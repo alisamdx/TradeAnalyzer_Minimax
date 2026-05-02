@@ -130,17 +130,19 @@ Polygon-specific implementation will sit behind this interface so v2 providers c
 ## Known Quirks & Gotchas
 
 - **DB driver is better-sqlite3 12.x**, wrapped behind `src/main/db/connection.ts` (`openDatabase`, `withTransaction`). Service code only uses the lowest-common-denominator API (`prepare`, `run`, `get`, `all`, `exec`) so the wrapper is the swap point if we ever change drivers. Don't reach for `db.transaction(fn)()` directly — use `withTransaction(db, fn)` so test code stays driver-agnostic.
-- **better-sqlite3 binary flips between Node and Electron ABIs.** Only one `better_sqlite3.node` binary lives in `node_modules` at a time. We work around this with two npm scripts:
-  - `rebuild:electron` (= `electron-builder install-app-deps`) → installs the Electron-target binary. Wired as `predev`/`prebuild`/`prepackage`, so `npm run dev`/`build`/`package` always re-flip before launching.
-  - `rebuild:node` (= `prebuild-install --runtime=node --force` inside `node_modules/better-sqlite3`) → installs the Node-target binary. Wired as `pretest`, so `npm test` always re-flips before vitest runs in plain Node.
-  After `npm install` the binary is whatever happened to land last (no postinstall script — left intentionally so the user gets a predictable test-friendly default; the very first `npm run dev` will rebuild). If you see `NODE_MODULE_VERSION 128 vs 137` errors, the wrong binary is in place — run the matching `rebuild:*` script. On Windows the rebuild path needs Visual Studio Build Tools 2022 (Desktop development with C++).
+- **better-sqlite3 binary flips between Node and Electron ABIs.** Only one `better_sqlite3.node` binary lives in `node_modules` at a time. We work around this with two npm scripts that both call the same helper, `scripts/rebuild-better-sqlite3.mjs`:
+  - `rebuild:electron` → installs the Electron-target prebuild. Reads the installed Electron version dynamically (so an Electron bump just works). Wired as `predev` / `prebuild` / `prepackage`.
+  - `rebuild:node` → installs the system-Node-target prebuild. Wired as `pretest`.
+  After `npm install` the binary is whatever happened to land last (no postinstall — kept off intentionally so a fresh-clone `npm test` works without an extra rebuild step). If you see `NODE_MODULE_VERSION 128 vs 137` errors, the wrong binary is in place — run the matching `rebuild:*` script.
+- **Why not `electron-builder install-app-deps`.** Tried first. It reported "finished" but didn't actually replace a Node-built binary that was already sitting in `build/Release/`. `prebuild-install --force` does, deterministically. Don't rewire `rebuild:electron` to use `electron-builder install-app-deps` again without verifying it actually swaps the binary's ABI.
 - **Case-insensitive unique watchlist names.** Enforced by a unique index on `lower(name)` in SQLite, not by `COLLATE NOCASE` on the column (so `name` keeps the user's casing on read). The service also pre-checks before insert to give a clean error.
 - **The 'Default' watchlist is undeletable.** Enforced in the service layer (delete throws) AND created idempotently on app startup. Renaming is allowed.
 - **CSV header.** Required column: `ticker`. Optional: `notes`, `added_date`. Header row is mandatory. Tickers are uppercased and trimmed; rows with missing/empty ticker are reported as skipped (never silently dropped).
 
 ## Recent Changes
 
-- **v0.1.1 (2026-05-02)** — Swap DB driver back to better-sqlite3 now that VS Build Tools are installed. Drops the `createRequire` workaround for `node:sqlite` and the vitest `forks` pool / `node:` externals; restores the `postinstall` electron-rebuild step. No behavior change. See `changelogs/v0.1.1_2026-05-02.md`.
+- **v0.1.2 (2026-05-02)** — Fix `rebuild:electron` so the better-sqlite3 binary's ABI actually changes. v0.1.1 used `electron-builder install-app-deps` which silently no-op'd; now both rebuild scripts call `scripts/rebuild-better-sqlite3.mjs` (`prebuild-install --force`). `npm run dev` opens the window cleanly. See `changelogs/v0.1.2_2026-05-02.md`.
+- **v0.1.1 (2026-05-02)** — Swap DB driver back to better-sqlite3 now that VS Build Tools are installed. Drops the `createRequire` workaround for `node:sqlite` and the vitest `forks` pool / `node:` externals; introduces paired `rebuild:electron` / `rebuild:node` scripts. See `changelogs/v0.1.1_2026-05-02.md`.
 - **v0.1.0 (2026-05-01)** — Initial scaffold. Section 7 infrastructure in place. FR-1 (watchlist CRUD + CSV) implemented end-to-end with tests. Polygon integration not started. See `changelogs/v0.1.0_2026-05-01.md`.
 
 ## How to Run
