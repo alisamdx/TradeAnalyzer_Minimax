@@ -13,7 +13,7 @@ import type {
   ConstituentRow,
   CachedQuote
 } from '@shared/types.js';
-import { DEFAULT_FILTER_SPECS, type FilterSpec } from '@shared/screener-filters.js';
+import { DEFAULT_FILTER_SPECS } from '@shared/screener-filters.js';
 
 declare global {
   interface Window {
@@ -93,8 +93,6 @@ export function ScreenerView() {
   const [error, setError] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
-  const [progress, setProgress] = useState<{ scanned: number; total: number } | null>(null);
-  const [showPresets, setShowPresets] = useState(false);
 
   // Load presets + runs + meta on mount.
   useEffect(() => {
@@ -176,7 +174,6 @@ export function ScreenerView() {
     setError(null);
     setActiveRunId(null);
     setResults([]);
-    setProgress({ scanned: 0, total: 0 });
     try {
       const run = await window.api.screen.run({ ...criteria, universe });
       setActiveRunId(run.id);
@@ -189,7 +186,6 @@ export function ScreenerView() {
       setError((e as Error).message);
     } finally {
       setIsRunning(false);
-      setProgress(null);
     }
   }, [criteria, universe]);
 
@@ -347,15 +343,6 @@ export function ScreenerView() {
 
           {/* Run */}
           <div className="control-section">
-            {progress && (
-              <div className="progress-bar-wrap">
-                <div
-                  className="progress-bar-fill"
-                  style={{ width: `${progress.scanned / Math.max(progress.total, 1) * 100}%` }}
-                />
-                <span className="progress-label">{progress.scanned} / {progress.total}</span>
-              </div>
-            )}
             <button
               onClick={runScreen}
               disabled={isRunning}
@@ -407,7 +394,7 @@ export function ScreenerView() {
                 <span>{results.length} result{results.length === 1 ? '' : 's'}</span>
                 <div style={{ flex: 1 }} />
                 <button
-                  onClick={() => setSelected((prev) => new Set(results.map((r) => r.id)))}
+                  onClick={() => setSelected(new Set(results.map((r) => r.id)))}
                   className="tiny-btn"
                 >
                   Select all

@@ -4,7 +4,7 @@
 // see SPEC: NFR-3
 
 import type { DbHandle } from '../db/connection.js';
-import type { DerivedRatios, Quote } from '@shared/types.js';
+import type { DerivedRatios } from '@shared/types.js';
 
 // ─── TTL constants (seconds) ─────────────────────────────────────────────────
 
@@ -13,8 +13,6 @@ export const TTL_SECONDS = {
   QUOTE: 60,              // 1 min
   OPTIONS: 300            // 5 min
 } as const;
-
-type CacheType = 'fundamentals' | 'quote' | 'options';
 
 // ─── SQL table creation ──────────────────────────────────────────────────────
 

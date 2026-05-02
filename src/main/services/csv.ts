@@ -74,7 +74,7 @@ export function parseCsv(text: string): ParseResult {
   const rows: ParsedRow[] = [];
 
   // Strip BOM, normalize line endings, drop trailing blank lines.
-  const cleaned = text.replace(/^﻿/, '').replace(/\r\n?/g, '\n');
+  const cleaned = text.replace(/^\xef\xbb\xbf/, '').replace(/\r\n?/g, '\n');
   const lines = cleaned.split('\n');
   while (lines.length > 0 && lines[lines.length - 1]!.trim() === '') lines.pop();
 
@@ -96,7 +96,7 @@ export function parseCsv(text: string): ParseResult {
   for (const opt of headerCells) {
     if (opt === REQUIRED_HEADER) continue;
     if (OPTIONAL_HEADERS.includes(opt)) continue;
-    // Unknown columns are ignored, not an error — keeps round-trip flexible.
+    // Unknown columns are ignored, not an error -- keeps round-trip flexible.
   }
 
   for (let i = 1; i < lines.length; i++) {

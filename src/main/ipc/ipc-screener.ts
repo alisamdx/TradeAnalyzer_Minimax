@@ -1,8 +1,7 @@
 // IPC handlers for the Screener (FR-2) and Quote refresh (FR-1.7).
 // see SPEC: FR-2, FR-1.7
 
-import { ipcMain, BrowserWindow, dialog } from 'electron';
-import { readFileSync } from 'node:fs';
+import { ipcMain, BrowserWindow, dialog, type IpcMainInvokeEvent } from 'electron';
 import type { ScreenerService } from '../services/screener-service.js';
 import type { ConstituentsService } from '../services/constituents-service.js';
 import type { WatchlistService } from '../services/watchlist-service.js';
@@ -13,11 +12,9 @@ import type {
   ScreenCriteria,
   ScreenPreset,
   ScreenRunResult,
-  ScreenResultRow,
   ConstituentsMeta,
   IpcResult
 } from '@shared/types.js';
-import { PolygonDataProvider } from '../services/polygon-provider.js';
 
 function ok<T>(value: T): IpcResult<T> {
   return { ok: true, value };
@@ -28,7 +25,7 @@ function fail(err: unknown): IpcResult<never> {
   return { ok: false, error: { code, message } };
 }
 function wrap<Args extends unknown[], R>(fn: (...args: Args) => R) {
-  return (_e: Electron.IpcMainInvokeEvent, ...args: Args): IpcResult<R> => {
+  return (_e: IpcMainInvokeEvent, ...args: Args): IpcResult<R> => {
     try { return ok(fn(...args)); }
     catch (err) { return fail(err); }
   };

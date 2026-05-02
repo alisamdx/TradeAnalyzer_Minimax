@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { DEFAULT_FILTER_SPECS, type FilterSpec } from '../src/shared/screener-filters.js';
-import type { ScreenCriteria, FilterDef } from '../src/shared/types.js';
+import { DEFAULT_FILTER_SPECS } from '../src/shared/screener-filters.js';
 
 // ─── Filter spec tests ─────────────────────────────────────────────────────────
 

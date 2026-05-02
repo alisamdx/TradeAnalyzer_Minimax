@@ -73,7 +73,7 @@ app.whenReady().then(() => {
   initCacheTables(db);
   const dataProvider = new PolygonDataProvider();
   const quoteCache = new QuoteCache(db);
-  const _fundamentalsCache = new FundamentalsCache(db);
+  new FundamentalsCache(db);
 
   // Constituents service (handles bundled CSV loading + Wikipedia refresh).
   const constituentsService = new ConstituentsService(db);

@@ -1,4 +1,4 @@
-import { ipcMain, dialog, BrowserWindow } from 'electron';
+import { ipcMain, dialog, BrowserWindow, type IpcMainInvokeEvent } from 'electron';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { WatchlistService, WatchlistError } from '../services/watchlist-service.js';
 import { parseCsv, buildCsv } from '../services/csv.js';
@@ -17,7 +17,7 @@ function fail(err: unknown): IpcResult<never> {
 }
 
 function wrap<Args extends unknown[], R>(fn: (...args: Args) => R) {
-  return (_e: Electron.IpcMainInvokeEvent, ...args: Args): IpcResult<R> => {
+  return (_e: IpcMainInvokeEvent, ...args: Args): IpcResult<R> => {
     try {
       return ok(fn(...args));
     } catch (err) {

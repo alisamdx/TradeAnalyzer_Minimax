@@ -33,7 +33,7 @@ export function App() {
   }, []);
 
   // Refresh all quotes for the current watchlist.
-  const refreshQuotes = useCallback(async (watchlistId: number) => {
+  const refreshQuotes = useCallback(async (_watchlistId: number) => {
     const tickers = items.map((i) => i.ticker);
     if (tickers.length === 0) return;
     try {

@@ -37,7 +37,7 @@ interface WatchlistItemRow {
   added_at: string;
 }
 
-const TICKER_RE = /^[A-Z][A-Z0-9.\-]{0,9}$/;
+const TICKER_RE = /^[A-Z][A-Z0-9.-]{0,9}$/;
 
 function normalizeTicker(raw: string): string {
   return raw.trim().toUpperCase();

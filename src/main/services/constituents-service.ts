@@ -99,7 +99,7 @@ export class ConstituentsService {
     if (!response.ok) throw new Error(`Wikipedia fetch failed: ${response.status}`);
     const html = await response.text();
 
-    const constituents = this.parseWikipediaTable(html, index);
+    const constituents = this.parseWikipediaTable(html);
     const source = 'wikipedia' as const;
 
     // Upsert into DB.
@@ -177,7 +177,7 @@ export class ConstituentsService {
 
   // ─── Wikipedia parsing ────────────────────────────────────────────────────
 
-  private parseWikipediaTable(html: string, index: 'sp500' | 'russell1000'): ConstituentRow[] {
+  private parseWikipediaTable(html: string): ConstituentRow[] {
     const rows: ConstituentRow[] = [];
     // Simple regex-based extraction — works for the standard Wikipedia S&P/Russell tables.
     // Extracts ticker from the first column link hrefs (/wiki/SYMBOL) and company name from text.
@@ -201,7 +201,7 @@ export class ConstituentsService {
       // Ticker is in the first cell (sometimes a link).
       const firstCell = cells[0]!;
       const linkMatch = linkRegex.exec(firstCell);
-      const ticker = (linkMatch ? linkMatch[1]! : firstCell).toUpperCase().replace(/[^A-Z0-9.\-]/g, '');
+      const ticker = (linkMatch ? linkMatch[1]! : firstCell).toUpperCase().replace(/[^A-Z0-9.-]/g, '');
       if (!ticker) continue;
 
       // Company name: strip HTML tags from the second cell.
@@ -210,7 +210,7 @@ export class ConstituentsService {
       let sector: string | null = null;
       for (let i = 2; i < cells.length; i++) {
         const cleaned = cells[i]!.replace(/<[^>]+>/g, '').trim();
-        if (cleaned && !/^[\d.\-]+$/.test(cleaned) && cleaned.length > 2 && cleaned.length < 40) {
+        if (cleaned && !/^[\d.-]+$/.test(cleaned) && cleaned.length > 2 && cleaned.length < 40) {
           sector = cleaned;
           break;
         }
@@ -226,7 +226,7 @@ export class ConstituentsService {
 // ─── CSV helpers (local, not the watchlist CSV service) ──────────────────────
 
 function parseConstituentsCsv(text: string): ConstituentRow[] {
-  const lines = text.replace(/^﻿/, '').replace(/\r\n?/g, '\n').split('\n').filter((l) => l.trim());
+  const lines = text.replace(/^\xef\xbb\xbf/, '').replace(/\r\n?/g, '\n').split('\n').filter((l) => l.trim());
   if (lines.length < 2) return [];
   const header = lines[0]!.toLowerCase().split(',').map((h) => h.trim());
   const tickerIdx = header.indexOf('ticker');
@@ -237,7 +237,7 @@ function parseConstituentsCsv(text: string): ConstituentRow[] {
   const rows: ConstituentRow[] = [];
   for (let i = 1; i < lines.length; i++) {
     const cells = lines[i]!.split(',').map((c) => c.trim().replace(/^"|"$/g, ''));
-    const ticker = (cells[tickerIdx] ?? '').replace(/[^A-Z0-9.\-]/g, '').toUpperCase();
+    const ticker = (cells[tickerIdx] ?? '').replace(/[^A-Z0-9.-]/g, '').toUpperCase();
     if (!ticker) continue;
     rows.push({
       ticker,

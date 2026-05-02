@@ -182,9 +182,7 @@ export class PolygonDataProvider implements DataProvider {
     // Phase 3's pipeline will compute this post-fetch and update the cache.
     const lastPrice = last?.c ?? prev?.c ?? null;
     const prevClose = prev?.c ?? null;
-    const dayChangePct = lastPrice != null && prevClose != null && prevClose !== 0
-      ? ((lastPrice - prevClose) / prevClose) * 100
-      : null;
+    void lastPrice; void prevClose; // used in return value below
 
     return {
       ticker,

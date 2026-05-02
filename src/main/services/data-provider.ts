@@ -6,7 +6,6 @@
 
 import type {
   DerivedRatios,
-  Quote,
   Universe,
   ConstituentRow
 } from '@shared/types.js';

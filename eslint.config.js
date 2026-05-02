@@ -9,7 +9,7 @@ import globals from 'globals';
 export default [
   js.configs.recommended,
   {
-    ignores: ['out/**', 'dist/**', 'release/**', 'node_modules/**', 'coverage/**']
+    ignores: ['out/**', 'dist/**', 'release/**', 'node_modules/**', 'coverage/**', '.claude/**']
   },
   {
     files: ['**/*.{ts,tsx}'],
@@ -31,6 +31,12 @@ export default [
       'react/react-in-jsx-scope': 'off',
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
       'no-unused-vars': 'off'
+    }
+  },
+  {
+    files: ['scripts/**/*.mjs'],
+    languageOptions: {
+      globals: { ...globals.node }
     }
   },
   prettier

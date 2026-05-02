@@ -92,19 +92,6 @@ export interface ScreenRunOutput {
   rows: TickerScreenData[];
 }
 
-// ─── Evaluation helpers ──────────────────────────────────────────────────────
-
-function evalMin(max: number): (v: number | null) => boolean {
-  return (v) => v !== null && v >= max;
-}
-function evalMax(min: number): (v: number | null) => boolean {
-  return (v) => v !== null && v <= min;
-}
-
-function evalRange(minVal: number, maxVal: number): (v: number | null) => boolean {
-  return (v) => v !== null && v >= minVal && v <= maxVal;
-}
-
 // ─── Screener engine ──────────────────────────────────────────────────────────
 
 export class ScreenerService {

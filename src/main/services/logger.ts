@@ -51,18 +51,6 @@ function pruneOldLogs(dir: string, days: number): void {
   }
 }
 
-function writeLine(dir: string, filename: string, obj: Record<string, unknown>): void {
-  ensureDir(dir);
-  const path = join(dir, filename);
-  const stream = createWriteStream(path, { flags: 'a', encoding: 'utf8' });
-  stream.write(JSON.stringify(obj) + '\n');
-  stream.end();
-}
-
-function formatMs(ms: number): number {
-  return Math.round(ms);
-}
-
 // ─── API Logger ────────────────────────────────────────────────────────────────
 
 export interface ApiLogEntry {
