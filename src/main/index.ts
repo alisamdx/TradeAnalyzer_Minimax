@@ -16,6 +16,8 @@ import { JobQueue } from './services/job-queue.js';
 import { AnalysisService } from './services/analysis-service.js';
 import { ValidateAllService } from './services/validate-all-service.js';
 import { registerAnalysisIpc } from './ipc/ipc-analysis.js';
+import { registerValidateIpc } from './ipc/ipc-validate.js';
+import { registerSettingsIpc, registerDiagnosticsIpc } from './ipc/ipc-settings.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -100,6 +102,9 @@ app.whenReady().then(() => {
   const validateAllService = new ValidateAllService(db, dataProvider, rateLimiter, jobQueue);
 
   registerAnalysisIpc(analysisService, validateAllService, jobQueue, watchlistService);
+  registerValidateIpc(validateAllService, watchlistService);
+  registerSettingsIpc(db, rateLimiter);
+  registerDiagnosticsIpc(db, quoteCache, new FundamentalsCache(db));
 
   // Check for incomplete runs from a previous session and surface in the renderer.
   // The renderer will prompt the user to resume or discard via the job IPC handlers.

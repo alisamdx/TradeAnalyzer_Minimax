@@ -308,6 +308,87 @@ export interface OptionContract {
 /** Backwards-alias — don't use in new code. */
 export type OptionsContract = OptionContract;
 
+// ─── FR-4 Validation Dashboard ───────────────────────────────────────────────
+
+export interface PatternHit {
+  name: string;
+  barIndex: number;
+  direction: 'bullish' | 'bearish' | 'neutral';
+}
+
+export interface Zone {
+  price: number;
+  type: 'demand' | 'supply';
+  strengthPct: number;
+}
+
+export interface ChartData {
+  bars: Bar[];
+  entryZoneLow: number | null;
+  entryZoneHigh: number | null;
+  stopLoss: number | null;
+  target: number | null;
+  supportZones: Zone[];
+  patterns: PatternHit[];
+}
+
+export interface ValidateDashboardResult {
+  ticker: string;
+  verdict: 'Strong' | 'Acceptable' | 'Caution' | 'Avoid';
+  verdictReason: string;
+  fundamentals: {
+    peRatio: number | null;
+    eps: number | null;
+    revenueGrowth: number | null;
+    profitMargin: number | null;
+    debtToEquity: number | null;
+    roe: number | null;
+    nextEarningsDate: string | null;
+    daysToEarnings: number | null;
+    epsHistory: number[];
+  };
+  marketOpinion: {
+    buyCount: number | null;
+    holdCount: number | null;
+    sellCount: number | null;
+    avgPriceTarget: number | null;
+    upsidePct: number | null;
+    badge: 'BUY' | 'HOLD' | 'SELL' | null;
+  };
+  trend: {
+    label: 'Bullish' | 'Bearish' | 'Sideways';
+    adx: number | null;
+    smaStack: { sma20: number | null; sma50: number | null; sma200: number | null };
+    priceVsSma50: number | null;
+  };
+  chart: ChartData;
+  indicators: {
+    rsi: number | null;
+    macdSignal: number | null;
+    macdValue: number | null;
+    bollingerPosition: number | null;
+    volumeAnomalyPct: number | null;
+  };
+  ivData: {
+    currentIv: number | null;
+    iv52WkHigh: number | null;
+    iv52WkLow: number | null;
+    ivRank: number | null;
+    ivPercentile: number | null;
+  };
+  fetchedAt: string;
+}
+
+/** OHLCV bar — same shape as the Bar type in analysis-service.ts */
+export interface Bar {
+  t: number; // unix timestamp in ms
+  o: number;
+  h: number;
+  l: number;
+  c: number;
+  v: number;
+}
+
 // ─── Validate All (FR-4.4) ────────────────────────────────────────────────────
 
 export type ValidateStatus = 'pending' | 'fetched' | 'persisted' | 'failed';
@@ -341,4 +422,28 @@ export interface JobRunInfo {
   totalCount: number;
   succeededCount: number;
   failedCount: number;
+}
+
+// ─── Settings (Phase 4) ────────────────────────────────────────────────────────
+
+export interface AppSettings {
+  polygonApiKey: string;
+  rateLimitRpm: number;
+  quoteCacheTtlSec: number;
+  fundamentalsCacheTtlSec: number;
+  optionsCacheTtlSec: number;
+  logRetentionDays: number;
+  errorLogRetentionDays: number;
+  autoBackupEnabled: boolean;
+  autoBackupIntervalDays: number;
+}
+
+export interface DiagnosticCheck {
+  ok: boolean;
+  message: string;
+}
+
+export interface DiagnosticsResult {
+  checks: Record<string, DiagnosticCheck>;
+  overall: 'ok' | 'degraded' | 'error';
 }

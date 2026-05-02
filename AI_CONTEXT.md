@@ -160,6 +160,7 @@ Authoritative DDL is in `migrations/001_init.sql` + `002_screen_schema.sql`. Pha
 
 ## Recent Changes
 
+- **v0.4.0 (2026-05-02)** — Phase 4: Chart polish + Settings. Pattern callouts rendered at price/time coordinates via `ISeriesApi.priceToCoordinate()`. Entry zone band, target line (amber), demand/supply zone labels on chart. EPS sparkline in Section A. Full SettingsView (General, API & Data, Cache & Limits, Diagnostics self-check, Backup & Restore). Settings IPC (9 handlers) + Diagnostics IPC. Bug fix: `detectEveningStar` guard was inverted. See `changelogs/v0.4.0_2026-05-02.md`.
 - **v0.3.0 (2026-05-02)** — Phase 3: Analysis Engine + Pipeline (FR-3 + FR-4.4). 5 analysis modes (Buy, Options Income, Wheel, Bullish, Bearish) with composite scoring, entry/stop/target. Validate All batch with verdict + full indicators. Pipeline: `TokenBucketRateLimiter` + SQLite `JobQueue` for resumable batch jobs. Full indicator library. AnalysisView UI. See `changelogs/v0.3.0_2026-05-02.md`.
 - **v0.2.0 (2026-05-02)** — Phase 2: Index Screener (FR-2). Screener engine with 17 default filters, strict/soft modes, presets, run history, save-as-watchlist. Polygon DataProvider + fundamentals computer. Quote auto-refresh (60s) on watchlist. Structured API + error logging. See `changelogs/v0.2.0_2026-05-02.md`.
 - **v0.1.2 (2026-05-02)** — Fix `rebuild:electron` so the better-sqlite3 binary's ABI actually changes. See `changelogs/v0.1.2_2026-05-02.md`.

@@ -1,6 +1,6 @@
 // Validate All service — deep-dive validation for every ticker in a watchlist.
 // Implements FR-4.4: batch validation with progress reporting, resumable via job queue.
-// see SPEC: FR-4.4, §4.4
+// see SPEC: FR-4
 // see docs/formulas.md
 
 import type { DbHandle } from '../db/connection.js';
@@ -8,136 +8,12 @@ import type { DataProvider } from './data-provider.js';
 import { QuoteCache, FundamentalsCache } from './cache-service.js';
 import { TokenBucketRateLimiter } from './rate-limiter.js';
 import { JobQueue } from './job-queue.js';
-
-// ─── Validation result types ─────────────────────────────────────────────────
-
-export interface ValidateResult {
-  ticker: string;
-  verdict: 'Strong' | 'Acceptable' | 'Caution' | 'Avoid';
-  verdictReason: string;
-  fundamentals: {
-    peRatio: number | null;
-    eps: number | null;
-    revenueGrowth: number | null;
-    profitMargin: number | null;
-    debtToEquity: number | null;
-    roe: number | null;
-    nextEarningsDate: string | null;
-    daysToEarnings: number | null;
-    epsHistory: number[];
-  };
-  marketOpinion: {
-    buyCount: number | null;
-    holdCount: number | null;
-    sellCount: number | null;
-    avgPriceTarget: number | null;
-    upsidePct: number | null;
-    badge: 'BUY' | 'HOLD' | 'SELL' | null;
-  };
-  trend: {
-    label: 'Bullish' | 'Bearish' | 'Sideways';
-    adx: number | null;
-    smaStack: { sma20: number | null; sma50: number | null; sma200: number | null };
-    priceVsSma50: number | null; // percent above/below
-  };
-  indicators: {
-    rsi: number | null;
-    macdSignal: number | null;
-    macdValue: number | null;
-    bollingerPosition: number | null;
-    volumeAnomalyPct: number | null; // today's volume vs 30d avg
-  };
-  ivData: {
-    currentIv: number | null;
-    iv52WkHigh: number | null;
-    iv52WkLow: number | null;
-    ivRank: number | null;
-    ivPercentile: number | null;
-  };
-  fetchedAt: string;
-}
-
-// ─── Indicator helpers (mirrors analysis-service.ts) ──────────────────────────
-
-function computeSMA(bars: Array<{ c: number }>, period: number): (number | null)[] {
-  const closes = bars.map((b) => b.c);
-  return closes.map((_, i) => {
-    if (i < period - 1) return null;
-    const slice = closes.slice(i - period + 1, i + 1);
-    return slice.reduce((a, b) => a + b, 0) / period;
-  });
-}
-
-function computeRSI(bars: Array<{ c: number }>, period = 14): (number | null)[] {
-  const closes = bars.map((b) => b.c);
-  const result: (number | null)[] = new Array(closes.length).fill(null);
-  if (closes.length < period + 1) return result;
-  let avgGain = 0, avgLoss = 0;
-  for (let i = 1; i <= period; i++) {
-    const change = closes[i]! - closes[i - 1]!;
-    if (change > 0) avgGain += change;
-    else avgLoss += Math.abs(change);
-  }
-  avgGain /= period;
-  avgLoss /= period;
-  const rs = avgLoss === 0 ? Infinity : avgGain / avgLoss;
-  result[period] = avgLoss === 0 ? 100 : 100 - 100 / (1 + rs);
-  for (let i = period + 1; i < closes.length; i++) {
-    const change = closes[i]! - closes[i - 1]!;
-    const gain = change > 0 ? change : 0;
-    const loss = change < 0 ? Math.abs(change) : 0;
-    avgGain = (avgGain * (period - 1) + gain) / period;
-    avgLoss = (avgLoss * (period - 1) + loss) / period;
-    const rs2 = avgLoss === 0 ? Infinity : avgGain / avgLoss;
-    result[i] = avgLoss === 0 ? 100 : 100 - 100 / (1 + rs2);
-  }
-  return result;
-}
-
-function computeADX(bars: Array<{ h: number; l: number; c: number }>, period = 14): (number | null)[] {
-  const result: (number | null)[] = new Array(bars.length).fill(null);
-  if (bars.length < period * 2) return result;
-  const trs: number[] = [], pDMs: number[] = [], nDMs: number[] = [];
-  for (let i = 1; i < bars.length; i++) {
-    const h = bars[i]!.h, l = bars[i]!.l, ph = bars[i - 1]!.h, pl = bars[i - 1]!.l;
-    trs.push(Math.max(h - l, Math.abs(h - pl), Math.abs(l - ph)));
-    pDMs.push(Math.max(0, h - ph));
-    nDMs.push(Math.max(0, pl - l));
-  }
-  const smooth = (arr: number[], n: number): (number | null)[] => {
-    let s = arr.slice(0, n).reduce((a, b) => a + b, 0);
-    const out: (number | null)[] = new Array(n - 1).fill(null);
-    out.push(s);
-    for (let i = n; i < arr.length; i++) {
-      s = s - s / n + arr[i]!;
-      out.push(s);
-    }
-    return out;
-  };
-  const sTR = smooth(trs, period);
-  const spDM = smooth(pDMs, period);
-  const snDM = smooth(nDMs, period);
-  const plusDI: (number | null)[] = new Array(bars.length).fill(null);
-  const minusDI: (number | null)[] = new Array(bars.length).fill(null);
-  for (let i = period - 1; i < bars.length; i++) {
-    const idx = i - (period - 1);
-    if (sTR[idx]! > 0) {
-      plusDI[i] = 100 * spDM[idx]! / sTR[idx]!;
-      minusDI[i] = 100 * snDM[idx]! / sTR[idx]!;
-    }
-  }
-  const dxs: number[] = [];
-  for (let i = period - 1; i < bars.length; i++) {
-    const pd = plusDI[i] ?? 0, nd = minusDI[i] ?? 0;
-    dxs.push(pd + nd === 0 ? 0 : Math.abs(pd - nd) / (pd + nd) * 100);
-  }
-  const smoothDX = smooth(dxs, period);
-  for (let i = period - 1; i < bars.length; i++) {
-    const idx = i - (period - 1);
-    if (smoothDX[idx] !== null && smoothDX[idx] !== undefined) result[i] = smoothDX[idx] as number;
-  }
-  return result;
-}
+import { computeSMA } from './analysis-service.js';
+import { computeRSI } from './analysis-service.js';
+import { computeADX } from './analysis-service.js';
+import { detectAllPatterns } from './pattern-detector.js';
+import { findRecentDemandZone, findRecentSupplyZone, computeEntryZoneAndStop } from './support-resistance.js';
+import type { ValidateDashboardResult, Bar, Zone } from '@shared/types.js';
 
 // ─── Validate All service ────────────────────────────────────────────────────
 
@@ -159,8 +35,8 @@ export class ValidateAllService {
   cancel(): void { this.cancelled = true; }
   resetCancel(): void { this.cancelled = false; }
 
-  /** Validate a single ticker (FR-4.4, FR-4.5 target: <5s warm, <10s cold). */
-  async validateTicker(ticker: string): Promise<ValidateResult> {
+  /** Validate a single ticker (FR-4.5 target: <5s warm, <10s cold). */
+  async validateTicker(ticker: string): Promise<ValidateDashboardResult> {
     await this.rateLimiter.acquire(1);
     const quote = await this.fetchQuote(ticker);
     const fundamentals = await this.fetchFundamentals(ticker);
@@ -175,11 +51,11 @@ export class ValidateAllService {
     watchlistId: number,
     tickers: string[],
     onProgress?: (current: number, total: number, ticker: string, status: string) => void
-  ): Promise<ValidateResult[]> {
+  ): Promise<ValidateDashboardResult[]> {
     this.resetCancel();
     const jobRunId = this.jobQueue.enqueue('validate_all', tickers, watchlistId, {}).id;
     this.jobQueue.markRunning(jobRunId);
-    const results: ValidateResult[] = [];
+    const results: ValidateDashboardResult[] = [];
     const total = tickers.length;
 
     for (let i = 0; i < tickers.length; i++) {
@@ -253,7 +129,7 @@ export class ValidateAllService {
     fundamentals: { peRatio: number | null; eps: number | null; revenueGrowth: number | null; profitMargin: number | null; debtToEquity: number | null; roe: number | null },
     earnings: { nextEarningsDate: string | null; epsActualLast4: number[] },
     bars: Array<{ t: number; o: number; h: number; l: number; c: number; v: number }>
-  ): ValidateResult {
+  ): ValidateDashboardResult {
 
     // Trend (SMA stack + ADX).
     const sma20Arr = computeSMA(bars, 20);
@@ -294,22 +170,23 @@ export class ValidateAllService {
     const bollingerPosition = upperBand !== lowerBand && currentPrice !== null
       ? ((currentPrice - lowerBand) / (upperBand - lowerBand)) * 100 : null;
 
-    // MACD (12/26/9).
+    // MACD (12/26/9) — corrected: filter nulls before EMA, not after.
     const ema12 = this.emaSeries(bars, 12);
     const ema26 = this.emaSeries(bars, 26);
-    const macdValues: (number | null)[] = ema12.map((e12, i) => {
+    // Build MACD histogram from aligned EMA values.
+    const macdValues: number[] = [];
+    for (let i = 0; i < ema12.length; i++) {
+      const e12 = ema12[i];
       const e26 = ema26[i];
-      if (e12 === null || e26 === undefined || e26 === null) return null;
-      return e12 - e26;
-    });
-    const signalLine = this.emaSeriesObj(macdValues.filter((v): v is number => v !== null), 9);
+      if (e12 != null && e26 != null) macdValues.push(e12 - e26);
+    }
+    // Signal line = EMA(9) of MACD values.
+    const macdSignalValues = this.emaSeriesFromNumbers(macdValues, 9);
+    const macdSignal = macdSignalValues[macdSignalValues.length - 1] ?? null;
     const macdValue = macdValues[macdValues.length - 1] ?? null;
-    // Find nearest signal value.
-    const sigValues = signalLine.filter((v): v is number => v !== null);
-    const macdSignal = sigValues[sigValues.length - 1] ?? null;
 
     // Verdict.
-    let verdict: ValidateResult['verdict'] = 'Acceptable';
+    let verdict: ValidateDashboardResult['verdict'] = 'Acceptable';
     let verdictReason = '';
     const earningsDays = earnings.nextEarningsDate
       ? Math.max(0, Math.round((new Date(earnings.nextEarningsDate).getTime() - Date.now()) / 86_400_000))
@@ -345,6 +222,15 @@ export class ValidateAllService {
     else if (verdict === 'Acceptable') badge = 'HOLD';
     else if (verdict === 'Avoid') badge = 'SELL';
 
+    // Pattern detection + supply/demand zones + entry zone.
+    const patterns = detectAllPatterns(bars as Bar[], 5);
+    const demandZone = findRecentDemandZone(bars as Bar[], 50);
+    const supplyZone = findRecentSupplyZone(bars as Bar[], 50);
+    const supportZones: Zone[] = [];
+    if (demandZone) supportZones.push(demandZone);
+    if (supplyZone) supportZones.push(supplyZone);
+    const entryZone = computeEntryZoneAndStop(bars as Bar[], trendLabel);
+
     return {
       ticker,
       verdict,
@@ -367,6 +253,15 @@ export class ValidateAllService {
         smaStack: { sma20, sma50, sma200 },
         priceVsSma50
       },
+      chart: {
+        bars: bars as Bar[],
+        entryZoneLow: entryZone.entryZoneLow,
+        entryZoneHigh: entryZone.entryZoneHigh,
+        stopLoss: entryZone.stopLoss,
+        target: entryZone.target,
+        supportZones,
+        patterns
+      },
       indicators: {
         rsi,
         macdSignal,
@@ -382,7 +277,7 @@ export class ValidateAllService {
         ivPercentile: quote.ivPercentile
       },
       fetchedAt: new Date().toISOString()
-    };
+    } satisfies ValidateDashboardResult;
   }
 
   private emaSeries(bars: Array<{ c: number }>, period: number): (number | null)[] {
@@ -398,14 +293,16 @@ export class ValidateAllService {
     return result;
   }
 
-  private emaSeriesObj(values: number[], period: number): (number | null)[] {
+  /** EMA over a plain number array (no nulls). */
+  private emaSeriesFromNumbers(values: number[], period: number): (number | null)[] {
+    if (values.length < period) return new Array(values.length).fill(null);
     const k = 2 / (period + 1);
     const result: (number | null)[] = new Array(values.length).fill(null);
-    if (values.length < period) return result;
     let ema = values.slice(0, period).reduce((a, b) => a + b, 0) / period;
-    for (let i = period - 1; i < values.length; i++) {
-      if (i === period - 1) result[i] = ema;
-      else { ema = values[i]! * k + ema * (1 - k); result[i] = ema; }
+    result[period - 1] = ema;
+    for (let i = period; i < values.length; i++) {
+      ema = values[i]! * k + ema * (1 - k);
+      result[i] = ema;
     }
     return result;
   }

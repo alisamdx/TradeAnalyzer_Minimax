@@ -4,11 +4,7 @@ import type {
   WatchlistItem,
   CsvImportResult,
   CsvExportResult,
-  IpcResult
-} from '@shared/types.js';
-
-// ─── Phase 2 type re-exports for renderer global.d.ts ────────────────────────
-import type {
+  IpcResult,
   ScreenPreset,
   ScreenCriteria,
   ScreenRunResult,
@@ -20,11 +16,19 @@ import type {
   AnalysisModeInfo,
   AnalysisRunResult,
   AnalysisSnapshotRow,
-  ValidateAllResult,
+  ValidateDashboardResult,
+  JobRunInfo,
   TickerStatusRow,
-  JobRunInfo
+  ValidateAllResult,
+  AppSettings,
+  DiagnosticsResult
 } from '@shared/types.js';
-export type { ScreenPreset, ScreenCriteria, ScreenRunResult, ScreenResultRow, Universe, ConstituentsMeta, ConstituentRow, CachedQuote, AnalysisModeInfo, AnalysisRunResult, AnalysisSnapshotRow, ValidateAllResult, TickerStatusRow, JobRunInfo };
+export type {
+  ScreenPreset, ScreenCriteria, ScreenRunResult, ScreenResultRow, Universe,
+  ConstituentsMeta, ConstituentRow, CachedQuote, AnalysisModeInfo, AnalysisRunResult,
+  AnalysisSnapshotRow, ValidateDashboardResult, JobRunInfo, TickerStatusRow, ValidateAllResult,
+  AppSettings, DiagnosticsResult
+};
 export type Api = ReturnType<typeof buildApi>['api'];
 
 async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
@@ -108,13 +112,39 @@ function buildApi() {
     cancel: () => invoke<boolean>('validate-all:cancel')
   };
 
+  const validate = {
+    openTickerById: (ticker: string) =>
+      invoke<ValidateDashboardResult>('validate:open-ticker-by-id', ticker),
+    getTickers: (watchlistId: number) =>
+      invoke<string[]>('validate:get-tickers', watchlistId),
+    runValidateAll: (watchlistId: number) =>
+      invoke<ValidateAllResult>('validate:run-all', { watchlistId }),
+    getStatus: (watchlistId: number) =>
+      invoke<{ run: JobRunInfo; progress: TickerStatusRow[] } | null>('validate:get-status', watchlistId),
+    cancel: () => invoke<boolean>('validate:cancel')
+  };
+
   const jobs = {
     listIncomplete: () => invoke<JobRunInfo[]>('job:list-incomplete'),
     resume: (jobRunId: number) => invoke<JobRunInfo | null>('job:resume', jobRunId),
     discard: (jobRunId: number) => invoke<boolean>('job:discard', jobRunId)
   };
 
-  return { api: { watchlists, screen, quotes, analysis, validateAll, jobs } };
+  const settings = {
+    getAll: () => invoke<AppSettings>('settings:get-all'),
+    setAll: (partial: Partial<AppSettings>) => invoke<boolean>('settings:set-all', partial),
+    getApiKey: () => invoke<string>('settings:get-api-key'),
+    setApiKey: (key: string) => invoke<boolean>('settings:set-api-key', key),
+    openLogsDir: () => invoke<boolean>('settings:open-logs-dir'),
+    backup: () => invoke<{ backupPath: string; message: string } | null>('settings:backup-everything'),
+    restore: () => invoke<{ restored: boolean; message: string } | null>('settings:restore-backup')
+  };
+
+  const diagnostics = {
+    run: () => invoke<DiagnosticsResult>('diagnostics:run')
+  };
+
+  return { api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics } };
 }
 
 const { api } = buildApi();
