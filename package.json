@@ -12,7 +12,7 @@
     "rebuild:electron": "node scripts/rebuild-better-sqlite3.mjs electron",
     "rebuild:node": "node scripts/rebuild-better-sqlite3.mjs node",
     "predev": "npm run rebuild:electron",
-    "dev": "electron-vite dev",
+    "dev": "env -u ELECTRON_RUN_AS_NODE electron-vite dev",
     "prebuild": "npm run rebuild:electron",
     "build": "electron-vite build && electron-builder",
     "prepackage": "npm run rebuild:electron",
