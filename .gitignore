@@ -1,0 +1,47 @@
+# dependencies
+node_modules/
+
+# build output
+out/
+dist/
+release/
+
+# native rebuild artifacts
+.vite/
+
+# logs (per spec EP-3, EP-4 — created at runtime)
+logs/
+
+# runtime DB + backups (per spec EP-9)
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+backups/
+
+# environment / secrets (per spec EP-7.1, EP-7.2)
+.env
+.env.local
+.env.*.local
+
+# editor / OS noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# test/coverage
+coverage/
+.nyc_output/
+
+# typescript incremental build
+*.tsbuildinfo
+
+# claude code session state
+.claude/
+
+# python helpers (left over from docx conversion)
+__pycache__/
+*.pyc
+_req_unpacked/

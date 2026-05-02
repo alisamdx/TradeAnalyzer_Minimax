@@ -1,0 +1,4 @@
+Read REQUIREMENTS.md. Set up the project per Section 7 (Engineering Practices). Create the initial AI_CONTEXT.md and AI_PROMPT.md
+Then begin Phase 1: watchlist CRUD
+
+We will build in phases, not all at once — the spec has many sections; build FR-1 (watchlists) first, get it working, commit, then FR-2 (screener), etc. Each phase ends with: tests pass, changelog written, AI_CONTEXT.md updated, git commit.
