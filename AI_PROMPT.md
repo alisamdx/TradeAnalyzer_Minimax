@@ -1,6 +1,6 @@
 # AI_PROMPT — Standing instructions for any AI session on this repo
 
-You are picking up a multi-phase build of the **TradeAnalyzer** desktop app. Before writing code:
+You are picking up a multi-phase build of the **TradeAnalyzer_Minimax** desktop app. Before writing code:
 
 1. **Read `AI_CONTEXT.md` first.** It is the source of truth for stack, structure, schema, conventions, and recent decisions. If anything in this prompt conflicts with `AI_CONTEXT.md`, prefer `AI_CONTEXT.md`.
 2. **Read `REQUIREMENTS.md`** for the full functional/non-functional spec. Treat every `FR-*` and `NFR-*` as an acceptance test.
