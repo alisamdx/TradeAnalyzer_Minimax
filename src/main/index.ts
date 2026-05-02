@@ -5,6 +5,12 @@ import { openDatabase } from './db/connection.js';
 import { runMigrations, currentSchemaVersion } from './db/migrations.js';
 import { WatchlistService } from './services/watchlist-service.js';
 import { registerWatchlistIpc } from './ipc/ipc-watchlists.js';
+import { ConstituentsService } from './services/constituents-service.js';
+import { ScreenerService } from './services/screener-service.js';
+import { PolygonDataProvider } from './services/polygon-provider.js';
+import { QuoteCache, FundamentalsCache, initCacheTables } from './services/cache-service.js';
+import { registerScreenerIpc } from './ipc/ipc-screener.js';
+import { pruneOldLogsOnStartup } from './services/logger.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -49,15 +55,38 @@ function createWindow(): BrowserWindow {
 }
 
 app.whenReady().then(() => {
+  pruneOldLogsOnStartup();
+
   const dbPath = join(app.getPath('userData'), 'trade-analyzer.sqlite');
   const db = openDatabase(dbPath);
   const ran = runMigrations(db, migrationsDir());
   if (ran.length > 0) {
     console.log(`[migrations] applied ${ran.length} (head=${currentSchemaVersion(db)})`);
   }
-  const service = new WatchlistService(db);
-  service.ensureDefault();
-  registerWatchlistIpc(service);
+
+  // Phase 1 — watchlist service.
+  const watchlistService = new WatchlistService(db);
+  watchlistService.ensureDefault();
+  registerWatchlistIpc(watchlistService);
+
+  // Phase 2 — market data services.
+  initCacheTables(db);
+  const dataProvider = new PolygonDataProvider();
+  const quoteCache = new QuoteCache(db);
+  const _fundamentalsCache = new FundamentalsCache(db);
+
+  // Constituents service (handles bundled CSV loading + Wikipedia refresh).
+  const constituentsService = new ConstituentsService(db);
+  // Bootstrap from bundled CSVs on first run so the DB has constituents.
+  constituentsService.bootstrapFromBundled('sp500');
+  constituentsService.bootstrapFromBundled('russell1000');
+
+  // Screener service — needs a function to get constituents (local closure).
+  const getConstituents = (u: Parameters<typeof constituentsService.getConstituents>[0]) =>
+    constituentsService.getConstituents(u);
+  const screenerService = new ScreenerService(db, dataProvider, getConstituents);
+
+  registerScreenerIpc(screenerService, constituentsService, watchlistService, quoteCache, dataProvider);
 
   createWindow();
 

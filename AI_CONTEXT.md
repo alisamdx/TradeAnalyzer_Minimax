@@ -36,20 +36,24 @@ TradeAnalyzer/
   migrations/              ← numbered SQL migrations (001_init.sql, ...)
   src/
     main/                  ← Electron main process: db, services, IPC handlers
-      index.ts             ← app lifecycle + window creation + IPC registration
+      index.ts             ← app lifecycle + window creation + Phase 1+2 IPC registration
       db/                  ← connection.ts, migrations.ts
-      services/            ← watchlist-service.ts, csv.ts (Phase 1)
-      ipc/                 ← ipc-watchlists.ts (Phase 1)
-    preload/               ← context-isolated bridge: exposes window.api.*
+      services/            ← watchlist-service.ts, csv.ts (Phase 1); screener-service.ts,
+                             constituents-service.ts, polygon-provider.ts, cache-service.ts,
+                             fundamentals-computer.ts, logger.ts (Phase 2)
+      ipc/                 ← ipc-watchlists.ts (Phase 1), ipc-screener.ts (Phase 2)
+    preload/               ← context-isolated bridge: exposes window.api.* (Phase 1+2)
       index.ts
     renderer/              ← React UI
       index.html
       src/
         main.tsx           ← React entry
-        App.tsx            ← top-level layout (sidebar + main pane)
-        api.ts             ← typed wrapper around window.api.*
+        App.tsx            ← top-level layout (sidebar + main pane) + ScreenerView (Phase 2)
+        api.ts             ← typed wrapper around window.api.* (deprecated — use window.api directly)
         views/
-          WatchlistView.tsx (Phase 1)
+          WatchlistView.tsx (Phase 1 — merged into App)
+          ScreenerView.tsx  (Phase 2)
+          screener-filters.ts (Phase 2)
         styles.css
     shared/                ← types shared between main and renderer
       types.ts
@@ -95,55 +99,66 @@ Per spec §4.4: Fetcher worker pulls jobs from a queue and respects token-bucket
 
 ## Data Model
 
-Authoritative DDL is in `migrations/001_init.sql`. Phase 1 only creates these tables:
+Authoritative DDL is in `migrations/001_init.sql` + `002_screen_schema.sql`. Phase 1 creates watchlists + items + settings. Phase 2 adds:
 
 | Table | Purpose | Persistent / Cache |
 | --- | --- | --- |
 | `schema_version` | Tracks applied migrations | persistent |
-| `watchlists` | Named watchlists, one row per list. `name` is unique case-insensitively. | persistent |
-| `watchlist_items` | Tickers belonging to a watchlist. | persistent |
-| `settings` | Free-form key/value app settings. | persistent |
+| `watchlists` | Named watchlists | persistent |
+| `watchlist_items` | Tickers in a watchlist | persistent |
+| `settings` | Free-form key/value | persistent |
+| `constituents` | S&P 500 / Russell 1000 ticker list | persistent (refreshable) |
+| `constituents_meta` | Last refresh timestamp + source | persistent |
+| `screen_presets` | Saved filter presets (FR-2.5) | persistent |
+| `screen_runs` | Past screen runs with result count | persistent |
+| `screen_results` | Per-ticker filter values + pass score | persistent |
+| `analysis_snapshots` | Past analysis runs (Phase 3) | persistent |
+| `fundamentals_cache` | Derived ratios, 24h TTL | cache |
+| `quote_cache` | Last price / volume / IV, 60s TTL | cache |
+| `options_cache` | Options chain, 5min TTL | cache |
 
-Tables defined in the spec but **not yet created** (will arrive with their owning phase): `screen_presets`, `screen_runs`, `screen_results`, `analysis_snapshots`, `fundamentals_cache`, `quote_cache`, `options_cache`, `job_runs`, `job_progress`.
+Not yet created (Phase ≥ 3): `job_runs`, `job_progress`.
 
 ## DataProvider Contract
 
-Per spec §4.2.3, all market-data access goes through a `DataProvider` interface. **Not implemented in Phase 1.** Stub will land in Phase 2 (screener) or earlier if needed. Methods to implement:
+`src/main/services/data-provider.ts` defines the `DataProvider` interface. Polygon implementation at `polygon-provider.ts`. Methods:
 
-- `getQuote(ticker)`
-- `getFundamentals(ticker)` (returns derived ratios; computed by a separate `fundamentals-computer` module from raw `/vX/reference/financials` data)
-- `getEarningsCalendar(ticker)`
-- `getHistoricalBars(ticker, timeframe, lookback)`
-- `getOptionsChain(ticker, expiration)`
-- `getIndexConstituents(index)`
-
-Polygon-specific implementation will sit behind this interface so v2 providers can drop in.
+- `getQuote(ticker)` → `QuoteSnapshot` (price, bid/ask, volume, IV rank/percentile)
+- `getFundamentals(ticker)` → `DerivedRatios` (P/E, EPS, ROE, D/E, profit margin, etc.)
+- `getEarningsCalendar(ticker)` → `EarningsInfo` (stub in Phase 2; Polygon has no public endpoint)
+- `getHistoricalBars(ticker, timeframe, lookback)` → `HistoricalBar[]`
+- `getOptionsChain(ticker, expiration)` → `OptionsChain`
+- `getIndexConstituents(index)` → `ConstituentRow[]` (no-op — `ConstituentsService` handles this)
+- `ping()` → health check
 
 ## Open Decisions
 
 - **Charting library** — between `lightweight-charts` and `ApexCharts`. Decide in Phase 4 (validation dashboard) when chart needs are concrete.
 - **Suitability score formula (wheel)** — TBD in Phase 3 (analysis engine). Will be documented in `docs/formulas.md`.
-- **Polygon financials → derived ratios mapping** — TBD in Phase 2 with the screener. Will be documented in `docs/data-provider.md` and `docs/formulas.md`.
 - **Producer/consumer technology** — leaning toward Node `worker_threads` + an in-process queue + token-bucket implementation (no external broker). Decide in Phase 3.
-- **Settings storage** — currently using a `settings` table; may move some fields (API key) to OS keychain via `keytar` in Phase 2.
+- **Settings storage** — API key currently loaded from `.env`; OS keychain via `keytar` deferred to Phase 2 (minor).
 
 ## Known Quirks & Gotchas
 
 - **DB driver is better-sqlite3 12.x**, wrapped behind `src/main/db/connection.ts` (`openDatabase`, `withTransaction`). Service code only uses the lowest-common-denominator API (`prepare`, `run`, `get`, `all`, `exec`) so the wrapper is the swap point if we ever change drivers. Don't reach for `db.transaction(fn)()` directly — use `withTransaction(db, fn)` so test code stays driver-agnostic.
-- **better-sqlite3 binary flips between Node and Electron ABIs.** Only one `better_sqlite3.node` binary lives in `node_modules` at a time. We work around this with two npm scripts that both call the same helper, `scripts/rebuild-better-sqlite3.mjs`:
-  - `rebuild:electron` → installs the Electron-target prebuild. Reads the installed Electron version dynamically (so an Electron bump just works). Wired as `predev` / `prebuild` / `prepackage`.
-  - `rebuild:node` → installs the system-Node-target prebuild. Wired as `pretest`.
-  After `npm install` the binary is whatever happened to land last (no postinstall — kept off intentionally so a fresh-clone `npm test` works without an extra rebuild step). If you see `NODE_MODULE_VERSION 128 vs 137` errors, the wrong binary is in place — run the matching `rebuild:*` script.
+- **better-sqlite3 binary flips between Node and Electron ABIs.** Only one `better_sqlite3.node` binary lives in `node_modules` at a time. `npm run predev` / `npm run pretest` call paired rebuild scripts that swap the correct prebuild in. If you see `NODE_MODULE_VERSION 128 vs 137` errors, run the matching `rebuild:*` script.
 - **Why not `electron-builder install-app-deps`.** Tried first. It reported "finished" but didn't actually replace a Node-built binary that was already sitting in `build/Release/`. `prebuild-install --force` does, deterministically. Don't rewire `rebuild:electron` to use `electron-builder install-app-deps` again without verifying it actually swaps the binary's ABI.
-- **Case-insensitive unique watchlist names.** Enforced by a unique index on `lower(name)` in SQLite, not by `COLLATE NOCASE` on the column (so `name` keeps the user's casing on read). The service also pre-checks before insert to give a clean error.
+- **Case-insensitive unique watchlist names.** Enforced by a unique index on `lower(name)` in SQLite. The service also pre-checks before insert to give a clean error.
 - **The 'Default' watchlist is undeletable.** Enforced in the service layer (delete throws) AND created idempotently on app startup. Renaming is allowed.
-- **CSV header.** Required column: `ticker`. Optional: `notes`, `added_date`. Header row is mandatory. Tickers are uppercased and trimmed; rows with missing/empty ticker are reported as skipped (never silently dropped).
+- **CSV header.** Required column: `ticker`. Optional: `notes`, `added_date`. Header row is mandatory. Tickers are uppercased and trimmed; rows with missing/empty ticker are reported as skipped.
+- **`node:fetch` does not exist in Node 24.** Use the global `fetch` (available since Node 18). Do not `import { fetch } from 'node:fetch'` — it will fail at runtime.
+- **`PolygonDataProvider.getIndexConstituents` is a no-op.** Constituents are loaded by `ConstituentsService` from bundled CSVs + SQLite cache. The DataProvider method exists only for interface completeness.
+- **IV rank/percentile are null** from the Polygon snapshot endpoint. Phase 3's pipeline will compute these from 52-week IV history after fetching. The screener accepts these as null (filter is disabled by default).
+- **Earnings calendar returns null** — Polygon has no public earnings calendar endpoint. Phase 3 may add a respectful web scrape or defer to a dedicated endpoint when available.
+- **Migration tests are migration-count-agnostic.** Tests check that migrations apply and are idempotent without asserting a specific count (Phase 2 adds migration 002).
+- **`ScreenerService` uses a `getConstituents` closure** in `main/index.ts` to avoid circular imports with `ConstituentsService`.
 
 ## Recent Changes
 
-- **v0.1.2 (2026-05-02)** — Fix `rebuild:electron` so the better-sqlite3 binary's ABI actually changes. v0.1.1 used `electron-builder install-app-deps` which silently no-op'd; now both rebuild scripts call `scripts/rebuild-better-sqlite3.mjs` (`prebuild-install --force`). `npm run dev` opens the window cleanly. See `changelogs/v0.1.2_2026-05-02.md`.
-- **v0.1.1 (2026-05-02)** — Swap DB driver back to better-sqlite3 now that VS Build Tools are installed. Drops the `createRequire` workaround for `node:sqlite` and the vitest `forks` pool / `node:` externals; introduces paired `rebuild:electron` / `rebuild:node` scripts. See `changelogs/v0.1.1_2026-05-02.md`.
-- **v0.1.0 (2026-05-01)** — Initial scaffold. Section 7 infrastructure in place. FR-1 (watchlist CRUD + CSV) implemented end-to-end with tests. Polygon integration not started. See `changelogs/v0.1.0_2026-05-01.md`.
+- **v0.2.0 (2026-05-02)** — Phase 2: Index Screener (FR-2). Screener engine with 17 default filters, strict/soft modes, presets, run history, save-as-watchlist. Polygon DataProvider + fundamentals computer. Quote auto-refresh (60s) on watchlist. Structured API + error logging. See `changelogs/v0.2.0_2026-05-02.md`.
+- **v0.1.2 (2026-05-02)** — Fix `rebuild:electron` so the better-sqlite3 binary's ABI actually changes. See `changelogs/v0.1.2_2026-05-02.md`.
+- **v0.1.1 (2026-05-02)** — Swap DB driver back to better-sqlite3. See `changelogs/v0.1.1_2026-05-02.md`.
+- **v0.1.0 (2026-05-01)** — Initial scaffold. Phase 1 (FR-1 watchlist CRUD + CSV) implemented end-to-end. See `changelogs/v0.1.0_2026-05-01.md`.
 
 ## How to Run
 

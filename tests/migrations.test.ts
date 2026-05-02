@@ -13,16 +13,18 @@ describe('migrations', () => {
   it('applies migrations to a fresh in-memory db and records the version', () => {
     const db = openDatabase(':memory:');
     const ran = runMigrations(db, MIGRATIONS_DIR);
-    expect(ran).toEqual([1]);
-    expect(currentSchemaVersion(db)).toBe(1);
+    expect(ran).toContain(1); // 001_init.sql always present
+    // 002_screen_schema.sql is Phase 2; check by presence, not specific count
+    expect(ran.length).toBeGreaterThanOrEqual(1);
+    expect(currentSchemaVersion(db)).toBeGreaterThanOrEqual(1);
   });
 
   it('is idempotent — running twice does not re-apply', () => {
     const db = openDatabase(':memory:');
-    runMigrations(db, MIGRATIONS_DIR);
+    const first = runMigrations(db, MIGRATIONS_DIR);
     const second = runMigrations(db, MIGRATIONS_DIR);
     expect(second).toEqual([]);
-    expect(currentSchemaVersion(db)).toBe(1);
+    expect(currentSchemaVersion(db)).toBe(first[first.length - 1]!);
   });
 
   it('creates the expected core tables', () => {

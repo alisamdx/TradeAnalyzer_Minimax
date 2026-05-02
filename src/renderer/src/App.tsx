@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { Watchlist, WatchlistItem } from '@shared/types.js';
+import type { Watchlist, WatchlistItem, CachedQuote } from '@shared/types.js';
+import { ScreenerView } from './views/ScreenerView.js';
 
 declare const __APP_VERSION__: string;
 
+type View = 'watchlists' | 'screener';
+
 export function App() {
+  const [view, setView] = useState<View>('watchlists');
   const [watchlists, setWatchlists] = useState<Watchlist[]>([]);
   const [activeId, setActiveId] = useState<number | null>(null);
   const [items, setItems] = useState<WatchlistItem[]>([]);
@@ -11,6 +15,8 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [tickerInput, setTickerInput] = useState('');
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
+  const [quoteMap, setQuoteMap] = useState<Record<string, CachedQuote | null>>({});
+  const [lastRefresh, setLastRefresh] = useState<string>('');
 
   const refreshLists = useCallback(async () => {
     const lists = await window.api.watchlists.list();
@@ -26,6 +32,23 @@ export function App() {
     setSelected(new Set());
   }, []);
 
+  // Refresh all quotes for the current watchlist.
+  const refreshQuotes = useCallback(async (watchlistId: number) => {
+    const tickers = items.map((i) => i.ticker);
+    if (tickers.length === 0) return;
+    try {
+      const quotes = await window.api.quotes.refreshBulk(tickers);
+      const map: Record<string, CachedQuote | null> = {};
+      for (const q of quotes) {
+        map[q.ticker] = q;
+      }
+      setQuoteMap(map);
+      setLastRefresh(new Date().toLocaleTimeString());
+    } catch {
+      // Silently fail — quotes are a nice-to-have on the watchlist table.
+    }
+  }, [items]);
+
   useEffect(() => {
     refreshLists().catch((e) => setError((e as Error).message));
   }, [refreshLists]);
@@ -34,6 +57,13 @@ export function App() {
     if (activeId === null) return;
     refreshItems(activeId).catch((e) => setError((e as Error).message));
   }, [activeId, refreshItems]);
+
+  // Auto-refresh quotes every 60 seconds (FR-1.7).
+  useEffect(() => {
+    if (activeId === null) return;
+    const interval = setInterval(() => refreshQuotes(activeId), 60_000);
+    return () => clearInterval(interval);
+  }, [activeId, refreshQuotes]);
 
   const onCreate = async () => {
     const name = window.prompt('New watchlist name');
@@ -161,26 +191,64 @@ export function App() {
 
   const active = watchlists.find((w) => w.id === activeId) ?? null;
 
+  const fmtPrice = (ticker: string): string => {
+    const q = quoteMap[ticker];
+    if (!q || q.last === null) return '—';
+    return `$${q.last.toFixed(2)}`;
+  };
+
+  const fmtDayPct = (ticker: string): string => {
+    const q = quoteMap[ticker];
+    if (!q || q.last === null || q.prevClose === null || q.prevClose === 0) return '—';
+    const pct = ((q.last - q.prevClose) / q.prevClose) * 100;
+    return `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
+  };
+
+  const dayPctClass = (ticker: string): string => {
+    const q = quoteMap[ticker];
+    if (!q || q.last === null || q.prevClose === null) return '';
+    const pct = ((q.last - q.prevClose) / q.prevClose) * 100;
+    return pct >= 0 ? 'up' : 'down';
+  };
+
   return (
     <div className="app">
       <aside className="sidebar">
-        <h2>Watchlists</h2>
-        <ul>
-          {watchlists.map((w) => (
-            <li
-              key={w.id}
-              className={`${w.id === activeId ? 'active' : ''} ${w.isDefault ? 'is-default' : ''}`}
-              onClick={() => setActiveId(w.id)}
-            >
-              <span>{w.name}</span>
-              <span className="count">{w.itemCount}</span>
-            </li>
-          ))}
-        </ul>
-        <div className="sidebar-actions">
-          <button onClick={onCreate}>+ New</button>
-          <button onClick={onImportNew}>Import…</button>
+        <div className="nav-section">
+          <button
+            className={`nav-btn ${view === 'watchlists' ? 'active' : ''}`}
+            onClick={() => setView('watchlists')}
+          >
+            📋 Watchlists
+          </button>
+          <button
+            className={`nav-btn ${view === 'screener' ? 'active' : ''}`}
+            onClick={() => setView('screener')}
+          >
+            🔍 Screener
+          </button>
         </div>
+
+        {view === 'watchlists' && (
+          <>
+            <ul className="watchlist-list">
+              {watchlists.map((w) => (
+                <li
+                  key={w.id}
+                  className={`${w.id === activeId ? 'active' : ''} ${w.isDefault ? 'is-default' : ''}`}
+                  onClick={() => setActiveId(w.id)}
+                >
+                  <span>{w.name}</span>
+                  <span className="count">{w.itemCount}</span>
+                </li>
+              ))}
+            </ul>
+            <div className="sidebar-actions">
+              <button onClick={onCreate}>+ New</button>
+              <button onClick={onImportNew}>Import…</button>
+            </div>
+          </>
+        )}
       </aside>
 
       <section className="main">
@@ -190,22 +258,32 @@ export function App() {
           </div>
         )}
 
-        {!active ? (
+        {view === 'screener' && <ScreenerView />}
+
+        {view === 'watchlists' && !active ? (
           <div className="empty">No watchlist selected.</div>
-        ) : (
+        ) : view === 'watchlists' ? (
           <>
             <div className="toolbar">
-              <h1>{active.name}</h1>
+              <h1>{active?.name}</h1>
               <span className="meta">
-                {active.itemCount} ticker{active.itemCount === 1 ? '' : 's'}
+                {active?.itemCount} ticker{active?.itemCount === 1 ? '' : 's'}
               </span>
               <button onClick={onRename}>Rename</button>
-              <button onClick={onExport} disabled={active.itemCount === 0}>
+              <button onClick={onExport} disabled={(active?.itemCount ?? 0) === 0}>
                 Export CSV
               </button>
               <button onClick={onImportIntoActive}>Import CSV</button>
-              <button onClick={onDelete} disabled={active.isDefault} className="danger">
+              <button onClick={onDelete} disabled={active?.isDefault ?? false} className="danger">
                 Delete
+              </button>
+              <div style={{ flex: 1 }} />
+              <button
+                onClick={() => activeId !== null && refreshQuotes(activeId)}
+                className="refresh-btn"
+                title="Refresh quotes"
+              >
+                ↻ Refresh quotes
               </button>
             </div>
             <div className="add-row">
@@ -256,15 +334,17 @@ export function App() {
                             onChange={() => toggleSelected(it.id)}
                           />
                         </td>
-                        <td>
-                          <strong>{it.ticker}</strong>
+                        <td><strong>{it.ticker}</strong></td>
+                        <td className="num">{fmtPrice(it.ticker)}</td>
+                        <td className={`num ${dayPctClass(it.ticker)}`}>
+                          {fmtDayPct(it.ticker)}
                         </td>
-                        <td className="placeholder" title="Lands in Phase 2">
-                          —
+                        <td className="num">
+                          {quoteMap[it.ticker]?.volume != null
+                            ? (quoteMap[it.ticker]!.volume! / 1_000_000).toFixed(1) + 'M'
+                            : '—'}
                         </td>
-                        <td className="placeholder">—</td>
-                        <td className="placeholder">—</td>
-                        <td className="placeholder">—</td>
+                        <td className="placeholder" title="Coming in Phase 3">—</td>
                         <td>{it.notes ?? ''}</td>
                         <td>{it.addedAt.slice(0, 10)}</td>
                       </tr>
@@ -274,12 +354,13 @@ export function App() {
               )}
             </div>
           </>
-        )}
+        ) : null}
       </section>
 
       <footer className="statusbar">
         <span>v{typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : '0.1.0'}</span>
         <span style={{ flex: 1 }} />
+        {lastRefresh && <span className="meta">Quotes: {lastRefresh}</span>}
         <span>{statusMsg ?? 'Ready'}</span>
       </footer>
     </div>

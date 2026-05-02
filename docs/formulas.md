@@ -8,39 +8,90 @@ The spec (EP-12.2) requires every derived financial metric to point back to its 
 
 ## Ratios (Phase 2)
 
-The following sections will be filled in as the screener and fundamentals-computer module land. Placeholders below name the anchors that code may reference.
+Implemented by `src/main/services/fundamentals-computer.ts`.
 
 ### price-to-earnings
 
-> _Phase 2._ TTM P/E = price / TTM EPS. Source: standard. Spec §5.2.2.
+```
+P/E (TTM) = current_price / EPS_TTM
+EPS_TTM   = sum(last_4_quarter_net_incomes) / share_count
+```
+Source: standard. Spec §5.2.2. Null when EPS is zero or share count is null.
+
+Implementation: `computeRatios()` in fundamentals-computer.ts.
+
+### earnings-per-share
+
+```
+EPS_TTM = sum(last_4_quarter_net_incomes) / share_count
+```
+Source: standard. Spec §5.2.2.
+
+Implementation: `computeRatios()` → `eps` field.
 
 ### profit-margin-net
 
-> _Phase 2._ Net margin = net income (TTM) / revenue (TTM). Spec §5.2.2.
+```
+Net margin (TTM) = sum(last_4_q_net_income) / sum(last_4_q_revenue) × 100
+```
+Source: standard. Spec §5.2.2.
+
+Implementation: `computeRatios()` → `profitMargin` field.
 
 ### return-on-equity
 
-> _Phase 2._ ROE = net income (TTM) / average shareholders' equity. Spec §5.2.2.
+```
+ROE = net_income_TTM / shareholders_equity_LTM × 100
+```
+Source: standard. Spec §5.2.2.
+
+Implementation: `computeRatios()` → `roe` field. Note: uses end-of-period equity (single latest filing), not average — per spec §10 this is a known simplification.
 
 ### debt-to-equity
 
-> _Phase 2._ D/E = total debt / shareholders' equity. Total debt = short-term + long-term. Spec §5.2.2.
+```
+D/E = total_debt / shareholders_equity
+```
+Source: standard. Spec §5.2.2. Financial sector (banks, insurance, investment) is **exempt** — D/E is returned as null. Detection: sector string contains 'bank', 'financial', 'insurance', or 'investment'.
+
+Implementation: `computeRatios()` → `debtToEquity` field.
 
 ### revenue-growth-yoy
 
-> _Phase 2._ Revenue growth YoY = (revenue_TTM − revenue_prior_TTM) / revenue_prior_TTM. Spec §5.2.2.
+```
+Revenue growth YoY = (revenue_current_TTM − revenue_prior_TTM) / |revenue_prior_TTM| × 100
+```
+Source: standard. Spec §5.2.2. Null when prior revenue is ≤ 0 or unavailable.
+
+Implementation: `computeRatios()` → `revenueGrowth` field.
 
 ### eps-growth-yoy
 
-> _Phase 2._ EPS growth YoY = (EPS_TTM − EPS_prior_TTM) / EPS_prior_TTM. Spec §5.2.2.
+```
+EPS growth YoY = (EPS_current_TTM − EPS_prior_TTM) / |EPS_prior_TTM| × 100
+EPS_TTM = sum(last_4_q_net_income) / share_count
+```
+Source: standard. Spec §5.2.2.
+
+Implementation: `computeRatios()` → `epsGrowth` field.
 
 ### free-cash-flow
 
-> _Phase 2._ FCF (TTM) = operating cash flow (TTM) − capital expenditures (TTM). Spec §5.2.2.
+```
+FCF (TTM) = operating_cash_flow_TTM − |capital_expenditures_TTM|
+```
+Source: standard. Spec §5.2.2.
+
+Implementation: `computeRatios()` → `freeCashFlow` field.
 
 ### current-ratio
 
-> _Phase 2._ Current ratio = current assets / current liabilities. Spec §5.2.2.
+```
+Current ratio = total_current_assets / total_current_liabilities
+```
+Source: standard. Spec §5.2.2. Null when liabilities are zero.
+
+Implementation: `computeRatios()` → `currentRatio` field.
 
 ## Indicators (Phase 4)
 
