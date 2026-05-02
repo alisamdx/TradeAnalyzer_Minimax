@@ -164,16 +164,181 @@ export interface FundamentalsCache {
   fetchedAt: string;
 }
 
-// ─── Screener IPC ─────────────────────────────────────────────────────────────
+// ─── Analysis Engine (Phase 3) ────────────────────────────────────────────────
 
-export interface ScreenerIpc {
-  'screen:list-presets': () => Promise<ScreenPreset[]>;
-  'screen:save-preset': (preset: Omit<ScreenPreset, 'id' | 'createdAt'>) => Promise<ScreenPreset>;
-  'screen:delete-preset': (id: number) => Promise<void>;
-  'screen:get-constituents': (index: Universe) => Promise<ConstituentRow[]>;
-  'screen:refresh-constituents': (index: 'sp500' | 'russell1000') => Promise<ConstituentsMeta>;
-  'screen:run': (criteria: ScreenCriteria) => Promise<ScreenRunResult>;
-  'screen:get-results': (runId: number) => Promise<ScreenResultRow[]>;
-  'screen:save-as-watchlist': (runId: number, tickerIds: number[], name: string) => Promise<Watchlist>;
-  'screen:get-runs': () => Promise<ScreenRunResult[]>;
+/** Analysis mode types, one per FR-3.3 mode. */
+export type AnalysisMode = 'buy' | 'options_income' | 'wheel' | 'bullish' | 'bearish';
+
+/** List-item shape for the analysis snapshot selector. */
+export interface AnalysisSnapshotRow {
+  id: number;
+  watchlistId: number;
+  mode: AnalysisMode;
+  runAt: string;
+  resultCount: number;
+  /** JSON string — parse to get the full AnalysisResult[]. */
+  payloadJson: string;
+}
+
+/** Mode descriptor for the UI selector. */
+export interface AnalysisModeInfo {
+  id: AnalysisMode;
+  label: string;
+  icon: string;
+  description: string;
+  outputColumns: string[];
+}
+
+/** Result of running an analysis against a watchlist. */
+export interface AnalysisRunResult {
+  snapshotId: number;
+  mode: AnalysisMode;
+  resultCount: number;
+  runAt: string;
+  resultsJson: string;
+  failedTickers: string[];
+}
+
+/** Unified analysis result — union of all 5 mode outputs. */
+export type AnalysisResult =
+  | BuyResult
+  | OptionsIncomeResult
+  | WheelResult
+  | StrategyResult;
+
+export interface BuyResult {
+  mode: 'buy';
+  ticker: string;
+  lastPrice: number | null;
+  compositeScore: number;
+  trend: 'bullish' | 'bearish' | 'sideways';
+  smaStack: { sma20: number | null; sma50: number | null; sma200: number | null };
+  rsi: number | null;
+  entryZoneLow: number | null;
+  entryZoneHigh: number | null;
+  stopLoss: number | null;
+  targetPrice: number | null;
+  riskReward: number | null;
+  fundamentalsPass: boolean;
+  explanation: string;
+}
+
+export interface OptionsIncomeResult {
+  mode: 'options_income';
+  ticker: string;
+  lastPrice: number | null;
+  strategy: 'CSP' | 'CC';
+  strike: number | null;
+  expiration: string | null;
+  dte: number | null;
+  delta: number | null;
+  premium: number | null;
+  annualizedReturn: number | null;
+  ivRank: number | null;
+  breakeven: number | null;
+  capitalRequired: number | null;
+  explanation: string;
+}
+
+export interface WheelResult {
+  mode: 'wheel';
+  ticker: string;
+  lastPrice: number | null;
+  recommendedStrike: number | null;
+  expiration: string | null;
+  dte: number | null;
+  delta: number | null;
+  premium: number | null;
+  annualizedReturn: number | null;
+  ivRank: number | null;
+  daysToEarnings: number | null;
+  optionLiquidityScore: number;
+  suitabilityScore: number;
+  explanation: string;
+}
+
+export interface StrategyResult {
+  mode: 'bullish' | 'bearish';
+  ticker: string;
+  lastPrice: number | null;
+  trendStrength: number | null;
+  suggestedStrategy:
+    | 'long_call'
+    | 'bull_call_spread'
+    | 'short_put'
+    | 'long_put'
+    | 'bear_put_spread'
+    | 'short_call';
+  structure: string;
+  maxProfit: number | null;
+  maxLoss: number | null;
+  breakeven: number | null;
+  probabilityOfProfit: number | null;
+  explanation: string;
+}
+
+// ─── Options chain (from DataProvider) ───────────────────────────────────────
+
+/** Alias — shared across DataProvider interface and renderer. */
+export type OptionsChain = DataProviderOptionsChain;
+
+export interface DataProviderOptionsChain {
+  ticker: string;
+  expiration: string;
+  contracts: OptionContract[];
+}
+
+/** Single option contract. */
+export interface OptionContract {
+  ticker: string;
+  expiration: string;
+  strike: number;
+  side: 'call' | 'put';
+  bid: number;
+  ask: number;
+  delta: number | null;
+  gamma: number | null;
+  theta: number | null;
+  vega: number | null;
+  iv: number;
+  openInterest: number | null;
+  volume: number | null;
+}
+
+/** Backwards-alias — don't use in new code. */
+export type OptionsContract = OptionContract;
+
+// ─── Validate All (FR-4.4) ────────────────────────────────────────────────────
+
+export type ValidateStatus = 'pending' | 'fetched' | 'persisted' | 'failed';
+
+export interface ValidateAllResult {
+  jobRunId: number;
+  totalCount: number;
+  succeededCount: number;
+  failedCount: number;
+  status: 'running' | 'completed' | 'stopped' | 'failed';
+}
+
+/** Per-ticker status for the Validate All progress grid. */
+export interface TickerStatusRow {
+  ticker: string;
+  status: ValidateStatus;
+  errorMsg: string | null;
+}
+
+// ─── Job run status ────────────────────────────────────────────────────────────
+
+export type JobRunStatus = 'pending' | 'running' | 'paused' | 'stopped' | 'completed' | 'failed';
+
+export interface JobRunInfo {
+  id: number;
+  type: 'validate_all' | 'screen_run' | 'analysis_run';
+  watchlistId: number | null;
+  status: JobRunStatus;
+  startedAt: string;
+  endedAt: string | null;
+  totalCount: number;
+  succeededCount: number;
+  failedCount: number;
 }

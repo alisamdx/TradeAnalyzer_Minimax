@@ -9,53 +9,11 @@ import type {
   ScreenRunResult,
   ScreenResultRow,
   Universe,
-  ConstituentsMeta,
-  ConstituentRow,
-  CachedQuote
+  ConstituentsMeta
 } from '@shared/types.js';
 import { DEFAULT_FILTER_SPECS } from '@shared/screener-filters.js';
 
-declare global {
-  interface Window {
-    api: {
-      watchlists: {
-        list: () => Promise<import('@shared/types.js').Watchlist[]>;
-        get: (id: number) => Promise<import('@shared/types.js').Watchlist>;
-        create: (name: string) => Promise<import('@shared/types.js').Watchlist>;
-        rename: (id: number, newName: string) => Promise<import('@shared/types.js').Watchlist>;
-        delete: (id: number) => Promise<true>;
-        items: {
-          list: (id: number) => Promise<import('@shared/types.js').WatchlistItem[]>;
-          add: (id: number, ticker: string, notes?: string | null) => Promise<import('@shared/types.js').WatchlistItem>;
-          addBulk: (id: number, items: Array<{ ticker: string; notes?: string | null }>) => Promise<{ added: import('@shared/types.js').WatchlistItem[]; skipped: Array<{ ticker: string; reason: string }> }>;
-          remove: (id: number, itemIds: number[]) => Promise<number>;
-        };
-        csv: {
-          export: (id: number) => Promise<{ filePath: string; rowCount: number } | null>;
-          import: (args: { watchlistId?: number; createWithName?: string }) => Promise<{ watchlistId: number; imported: number; skipped: Array<{ row: number; ticker: string; reason: string }> }>;
-        };
-      };
-      screen: {
-        listPresets: () => Promise<ScreenPreset[]>;
-        savePreset: (p: Omit<ScreenPreset, 'id' | 'createdAt'>) => Promise<ScreenPreset>;
-        deletePreset: (id: number) => Promise<void>;
-        getConstituents: (index: Universe) => Promise<ConstituentRow[]>;
-        getMeta: (index: 'sp500' | 'russell1000') => Promise<ConstituentsMeta | null>;
-        refreshConstituents: (index: 'sp500' | 'russell1000') => Promise<ConstituentsMeta>;
-        importConstituents: (filePath: string, index: 'sp500' | 'russell1000') => Promise<{ count: number }>;
-        run: (criteria: ScreenCriteria) => Promise<ScreenRunResult>;
-        getRuns: () => Promise<ScreenRunResult[]>;
-        getResults: (runId: number) => Promise<ScreenResultRow[]>;
-        saveAsWatchlist: (runId: number, resultIds: number[], name: string) => Promise<import('@shared/types.js').Watchlist>;
-      };
-      quotes: {
-        refresh: (ticker: string) => Promise<CachedQuote>;
-        refreshBulk: (tickers: string[]) => Promise<CachedQuote[]>;
-        getCached: (ticker: string) => Promise<CachedQuote | null>;
-      };
-    };
-  }
-}
+// `window.api` is declared once in `src/renderer/src/global.d.ts`.
 
 // ─── Filter panel state ───────────────────────────────────────────────────────
 

@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Watchlist, WatchlistItem, CachedQuote } from '@shared/types.js';
 import { ScreenerView } from './views/ScreenerView.js';
+import { AnalysisView } from './views/AnalysisView.js';
 
 declare const __APP_VERSION__: string;
 
-type View = 'watchlists' | 'screener';
+type View = 'watchlists' | 'screener' | 'analysis';
 
 export function App() {
   const [view, setView] = useState<View>('watchlists');
@@ -227,6 +228,12 @@ export function App() {
           >
             🔍 Screener
           </button>
+          <button
+            className={`nav-btn ${view === 'analysis' ? 'active' : ''}`}
+            onClick={() => setView('analysis')}
+          >
+            📊 Analysis
+          </button>
         </div>
 
         {view === 'watchlists' && (
@@ -259,6 +266,7 @@ export function App() {
         )}
 
         {view === 'screener' && <ScreenerView />}
+        {view === 'analysis' && <AnalysisView />}
 
         {view === 'watchlists' && !active ? (
           <div className="empty">No watchlist selected.</div>

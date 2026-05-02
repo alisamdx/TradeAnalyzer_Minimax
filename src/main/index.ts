@@ -11,6 +11,11 @@ import { PolygonDataProvider } from './services/polygon-provider.js';
 import { QuoteCache, FundamentalsCache, initCacheTables } from './services/cache-service.js';
 import { registerScreenerIpc } from './ipc/ipc-screener.js';
 import { pruneOldLogsOnStartup } from './services/logger.js';
+import { TokenBucketRateLimiter } from './services/rate-limiter.js';
+import { JobQueue } from './services/job-queue.js';
+import { AnalysisService } from './services/analysis-service.js';
+import { ValidateAllService } from './services/validate-all-service.js';
+import { registerAnalysisIpc } from './ipc/ipc-analysis.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -87,6 +92,17 @@ app.whenReady().then(() => {
   const screenerService = new ScreenerService(db, dataProvider, getConstituents);
 
   registerScreenerIpc(screenerService, constituentsService, watchlistService, quoteCache, dataProvider);
+
+  // Phase 3 — rate limiter + job queue + analysis + validate-all.
+  const rateLimiter = new TokenBucketRateLimiter({ requestsPerMinute: 100 });
+  const jobQueue = new JobQueue(db);
+  const analysisService = new AnalysisService(db, dataProvider, rateLimiter, jobQueue);
+  const validateAllService = new ValidateAllService(db, dataProvider, rateLimiter, jobQueue);
+
+  registerAnalysisIpc(analysisService, validateAllService, jobQueue, watchlistService);
+
+  // Check for incomplete runs from a previous session and surface in the renderer.
+  // The renderer will prompt the user to resume or discard via the job IPC handlers.
 
   createWindow();
 

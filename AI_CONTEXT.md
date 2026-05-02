@@ -40,19 +40,22 @@ TradeAnalyzer/
       db/                  ← connection.ts, migrations.ts
       services/            ← watchlist-service.ts, csv.ts (Phase 1); screener-service.ts,
                              constituents-service.ts, polygon-provider.ts, cache-service.ts,
-                             fundamentals-computer.ts, logger.ts (Phase 2)
-      ipc/                 ← ipc-watchlists.ts (Phase 1), ipc-screener.ts (Phase 2)
-    preload/               ← context-isolated bridge: exposes window.api.* (Phase 1+2)
+                             fundamentals-computer.ts, logger.ts (Phase 2); analysis-service.ts,
+                             rate-limiter.ts, job-queue.ts, validate-all-service.ts (Phase 3)
+      ipc/                 ← ipc-watchlists.ts (Phase 1), ipc-screener.ts (Phase 2),
+                             ipc-analysis.ts (Phase 3)
+    preload/               ← context-isolated bridge: exposes window.api.* (Phase 1–3)
       index.ts
     renderer/              ← React UI
       index.html
       src/
         main.tsx           ← React entry
-        App.tsx            ← top-level layout (sidebar + main pane) + ScreenerView (Phase 2)
+        App.tsx            ← top-level layout (sidebar + main pane) + AnalysisView (Phase 3)
         api.ts             ← typed wrapper around window.api.* (deprecated — use window.api directly)
         views/
           WatchlistView.tsx (Phase 1 — merged into App)
           ScreenerView.tsx  (Phase 2)
+          AnalysisView.tsx  (Phase 3)
           screener-filters.ts (Phase 2)
         styles.css
     shared/                ← types shared between main and renderer
@@ -87,15 +90,15 @@ TradeAnalyzer/
 - **Preload script** (`src/preload/`) uses `contextBridge` to expose `window.api` with only the safe IPC methods the renderer needs. Context isolation is on; nodeIntegration is off.
 - **Renderer** (`src/renderer/`) is a stock React/Vite app. It never touches Node, the filesystem, or the network directly — only `window.api.*`.
 
-### Data flow (current — Phase 1)
+### Data flow (Phase 3)
 ```
-React view ──invoke──▶ window.api.watchlists.* ──ipcRenderer.invoke──▶ main IPC handler ──▶ WatchlistService ──▶ better-sqlite3
+React view ──invoke──▶ window.api.* ──ipcRenderer.invoke──▶ main IPC handler ──▶ Service ──▶ better-sqlite3
                                                                                             │
-                                                                                            └──▶ shared types
+                                                                                            └──▶ DataProvider (Polygon.io)
 ```
 
-### Producer/consumer pipeline (deferred to Phase ≥ 3)
-Per spec §4.4: Fetcher worker pulls jobs from a queue and respects token-bucket rate limiting; Persister worker writes parsed responses to SQLite; UI Coordinator publishes progress events. Resumable via the `job_runs` + `job_progress` tables. Not implemented yet — only the schema columns exist.
+### Producer/consumer pipeline (§4.4)
+Implemented in Phase 3: `TokenBucketRateLimiter` (configurable 10–500 rpm) + SQLite-backed `JobQueue` for resumable batch jobs (`job_runs` + `job_progress` tables). Used by both the Analysis Engine and Validate All batch processing.
 
 ## Data Model
 
@@ -112,12 +115,12 @@ Authoritative DDL is in `migrations/001_init.sql` + `002_screen_schema.sql`. Pha
 | `screen_presets` | Saved filter presets (FR-2.5) | persistent |
 | `screen_runs` | Past screen runs with result count | persistent |
 | `screen_results` | Per-ticker filter values + pass score | persistent |
-| `analysis_snapshots` | Past analysis runs (Phase 3) | persistent |
+| `analysis_snapshots` | Past analysis runs | persistent |
+| `job_runs` | Batch job metadata (status, type, config) | persistent |
+| `job_progress` | Per-ticker job status (pending/fetched/persisted/failed) | persistent |
 | `fundamentals_cache` | Derived ratios, 24h TTL | cache |
 | `quote_cache` | Last price / volume / IV, 60s TTL | cache |
 | `options_cache` | Options chain, 5min TTL | cache |
-
-Not yet created (Phase ≥ 3): `job_runs`, `job_progress`.
 
 ## DataProvider Contract
 
@@ -134,8 +137,8 @@ Not yet created (Phase ≥ 3): `job_runs`, `job_progress`.
 ## Open Decisions
 
 - **Charting library** — between `lightweight-charts` and `ApexCharts`. Decide in Phase 4 (validation dashboard) when chart needs are concrete.
-- **Suitability score formula (wheel)** — TBD in Phase 3 (analysis engine). Will be documented in `docs/formulas.md`.
-- **Producer/consumer technology** — leaning toward Node `worker_threads` + an in-process queue + token-bucket implementation (no external broker). Decide in Phase 3.
+- **Suitability score formula (wheel)** — Documented in `docs/formulas.md`. Wheel suitability = weighted score 1–10 (IV rank, stability, liquidity, earnings proximity, ROE, FCF).
+- **Producer/consumer technology** — Settled in Phase 3: single-threaded Node event loop + `TokenBucketRateLimiter` + `JobQueue` (SQLite). No external broker. Works well for <2,000 tickers.
 - **Settings storage** — API key currently loaded from `.env`; OS keychain via `keytar` deferred to Phase 2 (minor).
 
 ## Known Quirks & Gotchas
@@ -152,9 +155,12 @@ Not yet created (Phase ≥ 3): `job_runs`, `job_progress`.
 - **Earnings calendar returns null** — Polygon has no public earnings calendar endpoint. Phase 3 may add a respectful web scrape or defer to a dedicated endpoint when available.
 - **Migration tests are migration-count-agnostic.** Tests check that migrations apply and are idempotent without asserting a specific count (Phase 2 adds migration 002).
 - **`ScreenerService` uses a `getConstituents` closure** in `main/index.ts` to avoid circular imports with `ConstituentsService`.
+- **`window.api` declaration** lives in `src/renderer/src/global.d.ts` only. Never redeclare it per-file — that causes TS2717 duplicate declaration errors.
+- **Phase 3 fake timer tests** use `flushTimersUntil()` helper with polling loop (`vi.advanceTimersByTime` + `await Promise.resolve()`) since `vi.runAllTimers()` alone doesn't drain the promise chain in the rate limiter.
 
 ## Recent Changes
 
+- **v0.3.0 (2026-05-02)** — Phase 3: Analysis Engine + Pipeline (FR-3 + FR-4.4). 5 analysis modes (Buy, Options Income, Wheel, Bullish, Bearish) with composite scoring, entry/stop/target. Validate All batch with verdict + full indicators. Pipeline: `TokenBucketRateLimiter` + SQLite `JobQueue` for resumable batch jobs. Full indicator library. AnalysisView UI. See `changelogs/v0.3.0_2026-05-02.md`.
 - **v0.2.0 (2026-05-02)** — Phase 2: Index Screener (FR-2). Screener engine with 17 default filters, strict/soft modes, presets, run history, save-as-watchlist. Polygon DataProvider + fundamentals computer. Quote auto-refresh (60s) on watchlist. Structured API + error logging. See `changelogs/v0.2.0_2026-05-02.md`.
 - **v0.1.2 (2026-05-02)** — Fix `rebuild:electron` so the better-sqlite3 binary's ABI actually changes. See `changelogs/v0.1.2_2026-05-02.md`.
 - **v0.1.1 (2026-05-02)** — Swap DB driver back to better-sqlite3. See `changelogs/v0.1.1_2026-05-02.md`.

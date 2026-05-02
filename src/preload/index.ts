@@ -16,9 +16,15 @@ import type {
   Universe,
   ConstituentsMeta,
   ConstituentRow,
-  Quote as CachedQuote
+  Quote as CachedQuote,
+  AnalysisModeInfo,
+  AnalysisRunResult,
+  AnalysisSnapshotRow,
+  ValidateAllResult,
+  TickerStatusRow,
+  JobRunInfo
 } from '@shared/types.js';
-export type { ScreenPreset, ScreenCriteria, ScreenRunResult, ScreenResultRow, Universe, ConstituentsMeta, ConstituentRow, CachedQuote };
+export type { ScreenPreset, ScreenCriteria, ScreenRunResult, ScreenResultRow, Universe, ConstituentsMeta, ConstituentRow, CachedQuote, AnalysisModeInfo, AnalysisRunResult, AnalysisSnapshotRow, ValidateAllResult, TickerStatusRow, JobRunInfo };
 export type Api = ReturnType<typeof buildApi>['api'];
 
 async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
@@ -85,7 +91,30 @@ function buildApi() {
     getCached: (ticker: string) => invoke<CachedQuote | null>('quotes:get-cached', ticker)
   };
 
-  return { api: { watchlists, screen, quotes } };
+  const analysis = {
+    listModes: () => invoke<AnalysisModeInfo[]>('analysis:list-modes'),
+    run: (watchlistId: number, mode: string, tickerSubset?: string[]) =>
+      invoke<AnalysisRunResult>('analysis:run', { watchlistId, mode: mode as Parameters<typeof analysis.run>[1], tickerSubset }),
+    getSnapshots: (watchlistId: number) => invoke<AnalysisSnapshotRow[]>('analysis:get-snapshots', watchlistId),
+    getSnapshot: (id: number) => invoke<{ id: number; watchlistId: number; mode: string; runAt: string; resultCount: number; results: unknown[] } | null>('analysis:get-snapshot', id),
+    saveAsWatchlist: (snapshotId: number, resultIndices: number[], name: string) =>
+      invoke<Watchlist>('analysis:save-as-watchlist', snapshotId, resultIndices, name),
+    cancel: () => invoke<boolean>('analysis:cancel')
+  };
+
+  const validateAll = {
+    run: (watchlistId: number) => invoke<ValidateAllResult>('validate-all:run', { watchlistId }),
+    getStatus: (jobRunId: number) => invoke<{ run: JobRunInfo; progress: TickerStatusRow[] } | null>('validate-all:get-status', jobRunId),
+    cancel: () => invoke<boolean>('validate-all:cancel')
+  };
+
+  const jobs = {
+    listIncomplete: () => invoke<JobRunInfo[]>('job:list-incomplete'),
+    resume: (jobRunId: number) => invoke<JobRunInfo | null>('job:resume', jobRunId),
+    discard: (jobRunId: number) => invoke<boolean>('job:discard', jobRunId)
+  };
+
+  return { api: { watchlists, screen, quotes, analysis, validateAll, jobs } };
 }
 
 const { api } = buildApi();
