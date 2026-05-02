@@ -1,12 +1,17 @@
 # Troubleshooting
 
-## `npm install` fails on better-sqlite3
+## `was compiled against a different Node.js version` (NODE_MODULE_VERSION mismatch)
 
-Symptom: `Error: The module ... was compiled against a different Node.js version`.
+Symptom: tests fail or the app fails to launch with `The module 'better_sqlite3.node' was compiled against a different Node.js version using NODE_MODULE_VERSION X. This version of Node.js requires NODE_MODULE_VERSION Y.`
 
-Fix: `npx electron-rebuild -f -w better-sqlite3`. The `postinstall` script should already do this; run manually if it didn't.
+Cause: `better-sqlite3`'s native binary has to match the runtime ABI. Electron's Node (Electron 32 → Node 20 → 128) and the system Node (24 → 137) are different. Only one binary lives in `node_modules` at a time.
 
-On Windows, ensure Visual Studio Build Tools 2022 (Desktop development with C++) is installed. Native rebuilds need a working toolchain.
+Fix:
+
+- For tests: `npm run rebuild:node` (then re-run `npm test`). The `pretest` script should do this automatically.
+- For the app: `npm run rebuild:electron` (then re-run `npm run dev`). The `predev`/`prebuild`/`prepackage` scripts should do this automatically.
+
+If the rebuild itself fails on Windows, install Visual Studio Build Tools 2022 with the *Desktop development with C++* workload.
 
 ## App launches but window is blank
 

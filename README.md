@@ -8,15 +8,23 @@ For the full spec, see [`REQUIREMENTS.md`](REQUIREMENTS.md). For AI session boot
 
 ## Prerequisites
 
-- **Node.js ≥ 22.5** (tested on 24.15). Required for the built-in `node:sqlite` module.
+- **Node.js ≥ 22.5** (tested on 24.15)
 - **npm ≥ 10**
-- No native compilation toolchain needed in Phase 1 (we use `node:sqlite`, not `better-sqlite3`).
+- **Windows**: Visual Studio Build Tools 2022 with the *Desktop development with C++* workload, for `electron-rebuild` of `better-sqlite3` against Electron's Node ABI. Most fresh installs run on the prebuilt binary, but the rebuild path needs the toolchain.
+- **macOS**: Xcode Command Line Tools (`xcode-select --install`).
 
 ## Install
 
 ```bash
 npm install
 ```
+
+> **Native module note:** the `better-sqlite3` binary has to match either Electron's Node ABI (for `dev`/`build`) or the system Node ABI (for `vitest`). Only one can live in `node_modules` at a time. The npm scripts handle the dance:
+>
+> - `npm run dev`, `npm run build`, `npm run package` automatically run `rebuild:electron` first (Electron ABI).
+> - `npm test` automatically runs `rebuild:node` first (system Node ABI).
+>
+> If you ever see `NODE_MODULE_VERSION 128 vs 137`, run the matching script manually.
 
 ## Configuration (Polygon API key)
 
@@ -63,10 +71,12 @@ This section answers the "Open Questions" in spec §10.
 - `electron-vite` consolidates main, preload, and renderer into a single Vite-based config with HMR for both processes. Avoids hand-rolling five separate tsconfigs.
 - TypeScript strict mode is on in all three contexts; types in `src/shared` cross the IPC boundary.
 
-### SQLite: Node 24's built-in `node:sqlite`
+### SQLite: better-sqlite3 12.x
 
-- Synchronous API like better-sqlite3, with zero native compilation step. The dev box does not have Visual Studio Build Tools, and better-sqlite3 12.x lacks Node-24 prebuilds; pivoting to `node:sqlite` removed an entire failure mode for fresh clones.
-- The driver is wrapped in `src/main/db/connection.ts` (`openDatabase`, `withTransaction`) so swapping to better-sqlite3 later is a single-file change — useful if/when we want WAL checkpointing tunables, named bind parameters, or other better-sqlite3-only features.
+- Synchronous API maps cleanly to per-IPC-call request handlers in the main process — no need to model async DB latency in service code that already runs off the renderer thread.
+- Mature ecosystem and feature surface (WAL tuning, attached DBs, JSON1/FTS5 baked in).
+- Native binding rebuilt for Electron's ABI via `electron-rebuild`, wired through `electron-builder install-app-deps` as `postinstall`.
+- Wrapped in `src/main/db/connection.ts` (`openDatabase`, `withTransaction`) so the driver isn't leaked across the codebase.
 
 ### Charting library: deferred
 

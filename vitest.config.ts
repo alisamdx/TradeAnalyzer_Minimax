@@ -6,13 +6,6 @@ export default defineConfig({
     environment: 'node',
     include: ['tests/**/*.test.ts'],
     testTimeout: 10_000,
-    pool: 'forks',
-    server: {
-      deps: {
-        // Don't try to transform Node built-ins like `node:sqlite`.
-        external: [/^node:/, 'sqlite']
-      }
-    },
     coverage: {
       provider: 'v8',
       reporter: ['text', 'lcov']

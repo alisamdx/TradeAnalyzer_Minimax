@@ -1,6 +1,6 @@
 {
   "name": "trade-analyzer",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Stock screening and analysis desktop app for a single retail trader.",
   "main": "out/main/index.js",
@@ -9,8 +9,13 @@
     "node": ">=22.5"
   },
   "scripts": {
+    "rebuild:electron": "electron-builder install-app-deps",
+    "rebuild:node": "cd node_modules/better-sqlite3 && prebuild-install --runtime=node --force",
+    "predev": "npm run rebuild:electron",
     "dev": "electron-vite dev",
+    "prebuild": "npm run rebuild:electron",
     "build": "electron-vite build && electron-builder",
+    "prepackage": "npm run rebuild:electron",
     "package": "electron-vite build && electron-builder --dir",
     "preview": "electron-vite preview",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
@@ -18,12 +23,16 @@
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "lint": "eslint .",
     "format": "prettier --write .",
+    "pretest": "npm run rebuild:node",
     "test": "vitest run",
     "test:watch": "vitest"
   },
-  "dependencies": {},
+  "dependencies": {
+    "better-sqlite3": "^12.9.0"
+  },
   "devDependencies": {
     "@eslint/js": "^9.14.0",
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.9.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",

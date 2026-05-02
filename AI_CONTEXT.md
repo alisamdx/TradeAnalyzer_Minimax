@@ -15,7 +15,7 @@ The full spec is in `REQUIREMENTS.md`. This file summarizes the build state.
 | Shell | Electron | 32.x | Spec recommends; mature cross-platform desktop runtime; rich Node + Chromium APIs |
 | UI | React + TypeScript | 18 / 5.x | Spec recommends; ecosystem fit for charting libs and tables |
 | Build | electron-vite | 2.x | Single config file for main + preload + renderer; fast HMR |
-| DB | Node `node:sqlite` | built-in (Node ≥ 22.5) | Synchronous API; **zero native compilation**. Switched from better-sqlite3 because the dev box has no Visual Studio Build Tools and v12.x has no Node-24 prebuilt. Wrapped in `src/main/db/connection.ts` so we can swap back later. |
+| DB | better-sqlite3 | 12.x | Synchronous API; well-supported on Electron via `electron-rebuild` (wired through `electron-builder install-app-deps` as `postinstall`). Wrapped in `src/main/db/connection.ts` (`openDatabase`, `withTransaction`) so the driver isn't leaked across the codebase. |
 | Tests | Vitest | 2.x | Native Vite integration; fast; jest-compatible API |
 | Lint/format | ESLint 9 + Prettier 3 | — | Industry standard |
 | CSV | hand-rolled (Phase 1) | — | One file, RFC-4180-ish; no deps; pluggable later if needed |
@@ -129,14 +129,18 @@ Polygon-specific implementation will sit behind this interface so v2 providers c
 
 ## Known Quirks & Gotchas
 
-- **DB driver is `node:sqlite`, not better-sqlite3.** Wrapped behind `src/main/db/connection.ts` (`openDatabase`, `withTransaction`). The wrapper exists specifically so we can swap better-sqlite3 back in when the dev environment has Visual Studio Build Tools 2022 (or when better-sqlite3 ships a Node-24 prebuilt). API differences vs better-sqlite3: no `db.pragma()` (use `db.exec('PRAGMA ...')`), no `db.transaction(fn)()` (use the `withTransaction(db, fn)` helper), and `prepare(...).all()` returns `unknown[]` so callers cast.
-- **`node:sqlite` is experimental in Node 22/23.** Pre-Node-24, it requires `--experimental-sqlite`. Node ≥ 24 enables it by default. The package.json `engines` field pins this; if you see `Unknown built-in module 'node:sqlite'`, you're on too old a Node.
+- **DB driver is better-sqlite3 12.x**, wrapped behind `src/main/db/connection.ts` (`openDatabase`, `withTransaction`). Service code only uses the lowest-common-denominator API (`prepare`, `run`, `get`, `all`, `exec`) so the wrapper is the swap point if we ever change drivers. Don't reach for `db.transaction(fn)()` directly — use `withTransaction(db, fn)` so test code stays driver-agnostic.
+- **better-sqlite3 binary flips between Node and Electron ABIs.** Only one `better_sqlite3.node` binary lives in `node_modules` at a time. We work around this with two npm scripts:
+  - `rebuild:electron` (= `electron-builder install-app-deps`) → installs the Electron-target binary. Wired as `predev`/`prebuild`/`prepackage`, so `npm run dev`/`build`/`package` always re-flip before launching.
+  - `rebuild:node` (= `prebuild-install --runtime=node --force` inside `node_modules/better-sqlite3`) → installs the Node-target binary. Wired as `pretest`, so `npm test` always re-flips before vitest runs in plain Node.
+  After `npm install` the binary is whatever happened to land last (no postinstall script — left intentionally so the user gets a predictable test-friendly default; the very first `npm run dev` will rebuild). If you see `NODE_MODULE_VERSION 128 vs 137` errors, the wrong binary is in place — run the matching `rebuild:*` script. On Windows the rebuild path needs Visual Studio Build Tools 2022 (Desktop development with C++).
 - **Case-insensitive unique watchlist names.** Enforced by a unique index on `lower(name)` in SQLite, not by `COLLATE NOCASE` on the column (so `name` keeps the user's casing on read). The service also pre-checks before insert to give a clean error.
 - **The 'Default' watchlist is undeletable.** Enforced in the service layer (delete throws) AND created idempotently on app startup. Renaming is allowed.
 - **CSV header.** Required column: `ticker`. Optional: `notes`, `added_date`. Header row is mandatory. Tickers are uppercased and trimmed; rows with missing/empty ticker are reported as skipped (never silently dropped).
 
 ## Recent Changes
 
+- **v0.1.1 (2026-05-02)** — Swap DB driver back to better-sqlite3 now that VS Build Tools are installed. Drops the `createRequire` workaround for `node:sqlite` and the vitest `forks` pool / `node:` externals; restores the `postinstall` electron-rebuild step. No behavior change. See `changelogs/v0.1.1_2026-05-02.md`.
 - **v0.1.0 (2026-05-01)** — Initial scaffold. Section 7 infrastructure in place. FR-1 (watchlist CRUD + CSV) implemented end-to-end with tests. Polygon integration not started. See `changelogs/v0.1.0_2026-05-01.md`.
 
 ## How to Run
