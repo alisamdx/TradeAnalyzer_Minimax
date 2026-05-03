@@ -41,6 +41,8 @@ export function SettingsView() {
   const [backupMsg, setBackupMsg] = useState<string | null>(null);
   const [restoreMsg, setRestoreMsg] = useState<string | null>(null);
 
+  const [activeTab, setActiveTab] = useState('General');
+
   // Load settings on mount.
   useEffect(() => {
     window.api.settings.getAll()
@@ -137,17 +139,18 @@ export function SettingsView() {
       <div className="settings-layout">
         {/* ── Left: nav tabs ── */}
         <aside className="settings-nav">
-          <button className="settings-tab active">General</button>
-          <button className="settings-tab">API & Data</button>
-          <button className="settings-tab">Cache & Limits</button>
-          <button className="settings-tab">Diagnostics</button>
-          <button className="settings-tab">Backup</button>
+          <button className={`settings-tab ${activeTab === 'General' ? 'active' : ''}`} onClick={() => setActiveTab('General')}>General</button>
+          <button className={`settings-tab ${activeTab === 'API & Data' ? 'active' : ''}`} onClick={() => setActiveTab('API & Data')}>API & Data</button>
+          <button className={`settings-tab ${activeTab === 'Cache & Limits' ? 'active' : ''}`} onClick={() => setActiveTab('Cache & Limits')}>Cache & Limits</button>
+          <button className={`settings-tab ${activeTab === 'Diagnostics' ? 'active' : ''}`} onClick={() => setActiveTab('Diagnostics')}>Diagnostics</button>
+          <button className={`settings-tab ${activeTab === 'Backup' ? 'active' : ''}`} onClick={() => setActiveTab('Backup')}>Backup</button>
         </aside>
 
         {/* ── Right: panels ── */}
         <main className="settings-panel">
 
           {/* ── General ── */}
+          {activeTab === 'General' && (
           <div className="settings-section">
             <h2>General Settings</h2>
 
@@ -208,9 +211,15 @@ export function SettingsView() {
                 <span>Enable weekly auto-backup</span>
               </div>
             </div>
+            
+            <div className="settings-row" style={{ marginTop: '20px' }}>
+               <button className="run-btn" onClick={() => saveSettings({})} style={{ width: 'auto', padding: '6px 16px' }}>Save Settings</button>
+            </div>
           </div>
+          )}
 
           {/* ── API & Data ── */}
+          {activeTab === 'API & Data' && (
           <div className="settings-section">
             <h2>API &amp; Data</h2>
 
@@ -241,8 +250,10 @@ export function SettingsView() {
               </button>
             </div>
           </div>
+          )}
 
           {/* ── Cache & Limits ── */}
+          {activeTab === 'Cache & Limits' && (
           <div className="settings-section">
             <h2>Cache &amp; Rate Limits</h2>
 
@@ -290,9 +301,15 @@ export function SettingsView() {
                 <span className="hint">({(settings.optionsCacheTtlSec / 60).toFixed(1)} min)</span>
               </div>
             </div>
+            
+            <div className="settings-row" style={{ marginTop: '20px' }}>
+               <button className="run-btn" onClick={() => saveSettings({})} style={{ width: 'auto', padding: '6px 16px' }}>Save Settings</button>
+            </div>
           </div>
+          )}
 
           {/* ── Diagnostics ── */}
+          {activeTab === 'Diagnostics' && (
           <div className="settings-section">
             <h2>Diagnostics</h2>
             <p className="hint" style={{ marginBottom: 12 }}>
@@ -345,8 +362,10 @@ export function SettingsView() {
               <span className="num">v{typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : '0.3.0'}</span>
             </div>
           </div>
+          )}
 
           {/* ── Backup / Restore ── */}
+          {activeTab === 'Backup' && (
           <div className="settings-section">
             <h2>Backup &amp; Restore</h2>
 
@@ -368,6 +387,7 @@ export function SettingsView() {
               {restoreMsg && <p className="hint" style={{ marginTop: 8 }}>{restoreMsg}</p>}
             </div>
           </div>
+          )}
 
         </main>
       </div>
