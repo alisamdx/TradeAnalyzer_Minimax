@@ -144,8 +144,17 @@ function buildApi() {
     run: () => invoke<DiagnosticsResult>('diagnostics:run')
   };
 
-  return { api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics } };
+  return {
+    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics },
+    dialog: {
+      prompt: (opts: { title: string; defaultValue?: string }) =>
+        invoke<string | null>('dialog:prompt', opts),
+      confirm: (opts: { title: string; message: string }) =>
+        invoke<boolean>('dialog:confirm', opts)
+    }
+  };
 }
 
-const { api } = buildApi();
+const { api, dialog } = buildApi();
 contextBridge.exposeInMainWorld('api', api);
+contextBridge.exposeInMainWorld('dialog', dialog);

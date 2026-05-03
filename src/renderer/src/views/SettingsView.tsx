@@ -103,7 +103,11 @@ export function SettingsView() {
   }, []);
 
   const handleRestore = useCallback(async () => {
-    if (!window.confirm('Restore from backup? This will replace the current database. Restart the app after restore.')) return;
+    const confirmed = await window.dialog.confirm({
+      title: 'Restore from backup',
+      message: 'Restore from backup? This will replace the current database. Restart the app after restore.'
+    });
+    if (!confirmed) return;
     try {
       const result = await window.api.settings.restore();
       if (result) setRestoreMsg(result.message ?? 'Restore applied.');

@@ -53,7 +53,11 @@ export function App() {
   }, [items]);
 
   useEffect(() => {
-    refreshLists().catch((e) => setError((e as Error).message));
+    console.log('[App] useEffect: refreshLists');
+    refreshLists().catch((e) => {
+      console.error('[App] refreshLists error:', e);
+      setError((e as Error).message);
+    });
   }, [refreshLists]);
 
   useEffect(() => {
@@ -69,7 +73,7 @@ export function App() {
   }, [activeId, refreshQuotes]);
 
   const onCreate = async () => {
-    const name = window.prompt('New watchlist name');
+    const name = await window.dialog.prompt({ title: 'New watchlist name' });
     if (!name) return;
     try {
       const wl = await window.api.watchlists.create(name);
@@ -85,7 +89,7 @@ export function App() {
     if (!activeId) return;
     const current = watchlists.find((w) => w.id === activeId);
     if (!current) return;
-    const next = window.prompt('Rename watchlist', current.name);
+    const next = await window.dialog.prompt({ title: 'Rename watchlist', defaultValue: current.name });
     if (!next || next === current.name) return;
     try {
       await window.api.watchlists.rename(activeId, next);
@@ -100,7 +104,11 @@ export function App() {
     if (!activeId) return;
     const current = watchlists.find((w) => w.id === activeId);
     if (!current) return;
-    if (!window.confirm(`Delete watchlist "${current.name}"? This cannot be undone.`)) return;
+    const confirmed = await window.dialog.confirm({
+      title: 'Delete watchlist',
+      message: `Delete watchlist "${current.name}"? This cannot be undone.`
+    });
+    if (!confirmed) return;
     try {
       await window.api.watchlists.delete(activeId);
       setActiveId(null);
@@ -167,7 +175,7 @@ export function App() {
   };
 
   const onImportNew = async () => {
-    const name = window.prompt('Import into a new watchlist named:');
+    const name = await window.dialog.prompt({ title: 'Import into a new watchlist named:' });
     if (!name) return;
     try {
       const result = await window.api.watchlists.csv.import({ createWithName: name });

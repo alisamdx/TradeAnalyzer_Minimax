@@ -88,7 +88,7 @@ export function ScreenerView() {
   }, []);
 
   const saveAsPreset = useCallback(async () => {
-    const name = window.prompt('Preset name:');
+    const name = await window.dialog.prompt({ title: 'Preset name:' });
     if (!name) return;
     try {
       const p = await window.api.screen.savePreset({ name, universe, criteria, isDefault: false });
@@ -151,7 +151,7 @@ export function ScreenerView() {
 
   const saveAsWatchlist = useCallback(async () => {
     if (selected.size === 0) return;
-    const name = window.prompt('Watchlist name:');
+    const name = await window.dialog.prompt({ title: 'Watchlist name:' });
     if (!name) return;
     if (!activeRunId) return;
     try {

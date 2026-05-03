@@ -22,7 +22,10 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin()],
     build: {
       outDir: 'out/preload',
-      lib: { entry: resolve('src/preload/index.ts') }
+      lib: { entry: resolve('src/preload/index.ts'), formats: ['cjs'] },
+      rollupOptions: {
+        output: { entryFileNames: 'index.js', preserveExt: false }
+      }
     },
     resolve: {
       alias: {

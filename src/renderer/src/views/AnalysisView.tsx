@@ -134,7 +134,7 @@ export function AnalysisView() {
 
   const saveAsWatchlist = useCallback(async () => {
     if (selected.size === 0 || !runResult) return;
-    const name = window.prompt('Watchlist name:');
+    const name = await window.dialog.prompt({ title: 'Watchlist name:' });
     if (!name) return;
     try {
       await window.api.analysis.saveAsWatchlist(runResult.snapshotId, Array.from(selected), name);
