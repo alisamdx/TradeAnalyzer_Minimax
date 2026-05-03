@@ -193,4 +193,5 @@ export class VolumeProfile implements ISeriesPrimitive {
         }
       })(),
     ];
+  }
 }
