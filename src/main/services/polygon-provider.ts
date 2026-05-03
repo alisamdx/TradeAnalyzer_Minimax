@@ -69,12 +69,13 @@ export class PolygonDataProvider implements DataProvider {
   ): Promise<Record<string, unknown>> {
     const url = new URL(this.baseUrl + path);
     const apiKey = this.getApiKey();
-    if (apiKey) url.searchParams.set('apiKey', apiKey);
+    if (apiKey) {
+      url.searchParams.set('apiKey', apiKey);
+    }
     
     for (const [k, v] of Object.entries(params)) {
       if (v !== undefined && v !== null) url.searchParams.set(k, String(v));
     }
-
 
     const start = Date.now();
     let response: Response;
