@@ -77,6 +77,8 @@ export class PolygonDataProvider implements DataProvider {
       if (v !== undefined && v !== null) url.searchParams.set(k, String(v));
     }
 
+    console.log(`[PolygonDataProvider] Fetching URL: ${url.toString()}`);
+
     const start = Date.now();
     let response: Response;
     try {
@@ -187,7 +189,7 @@ export class PolygonDataProvider implements DataProvider {
     const [finData, detailsData] = await Promise.all([
       this.fetchWithRetry('/vX/reference/financials', {
         ticker,
-        timeframe: 'TTM',
+        timeframe: 'quarterly',
         limit: '4'
       }),
       this.fetchWithRetry(`/v3/reference/tickers/${ticker}`)
