@@ -204,8 +204,8 @@ export interface DiagnosticsResult {
 
 export function registerDiagnosticsIpc(
   db: DbHandle,
-  quoteCache: QuoteCache,
-  fundamentalsCache: FundamentalsCache
+  _quoteCache: QuoteCache,
+  _fundamentalsCache: FundamentalsCache
 ): void {
   ipcMain.handle('diagnostics:run', () => {
     try {

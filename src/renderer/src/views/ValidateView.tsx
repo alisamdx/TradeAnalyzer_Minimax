@@ -5,7 +5,7 @@
 // Chart: lightweight-charts v4
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { createChart, type IChartApi, type ISeriesApi, ColorType } from 'lightweight-charts';
+import { createChart, type IChartApi, ColorType } from 'lightweight-charts';
 import type {
   Watchlist,
   ValidateDashboardResult
@@ -184,11 +184,6 @@ export function ValidateView() {
     const cutoff = now - timeframe.days * 86_400_000;
     const filteredBars = bars.filter(b => b.t >= cutoff);
 
-    // Compute SMAs.
-    const sma20Data = computeSMAChart(filteredBars, 20);
-    const sma50Data = computeSMAChart(filteredBars, 50);
-    const sma200Data = computeSMAChart(filteredBars, 200);
-
     // Destroy old chart.
     if (chartRef.current) {
       chartRef.current.remove();
@@ -263,10 +258,7 @@ export function ValidateView() {
       return s;
     };
 
-    const sma20Series = addLineSeries(sma20Data, '#58a6ff', 1);
-    const sma50Series = addLineSeries(sma50Data, '#d29922', 1);
-    const sma200Series = addLineSeries(sma200Data, '#bc8cff', 1);
-
+    
     // Entry zone — shaded price band using two horizontal lines.
     if (result.chart.entryZoneLow !== null && result.chart.entryZoneHigh !== null) {
       const entryTopData = filteredBars.map(b => ({
@@ -325,7 +317,6 @@ export function ValidateView() {
       markerLayerRef.current.innerHTML = '';
 
       const chartApi = chartRef.current;
-      const chartHeight = chartApi.options().height ?? 300;
       const chartWidth = chartApi.options().width ?? 800;
 
       const timeScale = chartApi.timeScale();
@@ -351,7 +342,6 @@ export function ValidateView() {
         if (priceCoord === null) continue;
 
         const label = pattern.name.replace(/_/g, ' ');
-        const colorClass = pattern.direction === 'bullish' ? 'bullish' : pattern.direction === 'bearish' ? 'bearish' : 'neutral';
         const bgColor = pattern.direction === 'bullish' ? 'rgba(63,185,80,0.85)'
           : pattern.direction === 'bearish' ? 'rgba(248,81,73,0.85)' : 'rgba(139,148,158,0.85)';
         const borderColor = pattern.direction === 'bullish' ? '#3fb950'
@@ -773,19 +763,4 @@ export function ValidateView() {
       </div>
     </div>
   );
-}
-
-// ─── Chart helpers ────────────────────────────────────────────────────────────
-
-function computeSMAChart(
-  bars: { t: number; c: number }[],
-  period: number
-): { time: import('lightweight-charts').Time; value: number }[] {
-  const result: { time: import('lightweight-charts').Time; value: number }[] = [];
-  for (let i = period - 1; i < bars.length; i++) {
-    const slice = bars.slice(i - period + 1, i + 1);
-    const avg = slice.reduce((a, b) => a + b.c, 0) / period;
-    result.push({ time: (bars[i]!.t / 1000) as import('lightweight-charts').Time, value: avg });
-  }
-  return result;
 }

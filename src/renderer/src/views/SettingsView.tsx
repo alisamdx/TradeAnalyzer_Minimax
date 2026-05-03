@@ -63,7 +63,7 @@ export function SettingsView() {
       setSettings(prev => prev ? { ...prev, ...partial } : null);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
-    } catch (e) {
+    } catch {
       setSaved(false);
     }
   }, [settings]);
@@ -73,7 +73,7 @@ export function SettingsView() {
       await window.api.settings.setApiKey(apiKey);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
-    } catch (e) {
+    } catch {
       // silently fail
     }
   }, [apiKey]);
