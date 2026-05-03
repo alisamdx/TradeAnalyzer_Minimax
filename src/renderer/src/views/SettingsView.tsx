@@ -236,9 +236,6 @@ export function SettingsView() {
                 <button className="tiny-btn" onClick={() => setApiKeyVisible(v => !v)}>
                   {apiKeyVisible ? 'Hide' : 'Show'}
                 </button>
-                <button className="run-btn" onClick={saveApiKey} style={{ padding: '4px 10px', fontSize: 11 }}>
-                  Save
-                </button>
               </div>
               <p className="hint">API key is stored in the database. Never logged or sent anywhere except Polygon.</p>
             </div>
@@ -248,6 +245,10 @@ export function SettingsView() {
               <button className="tiny-btn" onClick={() => window.api.settings.openLogsDir()}>
                 Open logs/
               </button>
+            </div>
+            
+            <div className="settings-row" style={{ marginTop: '20px' }}>
+               <button className="run-btn" onClick={saveApiKey} style={{ width: 'auto', padding: '6px 16px' }}>Save Settings</button>
             </div>
           </div>
           )}
