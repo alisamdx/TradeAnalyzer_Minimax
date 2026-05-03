@@ -92,17 +92,18 @@ export class VolumeProfile implements ISeriesPrimitive {
     if (data.length === 0) return [];
 
     const bars = Array.from(data.values());
-    const firstBar = chart.timeScale().logicalToVisible(bars[0].time);
-    const lastBar = chart.timeScale().logicalToVisible(bars[bars.length - 1].time);
+    const visibleRange = chart.timeScale().getVisibleLogicalRange();
 
-    if (firstBar === null || lastBar === null) return [];
+    if (visibleRange === null) {
+      return [];
+    }
 
-    const from = firstBar.from < lastBar.from ? firstBar.from : lastBar.from;
-    const to = firstBar.to > lastBar.to ? firstBar.to : lastBar.to;
+    const from = visibleRange.from;
+    const to = visibleRange.to;
 
     const volumeData: VolumeProfileData[] = [];
     let totalVolume = 0;
-    for (let i = from; i <= to; i++) {
+    for (let i = from; i < to; i++) {
       const bar = bars[i];
       if (!bar) continue;
       const price = bar.high - bar.low;
