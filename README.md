@@ -2,7 +2,7 @@
 
 Cross-platform desktop application for a single retail options/swing trader. Manages watchlists, screens index universes, runs analysis modes, and provides per-stock validation dashboards.
 
-> **Status:** v0.1.0 — Phase 1 (watchlist CRUD) complete. Polygon integration not yet wired.
+> **Status:** v0.4.0 — Phases 1-4 complete (Watchlists, Screener, Analysis Engine, Validation Dashboard, Settings). Polygon integration active.
 
 For the full spec, see [`REQUIREMENTS.md`](REQUIREMENTS.md). For AI session bootstrapping, see [`AI_CONTEXT.md`](AI_CONTEXT.md) and [`AI_PROMPT.md`](AI_PROMPT.md). For per-version notes, see [`CHANGELOG.md`](CHANGELOG.md).
 
@@ -28,9 +28,7 @@ npm install
 
 ## Configuration (Polygon API key)
 
-Phase 1 does not call Polygon. Configuration arrives in Phase 2 (screener).
-
-When it does, the API key will be sourced in this priority order:
+The application requires a Polygon.io API key. The key is sourced in this priority order:
 
 1. OS keychain (via `keytar`) — preferred.
 2. Environment variable `POLYGON_API_KEY` from a local `.env` (gitignored).

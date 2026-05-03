@@ -16,6 +16,7 @@ The full spec is in `REQUIREMENTS.md`. This file summarizes the build state.
 | UI | React + TypeScript | 18 / 5.x | Spec recommends; ecosystem fit for charting libs and tables |
 | Build | electron-vite | 2.x | Single config file for main + preload + renderer; fast HMR |
 | DB | better-sqlite3 | 12.x | Synchronous API; well-supported on Electron via `electron-rebuild` (wired through `electron-builder install-app-deps` as `postinstall`). Wrapped in `src/main/db/connection.ts` (`openDatabase`, `withTransaction`) so the driver isn't leaked across the codebase. |
+| Charts | lightweight-charts | 4.1.x | Finance-focused; high performance for OHLCV data; easier to style than ApexCharts for our needs. |
 | Tests | Vitest | 2.x | Native Vite integration; fast; jest-compatible API |
 | Lint/format | ESLint 9 + Prettier 3 | — | Industry standard |
 | CSV | hand-rolled (Phase 1) | — | One file, RFC-4180-ish; no deps; pluggable later if needed |
@@ -136,10 +137,8 @@ Authoritative DDL is in `migrations/001_init.sql` + `002_screen_schema.sql`. Pha
 
 ## Open Decisions
 
-- **Charting library** — between `lightweight-charts` and `ApexCharts`. Decide in Phase 4 (validation dashboard) when chart needs are concrete.
 - **Suitability score formula (wheel)** — Documented in `docs/formulas.md`. Wheel suitability = weighted score 1–10 (IV rank, stability, liquidity, earnings proximity, ROE, FCF).
-- **Producer/consumer technology** — Settled in Phase 3: single-threaded Node event loop + `TokenBucketRateLimiter` + `JobQueue` (SQLite). No external broker. Works well for <2,000 tickers.
-- **Settings storage** — API key currently loaded from `.env`; OS keychain via `keytar` deferred to Phase 2 (minor).
+- **Settings storage** — API key currently loaded from `.env`; OS keychain via `keytar` implemented in Phase 2. OS-level "System Settings" integration deferred.
 
 ## Known Quirks & Gotchas
 

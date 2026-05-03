@@ -192,12 +192,15 @@ export class ScreenerService {
           dayLow: snapshot.dayLow,
           ivRank: snapshot.ivRank,
           ivPercentile: snapshot.ivPercentile,
+          distance52WkHigh: snapshot.distance52WkHigh,
+          distance52WkLow: snapshot.distance52WkLow,
           fetchedAt: snapshot.fetchedAt
         });
       } catch {
         // Quote missing — continue with fundamentals only.
         quote = { ticker, last: null, prevClose: null, bid: null, ask: null,
-          volume: null, dayHigh: null, dayLow: null, ivRank: null, ivPercentile: null, fetchedAt: '' };
+          volume: null, dayHigh: null, dayLow: null, ivRank: null, ivPercentile: null,
+          distance52WkHigh: null, distance52WkLow: null, fetchedAt: '' };
       }
     }
 
@@ -293,8 +296,8 @@ export class ScreenerService {
       avgVolume,
       avgOptionVolume: null,
       price,
-      distance52WkHigh: null,  // TODO(phase-3): requires 52wk data from Polygon snapshot
-      distance52WkLow: null,
+      distance52WkHigh: quote?.distance52WkHigh ?? null,
+      distance52WkLow: quote?.distance52WkLow ?? null,
       beta: ratios.beta,
       lastPrice: quote?.last ?? null,
       dayChangePct: dayChangePct,

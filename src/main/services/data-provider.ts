@@ -21,6 +21,8 @@ export interface QuoteSnapshot {
   dayLow: number | null;
   ivRank: number | null;
   ivPercentile: number | null;
+  distance52WkHigh?: number | null;
+  distance52WkLow?: number | null;
   fetchedAt: string;
 }
 
