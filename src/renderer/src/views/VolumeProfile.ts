@@ -103,7 +103,7 @@ export class VolumeProfile implements ISeriesPrimitive {
 
     const volumeData: VolumeProfileData[] = [];
     let totalVolume = 0;
-    for (let i = from; i < to; i++) {
+    for (let i = from; i <= to; i++) {
       const bar = bars[i];
       if (!bar) continue;
       const price = bar.high - bar.low;
@@ -161,7 +161,7 @@ export class VolumeProfile implements ISeriesPrimitive {
             histograms: histograms,
             width: 70,
             barWidth: barWidth,
-            firstBar: firstBar?.from ?? 0,
+            firstBar: from,
             barSpacing: barSpacing,
           });
         }
