@@ -89,7 +89,9 @@ export class VolumeProfile implements ISeriesPrimitive {
     const chart = this._source.chart;
 
     const data = this._source.series.data();
-    if (data.length === 0) return [];
+    if (data.length === 0) {
+      return [];
+    }
 
     const bars = Array.from(data.values());
     const visibleRange = chart.timeScale().getVisibleLogicalRange();
@@ -105,17 +107,41 @@ export class VolumeProfile implements ISeriesPrimitive {
     let totalVolume = 0;
     for (let i = from; i <= to; i++) {
       const bar = bars[i];
-      if (!bar) continue;
-      const price = bar.high - bar.low;
-      const volume = bar.volume / (price / this._options.binSize || 1);
-      for (let j = bar.low; j < bar.high; j += this._options.binSize) {
-        const bin = volumeData.find((v) => v.price === j);
+      if (!bar || bar.high === null || bar.low === null || bar.volume === null || bar.high === undefined || bar.low === undefined || bar.volume === undefined) {
+        continue;
+      }
+
+      const barHigh = bar.high as number;
+      const barLow = bar.low as number;
+      const barVolume = bar.volume as number;
+
+      const priceRange = barHigh - barLow;
+
+      if (priceRange <= 0) {
+        // If priceRange is 0 or negative, put all volume into a single bin at barLow
+        const binPrice = barLow;
+        const bin = volumeData.find((v) => v.price === binPrice);
         if (bin) {
-          bin.volume += volume;
+          bin.volume += barVolume;
         } else {
-          volumeData.push({ price: j, volume: volume });
+          volumeData.push({ price: binPrice, volume: barVolume });
         }
-        totalVolume += volume;
+        totalVolume += barVolume;
+      } else {
+        // Distribute volume across bins
+        const numBinsInPriceRange = Math.ceil(priceRange / this._options.binSize);
+        const volumePerBin = barVolume / numBinsInPriceRange;
+
+        for (let j = barLow; j < barHigh; j += this._options.binSize) {
+          const binPrice = j;
+          const bin = volumeData.find((v) => v.price === binPrice);
+          if (bin) {
+            bin.volume += volumePerBin;
+          } else {
+            volumeData.push({ price: binPrice, volume: volumePerBin });
+          }
+          totalVolume += volumePerBin;
+        }
       }
     }
 
@@ -167,5 +193,4 @@ export class VolumeProfile implements ISeriesPrimitive {
         }
       })(),
     ];
-  }
 }
