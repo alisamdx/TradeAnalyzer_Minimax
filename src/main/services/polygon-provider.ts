@@ -20,26 +20,6 @@ import {
   computeRatios,
   type FundamentalsComputerInput
 } from './fundamentals-computer.js';
-import { readFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-// Load API key from .env at startup. .env is gitignored per EP-7.2.
-function loadApiKey(): string {
-  try {
-    const envPath = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '.env');
-    const text = readFileSync(envPath, 'utf8');
-    for (const line of text.split('\n')) {
-      const [k, ...rest] = line.split('=');
-      if (k?.trim() === 'POLYGON_API_KEY') {
-        return rest.join('=').trim().replace(/['"]/g, '');
-      }
-    }
-  } catch {
-    // .env not found — try process.env as fallback (for CI/testing).
-  }
-  return process.env['POLYGON_API_KEY'] ?? '';
-}
 
 const BASE_URL = 'https://api.polygon.io';
 
@@ -67,19 +47,16 @@ function endpointLabel(path: string, ticker?: string): string {
 
 export class PolygonDataProvider implements DataProvider {
   readonly name = 'polygon';
-  private readonly apiKey: string;
   private readonly baseUrl = BASE_URL;
   private readonly correlationCounter = 0;
   // Simple in-call retry counter (not the rate limiter — that's Phase 3).
   private readonly maxRetries = 3;
   private correlationSeq = 0;
 
-  constructor(_config?: PolygonConfig) {
-    this.apiKey = loadApiKey();
-    if (!this.apiKey) {
-      console.warn('[PolygonDataProvider] POLYGON_API_KEY not set — calls will fail.');
-    }
-  }
+  constructor(
+    private readonly getApiKey: () => string,
+    _config?: PolygonConfig
+  ) {}
 
   correlationId(): string {
     return `poly-${Date.now()}-${++this.correlationSeq}`;
@@ -91,10 +68,13 @@ export class PolygonDataProvider implements DataProvider {
     retryCount = 0
   ): Promise<Record<string, unknown>> {
     const url = new URL(this.baseUrl + path);
-    url.searchParams.set('apiKey', this.apiKey);
+    const apiKey = this.getApiKey();
+    if (apiKey) url.searchParams.set('apiKey', apiKey);
+    
     for (const [k, v] of Object.entries(params)) {
       if (v !== undefined && v !== null) url.searchParams.set(k, String(v));
     }
+
 
     const start = Date.now();
     let response: Response;

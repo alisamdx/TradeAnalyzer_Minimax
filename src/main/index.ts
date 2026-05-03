@@ -1,6 +1,7 @@
 import { app, BrowserWindow, shell } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { readFileSync, existsSync } from 'node:fs';
 import { openDatabase } from './db/connection.js';
 import { runMigrations, currentSchemaVersion } from './db/migrations.js';
 import { WatchlistService } from './services/watchlist-service.js';
@@ -39,7 +40,7 @@ function createWindow(): BrowserWindow {
     show: false,
     autoHideMenuBar: true,
     webPreferences: {
-      preload: join(__dirname, '..', 'preload', 'index.js'),
+      preload: join(__dirname, '..', 'preload', 'index.cjs'),
       sandbox: false,
       contextIsolation: true,
       nodeIntegration: false
@@ -78,7 +79,29 @@ app.whenReady().then(() => {
 
   // Phase 2 — market data services.
   initCacheTables(db);
-  const dataProvider = new PolygonDataProvider();
+  const dataProvider = new PolygonDataProvider(() => {
+    try {
+      const row = db.prepare('SELECT value FROM settings WHERE key = ?').get('polygonApiKey') as { value?: string } | undefined;
+      if (row?.value) return row.value;
+    } catch { /* ignore */ }
+
+    if (process.env['POLYGON_API_KEY']) return process.env['POLYGON_API_KEY'];
+
+    try {
+      const envPath = join(app.getAppPath(), '.env');
+      if (existsSync(envPath)) {
+        const text = readFileSync(envPath, 'utf8');
+        for (const line of text.split('\n')) {
+          const [k, ...rest] = line.split('=');
+          if (k?.trim() === 'POLYGON_API_KEY') {
+            return rest.join('=').trim().replace(/['"]/g, '');
+          }
+        }
+      }
+    } catch { /* ignore */ }
+
+    return '';
+  });
   const quoteCache = new QuoteCache(db);
   new FundamentalsCache(db);
 
