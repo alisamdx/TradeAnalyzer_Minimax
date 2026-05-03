@@ -123,7 +123,7 @@ export function ValidateView() {
     setResult(null);
     setSelectedTicker(ticker);
     try {
-      const data = await window.api.validate.openTickerById(ticker);
+      const data = await window.api.validate.openTickerById({ ticker });
       setResult(data);
     } catch (e) {
       setError((e as Error).message);
