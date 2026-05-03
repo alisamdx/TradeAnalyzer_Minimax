@@ -138,7 +138,7 @@ export class VolumeProfile implements ISeriesPrimitive {
 
     for (let i = 0; i < volumeData.length; i++) {
       const v = volumeData[i];
-      if (priceScale.priceToCoordinate(v.price) === null) continue;
+      if (series.priceToCoordinate(v.price) === null) continue;
       const color =
         poh === v
           ? this._options.pohColor
