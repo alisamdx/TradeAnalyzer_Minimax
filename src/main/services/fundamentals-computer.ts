@@ -112,8 +112,8 @@ export function parseFinancials(raw: PolygonFinancials): RawFinancials {
 
   // Try to get TTM (trailing 12 months = last 4 quarters) by summing the last 4 filings.
   // If fewer filings exist, sum what we have.
-  function sumField(arr: unknown[] | undefined, _key: string): number | null {
-    if (!arr || arr.length === 0) return null;
+  function sumField(arr: unknown, _key: string): number | null {
+    if (!Array.isArray(arr) || arr.length === 0) return null;
     // Take up to 4 entries for TTM.
     const vals = (arr as Array<{ value?: number }>).slice(0, 4)
       .map((e) => e.value)
