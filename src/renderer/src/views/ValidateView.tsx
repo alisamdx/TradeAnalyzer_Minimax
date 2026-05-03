@@ -6,6 +6,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createChart, type IChartApi, ColorType } from 'lightweight-charts';
+import { VolumeProfile } from './VolumeProfile';
 import type {
   Watchlist,
   ValidateDashboardResult
@@ -235,8 +236,14 @@ export function ValidateView() {
       open: b.o,
       high: b.h,
       low: b.l,
-      close: b.c
+      close: b.c,
+      // @ts-expect-error volume is not a standard part of CandlestickData
+      volume: b.v
     })));
+
+    // Volume profile primitive.
+    const volumeProfile = new VolumeProfile({ binSize: 0.5 });
+    candleSeries.attachPrimitive(volumeProfile);
 
     // Volume series.
     const volumeSeries = chart.addHistogramSeries({
