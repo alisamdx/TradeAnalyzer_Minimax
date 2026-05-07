@@ -10,6 +10,8 @@ import type {
   AnalysisSnapshotRow,
   AnalysisMode
 } from '@shared/types.js';
+import { HistoricalFinancialChart } from '../components/HistoricalFinancialChart.js';
+import { HistoricalPriceChart } from '../components/HistoricalPriceChart.js';
 
 // `window.api` is declared once in `src/renderer/src/global.d.ts`.
 
@@ -51,6 +53,10 @@ export function AnalysisView() {
   const [snapshots, setSnapshots] = useState<AnalysisSnapshotRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
+
+  // Selected ticker for chart view
+  const [selectedTickerForChart, setSelectedTickerForChart] = useState<string | null>(null);
+  const [showCharts, setShowCharts] = useState(false);
 
   // Load modes and watchlists on mount.
   useEffect(() => {
@@ -166,6 +172,13 @@ export function AnalysisView() {
     setStatusMsg(`Exported ${results.length} rows to CSV`);
   }, [results, selectedMode]);
 
+  // ── Open charts for a ticker ────────────────────────────────────────────
+
+  const openChartForTicker = useCallback((ticker: string) => {
+    setSelectedTickerForChart(ticker);
+    setShowCharts(true);
+  }, []);
+
   // ── Column definitions per mode ─────────────────────────────────────────
 
   const modeColumns = (mode: string): string[] => {
@@ -179,10 +192,18 @@ export function AnalysisView() {
     }
   };
 
-  const renderCell = (result: DecodedResult, col: string): string => {
+  const renderCell = (result: DecodedResult, col: string): React.ReactNode => {
     if (result.mode === 'buy') {
       switch (col) {
-        case 'Ticker': return result.ticker;
+        case 'Ticker': return (
+          <span
+            className="clickable-ticker"
+            onClick={() => openChartForTicker(result.ticker)}
+            title="Click to view charts"
+          >
+            {result.ticker}
+          </span>
+        );
         case 'Price': return fmtPrice(result.lastPrice);
         case 'Score/10': return `${result.compositeScore}/10`;
         case 'Trend': return result.trend;
@@ -195,7 +216,15 @@ export function AnalysisView() {
       }
     } else if (result.mode === 'options_income') {
       switch (col) {
-        case 'Ticker': return result.ticker;
+        case 'Ticker': return (
+          <span
+            className="clickable-ticker"
+            onClick={() => openChartForTicker(result.ticker)}
+            title="Click to view charts"
+          >
+            {result.ticker}
+          </span>
+        );
         case 'Price': return fmtPrice(result.lastPrice);
         case 'Strategy': return result.strategy;
         case 'Strike': return fmtNum(result.strike, 2);
@@ -208,7 +237,15 @@ export function AnalysisView() {
       }
     } else if (result.mode === 'wheel') {
       switch (col) {
-        case 'Ticker': return result.ticker;
+        case 'Ticker': return (
+          <span
+            className="clickable-ticker"
+            onClick={() => openChartForTicker(result.ticker)}
+            title="Click to view charts"
+          >
+            {result.ticker}
+          </span>
+        );
         case 'Price': return fmtPrice(result.lastPrice);
         case 'Strike': return fmtNum(result.recommendedStrike, 2);
         case 'Exp': return result.expiration ?? '—';
@@ -223,7 +260,15 @@ export function AnalysisView() {
     } else {
       // bullish / bearish
       switch (col) {
-        case 'Ticker': return result.ticker;
+        case 'Ticker': return (
+          <span
+            className="clickable-ticker"
+            onClick={() => openChartForTicker(result.ticker)}
+            title="Click to view charts"
+          >
+            {result.ticker}
+          </span>
+        );
         case 'Price': return fmtPrice(result.lastPrice);
         case 'ADX': return fmtNum(result.trendStrength, 1);
         case 'Strategy': return result.suggestedStrategy;
@@ -451,6 +496,34 @@ export function AnalysisView() {
                 </table>
               </div>
             </>
+          )}
+
+          {/* Historical Charts Section */}
+          {showCharts && selectedTickerForChart && (
+            <div className="charts-section">
+              <div className="charts-header">
+                <h3>{selectedTickerForChart} - Historical Charts</h3>
+                <button
+                  className="close-charts-btn"
+                  onClick={() => {
+                    setShowCharts(false);
+                    setSelectedTickerForChart(null);
+                  }}
+                >
+                  ✕ Close Charts
+                </button>
+              </div>
+
+              <div className="charts-grid">
+                <div className="chart-panel">
+                  <HistoricalPriceChart ticker={selectedTickerForChart} />
+                </div>
+
+                <div className="chart-panel">
+                  <HistoricalFinancialChart ticker={selectedTickerForChart} />
+                </div>
+              </div>
+            </div>
           )}
         </main>
       </div>

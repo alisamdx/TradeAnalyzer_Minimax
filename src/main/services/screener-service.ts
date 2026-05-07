@@ -17,6 +17,7 @@ import type {
 import type { DerivedRatios, Quote } from '@shared/types.js';
 import type { DataProvider } from './data-provider.js';
 import { QuoteCache, FundamentalsCache } from './cache-service.js';
+import { CacheManager } from './cache-manager.js';
 
 // ─── Filter definitions ───────────────────────────────────────────────────────
 // Default filter values tuned for options-income retail traders.
@@ -98,6 +99,8 @@ export class ScreenerService {
   private readonly quoteCache: QuoteCache;
   private readonly fundamentalsCache: FundamentalsCache;
 
+  private readonly cacheManager: CacheManager;
+
   constructor(
     private readonly db: DbHandle,
     private readonly dataProvider: DataProvider,
@@ -105,6 +108,7 @@ export class ScreenerService {
   ) {
     this.quoteCache = new QuoteCache(db);
     this.fundamentalsCache = new FundamentalsCache(db);
+    this.cacheManager = new CacheManager(db, 1);
   }
 
   /** Run the full screen against a universe. Progress is reported via the callback. */
@@ -404,6 +408,10 @@ export class ScreenerService {
         };
         insertResult.run(runId, row.ticker, row.companyName, row.sector, JSON.stringify(payload));
       }
+
+      // Update cache metadata after successful screen run
+      this.cacheManager.updateLastRun(rows.length);
+
       return {
         id: runId,
         presetId,

@@ -21,13 +21,15 @@ import type {
   TickerStatusRow,
   ValidateAllResult,
   AppSettings,
-  DiagnosticsResult
+  DiagnosticsResult,
+  CacheStatus,
+  CacheStats
 } from '@shared/types.js';
 export type {
   ScreenPreset, ScreenCriteria, ScreenRunResult, ScreenResultRow, Universe,
   ConstituentsMeta, ConstituentRow, CachedQuote, AnalysisModeInfo, AnalysisRunResult,
   AnalysisSnapshotRow, ValidateDashboardResult, JobRunInfo, TickerStatusRow, ValidateAllResult,
-  AppSettings, DiagnosticsResult
+  AppSettings, DiagnosticsResult, CacheStatus, CacheStats
 };
 export type Api = ReturnType<typeof buildApi>['api'];
 
@@ -113,8 +115,8 @@ function buildApi() {
   };
 
   const validate = {
-    openTickerById: (ticker: string) =>
-      invoke<ValidateDashboardResult>('validate:open-ticker-by-id', ticker),
+    openTickerById: (args: { ticker: string }) =>
+      invoke<ValidateDashboardResult>('validate:open-ticker-by-id', args),
     getTickers: (watchlistId: number) =>
       invoke<string[]>('validate:get-tickers', watchlistId),
     runValidateAll: (watchlistId: number) =>
@@ -144,8 +146,105 @@ function buildApi() {
     run: () => invoke<DiagnosticsResult>('diagnostics:run')
   };
 
+  const cache = {
+    getStatus: () => invoke<CacheStatus>('cache:getStatus'),
+    getStats: () => invoke<CacheStats>('cache:getStats'),
+    updateLastRun: (recordCount?: number) => invoke<boolean>('cache:updateLastRun', recordCount),
+    reset: () => invoke<boolean>('cache:reset'),
+    isStale: () => invoke<boolean>('cache:isStale')
+  };
+
+  const websocket = {
+    connect: () => invoke<boolean>('websocket:connect'),
+    disconnect: () => invoke<boolean>('websocket:disconnect'),
+    subscribe: (ticker: string) => invoke<boolean>('websocket:subscribe', ticker),
+    unsubscribe: (ticker: string) => invoke<boolean>('websocket:unsubscribe', ticker),
+    isConnected: () => invoke<boolean>('websocket:isConnected'),
+    getSubscribed: () => invoke<string[]>('websocket:getSubscribed'),
+    onPrice: (callback: (data: { ticker: string; price: number; change: number; changePct: number }) => void) => {
+      const handler = (_: any, data: any) => callback(data);
+      ipcRenderer.on('websocket:price', handler);
+      return () => ipcRenderer.removeListener('websocket:price', handler);
+    },
+    onConnected: (callback: () => void) => {
+      const handler = () => callback();
+      ipcRenderer.on('websocket:connected', handler);
+      return () => ipcRenderer.removeListener('websocket:connected', handler);
+    },
+    onDisconnected: (callback: () => void) => {
+      const handler = () => callback();
+      ipcRenderer.on('websocket:disconnected', handler);
+      return () => ipcRenderer.removeListener('websocket:disconnected', handler);
+    },
+    onError: (callback: (error: string) => void) => {
+      const handler = (_: any, error: string) => callback(error);
+      ipcRenderer.on('websocket:error', handler);
+      return () => ipcRenderer.removeListener('websocket:error', handler);
+    }
+  };
+
+  const historical = {
+    getFinancials: (ticker: string, periodType: 'quarterly' | 'annual', limit?: number) =>
+      invoke<{
+        ticker: string;
+        filingDate: string;
+        periodType: 'quarterly' | 'annual';
+        periodEndDate: string;
+        revenues: number | null;
+        netIncome: number | null;
+        grossProfit: number | null;
+        operatingIncome: number | null;
+        earningsPerShare: number | null;
+        sharesOutstanding: number | null;
+        totalAssets: number | null;
+        totalLiabilities: number | null;
+        shareholdersEquity: number | null;
+        longTermDebt: number | null;
+        currentAssets: number | null;
+        currentLiabilities: number | null;
+        operatingCashFlow: number | null;
+        freeCashFlow: number | null;
+        ebitda: number | null;
+      }[]>('historical:getFinancials', ticker, periodType, limit),
+    getFinancialsLatestDate: (ticker: string, periodType: 'quarterly' | 'annual') =>
+      invoke<string | null>('historical:getFinancialsLatestDate', ticker, periodType),
+    fetchFinancials: (ticker: string, periodType: 'quarterly' | 'annual') =>
+      invoke<{ success: boolean; count?: number; error?: string }>('historical:fetchFinancials', ticker, periodType),
+    getPrices: (ticker: string, fromDate: string, toDate: string) =>
+      invoke<{
+        ticker: string;
+        date: string;
+        open: number;
+        high: number;
+        low: number;
+        close: number;
+        volume: number;
+        adjustedClose: number | null;
+      }[]>('historical:getPrices', ticker, fromDate, toDate),
+    getPricesWithSMA: (ticker: string, range: '1M' | '3M' | '6M' | '1Y' | '2Y' | '5Y') =>
+      invoke<{
+        ticker: string;
+        date: string;
+        open: number;
+        high: number;
+        low: number;
+        close: number;
+        volume: number;
+        adjustedClose: number | null;
+        sma50: number | null;
+      }[]>('historical:getPricesWithSMA', ticker, range),
+    getPricesLatestDate: (ticker: string) =>
+      invoke<string | null>('historical:getPricesLatestDate', ticker),
+    fetchPrices: (ticker: string, range: '1M' | '3M' | '6M' | '1Y' | '2Y' | '5Y') =>
+      invoke<{ success: boolean; count?: number; error?: string }>('historical:fetchPrices', ticker, range),
+    fetchAndStore: (ticker: string, type: 'financials' | 'prices', options?: { periodType?: 'quarterly' | 'annual'; range?: '1M' | '3M' | '6M' | '1Y' | '2Y' | '5Y' }) =>
+      invoke<{ success: boolean; count?: number; error?: string; type: string }>('historical:fetchAndStore', ticker, type, options),
+    needsRefresh: (ticker: string, dataType: 'financials' | 'prices', maxAgeDays?: number) =>
+      invoke<boolean>('historical:needsRefresh', ticker, dataType, maxAgeDays)
+  };
+
   return {
-    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics },
+    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, websocket, historical },
     dialog: {
       prompt: (opts: { title: string; defaultValue?: string }) =>
         invoke<string | null>('dialog:prompt', opts),

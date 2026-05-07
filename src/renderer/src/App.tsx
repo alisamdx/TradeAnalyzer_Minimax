@@ -4,6 +4,11 @@ import { ScreenerView } from './views/ScreenerView.js';
 import { AnalysisView } from './views/AnalysisView.js';
 import { ValidateView } from './views/ValidateView.js';
 import { SettingsView } from './views/SettingsView.js';
+import { useCacheStatus } from './hooks/useCacheStatus.js';
+import { CacheStatusIndicator } from './components/CacheStatusIndicator.js';
+import { useSortable } from './hooks/useSortable.js';
+import { useWebSocket } from './hooks/useWebSocket.js';
+import { RealtimePriceTicker } from './components/RealtimePriceTicker.js';
 
 declare const __APP_VERSION__: string;
 
@@ -21,11 +26,40 @@ export function App() {
   const [quoteMap, setQuoteMap] = useState<Record<string, CachedQuote | null>>({});
   const [lastRefresh, setLastRefresh] = useState<string>('');
 
+  // Cache status for auto-refresh indicator
+  const { status: cacheStatus, refresh: refreshCacheStatus } = useCacheStatus();
+
+  // WebSocket for real-time prices
+  const { isConnected: wsConnected, priceUpdates, subscribe, unsubscribe } = useWebSocket();
+
+  // Sortable columns for watchlist table
+  const tableData = items.map(item => ({
+    ...item,
+    lastPrice: quoteMap[item.ticker]?.last ?? null,
+    dayChangePct: quoteMap[item.ticker]?.last && quoteMap[item.ticker]?.prevClose
+      ? ((quoteMap[item.ticker]!.last! - quoteMap[item.ticker]!.prevClose!) / quoteMap[item.ticker]!.prevClose!) * 100
+      : null,
+    volume: quoteMap[item.ticker]?.volume ?? null,
+    wheelSuitability: quoteMap[item.ticker]?.wheelSuitability ?? null,
+    targetStrike: quoteMap[item.ticker]?.targetStrike ?? null,
+    estimatedPremium: quoteMap[item.ticker]?.estimatedPremium ?? null
+  }));
+
+  const { sortedData, sortConfig, requestSort, getSortIndicator } = useSortable(tableData, 'ticker', 'asc');
+
   const refreshLists = useCallback(async () => {
-    const lists = await window.api.watchlists.list();
-    setWatchlists(lists);
-    if (activeId === null && lists.length > 0) {
-      setActiveId(lists[0]!.id);
+    try {
+      const lists = await window.api.watchlists.list();
+      setWatchlists(lists);
+      if (activeId === null && lists.length > 0) {
+        setActiveId(lists[0]!.id);
+      }
+    } catch (err) {
+      console.error('[App] refreshLists caught error:', err);
+      const errorMessage = err instanceof Error ? err.message : 'An unknown error occurred while fetching watchlists.';
+      setError(errorMessage);
+      // Re-throw to be caught by the useEffect catch block if needed, or handle here.
+      throw err;
     }
   }, [activeId]);
 
@@ -71,6 +105,23 @@ export function App() {
     const interval = setInterval(() => refreshQuotes(activeId), 60_000);
     return () => clearInterval(interval);
   }, [activeId, refreshQuotes]);
+
+  // Subscribe to WebSocket for real-time prices when watchlist changes
+  useEffect(() => {
+    if (activeId === null) return;
+
+    // Subscribe to all tickers in the current watchlist
+    items.forEach(item => {
+      subscribe(item.ticker);
+    });
+
+    return () => {
+      // Unsubscribe when watchlist changes
+      items.forEach(item => {
+        unsubscribe(item.ticker);
+      });
+    };
+  }, [activeId, items, subscribe, unsubscribe]);
 
   const onCreate = async () => {
     const name = await window.dialog.prompt({ title: 'New watchlist name' });
@@ -203,9 +254,12 @@ export function App() {
   const active = watchlists.find((w) => w.id === activeId) ?? null;
 
   const fmtPrice = (ticker: string): string => {
+    // Use WebSocket price if available, fallback to quote cache
+    const wsPrice = priceUpdates[ticker]?.price;
     const q = quoteMap[ticker];
-    if (!q || q.last === null) return '—';
-    return `$${q.last.toFixed(2)}`;
+    const price = wsPrice ?? q?.last;
+    if (price === null || price === undefined) return '—';
+    return `$${price.toFixed(2)}`;
   };
 
   const fmtDayPct = (ticker: string): string => {
@@ -220,6 +274,35 @@ export function App() {
     if (!q || q.last === null || q.prevClose === null) return '';
     const pct = ((q.last - q.prevClose) / q.prevClose) * 100;
     return pct >= 0 ? 'up' : 'down';
+  };
+
+  // Wheel column formatters
+  const fmtWheelScore = (ticker: string): string => {
+    const q = quoteMap[ticker];
+    if (!q || q.wheelSuitability === null || q.wheelSuitability === undefined) return '—';
+    return `${q.wheelSuitability}`;
+  };
+
+  const fmtTargetStrike = (ticker: string): string => {
+    const q = quoteMap[ticker];
+    if (!q || q.targetStrike === null || q.targetStrike === undefined) return '—';
+    return `$${q.targetStrike.toFixed(2)}`;
+  };
+
+  const fmtEstPremium = (ticker: string): string => {
+    const q = quoteMap[ticker];
+    if (!q || q.estimatedPremium === null || q.estimatedPremium === undefined) return '—';
+    return `$${q.estimatedPremium.toFixed(2)}`;
+  };
+
+  const wheelScoreClass = (ticker: string): string => {
+    const q = quoteMap[ticker];
+    if (!q || q.wheelSuitability === null || q.wheelSuitability === undefined) return '';
+    const score = q.wheelSuitability;
+    if (score >= 80) return 'excellent';
+    if (score >= 60) return 'good';
+    if (score >= 40) return 'fair';
+    return 'poor';
   };
 
   return (
@@ -310,6 +393,12 @@ export function App() {
                 Delete
               </button>
               <div style={{ flex: 1 }} />
+              <CacheStatusIndicator
+                status={cacheStatus}
+                isLoading={false}
+                onRefresh={refreshCacheStatus}
+                showRefreshButton={false}
+              />
               <button
                 onClick={() => activeId !== null && refreshQuotes(activeId)}
                 className="refresh-btn"
@@ -347,17 +436,20 @@ export function App() {
                   <thead>
                     <tr>
                       <th style={{ width: 24 }}></th>
-                      <th>Ticker</th>
-                      <th>Last</th>
-                      <th>Day %</th>
-                      <th>Volume</th>
+                      <th className="sortable-header" onClick={() => requestSort('ticker')}>Ticker {getSortIndicator('ticker')}</th>
+                      <th className="sortable-header" onClick={() => requestSort('lastPrice')}>Last {getSortIndicator('lastPrice')}</th>
+                      <th className="sortable-header" onClick={() => requestSort('dayChangePct')}>Day % {getSortIndicator('dayChangePct')}</th>
+                      <th className="sortable-header" onClick={() => requestSort('volume')}>Volume {getSortIndicator('volume')}</th>
+                      <th className="sortable-header" onClick={() => requestSort('wheelSuitability')} title="Wheel Suitability Score">Wheel {getSortIndicator('wheelSuitability')}</th>
+                      <th className="sortable-header" onClick={() => requestSort('targetStrike')} title="Target Put Strike">Strike {getSortIndicator('targetStrike')}</th>
+                      <th className="sortable-header" onClick={() => requestSort('estimatedPremium')} title="Estimated Monthly Premium">Premium {getSortIndicator('estimatedPremium')}</th>
                       <th>Sector</th>
-                      <th>Notes</th>
-                      <th>Added</th>
+                      <th className="sortable-header" onClick={() => requestSort('notes')}>Notes {getSortIndicator('notes')}</th>
+                      <th className="sortable-header" onClick={() => requestSort('addedAt')}>Added {getSortIndicator('addedAt')}</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {items.map((it) => (
+                    {sortedData.map((it) => (
                       <tr key={it.id} className={selected.has(it.id) ? 'selected' : ''}>
                         <td>
                           <input
@@ -372,10 +464,15 @@ export function App() {
                           {fmtDayPct(it.ticker)}
                         </td>
                         <td className="num">
-                          {quoteMap[it.ticker]?.volume != null
-                            ? (quoteMap[it.ticker]!.volume! / 1_000_000).toFixed(1) + 'M'
+                          {it.volume != null
+                            ? (it.volume / 1_000_000).toFixed(1) + 'M'
                             : '—'}
                         </td>
+                        <td className={`num wheel-score ${wheelScoreClass(it.ticker)}`}>
+                          {fmtWheelScore(it.ticker)}
+                        </td>
+                        <td className="num">{fmtTargetStrike(it.ticker)}</td>
+                        <td className="num">{fmtEstPremium(it.ticker)}</td>
                         <td className="placeholder" title="Coming in Phase 3">—</td>
                         <td>{it.notes ?? ''}</td>
                         <td>{it.addedAt.slice(0, 10)}</td>

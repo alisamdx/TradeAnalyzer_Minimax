@@ -1,6 +1,6 @@
 {
   "name": "trade-analyzer",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "description": "Stock screening and analysis desktop app for a single retail trader.",
   "main": "out/main/index.js",
@@ -29,7 +29,9 @@
   },
   "dependencies": {
     "better-sqlite3": "^12.9.0",
-    "lightweight-charts": "^4.1.0"
+    "lightweight-charts": "^4.1.0",
+    "recharts": "^3.8.1",
+    "ws": "^8.20.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.14.0",
@@ -37,6 +39,7 @@
     "@types/node": "^22.9.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
+    "@types/ws": "^8.18.1",
     "@typescript-eslint/eslint-plugin": "^8.13.0",
     "@typescript-eslint/parser": "^8.13.0",
     "@vitejs/plugin-react": "^4.3.3",

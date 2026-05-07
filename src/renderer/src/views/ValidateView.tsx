@@ -5,8 +5,8 @@
 // Chart: lightweight-charts v4
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { createChart, type IChartApi, ColorType } from 'lightweight-charts';
-import { VolumeProfile } from './VolumeProfile';
+import { createChart, type IChartApi, ColorType, type Time } from 'lightweight-charts';
+import { VolumeProfile, type BarDataWithVolume } from './VolumeProfile';
 import type {
   Watchlist,
   ValidateDashboardResult
@@ -242,7 +242,14 @@ export function ValidateView() {
     })));
 
     // Volume profile primitive.
-    const volumeProfile = new VolumeProfile({ binSize: 0.5 });
+    const volumeProfile = new VolumeProfile(filteredBars.map(b => ({
+      time: (b.t / 1000) as Time,
+      open: b.o,
+      high: b.h,
+      low: b.l,
+      close: b.c,
+      volume: b.v
+    })), { binSize: 0.5 });
     candleSeries.attachPrimitive(volumeProfile);
 
     // Volume series.

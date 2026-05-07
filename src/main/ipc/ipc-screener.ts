@@ -5,15 +5,17 @@ import { ipcMain, BrowserWindow, dialog, type IpcMainInvokeEvent } from 'electro
 import type { ScreenerService } from '../services/screener-service.js';
 import type { ConstituentsService } from '../services/constituents-service.js';
 import type { WatchlistService } from '../services/watchlist-service.js';
-import type { QuoteCache, CachedQuote } from '../services/cache-service.js';
+import type { QuoteCache, CachedQuote, FundamentalsCache } from '../services/cache-service.js';
 import type { DataProvider } from '../services/data-provider.js';
+import { calculateWheelMetrics } from '../services/wheel-calculator.js';
 import type {
   Universe,
   ScreenCriteria,
   ScreenPreset,
   ScreenRunResult,
   ConstituentsMeta,
-  IpcResult
+  IpcResult,
+  CachedQuote as QuoteWithWheel
 } from '@shared/types.js';
 
 function ok<T>(value: T): IpcResult<T> {
@@ -36,6 +38,7 @@ export function registerScreenerIpc(
   constituentsService: ConstituentsService,
   watchlistService: WatchlistService,
   quoteCache: QuoteCache,
+  fundamentalsCache: FundamentalsCache,
   dataProvider: DataProvider
 ): void {
   // ── Presets ──────────────────────────────────────────────────────────────
@@ -154,12 +157,22 @@ export function registerScreenerIpc(
   );
   ipcMain.handle(
     'quotes:refresh-bulk',
-    async (_e, tickers: string[]): Promise<IpcResult<CachedQuote[]>> => {
-      const results: CachedQuote[] = [];
+    async (_e, tickers: string[]): Promise<IpcResult<QuoteWithWheel[]>> => {
+      const results: QuoteWithWheel[] = [];
       for (const ticker of tickers) {
         try {
+          // Fetch both quote and fundamentals for wheel calculations
           const snapshot = await dataProvider.getQuote(ticker);
-          const cached: CachedQuote = {
+          let ratios = fundamentalsCache.get(ticker)?.ratios;
+          if (!ratios) {
+            ratios = await dataProvider.getFundamentals(ticker);
+            fundamentalsCache.upsert(ticker, ratios);
+          }
+
+          // Calculate wheel metrics
+          const wheelMetrics = calculateWheelMetrics(ratios, snapshot);
+
+          const cached: QuoteWithWheel = {
             ticker,
             last: snapshot.last,
             prevClose: snapshot.prevClose,
@@ -170,7 +183,10 @@ export function registerScreenerIpc(
             dayLow: snapshot.dayLow,
             ivRank: snapshot.ivRank,
             ivPercentile: snapshot.ivPercentile,
-            fetchedAt: snapshot.fetchedAt
+            fetchedAt: snapshot.fetchedAt,
+            wheelSuitability: wheelMetrics.suitabilityScore,
+            targetStrike: wheelMetrics.targetStrike,
+            estimatedPremium: wheelMetrics.estimatedPremium
           };
           quoteCache.upsert(cached);
           results.push(cached);

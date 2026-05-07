@@ -62,7 +62,7 @@ export class PolygonDataProvider implements DataProvider {
     return `poly-${Date.now()}-${++this.correlationSeq}`;
   }
 
-  private async fetchWithRetry(
+  async fetchWithRetry(
     path: string,
     params: Record<string, string> = {},
     retryCount = 0

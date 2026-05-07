@@ -19,6 +19,9 @@ logs/
 *.sqlite-shm
 backups/
 
+# local database folder (moved from userData to project folder)
+data/
+
 # environment / secrets (per spec EP-7.1, EP-7.2)
 .env
 .env.local

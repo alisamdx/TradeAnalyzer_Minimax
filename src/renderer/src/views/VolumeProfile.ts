@@ -43,12 +43,15 @@ class VolumeProfileRenderer implements ISeriesPrimitivePaneRenderer {
 
   constructor(data: VolumeProfileRendererData) {
     this._data = data;
+    console.log('[VolumeProfileRenderer] Constructor data:', data);
   }
 
   draw(target: any) {
+    console.log('[VolumeProfileRenderer] draw called.');
     target.useBitmapCoordinateSpace((scope: any) => {
       const ctx = scope.context;
       const h = scope.bitmapSize.height;
+      console.log(`[VolumeProfileRenderer] Canvas height: ${h}`);
 
       const barWidth = this._data.barWidth;
       const barSpacing = this._data.barSpacing;
@@ -61,18 +64,29 @@ class VolumeProfileRenderer implements ISeriesPrimitivePaneRenderer {
           ctx.fillStyle = bar.color;
           const w = (this._data.width / 100) * bar.volume;
           ctx.fillRect(scope.bitmapSize.width - w, y, w, barWidth);
+          console.log(`[VolumeProfileRenderer] Drawing bar at y=${y}, width=${w}, volume=${bar.volume}`);
         }
       }
     });
   }
 }
 
+interface BarDataWithVolume {
+  time: Time;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
+
 export class VolumeProfile implements ISeriesPrimitive {
   _source: any = null;
-  _data: VolumeProfileData[] = [];
+  _data: BarDataWithVolume[] = [];
   _options: any;
 
-  constructor(options = {}) {
+  constructor(data: BarDataWithVolume[], options = {}) {
+    this._data = data;
     this._options = { ...defaultOptions, ...options };
   }
 
@@ -85,11 +99,13 @@ export class VolumeProfile implements ISeriesPrimitive {
   }
 
   paneViews() {
+    console.log('[VolumeProfile] paneViews called.');
     const series = this._source.series;
     const chart = this._source.chart;
 
     const data = this._source.series.data();
     if (data.length === 0) {
+      console.log('[VolumeProfile] No series data, returning empty.');
       return [];
     }
 
@@ -97,25 +113,36 @@ export class VolumeProfile implements ISeriesPrimitive {
     const visibleRange = chart.timeScale().getVisibleLogicalRange();
 
     if (visibleRange === null) {
+      console.log('[VolumeProfile] No visible range, returning empty.');
       return [];
     }
+    console.log(`[VolumeProfile] Visible logical range: from ${visibleRange.from}, to ${visibleRange.to}`);
 
-    const from = visibleRange.from;
-    const to = visibleRange.to;
+
+    const from = Math.floor(visibleRange.from);
+    const to = Math.ceil(visibleRange.to);
 
     const volumeData: VolumeProfileData[] = [];
     let totalVolume = 0;
     for (let i = from; i <= to; i++) {
       const bar = bars[i];
-      if (!bar || bar.high === null || bar.low === null || bar.volume === null || bar.high === undefined || bar.low === undefined || bar.volume === undefined) {
+      if (!bar) {
+        console.log(`[VolumeProfile] Skipping bar at index ${i}: bar is null/undefined.`);
+        continue;
+      }
+      if (bar.high === null || bar.low === null || bar.volume === null || bar.high === undefined || bar.low === undefined || bar.volume === undefined) {
+        console.log(`[VolumeProfile] Skipping bar at index ${i}: missing high, low, or volume. Bar:`, bar);
         continue;
       }
 
       const barHigh = bar.high as number;
       const barLow = bar.low as number;
       const barVolume = bar.volume as number;
+      console.log(`[VolumeProfile] Processing bar ${i}: High=${barHigh}, Low=${barLow}, Volume=${barVolume}`);
 
-      const priceRange = barHigh - barLow;
+
+
+
 
       if (priceRange <= 0) {
         // If priceRange is 0 or negative, put all volume into a single bin at barLow
@@ -161,6 +188,7 @@ export class VolumeProfile implements ISeriesPrimitive {
     const priceScale = series.priceScale();
     const histograms: VolumeProfileHistogram[] = [];
     const maxVolume = Math.max(...volumeData.map((d) => d.volume));
+    console.log(`[VolumeProfile] Max Volume for scaling: ${maxVolume}`);
 
     for (let i = 0; i < volumeData.length; i++) {
       const v = volumeData[i];
@@ -176,6 +204,10 @@ export class VolumeProfile implements ISeriesPrimitive {
         color: color,
       });
     }
+    console.log(`[VolumeProfile] Final histograms count: ${histograms.length}`);
+    if (histograms.length > 0) {
+      console.log('[VolumeProfile] First histogram bar:', histograms[0]);
+    }
 
     const barWidth = 1;
     const barSpacing = 1;
@@ -183,6 +215,7 @@ export class VolumeProfile implements ISeriesPrimitive {
     return [
       new (class implements ISeriesPrimitivePaneView {
         renderer() {
+          console.log('[VolumeProfile] Creating renderer.');
           return new VolumeProfileRenderer({
             histograms: histograms,
             width: 70,

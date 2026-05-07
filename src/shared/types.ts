@@ -136,6 +136,10 @@ export interface Quote {
   distance52WkHigh?: number | null;
   distance52WkLow?: number | null;
   fetchedAt: string;
+  // Wheel Strategy columns (Phase 2)
+  wheelSuitability?: number | null;
+  targetStrike?: number | null;
+  estimatedPremium?: number | null;
 }
 
 /** Alias of Quote — used by the cache service IPC bridge. */
@@ -448,4 +452,20 @@ export interface DiagnosticCheck {
 export interface DiagnosticsResult {
   checks: Record<string, DiagnosticCheck>;
   overall: 'ok' | 'degraded' | 'error';
+}
+
+// ─── Cache Management (Phase 1 Enhancement) ─────────────────────────────────────
+
+export interface CacheStatus {
+  isStale: boolean;
+  lastUpdated: number | null;
+  ageMs: number | null;
+  ageText: string;
+  recordCount: number;
+}
+
+export interface CacheStats {
+  lastScreenerRun: number | null;
+  recordCount: number;
+  updatedAt: string;
 }
