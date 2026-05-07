@@ -59,7 +59,7 @@ class VolumeProfileRenderer implements ISeriesPrimitivePaneRenderer {
       for (let i = 0; i < this._data.histograms.length; i++) {
         const y = i * (barWidth + barSpacing) + barSpacing;
         const bar = this._data.histograms[i];
-        if (y > h) break;
+        if (!bar || y > h) break;
         if (bar.volume > 0) {
           ctx.fillStyle = bar.color;
           const w = (this._data.width / 100) * bar.volume;
@@ -71,7 +71,7 @@ class VolumeProfileRenderer implements ISeriesPrimitivePaneRenderer {
   }
 }
 
-interface BarDataWithVolume {
+export interface BarDataWithVolume {
   time: Time;
   open: number;
   high: number;
@@ -109,7 +109,7 @@ export class VolumeProfile implements ISeriesPrimitive {
       return [];
     }
 
-    const bars = Array.from(data.values());
+    const bars: unknown[] = Array.from(data.values());
     const visibleRange = chart.timeScale().getVisibleLogicalRange();
 
     if (visibleRange === null) {
@@ -125,7 +125,7 @@ export class VolumeProfile implements ISeriesPrimitive {
     const volumeData: VolumeProfileData[] = [];
     let totalVolume = 0;
     for (let i = from; i <= to; i++) {
-      const bar = bars[i];
+      const bar = bars[i] as { high?: number | null; low?: number | null; volume?: number | null } | undefined;
       if (!bar) {
         console.log(`[VolumeProfile] Skipping bar at index ${i}: bar is null/undefined.`);
         continue;
@@ -135,14 +135,12 @@ export class VolumeProfile implements ISeriesPrimitive {
         continue;
       }
 
-      const barHigh = bar.high as number;
-      const barLow = bar.low as number;
-      const barVolume = bar.volume as number;
+      const barHigh = bar.high;
+      const barLow = bar.low;
+      const barVolume = bar.volume;
       console.log(`[VolumeProfile] Processing bar ${i}: High=${barHigh}, Low=${barLow}, Volume=${barVolume}`);
 
-
-
-
+      const priceRange = barHigh - barLow;
 
       if (priceRange <= 0) {
         // If priceRange is 0 or negative, put all volume into a single bin at barLow
@@ -192,6 +190,7 @@ export class VolumeProfile implements ISeriesPrimitive {
 
     for (let i = 0; i < volumeData.length; i++) {
       const v = volumeData[i];
+      if (!v) continue;
       if (series.priceToCoordinate(v.price) === null) continue;
       const color =
         poh === v

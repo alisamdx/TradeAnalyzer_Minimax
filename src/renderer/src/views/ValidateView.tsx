@@ -236,9 +236,7 @@ export function ValidateView() {
       open: b.o,
       high: b.h,
       low: b.l,
-      close: b.c,
-      // @ts-expect-error volume is not a standard part of CandlestickData
-      volume: b.v
+      close: b.c
     })));
 
     // Volume profile primitive.
