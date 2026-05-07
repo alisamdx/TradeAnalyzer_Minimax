@@ -88,18 +88,18 @@
 
 ---
 
-## Priority 5: Screener Enhancements (High Value)
+## Priority 5: Screener Enhancements (High Value) ✅ COMPLETE
 
 **Frontend:**
-- [ ] Add sortable columns to Screener results table (all columns, asc/desc toggle)
-- [ ] Add `useSortable` hook implementation
-- [ ] Add "Quick Actions" in results row:
+- [x] Add sortable columns to Screener results table (all columns, asc/desc toggle)
+- [x] Add `useSortable` hook implementation
+- [x] Add "Quick Actions" in results row:
   - Add to watchlist button
   - Run analysis button
-- [ ] Add CSV export of filtered results
-- [ ] Add pagination (50 items per page) or infinite scroll
-- [ ] Add cache status indicator to Screener header
-- [ ] Add auto-refresh if data > 1 hour old
+- [x] Add CSV export of filtered results
+- [x] Add pagination (50 items per page)
+- [x] Add cache status indicator to Screener header
+- [x] Add auto-refresh if data > 1 hour old
 
 ---
 

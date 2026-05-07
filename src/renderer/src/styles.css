@@ -265,12 +265,14 @@ table.items-table {
   padding: 10px 16px;
   display: flex;
   gap: 16px;
-  align-items: baseline;
+  align-items: center;
   flex-shrink: 0;
+  justify-content: space-between;
 }
 
 .screener-header h2 { margin: 0; font-size: 15px; }
 .screener-header .meta { font-size: 11px; color: var(--text-muted); }
+.screener-header > div { display: flex; gap: 16px; align-items: baseline; }
 
 .screener-layout {
   display: grid;
@@ -460,6 +462,102 @@ table.items-table {
   border-radius: 4px;
   padding: 1px 5px;
   font-size: 10px;
+}
+
+/* Sortable table headers */
+.results-table th.sortable {
+  cursor: pointer;
+  user-select: none;
+}
+.results-table th.sortable:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+.sort-indicator {
+  margin-left: 4px;
+  color: var(--accent);
+}
+
+/* Quick actions */
+.quick-actions {
+  display: flex;
+  gap: 4px;
+}
+.action-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 6px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.15s;
+}
+.action-btn:hover {
+  background: rgba(88, 166, 255, 0.1);
+  border-color: var(--accent);
+}
+
+/* Watchlist dropdown */
+.watchlist-dropdown {
+  position: absolute;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  z-index: 100;
+  min-width: 150px;
+  margin-top: 4px;
+}
+.watchlist-dropdown .dropdown-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 6px 12px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text);
+}
+.watchlist-dropdown .dropdown-item:hover {
+  background: rgba(88, 166, 255, 0.1);
+}
+.watchlist-dropdown .dropdown-item.cancel {
+  color: var(--danger);
+  border-top: 1px solid var(--border);
+}
+.results-table td.actions {
+  position: relative;
+}
+
+/* Pagination */
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 12px;
+  border-top: 1px solid var(--border);
+}
+.page-btn {
+  padding: 6px 12px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.page-btn:hover:not(:disabled) {
+  background: rgba(88, 166, 255, 0.1);
+  border-color: var(--accent);
+}
+.page-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.page-info {
+  font-size: 12px;
+  color: var(--text-muted);
 }
 
 .empty-state {
