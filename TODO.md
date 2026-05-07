@@ -58,33 +58,33 @@
 
 ---
 
-## Priority 4: Historical Charts (High Value)
+## Priority 4: Historical Charts (High Value) ✅ COMPLETE
 
 **Database Migration:**
-- [ ] Create `005_historical_data.sql` with:
+- [x] Create `005_historical_data.sql` with:
   - `historical_financials` table (quarterly/annual metrics)
   - `historical_prices` table (OHLCV daily bars)
 
 **Backend:**
-- [ ] Add IPC handlers:
+- [x] Add IPC handlers:
   - `historical:getFinancials` - Get quarterly/annual data
   - `historical:getPrices` - Get OHLCV bars
   - `historical:fetchAndStore` - Auto-fetch if cache empty
-- [ ] Implement Polygon aggregates API fetching
+- [x] Implement Polygon aggregates API fetching
 
 **Frontend:**
-- [ ] Install Recharts: `npm install recharts`
-- [ ] Build `HistoricalFinancialChart` component:
+- [x] Install Recharts: `npm install recharts`
+- [x] Build `HistoricalFinancialChart` component:
   - Area chart for financial metrics
   - Metrics: Revenue, Net Income, EPS, EBITDA, Total Assets, Shareholder Equity
   - Period type selector (Quarterly/Annual)
   - CSV export button
-- [ ] Build `HistoricalPriceChart` component:
+- [x] Build `HistoricalPriceChart` component:
   - Line/candlestick chart with volume
   - Timeframe selector: 1M, 3M, 6M, 1Y, 2Y, 5Y
   - 50-day SMA overlay
-  - CSV/PDF export buttons
-- [ ] Integrate into Analysis view
+  - CSV export button
+- [x] Integrate into Analysis view
 
 ---
 
