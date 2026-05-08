@@ -45,6 +45,7 @@ function createWindow(): BrowserWindow {
     width: 1400,
     height: 900,
     show: false,
+    fullscreen: true,
     autoHideMenuBar: true,
     webPreferences: {
       preload: join(__dirname, '..', 'preload', 'index.cjs'),
@@ -52,7 +53,7 @@ function createWindow(): BrowserWindow {
       contextIsolation: true,
       nodeIntegration: false
     },
-    title: `TradeAnalyzer v${appVersion()}`
+    title: 'Trade Analyzer - Minimax'
   });
 
   win.on('ready-to-show', () => win.show());
