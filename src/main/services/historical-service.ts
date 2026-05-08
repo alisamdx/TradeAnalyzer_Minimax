@@ -80,7 +80,7 @@ export class HistoricalDataService {
         long_term_debt, current_assets, current_liabilities,
         operating_cash_flow, free_cash_flow, ebitda,
         currency, source, fetched_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     `);
 
     // Insert prices - handles duplicates via ON CONFLICT
