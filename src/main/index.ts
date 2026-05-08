@@ -53,7 +53,7 @@ function createWindow(): BrowserWindow {
       contextIsolation: true,
       nodeIntegration: false
     },
-    title: 'Trade Analyzer - Minimax'
+    title: `Trade Analyzer - Minimax v${appVersion()}`
   });
 
   win.on('ready-to-show', () => win.show());
