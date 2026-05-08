@@ -226,4 +226,51 @@
 
 ---
 
-*Last updated: 2026-05-05*
+## Future Enhancements (Backlog)
+
+> These items are not scheduled but documented for future consideration.
+
+### Polish & Quality
+- [ ] Run full app testing and identify UI/UX issues
+- [ ] Performance audit: database query optimization
+- [ ] Render optimization: memoize expensive components
+- [ ] Add loading skeletons for data-heavy views
+- [ ] Improve error boundaries and user-facing error messages
+- [ ] Add keyboard navigation support (arrow keys, tab navigation)
+
+### Testing
+- [ ] Add E2E tests with Playwright (critical user flows)
+- [ ] Add component tests with React Testing Library
+- [ ] Add performance benchmarks for large watchlists (>1000 tickers)
+- [ ] Add load testing for WebSocket handling
+
+### Data & Integrations
+- [ ] Options chain visualizer with Greeks display
+- [ ] Backtesting engine for strategy validation
+- [ ] Data import from brokerages (CSV/API)
+- [ ] Historical options data tracking
+- [ ] Earnings calendar integration (when Polygon adds endpoint)
+- [ ] News feed integration for watched tickers
+
+### Reporting & Export
+- [ ] Export to PDF for analysis reports
+- [ ] Excel export with formatting for portfolios
+- [ ] Automated daily/weekly email reports
+- [ ] Tax report generation (realized P&L by year)
+
+### Platform Features
+- [ ] Multi-monitor support (remember window positions)
+- [ ] System tray integration with mini-ticker
+- [ ] Mobile companion app (read-only)
+- [ ] Cloud sync option (encrypted, opt-in)
+- [ ] Auto-updater integration
+
+### Advanced Settings
+- [ ] Per-watchlist refresh intervals
+- [ ] Custom column configuration
+- [ ] Advanced alert conditions (combinations)
+- [ ] Data retention policies
+
+---
+
+*Last updated: 2026-05-08*
