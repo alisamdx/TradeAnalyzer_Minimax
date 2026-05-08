@@ -2,11 +2,31 @@
 // Exposes market regime, action items, and top setups
 // see SPEC: Priority 7 - Morning Briefing Dashboard
 
-import { ipcMain } from 'electron';
+import { ipcMain, type IpcMainInvokeEvent } from 'electron';
 import type { Database } from 'better-sqlite3';
 import { BriefingService } from '../services/briefing-service.js';
 import { HistoricalDataService } from '../services/historical-service.js';
 import { PolygonDataProvider } from '../services/polygon-provider.js';
+import type { IpcResult } from '@shared/types.js';
+
+function ok<T>(value: T): IpcResult<T> {
+  return { ok: true, value };
+}
+
+function fail(err: unknown): IpcResult<never> {
+  const message = err instanceof Error ? err.message : String(err);
+  return { ok: false, error: { code: 'BRIEFING_ERROR', message } };
+}
+
+function wrap<Args extends unknown[], R>(fn: (...args: Args) => R) {
+  return (_e: IpcMainInvokeEvent, ...args: Args): IpcResult<R> => {
+    try {
+      return ok(fn(...args));
+    } catch (err) {
+      return fail(err);
+    }
+  };
+}
 
 export function registerBriefingIpc(
   db: Database,
@@ -18,49 +38,29 @@ export function registerBriefingIpc(
 
   // ─── Market Regime ──────────────────────────────────────────────────────────
 
-  ipcMain.handle('briefing:getMarketRegime', async () => {
-    try {
-      const regime = await service.getMarketRegime();
-      return { success: true, data: regime };
-    } catch (err) {
-      console.error('[briefing:getMarketRegime] Error:', err);
-      return { success: false, error: String(err) };
-    }
-  });
+  ipcMain.handle('briefing:getMarketRegime', wrap(async () => {
+    const regime = await service.getMarketRegime();
+    return { success: true, data: regime };
+  }));
 
   // ─── Action Items ───────────────────────────────────────────────────────────
 
-  ipcMain.handle('briefing:getActionItems', async () => {
-    try {
-      const items = await service.getActionItems();
-      return { success: true, data: items };
-    } catch (err) {
-      console.error('[briefing:getActionItems] Error:', err);
-      return { success: false, error: String(err) };
-    }
-  });
+  ipcMain.handle('briefing:getActionItems', wrap(async () => {
+    const items = await service.getActionItems();
+    return { success: true, data: items };
+  }));
 
   // ─── Top Setups ─────────────────────────────────────────────────────────────
 
-  ipcMain.handle('briefing:getTopSetups', async () => {
-    try {
-      const setups = await service.getTopSetups();
-      return { success: true, data: setups };
-    } catch (err) {
-      console.error('[briefing:getTopSetups] Error:', err);
-      return { success: false, error: String(err) };
-    }
-  });
+  ipcMain.handle('briefing:getTopSetups', wrap(async () => {
+    const setups = await service.getTopSetups();
+    return { success: true, data: setups };
+  }));
 
   // ─── Full Briefing ────────────────────────────────────────────────────────────
 
-  ipcMain.handle('briefing:getFull', async () => {
-    try {
-      const briefing = await service.getFullBriefing();
-      return { success: true, data: briefing };
-    } catch (err) {
-      console.error('[briefing:getFull] Error:', err);
-      return { success: false, error: String(err) };
-    }
-  });
+  ipcMain.handle('briefing:getFull', wrap(async () => {
+    const briefing = await service.getFullBriefing();
+    return { success: true, data: briefing };
+  }));
 }

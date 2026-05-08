@@ -2,103 +2,83 @@
 // Exposes alert CRUD and checking functionality
 // see SPEC: Priority 8 - Alerts System
 
-import { ipcMain } from 'electron';
+import { ipcMain, type IpcMainInvokeEvent } from 'electron';
 import type { Database } from 'better-sqlite3';
 import { AlertsService, type AlertInput } from '../services/alerts-service.js';
+import type { IpcResult } from '@shared/types.js';
+
+function ok<T>(value: T): IpcResult<T> {
+  return { ok: true, value };
+}
+
+function fail(err: unknown): IpcResult<never> {
+  const message = err instanceof Error ? err.message : String(err);
+  return { ok: false, error: { code: 'ALERTS_ERROR', message } };
+}
+
+function wrap<Args extends unknown[], R>(fn: (...args: Args) => R) {
+  return (_e: IpcMainInvokeEvent, ...args: Args): IpcResult<R> => {
+    try {
+      return ok(fn(...args));
+    } catch (err) {
+      return fail(err);
+    }
+  };
+}
 
 export function registerAlertsIpc(db: Database): void {
   const service = new AlertsService(db);
 
   // ─── CRUD Operations ────────────────────────────────────────────────────────
 
-  ipcMain.handle('alerts:create', (_event, input: AlertInput) => {
-    try {
-      const alert = service.createAlert(input);
-      return { success: true, data: alert };
-    } catch (err) {
-      console.error('[alerts:create] Error:', err);
-      return { success: false, error: (err as Error).message };
-    }
-  });
+  ipcMain.handle('alerts:create', wrap((input: AlertInput) => {
+    const alert = service.createAlert(input);
+    return { success: true, data: alert };
+  }));
 
-  ipcMain.handle('alerts:list', (_event, activeOnly: boolean = false) => {
-    try {
-      const alerts = activeOnly ? service.listActive() : [...service.listActive(), ...service.listTriggered()];
-      return { success: true, data: alerts };
-    } catch (err) {
-      console.error('[alerts:list] Error:', err);
-      return { success: false, error: (err as Error).message };
-    }
-  });
+  ipcMain.handle('alerts:list', wrap((activeOnly: boolean = false) => {
+    const alerts = activeOnly ? service.listActive() : [...service.listActive(), ...service.listTriggered()];
+    return { success: true, data: alerts };
+  }));
 
-  ipcMain.handle('alerts:get', (_event, id: number) => {
-    try {
-      const alert = service.getById(id);
-      return { success: true, data: alert };
-    } catch (err) {
-      console.error('[alerts:get] Error:', err);
-      return { success: false, error: (err as Error).message };
-    }
-  });
+  ipcMain.handle('alerts:get', wrap((id: number) => {
+    const alert = service.getById(id);
+    return { success: true, data: alert };
+  }));
 
-  ipcMain.handle('alerts:update', (_event, id: number, input: Partial<AlertInput>) => {
-    try {
-      const alert = service.updateAlert(id, input);
-      return { success: true, data: alert };
-    } catch (err) {
-      console.error('[alerts:update] Error:', err);
-      return { success: false, error: (err as Error).message };
-    }
-  });
+  ipcMain.handle('alerts:update', wrap((id: number, input: Partial<AlertInput>) => {
+    const alert = service.updateAlert(id, input);
+    return { success: true, data: alert };
+  }));
 
-  ipcMain.handle('alerts:delete', (_event, id: number) => {
-    try {
-      service.deleteAlert(id);
-      return { success: true };
-    } catch (err) {
-      console.error('[alerts:delete] Error:', err);
-      return { success: false, error: (err as Error).message };
-    }
-  });
+  ipcMain.handle('alerts:delete', wrap((id: number) => {
+    service.deleteAlert(id);
+    return { success: true };
+  }));
 
   // ─── Trigger Management ─────────────────────────────────────────────────────
 
-  ipcMain.handle('alerts:markTriggered', (_event, id: number) => {
-    try {
-      service.markTriggered(id);
-      return { success: true };
-    } catch (err) {
-      console.error('[alerts:markTriggered] Error:', err);
-      return { success: false, error: (err as Error).message };
-    }
-  });
+  ipcMain.handle('alerts:markTriggered', wrap((id: number) => {
+    service.markTriggered(id);
+    return { success: true };
+  }));
 
-  ipcMain.handle('alerts:resetTriggered', (_event, id: number) => {
-    try {
-      service.resetTriggered(id);
-      return { success: true };
-    } catch (err) {
-      console.error('[alerts:resetTriggered] Error:', err);
-      return { success: false, error: (err as Error).message };
-    }
-  });
+  ipcMain.handle('alerts:resetTriggered', wrap((id: number) => {
+    service.resetTriggered(id);
+    return { success: true };
+  }));
 
   // ─── Alert Checking ─────────────────────────────────────────────────────────
 
-  ipcMain.handle('alerts:checkPrice', (_event, alertId: number, currentPrice: number) => {
-    try {
-      const alert = service.getById(alertId);
-      if (!alert) {
-        return { success: false, error: 'Alert not found' };
-      }
-      const result = service.checkPriceAlert(alert, currentPrice);
-      if (result.triggered) {
-        service.markTriggered(alertId);
-      }
-      return { success: true, data: result };
-    } catch (err) {
-      console.error('[alerts:checkPrice] Error:', err);
-      return { success: false, error: (err as Error).message };
+  ipcMain.handle('alerts:checkPrice', wrap((alertId: number, currentPrice: number) => {
+    const alert = service.getById(alertId);
+    if (!alert) {
+      return { success: false, error: 'Alert not found' };
     }
-  });
+    const result = service.checkPriceAlert(alert, currentPrice);
+    if (result.triggered) {
+      service.markTriggered(alertId);
+    }
+    return { success: true, data: result };
+  }));
 }
