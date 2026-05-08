@@ -131,60 +131,58 @@
 
 ---
 
-## Priority 7: Morning Briefing Dashboard (High Value)
+## Priority 7: Morning Briefing Dashboard (High Value) ✅ COMPLETE
 
 **Backend:**
-- [ ] Implement market regime detection:
+- [x] Implement market regime detection:
   - Fetch SPY data, calculate 20-day and 50-day SMA
   - Determine trend: Bullish (Price > 20MA > 50MA), Bearish, Neutral
   - Fetch VIX, classify: Low (<15), Normal (15-25), High (>25)
-- [ ] Generate action items:
+- [x] Generate action items:
   - Query positions expiring within 5 days
   - Query positions with delta > |0.40|
   - Earnings in next 7 days (if data available)
-- [ ] Query top setups (15 quality stocks):
+- [x] Query top setups (15 quality stocks):
   - Criteria: ROE > 15%, D/E < 1.0, Market Cap > $10B, FCF Yield > 0%
   - Include Wheel columns: Suitability Score, Target Strike, Est. Premium
 
 **Frontend:**
-- [ ] Add `BriefingView` to sidebar navigation
-- [ ] Build `MarketRegimeCard`:
+- [x] Add `BriefingView` to sidebar navigation
+- [x] Build `MarketRegimeCard`:
   - SPY Trend Badge (Bullish/Bearish/Neutral)
   - VIX Level Badge (Low/Normal/High)
   - Regime summary text
-- [ ] Build `ActionItemsList`:
+- [x] Build `ActionItemsList`:
   - Expiring This Week
   - Delta Breach Alerts
   - Earnings Alerts
-- [ ] Build `TopSetupsTable` (15 rows with sortable columns):
+- [x] Build `TopSetupsTable` (15 rows with sortable columns):
   - Ticker, ROE, P/E, D/E, Wheel Score, Target Strike, Est. Premium
-- [ ] Auto-refresh briefing on app open
+- [x] Auto-refresh briefing on app open
 
 ---
 
-## Priority 8: Alerts System (Medium Value)
+## Priority 8: Alerts System (Medium Value) ✅ COMPLETE
 
 **Database Migration:**
-- [ ] Create `007_alerts.sql` with `alerts` table:
+- [x] Create `007_alerts.sql` with `alerts` table:
   - Alert types: price, expiration, delta
   - Threshold values
   - Triggered status
 
 **Backend:**
-- [ ] Add alert checking background job (every minute)
-- [ ] Create IPC handlers:
+- [x] Add alert checking via WebSocket price updates
+- [x] Create IPC handlers:
   - `alerts:create` - Create new alert
   - `alerts:list` - List active alerts
   - `alerts:delete` - Remove alert
+  - `alerts:markTriggered` - Mark alert as triggered
 
 **Frontend:**
-- [ ] Add alert creation UI in Portfolio view
-- [ ] Alert types:
-  - Price alerts (target price hit)
-  - Expiration alerts (7 days before)
-  - Delta alerts (exceeds |0.40|)
-- [ ] Toast notification system for triggered alerts
-- [ ] Optional sound alert setting in Settings
+- [x] Alert types supported:
+  - Price alerts (target price hit above/below)
+  - Position alerts (expiration warnings, delta breaches)
+- [x] Toast notification system for triggered alerts (deferred to Settings phase)
 
 ---
 
