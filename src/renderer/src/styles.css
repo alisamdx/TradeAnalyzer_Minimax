@@ -1807,3 +1807,212 @@ input[type='checkbox'] {
   color: var(--text-muted);
   padding: 32px;
 }
+
+/* ── BriefingView ─────────────────────────────────────────────────────────── */
+
+.briefing-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: auto;
+  padding: 16px;
+}
+
+.briefing-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.briefing-header h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.briefing-header .meta {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.briefing-section {
+  margin-bottom: 24px;
+}
+
+.briefing-section h3 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Market Regime Card */
+.market-regime-card {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.regime-badges {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.regime-badge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 24px;
+  border: 2px solid;
+  border-radius: 8px;
+  min-width: 120px;
+}
+
+.badge-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.badge-value {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.badge-detail {
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.badge-sub {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.regime-summary {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text);
+  font-style: italic;
+}
+
+/* Action Items */
+.action-items-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.action-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  border-left: 3px solid;
+}
+
+.action-item.high {
+  border-left-color: #e74c3c;
+  background: rgba(231, 76, 60, 0.05);
+}
+
+.action-item.medium {
+  border-left-color: #f39c12;
+  background: rgba(243, 156, 18, 0.05);
+}
+
+.action-item.low {
+  border-left-color: #3498db;
+  background: rgba(52, 152, 219, 0.05);
+}
+
+.action-icon {
+  font-size: 14px;
+}
+
+.action-ticker {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  min-width: 60px;
+}
+
+.action-details {
+  flex: 1;
+  font-size: 13px;
+}
+
+.action-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* Setups Table */
+.setups-table-wrap {
+  overflow-x: auto;
+}
+
+.setups-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.setups-table th,
+.setups-table td {
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.setups-table th {
+  font-weight: 600;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.setups-table th.sortable {
+  cursor: pointer;
+  user-select: none;
+}
+
+.setups-table th.sortable:hover {
+  color: var(--text);
+}
+
+.setups-table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.score-badge {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.loading-placeholder {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.empty-state {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-muted);
+  background: rgba(255,255,255,0.03);
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+}

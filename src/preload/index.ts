@@ -243,6 +243,194 @@ function buildApi() {
       invoke<boolean>('historical:needsRefresh', ticker, dataType, maxAgeDays)
   };
 
+  const briefing = {
+    getMarketRegime: () => invoke<{
+      success: boolean;
+      data?: {
+        spyTrend: 'bullish' | 'bearish' | 'neutral';
+        spyPrice: number | null;
+        spySma20: number | null;
+        spySma50: number | null;
+        vixLevel: 'low' | 'normal' | 'high';
+        vixValue: number | null;
+        summary: string;
+      };
+      error?: string;
+    }>('briefing:getMarketRegime'),
+    getActionItems: () => invoke<{
+      success: boolean;
+      data?: {
+        type: 'expiring' | 'delta_breach' | 'earnings';
+        ticker: string;
+        details: string;
+        priority: 'high' | 'medium' | 'low';
+        positionId?: number;
+        daysRemaining?: number;
+        delta?: number;
+        expirationDate?: string;
+      }[];
+      error?: string;
+    }>('briefing:getActionItems'),
+    getTopSetups: () => invoke<{
+      success: boolean;
+      data?: {
+        ticker: string;
+        roe: number | null;
+        peRatio: number | null;
+        debtToEquity: number | null;
+        marketCap: number | null;
+        fcfYield: number | null;
+        wheelSuitability: number | null;
+        targetStrike: number | null;
+        estimatedPremium: number | null;
+        lastPrice: number | null;
+      }[];
+      error?: string;
+    }>('briefing:getTopSetups'),
+    getFull: () => invoke<{
+      success: boolean;
+      data?: {
+        generatedAt: string;
+        marketRegime: {
+          spyTrend: 'bullish' | 'bearish' | 'neutral';
+          spyPrice: number | null;
+          spySma20: number | null;
+          spySma50: number | null;
+          vixLevel: 'low' | 'normal' | 'high';
+          vixValue: number | null;
+          summary: string;
+        };
+        actionItems: {
+          type: 'expiring' | 'delta_breach' | 'earnings';
+          ticker: string;
+          details: string;
+          priority: 'high' | 'medium' | 'low';
+          positionId?: number;
+          daysRemaining?: number;
+          delta?: number;
+          expirationDate?: string;
+        }[];
+        topSetups: {
+          ticker: string;
+          roe: number | null;
+          peRatio: number | null;
+          debtToEquity: number | null;
+          marketCap: number | null;
+          fcfYield: number | null;
+          wheelSuitability: number | null;
+          targetStrike: number | null;
+          estimatedPremium: number | null;
+          lastPrice: number | null;
+        }[];
+      };
+      error?: string;
+    }>('briefing:getFull')
+  };
+
+  const alerts = {
+    create: (input: {
+      ticker: string;
+      alertType: 'price' | 'expiration' | 'delta';
+      priceThreshold?: number;
+      priceCondition?: 'above' | 'below';
+      daysBeforeExpiration?: number;
+      deltaThreshold?: number;
+      deltaDirection?: 'above' | 'below';
+      playSound?: boolean;
+    }) => invoke<{
+      success: boolean;
+      data?: {
+        id: number;
+        ticker: string;
+        alertType: 'price' | 'expiration' | 'delta';
+        priceThreshold: number | null;
+        priceCondition: 'above' | 'below' | null;
+        daysBeforeExpiration: number | null;
+        deltaThreshold: number | null;
+        deltaDirection: 'above' | 'below' | null;
+        isActive: boolean;
+        isTriggered: boolean;
+        triggeredAt: string | null;
+        playSound: boolean;
+        createdAt: string;
+        updatedAt: string;
+      };
+      error?: string;
+    }>('alerts:create', input),
+    list: (activeOnly?: boolean) => invoke<{
+      success: boolean;
+      data?: {
+        id: number;
+        ticker: string;
+        alertType: 'price' | 'expiration' | 'delta';
+        priceThreshold: number | null;
+        priceCondition: 'above' | 'below' | null;
+        daysBeforeExpiration: number | null;
+        deltaThreshold: number | null;
+        deltaDirection: 'above' | 'below' | null;
+        isActive: boolean;
+        isTriggered: boolean;
+        triggeredAt: string | null;
+        playSound: boolean;
+        createdAt: string;
+        updatedAt: string;
+      }[];
+      error?: string;
+    }>('alerts:list', activeOnly),
+    get: (id: number) => invoke<{
+      success: boolean;
+      data?: {
+        id: number;
+        ticker: string;
+        alertType: 'price' | 'expiration' | 'delta';
+        priceThreshold: number | null;
+        priceCondition: 'above' | 'below' | null;
+        daysBeforeExpiration: number | null;
+        deltaThreshold: number | null;
+        deltaDirection: 'above' | 'below' | null;
+        isActive: boolean;
+        isTriggered: boolean;
+        triggeredAt: string | null;
+        playSound: boolean;
+        createdAt: string;
+        updatedAt: string;
+      } | null;
+      error?: string;
+    }>('alerts:get', id),
+    update: (id: number, update: Partial<{
+      ticker?: string;
+      alertType?: 'price' | 'expiration' | 'delta';
+      priceThreshold?: number;
+      priceCondition?: 'above' | 'below';
+      daysBeforeExpiration?: number;
+      deltaThreshold?: number;
+      deltaDirection?: 'above' | 'below';
+      playSound?: boolean;
+    }>) => invoke<{
+      success: boolean;
+      data?: {
+        id: number;
+        ticker: string;
+        alertType: 'price' | 'expiration' | 'delta';
+        priceThreshold: number | null;
+        priceCondition: 'above' | 'below' | null;
+        daysBeforeExpiration: number | null;
+        deltaThreshold: number | null;
+        deltaDirection: 'above' | 'below' | null;
+        isActive: boolean;
+        isTriggered: boolean;
+        triggeredAt: string | null;
+        playSound: boolean;
+        createdAt: string;
+        updatedAt: string;
+      };
+      error?: string;
+    }>('alerts:update', id, update),
+    delete: (id: number) => invoke<{ success: boolean; error?: string }>('alerts:delete', id),
+    markTriggered: (id: number) => invoke<{ success: boolean; error?: string }>('alerts:markTriggered', id),
+    resetTriggered: (id: number) => invoke<{ success: boolean; error?: string }>('alerts:resetTriggered', id)
+  };
+
   const portfolio = {
     add: (input: {
       ticker: string;
@@ -428,7 +616,7 @@ function buildApi() {
   };
 
   return {
-    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, websocket, historical, portfolio },
+    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, websocket, historical, portfolio, briefing, alerts },
     dialog: {
       prompt: (opts: { title: string; defaultValue?: string }) =>
         invoke<string | null>('dialog:prompt', opts),
