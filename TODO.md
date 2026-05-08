@@ -186,13 +186,13 @@
 
 ---
 
-## Priority 9: Settings Enhancements (Nice to Have)
+## Priority 9: Settings Enhancements (Nice to Have) ✅ COMPLETE
 
-- [ ] Add sound alerts on/off setting
-- [ ] Add auto-connect WebSocket on startup setting
-- [ ] Add default screener index preference
-- [ ] Add theme setting (dark/light toggle)
-- [ ] Add keyboard shortcut configuration
+- [x] Add sound alerts on/off setting
+- [x] Add auto-connect WebSocket on startup setting
+- [x] Add default screener index preference
+- [x] Add theme setting (dark/light toggle)
+- [x] Add keyboard shortcut configuration
 
 ---
 

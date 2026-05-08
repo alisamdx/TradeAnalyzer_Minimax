@@ -160,6 +160,8 @@ Authoritative DDL is in `migrations/001_init.sql` + `002_screen_schema.sql`. Pha
 
 ## Recent Changes
 
+- **v0.10.0 (2026-05-08)** — Phase 10: Settings Enhancements (Priority 9). Extended AppSettings with soundAlertsEnabled, autoConnectWebSocket, defaultScreenerIndex, theme ('dark'|'light'), keyboardShortcuts config. Added Keyboard Shortcuts tab with 5 configurable shortcuts. Theme support via CSS variables (data-theme attribute). Conditional WebSocket auto-connect based on setting. ScreenerView uses default universe from settings. See `changelogs/v0.10.0_2026-05-08.md`.
+
 - **v0.9.0 (2026-05-08)** — Phase 9: Morning Briefing Dashboard (Priority 7) + Alerts System (Priority 8). `007_alerts.sql` migration with alerts table (price, position types). `BriefingService` with market regime detection (SPY SMA trends, VIX classification), action items (expiring positions, delta breaches), top 15 quality setups with wheel metrics. `AlertsService` with WebSocket-based price monitoring. IPC handlers for briefing and alerts. `BriefingView` with MarketRegimeCard, ActionItemsList, TopSetupsTable; auto-refresh every 5 minutes. See `changelogs/v0.9.0_2026-05-08.md`.
 
 - **v0.8.0 (2026-05-08)** — Phase 8: Portfolio Tracking (Priority 6). `006_portfolio.sql` migration with positions table (CSP, CC, Stock). `PortfolioService` with CRUD and P&L calculations. IPC handlers for position management. `PortfolioView` with add form, Open/Closed tabs, P&L summary cards (positions, unrealized/realized, capital, win rate). Added to sidebar. See `changelogs/v0.8.0_2026-05-08.md`.
