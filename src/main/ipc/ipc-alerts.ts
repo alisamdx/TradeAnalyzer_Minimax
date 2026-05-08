@@ -26,6 +26,18 @@ function wrap<Args extends unknown[], R>(fn: (...args: Args) => R) {
   };
 }
 
+// Async wrap for async functions
+function wrapAsync<Args extends unknown[], R>(fn: (...args: Args) => Promise<R>) {
+  return async (_e: IpcMainInvokeEvent, ...args: Args): Promise<IpcResult<R>> => {
+    try {
+      const result = await fn(...args);
+      return ok(result);
+    } catch (err) {
+      return fail(err);
+    }
+  };
+}
+
 export function registerAlertsIpc(db: Database): void {
   const service = new AlertsService(db);
 

@@ -18,10 +18,12 @@ function fail(err: unknown): IpcResult<never> {
   return { ok: false, error: { code: 'BRIEFING_ERROR', message } };
 }
 
-function wrap<Args extends unknown[], R>(fn: (...args: Args) => R) {
-  return (_e: IpcMainInvokeEvent, ...args: Args): IpcResult<R> => {
+// Async wrap for async functions
+function wrapAsync<Args extends unknown[], R>(fn: (...args: Args) => Promise<R>) {
+  return async (_e: IpcMainInvokeEvent, ...args: Args): Promise<IpcResult<R>> => {
     try {
-      return ok(fn(...args));
+      const result = await fn(...args);
+      return ok(result);
     } catch (err) {
       return fail(err);
     }
@@ -38,28 +40,28 @@ export function registerBriefingIpc(
 
   // ─── Market Regime ──────────────────────────────────────────────────────────
 
-  ipcMain.handle('briefing:getMarketRegime', wrap(async () => {
+  ipcMain.handle('briefing:getMarketRegime', wrapAsync(async () => {
     const regime = await service.getMarketRegime();
     return { success: true, data: regime };
   }));
 
   // ─── Action Items ───────────────────────────────────────────────────────────
 
-  ipcMain.handle('briefing:getActionItems', wrap(async () => {
+  ipcMain.handle('briefing:getActionItems', wrapAsync(async () => {
     const items = await service.getActionItems();
     return { success: true, data: items };
   }));
 
   // ─── Top Setups ─────────────────────────────────────────────────────────────
 
-  ipcMain.handle('briefing:getTopSetups', wrap(async () => {
+  ipcMain.handle('briefing:getTopSetups', wrapAsync(async () => {
     const setups = await service.getTopSetups();
     return { success: true, data: setups };
   }));
 
   // ─── Full Briefing ────────────────────────────────────────────────────────────
 
-  ipcMain.handle('briefing:getFull', wrap(async () => {
+  ipcMain.handle('briefing:getFull', wrapAsync(async () => {
     const briefing = await service.getFullBriefing();
     return { success: true, data: briefing };
   }));

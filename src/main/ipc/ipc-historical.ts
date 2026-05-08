@@ -64,6 +64,18 @@ function wrap<Args extends unknown[], R>(fn: (...args: Args) => R) {
   };
 }
 
+// Async wrap for async functions
+function wrapAsync<Args extends unknown[], R>(fn: (...args: Args) => Promise<R>) {
+  return async (_e: IpcMainInvokeEvent, ...args: Args): Promise<IpcResult<R>> => {
+    try {
+      const result = await fn(...args);
+      return ok(result);
+    } catch (err) {
+      return fail(err);
+    }
+  };
+}
+
 export function registerHistoricalIpc(
   db: Database,
   getApiKey: () => string
@@ -83,7 +95,7 @@ export function registerHistoricalIpc(
     return service.getLatestFinancialDate(ticker, periodType);
   }));
 
-  ipcMain.handle('historical:fetchFinancials', wrap(async (ticker: string, periodType: 'quarterly' | 'annual') => {
+  ipcMain.handle('historical:fetchFinancials', wrapAsync(async (ticker: string, periodType: 'quarterly' | 'annual') => {
     const count = await fetchAndStoreFinancials(service, provider, ticker, periodType);
     return { success: true, count };
   }));
@@ -131,14 +143,14 @@ export function registerHistoricalIpc(
     return service.getLatestPriceDate(ticker);
   }));
 
-  ipcMain.handle('historical:fetchPrices', wrap(async (ticker: string, range: '1M' | '3M' | '6M' | '1Y' | '2Y' | '5Y') => {
+  ipcMain.handle('historical:fetchPrices', wrapAsync(async (ticker: string, range: '1M' | '3M' | '6M' | '1Y' | '2Y' | '5Y') => {
     const count = await fetchAndStorePrices(service, provider, ticker, range);
     return { success: true, count };
   }));
 
   // ─── Combined Auto-Fetch ──────────────────────────────────────────────────
 
-  ipcMain.handle('historical:fetchAndStore', wrap(async (ticker: string, type: 'financials' | 'prices', options?: { periodType?: 'quarterly' | 'annual'; range?: '1M' | '3M' | '6M' | '1Y' | '2Y' | '5Y' }) => {
+  ipcMain.handle('historical:fetchAndStore', wrapAsync(async (ticker: string, type: 'financials' | 'prices', options?: { periodType?: 'quarterly' | 'annual'; range?: '1M' | '3M' | '6M' | '1Y' | '2Y' | '5Y' }) => {
     if (type === 'financials') {
       const periodType = options?.periodType ?? 'quarterly';
       const count = await fetchAndStoreFinancials(service, provider, ticker, periodType);
