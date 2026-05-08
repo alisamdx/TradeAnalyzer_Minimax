@@ -160,6 +160,8 @@ Authoritative DDL is in `migrations/001_init.sql` + `002_screen_schema.sql`. Pha
 
 ## Recent Changes
 
+- **v0.8.0 (2026-05-08)** — Phase 8: Portfolio Tracking (Priority 6). `006_portfolio.sql` migration with positions table (CSP, CC, Stock). `PortfolioService` with CRUD and P&L calculations. IPC handlers for position management. `PortfolioView` with add form, Open/Closed tabs, P&L summary cards (positions, unrealized/realized, capital, win rate). Added to sidebar. See `changelogs/v0.8.0_2026-05-08.md`.
+
 - **v0.7.0 (2026-05-07)** — Phase 7: Screener Enhancements (Priority 5). Sortable columns on all 17+ fields using `useSortable`. Quick Actions per row: Add to Watchlist dropdown, Run Analysis button. CSV export for filtered results. Pagination (50 items per page). Cache status indicator with stale data warning. See `changelogs/v0.7.0_2026-05-07.md`.
 
 - **v0.6.0 (2026-05-07)** — Phase 6: Historical Charts (Priority 4). `005_historical_data.sql` migration with `historical_financials` and `historical_prices` tables. `HistoricalDataService` with Polygon API integration, SMA calculation. IPC handlers for financials/prices fetching. `HistoricalFinancialChart` (Recharts Area chart with 9 metrics, Q/A toggle, CSV export). `HistoricalPriceChart` (timeframe selector 1M-5Y, 50-day SMA, volume, CSV export). Integrated into AnalysisView with click-to-open from ticker symbols. See `changelogs/v0.6.0_2026-05-07.md`.

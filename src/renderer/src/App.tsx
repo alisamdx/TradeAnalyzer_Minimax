@@ -4,6 +4,7 @@ import { ScreenerView } from './views/ScreenerView.js';
 import { AnalysisView } from './views/AnalysisView.js';
 import { ValidateView } from './views/ValidateView.js';
 import { SettingsView } from './views/SettingsView.js';
+import { PortfolioView } from './views/PortfolioView.js';
 import { useCacheStatus } from './hooks/useCacheStatus.js';
 import { CacheStatusIndicator } from './components/CacheStatusIndicator.js';
 import { useSortable } from './hooks/useSortable.js';
@@ -12,7 +13,7 @@ import { RealtimePriceTicker } from './components/RealtimePriceTicker.js';
 
 declare const __APP_VERSION__: string;
 
-type View = 'watchlists' | 'screener' | 'analysis' | 'validate' | 'settings';
+type View = 'watchlists' | 'screener' | 'analysis' | 'validate' | 'portfolio' | 'settings';
 
 export function App() {
   const [view, setView] = useState<View>('watchlists');
@@ -334,6 +335,12 @@ export function App() {
             🎯 Validate
           </button>
           <button
+            className={`nav-btn ${view === 'portfolio' ? 'active' : ''}`}
+            onClick={() => setView('portfolio')}
+          >
+            💼 Portfolio
+          </button>
+          <button
             className={`nav-btn ${view === 'settings' ? 'active' : ''}`}
             onClick={() => setView('settings')}
           >
@@ -373,6 +380,7 @@ export function App() {
         {view === 'screener' && <ScreenerView />}
         {view === 'analysis' && <AnalysisView />}
         {view === 'validate' && <ValidateView />}
+        {view === 'portfolio' && <PortfolioView />}
         {view === 'settings' && <SettingsView />}
 
         {view === 'watchlists' && !active ? (

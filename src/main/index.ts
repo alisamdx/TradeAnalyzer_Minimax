@@ -23,6 +23,7 @@ import { registerCacheIpc } from './ipc/ipc-cache.js';
 import { WebSocketService } from './services/websocket-service.js';
 import { registerWebSocketIpc } from './ipc/ipc-websocket.js';
 import { registerHistoricalIpc } from './ipc/ipc-historical.js';
+import { registerPortfolioIpc } from './ipc/ipc-portfolio.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -146,6 +147,9 @@ app.whenReady().then(() => {
 
   // Phase 4 - Historical data IPC
   registerHistoricalIpc(db, () => getApiKey(db));
+
+  // Phase 6 - Portfolio tracking IPC
+  registerPortfolioIpc(db);
 
   // Phase 3 - WebSocket streaming
   const wsService = new WebSocketService(() => {

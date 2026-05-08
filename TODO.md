@@ -103,16 +103,16 @@
 
 ---
 
-## Priority 6: Portfolio Tracking (Critical)
+## Priority 6: Portfolio Tracking (Critical) ✅ COMPLETE
 
 **Database Migration:**
-- [ ] Create `006_portfolio.sql` with `positions` table:
+- [x] Create `006_portfolio.sql` with `positions` table:
   - Position types: CSP, CC, Stock
   - Entry/exit price, quantity, dates
   - Strike, expiration for options
 
 **Backend:**
-- [ ] Build position management IPC handlers:
+- [x] Build position management IPC handlers:
   - `portfolio:add` - Add new position
   - `portfolio:list` - List all positions
   - `portfolio:update` - Edit position
@@ -120,14 +120,14 @@
   - `portfolio:pnl` - Get P&L calculations
 
 **Frontend:**
-- [ ] Add `PortfolioView` to sidebar navigation
-- [ ] Create add position form (ticker, type, entry price, quantity, date, strike/expiration)
-- [ ] Build positions table with tabs: Open / Closed
-- [ ] Implement P&L calculations:
+- [x] Add `PortfolioView` to sidebar navigation
+- [x] Create add position form (ticker, type, entry price, quantity, date, strike/expiration)
+- [x] Build positions table with tabs: Open / Closed
+- [x] Implement P&L calculations:
   - Unrealized P&L: `(currentPrice - entryPrice) × quantity`
   - Realized P&L: `(exitPrice - entryPrice) × quantity + premium`
   - Annualized Return: `((realizedPnl / capital) × (365 / daysHeld)) × 100`
-- [ ] P&L summary cards (total unrealized, total realized, win rate %)
+- [x] P&L summary cards (total unrealized, total realized, win rate %)
 
 ---
 

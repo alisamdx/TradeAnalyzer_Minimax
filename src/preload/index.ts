@@ -243,8 +243,192 @@ function buildApi() {
       invoke<boolean>('historical:needsRefresh', ticker, dataType, maxAgeDays)
   };
 
+  const portfolio = {
+    add: (input: {
+      ticker: string;
+      positionType: 'CSP' | 'CC' | 'Stock';
+      quantity: number;
+      entryPrice: number;
+      entryDate: string;
+      entryNotes?: string | null;
+      strikePrice?: number | null;
+      expirationDate?: string | null;
+      premiumReceived?: number | null;
+    }) => invoke<{ success: boolean; data?: {
+      id: number;
+      ticker: string;
+      positionType: 'CSP' | 'CC' | 'Stock';
+      quantity: number;
+      entryPrice: number;
+      entryDate: string;
+      entryNotes: string | null;
+      exitPrice: number | null;
+      exitDate: string | null;
+      exitNotes: string | null;
+      strikePrice: number | null;
+      expirationDate: string | null;
+      premiumReceived: number | null;
+      currentPrice: number | null;
+      unrealizedPnl: number | null;
+      realizedPnl: number | null;
+      status: 'open' | 'closed';
+      createdAt: string;
+      updatedAt: string;
+    }; error?: string }>('portfolio:add', input),
+    list: (status?: 'open' | 'closed') => invoke<{ success: boolean; data?: {
+      id: number;
+      ticker: string;
+      positionType: 'CSP' | 'CC' | 'Stock';
+      quantity: number;
+      entryPrice: number;
+      entryDate: string;
+      entryNotes: string | null;
+      exitPrice: number | null;
+      exitDate: string | null;
+      exitNotes: string | null;
+      strikePrice: number | null;
+      expirationDate: string | null;
+      premiumReceived: number | null;
+      currentPrice: number | null;
+      unrealizedPnl: number | null;
+      realizedPnl: number | null;
+      status: 'open' | 'closed';
+      createdAt: string;
+      updatedAt: string;
+    }[]; error?: string }>('portfolio:list', status),
+    get: (id: number) => invoke<{ success: boolean; data?: {
+      id: number;
+      ticker: string;
+      positionType: 'CSP' | 'CC' | 'Stock';
+      quantity: number;
+      entryPrice: number;
+      entryDate: string;
+      entryNotes: string | null;
+      exitPrice: number | null;
+      exitDate: string | null;
+      exitNotes: string | null;
+      strikePrice: number | null;
+      expirationDate: string | null;
+      premiumReceived: number | null;
+      currentPrice: number | null;
+      unrealizedPnl: number | null;
+      realizedPnl: number | null;
+      status: 'open' | 'closed';
+      createdAt: string;
+      updatedAt: string;
+    } | null; error?: string }>('portfolio:get', id),
+    update: (id: number, update: {
+      quantity?: number;
+      entryPrice?: number;
+      entryDate?: string;
+      entryNotes?: string | null;
+      strikePrice?: number | null;
+      expirationDate?: string | null;
+      premiumReceived?: number | null;
+    }) => invoke<{ success: boolean; data?: {
+      id: number;
+      ticker: string;
+      positionType: 'CSP' | 'CC' | 'Stock';
+      quantity: number;
+      entryPrice: number;
+      entryDate: string;
+      entryNotes: string | null;
+      exitPrice: number | null;
+      exitDate: string | null;
+      exitNotes: string | null;
+      strikePrice: number | null;
+      expirationDate: string | null;
+      premiumReceived: number | null;
+      currentPrice: number | null;
+      unrealizedPnl: number | null;
+      realizedPnl: number | null;
+      status: 'open' | 'closed';
+      createdAt: string;
+      updatedAt: string;
+    }; error?: string }>('portfolio:update', id, update),
+    close: (id: number, input: { exitPrice: number; exitDate: string; exitNotes?: string | null }) => invoke<{ success: boolean; data?: {
+      id: number;
+      ticker: string;
+      positionType: 'CSP' | 'CC' | 'Stock';
+      quantity: number;
+      entryPrice: number;
+      entryDate: string;
+      entryNotes: string | null;
+      exitPrice: number | null;
+      exitDate: string | null;
+      exitNotes: string | null;
+      strikePrice: number | null;
+      expirationDate: string | null;
+      premiumReceived: number | null;
+      currentPrice: number | null;
+      unrealizedPnl: number | null;
+      realizedPnl: number | null;
+      status: 'open' | 'closed';
+      createdAt: string;
+      updatedAt: string;
+    }; error?: string }>('portfolio:close', id, input),
+    delete: (id: number) => invoke<{ success: boolean; error?: string }>('portfolio:delete', id),
+    pnlSummary: () => invoke<{ success: boolean; data?: {
+      totalPositions: number;
+      openPositions: number;
+      closedPositions: number;
+      totalUnrealizedPnl: number;
+      totalRealizedPnl: number;
+      totalCapitalDeployed: number;
+      winRate: number;
+      averageReturnPct: number;
+    }; error?: string }>('portfolio:pnlSummary'),
+    getWithMetrics: (id: number) => invoke<{ success: boolean; data?: {
+      id: number;
+      ticker: string;
+      positionType: 'CSP' | 'CC' | 'Stock';
+      quantity: number;
+      entryPrice: number;
+      entryDate: string;
+      entryNotes: string | null;
+      exitPrice: number | null;
+      exitDate: string | null;
+      exitNotes: string | null;
+      strikePrice: number | null;
+      expirationDate: string | null;
+      premiumReceived: number | null;
+      currentPrice: number | null;
+      unrealizedPnl: number | null;
+      realizedPnl: number | null;
+      status: 'open' | 'closed';
+      createdAt: string;
+      updatedAt: string;
+      capitalRequired: number;
+      daysHeld: number | null;
+      returnPct: number | null;
+      annualizedReturn: number | null;
+    } | null; error?: string }>('portfolio:getWithMetrics', id),
+    updatePrice: (ticker: string, price: number) => invoke<{ success: boolean; error?: string }>('portfolio:updatePrice', ticker, price),
+    listByTicker: (ticker: string) => invoke<{ success: boolean; data?: {
+      id: number;
+      ticker: string;
+      positionType: 'CSP' | 'CC' | 'Stock';
+      quantity: number;
+      entryPrice: number;
+      entryDate: string;
+      entryNotes: string | null;
+      exitPrice: number | null;
+      exitDate: string | null;
+      exitNotes: string | null;
+      strikePrice: number | null;
+      expirationDate: string | null;
+      premiumReceived: number | null;
+      currentPrice: number | null;
+      unrealizedPnl: number | null;
+      realizedPnl: number | null;
+      status: 'open' | 'closed';
+      createdAt: string;
+      updatedAt: string;
+    }[]; error?: string }>('portfolio:listByTicker', ticker)
+  };
+
   return {
-    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, websocket, historical },
+    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, websocket, historical, portfolio },
     dialog: {
       prompt: (opts: { title: string; defaultValue?: string }) =>
         invoke<string | null>('dialog:prompt', opts),
