@@ -90,9 +90,9 @@ export class BriefingService {
     this.getScreenResultsStmt = db.prepare(`
       SELECT sr.* FROM screen_results sr
       JOIN screen_runs s ON sr.screen_run_id = s.id
-      WHERE sr.payload ->> 'roe' > 15
-        AND sr.payload ->> 'debtToEquity' < 1.0
-        AND sr.payload ->> 'marketCap' > 10000000000
+      WHERE json_extract(sr.payload_json, '$.roe') > 15
+        AND json_extract(sr.payload_json, '$.debtToEquity') < 1.0
+        AND json_extract(sr.payload_json, '$.marketCap') > 10000000000
       ORDER BY s.run_at DESC
       LIMIT 50
     `);
@@ -230,24 +230,24 @@ export class BriefingService {
       const results = this.db.prepare(`
         SELECT DISTINCT
           sr.ticker,
-          sr.payload ->> 'roe' as roe,
-          sr.payload ->> 'peRatio' as pe_ratio,
-          sr.payload ->> 'debtToEquity' as debt_to_equity,
-          sr.payload ->> 'marketCap' as market_cap,
-          sr.payload ->> 'freeCashFlow' as fcf,
-          sr.payload ->> 'lastPrice' as last_price
+          json_extract(sr.payload_json, '$.roe') as roe,
+          json_extract(sr.payload_json, '$.peRatio') as pe_ratio,
+          json_extract(sr.payload_json, '$.debtToEquity') as debt_to_equity,
+          json_extract(sr.payload_json, '$.marketCap') as market_cap,
+          json_extract(sr.payload_json, '$.freeCashFlow') as fcf,
+          json_extract(sr.payload_json, '$.lastPrice') as last_price
         FROM screen_results sr
         JOIN screen_runs s ON sr.screen_run_id = s.id
         WHERE s.run_at = (
           SELECT MAX(run_at) FROM screen_runs
         )
-        AND sr.payload ->> 'roe' IS NOT NULL
-        AND CAST(sr.payload ->> 'roe' AS REAL) > 15
-        AND sr.payload ->> 'debtToEquity' IS NOT NULL
-        AND CAST(sr.payload ->> 'debtToEquity' AS REAL) < 1.0
-        AND sr.payload ->> 'marketCap' IS NOT NULL
-        AND CAST(sr.payload ->> 'marketCap' AS REAL) > 10000000000
-        ORDER BY CAST(sr.payload ->> 'roe' AS REAL) DESC
+        AND json_extract(sr.payload_json, '$.roe') IS NOT NULL
+        AND CAST(json_extract(sr.payload_json, '$.roe') AS REAL) > 15
+        AND json_extract(sr.payload_json, '$.debtToEquity') IS NOT NULL
+        AND CAST(json_extract(sr.payload_json, '$.debtToEquity') AS REAL) < 1.0
+        AND json_extract(sr.payload_json, '$.marketCap') IS NOT NULL
+        AND CAST(json_extract(sr.payload_json, '$.marketCap') AS REAL) > 10000000000
+        ORDER BY CAST(json_extract(sr.payload_json, '$.roe') AS REAL) DESC
         LIMIT 15
       `).all() as Array<{
         ticker: string;
