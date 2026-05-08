@@ -13,6 +13,20 @@
   font-size: 13px;
 }
 
+/* Light Theme */
+[data-theme="light"] {
+  color-scheme: light;
+  --bg: #ffffff;
+  --bg-elev: #f6f8fa;
+  --border: #d0d7de;
+  --text: #24292f;
+  --text-muted: #57606a;
+  --accent: #0969da;
+  --danger: #cf222e;
+  --success: #1a7f37;
+  --warning: #9a6700;
+}
+
 * {
   box-sizing: border-box;
 }

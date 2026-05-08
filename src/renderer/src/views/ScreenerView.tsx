@@ -83,8 +83,21 @@ export function ScreenerView() {
   const [watchlists, setWatchlists] = useState<{ id: number; name: string }[]>([]);
   const [showAddToWatchlist, setShowAddToWatchlist] = useState<number | null>(null);
 
-  // Load presets + runs + meta + cache status on mount.
+  // Load presets + runs + meta + cache status + default universe on mount.
   useEffect(() => {
+    // Load default screener index from settings
+    window.api.settings.getAll()
+      .then((settings) => {
+        const defaultUniverse = settings.defaultScreenerIndex || 'sp500';
+        setUniverse(defaultUniverse);
+        setCriteria(defaultCriteria(defaultUniverse));
+      })
+      .catch(() => {
+        // Fallback to sp500
+        setUniverse('sp500');
+        setCriteria(defaultCriteria('sp500'));
+      });
+
     window.api.screen.listPresets()
       .then(setPresets)
       .catch((e) => setError((e as Error).message));

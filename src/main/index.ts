@@ -166,8 +166,12 @@ app.whenReady().then(() => {
   });
   registerWebSocketIpc(wsService);
 
-  // Auto-connect WebSocket on startup
-  wsService.connect();
+  // Auto-connect WebSocket on startup (respect setting, default to true)
+  const autoConnectSetting = db.prepare("SELECT value FROM settings WHERE key = 'autoConnectWebSocket'").get() as { value?: string } | undefined;
+  const shouldAutoConnect = autoConnectSetting?.value !== 'false'; // default true
+  if (shouldAutoConnect) {
+    wsService.connect();
+  }
 
   // Check for incomplete runs from a previous session and surface in the renderer.
   // The renderer will prompt the user to resume or discard via the job IPC handlers.

@@ -29,6 +29,18 @@ export interface AppSettings {
   errorLogRetentionDays: number;
   autoBackupEnabled: boolean;
   autoBackupIntervalDays: number;
+  // Priority 9: Settings Enhancements
+  soundAlertsEnabled: boolean;
+  autoConnectWebSocket: boolean;
+  defaultScreenerIndex: 'sp500' | 'russell1000' | 'both';
+  theme: 'dark' | 'light';
+  keyboardShortcuts: {
+    refreshQuotes: string;
+    runAnalysis: string;
+    openScreener: string;
+    openPortfolio: string;
+    openBriefing: string;
+  };
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -40,7 +52,19 @@ const DEFAULT_SETTINGS: AppSettings = {
   logRetentionDays: 30,
   errorLogRetentionDays: 90,
   autoBackupEnabled: false,
-  autoBackupIntervalDays: 7
+  autoBackupIntervalDays: 7,
+  // Priority 9 defaults
+  soundAlertsEnabled: true,
+  autoConnectWebSocket: true,
+  defaultScreenerIndex: 'sp500',
+  theme: 'dark',
+  keyboardShortcuts: {
+    refreshQuotes: 'F5',
+    runAnalysis: 'Ctrl+Shift+A',
+    openScreener: 'Ctrl+Shift+S',
+    openPortfolio: 'Ctrl+Shift+P',
+    openBriefing: 'Ctrl+Shift+B'
+  }
 };
 
 export function registerSettingsIpc(
@@ -79,6 +103,18 @@ export function registerSettingsIpc(
           else if (k === 'errorLogRetentionDays') settings.errorLogRetentionDays = v !== undefined ? parseInt(v, 10) : DEFAULT_SETTINGS.errorLogRetentionDays;
           else if (k === 'autoBackupEnabled') settings.autoBackupEnabled = v === 'true';
           else if (k === 'autoBackupIntervalDays') settings.autoBackupIntervalDays = v !== undefined ? parseInt(v, 10) : DEFAULT_SETTINGS.autoBackupIntervalDays;
+          // Priority 9: Settings Enhancements
+          else if (k === 'soundAlertsEnabled') settings.soundAlertsEnabled = v === 'true';
+          else if (k === 'autoConnectWebSocket') settings.autoConnectWebSocket = v === 'true';
+          else if (k === 'defaultScreenerIndex') settings.defaultScreenerIndex = (v as AppSettings['defaultScreenerIndex']) ?? DEFAULT_SETTINGS.defaultScreenerIndex;
+          else if (k === 'theme') settings.theme = (v as AppSettings['theme']) ?? DEFAULT_SETTINGS.theme;
+          else if (k === 'keyboardShortcuts') {
+            try {
+              settings.keyboardShortcuts = v ? JSON.parse(v) : DEFAULT_SETTINGS.keyboardShortcuts;
+            } catch {
+              settings.keyboardShortcuts = DEFAULT_SETTINGS.keyboardShortcuts;
+            }
+          }
         }
       }
       return ok(settings);

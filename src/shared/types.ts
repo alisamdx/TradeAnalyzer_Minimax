@@ -442,6 +442,20 @@ export interface AppSettings {
   errorLogRetentionDays: number;
   autoBackupEnabled: boolean;
   autoBackupIntervalDays: number;
+  // Priority 9: Settings Enhancements
+  soundAlertsEnabled: boolean;
+  autoConnectWebSocket: boolean;
+  defaultScreenerIndex: 'sp500' | 'russell1000' | 'both';
+  theme: 'dark' | 'light';
+  keyboardShortcuts: KeyboardShortcutsConfig;
+}
+
+export interface KeyboardShortcutsConfig {
+  refreshQuotes: string;
+  runAnalysis: string;
+  openScreener: string;
+  openPortfolio: string;
+  openBriefing: string;
 }
 
 export interface DiagnosticCheck {

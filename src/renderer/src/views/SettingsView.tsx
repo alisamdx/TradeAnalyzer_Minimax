@@ -142,6 +142,7 @@ export function SettingsView() {
           <button className={`settings-tab ${activeTab === 'General' ? 'active' : ''}`} onClick={() => setActiveTab('General')}>General</button>
           <button className={`settings-tab ${activeTab === 'API & Data' ? 'active' : ''}`} onClick={() => setActiveTab('API & Data')}>API & Data</button>
           <button className={`settings-tab ${activeTab === 'Cache & Limits' ? 'active' : ''}`} onClick={() => setActiveTab('Cache & Limits')}>Cache & Limits</button>
+          <button className={`settings-tab ${activeTab === 'Keyboard' ? 'active' : ''}`} onClick={() => setActiveTab('Keyboard')}>Keyboard</button>
           <button className={`settings-tab ${activeTab === 'Diagnostics' ? 'active' : ''}`} onClick={() => setActiveTab('Diagnostics')}>Diagnostics</button>
           <button className={`settings-tab ${activeTab === 'Backup' ? 'active' : ''}`} onClick={() => setActiveTab('Backup')}>Backup</button>
         </aside>
@@ -211,7 +212,62 @@ export function SettingsView() {
                 <span>Enable weekly auto-backup</span>
               </div>
             </div>
-            
+
+            <div className="settings-row">
+              <label>Theme</label>
+              <div className="preset-btns">
+                <button
+                  className={`preset-btn ${settings.theme === 'dark' ? 'active' : ''}`}
+                  onClick={() => saveSettings({ theme: 'dark' })}
+                >
+                  Dark
+                </button>
+                <button
+                  className={`preset-btn ${settings.theme === 'light' ? 'active' : ''}`}
+                  onClick={() => saveSettings({ theme: 'light' })}
+                >
+                  Light
+                </button>
+              </div>
+            </div>
+
+            <div className="settings-row">
+              <label>Sound Alerts</label>
+              <div className="toggle-row">
+                <input
+                  type="checkbox"
+                  checked={settings.soundAlertsEnabled}
+                  onChange={e => saveSettings({ soundAlertsEnabled: e.target.checked })}
+                />
+                <span>Enable sound alerts for triggered alerts</span>
+              </div>
+            </div>
+
+            <div className="settings-row">
+              <label>Auto-Connect WebSocket</label>
+              <div className="toggle-row">
+                <input
+                  type="checkbox"
+                  checked={settings.autoConnectWebSocket}
+                  onChange={e => saveSettings({ autoConnectWebSocket: e.target.checked })}
+                />
+                <span>Connect to real-time price feed on startup</span>
+              </div>
+            </div>
+
+            <div className="settings-row">
+              <label>Default Screener Index</label>
+              <select
+                value={settings.defaultScreenerIndex}
+                onChange={e => saveSettings({ defaultScreenerIndex: e.target.value as AppSettings['defaultScreenerIndex'] })}
+                style={{ width: 200 }}
+              >
+                <option value="sp500">S&P 500</option>
+                <option value="russell1000">Russell 1000</option>
+                <option value="both">Both (Combined)</option>
+              </select>
+            </div>
+
             <div className="settings-row" style={{ marginTop: '20px' }}>
                <button className="run-btn" onClick={() => saveSettings({})} style={{ width: 'auto', padding: '6px 16px' }}>Save Settings</button>
             </div>
@@ -362,6 +418,85 @@ export function SettingsView() {
               <label>App Version</label>
               <span className="num">v{typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : '0.3.0'}</span>
             </div>
+          </div>
+          )}
+
+          {/* ── Keyboard Shortcuts ── */}
+          {activeTab === 'Keyboard' && (
+          <div className="settings-section">
+            <h2>Keyboard Shortcuts</h2>
+            <p className="hint" style={{ marginBottom: 16 }}>
+              Configure keyboard shortcuts for quick navigation. Changes apply immediately.
+            </p>
+
+            <div className="settings-row">
+              <label>Refresh Quotes</label>
+              <input
+                type="text"
+                value={settings.keyboardShortcuts?.refreshQuotes ?? 'F5'}
+                onChange={e => saveSettings({
+                  keyboardShortcuts: { ...settings.keyboardShortcuts, refreshQuotes: e.target.value }
+                })}
+                style={{ width: 120, fontFamily: 'monospace' }}
+                placeholder="F5"
+              />
+            </div>
+
+            <div className="settings-row">
+              <label>Run Analysis</label>
+              <input
+                type="text"
+                value={settings.keyboardShortcuts?.runAnalysis ?? 'Ctrl+Shift+A'}
+                onChange={e => saveSettings({
+                  keyboardShortcuts: { ...settings.keyboardShortcuts, runAnalysis: e.target.value }
+                })}
+                style={{ width: 120, fontFamily: 'monospace' }}
+                placeholder="Ctrl+Shift+A"
+              />
+            </div>
+
+            <div className="settings-row">
+              <label>Open Screener</label>
+              <input
+                type="text"
+                value={settings.keyboardShortcuts?.openScreener ?? 'Ctrl+Shift+S'}
+                onChange={e => saveSettings({
+                  keyboardShortcuts: { ...settings.keyboardShortcuts, openScreener: e.target.value }
+                })}
+                style={{ width: 120, fontFamily: 'monospace' }}
+                placeholder="Ctrl+Shift+S"
+              />
+            </div>
+
+            <div className="settings-row">
+              <label>Open Portfolio</label>
+              <input
+                type="text"
+                value={settings.keyboardShortcuts?.openPortfolio ?? 'Ctrl+Shift+P'}
+                onChange={e => saveSettings({
+                  keyboardShortcuts: { ...settings.keyboardShortcuts, openPortfolio: e.target.value }
+                })}
+                style={{ width: 120, fontFamily: 'monospace' }}
+                placeholder="Ctrl+Shift+P"
+              />
+            </div>
+
+            <div className="settings-row">
+              <label>Open Briefing</label>
+              <input
+                type="text"
+                value={settings.keyboardShortcuts?.openBriefing ?? 'Ctrl+Shift+B'}
+                onChange={e => saveSettings({
+                  keyboardShortcuts: { ...settings.keyboardShortcuts, openBriefing: e.target.value }
+                })}
+                style={{ width: 120, fontFamily: 'monospace' }}
+                placeholder="Ctrl+Shift+B"
+              />
+            </div>
+
+            <p className="hint" style={{ marginTop: 16 }}>
+              <strong>Note:</strong> Keyboard shortcuts require app restart to take effect.
+            </p>
           </div>
           )}
 

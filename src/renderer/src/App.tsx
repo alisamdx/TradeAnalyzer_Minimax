@@ -125,6 +125,28 @@ export function App() {
     };
   }, [activeId, items, subscribe, unsubscribe]);
 
+  // Apply theme setting
+  useEffect(() => {
+    const applyTheme = async () => {
+      try {
+        const settings = await window.api.settings.getAll();
+        if (settings.theme) {
+          document.documentElement.setAttribute('data-theme', settings.theme);
+        }
+      } catch {
+        // Theme is optional, ignore errors
+      }
+    };
+    applyTheme();
+
+    // Listen for theme changes from settings
+    const handleStorage = () => {
+      applyTheme();
+    };
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, []);
+
   const onCreate = async () => {
     const name = await window.dialog.prompt({ title: 'New watchlist name' });
     if (!name) return;
