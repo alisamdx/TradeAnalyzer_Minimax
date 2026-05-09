@@ -53,13 +53,12 @@ function createWindow(): BrowserWindow {
       contextIsolation: true,
       nodeIntegration: false
     },
-    title: `Trade Analyzer - Minimax v${appVersion()}`
+    title: `Trade Analyzer - Minmax v${appVersion()}`
   });
 
   win.on('ready-to-show', () => {
+    win.maximize();
     win.show();
-    // Open DevTools in development to debug renderer issues
-    win.webContents.openDevTools();
   });
   win.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
