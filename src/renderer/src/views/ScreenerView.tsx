@@ -284,10 +284,8 @@ export function ScreenerView() {
   }, []);
 
   const runAnalysisForTicker = useCallback(async (ticker: string) => {
-    // Open analysis view with this ticker
-    // This is a simplified approach - in practice you might want to pass state
-    setStatusMsg(`Opening analysis for ${ticker}...`);
-    // Emit event or use global state to switch to analysis view
+    // Navigate to analysis view - user can select a watchlist there
+    setStatusMsg(`Opening analysis view...`);
     window.dispatchEvent(new CustomEvent('navigate-to-analysis', { detail: { ticker } }));
   }, []);
 

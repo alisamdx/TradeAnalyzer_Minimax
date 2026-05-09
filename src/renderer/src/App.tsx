@@ -32,7 +32,10 @@ export function App() {
   const [quoteMap, setQuoteMap] = useState<Record<string, CachedQuote | null>>({});
   const [lastRefresh, setLastRefresh] = useState<string>('');
   const [isRefreshingCache, setIsRefreshingCache] = useState(false);
-  
+
+  // Ticker passed from screener "Run Analysis" button
+  const [analysisTicker, setAnalysisTicker] = useState<string | null>(null);
+
   // Audio context for alerts
   const audioCtxRef = useRef<AudioContext | null>(null);
 
@@ -46,7 +49,7 @@ export function App() {
   useEffect(() => {
     const removeAlertListener = window.api.websocket.onAlert((data) => {
       setAlertMsg(`ALERT: ${data.message}`);
-      
+
       if (data.playSound) {
         // Play a simple beep using Web Audio API
         if (!audioCtxRef.current) {
@@ -60,21 +63,29 @@ export function App() {
         const gainNode = ctx.createGain();
         osc.connect(gainNode);
         gainNode.connect(ctx.destination);
-        
+
         osc.type = 'sine';
         osc.frequency.setValueAtTime(880, ctx.currentTime); // A5
-        
+
         gainNode.gain.setValueAtTime(0, ctx.currentTime);
         gainNode.gain.linearRampToValueAtTime(1, ctx.currentTime + 0.05);
         gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
-        
+
         osc.start(ctx.currentTime);
         osc.stop(ctx.currentTime + 0.5);
       }
     });
 
+    // Listen for "Run Analysis" from screener
+    const handleNavigateToAnalysis = (e: CustomEvent<{ ticker: string }>) => {
+      setAnalysisTicker(e.detail.ticker);
+      setView('analysis');
+    };
+    window.addEventListener('navigate-to-analysis', handleNavigateToAnalysis as EventListener);
+
     return () => {
       removeAlertListener();
+      window.removeEventListener('navigate-to-analysis', handleNavigateToAnalysis as EventListener);
     };
   }, []);
 
