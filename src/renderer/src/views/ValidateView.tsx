@@ -130,6 +130,7 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
   const [timeframe, setTimeframe] = useState<TimeframeOption>({ label: '6M', days: 180 });
   const [isValidatingAll, setIsValidatingAll] = useState(false);
   const [validateProgress, setValidateProgress] = useState<{ done: number; total: number } | null>(null);
+  const [showSMA, setShowSMA] = useState(true);
 
   // Load watchlists on mount.
   useEffect(() => {
@@ -398,6 +399,49 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
       void zoneSeries;
     }
 
+    // SMA lines - 20, 50, 200 period moving averages.
+    if (showSMA) {
+      if (result.chart.sma20 && result.chart.sma20.length > 0) {
+        const sma20Data = filteredBars
+          .map((b, i) => {
+            const originalIndex = result.chart.bars.findIndex(bar => bar.t === b.t);
+            const smaVal = originalIndex >= 0 ? result.chart.sma20[originalIndex] : null;
+            return { time: (b.t / 1000) as import('lightweight-charts').Time, value: smaVal };
+          })
+          .filter(d => d.value !== null) as { time: import('lightweight-charts').Time; value: number }[];
+        if (sma20Data.length > 0) {
+          const sma20Series = addLineSeries(sma20Data, '#58a6ff', 1); // blue
+          void sma20Series;
+        }
+      }
+      if (result.chart.sma50 && result.chart.sma50.length > 0) {
+        const sma50Data = filteredBars
+          .map((b, i) => {
+            const originalIndex = result.chart.bars.findIndex(bar => bar.t === b.t);
+            const smaVal = originalIndex >= 0 ? result.chart.sma50[originalIndex] : null;
+            return { time: (b.t / 1000) as import('lightweight-charts').Time, value: smaVal };
+          })
+          .filter(d => d.value !== null) as { time: import('lightweight-charts').Time; value: number }[];
+        if (sma50Data.length > 0) {
+          const sma50Series = addLineSeries(sma50Data, '#d29922', 1); // amber
+          void sma50Series;
+        }
+      }
+      if (result.chart.sma200 && result.chart.sma200.length > 0) {
+        const sma200Data = filteredBars
+          .map((b, i) => {
+            const originalIndex = result.chart.bars.findIndex(bar => bar.t === b.t);
+            const smaVal = originalIndex >= 0 ? result.chart.sma200[originalIndex] : null;
+            return { time: (b.t / 1000) as import('lightweight-charts').Time, value: smaVal };
+          })
+          .filter(d => d.value !== null) as { time: import('lightweight-charts').Time; value: number }[];
+        if (sma200Data.length > 0) {
+          const sma200Series = addLineSeries(sma200Data, '#bc8cff', 1); // purple
+          void sma200Series;
+        }
+      }
+    }
+
     // Append marker layer on top of chart canvas.
     container.style.position = 'relative';
     container.appendChild(markerLayer);
@@ -523,7 +567,7 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
       chartRef.current = null;
       markerLayerRef.current = null;
     };
-  }, [result, timeframe]);
+  }, [result, timeframe, showSMA]);
 
   return (
     <div className="validate-view">
@@ -822,6 +866,14 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
                       ))}
                     </div>
                     <div className="zoom-btns">
+                      <label className="sma-toggle">
+                        <input
+                          type="checkbox"
+                          checked={showSMA}
+                          onChange={(e) => setShowSMA(e.target.checked)}
+                        />
+                        <span>SMA</span>
+                      </label>
                       <button className="tiny-btn" onClick={() => handleZoom('in')} title="Zoom In">+</button>
                       <button className="tiny-btn" onClick={() => handleZoom('out')} title="Zoom Out">−</button>
                       <button className="tiny-btn" onClick={() => handleZoom('reset')} title="Reset Zoom">⟲</button>

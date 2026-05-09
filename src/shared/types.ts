@@ -336,6 +336,9 @@ export interface ChartData {
   target: number | null;
   supportZones: Zone[];
   patterns: PatternHit[];
+  sma20: (number | null)[];
+  sma50: (number | null)[];
+  sma200: (number | null)[];
 }
 
 export interface ValidateDashboardResult {

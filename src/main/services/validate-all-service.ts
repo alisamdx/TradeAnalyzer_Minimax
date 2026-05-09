@@ -261,7 +261,10 @@ export class ValidateAllService {
         stopLoss: entryZone.stopLoss,
         target: entryZone.target,
         supportZones,
-        patterns
+        patterns,
+        sma20: sma20Arr,
+        sma50: sma50Arr,
+        sma200: sma200Arr
       },
       indicators: {
         rsi,
