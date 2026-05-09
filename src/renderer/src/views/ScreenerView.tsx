@@ -313,9 +313,9 @@ export function ScreenerView() {
 
     const headers = [
       'Ticker', 'Company', 'Sector', 'Last Price', 'Day Change %', 'P/E',
-      'EPS', 'Market Cap', 'Revenue Growth %', 'EPS Growth %', 'D/E',
-      'ROE %', 'Profit Margin %', 'Free Cash Flow', 'Current Ratio',
-      'Avg Volume', 'Beta'
+      'EPS', 'Revenue Growth %', 'EPS Growth %', 'D/E',
+      'ROE %', 'Profit Margin %', 'Current Ratio',
+      'Avg Volume'
     ];
     if (mode === 'soft') headers.push('Pass Score');
 
@@ -327,16 +327,13 @@ export function ScreenerView() {
       r.payload.dayChangePct ?? '',
       r.payload.peRatio ?? '',
       r.payload.eps ?? '',
-      r.payload.marketCap ?? '',
       r.payload.revenueGrowth ?? '',
       r.payload.epsGrowth ?? '',
       r.payload.debtToEquity ?? '',
       r.payload.roe ?? '',
       r.payload.profitMargin ?? '',
-      r.payload.freeCashFlow ?? '',
       r.payload.currentRatio ?? '',
       r.payload.avgVolume ?? '',
-      r.payload.beta ?? '',
       mode === 'soft' ? r.payload.passScore : ''
     ].join(','));
 
@@ -388,16 +385,13 @@ export function ScreenerView() {
     { key: 'dayChangePct', label: 'Day %', title: 'Day Change %', sortable: true },
     { key: 'peRatio', label: 'P/E', title: 'P/E Ratio', sortable: true },
     { key: 'eps', label: 'EPS', title: 'EPS (TTM)', sortable: true },
-    { key: 'marketCap', label: 'Mkt Cap', title: 'Market Cap', sortable: true },
     { key: 'revenueGrowth', label: 'Rev Gr%', title: 'Revenue Growth YoY', sortable: true },
     { key: 'epsGrowth', label: 'EPS Gr%', title: 'EPS Growth YoY', sortable: true },
     { key: 'debtToEquity', label: 'D/E', title: 'Debt / Equity', sortable: true },
     { key: 'roe', label: 'ROE%', title: 'Return on Equity', sortable: true },
     { key: 'profitMargin', label: 'Margin%', title: 'Profit Margin', sortable: true },
-    { key: 'freeCashFlow', label: 'FCF', title: 'Free Cash Flow', sortable: true },
     { key: 'currentRatio', label: 'Curr%', title: 'Current Ratio', sortable: true },
     { key: 'avgVolume', label: 'Vol', title: 'Average Volume', sortable: true },
-    { key: 'beta', label: 'β', title: 'Beta', sortable: true },
     ...(mode === 'soft' ? [{ key: 'passScore', label: 'Pass', title: 'Pass score', sortable: true }] : [])
   ];
 
@@ -636,16 +630,13 @@ export function ScreenerView() {
                         </td>
                         <td className="num">{fmt((r as unknown as ScreenResultRow & { peRatio: number | null }).peRatio)}</td>
                         <td className="num">{fmt((r as unknown as ScreenResultRow & { eps: number | null }).eps, '$')}</td>
-                        <td className="num">{fmt((r as unknown as ScreenResultRow & { marketCap: number | null }).marketCap, '$')}</td>
                         <td className="num">{fmt((r as unknown as ScreenResultRow & { revenueGrowth: number | null }).revenueGrowth, '', '%')}</td>
                         <td className="num">{fmt((r as unknown as ScreenResultRow & { epsGrowth: number | null }).epsGrowth, '', '%')}</td>
                         <td className="num">{fmt((r as unknown as ScreenResultRow & { debtToEquity: number | null }).debtToEquity)}</td>
                         <td className="num">{fmt((r as unknown as ScreenResultRow & { roe: number | null }).roe, '', '%')}</td>
                         <td className="num">{fmt((r as unknown as ScreenResultRow & { profitMargin: number | null }).profitMargin, '', '%')}</td>
-                        <td className="num">{fmt((r as unknown as ScreenResultRow & { freeCashFlow: number | null }).freeCashFlow, '$')}</td>
                         <td className="num">{fmt((r as unknown as ScreenResultRow & { currentRatio: number | null }).currentRatio)}</td>
                         <td className="num">{formatLargeNumber((r as unknown as ScreenResultRow & { avgVolume: number | null }).avgVolume)}</td>
-                        <td className="num">{fmt((r as unknown as ScreenResultRow & { beta: number | null }).beta)}</td>
                         {mode === 'soft' && (
                           <td className="num pass-score">
                             <span className="pass-badge">{(r as unknown as ScreenResultRow & { passScore: number }).passScore} / {totalEnabled}</span>
