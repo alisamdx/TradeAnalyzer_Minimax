@@ -162,6 +162,7 @@ export interface DerivedRatios {
   beta: number | null;
   sector: string | null;
   industry: string | null;
+  companyName: string | null;
 }
 
 export interface FundamentalsCache {
@@ -339,10 +340,18 @@ export interface ChartData {
   sma20: (number | null)[];
   sma50: (number | null)[];
   sma200: (number | null)[];
+  bollingerUpper: (number | null)[];
+  bollingerMiddle: (number | null)[];
+  bollingerLower: (number | null)[];
+  rsi: (number | null)[];
+  macd: (number | null)[];
+  macdSignal: (number | null)[];
+  macdHistogram: (number | null)[];
 }
 
 export interface ValidateDashboardResult {
   ticker: string;
+  companyName: string | null;
   verdict: 'Strong' | 'Acceptable' | 'Caution' | 'Avoid';
   verdictReason: string;
   fundamentals: {

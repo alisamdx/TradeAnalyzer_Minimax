@@ -157,8 +157,12 @@ export function computeEntryZoneAndStop(
   });
   const sma50 = sma50Arr[sma50Arr.length - 1] ?? null;
 
-  // Current price
-  const currentPrice = bars[bars.length - 1]!.c;
+  // Current price (safe because we checked bars.length >= 20)
+  const lastBar = bars[bars.length - 1];
+  const currentPrice = lastBar?.c;
+  if (currentPrice === undefined) {
+    return { entryZoneLow: null, entryZoneHigh: null, stopLoss: null, target: null, riskReward: null, reason: 'Unable to determine current price.' };
+  }
 
   // ATR
   const atrArr = computeATR(bars, 14);

@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { WatchlistService, WatchlistError } from '../services/watchlist-service.js';
 import { parseCsv, buildCsv } from '../services/csv.js';
 import type { CsvImportResult, CsvExportResult, IpcResult } from '@shared/types.js';
+import type { DataProvider } from '../services/data-provider.js';
 
 function ok<T>(value: T): IpcResult<T> {
   return { ok: true, value };
@@ -26,7 +27,7 @@ function wrap<Args extends unknown[], R>(fn: (...args: Args) => R) {
   };
 }
 
-export function registerWatchlistIpc(service: WatchlistService): void {
+export function registerWatchlistIpc(service: WatchlistService, dataProvider: DataProvider): void {
   ipcMain.handle('watchlists:list', wrap(() => service.list()));
   ipcMain.handle(
     'watchlists:get',
@@ -53,7 +54,28 @@ export function registerWatchlistIpc(service: WatchlistService): void {
   );
   ipcMain.handle(
     'watchlists:items:add',
-    wrap((id: number, ticker: string, notes: string | null) => service.addItem(id, ticker, notes))
+    async (_e: IpcMainInvokeEvent, id: number, ticker: string, notes: string | null): Promise<IpcResult<import('@shared/types.js').WatchlistItem>> => {
+      try {
+        // Validate that the ticker exists via the data provider
+        try {
+          const quote = await dataProvider.getQuote(ticker);
+          // If we got a valid response with data, ticker exists
+          if (quote.last === null && quote.prevClose === null) {
+            throw new WatchlistError('INVALID_TICKER', `Ticker "${ticker}" not found or has no trading data`);
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (msg.includes('404') || msg.includes('NotFound') || msg.includes('not found')) {
+            throw new WatchlistError('INVALID_TICKER', `Ticker "${ticker}" not found. Please verify the symbol is correct.`);
+          }
+          throw err;
+        }
+        const item = service.addItem(id, ticker, notes);
+        return ok(item);
+      } catch (err) {
+        return fail(err);
+      }
+    }
   );
   ipcMain.handle(
     'watchlists:items:add-bulk',

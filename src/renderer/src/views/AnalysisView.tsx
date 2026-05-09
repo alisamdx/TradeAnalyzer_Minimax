@@ -480,7 +480,26 @@ export function AnalysisView({ initialTicker, clearInitialTicker }: AnalysisView
           {/* Past snapshots */}
           {snapshots.length > 0 && (
             <div className="control-section">
-              <h3>Past Snapshots</h3>
+              <div className="snapshot-header">
+                <h3>Past Snapshots</h3>
+                <button
+                  className="clear-all-btn"
+                  onClick={async () => {
+                    if (!selectedWatchlistId) return;
+                    const confirmed = await window.dialog.confirm({
+                      title: 'Clear All Snapshots',
+                      message: 'Are you sure you want to delete all snapshots? This cannot be undone.'
+                    });
+                    if (confirmed) {
+                      await window.api.analysis.clearSnapshots(selectedWatchlistId);
+                      setSnapshots([]);
+                    }
+                  }}
+                  title="Delete all snapshots"
+                >
+                  Clear All
+                </button>
+              </div>
               <ul className="snapshot-list">
                 {snapshots.slice(0, 10).map((s) => (
                   <li key={s.id} className="snapshot-item">
@@ -492,6 +511,17 @@ export function AnalysisView({ initialTicker, clearInitialTicker }: AnalysisView
                       <span className="snapshot-mode">{s.mode}</span>
                       <span className="snapshot-date">{new Date(s.runAt).toLocaleDateString()}</span>
                       <span className="snapshot-count">{s.resultCount} results</span>
+                    </button>
+                    <button
+                      className="snapshot-delete-btn"
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        await window.api.analysis.deleteSnapshot(s.id);
+                        setSnapshots(prev => prev.filter(snap => snap.id !== s.id));
+                      }}
+                      title="Delete this snapshot"
+                    >
+                      ✕
                     </button>
                   </li>
                 ))}

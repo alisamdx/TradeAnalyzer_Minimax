@@ -38,12 +38,48 @@ export class ValidateAllService {
   /** Validate a single ticker (FR-4.5 target: <5s warm, <10s cold). */
   async validateTicker(ticker: string): Promise<ValidateDashboardResult> {
     await this.rateLimiter.acquire(1);
-    const quote = await this.fetchQuote(ticker);
-    const fundamentals = await this.fetchFundamentals(ticker);
-    const earnings = await this.dataProvider.getEarningsCalendar(ticker);
-    const bars = await this.dataProvider.getHistoricalBars(ticker, 'day', 252);
 
-    return this.buildValidateResult(ticker, quote, fundamentals, earnings, bars);
+    // Fetch quote - required but handle failures gracefully
+    let quote = { ticker, last: null as number | null, prevClose: null as number | null, volume: null as number | null, dayHigh: null as number | null, dayLow: null as number | null, ivRank: null as number | null, ivPercentile: null as number | null, distance52WkHigh: null as number | null, distance52WkLow: null as number | null, fetchedAt: new Date().toISOString() };
+    try {
+      quote = await this.fetchQuote(ticker);
+    } catch (err) {
+      console.log(`[validateTicker] ${ticker} quote fetch failed, continuing without:`, err instanceof Error ? err.message : String(err));
+    }
+
+    // Fetch fundamentals - optional, some tickers may not have data
+    let fundamentals = { peRatio: null as number | null, eps: null as number | null, revenueGrowth: null as number | null, profitMargin: null as number | null, debtToEquity: null as number | null, roe: null as number | null, companyName: null as string | null };
+    try {
+      fundamentals = await this.fetchFundamentals(ticker);
+    } catch (err) {
+      console.log(`[validateTicker] ${ticker} fundamentals fetch failed, continuing without:`, err instanceof Error ? err.message : String(err));
+    }
+
+    // Fetch earnings - optional
+    let earnings = { nextEarningsDate: null as string | null, epsActualLast4: [] as number[] };
+    try {
+      earnings = await this.dataProvider.getEarningsCalendar(ticker);
+    } catch (err) {
+      console.log(`[validateTicker] ${ticker} earnings fetch failed, continuing without:`, err instanceof Error ? err.message : String(err));
+    }
+
+    // Fetch historical bars - required but handle failures gracefully
+    let bars: Array<{ t: number; o: number; h: number; l: number; c: number; v: number }> = [];
+    try {
+      bars = await this.dataProvider.getHistoricalBars(ticker, 'day', 252);
+    } catch (err) {
+      console.log(`[validateTicker] ${ticker} historical bars fetch failed, continuing without:`, err instanceof Error ? err.message : String(err));
+    }
+
+    // Fetch IV data from options - optional
+    let ivData = { currentIv: null as number | null, iv52WkHigh: null as number | null, iv52WkLow: null as number | null };
+    try {
+      ivData = await this.dataProvider.getOptionsIV(ticker);
+    } catch (err) {
+      console.log(`[validateTicker] ${ticker} IV fetch failed, continuing without IV:`, err instanceof Error ? err.message : String(err));
+    }
+
+    return this.buildValidateResult(ticker, quote, fundamentals, earnings, bars, ivData);
   }
 
   /** Validate an entire watchlist via the job queue pipeline. */
@@ -129,7 +165,8 @@ export class ValidateAllService {
     quote: { last: number | null; prevClose: number | null; volume: number | null; dayHigh: number | null; dayLow: number | null; ivRank: number | null; ivPercentile: number | null },
     fundamentals: { peRatio: number | null; eps: number | null; revenueGrowth: number | null; profitMargin: number | null; debtToEquity: number | null; roe: number | null },
     earnings: { nextEarningsDate: string | null; epsActualLast4: number[] },
-    bars: Array<{ t: number; o: number; h: number; l: number; c: number; v: number }>
+    bars: Array<{ t: number; o: number; h: number; l: number; c: number; v: number }>,
+    ivData: { currentIv: number | null; iv52WkHigh: number | null; iv52WkLow: number | null }
   ): ValidateDashboardResult {
 
     // Trend (SMA stack + ADX).
@@ -161,30 +198,49 @@ export class ValidateAllService {
     const todayVol = recentVolumes[recentVolumes.length - 1] ?? 0;
     const volumeAnomalyPct = avgVol > 0 ? ((todayVol - avgVol) / avgVol) * 100 : null;
 
-    // Bollinger position (price vs 20-period BB).
+    // Bollinger Bands (20-period, 2 std dev).
     const bbPeriod = 20;
-    const bbSlice = bars.slice(-bbPeriod).map((b) => b.c);
-    const bbMid = bbSlice.reduce((a, b) => a + b, 0) / bbPeriod;
-    const bbStd = Math.sqrt(bbSlice.map((c) => (c - bbMid) ** 2).reduce((a, b) => a + b, 0) / bbPeriod);
-    const upperBand = bbMid + 2 * bbStd;
-    const lowerBand = bbMid - 2 * bbStd;
-    const bollingerPosition = upperBand !== lowerBand && currentPrice !== null
+    const bollingerMiddle: (number | null)[] = [];
+    const bollingerUpper: (number | null)[] = [];
+    const bollingerLower: (number | null)[] = [];
+    for (let i = 0; i < bars.length; i++) {
+      if (i < bbPeriod - 1) {
+        bollingerMiddle.push(null);
+        bollingerUpper.push(null);
+        bollingerLower.push(null);
+      } else {
+        const slice = bars.slice(i - bbPeriod + 1, i + 1).map(b => b.c);
+        const mid = slice.reduce((a, b) => a + b, 0) / bbPeriod;
+        const std = Math.sqrt(slice.map(c => (c - mid) ** 2).reduce((a, b) => a + b, 0) / bbPeriod);
+        bollingerMiddle.push(mid);
+        bollingerUpper.push(mid + 2 * std);
+        bollingerLower.push(mid - 2 * std);
+      }
+    }
+    const upperBand = bollingerUpper[bollingerUpper.length - 1] ?? null;
+    const lowerBand = bollingerLower[bollingerLower.length - 1] ?? null;
+    const bollingerPosition = upperBand !== null && lowerBand !== null && currentPrice !== null
       ? ((currentPrice - lowerBand) / (upperBand - lowerBand)) * 100 : null;
 
-    // MACD (12/26/9) — corrected: filter nulls before EMA, not after.
+    // MACD (12/26/9) — keep full arrays aligned with bars.
     const ema12 = this.emaSeries(bars, 12);
     const ema26 = this.emaSeries(bars, 26);
-    // Build MACD histogram from aligned EMA values.
-    const macdValues: number[] = [];
-    for (let i = 0; i < ema12.length; i++) {
+    const macd: (number | null)[] = [];
+    for (let i = 0; i < bars.length; i++) {
       const e12 = ema12[i];
       const e26 = ema26[i];
-      if (e12 != null && e26 != null) macdValues.push(e12 - e26);
+      macd.push(e12 != null && e26 != null ? e12 - e26 : null);
     }
     // Signal line = EMA(9) of MACD values.
-    const macdSignalValues = this.emaSeriesFromNumbers(macdValues, 9);
-    const macdSignal = macdSignalValues[macdSignalValues.length - 1] ?? null;
-    const macdValue = macdValues[macdValues.length - 1] ?? null;
+    const macdSignalArr = this.emaSeriesFromNumbersWithNulls(macd, 9);
+    const macdHistogram: (number | null)[] = [];
+    for (let i = 0; i < bars.length; i++) {
+      const m = macd[i];
+      const s = macdSignalArr[i];
+      macdHistogram.push(m != null && s != null ? m - s : null);
+    }
+    const macdSignal = macdSignalArr[macdSignalArr.length - 1] ?? null;
+    const macdValue = macd[macd.length - 1] ?? null;
 
     // Verdict.
     let verdict: ValidateDashboardResult['verdict'] = 'Acceptable';
@@ -234,6 +290,7 @@ export class ValidateAllService {
 
     return {
       ticker,
+      companyName: fundamentals.companyName,
       verdict,
       verdictReason: verdictReason.trim(),
       fundamentals: {
@@ -264,7 +321,14 @@ export class ValidateAllService {
         patterns,
         sma20: sma20Arr,
         sma50: sma50Arr,
-        sma200: sma200Arr
+        sma200: sma200Arr,
+        bollingerUpper,
+        bollingerMiddle,
+        bollingerLower,
+        rsi: rsiArr,
+        macd,
+        macdSignal: macdSignalArr,
+        macdHistogram
       },
       indicators: {
         rsi,
@@ -274,9 +338,9 @@ export class ValidateAllService {
         volumeAnomalyPct
       },
       ivData: {
-        currentIv: null,
-        iv52WkHigh: null,
-        iv52WkLow: null,
+        currentIv: ivData.currentIv,
+        iv52WkHigh: ivData.iv52WkHigh,
+        iv52WkLow: ivData.iv52WkLow,
         ivRank: quote.ivRank,
         ivPercentile: quote.ivPercentile
       },
@@ -307,6 +371,32 @@ export class ValidateAllService {
     for (let i = period; i < values.length; i++) {
       ema = values[i]! * k + ema * (1 - k);
       result[i] = ema;
+    }
+    return result;
+  }
+
+  /** EMA over an array that may contain nulls, preserving alignment. */
+  private emaSeriesFromNumbersWithNulls(values: (number | null)[], period: number): (number | null)[] {
+    const result: (number | null)[] = new Array(values.length).fill(null);
+    const k = 2 / (period + 1);
+    let ema: number | null = null;
+    let validCount = 0;
+
+    for (let i = 0; i < values.length; i++) {
+      const v = values[i];
+      if (v == null) {
+        result[i] = null;
+        continue;
+      }
+      validCount++;
+      if (ema == null) {
+        ema = v;
+      } else {
+        ema = v * k + ema * (1 - k);
+      }
+      if (validCount >= period) {
+        result[i] = ema;
+      }
     }
     return result;
   }

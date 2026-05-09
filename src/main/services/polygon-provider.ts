@@ -333,6 +333,96 @@ export class PolygonDataProvider implements DataProvider {
     };
   }
 
+  /** Fetch current IV from ATM options for a ticker. */
+  async getOptionsIV(ticker: string): Promise<{ currentIv: number | null; iv52WkHigh: number | null; iv52WkLow: number | null }> {
+    console.log(`[getOptionsIV] ${ticker} called`);
+    try {
+      // Fetch options snapshot - get ATM options to derive IV
+      // Use a separate try-catch to handle 404s gracefully (some tickers have no options)
+      let data: Record<string, unknown>;
+      try {
+        data = await this.fetchWithRetry(
+          `/v3/snapshot/options/${ticker}`,
+          { limit: '250' }
+        );
+      } catch (fetchError) {
+        // 404 means no options data available for this ticker
+        const errMsg = fetchError instanceof Error ? fetchError.message : String(fetchError);
+        console.log(`[getOptionsIV] ${ticker} fetch error:`, errMsg.slice(0, 100));
+        if (errMsg.includes('404') || errMsg.includes('NotFound')) {
+          console.log(`[getOptionsIV] ${ticker} returning nulls (404 caught)`);
+          return { currentIv: null, iv52WkHigh: null, iv52WkLow: null };
+        }
+        throw fetchError;
+      }
+
+      // The results is directly an array of options contracts
+      const contracts = data.results as unknown[] | undefined;
+      if (!contracts || contracts.length === 0) {
+        return { currentIv: null, iv52WkHigh: null, iv52WkLow: null };
+      }
+
+      // Get underlying price from the first contract's underlying_asset field
+      let underlyingPrice: number | undefined;
+      if (contracts.length > 0) {
+        const firstContract = contracts[0] as Record<string, unknown>;
+        if (typeof firstContract['underlying_asset'] === 'object' && firstContract['underlying_asset'] !== null) {
+          underlyingPrice = (firstContract['underlying_asset'] as Record<string, unknown>)?.price as number | undefined;
+        }
+      }
+
+      // Find ATM options (strike closest to current price) and get their IV
+      let atmIv: number | null = null;
+      let minDistance = Infinity;
+
+      const allIvs: number[] = [];
+
+      for (const c of contracts) {
+        const co = c as Record<string, unknown>;
+        const strike = typeof co['strike_price'] === 'number' ? co['strike_price'] as number : 0;
+        const iv = typeof co['implied_volatility'] === 'number' ? co['implied_volatility'] as number : 0;
+
+        if (iv > 0) {
+          allIvs.push(iv);
+
+          // Find ATM option
+          if (underlyingPrice && strike > 0) {
+            const distance = Math.abs(strike - underlyingPrice);
+            if (distance < minDistance) {
+              minDistance = distance;
+              atmIv = iv;
+            }
+          }
+        }
+      }
+
+      // If no underlying price found, use average IV of near-term options
+      if (!atmIv && allIvs.length > 0) {
+        // Take median IV as fallback
+        allIvs.sort((a, b) => a - b);
+        atmIv = allIvs[Math.floor(allIvs.length / 2)] ?? null;
+      }
+
+      // Calculate IV range from the options we have
+      let iv52WkHigh: number | null = null;
+      let iv52WkLow: number | null = null;
+      if (allIvs.length > 0) {
+        allIvs.sort((a, b) => a - b);
+        iv52WkLow = allIvs[0] ?? null;
+        iv52WkHigh = allIvs[allIvs.length - 1] ?? null;
+      }
+
+      return {
+        currentIv: atmIv ? atmIv * 100 : null, // Convert to percentage
+        iv52WkHigh: iv52WkHigh ? iv52WkHigh * 100 : null,
+        iv52WkLow: iv52WkLow ? iv52WkLow * 100 : null
+      };
+    } catch (err) {
+      console.log(`[getOptionsIV] ${ticker} outer catch:`, err instanceof Error ? err.message : String(err));
+      return { currentIv: null, iv52WkHigh: null, iv52WkLow: null };
+    }
+  }
+
   async getIndexConstituents(_index: Universe): Promise<ConstituentRow[]> {
     // This is a no-op here — constituents are loaded from bundled CSV files
     // by the ConstituentsService. This method exists on the interface for

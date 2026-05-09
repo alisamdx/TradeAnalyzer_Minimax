@@ -131,6 +131,9 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
   const [isValidatingAll, setIsValidatingAll] = useState(false);
   const [validateProgress, setValidateProgress] = useState<{ done: number; total: number } | null>(null);
   const [showSMA, setShowSMA] = useState(true);
+  const [showBB, setShowBB] = useState(true);
+  const [showRSI, setShowRSI] = useState(true);
+  const [showMACD, setShowMACD] = useState(true);
 
   // Load watchlists on mount.
   useEffect(() => {
@@ -229,6 +232,14 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
   // Track current result/timeframe for pattern zone re-render
   const patternResultRef = useRef<ValidateDashboardResult | null>(null);
   const patternTimeframeRef = useRef<TimeframeOption | null>(null);
+
+  // RSI chart refs
+  const rsiChartContainerRef = useRef<HTMLDivElement>(null);
+  const rsiChartRef = useRef<IChartApi | null>(null);
+
+  // MACD chart refs
+  const macdChartContainerRef = useRef<HTMLDivElement>(null);
+  const macdChartRef = useRef<IChartApi | null>(null);
 
   // ── Zoom handlers ─────────────────────────────────────────────────────────────
   const handleZoom = useCallback((direction: 'in' | 'out' | 'reset') => {
@@ -442,6 +453,43 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
       }
     }
 
+    // Bollinger Bands overlay (20-period, 2 std dev).
+    if (showBB && result.chart.bollingerUpper && result.chart.bollingerMiddle && result.chart.bollingerLower) {
+      const bbUpperData = filteredBars
+        .map((b) => {
+          const originalIndex = result.chart.bars.findIndex(bar => bar.t === b.t);
+          const val = originalIndex >= 0 ? result.chart.bollingerUpper[originalIndex] : null;
+          return { time: (b.t / 1000) as import('lightweight-charts').Time, value: val };
+        })
+        .filter(d => d.value !== null) as { time: import('lightweight-charts').Time; value: number }[];
+      const bbMiddleData = filteredBars
+        .map((b) => {
+          const originalIndex = result.chart.bars.findIndex(bar => bar.t === b.t);
+          const val = originalIndex >= 0 ? result.chart.bollingerMiddle[originalIndex] : null;
+          return { time: (b.t / 1000) as import('lightweight-charts').Time, value: val };
+        })
+        .filter(d => d.value !== null) as { time: import('lightweight-charts').Time; value: number }[];
+      const bbLowerData = filteredBars
+        .map((b) => {
+          const originalIndex = result.chart.bars.findIndex(bar => bar.t === b.t);
+          const val = originalIndex >= 0 ? result.chart.bollingerLower[originalIndex] : null;
+          return { time: (b.t / 1000) as import('lightweight-charts').Time, value: val };
+        })
+        .filter(d => d.value !== null) as { time: import('lightweight-charts').Time; value: number }[];
+      if (bbUpperData.length > 0) {
+        const bbUpperSeries = addLineSeries(bbUpperData, 'rgba(139,148,158,0.5)', 1, 2);
+        void bbUpperSeries;
+      }
+      if (bbMiddleData.length > 0) {
+        const bbMiddleSeries = addLineSeries(bbMiddleData, 'rgba(139,148,158,0.7)', 1);
+        void bbMiddleSeries;
+      }
+      if (bbLowerData.length > 0) {
+        const bbLowerSeries = addLineSeries(bbLowerData, 'rgba(139,148,158,0.5)', 1, 2);
+        void bbLowerSeries;
+      }
+    }
+
     // Append marker layer on top of chart canvas.
     container.style.position = 'relative';
     container.appendChild(markerLayer);
@@ -567,7 +615,190 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
       chartRef.current = null;
       markerLayerRef.current = null;
     };
-  }, [result, timeframe, showSMA]);
+  }, [result, timeframe, showSMA, showBB]);
+
+  // ── RSI Chart ────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!rsiChartContainerRef.current || !result || !showRSI) {
+      // Clean up if hidden
+      if (rsiChartRef.current) {
+        rsiChartRef.current.remove();
+        rsiChartRef.current = null;
+      }
+      return;
+    }
+
+    const bars = result.chart.bars;
+    if (!bars.length || !result.chart.rsi) return;
+
+    const cutoff = Date.now() - timeframe.days * 86_400_000;
+    const filteredBars = bars.filter(b => b.t >= cutoff);
+
+    if (rsiChartRef.current) {
+      rsiChartRef.current.remove();
+      rsiChartRef.current = null;
+    }
+
+    const container = rsiChartContainerRef.current;
+    const rsiChart = createChart(container, {
+      width: container.clientWidth,
+      height: 100,
+      layout: { background: { type: ColorType.Solid, color: 'transparent' }, textColor: '#8b949e' },
+      grid: { vertLines: { color: 'rgba(48,54,61,0.3)' }, horzLines: { color: 'rgba(48,54,61,0.3)' } },
+      rightPriceScale: { borderColor: '#30363d', scaleMargins: { top: 0.1, bottom: 0.1 } },
+      timeScale: { visible: false, borderColor: '#30363d' },
+      crosshair: { mode: 0 },
+    });
+
+    rsiChartRef.current = rsiChart;
+
+    const rsiData = filteredBars
+      .map((b) => {
+        const originalIndex = result.chart.bars.findIndex(bar => bar.t === b.t);
+        const val = originalIndex >= 0 ? result.chart.rsi[originalIndex] : null;
+        return { time: (b.t / 1000) as Time, value: val };
+      })
+      .filter(d => d.value !== null) as { time: Time; value: number }[];
+
+    if (rsiData.length > 0) {
+      const rsiSeries = rsiChart.addLineSeries({
+        color: '#d29922',
+        lineWidth: 1,
+        priceLineVisible: false,
+      });
+      rsiSeries.setData(rsiData);
+
+      // Add overbought/oversold lines
+      rsiSeries.createPriceLine({ price: 70, color: 'rgba(248,81,73,0.3)', lineWidth: 1, lineStyle: 2 });
+      rsiSeries.createPriceLine({ price: 30, color: 'rgba(63,185,80,0.3)', lineWidth: 1, lineStyle: 2 });
+    }
+
+    // Sync time scale with main chart
+    if (chartRef.current) {
+      const mainRange = chartRef.current.timeScale().getVisibleLogicalRange();
+      if (mainRange) {
+        rsiChart.timeScale().setVisibleLogicalRange(mainRange);
+      }
+    }
+
+    return () => {
+      rsiChart.remove();
+      rsiChartRef.current = null;
+    };
+  }, [result, timeframe, showRSI]);
+
+  // ── MACD Chart ───────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!macdChartContainerRef.current || !result || !showMACD) {
+      if (macdChartRef.current) {
+        macdChartRef.current.remove();
+        macdChartRef.current = null;
+      }
+      return;
+    }
+
+    const bars = result.chart.bars;
+    if (!bars.length || !result.chart.macd) return;
+
+    const cutoff = Date.now() - timeframe.days * 86_400_000;
+    const filteredBars = bars.filter(b => b.t >= cutoff);
+
+    if (macdChartRef.current) {
+      macdChartRef.current.remove();
+      macdChartRef.current = null;
+    }
+
+    const container = macdChartContainerRef.current;
+    const macdChart = createChart(container, {
+      width: container.clientWidth,
+      height: 100,
+      layout: { background: { type: ColorType.Solid, color: 'transparent' }, textColor: '#8b949e' },
+      grid: { vertLines: { color: 'rgba(48,54,61,0.3)' }, horzLines: { color: 'rgba(48,54,61,0.3)' } },
+      rightPriceScale: { borderColor: '#30363d', scaleMargins: { top: 0.1, bottom: 0.1 } },
+      timeScale: { visible: false, borderColor: '#30363d' },
+      crosshair: { mode: 0 },
+    });
+
+    macdChartRef.current = macdChart;
+
+    // MACD line
+    const macdData = filteredBars
+      .map((b) => {
+        const originalIndex = result.chart.bars.findIndex(bar => bar.t === b.t);
+        const val = originalIndex >= 0 ? result.chart.macd[originalIndex] : null;
+        return { time: (b.t / 1000) as Time, value: val };
+      })
+      .filter(d => d.value !== null) as { time: Time; value: number }[];
+
+    // Signal line
+    const signalData = filteredBars
+      .map((b) => {
+        const originalIndex = result.chart.bars.findIndex(bar => bar.t === b.t);
+        const val = originalIndex >= 0 ? result.chart.macdSignal?.[originalIndex] : null;
+        return { time: (b.t / 1000) as Time, value: val };
+      })
+      .filter(d => d.value !== null) as { time: Time; value: number }[];
+
+    // Histogram
+    const histogramData = filteredBars
+      .map((b) => {
+        const originalIndex = result.chart.bars.findIndex(bar => bar.t === b.t);
+        const val = originalIndex >= 0 ? result.chart.macdHistogram?.[originalIndex] : null;
+        if (val === null) return null;
+        return { time: (b.t / 1000) as Time, value: val, color: val >= 0 ? 'rgba(63,185,80,0.5)' : 'rgba(248,81,73,0.5)' };
+      })
+      .filter(d => d !== null) as { time: Time; value: number; color: string }[];
+
+    if (macdData.length > 0) {
+      const macdSeries = macdChart.addLineSeries({
+        color: '#58a6ff',
+        lineWidth: 1,
+        priceLineVisible: false,
+      });
+      macdSeries.setData(macdData);
+    }
+
+    if (signalData.length > 0) {
+      const signalSeries = macdChart.addLineSeries({
+        color: '#d29922',
+        lineWidth: 1,
+        priceLineVisible: false,
+      });
+      signalSeries.setData(signalData);
+    }
+
+    if (histogramData.length > 0) {
+      const histogramSeries = macdChart.addHistogramSeries({
+        priceFormat: { type: 'price' },
+        priceLineVisible: false,
+      });
+      histogramSeries.setData(histogramData);
+    }
+
+    // Zero line
+    if (macdData.length > 0) {
+      const macdSeries = macdChart.addLineSeries({
+        color: 'rgba(139,148,158,0.3)',
+        lineWidth: 1,
+        lineStyle: 2,
+        priceLineVisible: false,
+      });
+      macdSeries.setData(filteredBars.map(b => ({ time: (b.t / 1000) as Time, value: 0 })));
+    }
+
+    // Sync time scale with main chart
+    if (chartRef.current) {
+      const mainRange = chartRef.current.timeScale().getVisibleLogicalRange();
+      if (mainRange) {
+        macdChart.timeScale().setVisibleLogicalRange(mainRange);
+      }
+    }
+
+    return () => {
+      macdChart.remove();
+      macdChartRef.current = null;
+    };
+  }, [result, timeframe, showMACD]);
 
   return (
     <div className="validate-view">
@@ -669,12 +900,93 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
                   >
                     {result.verdict}
                   </span>
-                  <h2>{result.ticker}</h2>
-                  {result.chart.bars.length > 0 && (
-                    <span className="current-price">
-                      ${result.chart.bars[result.chart.bars.length - 1]!.c.toFixed(2)}
-                    </span>
-                  )}
+                  {(() => {
+                    // Determine price position for coloring ticker and price
+                    const price = result.chart.bars[result.chart.bars.length - 1]?.c;
+                    const entryLow = result.chart.entryZoneLow;
+                    const entryHigh = result.chart.entryZoneHigh;
+                    const target = result.chart.target;
+                    const stop = result.chart.stopLoss;
+
+                    let priceColor = '#8b949e'; // default gray
+                    if (price !== undefined) {
+                      if (entryLow !== null && entryHigh !== null) {
+                        if (price >= entryLow && price <= entryHigh) {
+                          priceColor = '#3fb950'; // green - in entry zone
+                        } else {
+                          const nearEntryLow = entryLow * 0.97;
+                          const nearEntryHigh = entryHigh * 1.03;
+                          if (price >= nearEntryLow && price <= nearEntryHigh) {
+                            priceColor = '#d29922'; // yellow - near entry
+                          }
+                        }
+                      }
+                      if (target !== null) {
+                        if (price >= target * 0.97 && price <= target * 1.03) {
+                          priceColor = '#58a6ff'; // blue - near target
+                        } else if (price > target) {
+                          priceColor = '#1f4078'; // dark blue - above target (not good for entry)
+                        }
+                      }
+                      if (stop !== null) {
+                        if (price >= stop * 0.97 && price <= stop * 1.03) {
+                          priceColor = '#f85149'; // red - near stop
+                        } else if (price < stop) {
+                          priceColor = '#f85149'; // red - below stop
+                        }
+                      }
+                    }
+                    return (
+                      <>
+                        <h2 style={{ color: priceColor }}>{result.ticker}</h2>
+                        {result.companyName && (
+                          <span className="company-name">{result.companyName}</span>
+                        )}
+                        {result.chart.bars.length > 0 && (
+                          <>
+                            <span className="current-price" style={{ color: priceColor }}>
+                              ${result.chart.bars[result.chart.bars.length - 1]!.c.toFixed(2)}
+                            </span>
+                            {(() => {
+                              if (entryLow !== null && entryHigh !== null) {
+                                // In entry zone
+                                if (price! >= entryLow && price! <= entryHigh) {
+                                  return <span className="price-badge in-entry">In Entry Zone</span>;
+                                }
+                                // Near entry zone (within 3%)
+                                const nearEntryLow = entryLow * 0.97;
+                                const nearEntryHigh = entryHigh * 1.03;
+                                if (price! >= nearEntryLow && price! <= nearEntryHigh) {
+                                  return <span className="price-badge near-entry">Near Entry</span>;
+                                }
+                              }
+                              if (target !== null) {
+                                // Near target (within 3%)
+                                if (price! >= target * 0.97 && price! <= target * 1.03) {
+                                  return <span className="price-badge near-target">Near Target</span>;
+                                }
+                                // Above target
+                                if (price! > target) {
+                                  return <span className="price-badge above-target">Above Target</span>;
+                                }
+                              }
+                              if (stop !== null) {
+                                // Near stop loss (within 3%)
+                                if (price! >= stop * 0.97 && price! <= stop * 1.03) {
+                                  return <span className="price-badge near-stop">Near Stop</span>;
+                                }
+                                // Below stop
+                                if (price! < stop) {
+                                  return <span className="price-badge below-stop">Below Stop</span>;
+                                }
+                              }
+                              return null;
+                            })()}
+                          </>
+                        )}
+                      </>
+                    );
+                  })()}
                   <button onClick={refreshTicker} className="tiny-btn" style={{ marginLeft: 8 }}>
                     ↻ Refresh
                   </button>
@@ -874,6 +1186,30 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
                         />
                         <span>SMA</span>
                       </label>
+                      <label className="sma-toggle">
+                        <input
+                          type="checkbox"
+                          checked={showBB}
+                          onChange={(e) => setShowBB(e.target.checked)}
+                        />
+                        <span>BB</span>
+                      </label>
+                      <label className="sma-toggle">
+                        <input
+                          type="checkbox"
+                          checked={showRSI}
+                          onChange={(e) => setShowRSI(e.target.checked)}
+                        />
+                        <span>RSI</span>
+                      </label>
+                      <label className="sma-toggle">
+                        <input
+                          type="checkbox"
+                          checked={showMACD}
+                          onChange={(e) => setShowMACD(e.target.checked)}
+                        />
+                        <span>MACD</span>
+                      </label>
                       <button className="tiny-btn" onClick={() => handleZoom('in')} title="Zoom In">+</button>
                       <button className="tiny-btn" onClick={() => handleZoom('out')} title="Zoom Out">−</button>
                       <button className="tiny-btn" onClick={() => handleZoom('reset')} title="Reset Zoom">⟲</button>
@@ -909,7 +1245,34 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
                   {result.chart.supportZones.some(z => z.type === 'supply') && (
                     <span className="legend-item" style={{ color: '#f85149' }} title="Supply zone: Price level where selling pressure is strong. Potential resistance area for reversal.">:.. Supply Zone</span>
                   )}
+                  {showBB && (
+                    <span className="legend-item" style={{ color: 'rgba(139,148,158,0.7)' }} title="Bollinger Bands (20-period, 2 std dev). Volatility indicator. Price near upper band = potentially overbought, near lower = potentially oversold.">□ Bollinger Bands</span>
+                  )}
                 </div>
+                {/* RSI Chart Panel */}
+                {showRSI && (
+                  <div className="indicator-chart-section">
+                    <div className="indicator-chart-header">
+                      <span className="indicator-chart-label" title="Relative Strength Index (14 periods). Values above 70 indicate overbought conditions, below 30 indicate oversold.">RSI (14)</span>
+                      <span className="indicator-chart-value">
+                        {result.chart.rsi ? fmtNum(result.chart.rsi[result.chart.rsi.length - 1], 1) : '—'}
+                      </span>
+                    </div>
+                    <div className="indicator-chart-container" ref={rsiChartContainerRef} />
+                  </div>
+                )}
+                {/* MACD Chart Panel */}
+                {showMACD && (
+                  <div className="indicator-chart-section">
+                    <div className="indicator-chart-header">
+                      <span className="indicator-chart-label" title="Moving Average Convergence Divergence (12/26/9). MACD line (blue) crossing above signal (amber) is bullish, below is bearish. Histogram shows momentum.">MACD (12/26/9)</span>
+                      <span className="indicator-chart-value">
+                        {result.chart.macd ? fmtNum(result.chart.macd[result.chart.macd.length - 1], 2) : '—'}
+                      </span>
+                    </div>
+                    <div className="indicator-chart-container" ref={macdChartContainerRef} />
+                  </div>
+                )}
               </div>
 
               {/* ── Section E: Other Indicators ── */}
@@ -958,10 +1321,6 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
                         (range {result.ivData.iv52WkLow.toFixed(0)}–{result.ivData.iv52WkHigh.toFixed(0)}%)
                       </span>
                     )}
-                  </div>
-                  <div className="indicator-card">
-                    <span className="ind-label" title="IV Rank. Where current IV stands relative to its 52-week range. High IV Rank (>50%) suggests selling premium strategies. Low IV Rank (<30%) suggests buying premium strategies.">IV Rank</span>
-                    <span className="ind-value">{fmtNum(result.ivData.ivRank, 0)}%</span>
                   </div>
                 </div>
               </div>

@@ -286,6 +286,7 @@ export function computeRatios(input: FundamentalsComputerInput): DerivedRatios {
     dividendYield,
     beta,
     sector,
-    industry: details.industry ?? null
+    industry: details.industry ?? null,
+    companyName: financials.company_name ?? null
   };
 }

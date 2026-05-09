@@ -134,6 +134,22 @@ export function registerAnalysisIpc(
     })
   );
 
+  ipcMain.handle(
+    'analysis:delete-snapshot',
+    wrap((id: number) => {
+      analysisService.deleteSnapshot(id);
+      return { success: true };
+    })
+  );
+
+  ipcMain.handle(
+    'analysis:clear-snapshots',
+    wrap((watchlistId: number) => {
+      analysisService.clearSnapshots(watchlistId);
+      return { success: true };
+    })
+  );
+
   // ── Save as watchlist ──────────────────────────────────────────────────────
   ipcMain.handle(
     'analysis:save-as-watchlist',

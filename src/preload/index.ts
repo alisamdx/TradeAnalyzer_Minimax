@@ -117,6 +117,8 @@ function buildApi() {
       invoke<AnalysisRunResult>('analysis:run', { watchlistId, mode: mode as Parameters<typeof analysis.run>[1], tickerSubset }),
     getSnapshots: (watchlistId: number) => invoke<AnalysisSnapshotRow[]>('analysis:get-snapshots', watchlistId),
     getSnapshot: (id: number) => invoke<{ id: number; watchlistId: number; mode: string; runAt: string; resultCount: number; results: unknown[] } | null>('analysis:get-snapshot', id),
+    deleteSnapshot: (id: number) => invoke<{ success: boolean }>('analysis:delete-snapshot', id),
+    clearSnapshots: (watchlistId: number) => invoke<{ success: boolean }>('analysis:clear-snapshots', watchlistId),
     saveAsWatchlist: (snapshotId: number, resultIndices: number[], name: string) =>
       invoke<Watchlist>('analysis:save-as-watchlist', snapshotId, resultIndices, name),
     cancel: () => invoke<boolean>('analysis:cancel')

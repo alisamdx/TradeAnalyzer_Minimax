@@ -417,6 +417,14 @@ export class AnalysisService {
     }));
   }
 
+  deleteSnapshot(id: number): void {
+    this.db.prepare('DELETE FROM analysis_snapshots WHERE id = ?').run(id);
+  }
+
+  clearSnapshots(watchlistId: number): void {
+    this.db.prepare('DELETE FROM analysis_snapshots WHERE watchlist_id = ?').run(watchlistId);
+  }
+
   // ─── Private: data fetch helpers ────────────────────────────────────────────
 
   private async fetchQuote(ticker: string) {

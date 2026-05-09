@@ -95,6 +95,9 @@ export interface DataProvider {
   /** Full options chain for a given expiration. */
   getOptionsChain(ticker: string, expiration: string): Promise<OptionsChain>;
 
+  /** Fetch current IV from ATM options for a ticker. */
+  getOptionsIV(ticker: string): Promise<{ currentIv: number | null; iv52WkHigh: number | null; iv52WkLow: number | null }>;
+
   /**
    * Index constituents. The bundled lists are maintained at
    * src/main/assets/constituents/ and refreshed manually.

@@ -118,13 +118,15 @@ app.whenReady().then(() => {
   // Phase 1 — watchlist service.
   const watchlistService = new WatchlistService(db);
   watchlistService.ensureDefault();
-  registerWatchlistIpc(watchlistService);
 
   // Phase 2 — market data services.
   initCacheTables(db);
   const dataProvider = new PolygonDataProvider(() => getApiKey(db));
   const quoteCache = new QuoteCache(db);
   new FundamentalsCache(db);
+
+  // Register watchlist IPC with data provider for ticker validation
+  registerWatchlistIpc(watchlistService, dataProvider);
 
   // Constituents service (handles bundled CSV loading + Wikipedia refresh).
   const constituentsService = new ConstituentsService(db);
