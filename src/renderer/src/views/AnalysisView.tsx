@@ -2,7 +2,7 @@
 // Watchlist selector, mode cards, run with progress, results table, save-as-watchlist.
 // see SPEC: FR-3
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   Watchlist,
   AnalysisModeInfo,
@@ -12,8 +12,14 @@ import type {
 } from '@shared/types.js';
 import { HistoricalFinancialChart } from '../components/HistoricalFinancialChart.js';
 import { HistoricalPriceChart } from '../components/HistoricalPriceChart.js';
+import { showPromptDialog } from '../utils/promptDialog.js';
 
 // `window.api` is declared once in `src/renderer/src/global.d.ts`.
+
+interface AnalysisViewProps {
+  initialTicker?: string | null;
+  clearInitialTicker?: () => void;
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -39,7 +45,7 @@ type DecodedResult =
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function AnalysisView() {
+export function AnalysisView({ initialTicker, clearInitialTicker }: AnalysisViewProps) {
   const [watchlists, setWatchlists] = useState<Watchlist[]>([]);
   const [selectedWatchlistId, setSelectedWatchlistId] = useState<number | null>(null);
   const [tickerCount, setTickerCount] = useState(0);
@@ -58,6 +64,12 @@ export function AnalysisView() {
   const [selectedTickerForChart, setSelectedTickerForChart] = useState<string | null>(null);
   const [showCharts, setShowCharts] = useState(false);
 
+  // Flag for single-ticker analysis from screener
+  const [singleTickerMode, setSingleTickerMode] = useState<string | null>(null);
+
+  // Ref for charts section scroll
+  const chartsSectionRef = useRef<HTMLDivElement>(null);
+
   // Load modes and watchlists on mount.
   useEffect(() => {
     window.api.analysis.listModes()
@@ -67,6 +79,20 @@ export function AnalysisView() {
       .then((lists) => setWatchlists(lists))
       .catch((e) => setError((e as Error).message));
   }, []);
+
+  // Handle initial ticker from screener - auto-select mode and run analysis
+  useEffect(() => {
+    if (initialTicker && watchlists.length > 0 && modes.length > 0) {
+      // Set single ticker mode
+      setSingleTickerMode(initialTicker);
+      // Select the first watchlist (we'll only analyze the one ticker)
+      setSelectedWatchlistId(watchlists[0]!.id);
+      // Select default mode (buy)
+      setSelectedMode('buy');
+      // Clear the initial ticker flag so we don't re-trigger
+      if (clearInitialTicker) clearInitialTicker();
+    }
+  }, [initialTicker, watchlists, modes, clearInitialTicker]);
 
   // Load ticker count + snapshots when watchlist changes.
   useEffect(() => {
@@ -88,20 +114,27 @@ export function AnalysisView() {
     setRunResult(null);
     setResults([]);
     setSelected(new Set());
-    setProgress({ current: 0, total: tickerCount, ticker: '…' });
+
+    // Use single ticker mode if set, otherwise use all tickers in watchlist
+    const tickersToAnalyze = singleTickerMode ? [singleTickerMode] : undefined;
+    const totalCount = singleTickerMode ? 1 : tickerCount;
+    setProgress({ current: 0, total: totalCount, ticker: singleTickerMode ?? '…' });
 
     try {
-      const result = await window.api.analysis.run(selectedWatchlistId, selectedMode);
+      const result = await window.api.analysis.run(selectedWatchlistId, selectedMode, tickersToAnalyze);
       setRunResult(result);
       setResults(JSON.parse(result.resultsJson) as DecodedResult[]);
-      setStatusMsg(`Analysis complete — ${result.resultCount} results`);
+      setStatusMsg(singleTickerMode
+        ? `Analysis complete for ${singleTickerMode}`
+        : `Analysis complete — ${result.resultCount} results`);
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setIsRunning(false);
       setProgress(null);
+      setSingleTickerMode(null); // Reset single ticker mode after run
     }
-  }, [selectedWatchlistId, selectedMode, tickerCount]);
+  }, [selectedWatchlistId, selectedMode, tickerCount, singleTickerMode]);
 
   const cancelAnalysis = useCallback(async () => {
     try {
@@ -140,7 +173,7 @@ export function AnalysisView() {
 
   const saveAsWatchlist = useCallback(async () => {
     if (selected.size === 0 || !runResult) return;
-    const name = await window.dialog.prompt({ title: 'Watchlist name:' });
+    const name = await showPromptDialog('Watchlist name:');
     if (!name) return;
     try {
       await window.api.analysis.saveAsWatchlist(runResult.snapshotId, Array.from(selected), name);
@@ -172,12 +205,51 @@ export function AnalysisView() {
     setStatusMsg(`Exported ${results.length} rows to CSV`);
   }, [results, selectedMode]);
 
-  // ── Open charts for a ticker ────────────────────────────────────────────
+  // ── Navigate to Validate view for a ticker ────────────────────────────────────────
 
-  const openChartForTicker = useCallback((ticker: string) => {
-    setSelectedTickerForChart(ticker);
-    setShowCharts(true);
+  const openValidateForTicker = useCallback((ticker: string) => {
+    // Dispatch custom event to navigate to validate view
+    window.dispatchEvent(new CustomEvent('navigate-to-validate', { detail: { ticker } }));
   }, []);
+
+  // Auto-run analysis when in single ticker mode with everything ready
+  useEffect(() => {
+    if (singleTickerMode && selectedWatchlistId && selectedMode && !isRunning && results.length === 0) {
+      // Use a ref to track if we already ran to prevent double execution
+      let cancelled = false;
+      const run = async () => {
+        if (cancelled) return;
+        setIsRunning(true);
+        setError(null);
+        setProgress({ current: 0, total: 1, ticker: singleTickerMode });
+        try {
+          const result = await window.api.analysis.run(selectedWatchlistId, selectedMode, [singleTickerMode]);
+          if (cancelled) return;
+          setRunResult(result);
+          setResults(JSON.parse(result.resultsJson) as DecodedResult[]);
+          setStatusMsg(`Analysis complete for ${singleTickerMode}`);
+        } catch (e) {
+          if (cancelled) return;
+          setError((e as Error).message);
+        } finally {
+          if (!cancelled) {
+            setIsRunning(false);
+            setProgress(null);
+            setSingleTickerMode(null);
+          }
+        }
+      };
+      run();
+      return () => { cancelled = true; };
+    }
+  }, [singleTickerMode, selectedWatchlistId, selectedMode]);
+
+  // Scroll to charts section when opened
+  useEffect(() => {
+    if (showCharts && chartsSectionRef.current) {
+      chartsSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [showCharts]);
 
   // ── Column definitions per mode ─────────────────────────────────────────
 
@@ -198,8 +270,8 @@ export function AnalysisView() {
         case 'Ticker': return (
           <span
             className="clickable-ticker"
-            onClick={() => openChartForTicker(result.ticker)}
-            title="Click to view charts"
+            onClick={() => openValidateForTicker(result.ticker)}
+            title="Click to validate"
           >
             {result.ticker}
           </span>
@@ -219,8 +291,8 @@ export function AnalysisView() {
         case 'Ticker': return (
           <span
             className="clickable-ticker"
-            onClick={() => openChartForTicker(result.ticker)}
-            title="Click to view charts"
+            onClick={() => openValidateForTicker(result.ticker)}
+            title="Click to validate"
           >
             {result.ticker}
           </span>
@@ -240,8 +312,8 @@ export function AnalysisView() {
         case 'Ticker': return (
           <span
             className="clickable-ticker"
-            onClick={() => openChartForTicker(result.ticker)}
-            title="Click to view charts"
+            onClick={() => openValidateForTicker(result.ticker)}
+            title="Click to validate"
           >
             {result.ticker}
           </span>
@@ -263,8 +335,8 @@ export function AnalysisView() {
         case 'Ticker': return (
           <span
             className="clickable-ticker"
-            onClick={() => openChartForTicker(result.ticker)}
-            title="Click to view charts"
+            onClick={() => openValidateForTicker(result.ticker)}
+            title="Click to validate"
           >
             {result.ticker}
           </span>
@@ -304,7 +376,9 @@ export function AnalysisView() {
 
       <div className="analysis-header">
         <h2>Analysis Engine</h2>
-        {selectedWatchlistId && (
+        {singleTickerMode ? (
+          <span className="meta">Analyzing <strong>{singleTickerMode}</strong></span>
+        ) : selectedWatchlistId && (
           <span className="meta">{watchlists.find(w => w.id === selectedWatchlistId)?.name} · {tickerCount} ticker{tickerCount === 1 ? '' : 's'}</span>
         )}
       </div>
@@ -312,20 +386,43 @@ export function AnalysisView() {
       <div className="analysis-layout">
         {/* ── Left: controls ── */}
         <aside className="analysis-controls">
-          {/* Watchlist selector */}
-          <div className="control-section">
-            <h3>Watchlist</h3>
-            <select
-              value={selectedWatchlistId ?? ''}
-              onChange={(e) => setSelectedWatchlistId(e.target.value ? Number(e.target.value) : null)}
-              style={{ width: '100%', padding: 6 }}
-            >
-              <option value="">— Select watchlist —</option>
-              {watchlists.map((w) => (
-                <option key={w.id} value={w.id}>{w.name} ({w.itemCount})</option>
-              ))}
-            </select>
-          </div>
+          {/* Watchlist selector or single ticker indicator */}
+          {singleTickerMode ? (
+            <div className="control-section">
+              <h3>Single Stock Analysis</h3>
+              <div className="single-ticker-info" style={{ padding: '12px', background: '#f0f4f8', borderRadius: '6px', marginBottom: '8px' }}>
+                <span style={{ fontSize: '18px', fontWeight: 'bold' }}>{singleTickerMode}</span>
+                <button
+                  className="tiny-btn"
+                  style={{ marginLeft: '12px' }}
+                  onClick={() => {
+                    setSingleTickerMode(null);
+                    setResults([]);
+                    setRunResult(null);
+                  }}
+                >
+                  Clear
+                </button>
+              </div>
+              <p className="hint">Running {selectedMode ?? 'buy'} analysis on {singleTickerMode}</p>
+            </div>
+          ) : (
+            <div className="control-section">
+              <h3>Watchlist</h3>
+              <ul className="watchlist-selector-list">
+                {watchlists.map((w) => (
+                  <li
+                    key={w.id}
+                    className={`watchlist-selector-item ${selectedWatchlistId === w.id ? 'active' : ''}`}
+                    onClick={() => setSelectedWatchlistId(w.id)}
+                  >
+                    <span className="name">{w.name}</span>
+                    <span className="count">{w.itemCount}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           {/* Mode selector */}
           {modes.length > 0 && (
@@ -405,10 +502,16 @@ export function AnalysisView() {
 
         {/* ── Right: results ── */}
         <main className="analysis-results">
-          {!runResult && !isRunning && (
+          {!runResult && !isRunning && !singleTickerMode && (
             <div className="empty-state">
               <p>Select a watchlist and an analysis mode, then click <strong>Run Analysis</strong>.</p>
               <p className="hint">Results are saved as a snapshot and can be re-opened later.</p>
+            </div>
+          )}
+
+          {isRunning && singleTickerMode && (
+            <div className="empty-state">
+              <p>Running {selectedMode ?? 'buy'} analysis on <strong>{singleTickerMode}</strong>…</p>
             </div>
           )}
 
@@ -447,7 +550,16 @@ export function AnalysisView() {
                     <tr>
                       <th style={{ width: 24 }}></th>
                       {modeColumns(selectedMode ?? '').map((col) => (
-                        <th key={col}>{col}</th>
+                        <th
+                          key={col}
+                          className={
+                            col === 'Ticker' || col === 'Trend' || col === 'Strategy' || col === 'Structure' || col === 'Fund OK'
+                              ? ''
+                              : 'num'
+                          }
+                        >
+                          {col}
+                        </th>
                       ))}
                     </tr>
                   </thead>
@@ -471,9 +583,11 @@ export function AnalysisView() {
                           <td
                             key={col}
                             className={
-                              col === 'Score/10' || col === 'Suitability' || col === 'POP'
-                                ? 'num score-cell'
-                                : 'num'
+                              col === 'Ticker' || col === 'Trend' || col === 'Strategy' || col === 'Structure' || col === 'Fund OK'
+                                ? ''
+                                : col === 'Score/10' || col === 'Suitability' || col === 'POP'
+                                  ? 'num score-cell'
+                                  : 'num'
                             }
                             style={
                               col === 'Score/10' || col === 'Suitability'
@@ -500,7 +614,7 @@ export function AnalysisView() {
 
           {/* Historical Charts Section */}
           {showCharts && selectedTickerForChart && (
-            <div className="charts-section">
+            <div className="charts-section" ref={chartsSectionRef}>
               <div className="charts-header">
                 <h3>{selectedTickerForChart} - Historical Charts</h3>
                 <button

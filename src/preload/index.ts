@@ -84,7 +84,7 @@ function buildApi() {
     importConstituents: (filePath: string, index: 'sp500' | 'russell1000') =>
       invoke<{ count: number }>('screen:import-constituents', { filePath, index }),
     run: (criteria: ScreenCriteria) =>
-      invoke<{ resultCount: number; rows: ScreenResultRow[] }>('screen:run', criteria),
+      invoke<{ runId: number; resultCount: number; rows: ScreenResultRow[] }>('screen:run', criteria),
     syncUniverse: (universe: Universe) =>
       invoke<{ scanned: number }>('screen:sync-universe', universe),
     syncCancel: () => invoke<boolean>('screen:sync-cancel'),

@@ -63,7 +63,7 @@ class VolumeProfileRenderer implements ISeriesPrimitivePaneRenderer {
         if (bar.volume > 0) {
           ctx.fillStyle = bar.color;
           const w = (this._data.width / 100) * bar.volume;
-          ctx.fillRect(scope.bitmapSize.width - w, y, w, barWidth);
+          ctx.fillRect(0, y, w, barWidth);
           console.log(`[VolumeProfileRenderer] Drawing bar at y=${y}, width=${w}, volume=${bar.volume}`);
         }
       }

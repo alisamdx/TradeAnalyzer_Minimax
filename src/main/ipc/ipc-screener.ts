@@ -95,39 +95,15 @@ export function registerScreenerIpc(
   // ── Screen run ──────────────────────────────────────────────────────────
   ipcMain.handle(
     'screen:run',
-    async (_e, criteria: ScreenCriteria): Promise<IpcResult<{ resultCount: number; rows: ScreenResultRow[] }>> => {
+    async (_e, criteria: ScreenCriteria): Promise<IpcResult<{ runId: number; resultCount: number; rows: ScreenResultRow[] }>> => {
       try {
         const output = await screenerService.runScreen(criteria);
+        // Save the run to the database so it can be used for "Save as Watchlist"
+        const runResult = screenerService.saveRun(criteria, criteria.universe, output.rows);
         // Map the backend TickerScreenData to the frontend ScreenResultRow format
-        const rows: ScreenResultRow[] = output.rows.map(r => ({
-          id: Math.random(), // Temporary ID for React keys since we don't save to DB
-          screenRunId: 0,
-          ticker: r.ticker,
-          companyName: r.companyName,
-          sector: r.sector,
-          marketCap: r.marketCap,
-          peRatio: r.peRatio,
-          eps: r.eps,
-          revenueGrowth: r.revenueGrowth,
-          epsGrowth: r.epsGrowth,
-          debtToEquity: r.debtToEquity,
-          roe: r.roe,
-          profitMargin: r.profitMargin,
-          freeCashFlow: r.freeCashFlow,
-          currentRatio: r.currentRatio,
-          avgVolume: r.avgVolume,
-          avgOptionVolume: r.avgOptionVolume,
-          price: r.price,
-          distance52WkHigh: r.distance52WkHigh,
-          distance52WkLow: r.distance52WkLow,
-          beta: r.beta,
-          passedFilters: Array.from(r.passedFilters),
-          failedFilters: r.failedFilters,
-          passScore: r.passScore,
-          payload: r
-        }));
-        
-        return ok({ resultCount: rows.length, rows });
+        const rows: ScreenResultRow[] = screenerService.getResults(runResult.id);
+
+        return ok({ runId: runResult.id, resultCount: rows.length, rows });
       } catch (err) {
         return fail(err);
       }

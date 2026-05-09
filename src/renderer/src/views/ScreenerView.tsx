@@ -3,7 +3,7 @@
 // Priority 5: Sortable columns, quick actions, CSV export, pagination, cache status.
 // see SPEC: FR-2
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import type {
   ScreenPreset,
   ScreenCriteria,
@@ -16,6 +16,7 @@ import type {
 import { DEFAULT_FILTER_SPECS } from '@shared/screener-filters.js';
 import { useSortable } from '../hooks/useSortable.js';
 import { CacheStatusIndicator } from '../components/CacheStatusIndicator.js';
+import { showPromptDialog } from '../utils/promptDialog.js';
 
 // `window.api` is declared once in `src/renderer/src/global.d.ts`.
 
@@ -82,6 +83,7 @@ export function ScreenerView() {
   const [cacheStatus, setCacheStatus] = useState<CacheStatus | null>(null);
   const [watchlists, setWatchlists] = useState<{ id: number; name: string }[]>([]);
   const [showAddToWatchlist, setShowAddToWatchlist] = useState<number | null>(null);
+  const isRunningRef = useRef(false);
 
   // Load presets + runs + meta + cache status + default universe on mount.
   useEffect(() => {
@@ -202,7 +204,7 @@ export function ScreenerView() {
   }, []);
 
   const saveAsPreset = useCallback(async () => {
-    const name = await window.dialog.prompt({ title: 'Preset name:' });
+    const name = await showPromptDialog('Preset name:');
     if (!name) return;
     try {
       const p = await window.api.screen.savePreset({ name, universe, criteria, isDefault: false });
@@ -250,6 +252,10 @@ export function ScreenerView() {
   // ── Run screen ────────────────────────────────────────────────────────────
 
   const runScreen = useCallback(async () => {
+    // Prevent concurrent runs
+    if (isRunningRef.current) return;
+
+    isRunningRef.current = true;
     setIsRunning(true);
     setError(null);
     setResults([]);
@@ -257,19 +263,25 @@ export function ScreenerView() {
     try {
       const response = await window.api.screen.run({ ...criteria, universe });
       setResults(response.rows);
+      setActiveRunId(response.runId);
       const universeName = universe === 'both' ? 'Both' : universe.toUpperCase();
       setStatusMsg(`${universeName}: ${response.resultCount} passed`);
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setIsRunning(false);
+      isRunningRef.current = false;
     }
   }, [criteria, universe]);
 
   // Auto-run when criteria or universe changes
   useEffect(() => {
-    runScreen();
-  }, [runScreen]);
+    // Debounce: wait a bit before running to avoid rapid-fire on filter changes
+    const timeoutId = setTimeout(() => {
+      runScreen();
+    }, 100);
+    return () => clearTimeout(timeoutId);
+  }, [criteria, universe]);
 
   // ── Quick Actions ─────────────────────────────────────────────────────────
 
@@ -293,7 +305,7 @@ export function ScreenerView() {
 
   const saveAsWatchlist = useCallback(async () => {
     if (selected.size === 0) return;
-    const name = await window.dialog.prompt({ title: 'Watchlist name:' });
+    const name = await showPromptDialog('Watchlist name:');
     if (!name) return;
     if (!activeRunId) return;
     try {

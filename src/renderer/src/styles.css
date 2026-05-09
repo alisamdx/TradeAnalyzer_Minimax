@@ -617,6 +617,91 @@ table.items-table {
 .sidebar-actions { gap: 4px; }
 .sidebar-actions button { flex: 1; font-size: 11px; padding: 4px 6px; }
 
+/* ── AnalysisView ──────────────────────────────────────────────────────────── */
+
+.analysis-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.analysis-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.analysis-header h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.analysis-layout {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.analysis-controls {
+  width: 220px;
+  padding: 12px;
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+
+/* Watchlist selector list (used in Analysis and Validate views) */
+.watchlist-selector-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.watchlist-selector-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 8px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.watchlist-selector-item:last-child {
+  border-bottom: none;
+}
+.watchlist-selector-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+.watchlist-selector-item.active {
+  background: rgba(88, 166, 255, 0.12);
+  color: var(--accent);
+  border-left: 2px solid var(--accent);
+}
+.watchlist-selector-item .name {
+  font-weight: 500;
+}
+.watchlist-selector-item .count {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.analysis-results {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
 /* ── ValidateView ──────────────────────────────────────────────────────────── */
 
 .validate-view {
@@ -836,6 +921,11 @@ table.items-table {
   margin-bottom: 8px;
 }
 .chart-header h3 { margin: 0; }
+.chart-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
 .timeframe-btns { display: flex; gap: 2px; }
 .timeframe-btns .tiny-btn {
   background: var(--bg);
@@ -849,6 +939,26 @@ table.items-table {
   background: var(--accent);
   color: var(--bg);
   border-color: var(--accent);
+}
+.zoom-btns {
+  display: flex;
+  gap: 2px;
+  margin-left: 8px;
+}
+.zoom-btns .tiny-btn {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 2px 8px;
+  font-size: 14px;
+  font-weight: bold;
+  color: var(--text-muted);
+  cursor: pointer;
+  min-width: 28px;
+}
+.zoom-btns .tiny-btn:hover {
+  background: var(--border);
+  color: var(--text);
 }
 
 .chart-container {
@@ -2029,4 +2139,61 @@ input[type='checkbox'] {
   background: rgba(255,255,255,0.03);
   border: 1px dashed var(--border);
   border-radius: 6px;
+}
+
+/* ── Prompt Dialog ───────────────────────────────────────────────────────────── */
+
+.dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.dialog-content {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  min-width: 300px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.dialog-content h3 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.dialog-content input[type='text'] {
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+.dialog-buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.dialog-buttons button {
+  min-width: 70px;
+}
+
+.dialog-buttons button.primary {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.dialog-buttons button.primary:hover {
+  opacity: 0.9;
 }

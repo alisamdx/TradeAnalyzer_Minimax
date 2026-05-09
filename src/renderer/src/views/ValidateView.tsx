@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createChart, type IChartApi, ColorType, type Time } from 'lightweight-charts';
-import { VolumeProfile, type BarDataWithVolume } from './VolumeProfile';
+import { VolumeProfile, type BarDataWithVolume } from './VolumeProfile.js';
 import type {
   Watchlist,
   ValidateDashboardResult
@@ -78,6 +78,30 @@ const BADGE_COLORS = {
   SELL: '#f85149'
 } as const;
 
+const PATTERN_DESCRIPTIONS: Record<string, string> = {
+  // Bullish patterns
+  bullish_engulfing: 'Bullish reversal. A small bearish candle followed by a larger bullish candle that engulfs it. Signals potential upward move.',
+  morning_star: 'Bullish reversal. Three-candle pattern: bearish, small body, then bullish. Strong bottom reversal signal.',
+  hammer: 'Bullish reversal. Small body with long lower shadow at bottom of downtrend. Signals potential reversal up.',
+  inverted_hammer: 'Bullish reversal. Small body with long upper shadow at bottom of downtrend. Potential trend reversal.',
+  piercing_line: 'Bullish reversal. Bearish candle followed by bullish candle opening below but closing above midpoint of first. Reversal signal.',
+  three_white_soldiers: 'Bullish reversal. Three consecutive bullish candles with increasing opens and closes. Strong uptrend signal.',
+  bullish_harami: 'Bullish reversal. Large bearish candle followed by small bullish candle inside its range. Potential trend change.',
+  dragonfly_doji: 'Bullish reversal. Open, high, and close are same with long lower shadow. Strong reversal signal at support.',
+  // Bearish patterns
+  bearish_engulfing: 'Bearish reversal. A small bullish candle followed by a larger bearish candle that engulfs it. Signals potential downward move.',
+  evening_star: 'Bearish reversal. Three-candle pattern: bullish, small body, then bearish. Strong top reversal signal.',
+  shooting_star: 'Bearish reversal. Small body with long upper shadow at top of uptrend. Signals potential reversal down.',
+  hanging_man: 'Bearish reversal. Small body with long lower shadow at top of uptrend. Potential trend reversal.',
+  dark_cloud_cover: 'Bearish reversal. Bullish candle followed by bearish candle opening above but closing below midpoint. Reversal signal.',
+  three_black_crows: 'Bearish reversal. Three consecutive bearish candles with decreasing opens and closes. Strong downtrend signal.',
+  bearish_harami: 'Bearish reversal. Large bullish candle followed by small bearish candle inside its range. Potential trend change.',
+  gravestone_doji: 'Bearish reversal. Open, low, and close are same with long upper shadow. Strong reversal signal at resistance.',
+  // Neutral patterns
+  doji: 'Neutral. Open and close are nearly equal. Indicates indecision in the market. Watch for breakout direction.',
+  spinning_top: 'Neutral. Small body with long upper and lower shadows. Indicates indecision and potential trend change.'
+};
+
 interface TimeframeOption { label: string; days: number }
 
 const TIMEFRAMES: TimeframeOption[] = [
@@ -90,7 +114,12 @@ const TIMEFRAMES: TimeframeOption[] = [
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function ValidateView() {
+interface ValidateViewProps {
+  initialTicker?: string | null;
+  clearInitialTicker?: () => void;
+}
+
+export function ValidateView({ initialTicker, clearInitialTicker }: ValidateViewProps) {
   const [watchlists, setWatchlists] = useState<Watchlist[]>([]);
   const [selectedWatchlistId, setSelectedWatchlistId] = useState<number | null>(null);
   const [tickers, setTickers] = useState<string[]>([]);
@@ -133,6 +162,32 @@ export function ValidateView() {
     }
   }, []);
 
+  // Track if we've handled the initial ticker and store the ticker value
+  const initialTickerHandledRef = useRef(false);
+  const savedInitialTickerRef = useRef<string | null>(null);
+
+  // Handle initial ticker from navigation
+  useEffect(() => {
+    if (initialTicker && !initialTickerHandledRef.current && watchlists.length > 0) {
+      initialTickerHandledRef.current = true;
+      // Save the ticker before clearing
+      savedInitialTickerRef.current = initialTicker;
+      // Select the first watchlist
+      setSelectedWatchlistId(watchlists[0]!.id);
+      // Clear the initial ticker flag
+      if (clearInitialTicker) clearInitialTicker();
+    }
+  }, [initialTicker, watchlists, clearInitialTicker]);
+
+  // Load ticker when watchlist is selected (use saved ticker value)
+  useEffect(() => {
+    const tickerToLoad = savedInitialTickerRef.current;
+    if (tickerToLoad && selectedWatchlistId && !selectedTicker && !loading) {
+      loadTicker(tickerToLoad);
+      savedInitialTickerRef.current = null; // Clear after use
+    }
+  }, [selectedWatchlistId, selectedTicker, loading, loadTicker]);
+
   // Refresh current ticker.
   const refreshTicker = useCallback(async () => {
     if (!selectedTicker) return;
@@ -173,6 +228,31 @@ export function ValidateView() {
   // Track current result/timeframe for pattern zone re-render
   const patternResultRef = useRef<ValidateDashboardResult | null>(null);
   const patternTimeframeRef = useRef<TimeframeOption | null>(null);
+
+  // ── Zoom handlers ─────────────────────────────────────────────────────────────
+  const handleZoom = useCallback((direction: 'in' | 'out' | 'reset') => {
+    const chart = chartRef.current;
+    if (!chart) return;
+
+    const timeScale = chart.timeScale();
+    const visibleRange = timeScale.getVisibleLogicalRange();
+
+    if (direction === 'reset') {
+      timeScale.fitContent();
+      return;
+    }
+
+    if (!visibleRange) return;
+
+    const center = (visibleRange.from + visibleRange.to) / 2;
+    const range = visibleRange.to - visibleRange.from;
+    const factor = direction === 'in' ? 0.7 : 1.4;
+    const newRange = range * factor;
+    const newFrom = center - newRange / 2;
+    const newTo = center + newRange / 2;
+
+    timeScale.setVisibleLogicalRange({ from: newFrom, to: newTo });
+  }, []);
 
   useEffect(() => {
     if (!chartContainerRef.current || !result) return;
@@ -339,17 +419,13 @@ export function ValidateView() {
         return bar !== undefined && bar.t >= cutoff;
       });
 
-      // Pattern callouts.
+      // Pattern callouts - positioned on left side at their price level.
       for (const pattern of visiblePatterns) {
         const bar = result.chart.bars[pattern.barIndex]!;
         const barIndexInFiltered = filteredBars.findIndex(b => b.t === bar.t);
         if (barIndexInFiltered < 0) continue;
 
-        // Get the logical location for this bar's time.
-        const timeCoord = timeScale.timeToCoordinate(bar.t / 1000 as import('lightweight-charts').Time);
-        if (timeCoord === null) continue;
-
-        // Get the bar's high price as the Y anchor (priceToCoordinate lives on ISeriesApi).
+        // Get the Y coordinate for this pattern's bar high.
         const priceCoord = candleSeries.priceToCoordinate(bar.h);
         if (priceCoord === null) continue;
 
@@ -359,15 +435,14 @@ export function ValidateView() {
         const borderColor = pattern.direction === 'bullish' ? '#3fb950'
           : pattern.direction === 'bearish' ? '#f85149' : '#8b949e';
 
-        // Position label to the right of the bar, clamped within chart bounds.
-        const labelX = Math.min(timeCoord + 8, chartWidth - 120);
-        const labelY = Math.max(priceCoord - 12, 4);
+        // Position label on left side at the bar's price level.
+        const labelY = Math.max(priceCoord - 10, 2);
 
         const el = document.createElement('div');
         el.textContent = label;
         el.style.cssText = `
           position:absolute;
-          left:${labelX}px;
+          left:4px;
           top:${labelY}px;
           background:${bgColor};
           border:1px solid ${borderColor};
@@ -383,21 +458,21 @@ export function ValidateView() {
         markerLayerRef.current!.appendChild(el);
       }
 
-      // Zone labels on the right edge.
+      // Zone labels - positioned on left side at their price level.
       for (const zone of result.chart.supportZones) {
         const priceCoord = candleSeries.priceToCoordinate(zone.price);
         if (priceCoord === null) continue;
 
         const color = zone.type === 'demand' ? '#3fb950' : '#f85149';
         const label = zone.type === 'demand' ? 'DEMAND' : 'SUPPLY';
-        const barY = Math.max(priceCoord - 10, 4);
+        const labelY = Math.max(priceCoord - 10, 2);
 
         const el = document.createElement('div');
         el.textContent = `${label} $${zone.price.toFixed(2)}`;
         el.style.cssText = `
           position:absolute;
-          right:4px;
-          top:${barY}px;
+          left:4px;
+          top:${labelY}px;
           background:${color}22;
           border:1px solid ${color};
           color:${color};
@@ -424,6 +499,9 @@ export function ValidateView() {
     chartRef.current = chart;
     patternResultRef.current = result;
     patternTimeframeRef.current = timeframe;
+
+    // Fit content to ensure initial view matches reset behavior.
+    chart.timeScale().fitContent();
 
     // Resize observer.
     const ro = new ResizeObserver(() => {
@@ -460,16 +538,18 @@ export function ValidateView() {
         <aside className="validate-ticker-list">
           <div className="validate-list-header">
             <h3>Validate</h3>
-            <select
-              value={selectedWatchlistId ?? ''}
-              onChange={(e) => setSelectedWatchlistId(e.target.value ? Number(e.target.value) : null)}
-              style={{ width: '100%', padding: 4, fontSize: 11 }}
-            >
-              <option value="">— Select watchlist —</option>
+            <ul className="watchlist-selector-list">
               {watchlists.map((w) => (
-                <option key={w.id} value={w.id}>{w.name} ({w.itemCount})</option>
+                <li
+                  key={w.id}
+                  className={`watchlist-selector-item ${selectedWatchlistId === w.id ? 'active' : ''}`}
+                  onClick={() => setSelectedWatchlistId(w.id)}
+                >
+                  <span className="name">{w.name}</span>
+                  <span className="count">{w.itemCount}</span>
+                </li>
               ))}
-            </select>
+            </ul>
           </div>
 
           {tickers.length > 0 && (
@@ -541,6 +621,7 @@ export function ValidateView() {
                       color: VERDICT_COLORS[result.verdict],
                       borderColor: VERDICT_COLORS[result.verdict]
                     }}
+                    title="Overall trade recommendation. Strong = high confidence setup, Acceptable = valid setup with some concerns, Caution = proceed carefully, Avoid = unfavorable risk/reward."
                   >
                     {result.verdict}
                   </span>
@@ -557,27 +638,27 @@ export function ValidateView() {
                 <p className="verdict-reason">{result.verdictReason || 'No verdict reason.'}</p>
                 <div className="fundamentals-grid">
                   <div className="fund-item">
-                    <span className="fund-label">P/E</span>
+                    <span className="fund-label" title="Price-to-Earnings Ratio. Stock price divided by earnings per share. Lower P/E may indicate undervaluation. Compare to industry peers.">P/E</span>
                     <span className="fund-value">{fmtNum(result.fundamentals.peRatio, 1)}</span>
                   </div>
                   <div className="fund-item">
-                    <span className="fund-label">EPS</span>
+                    <span className="fund-label" title="Earnings Per Share. Company profit divided by outstanding shares. Higher EPS indicates better profitability. Growing EPS over time is positive.">EPS</span>
                     <span className="fund-value">{fmtNum(result.fundamentals.eps, 2)}</span>
                   </div>
                   <div className="fund-item">
-                    <span className="fund-label">Rev Growth</span>
+                    <span className="fund-label" title="Revenue Growth. Year-over-year percentage increase in revenue. Indicates company expansion. Positive growth suggests increasing market share or demand.">Rev Growth</span>
                     <span className="fund-value">{fmtPct(result.fundamentals.revenueGrowth)}</span>
                   </div>
                   <div className="fund-item">
-                    <span className="fund-label">Margin</span>
+                    <span className="fund-label" title="Profit Margin. Percentage of revenue that becomes profit. Higher margins indicate better efficiency and pricing power. Compare within industry.">Margin</span>
                     <span className="fund-value">{fmtPct(result.fundamentals.profitMargin)}</span>
                   </div>
                   <div className="fund-item">
-                    <span className="fund-label">D/E</span>
+                    <span className="fund-label" title="Debt-to-Equity Ratio. Total debt divided by shareholder equity. Lower D/E suggests less financial risk. High D/E may indicate aggressive financing.">D/E</span>
                     <span className="fund-value">{fmtNum(result.fundamentals.debtToEquity, 2)}</span>
                   </div>
                   <div className="fund-item">
-                    <span className="fund-label">ROE</span>
+                    <span className="fund-label" title="Return on Equity. Net income as percentage of shareholder equity. Measures how efficiently company uses investor capital. Higher ROE is generally better.">ROE</span>
                     <span className="fund-value">{fmtPct(result.fundamentals.roe)}</span>
                   </div>
                 </div>
@@ -606,11 +687,12 @@ export function ValidateView() {
                         color: BADGE_COLORS[result.marketOpinion.badge],
                         borderColor: BADGE_COLORS[result.marketOpinion.badge]
                       }}
+                      title="Consensus analyst recommendation based on Buy/Hold/Sell ratings. BUY = majority recommend buying, HOLD = neutral, SELL = majority recommend selling."
                     >
                       {result.marketOpinion.badge}
                     </span>
                   )}
-                  <div className="analyst-counts">
+                  <div className="analyst-counts" title="Number of analysts with each rating. More analysts providing ratings increases confidence in the consensus.">
                     {result.marketOpinion.buyCount !== null && (
                       <span style={{ color: '#3fb950' }}>Buy {result.marketOpinion.buyCount}</span>
                     )}
@@ -622,7 +704,7 @@ export function ValidateView() {
                     )}
                   </div>
                   {result.marketOpinion.avgPriceTarget !== null && (
-                    <div style={{ marginLeft: 16 }}>
+                    <div style={{ marginLeft: 16 }} title="Average price target from analysts. Upside percentage shows potential gain from current price to target.">
                       <span className="meta">Price target: </span>
                       <span>{fmtPrice(result.marketOpinion.avgPriceTarget)}</span>
                       {result.marketOpinion.upsidePct !== null && (
@@ -643,25 +725,26 @@ export function ValidateView() {
                       color: result.trend.label === 'Bullish' ? '#3fb950'
                         : result.trend.label === 'Bearish' ? '#f85149' : '#8b949e'
                     }}
+                    title="Overall trend direction based on price action relative to moving averages and ADX strength. Bullish = uptrend, Bearish = downtrend, Neutral = sideways."
                   >
                     {result.trend.label}
                   </span>
                   {result.trend.adx !== null && (
-                    <span className="adx-chip">ADX {fmtNum(result.trend.adx, 1)}</span>
+                    <span className="adx-chip" title="Average Directional Index. Measures trend strength regardless of direction. Above 25 = strong trend, below 20 = weak/no trend. Values above 40 indicate very strong trend.">ADX {fmtNum(result.trend.adx, 1)}</span>
                   )}
                   <div className="sma-stack">
                     {result.trend.smaStack.sma20 !== null && (
-                      <span className="sma-chip sma20">SMA20 {fmtPrice(result.trend.smaStack.sma20)}</span>
+                      <span className="sma-chip sma20" title="20-day Simple Moving Average. Short-term trend indicator. Price above suggests short-term bullish momentum.">SMA20 {fmtPrice(result.trend.smaStack.sma20)}</span>
                     )}
                     {result.trend.smaStack.sma50 !== null && (
-                      <span className="sma-chip sma50">SMA50 {fmtPrice(result.trend.smaStack.sma50)}</span>
+                      <span className="sma-chip sma50" title="50-day Simple Moving Average. Medium-term trend indicator. Commonly used for trend confirmation and support/resistance.">SMA50 {fmtPrice(result.trend.smaStack.sma50)}</span>
                     )}
                     {result.trend.smaStack.sma200 !== null && (
-                      <span className="sma-chip sma200">SMA200 {fmtPrice(result.trend.smaStack.sma200)}</span>
+                      <span className="sma-chip sma200" title="200-day Simple Moving Average. Long-term trend indicator. Widely watched by institutions. Price above = long-term bullish trend.">SMA200 {fmtPrice(result.trend.smaStack.sma200)}</span>
                     )}
                   </div>
                   {result.trend.priceVsSma50 !== null && (
-                    <span className="meta" style={{ marginLeft: 8 }}>
+                    <span className="meta" style={{ marginLeft: 8 }} title="Percentage difference between current price and the 50-day moving average. Positive = price trading above SMA50, negative = below SMA50.">
                       {result.trend.priceVsSma50 >= 0 ? '+' : ''}{fmtPct(result.trend.priceVsSma50)} vs SMA50
                     </span>
                   )}
@@ -672,46 +755,53 @@ export function ValidateView() {
               <div className="section-card section-d">
                 <div className="chart-header">
                   <h3>Chart</h3>
-                  <div className="timeframe-btns">
-                    {TIMEFRAMES.map((tf) => (
-                      <button
-                        key={tf.label}
-                        className={`tiny-btn ${timeframe.label === tf.label ? 'active' : ''}`}
-                        onClick={() => setTimeframe(tf)}
-                      >
-                        {tf.label}
-                      </button>
-                    ))}
+                  <div className="chart-controls">
+                    <div className="timeframe-btns">
+                      {TIMEFRAMES.map((tf) => (
+                        <button
+                          key={tf.label}
+                          className={`tiny-btn ${timeframe.label === tf.label ? 'active' : ''}`}
+                          onClick={() => setTimeframe(tf)}
+                        >
+                          {tf.label}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="zoom-btns">
+                      <button className="tiny-btn" onClick={() => handleZoom('in')} title="Zoom In">+</button>
+                      <button className="tiny-btn" onClick={() => handleZoom('out')} title="Zoom Out">−</button>
+                      <button className="tiny-btn" onClick={() => handleZoom('reset')} title="Reset Zoom">⟲</button>
+                    </div>
                   </div>
                 </div>
                 <div className="chart-container" ref={chartContainerRef} />
                 {result.chart.patterns.length > 0 && (
                   <div className="pattern-callouts">
                     {result.chart.patterns.map((p, i) => (
-                      <span key={i} className={`pattern-chip ${p.direction}`}>
+                      <span key={i} className={`pattern-chip ${p.direction}`} title={PATTERN_DESCRIPTIONS[p.name] || ''}>
                         {p.name.replace(/_/g, ' ')}
                       </span>
                     ))}
                   </div>
                 )}
                 <div className="chart-legend">
-                  <span className="legend-item sma20">— SMA20</span>
-                  <span className="legend-item sma50">— SMA50</span>
-                  <span className="legend-item sma200">— SMA200</span>
+                  <span className="legend-item sma20" title="Simple Moving Average (20 periods). Short-term trend indicator. Price above suggests bullish momentum.">— SMA20</span>
+                  <span className="legend-item sma50" title="Simple Moving Average (50 periods). Medium-term trend indicator. Commonly used for trend confirmation.">— SMA50</span>
+                  <span className="legend-item sma200" title="Simple Moving Average (200 periods). Long-term trend indicator. Price above suggests long-term bullish trend.">— SMA200</span>
                   {result.chart.entryZoneLow !== null && (
-                    <span className="legend-item entry-zone">■ Entry Zone</span>
+                    <span className="legend-item entry-zone" title="Optimal price range for entering a position. Green shaded area on chart indicates suggested entry prices.">■ Entry Zone</span>
                   )}
                   {result.chart.stopLoss !== null && (
-                    <span className="legend-item stop">-- Stop Loss</span>
+                    <span className="legend-item stop" title="Stop-loss level. Price at which to exit the trade to limit losses. Red dashed line on chart.">-- Stop Loss</span>
                   )}
                   {result.chart.target !== null && (
-                    <span className="legend-item" style={{ color: '#d29922' }}>-- Target</span>
+                    <span className="legend-item" style={{ color: '#d29922' }} title="Target price for taking profit. Amber dashed line shows the expected price objective.">-- Target</span>
                   )}
                   {result.chart.supportZones.some(z => z.type === 'demand') && (
-                    <span className="legend-item" style={{ color: '#3fb950' }}>:.. Demand Zone</span>
+                    <span className="legend-item" style={{ color: '#3fb950' }} title="Demand zone: Price level where buying interest is strong. Potential support area for bounce.">:.. Demand Zone</span>
                   )}
                   {result.chart.supportZones.some(z => z.type === 'supply') && (
-                    <span className="legend-item" style={{ color: '#f85149' }}>:.. Supply Zone</span>
+                    <span className="legend-item" style={{ color: '#f85149' }} title="Supply zone: Price level where selling pressure is strong. Potential resistance area for reversal.">:.. Supply Zone</span>
                   )}
                 </div>
               </div>
@@ -721,7 +811,7 @@ export function ValidateView() {
                 <h3>Indicators</h3>
                 <div className="indicator-grid">
                   <div className="indicator-card">
-                    <span className="ind-label">RSI(14)</span>
+                    <span className="ind-label" title="Relative Strength Index (14 periods). Measures momentum on 0-100 scale. Above 70 = overbought (OB), below 30 = oversold (OS).">RSI(14)</span>
                     <span className={`ind-value ${(result.indicators.rsi ?? 50) > 70 ? 'overbought' : (result.indicators.rsi ?? 50) < 30 ? 'oversold' : ''}`}>
                       {fmtNum(result.indicators.rsi, 1)}
                     </span>
@@ -732,7 +822,7 @@ export function ValidateView() {
                     )}
                   </div>
                   <div className="indicator-card">
-                    <span className="ind-label">MACD</span>
+                    <span className="ind-label" title="Moving Average Convergence Divergence. Momentum indicator showing relationship between two EMAs. Positive = bullish, negative = bearish. Signal line crossovers indicate trend changes.">MACD</span>
                     <span className="ind-value">
                       {result.indicators.macdValue !== null ? fmtNum(result.indicators.macdValue, 2) : '—'}
                       {result.indicators.macdSignal !== null && (
@@ -741,11 +831,11 @@ export function ValidateView() {
                     </span>
                   </div>
                   <div className="indicator-card">
-                    <span className="ind-label">BB Position</span>
+                    <span className="ind-label" title="Bollinger Band Position. Where current price sits within the bands. 0% = at lower band, 100% = at upper band. Values near extremes suggest potential reversal.">BB Position</span>
                     <span className="ind-value">{fmtNum(result.indicators.bollingerPosition, 0)}%</span>
                   </div>
                   <div className="indicator-card">
-                    <span className="ind-label">Volume vs Avg</span>
+                    <span className="ind-label" title="Volume vs Average. Current volume compared to average. High volume (>20%) signals strong conviction in the move. Can confirm or question price movements.">Volume vs Avg</span>
                     <span
                       className={`ind-value ${(result.indicators.volumeAnomalyPct ?? 0) > 20 ? 'high-vol' : ''}`}
                     >
@@ -753,7 +843,7 @@ export function ValidateView() {
                     </span>
                   </div>
                   <div className="indicator-card">
-                    <span className="ind-label">IV</span>
+                    <span className="ind-label" title="Implied Volatility. Market's expectation of future price movement. High IV means expensive options, potential for large moves. Low IV suggests cheaper options.">IV</span>
                     <span className="ind-value">
                       {result.ivData.currentIv !== null ? `${result.ivData.currentIv.toFixed(0)}%` : '—'}
                     </span>
@@ -764,7 +854,7 @@ export function ValidateView() {
                     )}
                   </div>
                   <div className="indicator-card">
-                    <span className="ind-label">IV Rank</span>
+                    <span className="ind-label" title="IV Rank. Where current IV stands relative to its 52-week range. High IV Rank (>50%) suggests selling premium strategies. Low IV Rank (<30%) suggests buying premium strategies.">IV Rank</span>
                     <span className="ind-value">{fmtNum(result.ivData.ivRank, 0)}%</span>
                   </div>
                 </div>

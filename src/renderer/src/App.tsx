@@ -12,6 +12,8 @@ import { CacheStatusIndicator } from './components/CacheStatusIndicator.js';
 import { useSortable } from './hooks/useSortable.js';
 import { useWebSocket } from './hooks/useWebSocket.js';
 import { RealtimePriceTicker } from './components/RealtimePriceTicker.js';
+import { PromptDialog } from './components/PromptDialog.js';
+import { showPromptDialog } from './utils/promptDialog.js';
 
 import { DataView } from './views/DataView.js';
 
@@ -35,6 +37,15 @@ export function App() {
 
   // Ticker passed from screener "Run Analysis" button
   const [analysisTicker, setAnalysisTicker] = useState<string | null>(null);
+
+  // Ticker passed from analysis "Validate" link
+  const [validateTicker, setValidateTicker] = useState<string | null>(null);
+
+  // Prompt dialog state
+  const [promptDialogOpen, setPromptDialogOpen] = useState(false);
+  const [promptTitle, setPromptTitle] = useState('');
+  const [promptDefaultValue, setPromptDefaultValue] = useState('');
+  const promptResolveRef = useRef<((value: string | null) => void) | null>(null);
 
   // Audio context for alerts
   const audioCtxRef = useRef<AudioContext | null>(null);
@@ -83,11 +94,43 @@ export function App() {
     };
     window.addEventListener('navigate-to-analysis', handleNavigateToAnalysis as EventListener);
 
+    // Listen for "Validate" from analysis
+    const handleNavigateToValidate = (e: CustomEvent<{ ticker: string }>) => {
+      setValidateTicker(e.detail.ticker);
+      setView('validate');
+    };
+    window.addEventListener('navigate-to-validate', handleNavigateToValidate as EventListener);
+
+    // Listen for prompt dialog requests
+    const handleShowPrompt = (e: CustomEvent<{ title: string; defaultValue?: string; resolveId: string }>) => {
+      setPromptTitle(e.detail.title);
+      setPromptDefaultValue(e.detail.defaultValue ?? '');
+      setPromptDialogOpen(true);
+      // Store resolveId to use when sending result
+      (window as unknown as Record<string, unknown>).__promptResolveId = e.detail.resolveId;
+    };
+    window.addEventListener('show-prompt-dialog', handleShowPrompt as EventListener);
+
     return () => {
       removeAlertListener();
       window.removeEventListener('navigate-to-analysis', handleNavigateToAnalysis as EventListener);
+      window.removeEventListener('navigate-to-validate', handleNavigateToValidate as EventListener);
+      window.removeEventListener('show-prompt-dialog', handleShowPrompt as EventListener);
     };
   }, []);
+
+  // Prompt dialog handlers
+  const handlePromptConfirm = (value: string) => {
+    const resolveId = (window as unknown as Record<string, unknown>).__promptResolveId as string;
+    window.dispatchEvent(new CustomEvent('prompt-dialog-result', { detail: { value: value || null, resolveId } }));
+    setPromptDialogOpen(false);
+  };
+
+  const handlePromptCancel = () => {
+    const resolveId = (window as unknown as Record<string, unknown>).__promptResolveId as string;
+    window.dispatchEvent(new CustomEvent('prompt-dialog-result', { detail: { value: null, resolveId } }));
+    setPromptDialogOpen(false);
+  };
 
   // Sortable columns for watchlist table
   const tableData = items.map(item => ({
@@ -203,7 +246,7 @@ export function App() {
   }, []);
 
   const onCreate = async () => {
-    const name = await window.dialog.prompt({ title: 'New watchlist name' });
+    const name = await showPromptDialog('New watchlist name');
     if (!name) return;
     try {
       const wl = await window.api.watchlists.create(name);
@@ -219,7 +262,7 @@ export function App() {
     if (!activeId) return;
     const current = watchlists.find((w) => w.id === activeId);
     if (!current) return;
-    const next = await window.dialog.prompt({ title: 'Rename watchlist', defaultValue: current.name });
+    const next = await showPromptDialog('Rename watchlist', current.name);
     if (!next || next === current.name) return;
     try {
       await window.api.watchlists.rename(activeId, next);
@@ -305,7 +348,7 @@ export function App() {
   };
 
   const onImportNew = async () => {
-    const name = await window.dialog.prompt({ title: 'Import into a new watchlist named:' });
+    const name = await showPromptDialog('Import into a new watchlist named:');
     if (!name) return;
     try {
       const result = await window.api.watchlists.csv.import({ createWithName: name });
@@ -479,8 +522,8 @@ export function App() {
         )}
 
         {view === 'screener' && <ScreenerView />}
-        {view === 'analysis' && <AnalysisView />}
-        {view === 'validate' && <ValidateView />}
+        {view === 'analysis' && <AnalysisView initialTicker={analysisTicker} clearInitialTicker={() => setAnalysisTicker(null)} />}
+        {view === 'validate' && <ValidateView initialTicker={validateTicker} clearInitialTicker={() => setValidateTicker(null)} />}
         {view === 'portfolio' && <PortfolioView />}
         {view === 'briefing' && <BriefingView />}
         {view === 'alerts' && <AlertsView />}
@@ -614,6 +657,14 @@ export function App() {
         {lastRefresh && <span className="meta">Quotes: {lastRefresh}</span>}
         <span>{statusMsg ?? 'Ready'}</span>
       </footer>
+
+      <PromptDialog
+        isOpen={promptDialogOpen}
+        title={promptTitle}
+        defaultValue={promptDefaultValue}
+        onConfirm={handlePromptConfirm}
+        onCancel={handlePromptCancel}
+      />
     </div>
   );
 }
