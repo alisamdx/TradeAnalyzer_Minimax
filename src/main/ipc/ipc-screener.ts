@@ -13,6 +13,7 @@ import type {
   ScreenCriteria,
   ScreenPreset,
   ScreenRunResult,
+  ScreenResultRow,
   ConstituentsMeta,
   IpcResult,
   CachedQuote as QuoteWithWheel
@@ -94,22 +95,73 @@ export function registerScreenerIpc(
   // ── Screen run ──────────────────────────────────────────────────────────
   ipcMain.handle(
     'screen:run',
-    async (_e, criteria: ScreenCriteria): Promise<IpcResult<ScreenRunResult>> => {
+    async (_e, criteria: ScreenCriteria): Promise<IpcResult<{ resultCount: number; rows: ScreenResultRow[] }>> => {
       try {
         const output = await screenerService.runScreen(criteria);
-        const saved = screenerService.saveRun(
-          criteria,
-          criteria.universe,
-          output.rows,
-          null,
-          null
-        );
-        return ok(saved);
+        // Map the backend TickerScreenData to the frontend ScreenResultRow format
+        const rows: ScreenResultRow[] = output.rows.map(r => ({
+          id: Math.random(), // Temporary ID for React keys since we don't save to DB
+          screenRunId: 0,
+          ticker: r.ticker,
+          companyName: r.companyName,
+          sector: r.sector,
+          marketCap: r.marketCap,
+          peRatio: r.peRatio,
+          eps: r.eps,
+          revenueGrowth: r.revenueGrowth,
+          epsGrowth: r.epsGrowth,
+          debtToEquity: r.debtToEquity,
+          roe: r.roe,
+          profitMargin: r.profitMargin,
+          freeCashFlow: r.freeCashFlow,
+          currentRatio: r.currentRatio,
+          avgVolume: r.avgVolume,
+          avgOptionVolume: r.avgOptionVolume,
+          price: r.price,
+          distance52WkHigh: r.distance52WkHigh,
+          distance52WkLow: r.distance52WkLow,
+          beta: r.beta,
+          passedFilters: Array.from(r.passedFilters),
+          failedFilters: r.failedFilters,
+          passScore: r.passScore,
+          payload: r
+        }));
+        
+        return ok({ resultCount: rows.length, rows });
       } catch (err) {
         return fail(err);
       }
     }
   );
+
+  let isSyncCancelled = false;
+
+  ipcMain.handle(
+    'screen:sync-universe',
+    async (e, universe: Universe): Promise<IpcResult<{ scanned: number }>> => {
+      isSyncCancelled = false;
+      try {
+        const output = await screenerService.syncUniverse(
+          universe,
+          (scanned, total, ticker) => {
+            if (scanned % 5 === 0 || scanned === total) {
+              e.sender.send('screen:sync-progress', { scanned, total, ticker });
+            }
+          },
+          () => isSyncCancelled
+        );
+        return ok(output);
+      } catch (err) {
+        return fail(err);
+      }
+    }
+  );
+
+  ipcMain.handle('screen:sync-cancel', async () => {
+    isSyncCancelled = true;
+    return ok(true);
+  });
+
   ipcMain.handle('screen:get-runs', wrap(() => screenerService.getRuns()));
   ipcMain.handle('screen:get-results', wrap((runId: number) => screenerService.getResults(runId)));
 

@@ -6,6 +6,8 @@ import { ipcMain, BrowserWindow, type IpcMainInvokeEvent } from 'electron';
 import type { WebSocketService } from '../services/websocket-service.js';
 import type { IpcResult } from '@shared/types.js';
 
+import { AlertsService } from '../services/alerts-service.js';
+
 function ok<T>(value: T): IpcResult<T> {
   return { ok: true, value };
 }
@@ -25,7 +27,9 @@ function wrap<Args extends unknown[], R>(fn: (...args: Args) => R) {
   };
 }
 
-export function registerWebSocketIpc(wsService: WebSocketService): void {
+export function registerWebSocketIpc(wsService: WebSocketService, db: import('better-sqlite3').Database): void {
+  const alertsService = new AlertsService(db);
+
   // Connect to WebSocket
   ipcMain.handle('websocket:connect', wrap(() => {
     wsService.connect();
@@ -65,6 +69,22 @@ export function registerWebSocketIpc(wsService: WebSocketService): void {
     BrowserWindow.getAllWindows().forEach(win => {
       win.webContents.send('websocket:price', data);
     });
+
+    // Check price alerts
+    try {
+      const activeAlerts = alertsService.listActive().filter((a: any) => a.alertType === 'price' && a.ticker === data.ticker);
+      for (const alert of activeAlerts) {
+        const result = alertsService.checkPriceAlert(alert, data.price);
+        if (result.triggered) {
+          alertsService.markTriggered(alert.id);
+          BrowserWindow.getAllWindows().forEach(win => {
+            win.webContents.send('websocket:alert', result);
+          });
+        }
+      }
+    } catch (err) {
+      console.error('[WebSocket] Error checking alerts:', err);
+    }
   });
 
   wsService.on('connected', () => {

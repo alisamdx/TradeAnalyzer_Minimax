@@ -47,6 +47,16 @@ export function registerCacheIpc(db: Database): void {
     return true;
   }));
 
+  // Refresh cache: clears data and resets metadata
+  ipcMain.handle('cache:refresh', wrap(() => {
+    db.prepare('DELETE FROM quote_cache').run();
+    db.prepare('DELETE FROM fundamentals_cache').run();
+    db.prepare('DELETE FROM constituents').run();
+    db.prepare('DELETE FROM constituents_meta').run();
+    cacheManager.resetCache();
+    return true;
+  }));
+
   // Check if cache is stale (simple boolean)
   ipcMain.handle('cache:isStale', wrap(() => cacheManager.isCacheStale()));
 }

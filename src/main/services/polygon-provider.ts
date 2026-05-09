@@ -149,33 +149,34 @@ export class PolygonDataProvider implements DataProvider {
     const data = await this.fetchWithRetry(
       `/v2/snapshot/locale/us/markets/stocks/tickers/${ticker}`
     ) as {
-      ticker?: string;
-      last?: { c?: number; p?: number; b?: { p?: number }; a?: { p?: number }; v?: number; h?: number; l?: number };
-      prevDay?: { c?: number; v?: number; h?: number; l?: number };
-      today?: { v?: number; h?: number; l?: number };
-      session?: { av?: number };
+      ticker?: {
+        ticker?: string;
+        day?: { c?: number; h?: number; l?: number; v?: number };
+        prevDay?: { c?: number; h?: number; l?: number; v?: number };
+      };
     };
 
-    const snapshot = (data as { results?: typeof data }).results ?? {};
-    const last = snapshot.last;
-    const prev = snapshot.prevDay;
+    // Polygon wraps the snapshot data under `ticker` key.
+    // The day's OHLCV is in `day`, previous day in `prevDay`.
+    const tickerData = data.ticker;
+    const day = tickerData?.day;
+    const prev = tickerData?.prevDay;
 
     // IV rank / percentile: computed from 52-week IV range — Polygon doesn't
     // expose this directly in the snapshot, so we store null here.
     // Phase 3's pipeline will compute this post-fetch and update the cache.
-    const lastPrice = last?.c ?? prev?.c ?? null;
+    const lastPrice = day?.c ?? null;
     const prevClose = prev?.c ?? null;
-    void lastPrice; void prevClose; // used in return value below
 
     return {
       ticker,
       last: lastPrice,
       prevClose,
-      bid: last?.b?.p ?? null,
-      ask: last?.a?.p ?? null,
-      volume: last?.v ?? prev?.v ?? null,
-      dayHigh: last?.h ?? prev?.h ?? null,
-      dayLow: last?.l ?? prev?.l ?? null,
+      bid: null,  // Bid/ask not available in v2 snapshot endpoint
+      ask: null,
+      volume: day?.v ?? null,
+      dayHigh: day?.h ?? null,
+      dayLow: day?.l ?? null,
       ivRank: null,
       ivPercentile: null,
       distance52WkHigh: null,
@@ -190,7 +191,7 @@ export class PolygonDataProvider implements DataProvider {
       this.fetchWithRetry('/vX/reference/financials', {
         ticker,
         timeframe: 'quarterly',
-        limit: '4'
+        limit: '8'
       }),
       this.fetchWithRetry(`/v3/reference/tickers/${ticker}`)
     ]);
@@ -215,7 +216,7 @@ export class PolygonDataProvider implements DataProvider {
 
     const tickerDetails = {
       market_cap: (details['market_cap'] as number | null) ?? null,
-      share_class_shares_outstanding: (details['shares_outstanding'] as number | null) ?? null,
+      share_class_shares_outstanding: (details['share_class_shares_outstanding'] as number | null) ?? null,
       sector: (details['sector'] as string | null) ?? null,
       industry: (details['industry'] as string | null) ?? null,
       sic_description: (details['sic_description'] as string | null) ?? null

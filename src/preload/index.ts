@@ -84,11 +84,25 @@ function buildApi() {
     importConstituents: (filePath: string, index: 'sp500' | 'russell1000') =>
       invoke<{ count: number }>('screen:import-constituents', { filePath, index }),
     run: (criteria: ScreenCriteria) =>
-      invoke<ScreenRunResult>('screen:run', criteria),
+      invoke<{ resultCount: number; rows: ScreenResultRow[] }>('screen:run', criteria),
+    syncUniverse: (universe: Universe) =>
+      invoke<{ scanned: number }>('screen:sync-universe', universe),
+    syncCancel: () => invoke<boolean>('screen:sync-cancel'),
+    onSyncProgress: (callback: (data: { scanned: number; total: number; ticker?: string }) => void) => {
+      const handler = (_: any, data: any) => callback(data);
+      ipcRenderer.on('screen:sync-progress', handler);
+      return () => ipcRenderer.removeListener('screen:sync-progress', handler);
+    },
     getRuns: () => invoke<ScreenRunResult[]>('screen:get-runs'),
     getResults: (runId: number) => invoke<ScreenResultRow[]>('screen:get-results', runId),
     saveAsWatchlist: (runId: number, resultIds: number[], name: string) =>
-      invoke<Watchlist>('screen:save-as-watchlist', runId, resultIds, name)
+      invoke<Watchlist>('screen:save-as-watchlist', runId, resultIds, name),
+    cancel: () => invoke<boolean>('screen:cancel'),
+    onProgress: (callback: (data: { scanned: number; total: number; ticker?: string }) => void) => {
+      const handler = (_: any, data: any) => callback(data);
+      ipcRenderer.on('screen:progress', handler);
+      return () => ipcRenderer.removeListener('screen:progress', handler);
+    }
   };
 
   const quotes = {
@@ -151,6 +165,7 @@ function buildApi() {
     getStats: () => invoke<CacheStats>('cache:getStats'),
     updateLastRun: (recordCount?: number) => invoke<boolean>('cache:updateLastRun', recordCount),
     reset: () => invoke<boolean>('cache:reset'),
+    refresh: () => invoke<boolean>('cache:refresh'),
     isStale: () => invoke<boolean>('cache:isStale')
   };
 
@@ -180,6 +195,11 @@ function buildApi() {
       const handler = (_: any, error: string) => callback(error);
       ipcRenderer.on('websocket:error', handler);
       return () => ipcRenderer.removeListener('websocket:error', handler);
+    },
+    onAlert: (callback: (data: { alertId: number; ticker: string; alertType: string; triggered: boolean; message: string; playSound: boolean }) => void) => {
+      const handler = (_: any, data: any) => callback(data);
+      ipcRenderer.on('websocket:alert', handler);
+      return () => ipcRenderer.removeListener('websocket:alert', handler);
     }
   };
 

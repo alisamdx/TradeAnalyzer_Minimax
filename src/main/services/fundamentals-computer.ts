@@ -7,32 +7,31 @@
 
 import type { DerivedRatios } from '@shared/types.js';
 
-/** Raw Polygon /v2/reference/financials shape (abbreviated — we only need the fields
+/** Raw Polygon /vX/reference/financials shape (abbreviated — we only need the fields
  *  we actually use, so extra Polygon fields are silently ignored). */
 export interface PolygonFinancials {
   ticker: string;
   company_name?: string;
- sic_description?: string;
+  sic_description?: string;
   filings?: ReadonlyArray<{
     date: string;
     start_date: string;
     end_date: string;
     financials?: {
       income_statement?: {
-        revenues?: { value: number }[];
-        net_income_loss?: { value: number }[];
-        operating_income_loss?: { value: number }[];
+        revenues?: { value: number; unit?: string; label?: string };
+        net_income_loss?: { value: number; unit?: string; label?: string };
+        operating_income_loss?: { value: number; unit?: string; label?: string };
       };
       balance_sheet?: {
-        shareholders_equity_loss?: { value: number }[];
-        total_current_assets?: { value: number }[];
-        total_current_liabilities?: { value: number }[];
-        total_liabilities?: { value: number }[];
-        total_debt?: { value: number }[];
+        equity?: { value: number; unit?: string; label?: string };
+        current_assets?: { value: number; unit?: string; label?: string };
+        current_liabilities?: { value: number; unit?: string; label?: string };
+        long_term_debt?: { value: number; unit?: string; label?: string };
       };
       cash_flow_statement?: {
-        operating_cash_flow?: { value: number }[];
-        capital_expenditures?: { value: number }[];
+        net_cash_flow_from_operating_activities?: { value: number; unit?: string; label?: string };
+        // Note: capital_expenditures is not consistently available in Polygon data
       };
     };
   }>;
@@ -87,10 +86,12 @@ interface RawFinancials {
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
-function latestValue(arr: unknown[] | undefined | null): number | null {
-  if (!arr || arr.length === 0) return null;
-  const first = arr[0] as { value?: unknown } | undefined;
-  const v = first?.value;
+function latestValue(obj: unknown): number | null {
+  // Polygon financials: each metric is an object { value: number, unit: string, ... }
+  // Not an array as previously assumed.
+  if (!obj || typeof obj !== 'object') return null;
+  const o = obj as Record<string, unknown>;
+  const v = o['value'];
   return typeof v === 'number' ? v : null;
 }
 
@@ -106,41 +107,43 @@ export function parseFinancials(raw: PolygonFinancials): RawFinancials {
   const filings = raw.filings ?? [];
   const latest = filings[0]?.financials;
 
-  const income = latest?.income_statement;
   const balance = latest?.balance_sheet;
-  const cashflow = latest?.cash_flow_statement;
 
-  // Try to get TTM (trailing 12 months = last 4 quarters) by summing the last 4 filings.
-  // If fewer filings exist, sum what we have.
-  function sumField(arr: unknown, _key: string): number | null {
-    if (!Array.isArray(arr) || arr.length === 0) return null;
-    // Take up to 4 entries for TTM.
-    const vals = (arr as Array<{ value?: number }>).slice(0, 4)
-      .map((e) => e.value)
-      .filter((_v): _v is number => typeof _v === 'number');
-    return vals.length > 0 ? vals.reduce((a, b) => a + b, 0) : null;
+  // Try to get TTM (trailing 12 months = last 4 quarters) by summing across the last 4 filings.
+  function sumTtm(extractor: (financials: NonNullable<PolygonFinancials['filings']>[0]['financials']) => number | null): number | null {
+    let sum = 0;
+    let found = 0;
+    for (let i = 0; i < Math.min(4, filings.length); i++) {
+      const f = filings[i]?.financials;
+      if (f) {
+        const val = extractor(f);
+        if (val !== null) {
+          sum += val;
+          found++;
+        }
+      }
+    }
+    return found > 0 ? sum : null;
   }
 
-  const revenues = income?.revenues;
-  const netIncomes = income?.net_income_loss;
-  const opIncomes = income?.operating_income_loss;
-  const equities = balance?.shareholders_equity_loss;
-  const currentAssets = balance?.total_current_assets;
-  const currentLiabs = balance?.total_current_liabilities;
-  const totalDebts = balance?.total_debt;
-  const opCash = cashflow?.operating_cash_flow;
-  const capexArr = cashflow?.capital_expenditures;
+  const revenue = sumTtm(f => latestValue(f?.income_statement?.revenues));
+  const netIncome = sumTtm(f => latestValue(f?.income_statement?.net_income_loss));
+  const operatingIncome = sumTtm(f => latestValue(f?.income_statement?.operating_income_loss));
+  const operatingCashFlow = sumTtm(f => latestValue(f?.cash_flow_statement?.net_cash_flow_from_operating_activities));
+  // Note: capital_expenditures is not consistently available in Polygon data
+  // FCF will be based on operating cash flow only if capex unavailable
+  const capex = null;
 
   return {
-    revenue: sumField(revenues, 'value'),
-    netIncome: sumField(netIncomes, 'value'),
-    operatingIncome: sumField(opIncomes, 'value'),
-    shareholdersEquity: latestValue(equities),
-    totalCurrentAssets: latestValue(currentAssets),
-    totalCurrentLiabilities: latestValue(currentLiabs),
-    totalDebt: latestValue(totalDebts),
-    operatingCashFlow: latestValue(opCash),
-    capex: latestValue(capexArr),
+    revenue,
+    netIncome,
+    operatingIncome,
+    shareholdersEquity: latestValue(balance?.equity),
+    totalCurrentAssets: latestValue(balance?.current_assets),
+    totalCurrentLiabilities: latestValue(balance?.current_liabilities),
+    totalDebt: latestValue(balance?.long_term_debt),
+    operatingCashFlow,
+    capex,
     shareCount: null,
     marketCap: null,
     currentPrice: null,
@@ -183,10 +186,27 @@ export function computeRatios(input: FundamentalsComputerInput): DerivedRatios {
   const currentPrice = snapshot.last?.c ?? snapshot.prev_day?.c ?? null;
 
   // Get prior-year financials for YoY growth calculations.
+  // We need the TTM from exactly 1 year ago (i.e. filings 4 through 7).
   const filings = financials.filings ?? [];
-  const priorFiling = filings[1]?.financials;
-  const priorRev = priorFiling?.income_statement?.revenues?.[0]?.value ?? null;
-  const priorNet = priorFiling?.income_statement?.net_income_loss?.[0]?.value ?? null;
+  
+  function sumPriorTtm(extractor: (financials: NonNullable<PolygonFinancials['filings']>[0]['financials']) => number | null): number | null {
+    let sum = 0;
+    let found = 0;
+    for (let i = 4; i < Math.min(8, filings.length); i++) {
+      const f = filings[i]?.financials;
+      if (f) {
+        const val = extractor(f);
+        if (val !== null) {
+          sum += val;
+          found++;
+        }
+      }
+    }
+    return found > 0 ? sum : null;
+  }
+
+  const priorRev = sumPriorTtm(f => latestValue(f?.income_statement?.revenues));
+  const priorNet = sumPriorTtm(f => latestValue(f?.income_statement?.net_income_loss));
 
   // EPS (TTM) = TTM net income / share count
   // see docs/formulas.md#earnings-per-share

@@ -3,6 +3,10 @@ import type { Api } from '../../preload/index.js';
 declare global {
   interface Window {
     api: Api & {
+      screen: {
+        cancel: () => Promise<boolean>;
+        onProgress: (callback: (data: { scanned: number; total: number; ticker?: string }) => void) => (() => void);
+      };
       websocket: {
         connect: () => Promise<boolean>;
         disconnect: () => Promise<boolean>;

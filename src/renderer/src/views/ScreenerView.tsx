@@ -239,37 +239,37 @@ export function ScreenerView() {
     setActivePresetId(null);
   }, [universe]);
 
+  const clearAllFilters = useCallback(() => {
+    setCriteria((prev) => ({
+      ...prev,
+      filters: prev.filters.map((f) => ({ ...f, enabled: false }))
+    }));
+    setActivePresetId(null);
+  }, []);
+
   // ── Run screen ────────────────────────────────────────────────────────────
 
   const runScreen = useCallback(async () => {
-    // Check cache staleness before running
-    if (cacheStatus?.isStale) {
-      const proceed = await window.dialog.confirm({
-        title: 'Stale Data Warning',
-        message: 'Cache data is more than 1 hour old. Results may be outdated. Proceed anyway?'
-      });
-      if (!proceed) return;
-    }
-
     setIsRunning(true);
     setError(null);
-    setActiveRunId(null);
     setResults([]);
     setCurrentPage(1);
     try {
-      const run = await window.api.screen.run({ ...criteria, universe });
-      setActiveRunId(run.id);
-      setRuns((prev) => [run, ...prev]);
-      const res = await window.api.screen.getResults(run.id);
-      setResults(res);
+      const response = await window.api.screen.run({ ...criteria, universe });
+      setResults(response.rows);
       const universeName = universe === 'both' ? 'Both' : universe.toUpperCase();
-      setStatusMsg(`${universeName}: ${run.resultCount} passed`);
+      setStatusMsg(`${universeName}: ${response.resultCount} passed`);
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setIsRunning(false);
     }
-  }, [criteria, universe, cacheStatus]);
+  }, [criteria, universe]);
+
+  // Auto-run when criteria or universe changes
+  useEffect(() => {
+    runScreen();
+  }, [runScreen]);
 
   // ── Quick Actions ─────────────────────────────────────────────────────────
 
@@ -421,7 +421,13 @@ export function ScreenerView() {
           <span className="meta">{metaFor('sp500')}</span>
           <span className="meta">{metaFor('russell1000')}</span>
         </div>
-        <CacheStatusIndicator status={cacheStatus} />
+        <div className="status-indicator">
+          <span className="meta">
+            {cacheStatus?.lastUpdated 
+              ? `Data as of: ${new Date(cacheStatus.lastUpdated).toLocaleString()}` 
+              : 'No data. Go to Data Sync.'}
+          </span>
+        </div>
       </div>
 
       <div className="screener-layout">
@@ -441,10 +447,6 @@ export function ScreenerView() {
                 </button>
               ))}
             </div>
-            <div className="refresh-btns">
-              <button onClick={() => refreshConstituents('sp500')} className="tiny-btn">↻ S&P 500</button>
-              <button onClick={() => refreshConstituents('russell1000')} className="tiny-btn">↻ Russell 1000</button>
-            </div>
           </div>
 
           {/* Mode */}
@@ -463,8 +465,13 @@ export function ScreenerView() {
 
           {/* Filters */}
           <div className="control-section filters-panel">
-            <h3>Filters <span className="badge">{totalEnabled} enabled</span></h3>
-            <button onClick={resetFilters} className="tiny-btn" style={{ marginBottom: 8 }}>Reset to defaults</button>
+            <div className="filters-header">
+              <h3>Filters <span className="badge">{totalEnabled} enabled</span></h3>
+              <div>
+                <button onClick={resetFilters} className="tiny-btn">Reset to defaults</button>
+                <button onClick={clearAllFilters} className="tiny-btn" style={{ marginLeft: '8px' }}>Clear all</button>
+              </div>
+            </div>
             <div className="filters-list">
               {criteria.filters.map((f) => {
                 const spec = DEFAULT_FILTER_SPECS.find((s) => s.id === f.id) ?? {
@@ -508,17 +515,6 @@ export function ScreenerView() {
                 );
               })}
             </div>
-          </div>
-
-          {/* Run */}
-          <div className="control-section">
-            <button
-              onClick={runScreen}
-              disabled={isRunning}
-              className="run-btn"
-            >
-              {isRunning ? 'Running…' : '▶ Run Screen'}
-            </button>
           </div>
 
           {/* Presets */}

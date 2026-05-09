@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
 import type { Watchlist, WatchlistItem, CachedQuote } from '@shared/types.js';
 import { ScreenerView } from './views/ScreenerView.js';
 import { AnalysisView } from './views/AnalysisView.js';
@@ -6,15 +6,18 @@ import { ValidateView } from './views/ValidateView.js';
 import { SettingsView } from './views/SettingsView.js';
 import { PortfolioView } from './views/PortfolioView.js';
 import { BriefingView } from './views/BriefingView.js';
+import { AlertsView } from './views/AlertsView.js';
 import { useCacheStatus } from './hooks/useCacheStatus.js';
 import { CacheStatusIndicator } from './components/CacheStatusIndicator.js';
 import { useSortable } from './hooks/useSortable.js';
 import { useWebSocket } from './hooks/useWebSocket.js';
 import { RealtimePriceTicker } from './components/RealtimePriceTicker.js';
 
+import { DataView } from './views/DataView.js';
+
 declare const __APP_VERSION__: string;
 
-type View = 'watchlists' | 'screener' | 'analysis' | 'validate' | 'portfolio' | 'briefing' | 'settings';
+type View = 'watchlists' | 'screener' | 'analysis' | 'validate' | 'portfolio' | 'briefing' | 'settings' | 'alerts' | 'data';
 
 export function App() {
   const [view, setView] = useState<View>('watchlists');
@@ -25,14 +28,55 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [tickerInput, setTickerInput] = useState('');
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
+  const [alertMsg, setAlertMsg] = useState<string | null>(null);
   const [quoteMap, setQuoteMap] = useState<Record<string, CachedQuote | null>>({});
   const [lastRefresh, setLastRefresh] = useState<string>('');
+  const [isRefreshingCache, setIsRefreshingCache] = useState(false);
+  
+  // Audio context for alerts
+  const audioCtxRef = useRef<AudioContext | null>(null);
 
   // Cache status for auto-refresh indicator
   const { status: cacheStatus, refresh: refreshCacheStatus } = useCacheStatus();
 
   // WebSocket for real-time prices
   const { isConnected: wsConnected, priceUpdates, subscribe, unsubscribe } = useWebSocket();
+
+  // Listen for real-time alerts
+  useEffect(() => {
+    const removeAlertListener = window.api.websocket.onAlert((data) => {
+      setAlertMsg(`ALERT: ${data.message}`);
+      
+      if (data.playSound) {
+        // Play a simple beep using Web Audio API
+        if (!audioCtxRef.current) {
+          audioCtxRef.current = new window.AudioContext();
+        }
+        const ctx = audioCtxRef.current;
+        if (ctx.state === 'suspended') {
+          ctx.resume();
+        }
+        const osc = ctx.createOscillator();
+        const gainNode = ctx.createGain();
+        osc.connect(gainNode);
+        gainNode.connect(ctx.destination);
+        
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(880, ctx.currentTime); // A5
+        
+        gainNode.gain.setValueAtTime(0, ctx.currentTime);
+        gainNode.gain.linearRampToValueAtTime(1, ctx.currentTime + 0.05);
+        gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
+        
+        osc.start(ctx.currentTime);
+        osc.stop(ctx.currentTime + 0.5);
+      }
+    });
+
+    return () => {
+      removeAlertListener();
+    };
+  }, []);
 
   // Sortable columns for watchlist table
   const tableData = items.map(item => ({
@@ -370,6 +414,18 @@ export function App() {
             📰 Briefing
           </button>
           <button
+            className={`nav-btn ${view === 'alerts' ? 'active' : ''}`}
+            onClick={() => setView('alerts')}
+          >
+            🔔 Alerts
+          </button>
+          <button
+            className={`nav-btn ${view === 'data' ? 'active' : ''}`}
+            onClick={() => setView('data')}
+          >
+            🗄️ Data Sync
+          </button>
+          <button
             className={`nav-btn ${view === 'settings' ? 'active' : ''}`}
             onClick={() => setView('settings')}
           >
@@ -405,12 +461,19 @@ export function App() {
             {error} <span style={{ float: 'right', cursor: 'pointer' }}>✕</span>
           </div>
         )}
+        {alertMsg && (
+          <div className="alert-toast" style={{ backgroundColor: '#e74c3c', color: 'white', padding: '10px', marginBottom: '10px', borderRadius: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }} onClick={() => setAlertMsg(null)}>
+            {alertMsg} <span style={{ float: 'right', cursor: 'pointer', fontWeight: 'bold' }}>✕</span>
+          </div>
+        )}
 
         {view === 'screener' && <ScreenerView />}
         {view === 'analysis' && <AnalysisView />}
         {view === 'validate' && <ValidateView />}
         {view === 'portfolio' && <PortfolioView />}
         {view === 'briefing' && <BriefingView />}
+        {view === 'alerts' && <AlertsView />}
+        {view === 'data' && <DataView />}
         {view === 'settings' && <SettingsView />}
 
         {view === 'watchlists' && !active ? (
@@ -433,9 +496,19 @@ export function App() {
               <div style={{ flex: 1 }} />
               <CacheStatusIndicator
                 status={cacheStatus}
-                isLoading={false}
-                onRefresh={refreshCacheStatus}
-                showRefreshButton={false}
+                isLoading={isRefreshingCache}
+                onRefresh={async () => {
+                  try {
+                    setIsRefreshingCache(true);
+                    await window.api.cache.refresh();
+                    await refreshCacheStatus();
+                    if (activeId !== null) await refreshQuotes(activeId);
+                  } catch (err) {
+                    console.error('Failed to refresh cache:', err);
+                  } finally {
+                    setIsRefreshingCache(false);
+                  }
+                }}
               />
               <button
                 onClick={() => activeId !== null && refreshQuotes(activeId)}

@@ -143,7 +143,7 @@ export function registerWatchlistIpc(service: WatchlistService): void {
   // Show a prompt dialog from the renderer via main process.
   ipcMain.handle('dialog:prompt', async (_e, opts: { title: string; defaultValue?: string }) => {
     const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
-    if (!win) return null;
+    if (!win) return ok(null);
     const { response } = await dialog.showMessageBox(win, {
       type: 'question',
       title: opts.title,
@@ -152,14 +152,14 @@ export function registerWatchlistIpc(service: WatchlistService): void {
       defaultId: 0,
       cancelId: 1
     });
-    if (response === 1) return null;
-    return opts.defaultValue ?? '';
+    if (response === 1) return ok(null);
+    return ok(opts.defaultValue ?? '');
   });
 
   // Show a confirm dialog from the renderer via main process.
   ipcMain.handle('dialog:confirm', async (_e, opts: { title: string; message: string }) => {
     const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
-    if (!win) return false;
+    if (!win) return ok(false);
     const { response } = await dialog.showMessageBox(win, {
       type: 'question',
       title: opts.title,
@@ -168,6 +168,6 @@ export function registerWatchlistIpc(service: WatchlistService): void {
       defaultId: 0,
       cancelId: 1
     });
-    return response === 0;
+    return ok(response === 0);
   });
 }

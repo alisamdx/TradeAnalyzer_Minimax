@@ -114,7 +114,8 @@ export class ScreenerService {
   /** Run the full screen against a universe. Progress is reported via the callback. */
   async runScreen(
     criteria: ScreenCriteria,
-    onProgress?: (scanned: number, total: number) => void
+    onProgress?: (scanned: number, total: number, ticker?: string) => void,
+    checkCancelled?: () => boolean
   ): Promise<ScreenRunOutput> {
     const universe = criteria.universe;
     const constituents = this.getConstituents(universe);
@@ -123,11 +124,15 @@ export class ScreenerService {
     let passed = 0;
 
     for (let i = 0; i < constituents.length; i++) {
+      if (checkCancelled && checkCancelled()) {
+        throw new Error('Screening cancelled by user');
+      }
+
       const { ticker, companyName, sector } = constituents[i]!;
-      onProgress?.(i, total);
+      onProgress?.(i, total, ticker);
 
       try {
-        const result = await this.evaluateTicker(ticker, companyName, sector, criteria);
+        const result = this.evaluateTicker(ticker, companyName, sector, criteria);
         if (criteria.mode === 'strict') {
           if (result.failedFilters.length === 0) {
             rows.push(result);
@@ -143,16 +148,84 @@ export class ScreenerService {
     }
 
     onProgress?.(total, total);
+    this.cacheManager.updateLastRun(total);
     return { scanned: total, passed, rows };
   }
 
+  /** Sync data for all constituents in a universe from the remote API into the local DB. */
+  async syncUniverse(
+    universe: Universe,
+    onProgress?: (scanned: number, total: number, ticker?: string) => void,
+    checkCancelled?: () => boolean
+  ): Promise<{ scanned: number }> {
+    const constituents = this.getConstituents(universe);
+    const total = constituents.length;
+
+    if (total === 0) {
+      throw new Error(`The ${universe === 'both' ? 'S&P 500 and Russell 1000 lists are' : universe + ' list is'} empty. Please click "Update Ticker Lists" above first.`);
+    }
+
+    for (let i = 0; i < total; i++) {
+      if (checkCancelled && checkCancelled()) {
+        throw new Error('Data sync cancelled by user');
+      }
+
+      const ticker = constituents[i]!.ticker;
+      onProgress?.(i, total, ticker);
+
+      // Fetch and cache Fundamentals
+      try {
+        if (this.fundamentalsCache.isStale(ticker)) {
+          const ratios = await this.dataProvider.getFundamentals(ticker);
+          this.fundamentalsCache.upsert(ticker, ratios);
+        }
+      } catch (err) {
+        if (err instanceof Error && (err.message.includes('401') || err.message.toLowerCase().includes('unauthorized') || err.message.toLowerCase().includes('api key'))) {
+          throw new Error('Invalid or missing Polygon API Key. Please update it in Settings.');
+        }
+        // Silently skip failed fundamentals, typical for OTC or delisted
+      }
+
+      // Fetch and cache Quotes
+      try {
+        if (this.quoteCache.isStale(ticker)) {
+          const snapshot = await this.dataProvider.getQuote(ticker);
+          this.quoteCache.upsert({
+            ticker,
+            last: snapshot.last,
+            prevClose: snapshot.prevClose,
+            bid: snapshot.bid,
+            ask: snapshot.ask,
+            volume: snapshot.volume,
+            dayHigh: snapshot.dayHigh,
+            dayLow: snapshot.dayLow,
+            ivRank: snapshot.ivRank,
+            ivPercentile: snapshot.ivPercentile,
+            distance52WkHigh: snapshot.distance52WkHigh,
+            distance52WkLow: snapshot.distance52WkLow,
+            fetchedAt: snapshot.fetchedAt
+          });
+        }
+      } catch (err) {
+        if (err instanceof Error && (err.message.includes('401') || err.message.toLowerCase().includes('unauthorized') || err.message.toLowerCase().includes('api key'))) {
+          throw new Error('Invalid or missing Polygon API Key. Please update it in Settings.');
+        }
+        // Silently skip failed quotes
+      }
+    }
+
+    onProgress?.(total, total);
+    this.cacheManager.updateLastRun(total);
+    return { scanned: total };
+  }
+
   /** Evaluate a single ticker against the screen criteria. */
-  async evaluateTicker(
+  evaluateTicker(
     ticker: string,
     companyName: string | null,
     sector: string | null,
     criteria: ScreenCriteria
-  ): Promise<TickerScreenData> {
+  ): TickerScreenData {
     const passedFilters = new Set<string>();
     const failedFilters: string[] = [];
 
@@ -168,44 +241,37 @@ export class ScreenerService {
 
     // ── Fundamentals ───────────────────────────────────────────────────────
     let ratios: DerivedRatios;
-    const cached = this.fundamentalsCache.get(ticker);
-    if (cached && !this.fundamentalsCache.isStale(ticker)) {
-      ratios = cached.ratios;
+    const cachedFundamentals = this.fundamentalsCache.get(ticker);
+    if (cachedFundamentals) {
+      ratios = cachedFundamentals.ratios;
     } else {
-      ratios = await this.dataProvider.getFundamentals(ticker);
-      this.fundamentalsCache.upsert(ticker, ratios);
+      ratios = {
+        marketCap: null,
+        peRatio: null,
+        eps: null,
+        epsGrowth: null,
+        revenueGrowth: null,
+        debtToEquity: null,
+        roe: null,
+        profitMargin: null,
+        freeCashFlow: null,
+        currentRatio: null,
+        dividendYield: null,
+        beta: null,
+        sector: null,
+        industry: null
+      };
     }
 
     // ── Quote ───────────────────────────────────────────────────────────────
     let quote: Quote | null = null;
     const cachedQuote = this.quoteCache.get(ticker);
-    if (cachedQuote && !this.quoteCache.isStale(ticker)) {
+    if (cachedQuote) {
       quote = cachedQuote as unknown as Quote;
     } else {
-      try {
-        const snapshot = await this.dataProvider.getQuote(ticker);
-        quote = snapshot;
-        this.quoteCache.upsert({
-          ticker,
-          last: snapshot.last,
-          prevClose: snapshot.prevClose,
-          bid: snapshot.bid,
-          ask: snapshot.ask,
-          volume: snapshot.volume,
-          dayHigh: snapshot.dayHigh,
-          dayLow: snapshot.dayLow,
-          ivRank: snapshot.ivRank,
-          ivPercentile: snapshot.ivPercentile,
-          distance52WkHigh: snapshot.distance52WkHigh,
-          distance52WkLow: snapshot.distance52WkLow,
-          fetchedAt: snapshot.fetchedAt
-        });
-      } catch {
-        // Quote missing — continue with fundamentals only.
-        quote = { ticker, last: null, prevClose: null, bid: null, ask: null,
-          volume: null, dayHigh: null, dayLow: null, ivRank: null, ivPercentile: null,
-          distance52WkHigh: null, distance52WkLow: null, fetchedAt: '' };
-      }
+      quote = { ticker, last: null, prevClose: null, bid: null, ask: null,
+        volume: null, dayHigh: null, dayLow: null, ivRank: null, ivPercentile: null,
+        distance52WkHigh: null, distance52WkLow: null, fetchedAt: '' };
     }
 
     const price = quote?.last ?? null;

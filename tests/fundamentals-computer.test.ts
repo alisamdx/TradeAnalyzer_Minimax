@@ -58,13 +58,13 @@ describe('fundamentals-computer', () => {
             end_date: '2025-03-31',
             financials: {
               income_statement: {
-                revenues: [{ value: 390_000_000_000 }],
-                net_income_loss: [{ value: 97_000_000_000 }]
+                revenues: { value: 390_000_000_000 },
+                net_income_loss: { value: 97_000_000_000 }
               },
               balance_sheet: {
-                shareholders_equity_loss: [{ value: 74_000_000_000 }],
-                total_current_assets: [{ value: 143_000_000_000 }],
-                total_current_liabilities: [{ value: 115_000_000_000 }]
+                equity: { value: 74_000_000_000 },
+                current_assets: { value: 143_000_000_000 },
+                current_liabilities: { value: 115_000_000_000 }
               }
             }
           }
@@ -84,16 +84,14 @@ describe('fundamentals-computer', () => {
             date: '2025-03-31', start_date: '', end_date: '',
             financials: {
               income_statement: {
-                revenues: [{ value: 100 }],
-                net_income_loss: [
-                  { value: 10 }, { value: 20 }, { value: 30 }, { value: 40 }
-                ]
+                revenues: { value: 100 },
+                net_income_loss: { value: 100 }
               }
             }
           }
         ]
       }));
-      // sumField takes first 4 entries: 10+20+30+40 = 100
+      // sumTtm takes the value from each filing's financials
       expect(raw.netIncome).toBeCloseTo(100);
     });
   });
@@ -119,7 +117,7 @@ describe('fundamentals-computer', () => {
               date: '', start_date: '', end_date: '',
               financials: {
                 income_statement: {
-                  net_income_loss: [{ value: 97_000_000_000 }]
+                  net_income_loss: { value: 97_000_000_000 }
                 }
               }
             }
@@ -143,7 +141,7 @@ describe('fundamentals-computer', () => {
             {
               date: '', start_date: '', end_date: '',
               financials: {
-                income_statement: { net_income_loss: [{ value: 100_000 }] }
+                income_statement: { net_income_loss: { value: 100_000 } }
               }
             }
           ]
@@ -163,10 +161,10 @@ describe('fundamentals-computer', () => {
             {
               date: '', start_date: '', end_date: '',
               financials: {
-                income_statement: { net_income_loss: [{ value: 100_000 }] },
+                income_statement: { net_income_loss: { value: 100_000 } },
                 balance_sheet: {
-                  shareholders_equity_loss: [{ value: 0 }],
-                  total_debt: [{ value: 200_000 }]
+                  equity: { value: 0 },
+                  long_term_debt: { value: 200_000 }
                 }
               }
             }
@@ -197,8 +195,8 @@ describe('fundamentals-computer', () => {
               date: '', start_date: '', end_date: '',
               financials: {
                 income_statement: {
-                  revenues: [{ value: 400 }],
-                  net_income_loss: [{ value: 40 }]
+                  revenues: { value: 400 },
+                  net_income_loss: { value: 40 }
                 }
               }
             }
@@ -208,14 +206,9 @@ describe('fundamentals-computer', () => {
         snapshot: makeSnapshot(),
         beta: null
       });
-      // 400 revenue TTM sum → 400
-      // 40 net income → not TTM (sums arrays, single-entry array = single value)
-      // → netIncome = 40, revenue = 400 (both latestValue, no sum needed)
-      // Wait — parseFinancials uses latestValue for income, sumField for net income
-      // single-entry array → latestValue returns value, sumField returns value
-      // So netIncome = 40, revenue = 400
+      // revenue = 400, netIncome = 40
+      // profitMargin = (40/400)*100 = 10%
       expect(result.profitMargin).not.toBeNull();
-      // 40/400 = 10%
       expect(result.profitMargin).toBeCloseTo(10, 0);
     });
 
@@ -226,8 +219,8 @@ describe('fundamentals-computer', () => {
             {
               date: '', start_date: '', end_date: '',
               financials: {
-                income_statement: { net_income_loss: [{ value: 100 }] },
-                balance_sheet: { shareholders_equity_loss: [{ value: 500 }] }
+                income_statement: { net_income_loss: { value: 100 } },
+                balance_sheet: { equity: { value: 500 } }
               }
             }
           ]
@@ -249,8 +242,8 @@ describe('fundamentals-computer', () => {
               date: '', start_date: '', end_date: '',
               financials: {
                 balance_sheet: {
-                  total_current_assets: [{ value: 150 }],
-                  total_current_liabilities: [{ value: 100 }]
+                  current_assets: { value: 150 },
+                  current_liabilities: { value: 100 }
                 }
               }
             }
@@ -271,13 +264,13 @@ describe('fundamentals-computer', () => {
               date: '', start_date: '', end_date: '',
               financials: {
                 income_statement: {
-                  revenues: [{ value: 333 }],
-                  net_income_loss: [{ value: 33.333 }]
+                  revenues: { value: 333 },
+                  net_income_loss: { value: 33.333 }
                 },
                 balance_sheet: {
-                  shareholders_equity_loss: [{ value: 100 }],
-                  total_current_assets: [{ value: 222.222 }],
-                  total_current_liabilities: [{ value: 100 }]
+                  equity: { value: 100 },
+                  current_assets: { value: 222.222 },
+                  current_liabilities: { value: 100 }
                 }
               }
             }

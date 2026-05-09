@@ -45,7 +45,7 @@ function createWindow(): BrowserWindow {
     width: 1400,
     height: 900,
     show: false,
-    fullscreen: true,
+    fullscreen: false,
     autoHideMenuBar: true,
     webPreferences: {
       preload: join(__dirname, '..', 'preload', 'index.cjs'),
@@ -56,7 +56,11 @@ function createWindow(): BrowserWindow {
     title: `Trade Analyzer - Minimax v${appVersion()}`
   });
 
-  win.on('ready-to-show', () => win.show());
+  win.on('ready-to-show', () => {
+    win.show();
+    // Open DevTools in development to debug renderer issues
+    win.webContents.openDevTools();
+  });
   win.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: 'deny' };
@@ -165,7 +169,7 @@ app.whenReady().then(() => {
     const row = db.prepare('SELECT value FROM settings WHERE key = ?').get('polygonApiKey') as { value?: string } | undefined;
     return row?.value || process.env['POLYGON_API_KEY'] || '';
   });
-  registerWebSocketIpc(wsService);
+  registerWebSocketIpc(wsService, db);
 
   // Auto-connect WebSocket on startup (respect setting, default to true)
   const autoConnectSetting = db.prepare("SELECT value FROM settings WHERE key = 'autoConnectWebSocket'").get() as { value?: string } | undefined;

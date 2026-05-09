@@ -198,11 +198,13 @@ export class ConstituentsService {
       const cells = [...rowHtml.matchAll(cellRegex)].map((m) => m[1]!);
       if (cells.length < 2) continue;
 
-      // Ticker is in the first cell (sometimes a link).
+      // Ticker is in the first cell.
       const firstCell = cells[0]!;
-      const linkMatch = linkRegex.exec(firstCell);
-      const ticker = (linkMatch ? linkMatch[1]! : firstCell).toUpperCase().replace(/[^A-Z0-9.-]/g, '');
-      if (!ticker) continue;
+      // First try to find a Wikipedia link, but it might just be an external link or plain text.
+      // Strip all HTML tags to get just the text content.
+      const textContent = firstCell.replace(/<[^>]+>/g, '').trim();
+      const ticker = textContent.toUpperCase().replace(/[^A-Z0-9.-]/g, '');
+      if (!ticker || ticker.length > 8) continue; // Ignore obvious garbage
 
       // Company name: strip HTML tags from the second cell.
       const companyName = cells[1]!.replace(/<[^>]+>/g, '').trim() || null;
