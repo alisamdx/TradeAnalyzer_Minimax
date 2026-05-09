@@ -626,6 +626,11 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
                     {result.verdict}
                   </span>
                   <h2>{result.ticker}</h2>
+                  {result.chart.bars.length > 0 && (
+                    <span className="current-price">
+                      ${result.chart.bars[result.chart.bars.length - 1]!.c.toFixed(2)}
+                    </span>
+                  )}
                   <button onClick={refreshTicker} className="tiny-btn" style={{ marginLeft: 8 }}>
                     ↻ Refresh
                   </button>
@@ -636,6 +641,60 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
                   )}
                 </div>
                 <p className="verdict-reason">{result.verdictReason || 'No verdict reason.'}</p>
+
+                {/* Trade Setup */}
+                {result.chart.entryZoneLow !== null && result.chart.entryZoneHigh !== null && (
+                  <div className="trade-setup">
+                    <div className="trade-setup-item">
+                      <span className="trade-label" title="Optimal price range for entering a position. Based on support levels, moving averages, and chart patterns. Best entry is when price pulls back into this zone.">Entry Zone</span>
+                      <span className="trade-value">
+                        ${result.chart.entryZoneLow.toFixed(2)} - ${result.chart.entryZoneHigh.toFixed(2)}
+                      </span>
+                      {(() => {
+                        const currentPrice = result.chart.bars[result.chart.bars.length - 1]?.c;
+                        if (currentPrice !== undefined) {
+                          if (currentPrice >= result.chart.entryZoneLow && currentPrice <= result.chart.entryZoneHigh) {
+                            return <span className="trade-status in-zone">✓ In Zone</span>;
+                          } else if (currentPrice > result.chart.entryZoneHigh) {
+                            const pct = ((currentPrice - result.chart.entryZoneHigh) / result.chart.entryZoneHigh * 100).toFixed(1);
+                            return <span className="trade-status above-zone">↑ {pct}% above</span>;
+                          } else {
+                            const pct = ((result.chart.entryZoneLow - currentPrice) / result.chart.entryZoneLow * 100).toFixed(1);
+                            return <span className="trade-status below-zone">↓ {pct}% below</span>;
+                          }
+                        }
+                        return null;
+                      })()}
+                    </div>
+                    {result.chart.stopLoss !== null && (
+                      <div className="trade-setup-item">
+                        <span className="trade-label" title="Exit price to limit losses if the trade goes against you. Placed below support levels. Risk only 1-2% of portfolio per trade.">Stop Loss</span>
+                        <span className="trade-value stop-loss">${result.chart.stopLoss.toFixed(2)}</span>
+                      </div>
+                    )}
+                    {result.chart.target !== null && (
+                      <div className="trade-setup-item">
+                        <span className="trade-label" title="Profit target price. Based on resistance levels and measured moves. Consider taking partial profits at this level.">Target</span>
+                        <span className="trade-value target">${result.chart.target.toFixed(2)}</span>
+                      </div>
+                    )}
+                    {result.chart.entryZoneLow !== null && result.chart.entryZoneHigh !== null && result.chart.stopLoss !== null && result.chart.target !== null && (
+                      <div className="trade-setup-item">
+                        <span className="trade-label" title="Ratio of potential profit to potential loss. Higher is better. 2:1 means you can gain $2 for every $1 risked. Minimum 1.5:1 recommended for good trades.">Risk/Reward</span>
+                        <span className="trade-value">
+                          {(() => {
+                            const entryAvg = (result.chart.entryZoneLow! + result.chart.entryZoneHigh!) / 2;
+                            const risk = Math.abs(entryAvg - result.chart.stopLoss!);
+                            const reward = Math.abs(result.chart.target! - entryAvg);
+                            const rr = risk > 0 ? (reward / risk).toFixed(1) : '—';
+                            return `${rr}:1`;
+                          })()}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div className="fundamentals-grid">
                   <div className="fund-item">
                     <span className="fund-label" title="Price-to-Earnings Ratio. Stock price divided by earnings per share. Lower P/E may indicate undervaluation. Compare to industry peers.">P/E</span>
@@ -675,79 +734,74 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
                 )}
               </div>
 
-              {/* ── Section B: Market Opinion ── */}
+              {/* ── Section B: Market & Trend ── */}
               <div className="section-card section-b">
-                <h3>Market Opinion</h3>
-                <div className="opinion-row">
-                  {result.marketOpinion.badge && (
-                    <span
-                      className="opinion-badge"
-                      style={{
-                        background: `${BADGE_COLORS[result.marketOpinion.badge]}22`,
-                        color: BADGE_COLORS[result.marketOpinion.badge],
-                        borderColor: BADGE_COLORS[result.marketOpinion.badge]
-                      }}
-                      title="Consensus analyst recommendation based on Buy/Hold/Sell ratings. BUY = majority recommend buying, HOLD = neutral, SELL = majority recommend selling."
-                    >
-                      {result.marketOpinion.badge}
-                    </span>
-                  )}
-                  <div className="analyst-counts" title="Number of analysts with each rating. More analysts providing ratings increases confidence in the consensus.">
-                    {result.marketOpinion.buyCount !== null && (
-                      <span style={{ color: '#3fb950' }}>Buy {result.marketOpinion.buyCount}</span>
-                    )}
-                    {result.marketOpinion.holdCount !== null && (
-                      <span style={{ color: '#8b949e', marginLeft: 12 }}>Hold {result.marketOpinion.holdCount}</span>
-                    )}
-                    {result.marketOpinion.sellCount !== null && (
-                      <span style={{ color: '#f85149', marginLeft: 12 }}>Sell {result.marketOpinion.sellCount}</span>
+                <div className="market-trend-grid">
+                  <div className="mt-col">
+                    <span className="mt-label">Analysts</span>
+                    <div className="mt-row">
+                      {result.marketOpinion.badge && (
+                        <span
+                          className="opinion-badge"
+                          style={{
+                            background: `${BADGE_COLORS[result.marketOpinion.badge]}22`,
+                            color: BADGE_COLORS[result.marketOpinion.badge],
+                            borderColor: BADGE_COLORS[result.marketOpinion.badge]
+                          }}
+                          title="Consensus analyst recommendation based on Buy/Hold/Sell ratings."
+                        >
+                          {result.marketOpinion.badge}
+                        </span>
+                      )}
+                      <div className="analyst-counts" title="Number of analysts with each rating.">
+                        {result.marketOpinion.buyCount !== null && (
+                          <span style={{ color: '#3fb950' }}>Buy {result.marketOpinion.buyCount}</span>
+                        )}
+                        {result.marketOpinion.holdCount !== null && (
+                          <span style={{ color: '#8b949e', marginLeft: 8 }}>Hold {result.marketOpinion.holdCount}</span>
+                        )}
+                        {result.marketOpinion.sellCount !== null && (
+                          <span style={{ color: '#f85149', marginLeft: 8 }}>Sell {result.marketOpinion.sellCount}</span>
+                        )}
+                      </div>
+                    </div>
+                    {result.marketOpinion.avgPriceTarget !== null && (
+                      <div className="mt-row" title="Average price target from analysts.">
+                        <span className="meta">Target:</span>
+                        <span style={{ marginLeft: 4 }}>{fmtPrice(result.marketOpinion.avgPriceTarget)}</span>
+                        {result.marketOpinion.upsidePct !== null && (
+                          <span className="meta" style={{ marginLeft: 4 }}>({fmtPct(result.marketOpinion.upsidePct)})</span>
+                        )}
+                      </div>
                     )}
                   </div>
-                  {result.marketOpinion.avgPriceTarget !== null && (
-                    <div style={{ marginLeft: 16 }} title="Average price target from analysts. Upside percentage shows potential gain from current price to target.">
-                      <span className="meta">Price target: </span>
-                      <span>{fmtPrice(result.marketOpinion.avgPriceTarget)}</span>
-                      {result.marketOpinion.upsidePct !== null && (
-                        <span className="meta" style={{ marginLeft: 4 }}>({fmtPct(result.marketOpinion.upsidePct)})</span>
+                  <div className="mt-col">
+                    <span className="mt-label">Trend</span>
+                    <div className="mt-row">
+                      <span
+                        className="trend-label"
+                        style={{
+                          color: result.trend.label === 'Bullish' ? '#3fb950'
+                            : result.trend.label === 'Bearish' ? '#f85149' : '#8b949e'
+                        }}
+                        title="Overall trend direction based on price action and moving averages."
+                      >
+                        {result.trend.label}
+                      </span>
+                      {result.trend.adx !== null && (
+                        <span className="adx-chip" title="Average Directional Index. Measures trend strength. Above 25 = strong trend.">ADX {fmtNum(result.trend.adx, 1)}</span>
+                      )}
+                      {result.trend.smaStack.sma20 !== null && (
+                        <span className="sma-chip sma20" title="20-day SMA. Short-term trend.">SMA20 {fmtPrice(result.trend.smaStack.sma20)}</span>
+                      )}
+                      {result.trend.smaStack.sma50 !== null && (
+                        <span className="sma-chip sma50" title="50-day SMA. Medium-term trend.">SMA50 {fmtPrice(result.trend.smaStack.sma50)}</span>
+                      )}
+                      {result.trend.smaStack.sma200 !== null && (
+                        <span className="sma-chip sma200" title="200-day SMA. Long-term trend.">SMA200 {fmtPrice(result.trend.smaStack.sma200)}</span>
                       )}
                     </div>
-                  )}
-                </div>
-              </div>
-
-              {/* ── Section C: Trend ── */}
-              <div className="section-card section-c">
-                <h3>Trend</h3>
-                <div className="trend-row">
-                  <span
-                    className="trend-label"
-                    style={{
-                      color: result.trend.label === 'Bullish' ? '#3fb950'
-                        : result.trend.label === 'Bearish' ? '#f85149' : '#8b949e'
-                    }}
-                    title="Overall trend direction based on price action relative to moving averages and ADX strength. Bullish = uptrend, Bearish = downtrend, Neutral = sideways."
-                  >
-                    {result.trend.label}
-                  </span>
-                  {result.trend.adx !== null && (
-                    <span className="adx-chip" title="Average Directional Index. Measures trend strength regardless of direction. Above 25 = strong trend, below 20 = weak/no trend. Values above 40 indicate very strong trend.">ADX {fmtNum(result.trend.adx, 1)}</span>
-                  )}
-                  <div className="sma-stack">
-                    {result.trend.smaStack.sma20 !== null && (
-                      <span className="sma-chip sma20" title="20-day Simple Moving Average. Short-term trend indicator. Price above suggests short-term bullish momentum.">SMA20 {fmtPrice(result.trend.smaStack.sma20)}</span>
-                    )}
-                    {result.trend.smaStack.sma50 !== null && (
-                      <span className="sma-chip sma50" title="50-day Simple Moving Average. Medium-term trend indicator. Commonly used for trend confirmation and support/resistance.">SMA50 {fmtPrice(result.trend.smaStack.sma50)}</span>
-                    )}
-                    {result.trend.smaStack.sma200 !== null && (
-                      <span className="sma-chip sma200" title="200-day Simple Moving Average. Long-term trend indicator. Widely watched by institutions. Price above = long-term bullish trend.">SMA200 {fmtPrice(result.trend.smaStack.sma200)}</span>
-                    )}
                   </div>
-                  {result.trend.priceVsSma50 !== null && (
-                    <span className="meta" style={{ marginLeft: 8 }} title="Percentage difference between current price and the 50-day moving average. Positive = price trading above SMA50, negative = below SMA50.">
-                      {result.trend.priceVsSma50 >= 0 ? '+' : ''}{fmtPct(result.trend.priceVsSma50)} vs SMA50
-                    </span>
-                  )}
                 </div>
               </div>
 
