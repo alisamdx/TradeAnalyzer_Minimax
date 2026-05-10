@@ -48,4 +48,4 @@ coverage/
 __pycache__/
 *.pyc
 _req_unpacked/
-server.log
+server*.log
