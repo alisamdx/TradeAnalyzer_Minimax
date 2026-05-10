@@ -99,6 +99,10 @@ export function BriefingView() {
 
   const { sortedData, sortConfig, requestSort, getSortIndicator } = useSortable(topSetups, 'wheelSuitability', 'desc');
 
+  const openValidateForTicker = (ticker: string) => {
+    window.dispatchEvent(new CustomEvent('navigate-to-validate', { detail: { ticker } }));
+  };
+
   const loadBriefing = async () => {
     setLoading(true);
     setError(null);
@@ -256,7 +260,15 @@ export function BriefingView() {
               <tbody>
                 {sortedData.map((setup) => (
                   <tr key={setup.ticker}>
-                    <td><strong>{setup.ticker}</strong></td>
+                    <td>
+                      <span
+                        className="clickable-ticker"
+                        onClick={() => openValidateForTicker(setup.ticker)}
+                        title="Click to validate"
+                      >
+                        <strong>{setup.ticker}</strong>
+                      </span>
+                    </td>
                     <td className="num">{fmtPct(setup.roe)}</td>
                     <td className="num">{setup.peRatio?.toFixed(1) ?? '—'}</td>
                     <td className="num">{setup.debtToEquity?.toFixed(2) ?? '—'}</td>

@@ -73,13 +73,24 @@ export class CacheManager {
    */
   updateLastRun(recordCount?: number): void {
     const now = Date.now();
-    this.db.prepare(
-      `UPDATE cache_metadata
-       SET last_screener_run = ?,
-           record_count = COALESCE(?, record_count),
-           updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = 1`
-    ).run(now, recordCount ?? null);
+    // If recordCount is provided, always use it (don't preserve old value)
+    if (recordCount !== undefined && recordCount !== null) {
+      this.db.prepare(
+        `UPDATE cache_metadata
+         SET last_screener_run = ?,
+             record_count = ?,
+             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+         WHERE id = 1`
+      ).run(now, recordCount);
+    } else {
+      // Just update timestamp
+      this.db.prepare(
+        `UPDATE cache_metadata
+         SET last_screener_run = ?,
+             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+         WHERE id = 1`
+      ).run(now);
+    }
   }
 
   /**

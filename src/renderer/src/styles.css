@@ -2385,6 +2385,10 @@ input[type='checkbox'] {
   font-variant-numeric: tabular-nums;
 }
 
+.setups-table th.num {
+  text-align: right;
+}
+
 .score-badge {
   padding: 2px 8px;
   border-radius: 4px;

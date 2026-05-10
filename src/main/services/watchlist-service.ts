@@ -73,10 +73,12 @@ export class WatchlistService {
   private readonly insertStmt;
   private readonly renameStmt;
   private readonly deleteStmt;
+  private readonly deleteSnapshotsStmt;
   private readonly listItemsStmt;
   private readonly insertItemStmt;
   private readonly findItemStmt;
   private readonly removeItemsStmt;
+  private readonly deleteItemsStmt;
   private readonly touchUpdatedAtStmt;
   private readonly findItemByIdStmt;
   private readonly findDefaultStmt;
@@ -107,10 +109,12 @@ export class WatchlistService {
        WHERE id = ?`
     );
     this.deleteStmt = db.prepare('DELETE FROM watchlists WHERE id = ?');
+    this.deleteSnapshotsStmt = db.prepare('DELETE FROM analysis_snapshots WHERE watchlist_id = ?');
+    this.deleteItemsStmt = db.prepare('DELETE FROM watchlist_items WHERE watchlist_id = ?');
     this.listItemsStmt = db.prepare(
-      `SELECT wi.id, wi.watchlist_id, wi.ticker, wi.notes, wi.added_at, c.sector
+      `SELECT wi.id, wi.watchlist_id, wi.ticker, wi.notes, wi.added_at,
+              (SELECT c2.sector FROM constituents c2 WHERE upper(c2.ticker) = upper(wi.ticker) LIMIT 1) AS sector
        FROM watchlist_items wi
-       LEFT JOIN constituents c ON upper(wi.ticker) = upper(c.ticker)
        WHERE wi.watchlist_id = ?
        ORDER BY wi.ticker ASC`
     );
@@ -194,6 +198,9 @@ export class WatchlistService {
         'The Default watchlist cannot be deleted (FR-1.3). It can be renamed.'
       );
     }
+    // Delete items first, then snapshots, then the watchlist
+    this.deleteItemsStmt.run(id);
+    this.deleteSnapshotsStmt.run(id);
     this.deleteStmt.run(id);
   }
 

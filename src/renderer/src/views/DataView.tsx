@@ -72,6 +72,21 @@ export function DataView() {
     }
   };
 
+  const importCsv = async (index: 'sp500' | 'russell1000') => {
+    try {
+      setStatusMsg(`Importing ${index} from CSV...`);
+      const result = await window.api.screen.importConstituents('', index);
+      await loadStats();
+      setStatusMsg(`Successfully imported ${result.count} tickers.`);
+    } catch (e) {
+      if ((e as Error).message.includes('Cancelled')) {
+        setStatusMsg('Import cancelled.');
+      } else {
+        setError((e as Error).message);
+      }
+    }
+  };
+
   const clearMarketData = async () => {
     const proceed = await window.dialog.confirm({
       title: 'Clear All Market Data',
@@ -117,6 +132,7 @@ export function DataView() {
         </div>
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginTop: '10px' }}>
           <button onClick={() => refreshConstituents('russell1000')} className="primary">↻ Update Russell 1000</button>
+          <button onClick={() => importCsv('russell1000')} className="secondary">Import CSV</button>
           <span className="meta" style={{ marginLeft: '10px' }}>
             {meta.russell1000 ? `Last synced: ${new Date(meta.russell1000.refreshedAt).toLocaleDateString()}` : 'Not loaded'}
           </span>

@@ -56,21 +56,23 @@ export function registerWatchlistIpc(service: WatchlistService, dataProvider: Da
     'watchlists:items:add',
     async (_e: IpcMainInvokeEvent, id: number, ticker: string, notes: string | null): Promise<IpcResult<import('@shared/types.js').WatchlistItem>> => {
       try {
+        // Normalize ticker to uppercase before validation
+        const normalizedTicker = ticker.trim().toUpperCase();
         // Validate that the ticker exists via the data provider
         try {
-          const quote = await dataProvider.getQuote(ticker);
+          const quote = await dataProvider.getQuote(normalizedTicker);
           // If we got a valid response with data, ticker exists
           if (quote.last === null && quote.prevClose === null) {
-            throw new WatchlistError('INVALID_TICKER', `Ticker "${ticker}" not found or has no trading data`);
+            throw new WatchlistError('INVALID_TICKER', `Ticker "${normalizedTicker}" not found or has no trading data`);
           }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           if (msg.includes('404') || msg.includes('NotFound') || msg.includes('not found')) {
-            throw new WatchlistError('INVALID_TICKER', `Ticker "${ticker}" not found. Please verify the symbol is correct.`);
+            throw new WatchlistError('INVALID_TICKER', `Ticker "${normalizedTicker}" not found. Please verify the symbol is correct.`);
           }
           throw err;
         }
-        const item = service.addItem(id, ticker, notes);
+        const item = service.addItem(id, normalizedTicker, notes);
         return ok(item);
       } catch (err) {
         return fail(err);

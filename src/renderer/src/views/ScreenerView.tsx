@@ -311,6 +311,8 @@ export function ScreenerView() {
     try {
       await window.api.screen.saveAsWatchlist(activeRunId, Array.from(selected), name);
       setStatusMsg(`Saved ${selected.size} tickers as "${name}"`);
+      // Notify App to refresh watchlist list
+      window.dispatchEvent(new CustomEvent('watchlist-created'));
     } catch (e) {
       setError((e as Error).message);
     }

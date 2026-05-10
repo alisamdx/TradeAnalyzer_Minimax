@@ -325,9 +325,12 @@ export class ScreenerService {
         case 'avg_volume':
           check(fd.id, avgVolume !== null && avgVolume >= (v['min'] as number ?? 0));
           break;
-        case 'price':
-          check(fd.id, price !== null && price < (v['max'] as number ?? Infinity));
+        case 'price': {
+          const priceMin = (v['min'] as number) ?? 0;
+          const priceMax = (v['max'] as number) ?? Infinity;
+          check(fd.id, price !== null && price >= priceMin && price <= priceMax);
           break;
+        }
         case 'dist_52wk_high': {
           const [mn, mx] = [(v['min'] as number) ?? 0, (v['max'] as number) ?? Infinity];
           const dist = quote?.distance52WkHigh ?? null;

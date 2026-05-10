@@ -178,50 +178,121 @@ export class ConstituentsService {
   // ─── Wikipedia parsing ────────────────────────────────────────────────────
 
   private parseWikipediaTable(html: string): ConstituentRow[] {
-    const rows: ConstituentRow[] = [];
-    // Simple regex-based extraction — works for the standard Wikipedia S&P/Russell tables.
-    // Extracts ticker from the first column link hrefs (/wiki/SYMBOL) and company name from text.
+    // Find all wikitable tables and pick the one with the most valid tickers.
+    // S&P 500: Column 1 = Ticker, Column 2 = Company name
+    // Russell 1000: Column 1 = Company name, Column 2 = Ticker
     const tableRegex = /<table[^>]*class="wikitable[^"]*"[^>]*>[\s\S]*?<\/table>/gi;
     const rowRegex = /<tr>[\s\S]*?<\/tr>/gi;
     const cellRegex = /<t[hd][^>]*>([\s\S]*?)<\/t[hd]>/gi;
-    const linkRegex = /href="\/wiki\/([^"#\s]+)"/;
 
-    const tableMatch = tableRegex.exec(html);
-    if (!tableMatch) return [];
-    const tableHtml = tableMatch[0]!;
-    const matches = tableHtml.matchAll(rowRegex);
-    let headerSeen = false;
+    const allTables = [...html.matchAll(tableRegex)];
+    if (allTables.length === 0) return [];
 
-    for (const rowMatch of matches) {
-      const rowHtml = rowMatch[0]!;
-      if (!headerSeen) { headerSeen = true; continue; }
-      const cells = [...rowHtml.matchAll(cellRegex)].map((m) => m[1]!);
-      if (cells.length < 2) continue;
+    // Helper to detect if a cell looks like a valid ticker (e.g., "AAPL", "MSFT", "BRK.B")
+    const looksLikeTicker = (cellHtml: string): boolean => {
+      const text = cellHtml.replace(/<[^>]+>/g, '').trim().toUpperCase();
+      // Valid tickers: 1-5 letters, possibly with . or - (like BRK.B, BRK-B)
+      return /^[A-Z]{1,5}[.-]?[A-Z0-9]{0,2}$/.test(text) && text.length >= 1 && text.length <= 8;
+    };
 
-      // Ticker is in the first cell.
-      const firstCell = cells[0]!;
-      // First try to find a Wikipedia link, but it might just be an external link or plain text.
-      // Strip all HTML tags to get just the text content.
-      const textContent = firstCell.replace(/<[^>]+>/g, '').trim();
-      const ticker = textContent.toUpperCase().replace(/[^A-Z0-9.-]/g, '');
-      if (!ticker || ticker.length > 8) continue; // Ignore obvious garbage
+    // Helper to detect if a cell looks like a company name
+    const looksLikeCompany = (cellHtml: string): boolean => {
+      const text = cellHtml.replace(/<[^>]+>/g, '').trim();
+      // Company names usually have spaces, are longer, don't look like tickers
+      return text.length > 3 && text.length < 100 && !looksLikeTicker(cellHtml) && !/^[\d.-]+$/.test(text);
+    };
 
-      // Company name: strip HTML tags from the second cell.
-      const companyName = cells[1]!.replace(/<[^>]+>/g, '').trim() || null;
-      // Sector: often in the 3rd or 4th cell depending on the table format.
-      let sector: string | null = null;
-      for (let i = 2; i < cells.length; i++) {
-        const cleaned = cells[i]!.replace(/<[^>]+>/g, '').trim();
-        if (cleaned && !/^[\d.-]+$/.test(cleaned) && cleaned.length > 2 && cleaned.length < 40) {
-          sector = cleaned;
+    // Helper to parse rows from a table with given column positions
+    const parseTable = (tableHtml: string, tickerCol: number, companyCol: number, sectorCol: number): ConstituentRow[] => {
+      const results: ConstituentRow[] = [];
+      const matches = tableHtml.matchAll(rowRegex);
+      let headerSeen = false;
+
+      for (const rowMatch of matches) {
+        const rowHtml = rowMatch[0]!;
+        if (!headerSeen) { headerSeen = true; continue; }
+        const cells = [...rowHtml.matchAll(cellRegex)].map((m) => m[1]!);
+        if (cells.length <= Math.max(tickerCol, companyCol)) continue;
+
+        const tickerCell = cells[tickerCol]!;
+        const cleaned = tickerCell.replace(/<[^>]+>/g, '').trim().toUpperCase();
+        const ticker = cleaned.replace(/[^A-Z0-9.-]/g, '');
+        if (!ticker || ticker.length > 8) continue;
+
+        const companyName = cells[companyCol]?.replace(/<[^>]+>/g, '').trim() || null;
+        const sector = sectorCol >= 0 && cells[sectorCol]
+          ? cells[sectorCol]!.replace(/<[^>]+>/g, '').trim() || null
+          : null;
+
+        results.push({ ticker, companyName, sector });
+      }
+      return results;
+    };
+
+    // Try each table and pick the one with the most valid tickers
+    let bestRows: ConstituentRow[] = [];
+    let bestCount = 0;
+
+    for (const tableEntry of allTables) {
+      const tableHtml = tableEntry[0]!;
+      const matches = [...tableHtml.matchAll(rowRegex)];
+
+      // Skip tables with very few rows
+      if (matches.length < 10) continue;
+
+      // Sample a few non-header rows to determine column layout
+      let sampleRow: string[] = [];
+      let headerSkipped = false;
+      for (const rowMatch of matches) {
+        const rowHtml = rowMatch[0]!;
+        if (!headerSkipped) { headerSkipped = true; continue; }
+        sampleRow = [...rowHtml.matchAll(cellRegex)].map((m) => m[1]!);
+        if (sampleRow.length >= 2) break;
+      }
+
+      if (sampleRow.length < 2) continue;
+
+      // Detect column positions based on content
+      let tickerCol = -1, companyCol = -1, sectorCol = -1;
+
+      // Find which column has tickers
+      for (let i = 0; i < sampleRow.length; i++) {
+        if (looksLikeTicker(sampleRow[i]!)) {
+          tickerCol = i;
           break;
         }
       }
 
-      rows.push({ ticker, companyName, sector });
+      // Find company name (not a ticker, looks like a name)
+      for (let i = 0; i < sampleRow.length; i++) {
+        if (i !== tickerCol && looksLikeCompany(sampleRow[i]!)) {
+          companyCol = i;
+          break;
+        }
+      }
+
+      // Find sector (usually 3rd or 4th column with sector-like content)
+      for (let i = 2; i < sampleRow.length; i++) {
+        if (i !== tickerCol && i !== companyCol) {
+          const text = sampleRow[i]!.replace(/<[^>]+>/g, '').trim();
+          // Valid sectors: don't look like tickers or numbers, reasonable length
+          if (text.length > 2 && text.length < 40 && !looksLikeTicker(sampleRow[i]!) && !/^[\d.-]+$/.test(text)) {
+            sectorCol = i;
+            break;
+          }
+        }
+      }
+
+      if (tickerCol >= 0 && companyCol >= 0) {
+        const rows = parseTable(tableHtml, tickerCol, companyCol, sectorCol);
+        if (rows.length > bestCount) {
+          bestCount = rows.length;
+          bestRows = rows;
+        }
+      }
     }
 
-    return rows;
+    return bestRows;
   }
 }
 
@@ -231,14 +302,27 @@ function parseConstituentsCsv(text: string): ConstituentRow[] {
   const lines = text.replace(/^\xef\xbb\xbf/, '').replace(/\r\n?/g, '\n').split('\n').filter((l) => l.trim());
   if (lines.length < 2) return [];
   const header = lines[0]!.toLowerCase().split(',').map((h) => h.trim());
-  const tickerIdx = header.indexOf('ticker');
-  const nameIdx = header.indexOf('company_name');
-  const sectorIdx = header.indexOf('sector');
+
+  // Support multiple formats:
+  // 1. ticker, company_name, sector (standard)
+  // 2. Symbol, Name (Barchart format)
+  // 3. Ticker, Company (alternative)
+  let tickerIdx = header.indexOf('ticker');
+  let nameIdx = header.indexOf('company_name');
+  let sectorIdx = header.indexOf('sector');
+
+  // Try alternative column names if not found
+  if (tickerIdx === -1) tickerIdx = header.indexOf('symbol');
+  if (nameIdx === -1) nameIdx = header.indexOf('name');
+  if (nameIdx === -1) nameIdx = header.indexOf('company');
+
   if (tickerIdx === -1) return [];
 
   const rows: ConstituentRow[] = [];
-  for (let i = 1; i < lines.length; i++) {
-    const cells = lines[i]!.split(',').map((c) => c.trim().replace(/^"|"$/g, ''));
+  // Skip header (line 0) and footer/source info (last line)
+  for (let i = 1; i < lines.length - 1; i++) {
+    // Handle CSV with quoted fields that may contain commas
+    const cells = parseCSVLine(lines[i]!);
     const ticker = (cells[tickerIdx] ?? '').replace(/[^A-Z0-9.-]/g, '').toUpperCase();
     if (!ticker) continue;
     rows.push({
@@ -248,4 +332,25 @@ function parseConstituentsCsv(text: string): ConstituentRow[] {
     });
   }
   return rows;
+}
+
+/** Parse a CSV line handling quoted fields with commas inside. */
+function parseCSVLine(line: string): string[] {
+  const result: string[] = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i]!;
+    if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if (char === ',' && !inQuotes) {
+      result.push(current.trim().replace(/^"|"$/g, ''));
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  result.push(current.trim().replace(/^"|"$/g, ''));
+  return result;
 }

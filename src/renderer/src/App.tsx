@@ -101,6 +101,12 @@ export function App() {
     };
     window.addEventListener('navigate-to-validate', handleNavigateToValidate as EventListener);
 
+    // Listen for watchlist created from screener
+    const handleWatchlistCreated = () => {
+      refreshLists();
+    };
+    window.addEventListener('watchlist-created', handleWatchlistCreated as EventListener);
+
     // Listen for prompt dialog requests
     const handleShowPrompt = (e: CustomEvent<{ title: string; defaultValue?: string; resolveId: string }>) => {
       setPromptTitle(e.detail.title);
@@ -115,6 +121,7 @@ export function App() {
       removeAlertListener();
       window.removeEventListener('navigate-to-analysis', handleNavigateToAnalysis as EventListener);
       window.removeEventListener('navigate-to-validate', handleNavigateToValidate as EventListener);
+      window.removeEventListener('watchlist-created', handleWatchlistCreated as EventListener);
       window.removeEventListener('show-prompt-dialog', handleShowPrompt as EventListener);
     };
   }, []);
@@ -164,10 +171,18 @@ export function App() {
   }, [activeId]);
 
   const refreshItems = useCallback(async (id: number) => {
+    // Guard against stale responses - only update if we're still on this watchlist
+    if (activeId !== id) {
+      return; // Skip update - user has already switched to another watchlist
+    }
     const list = await window.api.watchlists.items.list(id);
+    // Double-check after the async call
+    if (activeId !== id) {
+      return; // User switched during the API call
+    }
     setItems(list);
     setSelected(new Set());
-  }, []);
+  }, [activeId]);
 
   // Refresh all quotes for the current watchlist.
   const refreshQuotes = useCallback(async (tickers: string[]) => {
@@ -318,6 +333,10 @@ export function App() {
     } catch (e) {
       setError((e as Error).message);
     }
+  };
+
+  const runValidateForTicker = (ticker: string) => {
+    window.dispatchEvent(new CustomEvent('navigate-to-validate', { detail: { ticker } }));
   };
 
   const onRemoveSelected = async () => {
@@ -625,6 +644,7 @@ export function App() {
                       <th>Sector</th>
                       <th className="sortable-header" onClick={() => requestSort('notes')}>Notes {getSortIndicator('notes')}</th>
                       <th className="sortable-header" onClick={() => requestSort('addedAt')}>Added {getSortIndicator('addedAt')}</th>
+                      <th style={{ width: 50 }}></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -655,6 +675,15 @@ export function App() {
                         <td>{it.sector ?? ''}</td>
                         <td>{it.notes ?? ''}</td>
                         <td>{it.addedAt.slice(0, 10)}</td>
+                        <td>
+                          <button
+                            className="action-btn"
+                            title="Validate this ticker"
+                            onClick={() => runValidateForTicker(it.ticker)}
+                          >
+                            🎯
+                          </button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
