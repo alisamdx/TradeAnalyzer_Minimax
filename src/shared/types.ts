@@ -17,6 +17,7 @@ export interface WatchlistItem {
   ticker: string;
   notes: string | null;
   addedAt: string;
+  sector: string | null;
 }
 
 export interface CsvImportResult {
@@ -316,6 +317,11 @@ export interface OptionContract {
 export type OptionsContract = OptionContract;
 
 // ─── FR-4 Validation Dashboard ───────────────────────────────────────────────
+
+export interface ValidateTickerItem {
+  ticker: string;
+  name: string | null;
+}
 
 export interface PatternHit {
   name: string;

@@ -35,6 +35,7 @@ interface WatchlistItemRow {
   ticker: string;
   notes: string | null;
   added_at: string;
+  sector: string | null;
 }
 
 const TICKER_RE = /^[A-Z][A-Z0-9.-]{0,9}$/;
@@ -60,7 +61,8 @@ function rowToItem(r: WatchlistItemRow): WatchlistItem {
     watchlistId: r.watchlist_id,
     ticker: r.ticker,
     notes: r.notes,
-    addedAt: r.added_at
+    addedAt: r.added_at,
+    sector: r.sector
   };
 }
 
@@ -106,7 +108,11 @@ export class WatchlistService {
     );
     this.deleteStmt = db.prepare('DELETE FROM watchlists WHERE id = ?');
     this.listItemsStmt = db.prepare(
-      'SELECT id, watchlist_id, ticker, notes, added_at FROM watchlist_items WHERE watchlist_id = ? ORDER BY ticker ASC'
+      `SELECT wi.id, wi.watchlist_id, wi.ticker, wi.notes, wi.added_at, c.sector
+       FROM watchlist_items wi
+       LEFT JOIN constituents c ON upper(wi.ticker) = upper(c.ticker)
+       WHERE wi.watchlist_id = ?
+       ORDER BY wi.ticker ASC`
     );
     this.insertItemStmt = db.prepare(
       `INSERT INTO watchlist_items (watchlist_id, ticker, notes, added_at)
@@ -122,7 +128,10 @@ export class WatchlistService {
       `UPDATE watchlists SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?`
     );
     this.findItemByIdStmt = db.prepare(
-      'SELECT id, watchlist_id, ticker, notes, added_at FROM watchlist_items WHERE id = ?'
+      `SELECT wi.id, wi.watchlist_id, wi.ticker, wi.notes, wi.added_at, c.sector
+       FROM watchlist_items wi
+       LEFT JOIN constituents c ON upper(wi.ticker) = upper(c.ticker)
+       WHERE wi.id = ?`
     );
     this.findDefaultStmt = db.prepare(`
       SELECT w.id, w.name, w.is_default, w.created_at, w.updated_at,

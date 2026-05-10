@@ -170,8 +170,7 @@ export function App() {
   }, []);
 
   // Refresh all quotes for the current watchlist.
-  const refreshQuotes = useCallback(async (_watchlistId: number) => {
-    const tickers = items.map((i) => i.ticker);
+  const refreshQuotes = useCallback(async (tickers: string[]) => {
     if (tickers.length === 0) return;
     try {
       const quotes = await window.api.quotes.refreshBulk(tickers);
@@ -184,7 +183,7 @@ export function App() {
     } catch {
       // Silently fail — quotes are a nice-to-have on the watchlist table.
     }
-  }, [items]);
+  }, []);
 
   useEffect(() => {
     console.log('[App] useEffect: refreshLists');
@@ -194,17 +193,32 @@ export function App() {
     });
   }, [refreshLists]);
 
+  // Load items when watchlist changes
   useEffect(() => {
     if (activeId === null) return;
     refreshItems(activeId).catch((e) => setError((e as Error).message));
   }, [activeId, refreshItems]);
 
+  // When watchlist items change, trigger initial quote refresh
+  useEffect(() => {
+    if (activeId === null || items.length === 0) return;
+    // Use a small timeout to avoid race conditions with React's batching
+    const timer = setTimeout(() => {
+      const tickers = items.map((i) => i.ticker);
+      refreshQuotes(tickers).catch((e) => console.error('[App] initial quote refresh error:', e));
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [items]); // Only depend on items, not activeId
+
   // Auto-refresh quotes every 60 seconds (FR-1.7).
   useEffect(() => {
-    if (activeId === null) return;
-    const interval = setInterval(() => refreshQuotes(activeId), 60_000);
+    if (activeId === null || items.length === 0) return;
+    const interval = setInterval(() => {
+      const tickers = items.map((i) => i.ticker);
+      refreshQuotes(tickers).catch((e) => console.error('[App] interval quote refresh error:', e));
+    }, 60_000);
     return () => clearInterval(interval);
-  }, [activeId, refreshQuotes]);
+  }, [activeId, refreshQuotes]); // Removed items.length from deps to avoid unnecessary resets
 
   // Subscribe to WebSocket for real-time prices when watchlist changes
   useEffect(() => {
@@ -638,7 +652,7 @@ export function App() {
                         </td>
                         <td className="num">{fmtTargetStrike(it.ticker)}</td>
                         <td className="num">{fmtEstPremium(it.ticker)}</td>
-                        <td className="placeholder" title="Coming in Phase 3">—</td>
+                        <td>{it.sector ?? ''}</td>
                         <td>{it.notes ?? ''}</td>
                         <td>{it.addedAt.slice(0, 10)}</td>
                       </tr>
