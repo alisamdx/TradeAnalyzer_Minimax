@@ -94,17 +94,23 @@ export class CacheManager {
   }
 
   /**
-   * Get detailed cache stats
+   * Get detailed cache stats - actually counts records from the database
    */
   getCacheStats(): CacheStats {
-    const row = this.db.prepare(
-      'SELECT last_screener_run, record_count, updated_at FROM cache_metadata WHERE id = 1'
-    ).get() as { last_screener_run: number | null; record_count: number; updated_at: string } | undefined;
+    // Count actual constituents from database (this is what matters for the Data view)
+    const constituentsCount = this.db
+      .prepare('SELECT COUNT(*) as cnt FROM constituents')
+      .get() as { cnt: number };
+
+    // Also check when constituents_meta was last updated
+    const metaRow = this.db
+      .prepare('SELECT MAX(refreshed_at) as last_sync FROM constituents_meta')
+      .get() as { last_sync: string | null } | undefined;
 
     return {
-      lastScreenerRun: row?.last_screener_run ?? null,
-      recordCount: row?.record_count ?? 0,
-      updatedAt: row?.updated_at ?? new Date().toISOString()
+      lastScreenerRun: null,
+      recordCount: constituentsCount.cnt,
+      updatedAt: metaRow?.last_sync ?? new Date().toISOString()
     };
   }
 
