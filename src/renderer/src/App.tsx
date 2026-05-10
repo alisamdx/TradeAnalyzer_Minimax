@@ -642,6 +642,7 @@ export function App() {
                       <th className="sortable-header" onClick={() => requestSort('targetStrike')} title="Target Put Strike">Strike {getSortIndicator('targetStrike')}</th>
                       <th className="sortable-header" onClick={() => requestSort('estimatedPremium')} title="Estimated Monthly Premium">Premium {getSortIndicator('estimatedPremium')}</th>
                       <th>Sector</th>
+                      <th className="sortable-header num" title="ATM Implied Volatility">IV %</th>
                       <th className="sortable-header" onClick={() => requestSort('notes')}>Notes {getSortIndicator('notes')}</th>
                       <th className="sortable-header" onClick={() => requestSort('addedAt')}>Added {getSortIndicator('addedAt')}</th>
                       <th style={{ width: 50 }}></th>
@@ -673,6 +674,18 @@ export function App() {
                         <td className="num">{fmtTargetStrike(it.ticker)}</td>
                         <td className="num">{fmtEstPremium(it.ticker)}</td>
                         <td>{it.sector ?? ''}</td>
+                        <td className="num">
+                          {it.currentIv !== null ? (
+                            <span
+                              style={{
+                                color: it.currentIv >= 30 ? '#2ecc71' : it.currentIv >= 20 ? '#f39c12' : '#95a5a6'
+                              }}
+                              title={it.currentIv >= 30 ? 'Good premium' : it.currentIv >= 20 ? 'Moderate premium' : 'Low premium'}
+                            >
+                              {it.currentIv.toFixed(1)}%
+                            </span>
+                          ) : '—'}
+                        </td>
                         <td>{it.notes ?? ''}</td>
                         <td>{it.addedAt.slice(0, 10)}</td>
                         <td>

@@ -413,7 +413,7 @@ export class PolygonDataProvider implements DataProvider {
       }
 
       return {
-        currentIv: atmIv ? atmIv * 100 : null, // Convert to percentage
+        currentIv: atmIv ? atmIv * 100 : null,  // Convert decimal to percentage (0.285 -> 28.5)
         iv52WkHigh: iv52WkHigh ? iv52WkHigh * 100 : null,
         iv52WkLow: iv52WkLow ? iv52WkLow * 100 : null
       };

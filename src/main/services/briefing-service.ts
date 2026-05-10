@@ -40,6 +40,7 @@ export interface TopSetup {
   debtToEquity: number | null;
   marketCap: number | null;
   fcfYield: number | null;
+  currentIv: number | null;       // ATM implied volatility as percentage (e.g., 28.5)
   wheelSuitability: number | null;
   targetStrike: number | null;
   estimatedPremium: number | null;
@@ -263,6 +264,18 @@ export class BriefingService {
         last_price: string;
       }>;
 
+      // Fetch IV for each ticker in parallel
+      const ivPromises = results.map(async (r) => {
+        try {
+          const ivData = await this.dataProvider.getOptionsIV(r.ticker);
+          return { ticker: r.ticker, currentIv: ivData.currentIv };
+        } catch {
+          return { ticker: r.ticker, currentIv: null };
+        }
+      });
+      const ivResults = await Promise.all(ivPromises);
+      const ivMap = new Map(ivResults.map((iv) => [iv.ticker, iv.currentIv]));
+
       const setups: TopSetup[] = results.map(r => {
         const roe = parseFloat(r.roe) || null;
         const peRatio = parseFloat(r.pe_ratio) || null;
@@ -270,6 +283,10 @@ export class BriefingService {
         const marketCap = parseFloat(r.market_cap) || null;
         const fcf = parseFloat(r.fcf) || null;
         const lastPrice = parseFloat(r.last_price) || null;
+        const currentIv = ivMap.get(r.ticker) ?? null;
+
+        // Polygon returns IV as percentage already (e.g., 28.5 for 28.5%)
+        const currentIvPct = currentIv;
 
         // Calculate wheel metrics (simplified)
         const wheelSuitability = this.calculateWheelSuitability(roe, debtToEquity, marketCap);
@@ -284,6 +301,7 @@ export class BriefingService {
           debtToEquity,
           marketCap,
           fcfYield,
+          currentIv: currentIvPct,
           wheelSuitability,
           targetStrike,
           estimatedPremium,

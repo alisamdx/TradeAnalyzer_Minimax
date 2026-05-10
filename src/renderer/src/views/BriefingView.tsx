@@ -38,6 +38,7 @@ interface TopSetup {
   debtToEquity: number | null;
   marketCap: number | null;
   fcfYield: number | null;
+  currentIv: number | null;
   wheelSuitability: number | null;
   targetStrike: number | null;
   estimatedPremium: number | null;
@@ -250,6 +251,9 @@ export function BriefingView() {
                   <th onClick={() => requestSort('debtToEquity')} className="sortable num">
                     D/E {getSortIndicator('debtToEquity')}
                   </th>
+                  <th onClick={() => requestSort('currentIv')} className="sortable num">
+                    IV% {getSortIndicator('currentIv')}
+                  </th>
                   <th onClick={() => requestSort('wheelSuitability')} className="sortable num">
                     Wheel Score {getSortIndicator('wheelSuitability')}
                   </th>
@@ -272,6 +276,18 @@ export function BriefingView() {
                     <td className="num">{fmtPct(setup.roe)}</td>
                     <td className="num">{setup.peRatio?.toFixed(1) ?? '—'}</td>
                     <td className="num">{setup.debtToEquity?.toFixed(2) ?? '—'}</td>
+                    <td className="num">
+                      {setup.currentIv !== null ? (
+                        <span
+                          style={{
+                            color: setup.currentIv >= 30 ? '#2ecc71' : setup.currentIv >= 20 ? '#f39c12' : '#95a5a6'
+                          }}
+                          title={setup.currentIv >= 30 ? 'Good premium' : setup.currentIv >= 20 ? 'Moderate premium' : 'Low premium'}
+                        >
+                          {setup.currentIv.toFixed(1)}%
+                        </span>
+                      ) : '—'}
+                    </td>
                     <td className="num">
                       {setup.wheelSuitability !== null ? (
                         <span

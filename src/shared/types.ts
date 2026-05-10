@@ -18,6 +18,7 @@ export interface WatchlistItem {
   notes: string | null;
   addedAt: string;
   sector: string | null;
+  currentIv: number | null;  // ATM implied volatility as percentage
 }
 
 export interface CsvImportResult {

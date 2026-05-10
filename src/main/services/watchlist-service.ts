@@ -62,7 +62,8 @@ function rowToItem(r: WatchlistItemRow): WatchlistItem {
     ticker: r.ticker,
     notes: r.notes,
     addedAt: r.added_at,
-    sector: r.sector
+    sector: r.sector,
+    currentIv: null  // IV fetched on demand via options API
   };
 }
 
