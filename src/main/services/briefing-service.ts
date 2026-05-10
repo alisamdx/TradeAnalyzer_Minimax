@@ -5,6 +5,7 @@
 import type { DbHandle } from '../db/connection.js';
 import type { HistoricalDataService } from './historical-service.js';
 import type { PolygonDataProvider } from './polygon-provider.js';
+import type { TokenBucketRateLimiter } from './rate-limiter.js';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -69,7 +70,8 @@ export class BriefingService {
   constructor(
     private readonly db: DbHandle,
     private readonly historicalService: HistoricalDataService,
-    private readonly dataProvider: PolygonDataProvider
+    private readonly dataProvider: PolygonDataProvider,
+    private readonly rateLimiter: TokenBucketRateLimiter
   ) {
     // Get positions expiring within days
     this.getPositionsExpiringStmt = db.prepare(`
@@ -103,6 +105,7 @@ export class BriefingService {
   async getMarketRegime(): Promise<MarketRegime> {
     try {
       // Fetch SPY data for trend calculation
+      await this.rateLimiter.acquire(1);
       const spyQuote = await this.dataProvider.getQuote('SPY');
       const spyPrice = spyQuote?.last ?? null;
 
@@ -131,6 +134,7 @@ export class BriefingService {
       let vixValue: number | null = null;
       let vixLevel: VixLevel = 'normal';
       try {
+        await this.rateLimiter.acquire(1);
         const vixQuote = await this.dataProvider.getQuote('VIX');
         vixValue = vixQuote?.last ?? null;
         if (vixValue !== null) {

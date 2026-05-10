@@ -5,7 +5,7 @@
 import { ipcMain } from 'electron';
 import type { ValidateAllService } from '../services/validate-all-service.js';
 import type { WatchlistService } from '../services/watchlist-service.js';
-import type { ValidateDashboardResult, JobRunInfo, TickerStatusRow, ValidateAllResult } from '@shared/types.js';
+import type { ValidateDashboardResult, JobRunInfo, TickerStatusRow, ValidateAllResult, ValidateTickerItem } from '@shared/types.js';
 
 function ok<T>(value: T) { return { ok: true as const, value }; }
 function fail(err: unknown) {
@@ -44,8 +44,7 @@ export function registerValidateIpc(
   ipcMain.handle(
     'validate:get-tickers',
     wrap((watchlistId: number) => {
-      const items = watchlistService.listItems(watchlistId);
-      return items.map((i: import('@shared/types.js').WatchlistItem) => i.ticker);
+      return validateAllService.getTickersWithNames(watchlistId);
     })
   );
 

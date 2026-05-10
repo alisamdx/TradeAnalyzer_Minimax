@@ -38,7 +38,8 @@ const SAMPLE_RATIOS: DerivedRatios = {
   dividendYield: null,
   beta: 1.15,
   sector: 'Technology',
-  industry: 'Consumer Electronics'
+  industry: 'Consumer Electronics',
+  companyName: 'Apple Inc.'
 };
 
 describe('cache-service', () => {

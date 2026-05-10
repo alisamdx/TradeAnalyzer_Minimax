@@ -13,7 +13,7 @@ import { computeRSI } from './analysis-service.js';
 import { computeADX } from './analysis-service.js';
 import { detectAllPatterns } from './pattern-detector.js';
 import { findRecentDemandZone, findRecentSupplyZone, computeEntryZoneAndStop } from './support-resistance.js';
-import type { ValidateDashboardResult, Bar, Zone } from '@shared/types.js';
+import type { ValidateDashboardResult, Bar, Zone, ValidateTickerItem, Quote, DerivedRatios } from '@shared/types.js';
 
 // ─── Validate All service ────────────────────────────────────────────────────
 
@@ -35,20 +35,41 @@ export class ValidateAllService {
   cancel(): void { this.cancelled = true; }
   resetCancel(): void { this.cancelled = false; }
 
+  /** Get tickers for a watchlist with company names from constituents table. */
+  getTickersWithNames(watchlistId: number): ValidateTickerItem[] {
+    const rows = this.db.prepare(`
+      SELECT i.ticker, c.company_name as name
+      FROM watchlist_items i
+      LEFT JOIN (
+        SELECT ticker, MAX(company_name) as company_name
+        FROM constituents
+        GROUP BY ticker
+      ) c ON upper(i.ticker) = upper(c.ticker)
+      WHERE i.watchlist_id = ?
+      ORDER BY i.ticker ASC
+    `).all(watchlistId) as Array<{ ticker: string; name: string | null }>;
+
+    return rows.map(r => ({
+      ticker: r.ticker,
+      name: r.name
+    }));
+  }
+
   /** Validate a single ticker (FR-4.5 target: <5s warm, <10s cold). */
   async validateTicker(ticker: string): Promise<ValidateDashboardResult> {
     await this.rateLimiter.acquire(1);
 
     // Fetch quote - required but handle failures gracefully
-    let quote = { ticker, last: null as number | null, prevClose: null as number | null, volume: null as number | null, dayHigh: null as number | null, dayLow: null as number | null, ivRank: null as number | null, ivPercentile: null as number | null, distance52WkHigh: null as number | null, distance52WkLow: null as number | null, fetchedAt: new Date().toISOString() };
+    let quote: Quote = { ticker, last: null, prevClose: null, bid: null, ask: null, volume: null, dayHigh: null, dayLow: null, ivRank: null, ivPercentile: null, distance52WkHigh: null, distance52WkLow: null, fetchedAt: new Date().toISOString() };
     try {
-      quote = await this.fetchQuote(ticker);
+      const fetched = await this.fetchQuote(ticker);
+      quote = { ...quote, ...fetched };
     } catch (err) {
       console.log(`[validateTicker] ${ticker} quote fetch failed, continuing without:`, err instanceof Error ? err.message : String(err));
     }
 
     // Fetch fundamentals - optional, some tickers may not have data
-    let fundamentals = { peRatio: null as number | null, eps: null as number | null, revenueGrowth: null as number | null, profitMargin: null as number | null, debtToEquity: null as number | null, roe: null as number | null, companyName: null as string | null };
+    let fundamentals: DerivedRatios = { peRatio: null, eps: null, revenueGrowth: null, profitMargin: null, debtToEquity: null, roe: null, companyName: null, marketCap: null, freeCashFlow: null, currentRatio: null, dividendYield: null, beta: null, sector: null, industry: null, epsGrowth: null };
     try {
       fundamentals = await this.fetchFundamentals(ticker);
     } catch (err) {
@@ -163,7 +184,7 @@ export class ValidateAllService {
   private buildValidateResult(
     ticker: string,
     quote: { last: number | null; prevClose: number | null; volume: number | null; dayHigh: number | null; dayLow: number | null; ivRank: number | null; ivPercentile: number | null },
-    fundamentals: { peRatio: number | null; eps: number | null; revenueGrowth: number | null; profitMargin: number | null; debtToEquity: number | null; roe: number | null },
+    fundamentals: { peRatio: number | null; eps: number | null; revenueGrowth: number | null; profitMargin: number | null; debtToEquity: number | null; roe: number | null; companyName: string | null },
     earnings: { nextEarningsDate: string | null; epsActualLast4: number[] },
     bars: Array<{ t: number; o: number; h: number; l: number; c: number; v: number }>,
     ivData: { currentIv: number | null; iv52WkHigh: number | null; iv52WkLow: number | null }

@@ -7,6 +7,7 @@ import type { Database } from 'better-sqlite3';
 import { BriefingService } from '../services/briefing-service.js';
 import { HistoricalDataService } from '../services/historical-service.js';
 import { PolygonDataProvider } from '../services/polygon-provider.js';
+import type { TokenBucketRateLimiter } from '../services/rate-limiter.js';
 import type { IpcResult } from '@shared/types.js';
 
 function ok<T>(value: T): IpcResult<T> {
@@ -32,11 +33,12 @@ function wrapAsync<Args extends unknown[], R>(fn: (...args: Args) => Promise<R>)
 
 export function registerBriefingIpc(
   db: Database,
-  getApiKey: () => string
+  getApiKey: () => string,
+  rateLimiter: TokenBucketRateLimiter
 ): void {
   const historicalService = new HistoricalDataService(db);
   const dataProvider = new PolygonDataProvider(getApiKey);
-  const service = new BriefingService(db, historicalService, dataProvider);
+  const service = new BriefingService(db, historicalService, dataProvider, rateLimiter);
 
   // ─── Market Regime ──────────────────────────────────────────────────────────
 

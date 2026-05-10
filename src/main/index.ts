@@ -160,7 +160,7 @@ app.whenReady().then(() => {
   registerPortfolioIpc(db);
 
   // Phase 7 - Morning Briefing IPC
-  registerBriefingIpc(db, () => getApiKey(db));
+  registerBriefingIpc(db, () => getApiKey(db), rateLimiter);
 
   // Phase 8 - Alerts System IPC
   registerAlertsIpc(db);

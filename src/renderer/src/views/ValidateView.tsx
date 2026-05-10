@@ -9,7 +9,8 @@ import { createChart, type IChartApi, ColorType, type Time } from 'lightweight-c
 import { VolumeProfile, type BarDataWithVolume } from './VolumeProfile.js';
 import type {
   Watchlist,
-  ValidateDashboardResult
+  ValidateDashboardResult,
+  ValidateTickerItem
 } from '@shared/types.js';
 
 // `window.api` is declared once in `src/renderer/src/global.d.ts`.
@@ -122,7 +123,7 @@ interface ValidateViewProps {
 export function ValidateView({ initialTicker, clearInitialTicker }: ValidateViewProps) {
   const [watchlists, setWatchlists] = useState<Watchlist[]>([]);
   const [selectedWatchlistId, setSelectedWatchlistId] = useState<number | null>(null);
-  const [tickers, setTickers] = useState<string[]>([]);
+  const [tickers, setTickers] = useState<ValidateTickerItem[]>([]);
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
   const [result, setResult] = useState<ValidateDashboardResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -744,7 +745,7 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
       .map((b) => {
         const originalIndex = result.chart.bars.findIndex(bar => bar.t === b.t);
         const val = originalIndex >= 0 ? result.chart.macdHistogram?.[originalIndex] : null;
-        if (val === null) return null;
+        if (val === null || val === undefined) return null;
         return { time: (b.t / 1000) as Time, value: val, color: val >= 0 ? 'rgba(63,185,80,0.5)' : 'rgba(248,81,73,0.5)' };
       })
       .filter(d => d !== null) as { time: Time; value: number; color: string }[];
@@ -853,13 +854,16 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
           )}
 
           <ul className="ticker-list">
-            {tickers.map((ticker) => (
+            {tickers.map((item) => (
               <li
-                key={ticker}
-                className={`ticker-item ${selectedTicker === ticker ? 'active' : ''}`}
-                onClick={() => loadTicker(ticker)}
+                key={item.ticker}
+                className={`ticker-item ${selectedTicker === item.ticker ? 'active' : ''}`}
+                onClick={() => loadTicker(item.ticker)}
               >
-                <span className="ticker-symbol">{ticker}</span>
+                <div className="ticker-info">
+                  <span className="ticker-symbol">{item.ticker}</span>
+                  {item.name && <span className="ticker-name">{item.name}</span>}
+                </div>
                 <span className="verdict-dot" title="Refresh to load verdict" />
               </li>
             ))}
@@ -1255,7 +1259,7 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
                     <div className="indicator-chart-header">
                       <span className="indicator-chart-label" title="Relative Strength Index (14 periods). Values above 70 indicate overbought conditions, below 30 indicate oversold.">RSI (14)</span>
                       <span className="indicator-chart-value">
-                        {result.chart.rsi ? fmtNum(result.chart.rsi[result.chart.rsi.length - 1], 1) : '—'}
+                        {result.chart.rsi && result.chart.rsi.length > 0 ? fmtNum(result.chart.rsi[result.chart.rsi.length - 1] ?? null, 1) : '—'}
                       </span>
                     </div>
                     <div className="indicator-chart-container" ref={rsiChartContainerRef} />
@@ -1267,7 +1271,7 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
                     <div className="indicator-chart-header">
                       <span className="indicator-chart-label" title="Moving Average Convergence Divergence (12/26/9). MACD line (blue) crossing above signal (amber) is bullish, below is bearish. Histogram shows momentum.">MACD (12/26/9)</span>
                       <span className="indicator-chart-value">
-                        {result.chart.macd ? fmtNum(result.chart.macd[result.chart.macd.length - 1], 2) : '—'}
+                        {result.chart.macd && result.chart.macd.length > 0 ? fmtNum(result.chart.macd[result.chart.macd.length - 1] ?? null, 2) : '—'}
                       </span>
                     </div>
                     <div className="indicator-chart-container" ref={macdChartContainerRef} />

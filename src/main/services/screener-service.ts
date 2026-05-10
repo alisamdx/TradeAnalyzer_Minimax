@@ -256,7 +256,8 @@ export class ScreenerService {
         dividendYield: null,
         beta: null,
         sector: null,
-        industry: null
+        industry: null,
+        companyName: null
       };
     }
 

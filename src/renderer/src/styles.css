@@ -853,7 +853,21 @@ table.items-table {
   border-left-color: var(--accent);
   color: var(--accent);
 }
-.ticker-symbol { font-family: monospace; font-size: 12px; }
+.ticker-symbol { font-family: monospace; font-size: 12px; font-weight: 600; }
+.ticker-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.ticker-name {
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+}
 .verdict-dot {
   width: 8px;
   height: 8px;

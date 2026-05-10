@@ -20,6 +20,7 @@ import type {
   JobRunInfo,
   TickerStatusRow,
   ValidateAllResult,
+  ValidateTickerItem,
   AppSettings,
   DiagnosticsResult,
   CacheStatus,
@@ -134,7 +135,7 @@ function buildApi() {
     openTickerById: (args: { ticker: string }) =>
       invoke<ValidateDashboardResult>('validate:open-ticker-by-id', args),
     getTickers: (watchlistId: number) =>
-      invoke<string[]>('validate:get-tickers', watchlistId),
+      invoke<ValidateTickerItem[]>('validate:get-tickers', watchlistId),
     runValidateAll: (watchlistId: number) =>
       invoke<ValidateAllResult>('validate:run-all', { watchlistId }),
     getStatus: (watchlistId: number) =>

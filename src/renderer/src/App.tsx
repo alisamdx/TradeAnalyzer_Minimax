@@ -570,7 +570,7 @@ export function App() {
                     setIsRefreshingCache(true);
                     await window.api.cache.refresh();
                     await refreshCacheStatus();
-                    if (activeId !== null) await refreshQuotes(activeId);
+                    if (activeId !== null && items.length > 0) await refreshQuotes(items.map(i => i.ticker));
                   } catch (err) {
                     console.error('Failed to refresh cache:', err);
                   } finally {
@@ -579,7 +579,7 @@ export function App() {
                 }}
               />
               <button
-                onClick={() => activeId !== null && refreshQuotes(activeId)}
+                onClick={() => activeId !== null && items.length > 0 && refreshQuotes(items.map(i => i.ticker))}
                 className="refresh-btn"
                 title="Refresh quotes"
               >

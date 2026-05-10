@@ -72,11 +72,10 @@ export class WebSocketService extends EventEmitter {
 
     this.ws.on('open', () => {
       console.log('[WebSocket] Connected');
-      this.reconnectAttempts = 0;
+      // Do NOT reset reconnectAttempts here; wait for 'auth' confirmation message
       this.emit('connected');
 
-      // Resubscribe to all tickers
-      this.subscribedTickers.forEach(ticker => this.subscribe(ticker));
+      // Do NOT resubscribe here; wait for 'auth' confirmation message
     });
 
     this.ws.on('message', (data: WebSocket.RawData) => {
@@ -92,8 +91,8 @@ export class WebSocketService extends EventEmitter {
       }
     });
 
-    this.ws.on('close', () => {
-      console.log('[WebSocket] Disconnected');
+    this.ws.on('close', (code, reason) => {
+      console.log(`[WebSocket] Disconnected (code: ${code}, reason: ${reason.toString()})`);
       this.emit('disconnected');
       this.scheduleReconnect();
     });
@@ -139,8 +138,42 @@ export class WebSocketService extends EventEmitter {
         timestamp: msg.t
       };
       this.emit('aggregate', aggMsg);
-    } else if (msg.status === 'connected') {
-      console.log('[WebSocket] Auth confirmed');
+    } else if (msg.ev === 'status' || msg.status) {
+      console.log('[WebSocket] Status message:', JSON.stringify(msg));
+      if (msg.status === 'connected' || msg.message === 'Authenticated successfully') {
+        // Wait for actual authentication success if the first 'connected' is just socket connection
+        if (msg.message === 'Authenticated successfully' || (msg.status === 'connected' && !msg.message.includes('Successfully'))) {
+           // Polygon's "Connected Successfully" might be just socket open.
+           // Usually it sends "Authenticated successfully" after auth action.
+           // But if using apiKey in URL, "Connected Successfully" might mean auth worked.
+        }
+        
+        // Let's be more specific based on the log we saw:
+        // [WebSocket] Status message: {"ev":"status","status":"connected","message":"Connected Successfully"}
+        // This was followed by auth_failed.
+        
+        if (msg.message === 'Authenticated successfully') {
+          console.log('[WebSocket] Auth confirmed');
+          this.reconnectAttempts = 0; // Reset only on real success
+          this.subscribedTickers.forEach(ticker => this.doSubscribe(ticker));
+        }
+      } else if (msg.status === 'auth_failed') {
+        console.error('[WebSocket] Authentication failed. This API key may not support WebSocket access.');
+        // If auth fails, don't immediately reconnect; wait for the next manual attempt or hitting max attempts
+        // We set reconnectAttempts to max to stop the loop if it's a persistent auth error
+        this.reconnectAttempts = this.maxReconnectAttempts;
+      }
+    }
+  }
+
+  /**
+   * Internal subscribe implementation
+   */
+  private doSubscribe(ticker: string): void {
+    const upperTicker = ticker.toUpperCase();
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ action: 'subscribe', params: `T.${upperTicker},A.${upperTicker}` }));
+      console.log(`[WebSocket] Subscribed to ${upperTicker}`);
     }
   }
 
@@ -153,9 +186,10 @@ export class WebSocketService extends EventEmitter {
     const upperTicker = ticker.toUpperCase();
     this.subscribedTickers.add(upperTicker);
 
+    // Only send if we are already connected and authenticated
+    // We'll rely on handleMessage to call doSubscribe if we're just connecting
     if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({ action: 'subscribe', params: `T.${upperTicker},A.${upperTicker}` }));
-      console.log(`[WebSocket] Subscribed to ${upperTicker}`);
+      this.doSubscribe(upperTicker);
     }
   }
 
