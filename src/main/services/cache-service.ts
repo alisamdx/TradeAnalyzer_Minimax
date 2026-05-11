@@ -34,6 +34,7 @@ export function initCacheTables(db: DbHandle): void {
       day_low REAL,
       iv_rank REAL,
       iv_percentile REAL,
+      current_iv REAL,
       fetched_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     );
     CREATE TABLE IF NOT EXISTS options_cache (
@@ -67,6 +68,7 @@ export interface CachedQuote {
   dayLow: number | null;
   ivRank: number | null;
   ivPercentile: number | null;
+  currentIv: number | null;
   distance52WkHigh?: number | null;
   distance52WkLow?: number | null;
   fetchedAt: string;
@@ -79,12 +81,12 @@ export class QuoteCache {
   constructor(private readonly db: DbHandle) {
     this.upsertStmt = db.prepare(`
       INSERT OR REPLACE INTO quote_cache
-        (ticker, last, prev_close, bid, ask, volume, day_high, day_low, iv_rank, iv_percentile, fetched_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        (ticker, last, prev_close, bid, ask, volume, day_high, day_low, iv_rank, iv_percentile, current_iv, fetched_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     `);
     this.getStmt = db.prepare(
       `SELECT ticker, last, prev_close, bid, ask, volume, day_high, day_low,
-              iv_rank, iv_percentile, fetched_at
+              iv_rank, iv_percentile, current_iv, fetched_at
          FROM quote_cache WHERE ticker = ?`
     );
   }
@@ -94,7 +96,7 @@ export class QuoteCache {
       ticker: string; last: number | null; prev_close: number | null;
       bid: number | null; ask: number | null; volume: number | null;
       day_high: number | null; day_low: number | null;
-      iv_rank: number | null; iv_percentile: number | null; fetched_at: string;
+      iv_rank: number | null; iv_percentile: number | null; current_iv: number | null; fetched_at: string;
     } | undefined;
     if (!row) return null;
     return {
@@ -108,6 +110,7 @@ export class QuoteCache {
       dayLow: row.day_low,
       ivRank: row.iv_rank,
       ivPercentile: row.iv_percentile,
+      currentIv: row.current_iv,
       fetchedAt: row.fetched_at
     };
   }
@@ -115,7 +118,8 @@ export class QuoteCache {
   upsert(quote: CachedQuote): void {
     this.upsertStmt.run(
       quote.ticker, quote.last, quote.prevClose, quote.bid, quote.ask,
-      quote.volume, quote.dayHigh, quote.dayLow, quote.ivRank, quote.ivPercentile
+      quote.volume, quote.dayHigh, quote.dayLow, quote.ivRank, quote.ivPercentile,
+      quote.currentIv
     );
   }
 

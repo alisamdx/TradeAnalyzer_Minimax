@@ -833,40 +833,60 @@ export class AnalysisService {
     maxDelta: number
   ): Promise<{ contract: NonNullable<OptionsChain['contracts']>[number]; dte: number; expiration: string } | null> {
     try {
-      // Try nearest 3 expirations.
-      const expirations = await this.getNearTermExpirations(ticker, 3);
+      // Try nearest expirations (look out far enough for 30-45 DTE).
+      const expirations = await this.getNearTermExpirations(ticker, 7);
       for (const exp of expirations) {
         const chain = await this.dataProvider.getOptionsChain(ticker, exp);
         const dte = dteDays(exp);
         if (!isDTEMatch(dte, minDTE, maxDTE)) continue;
+        // For puts, delta is negative (e.g. -0.25). Use absolute value for filtering.
+        // Note: bid is lastPrice (day.close) from the v3 snapshot; OI is often 0/null.
         const puts = chain.contracts.filter(
           (c) => c.side === 'put' &&
-            c.delta !== null && c.delta >= minDelta && c.delta <= maxDelta &&
-            c.bid > 0 && c.openInterest !== null && c.openInterest >= 100
+            c.delta !== null && Math.abs(c.delta) >= minDelta && Math.abs(c.delta) <= maxDelta &&
+            c.bid > 0
         );
         if (puts.length > 0) {
-          // Pick the one closest to ATM (delta closest to 0.25 for CSP).
+          // Pick the one closest to ATM (delta closest to -0.25 for CSP, i.e. |delta| closest to 0.25).
           const best = puts.reduce((a, b) =>
+            Math.abs(Math.abs(a.delta ?? 0) - 0.25) < Math.abs(Math.abs(b.delta ?? 0) - 0.25) ? a : b
+          );
+          return { contract: best, dte, expiration: exp };
+        }
+        // If we got contracts but none matched filters, try calls for CC
+        const calls = chain.contracts.filter(
+          (c) => c.side === 'call' &&
+            c.delta !== null && Math.abs(c.delta) >= minDelta && Math.abs(c.delta) <= maxDelta &&
+            c.bid > 0
+        );
+        if (calls.length > 0) {
+          const best = calls.reduce((a, b) =>
             Math.abs((a.delta ?? 0) - 0.25) < Math.abs((b.delta ?? 0) - 0.25) ? a : b
           );
           return { contract: best, dte, expiration: exp };
         }
       }
-    } catch { /* no options data available */ }
+    } catch (err) {
+      console.log(`[findSuitableChain] ${ticker} error:`, err instanceof Error ? err.message : String(err));
+    }
+      console.log(`[findSuitableChain] ${ticker} error:`, err instanceof Error ? err.message : String(err));
+    }
     return null;
   }
 
-  private async getNearTermExpirations(ticker: string, count = 3): Promise<string[]> {
-    // Fetch the options chain for any near-term expiration to get the list.
-    // For now, derive from today's date: try Fridays for next 12 weeks.
+  private async getNearTermExpirations(ticker: string, count = 7): Promise<string[]> {
+    // Generate next `count` Fridays starting from the upcoming one (or today if Friday).
+    // We look out enough weeks to cover the 30–45 DTE window.
     const expirations: string[] = [];
     const now = new Date();
-    for (let w = 0; expirations.length < count && w < 16; w++) {
-      const d = new Date(now.getTime() + w * 7 * 86_400_000);
-      const day = d.getUTCDay();
-      // Find next Friday.
-      const daysUntilFriday = (5 - day + 7) % 7 || 7;
-      d.setUTCDate(d.getUTCDate() + daysUntilFriday);
+    const day = now.getUTCDay();
+    // Days until next Friday (0 = today if Friday, else days ahead)
+    const daysUntilFriday = (5 - day + 7) % 7;
+    const firstFriday = new Date(now);
+    firstFriday.setUTCDate(now.getUTCDate() + daysUntilFriday);
+    for (let w = 0; w < count; w++) {
+      const d = new Date(firstFriday);
+      d.setUTCDate(firstFriday.getUTCDate() + w * 7);
       expirations.push(d.toISOString().slice(0, 10));
     }
     return expirations;

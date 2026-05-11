@@ -135,6 +135,7 @@ export interface Quote {
   dayLow: number | null;
   ivRank: number | null;
   ivPercentile: number | null;
+  currentIv: number | null;  // ATM implied volatility as percentage (e.g., 28.5)
   distance52WkHigh?: number | null;
   distance52WkLow?: number | null;
   fetchedAt: string;

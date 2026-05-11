@@ -149,7 +149,8 @@ export function App() {
     volume: quoteMap[item.ticker]?.volume ?? null,
     wheelSuitability: quoteMap[item.ticker]?.wheelSuitability ?? null,
     targetStrike: quoteMap[item.ticker]?.targetStrike ?? null,
-    estimatedPremium: quoteMap[item.ticker]?.estimatedPremium ?? null
+    estimatedPremium: quoteMap[item.ticker]?.estimatedPremium ?? null,
+    currentIv: quoteMap[item.ticker]?.currentIv ?? item.currentIv
   }));
 
   const { sortedData, sortConfig, requestSort, getSortIndicator } = useSortable(tableData, 'ticker', 'asc');
@@ -675,16 +676,19 @@ export function App() {
                         <td className="num">{fmtEstPremium(it.ticker)}</td>
                         <td>{it.sector ?? ''}</td>
                         <td className="num">
-                          {it.currentIv !== null ? (
-                            <span
-                              style={{
-                                color: it.currentIv >= 30 ? '#2ecc71' : it.currentIv >= 20 ? '#f39c12' : '#95a5a6'
-                              }}
-                              title={it.currentIv >= 30 ? 'Good premium' : it.currentIv >= 20 ? 'Moderate premium' : 'Low premium'}
-                            >
-                              {it.currentIv.toFixed(1)}%
-                            </span>
-                          ) : '—'}
+                          {(() => {
+                            const iv = quoteMap[it.ticker]?.currentIv ?? it.currentIv;
+                            return iv !== null && iv !== undefined ? (
+                              <span
+                                style={{
+                                  color: iv >= 30 ? '#2ecc71' : iv >= 20 ? '#f39c12' : '#95a5a6'
+                                }}
+                                title={iv >= 30 ? 'Good premium' : iv >= 20 ? 'Moderate premium' : 'Low premium'}
+                              >
+                                {iv.toFixed(1)}%
+                              </span>
+                            ) : '—';
+                          })()}
                         </td>
                         <td>{it.notes ?? ''}</td>
                         <td>{it.addedAt.slice(0, 10)}</td>

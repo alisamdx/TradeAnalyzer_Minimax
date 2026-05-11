@@ -302,32 +302,45 @@ export class PolygonDataProvider implements DataProvider {
   }> }> {
     const data = await this.fetchWithRetry(
       `/v3/snapshot/options/${ticker}`,
-      { expiration_date: expiration }
+      { expiration_date: expiration, limit: '250' }
     );
 
-    const contracts = ((data.results as Record<string, unknown> | undefined)?.[
-      'options' as string
-    ] as unknown[] | undefined) ?? [];
+    // Polygon v3 snapshot returns results as an array of contract objects
+    let contracts: unknown[];
+    if (Array.isArray(data.results)) {
+      contracts = data.results;
+    } else if (data.results && typeof data.results === 'object' && 'options' in (data.results as Record<string, unknown>)) {
+      contracts = (data.results as Record<string, unknown>)['options'] as unknown[] ?? [];
+    } else {
+      contracts = [];
+    }
+
 
     return {
       ticker,
       expiration,
       contracts: contracts.map((c) => {
         const co = c as Record<string, unknown>;
+        // Polygon v3 snapshot nests key fields under "details", "greeks", and "day"
+        const details = (co['details'] as Record<string, unknown>) ?? {};
+        const greeks = (co['greeks'] as Record<string, unknown>) ?? {};
+        const day = (co['day'] as Record<string, unknown>) ?? {};
+        // bid/ask aren't in v3 snapshot; use day.close (last trade) as proxy
+        const lastPrice = typeof day['close'] === 'number' ? day['close'] as number : 0;
         return {
-          ticker: String(co['ticker'] ?? ticker),
-          expiration,
-          strike: Number(co['strike_price'] ?? 0),
-          side: String(co['contract_type'] ?? '').toLowerCase().includes('call') ? 'call' : 'put',
-          bid: Number(co['bid'] ?? 0),
-          ask: Number(co['ask'] ?? 0),
-          delta: typeof co['delta'] === 'number' ? (co['delta'] as number) : null,
-          gamma: typeof co['gamma'] === 'number' ? (co['gamma'] as number) : null,
-          theta: typeof co['theta'] === 'number' ? (co['theta'] as number) : null,
-          vega: typeof co['vega'] === 'number' ? (co['vega'] as number) : null,
-          iv: typeof co['implied_volatility'] === 'number' ? (co['implied_volatility'] as number) : 0,
-          openInterest: typeof co['open_interest'] === 'number' ? (co['open_interest'] as number) : null,
-          volume: typeof co['volume'] === 'number' ? (co['volume'] as number) : null
+          ticker: String(details['ticker'] ?? co['ticker'] ?? ticker),
+          expiration: String(details['expiration_date'] ?? expiration),
+          strike: Number(details['strike_price'] ?? co['strike_price'] ?? 0),
+          side: String(details['contract_type'] ?? co['contract_type'] ?? '').toLowerCase().includes('call') ? 'call' : 'put',
+          bid: lastPrice,
+          ask: lastPrice,
+          delta: typeof greeks['delta'] === 'number' ? (greeks['delta'] as number) : (typeof co['delta'] === 'number' ? co['delta'] as number : null),
+          gamma: typeof greeks['gamma'] === 'number' ? (greeks['gamma'] as number) : (typeof co['gamma'] === 'number' ? co['gamma'] as number : null),
+          theta: typeof greeks['theta'] === 'number' ? (greeks['theta'] as number) : (typeof co['theta'] === 'number' ? co['theta'] as number : null),
+          vega: typeof greeks['vega'] === 'number' ? (greeks['vega'] as number) : (typeof co['vega'] === 'number' ? co['vega'] as number : null),
+          iv: typeof co['implied_volatility'] === 'number' ? (co['implied_volatility'] as number) : (typeof details['implied_volatility'] === 'number' ? details['implied_volatility'] as number : 0),
+          openInterest: typeof details['open_interest'] === 'number' ? (details['open_interest'] as number) : (typeof co['open_interest'] === 'number' ? co['open_interest'] as number : null),
+          volume: typeof day['volume'] === 'number' ? (day['volume'] as number) : (typeof co['volume'] === 'number' ? co['volume'] as number : null)
         };
       })
     };

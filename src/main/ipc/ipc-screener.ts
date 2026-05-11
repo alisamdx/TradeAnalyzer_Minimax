@@ -163,6 +163,12 @@ export function registerScreenerIpc(
     async (_e, ticker: string): Promise<IpcResult<CachedQuote>> => {
       try {
         const snapshot = await dataProvider.getQuote(ticker);
+        // Fetch IV from options snapshot (non-blocking; null on failure)
+        let currentIv: number | null = null;
+        try {
+          const ivData = await dataProvider.getOptionsIV(ticker);
+          currentIv = ivData.currentIv;
+        } catch { /* IV unavailable for this ticker */ }
         const cached: CachedQuote = {
           ticker,
           last: snapshot.last,
@@ -174,6 +180,7 @@ export function registerScreenerIpc(
           dayLow: snapshot.dayLow,
           ivRank: snapshot.ivRank,
           ivPercentile: snapshot.ivPercentile,
+          currentIv,
           fetchedAt: snapshot.fetchedAt
         };
         quoteCache.upsert(cached);
@@ -197,6 +204,13 @@ export function registerScreenerIpc(
             fundamentalsCache.upsert(ticker, ratios);
           }
 
+          // Fetch IV from options snapshot (null on failure)
+          let currentIv: number | null = null;
+          try {
+            const ivData = await dataProvider.getOptionsIV(ticker);
+            currentIv = ivData.currentIv;
+          } catch { /* IV unavailable for this ticker */ }
+
           // Calculate wheel metrics
           const wheelMetrics = calculateWheelMetrics(ratios, snapshot);
 
@@ -211,6 +225,7 @@ export function registerScreenerIpc(
             dayLow: snapshot.dayLow,
             ivRank: snapshot.ivRank,
             ivPercentile: snapshot.ivPercentile,
+            currentIv,
             fetchedAt: snapshot.fetchedAt,
             wheelSuitability: wheelMetrics.suitabilityScore,
             targetStrike: wheelMetrics.targetStrike,
