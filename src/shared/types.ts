@@ -318,6 +318,23 @@ export interface OptionContract {
 /** Backwards-alias — don't use in new code. */
 export type OptionsContract = OptionContract;
 
+// ─── Options Chain View ─────────────────────────────────────────────────────────
+
+export interface OptionsChainExpirationSummary {
+  date: string;
+  dte: number;
+  callCount: number;
+  putCount: number;
+}
+
+export interface OptionsChainViewData {
+  ticker: string;
+  expiration: string;
+  contracts: OptionContract[];
+  currentPrice: number | null;
+  currentIv: number | null;
+}
+
 // ─── FR-4 Validation Dashboard ───────────────────────────────────────────────
 
 export interface ValidateTickerItem {

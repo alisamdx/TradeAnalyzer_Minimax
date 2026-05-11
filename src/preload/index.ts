@@ -24,7 +24,10 @@ import type {
   AppSettings,
   DiagnosticsResult,
   CacheStatus,
-  CacheStats
+  CacheStats,
+  OptionsChainExpirationSummary,
+  OptionsChainViewData,
+  OptionContract
 } from '@shared/types.js';
 export type {
   ScreenPreset, ScreenCriteria, ScreenRunResult, ScreenResultRow, Universe,
@@ -638,8 +641,15 @@ function buildApi() {
     }[]; error?: string }>('portfolio:listByTicker', ticker)
   };
 
+  const optionsChain = {
+    getNearExpirations: (ticker: string) =>
+      invoke<{ expirations: OptionsChainExpirationSummary[]; currentPrice: number | null; currentIv: number | null }>('options:get-near-expirations', ticker),
+    getChain: (ticker: string, expiration: string) =>
+      invoke<OptionsChainViewData>('options:get-chain', ticker, expiration)
+  };
+
   return {
-    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, websocket, historical, portfolio, briefing, alerts },
+    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, websocket, historical, portfolio, briefing, alerts, optionsChain },
     dialog: {
       prompt: (opts: { title: string; defaultValue?: string }) =>
         invoke<string | null>('dialog:prompt', opts),

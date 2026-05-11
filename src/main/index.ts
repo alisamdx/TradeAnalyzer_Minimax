@@ -26,6 +26,7 @@ import { registerHistoricalIpc } from './ipc/ipc-historical.js';
 import { registerPortfolioIpc } from './ipc/ipc-portfolio.js';
 import { registerBriefingIpc } from './ipc/ipc-briefing.js';
 import { registerAlertsIpc } from './ipc/ipc-alerts.js';
+import { registerOptionsIpc } from './ipc/ipc-options.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -164,6 +165,9 @@ app.whenReady().then(() => {
 
   // Phase 8 - Alerts System IPC
   registerAlertsIpc(db);
+
+  // Options Chain view
+  registerOptionsIpc(dataProvider, quoteCache, rateLimiter);
 
   // Phase 3 - WebSocket streaming
   const wsService = new WebSocketService(() => {

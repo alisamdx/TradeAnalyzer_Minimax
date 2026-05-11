@@ -594,7 +594,6 @@ table.items-table {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  border-bottom: 1px solid var(--border);
 }
 .nav-btn {
   background: none;
@@ -604,6 +603,11 @@ table.items-table {
   border-radius: 4px;
   font-size: 12px;
   color: var(--text);
+}
+.nav-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 8px;
 }
 .nav-btn:hover { background: rgba(255,255,255,0.05); }
 .nav-btn.active {
@@ -2466,4 +2470,343 @@ input[type='checkbox'] {
 
 .dialog-buttons button.primary:hover {
   opacity: 0.9;
+}
+
+/* ─── Options Chain View ─────────────────────────────────────────────────── */
+
+.options-chain-view {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  height: 100%;
+  min-height: 0;
+}
+
+.oc-sidebar {
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.oc-sidebar-header {
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.oc-sidebar-header h3 {
+  margin: 0 0 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.oc-ticker-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.oc-ticker-list li {
+  padding: 4px 8px;
+  cursor: pointer;
+  border-radius: 3px;
+  font-size: 12px;
+  font-family: monospace;
+}
+
+.oc-ticker-list li:hover {
+  background: var(--bg-elev);
+}
+
+.oc-ticker-list li.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.oc-validate-btn {
+  margin: 8px;
+  padding: 6px 12px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  text-align: center;
+}
+
+.oc-validate-btn:hover {
+  opacity: 0.9;
+}
+
+.oc-main {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 12px;
+  min-height: 0;
+}
+
+.oc-empty, .oc-loading, .oc-error {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 40px 0;
+}
+
+.oc-error {
+  color: var(--danger);
+}
+
+.oc-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.oc-header h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.oc-price {
+  font-size: 16px;
+  font-weight: 600;
+  font-family: monospace;
+}
+
+.oc-iv {
+  font-size: 13px;
+  font-family: monospace;
+}
+
+/* Expiration Tabs */
+.oc-exp-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.oc-exp-tab {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.oc-exp-tab:hover {
+  background: var(--bg-elev);
+}
+
+.oc-exp-tab.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.oc-dte {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: monospace;
+}
+
+.oc-exp-tab.active .oc-dte {
+  color: rgba(255,255,255,0.8);
+}
+
+.oc-counts {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: monospace;
+}
+
+.oc-exp-tab.active .oc-counts {
+  color: rgba(255,255,255,0.7);
+}
+
+/* Strategy Cards */
+.oc-strategy-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.oc-card {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+  background: var(--bg-elev);
+}
+
+.oc-card-put {
+  border-left: 3px solid var(--success);
+}
+
+.oc-card-call {
+  border-left: 3px solid var(--accent);
+}
+
+.oc-card-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+}
+
+.oc-card-strategy {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.oc-card-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12px;
+  font-family: monospace;
+}
+
+.oc-card-yield {
+  color: var(--success);
+  font-weight: 600;
+}
+
+/* Filter Controls */
+.oc-filters {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.oc-filters button {
+  padding: 3px 10px;
+  font-size: 11px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.oc-filters button.active {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.oc-filter-sep {
+  color: var(--text-muted);
+  margin: 0 2px;
+}
+
+.oc-oi-filter {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-left: 8px;
+}
+
+.oc-oi-filter input {
+  width: 50px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 2px 4px;
+  font-size: 11px;
+}
+
+/* Chain Table */
+.oc-chain-table-wrapper {
+  overflow-x: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.oc-chain-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  font-family: monospace;
+}
+
+.oc-chain-table th {
+  padding: 4px 8px;
+  text-align: right;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  z-index: 1;
+}
+
+.oc-chain-table td {
+  padding: 3px 8px;
+  text-align: right;
+  border-bottom: 1px solid rgba(48, 54, 61, 0.5);
+}
+
+.oc-chain-table tr:hover {
+  background: rgba(88, 166, 255, 0.05);
+}
+
+.oc-atm-row {
+  background: rgba(88, 166, 255, 0.08) !important;
+}
+
+.oc-strike-cell {
+  font-weight: 600;
+  text-align: center;
+  color: var(--text);
+  background: var(--bg);
+  position: sticky;
+  left: 0;
+  z-index: 1;
+}
+
+.oc-side-header {
+  text-align: center;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+}
+
+.oc-call-header {
+  color: var(--accent);
+}
+
+.oc-put-header {
+  color: var(--success);
+}
+
+.oc-profitable {
+  color: var(--success);
+  font-weight: 600;
+}
+
+.oc-delta-highlight {
+  color: var(--warning);
+  font-weight: 600;
+}
+
+.oc-empty-cell {
+  text-align: center;
+  color: var(--text-muted);
+  opacity: 0.3;
 }

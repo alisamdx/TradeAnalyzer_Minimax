@@ -298,26 +298,41 @@ export class PolygonDataProvider implements DataProvider {
     openInterest: number | null;
     volume: number | null;
   }> }> {
-    const data = await this.fetchWithRetry(
-      `/v3/snapshot/options/${ticker}`,
-      { expiration_date: expiration, limit: '250' }
-    );
-
-    // Polygon v3 snapshot returns results as an array of contract objects
-    let contracts: unknown[];
-    if (Array.isArray(data.results)) {
-      contracts = data.results;
-    } else if (data.results && typeof data.results === 'object' && 'options' in (data.results as Record<string, unknown>)) {
-      contracts = (data.results as Record<string, unknown>)['options'] as unknown[] ?? [];
-    } else {
-      contracts = [];
+    // Fetch all contracts for this expiration, handling pagination.
+    let allContracts: unknown[] = [];
+    let url: string | null = `/v3/snapshot/options/${ticker}`;
+    const params: Record<string, string> = { expiration_date: expiration, limit: '250' };
+    while (url) {
+      const data = await this.fetchWithRetry(url, url === `/v3/snapshot/options/${ticker}` ? params : {});
+      let pageContracts: unknown[];
+      if (Array.isArray(data.results)) {
+        pageContracts = data.results;
+      } else if (data.results && typeof data.results === 'object' && 'options' in (data.results as Record<string, unknown>)) {
+        pageContracts = (data.results as Record<string, unknown>)['options'] as unknown[] ?? [];
+      } else {
+        pageContracts = [];
+      }
+      allContracts = allContracts.concat(pageContracts);
+      // Follow next_url for pagination if available
+      const nextUrl = data.next_url as string | undefined;
+      if (nextUrl) {
+        // next_url is a full URL; extract just the path for our fetchWithRetry
+        try {
+          const parsed = new URL(nextUrl);
+          url = parsed.pathname + parsed.search;
+          // If next_url is already relative, use it as-is
+        } catch {
+          url = nextUrl;
+        }
+      } else {
+        url = null;
+      }
     }
-
 
     return {
       ticker,
       expiration,
-      contracts: contracts.map((c) => {
+      contracts: allContracts.map((c) => {
         const co = c as Record<string, unknown>;
         // Polygon v3 snapshot nests key fields under "details", "greeks", and "day"
         const details = (co['details'] as Record<string, unknown>) ?? {};

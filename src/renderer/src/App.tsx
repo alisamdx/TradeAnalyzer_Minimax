@@ -16,10 +16,11 @@ import { PromptDialog } from './components/PromptDialog.js';
 import { showPromptDialog } from './utils/promptDialog.js';
 
 import { DataView } from './views/DataView.js';
+import { OptionsChainView } from './views/OptionsChainView.js';
 
 declare const __APP_VERSION__: string;
 
-type View = 'watchlists' | 'screener' | 'analysis' | 'validate' | 'portfolio' | 'briefing' | 'settings' | 'alerts' | 'data';
+type View = 'watchlists' | 'screener' | 'analysis' | 'validate' | 'portfolio' | 'briefing' | 'settings' | 'alerts' | 'data' | 'optionsChain';
 
 export function App() {
   const [view, setView] = useState<View>('watchlists');
@@ -40,6 +41,7 @@ export function App() {
 
   // Ticker passed from analysis "Validate" link
   const [validateTicker, setValidateTicker] = useState<string | null>(null);
+  const [optionsChainTicker, setOptionsChainTicker] = useState<string | null>(null);
 
   // Prompt dialog state
   const [promptDialogOpen, setPromptDialogOpen] = useState(false);
@@ -101,6 +103,13 @@ export function App() {
     };
     window.addEventListener('navigate-to-validate', handleNavigateToValidate as EventListener);
 
+    // Listen for "Options Chain" from other views
+    const handleNavigateToOptions = (e: CustomEvent<{ ticker: string }>) => {
+      setOptionsChainTicker(e.detail.ticker);
+      setView('optionsChain');
+    };
+    window.addEventListener('navigate-to-options', handleNavigateToOptions as EventListener);
+
     // Listen for watchlist created from screener
     const handleWatchlistCreated = () => {
       refreshLists();
@@ -121,6 +130,7 @@ export function App() {
       removeAlertListener();
       window.removeEventListener('navigate-to-analysis', handleNavigateToAnalysis as EventListener);
       window.removeEventListener('navigate-to-validate', handleNavigateToValidate as EventListener);
+      window.removeEventListener('navigate-to-options', handleNavigateToOptions as EventListener);
       window.removeEventListener('watchlist-created', handleWatchlistCreated as EventListener);
       window.removeEventListener('show-prompt-dialog', handleShowPrompt as EventListener);
     };
@@ -466,10 +476,10 @@ export function App() {
       <aside className="sidebar">
         <div className="nav-section">
           <button
-            className={`nav-btn ${view === 'watchlists' ? 'active' : ''}`}
-            onClick={() => setView('watchlists')}
+            className={`nav-btn ${view === 'briefing' ? 'active' : ''}`}
+            onClick={() => setView('briefing')}
           >
-            📋 Watchlists
+            📰 Briefing
           </button>
           <button
             className={`nav-btn ${view === 'screener' ? 'active' : ''}`}
@@ -490,16 +500,17 @@ export function App() {
             🎯 Validate
           </button>
           <button
-            className={`nav-btn ${view === 'portfolio' ? 'active' : ''}`}
-            onClick={() => setView('portfolio')}
+            className={`nav-btn ${view === 'optionsChain' ? 'active' : ''}`}
+            onClick={() => setView('optionsChain')}
           >
-            💼 Portfolio
+            📉 Options
           </button>
+          <div className="nav-divider" />
           <button
-            className={`nav-btn ${view === 'briefing' ? 'active' : ''}`}
-            onClick={() => setView('briefing')}
+            className={`nav-btn ${view === 'data' ? 'active' : ''}`}
+            onClick={() => setView('data')}
           >
-            📰 Briefing
+            🗄️ Data Sync
           </button>
           <button
             className={`nav-btn ${view === 'alerts' ? 'active' : ''}`}
@@ -508,16 +519,23 @@ export function App() {
             🔔 Alerts
           </button>
           <button
-            className={`nav-btn ${view === 'data' ? 'active' : ''}`}
-            onClick={() => setView('data')}
-          >
-            🗄️ Data Sync
-          </button>
-          <button
             className={`nav-btn ${view === 'settings' ? 'active' : ''}`}
             onClick={() => setView('settings')}
           >
             ⚙ Settings
+          </button>
+          <div className="nav-divider" />
+          <button
+            className={`nav-btn ${view === 'portfolio' ? 'active' : ''}`}
+            onClick={() => setView('portfolio')}
+          >
+            💼 Portfolio
+          </button>
+          <button
+            className={`nav-btn ${view === 'watchlists' ? 'active' : ''}`}
+            onClick={() => setView('watchlists')}
+          >
+            📋 Watchlists
           </button>
         </div>
 
@@ -562,6 +580,7 @@ export function App() {
         {view === 'briefing' && <BriefingView />}
         {view === 'alerts' && <AlertsView />}
         {view === 'data' && <DataView />}
+        {view === 'optionsChain' && <OptionsChainView initialTicker={optionsChainTicker} clearInitialTicker={() => setOptionsChainTicker(null)} />}
         {view === 'settings' && <SettingsView />}
 
         {view === 'watchlists' && !active ? (
