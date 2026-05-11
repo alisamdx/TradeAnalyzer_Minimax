@@ -191,7 +191,7 @@ export function AnalysisView({ initialTicker, clearInitialTicker }: AnalysisView
     const rows = results.map((r) => {
       if (r.mode === 'buy') return `${r.ticker},${r.lastPrice ?? ''},${r.compositeScore},${r.trend},${r.rsi ?? ''},${r.entryZoneLow ?? ''},${r.stopLoss ?? ''},${r.targetPrice ?? ''},${r.riskReward ?? ''},${r.fundamentalsPass}`;
       if (r.mode === 'options_income') return `${r.ticker},${r.lastPrice ?? ''},${r.strategy},${r.strike ?? ''},${r.expiration ?? ''},${r.dte ?? ''},${r.delta ?? ''},${r.premium ?? ''},${r.annualizedReturn ?? ''},${r.capitalRequired ?? ''}`;
-      if (r.mode === 'wheel') return `${r.ticker},${r.lastPrice ?? ''},${r.recommendedStrike ?? ''},${r.expiration ?? ''},${r.dte ?? ''},${r.premium ?? ''},${r.annualizedReturn ?? ''},${r.ivRank ?? ''},${r.suitabilityScore},${r.optionLiquidityScore}`;
+      if (r.mode === 'wheel') return `${r.ticker},${r.lastPrice ?? ''},${r.recommendedStrike ?? ''},${r.expiration ?? ''},${r.dte ?? ''},${r.premium ?? ''},${r.annualizedReturn ?? ''},${r.currentIv ?? ''},${r.suitabilityScore},${r.optionLiquidityScore}`;
       return `${r.ticker},${r.lastPrice ?? ''},${r.trendStrength ?? ''},${r.suggestedStrategy},${r.structure},${r.maxProfit ?? ''},${r.maxLoss ?? ''},${r.breakeven ?? ''},${r.probabilityOfProfit ?? ''}`;
     });
     const csv = [header, ...rows].join('\n');
@@ -257,7 +257,7 @@ export function AnalysisView({ initialTicker, clearInitialTicker }: AnalysisView
     switch (mode) {
       case 'buy': return ['Ticker', 'Price', 'Score/10', 'Trend', 'RSI', 'Entry Low', 'Stop', 'Target', 'R:R', 'Fund OK'];
       case 'options_income': return ['Ticker', 'Price', 'Strategy', 'Strike', 'Exp', 'DTE', 'Delta', 'Premium', 'Ann Return%', 'Capital'];
-      case 'wheel': return ['Ticker', 'Price', 'Strike', 'Exp', 'DTE', 'Premium', 'Ann Return%', 'IV %', 'IV Rank', 'Days to Erns', 'Suitability', 'Liquidity'];
+      case 'wheel': return ['Ticker', 'Price', 'Strike', 'Exp', 'DTE', 'Premium', 'Ann Return%', 'IV %', 'Suitability', 'Liquidity'];
       case 'bullish':
       case 'bearish': return ['Ticker', 'Price', 'ADX', 'Strategy', 'Structure', 'Max Profit', 'Max Loss', 'Breakeven', 'POP'];
       default: return ['Ticker'];
@@ -329,8 +329,6 @@ export function AnalysisView({ initialTicker, clearInitialTicker }: AnalysisView
             {result.currentIv.toFixed(1)}%
           </span>
         ) : '—';
-        case 'IV Rank': return fmtPct(result.ivRank);
-        case 'Days to Erns': return result.daysToEarnings?.toString() ?? '—';
         case 'Suitability': return `${result.suitabilityScore}/10`;
         case 'Liquidity': return `${result.optionLiquidityScore}/10`;
       }

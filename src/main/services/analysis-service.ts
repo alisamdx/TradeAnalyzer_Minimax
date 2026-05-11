@@ -311,13 +311,13 @@ export class AnalysisService {
 
     const quote = await this.fetchQuote(ticker);
     const fundamentals = await this.fetchFundamentals(ticker);
-    const bars = await this.dataProvider.getHistoricalBars(ticker, 'day', 252);
+    const bars = await this.dataProvider.getHistoricalBars(ticker, 'day', 378); // ~252 trading days ≈ 378 calendar days
     const latestBars = bars.slice(-200); // last ~200 trading days
 
     switch (mode) {
       case 'buy': return this.modeBuy(ticker, quote, fundamentals, latestBars);
       case 'options_income': return this.modeOptionsIncome(ticker, quote, fundamentals, latestBars);
-      case 'wheel': return this.modeWheel(ticker, quote, fundamentals, latestBars);
+      case 'wheel': return this.modeWheel(ticker, quote, fundamentals, bars); // needs full 252 for 52-wk range
       case 'bullish': return this.modeDirectional(ticker, quote, fundamentals, latestBars, 'bullish');
       case 'bearish': return this.modeDirectional(ticker, quote, fundamentals, latestBars, 'bearish');
     }
@@ -644,10 +644,14 @@ export class AnalysisService {
     const chain = await this.findSuitableChain(ticker, 30, 45, 0.20, 0.30);
     let liquidityScore = 0;
     if (chain) {
-      const spread = chain.contract.bid > 0
-        ? ((chain.contract.ask - chain.contract.bid) / ((chain.contract.ask + chain.contract.bid) / 2)) * 100
-        : 100;
-      const oiPass = (chain.contract.openInterest ?? 0) >= 500;
+      const bid = chain.contract.bid;
+      const ask = chain.contract.ask;
+      // v3 snapshot uses day.close as bid/ask proxy (no real bid/ask), so spread is 0.
+      // Only penalize if we have a meaningful spread (> 5%).
+      const spread = (bid > 0 && ask > 0 && ask > bid)
+        ? ((ask - bid) / ((ask + bid) / 2)) * 100
+        : 0;
+      const oiPass = (chain.contract.openInterest ?? 0) >= 50;
       const spreadPass = spread <= 5;
       if (oiPass) liquidityScore += 5;
       if (spreadPass) liquidityScore += 5;
@@ -744,9 +748,28 @@ export class AnalysisService {
     let breakeven: number | null = null;
     let probabilityOfProfit: number | null = null;
 
-    if (!isTrending || !price) {
+    if (!price) {
       suggestedStrategy = mode === 'bullish' ? 'short_put' : 'short_call';
-      structure = 'Wait for trend confirmation';
+      structure = 'No price data available';
+    } else if (!isTrending) {
+      // No confirmed trend yet — suggest a conservative, income-oriented strategy.
+      if (mode === 'bullish') {
+        const otm = Math.round(price * 0.95 / 5) * 5;
+        suggestedStrategy = 'short_put';
+        structure = `Sell ${otm} put (conservative CSP — trend not confirmed)`;
+        maxProfit = null;
+        maxLoss = otm * 100;
+        breakeven = otm - 3;
+        probabilityOfProfit = 0.60;
+      } else {
+        const otm = Math.round(price * 1.05 / 5) * 5;
+        suggestedStrategy = 'short_call';
+        structure = `Sell ${otm} call (conservative — trend not confirmed)`;
+        maxProfit = null; // premium received
+        maxLoss = null; // theoretically unlimited if naked
+        breakeven = otm + 3;
+        probabilityOfProfit = 0.55;
+      }
     } else if (mode === 'bullish') {
       if (adx !== null && adx > 30 && rsi !== null && rsi < 70) {
         // Strong trend: bull call spread.
@@ -764,8 +787,8 @@ export class AnalysisService {
         suggestedStrategy = 'long_call';
         const atm = Math.round(price / 5) * 5;
         structure = `Buy ${atm} call (straight)`;
-        maxProfit = null; // theoretically unlimited
-        maxLoss = null; // premium paid
+        maxProfit = null; // unlimited upside
+        maxLoss = null; // limited to premium paid
         breakeven = atm + 3; // approximate
         probabilityOfProfit = 0.45;
       } else {
@@ -774,7 +797,7 @@ export class AnalysisService {
         const otm = Math.round(price * 0.95 / 5) * 5;
         structure = `Sell ${otm} put (cash-secured)`;
         maxProfit = null; // premium received
-        maxLoss = (otm * 100) - 0; // if put expires worthless
+        maxLoss = otm * 100; // max loss if assigned
         breakeven = otm - 3; // approximate
         probabilityOfProfit = 0.60;
       }
@@ -793,16 +816,16 @@ export class AnalysisService {
         suggestedStrategy = 'long_put';
         const atm = Math.round(price / 5) * 5;
         structure = `Buy ${atm} put (straight)`;
-        maxProfit = null;
-        maxLoss = null;
+        maxProfit = null; // limited to strike - premium
+        maxLoss = null; // limited to premium paid
         breakeven = atm - 3;
         probabilityOfProfit = 0.45;
       } else {
         suggestedStrategy = 'short_call';
         const otm = Math.round(price * 1.05 / 5) * 5;
         structure = `Sell ${otm} call (covered or naked)`;
-        maxProfit = null;
-        maxLoss = null;
+        maxProfit = null; // premium received
+        maxLoss = null; // unlimited if naked
         breakeven = otm + 3;
         probabilityOfProfit = 0.60;
       }
@@ -867,8 +890,6 @@ export class AnalysisService {
         }
       }
     } catch (err) {
-      console.log(`[findSuitableChain] ${ticker} error:`, err instanceof Error ? err.message : String(err));
-    }
       console.log(`[findSuitableChain] ${ticker} error:`, err instanceof Error ? err.message : String(err));
     }
     return null;

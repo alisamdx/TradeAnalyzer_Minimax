@@ -77,8 +77,6 @@ export class PolygonDataProvider implements DataProvider {
       if (v !== undefined && v !== null) url.searchParams.set(k, String(v));
     }
 
-    console.log(`[PolygonDataProvider] Fetching URL: ${url.toString()}`);
-
     const start = Date.now();
     let response: Response;
     try {
@@ -348,7 +346,6 @@ export class PolygonDataProvider implements DataProvider {
 
   /** Fetch current IV from ATM options for a ticker. */
   async getOptionsIV(ticker: string): Promise<{ currentIv: number | null; iv52WkHigh: number | null; iv52WkLow: number | null }> {
-    console.log(`[getOptionsIV] ${ticker} called`);
     try {
       // Fetch options snapshot - get ATM options to derive IV
       // Use a separate try-catch to handle 404s gracefully (some tickers have no options)
@@ -361,9 +358,7 @@ export class PolygonDataProvider implements DataProvider {
       } catch (fetchError) {
         // 404 means no options data available for this ticker
         const errMsg = fetchError instanceof Error ? fetchError.message : String(fetchError);
-        console.log(`[getOptionsIV] ${ticker} fetch error:`, errMsg.slice(0, 100));
         if (errMsg.includes('404') || errMsg.includes('NotFound')) {
-          console.log(`[getOptionsIV] ${ticker} returning nulls (404 caught)`);
           return { currentIv: null, iv52WkHigh: null, iv52WkLow: null };
         }
         throw fetchError;
