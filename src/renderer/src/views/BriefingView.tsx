@@ -38,7 +38,7 @@ interface TopSetup {
   debtToEquity: number | null;
   marketCap: number | null;
   fcfYield: number | null;
-  currentIv: number | null;
+  currentIv?: number | null;
   wheelSuitability: number | null;
   targetStrike: number | null;
   estimatedPremium: number | null;
@@ -277,7 +277,7 @@ export function BriefingView() {
                     <td className="num">{setup.peRatio?.toFixed(1) ?? '—'}</td>
                     <td className="num">{setup.debtToEquity?.toFixed(2) ?? '—'}</td>
                     <td className="num">
-                      {setup.currentIv !== null ? (
+                      {setup.currentIv != null ? (
                         <span
                           style={{
                             color: setup.currentIv >= 30 ? '#2ecc71' : setup.currentIv >= 20 ? '#f39c12' : '#95a5a6'

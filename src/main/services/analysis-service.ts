@@ -69,6 +69,7 @@ export interface WheelResult {
   delta: number | null;
   premium: number | null;
   annualizedReturn: number | null;
+  currentIv: number | null;     // Current ATM implied volatility (percentage)
   ivRank: number | null;
   daysToEarnings: number | null;
   optionLiquidityScore: number; // 0–10
@@ -608,9 +609,16 @@ export class AnalysisService {
     const price = quote.last ?? null;
     const ivRank = quote.ivRank ?? null;
 
+    // Fetch current IV from options chain
+    let currentIv: number | null = null;
+    try {
+      const ivData = await this.dataProvider.getOptionsIV(ticker);
+      currentIv = ivData.currentIv;
+    } catch { /* ignore errors */ }
+
     // Stability check: price within 25% of 52-wk high, not at 52-wk low.
     if (bars.length < 252) {
-      return this.emptyWheel(ticker, price, ivRank, 'Insufficient price history (need ≥252 bars).');
+      return this.emptyWheel(ticker, price, currentIv, ivRank, 'Insufficient price history (need ≥252 bars).');
     }
     const high252 = Math.max(...bars.map((b) => b.h));
     const low252 = Math.min(...bars.map((b) => b.l));
@@ -663,7 +671,7 @@ export class AnalysisService {
     if (explanation === '') explanation = 'All checks passed.';
 
     if (!chain || !price) {
-      return this.emptyWheel(ticker, price, ivRank, explanation || 'No suitable CSP found.');
+      return this.emptyWheel(ticker, price, currentIv, ivRank, explanation || 'No suitable CSP found.');
     }
 
     const { contract, dte } = chain;
@@ -677,19 +685,19 @@ export class AnalysisService {
       expiration: contract.expiration,
       dte, delta: contract.delta,
       premium, annualizedReturn: annual,
-      ivRank, daysToEarnings,
+      currentIv, ivRank, daysToEarnings,
       optionLiquidityScore: Math.min(10, liquidityScore),
       suitabilityScore: score,
       explanation: explanation.trim()
     };
   }
 
-  private emptyWheel(ticker: string, price: number | null, ivRank: number | null, explanation: string): WheelResult {
+  private emptyWheel(ticker: string, price: number | null, currentIv: number | null, ivRank: number | null, explanation: string): WheelResult {
     return {
       mode: 'wheel', ticker, lastPrice: price,
       recommendedStrike: null, expiration: null, dte: null,
       delta: null, premium: null, annualizedReturn: null,
-      ivRank, daysToEarnings: null,
+      currentIv, ivRank, daysToEarnings: null,
       optionLiquidityScore: 0, suitabilityScore: 1, explanation
     };
   }

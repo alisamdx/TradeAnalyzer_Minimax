@@ -40,7 +40,7 @@ function fmtNum(v: number | null, decimals = 2): string {
 type DecodedResult =
   | { mode: 'buy'; ticker: string; lastPrice: number | null; compositeScore: number; trend: string; rsi: number | null; entryZoneLow: number | null; stopLoss: number | null; targetPrice: number | null; riskReward: number | null; fundamentalsPass: boolean; explanation: string }
   | { mode: 'options_income'; ticker: string; lastPrice: number | null; strategy: 'CSP' | 'CC'; strike: number | null; expiration: string | null; dte: number | null; delta: number | null; premium: number | null; annualizedReturn: number | null; ivRank: number | null; breakeven: number | null; capitalRequired: number | null; explanation: string }
-  | { mode: 'wheel'; ticker: string; lastPrice: number | null; recommendedStrike: number | null; expiration: string | null; dte: number | null; delta: number | null; premium: number | null; annualizedReturn: number | null; ivRank: number | null; daysToEarnings: number | null; optionLiquidityScore: number; suitabilityScore: number; explanation: string }
+  | { mode: 'wheel'; ticker: string; lastPrice: number | null; recommendedStrike: number | null; expiration: string | null; dte: number | null; delta: number | null; premium: number | null; annualizedReturn: number | null; currentIv: number | null; ivRank: number | null; daysToEarnings: number | null; optionLiquidityScore: number; suitabilityScore: number; explanation: string }
   | { mode: 'bullish' | 'bearish'; ticker: string; lastPrice: number | null; trendStrength: number | null; suggestedStrategy: string; structure: string; maxProfit: number | null; maxLoss: number | null; breakeven: number | null; probabilityOfProfit: number | null; explanation: string };
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -257,7 +257,7 @@ export function AnalysisView({ initialTicker, clearInitialTicker }: AnalysisView
     switch (mode) {
       case 'buy': return ['Ticker', 'Price', 'Score/10', 'Trend', 'RSI', 'Entry Low', 'Stop', 'Target', 'R:R', 'Fund OK'];
       case 'options_income': return ['Ticker', 'Price', 'Strategy', 'Strike', 'Exp', 'DTE', 'Delta', 'Premium', 'Ann Return%', 'Capital'];
-      case 'wheel': return ['Ticker', 'Price', 'Strike', 'Exp', 'DTE', 'Premium', 'Ann Return%', 'IV Rank', 'Days to Erns', 'Suitability', 'Liquidity'];
+      case 'wheel': return ['Ticker', 'Price', 'Strike', 'Exp', 'DTE', 'Premium', 'Ann Return%', 'IV %', 'IV Rank', 'Days to Erns', 'Suitability', 'Liquidity'];
       case 'bullish':
       case 'bearish': return ['Ticker', 'Price', 'ADX', 'Strategy', 'Structure', 'Max Profit', 'Max Loss', 'Breakeven', 'POP'];
       default: return ['Ticker'];
@@ -324,6 +324,11 @@ export function AnalysisView({ initialTicker, clearInitialTicker }: AnalysisView
         case 'DTE': return result.dte?.toString() ?? '—';
         case 'Premium': return fmtPrice(result.premium);
         case 'Ann Return%': return fmtPct(result.annualizedReturn);
+        case 'IV %': return result.currentIv !== null ? (
+          <span style={{ color: result.currentIv >= 30 ? '#2ecc71' : result.currentIv >= 20 ? '#f39c12' : '#95a5a6' }}>
+            {result.currentIv.toFixed(1)}%
+          </span>
+        ) : '—';
         case 'IV Rank': return fmtPct(result.ivRank);
         case 'Days to Erns': return result.daysToEarnings?.toString() ?? '—';
         case 'Suitability': return `${result.suitabilityScore}/10`;
