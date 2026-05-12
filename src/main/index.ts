@@ -2,6 +2,7 @@ import { app, BrowserWindow, shell } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { readFileSync, existsSync } from 'node:fs';
+import { ApiServer } from './api-server.js';
 import { openDatabase } from './db/connection.js';
 import { runMigrations, currentSchemaVersion } from './db/migrations.js';
 import { WatchlistService } from './services/watchlist-service.js';
@@ -27,8 +28,12 @@ import { registerPortfolioIpc } from './ipc/ipc-portfolio.js';
 import { registerBriefingIpc } from './ipc/ipc-briefing.js';
 import { registerAlertsIpc } from './ipc/ipc-alerts.js';
 import { registerOptionsIpc } from './ipc/ipc-options.js';
+import { AgentDbService } from './services/agent-db-service.js';
+import { registerAgentIpc } from './ipc/ipc-agent.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+let _apiServer: ApiServer | null = null;
 
 // Resolve migrations dir whether running from `out/main/index.js` (built)
 // or via electron-vite dev (source). Both layouts have /migrations at repo root.
@@ -169,6 +174,13 @@ app.whenReady().then(() => {
   // Options Chain view
   registerOptionsIpc(dataProvider, quoteCache, rateLimiter);
 
+  // v0.12.0 — TraderAgent integration
+  const agentDb = new AgentDbService();
+  // Open the agent DB if a path is already saved in settings
+  const agentDbPathRow = db.prepare("SELECT value FROM settings WHERE key = 'agentDbPath'").get() as { value?: string } | undefined;
+  if (agentDbPathRow?.value) agentDb.open(agentDbPathRow.value);
+  registerAgentIpc(agentDb);
+
   // Phase 3 - WebSocket streaming
   const wsService = new WebSocketService(() => {
     const row = db.prepare('SELECT value FROM settings WHERE key = ?').get('polygonApiKey') as { value?: string } | undefined;
@@ -183,8 +195,36 @@ app.whenReady().then(() => {
     wsService.connect();
   }
 
+  // Local HTTP API server for the external trading agent.
+  const apiPort = (() => {
+    const row = db.prepare("SELECT value FROM settings WHERE key = 'apiServerPort'").get() as { value?: string } | undefined;
+    return parseInt(row?.value ?? '7432', 10) || 7432;
+  })();
+  _apiServer = new ApiServer({
+    db,
+    watchlistService,
+    screenerService,
+    analysisService,
+    validateAllService,
+    jobQueue,
+    dataProvider,
+    quoteCache,
+    fundamentalsCache: new FundamentalsCache(db),
+    rateLimiter,
+    appVersion: app.getVersion()
+  });
+  _apiServer.start(apiPort).catch((err) => {
+    console.error('[api-server] failed to start:', err);
+  });
+
   // Check for incomplete runs from a previous session and surface in the renderer.
   // The renderer will prompt the user to resume or discard via the job IPC handlers.
+
+  // In headless mode (TRADEANALYZER_HEADLESS=1) skip creating a window.
+  if (process.env['TRADEANALYZER_HEADLESS'] === '1') {
+    console.log('[headless] running without UI — API server only');
+    return;
+  }
 
   createWindow();
 
@@ -195,4 +235,8 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
+});
+
+app.on('before-quit', () => {
+  _apiServer?.stop().catch(console.error);
 });

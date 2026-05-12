@@ -42,9 +42,14 @@ TradeAnalyzer/
       services/            ← watchlist-service.ts, csv.ts (Phase 1); screener-service.ts,
                              constituents-service.ts, polygon-provider.ts, cache-service.ts,
                              fundamentals-computer.ts, logger.ts (Phase 2); analysis-service.ts,
-                             rate-limiter.ts, job-queue.ts, validate-all-service.ts (Phase 3)
+                             rate-limiter.ts, job-queue.ts, validate-all-service.ts (Phase 3);
+                             agent-db-service.ts (v0.12.0 — read-only access to TraderAgent DB)
+      api-server.ts        ← ApiServer class (Phase 11); token/port file management
+      api/                 ← REST route modules (Phase 11): routes-health, routes-watchlists,
+                             routes-screener, routes-analysis, routes-validation, routes-options,
+                             routes-quotes, routes-fundamentals, routes-jobs, routes-settings, helpers
       ipc/                 ← ipc-watchlists.ts (Phase 1), ipc-screener.ts (Phase 2),
-                             ipc-analysis.ts (Phase 3)
+                             ipc-analysis.ts (Phase 3), ipc-agent.ts (v0.12.0)
     preload/               ← context-isolated bridge: exposes window.api.* (Phase 1–3)
       index.ts
     renderer/              ← React UI
@@ -57,6 +62,7 @@ TradeAnalyzer/
           WatchlistView.tsx (Phase 1 — merged into App)
           ScreenerView.tsx  (Phase 2)
           AnalysisView.tsx  (Phase 3)
+          AgentView.tsx     (v0.12.0)
           screener-filters.ts (Phase 2)
         styles.css
     shared/                ← types shared between main and renderer
@@ -159,6 +165,10 @@ Authoritative DDL is in `migrations/001_init.sql` + `002_screen_schema.sql`. Pha
 - **Phase 3 fake timer tests** use `flushTimersUntil()` helper with polling loop (`vi.advanceTimersByTime` + `await Promise.resolve()`) since `vi.runAllTimers()` alone doesn't drain the promise chain in the rate limiter.
 
 ## Recent Changes
+
+- **v0.12.0 (2026-05-11)** — TraderAgent UI integration. New `🤖 Agent` tab in sidebar. `AgentDbService` opens TraderAgent's SQLite in read-only mode. IPC handlers (`ipc-agent.ts`): `agent:get-status`, `agent:get-trades`, `agent:get-lessons`, `agent:get-recommendations`, `agent:get-memory`, `agent:run-phase` (spawns agent CLI + streams stdout/stderr to renderer via `agent:log` events), `agent:close-trade`, `agent:open-db`. `AgentView.tsx`: Overview (stat cards + memory weight bars), Trades table (filterable open/closed/all), Lessons, Recommendations, Memory (bar charts), and Run phase panel with log stream. Settings extended with `agentDbPath` + `agentProjectPath`. `window.api.agent.*` preload bridge. See `changelogs/v0.12.0_2026-05-11.md`.
+
+- **v0.11.0 (2026-05-11)** — Phase 11: Local HTTP API Server. Fastify server (`ApiServer`) on `127.0.0.1:7432` (configurable). Token auth via `~/.tradeanalyzer/agent.token`. Headless mode (`TRADEANALYZER_HEADLESS=1`). 10 route modules under `src/main/api/` covering all service groups. Unified `{ ok, data|error }` response contract. Port written to `~/.tradeanalyzer/api.port`. `fastify@^5.8.5` added to dependencies. See `changelogs/v0.11.0_2026-05-11.md`.
 
 - **v0.10.0 (2026-05-08)** — Phase 10: Settings Enhancements (Priority 9). Extended AppSettings with soundAlertsEnabled, autoConnectWebSocket, defaultScreenerIndex, theme ('dark'|'light'), keyboardShortcuts config. Added Keyboard Shortcuts tab with 5 configurable shortcuts. Theme support via CSS variables (data-theme attribute). Conditional WebSocket auto-connect based on setting. ScreenerView uses default universe from settings. See `changelogs/v0.10.0_2026-05-08.md`.
 

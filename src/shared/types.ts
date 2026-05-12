@@ -485,6 +485,74 @@ export interface AppSettings {
   defaultScreenerIndex: 'sp500' | 'russell1000' | 'both';
   theme: 'dark' | 'light';
   keyboardShortcuts: KeyboardShortcutsConfig;
+  // v0.12.0: TraderAgent integration
+  agentDbPath: string;
+  agentProjectPath: string;
+}
+
+// ─── TraderAgent (v0.12.0) ─────────────────────────────────────────────────────
+
+export interface AgentTrade {
+  id: number;
+  ticker: string;
+  mode: string;
+  strategy: string;
+  strike: number;
+  expiration: string;
+  dteAtEntry: number;
+  entryPremium: number;
+  capitalRequired: number;
+  compositeScore: number;
+  rankAtEntry: number;
+  rationale: string;
+  status: 'open' | 'closed' | 'expired';
+  entryDate: string;
+  closeDate: string | null;
+  actualPl: number | null;
+  closeReason: string | null;
+  targetPl: number | null;
+  maxLoss: number | null;
+  annualizedReturn: number | null;
+}
+
+export interface AgentLesson {
+  id: number;
+  tradeId: number;
+  gapCause: string;
+  gapAmountUsd: number;
+  gapPct: number;
+  narrative: string;
+  createdAt: string;
+}
+
+export interface AgentRecommendation {
+  id: number;
+  category: string;
+  severity: string;
+  description: string;
+  proposedChange: string;
+  status: string;
+  createdAt: string;
+}
+
+export interface AgentMemorySnapshot {
+  id: number;
+  weights: Record<string, number>;
+  winRateByMode: Record<string, number>;
+  tradeCount: number;
+  confidence: number;
+  topLessons: string[];
+  savedAt: string;
+}
+
+export interface AgentStatus {
+  dbExists: boolean;
+  openTrades: number;
+  closedTrades: number;
+  totalPl: number;
+  winRate: number;
+  lastRunAt: string | null;
+  confidence: number;
 }
 
 export interface KeyboardShortcutsConfig {

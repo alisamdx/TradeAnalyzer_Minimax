@@ -27,7 +27,12 @@ import type {
   CacheStats,
   OptionsChainExpirationSummary,
   OptionsChainViewData,
-  OptionContract
+  OptionContract,
+  AgentStatus,
+  AgentTrade,
+  AgentLesson,
+  AgentRecommendation,
+  AgentMemorySnapshot
 } from '@shared/types.js';
 export type {
   ScreenPreset, ScreenCriteria, ScreenRunResult, ScreenResultRow, Universe,
@@ -648,8 +653,33 @@ function buildApi() {
       invoke<OptionsChainViewData>('options:get-chain', ticker, expiration)
   };
 
+  const agent = {
+    openDb: (dbPath: string) => invoke<boolean>('agent:open-db', dbPath),
+    closeDb: () => invoke<boolean>('agent:close-db'),
+    getStatus: () => invoke<AgentStatus>('agent:get-status'),
+    getTrades: (statusFilter?: 'open' | 'closed' | 'all') =>
+      invoke<AgentTrade[]>('agent:get-trades', statusFilter),
+    getLessons: (limit?: number) => invoke<AgentLesson[]>('agent:get-lessons', limit),
+    getRecommendations: () => invoke<AgentRecommendation[]>('agent:get-recommendations'),
+    getMemory: () => invoke<AgentMemorySnapshot | null>('agent:get-memory'),
+    runPhase: (phase: string, projectPath: string) =>
+      invoke<{ pid: number; phase: string }>('agent:run-phase', phase, projectPath),
+    closeTrade: (tradeId: number, reason: string, projectPath: string) =>
+      invoke<{ pid: number; tradeId: number }>('agent:close-trade', tradeId, reason, projectPath),
+    onLog: (callback: (data: { pid: number; phase: string; line: string }) => void) => {
+      const handler = (_: unknown, data: { pid: number; phase: string; line: string }) => callback(data);
+      ipcRenderer.on('agent:log', handler);
+      return () => ipcRenderer.removeListener('agent:log', handler);
+    },
+    onPhaseDone: (callback: (data: { pid: number; phase: string; code: number | null }) => void) => {
+      const handler = (_: unknown, data: { pid: number; phase: string; code: number | null }) => callback(data);
+      ipcRenderer.on('agent:phase-done', handler);
+      return () => ipcRenderer.removeListener('agent:phase-done', handler);
+    }
+  };
+
   return {
-    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, websocket, historical, portfolio, briefing, alerts, optionsChain },
+    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, websocket, historical, portfolio, briefing, alerts, optionsChain, agent },
     dialog: {
       prompt: (opts: { title: string; defaultValue?: string }) =>
         invoke<string | null>('dialog:prompt', opts),

@@ -41,6 +41,9 @@ export interface AppSettings {
     openPortfolio: string;
     openBriefing: string;
   };
+  // v0.12.0: TraderAgent integration
+  agentDbPath: string;
+  agentProjectPath: string;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -64,7 +67,10 @@ const DEFAULT_SETTINGS: AppSettings = {
     openScreener: 'Ctrl+Shift+S',
     openPortfolio: 'Ctrl+Shift+P',
     openBriefing: 'Ctrl+Shift+B'
-  }
+  },
+  // v0.12.0 defaults — user can override in Settings → Agent
+  agentDbPath: '',
+  agentProjectPath: ''
 };
 
 export function registerSettingsIpc(
@@ -115,6 +121,8 @@ export function registerSettingsIpc(
               settings.keyboardShortcuts = DEFAULT_SETTINGS.keyboardShortcuts;
             }
           }
+          else if (k === 'agentDbPath') settings.agentDbPath = v ?? '';
+          else if (k === 'agentProjectPath') settings.agentProjectPath = v ?? '';
         }
       }
       return ok(settings);

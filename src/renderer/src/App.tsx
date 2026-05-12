@@ -17,10 +17,11 @@ import { showPromptDialog } from './utils/promptDialog.js';
 
 import { DataView } from './views/DataView.js';
 import { OptionsChainView } from './views/OptionsChainView.js';
+import { AgentView } from './views/AgentView.js';
 
 declare const __APP_VERSION__: string;
 
-type View = 'watchlists' | 'screener' | 'analysis' | 'validate' | 'portfolio' | 'briefing' | 'settings' | 'alerts' | 'data' | 'optionsChain';
+type View = 'watchlists' | 'screener' | 'analysis' | 'validate' | 'portfolio' | 'briefing' | 'settings' | 'alerts' | 'data' | 'optionsChain' | 'agent';
 
 export function App() {
   const [view, setView] = useState<View>('watchlists');
@@ -532,6 +533,12 @@ export function App() {
             💼 Portfolio
           </button>
           <button
+            className={`nav-btn ${view === 'agent' ? 'active' : ''}`}
+            onClick={() => setView('agent')}
+          >
+            🤖 Agent
+          </button>
+          <button
             className={`nav-btn ${view === 'watchlists' ? 'active' : ''}`}
             onClick={() => setView('watchlists')}
           >
@@ -581,6 +588,7 @@ export function App() {
         {view === 'alerts' && <AlertsView />}
         {view === 'data' && <DataView />}
         {view === 'optionsChain' && <OptionsChainView initialTicker={optionsChainTicker} clearInitialTicker={() => setOptionsChainTicker(null)} />}
+        {view === 'agent' && <AgentView />}
         {view === 'settings' && <SettingsView />}
 
         {view === 'watchlists' && !active ? (
