@@ -32,7 +32,8 @@ import type {
   AgentTrade,
   AgentLesson,
   AgentRecommendation,
-  AgentMemorySnapshot
+  AgentMemorySnapshot,
+  AgentConfig
 } from '@shared/types.js';
 export type {
   ScreenPreset, ScreenCriteria, ScreenRunResult, ScreenResultRow, Universe,
@@ -666,6 +667,12 @@ function buildApi() {
       invoke<{ pid: number; phase: string }>('agent:run-phase', phase, projectPath),
     closeTrade: (tradeId: number, reason: string, projectPath: string) =>
       invoke<{ pid: number; tradeId: number }>('agent:close-trade', tradeId, reason, projectPath),
+    readConfig: (projectPath: string) => invoke<AgentConfig>('agent:read-config', projectPath),
+    writeConfig: (projectPath: string, config: AgentConfig) =>
+      invoke<boolean>('agent:write-config', projectPath, config),
+    sendPositionsEmail: (projectPath: string) =>
+      invoke<{ sent: number }>('agent:send-positions-email', projectPath),
+    deleteTrade: (id: number) => invoke<true>('agent:delete-trade', id),
     onLog: (callback: (data: { pid: number; phase: string; line: string }) => void) => {
       const handler = (_: unknown, data: { pid: number; phase: string; line: string }) => callback(data);
       ipcRenderer.on('agent:log', handler);

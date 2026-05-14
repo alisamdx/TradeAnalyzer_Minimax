@@ -513,6 +513,8 @@ export interface AgentTrade {
   targetPl: number | null;
   maxLoss: number | null;
   annualizedReturn: number | null;
+  entryPrice: number | null;
+  lastPrice: number | null;
 }
 
 export interface AgentLesson {
@@ -553,6 +555,38 @@ export interface AgentStatus {
   winRate: number;
   lastRunAt: string | null;
   confidence: number;
+}
+
+export interface AgentConfig {
+  // Connection
+  apiUrl: string;
+  agentDbPath: string;
+  // Capital & Risk
+  cashBalance: number;
+  maxPositionPct: number;
+  maxPositions: number;
+  maxPositionsPerSector: number;
+  kellyFraction: number;
+  // Trade Filters
+  dteMin: number;
+  dteMax: number;
+  deltaMin: number;
+  deltaMax: number;
+  minIvRank: number;
+  minOi: number;
+  maxBidAskPct: number;
+  minAnnualizedReturn: number;
+  earningsExclusionDays: number;
+  // Universe
+  screenerUniverse: 'sp500' | 'russell1000' | 'both';
+  preferredModes: string;
+  // Email / Notifications
+  emailList: string;
+  smtpHost: string;
+  smtpPort: number;
+  smtpUser: string;
+  smtpPass: string;
+  smtpFrom: string;
 }
 
 export interface KeyboardShortcutsConfig {

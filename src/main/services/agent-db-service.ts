@@ -17,6 +17,7 @@ interface TradeRow {
   actual_pl: number | null; close_reason: string | null;
   target_pl: number | null; max_loss: number | null;
   annualized_return: number | null;
+  entry_price: number | null; last_price: number | null;
 }
 
 interface LessonRow {
@@ -100,12 +101,20 @@ export class AgentDbService {
       ? "WHERE t.status IN ('closed','expired')"
       : '';
 
+    // Detect whether the v2 price-tracking columns exist (added by migration 002)
+    const cols = (this.db.prepare('PRAGMA table_info(agent_trades)').all() as Array<{ name: string }>).map((c) => c.name);
+    const hasPriceCols = cols.includes('entry_price');
+    const priceSelect = hasPriceCols
+      ? 't.entry_price, t.last_price'
+      : 'NULL AS entry_price, NULL AS last_price';
+
     const rows = this.db.prepare(`
       SELECT t.id, t.ticker, t.mode, t.strategy, t.strike, t.expiration,
              t.dte_at_entry, t.entry_premium, t.capital_required,
              t.composite_score, t.rank_at_entry, t.rationale,
              t.status, t.entry_date, t.close_date, t.actual_pl, t.close_reason,
-             p.target_pl, p.max_loss, p.annualized_return
+             p.target_pl, p.max_loss, p.annualized_return,
+             ${priceSelect}
       FROM agent_trades t
       LEFT JOIN agent_trade_projections p ON p.trade_id = t.id
       ${where}
@@ -120,7 +129,8 @@ export class AgentDbService {
       rationale: r.rationale, status: r.status as AgentTrade['status'],
       entryDate: r.entry_date, closeDate: r.close_date,
       actualPl: r.actual_pl, closeReason: r.close_reason,
-      targetPl: r.target_pl, maxLoss: r.max_loss, annualizedReturn: r.annualized_return
+      targetPl: r.target_pl, maxLoss: r.max_loss, annualizedReturn: r.annualized_return,
+      entryPrice: r.entry_price, lastPrice: r.last_price
     }));
   }
 
@@ -146,6 +156,25 @@ export class AgentDbService {
       description: r.description, proposedChange: r.proposed_change,
       status: r.status, createdAt: r.created_at
     }));
+  }
+
+  deleteTrade(id: number): void {
+    if (!this.dbPath) throw new Error('No database open');
+    // Open a separate writable connection — the main handle is readonly
+    const writeDb = new Database(this.dbPath);
+    try {
+      writeDb.transaction(() => {
+        writeDb.prepare('DELETE FROM agent_trade_alerts WHERE trade_id = ?').run(id);
+        writeDb.prepare('DELETE FROM agent_trade_events WHERE trade_id = ?').run(id);
+        writeDb.prepare('DELETE FROM agent_trade_projections WHERE trade_id = ?').run(id);
+        writeDb.prepare('DELETE FROM agent_trade_inputs WHERE trade_id = ?').run(id);
+        writeDb.prepare('DELETE FROM agent_lessons WHERE trade_id = ?').run(id);
+        const result = writeDb.prepare('DELETE FROM agent_trades WHERE id = ?').run(id);
+        if (result.changes === 0) throw new Error(`Trade #${id} not found`);
+      })();
+    } finally {
+      writeDb.close();
+    }
   }
 
   getMemory(): AgentMemorySnapshot | null {

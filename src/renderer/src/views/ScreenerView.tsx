@@ -44,6 +44,16 @@ function defaultCriteria(universe: Universe): ScreenCriteria {
 
 const ITEMS_PER_PAGE = 50;
 
+const PRICE_BUCKETS = [
+  { name: '1-Under-50',  min: 0,   max: 50  },
+  { name: '2-50-100',    min: 50,  max: 100 },
+  { name: '3-100-150',   min: 100, max: 150 },
+  { name: '4-150-200',   min: 150, max: 200 },
+  { name: '5-200-250',   min: 200, max: 250 },
+  { name: '6-250-300',   min: 250, max: 300 },
+  { name: '7-Above-300', min: 300, max: Infinity },
+] as const;
+
 function fmt(v: number | null, prefix = '', suffix = ''): string {
   if (v === null) return '—';
   return `${prefix}${v.toLocaleString(undefined, { maximumFractionDigits: 2 })}${suffix}`;
@@ -68,8 +78,8 @@ function formatLargeNumber(value: number | null): string {
 export function ScreenerView() {
   const [presets, setPresets] = useState<ScreenPreset[]>([]);
   const [activePresetId, setActivePresetId] = useState<number | null>(null);
-  const [criteria, setCriteria] = useState<ScreenCriteria>(() => defaultCriteria('sp500'));
-  const [universe, setUniverse] = useState<Universe>('sp500');
+  const [criteria, setCriteria] = useState<ScreenCriteria>(() => defaultCriteria('both'));
+  const [universe, setUniverse] = useState<Universe>('both');
   const [mode, setMode] = useState<'strict' | 'soft'>('strict');
   const [runs, setRuns] = useState<ScreenRunResult[]>([]);
   const [activeRunId, setActiveRunId] = useState<number | null>(null);
@@ -83,6 +93,8 @@ export function ScreenerView() {
   const [cacheStatus, setCacheStatus] = useState<CacheStatus | null>(null);
   const [watchlists, setWatchlists] = useState<{ id: number; name: string }[]>([]);
   const [showAddToWatchlist, setShowAddToWatchlist] = useState<number | null>(null);
+  const [creatingPriceWls, setCreatingPriceWls] = useState(false);
+  const [priceWlMsg, setPriceWlMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
   const isRunningRef = useRef(false);
 
   // Load presets + runs + meta + cache status + default universe on mount.
@@ -90,14 +102,13 @@ export function ScreenerView() {
     // Load default screener index from settings
     window.api.settings.getAll()
       .then((settings) => {
-        const defaultUniverse = settings.defaultScreenerIndex || 'sp500';
+        const defaultUniverse = settings.defaultScreenerIndex || 'both';
         setUniverse(defaultUniverse);
         setCriteria(defaultCriteria(defaultUniverse));
       })
       .catch(() => {
-        // Fallback to sp500
-        setUniverse('sp500');
-        setCriteria(defaultCriteria('sp500'));
+        setUniverse('both');
+        setCriteria(defaultCriteria('both'));
       });
 
     window.api.screen.listPresets()
@@ -261,7 +272,7 @@ export function ScreenerView() {
     setResults([]);
     setCurrentPage(1);
     try {
-      const response = await window.api.screen.run({ ...criteria, universe });
+      const response = await window.api.screen.run({ ...criteria, universe, mode });
       setResults(response.rows);
       setActiveRunId(response.runId);
       const universeName = universe === 'both' ? 'Both' : universe.toUpperCase();
@@ -300,6 +311,52 @@ export function ScreenerView() {
     setStatusMsg(`Opening analysis view...`);
     window.dispatchEvent(new CustomEvent('navigate-to-analysis', { detail: { ticker } }));
   }, []);
+
+  // ── Create watchlists by price range ──────────────────────────────────────
+
+  const handleCreateWatchlistsByPrice = useCallback(async () => {
+    if (results.length === 0) return;
+    setCreatingPriceWls(true);
+    setPriceWlMsg(null);
+    try {
+      const existingWls = await window.api.watchlists.list();
+      let totalTickers = 0;
+
+      for (const bucket of PRICE_BUCKETS) {
+        const tickers = results
+          .filter((r) => {
+            const price = r.payload.lastPrice ?? r.payload.price;
+            if (price == null) return false;
+            return price >= bucket.min && (bucket.max === Infinity ? true : price < bucket.max);
+          })
+          .map((r) => r.ticker);
+
+        // Find or create the watchlist for this bucket
+        let wl = existingWls.find((w) => w.name === bucket.name) ?? null;
+        if (wl) {
+          // Clear existing items
+          const items = await window.api.watchlists.items.list(wl.id);
+          if (items.length > 0) {
+            await window.api.watchlists.items.remove(wl.id, items.map((i) => i.id));
+          }
+        } else {
+          wl = await window.api.watchlists.create(bucket.name);
+        }
+
+        if (tickers.length > 0) {
+          await window.api.watchlists.items.addBulk(wl.id, tickers.map((t) => ({ ticker: t })));
+          totalTickers += tickers.length;
+        }
+      }
+
+      window.dispatchEvent(new CustomEvent('watchlist-created'));
+      setPriceWlMsg({ type: 'ok', text: `Done — ${totalTickers} ticker${totalTickers !== 1 ? 's' : ''} distributed across 7 price watchlists.` });
+    } catch (e) {
+      setPriceWlMsg({ type: 'err', text: (e as Error).message });
+    } finally {
+      setCreatingPriceWls(false);
+    }
+  }, [results]);
 
   // ── Save as watchlist ─────────────────────────────────────────────────────
 
@@ -459,10 +516,10 @@ export function ScreenerView() {
           <div className="control-section">
             <h3>Mode</h3>
             <div className="mode-btns">
-              <button className={`mode-btn ${mode === 'strict' ? 'active' : ''}`} onClick={() => { setMode('strict'); setActivePresetId(null); }}>
+              <button className={`mode-btn ${mode === 'strict' ? 'active' : ''}`} onClick={() => { setMode('strict'); setCriteria(c => ({ ...c, mode: 'strict' })); setActivePresetId(null); }}>
                 Strict
               </button>
-              <button className={`mode-btn ${mode === 'soft' ? 'active' : ''}`} onClick={() => { setMode('soft'); setActivePresetId(null); }}>
+              <button className={`mode-btn ${mode === 'soft' ? 'active' : ''}`} onClick={() => { setMode('soft'); setCriteria(c => ({ ...c, mode: 'soft' })); setActivePresetId(null); }}>
                 Soft (rank)
               </button>
             </div>
@@ -496,7 +553,34 @@ export function ScreenerView() {
                       />
                       {spec.label}
                     </label>
-                    {f.enabled && (spec.format === 'percent' || spec.format === 'ratio' || spec.format === 'dollars' || spec.format === 'count') && (
+                    {f.enabled && f.id === 'price' && (
+                      <div className="filter-range">
+                        <select
+                          value={max === Infinity ? '300-inf' : `${min}-${max}`}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            const [minStr, maxStr] = val.split('-');
+                            updateFilter(f.id, {
+                              value: {
+                                ...v,
+                                min: parseFloat(minStr!),
+                                max: maxStr === 'inf' ? Infinity : parseFloat(maxStr!)
+                              }
+                            });
+                          }}
+                          style={{ fontSize: 12 }}
+                        >
+                          <option value="0-50">$0 – $50</option>
+                          <option value="50-100">$50 – $100</option>
+                          <option value="100-150">$100 – $150</option>
+                          <option value="150-200">$150 – $200</option>
+                          <option value="200-250">$200 – $250</option>
+                          <option value="250-300">$250 – $300</option>
+                          <option value="300-inf">Above $300</option>
+                        </select>
+                      </div>
+                    )}
+                    {f.enabled && f.id !== 'price' && (spec.format === 'percent' || spec.format === 'ratio' || spec.format === 'dollars' || spec.format === 'count') && (
                       <div className="filter-range">
                         <input
                           type="number"
@@ -594,7 +678,27 @@ export function ScreenerView() {
                 >
                   Save as Watchlist ({selected.size})
                 </button>
+                <button
+                  onClick={handleCreateWatchlistsByPrice}
+                  disabled={creatingPriceWls || results.length === 0}
+                  className="tiny-btn"
+                  style={{ marginLeft: 8 }}
+                  title="Sort all results into 7 watchlists by price range (1-Under-50, 2-50-100, …, 7-Above-300)"
+                >
+                  {creatingPriceWls ? '⟳ Working…' : '📊 Create Watchlists by Price'}
+                </button>
               </div>
+              {priceWlMsg && (
+                <div style={{
+                  margin: '6px 0', padding: '6px 10px', borderRadius: 4, fontSize: 12,
+                  background: priceWlMsg.type === 'ok' ? '#1a3a2a' : '#3a1a1a',
+                  color: priceWlMsg.type === 'ok' ? '#2ecc71' : '#e74c3c',
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+                }}>
+                  {priceWlMsg.text}
+                  <span style={{ cursor: 'pointer', marginLeft: 12 }} onClick={() => setPriceWlMsg(null)}>✕</span>
+                </div>
+              )}
 
               <div className="results-table-wrap">
                 <table className="results-table">
