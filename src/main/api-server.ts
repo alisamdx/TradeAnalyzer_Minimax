@@ -72,28 +72,31 @@ export class ApiServer {
   private registerRoutes() {
     const { fastify, svc } = this;
 
-    // Token auth — all routes except /health require Bearer token
+    // Token auth hook — runs before every request.
+    // /api/v1/health is public; everything else requires X-Agent-Token.
     fastify.addHook('onRequest', async (req, reply) => {
-      if (req.url === '/health') return;
-      const auth = req.headers['authorization'] ?? '';
-      const bearer = auth.startsWith('Bearer ') ? auth.slice(7) : '';
-      if (bearer !== this.token) {
+      if (req.url === '/api/v1/health') return;
+      const token = req.headers['x-agent-token'] ?? '';
+      if (token !== this.token) {
         reply.code(401).send({ ok: false, error: 'Unauthorized', code: 'UNAUTHORIZED' });
       }
     });
 
     const getUptime = () => (Date.now() - this.startTime) / 1000;
 
-    registerHealthRoutes(fastify, svc, getUptime);
-    registerWatchlistRoutes(fastify, svc);
-    registerQuotesRoutes(fastify, svc);
-    registerScreenerRoutes(fastify, svc);
-    registerAnalysisRoutes(fastify, svc);
-    registerValidationRoutes(fastify, svc);
-    registerFundamentalsRoutes(fastify, svc);
-    registerOptionsRoutes(fastify, svc);
-    registerJobsRoutes(fastify, svc);
-    registerSettingsRoutes(fastify, svc);
+    // Register all routes under /api/v1 prefix to match the TraderAgent client
+    fastify.register(async (app) => {
+      registerHealthRoutes(app, svc, getUptime);
+      registerWatchlistRoutes(app, svc);
+      registerQuotesRoutes(app, svc);
+      registerScreenerRoutes(app, svc);
+      registerAnalysisRoutes(app, svc);
+      registerValidationRoutes(app, svc);
+      registerFundamentalsRoutes(app, svc);
+      registerOptionsRoutes(app, svc);
+      registerJobsRoutes(app, svc);
+      registerSettingsRoutes(app, svc);
+    }, { prefix: '/api/v1' });
   }
 
   async start(port: number): Promise<void> {
