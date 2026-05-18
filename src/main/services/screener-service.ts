@@ -198,6 +198,7 @@ export class ScreenerService {
             dayLow: snapshot.dayLow,
             ivRank: snapshot.ivRank,
             ivPercentile: snapshot.ivPercentile,
+            currentIv: null,
             distance52WkHigh: snapshot.distance52WkHigh,
             distance52WkLow: snapshot.distance52WkLow,
             fetchedAt: snapshot.fetchedAt
@@ -269,7 +270,7 @@ export class ScreenerService {
     } else {
       quote = { ticker, last: null, prevClose: null, bid: null, ask: null,
         volume: null, dayHigh: null, dayLow: null, ivRank: null, ivPercentile: null,
-        distance52WkHigh: null, distance52WkLow: null, fetchedAt: '' };
+        currentIv: null, distance52WkHigh: null, distance52WkLow: null, fetchedAt: '' };
     }
 
     const price = quote?.last ?? null;

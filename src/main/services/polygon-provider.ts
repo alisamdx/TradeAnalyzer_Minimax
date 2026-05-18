@@ -177,6 +177,7 @@ export class PolygonDataProvider implements DataProvider {
       dayLow: day?.l ?? null,
       ivRank: null,
       ivPercentile: null,
+      currentIv: null,
       distance52WkHigh: null,
       distance52WkLow: null,
       fetchedAt: new Date().toISOString()

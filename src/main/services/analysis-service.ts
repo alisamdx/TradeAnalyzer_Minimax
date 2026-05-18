@@ -438,6 +438,7 @@ export class AnalysisService {
       bid: snap.bid ?? null, ask: snap.ask ?? null, volume: snap.volume ?? null,
       dayHigh: snap.dayHigh ?? null, dayLow: snap.dayLow ?? null,
       ivRank: snap.ivRank ?? null, ivPercentile: snap.ivPercentile ?? null,
+      currentIv: null,
       fetchedAt: new Date().toISOString() };
     try { this.quoteCache.upsert(q); } catch { /* best effort */ }
     return q;

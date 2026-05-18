@@ -21,6 +21,7 @@ const SAMPLE_QUOTE = {
   dayLow: 177.50,
   ivRank: 45,
   ivPercentile: 38,
+  currentIv: null,
   fetchedAt: new Date().toISOString()
 };
 

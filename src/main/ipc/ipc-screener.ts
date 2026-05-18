@@ -212,7 +212,7 @@ export function registerScreenerIpc(
           } catch { /* IV unavailable for this ticker */ }
 
           // Calculate wheel metrics
-          const wheelMetrics = calculateWheelMetrics(ratios, snapshot);
+          const wheelMetrics = calculateWheelMetrics(ratios, { ...snapshot, currentIv });
 
           const cached: QuoteWithWheel = {
             ticker,

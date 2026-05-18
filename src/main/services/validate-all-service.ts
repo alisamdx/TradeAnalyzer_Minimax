@@ -60,7 +60,7 @@ export class ValidateAllService {
     await this.rateLimiter.acquire(1);
 
     // Fetch quote - required but handle failures gracefully
-    let quote: Quote = { ticker, last: null, prevClose: null, bid: null, ask: null, volume: null, dayHigh: null, dayLow: null, ivRank: null, ivPercentile: null, distance52WkHigh: null, distance52WkLow: null, fetchedAt: new Date().toISOString() };
+    let quote: Quote = { ticker, last: null, prevClose: null, bid: null, ask: null, volume: null, dayHigh: null, dayLow: null, ivRank: null, ivPercentile: null, currentIv: null, distance52WkHigh: null, distance52WkLow: null, fetchedAt: new Date().toISOString() };
     try {
       const fetched = await this.fetchQuote(ticker);
       quote = { ...quote, ...fetched };
@@ -167,6 +167,7 @@ export class ValidateAllService {
       bid: snap.bid ?? null, ask: snap.ask ?? null, volume: snap.volume ?? null,
       dayHigh: snap.dayHigh ?? null, dayLow: snap.dayLow ?? null,
       ivRank: snap.ivRank ?? null, ivPercentile: snap.ivPercentile ?? null,
+      currentIv: null,
       distance52WkHigh: snap.distance52WkHigh ?? null, distance52WkLow: snap.distance52WkLow ?? null,
       fetchedAt: new Date().toISOString() };
     try { this.quoteCache.upsert(q); } catch { /* best effort */ }

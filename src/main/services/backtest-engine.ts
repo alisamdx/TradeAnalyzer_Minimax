@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3';
 import type { BacktestConfig, BacktestTrade, BacktestProgressEvent } from '@shared/types.js';
 import { computeMetrics, type EquityPoint } from './backtest-metrics.js';
 
-type DbHandle = ReturnType<typeof import('better-sqlite3').default>;
+type DbHandle = Database.Database;
 
 interface PriceBar { date: string; open: number; high: number; low: number; close: number; volume: number }
 

@@ -46,7 +46,8 @@ echo ==========================================
 echo.
 
 :: Set environment and start
-cmd /c "set ELECTRON_RUN_AS_NODE=&& electron-vite dev"
+set ELECTRON_RUN_AS_NODE=
+call npx electron-vite dev
 
 if errorlevel 1 (
     echo.
