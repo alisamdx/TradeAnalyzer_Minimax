@@ -135,6 +135,18 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
   const [showBB, setShowBB] = useState(true);
   const [showRSI, setShowRSI] = useState(true);
   const [showMACD, setShowMACD] = useState(true);
+  const [buySignalFilter, setBuySignalFilter] = useState<'all' | 'none' | 'moderate' | 'strong'>('all');
+  const [tickerSignals, setTickerSignals] = useState<Record<string, 'strong' | 'moderate' | 'none'>>({});
+  const [scanningSignals, setScanningSignals] = useState(false);
+  const [scanProgress, setScanProgress] = useState<{ done: number; total: number } | null>(null);
+
+  // Stream per-ticker signals from Validate All runs.
+  useEffect(() => {
+    return window.api.validate.onTickerSignal(({ ticker, strength }) => {
+      setTickerSignals(prev => ({ ...prev, [ticker]: strength }));
+      setScanProgress(prev => prev ? { ...prev, done: prev.done + 1 } : null);
+    });
+  }, []);
 
   // Load watchlists on mount.
   useEffect(() => {
@@ -146,6 +158,8 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
   // Load tickers when watchlist changes.
   useEffect(() => {
     if (!selectedWatchlistId) { setTickers([]); setSelectedTicker(null); return; }
+    setTickerSignals({});
+    setBuySignalFilter('all');
     window.api.validate.getTickers(selectedWatchlistId)
       .then(setTickers)
       .catch(() => setTickers([]));
@@ -160,6 +174,7 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
     try {
       const data = await window.api.validate.openTickerById({ ticker });
       setResult(data);
+      setTickerSignals(prev => ({ ...prev, [ticker]: data.indicators.buySignalStrength }));
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -223,6 +238,20 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
     setIsValidatingAll(false);
     setValidateProgress(null);
   }, []);
+
+  const scanAllSignals = useCallback(async () => {
+    if (!selectedWatchlistId || scanningSignals) return;
+    setScanningSignals(true);
+    setScanProgress({ done: 0, total: tickers.length });
+    try {
+      await window.api.validate.runValidateAll(selectedWatchlistId);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setScanningSignals(false);
+      setScanProgress(null);
+    }
+  }, [selectedWatchlistId, tickers.length, scanningSignals]);
 
   // ── Chart ──────────────────────────────────────────────────────────────────
 
@@ -853,23 +882,75 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
             </div>
           )}
 
-          <ul className="ticker-list">
-            {tickers.map((item) => (
-              <li
-                key={item.ticker}
-                className={`ticker-item ${selectedTicker === item.ticker ? 'active' : ''}`}
-                onClick={() => loadTicker(item.ticker)}
-              >
-                <div className="ticker-info">
-                  <span className="ticker-symbol">{item.ticker}</span>
-                  {item.name && <span className="ticker-name">{item.name}</span>}
+          {tickers.length > 0 && (
+            <div className="buy-signal-filter">
+              <div className="signal-filter-row">
+                {(['all', 'strong', 'moderate', 'none'] as const).map(opt => (
+                  <button
+                    key={opt}
+                    className={`signal-filter-btn ${buySignalFilter === opt ? 'active' : ''} ${opt !== 'all' ? `signal-filter-${opt}` : ''}`}
+                    onClick={() => setBuySignalFilter(opt)}
+                  >
+                    {opt === 'all' ? 'All' : opt.charAt(0).toUpperCase() + opt.slice(1)}
+                  </button>
+                ))}
+                <button
+                  className="signal-scan-btn"
+                  onClick={scanAllSignals}
+                  disabled={scanningSignals || isValidatingAll}
+                  title="Calculate buy signals for all tickers in this watchlist"
+                >
+                  {scanningSignals ? '…' : '⟳'}
+                </button>
+              </div>
+              {scanProgress && (
+                <div className="signal-scan-progress">
+                  Scanning {scanProgress.done}/{scanProgress.total}…
                 </div>
-                <span className="verdict-dot" title="Refresh to load verdict" />
-              </li>
-            ))}
+              )}
+            </div>
+          )}
+
+          <ul className="ticker-list">
+            {tickers
+              .filter(item => {
+                if (buySignalFilter === 'all') return true;
+                const sig = tickerSignals[item.ticker];
+                if (!sig) return false;
+                return sig === buySignalFilter;
+              })
+              .map((item) => {
+                const sig = tickerSignals[item.ticker];
+                return (
+                  <li
+                    key={item.ticker}
+                    className={`ticker-item ${selectedTicker === item.ticker ? 'active' : ''}`}
+                    onClick={() => loadTicker(item.ticker)}
+                  >
+                    <div className="ticker-info">
+                      <span className="ticker-symbol">{item.ticker}</span>
+                      {item.name && <span className="ticker-name">{item.name}</span>}
+                    </div>
+                    {sig ? (
+                      <span className={`signal-pill signal-pill-${sig}`}>
+                        {sig === 'strong' ? '⬆' : sig === 'moderate' ? '↑' : '—'}
+                      </span>
+                    ) : (
+                      <span className="verdict-dot" title="Click to load buy signal" />
+                    )}
+                  </li>
+                );
+              })}
           </ul>
           {tickers.length === 0 && (
             <div className="empty-hint">Select a watchlist to see tickers.</div>
+          )}
+          {tickers.length > 0 && buySignalFilter !== 'all' && (
+            <div className="empty-hint">
+              {tickers.filter(t => tickerSignals[t.ticker] === buySignalFilter).length === 0
+                ? `No ${buySignalFilter} signals loaded yet — click tickers or run Validate All.`
+                : null}
+            </div>
           )}
         </aside>
 
@@ -943,9 +1024,6 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
                     return (
                       <>
                         <h2 style={{ color: priceColor }}>{result.ticker}</h2>
-                        {result.companyName && (
-                          <span className="company-name">{result.companyName}</span>
-                        )}
                         {result.chart.bars.length > 0 && (
                           <>
                             <span className="current-price" style={{ color: priceColor }}>
@@ -987,6 +1065,9 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
                               return null;
                             })()}
                           </>
+                        )}
+                        {result.companyName && (
+                          <span className="company-name">{result.companyName}</span>
                         )}
                       </>
                     );
@@ -1052,6 +1133,23 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
                         </span>
                       </div>
                     )}
+                    <div className={`trade-setup-item buy-signal-item ${result.indicators.buySignalStrength === 'strong' ? 'signal-strong' : result.indicators.buySignalStrength === 'moderate' ? 'signal-moderate' : ''}`}>
+                      <span className="trade-label" title="Buy Signal score (0–100) across 6 indicators: MACD crossover (20), RSI zone (20), Bollinger Band (15), candlestick pattern (20), demand zone proximity (15), trend alignment (10). Strong ≥60, Moderate ≥30.">
+                        Buy Signal
+                      </span>
+                      <span className="trade-value">
+                        {result.indicators.buySignalStrength === 'strong' ? '⬆ Strong' :
+                         result.indicators.buySignalStrength === 'moderate' ? '↑ Moderate' : '— None'}
+                        <span className="buy-signal-score"> {result.indicators.buySignalScore}/100</span>
+                      </span>
+                      {result.indicators.buySignalReasons.length > 0 && (
+                        <ul className="buy-signal-reasons">
+                          {result.indicators.buySignalReasons.map((r, i) => (
+                            <li key={i}>{r}</li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
                   </div>
                 )}
 
@@ -1302,6 +1400,9 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
                         <span className="meta"> (sig {fmtNum(result.indicators.macdSignal, 2)})</span>
                       )}
                     </span>
+                    {result.indicators.macdBullishCross && (
+                      <span className="ind-badge bullish-cross" title="MACD line crossed above signal line within the last 5 bars — bullish momentum shift">↑ Cross</span>
+                    )}
                   </div>
                   <div className="indicator-card">
                     <span className="ind-label" title="Bollinger Band Position. Where current price sits within the bands. 0% = at lower band, 100% = at upper band. Values near extremes suggest potential reversal.">BB Position</span>

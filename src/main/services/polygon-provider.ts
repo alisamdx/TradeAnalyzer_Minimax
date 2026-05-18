@@ -172,7 +172,7 @@ export class PolygonDataProvider implements DataProvider {
       prevClose,
       bid: null,  // Bid/ask not available in v2 snapshot endpoint
       ask: null,
-      volume: day?.v ?? null,
+      volume: (prev?.v && prev.v > 0 ? prev.v : null) ?? (day?.v && day.v > 0 ? day.v : null),
       dayHigh: day?.h ?? null,
       dayLow: day?.l ?? null,
       ivRank: null,

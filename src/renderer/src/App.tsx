@@ -18,10 +18,11 @@ import { showPromptDialog } from './utils/promptDialog.js';
 import { DataView } from './views/DataView.js';
 import { OptionsChainView } from './views/OptionsChainView.js';
 import { AgentView } from './views/AgentView.js';
+import { BacktestView } from './views/BacktestView.js';
 
 declare const __APP_VERSION__: string;
 
-type View = 'watchlists' | 'screener' | 'analysis' | 'validate' | 'portfolio' | 'briefing' | 'settings' | 'alerts' | 'data' | 'optionsChain' | 'agent';
+type View = 'watchlists' | 'screener' | 'analysis' | 'validate' | 'portfolio' | 'briefing' | 'settings' | 'alerts' | 'data' | 'optionsChain' | 'agent' | 'backtest';
 
 export function App() {
   const [view, setView] = useState<View>('watchlists');
@@ -539,6 +540,12 @@ export function App() {
             🤖 Agent
           </button>
           <button
+            className={`nav-btn ${view === 'backtest' ? 'active' : ''}`}
+            onClick={() => setView('backtest')}
+          >
+            🔁 Backtest
+          </button>
+          <button
             className={`nav-btn ${view === 'watchlists' ? 'active' : ''}`}
             onClick={() => setView('watchlists')}
           >
@@ -589,6 +596,7 @@ export function App() {
         {view === 'data' && <DataView />}
         {view === 'optionsChain' && <OptionsChainView initialTicker={optionsChainTicker} clearInitialTicker={() => setOptionsChainTicker(null)} />}
         {view === 'agent' && <AgentView />}
+        {view === 'backtest' && <BacktestView />}
         {view === 'settings' && <SettingsView />}
 
         {view === 'watchlists' && !active ? (

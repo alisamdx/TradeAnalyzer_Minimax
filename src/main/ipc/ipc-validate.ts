@@ -52,7 +52,7 @@ export function registerValidateIpc(
   ipcMain.handle(
     'validate:run-all',
     async (
-      _e,
+      e,
       args: { watchlistId: number }
     ): Promise<{ ok: true; value: ValidateAllResult } | { ok: false; error: { code: string; message: string } }> => {
       try {
@@ -60,8 +60,19 @@ export function registerValidateIpc(
         const tickers = items.map((i: import('@shared/types.js').WatchlistItem) => i.ticker);
         if (tickers.length === 0) return fail(new Error('No tickers to validate.'));
 
-        const results = await validateAllService.validateWatchlist(args.watchlistId, tickers);
-        void results;
+        const results = await validateAllService.validateWatchlist(
+          args.watchlistId,
+          tickers,
+          undefined,
+          (result) => {
+            e.sender.send('validate:ticker-signal', {
+              ticker: result.ticker,
+              strength: result.indicators.buySignalStrength,
+              score: result.indicators.buySignalScore,
+              reasons: result.indicators.buySignalReasons
+            });
+          }
+        );
 
         return ok({
           jobRunId: 0,

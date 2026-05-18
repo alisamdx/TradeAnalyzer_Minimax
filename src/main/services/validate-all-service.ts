@@ -107,7 +107,8 @@ export class ValidateAllService {
   async validateWatchlist(
     watchlistId: number,
     tickers: string[],
-    onProgress?: (current: number, total: number, ticker: string, status: string) => void
+    onProgress?: (current: number, total: number, ticker: string, status: string) => void,
+    onResult?: (result: ValidateDashboardResult) => void
   ): Promise<ValidateDashboardResult[]> {
     this.resetCancel();
     const jobRunId = this.jobQueue.enqueue('validate_all', tickers, watchlistId, {}).id;
@@ -127,6 +128,7 @@ export class ValidateAllService {
       try {
         const result = await this.validateTicker(ticker);
         results.push(result);
+        onResult?.(result);
         this.jobQueue.markPersisted(jobRunId, ticker);
         onProgress?.(i + 1, total, ticker, 'pass');
       } catch (err) {
@@ -309,6 +311,88 @@ export class ValidateAllService {
     if (supplyZone) supportZones.push(supplyZone);
     const entryZone = computeEntryZoneAndStop(bars as Bar[], trendLabel);
 
+    // ── Buy signal scoring (0–100) ────────────────────────────────────────────
+    // Signals: MACD crossover (20), MACD above zero (10), RSI zone (20),
+    // Bollinger (15), candlestick pattern (20), demand zone (15), trend (15).
+    // Strong ≥ 50, Moderate ≥ 25, None < 25.
+    let buyScore = 0;
+    const buySignalReasons: string[] = [];
+
+    // 1. MACD bullish crossover (20 pts): line crossed above signal within last 5 bars.
+    let macdBullishCross = false;
+    for (let i = Math.max(1, macd.length - 5); i < macd.length; i++) {
+      const pm = macd[i - 1]; const ps = macdSignalArr[i - 1];
+      const cm = macd[i];     const cs = macdSignalArr[i];
+      if (pm != null && ps != null && cm != null && cs != null && pm < ps && cm > cs) {
+        macdBullishCross = true; break;
+      }
+    }
+    if (macdBullishCross) { buyScore += 20; buySignalReasons.push('MACD bullish crossover'); }
+
+    // 2. MACD above zero line (10 pts): bullish momentum territory.
+    if (!macdBullishCross && macdValue !== null && macdValue > 0) {
+      buyScore += 10; buySignalReasons.push('MACD above zero (bullish momentum)');
+    }
+
+    // 3. RSI buy zone (up to 20 pts).
+    let rsiBuyZone: 'oversold_recovery' | 'neutral_momentum' | null = null;
+    if (rsi !== null) {
+      const recentRsi = rsiArr.slice(-11).filter((v): v is number => v != null);
+      const wasOversold = recentRsi.slice(0, -1).some(v => v < 30);
+      if (wasOversold && rsi > 30 && rsi < 65) {
+        rsiBuyZone = 'oversold_recovery';
+        buyScore += 20; buySignalReasons.push('RSI recovering from oversold (<30)');
+      } else if (rsi >= 35 && rsi <= 65) {
+        rsiBuyZone = 'neutral_momentum';
+        buyScore += 10; buySignalReasons.push('RSI in healthy range (35–65)');
+      }
+    }
+
+    // 4. Bollinger Band position (up to 15 pts): price near lower band = potential bounce.
+    if (bollingerPosition !== null) {
+      if (bollingerPosition < 15) {
+        buyScore += 15; buySignalReasons.push('Price near/below lower Bollinger Band');
+      } else if (bollingerPosition < 30) {
+        buyScore += 8; buySignalReasons.push('Price in lower Bollinger Band zone');
+      }
+    }
+
+    // 5. Bullish candlestick pattern (up to 20 pts).
+    const strongBullish = new Set(['morning_star', 'three_white_soldiers', 'bullish_engulfing']);
+    const moderateBullish = new Set(['hammer', 'dragonfly_doji', 'piercing_line', 'inverted_hammer']);
+    const recentBullishPattern = patterns.find(p => p.direction === 'bullish');
+    if (recentBullishPattern) {
+      const label = recentBullishPattern.name.replace(/_/g, ' ');
+      if (strongBullish.has(recentBullishPattern.name)) {
+        buyScore += 20; buySignalReasons.push(`Strong bullish pattern: ${label}`);
+      } else if (moderateBullish.has(recentBullishPattern.name)) {
+        buyScore += 12; buySignalReasons.push(`Bullish pattern: ${label}`);
+      } else {
+        buyScore += 6; buySignalReasons.push(`Weak bullish pattern: ${label}`);
+      }
+    }
+
+    // 6. Price near demand zone (up to 15 pts).
+    if (currentPrice !== null && demandZone !== null) {
+      const distPct = Math.abs(currentPrice - demandZone.price) / demandZone.price * 100;
+      if (distPct <= 2) {
+        buyScore += 15; buySignalReasons.push('Price at demand zone');
+      } else if (distPct <= 5) {
+        buyScore += 8; buySignalReasons.push('Price near demand zone');
+      }
+    }
+
+    // 7. Trend alignment (up to 15 pts).
+    if (trendLabel === 'Bullish') {
+      buyScore += 15; buySignalReasons.push('Bullish trend (price > SMA50 > SMA200)');
+    } else if (trendLabel === 'Sideways') {
+      buyScore += 5;
+    }
+
+    buyScore = Math.min(100, buyScore);
+    const buySignalStrength: 'strong' | 'moderate' | 'none' =
+      buyScore >= 50 ? 'strong' : buyScore >= 25 ? 'moderate' : 'none';
+
     return {
       ticker,
       companyName: fundamentals.companyName,
@@ -356,7 +440,12 @@ export class ValidateAllService {
         macdSignal,
         macdValue,
         bollingerPosition,
-        volumeAnomalyPct
+        volumeAnomalyPct,
+        macdBullishCross,
+        rsiBuyZone,
+        buySignalStrength,
+        buySignalScore: buyScore,
+        buySignalReasons
       },
       ivData: {
         currentIv: ivData.currentIv,

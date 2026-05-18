@@ -411,6 +411,11 @@ export interface ValidateDashboardResult {
     macdValue: number | null;
     bollingerPosition: number | null;
     volumeAnomalyPct: number | null;
+    macdBullishCross: boolean;
+    rsiBuyZone: 'oversold_recovery' | 'neutral_momentum' | null;
+    buySignalStrength: 'strong' | 'moderate' | 'none';
+    buySignalScore: number;
+    buySignalReasons: string[];
   };
   ivData: {
     currentIv: number | null;
@@ -457,7 +462,7 @@ export type JobRunStatus = 'pending' | 'running' | 'paused' | 'stopped' | 'compl
 
 export interface JobRunInfo {
   id: number;
-  type: 'validate_all' | 'screen_run' | 'analysis_run';
+  type: 'validate_all' | 'screen_run' | 'analysis_run' | 'backtest_run';
   watchlistId: number | null;
   status: JobRunStatus;
   startedAt: string;
@@ -621,4 +626,87 @@ export interface CacheStats {
   lastScreenerRun: number | null;
   recordCount: number;
   updatedAt: string;
+}
+
+// ─── Backtesting Engine (v0.13.0) ─────────────────────────────────────────────
+
+export type BacktestStrategy = 'CSP' | 'CC' | 'Wheel';
+
+export interface BacktestConfig {
+  id?: number;
+  name: string;
+  strategy: BacktestStrategy;
+  ticker: string;
+  startDate: string;       // YYYY-MM-DD
+  endDate: string;         // YYYY-MM-DD
+  startingCapital: number; // dollars
+  dteTarget: number;       // days to expiration target
+  deltaTarget: number;     // e.g. 0.30 for 30-delta
+  profitTargetPct: number; // close at X% of max profit (e.g. 50)
+  stopLossPct: number;     // close when loss reaches X% of premium (e.g. 200)
+  createdAt?: string;
+}
+
+export interface BacktestRun {
+  id: number;
+  configId: number;
+  config: BacktestConfig;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  startedAt: string | null;
+  completedAt: string | null;
+  errorMsg: string | null;
+  totalDays: number | null;
+  simulatedDays: number;
+  createdAt: string;
+}
+
+export interface BacktestTrade {
+  id: number;
+  runId: number;
+  ticker: string;
+  strategy: BacktestStrategy;
+  side: 'put' | 'call';
+  entryDate: string;
+  expiration: string;
+  strike: number;
+  entryPremium: number;
+  exitDate: string | null;
+  exitPremium: number | null;
+  exitReason: 'profit_target' | 'stop_loss' | 'expiration' | 'assigned' | null;
+  pnl: number | null;
+  stockShares: number;
+  stockCostBasis: number | null;
+  capitalRequired: number;
+}
+
+export interface BacktestMetrics {
+  runId: number;
+  netPnl: number;
+  totalReturnPct: number;
+  annualizedReturnPct: number;
+  maxDrawdownPct: number;
+  sharpeRatio: number;
+  winRate: number;
+  totalTrades: number;
+  winningTrades: number;
+  losingTrades: number;
+  avgTradePnl: number;
+  avgDaysHeld: number;
+  equityCurve: Array<{ date: string; equity: number }>;
+  computedAt: string;
+}
+
+export interface BacktestProgressEvent {
+  runId: number;
+  simulatedDays: number;
+  totalDays: number;
+  currentDate: string;
+  currentEquity: number;
+  openTrades: number;
+}
+
+export interface BacktestRunSummary {
+  run: BacktestRun;
+  metrics: BacktestMetrics | null;
+  tradeCount: number;
 }

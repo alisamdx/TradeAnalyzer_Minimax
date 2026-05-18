@@ -276,7 +276,17 @@ export class ScreenerService {
     const dayChangePct = quote?.prevClose && quote.last
       ? ((quote.last - quote.prevClose) / quote.prevClose) * 100
       : null;
-    const avgVolume = quote?.volume ?? null;
+    // Compute 30-day average daily volume from historical_prices (market-close
+    // accurate). Fall back to today's intraday snapshot volume if no history.
+    const avgVolumeRow = this.db.prepare(`
+      SELECT AVG(volume) as avg_vol
+      FROM (
+        SELECT volume FROM historical_prices
+        WHERE ticker = ? AND volume > 0
+        ORDER BY date DESC LIMIT 30
+      )
+    `).get(ticker) as { avg_vol: number | null } | undefined;
+    const avgVolume = (avgVolumeRow?.avg_vol ?? null) ?? (quote?.volume ?? null);
 
     // ── Apply filters ──────────────────────────────────────────────────────
     for (const fd of criteria.filters) {
@@ -323,7 +333,8 @@ export class ScreenerService {
           check(fd.id, ratios.currentRatio !== null && ratios.currentRatio >= (v['min'] as number ?? 0));
           break;
         case 'avg_volume':
-          check(fd.id, avgVolume !== null && avgVolume >= (v['min'] as number ?? 0));
+          // Pass if volume data unavailable (ticker not yet validated) to avoid false exclusions.
+          check(fd.id, avgVolume === null || avgVolume >= (v['min'] as number ?? 0));
           break;
         case 'price': {
           const priceMin = (v['min'] as number) ?? 0;

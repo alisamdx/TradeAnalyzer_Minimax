@@ -30,6 +30,8 @@ import { registerAlertsIpc } from './ipc/ipc-alerts.js';
 import { registerOptionsIpc } from './ipc/ipc-options.js';
 import { AgentDbService } from './services/agent-db-service.js';
 import { registerAgentIpc } from './ipc/ipc-agent.js';
+import { BacktestEngine } from './services/backtest-engine.js';
+import { registerBacktestIpc } from './ipc/ipc-backtest.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -173,6 +175,10 @@ app.whenReady().then(() => {
 
   // Options Chain view
   registerOptionsIpc(dataProvider, quoteCache, rateLimiter);
+
+  // v0.13.0 — Backtesting engine
+  const backtestEngine = new BacktestEngine(db);
+  registerBacktestIpc(backtestEngine);
 
   // v0.12.0 — TraderAgent integration
   const agentDb = new AgentDbService();

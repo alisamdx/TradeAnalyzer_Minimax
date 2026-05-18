@@ -33,7 +33,12 @@ import type {
   AgentLesson,
   AgentRecommendation,
   AgentMemorySnapshot,
-  AgentConfig
+  AgentConfig,
+  BacktestConfig,
+  BacktestRun,
+  BacktestTrade,
+  BacktestMetrics,
+  BacktestProgressEvent
 } from '@shared/types.js';
 export type {
   ScreenPreset, ScreenCriteria, ScreenRunResult, ScreenResultRow, Universe,
@@ -149,7 +154,12 @@ function buildApi() {
       invoke<ValidateAllResult>('validate:run-all', { watchlistId }),
     getStatus: (watchlistId: number) =>
       invoke<{ run: JobRunInfo; progress: TickerStatusRow[] } | null>('validate:get-status', watchlistId),
-    cancel: () => invoke<boolean>('validate:cancel')
+    cancel: () => invoke<boolean>('validate:cancel'),
+    onTickerSignal: (callback: (data: { ticker: string; strength: 'strong' | 'moderate' | 'none'; score: number; reasons: string[] }) => void) => {
+      const handler = (_: any, data: any) => callback(data);
+      ipcRenderer.on('validate:ticker-signal', handler);
+      return () => ipcRenderer.removeListener('validate:ticker-signal', handler);
+    }
   };
 
   const jobs = {
@@ -685,8 +695,30 @@ function buildApi() {
     }
   };
 
+  const backtest = {
+    config: {
+      list: () => invoke<BacktestConfig[]>('backtest:config:list'),
+      create: (cfg: Omit<BacktestConfig, 'id' | 'createdAt'>) => invoke<number>('backtest:config:create', cfg),
+      delete: (configId: number) => invoke<boolean>('backtest:config:delete', configId)
+    },
+    run: {
+      list: (configId?: number) => invoke<BacktestRun[]>('backtest:run:list', configId),
+      get: (runId: number) => invoke<BacktestRun | null>('backtest:run:get', runId),
+      start: (configId: number) => invoke<{ runId: number }>('backtest:run:start', configId),
+      cancel: () => invoke<boolean>('backtest:run:cancel'),
+      delete: (runId: number) => invoke<boolean>('backtest:run:delete', runId),
+      metrics: (runId: number) => invoke<BacktestMetrics | null>('backtest:run:metrics', runId),
+      trades: (runId: number) => invoke<BacktestTrade[]>('backtest:run:trades', runId),
+      onProgress: (callback: (evt: BacktestProgressEvent) => void) => {
+        const handler = (_: any, evt: any) => callback(evt);
+        ipcRenderer.on('backtest:progress', handler);
+        return () => ipcRenderer.removeListener('backtest:progress', handler);
+      }
+    }
+  };
+
   return {
-    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, websocket, historical, portfolio, briefing, alerts, optionsChain, agent },
+    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, websocket, historical, portfolio, briefing, alerts, optionsChain, agent, backtest },
     dialog: {
       prompt: (opts: { title: string; defaultValue?: string }) =>
         invoke<string | null>('dialog:prompt', opts),
