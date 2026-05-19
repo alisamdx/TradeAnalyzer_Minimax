@@ -15,7 +15,7 @@ const DEFAULT_FORM: Omit<BacktestConfig, 'id' | 'createdAt'> = {
   ticker: '',
   startDate: '2022-01-01',
   endDate: new Date().toISOString().slice(0, 10),
-  startingCapital: 10000,
+  startingCapital: 25000,
   dteTarget: 30,
   deltaTarget: 0.30,
   profitTargetPct: 50,
@@ -236,6 +236,9 @@ function ConfigForm({
           onChange={e => set('startingCapital', Number(e.target.value))}
           required
         />
+        <span className="hint" style={{ fontSize: '0.8em', marginTop: '4px', display: 'block' }}>
+          Must cover strike × 100 shares per CSP contract (e.g. $18k+ for AAPL)
+        </span>
       </div>
 
       <div className="bt-form-row bt-form-row-inline">
