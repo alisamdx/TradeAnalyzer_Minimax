@@ -2,6 +2,9 @@ import { useState, useEffect, useCallback } from 'react';
 import { CacheStatusIndicator } from '../components/CacheStatusIndicator.js';
 import type { Universe, CacheStats, ConstituentsMeta } from '@shared/types.js';
 
+const PRICE_RANGES = ['1M', '3M', '6M', '1Y', '2Y', '5Y'] as const;
+type PriceRange = typeof PRICE_RANGES[number];
+
 export function DataView() {
   const [universe, setUniverse] = useState<Universe>('sp500');
   const [isSyncing, setIsSyncing] = useState(false);
@@ -10,6 +13,11 @@ export function DataView() {
   const [meta, setMeta] = useState<Record<'sp500' | 'russell1000', ConstituentsMeta | null>>({ sp500: null, russell1000: null });
   const [error, setError] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
+
+  // Single-ticker historical price fetch (for backtesting)
+  const [priceTicker, setPriceTicker] = useState('');
+  const [priceRange, setPriceRange] = useState<PriceRange>('5Y');
+  const [isFetchingPrices, setIsFetchingPrices] = useState(false);
 
   const loadStats = useCallback(async () => {
     try {
@@ -84,6 +92,26 @@ export function DataView() {
       } else {
         setError((e as Error).message);
       }
+    }
+  };
+
+  const fetchTickerPrices = async () => {
+    const ticker = priceTicker.trim().toUpperCase();
+    if (!ticker) return;
+    setIsFetchingPrices(true);
+    setError(null);
+    setStatusMsg(null);
+    try {
+      const result = await window.api.historical.fetchPrices(ticker, priceRange);
+      if (result.success) {
+        setStatusMsg(`Fetched ${result.count ?? 0} price bars for ${ticker} (${priceRange}).`);
+      } else {
+        setError(`Failed to fetch prices for ${ticker}.`);
+      }
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setIsFetchingPrices(false);
     }
   };
 
@@ -185,6 +213,41 @@ export function DataView() {
             </button>
           </div>
         )}
+      </div>
+
+      <div className="card" style={{ marginTop: '20px', padding: '20px', border: '1px solid var(--border)', borderRadius: '8px' }}>
+        <h3>3. Fetch Historical Prices</h3>
+        <p className="hint" style={{ marginBottom: '15px' }}>Download daily OHLCV price history for a single ticker. Required before running a backtest on that ticker.</p>
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+          <input
+            type="text"
+            placeholder="Ticker (e.g. AAPL)"
+            value={priceTicker}
+            onChange={(e) => setPriceTicker(e.target.value.toUpperCase())}
+            onKeyDown={(e) => e.key === 'Enter' && fetchTickerPrices()}
+            style={{ padding: '8px 12px', borderRadius: '4px', border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', width: '160px', textTransform: 'uppercase' }}
+            disabled={isFetchingPrices}
+          />
+          <div style={{ display: 'flex', gap: '6px' }}>
+            {PRICE_RANGES.map((r) => (
+              <button
+                key={r}
+                className={`univ-btn ${priceRange === r ? 'active' : ''}`}
+                onClick={() => setPriceRange(r)}
+                disabled={isFetchingPrices}
+              >
+                {r}
+              </button>
+            ))}
+          </div>
+          <button
+            className="primary"
+            onClick={fetchTickerPrices}
+            disabled={isFetchingPrices || !priceTicker.trim()}
+          >
+            {isFetchingPrices ? 'Fetching…' : '↓ Fetch Prices'}
+          </button>
+        </div>
       </div>
 
       <div className="card" style={{ marginTop: '20px', padding: '20px', border: '1px solid var(--border)', borderRadius: '8px' }}>
