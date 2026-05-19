@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { CacheStatusIndicator } from '../components/CacheStatusIndicator.js';
-import type { Universe, CacheStats, ConstituentsMeta } from '@shared/types.js';
+import type { Universe, CacheStats, ConstituentsMeta, Watchlist } from '@shared/types.js';
 
 const PRICE_RANGES = ['1M', '3M', '6M', '1Y', '2Y', '5Y'] as const;
 type PriceRange = typeof PRICE_RANGES[number];
@@ -19,6 +19,13 @@ export function DataView() {
   const [priceRange, setPriceRange] = useState<PriceRange>('5Y');
   const [isFetchingPrices, setIsFetchingPrices] = useState(false);
 
+  // Watchlist historical price fetch
+  const [watchlists, setWatchlists] = useState<Watchlist[]>([]);
+  const [selectedWatchlistId, setSelectedWatchlistId] = useState<number | null>(null);
+  const [wlRange, setWlRange] = useState<PriceRange>('5Y');
+  const [isFetchingWl, setIsFetchingWl] = useState(false);
+  const [wlProgress, setWlProgress] = useState<{ done: number; total: number; ticker: string } | null>(null);
+
   const loadStats = useCallback(async () => {
     try {
       const currentStats = await window.api.cache.getStats();
@@ -34,14 +41,13 @@ export function DataView() {
 
   useEffect(() => {
     loadStats();
-    
+    window.api.watchlists.list().then(setWatchlists).catch(console.error);
+
     const unsubProgress = window.api.screen.onSyncProgress((data) => {
       setProgress(data);
     });
 
-    return () => {
-      unsubProgress();
-    };
+    return () => { unsubProgress(); };
   }, [loadStats]);
 
   const startSync = async () => {
@@ -115,6 +121,40 @@ export function DataView() {
     }
   };
 
+  const fetchWatchlistPrices = async () => {
+    if (selectedWatchlistId === null) return;
+    setIsFetchingWl(true);
+    setWlProgress(null);
+    setError(null);
+    setStatusMsg(null);
+    try {
+      const items = await window.api.watchlists.items.list(selectedWatchlistId);
+      const tickers = items.map((i) => i.ticker);
+      let done = 0;
+      const failed: string[] = [];
+      for (const ticker of tickers) {
+        setWlProgress({ done, total: tickers.length, ticker });
+        try {
+          await window.api.historical.fetchPrices(ticker, wlRange);
+        } catch {
+          failed.push(ticker);
+        }
+        done++;
+      }
+      setWlProgress(null);
+      if (failed.length > 0) {
+        setStatusMsg(`Done. ${done - failed.length}/${tickers.length} fetched. Failed: ${failed.join(', ')}`);
+      } else {
+        setStatusMsg(`Fetched ${wlRange} price history for all ${tickers.length} tickers.`);
+      }
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setIsFetchingWl(false);
+      setWlProgress(null);
+    }
+  };
+
   const clearMarketData = async () => {
     const proceed = await window.dialog.confirm({
       title: 'Clear All Market Data',
@@ -123,13 +163,15 @@ export function DataView() {
     if (!proceed) return;
 
     try {
-      await window.api.cache.refresh(); // This clears all market data tables
+      await window.api.cache.refresh();
       await loadStats();
       setStatusMsg('All market data has been cleared.');
     } catch (e) {
       setError((e as Error).message);
     }
   };
+
+  const isBusy = isFetchingPrices || isFetchingWl;
 
   return (
     <div className="data-view" style={{ padding: '20px', maxWidth: '800px', margin: '0 auto' }}>
@@ -170,7 +212,7 @@ export function DataView() {
       <div className="card" style={{ marginTop: '20px', padding: '20px', border: '1px solid var(--border)', borderRadius: '8px' }}>
         <h3>2. Sync Market Data</h3>
         <p className="hint" style={{ marginBottom: '15px' }}>Download current prices and fundamentals from Polygon.io for all tickers in the selected universe.</p>
-        
+
         <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
           {(['sp500', 'russell1000', 'both'] as Universe[]).map((u) => (
             <button
@@ -217,36 +259,65 @@ export function DataView() {
 
       <div className="card" style={{ marginTop: '20px', padding: '20px', border: '1px solid var(--border)', borderRadius: '8px' }}>
         <h3>3. Fetch Historical Prices</h3>
-        <p className="hint" style={{ marginBottom: '15px' }}>Download daily OHLCV price history for a single ticker. Required before running a backtest on that ticker.</p>
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-          <input
-            type="text"
-            placeholder="Ticker (e.g. AAPL)"
-            value={priceTicker}
-            onChange={(e) => setPriceTicker(e.target.value.toUpperCase())}
-            onKeyDown={(e) => e.key === 'Enter' && fetchTickerPrices()}
-            style={{ padding: '8px 12px', borderRadius: '4px', border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', width: '160px', textTransform: 'uppercase' }}
-            disabled={isFetchingPrices}
-          />
-          <div style={{ display: 'flex', gap: '6px' }}>
-            {PRICE_RANGES.map((r) => (
-              <button
-                key={r}
-                className={`univ-btn ${priceRange === r ? 'active' : ''}`}
-                onClick={() => setPriceRange(r)}
-                disabled={isFetchingPrices}
-              >
-                {r}
-              </button>
-            ))}
+        <p className="hint" style={{ marginBottom: '15px' }}>Download daily OHLCV price history. Required before running a backtest on a ticker.</p>
+
+        {/* Single ticker */}
+        <div style={{ marginBottom: '16px' }}>
+          <div style={{ fontSize: '0.85em', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Single Ticker</div>
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <input
+              type="text"
+              placeholder="e.g. AAPL"
+              value={priceTicker}
+              onChange={(e) => setPriceTicker(e.target.value.toUpperCase())}
+              onKeyDown={(e) => e.key === 'Enter' && fetchTickerPrices()}
+              style={{ padding: '8px 12px', borderRadius: '4px', border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', width: '140px', textTransform: 'uppercase' }}
+              disabled={isBusy}
+            />
+            <div style={{ display: 'flex', gap: '6px' }}>
+              {PRICE_RANGES.map((r) => (
+                <button key={r} className={`univ-btn ${priceRange === r ? 'active' : ''}`} onClick={() => setPriceRange(r)} disabled={isBusy}>{r}</button>
+              ))}
+            </div>
+            <button className="primary" onClick={fetchTickerPrices} disabled={isBusy || !priceTicker.trim()}>
+              {isFetchingPrices ? 'Fetching…' : '↓ Fetch'}
+            </button>
           </div>
-          <button
-            className="primary"
-            onClick={fetchTickerPrices}
-            disabled={isFetchingPrices || !priceTicker.trim()}
-          >
-            {isFetchingPrices ? 'Fetching…' : '↓ Fetch Prices'}
-          </button>
+        </div>
+
+        {/* Watchlist */}
+        <div style={{ borderTop: '1px solid var(--border)', paddingTop: '16px' }}>
+          <div style={{ fontSize: '0.85em', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Watchlist</div>
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <select
+              value={selectedWatchlistId ?? ''}
+              onChange={(e) => setSelectedWatchlistId(e.target.value ? Number(e.target.value) : null)}
+              disabled={isBusy}
+              style={{ padding: '8px 12px', borderRadius: '4px', border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', minWidth: '180px' }}
+            >
+              <option value="">— Select watchlist —</option>
+              {watchlists.map((wl) => (
+                <option key={wl.id} value={wl.id}>{wl.name} ({wl.itemCount ?? '?'} tickers)</option>
+              ))}
+            </select>
+            <div style={{ display: 'flex', gap: '6px' }}>
+              {PRICE_RANGES.map((r) => (
+                <button key={r} className={`univ-btn ${wlRange === r ? 'active' : ''}`} onClick={() => setWlRange(r)} disabled={isBusy}>{r}</button>
+              ))}
+            </div>
+            <button className="primary" onClick={fetchWatchlistPrices} disabled={isBusy || selectedWatchlistId === null}>
+              {isFetchingWl ? 'Fetching…' : '↓ Fetch All'}
+            </button>
+          </div>
+          {isFetchingWl && wlProgress && (
+            <div style={{ marginTop: '12px' }}>
+              <progress value={wlProgress.done} max={wlProgress.total} style={{ width: '100%', height: '8px' }} />
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px', fontSize: '0.85em', color: 'var(--text-muted)' }}>
+                <span>{wlProgress.done} / {wlProgress.total}</span>
+                <span>Fetching: <strong>{wlProgress.ticker}</strong></span>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
