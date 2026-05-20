@@ -369,7 +369,7 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
       low: b.l,
       close: b.c,
       volume: b.v
-    })), { binSize: 0.5 });
+    })), { binCount: 24, maxWidthPx: 80 });
     candleSeries.attachPrimitive(volumeProfile);
 
     // Volume series.
@@ -1134,7 +1134,7 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
                       </div>
                     )}
                     <div className={`trade-setup-item buy-signal-item ${result.indicators.buySignalStrength === 'strong' ? 'signal-strong' : result.indicators.buySignalStrength === 'moderate' ? 'signal-moderate' : ''}`}>
-                      <span className="trade-label" title="Buy Signal score (0–100) across 6 indicators: MACD crossover (20), RSI zone (20), Bollinger Band (15), candlestick pattern (20), demand zone proximity (15), trend alignment (10). Strong ≥60, Moderate ≥30.">
+                      <span className="trade-label" title="Buy Signal score (0–100) across 8 indicators: MACD crossover (20), RSI zone (10–20), Bollinger Band (8–15), candlestick pattern (6–20), demand zone proximity (8–15), trend alignment (5–15), bullish SMA structure (10), testing SMA50 support (8). Strong ≥60, Moderate ≥25.">
                         Buy Signal
                       </span>
                       <span className="trade-value">

@@ -1,75 +1,13 @@
-// Official lightweight-charts volume profile plugin example
-// https://tradingview.github.io/lightweight-charts/plugin-examples/examples/volume-profile/
-// Adapted for TradeAnalyzer
+// Volume Profile primitive for lightweight-charts v4.
+// Renders horizontal volume bars on the right side of the chart,
+// aligned to actual price coordinates via series.priceToCoordinate().
 
 import type {
   ISeriesPrimitive,
   ISeriesPrimitivePaneRenderer,
   ISeriesPrimitivePaneView,
   Time,
-  BusinessDay,
-  UTCTimestamp
 } from 'lightweight-charts';
-
-interface VolumeProfileData {
-  price: number;
-  volume: number;
-}
-
-interface VolumeProfileHistogram {
-  volume: number;
-  color: string;
-}
-
-interface VolumeProfileRendererData {
-  histograms: VolumeProfileHistogram[];
-  width: number;
-  barWidth: number;
-  firstBar: number;
-  barSpacing: number;
-}
-
-const defaultOptions = {
-  binSize: 20,
-  width: 70,
-  valueAreaVolume: 70,
-  pohColor: 'rgba(255, 165, 0, 0.5)',
-  vahColor: 'rgba(41, 98, 255, 0.5)',
-  valColor: 'rgba(41, 98, 255, 0.2)',
-};
-
-class VolumeProfileRenderer implements ISeriesPrimitivePaneRenderer {
-  _data: VolumeProfileRendererData;
-
-  constructor(data: VolumeProfileRendererData) {
-    this._data = data;
-    console.log('[VolumeProfileRenderer] Constructor data:', data);
-  }
-
-  draw(target: any) {
-    console.log('[VolumeProfileRenderer] draw called.');
-    target.useBitmapCoordinateSpace((scope: any) => {
-      const ctx = scope.context;
-      const h = scope.bitmapSize.height;
-      console.log(`[VolumeProfileRenderer] Canvas height: ${h}`);
-
-      const barWidth = this._data.barWidth;
-      const barSpacing = this._data.barSpacing;
-
-      for (let i = 0; i < this._data.histograms.length; i++) {
-        const y = i * (barWidth + barSpacing) + barSpacing;
-        const bar = this._data.histograms[i];
-        if (!bar || y > h) break;
-        if (bar.volume > 0) {
-          ctx.fillStyle = bar.color;
-          const w = (this._data.width / 100) * bar.volume;
-          ctx.fillRect(0, y, w, barWidth);
-          console.log(`[VolumeProfileRenderer] Drawing bar at y=${y}, width=${w}, volume=${bar.volume}`);
-        }
-      }
-    });
-  }
-}
 
 export interface BarDataWithVolume {
   time: Time;
@@ -80,150 +18,156 @@ export interface BarDataWithVolume {
   volume: number;
 }
 
-export class VolumeProfile implements ISeriesPrimitive {
-  _source: any = null;
-  _data: BarDataWithVolume[] = [];
-  _options: any;
+interface RendererBar {
+  y: number;       // CSS-pixel y of the top of this bin
+  height: number;  // CSS-pixel height of this bin
+  volumePct: number; // 0-100 relative to the max bin
+  color: string;
+}
 
-  constructor(data: BarDataWithVolume[], options = {}) {
-    this._data = data;
-    this._options = { ...defaultOptions, ...options };
+const defaults = {
+  binCount: 24,
+  maxWidthPx: 80,
+  pocColor: 'rgba(255, 165, 0, 0.75)',
+  valueAreaColor: 'rgba(41, 98, 255, 0.45)',
+  outsideColor: 'rgba(100, 149, 237, 0.20)',
+};
+
+class VolumeProfileRenderer implements ISeriesPrimitivePaneRenderer {
+  private _bars: RendererBar[];
+  private _maxWidth: number;
+
+  constructor(bars: RendererBar[], maxWidth: number) {
+    this._bars = bars;
+    this._maxWidth = maxWidth;
   }
 
-  attached(source: any) {
+  draw(target: any): void {
+    target.useBitmapCoordinateSpace((scope: any) => {
+      const ctx = scope.context as CanvasRenderingContext2D;
+      const rx = scope.horizontalPixelRatio as number;
+      const ry = scope.verticalPixelRatio as number;
+      const canvasW = scope.bitmapSize.width as number;
+
+      for (const bar of this._bars) {
+        if (bar.volumePct <= 0) continue;
+        const barW = Math.round((bar.volumePct / 100) * this._maxWidth * rx);
+        const barY = Math.round(bar.y * ry);
+        const barH = Math.max(1, Math.round(bar.height * ry) - 1);
+        ctx.fillStyle = bar.color;
+        ctx.fillRect(canvasW - barW, barY, barW, barH);
+      }
+    });
+  }
+}
+
+class VolumeProfilePaneView implements ISeriesPrimitivePaneView {
+  private _bars: RendererBar[];
+  private _maxWidth: number;
+
+  constructor(bars: RendererBar[], maxWidth: number) {
+    this._bars = bars;
+    this._maxWidth = maxWidth;
+  }
+
+  renderer(): ISeriesPrimitivePaneRenderer {
+    return new VolumeProfileRenderer(this._bars, this._maxWidth);
+  }
+}
+
+export class VolumeProfile implements ISeriesPrimitive<Time> {
+  private _source: any = null;
+  private _data: BarDataWithVolume[];
+  private _options: typeof defaults;
+
+  constructor(data: BarDataWithVolume[], options: Partial<typeof defaults> = {}) {
+    this._data = data;
+    this._options = { ...defaults, ...options };
+  }
+
+  attached(source: any): void {
     this._source = source;
   }
 
-  updateAllViews() {
-    return this.paneViews();
+  detached(): void {
+    this._source = null;
   }
 
-  paneViews() {
-    console.log('[VolumeProfile] paneViews called.');
+  updateAllViews(): void {}
+
+  paneViews(): ISeriesPrimitivePaneView[] {
+    if (!this._source || this._data.length === 0) return [];
+
     const series = this._source.series;
     const chart = this._source.chart;
 
-    const data = this._source.series.data();
-    if (data.length === 0) {
-      console.log('[VolumeProfile] No series data, returning empty.');
-      return [];
-    }
-
-    const bars: unknown[] = Array.from(data.values());
     const visibleRange = chart.timeScale().getVisibleLogicalRange();
+    if (!visibleRange) return [];
 
-    if (visibleRange === null) {
-      console.log('[VolumeProfile] No visible range, returning empty.');
-      return [];
-    }
-    console.log(`[VolumeProfile] Visible logical range: from ${visibleRange.from}, to ${visibleRange.to}`);
+    // Use this._data (which has volume) — series.data() holds candlestick data without volume.
+    const from = Math.max(0, Math.floor(visibleRange.from));
+    const to = Math.min(this._data.length - 1, Math.ceil(visibleRange.to));
 
+    const visibleBars = this._data.slice(from, to + 1);
+    if (visibleBars.length === 0) return [];
 
-    const from = Math.floor(visibleRange.from);
-    const to = Math.ceil(visibleRange.to);
+    const priceHigh = Math.max(...visibleBars.map((b) => b.high));
+    const priceLow = Math.min(...visibleBars.map((b) => b.low));
+    const priceRange = priceHigh - priceLow;
+    if (priceRange <= 0) return [];
 
-    const volumeData: VolumeProfileData[] = [];
-    let totalVolume = 0;
-    for (let i = from; i <= to; i++) {
-      const bar = bars[i] as { high?: number | null; low?: number | null; volume?: number | null } | undefined;
-      if (!bar) {
-        console.log(`[VolumeProfile] Skipping bar at index ${i}: bar is null/undefined.`);
-        continue;
-      }
-      if (bar.high === null || bar.low === null || bar.volume === null || bar.high === undefined || bar.low === undefined || bar.volume === undefined) {
-        console.log(`[VolumeProfile] Skipping bar at index ${i}: missing high, low, or volume. Bar:`, bar);
-        continue;
-      }
+    const { binCount, maxWidthPx, pocColor, valueAreaColor, outsideColor } = this._options;
+    const binSize = priceRange / binCount;
 
-      const barHigh = bar.high;
-      const barLow = bar.low;
-      const barVolume = bar.volume;
-      console.log(`[VolumeProfile] Processing bar ${i}: High=${barHigh}, Low=${barLow}, Volume=${barVolume}`);
-
-      const priceRange = barHigh - barLow;
-
-      if (priceRange <= 0) {
-        // If priceRange is 0 or negative, put all volume into a single bin at barLow
-        const binPrice = barLow;
-        const bin = volumeData.find((v) => v.price === binPrice);
-        if (bin) {
-          bin.volume += barVolume;
-        } else {
-          volumeData.push({ price: binPrice, volume: barVolume });
-        }
-        totalVolume += barVolume;
-      } else {
-        // Distribute volume across bins
-        const numBinsInPriceRange = Math.ceil(priceRange / this._options.binSize);
-        const volumePerBin = barVolume / numBinsInPriceRange;
-
-        for (let j = barLow; j < barHigh; j += this._options.binSize) {
-          const binPrice = j;
-          const bin = volumeData.find((v) => v.price === binPrice);
-          if (bin) {
-            bin.volume += volumePerBin;
-          } else {
-            volumeData.push({ price: binPrice, volume: volumePerBin });
-          }
-          totalVolume += volumePerBin;
-        }
+    // Accumulate volume per bin using this._data which carries volume
+    const bins = new Array<number>(binCount).fill(0);
+    for (const bar of visibleBars) {
+      const startBin = Math.max(0, Math.floor((bar.low - priceLow) / binSize));
+      const endBin = Math.min(binCount - 1, Math.floor((bar.high - priceLow) / binSize));
+      const numBins = Math.max(1, endBin - startBin + 1);
+      const volPerBin = bar.volume / numBins;
+      for (let b = startBin; b <= endBin; b++) {
+        bins[b] += volPerBin;
       }
     }
 
-    const valueAreaVolume = (totalVolume / 100) * this._options.valueAreaVolume;
-    volumeData.sort((a, b) => b.volume - a.volume);
-    const poh = volumeData[0];
-    let currentVolume = 0;
-    const valueArea: VolumeProfileData[] = [];
-    for (const v of volumeData) {
-      if (currentVolume > valueAreaVolume) break;
-      currentVolume += v.volume;
-      valueArea.push(v);
+    // Point of Control: bin with highest volume
+    const maxBinVol = Math.max(...bins);
+    if (maxBinVol <= 0) return [];
+    const pocIdx = bins.indexOf(maxBinVol);
+
+    // Value Area: bins containing 70% of total volume (highest-vol first)
+    const totalVol = bins.reduce((s, v) => s + v, 0);
+    const vaTarget = totalVol * 0.70;
+    const sorted = bins.map((v, i) => ({ v, i })).sort((a, b) => b.v - a.v);
+    const vaSet = new Set<number>();
+    let accVol = 0;
+    for (const { v, i } of sorted) {
+      if (accVol >= vaTarget) break;
+      accVol += v;
+      vaSet.add(i);
     }
-    
-    volumeData.sort((a, b) => a.price - b.price);
 
-    const priceScale = series.priceScale();
-    const histograms: VolumeProfileHistogram[] = [];
-    const maxVolume = Math.max(...volumeData.map((d) => d.volume));
-    console.log(`[VolumeProfile] Max Volume for scaling: ${maxVolume}`);
+    // Map bins to canvas y coordinates via priceToCoordinate
+    const rendererBars: RendererBar[] = [];
+    for (let i = 0; i < binCount; i++) {
+      const binTop = priceLow + (i + 1) * binSize;
+      const binBot = priceLow + i * binSize;
+      const yTop = series.priceToCoordinate(binTop);
+      const yBot = series.priceToCoordinate(binBot);
+      if (yTop === null || yBot === null) continue;
 
-    for (let i = 0; i < volumeData.length; i++) {
-      const v = volumeData[i];
-      if (!v) continue;
-      if (series.priceToCoordinate(v.price) === null) continue;
-      const color =
-        poh === v
-          ? this._options.pohColor
-          : valueArea.includes(v)
-          ? this._options.vahColor
-          : this._options.valColor;
-      histograms.push({
-        volume: (v.volume / maxVolume) * 100,
-        color: color,
+      const height = Math.max(1, yBot - yTop);
+      const color = i === pocIdx ? pocColor : vaSet.has(i) ? valueAreaColor : outsideColor;
+
+      rendererBars.push({
+        y: yTop,
+        height,
+        volumePct: (bins[i] / maxBinVol) * 100,
+        color,
       });
     }
-    console.log(`[VolumeProfile] Final histograms count: ${histograms.length}`);
-    if (histograms.length > 0) {
-      console.log('[VolumeProfile] First histogram bar:', histograms[0]);
-    }
 
-    const barWidth = 1;
-    const barSpacing = 1;
-
-    return [
-      new (class implements ISeriesPrimitivePaneView {
-        renderer() {
-          console.log('[VolumeProfile] Creating renderer.');
-          return new VolumeProfileRenderer({
-            histograms: histograms,
-            width: 70,
-            barWidth: barWidth,
-            firstBar: from,
-            barSpacing: barSpacing,
-          });
-        }
-      })(),
-    ];
+    return [new VolumeProfilePaneView(rendererBars, maxWidthPx)];
   }
 }

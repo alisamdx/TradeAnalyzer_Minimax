@@ -2,7 +2,7 @@
 // Watchlist selector, mode cards, run with progress, results table, save-as-watchlist.
 // see SPEC: FR-3
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   Watchlist,
   AnalysisModeInfo,
@@ -59,6 +59,8 @@ export function AnalysisView({ initialTicker, clearInitialTicker }: AnalysisView
   const [snapshots, setSnapshots] = useState<AnalysisSnapshotRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
+  const [sortCol, setSortCol] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
   // Selected ticker for chart view
   const [selectedTickerForChart, setSelectedTickerForChart] = useState<string | null>(null);
@@ -364,6 +366,86 @@ export function AnalysisView({ initialTicker, clearInitialTicker }: AnalysisView
     return '#e74c3c';
   };
 
+  const handleSortClick = (col: string) => {
+    setSortCol(prev => {
+      if (prev === col) { setSortDir(d => d === 'asc' ? 'desc' : 'asc'); return col; }
+      setSortDir('desc');
+      return col;
+    });
+  };
+
+  const getSortValue = (result: DecodedResult, col: string): number | string | null => {
+    if (result.mode === 'buy') {
+      switch (col) {
+        case 'Ticker': return result.ticker;
+        case 'Price': return result.lastPrice;
+        case 'Score/10': return result.compositeScore;
+        case 'Trend': return result.trend;
+        case 'RSI': return result.rsi;
+        case 'Entry Low': return result.entryZoneLow;
+        case 'Stop': return result.stopLoss;
+        case 'Target': return result.targetPrice;
+        case 'R:R': return result.riskReward;
+        case 'Fund OK': return result.fundamentalsPass ? 1 : 0;
+      }
+    } else if (result.mode === 'options_income') {
+      switch (col) {
+        case 'Ticker': return result.ticker;
+        case 'Price': return result.lastPrice;
+        case 'Strategy': return result.strategy;
+        case 'Strike': return result.strike;
+        case 'Exp': return result.expiration;
+        case 'DTE': return result.dte;
+        case 'Delta': return result.delta;
+        case 'Premium': return result.premium;
+        case 'Ann Return%': return result.annualizedReturn;
+        case 'Capital': return result.capitalRequired;
+      }
+    } else if (result.mode === 'wheel') {
+      switch (col) {
+        case 'Ticker': return result.ticker;
+        case 'Price': return result.lastPrice;
+        case 'Strike': return result.recommendedStrike;
+        case 'Exp': return result.expiration;
+        case 'DTE': return result.dte;
+        case 'Premium': return result.premium;
+        case 'Ann Return%': return result.annualizedReturn;
+        case 'IV %': return result.currentIv;
+        case 'Suitability': return result.suitabilityScore;
+        case 'Liquidity': return result.optionLiquidityScore;
+      }
+    } else {
+      switch (col) {
+        case 'Ticker': return result.ticker;
+        case 'Price': return result.lastPrice;
+        case 'ADX': return result.trendStrength;
+        case 'Strategy': return result.suggestedStrategy;
+        case 'Structure': return result.structure;
+        case 'Max Profit': return result.maxProfit;
+        case 'Max Loss': return result.maxLoss;
+        case 'Breakeven': return result.breakeven;
+        case 'POP': return result.probabilityOfProfit;
+      }
+    }
+    return null;
+  };
+
+  const sortedResults = useMemo(() => {
+    const indexed = results.map((r, i) => ({ r, i }));
+    if (!sortCol) return indexed;
+    return [...indexed].sort((a, b) => {
+      const av = getSortValue(a.r, sortCol);
+      const bv = getSortValue(b.r, sortCol);
+      if (av === null && bv === null) return 0;
+      if (av === null) return 1;
+      if (bv === null) return -1;
+      const cmp = typeof av === 'string' && typeof bv === 'string'
+        ? av.localeCompare(bv)
+        : (av as number) - (bv as number);
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+  }, [results, sortCol, sortDir]);
+
   return (
     <div className="analysis-view">
       {error && (
@@ -436,7 +518,7 @@ export function AnalysisView({ initialTicker, clearInitialTicker }: AnalysisView
                   <button
                     key={m.id}
                     className={`mode-card ${selectedMode === m.id ? 'active' : ''}`}
-                    onClick={() => { setSelectedMode(m.id); setRunResult(null); setResults([]); }}
+                    onClick={() => { setSelectedMode(m.id); setRunResult(null); setResults([]); setSortCol(null); }}
                     title={m.description}
                   >
                     <span className="mode-icon">{m.icon}</span>
@@ -582,31 +664,36 @@ export function AnalysisView({ initialTicker, clearInitialTicker }: AnalysisView
                   <thead>
                     <tr>
                       <th style={{ width: 24 }}></th>
-                      {modeColumns(selectedMode ?? '').map((col) => (
-                        <th
-                          key={col}
-                          className={
-                            col === 'Ticker' || col === 'Trend' || col === 'Strategy' || col === 'Structure' || col === 'Fund OK'
-                              ? ''
-                              : 'num'
-                          }
-                        >
-                          {col}
-                        </th>
-                      ))}
+                      {modeColumns(selectedMode ?? '').map((col) => {
+                        const isText = col === 'Ticker' || col === 'Trend' || col === 'Strategy' || col === 'Structure' || col === 'Fund OK';
+                        const isSorted = sortCol === col;
+                        return (
+                          <th
+                            key={col}
+                            className={isText ? 'sortable' : 'num sortable'}
+                            onClick={() => handleSortClick(col)}
+                            title={`Sort by ${col}`}
+                          >
+                            {col}
+                            <span className="sort-indicator">
+                              {isSorted ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ' ⇅'}
+                            </span>
+                          </th>
+                        );
+                      })}
                     </tr>
                   </thead>
                   <tbody>
-                    {results.map((result, idx) => (
-                      <tr key={idx} className={selected.has(idx) ? 'selected' : ''}>
+                    {sortedResults.map(({ r: result, i: origIdx }) => (
+                      <tr key={origIdx} className={selected.has(origIdx) ? 'selected' : ''}>
                         <td>
                           <input
                             type="checkbox"
-                            checked={selected.has(idx)}
+                            checked={selected.has(origIdx)}
                             onChange={() =>
                               setSelected((prev) => {
                                 const n = new Set(prev);
-                                if (n.has(idx)) n.delete(idx); else n.add(idx);
+                                if (n.has(origIdx)) n.delete(origIdx); else n.add(origIdx);
                                 return n;
                               })
                             }

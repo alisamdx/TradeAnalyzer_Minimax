@@ -169,9 +169,11 @@ export function computeEntryZoneAndStop(
   const atr = atrArr[atrArr.length - 1];
 
   if (atr === null || atr === undefined || atr === 0) {
+    const rawA = swingLow;
+    const rawB = sma50 ?? currentPrice;
     return {
-      entryZoneLow: swingLow,
-      entryZoneHigh: sma50 ?? currentPrice,
+      entryZoneLow: Math.min(rawA, rawB),
+      entryZoneHigh: Math.max(rawA, rawB),
       stopLoss: null,
       target: null,
       riskReward: null,
@@ -179,8 +181,10 @@ export function computeEntryZoneAndStop(
     };
   }
 
-  const entryLow = swingLow;
-  const entryHigh = sma50 ?? currentPrice;
+  const rawA = swingLow;
+  const rawB = sma50 ?? currentPrice;
+  const entryLow = Math.min(rawA, rawB);
+  const entryHigh = Math.max(rawA, rawB);
   const stopLoss = entryLow - 1.5 * atr;
   const target = entryLow + 3 * atr;
   const risk = entryLow - stopLoss; // = 1.5 * atr

@@ -141,8 +141,30 @@ Composite score 0–10 for buy opportunities. Implemented in `AnalysisService.mo
 | Profit margin ≥ 10% | +1 |
 | ROE ≥ 15% | +1 |
 | D/E < 1.0 | +1 |
+| Price > POC (volume profile) | +1 |
+| Price > VAH (breakout) OR within 2% above VAL (support test) | +1 |
 
 Score = min(10, sum of applicable criteria). see SPEC: §5.3, Mode 1 (Buy Opportunities).
+
+### volume-profile-levels
+
+Computed in `computeVolumeProfileLevels()` in `analysis-service.ts` (also mirrored in `VolumeProfile.ts` for chart rendering).
+
+Given N bars and `binCount = 24`:
+
+```
+binSize = (max(high) − min(low)) / binCount
+bins[i] += bar.volume / numBinsSpanned   for each bar
+POC  = midpoint of the bin with the highest accumulated volume
+Value Area = set of bins (highest-vol first) that together contain 70% of total volume
+VAL  = lower edge of the lowest-index bin in the value area
+VAH  = upper edge of the highest-index bin in the value area
+```
+
+Buy signal interpretation:
+- Price > VAH → breakout above value area (+1 in buy score)
+- Price within 2% of VAL from above → support test (+1 in buy score)
+- Price > POC → buyers in control (+1 in buy score)
 
 ### iv-rank, iv-percentile
 

@@ -2,8 +2,9 @@
 // Market regime, action items, and top setups
 // see SPEC: Priority 7 - Morning Briefing Dashboard
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useSortable } from '../hooks/useSortable.js';
+import { showPromptDialog } from '../utils/promptDialog.js';
 
 type Trend = 'bullish' | 'bearish' | 'neutral';
 type VixLevel = 'low' | 'normal' | 'high';
@@ -96,13 +97,46 @@ export function BriefingView() {
   const [topSetups, setTopSetups] = useState<TopSetup[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const { sortedData, sortConfig, requestSort, getSortIndicator } = useSortable(topSetups, 'wheelSuitability', 'desc');
 
   const openValidateForTicker = (ticker: string) => {
     window.dispatchEvent(new CustomEvent('navigate-to-validate', { detail: { ticker } }));
   };
+
+  const toggleTicker = (ticker: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(ticker) ? next.delete(ticker) : next.add(ticker);
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    if (selected.size === sortedData.length) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(sortedData.map((s) => s.ticker)));
+    }
+  };
+
+  const saveAsWatchlist = useCallback(async () => {
+    if (selected.size === 0) return;
+    const name = await showPromptDialog('Watchlist name:');
+    if (!name) return;
+    try {
+      const wl = await window.api.watchlists.create(name);
+      await window.api.watchlists.items.addBulk(wl.id, Array.from(selected).map((t) => ({ ticker: t })));
+      window.dispatchEvent(new CustomEvent('watchlist-created'));
+      setStatusMsg(`Saved ${selected.size} ticker${selected.size !== 1 ? 's' : ''} as "${name}"`);
+      setSelected(new Set());
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }, [selected]);
 
   const loadBriefing = async () => {
     setLoading(true);
@@ -151,6 +185,12 @@ export function BriefingView() {
       {error && (
         <div className="error-toast" onClick={() => setError(null)}>
           {error} <span style={{ float: 'right', cursor: 'pointer' }}>✕</span>
+        </div>
+      )}
+
+      {statusMsg && (
+        <div className="status-toast ok" onClick={() => setStatusMsg(null)}>
+          {statusMsg} <span style={{ float: 'right', cursor: 'pointer' }}>✕</span>
         </div>
       )}
 
@@ -233,12 +273,36 @@ export function BriefingView() {
 
       {/* ── Top Setups ── */}
       <div className="briefing-section">
-        <h3>Top 15 Quality Setups</h3>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+          <h3 style={{ margin: 0 }}>Top 15 Quality Setups</h3>
+          {topSetups.length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {selected.size > 0 && (
+                <span className="meta">{selected.size} selected</span>
+              )}
+              <button
+                onClick={saveAsWatchlist}
+                disabled={selected.size === 0}
+                className="save-wl-btn"
+              >
+                + Save to Watchlist
+              </button>
+            </div>
+          )}
+        </div>
         {topSetups.length > 0 ? (
           <div className="setups-table-wrap">
             <table className="setups-table">
               <thead>
                 <tr>
+                  <th style={{ width: 32 }}>
+                    <input
+                      type="checkbox"
+                      checked={selected.size === sortedData.length && sortedData.length > 0}
+                      onChange={toggleAll}
+                      title="Select all"
+                    />
+                  </th>
                   <th onClick={() => requestSort('ticker')} className="sortable">
                     Ticker {getSortIndicator('ticker')}
                   </th>
@@ -263,7 +327,14 @@ export function BriefingView() {
               </thead>
               <tbody>
                 {sortedData.map((setup) => (
-                  <tr key={setup.ticker}>
+                  <tr key={setup.ticker} className={selected.has(setup.ticker) ? 'row-selected' : ''}>
+                    <td>
+                      <input
+                        type="checkbox"
+                        checked={selected.has(setup.ticker)}
+                        onChange={() => toggleTicker(setup.ticker)}
+                      />
+                    </td>
                     <td>
                       <span
                         className="clickable-ticker"

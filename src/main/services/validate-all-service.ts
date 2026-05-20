@@ -87,7 +87,7 @@ export class ValidateAllService {
     // Fetch historical bars - required but handle failures gracefully
     let bars: Array<{ t: number; o: number; h: number; l: number; c: number; v: number }> = [];
     try {
-      bars = await this.dataProvider.getHistoricalBars(ticker, 'day', 252);
+      bars = await this.dataProvider.getHistoricalBars(ticker, 'day', 378); // ~252 trading days ≈ 378 calendar days
     } catch (err) {
       console.log(`[validateTicker] ${ticker} historical bars fetch failed, continuing without:`, err instanceof Error ? err.message : String(err));
     }
@@ -388,6 +388,18 @@ export class ValidateAllService {
       buyScore += 15; buySignalReasons.push('Bullish trend (price > SMA50 > SMA200)');
     } else if (trendLabel === 'Sideways') {
       buyScore += 5;
+    }
+
+    // 8. Longer-term bullish structure (10 pts): SMA50 > SMA200 even if price dipped below SMA50.
+    if (trendLabel !== 'Bullish' && sma50 !== null && sma200 !== null && sma50 > sma200) {
+      buyScore += 10; buySignalReasons.push('Bullish SMA structure (SMA50 > SMA200)');
+    }
+
+    // 9. Testing SMA50 support (8 pts): price within 5% below SMA50 in a longer-term uptrend.
+    if (sma50 !== null && sma200 !== null && sma50 > sma200 &&
+        currentPrice !== null && currentPrice < sma50 &&
+        (sma50 - currentPrice) / sma50 <= 0.05) {
+      buyScore += 8; buySignalReasons.push('Testing SMA50 support (pullback in uptrend)');
     }
 
     buyScore = Math.min(100, buyScore);

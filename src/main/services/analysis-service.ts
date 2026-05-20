@@ -256,6 +256,50 @@ export function findSwingHighLow(bars: Bar[], lookback = 20): { high: number | n
   };
 }
 
+// see docs/formulas.md#volume-profile-levels
+export function computeVolumeProfileLevels(
+  bars: Bar[],
+  binCount = 24
+): { poc: number; vah: number; val: number } | null {
+  if (bars.length === 0) return null;
+  const priceHigh = Math.max(...bars.map((b) => b.h));
+  const priceLow = Math.min(...bars.map((b) => b.l));
+  const priceRange = priceHigh - priceLow;
+  if (priceRange <= 0) return null;
+
+  const binSize = priceRange / binCount;
+  const bins = new Array<number>(binCount).fill(0);
+  for (const bar of bars) {
+    const startBin = Math.max(0, Math.floor((bar.l - priceLow) / binSize));
+    const endBin = Math.min(binCount - 1, Math.floor((bar.h - priceLow) / binSize));
+    const numBins = Math.max(1, endBin - startBin + 1);
+    const volPerBin = bar.v / numBins;
+    for (let b = startBin; b <= endBin; b++) bins[b] += volPerBin;
+  }
+
+  const maxVol = Math.max(...bins);
+  if (maxVol <= 0) return null;
+  const pocIdx = bins.indexOf(maxVol);
+  const poc = priceLow + (pocIdx + 0.5) * binSize;
+
+  // Value area: bins containing 70% of total volume (highest-vol first)
+  const totalVol = bins.reduce((s, v) => s + v, 0);
+  const vaTarget = totalVol * 0.70;
+  const sorted = bins.map((v, i) => ({ v, i })).sort((a, b) => b.v - a.v);
+  const vaSet = new Set<number>();
+  let acc = 0;
+  for (const { v, i } of sorted) {
+    if (acc >= vaTarget) break;
+    acc += v;
+    vaSet.add(i);
+  }
+  const vaIndices = Array.from(vaSet).sort((a, b) => a - b);
+  const val = priceLow + (vaIndices[0]!) * binSize;
+  const vah = priceLow + (vaIndices[vaIndices.length - 1]! + 1) * binSize;
+
+  return { poc: +poc.toFixed(4), vah: +vah.toFixed(4), val: +val.toFixed(4) };
+}
+
 // ─── Options helper functions ─────────────────────────────────────────────────
 
 function dteDays(expiration: string): number {
@@ -490,8 +534,10 @@ export class AnalysisService {
 
     // Swing low for entry zone lower bound.
     const swing = findSwingHighLow(bars, 20);
-    const entryZoneLow = swing.low;
-    const entryZoneHigh = sma50 !== null ? sma50 : currentPrice;
+    const rawA = swing.low;
+    const rawB = sma50 !== null ? sma50 : currentPrice;
+    const entryZoneLow = (rawA !== null && rawB !== null) ? Math.min(rawA, rawB) : (rawA ?? rawB);
+    const entryZoneHigh = (rawA !== null && rawB !== null) ? Math.max(rawA, rawB) : (rawA ?? rawB);
 
     // Stop-loss: 1.5× ATR below entry zone low.
     const stopLoss = (entryZoneLow !== null && atr !== null)
@@ -518,6 +564,28 @@ export class AnalysisService {
     if (fundamentals.profitMargin !== null && fundamentals.profitMargin >= 10) compositeScore += 1;
     if (fundamentals.roe !== null && fundamentals.roe >= 15) compositeScore += 1;
     if (fundamentals.debtToEquity !== null && fundamentals.debtToEquity < 1) compositeScore += 1;
+
+    // Volume profile scoring (+0–2). see docs/formulas.md#volume-profile-levels
+    const vpLevels = computeVolumeProfileLevels(bars);
+    let vpNote = '';
+    if (vpLevels !== null && currentPrice !== null) {
+      if (currentPrice > vpLevels.poc) {
+        compositeScore += 1; // price above POC → buyers in control
+      }
+      const nearVAL = currentPrice >= vpLevels.val * 0.98 && currentPrice <= vpLevels.val * 1.02;
+      if (currentPrice > vpLevels.vah) {
+        compositeScore += 1; // breakout above value area
+        vpNote = `VP: above VAH $${vpLevels.vah.toFixed(2)} (breakout ✓)`;
+      } else if (nearVAL) {
+        compositeScore += 1; // testing value area support
+        vpNote = `VP: near VAL $${vpLevels.val.toFixed(2)} (support test ✓)`;
+      } else if (currentPrice > vpLevels.poc) {
+        vpNote = `VP: above POC $${vpLevels.poc.toFixed(2)} ✓`;
+      } else {
+        vpNote = `VP: below POC $${vpLevels.poc.toFixed(2)}`;
+      }
+    }
+
     compositeScore = Math.min(10, compositeScore);
 
     // Fundamentals pass (basic screen criteria).
@@ -528,7 +596,7 @@ export class AnalysisService {
     );
 
     // Explanation.
-    const explanation = `Price ${currentPrice !== null ? `$${currentPrice.toFixed(2)}` : '—'} above $${sma50?.toFixed(2) ?? '?'}/$${sma200?.toFixed(2) ?? '?'} SMA${trend === 'bullish' ? ' (bullish stack)' : trend === 'bearish' ? ' (bearish stack)' : ' (sideways)'}. RSI ${rsi !== null ? rsi.toFixed(1) : '—'} ${rsi !== null && rsi >= 40 && rsi <= 65 ? '✓' : '✗'} (target 40–65). Composite score ${compositeScore}/10.`;
+    const explanation = `Price ${currentPrice !== null ? `$${currentPrice.toFixed(2)}` : '—'} above $${sma50?.toFixed(2) ?? '?'}/$${sma200?.toFixed(2) ?? '?'} SMA${trend === 'bullish' ? ' (bullish stack)' : trend === 'bearish' ? ' (bearish stack)' : ' (sideways)'}. RSI ${rsi !== null ? rsi.toFixed(1) : '—'} ${rsi !== null && rsi >= 40 && rsi <= 65 ? '✓' : '✗'} (target 40–65).${vpNote ? ' ' + vpNote + '.' : ''} Composite score ${compositeScore}/10.`;
 
     return {
       mode: 'buy', ticker, lastPrice: price,
