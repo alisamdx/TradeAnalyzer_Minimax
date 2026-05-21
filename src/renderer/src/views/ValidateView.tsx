@@ -15,6 +15,17 @@ import type {
 
 // `window.api` is declared once in `src/renderer/src/global.d.ts`.
 
+// ─── CSV export row ───────────────────────────────────────────────────────────
+
+interface CsvRow {
+  ticker: string; companyName: string | null; lastPrice: number | null;
+  trend: string; entryZoneLow: number | null; entryZoneHigh: number | null;
+  stopLoss: number | null; target: number | null;
+  strength: string; score: number; reasons: string[];
+  analystBuy: number | null; analystHold: number | null; analystSell: number | null;
+  avgPriceTarget: number | null; upsidePct: number | null; analystBadge: string | null;
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function fmtPrice(v: number | null): string {
@@ -140,11 +151,14 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
   const [scanningSignals, setScanningSignals] = useState(false);
   const [scanProgress, setScanProgress] = useState<{ done: number; total: number } | null>(null);
 
+  const [exportCache, setExportCache] = useState<Record<string, CsvRow>>({});
+
   // Stream per-ticker signals from Validate All runs.
   useEffect(() => {
-    return window.api.validate.onTickerSignal(({ ticker, strength }) => {
-      setTickerSignals(prev => ({ ...prev, [ticker]: strength }));
+    return window.api.validate.onTickerSignal((data) => {
+      setTickerSignals(prev => ({ ...prev, [data.ticker]: data.strength }));
       setScanProgress(prev => prev ? { ...prev, done: prev.done + 1 } : null);
+      setExportCache(prev => ({ ...prev, [data.ticker]: data }));
     });
   }, []);
 
@@ -175,6 +189,18 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
       const data = await window.api.validate.openTickerById({ ticker });
       setResult(data);
       setTickerSignals(prev => ({ ...prev, [ticker]: data.indicators.buySignalStrength }));
+      const lastBar = data.chart.bars[data.chart.bars.length - 1];
+      setExportCache(prev => ({ ...prev, [ticker]: {
+        ticker: data.ticker, companyName: data.companyName, lastPrice: lastBar?.c ?? null,
+        trend: data.trend.label,
+        entryZoneLow: data.chart.entryZoneLow, entryZoneHigh: data.chart.entryZoneHigh,
+        stopLoss: data.chart.stopLoss, target: data.chart.target,
+        strength: data.indicators.buySignalStrength, score: data.indicators.buySignalScore,
+        reasons: data.indicators.buySignalReasons,
+        analystBuy: data.marketOpinion.buyCount, analystHold: data.marketOpinion.holdCount,
+        analystSell: data.marketOpinion.sellCount, avgPriceTarget: data.marketOpinion.avgPriceTarget,
+        upsidePct: data.marketOpinion.upsidePct, analystBadge: data.marketOpinion.badge,
+      }}));
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -219,15 +245,23 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
     if (!selectedWatchlistId) return;
     setIsValidatingAll(true);
     setError(null);
-    setValidateProgress({ done: 0, total: tickers.length });
+    const total = tickers.length;
+    setValidateProgress({ done: 0, total });
+
+    let done = 0;
+    const unsub = window.api.validate.onTickerSignal(() => {
+      done += 1;
+      setValidateProgress({ done, total });
+    });
+
     try {
       await window.api.validate.runValidateAll(selectedWatchlistId);
-      // After run, refresh tickers (they now have cached results)
       const updated = await window.api.validate.getTickers(selectedWatchlistId);
       setTickers(updated);
     } catch (e) {
       setError((e as Error).message);
     } finally {
+      unsub();
       setIsValidatingAll(false);
       setValidateProgress(null);
     }
@@ -238,6 +272,66 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
     setIsValidatingAll(false);
     setValidateProgress(null);
   }, []);
+
+  const exportFilteredToCsv = useCallback(() => {
+    const filtered = tickers.filter(item => {
+      if (buySignalFilter === 'all') return true;
+      const sig = tickerSignals[item.ticker];
+      return sig === buySignalFilter;
+    });
+
+    const fmt = (v: number | null, decimals = 2) =>
+      v !== null && v !== undefined ? v.toFixed(decimals) : '';
+    const esc = (s: string | null | undefined) => {
+      if (s == null) return '';
+      const str = String(s);
+      return str.includes(',') || str.includes('"') || str.includes('\n')
+        ? `"${str.replace(/"/g, '""')}"` : str;
+    };
+
+    const headers = [
+      'Ticker', 'Company Name', 'Current Price', 'Trend',
+      'Entry Zone Low', 'Entry Zone High', 'Stop Loss', 'Target', 'Risk/Reward',
+      'Buy Signal', 'Buy Signal Score', 'Buy Signal Notes',
+      'Analyst Buy', 'Analyst Hold', 'Analyst Sell', 'Avg Price Target', 'Analyst Upside %', 'Analyst Rating',
+    ];
+
+    const rows = filtered.map(item => {
+      const d = exportCache[item.ticker];
+      if (!d) return [item.ticker, item.name ?? '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ''];
+      const rr = d.entryZoneLow !== null && d.stopLoss !== null && d.target !== null && d.entryZoneLow !== d.stopLoss
+        ? ((d.target - d.entryZoneLow) / (d.entryZoneLow - d.stopLoss)).toFixed(2) : '';
+      return [
+        item.ticker,
+        esc(d.companyName),
+        fmt(d.lastPrice),
+        d.trend,
+        fmt(d.entryZoneLow),
+        fmt(d.entryZoneHigh),
+        fmt(d.stopLoss),
+        fmt(d.target),
+        rr,
+        d.strength,
+        d.score.toString(),
+        esc(d.reasons.join('; ')),
+        d.analystBuy?.toString() ?? '',
+        d.analystHold?.toString() ?? '',
+        d.analystSell?.toString() ?? '',
+        fmt(d.avgPriceTarget),
+        fmt(d.upsidePct, 1),
+        d.analystBadge ?? '',
+      ];
+    });
+
+    const csv = [headers, ...rows].map(r => r.join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `validate-${buySignalFilter}-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [tickers, buySignalFilter, tickerSignals, exportCache]);
 
   const scanAllSignals = useCallback(async () => {
     if (!selectedWatchlistId || scanningSignals) return;
@@ -907,6 +1001,16 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
                 <div className="signal-scan-progress">
                   Scanning {scanProgress.done}/{scanProgress.total}…
                 </div>
+              )}
+              {tickers.some(t => exportCache[t.ticker]) && (
+                <button
+                  className="signal-scan-btn"
+                  onClick={exportFilteredToCsv}
+                  title={`Export ${buySignalFilter === 'all' ? 'all' : buySignalFilter} tickers to CSV`}
+                  style={{ marginTop: 4, width: '100%', fontSize: 11 }}
+                >
+                  ↓ Export CSV
+                </button>
               )}
             </div>
           )}

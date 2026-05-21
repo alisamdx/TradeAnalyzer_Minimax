@@ -65,11 +65,25 @@ export function registerValidateIpc(
           tickers,
           undefined,
           (result) => {
+            const lastBar = result.chart.bars[result.chart.bars.length - 1];
             e.sender.send('validate:ticker-signal', {
               ticker: result.ticker,
+              companyName: result.companyName,
+              lastPrice: lastBar?.c ?? null,
               strength: result.indicators.buySignalStrength,
               score: result.indicators.buySignalScore,
-              reasons: result.indicators.buySignalReasons
+              reasons: result.indicators.buySignalReasons,
+              trend: result.trend.label,
+              entryZoneLow: result.chart.entryZoneLow,
+              entryZoneHigh: result.chart.entryZoneHigh,
+              stopLoss: result.chart.stopLoss,
+              target: result.chart.target,
+              analystBuy: result.marketOpinion.buyCount,
+              analystHold: result.marketOpinion.holdCount,
+              analystSell: result.marketOpinion.sellCount,
+              avgPriceTarget: result.marketOpinion.avgPriceTarget,
+              upsidePct: result.marketOpinion.upsidePct,
+              analystBadge: result.marketOpinion.badge,
             });
           }
         );

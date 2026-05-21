@@ -155,7 +155,16 @@ function buildApi() {
     getStatus: (watchlistId: number) =>
       invoke<{ run: JobRunInfo; progress: TickerStatusRow[] } | null>('validate:get-status', watchlistId),
     cancel: () => invoke<boolean>('validate:cancel'),
-    onTickerSignal: (callback: (data: { ticker: string; strength: 'strong' | 'moderate' | 'none'; score: number; reasons: string[] }) => void) => {
+    onTickerSignal: (callback: (data: {
+      ticker: string; companyName: string | null; lastPrice: number | null;
+      strength: 'strong' | 'moderate' | 'none'; score: number; reasons: string[];
+      trend: 'Bullish' | 'Bearish' | 'Sideways';
+      entryZoneLow: number | null; entryZoneHigh: number | null;
+      stopLoss: number | null; target: number | null;
+      analystBuy: number | null; analystHold: number | null; analystSell: number | null;
+      avgPriceTarget: number | null; upsidePct: number | null;
+      analystBadge: 'BUY' | 'HOLD' | 'SELL' | null;
+    }) => void) => {
       const handler = (_: any, data: any) => callback(data);
       ipcRenderer.on('validate:ticker-signal', handler);
       return () => ipcRenderer.removeListener('validate:ticker-signal', handler);
