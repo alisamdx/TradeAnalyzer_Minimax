@@ -75,6 +75,8 @@ export class WatchlistService {
   private readonly renameStmt;
   private readonly deleteStmt;
   private readonly deleteSnapshotsStmt;
+  private readonly deleteScreenRunsStmt;
+  private readonly deleteJobRunsStmt;
   private readonly listItemsStmt;
   private readonly insertItemStmt;
   private readonly findItemStmt;
@@ -111,6 +113,8 @@ export class WatchlistService {
     );
     this.deleteStmt = db.prepare('DELETE FROM watchlists WHERE id = ?');
     this.deleteSnapshotsStmt = db.prepare('DELETE FROM analysis_snapshots WHERE watchlist_id = ?');
+    this.deleteScreenRunsStmt = db.prepare('DELETE FROM screen_runs WHERE watchlist_id = ?');
+    this.deleteJobRunsStmt = db.prepare('DELETE FROM job_runs WHERE watchlist_id = ?');
     this.deleteItemsStmt = db.prepare('DELETE FROM watchlist_items WHERE watchlist_id = ?');
     this.listItemsStmt = db.prepare(
       `SELECT wi.id, wi.watchlist_id, wi.ticker, wi.notes, wi.added_at,
@@ -199,9 +203,11 @@ export class WatchlistService {
         'The Default watchlist cannot be deleted (FR-1.3). It can be renamed.'
       );
     }
-    // Delete items first, then snapshots, then the watchlist
+    // Delete all child rows before the watchlist (no CASCADE on these FKs)
     this.deleteItemsStmt.run(id);
     this.deleteSnapshotsStmt.run(id);
+    this.deleteScreenRunsStmt.run(id);
+    this.deleteJobRunsStmt.run(id);
     this.deleteStmt.run(id);
   }
 

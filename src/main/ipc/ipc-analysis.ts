@@ -81,7 +81,7 @@ export function registerAnalysisIpc(
   ipcMain.handle(
     'analysis:run',
     async (
-      _e,
+      e,
       args: { watchlistId: number; mode: AnalysisMode; tickerSubset?: string[] }
     ): Promise<{ ok: true; value: AnalysisRunResult } | { ok: false; error: { code: string; message: string } }> => {
       try {
@@ -89,9 +89,8 @@ export function registerAnalysisIpc(
         const tickers = args.tickerSubset ?? items.map((i: import('@shared/types.js').WatchlistItem) => i.ticker);
         if (tickers.length === 0) return fail(new Error('No tickers to analyze.'));
 
-        const onProgress = (_current: number, _total: number, _ticker: string) => {
-          // Progress events would be sent via webContents.send in a real implementation.
-          // For now, analysis is synchronous enough that the IPC handler handles it.
+        const onProgress = (current: number, total: number, ticker: string) => {
+          e.sender.send('analysis:progress', { current, total, ticker });
         };
 
         const results = await analysisService.analyzeWatchlist(

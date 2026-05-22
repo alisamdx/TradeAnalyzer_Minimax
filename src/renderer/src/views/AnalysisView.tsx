@@ -122,6 +122,10 @@ export function AnalysisView({ initialTicker, clearInitialTicker }: AnalysisView
     const totalCount = singleTickerMode ? 1 : tickerCount;
     setProgress({ current: 0, total: totalCount, ticker: singleTickerMode ?? '…' });
 
+    const unsub = window.api.analysis.onProgress(({ current, total, ticker }) => {
+      setProgress({ current, total, ticker });
+    });
+
     try {
       const result = await window.api.analysis.run(selectedWatchlistId, selectedMode, tickersToAnalyze);
       setRunResult(result);
@@ -132,9 +136,10 @@ export function AnalysisView({ initialTicker, clearInitialTicker }: AnalysisView
     } catch (e) {
       setError((e as Error).message);
     } finally {
+      unsub();
       setIsRunning(false);
       setProgress(null);
-      setSingleTickerMode(null); // Reset single ticker mode after run
+      setSingleTickerMode(null);
     }
   }, [selectedWatchlistId, selectedMode, tickerCount, singleTickerMode]);
 

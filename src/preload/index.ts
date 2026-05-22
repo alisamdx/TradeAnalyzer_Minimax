@@ -136,7 +136,12 @@ function buildApi() {
     clearSnapshots: (watchlistId: number) => invoke<{ success: boolean }>('analysis:clear-snapshots', watchlistId),
     saveAsWatchlist: (snapshotId: number, resultIndices: number[], name: string) =>
       invoke<Watchlist>('analysis:save-as-watchlist', snapshotId, resultIndices, name),
-    cancel: () => invoke<boolean>('analysis:cancel')
+    cancel: () => invoke<boolean>('analysis:cancel'),
+    onProgress: (callback: (data: { current: number; total: number; ticker: string }) => void) => {
+      const handler = (_: any, data: any) => callback(data);
+      ipcRenderer.on('analysis:progress', handler);
+      return () => ipcRenderer.removeListener('analysis:progress', handler);
+    }
   };
 
   const validateAll = {
