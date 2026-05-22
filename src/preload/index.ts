@@ -339,6 +339,7 @@ function buildApi() {
         wheelSuitability: number | null;
         targetStrike: number | null;
         estimatedPremium: number | null;
+        expiryDate: string | null;
         lastPrice: number | null;
       }[];
       error?: string;
@@ -376,6 +377,7 @@ function buildApi() {
           wheelSuitability: number | null;
           targetStrike: number | null;
           estimatedPremium: number | null;
+          expiryDate: string | null;
           lastPrice: number | null;
         }[];
       };

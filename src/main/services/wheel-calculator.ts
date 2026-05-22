@@ -8,6 +8,7 @@ export interface WheelMetrics {
   suitabilityScore: number;  // 0-100
   targetStrike: number | null;
   estimatedPremium: number | null;
+  expiryDate: string | null;  // ISO date of nearest monthly expiry ≥25 DTE
 }
 
 /**
@@ -85,6 +86,32 @@ export function getWheelScoreColor(score: number): string {
 }
 
 /**
+ * Return the nearest 3rd-Friday monthly options expiry that is at least
+ * minDte calendar days from fromDate (defaults to today).
+ * Result is an ISO-8601 date string (YYYY-MM-DD).
+ */
+export function calculateExpiryDate(minDte = 25, fromDate: Date = new Date()): string {
+  const earliest = new Date(fromDate);
+  earliest.setDate(earliest.getDate() + minDte);
+
+  let year = earliest.getFullYear();
+  let month = earliest.getMonth();
+
+  for (;;) {
+    // 3rd Friday = first day of month + offset to Friday + 14 days
+    const firstDow = new Date(year, month, 1).getDay(); // 0=Sun … 6=Sat
+    const toFirstFriday = (5 - firstDow + 7) % 7;
+    const thirdFriday = new Date(year, month, 1 + toFirstFriday + 14);
+
+    if (thirdFriday >= earliest) {
+      return thirdFriday.toISOString().split('T')[0]!;
+    }
+
+    if (++month > 11) { month = 0; year++; }
+  }
+}
+
+/**
  * Calculate all Wheel metrics for a ticker
  */
 export function calculateWheelMetrics(
@@ -94,10 +121,12 @@ export function calculateWheelMetrics(
   const suitabilityScore = calculateWheelSuitability(ratios, quote);
   const targetStrike = calculateTargetStrike(quote?.last ?? null);
   const estimatedPremium = calculateEstimatedPremium(targetStrike);
+  const expiryDate = calculateExpiryDate();
 
   return {
     suitabilityScore,
     targetStrike,
-    estimatedPremium
+    estimatedPremium,
+    expiryDate
   };
 }

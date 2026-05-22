@@ -112,6 +112,63 @@ function getApiKey(db: ReturnType<typeof openDatabase>): string {
   return '';
 }
 
+// Repair watchlist_items if it was created before the migration system (missing watchlist_id).
+// Uses SQLite's table-rename dance because ALTER TABLE can't add NOT NULL without a default.
+function repairWatchlistItems(db: ReturnType<typeof openDatabase>): void {
+  type ColInfo = { name: string };
+  const cols = db.prepare("PRAGMA table_info(watchlist_items)").all() as ColInfo[];
+  if (cols.length === 0 || cols.some(c => c.name === 'watchlist_id')) return;
+
+  console.log('[repair] watchlist_items missing watchlist_id — recreating table');
+
+  // Ensure there is at least one watchlist to attach orphaned items to.
+  const firstWatchlist = db.prepare(
+    'SELECT id FROM watchlists ORDER BY is_default DESC, id ASC LIMIT 1'
+  ).get() as { id: number } | undefined;
+  const fallbackId = firstWatchlist?.id ?? null;
+
+  db.exec('BEGIN');
+  try {
+    db.exec(`
+      CREATE TABLE watchlist_items_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        watchlist_id INTEGER NOT NULL REFERENCES watchlists(id) ON DELETE CASCADE,
+        ticker TEXT NOT NULL,
+        notes TEXT,
+        added_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+      );
+    `);
+
+    if (fallbackId !== null) {
+      // Copy rows that exist in the old table, assigning them all to the fallback watchlist.
+      // Only copy columns that definitely exist in the old schema.
+      const oldCols = (db.prepare("PRAGMA table_info(watchlist_items)").all() as ColInfo[]).map(c => c.name);
+      const ticker  = oldCols.includes('ticker')   ? 'ticker'   : "''";
+      const notes   = oldCols.includes('notes')    ? 'notes'    : 'NULL';
+      const addedAt = oldCols.includes('added_at') ? 'added_at' : "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
+      db.exec(`
+        INSERT INTO watchlist_items_new (watchlist_id, ticker, notes, added_at)
+        SELECT ${fallbackId}, ${ticker}, ${notes}, ${addedAt}
+        FROM watchlist_items;
+      `);
+    }
+
+    db.exec('DROP TABLE watchlist_items;');
+    db.exec('ALTER TABLE watchlist_items_new RENAME TO watchlist_items;');
+    db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_watchlist_items_unique
+        ON watchlist_items (watchlist_id, upper(ticker));
+      CREATE INDEX IF NOT EXISTS idx_watchlist_items_watchlist
+        ON watchlist_items (watchlist_id);
+    `);
+    db.exec('COMMIT');
+    console.log('[repair] watchlist_items recreated successfully');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+}
+
 app.whenReady().then(() => {
   pruneOldLogsOnStartup();
 
@@ -122,6 +179,7 @@ app.whenReady().then(() => {
   if (ran.length > 0) {
     console.log(`[migrations] applied ${ran.length} (head=${currentSchemaVersion(db)})`);
   }
+  repairWatchlistItems(db);
 
   // Phase 1 — watchlist service.
   const watchlistService = new WatchlistService(db);

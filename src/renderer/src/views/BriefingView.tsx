@@ -43,6 +43,7 @@ interface TopSetup {
   wheelSuitability: number | null;
   targetStrike: number | null;
   estimatedPremium: number | null;
+  expiryDate: string | null;
   lastPrice: number | null;
 }
 
@@ -306,6 +307,9 @@ export function BriefingView() {
                   <th onClick={() => requestSort('ticker')} className="sortable">
                     Ticker {getSortIndicator('ticker')}
                   </th>
+                  <th onClick={() => requestSort('lastPrice')} className="sortable num">
+                    Price {getSortIndicator('lastPrice')}
+                  </th>
                   <th onClick={() => requestSort('roe')} className="sortable num">
                     ROE {getSortIndicator('roe')}
                   </th>
@@ -322,7 +326,8 @@ export function BriefingView() {
                     Wheel Score {getSortIndicator('wheelSuitability')}
                   </th>
                   <th className="num">Target Strike</th>
-                  <th className="num">Est. Premium</th>
+                  <th className="num">Put Premium</th>
+                  <th className="num">Expiry</th>
                 </tr>
               </thead>
               <tbody>
@@ -344,6 +349,7 @@ export function BriefingView() {
                         <strong>{setup.ticker}</strong>
                       </span>
                     </td>
+                    <td className="num">{fmtPrice(setup.lastPrice)}</td>
                     <td className="num">{fmtPct(setup.roe)}</td>
                     <td className="num">{setup.peRatio?.toFixed(1) ?? '—'}</td>
                     <td className="num">{setup.debtToEquity?.toFixed(2) ?? '—'}</td>
@@ -382,6 +388,7 @@ export function BriefingView() {
                     </td>
                     <td className="num">{fmtPrice(setup.targetStrike)}</td>
                     <td className="num">{fmtPrice(setup.estimatedPremium)}</td>
+                    <td className="num">{setup.expiryDate ?? '—'}</td>
                   </tr>
                 ))}
               </tbody>

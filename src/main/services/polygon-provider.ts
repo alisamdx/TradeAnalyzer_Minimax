@@ -360,91 +360,129 @@ export class PolygonDataProvider implements DataProvider {
     };
   }
 
-  /** Fetch current IV from ATM options for a ticker. */
-  async getOptionsIV(ticker: string): Promise<{ currentIv: number | null; iv52WkHigh: number | null; iv52WkLow: number | null }> {
+  /**
+   * Single snapshot fetch that returns IV + the put premium closest to
+   * targetStrike for targetExpiry.  Pass null for both target args to
+   * skip put-premium extraction (backward-compat with callers that only
+   * need IV).
+   */
+  async getOptionsIVAndPremium(
+    ticker: string,
+    targetExpiry: string | null,
+    targetStrike: number | null
+  ): Promise<{
+    currentIv: number | null;
+    iv52WkHigh: number | null;
+    iv52WkLow: number | null;
+    putPremium: number | null;
+  }> {
+    const noData = { currentIv: null, iv52WkHigh: null, iv52WkLow: null, putPremium: null };
     try {
-      // Fetch options snapshot - get ATM options to derive IV
-      // Use a separate try-catch to handle 404s gracefully (some tickers have no options)
       let data: Record<string, unknown>;
       try {
-        data = await this.fetchWithRetry(
-          `/v3/snapshot/options/${ticker}`,
-          { limit: '250' }
-        );
+        data = await this.fetchWithRetry(`/v3/snapshot/options/${ticker}`, { limit: '250' });
       } catch (fetchError) {
-        // 404 means no options data available for this ticker
         const errMsg = fetchError instanceof Error ? fetchError.message : String(fetchError);
-        if (errMsg.includes('404') || errMsg.includes('NotFound')) {
-          return { currentIv: null, iv52WkHigh: null, iv52WkLow: null };
-        }
+        if (errMsg.includes('404') || errMsg.includes('NotFound')) return noData;
         throw fetchError;
       }
 
-      // The results is directly an array of options contracts
       const contracts = data.results as unknown[] | undefined;
-      if (!contracts || contracts.length === 0) {
-        return { currentIv: null, iv52WkHigh: null, iv52WkLow: null };
-      }
+      if (!contracts || contracts.length === 0) return noData;
 
-      // Get underlying price from the first contract's underlying_asset field
+      // Underlying price from first contract
       let underlyingPrice: number | undefined;
-      if (contracts.length > 0) {
-        const firstContract = contracts[0] as Record<string, unknown>;
-        if (typeof firstContract['underlying_asset'] === 'object' && firstContract['underlying_asset'] !== null) {
-          underlyingPrice = (firstContract['underlying_asset'] as Record<string, unknown>)?.price as number | undefined;
-        }
+      const firstCo = contracts[0] as Record<string, unknown>;
+      if (typeof firstCo['underlying_asset'] === 'object' && firstCo['underlying_asset'] !== null) {
+        underlyingPrice = (firstCo['underlying_asset'] as Record<string, unknown>)['price'] as number | undefined;
       }
 
-      // Find ATM options (strike closest to current price) and get their IV
       let atmIv: number | null = null;
-      let minDistance = Infinity;
-
+      let minAtmDist = Infinity;
       const allIvs: number[] = [];
 
+      // For put-premium search
+      let bestPutPrice: number | null = null;
+      let minStrikeDist = Infinity;
+
       for (const c of contracts) {
-        const co = c as Record<string, unknown>;
-        const strike = typeof co['strike_price'] === 'number' ? co['strike_price'] as number : 0;
+        const co      = c as Record<string, unknown>;
+        const details = (co['details'] as Record<string, unknown>) ?? {};
+
+        // strike_price lives at top level in the unfiltered snapshot
+        const strike = typeof co['strike_price'] === 'number'
+          ? co['strike_price'] as number
+          : typeof details['strike_price'] === 'number'
+            ? details['strike_price'] as number
+            : 0;
+
         const iv = typeof co['implied_volatility'] === 'number' ? co['implied_volatility'] as number : 0;
 
+        // ── IV aggregation ──────────────────────────────────────────────
         if (iv > 0) {
           allIvs.push(iv);
-
-          // Find ATM option
           if (underlyingPrice && strike > 0) {
-            const distance = Math.abs(strike - underlyingPrice);
-            if (distance < minDistance) {
-              minDistance = distance;
-              atmIv = iv;
+            const d = Math.abs(strike - underlyingPrice);
+            if (d < minAtmDist) { minAtmDist = d; atmIv = iv; }
+          }
+        }
+
+        // ── Put-premium extraction ──────────────────────────────────────
+        if (targetExpiry && targetStrike !== null) {
+          const expiry = (details['expiration_date'] ?? co['expiration_date'] ?? '') as string;
+          const ctype  = String(details['contract_type'] ?? co['contract_type'] ?? '').toLowerCase();
+          if (expiry === targetExpiry && ctype === 'put' && strike > 0) {
+            const strikeDist = Math.abs(strike - targetStrike);
+            if (strikeDist < minStrikeDist) {
+              minStrikeDist = strikeDist;
+              // Price: try day.close, day.vwap, last_trade.price
+              const day   = (co['day']        as Record<string, unknown>) ?? {};
+              const trade = (co['last_trade'] as Record<string, unknown>) ?? {};
+              const price =
+                (typeof day['close']   === 'number' && (day['close']   as number) > 0 ? day['close']   as number : null) ??
+                (typeof day['vwap']    === 'number' && (day['vwap']    as number) > 0 ? day['vwap']    as number : null) ??
+                (typeof trade['price'] === 'number' && (trade['price'] as number) > 0 ? trade['price'] as number : null);
+              bestPutPrice = price ?? null;
             }
           }
         }
       }
 
-      // If no underlying price found, use average IV of near-term options
       if (!atmIv && allIvs.length > 0) {
-        // Take median IV as fallback
         allIvs.sort((a, b) => a - b);
         atmIv = allIvs[Math.floor(allIvs.length / 2)] ?? null;
       }
 
-      // Calculate IV range from the options we have
       let iv52WkHigh: number | null = null;
       let iv52WkLow: number | null = null;
       if (allIvs.length > 0) {
         allIvs.sort((a, b) => a - b);
-        iv52WkLow = allIvs[0] ?? null;
+        iv52WkLow  = allIvs[0] ?? null;
         iv52WkHigh = allIvs[allIvs.length - 1] ?? null;
       }
 
       return {
-        currentIv: atmIv ? atmIv * 100 : null,  // Convert decimal to percentage (0.285 -> 28.5)
-        iv52WkHigh: iv52WkHigh ? iv52WkHigh * 100 : null,
-        iv52WkLow: iv52WkLow ? iv52WkLow * 100 : null
+        currentIv:   atmIv        ? atmIv        * 100 : null,
+        iv52WkHigh:  iv52WkHigh   ? iv52WkHigh   * 100 : null,
+        iv52WkLow:   iv52WkLow    ? iv52WkLow    * 100 : null,
+        putPremium:  bestPutPrice
       };
     } catch (err) {
-      console.log(`[getOptionsIV] ${ticker} outer catch:`, err instanceof Error ? err.message : String(err));
-      return { currentIv: null, iv52WkHigh: null, iv52WkLow: null };
+      console.log(`[getOptionsIVAndPremium] ${ticker}:`, err instanceof Error ? err.message : String(err));
+      return noData;
     }
+  }
+
+  /** Fetch current IV from ATM options for a ticker. */
+  async getOptionsIV(ticker: string): Promise<{ currentIv: number | null; iv52WkHigh: number | null; iv52WkLow: number | null }> {
+    const result = await this.getOptionsIVAndPremium(ticker, null, null);
+    return { currentIv: result.currentIv, iv52WkHigh: result.iv52WkHigh, iv52WkLow: result.iv52WkLow };
+  }
+
+  /** @deprecated Use getOptionsIVAndPremium for combined fetches */
+  async getWheelPutPremium(ticker: string, expiryDate: string, targetStrike: number): Promise<number | null> {
+    const result = await this.getOptionsIVAndPremium(ticker, expiryDate, targetStrike);
+    return result.putPremium;
   }
 
   async getIndexConstituents(_index: Universe): Promise<ConstituentRow[]> {

@@ -44,6 +44,7 @@ export interface TopSetup {
   wheelSuitability: number | null;
   targetStrike: number | null;
   estimatedPremium: number | null;
+  expiryDate: string | null;
   lastPrice: number | null;
 }
 
@@ -230,6 +231,19 @@ export class BriefingService {
   // ─── Top Setups ─────────────────────────────────────────────────────────────
 
   async getTopSetups(): Promise<TopSetup[]> {
+    // Nearest 3rd-Friday monthly expiry at least 25 days out (inline to avoid import issues)
+    function nextMonthlyExpiry(): string {
+      const earliest = new Date();
+      earliest.setDate(earliest.getDate() + 25);
+      let year = earliest.getFullYear();
+      let month = earliest.getMonth();
+      for (;;) {
+        const firstDow = new Date(year, month, 1).getDay();
+        const thirdFriday = new Date(year, month, 1 + ((5 - firstDow + 7) % 7) + 14);
+        if (thirdFriday >= earliest) return thirdFriday.toISOString().split('T')[0]!;
+        if (++month > 11) { month = 0; year++; }
+      }
+    }
     try {
       // Query quality stocks from recent screener runs
       const results = this.db.prepare(`
@@ -264,48 +278,50 @@ export class BriefingService {
         last_price: string;
       }>;
 
-      // Fetch IV for each ticker in parallel
-      const ivPromises = results.map(async (r) => {
-        try {
-          const ivData = await this.dataProvider.getOptionsIV(r.ticker);
-          return { ticker: r.ticker, currentIv: ivData.currentIv };
-        } catch {
-          return { ticker: r.ticker, currentIv: null };
-        }
+      const expiryDate = nextMonthlyExpiry();
+
+      // Compute per-ticker strikes upfront so the premium fetch has a target
+      const tickerMeta = results.map(r => ({
+        ticker:      r.ticker,
+        roe:         parseFloat(r.roe)           || null,
+        peRatio:     parseFloat(r.pe_ratio)      || null,
+        debtToEquity:parseFloat(r.debt_to_equity)|| null,
+        marketCap:   parseFloat(r.market_cap)    || null,
+        fcf:         parseFloat(r.fcf)           || null,
+        lastPrice:   parseFloat(r.last_price)    || null,
+        targetStrike:(parseFloat(r.last_price) || 0) * 0.92 || null
+      }));
+
+      // Single options snapshot call per ticker → extracts IV + nearest put premium
+      const marketDataPromises = tickerMeta.map(async (m) => {
+        const result = await this.dataProvider
+          .getOptionsIVAndPremium(m.ticker, expiryDate, m.targetStrike)
+          .catch(() => ({ currentIv: null, iv52WkHigh: null, iv52WkLow: null, putPremium: null }));
+        return { ticker: m.ticker, currentIv: result.currentIv, livePremium: result.putPremium };
       });
-      const ivResults = await Promise.all(ivPromises);
-      const ivMap = new Map(ivResults.map((iv) => [iv.ticker, iv.currentIv]));
+      const marketData = await Promise.all(marketDataPromises);
+      const mdMap = new Map(marketData.map(d => [d.ticker, d]));
 
-      const setups: TopSetup[] = results.map(r => {
-        const roe = parseFloat(r.roe) || null;
-        const peRatio = parseFloat(r.pe_ratio) || null;
-        const debtToEquity = parseFloat(r.debt_to_equity) || null;
-        const marketCap = parseFloat(r.market_cap) || null;
-        const fcf = parseFloat(r.fcf) || null;
-        const lastPrice = parseFloat(r.last_price) || null;
-        const currentIv = ivMap.get(r.ticker) ?? null;
-
-        // Polygon returns IV as percentage already (e.g., 28.5 for 28.5%)
-        const currentIvPct = currentIv;
-
-        // Calculate wheel metrics (simplified)
-        const wheelSuitability = this.calculateWheelSuitability(roe, debtToEquity, marketCap);
-        const targetStrike = lastPrice ? lastPrice * 0.92 : null;
-        const estimatedPremium = targetStrike ? targetStrike * 0.012 : null;
-        const fcfYield = marketCap && fcf ? (fcf / marketCap) * 100 : null;
+      const setups: TopSetup[] = tickerMeta.map(m => {
+        const md = mdMap.get(m.ticker);
+        const currentIv = md?.currentIv ?? null;
+        const wheelSuitability = this.calculateWheelSuitability(m.roe, m.debtToEquity, m.marketCap);
+        const estimatedPremium = md?.livePremium ?? (m.targetStrike ? m.targetStrike * 0.012 : null);
+        const fcfYield = m.marketCap && m.fcf ? (m.fcf / m.marketCap) * 100 : null;
 
         return {
-          ticker: r.ticker,
-          roe,
-          peRatio,
-          debtToEquity,
-          marketCap,
+          ticker:        m.ticker,
+          roe:           m.roe,
+          peRatio:       m.peRatio,
+          debtToEquity:  m.debtToEquity,
+          marketCap:     m.marketCap,
           fcfYield,
-          currentIv: currentIvPct,
+          currentIv,
           wheelSuitability,
-          targetStrike,
+          targetStrike:  m.targetStrike,
           estimatedPremium,
-          lastPrice
+          expiryDate,
+          lastPrice:     m.lastPrice
         };
       });
 
