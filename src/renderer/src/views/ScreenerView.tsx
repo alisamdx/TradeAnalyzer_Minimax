@@ -89,6 +89,7 @@ export function ScreenerView() {
   const [error, setError] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
+  const [screenProgress, setScreenProgress] = useState<{ scanned: number; total: number; ticker?: string } | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [cacheStatus, setCacheStatus] = useState<CacheStatus | null>(null);
   const [watchlists, setWatchlists] = useState<{ id: number; name: string }[]>([]);
@@ -268,9 +269,12 @@ export function ScreenerView() {
 
     isRunningRef.current = true;
     setIsRunning(true);
+    setScreenProgress(null);
     setError(null);
     setResults([]);
     setCurrentPage(1);
+
+    const unsubProgress = window.api.screen.onProgress(p => setScreenProgress(p));
     try {
       const response = await window.api.screen.run({ ...criteria, universe, mode });
       setResults(response.rows);
@@ -280,6 +284,8 @@ export function ScreenerView() {
     } catch (e) {
       setError((e as Error).message);
     } finally {
+      unsubProgress();
+      setScreenProgress(null);
       setIsRunning(false);
       isRunningRef.current = false;
     }
@@ -629,6 +635,35 @@ export function ScreenerView() {
 
         {/* ── Right: results ── */}
         <main className="screener-results">
+          {/* Progress bar */}
+          {isRunning && (
+            <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 5 }}>
+                <span style={{ color: 'var(--text-muted)' }}>
+                  {screenProgress
+                    ? `Screening ${screenProgress.ticker ?? '…'} (${screenProgress.scanned} / ${screenProgress.total})`
+                    : 'Starting…'}
+                </span>
+                {screenProgress && (
+                  <span style={{ color: 'var(--text-muted)' }}>
+                    {Math.round((screenProgress.scanned / screenProgress.total) * 100)}%
+                  </span>
+                )}
+              </div>
+              <div style={{ height: 4, borderRadius: 2, background: 'var(--border)', overflow: 'hidden' }}>
+                <div style={{
+                  height: '100%',
+                  borderRadius: 2,
+                  background: 'var(--accent)',
+                  width: screenProgress
+                    ? `${Math.round((screenProgress.scanned / screenProgress.total) * 100)}%`
+                    : '0%',
+                  transition: 'width 0.15s ease',
+                }} />
+              </div>
+            </div>
+          )}
+
           {/* Run history */}
           {runs.length > 0 && activeRunId === null && (
             <div className="run-history">

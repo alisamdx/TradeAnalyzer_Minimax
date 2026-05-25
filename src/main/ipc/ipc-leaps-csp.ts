@@ -73,4 +73,10 @@ export function registerLeapsCspIpc(
 
   // Get all opened positions
   ipcMain.handle('leaps-csp:get-opened', wrap(() => service.getOpenedPositions()));
+
+  // Delete a run (cascades to opportunities via FK)
+  ipcMain.handle('leaps-csp:delete-run', wrap((runId: number) => {
+    service.deleteRun(runId);
+    return true;
+  }));
 }

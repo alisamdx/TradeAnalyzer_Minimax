@@ -391,6 +391,15 @@ export function LeapsCspView() {
     } catch { /* ignore */ }
   }, []);
 
+  const deleteRun = useCallback(async (runId: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await window.api.leapsCsp.deleteRun(runId);
+      setRecentRuns(prev => prev.filter(r => r.id !== runId));
+      if (result?.run.id === runId) setResult(null);
+    } catch { /* ignore */ }
+  }, [result]);
+
   const toggleGrade = (g: LeapsCspGrade) => {
     setSelectedGrades(prev => {
       const next = new Set(prev);
@@ -598,15 +607,23 @@ export function LeapsCspView() {
             {recentRuns.length > 0 && (
               <div style={{ marginTop: 24 }}>
                 <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>Recent runs:</div>
-                {recentRuns.slice(0, 5).map(r => (
-                  <button
-                    key={r.id}
-                    className="btn btn-sm"
-                    style={{ marginRight: 8, marginBottom: 4 }}
-                    onClick={() => loadRun(r.id)}
-                  >
-                    {r.runAt.slice(0, 16).replace('T', ' ')} — {r.opportunityCount} opps <GateBadge gate={r.marketGate} />
-                  </button>
+                {recentRuns.slice(0, 10).map(r => (
+                  <div key={r.id} style={{ display: 'inline-flex', alignItems: 'center', marginRight: 8, marginBottom: 6, border: '1px solid var(--border)', borderRadius: 4, overflow: 'hidden' }}>
+                    <button
+                      className="btn btn-sm"
+                      style={{ border: 'none', borderRadius: 0 }}
+                      onClick={() => loadRun(r.id)}
+                    >
+                      {r.runAt.slice(0, 16).replace('T', ' ')} — {r.opportunityCount} opps <GateBadge gate={r.marketGate} />
+                    </button>
+                    <button
+                      title="Delete this run"
+                      style={{ padding: '2px 6px', border: 'none', borderLeft: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 11 }}
+                      onClick={e => deleteRun(r.id, e)}
+                    >
+                      ✕
+                    </button>
+                  </div>
                 ))}
               </div>
             )}

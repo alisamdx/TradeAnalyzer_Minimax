@@ -525,6 +525,10 @@ export class LeapsCspService {
     }));
   }
 
+  deleteRun(runId: number): void {
+    this.db.prepare('DELETE FROM leaps_csp_runs WHERE id = ?').run(runId);
+  }
+
   // ── Market Gate ─────────────────────────────────────────────────────────────
 
   private async checkMarketGate(): Promise<{ gate: LeapsCspGate; detail: LeapsCspGateDetail; effect: string }> {

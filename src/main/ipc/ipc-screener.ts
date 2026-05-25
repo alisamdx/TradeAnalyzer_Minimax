@@ -95,9 +95,11 @@ export function registerScreenerIpc(
   // ── Screen run ──────────────────────────────────────────────────────────
   ipcMain.handle(
     'screen:run',
-    async (_e, criteria: ScreenCriteria): Promise<IpcResult<{ runId: number; resultCount: number; rows: ScreenResultRow[] }>> => {
+    async (e, criteria: ScreenCriteria): Promise<IpcResult<{ runId: number; resultCount: number; rows: ScreenResultRow[] }>> => {
       try {
-        const output = await screenerService.runScreen(criteria);
+        const output = await screenerService.runScreen(criteria, (scanned, total, ticker) => {
+          e.sender.send('screen:progress', { scanned, total, ticker });
+        });
         // Save the run to the database so it can be used for "Save as Watchlist"
         const runResult = screenerService.saveRun(criteria, criteria.universe, output.rows);
         // Map the backend TickerScreenData to the frontend ScreenResultRow format

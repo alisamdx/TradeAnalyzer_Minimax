@@ -688,6 +688,7 @@ function buildApi() {
     markOpened: (opportunityId: number, entry: { leapsEntryDebit?: number; cspEntryCredit?: number; notes?: string }) =>
       invoke<boolean>('leaps-csp:mark-opened', opportunityId, entry),
     getOpened: () => invoke<LeapsCspOpenedEntry[]>('leaps-csp:get-opened'),
+    deleteRun: (runId: number) => invoke<boolean>('leaps-csp:delete-run', runId),
     onProgress: (callback: (msg: string) => void) => {
       const handler = (_: unknown, msg: string) => callback(msg);
       ipcRenderer.on('leaps-csp:progress', handler);
