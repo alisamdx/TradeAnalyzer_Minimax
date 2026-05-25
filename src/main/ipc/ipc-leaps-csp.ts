@@ -48,11 +48,11 @@ export function registerLeapsCspIpc(
   // Run a full LEAPS+CSP screen. Streams progress via 'leaps-csp:progress' events.
   ipcMain.handle(
     'leaps-csp:run-screen',
-    wrapAsync(async (universe: 'sp500' | 'russell1000' | 'both') => {
+    wrapAsync(async (universe: 'sp500' | 'russell1000' | 'both', forceRun?: boolean) => {
       const win = (await import('electron')).BrowserWindow.getAllWindows()[0];
       return service.runScreen(universe, msg => {
         win?.webContents.send('leaps-csp:progress', msg);
-      });
+      }, forceRun ?? false);
     }),
   );
 

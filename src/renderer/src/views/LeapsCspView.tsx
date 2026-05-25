@@ -331,6 +331,7 @@ export function LeapsCspView() {
   const [sortField, setSortField] = useState<'combinedScore' | 'leapsSubScore' | 'cspSubScore' | 'cspAnnReturnPct'>('combinedScore');
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [wasForced, setWasForced] = useState(false);
   const progressRef = useRef<HTMLDivElement>(null);
   const unsubRef = useRef<(() => void) | null>(null);
 
@@ -345,11 +346,12 @@ export function LeapsCspView() {
     }
   }, [progressLog]);
 
-  const runScreen = useCallback(async () => {
+  const runScreen = useCallback(async (forceRun = false) => {
     setIsRunning(true);
     setProgressLog([]);
     setError(null);
     setResult(null);
+    setWasForced(forceRun);
 
     unsubRef.current?.();
     unsubRef.current = window.api.leapsCsp.onProgress(msg => {
@@ -357,7 +359,7 @@ export function LeapsCspView() {
     });
 
     try {
-      const r = await window.api.leapsCsp.runScreen(universe);
+      const r = await window.api.leapsCsp.runScreen(universe, forceRun);
       setResult(r);
       setRecentRuns(prev => [r.run, ...prev].slice(0, 20));
     } catch (err) {
@@ -434,7 +436,7 @@ export function LeapsCspView() {
 
         <button
           className="btn btn-primary btn-sm"
-          onClick={runScreen}
+          onClick={() => runScreen()}
           disabled={isRunning}
         >
           {isRunning ? 'Screening…' : 'Run Screen'}
@@ -446,7 +448,28 @@ export function LeapsCspView() {
             <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Market Gate:</span>
             <GateBadge gate={run.marketGate} />
             <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{run.gateEffect}</span>
+            {run.marketGate === 'FAIL' && !isRunning && (
+              <button
+                className="btn btn-sm"
+                style={{ fontSize: 11, borderColor: '#f97316', color: '#f97316' }}
+                onClick={() => runScreen(true)}
+              >
+                Run Anyway
+              </button>
+            )}
           </div>
+        )}
+
+        {/* Run Anyway when no run yet and gate unknown */}
+        {!run && !isRunning && (
+          <button
+            className="btn btn-sm"
+            style={{ fontSize: 11, opacity: 0.6 }}
+            title="Bypass market gate and screen regardless of conditions"
+            onClick={() => runScreen(true)}
+          >
+            Run Anyway
+          </button>
         )}
 
         {run && (
@@ -482,6 +505,19 @@ export function LeapsCspView() {
       {error && (
         <div style={{ padding: '8px 16px', background: 'rgba(239,68,68,0.1)', color: '#f87171', fontSize: 13 }}>
           {error}
+        </div>
+      )}
+
+      {/* ── Gate override warning ───────────────────────────────────────────── */}
+      {wasForced && result && result.run.marketGate === 'FAIL' && (
+        <div style={{
+          padding: '6px 16px',
+          background: 'rgba(249,115,22,0.12)',
+          borderBottom: '1px solid rgba(249,115,22,0.3)',
+          fontSize: 12,
+          color: '#f97316',
+        }}>
+          ⚠ Gate override active — results shown despite FAIL market conditions. Use with caution.
         </div>
       )}
 
@@ -546,7 +582,15 @@ export function LeapsCspView() {
               Finds deep-ITM LEAPS calls paired with independently selected cash-secured puts.
               Requires at least one screener run to populate the stock universe.
             </div>
-            <button className="btn btn-primary" onClick={runScreen}>Run Screen</button>
+            <button className="btn btn-primary" onClick={() => runScreen()}>Run Screen</button>
+            <button
+              className="btn btn-sm"
+              style={{ marginLeft: 8, borderColor: '#f97316', color: '#f97316' }}
+              title="Bypass market gate — run regardless of market conditions"
+              onClick={() => runScreen(true)}
+            >
+              Run Anyway
+            </button>
             {recentRuns.length > 0 && (
               <div style={{ marginTop: 24 }}>
                 <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>Recent runs:</div>

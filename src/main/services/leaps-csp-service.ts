@@ -197,6 +197,7 @@ export class LeapsCspService {
   async runScreen(
     universe: 'sp500' | 'russell1000' | 'both',
     onProgress?: (msg: string) => void,
+    forceRun = false,
   ): Promise<LeapsCspRunResult> {
     const log = (msg: string) => { onProgress?.(msg); };
 
@@ -205,13 +206,17 @@ export class LeapsCspService {
 
     log(`Market gate: ${gate} — ${effect}`);
 
-    // Under a FAIL gate, suppress new LEAPS opportunities (SRS §6.2)
-    if (gate === 'FAIL') {
+    // Under a FAIL gate, suppress new LEAPS opportunities (SRS §6.2) unless overridden
+    if (gate === 'FAIL' && !forceRun) {
       log('Market gate FAIL: LEAPS suppressed. Returning empty run.');
       return this.persistRun(
         { gate, detail, effect, universe },
         [],
       );
+    }
+
+    if (gate === 'FAIL' && forceRun) {
+      log('⚠ Gate override active — running despite FAIL conditions.');
     }
 
     log('Loading universe from screener cache…');

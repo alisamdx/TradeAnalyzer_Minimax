@@ -681,8 +681,8 @@ function buildApi() {
   };
 
   const leapsCsp = {
-    runScreen: (universe: 'sp500' | 'russell1000' | 'both') =>
-      invoke<LeapsCspRunResult>('leaps-csp:run-screen', universe),
+    runScreen: (universe: 'sp500' | 'russell1000' | 'both', forceRun?: boolean) =>
+      invoke<LeapsCspRunResult>('leaps-csp:run-screen', universe, forceRun),
     getRuns: () => invoke<LeapsCspRunSummary[]>('leaps-csp:get-runs'),
     getRun: (runId: number) => invoke<LeapsCspRunResult | null>('leaps-csp:get-run', runId),
     markOpened: (opportunityId: number, entry: { leapsEntryDebit?: number; cspEntryCredit?: number; notes?: string }) =>
