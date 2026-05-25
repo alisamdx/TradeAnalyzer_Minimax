@@ -163,7 +163,8 @@ export class PolygonDataProvider implements DataProvider {
     // IV rank / percentile: computed from 52-week IV range — Polygon doesn't
     // expose this directly in the snapshot, so we store null here.
     // Phase 3's pipeline will compute this post-fetch and update the cache.
-    const lastPrice = day?.c ?? null;
+    // On holidays/weekends day.c is 0 or absent; fall back to prevDay.c
+    const lastPrice = (day?.c && day.c > 0 ? day.c : null) ?? (prev?.c && prev.c > 0 ? prev.c : null) ?? null;
     const prevClose = prev?.c ?? null;
 
     return {
