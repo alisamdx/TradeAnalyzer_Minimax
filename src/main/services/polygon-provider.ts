@@ -378,17 +378,41 @@ export class PolygonDataProvider implements DataProvider {
   }> {
     const noData = { currentIv: null, iv52WkHigh: null, iv52WkLow: null, putPremium: null };
     try {
-      let data: Record<string, unknown>;
+      // Paginate just like getOptionsChain to avoid missing contracts past the first 250
+      let contracts: unknown[] = [];
       try {
-        data = await this.fetchWithRetry(`/v3/snapshot/options/${ticker}`, { limit: '250' });
+        const baseParams: Record<string, string> = { limit: '250' };
+        if (targetExpiry) baseParams['expiration_date'] = targetExpiry;
+        let url: string | null = `/v3/snapshot/options/${ticker}`;
+        let firstPage = true;
+        while (url) {
+          const data = await this.fetchWithRetry(url, firstPage ? baseParams : {});
+          firstPage = false;
+          let pageContracts: unknown[];
+          if (Array.isArray(data.results)) {
+            pageContracts = data.results;
+          } else if (data.results && typeof data.results === 'object' && 'options' in (data.results as Record<string, unknown>)) {
+            pageContracts = ((data.results as Record<string, unknown>)['options'] as unknown[]) ?? [];
+          } else {
+            pageContracts = [];
+          }
+          contracts = contracts.concat(pageContracts);
+          const nextUrl = data.next_url as string | undefined;
+          if (nextUrl) {
+            try { url = new URL(nextUrl).pathname + new URL(nextUrl).search; } catch { url = nextUrl; }
+          } else {
+            url = null;
+          }
+          // Stop after first page when not filtering (250 is enough for IV sampling)
+          if (!targetExpiry) break;
+        }
       } catch (fetchError) {
         const errMsg = fetchError instanceof Error ? fetchError.message : String(fetchError);
         if (errMsg.includes('404') || errMsg.includes('NotFound')) return noData;
         throw fetchError;
       }
 
-      const contracts = data.results as unknown[] | undefined;
-      if (!contracts || contracts.length === 0) return noData;
+      if (contracts.length === 0) return noData;
 
       // Underlying price from first contract
       let underlyingPrice: number | undefined;
@@ -428,20 +452,25 @@ export class PolygonDataProvider implements DataProvider {
         }
 
         // ── Put-premium extraction ──────────────────────────────────────
-        if (targetExpiry && targetStrike !== null) {
-          const expiry = (details['expiration_date'] ?? co['expiration_date'] ?? '') as string;
-          const ctype  = String(details['contract_type'] ?? co['contract_type'] ?? '').toLowerCase();
-          if (expiry === targetExpiry && ctype === 'put' && strike > 0) {
+        if (targetStrike !== null && targetExpiry && strike > 0) {
+          const expiryRaw = String(details['expiration_date'] ?? co['expiration_date'] ?? '');
+          const ctypeRaw  = String(
+            details['contract_type'] ?? co['contract_type'] ??
+            details['type'] ?? co['type'] ?? ''
+          ).toLowerCase();
+          const isPut = (ctypeRaw === 'put' || ctypeRaw === 'p') && expiryRaw === targetExpiry;
+          if (isPut) {
             const strikeDist = Math.abs(strike - targetStrike);
             if (strikeDist < minStrikeDist) {
               minStrikeDist = strikeDist;
-              // Price: try day.close, day.vwap, last_trade.price
               const day   = (co['day']        as Record<string, unknown>) ?? {};
               const trade = (co['last_trade'] as Record<string, unknown>) ?? {};
+              const fmv   = (co['fmv']        as Record<string, unknown>) ?? {};
               const price =
-                (typeof day['close']   === 'number' && (day['close']   as number) > 0 ? day['close']   as number : null) ??
-                (typeof day['vwap']    === 'number' && (day['vwap']    as number) > 0 ? day['vwap']    as number : null) ??
-                (typeof trade['price'] === 'number' && (trade['price'] as number) > 0 ? trade['price'] as number : null);
+                (typeof day['close']    === 'number' && (day['close']    as number) > 0 ? day['close']    as number : null) ??
+                (typeof day['vwap']     === 'number' && (day['vwap']     as number) > 0 ? day['vwap']     as number : null) ??
+                (typeof trade['price']  === 'number' && (trade['price']  as number) > 0 ? trade['price']  as number : null) ??
+                (typeof fmv['midpoint'] === 'number' && (fmv['midpoint'] as number) > 0 ? fmv['midpoint'] as number : null);
               bestPutPrice = price ?? null;
             }
           }
@@ -467,8 +496,7 @@ export class PolygonDataProvider implements DataProvider {
         iv52WkLow:   iv52WkLow    ? iv52WkLow    * 100 : null,
         putPremium:  bestPutPrice
       };
-    } catch (err) {
-      console.log(`[getOptionsIVAndPremium] ${ticker}:`, err instanceof Error ? err.message : String(err));
+    } catch {
       return noData;
     }
   }

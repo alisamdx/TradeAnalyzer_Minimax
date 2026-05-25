@@ -1792,41 +1792,6 @@ input[type='checkbox'] {
   font-family: monospace;
 }
 
-/* ── WebSocket Status Indicator ────────────────────────────────────────────── */
-
-.ws-status-indicator {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 11px;
-  color: var(--text-muted);
-}
-
-.ws-status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-}
-
-.ws-status-dot.connected {
-  background: var(--success);
-  box-shadow: 0 0 4px rgba(63, 185, 80, 0.5);
-}
-
-.ws-status-dot.disconnected {
-  background: var(--text-muted);
-}
-
-.ws-status-dot.connecting {
-  background: var(--warning);
-  animation: pulse 1s ease-in-out infinite;
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
-}
-
 /* ── Historical Charts ───────────────────────────────────────────────────────── */
 
 .historical-chart-container {
@@ -2910,6 +2875,35 @@ input[type='checkbox'] {
   color: var(--warning);
   font-weight: 600;
 }
+
+.oc-legend {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  padding: 6px 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+}
+
+.oc-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.oc-legend-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.oc-legend-atm    { background: rgba(88, 166, 255, 0.25); border: 1px solid rgba(88, 166, 255, 0.5); }
+.oc-legend-profitable { background: rgba(63, 185, 80, 0.25); border: 1px solid rgba(63, 185, 80, 0.5); }
+.oc-legend-delta  { background: rgba(210, 153, 34, 0.25); border: 1px solid rgba(210, 153, 34, 0.5); }
 
 .oc-empty-cell {
   text-align: center;

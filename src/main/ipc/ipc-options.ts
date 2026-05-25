@@ -13,6 +13,24 @@ interface ExpirationSummary {
   putCount: number;
 }
 
+function isMarketHoliday(d: Date): boolean {
+  const m = d.getMonth() + 1, day = d.getDate(), dow = d.getDay();
+  const fixedHolidays: [number, number][] = [[1,1],[6,19],[7,4],[12,25]];
+  for (const [hm, hd] of fixedHolidays) {
+    if (m === hm) {
+      if (day === hd - 1 && dow === 5) return true; // observed Friday
+      if (day === hd && dow >= 1 && dow <= 5) return true;
+      if (day === hd + 1 && dow === 1) return true; // observed Monday
+    }
+  }
+  if (m === 1 && dow === 1 && day >= 15 && day <= 21) return true; // MLK
+  if (m === 2 && dow === 1 && day >= 15 && day <= 21) return true; // Presidents Day
+  if (m === 5 && dow === 1 && day >= 25) return true;              // Memorial Day
+  if (m === 9 && dow === 1 && day <= 7) return true;               // Labor Day
+  if (m === 11 && dow === 4 && day >= 22 && day <= 28) return true; // Thanksgiving
+  return false;
+}
+
 function dteDays(expirationDate: string): number {
   const exp = new Date(expirationDate + 'T00:00:00Z');
   const now = new Date();
@@ -38,22 +56,23 @@ export function registerOptionsIpc(
     'options:get-near-expirations',
     async (_e: IpcMainInvokeEvent, ticker: string) => {
       try {
-        // Generate next 5 Fridays.
+        // Generate next 6 Fridays, shifting holidays back to Thursday.
+        const seen = new Set<string>();
         const expirations: string[] = [];
         const now = new Date();
-        const day = now.getDay(); // Use local time consistently
-        // If today is Friday (day=5), include today. Otherwise find next Friday.
+        const day = now.getDay();
         const daysUntilFriday = day <= 5 ? (5 - day) : (12 - day);
         const firstFriday = new Date(now);
         firstFriday.setDate(now.getDate() + daysUntilFriday);
-        for (let w = 0; w < 5; w++) {
+        for (let w = 0; w < 6; w++) {
           const d = new Date(firstFriday);
           d.setDate(firstFriday.getDate() + w * 7);
-          // Format as YYYY-MM-DD in local time
+          if (isMarketHoliday(d)) d.setDate(d.getDate() - 1); // use Thursday
           const yyyy = d.getFullYear();
           const mm = String(d.getMonth() + 1).padStart(2, '0');
           const dd = String(d.getDate()).padStart(2, '0');
-          expirations.push(`${yyyy}-${mm}-${dd}`);
+          const key = `${yyyy}-${mm}-${dd}`;
+          if (!seen.has(key)) { seen.add(key); expirations.push(key); }
         }
 
         // Fetch current price and IV.

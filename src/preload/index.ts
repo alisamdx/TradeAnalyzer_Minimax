@@ -205,40 +205,6 @@ function buildApi() {
     isStale: () => invoke<boolean>('cache:isStale')
   };
 
-  const websocket = {
-    connect: () => invoke<boolean>('websocket:connect'),
-    disconnect: () => invoke<boolean>('websocket:disconnect'),
-    subscribe: (ticker: string) => invoke<boolean>('websocket:subscribe', ticker),
-    unsubscribe: (ticker: string) => invoke<boolean>('websocket:unsubscribe', ticker),
-    isConnected: () => invoke<boolean>('websocket:isConnected'),
-    getSubscribed: () => invoke<string[]>('websocket:getSubscribed'),
-    onPrice: (callback: (data: { ticker: string; price: number; change: number; changePct: number }) => void) => {
-      const handler = (_: any, data: any) => callback(data);
-      ipcRenderer.on('websocket:price', handler);
-      return () => ipcRenderer.removeListener('websocket:price', handler);
-    },
-    onConnected: (callback: () => void) => {
-      const handler = () => callback();
-      ipcRenderer.on('websocket:connected', handler);
-      return () => ipcRenderer.removeListener('websocket:connected', handler);
-    },
-    onDisconnected: (callback: () => void) => {
-      const handler = () => callback();
-      ipcRenderer.on('websocket:disconnected', handler);
-      return () => ipcRenderer.removeListener('websocket:disconnected', handler);
-    },
-    onError: (callback: (error: string) => void) => {
-      const handler = (_: any, error: string) => callback(error);
-      ipcRenderer.on('websocket:error', handler);
-      return () => ipcRenderer.removeListener('websocket:error', handler);
-    },
-    onAlert: (callback: (data: { alertId: number; ticker: string; alertType: string; triggered: boolean; message: string; playSound: boolean }) => void) => {
-      const handler = (_: any, data: any) => callback(data);
-      ipcRenderer.on('websocket:alert', handler);
-      return () => ipcRenderer.removeListener('websocket:alert', handler);
-    }
-  };
-
   const historical = {
     getFinancials: (ticker: string, periodType: 'quarterly' | 'annual', limit?: number) =>
       invoke<{
@@ -734,7 +700,7 @@ function buildApi() {
   };
 
   return {
-    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, websocket, historical, portfolio, briefing, alerts, optionsChain, agent, backtest },
+    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, historical, portfolio, briefing, alerts, optionsChain, agent, backtest },
     dialog: {
       prompt: (opts: { title: string; defaultValue?: string }) =>
         invoke<string | null>('dialog:prompt', opts),

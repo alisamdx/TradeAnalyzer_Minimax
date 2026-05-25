@@ -486,7 +486,6 @@ export interface AppSettings {
   autoBackupIntervalDays: number;
   // Priority 9: Settings Enhancements
   soundAlertsEnabled: boolean;
-  autoConnectWebSocket: boolean;
   defaultScreenerIndex: 'sp500' | 'russell1000' | 'both';
   theme: 'dark' | 'light';
   keyboardShortcuts: KeyboardShortcutsConfig;

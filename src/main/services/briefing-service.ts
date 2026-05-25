@@ -231,7 +231,43 @@ export class BriefingService {
   // ─── Top Setups ─────────────────────────────────────────────────────────────
 
   async getTopSetups(): Promise<TopSetup[]> {
-    // Nearest 3rd-Friday monthly expiry at least 25 days out (inline to avoid import issues)
+    // US market holidays (month is 1-based). Juneteenth added 2022.
+    function isMarketHoliday(d: Date): boolean {
+      const m = d.getMonth() + 1, day = d.getDate(), dow = d.getDay();
+      // Fixed-date holidays — if they fall on Saturday observe Friday, Sunday observe Monday
+      const fixedHolidays: [number, number][] = [
+        [1, 1],   // New Year's Day
+        [6, 19],  // Juneteenth
+        [7, 4],   // Independence Day
+        [12, 25], // Christmas
+      ];
+      for (const [hm, hd] of fixedHolidays) {
+        if (m === hm) {
+          // Falls on Saturday → observed Friday (day-1)
+          if (day === hd - 1 && dow === 5) return true;
+          // Falls on actual date (weekday)
+          if (day === hd && dow >= 1 && dow <= 5) return true;
+          // Falls on Sunday → observed Monday (day+1)
+          if (day === hd + 1 && dow === 1) return true;
+        }
+      }
+      // Floating holidays
+      const y = d.getFullYear();
+      // MLK Day — 3rd Monday of January
+      if (m === 1 && dow === 1 && day >= 15 && day <= 21) return true;
+      // Presidents Day — 3rd Monday of February
+      if (m === 2 && dow === 1 && day >= 15 && day <= 21) return true;
+      // Memorial Day — last Monday of May
+      if (m === 5 && dow === 1 && day >= 25) return true;
+      // Labor Day — 1st Monday of September
+      if (m === 9 && dow === 1 && day <= 7) return true;
+      // Thanksgiving — 4th Thursday of November
+      if (m === 11 && dow === 4 && day >= 22 && day <= 28) return true;
+      void y;
+      return false;
+    }
+
+    // Nearest 3rd-Friday monthly expiry at least 25 days out, shifted back for holidays.
     function nextMonthlyExpiry(): string {
       const earliest = new Date();
       earliest.setDate(earliest.getDate() + 25);
@@ -239,8 +275,10 @@ export class BriefingService {
       let month = earliest.getMonth();
       for (;;) {
         const firstDow = new Date(year, month, 1).getDay();
-        const thirdFriday = new Date(year, month, 1 + ((5 - firstDow + 7) % 7) + 14);
-        if (thirdFriday >= earliest) return thirdFriday.toISOString().split('T')[0]!;
+        let expiry = new Date(year, month, 1 + ((5 - firstDow + 7) % 7) + 14);
+        // If the 3rd Friday is a market holiday, use the preceding Thursday
+        if (isMarketHoliday(expiry)) expiry.setDate(expiry.getDate() - 1);
+        if (expiry >= earliest) return expiry.toISOString().split('T')[0]!;
         if (++month > 11) { month = 0; year++; }
       }
     }

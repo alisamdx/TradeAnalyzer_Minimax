@@ -63,10 +63,11 @@ type StrikeFilter = '30' | 'all';
 
 interface OptionsChainViewProps {
   initialTicker?: string | null;
+  initialExpiry?: string | null;
   clearInitialTicker?: () => void;
 }
 
-export function OptionsChainView({ initialTicker, clearInitialTicker }: OptionsChainViewProps) {
+export function OptionsChainView({ initialTicker, initialExpiry, clearInitialTicker }: OptionsChainViewProps) {
   // Sidebar state
   const [watchlists, setWatchlists] = useState<Watchlist[]>([]);
   const [selectedWatchlistId, setSelectedWatchlistId] = useState<number | null>(null);
@@ -104,7 +105,7 @@ export function OptionsChainView({ initialTicker, clearInitialTicker }: OptionsC
   }, [selectedWatchlistId]);
 
   // Load expirations when ticker changes
-  const loadExpirations = useCallback(async (ticker: string) => {
+  const loadExpirations = useCallback(async (ticker: string, preferExpiry?: string | null) => {
     setLoading(true);
     setError(null);
     setChainData(null);
@@ -114,11 +115,13 @@ export function OptionsChainView({ initialTicker, clearInitialTicker }: OptionsC
       setExpirations(result.expirations);
       setCurrentPrice(result.currentPrice);
       setCurrentIv(result.currentIv);
-      // Auto-select first expiration with contracts
+      // Prefer the requested expiry; fall back to first expiration with contracts
+      const preferred = preferExpiry
+        ? result.expirations.find(e => e.date === preferExpiry)
+        : null;
       const first = result.expirations.find(e => e.callCount > 0 || e.putCount > 0);
-      if (first) {
-        setSelectedExpiration(first.date);
-      }
+      const toSelect = preferred ?? first;
+      if (toSelect) setSelectedExpiration(toSelect.date);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -143,15 +146,15 @@ export function OptionsChainView({ initialTicker, clearInitialTicker }: OptionsC
     if (initialTicker && !initialHandledRef.current && watchlists.length > 0) {
       initialHandledRef.current = true;
       setSelectedTicker(initialTicker);
-      loadExpirations(initialTicker);
+      loadExpirations(initialTicker, initialExpiry);
       clearInitialTicker?.();
     }
-  }, [initialTicker, watchlists, loadExpirations, clearInitialTicker]);
+  }, [initialTicker, initialExpiry, watchlists, loadExpirations, clearInitialTicker]);
 
   // Ticker click handler
   const handleTickerClick = useCallback((ticker: string) => {
     setSelectedTicker(ticker);
-    loadExpirations(ticker);
+    loadExpirations(ticker, null);
   }, [loadExpirations]);
 
   // Navigate to validate for the selected ticker
@@ -294,6 +297,22 @@ export function OptionsChainView({ initialTicker, clearInitialTicker }: OptionsC
               <button className={strikeFilter === '30' ? 'active' : ''} onClick={() => setStrikeFilter('30')}>30 Strikes</button>
               <button className={strikeFilter === 'all' ? 'active' : ''} onClick={() => setStrikeFilter('all')}>All</button>
               <label className="oc-oi-filter">Min OI: <input type="number" value={minOI} onChange={e => setMinOI(Number(e.target.value) || 0)} style={{ width: 50 }} /></label>
+            </div>
+
+            {/* Legend */}
+            <div className="oc-legend">
+              <span className="oc-legend-item">
+                <span className="oc-legend-swatch oc-legend-atm" />
+                Row within 2% of current price (ATM zone)
+              </span>
+              <span className="oc-legend-item">
+                <span className="oc-legend-swatch oc-legend-profitable" />
+                Premium yield &gt;15% annualized
+              </span>
+              <span className="oc-legend-item">
+                <span className="oc-legend-swatch oc-legend-delta" />
+                Delta in target range (puts 0.15–0.35 · calls ≥0.65)
+              </span>
             </div>
 
             {/* Chain Table */}

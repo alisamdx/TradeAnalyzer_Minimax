@@ -21,8 +21,7 @@ import { registerAnalysisIpc } from './ipc/ipc-analysis.js';
 import { registerValidateIpc } from './ipc/ipc-validate.js';
 import { registerSettingsIpc, registerDiagnosticsIpc } from './ipc/ipc-settings.js';
 import { registerCacheIpc } from './ipc/ipc-cache.js';
-import { WebSocketService } from './services/websocket-service.js';
-import { registerWebSocketIpc } from './ipc/ipc-websocket.js';
+
 import { registerHistoricalIpc } from './ipc/ipc-historical.js';
 import { registerPortfolioIpc } from './ipc/ipc-portfolio.js';
 import { registerBriefingIpc } from './ipc/ipc-briefing.js';
@@ -244,20 +243,6 @@ app.whenReady().then(() => {
   const agentDbPathRow = db.prepare("SELECT value FROM settings WHERE key = 'agentDbPath'").get() as { value?: string } | undefined;
   if (agentDbPathRow?.value) agentDb.open(agentDbPathRow.value);
   registerAgentIpc(agentDb);
-
-  // Phase 3 - WebSocket streaming
-  const wsService = new WebSocketService(() => {
-    const row = db.prepare('SELECT value FROM settings WHERE key = ?').get('polygonApiKey') as { value?: string } | undefined;
-    return row?.value || process.env['POLYGON_API_KEY'] || '';
-  });
-  registerWebSocketIpc(wsService, db);
-
-  // Auto-connect WebSocket on startup (respect setting, default to true)
-  const autoConnectSetting = db.prepare("SELECT value FROM settings WHERE key = 'autoConnectWebSocket'").get() as { value?: string } | undefined;
-  const shouldAutoConnect = autoConnectSetting?.value !== 'false'; // default true
-  if (shouldAutoConnect) {
-    wsService.connect();
-  }
 
   // Local HTTP API server for the external trading agent.
   const apiPort = (() => {

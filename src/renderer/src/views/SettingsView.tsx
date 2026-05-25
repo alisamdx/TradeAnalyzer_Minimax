@@ -244,18 +244,6 @@ export function SettingsView() {
             </div>
 
             <div className="settings-row">
-              <label>Auto-Connect WebSocket</label>
-              <div className="toggle-row">
-                <input
-                  type="checkbox"
-                  checked={settings.autoConnectWebSocket}
-                  onChange={e => saveSettings({ autoConnectWebSocket: e.target.checked })}
-                />
-                <span>Connect to real-time price feed on startup</span>
-              </div>
-            </div>
-
-            <div className="settings-row">
               <label>Default Screener Index</label>
               <select
                 value={settings.defaultScreenerIndex}

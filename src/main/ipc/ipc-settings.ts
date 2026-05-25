@@ -31,7 +31,6 @@ export interface AppSettings {
   autoBackupIntervalDays: number;
   // Priority 9: Settings Enhancements
   soundAlertsEnabled: boolean;
-  autoConnectWebSocket: boolean;
   defaultScreenerIndex: 'sp500' | 'russell1000' | 'both';
   theme: 'dark' | 'light';
   keyboardShortcuts: {
@@ -58,7 +57,6 @@ const DEFAULT_SETTINGS: AppSettings = {
   autoBackupIntervalDays: 7,
   // Priority 9 defaults
   soundAlertsEnabled: true,
-  autoConnectWebSocket: true,
   defaultScreenerIndex: 'sp500',
   theme: 'dark',
   keyboardShortcuts: {
@@ -111,7 +109,6 @@ export function registerSettingsIpc(
           else if (k === 'autoBackupIntervalDays') settings.autoBackupIntervalDays = v !== undefined ? parseInt(v, 10) : DEFAULT_SETTINGS.autoBackupIntervalDays;
           // Priority 9: Settings Enhancements
           else if (k === 'soundAlertsEnabled') settings.soundAlertsEnabled = v === 'true';
-          else if (k === 'autoConnectWebSocket') settings.autoConnectWebSocket = v === 'true';
           else if (k === 'defaultScreenerIndex') settings.defaultScreenerIndex = (v as AppSettings['defaultScreenerIndex']) ?? DEFAULT_SETTINGS.defaultScreenerIndex;
           else if (k === 'theme') settings.theme = (v as AppSettings['theme']) ?? DEFAULT_SETTINGS.theme;
           else if (k === 'keyboardShortcuts') {

@@ -10,8 +10,7 @@ import { AlertsView } from './views/AlertsView.js';
 import { useCacheStatus } from './hooks/useCacheStatus.js';
 import { CacheStatusIndicator } from './components/CacheStatusIndicator.js';
 import { useSortable } from './hooks/useSortable.js';
-import { useWebSocket } from './hooks/useWebSocket.js';
-import { RealtimePriceTicker } from './components/RealtimePriceTicker.js';
+
 import { PromptDialog } from './components/PromptDialog.js';
 import { showPromptDialog } from './utils/promptDialog.js';
 
@@ -44,6 +43,7 @@ export function App() {
   // Ticker passed from analysis "Validate" link
   const [validateTicker, setValidateTicker] = useState<string | null>(null);
   const [optionsChainTicker, setOptionsChainTicker] = useState<string | null>(null);
+  const [optionsChainExpiry, setOptionsChainExpiry] = useState<string | null>(null);
 
   // Prompt dialog state
   const [promptDialogOpen, setPromptDialogOpen] = useState(false);
@@ -51,46 +51,10 @@ export function App() {
   const [promptDefaultValue, setPromptDefaultValue] = useState('');
   const promptResolveRef = useRef<((value: string | null) => void) | null>(null);
 
-  // Audio context for alerts
-  const audioCtxRef = useRef<AudioContext | null>(null);
-
   // Cache status for auto-refresh indicator
   const { status: cacheStatus, refresh: refreshCacheStatus } = useCacheStatus();
 
-  // WebSocket for real-time prices
-  const { isConnected: wsConnected, priceUpdates, subscribe, unsubscribe } = useWebSocket();
-
-  // Listen for real-time alerts
   useEffect(() => {
-    const removeAlertListener = window.api.websocket.onAlert((data) => {
-      setAlertMsg(`ALERT: ${data.message}`);
-
-      if (data.playSound) {
-        // Play a simple beep using Web Audio API
-        if (!audioCtxRef.current) {
-          audioCtxRef.current = new window.AudioContext();
-        }
-        const ctx = audioCtxRef.current;
-        if (ctx.state === 'suspended') {
-          ctx.resume();
-        }
-        const osc = ctx.createOscillator();
-        const gainNode = ctx.createGain();
-        osc.connect(gainNode);
-        gainNode.connect(ctx.destination);
-
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(880, ctx.currentTime); // A5
-
-        gainNode.gain.setValueAtTime(0, ctx.currentTime);
-        gainNode.gain.linearRampToValueAtTime(1, ctx.currentTime + 0.05);
-        gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
-
-        osc.start(ctx.currentTime);
-        osc.stop(ctx.currentTime + 0.5);
-      }
-    });
-
     // Listen for "Run Analysis" from screener
     const handleNavigateToAnalysis = (e: CustomEvent<{ ticker: string }>) => {
       setAnalysisTicker(e.detail.ticker);
@@ -106,8 +70,9 @@ export function App() {
     window.addEventListener('navigate-to-validate', handleNavigateToValidate as EventListener);
 
     // Listen for "Options Chain" from other views
-    const handleNavigateToOptions = (e: CustomEvent<{ ticker: string }>) => {
+    const handleNavigateToOptions = (e: CustomEvent<{ ticker: string; expiry?: string }>) => {
       setOptionsChainTicker(e.detail.ticker);
+      setOptionsChainExpiry(e.detail.expiry ?? null);
       setView('optionsChain');
     };
     window.addEventListener('navigate-to-options', handleNavigateToOptions as EventListener);
@@ -129,7 +94,6 @@ export function App() {
     window.addEventListener('show-prompt-dialog', handleShowPrompt as EventListener);
 
     return () => {
-      removeAlertListener();
       window.removeEventListener('navigate-to-analysis', handleNavigateToAnalysis as EventListener);
       window.removeEventListener('navigate-to-validate', handleNavigateToValidate as EventListener);
       window.removeEventListener('navigate-to-options', handleNavigateToOptions as EventListener);
@@ -247,23 +211,6 @@ export function App() {
     }, 60_000);
     return () => clearInterval(interval);
   }, [activeId, refreshQuotes]); // Removed items.length from deps to avoid unnecessary resets
-
-  // Subscribe to WebSocket for real-time prices when watchlist changes
-  useEffect(() => {
-    if (activeId === null) return;
-
-    // Subscribe to all tickers in the current watchlist
-    items.forEach(item => {
-      subscribe(item.ticker);
-    });
-
-    return () => {
-      // Unsubscribe when watchlist changes
-      items.forEach(item => {
-        unsubscribe(item.ticker);
-      });
-    };
-  }, [activeId, items, subscribe, unsubscribe]);
 
   // Apply theme setting
   useEffect(() => {
@@ -422,12 +369,9 @@ export function App() {
   const active = watchlists.find((w) => w.id === activeId) ?? null;
 
   const fmtPrice = (ticker: string): string => {
-    // Use WebSocket price if available, fallback to quote cache
-    const wsPrice = priceUpdates[ticker]?.price;
     const q = quoteMap[ticker];
-    const price = wsPrice ?? q?.last;
-    if (price === null || price === undefined) return '—';
-    return `$${price.toFixed(2)}`;
+    if (q?.last === null || q?.last === undefined) return '—';
+    return `$${q.last.toFixed(2)}`;
   };
 
   const fmtDayPct = (ticker: string): string => {
@@ -594,7 +538,7 @@ export function App() {
         {view === 'briefing' && <BriefingView />}
         {view === 'alerts' && <AlertsView />}
         {view === 'data' && <DataView />}
-        {view === 'optionsChain' && <OptionsChainView initialTicker={optionsChainTicker} clearInitialTicker={() => setOptionsChainTicker(null)} />}
+        {view === 'optionsChain' && <OptionsChainView initialTicker={optionsChainTicker} initialExpiry={optionsChainExpiry} clearInitialTicker={() => { setOptionsChainTicker(null); setOptionsChainExpiry(null); }} />}
         {view === 'agent' && <AgentView />}
         {view === 'backtest' && <BacktestView />}
         {view === 'settings' && <SettingsView />}

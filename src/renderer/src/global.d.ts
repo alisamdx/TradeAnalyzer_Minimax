@@ -7,18 +7,6 @@ declare global {
         cancel: () => Promise<boolean>;
         onProgress: (callback: (data: { scanned: number; total: number; ticker?: string }) => void) => (() => void);
       };
-      websocket: {
-        connect: () => Promise<boolean>;
-        disconnect: () => Promise<boolean>;
-        subscribe: (ticker: string) => Promise<boolean>;
-        unsubscribe: (ticker: string) => Promise<boolean>;
-        isConnected: () => Promise<boolean>;
-        getSubscribed: () => Promise<string[]>;
-        onPrice: (callback: (data: { ticker: string; price: number; change: number; changePct: number }) => void) => (() => void);
-        onConnected: (callback: () => void) => (() => void);
-        onDisconnected: (callback: () => void) => (() => void);
-        onError: (callback: (error: string) => void) => (() => void);
-      };
       historical: {
         getFinancials: (ticker: string, periodType: 'quarterly' | 'annual', limit?: number) => Promise<{
           ticker: string;

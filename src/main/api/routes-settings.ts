@@ -21,7 +21,6 @@ export function registerSettingsRoutes(app: FastifyInstance, svc: ApiServerServi
       const logRetentionDays = parseInt(getSettingValue(db, 'logRetentionDays') ?? '30', 10);
       const defaultScreenerIndex = getSettingValue(db, 'defaultScreenerIndex') ?? 'sp500';
       const theme = getSettingValue(db, 'theme') ?? 'dark';
-      const autoConnectWebSocket = (getSettingValue(db, 'autoConnectWebSocket') ?? 'true') !== 'false';
       const soundAlertsEnabled = (getSettingValue(db, 'soundAlertsEnabled') ?? 'true') !== 'false';
 
       return apiOk(reply, {
@@ -32,7 +31,6 @@ export function registerSettingsRoutes(app: FastifyInstance, svc: ApiServerServi
         logRetentionDays,
         defaultScreenerIndex,
         theme,
-        autoConnectWebSocket,
         soundAlertsEnabled
         // polygonApiKey intentionally omitted
       });

@@ -108,6 +108,10 @@ export function BriefingView() {
     window.dispatchEvent(new CustomEvent('navigate-to-validate', { detail: { ticker } }));
   };
 
+  const openOptionsForTicker = (ticker: string, expiry: string | null) => {
+    window.dispatchEvent(new CustomEvent('navigate-to-options', { detail: { ticker, expiry } }));
+  };
+
   const toggleTicker = (ticker: string) => {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -388,7 +392,17 @@ export function BriefingView() {
                     </td>
                     <td className="num">{fmtPrice(setup.targetStrike)}</td>
                     <td className="num">{fmtPrice(setup.estimatedPremium)}</td>
-                    <td className="num">{setup.expiryDate ?? '—'}</td>
+                    <td className="num">
+                      {setup.expiryDate ? (
+                        <span
+                          className="clickable-ticker"
+                          onClick={() => openOptionsForTicker(setup.ticker, setup.expiryDate)}
+                          title="Open options chain for this expiry"
+                        >
+                          {setup.expiryDate}
+                        </span>
+                      ) : '—'}
+                    </td>
                   </tr>
                 ))}
               </tbody>

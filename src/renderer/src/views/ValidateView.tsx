@@ -5,6 +5,7 @@
 // Chart: lightweight-charts v4
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { showPromptDialog } from '../utils/promptDialog.js';
 import { createChart, type IChartApi, ColorType, type Time } from 'lightweight-charts';
 import { VolumeProfile, type BarDataWithVolume } from './VolumeProfile.js';
 import type {
@@ -139,6 +140,7 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
   const [result, setResult] = useState<ValidateDashboardResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [timeframe, setTimeframe] = useState<TimeframeOption>({ label: '6M', days: 180 });
   const [isValidatingAll, setIsValidatingAll] = useState(false);
   const [validateProgress, setValidateProgress] = useState<{ done: number; total: number } | null>(null);
@@ -331,6 +333,35 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
     a.download = `validate-${buySignalFilter}-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
+  }, [tickers, buySignalFilter, tickerSignals, exportCache]);
+
+  const saveToWatchlist = useCallback(async () => {
+    const filtered = tickers.filter(item => {
+      if (buySignalFilter === 'all') return true;
+      const sig = tickerSignals[item.ticker];
+      return sig === buySignalFilter;
+    }).filter(item => exportCache[item.ticker]);
+
+    if (filtered.length === 0) return;
+
+    const name = await showPromptDialog('Watchlist name:');
+    if (!name) return;
+
+    try {
+      const wl = await window.api.watchlists.create(name);
+      await window.api.watchlists.items.addBulk(
+        wl.id,
+        filtered.map(item => {
+          const d = exportCache[item.ticker]!;
+          const notes = `Buy Score: ${d.score}/100 (${d.strength})`;
+          return { ticker: item.ticker, notes };
+        })
+      );
+      window.dispatchEvent(new CustomEvent('watchlist-created'));
+      setStatusMsg(`Saved ${filtered.length} ticker${filtered.length !== 1 ? 's' : ''} to "${name}"`);
+    } catch (e) {
+      setError((e as Error).message);
+    }
   }, [tickers, buySignalFilter, tickerSignals, exportCache]);
 
   const scanAllSignals = useCallback(async () => {
@@ -931,6 +962,11 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
           {error} <span style={{ float: 'right', cursor: 'pointer' }}>✕</span>
         </div>
       )}
+      {statusMsg && (
+        <div className="status-toast ok" onClick={() => setStatusMsg(null)}>
+          {statusMsg} <span style={{ float: 'right', cursor: 'pointer' }}>✕</span>
+        </div>
+      )}
 
       <div className="validate-layout">
         {/* ── Left: ticker list ── */}
@@ -1003,14 +1039,24 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
                 </div>
               )}
               {tickers.some(t => exportCache[t.ticker]) && (
-                <button
-                  className="signal-scan-btn"
-                  onClick={exportFilteredToCsv}
-                  title={`Export ${buySignalFilter === 'all' ? 'all' : buySignalFilter} tickers to CSV`}
-                  style={{ marginTop: 4, width: '100%', fontSize: 11 }}
-                >
-                  ↓ Export CSV
-                </button>
+                <>
+                  <button
+                    className="signal-scan-btn"
+                    onClick={exportFilteredToCsv}
+                    title={`Export ${buySignalFilter === 'all' ? 'all' : buySignalFilter} tickers to CSV`}
+                    style={{ marginTop: 4, width: '100%', fontSize: 11 }}
+                  >
+                    ↓ Export CSV
+                  </button>
+                  <button
+                    className="signal-scan-btn"
+                    onClick={saveToWatchlist}
+                    title={`Save ${buySignalFilter === 'all' ? 'all' : buySignalFilter} tickers to a new watchlist with buy scores`}
+                    style={{ marginTop: 4, width: '100%', fontSize: 11 }}
+                  >
+                    + Save to Watchlist
+                  </button>
+                </>
               )}
             </div>
           )}
@@ -1023,6 +1069,7 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
                 if (!sig) return false;
                 return sig === buySignalFilter;
               })
+              .sort((a, b) => (exportCache[b.ticker]?.score ?? -1) - (exportCache[a.ticker]?.score ?? -1))
               .map((item) => {
                 const sig = tickerSignals[item.ticker];
                 return (
