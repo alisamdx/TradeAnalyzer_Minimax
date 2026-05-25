@@ -709,3 +709,113 @@ export interface BacktestRunSummary {
   metrics: BacktestMetrics | null;
   tradeCount: number;
 }
+
+// ─── LEAPS + CSP Strategy Module (v0.14.0) ────────────────────────────────────
+
+export type LeapsCspGate = 'PASS' | 'CAUTION' | 'FAIL';
+export type LeapsCspGrade = 'A+' | 'A' | 'B' | 'C' | 'F';
+export type LeapsCspPairingMode = 'same_ticker' | 'different_ticker' | 'leaps_only';
+
+export interface LeapsCspGateDetail {
+  spx: number | null;
+  spx50d: number | null;
+  spx200d: number | null;
+  vix: number | null;
+  vix5dChangePct: number | null;
+  hygIefRatio: number | null;
+  hygIefTrend: 'up' | 'down' | 'flat' | null;
+}
+
+export interface LeapsCspScoreComponent {
+  name: string;
+  weight: number;   // 0–1
+  rawScore: number; // 0–10
+  weightedScore: number;
+}
+
+export interface LeapsCspAlternative {
+  cspTicker: string;
+  cspStrike: number;
+  cspExpiry: string;
+  cspDelta: number | null;
+  cspPremium: number | null;
+  cspAnnReturnPct: number | null;
+  cspSubScore: number;
+  combinedScore: number;
+  grade: LeapsCspGrade;
+}
+
+export interface LeapsCspDetail {
+  leapsScoreBreakdown: LeapsCspScoreComponent[];
+  cspScoreBreakdown: LeapsCspScoreComponent[];
+  alternatives: LeapsCspAlternative[];
+}
+
+export interface LeapsCspOpportunity {
+  id: number;
+  runId: number;
+  rank: number;
+  pairingMode: LeapsCspPairingMode;
+
+  // Leg A
+  leapsTicker: string;
+  leapsCurrentPrice: number | null;
+  leapsStrike: number;
+  leapsExpiry: string;
+  leapsDte: number | null;
+  leapsDelta: number | null;
+  leapsPremium: number | null;
+  leapsExtrinsicPct: number | null;
+  leapsIvPct: number | null;
+  leapsIvr: number | null;
+  leapsOi: number | null;
+  leapsSubScore: number;
+
+  // Leg B
+  cspTicker: string | null;
+  cspCurrentPrice: number | null;
+  cspStrike: number | null;
+  cspExpiry: string | null;
+  cspDte: number | null;
+  cspDelta: number | null;
+  cspPremium: number | null;
+  cspCollateral: number | null;
+  cspAnnReturnPct: number | null;
+  cspIvPct: number | null;
+  cspIvr: number | null;
+  cspOi: number | null;
+  cspSubScore: number | null;
+
+  // Combined
+  combinedScore: number;
+  grade: LeapsCspGrade;
+  cautionFlags: string[];
+  totalCashToDeploy: number | null;
+
+  detail: LeapsCspDetail;
+}
+
+export interface LeapsCspRunSummary {
+  id: number;
+  runAt: string;
+  universe: string;
+  marketGate: LeapsCspGate;
+  gateDetail: LeapsCspGateDetail;
+  gateEffect: string;
+  candidateCount: number;
+  opportunityCount: number;
+}
+
+export interface LeapsCspRunResult {
+  run: LeapsCspRunSummary;
+  opportunities: LeapsCspOpportunity[];
+}
+
+export interface LeapsCspOpenedEntry {
+  id: number;
+  opportunityId: number;
+  openedAt: string;
+  leapsEntryDebit: number | null;
+  cspEntryCredit: number | null;
+  notes: string | null;
+}

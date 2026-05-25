@@ -38,7 +38,10 @@ import type {
   BacktestRun,
   BacktestTrade,
   BacktestMetrics,
-  BacktestProgressEvent
+  BacktestProgressEvent,
+  LeapsCspRunResult,
+  LeapsCspRunSummary,
+  LeapsCspOpenedEntry,
 } from '@shared/types.js';
 export type {
   ScreenPreset, ScreenCriteria, ScreenRunResult, ScreenResultRow, Universe,
@@ -677,6 +680,21 @@ function buildApi() {
     }
   };
 
+  const leapsCsp = {
+    runScreen: (universe: 'sp500' | 'russell1000' | 'both') =>
+      invoke<LeapsCspRunResult>('leaps-csp:run-screen', universe),
+    getRuns: () => invoke<LeapsCspRunSummary[]>('leaps-csp:get-runs'),
+    getRun: (runId: number) => invoke<LeapsCspRunResult | null>('leaps-csp:get-run', runId),
+    markOpened: (opportunityId: number, entry: { leapsEntryDebit?: number; cspEntryCredit?: number; notes?: string }) =>
+      invoke<boolean>('leaps-csp:mark-opened', opportunityId, entry),
+    getOpened: () => invoke<LeapsCspOpenedEntry[]>('leaps-csp:get-opened'),
+    onProgress: (callback: (msg: string) => void) => {
+      const handler = (_: unknown, msg: string) => callback(msg);
+      ipcRenderer.on('leaps-csp:progress', handler);
+      return () => ipcRenderer.removeListener('leaps-csp:progress', handler);
+    },
+  };
+
   const backtest = {
     config: {
       list: () => invoke<BacktestConfig[]>('backtest:config:list'),
@@ -700,7 +718,7 @@ function buildApi() {
   };
 
   return {
-    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, historical, portfolio, briefing, alerts, optionsChain, agent, backtest },
+    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, historical, portfolio, briefing, alerts, optionsChain, agent, backtest, leapsCsp },
     dialog: {
       prompt: (opts: { title: string; defaultValue?: string }) =>
         invoke<string | null>('dialog:prompt', opts),

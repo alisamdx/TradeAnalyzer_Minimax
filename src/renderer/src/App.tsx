@@ -18,10 +18,11 @@ import { DataView } from './views/DataView.js';
 import { OptionsChainView } from './views/OptionsChainView.js';
 import { AgentView } from './views/AgentView.js';
 import { BacktestView } from './views/BacktestView.js';
+import { LeapsCspView } from './views/LeapsCspView.js';
 
 declare const __APP_VERSION__: string;
 
-type View = 'watchlists' | 'screener' | 'analysis' | 'validate' | 'portfolio' | 'briefing' | 'settings' | 'alerts' | 'data' | 'optionsChain' | 'agent' | 'backtest';
+type View = 'watchlists' | 'screener' | 'analysis' | 'validate' | 'portfolio' | 'briefing' | 'settings' | 'alerts' | 'data' | 'optionsChain' | 'agent' | 'backtest' | 'leapsCsp';
 
 export function App() {
   const [view, setView] = useState<View>('watchlists');
@@ -451,6 +452,12 @@ export function App() {
           >
             📉 Options
           </button>
+          <button
+            className={`nav-btn ${view === 'leapsCsp' ? 'active' : ''}`}
+            onClick={() => setView('leapsCsp')}
+          >
+            ⚡ LEAPS+CSP
+          </button>
           <div className="nav-divider" />
           <button
             className={`nav-btn ${view === 'data' ? 'active' : ''}`}
@@ -541,6 +548,7 @@ export function App() {
         {view === 'optionsChain' && <OptionsChainView initialTicker={optionsChainTicker} initialExpiry={optionsChainExpiry} clearInitialTicker={() => { setOptionsChainTicker(null); setOptionsChainExpiry(null); }} />}
         {view === 'agent' && <AgentView />}
         {view === 'backtest' && <BacktestView />}
+        {view === 'leapsCsp' && <LeapsCspView />}
         {view === 'settings' && <SettingsView />}
 
         {view === 'watchlists' && !active ? (

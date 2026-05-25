@@ -23,6 +23,7 @@ import { registerSettingsIpc, registerDiagnosticsIpc } from './ipc/ipc-settings.
 import { registerCacheIpc } from './ipc/ipc-cache.js';
 
 import { registerHistoricalIpc } from './ipc/ipc-historical.js';
+import { registerLeapsCspIpc } from './ipc/ipc-leaps-csp.js';
 import { registerPortfolioIpc } from './ipc/ipc-portfolio.js';
 import { registerBriefingIpc } from './ipc/ipc-briefing.js';
 import { registerAlertsIpc } from './ipc/ipc-alerts.js';
@@ -232,6 +233,9 @@ app.whenReady().then(() => {
 
   // Options Chain view
   registerOptionsIpc(dataProvider, quoteCache, rateLimiter);
+
+  // LEAPS + CSP strategy screener
+  registerLeapsCspIpc(db, () => getApiKey(db), rateLimiter);
 
   // v0.13.0 — Backtesting engine
   const backtestEngine = new BacktestEngine(db);
