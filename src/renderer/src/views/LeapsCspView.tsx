@@ -321,7 +321,7 @@ const DEFAULT_GRADES = new Set<LeapsCspGrade>(['A+', 'A', 'B']);
 
 // ─── Main View ────────────────────────────────────────────────────────────────
 
-export default function LeapsCspView() {
+export function LeapsCspView() {
   const [universe, setUniverse] = useState<'sp500' | 'russell1000' | 'both'>('sp500');
   const [isRunning, setIsRunning] = useState(false);
   const [progressLog, setProgressLog] = useState<string[]>([]);
