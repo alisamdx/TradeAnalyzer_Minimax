@@ -362,6 +362,10 @@ export function LeapsCspView() {
       const r = await window.api.leapsCsp.runScreen(universe, forceRun);
       setResult(r);
       setRecentRuns(prev => [r.run, ...prev].slice(0, 20));
+      // Under a gate override or CAUTION, widen the grade filter automatically
+      if (forceRun || r.run.marketGate === 'CAUTION') {
+        setSelectedGrades(new Set(ALL_GRADES));
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
