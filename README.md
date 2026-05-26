@@ -4,7 +4,7 @@ Cross-platform desktop application for a single retail options/swing trader. Man
 
 > **Status:** v0.4.0 — Phases 1-4 complete (Watchlists, Screener, Analysis Engine, Validation Dashboard, Settings). Polygon integration active.
 
-For the full spec, see [`REQUIREMENTS.md`](REQUIREMENTS.md). For AI session bootstrapping, see [`AI_CONTEXT.md`](AI_CONTEXT.md) and [`AI_PROMPT.md`](AI_PROMPT.md). For per-version notes, see [`CHANGELOG.md`](CHANGELOG.md).
+For the full spec, see [`REQUIREMENTS.md`](Requirements/REQUIREMENTS.md). For AI session bootstrapping, see [`.ai/AI_CONTEXT.md`](.ai/AI_CONTEXT.md) and [`.ai/AI_PROMPT.md`](.ai/AI_PROMPT.md). For per-version notes, see [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Prerequisites
 

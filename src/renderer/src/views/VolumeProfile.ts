@@ -127,7 +127,7 @@ export class VolumeProfile implements ISeriesPrimitive<Time> {
       const numBins = Math.max(1, endBin - startBin + 1);
       const volPerBin = bar.volume / numBins;
       for (let b = startBin; b <= endBin; b++) {
-        bins[b] += volPerBin;
+        const cur = bins[b] ?? 0; bins[b] = cur + volPerBin;
       }
     }
 
@@ -163,7 +163,7 @@ export class VolumeProfile implements ISeriesPrimitive<Time> {
       rendererBars.push({
         y: yTop,
         height,
-        volumePct: (bins[i] / maxBinVol) * 100,
+        volumePct: ((bins[i] ?? 0) / maxBinVol) * 100,
         color,
       });
     }

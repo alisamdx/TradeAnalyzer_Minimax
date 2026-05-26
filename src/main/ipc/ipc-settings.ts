@@ -157,6 +157,22 @@ export function registerSettingsIpc(
     return ok({ available: encryptionAvailable() });
   });
 
+  /** Get the currently selected options data provider ('polygon' | 'etrade'). */
+  ipcMain.handle('settings:get-options-provider', () => {
+    try {
+      const row = db.prepare("SELECT value FROM settings WHERE key = 'optionsProvider'").get() as { value?: string } | undefined;
+      return ok<'polygon' | 'etrade'>((row?.value as 'polygon' | 'etrade') ?? 'polygon');
+    } catch (err) { return fail(err); }
+  });
+
+  /** Set the active options data provider. Restarts take effect on next app launch. */
+  ipcMain.handle('settings:set-options-provider', (_e, provider: 'polygon' | 'etrade') => {
+    try {
+      db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('optionsProvider', ?)").run(provider);
+      return ok(true);
+    } catch (err) { return fail(err); }
+  });
+
   ipcMain.handle('settings:open-logs-dir', () => {
     const logsDir = join(app.getPath('userData'), 'logs', 'api');
     shell.openPath(logsDir).catch(() => { /* best effort */ });
@@ -195,7 +211,7 @@ export function registerSettingsIpc(
       }
 
       // Copy AI_CONTEXT if present at repo root (not in userData — use user's app dir)
-      const aiCtxSrc = join(app.getAppPath().replace(/[\\/]out[\\/]renderer$/, ''), 'AI_CONTEXT.md');
+      const aiCtxSrc = join(app.getAppPath().replace(/[\\/]out[\\/]renderer$/, ''), '.ai', 'AI_CONTEXT.md');
       const aiCtxDst = join(backupDir, 'AI_CONTEXT.md');
       if (existsSync(aiCtxSrc)) {
         copyFileSync(aiCtxSrc, aiCtxDst);

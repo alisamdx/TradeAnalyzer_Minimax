@@ -31,6 +31,8 @@ import { registerOptionsIpc } from './ipc/ipc-options.js';
 import { registerTestApiIpc } from './ipc/ipc-test-api.js';
 import { registerETradeIpc } from './ipc/ipc-etrade.js';
 import { secureGet, migratePlaintextSecrets } from './services/secure-settings.js';
+import type { OptionsProvider } from './services/options-provider.js';
+import { ETradeDataProvider } from './services/etrade-data-provider.js';
 import { AgentDbService } from './services/agent-db-service.js';
 import { registerAgentIpc } from './ipc/ipc-agent.js';
 import { BacktestEngine } from './services/backtest-engine.js';
@@ -197,6 +199,29 @@ app.whenReady().then(() => {
   const quoteCache = new QuoteCache(db);
   new FundamentalsCache(db);
 
+  // Options provider selection (read from DB; chosen at startup).
+  // 'polygon' → uses PolygonDataProvider (already created above).
+  // 'etrade'  → uses ETradeDataProvider with live credentials from DB.
+  const optionsProviderSetting = (() => {
+    const row = db.prepare("SELECT value FROM settings WHERE key = 'optionsProvider'").get() as { value?: string } | undefined;
+    return row?.value ?? 'polygon';
+  })();
+
+  let optionsProvider: OptionsProvider;
+  if (optionsProviderSetting === 'etrade') {
+    const etradeCredsFactory = () => ({
+      consumerKey:    secureGet(db, 'etradeConsumerKey'),
+      consumerSecret: secureGet(db, 'etradeConsumerSecret'),
+      accessToken:    secureGet(db, 'etradeAccessToken'),
+      accessSecret:   secureGet(db, 'etradeAccessSecret'),
+    });
+    optionsProvider = new ETradeDataProvider(etradeCredsFactory);
+    console.log('[options] provider = E*Trade');
+  } else {
+    optionsProvider = dataProvider; // PolygonDataProvider implements OptionsProvider
+    console.log('[options] provider = Polygon');
+  }
+
   // Register watchlist IPC with data provider for ticker validation
   registerWatchlistIpc(watchlistService, dataProvider);
 
@@ -216,7 +241,7 @@ app.whenReady().then(() => {
   // Phase 3 — rate limiter + job queue + analysis + validate-all.
   const rateLimiter = new TokenBucketRateLimiter({ requestsPerMinute: 100 });
   const jobQueue = new JobQueue(db);
-  const analysisService = new AnalysisService(db, dataProvider, rateLimiter, jobQueue);
+  const analysisService = new AnalysisService(db, dataProvider, rateLimiter, jobQueue, optionsProvider);
   const validateAllService = new ValidateAllService(db, dataProvider, rateLimiter, jobQueue);
 
   registerAnalysisIpc(analysisService, validateAllService, jobQueue, watchlistService);
@@ -238,16 +263,16 @@ app.whenReady().then(() => {
   registerAlertsIpc(db);
 
   // Options Chain view
-  registerOptionsIpc(dataProvider, quoteCache, rateLimiter);
+  registerOptionsIpc(optionsProvider, quoteCache, rateLimiter);
 
   // Test API diagnostic screen
   registerTestApiIpc(dataProvider);
 
-  // E*Trade provider (used by Test API now; full DataProvider integration later)
+  // E*Trade auth / credential management IPC
   registerETradeIpc(db);
 
   // LEAPS + CSP strategy screener
-  registerLeapsCspIpc(db, () => getApiKey(db), rateLimiter);
+  registerLeapsCspIpc(db, dataProvider, optionsProvider, rateLimiter);
 
   // v0.13.0 — Backtesting engine
   const backtestEngine = new BacktestEngine(db);

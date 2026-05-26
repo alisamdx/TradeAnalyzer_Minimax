@@ -40,9 +40,11 @@ function ivColor(iv: number): string {
 
 /** Format YYYY-MM-DD as "Mon DD" in local time (no UTC shift). */
 function formatExpDate(dateStr: string): string {
-  const [y, m, d] = dateStr.split('-').map(Number);
+  const parts = dateStr.split('-');
+  const m = Number(parts[1] ?? '1');
+  const d = Number(parts[2] ?? '1');
   const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  return `${months[m - 1]!} ${d}`;
+  return `${months[m - 1] ?? 'Jan'} ${d}`;
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────

@@ -9,6 +9,7 @@
 // Uses the global `fetch` available in Node 18+ (Electron main process).
 // No import needed — fetch is a global in Node 22+ ESM.
 import type { DataProvider } from './data-provider.js';
+import type { OptionsProvider } from './options-provider.js';
 import type {
   DerivedRatios,
   Quote,
@@ -45,7 +46,7 @@ function endpointLabel(path: string, ticker?: string): string {
   return label;
 }
 
-export class PolygonDataProvider implements DataProvider {
+export class PolygonDataProvider implements DataProvider, OptionsProvider {
   readonly name = 'polygon';
   private readonly baseUrl = BASE_URL;
   private readonly correlationCounter = 0;
@@ -280,6 +281,14 @@ export class PolygonDataProvider implements DataProvider {
       const t = bar['t'] ?? 0, o = bar['o'] ?? 0, h = bar['h'] ?? 0, l = bar['l'] ?? 0, c = bar['c'] ?? 0, v = bar['v'] ?? 0;
       return { t, o, h, l, c, v };
     });
+  }
+
+  /**
+   * Polygon does not expose a dedicated "list expirations" endpoint, so this
+   * always returns [] and callers fall back to generating the next N Fridays.
+   */
+  async getOptionsExpirations(_ticker: string): Promise<string[]> {
+    return [];
   }
 
   async getOptionsChain(

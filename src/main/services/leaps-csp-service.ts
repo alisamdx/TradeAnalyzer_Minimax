@@ -10,7 +10,8 @@
 //   Pair (same-ticker + cross-ticker) → Combined score → Rank → Persist
 
 import type { DbHandle } from '../db/connection.js';
-import type { PolygonDataProvider } from './polygon-provider.js';
+import type { DataProvider } from './data-provider.js';
+import type { OptionsProvider } from './options-provider.js';
 import type { TokenBucketRateLimiter } from './rate-limiter.js';
 import type {
   LeapsCspGate,
@@ -189,7 +190,8 @@ function clamp(v: number, lo: number, hi: number): number {
 export class LeapsCspService {
   constructor(
     private readonly db: DbHandle,
-    private readonly provider: PolygonDataProvider,
+    private readonly dataProvider: DataProvider,
+    private readonly optionsProvider: OptionsProvider,
     private readonly rateLimiter: TokenBucketRateLimiter,
   ) {}
 
@@ -273,7 +275,7 @@ export class LeapsCspService {
 
       await this.rateLimiter.acquire();
       try {
-        const ratios = await this.provider.getFundamentals(ticker);
+        const ratios = await this.dataProvider.getFundamentals(ticker);
         fundamentalsMap.set(ticker, {
           ticker,
           marketCap: ratios.marketCap ?? null,
@@ -1210,7 +1212,7 @@ export class LeapsCspService {
 
   private async fetchIvData(ticker: string): Promise<IvData> {
     try {
-      const result = await this.provider.getOptionsIVAndPremium(ticker, null, null);
+      const result = await this.optionsProvider.getOptionsIVAndPremium(ticker, null, null);
       const { currentIv, iv52WkHigh, iv52WkLow } = result;
       // IVR = (current - low) / (high - low) × 100  (see docs/formulas.md#iv-rank)
       let ivr: number | null = null;
@@ -1235,7 +1237,7 @@ export class LeapsCspService {
 
   private async safeGetChain(ticker: string, expiry: string): Promise<OptionContract[] | null> {
     try {
-      const chain = await this.provider.getOptionsChain(ticker, expiry);
+      const chain = await this.optionsProvider.getOptionsChain(ticker, expiry);
       return chain.contracts as OptionContract[];
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -1254,7 +1256,7 @@ export class LeapsCspService {
 
   private async safeQuote(ticker: string): Promise<{ last: number | null; volume: number | null } | null> {
     try {
-      const q = await this.provider.getQuote(ticker);
+      const q = await this.dataProvider.getQuote(ticker);
       return { last: q.last, volume: q.volume };
     } catch {
       return null;
@@ -1263,8 +1265,8 @@ export class LeapsCspService {
 
   private async safeBars(ticker: string, tf: 'day', lookbackDays: number): Promise<Array<{ c: number }>> {
     try {
-      const bars = await this.provider.getHistoricalBars(ticker, tf, lookbackDays);
-      return bars.map(b => ({ c: b.c }));
+      const bars = await this.dataProvider.getHistoricalBars(ticker, tf, lookbackDays);
+      return bars.map((b) => ({ c: b.c }));
     } catch {
       return [];
     }

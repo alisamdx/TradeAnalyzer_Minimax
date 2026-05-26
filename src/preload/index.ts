@@ -193,7 +193,11 @@ function buildApi() {
     setApiKey: (key: string) => invoke<boolean>('settings:set-api-key', key),
     openLogsDir: () => invoke<boolean>('settings:open-logs-dir'),
     backup: () => invoke<{ backupPath: string; message: string } | null>('settings:backup-everything'),
-    restore: () => invoke<{ restored: boolean; message: string } | null>('settings:restore-backup')
+    restore: () => invoke<{ restored: boolean; message: string } | null>('settings:restore-backup'),
+    /** Returns which options data provider is active ('polygon' or 'etrade'). */
+    getOptionsProvider: () => invoke<'polygon' | 'etrade'>('settings:get-options-provider'),
+    /** Saves the options provider selection. Takes effect after next app restart. */
+    setOptionsProvider: (provider: 'polygon' | 'etrade') => invoke<boolean>('settings:set-options-provider', provider),
   };
 
   const diagnostics = {

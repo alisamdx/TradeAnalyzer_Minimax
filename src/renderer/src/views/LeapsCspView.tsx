@@ -414,7 +414,7 @@ export function LeapsCspView() {
     window.api.watchlists.list().then(wl => {
       setWatchlists(wl);
       if (wl.length > 0 && selectedWatchlistId === null) {
-        setSelectedWatchlistId(wl[0].id);
+        setSelectedWatchlistId(wl[0]?.id ?? null);
       }
     }).catch(() => {});
     return () => { unsubRef.current?.(); unsubDetailRef.current?.(); };

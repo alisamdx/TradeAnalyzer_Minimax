@@ -6,8 +6,9 @@ import { DEFAULT_FILTER_SPECS } from '../src/shared/screener-filters.js';
 describe('screener-filters', () => {
   describe('DEFAULT_FILTER_SPECS', () => {
     it('has all filters from the spec table', () => {
-      // 17 from spec table + 1 sector_exclude (also in table) = 18
-      expect(DEFAULT_FILTER_SPECS.length).toBeGreaterThanOrEqual(17);
+      // 15 filters: 3 removed because Polygon does not supply the data
+      // (avg_option_vol, beta, exclude_earnings — see screener-filters.ts comment)
+      expect(DEFAULT_FILTER_SPECS.length).toBeGreaterThanOrEqual(15);
     });
 
     it('has unique IDs', () => {
@@ -16,15 +17,15 @@ describe('screener-filters', () => {
       expect(unique.size).toBe(ids.length);
     });
 
-    it('default market cap is $10B (≥ $10B large-cap)', () => {
+    it('default market cap is $2B (≥ $2B mid+large-cap)', () => {
       const f = DEFAULT_FILTER_SPECS.find((f) => f.id === 'market_cap')!;
-      expect(f.defaultMin).toBe(10_000_000_000);
+      expect(f.defaultMin).toBe(2_000_000_000);
     });
 
-    it('default P/E is 5–30', () => {
+    it('default P/E is 0–50', () => {
       const f = DEFAULT_FILTER_SPECS.find((f) => f.id === 'pe_ratio')!;
-      expect(f.defaultMin).toBe(5);
-      expect(f.defaultMax).toBe(30);
+      expect(f.defaultMin).toBe(0);
+      expect(f.defaultMax).toBe(50);
     });
 
     it('P/E is enabled by default', () => {
@@ -42,14 +43,14 @@ describe('screener-filters', () => {
       expect(f.defaultMax).toBe(1.5);
     });
 
-    it('ROE is ≥ 15% by default', () => {
+    it('ROE is ≥ 10% by default', () => {
       const f = DEFAULT_FILTER_SPECS.find((f) => f.id === 'roe')!;
-      expect(f.defaultMin).toBe(15);
+      expect(f.defaultMin).toBe(10);
     });
 
-    it('profit margin is ≥ 8% by default', () => {
+    it('profit margin is ≥ 5% by default', () => {
       const f = DEFAULT_FILTER_SPECS.find((f) => f.id === 'profit_margin')!;
-      expect(f.defaultMin).toBe(8);
+      expect(f.defaultMin).toBe(5);
     });
 
     it('avg volume is ≥ 1M by default', () => {
@@ -57,14 +58,15 @@ describe('screener-filters', () => {
       expect(f.defaultMin).toBe(1_000_000);
     });
 
-    it('option volume is disabled by default', () => {
-      const f = DEFAULT_FILTER_SPECS.find((f) => f.id === 'avg_option_vol')!;
-      expect(f.defaultEnabled).toBe(false);
+    it('avg_option_vol filter does not exist (Polygon does not supply option volume)', () => {
+      const f = DEFAULT_FILTER_SPECS.find((f) => f.id === 'avg_option_vol');
+      expect(f).toBeUndefined();
     });
 
-    it('price is ≥ $20 by default', () => {
+    it('price filter exists and is disabled by default', () => {
       const f = DEFAULT_FILTER_SPECS.find((f) => f.id === 'price')!;
-      expect(f.defaultMin).toBe(20);
+      expect(f).toBeDefined();
+      expect(f.defaultEnabled).toBe(false);
     });
 
     it('dist_52wk_high is within 25% by default', () => {
@@ -78,15 +80,14 @@ describe('screener-filters', () => {
       expect(f.defaultMin).toBe(15);
     });
 
-    it('beta is 0.7–1.6 by default', () => {
-      const f = DEFAULT_FILTER_SPECS.find((f) => f.id === 'beta')!;
-      expect(f.defaultMin).toBe(0.7);
-      expect(f.defaultMax).toBe(1.6);
+    it('beta filter does not exist (Polygon does not supply beta)', () => {
+      const f = DEFAULT_FILTER_SPECS.find((f) => f.id === 'beta');
+      expect(f).toBeUndefined();
     });
 
-    it('earnings filter is disabled by default', () => {
-      const f = DEFAULT_FILTER_SPECS.find((f) => f.id === 'exclude_earnings')!;
-      expect(f.defaultEnabled).toBe(false);
+    it('exclude_earnings filter does not exist (Polygon has no earnings calendar endpoint)', () => {
+      const f = DEFAULT_FILTER_SPECS.find((f) => f.id === 'exclude_earnings');
+      expect(f).toBeUndefined();
     });
 
     it('sector_exclude is disabled by default', () => {

@@ -157,11 +157,12 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
 
   // Stream per-ticker signals from Validate All runs.
   useEffect(() => {
-    return window.api.validate.onTickerSignal((data) => {
+    const unsub = window.api.validate.onTickerSignal((data) => {
       setTickerSignals(prev => ({ ...prev, [data.ticker]: data.strength }));
       setScanProgress(prev => prev ? { ...prev, done: prev.done + 1 } : null);
       setExportCache(prev => ({ ...prev, [data.ticker]: data }));
     });
+    return () => { unsub(); };
   }, []);
 
   // Load watchlists on mount.

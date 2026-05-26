@@ -5,6 +5,7 @@
 import type { DbHandle } from '../db/connection.js';
 import { withTransaction } from '../db/connection.js';
 import type { DataProvider } from './data-provider.js';
+import type { OptionsProvider } from './options-provider.js';
 import { QuoteCache, FundamentalsCache } from './cache-service.js';
 import { TokenBucketRateLimiter } from './rate-limiter.js';
 import { JobQueue } from './job-queue.js';
@@ -274,7 +275,7 @@ export function computeVolumeProfileLevels(
     const endBin = Math.min(binCount - 1, Math.floor((bar.h - priceLow) / binSize));
     const numBins = Math.max(1, endBin - startBin + 1);
     const volPerBin = bar.v / numBins;
-    for (let b = startBin; b <= endBin; b++) bins[b] += volPerBin;
+    for (let b = startBin; b <= endBin; b++) { const cur = bins[b] ?? 0; bins[b] = cur + volPerBin; }
   }
 
   const maxVol = Math.max(...bins);
@@ -333,7 +334,8 @@ export class AnalysisService {
     private readonly db: DbHandle,
     private readonly dataProvider: DataProvider,
     private readonly rateLimiter: TokenBucketRateLimiter,
-    private readonly jobQueue: JobQueue
+    private readonly jobQueue: JobQueue,
+    private readonly optionsProvider?: OptionsProvider
   ) {
     this.quoteCache = new QuoteCache(db);
     this.fundamentalsCache = new FundamentalsCache(db);
@@ -681,7 +683,7 @@ export class AnalysisService {
     // Fetch current IV from options chain
     let currentIv: number | null = null;
     try {
-      const ivData = await this.dataProvider.getOptionsIV(ticker);
+      const ivData = await (this.optionsProvider ?? this.dataProvider).getOptionsIV(ticker);
       currentIv = ivData.currentIv;
     } catch { /* ignore errors */ }
 
@@ -928,7 +930,7 @@ export class AnalysisService {
       // Try nearest expirations (look out far enough for 30-45 DTE).
       const expirations = await this.getNearTermExpirations(ticker, 7);
       for (const exp of expirations) {
-        const chain = await this.dataProvider.getOptionsChain(ticker, exp);
+        const chain = await (this.optionsProvider ?? this.dataProvider).getOptionsChain(ticker, exp);
         const dte = dteDays(exp);
         if (!isDTEMatch(dte, minDTE, maxDTE)) continue;
         // For puts, delta is negative (e.g. -0.25). Use absolute value for filtering.

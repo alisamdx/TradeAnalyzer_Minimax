@@ -4,7 +4,8 @@
 import { ipcMain, type IpcMainInvokeEvent } from 'electron';
 import type { DbHandle } from '../db/connection.js';
 import { LeapsCspService } from '../services/leaps-csp-service.js';
-import { PolygonDataProvider } from '../services/polygon-provider.js';
+import type { DataProvider } from '../services/data-provider.js';
+import type { OptionsProvider } from '../services/options-provider.js';
 import type { TokenBucketRateLimiter } from '../services/rate-limiter.js';
 import type { IpcResult, LeapsCspProgressDetail } from '@shared/types.js';
 
@@ -39,11 +40,11 @@ function wrap<Args extends unknown[], R>(fn: (...args: Args) => R) {
 
 export function registerLeapsCspIpc(
   db: DbHandle,
-  getApiKey: () => string,
+  dataProvider: DataProvider,
+  optionsProvider: OptionsProvider,
   rateLimiter: TokenBucketRateLimiter,
 ): void {
-  const provider = new PolygonDataProvider(getApiKey);
-  const service = new LeapsCspService(db, provider, rateLimiter);
+  const service = new LeapsCspService(db, dataProvider, optionsProvider, rateLimiter);
 
   // Run a full LEAPS+CSP screen. Streams progress via 'leaps-csp:progress' events.
   ipcMain.handle(

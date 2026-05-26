@@ -42,6 +42,8 @@ export function SettingsView() {
   const [restoreMsg, setRestoreMsg] = useState<string | null>(null);
 
   const [activeTab, setActiveTab] = useState('General');
+  const [optionsProvider, setOptionsProvider] = useState<'polygon' | 'etrade'>('polygon');
+  const [optionsProviderSaved, setOptionsProviderSaved] = useState(false);
 
   // Load settings on mount.
   useEffect(() => {
@@ -56,6 +58,22 @@ export function SettingsView() {
     window.api.settings.getApiKey()
       .then(setApiKey)
       .catch(() => setApiKey(''));
+  }, []);
+
+  // Load options provider setting.
+  useEffect(() => {
+    window.api.settings.getOptionsProvider()
+      .then(setOptionsProvider)
+      .catch(() => setOptionsProvider('polygon'));
+  }, []);
+
+  const saveOptionsProvider = useCallback(async (provider: 'polygon' | 'etrade') => {
+    try {
+      await window.api.settings.setOptionsProvider(provider);
+      setOptionsProvider(provider);
+      setOptionsProviderSaved(true);
+      setTimeout(() => setOptionsProviderSaved(false), 2500);
+    } catch { /* silently fail */ }
   }, []);
 
   const saveSettings = useCallback(async (partial: Partial<AppSettings>) => {
@@ -268,6 +286,30 @@ export function SettingsView() {
             <h2>API &amp; Data</h2>
 
             <div className="settings-row">
+              <label>Options Data Source</label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <select
+                  value={optionsProvider}
+                  onChange={e => saveOptionsProvider(e.target.value as 'polygon' | 'etrade')}
+                  style={{ width: 200 }}
+                >
+                  <option value="polygon">Polygon.io</option>
+                  <option value="etrade">E*Trade</option>
+                </select>
+                {optionsProviderSaved && (
+                  <span style={{ color: '#4ade80', fontSize: 13 }}>
+                    ✓ Saved — restart to apply
+                  </span>
+                )}
+              </div>
+              <p className="hint">
+                Controls which provider is used for options chains, IV, and the LEAPS+CSP screener.
+                E*Trade requires a connected account (see 🔬 Test API).
+                <strong> Restart the app after changing.</strong>
+              </p>
+            </div>
+
+            <div className="settings-row">
               <label>Polygon API Key</label>
               <div className="api-key-row">
                 <input
@@ -281,7 +323,7 @@ export function SettingsView() {
                   {apiKeyVisible ? 'Hide' : 'Show'}
                 </button>
               </div>
-              <p className="hint">API key is stored in the database. Never logged or sent anywhere except Polygon.</p>
+              <p className="hint">Used for stock quotes, fundamentals, and historical bars. Never logged or sent anywhere except Polygon.</p>
             </div>
 
             <div className="settings-row">
@@ -290,7 +332,7 @@ export function SettingsView() {
                 Open logs/
               </button>
             </div>
-            
+
             <div className="settings-row" style={{ marginTop: '20px' }}>
                <button className="run-btn" onClick={saveApiKey} style={{ width: 'auto', padding: '6px 16px' }}>Save Settings</button>
             </div>
@@ -495,7 +537,7 @@ export function SettingsView() {
 
             <div className="backup-card">
               <h3>Backup Everything</h3>
-              <p>Creates a backup folder containing the SQLite database, recent logs, and AI_CONTEXT.md. Keep backups in a safe location.</p>
+              <p>Creates a backup folder containing the SQLite database, recent logs, and .ai/AI_CONTEXT.md. Keep backups in a safe location.</p>
               <button className="run-btn" onClick={handleBackup} style={{ width: 'auto', padding: '6px 16px' }}>
                 Backup Everything
               </button>

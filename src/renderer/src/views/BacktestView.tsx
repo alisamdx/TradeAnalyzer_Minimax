@@ -135,7 +135,7 @@ function ResultsPanel({ run, metrics, trades }: { run: BacktestRun; metrics: Bac
               domain={['auto', 'auto']}
             />
             <Tooltip
-              formatter={(v: number) => [fmt$(v, 0), 'Equity']}
+              formatter={(v) => [fmt$(typeof v === 'number' ? v : 0, 0), 'Equity']}
               labelFormatter={l => String(l)}
               contentStyle={{ background: '#1a1d23', border: '1px solid #333', fontSize: 12 }}
             />
@@ -341,7 +341,7 @@ export function BacktestView() {
       setProgress(evt);
     });
     unsubRef.current = unsub;
-    return () => unsub();
+    return () => { unsub(); };
   }, []);
 
   const selectRun = useCallback(async (runId: number) => {

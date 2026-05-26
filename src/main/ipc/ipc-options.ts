@@ -2,7 +2,7 @@
 // Provides near-term expiration discovery and full chain fetching.
 
 import { ipcMain, type IpcMainInvokeEvent } from 'electron';
-import type { DataProvider } from '../services/data-provider.js';
+import type { OptionsProvider } from '../services/options-provider.js';
 import type { QuoteCache } from '../services/cache-service.js';
 import type { TokenBucketRateLimiter } from '../services/rate-limiter.js';
 
@@ -47,7 +47,7 @@ function fail(err: unknown): { ok: false; error: { code: string; message: string
 }
 
 export function registerOptionsIpc(
-  dataProvider: DataProvider,
+  optionsProvider: OptionsProvider,
   quoteCache: QuoteCache,
   rateLimiter: TokenBucketRateLimiter
 ): void {
@@ -56,23 +56,14 @@ export function registerOptionsIpc(
     'options:get-near-expirations',
     async (_e: IpcMainInvokeEvent, ticker: string) => {
       try {
-        // Generate next 6 Fridays, shifting holidays back to Thursday.
-        const seen = new Set<string>();
-        const expirations: string[] = [];
-        const now = new Date();
-        const day = now.getDay();
-        const daysUntilFriday = day <= 5 ? (5 - day) : (12 - day);
-        const firstFriday = new Date(now);
-        firstFriday.setDate(now.getDate() + daysUntilFriday);
-        for (let w = 0; w < 6; w++) {
-          const d = new Date(firstFriday);
-          d.setDate(firstFriday.getDate() + w * 7);
-          if (isMarketHoliday(d)) d.setDate(d.getDate() - 1); // use Thursday
-          const yyyy = d.getFullYear();
-          const mm = String(d.getMonth() + 1).padStart(2, '0');
-          const dd = String(d.getDate()).padStart(2, '0');
-          const key = `${yyyy}-${mm}-${dd}`;
-          if (!seen.has(key)) { seen.add(key); expirations.push(key); }
+        // Try to get real expirations from the provider (E*Trade supports this).
+        // Fall back to generating next 8 Fridays when the provider returns [] (Polygon).
+        let expirations: string[] = await optionsProvider.getOptionsExpirations(ticker);
+        if (expirations.length === 0) {
+          expirations = generateNextFridays(8);
+        } else {
+          // Limit to nearest 12 to avoid overloading the UI.
+          expirations = expirations.slice(0, 12);
         }
 
         // Fetch current price and IV.
@@ -81,7 +72,7 @@ export function registerOptionsIpc(
         let currentIv: number | null = cachedQuote?.currentIv ?? null;
         if (currentIv === null) {
           try {
-            const ivData = await dataProvider.getOptionsIV(ticker);
+            const ivData = await optionsProvider.getOptionsIV(ticker);
             currentIv = ivData.currentIv;
           } catch { /* IV unavailable */ }
         }
@@ -91,7 +82,7 @@ export function registerOptionsIpc(
         for (const exp of expirations) {
           try {
             await rateLimiter.acquire(1);
-            const chain = await dataProvider.getOptionsChain(ticker, exp);
+            const chain = await optionsProvider.getOptionsChain(ticker, exp);
             const dte = dteDays(exp);
             const callCount = chain.contracts.filter(c => c.side === 'call').length;
             const putCount = chain.contracts.filter(c => c.side === 'put').length;
@@ -115,14 +106,14 @@ export function registerOptionsIpc(
     async (_e: IpcMainInvokeEvent, ticker: string, expiration: string) => {
       try {
         await rateLimiter.acquire(1);
-        const chain = await dataProvider.getOptionsChain(ticker, expiration);
+        const chain = await optionsProvider.getOptionsChain(ticker, expiration);
 
         const cachedQuote = quoteCache.get(ticker);
         const currentPrice = cachedQuote?.last ?? null;
         let currentIv: number | null = cachedQuote?.currentIv ?? null;
         if (currentIv === null) {
           try {
-            const ivData = await dataProvider.getOptionsIV(ticker);
+            const ivData = await optionsProvider.getOptionsIV(ticker);
             currentIv = ivData.currentIv;
           } catch { /* IV unavailable */ }
         }
@@ -139,4 +130,28 @@ export function registerOptionsIpc(
       }
     }
   );
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Generate the next N standard weekly expiration Fridays, shifting holidays to Thursday. */
+function generateNextFridays(count: number): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  const now = new Date();
+  const day = now.getDay();
+  const daysUntilFriday = day <= 5 ? (5 - day) : (12 - day);
+  const firstFriday = new Date(now);
+  firstFriday.setDate(now.getDate() + daysUntilFriday);
+  for (let w = 0; result.length < count; w++) {
+    const d = new Date(firstFriday);
+    d.setDate(firstFriday.getDate() + w * 7);
+    if (isMarketHoliday(d)) d.setDate(d.getDate() - 1); // use Thursday
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    const key = `${yyyy}-${mm}-${dd}`;
+    if (!seen.has(key)) { seen.add(key); result.push(key); }
+  }
+  return result;
 }
