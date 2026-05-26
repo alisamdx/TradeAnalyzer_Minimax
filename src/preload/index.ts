@@ -655,6 +655,11 @@ function buildApi() {
   };
 
   const etrade = {
+    /** Check whether the E*Trade token is valid. Returns a status object. */
+    checkConnection: () => invoke<{
+      status: 'ok' | 'no_credentials' | 'no_token' | 'expired' | 'error';
+      message?: string;
+    }>('etrade:check-connection'),
     getStatus: () => invoke<{
       status: { hasConsumerKey: boolean; hasConsumerSecret: boolean; hasAccessToken: boolean; isConfigured: boolean; isAuthenticated: boolean };
       consumerKey: string;

@@ -145,6 +145,44 @@ export function registerETradeIpc(db: Database): void {
     } catch (err) { return fail(err); }
   });
 
+  /**
+   * Lightweight connection check: tries to renew/ping the token.
+   * Returns { status: 'ok' | 'no_credentials' | 'no_token' | 'expired' | 'error', message? }
+   * 'ok'             — token is valid (active or dormant; renewal succeeded)
+   * 'no_credentials' — consumer key/secret not saved
+   * 'no_token'       — credentials saved but not yet authenticated
+   * 'expired'        — token expired at midnight ET; full re-auth required
+   * 'error'          — unexpected API error
+   */
+  ipcMain.handle('etrade:check-connection', async (_e: IpcMainInvokeEvent) => {
+    try {
+      const consumerKey    = secureGet(db, 'etradeConsumerKey');
+      const consumerSecret = secureGet(db, 'etradeConsumerSecret');
+      const accessToken    = secureGet(db, 'etradeAccessToken');
+      const accessSecret   = secureGet(db, 'etradeAccessSecret');
+
+      if (!consumerKey || !consumerSecret) {
+        return ok({ status: 'no_credentials' as const });
+      }
+      if (!accessToken || !accessSecret) {
+        return ok({ status: 'no_token' as const });
+      }
+
+      // Ping via renewAccessToken — succeeds for active and dormant tokens;
+      // returns 401 with "token_expired" for expired tokens.
+      try {
+        await renewAccessToken({ consumerKey, consumerSecret, accessToken, accessSecret });
+        return ok({ status: 'ok' as const });
+      } catch (pingErr) {
+        const msg = pingErr instanceof Error ? pingErr.message : String(pingErr);
+        if (msg.includes('token_expired') || msg.includes('401')) {
+          return ok({ status: 'expired' as const });
+        }
+        return ok({ status: 'error' as const, message: msg });
+      }
+    } catch (err) { return fail(err); }
+  });
+
   /** Clear access token (force re-auth). */
   ipcMain.handle('etrade:disconnect', (_e: IpcMainInvokeEvent) => {
     try {

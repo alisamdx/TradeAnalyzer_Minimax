@@ -56,6 +56,39 @@ export function App() {
   // Cache status for auto-refresh indicator
   const { status: cacheStatus, refresh: refreshCacheStatus } = useCacheStatus();
 
+  // E*Trade connection warning forwarded to SettingsView
+  const [etradeWarning, setEtradeWarning] = useState<string | null>(null);
+
+  // On mount: if E*Trade is the options provider, verify the token is still valid.
+  // If not, redirect to Settings so the user can reconnect before anything breaks.
+  useEffect(() => {
+    (async () => {
+      try {
+        const provider = await window.api.settings.getOptionsProvider();
+        if (provider !== 'etrade') return;
+
+        const result = await window.api.etrade.checkConnection();
+        if (result.status === 'ok') return; // all good, normal startup
+
+        let warning: string;
+        if (result.status === 'expired') {
+          warning = 'E*Trade token expired (tokens reset at midnight ET). Please reconnect.';
+        } else if (result.status === 'no_token') {
+          warning = 'E*Trade is selected as the options provider but you have not connected yet. Click "Connect" below to authenticate.';
+        } else if (result.status === 'no_credentials') {
+          warning = 'E*Trade is selected as the options provider but no credentials are saved. Enter your Consumer Key and Secret, then click "Connect".';
+        } else {
+          warning = `E*Trade connection error: ${result.message ?? 'unknown'}. Please reconnect.`;
+        }
+
+        setEtradeWarning(warning);
+        setView('settings');
+      } catch {
+        // If the check itself fails, let the app start normally — don't block on this
+      }
+    })();
+  }, []);
+
   useEffect(() => {
     // Listen for "Run Analysis" from screener
     const handleNavigateToAnalysis = (e: CustomEvent<{ ticker: string }>) => {
@@ -557,7 +590,7 @@ export function App() {
         {view === 'backtest' && <BacktestView />}
         {view === 'leapsCsp' && <LeapsCspView />}
         {view === 'testApi' && <TestApiView />}
-        {view === 'settings' && <SettingsView />}
+        {view === 'settings' && <SettingsView etradeWarning={etradeWarning} onEtradeWarningDismiss={() => setEtradeWarning(null)} />}
 
         {view === 'watchlists' && !active ? (
           <div className="empty">No watchlist selected.</div>

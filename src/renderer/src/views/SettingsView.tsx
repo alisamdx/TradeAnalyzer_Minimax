@@ -1,7 +1,7 @@
 // SettingsView — EP-10 diagnostics panel + EP-11 backup/restore + rate limit config.
 // FR-6: API key management, cache TTLs, rate limit settings.
 
-import { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import type { AppSettings, DiagnosticsResult } from '@shared/types.js';
 
 declare const __APP_VERSION__: string;
@@ -29,7 +29,210 @@ function CheckRow({ label, check }: { label: string; check: DiagnosticCheck }) {
   );
 }
 
-export function SettingsView() {
+interface SettingsViewProps {
+  /** Set when app startup detected an expired/missing E*Trade token. */
+  etradeWarning?: string | null;
+  /** Called when the user dismisses the warning (e.g. after successful connect). */
+  onEtradeWarningDismiss?: () => void;
+}
+
+// ─── E*Trade connection panel ──────────────────────────────────────────────────
+
+type ETradeStep = 'idle' | 'awaiting-verifier';
+type ETradeConnStatus = 'unknown' | 'ok' | 'expired' | 'no_token' | 'no_credentials' | 'error';
+
+interface ETradeConnectPanelProps {
+  warning?: string | null;
+  onConnected?: () => void;
+}
+
+function ETradeConnectPanel({ warning, onConnected }: ETradeConnectPanelProps) {
+  const [consumerKey, setConsumerKey]     = useState('');
+  const [consumerSecret, setConsumerSecret] = useState('');
+  const [verifier, setVerifier]           = useState('');
+  const [step, setStep]                   = useState<ETradeStep>('idle');
+  const [authUrl, setAuthUrl]             = useState('');
+  const [busy, setBusy]                   = useState(false);
+  const [connStatus, setConnStatus]       = useState<ETradeConnStatus>('unknown');
+  const [statusMsg, setStatusMsg]         = useState<string | null>(null);
+  const [error, setError]                 = useState<string | null>(null);
+  const [credsSaved, setCredsSaved]       = useState(false);
+
+  // Load existing consumer key + connection status on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await window.api.etrade.getStatus();
+        setConsumerKey(res.consumerKey ?? '');
+        const check = await window.api.etrade.checkConnection();
+        setConnStatus(check.status);
+      } catch { /* ignore */ }
+    })();
+  }, []);
+
+  const saveCredentials = async () => {
+    if (!consumerKey.trim() || !consumerSecret.trim()) {
+      setError('Enter both Consumer Key and Consumer Secret.');
+      return;
+    }
+    setBusy(true); setError(null);
+    try {
+      await window.api.etrade.saveCredentials(consumerKey.trim(), consumerSecret.trim());
+      setCredsSaved(true);
+      setConnStatus('no_token');
+      setStep('idle');
+      setTimeout(() => setCredsSaved(false), 2500);
+    } catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
+  const startAuth = async () => {
+    setBusy(true); setError(null);
+    try {
+      const res = await window.api.etrade.startAuth();
+      setAuthUrl(res.authUrl);
+      setStep('awaiting-verifier');
+    } catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
+  const submitVerifier = async () => {
+    if (!verifier.trim()) { setError('Paste the verifier code from the E*Trade browser page.'); return; }
+    setBusy(true); setError(null);
+    try {
+      await window.api.etrade.submitVerifier(verifier.trim());
+      setConnStatus('ok');
+      setStep('idle');
+      setVerifier('');
+      setStatusMsg('Connected successfully!');
+      setTimeout(() => setStatusMsg(null), 3000);
+      onConnected?.();
+    } catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
+  const renewToken = async () => {
+    setBusy(true); setError(null);
+    try {
+      await window.api.etrade.renewToken();
+      setConnStatus('ok');
+      setStatusMsg('Token renewed.');
+      setTimeout(() => setStatusMsg(null), 2500);
+    } catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
+  const disconnect = async () => {
+    await window.api.etrade.disconnect();
+    setConnStatus('no_token');
+    setStep('idle');
+  };
+
+  const statusBadge = () => {
+    if (connStatus === 'ok')             return <span style={{ color: '#4ade80', fontWeight: 600 }}>✓ Connected</span>;
+    if (connStatus === 'expired')        return <span style={{ color: '#f87171', fontWeight: 600 }}>✗ Token expired — reconnect required</span>;
+    if (connStatus === 'no_token')       return <span style={{ color: '#fbbf24', fontWeight: 600 }}>⚠ Not authenticated</span>;
+    if (connStatus === 'no_credentials') return <span style={{ color: '#f87171', fontWeight: 600 }}>✗ No credentials saved</span>;
+    if (connStatus === 'error')          return <span style={{ color: '#f87171', fontWeight: 600 }}>✗ Connection error</span>;
+    return <span style={{ color: '#9ca3af' }}>Checking…</span>;
+  };
+
+  const inp: React.CSSProperties = { width: '100%', padding: '6px 10px', background: '#1a1d23', border: '1px solid #333', borderRadius: 4, color: '#cdd6f4', fontSize: 13 };
+  const btn = (color = '#3b82f6'): React.CSSProperties => ({ padding: '6px 14px', background: color, border: 'none', borderRadius: 4, color: '#fff', fontWeight: 600, fontSize: 12, cursor: busy ? 'not-allowed' : 'pointer', opacity: busy ? 0.6 : 1 });
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+
+      {/* Startup warning banner */}
+      {warning && (
+        <div style={{ padding: '10px 14px', background: 'rgba(251,191,36,0.12)', border: '1px solid rgba(251,191,36,0.35)', borderRadius: 6, color: '#fbbf24', fontSize: 13, lineHeight: 1.5 }}>
+          ⚠ {warning}
+        </div>
+      )}
+
+      {/* Connection status */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <span style={{ color: '#9ca3af', fontSize: 13 }}>Status:</span>
+        {statusBadge()}
+        {statusMsg && <span style={{ color: '#4ade80', fontSize: 12 }}>{statusMsg}</span>}
+      </div>
+
+      {/* Credentials */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <label style={{ fontSize: 12, color: '#9ca3af' }}>Consumer Key</label>
+        <input
+          style={inp}
+          placeholder="From developer.etrade.com"
+          value={consumerKey}
+          onChange={e => setConsumerKey(e.target.value)}
+        />
+        <label style={{ fontSize: 12, color: '#9ca3af' }}>Consumer Secret</label>
+        <input
+          style={inp}
+          type="password"
+          placeholder="Consumer Secret"
+          value={consumerSecret}
+          onChange={e => setConsumerSecret(e.target.value)}
+        />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <button style={btn()} disabled={busy} onClick={saveCredentials}>Save Credentials</button>
+          {credsSaved && <span style={{ color: '#4ade80', fontSize: 12 }}>✓ Saved</span>}
+        </div>
+        <p style={{ fontSize: 11, color: '#6b7280', margin: 0 }}>
+          API keys from <strong style={{ color: '#9ca3af' }}>developer.etrade.com</strong> → My Applications. Stored encrypted on this machine only.
+        </p>
+      </div>
+
+      {/* OAuth connect */}
+      {step === 'idle' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <button style={btn('#22c55e')} disabled={busy} onClick={startAuth}>
+            {busy ? 'Opening browser…' : '🔗 Connect — Open E*Trade Login'}
+          </button>
+          <span style={{ fontSize: 11, color: '#6b7280' }}>
+            Browser will open → log in → E*Trade shows a verifier code → paste it below.
+          </span>
+        </div>
+      )}
+
+      {step === 'awaiting-verifier' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {authUrl && (
+            <span style={{ fontSize: 11, color: '#6b7280' }}>
+              Auth page opened. Log in to E*Trade, approve access, and paste the verifier code:
+            </span>
+          )}
+          <input
+            style={inp}
+            placeholder="Paste verifier code here…"
+            value={verifier}
+            onChange={e => setVerifier(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && submitVerifier()}
+            autoFocus
+          />
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button style={btn('#22c55e')} disabled={busy} onClick={submitVerifier}>Submit Code</button>
+            <button style={btn('#6b7280')} disabled={busy} onClick={() => { setStep('idle'); setVerifier(''); }}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {/* Renew / Disconnect (only when we have a token) */}
+      {(connStatus === 'ok' || connStatus === 'expired') && (
+        <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+          <button style={btn('#6366f1')} disabled={busy} onClick={renewToken}>Renew Token</button>
+          <button style={btn('#6b7280')} disabled={busy} onClick={disconnect}>Disconnect</button>
+        </div>
+      )}
+
+      {error && <p style={{ color: '#f87171', fontSize: 12, margin: 0 }}>{error}</p>}
+    </div>
+  );
+}
+
+// ─── Main SettingsView ─────────────────────────────────────────────────────────
+
+export function SettingsView({ etradeWarning, onEtradeWarningDismiss }: SettingsViewProps = {}) {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [saved, setSaved] = useState(false);
@@ -41,7 +244,8 @@ export function SettingsView() {
   const [backupMsg, setBackupMsg] = useState<string | null>(null);
   const [restoreMsg, setRestoreMsg] = useState<string | null>(null);
 
-  const [activeTab, setActiveTab] = useState('General');
+  // If we arrived here due to an E*Trade warning, default to the API & Data tab
+  const [activeTab, setActiveTab] = useState(etradeWarning ? 'API & Data' : 'General');
   const [optionsProvider, setOptionsProvider] = useState<'polygon' | 'etrade'>('polygon');
   const [optionsProviderSaved, setOptionsProviderSaved] = useState(false);
 
@@ -285,6 +489,7 @@ export function SettingsView() {
           <div className="settings-section">
             <h2>API &amp; Data</h2>
 
+            {/* Options Data Source */}
             <div className="settings-row">
               <label>Options Data Source</label>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -304,10 +509,20 @@ export function SettingsView() {
               </div>
               <p className="hint">
                 Controls which provider is used for options chains, IV, and the LEAPS+CSP screener.
-                E*Trade requires a connected account (see 🔬 Test API).
                 <strong> Restart the app after changing.</strong>
               </p>
             </div>
+
+            {/* E*Trade Connection — shown whenever E*Trade is selected, or when a warning is present */}
+            {(optionsProvider === 'etrade' || etradeWarning) && (
+              <div className="settings-row" style={{ borderLeft: '3px solid #6366f1', paddingLeft: 14 }}>
+                <label style={{ color: '#a5b4fc', marginBottom: 10, display: 'block' }}>E*Trade Connection</label>
+                <ETradeConnectPanel
+                  warning={etradeWarning}
+                  onConnected={onEtradeWarningDismiss}
+                />
+              </div>
+            )}
 
             <div className="settings-row">
               <label>Polygon API Key</label>
