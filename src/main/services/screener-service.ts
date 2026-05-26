@@ -130,13 +130,12 @@ export class ScreenerService {
 
       try {
         const result = this.evaluateTicker(ticker, companyName, sector, criteria);
+        // Always include all tickers in results so screen_results has full universe data.
+        // The frontend filters the display in strict mode.
+        rows.push(result);
         if (criteria.mode === 'strict') {
-          if (result.failedFilters.length === 0) {
-            rows.push(result);
-            passed++;
-          }
+          if (result.failedFilters.length === 0) passed++;
         } else {
-          rows.push(result);
           if (result.passedFilters.size > 0) passed++;
         }
       } catch {

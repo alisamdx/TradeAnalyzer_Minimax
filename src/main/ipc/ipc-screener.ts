@@ -95,7 +95,7 @@ export function registerScreenerIpc(
   // ── Screen run ──────────────────────────────────────────────────────────
   ipcMain.handle(
     'screen:run',
-    async (e, criteria: ScreenCriteria): Promise<IpcResult<{ runId: number; resultCount: number; rows: ScreenResultRow[] }>> => {
+    async (e, criteria: ScreenCriteria): Promise<IpcResult<{ runId: number; resultCount: number; passedCount: number; rows: ScreenResultRow[] }>> => {
       try {
         const output = await screenerService.runScreen(criteria, (scanned, total, ticker) => {
           e.sender.send('screen:progress', { scanned, total, ticker });
@@ -105,7 +105,7 @@ export function registerScreenerIpc(
         // Map the backend TickerScreenData to the frontend ScreenResultRow format
         const rows: ScreenResultRow[] = screenerService.getResults(runResult.id);
 
-        return ok({ runId: runResult.id, resultCount: rows.length, rows });
+        return ok({ runId: runResult.id, resultCount: rows.length, passedCount: output.passed, rows });
       } catch (err) {
         return fail(err);
       }

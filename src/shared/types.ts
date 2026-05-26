@@ -799,6 +799,7 @@ export interface LeapsCspRunSummary {
   id: number;
   runAt: string;
   universe: string;
+  watchlistId: number | null;
   marketGate: LeapsCspGate;
   gateDetail: LeapsCspGateDetail;
   gateEffect: string;
@@ -818,4 +819,11 @@ export interface LeapsCspOpenedEntry {
   leapsEntryDebit: number | null;
   cspEntryCredit: number | null;
   notes: string | null;
+}
+
+export interface LeapsCspProgressDetail {
+  phase: 'gate' | 'universe' | 'leaps' | 'csp' | 'pairing';
+  current: number;
+  total: number;
+  ticker?: string;
 }

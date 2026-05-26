@@ -24,6 +24,7 @@ import type {
   LeapsCspDetail,
   LeapsCspPairingMode,
   LeapsCspOpenedEntry,
+  LeapsCspProgressDetail,
 } from '@shared/types.js';
 
 // ─── Internal working types ───────────────────────────────────────────────────
@@ -198,19 +199,24 @@ export class LeapsCspService {
     universe: 'sp500' | 'russell1000' | 'both',
     onProgress?: (msg: string) => void,
     forceRun = false,
+    onProgressDetail?: (detail: LeapsCspProgressDetail) => void,
+    watchlistId?: number,
   ): Promise<LeapsCspRunResult> {
     const log = (msg: string) => { onProgress?.(msg); };
+    const progress = (detail: LeapsCspProgressDetail) => { onProgressDetail?.(detail); };
 
     log('Checking market gate…');
+    progress({ phase: 'gate', current: 0, total: 1 });
     const { gate, detail, effect } = await this.checkMarketGate();
 
     log(`Market gate: ${gate} — ${effect}`);
+    progress({ phase: 'gate', current: 1, total: 1 });
 
     // Under a FAIL gate, suppress new LEAPS opportunities (SRS §6.2) unless overridden
     if (gate === 'FAIL' && !forceRun) {
       log('Market gate FAIL: LEAPS suppressed. Returning empty run.');
       return this.persistRun(
-        { gate, detail, effect, universe },
+        { gate, detail, effect, universe, watchlistId: watchlistId ?? null },
         [],
       );
     }
@@ -219,62 +225,132 @@ export class LeapsCspService {
       log('⚠ Gate override active — running despite FAIL conditions.');
     }
 
-    log('Loading universe from screener cache…');
-    const tickers = this.getScreenedTickers(universe);
-    log(`${tickers.length} tickers from screener cache`);
+    let tickers: string[];
+    if (watchlistId != null) {
+      log(`Loading tickers from watchlist ${watchlistId}…`);
+      progress({ phase: 'universe', current: 0, total: 1 });
+      tickers = this.getWatchlistTickers(watchlistId);
+      log(`${tickers.length} tickers from watchlist`);
+      progress({ phase: 'universe', current: 1, total: 1 });
+    } else {
+      log('Loading universe from screener cache…');
+      progress({ phase: 'universe', current: 0, total: 1 });
+      tickers = this.getScreenedTickers(universe);
+      log(`${tickers.length} tickers from screener cache`);
+      progress({ phase: 'universe', current: 1, total: 1 });
+    }
 
     if (tickers.length === 0) {
-      log('No screener results found. Run the Index Screener first to populate the universe.');
-      return this.persistRun({ gate, detail, effect, universe }, []);
+      log(watchlistId != null
+        ? 'Watchlist is empty. Add tickers to the watchlist first.'
+        : 'No tickers found. Ensure constituents are loaded (Data Sync) and try again.');
+      return this.persistRun({ gate, detail, effect, universe, watchlistId: watchlistId ?? null }, []);
     }
 
     log('Loading cached fundamentals & quotes…');
     const fundamentalsMap = this.loadFundamentalsCache(tickers);
     const quotesMap = this.loadQuoteCache(tickers);
 
+    // For tickers missing cached data, fetch on-demand (essential for watchlist runs
+    // where the screener hasn't been run yet)
+    const missingFundamentals = tickers.filter(t => !fundamentalsMap.has(t));
+    const missingQuotes = tickers.filter(t => !quotesMap.has(t));
+    const missingTickers = [...new Set([...missingFundamentals, ...missingQuotes])];
+
+    if (missingTickers.length > 0) {
+      log(`Fetching on-demand data for ${missingTickers.length} tickers…`);
+    }
+    let fetchFailCount = 0;
+    for (const ticker of missingTickers) {
+      await this.rateLimiter.acquire();
+      const quote = await this.safeQuote(ticker);
+      if (quote) {
+        quotesMap.set(ticker, { ticker, last: quote.last, volume: quote.volume });
+      } else {
+        log(`  ${ticker}: quote fetch failed`);
+        fetchFailCount++;
+      }
+
+      await this.rateLimiter.acquire();
+      try {
+        const ratios = await this.provider.getFundamentals(ticker);
+        fundamentalsMap.set(ticker, {
+          ticker,
+          marketCap: ratios.marketCap ?? null,
+          sector: ratios.sector ?? null,
+          roe: ratios.roe ?? null,
+          debtToEquity: ratios.debtToEquity ?? null,
+          freeCashFlow: ratios.freeCashFlow ?? null,
+          peRatio: ratios.peRatio ?? null,
+        });
+      } catch (err) {
+        log(`  ${ticker}: fundamentals fetch failed — ${err instanceof Error ? err.message : String(err)}`);
+        fetchFailCount++;
+      }
+    }
+    if (fetchFailCount > 0) {
+      log(`${fetchFailCount} fetch failures for on-demand tickers`);
+    }
+
     log('Applying universe filters…');
     const filtered = tickers.filter(t => {
       const f = fundamentalsMap.get(t);
       const q = quotesMap.get(t);
-      return this.passUniverseFilter(t, f, q);
+      return this.passUniverseFilter(t, f, q, log);
     });
-    log(`${filtered.length} tickers pass universe filters`);
+    const rejected = tickers.filter(t => !filtered.includes(t));
+    if (rejected.length > 0 && rejected.length <= 20) {
+      log(`Rejected tickers: ${rejected.join(', ')}`);
+    }
+    log(`${filtered.length} of ${tickers.length} tickers pass universe filters`);
 
     // ── LEAPS candidates ────────────────────────────────────────────────────
     log('Screening LEAPS candidates…');
     const leapsCandidates: LeapsCandidate[] = [];
     const leapsExpiries = leapsExpiryDates();
+    log(`LEAPS expiry window: ${leapsExpiries.join(', ')}`);
 
     if (leapsExpiries.length === 0) {
       log('No valid LEAPS expiry dates found in 365–730 DTE window.');
-      return this.persistRun({ gate, detail, effect, universe }, []);
+      return this.persistRun({ gate, detail, effect, universe, watchlistId: watchlistId ?? null }, []);
     }
 
+    let skipNoPrice = 0, skipHardFail = 0, skipIvr = 0, skipNoChain = 0, skipNoContract = 0;
+    const leapsTotal = filtered.length;
+    let leapsIdx = 0;
     for (const ticker of filtered) {
+      leapsIdx++;
+      progress({ phase: 'leaps', current: leapsIdx, total: leapsTotal, ticker });
       const f = fundamentalsMap.get(ticker);
       const q = quotesMap.get(ticker);
       const currentPrice = q?.last ?? null;
-      if (!currentPrice || currentPrice <= 0) continue;
+      if (!currentPrice || currentPrice <= 0) { skipNoPrice++; continue; }
 
       // Check stock hard fails for LEAPS leg
       const failReason = this.leapsStockHardFail(ticker, f, q);
-      if (failReason) continue;
+      if (failReason) { skipHardFail++; continue; }
 
       // Fetch IV for IVR computation
       await this.rateLimiter.acquire();
       const ivData = await this.fetchIvData(ticker);
 
       // IVR > 80 on underlying → reject for LEAPS (IV crush risk) — SRS §4.2
-      if (ivData.ivr !== null && ivData.ivr > 80) continue;
+      if (ivData.ivr !== null && ivData.ivr > 80) { skipIvr++; continue; }
 
       // Try each LEAPS expiry, keep best contract
       let best: LeapsCandidate | null = null;
+      let chainCount = 0;
+      let totalCalls = 0;
+      let callsWithDelta = 0;
       for (const expiry of leapsExpiries) {
         await this.rateLimiter.acquire();
         const chain = await this.safeGetChain(ticker, expiry);
         if (!chain) continue;
+        chainCount++;
 
         const calls = chain.filter(c => c.side === 'call');
+        totalCalls += calls.length;
+        callsWithDelta += calls.filter(c => c.delta !== null).length;
         const contract = this.selectLeapsContract(calls, currentPrice);
         if (!contract) continue;
 
@@ -307,12 +383,29 @@ export class LeapsCspService {
         if (!best || score > best.subScore) best = candidate;
       }
 
+      if (!best && chainCount === 0) {
+        skipNoChain++;
+      } else if (!best) {
+        skipNoContract++;
+        if (totalCalls > 0 && callsWithDelta === 0) {
+          log(`  ${ticker}: ${totalCalls} calls, 0 have delta data — Polygon not returning greeks`);
+        } else if (callsWithDelta > 0 && callsWithDelta < totalCalls) {
+          log(`  ${ticker}: ${callsWithDelta}/${totalCalls} calls have delta, but none in 0.70–0.90 range`);
+        } else {
+          log(`  ${ticker}: ${totalCalls} calls, all filtered out by LEAPS contract criteria`);
+        }
+      }
+
       if (best) leapsCandidates.push(best);
+    }
+
+    if (leapsCandidates.length === 0) {
+      log(`LEAPS screening skip summary: noPrice=${skipNoPrice} hardFail=${skipHardFail} ivr=${skipIvr} noChain=${skipNoChain} noContract=${skipNoContract}`);
     }
 
     log(`${leapsCandidates.length} qualifying LEAPS candidates`);
     if (leapsCandidates.length === 0) {
-      return this.persistRun({ gate, detail, effect, universe }, []);
+      return this.persistRun({ gate, detail, effect, universe, watchlistId: watchlistId ?? null }, []);
     }
 
     // ── CSP candidate pool (full filtered universe) ─────────────────────────
@@ -320,7 +413,11 @@ export class LeapsCspService {
     const cspExpiry = cspExpiryDate();
     const cspPool = new Map<string, CspCandidate[]>();
 
+    const cspTotal = filtered.length;
+    let cspIdx = 0;
     for (const ticker of filtered) {
+      cspIdx++;
+      progress({ phase: 'csp', current: cspIdx, total: cspTotal, ticker });
       const q = quotesMap.get(ticker);
       const currentPrice = q?.last ?? null;
       if (!currentPrice || currentPrice <= 0) continue;
@@ -355,7 +452,11 @@ export class LeapsCspService {
     }
     allCspSorted.sort((a, b) => b.subScore - a.subScore);
 
+    const pairTotal = leapsCandidates.length;
+    let pairIdx = 0;
     for (const leaps of leapsCandidates) {
+      pairIdx++;
+      progress({ phase: 'pairing', current: pairIdx, total: pairTotal, ticker: leaps.ticker });
       const sameTicker = cspPool.get(leaps.ticker)?.[0] ?? null;
 
       // Top-5 cross-ticker CSPs (different from LEAPS ticker)
@@ -435,19 +536,19 @@ export class LeapsCspService {
     paired.sort((a, b) => b.combinedScore - a.combinedScore);
 
     log(`${paired.length} ranked opportunities`);
-    return this.persistRun({ gate, detail, effect, universe }, paired);
+    return this.persistRun({ gate, detail, effect, universe, watchlistId: watchlistId ?? null }, paired);
   }
 
   getRecentRuns(): LeapsCspRunSummary[] {
     const rows = this.db.prepare(`
-      SELECT id, run_at, universe, market_gate, gate_detail_json, gate_effect,
+      SELECT id, run_at, universe, watchlist_id, market_gate, gate_detail_json, gate_effect,
              candidate_count, opportunity_count
       FROM leaps_csp_runs
       ORDER BY id DESC
       LIMIT 20
     `).all() as Array<{
-      id: number; run_at: string; universe: string; market_gate: string;
-      gate_detail_json: string; gate_effect: string;
+      id: number; run_at: string; universe: string; watchlist_id: number | null;
+      market_gate: string; gate_detail_json: string; gate_effect: string;
       candidate_count: number; opportunity_count: number;
     }>;
 
@@ -455,6 +556,7 @@ export class LeapsCspService {
       id: r.id,
       runAt: r.run_at,
       universe: r.universe,
+      watchlistId: r.watchlist_id,
       marketGate: r.market_gate as LeapsCspGate,
       gateDetail: JSON.parse(r.gate_detail_json) as LeapsCspGateDetail,
       gateEffect: r.gate_effect,
@@ -465,12 +567,12 @@ export class LeapsCspService {
 
   getRun(runId: number): LeapsCspRunResult | null {
     const runRow = this.db.prepare(`
-      SELECT id, run_at, universe, market_gate, gate_detail_json, gate_effect,
+      SELECT id, run_at, universe, watchlist_id, market_gate, gate_detail_json, gate_effect,
              candidate_count, opportunity_count
       FROM leaps_csp_runs WHERE id = ?
     `).get(runId) as {
-      id: number; run_at: string; universe: string; market_gate: string;
-      gate_detail_json: string; gate_effect: string;
+      id: number; run_at: string; universe: string; watchlist_id: number | null;
+      market_gate: string; gate_detail_json: string; gate_effect: string;
       candidate_count: number; opportunity_count: number;
     } | undefined;
 
@@ -485,6 +587,7 @@ export class LeapsCspService {
         id: runRow.id,
         runAt: runRow.run_at,
         universe: runRow.universe,
+        watchlistId: runRow.watchlist_id,
         marketGate: runRow.market_gate as LeapsCspGate,
         gateDetail: JSON.parse(runRow.gate_detail_json) as LeapsCspGateDetail,
         gateEffect: runRow.gate_effect,
@@ -671,7 +774,26 @@ export class LeapsCspService {
       LIMIT 2000
     `).all() as Array<{ ticker: string }>;
 
-    return [...new Set(rows.map(r => r.ticker))];
+    if (rows.length > 0) {
+      return [...new Set(rows.map(r => r.ticker))];
+    }
+
+    // No screener results yet — fall back to constituents table for the full universe
+    const indexClause = universe === 'both'
+      ? `1=1`
+      : `index_name = '${universe === 'sp500' ? 'sp500' : 'russell1000'}'`;
+    const constRows = this.db.prepare(`
+      SELECT ticker FROM constituents WHERE ${indexClause} ORDER BY ticker ASC
+    `).all() as Array<{ ticker: string }>;
+
+    return constRows.map(r => r.ticker);
+  }
+
+  private getWatchlistTickers(watchlistId: number): string[] {
+    const rows = this.db.prepare(
+      'SELECT ticker FROM watchlist_items WHERE watchlist_id = ? ORDER BY id',
+    ).all(watchlistId) as Array<{ ticker: string }>;
+    return rows.map(r => r.ticker);
   }
 
   private loadFundamentalsCache(tickers: string[]): Map<string, FundamentalsRow> {
@@ -718,18 +840,22 @@ export class LeapsCspService {
   // ── Universe filter (SRS §4.1) ──────────────────────────────────────────────
 
   private passUniverseFilter(
-    _ticker: string,
+    ticker: string,
     f: FundamentalsRow | undefined,
     q: QuoteRow | undefined,
+    log?: (msg: string) => void,
   ): boolean {
-    if (!f || !q) return false;
+    if (!f || !q) {
+      log?.(`  ${ticker} failed: ${!f ? 'no fundamentals' : 'no quote'}`);
+      return false;
+    }
     const price = q.last ?? 0;
     const volume = q.volume ?? 0;
     const marketCap = f.marketCap ?? 0;
-    if (price < 10) return false;
-    if (volume < 2_000_000) return false;
-    if (marketCap < 10_000_000_000) return false;  // $10B
-    if (isBiotech(f.sector)) return false;
+    if (price < 10) { log?.(`  ${ticker} failed: price $${price.toFixed(2)} < $10`); return false; }
+    if (volume < 2_000_000) { log?.(`  ${ticker} failed: volume ${volume} < 2M`); return false; }
+    if (marketCap < 10_000_000_000) { log?.(`  ${ticker} failed: marketCap $${(marketCap / 1e9).toFixed(1)}B < $10B`); return false; }
+    if (isBiotech(f.sector)) { log?.(`  ${ticker} failed: biotech sector (${f.sector})`); return false; }
     return true;
   }
 
@@ -768,14 +894,29 @@ export class LeapsCspService {
   ): OptionContract | null {
     // Filter to delta 0.70–0.90 range
     const inBand = calls.filter(c => c.delta !== null && c.delta >= 0.70 && c.delta <= 0.90);
-    if (inBand.length === 0) return null;
+    if (inBand.length > 0) {
+      // Prefer delta closest to 0.80 (center of target 0.75–0.85)
+      inBand.sort((a, b) => Math.abs((a.delta ?? 0) - 0.80) - Math.abs((b.delta ?? 0) - 0.80));
+      // Among top candidates, prefer ITM (strike < currentPrice)
+      const itm = inBand.filter(c => c.strike < currentPrice);
+      return itm[0] ?? inBand[0] ?? null;
+    }
 
-    // Prefer delta closest to 0.80 (center of target 0.75–0.85)
-    inBand.sort((a, b) => Math.abs((a.delta ?? 0) - 0.80) - Math.abs((b.delta ?? 0) - 0.80));
-
-    // Among top candidates, prefer ITM (strike < currentPrice)
-    const itm = inBand.filter(c => c.strike < currentPrice);
-    return itm[0] ?? inBand[0] ?? null;
+    // Fallback: no greeks available — select by moneyness.
+    // Deep ITM calls (strike 5–15% below price) approximate delta 0.70–0.85.
+    if (calls.length === 0) return null;
+    const itmCalls = calls.filter(c => {
+      if (c.strike >= currentPrice) return false;  // must be ITM
+      const pctBelow = (currentPrice - c.strike) / currentPrice;
+      return pctBelow >= 0.05 && pctBelow <= 0.20;  // 5–20% ITM
+    });
+    // Prefer closest to 10% ITM (approx delta 0.80)
+    itmCalls.sort((a, b) => {
+      const aDist = Math.abs((currentPrice - a.strike) / currentPrice - 0.10);
+      const bDist = Math.abs((currentPrice - b.strike) / currentPrice - 0.10);
+      return aDist - bDist;
+    });
+    return itmCalls[0] ?? null;
   }
 
   // ── LEAPS contract hard fails (SRS §4.3.1) ─────────────────────────────────
@@ -788,8 +929,9 @@ export class LeapsCspService {
     if (midPrice <= 0) return false;
     const spread = contract.ask - contract.bid;
     const spreadPct = spread / midPrice * 100;
-    if (spreadPct > 5) return false;           // spread > 5% of mid
-    if ((contract.openInterest ?? 0) < 100) return false;
+    // Skip spread check when bid===ask (lastPrice proxy, no real market)
+    if (contract.bid !== contract.ask && spreadPct > 5) return false;
+    if ((contract.openInterest ?? 0) < 10) return false;
     if (extrinsicPct > 15) return false;       // paying too much for time
     // IV > 1.5× baseline: we don't have the baseline here — skip
     return true;
@@ -893,10 +1035,21 @@ export class LeapsCspService {
 
     const results: CspCandidate[] = [];
 
-    const inBand = puts.filter(c => {
+    // Filter puts by delta -0.15 to -0.30 (OTM puts for CSP)
+    let inBand = puts.filter(c => {
       const d = c.delta ?? 0;
       return d <= -0.15 && d >= -0.30;
     });
+
+    // Fallback: if no greeks available, select by moneyness.
+    // OTM puts 2–8% below price approximate delta -0.15 to -0.30.
+    if (inBand.length === 0 && puts.some(c => c.delta === null)) {
+      inBand = puts.filter(c => {
+        if (c.strike >= currentPrice) return false;  // must be OTM
+        const pctBelow = (currentPrice - c.strike) / currentPrice;
+        return pctBelow >= 0.02 && pctBelow <= 0.08;
+      });
+    }
 
     for (const contract of inBand) {
       const mid = (contract.bid + contract.ask) / 2;
@@ -904,11 +1057,13 @@ export class LeapsCspService {
 
       const spread = contract.ask - contract.bid;
       const spreadPct = spread / mid * 100;
-      if (spreadPct > 10) continue;
-      if (Math.abs(spread) > 0.10 && spreadPct > 10) continue;
+      // Skip spread checks when bid===ask (no real market, just lastPrice proxy)
+      const hasRealBidAsk = contract.bid !== contract.ask;
+      if (hasRealBidAsk && spreadPct > 10) continue;
+      if (hasRealBidAsk && Math.abs(spread) > 0.10 && spreadPct > 10) continue;
 
       const oi = contract.openInterest ?? 0;
-      if (oi < 250) continue;
+      if (oi < 10) continue;
 
       const collateral = contract.strike * 100;
       const annReturnPct = collateral > 0 ? (mid / collateral) * (365 / dte) * 100 : 0;
@@ -1051,6 +1206,8 @@ export class LeapsCspService {
 
   // ── IV data helper ──────────────────────────────────────────────────────────
 
+  private ivFailLogged = false;
+
   private async fetchIvData(ticker: string): Promise<IvData> {
     try {
       const result = await this.provider.getOptionsIVAndPremium(ticker, null, null);
@@ -1062,25 +1219,43 @@ export class LeapsCspService {
         if (range > 0) ivr = clamp(((currentIv - iv52WkLow) / range) * 100, 0, 100);
       }
       return { currentIv, iv52WkHigh, iv52WkLow, ivr };
-    } catch {
+    } catch (err) {
+      if (!this.ivFailLogged) {
+        this.ivFailLogged = true;
+        const msg = err instanceof Error ? err.message : String(err);
+        console.warn(`[LEAPS-CSP] IV data fetch failed for ${ticker}: ${msg}`);
+      }
       return { currentIv: null, iv52WkHigh: null, iv52WkLow: null, ivr: null };
     }
   }
 
   // ── Safe fetch wrappers ─────────────────────────────────────────────────────
 
+  private chainFailLogged = false;
+
   private async safeGetChain(ticker: string, expiry: string): Promise<OptionContract[] | null> {
     try {
       const chain = await this.provider.getOptionsChain(ticker, expiry);
       return chain.contracts as OptionContract[];
-    } catch {
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      // Log the first failure to help diagnose systemic issues; suppress subsequent noise
+      if (!this.chainFailLogged) {
+        this.chainFailLogged = true;
+        console.warn(`[LEAPS-CSP] Options chain fetch failed for ${ticker}/${expiry}: ${msg}`);
+      }
+      // Auth/key errors are systemic — abort the run
+      if (msg.includes('401') || msg.includes('403') || msg.includes('API key') || msg.includes('Unauthorized')) {
+        throw new Error(`Options API auth failed for ${ticker}: ${msg}`);
+      }
       return null;
     }
   }
 
-  private async safeQuote(ticker: string): Promise<{ last: number | null } | null> {
+  private async safeQuote(ticker: string): Promise<{ last: number | null; volume: number | null } | null> {
     try {
-      return await this.provider.getQuote(ticker);
+      const q = await this.provider.getQuote(ticker);
+      return { last: q.last, volume: q.volume };
     } catch {
       return null;
     }
@@ -1098,18 +1273,19 @@ export class LeapsCspService {
   // ── Persistence ─────────────────────────────────────────────────────────────
 
   private persistRun(
-    meta: { gate: LeapsCspGate; detail: LeapsCspGateDetail; effect: string; universe: string },
+    meta: { gate: LeapsCspGate; detail: LeapsCspGateDetail; effect: string; universe: string; watchlistId: number | null },
     opportunities: PairedOpportunity[],
   ): LeapsCspRunResult {
     const runAt = new Date().toISOString();
 
     const runId = (this.db.prepare(`
       INSERT INTO leaps_csp_runs
-        (run_at, universe, market_gate, gate_detail_json, gate_effect, candidate_count, opportunity_count)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+        (run_at, universe, watchlist_id, market_gate, gate_detail_json, gate_effect, candidate_count, opportunity_count)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       runAt,
       meta.universe,
+      meta.watchlistId,
       meta.gate,
       JSON.stringify(meta.detail),
       meta.effect,
@@ -1199,6 +1375,7 @@ export class LeapsCspService {
       id: Number(runId),
       runAt,
       universe: meta.universe,
+      watchlistId: meta.watchlistId,
       marketGate: meta.gate,
       gateDetail: meta.detail,
       gateEffect: meta.effect,

@@ -5,6 +5,8 @@ import type {
   LeapsCspOpportunity,
   LeapsCspGrade,
   LeapsCspGate,
+  LeapsCspProgressDetail,
+  Watchlist,
 } from '@shared/types.js';
 
 // ─── Formatting helpers ───────────────────────────────────────────────────────
@@ -314,30 +316,108 @@ function OpportunityDetail({
   );
 }
 
+// ─── Sortable column header ────────────────────────────────────────────────────
+
+function SortHeader({ label, col, sortCol, sortDir, onSort, align }: {
+  label: string;
+  col: keyof LeapsCspOpportunity | 'rank';
+  sortCol: keyof LeapsCspOpportunity | 'rank';
+  sortDir: 'asc' | 'desc';
+  onSort: (col: keyof LeapsCspOpportunity | 'rank') => void;
+  align?: 'left' | 'right' | 'center';
+}) {
+  const active = sortCol === col;
+  const arrow = active ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
+  return (
+    <th
+      style={{
+        ...thStyle,
+        cursor: 'pointer',
+        userSelect: 'none',
+        textAlign: align ?? 'left',
+        color: active ? 'var(--accent)' : 'var(--text-muted)',
+        whiteSpace: 'nowrap',
+      }}
+      onClick={() => onSort(col)}
+    >
+      {label}{arrow}
+    </th>
+  );
+}
+
 // ─── Grade filter ─────────────────────────────────────────────────────────────
 
 const ALL_GRADES: LeapsCspGrade[] = ['A+', 'A', 'B', 'C', 'F'];
 const DEFAULT_GRADES = new Set<LeapsCspGrade>(['A+', 'A', 'B']);
 
+// ─── Phase labels ─────────────────────────────────────────────────────────────
+
+const PHASE_LABELS: Record<LeapsCspProgressDetail['phase'], string> = {
+  gate: 'Checking market gate',
+  universe: 'Loading universe',
+  leaps: 'Screening LEAPS',
+  csp: 'Building CSP pool',
+  pairing: 'Pairing opportunities',
+};
+
+// ─── Progress bar ──────────────────────────────────────────────────────────────
+
+function ProgressBar({ detail }: { detail: LeapsCspProgressDetail }) {
+  const pct = detail.total > 0 ? (detail.current / detail.total) * 100 : 0;
+  return (
+    <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--border)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+          {PHASE_LABELS[detail.phase]}
+          {detail.ticker ? ` — ${detail.ticker}` : ''}
+        </span>
+        <span style={{ fontSize: 12, color: 'var(--text)', fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>
+          {detail.current} / {detail.total}
+        </span>
+      </div>
+      <div style={{
+        height: 6, borderRadius: 3, background: 'rgba(255,255,255,0.08)', overflow: 'hidden',
+      }}>
+        <div style={{
+          height: '100%', width: `${pct}%`, borderRadius: 3,
+          background: 'var(--accent)', transition: 'width 0.15s ease',
+        }} />
+      </div>
+    </div>
+  );
+}
+
 // ─── Main View ────────────────────────────────────────────────────────────────
 
 export function LeapsCspView() {
+  const [source, setSource] = useState<'universe' | 'watchlist'>('universe');
   const [universe, setUniverse] = useState<'sp500' | 'russell1000' | 'both'>('sp500');
+  const [watchlists, setWatchlists] = useState<Watchlist[]>([]);
+  const [selectedWatchlistId, setSelectedWatchlistId] = useState<number | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [progressLog, setProgressLog] = useState<string[]>([]);
+  const [progressDetail, setProgressDetail] = useState<LeapsCspProgressDetail | null>(null);
   const [result, setResult] = useState<LeapsCspRunResult | null>(null);
   const [recentRuns, setRecentRuns] = useState<LeapsCspRunSummary[]>([]);
   const [selectedGrades, setSelectedGrades] = useState<Set<LeapsCspGrade>>(new Set(DEFAULT_GRADES));
-  const [sortField, setSortField] = useState<'combinedScore' | 'leapsSubScore' | 'cspSubScore' | 'cspAnnReturnPct'>('combinedScore');
+  const [sortCol, setSortCol] = useState<keyof LeapsCspOpportunity | 'rank'>('combinedScore');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [wasForced, setWasForced] = useState(false);
   const progressRef = useRef<HTMLDivElement>(null);
   const unsubRef = useRef<(() => void) | null>(null);
+  const unsubDetailRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     window.api.leapsCsp.getRuns().then(setRecentRuns).catch(() => {});
-    return () => { unsubRef.current?.(); };
+    window.api.watchlists.list().then(wl => {
+      setWatchlists(wl);
+      if (wl.length > 0 && selectedWatchlistId === null) {
+        setSelectedWatchlistId(wl[0].id);
+      }
+    }).catch(() => {});
+    return () => { unsubRef.current?.(); unsubDetailRef.current?.(); };
   }, []);
 
   useEffect(() => {
@@ -349,17 +429,23 @@ export function LeapsCspView() {
   const runScreen = useCallback(async (forceRun = false) => {
     setIsRunning(true);
     setProgressLog([]);
+    setProgressDetail(null);
     setError(null);
     setResult(null);
     setWasForced(forceRun);
 
     unsubRef.current?.();
+    unsubDetailRef.current?.();
     unsubRef.current = window.api.leapsCsp.onProgress(msg => {
       setProgressLog(prev => [...prev, msg]);
     });
+    unsubDetailRef.current = window.api.leapsCsp.onProgressDetail(detail => {
+      setProgressDetail(detail);
+    });
 
     try {
-      const r = await window.api.leapsCsp.runScreen(universe, forceRun);
+      const watchlistId = source === 'watchlist' ? selectedWatchlistId : null;
+      const r = await window.api.leapsCsp.runScreen(universe, forceRun, watchlistId);
       setResult(r);
       setRecentRuns(prev => [r.run, ...prev].slice(0, 20));
       // Under a gate override or CAUTION, widen the grade filter automatically
@@ -370,10 +456,13 @@ export function LeapsCspView() {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setIsRunning(false);
+      setProgressDetail(null);
       unsubRef.current?.();
       unsubRef.current = null;
+      unsubDetailRef.current?.();
+      unsubDetailRef.current = null;
     }
-  }, [universe]);
+  }, [universe, source, selectedWatchlistId]);
 
   const loadRun = useCallback(async (runId: number) => {
     try {
@@ -409,13 +498,25 @@ export function LeapsCspView() {
     });
   };
 
+  const toggleSort = (col: keyof LeapsCspOpportunity | 'rank') => {
+    if (sortCol === col) {
+      setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortCol(col);
+      setSortDir('desc');
+    }
+  };
+
   const opportunities = result?.opportunities ?? [];
   const filtered = opportunities
     .filter(o => selectedGrades.has(o.grade))
     .sort((a, b) => {
-      const av = a[sortField] ?? 0;
-      const bv = b[sortField] ?? 0;
-      return (bv as number) - (av as number);
+      const av = sortCol === 'rank' ? a.rank : (a[sortCol] ?? 0);
+      const bv = sortCol === 'rank' ? b.rank : (b[sortCol] ?? 0);
+      const cmp = typeof av === 'number' && typeof bv === 'number'
+        ? (av as number) - (bv as number)
+        : String(av ?? '').localeCompare(String(bv ?? ''));
+      return sortDir === 'asc' ? cmp : -cmp;
     });
 
   const run = result?.run;
@@ -434,18 +535,63 @@ export function LeapsCspView() {
       }}>
         <span style={{ fontWeight: 700, fontSize: 15, marginRight: 4 }}>LEAPS + CSP</span>
 
-        {/* Universe selector */}
-        <select
-          value={universe}
-          onChange={e => setUniverse(e.target.value as typeof universe)}
-          className="form-select form-select-sm"
-          style={{ width: 140 }}
-          disabled={isRunning}
+        {/* Source toggle: Universe vs Watchlist */}
+        <div style={{ display: 'flex', gap: 0, borderRadius: 4, overflow: 'hidden', border: '1px solid var(--border)' }}>
+          <button
+            style={{
+              borderRadius: 0, fontSize: 12, padding: '4px 12px', cursor: isRunning ? 'not-allowed' : 'pointer',
+              background: source === 'universe' ? 'var(--accent)' : 'transparent',
+              color: source === 'universe' ? '#000' : 'var(--text-muted)',
+              fontWeight: source === 'universe' ? 700 : 400,
+              border: 'none', borderRight: '1px solid var(--border)',
+            }}
+            onClick={() => setSource('universe')}
+            disabled={isRunning}
+          >
+            Universe
+          </button>
+          <button
+            style={{
+              borderRadius: 0, fontSize: 12, padding: '4px 12px', cursor: isRunning ? 'not-allowed' : 'pointer',
+              background: source === 'watchlist' ? 'var(--accent)' : 'transparent',
+              color: source === 'watchlist' ? '#000' : 'var(--text-muted)',
+              fontWeight: source === 'watchlist' ? 700 : 400,
+              border: 'none',
+            }}
+            onClick={() => setSource('watchlist')}
+            disabled={isRunning}
+          >
+            Watchlist
+          </button>
+        </div>
+
+        {/* Source-specific selector */}
+        {source === 'universe' ? (
+          <select
+            value={universe}
+            onChange={e => setUniverse(e.target.value as typeof universe)}
+            className="form-select form-select-sm"
+            style={{ width: 140 }}
+            disabled={isRunning}
         >
           <option value="sp500">S&P 500</option>
-          <option value="russell1000">Russell 1000</option>
-          <option value="both">Both</option>
-        </select>
+            <option value="russell1000">Russell 1000</option>
+            <option value="both">Both</option>
+          </select>
+        ) : (
+          <select
+            value={selectedWatchlistId ?? ''}
+            onChange={e => setSelectedWatchlistId(Number(e.target.value))}
+            className="form-select form-select-sm"
+            style={{ width: 180 }}
+            disabled={isRunning}
+          >
+            {watchlists.length === 0 && <option value="">No watchlists</option>}
+            {watchlists.map(wl => (
+              <option key={wl.id} value={wl.id}>{wl.name} ({wl.itemCount} tickers)</option>
+            ))}
+          </select>
+        )}
 
         <button
           className="btn btn-primary btn-sm"
@@ -495,23 +641,39 @@ export function LeapsCspView() {
         )}
       </div>
 
-      {/* ── Progress log ────────────────────────────────────────────────────── */}
-      {(isRunning || progressLog.length > 0) && (
-        <div
-          ref={progressRef}
-          style={{
-            padding: '8px 16px',
-            background: 'rgba(0,0,0,0.3)',
-            maxHeight: 80,
-            overflowY: 'auto',
-            fontSize: 11,
-            color: 'var(--text-muted)',
-            borderBottom: '1px solid var(--border)',
-          }}
-        >
-          {progressLog.map((m, i) => <div key={i}>{m}</div>)}
-          {isRunning && <div style={{ color: 'var(--accent)' }}>Running…</div>}
+      {/* ── Progress bar ────────────────────────────────────────────────────── */}
+      {isRunning && progressDetail && (
+        <ProgressBar detail={progressDetail} />
+      )}
+      {isRunning && !progressDetail && (
+        <div style={{ padding: '8px 16px', borderBottom: '1px solid var(--border)', fontSize: 12, color: 'var(--accent)' }}>
+          Starting…
         </div>
+      )}
+
+      {/* ── Progress log (collapsible) ─────────────────────────────────────── */}
+      {(isRunning || progressLog.length > 0) && (
+        <details style={{ borderBottom: '1px solid var(--border)' }}>
+          <summary style={{
+            padding: '4px 16px', fontSize: 11, color: 'var(--text-muted)',
+            cursor: 'pointer', userSelect: 'none',
+          }}>
+            Log ({progressLog.length} messages)
+          </summary>
+          <div
+            ref={progressRef}
+            style={{
+              padding: '6px 16px',
+              background: 'rgba(0,0,0,0.2)',
+              maxHeight: 100,
+              overflowY: 'auto',
+              fontSize: 11,
+              color: 'var(--text-muted)',
+            }}
+          >
+            {progressLog.map((m, i) => <div key={i}>{m}</div>)}
+          </div>
+        </details>
       )}
 
       {/* ── Error ───────────────────────────────────────────────────────────── */}
@@ -566,18 +728,6 @@ export function LeapsCspView() {
             </button>
           ))}
 
-          <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--text-muted)' }}>Sort:</span>
-          <select
-            value={sortField}
-            onChange={e => setSortField(e.target.value as typeof sortField)}
-            className="form-select form-select-sm"
-            style={{ width: 160 }}
-          >
-            <option value="combinedScore">Combined Score</option>
-            <option value="leapsSubScore">LEAPS Score</option>
-            <option value="cspSubScore">CSP Score</option>
-            <option value="cspAnnReturnPct">CSP Ann. Return</option>
-          </select>
 
           <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text-muted)' }}>
             {filtered.length} of {opportunities.length} shown
@@ -614,7 +764,7 @@ export function LeapsCspView() {
                       style={{ border: 'none', borderRadius: 0 }}
                       onClick={() => loadRun(r.id)}
                     >
-                      {r.runAt.slice(0, 16).replace('T', ' ')} — {r.opportunityCount} opps <GateBadge gate={r.marketGate} />
+                      {r.runAt.slice(0, 16).replace('T', ' ')} — {r.opportunityCount} opps {r.watchlistId ? '(WL)' : ''} <GateBadge gate={r.marketGate} />
                     </button>
                     <button
                       title="Delete this run"
@@ -649,22 +799,22 @@ export function LeapsCspView() {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead>
               <tr style={{ position: 'sticky', top: 0, background: 'var(--surface)', zIndex: 1 }}>
-                <th style={thStyle}>#</th>
-                <th style={thStyle}>LEAPS Ticker</th>
-                <th style={thStyle}>Strike / Expiry</th>
-                <th style={{ ...thStyle, textAlign: 'right' }}>Delta</th>
-                <th style={{ ...thStyle, textAlign: 'right' }}>Premium</th>
-                <th style={{ ...thStyle, textAlign: 'right' }}>Ext%</th>
-                <th style={{ ...thStyle, textAlign: 'center' }}>L-Score</th>
-                <th style={thStyle}>CSP Ticker</th>
-                <th style={thStyle}>Strike / Expiry</th>
-                <th style={{ ...thStyle, textAlign: 'right' }}>Ann%</th>
-                <th style={{ ...thStyle, textAlign: 'center' }}>C-Score</th>
-                <th style={{ ...thStyle, textAlign: 'center' }}>Combined</th>
-                <th style={{ ...thStyle, textAlign: 'center' }}>Grade</th>
-                <th style={{ ...thStyle, textAlign: 'center' }}>Mode</th>
-                <th style={{ ...thStyle, textAlign: 'right' }}>Cash</th>
-                <th style={{ ...thStyle, textAlign: 'center' }}>Flags</th>
+                <SortHeader label="#" col="rank" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} align="center" />
+                <SortHeader label="LEAPS Ticker" col="leapsTicker" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
+                <SortHeader label="Strike / Expiry" col="leapsStrike" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
+                <SortHeader label="Delta" col="leapsDelta" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} align="right" />
+                <SortHeader label="Premium" col="leapsPremium" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} align="right" />
+                <SortHeader label="Ext%" col="leapsExtrinsicPct" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} align="right" />
+                <SortHeader label="L-Score" col="leapsSubScore" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} align="center" />
+                <SortHeader label="CSP Ticker" col="cspTicker" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
+                <SortHeader label="Strike / Expiry" col="cspStrike" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
+                <SortHeader label="Ann%" col="cspAnnReturnPct" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} align="right" />
+                <SortHeader label="C-Score" col="cspSubScore" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} align="center" />
+                <SortHeader label="Combined" col="combinedScore" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} align="center" />
+                <SortHeader label="Grade" col="grade" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} align="center" />
+                <SortHeader label="Mode" col="pairingMode" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} align="center" />
+                <SortHeader label="Cash" col="totalCashToDeploy" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} align="right" />
+                <SortHeader label="Flags" col="cautionFlags" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} align="center" />
               </tr>
             </thead>
             <tbody>

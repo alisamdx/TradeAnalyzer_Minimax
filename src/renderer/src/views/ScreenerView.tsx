@@ -277,10 +277,17 @@ export function ScreenerView() {
     const unsubProgress = window.api.screen.onProgress(p => setScreenProgress(p));
     try {
       const response = await window.api.screen.run({ ...criteria, universe, mode });
-      setResults(response.rows);
       setActiveRunId(response.runId);
       const universeName = universe === 'both' ? 'Both' : universe.toUpperCase();
-      setStatusMsg(`${universeName}: ${response.resultCount} passed`);
+      if (mode === 'strict') {
+        // In strict mode, only show tickers that passed all filters
+        const passing = response.rows.filter(r => r.payload.failedFilters.length === 0);
+        setResults(passing);
+        setStatusMsg(`${universeName}: ${passing.length} of ${response.resultCount} passed`);
+      } else {
+        setResults(response.rows);
+        setStatusMsg(`${universeName}: ${response.passedCount} of ${response.resultCount} scored`);
+      }
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -289,7 +296,7 @@ export function ScreenerView() {
       setIsRunning(false);
       isRunningRef.current = false;
     }
-  }, [criteria, universe]);
+  }, [criteria, universe, mode]);
 
   // Auto-run when criteria or universe changes
   useEffect(() => {

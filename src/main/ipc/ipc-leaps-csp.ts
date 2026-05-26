@@ -6,7 +6,7 @@ import type { DbHandle } from '../db/connection.js';
 import { LeapsCspService } from '../services/leaps-csp-service.js';
 import { PolygonDataProvider } from '../services/polygon-provider.js';
 import type { TokenBucketRateLimiter } from '../services/rate-limiter.js';
-import type { IpcResult } from '@shared/types.js';
+import type { IpcResult, LeapsCspProgressDetail } from '@shared/types.js';
 
 function ok<T>(value: T): IpcResult<T> {
   return { ok: true, value };
@@ -48,11 +48,13 @@ export function registerLeapsCspIpc(
   // Run a full LEAPS+CSP screen. Streams progress via 'leaps-csp:progress' events.
   ipcMain.handle(
     'leaps-csp:run-screen',
-    wrapAsync(async (universe: 'sp500' | 'russell1000' | 'both', forceRun?: boolean) => {
+    wrapAsync(async (universe: 'sp500' | 'russell1000' | 'both', forceRun?: boolean, watchlistId?: number | null) => {
       const win = (await import('electron')).BrowserWindow.getAllWindows()[0];
       return service.runScreen(universe, msg => {
         win?.webContents.send('leaps-csp:progress', msg);
-      }, forceRun ?? false);
+      }, forceRun ?? false, (detail: LeapsCspProgressDetail) => {
+        win?.webContents.send('leaps-csp:progress-detail', detail);
+      }, watchlistId ?? undefined);
     }),
   );
 

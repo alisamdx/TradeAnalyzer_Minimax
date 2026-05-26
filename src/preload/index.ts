@@ -42,6 +42,7 @@ import type {
   LeapsCspRunResult,
   LeapsCspRunSummary,
   LeapsCspOpenedEntry,
+  LeapsCspProgressDetail,
 } from '@shared/types.js';
 export type {
   ScreenPreset, ScreenCriteria, ScreenRunResult, ScreenResultRow, Universe,
@@ -102,7 +103,7 @@ function buildApi() {
     importConstituents: (filePath: string, index: 'sp500' | 'russell1000') =>
       invoke<{ count: number }>('screen:import-constituents', { filePath, index }),
     run: (criteria: ScreenCriteria) =>
-      invoke<{ runId: number; resultCount: number; rows: ScreenResultRow[] }>('screen:run', criteria),
+      invoke<{ runId: number; resultCount: number; passedCount: number; rows: ScreenResultRow[] }>('screen:run', criteria),
     syncUniverse: (universe: Universe) =>
       invoke<{ scanned: number }>('screen:sync-universe', universe),
     syncCancel: () => invoke<boolean>('screen:sync-cancel'),
@@ -681,8 +682,8 @@ function buildApi() {
   };
 
   const leapsCsp = {
-    runScreen: (universe: 'sp500' | 'russell1000' | 'both', forceRun?: boolean) =>
-      invoke<LeapsCspRunResult>('leaps-csp:run-screen', universe, forceRun),
+    runScreen: (universe: 'sp500' | 'russell1000' | 'both', forceRun?: boolean, watchlistId?: number | null) =>
+      invoke<LeapsCspRunResult>('leaps-csp:run-screen', universe, forceRun, watchlistId),
     getRuns: () => invoke<LeapsCspRunSummary[]>('leaps-csp:get-runs'),
     getRun: (runId: number) => invoke<LeapsCspRunResult | null>('leaps-csp:get-run', runId),
     markOpened: (opportunityId: number, entry: { leapsEntryDebit?: number; cspEntryCredit?: number; notes?: string }) =>
@@ -693,6 +694,11 @@ function buildApi() {
       const handler = (_: unknown, msg: string) => callback(msg);
       ipcRenderer.on('leaps-csp:progress', handler);
       return () => ipcRenderer.removeListener('leaps-csp:progress', handler);
+    },
+    onProgressDetail: (callback: (detail: LeapsCspProgressDetail) => void) => {
+      const handler = (_: unknown, detail: LeapsCspProgressDetail) => callback(detail);
+      ipcRenderer.on('leaps-csp:progress-detail', handler);
+      return () => ipcRenderer.removeListener('leaps-csp:progress-detail', handler);
     },
   };
 
