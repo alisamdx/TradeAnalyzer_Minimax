@@ -4,9 +4,12 @@
  * Credentials are supplied via a factory callback so this class always reads
  * the latest tokens from the DB (access tokens expire at midnight ET).
  *
- * Unit conversions:
- *   - E*Trade IV is a decimal fraction (0.3882 = 38.82%). We convert to
- *     percentage (× 100) to match the Polygon convention used everywhere else.
+ * Unit conventions:
+ *   - OptionContract.iv (returned by getOptionsChain) is stored as a DECIMAL
+ *     FRACTION (e.g. 0.285 = 28.5%) — matching the LeapsCspService expectation.
+ *     Do NOT multiply by 100 here; the service does that where needed.
+ *   - getOptionsIVAndPremium returns IV as a PERCENTAGE (28.5) — that is the
+ *     IvData convention used by fetchIvData in LeapsCspService.
  *   - Bid / ask are already in dollars per share.
  */
 
@@ -42,8 +45,9 @@ function legToContract(
     gamma:        leg.greek.gamma,
     theta:        leg.greek.theta,
     vega:         leg.greek.vega,
-    // E*Trade IV is a decimal fraction; multiply by 100 to get a percentage.
-    iv:           leg.greek.iv !== null ? leg.greek.iv * 100 : 0,
+    // Keep IV as a decimal fraction (e.g. 0.285) — LeapsCspService multiplies
+    // by 100 itself when it needs a percentage.  Do NOT pre-multiply here.
+    iv:           leg.greek.iv ?? 0,
     openInterest: leg.openInterest,
     volume:       leg.volume,
   };

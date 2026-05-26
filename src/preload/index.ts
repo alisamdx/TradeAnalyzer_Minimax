@@ -655,10 +655,15 @@ function buildApi() {
   };
 
   const etrade = {
-    /** Check whether the E*Trade token is valid. Returns a status object. */
+    /**
+     * Startup freshness check — date-based, no API call.
+     * 'ok'             — token issued today (ET), still valid
+     * 'expired'        — token crossed a midnight ET boundary, re-auth required
+     * 'no_token'       — credentials saved but never authenticated
+     * 'no_credentials' — no consumer key/secret saved
+     */
     checkConnection: () => invoke<{
-      status: 'ok' | 'no_credentials' | 'no_token' | 'expired' | 'error';
-      message?: string;
+      status: 'ok' | 'no_credentials' | 'no_token' | 'expired';
     }>('etrade:check-connection'),
     getStatus: () => invoke<{
       status: { hasConsumerKey: boolean; hasConsumerSecret: boolean; hasAccessToken: boolean; isConfigured: boolean; isAuthenticated: boolean };

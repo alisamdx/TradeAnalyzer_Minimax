@@ -8,6 +8,8 @@
  *   etradeAccessSecret   — live access token secret
  *   etradeRequestToken   — temp during OAuth flow
  *   etradeRequestSecret  — temp during OAuth flow
+ *   etradeTokenDate      — YYYY-MM-DD (ET) when the access token was issued;
+ *                          used for startup freshness check without an API call
  */
 
 import { ipcMain, shell, type IpcMainInvokeEvent } from 'electron';
@@ -33,6 +35,16 @@ function fail(err: unknown): { ok: false; error: { code: string; message: string
   const message = err instanceof Error ? err.message : String(err);
   const code = err instanceof Error && 'code' in err ? (err as Error & { code: string }).code : 'UNKNOWN';
   return { ok: false, error: { code, message } };
+}
+
+/**
+ * Returns today's date in Eastern Time as YYYY-MM-DD.
+ * E*Trade access tokens expire at midnight ET every day, so comparing the
+ * stored issue date with today's ET date is sufficient to detect expiry
+ * without making an extra API round-trip on startup.
+ */
+function todayET(): string {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
 }
 
 function getCredentials(db: Database): OAuthCredentials {
@@ -127,6 +139,8 @@ export function registerETradeIpc(db: Database): void {
         );
         secureSet(db, 'etradeAccessToken',  accessToken);
         secureSet(db, 'etradeAccessSecret', accessSecret);
+        // Record the ET date the token was issued for startup freshness checks.
+        secureSet(db, 'etradeTokenDate', todayET());
         // Clear temp tokens
         secureSet(db, 'etradeRequestToken',  '');
         secureSet(db, 'etradeRequestSecret', '');
@@ -146,15 +160,22 @@ export function registerETradeIpc(db: Database): void {
   });
 
   /**
-   * Lightweight connection check: tries to renew/ping the token.
-   * Returns { status: 'ok' | 'no_credentials' | 'no_token' | 'expired' | 'error', message? }
-   * 'ok'             — token is valid (active or dormant; renewal succeeded)
-   * 'no_credentials' — consumer key/secret not saved
-   * 'no_token'       — credentials saved but not yet authenticated
-   * 'expired'        — token expired at midnight ET; full re-auth required
-   * 'error'          — unexpected API error
+   * Lightweight startup connection check — no API call required.
+   *
+   * E*Trade tokens expire at midnight Eastern Time on the day they are issued.
+   * We stamp the issue date (ET) into 'etradeTokenDate' when the verifier
+   * succeeds, then compare it with today's ET date here.  If they match the
+   * token is still valid; if they differ (or the stamp is missing) the token
+   * has crossed a midnight boundary and needs re-auth.
+   *
+   * We intentionally avoid calling renewAccessToken() on startup because:
+   *   - renewAccessToken is meant for DORMANT tokens (inactive > 2 h).
+   *   - Calling it on an ACTIVE token (just obtained) causes E*Trade to return
+   *     an error, which would produce a false-positive "expired" result.
+   *
+   * Returns { status: 'ok' | 'no_credentials' | 'no_token' | 'expired' }
    */
-  ipcMain.handle('etrade:check-connection', async (_e: IpcMainInvokeEvent) => {
+  ipcMain.handle('etrade:check-connection', (_e: IpcMainInvokeEvent) => {
     try {
       const consumerKey    = secureGet(db, 'etradeConsumerKey');
       const consumerSecret = secureGet(db, 'etradeConsumerSecret');
@@ -168,18 +189,24 @@ export function registerETradeIpc(db: Database): void {
         return ok({ status: 'no_token' as const });
       }
 
-      // Ping via renewAccessToken — succeeds for active and dormant tokens;
-      // returns 401 with "token_expired" for expired tokens.
-      try {
-        await renewAccessToken({ consumerKey, consumerSecret, accessToken, accessSecret });
+      // Compare the stored issue date with today's ET date.
+      const tokenDate = secureGet(db, 'etradeTokenDate');
+      const today     = todayET();
+
+      if (!tokenDate) {
+        // No date stamp — token pre-dates this check (existing session).
+        // Assume valid and stamp today so subsequent restarts work correctly.
+        secureSet(db, 'etradeTokenDate', today);
         return ok({ status: 'ok' as const });
-      } catch (pingErr) {
-        const msg = pingErr instanceof Error ? pingErr.message : String(pingErr);
-        if (msg.includes('token_expired') || msg.includes('401')) {
-          return ok({ status: 'expired' as const });
-        }
-        return ok({ status: 'error' as const, message: msg });
       }
+
+      if (tokenDate !== today) {
+        // Token was issued on a different calendar day — it expired at midnight ET.
+        return ok({ status: 'expired' as const });
+      }
+
+      // Dates match — token is still valid for today.
+      return ok({ status: 'ok' as const });
     } catch (err) { return fail(err); }
   });
 
@@ -188,6 +215,7 @@ export function registerETradeIpc(db: Database): void {
     try {
       secureSet(db, 'etradeAccessToken',  '');
       secureSet(db, 'etradeAccessSecret', '');
+      secureSet(db, 'etradeTokenDate',    '');
       return ok(true);
     } catch (err) { return fail(err); }
   });

@@ -306,10 +306,57 @@ export class LeapsCspService {
     }
     log(`${filtered.length} of ${tickers.length} tickers pass universe filters`);
 
+    // ── Resolve expiry dates from provider ─────────────────────────────────
+    // For E*Trade we fetch the real exchange-listed expirations for a sample
+    // ticker and derive both LEAPS (365–730 DTE) and CSP (25–50 DTE) dates.
+    // Polygon returns [] from getOptionsExpirations, so we fall back to the
+    // locally-generated standard third-Friday dates.
+    let leapsExpiries = leapsExpiryDates();
+    let cspExpiry = cspExpiryDate();
+
+    if (filtered.length > 0) {
+      try {
+        const sampleTicker = filtered[0]!;
+        await this.rateLimiter.acquire();
+        const providerExpiries = await this.optionsProvider.getOptionsExpirations(sampleTicker);
+        if (providerExpiries.length > 0) {
+          // LEAPS leg: 365–730 DTE
+          const realLeaps = providerExpiries.filter(e => {
+            const d = dteDays(e);
+            return d >= 365 && d <= 730;
+          });
+          if (realLeaps.length > 0) {
+            leapsExpiries = realLeaps;
+            log(`${this.optionsProvider.name}: ${realLeaps.length} LEAPS expirations: ${realLeaps.join(', ')}`);
+          } else {
+            log(`Provider has no expirations in 365–730 DTE window — using generated LEAPS dates`);
+          }
+
+          // CSP leg: 25–50 DTE, pick the one closest to 37 DTE (centre of range)
+          const cspCandidates = providerExpiries.filter(e => {
+            const d = dteDays(e);
+            return d >= 25 && d <= 50;
+          });
+          if (cspCandidates.length > 0) {
+            cspCandidates.sort((a, b) =>
+              Math.abs(dteDays(a) - 37) - Math.abs(dteDays(b) - 37),
+            );
+            cspExpiry = cspCandidates[0]!;
+            log(`${this.optionsProvider.name}: CSP expiry ${cspExpiry} (${dteDays(cspExpiry)} DTE)`);
+          }
+        } else {
+          log('Provider returned no expirations — using generated default dates');
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        log(`Expiration fetch failed (${msg}) — using generated default dates`);
+      }
+    }
+
     // ── LEAPS candidates ────────────────────────────────────────────────────
     log('Screening LEAPS candidates…');
     const leapsCandidates: LeapsCandidate[] = [];
-    const leapsExpiries = leapsExpiryDates();
+
     log(`LEAPS expiry window: ${leapsExpiries.join(', ')}`);
 
     if (leapsExpiries.length === 0) {
@@ -362,7 +409,11 @@ export class LeapsCspService {
         const extrinsicPct = midPrice > 0 ? ((midPrice - intrinsic) / midPrice) * 100 : 999;
 
         // LEAPS contract hard fails (SRS §4.3.1)
-        if (!this.passLeapsContractHardFails(contract, midPrice, extrinsicPct)) continue;
+        const hardFailReason = this.passLeapsContractHardFails(contract, midPrice, extrinsicPct);
+        if (hardFailReason) {
+          log(`  ${ticker}/${expiry}: best contract Δ${(contract.delta ?? 0).toFixed(2)} strike $${contract.strike} rejected — ${hardFailReason}`);
+          continue;
+        }
 
         const ivPct = contract.iv * 100;
         const { score, breakdown } = this.scoreLeapsLeg(
@@ -412,7 +463,7 @@ export class LeapsCspService {
 
     // ── CSP candidate pool (full filtered universe) ─────────────────────────
     log('Building CSP candidate pool…');
-    const cspExpiry = cspExpiryDate();
+    log(`CSP expiry: ${cspExpiry} (${dteDays(cspExpiry)} DTE)`);
     const cspPool = new Map<string, CspCandidate[]>();
 
     const cspTotal = filtered.length;
@@ -922,21 +973,37 @@ export class LeapsCspService {
   }
 
   // ── LEAPS contract hard fails (SRS §4.3.1) ─────────────────────────────────
+  //
+  // Thresholds are calibrated for LEAPS (365–730 DTE), NOT short-dated options:
+  //
+  //  spreadPct ≤ 15%   — LEAPS markets are less liquid; a $1.50 spread on a $20
+  //                       option is 7.5%, which is normal and acceptable.
+  //  extrinsicPct ≤ 50% — For 400–700 DTE with IV > 20%, even a well-chosen
+  //                       delta-0.80 call has 25–40% extrinsic as % of premium.
+  //                       The scoring system already penalises high extrinsic
+  //                       (0 points above 15%); the hard fail just removes truly
+  //                       egregious outliers (>50%).
+  //  openInterest ≥ 10 — Minimum real-market liquidity signal.
 
   private passLeapsContractHardFails(
     contract: OptionContract,
     midPrice: number,
     extrinsicPct: number,
-  ): boolean {
-    if (midPrice <= 0) return false;
+  ): string | null {   // returns null = pass, non-null = rejection reason
+    if (midPrice <= 0) return 'zero mid-price';
     const spread = contract.ask - contract.bid;
     const spreadPct = spread / midPrice * 100;
-    // Skip spread check when bid===ask (lastPrice proxy, no real market)
-    if (contract.bid !== contract.ask && spreadPct > 5) return false;
-    if ((contract.openInterest ?? 0) < 10) return false;
-    if (extrinsicPct > 15) return false;       // paying too much for time
-    // IV > 1.5× baseline: we don't have the baseline here — skip
-    return true;
+    // Skip spread check when bid===ask (lastPrice proxy — no real market data)
+    if (contract.bid !== contract.ask && spreadPct > 15) {
+      return `spread ${spreadPct.toFixed(1)}% > 15%`;
+    }
+    if ((contract.openInterest ?? 0) < 10) {
+      return `OI ${contract.openInterest ?? 0} < 10`;
+    }
+    if (extrinsicPct > 50) {
+      return `extrinsic ${extrinsicPct.toFixed(1)}% > 50%`;
+    }
+    return null; // pass
   }
 
   // ── LEAPS leg scoring (SRS §5.1) ───────────────────────────────────────────

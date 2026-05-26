@@ -75,10 +75,9 @@ export function App() {
           warning = 'E*Trade token expired (tokens reset at midnight ET). Please reconnect.';
         } else if (result.status === 'no_token') {
           warning = 'E*Trade is selected as the options provider but you have not connected yet. Click "Connect" below to authenticate.';
-        } else if (result.status === 'no_credentials') {
-          warning = 'E*Trade is selected as the options provider but no credentials are saved. Enter your Consumer Key and Secret, then click "Connect".';
         } else {
-          warning = `E*Trade connection error: ${result.message ?? 'unknown'}. Please reconnect.`;
+          // 'no_credentials'
+          warning = 'E*Trade is selected as the options provider but no credentials are saved. Enter your Consumer Key and Secret, then click "Connect".';
         }
 
         setEtradeWarning(warning);
