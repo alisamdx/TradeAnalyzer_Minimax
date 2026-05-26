@@ -19,10 +19,11 @@ import { OptionsChainView } from './views/OptionsChainView.js';
 import { AgentView } from './views/AgentView.js';
 import { BacktestView } from './views/BacktestView.js';
 import { LeapsCspView } from './views/LeapsCspView.js';
+import { TestApiView } from './views/TestApiView.js';
 
 declare const __APP_VERSION__: string;
 
-type View = 'watchlists' | 'screener' | 'analysis' | 'validate' | 'portfolio' | 'briefing' | 'settings' | 'alerts' | 'data' | 'optionsChain' | 'agent' | 'backtest' | 'leapsCsp';
+type View = 'watchlists' | 'screener' | 'analysis' | 'validate' | 'portfolio' | 'briefing' | 'settings' | 'alerts' | 'data' | 'optionsChain' | 'agent' | 'backtest' | 'leapsCsp' | 'testApi';
 
 export function App() {
   const [view, setView] = useState<View>('watchlists');
@@ -458,6 +459,12 @@ export function App() {
           >
             ⚡ LEAPS+CSP
           </button>
+          <button
+            className={`nav-btn ${view === 'testApi' ? 'active' : ''}`}
+            onClick={() => setView('testApi')}
+          >
+            🔬 Test API
+          </button>
           <div className="nav-divider" />
           <button
             className={`nav-btn ${view === 'data' ? 'active' : ''}`}
@@ -549,6 +556,7 @@ export function App() {
         {view === 'agent' && <AgentView />}
         {view === 'backtest' && <BacktestView />}
         {view === 'leapsCsp' && <LeapsCspView />}
+        {view === 'testApi' && <TestApiView />}
         {view === 'settings' && <SettingsView />}
 
         {view === 'watchlists' && !active ? (

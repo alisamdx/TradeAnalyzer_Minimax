@@ -650,6 +650,68 @@ function buildApi() {
       invoke<OptionsChainViewData>('options:get-chain', ticker, expiration)
   };
 
+  const etrade = {
+    getStatus: () => invoke<{
+      status: { hasConsumerKey: boolean; hasConsumerSecret: boolean; hasAccessToken: boolean; isConfigured: boolean; isAuthenticated: boolean };
+      consumerKey: string;
+    }>('etrade:get-status'),
+    saveCredentials: (consumerKey: string, consumerSecret: string) =>
+      invoke<boolean>('etrade:save-credentials', consumerKey, consumerSecret),
+    startAuth: () => invoke<{ authUrl: string }>('etrade:start-auth'),
+    submitVerifier: (verifier: string) => invoke<boolean>('etrade:submit-verifier', verifier),
+    renewToken: () => invoke<boolean>('etrade:renew-token'),
+    disconnect: () => invoke<boolean>('etrade:disconnect'),
+    getExpirations: (symbol: string) => invoke<Array<{
+      year: number; month: number; day: number; expiryType: string; dateStr: string;
+    }>>('etrade:get-expirations', symbol),
+    getOptionsChain: (symbol: string, expiration: { year: number; month: number; day: number; expiryType: string; dateStr: string }) =>
+      invoke<{
+        ticker: string; expiration: string; underlyingPrice: number | null;
+        totalContracts: number; withGreeks: number; withBidAsk: number;
+        rawTopLevelKeys: string[]; rawResponseKeys: string[]; pairsCount: number;
+        rawSampleCall: string; rawSamplePut: string;
+        calls: Array<{
+          symbol: string; osiKey: string; optionType: 'CALL' | 'PUT'; strikePrice: number;
+          bid: number | null; ask: number | null; bidSize: number | null; askSize: number | null;
+          lastPrice: number | null; volume: number | null; openInterest: number | null; inTheMoney: boolean;
+          greek: { delta: number | null; gamma: number | null; theta: number | null; vega: number | null; rho: number | null; iv: number | null };
+          hasGreeks: boolean; hasBidAsk: boolean;
+        }>;
+        puts: Array<{
+          symbol: string; osiKey: string; optionType: 'CALL' | 'PUT'; strikePrice: number;
+          bid: number | null; ask: number | null; bidSize: number | null; askSize: number | null;
+          lastPrice: number | null; volume: number | null; openInterest: number | null; inTheMoney: boolean;
+          greek: { delta: number | null; gamma: number | null; theta: number | null; vega: number | null; rho: number | null; iv: number | null };
+          hasGreeks: boolean; hasBidAsk: boolean;
+        }>;
+      }>('etrade:get-options-chain', symbol, expiration),
+  };
+
+  const testApi = {
+    getRawOptions: (ticker: string, expiration: string) =>
+      invoke<{
+        ticker: string;
+        expiration: string;
+        underlyingPrice: number | null;
+        totalContracts: number;
+        contractsWithGreeks: number;
+        contractsWithLastQuote: number;
+        pages: number;
+        polygonStatus: string;
+        rawResultsType: string;
+        rawResultsCount: number;
+        firstPageKeys: string[];
+        contracts: Array<{
+          ticker: string; strike: number; expiration: string; contractType: string; exerciseStyle: string;
+          impliedVolatility: number | null; openInterest: number | null; breakEvenPrice: number | null; fmv: number | null;
+          delta: number | null; gamma: number | null; theta: number | null; vega: number | null; hasGreeks: boolean;
+          bid: number | null; ask: number | null; bidSize: number | null; askSize: number | null; quoteMidpoint: number | null; hasLastQuote: boolean;
+          dayClose: number | null; dayVolume: number | null; dayVwap: number | null;
+          lastTradePrice: number | null; underlyingPrice: number | null;
+        }>;
+      }>('test-api:get-raw-options', ticker, expiration)
+  };
+
   const agent = {
     openDb: (dbPath: string) => invoke<boolean>('agent:open-db', dbPath),
     closeDb: () => invoke<boolean>('agent:close-db'),
@@ -725,7 +787,7 @@ function buildApi() {
   };
 
   return {
-    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, historical, portfolio, briefing, alerts, optionsChain, agent, backtest, leapsCsp },
+    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, historical, portfolio, briefing, alerts, optionsChain, agent, backtest, leapsCsp, testApi, etrade },
     dialog: {
       prompt: (opts: { title: string; defaultValue?: string }) =>
         invoke<string | null>('dialog:prompt', opts),

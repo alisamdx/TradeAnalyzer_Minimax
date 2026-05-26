@@ -514,6 +514,58 @@ export class PolygonDataProvider implements DataProvider {
     return result.putPremium;
   }
 
+  /** Returns raw Polygon contract objects for the given ticker + optional expiration, with pagination.
+   *  Also returns diagnostic info about the raw API response. */
+  async getRawOptionsSnapshot(ticker: string, expiration?: string): Promise<{
+    contracts: unknown[];
+    pages: number;
+    rawStatus: string;
+    rawResultsType: string;
+    rawResultsCount: number;
+    firstPageKeys: string[];
+    polygonStatus: string;
+  }> {
+    let allContracts: unknown[] = [];
+    let url: string | null = `/v3/snapshot/options/${ticker}`;
+    const params: Record<string, string> = { limit: '250' };
+    if (expiration) params['expiration_date'] = expiration;
+    let pages = 0;
+    let firstPageData: Record<string, unknown> | null = null;
+
+    while (url) {
+      const data = await this.fetchWithRetry(url, pages === 0 ? params : {});
+      if (pages === 0) firstPageData = data;
+      pages++;
+      let pageContracts: unknown[];
+      if (Array.isArray(data.results)) {
+        pageContracts = data.results;
+      } else if (data.results && typeof data.results === 'object' && 'options' in (data.results as Record<string, unknown>)) {
+        pageContracts = ((data.results as Record<string, unknown>)['options'] as unknown[]) ?? [];
+      } else {
+        pageContracts = [];
+      }
+      allContracts = allContracts.concat(pageContracts);
+      const nextUrl = data.next_url as string | undefined;
+      if (nextUrl) {
+        try { url = new URL(nextUrl).pathname + new URL(nextUrl).search; } catch { url = nextUrl; }
+      } else {
+        url = null;
+      }
+    }
+
+    const fd = firstPageData ?? {};
+    const resultsVal = fd['results'];
+    return {
+      contracts: allContracts,
+      pages,
+      rawStatus: String(fd['status'] ?? 'unknown'),
+      rawResultsType: resultsVal === null ? 'null' : Array.isArray(resultsVal) ? 'array' : typeof resultsVal,
+      rawResultsCount: Array.isArray(resultsVal) ? resultsVal.length : 0,
+      firstPageKeys: Object.keys(fd),
+      polygonStatus: String(fd['status'] ?? ''),
+    };
+  }
+
   async getIndexConstituents(_index: Universe): Promise<ConstituentRow[]> {
     // This is a no-op here — constituents are loaded from bundled CSV files
     // by the ConstituentsService. This method exists on the interface for

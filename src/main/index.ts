@@ -28,6 +28,9 @@ import { registerPortfolioIpc } from './ipc/ipc-portfolio.js';
 import { registerBriefingIpc } from './ipc/ipc-briefing.js';
 import { registerAlertsIpc } from './ipc/ipc-alerts.js';
 import { registerOptionsIpc } from './ipc/ipc-options.js';
+import { registerTestApiIpc } from './ipc/ipc-test-api.js';
+import { registerETradeIpc } from './ipc/ipc-etrade.js';
+import { secureGet, migratePlaintextSecrets } from './services/secure-settings.js';
 import { AgentDbService } from './services/agent-db-service.js';
 import { registerAgentIpc } from './ipc/ipc-agent.js';
 import { BacktestEngine } from './services/backtest-engine.js';
@@ -84,8 +87,8 @@ function createWindow(): BrowserWindow {
 // API key retrieval helper - used by multiple services
 function getApiKey(db: ReturnType<typeof openDatabase>): string {
   try {
-    const row = db.prepare('SELECT value FROM settings WHERE key = ?').get('polygonApiKey') as { value?: string } | undefined;
-    if (row?.value) return row.value;
+    const val = secureGet(db, 'polygonApiKey');
+    if (val) return val;
   } catch (err) {
     // Table might not exist yet
   }
@@ -181,6 +184,9 @@ app.whenReady().then(() => {
   }
   repairWatchlistItems(db);
 
+  // Encrypt any plain-text secrets left from before safeStorage was introduced.
+  migratePlaintextSecrets(db);
+
   // Phase 1 — watchlist service.
   const watchlistService = new WatchlistService(db);
   watchlistService.ensureDefault();
@@ -233,6 +239,12 @@ app.whenReady().then(() => {
 
   // Options Chain view
   registerOptionsIpc(dataProvider, quoteCache, rateLimiter);
+
+  // Test API diagnostic screen
+  registerTestApiIpc(dataProvider);
+
+  // E*Trade provider (used by Test API now; full DataProvider integration later)
+  registerETradeIpc(db);
 
   // LEAPS + CSP strategy screener
   registerLeapsCspIpc(db, () => getApiKey(db), rateLimiter);

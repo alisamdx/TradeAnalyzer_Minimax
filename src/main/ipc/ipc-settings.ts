@@ -9,6 +9,7 @@ import type { DbHandle } from '../db/connection.js';
 import type { TokenBucketRateLimiter } from '../services/rate-limiter.js';
 import type { QuoteCache, FundamentalsCache } from '../services/cache-service.js';
 import { TTL_SECONDS } from '../services/cache-service.js';
+import { secureGet, secureSet, encryptionAvailable } from '../services/secure-settings.js';
 
 function ok<T>(value: T) { return { ok: true as const, value }; }
 function fail(err: unknown) {
@@ -141,16 +142,19 @@ export function registerSettingsIpc(
 
   ipcMain.handle('settings:get-api-key', () => {
     try {
-      const row = db.prepare('SELECT value FROM settings WHERE key = ?').get('polygonApiKey') as { value: string } | undefined;
-      return ok<string>(row?.value ?? '');
+      return ok<string>(secureGet(db, 'polygonApiKey'));
     } catch (err) { return fail(err); }
   });
 
   ipcMain.handle('settings:set-api-key', (_e, apiKey: string) => {
     try {
-      db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('polygonApiKey', apiKey);
+      secureSet(db, 'polygonApiKey', apiKey);
       return ok(true);
     } catch (err) { return fail(err); }
+  });
+
+  ipcMain.handle('settings:encryption-status', () => {
+    return ok({ available: encryptionAvailable() });
   });
 
   ipcMain.handle('settings:open-logs-dir', () => {
