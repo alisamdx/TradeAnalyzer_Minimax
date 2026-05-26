@@ -58,12 +58,13 @@ function ETradeConnectPanel({ warning, onConnected }: ETradeConnectPanelProps) {
   const [error, setError]                 = useState<string | null>(null);
   const [credsSaved, setCredsSaved]       = useState(false);
 
-  // Load existing consumer key + connection status on mount
+  // Load existing credentials + connection status on mount
   useEffect(() => {
     (async () => {
       try {
         const res = await window.api.etrade.getStatus();
         setConsumerKey(res.consumerKey ?? '');
+        setConsumerSecret(res.consumerSecret ?? '');
         const check = await window.api.etrade.checkConnection();
         setConnStatus(check.status);
       } catch { /* ignore */ }

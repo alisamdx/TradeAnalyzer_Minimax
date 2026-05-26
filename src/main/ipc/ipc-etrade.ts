@@ -56,7 +56,7 @@ export interface ETradeStatus {
 
 export function registerETradeIpc(db: Database): void {
 
-  /** Get current auth status + saved consumer key (never return secrets). */
+  /** Get current auth status + saved credentials (credentials are stored encrypted locally). */
   ipcMain.handle('etrade:get-status', (_e: IpcMainInvokeEvent) => {
     try {
       const consumerKey    = secureGet(db, 'etradeConsumerKey');
@@ -69,7 +69,7 @@ export function registerETradeIpc(db: Database): void {
         isConfigured:      !!(consumerKey && consumerSecret),
         isAuthenticated:   !!(consumerKey && consumerSecret && accessToken),
       };
-      return ok({ status, consumerKey });
+      return ok({ status, consumerKey, consumerSecret });
     } catch (err) { return fail(err); }
   });
 

@@ -663,6 +663,7 @@ function buildApi() {
     getStatus: () => invoke<{
       status: { hasConsumerKey: boolean; hasConsumerSecret: boolean; hasAccessToken: boolean; isConfigured: boolean; isAuthenticated: boolean };
       consumerKey: string;
+      consumerSecret: string;
     }>('etrade:get-status'),
     saveCredentials: (consumerKey: string, consumerSecret: string) =>
       invoke<boolean>('etrade:save-credentials', consumerKey, consumerSecret),
