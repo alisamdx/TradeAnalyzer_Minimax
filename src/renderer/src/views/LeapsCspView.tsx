@@ -453,7 +453,13 @@ export function LeapsCspView() {
         setSelectedGrades(new Set(ALL_GRADES));
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg);
+      if (msg.includes('token_rejected') || msg.includes('oauth_problem') || msg.includes('auth failed')) {
+        window.dispatchEvent(new CustomEvent('navigate-to-settings-etrade', {
+          detail: { warning: 'E*Trade token rejected. The token may have expired or been revoked — please reconnect.' }
+        }));
+      }
     } finally {
       setIsRunning(false);
       setProgressDetail(null);

@@ -827,3 +827,26 @@ export interface LeapsCspProgressDetail {
   total: number;
   ticker?: string;
 }
+
+// ─── Filter Templates (Pre-built criteria) ──────────────────────────────────
+
+export type FilterCategory = 'technical' | 'volatility' | 'earnings' | 'options' | 'wheel';
+export type DataNeeded = 'quote' | 'bars' | 'fundamentals' | 'options' | 'earnings';
+
+export interface FilterTemplate {
+  id: string;
+  label: string;
+  description: string;
+  category: FilterCategory;
+  icon: string;
+  dataNeeded: DataNeeded[];
+  metricColumns: Record<string, string>;
+}
+
+export interface FilterTemplateResult {
+  ticker: string;
+  watchlists: string[];
+  lastPrice: number | null;
+  metrics: Record<string, number | null>;
+  matchReason: string;
+}

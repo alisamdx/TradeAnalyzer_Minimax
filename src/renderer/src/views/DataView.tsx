@@ -5,10 +5,16 @@ import type { Universe, CacheStats, ConstituentsMeta, Watchlist } from '@shared/
 const PRICE_RANGES = ['1M', '3M', '6M', '1Y', '2Y', '5Y'] as const;
 type PriceRange = typeof PRICE_RANGES[number];
 
-export function DataView() {
-  const [universe, setUniverse] = useState<Universe>('sp500');
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [progress, setProgress] = useState<{ scanned: number; total: number; ticker?: string } | null>(null);
+interface DataViewProps {
+  isSyncing: boolean;
+  syncProgress: { scanned: number; total: number; ticker?: string } | null;
+  syncUniverseSelection: Universe;
+  onSyncUniverseChange: (u: Universe) => void;
+  onStartSync: (universe: Universe) => Promise<{ scanned: number }>;
+  onCancelSync: () => Promise<void>;
+}
+
+export function DataView({ isSyncing, syncProgress, syncUniverseSelection, onSyncUniverseChange, onStartSync, onCancelSync }: DataViewProps) {
   const [stats, setStats] = useState<CacheStats | null>(null);
   const [meta, setMeta] = useState<Record<'sp500' | 'russell1000', ConstituentsMeta | null>>({ sp500: null, russell1000: null });
   const [error, setError] = useState<string | null>(null);
@@ -42,21 +48,13 @@ export function DataView() {
   useEffect(() => {
     loadStats();
     window.api.watchlists.list().then(setWatchlists).catch(console.error);
-
-    const unsubProgress = window.api.screen.onSyncProgress((data) => {
-      setProgress(data);
-    });
-
-    return () => { unsubProgress(); };
   }, [loadStats]);
 
   const startSync = async () => {
-    setIsSyncing(true);
-    setProgress(null);
     setError(null);
     setStatusMsg(null);
     try {
-      const result = await window.api.screen.syncUniverse(universe);
+      const result = await onStartSync(syncUniverseSelection);
       setStatusMsg(`Successfully synced data for ${result.scanned} tickers.`);
       await loadStats();
     } catch (err) {
@@ -65,14 +63,11 @@ export function DataView() {
       } else {
         setError((err as Error).message);
       }
-    } finally {
-      setIsSyncing(false);
-      setProgress(null);
     }
   };
 
   const cancelSync = async () => {
-    await window.api.screen.syncCancel();
+    await onCancelSync();
   };
 
   const refreshConstituents = async (index: 'sp500' | 'russell1000') => {
@@ -217,8 +212,8 @@ export function DataView() {
           {(['sp500', 'russell1000', 'both'] as Universe[]).map((u) => (
             <button
               key={u}
-              className={`univ-btn ${universe === u ? 'active' : ''}`}
-              onClick={() => setUniverse(u)}
+              className={`univ-btn ${syncUniverseSelection === u ? 'active' : ''}`}
+              onClick={() => onSyncUniverseChange(u)}
               disabled={isSyncing}
             >
               {u === 'sp500' ? 'S&P 500' : u === 'russell1000' ? 'Russell 1000' : 'Both'}
@@ -230,16 +225,16 @@ export function DataView() {
           <div style={{ padding: '15px', backgroundColor: 'var(--bg-lighter)', borderRadius: '4px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
               <strong>Downloading...</strong>
-              {progress && progress.total > 0 && (
-                <span>{Math.round((progress.scanned / progress.total) * 100)}%</span>
+              {syncProgress && syncProgress.total > 0 && (
+                <span>{Math.round((syncProgress.scanned / syncProgress.total) * 100)}%</span>
               )}
             </div>
-            {progress && progress.total > 0 && (
+            {syncProgress && syncProgress.total > 0 && (
               <>
-                <progress value={progress.scanned} max={progress.total} style={{ width: '100%', height: '10px' }}></progress>
+                <progress value={syncProgress.scanned} max={syncProgress.total} style={{ width: '100%', height: '10px' }}></progress>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '5px', fontSize: '0.9em', color: 'var(--text-muted)' }}>
-                  <span>{progress.scanned} / {progress.total} tickers processed</span>
-                  <span>Fetching: <strong>{progress.ticker}</strong></span>
+                  <span>{syncProgress.scanned} / {syncProgress.total} tickers processed</span>
+                  <span>Fetching: <strong>{syncProgress.ticker}</strong></span>
                 </div>
               </>
             )}

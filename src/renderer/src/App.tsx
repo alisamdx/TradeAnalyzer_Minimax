@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, useRef } from 'react';
-import type { Watchlist, WatchlistItem, CachedQuote } from '@shared/types.js';
+import type { Watchlist, WatchlistItem, CachedQuote, Universe } from '@shared/types.js';
 import { ScreenerView } from './views/ScreenerView.js';
 import { AnalysisView } from './views/AnalysisView.js';
 import { ValidateView } from './views/ValidateView.js';
@@ -19,11 +19,12 @@ import { OptionsChainView } from './views/OptionsChainView.js';
 import { AgentView } from './views/AgentView.js';
 import { BacktestView } from './views/BacktestView.js';
 import { LeapsCspView } from './views/LeapsCspView.js';
+import { FiltersView } from './views/FiltersView.js';
 import { TestApiView } from './views/TestApiView.js';
 
 declare const __APP_VERSION__: string;
 
-type View = 'watchlists' | 'screener' | 'analysis' | 'validate' | 'portfolio' | 'briefing' | 'settings' | 'alerts' | 'data' | 'optionsChain' | 'agent' | 'backtest' | 'leapsCsp' | 'testApi';
+type View = 'watchlists' | 'screener' | 'filters' | 'analysis' | 'validate' | 'portfolio' | 'briefing' | 'settings' | 'alerts' | 'data' | 'optionsChain' | 'agent' | 'backtest' | 'leapsCsp' | 'testApi';
 
 export function App() {
   const [view, setView] = useState<View>('watchlists');
@@ -59,6 +60,11 @@ export function App() {
   // E*Trade connection warning forwarded to SettingsView
   const [etradeWarning, setEtradeWarning] = useState<string | null>(null);
 
+  // Data sync state — lifted here so it survives tab navigation
+  const [syncUniverseSelection, setSyncUniverseSelection] = useState<Universe>('sp500');
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncProgress, setSyncProgress] = useState<{ scanned: number; total: number; ticker?: string } | null>(null);
+
   // On mount: if E*Trade is the options provider, verify the token is still valid.
   // If not, redirect to Settings so the user can reconnect before anything breaks.
   useEffect(() => {
@@ -89,6 +95,30 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    const unsub = window.api.screen.onSyncProgress((data) => {
+      setSyncProgress(data);
+    });
+    return () => { unsub(); };
+  }, []);
+
+  const handleStartSync = useCallback(async (universe: Universe): Promise<{ scanned: number }> => {
+    setSyncUniverseSelection(universe);
+    setIsSyncing(true);
+    setSyncProgress(null);
+    try {
+      const result = await window.api.screen.syncUniverse(universe);
+      return result;
+    } finally {
+      setIsSyncing(false);
+      setSyncProgress(null);
+    }
+  }, []);
+
+  const handleCancelSync = useCallback(async () => {
+    await window.api.screen.syncCancel();
+  }, []);
+
+  useEffect(() => {
     // Listen for "Run Analysis" from screener
     const handleNavigateToAnalysis = (e: CustomEvent<{ ticker: string }>) => {
       setAnalysisTicker(e.detail.ticker);
@@ -111,6 +141,13 @@ export function App() {
     };
     window.addEventListener('navigate-to-options', handleNavigateToOptions as EventListener);
 
+    // Listen for E*Trade auth errors from any view → redirect to Settings
+    const handleEtradeAuthError = (e: CustomEvent<{ warning: string }>) => {
+      setEtradeWarning(e.detail.warning);
+      setView('settings');
+    };
+    window.addEventListener('navigate-to-settings-etrade', handleEtradeAuthError as EventListener);
+
     // Listen for watchlist created from screener
     const handleWatchlistCreated = () => {
       refreshLists();
@@ -131,6 +168,7 @@ export function App() {
       window.removeEventListener('navigate-to-analysis', handleNavigateToAnalysis as EventListener);
       window.removeEventListener('navigate-to-validate', handleNavigateToValidate as EventListener);
       window.removeEventListener('navigate-to-options', handleNavigateToOptions as EventListener);
+      window.removeEventListener('navigate-to-settings-etrade', handleEtradeAuthError as EventListener);
       window.removeEventListener('watchlist-created', handleWatchlistCreated as EventListener);
       window.removeEventListener('show-prompt-dialog', handleShowPrompt as EventListener);
     };
@@ -468,6 +506,12 @@ export function App() {
             🔍 Screener
           </button>
           <button
+            className={`nav-btn ${view === 'filters' ? 'active' : ''}`}
+            onClick={() => setView('filters')}
+          >
+            🎛️ Filters
+          </button>
+          <button
             className={`nav-btn ${view === 'analysis' ? 'active' : ''}`}
             onClick={() => setView('analysis')}
           >
@@ -578,12 +622,22 @@ export function App() {
         )}
 
         {view === 'screener' && <ScreenerView />}
+        {view === 'filters' && <FiltersView />}
         {view === 'analysis' && <AnalysisView initialTicker={analysisTicker} clearInitialTicker={() => setAnalysisTicker(null)} />}
         {view === 'validate' && <ValidateView initialTicker={validateTicker} clearInitialTicker={() => setValidateTicker(null)} />}
         {view === 'portfolio' && <PortfolioView />}
         {view === 'briefing' && <BriefingView />}
         {view === 'alerts' && <AlertsView />}
-        {view === 'data' && <DataView />}
+        {view === 'data' && (
+          <DataView
+            isSyncing={isSyncing}
+            syncProgress={syncProgress}
+            syncUniverseSelection={syncUniverseSelection}
+            onSyncUniverseChange={setSyncUniverseSelection}
+            onStartSync={handleStartSync}
+            onCancelSync={handleCancelSync}
+          />
+        )}
         {view === 'optionsChain' && <OptionsChainView initialTicker={optionsChainTicker} initialExpiry={optionsChainExpiry} clearInitialTicker={() => { setOptionsChainTicker(null); setOptionsChainExpiry(null); }} />}
         {view === 'agent' && <AgentView />}
         {view === 'backtest' && <BacktestView />}

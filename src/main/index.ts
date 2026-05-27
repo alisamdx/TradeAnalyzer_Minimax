@@ -37,6 +37,7 @@ import { AgentDbService } from './services/agent-db-service.js';
 import { registerAgentIpc } from './ipc/ipc-agent.js';
 import { BacktestEngine } from './services/backtest-engine.js';
 import { registerBacktestIpc } from './ipc/ipc-backtest.js';
+import { registerFiltersIpc } from './ipc/ipc-filters.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -261,6 +262,7 @@ app.whenReady().then(() => {
 
   // Phase 8 - Alerts System IPC
   registerAlertsIpc(db);
+  registerFiltersIpc(db, dataProvider, optionsProvider, quoteCache, new FundamentalsCache(db), constituentsService);
 
   // Options Chain view
   registerOptionsIpc(optionsProvider, quoteCache, rateLimiter);

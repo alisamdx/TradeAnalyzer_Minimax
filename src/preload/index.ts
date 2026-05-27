@@ -43,6 +43,8 @@ import type {
   LeapsCspRunSummary,
   LeapsCspOpenedEntry,
   LeapsCspProgressDetail,
+  FilterTemplate,
+  FilterTemplateResult,
 } from '@shared/types.js';
 export type {
   ScreenPreset, ScreenCriteria, ScreenRunResult, ScreenResultRow, Universe,
@@ -801,8 +803,19 @@ function buildApi() {
     }
   };
 
+  const filters = {
+    listTemplates: () => invoke<FilterTemplate[]>('filters:list-templates'),
+    runTemplate: (templateId: string, source?: 'watchlist' | 'universe', universe?: Universe, watchlistIds?: number[]) =>
+      invoke<FilterTemplateResult[]>('filters:run-template', templateId, source, universe, watchlistIds),
+    onProgress: (callback: (data: { current: number; total: number; ticker: string }) => void) => {
+      const handler = (_: any, data: any) => callback(data);
+      ipcRenderer.on('filters:progress', handler);
+      return () => ipcRenderer.removeListener('filters:progress', handler);
+    }
+  };
+
   return {
-    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, historical, portfolio, briefing, alerts, optionsChain, agent, backtest, leapsCsp, testApi, etrade },
+    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, historical, portfolio, briefing, alerts, optionsChain, agent, backtest, leapsCsp, testApi, etrade, filters },
     dialog: {
       prompt: (opts: { title: string; defaultValue?: string }) =>
         invoke<string | null>('dialog:prompt', opts),
