@@ -2,9 +2,9 @@
 // Each template specifies what data it needs and a human-readable condition.
 // The actual condition logic lives in FilterTemplatesService on the main side.
 
-export type FilterCategory = 'technical' | 'volatility' | 'earnings' | 'options' | 'wheel';
+export type FilterCategory = 'technical' | 'volatility' | 'options' | 'wheel';
 
-export type DataNeeded = 'quote' | 'bars' | 'fundamentals' | 'options' | 'earnings';
+export type DataNeeded = 'quote' | 'bars' | 'fundamentals' | 'options';
 
 export interface FilterTemplate {
   id: string;
@@ -51,30 +51,21 @@ export const FILTER_TEMPLATES: FilterTemplate[] = [
   },
   {
     id: 'iv_rank_low',
-    label: 'IV Rank Low',
-    description: 'IV rank below 20 — good CSP entry (low premium)',
+    label: 'IV Low',
+    description: 'IV below 20% — low premium environment, consider waiting for higher IV before selling options. Uses IV rank if available, otherwise current ATM IV.',
     category: 'volatility',
     icon: '📉',
-    dataNeeded: ['quote'],
-    metricColumns: { ivRank: 'IV Rank %' }
+    dataNeeded: ['quote', 'options'],
+    metricColumns: { ivRank: 'IV %' }
   },
   {
     id: 'iv_rank_high',
-    label: 'IV Rank High',
-    description: 'IV rank above 70 — good CC entry or CSP exit (high premium)',
+    label: 'IV High',
+    description: 'IV above 35% — elevated premium, good for CSPs / CCs. Uses IV rank if available, otherwise current ATM IV.',
     category: 'volatility',
     icon: '📈',
-    dataNeeded: ['quote'],
-    metricColumns: { ivRank: 'IV Rank %', currentIv: 'Current IV %' }
-  },
-  {
-    id: 'earnings_approaching',
-    label: 'Earnings Approaching',
-    description: 'Earnings within 14 days — avoid or prepare',
-    category: 'earnings',
-    icon: '📅',
-    dataNeeded: ['earnings'],
-    metricColumns: { daysToEarnings: 'Days to Earnings' }
+    dataNeeded: ['quote', 'options'],
+    metricColumns: { ivRank: 'IV %', currentIv: 'Current IV %' }
   },
   {
     id: 'price_alert',

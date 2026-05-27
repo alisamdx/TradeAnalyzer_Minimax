@@ -136,8 +136,6 @@ export class FilterTemplatesService {
         return this.evalIVRank(ticker, watchlists, 'low');
       case 'iv_rank_high':
         return this.evalIVRank(ticker, watchlists, 'high');
-      case 'earnings_approaching':
-        return this.evalEarnings(ticker, watchlists);
       case 'price_alert':
         return this.evalPriceAlert(ticker, watchlists);
       case 'assignment_risk':
@@ -182,47 +180,66 @@ export class FilterTemplatesService {
     watchlists: string[],
     direction: 'low' | 'high'
   ): Promise<FilterTemplateResult | null> {
+    // IV rank is not available from Polygon's stock snapshot endpoint.
+    // Resolution order:
+    //   1. quote_cache.iv_rank  (populated if a full screener sync was run — rarely available)
+    //   2. quote_cache.current_iv (ATM IV %, populated by screener or previous filter run)
+    //   3. Live fetch via optionsProvider.getOptionsIV() — one options chain call per ticker
     const quote = await this.fetchQuote(ticker);
-    const ivRank = quote.ivRank;
-    if (ivRank === null) return null;
 
-    const threshold = direction === 'low' ? 20 : 70;
-    const matches = direction === 'low' ? ivRank < threshold : ivRank > threshold;
+    let ivValue = quote.ivRank;   // true IV rank (0–100), or null
+    let isRank  = true;
+
+    if (ivValue === null) {
+      // Try cached ATM IV first (no extra API call).
+      if (quote.currentIv !== null) {
+        ivValue = quote.currentIv;
+        isRank  = false;
+      } else if (this.optionsProvider) {
+        // Last resort: fetch live ATM IV from options chain.
+        try {
+          const ivData = await this.optionsProvider.getOptionsIV(ticker);
+          if (ivData.currentIv !== null) {
+            ivValue = ivData.currentIv;
+            isRank  = false;
+            // Persist to quote_cache so repeat runs skip the API call.
+            try {
+              this.db.prepare(
+                `INSERT INTO quote_cache (ticker, current_iv, fetched_at)
+                 VALUES (?, ?, ?)
+                 ON CONFLICT(ticker) DO UPDATE SET current_iv = excluded.current_iv,
+                                                    fetched_at = excluded.fetched_at`
+              ).run(ticker, ivData.currentIv, new Date().toISOString());
+            } catch { /* cache write is best-effort */ }
+          }
+        } catch { /* options data unavailable for this ticker */ }
+      }
+    }
+
+    if (ivValue === null) return null;
+
+    // When using true IV rank (0–100): low < 20, high > 70.
+    // When using raw current IV (%): low < 20%, high > 35% — reasonable absolute proxies.
+    const threshold = isRank
+      ? (direction === 'low' ? 20 : 70)
+      : (direction === 'low' ? 20 : 35);
+
+    const matches = direction === 'low' ? ivValue < threshold : ivValue > threshold;
     if (!matches) return null;
 
-    const label = direction === 'low' ? 'Low (CSP entry)' : 'High (CC/CSP exit)';
+    const label       = direction === 'low' ? 'Low (CSP entry)' : 'High (CC/CSP exit)';
+    const metricLabel = isRank ? 'IV Rank' : 'Current IV';
+    const op          = direction === 'low' ? '<' : '>';
+
     return {
       ticker,
       watchlists,
       lastPrice: quote.last,
       metrics: {
-        ivRank: +ivRank.toFixed(1),
-        ...(quote.currentIv !== null ? { currentIv: +quote.currentIv.toFixed(1) } : {})
+        ivRank: +ivValue.toFixed(1),
+        ...(quote.currentIv !== null && !isRank ? { currentIv: +quote.currentIv.toFixed(1) } : {})
       },
-      matchReason: `IV Rank ${label}: ${ivRank.toFixed(1)}% (threshold: ${direction === 'low' ? '<' : '>'}${threshold}%)`
-    };
-  }
-
-  private async evalEarnings(
-    ticker: string,
-    watchlists: string[]
-  ): Promise<FilterTemplateResult | null> {
-    const earnings = await this.dataProvider.getEarningsCalendar(ticker);
-    if (!earnings.nextEarningsDate) return null;
-
-    const now = new Date();
-    const nextDate = new Date(earnings.nextEarningsDate);
-    const daysToEarnings = Math.ceil((nextDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-
-    if (daysToEarnings < 0 || daysToEarnings > 14) return null;
-
-    const quote = await this.fetchQuote(ticker);
-    return {
-      ticker,
-      watchlists,
-      lastPrice: quote.last,
-      metrics: { daysToEarnings },
-      matchReason: `Earnings in ${daysToEarnings} day${daysToEarnings !== 1 ? 's' : ''}`
+      matchReason: `${metricLabel} ${label}: ${ivValue.toFixed(1)}% (${op}${threshold}%)${isRank ? '' : ' — ATM IV used (IV rank unavailable)'}`
     };
   }
 

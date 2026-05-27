@@ -11,7 +11,6 @@ import { useSortable } from '../hooks/useSortable.js';
 const CATEGORY_ORDER: Array<{ key: string; label: string }> = [
   { key: 'technical', label: 'Technical' },
   { key: 'volatility', label: 'Volatility' },
-  { key: 'earnings', label: 'Earnings' },
   { key: 'options', label: 'Options' },
   { key: 'wheel', label: 'Wheel' },
 ];

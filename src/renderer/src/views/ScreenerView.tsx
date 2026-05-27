@@ -97,6 +97,9 @@ export function ScreenerView() {
   const [creatingPriceWls, setCreatingPriceWls] = useState(false);
   const [priceWlMsg, setPriceWlMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
   const isRunningRef = useRef(false);
+  // Tracks whether the most recent activeRunId was set by a fresh run (so the
+  // activeRunId useEffect skips the redundant DB reload — runScreen already set results).
+  const freshRunIdRef = useRef<number | null>(null);
 
   // Load presets + runs + meta + cache status + default universe on mount.
   useEffect(() => {
@@ -153,15 +156,27 @@ export function ScreenerView() {
     }
   }, [cacheStatus, activeRunId]);
 
-  // Load results when a run is selected.
+  // Load results when a run is selected (or mode changes).
+  // Apply the same strict/soft filtering so historical runs respect the current mode.
+  // Skip the reload when activeRunId was just set by a fresh run — runScreen already set results.
   useEffect(() => {
     if (activeRunId === null) { setResults([]); setCurrentPage(1); return; }
+    if (freshRunIdRef.current === activeRunId) {
+      // Fresh run: results already set by runScreen; just reset page/selection.
+      freshRunIdRef.current = null;
+      setCurrentPage(1);
+      setSelected(new Set());
+      return;
+    }
     window.api.screen.getResults(activeRunId).then((res) => {
-      setResults(res);
+      const displayRows = mode === 'strict'
+        ? res.filter(r => r.payload.failedFilters.length === 0)
+        : res;
+      setResults(displayRows);
       setCurrentPage(1);
       setSelected(new Set());
     }).catch(() => {});
-  }, [activeRunId]);
+  }, [activeRunId, mode]);
 
   // ── Sorting ───────────────────────────────────────────────────────────────
 
@@ -277,10 +292,12 @@ export function ScreenerView() {
     const unsubProgress = window.api.screen.onProgress(p => setScreenProgress(p));
     try {
       const response = await window.api.screen.run({ ...criteria, universe, mode });
+      // Mark this runId as fresh so the activeRunId useEffect skips its DB reload.
+      freshRunIdRef.current = response.runId;
       setActiveRunId(response.runId);
       const universeName = universe === 'both' ? 'Both' : universe.toUpperCase();
       if (mode === 'strict') {
-        // In strict mode, only show tickers that passed all filters
+        // In strict mode, only show tickers that passed all enabled filters
         const passing = response.rows.filter(r => r.payload.failedFilters.length === 0);
         setResults(passing);
         setStatusMsg(`${universeName}: ${passing.length} of ${response.resultCount} passed`);
