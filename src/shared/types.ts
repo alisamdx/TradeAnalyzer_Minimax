@@ -576,7 +576,7 @@ export interface AgentConfig {
   dteMax: number;
   deltaMin: number;
   deltaMax: number;
-  minIvRank: number;
+  minIv: number;         // minimum current IV% (replaces minIvRank — true IV rank requires 52-wk history we don't have)
   minOi: number;
   maxBidAskPct: number;
   minAnnualizedReturn: number;

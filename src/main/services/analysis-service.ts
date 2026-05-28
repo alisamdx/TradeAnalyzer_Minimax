@@ -304,7 +304,8 @@ export function computeVolumeProfileLevels(
 // ─── Options helper functions ─────────────────────────────────────────────────
 
 function dteDays(expiration: string): number {
-  const exp = new Date(expiration + 'T00:00:00Z').getTime();
+  // 21:00 UTC ≈ 4pm ET (winter) — consistent settlement reference across services.
+  const exp = new Date(expiration + 'T21:00:00Z').getTime();
   const now = Date.now();
   return Math.max(0, Math.round((exp - now) / 86_400_000));
 }

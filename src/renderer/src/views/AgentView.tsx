@@ -836,7 +836,7 @@ function ConfigTab({ config, saving, msg, onChange, onSave, onReset }: ConfigTab
           {numField('Delta Min', 'deltaMin', 0.01, 'Min put delta (e.g. 0.20 = 20-delta)')}
           {numField('Delta Max', 'deltaMax', 0.01, 'Max put delta (e.g. 0.35 = 35-delta)')}
         </div>
-        {numField('Min IV Rank', 'minIvRank', 1, 'Only trade when IV rank ≥ this value (0–100)')}
+        {numField('Min IV %', 'minIv', 1, 'Only trade when current IV ≥ this % (e.g. 20 = 20% IV minimum)')}
         {numField('Min Annualized Return', 'minAnnualizedReturn', 0.01, 'e.g. 0.12 = 12% annualized — filter out low-yield trades')}
         {numField('Earnings Exclusion Days', 'earningsExclusionDays', 1, 'Skip trades within N days of earnings')}
         {numField('Min Open Interest', 'minOi', 100, 'Minimum OI on the contract for liquidity')}

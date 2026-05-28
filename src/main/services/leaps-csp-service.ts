@@ -118,19 +118,40 @@ function isBiotech(sector: string | null): boolean {
 
 // ─── Date helpers ─────────────────────────────────────────────────────────────
 
+// US market holidays on which options expire the prior Thursday instead of Friday.
+// Good Friday is always closed; others are calendar-specific Fridays.
+const MARKET_HOLIDAY_FRIDAYS = new Set([
+  '2024-03-29', // Good Friday
+  '2025-04-18', // Good Friday
+  '2025-07-04', // Independence Day (Friday)
+  '2026-04-03', // Good Friday
+  '2026-12-25', // Christmas (Friday)
+  '2027-01-01', // New Year's Day (Friday)
+  '2027-03-26', // Good Friday
+  '2028-04-14', // Good Friday
+]);
+
+/** If date falls on a market-holiday Friday, move back to Thursday. */
+function adjustForHoliday(ymd: string): string {
+  if (!MARKET_HOLIDAY_FRIDAYS.has(ymd)) return ymd;
+  const d = new Date(ymd + 'T12:00:00Z');
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
 function dteDays(expiryYMD: string): number {
-  const exp = new Date(expiryYMD + 'T16:00:00Z'); // market close
+  // Use 21:00 UTC (~4pm ET winter) as settlement reference.
+  const exp = new Date(expiryYMD + 'T21:00:00Z');
   return Math.round((exp.getTime() - Date.now()) / 86_400_000);
 }
 
-/** 3rd Friday of January for a given year. */
+/** 3rd Friday of January for a given year, adjusted for market holidays. */
 function thirdFridayOfJanuary(year: number): string {
   const d = new Date(Date.UTC(year, 0, 1));
-  // Find first Friday
-  const dow = d.getUTCDay(); // 0=Sun
+  const dow = d.getUTCDay();
   const daysToFri = (5 - dow + 7) % 7;
   d.setUTCDate(1 + daysToFri + 14); // +2 weeks = 3rd Friday
-  return d.toISOString().slice(0, 10);
+  return adjustForHoliday(d.toISOString().slice(0, 10));
 }
 
 /** Returns expiry dates in YYYY-MM-DD that are 365–730 DTE (LEAPS window). */
@@ -145,16 +166,15 @@ function leapsExpiryDates(): string[] {
     const dow = d.getUTCDay();
     const daysToFri = (5 - dow + 7) % 7;
     d.setUTCDate(1 + daysToFri + 14);
-    candidates.push(d.toISOString().slice(0, 10));
+    candidates.push(adjustForHoliday(d.toISOString().slice(0, 10)));
   }
-  // Keep only those in the 365–730 day window
   return candidates.filter(e => {
     const dte = dteDays(e);
     return dte >= 365 && dte <= 730;
   });
 }
 
-/** Best Friday with DTE 30–45 for the CSP leg. */
+/** Best expiry with DTE 25–50 for the CSP leg, adjusted for market holidays. */
 function cspExpiryDate(): string {
   const now = new Date();
   const dow = now.getDay();
@@ -162,13 +182,14 @@ function cspExpiryDate(): string {
   for (let weeks = 0; weeks < 10; weeks++) {
     const d = new Date(now);
     d.setDate(now.getDate() + daysToFriday + weeks * 7);
-    const dte = Math.round((d.getTime() - now.getTime()) / 86_400_000);
-    if (dte >= 25 && dte <= 50) return d.toISOString().slice(0, 10);
+    const ymd = adjustForHoliday(d.toISOString().slice(0, 10));
+    const dte = Math.round((new Date(ymd + 'T21:00:00Z').getTime() - now.getTime()) / 86_400_000);
+    if (dte >= 25 && dte <= 50) return ymd;
   }
   // Fallback: 5 weeks out
   const fb = new Date(now);
   fb.setDate(now.getDate() + daysToFriday + 35);
-  return fb.toISOString().slice(0, 10);
+  return adjustForHoliday(fb.toISOString().slice(0, 10));
 }
 
 // ─── Scoring helpers ──────────────────────────────────────────────────────────
