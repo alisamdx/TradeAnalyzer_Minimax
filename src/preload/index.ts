@@ -43,6 +43,10 @@ import type {
   LeapsCspRunSummary,
   LeapsCspOpenedEntry,
   LeapsCspProgressDetail,
+  CollaredLeapsRunResult,
+  CollaredLeapsRunSummary,
+  CollaredLeapsOpenedEntry,
+  CollaredLeapsProgressDetail,
   FilterTemplate,
   FilterTemplateResult,
 } from '@shared/types.js';
@@ -781,6 +785,27 @@ function buildApi() {
     },
   };
 
+  const collaredLeaps = {
+    runScreen: (universe: 'sp500' | 'russell1000' | 'both', forceRun?: boolean, watchlistId?: number | null) =>
+      invoke<CollaredLeapsRunResult>('collared-leaps:run-screen', universe, forceRun, watchlistId),
+    getRuns: () => invoke<CollaredLeapsRunSummary[]>('collared-leaps:get-runs'),
+    getRun: (runId: number) => invoke<CollaredLeapsRunResult | null>('collared-leaps:get-run', runId),
+    markOpened: (opportunityId: number, entry: { leapsEntryDebit?: number; putEntryDebit?: number; notes?: string }) =>
+      invoke<boolean>('collared-leaps:mark-opened', opportunityId, entry),
+    getOpened: () => invoke<CollaredLeapsOpenedEntry[]>('collared-leaps:get-opened'),
+    deleteRun: (runId: number) => invoke<boolean>('collared-leaps:delete-run', runId),
+    onProgress: (callback: (msg: string) => void) => {
+      const handler = (_: unknown, msg: string) => callback(msg);
+      ipcRenderer.on('collared-leaps:progress', handler);
+      return () => ipcRenderer.removeListener('collared-leaps:progress', handler);
+    },
+    onProgressDetail: (callback: (detail: CollaredLeapsProgressDetail) => void) => {
+      const handler = (_: unknown, detail: CollaredLeapsProgressDetail) => callback(detail);
+      ipcRenderer.on('collared-leaps:progress-detail', handler);
+      return () => ipcRenderer.removeListener('collared-leaps:progress-detail', handler);
+    },
+  };
+
   const backtest = {
     config: {
       list: () => invoke<BacktestConfig[]>('backtest:config:list'),
@@ -815,7 +840,7 @@ function buildApi() {
   };
 
   return {
-    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, historical, portfolio, briefing, alerts, optionsChain, agent, backtest, leapsCsp, testApi, etrade, filters },
+    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, historical, portfolio, briefing, alerts, optionsChain, agent, backtest, leapsCsp, collaredLeaps, testApi, etrade, filters },
     dialog: {
       prompt: (opts: { title: string; defaultValue?: string }) =>
         invoke<string | null>('dialog:prompt', opts),

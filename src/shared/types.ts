@@ -850,3 +850,132 @@ export interface FilterTemplateResult {
   metrics: Record<string, number | null>;
   matchReason: string;
 }
+
+// ─── Collared LEAPS Strategy ──────────────────────────────────────────────────
+// Long deep-ITM LEAPS call + long OTM protective put on same underlying.
+// The put is insurance on the LEAPS; its parameters derive from the LEAPS chosen.
+
+export type CollaredLeapsGate = 'PASS' | 'CAUTION' | 'FAIL';
+export type CollaredLeapsGrade = 'A+' | 'A' | 'B' | 'C' | 'F';
+
+export interface CollaredLeapsGateDetail {
+  spx: number | null;
+  spx50d: number | null;
+  spx200d: number | null;
+  vix: number | null;
+  vix5dChangePct: number | null;
+  hygIefRatio: number | null;
+  hygIefTrend: 'up' | 'down' | 'flat' | null;
+}
+
+export interface CollaredLeapsScoreComponent {
+  name: string;
+  weight: number;       // 0–1
+  rawScore: number;     // 0–10
+  weightedScore: number;
+}
+
+/** One point in the P&L payoff grid (200 price points across 0.5×–1.5× spot). */
+export interface CollaredLeapsPnlPoint {
+  price: number;        // underlying price
+  collarPnl: number;    // collared position P&L ($)
+  nakedPnl: number;     // naked LEAPS call P&L ($)
+}
+
+export interface CollaredLeapsDetail {
+  leapsScoreBreakdown: CollaredLeapsScoreComponent[];
+  putScoreBreakdown: CollaredLeapsScoreComponent[];
+  structuralScoreBreakdown: CollaredLeapsScoreComponent[];
+  pnlGrid: CollaredLeapsPnlPoint[];        // 200 pts at LEAPS expiry — always present
+  pnlGrid180d?: CollaredLeapsPnlPoint[];   // omitted if LEAPS DTE < 190
+  pnlGrid90d?: CollaredLeapsPnlPoint[];
+  pnlGrid30d?: CollaredLeapsPnlPoint[];
+}
+
+export interface CollaredLeapsOpportunity {
+  id: number;
+  runId: number;
+  rank: number;
+
+  // Underlying
+  ticker: string;
+  spot: number;
+  ma200d: number | null;
+
+  // LEAPS call leg
+  leapsStrike: number;
+  leapsExpiry: string;
+  leapsDte: number | null;
+  leapsDelta: number | null;
+  leapsDebit: number;           // mid × 100 per contract
+  leapsExtrinsicPct: number | null;
+  leapsIvPct: number | null;
+  leapsIvr: number | null;
+  leapsOi: number | null;
+  leapsSpreadPct: number | null;
+  leapsSubScore: number;
+
+  // Protective put leg
+  putStrike: number;
+  putExpiry: string;
+  putDte: number | null;
+  putDelta: number | null;      // negative
+  putDebit: number;             // mid × 100 per contract
+  putIvPct: number | null;
+  putIvr: number | null;
+  putOi: number | null;
+  putSpreadPct: number | null;
+  putSubScore: number;
+
+  // Structural metrics
+  costDragPct: number;
+  floorDepthPct: number;
+  breakeven: number;
+  maxLossAtPut: number | null;
+  maxLossAtZero: number;        // can be negative (put over-insures — fully hedged)
+  upsideRetentionPct: number;
+  hedgeEfficiencyPct: number;
+  rrRatio: number | null;
+
+  // Combined scoring
+  structuralSubScore: number;
+  combinedScore: number;
+  grade: CollaredLeapsGrade;
+  cautionFlags: string[];
+  gateSurvived: boolean;        // true if collar passes FAIL-gate structural requirements
+
+  detail: CollaredLeapsDetail;
+}
+
+export interface CollaredLeapsRunSummary {
+  id: number;
+  runAt: string;
+  universe: string;
+  watchlistId: number | null;
+  marketGate: CollaredLeapsGate;
+  gateDetail: CollaredLeapsGateDetail;
+  gateEffect: string;
+  candidateCount: number;
+  opportunityCount: number;
+}
+
+export interface CollaredLeapsRunResult {
+  run: CollaredLeapsRunSummary;
+  opportunities: CollaredLeapsOpportunity[];
+}
+
+export interface CollaredLeapsOpenedEntry {
+  id: number;
+  opportunityId: number;
+  openedAt: string;
+  leapsEntryDebit: number | null;
+  putEntryDebit: number | null;
+  notes: string | null;
+}
+
+export interface CollaredLeapsProgressDetail {
+  phase: 'gate' | 'universe' | 'leaps' | 'puts' | 'structural' | 'persist';
+  current: number;
+  total: number;
+  ticker?: string;
+}

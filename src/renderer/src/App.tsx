@@ -19,12 +19,13 @@ import { OptionsChainView } from './views/OptionsChainView.js';
 import { AgentView } from './views/AgentView.js';
 import { BacktestView } from './views/BacktestView.js';
 import { LeapsCspView } from './views/LeapsCspView.js';
+import { CollaredLeapsView } from './views/CollaredLeapsView.js';
 import { FiltersView } from './views/FiltersView.js';
 import { TestApiView } from './views/TestApiView.js';
 
 declare const __APP_VERSION__: string;
 
-type View = 'watchlists' | 'screener' | 'filters' | 'analysis' | 'validate' | 'portfolio' | 'briefing' | 'settings' | 'alerts' | 'data' | 'optionsChain' | 'agent' | 'backtest' | 'leapsCsp' | 'testApi';
+type View = 'watchlists' | 'screener' | 'filters' | 'analysis' | 'validate' | 'portfolio' | 'briefing' | 'settings' | 'alerts' | 'data' | 'optionsChain' | 'agent' | 'backtest' | 'leapsCsp' | 'collaredLeaps' | 'testApi';
 
 export function App() {
   const [view, setView] = useState<View>('watchlists');
@@ -536,6 +537,12 @@ export function App() {
             ⚡ LEAPS+CSP
           </button>
           <button
+            className={`nav-btn ${view === 'collaredLeaps' ? 'active' : ''}`}
+            onClick={() => setView('collaredLeaps')}
+          >
+            🛡️ Collared LEAPS
+          </button>
+          <button
             className={`nav-btn ${view === 'testApi' ? 'active' : ''}`}
             onClick={() => setView('testApi')}
           >
@@ -642,6 +649,7 @@ export function App() {
         {view === 'agent' && <AgentView />}
         {view === 'backtest' && <BacktestView />}
         {view === 'leapsCsp' && <LeapsCspView />}
+        {view === 'collaredLeaps' && <CollaredLeapsView />}
         {view === 'testApi' && <TestApiView />}
         {view === 'settings' && <SettingsView etradeWarning={etradeWarning} onEtradeWarningDismiss={() => setEtradeWarning(null)} />}
 
