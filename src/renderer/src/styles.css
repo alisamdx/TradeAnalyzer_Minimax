@@ -621,6 +621,14 @@ table.items-table {
   color: var(--accent);
   border: 1px solid rgba(88, 166, 255, 0.3);
 }
+.nav-btn.back-nav-btn {
+  color: var(--accent);
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+  padding-bottom: 8px;
+  border-radius: 0;
+}
 
 .watchlist-list { padding: 0; }
 .refresh-btn { font-size: 11px; }

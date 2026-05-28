@@ -27,8 +27,18 @@ declare const __APP_VERSION__: string;
 
 type View = 'watchlists' | 'screener' | 'filters' | 'analysis' | 'validate' | 'portfolio' | 'briefing' | 'settings' | 'alerts' | 'data' | 'optionsChain' | 'agent' | 'backtest' | 'leapsCsp' | 'collaredLeaps' | 'testApi';
 
+type NavEntry = {
+  id: number;
+  view: View;
+  analysisTicker?: string | null;
+  validateTicker?: string | null;
+  optionsChainTicker?: string | null;
+  optionsChainExpiry?: string | null;
+};
+
 export function App() {
-  const [view, setView] = useState<View>('watchlists');
+  const [navStack, setNavStack] = useState<NavEntry[]>([{ id: 0, view: 'watchlists' }]);
+  const navIdRef = useRef(1);
   const [watchlists, setWatchlists] = useState<Watchlist[]>([]);
   const [activeId, setActiveId] = useState<number | null>(null);
   const [items, setItems] = useState<WatchlistItem[]>([]);
@@ -40,14 +50,6 @@ export function App() {
   const [quoteMap, setQuoteMap] = useState<Record<string, CachedQuote | null>>({});
   const [lastRefresh, setLastRefresh] = useState<string>('');
   const [isRefreshingCache, setIsRefreshingCache] = useState(false);
-
-  // Ticker passed from screener "Run Analysis" button
-  const [analysisTicker, setAnalysisTicker] = useState<string | null>(null);
-
-  // Ticker passed from analysis "Validate" link
-  const [validateTicker, setValidateTicker] = useState<string | null>(null);
-  const [optionsChainTicker, setOptionsChainTicker] = useState<string | null>(null);
-  const [optionsChainExpiry, setOptionsChainExpiry] = useState<string | null>(null);
 
   // Prompt dialog state
   const [promptDialogOpen, setPromptDialogOpen] = useState(false);
@@ -65,6 +67,19 @@ export function App() {
   const [syncUniverseSelection, setSyncUniverseSelection] = useState<Universe>('sp500');
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncProgress, setSyncProgress] = useState<{ scanned: number; total: number; ticker?: string } | null>(null);
+
+  // Derived navigation state
+  const currentEntry = navStack[navStack.length - 1]!;
+  const currentView = currentEntry.view;
+  const canGoBack = navStack.length > 1;
+
+  const navigateSidebar = useCallback((v: View) => {
+    setNavStack([{ id: navIdRef.current++, view: v }]);
+  }, []);
+
+  const navigateBack = useCallback(() => {
+    setNavStack(prev => prev.length > 1 ? prev.slice(0, -1) : prev);
+  }, []);
 
   // On mount: if E*Trade is the options provider, verify the token is still valid.
   // If not, redirect to Settings so the user can reconnect before anything breaks.
@@ -88,7 +103,7 @@ export function App() {
         }
 
         setEtradeWarning(warning);
-        setView('settings');
+        setNavStack([{ id: navIdRef.current++, view: 'settings' }]);
       } catch {
         // If the check itself fails, let the app start normally — don't block on this
       }
@@ -122,30 +137,26 @@ export function App() {
   useEffect(() => {
     // Listen for "Run Analysis" from screener
     const handleNavigateToAnalysis = (e: CustomEvent<{ ticker: string }>) => {
-      setAnalysisTicker(e.detail.ticker);
-      setView('analysis');
+      setNavStack(prev => [...prev, { id: navIdRef.current++, view: 'analysis', analysisTicker: e.detail.ticker }]);
     };
     window.addEventListener('navigate-to-analysis', handleNavigateToAnalysis as EventListener);
 
     // Listen for "Validate" from analysis
     const handleNavigateToValidate = (e: CustomEvent<{ ticker: string }>) => {
-      setValidateTicker(e.detail.ticker);
-      setView('validate');
+      setNavStack(prev => [...prev, { id: navIdRef.current++, view: 'validate', validateTicker: e.detail.ticker }]);
     };
     window.addEventListener('navigate-to-validate', handleNavigateToValidate as EventListener);
 
     // Listen for "Options Chain" from other views
     const handleNavigateToOptions = (e: CustomEvent<{ ticker: string; expiry?: string }>) => {
-      setOptionsChainTicker(e.detail.ticker);
-      setOptionsChainExpiry(e.detail.expiry ?? null);
-      setView('optionsChain');
+      setNavStack(prev => [...prev, { id: navIdRef.current++, view: 'optionsChain', optionsChainTicker: e.detail.ticker, optionsChainExpiry: e.detail.expiry ?? null }]);
     };
     window.addEventListener('navigate-to-options', handleNavigateToOptions as EventListener);
 
     // Listen for E*Trade auth errors from any view → redirect to Settings
     const handleEtradeAuthError = (e: CustomEvent<{ warning: string }>) => {
       setEtradeWarning(e.detail.warning);
-      setView('settings');
+      setNavStack([{ id: navIdRef.current++, view: 'settings' }]);
     };
     window.addEventListener('navigate-to-settings-etrade', handleEtradeAuthError as EventListener);
 
@@ -490,111 +501,304 @@ export function App() {
     return 'poor';
   };
 
+  // Renders the content for a single nav stack entry.
+  // Hidden entries remain mounted (display:none) so their state is preserved.
+  const renderEntry = (entry: NavEntry) => {
+    switch (entry.view) {
+      case 'screener': return <ScreenerView />;
+      case 'filters': return <FiltersView />;
+      case 'analysis': return <AnalysisView initialTicker={entry.analysisTicker ?? null} clearInitialTicker={() => {}} />;
+      case 'validate': return <ValidateView initialTicker={entry.validateTicker ?? null} clearInitialTicker={() => {}} />;
+      case 'portfolio': return <PortfolioView />;
+      case 'briefing': return <BriefingView />;
+      case 'alerts': return <AlertsView />;
+      case 'data': return (
+        <DataView
+          isSyncing={isSyncing}
+          syncProgress={syncProgress}
+          syncUniverseSelection={syncUniverseSelection}
+          onSyncUniverseChange={setSyncUniverseSelection}
+          onStartSync={handleStartSync}
+          onCancelSync={handleCancelSync}
+        />
+      );
+      case 'optionsChain': return (
+        <OptionsChainView
+          initialTicker={entry.optionsChainTicker ?? null}
+          initialExpiry={entry.optionsChainExpiry ?? null}
+          clearInitialTicker={() => {}}
+        />
+      );
+      case 'agent': return <AgentView />;
+      case 'backtest': return <BacktestView />;
+      case 'leapsCsp': return <LeapsCspView />;
+      case 'collaredLeaps': return <CollaredLeapsView />;
+      case 'testApi': return <TestApiView />;
+      case 'settings': return (
+        <SettingsView
+          etradeWarning={etradeWarning}
+          onEtradeWarningDismiss={() => setEtradeWarning(null)}
+        />
+      );
+      case 'watchlists': return !active ? (
+        <div className="empty">No watchlist selected.</div>
+      ) : (
+        <>
+          <div className="toolbar">
+            <h1>{active?.name}</h1>
+            <span className="meta">
+              {active?.itemCount} ticker{active?.itemCount === 1 ? '' : 's'}
+            </span>
+            <button onClick={onRename}>Rename</button>
+            <button onClick={onExport} disabled={(active?.itemCount ?? 0) === 0}>
+              Export CSV
+            </button>
+            <button onClick={onImportIntoActive}>Import CSV</button>
+            <button onClick={onDelete} disabled={active?.isDefault ?? false} className="danger">
+              Delete
+            </button>
+            <div style={{ flex: 1 }} />
+            <CacheStatusIndicator
+              status={cacheStatus}
+              isLoading={isRefreshingCache}
+              onRefresh={async () => {
+                try {
+                  setIsRefreshingCache(true);
+                  await window.api.cache.refresh();
+                  await refreshCacheStatus();
+                  if (activeId !== null && items.length > 0) await refreshQuotes(items.map(i => i.ticker));
+                } catch (err) {
+                  console.error('Failed to refresh cache:', err);
+                } finally {
+                  setIsRefreshingCache(false);
+                }
+              }}
+            />
+            <button
+              onClick={() => activeId !== null && items.length > 0 && refreshQuotes(items.map(i => i.ticker))}
+              className="refresh-btn"
+              title="Refresh quotes"
+            >
+              ↻ Refresh quotes
+            </button>
+          </div>
+          <div className="add-row">
+            <input
+              type="text"
+              placeholder="Add ticker (e.g. AAPL)"
+              value={tickerInput}
+              onChange={(e) => setTickerInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && onAddTicker()}
+              style={{ width: 220 }}
+            />
+            <button onClick={onAddTicker} disabled={!tickerInput.trim()}>
+              Add
+            </button>
+            <span style={{ flex: 1 }} />
+            <button
+              onClick={onRemoveSelected}
+              disabled={selected.size === 0}
+              className="danger"
+            >
+              Remove {selected.size > 0 ? `(${selected.size})` : 'selected'}
+            </button>
+          </div>
+          <div className="items">
+            {items.length === 0 ? (
+              <div className="empty">Empty watchlist. Add a ticker above or import a CSV.</div>
+            ) : (
+              <table className="items-table">
+                <thead>
+                  <tr>
+                    <th style={{ width: 24 }}></th>
+                    <th className="sortable-header" onClick={() => requestSort('ticker')}>Ticker {getSortIndicator('ticker')}</th>
+                    <th className="sortable-header" onClick={() => requestSort('lastPrice')}>Last {getSortIndicator('lastPrice')}</th>
+                    <th className="sortable-header" onClick={() => requestSort('dayChangePct')}>Day % {getSortIndicator('dayChangePct')}</th>
+                    <th className="sortable-header" onClick={() => requestSort('volume')}>Volume {getSortIndicator('volume')}</th>
+                    <th className="sortable-header" onClick={() => requestSort('wheelSuitability')} title="Wheel Suitability Score">Wheel {getSortIndicator('wheelSuitability')}</th>
+                    <th className="sortable-header" onClick={() => requestSort('targetStrike')} title="Target Put Strike">Strike {getSortIndicator('targetStrike')}</th>
+                    <th className="sortable-header" onClick={() => requestSort('estimatedPremium')} title="Estimated Monthly Premium">Premium {getSortIndicator('estimatedPremium')}</th>
+                    <th>Sector</th>
+                    <th className="sortable-header num" title="ATM Implied Volatility">IV %</th>
+                    <th className="sortable-header" onClick={() => requestSort('notes')}>Notes {getSortIndicator('notes')}</th>
+                    <th className="sortable-header" onClick={() => requestSort('addedAt')}>Added {getSortIndicator('addedAt')}</th>
+                    <th style={{ width: 50 }}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedData.map((it) => (
+                    <tr key={it.id} className={selected.has(it.id) ? 'selected' : ''}>
+                      <td>
+                        <input
+                          type="checkbox"
+                          checked={selected.has(it.id)}
+                          onChange={() => toggleSelected(it.id)}
+                        />
+                      </td>
+                      <td><strong>{it.ticker}</strong></td>
+                      <td className="num">{fmtPrice(it.ticker)}</td>
+                      <td className={`num ${dayPctClass(it.ticker)}`}>
+                        {fmtDayPct(it.ticker)}
+                      </td>
+                      <td className="num">
+                        {it.volume != null
+                          ? (it.volume / 1_000_000).toFixed(1) + 'M'
+                          : '—'}
+                      </td>
+                      <td className={`num wheel-score ${wheelScoreClass(it.ticker)}`}>
+                        {fmtWheelScore(it.ticker)}
+                      </td>
+                      <td className="num">{fmtTargetStrike(it.ticker)}</td>
+                      <td className="num">{fmtEstPremium(it.ticker)}</td>
+                      <td>{it.sector ?? ''}</td>
+                      <td className="num">
+                        {(() => {
+                          const iv = quoteMap[it.ticker]?.currentIv ?? it.currentIv;
+                          return iv !== null && iv !== undefined ? (
+                            <span
+                              style={{
+                                color: iv >= 30 ? '#2ecc71' : iv >= 20 ? '#f39c12' : '#95a5a6'
+                              }}
+                              title={iv >= 30 ? 'Good premium' : iv >= 20 ? 'Moderate premium' : 'Low premium'}
+                            >
+                              {iv.toFixed(1)}%
+                            </span>
+                          ) : '—';
+                        })()}
+                      </td>
+                      <td>{it.notes ?? ''}</td>
+                      <td>{it.addedAt.slice(0, 10)}</td>
+                      <td>
+                        <button
+                          className="action-btn"
+                          title="Validate this ticker"
+                          onClick={() => runValidateForTicker(it.ticker)}
+                        >
+                          🎯
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </>
+      );
+      default: return null;
+    }
+  };
+
   return (
     <div className="app">
       <aside className="sidebar">
         <div className="nav-section">
+          {canGoBack && (
+            <button className="nav-btn back-nav-btn" onClick={navigateBack}>
+              ← Back
+            </button>
+          )}
           <button
-            className={`nav-btn ${view === 'briefing' ? 'active' : ''}`}
-            onClick={() => setView('briefing')}
+            className={`nav-btn ${currentView === 'briefing' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('briefing')}
           >
             📰 Briefing
           </button>
           <button
-            className={`nav-btn ${view === 'screener' ? 'active' : ''}`}
-            onClick={() => setView('screener')}
+            className={`nav-btn ${currentView === 'screener' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('screener')}
           >
             🔍 Screener
           </button>
           <button
-            className={`nav-btn ${view === 'filters' ? 'active' : ''}`}
-            onClick={() => setView('filters')}
+            className={`nav-btn ${currentView === 'filters' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('filters')}
           >
             🎛️ Filters
           </button>
           <button
-            className={`nav-btn ${view === 'analysis' ? 'active' : ''}`}
-            onClick={() => setView('analysis')}
+            className={`nav-btn ${currentView === 'analysis' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('analysis')}
           >
             📊 Analysis
           </button>
           <button
-            className={`nav-btn ${view === 'validate' ? 'active' : ''}`}
-            onClick={() => setView('validate')}
+            className={`nav-btn ${currentView === 'validate' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('validate')}
           >
             🎯 Validate
           </button>
           <button
-            className={`nav-btn ${view === 'optionsChain' ? 'active' : ''}`}
-            onClick={() => setView('optionsChain')}
+            className={`nav-btn ${currentView === 'optionsChain' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('optionsChain')}
           >
             📉 Options
           </button>
           <button
-            className={`nav-btn ${view === 'leapsCsp' ? 'active' : ''}`}
-            onClick={() => setView('leapsCsp')}
+            className={`nav-btn ${currentView === 'leapsCsp' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('leapsCsp')}
           >
             ⚡ LEAPS+CSP
           </button>
           <button
-            className={`nav-btn ${view === 'collaredLeaps' ? 'active' : ''}`}
-            onClick={() => setView('collaredLeaps')}
+            className={`nav-btn ${currentView === 'collaredLeaps' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('collaredLeaps')}
           >
             🛡️ Collared LEAPS
           </button>
           <button
-            className={`nav-btn ${view === 'testApi' ? 'active' : ''}`}
-            onClick={() => setView('testApi')}
+            className={`nav-btn ${currentView === 'testApi' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('testApi')}
           >
             🔬 Test API
           </button>
           <div className="nav-divider" />
           <button
-            className={`nav-btn ${view === 'data' ? 'active' : ''}`}
-            onClick={() => setView('data')}
+            className={`nav-btn ${currentView === 'data' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('data')}
           >
             🗄️ Data Sync
           </button>
           <button
-            className={`nav-btn ${view === 'alerts' ? 'active' : ''}`}
-            onClick={() => setView('alerts')}
+            className={`nav-btn ${currentView === 'alerts' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('alerts')}
           >
             🔔 Alerts
           </button>
           <button
-            className={`nav-btn ${view === 'settings' ? 'active' : ''}`}
-            onClick={() => setView('settings')}
+            className={`nav-btn ${currentView === 'settings' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('settings')}
           >
             ⚙ Settings
           </button>
           <div className="nav-divider" />
           <button
-            className={`nav-btn ${view === 'portfolio' ? 'active' : ''}`}
-            onClick={() => setView('portfolio')}
+            className={`nav-btn ${currentView === 'portfolio' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('portfolio')}
           >
             💼 Portfolio
           </button>
           <button
-            className={`nav-btn ${view === 'agent' ? 'active' : ''}`}
-            onClick={() => setView('agent')}
+            className={`nav-btn ${currentView === 'agent' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('agent')}
           >
             🤖 Agent
           </button>
           <button
-            className={`nav-btn ${view === 'backtest' ? 'active' : ''}`}
-            onClick={() => setView('backtest')}
+            className={`nav-btn ${currentView === 'backtest' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('backtest')}
           >
             🔁 Backtest
           </button>
           <button
-            className={`nav-btn ${view === 'watchlists' ? 'active' : ''}`}
-            onClick={() => setView('watchlists')}
+            className={`nav-btn ${currentView === 'watchlists' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('watchlists')}
           >
             📋 Watchlists
           </button>
         </div>
 
-        {view === 'watchlists' && (
+        {currentView === 'watchlists' && (
           <>
             <ul className="watchlist-list">
               {watchlists.map((w) => (
@@ -628,176 +832,17 @@ export function App() {
           </div>
         )}
 
-        {view === 'screener' && <ScreenerView />}
-        {view === 'filters' && <FiltersView />}
-        {view === 'analysis' && <AnalysisView initialTicker={analysisTicker} clearInitialTicker={() => setAnalysisTicker(null)} />}
-        {view === 'validate' && <ValidateView initialTicker={validateTicker} clearInitialTicker={() => setValidateTicker(null)} />}
-        {view === 'portfolio' && <PortfolioView />}
-        {view === 'briefing' && <BriefingView />}
-        {view === 'alerts' && <AlertsView />}
-        {view === 'data' && (
-          <DataView
-            isSyncing={isSyncing}
-            syncProgress={syncProgress}
-            syncUniverseSelection={syncUniverseSelection}
-            onSyncUniverseChange={setSyncUniverseSelection}
-            onStartSync={handleStartSync}
-            onCancelSync={handleCancelSync}
-          />
-        )}
-        {view === 'optionsChain' && <OptionsChainView initialTicker={optionsChainTicker} initialExpiry={optionsChainExpiry} clearInitialTicker={() => { setOptionsChainTicker(null); setOptionsChainExpiry(null); }} />}
-        {view === 'agent' && <AgentView />}
-        {view === 'backtest' && <BacktestView />}
-        {view === 'leapsCsp' && <LeapsCspView />}
-        {view === 'collaredLeaps' && <CollaredLeapsView />}
-        {view === 'testApi' && <TestApiView />}
-        {view === 'settings' && <SettingsView etradeWarning={etradeWarning} onEtradeWarningDismiss={() => setEtradeWarning(null)} />}
-
-        {view === 'watchlists' && !active ? (
-          <div className="empty">No watchlist selected.</div>
-        ) : view === 'watchlists' ? (
-          <>
-            <div className="toolbar">
-              <h1>{active?.name}</h1>
-              <span className="meta">
-                {active?.itemCount} ticker{active?.itemCount === 1 ? '' : 's'}
-              </span>
-              <button onClick={onRename}>Rename</button>
-              <button onClick={onExport} disabled={(active?.itemCount ?? 0) === 0}>
-                Export CSV
-              </button>
-              <button onClick={onImportIntoActive}>Import CSV</button>
-              <button onClick={onDelete} disabled={active?.isDefault ?? false} className="danger">
-                Delete
-              </button>
-              <div style={{ flex: 1 }} />
-              <CacheStatusIndicator
-                status={cacheStatus}
-                isLoading={isRefreshingCache}
-                onRefresh={async () => {
-                  try {
-                    setIsRefreshingCache(true);
-                    await window.api.cache.refresh();
-                    await refreshCacheStatus();
-                    if (activeId !== null && items.length > 0) await refreshQuotes(items.map(i => i.ticker));
-                  } catch (err) {
-                    console.error('Failed to refresh cache:', err);
-                  } finally {
-                    setIsRefreshingCache(false);
-                  }
-                }}
-              />
-              <button
-                onClick={() => activeId !== null && items.length > 0 && refreshQuotes(items.map(i => i.ticker))}
-                className="refresh-btn"
-                title="Refresh quotes"
-              >
-                ↻ Refresh quotes
-              </button>
+        {navStack.map((entry, idx) => {
+          const isActive = idx === navStack.length - 1;
+          // Active entry: display:contents makes the wrapper invisible to CSS layout,
+          // so children participate in section.main exactly as before.
+          // Hidden entries: display:none hides them from layout while keeping them mounted.
+          return (
+            <div key={entry.id} style={{ display: isActive ? 'contents' : 'none' }}>
+              {renderEntry(entry)}
             </div>
-            <div className="add-row">
-              <input
-                type="text"
-                placeholder="Add ticker (e.g. AAPL)"
-                value={tickerInput}
-                onChange={(e) => setTickerInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && onAddTicker()}
-                style={{ width: 220 }}
-              />
-              <button onClick={onAddTicker} disabled={!tickerInput.trim()}>
-                Add
-              </button>
-              <span style={{ flex: 1 }} />
-              <button
-                onClick={onRemoveSelected}
-                disabled={selected.size === 0}
-                className="danger"
-              >
-                Remove {selected.size > 0 ? `(${selected.size})` : 'selected'}
-              </button>
-            </div>
-            <div className="items">
-              {items.length === 0 ? (
-                <div className="empty">Empty watchlist. Add a ticker above or import a CSV.</div>
-              ) : (
-                <table className="items-table">
-                  <thead>
-                    <tr>
-                      <th style={{ width: 24 }}></th>
-                      <th className="sortable-header" onClick={() => requestSort('ticker')}>Ticker {getSortIndicator('ticker')}</th>
-                      <th className="sortable-header" onClick={() => requestSort('lastPrice')}>Last {getSortIndicator('lastPrice')}</th>
-                      <th className="sortable-header" onClick={() => requestSort('dayChangePct')}>Day % {getSortIndicator('dayChangePct')}</th>
-                      <th className="sortable-header" onClick={() => requestSort('volume')}>Volume {getSortIndicator('volume')}</th>
-                      <th className="sortable-header" onClick={() => requestSort('wheelSuitability')} title="Wheel Suitability Score">Wheel {getSortIndicator('wheelSuitability')}</th>
-                      <th className="sortable-header" onClick={() => requestSort('targetStrike')} title="Target Put Strike">Strike {getSortIndicator('targetStrike')}</th>
-                      <th className="sortable-header" onClick={() => requestSort('estimatedPremium')} title="Estimated Monthly Premium">Premium {getSortIndicator('estimatedPremium')}</th>
-                      <th>Sector</th>
-                      <th className="sortable-header num" title="ATM Implied Volatility">IV %</th>
-                      <th className="sortable-header" onClick={() => requestSort('notes')}>Notes {getSortIndicator('notes')}</th>
-                      <th className="sortable-header" onClick={() => requestSort('addedAt')}>Added {getSortIndicator('addedAt')}</th>
-                      <th style={{ width: 50 }}></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sortedData.map((it) => (
-                      <tr key={it.id} className={selected.has(it.id) ? 'selected' : ''}>
-                        <td>
-                          <input
-                            type="checkbox"
-                            checked={selected.has(it.id)}
-                            onChange={() => toggleSelected(it.id)}
-                          />
-                        </td>
-                        <td><strong>{it.ticker}</strong></td>
-                        <td className="num">{fmtPrice(it.ticker)}</td>
-                        <td className={`num ${dayPctClass(it.ticker)}`}>
-                          {fmtDayPct(it.ticker)}
-                        </td>
-                        <td className="num">
-                          {it.volume != null
-                            ? (it.volume / 1_000_000).toFixed(1) + 'M'
-                            : '—'}
-                        </td>
-                        <td className={`num wheel-score ${wheelScoreClass(it.ticker)}`}>
-                          {fmtWheelScore(it.ticker)}
-                        </td>
-                        <td className="num">{fmtTargetStrike(it.ticker)}</td>
-                        <td className="num">{fmtEstPremium(it.ticker)}</td>
-                        <td>{it.sector ?? ''}</td>
-                        <td className="num">
-                          {(() => {
-                            const iv = quoteMap[it.ticker]?.currentIv ?? it.currentIv;
-                            return iv !== null && iv !== undefined ? (
-                              <span
-                                style={{
-                                  color: iv >= 30 ? '#2ecc71' : iv >= 20 ? '#f39c12' : '#95a5a6'
-                                }}
-                                title={iv >= 30 ? 'Good premium' : iv >= 20 ? 'Moderate premium' : 'Low premium'}
-                              >
-                                {iv.toFixed(1)}%
-                              </span>
-                            ) : '—';
-                          })()}
-                        </td>
-                        <td>{it.notes ?? ''}</td>
-                        <td>{it.addedAt.slice(0, 10)}</td>
-                        <td>
-                          <button
-                            className="action-btn"
-                            title="Validate this ticker"
-                            onClick={() => runValidateForTicker(it.ticker)}
-                          >
-                            🎯
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </>
-        ) : null}
+          );
+        })}
       </section>
 
       <footer className="statusbar">
