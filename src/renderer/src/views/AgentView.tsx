@@ -165,8 +165,31 @@ export function AgentView() {
       setError('Set the agent project path in Settings → Agent first.');
       return;
     }
+    // Auto-sync active strategy to .env before spawning so the CLI always
+    // runs with the current strategy settings, not a potentially stale file.
+    const activeStrat = strategies.find(s => s.id === activeStrategyId);
+    if (configDraft && activeStrat) {
+      const merged: AgentConfig = {
+        ...configDraft,
+        screenerUniverse: activeStrat.screenerUniverse,
+        preferredModes: activeStrat.preferredModes,
+        dteMin: activeStrat.dteMin,
+        dteMax: activeStrat.dteMax,
+        deltaMin: activeStrat.deltaMin,
+        deltaMax: activeStrat.deltaMax,
+        minIv: activeStrat.minIv,
+        minOi: activeStrat.minOi,
+        maxBidAskPct: activeStrat.maxBidAskPct,
+        minAnnualizedReturn: activeStrat.minAnnualizedReturn,
+        earningsExclusionDays: activeStrat.earningsExclusionDays,
+      };
+      try {
+        await window.api.agent.writeConfig(agentProjectPath, merged);
+      } catch { /* non-fatal — proceed with existing .env */ }
+    }
     setRunning(true);
-    setLogs((prev) => [...prev, `▶ Starting phase: ${runPhase}`]);
+    const stratLabel = activeStrat ? ` [strategy: ${activeStrat.name}]` : '';
+    setLogs((prev) => [...prev, `▶ Starting phase: ${runPhase}${stratLabel}`]);
     try {
       await window.api.agent.runPhase(runPhase, agentProjectPath);
     } catch (e) {
@@ -727,7 +750,15 @@ export function AgentView() {
         {/* Run */}
         {tab === 'run' && (
           <div>
-            <h4 style={{ marginBottom: 12 }}>Run Agent Phase</h4>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 12 }}>
+              <h4 style={{ margin: 0 }}>Run Agent Phase</h4>
+              {(() => {
+                const activeStrat = strategies.find(s => s.id === activeStrategyId);
+                return activeStrat
+                  ? <span style={{ fontSize: 12, color: '#3498db' }}>★ {activeStrat.name} — {activeStrat.screeningMode} mode · {activeStrat.screenerUniverse}</span>
+                  : <span style={{ fontSize: 12, color: '#95a5a6' }}>No active strategy</span>;
+              })()}
+            </div>
             <div style={{ display: 'flex', gap: 10, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}>
               <select
                 value={runPhase}
