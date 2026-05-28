@@ -34,6 +34,8 @@ import type {
   AgentRecommendation,
   AgentMemorySnapshot,
   AgentConfig,
+  AgentStrategy,
+  AgentStrategiesState,
   BacktestConfig,
   BacktestRun,
   BacktestTrade,
@@ -752,6 +754,10 @@ function buildApi() {
     sendPositionsEmail: (projectPath: string) =>
       invoke<{ sent: number }>('agent:send-positions-email', projectPath),
     deleteTrade: (id: number) => invoke<true>('agent:delete-trade', id),
+    listStrategies: () => invoke<AgentStrategiesState>('agent:list-strategies'),
+    saveStrategy: (strategy: AgentStrategy) => invoke<AgentStrategy>('agent:save-strategy', strategy),
+    deleteStrategy: (id: string) => invoke<boolean>('agent:delete-strategy', id),
+    setActiveStrategy: (id: string) => invoke<boolean>('agent:set-active-strategy', id),
     onLog: (callback: (data: { pid: number; phase: string; line: string }) => void) => {
       const handler = (_: unknown, data: { pid: number; phase: string; line: string }) => callback(data);
       ipcRenderer.on('agent:log', handler);

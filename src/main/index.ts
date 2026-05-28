@@ -289,7 +289,7 @@ app.whenReady().then(() => {
   // Open the agent DB if a path is already saved in settings
   const agentDbPathRow = db.prepare("SELECT value FROM settings WHERE key = 'agentDbPath'").get() as { value?: string } | undefined;
   if (agentDbPathRow?.value) agentDb.open(agentDbPathRow.value);
-  registerAgentIpc(agentDb);
+  registerAgentIpc(agentDb, db);
 
   // Local HTTP API server for the external trading agent.
   const apiPort = (() => {

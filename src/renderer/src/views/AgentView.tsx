@@ -1,5 +1,5 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
-import type { AgentStatus, AgentTrade, AgentLesson, AgentRecommendation, AgentMemorySnapshot, AgentConfig, Watchlist } from '@shared/types.js';
+import type { AgentStatus, AgentTrade, AgentLesson, AgentRecommendation, AgentMemorySnapshot, AgentConfig, AgentStrategy, AgentStrategiesState, OptionStrategyType, Watchlist } from '@shared/types.js';
 
 type Tab = 'overview' | 'trades' | 'lessons' | 'recommendations' | 'memory' | 'run' | 'config';
 
@@ -39,6 +39,12 @@ export function AgentView() {
   const [configSaving, setConfigSaving] = useState(false);
   const [configMsg, setConfigMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
 
+  // Strategy state
+  const [strategies, setStrategies] = useState<AgentStrategy[]>([]);
+  const [activeStrategyId, setActiveStrategyId] = useState<string | null>(null);
+  const [editingStrategy, setEditingStrategy] = useState<AgentStrategy | null>(null);
+  const [strategyMsg, setStrategyMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+
   // Email state
   const [emailSending, setEmailSending] = useState(false);
   const [emailMsg, setEmailMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
@@ -60,6 +66,7 @@ export function AgentView() {
         if (s.agentProjectPath) loadConfig(s.agentProjectPath);
       }
     }).catch(() => {});
+    loadStrategies();
   }, []);
 
   // Subscribe to log stream
@@ -103,6 +110,16 @@ export function AgentView() {
     } catch { /* ignore */ }
   }, []);
 
+  const loadStrategies = useCallback(async () => {
+    try {
+      const state: AgentStrategiesState = await window.api.agent.listStrategies();
+      setStrategies(state.strategies);
+      setActiveStrategyId(state.activeId);
+      const active = state.strategies.find(s => s.id === state.activeId) ?? state.strategies[0] ?? null;
+      setEditingStrategy(active ? { ...active } : null);
+    } catch { /* ignore */ }
+  }, []);
+
   const loadAllData = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -137,6 +154,7 @@ export function AgentView() {
       setDbConnected(true);
       await loadAllData();
       await loadConfig(agentProjectPath);
+      await loadStrategies();
     } catch (e) {
       setError((e as Error).message);
     }
@@ -616,8 +634,12 @@ export function AgentView() {
               setConfigSaving(true);
               setConfigMsg(null);
               try {
-                await window.api.agent.writeConfig(agentProjectPath, configDraft);
-                setConfig(configDraft);
+                // Merge active strategy fields into the global config before writing .env
+                const merged: AgentConfig = editingStrategy
+                  ? { ...configDraft, screenerUniverse: editingStrategy.screenerUniverse, preferredModes: editingStrategy.preferredModes, dteMin: editingStrategy.dteMin, dteMax: editingStrategy.dteMax, deltaMin: editingStrategy.deltaMin, deltaMax: editingStrategy.deltaMax, minIv: editingStrategy.minIv, minOi: editingStrategy.minOi, maxBidAskPct: editingStrategy.maxBidAskPct, minAnnualizedReturn: editingStrategy.minAnnualizedReturn, earningsExclusionDays: editingStrategy.earningsExclusionDays }
+                  : configDraft;
+                await window.api.agent.writeConfig(agentProjectPath, merged);
+                setConfig(merged);
                 setConfigMsg({ type: 'ok', text: 'Saved — restart the agent for changes to take effect.' });
               } catch (e) {
                 setConfigMsg({ type: 'err', text: (e as Error).message });
@@ -626,6 +648,79 @@ export function AgentView() {
               }
             }}
             onReset={() => { setConfigDraft(config); setConfigMsg(null); }}
+            strategies={strategies}
+            activeStrategyId={activeStrategyId}
+            editingStrategy={editingStrategy}
+            strategyMsg={strategyMsg}
+            onStrategyChange={(patch) => setEditingStrategy((prev) => prev ? { ...prev, ...patch } : prev)}
+            onSelectStrategy={(id) => {
+              const s = strategies.find(x => x.id === id);
+              if (s) setEditingStrategy({ ...s });
+              setStrategyMsg(null);
+            }}
+            onSaveStrategy={async () => {
+              if (!editingStrategy) return;
+              setStrategyMsg(null);
+              try {
+                const saved = await window.api.agent.saveStrategy(editingStrategy);
+                setStrategies((prev) => {
+                  const idx = prev.findIndex(s => s.id === saved.id);
+                  return idx >= 0 ? prev.map((s, i) => i === idx ? saved : s) : [...prev, saved];
+                });
+                setEditingStrategy({ ...saved });
+                setStrategyMsg({ type: 'ok', text: 'Strategy saved.' });
+              } catch (e) {
+                setStrategyMsg({ type: 'err', text: (e as Error).message });
+              }
+            }}
+            onNewStrategy={() => {
+              const s: AgentStrategy = {
+                id: crypto.randomUUID(),
+                name: 'New Strategy',
+                screeningMode: 'both',
+                screeningCriteria: { optionStrategies: ['wheel'], minCompositeScore: 60, minBuyStrength: 65 },
+                screenerUniverse: 'sp500',
+                preferredModes: 'wheel,options_income',
+                dteMin: 25, dteMax: 50, deltaMin: 0.20, deltaMax: 0.35,
+                minIv: 20, minOi: 500, maxBidAskPct: 0.05, minAnnualizedReturn: 0.15, earningsExclusionDays: 14,
+              };
+              setEditingStrategy(s);
+              setStrategyMsg(null);
+            }}
+            onCloneStrategy={() => {
+              if (!editingStrategy) return;
+              const clone: AgentStrategy = { ...editingStrategy, id: crypto.randomUUID(), name: `${editingStrategy.name} (copy)` };
+              setEditingStrategy(clone);
+              setStrategyMsg(null);
+            }}
+            onDeleteStrategy={async () => {
+              if (!editingStrategy) return;
+              const confirmed = await window.dialog.confirm({ title: 'Delete strategy', message: `Delete "${editingStrategy.name}"?` });
+              if (!confirmed) return;
+              try {
+                await window.api.agent.deleteStrategy(editingStrategy.id);
+                await loadStrategies();
+                setStrategyMsg({ type: 'ok', text: 'Strategy deleted.' });
+              } catch (e) {
+                setStrategyMsg({ type: 'err', text: (e as Error).message });
+              }
+            }}
+            onActivateStrategy={async () => {
+              if (!editingStrategy) return;
+              try {
+                // Save first, then activate
+                const saved = await window.api.agent.saveStrategy(editingStrategy);
+                await window.api.agent.setActiveStrategy(saved.id);
+                setActiveStrategyId(saved.id);
+                setStrategies((prev) => {
+                  const idx = prev.findIndex(s => s.id === saved.id);
+                  return idx >= 0 ? prev.map((s, i) => i === idx ? saved : s) : [...prev, saved];
+                });
+                setStrategyMsg({ type: 'ok', text: `"${saved.name}" is now the active strategy.` });
+              } catch (e) {
+                setStrategyMsg({ type: 'err', text: (e as Error).message });
+              }
+            }}
           />
         )}
 
@@ -765,6 +860,16 @@ function WeightBar({ label, data, pct }: { label: string; data: Record<string, n
 
 // ── Config tab ─────────────────────────────────────────────────────────────────
 
+const OPTION_STRATEGY_LABELS: Record<OptionStrategyType, string> = {
+  wheel: 'Wheel (CSP → CC)',
+  leaps_csp: 'LEAPS + CSP',
+  covered_call: 'Covered Call',
+  bull_call_spread: 'Bull Call Spread',
+  bear_put_spread: 'Bear Put Spread',
+  iron_condor: 'Iron Condor',
+};
+const ALL_OPTION_STRATEGIES: OptionStrategyType[] = ['wheel', 'leaps_csp', 'covered_call', 'bull_call_spread', 'bear_put_spread', 'iron_condor'];
+
 interface ConfigTabProps {
   config: AgentConfig | null;
   saving: boolean;
@@ -772,153 +877,299 @@ interface ConfigTabProps {
   onChange: (patch: Partial<AgentConfig>) => void;
   onSave: () => void;
   onReset: () => void;
+  // Strategy props
+  strategies: AgentStrategy[];
+  activeStrategyId: string | null;
+  editingStrategy: AgentStrategy | null;
+  strategyMsg: { type: 'ok' | 'err'; text: string } | null;
+  onStrategyChange: (patch: Partial<AgentStrategy>) => void;
+  onSelectStrategy: (id: string) => void;
+  onSaveStrategy: () => void;
+  onNewStrategy: () => void;
+  onCloneStrategy: () => void;
+  onDeleteStrategy: () => void;
+  onActivateStrategy: () => void;
 }
 
-function ConfigTab({ config, saving, msg, onChange, onSave, onReset }: ConfigTabProps) {
-  if (!config) return <div style={{ color: '#95a5a6', fontSize: 13 }}>No config found — set the agent project path first.</div>;
+function ConfigTab({
+  config, saving, msg, onChange, onSave, onReset,
+  strategies, activeStrategyId, editingStrategy, strategyMsg,
+  onStrategyChange, onSelectStrategy, onSaveStrategy,
+  onNewStrategy, onCloneStrategy, onDeleteStrategy, onActivateStrategy,
+}: ConfigTabProps) {
 
-  const numField = (label: string, key: keyof AgentConfig, step = 1, hint?: string) => (
-    <ConfigField label={label} hint={hint}>
-      <input
-        type="number"
-        step={step}
-        value={config[key] as number}
-        onChange={(e) => onChange({ [key]: parseFloat(e.target.value) } as Partial<AgentConfig>)}
-        style={{ width: 120, fontSize: 13 }}
-      />
-    </ConfigField>
-  );
+  // ── Strategy field helpers ──
+  const sNum = (label: string, key: keyof AgentStrategy, step = 1, hint?: string) => {
+    if (!editingStrategy) return null;
+    return (
+      <ConfigField label={label} hint={hint}>
+        <input
+          type="number"
+          step={step}
+          value={editingStrategy[key] as number}
+          onChange={(e) => onStrategyChange({ [key]: parseFloat(e.target.value) } as Partial<AgentStrategy>)}
+          style={{ width: 120, fontSize: 13 }}
+        />
+      </ConfigField>
+    );
+  };
 
-  const strField = (label: string, key: keyof AgentConfig, hint?: string) => (
-    <ConfigField label={label} hint={hint}>
-      <input
-        type="text"
-        value={config[key] as string}
-        onChange={(e) => onChange({ [key]: e.target.value } as Partial<AgentConfig>)}
-        style={{ width: 320, fontSize: 13, fontFamily: 'monospace' }}
-      />
-    </ConfigField>
-  );
+  // ── Global config field helpers ──
+  const numField = (label: string, key: keyof AgentConfig, step = 1, hint?: string) => {
+    if (!config) return null;
+    return (
+      <ConfigField label={label} hint={hint}>
+        <input
+          type="number"
+          step={step}
+          value={config[key] as number}
+          onChange={(e) => onChange({ [key]: parseFloat(e.target.value) } as Partial<AgentConfig>)}
+          style={{ width: 120, fontSize: 13 }}
+        />
+      </ConfigField>
+    );
+  };
+
+  const strField = (label: string, key: keyof AgentConfig, hint?: string) => {
+    if (!config) return null;
+    return (
+      <ConfigField label={label} hint={hint}>
+        <input
+          type="text"
+          value={config[key] as string}
+          onChange={(e) => onChange({ [key]: e.target.value } as Partial<AgentConfig>)}
+          style={{ width: 320, fontSize: 13, fontFamily: 'monospace' }}
+        />
+      </ConfigField>
+    );
+  };
+
+  const isActive = editingStrategy?.id === activeStrategyId;
+  const isNew = editingStrategy ? !strategies.find(s => s.id === editingStrategy.id) : false;
 
   return (
-    <div style={{ maxWidth: 720 }}>
-      <div style={{ display: 'flex', gap: 10, marginBottom: 20, alignItems: 'center' }}>
-        <h4 style={{ margin: 0 }}>Agent Configuration</h4>
-        <span style={{ fontSize: 12, color: '#95a5a6' }}>Writes to .env in the agent project folder</span>
-        <button onClick={onSave} disabled={saving} style={{ marginLeft: 'auto', background: '#27ae60', fontSize: 13 }}>
-          {saving ? 'Saving…' : 'Save'}
-        </button>
-        <button onClick={onReset} disabled={saving} style={{ fontSize: 13, background: '#2c2c2c' }}>
-          Reset
-        </button>
-      </div>
+    <div style={{ maxWidth: 760 }}>
 
-      {msg && (
-        <div style={{
-          marginBottom: 16, padding: '8px 12px', borderRadius: 4, fontSize: 12,
-          background: msg.type === 'ok' ? '#1a3a2a' : '#3a1a1a',
-          color: msg.type === 'ok' ? '#2ecc71' : '#e74c3c'
-        }}>{msg.text}</div>
+      {/* ── Strategy selector bar ── */}
+      <ConfigSection label="Strategies">
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
+          <select
+            value={editingStrategy?.id ?? ''}
+            onChange={(e) => onSelectStrategy(e.target.value)}
+            style={{ fontSize: 13, minWidth: 200 }}
+          >
+            {strategies.map(s => (
+              <option key={s.id} value={s.id}>
+                {s.name}{s.id === activeStrategyId ? ' ★' : ''}
+              </option>
+            ))}
+            {isNew && editingStrategy && <option value={editingStrategy.id}>{editingStrategy.name} (unsaved)</option>}
+          </select>
+          <button onClick={onNewStrategy} style={{ fontSize: 12, background: '#2c3e50' }}>+ New</button>
+          <button onClick={onCloneStrategy} disabled={!editingStrategy} style={{ fontSize: 12, background: '#2c3e50' }}>Clone</button>
+          <button onClick={onDeleteStrategy} disabled={!editingStrategy || strategies.length <= 1} style={{ fontSize: 12, background: '#3a1a1a', color: '#e74c3c' }}>Delete</button>
+          <span style={{ flex: 1 }} />
+          <button
+            onClick={onActivateStrategy}
+            disabled={!editingStrategy || isActive}
+            style={{ fontSize: 12, background: isActive ? '#1a3a1a' : '#1a4a2a', color: isActive ? '#2ecc71' : '#fff', border: isActive ? '1px solid #2ecc71' : 'none' }}
+          >
+            {isActive ? '★ Active' : '☆ Activate'}
+          </button>
+          <button onClick={onSaveStrategy} disabled={!editingStrategy} style={{ fontSize: 12, background: '#27ae60' }}>
+            Save Strategy
+          </button>
+        </div>
+
+        {strategyMsg && (
+          <div style={{ marginBottom: 12, padding: '6px 10px', borderRadius: 4, fontSize: 12, background: strategyMsg.type === 'ok' ? '#1a3a2a' : '#3a1a1a', color: strategyMsg.type === 'ok' ? '#2ecc71' : '#e74c3c' }}>
+            {strategyMsg.text}
+          </div>
+        )}
+
+        {editingStrategy && (
+          <>
+            <ConfigField label="Name">
+              <input
+                type="text"
+                value={editingStrategy.name}
+                onChange={(e) => onStrategyChange({ name: e.target.value })}
+                style={{ width: 240, fontSize: 13 }}
+              />
+            </ConfigField>
+            <ConfigField label="Description" hint="Optional note about this strategy's intent">
+              <input
+                type="text"
+                value={editingStrategy.description ?? ''}
+                onChange={(e) => onStrategyChange({ description: e.target.value })}
+                style={{ width: 380, fontSize: 13 }}
+              />
+            </ConfigField>
+          </>
+        )}
+      </ConfigSection>
+
+      {/* ── Screening pipeline ── */}
+      {editingStrategy && (
+        <ConfigSection label="Screening Pipeline">
+          <ConfigField label="Universe" hint="Strict screener filter applied first; then Validate/Analysis gates below">
+            <select
+              value={editingStrategy.screenerUniverse}
+              onChange={(e) => onStrategyChange({ screenerUniverse: e.target.value as AgentStrategy['screenerUniverse'] })}
+              style={{ fontSize: 13 }}
+            >
+              <option value="sp500">S&P 500</option>
+              <option value="russell1000">Russell 1000</option>
+              <option value="both">Both</option>
+            </select>
+          </ConfigField>
+
+          <ConfigField label="Screening Mode" hint="Which gate(s) candidates must pass after the screener filter">
+            <select
+              value={editingStrategy.screeningMode}
+              onChange={(e) => onStrategyChange({ screeningMode: e.target.value as AgentStrategy['screeningMode'] })}
+              style={{ fontSize: 13 }}
+            >
+              <option value="analysis">Analysis only — option structure must match</option>
+              <option value="validate">Validate only — stock buy-strength must pass</option>
+              <option value="both">Both — stock AND option structure must pass</option>
+            </select>
+          </ConfigField>
+
+          {(editingStrategy.screeningMode === 'analysis' || editingStrategy.screeningMode === 'both') && (
+            <ConfigField label="Option Strategies" hint="Agent will only enter trades using the selected structures">
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 16px', marginTop: 2 }}>
+                {ALL_OPTION_STRATEGIES.map(type => (
+                  <label key={type} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={editingStrategy.screeningCriteria.optionStrategies.includes(type)}
+                      onChange={(e) => {
+                        const current = editingStrategy.screeningCriteria.optionStrategies;
+                        const next = e.target.checked ? [...current, type] : current.filter(x => x !== type);
+                        onStrategyChange({ screeningCriteria: { ...editingStrategy.screeningCriteria, optionStrategies: next } });
+                      }}
+                    />
+                    {OPTION_STRATEGY_LABELS[type]}
+                  </label>
+                ))}
+              </div>
+            </ConfigField>
+          )}
+
+          {(editingStrategy.screeningMode === 'analysis' || editingStrategy.screeningMode === 'both') && (
+            <ConfigField label="Min Composite Score" hint="0–100; Analysis score a stock must reach to be considered">
+              <input
+                type="number"
+                step={5}
+                min={0}
+                max={100}
+                value={editingStrategy.screeningCriteria.minCompositeScore}
+                onChange={(e) => onStrategyChange({ screeningCriteria: { ...editingStrategy.screeningCriteria, minCompositeScore: parseInt(e.target.value, 10) } })}
+                style={{ width: 90, fontSize: 13 }}
+              />
+            </ConfigField>
+          )}
+
+          {(editingStrategy.screeningMode === 'validate' || editingStrategy.screeningMode === 'both') && (
+            <ConfigField label="Min Buy Strength" hint="0–100; Validate score a stock must reach to be considered">
+              <input
+                type="number"
+                step={5}
+                min={0}
+                max={100}
+                value={editingStrategy.screeningCriteria.minBuyStrength}
+                onChange={(e) => onStrategyChange({ screeningCriteria: { ...editingStrategy.screeningCriteria, minBuyStrength: parseInt(e.target.value, 10) } })}
+                style={{ width: 90, fontSize: 13 }}
+              />
+            </ConfigField>
+          )}
+        </ConfigSection>
       )}
 
-      <ConfigSection label="Capital & Risk">
-        {numField('Cash Balance ($)', 'cashBalance', 1000, 'Total available cash for the agent to deploy')}
-        {numField('Max Positions', 'maxPositions', 1, 'Maximum number of open trades at once')}
-        {numField('Max Position % of Cash', 'maxPositionPct', 0.01, 'e.g. 0.20 = 20% of cash per trade ($10k on $50k)')}
-        {numField('Max Positions per Sector', 'maxPositionsPerSector', 1, 'Prevents sector concentration')}
-        {numField('Kelly Fraction', 'kellyFraction', 0.05, 'Fraction of Kelly criterion to use (0.25 = quarter-Kelly)')}
-      </ConfigSection>
-
-      <ConfigSection label="Trade Filters">
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0 }}>
-          {numField('DTE Min', 'dteMin', 1, 'Minimum days to expiration')}
-          {numField('DTE Max', 'dteMax', 1, 'Maximum days to expiration')}
-          {numField('Delta Min', 'deltaMin', 0.01, 'Min put delta (e.g. 0.20 = 20-delta)')}
-          {numField('Delta Max', 'deltaMax', 0.01, 'Max put delta (e.g. 0.35 = 35-delta)')}
-        </div>
-        {numField('Min IV %', 'minIv', 1, 'Only trade when current IV ≥ this % (e.g. 20 = 20% IV minimum)')}
-        {numField('Min Annualized Return', 'minAnnualizedReturn', 0.01, 'e.g. 0.12 = 12% annualized — filter out low-yield trades')}
-        {numField('Earnings Exclusion Days', 'earningsExclusionDays', 1, 'Skip trades within N days of earnings')}
-        {numField('Min Open Interest', 'minOi', 100, 'Minimum OI on the contract for liquidity')}
-        {numField('Max Bid/Ask % Spread', 'maxBidAskPct', 0.005, 'e.g. 0.05 = 5% — filter illiquid contracts')}
-      </ConfigSection>
-
-      <ConfigSection label="Universe & Modes">
-        <ConfigField label="Screener Universe" hint="Which index to pull candidates from">
-          <select
-            value={config.screenerUniverse}
-            onChange={(e) => onChange({ screenerUniverse: e.target.value as AgentConfig['screenerUniverse'] })}
-            style={{ fontSize: 13 }}
-          >
-            <option value="sp500">S&P 500</option>
-            <option value="russell1000">Russell 1000</option>
-            <option value="both">Both</option>
-          </select>
-        </ConfigField>
-        {strField('Preferred Modes', 'preferredModes', 'Comma-separated: wheel, options_income, buy')}
-      </ConfigSection>
-
-      <ConfigSection label="Connection">
-        {strField('API URL', 'apiUrl', 'TradeAnalyzer API base URL')}
-        {strField('Agent DB Path', 'agentDbPath', 'Absolute path to the agent SQLite database')}
-      </ConfigSection>
-
-      <ConfigSection label="Email / Notifications">
-        <ConfigField label="Distribution List" hint="Comma-separated email addresses — all emails go to everyone here">
-          <input
-            type="text"
-            value={config.emailList}
-            onChange={(e) => onChange({ emailList: e.target.value })}
-            placeholder="alice@example.com, bob@example.com"
-            style={{ width: 400, fontSize: 13, fontFamily: 'monospace' }}
-          />
-        </ConfigField>
-        <ConfigField label="From Address" hint="Sender address shown in the email">
-          <input
-            type="text"
-            value={config.smtpFrom}
-            onChange={(e) => onChange({ smtpFrom: e.target.value })}
-            placeholder="traderagent@example.com"
-            style={{ width: 280, fontSize: 13, fontFamily: 'monospace' }}
-          />
-        </ConfigField>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0 }}>
-          <ConfigField label="SMTP Host" hint="e.g. smtp.gmail.com">
+      {/* ── Trade filters (per strategy) ── */}
+      {editingStrategy && (
+        <ConfigSection label="Trade Filters">
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0 }}>
+            {sNum('DTE Min', 'dteMin', 1, 'Minimum days to expiration')}
+            {sNum('DTE Max', 'dteMax', 1, 'Maximum days to expiration')}
+            {sNum('Delta Min', 'deltaMin', 0.01, 'Min put delta (e.g. 0.20 = 20-delta)')}
+            {sNum('Delta Max', 'deltaMax', 0.01, 'Max put delta (e.g. 0.35 = 35-delta)')}
+          </div>
+          {sNum('Min IV %', 'minIv', 1, 'Only enter when current IV ≥ this % (e.g. 20 = 20%)')}
+          {sNum('Min Annualized Return', 'minAnnualizedReturn', 0.01, 'e.g. 0.12 = 12% annualized minimum')}
+          {sNum('Earnings Exclusion Days', 'earningsExclusionDays', 1, 'Skip trades within N days of earnings')}
+          {sNum('Min Open Interest', 'minOi', 100, 'Minimum OI on the contract for liquidity')}
+          {sNum('Max Bid/Ask % Spread', 'maxBidAskPct', 0.005, 'e.g. 0.05 = 5% — filter illiquid contracts')}
+          <ConfigField label="Preferred Modes" hint="Comma-separated: wheel, options_income, buy">
             <input
               type="text"
-              value={config.smtpHost}
-              onChange={(e) => onChange({ smtpHost: e.target.value })}
-              placeholder="smtp.gmail.com"
-              style={{ width: 220, fontSize: 13, fontFamily: 'monospace' }}
+              value={editingStrategy.preferredModes}
+              onChange={(e) => onStrategyChange({ preferredModes: e.target.value })}
+              style={{ width: 280, fontSize: 13, fontFamily: 'monospace' }}
             />
           </ConfigField>
-          <ConfigField label="SMTP Port" hint="587 = TLS, 465 = SSL, 25 = plain">
-            <input
-              type="number"
-              step={1}
-              value={config.smtpPort}
-              onChange={(e) => onChange({ smtpPort: parseInt(e.target.value, 10) || 587 })}
-              style={{ width: 90, fontSize: 13 }}
-            />
-          </ConfigField>
-          <ConfigField label="SMTP Username" hint="Usually your full email address">
-            <input
-              type="text"
-              value={config.smtpUser}
-              onChange={(e) => onChange({ smtpUser: e.target.value })}
-              style={{ width: 220, fontSize: 13, fontFamily: 'monospace' }}
-            />
-          </ConfigField>
-          <ConfigField label="SMTP Password" hint="App password recommended (e.g. Gmail app password)">
-            <input
-              type="password"
-              value={config.smtpPass}
-              onChange={(e) => onChange({ smtpPass: e.target.value })}
-              style={{ width: 220, fontSize: 13, fontFamily: 'monospace' }}
-            />
-          </ConfigField>
+        </ConfigSection>
+      )}
+
+      {/* ── Global: export to .env ── */}
+      <div style={{ borderTop: '1px solid #2c2c2c', paddingTop: 16, marginTop: 8 }}>
+        <div style={{ display: 'flex', gap: 10, marginBottom: 12, alignItems: 'center' }}>
+          <h4 style={{ margin: 0, fontSize: 13 }}>Export to .env</h4>
+          <span style={{ fontSize: 11, color: '#95a5a6' }}>Writes active strategy + global settings to agent project .env</span>
+          <span style={{ flex: 1 }} />
+          <button onClick={onSave} disabled={saving || !config} style={{ background: '#2980b9', fontSize: 13 }}>
+            {saving ? 'Saving…' : 'Export .env'}
+          </button>
+          <button onClick={onReset} disabled={saving} style={{ fontSize: 13, background: '#2c2c2c' }}>Reset</button>
         </div>
-      </ConfigSection>
+
+        {msg && (
+          <div style={{ marginBottom: 12, padding: '6px 10px', borderRadius: 4, fontSize: 12, background: msg.type === 'ok' ? '#1a3a2a' : '#3a1a1a', color: msg.type === 'ok' ? '#2ecc71' : '#e74c3c' }}>
+            {msg.text}
+          </div>
+        )}
+      </div>
+
+      {config && (
+        <>
+          <ConfigSection label="Capital & Risk (global — not per strategy)">
+            {numField('Cash Balance ($)', 'cashBalance', 1000, 'Total available cash for the agent to deploy')}
+            {numField('Max Positions', 'maxPositions', 1, 'Maximum number of open trades at once')}
+            {numField('Max Position % of Cash', 'maxPositionPct', 0.01, 'e.g. 0.20 = 20% of cash per trade')}
+            {numField('Max Positions per Sector', 'maxPositionsPerSector', 1, 'Prevents sector concentration')}
+            {numField('Kelly Fraction', 'kellyFraction', 0.05, 'Fraction of Kelly criterion to use (0.25 = quarter-Kelly)')}
+          </ConfigSection>
+
+          <ConfigSection label="Connection">
+            {strField('API URL', 'apiUrl', 'TradeAnalyzer API base URL')}
+            {strField('Agent DB Path', 'agentDbPath', 'Absolute path to the agent SQLite database')}
+          </ConfigSection>
+
+          <ConfigSection label="Email / Notifications">
+            <ConfigField label="Distribution List" hint="Comma-separated email addresses">
+              <input type="text" value={config.emailList} onChange={(e) => onChange({ emailList: e.target.value })} placeholder="alice@example.com, bob@example.com" style={{ width: 400, fontSize: 13, fontFamily: 'monospace' }} />
+            </ConfigField>
+            <ConfigField label="From Address" hint="Sender address shown in the email">
+              <input type="text" value={config.smtpFrom} onChange={(e) => onChange({ smtpFrom: e.target.value })} placeholder="traderagent@example.com" style={{ width: 280, fontSize: 13, fontFamily: 'monospace' }} />
+            </ConfigField>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0 }}>
+              <ConfigField label="SMTP Host" hint="e.g. smtp.gmail.com">
+                <input type="text" value={config.smtpHost} onChange={(e) => onChange({ smtpHost: e.target.value })} placeholder="smtp.gmail.com" style={{ width: 220, fontSize: 13, fontFamily: 'monospace' }} />
+              </ConfigField>
+              <ConfigField label="SMTP Port" hint="587 = TLS, 465 = SSL">
+                <input type="number" step={1} value={config.smtpPort} onChange={(e) => onChange({ smtpPort: parseInt(e.target.value, 10) || 587 })} style={{ width: 90, fontSize: 13 }} />
+              </ConfigField>
+              <ConfigField label="SMTP Username">
+                <input type="text" value={config.smtpUser} onChange={(e) => onChange({ smtpUser: e.target.value })} style={{ width: 220, fontSize: 13, fontFamily: 'monospace' }} />
+              </ConfigField>
+              <ConfigField label="SMTP Password" hint="App password recommended">
+                <input type="password" value={config.smtpPass} onChange={(e) => onChange({ smtpPass: e.target.value })} style={{ width: 220, fontSize: 13, fontFamily: 'monospace' }} />
+              </ConfigField>
+            </div>
+          </ConfigSection>
+        </>
+      )}
     </div>
   );
 }

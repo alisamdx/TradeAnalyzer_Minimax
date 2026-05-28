@@ -5,10 +5,13 @@ import { ipcMain, BrowserWindow } from 'electron';
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import nodemailer from 'nodemailer';
+import type Database from 'better-sqlite3';
 import type { AgentDbService } from '../services/agent-db-service.js';
 import type {
-  AgentStatus, AgentTrade, AgentLesson, AgentRecommendation, AgentMemorySnapshot, AgentConfig
+  AgentStatus, AgentTrade, AgentLesson, AgentRecommendation, AgentMemorySnapshot,
+  AgentConfig, AgentStrategy, AgentStrategiesState
 } from '@shared/types.js';
 
 function ok<T>(value: T) { return { ok: true as const, value }; }
@@ -18,7 +21,84 @@ function fail(err: unknown) {
   return { ok: false as const, error: { code, message } };
 }
 
-export function registerAgentIpc(agentDb: AgentDbService): void {
+function defaultStrategy(): AgentStrategy {
+  return {
+    id: randomUUID(),
+    name: 'Default',
+    description: 'Pre-configured balanced strategy',
+    screeningMode: 'both',
+    screeningCriteria: {
+      optionStrategies: ['wheel', 'leaps_csp'],
+      minCompositeScore: 60,
+      minBuyStrength: 65,
+    },
+    screenerUniverse: 'sp500',
+    preferredModes: 'wheel,options_income,buy',
+    dteMin: 25,
+    dteMax: 50,
+    deltaMin: 0.20,
+    deltaMax: 0.35,
+    minIv: 20,
+    minOi: 500,
+    maxBidAskPct: 0.05,
+    minAnnualizedReturn: 0.15,
+    earningsExclusionDays: 14,
+  };
+}
+
+function getStrategies(db: Database.Database): AgentStrategiesState {
+  const row = db.prepare("SELECT value FROM settings WHERE key = 'agentStrategies'").get() as { value?: string } | undefined;
+  const strategies: AgentStrategy[] = row?.value ? JSON.parse(row.value) : [];
+  const activeRow = db.prepare("SELECT value FROM settings WHERE key = 'activeStrategyId'").get() as { value?: string } | undefined;
+  const activeId = activeRow?.value ?? null;
+  if (strategies.length === 0) {
+    const strat = defaultStrategy();
+    strategies.push(strat);
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run('agentStrategies', JSON.stringify(strategies));
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run('activeStrategyId', strat.id);
+    return { strategies, activeId: strat.id };
+  }
+  return { strategies, activeId };
+}
+
+export function registerAgentIpc(agentDb: AgentDbService, db: Database.Database): void {
+
+  // ── Strategy management ────────────────────────────────────────────────────
+
+  ipcMain.handle('agent:list-strategies', (_e) => {
+    try { return ok(getStrategies(db)); } catch (err) { return fail(err); }
+  });
+
+  ipcMain.handle('agent:save-strategy', (_e, strategy: AgentStrategy) => {
+    try {
+      const { strategies } = getStrategies(db);
+      const idx = strategies.findIndex(s => s.id === strategy.id);
+      if (idx >= 0) strategies[idx] = strategy;
+      else strategies.push(strategy);
+      db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run('agentStrategies', JSON.stringify(strategies));
+      return ok(strategy);
+    } catch (err) { return fail(err); }
+  });
+
+  ipcMain.handle('agent:delete-strategy', (_e, id: string) => {
+    try {
+      const state = getStrategies(db);
+      const remaining = state.strategies.filter(s => s.id !== id);
+      if (remaining.length === 0) remaining.push(defaultStrategy());
+      db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run('agentStrategies', JSON.stringify(remaining));
+      if (state.activeId === id) {
+        db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run('activeStrategyId', remaining[0]!.id);
+      }
+      return ok(true);
+    } catch (err) { return fail(err); }
+  });
+
+  ipcMain.handle('agent:set-active-strategy', (_e, id: string) => {
+    try {
+      db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run('activeStrategyId', id);
+      return ok(true);
+    } catch (err) { return fail(err); }
+  });
 
   // ── DB management ──────────────────────────────────────────────────────────
 

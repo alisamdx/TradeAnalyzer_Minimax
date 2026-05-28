@@ -561,6 +561,44 @@ export interface AgentStatus {
   confidence: number;
 }
 
+export type OptionStrategyType =
+  | 'wheel'
+  | 'leaps_csp'
+  | 'covered_call'
+  | 'bull_call_spread'
+  | 'bear_put_spread'
+  | 'iron_condor';
+
+export interface AgentScreeningCriteria {
+  optionStrategies: OptionStrategyType[];
+  minCompositeScore: number;   // 0–100 gate for analysis mode
+  minBuyStrength: number;      // 0–100 gate for validate mode
+}
+
+export interface AgentStrategy {
+  id: string;
+  name: string;
+  description?: string;
+  screeningMode: 'analysis' | 'validate' | 'both';
+  screeningCriteria: AgentScreeningCriteria;
+  screenerUniverse: 'sp500' | 'russell1000' | 'both';
+  preferredModes: string;
+  dteMin: number;
+  dteMax: number;
+  deltaMin: number;
+  deltaMax: number;
+  minIv: number;
+  minOi: number;
+  maxBidAskPct: number;
+  minAnnualizedReturn: number;
+  earningsExclusionDays: number;
+}
+
+export interface AgentStrategiesState {
+  strategies: AgentStrategy[];
+  activeId: string | null;
+}
+
 export interface AgentConfig {
   // Connection
   apiUrl: string;
