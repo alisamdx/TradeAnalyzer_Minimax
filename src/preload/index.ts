@@ -803,6 +803,9 @@ function buildApi() {
           estimatedFromDelta: boolean;
         } | null;
         withIv: number; withDelta: number; withUndPx: number;
+        rawTopLevelKeys: string[];
+        rawFieldTypes: Record<string, string>;
+        rawContractSample: string;
         rawJsonSample: string;
       }>('test-api:get-marketdata-chain', ticker, date),
   };

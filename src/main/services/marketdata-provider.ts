@@ -37,6 +37,22 @@ export class MarketDataProvider {
     this.limiter.setRate(rpm);
   }
 
+  /** Returns the raw unparsed JSON object — used by the Test API screen to inspect field names. */
+  async getRawChain(ticker: string, date: string): Promise<Record<string, unknown>> {
+    await this.limiter.acquire();
+    const token = this.getToken();
+    if (!token) throw new Error('MarketData.app API token not configured.');
+    const url = `${BASE_URL}/options/chain/${encodeURIComponent(ticker.toUpperCase())}/?date=${encodeURIComponent(date)}`;
+    const res = await fetch(url, {
+      headers: { Authorization: `Token ${token}`, Accept: 'application/json' },
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`MarketData.app error (${res.status}): ${body.slice(0, 300)}`);
+    }
+    return res.json() as Promise<Record<string, unknown>>;
+  }
+
   async getOptionsChain(ticker: string, date: string): Promise<MarketDataChainResult> {
     await this.limiter.acquire();
 

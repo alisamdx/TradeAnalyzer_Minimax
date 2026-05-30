@@ -148,7 +148,11 @@ export interface MarketDataTestResult {
   withIv:     number;
   withDelta:  number;
   withUndPx:  number;
-  // Raw JSON (truncated to first 3 contracts to keep it readable)
+  // Raw field diagnostics (from unparsed response)
+  rawTopLevelKeys:   string[];           // all keys present in the API response
+  rawFieldTypes:     Record<string, string>;  // key → type/shape description
+  rawContractSample: string;             // JSON of first 2 raw contracts (before parsing)
+  // Compact parsed sample as JSON
   rawJsonSample: string;
 }
 
@@ -190,6 +194,33 @@ export function registerTestApiIpc(dataProvider: PolygonDataProvider, marketdata
       try {
         if (!marketdata) throw new Error('MarketData.app provider not initialised.');
 
+        // Step 1 — get the RAW unparsed response so we can inspect actual field names.
+        const raw = await marketdata.getRawChain(ticker.toUpperCase(), date);
+
+        // Describe each top-level field: type + first-element preview for arrays.
+        const rawFieldTypes: Record<string, string> = {};
+        for (const [k, v] of Object.entries(raw)) {
+          if (Array.isArray(v)) {
+            const sample0 = v[0];
+            const elemType = sample0 === null ? 'null' : typeof sample0;
+            rawFieldTypes[k] = `array(${v.length}) of ${elemType} — first: ${JSON.stringify(sample0)}`;
+          } else {
+            rawFieldTypes[k] = `${typeof v} — ${JSON.stringify(v)}`;
+          }
+        }
+
+        // Build a raw contract sample: zip first 2 elements of every array field.
+        const arrayFields = Object.entries(raw).filter(([, v]) => Array.isArray(v));
+        const rawContractRows: Record<string, unknown>[] = [];
+        for (let i = 0; i < Math.min(2, (arrayFields[0]?.[1] as unknown[])?.length ?? 0); i++) {
+          const row: Record<string, unknown> = {};
+          for (const [k, v] of arrayFields) {
+            row[k] = (v as unknown[])[i];
+          }
+          rawContractRows.push(row);
+        }
+
+        // Step 2 — run the regular parser + ATM IV computation.
         const chain = await marketdata.getOptionsChain(ticker.toUpperCase(), date);
 
         if (chain.s !== 'ok') {
@@ -197,7 +228,11 @@ export function registerTestApiIpc(dataProvider: PolygonDataProvider, marketdata
             ticker: ticker.toUpperCase(), date, status: chain.s,
             contractCount: 0, underlyingPrice: null,
             sample: [], atmIvResult: null,
-            withIv: 0, withDelta: 0, withUndPx: 0, rawJsonSample: '{}',
+            withIv: 0, withDelta: 0, withUndPx: 0,
+            rawTopLevelKeys: Object.keys(raw),
+            rawFieldTypes,
+            rawContractSample: JSON.stringify(rawContractRows, null, 2),
+            rawJsonSample: JSON.stringify(raw, null, 2).slice(0, 2000),
           });
         }
 
@@ -216,9 +251,11 @@ export function registerTestApiIpc(dataProvider: PolygonDataProvider, marketdata
         const atmRaw = resolvedUndPx !== null ? computeAtmIv(contracts, resolvedUndPx) : null;
         const atmIvResult = atmRaw
           ? { ...atmRaw, atmIvPct: Math.round(atmRaw.atmIv * 10000) / 100, estimatedFromDelta }
-          : (resolvedUndPx !== null ? { atmIv: null, atmIvPct: null, expNear: null, expFar: null, dteNear: null, dteFar: null, estimatedFromDelta } : null);
+          : (resolvedUndPx !== null
+              ? { atmIv: null, atmIvPct: null, expNear: null, expFar: null, dteNear: null, dteFar: null, estimatedFromDelta }
+              : null);
 
-        // Sample — 6 contracts near ATM across call/put
+        // Near-ATM sample (8 contracts)
         const nearAtm = resolvedUndPx ?? 0;
         const sorted = [...contracts].sort((a, b) => Math.abs(a.strike - nearAtm) - Math.abs(b.strike - nearAtm));
         const sample = sorted.slice(0, 8).map(c => ({
@@ -226,24 +263,6 @@ export function registerTestApiIpc(dataProvider: PolygonDataProvider, marketdata
           strike: c.strike, iv: c.iv, delta: c.delta,
           underlyingPrice: c.underlyingPrice, dte: c.dte,
         }));
-
-        // Raw JSON: full response but only first 4 elements of each array
-        const rawSample: Record<string, unknown> = { s: chain.s, underlyingPrice, _note: 'Arrays truncated to 4 items' };
-        for (const [k, v] of Object.entries({ contracts })) {
-          void k; void v; // unused — build raw from chain fields instead
-        }
-        // Build compact representation
-        const compactSample = {
-          s: chain.s,
-          underlyingPrice,
-          contractCount: contracts.length,
-          firstContracts: contracts.slice(0, 4).map(c => ({
-            sym: c.optionSymbol, exp: c.expiration, side: c.side,
-            strike: c.strike, iv: c.iv, delta: c.delta,
-            undPx: c.underlyingPrice, dte: c.dte,
-          })),
-        };
-        void rawSample;
 
         return ok<MarketDataTestResult>({
           ticker: ticker.toUpperCase(), date, status: 'ok',
@@ -254,7 +273,17 @@ export function registerTestApiIpc(dataProvider: PolygonDataProvider, marketdata
           withIv:    contracts.filter(c => c.iv !== null).length,
           withDelta: contracts.filter(c => c.delta !== null).length,
           withUndPx: contracts.filter(c => c.underlyingPrice !== null).length,
-          rawJsonSample: JSON.stringify(compactSample, null, 2),
+          rawTopLevelKeys: Object.keys(raw),
+          rawFieldTypes,
+          rawContractSample: JSON.stringify(rawContractRows, null, 2),
+          rawJsonSample: JSON.stringify({
+            s: chain.s, underlyingPrice, contractCount: contracts.length,
+            parsedFirst4: contracts.slice(0, 4).map(c => ({
+              sym: c.optionSymbol, exp: c.expiration, side: c.side,
+              strike: c.strike, iv: c.iv, delta: c.delta,
+              undPx: c.underlyingPrice, dte: c.dte,
+            })),
+          }, null, 2),
         });
       } catch (err) {
         return fail(err);

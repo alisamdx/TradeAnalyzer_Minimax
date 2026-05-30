@@ -645,17 +645,49 @@ function MarketDataTab() {
             </div>
           )}
 
-          {/* Raw JSON toggle */}
+          {/* Raw field diagnostics — always shown, this is the key diagnostic */}
+          <div style={S.card}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#89b4fa', marginBottom: 8 }}>
+              Raw API Response Fields
+            </div>
+            <div style={{ fontSize: 11, color: '#6c7086', marginBottom: 8 }}>
+              Top-level keys returned by MarketData.app — confirms actual field names and whether IV/delta/DTE arrays are populated.
+            </div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+              <thead>
+                <tr style={{ color: '#6c7086', borderBottom: '1px solid #313244' }}>
+                  <th style={{ textAlign: 'left', padding: '3px 8px', width: 140 }}>Field</th>
+                  <th style={{ textAlign: 'left', padding: '3px 8px' }}>Type / First value</th>
+                </tr>
+              </thead>
+              <tbody>
+                {result.rawTopLevelKeys.map(k => {
+                  const desc = result.rawFieldTypes[k] ?? '?';
+                  const isIvOrGreek = ['iv', 'delta', 'gamma', 'theta', 'vega', 'impliedVolatility', 'impliedVol'].includes(k);
+                  const firstVal = desc.match(/first: (.+)/)?.[1] ?? '';
+                  const hasData = firstVal !== 'null' && firstVal !== '';
+                  return (
+                    <tr key={k} style={{ borderBottom: '1px solid #1e1e2e', background: isIvOrGreek ? '#1a2a1a' : 'transparent' }}>
+                      <td style={{ padding: '3px 8px', color: isIvOrGreek ? '#a6e3a1' : '#cdd6f4', fontFamily: 'monospace', fontWeight: isIvOrGreek ? 700 : 400 }}>{k}</td>
+                      <td style={{ padding: '3px 8px', color: hasData ? '#cdd6f4' : '#f38ba8' }}>{desc}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Raw contract sample (2 contracts, all fields) */}
           <div>
             <button
               onClick={() => setShowRaw(v => !v)}
               style={{ padding: '4px 12px', borderRadius: 5, border: '1px solid #313244', background: 'transparent', color: '#6c7086', fontSize: 11, cursor: 'pointer' }}
             >
-              {showRaw ? 'Hide' : 'Show'} Raw JSON Sample
+              {showRaw ? 'Hide' : 'Show'} Raw Contract Sample (first 2, all fields)
             </button>
             {showRaw && (
-              <pre style={{ marginTop: 8, background: '#1e1e2e', border: '1px solid #313244', borderRadius: 6, padding: '10px 14px', fontSize: 11, color: '#a6e3a1', overflowX: 'auto', maxHeight: 300, overflowY: 'auto' }}>
-                {result.rawJsonSample}
+              <pre style={{ marginTop: 8, background: '#1e1e2e', border: '1px solid #313244', borderRadius: 6, padding: '10px 14px', fontSize: 11, color: '#a6e3a1', overflowX: 'auto', maxHeight: 400, overflowY: 'auto' }}>
+                {result.rawContractSample}
               </pre>
             )}
           </div>
