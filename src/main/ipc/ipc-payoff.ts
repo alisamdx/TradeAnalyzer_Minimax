@@ -3,7 +3,10 @@
 import { ipcMain } from 'electron';
 import type { Database } from 'better-sqlite3';
 import { PayoffService } from '../services/payoff-service.js';
-import type { IpcResult, PayoffLeg, SavedPayoffStrategy } from '@shared/types.js';
+import type {
+  IpcResult, PayoffLeg, SavedPayoffStrategy,
+  PayoffAssessInput, PayoffAssessment,
+} from '@shared/types.js';
 
 function ok<T>(value: T): IpcResult<T> { return { ok: true, value }; }
 function fail(err: unknown): IpcResult<never> {
@@ -27,4 +30,20 @@ export function registerPayoffIpc(db: Database): void {
     try { svc.delete(db, id); return ok(true); }
     catch (err) { return fail(err); }
   });
+
+  ipcMain.handle(
+    'payoff:assess',
+    async (event, legs: PayoffLeg[], input: PayoffAssessInput): Promise<IpcResult<PayoffAssessment>> => {
+      try {
+        const result = await svc.assess(
+          legs,
+          input,
+          (chunk: string) => event.sender.send('payoff:assess:progress', chunk),
+        );
+        return ok(result);
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
 }

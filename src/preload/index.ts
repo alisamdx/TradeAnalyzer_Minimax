@@ -62,6 +62,8 @@ import type {
   AdvisorProgressEvent,
   PayoffLeg,
   SavedPayoffStrategy,
+  PayoffAssessInput,
+  PayoffAssessment,
 } from '@shared/types.js';
 export type {
   ScreenPreset, ScreenCriteria, ScreenRunResult, ScreenResultRow, Universe,
@@ -893,6 +895,13 @@ function buildApi() {
     save:   (name: string, ticker: string | null, legs: PayoffLeg[]) => invoke<SavedPayoffStrategy>('payoff:save', name, ticker, legs),
     list:   () => invoke<SavedPayoffStrategy[]>('payoff:list'),
     delete: (id: number) => invoke<boolean>('payoff:delete', id),
+    assess: (legs: PayoffLeg[], input: PayoffAssessInput) =>
+      invoke<PayoffAssessment>('payoff:assess', legs, input),
+    onAssessProgress: (callback: (chunk: string) => void) => {
+      const handler = (_: unknown, chunk: string) => callback(chunk);
+      ipcRenderer.on('payoff:assess:progress', handler);
+      return () => ipcRenderer.removeListener('payoff:assess:progress', handler);
+    },
   };
 
   return {

@@ -1217,3 +1217,37 @@ export interface SavedPayoffStrategy {
   legs: PayoffLeg[];
   createdAt: string;
 }
+
+/** Inputs passed from the renderer to the assessment service. */
+export interface PayoffAssessInput {
+  spot: number;
+  ticker: string | null;
+  strategyName: string;
+  maxProfit: number | null;
+  maxLoss: number | null;
+  unlimitedProfit: boolean;
+  unlimitedLoss: boolean;
+  breakevenPrices: number[];
+  netPremium: number;
+  netDelta: number | null;
+  netTheta: number | null;
+  netVega: number | null;
+}
+
+/** Structured expert assessment returned by Claude. */
+export interface PayoffAssessment {
+  strategyName: string;
+  rating: 'excellent' | 'good' | 'neutral' | 'caution' | 'avoid';
+  ratingReason: string;
+  pros: string[];
+  cons: string[];
+  idealMarket: string;
+  keyRisks: string[];
+  /** E.g. "~68% based on Δ" or null if deltas unavailable. */
+  probOfProfit: string | null;
+  exit: {
+    closeAll: { trigger: string; details: string };
+    bullish: { trigger: string; exitFirst: string; holdLast: string };
+    bearish: { trigger: string; exitFirst: string; holdLast: string };
+  };
+}

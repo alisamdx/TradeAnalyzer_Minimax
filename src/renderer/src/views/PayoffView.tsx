@@ -3,10 +3,12 @@
 // Supports CSP, CC, Collar, Bull/Bear spreads, and arbitrary combos.
 // Chain integration loads live strikes + mid-prices + Greeks from the IPC layer.
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   PayoffLeg,
   SavedPayoffStrategy,
+  PayoffAssessInput,
+  PayoffAssessment,
   OptionsChainExpirationSummary,
   OptionsChainViewData,
   OptionContract,
@@ -212,6 +214,148 @@ const TEMPLATES: Template[] = [
   },
 ];
 
+// ─── InfoTip tooltip ──────────────────────────────────────────────────────────
+
+function InfoTip({ text }: { text: string }) {
+  const [show, setShow] = useState(false);
+  return (
+    <span style={{ position: 'relative', display: 'inline-flex', verticalAlign: 'middle' }}>
+      <span
+        onMouseEnter={() => setShow(true)}
+        onMouseLeave={() => setShow(false)}
+        style={{
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          width: 14, height: 14, borderRadius: '50%',
+          background: '#334155', color: '#94a3b8',
+          fontSize: 9, fontWeight: 700, cursor: 'help', marginLeft: 4, flexShrink: 0,
+          lineHeight: 1,
+        }}
+      >?</span>
+      {show && (
+        <div style={{
+          position: 'absolute', bottom: 'calc(100% + 6px)', left: '50%',
+          transform: 'translateX(-50%)', zIndex: 200,
+          background: '#1e293b', border: '1px solid #475569',
+          borderRadius: 6, padding: '9px 11px',
+          fontSize: 11, color: '#cbd5e1', lineHeight: 1.55,
+          maxWidth: 280, width: 'max-content',
+          boxShadow: '0 6px 18px rgba(0,0,0,0.5)',
+          pointerEvents: 'none', whiteSpace: 'pre-line',
+        }}>
+          {text}
+        </div>
+      )}
+    </span>
+  );
+}
+
+// ─── Strategy recognition ─────────────────────────────────────────────────────
+
+interface StrategyInfo {
+  name: string;
+  description: string;
+  color: string;        // accent border/badge color
+  partial?: boolean;    // still building the strategy
+}
+
+function recognizeStrategy(legs: PayoffLeg[]): StrategyInfo | null {
+  if (legs.length === 0) return null;
+
+  const opts      = legs.filter(l => l.type !== 'stock');
+  const stocks    = legs.filter(l => l.type === 'stock');
+  const puts      = opts.filter(l => l.type === 'put').sort((a, b) => a.strike - b.strike);
+  const calls     = opts.filter(l => l.type === 'call').sort((a, b) => a.strike - b.strike);
+  const sellPuts  = puts.filter(l => l.side === 'sell');
+  const buyPuts   = puts.filter(l => l.side === 'buy');
+  const sellCalls = calls.filter(l => l.side === 'sell');
+  const buyCalls  = calls.filter(l => l.side === 'buy');
+  const longStock = stocks.filter(l => l.side === 'buy');
+
+  // ── Single leg ────────────────────────────────────────────────────────────────
+  if (legs.length === 1) {
+    const l = legs[0]!;
+    if (l.side === 'sell' && l.type === 'put')
+      return { name: 'Cash-Secured Put', description: 'Collect premium; buy stock at strike if assigned', color: '#22c55e' };
+    if (l.side === 'sell' && l.type === 'call')
+      return { name: 'Naked Call', description: '⚠ Unlimited upside risk — requires margin', color: '#ef4444' };
+    if (l.side === 'buy' && l.type === 'call')
+      return { name: 'Long Call', description: 'Bullish; profit above breakeven, risk = premium paid', color: '#3b82f6' };
+    if (l.side === 'buy' && l.type === 'put')
+      return { name: 'Long Put', description: 'Bearish; profit below breakeven, risk = premium paid', color: '#f97316' };
+    if (l.type === 'stock')
+      return { name: l.side === 'buy' ? 'Long Stock' : 'Short Stock', description: 'Directional equity position', color: '#94a3b8' };
+  }
+
+  // ── Covered Call: long stock + sell call ──────────────────────────────────────
+  if (longStock.length === 1 && sellCalls.length === 1 && opts.length === 1)
+    return { name: 'Covered Call', description: 'Capped upside; premium reduces effective cost basis', color: '#22c55e' };
+
+  // ── Protective Put: long stock + buy put ──────────────────────────────────────
+  if (longStock.length === 1 && buyPuts.length === 1 && opts.length === 1)
+    return { name: 'Protective Put', description: 'Stock with a floor; unlimited upside, limited downside', color: '#3b82f6' };
+
+  // ── Collar: long stock + buy put + sell call ──────────────────────────────────
+  if (longStock.length === 1 && buyPuts.length === 1 && sellCalls.length === 1 && opts.length === 2)
+    return { name: 'Collar', description: 'Protected between put (floor) and call (cap)', color: '#8b5cf6' };
+
+  // ── Two-leg option strategies ─────────────────────────────────────────────────
+  if (stocks.length === 0 && opts.length === 2) {
+    // Bull Call Spread / Bear Call Spread
+    if (buyCalls.length === 1 && sellCalls.length === 1 && puts.length === 0) {
+      const b = buyCalls[0]!, s = sellCalls[0]!;
+      return b.strike < s.strike
+        ? { name: 'Bull Call Spread', description: 'Defined-risk bullish; max profit at or above short call', color: '#22c55e' }
+        : { name: 'Bear Call Spread',  description: 'Credit spread; profit if stock stays below long call',   color: '#f97316' };
+    }
+    // Bear Put Spread / Bull Put Spread
+    if (buyPuts.length === 1 && sellPuts.length === 1 && calls.length === 0) {
+      const b = buyPuts[0]!, s = sellPuts[0]!;
+      return b.strike > s.strike
+        ? { name: 'Bear Put Spread', description: 'Defined-risk bearish; max profit at or below short put', color: '#ef4444' }
+        : { name: 'Bull Put Spread', description: 'Credit spread; profit if stock stays above short put',   color: '#22c55e' };
+    }
+    // Short Straddle / Strangle
+    if (sellPuts.length === 1 && sellCalls.length === 1 && buyPuts.length === 0 && buyCalls.length === 0) {
+      const p = sellPuts[0]!, c = sellCalls[0]!;
+      return p.strike === c.strike
+        ? { name: 'Short Straddle', description: 'Profit in tight range; ATM short put + call', color: '#f97316' }
+        : { name: 'Short Strangle', description: 'Profit if stock stays between strikes', color: '#f97316' };
+    }
+    // Long Straddle / Strangle
+    if (buyPuts.length === 1 && buyCalls.length === 1 && sellPuts.length === 0 && sellCalls.length === 0) {
+      const p = buyPuts[0]!, c = buyCalls[0]!;
+      return p.strike === c.strike
+        ? { name: 'Long Straddle', description: 'Profit on large move either direction', color: '#3b82f6' }
+        : { name: 'Long Strangle', description: 'Profit on large move; lower cost than straddle', color: '#3b82f6' };
+    }
+  }
+
+  // ── Four-leg strategies ───────────────────────────────────────────────────────
+  if (stocks.length === 0 && buyPuts.length === 1 && sellPuts.length === 1
+      && buyCalls.length === 1 && sellCalls.length === 1) {
+    const bp = buyPuts[0]!, sp = sellPuts[0]!, sc = sellCalls[0]!, bc = buyCalls[0]!;
+    if (bp.strike < sp.strike && sp.strike <= sc.strike && sc.strike < bc.strike) {
+      return sp.strike === sc.strike
+        ? { name: 'Iron Butterfly', description: 'Max profit at middle strike; defined risk both sides', color: '#8b5cf6' }
+        : { name: 'Iron Condor',    description: 'Profit if stock stays between short strikes; defined risk', color: '#8b5cf6' };
+    }
+  }
+
+  // ── Partial / building state ──────────────────────────────────────────────────
+  if (sellPuts.length >= 1 && opts.length < 4)
+    return { name: 'Building…', description: `${sellPuts.length} short put${sellPuts.length > 1 ? 's' : ''} — add more legs to complete the strategy`, color: '#64748b', partial: true };
+  if (sellCalls.length >= 1 && opts.length < 4)
+    return { name: 'Building…', description: `${sellCalls.length} short call${sellCalls.length > 1 ? 's' : ''} — add more legs`, color: '#64748b', partial: true };
+
+  // ── Generic fallback ──────────────────────────────────────────────────────────
+  const netPrem = legs.reduce((s, l) => s + (l.side === 'sell' ? 1 : -1) * l.premium, 0);
+  return {
+    name: 'Custom Strategy',
+    description: netPrem >= 0 ? 'Net credit spread' : 'Net debit spread',
+    color: '#94a3b8',
+  };
+}
+
 // ─── Payoff SVG chart ─────────────────────────────────────────────────────────
 
 const PAD = { t: 24, r: 24, b: 36, l: 64 };
@@ -380,19 +524,54 @@ function LegCard({
   leg,
   onRemove,
   onToggleSide,
+  onUpdate,
 }: {
   leg: PayoffLeg;
   onRemove: () => void;
   onToggleSide: () => void;
+  onUpdate: (patch: Partial<PayoffLeg>) => void;
 }) {
   const isBuy  = leg.side === 'buy';
   const isCall = leg.type === 'call';
   const isPut  = leg.type === 'put';
 
+  const [editingPrem, setEditingPrem] = useState(false);
+  const [editingQty,  setEditingQty]  = useState(false);
+  const [premStr, setPremStr]         = useState(String(leg.premium));
+  const [qtyStr,  setQtyStr]          = useState(String(leg.quantity));
+
+  // Keep local strings in sync when leg prop changes (e.g. chain reload)
+  const prevPremRef = { current: leg.premium };
+  if (!editingPrem && leg.premium !== prevPremRef.current) setPremStr(String(leg.premium));
+
+  const commitPrem = () => {
+    const v = parseFloat(premStr);
+    if (!isNaN(v) && v >= 0) onUpdate({ premium: v });
+    else setPremStr(String(leg.premium));   // revert on bad input
+    setEditingPrem(false);
+  };
+
+  const commitQty = () => {
+    const v = parseInt(qtyStr);
+    if (!isNaN(v) && v >= 1) onUpdate({ quantity: v });
+    else setQtyStr(String(leg.quantity));
+    setEditingQty(false);
+  };
+
   const typeLabel = leg.type === 'stock' ? '100 shares'
     : `${leg.type.toUpperCase()} $${leg.strike}`;
 
   const sideColor = isBuy ? '#22c55e' : '#f97316';
+
+  const inlineInputStyle: React.CSSProperties = {
+    width: 60, padding: '1px 4px', fontSize: 11, background: '#0f172a',
+    border: '1px solid #3b82f6', borderRadius: 3, color: '#f1f5f9',
+    outline: 'none',
+  };
+
+  const premLabel = leg.type === 'stock' ? 'Entry' : 'Prem';
+  // Highlight zero-premium option legs as a visual cue that input is needed
+  const premColor = (leg.type !== 'stock' && leg.premium === 0) ? '#f97316' : '#94a3b8';
 
   return (
     <div style={{
@@ -428,9 +607,55 @@ function LegCard({
           ✕
         </button>
       </div>
-      <div style={{ display: 'flex', gap: 10, fontSize: 11, color: '#94a3b8' }}>
-        <span>{leg.type === 'stock' ? `Entry ${fmtPrice(leg.premium)}` : `Prem ${fmtPrice(leg.premium)}`}</span>
-        <span>×{leg.quantity}</span>
+      <div style={{ display: 'flex', gap: 10, fontSize: 11, color: '#94a3b8', alignItems: 'center' }}>
+        {/* Editable premium */}
+        <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+          <span style={{ color: '#64748b' }}>{premLabel}</span>
+          {editingPrem ? (
+            <input
+              autoFocus
+              type="number" step="0.01" min="0"
+              value={premStr}
+              onChange={e => setPremStr(e.target.value)}
+              onBlur={commitPrem}
+              onKeyDown={e => { if (e.key === 'Enter') commitPrem(); if (e.key === 'Escape') { setPremStr(String(leg.premium)); setEditingPrem(false); } }}
+              style={inlineInputStyle}
+            />
+          ) : (
+            <span
+              onClick={() => { setPremStr(String(leg.premium)); setEditingPrem(true); }}
+              title="Click to edit premium"
+              style={{ color: premColor, cursor: 'text', textDecoration: 'underline dotted', textUnderlineOffset: 2 }}
+            >
+              {fmtPrice(leg.premium)}
+            </span>
+          )}
+        </span>
+
+        {/* Editable quantity */}
+        <span style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <span style={{ color: '#64748b' }}>×</span>
+          {editingQty ? (
+            <input
+              autoFocus
+              type="number" min="1"
+              value={qtyStr}
+              onChange={e => setQtyStr(e.target.value)}
+              onBlur={commitQty}
+              onKeyDown={e => { if (e.key === 'Enter') commitQty(); if (e.key === 'Escape') { setQtyStr(String(leg.quantity)); setEditingQty(false); } }}
+              style={{ ...inlineInputStyle, width: 40 }}
+            />
+          ) : (
+            <span
+              onClick={() => { setQtyStr(String(leg.quantity)); setEditingQty(true); }}
+              title="Click to edit quantity"
+              style={{ cursor: 'text', textDecoration: 'underline dotted', textUnderlineOffset: 2 }}
+            >
+              {leg.quantity}
+            </span>
+          )}
+        </span>
+
         {leg.delta != null && (isCall || isPut) && (
           <span title="Delta">Δ {leg.delta >= 0 ? '+' : ''}{leg.delta.toFixed(2)}</span>
         )}
@@ -618,6 +843,12 @@ export function PayoffView({ initialTicker, initialSpot }: PayoffViewProps) {
   const [chainData, setChainData]               = useState<OptionsChainViewData | null>(null);
   const [chainStrikeFilter, setChainStrikeFilter] = useState<'atm' | 'all'>('atm');
 
+  // Assessment state
+  const [assessment, setAssessment]         = useState<PayoffAssessment | null>(null);
+  const [assessLoading, setAssessLoading]   = useState(false);
+  const [assessThinking, setAssessThinking] = useState('');
+  const thinkingRef = useRef<HTMLDivElement>(null);
+
   // UI state
   const [error, setError]     = useState<string | null>(null);
   const [statusMsg, setStatus] = useState<string | null>(null);
@@ -635,6 +866,53 @@ export function PayoffView({ initialTicker, initialSpot }: PayoffViewProps) {
     [legs, spotNum]
   );
 
+  // ── Strategy recognition ────────────────────────────────────────────────────
+  const recognizedStrategy = useMemo(() => recognizeStrategy(legs), [legs]);
+
+  // ── Trade assessment ────────────────────────────────────────────────────────
+  const handleAssess = useCallback(async () => {
+    if (!metrics || legs.length === 0) { setError('Add legs and a spot price first'); return; }
+    setAssessLoading(true);
+    setAssessThinking('');
+    setAssessment(null);
+    setError(null);
+
+    const strategyName = recognizedStrategy?.name ?? 'Custom Strategy';
+    const input: PayoffAssessInput = {
+      spot:            spotNum,
+      ticker:          ticker.trim() || null,
+      strategyName,
+      maxProfit:       metrics.maxProfit,
+      maxLoss:         metrics.maxLoss,
+      unlimitedProfit: metrics.unlimitedProfit,
+      unlimitedLoss:   metrics.unlimitedLoss,
+      breakevenPrices: metrics.breakevenPrices,
+      netPremium:      metrics.netPremium,
+      netDelta:        metrics.netDelta,
+      netTheta:        metrics.netTheta,
+      netVega:         metrics.netVega,
+    };
+
+    const unsubscribe = window.api.payoff.onAssessProgress((chunk: string) => {
+      setAssessThinking(prev => {
+        const next = prev + chunk;
+        setTimeout(() => { if (thinkingRef.current) thinkingRef.current.scrollTop = thinkingRef.current.scrollHeight; }, 0);
+        return next;
+      });
+    });
+
+    try {
+      const result = await window.api.payoff.assess(legs, input);
+      setAssessment(result);
+      setAssessThinking('');
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      unsubscribe();
+      setAssessLoading(false);
+    }
+  }, [legs, metrics, recognizedStrategy, spotNum, ticker]);
+
   // ── Template application ────────────────────────────────────────────────────
   const applyTemplate = useCallback((tpl: Template) => {
     if (!spotNum) { setError('Enter a spot price first'); return; }
@@ -649,6 +927,9 @@ export function PayoffView({ initialTicker, initialSpot }: PayoffViewProps) {
     setLegs(prev => prev.map(l =>
       l.id === id ? { ...l, side: l.side === 'buy' ? 'sell' : 'buy' } : l
     ));
+
+  const updateLeg = (id: string, patch: Partial<PayoffLeg>) =>
+    setLegs(prev => prev.map(l => l.id === id ? { ...l, ...patch } : l));
 
   const addLeg = (leg: PayoffLeg) => {
     setLegs(prev => [...prev, leg]);
@@ -833,6 +1114,7 @@ export function PayoffView({ initialTicker, initialSpot }: PayoffViewProps) {
               leg={leg}
               onRemove={() => removeLeg(leg.id)}
               onToggleSide={() => toggleSide(leg.id)}
+              onUpdate={patch => updateLeg(leg.id, patch)}
             />
           ))}
 
@@ -855,6 +1137,24 @@ export function PayoffView({ initialTicker, initialSpot }: PayoffViewProps) {
             </button>
           )}
         </div>
+
+        {/* ── Strategy recognition badge ── */}
+        {recognizedStrategy && (
+          <div style={{
+            background: '#0f172a',
+            border: `1px solid ${recognizedStrategy.color}44`,
+            borderLeft: `3px solid ${recognizedStrategy.color}`,
+            borderRadius: 5, padding: '7px 10px',
+            opacity: recognizedStrategy.partial ? 0.65 : 1,
+          }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: recognizedStrategy.color, marginBottom: 2 }}>
+              {recognizedStrategy.partial ? '…' : '✓'} {recognizedStrategy.name}
+            </div>
+            <div style={{ fontSize: 10, color: '#94a3b8', lineHeight: 1.4 }}>
+              {recognizedStrategy.description}
+            </div>
+          </div>
+        )}
 
         {/* ── Chain Loader ── */}
         <div>
@@ -957,19 +1257,22 @@ export function PayoffView({ initialTicker, initialSpot }: PayoffViewProps) {
 
             {/* ── Metrics row ── */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
-              {[
+              {([
                 {
                   label: 'Max Profit',
+                  tip: 'Highest P&L at expiration, simulated across 200 price points (50%–155% of spot).\n\n• Short options: total premium collected × qty × 100\n• Spreads: capped at strike width − net debit\n• Long calls/stock: shown as ∞ (payoff rises indefinitely)\n\nFormula: max(pnl[i]) across simulated prices',
                   value: fmtMetric(metrics.maxProfit, metrics.unlimitedProfit),
                   color: '#22c55e',
                 },
                 {
                   label: 'Max Loss',
+                  tip: 'Worst P&L at expiration across the same 200 simulated price points.\n\n• Long options: limited to premium paid × qty × 100\n• Short naked options: shown as ∞\n• Short puts: (strike − premium) × qty × 100\n\nFormula: min(pnl[i]) across simulated prices',
                   value: fmtMetric(metrics.maxLoss, metrics.unlimitedLoss),
                   color: '#ef4444',
                 },
                 {
-                  label: metrics.breakevenPrices.length > 1 ? 'Breakevenx2' : 'Breakeven',
+                  label: metrics.breakevenPrices.length > 1 ? `Breakeven ×${metrics.breakevenPrices.length}` : 'Breakeven',
+                  tip: 'Stock price(s) at expiration where total P&L = $0.\n\nDetected by linear interpolation wherever the payoff curve crosses the zero line. Complex strategies (straddles, condors, collars) have two breakevens.\n\nCSP example: strike − net premium received\nLong call: strike + premium paid',
                   value: metrics.breakevenPrices.length === 0
                     ? '—'
                     : metrics.breakevenPrices.map(p => fmtPrice(p)).join(' / '),
@@ -977,12 +1280,15 @@ export function PayoffView({ initialTicker, initialSpot }: PayoffViewProps) {
                 },
                 {
                   label: metrics.netPremium >= 0 ? 'Net Credit' : 'Net Debit',
+                  tip: 'Total premium cash flow for the position.\n\n• Net Credit (positive): you received more than you paid — the credit is your buffer before a loss begins\n• Net Debit (negative): you paid net — the stock must move in your favour to profit\n\nFormula: Σ (sell: +premium, buy: −premium) × qty × 100',
                   value: fmtDollar(Math.abs(metrics.netPremium)),
                   color: metrics.netPremium >= 0 ? '#22c55e' : '#f97316',
                 },
-              ].map(m => (
+              ] as Array<{ label: string; tip: string; value: string; color: string }>).map(m => (
                 <div key={m.label} style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 6, padding: '8px 10px' }}>
-                  <div style={{ fontSize: 10, color: '#64748b', marginBottom: 3 }}>{m.label}</div>
+                  <div style={{ fontSize: 10, color: '#64748b', marginBottom: 3, display: 'flex', alignItems: 'center' }}>
+                    {m.label}<InfoTip text={m.tip} />
+                  </div>
                   <div style={{ fontSize: 14, fontWeight: 700, color: m.color }}>{m.value}</div>
                 </div>
               ))}
@@ -990,20 +1296,203 @@ export function PayoffView({ initialTicker, initialSpot }: PayoffViewProps) {
 
             {/* ── Net Greeks ── */}
             {(metrics.netDelta != null || metrics.netTheta != null || metrics.netVega != null) && (
-              <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 6, padding: '8px 14px', display: 'flex', gap: 20, fontSize: 12 }}>
-                <span style={{ color: '#64748b', marginRight: 4 }}>Net Greeks:</span>
+              <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 6, padding: '8px 14px', display: 'flex', gap: 20, fontSize: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+                <span style={{ color: '#64748b' }}>Net Greeks</span>
                 {metrics.netDelta != null && (
-                  <span><span style={{ color: '#94a3b8' }}>Δ </span><strong style={{ color: metrics.netDelta > 0 ? '#22c55e' : '#ef4444' }}>{metrics.netDelta >= 0 ? '+' : ''}{metrics.netDelta.toFixed(2)}</strong></span>
+                  <span style={{ display: 'flex', alignItems: 'center' }}>
+                    <span style={{ color: '#94a3b8' }}>Δ</span>
+                    <InfoTip text={'Position delta — how much total P&L changes per $1 move in the stock.\n\n+1.00 ≈ long 100 shares\n−1.00 ≈ short 100 shares\n 0.00 = delta-neutral\n\nFormula: Σ (buy:+1, sell:−1) × leg.delta × qty\nStock legs contribute ±1 per share × qty.'} />
+                    <strong style={{ color: metrics.netDelta > 0 ? '#22c55e' : '#ef4444', marginLeft: 4 }}>
+                      {metrics.netDelta >= 0 ? '+' : ''}{metrics.netDelta.toFixed(2)}
+                    </strong>
+                  </span>
                 )}
                 {metrics.netTheta != null && (
-                  <span><span style={{ color: '#94a3b8' }}>Θ </span><strong style={{ color: metrics.netTheta > 0 ? '#22c55e' : '#f97316' }}>{metrics.netTheta >= 0 ? '+' : ''}{fmtDollar(metrics.netTheta)}/day</strong></span>
+                  <span style={{ display: 'flex', alignItems: 'center' }}>
+                    <span style={{ color: '#94a3b8' }}>Θ</span>
+                    <InfoTip text={'Daily time decay for the full position (in dollars/day).\n\nPositive Θ: you collect decay each day (short options — favourable)\nNegative Θ: time erodes your position value (long options)\n\nFormula: Σ (buy:+1, sell:−1) × leg.theta × qty × 100\nScaled by 100 shares per contract.'} />
+                    <strong style={{ color: metrics.netTheta > 0 ? '#22c55e' : '#f97316', marginLeft: 4 }}>
+                      {metrics.netTheta >= 0 ? '+' : ''}{fmtDollar(metrics.netTheta)}/day
+                    </strong>
+                  </span>
                 )}
                 {metrics.netVega != null && (
-                  <span><span style={{ color: '#94a3b8' }}>V </span><strong style={{ color: '#94a3b8' }}>{metrics.netVega >= 0 ? '+' : ''}{fmtDollar(metrics.netVega)}/1%IV</strong></span>
+                  <span style={{ display: 'flex', alignItems: 'center' }}>
+                    <span style={{ color: '#94a3b8' }}>V</span>
+                    <InfoTip text={'How much the position gains or loses per 1% rise in implied volatility.\n\nPositive Vega: rising IV helps (long options, pre-earnings)\nNegative Vega: rising IV hurts (short options, sellers prefer IV crush)\n\nFormula: Σ (buy:+1, sell:−1) × leg.vega × qty × 100\nScaled by 100 shares per contract.'} />
+                    <strong style={{ color: '#94a3b8', marginLeft: 4 }}>
+                      {metrics.netVega >= 0 ? '+' : ''}{fmtDollar(metrics.netVega)}/1%IV
+                    </strong>
+                  </span>
                 )}
               </div>
             )}
           </>
+        )}
+
+        {/* ════════════════════════════════════════════════════════════════════
+            AI TRADE ASSESSMENT
+        ════════════════════════════════════════════════════════════════════ */}
+        {legs.length > 0 && spotNum > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {/* Assess button */}
+            <button
+              onClick={handleAssess}
+              disabled={assessLoading}
+              style={{
+                padding: '8px 16px', fontSize: 13, fontWeight: 600, borderRadius: 5,
+                cursor: assessLoading ? 'default' : 'pointer',
+                background: assessLoading ? '#1e293b' : '#1d4ed8',
+                color: assessLoading ? '#64748b' : '#fff',
+                border: '1px solid #334155',
+                display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center',
+              }}
+            >
+              {assessLoading
+                ? <><span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>⟳</span> Analysing…</>
+                : <><span>⚡</span> {assessment ? 'Re-assess Trade' : 'Assess Trade'}</>
+              }
+            </button>
+
+            {/* Thinking progress */}
+            {assessLoading && assessThinking && (
+              <div style={{ background: '#0c1425', border: '1px solid #1e3a5f', borderRadius: 6, padding: '8px 10px' }}>
+                <div style={{ fontSize: 10, color: '#3b82f6', marginBottom: 5, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: '#3b82f6', animation: 'pulse 1s ease-in-out infinite' }} />
+                  Claude is thinking…
+                </div>
+                <div
+                  ref={thinkingRef}
+                  style={{ fontSize: 10, color: '#64748b', fontFamily: 'monospace', maxHeight: 120, overflowY: 'auto', lineHeight: 1.5 }}
+                >
+                  {assessThinking}
+                </div>
+              </div>
+            )}
+
+            {/* Assessment results */}
+            {assessment && !assessLoading && (() => {
+              const ratingColors: Record<string, string> = {
+                excellent: '#22c55e', good: '#86efac', neutral: '#94a3b8',
+                caution: '#f97316', avoid: '#ef4444',
+              };
+              const rc = ratingColors[assessment.rating] ?? '#94a3b8';
+              return (
+                <div style={{ background: '#0f172a', border: `1px solid ${rc}33`, borderRadius: 8, overflow: 'hidden' }}>
+                  {/* Header */}
+                  <div style={{ padding: '10px 14px', borderBottom: '1px solid #1e293b', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                    <span style={{
+                      padding: '2px 10px', borderRadius: 12, fontSize: 11, fontWeight: 700,
+                      background: rc + '22', color: rc, border: `1px solid ${rc}55`,
+                      textTransform: 'uppercase', letterSpacing: 0.5,
+                    }}>
+                      {assessment.rating}
+                    </span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: '#f1f5f9' }}>{assessment.strategyName}</span>
+                    {assessment.probOfProfit && (
+                      <span style={{ marginLeft: 'auto', fontSize: 11, color: '#94a3b8' }}>
+                        POP: <strong style={{ color: '#fbbf24' }}>{assessment.probOfProfit}</strong>
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ padding: '10px 14px', fontSize: 12, color: '#94a3b8', borderBottom: '1px solid #1e293b', fontStyle: 'italic' }}>
+                    {assessment.ratingReason}
+                  </div>
+
+                  {/* Pros / Cons */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', borderBottom: '1px solid #1e293b' }}>
+                    <div style={{ padding: '10px 12px', borderRight: '1px solid #1e293b' }}>
+                      <div style={{ fontSize: 10, color: '#22c55e', fontWeight: 700, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                        ✓ Pros
+                      </div>
+                      {assessment.pros.map((p, i) => (
+                        <div key={i} style={{ fontSize: 11, color: '#cbd5e1', marginBottom: 4, paddingLeft: 8, borderLeft: '2px solid #22c55e33' }}>
+                          {p}
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ padding: '10px 12px' }}>
+                      <div style={{ fontSize: 10, color: '#ef4444', fontWeight: 700, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                        ✗ Cons
+                      </div>
+                      {assessment.cons.map((c, i) => (
+                        <div key={i} style={{ fontSize: 11, color: '#cbd5e1', marginBottom: 4, paddingLeft: 8, borderLeft: '2px solid #ef444433' }}>
+                          {c}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Ideal market + Key risks */}
+                  <div style={{ padding: '8px 14px', borderBottom: '1px solid #1e293b', display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                    <div style={{ flex: 1, minWidth: 160 }}>
+                      <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600, marginBottom: 3, textTransform: 'uppercase', letterSpacing: 0.5 }}>Ideal market</div>
+                      <div style={{ fontSize: 11, color: '#e2e8f0' }}>{assessment.idealMarket}</div>
+                    </div>
+                    <div style={{ flex: 1, minWidth: 160 }}>
+                      <div style={{ fontSize: 10, color: '#f97316', fontWeight: 600, marginBottom: 3, textTransform: 'uppercase', letterSpacing: 0.5 }}>Key risks</div>
+                      {assessment.keyRisks.map((r, i) => (
+                        <div key={i} style={{ fontSize: 11, color: '#fca5a5', marginBottom: 2 }}>• {r}</div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Exit strategy — 3 scenarios */}
+                  <div style={{ padding: '10px 14px' }}>
+                    <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                      Recommended exit strategy
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+                      {/* Close All */}
+                      <div style={{ background: '#1e293b', borderRadius: 6, padding: '9px 10px', border: '1px solid #334155' }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', marginBottom: 5, display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <span>⏹</span> Close All
+                        </div>
+                        <div style={{ fontSize: 10, color: '#fbbf24', marginBottom: 4, fontWeight: 600 }}>
+                          {assessment.exit.closeAll.trigger}
+                        </div>
+                        <div style={{ fontSize: 10, color: '#94a3b8', lineHeight: 1.45 }}>
+                          {assessment.exit.closeAll.details}
+                        </div>
+                      </div>
+
+                      {/* Bullish */}
+                      <div style={{ background: '#0c2010', borderRadius: 6, padding: '9px 10px', border: '1px solid #22c55e33' }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: '#22c55e', marginBottom: 5, display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <span>↑</span> Bullish trend
+                        </div>
+                        <div style={{ fontSize: 10, color: '#86efac', marginBottom: 4, fontWeight: 600 }}>
+                          {assessment.exit.bullish.trigger}
+                        </div>
+                        <div style={{ fontSize: 10, color: '#4ade80', marginBottom: 4 }}>
+                          <strong>Exit first:</strong> {assessment.exit.bullish.exitFirst}
+                        </div>
+                        <div style={{ fontSize: 10, color: '#86efac', lineHeight: 1.45 }}>
+                          <strong>Hold:</strong> {assessment.exit.bullish.holdLast}
+                        </div>
+                      </div>
+
+                      {/* Bearish */}
+                      <div style={{ background: '#200c0c', borderRadius: 6, padding: '9px 10px', border: '1px solid #ef444433' }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: '#ef4444', marginBottom: 5, display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <span>↓</span> Bearish trend
+                        </div>
+                        <div style={{ fontSize: 10, color: '#fca5a5', marginBottom: 4, fontWeight: 600 }}>
+                          {assessment.exit.bearish.trigger}
+                        </div>
+                        <div style={{ fontSize: 10, color: '#f87171', marginBottom: 4 }}>
+                          <strong>Exit first:</strong> {assessment.exit.bearish.exitFirst}
+                        </div>
+                        <div style={{ fontSize: 10, color: '#fca5a5', lineHeight: 1.45 }}>
+                          <strong>Hold:</strong> {assessment.exit.bearish.holdLast}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
         )}
 
         {/* ════════════════════════════════════════════════════════════════════
