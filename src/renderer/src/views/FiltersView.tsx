@@ -101,6 +101,14 @@ export function FiltersView() {
     window.dispatchEvent(new CustomEvent('navigate-to-analysis', { detail: { ticker } }));
   };
 
+  const runValidateForTicker = (ticker: string) => {
+    window.dispatchEvent(new CustomEvent('navigate-to-validate', { detail: { ticker } }));
+  };
+
+  const runOptionsForTicker = (ticker: string) => {
+    window.dispatchEvent(new CustomEvent('navigate-to-options', { detail: { ticker } }));
+  };
+
   const [addToWatchlistTarget, setAddToWatchlistTarget] = useState<number | null>(null);
 
   const addToWatchlist = async (ticker: string, watchlistId: number) => {
@@ -304,7 +312,7 @@ export function FiltersView() {
                       </th>
                     ))}
                     <th>Match Reason</th>
-                    <th style={{ width: 80 }}>Actions</th>
+                    <th style={{ width: 110 }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -329,6 +337,20 @@ export function FiltersView() {
                             onClick={() => runAnalysisForTicker(r.ticker)}
                           >
                             📊
+                          </button>
+                          <button
+                            className="action-btn"
+                            title="Validate"
+                            onClick={() => runValidateForTicker(r.ticker)}
+                          >
+                            ✔
+                          </button>
+                          <button
+                            className="action-btn"
+                            title="Options chain"
+                            onClick={() => runOptionsForTicker(r.ticker)}
+                          >
+                            ⛓
                           </button>
                           <div style={{ position: 'relative' }}>
                             <button
