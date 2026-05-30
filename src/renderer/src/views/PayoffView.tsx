@@ -4,6 +4,7 @@
 // Chain integration loads live strikes + mid-prices + Greeks from the IPC layer.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type {
   PayoffLeg,
   SavedPayoffStrategy,
@@ -214,15 +215,28 @@ const TEMPLATES: Template[] = [
   },
 ];
 
-// ─── InfoTip tooltip ──────────────────────────────────────────────────────────
+// ─── InfoTip tooltip (portal-based — renders at document.body to avoid clipping) ──
+
+interface TooltipState { top: number; left: number }
 
 function InfoTip({ text }: { text: string }) {
-  const [show, setShow] = useState(false);
+  const [pos, setPos] = useState<TooltipState | null>(null);
+  const btnRef = useRef<HTMLSpanElement>(null);
+
+  const open = () => {
+    if (!btnRef.current) return;
+    const r = btnRef.current.getBoundingClientRect();
+    setPos({ top: r.top, left: r.left + r.width / 2 });
+  };
+
+  const close = () => setPos(null);
+
   return (
-    <span style={{ position: 'relative', display: 'inline-flex', verticalAlign: 'middle' }}>
+    <span style={{ display: 'inline-flex', verticalAlign: 'middle' }}>
       <span
-        onMouseEnter={() => setShow(true)}
-        onMouseLeave={() => setShow(false)}
+        ref={btnRef}
+        onMouseEnter={open}
+        onMouseLeave={close}
         style={{
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
           width: 14, height: 14, borderRadius: '50%',
@@ -231,19 +245,29 @@ function InfoTip({ text }: { text: string }) {
           lineHeight: 1,
         }}
       >?</span>
-      {show && (
+      {pos && createPortal(
         <div style={{
-          position: 'absolute', bottom: 'calc(100% + 6px)', left: '50%',
-          transform: 'translateX(-50%)', zIndex: 200,
-          background: '#1e293b', border: '1px solid #475569',
-          borderRadius: 6, padding: '9px 11px',
-          fontSize: 11, color: '#cbd5e1', lineHeight: 1.55,
-          maxWidth: 280, width: 'max-content',
-          boxShadow: '0 6px 18px rgba(0,0,0,0.5)',
-          pointerEvents: 'none', whiteSpace: 'pre-line',
+          position: 'fixed',
+          bottom: `calc(100vh - ${pos.top}px + 6px)`,
+          left: pos.left,
+          transform: 'translateX(-50%)',
+          zIndex: 99999,
+          background: '#1e293b',
+          border: '1px solid #475569',
+          borderRadius: 6,
+          padding: '9px 11px',
+          fontSize: 11,
+          color: '#cbd5e1',
+          lineHeight: 1.55,
+          maxWidth: 280,
+          width: 'max-content',
+          boxShadow: '0 6px 18px rgba(0,0,0,0.6)',
+          pointerEvents: 'none',
+          whiteSpace: 'pre-line',
         }}>
           {text}
-        </div>
+        </div>,
+        document.body,
       )}
     </span>
   );
