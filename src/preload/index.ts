@@ -31,6 +31,9 @@ import type {
   AgentStatus,
   AgentTrade,
   AgentLesson,
+  AgentTheoryCheck,
+  AgentNativeLesson,
+  AgentDashboard,
   AgentRecommendation,
   AgentMemorySnapshot,
   AgentConfig,
@@ -51,6 +54,12 @@ import type {
   CollaredLeapsProgressDetail,
   FilterTemplate,
   FilterTemplateResult,
+  EtradeAccount,
+  EtradeSyncResult,
+  PositionEtrade,
+  PositionAnalysis,
+  AdvisorSession,
+  AdvisorProgressEvent,
 } from '@shared/types.js';
 export type {
   ScreenPreset, ScreenCriteria, ScreenRunResult, ScreenResultRow, Universe,
@@ -652,7 +661,36 @@ function buildApi() {
       status: 'open' | 'closed';
       createdAt: string;
       updatedAt: string;
-    }[]; error?: string }>('portfolio:listByTicker', ticker)
+    }[]; error?: string }>('portfolio:listByTicker', ticker),
+
+    // ── Phase 1: E*Trade Sync ─────────────────────────────────────────────────
+    etrade: {
+      listAccounts: () => invoke<EtradeAccount[]>('portfolio:etrade:listAccounts'),
+      sync: (accountIdKey?: string) => invoke<EtradeSyncResult>('portfolio:etrade:sync', accountIdKey),
+      lastSync: () => invoke<string | null>('portfolio:etrade:lastSync'),
+      listPositions: () => invoke<PositionEtrade[]>('portfolio:etrade:listPositions'),
+    },
+
+    // ── Phase 2: Per-Position Analysis ────────────────────────────────────────
+    analysis: {
+      run: (positionId: number) => invoke<PositionAnalysis>('portfolio:analysis:run', positionId),
+      runAll: () => invoke<PositionAnalysis[]>('portfolio:analysis:runAll'),
+      get: (positionId: number) => invoke<PositionAnalysis | null>('portfolio:analysis:get', positionId),
+    },
+
+    // ── Phase 3: AI Advisor ───────────────────────────────────────────────────
+    advisor: {
+      run: () => invoke<AdvisorSession>('portfolio:advisor:run'),
+      history: (limit?: number) => invoke<AdvisorSession[]>('portfolio:advisor:history', limit),
+      setApiKey: (key: string) => invoke<boolean>('portfolio:advisor:setApiKey', key),
+      hasApiKey: () => invoke<boolean>('portfolio:advisor:hasApiKey'),
+      /** Subscribe to streaming progress events. Returns an unsubscribe function. */
+      onProgress: (callback: (evt: AdvisorProgressEvent) => void) => {
+        const handler = (_: unknown, evt: AdvisorProgressEvent) => callback(evt);
+        ipcRenderer.on('portfolio:advisor:progress', handler);
+        return () => ipcRenderer.removeListener('portfolio:advisor:progress', handler);
+      },
+    },
   };
 
   const optionsChain = {
@@ -742,6 +780,10 @@ function buildApi() {
     getTrades: (statusFilter?: 'open' | 'closed' | 'all') =>
       invoke<AgentTrade[]>('agent:get-trades', statusFilter),
     getLessons: (limit?: number) => invoke<AgentLesson[]>('agent:get-lessons', limit),
+    getTheoryChecks: (limit?: number) => invoke<AgentTheoryCheck[]>('agent:get-theory-checks', limit),
+    getNativeLessons: () => invoke<AgentNativeLesson[]>('agent:get-native-lessons'),
+    getDashboard: () => invoke<AgentDashboard>('agent:get-dashboard'),
+    getLiveRecommendations: () => invoke<AgentRecommendation[]>('agent:get-live-recommendations'),
     getRecommendations: () => invoke<AgentRecommendation[]>('agent:get-recommendations'),
     getMemory: () => invoke<AgentMemorySnapshot | null>('agent:get-memory'),
     runPhase: (phase: string, projectPath: string) =>

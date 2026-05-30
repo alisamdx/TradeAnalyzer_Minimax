@@ -238,7 +238,7 @@ app.whenReady().then(() => {
     constituentsService.getConstituents(u);
   const screenerService = new ScreenerService(db, dataProvider, getConstituents);
 
-  registerScreenerIpc(screenerService, constituentsService, watchlistService, quoteCache, new FundamentalsCache(db), dataProvider);
+  registerScreenerIpc(screenerService, constituentsService, watchlistService, quoteCache, new FundamentalsCache(db), dataProvider, db);
 
   // Phase 3 — rate limiter + job queue + analysis + validate-all.
   const rateLimiter = new TokenBucketRateLimiter({ requestsPerMinute: 100 });
@@ -255,8 +255,8 @@ app.whenReady().then(() => {
   // Phase 4 - Historical data IPC
   registerHistoricalIpc(db, () => getApiKey(db));
 
-  // Phase 6 - Portfolio tracking IPC
-  registerPortfolioIpc(db);
+  // Phase 6 - Portfolio tracking IPC (+ Phase 1–3 AI Portfolio Advisor)
+  registerPortfolioIpc(db, analysisService);
 
   // Phase 7 - Morning Briefing IPC
   registerBriefingIpc(db, () => getApiKey(db), rateLimiter);

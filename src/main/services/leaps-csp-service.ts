@@ -125,6 +125,7 @@ const MARKET_HOLIDAY_FRIDAYS = new Set([
   '2025-04-18', // Good Friday
   '2025-07-04', // Independence Day (Friday)
   '2026-04-03', // Good Friday
+  '2026-06-19', // Juneteenth (Friday)
   '2026-12-25', // Christmas (Friday)
   '2027-01-01', // New Year's Day (Friday)
   '2027-03-26', // Good Friday

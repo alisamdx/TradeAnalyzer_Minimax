@@ -1,7 +1,35 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
-import type { AgentStatus, AgentTrade, AgentLesson, AgentRecommendation, AgentMemorySnapshot, AgentConfig, AgentStrategy, AgentStrategiesState, OptionStrategyType, Watchlist } from '@shared/types.js';
+import type { AgentStatus, AgentTrade, AgentLesson, AgentNativeLesson, AgentTheoryCheck, AgentDashboard, AgentRecommendation, AgentMemorySnapshot, AgentConfig, AgentStrategy, AgentStrategiesState, OptionStrategyType, Watchlist } from '@shared/types.js';
 
-type Tab = 'overview' | 'trades' | 'lessons' | 'recommendations' | 'memory' | 'run' | 'config';
+type Tab = 'overview' | 'trades' | 'actions' | 'lessons' | 'recommendations' | 'memory' | 'run' | 'config';
+
+function liveDTE(expiration: string): number {
+  return Math.max(0, Math.round((new Date(expiration + 'T21:00:00Z').getTime() - Date.now()) / 86400000));
+}
+
+function dteSeverity(dte: number): 'high' | 'medium' | 'low' | null {
+  if (dte <= 7) return 'high';
+  if (dte <= 14) return 'medium';
+  if (dte <= 21) return 'low';
+  return null;
+}
+
+// lastPrice = current stock price, strike = option strike
+// Returns how at-risk the position is based on stock proximity to/through the strike
+function strikeRisk(stockPrice: number, strike: number, strategy: string): 'high' | 'medium' | 'low' | null {
+  const isCall = strategy.toLowerCase().includes('call');
+  // dist > 0 = OTM (safe), dist < 0 = ITM (at risk)
+  const dist = isCall
+    ? (strike - stockPrice) / strike   // call: want stock below strike
+    : (stockPrice - strike) / strike;  // put: want stock above strike
+  if (dist < -0.05) return 'high';   // > 5% ITM
+  if (dist < 0)     return 'medium'; // any ITM
+  if (dist < 0.03)  return 'low';    // within 3% of strike (OTM but close)
+  return null;
+}
+
+const SEVERITY_COLOR = { high: '#e74c3c', medium: '#f39c12', low: '#95a5a6' } as const;
+const SEVERITY_BG    = { high: '#3a1a1a', medium: '#3a2a1a', low: '#2c2c2c' } as const;
 
 const fmt$ = (n: number | null | undefined) =>
   n == null ? '—' : n >= 0 ? `+$${n.toFixed(2)}` : `-$${Math.abs(n).toFixed(2)}`;
@@ -15,8 +43,12 @@ export function AgentView() {
   const [status, setStatus] = useState<AgentStatus | null>(null);
   const [trades, setTrades] = useState<AgentTrade[]>([]);
   const [lessons, setLessons] = useState<AgentLesson[]>([]);
+  const [theoryChecks, setTheoryChecks] = useState<AgentTheoryCheck[]>([]);
+  const [nativeLessons, setNativeLessons] = useState<AgentNativeLesson[]>([]);
   const [recs, setRecs] = useState<AgentRecommendation[]>([]);
+  const [liveRecs, setLiveRecs] = useState<AgentRecommendation[]>([]);
   const [memory, setMemory] = useState<AgentMemorySnapshot | null>(null);
+  const [dashboard, setDashboard] = useState<AgentDashboard | null>(null);
   const [tradeFilter, setTradeFilter] = useState<'open' | 'closed' | 'all'>('all');
   const [selectedTradeId, setSelectedTradeId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
@@ -124,18 +156,26 @@ export function AgentView() {
     setLoading(true);
     setError(null);
     try {
-      const [s, t, l, r, m] = await Promise.all([
+      const [s, t, l, tc, nl, r, lr, m, d] = await Promise.all([
         window.api.agent.getStatus(),
         window.api.agent.getTrades('all'),
         window.api.agent.getLessons(50),
+        window.api.agent.getTheoryChecks(100),
+        window.api.agent.getNativeLessons(),
         window.api.agent.getRecommendations(),
-        window.api.agent.getMemory()
+        window.api.agent.getLiveRecommendations(),
+        window.api.agent.getMemory(),
+        window.api.agent.getDashboard()
       ]);
       setStatus(s);
       setTrades(t);
       setLessons(l);
+      setTheoryChecks(tc);
+      setNativeLessons(nl);
       setRecs(r);
+      setLiveRecs(lr);
       setMemory(m);
+      setDashboard(d);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -307,7 +347,7 @@ export function AgentView() {
 
       {/* Tabs */}
       <div style={{ padding: '8px 20px 0', display: 'flex', gap: 4, borderBottom: '1px solid #2c2c2c' }}>
-        {(['overview', 'trades', 'lessons', 'recommendations', 'memory', 'run', 'config'] as Tab[]).map((t) => (
+        {(['overview', 'trades', 'actions', 'lessons', 'recommendations', 'memory', 'run', 'config'] as Tab[]).map((t) => (
           <button key={t} onClick={() => setTab(t)}
             style={{
               padding: '4px 12px', fontSize: 12, borderRadius: '4px 4px 0 0',
@@ -358,6 +398,71 @@ export function AgentView() {
         {/* Trades */}
         {tab === 'trades' && (
           <div>
+            {/* ── Today's Actions panel ────────────────────────────────────── */}
+            {(() => {
+              const openTrades = trades.filter((t) => t.status === 'open');
+              if (openTrades.length === 0) return null;
+              const actions: Array<{ trade: AgentTrade; action: string; reason: string; severity: 'high' | 'medium' | 'low' }> = [];
+              for (const t of openTrades) {
+                const dte = liveDTE(t.expiration);
+                const isCall = t.strategy.toLowerCase().includes('call');
+                // dist > 0 = OTM (safe), dist < 0 = ITM (at risk)
+                const dist = t.lastPrice != null
+                  ? (isCall ? (t.strike - t.lastPrice) / t.strike : (t.lastPrice - t.strike) / t.strike)
+                  : null;
+
+                if (dte <= 5) {
+                  const itm = dist != null && dist < 0;
+                  actions.push({ trade: t, action: '🔴 Close/Roll', reason: `Only ${dte} DTE — expiry imminent${itm ? ', position is ITM' : ''}`, severity: 'high' });
+                } else if (dte <= 14) {
+                  const itm = dist != null && dist < 0;
+                  const nearMoney = dist != null && dist < 0.05;
+                  actions.push({ trade: t, action: '⏰ Roll', reason: `${dte} DTE${itm ? ` — ITM ($${t.lastPrice!.toFixed(2)} ${isCall ? 'above' : 'below'} $${t.strike} strike)` : nearMoney ? ' — near strike, watch closely' : ''}`, severity: dte <= 7 ? 'high' : 'medium' });
+                } else if (dist != null && dist < 0) {
+                  // Stock through strike with time still remaining
+                  const pct = (Math.abs(dist) * 100).toFixed(1);
+                  actions.push({ trade: t, action: '🛡 Defend', reason: `Stock ${pct}% ITM — $${t.lastPrice!.toFixed(2)} ${isCall ? 'above' : 'below'} $${t.strike} strike`, severity: Math.abs(dist) > 0.05 ? 'high' : 'medium' });
+                } else if (dist != null && dist < 0.03) {
+                  // Near strike but still OTM
+                  const pct = (dist * 100).toFixed(1);
+                  actions.push({ trade: t, action: '⚠ Monitor', reason: `Stock within ${pct}% of $${t.strike} strike — $${t.lastPrice!.toFixed(2)}`, severity: 'low' });
+                } else if (t.currentOptionMid != null && t.entryPremium > 0) {
+                  // Real close signal: actual option P&L from theory check
+                  const captured = (t.entryPremium - t.currentOptionMid) / t.entryPremium;
+                  if (captured >= 0.5) {
+                    const plPerContract = ((t.entryPremium - t.currentOptionMid) * 100).toFixed(0);
+                    actions.push({ trade: t, action: '💰 Consider Close', reason: `${(captured * 100).toFixed(0)}% of premium captured — entry $${t.entryPremium.toFixed(2)} → now $${t.currentOptionMid.toFixed(2)} (+$${plPerContract}/contract)`, severity: captured >= 0.75 ? 'medium' : 'low' });
+                  }
+                }
+              }
+              if (actions.length === 0) return null;
+              return (
+                <div style={{ marginBottom: 14, background: '#12121e', borderRadius: 6, border: '1px solid #2c3050' }}>
+                  <div style={{ padding: '7px 14px', borderBottom: '1px solid #2c2c2c', display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{ fontWeight: 600, fontSize: 13 }}>Today's Actions</span>
+                    <span style={{ fontSize: 11, color: '#95a5a6' }}>{actions.length} position{actions.length !== 1 ? 's' : ''} need attention</span>
+                  </div>
+                  <div style={{ padding: '8px 14px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {actions.map(({ trade: t, action, reason, severity }) => (
+                      <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, flexWrap: 'wrap' }}>
+                        <span style={{ padding: '1px 6px', borderRadius: 3, fontSize: 11, fontWeight: 600, background: SEVERITY_BG[severity], color: SEVERITY_COLOR[severity], whiteSpace: 'nowrap' }}>
+                          {action}
+                        </span>
+                        <span style={{ fontWeight: 600, minWidth: 55 }}>{t.ticker}</span>
+                        <span style={{ color: '#95a5a6' }}>{t.strategy} ${t.strike}</span>
+                        <span style={{ color: '#bdc3c7', flex: 1 }}>{reason}</span>
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          <button onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-analysis', { detail: { ticker: t.ticker } }))}
+                            style={{ fontSize: 10, padding: '1px 5px', background: '#1a2a3a', color: '#3498db', borderRadius: 3 }}>📊</button>
+                          <button onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-options', { detail: { ticker: t.ticker, expiry: t.expiration } }))}
+                            style={{ fontSize: 10, padding: '1px 5px', background: '#2a1a3a', color: '#9b59b6', borderRadius: 3 }}>⛓</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
             <div style={{ display: 'flex', gap: 8, marginBottom: emailMsg ? 8 : 12, alignItems: 'center', flexWrap: 'wrap' }}>
               {(['all', 'open', 'closed'] as const).map((f) => (
                 <button key={f} onClick={() => setTradeFilter(f)}
@@ -405,7 +510,7 @@ export function AgentView() {
               <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ color: '#95a5a6', borderBottom: '1px solid #2c2c2c' }}>
-                    {['#', 'Ticker', 'Strategy', 'Strike', 'Exp', 'DTE', 'Premium', 'Capital', 'Score', 'Status', 'Entry', 'Close', 'P&L', 'Reason', 'Entry $', 'Last $ / Chg', ''].map((h) => (
+                    {['#', 'Ticker', 'Strategy', 'Strike', 'Exp', 'DTE', 'Premium', 'Option Now', 'Capital', 'Score', 'Status', 'Entry', 'Close', 'P&L', 'Reason', 'Entry $', 'Last $ / Chg', ''].map((h) => (
                       <th key={h} style={{ textAlign: 'left', padding: '4px 8px', fontWeight: 500 }}>{h}</th>
                     ))}
                   </tr>
@@ -441,11 +546,25 @@ export function AgentView() {
                                   {wlAdding === t.id ? '…' : '+WL'}
                                 </button>
                                 <button
+                                  onClick={(e) => { e.stopPropagation(); window.dispatchEvent(new CustomEvent('navigate-to-analysis', { detail: { ticker: t.ticker } })); }}
+                                  title={`Analyze ${t.ticker}`}
+                                  style={{ fontSize: 10, padding: '1px 5px', background: '#1a2a3a', color: '#3498db', borderRadius: 3, cursor: 'pointer', lineHeight: 1.4, fontWeight: 400 }}
+                                >
+                                  📊
+                                </button>
+                                <button
                                   onClick={(e) => { e.stopPropagation(); window.dispatchEvent(new CustomEvent('navigate-to-validate', { detail: { ticker: t.ticker } })); }}
                                   title={`Validate ${t.ticker}`}
                                   style={{ fontSize: 10, padding: '1px 5px', background: '#1a2a1a', color: '#2ecc71', borderRadius: 3, cursor: 'pointer', lineHeight: 1.4, fontWeight: 400 }}
                                 >
                                   🎯
+                                </button>
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); window.dispatchEvent(new CustomEvent('navigate-to-options', { detail: { ticker: t.ticker, expiry: t.expiration } })); }}
+                                  title={`Options chain for ${t.ticker}`}
+                                  style={{ fontSize: 10, padding: '1px 5px', background: '#2a1a3a', color: '#9b59b6', borderRadius: 3, cursor: 'pointer', lineHeight: 1.4, fontWeight: 400 }}
+                                >
+                                  ⛓
                                 </button>
                                 {wlPickerTradeId === t.id && (
                                   <div
@@ -482,6 +601,26 @@ export function AgentView() {
                           <td style={{ padding: '4px 8px' }}>{fmtDate(t.expiration)}</td>
                           <td style={{ padding: '4px 8px' }}>{t.dteAtEntry}</td>
                           <td style={{ padding: '4px 8px' }}>${t.entryPremium.toFixed(2)}</td>
+                          <td style={{ padding: '4px 8px' }}>
+                            {t.currentOptionMid != null ? (() => {
+                              const pl = (t.entryPremium - t.currentOptionMid) * 100; // per contract
+                              const captured = t.entryPremium > 0 ? (t.entryPremium - t.currentOptionMid) / t.entryPremium : 0;
+                              const color = pl >= 0 ? '#2ecc71' : '#e74c3c';
+                              return (
+                                <span>
+                                  <span style={{ color: '#bdc3c7' }}>${t.currentOptionMid.toFixed(2)}</span>
+                                  <span style={{ marginLeft: 4, fontSize: 11, color }}>
+                                    {pl >= 0 ? '+' : ''}${pl.toFixed(0)}/ct
+                                  </span>
+                                  {Math.abs(captured) >= 0.1 && (
+                                    <span style={{ marginLeft: 3, fontSize: 10, color }}>
+                                      ({(captured * 100).toFixed(0)}%)
+                                    </span>
+                                  )}
+                                </span>
+                              );
+                            })() : <span style={{ color: '#555' }}>—</span>}
+                          </td>
                           <td style={{ padding: '4px 8px' }}>${t.capitalRequired.toLocaleString()}</td>
                           <td style={{ padding: '4px 8px' }}>{t.compositeScore.toFixed(2)}</td>
                           <td style={{ padding: '4px 8px' }}>
@@ -529,7 +668,7 @@ export function AgentView() {
                         </tr>
                         {isSelected && (
                           <tr key={`${t.id}-detail`}>
-                            <td colSpan={17} style={{ padding: 0, borderBottom: '1px solid #2c2c2c' }}>
+                            <td colSpan={18} style={{ padding: 0, borderBottom: '1px solid #2c2c2c' }}>
                               <TradeDetail trade={t} />
                             </td>
                           </tr>
@@ -543,103 +682,436 @@ export function AgentView() {
           </div>
         )}
 
+        {/* Actions */}
+        {tab === 'actions' && (() => {
+          const openTrades = trades.filter((t) => t.status === 'open');
+          const expiringRows = openTrades
+            .map((t) => ({ trade: t, dte: liveDTE(t.expiration), severity: dteSeverity(liveDTE(t.expiration)) }))
+            .filter((r) => r.severity !== null)
+            .sort((a, b) => a.dte - b.dte) as { trade: AgentTrade; dte: number; severity: 'high' | 'medium' | 'low' }[];
+          // "Underwater" = stock near or through the strike (not premium comparison)
+          const underwaterRows = openTrades
+            .filter((t) => t.lastPrice !== null)
+            .map((t) => {
+              const severity = strikeRisk(t.lastPrice!, t.strike, t.strategy);
+              const isCall = t.strategy.toLowerCase().includes('call');
+              // dist < 0 = ITM, dist > 0 = OTM; sort most ITM first
+              const dist = isCall
+                ? (t.strike - t.lastPrice!) / t.strike
+                : (t.lastPrice! - t.strike) / t.strike;
+              return { trade: t, severity, dist };
+            })
+            .filter((r) => r.severity !== null)
+            .sort((a, b) => a.dist - b.dist) as { trade: AgentTrade; severity: 'high' | 'medium' | 'low'; dist: number }[];
+          const total = expiringRows.length + underwaterRows.length;
+          return (
+            <div>
+              <div style={{ marginBottom: 16, fontSize: 12, color: '#95a5a6' }}>
+                {openTrades.length} open trade{openTrades.length !== 1 ? 's' : ''} · {total} alert{total !== 1 ? 's' : ''}
+              </div>
+              {total === 0 && (
+                <div style={{ color: '#2ecc71', fontSize: 13 }}>✓ No action needed — all open positions look healthy.</div>
+              )}
+              {expiringRows.length > 0 && (
+                <div style={{ marginBottom: 24 }}>
+                  <h4 style={{ margin: '0 0 10px', color: '#bdc3c7' }}>Expiring Soon</h4>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {expiringRows.map(({ trade: t, dte, severity }) => (
+                      <div key={t.id} style={{
+                        background: '#1a1a2e', borderRadius: 6, padding: '10px 14px',
+                        borderLeft: `3px solid ${SEVERITY_COLOR[severity]}`,
+                        display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap'
+                      }}>
+                        <span style={{ padding: '1px 7px', borderRadius: 3, fontSize: 11, fontWeight: 600, background: SEVERITY_BG[severity], color: SEVERITY_COLOR[severity] }}>
+                          {severity.toUpperCase()}
+                        </span>
+                        <span style={{ fontWeight: 600, minWidth: 60 }}>{t.ticker}</span>
+                        <span style={{ fontSize: 12, color: '#95a5a6' }}>{t.strategy} ${t.strike} · exp {fmtDate(t.expiration)}</span>
+                        <span style={{ fontSize: 12, color: SEVERITY_COLOR[severity], fontWeight: 600 }}>{dte} DTE</span>
+                        <span style={{ fontSize: 12, color: '#bdc3c7' }}>premium ${t.entryPremium.toFixed(2)}</span>
+                        <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
+                          <button onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-analysis', { detail: { ticker: t.ticker } }))}
+                            style={{ fontSize: 11, padding: '2px 7px', background: '#1a2a3a', color: '#3498db', borderRadius: 3 }}>📊 Analysis</button>
+                          <button onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-validate', { detail: { ticker: t.ticker } }))}
+                            style={{ fontSize: 11, padding: '2px 7px', background: '#1a2a1a', color: '#2ecc71', borderRadius: 3 }}>🎯 Validate</button>
+                          <button onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-options', { detail: { ticker: t.ticker, expiry: t.expiration } }))}
+                            style={{ fontSize: 11, padding: '2px 7px', background: '#2a1a3a', color: '#9b59b6', borderRadius: 3 }}>⛓ Options</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {underwaterRows.length > 0 && (
+                <div>
+                  <h4 style={{ margin: '0 0 10px', color: '#bdc3c7' }}>Underwater Positions</h4>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {underwaterRows.map(({ trade: t, severity, dist }) => {
+                      const isCall = t.strategy.toLowerCase().includes('call');
+                      const isITM = dist < 0;
+                      const distPct = (Math.abs(dist) * 100).toFixed(1);
+                      const label = isITM
+                        ? `Stock ${distPct}% ITM ($${t.lastPrice!.toFixed(2)} ${isCall ? 'above' : 'below'} $${t.strike} strike)`
+                        : `Stock within ${distPct}% of $${t.strike} strike ($${t.lastPrice!.toFixed(2)})`;
+                      return (
+                      <div key={t.id} style={{
+                        background: '#1a1a2e', borderRadius: 6, padding: '10px 14px',
+                        borderLeft: `3px solid ${SEVERITY_COLOR[severity]}`,
+                        display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap'
+                      }}>
+                        <span style={{ padding: '1px 7px', borderRadius: 3, fontSize: 11, fontWeight: 600, background: SEVERITY_BG[severity], color: SEVERITY_COLOR[severity] }}>
+                          {severity.toUpperCase()}
+                        </span>
+                        <span style={{ fontWeight: 600, minWidth: 60 }}>{t.ticker}</span>
+                        <span style={{ fontSize: 12, color: '#95a5a6' }}>{t.strategy} ${t.strike} · exp {fmtDate(t.expiration)}</span>
+                        <span style={{ fontSize: 12, color: SEVERITY_COLOR[severity], fontWeight: 600 }}>
+                          {label}
+                        </span>
+                        <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
+                          <button onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-analysis', { detail: { ticker: t.ticker } }))}
+                            style={{ fontSize: 11, padding: '2px 7px', background: '#1a2a3a', color: '#3498db', borderRadius: 3 }}>📊 Analysis</button>
+                          <button onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-validate', { detail: { ticker: t.ticker } }))}
+                            style={{ fontSize: 11, padding: '2px 7px', background: '#1a2a1a', color: '#2ecc71', borderRadius: 3 }}>🎯 Validate</button>
+                          <button onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-options', { detail: { ticker: t.ticker, expiry: t.expiration } }))}
+                            style={{ fontSize: 11, padding: '2px 7px', background: '#2a1a3a', color: '#9b59b6', borderRadius: 3 }}>⛓ Options</button>
+                        </div>
+                      </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
         {/* Lessons */}
         {tab === 'lessons' && (
           <div>
-            {lessons.length === 0 ? (
-              <div style={{ color: '#95a5a6', fontSize: 13 }}>No lessons recorded yet.</div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {lessons.map((l) => (
-                  <div key={l.id} style={{ background: '#1a1a2e', borderRadius: 6, padding: '10px 14px', borderLeft: '3px solid #3498db' }}>
-                    <div style={{ display: 'flex', gap: 12, marginBottom: 6, fontSize: 12 }}>
-                      <span style={{ color: '#f39c12', fontWeight: 600 }}>{l.gapCause}</span>
-                      <span style={{ color: '#e74c3c' }}>{fmt$(l.gapAmountUsd)}</span>
-                      <span style={{ color: '#95a5a6' }}>({(l.gapPct * 100).toFixed(1)}%)</span>
-                      <span style={{ marginLeft: 'auto', color: '#95a5a6' }}>Trade #{l.tradeId} · {fmtDate(l.createdAt)}</span>
+            {/* ── Native Insights — computed from DB without running agent ── */}
+            <div style={{ marginBottom: 20 }}>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 10 }}>
+                <h4 style={{ margin: 0 }}>Portfolio Insights</h4>
+                <span style={{ fontSize: 12, color: '#95a5a6' }}>detected from your trades — no agent run needed</span>
+                <button onClick={loadAllData} disabled={loading} style={{ marginLeft: 'auto', fontSize: 11, background: '#1a2a3a', color: '#3498db' }}>
+                  {loading ? '⟳' : '↻ Refresh Insights'}
+                </button>
+              </div>
+              {nativeLessons.length === 0 ? (
+                <div style={{ color: '#2ecc71', fontSize: 13 }}>✓ No issues detected — all open positions look healthy.</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {nativeLessons.map((l) => {
+                    const sevColor = l.severity === 'high' ? '#e74c3c' : l.severity === 'medium' ? '#f39c12' : '#95a5a6';
+                    const sevBg = l.severity === 'high' ? '#3a1a1a' : l.severity === 'medium' ? '#3a2a1a' : '#2c2c2c';
+                    return (
+                      <div key={l.id} style={{
+                        background: '#1a1a2e', borderRadius: 6, padding: '10px 14px',
+                        borderLeft: `3px solid ${sevColor}`
+                      }}>
+                        <div style={{ display: 'flex', gap: 10, marginBottom: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                          <span style={{ padding: '1px 6px', borderRadius: 3, fontSize: 11, fontWeight: 600, background: sevBg, color: sevColor }}>
+                            {l.severity.toUpperCase()}
+                          </span>
+                          <span style={{ fontWeight: 600 }}>{l.title}</span>
+                          {l.ticker && (
+                            <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
+                              <button onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-analysis', { detail: { ticker: l.ticker } }))}
+                                style={{ fontSize: 11, padding: '2px 7px', background: '#1a2a3a', color: '#3498db', borderRadius: 3 }}>📊</button>
+                              <button onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-validate', { detail: { ticker: l.ticker } }))}
+                                style={{ fontSize: 11, padding: '2px 7px', background: '#1a2a1a', color: '#2ecc71', borderRadius: 3 }}>🎯</button>
+                            </div>
+                          )}
+                        </div>
+                        <div style={{ fontSize: 12, color: '#bdc3c7', lineHeight: 1.5 }}>{l.narrative}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Theory Checks — from the review phase */}
+            {theoryChecks.length > 0 && (
+              <div style={{ marginBottom: 24 }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 10 }}>
+                  <h4 style={{ margin: 0 }}>Theory Validation</h4>
+                  <span style={{ fontSize: 12, color: '#95a5a6' }}>
+                    {theoryChecks.filter(c => c.verdict === 'CONFIRMED').length} confirmed ·{' '}
+                    {theoryChecks.filter(c => c.verdict === 'AT_RISK').length} at risk ·{' '}
+                    {theoryChecks.filter(c => c.verdict === 'INVALIDATED').length} invalidated
+                  </span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {theoryChecks.map((c) => {
+                    const vColor = c.verdict === 'CONFIRMED' ? '#2ecc71' : c.verdict === 'AT_RISK' ? '#f39c12' : '#e74c3c';
+                    const vBg    = c.verdict === 'CONFIRMED' ? '#1a3a2a' : c.verdict === 'AT_RISK' ? '#3a2a1a' : '#3a1a1a';
+                    return (
+                      <div key={c.id} style={{
+                        background: '#1a1a2e', borderRadius: 6, padding: '10px 14px',
+                        borderLeft: `3px solid ${vColor}`
+                      }}>
+                        <div style={{ display: 'flex', gap: 10, marginBottom: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                          <span style={{ padding: '1px 7px', borderRadius: 3, fontSize: 11, fontWeight: 600, background: vBg, color: vColor }}>
+                            {c.verdict}
+                          </span>
+                          <span style={{ fontWeight: 600 }}>{c.ticker}</span>
+                          <span style={{ fontSize: 12, color: '#95a5a6' }}>{c.strategy} ${c.strike} · exp {fmtDate(c.expiration)}</span>
+                          <span style={{ fontSize: 11, padding: '1px 6px', borderRadius: 3, background: '#2c2c2c', color: '#95a5a6' }}>
+                            {c.tradeStatus}
+                          </span>
+                          {c.currentDelta != null && (
+                            <span style={{ fontSize: 12, color: '#bdc3c7' }}>δ {c.currentDelta.toFixed(2)}</span>
+                          )}
+                          {c.currentDTE != null && c.currentDTE > 0 && (
+                            <span style={{ fontSize: 12, color: '#bdc3c7' }}>{c.currentDTE} DTE</span>
+                          )}
+                          <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
+                            <button onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-analysis', { detail: { ticker: c.ticker } }))}
+                              style={{ fontSize: 11, padding: '2px 7px', background: '#1a2a3a', color: '#3498db', borderRadius: 3 }}>📊</button>
+                            <button onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-validate', { detail: { ticker: c.ticker } }))}
+                              style={{ fontSize: 11, padding: '2px 7px', background: '#1a2a1a', color: '#2ecc71', borderRadius: 3 }}>🎯</button>
+                            <button onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-options', { detail: { ticker: c.ticker, expiry: c.expiration } }))}
+                              style={{ fontSize: 11, padding: '2px 7px', background: '#2a1a3a', color: '#9b59b6', borderRadius: 3 }}>⛓</button>
+                          </div>
+                          <span style={{ fontSize: 11, color: '#555', marginLeft: 4 }}>{fmtDate(c.checkedAt)}</span>
+                        </div>
+                        <div style={{ fontSize: 12, color: '#bdc3c7', lineHeight: 1.5 }}>{c.narrative}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Gap-analysis lessons from the learn phase */}
+            {lessons.length > 0 && (
+              <div>
+                <h4 style={{ margin: '0 0 10px', color: '#bdc3c7' }}>Gap Analysis (Learn Phase)</h4>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {lessons.map((l) => (
+                    <div key={l.id} style={{ background: '#1a1a2e', borderRadius: 6, padding: '10px 14px', borderLeft: '3px solid #3498db' }}>
+                      <div style={{ display: 'flex', gap: 12, marginBottom: 6, fontSize: 12 }}>
+                        <span style={{ color: '#f39c12', fontWeight: 600 }}>{l.gapCause}</span>
+                        <span style={{ color: '#e74c3c' }}>{fmt$(l.gapAmountUsd)}</span>
+                        <span style={{ color: '#95a5a6' }}>({(l.gapPct * 100).toFixed(1)}%)</span>
+                        <span style={{ marginLeft: 'auto', color: '#95a5a6' }}>Trade #{l.tradeId} · {fmtDate(l.createdAt)}</span>
+                      </div>
+                      <div style={{ fontSize: 12, color: '#bdc3c7', lineHeight: 1.5 }}>{l.narrative}</div>
                     </div>
-                    <div style={{ fontSize: 12, color: '#bdc3c7', lineHeight: 1.5 }}>{l.narrative}</div>
-                  </div>
-                ))}
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {theoryChecks.length === 0 && lessons.length === 0 && (
+              <div style={{ color: '#95a5a6', fontSize: 13 }}>
+                No theory checks or gap-analysis lessons yet. Run the <strong>review</strong> phase to validate open trade theories, or the <strong>learn</strong> phase after trades close to generate gap analysis.
               </div>
             )}
           </div>
         )}
 
         {/* Recommendations */}
-        {tab === 'recommendations' && (
-          <div>
-            {recs.length === 0 ? (
-              <div style={{ color: '#95a5a6', fontSize: 13 }}>No recommendations yet.</div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {recs.map((r) => (
-                  <div key={r.id} style={{
-                    background: '#1a1a2e', borderRadius: 6, padding: '10px 14px',
-                    borderLeft: `3px solid ${r.severity === 'high' ? '#e74c3c' : r.severity === 'medium' ? '#f39c12' : '#95a5a6'}`
-                  }}>
-                    <div style={{ display: 'flex', gap: 10, marginBottom: 6, fontSize: 12, flexWrap: 'wrap' }}>
-                      <span style={{ fontWeight: 600, color: '#3498db' }}>{r.category}</span>
-                      <span style={{
-                        padding: '1px 6px', borderRadius: 3, fontSize: 11,
-                        background: r.severity === 'high' ? '#3a1a1a' : r.severity === 'medium' ? '#3a2a1a' : '#2c2c2c',
-                        color: r.severity === 'high' ? '#e74c3c' : r.severity === 'medium' ? '#f39c12' : '#95a5a6'
-                      }}>{r.severity}</span>
-                      <span style={{
-                        padding: '1px 6px', borderRadius: 3, fontSize: 11,
-                        background: r.status === 'pending' ? '#1a2a3a' : '#2c2c2c',
-                        color: r.status === 'pending' ? '#3498db' : '#95a5a6'
-                      }}>{r.status}</span>
-                      <span style={{ marginLeft: 'auto', color: '#95a5a6' }}>{fmtDate(r.createdAt)}</span>
-                    </div>
-                    <div style={{ fontSize: 12, color: '#bdc3c7', marginBottom: 6 }}>{r.description}</div>
-                    <div style={{ fontSize: 12, color: '#95a5a6', fontStyle: 'italic' }}>
-                      → {r.proposedChange}
-                    </div>
-                  </div>
-                ))}
+        {tab === 'recommendations' && (() => {
+          const sevColor = (s: string) => s === 'high' ? '#e74c3c' : s === 'medium' ? '#f39c12' : '#95a5a6';
+          const sevBg    = (s: string) => s === 'high' ? '#3a1a1a' : s === 'medium' ? '#3a2a1a' : '#2c2c2c';
+          // Category accent colors
+          const catColor = (c: string) =>
+            c === 'Close Now' ? '#2ecc71' :
+            c === 'Roll'      ? '#3498db' :
+            c === 'Defend'    ? '#f39c12' :
+            '#9b59b6';
+          const RecCard = ({ r }: { r: AgentRecommendation }) => (
+            <div style={{
+              background: '#1a1a2e', borderRadius: 6, padding: '10px 14px',
+              borderLeft: `3px solid ${sevColor(r.severity)}`
+            }}>
+              <div style={{ display: 'flex', gap: 10, marginBottom: 6, fontSize: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+                <span style={{ fontWeight: 700, fontSize: 12, color: catColor(r.category) }}>{r.category}</span>
+                <span style={{ padding: '1px 6px', borderRadius: 3, fontSize: 11, background: sevBg(r.severity), color: sevColor(r.severity) }}>
+                  {r.severity}
+                </span>
+                <span style={{
+                  padding: '1px 6px', borderRadius: 3, fontSize: 11,
+                  background: r.status === 'live' ? '#1a2a1a' : r.status === 'pending' ? '#1a2a3a' : '#2c2c2c',
+                  color: r.status === 'live' ? '#2ecc71' : r.status === 'pending' ? '#3498db' : '#95a5a6'
+                }}>
+                  {r.status === 'live' ? '⚡ live' : r.status}
+                </span>
+                <span style={{ marginLeft: 'auto', color: '#95a5a6' }}>{r.status !== 'live' ? fmtDate(r.createdAt) : ''}</span>
               </div>
-            )}
-          </div>
-        )}
+              <div style={{ fontSize: 12, color: '#bdc3c7', marginBottom: 6 }}>{r.description}</div>
+              <div style={{ fontSize: 12, color: '#95a5a6', fontStyle: 'italic' }}>→ {r.proposedChange}</div>
+            </div>
+          );
+          const actionCategories = new Set(['Close Now', 'Roll', 'Defend']);
+          const actionRecs = liveRecs.filter(r => actionCategories.has(r.category));
+          const portfolioRecs = liveRecs.filter(r => !actionCategories.has(r.category));
+          return (
+            <div>
+              {actionRecs.length > 0 && (
+                <div style={{ marginBottom: 24 }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 10 }}>
+                    <h4 style={{ margin: 0 }}>Trade Actions</h4>
+                    <span style={{ fontSize: 12, color: '#95a5a6' }}>Close Now · Roll · Defend — computed from open position data</span>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {actionRecs.map((r) => <RecCard key={r.id} r={r} />)}
+                  </div>
+                </div>
+              )}
+              {portfolioRecs.length > 0 && (
+                <div style={{ marginBottom: 24 }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 10 }}>
+                    <h4 style={{ margin: 0 }}>Portfolio Insights</h4>
+                    <span style={{ fontSize: 12, color: '#95a5a6' }}>computed now from your open positions</span>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {portfolioRecs.map((r) => <RecCard key={r.id} r={r} />)}
+                  </div>
+                </div>
+              )}
+              {recs.length > 0 && (
+                <div>
+                  <h4 style={{ margin: '0 0 10px', color: '#bdc3c7' }}>Learned Recommendations</h4>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {recs.map((r) => <RecCard key={r.id} r={r} />)}
+                  </div>
+                </div>
+              )}
+              {actionRecs.length === 0 && portfolioRecs.length === 0 && recs.length === 0 && (
+                <div style={{ color: '#2ecc71', fontSize: 13 }}>
+                  ✓ No recommendations. All positions within healthy parameters.
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
-        {/* Memory */}
+        {/* Memory — live dashboard */}
         {tab === 'memory' && (
           <div>
-            {!memory ? (
-              <div style={{ color: '#95a5a6', fontSize: 13 }}>No memory snapshot found.</div>
+            {!dashboard ? (
+              <div style={{ color: '#95a5a6', fontSize: 13 }}>No data yet — connect the agent DB.</div>
             ) : (
-              <div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 20 }}>
-                  <StatCard label="Trade Count" value={String(memory.tradeCount)} />
-                  <StatCard label="Confidence" value={fmtPct(memory.confidence)} />
-                  <StatCard label="Saved" value={fmtDate(memory.savedAt)} />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+
+                {/* ── Row 1: top KPIs ── */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12 }}>
+                  <StatCard label="Open Positions"   value={String(dashboard.openPositionCount)} />
+                  <StatCard label="Capital Deployed"  value={`$${dashboard.totalDeployedCapital.toLocaleString(undefined, { maximumFractionDigits: 0 })}`} />
+                  <StatCard label="Overall Win Rate"  value={dashboard.totalClosed > 0 ? fmtPct(dashboard.overallWinRate) : '—'}
+                    color={dashboard.overallWinRate >= 0.6 ? '#2ecc71' : dashboard.overallWinRate >= 0.4 ? '#f39c12' : '#e74c3c'} />
+                  <StatCard label="Total P&L"  value={fmt$(dashboard.totalRealizedPl)}
+                    color={dashboard.totalRealizedPl >= 0 ? '#2ecc71' : '#e74c3c'} />
+                  <StatCard label="Est. Daily θ"
+                    value={dashboard.estimatedDailyTheta != null ? `$${dashboard.estimatedDailyTheta.toFixed(2)}` : '—'}
+                    color="#3498db" />
                 </div>
+
+                {/* ── Row 2: IV environment ── */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+                  <StatCard label="Avg IV (open positions)"
+                    value={dashboard.avgIv != null ? `${dashboard.avgIv.toFixed(1)}%` : '—'}
+                    color={dashboard.avgIv != null ? (dashboard.avgIv >= 30 ? '#2ecc71' : '#f39c12') : undefined} />
+                  <StatCard label="Avg Delta (open)"
+                    value={dashboard.avgDelta != null ? dashboard.avgDelta.toFixed(2) : '—'}
+                    color={dashboard.avgDelta != null && Math.abs(dashboard.avgDelta) > 0.4 ? '#e74c3c' : '#bdc3c7'} />
+                  <StatCard label="Avg DTE (open)"
+                    value={dashboard.avgDTE != null ? `${Math.round(dashboard.avgDTE)} days` : '—'}
+                    color={dashboard.avgDTE != null && dashboard.avgDTE < 10 ? '#e74c3c' : '#bdc3c7'} />
+                </div>
+
+                {/* ── Row 3: Win rate by strategy + capital by strategy ── */}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
                   <div>
-                    <h4 style={{ marginBottom: 10 }}>Scoring Weights</h4>
-                    {Object.entries(memory.weights).map(([k, v]) => (
-                      <BarRow key={k} label={k} value={v} max={1} />
-                    ))}
+                    <h4 style={{ margin: '0 0 10px' }}>Win Rate by Strategy</h4>
+                    {Object.keys(dashboard.winRateByStrategy).length === 0
+                      ? <div style={{ color: '#95a5a6', fontSize: 12 }}>No closed trades yet.</div>
+                      : Object.entries(dashboard.winRateByStrategy)
+                          .sort((a, b) => b[1].total - a[1].total)
+                          .map(([k, v]) => (
+                            <div key={k} style={{ marginBottom: 8 }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 3 }}>
+                                <span style={{ color: '#bdc3c7' }}>{k}</span>
+                                <span style={{ color: '#95a5a6' }}>{v.wins}/{v.total} · {(v.winRate * 100).toFixed(0)}%</span>
+                              </div>
+                              <div style={{ background: '#2c2c2c', borderRadius: 3, height: 6 }}>
+                                <div style={{ width: `${v.winRate * 100}%`, background: v.winRate >= 0.6 ? '#2ecc71' : v.winRate >= 0.4 ? '#f39c12' : '#e74c3c', height: '100%', borderRadius: 3, transition: 'width 0.3s' }} />
+                              </div>
+                            </div>
+                          ))
+                    }
                   </div>
                   <div>
-                    <h4 style={{ marginBottom: 10 }}>Win Rate by Mode</h4>
-                    {Object.entries(memory.winRateByMode).map(([k, v]) => (
-                      <BarRow key={k} label={k} value={v} max={1} pct />
-                    ))}
-                    {Object.keys(memory.winRateByMode).length === 0 && (
-                      <div style={{ color: '#95a5a6', fontSize: 12 }}>No closed trades yet.</div>
-                    )}
+                    <h4 style={{ margin: '0 0 10px' }}>Capital by Strategy (open)</h4>
+                    {Object.keys(dashboard.capitalByStrategy).length === 0
+                      ? <div style={{ color: '#95a5a6', fontSize: 12 }}>No open positions.</div>
+                      : (() => {
+                          const max = Math.max(...Object.values(dashboard.capitalByStrategy));
+                          return Object.entries(dashboard.capitalByStrategy)
+                            .sort((a, b) => b[1] - a[1])
+                            .map(([k, v]) => (
+                              <div key={k} style={{ marginBottom: 8 }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 3 }}>
+                                  <span style={{ color: '#bdc3c7' }}>{k}</span>
+                                  <span style={{ color: '#95a5a6' }}>${v.toLocaleString(undefined, { maximumFractionDigits: 0 })} · {dashboard.totalDeployedCapital > 0 ? ((v / dashboard.totalDeployedCapital) * 100).toFixed(0) : 0}%</span>
+                                </div>
+                                <div style={{ background: '#2c2c2c', borderRadius: 3, height: 6 }}>
+                                  <div style={{ width: `${(v / max) * 100}%`, background: '#3498db', height: '100%', borderRadius: 3 }} />
+                                </div>
+                              </div>
+                            ));
+                        })()
+                    }
                   </div>
                 </div>
-                {memory.topLessons.length > 0 && (
-                  <div style={{ marginTop: 20 }}>
-                    <h4 style={{ marginBottom: 8 }}>Top Lessons</h4>
-                    <ul style={{ margin: 0, paddingLeft: 20, fontSize: 13, color: '#bdc3c7', lineHeight: 1.8 }}>
-                      {memory.topLessons.map((l, i) => <li key={i}>{l}</li>)}
-                    </ul>
+
+                {/* ── Row 4: P&L by month ── */}
+                {Object.keys(dashboard.plByMonth).length > 0 && (
+                  <div>
+                    <h4 style={{ margin: '0 0 10px' }}>Monthly P&L (last 6 months)</h4>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', height: 80 }}>
+                      {Object.entries(dashboard.plByMonth).map(([month, pl]) => {
+                        const maxAbs = Math.max(...Object.values(dashboard.plByMonth).map(Math.abs), 1);
+                        const h = Math.round((Math.abs(pl) / maxAbs) * 60);
+                        return (
+                          <div key={month} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                            <span style={{ fontSize: 10, color: pl >= 0 ? '#2ecc71' : '#e74c3c' }}>{pl >= 0 ? '+' : ''}${Math.round(pl)}</span>
+                            <div style={{ width: '100%', height: h, background: pl >= 0 ? '#2ecc71' : '#e74c3c', borderRadius: '3px 3px 0 0', opacity: 0.8, minHeight: 4 }} />
+                            <span style={{ fontSize: 10, color: '#95a5a6' }}>{month.slice(5)}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 )}
+
+                {/* ── Row 5: Capital by ticker (top 8) ── */}
+                {Object.keys(dashboard.capitalByTicker).length > 0 && (
+                  <div>
+                    <h4 style={{ margin: '0 0 10px' }}>Capital by Ticker (open)</h4>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      {Object.entries(dashboard.capitalByTicker)
+                        .sort((a, b) => b[1] - a[1]).slice(0, 8)
+                        .map(([ticker, cap]) => {
+                          const pct = dashboard.totalDeployedCapital > 0 ? (cap / dashboard.totalDeployedCapital) * 100 : 0;
+                          return (
+                            <div key={ticker} style={{
+                              background: '#1a1a2e', borderRadius: 6, padding: '8px 14px', minWidth: 110,
+                              borderLeft: `3px solid ${pct > 40 ? '#e74c3c' : pct > 25 ? '#f39c12' : '#3498db'}`
+                            }}>
+                              <div style={{ fontWeight: 600, fontSize: 13 }}>{ticker}</div>
+                              <div style={{ fontSize: 12, color: '#95a5a6' }}>${cap.toLocaleString(undefined, { maximumFractionDigits: 0 })}</div>
+                              <div style={{ fontSize: 11, color: pct > 40 ? '#e74c3c' : pct > 25 ? '#f39c12' : '#bdc3c7' }}>{pct.toFixed(0)}%</div>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  </div>
+                )}
+
               </div>
             )}
           </div>
@@ -766,7 +1238,7 @@ export function AgentView() {
                 disabled={running}
                 style={{ fontSize: 13 }}
               >
-                {['run', 'scout', 'decide', 'trade', 'monitor', 'learn'].map((p) => (
+                {['run', 'scout', 'decide', 'trade', 'monitor', 'learn', 'review'].map((p) => (
                   <option key={p} value={p}>{p}</option>
                 ))}
               </select>

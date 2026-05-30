@@ -50,10 +50,22 @@ export function registerScreenerRoutes(app: FastifyInstance, svc: ApiServerServi
     };
   }>('/screener/run', async (req, reply) => {
     const body = req.body ?? {};
-    const universe = (body.universe ?? 'sp500') as Universe;
+    let universe = (body.universe ?? 'sp500') as Universe;
     const mode = (body.mode ?? 'strict') as 'strict' | 'soft';
     const topN = typeof body.topN === 'number' ? body.topN : undefined;
-    const filters: FilterDef[] = Array.isArray(body.filters) ? body.filters : buildDefaultFilters();
+    let filters: FilterDef[];
+    if (Array.isArray(body.filters) && body.filters.length > 0) {
+      filters = body.filters;
+    } else {
+      const saved = svc.db.prepare("SELECT value FROM settings WHERE key = 'agentDefaultFilters'").get() as { value?: string } | undefined;
+      if (saved?.value) {
+        const parsed = JSON.parse(saved.value) as { universe?: string; filters?: FilterDef[] };
+        filters = parsed.filters ?? buildDefaultFilters();
+        if (!body.universe && parsed.universe) universe = parsed.universe as Universe;
+      } else {
+        filters = buildDefaultFilters();
+      }
+    }
 
     if (!['sp500', 'russell1000', 'both'].includes(universe)) {
       return apiError(reply, 'universe must be sp500, russell1000, or both', 'VALIDATION_ERROR');
@@ -67,7 +79,12 @@ export function registerScreenerRoutes(app: FastifyInstance, svc: ApiServerServi
     try {
       const output = await ss.runScreen(criteria);
       const runResult = ss.saveRun(criteria, universe, output.rows);
-      let rows = ss.getResults(runResult.id);
+      // Return only passing rows: strict = zero failed filters; soft = at least one passed
+      let rows = ss.getResults(runResult.id).filter((r) =>
+        mode === 'strict'
+          ? r.payload.failedFilters.length === 0
+          : r.payload.passScore > 0
+      );
       if (topN !== undefined && topN > 0) {
         rows = rows.slice(0, topN);
       }

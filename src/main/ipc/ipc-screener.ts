@@ -2,6 +2,7 @@
 // see SPEC: FR-2, FR-1.7
 
 import { ipcMain, BrowserWindow, dialog, type IpcMainInvokeEvent } from 'electron';
+import type { Database } from 'better-sqlite3';
 import type { ScreenerService } from '../services/screener-service.js';
 import type { ConstituentsService } from '../services/constituents-service.js';
 import type { WatchlistService } from '../services/watchlist-service.js';
@@ -40,7 +41,8 @@ export function registerScreenerIpc(
   watchlistService: WatchlistService,
   quoteCache: QuoteCache,
   fundamentalsCache: FundamentalsCache,
-  dataProvider: DataProvider
+  dataProvider: DataProvider,
+  db?: Database
 ): void {
   // ── Presets ──────────────────────────────────────────────────────────────
   ipcMain.handle('screen:list-presets', wrap(() => screenerService.listPresets()));
@@ -104,6 +106,12 @@ export function registerScreenerIpc(
         const runResult = screenerService.saveRun(criteria, criteria.universe, output.rows);
         // Map the backend TickerScreenData to the frontend ScreenResultRow format
         const rows: ScreenResultRow[] = screenerService.getResults(runResult.id);
+
+        // Persist strict-mode filter config so the agent scout can mirror this run
+        if (criteria.mode === 'strict' && db) {
+          db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('agentDefaultFilters', ?)")
+            .run(JSON.stringify({ universe: criteria.universe, filters: criteria.filters }));
+        }
 
         return ok({ runId: runResult.id, resultCount: rows.length, passedCount: output.passed, rows });
       } catch (err) {

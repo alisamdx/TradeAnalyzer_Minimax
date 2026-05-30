@@ -517,8 +517,9 @@ export interface AgentTrade {
   targetPl: number | null;
   maxLoss: number | null;
   annualizedReturn: number | null;
-  entryPrice: number | null;
-  lastPrice: number | null;
+  entryPrice: number | null;    // stock price at entry
+  lastPrice: number | null;     // current stock price
+  currentOptionMid: number | null;  // current option mid-price (from latest theory check)
 }
 
 export interface AgentLesson {
@@ -529,6 +530,54 @@ export interface AgentLesson {
   gapPct: number;
   narrative: string;
   createdAt: string;
+}
+
+export interface AgentDashboard {
+  winRateByStrategy: Record<string, { wins: number; total: number; winRate: number }>;
+  winRateByMode:     Record<string, { wins: number; total: number; winRate: number }>;
+  overallWinRate: number;
+  totalClosed: number;
+  totalDeployedCapital: number;
+  capitalByTicker:   Record<string, number>;
+  capitalByStrategy: Record<string, number>;
+  openPositionCount: number;
+  avgIv:    number | null;
+  avgDelta: number | null;
+  avgDTE:   number | null;
+  estimatedDailyTheta: number | null;
+  totalRealizedPl: number;
+  plByMonth: Record<string, number>;
+}
+
+export interface AgentNativeLesson {
+  id: number;        // synthetic negative integer (never persisted)
+  type: 'expiry_risk' | 'strike_breach' | 'strategy_losing_streak' | 'stale_position' | 'profit_target';
+  severity: 'high' | 'medium' | 'low';
+  title: string;
+  narrative: string;
+  ticker?: string;
+  tradeId?: number;
+  createdAt: string;
+}
+
+export interface AgentTheoryCheck {
+  id: number;
+  tradeId: number;
+  tradeStatus: string;
+  verdict: 'CONFIRMED' | 'AT_RISK' | 'INVALIDATED';
+  narrative: string;
+  currentStockPrice: number | null;
+  currentOptionMid: number | null;
+  currentDelta: number | null;
+  currentDTE: number | null;
+  ivAtCheck: number | null;
+  checkedAt: string;
+  // joined from agent_trades
+  ticker: string;
+  strategy: string;
+  strike: number;
+  expiration: string;
+  entryPremium: number;
 }
 
 export interface AgentRecommendation {
@@ -1016,4 +1065,119 @@ export interface CollaredLeapsProgressDetail {
   current: number;
   total: number;
   ticker?: string;
+}
+
+// ─── AI Portfolio Advisor (v0.16.0) ───────────────────────────────────────────
+
+export interface EtradeAccount {
+  accountId: string;
+  accountIdKey: string;
+  accountName: string;
+  accountType: string;   // 'INDIVIDUAL', 'IRA', etc.
+  institutionType: string;
+}
+
+export interface EtradeSyncResult {
+  accountsScanned: number;
+  positionsUpserted: number;
+  positionsSkipped: number;
+  errors: string[];
+  syncedAt: string;
+}
+
+/** Extended position with E*Trade sync fields (migration 014). */
+export interface PositionEtrade {
+  id: number;
+  ticker: string;
+  positionType: 'CSP' | 'CC' | 'Stock';
+  quantity: number;
+  entryPrice: number;
+  entryDate: string;
+  entryNotes: string | null;
+  exitPrice: number | null;
+  exitDate: string | null;
+  exitNotes: string | null;
+  strikePrice: number | null;
+  expirationDate: string | null;
+  premiumReceived: number | null;
+  currentPrice: number | null;
+  unrealizedPnl: number | null;
+  realizedPnl: number | null;
+  status: 'open' | 'closed';
+  createdAt: string;
+  updatedAt: string;
+  // E*Trade sync fields
+  etradePositionId: number | null;
+  etradeAccountId: string | null;
+  marketValue: number | null;
+  totalGainPct: number | null;
+  daysGain: number | null;
+  daysGainPct: number | null;
+  costPerShare: number | null;
+  pctOfPortfolio: number | null;
+  delta: number | null;
+  gamma: number | null;
+  theta: number | null;
+  vega: number | null;
+  iv: number | null;     // percentage (e.g. 38.82)
+  beta: number | null;
+  lastSyncedAt: string | null;
+  // Analysis fields (from position_analysis table)
+  analysis?: PositionAnalysis | null;
+}
+
+export interface PositionAnalysis {
+  id: number;
+  positionId: number;
+  analyzedAt: string;
+  // Technical signals
+  trend: 'bullish' | 'bearish' | 'sideways' | null;
+  rsi: number | null;
+  sma20: number | null;
+  sma50: number | null;
+  sma200: number | null;
+  supportLevel: number | null;
+  resistanceLevel: number | null;
+  compositeScore: number | null;
+  // Position metrics
+  daysInPosition: number | null;
+  currentReturnPct: number | null;
+  annualizedReturn: number | null;
+  // Options-specific
+  currentDelta: number | null;
+  thetaDecay: number | null;
+  ivRank: number | null;
+  assignmentRisk: 'low' | 'medium' | 'high' | null;
+  rollOpportunity: unknown | null;
+  // Recommendation
+  action: 'hold' | 'close' | 'roll' | 'hedge' | 'take_profits';
+  conviction: 1 | 2 | 3;
+  explanation: string;
+}
+
+export interface AdvisorActionItem {
+  positionId: number | null;
+  ticker: string | null;
+  action: string;
+  rationale: string;
+  urgency: 'immediate' | 'this_week' | 'monitor';
+}
+
+export interface AdvisorSession {
+  id: number;
+  requestedAt: string;
+  adviceText: string;
+  actionItems: AdvisorActionItem[];
+  positionAdvice: Record<string, string>;
+  observations: string[];
+  model: string;
+  inputTokens: number | null;
+  outputTokens: number | null;
+}
+
+/** Streamed from main → renderer while the advisor is running. */
+export interface AdvisorProgressEvent {
+  /** 'thinking' = reasoning chunk from Claude; 'status' = app-level status line; 'done' = finished */
+  type: 'thinking' | 'status' | 'done';
+  text: string;
 }

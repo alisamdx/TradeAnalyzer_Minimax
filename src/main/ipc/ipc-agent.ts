@@ -146,6 +146,30 @@ export function registerAgentIpc(agentDb: AgentDbService, db: Database.Database)
     } catch (err) { return fail(err); }
   });
 
+  ipcMain.handle('agent:get-dashboard', () => {
+    try {
+      return ok(agentDb.getDashboardData());
+    } catch (err) { return fail(err); }
+  });
+
+  ipcMain.handle('agent:get-live-recommendations', () => {
+    try {
+      return ok(agentDb.getLiveRecommendations());
+    } catch (err) { return fail(err); }
+  });
+
+  ipcMain.handle('agent:get-theory-checks', (_e, limit?: number) => {
+    try {
+      return ok(agentDb.getTheoryChecks(limit));
+    } catch (err) { return fail(err); }
+  });
+
+  ipcMain.handle('agent:get-native-lessons', () => {
+    try {
+      return ok(agentDb.getNativeLessons());
+    } catch (err) { return fail(err); }
+  });
+
   ipcMain.handle('agent:get-recommendations', () => {
     try {
       const recs: AgentRecommendation[] = agentDb.getRecommendations();
@@ -262,7 +286,7 @@ export function registerAgentIpc(agentDb: AgentDbService, db: Database.Database)
         return fail(new Error(`Agent project path not found: ${projectPath}`));
       }
 
-      const validPhases = ['scout', 'decide', 'trade', 'monitor', 'learn', 'run'];
+      const validPhases = ['scout', 'decide', 'trade', 'monitor', 'learn', 'review', 'run'];
       if (!validPhases.includes(phase)) {
         return fail(new Error(`Unknown phase: ${phase}`));
       }
