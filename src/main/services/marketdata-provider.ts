@@ -74,13 +74,25 @@ function parseChainResponse(raw: Record<string, unknown>): MarketDataChainResult
   const strikes = (raw['strike']         as number[]           | undefined) ?? [];
   const ivs     = (raw['iv']             as (number | null)[]  | undefined) ?? [];
   const deltas  = (raw['delta']          as (number | null)[]  | undefined) ?? [];
-  const undPxs  = (raw['underlyingPrice'] as (number | null)[] | undefined) ?? [];
   const dtes    = (raw['dte']            as (number | null)[]  | undefined) ?? [];
+
+  // underlyingPrice may be a single scalar for the whole chain, or a parallel array.
+  // Handle both: if it's a number, broadcast it to all contracts.
+  const undPxRaw = raw['underlyingPrice'];
+  const rootUndPx: number | null = typeof undPxRaw === 'number' ? undPxRaw : null;
+  const undPxArr: (number | null)[] = Array.isArray(undPxRaw)
+    ? (undPxRaw as (number | null)[])
+    : [];
 
   const contracts: MarketDataContract[] = [];
   for (let i = 0; i < syms.length; i++) {
     const side = String(sides[i] ?? '').toLowerCase();
     if (side !== 'call' && side !== 'put') continue;
+
+    // Prefer per-contract value; fall back to root-level scalar.
+    const perContractPx = typeof undPxArr[i] === 'number' ? (undPxArr[i] as number) : null;
+    const contractUndPx = perContractPx ?? rootUndPx;
+
     contracts.push({
       optionSymbol:    String(syms[i] ?? ''),
       expiration:      String(exps[i] ?? ''),
@@ -88,11 +100,11 @@ function parseChainResponse(raw: Record<string, unknown>): MarketDataChainResult
       side:            side as 'call' | 'put',
       iv:              typeof ivs[i] === 'number'    ? (ivs[i] as number)    : null,
       delta:           typeof deltas[i] === 'number' ? (deltas[i] as number) : null,
-      underlyingPrice: typeof undPxs[i] === 'number' ? (undPxs[i] as number) : null,
+      underlyingPrice: contractUndPx,
       dte:             typeof dtes[i] === 'number'   ? (dtes[i] as number)   : null,
     });
   }
 
-  const firstUnderlying = contracts.find(c => c.underlyingPrice !== null)?.underlyingPrice ?? null;
+  const firstUnderlying = rootUndPx ?? contracts.find(c => c.underlyingPrice !== null)?.underlyingPrice ?? null;
   return { s: 'ok', contracts, underlyingPrice: firstUnderlying };
 }

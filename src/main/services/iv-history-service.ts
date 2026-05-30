@@ -440,22 +440,37 @@ export class IvHistoryService {
       try {
         const chain = await this.marketdata.getOptionsChain(ticker, date);
 
-        if (chain.s === 'no_data' || chain.contracts.length === 0 || chain.underlyingPrice === null) {
+        if (chain.s === 'no_data' || chain.contracts.length === 0) {
           skipped++;
         } else {
-          const result = computeAtmIv(chain.contracts, chain.underlyingPrice);
-          if (result === null) {
+          // If underlyingPrice is null (MarketData.app sometimes omits it for historical data),
+          // fall back to estimating it from call delta: the strike where |delta| ≈ 0.50 is ATM.
+          // see docs/formulas.md#atm-iv-interpolation
+          let underlyingPx = chain.underlyingPrice;
+          if (underlyingPx === null) {
+            const atmByDelta = chain.contracts
+              .filter(c => c.side === 'call' && c.delta !== null)
+              .sort((a, b) => Math.abs(Math.abs(a.delta!) - 0.5) - Math.abs(Math.abs(b.delta!) - 0.5));
+            underlyingPx = atmByDelta[0]?.strike ?? null;
+          }
+
+          if (underlyingPx === null) {
             skipped++;
           } else {
-            this.storeReading(ticker, date, result.atmIv, {
-              underlyingPx: chain.underlyingPrice,
-              expNear: result.expNear,
-              expFar:  result.expFar,
-              dteNear: result.dteNear,
-              dteFar:  result.dteFar,
-              source: 'marketdata',
-            });
-            processed++;
+            const result = computeAtmIv(chain.contracts, underlyingPx);
+            if (result === null) {
+              skipped++;
+            } else {
+              this.storeReading(ticker, date, result.atmIv, {
+                underlyingPx,
+                expNear: result.expNear,
+                expFar:  result.expFar,
+                dteNear: result.dteNear,
+                dteFar:  result.dteFar,
+                source: 'marketdata',
+              });
+              processed++;
+            }
           }
         }
       } catch {
