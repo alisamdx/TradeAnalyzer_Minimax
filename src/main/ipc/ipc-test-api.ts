@@ -1,5 +1,7 @@
 import { ipcMain, type IpcMainInvokeEvent } from 'electron';
 import type { PolygonDataProvider } from '../services/polygon-provider.js';
+import type { MarketDataProvider } from '../services/marketdata-provider.js';
+import { computeAtmIv } from '../services/iv-history-service.js';
 
 function ok<T>(value: T): { ok: true; value: T } { return { ok: true, value }; }
 function fail(err: unknown): { ok: false; error: { code: string; message: string } } {
@@ -115,7 +117,42 @@ function parseRaw(raw: unknown): RawOptionContract {
   };
 }
 
-export function registerTestApiIpc(dataProvider: PolygonDataProvider): void {
+export interface MarketDataTestResult {
+  ticker:          string;
+  date:            string;
+  status:          string;                 // 'ok' | 'no_data' | 'error'
+  contractCount:   number;
+  underlyingPrice: number | null;          // root-level from response
+  // Parsed sample
+  sample: Array<{
+    optionSymbol: string;
+    expiration:   string;
+    side:         string;
+    strike:       number;
+    iv:           number | null;
+    delta:        number | null;
+    underlyingPrice: number | null;
+    dte:          number | null;
+  }>;
+  // ATM IV computation result
+  atmIvResult: {
+    atmIv:   number | null;
+    atmIvPct: number | null;   // atmIv * 100
+    expNear: string | null;
+    expFar:  string | null;
+    dteNear: number | null;
+    dteFar:  number | null;
+    estimatedFromDelta: boolean;
+  } | null;
+  // Coverage breakdown
+  withIv:     number;
+  withDelta:  number;
+  withUndPx:  number;
+  // Raw JSON (truncated to first 3 contracts to keep it readable)
+  rawJsonSample: string;
+}
+
+export function registerTestApiIpc(dataProvider: PolygonDataProvider, marketdata?: MarketDataProvider): void {
   ipcMain.handle(
     'test-api:get-raw-options',
     async (_e: IpcMainInvokeEvent, ticker: string, expiration: string) => {
@@ -139,6 +176,85 @@ export function registerTestApiIpc(dataProvider: PolygonDataProvider): void {
           rawResultsType: snap.rawResultsType,
           rawResultsCount: snap.rawResultsCount,
           firstPageKeys: snap.firstPageKeys,
+        });
+      } catch (err) {
+        return fail(err);
+      }
+    }
+  );
+
+  // MarketData.app chain test — fetches one historical chain, parses it, runs computeAtmIv.
+  ipcMain.handle(
+    'test-api:get-marketdata-chain',
+    async (_e: IpcMainInvokeEvent, ticker: string, date: string) => {
+      try {
+        if (!marketdata) throw new Error('MarketData.app provider not initialised.');
+
+        const chain = await marketdata.getOptionsChain(ticker.toUpperCase(), date);
+
+        if (chain.s !== 'ok') {
+          return ok<MarketDataTestResult>({
+            ticker: ticker.toUpperCase(), date, status: chain.s,
+            contractCount: 0, underlyingPrice: null,
+            sample: [], atmIvResult: null,
+            withIv: 0, withDelta: 0, withUndPx: 0, rawJsonSample: '{}',
+          });
+        }
+
+        const { contracts, underlyingPrice } = chain;
+
+        // Delta-based ATM fallback (mirrors iv-history-service logic)
+        let resolvedUndPx = underlyingPrice;
+        let estimatedFromDelta = false;
+        if (resolvedUndPx === null) {
+          const byDelta = contracts
+            .filter(c => c.side === 'call' && c.delta !== null)
+            .sort((a, b) => Math.abs(Math.abs(a.delta!) - 0.5) - Math.abs(Math.abs(b.delta!) - 0.5));
+          if (byDelta[0]) { resolvedUndPx = byDelta[0].strike; estimatedFromDelta = true; }
+        }
+
+        const atmRaw = resolvedUndPx !== null ? computeAtmIv(contracts, resolvedUndPx) : null;
+        const atmIvResult = atmRaw
+          ? { ...atmRaw, atmIvPct: Math.round(atmRaw.atmIv * 10000) / 100, estimatedFromDelta }
+          : (resolvedUndPx !== null ? { atmIv: null, atmIvPct: null, expNear: null, expFar: null, dteNear: null, dteFar: null, estimatedFromDelta } : null);
+
+        // Sample — 6 contracts near ATM across call/put
+        const nearAtm = resolvedUndPx ?? 0;
+        const sorted = [...contracts].sort((a, b) => Math.abs(a.strike - nearAtm) - Math.abs(b.strike - nearAtm));
+        const sample = sorted.slice(0, 8).map(c => ({
+          optionSymbol: c.optionSymbol, expiration: c.expiration, side: c.side,
+          strike: c.strike, iv: c.iv, delta: c.delta,
+          underlyingPrice: c.underlyingPrice, dte: c.dte,
+        }));
+
+        // Raw JSON: full response but only first 4 elements of each array
+        const rawSample: Record<string, unknown> = { s: chain.s, underlyingPrice, _note: 'Arrays truncated to 4 items' };
+        for (const [k, v] of Object.entries({ contracts })) {
+          void k; void v; // unused — build raw from chain fields instead
+        }
+        // Build compact representation
+        const compactSample = {
+          s: chain.s,
+          underlyingPrice,
+          contractCount: contracts.length,
+          firstContracts: contracts.slice(0, 4).map(c => ({
+            sym: c.optionSymbol, exp: c.expiration, side: c.side,
+            strike: c.strike, iv: c.iv, delta: c.delta,
+            undPx: c.underlyingPrice, dte: c.dte,
+          })),
+        };
+        void rawSample;
+
+        return ok<MarketDataTestResult>({
+          ticker: ticker.toUpperCase(), date, status: 'ok',
+          contractCount: contracts.length,
+          underlyingPrice,
+          sample,
+          atmIvResult: atmIvResult ?? null,
+          withIv:    contracts.filter(c => c.iv !== null).length,
+          withDelta: contracts.filter(c => c.delta !== null).length,
+          withUndPx: contracts.filter(c => c.underlyingPrice !== null).length,
+          rawJsonSample: JSON.stringify(compactSample, null, 2),
         });
       } catch (err) {
         return fail(err);

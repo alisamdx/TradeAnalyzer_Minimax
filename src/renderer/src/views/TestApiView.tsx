@@ -467,6 +467,204 @@ function extractIvKeys(rawJson: string): Array<{ path: string; value: unknown }>
   return results;
 }
 
+// ─── MarketData.app tab ───────────────────────────────────────────────────────
+
+type MDResult = Awaited<ReturnType<typeof window.api.testApi.getMarketDataChain>>;
+
+function MarketDataTab() {
+  const [ticker, setTicker]   = useState('AAPL');
+  // Default date: yesterday (hardcode-friendly — user can change)
+  const [date, setDate]       = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    return d.toLocaleDateString('en-CA'); // YYYY-MM-DD
+  });
+  const [loading, setLoading] = useState(false);
+  const [result, setResult]   = useState<MDResult | null>(null);
+  const [error, setError]     = useState<string | null>(null);
+  const [showRaw, setShowRaw] = useState(false);
+
+  const fetch = async () => {
+    if (!ticker.trim() || !date.trim()) return;
+    setLoading(true);
+    setError(null);
+    setResult(null);
+    try {
+      const r = await window.api.testApi.getMarketDataChain(ticker.trim().toUpperCase(), date.trim());
+      setResult(r);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const S = { // common styles
+    row: { display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' as const, marginBottom: 10 },
+    label: { color: '#6c7086', minWidth: 110 },
+    val: { color: '#cdd6f4' },
+    good: { color: '#a6e3a1' },
+    warn: { color: '#f9e2af' },
+    bad: { color: '#f38ba8' },
+    card: { background: '#1e1e2e', border: '1px solid #313244', borderRadius: 8, padding: '12px 16px', marginBottom: 12 },
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+
+      {/* Input row */}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <input
+          value={ticker}
+          onChange={e => setTicker(e.target.value.toUpperCase())}
+          placeholder="Ticker"
+          style={{ width: 90, padding: '5px 10px', borderRadius: 5, border: '1px solid #313244', background: '#1e1e2e', color: '#cdd6f4', fontSize: 12 }}
+        />
+        <input
+          value={date}
+          onChange={e => setDate(e.target.value)}
+          placeholder="YYYY-MM-DD"
+          style={{ width: 120, padding: '5px 10px', borderRadius: 5, border: '1px solid #313244', background: '#1e1e2e', color: '#cdd6f4', fontSize: 12 }}
+        />
+        <button
+          onClick={fetch}
+          disabled={loading}
+          style={{ padding: '5px 18px', borderRadius: 5, border: 'none', background: '#89b4fa', color: '#1e1e2e', fontSize: 12, fontWeight: 700, cursor: 'pointer', opacity: loading ? 0.6 : 1 }}
+        >
+          {loading ? 'Fetching…' : 'Fetch Chain'}
+        </button>
+        <span style={{ fontSize: 11, color: '#6c7086' }}>
+          Fetches a historical options chain via MarketData.app and runs the ATM IV computation to verify parsing.
+        </span>
+      </div>
+
+      {error && <div style={{ color: '#f38ba8', fontSize: 12, background: '#1e1e2e', padding: '8px 12px', borderRadius: 6 }}>Error: {error}</div>}
+
+      {result && (
+        <>
+          {/* Status row */}
+          <div style={S.card}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#89b4fa', marginBottom: 8 }}>
+              {result.ticker} — {result.date}
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '6px 20px', fontSize: 12 }}>
+              <span><span style={S.label}>Status:</span>{' '}
+                <span style={result.status === 'ok' ? S.good : S.bad}>{result.status}</span>
+              </span>
+              <span><span style={S.label}>Contracts:</span>{' '}
+                <span style={S.val}>{result.contractCount.toLocaleString()}</span>
+              </span>
+              <span><span style={S.label}>Underlying Px:</span>{' '}
+                <span style={result.underlyingPrice !== null ? S.good : S.bad}>
+                  {result.underlyingPrice !== null ? `$${result.underlyingPrice.toFixed(2)}` : 'NULL ⚠'}
+                </span>
+              </span>
+              <span><span style={S.label}>With IV:</span>{' '}
+                <span style={result.withIv > 0 ? S.good : S.bad}>
+                  {result.withIv} / {result.contractCount}{' '}
+                  ({result.contractCount > 0 ? Math.round(result.withIv / result.contractCount * 100) : 0}%)
+                </span>
+              </span>
+              <span><span style={S.label}>With Delta:</span>{' '}
+                <span style={result.withDelta > 0 ? S.good : S.bad}>
+                  {result.withDelta} / {result.contractCount}{' '}
+                  ({result.contractCount > 0 ? Math.round(result.withDelta / result.contractCount * 100) : 0}%)
+                </span>
+              </span>
+              <span><span style={S.label}>Und Px per-ctr:</span>{' '}
+                <span style={result.withUndPx > 0 ? S.good : S.warn}>
+                  {result.withUndPx > 0 ? `${result.withUndPx} contracts` : 'None (root-level only)'}
+                </span>
+              </span>
+            </div>
+          </div>
+
+          {/* ATM IV result */}
+          <div style={S.card}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#89b4fa', marginBottom: 8 }}>ATM IV Computation</div>
+            {result.atmIvResult === null ? (
+              <span style={S.bad}>Could not compute — underlyingPrice is null and no delta data available.</span>
+            ) : result.atmIvResult.atmIv === null ? (
+              <span style={S.warn}>computeAtmIv returned null — no expirations bracket 30 DTE on this date.</span>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '6px 20px', fontSize: 12 }}>
+                <span><span style={S.label}>ATM IV:</span>{' '}
+                  <span style={{ color: '#a6e3a1', fontWeight: 700, fontSize: 14 }}>
+                    {result.atmIvResult.atmIvPct?.toFixed(2)}%
+                  </span>
+                  {' '}<span style={{ color: '#6c7086' }}>(= {result.atmIvResult.atmIv?.toFixed(4)} decimal)</span>
+                </span>
+                <span><span style={S.label}>Near exp:</span>{' '}
+                  <span style={S.val}>{result.atmIvResult.expNear ?? '—'}{result.atmIvResult.dteNear !== null ? ` (${result.atmIvResult.dteNear}d)` : ''}</span>
+                </span>
+                <span><span style={S.label}>Far exp:</span>{' '}
+                  <span style={S.val}>{result.atmIvResult.expFar ?? '—'}{result.atmIvResult.dteFar !== null ? ` (${result.atmIvResult.dteFar}d)` : ''}</span>
+                </span>
+                {result.atmIvResult.estimatedFromDelta && (
+                  <span style={S.warn}>⚠ Underlying price estimated from delta (root-level price was null)</span>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Sample contracts table */}
+          {result.sample.length > 0 && (
+            <div style={S.card}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#89b4fa', marginBottom: 8 }}>
+                Near-ATM Sample ({result.sample.length} contracts)
+              </div>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                <thead>
+                  <tr style={{ color: '#6c7086', borderBottom: '1px solid #313244' }}>
+                    {['Symbol', 'Exp', 'Side', 'Strike', 'DTE', 'IV%', 'Delta', 'Und Px'].map(h => (
+                      <th key={h} style={{ textAlign: 'left', padding: '3px 8px', fontWeight: 600 }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.sample.map((c, i) => (
+                    <tr key={i} style={{ borderBottom: '1px solid #1e1e2e' }}>
+                      <td style={{ padding: '3px 8px', color: '#cdd6f4', fontFamily: 'monospace', fontSize: 10 }}>{c.optionSymbol}</td>
+                      <td style={{ padding: '3px 8px', color: '#cdd6f4' }}>{c.expiration}</td>
+                      <td style={{ padding: '3px 8px', color: c.side === 'call' ? '#a6e3a1' : '#f38ba8' }}>{c.side}</td>
+                      <td style={{ padding: '3px 8px', color: '#cdd6f4' }}>${c.strike}</td>
+                      <td style={{ padding: '3px 8px', color: '#cdd6f4' }}>{c.dte ?? '—'}</td>
+                      <td style={{ padding: '3px 8px', color: c.iv !== null ? '#a6e3a1' : '#f38ba8' }}>
+                        {c.iv !== null ? `${(c.iv * 100).toFixed(1)}%` : 'null ⚠'}
+                      </td>
+                      <td style={{ padding: '3px 8px', color: c.delta !== null ? '#fab387' : '#f38ba8' }}>
+                        {c.delta !== null ? c.delta.toFixed(3) : 'null ⚠'}
+                      </td>
+                      <td style={{ padding: '3px 8px', color: c.underlyingPrice !== null ? '#cdd6f4' : '#6c7086' }}>
+                        {c.underlyingPrice !== null ? `$${c.underlyingPrice.toFixed(2)}` : 'root-only'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Raw JSON toggle */}
+          <div>
+            <button
+              onClick={() => setShowRaw(v => !v)}
+              style={{ padding: '4px 12px', borderRadius: 5, border: '1px solid #313244', background: 'transparent', color: '#6c7086', fontSize: 11, cursor: 'pointer' }}
+            >
+              {showRaw ? 'Hide' : 'Show'} Raw JSON Sample
+            </button>
+            {showRaw && (
+              <pre style={{ marginTop: 8, background: '#1e1e2e', border: '1px solid #313244', borderRadius: 6, padding: '10px 14px', fontSize: 11, color: '#a6e3a1', overflowX: 'auto', maxHeight: 300, overflowY: 'auto' }}>
+                {result.rawJsonSample}
+              </pre>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── E*Trade tab ──────────────────────────────────────────────────────────────
 
 function ETradeTab() {
@@ -716,42 +914,53 @@ function ErrorBox({ msg }: { msg: string }) {
 // ─── Root view ────────────────────────────────────────────────────────────────
 
 export function TestApiView() {
-  const [provider, setProvider] = useState<'polygon' | 'etrade'>('polygon');
+  const [provider, setProvider] = useState<'polygon' | 'etrade' | 'marketdata'>('polygon');
+
+  const TAB_LABELS: Record<typeof provider, string> = {
+    polygon:    'Polygon',
+    etrade:     'E*Trade',
+    marketdata: 'MarketData.app',
+  };
+  const TAB_DESC: Record<typeof provider, string> = {
+    polygon:    'Current provider — validates data quality & plan coverage',
+    etrade:     'Options provider — validate before full integration',
+    marketdata: 'IV history source — verify chain parsing & ATM IV computation',
+  };
 
   return (
     <div style={{ padding: '16px', fontFamily: 'monospace', fontSize: '12px', color: '#cdd6f4', height: '100%', display: 'flex', flexDirection: 'column', gap: '12px' }}>
 
       {/* ── Header + provider tabs ── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
         <h2 style={{ margin: 0, color: '#89b4fa', fontSize: '14px', fontWeight: 700 }}>🔬 Test API</h2>
         <div style={{ display: 'flex', borderRadius: '6px', overflow: 'hidden', border: '1px solid #313244' }}>
-          {(['polygon', 'etrade'] as const).map(p => (
+          {(['polygon', 'etrade', 'marketdata'] as const).map(p => (
             <button key={p} onClick={() => setProvider(p)} style={{
               padding: '4px 16px', border: 'none', cursor: 'pointer', fontSize: '12px', fontWeight: 600,
               background: provider === p ? '#89b4fa' : '#1e1e2e',
               color: provider === p ? '#1e1e2e' : '#6c7086',
             }}>
-              {p === 'polygon' ? 'Polygon' : 'E*Trade'}
+              {TAB_LABELS[p]}
             </button>
           ))}
         </div>
-        <span style={{ fontSize: '11px', color: '#6c7086' }}>
-          {provider === 'polygon'
-            ? 'Current provider — validates data quality & plan coverage'
-            : 'New provider candidate — validate before full integration'}
-        </span>
+        <span style={{ fontSize: '11px', color: '#6c7086' }}>{TAB_DESC[provider]}</span>
       </div>
 
-      {/* ── Legend ── */}
-      <div style={{ display: 'flex', gap: '16px', fontSize: '11px', color: '#6c7086', flexWrap: 'wrap' }}>
-        <span><span style={{ color: '#a6e3a1' }}>Mid</span> = (bid+ask)/2</span>
-        <span><span style={{ color: '#fab387' }}>Last</span> = most recent trade / day close</span>
-        <span><span style={{ color: '#f38ba8' }}>Red cell</span> = field absent from API response</span>
-        <span><span style={{ color: '#fab387' }}>Orange delta</span> = wheel target zone (0.15–0.35)</span>
-      </div>
+      {/* ── Legend (Polygon / E*Trade only) ── */}
+      {provider !== 'marketdata' && (
+        <div style={{ display: 'flex', gap: '16px', fontSize: '11px', color: '#6c7086', flexWrap: 'wrap' }}>
+          <span><span style={{ color: '#a6e3a1' }}>Mid</span> = (bid+ask)/2</span>
+          <span><span style={{ color: '#fab387' }}>Last</span> = most recent trade / day close</span>
+          <span><span style={{ color: '#f38ba8' }}>Red cell</span> = field absent from API response</span>
+          <span><span style={{ color: '#fab387' }}>Orange delta</span> = wheel target zone (0.15–0.35)</span>
+        </div>
+      )}
 
       {/* ── Active tab ── */}
-      {provider === 'polygon' ? <PolygonTab /> : <ETradeTab />}
+      {provider === 'polygon'    && <PolygonTab />}
+      {provider === 'etrade'     && <ETradeTab />}
+      {provider === 'marketdata' && <MarketDataTab />}
     </div>
   );
 }

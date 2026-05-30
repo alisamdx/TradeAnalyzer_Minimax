@@ -782,7 +782,29 @@ function buildApi() {
           dayClose: number | null; dayVolume: number | null; dayVwap: number | null;
           lastTradePrice: number | null; underlyingPrice: number | null;
         }>;
-      }>('test-api:get-raw-options', ticker, expiration)
+      }>('test-api:get-raw-options', ticker, expiration),
+
+    getMarketDataChain: (ticker: string, date: string) =>
+      invoke<{
+        ticker: string;
+        date: string;
+        status: string;
+        contractCount: number;
+        underlyingPrice: number | null;
+        sample: Array<{
+          optionSymbol: string; expiration: string; side: string;
+          strike: number; iv: number | null; delta: number | null;
+          underlyingPrice: number | null; dte: number | null;
+        }>;
+        atmIvResult: {
+          atmIv: number | null; atmIvPct: number | null;
+          expNear: string | null; expFar: string | null;
+          dteNear: number | null; dteFar: number | null;
+          estimatedFromDelta: boolean;
+        } | null;
+        withIv: number; withDelta: number; withUndPx: number;
+        rawJsonSample: string;
+      }>('test-api:get-marketdata-chain', ticker, date),
   };
 
   const agent = {

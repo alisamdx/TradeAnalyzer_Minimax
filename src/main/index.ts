@@ -283,8 +283,8 @@ app.whenReady().then(() => {
   registerOptionsIpc(optionsProvider, quoteCache, rateLimiter,
     (ticker, contracts, underlyingPx) => ivHistoryService.captureFromEtradeChain(ticker, contracts, underlyingPx));
 
-  // Test API diagnostic screen
-  registerTestApiIpc(dataProvider);
+  // Test API diagnostic screen (marketdata passed so the MarketData.app tab can test live chains)
+  registerTestApiIpc(dataProvider, marketdataProvider);
 
   // E*Trade auth / credential management IPC
   registerETradeIpc(db);
