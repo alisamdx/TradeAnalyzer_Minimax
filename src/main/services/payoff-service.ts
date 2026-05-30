@@ -50,8 +50,8 @@ const ASSESS_TOOL: Anthropic.Messages.Tool = {
         description: '2–3 specific risk factors for this exact setup (strikes, premium, expiry).',
       },
       probOfProfit: {
-        type: ['string', 'null'],
-        description: 'Estimated probability of profit — e.g. "~68% based on Δ 0.32" — or null if insufficient data.',
+        type: 'string',
+        description: 'Estimated probability of profit — e.g. "~68% based on Δ 0.32". Use empty string if insufficient data.',
       },
       exit: {
         type: 'object',
@@ -147,9 +147,10 @@ export class PayoffService {
   async assess(
     legs: PayoffLeg[],
     input: PayoffAssessInput,
+    apiKey: string,
     onProgress?: (thinkingChunk: string) => void,
   ): Promise<PayoffAssessment> {
-    const client = new Anthropic();
+    const client = new Anthropic({ apiKey });
 
     // ── Build descriptive message ───────────────────────────────────────────────
     const legsText = legs.map((leg, i) => {
@@ -188,34 +189,56 @@ export class PayoffService {
       `At-expiration metrics:\n${metricsText}\n\n` +
       `Please call submit_trade_assessment with your full expert analysis including specific exit guidance.`;
 
-    // ── Stream + collect ────────────────────────────────────────────────────────
-    const stream = client.messages.stream({
-      model:      'claude-opus-4-7',
-      max_tokens: 4_096,
-      thinking:   { type: 'adaptive', display: 'summarized' },
-      system: [{
-        type: 'text',
-        text: ASSESS_SYSTEM,
-        cache_control: { type: 'ephemeral' },
-      }],
-      messages: [{ role: 'user', content: userMessage }],
-      tools:    [ASSESS_TOOL],
-    });
+    // Signal the UI immediately so the button feedback is visible
+    onProgress?.('Connecting to Claude…');
 
-    for await (const event of stream) {
-      if (
-        event.type === 'content_block_delta' &&
-        event.delta.type === 'thinking_delta' &&
-        onProgress
-      ) {
-        onProgress(event.delta.thinking);
-      }
+    // ── Streaming call — forwards thinking summaries + text chunks to the UI ───
+    let message: Anthropic.Messages.Message;
+    try {
+      const stream = client.messages.stream({
+        model:      'claude-opus-4-7',
+        max_tokens: 8_192,
+        thinking:   { type: 'adaptive', display: 'summarized' },
+        system: [{
+          type: 'text',
+          text: ASSESS_SYSTEM,
+          cache_control: { type: 'ephemeral' },
+        }],
+        messages: [{ role: 'user', content: userMessage }],
+        tools:    [ASSESS_TOOL],
+      });
+
+      // Forward model preamble text (if any) so the UI isn't frozen
+      stream.on('text', (text) => onProgress?.(text));
+
+      // Forward thinking summaries — keeps the UI alive during the reasoning phase
+      stream.on('streamEvent', (event) => {
+        if (
+          event.type === 'content_block_delta' &&
+          event.delta.type === 'thinking_delta'
+        ) {
+          onProgress?.(event.delta.thinking);
+        }
+      });
+
+      message = await stream.finalMessage();
+    } catch (apiErr) {
+      console.error('[payoff:assess] Anthropic API error:', apiErr);
+      throw apiErr;
     }
 
-    const message = await stream.finalMessage();
     const toolBlock = message.content.find(b => b.type === 'tool_use');
     if (!toolBlock || toolBlock.type !== 'tool_use') {
-      throw new Error('Assessment failed — model did not call the tool. Try again.');
+      // Surface any text Claude returned as the error message
+      const textFallback = message.content
+        .filter(b => b.type === 'text')
+        .map(b => (b as Anthropic.Messages.TextBlock).text)
+        .join('');
+      throw new Error(
+        textFallback
+          ? `Claude did not call the assessment tool. Response: ${textFallback.slice(0, 300)}`
+          : 'Assessment failed — model did not return structured data. Try again.'
+      );
     }
     return toolBlock.input as PayoffAssessment;
   }

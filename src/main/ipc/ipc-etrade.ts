@@ -243,4 +243,28 @@ export function registerETradeIpc(db: Database): void {
       } catch (err) { return fail(err); }
     }
   );
+
+  /**
+   * Fetch a raw stock quote from E*Trade with detailFlag=ALL.
+   * Returns the full JSON so the Test API screen can inspect every field
+   * E*Trade returns — used to discover whether IV rank/percentile is available.
+   */
+  ipcMain.handle('etrade:get-raw-quote',
+    async (_e: IpcMainInvokeEvent, symbol: string) => {
+      try {
+        const creds = getCredentials(db);
+        if (!creds.accessToken) throw new Error('Not authenticated with E*Trade. Please connect first.');
+        const { etradeGet } = await import('../services/etrade-auth.js');
+        const raw = await etradeGet(
+          `/v1/market/quote/${encodeURIComponent(symbol.toUpperCase())}`,
+          { detailFlag: 'ALL' },
+          creds
+        );
+        return ok({
+          rawJson: JSON.stringify(raw, null, 2),
+          topLevelKeys: Object.keys(raw),
+        });
+      } catch (err) { return fail(err); }
+    }
+  );
 }

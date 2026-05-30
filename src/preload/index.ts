@@ -750,6 +750,9 @@ function buildApi() {
           hasGreeks: boolean; hasBidAsk: boolean;
         }>;
       }>('etrade:get-options-chain', symbol, expiration),
+    /** Fetch a raw quote with detailFlag=ALL — used in the Test API screen to inspect every field E*Trade returns. */
+    getRawQuote: (symbol: string) =>
+      invoke<{ rawJson: string; topLevelKeys: string[] }>('etrade:get-raw-quote', symbol),
   };
 
   const testApi = {

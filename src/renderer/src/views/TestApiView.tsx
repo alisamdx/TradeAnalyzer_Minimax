@@ -360,6 +360,113 @@ function PolygonTab() {
   );
 }
 
+// ─── E*Trade Quote Inspector ─────────────────────────────────────────────────
+
+function QuoteInspector() {
+  const [ticker, setTicker]   = useState('');
+  const [busy, setBusy]       = useState(false);
+  const [error, setError]     = useState<string | null>(null);
+  const [result, setResult]   = useState<{ rawJson: string; topLevelKeys: string[] } | null>(null);
+
+  const fetch = async () => {
+    const t = ticker.trim().toUpperCase();
+    if (!t) { setError('Enter a ticker.'); return; }
+    setBusy(true); setError(null); setResult(null);
+    try {
+      const res = await window.api.etrade.getRawQuote(t);
+      setResult(res);
+    } catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
+  const ivRelatedKeys = result
+    ? extractIvKeys(result.rawJson)
+    : [];
+
+  return (
+    <div style={{ background: '#181825', border: '1px solid #313244', borderRadius: '6px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+        <span style={{ fontSize: '13px', fontWeight: 700, color: '#cba6f7' }}>Quote Inspector</span>
+        <span style={{ fontSize: '12px', color: '#6c7086' }}>
+          Calls <code style={{ color: '#fab387' }}>/v1/market/quote/TICKER?detailFlag=ALL</code> — inspect every field E*Trade returns
+        </span>
+      </div>
+      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+        <input
+          value={ticker}
+          onChange={e => setTicker(e.target.value.toUpperCase())}
+          onKeyDown={e => e.key === 'Enter' && fetch()}
+          placeholder="Ticker (e.g. AAPL)"
+          style={inputStyle}
+        />
+        <FetchBtn loading={busy} onClick={fetch} label="Fetch Quote" />
+      </div>
+      {error && <ErrorBox msg={error} />}
+      {result && (
+        <>
+          {/* IV-related fields highlighted at the top */}
+          <div style={{ background: '#12121e', border: '1px solid #45475a', borderRadius: '4px', padding: '10px 12px' }}>
+            <div style={{ fontSize: '13px', fontWeight: 700, color: '#cba6f7', marginBottom: '6px' }}>
+              IV / Volatility fields found ({ivRelatedKeys.length === 0 ? 'none' : ivRelatedKeys.length})
+            </div>
+            {ivRelatedKeys.length === 0 ? (
+              <div style={{ fontSize: '13px', color: '#f38ba8' }}>
+                No IV rank / IV percentile / volatility fields detected in this response.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                {ivRelatedKeys.map(({ path, value }) => (
+                  <div key={path} style={{ display: 'flex', gap: '8px', fontSize: '13px' }}>
+                    <span style={{ color: '#a6e3a1', minWidth: '280px', fontFamily: 'monospace' }}>{path}</span>
+                    <span style={{ color: '#cdd6f4' }}>{String(value)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Full raw response */}
+          <details style={{ background: '#12121e', border: '1px solid #313244', borderRadius: '4px', padding: '8px 12px', fontSize: '13px' }}>
+            <summary style={{ cursor: 'pointer', color: '#89b4fa', marginBottom: '6px' }}>
+              🔍 Full raw response (top-level keys: {result.topLevelKeys.join(', ')})
+            </summary>
+            <pre style={{ margin: 0, color: '#cdd6f4', overflowX: 'auto', fontSize: '13px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: '400px', overflowY: 'auto' }}>
+              {result.rawJson}
+            </pre>
+          </details>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Walk the parsed JSON and return every key path that looks IV/volatility-related. */
+function extractIvKeys(rawJson: string): Array<{ path: string; value: unknown }> {
+  let parsed: unknown;
+  try { parsed = JSON.parse(rawJson); } catch { return []; }
+
+  const results: Array<{ path: string; value: unknown }> = [];
+  const ivTerms = ['iv', 'impliedvol', 'volatility', 'ivrank', 'ivpct', 'ivpercentile', 'historicalvol', 'hvol'];
+
+  function walk(obj: unknown, path: string) {
+    if (obj === null || obj === undefined) return;
+    if (typeof obj === 'object' && !Array.isArray(obj)) {
+      for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+        const lower = k.toLowerCase().replace(/[_\-]/g, '');
+        if (ivTerms.some(t => lower.includes(t))) {
+          results.push({ path: path ? `${path}.${k}` : k, value: v });
+        }
+        walk(v, path ? `${path}.${k}` : k);
+      }
+    } else if (Array.isArray(obj)) {
+      obj.forEach((item, i) => walk(item, `${path}[${i}]`));
+    }
+  }
+
+  walk(parsed, '');
+  return results;
+}
+
 // ─── E*Trade tab ──────────────────────────────────────────────────────────────
 
 function ETradeTab() {
@@ -505,6 +612,9 @@ function ETradeTab() {
           </div>
         )}
       </div>
+
+      {/* ── Quote Inspector (only when authenticated) ── */}
+      {isAuth && <QuoteInspector />}
 
       {/* ── Chain fetch (only when authenticated) ── */}
       {isAuth && (

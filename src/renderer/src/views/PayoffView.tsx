@@ -382,9 +382,9 @@ function recognizeStrategy(legs: PayoffLeg[]): StrategyInfo | null {
 
 // ─── Payoff SVG chart ─────────────────────────────────────────────────────────
 
-const PAD = { t: 24, r: 24, b: 36, l: 64 };
+const PAD = { t: 18, r: 24, b: 30, l: 56 };
 const SVG_W = 560;
-const SVG_H = 260;
+const SVG_H = 160;
 const PLOT_W = SVG_W - PAD.l - PAD.r;
 const PLOT_H = SVG_H - PAD.t - PAD.b;
 
@@ -866,6 +866,7 @@ export function PayoffView({ initialTicker, initialSpot }: PayoffViewProps) {
   const [selectedExpiry, setSelectedExpiry]     = useState('');
   const [chainData, setChainData]               = useState<OptionsChainViewData | null>(null);
   const [chainStrikeFilter, setChainStrikeFilter] = useState<'atm' | 'all'>('atm');
+  const [chainExpanded, setChainExpanded]         = useState(true); // opens expanded; user can collapse
 
   // Assessment state
   const [assessment, setAssessment]         = useState<PayoffAssessment | null>(null);
@@ -1245,8 +1246,9 @@ export function PayoffView({ initialTicker, initialSpot }: PayoffViewProps) {
       </aside>
 
       {/* ════════════════════════════════════════════════════════════════════
-          RIGHT PANEL — chart + metrics + chain
+          RIGHT PANEL — chart + metrics + chain drawer
       ════════════════════════════════════════════════════════════════════ */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <main style={{ flex: 1, overflowY: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
 
         {/* Toasts */}
@@ -1275,7 +1277,7 @@ export function PayoffView({ initialTicker, initialSpot }: PayoffViewProps) {
         {/* ── Chart ── */}
         {metrics && (
           <>
-            <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8, padding: '10px 10px 4px' }}>
+            <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8, padding: '6px 8px 2px' }}>
               <PayoffChart metrics={metrics} spot={spotNum} />
             </div>
 
@@ -1404,43 +1406,43 @@ export function PayoffView({ initialTicker, initialSpot }: PayoffViewProps) {
               return (
                 <div style={{ background: '#0f172a', border: `1px solid ${rc}33`, borderRadius: 8, overflow: 'hidden' }}>
                   {/* Header */}
-                  <div style={{ padding: '10px 14px', borderBottom: '1px solid #1e293b', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                  <div style={{ padding: '12px 16px', borderBottom: '1px solid #1e293b', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                     <span style={{
-                      padding: '2px 10px', borderRadius: 12, fontSize: 11, fontWeight: 700,
+                      padding: '3px 12px', borderRadius: 12, fontSize: 12, fontWeight: 700,
                       background: rc + '22', color: rc, border: `1px solid ${rc}55`,
                       textTransform: 'uppercase', letterSpacing: 0.5,
                     }}>
                       {assessment.rating}
                     </span>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: '#f1f5f9' }}>{assessment.strategyName}</span>
+                    <span style={{ fontSize: 15, fontWeight: 600, color: '#f1f5f9' }}>{assessment.strategyName}</span>
                     {assessment.probOfProfit && (
-                      <span style={{ marginLeft: 'auto', fontSize: 11, color: '#94a3b8' }}>
+                      <span style={{ marginLeft: 'auto', fontSize: 13, color: '#94a3b8' }}>
                         POP: <strong style={{ color: '#fbbf24' }}>{assessment.probOfProfit}</strong>
                       </span>
                     )}
                   </div>
-                  <div style={{ padding: '10px 14px', fontSize: 12, color: '#94a3b8', borderBottom: '1px solid #1e293b', fontStyle: 'italic' }}>
+                  <div style={{ padding: '10px 16px', fontSize: 13, color: '#94a3b8', borderBottom: '1px solid #1e293b', fontStyle: 'italic', lineHeight: 1.5 }}>
                     {assessment.ratingReason}
                   </div>
 
                   {/* Pros / Cons */}
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', borderBottom: '1px solid #1e293b' }}>
-                    <div style={{ padding: '10px 12px', borderRight: '1px solid #1e293b' }}>
-                      <div style={{ fontSize: 10, color: '#22c55e', fontWeight: 700, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                    <div style={{ padding: '10px 14px', borderRight: '1px solid #1e293b' }}>
+                      <div style={{ fontSize: 11, color: '#22c55e', fontWeight: 700, marginBottom: 7, textTransform: 'uppercase', letterSpacing: 0.5 }}>
                         ✓ Pros
                       </div>
                       {assessment.pros.map((p, i) => (
-                        <div key={i} style={{ fontSize: 11, color: '#cbd5e1', marginBottom: 4, paddingLeft: 8, borderLeft: '2px solid #22c55e33' }}>
+                        <div key={i} style={{ fontSize: 13, color: '#cbd5e1', marginBottom: 5, paddingLeft: 9, borderLeft: '2px solid #22c55e33', lineHeight: 1.45 }}>
                           {p}
                         </div>
                       ))}
                     </div>
-                    <div style={{ padding: '10px 12px' }}>
-                      <div style={{ fontSize: 10, color: '#ef4444', fontWeight: 700, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                    <div style={{ padding: '10px 14px' }}>
+                      <div style={{ fontSize: 11, color: '#ef4444', fontWeight: 700, marginBottom: 7, textTransform: 'uppercase', letterSpacing: 0.5 }}>
                         ✗ Cons
                       </div>
                       {assessment.cons.map((c, i) => (
-                        <div key={i} style={{ fontSize: 11, color: '#cbd5e1', marginBottom: 4, paddingLeft: 8, borderLeft: '2px solid #ef444433' }}>
+                        <div key={i} style={{ fontSize: 13, color: '#cbd5e1', marginBottom: 5, paddingLeft: 9, borderLeft: '2px solid #ef444433', lineHeight: 1.45 }}>
                           {c}
                         </div>
                       ))}
@@ -1448,66 +1450,66 @@ export function PayoffView({ initialTicker, initialSpot }: PayoffViewProps) {
                   </div>
 
                   {/* Ideal market + Key risks */}
-                  <div style={{ padding: '8px 14px', borderBottom: '1px solid #1e293b', display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                  <div style={{ padding: '10px 16px', borderBottom: '1px solid #1e293b', display: 'flex', gap: 16, flexWrap: 'wrap' }}>
                     <div style={{ flex: 1, minWidth: 160 }}>
-                      <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600, marginBottom: 3, textTransform: 'uppercase', letterSpacing: 0.5 }}>Ideal market</div>
-                      <div style={{ fontSize: 11, color: '#e2e8f0' }}>{assessment.idealMarket}</div>
+                      <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>Ideal market</div>
+                      <div style={{ fontSize: 13, color: '#e2e8f0', lineHeight: 1.5 }}>{assessment.idealMarket}</div>
                     </div>
                     <div style={{ flex: 1, minWidth: 160 }}>
-                      <div style={{ fontSize: 10, color: '#f97316', fontWeight: 600, marginBottom: 3, textTransform: 'uppercase', letterSpacing: 0.5 }}>Key risks</div>
+                      <div style={{ fontSize: 11, color: '#f97316', fontWeight: 600, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>Key risks</div>
                       {assessment.keyRisks.map((r, i) => (
-                        <div key={i} style={{ fontSize: 11, color: '#fca5a5', marginBottom: 2 }}>• {r}</div>
+                        <div key={i} style={{ fontSize: 13, color: '#fca5a5', marginBottom: 3, lineHeight: 1.45 }}>• {r}</div>
                       ))}
                     </div>
                   </div>
 
                   {/* Exit strategy — 3 scenarios */}
-                  <div style={{ padding: '10px 14px' }}>
-                    <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                  <div style={{ padding: '12px 16px' }}>
+                    <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, marginBottom: 10, textTransform: 'uppercase', letterSpacing: 0.5 }}>
                       Recommended exit strategy
                     </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
                       {/* Close All */}
-                      <div style={{ background: '#1e293b', borderRadius: 6, padding: '9px 10px', border: '1px solid #334155' }}>
-                        <div style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', marginBottom: 5, display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <div style={{ background: '#1e293b', borderRadius: 6, padding: '10px 12px', border: '1px solid #334155' }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: '#94a3b8', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 4 }}>
                           <span>⏹</span> Close All
                         </div>
-                        <div style={{ fontSize: 10, color: '#fbbf24', marginBottom: 4, fontWeight: 600 }}>
+                        <div style={{ fontSize: 13, color: '#fbbf24', marginBottom: 5, fontWeight: 600, lineHeight: 1.4 }}>
                           {assessment.exit.closeAll.trigger}
                         </div>
-                        <div style={{ fontSize: 10, color: '#94a3b8', lineHeight: 1.45 }}>
+                        <div style={{ fontSize: 13, color: '#94a3b8', lineHeight: 1.5 }}>
                           {assessment.exit.closeAll.details}
                         </div>
                       </div>
 
                       {/* Bullish */}
-                      <div style={{ background: '#0c2010', borderRadius: 6, padding: '9px 10px', border: '1px solid #22c55e33' }}>
-                        <div style={{ fontSize: 10, fontWeight: 700, color: '#22c55e', marginBottom: 5, display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <div style={{ background: '#0c2010', borderRadius: 6, padding: '10px 12px', border: '1px solid #22c55e33' }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: '#22c55e', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 4 }}>
                           <span>↑</span> Bullish trend
                         </div>
-                        <div style={{ fontSize: 10, color: '#86efac', marginBottom: 4, fontWeight: 600 }}>
+                        <div style={{ fontSize: 13, color: '#86efac', marginBottom: 5, fontWeight: 600, lineHeight: 1.4 }}>
                           {assessment.exit.bullish.trigger}
                         </div>
-                        <div style={{ fontSize: 10, color: '#4ade80', marginBottom: 4 }}>
+                        <div style={{ fontSize: 13, color: '#4ade80', marginBottom: 5, lineHeight: 1.5 }}>
                           <strong>Exit first:</strong> {assessment.exit.bullish.exitFirst}
                         </div>
-                        <div style={{ fontSize: 10, color: '#86efac', lineHeight: 1.45 }}>
+                        <div style={{ fontSize: 13, color: '#86efac', lineHeight: 1.5 }}>
                           <strong>Hold:</strong> {assessment.exit.bullish.holdLast}
                         </div>
                       </div>
 
                       {/* Bearish */}
-                      <div style={{ background: '#200c0c', borderRadius: 6, padding: '9px 10px', border: '1px solid #ef444433' }}>
-                        <div style={{ fontSize: 10, fontWeight: 700, color: '#ef4444', marginBottom: 5, display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <div style={{ background: '#200c0c', borderRadius: 6, padding: '10px 12px', border: '1px solid #ef444433' }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: '#ef4444', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 4 }}>
                           <span>↓</span> Bearish trend
                         </div>
-                        <div style={{ fontSize: 10, color: '#fca5a5', marginBottom: 4, fontWeight: 600 }}>
+                        <div style={{ fontSize: 13, color: '#fca5a5', marginBottom: 5, fontWeight: 600, lineHeight: 1.4 }}>
                           {assessment.exit.bearish.trigger}
                         </div>
-                        <div style={{ fontSize: 10, color: '#f87171', marginBottom: 4 }}>
+                        <div style={{ fontSize: 13, color: '#f87171', marginBottom: 5, lineHeight: 1.5 }}>
                           <strong>Exit first:</strong> {assessment.exit.bearish.exitFirst}
                         </div>
-                        <div style={{ fontSize: 10, color: '#fca5a5', lineHeight: 1.45 }}>
+                        <div style={{ fontSize: 13, color: '#fca5a5', lineHeight: 1.5 }}>
                           <strong>Hold:</strong> {assessment.exit.bearish.holdLast}
                         </div>
                       </div>
@@ -1519,14 +1521,54 @@ export function PayoffView({ initialTicker, initialSpot }: PayoffViewProps) {
           </div>
         )}
 
-        {/* ════════════════════════════════════════════════════════════════════
-            OPTIONS CHAIN LOADER
-        ════════════════════════════════════════════════════════════════════ */}
-        {showChain && (
-          <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8, overflow: 'hidden' }}>
-            {/* Expiry selector */}
-            <div style={{ padding: '10px 12px', borderBottom: '1px solid #1e293b', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 11, color: '#64748b', marginRight: 4 }}>Expiry:</span>
+      </main>
+
+      {/* ════════════════════════════════════════════════════════════════════
+          OPTIONS CHAIN DRAWER — expandable panel anchored to bottom of right panel
+          ▲ expands to 70 vh   ▼ collapses to compact 220 px strip
+      ════════════════════════════════════════════════════════════════════ */}
+      {showChain && (
+        <div style={{
+          flexShrink: 0,
+          height: chainExpanded ? '70vh' : 44,
+          transition: 'height 0.22s ease',
+          borderTop: '2px solid #1e293b',
+          background: '#0f172a',
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+        }}>
+
+          {/* ── Title bar — fixed 44 px, always fully visible ── */}
+          <div style={{
+            height: 44, flexShrink: 0,
+            padding: '0 12px',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            borderBottom: '1px solid #1e293b',
+          }}>
+            <span style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600 }}>Options Chain</span>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              {chainExpanded && (
+                <button
+                  onClick={() => setChainStrikeFilter(f => f === 'atm' ? 'all' : 'atm')}
+                  style={{ padding: '3px 8px', fontSize: 10, borderRadius: 3, cursor: 'pointer', background: '#1e293b', border: '1px solid #334155', color: '#94a3b8' }}
+                >
+                  {chainStrikeFilter === 'atm' ? 'Show all strikes' : 'ATM ±10%'}
+                </button>
+              )}
+              <button
+                onClick={() => setChainExpanded(e => !e)}
+                title={chainExpanded ? 'Minimize chain panel' : 'Expand chain panel'}
+                style={{ padding: '3px 10px', fontSize: 13, lineHeight: 1, borderRadius: 3, cursor: 'pointer', background: '#1e293b', border: '1px solid #334155', color: '#94a3b8' }}
+              >
+                {chainExpanded ? '▼' : '▲'}
+              </button>
+            </div>
+          </div>
+
+          {/* ── Expiry tabs — only rendered when expanded ── */}
+          {chainExpanded && (
+            <div style={{ padding: '6px 12px', borderBottom: '1px solid #1e293b', display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', flexShrink: 0 }}>
               {chainExpirations.map(exp => (
                 <button
                   key={exp.date}
@@ -1541,114 +1583,118 @@ export function PayoffView({ initialTicker, initialSpot }: PayoffViewProps) {
                   {exp.date.slice(5)} <span style={{ color: '#64748b', fontSize: 9 }}>({exp.dte}d)</span>
                 </button>
               ))}
-              <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
-                <button
-                  onClick={() => setChainStrikeFilter(f => f === 'atm' ? 'all' : 'atm')}
-                  style={{
-                    padding: '3px 8px', fontSize: 10, borderRadius: 3, cursor: 'pointer',
-                    background: '#1e293b', border: '1px solid #334155', color: '#94a3b8',
-                  }}
-                >
-                  {chainStrikeFilter === 'atm' ? 'Show all strikes' : 'ATM ±10%'}
-                </button>
-              </div>
             </div>
+          )}
 
-            {/* Chain table */}
-            {chainData && !chainLoading ? (
-              <div style={{ overflowX: 'auto', maxHeight: 320, overflowY: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
-                  <thead>
-                    <tr style={{ position: 'sticky', top: 0, background: '#0f172a', zIndex: 1 }}>
-                      <th colSpan={4} style={{ padding: '5px 8px', textAlign: 'center', color: '#22c55e', borderBottom: '1px solid #1e293b', borderRight: '1px solid #1e293b', fontSize: 10 }}>CALLS</th>
-                      <th style={{ padding: '5px 8px', textAlign: 'center', color: '#fbbf24', borderBottom: '1px solid #1e293b', fontWeight: 700, fontSize: 12 }}>Strike</th>
-                      <th colSpan={4} style={{ padding: '5px 8px', textAlign: 'center', color: '#ef4444', borderBottom: '1px solid #1e293b', borderLeft: '1px solid #1e293b', fontSize: 10 }}>PUTS</th>
-                    </tr>
-                    <tr style={{ background: '#0f172a' }}>
-                      {['B', 'S', 'Mid', 'Δ'].map(h => (
-                        <th key={`c-${h}`} style={{ padding: '4px 6px', color: '#64748b', fontWeight: 400, textAlign: 'center', borderBottom: '1px solid #1e293b' }}>{h}</th>
-                      ))}
-                      <th style={{ padding: '4px 6px', color: '#fbbf24', textAlign: 'center', borderBottom: '1px solid #1e293b' }}></th>
-                      {['Δ', 'Mid', 'B', 'S'].map(h => (
-                        <th key={`p-${h}`} style={{ padding: '4px 6px', color: '#64748b', fontWeight: 400, textAlign: 'center', borderBottom: '1px solid #1e293b' }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {chainStrikes.map(strike => {
-                      const call = chainData.contracts.find(c => c.strike === strike && c.side === 'call');
-                      const put  = chainData.contracts.find(c => c.strike === strike && c.side === 'put');
-                      const isAtm = spotNum > 0 && Math.abs(strike / spotNum - 1) < 0.01;
+          {/* ── Chain table — fills remaining panel height (only when expanded) ── */}
+          {chainExpanded && (chainLoading ? (
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b', fontSize: 12 }}>
+              Loading chain…
+            </div>
+          ) : !chainData ? (
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#475569', fontSize: 12 }}>
+              No data — chain failed to load.
+            </div>
+          ) : chainData.contracts.length === 0 ? (
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, color: '#475569', fontSize: 12, padding: 16, textAlign: 'center' }}>
+              <span>No contracts returned for this expiry.</span>
+              <span style={{ fontSize: 11, color: '#334155' }}>
+                Try a different expiry, or click "Show all strikes" to remove the ATM filter.
+              </span>
+            </div>
+          ) : (
+            <div style={{ flex: 1, overflowX: 'auto', overflowY: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                <thead>
+                  <tr style={{ position: 'sticky', top: 0, background: '#0f172a', zIndex: 1 }}>
+                    <th colSpan={4} style={{ padding: '5px 8px', textAlign: 'center', color: '#22c55e', borderBottom: '1px solid #1e293b', borderRight: '1px solid #1e293b', fontSize: 10 }}>CALLS</th>
+                    <th style={{ padding: '5px 8px', textAlign: 'center', color: '#fbbf24', borderBottom: '1px solid #1e293b', fontWeight: 700, fontSize: 12 }}>Strike</th>
+                    <th colSpan={4} style={{ padding: '5px 8px', textAlign: 'center', color: '#ef4444', borderBottom: '1px solid #1e293b', borderLeft: '1px solid #1e293b', fontSize: 10 }}>PUTS</th>
+                  </tr>
+                  <tr style={{ background: '#0f172a' }}>
+                    {['B', 'S', 'Mid', 'Δ'].map(h => (
+                      <th key={`c-${h}`} style={{ padding: '4px 6px', color: '#64748b', fontWeight: 400, textAlign: 'center', borderBottom: '1px solid #1e293b' }}>{h}</th>
+                    ))}
+                    <th style={{ padding: '4px 6px', color: '#fbbf24', textAlign: 'center', borderBottom: '1px solid #1e293b' }}></th>
+                    {['Δ', 'Mid', 'B', 'S'].map(h => (
+                      <th key={`p-${h}`} style={{ padding: '4px 6px', color: '#64748b', fontWeight: 400, textAlign: 'center', borderBottom: '1px solid #1e293b' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {chainStrikes.map(strike => {
+                    const call = chainData.contracts.find(c => c.strike === strike && c.side === 'call');
+                    const put  = chainData.contracts.find(c => c.strike === strike && c.side === 'put');
+                    const isAtm = spotNum > 0 && Math.abs(strike / spotNum - 1) < 0.01;
 
-                      const cell = (v: number | null) =>
-                        v != null ? (v < 0.01 ? v.toFixed(4) : v.toFixed(2)) : '—';
+                    const cell = (v: number | null) =>
+                      v != null ? (v < 0.01 ? v.toFixed(4) : v.toFixed(2)) : '—';
 
-                      return (
-                        <tr key={strike} style={{ background: isAtm ? '#0f2d4a' : 'transparent' }}>
-                          {/* Call: Buy + Sell buttons */}
-                          <td style={{ padding: '3px 5px', textAlign: 'center' }}>
-                            {call && (
-                              <button onClick={() => addLegFromContract(call, 'buy', 'call', selectedExpiry)}
-                                style={{ fontSize: 9, padding: '1px 5px', background: '#14532d', color: '#86efac', border: 'none', borderRadius: 2, cursor: 'pointer' }}>
-                                B
-                              </button>
-                            )}
-                          </td>
-                          <td style={{ padding: '3px 5px', textAlign: 'center' }}>
-                            {call && (
-                              <button onClick={() => addLegFromContract(call, 'sell', 'call', selectedExpiry)}
-                                style={{ fontSize: 9, padding: '1px 5px', background: '#7c2d12', color: '#fdba74', border: 'none', borderRadius: 2, cursor: 'pointer' }}>
-                                S
-                              </button>
-                            )}
-                          </td>
-                          <td style={{ padding: '3px 6px', textAlign: 'right', color: '#22c55e' }}>
-                            {call ? cell((call.bid + call.ask) / 2) : '—'}
-                          </td>
-                          <td style={{ padding: '3px 6px', textAlign: 'right', color: '#64748b' }}>
-                            {call ? cell(call.delta) : '—'}
-                          </td>
+                    return (
+                      <tr key={strike} style={{ background: isAtm ? '#0f2d4a' : 'transparent' }}>
+                        {/* Call: Buy + Sell buttons */}
+                        <td style={{ padding: '3px 5px', textAlign: 'center' }}>
+                          {call && (
+                            <button onClick={() => addLegFromContract(call, 'buy', 'call', selectedExpiry)}
+                              style={{ fontSize: 9, padding: '1px 5px', background: '#14532d', color: '#86efac', border: 'none', borderRadius: 2, cursor: 'pointer' }}>
+                              B
+                            </button>
+                          )}
+                        </td>
+                        <td style={{ padding: '3px 5px', textAlign: 'center' }}>
+                          {call && (
+                            <button onClick={() => addLegFromContract(call, 'sell', 'call', selectedExpiry)}
+                              style={{ fontSize: 9, padding: '1px 5px', background: '#7c2d12', color: '#fdba74', border: 'none', borderRadius: 2, cursor: 'pointer' }}>
+                              S
+                            </button>
+                          )}
+                        </td>
+                        <td style={{ padding: '3px 6px', textAlign: 'right', color: '#22c55e' }}>
+                          {call ? cell((call.bid + call.ask) / 2) : '—'}
+                        </td>
+                        <td style={{ padding: '3px 6px', textAlign: 'right', color: '#64748b' }}>
+                          {call ? cell(call.delta) : '—'}
+                        </td>
 
-                          {/* Strike */}
-                          <td style={{ padding: '3px 8px', textAlign: 'center', fontWeight: 700, color: isAtm ? '#fbbf24' : '#e2e8f0', borderLeft: '1px solid #1e293b', borderRight: '1px solid #1e293b' }}>
-                            {strike}
-                          </td>
+                        {/* Strike */}
+                        <td style={{ padding: '3px 8px', textAlign: 'center', fontWeight: 700, color: isAtm ? '#fbbf24' : '#e2e8f0', borderLeft: '1px solid #1e293b', borderRight: '1px solid #1e293b' }}>
+                          {strike}
+                        </td>
 
-                          {/* Put: Delta + Mid + Buy + Sell */}
-                          <td style={{ padding: '3px 6px', textAlign: 'right', color: '#64748b' }}>
-                            {put ? cell(put.delta) : '—'}
-                          </td>
-                          <td style={{ padding: '3px 6px', textAlign: 'right', color: '#ef4444' }}>
-                            {put ? cell((put.bid + put.ask) / 2) : '—'}
-                          </td>
-                          <td style={{ padding: '3px 5px', textAlign: 'center' }}>
-                            {put && (
-                              <button onClick={() => addLegFromContract(put, 'buy', 'put', selectedExpiry)}
-                                style={{ fontSize: 9, padding: '1px 5px', background: '#14532d', color: '#86efac', border: 'none', borderRadius: 2, cursor: 'pointer' }}>
-                                B
-                              </button>
-                            )}
-                          </td>
-                          <td style={{ padding: '3px 5px', textAlign: 'center' }}>
-                            {put && (
-                              <button onClick={() => addLegFromContract(put, 'sell', 'put', selectedExpiry)}
-                                style={{ fontSize: 9, padding: '1px 5px', background: '#7c2d12', color: '#fdba74', border: 'none', borderRadius: 2, cursor: 'pointer' }}>
-                                S
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            ) : chainLoading ? (
-              <div style={{ padding: 20, textAlign: 'center', color: '#64748b', fontSize: 12 }}>Loading chain…</div>
-            ) : null}
-          </div>
-        )}
-      </main>
+                        {/* Put: Delta + Mid + Buy + Sell */}
+                        <td style={{ padding: '3px 6px', textAlign: 'right', color: '#64748b' }}>
+                          {put ? cell(put.delta) : '—'}
+                        </td>
+                        <td style={{ padding: '3px 6px', textAlign: 'right', color: '#ef4444' }}>
+                          {put ? cell((put.bid + put.ask) / 2) : '—'}
+                        </td>
+                        <td style={{ padding: '3px 5px', textAlign: 'center' }}>
+                          {put && (
+                            <button onClick={() => addLegFromContract(put, 'buy', 'put', selectedExpiry)}
+                              style={{ fontSize: 9, padding: '1px 5px', background: '#14532d', color: '#86efac', border: 'none', borderRadius: 2, cursor: 'pointer' }}>
+                              B
+                            </button>
+                          )}
+                        </td>
+                        <td style={{ padding: '3px 5px', textAlign: 'center' }}>
+                          {put && (
+                            <button onClick={() => addLegFromContract(put, 'sell', 'put', selectedExpiry)}
+                              style={{ fontSize: 9, padding: '1px 5px', background: '#7c2d12', color: '#fdba74', border: 'none', borderRadius: 2, cursor: 'pointer' }}>
+                              S
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ))}
+
+        </div>
+      )}
+      </div>
     </div>
   );
 }

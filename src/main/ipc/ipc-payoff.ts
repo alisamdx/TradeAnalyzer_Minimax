@@ -3,6 +3,7 @@
 import { ipcMain } from 'electron';
 import type { Database } from 'better-sqlite3';
 import { PayoffService } from '../services/payoff-service.js';
+import { secureGet } from '../services/secure-settings.js';
 import type {
   IpcResult, PayoffLeg, SavedPayoffStrategy,
   PayoffAssessInput, PayoffAssessment,
@@ -34,10 +35,13 @@ export function registerPayoffIpc(db: Database): void {
   ipcMain.handle(
     'payoff:assess',
     async (event, legs: PayoffLeg[], input: PayoffAssessInput): Promise<IpcResult<PayoffAssessment>> => {
+      const apiKey = secureGet(db, 'anthropicApiKey');
+      if (!apiKey) return fail(new Error('Anthropic API key not configured. Add it in Portfolio → AI Advisor → Settings.'));
       try {
         const result = await svc.assess(
           legs,
           input,
+          apiKey,
           (chunk: string) => event.sender.send('payoff:assess:progress', chunk),
         );
         return ok(result);
