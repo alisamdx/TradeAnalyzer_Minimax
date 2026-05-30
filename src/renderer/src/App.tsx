@@ -23,10 +23,11 @@ import { CollaredLeapsView } from './views/CollaredLeapsView.js';
 import { FiltersView } from './views/FiltersView.js';
 import { TestApiView } from './views/TestApiView.js';
 import { PayoffView } from './views/PayoffView.js';
+import { IvHistoryView } from './views/IvHistoryView.js';
 
 declare const __APP_VERSION__: string;
 
-type View = 'watchlists' | 'screener' | 'filters' | 'analysis' | 'validate' | 'portfolio' | 'briefing' | 'settings' | 'alerts' | 'data' | 'optionsChain' | 'payoff' | 'agent' | 'backtest' | 'leapsCsp' | 'collaredLeaps' | 'testApi';
+type View = 'watchlists' | 'screener' | 'filters' | 'analysis' | 'validate' | 'portfolio' | 'briefing' | 'settings' | 'alerts' | 'data' | 'optionsChain' | 'payoff' | 'agent' | 'backtest' | 'leapsCsp' | 'collaredLeaps' | 'testApi' | 'ivHistory';
 
 type NavEntry = {
   id: number;
@@ -550,6 +551,7 @@ export function App() {
       case 'leapsCsp': return <LeapsCspView />;
       case 'collaredLeaps': return <CollaredLeapsView />;
       case 'testApi': return <TestApiView />;
+      case 'ivHistory': return <IvHistoryView />;
       case 'settings': return (
         <SettingsView
           etradeWarning={etradeWarning}
@@ -775,6 +777,12 @@ export function App() {
             🔬 Test API
           </button>
           <div className="nav-divider" />
+          <button
+            className={`nav-btn ${currentView === 'ivHistory' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('ivHistory')}
+          >
+            📊 IV History
+          </button>
           <button
             className={`nav-btn ${currentView === 'data' ? 'active' : ''}`}
             onClick={() => navigateSidebar('data')}

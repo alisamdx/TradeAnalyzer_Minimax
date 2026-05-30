@@ -40,6 +40,9 @@ import { BacktestEngine } from './services/backtest-engine.js';
 import { registerBacktestIpc } from './ipc/ipc-backtest.js';
 import { registerFiltersIpc } from './ipc/ipc-filters.js';
 import { registerPayoffIpc } from './ipc/ipc-payoff.js';
+import { MarketDataProvider } from './services/marketdata-provider.js';
+import { IvHistoryService } from './services/iv-history-service.js';
+import { registerIvHistoryIpc } from './ipc/ipc-iv-history.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -269,8 +272,16 @@ app.whenReady().then(() => {
   // Payoff Visualizer — saved strategy CRUD
   registerPayoffIpc(db);
 
-  // Options Chain view
-  registerOptionsIpc(optionsProvider, quoteCache, rateLimiter);
+  // v0.17.0 — IV History service + MarketData.app provider
+  const marketdataProvider = new MarketDataProvider(
+    () => { try { return secureGet(db, 'marketdataApiToken'); } catch { return ''; } }
+  );
+  const ivHistoryService = new IvHistoryService(db, marketdataProvider, getConstituents);
+  registerIvHistoryIpc(db, ivHistoryService, marketdataProvider);
+
+  // Options Chain view (passes IV capture callback for E*Trade auto-capture)
+  registerOptionsIpc(optionsProvider, quoteCache, rateLimiter,
+    (ticker, contracts, underlyingPx) => ivHistoryService.captureFromEtradeChain(ticker, contracts, underlyingPx));
 
   // Test API diagnostic screen
   registerTestApiIpc(dataProvider);

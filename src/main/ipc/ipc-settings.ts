@@ -44,6 +44,8 @@ export interface AppSettings {
   // v0.12.0: TraderAgent integration
   agentDbPath: string;
   agentProjectPath: string;
+  // v0.17.0: MarketData.app rate limit
+  marketdataDailyCredits: number;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -69,7 +71,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   },
   // v0.12.0 defaults — user can override in Settings → Agent
   agentDbPath: '',
-  agentProjectPath: ''
+  agentProjectPath: '',
+  // v0.17.0 defaults
+  marketdataDailyCredits: 500,
 };
 
 export function registerSettingsIpc(

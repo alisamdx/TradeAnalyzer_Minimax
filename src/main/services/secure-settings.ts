@@ -31,6 +31,7 @@ const SENSITIVE_KEYS = new Set([
   'etradeAccessSecret',
   'etradeRequestToken',
   'etradeRequestSecret',
+  'marketdataApiToken',
 ]);
 
 const ENC_PREFIX = 'enc:';

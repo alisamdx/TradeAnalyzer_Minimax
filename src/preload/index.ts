@@ -64,6 +64,11 @@ import type {
   SavedPayoffStrategy,
   PayoffAssessInput,
   PayoffAssessment,
+  IvHistoryBackfillPhase,
+  IvRankResult,
+  IvHistoryCoverage,
+  IvHistoryGapSummary,
+  IvHistoryProgressEvent,
 } from '@shared/types.js';
 export type {
   ScreenPreset, ScreenCriteria, ScreenRunResult, ScreenResultRow, Universe,
@@ -907,8 +912,29 @@ function buildApi() {
     },
   };
 
+  const ivHistory = {
+    getCoverage:         (universe: 'sp500' | 'russell1000' | 'both') => invoke<IvHistoryCoverage>('iv-history:get-coverage', universe),
+    getGaps:             (universe: 'sp500' | 'russell1000' | 'both') => invoke<IvHistoryGapSummary>('iv-history:get-gaps', universe),
+    startBackfill:       (phase: IvHistoryBackfillPhase) => invoke<{ processed: number; skipped: number; failed: number }>('iv-history:start-backfill', phase),
+    cancel:              () => invoke<boolean>('iv-history:cancel'),
+    getRank:             (ticker: string) => invoke<IvRankResult>('iv-history:get-rank', ticker),
+    getRanks:            (tickers: string[]) => invoke<IvRankResult[]>('iv-history:get-ranks', tickers),
+    getInitialLoadStatus: () => invoke<{
+      sp500:   { complete: boolean; completedAt: string | null };
+      russell: { complete: boolean; completedAt: string | null; newTickers: number };
+    }>('iv-history:get-initial-load-status'),
+    saveToken:           (token: string) => invoke<boolean>('iv-history:save-token', token),
+    getTokenConfigured:  () => invoke<boolean>('iv-history:get-token-configured'),
+    setRate:             (rpm: number) => invoke<boolean>('iv-history:set-rate', rpm),
+    onProgress: (callback: (evt: IvHistoryProgressEvent) => void) => {
+      const handler = (_: unknown, evt: IvHistoryProgressEvent) => callback(evt);
+      ipcRenderer.on('iv-history:progress', handler);
+      return () => ipcRenderer.removeListener('iv-history:progress', handler);
+    },
+  };
+
   return {
-    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, historical, portfolio, briefing, alerts, optionsChain, agent, backtest, leapsCsp, collaredLeaps, testApi, etrade, filters, payoff },
+    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, historical, portfolio, briefing, alerts, optionsChain, agent, backtest, leapsCsp, collaredLeaps, testApi, etrade, filters, payoff, ivHistory },
     dialog: {
       prompt: (opts: { title: string; defaultValue?: string }) =>
         invoke<string | null>('dialog:prompt', opts),

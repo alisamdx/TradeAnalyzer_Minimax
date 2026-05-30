@@ -1251,3 +1251,49 @@ export interface PayoffAssessment {
     bearish: { trigger: string; exitFirst: string; holdLast: string };
   };
 }
+
+// ─── IV History (v0.17.0) ──────────────────────────────────────────────────────
+
+/** Which backfill phase to run. gap_fill fills holes in existing history. */
+export type IvHistoryBackfillPhase = 'initial_sp500' | 'initial_russell' | 'gap_fill';
+
+/** Per-ticker IV rank/percentile result from the iv_history table. */
+export interface IvRankResult {
+  ticker:       string;
+  currentIv:    number | null;  // most recent ATM IV, decimal (0.285) — null if < 21 points
+  ivRank:       number | null;  // 0–100, null if insufficient data
+  ivPercentile: number | null;  // 0–100, null if insufficient data
+  dataPoints:   number;         // number of daily readings used
+  oldestDate:   string | null;  // YYYY-MM-DD of oldest reading in window
+  newestDate:   string | null;  // YYYY-MM-DD of most recent reading
+}
+
+/** Coverage summary for a universe of tickers. */
+export interface IvHistoryCoverage {
+  complete:        number;         // tickers with ≥ 252 data points
+  partial:         number;         // tickers with 1–251 data points
+  none:            number;         // tickers with 0 data points
+  lastRefreshDate: string | null;  // most recent date in the table
+  totalReadings:   number;         // total rows in iv_history
+}
+
+/** Summary of how many (ticker, date) gap pairs exist. */
+export interface IvHistoryGapSummary {
+  missingDays:    number;         // distinct missing trading days
+  missingPairs:   number;         // total (ticker, date) pairs to fetch
+  oldestGapDate:  string | null;  // YYYY-MM-DD
+  newestGapDate:  string | null;  // YYYY-MM-DD
+  estimatedCalls: number;         // = missingPairs
+}
+
+/** Progress event emitted during backfill via iv-history:progress IPC channel. */
+export interface IvHistoryProgressEvent {
+  phase:       IvHistoryBackfillPhase;
+  ticker:      string;
+  date:        string;
+  processed:   number;
+  total:       number;
+  skipped:     number;
+  failed:      number;
+  callsPerMin: number;
+}

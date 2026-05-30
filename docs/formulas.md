@@ -271,3 +271,49 @@ Risk/Reward = (Target − Entry zone low) / (Entry zone low − Stop-loss)
 
 These formulas surface in the UI tooltip in the validation dashboard (Phase 4).
 Implemented in `modeBuy()` in `analysis-service.ts`. see docs/formulas.md#entry-zone-and-stop
+
+## IV History (v0.17.0)
+
+### iv-history
+
+IV History stores daily 30-day constant-maturity ATM implied volatility per ticker.
+Used to compute IV Rank and IV Percentile over a 252 trading-day window.
+
+```
+IV Rank      = (current_iv − min_iv_252d) / (max_iv_252d − min_iv_252d) × 100
+IV Percentile = count(days where iv < current_iv) / total_days × 100
+```
+
+- `current_iv` is today's most recent reading (decimal, e.g. 0.285).
+- `min_iv_252d` / `max_iv_252d` are the min and max of the last 252 trading-day window.
+- At least 21 data points required before returning a value (returns null otherwise).
+
+Implemented in `IvHistoryService.getIvRank()` in `src/main/services/iv-history-service.ts`.
+
+### atm-iv-interpolation
+
+30-day constant-maturity ATM IV is computed from two expirations bracketing 30 DTE:
+
+```
+1. Group all contracts by expiration date.
+2. For each expiration: find the ATM strike (nearest to underlying price) that has
+   both a call IV and a put IV.  ATM_IV_exp = (call_iv + put_iv) / 2.
+3. Identify near = highest DTE ≤ 30, far = lowest DTE > 30.
+4. weight_near = (dte_far − 30) / (dte_far − dte_near)
+   weight_far  = 1 − weight_near
+   ATM_IV_30d  = ATM_IV_near × weight_near + ATM_IV_far × weight_far
+```
+
+If only one side of the bracket is available, use that expiration's IV directly.
+IVs are stored as decimal fractions (0.285 = 28.5%).
+
+Implemented in `computeAtmIv()` in `src/main/services/iv-history-service.ts`.
+
+### trading-days
+
+NYSE trading days are calendar weekdays excluding the NYSE_HOLIDAYS set
+(hardcoded for 2023–2027; extend as needed). The gap-detection logic uses
+`tradingDaysInRange(from, to)` to enumerate missing dates.
+
+Implemented in `src/main/services/iv-history-service.ts`.
+

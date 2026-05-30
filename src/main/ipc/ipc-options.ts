@@ -49,7 +49,8 @@ function fail(err: unknown): { ok: false; error: { code: string; message: string
 export function registerOptionsIpc(
   optionsProvider: OptionsProvider,
   quoteCache: QuoteCache,
-  rateLimiter: TokenBucketRateLimiter
+  rateLimiter: TokenBucketRateLimiter,
+  onChainFetched?: (ticker: string, contracts: import('@shared/types.js').OptionContract[], underlyingPx: number | null) => void,
 ): void {
   // Fetch near-term expirations with contract counts.
   ipcMain.handle(
@@ -117,6 +118,8 @@ export function registerOptionsIpc(
             currentIv = ivData.currentIv;
           } catch { /* IV unavailable */ }
         }
+
+        onChainFetched?.(chain.ticker, chain.contracts, currentPrice);
 
         return ok({
           ticker: chain.ticker,
