@@ -1181,3 +1181,39 @@ export interface AdvisorProgressEvent {
   type: 'thinking' | 'status' | 'done';
   text: string;
 }
+
+// ─── Payoff Visualizer ────────────────────────────────────────────────────────
+
+/** One leg of a multi-leg options/stock strategy. */
+export interface PayoffLeg {
+  id: string;
+  side: 'buy' | 'sell';
+  type: 'call' | 'put' | 'stock';
+  /** Strike price; 0 for stock legs (stock uses premium as entry price). */
+  strike: number;
+  /** ISO date expiry; ignored for stock legs. */
+  expiry: string;
+  /** Per-share price: premium paid/received for options; entry price for stock. */
+  premium: number;
+  /** Number of contracts (1 contract = 100 shares). */
+  quantity: number;
+  /** Signed delta per share (positive for calls, negative for puts). Null if unknown. */
+  delta: number | null;
+  /** Theta per day per share. Null if unknown. */
+  theta: number | null;
+  /** Vega per 1% IV move per share. Null if unknown. */
+  vega: number | null;
+  /** IV as percentage (e.g. 28.5). Null if unknown. */
+  iv: number | null;
+  /** Human-readable label shown in the legs list. */
+  label: string;
+}
+
+/** A named multi-leg strategy saved to the DB. */
+export interface SavedPayoffStrategy {
+  id: number;
+  name: string;
+  ticker: string | null;
+  legs: PayoffLeg[];
+  createdAt: string;
+}

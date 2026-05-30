@@ -60,6 +60,8 @@ import type {
   PositionAnalysis,
   AdvisorSession,
   AdvisorProgressEvent,
+  PayoffLeg,
+  SavedPayoffStrategy,
 } from '@shared/types.js';
 export type {
   ScreenPreset, ScreenCriteria, ScreenRunResult, ScreenResultRow, Universe,
@@ -887,8 +889,14 @@ function buildApi() {
     }
   };
 
+  const payoff = {
+    save:   (name: string, ticker: string | null, legs: PayoffLeg[]) => invoke<SavedPayoffStrategy>('payoff:save', name, ticker, legs),
+    list:   () => invoke<SavedPayoffStrategy[]>('payoff:list'),
+    delete: (id: number) => invoke<boolean>('payoff:delete', id),
+  };
+
   return {
-    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, historical, portfolio, briefing, alerts, optionsChain, agent, backtest, leapsCsp, collaredLeaps, testApi, etrade, filters },
+    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, historical, portfolio, briefing, alerts, optionsChain, agent, backtest, leapsCsp, collaredLeaps, testApi, etrade, filters, payoff },
     dialog: {
       prompt: (opts: { title: string; defaultValue?: string }) =>
         invoke<string | null>('dialog:prompt', opts),

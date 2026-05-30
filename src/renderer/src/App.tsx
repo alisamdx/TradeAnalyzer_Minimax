@@ -22,10 +22,11 @@ import { LeapsCspView } from './views/LeapsCspView.js';
 import { CollaredLeapsView } from './views/CollaredLeapsView.js';
 import { FiltersView } from './views/FiltersView.js';
 import { TestApiView } from './views/TestApiView.js';
+import { PayoffView } from './views/PayoffView.js';
 
 declare const __APP_VERSION__: string;
 
-type View = 'watchlists' | 'screener' | 'filters' | 'analysis' | 'validate' | 'portfolio' | 'briefing' | 'settings' | 'alerts' | 'data' | 'optionsChain' | 'agent' | 'backtest' | 'leapsCsp' | 'collaredLeaps' | 'testApi';
+type View = 'watchlists' | 'screener' | 'filters' | 'analysis' | 'validate' | 'portfolio' | 'briefing' | 'settings' | 'alerts' | 'data' | 'optionsChain' | 'payoff' | 'agent' | 'backtest' | 'leapsCsp' | 'collaredLeaps' | 'testApi';
 
 type NavEntry = {
   id: number;
@@ -34,6 +35,8 @@ type NavEntry = {
   validateTicker?: string | null;
   optionsChainTicker?: string | null;
   optionsChainExpiry?: string | null;
+  payoffTicker?: string | null;
+  payoffSpot?: number | null;
 };
 
 export function App() {
@@ -153,6 +156,12 @@ export function App() {
     };
     window.addEventListener('navigate-to-options', handleNavigateToOptions as EventListener);
 
+    // Listen for "Payoff Visualizer" from other views
+    const handleNavigateToPayoff = (e: CustomEvent<{ ticker?: string; spot?: number }>) => {
+      setNavStack(prev => [...prev, { id: navIdRef.current++, view: 'payoff', payoffTicker: e.detail.ticker ?? null, payoffSpot: e.detail.spot ?? null }]);
+    };
+    window.addEventListener('navigate-to-payoff', handleNavigateToPayoff as EventListener);
+
     // Listen for E*Trade auth errors from any view → redirect to Settings
     const handleEtradeAuthError = (e: CustomEvent<{ warning: string }>) => {
       setEtradeWarning(e.detail.warning);
@@ -180,6 +189,7 @@ export function App() {
       window.removeEventListener('navigate-to-analysis', handleNavigateToAnalysis as EventListener);
       window.removeEventListener('navigate-to-validate', handleNavigateToValidate as EventListener);
       window.removeEventListener('navigate-to-options', handleNavigateToOptions as EventListener);
+      window.removeEventListener('navigate-to-payoff', handleNavigateToPayoff as EventListener);
       window.removeEventListener('navigate-to-settings-etrade', handleEtradeAuthError as EventListener);
       window.removeEventListener('watchlist-created', handleWatchlistCreated as EventListener);
       window.removeEventListener('show-prompt-dialog', handleShowPrompt as EventListener);
@@ -529,6 +539,12 @@ export function App() {
           clearInitialTicker={() => {}}
         />
       );
+      case 'payoff': return (
+        <PayoffView
+          initialTicker={entry.payoffTicker ?? null}
+          initialSpot={entry.payoffSpot ?? null}
+        />
+      );
       case 'agent': return <AgentView />;
       case 'backtest': return <BacktestView />;
       case 'leapsCsp': return <LeapsCspView />;
@@ -733,6 +749,12 @@ export function App() {
             onClick={() => navigateSidebar('optionsChain')}
           >
             📉 Options
+          </button>
+          <button
+            className={`nav-btn ${currentView === 'payoff' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('payoff')}
+          >
+            📐 Payoff
           </button>
           <button
             className={`nav-btn ${currentView === 'leapsCsp' ? 'active' : ''}`}
