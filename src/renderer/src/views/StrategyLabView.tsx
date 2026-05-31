@@ -13,7 +13,30 @@ import type {
   SetupLeg,
   StrategyLabGrade,
   StrategyLabComplexity,
+  PayoffLeg,
 } from '@shared/types.js';
+
+// ─── SetupLeg → PayoffLeg conversion ─────────────────────────────────────────
+
+function labLegToPayoffLeg(leg: SetupLeg): PayoffLeg {
+  const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+  const actionLabel = leg.action === 'buy' ? 'Buy' : 'Sell';
+  const typeLabel   = leg.side.charAt(0).toUpperCase() + leg.side.slice(1);
+  return {
+    id,
+    side:     leg.action,
+    type:     leg.side,
+    strike:   leg.strike,
+    expiry:   leg.expiration,
+    premium:  leg.mid,
+    quantity: leg.qty,
+    delta:    leg.delta,
+    theta:    null,
+    vega:     null,
+    iv:       leg.iv,   // already in percentage form (e.g. 28.5)
+    label:    `${actionLabel} ${typeLabel} $${leg.strike}`,
+  };
+}
 
 // ─── Formatters ────────────────────────────────────────────────────────────────
 
@@ -242,6 +265,7 @@ function ValidateTab({ ctx, scores, onExplore }: ValidateTabProps) {
         expiry:   setup.expiration,
         strategy: score.slug,
         strike:   setup.legs[0]?.strike ?? undefined,
+        legs:     setup.legs.map(labLegToPayoffLeg),
       },
     }));
   };
@@ -484,6 +508,7 @@ function ExploreTab({ initialSlug, initialCtx }: ExploreTabProps) {
         expiry:   setup.expiration,
         strategy: slug,
         strike:   setup.legs[0]?.strike ?? undefined,
+        legs:     setup.legs.map(labLegToPayoffLeg),
       },
     }));
   };

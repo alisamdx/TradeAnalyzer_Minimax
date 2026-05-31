@@ -851,9 +851,14 @@ interface PayoffViewProps {
   initialStrategy?: string | null;
   /** Target strike price from Opportunity — used to find the nearest contract. */
   initialStrike?: number | null;
+  /**
+   * Pre-built legs from Strategy Lab. When provided the chain-fetch auto-load
+   * is skipped and these legs are applied directly on mount.
+   */
+  initialLegs?: PayoffLeg[] | null;
 }
 
-export function PayoffView({ initialTicker, initialSpot, initialExpiry, initialStrategy, initialStrike }: PayoffViewProps) {
+export function PayoffView({ initialTicker, initialSpot, initialExpiry, initialStrategy, initialStrike, initialLegs }: PayoffViewProps) {
   const [ticker, setTicker]   = useState(initialTicker ?? '');
   const [spotStr, setSpotStr] = useState(initialSpot != null ? String(initialSpot) : '');
   const [legs, setLegs]       = useState<PayoffLeg[]>([]);
@@ -905,8 +910,17 @@ export function PayoffView({ initialTicker, initialSpot, initialExpiry, initialS
     window.api.watchlists.items.list(selectedWlId).then(setWatchlistItems).catch(() => setWatchlistItems([]));
   }, [selectedWlId]);
 
+  // ── Strategy Lab navigation: pre-built legs supplied directly ────────────────
+  useEffect(() => {
+    if (!initialLegs || initialLegs.length === 0) return;
+    setLegs(initialLegs);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // run only once on mount
+
   // ── Opportunity navigation: auto-load chain + pre-add leg(s) on mount ────────
   useEffect(() => {
+    // Skip if Strategy Lab already supplied pre-built legs
+    if (initialLegs && initialLegs.length > 0) return;
     if (!initialTicker || !initialExpiry || !initialStrike || !initialStrategy) return;
 
     const init = async () => {

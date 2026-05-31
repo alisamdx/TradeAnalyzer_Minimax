@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, useRef } from 'react';
-import type { Watchlist, WatchlistItem, CachedQuote, Universe } from '@shared/types.js';
+import type { Watchlist, WatchlistItem, CachedQuote, Universe, PayoffLeg } from '@shared/types.js';
 import { ScreenerView } from './views/ScreenerView.js';
 import { AnalysisView } from './views/AnalysisView.js';
 import { ValidateView } from './views/ValidateView.js';
@@ -43,6 +43,7 @@ type NavEntry = {
   payoffExpiry?: string | null;
   payoffStrategy?: string | null;
   payoffStrike?: number | null;
+  payoffLegs?: PayoffLeg[] | null;
 };
 
 export function App() {
@@ -163,7 +164,7 @@ export function App() {
     window.addEventListener('navigate-to-options', handleNavigateToOptions as EventListener);
 
     // Listen for "Payoff Visualizer" from other views
-    const handleNavigateToPayoff = (e: CustomEvent<{ ticker?: string; spot?: number; expiry?: string; strategy?: string; strike?: number }>) => {
+    const handleNavigateToPayoff = (e: CustomEvent<{ ticker?: string; spot?: number; expiry?: string; strategy?: string; strike?: number; legs?: PayoffLeg[] }>) => {
       setNavStack(prev => [...prev, {
         id: navIdRef.current++,
         view: 'payoff',
@@ -172,6 +173,7 @@ export function App() {
         payoffExpiry:   e.detail.expiry   ?? null,
         payoffStrategy: e.detail.strategy ?? null,
         payoffStrike:   e.detail.strike   ?? null,
+        payoffLegs:     e.detail.legs     ?? null,
       }]);
     };
     window.addEventListener('navigate-to-payoff', handleNavigateToPayoff as EventListener);
@@ -560,6 +562,7 @@ export function App() {
           initialExpiry={entry.payoffExpiry ?? null}
           initialStrategy={entry.payoffStrategy ?? null}
           initialStrike={entry.payoffStrike ?? null}
+          initialLegs={entry.payoffLegs ?? null}
         />
       );
       case 'agent': return <AgentView />;
