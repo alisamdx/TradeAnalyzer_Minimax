@@ -335,9 +335,9 @@ export function OpportunityView() {
                 <th style={thNum} onClick={() => handleSort('dayChangePct')}>Day%{sortIndicator('dayChangePct')}</th>
                 <th style={thCtr} onClick={() => handleSort('compositeScore')} title="Composite opportunity score optimized for the selected strategy — NOT a buy signal. High score = favorable conditions to sell premium (Wheel/CSP) or buy options (Bullish/Bearish).">Score{sortIndicator('compositeScore')}</th>
                 <th style={th} onClick={() => handleSort('fundamentalsScore')}>Fund{sortIndicator('fundamentalsScore')}</th>
-                <th style={thNum} onClick={() => handleSort('ivRank')}>IV Rank{sortIndicator('ivRank')}</th>
-                <th style={thNum} onClick={() => handleSort('technicalScore')}>Tech{sortIndicator('technicalScore')}</th>
-                <th style={thNum} onClick={() => handleSort('premiumYieldScore')}>Yield{sortIndicator('premiumYieldScore')}</th>
+                <th style={th} onClick={() => handleSort('ivRank')}>IV Rank{sortIndicator('ivRank')}</th>
+                <th style={th} onClick={() => handleSort('technicalScore')}>Tech{sortIndicator('technicalScore')}</th>
+                <th style={th} onClick={() => handleSort('premiumYieldScore')}>Yield{sortIndicator('premiumYieldScore')}</th>
                 <th style={thNum} onClick={() => handleSort('currentIv')}>Curr IV{sortIndicator('currentIv')}</th>
                 <th style={thNum} onClick={() => handleSort('targetStrike')} title="~92% of price — CSP target strike">Strike{sortIndicator('targetStrike')}</th>
                 <th style={thNum} title="Nearest Friday ≥ 30 DTE from today">Exp / DTE</th>
