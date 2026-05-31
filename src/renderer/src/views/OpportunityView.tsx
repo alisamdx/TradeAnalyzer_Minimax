@@ -144,14 +144,14 @@ export function OpportunityView() {
   const sortIndicator = (key: SortKey) =>
     sortKey !== key ? ' ↕' : sortDir === 'desc' ? ' ↓' : ' ↑';
 
-  const run = useCallback(async () => {
+  const run = useCallback(async (strategyOverride?: StrategyMode) => {
     setLoading(true);
     setError(null);
     const t0 = Date.now();
     try {
       const opts: OpportunityRunOptions = {
         universe,
-        strategy,
+        strategy: strategyOverride ?? strategy,
         minCompositeScore: minScore,
         limit,
       };
@@ -246,7 +246,7 @@ export function OpportunityView() {
           {STRATEGY_OPTIONS.map(opt => (
             <button
               key={opt.value}
-              onClick={() => setStrategy(opt.value)}
+              onClick={() => { setStrategy(opt.value); run(opt.value); }}
               style={{
                 padding: '3px 10px', fontSize: 12, borderRadius: 4,
                 background: strategy === opt.value ? '#9b59b6' : '#333',
@@ -278,7 +278,7 @@ export function OpportunityView() {
         </select>
 
         <button
-          onClick={run}
+          onClick={() => run()}
           disabled={loading}
           style={{
             padding: '5px 16px', fontSize: 13, fontWeight: 600,
