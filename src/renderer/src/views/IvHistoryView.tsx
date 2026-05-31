@@ -71,7 +71,7 @@ export function HistoryView() {
   const ivUnsubRef = useRef<(() => void) | null>(null);
 
   // Bulk price load state
-  const [bulkUniverse, setBulkUniverse]   = useState<'sp500' | 'russell1000' | 'both'>('both');
+  const [bulkUniverse, setBulkUniverse]   = useState<'sp500' | 'russell1000' | 'both' | 'etf'>('both');
   const [bulkRunning, setBulkRunning]     = useState(false);
   const [bulkProgress, setBulkProgress]   = useState<{ done: number; total: number; ticker: string; stored: number; failed: number } | null>(null);
   const [bulkResult, setBulkResult]       = useState<{ stored: number; skipped: number; failed: number } | null>(null);
@@ -176,7 +176,8 @@ export function HistoryView() {
     bulkCancelRef.current = false;
     setBulkRunning(true);
 
-    appendLog(`Starting bulk price load — ${bulkUniverse === 'both' ? 'S&P 500 + Russell 1000' : bulkUniverse} · 2Y…`);
+    const univLabel = bulkUniverse === 'both' ? 'S&P 500 + Russell 1000' : bulkUniverse === 'etf' ? 'ETFs' : bulkUniverse;
+    appendLog(`Starting bulk price load — ${univLabel} · 2Y…`);
 
     try {
       const tickers = await window.api.historical.getUniverseTickers(bulkUniverse);
@@ -403,7 +404,7 @@ export function HistoryView() {
           )}
 
           <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-            {(['sp500', 'russell1000', 'both'] as const).map(u => (
+            {(['sp500', 'russell1000', 'both', 'etf'] as const).map(u => (
               <button
                 key={u}
                 onClick={() => setBulkUniverse(u)}
@@ -414,7 +415,7 @@ export function HistoryView() {
                   color: bulkUniverse === u ? '#fff' : '#888',
                 }}
               >
-                {u === 'sp500' ? 'S&P 500' : u === 'russell1000' ? 'Russell 1000' : 'Both'}
+                {u === 'sp500' ? 'S&P 500' : u === 'russell1000' ? 'Russell 1000' : u === 'both' ? 'Both' : 'ETFs'}
               </button>
             ))}
           </div>
