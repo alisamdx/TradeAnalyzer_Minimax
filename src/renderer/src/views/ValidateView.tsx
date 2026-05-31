@@ -1606,17 +1606,37 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
                     )}
                   </div>
                   <div className="indicator-card">
-                    <span className="ind-label" title="IV Rank (0–100). Where current implied volatility sits within its 52-week high/low range. Below 30 = historically low IV — cheap options, potential coiling/compression setup. Above 70 = historically high IV — expensive options, elevated uncertainty. Computed from iv_history; requires Data Sync → IV History to be populated.">IV Rank</span>
-                    {result.ivData.ivRank !== null ? (
-                      <>
-                        <span className={`ind-value ${result.ivData.ivRank >= 70 ? 'overbought' : result.ivData.ivRank <= 30 ? 'oversold' : ''}`}>
-                          {result.ivData.ivRank.toFixed(0)}
-                        </span>
-                        <span className="ind-badge">
-                          {result.ivData.ivRank >= 70 ? 'High' : result.ivData.ivRank <= 30 ? 'Low' : 'Mid'}
-                        </span>
-                      </>
-                    ) : (
+                    <span className="ind-label" title="IV Rank (0–100). Where current implied volatility sits within its 52-week high/low range. Below 30 = historically low IV (cheap options / compression setup). Above 70 = historically high IV (expensive options / elevated fear). ETFs have structurally lower volatility, so a compressed scale is shown: IVR 30 on an ETF = 100 on the ETF-adjusted scale. Requires Data Sync → IV History to be populated.">IV Rank</span>
+                    {result.ivData.ivRank !== null ? (() => {
+                      const isEtf =
+                        result.fundamentals.peRatio === null &&
+                        result.fundamentals.eps === null &&
+                        result.fundamentals.roe === null &&
+                        result.fundamentals.debtToEquity === null;
+                      const rawIvr = result.ivData.ivRank!;
+                      if (isEtf) {
+                        const adjIvr = Math.min(100, Math.round(rawIvr * (100 / 30)));
+                        const badge = adjIvr >= 70 ? 'High' : adjIvr <= 30 ? 'Low' : 'Mid';
+                        const colorClass = adjIvr >= 70 ? 'overbought' : adjIvr <= 30 ? 'oversold' : '';
+                        return (
+                          <>
+                            <span className={`ind-value ${colorClass}`}>
+                              {rawIvr.toFixed(0)} <span className="meta" style={{ fontSize: 10 }}>raw</span>
+                            </span>
+                            <span className="meta" style={{ fontSize: 10 }}>→ {adjIvr} ETF-adj.</span>
+                            <span className="ind-badge">{badge}</span>
+                          </>
+                        );
+                      }
+                      const badge = rawIvr >= 70 ? 'High' : rawIvr <= 30 ? 'Low' : 'Mid';
+                      const colorClass = rawIvr >= 70 ? 'overbought' : rawIvr <= 30 ? 'oversold' : '';
+                      return (
+                        <>
+                          <span className={`ind-value ${colorClass}`}>{rawIvr.toFixed(0)}</span>
+                          <span className="ind-badge">{badge}</span>
+                        </>
+                      );
+                    })() : (
                       <span className="ind-value meta">—</span>
                     )}
                   </div>
