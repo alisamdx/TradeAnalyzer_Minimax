@@ -204,6 +204,7 @@ export function FiltersView() {
               <option value="sp500">S&P 500</option>
               <option value="russell1000">Russell 1000</option>
               <option value="both">Both</option>
+              <option value="etf">ETFs</option>
             </select>
           ) : (
             <select

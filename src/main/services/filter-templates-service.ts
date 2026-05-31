@@ -71,12 +71,13 @@ export class FilterTemplatesService {
 
     const results: FilterTemplateResult[] = [];
     const total = tickers.length;
+    const isEtf = universe === 'etf';
 
     for (let i = 0; i < total; i++) {
       const { ticker, watchlists } = tickers[i]!;
       onProgress?.({ current: i + 1, total, ticker });
       try {
-        const result = await this.evaluateTemplate(template, ticker, watchlists);
+        const result = await this.evaluateTemplate(template, ticker, watchlists, isEtf);
         if (result) results.push(result);
       } catch {
         // Skip tickers where data fetch fails — they just won't appear in results.
@@ -122,10 +123,12 @@ export class FilterTemplatesService {
 
   private getUniverseTickers(universe: Universe): TickerSource[] {
     const constituents = this.constituentsService.getConstituents(universe);
-    return constituents.map(c => ({
-      ticker: c.ticker,
-      watchlists: [universe === 'sp500' ? 'S&P 500' : universe === 'russell1000' ? 'Russell 1000' : 'Universe']
-    }));
+    const label =
+      universe === 'sp500'       ? 'S&P 500' :
+      universe === 'russell1000' ? 'Russell 1000' :
+      universe === 'etf'         ? 'ETFs' :
+      'Universe';
+    return constituents.map(c => ({ ticker: c.ticker, watchlists: [label] }));
   }
 
   // ─── Private: evaluate a single template for one ticker ──────────────────────
@@ -133,7 +136,8 @@ export class FilterTemplatesService {
   private async evaluateTemplate(
     template: FilterTemplate,
     ticker: string,
-    watchlists: string[]
+    watchlists: string[],
+    isEtf = false
   ): Promise<FilterTemplateResult | null> {
     switch (template.id) {
       case 'rsi_overbought':
@@ -141,15 +145,15 @@ export class FilterTemplatesService {
       case 'rsi_oversold':
         return this.evalRSI(ticker, watchlists, 'oversold');
       case 'iv_rank_low':
-        return this.evalIVRank(ticker, watchlists, 'low');
+        return this.evalIVRank(ticker, watchlists, 'low', isEtf);
       case 'iv_rank_high':
-        return this.evalIVRank(ticker, watchlists, 'high');
+        return this.evalIVRank(ticker, watchlists, 'high', isEtf);
       case 'price_alert':
         return this.evalPriceAlert(ticker, watchlists);
       case 'assignment_risk':
         return this.evalAssignmentRisk(ticker, watchlists);
       case 'wheel_opportunity':
-        return this.evalWheelOpportunity(ticker, watchlists);
+        return this.evalWheelOpportunity(ticker, watchlists, isEtf);
       default:
         return null;
     }
@@ -186,7 +190,8 @@ export class FilterTemplatesService {
   private async evalIVRank(
     ticker: string,
     watchlists: string[],
-    direction: 'low' | 'high'
+    direction: 'low' | 'high',
+    isEtf = false
   ): Promise<FilterTemplateResult | null> {
     // Always fetch quote for last price; use it for IV fallbacks too.
     const quote = await this.fetchQuote(ticker);
@@ -229,17 +234,21 @@ export class FilterTemplatesService {
     const compareValue = useIvRank ? ivRank! : currentIv;
     if (compareValue === null) return null;
 
-    // Thresholds: IV Rank uses 0-100 scale; raw IV % uses absolute % thresholds
+    // Thresholds: IV Rank uses 0-100 scale; raw IV % uses absolute % thresholds.
+    // ETFs have structurally lower IV than individual stocks — compress the "high" threshold
+    // to 30 (matching the Opportunity Dashboard calibration: IVR 30 = elevated for ETFs).
     const threshold = useIvRank
-      ? (direction === 'low' ? 20 : 70)
-      : (direction === 'low' ? 20 : 35);
+      ? (direction === 'low' ? 20 : isEtf ? 30 : 70)
+      : (direction === 'low' ? 20 : isEtf ? 20 : 35);
 
     const matches = direction === 'low' ? compareValue < threshold : compareValue > threshold;
     if (!matches) return null;
 
     const label = direction === 'low'
       ? 'low — cheap options, wait for IV expansion'
-      : 'high — elevated premium, good for selling';
+      : isEtf
+        ? 'elevated for ETF — good for selling premium (ETF-calibrated threshold)'
+        : 'high — elevated premium, good for selling';
     const metricLabel = useIvRank ? 'IV Rank' : 'Current IV';
     const op          = direction === 'low' ? '<' : '>';
     const suffix      = useIvRank ? '' : '% (ATM IV; IV rank unavailable)';
@@ -359,22 +368,44 @@ export class FilterTemplatesService {
 
   private async evalWheelOpportunity(
     ticker: string,
-    watchlists: string[]
+    watchlists: string[],
+    isEtf = false
   ): Promise<FilterTemplateResult | null> {
     const quote = await this.fetchQuote(ticker);
-    const ratios = await this.fetchFundamentals(ticker);
-
-    const suitabilityScore = calculateWheelSuitability(ratios, quote);
-    if (suitabilityScore < 60) return null;
 
     // Prefer iv_history currentIv (already %) over quote cache
     let currentIv: number | null = quote.currentIv;
+    let ivRank: number | null = null;
     if (this.ivHistoryService) {
       try {
         const ivh = this.ivHistoryService.getIvRank(ticker);
         if (ivh.currentIv !== null) currentIv = ivh.currentIv;
+        ivRank = ivh.ivRank;
       } catch { /* no iv_history data */ }
     }
+
+    if (isEtf) {
+      // ETFs don't have P/E, ROE, D/E etc. — skip calculateWheelSuitability.
+      // All ETFs in our curated list are wheel-eligible by design (liquid, optionable).
+      // Require at minimum that we have a valid price.
+      if (quote.last === null) return null;
+      return {
+        ticker,
+        watchlists,
+        lastPrice: quote.last,
+        metrics: {
+          suitabilityScore: null,
+          ...(currentIv !== null ? { currentIv: +currentIv.toFixed(1) } : {}),
+          ...(ivRank !== null ? { ivRank: +ivRank.toFixed(1) } : {}),
+          targetStrike: +(quote.last * 0.92).toFixed(2)
+        },
+        matchReason: `ETF — wheel eligible by default (liquid, optionable)${ivRank !== null ? `; IV Rank ${ivRank.toFixed(0)}` : ''}`
+      };
+    }
+
+    const ratios = await this.fetchFundamentals(ticker);
+    const suitabilityScore = calculateWheelSuitability(ratios, quote);
+    if (suitabilityScore < 60) return null;
 
     return {
       ticker,
