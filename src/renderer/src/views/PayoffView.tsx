@@ -1675,7 +1675,7 @@ export function PayoffView({ initialTicker, initialSpot }: PayoffViewProps) {
                           {call ? cell((call.bid + call.ask) / 2) : '—'}
                         </td>
                         <td style={{ padding: '3px 6px', textAlign: 'right', color: '#64748b' }}>
-                          {call ? cell(call.delta) : '—'}
+                          {call?.delta != null ? call.delta.toFixed(2) : '—'}
                         </td>
 
                         {/* Strike */}
@@ -1685,7 +1685,7 @@ export function PayoffView({ initialTicker, initialSpot }: PayoffViewProps) {
 
                         {/* Put: Delta + Mid + Buy + Sell */}
                         <td style={{ padding: '3px 6px', textAlign: 'right', color: '#64748b' }}>
-                          {put ? cell(put.delta) : '—'}
+                          {put?.delta != null ? put.delta.toFixed(2) : '—'}
                         </td>
                         <td style={{ padding: '3px 6px', textAlign: 'right', color: put ? midColor(put.bid, put.ask, '#ef4444') : '#ef4444' }}
                             title={put ? midTitle(put.bid, put.ask) : undefined}>
