@@ -117,7 +117,7 @@ const STRATEGY_OPTIONS: { value: StrategyMode; label: string; icon: string }[] =
 ];
 
 export function OpportunityView() {
-  const [universe, setUniverse] = useState<OpportunityUniverse>('sp500');
+  const [universe, setUniverse] = useState<OpportunityUniverse>('both');
   const [strategy, setStrategy] = useState<StrategyMode>('wheel');
   const [minScore, setMinScore] = useState(0);
   const [limit, setLimit] = useState(50);
