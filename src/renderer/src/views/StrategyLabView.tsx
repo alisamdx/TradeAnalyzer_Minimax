@@ -424,6 +424,24 @@ function ValidateTab({ ctx, scores, onExplore }: ValidateTabProps) {
                     </button>
                   )}
                   <button
+                    onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-validate', { detail: { ticker: ctx.ticker } }))}
+                    style={{
+                      padding: '5px 14px', borderRadius: 5, border: '1px solid #2d3748',
+                      background: '#1e2030', color: '#94a3b8', cursor: 'pointer', fontSize: 12,
+                    }}
+                  >
+                    🔎 Validate
+                  </button>
+                  <button
+                    onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-options', { detail: { ticker: ctx.ticker, expiry: score.setup?.expiration ?? undefined } }))}
+                    style={{
+                      padding: '5px 14px', borderRadius: 5, border: '1px solid #2d3748',
+                      background: '#1e2030', color: '#94a3b8', cursor: 'pointer', fontSize: 12,
+                    }}
+                  >
+                    📋 Options Chain
+                  </button>
+                  <button
                     disabled={ai?.loading}
                     onClick={() => fetchAi(score)}
                     style={{
@@ -675,6 +693,24 @@ function ExploreTab({ initialSlug, initialCtx, watchlists }: ExploreTabProps) {
                 }}
               >
                 📈 View in Payoff
+              </button>
+              <button
+                onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-validate', { detail: { ticker: setup.ticker } }))}
+                style={{
+                  padding: '5px 14px', borderRadius: 5, border: '1px solid #2d3748',
+                  background: '#1e2030', color: '#94a3b8', cursor: 'pointer', fontSize: 12,
+                }}
+              >
+                🔎 Validate
+              </button>
+              <button
+                onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-options', { detail: { ticker: setup.ticker, expiry: setup.expiration } }))}
+                style={{
+                  padding: '5px 14px', borderRadius: 5, border: '1px solid #2d3748',
+                  background: '#1e2030', color: '#94a3b8', cursor: 'pointer', fontSize: 12,
+                }}
+              >
+                📋 Options Chain
               </button>
               <button
                 disabled={aiLoading}
