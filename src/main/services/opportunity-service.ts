@@ -63,9 +63,38 @@ export interface OpportunityRunOptions {
 
 type GetConstituents = (u: 'sp500' | 'russell1000' | 'both') => ConstituentRow[];
 
-// ── Score thresholds ──────────────────────────────────────────────────────────
-// Premium selling (wheel/csp/spreads): high IV rank = favorable entry
-// Directional (bullish/bearish): low IV = cheaper options, better risk/reward
+// ── Per-strategy composite weights ───────────────────────────────────────────
+// Each strategy emphasises different components.
+// see docs/formulas.md#opportunity-score
+//
+//                    fund  ivRank  tech  premYield
+// wheel   – want quality companies you'd own + rich premium
+// csp     – pure premium income, OTM bias, IV richness matters most
+// spreads – defined risk, premium yield is the primary metric
+// bullish – need directional momentum (tech), cheaper options preferred
+// bearish – need strong bearish momentum, less concerned with fundamentals
+type WeightTuple = [fundamentals: number, ivRank: number, technical: number, premiumYield: number];
+const STRATEGY_WEIGHTS: Record<StrategyMode, WeightTuple> = {
+  wheel:   [0.30, 0.30, 0.20, 0.20],
+  csp:     [0.20, 0.35, 0.20, 0.25],
+  spreads: [0.15, 0.30, 0.25, 0.30],
+  bullish: [0.25, 0.25, 0.40, 0.10],
+  bearish: [0.10, 0.25, 0.45, 0.20],
+};
+
+// ── Per-strategy target strike ────────────────────────────────────────────────
+// Wheel / CSP / Spreads: selling puts at different moneyness levels
+// Bullish: OTM call target; Bearish: OTM put target
+// see docs/formulas.md#opportunity-target-strike
+const STRATEGY_STRIKE_PCT: Record<StrategyMode, number> = {
+  wheel:   0.90,   // sell put at 90% — willing to own at a discount
+  csp:     0.85,   // sell put further OTM — prefer not to be assigned
+  spreads: 0.90,   // short leg at 90% (protection leg ~5% lower, not shown)
+  bullish: 1.05,   // buy OTM call at 105%
+  bearish: 0.92,   // buy OTM put at 92%
+};
+
+// IV rank direction: premium selling wants HIGH IV; directional wants LOW IV (cheaper options)
 const PREMIUM_SELLING_MODES: StrategyMode[] = ['wheel', 'csp', 'spreads'];
 
 export class OpportunityService {
@@ -114,10 +143,12 @@ export class OpportunityService {
       const fundamentalsScore = this.scoreFundamentals(fund);
       const ivRankScore = this.scoreIvRank(ivData?.ivRank, strategy);
       const technicalScore = tech;
-      const targetStrike = price ? +(price * 0.92).toFixed(2) : null;
+      // Per-strategy target strike — see docs/formulas.md#opportunity-target-strike
+      const strikePct = STRATEGY_STRIKE_PCT[strategy];
+      const targetStrike = price ? +(price * strikePct).toFixed(2) : null;
       const estimatedPremium = targetStrike ? +(targetStrike * 0.015).toFixed(2) : null;
       const premiumYieldScore = this.scorePremiumYield(estimatedPremium, price);
-      const compositeScore = this.composite(fundamentalsScore, ivRankScore, technicalScore, premiumYieldScore);
+      const compositeScore = this.composite(fundamentalsScore, ivRankScore, technicalScore, premiumYieldScore, strategy);
 
       if (compositeScore < minCompositeScore) continue;
 
@@ -367,14 +398,15 @@ export class OpportunityService {
     ivRank: number | null,
     technical: number | null,
     premiumYield: number | null,
+    strategy: StrategyMode,
   ): number {
-    // Weights: fundamentals 25%, IV rank 30%, technical 25%, premium yield 20%
-    // see docs/formulas.md#opportunity-score
+    // Per-strategy weights — see docs/formulas.md#opportunity-score
+    const [wFund, wIv, wTech, wYield] = STRATEGY_WEIGHTS[strategy];
     const components: Array<[number | null, number]> = [
-      [fundamentals, 0.25],
-      [ivRank,       0.30],
-      [technical,    0.25],
-      [premiumYield, 0.20],
+      [fundamentals, wFund],
+      [ivRank,       wIv],
+      [technical,    wTech],
+      [premiumYield, wYield],
     ];
     let sum = 0;
     let totalWeight = 0;

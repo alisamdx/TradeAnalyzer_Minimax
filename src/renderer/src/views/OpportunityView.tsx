@@ -82,6 +82,32 @@ const UNIVERSE_OPTIONS: { value: OpportunityUniverse; label: string }[] = [
   { value: 'both',        label: 'Both Universes' },
 ];
 
+// Per-strategy weight labels shown in the header — mirrors STRATEGY_WEIGHTS in opportunity-service
+const STRATEGY_WEIGHT_LABELS: Record<StrategyMode, string> = {
+  wheel:   'Composite = Fund 30% + IV Rank 30% + Technical 20% + Yield 20%',
+  csp:     'Composite = Fund 20% + IV Rank 35% + Technical 20% + Yield 25%',
+  spreads: 'Composite = Fund 15% + IV Rank 30% + Technical 25% + Yield 30%',
+  bullish: 'Composite = Fund 25% + IV Rank 25% (inverted) + Technical 40% + Yield 10%',
+  bearish: 'Composite = Fund 10% + IV Rank 25% (inverted) + Technical 45% + Yield 20%',
+};
+
+// Per-strategy context shown in the amber warning strip
+const STRATEGY_CONTEXT: Record<StrategyMode, string> = {
+  wheel:   'Wheel favours quality companies + high IV (30% wt). Strike at 90% of price.',
+  csp:     'CSP favours high IV (35% wt) for premium income. Strike at 85% OTM.',
+  spreads: 'Spreads favour premium yield (30% wt) + defined risk. Strike at 90%.',
+  bullish: 'Bullish favours strong momentum (40% wt) + low IV for cheaper calls (inverted). Strike at 105%.',
+  bearish: 'Bearish favours strong bearish momentum (45% wt) + low IV for cheaper puts (inverted). Strike at 92%.',
+};
+
+const STRATEGY_STRIKE_LEGEND: Record<StrategyMode, string> = {
+  wheel:   '90% of price (sell put, willing to own)',
+  csp:     '85% of price (OTM put, prefer not to be assigned)',
+  spreads: '90% of price (short leg; protection leg ~5% lower)',
+  bullish: '105% of price (OTM call target)',
+  bearish: '92% of price (OTM put target)',
+};
+
 const STRATEGY_OPTIONS: { value: StrategyMode; label: string; icon: string }[] = [
   { value: 'wheel',   label: 'Wheel',    icon: '⚙️' },
   { value: 'csp',     label: 'CSP',      icon: '🛡' },
@@ -178,7 +204,7 @@ export function OpportunityView() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <h2 style={{ margin: 0, fontSize: 18 }}>🎯 Opportunity Dashboard</h2>
         <span style={{ color: '#888', fontSize: 12 }}>
-          Composite score = Fundamentals 25% + IV Rank 30% + Technical 25% + Premium Yield 20%
+          {STRATEGY_WEIGHT_LABELS[strategy]}
         </span>
         <div style={{ flex: 1 }} />
         {lastRunAt && (
@@ -273,10 +299,7 @@ export function OpportunityView() {
           <span><strong style={{ color: '#3498db' }}>{withFund}</strong> <span style={{ color: '#888' }}>with fundamentals</span></span>
           <span><strong style={{ color: '#9b59b6' }}>{withTech}</strong> <span style={{ color: '#888' }}>with technical score</span></span>
           <span style={{ color: '#f39c12', fontStyle: 'italic' }}>
-            ⚠ Score ≠ buy signal —{' '}
-            {strategy === 'wheel' || strategy === 'csp' || strategy === 'spreads'
-              ? 'optimized for premium selling. High IV rank = rich premium to collect.'
-              : 'optimized for options buying. Low IV rank = cheaper contracts.'}
+            ⚠ Score ≠ buy signal — {STRATEGY_CONTEXT[strategy]}
           </span>
         </div>
       )}
@@ -427,7 +450,7 @@ export function OpportunityView() {
           <span><span style={{ color: '#f39c12' }}>●</span> 45–69 = moderate</span>
           <span><span style={{ color: '#e74c3c' }}>●</span> &lt; 45 = weak</span>
           <span style={{ marginLeft: 16 }}><strong>Data</strong> = IV history days (green ≥ 200, yellow ≥ 100)</span>
-          <span><strong>Strike</strong> = 92% of price (CSP target)</span>
+          <span><strong>Strike</strong> = {STRATEGY_STRIKE_LEGEND[strategy]}</span>
           <span><strong>Exp</strong> = nearest Friday ≥ 30 DTE</span>
           <span><strong>Est Prem</strong> = ~1.5%/mo of strike (rule of thumb — verify in Options Chain)</span>
         </div>
