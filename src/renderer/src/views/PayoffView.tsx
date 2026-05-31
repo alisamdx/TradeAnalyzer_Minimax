@@ -1628,7 +1628,7 @@ export function PayoffView({ initialTicker, initialSpot }: PayoffViewProps) {
                     const isAtm = spotNum > 0 && Math.abs(strike / spotNum - 1) < 0.01;
 
                     const cell = (v: number | null) =>
-                      v != null ? (v < 0.01 ? v.toFixed(4) : v.toFixed(2)) : '—';
+                      v != null ? (Math.abs(v) < 0.01 ? v.toFixed(4) : v.toFixed(2)) : '—';
 
                     // Spread quality: color mid by spread-pct to flag illiquid options.
                     // spread% = (ask - bid) / mid. <10% green, 10-30% yellow, >30% red.
