@@ -41,7 +41,7 @@ type NavEntry = {
 };
 
 export function App() {
-  const [navStack, setNavStack] = useState<NavEntry[]>([{ id: 0, view: 'watchlists' }]);
+  const [navStack, setNavStack] = useState<NavEntry[]>([{ id: 0, view: 'data' }]);
   const navIdRef = useRef(1);
   const [watchlists, setWatchlists] = useState<Watchlist[]>([]);
   const [activeId, setActiveId] = useState<number | null>(null);
@@ -717,16 +717,22 @@ export function App() {
             </button>
           )}
           <button
-            className={`nav-btn ${currentView === 'opportunity' ? 'active' : ''}`}
-            onClick={() => navigateSidebar('opportunity')}
+            className={`nav-btn ${currentView === 'data' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('data')}
           >
-            🎯 Opportunity
+            🗄️ Data Sync
           </button>
           <button
             className={`nav-btn ${currentView === 'screener' ? 'active' : ''}`}
             onClick={() => navigateSidebar('screener')}
           >
             🔍 Screener
+          </button>
+          <button
+            className={`nav-btn ${currentView === 'opportunity' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('opportunity')}
+          >
+            🎯 Opportunity
           </button>
           <button
             className={`nav-btn ${currentView === 'filters' ? 'active' : ''}`}
@@ -770,24 +776,12 @@ export function App() {
           >
             🛡️ Collared LEAPS
           </button>
-          <button
-            className={`nav-btn ${currentView === 'testApi' ? 'active' : ''}`}
-            onClick={() => navigateSidebar('testApi')}
-          >
-            🔬 Test API
-          </button>
           <div className="nav-divider" />
           <button
             className={`nav-btn ${currentView === 'ivHistory' ? 'active' : ''}`}
             onClick={() => navigateSidebar('ivHistory')}
           >
             📊 IV History
-          </button>
-          <button
-            className={`nav-btn ${currentView === 'data' ? 'active' : ''}`}
-            onClick={() => navigateSidebar('data')}
-          >
-            🗄️ Data Sync
           </button>
           <button
             className={`nav-btn ${currentView === 'alerts' ? 'active' : ''}`}
@@ -800,6 +794,12 @@ export function App() {
             onClick={() => navigateSidebar('settings')}
           >
             ⚙ Settings
+          </button>
+          <button
+            className={`nav-btn ${currentView === 'testApi' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('testApi')}
+          >
+            🔬 Test API
           </button>
           <div className="nav-divider" />
           <button
