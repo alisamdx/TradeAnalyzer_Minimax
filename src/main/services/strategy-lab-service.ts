@@ -396,19 +396,27 @@ function buildSetup(
 
 function scoreStrategy(
   profile: StrategyProfile,
-  ctx: { ivRank: number | null; ivDataPoints: number; bias: StrategyLabDirectionBias },
+  ctx: { ivRank: number | null; ivDataPoints: number; bias: StrategyLabDirectionBias; isEtf?: boolean },
   setup: StrategySetup | null,
 ): StrategyScore {
   const flags: string[] = [];
   let ivScore = 0, directionScore = 0, premiumScore = 0, liquidityScore = 0;
+  const isEtf = ctx.isEtf ?? false;
 
   // ── IV Score (30 pts) ──────────────────────────────────────────────────────
+  // ETFs have structurally lower IV than individual stocks (SPY typically IVR 10–25).
+  // Use compressed thresholds calibrated to ETF volatility levels (IVR 30 = elevated).
+  // see docs/formulas.md#iv-rank-score
+  const ivHighThresh = isEtf ? 30 : 50;
+  const ivMidThresh  = isEtf ? 15 : 30;
+  const ivHighLabel  = isEtf ? `(ETF-calibrated — IVR ${ivHighThresh}= elevated)` : '';
+
   const ivRank = ctx.ivRank;
   if (ivRank !== null) {
     if (profile.ivPreference === 'high') {
-      if (ivRank >= 50)       { ivScore = 30; flags.push(`✓ IV rank ${ivRank.toFixed(0)}% — ideal for premium selling`); }
-      else if (ivRank >= 30)  { ivScore = 15; flags.push(`~ IV rank ${ivRank.toFixed(0)}% — moderate for premium selling`); }
-      else                    { ivScore = 0;  flags.push(`✗ IV rank ${ivRank.toFixed(0)}% — low IV, unfavorable for selling`); }
+      if (ivRank >= ivHighThresh)      { ivScore = 30; flags.push(`✓ IV rank ${ivRank.toFixed(0)}% — ideal for premium selling ${ivHighLabel}`.trim()); }
+      else if (ivRank >= ivMidThresh)  { ivScore = 15; flags.push(`~ IV rank ${ivRank.toFixed(0)}% — moderate for premium selling`); }
+      else                             { ivScore = 0;  flags.push(`✗ IV rank ${ivRank.toFixed(0)}% — low IV, unfavorable for selling`); }
     } else if (profile.ivPreference === 'low') {
       if (ivRank <= 30)       { ivScore = 30; flags.push(`✓ IV rank ${ivRank.toFixed(0)}% — ideal for buying options`); }
       else if (ivRank <= 50)  { ivScore = 15; flags.push(`~ IV rank ${ivRank.toFixed(0)}% — moderate IV for debit strategy`); }
@@ -557,11 +565,16 @@ export class StrategyLabService {
       momentum5d:    directionResult.momentum5d,
     };
 
+    // 6b. Detect ETF — compressed IV thresholds apply (IVR 30 = elevated for ETFs)
+    const isEtf = !!(db.prepare(
+      `SELECT 1 FROM constituents WHERE ticker = ? AND index_name = 'etf' LIMIT 1`
+    ).get(t));
+
     // 7. Score all strategies
     const scores: StrategyScore[] = PROFILES.map(profile => {
       const setup = buildSetup(profile, chain, underlyingPx, expInfo.dte, currentAtmIv);
       setup.ticker = t;
-      return scoreStrategy(profile, { ivRank: ctx.ivRank, ivDataPoints: ctx.ivDataPoints, bias: ctx.directionBias }, setup);
+      return scoreStrategy(profile, { ivRank: ctx.ivRank, ivDataPoints: ctx.ivDataPoints, bias: ctx.directionBias, isEtf }, setup);
     });
 
     // Sort: non-requiresStock first, then by score descending
