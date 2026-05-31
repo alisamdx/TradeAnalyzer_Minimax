@@ -391,7 +391,7 @@ function ProgressBar({ detail }: { detail: LeapsCspProgressDetail }) {
 
 export function LeapsCspView() {
   const [source, setSource] = useState<'universe' | 'watchlist'>('universe');
-  const [universe, setUniverse] = useState<'sp500' | 'russell1000' | 'both'>('sp500');
+  const [universe, setUniverse] = useState<'sp500' | 'russell1000' | 'both' | 'etf'>('sp500');
   const [watchlists, setWatchlists] = useState<Watchlist[]>([]);
   const [selectedWatchlistId, setSelectedWatchlistId] = useState<number | null>(null);
   const [isRunning, setIsRunning] = useState(false);
@@ -573,17 +573,27 @@ export function LeapsCspView() {
 
         {/* Source-specific selector */}
         {source === 'universe' ? (
-          <select
-            value={universe}
-            onChange={e => setUniverse(e.target.value as typeof universe)}
-            className="form-select form-select-sm"
-            style={{ width: 140 }}
-            disabled={isRunning}
-        >
-          <option value="sp500">S&P 500</option>
-            <option value="russell1000">Russell 1000</option>
-            <option value="both">Both</option>
-          </select>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <select
+              value={universe}
+              onChange={e => setUniverse(e.target.value as typeof universe)}
+              className="form-select form-select-sm"
+              style={{ width: 140 }}
+              disabled={isRunning}
+            >
+              <option value="sp500">S&P 500</option>
+              <option value="russell1000">Russell 1000</option>
+              <option value="both">Both</option>
+              <option value="etf">ETFs</option>
+            </select>
+            {universe === 'etf' && (
+              <div style={{ fontSize: 10, color: '#c8a000', maxWidth: 260 }}>
+                📋 ETF mode — market cap filter skipped; IVR thresholds calibrated for ETF vol levels.
+                No earnings risk → full score on distance-to-earnings.
+                Run Data Sync → ETFs first.
+              </div>
+            )}
+          </div>
         ) : (
           <select
             value={selectedWatchlistId ?? ''}

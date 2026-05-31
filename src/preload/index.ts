@@ -803,7 +803,7 @@ function buildApi() {
   };
 
   const leapsCsp = {
-    runScreen: (universe: 'sp500' | 'russell1000' | 'both', forceRun?: boolean, watchlistId?: number | null) =>
+    runScreen: (universe: 'sp500' | 'russell1000' | 'both' | 'etf', forceRun?: boolean, watchlistId?: number | null) =>
       invoke<LeapsCspRunResult>('leaps-csp:run-screen', universe, forceRun, watchlistId),
     getRuns: () => invoke<LeapsCspRunSummary[]>('leaps-csp:get-runs'),
     getRun: (runId: number) => invoke<LeapsCspRunResult | null>('leaps-csp:get-run', runId),

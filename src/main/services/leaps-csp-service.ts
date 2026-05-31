@@ -220,7 +220,7 @@ export class LeapsCspService {
   // ── Public API ──────────────────────────────────────────────────────────────
 
   async runScreen(
-    universe: 'sp500' | 'russell1000' | 'both',
+    universe: 'sp500' | 'russell1000' | 'both' | 'etf',
     onProgress?: (msg: string) => void,
     forceRun = false,
     onProgressDetail?: (detail: LeapsCspProgressDetail) => void,
@@ -228,6 +228,7 @@ export class LeapsCspService {
   ): Promise<LeapsCspRunResult> {
     const log = (msg: string) => { onProgress?.(msg); };
     const progress = (detail: LeapsCspProgressDetail) => { onProgressDetail?.(detail); };
+    const isEtf = universe === 'etf';
 
     log('Checking market gate…');
     progress({ phase: 'gate', current: 0, total: 1 });
@@ -320,7 +321,7 @@ export class LeapsCspService {
     const filtered = tickers.filter(t => {
       const f = fundamentalsMap.get(t);
       const q = quotesMap.get(t);
-      return this.passUniverseFilter(t, f, q, log);
+      return this.passUniverseFilter(t, f, q, log, isEtf);
     });
     const rejected = tickers.filter(t => !filtered.includes(t));
     if (rejected.length > 0 && rejected.length <= 20) {
@@ -439,7 +440,7 @@ export class LeapsCspService {
 
         const ivPct = contract.iv * 100;
         const { score, breakdown } = this.scoreLeapsLeg(
-          contract, dte, extrinsicPct, ivData, f, currentPrice,
+          contract, dte, extrinsicPct, ivData, f, currentPrice, isEtf,
         );
 
         const candidate: LeapsCandidate = {
@@ -509,7 +510,7 @@ export class LeapsCspService {
       if (!chain) continue;
 
       const puts = chain.filter(c => c.side === 'put');
-      const candidates = this.selectCspContracts(puts, currentPrice, cspExpiry, ivData, f);
+      const candidates = this.selectCspContracts(puts, currentPrice, cspExpiry, ivData, f, isEtf);
       if (candidates.length > 0) {
         cspPool.set(ticker, candidates);
       }
@@ -835,10 +836,15 @@ export class LeapsCspService {
   // ── Universe loading from screener cache ────────────────────────────────────
 
   private getScreenedTickers(universe: string): string[] {
+    // Map universe key to the index_name value stored in screen_runs / constituents
+    const univKey =
+      universe === 'sp500'       ? 'sp500' :
+      universe === 'russell1000' ? 'russell1000' :
+      universe === 'etf'         ? 'etf' :
+      null; // null = 'both' → no filter
+
     // Use the most recent screener run for the given universe (or both)
-    const universeClause = universe === 'both'
-      ? `1=1`
-      : `sr.universe = '${universe === 'sp500' ? 'sp500' : 'russell1000'}'`;
+    const universeClause = univKey === null ? `1=1` : `sr.universe = '${univKey}'`;
 
     const rows = this.db.prepare(`
       SELECT DISTINCT res.ticker
@@ -854,9 +860,7 @@ export class LeapsCspService {
     }
 
     // No screener results yet — fall back to constituents table for the full universe
-    const indexClause = universe === 'both'
-      ? `1=1`
-      : `index_name = '${universe === 'sp500' ? 'sp500' : 'russell1000'}'`;
+    const indexClause = univKey === null ? `1=1` : `index_name = '${univKey}'`;
     const constRows = this.db.prepare(`
       SELECT ticker FROM constituents WHERE ${indexClause} ORDER BY ticker ASC
     `).all() as Array<{ ticker: string }>;
@@ -919,6 +923,7 @@ export class LeapsCspService {
     f: FundamentalsRow | undefined,
     q: QuoteRow | undefined,
     log?: (msg: string) => void,
+    isEtf = false,
   ): boolean {
     if (!f || !q) {
       log?.(`  ${ticker} failed: ${!f ? 'no fundamentals' : 'no quote'}`);
@@ -926,11 +931,14 @@ export class LeapsCspService {
     }
     const price = q.last ?? 0;
     const volume = q.volume ?? 0;
-    const marketCap = f.marketCap ?? 0;
     if (price < 10) { log?.(`  ${ticker} failed: price $${price.toFixed(2)} < $10`); return false; }
     if (volume < 2_000_000) { log?.(`  ${ticker} failed: volume ${volume} < 2M`); return false; }
-    if (marketCap < 10_000_000_000) { log?.(`  ${ticker} failed: marketCap $${(marketCap / 1e9).toFixed(1)}B < $10B`); return false; }
-    if (isBiotech(f.sector)) { log?.(`  ${ticker} failed: biotech sector (${f.sector})`); return false; }
+    if (!isEtf) {
+      // ETFs don't report market cap or sector in fundamentals — skip these checks
+      const marketCap = f.marketCap ?? 0;
+      if (marketCap < 10_000_000_000) { log?.(`  ${ticker} failed: marketCap $${(marketCap / 1e9).toFixed(1)}B < $10B`); return false; }
+      if (isBiotech(f.sector)) { log?.(`  ${ticker} failed: biotech sector (${f.sector})`); return false; }
+    }
     return true;
   }
 
@@ -1037,6 +1045,7 @@ export class LeapsCspService {
     ivData: IvData,
     f: FundamentalsRow | undefined,
     _currentPrice: number,
+    isEtf = false,
   ): { score: number; breakdown: LeapsCspScoreComponent[] } {
     const components: Array<{ name: string; weight: number; rawScore: number }> = [];
 
@@ -1085,16 +1094,22 @@ export class LeapsCspService {
     components.push({ name: 'Liquidity', weight: 0.10, rawScore: liqScore });
 
     // 6. Fundamental grade (10%) — proxy: ROE + D/E
-    let fundScore = 5;
-    const de = f?.debtToEquity ?? null;
-    if (roe !== null && roe >= 20 && de !== null && de < 1.0) fundScore = 10;
-    else if (roe !== null && roe >= 15) fundScore = 8;
-    else if (roe !== null && roe >= 10) fundScore = 5;
+    //    ETFs: institutionally-grade instruments, no earnings risk → score 7
+    let fundScore: number;
+    if (isEtf) {
+      fundScore = 7;
+    } else {
+      fundScore = 5;
+      const de = f?.debtToEquity ?? null;
+      if (roe !== null && roe >= 20 && de !== null && de < 1.0) fundScore = 10;
+      else if (roe !== null && roe >= 15) fundScore = 8;
+      else if (roe !== null && roe >= 10) fundScore = 5;
+    }
     components.push({ name: 'Fundamental grade', weight: 0.10, rawScore: fundScore });
 
-    // 7. Distance to next earnings (10%) — stub: Polygon has no earnings calendar
-    //    Default to 8 (60–90 days) as neutral assumption
-    const earningsScore = 8;
+    // 7. Distance to next earnings (10%) — ETFs have no earnings → 10/10
+    //    Stocks: Polygon has no earnings calendar — use neutral default 8
+    const earningsScore = isEtf ? 10 : 8;
     components.push({ name: 'Distance to earnings', weight: 0.10, rawScore: earningsScore });
 
     // Weighted sum
@@ -1120,6 +1135,7 @@ export class LeapsCspService {
     expiry: string,
     ivData: IvData,
     f: FundamentalsRow | undefined,
+    isEtf = false,
   ): CspCandidate[] {
     const dte = dteDays(expiry);
     if (dte < 25 || dte > 50) return [];
@@ -1161,7 +1177,7 @@ export class LeapsCspService {
       if (annReturnPct < 12) continue;
 
       const { score, breakdown } = this.scoreCspLeg(
-        contract, dte, annReturnPct, ivData, currentPrice, f,
+        contract, dte, annReturnPct, ivData, currentPrice, f, isEtf,
       );
 
       results.push({
@@ -1191,6 +1207,7 @@ export class LeapsCspService {
     ivData: IvData,
     currentPrice: number,
     f: FundamentalsRow | undefined,
+    isEtf = false,
   ): { score: number; breakdown: LeapsCspScoreComponent[] } {
     const components: Array<{ name: string; weight: number; rawScore: number }> = [];
 
@@ -1203,11 +1220,18 @@ export class LeapsCspService {
     components.push({ name: 'Ann. return on collateral', weight: 0.25, rawScore: retScore });
 
     // 2. IV Rank on underlying (20%) — SRS §5.2
+    //    ETFs: compressed scale (IVR 25 = peak normal, equivalent to stock IVR 50)
     let ivrScore = 2;
     const ivr = ivData.ivr ?? 25;
-    if (ivr >= 50) ivrScore = 10;
-    else if (ivr >= 35) ivrScore = 8;
-    else if (ivr >= 25) ivrScore = 5;
+    if (isEtf) {
+      if (ivr >= 25) ivrScore = 10;
+      else if (ivr >= 15) ivrScore = 8;
+      else if (ivr >= 10) ivrScore = 5;
+    } else {
+      if (ivr >= 50) ivrScore = 10;
+      else if (ivr >= 35) ivrScore = 8;
+      else if (ivr >= 25) ivrScore = 5;
+    }
     components.push({ name: 'IV Rank', weight: 0.20, rawScore: ivrScore });
 
     // 3. Delta in target band (15%) — SRS §5.2 (target -0.20 to -0.25)
