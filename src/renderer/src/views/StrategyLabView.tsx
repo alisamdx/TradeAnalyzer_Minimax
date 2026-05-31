@@ -4,7 +4,7 @@
  *
  * v0.20.0
  */
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import type {
   StrategyLabValidateResult,
   StrategyLabContext,
@@ -14,6 +14,8 @@ import type {
   StrategyLabGrade,
   StrategyLabComplexity,
   PayoffLeg,
+  Watchlist,
+  WatchlistItem,
 } from '@shared/types.js';
 
 // ─── SetupLeg → PayoffLeg conversion ─────────────────────────────────────────
@@ -218,6 +220,64 @@ function SetupSummary({ setup }: { setup: StrategySetup }) {
       {setup.breakevens.length > 0 && (
         <span><span style={{ color: '#94a3b8' }}>B/E: </span>{setup.breakevens.map(b => fmt$(b)).join(' / ')}</span>
       )}
+    </div>
+  );
+}
+
+// ─── Watchlist picker ─────────────────────────────────────────────────────────
+
+interface WatchlistPickerProps {
+  watchlists: Watchlist[];
+  onSelect: (ticker: string) => void;
+}
+
+function WatchlistPicker({ watchlists, onSelect }: WatchlistPickerProps) {
+  const [selectedWlId, setSelectedWlId]     = useState<number | null>(null);
+  const [watchlistItems, setWatchlistItems] = useState<WatchlistItem[]>([]);
+
+  useEffect(() => {
+    if (selectedWlId === null) { setWatchlistItems([]); return; }
+    window.api.watchlists.items.list(selectedWlId).then(setWatchlistItems).catch(() => setWatchlistItems([]));
+  }, [selectedWlId]);
+
+  return (
+    <div style={{ display: 'flex', gap: 8 }}>
+      <div>
+        <div style={{ color: '#94a3b8', fontSize: 11, marginBottom: 4 }}>WATCHLIST</div>
+        <select
+          value={selectedWlId ?? ''}
+          onChange={e => setSelectedWlId(e.target.value ? Number(e.target.value) : null)}
+          style={{
+            padding: '6px 10px', background: '#1e2030', border: '1px solid #2d3748',
+            borderRadius: 5, color: '#e2e8f0', fontSize: 13, minWidth: 130,
+          }}
+        >
+          <option value=''>— select —</option>
+          {watchlists.map(w => (
+            <option key={w.id} value={w.id}>{w.name}</option>
+          ))}
+        </select>
+      </div>
+      <div>
+        <div style={{ color: '#94a3b8', fontSize: 11, marginBottom: 4 }}>TICKER FROM LIST</div>
+        <select
+          value=''
+          disabled={watchlistItems.length === 0}
+          onChange={e => { if (e.target.value) onSelect(e.target.value); }}
+          style={{
+            padding: '6px 10px', background: '#1e2030', border: '1px solid #2d3748',
+            borderRadius: 5, color: '#e2e8f0', fontSize: 13, minWidth: 150,
+            opacity: watchlistItems.length === 0 ? 0.5 : 1,
+          }}
+        >
+          <option value=''>— pick ticker —</option>
+          {watchlistItems.map(t => (
+            <option key={t.id} value={t.ticker}>
+              {t.ticker}{t.notes ? ` — ${t.notes}` : ''}
+            </option>
+          ))}
+        </select>
+      </div>
     </div>
   );
 }
@@ -440,9 +500,10 @@ const CATEGORY_COLORS: Record<string, string> = {
 interface ExploreTabProps {
   initialSlug?: string;
   initialCtx?: StrategyLabContext;
+  watchlists: Watchlist[];
 }
 
-function ExploreTab({ initialSlug, initialCtx }: ExploreTabProps) {
+function ExploreTab({ initialSlug, initialCtx, watchlists }: ExploreTabProps) {
   const [ticker, setTicker]       = useState(initialCtx?.ticker ?? '');
   const [slug, setSlug]           = useState(initialSlug ?? 'short-naked-put');
   const [loading, setLoading]     = useState(false);
@@ -517,6 +578,11 @@ function ExploreTab({ initialSlug, initialCtx }: ExploreTabProps) {
 
   return (
     <div>
+      {/* Watchlist picker */}
+      <div style={{ marginBottom: 12 }}>
+        <WatchlistPicker watchlists={watchlists} onSelect={t => handleTickerChange(t)} />
+      </div>
+
       {/* Controls */}
       <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'flex-end' }}>
         <div>
@@ -651,6 +717,12 @@ export function StrategyLabView() {
   const [error, setError]         = useState<string | null>(null);
   const [result, setResult]       = useState<StrategyLabValidateResult | null>(null);
 
+  // Watchlists — loaded once, shared by both tabs
+  const [watchlists, setWatchlists] = useState<Watchlist[]>([]);
+  useEffect(() => {
+    window.api.watchlists.list().then(setWatchlists).catch(() => {});
+  }, []);
+
   // When user clicks "→ Explore Strategy" from Validate tab
   const [exploreSlug, setExploreSlug]   = useState<string | undefined>(undefined);
   const [exploreCtx, setExploreCtx]     = useState<StrategyLabContext | undefined>(undefined);
@@ -705,6 +777,14 @@ export function StrategyLabView() {
       {/* Validate tab — ticker input always visible at top */}
       {tab === 'validate' && (
         <>
+          {/* Watchlist picker */}
+          <div style={{ marginBottom: 12 }}>
+            <WatchlistPicker
+              watchlists={watchlists}
+              onSelect={t => { setTicker(t); setResult(null); setError(null); }}
+            />
+          </div>
+
           <div style={{ display: 'flex', gap: 10, marginBottom: 20, alignItems: 'flex-end' }}>
             <div>
               <div style={{ color: '#94a3b8', fontSize: 11, marginBottom: 4 }}>TICKER</div>
@@ -755,7 +835,7 @@ export function StrategyLabView() {
 
       {/* Explore tab */}
       {tab === 'explore' && (
-        <ExploreTab initialSlug={exploreSlug} initialCtx={exploreCtx} />
+        <ExploreTab initialSlug={exploreSlug} initialCtx={exploreCtx} watchlists={watchlists} />
       )}
     </div>
   );
