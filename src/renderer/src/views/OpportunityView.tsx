@@ -392,6 +392,16 @@ export function OpportunityView() {
                       >
                         🎯
                       </button>
+                      <button
+                        title="Open on E*Trade"
+                        onClick={() => window.open(
+                          `https://us.etrade.com/e/t/invest/quotesandresearch?content=3&sym=${row.ticker.toLowerCase()}`,
+                          '_blank'
+                        )}
+                        style={actionBtn}
+                      >
+                        🏦
+                      </button>
                     </div>
                   </td>
                 </tr>
