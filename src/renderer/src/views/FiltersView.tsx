@@ -109,9 +109,28 @@ export function FiltersView() {
     window.dispatchEvent(new CustomEvent('navigate-to-options', { detail: { ticker } }));
   };
 
-  const openInPayoff = (ticker: string, lastPrice: number | null) => {
+  const openInPayoff = (r: FilterTemplateResult) => {
+    // Compute a target ~30 DTE expiry; PayoffView will snap to the nearest real expiry.
+    const thirtyDTE = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+
+    let strategy: string | undefined;
+    let expiry: string | undefined;
+    let strike: number | undefined;
+
+    if (activeTemplate === 'iv_rank_high') {
+      // High IV → sell CSP ATM (nearest available strike to current price)
+      strategy = 'csp';
+      expiry   = thirtyDTE;
+      strike   = r.lastPrice ?? undefined;
+    } else if (activeTemplate === 'wheel_opportunity') {
+      // Wheel → sell CSP at the pre-computed target strike
+      strategy = 'csp';
+      expiry   = thirtyDTE;
+      strike   = (r.metrics['targetStrike'] as number | null) ?? r.lastPrice ?? undefined;
+    }
+
     window.dispatchEvent(new CustomEvent('navigate-to-payoff', {
-      detail: { ticker, spot: lastPrice ?? undefined }
+      detail: { ticker: r.ticker, spot: r.lastPrice ?? undefined, expiry, strategy, strike }
     }));
   };
 
@@ -349,7 +368,7 @@ export function FiltersView() {
                           <button
                             className="action-btn"
                             title="Open in Payoff Visualizer"
-                            onClick={() => openInPayoff(r.ticker, r.lastPrice)}
+                            onClick={() => openInPayoff(r)}
                           >
                             📐
                           </button>
