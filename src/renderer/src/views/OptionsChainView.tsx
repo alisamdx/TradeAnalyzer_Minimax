@@ -281,7 +281,7 @@ export function OptionsChainView({ initialTicker, initialExpiry, clearInitialTic
                       <span>Strike: {fmtPrice(card.contract.strike)}</span>
                       <span>DTE: {card.dte}</span>
                       <span>Delta: {fmtNum(card.contract.delta)}</span>
-                      <span>IV: <span style={{ color: ivColor(card.contract.iv) }}>{card.contract.iv.toFixed(1)}%</span></span>
+                      <span>IV: <span style={{ color: ivColor(card.contract.iv * 100) }}>{(card.contract.iv * 100).toFixed(1)}%</span></span>
                       <span>Prem: {fmtPrice(card.contract.bid)}</span>
                       <span className="oc-card-yield">Ann: {card.annualRet !== null ? `${card.annualRet.toFixed(1)}%` : '—'}</span>
                     </div>
@@ -356,7 +356,7 @@ export function OptionsChainView({ initialTicker, initialExpiry, clearInitialTic
                               <td className={callYield !== null && callYield > 15 ? 'oc-profitable' : ''}>{fmtPrice(call.bid)}</td>
                               <td>{fmtPrice(call.ask)}</td>
                               <td className={call.delta !== null && call.delta >= 0.65 ? 'oc-delta-highlight' : ''}>{fmtNum(call.delta)}</td>
-                              <td style={{ color: ivColor(call.iv) }}>{call.iv.toFixed(1)}%</td>
+                              <td style={{ color: ivColor(call.iv * 100) }}>{(call.iv * 100).toFixed(1)}%</td>
                               <td>{fmtNum(call.openInterest, 0)}</td>
                               <td>{fmtNum(call.volume, 0)}</td>
                             </>
@@ -368,7 +368,7 @@ export function OptionsChainView({ initialTicker, initialExpiry, clearInitialTic
                               <td className={putYield !== null && putYield > 15 ? 'oc-profitable' : ''}>{fmtPrice(put.bid)}</td>
                               <td>{fmtPrice(put.ask)}</td>
                               <td className={put.delta !== null && Math.abs(put.delta) >= 0.15 && Math.abs(put.delta) <= 0.35 ? 'oc-delta-highlight' : ''}>{fmtNum(put.delta)}</td>
-                              <td style={{ color: ivColor(put.iv) }}>{put.iv.toFixed(1)}%</td>
+                              <td style={{ color: ivColor(put.iv * 100) }}>{(put.iv * 100).toFixed(1)}%</td>
                               <td>{fmtNum(put.openInterest, 0)}</td>
                               <td>{fmtNum(put.volume, 0)}</td>
                             </>
@@ -442,7 +442,7 @@ function deriveStrategyCards(
 
   // High IV Play (highest IV contract with OI > 0)
   const highIv = data.contracts
-    .filter(c => c.iv > 30 && (c.openInterest ?? 0) > 0 && c.bid > 0)
+    .filter(c => c.iv > 0.30 && (c.openInterest ?? 0) > 0 && c.bid > 0)  // iv is decimal fraction (0.30 = 30%)
     .sort((a, b) => b.iv - a.iv)[0];
   if (highIv) {
     cards.push({

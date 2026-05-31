@@ -426,7 +426,7 @@ export function IvHistoryView() {
             {lookupRank && lookupRows !== null && (
               <div style={{ display: 'flex', gap: 16, marginLeft: 8, fontSize: 12, color: '#888' }}>
                 <span>{lookupRows.length} rows</span>
-                {lookupRank.currentIv !== null && <span>Current IV: <strong style={{ color: '#e0e0f0' }}>{(lookupRank.currentIv * 100).toFixed(1)}%</strong></span>}
+                {lookupRank.currentIv !== null && <span>Current IV: <strong style={{ color: '#e0e0f0' }}>{lookupRank.currentIv.toFixed(1)}%</strong></span>}
                 {lookupRank.ivRank !== null && <span>IV Rank: <strong style={{ color: '#fab387' }}>{lookupRank.ivRank.toFixed(1)}%</strong></span>}
                 {lookupRank.ivPercentile !== null && <span>IV Pct: <strong style={{ color: '#89b4fa' }}>{lookupRank.ivPercentile.toFixed(1)}%</strong></span>}
               </div>
@@ -451,7 +451,7 @@ export function IvHistoryView() {
                 </thead>
                 <tbody>
                   {lookupRows.map((row, i) => {
-                    const ivPct = row.atm_iv * 100;
+                    const ivPct = row.atm_iv;  // stored as percentage since migration 017
                     const ivColor = ivPct > 50 ? '#ef5350' : ivPct > 30 ? '#ff9800' : '#4caf50';
                     return (
                       <tr key={row.date} style={{ borderBottom: '1px solid #1a1a2e', background: i % 2 === 0 ? 'transparent' : '#0e0e1a' }}>
