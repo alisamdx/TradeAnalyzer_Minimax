@@ -831,7 +831,7 @@ export function App() {
             className={`nav-btn ${currentView === 'ivHistory' ? 'active' : ''}`}
             onClick={() => navigateSidebar('ivHistory')}
           >
-            📊 IV History
+            📊 History
           </button>
 
           {/* ── Personal ── */}

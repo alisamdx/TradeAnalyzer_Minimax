@@ -40,6 +40,13 @@ export function DataView({ isSyncing, syncProgress, syncUniverseSelection, onSyn
   const [ivResult, setIvResult] = useState<{ processed: number; skipped: number; failed: number } | null>(null);
   const ivUnsubRef = useRef<(() => void) | null>(null);
 
+  // Price gap fill
+  const [priceStaleCount, setPriceStaleCount] = useState<number | null>(null);
+  const [priceGapRunning, setPriceGapRunning] = useState(false);
+  const [priceGapProgress, setPriceGapProgress] = useState<{ done: number; total: number; ticker: string } | null>(null);
+  const [priceGapResult, setPriceGapResult] = useState<{ updated: number; failed: number } | null>(null);
+  const priceGapCancelRef = useRef(false);
+
   const loadStats = useCallback(async () => {
     try {
       const currentStats = await window.api.cache.getStats();
@@ -64,12 +71,20 @@ export function DataView({ isSyncing, syncProgress, syncUniverseSelection, onSyn
     } catch { /* non-fatal */ }
   }, []);
 
+  const loadPriceGapStatus = useCallback(async () => {
+    try {
+      const stale = await window.api.historical.getStalePriceTickers();
+      setPriceStaleCount(stale.length);
+    } catch { /* non-fatal */ }
+  }, []);
+
   useEffect(() => {
     loadStats();
     loadIvStatus();
+    loadPriceGapStatus();
     window.api.watchlists.list().then(setWatchlists).catch(console.error);
     return () => { ivUnsubRef.current?.(); };
-  }, [loadStats, loadIvStatus]);
+  }, [loadStats, loadIvStatus, loadPriceGapStatus]);
 
   const startSync = async () => {
     setError(null);
@@ -206,6 +221,46 @@ export function DataView({ isSyncing, syncProgress, syncUniverseSelection, onSyn
   };
 
   const cancelIvGapFill = () => window.api.ivHistory.cancel().catch(console.error);
+
+  const runPriceGapFill = async () => {
+    setPriceGapResult(null);
+    setPriceGapProgress(null);
+    priceGapCancelRef.current = false;
+    setPriceGapRunning(true);
+    setError(null);
+    setStatusMsg(null);
+    try {
+      const tickers = await window.api.historical.getStalePriceTickers();
+      if (tickers.length === 0) {
+        setStatusMsg('Price history is already up to date — no gaps found.');
+        setPriceGapRunning(false);
+        return;
+      }
+      let updated = 0, failed = 0;
+      for (const [i, ticker] of tickers.entries()) {
+        if (priceGapCancelRef.current) break;
+        setPriceGapProgress({ done: i, total: tickers.length, ticker });
+        try {
+          await window.api.historical.fetchPrices(ticker, '1M');
+          updated++;
+        } catch {
+          failed++;
+        }
+      }
+      setPriceGapResult({ updated, failed });
+      await loadPriceGapStatus();
+      if (!priceGapCancelRef.current) {
+        setStatusMsg(`Price gap fill done — ${updated} tickers refreshed${failed > 0 ? `, ${failed} failed` : ''}.`);
+      }
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setPriceGapRunning(false);
+      setPriceGapProgress(null);
+    }
+  };
+
+  const cancelPriceGapFill = () => { priceGapCancelRef.current = true; };
 
   const isBusy = isFetchingPrices || isFetchingWl;
 
@@ -395,7 +450,40 @@ export function DataView({ isSyncing, syncProgress, syncUniverseSelection, onSyn
             </div>
           </div>
 
-          {/* 5. DB Stats */}
+          {/* 5. Price Gap Fill */}
+          <div style={card}>
+            <h3 style={cardTitle}>5. Price Gap Fill</h3>
+            <p style={hint}>Refreshes price history for tickers already loaded but missing recent bars. Fetches the last month for each stale ticker — run weekly after initial bulk load.</p>
+            {priceStaleCount !== null && (
+              <div style={{ fontSize: '0.82em', color: 'var(--text-muted)', marginBottom: 10, flexWrap: 'wrap' }}>
+                {priceStaleCount === 0
+                  ? <span style={{ color: '#4caf50' }}>✓ All price history is up to date.</span>
+                  : <span><strong style={{ color: '#ff9800' }}>{priceStaleCount}</strong> ticker{priceStaleCount !== 1 ? 's' : ''} need a refresh.</span>}
+              </div>
+            )}
+            {priceGapRunning && priceGapProgress && (
+              <div style={{ marginBottom: 10 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: '0.82em', color: 'var(--text-muted)' }}>
+                  <span><strong style={{ color: 'var(--text)' }}>{priceGapProgress.ticker}</strong></span>
+                  <span>{priceGapProgress.done + 1} / {priceGapProgress.total}</span>
+                </div>
+                <progress value={priceGapProgress.done + 1} max={priceGapProgress.total} style={{ width: '100%', height: 7 }} />
+              </div>
+            )}
+            {!priceGapRunning && priceGapResult && (
+              <div style={{ marginBottom: 10, fontSize: '0.85em', color: 'var(--text-muted)' }}>
+                Done — <strong style={{ color: '#4caf50' }}>{priceGapResult.updated}</strong> updated · <strong style={{ color: priceGapResult.failed > 0 ? '#ef5350' : 'inherit' }}>{priceGapResult.failed}</strong> failed
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 8 }}>
+              {priceGapRunning
+                ? <button onClick={cancelPriceGapFill} className="danger" style={{ padding: '6px 14px' }}>Stop</button>
+                : <button onClick={runPriceGapFill} className="primary" disabled={priceStaleCount === 0}>▶ Run Price Gap Fill</button>}
+              <button onClick={loadPriceGapStatus} className="secondary" disabled={priceGapRunning} style={{ padding: '6px 12px' }}>↻ Check</button>
+            </div>
+          </div>
+
+          {/* 6. DB Stats */}
           <div style={card}>
             <h3 style={cardTitle}>Local Database Stats</h3>
             <ul style={{ listStyle: 'none', padding: 0, margin: '10px 0 0', lineHeight: 1.8, fontSize: '0.9em' }}>

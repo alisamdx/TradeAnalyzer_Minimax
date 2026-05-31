@@ -173,4 +173,39 @@ export function registerHistoricalIpc(
     }
     return service.needsRefresh(latestDate, maxAgeDays);
   }));
+
+  // ─── Universe + Gap-fill helpers ─────────────────────────────────────────
+
+  // Returns all constituent tickers for a universe — used for bulk price load
+  ipcMain.handle('historical:getUniverseTickers', wrap((universe: 'sp500' | 'russell1000' | 'both') => {
+    const filter = universe === 'sp500'
+      ? `WHERE index_name = 'sp500'`
+      : universe === 'russell1000'
+        ? `WHERE index_name = 'russell1000'`
+        : '';
+    const rows = db.prepare(
+      `SELECT DISTINCT ticker FROM constituents ${filter} ORDER BY ticker`
+    ).all() as { ticker: string }[];
+    return rows.map(r => r.ticker);
+  }));
+
+  // Returns tickers already in historical_prices whose latest bar is stale (> 2 days old)
+  // Used by the price gap-fill in DataSync
+  ipcMain.handle('historical:getStalePriceTickers', wrap(() => {
+    const rows = db.prepare(`
+      SELECT ticker FROM historical_prices
+      GROUP BY ticker
+      HAVING MAX(date) < date('now', '-2 day')
+      ORDER BY ticker
+    `).all() as { ticker: string }[];
+    return rows.map(r => r.ticker);
+  }));
+
+  // Returns count of tickers in historical_prices (for coverage display)
+  ipcMain.handle('historical:getPriceTickerCount', wrap(() => {
+    const row = db.prepare(
+      `SELECT COUNT(DISTINCT ticker) as cnt FROM historical_prices`
+    ).get() as { cnt: number };
+    return row.cnt;
+  }));
 }

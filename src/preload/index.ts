@@ -300,7 +300,13 @@ function buildApi() {
     fetchAndStore: (ticker: string, type: 'financials' | 'prices', options?: { periodType?: 'quarterly' | 'annual'; range?: '1M' | '3M' | '6M' | '1Y' | '2Y' | '5Y' }) =>
       invoke<{ success: boolean; count?: number; error?: string; type: string }>('historical:fetchAndStore', ticker, type, options),
     needsRefresh: (ticker: string, dataType: 'financials' | 'prices', maxAgeDays?: number) =>
-      invoke<boolean>('historical:needsRefresh', ticker, dataType, maxAgeDays)
+      invoke<boolean>('historical:needsRefresh', ticker, dataType, maxAgeDays),
+    getUniverseTickers: (universe: 'sp500' | 'russell1000' | 'both') =>
+      invoke<string[]>('historical:getUniverseTickers', universe),
+    getStalePriceTickers: () =>
+      invoke<string[]>('historical:getStalePriceTickers'),
+    getPriceTickerCount: () =>
+      invoke<number>('historical:getPriceTickerCount'),
   };
 
   const alerts = {

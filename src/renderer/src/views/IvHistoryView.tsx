@@ -1,20 +1,20 @@
-// IV History management screen — initial backfill, gap fill, coverage summary, token config.
+// History screen — IV initial backfill + bulk price history load + coverage summary.
+// Gap-fill (ongoing refresh) lives in Data Sync → sections 3 & 5.
 // see docs/formulas.md#iv-history
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { IvHistoryCoverage, IvHistoryGapSummary, IvHistoryProgressEvent } from '@shared/types.js';
 
-type Phase = 'initial_sp500' | 'initial_russell' | 'gap_fill';
+type IvPhase = 'initial_sp500' | 'initial_russell';
 
 interface InitialLoadStatus {
   sp500:   { complete: boolean; completedAt: string | null };
   russell: { complete: boolean; completedAt: string | null; newTickers: number };
 }
 
-const PHASE_LABELS: Record<Phase, string> = {
-  initial_sp500:   'S&P 500 Initial Load',
-  initial_russell: 'Russell 1000 Initial Load',
-  gap_fill:        'Gap Fill',
+const IV_PHASE_LABELS: Record<IvPhase, string> = {
+  initial_sp500:   'S&P 500 IV Initial Load',
+  initial_russell: 'Russell 1000 IV Initial Load',
 };
 
 // ─── Sub-components ────────────────────────────────────────────────────────────
@@ -48,34 +48,40 @@ function SectionCard({ title, children }: { title: string; children: React.React
 
 // ─── Main view ─────────────────────────────────────────────────────────────────
 
-export function IvHistoryView() {
-  const [keyConfigured, setKeyConfigured]     = useState(false);
+export function HistoryView() {
+  const [ivKeyConfigured, setIvKeyConfigured] = useState(false);
 
-  const [coverage, setCoverage]               = useState<IvHistoryCoverage | null>(null);
-  const [gaps, setGaps]                       = useState<IvHistoryGapSummary | null>(null);
-  const [loadStatus, setLoadStatus]           = useState<InitialLoadStatus | null>(null);
+  const [ivCoverage, setIvCoverage]     = useState<IvHistoryCoverage | null>(null);
+  const [ivGaps, setIvGaps]             = useState<IvHistoryGapSummary | null>(null);
+  const [loadStatus, setLoadStatus]     = useState<InitialLoadStatus | null>(null);
 
   // Ticker lookup
-  const [lookupTicker, setLookupTicker]       = useState('');
-  const [lookupRows, setLookupRows]           = useState<Array<{ date: string; atm_iv: number; underlying_px: number | null; source: string }> | null>(null);
-  const [lookupRank, setLookupRank]           = useState<{ ivRank: number | null; ivPercentile: number | null; currentIv: number | null; dataPoints: number } | null>(null);
-  const [lookupLoading, setLookupLoading]     = useState(false);
+  const [lookupTicker, setLookupTicker]   = useState('');
+  const [lookupRows, setLookupRows]       = useState<Array<{ date: string; atm_iv: number; underlying_px: number | null; source: string }> | null>(null);
+  const [lookupRank, setLookupRank]       = useState<{ ivRank: number | null; ivPercentile: number | null; currentIv: number | null; dataPoints: number } | null>(null);
+  const [lookupLoading, setLookupLoading] = useState(false);
 
-  const [running, setRunning]                 = useState(false);
-  const [activePhase, setActivePhase]         = useState<Phase | null>(null);
-  const [progress, setProgress]               = useState<IvHistoryProgressEvent | null>(null);
-  const [result, setResult]                   = useState<{ processed: number; skipped: number; failed: number } | null>(null);
-  const [error, setError]                     = useState<string | null>(null);
-  const [logs, setLogs]                       = useState<string[]>(['Ready. Configure an IVolatility API key in Settings → API & Data, then press Start.']);
+  // IV phase run state
+  const [ivRunning, setIvRunning]         = useState(false);
+  const [activeIvPhase, setActiveIvPhase] = useState<IvPhase | null>(null);
+  const [ivProgress, setIvProgress]       = useState<IvHistoryProgressEvent | null>(null);
+  const [ivResult, setIvResult]           = useState<{ processed: number; skipped: number; failed: number } | null>(null);
+  const ivUnsubRef = useRef<(() => void) | null>(null);
 
-  const unsubRef  = useRef<(() => void) | null>(null);
-  const logBoxRef = useRef<HTMLDivElement>(null);
+  // Bulk price load state
+  const [bulkUniverse, setBulkUniverse]   = useState<'sp500' | 'russell1000' | 'both'>('both');
+  const [bulkRunning, setBulkRunning]     = useState(false);
+  const [bulkProgress, setBulkProgress]   = useState<{ done: number; total: number; ticker: string; stored: number; failed: number } | null>(null);
+  const [bulkResult, setBulkResult]       = useState<{ stored: number; skipped: number; failed: number } | null>(null);
+  const [priceCoverage, setPriceCoverage] = useState<number | null>(null);
+  const bulkCancelRef = useRef(false);
 
-  // Auto-scroll console to bottom when new lines arrive
+  const [error, setError]   = useState<string | null>(null);
+  const [logs, setLogs]     = useState<string[]>(['Ready.']);
+  const logBoxRef           = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
-    if (logBoxRef.current) {
-      logBoxRef.current.scrollTop = logBoxRef.current.scrollHeight;
-    }
+    if (logBoxRef.current) logBoxRef.current.scrollTop = logBoxRef.current.scrollHeight;
   }, [logs]);
 
   const appendLog = (msg: string) => {
@@ -85,56 +91,59 @@ export function IvHistoryView() {
 
   const loadData = useCallback(async () => {
     try {
-      const [cov, gapSummary, status] = await Promise.all([
+      const [cov, gapSummary, status, priceCnt] = await Promise.all([
         window.api.ivHistory.getCoverage('both'),
         window.api.ivHistory.getGaps('both'),
         window.api.ivHistory.getInitialLoadStatus(),
+        window.api.historical.getPriceTickerCount(),
       ]);
-      setCoverage(cov);
-      setGaps(gapSummary);
+      setIvCoverage(cov);
+      setIvGaps(gapSummary);
       setLoadStatus(status);
+      setPriceCoverage(priceCnt);
     } catch (e) {
-      console.error('[IvHistoryView] loadData failed:', e);
+      console.error('[HistoryView] loadData failed:', e);
     }
   }, []);
 
   useEffect(() => {
     window.api.settings.getIvolatilityKey().then(key => {
       const configured = Boolean(key);
-      setKeyConfigured(configured);
+      setIvKeyConfigured(configured);
       if (configured) appendLog('IVolatility API key is configured.');
+      else appendLog('IVolatility key not set — add it in Settings → API & Data.');
     }).catch(console.error);
     loadData();
-    return () => { unsubRef.current?.(); };
+    return () => { ivUnsubRef.current?.(); };
   }, [loadData]);
 
-  const startPhase = async (phase: Phase) => {
-    setError(null);
-    setResult(null);
-    setProgress(null);
-    setRunning(true);
-    setActivePhase(phase);
-    appendLog(`Starting ${PHASE_LABELS[phase]}…`);
+  // ─── IV phase runner ──────────────────────────────────────────────────────
 
-    unsubRef.current?.();
-    unsubRef.current = window.api.ivHistory.onProgress(evt => {
-      setProgress(evt);
-      // Log every 50 processed to avoid flooding; always log first event
+  const startIvPhase = async (phase: IvPhase) => {
+    setError(null);
+    setIvResult(null);
+    setIvProgress(null);
+    setIvRunning(true);
+    setActiveIvPhase(phase);
+    setBulkResult(null);
+    setBulkProgress(null);
+    appendLog(`Starting ${IV_PHASE_LABELS[phase]}…`);
+
+    ivUnsubRef.current?.();
+    ivUnsubRef.current = window.api.ivHistory.onProgress(evt => {
+      setIvProgress(evt);
       const done = evt.processed + evt.skipped + evt.failed;
-      // Always log errors; log progress every 10 tickers
       if (evt.lastError) {
         appendLog(`✗ ${evt.ticker} — ${evt.lastError}`);
       } else if (done === 1 || done % 10 === 0) {
         const pct = evt.total > 0 ? Math.round(done / evt.total * 100) : 0;
-        appendLog(
-          `${evt.ticker} — ok:${evt.processed} skip:${evt.skipped} fail:${evt.failed} (${pct}%) ${evt.callsPerMin}/min`
-        );
+        appendLog(`${evt.ticker} — ok:${evt.processed} skip:${evt.skipped} fail:${evt.failed} (${pct}%) ${evt.callsPerMin}/min`);
       }
     });
 
     try {
       const res = await window.api.ivHistory.startBackfill(phase);
-      setResult(res);
+      setIvResult(res);
       appendLog(`Done — ${res.processed} stored, ${res.skipped} skipped, ${res.failed} failed.`);
       await loadData();
     } catch (e) {
@@ -142,19 +151,76 @@ export function IvHistoryView() {
       setError(msg);
       appendLog(`Error: ${msg}`);
     } finally {
-      setRunning(false);
-      setActivePhase(null);
-      unsubRef.current?.();
-      unsubRef.current = null;
+      setIvRunning(false);
+      setActiveIvPhase(null);
+      ivUnsubRef.current?.();
+      ivUnsubRef.current = null;
     }
   };
 
-  const cancel = async () => {
-    appendLog('Cancelling…');
+  const cancelIv = async () => {
+    appendLog('Cancelling IV load…');
     await window.api.ivHistory.cancel().catch(console.error);
   };
 
-  const clearLogs = () => setLogs([]);
+  // ─── Bulk price runner ────────────────────────────────────────────────────
+
+  const startBulkPrice = async () => {
+    setError(null);
+    setBulkResult(null);
+    setBulkProgress(null);
+    setIvResult(null);
+    setIvProgress(null);
+    bulkCancelRef.current = false;
+    setBulkRunning(true);
+
+    appendLog(`Starting bulk price load — ${bulkUniverse === 'both' ? 'S&P 500 + Russell 1000' : bulkUniverse} · 2Y…`);
+
+    try {
+      const tickers = await window.api.historical.getUniverseTickers(bulkUniverse);
+      appendLog(`${tickers.length} tickers to load.`);
+
+      let stored = 0, failed = 0;
+      for (const [i, ticker] of tickers.entries()) {
+        if (bulkCancelRef.current) {
+          appendLog('Cancelled by user.');
+          break;
+        }
+        setBulkProgress({ done: i, total: tickers.length, ticker, stored, failed });
+
+        try {
+          const res = await window.api.historical.fetchPrices(ticker, '2Y');
+          stored += res.count ?? 0;
+          if ((i + 1) % 25 === 0 || i === tickers.length - 1) {
+            const pct = Math.round((i + 1) / tickers.length * 100);
+            appendLog(`${ticker} — ${i + 1}/${tickers.length} (${pct}%) · ${stored.toLocaleString()} bars stored`);
+          }
+        } catch {
+          failed++;
+          appendLog(`✗ ${ticker} — fetch failed`);
+        }
+      }
+
+      const skipped = 0;
+      setBulkResult({ stored, skipped, failed });
+      appendLog(`Done — ${stored.toLocaleString()} bars stored, ${failed} failed.`);
+      await loadData();
+    } catch (e) {
+      const msg = (e as Error).message;
+      setError(msg);
+      appendLog(`Error: ${msg}`);
+    } finally {
+      setBulkRunning(false);
+      setBulkProgress(null);
+    }
+  };
+
+  const cancelBulk = () => {
+    bulkCancelRef.current = true;
+    appendLog('Cancel requested…');
+  };
+
+  // ─── Ticker lookup ────────────────────────────────────────────────────────
 
   const fetchLookup = async () => {
     const t = lookupTicker.trim().toUpperCase();
@@ -173,13 +239,24 @@ export function IvHistoryView() {
     finally { setLookupLoading(false); }
   };
 
-  const progressPct = progress && progress.total > 0
-    ? Math.round((progress.processed + progress.skipped + progress.failed) / progress.total * 100)
-    : 0;
+  const clearLogs = () => setLogs([]);
 
-  const doneSoFar = progress ? progress.processed + progress.skipped + progress.failed : 0;
+  // ─── Derived progress values ──────────────────────────────────────────────
 
-  // ─── render ─────────────────────────────────────────────────────────────────
+  const isRunning = ivRunning || bulkRunning;
+
+  const progressPct = ivRunning && ivProgress && ivProgress.total > 0
+    ? Math.round((ivProgress.processed + ivProgress.skipped + ivProgress.failed) / ivProgress.total * 100)
+    : bulkRunning && bulkProgress && bulkProgress.total > 0
+      ? Math.round((bulkProgress.done + 1) / bulkProgress.total * 100)
+      : bulkResult || ivResult ? 100 : 0;
+
+  const progressLabel = ivRunning && activeIvPhase
+    ? IV_PHASE_LABELS[activeIvPhase]
+    : bulkRunning ? 'Price History Bulk Load'
+    : ivResult || bulkResult ? 'Last Run' : 'Progress';
+
+  // ─── Render ───────────────────────────────────────────────────────────────
 
   return (
     <div style={{ display: 'flex', gap: 20, padding: '20px 24px', height: '100%', boxSizing: 'border-box', fontFamily: 'inherit', minHeight: 0 }}>
@@ -188,37 +265,51 @@ export function IvHistoryView() {
       <div style={{ flex: '0 0 480px', display: 'flex', flexDirection: 'column', gap: 0, overflowY: 'auto' }}>
 
         <div style={{ marginBottom: 16 }}>
-          <span style={{ fontSize: 20, fontWeight: 700, color: '#e0e0f0' }}>IV History</span>
-          <span style={{ fontSize: 12, color: '#666', marginLeft: 10 }}>30-day ATM IV · 252 trading days</span>
+          <span style={{ fontSize: 20, fontWeight: 700, color: '#e0e0f0' }}>History</span>
+          <span style={{ fontSize: 12, color: '#666', marginLeft: 10 }}>Initial bulk loads — IV &amp; price history</span>
         </div>
 
-        {/* Key status */}
+        {/* ── Section A: IV History ── */}
+        <div style={{ fontSize: 11, fontWeight: 700, color: '#5a5a8a', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ flex: 1, height: 1, background: '#2a2a3e' }} />
+          IV History
+          <span style={{ flex: 1, height: 1, background: '#2a2a3e' }} />
+        </div>
+
+        {/* IVolatility key status */}
         <SectionCard title="IVolatility API Key">
           <div style={{ fontSize: 12, color: '#aaa', marginBottom: 6 }}>
             Status:{' '}
-            {keyConfigured
+            {ivKeyConfigured
               ? <span style={{ color: '#4caf50' }}>Configured ✓</span>
               : <span style={{ color: '#ff9800' }}>Not configured — add key in <strong>Settings → API &amp; Data</strong></span>}
           </div>
           <div style={{ fontSize: 11, color: '#555' }}>
-            IVolatility provides true as-of-date daily IVX snapshots (pre-computed 30-day CM ATM IV).
-            One API call per ticker covers the full date range — ~500 calls for S&amp;P 500, ~500 more for Russell unique.
-            Rate limit: 1 req/sec · 20,000 req/month.
+            IVolatility provides true as-of-date daily IVX snapshots (30-day CM ATM IV).
+            One API call per ticker · rate limit: 1 req/sec · 20,000 req/month.
           </div>
         </SectionCard>
 
-        {/* Coverage */}
-        <SectionCard title="Coverage Summary">
-          {coverage ? (
+        {/* IV coverage */}
+        <SectionCard title="IV Coverage">
+          {ivCoverage ? (
             <>
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
-                <CoverageCard label="Complete ≥252d" value={coverage.complete} color="#4caf50" />
-                <CoverageCard label="Partial 1–251d" value={coverage.partial} color="#ff9800" />
-                <CoverageCard label="No Data" value={coverage.none} color="#ef5350" />
-                <CoverageCard label="Total Rows" value={coverage.totalReadings} color="#90caf9" />
+                <CoverageCard label="Complete ≥252d" value={ivCoverage.complete} color="#4caf50" />
+                <CoverageCard label="Partial 1–251d" value={ivCoverage.partial} color="#ff9800" />
+                <CoverageCard label="No Data" value={ivCoverage.none} color="#ef5350" />
+                <CoverageCard label="Total Rows" value={ivCoverage.totalReadings} color="#90caf9" />
               </div>
-              {coverage.lastRefreshDate && (
-                <div style={{ fontSize: 11, color: '#666' }}>Last reading: {coverage.lastRefreshDate}</div>
+              {ivCoverage.lastRefreshDate && (
+                <div style={{ fontSize: 11, color: '#666' }}>Last reading: {ivCoverage.lastRefreshDate}</div>
+              )}
+              {ivGaps && ivGaps.missingPairs > 0 && (
+                <div style={{ fontSize: 11, color: '#ff9800', marginTop: 4 }}>
+                  {ivGaps.missingPairs.toLocaleString()} gap pairs detected — run IV Gap Fill in Data Sync.
+                </div>
+              )}
+              {ivGaps && ivGaps.missingPairs === 0 && (
+                <div style={{ fontSize: 11, color: '#4caf50', marginTop: 4 }}>No gaps — IV history is up to date.</div>
               )}
             </>
           ) : (
@@ -232,24 +323,22 @@ export function IvHistoryView() {
           </button>
         </SectionCard>
 
-        {/* Initial Load */}
+        {/* IV initial load steps */}
         <SectionCard title="Initial Load — 252 trading days">
           {/* Step 1 */}
           <div style={{ padding: '10px 0', borderBottom: '1px solid #1e1e30' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: '#c8c8e0', marginBottom: 4 }}>Step 1 — S&P 500 (~503 tickers)</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: '#c8c8e0', marginBottom: 4 }}>Step 1 — S&amp;P 500 (~503 tickers)</div>
                 {loadStatus && <StatusBadge complete={loadStatus.sp500.complete} completedAt={loadStatus.sp500.completedAt} />}
               </div>
-              {running && activePhase === 'initial_sp500' ? (
-                <button onClick={cancel} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', background: '#7a2020', color: '#fff', fontSize: 12, cursor: 'pointer' }}>
-                  Cancel
-                </button>
+              {ivRunning && activeIvPhase === 'initial_sp500' ? (
+                <button onClick={cancelIv} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', background: '#7a2020', color: '#fff', fontSize: 12, cursor: 'pointer' }}>Cancel</button>
               ) : (
                 <button
-                  onClick={() => startPhase('initial_sp500')}
-                  disabled={running || !keyConfigured}
-                  style={{ padding: '6px 14px', borderRadius: 6, border: 'none', background: keyConfigured && !running ? '#2a5a8a' : '#333', color: '#fff', fontSize: 12, cursor: running || !keyConfigured ? 'not-allowed' : 'pointer', opacity: running || !keyConfigured ? 0.5 : 1 }}
+                  onClick={() => startIvPhase('initial_sp500')}
+                  disabled={isRunning || !ivKeyConfigured}
+                  style={{ padding: '6px 14px', borderRadius: 6, border: 'none', background: ivKeyConfigured && !isRunning ? '#2a5a8a' : '#333', color: '#fff', fontSize: 12, cursor: isRunning || !ivKeyConfigured ? 'not-allowed' : 'pointer', opacity: isRunning || !ivKeyConfigured ? 0.5 : 1 }}
                 >
                   {loadStatus?.sp500.complete ? 'Re-run' : 'Start'}
                 </button>
@@ -262,21 +351,18 @@ export function IvHistoryView() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <div>
                 <div style={{ fontSize: 13, fontWeight: 600, color: '#c8c8e0', marginBottom: 2 }}>
-                  Step 2 — Russell 1000
-                  {loadStatus?.russell.newTickers ? ` (~${loadStatus.russell.newTickers} unique)` : ''}
+                  Step 2 — Russell 1000{loadStatus?.russell.newTickers ? ` (~${loadStatus.russell.newTickers} unique)` : ''}
                 </div>
-                <div style={{ fontSize: 11, color: '#555', marginBottom: 4 }}>Skips tickers already in Step 1</div>
+                <div style={{ fontSize: 11, color: '#555', marginBottom: 4 }}>Skips tickers already loaded in Step 1</div>
                 {loadStatus && <StatusBadge complete={loadStatus.russell.complete} completedAt={loadStatus.russell.completedAt} />}
               </div>
-              {running && activePhase === 'initial_russell' ? (
-                <button onClick={cancel} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', background: '#7a2020', color: '#fff', fontSize: 12, cursor: 'pointer' }}>
-                  Cancel
-                </button>
+              {ivRunning && activeIvPhase === 'initial_russell' ? (
+                <button onClick={cancelIv} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', background: '#7a2020', color: '#fff', fontSize: 12, cursor: 'pointer' }}>Cancel</button>
               ) : (
                 <button
-                  onClick={() => startPhase('initial_russell')}
-                  disabled={running || !keyConfigured}
-                  style={{ padding: '6px 14px', borderRadius: 6, border: 'none', background: keyConfigured && !running ? '#2a5a8a' : '#333', color: '#fff', fontSize: 12, cursor: running || !keyConfigured ? 'not-allowed' : 'pointer', opacity: running || !keyConfigured ? 0.5 : 1 }}
+                  onClick={() => startIvPhase('initial_russell')}
+                  disabled={isRunning || !ivKeyConfigured}
+                  style={{ padding: '6px 14px', borderRadius: 6, border: 'none', background: ivKeyConfigured && !isRunning ? '#2a5a8a' : '#333', color: '#fff', fontSize: 12, cursor: isRunning || !ivKeyConfigured ? 'not-allowed' : 'pointer', opacity: isRunning || !ivKeyConfigured ? 0.5 : 1 }}
                 >
                   {loadStatus?.russell.complete ? 'Re-run' : 'Start'}
                 </button>
@@ -285,92 +371,115 @@ export function IvHistoryView() {
           </div>
         </SectionCard>
 
-        {/* Gap Fill */}
-        <SectionCard title="Ongoing Refresh — Gap Fill">
+        {/* ── Section B: Price History ── */}
+        <div style={{ fontSize: 11, fontWeight: 700, color: '#5a5a8a', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8, marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ flex: 1, height: 1, background: '#2a2a3e' }} />
+          Price History
+          <span style={{ flex: 1, height: 1, background: '#2a2a3e' }} />
+        </div>
+
+        <SectionCard title="Bulk Price Load — 2 Years Daily (Polygon)">
           <div style={{ fontSize: 12, color: '#888', marginBottom: 10 }}>
-            Fetches any trading days missing since the last reading — one API call per ticker.
-            E*Trade auto-capture also stores today's IV for free whenever you open an options chain.
+            Downloads 2 years of daily OHLCV bars for every ticker in the selected universe from Polygon.io.
+            Required before running backtests. One API call per ticker — ~1,100 calls for Both.
           </div>
-          {gaps ? (
-            <div style={{ fontSize: 12, color: '#c8c8e0', marginBottom: 10 }}>
-              {gaps.missingPairs === 0
-                ? <span style={{ color: '#4caf50' }}>No gaps — up to date.</span>
-                : <>
-                    <span style={{ color: '#ff9800' }}>{gaps.missingPairs.toLocaleString()} pairs</span>
-                    {' '}· {gaps.missingDays} days
-                    {gaps.oldestGapDate ? ` · ${gaps.oldestGapDate} → ${gaps.newestGapDate}` : ''}
-                  </>
-              }
+
+          {priceCoverage !== null && (
+            <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
+              <CoverageCard label="Tickers Loaded" value={priceCoverage} color="#90caf9" />
             </div>
-          ) : (
-            <div style={{ fontSize: 12, color: '#555', marginBottom: 10 }}>Loading…</div>
           )}
-          {running && activePhase === 'gap_fill' ? (
-            <button onClick={cancel} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', background: '#7a2020', color: '#fff', fontSize: 12, cursor: 'pointer' }}>
-              Cancel Gap Fill
+
+          <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+            {(['sp500', 'russell1000', 'both'] as const).map(u => (
+              <button
+                key={u}
+                onClick={() => setBulkUniverse(u)}
+                disabled={isRunning}
+                style={{
+                  padding: '5px 12px', borderRadius: 5, border: 'none', fontSize: 12, cursor: isRunning ? 'not-allowed' : 'pointer',
+                  background: bulkUniverse === u ? '#2a5a8a' : '#1e1e30',
+                  color: bulkUniverse === u ? '#fff' : '#888',
+                }}
+              >
+                {u === 'sp500' ? 'S&P 500' : u === 'russell1000' ? 'Russell 1000' : 'Both'}
+              </button>
+            ))}
+          </div>
+
+          {bulkRunning ? (
+            <button onClick={cancelBulk} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', background: '#7a2020', color: '#fff', fontSize: 12, cursor: 'pointer' }}>
+              Cancel
             </button>
           ) : (
             <button
-              onClick={() => startPhase('gap_fill')}
-              disabled={running || !keyConfigured || gaps?.missingPairs === 0}
-              style={{ padding: '6px 16px', borderRadius: 6, border: 'none', background: keyConfigured && gaps?.missingPairs && !running ? '#2a5a8a' : '#333', color: '#fff', fontSize: 12, cursor: 'pointer', opacity: running || !keyConfigured || gaps?.missingPairs === 0 ? 0.5 : 1 }}
+              onClick={startBulkPrice}
+              disabled={isRunning}
+              style={{ padding: '6px 20px', borderRadius: 6, border: 'none', background: isRunning ? '#333' : '#1a6a3a', color: '#fff', fontSize: 12, cursor: isRunning ? 'not-allowed' : 'pointer', opacity: isRunning ? 0.5 : 1 }}
             >
-              Start Gap Fill
+              {priceCoverage && priceCoverage > 0 ? '↻ Re-run Bulk Load' : '▶ Start Bulk Load'}
             </button>
           )}
+          <div style={{ marginTop: 8, fontSize: 11, color: '#555' }}>
+            Ongoing gap fill (daily refresh) lives in <strong style={{ color: '#7070a0' }}>Data Sync → section 5</strong>.
+          </div>
         </SectionCard>
+
       </div>
 
-      {/* ── Right column: progress + console ─────────────────────────────── */}
+      {/* ── Right column: progress + console + lookup ─────────────────────── */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>
 
-        {/* Progress bar + stats */}
+        {/* Progress panel */}
         <div style={{ background: '#13131f', border: '1px solid #2a2a3e', borderRadius: 10, padding: '16px 20px', marginBottom: 12 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
             <span style={{ fontSize: 13, fontWeight: 600, color: '#9090b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              {running && activePhase ? PHASE_LABELS[activePhase] : result ? 'Last Run' : 'Progress'}
+              {progressLabel}
             </span>
-            {running && (
-              <span style={{ fontSize: 11, color: '#ff9800', animation: 'pulse 1.2s ease-in-out infinite' }}>● RUNNING</span>
-            )}
-            {!running && result && (
-              <span style={{ fontSize: 11, color: '#4caf50' }}>● COMPLETE</span>
-            )}
-            {!running && error && (
-              <span style={{ fontSize: 11, color: '#ef5350' }}>● ERROR</span>
-            )}
+            {isRunning && <span style={{ fontSize: 11, color: '#ff9800' }}>● RUNNING</span>}
+            {!isRunning && (ivResult || bulkResult) && <span style={{ fontSize: 11, color: '#4caf50' }}>● COMPLETE</span>}
+            {!isRunning && error && <span style={{ fontSize: 11, color: '#ef5350' }}>● ERROR</span>}
           </div>
 
-          {/* Progress bar — always visible */}
           <div style={{ background: '#1a1a2e', borderRadius: 6, height: 14, overflow: 'hidden', marginBottom: 8, border: '1px solid #2a2a3e' }}>
             <div style={{
               height: '100%',
-              width: running || result ? `${progressPct}%` : '0%',
-              background: error ? '#ef5350' : result ? '#4caf50' : '#3a8fd0',
+              width: `${progressPct}%`,
+              background: error ? '#ef5350' : (ivResult || bulkResult) && !isRunning ? '#4caf50' : '#3a8fd0',
               transition: 'width 0.4s ease',
               borderRadius: 6,
             }} />
           </div>
 
-          {/* Stats row */}
           <div style={{ display: 'flex', gap: 20, fontSize: 12, color: '#888', flexWrap: 'wrap' }}>
-            {running && progress ? (
+            {ivRunning && ivProgress ? (
               <>
-                <span>Ticker: <strong style={{ color: '#e0e0f0' }}>{progress.ticker}</strong></span>
-                <span>Date: <strong style={{ color: '#e0e0f0' }}>{progress.date}</strong></span>
-                <span>{doneSoFar.toLocaleString()} / {progress.total.toLocaleString()} <span style={{ color: '#777' }}>({progressPct}%)</span></span>
-                <span>Stored: <strong style={{ color: '#4caf50' }}>{progress.processed}</strong></span>
-                <span>Skipped: <strong style={{ color: '#ff9800' }}>{progress.skipped}</strong></span>
-                <span>Failed: <strong style={{ color: '#ef5350' }}>{progress.failed}</strong></span>
-                <span>Rate: <strong style={{ color: '#90caf9' }}>{progress.callsPerMin}/min</strong></span>
+                <span>Ticker: <strong style={{ color: '#e0e0f0' }}>{ivProgress.ticker}</strong></span>
+                <span>{(ivProgress.processed + ivProgress.skipped + ivProgress.failed).toLocaleString()} / {ivProgress.total.toLocaleString()} <span style={{ color: '#777' }}>({progressPct}%)</span></span>
+                <span>Stored: <strong style={{ color: '#4caf50' }}>{ivProgress.processed}</strong></span>
+                <span>Skipped: <strong style={{ color: '#ff9800' }}>{ivProgress.skipped}</strong></span>
+                <span>Failed: <strong style={{ color: '#ef5350' }}>{ivProgress.failed}</strong></span>
+                <span>Rate: <strong style={{ color: '#90caf9' }}>{ivProgress.callsPerMin}/min</strong></span>
               </>
-            ) : running ? (
-              <span style={{ color: '#ff9800' }}>Starting — waiting for first response…</span>
-            ) : result ? (
+            ) : bulkRunning && bulkProgress ? (
               <>
-                <span>Stored: <strong style={{ color: '#4caf50' }}>{result.processed}</strong></span>
-                <span>Skipped: <strong style={{ color: '#888' }}>{result.skipped}</strong></span>
-                <span>Failed: <strong style={{ color: result.failed > 0 ? '#ef5350' : '#888' }}>{result.failed}</strong></span>
+                <span>Ticker: <strong style={{ color: '#e0e0f0' }}>{bulkProgress.ticker}</strong></span>
+                <span>{(bulkProgress.done + 1).toLocaleString()} / {bulkProgress.total.toLocaleString()} <span style={{ color: '#777' }}>({progressPct}%)</span></span>
+                <span>Bars stored: <strong style={{ color: '#4caf50' }}>{bulkProgress.stored.toLocaleString()}</strong></span>
+                <span>Failed: <strong style={{ color: bulkProgress.failed > 0 ? '#ef5350' : '#888' }}>{bulkProgress.failed}</strong></span>
+              </>
+            ) : isRunning ? (
+              <span style={{ color: '#ff9800' }}>Starting — waiting for first response…</span>
+            ) : ivResult ? (
+              <>
+                <span>IV stored: <strong style={{ color: '#4caf50' }}>{ivResult.processed}</strong></span>
+                <span>Skipped: <strong>{ivResult.skipped}</strong></span>
+                <span>Failed: <strong style={{ color: ivResult.failed > 0 ? '#ef5350' : '#888' }}>{ivResult.failed}</strong></span>
+              </>
+            ) : bulkResult ? (
+              <>
+                <span>Bars stored: <strong style={{ color: '#4caf50' }}>{bulkResult.stored.toLocaleString()}</strong></span>
+                <span>Failed: <strong style={{ color: bulkResult.failed > 0 ? '#ef5350' : '#888' }}>{bulkResult.failed}</strong></span>
               </>
             ) : error ? (
               <span style={{ color: '#ef5350' }}>{error}</span>
@@ -380,7 +489,7 @@ export function IvHistoryView() {
           </div>
         </div>
 
-        {/* Console log box — half height */}
+        {/* Console */}
         <div style={{ flex: '0 0 180px', display: 'flex', flexDirection: 'column', background: '#0c0c18', border: '1px solid #2a2a3e', borderRadius: 10, overflow: 'hidden' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 14px', background: '#13131f', borderBottom: '1px solid #1e1e30' }}>
             <span style={{ fontSize: 11, fontWeight: 600, color: '#6060a0', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Console</span>
@@ -392,8 +501,8 @@ export function IvHistoryView() {
             ) : (
               logs.map((line, i) => (
                 <div key={i} style={{
-                  color: line.includes('Error') || line.includes('fail') ? '#ef9a9a'
-                       : line.includes('Done') || line.includes('saved') || line.includes('Configured') ? '#a5d6a7'
+                  color: line.includes('Error') || line.includes('fail') || line.includes('✗') ? '#ef9a9a'
+                       : line.includes('Done') || line.includes('Configured') ? '#a5d6a7'
                        : line.includes('Cancel') ? '#ff9800'
                        : '#a0c0a0',
                   whiteSpace: 'pre-wrap', wordBreak: 'break-all',
@@ -403,11 +512,10 @@ export function IvHistoryView() {
           </div>
         </div>
 
-        {/* ── Ticker Lookup ── */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#13131f', border: '1px solid #2a2a3e', borderRadius: 10, overflow: 'hidden', minHeight: 0 }}>
-          {/* Search bar */}
+        {/* Ticker lookup (IV) */}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#13131f', border: '1px solid #2a2a3e', borderRadius: 10, overflow: 'hidden', minHeight: 0, marginTop: 12 }}>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '10px 14px', borderBottom: '1px solid #1e1e30' }}>
-            <span style={{ fontSize: 11, fontWeight: 600, color: '#6060a0', textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>Lookup Symbol</span>
+            <span style={{ fontSize: 11, fontWeight: 600, color: '#6060a0', textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>IV Lookup</span>
             <input
               type="text"
               value={lookupTicker}
@@ -432,11 +540,10 @@ export function IvHistoryView() {
               </div>
             )}
             {lookupRows !== null && lookupRows.length === 0 && (
-              <span style={{ fontSize: 12, color: '#ff9800', marginLeft: 8 }}>No data stored for {lookupTicker}</span>
+              <span style={{ fontSize: 12, color: '#ff9800', marginLeft: 8 }}>No IV data for {lookupTicker}</span>
             )}
           </div>
 
-          {/* Data grid */}
           {lookupRows && lookupRows.length > 0 && (
             <div style={{ flex: 1, overflowY: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
@@ -451,7 +558,7 @@ export function IvHistoryView() {
                 </thead>
                 <tbody>
                   {lookupRows.map((row, i) => {
-                    const ivPct = row.atm_iv;  // stored as percentage since migration 017
+                    const ivPct = row.atm_iv;
                     const ivColor = ivPct > 50 ? '#ef5350' : ivPct > 30 ? '#ff9800' : '#4caf50';
                     return (
                       <tr key={row.date} style={{ borderBottom: '1px solid #1a1a2e', background: i % 2 === 0 ? 'transparent' : '#0e0e1a' }}>
@@ -482,3 +589,6 @@ export function IvHistoryView() {
     </div>
   );
 }
+
+// Backward-compatible alias (App.tsx imports IvHistoryView by name)
+export { HistoryView as IvHistoryView };
