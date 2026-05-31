@@ -749,18 +749,18 @@ export function App() {
             🎯 Opportunity
           </button>
           <button
+            className={`nav-btn ${currentView === 'filters' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('filters')}
+          >
+            🎛️ Filters
+          </button>
+          <button
             className={`nav-btn ${currentView === 'payoff' ? 'active' : ''}`}
             onClick={() => navigateSidebar('payoff')}
           >
             📐 Payoff
           </button>
           <div className="nav-divider" />
-          <button
-            className={`nav-btn ${currentView === 'filters' ? 'active' : ''}`}
-            onClick={() => navigateSidebar('filters')}
-          >
-            🎛️ Filters
-          </button>
           <button
             className={`nav-btn ${currentView === 'analysis' ? 'active' : ''}`}
             onClick={() => navigateSidebar('analysis')}
