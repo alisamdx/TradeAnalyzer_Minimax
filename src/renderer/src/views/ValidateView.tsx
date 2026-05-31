@@ -1305,43 +1305,69 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
                   </div>
                 )}
 
-                <div className="fundamentals-grid">
-                  <div className="fund-item">
-                    <span className="fund-label" title="Price-to-Earnings Ratio. Stock price divided by earnings per share. Lower P/E may indicate undervaluation. Compare to industry peers.">P/E</span>
-                    <span className="fund-value">{fmtNum(result.fundamentals.peRatio, 1)}</span>
-                  </div>
-                  <div className="fund-item">
-                    <span className="fund-label" title="Earnings Per Share. Company profit divided by outstanding shares. Higher EPS indicates better profitability. Growing EPS over time is positive.">EPS</span>
-                    <span className="fund-value">{fmtNum(result.fundamentals.eps, 2)}</span>
-                  </div>
-                  <div className="fund-item">
-                    <span className="fund-label" title="Revenue Growth. Year-over-year percentage increase in revenue. Indicates company expansion. Positive growth suggests increasing market share or demand.">Rev Growth</span>
-                    <span className="fund-value">{fmtPct(result.fundamentals.revenueGrowth)}</span>
-                  </div>
-                  <div className="fund-item">
-                    <span className="fund-label" title="Profit Margin. Percentage of revenue that becomes profit. Higher margins indicate better efficiency and pricing power. Compare within industry.">Margin</span>
-                    <span className="fund-value">{fmtPct(result.fundamentals.profitMargin)}</span>
-                  </div>
-                  <div className="fund-item">
-                    <span className="fund-label" title="Debt-to-Equity Ratio. Total debt divided by shareholder equity. Lower D/E suggests less financial risk. High D/E may indicate aggressive financing.">D/E</span>
-                    <span className="fund-value">{fmtNum(result.fundamentals.debtToEquity, 2)}</span>
-                  </div>
-                  <div className="fund-item">
-                    <span className="fund-label" title="Return on Equity. Net income as percentage of shareholder equity. Measures how efficiently company uses investor capital. Higher ROE is generally better.">ROE</span>
-                    <span className="fund-value">{fmtPct(result.fundamentals.roe)}</span>
-                  </div>
-                </div>
-                {result.fundamentals.daysToEarnings !== null && result.fundamentals.daysToEarnings <= 14 && (
-                  <div className="warning-banner">
-                    ⚠ Earnings in {result.fundamentals.daysToEarnings} days — {result.fundamentals.nextEarningsDate ?? 'date unknown'}
-                  </div>
-                )}
-                {result.fundamentals.epsHistory.length > 1 && (
-                  <div className="eps-history-row">
-                    <span className="fund-label">EPS History</span>
-                    <EPSSparkline values={result.fundamentals.epsHistory} />
-                  </div>
-                )}
+                {(() => {
+                  // Detect ETF: all four key fundamental ratios are null → no P/E, EPS, ROE, D/E
+                  const isEtf =
+                    result.fundamentals.peRatio === null &&
+                    result.fundamentals.eps === null &&
+                    result.fundamentals.roe === null &&
+                    result.fundamentals.debtToEquity === null;
+
+                  if (isEtf) {
+                    return (
+                      <div style={{
+                        padding: '8px 10px', borderRadius: 4,
+                        background: 'rgba(90,74,0,0.25)', border: '1px solid #5a4a00',
+                        color: '#c8a000', fontSize: 12,
+                      }}>
+                        📋 ETF — P/E, EPS, ROE, D/E, Margin, Revenue Growth are not applicable.
+                        Technical, IV rank and trend analysis below remain valid.
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <>
+                      <div className="fundamentals-grid">
+                        <div className="fund-item">
+                          <span className="fund-label" title="Price-to-Earnings Ratio. Stock price divided by earnings per share. Lower P/E may indicate undervaluation. Compare to industry peers.">P/E</span>
+                          <span className="fund-value">{fmtNum(result.fundamentals.peRatio, 1)}</span>
+                        </div>
+                        <div className="fund-item">
+                          <span className="fund-label" title="Earnings Per Share. Company profit divided by outstanding shares. Higher EPS indicates better profitability. Growing EPS over time is positive.">EPS</span>
+                          <span className="fund-value">{fmtNum(result.fundamentals.eps, 2)}</span>
+                        </div>
+                        <div className="fund-item">
+                          <span className="fund-label" title="Revenue Growth. Year-over-year percentage increase in revenue. Indicates company expansion. Positive growth suggests increasing market share or demand.">Rev Growth</span>
+                          <span className="fund-value">{fmtPct(result.fundamentals.revenueGrowth)}</span>
+                        </div>
+                        <div className="fund-item">
+                          <span className="fund-label" title="Profit Margin. Percentage of revenue that becomes profit. Higher margins indicate better efficiency and pricing power. Compare within industry.">Margin</span>
+                          <span className="fund-value">{fmtPct(result.fundamentals.profitMargin)}</span>
+                        </div>
+                        <div className="fund-item">
+                          <span className="fund-label" title="Debt-to-Equity Ratio. Total debt divided by shareholder equity. Lower D/E suggests less financial risk. High D/E may indicate aggressive financing.">D/E</span>
+                          <span className="fund-value">{fmtNum(result.fundamentals.debtToEquity, 2)}</span>
+                        </div>
+                        <div className="fund-item">
+                          <span className="fund-label" title="Return on Equity. Net income as percentage of shareholder equity. Measures how efficiently company uses investor capital. Higher ROE is generally better.">ROE</span>
+                          <span className="fund-value">{fmtPct(result.fundamentals.roe)}</span>
+                        </div>
+                      </div>
+                      {result.fundamentals.daysToEarnings !== null && result.fundamentals.daysToEarnings <= 14 && (
+                        <div className="warning-banner">
+                          ⚠ Earnings in {result.fundamentals.daysToEarnings} days — {result.fundamentals.nextEarningsDate ?? 'date unknown'}
+                        </div>
+                      )}
+                      {result.fundamentals.epsHistory.length > 1 && (
+                        <div className="eps-history-row">
+                          <span className="fund-label">EPS History</span>
+                          <EPSSparkline values={result.fundamentals.epsHistory} />
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
 
               {/* ── Section B: Market & Trend ── */}
