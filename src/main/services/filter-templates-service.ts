@@ -433,7 +433,9 @@ export class FilterTemplatesService {
   }
 
   private async fetchBars(ticker: string) {
-    const bars = await this.dataProvider.getHistoricalBars(ticker, 'day', 252);
+    // Request 400 calendar days — getHistoricalBars converts lookback to a date
+    // range using calendar days, so 400 ≈ 285 trading bars, enough for SMA-200.
+    const bars = await this.dataProvider.getHistoricalBars(ticker, 'day', 400);
     return bars.length >= 15 ? bars : null;
   }
 

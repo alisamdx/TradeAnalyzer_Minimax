@@ -15,6 +15,7 @@ interface UseSortableReturn<T> {
   sortedData: T[];
   sortConfig: SortConfig | null;
   requestSort: (key: string) => void;
+  setSort: (key: string, direction: SortDirection) => void;
   getSortIndicator: (key: string) => string;
 }
 
@@ -35,6 +36,10 @@ export function useSortable<T>(
       // Toggle direction
       return { key, direction: current.direction === 'asc' ? 'desc' : 'asc' };
     });
+  }, []);
+
+  const setSort = useCallback((key: string, direction: SortDirection) => {
+    setSortConfig({ key, direction });
   }, []);
 
   const getSortIndicator = useCallback(
@@ -80,6 +85,7 @@ export function useSortable<T>(
     sortedData,
     sortConfig,
     requestSort,
+    setSort,
     getSortIndicator
   };
 }

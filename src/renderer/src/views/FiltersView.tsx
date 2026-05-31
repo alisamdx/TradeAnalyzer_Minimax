@@ -1,10 +1,22 @@
 // FiltersView — pre-built filter templates that scan watchlist or universe tickers.
 // User selects a template, picks a source (universe or watchlist), and sees matching results.
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { FilterTemplateResult, Watchlist, Universe } from '@shared/types.js';
 import { FILTER_TEMPLATES } from '@shared/filter-templates.js';
-import { useSortable } from '../hooks/useSortable.js';
+import { useSortable, type SortDirection } from '../hooks/useSortable.js';
+
+// ─── Per-template default sort ────────────────────────────────────────────────
+
+const TEMPLATE_DEFAULT_SORT: Record<string, { key: string; dir: SortDirection }> = {
+  rsi_overbought:      { key: 'rsi',            dir: 'desc' },
+  rsi_oversold:        { key: 'rsi',            dir: 'asc'  },
+  price_alert:         { key: 'priceVsSma50',   dir: 'asc'  },
+  iv_rank_low:         { key: 'ivRank',         dir: 'asc'  },
+  iv_rank_high:        { key: 'ivRank',         dir: 'desc' },
+  assignment_risk:     { key: 'delta',          dir: 'desc' },
+  wheel_opportunity:   { key: 'suitabilityScore', dir: 'desc' },
+};
 
 // ─── Category metadata ────────────────────────────────────────────────────────
 
@@ -54,9 +66,15 @@ export function FiltersView() {
     return () => { unsub(); };
   }, []);
 
-  // Sortable results
-  const { sortedData, sortConfig, requestSort, getSortIndicator } = useSortable(
-    results,
+  // Flatten results so metric sub-keys (rsi, ivRank, …) are top-level for useSortable.
+  const flatResults = useMemo(
+    () => results.map(r => ({ ...r, ...r.metrics })),
+    [results]
+  );
+
+  // Sortable results — start with ticker asc; setSort is called after each run.
+  const { sortedData, sortConfig, requestSort, setSort, getSortIndicator } = useSortable(
+    flatResults,
     'ticker',
     'asc'
   );
@@ -81,6 +99,10 @@ export function FiltersView() {
         watchlistIds
       );
       setResults(res);
+      // Apply per-template default sort
+      const def = TEMPLATE_DEFAULT_SORT[templateId];
+      if (def) setSort(def.key, def.dir);
+      else setSort('ticker', 'asc');
       const template = FILTER_TEMPLATES.find(t => t.id === templateId);
       setStatusMsg(`${template?.label ?? templateId}: ${res.length} match${res.length !== 1 ? 'es' : ''}`);
     } catch (e) {
