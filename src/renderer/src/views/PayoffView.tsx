@@ -13,6 +13,8 @@ import type {
   OptionsChainExpirationSummary,
   OptionsChainViewData,
   OptionContract,
+  Watchlist,
+  WatchlistItem,
 } from '@shared/types.js';
 
 // ─── Pure math helpers ────────────────────────────────────────────────────────
@@ -878,12 +880,24 @@ export function PayoffView({ initialTicker, initialSpot }: PayoffViewProps) {
   const [error, setError]     = useState<string | null>(null);
   const [statusMsg, setStatus] = useState<string | null>(null);
 
+  // Watchlist picker
+  const [watchlists, setWatchlists]           = useState<Watchlist[]>([]);
+  const [selectedWlId, setSelectedWlId]       = useState<number | null>(null);
+  const [watchlistItems, setWatchlistItems]   = useState<WatchlistItem[]>([]);
+
   const spotNum = parseFloat(spotStr) || 0;
 
-  // Load saved strategies on mount
+  // Load saved strategies + watchlists on mount
   useEffect(() => {
     window.api.payoff.list().then(setSaved).catch(() => {});
+    window.api.watchlists.list().then(setWatchlists).catch(() => {});
   }, []);
+
+  // Load items when watchlist selection changes
+  useEffect(() => {
+    if (selectedWlId === null) { setWatchlistItems([]); return; }
+    window.api.watchlists.items.list(selectedWlId).then(setWatchlistItems).catch(() => setWatchlistItems([]));
+  }, [selectedWlId]);
 
   // ── Computed payoff ─────────────────────────────────────────────────────────
   const metrics = useMemo(
@@ -1067,6 +1081,37 @@ export function PayoffView({ initialTicker, initialSpot }: PayoffViewProps) {
 
         {/* ── Header ── */}
         <h2 style={{ margin: 0, fontSize: 16 }}>📐 Payoff Visualizer</h2>
+
+        {/* ── Watchlist picker ── */}
+        <div style={{ display: 'flex', gap: 6 }}>
+          <div style={{ flex: 1 }}>
+            <label style={{ fontSize: 10, color: 'var(--text-muted)', display: 'block', marginBottom: 2 }}>Watchlist</label>
+            <select
+              value={selectedWlId ?? ''}
+              onChange={e => setSelectedWlId(e.target.value ? Number(e.target.value) : null)}
+              style={{ width: '100%', padding: '5px 7px', fontSize: 13, background: '#1e293b', color: '#e2e8f0', border: '1px solid #334155', borderRadius: 4 }}
+            >
+              <option value=''>— select —</option>
+              {watchlists.map(w => (
+                <option key={w.id} value={w.id}>{w.name}</option>
+              ))}
+            </select>
+          </div>
+          <div style={{ flex: 1 }}>
+            <label style={{ fontSize: 10, color: 'var(--text-muted)', display: 'block', marginBottom: 2 }}>Ticker from watchlist</label>
+            <select
+              value=''
+              disabled={watchlistItems.length === 0}
+              onChange={e => { if (e.target.value) setTicker(e.target.value); }}
+              style={{ width: '100%', padding: '5px 7px', fontSize: 13, background: '#1e293b', color: '#e2e8f0', border: '1px solid #334155', borderRadius: 4, opacity: watchlistItems.length === 0 ? 0.5 : 1 }}
+            >
+              <option value=''>— pick ticker —</option>
+              {watchlistItems.map(t => (
+                <option key={t.id} value={t.ticker}>{t.ticker}{t.notes ? ` — ${t.notes}` : ''}</option>
+              ))}
+            </select>
+          </div>
+        </div>
 
         {/* ── Ticker + Spot ── */}
         <div style={{ display: 'flex', gap: 6 }}>
