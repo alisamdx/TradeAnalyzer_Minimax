@@ -249,9 +249,13 @@ export class OpportunityService {
 
     for (const snap of snaps) {
       if (snap.mode !== 'buy' && snap.mode !== 'wheel') continue;
-      let results: Array<{ ticker: string; compositeScore?: number; suitabilityScore?: number }>;
-      try { results = JSON.parse(snap.payload_json) as typeof results; }
-      catch { continue; }
+      // payload_json is stored as { jobRunId, results: [...] } by AnalysisService
+      type ResultItem = { ticker: string; compositeScore?: number; suitabilityScore?: number };
+      let results: ResultItem[];
+      try {
+        const parsed = JSON.parse(snap.payload_json) as ResultItem[] | { results?: ResultItem[] };
+        results = Array.isArray(parsed) ? parsed : (parsed.results ?? []);
+      } catch { continue; }
 
       for (const r of results) {
         if (!tickerSet.has(r.ticker)) continue;
