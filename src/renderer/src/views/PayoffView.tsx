@@ -998,6 +998,58 @@ export function PayoffView({ initialTicker, initialSpot, initialExpiry, initialS
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // run only once on mount
 
+  // ── Protective leg recommendation (shown when exactly 1 leg is active) ──────
+  const protectiveRec = useMemo(() => {
+    if (legs.length !== 1) return null;
+    const leg = legs[0]!;
+
+    let mult: number, pSide: 'buy' | 'sell', pType: 'put' | 'call', rationale: string, emoji: string;
+
+    if (leg.side === 'sell' && leg.type === 'put') {
+      // Short put (CSP) → buy put below = bull put spread
+      mult = 0.95; pSide = 'buy'; pType = 'put';
+      rationale = 'Bull put spread — caps max loss on this short put';
+      emoji = '🛡️';
+    } else if (leg.side === 'sell' && leg.type === 'call') {
+      // Short call → buy call above = bear call spread
+      mult = 1.05; pSide = 'buy'; pType = 'call';
+      rationale = 'Bear call spread — caps upside risk on this short call';
+      emoji = '🛡️';
+    } else if (leg.side === 'buy' && leg.type === 'call') {
+      // Long call → sell call above = bull call spread (reduce cost)
+      mult = 1.05; pSide = 'sell'; pType = 'call';
+      rationale = 'Bull call spread — sell higher call to cut cost basis';
+      emoji = '💰';
+    } else if (leg.side === 'buy' && leg.type === 'put') {
+      // Long put → sell put below = bear put spread (reduce cost)
+      mult = 0.95; pSide = 'sell'; pType = 'put';
+      rationale = 'Bear put spread — sell lower put to cut cost basis';
+      emoji = '💰';
+    } else {
+      return null;
+    }
+
+    const estStrike = Math.round(leg.strike * mult);
+
+    // If chain is loaded, snap to the nearest real available contract
+    let contract: OptionContract | null = null;
+    if (chainData) {
+      const pool = chainData.contracts.filter(c => c.side === pType);
+      contract = pool.reduce<OptionContract | null>((best, c) =>
+        best === null ? c : Math.abs(c.strike - estStrike) < Math.abs(best.strike - estStrike) ? c : best,
+      null);
+    }
+
+    return {
+      side:     pSide,
+      type:     pType,
+      rationale,
+      emoji,
+      strike:   contract?.strike ?? estStrike,
+      contract,
+    };
+  }, [legs, chainData]);
+
   // ── Computed payoff ─────────────────────────────────────────────────────────
   const metrics = useMemo(
     () => (legs.length > 0 && spotNum > 0 ? computePayoffMetrics(legs, spotNum) : null),
@@ -1073,6 +1125,38 @@ export function PayoffView({ initialTicker, initialSpot, initialExpiry, initialS
     setLegs(prev => [...prev, leg]);
     setShowAddForm(false);
   };
+
+  const addProtectiveLeg = useCallback(async () => {
+    if (!protectiveRec) return;
+    // If chain already loaded, add immediately from the nearest contract
+    if (protectiveRec.contract && selectedExpiry) {
+      addLegFromContract(protectiveRec.contract, protectiveRec.side, protectiveRec.type, selectedExpiry);
+      return;
+    }
+    // Chain not loaded — try to load it first, then add
+    if (!ticker.trim()) { setError('Enter a ticker to load the chain'); return; }
+    setChainLoading(true); setError(null);
+    try {
+      const expResult = await window.api.optionsChain.getNearExpirations(ticker.toUpperCase());
+      setChainExpirations(expResult.expirations);
+      if (expResult.currentPrice && !spotNum) setSpotStr(expResult.currentPrice.toFixed(2));
+      const expiry = expResult.expirations[0]?.date ?? '';
+      if (expiry) {
+        setSelectedExpiry(expiry);
+        const chainResult = await window.api.optionsChain.getChain(ticker.toUpperCase(), expiry);
+        setChainData(chainResult);
+        setShowChain(true);
+        if (chainResult.currentPrice && !spotNum) setSpotStr(chainResult.currentPrice.toFixed(2));
+        // Find nearest contract in freshly-loaded chain
+        const pool = chainResult.contracts.filter(c => c.side === protectiveRec.type);
+        const nearest = pool.reduce<OptionContract | null>((best, c) =>
+          best === null ? c : Math.abs(c.strike - protectiveRec.strike) < Math.abs(best.strike - protectiveRec.strike) ? c : best,
+        null);
+        if (nearest) addLegFromContract(nearest, protectiveRec.side, protectiveRec.type, expiry);
+      }
+    } catch (e) { setError((e as Error).message); }
+    finally { setChainLoading(false); }
+  }, [protectiveRec, selectedExpiry, ticker, spotNum]);
 
   // ── Chain loading ───────────────────────────────────────────────────────────
   const loadChainExpirations = async () => {
@@ -1286,6 +1370,38 @@ export function PayoffView({ initialTicker, initialSpot, initialExpiry, initialS
               onUpdate={patch => updateLeg(leg.id, patch)}
             />
           ))}
+
+          {/* ── Protective leg recommendation ── */}
+          {protectiveRec && !showAddForm && (
+            <div style={{
+              background: '#0c1a2e',
+              border: '1px solid #1d4ed8',
+              borderLeft: '3px solid #3b82f6',
+              borderRadius: 5, padding: '8px 10px', marginTop: 4,
+            }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#93c5fd', marginBottom: 3 }}>
+                {protectiveRec.emoji} Suggested next leg
+              </div>
+              <div style={{ fontSize: 12, color: '#e2e8f0', marginBottom: 3 }}>
+                {protectiveRec.side === 'buy' ? 'Buy' : 'Sell'} {protectiveRec.type} ${protectiveRec.strike}
+                {!protectiveRec.contract && <span style={{ fontSize: 10, color: '#64748b' }}> (est.)</span>}
+              </div>
+              <div style={{ fontSize: 10, color: '#94a3b8', marginBottom: 6 }}>
+                {protectiveRec.rationale}
+              </div>
+              <button
+                onClick={addProtectiveLeg}
+                disabled={chainLoading}
+                style={{
+                  width: '100%', padding: '5px 8px', fontSize: 11, borderRadius: 4,
+                  background: '#1d4ed8', border: 'none', color: '#fff',
+                  cursor: chainLoading ? 'not-allowed' : 'pointer', fontWeight: 600,
+                }}
+              >
+                {chainLoading ? '⟳ Loading…' : '+ Add protective leg'}
+              </button>
+            </div>
+          )}
 
           {showAddForm ? (
             <AddLegForm
