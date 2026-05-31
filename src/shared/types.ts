@@ -1292,7 +1292,7 @@ export interface IvHistoryGapSummary {
 // ─── ENH-2: Opportunity Dashboard ─────────────────────────────────────────────
 
 export type StrategyMode = 'wheel' | 'csp' | 'spreads' | 'bullish' | 'bearish';
-export type OpportunityUniverse = 'sp500' | 'russell1000' | 'both';
+export type OpportunityUniverse = 'sp500' | 'russell1000' | 'both' | 'etf';
 
 export interface OpportunityRow {
   rank: number;

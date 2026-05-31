@@ -80,7 +80,11 @@ const UNIVERSE_OPTIONS: { value: OpportunityUniverse; label: string }[] = [
   { value: 'sp500',       label: 'S&P 500' },
   { value: 'russell1000', label: 'Russell 1000' },
   { value: 'both',        label: 'Both Universes' },
+  { value: 'etf',         label: 'ETFs' },
 ];
+
+// Strategies available for ETF universe (directional modes require fundamental/technical scores)
+const ETF_STRATEGIES: StrategyMode[] = ['wheel', 'csp', 'spreads'];
 
 // Per-strategy weight labels shown in the header — mirrors STRATEGY_WEIGHTS in opportunity-service
 const STRATEGY_WEIGHT_LABELS: Record<StrategyMode, string> = {
@@ -89,6 +93,15 @@ const STRATEGY_WEIGHT_LABELS: Record<StrategyMode, string> = {
   spreads: 'Composite = Fund 15% + IV Rank 30% + Technical 25% + Yield 30%',
   bullish: 'Composite = Fund 25% + IV Rank 25% (inverted) + Technical 40% + Yield 10%',
   bearish: 'Composite = Fund 10% + IV Rank 25% (inverted) + Technical 45% + Yield 20%',
+};
+
+// ETF mode: fundamentals excluded; weights re-normalise across remaining components
+const ETF_WEIGHT_LABELS: Record<StrategyMode, string> = {
+  wheel:   'ETF mode — Composite = IV Rank 30% + Yield 20% (Fund excluded; weights re-normalised)',
+  csp:     'ETF mode — Composite = IV Rank 35% + Yield 25% (Fund excluded; weights re-normalised)',
+  spreads: 'ETF mode — Composite = IV Rank 30% + Yield 30% (Fund excluded; weights re-normalised)',
+  bullish: '',
+  bearish: '',
 };
 
 // Per-strategy context shown in the amber warning strip
@@ -119,6 +132,7 @@ const STRATEGY_OPTIONS: { value: StrategyMode; label: string; icon: string }[] =
 export function OpportunityView() {
   const [universe, setUniverse] = useState<OpportunityUniverse>('both');
   const [strategy, setStrategy] = useState<StrategyMode>('wheel');
+  const isEtf = universe === 'etf';
   const [minScore, setMinScore] = useState(0);
   const [limit, setLimit] = useState(50);
 
@@ -204,7 +218,7 @@ export function OpportunityView() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <h2 style={{ margin: 0, fontSize: 18 }}>🎯 Opportunity Dashboard</h2>
         <span style={{ color: '#888', fontSize: 12 }}>
-          {STRATEGY_WEIGHT_LABELS[strategy]}
+          {isEtf ? ETF_WEIGHT_LABELS[strategy] : STRATEGY_WEIGHT_LABELS[strategy]}
         </span>
         <div style={{ flex: 1 }} />
         {lastRunAt && (
@@ -225,7 +239,13 @@ export function OpportunityView() {
           {UNIVERSE_OPTIONS.map(opt => (
             <button
               key={opt.value}
-              onClick={() => setUniverse(opt.value)}
+              onClick={() => {
+                setUniverse(opt.value);
+                // ETF only supports premium-selling strategies; switch away from directional modes
+                if (opt.value === 'etf' && !ETF_STRATEGIES.includes(strategy)) {
+                  setStrategy('wheel');
+                }
+              }}
               style={{
                 padding: '3px 10px', fontSize: 12, borderRadius: 4,
                 background: universe === opt.value ? '#3498db' : '#333',
@@ -243,20 +263,27 @@ export function OpportunityView() {
         {/* Strategy */}
         <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
           <label style={{ fontSize: 12, color: '#aaa' }}>Strategy:</label>
-          {STRATEGY_OPTIONS.map(opt => (
-            <button
-              key={opt.value}
-              onClick={() => { setStrategy(opt.value); run(opt.value); }}
-              style={{
-                padding: '3px 10px', fontSize: 12, borderRadius: 4,
-                background: strategy === opt.value ? '#9b59b6' : '#333',
-                color: strategy === opt.value ? '#fff' : '#ccc',
-                border: 'none', cursor: 'pointer',
-              }}
-            >
-              {opt.icon} {opt.label}
-            </button>
-          ))}
+          {STRATEGY_OPTIONS.map(opt => {
+            const disabled = isEtf && !ETF_STRATEGIES.includes(opt.value);
+            return (
+              <button
+                key={opt.value}
+                disabled={disabled}
+                title={disabled ? 'Not available for ETF universe — requires fundamental & technical scores' : undefined}
+                onClick={() => { setStrategy(opt.value); run(opt.value); }}
+                style={{
+                  padding: '3px 10px', fontSize: 12, borderRadius: 4,
+                  background: strategy === opt.value ? '#9b59b6' : '#333',
+                  color: disabled ? '#555' : strategy === opt.value ? '#fff' : '#ccc',
+                  border: disabled ? '1px solid #444' : 'none',
+                  cursor: disabled ? 'not-allowed' : 'pointer',
+                  opacity: disabled ? 0.45 : 1,
+                }}
+              >
+                {opt.icon} {opt.label}
+              </button>
+            );
+          })}
         </div>
 
         <div style={{ width: 1, height: 20, background: '#444' }} />
@@ -289,6 +316,22 @@ export function OpportunityView() {
           {loading ? '⏳ Running…' : '▶ Run'}
         </button>
       </div>
+
+      {/* ── ETF hint strip ─────────────────────────────────────────────── */}
+      {isEtf && (
+        <div style={{
+          background: '#1a1400', border: '1px solid #5a4a00', borderRadius: 4,
+          padding: '6px 12px', fontSize: 12, color: '#c8a000', display: 'flex', gap: 8, alignItems: 'center',
+        }}>
+          <span>📋</span>
+          <span>
+            <strong>ETF mode</strong> — Fundamental score (P/E, ROE, D/E etc.) is N/A for ETFs and excluded from composite.
+            IV rank uses a compressed scale calibrated to ETF volatility levels (IVR 30 = max score).
+            Bullish/Bearish strategies are disabled (require technical scores from analysis snapshots).
+            Run <em>Data Sync → ETFs</em> first to populate quote &amp; IV data.
+          </span>
+        </div>
+      )}
 
       {/* ── Stats strip ────────────────────────────────────────────────── */}
       {rows.length > 0 && (
@@ -371,7 +414,12 @@ export function OpportunityView() {
                   <td style={{ ...td, textAlign: 'center' }}>
                     <CompositeScore score={row.compositeScore} />
                   </td>
-                  <td style={td}><ScoreBar value={row.fundamentalsScore} /></td>
+                  <td style={td}>
+                    {isEtf
+                      ? <span style={{ color: '#555', fontSize: 11 }} title="Fundamental metrics (P/E, ROE, D/E) are not applicable for ETFs">N/A</span>
+                      : <ScoreBar value={row.fundamentalsScore} />
+                    }
+                  </td>
                   <td style={td}><IvBadge ivRank={row.ivRank} /></td>
                   <td style={td}><ScoreBar value={row.technicalScore} /></td>
                   <td style={td}><ScoreBar value={row.premiumYieldScore} /></td>

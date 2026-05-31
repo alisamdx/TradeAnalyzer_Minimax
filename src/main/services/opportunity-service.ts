@@ -7,7 +7,7 @@ import type { Database } from 'better-sqlite3';
 import type { ConstituentRow, ScreenResultPayload } from '@shared/types.js';
 
 export type StrategyMode = 'wheel' | 'csp' | 'spreads' | 'bullish' | 'bearish';
-export type OpportunityUniverse = 'sp500' | 'russell1000' | 'both';
+export type OpportunityUniverse = 'sp500' | 'russell1000' | 'both' | 'etf';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -61,7 +61,7 @@ export interface OpportunityRunOptions {
   limit?: number;
 }
 
-type GetConstituents = (u: 'sp500' | 'russell1000' | 'both') => ConstituentRow[];
+type GetConstituents = (u: 'sp500' | 'russell1000' | 'both' | 'etf') => ConstituentRow[];
 
 // ── Per-strategy composite weights ───────────────────────────────────────────
 // Each strategy emphasises different components.
@@ -105,6 +105,7 @@ export class OpportunityService {
 
   run(opts: OpportunityRunOptions): OpportunityRow[] {
     const { universe, strategy, minCompositeScore = 0, limit = 100 } = opts;
+    const isEtf = universe === 'etf';
 
     // 0. Target expiry — computed once per run (nearest Friday ≥ 30 DTE)
     const { date: targetExpiry, dte: targetDte } = nearestFridayAtLeast(30);
@@ -140,8 +141,8 @@ export class OpportunityService {
       const price = quote?.last ?? fund?.lastPrice ?? fund?.price ?? null;  // see docs/formulas.md#opportunity-price
       const prevClose = quote?.prevClose ?? null;
 
-      const fundamentalsScore = this.scoreFundamentals(fund);
-      const ivRankScore = this.scoreIvRank(ivData?.ivRank, strategy);
+      const fundamentalsScore = isEtf ? null : this.scoreFundamentals(fund);
+      const ivRankScore = this.scoreIvRank(ivData?.ivRank, strategy, isEtf);
       const technicalScore = tech;
       // Per-strategy target strike — see docs/formulas.md#opportunity-target-strike
       const strikePct = STRATEGY_STRIKE_PCT[strategy];
@@ -375,12 +376,21 @@ export class OpportunityService {
     return max === 0 ? null : Math.round((score / max) * 100);
   }
 
-  private scoreIvRank(ivRank: number | null | undefined, strategy: StrategyMode): number | null {
+  private scoreIvRank(ivRank: number | null | undefined, strategy: StrategyMode, isEtf = false): number | null {
     if (ivRank === null || ivRank === undefined) return null;
     // Premium selling → high IV rank = rich premium → score matches rank
     // Directional     → low IV = cheaper options → invert
     // see docs/formulas.md#iv-rank-score
-    if (PREMIUM_SELLING_MODES.includes(strategy)) return Math.round(ivRank);
+    if (PREMIUM_SELLING_MODES.includes(strategy)) {
+      if (isEtf) {
+        // ETFs have structurally lower IV than individual stocks (SPY typically IVR 10-30).
+        // Compressed scale: IVR 30 → score 100, IVR 15 → score 50.
+        // This calibrates ETF IV richness relative to its own history rather than stock benchmarks.
+        // see docs/formulas.md#iv-rank-score
+        return Math.min(100, Math.round(ivRank * (100 / 30)));
+      }
+      return Math.round(ivRank);
+    }
     return Math.round(100 - ivRank);
   }
 
