@@ -3,7 +3,7 @@
 // Weights: fundamentals 25% | IV rank 30% | technical 25% | premium yield 20%
 // see docs/formulas.md#opportunity-score
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import type { OpportunityRow, OpportunityRunOptions, StrategyMode, OpportunityUniverse } from '@shared/types.js';
 
 // ── Sub-components ──────────────────────────────────────────────────────────
@@ -53,6 +53,27 @@ function CompositeScore({ score }: { score: number }) {
   );
 }
 
+// ── Sort helpers ───────────────────────────────────────────────────────────
+
+type SortKey =
+  | 'rank' | 'ticker' | 'lastPrice' | 'dayChangePct' | 'compositeScore'
+  | 'fundamentalsScore' | 'ivRank' | 'technicalScore' | 'premiumYieldScore'
+  | 'currentIv' | 'targetStrike' | 'estimatedPremium' | 'dataPoints';
+
+type SortDir = 'asc' | 'desc';
+
+function sortRows(rows: OpportunityRow[], key: SortKey, dir: SortDir): OpportunityRow[] {
+  return [...rows].sort((a, b) => {
+    const av = a[key] as number | string | null;
+    const bv = b[key] as number | string | null;
+    if (av === null && bv === null) return 0;
+    if (av === null) return 1;   // nulls last
+    if (bv === null) return -1;
+    const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+    return dir === 'asc' ? cmp : -cmp;
+  });
+}
+
 // ── Main view ──────────────────────────────────────────────────────────────
 
 const UNIVERSE_OPTIONS: { value: OpportunityUniverse; label: string }[] = [
@@ -80,6 +101,22 @@ export function OpportunityView() {
   const [error, setError] = useState<string | null>(null);
   const [lastRunAt, setLastRunAt] = useState<string | null>(null);
   const [runMs, setRunMs] = useState<number | null>(null);
+  const [sortKey, setSortKey] = useState<SortKey>('compositeScore');
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
+
+  const sortedRows = useMemo(() => sortRows(rows, sortKey, sortDir), [rows, sortKey, sortDir]);
+
+  const handleSort = (key: SortKey) => {
+    if (key === sortKey) {
+      setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortKey(key);
+      setSortDir('desc');
+    }
+  };
+
+  const sortIndicator = (key: SortKey) =>
+    sortKey !== key ? ' ↕' : sortDir === 'desc' ? ' ↓' : ' ↑';
 
   const run = useCallback(async () => {
     setLoading(true);
@@ -263,33 +300,33 @@ export function OpportunityView() {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr style={{ background: '#1e1e2e', position: 'sticky', top: 0, zIndex: 1 }}>
-                <th style={th}>#</th>
-                <th style={th}>Ticker</th>
+                <th style={thNum} onClick={() => handleSort('rank')}>#{ sortIndicator('rank')}</th>
+                <th style={th}    onClick={() => handleSort('ticker')}>Ticker{sortIndicator('ticker')}</th>
                 <th style={th}>Company</th>
-                <th style={th}>Price</th>
-                <th style={th}>Day%</th>
-                <th style={th}>Score</th>
-                <th style={th}>Fund</th>
-                <th style={th}>IV Rank</th>
-                <th style={th}>Tech</th>
-                <th style={th}>Yield</th>
-                <th style={th}>Curr IV</th>
-                <th style={th}>Strike</th>
-                <th style={th}>Premium</th>
-                <th style={th}>Data</th>
+                <th style={thNum} onClick={() => handleSort('lastPrice')}>Price{sortIndicator('lastPrice')}</th>
+                <th style={thNum} onClick={() => handleSort('dayChangePct')}>Day%{sortIndicator('dayChangePct')}</th>
+                <th style={thCtr} onClick={() => handleSort('compositeScore')}>Score{sortIndicator('compositeScore')}</th>
+                <th style={thNum} onClick={() => handleSort('fundamentalsScore')}>Fund{sortIndicator('fundamentalsScore')}</th>
+                <th style={thNum} onClick={() => handleSort('ivRank')}>IV Rank{sortIndicator('ivRank')}</th>
+                <th style={thNum} onClick={() => handleSort('technicalScore')}>Tech{sortIndicator('technicalScore')}</th>
+                <th style={thNum} onClick={() => handleSort('premiumYieldScore')}>Yield{sortIndicator('premiumYieldScore')}</th>
+                <th style={thNum} onClick={() => handleSort('currentIv')}>Curr IV{sortIndicator('currentIv')}</th>
+                <th style={thNum} onClick={() => handleSort('targetStrike')}>Strike{sortIndicator('targetStrike')}</th>
+                <th style={thNum} onClick={() => handleSort('estimatedPremium')}>Premium{sortIndicator('estimatedPremium')}</th>
+                <th style={thCtr} onClick={() => handleSort('dataPoints')}>Data{sortIndicator('dataPoints')}</th>
                 <th style={th}>Actions</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => (
+              {sortedRows.map((row, idx) => (
                 <tr
                   key={row.ticker}
                   style={{
                     borderBottom: '1px solid #222',
-                    background: row.rank % 2 === 0 ? '#141420' : 'transparent',
+                    background: idx % 2 === 1 ? '#141420' : 'transparent',
                   }}
                   onMouseEnter={e => (e.currentTarget.style.background = '#1e1e3a')}
-                  onMouseLeave={e => (e.currentTarget.style.background = row.rank % 2 === 0 ? '#141420' : 'transparent')}
+                  onMouseLeave={e => (e.currentTarget.style.background = idx % 2 === 1 ? '#141420' : 'transparent')}
                 >
                   <td style={td}><span style={{ color: '#666', fontSize: 11 }}>{row.rank}</span></td>
                   <td style={td}>
@@ -369,15 +406,25 @@ export function OpportunityView() {
 
 // ── Styles ─────────────────────────────────────────────────────────────────
 
-const th: React.CSSProperties = {
+const thBase: React.CSSProperties = {
   padding: '8px 10px',
-  textAlign: 'left',
   fontSize: 12,
   fontWeight: 600,
   color: '#aaa',
   borderBottom: '1px solid #333',
   whiteSpace: 'nowrap',
+  cursor: 'pointer',
+  userSelect: 'none',
 };
+
+/** Left-aligned sortable header (text columns) */
+const th: React.CSSProperties = { ...thBase, textAlign: 'left' };
+
+/** Right-aligned sortable header (numeric columns) */
+const thNum: React.CSSProperties = { ...thBase, textAlign: 'right' };
+
+/** Center-aligned sortable header (score circles, counts) */
+const thCtr: React.CSSProperties = { ...thBase, textAlign: 'center' };
 
 const td: React.CSSProperties = {
   padding: '6px 10px',
