@@ -57,8 +57,10 @@ export function HistoryView() {
 
   // Ticker lookup
   const [lookupTicker, setLookupTicker]   = useState('');
+  const [lookupMode, setLookupMode]       = useState<'iv' | 'price'>('iv');
   const [lookupRows, setLookupRows]       = useState<Array<{ date: string; atm_iv: number; underlying_px: number | null; source: string }> | null>(null);
   const [lookupRank, setLookupRank]       = useState<{ ivRank: number | null; ivPercentile: number | null; currentIv: number | null; dataPoints: number } | null>(null);
+  const [priceRows, setPriceRows]         = useState<Array<{ date: string; open: number; high: number; low: number; close: number; volume: number; adjustedClose: number | null }> | null>(null);
   const [lookupLoading, setLookupLoading] = useState(false);
 
   // IV phase run state
@@ -228,13 +230,23 @@ export function HistoryView() {
     setLookupLoading(true);
     setLookupRows(null);
     setLookupRank(null);
+    setPriceRows(null);
     try {
-      const [rows, rank] = await Promise.all([
-        window.api.ivHistory.getRows(t),
-        window.api.ivHistory.getRank(t),
-      ]);
-      setLookupRows(rows);
-      setLookupRank(rank);
+      if (lookupMode === 'iv') {
+        const [rows, rank] = await Promise.all([
+          window.api.ivHistory.getRows(t),
+          window.api.ivHistory.getRank(t),
+        ]);
+        setLookupRows(rows);
+        setLookupRank(rank);
+      } else {
+        // Last 2 years for price spot-check
+        const toDate  = new Date().toISOString().slice(0, 10);
+        const fromDate = new Date(Date.now() - 730 * 86_400_000).toISOString().slice(0, 10);
+        const rows = await window.api.historical.getPrices(t, fromDate, toDate);
+        // Sort descending for easy spot-check (most recent first)
+        setPriceRows([...rows].reverse());
+      }
     } catch { /* silently ignore */ }
     finally { setLookupLoading(false); }
   };
@@ -512,10 +524,28 @@ export function HistoryView() {
           </div>
         </div>
 
-        {/* Ticker lookup (IV) */}
+        {/* Ticker lookup — IV + Price */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#13131f', border: '1px solid #2a2a3e', borderRadius: 10, overflow: 'hidden', minHeight: 0, marginTop: 12 }}>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '10px 14px', borderBottom: '1px solid #1e1e30' }}>
-            <span style={{ fontSize: 11, fontWeight: 600, color: '#6060a0', textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>IV Lookup</span>
+
+          {/* Search bar */}
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '10px 14px', borderBottom: '1px solid #1e1e30', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: '#6060a0', textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>Lookup</span>
+
+            {/* Mode toggle */}
+            {(['iv', 'price'] as const).map(m => (
+              <button
+                key={m}
+                onClick={() => { setLookupMode(m); setLookupRows(null); setPriceRows(null); setLookupRank(null); }}
+                style={{
+                  padding: '3px 10px', borderRadius: 4, border: 'none', fontSize: 11, cursor: 'pointer',
+                  background: lookupMode === m ? '#2a5a8a' : '#1e1e30',
+                  color: lookupMode === m ? '#fff' : '#666',
+                }}
+              >
+                {m === 'iv' ? 'IV History' : 'Price History'}
+              </button>
+            ))}
+
             <input
               type="text"
               value={lookupTicker}
@@ -531,20 +561,37 @@ export function HistoryView() {
             >
               {lookupLoading ? 'Loading…' : 'Fetch'}
             </button>
-            {lookupRank && lookupRows !== null && (
-              <div style={{ display: 'flex', gap: 16, marginLeft: 8, fontSize: 12, color: '#888' }}>
+
+            {/* IV summary */}
+            {lookupMode === 'iv' && lookupRank && lookupRows !== null && lookupRows.length > 0 && (
+              <div style={{ display: 'flex', gap: 14, fontSize: 12, color: '#888' }}>
                 <span>{lookupRows.length} rows</span>
-                {lookupRank.currentIv !== null && <span>Current IV: <strong style={{ color: '#e0e0f0' }}>{lookupRank.currentIv.toFixed(1)}%</strong></span>}
-                {lookupRank.ivRank !== null && <span>IV Rank: <strong style={{ color: '#fab387' }}>{lookupRank.ivRank.toFixed(1)}%</strong></span>}
-                {lookupRank.ivPercentile !== null && <span>IV Pct: <strong style={{ color: '#89b4fa' }}>{lookupRank.ivPercentile.toFixed(1)}%</strong></span>}
+                {lookupRank.currentIv !== null && <span>IV: <strong style={{ color: '#e0e0f0' }}>{lookupRank.currentIv.toFixed(1)}%</strong></span>}
+                {lookupRank.ivRank !== null && <span>Rank: <strong style={{ color: '#fab387' }}>{lookupRank.ivRank.toFixed(1)}%</strong></span>}
+                {lookupRank.ivPercentile !== null && <span>Pct: <strong style={{ color: '#89b4fa' }}>{lookupRank.ivPercentile.toFixed(1)}%</strong></span>}
               </div>
             )}
-            {lookupRows !== null && lookupRows.length === 0 && (
-              <span style={{ fontSize: 12, color: '#ff9800', marginLeft: 8 }}>No IV data for {lookupTicker}</span>
+
+            {/* Price summary */}
+            {lookupMode === 'price' && priceRows !== null && priceRows.length > 0 && (
+              <div style={{ display: 'flex', gap: 14, fontSize: 12, color: '#888' }}>
+                <span>{priceRows.length} bars</span>
+                <span>Latest: <strong style={{ color: '#e0e0f0' }}>{priceRows[0]?.date ?? '—'}</strong></span>
+                <span>Close: <strong style={{ color: '#4caf50' }}>${priceRows[0]?.close.toFixed(2) ?? '—'}</strong></span>
+              </div>
+            )}
+
+            {/* No data messages */}
+            {lookupMode === 'iv' && lookupRows !== null && lookupRows.length === 0 && (
+              <span style={{ fontSize: 12, color: '#ff9800' }}>No IV data stored for {lookupTicker}</span>
+            )}
+            {lookupMode === 'price' && priceRows !== null && priceRows.length === 0 && (
+              <span style={{ fontSize: 12, color: '#ff9800' }}>No price history stored for {lookupTicker}</span>
             )}
           </div>
 
-          {lookupRows && lookupRows.length > 0 && (
+          {/* IV table */}
+          {lookupMode === 'iv' && lookupRows && lookupRows.length > 0 && (
             <div style={{ flex: 1, overflowY: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                 <thead style={{ position: 'sticky', top: 0, background: '#13131f', zIndex: 1 }}>
@@ -552,7 +599,7 @@ export function HistoryView() {
                     <th style={{ textAlign: 'left', padding: '6px 14px', fontWeight: 600 }}>#</th>
                     <th style={{ textAlign: 'left', padding: '6px 14px', fontWeight: 600 }}>Date</th>
                     <th style={{ textAlign: 'right', padding: '6px 14px', fontWeight: 600 }}>IV30</th>
-                    <th style={{ textAlign: 'right', padding: '6px 14px', fontWeight: 600 }}>Stock Price</th>
+                    <th style={{ textAlign: 'right', padding: '6px 14px', fontWeight: 600 }}>Stock Px</th>
                     <th style={{ textAlign: 'left', padding: '6px 14px', fontWeight: 600 }}>Source</th>
                   </tr>
                 </thead>
@@ -579,9 +626,42 @@ export function HistoryView() {
             </div>
           )}
 
-          {!lookupRows && (
+          {/* Price table */}
+          {lookupMode === 'price' && priceRows && priceRows.length > 0 && (
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead style={{ position: 'sticky', top: 0, background: '#13131f', zIndex: 1 }}>
+                  <tr style={{ color: '#6c7086', borderBottom: '1px solid #2a2a3e' }}>
+                    <th style={{ textAlign: 'left', padding: '6px 14px', fontWeight: 600 }}>Date</th>
+                    <th style={{ textAlign: 'right', padding: '6px 14px', fontWeight: 600 }}>Open</th>
+                    <th style={{ textAlign: 'right', padding: '6px 14px', fontWeight: 600 }}>High</th>
+                    <th style={{ textAlign: 'right', padding: '6px 14px', fontWeight: 600 }}>Low</th>
+                    <th style={{ textAlign: 'right', padding: '6px 14px', fontWeight: 600 }}>Close</th>
+                    <th style={{ textAlign: 'right', padding: '6px 14px', fontWeight: 600 }}>Volume</th>
+                    <th style={{ textAlign: 'right', padding: '6px 14px', fontWeight: 600 }}>Adj</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {priceRows.map((row, i) => (
+                    <tr key={row.date} style={{ borderBottom: '1px solid #1a1a2e', background: i % 2 === 0 ? 'transparent' : '#0e0e1a' }}>
+                      <td style={{ padding: '4px 14px', fontFamily: 'monospace', color: '#cdd6f4' }}>{row.date}</td>
+                      <td style={{ padding: '4px 14px', textAlign: 'right', fontFamily: 'monospace', color: '#888' }}>{row.open.toFixed(2)}</td>
+                      <td style={{ padding: '4px 14px', textAlign: 'right', fontFamily: 'monospace', color: '#4caf50' }}>{row.high.toFixed(2)}</td>
+                      <td style={{ padding: '4px 14px', textAlign: 'right', fontFamily: 'monospace', color: '#ef5350' }}>{row.low.toFixed(2)}</td>
+                      <td style={{ padding: '4px 14px', textAlign: 'right', fontFamily: 'monospace', color: '#e0e0f0', fontWeight: 600 }}>{row.close.toFixed(2)}</td>
+                      <td style={{ padding: '4px 14px', textAlign: 'right', fontFamily: 'monospace', color: '#666' }}>{(row.volume / 1_000_000).toFixed(2)}M</td>
+                      <td style={{ padding: '4px 14px', textAlign: 'right', fontFamily: 'monospace', color: '#555' }}>{row.adjustedClose !== null ? row.adjustedClose.toFixed(2) : '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Empty state */}
+          {((lookupMode === 'iv' && !lookupRows) || (lookupMode === 'price' && !priceRows)) && (
             <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#333', fontSize: 12 }}>
-              Enter a symbol above to inspect stored IV history
+              Enter a symbol above to spot-check stored {lookupMode === 'iv' ? 'IV' : 'price'} history
             </div>
           )}
         </div>
