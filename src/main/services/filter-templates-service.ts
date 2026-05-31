@@ -387,19 +387,20 @@ export class FilterTemplatesService {
     if (isEtf) {
       // ETFs don't have P/E, ROE, D/E etc. — skip calculateWheelSuitability.
       // All ETFs in our curated list are wheel-eligible by design (liquid, optionable).
-      // Require at minimum that we have a valid price.
+      // Use IV rank as the suitability proxy so the Score column + sort still work
+      // (higher IV rank = richer premium = better wheel opportunity for ETFs).
       if (quote.last === null) return null;
+      const etfScore = ivRank !== null ? Math.round(ivRank) : 50;
       return {
         ticker,
         watchlists,
         lastPrice: quote.last,
         metrics: {
-          suitabilityScore: null,
+          suitabilityScore: etfScore,
           ...(currentIv !== null ? { currentIv: +currentIv.toFixed(1) } : {}),
-          ...(ivRank !== null ? { ivRank: +ivRank.toFixed(1) } : {}),
           targetStrike: +(quote.last * 0.92).toFixed(2)
         },
-        matchReason: `ETF — wheel eligible by default (liquid, optionable)${ivRank !== null ? `; IV Rank ${ivRank.toFixed(0)}` : ''}`
+        matchReason: `ETF — wheel eligible (score = IV Rank${ivRank !== null ? ` ${ivRank.toFixed(0)}` : '; no IV data, defaulted to 50'})`
       };
     }
 

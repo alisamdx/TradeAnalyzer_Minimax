@@ -326,7 +326,12 @@ export function FiltersView() {
               </span>
               {source === 'universe' && (
                 <span className="meta" style={{ marginLeft: 8 }}>
-                  from {universe === 'sp500' ? 'S&P 500' : universe === 'russell1000' ? 'Russell 1000' : 'S&P 500 + Russell 1000'}
+                  from {
+                    universe === 'sp500'       ? 'S&P 500' :
+                    universe === 'russell1000' ? 'Russell 1000' :
+                    universe === 'etf'         ? 'ETFs' :
+                    'S&P 500 + Russell 1000'
+                  }
                 </span>
               )}
               {sortConfig && (
