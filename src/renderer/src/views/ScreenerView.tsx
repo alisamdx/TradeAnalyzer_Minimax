@@ -546,7 +546,11 @@ export function ScreenerView() {
                 <button
                   key={u}
                   className={`univ-btn ${universe === u ? 'active' : ''}`}
-                  onClick={() => { setUniverse(u); setActivePresetId(null); }}
+                  onClick={() => {
+                    setUniverse(u);
+                    setActivePresetId(null);
+                    if (u === 'etf') { setMode('soft'); setCriteria(c => ({ ...c, mode: 'soft' })); }
+                  }}
                 >
                   {u === 'sp500' ? 'S&P 500' : u === 'russell1000' ? 'Russell 1000' : u === 'both' ? 'Both' : 'ETFs'}
                 </button>
@@ -554,7 +558,7 @@ export function ScreenerView() {
             </div>
             {universe === 'etf' && (
               <p className="hint" style={{ marginTop: 6, color: 'var(--text-muted)', fontSize: 11 }}>
-                Fundamental filters (P/E, EPS, ROE etc.) are N/A for ETFs and auto-skipped. Volume and IV rank filters still apply. Use <strong>Soft</strong> mode to rank ETFs — strict mode requires all filters to pass. Run <strong>Data Sync → ETFs</strong> first to populate market data.
+                Fundamental filters (P/E, EPS, ROE etc.) are N/A for ETFs and auto-skipped. Soft mode is set automatically. Volume and IV rank filters still apply. Run <strong>Data Sync → ETFs</strong> first to populate market data.
               </p>
             )}
           </div>
