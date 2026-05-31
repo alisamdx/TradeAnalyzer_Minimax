@@ -158,13 +158,13 @@ export function OpportunityView() {
   const sortIndicator = (key: SortKey) =>
     sortKey !== key ? ' ↕' : sortDir === 'desc' ? ' ↓' : ' ↑';
 
-  const run = useCallback(async (strategyOverride?: StrategyMode) => {
+  const run = useCallback(async (strategyOverride?: StrategyMode, universeOverride?: OpportunityUniverse) => {
     setLoading(true);
     setError(null);
     const t0 = Date.now();
     try {
       const opts: OpportunityRunOptions = {
-        universe,
+        universe: universeOverride ?? universe,
         strategy: strategyOverride ?? strategy,
         minCompositeScore: minScore,
         limit,
@@ -242,9 +242,11 @@ export function OpportunityView() {
               onClick={() => {
                 setUniverse(opt.value);
                 // ETF only supports premium-selling strategies; switch away from directional modes
-                if (opt.value === 'etf' && !ETF_STRATEGIES.includes(strategy)) {
-                  setStrategy('wheel');
-                }
+                const effectiveStrategy = (opt.value === 'etf' && !ETF_STRATEGIES.includes(strategy))
+                  ? (setStrategy('wheel'), 'wheel' as StrategyMode)
+                  : strategy;
+                // Run immediately with the new universe (state not flushed yet — pass as override)
+                run(effectiveStrategy, opt.value);
               }}
               style={{
                 padding: '3px 10px', fontSize: 12, borderRadius: 4,
