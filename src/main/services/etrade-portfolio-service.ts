@@ -519,10 +519,10 @@ export class EtradePortfolioService {
     const legs: TxLeg[] = [];
     let marker: string | undefined;
 
-    // E*Trade uses MM/dd/yyyy for transaction date params
+    // E*Trade requires MMDDYYYY (no separators), e.g. "07112018"
     const fmt = (iso: string) => {
       const [y, m, d] = iso.split('-') as [string, string, string];
-      return `${m}/${d}/${y}`;
+      return `${m}${d}${y}`;
     };
 
     do {
