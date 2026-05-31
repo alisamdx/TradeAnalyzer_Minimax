@@ -475,7 +475,9 @@ export class IvHistoryService {
           let rowsStored = 0;
           for (const row of result.rows) {
             if (row.iv30 === null) continue;
-            this.storeReading(ticker, row.date, row.iv30, { source: 'ivolatility' });
+            // IVolatility returns decimal fractions (0.285 = 28.5%) — convert to pct before storing.
+            // see docs/formulas.md#atm-iv-storage
+            this.storeReading(ticker, row.date, row.iv30 * 100, { source: 'ivolatility' });
             rowsStored++;
           }
           if (rowsStored > 0) processed++;
@@ -495,7 +497,7 @@ export class IvHistoryService {
               let rowsStored = 0;
               for (const row of retry.rows) {
                 if (row.iv30 === null) continue;
-                this.storeReading(ticker, row.date, row.iv30, { source: 'ivolatility' });
+                this.storeReading(ticker, row.date, row.iv30 * 100, { source: 'ivolatility' });
                 rowsStored++;
               }
               if (rowsStored > 0) { processed++; lastError = undefined; }
@@ -546,7 +548,7 @@ export class IvHistoryService {
       expiration: c.expiration,
       strike:     c.strike,
       side:       c.side as 'call' | 'put',
-      iv:         c.iv !== null ? c.iv / 100 : null, // OptionContract stores IV as %, convert to decimal
+      iv:         c.iv,  // OptionContract.iv is already a percentage (28.5) — pass as-is so computeAtmIv works in pct space
       dte:        (() => {
         const exp = new Date(c.expiration + 'T00:00:00Z');
         return Math.max(0, Math.round((exp.getTime() - Date.now()) / 86_400_000));
