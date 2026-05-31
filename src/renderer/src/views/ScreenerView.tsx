@@ -549,7 +549,11 @@ export function ScreenerView() {
                   onClick={() => {
                     setUniverse(u);
                     setActivePresetId(null);
-                    if (u === 'etf') { setMode('soft'); setCriteria(c => ({ ...c, mode: 'soft' })); }
+                    if (u === 'etf') {
+                      setMode('soft'); setCriteria(c => ({ ...c, mode: 'soft' }));
+                    } else {
+                      setMode('strict'); setCriteria(c => ({ ...c, mode: 'strict' }));
+                    }
                   }}
                 >
                   {u === 'sp500' ? 'S&P 500' : u === 'russell1000' ? 'Russell 1000' : u === 'both' ? 'Both' : 'ETFs'}
