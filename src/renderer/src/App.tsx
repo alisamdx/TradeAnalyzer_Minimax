@@ -38,6 +38,9 @@ type NavEntry = {
   optionsChainExpiry?: string | null;
   payoffTicker?: string | null;
   payoffSpot?: number | null;
+  payoffExpiry?: string | null;
+  payoffStrategy?: string | null;
+  payoffStrike?: number | null;
 };
 
 export function App() {
@@ -158,8 +161,16 @@ export function App() {
     window.addEventListener('navigate-to-options', handleNavigateToOptions as EventListener);
 
     // Listen for "Payoff Visualizer" from other views
-    const handleNavigateToPayoff = (e: CustomEvent<{ ticker?: string; spot?: number }>) => {
-      setNavStack(prev => [...prev, { id: navIdRef.current++, view: 'payoff', payoffTicker: e.detail.ticker ?? null, payoffSpot: e.detail.spot ?? null }]);
+    const handleNavigateToPayoff = (e: CustomEvent<{ ticker?: string; spot?: number; expiry?: string; strategy?: string; strike?: number }>) => {
+      setNavStack(prev => [...prev, {
+        id: navIdRef.current++,
+        view: 'payoff',
+        payoffTicker:   e.detail.ticker   ?? null,
+        payoffSpot:     e.detail.spot     ?? null,
+        payoffExpiry:   e.detail.expiry   ?? null,
+        payoffStrategy: e.detail.strategy ?? null,
+        payoffStrike:   e.detail.strike   ?? null,
+      }]);
     };
     window.addEventListener('navigate-to-payoff', handleNavigateToPayoff as EventListener);
 
@@ -544,6 +555,9 @@ export function App() {
         <PayoffView
           initialTicker={entry.payoffTicker ?? null}
           initialSpot={entry.payoffSpot ?? null}
+          initialExpiry={entry.payoffExpiry ?? null}
+          initialStrategy={entry.payoffStrategy ?? null}
+          initialStrike={entry.payoffStrike ?? null}
         />
       );
       case 'agent': return <AgentView />;

@@ -52,20 +52,20 @@ export const FILTER_TEMPLATES: FilterTemplate[] = [
   {
     id: 'iv_rank_low',
     label: 'IV Low',
-    description: 'IV below 20% — low premium environment, consider waiting for higher IV before selling options. Uses IV rank if available, otherwise current ATM IV.',
+    description: 'IV Rank below 20 — cheap options, consider buying or waiting for IV expansion before selling premium.',
     category: 'volatility',
     icon: '📉',
     dataNeeded: ['quote', 'options'],
-    metricColumns: { ivRank: 'IV %' }
+    metricColumns: { ivRank: 'IV Rank', currentIv: 'IV %' }
   },
   {
     id: 'iv_rank_high',
     label: 'IV High',
-    description: 'IV above 35% — elevated premium, good for CSPs / CCs. Uses IV rank if available, otherwise current ATM IV.',
+    description: 'IV Rank above 70 — elevated premium, good for CSPs / covered calls / selling premium.',
     category: 'volatility',
     icon: '📈',
     dataNeeded: ['quote', 'options'],
-    metricColumns: { ivRank: 'IV %', currentIv: 'Current IV %' }
+    metricColumns: { ivRank: 'IV Rank', currentIv: 'IV %' }
   },
   {
     id: 'price_alert',

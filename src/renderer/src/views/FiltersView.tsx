@@ -109,16 +109,10 @@ export function FiltersView() {
     window.dispatchEvent(new CustomEvent('navigate-to-options', { detail: { ticker } }));
   };
 
-  const [addToWatchlistTarget, setAddToWatchlistTarget] = useState<number | null>(null);
-
-  const addToWatchlist = async (ticker: string, watchlistId: number) => {
-    try {
-      await window.api.watchlists.items.add(watchlistId, ticker, null);
-      setStatusMsg(`Added ${ticker} to watchlist`);
-      setAddToWatchlistTarget(null);
-    } catch (e) {
-      setError((e as Error).message);
-    }
+  const openInPayoff = (ticker: string, lastPrice: number | null) => {
+    window.dispatchEvent(new CustomEvent('navigate-to-payoff', {
+      detail: { ticker, spot: lastPrice ?? undefined }
+    }));
   };
 
   return (
@@ -312,12 +306,12 @@ export function FiltersView() {
                       </th>
                     ))}
                     <th>Match Reason</th>
-                    <th style={{ width: 110 }}>Actions</th>
+                    <th style={{ width: 90 }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {sortedData.map((r, i) => (
-                    <tr key={`${r.ticker}-${i}`}>
+                  {sortedData.map((r) => (
+                    <tr key={r.ticker}>
                       <td><strong>{r.ticker}</strong></td>
                       <td className="num">{fmt(r.lastPrice, '$')}</td>
                       <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{r.watchlists.join(', ')}</td>
@@ -352,29 +346,13 @@ export function FiltersView() {
                           >
                             ⛓
                           </button>
-                          <div style={{ position: 'relative' }}>
-                            <button
-                              className="action-btn"
-                              title="Add to watchlist"
-                              onClick={() => setAddToWatchlistTarget(addToWatchlistTarget === i ? null : i)}
-                            >
-                              ⭐
-                            </button>
-                            {addToWatchlistTarget === i && (
-                              <div className="watchlist-dropdown" style={{ position: 'absolute', right: 0, zIndex: 10 }}>
-                                {watchlists.map(wl => (
-                                  <button
-                                    key={wl.id}
-                                    className="dropdown-item"
-                                    onClick={() => addToWatchlist(r.ticker, wl.id)}
-                                  >
-                                    {wl.name}
-                                  </button>
-                                ))}
-                                <button className="dropdown-item cancel" onClick={() => setAddToWatchlistTarget(null)}>Cancel</button>
-                              </div>
-                            )}
-                          </div>
+                          <button
+                            className="action-btn"
+                            title="Open in Payoff Visualizer"
+                            onClick={() => openInPayoff(r.ticker, r.lastPrice)}
+                          >
+                            📐
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -404,7 +382,8 @@ export function FiltersView() {
 
 function formatMetricValue(key: string, value: number | null | undefined): string {
   if (value === null || value === undefined) return '—';
-  const percentKeys = ['ivRank', 'currentIv', 'priceVsSma50', 'priceVsSma200'];
+  if (key === 'ivRank') return `${value}`;               // IV Rank is 0–100, not a %
+  const percentKeys = ['currentIv', 'priceVsSma50', 'priceVsSma200'];
   if (percentKeys.includes(key)) return `${value}%`;
   const dollarKeys = ['targetStrike'];
   if (dollarKeys.includes(key)) return `$${value}`;

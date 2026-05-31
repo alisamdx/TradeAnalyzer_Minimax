@@ -425,6 +425,21 @@ export function OpportunityView() {
                         🎯
                       </button>
                       <button
+                        title="Open in Payoff Visualizer"
+                        onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-payoff', {
+                          detail: {
+                            ticker:   row.ticker,
+                            spot:     row.lastPrice,
+                            expiry:   row.targetExpiry,
+                            strategy: strategy,
+                            strike:   row.targetStrike,
+                          },
+                        }))}
+                        style={actionBtn}
+                      >
+                        📐
+                      </button>
+                      <button
                         title="Open on E*Trade"
                         onClick={() => window.open(
                           `https://us.etrade.com/e/t/invest/quotesandresearch?content=3&sym=${row.ticker.toLowerCase()}`,

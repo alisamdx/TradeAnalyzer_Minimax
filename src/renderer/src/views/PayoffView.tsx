@@ -686,7 +686,7 @@ function LegCard({
           <span title="Delta">Δ {leg.delta >= 0 ? '+' : ''}{leg.delta.toFixed(2)}</span>
         )}
         {leg.iv != null && (
-          <span title="IV">IV {leg.iv.toFixed(1)}%</span>
+          <span title="IV">IV {(leg.iv * 100).toFixed(1)}%</span>
         )}
       </div>
     </div>
@@ -845,9 +845,15 @@ function AddLegForm({ spotNum, onAdd, onCancel }: AddLegFormProps) {
 interface PayoffViewProps {
   initialTicker?: string | null;
   initialSpot?: number | null;
+  /** Pre-select this expiry date (YYYY-MM-DD) when navigating from Opportunity. */
+  initialExpiry?: string | null;
+  /** Strategy mode from Opportunity (wheel | csp | spreads | bullish | bearish). */
+  initialStrategy?: string | null;
+  /** Target strike price from Opportunity — used to find the nearest contract. */
+  initialStrike?: number | null;
 }
 
-export function PayoffView({ initialTicker, initialSpot }: PayoffViewProps) {
+export function PayoffView({ initialTicker, initialSpot, initialExpiry, initialStrategy, initialStrike }: PayoffViewProps) {
   const [ticker, setTicker]   = useState(initialTicker ?? '');
   const [spotStr, setSpotStr] = useState(initialSpot != null ? String(initialSpot) : '');
   const [legs, setLegs]       = useState<PayoffLeg[]>([]);
@@ -898,6 +904,99 @@ export function PayoffView({ initialTicker, initialSpot }: PayoffViewProps) {
     if (selectedWlId === null) { setWatchlistItems([]); return; }
     window.api.watchlists.items.list(selectedWlId).then(setWatchlistItems).catch(() => setWatchlistItems([]));
   }, [selectedWlId]);
+
+  // ── Opportunity navigation: auto-load chain + pre-add leg(s) on mount ────────
+  useEffect(() => {
+    if (!initialTicker || !initialExpiry || !initialStrike || !initialStrategy) return;
+
+    const init = async () => {
+      try {
+        // 1. Load available expirations for this ticker
+        const expResult = await window.api.optionsChain.getNearExpirations(initialTicker.toUpperCase());
+        setChainExpirations(expResult.expirations);
+        if (expResult.currentPrice) setSpotStr(expResult.currentPrice.toFixed(2));
+
+        // 2. Find the closest available expiry to the target date
+        const targetTs = new Date(initialExpiry).getTime();
+        const bestExpiry = expResult.expirations.length === 0
+          ? initialExpiry
+          : expResult.expirations.reduce((best, e) => {
+              const eDiff = Math.abs(new Date(e.date).getTime() - targetTs);
+              const bDiff = Math.abs(new Date(best.date).getTime() - targetTs);
+              return eDiff < bDiff ? e : best;
+            }).date;
+
+        setSelectedExpiry(bestExpiry);
+
+        // 3. Load the option chain for that expiry
+        const chainResult = await window.api.optionsChain.getChain(initialTicker.toUpperCase(), bestExpiry);
+        setChainData(chainResult);
+        if (chainResult.currentPrice) setSpotStr(chainResult.currentPrice.toFixed(2));
+        setShowChain(true);
+
+        // 4. Build leg(s) closest to the target strike
+        const puts  = chainResult.contracts.filter(c => c.side === 'put');
+        const calls = chainResult.contracts.filter(c => c.side === 'call');
+
+        const nearest = (contracts: OptionContract[], target: number) =>
+          contracts.reduce<OptionContract | null>((best, c) => {
+            if (!best) return c;
+            return Math.abs(c.strike - target) < Math.abs(best.strike - target) ? c : best;
+          }, null);
+
+        const mkLeg = (c: OptionContract, side: 'buy' | 'sell', type: 'put' | 'call'): PayoffLeg => {
+          const mid = parseFloat(((c.bid + c.ask) / 2).toFixed(2));
+          return {
+            id:       genId(),
+            side,
+            type,
+            strike:   c.strike,
+            expiry:   bestExpiry,
+            premium:  mid,
+            quantity: 1,
+            delta:    c.delta,
+            theta:    c.theta,
+            vega:     c.vega,
+            iv:       c.iv,
+            label:    `${side === 'buy' ? 'Buy' : 'Sell'} ${type.charAt(0).toUpperCase() + type.slice(1)} $${c.strike}`,
+          };
+        };
+
+        const newLegs: PayoffLeg[] = [];
+
+        if (initialStrategy === 'wheel' || initialStrategy === 'csp') {
+          // Sell put at target strike
+          const put = nearest(puts, initialStrike);
+          if (put) newLegs.push(mkLeg(put, 'sell', 'put'));
+
+        } else if (initialStrategy === 'spreads') {
+          // Sell put at target strike + buy put ~5% lower (protection leg)
+          const shortPut = nearest(puts, initialStrike);
+          const longPut  = nearest(puts, initialStrike * 0.95);
+          if (shortPut) newLegs.push(mkLeg(shortPut, 'sell', 'put'));
+          if (longPut && longPut.strike !== shortPut?.strike) newLegs.push(mkLeg(longPut, 'buy', 'put'));
+
+        } else if (initialStrategy === 'bullish') {
+          // Buy call at target strike (105% of price)
+          const call = nearest(calls, initialStrike);
+          if (call) newLegs.push(mkLeg(call, 'buy', 'call'));
+
+        } else if (initialStrategy === 'bearish') {
+          // Buy put at target strike (92% of price)
+          const put = nearest(puts, initialStrike);
+          if (put) newLegs.push(mkLeg(put, 'buy', 'put'));
+        }
+
+        if (newLegs.length > 0) setLegs(newLegs);
+
+      } catch (e) {
+        setError((e as Error).message);
+      }
+    };
+
+    void init();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // run only once on mount
 
   // ── Computed payoff ─────────────────────────────────────────────────────────
   const metrics = useMemo(
@@ -1652,17 +1751,17 @@ export function PayoffView({ initialTicker, initialSpot }: PayoffViewProps) {
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
                 <thead>
                   <tr style={{ position: 'sticky', top: 0, background: '#0f172a', zIndex: 1 }}>
-                    <th colSpan={5} style={{ padding: '5px 8px', textAlign: 'center', color: '#22c55e', borderBottom: '1px solid #1e293b', borderRight: '1px solid #1e293b', fontSize: 10 }}>CALLS</th>
+                    <th colSpan={6} style={{ padding: '5px 8px', textAlign: 'center', color: '#22c55e', borderBottom: '1px solid #1e293b', borderRight: '1px solid #1e293b', fontSize: 10 }}>CALLS</th>
                     <th style={{ padding: '5px 8px', textAlign: 'center', color: '#fbbf24', borderBottom: '1px solid #1e293b', fontWeight: 700, fontSize: 12 }}>Strike</th>
-                    <th colSpan={5} style={{ padding: '5px 8px', textAlign: 'center', color: '#ef4444', borderBottom: '1px solid #1e293b', borderLeft: '1px solid #1e293b', fontSize: 10 }}>PUTS</th>
+                    <th colSpan={6} style={{ padding: '5px 8px', textAlign: 'center', color: '#ef4444', borderBottom: '1px solid #1e293b', borderLeft: '1px solid #1e293b', fontSize: 10 }}>PUTS</th>
                   </tr>
                   <tr style={{ background: '#0f172a' }}>
-                    {(['OI', 'B', 'S', 'Mid', 'Δ'] as const).map(h => (
-                      <th key={`c-${h}`} style={{ padding: '4px 6px', color: '#64748b', fontWeight: 400, textAlign: h === 'Mid' || h === 'Δ' || h === 'OI' ? 'right' : 'center', borderBottom: '1px solid #1e293b' }}>{h}</th>
+                    {(['IV%', 'OI', 'B', 'S', 'Mid', 'Δ'] as const).map(h => (
+                      <th key={`c-${h}`} style={{ padding: '4px 6px', color: '#64748b', fontWeight: 400, textAlign: h === 'Mid' || h === 'Δ' || h === 'OI' || h === 'IV%' ? 'right' : 'center', borderBottom: '1px solid #1e293b' }}>{h}</th>
                     ))}
                     <th style={{ padding: '4px 6px', color: '#fbbf24', textAlign: 'center', borderBottom: '1px solid #1e293b' }}></th>
-                    {(['Δ', 'Mid', 'B', 'S', 'OI'] as const).map(h => (
-                      <th key={`p-${h}`} style={{ padding: '4px 6px', color: '#64748b', fontWeight: 400, textAlign: h === 'Mid' || h === 'Δ' || h === 'OI' ? 'right' : 'center', borderBottom: '1px solid #1e293b' }}>{h}</th>
+                    {(['Δ', 'Mid', 'B', 'S', 'OI', 'IV%'] as const).map(h => (
+                      <th key={`p-${h}`} style={{ padding: '4px 6px', color: '#64748b', fontWeight: 400, textAlign: h === 'Mid' || h === 'Δ' || h === 'OI' || h === 'IV%' ? 'right' : 'center', borderBottom: '1px solid #1e293b' }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -1694,6 +1793,14 @@ export function PayoffView({ initialTicker, initialSpot }: PayoffViewProps) {
 
                     return (
                       <tr key={strike} style={{ background: isAtm ? '#0f2d4a' : 'transparent' }}>
+                        {/* Call IV% */}
+                        <td style={{ padding: '3px 6px', textAlign: 'right', fontSize: 10,
+                          color: call == null ? '#475569'
+                            : call.iv * 100 >= 50 ? '#ef4444'
+                            : call.iv * 100 >= 30 ? '#f59e0b'
+                            : '#64748b' }}>
+                          {call != null ? `${(call.iv * 100).toFixed(1)}%` : '—'}
+                        </td>
                         {/* Call OI */}
                         <td style={{ padding: '3px 6px', textAlign: 'right', color: '#475569', fontSize: 10 }}>
                           {call?.openInterest != null ? call.openInterest.toLocaleString() : '—'}
@@ -1755,6 +1862,14 @@ export function PayoffView({ initialTicker, initialSpot }: PayoffViewProps) {
                         {/* Put OI */}
                         <td style={{ padding: '3px 6px', textAlign: 'right', color: '#475569', fontSize: 10 }}>
                           {put?.openInterest != null ? put.openInterest.toLocaleString() : '—'}
+                        </td>
+                        {/* Put IV% */}
+                        <td style={{ padding: '3px 6px', textAlign: 'right', fontSize: 10,
+                          color: put == null ? '#475569'
+                            : put.iv * 100 >= 50 ? '#ef4444'
+                            : put.iv * 100 >= 30 ? '#f59e0b'
+                            : '#64748b' }}>
+                          {put != null ? `${(put.iv * 100).toFixed(1)}%` : '—'}
                         </td>
                       </tr>
                     );

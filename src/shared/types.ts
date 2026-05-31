@@ -115,8 +115,9 @@ export interface ScreenResultPayload {
   lastPrice: number | null;
   dayChangePct: number | null;
   // Derived
-  ivRank: number | null;
-  ivPercentile: number | null;
+  currentIv: number | null;    // ATM IV as percentage (e.g. 28.5 for 28.5%) — from iv_history
+  ivRank: number | null;       // 0–100, null if < 21 data points
+  ivPercentile: number | null; // 0–100, null if < 21 data points
   // Pass score
   passScore: number;       // count of filters passed (soft mode)
   failedFilters: string[]; // ids of filters that failed
@@ -1260,7 +1261,7 @@ export type IvHistoryBackfillPhase = 'initial_sp500' | 'initial_russell' | 'gap_
 /** Per-ticker IV rank/percentile result from the iv_history table. */
 export interface IvRankResult {
   ticker:       string;
-  currentIv:    number | null;  // most recent ATM IV, decimal (0.285) — null if < 21 points
+  currentIv:    number | null;  // most recent ATM IV as percentage (28.5 = 28.5%) — null if < 21 points
   ivRank:       number | null;  // 0–100, null if insufficient data
   ivPercentile: number | null;  // 0–100, null if insufficient data
   dataPoints:   number;         // number of daily readings used

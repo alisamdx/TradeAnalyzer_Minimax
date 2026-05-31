@@ -270,7 +270,7 @@ app.whenReady().then(() => {
 
   // Phase 8 - Alerts System IPC
   registerAlertsIpc(db);
-  registerFiltersIpc(db, dataProvider, optionsProvider, quoteCache, new FundamentalsCache(db), constituentsService);
+  const filterTemplatesService = registerFiltersIpc(db, dataProvider, optionsProvider, quoteCache, new FundamentalsCache(db), constituentsService);
 
   // Payoff Visualizer — saved strategy CRUD
   registerPayoffIpc(db);
@@ -285,6 +285,9 @@ app.whenReady().then(() => {
   );
   const ivHistoryService = new IvHistoryService(db, ivolatilityProvider, getConstituents);
   registerIvHistoryIpc(ivHistoryService);
+  // Give the screener and filter templates access to iv_history.
+  screenerService.setIvHistoryService(ivHistoryService);
+  filterTemplatesService.setIvHistoryService(ivHistoryService);
 
   // Options Chain view (passes IV capture callback for E*Trade auto-capture)
   registerOptionsIpc(optionsProvider, quoteCache, rateLimiter,

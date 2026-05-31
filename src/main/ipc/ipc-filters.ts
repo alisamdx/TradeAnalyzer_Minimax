@@ -25,7 +25,7 @@ export function registerFiltersIpc(
   quoteCache: QuoteCache,
   fundamentalsCache: FundamentalsCache,
   constituentsService: ConstituentsService
-): void {
+): FilterTemplatesService {
   const service = new FilterTemplatesService(db, dataProvider, optionsProvider, quoteCache, fundamentalsCache, constituentsService);
 
   ipcMain.handle('filters:list-templates', () => {
@@ -49,4 +49,6 @@ export function registerFiltersIpc(
       return fail(err);
     }
   });
+
+  return service;
 }

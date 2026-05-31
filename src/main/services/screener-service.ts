@@ -16,6 +16,7 @@ import type {
 } from '@shared/types.js';
 import type { DerivedRatios, Quote } from '@shared/types.js';
 import type { DataProvider } from './data-provider.js';
+import type { IvHistoryService } from './iv-history-service.js';
 import { QuoteCache, FundamentalsCache } from './cache-service.js';
 import { CacheManager } from './cache-manager.js';
 
@@ -37,14 +38,14 @@ export interface FilterSpec {
 
 export const DEFAULT_FILTER_SPECS: FilterSpec[] = [
   { id: 'market_cap',       label: 'Market Cap',        enabled: true,  defaultMin: 2_000_000_000,  defaultMax: Infinity,       defaultEnabled: true,  format: 'dollars',  description: '≥ $2B — Mid and Large-cap companies' },
-  { id: 'pe_ratio',         label: 'P/E Ratio',          enabled: true,  defaultMin: 0,              defaultMax: 50,             defaultEnabled: true,  format: 'ratio',    description: '0–50: profitable and not wildly overvalued' },
+  { id: 'pe_ratio',         label: 'P/E Ratio',          enabled: true,  defaultMin: 0,              defaultMax: 80,             defaultEnabled: true,  format: 'ratio',    description: '0–80: profitable, includes quality growth stocks' },
   { id: 'eps',              label: 'EPS (TTM)',          enabled: true,  defaultMin: 0.01,          defaultMax: Infinity,       defaultEnabled: true,  format: 'dollars',  description: '> 0: currently profitable' },
   { id: 'revenue_growth',   label: 'Revenue Growth YoY',enabled: true,  defaultMin: 0,             defaultMax: Infinity,       defaultEnabled: true,  format: 'percent',  description: '≥ 0%: revenue is not shrinking' },
   { id: 'eps_growth',       label: 'EPS Growth YoY',    enabled: false, defaultMin: 0,             defaultMax: Infinity,       defaultEnabled: false, format: 'percent',  description: '≥ 0%: earnings are not shrinking' },
-  { id: 'debt_to_equity',   label: 'Debt / Equity',     enabled: true,  defaultMin: 0,             defaultMax: 1.5,            defaultEnabled: true,  format: 'ratio',    description: '< 1.5: manageable leverage' },
+  { id: 'debt_to_equity',   label: 'Debt / Equity',     enabled: true,  defaultMin: 0,             defaultMax: 2.0,            defaultEnabled: true,  format: 'ratio',    description: '< 2.0: manageable leverage' },
   { id: 'roe',              label: 'ROE',               enabled: true,  defaultMin: 10,            defaultMax: Infinity,       defaultEnabled: true,  format: 'percent',  description: '≥ 10%: solid return on equity' },
   { id: 'profit_margin',    label: 'Profit Margin',     enabled: true,  defaultMin: 5,             defaultMax: Infinity,       defaultEnabled: true,  format: 'percent',  description: '≥ 5%: positive operating margins' },
-  { id: 'free_cash_flow',   label: 'Free Cash Flow',    enabled: true,  defaultMin: 0,             defaultMax: Infinity,       defaultEnabled: true,  format: 'dollars',  description: 'Positive TTM cash flow' },
+  { id: 'free_cash_flow',   label: 'Free Cash Flow',    enabled: true,  defaultMin: 50_000_000,    defaultMax: Infinity,       defaultEnabled: true,  format: 'dollars',  description: '≥ $50M TTM: real cash generation for ≥$2B market cap companies' },
   { id: 'current_ratio',    label: 'Current Ratio',     enabled: true,  defaultMin: 1.0,          defaultMax: Infinity,       defaultEnabled: true,  format: 'ratio',    description: '≥ 1.0: can cover short-term obligations' },
   { id: 'avg_volume',       label: 'Avg Daily Volume',  enabled: true,  defaultMin: 1_000_000,  defaultMax: Infinity,       defaultEnabled: true,  format: 'count',    description: '≥ 1M shares: options-grade liquidity' },
   { id: 'price',            label: 'Price',             enabled: true,  defaultMin: 0,            defaultMax: 300,       defaultEnabled: true,  format: 'dollars',  description: 'Price under $300' },
@@ -77,6 +78,7 @@ export interface TickerScreenData {
   beta: number | null;
   lastPrice: number | null;
   dayChangePct: number | null;
+  currentIv: number | null;    // ATM IV as percentage (28.5 = 28.5%)
   ivRank: number | null;
   ivPercentile: number | null;
   passedFilters: Set<string>;
@@ -95,8 +97,8 @@ export interface ScreenRunOutput {
 export class ScreenerService {
   private readonly quoteCache: QuoteCache;
   private readonly fundamentalsCache: FundamentalsCache;
-
   private readonly cacheManager: CacheManager;
+  private ivHistoryService?: IvHistoryService;
 
   constructor(
     private readonly db: DbHandle,
@@ -106,6 +108,11 @@ export class ScreenerService {
     this.quoteCache = new QuoteCache(db);
     this.fundamentalsCache = new FundamentalsCache(db);
     this.cacheManager = new CacheManager(db, 1);
+  }
+
+  /** Wire up IV history after construction (avoids circular init ordering). */
+  setIvHistoryService(svc: IvHistoryService): void {
+    this.ivHistoryService = svc;
   }
 
   /** Run the full screen against a universe. Progress is reported via the callback. */
@@ -327,14 +334,15 @@ export class ScreenerService {
           check(fd.id, ratios.profitMargin !== null && ratios.profitMargin >= (v['min'] as number ?? 0));
           break;
         case 'free_cash_flow':
-          check(fd.id, ratios.freeCashFlow !== null && ratios.freeCashFlow > 0);
+          check(fd.id, ratios.freeCashFlow !== null && ratios.freeCashFlow >= (v['min'] as number ?? 0));
           break;
         case 'current_ratio':
           check(fd.id, ratios.currentRatio !== null && ratios.currentRatio >= (v['min'] as number ?? 0));
           break;
         case 'avg_volume':
-          // Pass if volume data unavailable (ticker not yet validated) to avoid false exclusions.
-          check(fd.id, avgVolume === null || avgVolume >= (v['min'] as number ?? 0));
+          // Require non-null volume; null means no quote/history data — fails strict,
+          // scores 0 in soft (same treatment as fundamentals nulls).
+          check(fd.id, avgVolume !== null && avgVolume >= (v['min'] as number ?? 0));
           break;
         case 'price': {
           const priceMin = (v['min'] as number) ?? 0;
@@ -391,8 +399,22 @@ export class ScreenerService {
       beta: ratios.beta,
       lastPrice: quote?.last ?? null,
       dayChangePct: dayChangePct,
-      ivRank: quote?.ivRank ?? null,
-      ivPercentile: quote?.ivPercentile ?? null,
+      // IV from iv_history DB (own computed values) preferred over Polygon snapshot
+      // (Polygon snapshot ivRank/ivPercentile are almost always null per CLAUDE.md).
+      // IvRankResult.currentIv is a decimal fraction (0.285); convert to pct (28.5).
+      // see docs/formulas.md#iv-rank
+      ...(() => {
+        try {
+          const ivh = this.ivHistoryService?.getIvRank(ticker);
+          return {
+            currentIv:    ivh?.currentIv   ?? null,  // already a percentage (atm_iv stored as pct after migration 017)
+            ivRank:       ivh?.ivRank       ?? quote?.ivRank       ?? null,
+            ivPercentile: ivh?.ivPercentile ?? quote?.ivPercentile ?? null,
+          };
+        } catch {
+          return { currentIv: null, ivRank: quote?.ivRank ?? null, ivPercentile: quote?.ivPercentile ?? null };
+        }
+      })(),
       passedFilters,
       failedFilters,
       passScore
@@ -489,7 +511,7 @@ export class ScreenerService {
           price: row.price, distance52WkHigh: row.distance52WkHigh,
           distance52WkLow: row.distance52WkLow, beta: row.beta,
           sector: row.sector, lastPrice: row.lastPrice, dayChangePct: row.dayChangePct,
-          ivRank: row.ivRank, ivPercentile: row.ivPercentile,
+          currentIv: row.currentIv, ivRank: row.ivRank, ivPercentile: row.ivPercentile,
           passScore: row.passScore, failedFilters: row.failedFilters
         };
         insertResult.run(runId, row.ticker, row.companyName, row.sector, JSON.stringify(payload));

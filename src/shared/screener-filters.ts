@@ -19,14 +19,14 @@ export interface FilterSpec {
 
 export const DEFAULT_FILTER_SPECS: FilterSpec[] = [
   { id: 'market_cap',       label: 'Market Cap',         defaultMin: 2_000_000_000,  defaultMax: Infinity,    defaultEnabled: true,  format: 'dollars', description: '≥ $2B — Mid and Large-cap companies' },
-  { id: 'pe_ratio',         label: 'P/E Ratio',           defaultMin: 0,              defaultMax: 50,          defaultEnabled: true,  format: 'ratio',   description: '0–50: profitable and not wildly overvalued' },
+  { id: 'pe_ratio',         label: 'P/E Ratio',           defaultMin: 0,              defaultMax: 80,          defaultEnabled: true,  format: 'ratio',   description: '0–80: profitable, includes quality growth stocks' },
   { id: 'eps',              label: 'EPS (TTM)',            defaultMin: 0.01,          defaultMax: Infinity,    defaultEnabled: true,  format: 'dollars', description: '> 0: currently profitable' },
   { id: 'revenue_growth',   label: 'Revenue Growth YoY',  defaultMin: 0,             defaultMax: Infinity,    defaultEnabled: true,  format: 'percent', description: '≥ 0%: revenue is not shrinking' },
   { id: 'eps_growth',       label: 'EPS Growth YoY',       defaultMin: 0,             defaultMax: Infinity,    defaultEnabled: false, format: 'percent', description: '≥ 0%: earnings are not shrinking' },
-  { id: 'debt_to_equity',   label: 'Debt / Equity',        defaultMin: 0,             defaultMax: 1.5,         defaultEnabled: true,  format: 'ratio',   description: '< 1.5: manageable leverage' },
+  { id: 'debt_to_equity',   label: 'Debt / Equity',        defaultMin: 0,             defaultMax: 2.0,         defaultEnabled: true,  format: 'ratio',   description: '< 2.0: manageable leverage' },
   { id: 'roe',              label: 'ROE',                 defaultMin: 10,            defaultMax: Infinity,    defaultEnabled: true,  format: 'percent', description: '≥ 10%: solid return on equity' },
   { id: 'profit_margin',    label: 'Profit Margin',       defaultMin: 5,             defaultMax: Infinity,    defaultEnabled: true,  format: 'percent', description: '≥ 5%: positive operating margins' },
-  { id: 'free_cash_flow',   label: 'Free Cash Flow',      defaultMin: 0,             defaultMax: Infinity,    defaultEnabled: true,  format: 'dollars', description: 'Positive TTM cash flow' },
+  { id: 'free_cash_flow',   label: 'Free Cash Flow',      defaultMin: 50_000_000,    defaultMax: Infinity,    defaultEnabled: true,  format: 'dollars', description: '≥ $50M TTM: real cash generation for ≥$2B market cap companies' },
   { id: 'current_ratio',    label: 'Current Ratio',       defaultMin: 1.0,          defaultMax: Infinity,    defaultEnabled: true,  format: 'ratio',   description: '≥ 1.0: can cover short-term obligations' },
   { id: 'avg_volume',       label: 'Avg Daily Volume',     defaultMin: 1_000_000,    defaultMax: Infinity,    defaultEnabled: true,  format: 'count',   description: '≥ 1M shares: options-grade liquidity' },
   { id: 'price',            label: 'Price',              defaultMin: 0,             defaultMax: 50,     defaultEnabled: false, format: 'dollars', description: 'Filter by price range' },

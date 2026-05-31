@@ -5,6 +5,7 @@
 import type { DbHandle } from '../db/connection.js';
 import type { DataProvider } from './data-provider.js';
 import type { OptionsProvider } from './options-provider.js';
+import type { IvHistoryService } from './iv-history-service.js';
 import type { Universe, Quote } from '@shared/types.js';
 import { QuoteCache, FundamentalsCache } from './cache-service.js';
 import { computeRSI, computeSMA } from './analysis-service.js';
@@ -29,6 +30,8 @@ export interface FilterProgress {
 // ─── Service ──────────────────────────────────────────────────────────────────
 
 export class FilterTemplatesService {
+  private ivHistoryService?: IvHistoryService;
+
   constructor(
     private readonly db: DbHandle,
     private readonly dataProvider: DataProvider,
@@ -37,6 +40,11 @@ export class FilterTemplatesService {
     private readonly fundamentalsCache: FundamentalsCache,
     private readonly constituentsService: ConstituentsService
   ) {}
+
+  /** Wire up IV history after construction (avoids circular init ordering). */
+  setIvHistoryService(svc: IvHistoryService): void {
+    this.ivHistoryService = svc;
+  }
 
   listTemplates(): FilterTemplate[] {
     return FILTER_TEMPLATES;
@@ -180,66 +188,73 @@ export class FilterTemplatesService {
     watchlists: string[],
     direction: 'low' | 'high'
   ): Promise<FilterTemplateResult | null> {
-    // IV rank is not available from Polygon's stock snapshot endpoint.
-    // Resolution order:
-    //   1. quote_cache.iv_rank  (populated if a full screener sync was run — rarely available)
-    //   2. quote_cache.current_iv (ATM IV %, populated by screener or previous filter run)
-    //   3. Live fetch via optionsProvider.getOptionsIV() — one options chain call per ticker
+    // Always fetch quote for last price; use it for IV fallbacks too.
     const quote = await this.fetchQuote(ticker);
 
-    let ivValue = quote.ivRank;   // true IV rank (0–100), or null
-    let isRank  = true;
+    // Resolution order — prefer local DB over live API calls:
+    //   1. iv_history DB (our own computed IvRankResult — most reliable, zero API cost)
+    //   2. quote_cache.iv_rank / current_iv (Polygon snapshot — usually null per CLAUDE.md)
+    //   3. Live optionsProvider.getOptionsIV() — last resort, one API call per ticker
 
-    if (ivValue === null) {
-      // Try cached ATM IV first (no extra API call).
-      if (quote.currentIv !== null) {
-        ivValue = quote.currentIv;
-        isRank  = false;
-      } else if (this.optionsProvider) {
-        // Last resort: fetch live ATM IV from options chain.
-        try {
-          const ivData = await this.optionsProvider.getOptionsIV(ticker);
-          if (ivData.currentIv !== null) {
-            ivValue = ivData.currentIv;
-            isRank  = false;
-            // Persist to quote_cache so repeat runs skip the API call.
-            try {
-              this.db.prepare(
-                `INSERT INTO quote_cache (ticker, current_iv, fetched_at)
-                 VALUES (?, ?, ?)
-                 ON CONFLICT(ticker) DO UPDATE SET current_iv = excluded.current_iv,
-                                                    fetched_at = excluded.fetched_at`
-              ).run(ticker, ivData.currentIv, new Date().toISOString());
-            } catch { /* cache write is best-effort */ }
-          }
-        } catch { /* options data unavailable for this ticker */ }
-      }
+    let ivRank:    number | null = null;  // 0–100 rank
+    let currentIv: number | null = null;  // ATM IV as percentage (28.5 = 28.5%)
+
+    // 1. iv_history (fast SQLite read, no API call)
+    if (this.ivHistoryService) {
+      try {
+        const ivh = this.ivHistoryService.getIvRank(ticker);
+        ivRank    = ivh.ivRank;    // null if < 21 data points
+        currentIv = ivh.currentIv; // already a percentage
+      } catch { /* no iv_history data for this ticker */ }
     }
 
-    if (ivValue === null) return null;
+    // 2. Quote cache fallback
+    if (ivRank === null && currentIv === null) {
+      ivRank    = quote.ivRank;
+      currentIv = quote.currentIv;
+    }
 
-    // When using true IV rank (0–100): low < 20, high > 70.
-    // When using raw current IV (%): low < 20%, high > 35% — reasonable absolute proxies.
-    const threshold = isRank
+    // 3. Live options API — only if still nothing
+    if (ivRank === null && currentIv === null && this.optionsProvider) {
+      try {
+        const ivData = await this.optionsProvider.getOptionsIV(ticker);
+        if (ivData.currentIv !== null) {
+          currentIv = ivData.currentIv;
+        }
+      } catch { /* options data unavailable */ }
+    }
+
+    // Prefer IV rank (normalized 0-100) for comparison; fall back to raw IV %
+    const useIvRank    = ivRank !== null;
+    const compareValue = useIvRank ? ivRank! : currentIv;
+    if (compareValue === null) return null;
+
+    // Thresholds: IV Rank uses 0-100 scale; raw IV % uses absolute % thresholds
+    const threshold = useIvRank
       ? (direction === 'low' ? 20 : 70)
       : (direction === 'low' ? 20 : 35);
 
-    const matches = direction === 'low' ? ivValue < threshold : ivValue > threshold;
+    const matches = direction === 'low' ? compareValue < threshold : compareValue > threshold;
     if (!matches) return null;
 
-    const label       = direction === 'low' ? 'Low (CSP entry)' : 'High (CC/CSP exit)';
-    const metricLabel = isRank ? 'IV Rank' : 'Current IV';
+    const label = direction === 'low'
+      ? 'low — cheap options, wait for IV expansion'
+      : 'high — elevated premium, good for selling';
+    const metricLabel = useIvRank ? 'IV Rank' : 'Current IV';
     const op          = direction === 'low' ? '<' : '>';
+    const suffix      = useIvRank ? '' : '% (ATM IV; IV rank unavailable)';
+
+    // Build metrics — include both when available
+    const metrics: Record<string, number | null> = {};
+    if (ivRank    !== null) metrics.ivRank    = +ivRank.toFixed(1);
+    if (currentIv !== null) metrics.currentIv = +currentIv.toFixed(1);
 
     return {
       ticker,
       watchlists,
       lastPrice: quote.last,
-      metrics: {
-        ivRank: +ivValue.toFixed(1),
-        ...(quote.currentIv !== null && !isRank ? { currentIv: +quote.currentIv.toFixed(1) } : {})
-      },
-      matchReason: `${metricLabel} ${label}: ${ivValue.toFixed(1)}% (${op}${threshold}%)${isRank ? '' : ' — ATM IV used (IV rank unavailable)'}`
+      metrics,
+      matchReason: `${metricLabel} ${label}: ${compareValue.toFixed(1)}${useIvRank ? '' : '%'} (${op}${threshold}${useIvRank ? '' : '%'})${suffix}`
     };
   }
 
@@ -352,13 +367,22 @@ export class FilterTemplatesService {
     const suitabilityScore = calculateWheelSuitability(ratios, quote);
     if (suitabilityScore < 60) return null;
 
+    // Prefer iv_history currentIv (already %) over quote cache
+    let currentIv: number | null = quote.currentIv;
+    if (this.ivHistoryService) {
+      try {
+        const ivh = this.ivHistoryService.getIvRank(ticker);
+        if (ivh.currentIv !== null) currentIv = ivh.currentIv;
+      } catch { /* no iv_history data */ }
+    }
+
     return {
       ticker,
       watchlists,
       lastPrice: quote.last,
       metrics: {
         suitabilityScore,
-        ...(quote.currentIv !== null ? { currentIv: +quote.currentIv.toFixed(1) } : {}),
+        ...(currentIv !== null ? { currentIv: +currentIv.toFixed(1) } : {}),
         targetStrike: quote.last !== null ? +(quote.last * 0.92).toFixed(2) : null
       },
       matchReason: `Wheel suitability score: ${suitabilityScore}/100`

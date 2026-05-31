@@ -171,7 +171,8 @@ export function ScreenerView() {
     window.api.screen.getResults(activeRunId).then((res) => {
       const displayRows = mode === 'strict'
         ? res.filter(r => r.payload.failedFilters.length === 0)
-        : res;
+        : res.filter(r => r.payload.passScore > 0)
+            .sort((a, b) => b.payload.passScore - a.payload.passScore);
       setResults(displayRows);
       setCurrentPage(1);
       setSelected(new Set());
@@ -199,14 +200,18 @@ export function ScreenerView() {
       currentRatio: r.payload.currentRatio,
       avgVolume: r.payload.avgVolume,
       beta: r.payload.beta,
+      currentIv: r.payload.currentIv,
+      ivRank: r.payload.ivRank,
       passScore: r.payload.passScore
     }));
   }, [results]);
 
+  // Strict: IV Rank descending — highest-IV passing stocks surface first (best for options sellers).
+  // Soft: Pass Score descending — most filters passed floats to the top.
   const { sortedData, sortConfig, requestSort, getSortIndicator } = useSortable(
     sortableResults,
-    'ticker',
-    'asc'
+    mode === 'soft' ? 'passScore' : 'ivRank',
+    'desc'
   );
 
   // ── Pagination ────────────────────────────────────────────────────────────
@@ -302,8 +307,13 @@ export function ScreenerView() {
         setResults(passing);
         setStatusMsg(`${universeName}: ${passing.length} of ${response.resultCount} passed`);
       } else {
-        setResults(response.rows);
-        setStatusMsg(`${universeName}: ${response.passedCount} of ${response.resultCount} scored`);
+        // In soft mode, drop tickers that passed zero filters (no data / truly bad)
+        // and sort by passScore descending so best matches float to the top.
+        const scored = response.rows
+          .filter(r => r.payload.passScore > 0)
+          .sort((a, b) => b.payload.passScore - a.payload.passScore);
+        setResults(scored);
+        setStatusMsg(`${universeName}: ${scored.length} of ${response.resultCount} scored ≥ 1 filter`);
       }
     } catch (e) {
       setError((e as Error).message);
@@ -411,7 +421,7 @@ export function ScreenerView() {
     if (sortedData.length === 0) return;
 
     const headers = [
-      'Ticker', 'Company', 'Sector', 'Last Price', 'Day Change %', 'P/E',
+      'Ticker', 'Company', 'Last Price', 'Day Change %', 'IV%', 'IV Rank', 'P/E',
       'EPS', 'Revenue Growth %', 'EPS Growth %', 'D/E',
       'ROE %', 'Profit Margin %', 'Current Ratio',
       'Avg Volume'
@@ -421,9 +431,10 @@ export function ScreenerView() {
     const rows = sortedData.map(r => [
       r.ticker,
       r.companyName ?? '',
-      r.sector ?? '',
       r.payload.lastPrice ?? '',
       r.payload.dayChangePct ?? '',
+      r.payload.currentIv != null ? r.payload.currentIv.toFixed(1) : '',
+      r.payload.ivRank != null ? Math.round(r.payload.ivRank) : '',
       r.payload.peRatio ?? '',
       r.payload.eps ?? '',
       r.payload.revenueGrowth ?? '',
@@ -479,9 +490,10 @@ export function ScreenerView() {
   const columns: ColumnDef[] = [
     { key: 'ticker', label: 'Ticker', sortable: true },
     { key: 'companyName', label: 'Company', sortable: true },
-    { key: 'sector', label: 'Sector', sortable: true },
     { key: 'lastPrice', label: 'Last', title: 'Last Price', sortable: true },
     { key: 'dayChangePct', label: 'Day %', title: 'Day Change %', sortable: true },
+    { key: 'currentIv', label: 'IV%', title: 'Current Implied Volatility (from IV History)', sortable: true },
+    { key: 'ivRank', label: 'IV Rank', title: 'IV Rank 0–100 (from IV History, ≥70 = elevated)', sortable: true },
     { key: 'peRatio', label: 'P/E', title: 'P/E Ratio', sortable: true },
     { key: 'eps', label: 'EPS', title: 'EPS (TTM)', sortable: true },
     { key: 'revenueGrowth', label: 'Rev Gr%', title: 'Revenue Growth YoY', sortable: true },
@@ -777,7 +789,6 @@ export function ScreenerView() {
                           )}
                         </th>
                       ))}
-                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -796,12 +807,36 @@ export function ScreenerView() {
                             }
                           />
                         </td>
-                        <td><strong>{r.ticker}</strong></td>
+                        <td>
+                          <button
+                            onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-validate', { detail: { ticker: r.ticker } }))}
+                            style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--accent)', fontWeight: 700, fontSize: 'inherit', textDecoration: 'underline' }}
+                          >
+                            {r.ticker}
+                          </button>
+                        </td>
                         <td>{r.companyName ?? '—'}</td>
-                        <td>{r.sector ?? '—'}</td>
                         <td className="num">{fmt((r as unknown as ScreenResultRow & { lastPrice: number | null }).lastPrice, '$')}</td>
                         <td className={`num ${((r as unknown as ScreenResultRow & { dayChangePct: number | null }).dayChangePct ?? 0) >= 0 ? 'up' : 'down'}`}>
                           {fmtPct((r as unknown as ScreenResultRow & { dayChangePct: number | null }).dayChangePct)}
+                        </td>
+                        {/* IV% — coloured: <30% muted, 30-50% amber, >50% red */}
+                        <td className="num" style={(() => {
+                          const iv = (r as unknown as ScreenResultRow & { currentIv: number | null }).currentIv;
+                          return { color: iv == null ? undefined : iv >= 50 ? '#ef4444' : iv >= 30 ? '#f59e0b' : '#94a3b8' };
+                        })()}>
+                          {(r as unknown as ScreenResultRow & { currentIv: number | null }).currentIv != null
+                            ? `${((r as unknown as ScreenResultRow & { currentIv: number | null }).currentIv!).toFixed(1)}%`
+                            : '—'}
+                        </td>
+                        {/* IV Rank — coloured: <40 green, 40-69 amber, ≥70 red */}
+                        <td className="num" style={(() => {
+                          const ivr = (r as unknown as ScreenResultRow & { ivRank: number | null }).ivRank;
+                          return { color: ivr == null ? undefined : ivr >= 70 ? '#ef4444' : ivr >= 40 ? '#f59e0b' : '#2ecc71' };
+                        })()}>
+                          {(r as unknown as ScreenResultRow & { ivRank: number | null }).ivRank != null
+                            ? Math.round((r as unknown as ScreenResultRow & { ivRank: number | null }).ivRank!)
+                            : '—'}
                         </td>
                         <td className="num">{fmt((r as unknown as ScreenResultRow & { peRatio: number | null }).peRatio)}</td>
                         <td className="num">{fmt((r as unknown as ScreenResultRow & { eps: number | null }).eps, '$')}</td>
@@ -817,43 +852,6 @@ export function ScreenerView() {
                             <span className="pass-badge">{(r as unknown as ScreenResultRow & { passScore: number }).passScore} / {totalEnabled}</span>
                           </td>
                         )}
-                        <td className="actions">
-                          <div className="quick-actions">
-                            <button
-                              className="action-btn"
-                              title="Add to watchlist"
-                              onClick={() => setShowAddToWatchlist(r.id)}
-                            >
-                              ⭐
-                            </button>
-                            <button
-                              className="action-btn"
-                              title="Run analysis"
-                              onClick={() => runAnalysisForTicker(r.ticker)}
-                            >
-                              📊
-                            </button>
-                          </div>
-                          {showAddToWatchlist === r.id && (
-                            <div className="watchlist-dropdown">
-                              {watchlists.map(wl => (
-                                <button
-                                  key={wl.id}
-                                  className="dropdown-item"
-                                  onClick={() => addToWatchlist(r.ticker, wl.id)}
-                                >
-                                  {wl.name}
-                                </button>
-                              ))}
-                              <button
-                                className="dropdown-item cancel"
-                                onClick={() => setShowAddToWatchlist(null)}
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                          )}
-                        </td>
                       </tr>
                     ))}
                   </tbody>
