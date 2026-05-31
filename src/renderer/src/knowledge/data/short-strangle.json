@@ -1,0 +1,42 @@
+{
+  "slug": "short-strangle",
+  "name": "Short Strangle",
+  "category": "neutral",
+  "description": "Neutral, undefined risk strategy consisting of an OTM short put and an OTM short call. We want the stock to stay between our strikes through expiration so the options expire worthless and we keep the credit received up front as profit.",
+  "directionalAssumption": "Neutral",
+  "ivEnvironment": "High",
+  "dte": "45",
+  "probabilityOfProfit": "60% to 80%",
+  "setup": [
+    "Leg 1: Sell an OTM put",
+    "Leg 2: Sell an OTM call"
+  ],
+  "maxProfit": "Credit Received",
+  "maxLoss": "Unlimited",
+  "profitTarget": "50% of Max Profit",
+  "breakeven": "Put Strike - Credit Received / Call Strike + Credit Received",
+  "greeks": {
+    "delta": "Flat",
+    "vega": "Short",
+    "theta": "Long",
+    "gamma": "Short"
+  },
+  "howItWorks": {
+    "ideal": "The stock stays between our strikes as time passes. This results in extrinsic value decay on both sides and the trade can be bought back for a profit over time.",
+    "notIdeal": "The stock moves outside of one of our strikes. The trade now moves from neutral to directional. We can start to see losses as the 'tested' side increases in value because the stock price has moved closer to that side.",
+    "defensiveTactics": "Strangles are undefined risk trades and they can be adjusted very easily. If the stock moves towards or past one of our strikes, we can roll the other 'untested' side closer to the 'tested' side to pick up additional credit and reduce the delta of the position. We can also roll both strikes out in time to add more credit, or a combination of both of these tactics. If the trade is small enough upon entry, it enables us to adjust perpetually, so that we can pick up a large credit that offsets our breakevens well beyond our strikes."
+  },
+  "volatility": {
+    "ifExpands": "Extrinsic value may have increased - we could see a marked extrinsic value loss, but our strikes could still be OTM. We hold in this case as these options will expire worthless if the stock stays between our strikes.",
+    "ifContracts": "Extrinsic value will likely contract - in this case, we close the trade if it's net profitable at a percentage we're happy with."
+  },
+  "expiration": {
+    "ifOTM": "Both strikes will expire worthless and we will realize max profit.",
+    "ifITM": "We can roll the strikes out in time to add credit and duration to the trade, or close the trade if our assumption has changed.",
+    "other": []
+  },
+  "takeaways": [
+    "As the market moves, we may see profitability on one side of a strangle and losses on the other. Realize that this is a neutral strategy because the short put hedges the short call and vice versa.",
+    "Strangles take risk on both sides of the market, so being tested is pretty normal. We need to trade small so that we can roll losers out in time and adjust the strikes if we want to, as time & extrinsic value credit are our biggest assets in this type of trade."
+  ]
+}

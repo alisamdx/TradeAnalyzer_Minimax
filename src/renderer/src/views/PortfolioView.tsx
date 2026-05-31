@@ -88,6 +88,20 @@ function urgencyColor(urgency: 'immediate' | 'this_week' | 'monitor'): string {
   }
 }
 
+// ─── Greeks chip ──────────────────────────────────────────────────────────────
+
+function GreeksChip({ label, value, color, title }: { label: string; value: string; color: string; title?: string }) {
+  return (
+    <div
+      title={title}
+      style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#1f2937', borderRadius: 6, padding: '4px 10px', fontSize: 11 }}
+    >
+      <span style={{ color: '#6b7280' }}>{label}</span>
+      <span style={{ color, fontWeight: 600 }}>{value}</span>
+    </div>
+  );
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function PortfolioView() {
@@ -118,6 +132,9 @@ export function PortfolioView() {
   const [hasApiKey, setHasApiKey]                 = useState(false);
   const [selectedHistoryId, setSelectedHistoryId] = useState<number | null>(null);
 
+  // Account size for BP% calculation
+  const [accountSize, setAccountSize]     = useState<number>(0);
+
   // Streaming state
   const [streamStatus, setStreamStatus]   = useState<string>('');
   const [thinkingText, setThinkingText]   = useState<string>('');
@@ -137,12 +154,13 @@ export function PortfolioView() {
   // Load positions, summary, and E*Trade enhanced positions
   const loadData = useCallback(async () => {
     try {
-      const [posResult, sumResult, etResult, syncResult, apiKeyResult] = await Promise.all([
+      const [posResult, sumResult, etResult, syncResult, apiKeyResult, settingsResult] = await Promise.all([
         window.api.portfolio.list(activeTab === 'open' ? 'open' : activeTab === 'closed' ? 'closed' : 'open'),
         window.api.portfolio.pnlSummary(),
         window.api.portfolio.etrade.listPositions(),
         window.api.portfolio.etrade.lastSync(),
         window.api.portfolio.advisor.hasApiKey(),
+        window.api.settings.getAll(),
       ]);
 
       if (posResult.success && posResult.data) setPositions(posResult.data);
@@ -150,6 +168,7 @@ export function PortfolioView() {
       setEtPositions(etResult);
       setLastSyncedAt(syncResult);
       setHasApiKey(apiKeyResult);
+      setAccountSize(settingsResult.accountSize ?? 0);
     } catch (e) {
       setError((e as Error).message);
     }
@@ -176,6 +195,44 @@ export function PortfolioView() {
     for (const p of etPositions) m.set(p.id, p);
     return m;
   }, [etPositions]);
+
+  // Aggregate portfolio Greeks from open positions + E*Trade data
+  // see docs/formulas.md#portfolio-greeks
+  const greeksSummary = useMemo(() => {
+    const open = positions.filter(p => p.status === 'open');
+    let netDelta = 0, totalTheta = 0, totalVega = 0;
+    const now = Date.now();
+    let exp7 = 0, exp14 = 0, exp21 = 0;
+
+    for (const pos of open) {
+      const et = etMap.get(pos.id);
+      const isOption = pos.positionType !== 'Stock';
+      const multiplier = isOption ? pos.quantity * 100 : pos.quantity;
+
+      if (et) {
+        if (et.delta != null) netDelta += et.delta * multiplier;
+        if (isOption) {
+          if (et.theta != null) totalTheta += et.theta * multiplier;
+          if (et.vega  != null) totalVega  += et.vega  * multiplier;
+        }
+      } else if (!isOption) {
+        netDelta += pos.quantity; // stock with no ET data: assume Δ=1/share
+      }
+
+      if (pos.expirationDate) {
+        const d = Math.round((new Date(pos.expirationDate).getTime() - now) / 86_400_000);
+        if (d >= 0 && d <= 7)        exp7++;
+        else if (d >= 0 && d <= 14)  exp14++;
+        else if (d >= 0 && d <= 21)  exp21++;
+      }
+    }
+
+    const bpUsedPct = accountSize > 0 && summary
+      ? (summary.totalCapitalDeployed / accountSize) * 100
+      : null;
+
+    return { netDelta, totalTheta, totalVega, bpUsedPct, exp7, exp14, exp21 };
+  }, [positions, etMap, accountSize, summary]);
 
   // ─── Form handling ────────────────────────────────────────────────────────────
 
@@ -402,6 +459,60 @@ export function PortfolioView() {
             <span className="summary-label">Win Rate</span>
             <span className="summary-value">{summary.winRate.toFixed(1)}%</span>
           </div>
+        </div>
+      )}
+
+      {/* ── Portfolio Greeks Bar ── */}
+      {positions.some(p => p.status === 'open') && (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+          <GreeksChip
+            label="Net Δ"
+            value={greeksSummary.netDelta.toFixed(2)}
+            color={Math.abs(greeksSummary.netDelta) > 0 ? '#60a5fa' : '#6b7280'}
+            title="Net portfolio delta (sum of position deltas × multiplier)"
+          />
+          <GreeksChip
+            label="Θ/day"
+            value={`$${greeksSummary.totalTheta.toFixed(0)}`}
+            color={greeksSummary.totalTheta >= 0 ? '#22c55e' : '#ef4444'}
+            title="Total daily theta decay in dollars (options only)"
+          />
+          <GreeksChip
+            label="Vega"
+            value={greeksSummary.totalVega.toFixed(0)}
+            color="#a78bfa"
+            title="Total vega (P&L per 1% IV move, options only)"
+          />
+          {greeksSummary.bpUsedPct !== null && (
+            <GreeksChip
+              label="BP Used"
+              value={`${greeksSummary.bpUsedPct.toFixed(1)}%`}
+              color={greeksSummary.bpUsedPct > 80 ? '#ef4444' : greeksSummary.bpUsedPct > 50 ? '#f59e0b' : '#22c55e'}
+              title={`Buying power used (capital deployed / $${accountSize.toLocaleString()} account size)`}
+            />
+          )}
+          {(greeksSummary.exp7 + greeksSummary.exp14 + greeksSummary.exp21) > 0 && (
+            <div style={{ display: 'flex', gap: 4, alignItems: 'center', background: '#1f2937', borderRadius: 6, padding: '4px 10px', fontSize: 11, color: '#9ca3af' }}>
+              <span style={{ marginRight: 4 }}>Exp:</span>
+              {greeksSummary.exp7  > 0 && <span style={{ color: '#ef4444', fontWeight: 600 }}>{greeksSummary.exp7} ≤7d</span>}
+              {greeksSummary.exp7  > 0 && (greeksSummary.exp14 + greeksSummary.exp21) > 0 && <span style={{ color: '#374151' }}>·</span>}
+              {greeksSummary.exp14 > 0 && <span style={{ color: '#f59e0b', fontWeight: 600 }}>{greeksSummary.exp14} ≤14d</span>}
+              {greeksSummary.exp14 > 0 && greeksSummary.exp21 > 0 && <span style={{ color: '#374151' }}>·</span>}
+              {greeksSummary.exp21 > 0 && <span style={{ color: '#d1d5db' }}>{greeksSummary.exp21} ≤21d</span>}
+            </div>
+          )}
+          {accountSize === 0 && (
+            <button
+              onClick={() => {
+                const size = prompt('Enter account size ($):');
+                if (size) window.api.settings.setAll({ accountSize: parseFloat(size) }).then(() => loadData());
+              }}
+              style={{ fontSize: 10, padding: '4px 8px', background: 'transparent', border: '1px dashed #374151', borderRadius: 6, color: '#6b7280', cursor: 'pointer' }}
+              title="Set account size to enable BP% display"
+            >
+              + Set account size
+            </button>
+          )}
         </div>
       )}
 

@@ -1,0 +1,45 @@
+{
+  "slug": "iron-fly",
+  "name": "Iron Fly",
+  "category": "neutral",
+  "description": "Neutral, defined risk strategy consisting of an ATM put credit spread and ATM call credit spread. We want the stock to stay between our breakeven prices through expiration.",
+  "directionalAssumption": "Neutral",
+  "ivEnvironment": "High",
+  "dte": "45",
+  "probabilityOfProfit": "60% to 80%",
+  "setup": [
+    "Leg 1: Sell a straddle (ATM put and ATM call)",
+    "Leg 2: Buy an OTM put",
+    "Leg 3: Buy an OTM call"
+  ],
+  "maxProfit": "Credit Received",
+  "maxLoss": "Widest Spread - Credit Received",
+  "profitTarget": "25% of Max Profit",
+  "breakeven": "Short Put Strike - Credit Received / Short Call Strike + Credit Received",
+  "greeks": {
+    "delta": "Flat",
+    "vega": "Short",
+    "theta": "Long",
+    "gamma": "Flat"
+  },
+  "howItWorks": {
+    "ideal": "The stock stays between our breakeven points as time passes. This results in extrinsic value decay on both sides and the trade can be bought back for a profit over time.",
+    "notIdeal": "The stock moves outside of one of our breakeven points. The trade goes from neutral to directional if this happens. We can start to see losses as the 'tested' side increases in value as the stock price moves closer to that side.",
+    "defensiveTactics": "Iron flies are like a defined-risk straddle. Because of this, management is limited compared to an undefined risk trade. If one of the sides is completely ITM, it cannot be rolled for a credit, so there is not much we can do with this trade if the stock moves outside of our long strikes without manipulating risk."
+  },
+  "volatility": {
+    "ifExpands": "We may hold - this may result in an extrinsic value loss. However, if the stock is still within our breakeven points, we know that the trade can be profitable at expiration.",
+    "ifContracts": "The extrinsic value may collapse to a point where we can buy the trade back for 25% of max profit, which is our target."
+  },
+  "expiration": {
+    "ifOTM": "This strategy will always have one strike that is ITM, so we have to either close or roll the trade prior to expiration to avoid assignment of shares.",
+    "ifITM": "If the spread is completely ITM at expiration, we can close the trade to avoid assignment and move on.",
+    "other": [
+      "If Partially ITM at Expiration: We can still see profitability if we are within our breakeven ranges. We close the trade for a profit if this is the case to avoid assignment."
+    ]
+  },
+  "takeaways": [
+    "With spreads, it's important to realize that options will be exercised if they are ITM and held through expiration. If one strike is ITM and the other moves OTM, close the trade prior to expiration to avoid unwanted shares.",
+    "Target risk:reward is 1:1 so that we do not have an impractical spread width. Defensive management is limited, so we want to have a nice wide breakeven range."
+  ]
+}

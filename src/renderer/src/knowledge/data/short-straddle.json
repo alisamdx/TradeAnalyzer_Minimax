@@ -1,0 +1,42 @@
+{
+  "slug": "short-straddle",
+  "name": "Short Straddle",
+  "category": "neutral",
+  "description": "Neutral, undefined risk strategy consisting of an ATM short put and an ATM short call. We want the stock to stay between our breakeven points through expiration.",
+  "directionalAssumption": "Neutral",
+  "ivEnvironment": "High",
+  "dte": "45",
+  "probabilityOfProfit": "50% to 60%",
+  "setup": [
+    "Leg 1: Sell an ATM put",
+    "Leg 2: Sell an ATM call"
+  ],
+  "maxProfit": "Credit Received",
+  "maxLoss": "Unlimited",
+  "profitTarget": "25% of Max Profit",
+  "breakeven": "Put Strike - Credit Received / Call Strike + Credit Received",
+  "greeks": {
+    "delta": "Flat",
+    "vega": "Short",
+    "theta": "Long",
+    "gamma": "Short"
+  },
+  "howItWorks": {
+    "ideal": "The stock stays between our breakeven points as time passes. This results in extrinsic value decay on both sides, and the trade can be bought back for a profit over time.",
+    "notIdeal": "The stock moves outside of one of our breakeven points. The trade moves from neutral to directional if this happens, and we can start to see losses as the 'tested' side increases in value as the stock price moves closer to that side.",
+    "defensiveTactics": "Straddles are undefined risk trades and they can be adjusted very easily. If the stock moves towards or past our breakeven point, we can roll the other 'untested' side beyond the 'tested' side (inversion) to pick up additional credit and reduce the delta of the position. We can also roll both strikes out in time to add more credit, or use a combination of both of these tactics."
+  },
+  "volatility": {
+    "ifExpands": "Extrinsic value may have increased, and we could see a marked extrinsic value loss. However, the stock could still be within our breakeven points, so we should hold because extrinsic value will decay to zero as we approach expiration.",
+    "ifContracts": "We may be able to close the trade for a net profit if the stock has not moved much. Straddles have strong vega exposure, so this could be ideal and we can close for a profit if we see it."
+  },
+  "expiration": {
+    "ifOTM": "This strategy will always have one strike that is ITM, so we have to close the trade, or roll the trade prior to expiration to avoid assignment of shares.",
+    "ifITM": "We can roll the strikes out in time to add credit and duration to the trade, or close the trade if our assumption has changed.",
+    "other": []
+  },
+  "takeaways": [
+    "Straddles will always have an ITM option, so we temper our profit target expectations, since this is not a trade that will expire worthless in almost all cases. We still focus on time and extrinsic value collection though, as that boosts our breakeven prices well past our strikes over time.",
+    "Typically, we reserve straddles for high IV & IVR stocks, so that our credit collection is very high, and our breakevens are wide. This is not a strategy we would deploy in a low IV environment."
+  ]
+}

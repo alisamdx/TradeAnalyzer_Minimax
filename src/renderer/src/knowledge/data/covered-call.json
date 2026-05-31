@@ -1,0 +1,42 @@
+{
+  "slug": "covered-call",
+  "name": "Covered Call",
+  "category": "bullish",
+  "description": "Bullish stock position where we are selling an ATM/OTM call against 100 long shares of stock to reduce the cost basis of the shares.",
+  "directionalAssumption": "Bullish",
+  "ivEnvironment": "High",
+  "dte": "45",
+  "probabilityOfProfit": "50% to 70%",
+  "setup": [
+    "Leg 1: Buy 100 shares of stock",
+    "Leg 2: Sell an ATM/OTM call for every 100 shares"
+  ],
+  "maxProfit": "Distance Between Stock Purchase & Short Call + Credit Received",
+  "maxLoss": "Stock Purchase Price - Credit Received",
+  "profitTarget": "50% of Max Profit",
+  "breakeven": "Stock Purchase Price - Credit Received",
+  "greeks": {
+    "delta": "Long",
+    "vega": "Short",
+    "theta": "Long",
+    "gamma": "Dynamic"
+  },
+  "howItWorks": {
+    "ideal": "The stock moves up to the short call strike by the expiration of the contract. This results in max extrinsic value collected from the short call, as well as max value gained on the long shares up to the call strike.",
+    "notIdeal": "The stock goes down. This results in losses in the shares you own, although the short call will lose value and hedge the loss on those shares.",
+    "defensiveTactics": "If the short call loses value, we can roll it out in time to add extrinsic value to the trade, reducing the cost basis on the shares further. We can also move the call strike down in the same cycle to achieve the same cost basis reduction result, or a combination of rolling out in time and down a few strikes. Avoid rolling the call below your breakeven on the trade overall to ensure potential profit if the stock rallies back."
+  },
+  "volatility": {
+    "ifExpands": "We may hold - this may result in an extrinsic value loss in the short call, but extrinsic value goes to zero by expiration. If this is paired with a stock price selloff, we can adjust the short call if desired.",
+    "ifContracts": "The short call may decrease in value and add profit to our position overall, especially if this is paired with a small bullish move."
+  },
+  "expiration": {
+    "ifOTM": "The short call will expire worthless - we can deploy another one in a further expiration, or lean long with the shares.",
+    "ifITM": "The short call will be exercised and 'call away' the 100 shares of stock we own. The position will go away and we will realize max profit.",
+    "other": []
+  },
+  "takeaways": [
+    "Covered calls are cost basis reduction strategies where we are limiting our upside profit potential to guarantee a credit and cost basis reduction on the shares. We should place our short call at a level we're comfortable capping our profit potential at.",
+    "If we want to preserve our shares and avoid assignment, we can roll the short call out in time and up a few strikes for a small credit before the short call moves ITM. This moves the existing extrinsic value to the next cycle, and moving our short strike up gives us more potential profit on the shares."
+  ]
+}

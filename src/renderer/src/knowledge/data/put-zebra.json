@@ -1,0 +1,44 @@
+{
+  "slug": "put-zebra",
+  "name": "Put ZEBRA",
+  "category": "bearish",
+  "description": "A bearish back-ratio spread, where we are buying two ITM puts and selling one ATM put to remove all extrinsic value and achieve 100 negative deltas.",
+  "directionalAssumption": "Bearish",
+  "ivEnvironment": "Any",
+  "dte": "Any",
+  "probabilityOfProfit": "50%",
+  "setup": [
+    "Leg 1: Buy 2 ITM puts",
+    "Leg 2: Sell 1 ATM put (to remove all extrinsic value)"
+  ],
+  "maxProfit": "Unlimited",
+  "maxLoss": "Debit Paid",
+  "profitTarget": "25% of Debit Paid",
+  "breakeven": "Short Put Strike - Any Extrinsic Value Paid",
+  "greeks": {
+    "delta": "Short / Dynamic",
+    "vega": "Flat",
+    "theta": "Flat",
+    "gamma": "Dynamic"
+  },
+  "howItWorks": {
+    "ideal": "The stock price moves down. This is a synthetic short stock position that acts like a married call, where you have 100 short shares of downside profit potential with limited risk above your long put strikes. Unlike a married call, the put ZEBRA gives you defined risk without having to pay extrinsic value for the protection (if set up with zero extrinsic value on entry).",
+    "notIdeal": "The stock price moves up. The synthetic short stock position will lose value at almost the same rate as being short 100 shares of stock, but losses will taper off above the long put strikes, since the most you can lose is the debit paid for the trade.",
+    "defensiveTactics": "In an effort to reduce the cost of the trade, we can roll the short put up a few strikes if the stock rallies. This will decrease the short delta amount on a selloff, but if that never happens, we reduce the overall debit paid on the trade by rolling the put up."
+  },
+  "volatility": {
+    "ifExpands": "The trade could be profitable if this is paired with a bearish move in the stock price.",
+    "ifContracts": "This trade will likely be unaffected as we start with zero extrinsic value, unless this is paired with a bullish move in the stock price, which could result in losses."
+  },
+  "expiration": {
+    "ifOTM": "We will realize max loss on the trade, which is the debit paid up front.",
+    "ifITM": "We close the trade for a profit.",
+    "other": [
+      "If Partially ITM at Expiration: We close the trade and restructure in a later cycle if we want to stay in. We want to avoid assignment by closing the trade prior to expiration."
+    ]
+  },
+  "takeaways": [
+    "This can be a great short stock replacement strategy with limited risk if you're directionally correct. The risk profile for a put zebra is similar to a married call, since our risk is capped at the debit paid for the spread.",
+    "Long term cycles & high IV products will be more expensive trades on entry. Short term cycles and low IV products will be cheaper trades on entry. We still need the directional move to be profitable."
+  ]
+}

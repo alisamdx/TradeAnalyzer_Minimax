@@ -1,0 +1,41 @@
+{
+  "slug": "short-naked-call",
+  "name": "Short Naked Call",
+  "category": "neutral-bearish",
+  "description": "Neutral-Bearish undefined risk credit trade where we are betting against the stock moving above our strike price by the expiration of our contract.",
+  "directionalAssumption": "Neutral-Bearish",
+  "ivEnvironment": "High",
+  "dte": "45",
+  "probabilityOfProfit": "60% to 80%",
+  "setup": [
+    "Leg 1: Sell an OTM call"
+  ],
+  "maxProfit": "Credit Received",
+  "maxLoss": "Unlimited",
+  "profitTarget": "50% of Max Profit",
+  "breakeven": "Call Strike + Credit Received",
+  "greeks": {
+    "delta": "Short",
+    "vega": "Short",
+    "theta": "Long",
+    "gamma": "Short"
+  },
+  "howItWorks": {
+    "ideal": "The stock decreases in value. As time passes, and if volatility decreases, the extrinsic value of the call will decrease. As long as we buy back the call for less than we sold it for, we lock in a profit.",
+    "notIdeal": "The stock increases in value. As the stock goes up, the value of the call will increase, which means you may see losses if the option is worth more than you sold it for when you opened the trade.",
+    "defensiveTactics": "Short naked options can usually be rolled out in time for a credit without adding any additional risk. Rolling out in time extends duration and increases extrinsic value in the position, which improves your breakeven on the trade overall."
+  },
+  "volatility": {
+    "ifExpands": "We may hold - this may result in an extrinsic value loss, but extrinsic value will always go to zero by expiration.",
+    "ifContracts": "Close for a winner if we reach our desired profit target and the strike is still OTM."
+  },
+  "expiration": {
+    "ifOTM": "The call will expire worthless, and we keep the credit received up front as profit.",
+    "ifITM": "If the option is ITM through expiration, the call seller will be short 100 shares of that stock at the strike price. To avoid this, we roll the position out in time or close it.",
+    "other": []
+  },
+  "takeaways": [
+    "Short calls can be profitable if the stock stays the same, goes down, or even goes up a little bit as long as the strike remains OTM through expiration. The many ways to be profitable translates to a high probability trade when sold OTM.",
+    "Short ITM calls could be subject to additional assignment risk due to dividends. If you're trading a dividend stock and have an ITM short call with an upcoming dividend, ensure that your short call's extrinsic value is more than the expected dividend. If it is less, consider rolling the position out in time to add extrinsic value and remove dividend assignment risk."
+  ]
+}

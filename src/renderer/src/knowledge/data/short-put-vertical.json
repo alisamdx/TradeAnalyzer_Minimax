@@ -1,0 +1,44 @@
+{
+  "slug": "short-put-vertical",
+  "name": "Short Put Vertical Spread",
+  "category": "neutral-bullish",
+  "description": "Neutral-Bullish defined risk credit trade where we are betting against the stock moving below our short strike price by the expiration of our contract.",
+  "directionalAssumption": "Neutral-Bullish",
+  "ivEnvironment": "High",
+  "dte": "45",
+  "probabilityOfProfit": "60% to 80%",
+  "setup": [
+    "Leg 1: Sell an OTM/ATM put",
+    "Leg 2: Buy a further OTM put"
+  ],
+  "maxProfit": "Credit Received",
+  "maxLoss": "Distance Between Strikes - Credit Received",
+  "profitTarget": "50% of Max Profit",
+  "breakeven": "Short Put Strike - Credit Received",
+  "greeks": {
+    "delta": "Long",
+    "vega": "Short",
+    "theta": "Long",
+    "gamma": "Flat"
+  },
+  "howItWorks": {
+    "ideal": "The stock increases in value. A short put spread is a directionally bullish position so ideally the stock rises, time passes, volatility contracts, or a combination of the three so the spread loses value over time.",
+    "notIdeal": "The stock decreases in value. The value of the short put spread can increase, which means the spread will be more expensive compared to the original opening sale price, which would result in a loss.",
+    "defensiveTactics": "If the spread is OTM/ATM, rolling out to a farther expiration can be done for a credit, which adds time to the trade, reduces max loss, and increases max profit if the new spread expires OTM."
+  },
+  "volatility": {
+    "ifExpands": "We may hold - this may result in an extrinsic value loss, but extrinsic value will always go to zero by expiration.",
+    "ifContracts": "This could result in a profitable trade, as extrinsic value goes down across the board, so we may consider closing if the trade is profitable."
+  },
+  "expiration": {
+    "ifOTM": "The trade will realize max profit - we can close it to remove risk, or let it expire worthless if we believe it will remain OTM.",
+    "ifITM": "We close the trade - holding a put spread through expiration will result in both options being exercised resulting in no position, but we close the trade for max loss to avoid assignment.",
+    "other": [
+      "If Partially ITM at Expiration: We either roll out in time to extend the trade or close it. We avoid letting these trades go through expiration because if the short put is ITM and the long put is OTM, we can come back to the market the next trading session with 100 shares of stock."
+    ]
+  },
+  "takeaways": [
+    "Vertical spreads have a less volatile P/L because of the long option that defines our risk. If we see profit on the short option, we will see losses on the long option and vice versa. For this reason, we should expect to be in spread trades longer than naked options to reach profit targets.",
+    "With spreads, it's important to realize that options will be exercised if they are ITM and held through expiration. If one strike is ITM and the other moves OTM, close the trade prior to expiration to avoid unwanted shares."
+  ]
+}

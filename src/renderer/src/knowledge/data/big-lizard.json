@@ -1,0 +1,44 @@
+{
+  "slug": "big-lizard",
+  "name": "Big Lizard",
+  "category": "bullish",
+  "description": "A bullish position constructed by selling an ATM short put combined with an ATM short call spread, where the total credit received should be greater than the width of the call spread to remove upside risk entirely.",
+  "directionalAssumption": "Bullish",
+  "ivEnvironment": "High",
+  "dte": "45",
+  "probabilityOfProfit": "60% to 80%",
+  "setup": [
+    "Leg 1: Sell an ATM put",
+    "Leg 2: Sell an ATM call credit spread with the same short strike as the put"
+  ],
+  "maxProfit": "Credit Received",
+  "maxLoss": "Short Put Strike x 100 - Credit Received",
+  "profitTarget": "25% Max Profit",
+  "breakeven": "Short Put Strike - Credit Received",
+  "greeks": {
+    "delta": "Long",
+    "vega": "Short",
+    "theta": "Long",
+    "gamma": "Short"
+  },
+  "howItWorks": {
+    "ideal": "The stock stays between our breakeven range. There is no risk to the upside if our net credit is greater than the width of the call credit spread, so the trade is profitable if the stock is above our short put breakeven at expiration.",
+    "notIdeal": "The stock goes down. We have a naked short put, so if the stock drops below our short put strike, we take on intrinsic value losses equivalent to 100 shares of stock, less the credit received from selling the big lizard up front.",
+    "defensiveTactics": "If we near expiration and our short put is still ITM, we can roll it out in time and close the short call spread, or redeploy another call spread against the short put."
+  },
+  "volatility": {
+    "ifExpands": "We may hold - this may result in an extrinsic value loss, but extrinsic value will always go to zero by expiration.",
+    "ifContracts": "We may have a winning trade - if we are happy with our profit target we can close the trade."
+  },
+  "expiration": {
+    "ifOTM": "",
+    "ifITM": "If the naked put is ITM at expiration, it has to be closed or rolled out in time, otherwise it will turn into stock. If the call spread is fully ITM at expiration, it will get exercised/assigned and result in no position. We close or roll prior to expiration to avoid unwanted shares.",
+    "other": [
+      "If ITM/ATM at Expiration: Since the short options are placed at the same strike, one side of the position will always be ITM. To avoid taking potential assignment of shares, we close out the position which would be profitable if the call spread is ITM or if the stock is within our breakeven to the put side."
+    ]
+  },
+  "takeaways": [
+    "This trade will almost always be ITM at any time, so we temper our profit target to 25%, since even at expiration, one of these strikes will hold intrinsic value.",
+    "Ensure the credit received is wider than the width of the call spread, so that there is no risk to the upside. The big lizard call spread will be much wider than the jade lizard call spread since the short strikes are ATM."
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "slug": "short-call-vertical",
+  "name": "Short Call Vertical Spread",
+  "category": "neutral-bearish",
+  "description": "Neutral-Bearish defined risk credit trade where we are betting against the stock moving above our short strike price by the expiration of our contract.",
+  "directionalAssumption": "Neutral-Bearish",
+  "ivEnvironment": "High",
+  "dte": "45",
+  "probabilityOfProfit": "60% to 80%",
+  "setup": [
+    "Leg 1: Sell an ATM/OTM call",
+    "Leg 2: Buy a further OTM call"
+  ],
+  "maxProfit": "Credit Received",
+  "maxLoss": "Distance Between Strikes - Credit Received",
+  "profitTarget": "50% of Max Profit",
+  "breakeven": "Call Strike + Credit Received",
+  "greeks": {
+    "delta": "Short",
+    "vega": "Short",
+    "theta": "Long",
+    "gamma": "Flat"
+  },
+  "howItWorks": {
+    "ideal": "The stock decreases in value. A short call spread is a directionally bearish position - so ideally the stock price falls, time passes, volatility contracts, or a combination of the three so that the spread loses value over time.",
+    "notIdeal": "The stock increases in value. The value of the short call spread can increase, which means the spread will be more expensive compared to the original opening sale price, which would result in a loss.",
+    "defensiveTactics": "If the spread is OTM/ATM, rolling out to a further expiration can be done for a credit, which adds time to the trade, reduces max loss, and increases max profit if the new spread expires OTM."
+  },
+  "volatility": {
+    "ifExpands": "The trade may increase in extrinsic value, but if the increase in IV is paired with a selloff, the trade could be profitable and we can close for a winner.",
+    "ifContracts": "The trade may lose value, unless this is paired with a bullish move that could offset the extrinsic value contraction."
+  },
+  "expiration": {
+    "ifOTM": "Both options will expire worthless, and the trade will be at max profit.",
+    "ifITM": "The trade will be at max loss, and we can close the trade to avoid assignment.",
+    "other": [
+      "If Partially ITM at Expiration: We either close the trade or roll out in time to extend it. We avoid letting these trades go through expiration because if the short call is ITM and the long call is OTM, we can come back to the market in the next trading session with 100 shares of short stock."
+    ]
+  },
+  "takeaways": [
+    "Vertical spreads have a less volatile P/L because of the long option that defines our risk. If we see profit on the short option, we will see losses on the long option and vice versa. For this reason, we should expect to be in spread trades longer than naked options to reach profit targets.",
+    "With spreads, it's important to realize that options will be exercised if they are ITM and held through expiration. If one strike is ITM and the other moves OTM, close the trade prior to expiration to avoid unwanted shares."
+  ]
+}

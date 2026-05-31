@@ -1,0 +1,42 @@
+{
+  "slug": "poor-mans-covered-call",
+  "name": "Poor Man's Covered Call",
+  "category": "bullish",
+  "description": "A bullish synthetic covered call strategy that consists of an ITM long-term call to replicate 100 shares of stock, with an ATM/OTM short call in a near-term cycle to reduce cost basis.",
+  "directionalAssumption": "Bullish",
+  "ivEnvironment": "Low",
+  "dte": "45 to 60",
+  "probabilityOfProfit": "50% to 60%",
+  "setup": [
+    "Leg 1: Buy an ITM call in a long-term expiration cycle",
+    "Leg 2: Sell an OTM call in a near-term expiration cycle"
+  ],
+  "maxProfit": "Distance Between Strikes - Debit Paid + Estimated Extrinsic Value in Long Option",
+  "maxLoss": "Debit Paid",
+  "profitTarget": "50% of Estimated Max Profit",
+  "breakeven": "Long Call Strike + Debit Paid",
+  "greeks": {
+    "delta": "Long",
+    "vega": "Long",
+    "theta": "Flat",
+    "gamma": "Dynamic"
+  },
+  "howItWorks": {
+    "ideal": "The stock moves up to the short call strike by the expiration of the contract. This results in max extrinsic value collected from the short call, as well as max value gained on the long call option that acts as a synthetic long stock position, plus any remaining extrinsic value in the long option as well.",
+    "notIdeal": "The stock goes down. This results in losses on the long call you own, although the short call will lose value and hedge the loss on the long call, and you would not lose as much as owning 100 shares of stock if there is a big selloff.",
+    "defensiveTactics": "If the short call loses value, we can roll it out in time to add extrinsic value to the trade, further reducing the cost basis on the position. We can also move the call strike down in the same cycle to achieve the same cost basis reduction result, or a combination of rolling out in time and down a few strikes. Avoid rolling the call below your breakeven on the trade overall to ensure potential profit if the stock rallies back."
+  },
+  "volatility": {
+    "ifExpands": "We typically hold onto the trade - extrinsic value moves against us are temporary, but if this is paired with a stock selloff, we can adjust the short call if we want to.",
+    "ifContracts": "We can consider adjusting the short call if it has lost value by rolling it out in time or moving it closer to the long strike, but not below our breakeven point."
+  },
+  "expiration": {
+    "ifOTM": "We will realize max loss on the trade, which is the debit paid up front.",
+    "ifITM": "The trade will be at max profit - we close the trade.",
+    "other": []
+  },
+  "takeaways": [
+    "Make sure the debit paid is no more than 75% the width of the strikes. If you pay a debit higher than the width of the strikes and there is a huge move where the spread moves ITM, you can lose money as the strikes lose extrinsic value and start to trade with pure intrinsic value.",
+    "The idea here is to buy a long-term low volatility contract and take advantage of heightened IV in the front-month by placing our short contract there. This setup can be very efficient for products with pending news, or big realized movements that pump up the near-term IV."
+  ]
+}

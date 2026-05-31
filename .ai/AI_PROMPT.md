@@ -14,6 +14,7 @@ You are picking up a multi-phase build of the **TradeAnalyzer_Minimax** desktop 
 - **Never log secrets.** API keys live in OS keychain or `.env` and are scrubbed from logs at write time.
 - **Every material change updates `CHANGELOG.md` + `changelogs/v{version}_{date}.md` + `.ai/AI_CONTEXT.md` in the same commit.** Bump the version per semver (PATCH/MINOR/MAJOR).
 - **Every formula in code that derives a financial metric** has a `// see docs/formulas.md#anchor` comment and a corresponding entry in `docs/formulas.md`.
+- **At the end of every session, commit all staged changes** in a single Conventional Commit that includes the version bump, changelog entries, and `AI_CONTEXT.md` update. Do not leave material changes uncommitted.
 - **Every bug fix ships with a regression test** that fails before the fix and passes after.
 
 ## Working agreement

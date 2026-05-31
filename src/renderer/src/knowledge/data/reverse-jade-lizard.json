@@ -1,0 +1,44 @@
+{
+  "slug": "reverse-jade-lizard",
+  "name": "Reverse Jade Lizard",
+  "category": "neutral-bearish",
+  "description": "A bearish position constructed by selling an OTM call combined with an OTM short put spread, where the total credit received is greater than the width of the put spread to remove downside risk entirely.",
+  "directionalAssumption": "Neutral-Bearish",
+  "ivEnvironment": "High",
+  "dte": "45",
+  "probabilityOfProfit": "60% to 80%",
+  "setup": [
+    "Leg 1: Sell an OTM vertical put spread",
+    "Leg 2: Sell an OTM call"
+  ],
+  "maxProfit": "Credit Received",
+  "maxLoss": "Unlimited",
+  "profitTarget": "50% of Max Profit",
+  "breakeven": "Short Call Strike + Credit Received",
+  "greeks": {
+    "delta": "Short",
+    "vega": "Short",
+    "theta": "Long",
+    "gamma": "Short"
+  },
+  "howItWorks": {
+    "ideal": "The stock stays between our short strikes. There is no risk to the downside if our net credit is greater than the width of the put credit spread, but max profit is realized if all options expire OTM.",
+    "notIdeal": "The stock goes up. We have a naked short call, so if the stock rallies above our short call strike, we take on intrinsic value losses equivalent to 100 short shares of stock, less the credit received from selling the reverse jade lizard up front.",
+    "defensiveTactics": "If the short call is ITM, we can either roll that out in time, or roll the put spread up to defend the short call. We just ensure that there is no risk to the downside by keeping the net credit higher than the width of the put spread we roll to."
+  },
+  "volatility": {
+    "ifExpands": "We may hold - this may result in an extrinsic value loss, but extrinsic value will always go to zero by expiration.",
+    "ifContracts": "We look to close the position for a profit if our strikes are still OTM."
+  },
+  "expiration": {
+    "ifOTM": "All options will expire worthless and we'll keep the credit received up front as profit.",
+    "ifITM": "The short call can be rolled out in time if we don't mind being bearish on the product for another cycle, and we can roll the put spread out in time as well if we want to keep that portion of the trade on.",
+    "other": [
+      "If Partially ITM at Expiration: We typically close the trade for a profit to ensure we do not end up with shares in the next trading session."
+    ]
+  },
+  "takeaways": [
+    "The most important aspect of the reverse jade lizard is to ensure the net credit received is greater than the width of the put spread - this ensures we have no risk to the downside, and increases our probability of profit substantially.",
+    "Because we are taking risk on the put side in this trade, ensure that the premium we are collecting on the put spread is around 1/3rd the width. There is no reason to take risk on that side or reduce our potential max profit if we're not collecting a fair amount to do so."
+  ]
+}

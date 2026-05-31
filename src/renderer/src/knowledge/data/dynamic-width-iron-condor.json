@@ -1,0 +1,42 @@
+{
+  "slug": "dynamic-width-iron-condor",
+  "name": "Dynamic Width Iron Condor",
+  "category": "neutral",
+  "description": "Neutral, defined risk strategy consisting of an OTM put credit spread and OTM call credit spread with different spread widths to account for skew. We want the stock to stay between our strikes through expiration.",
+  "directionalAssumption": "Neutral",
+  "ivEnvironment": "High",
+  "dte": "45",
+  "probabilityOfProfit": "60% to 80%",
+  "setup": [
+    "Leg 1: Sell an OTM put spread",
+    "Leg 2: Sell an OTM call spread (widths may differ to account for skew)"
+  ],
+  "maxProfit": "Credit Received",
+  "maxLoss": "Widest Spread - Credit Received",
+  "profitTarget": "50% of Max Profit",
+  "breakeven": "Short Put Strike - Credit Received / Short Call Strike + Credit Received",
+  "greeks": {
+    "delta": "Flat",
+    "vega": "Short",
+    "theta": "Long",
+    "gamma": "Flat"
+  },
+  "howItWorks": {
+    "ideal": "The stock stays between our strikes as time passes. This results in extrinsic value decay on both sides, and the trade can be bought back for a profit over time.",
+    "notIdeal": "The stock moves outside of one of our credit spreads. The trade goes from neutral to directional if this happens, and we can start to see losses as the 'tested' side increases in value as the stock price moves closer to that side.",
+    "defensiveTactics": "Defensive management is limited with defined risk credit trades, but we can roll a spread out in time for a credit if it is not ITM yet. If one of our spreads begins to be tested, we can roll it out in time. We can also close or roll the untested side if we want to extend duration and add credit to the trade to reduce max loss."
+  },
+  "volatility": {
+    "ifExpands": "We may hold - this may result in an extrinsic value loss, but extrinsic value will always go to zero by expiration.",
+    "ifContracts": "Close for a winner if we reach our desired profit target and the stock is still between our strikes."
+  },
+  "expiration": {
+    "ifOTM": "Close the position for profit which will also remove any expiration risk.",
+    "ifITM": "Close for max loss to avoid assignment fees and the stock moving between our spread after hours, which could result in unwanted shares on Monday.",
+    "other": []
+  },
+  "takeaways": [
+    "If there is skew in the market, dynamic width iron condors will always have different spread widths on the call side and put side, so one side will have more risk than the other. This strategy will still operate like a normal iron condor, but it will account for skew in the market.",
+    "Select strikes that create a wide range of profitability while still collecting around 1/3rd the width of the spread. Defensive management is limited, so the best defense is a wide profit range up front."
+  ]
+}

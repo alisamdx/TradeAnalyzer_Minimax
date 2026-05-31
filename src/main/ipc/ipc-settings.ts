@@ -46,6 +46,8 @@ export interface AppSettings {
   agentProjectPath: string;
   // v0.17.0: MarketData.app rate limit
   marketdataDailyCredits: number;
+  // ENH-3: Portfolio Greeks monitor
+  accountSize: number;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -74,6 +76,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   agentProjectPath: '',
   // v0.17.0 defaults
   marketdataDailyCredits: 500,
+  // ENH-3 defaults
+  accountSize: 0,
 };
 
 export function registerSettingsIpc(
@@ -125,6 +129,8 @@ export function registerSettingsIpc(
           }
           else if (k === 'agentDbPath') settings.agentDbPath = v ?? '';
           else if (k === 'agentProjectPath') settings.agentProjectPath = v ?? '';
+          else if (k === 'marketdataDailyCredits') settings.marketdataDailyCredits = v !== undefined ? parseInt(v, 10) : DEFAULT_SETTINGS.marketdataDailyCredits;
+          else if (k === 'accountSize') settings.accountSize = v !== undefined ? parseFloat(v) : DEFAULT_SETTINGS.accountSize;
         }
       }
       return ok(settings);

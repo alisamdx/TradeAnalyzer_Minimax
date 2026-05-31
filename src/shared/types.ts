@@ -493,6 +493,8 @@ export interface AppSettings {
   // v0.12.0: TraderAgent integration
   agentDbPath: string;
   agentProjectPath: string;
+  // ENH-3: Portfolio Greeks monitor
+  accountSize: number;
 }
 
 // ─── TraderAgent (v0.12.0) ─────────────────────────────────────────────────────

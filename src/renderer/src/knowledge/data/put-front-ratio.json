@@ -1,0 +1,44 @@
+{
+  "slug": "put-front-ratio",
+  "name": "Put Front-Ratio Spread",
+  "category": "omnidirectional",
+  "description": "Omnidirectional, undefined risk trade consisting of a long put spread with an extra short put to finance the trade and receive a net credit overall. No risk to the upside, but max profit at the short strike.",
+  "directionalAssumption": "Omnidirectional",
+  "ivEnvironment": "High",
+  "dte": "15 to 45",
+  "probabilityOfProfit": "60% to 80%",
+  "setup": [
+    "Leg 1: Buy an ATM or OTM put",
+    "Leg 2: Sell two further OTM puts for a net credit"
+  ],
+  "maxProfit": "Width of Long Spread + Credit Received",
+  "maxLoss": "Breakeven Price x 100",
+  "profitTarget": "50% of Credit Received or 25% of Long Spread Width",
+  "breakeven": "Short Put Strike - (Long Spread Width + Credit Received)",
+  "greeks": {
+    "delta": "Long / Dynamic",
+    "vega": "Short",
+    "theta": "Long",
+    "gamma": "Dynamic"
+  },
+  "howItWorks": {
+    "ideal": "The stock moves towards the short strikes at expiration. Put ratio spreads are omnidirectional trades, so they can be profitable from an increase in the stock price or a move down towards the short strikes. Max profit occurs when the long put spread is fully ITM at the short strike, so ideally the stock moves towards the short strikes near expiration.",
+    "notIdeal": "The stock moves well below the short strikes and below our breakevens. This results in the stock passing through our profit zone and into our loss zone, because we have a short put which has undefined risk.",
+    "defensiveTactics": "The naked put portion of the put ratio spread is where the risk lies. Rolling the naked put out in time for a credit will add extrinsic value and more time without adding additional risk. The long put spread would be near max value if we're seeing losses overall. The long put spread can be closed for an additional credit against the remaining short put."
+  },
+  "volatility": {
+    "ifExpands": "We may hold - this may result in an extrinsic value loss if paired with a bearish move in the stock price. However, extrinsic value will always go to zero by expiration.",
+    "ifContracts": "Our spread could lose value if volatility contraction is paired with a bullish stock price move. We can close for a profit, or we can look to purchase an OTM put to create a symmetrical butterfly. If we can buy the put for less than the credit received up front, we lock in a small profit and remove buying power and initial risk from the trade."
+  },
+  "expiration": {
+    "ifOTM": "All strikes will expire worthless and we keep the credit received on entry as profit.",
+    "ifITM": "We close the long put spread to secure value, and either roll the remaining short put out in time or consider closing the trade overall.",
+    "other": [
+      "If Partially ITM at Expiration: We can likely sell out of the long put spread for some sort of profit. We consider closing the entire trade if this is the case."
+    ]
+  },
+  "takeaways": [
+    "For us to see profits on the long spread if it goes ITM, we need extrinsic value to be close to zero so we can realize the pure intrinsic value of the spread. If we see a move ITM too soon prior to expiration, we can see extrinsic value losses, even if we're in our max profit zone. For this reason, we may hold ratio spreads closer to expiration, since we pass through our profit zone before we hit our loss zone.",
+    "For earnings trade ratio spreads, we typically go into the weekly cycle which is atypical - this is because we want the stock to move towards our spread, and we need extrinsic value to be close to zero to see profits on the long spread if we get the desired stock price move in our favor."
+  ]
+}

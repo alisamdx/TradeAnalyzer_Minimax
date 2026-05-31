@@ -1,0 +1,45 @@
+{
+  "slug": "call-broken-wing-butterfly",
+  "name": "Call Broken Wing Butterfly",
+  "category": "omnidirectional",
+  "description": "Omnidirectional, defined risk trade consisting of a long call spread with a wider OTM short call spread to finance the trade and receive a net credit overall. No risk to the downside, but max profit at the short strikes.",
+  "directionalAssumption": "Omnidirectional",
+  "ivEnvironment": "High",
+  "dte": "15 to 45",
+  "probabilityOfProfit": "60% to 80%",
+  "setup": [
+    "Leg 1: Buy ATM/OTM call",
+    "Leg 2: Sell two further OTM calls",
+    "Leg 3: Buy much further OTM call"
+  ],
+  "maxProfit": "Width of Long Spread + Credit Received",
+  "maxLoss": "Short Spread - Long Spread - Credit Received",
+  "profitTarget": "50% of Credit Received or 25% of Long Spread Width",
+  "breakeven": "Short Call Strike + (Long Spread Width + Credit Received)",
+  "greeks": {
+    "delta": "Short / Dynamic",
+    "vega": "Short",
+    "theta": "Long",
+    "gamma": "Dynamic"
+  },
+  "howItWorks": {
+    "ideal": "Call broken wing butterflies are similar to call ratio spreads, but are defined risk. Max profit would occur at the short strikes, where the long call spread would realize max value and the short call spread would be worthless at expiration. The spread has no risk to the downside if routed for a credit so the position can also be profitable with a downside move in the stock.",
+    "notIdeal": "If the spread moves fully ITM at expiration, you will realize max loss on the trade. Additionally, if the stock price moves too quickly towards the spread, you can see an extrinsic value loss on the trade since the bulk of the potential profit on a trade like this requires extrinsic value to be low.",
+    "defensiveTactics": "If the long spread is ITM and near max value, we sell out of it to retain that value and either hold the credit spread, or manipulate the trade into something else like an iron condor."
+  },
+  "volatility": {
+    "ifExpands": "This trade doesn't have a ton of exposure to vega since it's defined risk, but this could result in an extrinsic value marked loss.",
+    "ifContracts": "This trade doesn't have a ton of exposure to vega since it's defined risk, but this may make it easier to 'fly off' the risk by rolling into symmetrical butterfly for a debit less than the credit received up front."
+  },
+  "expiration": {
+    "ifOTM": "The strikes would expire worthless and we can keep our credit collected up front as profit.",
+    "ifITM": "The trade would be at max loss if it is completely ITM. We close the trade to avoid assignment and move on.",
+    "other": [
+      "If Partially ITM at Expiration: We can sell out of the spread for a profit if we're in our profit zone, since our long spread will increase in value and the short spread will decrease in value if it is OTM."
+    ]
+  },
+  "takeaways": [
+    "Call Broken Wing Butterflies are frequently used in products that have call skew, because we can make them wider or collect a larger credit up front.",
+    "Broken Wing Butterflies don't appreciate in value too much until closer to expiration when extrinsic value gets closer to zero, so our initial goal with BWBs is to remove risk by rolling into a symmetrical butterfly if the spread moves further OTM. If we can do this for a debit less than the initial credit received, we lock in a small profit and remove initial risk from the trade."
+  ]
+}

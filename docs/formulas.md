@@ -317,3 +317,32 @@ NYSE trading days are calendar weekdays excluding the NYSE_HOLIDAYS set
 
 Implemented in `src/main/services/iv-history-service.ts`.
 
+## Portfolio Greeks (ENH-3)
+
+Computed in `PortfolioView.tsx` from `PositionEtrade` data and position records.
+
+### portfolio-greeks
+
+```
+For each open position:
+  isOption = positionType ∈ { 'CSP', 'CC' }
+  multiplier = isOption ? quantity × 100 : quantity
+
+Net Delta      = Σ (et.delta × multiplier)            [all open positions with ET data]
+               + Σ (quantity)                          [stock positions with no ET data; assumes Δ=1/share]
+
+Total Theta/day = Σ (et.theta × multiplier)            [options only; result is $/day]
+
+Total Vega     = Σ (et.vega × multiplier)              [options only; result is $ per 1% IV move]
+
+BP Used %      = totalCapitalDeployed / accountSize × 100
+  where totalCapitalDeployed = Σ (entryPrice × quantity)         [Stock]
+                              + Σ (strikePrice × quantity × 100)  [CSP / CC]
+```
+
+Greeks (delta, theta, vega) come from E*Trade Complete response — per-share values.
+The × 100 multiplier converts to per-contract position-level impact.
+`accountSize` is a user-configured setting (default 0 = BP% hidden).
+
+Implemented in `greeksSummary` useMemo in `src/renderer/src/views/PortfolioView.tsx`.
+

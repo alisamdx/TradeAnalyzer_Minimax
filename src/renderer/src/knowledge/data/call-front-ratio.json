@@ -1,0 +1,44 @@
+{
+  "slug": "call-front-ratio",
+  "name": "Call Front-Ratio Spread",
+  "category": "omnidirectional",
+  "description": "Omnidirectional, undefined risk trade consisting of a long call spread with an extra short call to finance the trade and receive a net credit overall. No risk to the downside, but max profit at the short strike to the upside.",
+  "directionalAssumption": "Omnidirectional",
+  "ivEnvironment": "High",
+  "dte": "15 to 45",
+  "probabilityOfProfit": "60% to 80%",
+  "setup": [
+    "Leg 1: Buy an ATM or OTM call",
+    "Leg 2: Sell two further OTM calls for a net credit"
+  ],
+  "maxProfit": "Width of Long Spread + Credit Received",
+  "maxLoss": "Unlimited",
+  "profitTarget": "50% of Credit Received or 25% of Long Spread Width",
+  "breakeven": "Short Call Strike + (Long Spread Width + Credit Received)",
+  "greeks": {
+    "delta": "Short / Dynamic",
+    "vega": "Short",
+    "theta": "Long",
+    "gamma": "Dynamic"
+  },
+  "howItWorks": {
+    "ideal": "The stock moves towards the short strikes at expiration. Call ratio spreads are omnidirectional trades, so they can be profitable from a decrease in the stock price or a move up towards the short strikes. Max profit occurs when the long call spread is fully ITM at the short strike, so ideally the stock moves towards the short strike near expiration.",
+    "notIdeal": "The stock moves well above the short strikes and above our breakevens. This results in the stock passing through our profit zone and into our loss zone, because our short call has undefined risk.",
+    "defensiveTactics": "The naked call portion of the call ratio spread is where the risk lies. Rolling the naked call out in time for a credit will add extrinsic value and more time without adding additional risk. The long call spread would be near max value if we're seeing losses overall, and can be closed for an additional credit against the remaining short call."
+  },
+  "volatility": {
+    "ifExpands": "Our spread could be losing value if volatility expansion is paired with a bearish stock price move. We can close for a profit, or we can look to purchase an OTM call to create a symmetrical butterfly. If we can buy the call for less than the credit received up front, we lock in a small profit and remove buying power and initial risk from the trade.",
+    "ifContracts": "We may hold - this may result in an extrinsic value loss if volatility contraction is paired with a bullish move in the stock price, but extrinsic value will always go to zero by expiration."
+  },
+  "expiration": {
+    "ifOTM": "All strikes will expire worthless and we keep the credit received on entry as profit.",
+    "ifITM": "We close the long call spread to secure value, and either roll the remaining short call out in time or consider closing the trade overall.",
+    "other": [
+      "If Partially ITM at Expiration: We can likely sell out of the long call spread for some sort of profit. We consider closing the entire trade if this is the case."
+    ]
+  },
+  "takeaways": [
+    "For us to see profits on the long spread if it goes ITM, we need extrinsic value to be close to zero so we can realize the pure intrinsic value of the spread. If we see a move ITM too soon prior to expiration, we can see extrinsic value losses, even if we're in our max profit zone. For this reason, we may hold ratio spreads closer to expiration, since we pass through our profit zone before we hit our loss zone.",
+    "For earnings trade ratio spreads, we typically go into the weekly cycle which is atypical - this is because we want the stock to move towards our spread, and we need extrinsic value to be close to zero to see profits on the long spread if we get the desired stock price move in our favor."
+  ]
+}

@@ -1,0 +1,45 @@
+{
+  "slug": "call-butterfly",
+  "name": "Call Butterfly",
+  "category": "bullish",
+  "description": "Symmetrical long call spread and short call spread that share the same short strikes. A low probability trade because we pay for it up front and need the stock to be within our strikes at expiration.",
+  "directionalAssumption": "Bullish",
+  "ivEnvironment": "Any",
+  "dte": "15 to 45",
+  "probabilityOfProfit": "20% to 40%",
+  "setup": [
+    "Leg 1: Buy an ATM/OTM call",
+    "Leg 2: Sell 2 further OTM calls",
+    "Leg 3: Buy further OTM call for equidistant spreads"
+  ],
+  "maxProfit": "Width of Long Spread - Debit Paid",
+  "maxLoss": "Debit Paid",
+  "profitTarget": "25% of Long Spread Width",
+  "breakeven": "Long Call Strike + Debit Paid",
+  "greeks": {
+    "delta": "Long / Dynamic",
+    "vega": "Long",
+    "theta": "Short",
+    "gamma": "Dynamic"
+  },
+  "howItWorks": {
+    "ideal": "The stock is between our strikes at expiration and we sell out of the butterfly for a higher amount than we bought it for.",
+    "notIdeal": "The spread is completely ITM or OTM and we realize max loss of the debit paid up front.",
+    "defensiveTactics": "If the long spread is ITM and near max value, we sell out of it to retain that value and either hold the credit spread, or manipulate the trade into something else like an iron condor."
+  },
+  "volatility": {
+    "ifExpands": "This trade will likely be unaffected - narrow defined risk trades do not have too much vega exposure.",
+    "ifContracts": "This trade will likely be unaffected - narrow defined risk trades do not have too much vega exposure."
+  },
+  "expiration": {
+    "ifOTM": "We close the trade for max loss to avoid assignment.",
+    "ifITM": "We close the trade for max loss to avoid assignment.",
+    "other": [
+      "If Partially ITM at Expiration: We look to sell the butterfly for a profit at expiration. We avoid holding through expiration as this can result in unwanted shares."
+    ]
+  },
+  "takeaways": [
+    "These trades are low probability because the range of success is so small relative to the normal stock price movement for the cycle. We like to roll into equidistant butterflies from broken wing butterflies for this reason, as opposed to starting with them.",
+    "The less time we have to expiration, the more we can expect to get out of a butterfly if the stock price moves through it. Too much extrinsic value will prevent the trade from moving much at all."
+  ]
+}

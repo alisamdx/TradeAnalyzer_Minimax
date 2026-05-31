@@ -1,0 +1,44 @@
+{
+  "slug": "call-zebra",
+  "name": "Call ZEBRA",
+  "category": "bullish",
+  "description": "A bullish back-ratio spread, where we are buying two ITM calls and selling one ATM call to remove all extrinsic value and achieve 100 positive deltas.",
+  "directionalAssumption": "Bullish",
+  "ivEnvironment": "Any",
+  "dte": "Any",
+  "probabilityOfProfit": "50%",
+  "setup": [
+    "Leg 1: Buy 2 ITM calls",
+    "Leg 2: Sell 1 ATM call (to remove all extrinsic value)"
+  ],
+  "maxProfit": "Unlimited",
+  "maxLoss": "Debit Paid",
+  "profitTarget": "25% of Debit Paid",
+  "breakeven": "Short Call Strike + Any Extrinsic Value Paid",
+  "greeks": {
+    "delta": "Long / Dynamic",
+    "vega": "Flat",
+    "theta": "Flat",
+    "gamma": "Dynamic"
+  },
+  "howItWorks": {
+    "ideal": "The stock price moves up. This is a synthetic long stock position that acts like a married put, where you have 100 shares of upside profit potential with limited risk below your long call strikes. Unlike a married put, the call ZEBRA gives you defined risk without having to pay extrinsic value for the protection (if set up with zero extrinsic value on entry).",
+    "notIdeal": "The stock price moves down. The synthetic stock position will lose value at almost the same rate as owning 100 shares of stock, but losses will taper off below the long call strikes, since the most you can lose is the debit paid for the trade.",
+    "defensiveTactics": "In an effort to reduce the cost of the trade, we can roll the short call down a few strikes if the stock sells off. This will reduce the long delta amount on a rally, but if that never happens, we reduce the overall debit paid on the trade by rolling the call down."
+  },
+  "volatility": {
+    "ifExpands": "This trade will likely be unaffected as we start with zero extrinsic value, unless this is paired with a bearish move in the stock price, which could result in losses.",
+    "ifContracts": "The trade could be profitable if this is paired with a bullish move in the stock price."
+  },
+  "expiration": {
+    "ifOTM": "We will realize max loss on the trade, which is the debit paid up front.",
+    "ifITM": "We close the trade for a profit.",
+    "other": [
+      "If Partially ITM at Expiration: We close the trade and restructure in a later cycle if we want to stay in. We want to avoid assignment by closing the trade prior to expiration."
+    ]
+  },
+  "takeaways": [
+    "This can be a great long stock replacement strategy with limited risk if you're directionally correct. The risk profile for a call zebra is similar to a married put, since our risk is capped at the debit paid for the spread.",
+    "Long term cycles & high IV products will be more expensive trades on entry. Short term cycles and low IV products will be cheaper trades on entry. We still need the directional move to be profitable."
+  ]
+}

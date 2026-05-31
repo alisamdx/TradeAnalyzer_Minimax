@@ -1,0 +1,44 @@
+{
+  "slug": "call-calendar",
+  "name": "Call Calendar Spread",
+  "category": "bullish",
+  "description": "A neutral, defined risk trade where we are betting on an increase in IV while the stock stays near our strikes, or for the stock to stay stagnant and our short premium to decay faster than our long premium.",
+  "directionalAssumption": "Bullish",
+  "ivEnvironment": "Low",
+  "dte": "45",
+  "probabilityOfProfit": "N/A",
+  "setup": [
+    "Leg 1: Buy call in a long-term expiration cycle",
+    "Leg 2: Sell call in a near-term expiration cycle"
+  ],
+  "maxProfit": "Variable",
+  "maxLoss": "Debit Paid",
+  "profitTarget": "10-25% of Debit Paid",
+  "breakeven": "Variable",
+  "greeks": {
+    "delta": "Long",
+    "vega": "Long",
+    "theta": "Short",
+    "gamma": "Dynamic"
+  },
+  "howItWorks": {
+    "ideal": "The stock trickles up to the call calendar strikes over time. This will result in an expansion in the value of the long call option with a contraction in value of the near-term short call option, resulting in a net profit.",
+    "notIdeal": "The stock goes well beyond the call calendar strikes in either direction. This will result in the options losing their extrinsic value, which is what you paid for the trade. Intrinsic value is completely offset, resulting in a loss. This is an extrinsic value trade.",
+    "defensiveTactics": "If the short call option loses a lot of value, we can roll it out in time closer to the long call option's expiration. This will result in a reduction in our net debit and max loss, but it will desensitize the trade's ability to appreciate in value with the short option now closer to the long option's expiration."
+  },
+  "volatility": {
+    "ifExpands": "The call calendar could see a profit, as long as this expansion is not paired with a bearish move. A bearish move may have a greater effect than the increase in implied volatility.",
+    "ifContracts": "This could result in a profit if the contraction is paired with a bullish move, as the long option could still increase in value to a greater degree than the short option."
+  },
+  "expiration": {
+    "ifOTM": "The short call will expire worthless, and you can hold the long call or roll the short call into a new expiration to reduce cost basis further.",
+    "ifITM": "The short call will convert to 100 short shares of stock. Your long call still protects your risk on the short shares, but buying power will increase dramatically. Close or roll the short call to avoid this.",
+    "other": [
+      "If ATM at Expiration: As time passes, the short option will decay faster than the long option, and ultimately expire worthless. This is the ideal spot for the stock to be and will have the highest potential profit at this point."
+    ]
+  },
+  "takeaways": [
+    "This strategy is typically not one we will hold to expiration, and we temper our profit target because the spread cannot go too far ITM or OTM.",
+    "This is a short-term, vol expansion trade where we are purely trading the extrinsic value and IV spread between the short front-month option and the long back-month option. For this reason, we look for a quick exit if we see profitability and a move towards our spread."
+  ]
+}

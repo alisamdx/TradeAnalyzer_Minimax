@@ -615,6 +615,24 @@ table.items-table {
   background: var(--border);
   margin: 4px 8px;
 }
+.nav-section-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 8px 2px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #4b5563;
+}
+.nav-section-label::before,
+.nav-section-label::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
 .nav-btn:hover { background: rgba(255,255,255,0.05); }
 .nav-btn.active {
   background: rgba(88, 166, 255, 0.12);

@@ -1,0 +1,44 @@
+{
+  "slug": "put-calendar",
+  "name": "Put Calendar Spread",
+  "category": "bearish",
+  "description": "A neutral, defined risk trade where we are betting on an increase in IV while the stock stays near our strikes, or for the stock to stay stagnant and our short premium to decay faster than our long premium.",
+  "directionalAssumption": "Bearish",
+  "ivEnvironment": "Low",
+  "dte": "45",
+  "probabilityOfProfit": "N/A",
+  "setup": [
+    "Leg 1: Buy put in a long-term expiration cycle",
+    "Leg 2: Sell put in a near-term expiration cycle"
+  ],
+  "maxProfit": "Variable",
+  "maxLoss": "Debit Paid",
+  "profitTarget": "10-25% of Debit Paid",
+  "breakeven": "Variable",
+  "greeks": {
+    "delta": "Short",
+    "vega": "Long",
+    "theta": "Short",
+    "gamma": "Dynamic"
+  },
+  "howItWorks": {
+    "ideal": "The stock trickles down to the put calendar strikes over time. This will result in an expansion in the value of the long put option with a contraction in value of the near-term short put option, resulting in a net profit.",
+    "notIdeal": "The stock goes well beyond the put calendar strikes in either direction. This will result in the options losing their extrinsic value, which is what you paid for the trade. Intrinsic value is completely offset, resulting in a loss. This is an extrinsic value trade.",
+    "defensiveTactics": "If the short put option loses a lot of value, we can roll it out in time closer to the long put option's expiration. This will result in a reduction in our net debit and max loss, but it will desensitize the trade's ability to appreciate in value with the short option now closer to the long option's expiration."
+  },
+  "volatility": {
+    "ifExpands": "The put calendar will likely see a profit, especially if this is paired with a bearish move in the stock price.",
+    "ifContracts": "The put calendar will likely see losses, especially if this is paired with a bullish move moving the strikes further OTM."
+  },
+  "expiration": {
+    "ifOTM": "The short put will expire worthless, and you can hold the long put or roll the short put into a new expiration to reduce cost basis further.",
+    "ifITM": "The short put will convert to 100 shares of stock. Your long put still protects your risk on the shares, but buying power will increase dramatically. Close or roll the short put to avoid this.",
+    "other": [
+      "If ATM at Expiration: As time passes, the short option will decay faster than the long option, and ultimately expire worthless. This is the ideal spot for the stock to be and will have the highest potential profit at this point."
+    ]
+  },
+  "takeaways": [
+    "This strategy is typically not one we will hold to expiration, and we temper our profit target because the spread cannot go too far ITM or OTM.",
+    "This is a short-term, vol expansion trade where we are purely trading the extrinsic value and IV spread between the short front-month option and the long back-month option. For this reason, we look for a quick exit if we see profitability and a move towards our spread."
+  ]
+}

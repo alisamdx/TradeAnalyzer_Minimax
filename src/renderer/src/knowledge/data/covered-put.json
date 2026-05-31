@@ -1,0 +1,42 @@
+{
+  "slug": "covered-put",
+  "name": "Covered Put",
+  "category": "bearish",
+  "description": "Bearish stock position where we are selling an ATM/OTM put against 100 short shares of stock to improve the cost basis of the shares.",
+  "directionalAssumption": "Bearish",
+  "ivEnvironment": "High",
+  "dte": "45",
+  "probabilityOfProfit": "50% to 70%",
+  "setup": [
+    "Leg 1: Short 100 shares of stock",
+    "Leg 2: Sell an ATM/OTM put for every 100 shares"
+  ],
+  "maxProfit": "Distance Between Short Stock & Short Put + Credit Received",
+  "maxLoss": "Unlimited",
+  "profitTarget": "50% of Max Profit",
+  "breakeven": "Short Stock Price + Credit Received",
+  "greeks": {
+    "delta": "Short",
+    "vega": "Short",
+    "theta": "Long",
+    "gamma": "Dynamic"
+  },
+  "howItWorks": {
+    "ideal": "The stock moves down to the short put strike by the expiration of the contract. This results in max extrinsic value collected from the short put, as well as max value gained on the short shares down to the put strike.",
+    "notIdeal": "The stock goes up. This results in losses in the shares you are short, although the short put will lose value and hedge the loss on those shares.",
+    "defensiveTactics": "If the short put loses value, we can roll it out in time to add extrinsic value to the trade, improving the cost basis on the short shares to the upside. We can also move the put strike up in the same cycle to achieve the same cost basis reduction result, or a combination of rolling out in time and up a few strikes. Avoid rolling the put above your breakeven on the trade overall to ensure potential profit if the stock sells off."
+  },
+  "volatility": {
+    "ifExpands": "We may hold - this may result in an extrinsic value loss in the short put, but extrinsic value goes to zero by expiration. If this is paired with a stock price selloff, we may be able to close for a winner.",
+    "ifContracts": "The short put will likely lose a good amount of value, especially if this is paired with a bullish move. We can adjust the put to hedge our short shares if this is the case."
+  },
+  "expiration": {
+    "ifOTM": "The short put will expire worthless - we can deploy another one in a further expiration, or lean short with the shares.",
+    "ifITM": "The short put will be exercised and we will 'be put' 100 shares of stock. This will offset our 100 short shares and we will realize max profit.",
+    "other": []
+  },
+  "takeaways": [
+    "Covered puts are cost basis reduction strategies where we are limiting our downside profit potential to guarantee a credit and cost basis reduction on the short shares. We should place our short put at a level we're comfortable capping our profit potential at.",
+    "If we want to preserve our short shares and avoid assignment, we can roll the short put out in time and down a few strikes for a small credit before the short put moves ITM. This moves the existing extrinsic value to the next cycle, and moving our short strike down gives us more potential profit on the short shares."
+  ]
+}

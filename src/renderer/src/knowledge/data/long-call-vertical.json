@@ -1,0 +1,44 @@
+{
+  "slug": "long-call-vertical",
+  "name": "Long Call Vertical Spread",
+  "category": "bullish",
+  "description": "Bullish defined risk debit trade where we are betting on the stock moving above our short call strike price by the expiration of our contract.",
+  "directionalAssumption": "Bullish",
+  "ivEnvironment": "Any",
+  "dte": "45",
+  "probabilityOfProfit": "40% to 60%",
+  "setup": [
+    "Leg 1: Buy an ITM call",
+    "Leg 2: Sell an ATM/OTM call"
+  ],
+  "maxProfit": "Distance Between Strikes - Debit Paid",
+  "maxLoss": "Debit Paid",
+  "profitTarget": "50% of Max Profit",
+  "breakeven": "Long Call Strike + Debit Paid",
+  "greeks": {
+    "delta": "Long",
+    "vega": "Flat",
+    "theta": "Flat",
+    "gamma": "Flat"
+  },
+  "howItWorks": {
+    "ideal": "The stock increases in value. A long call spread is a directionally bullish position - so ideally the stock price rises so that the long call strike increases in value to a greater degree than the short call, resulting in a profit.",
+    "notIdeal": "The stock decreases in value. The value of the long call spread would decrease, which means the spread will be less valuable to sell to close compared to the original purchase price, which would result in a loss.",
+    "defensiveTactics": "Long call spreads trade for a debit, which means extending duration actually increases risk since we'd pay another debit to roll the trade out in time. We can roll the short call down closer to the long call to reduce the net debit on the trade, but we don't roll below our breakeven price."
+  },
+  "volatility": {
+    "ifExpands": "We may hold the position - this may be paired with a sell-off in the stock price, but our risk is capped at the debit paid so we typically let the trade play out. However, we can close the trade if our assumption has changed.",
+    "ifContracts": "We may hold the position - if this is paired with a bullish move in the stock price, we may see profit in the spread and we can close if we're happy with the trade."
+  },
+  "expiration": {
+    "ifOTM": "The trade will be at max loss, as both options will have lost all value. We let the trade expire worthless.",
+    "ifITM": "Both options will be trading for intrinsic value, and the trade will be at max profit. To avoid assignment fees and the possibility of one of the options moving OTM, close the trade prior to expiration.",
+    "other": [
+      "If Partially ITM at Expiration: We either close the trade or roll out in time to extend it. We avoid letting these trades go through expiration because if the long call is ITM and the short call is OTM, we can come back to the market in the next trading session with 100 shares of stock."
+    ]
+  },
+  "takeaways": [
+    "Vertical spreads have a less volatile P/L because of the long option that defines our risk. If we see profit on the short option, we will see losses on the long option and vice versa. For this reason, we should expect to be in spread trades longer than naked options to reach profit targets.",
+    "With spreads, it's important to realize that options will be exercised if they are ITM and held through expiration. If one strike is ITM and the other moves OTM, close the trade prior to expiration to avoid unwanted shares."
+  ]
+}

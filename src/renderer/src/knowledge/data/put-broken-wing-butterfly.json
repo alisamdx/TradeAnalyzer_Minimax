@@ -1,0 +1,45 @@
+{
+  "slug": "put-broken-wing-butterfly",
+  "name": "Put Broken Wing Butterfly",
+  "category": "omnidirectional",
+  "description": "Omnidirectional, defined risk trade consisting of a long put spread with a wider OTM short put spread to finance the trade and receive a net credit overall. No risk to the upside, but max profit at the short strikes.",
+  "directionalAssumption": "Omnidirectional",
+  "ivEnvironment": "High",
+  "dte": "15 to 45",
+  "probabilityOfProfit": "60% to 80%",
+  "setup": [
+    "Leg 1: Buy ATM/OTM put",
+    "Leg 2: Sell two further OTM puts",
+    "Leg 3: Buy much further OTM put"
+  ],
+  "maxProfit": "Width of Long Spread + Credit Received",
+  "maxLoss": "Short Spread - Long Spread - Credit Received",
+  "profitTarget": "50% of Credit Received or 25% of Long Spread Width",
+  "breakeven": "Short Put Strike - (Long Spread Width + Credit Received)",
+  "greeks": {
+    "delta": "Long / Dynamic",
+    "vega": "Short",
+    "theta": "Long",
+    "gamma": "Dynamic"
+  },
+  "howItWorks": {
+    "ideal": "Put broken wing butterflies are similar to put ratio spreads, but are defined risk. Max profit occurs at the short strikes, where the long put spread would realize max value and the short put spread would be worthless at expiration. The spread has no risk to the upside if entered for a credit, so the position can also be profitable with an upside move in the stock.",
+    "notIdeal": "If the spread moves fully ITM at expiration, you will realize max loss on the trade. Additionally, if the stock price moves too quickly towards the spread, you can see an extrinsic value loss on the trade since the bulk of the potential profit on a trade like this requires extrinsic value to be low.",
+    "defensiveTactics": "If the long spread is ITM and near max value, we sell out of it to retain that value and either hold the credit spread, or adjust the trade into something else like an iron condor."
+  },
+  "volatility": {
+    "ifExpands": "This trade doesn't have a ton of exposure to vega since it's defined risk, but this could result in an extrinsic value marked loss.",
+    "ifContracts": "This trade doesn't have a ton of exposure to vega since it's defined risk, but this may make it easier to 'fly off' the risk by rolling into a symmetrical butterfly for a debit that's less than the credit received upon entry."
+  },
+  "expiration": {
+    "ifOTM": "The strikes would expire worthless and we can keep our credit collected up front as profit.",
+    "ifITM": "The trade would be at max loss if it is completely ITM. We close the trade to avoid assignment and move on.",
+    "other": [
+      "If Partially ITM at Expiration: We can sell out of the spread for a profit if we're in our profit zone, since our long spread will increase in value and the short spread will decrease in value if it is OTM."
+    ]
+  },
+  "takeaways": [
+    "Put Broken Wing Butterflies are frequently used in products that have put skew, because we can make them wider or collect a larger credit up front.",
+    "Broken Wing Butterflies don't appreciate in value too much until closer to expiration when extrinsic value gets closer to zero, so our initial goal with BWBs is to remove risk by rolling into a symmetrical butterfly if the spread moves further OTM. If we can do this for a debit less than the initial credit received, we lock in a small profit and remove initial risk from the trade."
+  ]
+}

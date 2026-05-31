@@ -1,0 +1,42 @@
+{
+  "slug": "poor-mans-covered-put",
+  "name": "Poor Man's Covered Put",
+  "category": "bearish",
+  "description": "A bearish synthetic covered put strategy that consists of an ITM long-term put to replicate 100 shares of short stock, with an ATM/OTM short put in a near-term cycle to reduce cost basis.",
+  "directionalAssumption": "Bearish",
+  "ivEnvironment": "Low",
+  "dte": "45 to 60",
+  "probabilityOfProfit": "50% to 60%",
+  "setup": [
+    "Leg 1: Buy an ITM put in a long-term expiration cycle",
+    "Leg 2: Sell an OTM put in a near-term expiration cycle"
+  ],
+  "maxProfit": "Distance Between Strikes - Debit Paid + Estimated Extrinsic Value in Long Option",
+  "maxLoss": "Debit Paid",
+  "profitTarget": "50% of Estimated Max Profit",
+  "breakeven": "Long Put Strike - Debit Paid",
+  "greeks": {
+    "delta": "Short",
+    "vega": "Long",
+    "theta": "Flat",
+    "gamma": "Dynamic"
+  },
+  "howItWorks": {
+    "ideal": "The stock moves down to the short put strike by the expiration of the contract. This results in max extrinsic value collected from the short put, as well as max value gained on the long put option that acts as a synthetic short stock position, plus any remaining extrinsic value in the long option as well.",
+    "notIdeal": "The stock goes up. This results in losses on the long put you own, although the short put will lose value and hedge the loss on the long put, and you would not lose as much as being short 100 shares of stock if there is a big rally.",
+    "defensiveTactics": "If the short put loses value, we can roll it out in time to add extrinsic value to the trade, further reducing the cost basis on the position. We can also move the put strike up in the same cycle to achieve the same cost basis reduction result, or a combination of rolling out in time and down a few strikes. Avoid rolling the put above your breakeven on the trade overall to ensure potential profit if the stock sells off."
+  },
+  "volatility": {
+    "ifExpands": "The long put may appreciate in value to a greater degree than the short put and the trade may become profitable, especially if this is paired with a bearish move.",
+    "ifContracts": "The long put may decrease in value to a greater degree than the short put, especially if this is paired with a bullish move. We typically hold if this is the case, or close if our assumption has changed."
+  },
+  "expiration": {
+    "ifOTM": "We will realize max loss on the trade, which is the debit paid up front.",
+    "ifITM": "The trade will be at max profit - we close the trade.",
+    "other": []
+  },
+  "takeaways": [
+    "Make sure the debit paid is no more than 75% the width of the strikes. If you pay a debit higher than the width of the strikes and there is a huge move where the spread moves ITM, you can lose money as the strikes lose extrinsic value and start to trade with pure intrinsic value.",
+    "The idea here is to buy a long-term low volatility contract and take advantage of heightened IV in the front-month by placing our short contract there. This setup can be very efficient for products with pending news, or big realized movements that pump up the near-term IV."
+  ]
+}

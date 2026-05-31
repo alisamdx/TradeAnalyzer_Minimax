@@ -1,0 +1,41 @@
+{
+  "slug": "short-naked-put",
+  "name": "Short Naked Put",
+  "category": "neutral-bullish",
+  "description": "Neutral-Bullish undefined risk credit trade where we're betting against the stock moving below our strike price by the expiration of our contract.",
+  "directionalAssumption": "Neutral-Bullish",
+  "ivEnvironment": "High",
+  "dte": "45",
+  "probabilityOfProfit": "60% to 80%",
+  "setup": [
+    "Leg 1: Sell an OTM put"
+  ],
+  "maxProfit": "Credit Received",
+  "maxLoss": "Put Strike x 100 - Credit Received",
+  "profitTarget": "50% of Max Profit",
+  "breakeven": "Put Strike - Credit Received",
+  "greeks": {
+    "delta": "Long",
+    "vega": "Short",
+    "theta": "Long",
+    "gamma": "Short"
+  },
+  "howItWorks": {
+    "ideal": "The stock increases in value. As time passes, and if volatility decreases, the extrinsic value of the put will decrease. As long as we buy back the put for less than we sold it for, we lock in a profit.",
+    "notIdeal": "The stock decreases in value. As the stock goes down, the value of the put option will increase, which means you may see losses if the option is worth more than you sold it for to start the trade.",
+    "defensiveTactics": "Short naked options can always be rolled out in time for a credit without adding any additional risk. Rolling out in time extends duration and increases extrinsic value in the position, which lowers your breakeven on the trade overall."
+  },
+  "volatility": {
+    "ifExpands": "We may hold - this may result in an extrinsic value loss, but extrinsic value will always go to zero by expiration.",
+    "ifContracts": "Close for a winner if we reach our desired profit target and the strike is still OTM."
+  },
+  "expiration": {
+    "ifOTM": "The put will expire worthless, and we keep the credit received up front as profit.",
+    "ifITM": "If the option is ITM through expiration, the put seller will be put 100 shares of that stock at the strike price. To avoid this, we roll out the position in time or close it.",
+    "other": []
+  },
+  "takeaways": [
+    "Short puts can be profitable if the stock stays the same, goes up, or even goes down a little bit as long as the strike remains OTM through expiration. The many ways to be profitable translates to a high probability trade when sold OTM.",
+    "If a short put goes ITM, it will replicate the same risk profile as a covered call on the same strike, so many traders tend to roll short puts perpetually vs closing for a loss. However, everyone has a different risk tolerance."
+  ]
+}

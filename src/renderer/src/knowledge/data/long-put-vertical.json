@@ -1,0 +1,44 @@
+{
+  "slug": "long-put-vertical",
+  "name": "Long Put Vertical Spread",
+  "category": "bearish",
+  "description": "Bearish, defined risk debit trade where we are betting on the stock moving below our short put strike price by the expiration of our contract.",
+  "directionalAssumption": "Bearish",
+  "ivEnvironment": "Any",
+  "dte": "45",
+  "probabilityOfProfit": "50% to 60%",
+  "setup": [
+    "Leg 1: Buy an ITM put",
+    "Leg 2: Sell an ATM/OTM put"
+  ],
+  "maxProfit": "Distance Between Strikes - Debit Paid",
+  "maxLoss": "Debit Paid",
+  "profitTarget": "50% of Max Profit",
+  "breakeven": "Long Put Strike - Debit Paid",
+  "greeks": {
+    "delta": "Short",
+    "vega": "Flat",
+    "theta": "Flat",
+    "gamma": "Flat"
+  },
+  "howItWorks": {
+    "ideal": "The stock decreases in value. A long put spread is a directionally bearish position - so ideally the stock price decreases so that the long put strike increases in value to a greater degree than the short put.",
+    "notIdeal": "The stock increases in value. The value of the long put spread would decrease in value, which means the spread will be less valuable to sell to close compared to the original purchase price, which would result in a loss.",
+    "defensiveTactics": "Long put spreads are debit trades which means extending duration actually increases risk since we'd pay another debit to roll the trade out in time. We can roll the short put up closer to the long put to bring in more credit and reduce our net debit paid and reduce max profit potential, but we do not roll above our breakeven price."
+  },
+  "volatility": {
+    "ifExpands": "Extrinsic value may have increased - but this is primarily a bearish trade and if the increase in IV is paired with a bearish move, we may see profitability and can close if we are happy with the exit price.",
+    "ifContracts": "Extrinsic value may have decreased, but this could be paired with a rally in the product. We may consider holding the position, or rolling the short option up closer to the long option, but not above the breakeven price."
+  },
+  "expiration": {
+    "ifOTM": "The trade will be at max loss, as both options will have lost all of their value. We let the trade expire worthless.",
+    "ifITM": "The trade will be at max profit. We close the trade.",
+    "other": [
+      "If Partially ITM at Expiration: We either roll out in time to extend the trade or close it. We avoid letting these trades go through expiration, because if the long put is ITM and the short put is OTM we can come back to the market the next trading session with 100 shares of short stock."
+    ]
+  },
+  "takeaways": [
+    "Vertical spreads have a less volatile P/L because of the long option that defines our risk. If we see profit on the short option, we will see losses on the long option and vice versa. For this reason, we should expect to be in spread trades longer than naked options to reach profit targets.",
+    "With spreads, it's important to realize that options will be exercised if they are ITM and held through expiration. If one strike is ITM and the other moves OTM, close the trade prior to expiration to avoid unwanted shares."
+  ]
+}

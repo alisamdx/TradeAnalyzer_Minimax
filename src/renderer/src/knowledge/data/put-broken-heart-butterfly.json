@@ -1,0 +1,44 @@
+{
+  "slug": "put-broken-heart-butterfly",
+  "name": "Put Broken Heart Butterfly",
+  "category": "omnidirectional",
+  "description": "A disconnected Put Broken Wing Butterfly where we separate the long and short put spreads for a wide max profit space to the downside, but still route for a credit to keep probability of success high.",
+  "directionalAssumption": "Omnidirectional",
+  "ivEnvironment": "High",
+  "dte": "45",
+  "probabilityOfProfit": "60% to 80%",
+  "setup": [
+    "Leg 1: Buy an OTM put spread",
+    "Leg 2: Sell a further, wider OTM put spread to route trade for a credit"
+  ],
+  "maxProfit": "Width of Long Spread + Credit Received",
+  "maxLoss": "Short Spread - Long Spread - Credit Received",
+  "profitTarget": "25%-50% of Long Spread Width",
+  "breakeven": "Subtract Long Spread Width & Credit Received from Short Put Strike",
+  "greeks": {
+    "delta": "Flat / Dynamic",
+    "vega": "Short",
+    "theta": "Long",
+    "gamma": "Dynamic"
+  },
+  "howItWorks": {
+    "ideal": "The long put spread moves ITM and the short put spread remains OTM at expiration. This results in max profit, as the long put spread appreciates to full value and the short put spread expires worthless.",
+    "notIdeal": "The short put spread moves ITM at expiration, as that results in max loss.",
+    "defensiveTactics": "We can sell out of our long put spread to retain value and roll the short put spread out in time. We can use that short put spread and turn the position into an iron condor, or jade lizard, by adding a short call spread in that new expiration."
+  },
+  "volatility": {
+    "ifExpands": "The trade will likely be unaffected - narrow spread trades have low exposure to greeks.",
+    "ifContracts": "The trade will likely be unaffected - narrow spread trades have low exposure to greeks."
+  },
+  "expiration": {
+    "ifOTM": "The trade will expire worthless and we keep the credit collected up front as profit.",
+    "ifITM": "If completely ITM at expiration, the trade will realize max loss. If just the long spread is ITM and the short spread is OTM, the trade will be at max profit.",
+    "other": [
+      "If Partially ITM at Expiration: We close the trade or roll it out in time to avoid assignment - we don't want to have unwanted shares if one option expires ITM and the other OTM in a spread."
+    ]
+  },
+  "takeaways": [
+    "We give up almost all credit up front on this trade so that we can create a large distance between the long and short spread. This means we may have to hold closer to expiration to see decent profitability, and we need a directional move so the long spread moves ATM/ITM.",
+    "If there is put skew, where OTM puts are trading for a higher premium than equidistant OTM calls, the distance between the long and short spread can be maximized and we can still route the trade for a credit. For this reason, we like to place these trades on the skewed side if it aligns with our directional assumption."
+  ]
+}

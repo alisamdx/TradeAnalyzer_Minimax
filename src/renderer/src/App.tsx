@@ -24,10 +24,11 @@ import { FiltersView } from './views/FiltersView.js';
 import { TestApiView } from './views/TestApiView.js';
 import { PayoffView } from './views/PayoffView.js';
 import { IvHistoryView } from './views/IvHistoryView.js';
+import { KnowledgeView } from './views/KnowledgeView.js';
 
 declare const __APP_VERSION__: string;
 
-type View = 'watchlists' | 'screener' | 'filters' | 'analysis' | 'validate' | 'portfolio' | 'opportunity' | 'settings' | 'alerts' | 'data' | 'optionsChain' | 'payoff' | 'agent' | 'backtest' | 'leapsCsp' | 'collaredLeaps' | 'testApi' | 'ivHistory';
+type View = 'watchlists' | 'screener' | 'filters' | 'analysis' | 'validate' | 'portfolio' | 'opportunity' | 'settings' | 'alerts' | 'data' | 'optionsChain' | 'payoff' | 'agent' | 'backtest' | 'leapsCsp' | 'collaredLeaps' | 'testApi' | 'ivHistory' | 'knowledge';
 
 type NavEntry = {
   id: number;
@@ -566,6 +567,7 @@ export function App() {
       case 'collaredLeaps': return <CollaredLeapsView />;
       case 'testApi': return <TestApiView />;
       case 'ivHistory': return <IvHistoryView />;
+      case 'knowledge': return <KnowledgeView />;
       case 'settings': return (
         <SettingsView
           etradeWarning={etradeWarning}
@@ -730,6 +732,8 @@ export function App() {
               ← Back
             </button>
           )}
+          {/* ── Data ── */}
+          <div className="nav-section-label">Data</div>
           <button
             className={`nav-btn ${currentView === 'data' ? 'active' : ''}`}
             onClick={() => navigateSidebar('data')}
@@ -754,18 +758,14 @@ export function App() {
           >
             🎛️ Filters
           </button>
+
+          {/* ── Analysis ── */}
+          <div className="nav-section-label">Analysis</div>
           <button
             className={`nav-btn ${currentView === 'payoff' ? 'active' : ''}`}
             onClick={() => navigateSidebar('payoff')}
           >
             📐 Payoff
-          </button>
-          <div className="nav-divider" />
-          <button
-            className={`nav-btn ${currentView === 'analysis' ? 'active' : ''}`}
-            onClick={() => navigateSidebar('analysis')}
-          >
-            📊 Analysis
           </button>
           <button
             className={`nav-btn ${currentView === 'validate' ? 'active' : ''}`}
@@ -779,6 +779,15 @@ export function App() {
           >
             📉 Options
           </button>
+
+          {/* ── Strategy ── */}
+          <div className="nav-section-label">Strategy</div>
+          <button
+            className={`nav-btn ${currentView === 'analysis' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('analysis')}
+          >
+            📊 Analysis
+          </button>
           <button
             className={`nav-btn ${currentView === 'leapsCsp' ? 'active' : ''}`}
             onClick={() => navigateSidebar('leapsCsp')}
@@ -791,19 +800,15 @@ export function App() {
           >
             🛡️ Collared LEAPS
           </button>
-          <div className="nav-divider" />
           <button
-            className={`nav-btn ${currentView === 'ivHistory' ? 'active' : ''}`}
-            onClick={() => navigateSidebar('ivHistory')}
+            className={`nav-btn ${currentView === 'knowledge' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('knowledge')}
           >
-            📊 IV History
+            📚 Knowledge
           </button>
-          <button
-            className={`nav-btn ${currentView === 'alerts' ? 'active' : ''}`}
-            onClick={() => navigateSidebar('alerts')}
-          >
-            🔔 Alerts
-          </button>
+
+          {/* ── Settings ── */}
+          <div className="nav-section-label">Settings</div>
           <button
             className={`nav-btn ${currentView === 'settings' ? 'active' : ''}`}
             onClick={() => navigateSidebar('settings')}
@@ -816,7 +821,21 @@ export function App() {
           >
             🔬 Test API
           </button>
-          <div className="nav-divider" />
+          <button
+            className={`nav-btn ${currentView === 'alerts' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('alerts')}
+          >
+            🔔 Alerts
+          </button>
+          <button
+            className={`nav-btn ${currentView === 'ivHistory' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('ivHistory')}
+          >
+            📊 IV History
+          </button>
+
+          {/* ── Personal ── */}
+          <div className="nav-section-label">Personal</div>
           <button
             className={`nav-btn ${currentView === 'portfolio' ? 'active' : ''}`}
             onClick={() => navigateSidebar('portfolio')}
