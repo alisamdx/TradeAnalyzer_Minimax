@@ -305,7 +305,7 @@ function buildApi() {
       invoke<{ success: boolean; count?: number; error?: string; type: string }>('historical:fetchAndStore', ticker, type, options),
     needsRefresh: (ticker: string, dataType: 'financials' | 'prices', maxAgeDays?: number) =>
       invoke<boolean>('historical:needsRefresh', ticker, dataType, maxAgeDays),
-    getUniverseTickers: (universe: 'sp500' | 'russell1000' | 'both') =>
+    getUniverseTickers: (universe: 'sp500' | 'russell1000' | 'both' | 'etf') =>
       invoke<string[]>('historical:getUniverseTickers', universe),
     getStalePriceTickers: () =>
       invoke<string[]>('historical:getStalePriceTickers'),
@@ -890,8 +890,8 @@ function buildApi() {
   };
 
   const ivHistory = {
-    getCoverage:         (universe: 'sp500' | 'russell1000' | 'both') => invoke<IvHistoryCoverage>('iv-history:get-coverage', universe),
-    getGaps:             (universe: 'sp500' | 'russell1000' | 'both') => invoke<IvHistoryGapSummary>('iv-history:get-gaps', universe),
+    getCoverage:         (universe: 'sp500' | 'russell1000' | 'both' | 'etf') => invoke<IvHistoryCoverage>('iv-history:get-coverage', universe),
+    getGaps:             (universe: 'sp500' | 'russell1000' | 'both' | 'etf') => invoke<IvHistoryGapSummary>('iv-history:get-gaps', universe),
     startBackfill:       (phase: IvHistoryBackfillPhase) => invoke<{ processed: number; skipped: number; failed: number }>('iv-history:start-backfill', phase),
     cancel:              () => invoke<boolean>('iv-history:cancel'),
     getRank:             (ticker: string) => invoke<IvRankResult>('iv-history:get-rank', ticker),

@@ -189,7 +189,7 @@ export class IvHistoryService {
   constructor(
     private readonly db: DbHandle,
     private readonly ivolatility: IVolatilityProvider,
-    private readonly getConstituents: (u: 'sp500' | 'russell1000') => ConstituentRow[],
+    private readonly getConstituents: (u: 'sp500' | 'russell1000' | 'etf') => ConstituentRow[],
   ) {}
 
   // ── Storage ──────────────────────────────────────────────────────────────────
@@ -271,10 +271,10 @@ export class IvHistoryService {
 
   // ── Coverage stats ────────────────────────────────────────────────────────────
 
-  getCoverage(universe: 'sp500' | 'russell1000' | 'both'): IvHistoryCoverage {
+  getCoverage(universe: 'sp500' | 'russell1000' | 'both' | 'etf'): IvHistoryCoverage {
     type CountRow = { ticker: string; cnt: number };
 
-    const universes: Array<'sp500' | 'russell1000'> =
+    const universes: Array<'sp500' | 'russell1000' | 'etf'> =
       universe === 'both' ? ['sp500', 'russell1000'] : [universe];
 
     const tickers = new Set<string>();
@@ -319,8 +319,8 @@ export class IvHistoryService {
 
   // ── Gap detection ─────────────────────────────────────────────────────────────
 
-  getGaps(universe: 'sp500' | 'russell1000' | 'both'): { pairs: Array<{ ticker: string; date: string }>; summary: IvHistoryGapSummary } {
-    const universes: Array<'sp500' | 'russell1000'> =
+  getGaps(universe: 'sp500' | 'russell1000' | 'both' | 'etf'): { pairs: Array<{ ticker: string; date: string }>; summary: IvHistoryGapSummary } {
+    const universes: Array<'sp500' | 'russell1000' | 'etf'> =
       universe === 'both' ? ['sp500', 'russell1000'] : [universe];
 
     const tickers = new Set<string>();
@@ -439,7 +439,8 @@ export class IvHistoryService {
     if (phase === 'gap_fill') {
       const sp500    = this.getConstituents('sp500').map(r => r.ticker.toUpperCase());
       const russell  = this.getConstituents('russell1000').map(r => r.ticker.toUpperCase());
-      const allTickers = [...new Set([...sp500, ...russell])];
+      const etf      = this.getConstituents('etf').map(r => r.ticker.toUpperCase());
+      const allTickers = [...new Set([...sp500, ...russell, ...etf])];
       tickerWork = allTickers
         .map(ticker => ({ ticker, from: this.tickerFromDate(ticker, backfillStart) }))
         .filter(w => w.from <= yesterday);

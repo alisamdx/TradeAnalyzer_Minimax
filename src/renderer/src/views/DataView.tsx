@@ -16,7 +16,7 @@ interface DataViewProps {
 
 export function DataView({ isSyncing, syncProgress, syncUniverseSelection, onSyncUniverseChange, onStartSync, onCancelSync }: DataViewProps) {
   const [stats, setStats] = useState<CacheStats | null>(null);
-  const [meta, setMeta] = useState<Record<'sp500' | 'russell1000', ConstituentsMeta | null>>({ sp500: null, russell1000: null });
+  const [meta, setMeta] = useState<Record<'sp500' | 'russell1000' | 'etf', ConstituentsMeta | null>>({ sp500: null, russell1000: null, etf: null });
   const [error, setError] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
 
@@ -31,6 +31,13 @@ export function DataView({ isSyncing, syncProgress, syncUniverseSelection, onSyn
   const [wlRange, setWlRange] = useState<PriceRange>('5Y');
   const [isFetchingWl, setIsFetchingWl] = useState(false);
   const [wlProgress, setWlProgress] = useState<{ done: number; total: number; ticker: string } | null>(null);
+
+  // Universe historical price fetch
+  const [univPriceUniverse, setUnivPriceUniverse] = useState<'sp500' | 'russell1000' | 'etf'>('etf');
+  const [univPriceRange, setUnivPriceRange] = useState<PriceRange>('5Y');
+  const [isFetchingUniv, setIsFetchingUniv] = useState(false);
+  const [univProgress, setUnivProgress] = useState<{ done: number; total: number; ticker: string } | null>(null);
+  const univCancelRef = useRef(false);
 
   // IV History gap fill
   const [ivKeyConfigured, setIvKeyConfigured] = useState(false);
@@ -51,7 +58,7 @@ export function DataView({ isSyncing, syncProgress, syncUniverseSelection, onSyn
     try {
       const currentStats = await window.api.cache.getStats();
       setStats(currentStats);
-      for (const idx of ['sp500', 'russell1000'] as const) {
+      for (const idx of ['sp500', 'russell1000', 'etf'] as const) {
         const m = await window.api.screen.getMeta(idx);
         setMeta((prev) => ({ ...prev, [idx]: m }));
       }
@@ -117,7 +124,7 @@ export function DataView({ isSyncing, syncProgress, syncUniverseSelection, onSyn
     }
   };
 
-  const importCsv = async (index: 'sp500' | 'russell1000') => {
+  const importCsv = async (index: 'sp500' | 'russell1000' | 'etf') => {
     try {
       setStatusMsg(`Importing ${index} from CSV...`);
       const result = await window.api.screen.importConstituents('', index);
@@ -129,6 +136,42 @@ export function DataView({ isSyncing, syncProgress, syncUniverseSelection, onSyn
       } else {
         setError((e as Error).message);
       }
+    }
+  };
+
+  const fetchUniversePrices = async () => {
+    univCancelRef.current = false;
+    setIsFetchingUniv(true);
+    setUnivProgress(null);
+    setError(null);
+    setStatusMsg(null);
+    try {
+      const tickers = await window.api.historical.getUniverseTickers(univPriceUniverse);
+      let done = 0;
+      const failed: string[] = [];
+      for (const ticker of tickers) {
+        if (univCancelRef.current) break;
+        setUnivProgress({ done, total: tickers.length, ticker });
+        try {
+          await window.api.historical.fetchPrices(ticker, univPriceRange);
+        } catch {
+          failed.push(ticker);
+        }
+        done++;
+      }
+      setUnivProgress(null);
+      if (univCancelRef.current) {
+        setStatusMsg(`Cancelled after ${done} / ${tickers.length} tickers.`);
+      } else if (failed.length > 0) {
+        setStatusMsg(`Done. ${done - failed.length}/${tickers.length} fetched. Failed: ${failed.join(', ')}`);
+      } else {
+        setStatusMsg(`Fetched ${univPriceRange} price history for all ${tickers.length} ${univPriceUniverse.toUpperCase()} tickers.`);
+      }
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setIsFetchingUniv(false);
+      setUnivProgress(null);
     }
   };
 
@@ -262,7 +305,7 @@ export function DataView({ isSyncing, syncProgress, syncUniverseSelection, onSyn
 
   const cancelPriceGapFill = () => { priceGapCancelRef.current = true; };
 
-  const isBusy = isFetchingPrices || isFetchingWl;
+  const isBusy = isFetchingPrices || isFetchingWl || isFetchingUniv;
 
   const card: React.CSSProperties = { padding: '16px 18px', border: '1px solid var(--border)', borderRadius: '8px', background: 'var(--bg-card, var(--bg))' };
   const cardTitle: React.CSSProperties = { margin: '0 0 4px', fontSize: '14px', fontWeight: 700 };
@@ -298,15 +341,20 @@ export function DataView({ isSyncing, syncProgress, syncUniverseSelection, onSyn
           {/* 1. Ticker Lists */}
           <div style={card}>
             <h3 style={cardTitle}>1. Update Ticker Lists</h3>
-            <p style={hint}>Scrape the latest index constituents from Wikipedia.</p>
+            <p style={hint}>Scrape equity index constituents from Wikipedia. ETF list is curated (import CSV to override).</p>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
               <button onClick={() => refreshConstituents('sp500')} className="primary">↻ S&amp;P 500</button>
               <span className="meta">{meta.sp500 ? `Updated ${new Date(meta.sp500.refreshedAt).toLocaleDateString()}` : 'Not loaded'}</span>
             </div>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
               <button onClick={() => refreshConstituents('russell1000')} className="primary">↻ Russell 1000</button>
               <button onClick={() => importCsv('russell1000')} className="secondary">Import CSV</button>
               <span className="meta">{meta.russell1000 ? `Updated ${new Date(meta.russell1000.refreshedAt).toLocaleDateString()}` : 'Not loaded'}</span>
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-muted)', minWidth: 100 }}>ETF Universe</span>
+              <button onClick={() => importCsv('etf')} className="secondary">Import CSV</button>
+              <span className="meta">{meta.etf ? `Updated ${new Date(meta.etf.refreshedAt).toLocaleDateString()}` : 'Using bundled list'}</span>
             </div>
           </div>
 
@@ -314,11 +362,11 @@ export function DataView({ isSyncing, syncProgress, syncUniverseSelection, onSyn
           <div style={card}>
             <h3 style={cardTitle}>2. Sync Market Data</h3>
             <p style={hint}>Download current prices &amp; fundamentals from Polygon.io for all tickers in the selected universe.</p>
-            <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-              {(['sp500', 'russell1000', 'both'] as Universe[]).map((u) => (
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+              {(['sp500', 'russell1000', 'both', 'etf'] as Universe[]).map((u) => (
                 <button key={u} className={`univ-btn ${syncUniverseSelection === u ? 'active' : ''}`}
                   onClick={() => onSyncUniverseChange(u)} disabled={isSyncing}>
-                  {u === 'sp500' ? 'S&P 500' : u === 'russell1000' ? 'Russell 1000' : 'Both'}
+                  {u === 'sp500' ? 'S&P 500' : u === 'russell1000' ? 'Russell 1000' : u === 'both' ? 'Both' : 'ETFs'}
                 </button>
               ))}
             </div>
@@ -350,7 +398,7 @@ export function DataView({ isSyncing, syncProgress, syncUniverseSelection, onSyn
           {/* 3. IV History Sync */}
           <div style={card}>
             <h3 style={cardTitle}>3. IV History Sync</h3>
-            <p style={hint}>Fetch missing daily IV readings from IVolatility.com for S&amp;P 500 + Russell 1000. One API call per ticker — run weekly.</p>
+            <p style={hint}>Fetch missing daily IV readings from IVolatility.com for S&amp;P 500, Russell 1000 + ETF Universe. One API call per ticker — run weekly.</p>
             {!ivKeyConfigured ? (
               <p style={{ ...hint, color: 'var(--warning, #ff9800)', margin: 0 }}>
                 IVolatility API key not configured — add it in <strong>Settings → API &amp; Data</strong>.
@@ -444,6 +492,36 @@ export function DataView({ isSyncing, syncProgress, syncUniverseSelection, onSyn
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 3, fontSize: '0.8em', color: 'var(--text-muted)' }}>
                     <span>{wlProgress.done} / {wlProgress.total}</span>
                     <span>Fetching: <strong>{wlProgress.ticker}</strong></span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Universe bulk */}
+            <div style={{ borderTop: '1px solid var(--border)', paddingTop: 14 }}>
+              <div style={{ fontSize: '0.78em', fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Universe Bulk Load</div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                {(['sp500', 'russell1000', 'etf'] as const).map((u) => (
+                  <button key={u} className={`univ-btn ${univPriceUniverse === u ? 'active' : ''}`}
+                    onClick={() => setUnivPriceUniverse(u)} disabled={isBusy}>
+                    {u === 'sp500' ? 'S&P 500' : u === 'russell1000' ? 'Russell 1000' : 'ETFs'}
+                  </button>
+                ))}
+                <div style={{ display: 'flex', gap: 4 }}>
+                  {PRICE_RANGES.map((r) => (
+                    <button key={r} className={`univ-btn ${univPriceRange === r ? 'active' : ''}`} onClick={() => setUnivPriceRange(r)} disabled={isBusy}>{r}</button>
+                  ))}
+                </div>
+                {isFetchingUniv
+                  ? <button className="danger" onClick={() => { univCancelRef.current = true; }} style={{ padding: '6px 12px' }}>Stop</button>
+                  : <button className="primary" onClick={fetchUniversePrices} disabled={isBusy}>↓ Fetch All</button>}
+              </div>
+              {isFetchingUniv && univProgress && (
+                <div style={{ marginTop: 10 }}>
+                  <progress value={univProgress.done} max={univProgress.total} style={{ width: '100%', height: 7 }} />
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 3, fontSize: '0.8em', color: 'var(--text-muted)' }}>
+                    <span>{univProgress.done} / {univProgress.total}</span>
+                    <span>Fetching: <strong>{univProgress.ticker}</strong></span>
                   </div>
                 </div>
               )}

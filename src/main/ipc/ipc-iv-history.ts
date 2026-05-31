@@ -43,7 +43,7 @@ export function registerIvHistoryIpc(
   // Coverage summary for a universe
   ipcMain.handle(
     'iv-history:get-coverage',
-    wrap((universe: 'sp500' | 'russell1000' | 'both') =>
+    wrap((universe: 'sp500' | 'russell1000' | 'both' | 'etf') =>
       service.getCoverage(universe)
     ),
   );
@@ -51,7 +51,7 @@ export function registerIvHistoryIpc(
   // Gap detection — returns summary + pair count (pairs not sent over IPC to keep payload small)
   ipcMain.handle(
     'iv-history:get-gaps',
-    wrap((universe: 'sp500' | 'russell1000' | 'both') => {
+    wrap((universe: 'sp500' | 'russell1000' | 'both' | 'etf') => {
       const { summary } = service.getGaps(universe);
       return summary;
     }),

@@ -177,12 +177,14 @@ export function registerHistoricalIpc(
   // ─── Universe + Gap-fill helpers ─────────────────────────────────────────
 
   // Returns all constituent tickers for a universe — used for bulk price load
-  ipcMain.handle('historical:getUniverseTickers', wrap((universe: 'sp500' | 'russell1000' | 'both') => {
+  ipcMain.handle('historical:getUniverseTickers', wrap((universe: 'sp500' | 'russell1000' | 'both' | 'etf') => {
     const filter = universe === 'sp500'
       ? `WHERE index_name = 'sp500'`
       : universe === 'russell1000'
         ? `WHERE index_name = 'russell1000'`
-        : '';
+        : universe === 'etf'
+          ? `WHERE index_name = 'etf'`
+          : `WHERE index_name IN ('sp500', 'russell1000')`;
     const rows = db.prepare(
       `SELECT DISTINCT ticker FROM constituents ${filter} ORDER BY ticker`
     ).all() as { ticker: string }[];
