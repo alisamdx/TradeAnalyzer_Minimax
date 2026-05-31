@@ -272,10 +272,11 @@ export function OpportunityView() {
           <span><strong style={{ color: '#2ecc71' }}>{withIv}</strong> <span style={{ color: '#888' }}>with IV rank</span></span>
           <span><strong style={{ color: '#3498db' }}>{withFund}</strong> <span style={{ color: '#888' }}>with fundamentals</span></span>
           <span><strong style={{ color: '#9b59b6' }}>{withTech}</strong> <span style={{ color: '#888' }}>with technical score</span></span>
-          <span style={{ color: '#888', fontStyle: 'italic' }}>
+          <span style={{ color: '#f39c12', fontStyle: 'italic' }}>
+            ⚠ Score ≠ buy signal —{' '}
             {strategy === 'wheel' || strategy === 'csp' || strategy === 'spreads'
-              ? '↑ High IV rank = more premium to sell'
-              : '↑ Low IV rank = cheaper options to buy'}
+              ? 'optimized for premium selling. High IV rank = rich premium to collect.'
+              : 'optimized for options buying. Low IV rank = cheaper contracts.'}
           </span>
         </div>
       )}
@@ -309,7 +310,7 @@ export function OpportunityView() {
                 <th style={th}>Company</th>
                 <th style={thNum} onClick={() => handleSort('lastPrice')}>Price{sortIndicator('lastPrice')}</th>
                 <th style={thNum} onClick={() => handleSort('dayChangePct')}>Day%{sortIndicator('dayChangePct')}</th>
-                <th style={thCtr} onClick={() => handleSort('compositeScore')}>Score{sortIndicator('compositeScore')}</th>
+                <th style={thCtr} onClick={() => handleSort('compositeScore')} title="Composite opportunity score optimized for the selected strategy — NOT a buy signal. High score = favorable conditions to sell premium (Wheel/CSP) or buy options (Bullish/Bearish).">Score{sortIndicator('compositeScore')}</th>
                 <th style={thNum} onClick={() => handleSort('fundamentalsScore')}>Fund{sortIndicator('fundamentalsScore')}</th>
                 <th style={thNum} onClick={() => handleSort('ivRank')}>IV Rank{sortIndicator('ivRank')}</th>
                 <th style={thNum} onClick={() => handleSort('technicalScore')}>Tech{sortIndicator('technicalScore')}</th>
