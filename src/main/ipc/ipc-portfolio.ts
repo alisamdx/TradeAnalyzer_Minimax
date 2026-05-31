@@ -164,6 +164,21 @@ export function registerPortfolioIpc(db: Database, analysisService?: AnalysisSer
     }
   });
 
+  ipcMain.handle('portfolio:etrade:sync-closed', async (_e, accountIdKey?: string): Promise<IpcResult<EtradeSyncResult>> => {
+    try {
+      const creds = {
+        consumerKey:    secureGet(db, 'etradeConsumerKey'),
+        consumerSecret: secureGet(db, 'etradeConsumerSecret'),
+        accessToken:    secureGet(db, 'etradeAccessToken'),
+        accessSecret:   secureGet(db, 'etradeAccessSecret'),
+      };
+      const result = await etradePortfolio.syncClosedPositions(db, creds, accountIdKey);
+      return ok(result);
+    } catch (err) {
+      return fail(err);
+    }
+  });
+
   ipcMain.handle('portfolio:etrade:lastSync', (_e): IpcResult<string | null> => {
     try {
       return ok(etradePortfolio.getLastSyncedAt(db));

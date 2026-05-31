@@ -117,6 +117,7 @@ export function PortfolioView() {
 
   // E*Trade sync state
   const [syncBusy, setSyncBusy]           = useState(false);
+  const [syncClosedBusy, setSyncClosedBusy] = useState(false);
   const [lastSyncedAt, setLastSyncedAt]   = useState<string | null>(null);
 
   // Analysis state
@@ -299,6 +300,17 @@ export function PortfolioView() {
       loadData();
     } catch (e) { setError(`Sync failed: ${(e as Error).message}`); }
     finally { setSyncBusy(false); }
+  };
+
+  const handleSyncClosed = async () => {
+    setSyncClosedBusy(true); setError(null);
+    try {
+      const result = await window.api.portfolio.etrade.syncClosed();
+      const msg = `Imported: ${result.positionsUpserted} closed positions, ${result.positionsSkipped} already existed`;
+      setStatusMsg(result.errors.length > 0 ? `${msg}. Errors: ${result.errors.join('; ')}` : msg);
+      loadData();
+    } catch (e) { setError(`Sync closed failed: ${(e as Error).message}`); }
+    finally { setSyncClosedBusy(false); }
   };
 
   // ─── Position analysis ────────────────────────────────────────────────────────
@@ -594,6 +606,19 @@ export function PortfolioView() {
       {activeTab !== 'advisor' && (
         <>
           {/* Analyze All button for open tab */}
+          {activeTab === 'closed' && (
+            <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
+              <button
+                onClick={handleSyncClosed}
+                disabled={syncClosedBusy}
+                style={{ padding: '4px 12px', background: '#1d4ed8', color: '#fff', border: 'none', borderRadius: 4, cursor: syncClosedBusy ? 'wait' : 'pointer', fontSize: 12 }}
+              >
+                {syncClosedBusy ? '⟳ Importing…' : '↓ Import Closed (YTD)'}
+              </button>
+              <span style={{ fontSize: 11, color: '#6b7280' }}>Pulls closed trades for the year from E*Trade transaction history</span>
+            </div>
+          )}
+
           {activeTab === 'open' && positions.length > 0 && (
             <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
               <button
@@ -627,7 +652,7 @@ export function PortfolioView() {
                 {sortedData.length === 0 ? (
                   <tr>
                     <td colSpan={columns.length} className="empty-cell">
-                      No {activeTab} positions. {activeTab === 'open' ? 'Click "+ Add Position" or "Sync E*Trade" to get started.' : 'No closed positions yet.'}
+                      No {activeTab} positions. {activeTab === 'open' ? 'Click "+ Add Position" or "Sync E*Trade" to get started.' : 'Click "Import Closed (YTD)" to pull closed trades from E*Trade.'}
                     </td>
                   </tr>
                 ) : (

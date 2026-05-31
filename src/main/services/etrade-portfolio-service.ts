@@ -45,6 +45,51 @@ interface EtradeProduct {
   strikePrice?: number;
 }
 
+// ─── Transaction API response shapes ─────────────────────────────────────────
+
+interface EtradeTxProduct {
+  symbol: string;
+  securityType: 'EQ' | 'OPTN' | string;
+  callPut?: 'CALL' | 'PUT';
+  strikePrice?: number;
+  expiryYear?: number;
+  expiryMonth?: number;
+  expiryDay?: number;
+}
+
+interface EtradeBrokerage {
+  transactionType: string;   // "Bought" | "Sold" | "EXPIRED" | "ASSIGNED" | "EXERCISED"
+  quantity: number;
+  price: number;
+  amount: number;
+  commission?: number;
+  product?: EtradeTxProduct;
+}
+
+interface EtradeTransaction {
+  transactionId: string;
+  transactionDate: number;   // epoch ms
+  amount: number;
+  description: string;
+  Brokerage?: EtradeBrokerage;
+}
+
+// Normalised single-leg record after classifying a transaction
+interface TxLeg {
+  txId: string;
+  date: string;              // YYYY-MM-DD
+  action: 'open' | 'close' | 'expired' | 'assigned';
+  secType: 'OPTN' | 'EQ';
+  ticker: string;
+  symbolKey: string;         // OCC for options, ticker for EQ
+  strikePrice: number | null;
+  expirationDate: string | null;
+  callPut: 'CALL' | 'PUT' | null;
+  qty: number;               // absolute contracts / shares
+  price: number;             // per share
+  commission: number;
+}
+
 interface EtradePositionComplete {
   delta?: number;
   gamma?: number;
@@ -108,6 +153,23 @@ function epochToDate(ms?: number): string {
 
 function num(v: number | undefined | null): number | null {
   return v != null && isFinite(v) ? v : null;
+}
+
+// ─── Internal closed-position record ─────────────────────────────────────────
+
+interface ClosedPosition {
+  ticker: string;
+  positionType: 'CSP' | 'CC' | 'Stock';
+  quantity: number;
+  entryPrice: number;
+  entryDate: string;
+  exitPrice: number;
+  exitDate: string;
+  exitNotes: string | null;
+  strikePrice: number | null;
+  expirationDate: string | null;
+  premiumReceived: number | null;
+  realizedPnl: number;
 }
 
 // ─── Service ──────────────────────────────────────────────────────────────────
@@ -383,6 +445,267 @@ export class EtradePortfolioService {
         now, now, now
       );
     }
+
+    return true;
+  }
+
+  // ─── Closed positions sync (transaction history) ─────────────────────────
+
+  /**
+   * Fetches YTD transaction history from E*Trade and reconstructs closed
+   * positions (single open + single close, or open + expiration).
+   * Skips positions that already exist in the local DB (dedup by ticker +
+   * type + entry_date + exit_date).
+   */
+  async syncClosedPositions(
+    db: Database,
+    creds: OAuthCredentials,
+    targetAccountIdKey?: string
+  ): Promise<EtradeSyncResult> {
+    const result: EtradeSyncResult = {
+      accountsScanned:   0,
+      positionsUpserted: 0,
+      positionsSkipped:  0,
+      errors:            [],
+      syncedAt:          new Date().toISOString(),
+    };
+
+    let accounts: EtradeAccount[];
+    try {
+      accounts = await this.listAccounts(creds);
+    } catch (err) {
+      result.errors.push(`Failed to list accounts: ${err instanceof Error ? err.message : String(err)}`);
+      return result;
+    }
+
+    const toSync = targetAccountIdKey
+      ? accounts.filter(a => a.accountIdKey === targetAccountIdKey)
+      : accounts;
+
+    const now   = new Date();
+    const start = `${now.getFullYear()}-01-01`;
+    const end   = now.toISOString().slice(0, 10);
+
+    for (const acct of toSync) {
+      result.accountsScanned++;
+      try {
+        const legs = await this.fetchTransactionLegs(acct.accountIdKey, start, end, creds);
+        const closed = this.matchClosedPositions(legs);
+        for (const pos of closed) {
+          try {
+            const inserted = this.insertClosedPosition(db, pos);
+            if (inserted) result.positionsUpserted++;
+            else          result.positionsSkipped++;
+          } catch (err) {
+            result.errors.push(`${pos.ticker}: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
+      } catch (err) {
+        result.errors.push(`Account ${acct.accountId}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    return result;
+  }
+
+  // ─── Fetch + classify all transaction legs ────────────────────────────────
+
+  private async fetchTransactionLegs(
+    accountIdKey: string,
+    startDate: string,
+    endDate: string,
+    creds: OAuthCredentials
+  ): Promise<TxLeg[]> {
+    const legs: TxLeg[] = [];
+    let marker: string | undefined;
+
+    // E*Trade uses MM/dd/yyyy for transaction date params
+    const fmt = (iso: string) => {
+      const [y, m, d] = iso.split('-') as [string, string, string];
+      return `${m}/${d}/${y}`;
+    };
+
+    do {
+      const params: Record<string, string> = {
+        startDate: fmt(startDate),
+        endDate:   fmt(endDate),
+        count:     '50',
+      };
+      if (marker) params['marker'] = marker;
+
+      const raw = await etradeGet(
+        `/v1/accounts/${accountIdKey}/transactions`,
+        params,
+        creds
+      ) as Record<string, unknown>;
+
+      const resp = raw['TransactionListResponse'] as Record<string, unknown> | undefined;
+      if (!resp) break;
+
+      const txArr = resp['Transaction'];
+      if (Array.isArray(txArr)) {
+        for (const tx of txArr as EtradeTransaction[]) {
+          const leg = this.classifyTransaction(tx);
+          if (leg) legs.push(leg);
+        }
+      }
+
+      marker = typeof resp['marker'] === 'string' ? resp['marker'] : undefined;
+    } while (marker);
+
+    return legs;
+  }
+
+  // ─── Classify one transaction into a TxLeg ───────────────────────────────
+
+  private classifyTransaction(tx: EtradeTransaction): TxLeg | null {
+    const br = tx.Brokerage;
+    if (!br?.product) return null;
+
+    const prod     = br.product;
+    const secType  = prod.securityType === 'OPTN' ? 'OPTN' : prod.securityType === 'EQ' ? 'EQ' : null;
+    if (!secType) return null;
+
+    const txType   = (br.transactionType ?? '').toLowerCase();
+    const date     = epochToDate(tx.transactionDate);
+    const qty      = Math.abs(br.quantity ?? 0);
+    const price    = Math.abs(br.price ?? 0);
+    const commission = Math.abs(br.commission ?? 0);
+
+    let action: TxLeg['action'];
+    if (/expired/i.test(txType))         action = 'expired';
+    else if (/assigned|exercise/i.test(txType)) action = 'assigned';
+    else if (/sold|sell/i.test(txType))  action = 'open';   // sold-to-open = short position opened
+    else if (/bought|buy/i.test(txType)) action = 'close';  // bought-to-close = short position closed
+    else return null;
+
+    let ticker: string;
+    let symbolKey: string;
+    let strikePrice: number | null = null;
+    let expirationDate: string | null = null;
+    let callPut: 'CALL' | 'PUT' | null = null;
+
+    if (secType === 'OPTN') {
+      const occ = parseOccSymbol(prod.symbol);
+      if (occ) {
+        ticker         = occ.ticker;
+        symbolKey      = prod.symbol.toUpperCase();
+        strikePrice    = occ.strike;
+        expirationDate = occ.expiry;
+        callPut        = occ.callPut;
+      } else {
+        ticker    = prod.symbol;
+        symbolKey = prod.symbol.toUpperCase();
+        strikePrice = num(prod.strikePrice);
+        callPut   = prod.callPut ?? null;
+        if (prod.expiryYear && prod.expiryMonth && prod.expiryDay) {
+          expirationDate = `${prod.expiryYear}-${String(prod.expiryMonth).padStart(2,'0')}-${String(prod.expiryDay).padStart(2,'0')}`;
+        }
+      }
+    } else {
+      ticker    = prod.symbol;
+      symbolKey = prod.symbol.toUpperCase();
+    }
+
+    return { txId: tx.transactionId, date, action, secType, ticker, symbolKey, strikePrice, expirationDate, callPut, qty, price, commission };
+  }
+
+  // ─── Match open legs to close/expiration legs ─────────────────────────────
+
+  private matchClosedPositions(legs: TxLeg[]): ClosedPosition[] {
+    // Group by symbol key
+    const bySymbol = new Map<string, TxLeg[]>();
+    for (const leg of legs) {
+      const arr = bySymbol.get(leg.symbolKey) ?? [];
+      arr.push(leg);
+      bySymbol.set(leg.symbolKey, arr);
+    }
+
+    const result: ClosedPosition[] = [];
+
+    for (const [, group] of bySymbol) {
+      // Sort chronologically
+      group.sort((a, b) => a.date.localeCompare(b.date));
+
+      const opens   = group.filter(l => l.action === 'open');
+      const closes  = group.filter(l => l.action === 'close' || l.action === 'expired' || l.action === 'assigned');
+
+      // Pair each open with its corresponding close (FIFO)
+      for (let i = 0; i < opens.length; i++) {
+        const open = opens[i]!;
+        const close = closes[i]; // may be undefined if still open or no matching close yet
+
+        // Only process if there's a matching close (or expiration)
+        if (!close) continue;
+
+        const secType = open.secType;
+        let positionType: 'CSP' | 'CC' | 'Stock';
+
+        if (secType === 'OPTN') {
+          positionType = open.callPut === 'PUT' ? 'CSP' : 'CC';
+        } else {
+          positionType = 'Stock';
+        }
+
+        const multiplier  = secType === 'OPTN' ? open.qty * 100 : open.qty;
+        const closePrice  = close.action === 'expired' ? 0 : close.price;
+        // For short options: profit = (open_price - close_price) × multiplier
+        // For long stock:    profit = (close_price - open_price) × multiplier
+        const realizedPnl = secType === 'OPTN'
+          ? (open.price - closePrice) * multiplier - open.commission - close.commission
+          : (closePrice - open.price) * multiplier - open.commission - close.commission;
+
+        result.push({
+          ticker:          open.ticker,
+          positionType,
+          quantity:        open.qty,
+          entryPrice:      open.price,
+          entryDate:       open.date,
+          exitPrice:       closePrice,
+          exitDate:        close.date,
+          exitNotes:       close.action === 'expired' ? 'Expired worthless' : close.action === 'assigned' ? 'Assigned' : null,
+          strikePrice:     open.strikePrice,
+          expirationDate:  open.expirationDate,
+          premiumReceived: secType === 'OPTN' ? open.price : null,
+          realizedPnl,
+        });
+      }
+    }
+
+    return result;
+  }
+
+  // ─── Insert one closed position (with dedup check) ────────────────────────
+
+  private insertClosedPosition(db: Database, pos: ClosedPosition): boolean {
+    // Dedup: skip if a closed position with same ticker + type + entry_date + exit_date exists
+    const existing = db.prepare(`
+      SELECT id FROM positions
+      WHERE ticker = ? AND position_type = ? AND entry_date = ? AND exit_date = ? AND status = 'closed'
+    `).get(pos.ticker, pos.positionType, pos.entryDate, pos.exitDate);
+
+    if (existing) return false;
+
+    const now = new Date().toISOString();
+    db.prepare(`
+      INSERT INTO positions (
+        ticker, position_type, quantity, entry_price, entry_date,
+        exit_price, exit_date, exit_notes,
+        strike_price, expiration_date, premium_received,
+        realized_pnl, status, created_at, updated_at
+      ) VALUES (
+        ?, ?, ?, ?, ?,
+        ?, ?, ?,
+        ?, ?, ?,
+        ?, 'closed', ?, ?
+      )
+    `).run(
+      pos.ticker, pos.positionType, pos.quantity, pos.entryPrice, pos.entryDate,
+      pos.exitPrice, pos.exitDate, pos.exitNotes,
+      pos.strikePrice, pos.expirationDate, pos.premiumReceived,
+      pos.realizedPnl,
+      now, now
+    );
 
     return true;
   }

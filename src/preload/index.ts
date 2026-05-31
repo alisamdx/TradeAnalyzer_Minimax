@@ -594,6 +594,7 @@ function buildApi() {
     etrade: {
       listAccounts: () => invoke<EtradeAccount[]>('portfolio:etrade:listAccounts'),
       sync: (accountIdKey?: string) => invoke<EtradeSyncResult>('portfolio:etrade:sync', accountIdKey),
+      syncClosed: (accountIdKey?: string) => invoke<EtradeSyncResult>('portfolio:etrade:sync-closed', accountIdKey),
       lastSync: () => invoke<string | null>('portfolio:etrade:lastSync'),
       listPositions: () => invoke<PositionEtrade[]>('portfolio:etrade:listPositions'),
     },
