@@ -1605,6 +1605,21 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
                       </span>
                     )}
                   </div>
+                  <div className="indicator-card">
+                    <span className="ind-label" title="IV Rank (0–100). Where current implied volatility sits within its 52-week high/low range. Below 30 = historically low IV — cheap options, potential coiling/compression setup. Above 70 = historically high IV — expensive options, elevated uncertainty. Computed from iv_history; requires Data Sync → IV History to be populated.">IV Rank</span>
+                    {result.ivData.ivRank !== null ? (
+                      <>
+                        <span className={`ind-value ${result.ivData.ivRank >= 70 ? 'overbought' : result.ivData.ivRank <= 30 ? 'oversold' : ''}`}>
+                          {result.ivData.ivRank.toFixed(0)}
+                        </span>
+                        <span className="ind-badge">
+                          {result.ivData.ivRank >= 70 ? 'High' : result.ivData.ivRank <= 30 ? 'Low' : 'Mid'}
+                        </span>
+                      </>
+                    ) : (
+                      <span className="ind-value meta">—</span>
+                    )}
+                  </div>
                 </div>
               </div>
             </>
