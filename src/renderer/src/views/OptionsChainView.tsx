@@ -253,6 +253,15 @@ export function OptionsChainView({ initialTicker, initialExpiry, clearInitialTic
               {currentIv !== null && (
                 <span className="oc-iv" style={{ color: ivColor(currentIv) }}>IV: {currentIv.toFixed(1)}%</span>
               )}
+              {selectedExpiration && (
+                <span style={{
+                  marginLeft: 8, padding: '2px 10px', borderRadius: 4,
+                  background: '#1e2a3a', border: '1px solid #2d3f55',
+                  color: '#93c5fd', fontSize: 13, fontWeight: 600,
+                }}>
+                  Expiry: {selectedExpiration} · {dteDays(selectedExpiration)}d
+                </span>
+              )}
             </div>
 
             {/* Expiration Tabs — Fridays only, current week + next 4 */}
