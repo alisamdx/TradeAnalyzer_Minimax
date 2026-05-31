@@ -36,7 +36,7 @@ export type IpcResult<T> = { ok: true; value: T } | { ok: false; error: { code: 
 
 // ─── Screener (Phase 2) ────────────────────────────────────────────────────────
 
-export type Universe = 'sp500' | 'russell1000' | 'both';
+export type Universe = 'sp500' | 'russell1000' | 'both' | 'etf';
 
 /** One enabled filter with its threshold(s). */
 export interface FilterDef {
@@ -63,7 +63,7 @@ export interface ScreenPreset {
 }
 
 export interface ConstituentsMeta {
-  indexName: 'sp500' | 'russell1000';
+  indexName: 'sp500' | 'russell1000' | 'etf';
   refreshedAt: string;
   source: 'bundled' | 'wikipedia' | 'csv';
 }

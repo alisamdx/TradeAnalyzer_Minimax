@@ -128,11 +128,11 @@ function buildApi() {
     deletePreset: (id: number) => invoke<void>('screen:delete-preset', id),
     getConstituents: (index: Universe) =>
       invoke<ConstituentRow[]>('screen:get-constituents', index),
-    getMeta: (index: 'sp500' | 'russell1000') =>
+    getMeta: (index: 'sp500' | 'russell1000' | 'etf') =>
       invoke<ConstituentsMeta | null>('screen:get-meta', index),
     refreshConstituents: (index: 'sp500' | 'russell1000') =>
       invoke<ConstituentsMeta>('screen:refresh-constituents', index),
-    importConstituents: (filePath: string, index: 'sp500' | 'russell1000') =>
+    importConstituents: (filePath: string, index: 'sp500' | 'russell1000' | 'etf') =>
       invoke<{ count: number }>('screen:import-constituents', { filePath, index }),
     run: (criteria: ScreenCriteria) =>
       invoke<{ runId: number; resultCount: number; passedCount: number; rows: ScreenResultRow[] }>('screen:run', criteria),

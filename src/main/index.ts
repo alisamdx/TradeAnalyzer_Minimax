@@ -239,6 +239,7 @@ app.whenReady().then(() => {
   // Bootstrap from bundled CSVs on first run so the DB has constituents.
   constituentsService.bootstrapFromBundled('sp500');
   constituentsService.bootstrapFromBundled('russell1000');
+  constituentsService.bootstrapFromBundled('etf');
 
   // Screener service — needs a function to get constituents (local closure).
   const getConstituents = (u: Parameters<typeof constituentsService.getConstituents>[0]) =>

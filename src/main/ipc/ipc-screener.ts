@@ -57,7 +57,7 @@ export function registerScreenerIpc(
     'screen:get-constituents',
     wrap((index: Universe) => constituentsService.getConstituents(index))
   );
-  ipcMain.handle('screen:get-meta', wrap((index: 'sp500' | 'russell1000') =>
+  ipcMain.handle('screen:get-meta', wrap((index: 'sp500' | 'russell1000' | 'etf') =>
     constituentsService.getMeta(index))
   );
   ipcMain.handle(
@@ -75,7 +75,7 @@ export function registerScreenerIpc(
     'screen:import-constituents',
     async (
       _e,
-      args: { filePath?: string; index?: 'sp500' | 'russell1000' }
+      args: { filePath?: string; index?: 'sp500' | 'russell1000' | 'etf' }
     ): Promise<IpcResult<{ count: number }>> => {
       try {
         const win = BrowserWindow.getFocusedWindow();

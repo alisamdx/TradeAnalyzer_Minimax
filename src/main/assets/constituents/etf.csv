@@ -1,0 +1,62 @@
+ticker,company_name,sector
+SPY,SPDR S&P 500 ETF Trust,Broad Market
+IVV,iShares Core S&P 500 ETF,Broad Market
+QQQ,Invesco QQQ Trust,Broad Market
+IWM,iShares Russell 2000 ETF,Broad Market
+DIA,SPDR Dow Jones Industrial Average ETF,Broad Market
+VTI,Vanguard Total Stock Market ETF,Broad Market
+MDY,SPDR S&P MidCap 400 ETF,Broad Market
+XLK,Technology Select Sector SPDR Fund,Sector - Technology
+XLF,Financial Select Sector SPDR Fund,Sector - Financials
+XLV,Health Care Select Sector SPDR Fund,Sector - Health Care
+XLY,Consumer Discretionary Select Sector SPDR Fund,Sector - Consumer Discretionary
+XLP,Consumer Staples Select Sector SPDR Fund,Sector - Consumer Staples
+XLE,Energy Select Sector SPDR Fund,Sector - Energy
+XLI,Industrial Select Sector SPDR Fund,Sector - Industrials
+XLB,Materials Select Sector SPDR Fund,Sector - Materials
+XLRE,Real Estate Select Sector SPDR Fund,Sector - Real Estate
+XLU,Utilities Select Sector SPDR Fund,Sector - Utilities
+XLC,Communication Services Select Sector SPDR Fund,Sector - Communication Services
+IWF,iShares Russell 1000 Growth ETF,Factor - Growth
+IWD,iShares Russell 1000 Value ETF,Factor - Value
+IWN,iShares Russell 2000 Value ETF,Factor - Value
+IWO,iShares Russell 2000 Growth ETF,Factor - Growth
+MTUM,iShares MSCI USA Momentum Factor ETF,Factor - Momentum
+USMV,iShares MSCI USA Min Vol Factor ETF,Factor - Low Volatility
+QUAL,iShares MSCI USA Quality Factor ETF,Factor - Quality
+VLUE,iShares MSCI USA Value Factor ETF,Factor - Value
+EFA,iShares MSCI EAFE ETF,International - Developed
+EEM,iShares MSCI Emerging Markets ETF,International - Emerging
+FXI,iShares China Large-Cap ETF,International - China
+EWJ,iShares MSCI Japan ETF,International - Japan
+EWZ,iShares MSCI Brazil Capped ETF,International - Brazil
+KWEB,KraneShares CSI China Internet ETF,International - China
+EWG,iShares MSCI Germany ETF,International - Europe
+IBB,iShares Biotechnology ETF,Sector - Biotech
+XBI,SPDR S&P Biotech ETF,Sector - Biotech
+SMH,VanEck Semiconductor ETF,Sector - Semiconductors
+SOXX,iShares Semiconductor ETF,Sector - Semiconductors
+XOP,SPDR S&P Oil & Gas Exploration & Production ETF,Sector - Energy
+OIH,VanEck Oil Services ETF,Sector - Energy
+KRE,SPDR S&P Regional Banking ETF,Sector - Financials
+KBE,SPDR S&P Bank ETF,Sector - Financials
+IYR,iShares U.S. Real Estate ETF,Sector - Real Estate
+VNQ,Vanguard Real Estate ETF,Sector - Real Estate
+XRT,SPDR S&P Retail ETF,Sector - Consumer Discretionary
+XHB,SPDR S&P Homebuilders ETF,Sector - Industrials
+XME,SPDR S&P Metals & Mining ETF,Sector - Materials
+ICLN,iShares Global Clean Energy ETF,Sector - Clean Energy
+GLD,SPDR Gold Shares,Commodities - Gold
+SLV,iShares Silver Trust,Commodities - Silver
+GDX,VanEck Gold Miners ETF,Commodities - Gold Miners
+GDXJ,VanEck Junior Gold Miners ETF,Commodities - Gold Miners
+USO,United States Oil Fund,Commodities - Oil
+TLT,iShares 20+ Year Treasury Bond ETF,Fixed Income
+HYG,iShares iBoxx High Yield Corporate Bond ETF,Fixed Income
+LQD,iShares iBoxx Investment Grade Corporate Bond ETF,Fixed Income
+VXX,iPath Series B S&P 500 VIX Short-Term Futures ETN,Volatility
+TQQQ,ProShares UltraPro QQQ,Leveraged
+SQQQ,ProShares UltraPro Short QQQ,Leveraged
+SPXL,Direxion Daily S&P 500 Bull 3x Shares,Leveraged
+SPXS,Direxion Daily S&P 500 Bear 3x Shares,Leveraged
+# source: curated ETF universe (options-liquid),,

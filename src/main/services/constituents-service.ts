@@ -14,7 +14,7 @@ function thisDir(): string {
   return dirname(fileURLToPath(import.meta.url));
 }
 
-function bundledPath(index: 'sp500' | 'russell1000'): string {
+function bundledPath(index: 'sp500' | 'russell1000' | 'etf'): string {
   return join(thisDir(), '..', 'assets', 'constituents', `${index}.csv`);
 }
 
@@ -75,13 +75,13 @@ export class ConstituentsService {
     return this.loadBundled(index);
   }
 
-  getMeta(index: 'sp500' | 'russell1000'): ConstituentsMeta | null {
+  getMeta(index: 'sp500' | 'russell1000' | 'etf'): ConstituentsMeta | null {
     const row = this.db
       .prepare(`SELECT index_name, refreshed_at, source FROM constituents_meta WHERE index_name = ?`)
       .get(index) as { index_name: string; refreshed_at: string; source: string } | undefined;
     if (!row) return null;
     return {
-      indexName: row.index_name as 'sp500' | 'russell1000',
+      indexName: row.index_name as 'sp500' | 'russell1000' | 'etf',
       refreshedAt: row.refreshed_at,
       source: row.source as 'bundled' | 'wikipedia' | 'csv'
     };
@@ -127,7 +127,7 @@ export class ConstituentsService {
   }
 
   /** Parse constituents from the bundled CSV (one-time setup). */
-  loadBundled(index: 'sp500' | 'russell1000'): ConstituentRow[] {
+  loadBundled(index: 'sp500' | 'russell1000' | 'etf'): ConstituentRow[] {
     const path = bundledPath(index);
     if (!existsSync(path)) return [];
     const text = readFileSync(path, 'utf8');
@@ -135,7 +135,7 @@ export class ConstituentsService {
   }
 
   /** Bootstrap the DB from a bundled CSV (used on first run if DB cache is empty). */
-  bootstrapFromBundled(index: 'sp500' | 'russell1000'): void {
+  bootstrapFromBundled(index: 'sp500' | 'russell1000' | 'etf'): void {
     const rows = this.loadBundled(index);
     if (rows.length === 0) return;
     const insertStmt = this.db.prepare(
@@ -154,7 +154,7 @@ export class ConstituentsService {
   }
 
   /** Import constituents from a CSV file (user override). */
-  importFromCsv(filePath: string, index: 'sp500' | 'russell1000'): number {
+  importFromCsv(filePath: string, index: 'sp500' | 'russell1000' | 'etf'): number {
     const text = readFileSync(filePath, 'utf8');
     const rows = parseConstituentsCsv(text);
     const insertStmt = this.db.prepare(
