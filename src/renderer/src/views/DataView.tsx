@@ -28,7 +28,7 @@ export function DataView({ isSyncing, syncProgress, syncUniverseSelection, onSyn
   // Watchlist historical price fetch
   const [watchlists, setWatchlists] = useState<Watchlist[]>([]);
   const [selectedWatchlistId, setSelectedWatchlistId] = useState<number | null>(null);
-  const [wlRange, setWlRange] = useState<PriceRange>('5Y');
+  const [wlRange, setWlRange] = useState<PriceRange>('2Y');
   const [isFetchingWl, setIsFetchingWl] = useState(false);
   const [wlProgress, setWlProgress] = useState<{ done: number; total: number; ticker: string } | null>(null);
 
