@@ -1258,7 +1258,7 @@ export interface PayoffAssessment {
 // ─── IV History (v0.17.0) ──────────────────────────────────────────────────────
 
 /** Which backfill phase to run. gap_fill fills holes in existing history. */
-export type IvHistoryBackfillPhase = 'initial_sp500' | 'initial_russell' | 'gap_fill';
+export type IvHistoryBackfillPhase = 'initial_sp500' | 'initial_russell' | 'initial_etf' | 'gap_fill';
 
 /** Per-ticker IV rank/percentile result from the iv_history table. */
 export interface IvRankResult {

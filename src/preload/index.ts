@@ -900,6 +900,7 @@ function buildApi() {
     getInitialLoadStatus: () => invoke<{
       sp500:   { complete: boolean; completedAt: string | null };
       russell: { complete: boolean; completedAt: string | null; newTickers: number };
+      etf:     { complete: boolean; completedAt: string | null; totalTickers: number };
     }>('iv-history:get-initial-load-status'),
     onProgress: (callback: (evt: IvHistoryProgressEvent) => void) => {
       const handler = (_: unknown, evt: IvHistoryProgressEvent) => callback(evt);

@@ -404,6 +404,9 @@ export class IvHistoryService {
       const hasHistory = new Set(existingRows.map(r => r.ticker));
       return russell.filter(t => !hasHistory.has(t));
     }
+    if (phase === 'initial_etf') {
+      return this.getConstituents('etf').map(r => r.ticker.toUpperCase());
+    }
     return []; // gap_fill handled separately
   }
 
@@ -578,9 +581,14 @@ export class IvHistoryService {
 
   // ── Initial load status ───────────────────────────────────────────────────────
 
-  getInitialLoadStatus(): { sp500: { complete: boolean; completedAt: string | null }; russell: { complete: boolean; completedAt: string | null; newTickers: number } } {
+  getInitialLoadStatus(): {
+    sp500:   { complete: boolean; completedAt: string | null };
+    russell: { complete: boolean; completedAt: string | null; newTickers: number };
+    etf:     { complete: boolean; completedAt: string | null; totalTickers: number };
+  } {
     const sp500Tickers = this.getConstituents('sp500').map(r => r.ticker.toUpperCase());
     const russell1000Tickers = this.getConstituents('russell1000').map(r => r.ticker.toUpperCase());
+    const etfTickers = this.getConstituents('etf').map(r => r.ticker.toUpperCase());
 
     type CovRow = { ticker: string; cnt: number; max_date: string | null };
 
@@ -612,9 +620,23 @@ export class IvHistoryService {
       ? russellCoverage.reduce((best, r) => (r.max_date ?? '') > (best.max_date ?? '') ? r : best).max_date
       : null;
 
+    const etfCoverage = etfTickers.length > 0
+      ? this.db.prepare(
+          `SELECT ticker, COUNT(*) as cnt, MAX(date) as max_date FROM iv_history WHERE ticker IN (${
+            etfTickers.map(() => '?').join(',')
+          }) GROUP BY ticker`
+        ).all(...etfTickers) as CovRow[]
+      : [];
+
+    const etfComplete = etfCoverage.filter(r => r.cnt >= 20).length >= etfTickers.length * 0.9;
+    const etfDate = etfCoverage.length > 0
+      ? etfCoverage.reduce((best, r) => (r.max_date ?? '') > (best.max_date ?? '') ? r : best).max_date
+      : null;
+
     return {
       sp500:   { complete: sp500Complete,   completedAt: sp500Date },
       russell: { complete: russellComplete, completedAt: russellDate, newTickers: russellUnique.length },
+      etf:     { complete: etfComplete,     completedAt: etfDate,    totalTickers: etfTickers.length },
     };
   }
 }

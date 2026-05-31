@@ -5,16 +5,18 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { IvHistoryCoverage, IvHistoryGapSummary, IvHistoryProgressEvent } from '@shared/types.js';
 
-type IvPhase = 'initial_sp500' | 'initial_russell';
+type IvPhase = 'initial_sp500' | 'initial_russell' | 'initial_etf';
 
 interface InitialLoadStatus {
   sp500:   { complete: boolean; completedAt: string | null };
   russell: { complete: boolean; completedAt: string | null; newTickers: number };
+  etf:     { complete: boolean; completedAt: string | null; totalTickers: number };
 }
 
 const IV_PHASE_LABELS: Record<IvPhase, string> = {
   initial_sp500:   'S&P 500 IV Initial Load',
   initial_russell: 'Russell 1000 IV Initial Load',
+  initial_etf:     'ETF Universe IV Initial Load',
 };
 
 // ─── Sub-components ────────────────────────────────────────────────────────────
@@ -360,7 +362,7 @@ export function HistoryView() {
           </div>
 
           {/* Step 2 */}
-          <div style={{ padding: '10px 0 4px' }}>
+          <div style={{ padding: '10px 0', borderBottom: '1px solid #1e1e30' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <div>
                 <div style={{ fontSize: 13, fontWeight: 600, color: '#c8c8e0', marginBottom: 2 }}>
@@ -378,6 +380,30 @@ export function HistoryView() {
                   style={{ padding: '6px 14px', borderRadius: 6, border: 'none', background: ivKeyConfigured && !isRunning ? '#2a5a8a' : '#333', color: '#fff', fontSize: 12, cursor: isRunning || !ivKeyConfigured ? 'not-allowed' : 'pointer', opacity: isRunning || !ivKeyConfigured ? 0.5 : 1 }}
                 >
                   {loadStatus?.russell.complete ? 'Re-run' : 'Start'}
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Step 3 — ETF Universe */}
+          <div style={{ padding: '10px 0 4px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: '#c8c8e0', marginBottom: 2 }}>
+                  Step 3 — ETF Universe{loadStatus?.etf.totalTickers ? ` (${loadStatus.etf.totalTickers} tickers)` : ''}
+                </div>
+                <div style={{ fontSize: 11, color: '#555', marginBottom: 4 }}>Independent of Steps 1 & 2 — run any time</div>
+                {loadStatus && <StatusBadge complete={loadStatus.etf.complete} completedAt={loadStatus.etf.completedAt} />}
+              </div>
+              {ivRunning && activeIvPhase === 'initial_etf' ? (
+                <button onClick={cancelIv} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', background: '#7a2020', color: '#fff', fontSize: 12, cursor: 'pointer' }}>Cancel</button>
+              ) : (
+                <button
+                  onClick={() => startIvPhase('initial_etf')}
+                  disabled={isRunning || !ivKeyConfigured}
+                  style={{ padding: '6px 14px', borderRadius: 6, border: 'none', background: ivKeyConfigured && !isRunning ? '#2a5a8a' : '#333', color: '#fff', fontSize: 12, cursor: isRunning || !ivKeyConfigured ? 'not-allowed' : 'pointer', opacity: isRunning || !ivKeyConfigured ? 0.5 : 1 }}
+                >
+                  {loadStatus?.etf.complete ? 'Re-run' : 'Start'}
                 </button>
               )}
             </div>
