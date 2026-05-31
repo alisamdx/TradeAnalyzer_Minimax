@@ -60,7 +60,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   autoBackupIntervalDays: 7,
   // Priority 9 defaults
   soundAlertsEnabled: true,
-  defaultScreenerIndex: 'sp500',
+  defaultScreenerIndex: 'both',
   theme: 'dark',
   keyboardShortcuts: {
     refreshQuotes: 'F5',

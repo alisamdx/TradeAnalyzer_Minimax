@@ -19,7 +19,7 @@ export function registerSettingsRoutes(app: FastifyInstance, svc: ApiServerServi
       const fundamentalsCacheTtlSec = parseInt(getSettingValue(db, 'fundamentalsCacheTtlSec') ?? String(TTL_SECONDS.FUNDAMENTALS), 10);
       const optionsCacheTtlSec = parseInt(getSettingValue(db, 'optionsCacheTtlSec') ?? String(TTL_SECONDS.OPTIONS), 10);
       const logRetentionDays = parseInt(getSettingValue(db, 'logRetentionDays') ?? '30', 10);
-      const defaultScreenerIndex = getSettingValue(db, 'defaultScreenerIndex') ?? 'sp500';
+      const defaultScreenerIndex = getSettingValue(db, 'defaultScreenerIndex') ?? 'both';
       const theme = getSettingValue(db, 'theme') ?? 'dark';
       const soundAlertsEnabled = (getSettingValue(db, 'soundAlertsEnabled') ?? 'true') !== 'false';
 
