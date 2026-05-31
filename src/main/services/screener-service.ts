@@ -136,7 +136,7 @@ export class ScreenerService {
       onProgress?.(i, total, ticker);
 
       try {
-        const result = this.evaluateTicker(ticker, companyName, sector, criteria);
+        const result = this.evaluateTicker(ticker, companyName, sector, criteria, universe === 'etf');
         // Always include all tickers in results so screen_results has full universe data.
         // The frontend filters the display in strict mode.
         rows.push(result);
@@ -165,7 +165,8 @@ export class ScreenerService {
     const total = constituents.length;
 
     if (total === 0) {
-      throw new Error(`The ${universe === 'both' ? 'S&P 500 and Russell 1000 lists are' : universe + ' list is'} empty. Please click "Update Ticker Lists" above first.`);
+      const label = universe === 'both' ? 'S&P 500 and Russell 1000 lists are' : universe === 'etf' ? 'ETF list is' : universe + ' list is';
+      throw new Error(`The ${label} empty. Please click "Update Ticker Lists" above first.`);
     }
 
     for (let i = 0; i < total; i++) {
@@ -228,7 +229,8 @@ export class ScreenerService {
     ticker: string,
     companyName: string | null,
     sector: string | null,
-    criteria: ScreenCriteria
+    criteria: ScreenCriteria,
+    isEtf: boolean = false
   ): TickerScreenData {
     const passedFilters = new Set<string>();
     const failedFilters: string[] = [];
@@ -307,36 +309,45 @@ export class ScreenerService {
           check(fd.id, ratios.marketCap !== null && ratios.marketCap >= (v['min'] as number ?? 0));
           break;
         case 'pe_ratio': {
+          // ETFs have no earnings — treat null as N/A (pass), not a failure.
+          if (isEtf && ratios.peRatio === null) { check(fd.id, true); break; }
           const [mn, mx] = [(v['min'] as number) ?? 0, (v['max'] as number) ?? Infinity];
           check(fd.id, ratios.peRatio !== null && ratios.peRatio >= mn && ratios.peRatio <= mx);
           break;
         }
         case 'eps':
+          if (isEtf && ratios.eps === null) { check(fd.id, true); break; }
           check(fd.id, ratios.eps !== null && ratios.eps >= (v['min'] as number ?? 0));
           break;
         case 'revenue_growth':
+          if (isEtf && ratios.revenueGrowth === null) { check(fd.id, true); break; }
           check(fd.id, ratios.revenueGrowth !== null && ratios.revenueGrowth >= (v['min'] as number ?? 0));
           break;
         case 'eps_growth':
+          if (isEtf && ratios.epsGrowth === null) { check(fd.id, true); break; }
           check(fd.id, ratios.epsGrowth !== null && ratios.epsGrowth >= (v['min'] as number ?? 0));
           break;
         case 'debt_to_equity': {
-          // Null means financials sector — pass to avoid false negatives.
+          // Null means financials sector or ETF — pass to avoid false negatives.
           if (ratios.debtToEquity === null) { check(fd.id, true); break; }
           const [mn, mx] = [(v['min'] as number) ?? 0, (v['max'] as number) ?? Infinity];
           check(fd.id, ratios.debtToEquity >= mn && ratios.debtToEquity <= mx);
           break;
         }
         case 'roe':
+          if (isEtf && ratios.roe === null) { check(fd.id, true); break; }
           check(fd.id, ratios.roe !== null && ratios.roe >= (v['min'] as number ?? 0));
           break;
         case 'profit_margin':
+          if (isEtf && ratios.profitMargin === null) { check(fd.id, true); break; }
           check(fd.id, ratios.profitMargin !== null && ratios.profitMargin >= (v['min'] as number ?? 0));
           break;
         case 'free_cash_flow':
+          if (isEtf && ratios.freeCashFlow === null) { check(fd.id, true); break; }
           check(fd.id, ratios.freeCashFlow !== null && ratios.freeCashFlow >= (v['min'] as number ?? 0));
           break;
         case 'current_ratio':
+          if (isEtf && ratios.currentRatio === null) { check(fd.id, true); break; }
           check(fd.id, ratios.currentRatio !== null && ratios.currentRatio >= (v['min'] as number ?? 0));
           break;
         case 'avg_volume':

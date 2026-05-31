@@ -542,16 +542,21 @@ export function ScreenerView() {
           <div className="control-section">
             <h3>Universe</h3>
             <div className="universe-btns">
-              {(['sp500', 'russell1000', 'both'] as Universe[]).map((u) => (
+              {(['sp500', 'russell1000', 'both', 'etf'] as Universe[]).map((u) => (
                 <button
                   key={u}
                   className={`univ-btn ${universe === u ? 'active' : ''}`}
                   onClick={() => { setUniverse(u); setActivePresetId(null); }}
                 >
-                  {u === 'sp500' ? 'S&P 500' : u === 'russell1000' ? 'Russell 1000' : 'Both'}
+                  {u === 'sp500' ? 'S&P 500' : u === 'russell1000' ? 'Russell 1000' : u === 'both' ? 'Both' : 'ETFs'}
                 </button>
               ))}
             </div>
+            {universe === 'etf' && (
+              <p className="hint" style={{ marginTop: 6, color: 'var(--text-muted)', fontSize: 11 }}>
+                Fundamental filters (P/E, EPS, ROE etc.) are N/A for ETFs and auto-skipped. Volume, price, and IV rank filters still apply.
+              </p>
+            )}
           </div>
 
           {/* Mode */}
