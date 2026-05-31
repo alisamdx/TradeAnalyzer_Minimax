@@ -554,7 +554,7 @@ export function ScreenerView() {
             </div>
             {universe === 'etf' && (
               <p className="hint" style={{ marginTop: 6, color: 'var(--text-muted)', fontSize: 11 }}>
-                Fundamental filters (P/E, EPS, ROE etc.) are N/A for ETFs and auto-skipped. Volume, price, and IV rank filters still apply.
+                Fundamental filters (P/E, EPS, ROE etc.) are N/A for ETFs and auto-skipped. Volume, price min, and IV rank filters still apply. Price upper bound is ignored. Run <strong>Data Sync → ETFs</strong> first to populate market data.
               </p>
             )}
           </div>

@@ -357,7 +357,9 @@ export class ScreenerService {
           break;
         case 'price': {
           const priceMin = (v['min'] as number) ?? 0;
-          const priceMax = (v['max'] as number) ?? Infinity;
+          // ETFs have no meaningful upper price cap (SPY ~$560, QQQ ~$490).
+          // For ETF universe ignore the max bound; only enforce the min.
+          const priceMax = isEtf ? Infinity : ((v['max'] as number) ?? Infinity);
           check(fd.id, price !== null && price >= priceMin && price <= priceMax);
           break;
         }
