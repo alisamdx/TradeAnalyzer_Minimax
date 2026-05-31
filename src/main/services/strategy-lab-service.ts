@@ -231,7 +231,10 @@ function computeAtmIv(chain: OptionsChain, underlyingPx: number): number {
   const ivs = chain.contracts
     .filter(c => c.strike === atmStrike && c.iv > 0)
     .map(c => c.iv);
-  return ivs.length ? avg(ivs) : 0;
+  // OptionContract.iv is a decimal fraction (0.285) from both Polygon and E*Trade.
+  // Multiply by 100 to get percentage consistent with iv_history storage.
+  // see docs/formulas.md#iv-conventions
+  return ivs.length ? avg(ivs) * 100 : 0;
 }
 
 function computeIvRank(db: Database, ticker: string, currentIv: number): {
@@ -295,7 +298,8 @@ function buildSetup(
       action: legDef.action, side: legDef.side, strike: contract.strike,
       expiration: chain.expiration, delta: contract.delta,
       bid: contract.bid, ask: contract.ask, mid: (contract.bid + contract.ask) / 2,
-      iv: contract.iv, openInterest: contract.openInterest, qty: legDef.qty ?? 1,
+      iv: contract.iv * 100, // decimal fraction → percentage (see docs/formulas.md#iv-conventions)
+      openInterest: contract.openInterest, qty: legDef.qty ?? 1,
     });
   }
 
