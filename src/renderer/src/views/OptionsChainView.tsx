@@ -349,11 +349,32 @@ export function OptionsChainView({ initialTicker, initialExpiry, clearInitialTic
                       const isAtm = currentPrice !== null && Math.abs(strike - currentPrice) < currentPrice * 0.02;
                       const callYield = call ? annualizedReturn(call.bid, call.strike, dteDays(chainData.expiration)) : null;
                       const putYield = put ? annualizedReturn(put.bid, put.strike, dteDays(chainData.expiration)) : null;
+
+                      // Spread quality: color bid by spread-pct. <10% = default, 10-30% = amber, >30% = red.
+                      const spreadColor = (bid: number, ask: number) => {
+                        const mid = (bid + ask) / 2;
+                        if (mid <= 0) return undefined;
+                        const pct = (ask - bid) / mid * 100;
+                        if (pct > 30) return '#ef4444';
+                        if (pct > 10) return '#f59e0b';
+                        return undefined;
+                      };
+                      const spreadTitle = (bid: number, ask: number) => {
+                        const mid = (bid + ask) / 2;
+                        const spread = ask - bid;
+                        const pct = mid > 0 ? (spread / mid * 100).toFixed(0) : '—';
+                        return `Bid $${bid.toFixed(2)}  Ask $${ask.toFixed(2)}  Spread $${spread.toFixed(2)} (${pct}%)`;
+                      };
+
                       return (
                         <tr key={strike} className={isAtm ? 'oc-atm-row' : ''}>
                           {filterSide !== 'put' && call && (
                             <>
-                              <td className={callYield !== null && callYield > 15 ? 'oc-profitable' : ''}>{fmtPrice(call.bid)}</td>
+                              <td className={callYield !== null && callYield > 15 ? 'oc-profitable' : ''}
+                                  style={{ color: spreadColor(call.bid, call.ask) }}
+                                  title={spreadTitle(call.bid, call.ask)}>
+                                {fmtPrice(call.bid)}
+                              </td>
                               <td>{fmtPrice(call.ask)}</td>
                               <td className={call.delta !== null && call.delta >= 0.65 ? 'oc-delta-highlight' : ''}>{fmtNum(call.delta)}</td>
                               <td style={{ color: ivColor(call.iv * 100) }}>{(call.iv * 100).toFixed(1)}%</td>
@@ -365,7 +386,11 @@ export function OptionsChainView({ initialTicker, initialExpiry, clearInitialTic
                           <td className="oc-strike-cell">{fmtPrice(strike)}</td>
                           {filterSide !== 'call' && put && (
                             <>
-                              <td className={putYield !== null && putYield > 15 ? 'oc-profitable' : ''}>{fmtPrice(put.bid)}</td>
+                              <td className={putYield !== null && putYield > 15 ? 'oc-profitable' : ''}
+                                  style={{ color: spreadColor(put.bid, put.ask) }}
+                                  title={spreadTitle(put.bid, put.ask)}>
+                                {fmtPrice(put.bid)}
+                              </td>
                               <td>{fmtPrice(put.ask)}</td>
                               <td className={put.delta !== null && Math.abs(put.delta) >= 0.15 && Math.abs(put.delta) <= 0.35 ? 'oc-delta-highlight' : ''}>{fmtNum(put.delta)}</td>
                               <td style={{ color: ivColor(put.iv * 100) }}>{(put.iv * 100).toFixed(1)}%</td>
