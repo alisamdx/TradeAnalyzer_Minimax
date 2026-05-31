@@ -316,8 +316,9 @@ export function OpportunityView() {
                 <th style={thNum} onClick={() => handleSort('technicalScore')}>Tech{sortIndicator('technicalScore')}</th>
                 <th style={thNum} onClick={() => handleSort('premiumYieldScore')}>Yield{sortIndicator('premiumYieldScore')}</th>
                 <th style={thNum} onClick={() => handleSort('currentIv')}>Curr IV{sortIndicator('currentIv')}</th>
-                <th style={thNum} onClick={() => handleSort('targetStrike')}>Strike{sortIndicator('targetStrike')}</th>
-                <th style={thNum} onClick={() => handleSort('estimatedPremium')}>Premium{sortIndicator('estimatedPremium')}</th>
+                <th style={thNum} onClick={() => handleSort('targetStrike')} title="~92% of price — CSP target strike">Strike{sortIndicator('targetStrike')}</th>
+                <th style={thNum} title="Nearest Friday ≥ 30 DTE from today">Exp / DTE</th>
+                <th style={thNum} onClick={() => handleSort('estimatedPremium')} title="Estimated premium at target strike for the target expiry (~1.5%/mo rule of thumb)">Est Prem{sortIndicator('estimatedPremium')}</th>
                 <th style={thCtr} onClick={() => handleSort('dataPoints')}>Data{sortIndicator('dataPoints')}</th>
                 <th style={th}>Actions</th>
               </tr>
@@ -360,6 +361,14 @@ export function OpportunityView() {
                   </td>
                   <td style={{ ...td, textAlign: 'right', color: '#888' }}>
                     {row.targetStrike !== null ? `$${row.targetStrike.toFixed(2)}` : '—'}
+                  </td>
+                  <td style={{ ...td, textAlign: 'right' }}>
+                    {row.targetExpiry !== null ? (
+                      <span style={{ fontSize: 11, color: '#aaa' }}>
+                        {row.targetExpiry}<br />
+                        <span style={{ color: '#666' }}>{row.targetDte}d</span>
+                      </span>
+                    ) : '—'}
                   </td>
                   <td style={{ ...td, textAlign: 'right', color: '#2ecc71' }}>
                     {row.estimatedPremium !== null ? `$${row.estimatedPremium.toFixed(2)}` : '—'}
@@ -419,7 +428,8 @@ export function OpportunityView() {
           <span><span style={{ color: '#e74c3c' }}>●</span> &lt; 45 = weak</span>
           <span style={{ marginLeft: 16 }}><strong>Data</strong> = IV history days (green ≥ 200, yellow ≥ 100)</span>
           <span><strong>Strike</strong> = 92% of price (CSP target)</span>
-          <span><strong>Premium</strong> = estimated (1.5% of strike/mo)</span>
+          <span><strong>Exp</strong> = nearest Friday ≥ 30 DTE</span>
+          <span><strong>Est Prem</strong> = ~1.5%/mo of strike (rule of thumb — verify in Options Chain)</span>
         </div>
       )}
     </div>

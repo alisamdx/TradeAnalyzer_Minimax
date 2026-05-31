@@ -9,6 +9,27 @@ import type { ConstituentRow, ScreenResultPayload } from '@shared/types.js';
 export type StrategyMode = 'wheel' | 'csp' | 'spreads' | 'bullish' | 'bearish';
 export type OpportunityUniverse = 'sp500' | 'russell1000' | 'both';
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/**
+ * Returns the nearest Friday that is at least `minDte` calendar days from today,
+ * formatted as YYYY-MM-DD.  Used to anchor the estimated premium to a concrete expiry.
+ * see docs/formulas.md#opportunity-target-expiry
+ */
+function nearestFridayAtLeast(minDte: number): { date: string; dte: number } {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const target = new Date(today);
+  target.setDate(today.getDate() + minDte);
+  // Advance to next Friday (dayOfWeek 5)
+  const dow = target.getDay(); // 0=Sun … 6=Sat
+  const daysUntilFriday = dow <= 5 ? 5 - dow : 6; // if already Friday, stay; otherwise next Friday
+  target.setDate(target.getDate() + daysUntilFriday);
+  const dte = Math.round((target.getTime() - today.getTime()) / 86_400_000);
+  const date = target.toLocaleDateString('en-CA'); // YYYY-MM-DD
+  return { date, dte };
+}
+
 export interface OpportunityRow {
   rank: number;
   ticker: string;
@@ -26,8 +47,10 @@ export interface OpportunityRow {
   ivRankScore: number | null;         // 0-100 strategy-adjusted IV rank score
   compositeScore: number;             // 0-100 weighted composite
   passScore: number | null;           // raw filter pass count from screener
-  estimatedPremium: number | null;    // rough ~1.5% of strike/month
+  estimatedPremium: number | null;    // rough ~1.5% of strike/month at targetDte
   targetStrike: number | null;        // ~92% of last price
+  targetExpiry: string | null;        // nearest Friday ≥ 30 DTE (YYYY-MM-DD)
+  targetDte: number | null;           // calendar days to targetExpiry
   priceAge: string | null;            // ISO timestamp of last quote_cache fetch
 }
 
@@ -53,6 +76,9 @@ export class OpportunityService {
 
   run(opts: OpportunityRunOptions): OpportunityRow[] {
     const { universe, strategy, minCompositeScore = 0, limit = 100 } = opts;
+
+    // 0. Target expiry — computed once per run (nearest Friday ≥ 30 DTE)
+    const { date: targetExpiry, dte: targetDte } = nearestFridayAtLeast(30);
 
     // 1. Universe tickers
     const constituents = this.getConstituents(universe);
@@ -119,6 +145,8 @@ export class OpportunityService {
         passScore: fund?.passScore ?? null,
         estimatedPremium,
         targetStrike,
+        targetExpiry,
+        targetDte,
         priceAge: quote?.fetchedAt ?? null,
       });
     }

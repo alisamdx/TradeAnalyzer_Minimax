@@ -1310,6 +1310,8 @@ export interface OpportunityRow {
   passScore: number | null;
   estimatedPremium: number | null;
   targetStrike: number | null;
+  targetExpiry: string | null;
+  targetDte: number | null;
   priceAge: string | null;
 }
 
