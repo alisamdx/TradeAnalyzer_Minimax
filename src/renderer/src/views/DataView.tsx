@@ -34,7 +34,7 @@ export function DataView({ isSyncing, syncProgress, syncUniverseSelection, onSyn
 
   // Universe historical price fetch
   const [univPriceUniverse, setUnivPriceUniverse] = useState<'sp500' | 'russell1000' | 'etf'>('etf');
-  const [univPriceRange, setUnivPriceRange] = useState<PriceRange>('5Y');
+  const [univPriceRange, setUnivPriceRange] = useState<PriceRange>('2Y');
   const [isFetchingUniv, setIsFetchingUniv] = useState(false);
   const [univProgress, setUnivProgress] = useState<{ done: number; total: number; ticker: string } | null>(null);
   const univCancelRef = useRef(false);
@@ -508,7 +508,7 @@ export function DataView({ isSyncing, syncProgress, syncUniverseSelection, onSyn
                   </button>
                 ))}
                 <div style={{ display: 'flex', gap: 4 }}>
-                  {PRICE_RANGES.map((r) => (
+                  {PRICE_RANGES.filter(r => r !== '5Y').map((r) => (
                     <button key={r} className={`univ-btn ${univPriceRange === r ? 'active' : ''}`} onClick={() => setUnivPriceRange(r)} disabled={isBusy}>{r}</button>
                   ))}
                 </div>
