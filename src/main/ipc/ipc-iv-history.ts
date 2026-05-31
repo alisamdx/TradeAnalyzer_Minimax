@@ -1,13 +1,10 @@
 // IPC handlers for the IV History feature (v0.17.0).
-// Exposes coverage, gap detection, backfill orchestration, IV rank queries,
-// and MarketData.app token management.
+// Exposes coverage, gap detection, backfill orchestration, and IV rank queries.
 // Progress events stream via 'iv-history:progress'.
+// API key management is handled by ipc-settings.ts (settings:get/set-ivolatility-key).
 
 import { ipcMain, type IpcMainInvokeEvent } from 'electron';
-import type { DbHandle } from '../db/connection.js';
 import type { IvHistoryService } from '../services/iv-history-service.js';
-import type { MarketDataProvider } from '../services/marketdata-provider.js';
-import { secureGet, secureSet } from '../services/secure-settings.js';
 import type { IpcResult, IvHistoryBackfillPhase } from '@shared/types.js';
 
 function ok<T>(value: T): IpcResult<T> {
@@ -40,9 +37,7 @@ function wrap<Args extends unknown[], R>(fn: (...args: Args) => R) {
 }
 
 export function registerIvHistoryIpc(
-  db: DbHandle,
   service: IvHistoryService,
-  marketdata: MarketDataProvider,
 ): void {
 
   // Coverage summary for a universe
@@ -98,20 +93,10 @@ export function registerIvHistoryIpc(
     wrap(() => service.getInitialLoadStatus()),
   );
 
-  // MarketData.app token management
-  ipcMain.handle('iv-history:save-token', wrap((token: string) => {
-    secureSet(db, 'marketdataApiToken', token.trim());
-    return true;
-  }));
+  // All stored IV rows for a single ticker (newest first) — used by the lookup UI
+  ipcMain.handle(
+    'iv-history:get-rows',
+    wrap((ticker: string) => service.getRows(ticker)),
+  );
 
-  ipcMain.handle('iv-history:get-token-configured', wrap(() => {
-    const token = secureGet(db, 'marketdataApiToken');
-    return Boolean(token);
-  }));
-
-  // Update MarketData.app rate limit (requests per minute)
-  ipcMain.handle('iv-history:set-rate', wrap((rpm: number) => {
-    marketdata.updateRate(rpm);
-    return true;
-  }));
 }

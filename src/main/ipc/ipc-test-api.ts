@@ -1,6 +1,9 @@
 import { ipcMain, type IpcMainInvokeEvent } from 'electron';
 import type { PolygonDataProvider } from '../services/polygon-provider.js';
-import type { MarketDataProvider } from '../services/marketdata-provider.js';
+import type { MarketDataProvider, MarketDataContract } from '../services/marketdata-provider.js';
+import type { IVolatilityProvider } from '../services/ivolatility-provider.js';
+import type { DbHandle } from '../db/connection.js';
+import { secureGet, secureSet } from '../services/secure-settings.js';
 import { computeAtmIv } from '../services/iv-history-service.js';
 
 function ok<T>(value: T): { ok: true; value: T } { return { ok: true, value }; }
@@ -146,6 +149,7 @@ export interface MarketDataTestResult {
   } | null;
   // Coverage breakdown
   withIv:     number;
+  withBsIv:   number;    // subset of withIv computed via Black-Scholes (API returned null)
   withDelta:  number;
   withUndPx:  number;
   // Raw field diagnostics (from unparsed response)
@@ -156,7 +160,44 @@ export interface MarketDataTestResult {
   rawJsonSample: string;
 }
 
-export function registerTestApiIpc(dataProvider: PolygonDataProvider, marketdata?: MarketDataProvider): void {
+// ─── IVolatility result type ──────────────────────────────────────────────────
+
+export interface IVolatilityTestResult {
+  symbol:   string;
+  from:     string;
+  to:       string;
+  status:   string;
+  rowCount: number;
+  // Parsed rows (all, sorted ascending — UI can slice for display)
+  rows: Array<{
+    date:  string;
+    iv30:  number | null;
+    iv60:  number | null;
+    iv90:  number | null;
+    iv7:   number | null;
+    iv14:  number | null;
+    iv21:  number | null;
+    iv120: number | null;
+    iv180: number | null;
+    iv360: number | null;
+  }>;
+  // iv30 summary stats
+  iv30Min:    number | null;
+  iv30Max:    number | null;
+  iv30Latest: number | null;
+  iv30LatestDate: string | null;
+  // Raw diagnostics
+  rawTopLevelKeys: string[];
+  rawFieldTypes:   Record<string, string>;
+  rawSample:       string;   // JSON of first 3 raw rows
+}
+
+export function registerTestApiIpc(
+  dataProvider: PolygonDataProvider,
+  db: DbHandle,
+  marketdata?: MarketDataProvider,
+  ivolatility?: IVolatilityProvider,
+): void {
   ipcMain.handle(
     'test-api:get-raw-options',
     async (_e: IpcMainInvokeEvent, ticker: string, expiration: string) => {
@@ -220,23 +261,25 @@ export function registerTestApiIpc(dataProvider: PolygonDataProvider, marketdata
           rawContractRows.push(row);
         }
 
-        // Step 2 — run the regular parser + ATM IV computation.
-        const chain = await marketdata.getOptionsChain(ticker.toUpperCase(), date);
+        // Step 2 — run the full pipeline: query the two monthly expirations
+        // that bracket (date + 30 days) and combine their contracts.
+        // This mirrors exactly what iv-history-service does during backfill.
+        const chain = await marketdata.getChainForDate(ticker.toUpperCase(), date);
 
-        if (chain.s !== 'ok') {
+        const { contracts, underlyingPrice } = chain;
+
+        if (contracts.length === 0) {
           return ok<MarketDataTestResult>({
-            ticker: ticker.toUpperCase(), date, status: chain.s,
+            ticker: ticker.toUpperCase(), date, status: 'no_data',
             contractCount: 0, underlyingPrice: null,
             sample: [], atmIvResult: null,
-            withIv: 0, withDelta: 0, withUndPx: 0,
+            withIv: 0, withBsIv: 0, withDelta: 0, withUndPx: 0,
             rawTopLevelKeys: Object.keys(raw),
             rawFieldTypes,
             rawContractSample: JSON.stringify(rawContractRows, null, 2),
             rawJsonSample: JSON.stringify(raw, null, 2).slice(0, 2000),
           });
         }
-
-        const { contracts, underlyingPrice } = chain;
 
         // Delta-based ATM fallback (mirrors iv-history-service logic)
         let resolvedUndPx = underlyingPrice;
@@ -264,6 +307,8 @@ export function registerTestApiIpc(dataProvider: PolygonDataProvider, marketdata
           underlyingPrice: c.underlyingPrice, dte: c.dte,
         }));
 
+        const withBsIv = (contracts as MarketDataContract[]).filter(c => c.ivSource === 'bs').length;
+
         return ok<MarketDataTestResult>({
           ticker: ticker.toUpperCase(), date, status: 'ok',
           contractCount: contracts.length,
@@ -271,19 +316,115 @@ export function registerTestApiIpc(dataProvider: PolygonDataProvider, marketdata
           sample,
           atmIvResult: atmIvResult ?? null,
           withIv:    contracts.filter(c => c.iv !== null).length,
+          withBsIv,
           withDelta: contracts.filter(c => c.delta !== null).length,
           withUndPx: contracts.filter(c => c.underlyingPrice !== null).length,
           rawTopLevelKeys: Object.keys(raw),
           rawFieldTypes,
           rawContractSample: JSON.stringify(rawContractRows, null, 2),
           rawJsonSample: JSON.stringify({
-            s: chain.s, underlyingPrice, contractCount: contracts.length,
-            parsedFirst4: contracts.slice(0, 4).map(c => ({
+            status: 'ok', asOfDate: date, underlyingPrice,
+            contractCount: contracts.length,
+            withBsIv,
+            expirations: [...new Set(contracts.map(c => c.expiration))],
+            parsedFirst4: (contracts as MarketDataContract[]).slice(0, 4).map(c => ({
               sym: c.optionSymbol, exp: c.expiration, side: c.side,
-              strike: c.strike, iv: c.iv, delta: c.delta,
-              undPx: c.underlyingPrice, dte: c.dte,
+              strike: c.strike, iv: c.iv, ivSource: c.ivSource,
+              delta: c.delta, undPx: c.underlyingPrice, dte: c.dte,
             })),
           }, null, 2),
+        });
+      } catch (err) {
+        return fail(err);
+      }
+    }
+  );
+
+  // ── IVolatility handlers ──────────────────────────────────────────────────
+
+  ipcMain.handle('test-api:save-ivolatility-key', (_e, key: string) => {
+    try { secureSet(db, 'ivolatilityApiKey', key.trim()); return ok(true); }
+    catch (err) { return fail(err); }
+  });
+
+  ipcMain.handle('test-api:get-ivolatility-key-configured', () => {
+    try { return ok(Boolean(secureGet(db, 'ivolatilityApiKey'))); }
+    catch { return ok(false); }
+  });
+
+  ipcMain.handle(
+    'test-api:get-ivolatility-ivx',
+    async (_e: IpcMainInvokeEvent, symbol: string, from: string, to: string) => {
+      try {
+        if (!ivolatility) throw new Error('IVolatility provider not initialised.');
+
+        // Step 1 — raw response for field inspection.
+        const raw = await ivolatility.getRawIvx(symbol.toUpperCase(), from, to);
+
+        // Find the data rows array (may be top-level array or inside an envelope key).
+        const topObj: Record<string, unknown> = Array.isArray(raw)
+          ? { _array: raw }
+          : (raw as Record<string, unknown>);
+        const anyArr = Array.isArray(raw)
+          ? raw
+          : (Object.values(topObj).find(Array.isArray) as unknown[] | undefined);
+
+        // Describe the FIRST ROW's fields — that's what the parser cares about.
+        // Envelope keys (status, query, data) are shown in rawSample instead.
+        const rawTopLevelKeys: string[] = [];
+        const rawFieldTypes: Record<string, string> = {};
+        const firstRow = (anyArr ?? [])[0];
+        if (firstRow !== null && typeof firstRow === 'object') {
+          for (const [k, v] of Object.entries(firstRow as Record<string, unknown>)) {
+            rawTopLevelKeys.push(k);
+            rawFieldTypes[k] = `${typeof v} — ${JSON.stringify(v)}`;
+          }
+        } else {
+          // Fallback: show envelope keys
+          for (const [k, v] of Object.entries(topObj)) {
+            rawTopLevelKeys.push(k);
+            rawFieldTypes[k] = Array.isArray(v)
+              ? `array(${(v as unknown[]).length})`
+              : `${typeof v} — ${JSON.stringify(v)}`;
+          }
+        }
+
+        // Build raw sample from first 3 rows.
+        const rawSample = JSON.stringify((anyArr ?? []).slice(0, 3), null, 2);
+
+        // Step 2 — parse.
+        const { parseIvxResponse } = await import('../services/ivolatility-provider.js');
+        const result = parseIvxResponse(raw, symbol.toUpperCase());
+
+        if (result.s === 'no_data' || result.rows.length === 0) {
+          return ok<IVolatilityTestResult>({
+            symbol: symbol.toUpperCase(), from, to,
+            status: 'no_data', rowCount: 0, rows: [],
+            iv30Min: null, iv30Max: null, iv30Latest: null, iv30LatestDate: null,
+            rawTopLevelKeys, rawFieldTypes, rawSample,
+          });
+        }
+
+        const latestRow = result.rows[result.rows.length - 1];
+
+        // IV Rank is a 52-week metric — restrict min/max to the last 365 calendar days
+        // regardless of how wide the query range is.
+        const cutoff365 = latestRow
+          ? new Date(latestRow.date + 'T00:00:00Z').getTime() - 365 * 86_400_000
+          : 0;
+        const rows52w = result.rows.filter(r => new Date(r.date + 'T00:00:00Z').getTime() >= cutoff365);
+        const iv30s52w = rows52w.map(r => r.iv30).filter((v): v is number => v !== null);
+
+        return ok<IVolatilityTestResult>({
+          symbol: symbol.toUpperCase(), from, to,
+          status: 'ok',
+          rowCount: result.rows.length,
+          rows: result.rows,
+          iv30Min:       iv30s52w.length ? Math.min(...iv30s52w) : null,
+          iv30Max:       iv30s52w.length ? Math.max(...iv30s52w) : null,
+          iv30Latest:    latestRow?.iv30 ?? null,
+          iv30LatestDate: latestRow?.date ?? null,
+          rawTopLevelKeys, rawFieldTypes, rawSample,
         });
       } catch (err) {
         return fail(err);

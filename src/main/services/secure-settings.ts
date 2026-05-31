@@ -32,6 +32,7 @@ const SENSITIVE_KEYS = new Set([
   'etradeRequestToken',
   'etradeRequestSecret',
   'marketdataApiToken',
+  'ivolatilityApiKey',
 ]);
 
 const ENC_PREFIX = 'enc:';

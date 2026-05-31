@@ -49,21 +49,24 @@ function SectionCard({ title, children }: { title: string; children: React.React
 // ─── Main view ─────────────────────────────────────────────────────────────────
 
 export function IvHistoryView() {
-  const [tokenInput, setTokenInput]           = useState('');
-  const [tokenConfigured, setTokenConfigured] = useState(false);
-  const [tokenSaving, setTokenSaving]         = useState(false);
-  const [tokenMsg, setTokenMsg]               = useState<string | null>(null);
+  const [keyConfigured, setKeyConfigured]     = useState(false);
 
   const [coverage, setCoverage]               = useState<IvHistoryCoverage | null>(null);
   const [gaps, setGaps]                       = useState<IvHistoryGapSummary | null>(null);
   const [loadStatus, setLoadStatus]           = useState<InitialLoadStatus | null>(null);
+
+  // Ticker lookup
+  const [lookupTicker, setLookupTicker]       = useState('');
+  const [lookupRows, setLookupRows]           = useState<Array<{ date: string; atm_iv: number; underlying_px: number | null; source: string }> | null>(null);
+  const [lookupRank, setLookupRank]           = useState<{ ivRank: number | null; ivPercentile: number | null; currentIv: number | null; dataPoints: number } | null>(null);
+  const [lookupLoading, setLookupLoading]     = useState(false);
 
   const [running, setRunning]                 = useState(false);
   const [activePhase, setActivePhase]         = useState<Phase | null>(null);
   const [progress, setProgress]               = useState<IvHistoryProgressEvent | null>(null);
   const [result, setResult]                   = useState<{ processed: number; skipped: number; failed: number } | null>(null);
   const [error, setError]                     = useState<string | null>(null);
-  const [logs, setLogs]                       = useState<string[]>(['Ready. Configure a MarketData.app token and press Start.']);
+  const [logs, setLogs]                       = useState<string[]>(['Ready. Configure an IVolatility API key in Settings → API & Data, then press Start.']);
 
   const unsubRef  = useRef<(() => void) | null>(null);
   const logBoxRef = useRef<HTMLDivElement>(null);
@@ -96,31 +99,14 @@ export function IvHistoryView() {
   }, []);
 
   useEffect(() => {
-    window.api.ivHistory.getTokenConfigured().then(ok => {
-      setTokenConfigured(ok);
-      if (ok) appendLog('MarketData.app token is configured.');
+    window.api.settings.getIvolatilityKey().then(key => {
+      const configured = Boolean(key);
+      setKeyConfigured(configured);
+      if (configured) appendLog('IVolatility API key is configured.');
     }).catch(console.error);
     loadData();
     return () => { unsubRef.current?.(); };
   }, [loadData]);
-
-  const saveToken = async () => {
-    if (!tokenInput.trim()) return;
-    setTokenSaving(true);
-    setTokenMsg(null);
-    try {
-      await window.api.ivHistory.saveToken(tokenInput.trim());
-      setTokenConfigured(true);
-      setTokenInput('');
-      setTokenMsg('Saved.');
-      appendLog('MarketData.app token saved successfully.');
-    } catch (e) {
-      setTokenMsg(`Error: ${(e as Error).message}`);
-      appendLog(`Token save failed: ${(e as Error).message}`);
-    } finally {
-      setTokenSaving(false);
-    }
-  };
 
   const startPhase = async (phase: Phase) => {
     setError(null);
@@ -135,10 +121,13 @@ export function IvHistoryView() {
       setProgress(evt);
       // Log every 50 processed to avoid flooding; always log first event
       const done = evt.processed + evt.skipped + evt.failed;
-      if (done === 1 || done % 50 === 0) {
+      // Always log errors; log progress every 10 tickers
+      if (evt.lastError) {
+        appendLog(`✗ ${evt.ticker} — ${evt.lastError}`);
+      } else if (done === 1 || done % 10 === 0) {
         const pct = evt.total > 0 ? Math.round(done / evt.total * 100) : 0;
         appendLog(
-          `${evt.ticker} ${evt.date} — stored:${evt.processed} skip:${evt.skipped} fail:${evt.failed} (${pct}%) ${evt.callsPerMin}/min`
+          `${evt.ticker} — ok:${evt.processed} skip:${evt.skipped} fail:${evt.failed} (${pct}%) ${evt.callsPerMin}/min`
         );
       }
     });
@@ -167,6 +156,23 @@ export function IvHistoryView() {
 
   const clearLogs = () => setLogs([]);
 
+  const fetchLookup = async () => {
+    const t = lookupTicker.trim().toUpperCase();
+    if (!t) return;
+    setLookupLoading(true);
+    setLookupRows(null);
+    setLookupRank(null);
+    try {
+      const [rows, rank] = await Promise.all([
+        window.api.ivHistory.getRows(t),
+        window.api.ivHistory.getRank(t),
+      ]);
+      setLookupRows(rows);
+      setLookupRank(rank);
+    } catch { /* silently ignore */ }
+    finally { setLookupLoading(false); }
+  };
+
   const progressPct = progress && progress.total > 0
     ? Math.round((progress.processed + progress.skipped + progress.failed) / progress.total * 100)
     : 0;
@@ -186,34 +192,18 @@ export function IvHistoryView() {
           <span style={{ fontSize: 12, color: '#666', marginLeft: 10 }}>30-day ATM IV · 252 trading days</span>
         </div>
 
-        {/* Token */}
-        <SectionCard title="MarketData.app Token">
-          <div style={{ fontSize: 12, color: '#aaa', marginBottom: 8 }}>
+        {/* Key status */}
+        <SectionCard title="IVolatility API Key">
+          <div style={{ fontSize: 12, color: '#aaa', marginBottom: 6 }}>
             Status:{' '}
-            {tokenConfigured
+            {keyConfigured
               ? <span style={{ color: '#4caf50' }}>Configured ✓</span>
-              : <span style={{ color: '#ff9800' }}>Not configured — required for backfill</span>}
+              : <span style={{ color: '#ff9800' }}>Not configured — add key in <strong>Settings → API &amp; Data</strong></span>}
           </div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <input
-              type="password"
-              placeholder="Paste API token…"
-              value={tokenInput}
-              onChange={e => setTokenInput(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && saveToken()}
-              style={{ flex: 1, padding: '6px 10px', borderRadius: 6, border: '1px solid #3a3a5e', background: '#1a1a2e', color: '#e0e0f0', fontSize: 12 }}
-            />
-            <button
-              onClick={saveToken}
-              disabled={tokenSaving || !tokenInput.trim()}
-              style={{ padding: '6px 14px', borderRadius: 6, border: 'none', background: '#3a5fb0', color: '#fff', fontSize: 12, cursor: 'pointer', opacity: tokenSaving || !tokenInput.trim() ? 0.5 : 1, whiteSpace: 'nowrap' }}
-            >
-              {tokenSaving ? 'Saving…' : 'Save'}
-            </button>
-          </div>
-          {tokenMsg && <div style={{ marginTop: 6, fontSize: 12, color: tokenMsg.startsWith('Error') ? '#ef5350' : '#4caf50' }}>{tokenMsg}</div>}
-          <div style={{ marginTop: 8, fontSize: 11, color: '#555' }}>
-            Trader trial ≈ 100k credits/day (initial backfill) · Starter $12/mo ≈ 10k/day (gap fills)
+          <div style={{ fontSize: 11, color: '#555' }}>
+            IVolatility provides true as-of-date daily IVX snapshots (pre-computed 30-day CM ATM IV).
+            One API call per ticker covers the full date range — ~500 calls for S&amp;P 500, ~500 more for Russell unique.
+            Rate limit: 1 req/sec · 20,000 req/month.
           </div>
         </SectionCard>
 
@@ -243,7 +233,7 @@ export function IvHistoryView() {
         </SectionCard>
 
         {/* Initial Load */}
-        <SectionCard title="Initial Load (run once with Trader trial)">
+        <SectionCard title="Initial Load — 252 trading days">
           {/* Step 1 */}
           <div style={{ padding: '10px 0', borderBottom: '1px solid #1e1e30' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -258,8 +248,8 @@ export function IvHistoryView() {
               ) : (
                 <button
                   onClick={() => startPhase('initial_sp500')}
-                  disabled={running || !tokenConfigured}
-                  style={{ padding: '6px 14px', borderRadius: 6, border: 'none', background: tokenConfigured && !running ? '#2a5a8a' : '#333', color: '#fff', fontSize: 12, cursor: running || !tokenConfigured ? 'not-allowed' : 'pointer', opacity: running || !tokenConfigured ? 0.5 : 1 }}
+                  disabled={running || !keyConfigured}
+                  style={{ padding: '6px 14px', borderRadius: 6, border: 'none', background: keyConfigured && !running ? '#2a5a8a' : '#333', color: '#fff', fontSize: 12, cursor: running || !keyConfigured ? 'not-allowed' : 'pointer', opacity: running || !keyConfigured ? 0.5 : 1 }}
                 >
                   {loadStatus?.sp500.complete ? 'Re-run' : 'Start'}
                 </button>
@@ -285,8 +275,8 @@ export function IvHistoryView() {
               ) : (
                 <button
                   onClick={() => startPhase('initial_russell')}
-                  disabled={running || !tokenConfigured}
-                  style={{ padding: '6px 14px', borderRadius: 6, border: 'none', background: tokenConfigured && !running ? '#2a5a8a' : '#333', color: '#fff', fontSize: 12, cursor: running || !tokenConfigured ? 'not-allowed' : 'pointer', opacity: running || !tokenConfigured ? 0.5 : 1 }}
+                  disabled={running || !keyConfigured}
+                  style={{ padding: '6px 14px', borderRadius: 6, border: 'none', background: keyConfigured && !running ? '#2a5a8a' : '#333', color: '#fff', fontSize: 12, cursor: running || !keyConfigured ? 'not-allowed' : 'pointer', opacity: running || !keyConfigured ? 0.5 : 1 }}
                 >
                   {loadStatus?.russell.complete ? 'Re-run' : 'Start'}
                 </button>
@@ -298,8 +288,8 @@ export function IvHistoryView() {
         {/* Gap Fill */}
         <SectionCard title="Ongoing Refresh — Gap Fill">
           <div style={{ fontSize: 12, color: '#888', marginBottom: 10 }}>
-            Fills missing trading days since last reading. Run weekly with Starter subscription.
-            E*Trade auto-capture stores today's IV free whenever you open an options chain.
+            Fetches any trading days missing since the last reading — one API call per ticker.
+            E*Trade auto-capture also stores today's IV for free whenever you open an options chain.
           </div>
           {gaps ? (
             <div style={{ fontSize: 12, color: '#c8c8e0', marginBottom: 10 }}>
@@ -322,8 +312,8 @@ export function IvHistoryView() {
           ) : (
             <button
               onClick={() => startPhase('gap_fill')}
-              disabled={running || !tokenConfigured || gaps?.missingPairs === 0}
-              style={{ padding: '6px 16px', borderRadius: 6, border: 'none', background: tokenConfigured && gaps?.missingPairs && !running ? '#2a5a8a' : '#333', color: '#fff', fontSize: 12, cursor: 'pointer', opacity: running || !tokenConfigured || gaps?.missingPairs === 0 ? 0.5 : 1 }}
+              disabled={running || !keyConfigured || gaps?.missingPairs === 0}
+              style={{ padding: '6px 16px', borderRadius: 6, border: 'none', background: keyConfigured && gaps?.missingPairs && !running ? '#2a5a8a' : '#333', color: '#fff', fontSize: 12, cursor: 'pointer', opacity: running || !keyConfigured || gaps?.missingPairs === 0 ? 0.5 : 1 }}
             >
               Start Gap Fill
             </button>
@@ -390,49 +380,103 @@ export function IvHistoryView() {
           </div>
         </div>
 
-        {/* Console log box */}
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#0c0c18', border: '1px solid #2a2a3e', borderRadius: 10, overflow: 'hidden', minHeight: 0 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 14px', background: '#13131f', borderBottom: '1px solid #1e1e30' }}>
+        {/* Console log box — half height */}
+        <div style={{ flex: '0 0 180px', display: 'flex', flexDirection: 'column', background: '#0c0c18', border: '1px solid #2a2a3e', borderRadius: 10, overflow: 'hidden' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 14px', background: '#13131f', borderBottom: '1px solid #1e1e30' }}>
             <span style={{ fontSize: 11, fontWeight: 600, color: '#6060a0', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Console</span>
-            <button
-              onClick={clearLogs}
-              style={{ fontSize: 10, color: '#555', background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px 6px' }}
-            >
-              Clear
-            </button>
+            <button onClick={clearLogs} style={{ fontSize: 10, color: '#555', background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px 6px' }}>Clear</button>
           </div>
-          <div
-            ref={logBoxRef}
-            style={{
-              flex: 1,
-              overflowY: 'auto',
-              padding: '10px 14px',
-              fontFamily: '"Cascadia Code", "Fira Code", "Consolas", monospace',
-              fontSize: 12,
-              lineHeight: 1.6,
-              color: '#a0c0a0',
-            }}
-          >
+          <div ref={logBoxRef} style={{ flex: 1, overflowY: 'auto', padding: '8px 14px', fontFamily: '"Cascadia Code", "Fira Code", "Consolas", monospace', fontSize: 11, lineHeight: 1.55, color: '#a0c0a0' }}>
             {logs.length === 0 ? (
               <span style={{ color: '#444' }}>No output yet.</span>
             ) : (
               logs.map((line, i) => (
-                <div
-                  key={i}
-                  style={{
-                    color: line.includes('Error') || line.includes('fail') ? '#ef9a9a'
-                         : line.includes('Done') || line.includes('saved') || line.includes('Configured') ? '#a5d6a7'
-                         : line.includes('Cancel') ? '#ff9800'
-                         : '#a0c0a0',
-                    whiteSpace: 'pre-wrap',
-                    wordBreak: 'break-all',
-                  }}
-                >
-                  {line}
-                </div>
+                <div key={i} style={{
+                  color: line.includes('Error') || line.includes('fail') ? '#ef9a9a'
+                       : line.includes('Done') || line.includes('saved') || line.includes('Configured') ? '#a5d6a7'
+                       : line.includes('Cancel') ? '#ff9800'
+                       : '#a0c0a0',
+                  whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+                }}>{line}</div>
               ))
             )}
           </div>
+        </div>
+
+        {/* ── Ticker Lookup ── */}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#13131f', border: '1px solid #2a2a3e', borderRadius: 10, overflow: 'hidden', minHeight: 0 }}>
+          {/* Search bar */}
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '10px 14px', borderBottom: '1px solid #1e1e30' }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: '#6060a0', textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>Lookup Symbol</span>
+            <input
+              type="text"
+              value={lookupTicker}
+              onChange={e => setLookupTicker(e.target.value.toUpperCase())}
+              onKeyDown={e => e.key === 'Enter' && fetchLookup()}
+              placeholder="e.g. AAPL"
+              style={{ width: 90, padding: '4px 8px', borderRadius: 5, border: '1px solid #3a3a5e', background: '#1a1a2e', color: '#e0e0f0', fontSize: 12, fontFamily: 'monospace', textTransform: 'uppercase' }}
+            />
+            <button
+              onClick={fetchLookup}
+              disabled={lookupLoading || !lookupTicker.trim()}
+              style={{ padding: '4px 12px', borderRadius: 5, border: 'none', background: '#3a5fb0', color: '#fff', fontSize: 12, cursor: 'pointer', opacity: lookupLoading || !lookupTicker.trim() ? 0.5 : 1 }}
+            >
+              {lookupLoading ? 'Loading…' : 'Fetch'}
+            </button>
+            {lookupRank && lookupRows !== null && (
+              <div style={{ display: 'flex', gap: 16, marginLeft: 8, fontSize: 12, color: '#888' }}>
+                <span>{lookupRows.length} rows</span>
+                {lookupRank.currentIv !== null && <span>Current IV: <strong style={{ color: '#e0e0f0' }}>{(lookupRank.currentIv * 100).toFixed(1)}%</strong></span>}
+                {lookupRank.ivRank !== null && <span>IV Rank: <strong style={{ color: '#fab387' }}>{lookupRank.ivRank.toFixed(1)}%</strong></span>}
+                {lookupRank.ivPercentile !== null && <span>IV Pct: <strong style={{ color: '#89b4fa' }}>{lookupRank.ivPercentile.toFixed(1)}%</strong></span>}
+              </div>
+            )}
+            {lookupRows !== null && lookupRows.length === 0 && (
+              <span style={{ fontSize: 12, color: '#ff9800', marginLeft: 8 }}>No data stored for {lookupTicker}</span>
+            )}
+          </div>
+
+          {/* Data grid */}
+          {lookupRows && lookupRows.length > 0 && (
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead style={{ position: 'sticky', top: 0, background: '#13131f', zIndex: 1 }}>
+                  <tr style={{ color: '#6c7086', borderBottom: '1px solid #2a2a3e' }}>
+                    <th style={{ textAlign: 'left', padding: '6px 14px', fontWeight: 600 }}>#</th>
+                    <th style={{ textAlign: 'left', padding: '6px 14px', fontWeight: 600 }}>Date</th>
+                    <th style={{ textAlign: 'right', padding: '6px 14px', fontWeight: 600 }}>IV30</th>
+                    <th style={{ textAlign: 'right', padding: '6px 14px', fontWeight: 600 }}>Stock Price</th>
+                    <th style={{ textAlign: 'left', padding: '6px 14px', fontWeight: 600 }}>Source</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {lookupRows.map((row, i) => {
+                    const ivPct = row.atm_iv * 100;
+                    const ivColor = ivPct > 50 ? '#ef5350' : ivPct > 30 ? '#ff9800' : '#4caf50';
+                    return (
+                      <tr key={row.date} style={{ borderBottom: '1px solid #1a1a2e', background: i % 2 === 0 ? 'transparent' : '#0e0e1a' }}>
+                        <td style={{ padding: '4px 14px', color: '#444', fontFamily: 'monospace' }}>{lookupRows.length - i}</td>
+                        <td style={{ padding: '4px 14px', fontFamily: 'monospace', color: '#cdd6f4' }}>{row.date}</td>
+                        <td style={{ padding: '4px 14px', textAlign: 'right', fontFamily: 'monospace', color: ivColor, fontWeight: 600 }}>{ivPct.toFixed(2)}%</td>
+                        <td style={{ padding: '4px 14px', textAlign: 'right', fontFamily: 'monospace', color: '#cdd6f4' }}>{row.underlying_px !== null ? `$${row.underlying_px.toFixed(2)}` : '—'}</td>
+                        <td style={{ padding: '4px 14px' }}>
+                          <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, background: row.source === 'ivolatility' ? '#1a2a3a' : row.source === 'etrade' ? '#2a1a3a' : '#1a2a1a', color: row.source === 'ivolatility' ? '#89b4fa' : row.source === 'etrade' ? '#cba6f7' : '#a6e3a1' }}>
+                            {row.source}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {!lookupRows && (
+            <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#333', fontSize: 12 }}>
+              Enter a symbol above to inspect stored IV history
+            </div>
+          )}
         </div>
       </div>
     </div>

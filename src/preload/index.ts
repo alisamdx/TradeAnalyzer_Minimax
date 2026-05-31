@@ -69,6 +69,8 @@ import type {
   IvHistoryCoverage,
   IvHistoryGapSummary,
   IvHistoryProgressEvent,
+  OpportunityRow,
+  OpportunityRunOptions,
 } from '@shared/types.js';
 export type {
   ScreenPreset, ScreenCriteria, ScreenRunResult, ScreenResultRow, Universe,
@@ -217,6 +219,8 @@ function buildApi() {
     setAll: (partial: Partial<AppSettings>) => invoke<boolean>('settings:set-all', partial),
     getApiKey: () => invoke<string>('settings:get-api-key'),
     setApiKey: (key: string) => invoke<boolean>('settings:set-api-key', key),
+    getIvolatilityKey: () => invoke<string>('settings:get-ivolatility-key'),
+    setIvolatilityKey: (key: string) => invoke<boolean>('settings:set-ivolatility-key', key),
     openLogsDir: () => invoke<boolean>('settings:open-logs-dir'),
     backup: () => invoke<{ backupPath: string; message: string } | null>('settings:backup-everything'),
     restore: () => invoke<{ restored: boolean; message: string } | null>('settings:restore-backup'),
@@ -297,92 +301,6 @@ function buildApi() {
       invoke<{ success: boolean; count?: number; error?: string; type: string }>('historical:fetchAndStore', ticker, type, options),
     needsRefresh: (ticker: string, dataType: 'financials' | 'prices', maxAgeDays?: number) =>
       invoke<boolean>('historical:needsRefresh', ticker, dataType, maxAgeDays)
-  };
-
-  const briefing = {
-    getMarketRegime: () => invoke<{
-      success: boolean;
-      data?: {
-        spyTrend: 'bullish' | 'bearish' | 'neutral';
-        spyPrice: number | null;
-        spySma20: number | null;
-        spySma50: number | null;
-        vixLevel: 'low' | 'normal' | 'high';
-        vixValue: number | null;
-        summary: string;
-      };
-      error?: string;
-    }>('briefing:getMarketRegime'),
-    getActionItems: () => invoke<{
-      success: boolean;
-      data?: {
-        type: 'expiring' | 'delta_breach' | 'earnings';
-        ticker: string;
-        details: string;
-        priority: 'high' | 'medium' | 'low';
-        positionId?: number;
-        daysRemaining?: number;
-        delta?: number;
-        expirationDate?: string;
-      }[];
-      error?: string;
-    }>('briefing:getActionItems'),
-    getTopSetups: () => invoke<{
-      success: boolean;
-      data?: {
-        ticker: string;
-        roe: number | null;
-        peRatio: number | null;
-        debtToEquity: number | null;
-        marketCap: number | null;
-        fcfYield: number | null;
-        wheelSuitability: number | null;
-        targetStrike: number | null;
-        estimatedPremium: number | null;
-        expiryDate: string | null;
-        lastPrice: number | null;
-      }[];
-      error?: string;
-    }>('briefing:getTopSetups'),
-    getFull: () => invoke<{
-      success: boolean;
-      data?: {
-        generatedAt: string;
-        marketRegime: {
-          spyTrend: 'bullish' | 'bearish' | 'neutral';
-          spyPrice: number | null;
-          spySma20: number | null;
-          spySma50: number | null;
-          vixLevel: 'low' | 'normal' | 'high';
-          vixValue: number | null;
-          summary: string;
-        };
-        actionItems: {
-          type: 'expiring' | 'delta_breach' | 'earnings';
-          ticker: string;
-          details: string;
-          priority: 'high' | 'medium' | 'low';
-          positionId?: number;
-          daysRemaining?: number;
-          delta?: number;
-          expirationDate?: string;
-        }[];
-        topSetups: {
-          ticker: string;
-          roe: number | null;
-          peRatio: number | null;
-          debtToEquity: number | null;
-          marketCap: number | null;
-          fcfYield: number | null;
-          wheelSuitability: number | null;
-          targetStrike: number | null;
-          estimatedPremium: number | null;
-          expiryDate: string | null;
-          lastPrice: number | null;
-        }[];
-      };
-      error?: string;
-    }>('briefing:getFull')
   };
 
   const alerts = {
@@ -802,12 +720,35 @@ function buildApi() {
           dteNear: number | null; dteFar: number | null;
           estimatedFromDelta: boolean;
         } | null;
-        withIv: number; withDelta: number; withUndPx: number;
+        withIv: number; withBsIv: number; withDelta: number; withUndPx: number;
         rawTopLevelKeys: string[];
         rawFieldTypes: Record<string, string>;
         rawContractSample: string;
         rawJsonSample: string;
       }>('test-api:get-marketdata-chain', ticker, date),
+
+    saveIVolatilityKey: (key: string) =>
+      invoke<boolean>('test-api:save-ivolatility-key', key),
+
+    getIVolatilityKeyConfigured: () =>
+      invoke<boolean>('test-api:get-ivolatility-key-configured'),
+
+    getIVolatilityIvx: (symbol: string, from: string, to: string) =>
+      invoke<{
+        symbol: string; from: string; to: string;
+        status: string; rowCount: number;
+        rows: Array<{
+          date: string;
+          iv30: number | null; iv60: number | null; iv90: number | null;
+          iv7: number | null; iv14: number | null; iv21: number | null;
+          iv120: number | null; iv180: number | null; iv360: number | null;
+        }>;
+        iv30Min: number | null; iv30Max: number | null;
+        iv30Latest: number | null; iv30LatestDate: string | null;
+        rawTopLevelKeys: string[];
+        rawFieldTypes: Record<string, string>;
+        rawSample: string;
+      }>('test-api:get-ivolatility-ivx', symbol, from, to),
   };
 
   const agent = {
@@ -944,13 +885,11 @@ function buildApi() {
     cancel:              () => invoke<boolean>('iv-history:cancel'),
     getRank:             (ticker: string) => invoke<IvRankResult>('iv-history:get-rank', ticker),
     getRanks:            (tickers: string[]) => invoke<IvRankResult[]>('iv-history:get-ranks', tickers),
+    getRows:             (ticker: string) => invoke<Array<{ date: string; atm_iv: number; underlying_px: number | null; source: string }>>('iv-history:get-rows', ticker),
     getInitialLoadStatus: () => invoke<{
       sp500:   { complete: boolean; completedAt: string | null };
       russell: { complete: boolean; completedAt: string | null; newTickers: number };
     }>('iv-history:get-initial-load-status'),
-    saveToken:           (token: string) => invoke<boolean>('iv-history:save-token', token),
-    getTokenConfigured:  () => invoke<boolean>('iv-history:get-token-configured'),
-    setRate:             (rpm: number) => invoke<boolean>('iv-history:set-rate', rpm),
     onProgress: (callback: (evt: IvHistoryProgressEvent) => void) => {
       const handler = (_: unknown, evt: IvHistoryProgressEvent) => callback(evt);
       ipcRenderer.on('iv-history:progress', handler);
@@ -958,8 +897,12 @@ function buildApi() {
     },
   };
 
+  const opportunity = {
+    run: (opts: OpportunityRunOptions) => invoke<OpportunityRow[]>('opportunity:run', opts),
+  };
+
   return {
-    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, historical, portfolio, briefing, alerts, optionsChain, agent, backtest, leapsCsp, collaredLeaps, testApi, etrade, filters, payoff, ivHistory },
+    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, historical, portfolio, alerts, optionsChain, agent, backtest, leapsCsp, collaredLeaps, testApi, etrade, filters, payoff, ivHistory, opportunity },
     dialog: {
       prompt: (opts: { title: string; defaultValue?: string }) =>
         invoke<string | null>('dialog:prompt', opts),

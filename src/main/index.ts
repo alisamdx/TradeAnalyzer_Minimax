@@ -26,7 +26,8 @@ import { registerHistoricalIpc } from './ipc/ipc-historical.js';
 import { registerLeapsCspIpc } from './ipc/ipc-leaps-csp.js';
 import { registerCollaredLeapsIpc } from './ipc/ipc-collared-leaps.js';
 import { registerPortfolioIpc } from './ipc/ipc-portfolio.js';
-import { registerBriefingIpc } from './ipc/ipc-briefing.js';
+import { registerOpportunityIpc } from './ipc/ipc-opportunity.js';
+import { OpportunityService } from './services/opportunity-service.js';
 import { registerAlertsIpc } from './ipc/ipc-alerts.js';
 import { registerOptionsIpc } from './ipc/ipc-options.js';
 import { registerTestApiIpc } from './ipc/ipc-test-api.js';
@@ -41,6 +42,7 @@ import { registerBacktestIpc } from './ipc/ipc-backtest.js';
 import { registerFiltersIpc } from './ipc/ipc-filters.js';
 import { registerPayoffIpc } from './ipc/ipc-payoff.js';
 import { MarketDataProvider } from './services/marketdata-provider.js';
+import { IVolatilityProvider } from './services/ivolatility-provider.js';
 import { IvHistoryService } from './services/iv-history-service.js';
 import { registerIvHistoryIpc } from './ipc/ipc-iv-history.js';
 
@@ -262,8 +264,9 @@ app.whenReady().then(() => {
   // Phase 6 - Portfolio tracking IPC (+ Phase 1–3 AI Portfolio Advisor)
   registerPortfolioIpc(db, analysisService);
 
-  // Phase 7 - Morning Briefing IPC
-  registerBriefingIpc(db, () => getApiKey(db), rateLimiter);
+  // ENH-2 - Opportunity Dashboard
+  const opportunityService = new OpportunityService(db, getConstituents);
+  registerOpportunityIpc(opportunityService);
 
   // Phase 8 - Alerts System IPC
   registerAlertsIpc(db);
@@ -272,19 +275,23 @@ app.whenReady().then(() => {
   // Payoff Visualizer — saved strategy CRUD
   registerPayoffIpc(db);
 
-  // v0.17.0 — IV History service + MarketData.app provider
+  // v0.17.0 — IV History: IVolatility.com provides true as-of-date daily IVX snapshots.
+  // MarketData.app is kept for Test API diagnostics only (not used for backfill).
   const marketdataProvider = new MarketDataProvider(
     () => { try { return secureGet(db, 'marketdataApiToken'); } catch { return ''; } }
   );
-  const ivHistoryService = new IvHistoryService(db, marketdataProvider, getConstituents);
-  registerIvHistoryIpc(db, ivHistoryService, marketdataProvider);
+  const ivolatilityProvider = new IVolatilityProvider(
+    () => { try { return secureGet(db, 'ivolatilityApiKey'); } catch { return ''; } }
+  );
+  const ivHistoryService = new IvHistoryService(db, ivolatilityProvider, getConstituents);
+  registerIvHistoryIpc(ivHistoryService);
 
   // Options Chain view (passes IV capture callback for E*Trade auto-capture)
   registerOptionsIpc(optionsProvider, quoteCache, rateLimiter,
     (ticker, contracts, underlyingPx) => ivHistoryService.captureFromEtradeChain(ticker, contracts, underlyingPx));
 
-  // Test API diagnostic screen (marketdata passed so the MarketData.app tab can test live chains)
-  registerTestApiIpc(dataProvider, marketdataProvider);
+  // Test API diagnostic screen
+  registerTestApiIpc(dataProvider, db, marketdataProvider, ivolatilityProvider);
 
   // E*Trade auth / credential management IPC
   registerETradeIpc(db);

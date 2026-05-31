@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { CacheStatusIndicator } from '../components/CacheStatusIndicator.js';
-import type { Universe, CacheStats, ConstituentsMeta, Watchlist } from '@shared/types.js';
+import type { Universe, CacheStats, ConstituentsMeta, Watchlist, IvHistoryProgressEvent, IvHistoryCoverage } from '@shared/types.js';
 
 const PRICE_RANGES = ['1M', '3M', '6M', '1Y', '2Y', '5Y'] as const;
 type PriceRange = typeof PRICE_RANGES[number];
@@ -32,6 +32,14 @@ export function DataView({ isSyncing, syncProgress, syncUniverseSelection, onSyn
   const [isFetchingWl, setIsFetchingWl] = useState(false);
   const [wlProgress, setWlProgress] = useState<{ done: number; total: number; ticker: string } | null>(null);
 
+  // IV History gap fill
+  const [ivKeyConfigured, setIvKeyConfigured] = useState(false);
+  const [ivCoverage, setIvCoverage] = useState<IvHistoryCoverage | null>(null);
+  const [ivRunning, setIvRunning] = useState(false);
+  const [ivProgress, setIvProgress] = useState<IvHistoryProgressEvent | null>(null);
+  const [ivResult, setIvResult] = useState<{ processed: number; skipped: number; failed: number } | null>(null);
+  const ivUnsubRef = useRef<(() => void) | null>(null);
+
   const loadStats = useCallback(async () => {
     try {
       const currentStats = await window.api.cache.getStats();
@@ -45,10 +53,23 @@ export function DataView({ isSyncing, syncProgress, syncUniverseSelection, onSyn
     }
   }, []);
 
+  const loadIvStatus = useCallback(async () => {
+    try {
+      const [key, cov] = await Promise.all([
+        window.api.settings.getIvolatilityKey(),
+        window.api.ivHistory.getCoverage('both'),
+      ]);
+      setIvKeyConfigured(Boolean(key));
+      setIvCoverage(cov);
+    } catch { /* non-fatal */ }
+  }, []);
+
   useEffect(() => {
     loadStats();
+    loadIvStatus();
     window.api.watchlists.list().then(setWatchlists).catch(console.error);
-  }, [loadStats]);
+    return () => { ivUnsubRef.current?.(); };
+  }, [loadStats, loadIvStatus]);
 
   const startSync = async () => {
     setError(null);
@@ -166,163 +187,226 @@ export function DataView({ isSyncing, syncProgress, syncUniverseSelection, onSyn
     }
   };
 
+  const runIvGapFill = async () => {
+    setIvResult(null);
+    setIvProgress(null);
+    setIvRunning(true);
+    ivUnsubRef.current?.();
+    ivUnsubRef.current = window.api.ivHistory.onProgress(evt => setIvProgress(evt));
+    try {
+      const res = await window.api.ivHistory.startBackfill('gap_fill');
+      setIvResult(res);
+      await loadIvStatus();
+    } catch { /* error surfaced via progress */ }
+    finally {
+      setIvRunning(false);
+      ivUnsubRef.current?.();
+      ivUnsubRef.current = null;
+    }
+  };
+
+  const cancelIvGapFill = () => window.api.ivHistory.cancel().catch(console.error);
+
   const isBusy = isFetchingPrices || isFetchingWl;
 
+  const card: React.CSSProperties = { padding: '16px 18px', border: '1px solid var(--border)', borderRadius: '8px', background: 'var(--bg-card, var(--bg))' };
+  const cardTitle: React.CSSProperties = { margin: '0 0 4px', fontSize: '14px', fontWeight: 700 };
+  const hint: React.CSSProperties = { margin: '0 0 12px', fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.5 };
+
   return (
-    <div className="data-view" style={{ padding: '20px', maxWidth: '800px', margin: '0 auto' }}>
+    <div className="data-view" style={{ display: 'flex', flexDirection: 'column', height: '100%', padding: '16px 20px', boxSizing: 'border-box', overflow: 'hidden' }}>
+
+      {/* ── Toasts ── */}
       {error && (
-        <div className="error-toast" onClick={() => setError(null)}>
+        <div className="error-toast" onClick={() => setError(null)} style={{ marginBottom: 8 }}>
           {error} <span style={{ float: 'right', cursor: 'pointer' }}>✕</span>
         </div>
       )}
       {statusMsg && !error && (
-        <div className="status-toast" onClick={() => setStatusMsg(null)}>
+        <div className="status-toast" onClick={() => setStatusMsg(null)} style={{ marginBottom: 8 }}>
           {statusMsg} <span style={{ float: 'right', cursor: 'pointer' }}>✕</span>
         </div>
       )}
 
-      <h2>Data Management</h2>
-      <p className="hint">
-        Manage the local database. Fetch lists of companies and download their quotes and fundamentals to enable instantaneous screening.
-      </p>
-
-      <div className="card" style={{ marginTop: '20px', padding: '20px', border: '1px solid var(--border)', borderRadius: '8px' }}>
-        <h3>1. Update Ticker Lists</h3>
-        <p className="hint" style={{ marginBottom: '15px' }}>Scrape the latest index constituents from Wikipedia.</p>
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-          <button onClick={() => refreshConstituents('sp500')} className="primary">↻ Update S&P 500</button>
-          <span className="meta" style={{ marginLeft: '10px' }}>
-            {meta.sp500 ? `Last synced: ${new Date(meta.sp500.refreshedAt).toLocaleDateString()}` : 'Not loaded'}
-          </span>
-        </div>
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', marginTop: '10px' }}>
-          <button onClick={() => refreshConstituents('russell1000')} className="primary">↻ Update Russell 1000</button>
-          <button onClick={() => importCsv('russell1000')} className="secondary">Import CSV</button>
-          <span className="meta" style={{ marginLeft: '10px' }}>
-            {meta.russell1000 ? `Last synced: ${new Date(meta.russell1000.refreshedAt).toLocaleDateString()}` : 'Not loaded'}
-          </span>
-        </div>
+      {/* ── Header ── */}
+      <div style={{ marginBottom: 14 }}>
+        <h2 style={{ margin: '0 0 2px', fontSize: 16 }}>Data Management</h2>
+        <p style={{ ...hint, margin: 0 }}>Manage the local database: ticker lists, market data, IV history, and price history.</p>
       </div>
 
-      <div className="card" style={{ marginTop: '20px', padding: '20px', border: '1px solid var(--border)', borderRadius: '8px' }}>
-        <h3>2. Sync Market Data</h3>
-        <p className="hint" style={{ marginBottom: '15px' }}>Download current prices and fundamentals from Polygon.io for all tickers in the selected universe.</p>
+      {/* ── Two-column body ── */}
+      <div style={{ display: 'flex', gap: 16, flex: 1, minHeight: 0, overflow: 'hidden' }}>
 
-        <div style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
-          {(['sp500', 'russell1000', 'both'] as Universe[]).map((u) => (
-            <button
-              key={u}
-              className={`univ-btn ${syncUniverseSelection === u ? 'active' : ''}`}
-              onClick={() => onSyncUniverseChange(u)}
-              disabled={isSyncing}
-            >
-              {u === 'sp500' ? 'S&P 500' : u === 'russell1000' ? 'Russell 1000' : 'Both'}
-            </button>
-          ))}
-        </div>
+        {/* ── Left column ── */}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto', minWidth: 0 }}>
 
-        {isSyncing ? (
-          <div style={{ padding: '15px', backgroundColor: 'var(--bg-lighter)', borderRadius: '4px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
-              <strong>Downloading...</strong>
-              {syncProgress && syncProgress.total > 0 && (
-                <span>{Math.round((syncProgress.scanned / syncProgress.total) * 100)}%</span>
-              )}
+          {/* 1. Ticker Lists */}
+          <div style={card}>
+            <h3 style={cardTitle}>1. Update Ticker Lists</h3>
+            <p style={hint}>Scrape the latest index constituents from Wikipedia.</p>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+              <button onClick={() => refreshConstituents('sp500')} className="primary">↻ S&amp;P 500</button>
+              <span className="meta">{meta.sp500 ? `Updated ${new Date(meta.sp500.refreshedAt).toLocaleDateString()}` : 'Not loaded'}</span>
             </div>
-            {syncProgress && syncProgress.total > 0 && (
-              <>
-                <progress value={syncProgress.scanned} max={syncProgress.total} style={{ width: '100%', height: '10px' }}></progress>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '5px', fontSize: '0.9em', color: 'var(--text-muted)' }}>
-                  <span>{syncProgress.scanned} / {syncProgress.total} tickers processed</span>
-                  <span>Fetching: <strong>{syncProgress.ticker}</strong></span>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <button onClick={() => refreshConstituents('russell1000')} className="primary">↻ Russell 1000</button>
+              <button onClick={() => importCsv('russell1000')} className="secondary">Import CSV</button>
+              <span className="meta">{meta.russell1000 ? `Updated ${new Date(meta.russell1000.refreshedAt).toLocaleDateString()}` : 'Not loaded'}</span>
+            </div>
+          </div>
+
+          {/* 2. Sync Market Data */}
+          <div style={card}>
+            <h3 style={cardTitle}>2. Sync Market Data</h3>
+            <p style={hint}>Download current prices &amp; fundamentals from Polygon.io for all tickers in the selected universe.</p>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+              {(['sp500', 'russell1000', 'both'] as Universe[]).map((u) => (
+                <button key={u} className={`univ-btn ${syncUniverseSelection === u ? 'active' : ''}`}
+                  onClick={() => onSyncUniverseChange(u)} disabled={isSyncing}>
+                  {u === 'sp500' ? 'S&P 500' : u === 'russell1000' ? 'Russell 1000' : 'Both'}
+                </button>
+              ))}
+            </div>
+            {isSyncing ? (
+              <div style={{ background: 'var(--bg-lighter)', borderRadius: 4, padding: 12 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, fontSize: '0.85em' }}>
+                  <strong>Downloading…</strong>
+                  {syncProgress && syncProgress.total > 0 && <span>{Math.round(syncProgress.scanned / syncProgress.total * 100)}%</span>}
                 </div>
+                {syncProgress && syncProgress.total > 0 && (
+                  <>
+                    <progress value={syncProgress.scanned} max={syncProgress.total} style={{ width: '100%', height: 8 }} />
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4, fontSize: '0.8em', color: 'var(--text-muted)' }}>
+                      <span>{syncProgress.scanned} / {syncProgress.total}</span>
+                      <span>Fetching: <strong>{syncProgress.ticker}</strong></span>
+                    </div>
+                  </>
+                )}
+                <button onClick={cancelSync} className="danger" style={{ marginTop: 10, padding: '6px 14px' }}>Stop Sync</button>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={startSync} className="primary">▶ Start Sync</button>
+                <button onClick={clearMarketData} className="danger">Clear All Market Data</button>
+              </div>
+            )}
+          </div>
+
+          {/* 3. IV History Sync */}
+          <div style={card}>
+            <h3 style={cardTitle}>3. IV History Sync</h3>
+            <p style={hint}>Fetch missing daily IV readings from IVolatility.com for S&amp;P 500 + Russell 1000. One API call per ticker — run weekly.</p>
+            {!ivKeyConfigured ? (
+              <p style={{ ...hint, color: 'var(--warning, #ff9800)', margin: 0 }}>
+                IVolatility API key not configured — add it in <strong>Settings → API &amp; Data</strong>.
+              </p>
+            ) : (
+              <>
+                {ivCoverage && (
+                  <div style={{ display: 'flex', gap: 16, marginBottom: 10, fontSize: '0.82em', color: 'var(--text-muted)', flexWrap: 'wrap' }}>
+                    <span>Last: <strong style={{ color: 'var(--text)' }}>{ivCoverage.lastRefreshDate ?? '—'}</strong></span>
+                    <span>Rows: <strong style={{ color: 'var(--text)' }}>{ivCoverage.totalReadings.toLocaleString()}</strong></span>
+                    <span><strong style={{ color: '#4caf50' }}>{ivCoverage.complete}</strong> complete · <strong style={{ color: '#ff9800' }}>{ivCoverage.partial}</strong> partial · <strong style={{ color: '#ef5350' }}>{ivCoverage.none}</strong> none</span>
+                  </div>
+                )}
+                {ivRunning && ivProgress && (
+                  <div style={{ marginBottom: 10 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: '0.82em', color: 'var(--text-muted)' }}>
+                      <span><strong style={{ color: 'var(--text)' }}>{ivProgress.ticker}</strong></span>
+                      <span>{ivProgress.processed + ivProgress.skipped + ivProgress.failed} / {ivProgress.total} · {ivProgress.callsPerMin}/min</span>
+                    </div>
+                    <progress value={ivProgress.processed + ivProgress.skipped + ivProgress.failed} max={ivProgress.total} style={{ width: '100%', height: 7 }} />
+                    {ivProgress.lastError && <div style={{ marginTop: 3, fontSize: '0.78em', color: '#ef5350' }}>✗ {ivProgress.ticker}: {ivProgress.lastError}</div>}
+                  </div>
+                )}
+                {!ivRunning && ivResult && (
+                  <div style={{ marginBottom: 10, fontSize: '0.85em', color: 'var(--text-muted)' }}>
+                    Done — <strong style={{ color: '#4caf50' }}>{ivResult.processed}</strong> updated · <strong>{ivResult.skipped}</strong> skipped · <strong style={{ color: ivResult.failed > 0 ? '#ef5350' : 'inherit' }}>{ivResult.failed}</strong> failed
+                  </div>
+                )}
+                {ivRunning
+                  ? <button onClick={cancelIvGapFill} className="danger" style={{ padding: '6px 14px' }}>Stop IV Sync</button>
+                  : <button onClick={runIvGapFill} className="primary">▶ Run IV Gap Fill</button>
+                }
               </>
             )}
-            <button onClick={cancelSync} className="danger" style={{ marginTop: '15px' }}>Stop Sync</button>
           </div>
-        ) : (
-          <div style={{ display: 'flex', gap: '10px' }}>
-            <button onClick={startSync} className="primary" style={{ padding: '10px 20px', fontSize: '1.1em' }}>
-              ▶ Start Sync
-            </button>
-            <button onClick={clearMarketData} className="danger" style={{ padding: '10px 20px', fontSize: '1.1em' }}>
-              Clear All Market Data
-            </button>
-          </div>
-        )}
-      </div>
 
-      <div className="card" style={{ marginTop: '20px', padding: '20px', border: '1px solid var(--border)', borderRadius: '8px' }}>
-        <h3>3. Fetch Historical Prices</h3>
-        <p className="hint" style={{ marginBottom: '15px' }}>Download daily OHLCV price history. Required before running a backtest on a ticker.</p>
+        </div>{/* end left */}
 
-        {/* Single ticker */}
-        <div style={{ marginBottom: '16px' }}>
-          <div style={{ fontSize: '0.85em', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Single Ticker</div>
-          <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-            <input
-              type="text"
-              placeholder="e.g. AAPL"
-              value={priceTicker}
-              onChange={(e) => setPriceTicker(e.target.value.toUpperCase())}
-              onKeyDown={(e) => e.key === 'Enter' && fetchTickerPrices()}
-              style={{ padding: '8px 12px', borderRadius: '4px', border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', width: '140px', textTransform: 'uppercase' }}
-              disabled={isBusy}
-            />
-            <div style={{ display: 'flex', gap: '6px' }}>
-              {PRICE_RANGES.map((r) => (
-                <button key={r} className={`univ-btn ${priceRange === r ? 'active' : ''}`} onClick={() => setPriceRange(r)} disabled={isBusy}>{r}</button>
-              ))}
-            </div>
-            <button className="primary" onClick={fetchTickerPrices} disabled={isBusy || !priceTicker.trim()}>
-              {isFetchingPrices ? 'Fetching…' : '↓ Fetch'}
-            </button>
-          </div>
-        </div>
+        {/* ── Right column ── */}
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 12, overflowY: 'auto', minWidth: 0 }}>
 
-        {/* Watchlist */}
-        <div style={{ borderTop: '1px solid var(--border)', paddingTop: '16px' }}>
-          <div style={{ fontSize: '0.85em', fontWeight: 600, color: 'var(--text-muted)', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Watchlist</div>
-          <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-            <select
-              value={selectedWatchlistId ?? ''}
-              onChange={(e) => setSelectedWatchlistId(e.target.value ? Number(e.target.value) : null)}
-              disabled={isBusy}
-              style={{ padding: '8px 12px', borderRadius: '4px', border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', minWidth: '180px' }}
-            >
-              <option value="">— Select watchlist —</option>
-              {watchlists.map((wl) => (
-                <option key={wl.id} value={wl.id}>{wl.name} ({wl.itemCount ?? '?'} tickers)</option>
-              ))}
-            </select>
-            <div style={{ display: 'flex', gap: '6px' }}>
-              {PRICE_RANGES.map((r) => (
-                <button key={r} className={`univ-btn ${wlRange === r ? 'active' : ''}`} onClick={() => setWlRange(r)} disabled={isBusy}>{r}</button>
-              ))}
-            </div>
-            <button className="primary" onClick={fetchWatchlistPrices} disabled={isBusy || selectedWatchlistId === null}>
-              {isFetchingWl ? 'Fetching…' : '↓ Fetch All'}
-            </button>
-          </div>
-          {isFetchingWl && wlProgress && (
-            <div style={{ marginTop: '12px' }}>
-              <progress value={wlProgress.done} max={wlProgress.total} style={{ width: '100%', height: '8px' }} />
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px', fontSize: '0.85em', color: 'var(--text-muted)' }}>
-                <span>{wlProgress.done} / {wlProgress.total}</span>
-                <span>Fetching: <strong>{wlProgress.ticker}</strong></span>
+          {/* 4. Historical Prices */}
+          <div style={card}>
+            <h3 style={cardTitle}>4. Fetch Historical Prices</h3>
+            <p style={hint}>Download daily OHLCV price history. Required before running a backtest on a ticker.</p>
+
+            {/* Single ticker */}
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: '0.78em', fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Single Ticker</div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <input type="text" placeholder="e.g. AAPL" value={priceTicker}
+                  onChange={(e) => setPriceTicker(e.target.value.toUpperCase())}
+                  onKeyDown={(e) => e.key === 'Enter' && fetchTickerPrices()}
+                  style={{ padding: '6px 10px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', width: 110, textTransform: 'uppercase' }}
+                  disabled={isBusy} />
+                <div style={{ display: 'flex', gap: 4 }}>
+                  {PRICE_RANGES.map((r) => (
+                    <button key={r} className={`univ-btn ${priceRange === r ? 'active' : ''}`} onClick={() => setPriceRange(r)} disabled={isBusy}>{r}</button>
+                  ))}
+                </div>
+                <button className="primary" onClick={fetchTickerPrices} disabled={isBusy || !priceTicker.trim()}>
+                  {isFetchingPrices ? 'Fetching…' : '↓ Fetch'}
+                </button>
               </div>
             </div>
-          )}
-        </div>
-      </div>
 
-      <div className="card" style={{ marginTop: '20px', padding: '20px', border: '1px solid var(--border)', borderRadius: '8px' }}>
-        <h3>Local Database Stats</h3>
-        <ul style={{ listStyleType: 'none', padding: 0, lineHeight: '1.6' }}>
-          <li><strong>Cached Records:</strong> {stats?.recordCount ?? 0}</li>
-          <li><strong>Last Sync Completed:</strong> {stats?.lastScreenerRun ? new Date(stats.lastScreenerRun).toLocaleString() : 'Never'}</li>
-        </ul>
-      </div>
+            {/* Watchlist */}
+            <div style={{ borderTop: '1px solid var(--border)', paddingTop: 14 }}>
+              <div style={{ fontSize: '0.78em', fontWeight: 600, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Watchlist</div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <select value={selectedWatchlistId ?? ''} onChange={(e) => setSelectedWatchlistId(e.target.value ? Number(e.target.value) : null)}
+                  disabled={isBusy}
+                  style={{ padding: '6px 10px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', minWidth: 160 }}>
+                  <option value="">— Select watchlist —</option>
+                  {watchlists.map((wl) => (
+                    <option key={wl.id} value={wl.id}>{wl.name} ({wl.itemCount ?? '?'})</option>
+                  ))}
+                </select>
+                <div style={{ display: 'flex', gap: 4 }}>
+                  {PRICE_RANGES.map((r) => (
+                    <button key={r} className={`univ-btn ${wlRange === r ? 'active' : ''}`} onClick={() => setWlRange(r)} disabled={isBusy}>{r}</button>
+                  ))}
+                </div>
+                <button className="primary" onClick={fetchWatchlistPrices} disabled={isBusy || selectedWatchlistId === null}>
+                  {isFetchingWl ? 'Fetching…' : '↓ Fetch All'}
+                </button>
+              </div>
+              {isFetchingWl && wlProgress && (
+                <div style={{ marginTop: 10 }}>
+                  <progress value={wlProgress.done} max={wlProgress.total} style={{ width: '100%', height: 7 }} />
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 3, fontSize: '0.8em', color: 'var(--text-muted)' }}>
+                    <span>{wlProgress.done} / {wlProgress.total}</span>
+                    <span>Fetching: <strong>{wlProgress.ticker}</strong></span>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* 5. DB Stats */}
+          <div style={card}>
+            <h3 style={cardTitle}>Local Database Stats</h3>
+            <ul style={{ listStyle: 'none', padding: 0, margin: '10px 0 0', lineHeight: 1.8, fontSize: '0.9em' }}>
+              <li><strong>Cached Records:</strong> {stats?.recordCount ?? 0}</li>
+              <li><strong>Last Sync Completed:</strong> {stats?.lastScreenerRun ? new Date(stats.lastScreenerRun).toLocaleString() : 'Never'}</li>
+              {ivCoverage && <li><strong>IV Readings:</strong> {ivCoverage.totalReadings.toLocaleString()}</li>}
+            </ul>
+          </div>
+
+        </div>{/* end right */}
+      </div>{/* end two-column */}
     </div>
   );
 }

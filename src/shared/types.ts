@@ -1286,6 +1286,40 @@ export interface IvHistoryGapSummary {
   estimatedCalls: number;         // = missingPairs
 }
 
+// ─── ENH-2: Opportunity Dashboard ─────────────────────────────────────────────
+
+export type StrategyMode = 'wheel' | 'csp' | 'spreads' | 'bullish' | 'bearish';
+export type OpportunityUniverse = 'sp500' | 'russell1000' | 'both';
+
+export interface OpportunityRow {
+  rank: number;
+  ticker: string;
+  companyName: string | null;
+  sector: string | null;
+  lastPrice: number | null;
+  dayChangePct: number | null;
+  ivRank: number | null;
+  ivPercentile: number | null;
+  currentIv: number | null;
+  dataPoints: number;
+  fundamentalsScore: number | null;
+  technicalScore: number | null;
+  premiumYieldScore: number | null;
+  ivRankScore: number | null;
+  compositeScore: number;
+  passScore: number | null;
+  estimatedPremium: number | null;
+  targetStrike: number | null;
+  priceAge: string | null;
+}
+
+export interface OpportunityRunOptions {
+  universe: OpportunityUniverse;
+  strategy: StrategyMode;
+  minCompositeScore?: number;
+  limit?: number;
+}
+
 /** Progress event emitted during backfill via iv-history:progress IPC channel. */
 export interface IvHistoryProgressEvent {
   phase:       IvHistoryBackfillPhase;
@@ -1296,4 +1330,5 @@ export interface IvHistoryProgressEvent {
   skipped:     number;
   failed:      number;
   callsPerMin: number;
+  lastError?:  string;   // set when the most recent ticker failed — shown in console
 }

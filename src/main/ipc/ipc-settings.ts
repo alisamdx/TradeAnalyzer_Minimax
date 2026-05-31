@@ -157,6 +157,16 @@ export function registerSettingsIpc(
     } catch (err) { return fail(err); }
   });
 
+  ipcMain.handle('settings:get-ivolatility-key', () => {
+    try { return ok<string>(secureGet(db, 'ivolatilityApiKey')); }
+    catch (err) { return fail(err); }
+  });
+
+  ipcMain.handle('settings:set-ivolatility-key', (_e, key: string) => {
+    try { secureSet(db, 'ivolatilityApiKey', key); return ok(true); }
+    catch (err) { return fail(err); }
+  });
+
   ipcMain.handle('settings:encryption-status', () => {
     return ok({ available: encryptionAvailable() });
   });

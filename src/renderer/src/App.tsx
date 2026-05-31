@@ -5,7 +5,7 @@ import { AnalysisView } from './views/AnalysisView.js';
 import { ValidateView } from './views/ValidateView.js';
 import { SettingsView } from './views/SettingsView.js';
 import { PortfolioView } from './views/PortfolioView.js';
-import { BriefingView } from './views/BriefingView.js';
+import { OpportunityView } from './views/OpportunityView.js';
 import { AlertsView } from './views/AlertsView.js';
 import { useCacheStatus } from './hooks/useCacheStatus.js';
 import { CacheStatusIndicator } from './components/CacheStatusIndicator.js';
@@ -27,7 +27,7 @@ import { IvHistoryView } from './views/IvHistoryView.js';
 
 declare const __APP_VERSION__: string;
 
-type View = 'watchlists' | 'screener' | 'filters' | 'analysis' | 'validate' | 'portfolio' | 'briefing' | 'settings' | 'alerts' | 'data' | 'optionsChain' | 'payoff' | 'agent' | 'backtest' | 'leapsCsp' | 'collaredLeaps' | 'testApi' | 'ivHistory';
+type View = 'watchlists' | 'screener' | 'filters' | 'analysis' | 'validate' | 'portfolio' | 'opportunity' | 'settings' | 'alerts' | 'data' | 'optionsChain' | 'payoff' | 'agent' | 'backtest' | 'leapsCsp' | 'collaredLeaps' | 'testApi' | 'ivHistory';
 
 type NavEntry = {
   id: number;
@@ -521,7 +521,7 @@ export function App() {
       case 'analysis': return <AnalysisView initialTicker={entry.analysisTicker ?? null} clearInitialTicker={() => {}} />;
       case 'validate': return <ValidateView initialTicker={entry.validateTicker ?? null} clearInitialTicker={() => {}} />;
       case 'portfolio': return <PortfolioView />;
-      case 'briefing': return <BriefingView />;
+      case 'opportunity': return <OpportunityView />;
       case 'alerts': return <AlertsView />;
       case 'data': return (
         <DataView
@@ -717,10 +717,10 @@ export function App() {
             </button>
           )}
           <button
-            className={`nav-btn ${currentView === 'briefing' ? 'active' : ''}`}
-            onClick={() => navigateSidebar('briefing')}
+            className={`nav-btn ${currentView === 'opportunity' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('opportunity')}
           >
-            📰 Briefing
+            🎯 Opportunity
           </button>
           <button
             className={`nav-btn ${currentView === 'screener' ? 'active' : ''}`}

@@ -473,10 +473,11 @@ type MDResult = Awaited<ReturnType<typeof window.api.testApi.getMarketDataChain>
 
 function MarketDataTab() {
   const [ticker, setTicker]   = useState('AAPL');
-  // Default date: yesterday (hardcode-friendly — user can change)
+  // Default date: most recent weekday (skip Saturday/Sunday — markets closed).
   const [date, setDate]       = useState(() => {
     const d = new Date();
-    d.setDate(d.getDate() - 1);
+    d.setDate(d.getDate() - 1); // start from yesterday
+    while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() - 1);
     return d.toLocaleDateString('en-CA'); // YYYY-MM-DD
   });
   const [loading, setLoading] = useState(false);
@@ -534,7 +535,7 @@ function MarketDataTab() {
           {loading ? 'Fetching…' : 'Fetch Chain'}
         </button>
         <span style={{ fontSize: 11, color: '#6c7086' }}>
-          Fetches a historical options chain via MarketData.app and runs the ATM IV computation to verify parsing.
+          As-of date (weekday). Queries the two monthly expirations bracketing +30 days and computes ATM IV via Black-Scholes if the API returns null IV.
         </span>
       </div>
 
@@ -564,6 +565,11 @@ function MarketDataTab() {
                   {result.withIv} / {result.contractCount}{' '}
                   ({result.contractCount > 0 ? Math.round(result.withIv / result.contractCount * 100) : 0}%)
                 </span>
+                {result.withBsIv > 0 && (
+                  <span style={{ color: '#f9e2af', fontSize: 11, marginLeft: 6 }}>
+                    ({result.withBsIv} via BS)
+                  </span>
+                )}
               </span>
               <span><span style={S.label}>With Delta:</span>{' '}
                 <span style={result.withDelta > 0 ? S.good : S.bad}>
@@ -653,28 +659,30 @@ function MarketDataTab() {
             <div style={{ fontSize: 11, color: '#6c7086', marginBottom: 8 }}>
               Top-level keys returned by MarketData.app — confirms actual field names and whether IV/delta/DTE arrays are populated.
             </div>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
-              <thead>
-                <tr style={{ color: '#6c7086', borderBottom: '1px solid #313244' }}>
-                  <th style={{ textAlign: 'left', padding: '3px 8px', width: 140 }}>Field</th>
-                  <th style={{ textAlign: 'left', padding: '3px 8px' }}>Type / First value</th>
-                </tr>
-              </thead>
-              <tbody>
-                {result.rawTopLevelKeys.map(k => {
-                  const desc = result.rawFieldTypes[k] ?? '?';
-                  const isIvOrGreek = ['iv', 'delta', 'gamma', 'theta', 'vega', 'impliedVolatility', 'impliedVol'].includes(k);
-                  const firstVal = desc.match(/first: (.+)/)?.[1] ?? '';
-                  const hasData = firstVal !== 'null' && firstVal !== '';
-                  return (
-                    <tr key={k} style={{ borderBottom: '1px solid #1e1e2e', background: isIvOrGreek ? '#1a2a1a' : 'transparent' }}>
-                      <td style={{ padding: '3px 8px', color: isIvOrGreek ? '#a6e3a1' : '#cdd6f4', fontFamily: 'monospace', fontWeight: isIvOrGreek ? 700 : 400 }}>{k}</td>
-                      <td style={{ padding: '3px 8px', color: hasData ? '#cdd6f4' : '#f38ba8' }}>{desc}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            <div style={{ maxHeight: 400, overflowY: 'auto', border: '1px solid #313244', borderRadius: 4 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                <thead style={{ position: 'sticky', top: 0, background: '#1e1e2e', zIndex: 1 }}>
+                  <tr style={{ color: '#6c7086', borderBottom: '1px solid #313244' }}>
+                    <th style={{ textAlign: 'left', padding: '3px 8px', width: 140 }}>Field</th>
+                    <th style={{ textAlign: 'left', padding: '3px 8px' }}>Type / First value</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.rawTopLevelKeys.map(k => {
+                    const desc = result.rawFieldTypes[k] ?? '?';
+                    const isIvOrGreek = ['iv', 'delta', 'gamma', 'theta', 'vega', 'impliedVolatility', 'impliedVol'].includes(k);
+                    const firstVal = desc.match(/first: (.+)/)?.[1] ?? '';
+                    const hasData = firstVal !== 'null' && firstVal !== '';
+                    return (
+                      <tr key={k} style={{ borderBottom: '1px solid #1e1e2e', background: isIvOrGreek ? '#1a2a1a' : 'transparent' }}>
+                        <td style={{ padding: '3px 8px', color: isIvOrGreek ? '#a6e3a1' : '#cdd6f4', fontFamily: 'monospace', fontWeight: isIvOrGreek ? 700 : 400 }}>{k}</td>
+                        <td style={{ padding: '3px 8px', color: hasData ? '#cdd6f4' : '#f38ba8' }}>{desc}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
 
           {/* Raw contract sample (2 contracts, all fields) */}
@@ -943,20 +951,276 @@ function ErrorBox({ msg }: { msg: string }) {
   );
 }
 
+// ─── IVolatility tab ──────────────────────────────────────────────────────────
+
+type IVolResult = Awaited<ReturnType<typeof window.api.testApi.getIVolatilityIvx>>;
+
+function lastWeekday(daysBack = 1): string {
+  const d = new Date();
+  d.setDate(d.getDate() - daysBack);
+  while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() - 1);
+  return d.toLocaleDateString('en-CA');
+}
+
+function IVolatilityTab() {
+  const [apiKey, setApiKey]       = useState('');
+  const [showKey, setShowKey]     = useState(false);
+  const [keySaved, setKeySaved]   = useState(false);
+  const [keyOk, setKeyOk]         = useState<boolean | null>(null);
+  const [symbol, setSymbol]       = useState('SPY');
+  const [from, setFrom]           = useState(() => {
+    const d = new Date(); d.setFullYear(d.getFullYear() - 1); return d.toLocaleDateString('en-CA');
+  });
+  const [to, setTo]               = useState(() => lastWeekday());
+  const [loading, setLoading]     = useState(false);
+  const [result, setResult]       = useState<IVolResult | null>(null);
+  const [error, setError]         = useState<string | null>(null);
+  const [showRaw, setShowRaw]     = useState(false);
+  const [showAllRows, setShowAllRows] = useState(false);
+
+  // Check if key is configured on mount
+  useEffect(() => {
+    window.api.testApi.getIVolatilityKeyConfigured().then(ok => setKeyOk(ok)).catch(() => setKeyOk(false));
+  }, []);
+
+  const saveKey = async () => {
+    if (!apiKey.trim()) return;
+    await window.api.testApi.saveIVolatilityKey(apiKey.trim());
+    setKeySaved(true); setKeyOk(true); setApiKey('');
+    setTimeout(() => setKeySaved(false), 2500);
+  };
+
+  const fetchIvx = async () => {
+    if (!symbol.trim() || !from.trim() || !to.trim()) return;
+    setLoading(true); setError(null); setResult(null);
+    try {
+      const r = await window.api.testApi.getIVolatilityIvx(symbol.trim().toUpperCase(), from.trim(), to.trim());
+      setResult(r);
+    } catch (e) { setError((e as Error).message); }
+    finally { setLoading(false); }
+  };
+
+  const S = {
+    card:  { background: '#1e1e2e', border: '1px solid #313244', borderRadius: 8, padding: '12px 16px', marginBottom: 12 },
+    label: { color: '#6c7086', minWidth: 120 },
+    val:   { color: '#cdd6f4' },
+    good:  { color: '#a6e3a1' },
+    warn:  { color: '#f9e2af' },
+    bad:   { color: '#f38ba8' },
+  };
+
+  const fmtIv = (v: number | null) => v === null ? '—' : `${(v * 100).toFixed(2)}%`;
+
+  const displayRows = result
+    ? (showAllRows ? result.rows : result.rows.slice(-30))
+    : [];
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+
+      {/* ── API key row ── */}
+      <div style={S.card}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: '#89b4fa', marginBottom: 8 }}>
+          IVolatility API Key{' '}
+          {keyOk === true && <span style={{ color: '#a6e3a1', fontWeight: 400, fontSize: 11 }}>✓ configured</span>}
+          {keyOk === false && <span style={{ color: '#f38ba8', fontWeight: 400, fontSize: 11 }}>⚠ not set</span>}
+        </div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <input
+            type={showKey ? 'text' : 'password'}
+            value={apiKey}
+            onChange={e => setApiKey(e.target.value)}
+            placeholder="Paste API key…"
+            style={{ flex: 1, padding: '5px 10px', borderRadius: 5, border: '1px solid #313244', background: '#181825', color: '#cdd6f4', fontSize: 12 }}
+          />
+          <button onClick={() => setShowKey(v => !v)}
+            style={{ padding: '4px 10px', borderRadius: 5, border: '1px solid #313244', background: 'transparent', color: '#6c7086', fontSize: 11, cursor: 'pointer' }}>
+            {showKey ? 'Hide' : 'Show'}
+          </button>
+          <button onClick={saveKey} disabled={!apiKey.trim()}
+            style={{ padding: '5px 14px', borderRadius: 5, border: 'none', background: '#89b4fa', color: '#1e1e2e', fontSize: 12, fontWeight: 700, cursor: 'pointer', opacity: apiKey.trim() ? 1 : 0.5 }}>
+            {keySaved ? 'Saved ✓' : 'Save'}
+          </button>
+        </div>
+        <div style={{ fontSize: 11, color: '#6c7086', marginTop: 6 }}>
+          Get a free 7-day trial at <span style={{ color: '#89b4fa' }}>ivolatility.com/data-cloud-api</span> — no credit card required.
+        </div>
+      </div>
+
+      {/* ── Query row ── */}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <input value={symbol} onChange={e => setSymbol(e.target.value.toUpperCase())}
+          placeholder="Symbol"
+          style={{ width: 80, padding: '5px 10px', borderRadius: 5, border: '1px solid #313244', background: '#1e1e2e', color: '#cdd6f4', fontSize: 12 }} />
+        <input value={from} onChange={e => setFrom(e.target.value)}
+          placeholder="From YYYY-MM-DD"
+          style={{ width: 130, padding: '5px 10px', borderRadius: 5, border: '1px solid #313244', background: '#1e1e2e', color: '#cdd6f4', fontSize: 12 }} />
+        <input value={to} onChange={e => setTo(e.target.value)}
+          placeholder="To YYYY-MM-DD"
+          style={{ width: 130, padding: '5px 10px', borderRadius: 5, border: '1px solid #313244', background: '#1e1e2e', color: '#cdd6f4', fontSize: 12 }} />
+        <button onClick={fetchIvx} disabled={loading}
+          style={{ padding: '5px 18px', borderRadius: 5, border: 'none', background: '#89b4fa', color: '#1e1e2e', fontSize: 12, fontWeight: 700, cursor: 'pointer', opacity: loading ? 0.6 : 1 }}>
+          {loading ? 'Fetching…' : 'Fetch IVX'}
+        </button>
+        <span style={{ fontSize: 11, color: '#6c7086' }}>
+          Queries the pre-computed 30-day ATM IVX (constant-maturity) time series. True as-of-date snapshots.
+        </span>
+      </div>
+
+      {error && (
+        <div style={{ color: '#f38ba8', fontSize: 12, background: '#1e1e2e', padding: '8px 12px', borderRadius: 6 }}>
+          Error: {error}
+        </div>
+      )}
+
+      {result && (
+        <>
+          {/* ── Summary ── */}
+          <div style={S.card}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#89b4fa', marginBottom: 8 }}>
+              {result.symbol} — {result.from} → {result.to}
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '6px 24px', fontSize: 12 }}>
+              <span><span style={S.label}>Status:</span>{' '}
+                <span style={result.status === 'ok' ? S.good : S.bad}>{result.status}</span>
+              </span>
+              <span><span style={S.label}>Trading days:</span>{' '}
+                <span style={result.rowCount > 0 ? S.good : S.bad}>{result.rowCount.toLocaleString()}</span>
+              </span>
+              <span><span style={S.label}>Latest iv30:</span>{' '}
+                <span style={result.iv30Latest !== null ? { color: '#a6e3a1', fontWeight: 700, fontSize: 14 } : S.bad}>
+                  {result.iv30Latest !== null ? `${(result.iv30Latest * 100).toFixed(2)}%` : 'null ⚠'}
+                </span>
+                {result.iv30LatestDate && <span style={{ color: '#6c7086', fontSize: 11, marginLeft: 6 }}>({result.iv30LatestDate})</span>}
+              </span>
+              <span><span style={S.label}>iv30 range (52w):</span>{' '}
+                <span style={S.val}>
+                  {result.iv30Min !== null ? `${(result.iv30Min * 100).toFixed(2)}%` : '—'}
+                  {' → '}
+                  {result.iv30Max !== null ? `${(result.iv30Max * 100).toFixed(2)}%` : '—'}
+                </span>
+              </span>
+              {result.iv30Latest !== null && result.iv30Min !== null && result.iv30Max !== null && result.iv30Max > result.iv30Min && (
+                <span><span style={S.label}>IV Rank (52w):</span>{' '}
+                  <span style={{ color: '#fab387', fontWeight: 700 }}>
+                    {((result.iv30Latest - result.iv30Min) / (result.iv30Max - result.iv30Min) * 100).toFixed(1)}%
+                  </span>
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* ── IVX table ── */}
+          {result.rowCount > 0 && (
+            <div style={S.card}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#89b4fa' }}>
+                  IVX Time Series {!showAllRows && result.rowCount > 30 ? `(last 30 of ${result.rowCount})` : `(${result.rowCount} rows)`}
+                </div>
+                {result.rowCount > 30 && (
+                  <button onClick={() => setShowAllRows(v => !v)}
+                    style={{ padding: '3px 10px', borderRadius: 5, border: '1px solid #313244', background: 'transparent', color: '#6c7086', fontSize: 11, cursor: 'pointer' }}>
+                    {showAllRows ? 'Show last 30' : `Show all ${result.rowCount}`}
+                  </button>
+                )}
+              </div>
+              <div style={{ maxHeight: 400, overflowY: 'auto', border: '1px solid #313244', borderRadius: 4 }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                  <thead style={{ position: 'sticky', top: 0, background: '#1e1e2e', zIndex: 1 }}>
+                    <tr style={{ color: '#6c7086', borderBottom: '1px solid #313244' }}>
+                      {['Date', 'iv7', 'iv14', 'iv21', 'iv30 ★', 'iv60', 'iv90', 'iv120', 'iv180', 'iv360'].map(h => (
+                        <th key={h} style={{ textAlign: 'right', padding: '3px 10px', fontWeight: h.includes('★') ? 700 : 400, color: h.includes('★') ? '#89b4fa' : '#6c7086' }}>
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...displayRows].reverse().map((row, i) => (
+                      <tr key={row.date} style={{ borderBottom: '1px solid #1e1e2e', background: i === 0 ? '#1a2040' : 'transparent' }}>
+                        <td style={{ padding: '3px 10px', color: '#6c7086', textAlign: 'right', fontFamily: 'monospace' }}>{row.date}</td>
+                        {([row.iv7, row.iv14, row.iv21] as (number | null)[]).map((v, j) => (
+                          <td key={j} style={{ padding: '3px 10px', color: v !== null ? '#6c7086' : '#313244', textAlign: 'right' }}>{fmtIv(v)}</td>
+                        ))}
+                        <td style={{ padding: '3px 10px', textAlign: 'right', fontWeight: 700, color: row.iv30 !== null ? '#a6e3a1' : '#f38ba8', fontSize: 12 }}>
+                          {fmtIv(row.iv30)}
+                        </td>
+                        {([row.iv60, row.iv90, row.iv120, row.iv180, row.iv360] as (number | null)[]).map((v, j) => (
+                          <td key={j} style={{ padding: '3px 10px', color: v !== null ? '#6c7086' : '#313244', textAlign: 'right' }}>{fmtIv(v)}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* ── Raw API Response Fields ── */}
+          <div style={S.card}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#89b4fa', marginBottom: 6 }}>Raw API Response Fields</div>
+            <div style={{ fontSize: 11, color: '#6c7086', marginBottom: 8 }}>
+              Actual field names and types returned by the IVolatility API — use this to verify the parser picks up the right columns.
+            </div>
+            <div style={{ maxHeight: 320, overflowY: 'auto', border: '1px solid #313244', borderRadius: 4 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                <thead style={{ position: 'sticky', top: 0, background: '#1e1e2e', zIndex: 1 }}>
+                  <tr style={{ color: '#6c7086', borderBottom: '1px solid #313244' }}>
+                    <th style={{ textAlign: 'left', padding: '3px 8px', width: 160 }}>Field</th>
+                    <th style={{ textAlign: 'left', padding: '3px 8px' }}>Type / Value</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.rawTopLevelKeys.map(k => {
+                    const desc = result.rawFieldTypes[k] ?? '?';
+                    const isIv = /iv|vol|ivx/i.test(k);
+                    const isDate = /date|time|ts/i.test(k);
+                    return (
+                      <tr key={k} style={{ borderBottom: '1px solid #1e1e2e', background: isIv ? '#1a2a1a' : 'transparent' }}>
+                        <td style={{ padding: '3px 8px', fontFamily: 'monospace', color: isIv ? '#a6e3a1' : isDate ? '#89b4fa' : '#cdd6f4', fontWeight: isIv ? 700 : 400 }}>{k}</td>
+                        <td style={{ padding: '3px 8px', color: '#cdd6f4' }}>{desc}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* ── Raw JSON sample ── */}
+          <div>
+            <button onClick={() => setShowRaw(v => !v)}
+              style={{ padding: '4px 12px', borderRadius: 5, border: '1px solid #313244', background: 'transparent', color: '#6c7086', fontSize: 11, cursor: 'pointer' }}>
+              {showRaw ? 'Hide' : 'Show'} Raw JSON Sample (first 3 rows)
+            </button>
+            {showRaw && (
+              <pre style={{ marginTop: 8, background: '#1e1e2e', border: '1px solid #313244', borderRadius: 6, padding: '10px 14px', fontSize: 11, color: '#a6e3a1', overflowX: 'auto', maxHeight: 400, overflowY: 'auto' }}>
+                {result.rawSample}
+              </pre>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── Root view ────────────────────────────────────────────────────────────────
 
 export function TestApiView() {
-  const [provider, setProvider] = useState<'polygon' | 'etrade' | 'marketdata'>('polygon');
+  const [provider, setProvider] = useState<'polygon' | 'etrade' | 'marketdata' | 'ivolatility'>('polygon');
 
   const TAB_LABELS: Record<typeof provider, string> = {
-    polygon:    'Polygon',
-    etrade:     'E*Trade',
-    marketdata: 'MarketData.app',
+    polygon:     'Polygon',
+    etrade:      'E*Trade',
+    marketdata:  'MarketData.app',
+    ivolatility: 'IVolatility',
   };
   const TAB_DESC: Record<typeof provider, string> = {
-    polygon:    'Current provider — validates data quality & plan coverage',
-    etrade:     'Options provider — validate before full integration',
-    marketdata: 'IV history source — verify chain parsing & ATM IV computation',
+    polygon:     'Current provider — validates data quality & plan coverage',
+    etrade:      'Options provider — validate before full integration',
+    marketdata:  'IV history source — verify chain parsing & ATM IV computation',
+    ivolatility: 'IV history source — pre-computed 30-day CM ATM IVX, true as-of-date snapshots',
   };
 
   return (
@@ -966,7 +1230,7 @@ export function TestApiView() {
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
         <h2 style={{ margin: 0, color: '#89b4fa', fontSize: '14px', fontWeight: 700 }}>🔬 Test API</h2>
         <div style={{ display: 'flex', borderRadius: '6px', overflow: 'hidden', border: '1px solid #313244' }}>
-          {(['polygon', 'etrade', 'marketdata'] as const).map(p => (
+          {(['polygon', 'etrade', 'marketdata', 'ivolatility'] as const).map(p => (
             <button key={p} onClick={() => setProvider(p)} style={{
               padding: '4px 16px', border: 'none', cursor: 'pointer', fontSize: '12px', fontWeight: 600,
               background: provider === p ? '#89b4fa' : '#1e1e2e',
@@ -980,7 +1244,7 @@ export function TestApiView() {
       </div>
 
       {/* ── Legend (Polygon / E*Trade only) ── */}
-      {provider !== 'marketdata' && (
+      {provider !== 'marketdata' && provider !== 'ivolatility' && (
         <div style={{ display: 'flex', gap: '16px', fontSize: '11px', color: '#6c7086', flexWrap: 'wrap' }}>
           <span><span style={{ color: '#a6e3a1' }}>Mid</span> = (bid+ask)/2</span>
           <span><span style={{ color: '#fab387' }}>Last</span> = most recent trade / day close</span>
@@ -990,9 +1254,10 @@ export function TestApiView() {
       )}
 
       {/* ── Active tab ── */}
-      {provider === 'polygon'    && <PolygonTab />}
-      {provider === 'etrade'     && <ETradeTab />}
-      {provider === 'marketdata' && <MarketDataTab />}
+      {provider === 'polygon'      && <PolygonTab />}
+      {provider === 'etrade'       && <ETradeTab />}
+      {provider === 'marketdata'   && <MarketDataTab />}
+      {provider === 'ivolatility'  && <IVolatilityTab />}
     </div>
   );
 }

@@ -239,6 +239,8 @@ export function SettingsView({ etradeWarning, onEtradeWarningDismiss }: Settings
   const [saved, setSaved] = useState(false);
   const [apiKey, setApiKey] = useState('');
   const [apiKeyVisible, setApiKeyVisible] = useState(false);
+  const [ivolatilityKey, setIvolatilityKey] = useState('');
+  const [ivolatilityKeyVisible, setIvolatilityKeyVisible] = useState(false);
   const [diagnostics, setDiagnostics] = useState<DiagnosticsResult | null>(null);
   const [diagRunning, setDiagRunning] = useState(false);
   const [diagError, setDiagError] = useState<string | null>(null);
@@ -263,6 +265,13 @@ export function SettingsView({ etradeWarning, onEtradeWarningDismiss }: Settings
     window.api.settings.getApiKey()
       .then(setApiKey)
       .catch(() => setApiKey(''));
+  }, []);
+
+  // Load IVolatility API key.
+  useEffect(() => {
+    window.api.settings.getIvolatilityKey()
+      .then(setIvolatilityKey)
+      .catch(() => setIvolatilityKey(''));
   }, []);
 
   // Load options provider setting.
@@ -295,13 +304,16 @@ export function SettingsView({ etradeWarning, onEtradeWarningDismiss }: Settings
 
   const saveApiKey = useCallback(async () => {
     try {
-      await window.api.settings.setApiKey(apiKey);
+      await Promise.all([
+        window.api.settings.setApiKey(apiKey),
+        window.api.settings.setIvolatilityKey(ivolatilityKey),
+      ]);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch {
       // silently fail
     }
-  }, [apiKey]);
+  }, [apiKey, ivolatilityKey]);
 
   const runDiagnostics = useCallback(async () => {
     setDiagRunning(true);
@@ -540,6 +552,23 @@ export function SettingsView({ etradeWarning, onEtradeWarningDismiss }: Settings
                 </button>
               </div>
               <p className="hint">Used for stock quotes, fundamentals, and historical bars. Never logged or sent anywhere except Polygon.</p>
+            </div>
+
+            <div className="settings-row">
+              <label>IVolatility API Key</label>
+              <div className="api-key-row">
+                <input
+                  type={ivolatilityKeyVisible ? 'text' : 'password'}
+                  value={ivolatilityKey}
+                  onChange={e => setIvolatilityKey(e.target.value)}
+                  placeholder="Enter your IVolatility API key"
+                  style={{ fontFamily: ivolatilityKeyVisible ? 'monospace' : 'inherit', width: 300 }}
+                />
+                <button className="tiny-btn" onClick={() => setIvolatilityKeyVisible(v => !v)}>
+                  {ivolatilityKeyVisible ? 'Hide' : 'Show'}
+                </button>
+              </div>
+              <p className="hint">Used for IV history (true as-of-date daily IVX snapshots). Get a key at <a href="https://www.ivolatility.com/data-cloud-api/" target="_blank" rel="noreferrer" style={{ color: '#89b4fa' }}>ivolatility.com</a>.</p>
             </div>
 
             <div className="settings-row">

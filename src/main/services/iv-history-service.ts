@@ -4,7 +4,7 @@
 // see docs/formulas.md#iv-history
 
 import type { DbHandle } from '../db/connection.js';
-import type { MarketDataProvider, MarketDataContract } from './marketdata-provider.js';
+import type { IVolatilityProvider } from './ivolatility-provider.js';
 import type { OptionContract } from '@shared/types.js';
 import type { IvHistoryCoverage, IvHistoryGapSummary, IvRankResult, IvHistoryProgressEvent, IvHistoryBackfillPhase } from '@shared/types.js';
 
@@ -74,6 +74,13 @@ function tradingDaysAgo(n: number): string {
     if (isTradingDay(s)) count++;
   }
   return cur.toISOString().slice(0, 10);
+}
+
+/** Advance a YYYY-MM-DD string by one calendar day. */
+function nextDay(dateStr: string): string {
+  const d = new Date(dateStr + 'T12:00:00Z');
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
 }
 
 // ─── ATM IV computation ───────────────────────────────────────────────────────
@@ -181,7 +188,7 @@ export class IvHistoryService {
 
   constructor(
     private readonly db: DbHandle,
-    private readonly marketdata: MarketDataProvider,
+    private readonly ivolatility: IVolatilityProvider,
     private readonly getConstituents: (u: 'sp500' | 'russell1000') => ConstituentRow[],
   ) {}
 
@@ -225,6 +232,14 @@ export class IvHistoryService {
   }
 
   // ── IV Rank / Percentile ──────────────────────────────────────────────────────
+
+  /** All stored IV readings for a ticker, newest first. */
+  getRows(ticker: string): Array<{ date: string; atm_iv: number; underlying_px: number | null; source: string }> {
+    type Row = { date: string; atm_iv: number; underlying_px: number | null; source: string };
+    return this.db.prepare(
+      `SELECT date, atm_iv, underlying_px, source FROM iv_history WHERE ticker = ? ORDER BY date DESC`
+    ).all(ticker.toUpperCase()) as Row[];
+  }
 
   getIvRank(ticker: string): IvRankResult {
     type Row = { date: string; atm_iv: number };
@@ -394,6 +409,20 @@ export class IvHistoryService {
 
   cancel(): void { this.cancelled = true; }
 
+  /**
+   * Determine the earliest date to fetch for a ticker.
+   * If we have existing data, start from the day after the latest reading.
+   * Otherwise start from `fallback` (252 trading days ago).
+   */
+  private tickerFromDate(ticker: string, fallback: string): string {
+    type Row = { max_date: string | null };
+    const row = this.db.prepare(
+      `SELECT MAX(date) as max_date FROM iv_history WHERE ticker = ?`
+    ).get(ticker) as Row | undefined;
+    const maxDate = row?.max_date ?? null;
+    return maxDate ? nextDay(maxDate) : fallback;
+  }
+
   async runBackfill(
     phase: IvHistoryBackfillPhase,
     onProgress: (evt: IvHistoryProgressEvent) => void,
@@ -403,85 +432,95 @@ export class IvHistoryService {
     const backfillStart = tradingDaysAgo(252);
     const yesterday     = yesterdayET();
 
-    let pairs: Array<{ ticker: string; date: string }>;
+    // Build per-ticker work list: { ticker, from, to }
+    // IVolatility fetches an entire date range in one call — no per-day loop.
+    let tickerWork: Array<{ ticker: string; from: string }>;
 
     if (phase === 'gap_fill') {
-      const { pairs: gapPairs } = this.getGaps('both');
-      pairs = gapPairs;
+      const sp500    = this.getConstituents('sp500').map(r => r.ticker.toUpperCase());
+      const russell  = this.getConstituents('russell1000').map(r => r.ticker.toUpperCase());
+      const allTickers = [...new Set([...sp500, ...russell])];
+      tickerWork = allTickers
+        .map(ticker => ({ ticker, from: this.tickerFromDate(ticker, backfillStart) }))
+        .filter(w => w.from <= yesterday);
     } else {
       const tickers = this.getBackfillTickers(phase);
-      const dates   = tradingDaysInRange(backfillStart, yesterday);
-      // Build pairs, skipping any already in iv_history
-      type ExRow = { ticker: string; date: string };
-      const existingSet = new Set<string>();
-      if (tickers.length > 0) {
-        const existing = this.db.prepare(
-          `SELECT ticker, date FROM iv_history WHERE ticker IN (${
-            tickers.map(() => '?').join(',')
-          }) AND date BETWEEN ? AND ?`
-        ).all(...tickers, backfillStart, yesterday) as ExRow[];
-        for (const r of existing) existingSet.add(`${r.ticker}|${r.date}`);
-      }
-      pairs = [];
-      for (const ticker of tickers) {
-        for (const date of dates) {
-          if (!existingSet.has(`${ticker}|${date}`)) pairs.push({ ticker, date });
-        }
-      }
+      tickerWork = tickers.map(ticker => ({
+        ticker,
+        from: this.tickerFromDate(ticker, backfillStart),
+      })).filter(w => w.from <= yesterday);
     }
 
-    const total = pairs.length;
+    const total = tickerWork.length;
+    // processed = tickers where ≥1 row stored; skipped = no data; failed = API error
     let processed = 0, skipped = 0, failed = 0;
     const startMs = Date.now();
 
-    for (const { ticker, date } of pairs) {
+    // Throttle: IVolatility allows 1 req/sec sustained (burst 5), 20k req/month.
+    // 1,100ms between calls = ~55/min — stays safely under the 1/sec limit.
+    // On 429, back off 15 s before retrying once.
+    const CALL_DELAY_MS = 1_100;
+
+    for (const { ticker, from } of tickerWork) {
       if (this.cancelled) break;
 
-      try {
-        const chain = await this.marketdata.getOptionsChain(ticker, date);
+      let lastError: string | undefined;
 
-        if (chain.s === 'no_data' || chain.contracts.length === 0) {
+      try {
+        const result = await this.ivolatility.getIvx(ticker, from, yesterday);
+
+        if (result.s === 'no_data' || result.rows.length === 0) {
           skipped++;
         } else {
-          // If underlyingPrice is null (MarketData.app sometimes omits it for historical data),
-          // fall back to estimating it from call delta: the strike where |delta| ≈ 0.50 is ATM.
-          // see docs/formulas.md#atm-iv-interpolation
-          let underlyingPx = chain.underlyingPrice;
-          if (underlyingPx === null) {
-            const atmByDelta = chain.contracts
-              .filter(c => c.side === 'call' && c.delta !== null)
-              .sort((a, b) => Math.abs(Math.abs(a.delta!) - 0.5) - Math.abs(Math.abs(b.delta!) - 0.5));
-            underlyingPx = atmByDelta[0]?.strike ?? null;
+          let rowsStored = 0;
+          for (const row of result.rows) {
+            if (row.iv30 === null) continue;
+            this.storeReading(ticker, row.date, row.iv30, { source: 'ivolatility' });
+            rowsStored++;
           }
-
-          if (underlyingPx === null) {
-            skipped++;
-          } else {
-            const result = computeAtmIv(chain.contracts, underlyingPx);
-            if (result === null) {
-              skipped++;
-            } else {
-              this.storeReading(ticker, date, result.atmIv, {
-                underlyingPx,
-                expNear: result.expNear,
-                expFar:  result.expFar,
-                dteNear: result.dteNear,
-                dteFar:  result.dteFar,
-                source: 'marketdata',
-              });
-              processed++;
-            }
-          }
+          if (rowsStored > 0) processed++;
+          else skipped++;
         }
-      } catch {
-        failed++;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        lastError = msg;
+
+        // 429 rate-limit: wait 15 s and retry once before counting as failure
+        if (msg.includes('429')) {
+          console.warn(`[iv-history] 429 on ${ticker} — pausing 15 s`);
+          await new Promise(r => setTimeout(r, 15_000));
+          try {
+            const retry = await this.ivolatility.getIvx(ticker, from, yesterday);
+            if (retry.s !== 'no_data' && retry.rows.length > 0) {
+              let rowsStored = 0;
+              for (const row of retry.rows) {
+                if (row.iv30 === null) continue;
+                this.storeReading(ticker, row.date, row.iv30, { source: 'ivolatility' });
+                rowsStored++;
+              }
+              if (rowsStored > 0) { processed++; lastError = undefined; }
+              else skipped++;
+            } else {
+              skipped++;
+              lastError = undefined;
+            }
+          } catch (retryErr) {
+            lastError = retryErr instanceof Error ? retryErr.message : String(retryErr);
+            failed++;
+          }
+        } else {
+          failed++;
+        }
       }
 
       const done = processed + skipped + failed;
       const elapsedMin = (Date.now() - startMs) / 60_000;
       const callsPerMin = elapsedMin > 0 ? Math.round(done / elapsedMin) : 0;
 
-      onProgress({ phase, ticker, date, processed, total, skipped, failed, callsPerMin });
+      onProgress({ phase, ticker, date: yesterday, processed, total, skipped, failed, callsPerMin, lastError });
+
+      // Throttle between calls
+      if (!this.cancelled) await new Promise(r => setTimeout(r, CALL_DELAY_MS));
     }
 
     return { processed, skipped, failed };
@@ -517,12 +556,12 @@ export class IvHistoryService {
     const result = computeAtmIv(mapped, underlyingPx);
     if (!result) return;
 
-    // Don't overwrite an existing MarketData reading for today
+    // Don't overwrite an existing IVolatility reading for today (higher quality)
     type ExRow = { source: string } | undefined;
     const existing = this.db.prepare(
       `SELECT source FROM iv_history WHERE ticker = ? AND date = ?`
     ).get(ticker.toUpperCase(), today) as ExRow;
-    if (existing?.source === 'marketdata') return;
+    if (existing?.source === 'ivolatility') return;
 
     this.storeReading(ticker, today, result.atmIv, {
       underlyingPx,
