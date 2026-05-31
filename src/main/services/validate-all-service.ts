@@ -67,6 +67,10 @@ export class ValidateAllService {
     } catch (err) {
       console.log(`[validateTicker] ${ticker} quote fetch failed, continuing without:`, err instanceof Error ? err.message : String(err));
     }
+    // Polygon snapshot ivRank is always null — override from iv_history when available
+    // see docs/formulas.md#iv-rank
+    const ivRankHistory = this.lookupIvRankFromHistory(ticker);
+    if (ivRankHistory !== null) quote.ivRank = ivRankHistory;
 
     // Fetch fundamentals - optional, some tickers may not have data
     let fundamentals: DerivedRatios = { peRatio: null, eps: null, revenueGrowth: null, profitMargin: null, debtToEquity: null, roe: null, companyName: null, marketCap: null, freeCashFlow: null, currentRatio: null, dividendYield: null, beta: null, sector: null, industry: null, epsGrowth: null };
@@ -180,6 +184,28 @@ export class ValidateAllService {
     const ratios = await this.dataProvider.getFundamentals(ticker);
     try { this.fundamentalsCache.upsert(ticker, ratios); } catch { /* best effort */ }
     return ratios;
+  }
+
+  /** Compute IVR from the iv_history table (252-day rolling window).
+   *  Polygon snapshot ivRank is always null — use this instead.
+   *  see docs/formulas.md#iv-rank */
+  private lookupIvRankFromHistory(ticker: string): number | null {
+    try {
+      const agg = this.db.prepare(`
+        SELECT MAX(iv_value) as iv_high, MIN(iv_value) as iv_low, COUNT(*) as cnt
+        FROM iv_history WHERE ticker = ?
+      `).get(ticker) as { iv_high: number | null; iv_low: number | null; cnt: number } | undefined;
+      if (!agg || agg.cnt < 21 || agg.iv_high === null || agg.iv_low === null) return null;
+      const range = agg.iv_high - agg.iv_low;
+      if (range <= 0) return null;
+      const latest = this.db.prepare(
+        `SELECT iv_value FROM iv_history WHERE ticker = ? ORDER BY date DESC LIMIT 1`
+      ).get(ticker) as { iv_value: number } | undefined;
+      if (!latest) return null;
+      return Math.min(100, Math.max(0, ((latest.iv_value - agg.iv_low) / range) * 100));
+    } catch {
+      return null;
+    }
   }
 
   // ─── Private: result builder ───────────────────────────────────────────────
