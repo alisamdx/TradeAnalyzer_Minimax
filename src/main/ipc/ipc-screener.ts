@@ -151,6 +151,16 @@ export function registerScreenerIpc(
   ipcMain.handle('screen:get-runs', wrap(() => screenerService.getRuns()));
   ipcMain.handle('screen:get-results', wrap((runId: number) => screenerService.getResults(runId)));
 
+  // ── DB record counts for the screener stats strip ────────────────────────
+  ipcMain.handle('screen:get-db-counts', wrap(() => {
+    if (!db) return { quotesCache: 0, fundamentalsCache: 0, screenResults: 0, constituents: 0 };
+    const qc  = (db.prepare('SELECT COUNT(*) as n FROM quote_cache').get() as { n: number }).n;
+    const fc  = (db.prepare('SELECT COUNT(*) as n FROM fundamentals_cache').get() as { n: number }).n;
+    const sr  = (db.prepare('SELECT COUNT(*) as n FROM screen_results').get() as { n: number }).n;
+    const con = (db.prepare('SELECT COUNT(*) as n FROM constituents').get() as { n: number }).n;
+    return { quotesCache: qc, fundamentalsCache: fc, screenResults: sr, constituents: con };
+  }));
+
   // ── Save as watchlist ────────────────────────────────────────────────────
   ipcMain.handle(
     'screen:save-as-watchlist',

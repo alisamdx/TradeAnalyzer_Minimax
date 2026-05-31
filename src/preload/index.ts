@@ -146,6 +146,7 @@ function buildApi() {
     },
     getRuns: () => invoke<ScreenRunResult[]>('screen:get-runs'),
     getResults: (runId: number) => invoke<ScreenResultRow[]>('screen:get-results', runId),
+    getDbCounts: () => invoke<{ quotesCache: number; fundamentalsCache: number; screenResults: number; constituents: number }>('screen:get-db-counts'),
     saveAsWatchlist: (runId: number, resultIds: number[], name: string) =>
       invoke<Watchlist>('screen:save-as-watchlist', runId, resultIds, name),
     cancel: () => invoke<boolean>('screen:cancel'),

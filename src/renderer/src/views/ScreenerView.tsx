@@ -86,6 +86,7 @@ export function ScreenerView() {
   const [results, setResults] = useState<ScreenResultRow[]>([]);
   const [constituentsMeta, setConstituentsMeta] = useState<Record<'sp500' | 'russell1000', ConstituentsMeta | null>>({ sp500: null, russell1000: null });
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [dbCounts, setDbCounts] = useState<{ quotesCache: number; fundamentalsCache: number; screenResults: number; constituents: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
@@ -121,6 +122,10 @@ export function ScreenerView() {
 
     window.api.screen.getRuns()
       .then(setRuns)
+      .catch(() => {});
+
+    window.api.screen.getDbCounts()
+      .then(setDbCounts)
       .catch(() => {});
 
     for (const idx of ['sp500', 'russell1000'] as const) {
@@ -322,6 +327,8 @@ export function ScreenerView() {
       setScreenProgress(null);
       setIsRunning(false);
       isRunningRef.current = false;
+      // Refresh DB counts after each run
+      window.api.screen.getDbCounts().then(setDbCounts).catch(() => {});
     }
   }, [criteria, universe, mode]);
 
@@ -680,6 +687,17 @@ export function ScreenerView() {
               {presets.length === 0 && <li className="hint">No presets yet.</li>}
             </ul>
           </div>
+
+          {/* ── DB counts strip ── */}
+          {dbCounts && (
+            <div style={{ padding: '10px 12px', borderTop: '1px solid var(--border)', marginTop: 'auto', fontSize: 11, color: 'var(--text-muted)', display: 'flex', flexDirection: 'column', gap: 3 }}>
+              <div style={{ fontWeight: 700, color: 'var(--text)', marginBottom: 2, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Cache Records</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Constituents</span><strong style={{ color: 'var(--text)' }}>{dbCounts.constituents.toLocaleString()}</strong></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Quotes cached</span><strong style={{ color: 'var(--text)' }}>{dbCounts.quotesCache.toLocaleString()}</strong></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Fundamentals cached</span><strong style={{ color: 'var(--text)' }}>{dbCounts.fundamentalsCache.toLocaleString()}</strong></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Screen results</span><strong style={{ color: 'var(--text)' }}>{dbCounts.screenResults.toLocaleString()}</strong></div>
+            </div>
+          )}
         </aside>
 
         {/* ── Right: results ── */}
