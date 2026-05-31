@@ -33,7 +33,7 @@ function labLegToPayoffLeg(leg: SetupLeg): PayoffLeg {
     delta:    leg.delta,
     theta:    null,
     vega:     null,
-    iv:       leg.iv,   // already in percentage form (e.g. 28.5)
+    iv:       leg.iv / 100,  // SetupLeg.iv is %; PayoffLeg.iv is decimal fraction (PayoffView multiplies ×100 on display)
     label:    `${actionLabel} ${typeLabel} $${leg.strike}`,
   };
 }
