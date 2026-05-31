@@ -735,6 +735,13 @@ export function App() {
             🎯 Opportunity
           </button>
           <button
+            className={`nav-btn ${currentView === 'payoff' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('payoff')}
+          >
+            📐 Payoff
+          </button>
+          <div className="nav-divider" />
+          <button
             className={`nav-btn ${currentView === 'filters' ? 'active' : ''}`}
             onClick={() => navigateSidebar('filters')}
           >
@@ -757,12 +764,6 @@ export function App() {
             onClick={() => navigateSidebar('optionsChain')}
           >
             📉 Options
-          </button>
-          <button
-            className={`nav-btn ${currentView === 'payoff' ? 'active' : ''}`}
-            onClick={() => navigateSidebar('payoff')}
-          >
-            📐 Payoff
           </button>
           <button
             className={`nav-btn ${currentView === 'leapsCsp' ? 'active' : ''}`}
