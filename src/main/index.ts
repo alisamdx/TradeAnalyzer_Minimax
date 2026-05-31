@@ -45,6 +45,7 @@ import { MarketDataProvider } from './services/marketdata-provider.js';
 import { IVolatilityProvider } from './services/ivolatility-provider.js';
 import { IvHistoryService } from './services/iv-history-service.js';
 import { registerIvHistoryIpc } from './ipc/ipc-iv-history.js';
+import { registerStrategyLabIpc } from './ipc/ipc-strategy-lab.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -298,6 +299,9 @@ app.whenReady().then(() => {
 
   // E*Trade auth / credential management IPC
   registerETradeIpc(db);
+
+  // Strategy Lab — score / explore all 31 strategies for a single ticker
+  registerStrategyLabIpc(db, dataProvider, optionsProvider);
 
   // LEAPS + CSP strategy screener
   registerLeapsCspIpc(db, dataProvider, optionsProvider, rateLimiter);

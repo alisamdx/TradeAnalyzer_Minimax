@@ -71,6 +71,10 @@ import type {
   IvHistoryProgressEvent,
   OpportunityRow,
   OpportunityRunOptions,
+  StrategyLabValidateResult,
+  StrategySetup,
+  StrategyScore,
+  StrategyLabContext,
 } from '@shared/types.js';
 export type {
   ScreenPreset, ScreenCriteria, ScreenRunResult, ScreenResultRow, Universe,
@@ -908,8 +912,17 @@ function buildApi() {
     run: (opts: OpportunityRunOptions) => invoke<OpportunityRow[]>('opportunity:run', opts),
   };
 
+  const strategyLab = {
+    validate:    (ticker: string) =>
+      invoke<StrategyLabValidateResult>('strategyLab:validate', ticker),
+    explore:     (ticker: string, slug: string) =>
+      invoke<StrategySetup>('strategyLab:explore', ticker, slug),
+    aiRationale: (score: StrategyScore, ctx: StrategyLabContext) =>
+      invoke<string>('strategyLab:aiRationale', score, ctx),
+  };
+
   return {
-    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, historical, portfolio, alerts, optionsChain, agent, backtest, leapsCsp, collaredLeaps, testApi, etrade, filters, payoff, ivHistory, opportunity },
+    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, historical, portfolio, alerts, optionsChain, agent, backtest, leapsCsp, collaredLeaps, testApi, etrade, filters, payoff, ivHistory, opportunity, strategyLab },
     dialog: {
       prompt: (opts: { title: string; defaultValue?: string }) =>
         invoke<string | null>('dialog:prompt', opts),

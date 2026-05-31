@@ -25,10 +25,11 @@ import { TestApiView } from './views/TestApiView.js';
 import { PayoffView } from './views/PayoffView.js';
 import { IvHistoryView } from './views/IvHistoryView.js';
 import { KnowledgeView } from './views/KnowledgeView.js';
+import { StrategyLabView } from './views/StrategyLabView.js';
 
 declare const __APP_VERSION__: string;
 
-type View = 'watchlists' | 'screener' | 'filters' | 'analysis' | 'validate' | 'portfolio' | 'opportunity' | 'settings' | 'alerts' | 'data' | 'optionsChain' | 'payoff' | 'agent' | 'backtest' | 'leapsCsp' | 'collaredLeaps' | 'testApi' | 'ivHistory' | 'knowledge';
+type View = 'watchlists' | 'screener' | 'filters' | 'analysis' | 'validate' | 'portfolio' | 'opportunity' | 'settings' | 'alerts' | 'data' | 'optionsChain' | 'payoff' | 'agent' | 'backtest' | 'leapsCsp' | 'collaredLeaps' | 'testApi' | 'ivHistory' | 'knowledge' | 'strategyLab';
 
 type NavEntry = {
   id: number;
@@ -568,6 +569,7 @@ export function App() {
       case 'testApi': return <TestApiView />;
       case 'ivHistory': return <IvHistoryView />;
       case 'knowledge': return <KnowledgeView />;
+      case 'strategyLab': return <StrategyLabView />;
       case 'settings': return (
         <SettingsView
           etradeWarning={etradeWarning}
@@ -799,6 +801,12 @@ export function App() {
             onClick={() => navigateSidebar('collaredLeaps')}
           >
             🛡️ Collared LEAPS
+          </button>
+          <button
+            className={`nav-btn ${currentView === 'strategyLab' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('strategyLab')}
+          >
+            🔬 Strategy Lab
           </button>
           <button
             className={`nav-btn ${currentView === 'knowledge' ? 'active' : ''}`}

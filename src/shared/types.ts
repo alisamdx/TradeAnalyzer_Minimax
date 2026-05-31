@@ -1325,6 +1325,81 @@ export interface OpportunityRunOptions {
   limit?: number;
 }
 
+// ─── Strategy Lab ─────────────────────────────────────────────────────────────
+
+export type StrategyLabDirectionBias = 'bullish' | 'bearish' | 'neutral';
+export type StrategyLabGrade = 'A+' | 'A' | 'B' | 'C' | 'F';
+export type StrategyLabComplexity = 'simple' | 'moderate' | 'complex';
+
+export interface StrategyLabContext {
+  ticker:        string;
+  underlyingPx:  number;
+  expiration:    string;
+  dte:           number;
+  currentAtmIv:  number;
+  ivRank:        number | null;
+  ivPercentile:  number | null;
+  ivDataPoints:  number;
+  directionBias: StrategyLabDirectionBias;
+  ma20:          number | null;
+  ma50:          number | null;
+  momentum5d:    number | null;  // 5-day price change %
+}
+
+export interface SetupLeg {
+  action:       'buy' | 'sell';
+  side:         'call' | 'put';
+  strike:       number;
+  expiration:   string;
+  delta:        number | null;
+  bid:          number;
+  ask:          number;
+  mid:          number;
+  iv:           number;
+  openInterest: number | null;
+  qty:          number;
+}
+
+export interface StrategySetup {
+  slug:              string;
+  ticker:            string;
+  expiration:        string;
+  dte:               number;
+  underlyingPrice:   number;
+  legs:              SetupLeg[];
+  netCredit:         number | null;  // dollars per contract (positive = credit received)
+  netDebit:          number | null;  // dollars per contract (positive = debit paid)
+  maxProfit:         number | null;  // dollars per contract
+  maxLoss:           number | null;  // dollars per contract (negative = loss)
+  breakevens:        number[];
+  annualizedReturn:  number | null;  // %
+  popEstimate:       number | null;  // % from short leg delta
+  currentAtmIv:      number;
+  unavailableReason: string | null;  // set when setup cannot be computed
+}
+
+export interface StrategyScore {
+  slug:           string;
+  name:           string;
+  category:       string;
+  totalScore:     number;       // 0–100
+  grade:          StrategyLabGrade;
+  ivScore:        number;       // 0–30
+  directionScore: number;       // 0–30
+  premiumScore:   number;       // 0–25
+  liquidityScore: number;       // 0–15
+  requiresStock:  boolean;
+  complexity:     StrategyLabComplexity;
+  flags:          string[];     // reason chips
+  setup:          StrategySetup | null;
+  aiRationale:    string | null;
+}
+
+export interface StrategyLabValidateResult {
+  context: StrategyLabContext;
+  scores:  StrategyScore[];    // sorted best → worst
+}
+
 /** Progress event emitted during backfill via iv-history:progress IPC channel. */
 export interface IvHistoryProgressEvent {
   phase:       IvHistoryBackfillPhase;
