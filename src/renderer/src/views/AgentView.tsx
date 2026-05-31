@@ -1515,7 +1515,7 @@ function ConfigTab({
       {/* ── Screening pipeline ── */}
       {editingStrategy && (
         <ConfigSection label="Screening Pipeline">
-          <ConfigField label="Universe" hint="Strict screener filter applied first; then Validate/Analysis gates below">
+          <ConfigField label="Universe" hint="Strict screener filter applied first; then Validate/Analysis gates below. ETFs use Soft mode — fundamentals (P/E, ROE, D/E) are skipped automatically.">
             <select
               value={editingStrategy.screenerUniverse}
               onChange={(e) => onStrategyChange({ screenerUniverse: e.target.value as AgentStrategy['screenerUniverse'] })}
@@ -1524,7 +1524,14 @@ function ConfigTab({
               <option value="sp500">S&P 500</option>
               <option value="russell1000">Russell 1000</option>
               <option value="both">Both</option>
+              <option value="etf">ETFs</option>
             </select>
+            {editingStrategy.screenerUniverse === 'etf' && (
+              <div style={{ fontSize: 11, color: '#c8a000', marginTop: 4 }}>
+                📋 ETF mode — fundamental filters auto-skipped. Earnings exclusion not applicable.
+                IV thresholds calibrated to ETF volatility levels. Run Data Sync → ETFs first.
+              </div>
+            )}
           </ConfigField>
 
           <ConfigField label="Screening Mode" hint="Which gate(s) candidates must pass after the screener filter">

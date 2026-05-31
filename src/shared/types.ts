@@ -633,7 +633,7 @@ export interface AgentStrategy {
   description?: string;
   screeningMode: 'analysis' | 'validate' | 'both';
   screeningCriteria: AgentScreeningCriteria;
-  screenerUniverse: 'sp500' | 'russell1000' | 'both';
+  screenerUniverse: 'sp500' | 'russell1000' | 'both' | 'etf';
   preferredModes: string;
   dteMin: number;
   dteMax: number;
@@ -672,7 +672,7 @@ export interface AgentConfig {
   minAnnualizedReturn: number;
   earningsExclusionDays: number;
   // Universe
-  screenerUniverse: 'sp500' | 'russell1000' | 'both';
+  screenerUniverse: 'sp500' | 'russell1000' | 'both' | 'etf';
   preferredModes: string;
   // Email / Notifications
   emailList: string;
