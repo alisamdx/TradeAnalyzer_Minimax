@@ -1607,17 +1607,17 @@ export function PayoffView({ initialTicker, initialSpot }: PayoffViewProps) {
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
                 <thead>
                   <tr style={{ position: 'sticky', top: 0, background: '#0f172a', zIndex: 1 }}>
-                    <th colSpan={4} style={{ padding: '5px 8px', textAlign: 'center', color: '#22c55e', borderBottom: '1px solid #1e293b', borderRight: '1px solid #1e293b', fontSize: 10 }}>CALLS</th>
+                    <th colSpan={5} style={{ padding: '5px 8px', textAlign: 'center', color: '#22c55e', borderBottom: '1px solid #1e293b', borderRight: '1px solid #1e293b', fontSize: 10 }}>CALLS</th>
                     <th style={{ padding: '5px 8px', textAlign: 'center', color: '#fbbf24', borderBottom: '1px solid #1e293b', fontWeight: 700, fontSize: 12 }}>Strike</th>
-                    <th colSpan={4} style={{ padding: '5px 8px', textAlign: 'center', color: '#ef4444', borderBottom: '1px solid #1e293b', borderLeft: '1px solid #1e293b', fontSize: 10 }}>PUTS</th>
+                    <th colSpan={5} style={{ padding: '5px 8px', textAlign: 'center', color: '#ef4444', borderBottom: '1px solid #1e293b', borderLeft: '1px solid #1e293b', fontSize: 10 }}>PUTS</th>
                   </tr>
                   <tr style={{ background: '#0f172a' }}>
-                    {(['B', 'S', 'Mid', 'Δ'] as const).map(h => (
-                      <th key={`c-${h}`} style={{ padding: '4px 6px', color: '#64748b', fontWeight: 400, textAlign: h === 'Mid' || h === 'Δ' ? 'right' : 'center', borderBottom: '1px solid #1e293b' }}>{h}</th>
+                    {(['OI', 'B', 'S', 'Mid', 'Δ'] as const).map(h => (
+                      <th key={`c-${h}`} style={{ padding: '4px 6px', color: '#64748b', fontWeight: 400, textAlign: h === 'Mid' || h === 'Δ' || h === 'OI' ? 'right' : 'center', borderBottom: '1px solid #1e293b' }}>{h}</th>
                     ))}
                     <th style={{ padding: '4px 6px', color: '#fbbf24', textAlign: 'center', borderBottom: '1px solid #1e293b' }}></th>
-                    {(['Δ', 'Mid', 'B', 'S'] as const).map(h => (
-                      <th key={`p-${h}`} style={{ padding: '4px 6px', color: '#64748b', fontWeight: 400, textAlign: h === 'Mid' || h === 'Δ' ? 'right' : 'center', borderBottom: '1px solid #1e293b' }}>{h}</th>
+                    {(['Δ', 'Mid', 'B', 'S', 'OI'] as const).map(h => (
+                      <th key={`p-${h}`} style={{ padding: '4px 6px', color: '#64748b', fontWeight: 400, textAlign: h === 'Mid' || h === 'Δ' || h === 'OI' ? 'right' : 'center', borderBottom: '1px solid #1e293b' }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -1649,6 +1649,10 @@ export function PayoffView({ initialTicker, initialSpot }: PayoffViewProps) {
 
                     return (
                       <tr key={strike} style={{ background: isAtm ? '#0f2d4a' : 'transparent' }}>
+                        {/* Call OI */}
+                        <td style={{ padding: '3px 6px', textAlign: 'right', color: '#475569', fontSize: 10 }}>
+                          {call?.openInterest != null ? call.openInterest.toLocaleString() : '—'}
+                        </td>
                         {/* Call: Buy + Sell buttons */}
                         <td style={{ padding: '3px 5px', textAlign: 'center' }}>
                           {call && (
@@ -1702,6 +1706,10 @@ export function PayoffView({ initialTicker, initialSpot }: PayoffViewProps) {
                               S
                             </button>
                           )}
+                        </td>
+                        {/* Put OI */}
+                        <td style={{ padding: '3px 6px', textAlign: 'right', color: '#475569', fontSize: 10 }}>
+                          {put?.openInterest != null ? put.openInterest.toLocaleString() : '—'}
                         </td>
                       </tr>
                     );
