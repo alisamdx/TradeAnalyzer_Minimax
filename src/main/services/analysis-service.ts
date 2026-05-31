@@ -557,16 +557,26 @@ export class AnalysisService {
       ? +(targetPrice - entryZoneLow) / (entryZoneLow - stopLoss)
       : null;
 
+    // Detect ETF: all key fundamental ratios null → P/E, EPS, ROE, D/E not applicable.
+    const isEtf =
+      fundamentals.peRatio === null &&
+      fundamentals.eps === null &&
+      fundamentals.roe === null &&
+      fundamentals.debtToEquity === null;
+
     // Composite score (0–10).
     let compositeScore = 0;
     if (trend === 'bullish') compositeScore += 3;
     else if (trend === 'sideways') compositeScore += 1;
     if (rsi !== null && rsi >= 40 && rsi <= 65) compositeScore += 2;
     if (rsi !== null && rsi >= 45 && rsi <= 55) compositeScore += 1; // sweet spot
-    if (fundamentals.peRatio !== null && fundamentals.peRatio >= 5 && fundamentals.peRatio <= 25) compositeScore += 1;
-    if (fundamentals.profitMargin !== null && fundamentals.profitMargin >= 10) compositeScore += 1;
-    if (fundamentals.roe !== null && fundamentals.roe >= 15) compositeScore += 1;
-    if (fundamentals.debtToEquity !== null && fundamentals.debtToEquity < 1) compositeScore += 1;
+    // Fundamental scoring — skipped for ETFs (P/E, Margin, ROE, D/E are N/A)
+    if (!isEtf) {
+      if (fundamentals.peRatio !== null && fundamentals.peRatio >= 5 && fundamentals.peRatio <= 25) compositeScore += 1;
+      if (fundamentals.profitMargin !== null && fundamentals.profitMargin >= 10) compositeScore += 1;
+      if (fundamentals.roe !== null && fundamentals.roe >= 15) compositeScore += 1;
+      if (fundamentals.debtToEquity !== null && fundamentals.debtToEquity < 1) compositeScore += 1;
+    }
 
     // Volume profile scoring (+0–2). see docs/formulas.md#volume-profile-levels
     const vpLevels = computeVolumeProfileLevels(bars);
@@ -591,15 +601,16 @@ export class AnalysisService {
 
     compositeScore = Math.min(10, compositeScore);
 
-    // Fundamentals pass (basic screen criteria).
-    const fundamentalsPass = !!(
+    // Fundamentals pass — ETFs are always treated as passing (no earnings/debt risk by construction).
+    const fundamentalsPass = isEtf || !!(
       fundamentals.peRatio !== null && fundamentals.peRatio >= 5 && fundamentals.peRatio <= 30 &&
       (fundamentals.eps ?? 0) > 0 &&
       fundamentals.debtToEquity !== null && fundamentals.debtToEquity < 1.5
     );
 
     // Explanation.
-    const explanation = `Price ${currentPrice !== null ? `$${currentPrice.toFixed(2)}` : '—'} above $${sma50?.toFixed(2) ?? '?'}/$${sma200?.toFixed(2) ?? '?'} SMA${trend === 'bullish' ? ' (bullish stack)' : trend === 'bearish' ? ' (bearish stack)' : ' (sideways)'}. RSI ${rsi !== null ? rsi.toFixed(1) : '—'} ${rsi !== null && rsi >= 40 && rsi <= 65 ? '✓' : '✗'} (target 40–65).${vpNote ? ' ' + vpNote + '.' : ''} Composite score ${compositeScore}/10.`;
+    const etfNote = isEtf ? ' ETF — fundamentals N/A, scored on technicals only.' : '';
+    const explanation = `Price ${currentPrice !== null ? `$${currentPrice.toFixed(2)}` : '—'} above $${sma50?.toFixed(2) ?? '?'}/$${sma200?.toFixed(2) ?? '?'} SMA${trend === 'bullish' ? ' (bullish stack)' : trend === 'bearish' ? ' (bearish stack)' : ' (sideways)'}. RSI ${rsi !== null ? rsi.toFixed(1) : '—'} ${rsi !== null && rsi >= 40 && rsi <= 65 ? '✓' : '✗'} (target 40–65).${vpNote ? ' ' + vpNote + '.' : ''}${etfNote} Composite score ${compositeScore}/10.`;
 
     return {
       mode: 'buy', ticker, lastPrice: price,
@@ -729,14 +740,19 @@ export class AnalysisService {
       if (spreadPass) liquidityScore += 5;
     }
 
+    // Detect ETF: ROE and FCF are N/A (null) — award those points automatically.
+    // ETFs hold diversified assets with no single-company earnings/debt risk.
+    const isEtf = fundamentals.peRatio === null && fundamentals.roe === null;
+
     // Suitability score (1–10) — see docs/formulas.md#wheel-suitability-score
     let score = 1;
     if (ivPass) score += 2;
     if (stabilityPass) score += 2;
     if (liquidityScore >= 5) score += 2;
     if (earningsPass) score += 2;
-    if (fundamentals.roe !== null && fundamentals.roe >= 15) score += 1;
-    if (fundamentals.freeCashFlow !== null && fundamentals.freeCashFlow > 0) score += 1;
+    // ROE / FCF — auto-pass for ETFs (no meaningful company fundamentals)
+    if (isEtf || (fundamentals.roe !== null && fundamentals.roe >= 15)) score += 1;
+    if (isEtf || (fundamentals.freeCashFlow !== null && fundamentals.freeCashFlow > 0)) score += 1;
     score = Math.min(10, score);
 
     let explanation = '';
@@ -744,6 +760,7 @@ export class AnalysisService {
     if (!stabilityPass) explanation += 'Price not in healthy range. ';
     if (!earningsPass) explanation += `Earnings in ${daysToEarnings} days. `;
     if (liquidityScore < 5) explanation += 'Low option liquidity. ';
+    if (isEtf && explanation === '') explanation = 'ETF — all checks passed (fundamentals N/A). ';
     if (explanation === '') explanation = 'All checks passed.';
 
     if (!chain || !price) {
