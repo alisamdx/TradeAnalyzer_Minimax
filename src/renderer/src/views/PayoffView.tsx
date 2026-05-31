@@ -1630,6 +1630,23 @@ export function PayoffView({ initialTicker, initialSpot }: PayoffViewProps) {
                     const cell = (v: number | null) =>
                       v != null ? (v < 0.01 ? v.toFixed(4) : v.toFixed(2)) : '—';
 
+                    // Spread quality: color mid by spread-pct to flag illiquid options.
+                    // spread% = (ask - bid) / mid. <10% green, 10-30% yellow, >30% red.
+                    const midColor = (bid: number, ask: number, baseColor: string) => {
+                      const mid = (bid + ask) / 2;
+                      if (mid <= 0) return baseColor;
+                      const spreadPct = (ask - bid) / mid * 100;
+                      if (spreadPct > 30) return '#ef4444';   // red  — wide, illiquid
+                      if (spreadPct > 10) return '#f59e0b';   // amber — moderate spread
+                      return baseColor;                        // original color — tight
+                    };
+                    const midTitle = (bid: number, ask: number) => {
+                      const mid = (bid + ask) / 2;
+                      const spread = ask - bid;
+                      const spreadPct = mid > 0 ? (spread / mid * 100).toFixed(0) : '—';
+                      return `Bid $${bid.toFixed(2)}  Ask $${ask.toFixed(2)}  Spread $${spread.toFixed(2)} (${spreadPct}%)`;
+                    };
+
                     return (
                       <tr key={strike} style={{ background: isAtm ? '#0f2d4a' : 'transparent' }}>
                         {/* Call: Buy + Sell buttons */}
@@ -1649,7 +1666,8 @@ export function PayoffView({ initialTicker, initialSpot }: PayoffViewProps) {
                             </button>
                           )}
                         </td>
-                        <td style={{ padding: '3px 6px', textAlign: 'right', color: '#22c55e' }}>
+                        <td style={{ padding: '3px 6px', textAlign: 'right', color: call ? midColor(call.bid, call.ask, '#22c55e') : '#22c55e' }}
+                            title={call ? midTitle(call.bid, call.ask) : undefined}>
                           {call ? cell((call.bid + call.ask) / 2) : '—'}
                         </td>
                         <td style={{ padding: '3px 6px', textAlign: 'right', color: '#64748b' }}>
@@ -1665,7 +1683,8 @@ export function PayoffView({ initialTicker, initialSpot }: PayoffViewProps) {
                         <td style={{ padding: '3px 6px', textAlign: 'right', color: '#64748b' }}>
                           {put ? cell(put.delta) : '—'}
                         </td>
-                        <td style={{ padding: '3px 6px', textAlign: 'right', color: '#ef4444' }}>
+                        <td style={{ padding: '3px 6px', textAlign: 'right', color: put ? midColor(put.bid, put.ask, '#ef4444') : '#ef4444' }}
+                            title={put ? midTitle(put.bid, put.ask) : undefined}>
                           {put ? cell((put.bid + put.ask) / 2) : '—'}
                         </td>
                         <td style={{ padding: '3px 5px', textAlign: 'center' }}>
