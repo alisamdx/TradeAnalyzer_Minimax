@@ -293,13 +293,14 @@ export class CollaredLeapsService {
   // ── Public API ──────────────────────────────────────────────────────────────
 
   async runScreen(
-    universe: 'sp500' | 'russell1000' | 'both',
+    universe: 'sp500' | 'russell1000' | 'both' | 'etf',
     onProgress?: (msg: string) => void,
     forceRun = false,
     onProgressDetail?: (detail: CollaredLeapsProgressDetail) => void,
     watchlistId?: number,
   ): Promise<CollaredLeapsRunResult> {
     const log = (msg: string) => { onProgress?.(msg); };
+    const isEtf = universe === 'etf';
     const progress = (detail: CollaredLeapsProgressDetail) => { onProgressDetail?.(detail); };
 
     // ── Phase 1: Market gate ─────────────────────────────────────────────────
@@ -371,7 +372,7 @@ export class CollaredLeapsService {
 
     // ── Universe filters ─────────────────────────────────────────────────────
     log('Applying universe filters…');
-    const filtered = tickers.filter(t => this.passUniverseFilter(t, fundamentalsMap.get(t), quotesMap.get(t)));
+    const filtered = tickers.filter(t => this.passUniverseFilter(t, fundamentalsMap.get(t), quotesMap.get(t), isEtf));
     log(`${filtered.length} of ${tickers.length} tickers pass universe filters`);
 
     if (filtered.length === 0) {
@@ -843,7 +844,13 @@ export class CollaredLeapsService {
   // ── Universe loading ─────────────────────────────────────────────────────────
 
   private getScreenedTickers(universe: string): string[] {
-    const clause = universe === 'both' ? '1=1' : `sr.universe = '${universe}'`;
+    const univKey =
+      universe === 'sp500'       ? 'sp500' :
+      universe === 'russell1000' ? 'russell1000' :
+      universe === 'etf'         ? 'etf' :
+      null; // null = 'both' → no filter
+
+    const clause = univKey === null ? '1=1' : `sr.universe = '${univKey}'`;
     const rows = this.db.prepare(`
       SELECT DISTINCT res.ticker
       FROM screen_results res
@@ -854,7 +861,7 @@ export class CollaredLeapsService {
 
     if (rows.length > 0) return [...new Set(rows.map(r => r.ticker))];
 
-    const idxClause = universe === 'both' ? '1=1' : `index_name = '${universe}'`;
+    const idxClause = univKey === null ? '1=1' : `index_name = '${univKey}'`;
     return (this.db.prepare(`SELECT ticker FROM constituents WHERE ${idxClause} ORDER BY ticker`).all() as Array<{ ticker: string }>).map(r => r.ticker);
   }
 
@@ -904,15 +911,19 @@ export class CollaredLeapsService {
     _ticker: string,
     f: FundamentalsRow | undefined,
     q: QuoteRow | undefined,
+    isEtf = false,
   ): boolean {
     if (!f || !q) return false;
     const price = q.last ?? 0;
     const volume = q.volume ?? 0;
-    const marketCap = f.marketCap ?? 0;
     if (price < 10) return false;
     if (volume < 2_000_000) return false;
-    if (marketCap < 10_000_000_000) return false;
-    if (isBiotech(f.sector)) return false;
+    if (!isEtf) {
+      // ETFs don't report market cap or sector in fundamentals — skip these checks
+      const marketCap = f.marketCap ?? 0;
+      if (marketCap < 10_000_000_000) return false;
+      if (isBiotech(f.sector)) return false;
+    }
     return true;
   }
 

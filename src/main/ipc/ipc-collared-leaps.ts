@@ -50,7 +50,7 @@ export function registerCollaredLeapsIpc(
   // Run a full Collared LEAPS screen. Streams progress via 'collared-leaps:progress' events.
   ipcMain.handle(
     'collared-leaps:run-screen',
-    wrapAsync(async (universe: 'sp500' | 'russell1000' | 'both', forceRun?: boolean, watchlistId?: number | null) => {
+    wrapAsync(async (universe: 'sp500' | 'russell1000' | 'both' | 'etf', forceRun?: boolean, watchlistId?: number | null) => {
       const win = (await import('electron')).BrowserWindow.getAllWindows()[0];
       return service.runScreen(
         universe,

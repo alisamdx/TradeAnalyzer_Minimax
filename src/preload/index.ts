@@ -824,7 +824,7 @@ function buildApi() {
   };
 
   const collaredLeaps = {
-    runScreen: (universe: 'sp500' | 'russell1000' | 'both', forceRun?: boolean, watchlistId?: number | null) =>
+    runScreen: (universe: 'sp500' | 'russell1000' | 'both' | 'etf', forceRun?: boolean, watchlistId?: number | null) =>
       invoke<CollaredLeapsRunResult>('collared-leaps:run-screen', universe, forceRun, watchlistId),
     getRuns: () => invoke<CollaredLeapsRunSummary[]>('collared-leaps:get-runs'),
     getRun: (runId: number) => invoke<CollaredLeapsRunResult | null>('collared-leaps:get-run', runId),
