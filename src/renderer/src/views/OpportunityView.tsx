@@ -151,6 +151,10 @@ export function OpportunityView() {
     window.dispatchEvent(new CustomEvent('navigate-to-options', { detail: { ticker } }));
   };
 
+  const navigateToValidate = (ticker: string) => {
+    window.dispatchEvent(new CustomEvent('navigate-to-validate', { detail: { ticker } }));
+  };
+
   const fmtPrice = (p: number | null) => p === null ? '—' : `$${p.toFixed(2)}`;
   const fmtPct   = (p: number | null) =>
     p === null ? '—' : `${p >= 0 ? '+' : ''}${p.toFixed(1)}%`;
@@ -379,6 +383,13 @@ export function OpportunityView() {
                         style={actionBtn}
                       >
                         📉
+                      </button>
+                      <button
+                        title="Validate"
+                        onClick={() => navigateToValidate(row.ticker)}
+                        style={actionBtn}
+                      >
+                        🎯
                       </button>
                     </div>
                   </td>
