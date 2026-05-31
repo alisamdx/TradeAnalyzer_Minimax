@@ -306,6 +306,8 @@ export class ScreenerService {
 
       switch (fd.id) {
         case 'market_cap':
+          // ETFs report AUM differently — Polygon often returns null market cap for ETFs.
+          if (isEtf && ratios.marketCap === null) { check(fd.id, true); break; }
           check(fd.id, ratios.marketCap !== null && ratios.marketCap >= (v['min'] as number ?? 0));
           break;
         case 'pe_ratio': {
