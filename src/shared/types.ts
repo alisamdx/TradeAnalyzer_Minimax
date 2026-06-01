@@ -272,9 +272,12 @@ export interface OptionsIncomeResult {
   expiration: string | null;
   dte: number | null;
   delta: number | null;
+  bid: number | null;
+  ask: number | null;
   premium: number | null;
   annualizedReturn: number | null;
   ivRank: number | null;
+  openInterest: number | null;
   breakeven: number | null;
   capitalRequired: number | null;
   explanation: string;

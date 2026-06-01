@@ -828,16 +828,16 @@ export function App() {
             📚 Knowledge
           </button>
           <button
-            className={`nav-btn ${currentView === 'strategyLab' ? 'active' : ''}`}
-            onClick={() => navigateSidebar('strategyLab')}
-          >
-            🔬 Strategy Lab
-          </button>
-          <button
             className={`nav-btn ${currentView === 'analysis' ? 'active' : ''}`}
             onClick={() => navigateSidebar('analysis')}
           >
             📊 Analysis
+          </button>
+          <button
+            className={`nav-btn ${currentView === 'strategyLab' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('strategyLab')}
+          >
+            🔬 Strategy Lab
           </button>
           <button
             className={`nav-btn ${currentView === 'leapsCsp' ? 'active' : ''}`}

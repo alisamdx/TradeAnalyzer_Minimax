@@ -53,9 +53,12 @@ export interface OptionsIncomeResult {
   expiration: string | null;
   dte: number | null;
   delta: number | null;
+  bid: number | null;
+  ask: number | null;
   premium: number | null;       // per-share credit received
   annualizedReturn: number | null; // annualized return on capital (%)
   ivRank: number | null;
+  openInterest: number | null;
   breakeven: number | null;
   capitalRequired: number | null; // 100 × strike
   explanation: string;
@@ -765,8 +768,10 @@ export class AnalysisService {
       mode: 'options_income', ticker, lastPrice: price,
       strategy, strike: contract.strike, expiration: contract.expiration,
       dte, delta: contract.delta,
+      bid: contract.bid, ask: contract.ask,
       premium, annualizedReturn: annualizedReturn_val,
-      ivRank, breakeven, capitalRequired, explanation
+      ivRank, openInterest: contract.openInterest ?? null,
+      breakeven, capitalRequired, explanation
     };
   }
 
@@ -774,8 +779,8 @@ export class AnalysisService {
     return {
       mode: 'options_income', ticker, lastPrice: price,
       strategy: 'CSP', strike: null, expiration: null, dte: null,
-      delta: null, premium: null, annualizedReturn: null,
-      ivRank, breakeven: null, capitalRequired: null, explanation
+      delta: null, bid: null, ask: null, premium: null, annualizedReturn: null,
+      ivRank, openInterest: null, breakeven: null, capitalRequired: null, explanation
     };
   }
 

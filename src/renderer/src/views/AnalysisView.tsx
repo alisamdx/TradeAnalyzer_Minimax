@@ -33,7 +33,7 @@ function fmtNum(v: number | null, decimals = 2): string {
 // ─── Result types (decoded from JSON) ────────────────────────────────────────
 
 type BuyRow = { mode: 'buy'; ticker: string; lastPrice: number | null; compositeScore: number; trend: string; rsi: number | null; entryZoneLow: number | null; stopLoss: number | null; targetPrice: number | null; riskReward: number | null; fundamentalsPass: boolean; explanation: string };
-type OptionsRow = { mode: 'options_income'; ticker: string; lastPrice: number | null; strategy: 'CSP' | 'CC'; strike: number | null; expiration: string | null; dte: number | null; delta: number | null; premium: number | null; annualizedReturn: number | null; ivRank: number | null; breakeven: number | null; capitalRequired: number | null; explanation: string };
+type OptionsRow = { mode: 'options_income'; ticker: string; lastPrice: number | null; strategy: 'CSP' | 'CC'; strike: number | null; expiration: string | null; dte: number | null; delta: number | null; bid: number | null; ask: number | null; premium: number | null; annualizedReturn: number | null; ivRank: number | null; openInterest: number | null; breakeven: number | null; capitalRequired: number | null; explanation: string };
 type WheelRow = { mode: 'wheel'; ticker: string; lastPrice: number | null; recommendedStrike: number | null; expiration: string | null; dte: number | null; delta: number | null; premium: number | null; annualizedReturn: number | null; currentIv: number | null; ivRank: number | null; daysToEarnings: number | null; optionLiquidityScore: number; suitabilityScore: number; explanation: string };
 type StrategyRow = { mode: 'bullish' | 'bearish'; ticker: string; lastPrice: number | null; trendStrength: number | null; suggestedStrategy: string; structure: string; maxProfit: number | null; maxLoss: number | null; breakeven: number | null; probabilityOfProfit: number | null; explanation: string };
 type DecodedResult = BuyRow | OptionsRow | WheelRow | StrategyRow;
@@ -58,7 +58,7 @@ const MODE_LABEL: Record<string, string> = {
 function modeColumns(mode: AnalysisMode): string[] {
   switch (mode) {
     case 'buy':           return ['Ticker', 'Price', 'Score/10', 'Trend', 'RSI', 'Entry Low', 'Stop', 'Target', 'R:R', 'Fund OK'];
-    case 'options_income': return ['Ticker', 'Price', 'Strategy', 'Strike', 'Exp', 'DTE', 'Delta', 'Premium', 'Ann Return%', 'Capital'];
+    case 'options_income': return ['Ticker', 'Price', 'Strategy', 'Strike', 'Exp', 'DTE', 'Delta', 'Bid', 'Ask', 'Premium', 'Ann Return%', 'OI', 'Capital'];
     case 'wheel':         return ['Ticker', 'Price', 'Strike', 'Exp', 'DTE', 'Premium', 'Ann Return%', 'IV %', 'Suitability', 'Liquidity'];
     case 'bullish':
     case 'bearish':       return ['Ticker', 'Price', 'ADX', 'Strategy', 'Structure', 'Max Profit', 'Max Loss', 'Breakeven', 'POP'];
@@ -104,7 +104,7 @@ export function AnalysisView({ initialTicker, clearInitialTicker }: AnalysisView
   const [snapshots, setSnapshots] = useState<AnalysisSnapshotRow[]>([]);
   const [activeSnapshotId, setActiveSnapshotId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [sortCol, setSortCol] = useState<string | null>(null);
+  const [sortCol, setSortCol] = useState<string | null>('Score/10');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
   // For single-ticker auto-run (launched from screener/validate)
@@ -158,7 +158,7 @@ export function AnalysisView({ initialTicker, clearInitialTicker }: AnalysisView
       const result = await window.api.analysis.runAll(selectedWatchlistId, tickerSubset);
       setAllResults(result.results);
       setActiveSnapshotId(result.snapshotId);
-      setActiveTab('buy');
+      switchTab('buy');
       await loadSnapshots(selectedWatchlistId);
     } catch (e) {
       setError((e as Error).message);
@@ -191,8 +191,7 @@ export function AnalysisView({ initialTicker, clearInitialTicker }: AnalysisView
     if (!full) { setError('Snapshot not found.'); return; }
     setAllResults(full.results);
     setActiveSnapshotId(snap.id);
-    setActiveTab('buy');
-    setSortCol(null);
+    switchTab('buy');
   }, []);
 
   // ── Delete snapshot ──────────────────────────────────────────────────────
@@ -218,6 +217,23 @@ export function AnalysisView({ initialTicker, clearInitialTicker }: AnalysisView
 
   // ── Sort ─────────────────────────────────────────────────────────────────
 
+  const defaultSortFor = (mode: AnalysisMode): { col: string; dir: 'asc' | 'desc' } => {
+    switch (mode) {
+      case 'buy':           return { col: 'Score/10',   dir: 'desc' };
+      case 'options_income': return { col: 'Premium',   dir: 'desc' };
+      case 'wheel':         return { col: 'Suitability', dir: 'desc' };
+      case 'bullish':
+      case 'bearish':       return { col: 'Max Loss',   dir: 'desc' };
+    }
+  };
+
+  const switchTab = (mode: AnalysisMode) => {
+    const def = defaultSortFor(mode);
+    setActiveTab(mode);
+    setSortCol(def.col);
+    setSortDir(def.dir);
+  };
+
   const handleSortClick = (col: string) => {
     setSortCol(prev => {
       if (prev === col) { setSortDir(d => d === 'asc' ? 'desc' : 'asc'); return col; }
@@ -240,8 +256,10 @@ export function AnalysisView({ initialTicker, clearInitialTicker }: AnalysisView
         case 'Ticker': return result.ticker; case 'Price': return result.lastPrice;
         case 'Strategy': return result.strategy; case 'Strike': return result.strike;
         case 'Exp': return result.expiration; case 'DTE': return result.dte;
-        case 'Delta': return result.delta; case 'Premium': return result.premium;
-        case 'Ann Return%': return result.annualizedReturn; case 'Capital': return result.capitalRequired;
+        case 'Delta': return result.delta; case 'Bid': return result.bid;
+        case 'Ask': return result.ask; case 'Premium': return result.premium;
+        case 'Ann Return%': return result.annualizedReturn; case 'OI': return result.openInterest;
+        case 'Capital': return result.capitalRequired;
       }
     } else if (result.mode === 'wheel') {
       switch (col) {
@@ -314,8 +332,11 @@ export function AnalysisView({ initialTicker, clearInitialTicker }: AnalysisView
         case 'Exp':         return result.expiration ?? '—';
         case 'DTE':         return result.dte?.toString() ?? '—';
         case 'Delta':       return fmtNum(result.delta, 3);
+        case 'Bid':         return fmtPrice(result.bid);
+        case 'Ask':         return fmtPrice(result.ask);
         case 'Premium':     return fmtPrice(result.premium);
         case 'Ann Return%': return fmtPct(result.annualizedReturn);
+        case 'OI':          return result.openInterest !== null ? result.openInterest.toLocaleString() : '—';
         case 'Capital':     return result.capitalRequired ? `$${(result.capitalRequired / 1000).toFixed(0)}K` : '—';
       }
     } else if (result.mode === 'wheel') {
@@ -469,7 +490,7 @@ export function AnalysisView({ initialTicker, clearInitialTicker }: AnalysisView
                 <button
                   key={tab.mode}
                   className={`an-tab${activeTab === tab.mode ? ' active' : ''}`}
-                  onClick={() => { setActiveTab(tab.mode); setSortCol(null); }}
+                  onClick={() => switchTab(tab.mode)}
                 >
                   {tab.icon} {tab.label}
                   <span className="tab-count">{count}</span>
