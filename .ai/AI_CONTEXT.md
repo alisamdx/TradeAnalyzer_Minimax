@@ -171,6 +171,8 @@ Authoritative DDL is in `migrations/001_init.sql` + `002_screen_schema.sql`. Pha
 
 ## Recent Changes
 
+- **v0.22.3 (2026-06-01)** — Single instance lock. `app.requestSingleInstanceLock()` in `index.ts`; second launch focuses existing window instead of opening a duplicate.
+
 - **v0.22.2 (2026-06-01)** — Analysis sidebar order + per-tab default sort + Options Income columns. Sidebar: 📊 Analysis moved above 🔬 Strategy Lab. Default sort applied on every tab switch/run: Buy → Score/10 desc, Options Income → Premium desc, Wheel → Suitability desc, Bullish/Bearish → Max Loss desc. Options Income: Bid, Ask, OI columns added (from selected contract). `OptionsIncomeResult` type and analysis service updated in both shared types and service-local interface.
 
 - **v0.22.1 (2026-06-01)** — Batch Jobs global session toggle. In-memory `batchJobsEnabled` flag on `BatchService` (defaults `true` on every app start). Toggling OFF prevents startup jobs and scheduled jobs from firing; manual "Run Now" still works. New methods: `setEnabled(bool)` / `isEnabled()` on `BatchService`; `batch:set-enabled` + `batch:get-enabled` IPC handlers in `ipc-batch.ts`; `setEnabled` + `getEnabled` in preload bridge. `BatchView` header now shows a toggle switch (green ON / red OFF) with an amber warning banner when disabled.
