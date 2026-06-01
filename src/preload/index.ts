@@ -939,6 +939,8 @@ function buildApi() {
     runNow:     (jobId: string) => invoke<boolean>('batch:run-now', jobId),
     cancel:     (jobId: string) => invoke<boolean>('batch:cancel', jobId),
     updateJob:  (jobId: string, patch: Partial<BatchJob>) => invoke<boolean>('batch:update-job', jobId, patch),
+    setEnabled: (enabled: boolean) => invoke<boolean>('batch:set-enabled', enabled),
+    getEnabled: () => invoke<boolean>('batch:get-enabled'),
     onProgress: (cb: (evt: BatchProgressEvent) => void): (() => void) => {
       const handler = (_e: Electron.IpcRendererEvent, evt: BatchProgressEvent) => cb(evt);
       ipcRenderer.on('batch:progress', handler);

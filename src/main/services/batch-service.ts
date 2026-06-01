@@ -66,6 +66,16 @@ export class BatchService {
   private abortControllers = new Map<string, AbortController>();
   private runningJobId: string | null = null;
   private scheduleTimer: NodeJS.Timeout | null = null;
+  private batchJobsEnabled = true;
+
+  setEnabled(enabled: boolean): void {
+    this.batchJobsEnabled = enabled;
+    console.log(`[batch] global toggle: ${enabled ? 'enabled' : 'disabled'}`);
+  }
+
+  isEnabled(): boolean {
+    return this.batchJobsEnabled;
+  }
 
   constructor(
     private readonly db: DbHandle,
@@ -106,6 +116,10 @@ export class BatchService {
   // ── Startup jobs ─────────────────────────────────────────────────────────
 
   async runStartupJobs(): Promise<void> {
+    if (!this.batchJobsEnabled) {
+      console.log('[batch] global toggle is OFF — skipping startup jobs');
+      return;
+    }
     const jobs = this._getJobRows().filter(j => j.enabled && j.run_on_startup);
     for (const job of jobs) {
       const today = this.todayET();
@@ -135,6 +149,7 @@ export class BatchService {
   }
 
   private async checkSchedule(): Promise<void> {
+    if (!this.batchJobsEnabled) return;
     const now = this.currentTimeET();
     const today = this.todayET();
 

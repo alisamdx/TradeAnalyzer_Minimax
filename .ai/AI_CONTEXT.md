@@ -171,6 +171,8 @@ Authoritative DDL is in `migrations/001_init.sql` + `002_screen_schema.sql`. Pha
 
 ## Recent Changes
 
+- **v0.22.1 (2026-06-01)** — Batch Jobs global session toggle. In-memory `batchJobsEnabled` flag on `BatchService` (defaults `true` on every app start). Toggling OFF prevents startup jobs and scheduled jobs from firing; manual "Run Now" still works. New methods: `setEnabled(bool)` / `isEnabled()` on `BatchService`; `batch:set-enabled` + `batch:get-enabled` IPC handlers in `ipc-batch.ts`; `setEnabled` + `getEnabled` in preload bridge. `BatchView` header now shows a toggle switch (green ON / red OFF) with an amber warning banner when disabled.
+
 - **v0.22.0 (2026-06-01)** — Analysis Engine redesign. One click runs all 5 modes. Mode selector removed; strategy tabs (📈 Buy / 💰 Options Income / 🎯 Wheel / 🐂 Bullish / 🐻 Bearish) populate after run. Snapshots moved below results (newest first, delete per row, Clear All). Combined `mode='all'` snapshots store all 5 mode results. New: `analyzeWatchlistAllModes()`, `saveAllModesSnapshot()`, `getAllModesSnapshot()` in analysis service; `analysis:run-all` + `analysis:get-all-modes-snapshot` IPC; `runAll` + `getAllModesSnapshot` + `AnalysisProgressEvent` in preload. `AnalysisSnapshotRow.mode` widened to `AnalysisMode | 'all'`.
 
 - **v0.21.1 (2026-06-01)** — Batch Jobs UI: moved Run History panel above Live Activity panel in `BatchView` so completed run data is always visible without scrolling past the live log.

@@ -162,6 +162,7 @@ export function BatchView() {
   const [runningJobId, setRunningJobId] = useState<string | null>(null);
   const [liveEvents, setLiveEvents] = useState<BatchProgressEvent[]>([]);
   const [liveRunId, setLiveRunId] = useState<number | null>(null);
+  const [batchEnabled, setBatchEnabled] = useState(true);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const logEndRef = useRef<HTMLDivElement | null>(null);
 
@@ -193,8 +194,16 @@ export function BatchView() {
   // Initial load
   useEffect(() => {
     setLoading(true);
-    loadJobs().finally(() => setLoading(false));
+    Promise.all([
+      loadJobs(),
+      window.api.batch.getEnabled().then(v => setBatchEnabled(v)),
+    ]).finally(() => setLoading(false));
   }, []);
+
+  const handleToggleEnabled = async (enabled: boolean) => {
+    await window.api.batch.setEnabled(enabled);
+    setBatchEnabled(enabled);
+  };
 
   // Reload runs when selected job changes
   useEffect(() => {
@@ -300,7 +309,44 @@ export function BatchView() {
         .settings-row label { color: #a0aec0; font-size: 13px; }
       `}</style>
 
-      <h2 style={{ color: '#ecf0f1', margin: '0 0 20px' }}>⚙ Batch Jobs</h2>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+        <h2 style={{ color: '#ecf0f1', margin: 0 }}>⚙ Batch Jobs</h2>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', userSelect: 'none' }}>
+          <span style={{ color: batchEnabled ? '#2ecc71' : '#e74c3c', fontWeight: 600, fontSize: 13 }}>
+            {batchEnabled ? 'Jobs ON' : 'Jobs OFF'}
+          </span>
+          <span style={{
+            position: 'relative', display: 'inline-block', width: 40, height: 22,
+          }}>
+            <input
+              type="checkbox"
+              checked={batchEnabled}
+              onChange={e => handleToggleEnabled(e.target.checked)}
+              style={{ opacity: 0, width: 0, height: 0, position: 'absolute' }}
+            />
+            <span style={{
+              position: 'absolute', inset: 0, borderRadius: 11,
+              background: batchEnabled ? '#27ae60' : '#444',
+              transition: 'background 0.2s',
+              cursor: 'pointer',
+            }} onClick={() => handleToggleEnabled(!batchEnabled)} />
+            <span style={{
+              position: 'absolute', top: 3, left: batchEnabled ? 21 : 3, width: 16, height: 16,
+              borderRadius: '50%', background: '#fff', transition: 'left 0.2s',
+              pointerEvents: 'none',
+            }} />
+          </span>
+        </label>
+      </div>
+
+      {!batchEnabled && (
+        <div style={{
+          background: '#2a1a00', border: '1px solid #e67e22', borderRadius: 8,
+          padding: '10px 16px', marginBottom: 20, color: '#e67e22', fontSize: 13,
+        }}>
+          Batch jobs are disabled for this session. Startup and scheduled jobs will not run until re-enabled. Manual "Run Now" still works.
+        </div>
+      )}
 
       {/* ── Top panel: job table ── */}
       <div style={{ background: '#131b2e', borderRadius: 10, border: '1px solid #2d3748', marginBottom: 24 }}>

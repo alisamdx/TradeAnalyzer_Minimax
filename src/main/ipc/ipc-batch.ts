@@ -81,6 +81,20 @@ export function registerBatchIpc(
     })
   );
 
+  // Global session toggle (in-memory, resets to true on every app start)
+  ipcMain.handle(
+    'batch:set-enabled',
+    wrap((enabled: boolean) => {
+      batchService.setEnabled(enabled);
+      return true;
+    })
+  );
+
+  ipcMain.handle(
+    'batch:get-enabled',
+    wrap(() => batchService.isEnabled())
+  );
+
   // Wire batch:progress and app:notification callbacks → renderer IPC events
   // (These are set up in index.ts via the callback injection, not here.
   //  This function only registers the invoke handlers above.)
