@@ -8,6 +8,7 @@ import type { ConstituentsService } from '../services/constituents-service.js';
 import type { WatchlistService } from '../services/watchlist-service.js';
 import type { QuoteCache, CachedQuote, FundamentalsCache } from '../services/cache-service.js';
 import type { DataProvider } from '../services/data-provider.js';
+import type { OptionsProvider } from '../services/options-provider.js';
 import { calculateWheelMetrics } from '../services/wheel-calculator.js';
 import type {
   Universe,
@@ -42,7 +43,8 @@ export function registerScreenerIpc(
   quoteCache: QuoteCache,
   fundamentalsCache: FundamentalsCache,
   dataProvider: DataProvider,
-  db?: Database
+  db?: Database,
+  optionsProvider?: OptionsProvider
 ): void {
   // ── Presets ──────────────────────────────────────────────────────────────
   ipcMain.handle('screen:list-presets', wrap(() => screenerService.listPresets()));
@@ -186,7 +188,7 @@ export function registerScreenerIpc(
         // Fetch IV from options snapshot (non-blocking; null on failure)
         let currentIv: number | null = null;
         try {
-          const ivData = await dataProvider.getOptionsIV(ticker);
+          const ivData = await (optionsProvider ?? dataProvider).getOptionsIV(ticker);
           currentIv = ivData.currentIv;
         } catch { /* IV unavailable for this ticker */ }
         const cached: CachedQuote = {
@@ -227,7 +229,7 @@ export function registerScreenerIpc(
           // Fetch IV from options snapshot (null on failure)
           let currentIv: number | null = null;
           try {
-            const ivData = await dataProvider.getOptionsIV(ticker);
+            const ivData = await (optionsProvider ?? dataProvider).getOptionsIV(ticker);
             currentIv = ivData.currentIv;
           } catch { /* IV unavailable for this ticker */ }
 

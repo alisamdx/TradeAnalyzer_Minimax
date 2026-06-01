@@ -87,19 +87,6 @@ function ScoreChip({ score }: { score: number }) {
   );
 }
 
-// ─── Pairing mode pill ────────────────────────────────────────────────────────
-
-function PairingPill({ mode }: { mode: string }) {
-  const label = mode === 'same_ticker' ? 'Same' : mode === 'different_ticker' ? 'Cross' : 'LEAPS Only';
-  const bg = mode === 'same_ticker' ? 'rgba(99,102,241,0.2)' : mode === 'different_ticker' ? 'rgba(20,184,166,0.2)' : 'rgba(239,68,68,0.15)';
-  const color = mode === 'same_ticker' ? '#818cf8' : mode === 'different_ticker' ? '#2dd4bf' : '#f87171';
-  return (
-    <span style={{ fontSize: 10, padding: '1px 5px', borderRadius: 3, background: bg, color, fontWeight: 600 }}>
-      {label}
-    </span>
-  );
-}
-
 // ─── Opportunity row ──────────────────────────────────────────────────────────
 
 function OpportunityRow({
@@ -123,71 +110,61 @@ function OpportunityRow({
         {/* Rank */}
         <td style={{ color: 'var(--text-muted)', textAlign: 'center', width: 36 }}>{opp.rank}</td>
 
-        {/* LEAPS leg */}
+        {/* Ticker */}
         <td>
           <div style={{ fontWeight: 700, letterSpacing: 0.5 }}>{opp.leapsTicker}</div>
           <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
             {fmt$(opp.leapsCurrentPrice)}
           </div>
         </td>
+
+        {/* Strike / Expiry */}
         <td style={{ fontVariantNumeric: 'tabular-nums' }}>
           <div>{fmt$(opp.leapsStrike)}</div>
           <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{opp.leapsExpiry}</div>
         </td>
+
+        {/* DTE */}
+        <td style={{ fontVariantNumeric: 'tabular-nums', textAlign: 'right', color: 'var(--text-muted)' }}>
+          {opp.leapsDte ?? '—'}
+        </td>
+
+        {/* Delta */}
         <td style={{ fontVariantNumeric: 'tabular-nums', textAlign: 'right' }}>
           {fmtNum(opp.leapsDelta, 2)}
         </td>
+
+        {/* Premium (per contract) */}
         <td style={{ fontVariantNumeric: 'tabular-nums', textAlign: 'right' }}>
           {fmtK(opp.leapsPremium)}
         </td>
+
+        {/* Extrinsic % */}
         <td style={{ fontVariantNumeric: 'tabular-nums', textAlign: 'right', fontSize: 12 }}>
           {fmtPct(opp.leapsExtrinsicPct)}
         </td>
-        <td style={{ textAlign: 'center' }}>
-          <ScoreChip score={opp.leapsSubScore} />
-        </td>
 
-        {/* CSP leg */}
-        <td>
-          {opp.cspTicker ? (
-            <>
-              <div style={{ fontWeight: 700, letterSpacing: 0.5 }}>{opp.cspTicker}</div>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                {fmt$(opp.cspCurrentPrice)}
-              </div>
-            </>
-          ) : (
-            <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>None</span>
-          )}
-        </td>
-        <td style={{ fontVariantNumeric: 'tabular-nums' }}>
-          {opp.cspStrike ? (
-            <>
-              <div>{fmt$(opp.cspStrike)}</div>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{opp.cspExpiry}</div>
-            </>
-          ) : '—'}
-        </td>
+        {/* IVR */}
         <td style={{ fontVariantNumeric: 'tabular-nums', textAlign: 'right', fontSize: 12 }}>
-          {fmtPct(opp.cspAnnReturnPct)}
-        </td>
-        <td style={{ textAlign: 'center' }}>
-          {opp.cspSubScore != null ? <ScoreChip score={opp.cspSubScore} /> : '—'}
+          {opp.leapsIvr != null ? `${opp.leapsIvr.toFixed(0)}` : '—'}
         </td>
 
-        {/* Combined */}
+        {/* Score */}
         <td style={{ textAlign: 'center' }}>
           <ScoreChip score={opp.combinedScore} />
         </td>
+
+        {/* Grade */}
         <td style={{ textAlign: 'center' }}>
           <GradeBadge grade={opp.grade} />
         </td>
-        <td style={{ textAlign: 'center' }}>
-          <PairingPill mode={opp.pairingMode} />
-        </td>
+
+        {/* Cash (LEAPS debit) */}
         <td style={{ fontVariantNumeric: 'tabular-nums', textAlign: 'right', fontSize: 12 }}>
           {fmtK(opp.totalCashToDeploy)}
         </td>
+
+        {/* Caution flags */}
         <td style={{ textAlign: 'center', fontSize: 11, color: '#f97316' }}>
           {opp.cautionFlags.length > 0 ? `⚑ ${opp.cautionFlags.length}` : ''}
         </td>
@@ -195,7 +172,7 @@ function OpportunityRow({
 
       {isExpanded && (
         <tr>
-          <td colSpan={17} style={{ padding: 0 }}>
+          <td colSpan={12} style={{ padding: 0 }}>
             <OpportunityDetail opp={opp} onMarkOpened={onMarkOpened} />
           </td>
         </tr>
@@ -223,9 +200,9 @@ function OpportunityDetail({
       flexWrap: 'wrap',
     }}>
       {/* LEAPS scoring breakdown */}
-      <div style={{ minWidth: 220 }}>
+      <div style={{ minWidth: 240 }}>
         <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6, color: 'var(--text-muted)' }}>
-          LEAPS Leg Breakdown ({opp.leapsTicker})
+          Score Breakdown — {opp.leapsTicker}
         </div>
         {opp.detail.leapsScoreBreakdown.map(c => (
           <div key={c.name} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 2 }}>
@@ -236,39 +213,23 @@ function OpportunityDetail({
           </div>
         ))}
         <div style={{ marginTop: 6, fontSize: 12, fontWeight: 700 }}>
-          Sub-score: <ScoreChip score={opp.leapsSubScore} />
-        </div>
-        <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-muted)' }}>
-          <div>Strike: {fmt$(opp.leapsStrike)} | Delta: {fmtNum(opp.leapsDelta)}</div>
-          <div>Extrinsic: {fmtPct(opp.leapsExtrinsicPct)} | IVR: {fmtNum(opp.leapsIvr, 0)}</div>
-          <div>DTE: {opp.leapsDte} | OI: {opp.leapsOi?.toLocaleString() ?? '—'}</div>
+          Score: <ScoreChip score={opp.combinedScore} />
         </div>
       </div>
 
-      {/* CSP scoring breakdown */}
-      {opp.cspTicker && (
-        <div style={{ minWidth: 220 }}>
-          <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6, color: 'var(--text-muted)' }}>
-            CSP Leg Breakdown ({opp.cspTicker})
-          </div>
-          {opp.detail.cspScoreBreakdown.map(c => (
-            <div key={c.name} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 2 }}>
-              <span style={{ color: 'var(--text-muted)' }}>{c.name} ({Math.round(c.weight * 100)}%)</span>
-              <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-                {c.rawScore.toFixed(0)}/10 → <strong>{c.weightedScore.toFixed(2)}</strong>
-              </span>
-            </div>
-          ))}
-          <div style={{ marginTop: 6, fontSize: 12, fontWeight: 700 }}>
-            Sub-score: {opp.cspSubScore != null ? <ScoreChip score={opp.cspSubScore} /> : '—'}
-          </div>
-          <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-muted)' }}>
-            <div>Strike: {fmt$(opp.cspStrike)} | Delta: {fmtNum(opp.cspDelta)}</div>
-            <div>Ann. Return: {fmtPct(opp.cspAnnReturnPct)} | IVR: {fmtNum(opp.cspIvr, 0)}</div>
-            <div>DTE: {opp.cspDte} | Collateral: {fmtK(opp.cspCollateral)}</div>
-          </div>
+      {/* Contract details */}
+      <div style={{ minWidth: 200 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6, color: 'var(--text-muted)' }}>
+          Contract Details
         </div>
-      )}
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.7 }}>
+          <div>Strike: {fmt$(opp.leapsStrike)} | Delta: {fmtNum(opp.leapsDelta)}</div>
+          <div>Extrinsic: {fmtPct(opp.leapsExtrinsicPct)} | IV: {fmtPct(opp.leapsIvPct)}</div>
+          <div>IVR: {opp.leapsIvr != null ? `${opp.leapsIvr.toFixed(0)}` : '—'} | DTE: {opp.leapsDte ?? '—'}</div>
+          <div>OI: {opp.leapsOi?.toLocaleString() ?? '—'} | Premium: {fmtK(opp.leapsPremium)}</div>
+          <div>Stock: {fmt$(opp.leapsCurrentPrice)}</div>
+        </div>
+      </div>
 
       {/* Caution flags */}
       {opp.cautionFlags.length > 0 && (
@@ -278,26 +239,6 @@ function OpportunityDetail({
           </div>
           {opp.cautionFlags.map(f => (
             <div key={f} style={{ fontSize: 11, color: '#f97316', marginBottom: 2 }}>• {f}</div>
-          ))}
-        </div>
-      )}
-
-      {/* Alternatives */}
-      {opp.detail.alternatives.length > 0 && (
-        <div style={{ minWidth: 240 }}>
-          <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6, color: 'var(--text-muted)' }}>
-            Alternative CSP Pairings
-          </div>
-          {opp.detail.alternatives.map((alt, i) => (
-            <div key={i} style={{
-              fontSize: 11, padding: '4px 8px', marginBottom: 4,
-              background: 'rgba(255,255,255,0.04)', borderRadius: 4,
-            }}>
-              <strong>{alt.cspTicker}</strong> {fmt$(alt.cspStrike)} {alt.cspExpiry}
-              <span style={{ marginLeft: 8 }}>Ann: {fmtPct(alt.cspAnnReturnPct)}</span>
-              <span style={{ marginLeft: 8 }}>Score: <ScoreChip score={alt.combinedScore} /></span>
-              <GradeBadge grade={alt.grade} />
-            </div>
           ))}
         </div>
       )}
@@ -318,12 +259,16 @@ function OpportunityDetail({
 
 // ─── Sortable column header ────────────────────────────────────────────────────
 
+type SortCol = 'rank' | 'leapsTicker' | 'leapsStrike' | 'leapsDte' | 'leapsDelta'
+  | 'leapsPremium' | 'leapsExtrinsicPct' | 'leapsIvr' | 'combinedScore' | 'grade'
+  | 'totalCashToDeploy';
+
 function SortHeader({ label, col, sortCol, sortDir, onSort, align }: {
   label: string;
-  col: keyof LeapsCspOpportunity | 'rank';
-  sortCol: keyof LeapsCspOpportunity | 'rank';
+  col: SortCol;
+  sortCol: SortCol;
   sortDir: 'asc' | 'desc';
-  onSort: (col: keyof LeapsCspOpportunity | 'rank') => void;
+  onSort: (col: SortCol) => void;
   align?: 'left' | 'right' | 'center';
 }) {
   const active = sortCol === col;
@@ -353,11 +298,9 @@ const DEFAULT_GRADES = new Set<LeapsCspGrade>(['A+', 'A', 'B']);
 // ─── Phase labels ─────────────────────────────────────────────────────────────
 
 const PHASE_LABELS: Record<LeapsCspProgressDetail['phase'], string> = {
-  gate: 'Checking market gate',
+  gate:     'Checking market gate',
   universe: 'Loading universe',
-  leaps: 'Screening LEAPS',
-  csp: 'Building CSP pool',
-  pairing: 'Pairing opportunities',
+  leaps:    'Screening LEAPS',
 };
 
 // ─── Progress bar ──────────────────────────────────────────────────────────────
@@ -400,7 +343,7 @@ export function LeapsCspView() {
   const [result, setResult] = useState<LeapsCspRunResult | null>(null);
   const [recentRuns, setRecentRuns] = useState<LeapsCspRunSummary[]>([]);
   const [selectedGrades, setSelectedGrades] = useState<Set<LeapsCspGrade>>(new Set(DEFAULT_GRADES));
-  const [sortCol, setSortCol] = useState<keyof LeapsCspOpportunity | 'rank'>('combinedScore');
+  const [sortCol, setSortCol] = useState<SortCol>('combinedScore');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -448,7 +391,6 @@ export function LeapsCspView() {
       const r = await window.api.leapsCsp.runScreen(universe, forceRun, watchlistId);
       setResult(r);
       setRecentRuns(prev => [r.run, ...prev].slice(0, 20));
-      // Under a gate override or CAUTION, widen the grade filter automatically
       if (forceRun || r.run.marketGate === 'CAUTION') {
         setSelectedGrades(new Set(ALL_GRADES));
       }
@@ -504,7 +446,7 @@ export function LeapsCspView() {
     });
   };
 
-  const toggleSort = (col: keyof LeapsCspOpportunity | 'rank') => {
+  const toggleSort = (col: SortCol) => {
     if (sortCol === col) {
       setSortDir(d => d === 'asc' ? 'desc' : 'asc');
     } else {
@@ -539,7 +481,7 @@ export function LeapsCspView() {
         gap: 12,
         flexWrap: 'wrap',
       }}>
-        <span style={{ fontWeight: 700, fontSize: 15, marginRight: 4 }}>LEAPS + CSP</span>
+        <span style={{ fontWeight: 700, fontSize: 15, marginRight: 4 }}>LEAPS Screener</span>
 
         {/* Source toggle: Universe vs Watchlist */}
         <div style={{ display: 'flex', gap: 0, borderRadius: 4, overflow: 'hidden', border: '1px solid var(--border)' }}>
@@ -589,7 +531,6 @@ export function LeapsCspView() {
             {universe === 'etf' && (
               <div style={{ fontSize: 10, color: '#c8a000', maxWidth: 260 }}>
                 📋 ETF mode — market cap filter skipped; IVR thresholds calibrated for ETF vol levels.
-                No earnings risk → full score on distance-to-earnings.
                 Run Data Sync → ETFs first.
               </div>
             )}
@@ -635,7 +576,6 @@ export function LeapsCspView() {
           </div>
         )}
 
-        {/* Run Anyway when no run yet and gate unknown */}
         {!run && !isRunning && (
           <button
             className="btn btn-sm"
@@ -743,8 +683,6 @@ export function LeapsCspView() {
               {g}
             </button>
           ))}
-
-
           <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text-muted)' }}>
             {filtered.length} of {opportunities.length} shown
           </span>
@@ -755,10 +693,11 @@ export function LeapsCspView() {
       <div style={{ flex: 1, overflow: 'auto' }}>
         {!result && !isRunning && (
           <div style={{ padding: 48, textAlign: 'center' }}>
-            <div style={{ fontSize: 32, marginBottom: 12 }}>📊</div>
-            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8 }}>LEAPS + CSP Strategy Screener</div>
+            <div style={{ fontSize: 32, marginBottom: 12 }}>⚡</div>
+            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8 }}>LEAPS Screener</div>
             <div style={{ fontSize: 13, color: 'var(--text-muted)', maxWidth: 480, margin: '0 auto 16px' }}>
-              Finds deep-ITM LEAPS calls paired with independently selected cash-secured puts.
+              Finds deep-ITM LEAPS calls (365–730 DTE, delta 0.70–0.90) across the universe,
+              scored on delta quality, extrinsic cost, IVR, liquidity, and fundamentals.
               Requires at least one screener run to populate the stock universe.
             </div>
             <button className="btn btn-primary" onClick={() => runScreen()}>Run Screen</button>
@@ -815,22 +754,18 @@ export function LeapsCspView() {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead>
               <tr style={{ position: 'sticky', top: 0, background: 'var(--surface)', zIndex: 1 }}>
-                <SortHeader label="#" col="rank" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} align="center" />
-                <SortHeader label="LEAPS Ticker" col="leapsTicker" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
+                <SortHeader label="#"        col="rank"             sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} align="center" />
+                <SortHeader label="Ticker"   col="leapsTicker"      sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
                 <SortHeader label="Strike / Expiry" col="leapsStrike" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
-                <SortHeader label="Delta" col="leapsDelta" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} align="right" />
-                <SortHeader label="Premium" col="leapsPremium" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} align="right" />
-                <SortHeader label="Ext%" col="leapsExtrinsicPct" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} align="right" />
-                <SortHeader label="L-Score" col="leapsSubScore" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} align="center" />
-                <SortHeader label="CSP Ticker" col="cspTicker" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
-                <SortHeader label="Strike / Expiry" col="cspStrike" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} />
-                <SortHeader label="Ann%" col="cspAnnReturnPct" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} align="right" />
-                <SortHeader label="C-Score" col="cspSubScore" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} align="center" />
-                <SortHeader label="Combined" col="combinedScore" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} align="center" />
-                <SortHeader label="Grade" col="grade" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} align="center" />
-                <SortHeader label="Mode" col="pairingMode" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} align="center" />
-                <SortHeader label="Cash" col="totalCashToDeploy" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} align="right" />
-                <SortHeader label="Flags" col="cautionFlags" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} align="center" />
+                <SortHeader label="DTE"      col="leapsDte"         sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} align="right" />
+                <SortHeader label="Delta"    col="leapsDelta"       sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} align="right" />
+                <SortHeader label="Premium"  col="leapsPremium"     sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} align="right" />
+                <SortHeader label="Ext%"     col="leapsExtrinsicPct" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} align="right" />
+                <SortHeader label="IVR"      col="leapsIvr"         sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} align="right" />
+                <SortHeader label="Score"    col="combinedScore"    sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} align="center" />
+                <SortHeader label="Grade"    col="grade"            sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} align="center" />
+                <SortHeader label="Debit"    col="totalCashToDeploy" sortCol={sortCol} sortDir={sortDir} onSort={toggleSort} align="right" />
+                <th style={{ ...thStyle, textAlign: 'center' }}>Flags</th>
               </tr>
             </thead>
             <tbody>

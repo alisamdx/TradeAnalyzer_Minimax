@@ -63,6 +63,7 @@ export interface OptionsChain {
   ticker: string;
   expiration: string;
   contracts: OptionContract[];
+  underlyingPrice: number | null;
 }
 
 /**

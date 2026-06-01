@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, useRef } from 'react';
-import type { Watchlist, WatchlistItem, CachedQuote, Universe, PayoffLeg } from '@shared/types.js';
+import type { Watchlist, WatchlistItem, CachedQuote, Universe, PayoffLeg, AppNotification } from '@shared/types.js';
 import { ScreenerView } from './views/ScreenerView.js';
 import { AnalysisView } from './views/AnalysisView.js';
 import { ValidateView } from './views/ValidateView.js';
@@ -26,10 +26,11 @@ import { PayoffView } from './views/PayoffView.js';
 import { IvHistoryView } from './views/IvHistoryView.js';
 import { KnowledgeView } from './views/KnowledgeView.js';
 import { StrategyLabView } from './views/StrategyLabView.js';
+import { BatchView } from './views/BatchView.js';
 
 declare const __APP_VERSION__: string;
 
-type View = 'watchlists' | 'screener' | 'filters' | 'analysis' | 'validate' | 'portfolio' | 'opportunity' | 'settings' | 'alerts' | 'data' | 'optionsChain' | 'payoff' | 'agent' | 'backtest' | 'leapsCsp' | 'collaredLeaps' | 'testApi' | 'ivHistory' | 'knowledge' | 'strategyLab';
+type View = 'watchlists' | 'screener' | 'filters' | 'analysis' | 'validate' | 'portfolio' | 'opportunity' | 'settings' | 'alerts' | 'data' | 'optionsChain' | 'payoff' | 'agent' | 'backtest' | 'leapsCsp' | 'collaredLeaps' | 'testApi' | 'ivHistory' | 'knowledge' | 'strategyLab' | 'batch';
 
 type NavEntry = {
   id: number;
@@ -72,6 +73,9 @@ export function App() {
 
   // E*Trade connection warning forwarded to SettingsView
   const [etradeWarning, setEtradeWarning] = useState<string | null>(null);
+
+  // App notifications (batch jobs, etc.)
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
 
   // Data sync state — lifted here so it survives tab navigation
   const [syncUniverseSelection, setSyncUniverseSelection] = useState<Universe>('sp500');
@@ -125,6 +129,20 @@ export function App() {
       setSyncProgress(data);
     });
     return () => { unsub(); };
+  }, []);
+
+  // Subscribe to app notifications from batch jobs
+  useEffect(() => {
+    const unsub = window.api.batch.onNotification((n: AppNotification) => {
+      setNotifications(prev => [...prev, n]);
+      // Auto-dismiss info/success after 8 seconds
+      if (n.type === 'info' || n.type === 'success') {
+        setTimeout(() => {
+          setNotifications(prev => prev.filter(x => x.id !== n.id));
+        }, 8000);
+      }
+    });
+    return () => unsub();
   }, []);
 
   const handleStartSync = useCallback(async (universe: Universe): Promise<{ scanned: number }> => {
@@ -573,6 +591,7 @@ export function App() {
       case 'ivHistory': return <IvHistoryView />;
       case 'knowledge': return <KnowledgeView />;
       case 'strategyLab': return <StrategyLabView />;
+      case 'batch': return <BatchView />;
       case 'settings': return (
         <SettingsView
           etradeWarning={etradeWarning}
@@ -740,11 +759,26 @@ export function App() {
           {/* ── Data ── */}
           <div className="nav-section-label">Data</div>
           <button
+            className={`nav-btn ${currentView === 'settings' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('settings')}
+          >
+            ⚙ Settings
+          </button>
+          <button
             className={`nav-btn ${currentView === 'data' ? 'active' : ''}`}
             onClick={() => navigateSidebar('data')}
           >
             🗄️ Data Sync
           </button>
+          <button
+            className={`nav-btn ${currentView === 'batch' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('batch')}
+          >
+            🔄 Batch Jobs
+          </button>
+
+          {/* ── Screeners ── */}
+          <div className="nav-section-label">Screeners</div>
           <button
             className={`nav-btn ${currentView === 'screener' ? 'active' : ''}`}
             onClick={() => navigateSidebar('screener')}
@@ -788,6 +822,18 @@ export function App() {
           {/* ── Strategy ── */}
           <div className="nav-section-label">Strategy</div>
           <button
+            className={`nav-btn ${currentView === 'knowledge' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('knowledge')}
+          >
+            📚 Knowledge
+          </button>
+          <button
+            className={`nav-btn ${currentView === 'strategyLab' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('strategyLab')}
+          >
+            🔬 Strategy Lab
+          </button>
+          <button
             className={`nav-btn ${currentView === 'analysis' ? 'active' : ''}`}
             onClick={() => navigateSidebar('analysis')}
           >
@@ -797,7 +843,7 @@ export function App() {
             className={`nav-btn ${currentView === 'leapsCsp' ? 'active' : ''}`}
             onClick={() => navigateSidebar('leapsCsp')}
           >
-            ⚡ LEAPS+CSP
+            ⚡ LEAPS
           </button>
           <button
             className={`nav-btn ${currentView === 'collaredLeaps' ? 'active' : ''}`}
@@ -805,54 +851,9 @@ export function App() {
           >
             🛡️ Collared LEAPS
           </button>
-          <button
-            className={`nav-btn ${currentView === 'strategyLab' ? 'active' : ''}`}
-            onClick={() => navigateSidebar('strategyLab')}
-          >
-            🔬 Strategy Lab
-          </button>
-          <button
-            className={`nav-btn ${currentView === 'knowledge' ? 'active' : ''}`}
-            onClick={() => navigateSidebar('knowledge')}
-          >
-            📚 Knowledge
-          </button>
 
-          {/* ── Settings ── */}
-          <div className="nav-section-label">Settings</div>
-          <button
-            className={`nav-btn ${currentView === 'settings' ? 'active' : ''}`}
-            onClick={() => navigateSidebar('settings')}
-          >
-            ⚙ Settings
-          </button>
-          <button
-            className={`nav-btn ${currentView === 'testApi' ? 'active' : ''}`}
-            onClick={() => navigateSidebar('testApi')}
-          >
-            🔬 Test API
-          </button>
-          <button
-            className={`nav-btn ${currentView === 'alerts' ? 'active' : ''}`}
-            onClick={() => navigateSidebar('alerts')}
-          >
-            🔔 Alerts
-          </button>
-          <button
-            className={`nav-btn ${currentView === 'ivHistory' ? 'active' : ''}`}
-            onClick={() => navigateSidebar('ivHistory')}
-          >
-            📊 History
-          </button>
-
-          {/* ── Personal ── */}
-          <div className="nav-section-label">Personal</div>
-          <button
-            className={`nav-btn ${currentView === 'portfolio' ? 'active' : ''}`}
-            onClick={() => navigateSidebar('portfolio')}
-          >
-            💼 Portfolio
-          </button>
+          {/* ── Misc ── */}
+          <div className="nav-section-label">Misc</div>
           <button
             className={`nav-btn ${currentView === 'agent' ? 'active' : ''}`}
             onClick={() => navigateSidebar('agent')}
@@ -864,6 +865,33 @@ export function App() {
             onClick={() => navigateSidebar('backtest')}
           >
             🔁 Backtest
+          </button>
+          <button
+            className={`nav-btn ${currentView === 'testApi' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('testApi')}
+          >
+            🔬 Test API
+          </button>
+          <button
+            className={`nav-btn ${currentView === 'ivHistory' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('ivHistory')}
+          >
+            🗓️ History
+          </button>
+          <button
+            className={`nav-btn ${currentView === 'alerts' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('alerts')}
+          >
+            🔔 Alerts
+          </button>
+
+          {/* ── Personal ── */}
+          <div className="nav-section-label">Personal</div>
+          <button
+            className={`nav-btn ${currentView === 'portfolio' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('portfolio')}
+          >
+            💼 Portfolio
           </button>
           <button
             className={`nav-btn ${currentView === 'watchlists' ? 'active' : ''}`}
@@ -934,6 +962,40 @@ export function App() {
         onConfirm={handlePromptConfirm}
         onCancel={handlePromptCancel}
       />
+
+      {/* App notification toasts (batch jobs, etc.) */}
+      <div style={{ position: 'fixed', bottom: 16, left: 16, zIndex: 9999, display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 340 }}>
+        {notifications.map(n => (
+          <div key={n.id} style={{
+            background: n.type === 'error' ? '#3a1a1a' : n.type === 'warning' ? '#3a2a10' : n.type === 'success' ? '#1a3a1a' : '#1e2a3a',
+            border: `1px solid ${n.type === 'error' ? '#e74c3c' : n.type === 'warning' ? '#f39c12' : n.type === 'success' ? '#2ecc71' : '#3498db'}`,
+            borderRadius: 8, padding: '10px 14px', fontSize: 13, color: '#ecf0f1',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.4)',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <span>
+                {n.type === 'success' ? '✓' : n.type === 'error' ? '✗' : n.type === 'warning' ? '⚠' : 'ℹ'}{' '}
+                {n.message}
+              </span>
+              <button
+                onClick={() => setNotifications(prev => prev.filter(x => x.id !== n.id))}
+                style={{ background: 'none', border: 'none', color: '#95a5a6', cursor: 'pointer', marginLeft: 8, fontSize: 16, lineHeight: 1 }}
+              >×</button>
+            </div>
+            {n.cta && (
+              <button
+                onClick={() => {
+                  setNotifications(prev => prev.filter(x => x.id !== n.id));
+                  navigateSidebar(n.cta!.view as View);
+                }}
+                style={{ marginTop: 6, fontSize: 12, color: '#89b4fa', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+              >
+                {n.cta.label} →
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

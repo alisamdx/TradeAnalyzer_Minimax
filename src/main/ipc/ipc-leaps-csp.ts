@@ -65,10 +65,10 @@ export function registerLeapsCspIpc(
   // Full run result including all opportunities
   ipcMain.handle('leaps-csp:get-run', wrap((runId: number) => service.getRun(runId)));
 
-  // Mark an opportunity as opened (for exit-rule monitoring in Phase 2)
+  // Mark an opportunity as opened
   ipcMain.handle(
     'leaps-csp:mark-opened',
-    wrap((opportunityId: number, entry: { leapsEntryDebit?: number; cspEntryCredit?: number; notes?: string }) => {
+    wrap((opportunityId: number, entry: { leapsEntryDebit?: number; notes?: string }) => {
       service.markOpened(opportunityId, entry);
       return true;
     }),

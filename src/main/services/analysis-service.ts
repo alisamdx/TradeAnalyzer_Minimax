@@ -509,17 +509,17 @@ export class AnalysisService {
   private lookupIvRankFromHistory(ticker: string): number | null {
     try {
       const agg = this.db.prepare(`
-        SELECT MAX(iv_value) as iv_high, MIN(iv_value) as iv_low, COUNT(*) as cnt
+        SELECT MAX(atm_iv) as iv_high, MIN(atm_iv) as iv_low, COUNT(*) as cnt
         FROM iv_history WHERE ticker = ?
       `).get(ticker) as { iv_high: number | null; iv_low: number | null; cnt: number } | undefined;
       if (!agg || agg.cnt < 21 || agg.iv_high === null || agg.iv_low === null) return null;
       const range = agg.iv_high - agg.iv_low;
       if (range <= 0) return null;
       const latest = this.db.prepare(
-        `SELECT iv_value FROM iv_history WHERE ticker = ? ORDER BY date DESC LIMIT 1`
-      ).get(ticker) as { iv_value: number } | undefined;
+        `SELECT atm_iv FROM iv_history WHERE ticker = ? ORDER BY date DESC LIMIT 1`
+      ).get(ticker) as { atm_iv: number } | undefined;
       if (!latest) return null;
-      return Math.min(100, Math.max(0, ((latest.iv_value - agg.iv_low) / range) * 100));
+      return Math.min(100, Math.max(0, ((latest.atm_iv - agg.iv_low) / range) * 100));
     } catch {
       return null;
     }

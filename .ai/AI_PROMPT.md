@@ -15,6 +15,7 @@ You are picking up a multi-phase build of the **TradeAnalyzer_Minimax** desktop 
 - **Every material change updates `CHANGELOG.md` + `changelogs/v{version}_{date}.md` + `.ai/AI_CONTEXT.md` in the same commit.** Bump the version per semver (PATCH/MINOR/MAJOR).
 - **Every formula in code that derives a financial metric** has a `// see docs/formulas.md#anchor` comment and a corresponding entry in `docs/formulas.md`.
 - **At the end of every session, commit all staged changes** in a single Conventional Commit that includes the version bump, changelog entries, and `AI_CONTEXT.md` update. Do not leave material changes uncommitted.
+- **After committing, always run `npm run package`** to rebuild the production exe so it reflects the latest code. The packaged exe is what the user runs day-to-day — leaving it stale defeats the purpose of the change. Announce when the build starts and when it finishes.
 - **Every bug fix ships with a regression test** that fails before the fix and passes after.
 
 ## Working agreement

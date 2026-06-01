@@ -46,6 +46,11 @@ import { IVolatilityProvider } from './services/ivolatility-provider.js';
 import { IvHistoryService } from './services/iv-history-service.js';
 import { registerIvHistoryIpc } from './ipc/ipc-iv-history.js';
 import { registerStrategyLabIpc } from './ipc/ipc-strategy-lab.js';
+import { BatchService } from './services/batch-service.js';
+import { DailyIvCaptureJob } from './services/jobs/daily-iv-capture.js';
+import { MarketSyncJob } from './services/jobs/market-sync-job.js';
+import { PriceGapFillJob } from './services/jobs/price-gap-fill-job.js';
+import { registerBatchIpc } from './ipc/ipc-batch.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -186,8 +191,11 @@ function repairWatchlistItems(db: ReturnType<typeof openDatabase>): void {
 app.whenReady().then(() => {
   pruneOldLogsOnStartup();
 
-  // Store database in project folder for portability
-  const dbPath = join(app.getAppPath(), 'data', 'trade-analyzer.sqlite');
+  // Dev: store DB in project folder for portability.
+  // Production: store in userData (writable; app.getAppPath() is inside the read-only ASAR in packaged builds).
+  const dbPath = app.isPackaged
+    ? join(app.getPath('userData'), 'trade-analyzer.sqlite')
+    : join(app.getAppPath(), 'data', 'trade-analyzer.sqlite');
   const db = openDatabase(dbPath);
   const ran = runMigrations(db, migrationsDir());
   if (ran.length > 0) {
@@ -208,28 +216,17 @@ app.whenReady().then(() => {
   const quoteCache = new QuoteCache(db);
   new FundamentalsCache(db);
 
-  // Options provider selection (read from DB; chosen at startup).
-  // 'polygon' → uses PolygonDataProvider (already created above).
-  // 'etrade'  → uses ETradeDataProvider with live credentials from DB.
-  const optionsProviderSetting = (() => {
-    const row = db.prepare("SELECT value FROM settings WHERE key = 'optionsProvider'").get() as { value?: string } | undefined;
-    return row?.value ?? 'polygon';
-  })();
-
-  let optionsProvider: OptionsProvider;
-  if (optionsProviderSetting === 'etrade') {
-    const etradeCredsFactory = () => ({
-      consumerKey:    secureGet(db, 'etradeConsumerKey'),
-      consumerSecret: secureGet(db, 'etradeConsumerSecret'),
-      accessToken:    secureGet(db, 'etradeAccessToken'),
-      accessSecret:   secureGet(db, 'etradeAccessSecret'),
-    });
-    optionsProvider = new ETradeDataProvider(etradeCredsFactory);
-    console.log('[options] provider = E*Trade');
-  } else {
-    optionsProvider = dataProvider; // PolygonDataProvider implements OptionsProvider
-    console.log('[options] provider = Polygon');
-  }
+  // Options provider is always E*Trade — Polygon Options subscription is not needed.
+  // Polygon DataProvider handles stocks/fundamentals/bars; E*Trade handles all options.
+  db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('optionsProvider', 'etrade')").run();
+  const etradeCredsFactory = () => ({
+    consumerKey:    secureGet(db, 'etradeConsumerKey'),
+    consumerSecret: secureGet(db, 'etradeConsumerSecret'),
+    accessToken:    secureGet(db, 'etradeAccessToken'),
+    accessSecret:   secureGet(db, 'etradeAccessSecret'),
+  });
+  const optionsProvider: OptionsProvider = new ETradeDataProvider(etradeCredsFactory);
+  console.log('[options] provider = E*Trade (enforced)');
 
   // Register watchlist IPC with data provider for ticker validation
   registerWatchlistIpc(watchlistService, dataProvider);
@@ -246,13 +243,13 @@ app.whenReady().then(() => {
     constituentsService.getConstituents(u);
   const screenerService = new ScreenerService(db, dataProvider, getConstituents);
 
-  registerScreenerIpc(screenerService, constituentsService, watchlistService, quoteCache, new FundamentalsCache(db), dataProvider, db);
+  registerScreenerIpc(screenerService, constituentsService, watchlistService, quoteCache, new FundamentalsCache(db), dataProvider, db, optionsProvider);
 
   // Phase 3 — rate limiter + job queue + analysis + validate-all.
   const rateLimiter = new TokenBucketRateLimiter({ requestsPerMinute: 100 });
   const jobQueue = new JobQueue(db);
   const analysisService = new AnalysisService(db, dataProvider, rateLimiter, jobQueue, optionsProvider);
-  const validateAllService = new ValidateAllService(db, dataProvider, rateLimiter, jobQueue);
+  const validateAllService = new ValidateAllService(db, dataProvider, rateLimiter, jobQueue, optionsProvider);
 
   registerAnalysisIpc(analysisService, validateAllService, jobQueue, watchlistService);
   registerValidateIpc(validateAllService, watchlistService);
@@ -304,6 +301,48 @@ app.whenReady().then(() => {
   // Strategy Lab — score / explore all 31 strategies for a single ticker
   registerStrategyLabIpc(db, dataProvider, optionsProvider);
 
+  // v0.21.0 — Batch job scheduler
+  // Use a getter so callbacks always send to the current window (created later).
+  const getMainWindow = () => BrowserWindow.getAllWindows()[0] ?? null;
+  const batchService = new BatchService(
+    db,
+    (notification) => getMainWindow()?.webContents.send('app:notification', notification),
+    (evt) => getMainWindow()?.webContents.send('batch:progress', evt)
+  );
+  const dailyIvJob = new DailyIvCaptureJob(
+    db,
+    optionsProvider as ETradeDataProvider,
+    ivHistoryService,
+    constituentsService
+  );
+  batchService.registerJob('daily-iv-update', dailyIvJob);
+
+  // Market sync jobs — populate quote_cache + fundamentals_cache post-market.
+  // Both jobs share the one-at-a-time mutex so they chain sequentially:
+  //   16:30 → stocks (~30-40 min) → finishes → ETFs starts automatically
+  //   → ETFs done → gap fill starts automatically (same scheduler tick).
+  const marketSyncStocksJob = new MarketSyncJob(screenerService, 'both');
+  batchService.registerJob('daily-market-sync-stocks', marketSyncStocksJob, {
+    dailyScheduleTime: '16:30',
+    startupDelaySeconds: 60,   // give IV update (30 s delay) a head start on startup
+  });
+
+  const marketSyncEtfsJob = new MarketSyncJob(screenerService, 'etf');
+  batchService.registerJob('daily-market-sync-etfs', marketSyncEtfsJob, {
+    dailyScheduleTime: '16:30', // same time — runs after stocks finishes (mutex chains them)
+    startupDelaySeconds: 90,
+  });
+
+  const priceGapFillJob = new PriceGapFillJob(db, () => getApiKey(db));
+  batchService.registerJob('daily-price-gap-fill', priceGapFillJob, {
+    dailyScheduleTime: '16:30', // same time — chains after ETFs
+    startupDelaySeconds: 120,
+  });
+
+  registerBatchIpc(batchService, getMainWindow);
+  batchService.startScheduler();
+  batchService.runStartupJobs().catch(err => console.error('[batch] startup error:', err));
+
   // LEAPS + CSP strategy screener
   registerLeapsCspIpc(db, dataProvider, optionsProvider, rateLimiter);
 
@@ -334,6 +373,7 @@ app.whenReady().then(() => {
     validateAllService,
     jobQueue,
     dataProvider,
+    optionsProvider,
     quoteCache,
     fundamentalsCache: new FundamentalsCache(db),
     rateLimiter,
@@ -351,6 +391,9 @@ app.whenReady().then(() => {
     console.log('[headless] running without UI — API server only');
     return;
   }
+
+  // Launch automatically when the user logs into Windows.
+  app.setLoginItemSettings({ openAtLogin: true });
 
   createWindow();
 

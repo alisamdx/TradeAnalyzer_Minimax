@@ -294,7 +294,7 @@ export class PolygonDataProvider implements DataProvider, OptionsProvider {
   async getOptionsChain(
     ticker: string,
     expiration: string
-  ): Promise<{ ticker: string; expiration: string; contracts: Array<{
+  ): Promise<{ ticker: string; expiration: string; underlyingPrice: number | null; contracts: Array<{
     ticker: string;
     expiration: string;
     strike: number;
@@ -343,6 +343,7 @@ export class PolygonDataProvider implements DataProvider, OptionsProvider {
     return {
       ticker,
       expiration,
+      underlyingPrice: null,
       contracts: allContracts.map((c) => {
         const co = c as Record<string, unknown>;
         // Polygon v3 snapshot nests key fields under "details", "greeks", and "day"

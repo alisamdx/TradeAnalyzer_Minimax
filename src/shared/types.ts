@@ -800,11 +800,12 @@ export interface BacktestRunSummary {
   tradeCount: number;
 }
 
-// ─── LEAPS + CSP Strategy Module (v0.14.0) ────────────────────────────────────
+// ─── LEAPS Strategy Module (v0.22.0) ──────────────────────────────────────────
+// Pure LEAPS screener — finds deep-ITM long calls (365–730 DTE) ranked by score.
+// CSP pairing removed: CSP is covered by Analysis and Strategy Lab.
 
 export type LeapsCspGate = 'PASS' | 'CAUTION' | 'FAIL';
 export type LeapsCspGrade = 'A+' | 'A' | 'B' | 'C' | 'F';
-export type LeapsCspPairingMode = 'same_ticker' | 'different_ticker' | 'leaps_only';
 
 export interface LeapsCspGateDetail {
   spx: number | null;
@@ -823,64 +824,34 @@ export interface LeapsCspScoreComponent {
   weightedScore: number;
 }
 
-export interface LeapsCspAlternative {
-  cspTicker: string;
-  cspStrike: number;
-  cspExpiry: string;
-  cspDelta: number | null;
-  cspPremium: number | null;
-  cspAnnReturnPct: number | null;
-  cspSubScore: number;
-  combinedScore: number;
-  grade: LeapsCspGrade;
-}
-
 export interface LeapsCspDetail {
   leapsScoreBreakdown: LeapsCspScoreComponent[];
-  cspScoreBreakdown: LeapsCspScoreComponent[];
-  alternatives: LeapsCspAlternative[];
 }
 
 export interface LeapsCspOpportunity {
   id: number;
   runId: number;
   rank: number;
-  pairingMode: LeapsCspPairingMode;
 
-  // Leg A
+  // LEAPS leg
   leapsTicker: string;
   leapsCurrentPrice: number | null;
   leapsStrike: number;
   leapsExpiry: string;
   leapsDte: number | null;
   leapsDelta: number | null;
-  leapsPremium: number | null;
+  leapsPremium: number | null;       // per contract (mid × 100)
   leapsExtrinsicPct: number | null;
   leapsIvPct: number | null;
   leapsIvr: number | null;
   leapsOi: number | null;
   leapsSubScore: number;
 
-  // Leg B
-  cspTicker: string | null;
-  cspCurrentPrice: number | null;
-  cspStrike: number | null;
-  cspExpiry: string | null;
-  cspDte: number | null;
-  cspDelta: number | null;
-  cspPremium: number | null;
-  cspCollateral: number | null;
-  cspAnnReturnPct: number | null;
-  cspIvPct: number | null;
-  cspIvr: number | null;
-  cspOi: number | null;
-  cspSubScore: number | null;
-
-  // Combined
+  // Score (= leapsSubScore, kept for DB backward-compat)
   combinedScore: number;
   grade: LeapsCspGrade;
   cautionFlags: string[];
-  totalCashToDeploy: number | null;
+  totalCashToDeploy: number | null;  // = leapsPremium per contract
 
   detail: LeapsCspDetail;
 }
@@ -907,12 +878,11 @@ export interface LeapsCspOpenedEntry {
   opportunityId: number;
   openedAt: string;
   leapsEntryDebit: number | null;
-  cspEntryCredit: number | null;
   notes: string | null;
 }
 
 export interface LeapsCspProgressDetail {
-  phase: 'gate' | 'universe' | 'leaps' | 'csp' | 'pairing';
+  phase: 'gate' | 'universe' | 'leaps';
   current: number;
   total: number;
   ticker?: string;
@@ -1411,4 +1381,54 @@ export interface IvHistoryProgressEvent {
   failed:      number;
   callsPerMin: number;
   lastError?:  string;   // set when the most recent ticker failed — shown in console
+}
+
+// ─── Batch Jobs (v0.21.0) ─────────────────────────────────────────────────────
+
+export interface BatchJob {
+  id: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  runOnStartup: boolean;
+  startupDelaySeconds: number;
+  dailyScheduleEnabled: boolean;
+  dailyScheduleTime: string;   // 'HH:MM' ET
+  lastRunAt: string | null;
+  lastRunStatus: 'running' | 'success' | 'failed' | 'skipped' | null;
+  lastSuccessDate: string | null;
+}
+
+export interface BatchRun {
+  id: number;
+  jobId: string;
+  startedAt: string;
+  completedAt: string | null;
+  status: 'running' | 'success' | 'failed' | 'skipped' | 'cancelled';
+  tickersAttempted: number;
+  tickersUpdated: number;
+  tickersSkipped: number;
+  tickersFailed: number;
+  notes: string | null;
+  errorMessage: string | null;
+}
+
+export interface AppNotification {
+  id: string;
+  type: 'info' | 'success' | 'warning' | 'error';
+  message: string;
+  cta?: { label: string; view: string };
+}
+
+export interface BatchProgressEvent {
+  jobId: string;
+  runId: number;
+  ticker: string;
+  status: 'updated' | 'skipped' | 'failed' | 'no-data';
+  attempted: number;
+  updated: number;
+  skipped: number;
+  failed: number;
+  total: number;
+  message?: string;
 }

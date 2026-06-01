@@ -36,7 +36,7 @@ const NYSE_HOLIDAYS = new Set([
 ]);
 
 /** Returns true if the given YYYY-MM-DD string is a NYSE trading day. */
-function isTradingDay(dateStr: string): boolean {
+export function isTradingDay(dateStr: string): boolean {
   const d = new Date(dateStr + 'T12:00:00Z');
   const dow = d.getUTCDay(); // 0=Sun, 6=Sat
   return dow !== 0 && dow !== 6 && !NYSE_HOLIDAYS.has(dateStr);

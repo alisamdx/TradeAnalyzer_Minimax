@@ -13,7 +13,7 @@
  *   - Bid / ask are already in dollars per share.
  */
 
-import type { OAuthCredentials } from './etrade-auth.js';
+import { renewAccessToken, type OAuthCredentials } from './etrade-auth.js';
 import {
   getETradeExpirations,
   getETradeOptionsChain,
@@ -60,6 +60,15 @@ export class ETradeDataProvider implements OptionsProvider {
 
   constructor(private readonly getCreds: () => OAuthCredentials) {}
 
+  /**
+   * Attempt to renew a dormant token (inactive > 2 h, same calendar day).
+   * Throws if the token is fully expired (midnight rollover) — caller must
+   * detect that and prompt the user to re-auth in Settings → E*Trade Connection.
+   */
+  async renewToken(): Promise<void> {
+    await renewAccessToken(this.getCreds());
+  }
+
   // ── Expiration Discovery ───────────────────────────────────────────────────
 
   async getOptionsExpirations(ticker: string): Promise<string[]> {
@@ -84,7 +93,7 @@ export class ETradeDataProvider implements OptionsProvider {
       ...result.puts .map(leg => legToContract(leg, ticker, expiration)),
     ];
 
-    return { ticker: ticker.toUpperCase(), expiration, contracts };
+    return { ticker: ticker.toUpperCase(), expiration, contracts, underlyingPrice: result.underlyingPrice ?? null };
   }
 
   // ── IV ────────────────────────────────────────────────────────────────────

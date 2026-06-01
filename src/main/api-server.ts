@@ -9,6 +9,7 @@ import type { AnalysisService } from './services/analysis-service.js';
 import type { ValidateAllService } from './services/validate-all-service.js';
 import type { JobQueue } from './services/job-queue.js';
 import type { DataProvider } from './services/data-provider.js';
+import type { OptionsProvider } from './services/options-provider.js';
 import type { QuoteCache, FundamentalsCache } from './services/cache-service.js';
 import type { TokenBucketRateLimiter } from './services/rate-limiter.js';
 import { registerHealthRoutes } from './api/routes-health.js';
@@ -52,6 +53,7 @@ export interface ApiServerServices {
   validateAllService: ValidateAllService;
   jobQueue: JobQueue;
   dataProvider: DataProvider;
+  optionsProvider: OptionsProvider;
   quoteCache: QuoteCache;
   fundamentalsCache: FundamentalsCache;
   rateLimiter: TokenBucketRateLimiter;

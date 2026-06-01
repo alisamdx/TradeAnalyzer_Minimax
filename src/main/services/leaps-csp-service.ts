@@ -1,13 +1,11 @@
-// LEAPS + CSP Strategy Screener
-// Implements the SRS: "LEAPS Stock Replacement with Decoupled Cash-Secured Puts"
-// Design philosophy: opportunity ranking, not capital management.
-// All hard fails are quality gates — never capital constraints.
+// LEAPS Strategy Screener (v0.22.0)
+// Pure LEAPS stock-replacement screener. Finds deep-ITM long calls (365–730 DTE)
+// ranked by a 7-factor score. CSP pairing removed — CSP is covered by Analysis
+// and Strategy Lab.
 //
 // Screening pipeline:
 //   Market gate → Universe filters → Stock hard fails →
-//   LEAPS contract selection + scoring →
-//   CSP candidate pool (cross-universe) + scoring →
-//   Pair (same-ticker + cross-ticker) → Combined score → Rank → Persist
+//   LEAPS contract selection + scoring → Rank → Persist
 
 import type { DbHandle } from '../db/connection.js';
 import type { DataProvider } from './data-provider.js';
@@ -18,13 +16,11 @@ import type {
   LeapsCspGateDetail,
   LeapsCspGrade,
   LeapsCspOpportunity,
+  LeapsCspOpenedEntry,
   LeapsCspRunResult,
   LeapsCspRunSummary,
   LeapsCspScoreComponent,
-  LeapsCspAlternative,
   LeapsCspDetail,
-  LeapsCspPairingMode,
-  LeapsCspOpenedEntry,
   LeapsCspProgressDetail,
 } from '@shared/types.js';
 
@@ -78,27 +74,11 @@ interface LeapsCandidate {
   fundamentals: FundamentalsRow;
 }
 
-interface CspCandidate {
-  ticker: string;
-  currentPrice: number;
-  contract: OptionContract;
-  expiry: string;
-  dte: number;
-  annReturnPct: number;
-  ivPct: number;
-  ivr: number | null;
-  subScore: number;
-  scoreBreakdown: LeapsCspScoreComponent[];
-}
-
-interface PairedOpportunity {
+interface LeapsOpportunity {
   leaps: LeapsCandidate;
-  csp: CspCandidate | null;
-  pairingMode: LeapsCspPairingMode;
-  combinedScore: number;
+  score: number;
   grade: LeapsCspGrade;
   cautionFlags: string[];
-  alternatives: LeapsCspAlternative[];
 }
 
 // ─── Excluded sectors (binary risk / chain instability) ───────────────────────
@@ -119,7 +99,6 @@ function isBiotech(sector: string | null): boolean {
 // ─── Date helpers ─────────────────────────────────────────────────────────────
 
 // US market holidays on which options expire the prior Thursday instead of Friday.
-// Good Friday is always closed; others are calendar-specific Fridays.
 const MARKET_HOLIDAY_FRIDAYS = new Set([
   '2024-03-29', // Good Friday
   '2025-04-18', // Good Friday
@@ -175,24 +154,6 @@ function leapsExpiryDates(): string[] {
   });
 }
 
-/** Best expiry with DTE 25–50 for the CSP leg, adjusted for market holidays. */
-function cspExpiryDate(): string {
-  const now = new Date();
-  const dow = now.getDay();
-  const daysToFriday = (5 - dow + 7) % 7 || 7;
-  for (let weeks = 0; weeks < 10; weeks++) {
-    const d = new Date(now);
-    d.setDate(now.getDate() + daysToFriday + weeks * 7);
-    const ymd = adjustForHoliday(d.toISOString().slice(0, 10));
-    const dte = Math.round((new Date(ymd + 'T21:00:00Z').getTime() - now.getTime()) / 86_400_000);
-    if (dte >= 25 && dte <= 50) return ymd;
-  }
-  // Fallback: 5 weeks out
-  const fb = new Date(now);
-  fb.setDate(now.getDate() + daysToFriday + 35);
-  return adjustForHoliday(fb.toISOString().slice(0, 10));
-}
-
 // ─── Scoring helpers ──────────────────────────────────────────────────────────
 
 function grade(score: number): LeapsCspGrade {
@@ -237,7 +198,7 @@ export class LeapsCspService {
     log(`Market gate: ${gate} — ${effect}`);
     progress({ phase: 'gate', current: 1, total: 1 });
 
-    // Under a FAIL gate, suppress new LEAPS opportunities (SRS §6.2) unless overridden
+    // Under a FAIL gate, suppress new LEAPS opportunities unless overridden
     if (gate === 'FAIL' && !forceRun) {
       log('Market gate FAIL: LEAPS suppressed. Returning empty run.');
       return this.persistRun(
@@ -329,13 +290,12 @@ export class LeapsCspService {
     }
     log(`${filtered.length} of ${tickers.length} tickers pass universe filters`);
 
-    // ── Resolve expiry dates from provider ─────────────────────────────────
+    // ── Resolve LEAPS expiry dates from provider ────────────────────────────
     // For E*Trade we fetch the real exchange-listed expirations for a sample
-    // ticker and derive both LEAPS (365–730 DTE) and CSP (25–50 DTE) dates.
+    // ticker and pick dates in the 365–730 DTE LEAPS window.
     // Polygon returns [] from getOptionsExpirations, so we fall back to the
     // locally-generated standard third-Friday dates.
     let leapsExpiries = leapsExpiryDates();
-    let cspExpiry = cspExpiryDate();
 
     if (filtered.length > 0) {
       try {
@@ -343,7 +303,6 @@ export class LeapsCspService {
         await this.rateLimiter.acquire();
         const providerExpiries = await this.optionsProvider.getOptionsExpirations(sampleTicker);
         if (providerExpiries.length > 0) {
-          // LEAPS leg: 365–730 DTE
           const realLeaps = providerExpiries.filter(e => {
             const d = dteDays(e);
             return d >= 365 && d <= 730;
@@ -352,20 +311,7 @@ export class LeapsCspService {
             leapsExpiries = realLeaps;
             log(`${this.optionsProvider.name}: ${realLeaps.length} LEAPS expirations: ${realLeaps.join(', ')}`);
           } else {
-            log(`Provider has no expirations in 365–730 DTE window — using generated LEAPS dates`);
-          }
-
-          // CSP leg: 25–50 DTE, pick the one closest to 37 DTE (centre of range)
-          const cspCandidates = providerExpiries.filter(e => {
-            const d = dteDays(e);
-            return d >= 25 && d <= 50;
-          });
-          if (cspCandidates.length > 0) {
-            cspCandidates.sort((a, b) =>
-              Math.abs(dteDays(a) - 37) - Math.abs(dteDays(b) - 37),
-            );
-            cspExpiry = cspCandidates[0]!;
-            log(`${this.optionsProvider.name}: CSP expiry ${cspExpiry} (${dteDays(cspExpiry)} DTE)`);
+            log('Provider has no expirations in 365–730 DTE window — using generated LEAPS dates');
           }
         } else {
           log('Provider returned no expirations — using generated default dates');
@@ -406,7 +352,7 @@ export class LeapsCspService {
       await this.rateLimiter.acquire();
       const ivData = await this.fetchIvData(ticker);
 
-      // IVR > 80 on underlying → reject for LEAPS (IV crush risk) — SRS §4.2
+      // IVR > 80 on underlying → reject for LEAPS (IV crush risk)
       if (ivData.ivr !== null && ivData.ivr > 80) { skipIvr++; continue; }
 
       // Try each LEAPS expiry, keep best contract
@@ -431,7 +377,7 @@ export class LeapsCspService {
         const midPrice = (contract.bid + contract.ask) / 2;
         const extrinsicPct = midPrice > 0 ? ((midPrice - intrinsic) / midPrice) * 100 : 999;
 
-        // LEAPS contract hard fails (SRS §4.3.1)
+        // LEAPS contract hard fails
         const hardFailReason = this.passLeapsContractHardFails(contract, midPrice, extrinsicPct);
         if (hardFailReason) {
           log(`  ${ticker}/${expiry}: best contract Δ${(contract.delta ?? 0).toFixed(2)} strike $${contract.strike} rejected — ${hardFailReason}`);
@@ -464,7 +410,7 @@ export class LeapsCspService {
       } else if (!best) {
         skipNoContract++;
         if (totalCalls > 0 && callsWithDelta === 0) {
-          log(`  ${ticker}: ${totalCalls} calls, 0 have delta data — Polygon not returning greeks`);
+          log(`  ${ticker}: ${totalCalls} calls, 0 have delta data — provider not returning greeks`);
         } else if (callsWithDelta > 0 && callsWithDelta < totalCalls) {
           log(`  ${ticker}: ${callsWithDelta}/${totalCalls} calls have delta, but none in 0.70–0.90 range`);
         } else {
@@ -484,135 +430,27 @@ export class LeapsCspService {
       return this.persistRun({ gate, detail, effect, universe, watchlistId: watchlistId ?? null }, []);
     }
 
-    // ── CSP candidate pool (full filtered universe) ─────────────────────────
-    log('Building CSP candidate pool…');
-    log(`CSP expiry: ${cspExpiry} (${dteDays(cspExpiry)} DTE)`);
-    const cspPool = new Map<string, CspCandidate[]>();
-
-    const cspTotal = filtered.length;
-    let cspIdx = 0;
-    for (const ticker of filtered) {
-      cspIdx++;
-      progress({ phase: 'csp', current: cspIdx, total: cspTotal, ticker });
-      const q = quotesMap.get(ticker);
-      const currentPrice = q?.last ?? null;
-      if (!currentPrice || currentPrice <= 0) continue;
-
-      // Basic CSP stock check: must be above 50d MA in trend
-      const f = fundamentalsMap.get(ticker);
-      if (this.cspStockHardFail(ticker, f, q)) continue;
-
-      await this.rateLimiter.acquire();
-      const ivData = await this.fetchIvData(ticker);
-
-      await this.rateLimiter.acquire();
-      const chain = await this.safeGetChain(ticker, cspExpiry);
-      if (!chain) continue;
-
-      const puts = chain.filter(c => c.side === 'put');
-      const candidates = this.selectCspContracts(puts, currentPrice, cspExpiry, ivData, f, isEtf);
-      if (candidates.length > 0) {
-        cspPool.set(ticker, candidates);
-      }
-    }
-    log(`${cspPool.size} tickers with qualifying CSP contracts`);
-
-    // ── Pair LEAPS with CSP ─────────────────────────────────────────────────
-    log('Pairing LEAPS with best CSP…');
-    const paired: PairedOpportunity[] = [];
-
-    // Sort all CSP candidates by sub-score for fast ranking
-    const allCspSorted: CspCandidate[] = [];
-    for (const candidates of cspPool.values()) {
-      allCspSorted.push(...candidates);
-    }
-    allCspSorted.sort((a, b) => b.subScore - a.subScore);
-
-    const pairTotal = leapsCandidates.length;
-    let pairIdx = 0;
-    for (const leaps of leapsCandidates) {
-      pairIdx++;
-      progress({ phase: 'pairing', current: pairIdx, total: pairTotal, ticker: leaps.ticker });
-      const sameTicker = cspPool.get(leaps.ticker)?.[0] ?? null;
-
-      // Top-5 cross-ticker CSPs (different from LEAPS ticker)
-      const crossTicker = allCspSorted
-        .filter(c => c.ticker !== leaps.ticker)
-        .slice(0, 5);
-
-      // Score each combination
-      const pairCandidates: Array<{ csp: CspCandidate; combined: number; mode: LeapsCspPairingMode }> = [];
-
-      if (sameTicker) {
-        const combined = this.combinedScore(leaps.subScore, sameTicker.subScore);
-        pairCandidates.push({ csp: sameTicker, combined, mode: 'same_ticker' });
-      }
-
-      for (const csp of crossTicker) {
-        const combined = this.combinedScore(leaps.subScore, csp.subScore);
-        pairCandidates.push({ csp, combined, mode: 'different_ticker' });
-      }
-
-      // Sort by combined score — pick best
-      pairCandidates.sort((a, b) => b.combined - a.combined);
-
-      const best = pairCandidates[0];
-      const cautionFlags = this.cautionFlags(leaps, best?.csp ?? null);
-      const cautionDeduction = cautionFlags.length * 0.3; // simple flat deduction per flag
-
-      let finalScore: number;
-      let pairingMode: LeapsCspPairingMode;
-      let bestCsp: CspCandidate | null;
-
-      if (best) {
-        finalScore = clamp(
-          Math.round((best.combined - cautionDeduction) * 10) / 10,
-          0, 10,
-        );
-        pairingMode = best.mode;
-        bestCsp = best.csp;
-      } else {
-        // LEAPS-only opportunity (SRS §12.3)
-        finalScore = clamp(
-          Math.round((leaps.subScore * 0.6 - cautionDeduction) * 10) / 10,
-          0, 10,
-        );
-        pairingMode = 'leaps_only';
-        bestCsp = null;
-        cautionFlags.push('LEAPS_ONLY');
-      }
-
-      // Alternatives: next 2 pairs
-      const alternatives: LeapsCspAlternative[] = pairCandidates.slice(1, 3).map(p => ({
-        cspTicker: p.csp.ticker,
-        cspStrike: p.csp.contract.strike,
-        cspExpiry: p.csp.expiry,
-        cspDelta: p.csp.contract.delta,
-        cspPremium: (p.csp.contract.bid + p.csp.contract.ask) / 2,
-        cspAnnReturnPct: p.csp.annReturnPct,
-        cspSubScore: p.csp.subScore,
-        combinedScore: clamp(Math.round((p.combined - cautionDeduction) * 10) / 10, 0, 10),
-        grade: grade(clamp(Math.round((p.combined - cautionDeduction) * 10) / 10, 0, 10)),
-      }));
-
-      paired.push({
+    // ── Score and rank LEAPS opportunities ──────────────────────────────────
+    log('Ranking LEAPS opportunities…');
+    const opportunities: LeapsOpportunity[] = leapsCandidates.map(leaps => {
+      const flags = this.cautionFlags(leaps);
+      const cautionDeduction = flags.length * 0.3;
+      const finalScore = clamp(
+        Math.round((leaps.subScore - cautionDeduction) * 10) / 10,
+        0, 10,
+      );
+      return {
         leaps,
-        csp: bestCsp,
-        pairingMode,
-        combinedScore: finalScore,
+        score: finalScore,
         grade: grade(finalScore),
-        cautionFlags,
-        alternatives,
-      });
-    }
+        cautionFlags: flags,
+      };
+    });
 
-    // Apply CAUTION gate floor: raise minimum score for default view
-    // (The UI handles the display filter; we just record the gate state)
+    opportunities.sort((a, b) => b.score - a.score);
 
-    paired.sort((a, b) => b.combinedScore - a.combinedScore);
-
-    log(`${paired.length} ranked opportunities`);
-    return this.persistRun({ gate, detail, effect, universe, watchlistId: watchlistId ?? null }, paired);
+    log(`${opportunities.length} ranked opportunities`);
+    return this.persistRun({ gate, detail, effect, universe, watchlistId: watchlistId ?? null }, opportunities);
   }
 
   getRecentRuns(): LeapsCspRunSummary[] {
@@ -676,30 +514,28 @@ export class LeapsCspService {
 
   markOpened(
     opportunityId: number,
-    entry: { leapsEntryDebit?: number; cspEntryCredit?: number; notes?: string },
+    entry: { leapsEntryDebit?: number; notes?: string },
   ): void {
     this.db.prepare(`
       INSERT INTO leaps_csp_opened (opportunity_id, opened_at, leaps_entry_debit, csp_entry_credit, notes)
-      VALUES (?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, NULL, ?)
     `).run(
       opportunityId,
       new Date().toISOString(),
       entry.leapsEntryDebit ?? null,
-      entry.cspEntryCredit ?? null,
       entry.notes ?? null,
     );
   }
 
   getOpenedPositions(): LeapsCspOpenedEntry[] {
     return (this.db.prepare(`
-      SELECT id, opportunity_id, opened_at, leaps_entry_debit, csp_entry_credit, notes
+      SELECT id, opportunity_id, opened_at, leaps_entry_debit, notes
       FROM leaps_csp_opened ORDER BY id DESC
     `).all() as Array<Record<string, unknown>>).map(r => ({
       id: r['id'] as number,
       opportunityId: r['opportunity_id'] as number,
       openedAt: r['opened_at'] as string,
       leapsEntryDebit: r['leaps_entry_debit'] as number | null,
-      cspEntryCredit: r['csp_entry_credit'] as number | null,
       notes: r['notes'] as string | null,
     }));
   }
@@ -765,8 +601,7 @@ export class LeapsCspService {
       let hygIefTrend: 'up' | 'down' | 'flat' | null = null;
       if (hygPrice && iefPrice && iefPrice > 0) {
         hygIefRatio = hygPrice / iefPrice;
-        // Simple trend: compare to 5-session average (approximate via current ratio vs a baseline)
-        hygIefTrend = 'flat'; // detailed trend requires historical ratio — use flat as safe default
+        hygIefTrend = 'flat'; // detailed trend requires historical ratio
       }
 
       const detail: LeapsCspGateDetail = {
@@ -779,31 +614,27 @@ export class LeapsCspService {
         hygIefTrend,
       };
 
-      // ── Gate logic (SRS §6.1) ────────────────────────────────────────────
+      // ── Gate logic ───────────────────────────────────────────────────────
       const failConditions: string[] = [];
       const cautionConditions: string[] = [];
 
-      // SPX vs 50d MA
       if (spxPrice !== null && spx50d !== null) {
         const pctFrom50d = ((spxPrice - spx50d) / spx50d) * 100;
         if (pctFrom50d < -1) failConditions.push('SPX below 50d MA');
         else if (Math.abs(pctFrom50d) <= 1) cautionConditions.push('SPX near 50d MA');
       }
 
-      // SPX vs 200d MA
       if (spxPrice !== null && spx200d !== null) {
         const pctFrom200d = ((spxPrice - spx200d) / spx200d) * 100;
         if (pctFrom200d < 0) failConditions.push('SPX below 200d MA');
         else if (pctFrom200d < 2) cautionConditions.push('SPX near 200d MA');
       }
 
-      // VIX level
       if (vixPrice !== null) {
         if (vixPrice > 28) failConditions.push(`VIX ${vixPrice.toFixed(1)} > 28 (panic)`);
         else if (vixPrice >= 22) cautionConditions.push(`VIX ${vixPrice.toFixed(1)} elevated`);
       }
 
-      // VIX 5-day change
       if (vix5dChangePct !== null) {
         if (vix5dChangePct > 40) failConditions.push(`VIX spiked +${vix5dChangePct.toFixed(0)}% in 5d`);
         else if (vix5dChangePct > 20) cautionConditions.push(`VIX up +${vix5dChangePct.toFixed(0)}% in 5d`);
@@ -836,14 +667,12 @@ export class LeapsCspService {
   // ── Universe loading from screener cache ────────────────────────────────────
 
   private getScreenedTickers(universe: string): string[] {
-    // Map universe key to the index_name value stored in screen_runs / constituents
     const univKey =
       universe === 'sp500'       ? 'sp500' :
       universe === 'russell1000' ? 'russell1000' :
       universe === 'etf'         ? 'etf' :
       null; // null = 'both' → no filter
 
-    // Use the most recent screener run for the given universe (or both)
     const universeClause = univKey === null ? `1=1` : `sr.universe = '${univKey}'`;
 
     const rows = this.db.prepare(`
@@ -916,7 +745,7 @@ export class LeapsCspService {
     return result;
   }
 
-  // ── Universe filter (SRS §4.1) ──────────────────────────────────────────────
+  // ── Universe filter ─────────────────────────────────────────────────────────
 
   private passUniverseFilter(
     ticker: string,
@@ -934,7 +763,6 @@ export class LeapsCspService {
     if (price < 10) { log?.(`  ${ticker} failed: price $${price.toFixed(2)} < $10`); return false; }
     if (volume < 2_000_000) { log?.(`  ${ticker} failed: volume ${volume} < 2M`); return false; }
     if (!isEtf) {
-      // ETFs don't report market cap or sector in fundamentals — skip these checks
       const marketCap = f.marketCap ?? 0;
       if (marketCap < 10_000_000_000) { log?.(`  ${ticker} failed: marketCap $${(marketCap / 1e9).toFixed(1)}B < $10B`); return false; }
       if (isBiotech(f.sector)) { log?.(`  ${ticker} failed: biotech sector (${f.sector})`); return false; }
@@ -942,7 +770,7 @@ export class LeapsCspService {
     return true;
   }
 
-  // ── Stock hard fails — LEAPS leg (SRS §4.2) ────────────────────────────────
+  // ── Stock hard fails — LEAPS leg ────────────────────────────────────────────
 
   private leapsStockHardFail(
     _ticker: string,
@@ -950,23 +778,7 @@ export class LeapsCspService {
     q: QuoteRow | undefined,
   ): string | null {
     if (!f || !q) return 'missing data';
-    // Earnings within 14 days: Polygon has no earnings calendar endpoint — skip
-    // M&A: not available — skip
-    // Short float > 20%: not available — skip
-    // Death cross + price below both MAs: requires historical bars; checked opportunistically
-    // (We apply this check in the caller after fetching the chain when bars are available)
     return null;
-  }
-
-  // ── Stock hard fails — CSP leg ──────────────────────────────────────────────
-
-  private cspStockHardFail(
-    _ticker: string,
-    _f: FundamentalsRow | undefined,
-    q: QuoteRow | undefined,
-  ): boolean {
-    if (!q?.last || q.last <= 0) return true;
-    return false; // CSP stock checks are lighter; hard fails applied at contract level
   }
 
   // ── LEAPS contract selection ────────────────────────────────────────────────
@@ -978,22 +790,18 @@ export class LeapsCspService {
     // Filter to delta 0.70–0.90 range
     const inBand = calls.filter(c => c.delta !== null && c.delta >= 0.70 && c.delta <= 0.90);
     if (inBand.length > 0) {
-      // Prefer delta closest to 0.80 (center of target 0.75–0.85)
       inBand.sort((a, b) => Math.abs((a.delta ?? 0) - 0.80) - Math.abs((b.delta ?? 0) - 0.80));
-      // Among top candidates, prefer ITM (strike < currentPrice)
       const itm = inBand.filter(c => c.strike < currentPrice);
       return itm[0] ?? inBand[0] ?? null;
     }
 
-    // Fallback: no greeks available — select by moneyness.
-    // Deep ITM calls (strike 5–15% below price) approximate delta 0.70–0.85.
+    // Fallback: no greeks available — select by moneyness (5–20% ITM ≈ delta 0.70–0.85)
     if (calls.length === 0) return null;
     const itmCalls = calls.filter(c => {
-      if (c.strike >= currentPrice) return false;  // must be ITM
+      if (c.strike >= currentPrice) return false;
       const pctBelow = (currentPrice - c.strike) / currentPrice;
-      return pctBelow >= 0.05 && pctBelow <= 0.20;  // 5–20% ITM
+      return pctBelow >= 0.05 && pctBelow <= 0.20;
     });
-    // Prefer closest to 10% ITM (approx delta 0.80)
     itmCalls.sort((a, b) => {
       const aDist = Math.abs((currentPrice - a.strike) / currentPrice - 0.10);
       const bDist = Math.abs((currentPrice - b.strike) / currentPrice - 0.10);
@@ -1002,28 +810,23 @@ export class LeapsCspService {
     return itmCalls[0] ?? null;
   }
 
-  // ── LEAPS contract hard fails (SRS §4.3.1) ─────────────────────────────────
-  //
-  // Thresholds are calibrated for LEAPS (365–730 DTE), NOT short-dated options:
+  // ── LEAPS contract hard fails ───────────────────────────────────────────────
   //
   //  spreadPct ≤ 15%   — LEAPS markets are less liquid; a $1.50 spread on a $20
   //                       option is 7.5%, which is normal and acceptable.
   //  extrinsicPct ≤ 50% — For 400–700 DTE with IV > 20%, even a well-chosen
-  //                       delta-0.80 call has 25–40% extrinsic as % of premium.
-  //                       The scoring system already penalises high extrinsic
-  //                       (0 points above 15%); the hard fail just removes truly
-  //                       egregious outliers (>50%).
+  //                       delta-0.80 call has 25–40% extrinsic. The hard fail
+  //                       removes truly egregious outliers (>50%).
   //  openInterest ≥ 10 — Minimum real-market liquidity signal.
 
   private passLeapsContractHardFails(
     contract: OptionContract,
     midPrice: number,
     extrinsicPct: number,
-  ): string | null {   // returns null = pass, non-null = rejection reason
+  ): string | null {
     if (midPrice <= 0) return 'zero mid-price';
     const spread = contract.ask - contract.bid;
     const spreadPct = spread / midPrice * 100;
-    // Skip spread check when bid===ask (lastPrice proxy — no real market data)
     if (contract.bid !== contract.ask && spreadPct > 15) {
       return `spread ${spreadPct.toFixed(1)}% > 15%`;
     }
@@ -1033,10 +836,10 @@ export class LeapsCspService {
     if (extrinsicPct > 50) {
       return `extrinsic ${extrinsicPct.toFixed(1)}% > 50%`;
     }
-    return null; // pass
+    return null;
   }
 
-  // ── LEAPS leg scoring (SRS §5.1) ───────────────────────────────────────────
+  // ── LEAPS leg scoring ───────────────────────────────────────────────────────
 
   private scoreLeapsLeg(
     contract: OptionContract,
@@ -1049,15 +852,14 @@ export class LeapsCspService {
   ): { score: number; breakdown: LeapsCspScoreComponent[] } {
     const components: Array<{ name: string; weight: number; rawScore: number }> = [];
 
-    // 1. Stock trend strength (20%) — approximate from ROE/fundamentals quality
-    //    (Full MA check requires historical bars; use fundamentals as proxy)
+    // 1. Stock trend strength (20%) — approximated via ROE / fundamentals quality
     let trendScore = 5;
     const roe = f?.roe ?? null;
     if (roe !== null && roe >= 20) trendScore = 10;
     else if (roe !== null && roe >= 15) trendScore = 7;
     components.push({ name: 'Stock trend strength', weight: 0.20, rawScore: trendScore });
 
-    // 2. Delta in target band (15%) — SRS §5.1
+    // 2. Delta in target band (15%)
     let deltaScore = 0;
     const delta = contract.delta ?? 0;
     if (delta >= 0.78 && delta <= 0.82) deltaScore = 10;
@@ -1065,7 +867,7 @@ export class LeapsCspService {
     else if ((delta >= 0.70 && delta < 0.75) || (delta > 0.85 && delta <= 0.90)) deltaScore = 5;
     components.push({ name: 'Delta in target band', weight: 0.15, rawScore: deltaScore });
 
-    // 3. Extrinsic % of premium (20%) — SRS §5.1
+    // 3. Extrinsic % of premium (20%)
     let extScore = 0;
     if (extrinsicPct <= 5) extScore = 10;
     else if (extrinsicPct <= 8) extScore = 8;
@@ -1073,7 +875,7 @@ export class LeapsCspService {
     else if (extrinsicPct <= 15) extScore = 2;
     components.push({ name: 'Extrinsic % of premium', weight: 0.20, rawScore: extScore });
 
-    // 4. IV state on contract (15%) — SRS §5.1
+    // 4. IV state on contract (15%)
     let ivScore = 5;
     const ivr = ivData.ivr ?? 50;
     if (ivr < 30) ivScore = 10;
@@ -1083,7 +885,7 @@ export class LeapsCspService {
     else ivScore = 0;
     components.push({ name: 'IV state (IVR)', weight: 0.15, rawScore: ivScore });
 
-    // 5. Liquidity — spread + OI (10%) — SRS §5.1
+    // 5. Liquidity — spread + OI (10%)
     let liqScore = 0;
     const midPrice = (contract.bid + contract.ask) / 2;
     const spreadPct = midPrice > 0 ? ((contract.ask - contract.bid) / midPrice) * 100 : 99;
@@ -1094,7 +896,6 @@ export class LeapsCspService {
     components.push({ name: 'Liquidity', weight: 0.10, rawScore: liqScore });
 
     // 6. Fundamental grade (10%) — proxy: ROE + D/E
-    //    ETFs: institutionally-grade instruments, no earnings risk → score 7
     let fundScore: number;
     if (isEtf) {
       fundScore = 7;
@@ -1108,169 +909,8 @@ export class LeapsCspService {
     components.push({ name: 'Fundamental grade', weight: 0.10, rawScore: fundScore });
 
     // 7. Distance to next earnings (10%) — ETFs have no earnings → 10/10
-    //    Stocks: Polygon has no earnings calendar — use neutral default 8
     const earningsScore = isEtf ? 10 : 8;
     components.push({ name: 'Distance to earnings', weight: 0.10, rawScore: earningsScore });
-
-    // Weighted sum
-    const weightedSum = components.reduce((acc, c) => acc + c.rawScore * c.weight, 0);
-    const score = clamp(Math.round(weightedSum * 10) / 10, 0, 10);
-
-    const breakdown: LeapsCspScoreComponent[] = components.map(c => ({
-      name: c.name,
-      weight: c.weight,
-      rawScore: c.rawScore,
-      weightedScore: Math.round(c.rawScore * c.weight * 100) / 100,
-    }));
-
-    return { score, breakdown };
-    void dte; // DTE used externally for hard fails but not in scoring formula directly
-  }
-
-  // ── CSP contract selection ──────────────────────────────────────────────────
-
-  private selectCspContracts(
-    puts: OptionContract[],
-    currentPrice: number,
-    expiry: string,
-    ivData: IvData,
-    f: FundamentalsRow | undefined,
-    isEtf = false,
-  ): CspCandidate[] {
-    const dte = dteDays(expiry);
-    if (dte < 25 || dte > 50) return [];
-
-    const results: CspCandidate[] = [];
-
-    // Filter puts by delta -0.15 to -0.30 (OTM puts for CSP)
-    let inBand = puts.filter(c => {
-      const d = c.delta ?? 0;
-      return d <= -0.15 && d >= -0.30;
-    });
-
-    // Fallback: if no greeks available, select by moneyness.
-    // OTM puts 2–8% below price approximate delta -0.15 to -0.30.
-    if (inBand.length === 0 && puts.some(c => c.delta === null)) {
-      inBand = puts.filter(c => {
-        if (c.strike >= currentPrice) return false;  // must be OTM
-        const pctBelow = (currentPrice - c.strike) / currentPrice;
-        return pctBelow >= 0.02 && pctBelow <= 0.08;
-      });
-    }
-
-    for (const contract of inBand) {
-      const mid = (contract.bid + contract.ask) / 2;
-      if (mid <= 0) continue;
-
-      const spread = contract.ask - contract.bid;
-      const spreadPct = spread / mid * 100;
-      // Skip spread checks when bid===ask (no real market, just lastPrice proxy)
-      const hasRealBidAsk = contract.bid !== contract.ask;
-      if (hasRealBidAsk && spreadPct > 10) continue;
-      if (hasRealBidAsk && Math.abs(spread) > 0.10 && spreadPct > 10) continue;
-
-      const oi = contract.openInterest ?? 0;
-      if (oi < 10) continue;
-
-      const collateral = contract.strike * 100;
-      const annReturnPct = collateral > 0 ? (mid / collateral) * (365 / dte) * 100 : 0;
-      if (annReturnPct < 12) continue;
-
-      const { score, breakdown } = this.scoreCspLeg(
-        contract, dte, annReturnPct, ivData, currentPrice, f, isEtf,
-      );
-
-      results.push({
-        ticker: f?.ticker ?? '',
-        currentPrice,
-        contract,
-        expiry,
-        dte,
-        annReturnPct,
-        ivPct: contract.iv * 100,
-        ivr: ivData.ivr,
-        subScore: score,
-        scoreBreakdown: breakdown,
-      });
-    }
-
-    results.sort((a, b) => b.subScore - a.subScore);
-    return results.slice(0, 3); // keep top 3 per ticker
-  }
-
-  // ── CSP leg scoring (SRS §5.2) ──────────────────────────────────────────────
-
-  private scoreCspLeg(
-    contract: OptionContract,
-    dte: number,
-    annReturnPct: number,
-    ivData: IvData,
-    currentPrice: number,
-    f: FundamentalsRow | undefined,
-    isEtf = false,
-  ): { score: number; breakdown: LeapsCspScoreComponent[] } {
-    const components: Array<{ name: string; weight: number; rawScore: number }> = [];
-
-    // 1. Annualized return on collateral (25%) — SRS §5.2
-    let retScore = 0;
-    if (annReturnPct >= 25) retScore = 10;
-    else if (annReturnPct >= 20) retScore = 8;
-    else if (annReturnPct >= 15) retScore = 6;
-    else if (annReturnPct >= 12) retScore = 4;
-    components.push({ name: 'Ann. return on collateral', weight: 0.25, rawScore: retScore });
-
-    // 2. IV Rank on underlying (20%) — SRS §5.2
-    //    ETFs: compressed scale (IVR 25 = peak normal, equivalent to stock IVR 50)
-    let ivrScore = 2;
-    const ivr = ivData.ivr ?? 25;
-    if (isEtf) {
-      if (ivr >= 25) ivrScore = 10;
-      else if (ivr >= 15) ivrScore = 8;
-      else if (ivr >= 10) ivrScore = 5;
-    } else {
-      if (ivr >= 50) ivrScore = 10;
-      else if (ivr >= 35) ivrScore = 8;
-      else if (ivr >= 25) ivrScore = 5;
-    }
-    components.push({ name: 'IV Rank', weight: 0.20, rawScore: ivrScore });
-
-    // 3. Delta in target band (15%) — SRS §5.2 (target -0.20 to -0.25)
-    let deltaScore = 0;
-    const delta = contract.delta ?? 0;
-    if (delta >= -0.25 && delta <= -0.20) deltaScore = 10;
-    else if ((delta >= -0.30 && delta < -0.25) || (delta > -0.20 && delta >= -0.15)) deltaScore = 7;
-    components.push({ name: 'Delta in target band', weight: 0.15, rawScore: deltaScore });
-
-    // 4. Liquidity (10%) — same scale as LEAPS
-    let liqScore = 0;
-    const mid = (contract.bid + contract.ask) / 2;
-    const spreadPct = mid > 0 ? ((contract.ask - contract.bid) / mid) * 100 : 99;
-    const oi = contract.openInterest ?? 0;
-    if (spreadPct < 2 && oi > 500) liqScore = 10;
-    else if (spreadPct < 3 && oi > 250) liqScore = 8;
-    else if (spreadPct < 5 && oi > 100) liqScore = 5;
-    components.push({ name: 'Liquidity', weight: 0.10, rawScore: liqScore });
-
-    // 5. Stock trend (10%) — fundamentals proxy
-    let trendScore = 5;
-    const roe = f?.roe ?? null;
-    if (roe !== null && roe > 0) trendScore = 10;
-    else if (roe === null) trendScore = 5;
-    components.push({ name: 'Stock trend', weight: 0.10, rawScore: trendScore });
-
-    // 6. Strike quality (10%) — SRS §5.2: strike vs 200d MA proxy
-    //    Approximate: if strike < 85% of current price, score high
-    let strikeScore = 5;
-    const strikeToPrice = currentPrice > 0 ? contract.strike / currentPrice : 1;
-    if (strikeToPrice <= 0.85) strikeScore = 10;     // well below price
-    else if (strikeToPrice <= 0.92) strikeScore = 7;
-    else if (strikeToPrice <= 0.97) strikeScore = 4;
-    else strikeScore = 1;
-    components.push({ name: 'Strike quality', weight: 0.10, rawScore: strikeScore });
-
-    // 7. Distance to events (10%) — stub: default neutral
-    const eventScore = 8;
-    components.push({ name: 'Distance to events', weight: 0.10, rawScore: eventScore });
 
     const weightedSum = components.reduce((acc, c) => acc + c.rawScore * c.weight, 0);
     const score = clamp(Math.round(weightedSum * 10) / 10, 0, 10);
@@ -1286,36 +926,19 @@ export class LeapsCspService {
     void dte;
   }
 
-  // ── Combined score (SRS §5.3) ───────────────────────────────────────────────
+  // ── Caution flags ───────────────────────────────────────────────────────────
 
-  private combinedScore(leapsScore: number, cspScore: number): number {
-    return leapsScore * 0.60 + cspScore * 0.40;
-  }
-
-  // ── Caution flags (SRS §4.4) ────────────────────────────────────────────────
-
-  private cautionFlags(
-    leaps: LeapsCandidate,
-    csp: CspCandidate | null,
-  ): string[] {
+  private cautionFlags(leaps: LeapsCandidate): string[] {
     const flags: string[] = [];
-
     // LEAPS premium > 25% of stock price
     if (leaps.contract.bid > 0) {
       const premiumPct = ((leaps.contract.bid + leaps.contract.ask) / 2) / leaps.currentPrice * 100;
       if (premiumPct > 25) flags.push('HIGH_LEAPS_PREMIUM');
     }
-
-    // IVR between 60–80 on LEAPS underlying
+    // IVR between 60–80 on underlying (elevated but not disqualifying)
     if (leaps.ivr !== null && leaps.ivr >= 60 && leaps.ivr <= 80) {
       flags.push('LEAPS_IV_ELEVATED');
     }
-
-    // CSP strike close to 200d MA proxy (strike > 90% of current price)
-    if (csp && csp.contract.strike / csp.currentPrice > 0.90) {
-      flags.push('CSP_STRIKE_NEAR_PRICE');
-    }
-
     return flags;
   }
 
@@ -1338,7 +961,7 @@ export class LeapsCspService {
       if (!this.ivFailLogged) {
         this.ivFailLogged = true;
         const msg = err instanceof Error ? err.message : String(err);
-        console.warn(`[LEAPS-CSP] IV data fetch failed for ${ticker}: ${msg}`);
+        console.warn(`[LEAPS] IV data fetch failed for ${ticker}: ${msg}`);
       }
       return { currentIv: null, iv52WkHigh: null, iv52WkLow: null, ivr: null };
     }
@@ -1354,12 +977,10 @@ export class LeapsCspService {
       return chain.contracts as OptionContract[];
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      // Log the first failure to help diagnose systemic issues; suppress subsequent noise
       if (!this.chainFailLogged) {
         this.chainFailLogged = true;
-        console.warn(`[LEAPS-CSP] Options chain fetch failed for ${ticker}/${expiry}: ${msg}`);
+        console.warn(`[LEAPS] Options chain fetch failed for ${ticker}/${expiry}: ${msg}`);
       }
-      // Auth/key errors are systemic — abort the run
       if (msg.includes('401') || msg.includes('403') || msg.includes('API key') || msg.includes('Unauthorized')) {
         throw new Error(`Options API auth failed for ${ticker}: ${msg}`);
       }
@@ -1389,7 +1010,7 @@ export class LeapsCspService {
 
   private persistRun(
     meta: { gate: LeapsCspGate; detail: LeapsCspGateDetail; effect: string; universe: string; watchlistId: number | null },
-    opportunities: PairedOpportunity[],
+    opportunities: LeapsOpportunity[],
   ): LeapsCspRunResult {
     const runAt = new Date().toISOString();
 
@@ -1424,35 +1045,27 @@ export class LeapsCspService {
     const resultOpportunities: LeapsCspOpportunity[] = opportunities.map((p, idx) => {
       const leapsMid = (p.leaps.contract.bid + p.leaps.contract.ask) / 2;
       const leapsPremiumPerContract = leapsMid * 100;
-      const cspMid = p.csp ? (p.csp.contract.bid + p.csp.contract.ask) / 2 : null;
-      const cspCollateral = p.csp ? p.csp.contract.strike * 100 : null;
-      const totalCash = leapsPremiumPerContract + (cspCollateral ?? 0) || null;
 
       const detail: LeapsCspDetail = {
         leapsScoreBreakdown: p.leaps.scoreBreakdown,
-        cspScoreBreakdown: p.csp?.scoreBreakdown ?? [],
-        alternatives: p.alternatives,
       };
 
       const id = (insertOpp.run(
-        runId, idx + 1, p.pairingMode,
+        runId, idx + 1, 'leaps_only',
         p.leaps.ticker, p.leaps.currentPrice, p.leaps.contract.strike, p.leaps.expiry, p.leaps.dte,
         p.leaps.contract.delta, leapsPremiumPerContract, p.leaps.extrinsicPct,
         p.leaps.ivPct, p.leaps.ivr, p.leaps.contract.openInterest, p.leaps.subScore,
-        p.csp?.ticker ?? null, p.csp?.currentPrice ?? null,
-        p.csp?.contract.strike ?? null, p.csp?.expiry ?? null, p.csp?.dte ?? null,
-        p.csp?.contract.delta ?? null, cspMid, cspCollateral,
-        p.csp?.annReturnPct ?? null, p.csp?.ivPct ?? null, p.csp?.ivr ?? null,
-        p.csp?.contract.openInterest ?? null, p.csp?.subScore ?? null,
-        p.combinedScore, p.grade, p.cautionFlags.join(',') || null,
-        totalCash, JSON.stringify(detail),
+        // CSP columns — always null
+        null, null, null, null, null,
+        null, null, null, null, null, null, null, null,
+        p.score, p.grade, p.cautionFlags.join(',') || null,
+        leapsPremiumPerContract, JSON.stringify(detail),
       ) as { lastInsertRowid: number }).lastInsertRowid;
 
       return {
         id: Number(id),
         runId: Number(runId),
         rank: idx + 1,
-        pairingMode: p.pairingMode,
         leapsTicker: p.leaps.ticker,
         leapsCurrentPrice: p.leaps.currentPrice,
         leapsStrike: p.leaps.contract.strike,
@@ -1465,23 +1078,10 @@ export class LeapsCspService {
         leapsIvr: p.leaps.ivr,
         leapsOi: p.leaps.contract.openInterest,
         leapsSubScore: p.leaps.subScore,
-        cspTicker: p.csp?.ticker ?? null,
-        cspCurrentPrice: p.csp?.currentPrice ?? null,
-        cspStrike: p.csp?.contract.strike ?? null,
-        cspExpiry: p.csp?.expiry ?? null,
-        cspDte: p.csp?.dte ?? null,
-        cspDelta: p.csp?.contract.delta ?? null,
-        cspPremium: cspMid,
-        cspCollateral,
-        cspAnnReturnPct: p.csp?.annReturnPct ?? null,
-        cspIvPct: p.csp?.ivPct ?? null,
-        cspIvr: p.csp?.ivr ?? null,
-        cspOi: p.csp?.contract.openInterest ?? null,
-        cspSubScore: p.csp?.subScore ?? null,
-        combinedScore: p.combinedScore,
+        combinedScore: p.score,
         grade: p.grade,
         cautionFlags: p.cautionFlags,
-        totalCashToDeploy: totalCash,
+        totalCashToDeploy: leapsPremiumPerContract,
         detail,
       };
     });
@@ -1505,14 +1105,18 @@ export class LeapsCspService {
 
   private rowToOpportunity(r: Record<string, unknown>): LeapsCspOpportunity {
     const flags = r['caution_flags'] ? String(r['caution_flags']).split(',').filter(Boolean) : [];
-    let detail: LeapsCspDetail = { leapsScoreBreakdown: [], cspScoreBreakdown: [], alternatives: [] };
-    try { detail = JSON.parse(r['detail_json'] as string) as LeapsCspDetail; } catch { /* use default */ }
+    let detail: LeapsCspDetail = { leapsScoreBreakdown: [] };
+    try {
+      const parsed = JSON.parse(r['detail_json'] as string) as Record<string, unknown>;
+      detail = {
+        leapsScoreBreakdown: (parsed['leapsScoreBreakdown'] as LeapsCspScoreComponent[]) ?? [],
+      };
+    } catch { /* use default */ }
 
     return {
       id: r['id'] as number,
       runId: r['run_id'] as number,
       rank: r['rank'] as number,
-      pairingMode: r['pairing_mode'] as LeapsCspPairingMode,
       leapsTicker: r['leaps_ticker'] as string,
       leapsCurrentPrice: r['leaps_current_price'] as number | null,
       leapsStrike: r['leaps_strike'] as number,
@@ -1525,19 +1129,6 @@ export class LeapsCspService {
       leapsIvr: r['leaps_ivr'] as number | null,
       leapsOi: r['leaps_oi'] as number | null,
       leapsSubScore: r['leaps_sub_score'] as number,
-      cspTicker: r['csp_ticker'] as string | null,
-      cspCurrentPrice: r['csp_current_price'] as number | null,
-      cspStrike: r['csp_strike'] as number | null,
-      cspExpiry: r['csp_expiry'] as string | null,
-      cspDte: r['csp_dte'] as number | null,
-      cspDelta: r['csp_delta'] as number | null,
-      cspPremium: r['csp_premium'] as number | null,
-      cspCollateral: r['csp_collateral'] as number | null,
-      cspAnnReturnPct: r['csp_ann_return_pct'] as number | null,
-      cspIvPct: r['csp_iv_pct'] as number | null,
-      cspIvr: r['csp_ivr'] as number | null,
-      cspOi: r['csp_oi'] as number | null,
-      cspSubScore: r['csp_sub_score'] as number | null,
       combinedScore: r['combined_score'] as number,
       grade: r['grade'] as LeapsCspGrade,
       cautionFlags: flags,

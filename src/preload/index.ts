@@ -75,6 +75,10 @@ import type {
   StrategySetup,
   StrategyScore,
   StrategyLabContext,
+  BatchJob,
+  BatchRun,
+  AppNotification,
+  BatchProgressEvent,
 } from '@shared/types.js';
 export type {
   ScreenPreset, ScreenCriteria, ScreenRunResult, ScreenResultRow, Universe,
@@ -923,8 +927,26 @@ function buildApi() {
       invoke<string>('strategyLab:aiRationale', score, ctx),
   };
 
+  const batch = {
+    listJobs:   () => invoke<BatchJob[]>('batch:list-jobs'),
+    listRuns:   (jobId: string) => invoke<BatchRun[]>('batch:list-runs', jobId),
+    runNow:     (jobId: string) => invoke<boolean>('batch:run-now', jobId),
+    cancel:     (jobId: string) => invoke<boolean>('batch:cancel', jobId),
+    updateJob:  (jobId: string, patch: Partial<BatchJob>) => invoke<boolean>('batch:update-job', jobId, patch),
+    onProgress: (cb: (evt: BatchProgressEvent) => void): (() => void) => {
+      const handler = (_e: Electron.IpcRendererEvent, evt: BatchProgressEvent) => cb(evt);
+      ipcRenderer.on('batch:progress', handler);
+      return () => ipcRenderer.removeAllListeners('batch:progress');
+    },
+    onNotification: (cb: (n: AppNotification) => void): (() => void) => {
+      const handler = (_e: Electron.IpcRendererEvent, n: AppNotification) => cb(n);
+      ipcRenderer.on('app:notification', handler);
+      return () => ipcRenderer.removeAllListeners('app:notification');
+    },
+  };
+
   return {
-    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, historical, portfolio, alerts, optionsChain, agent, backtest, leapsCsp, collaredLeaps, testApi, etrade, filters, payoff, ivHistory, opportunity, strategyLab },
+    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, historical, portfolio, alerts, optionsChain, agent, backtest, leapsCsp, collaredLeaps, testApi, etrade, filters, payoff, ivHistory, opportunity, strategyLab, batch },
     dialog: {
       prompt: (opts: { title: string; defaultValue?: string }) =>
         invoke<string | null>('dialog:prompt', opts),

@@ -177,20 +177,14 @@ export function registerSettingsIpc(
     return ok({ available: encryptionAvailable() });
   });
 
-  /** Get the currently selected options data provider ('polygon' | 'etrade'). */
+  /** Options provider is always E*Trade — returns 'etrade' unconditionally. */
   ipcMain.handle('settings:get-options-provider', () => {
-    try {
-      const row = db.prepare("SELECT value FROM settings WHERE key = 'optionsProvider'").get() as { value?: string } | undefined;
-      return ok<'polygon' | 'etrade'>((row?.value as 'polygon' | 'etrade') ?? 'polygon');
-    } catch (err) { return fail(err); }
+    return ok<'polygon' | 'etrade'>('etrade');
   });
 
-  /** Set the active options data provider. Restarts take effect on next app launch. */
-  ipcMain.handle('settings:set-options-provider', (_e, provider: 'polygon' | 'etrade') => {
-    try {
-      db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('optionsProvider', ?)").run(provider);
-      return ok(true);
-    } catch (err) { return fail(err); }
+  /** No-op: options provider is locked to E*Trade and cannot be changed. */
+  ipcMain.handle('settings:set-options-provider', () => {
+    return ok(true);
   });
 
   ipcMain.handle('settings:open-logs-dir', () => {

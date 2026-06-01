@@ -249,8 +249,7 @@ export function SettingsView({ etradeWarning, onEtradeWarningDismiss }: Settings
 
   // If we arrived here due to an E*Trade warning, default to the API & Data tab
   const [activeTab, setActiveTab] = useState(etradeWarning ? 'API & Data' : 'General');
-  const [optionsProvider, setOptionsProvider] = useState<'polygon' | 'etrade'>('polygon');
-  const [optionsProviderSaved, setOptionsProviderSaved] = useState(false);
+  // optionsProvider is locked to 'etrade' — no state needed
 
   // Load settings on mount.
   useEffect(() => {
@@ -274,21 +273,6 @@ export function SettingsView({ etradeWarning, onEtradeWarningDismiss }: Settings
       .catch(() => setIvolatilityKey(''));
   }, []);
 
-  // Load options provider setting.
-  useEffect(() => {
-    window.api.settings.getOptionsProvider()
-      .then(setOptionsProvider)
-      .catch(() => setOptionsProvider('polygon'));
-  }, []);
-
-  const saveOptionsProvider = useCallback(async (provider: 'polygon' | 'etrade') => {
-    try {
-      await window.api.settings.setOptionsProvider(provider);
-      setOptionsProvider(provider);
-      setOptionsProviderSaved(true);
-      setTimeout(() => setOptionsProviderSaved(false), 2500);
-    } catch { /* silently fail */ }
-  }, []);
 
   const saveSettings = useCallback(async (partial: Partial<AppSettings>) => {
     if (!settings) return;
@@ -502,40 +486,32 @@ export function SettingsView({ etradeWarning, onEtradeWarningDismiss }: Settings
           <div className="settings-section">
             <h2>API &amp; Data</h2>
 
-            {/* Options Data Source */}
+            {/* Options Data Source — locked to E*Trade */}
             <div className="settings-row">
               <label>Options Data Source</label>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <select
-                  value={optionsProvider}
-                  onChange={e => saveOptionsProvider(e.target.value as 'polygon' | 'etrade')}
-                  style={{ width: 200 }}
-                >
-                  <option value="polygon">Polygon.io</option>
-                  <option value="etrade">E*Trade</option>
-                </select>
-                {optionsProviderSaved && (
-                  <span style={{ color: '#4ade80', fontSize: 13 }}>
-                    ✓ Saved — restart to apply
-                  </span>
-                )}
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6,
+                  background: '#1a2a1a', border: '1px solid #4ade80',
+                  borderRadius: 6, padding: '4px 12px', fontSize: 13, color: '#4ade80'
+                }}>
+                  🔒 E*Trade (enforced)
+                </span>
               </div>
               <p className="hint">
-                Controls which provider is used for options chains, IV, and the LEAPS+CSP screener.
-                <strong> Restart the app after changing.</strong>
+                Options chains, Greeks, IV, expirations, and all screeners use E*Trade exclusively.
+                Polygon is used only for stock quotes, fundamentals, and historical bars.
               </p>
             </div>
 
-            {/* E*Trade Connection — shown whenever E*Trade is selected, or when a warning is present */}
-            {(optionsProvider === 'etrade' || etradeWarning) && (
-              <div className="settings-row" style={{ borderLeft: '3px solid #6366f1', paddingLeft: 14 }}>
-                <label style={{ color: '#a5b4fc', marginBottom: 10, display: 'block' }}>E*Trade Connection</label>
-                <ETradeConnectPanel
-                  warning={etradeWarning}
-                  onConnected={onEtradeWarningDismiss}
-                />
-              </div>
-            )}
+            {/* E*Trade Connection — always shown */}
+            <div className="settings-row" style={{ borderLeft: '3px solid #6366f1', paddingLeft: 14 }}>
+              <label style={{ color: '#a5b4fc', marginBottom: 10, display: 'block' }}>E*Trade Connection</label>
+              <ETradeConnectPanel
+                warning={etradeWarning}
+                onConnected={onEtradeWarningDismiss}
+              />
+            </div>
 
             <div className="settings-row">
               <label>Polygon API Key</label>

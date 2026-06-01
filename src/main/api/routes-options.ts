@@ -59,7 +59,7 @@ export function registerOptionsRoutes(app: FastifyInstance, svc: ApiServerServic
 
         let chain;
         try {
-          chain = await svc.dataProvider.getOptionsChain(ticker, exp);
+          chain = await svc.optionsProvider.getOptionsChain(ticker, exp);
         } catch {
           continue; // skip expirations that fail (no data)
         }

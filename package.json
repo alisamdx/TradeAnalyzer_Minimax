@@ -1,6 +1,6 @@
 {
   "name": "trade-analyzer",
-  "version": "0.20.0",
+  "version": "0.21.0",
   "private": true,
   "description": "Stock screening and analysis desktop app for a single retail trader.",
   "main": "out/main/index.js",
@@ -16,7 +16,7 @@
     "prebuild": "npm run rebuild:electron",
     "build": "electron-vite build && electron-builder",
     "prepackage": "npm run rebuild:electron",
-    "package": "electron-vite build && electron-builder --dir",
+    "package": "cmd /c \"set CSC_IDENTITY_AUTO_DISCOVERY=false&& electron-vite build && electron-builder --dir\"",
     "preview": "electron-vite preview",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
@@ -71,6 +71,9 @@
     ],
     "directories": {
       "output": "release"
+    },
+    "win": {
+      "forceCodeSigning": false
     }
   }
 }
