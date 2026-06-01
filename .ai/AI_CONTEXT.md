@@ -171,6 +171,8 @@ Authoritative DDL is in `migrations/001_init.sql` + `002_screen_schema.sql`. Pha
 
 ## Recent Changes
 
+- **v0.22.4 (2026-06-01)** — Batch Jobs sequence ordering. `sequence_order` column added to `batch_jobs` (migration 021). Jobs with the same schedule now run in the user-defined order. `BatchView` job table has a `#` column with ▲/▼ buttons; clicking persists order via `BatchService.reorderJobs()` / `batch:reorder` IPC / `window.api.batch.reorderJobs`. `_getJobRows` now sorts `ORDER BY sequence_order ASC, id`. New jobs append to end on `registerJob`.
+
 - **v0.22.3 (2026-06-01)** — Single instance lock. `app.requestSingleInstanceLock()` in `index.ts`; second launch focuses existing window instead of opening a duplicate.
 
 - **v0.22.2 (2026-06-01)** — Analysis sidebar order + per-tab default sort + Options Income columns. Sidebar: 📊 Analysis moved above 🔬 Strategy Lab. Default sort applied on every tab switch/run: Buy → Score/10 desc, Options Income → Premium desc, Wheel → Suitability desc, Bullish/Bearish → Max Loss desc. Options Income: Bid, Ask, OI columns added (from selected contract). `OptionsIncomeResult` type and analysis service updated in both shared types and service-local interface.

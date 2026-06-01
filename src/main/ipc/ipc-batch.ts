@@ -81,6 +81,15 @@ export function registerBatchIpc(
     })
   );
 
+  // Reorder jobs — jobIds is the full list in desired sequence
+  ipcMain.handle(
+    'batch:reorder',
+    wrap((jobIds: string[]) => {
+      batchService.reorderJobs(jobIds);
+      return true;
+    })
+  );
+
   // Global session toggle (in-memory, resets to true on every app start)
   ipcMain.handle(
     'batch:set-enabled',

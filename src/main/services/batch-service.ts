@@ -43,6 +43,7 @@ interface BatchJobRow {
   last_run_at: string | null;
   last_run_status: string | null;
   last_success_date: string | null;
+  sequence_order: number;
 }
 
 interface BatchRunRow {
@@ -105,11 +106,12 @@ export class BatchService {
     const startupDelaySecs    = options?.startupDelaySeconds ?? 30;
 
     // Seed the batch_jobs row with INSERT OR IGNORE so config persists across restarts.
+    // sequence_order is set to max+1 so new jobs always append to the end.
     this.db.prepare(`
       INSERT OR IGNORE INTO batch_jobs
         (id, name, description, enabled, run_on_startup, startup_delay_seconds,
-         daily_schedule_enabled, daily_schedule_time)
-      VALUES (?, ?, ?, 1, ?, ?, 1, ?)
+         daily_schedule_enabled, daily_schedule_time, sequence_order)
+      VALUES (?, ?, ?, 1, ?, ?, 1, ?, (SELECT COALESCE(MAX(sequence_order), 0) + 1 FROM batch_jobs))
     `).run(id, handler.name, handler.description, runOnStartup, startupDelaySecs, scheduleTime);
   }
 
@@ -347,10 +349,19 @@ export class BatchService {
     }
   }
 
+  /**
+   * Persist a new sequence order for all jobs. `jobIds` is the full ordered list;
+   * each job gets sequence_order = its 1-based position in the array.
+   */
+  reorderJobs(jobIds: string[]): void {
+    const stmt = this.db.prepare(`UPDATE batch_jobs SET sequence_order = ? WHERE id = ?`);
+    jobIds.forEach((id, idx) => stmt.run(idx + 1, id));
+  }
+
   // ── Internal helpers ──────────────────────────────────────────────────────
 
   private _getJobRows(): BatchJobRow[] {
-    return this.db.prepare(`SELECT * FROM batch_jobs ORDER BY id`).all() as BatchJobRow[];
+    return this.db.prepare(`SELECT * FROM batch_jobs ORDER BY sequence_order ASC, id`).all() as BatchJobRow[];
   }
 
   private _getJobRow(jobId: string): BatchJobRow | undefined {
@@ -371,6 +382,7 @@ export class BatchService {
       lastRunAt: row.last_run_at,
       lastRunStatus: (status === 'running' || status === 'success' || status === 'failed' || status === 'skipped') ? status : null,
       lastSuccessDate: row.last_success_date,
+      sequenceOrder: row.sequence_order,
     };
   }
 

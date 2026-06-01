@@ -1429,6 +1429,7 @@ export interface BatchJob {
   lastRunAt: string | null;
   lastRunStatus: 'running' | 'success' | 'failed' | 'skipped' | null;
   lastSuccessDate: string | null;
+  sequenceOrder: number;
 }
 
 export interface BatchRun {
