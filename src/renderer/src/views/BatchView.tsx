@@ -80,6 +80,7 @@ function EditModal({ job, onSave, onClose }: EditModalProps) {
   const [startupDelay, setStartupDelay] = useState(String(job.startupDelaySeconds));
   const [scheduleEnabled, setScheduleEnabled] = useState(job.dailyScheduleEnabled);
   const [scheduleTime, setScheduleTime] = useState(job.dailyScheduleTime);
+  const [sequenceOrder, setSequenceOrder] = useState(String(job.sequenceOrder));
 
   const handleSave = () => {
     onSave({
@@ -88,6 +89,7 @@ function EditModal({ job, onSave, onClose }: EditModalProps) {
       startupDelaySeconds: Math.max(0, parseInt(startupDelay, 10) || 0),
       dailyScheduleEnabled: scheduleEnabled,
       dailyScheduleTime: scheduleTime,
+      sequenceOrder: Math.max(1, parseInt(sequenceOrder, 10) || 1),
     });
     onClose();
   };
@@ -138,6 +140,15 @@ function EditModal({ job, onSave, onClose }: EditModalProps) {
               />
             </div>
           )}
+          <div className="settings-row">
+            <label>Sequence order</label>
+            <input
+              type="number" min={1}
+              value={sequenceOrder}
+              onChange={e => setSequenceOrder(e.target.value)}
+              style={{ width: 80 }}
+            />
+          </div>
         </div>
 
         <div style={{ display: 'flex', gap: 10, marginTop: 20, justifyContent: 'flex-end' }}>
@@ -288,16 +299,6 @@ export function BatchView() {
     setEditJob(null);
   };
 
-  const handleMove = async (jobId: string, direction: 'up' | 'down') => {
-    const idx = jobs.findIndex(j => j.id === jobId);
-    if (idx === -1) return;
-    const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
-    if (swapIdx < 0 || swapIdx >= jobs.length) return;
-    const reordered = [...jobs];
-    [reordered[idx], reordered[swapIdx]] = [reordered[swapIdx]!, reordered[idx]!];
-    setJobs(reordered);
-    await window.api.batch.reorderJobs(reordered.map(j => j.id));
-  };
 
   const selectedJob = jobs.find(j => j.id === selectedJobId) ?? null;
 
@@ -314,9 +315,6 @@ export function BatchView() {
         .batch-btn:hover { background: #2a3a5a; }
         .batch-btn.run { border-color: #2ecc71; color: #2ecc71; }
         .batch-btn.cancel { border-color: #e74c3c; color: #e74c3c; }
-        .batch-btn.seq { padding: 2px 6px; border-color: #2d3748; color: #666; min-width: 22px; }
-        .batch-btn.seq:hover:not(:disabled) { color: #89b4fa; border-color: #89b4fa; }
-        .batch-btn.seq:disabled { opacity: 0.3; cursor: default; }
         .settings-section { background: #1a2235; border-radius: 8px; padding: 12px 16px; }
         .settings-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #2d3748; }
         .settings-row:last-child { border-bottom: none; }
@@ -375,7 +373,7 @@ export function BatchView() {
           <table className="batch-table">
             <thead>
               <tr>
-                <th style={{ width: 40, textAlign: 'center' }}>#</th>
+                <th style={{ width: 32, textAlign: 'center', color: '#555' }}>#</th>
                 <th>Name</th>
                 <th>Description</th>
                 <th>Startup</th>
@@ -386,7 +384,7 @@ export function BatchView() {
               </tr>
             </thead>
             <tbody>
-              {jobs.map((job, idx) => {
+              {jobs.map(job => {
                 const isRunning = job.lastRunStatus === 'running';
                 return (
                   <tr
@@ -395,23 +393,7 @@ export function BatchView() {
                     onClick={() => setSelectedJobId(job.id)}
                     style={{ cursor: 'pointer' }}
                   >
-                    <td style={{ textAlign: 'center' }} onClick={e => e.stopPropagation()}>
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
-                        <button
-                          className="batch-btn seq"
-                          disabled={idx === 0}
-                          onClick={() => handleMove(job.id, 'up')}
-                          title="Move up"
-                        >▲</button>
-                        <span style={{ color: '#555', fontSize: 11 }}>{idx + 1}</span>
-                        <button
-                          className="batch-btn seq"
-                          disabled={idx === jobs.length - 1}
-                          onClick={() => handleMove(job.id, 'down')}
-                          title="Move down"
-                        >▼</button>
-                      </div>
-                    </td>
+                    <td style={{ textAlign: 'center', color: '#555', fontSize: 12 }}>{job.sequenceOrder}</td>
                     <td>
                       <strong style={{ color: job.enabled ? '#ecf0f1' : '#666' }}>{job.name}</strong>
                       {!job.enabled && <span style={{ marginLeft: 6, fontSize: 11, color: '#555' }}>(disabled)</span>}

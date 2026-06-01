@@ -330,7 +330,7 @@ export class BatchService {
 
   updateJobConfig(
     jobId: string,
-    patch: Partial<Pick<BatchJob, 'enabled' | 'runOnStartup' | 'startupDelaySeconds' | 'dailyScheduleEnabled' | 'dailyScheduleTime'>>
+    patch: Partial<Pick<BatchJob, 'enabled' | 'runOnStartup' | 'startupDelaySeconds' | 'dailyScheduleEnabled' | 'dailyScheduleTime' | 'sequenceOrder'>>
   ): void {
     if (patch.enabled !== undefined) {
       this.db.prepare(`UPDATE batch_jobs SET enabled = ? WHERE id = ?`).run(patch.enabled ? 1 : 0, jobId);
@@ -346,6 +346,9 @@ export class BatchService {
     }
     if (patch.dailyScheduleTime !== undefined) {
       this.db.prepare(`UPDATE batch_jobs SET daily_schedule_time = ? WHERE id = ?`).run(patch.dailyScheduleTime, jobId);
+    }
+    if (patch.sequenceOrder !== undefined) {
+      this.db.prepare(`UPDATE batch_jobs SET sequence_order = ? WHERE id = ?`).run(patch.sequenceOrder, jobId);
     }
   }
 
