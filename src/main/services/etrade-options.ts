@@ -171,7 +171,11 @@ export async function getETradeOptionsChain(
   const respKeys = Object.keys(resp);
   const rawPairs = resp['OptionPair'] ?? resp['optionPair'];
 
-  const underlyingPrice = num(resp['currentPrice'] ?? resp['CurrentPrice']);
+  // E*Trade v1 returns the underlying price as 'nearPrice' in OptionChainResponse.
+  const underlyingPrice = num(
+    resp['nearPrice']    ?? resp['NearPrice']    ??
+    resp['currentPrice'] ?? resp['CurrentPrice']
+  );
 
   const calls: ETradeOptionLeg[] = [];
   const puts:  ETradeOptionLeg[] = [];

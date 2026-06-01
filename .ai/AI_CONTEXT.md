@@ -171,6 +171,8 @@ Authoritative DDL is in `migrations/001_init.sql` + `002_screen_schema.sql`. Pha
 
 ## Recent Changes
 
+- **v0.22.5 (2026-06-01)** — Fix Daily IV Update batch job ("no-data" on every ticker). Bug 1: `etrade-options.ts` looked for `currentPrice` in `OptionChainResponse` but E*Trade returns `nearPrice` — `underlyingPrice` was always null, so `captureFromEtradeChain` exited before writing any row. Bug 2: `OptionContract.iv` is a decimal fraction but `captureFromEtradeChain` stored it without `×100` — IV values would have been 100× too small. Both fixed.
+
 - **v0.22.4 (2026-06-01)** — Batch Jobs sequence ordering. `sequence_order` column added to `batch_jobs` (migration 021). Jobs with the same schedule now run in the user-defined order. `BatchView` job table has a `#` column with ▲/▼ buttons; clicking persists order via `BatchService.reorderJobs()` / `batch:reorder` IPC / `window.api.batch.reorderJobs`. `_getJobRows` now sorts `ORDER BY sequence_order ASC, id`. New jobs append to end on `registerJob`.
 
 - **v0.22.3 (2026-06-01)** — Single instance lock. `app.requestSingleInstanceLock()` in `index.ts`; second launch focuses existing window instead of opening a duplicate.

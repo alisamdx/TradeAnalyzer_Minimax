@@ -547,12 +547,15 @@ export class IvHistoryService {
     const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
     if (!isTradingDay(today)) return;
 
-    // Map OptionContract → the shape computeAtmIv expects
+    // Map OptionContract → the shape computeAtmIv expects.
+    // OptionContract.iv is a decimal fraction (0.285 = 28.5%) from E*Trade — multiply
+    // by 100 so computeAtmIv operates in percentage space and the stored value is correct.
+    // see docs/formulas.md#atm-iv-storage
     const mapped = contracts.map(c => ({
       expiration: c.expiration,
       strike:     c.strike,
       side:       c.side as 'call' | 'put',
-      iv:         c.iv,  // OptionContract.iv is already a percentage (28.5) — pass as-is so computeAtmIv works in pct space
+      iv:         c.iv * 100,
       dte:        (() => {
         const exp = new Date(c.expiration + 'T00:00:00Z');
         return Math.max(0, Math.round((exp.getTime() - Date.now()) / 86_400_000));
