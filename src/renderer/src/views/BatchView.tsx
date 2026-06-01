@@ -371,6 +371,55 @@ export function BatchView() {
         )}
       </div>
 
+      {/* ── Bottom panel: run history ── */}
+      <div style={{ background: '#131b2e', borderRadius: 10, border: '1px solid #2d3748', marginBottom: 24 }}>
+        <div style={{ padding: '12px 16px', borderBottom: '1px solid #2d3748', color: '#89b4fa', fontWeight: 600, fontSize: 13 }}>
+          Run History{selectedJob ? ` — ${selectedJob.name} (last 30 days)` : ''}
+        </div>
+        {!selectedJobId ? (
+          <div style={{ padding: 20, color: '#95a5a6', textAlign: 'center' }}>Select a job above to view history.</div>
+        ) : runs.length === 0 ? (
+          <div style={{ padding: 20, color: '#95a5a6', textAlign: 'center' }}>No runs recorded yet.</div>
+        ) : (
+          <table className="batch-table">
+            <thead>
+              <tr>
+                <th>Started</th>
+                <th>Duration</th>
+                <th>Status</th>
+                <th>Updated ✓</th>
+                <th>Skipped —</th>
+                <th>Failed ✗</th>
+                <th>Notes / Error</th>
+              </tr>
+            </thead>
+            <tbody>
+              {runs.map(run => (
+                <tr key={run.id}>
+                  <td style={{ color: '#95a5a6', fontSize: 12, whiteSpace: 'nowrap' }}>{formatTime(run.startedAt)}</td>
+                  <td style={{ color: '#95a5a6', fontSize: 12 }}>{formatDuration(run.startedAt, run.completedAt)}</td>
+                  <td><StatusBadge status={run.status} small /></td>
+                  <td style={{ color: '#2ecc71', textAlign: 'center' }}>{run.tickersUpdated || '—'}</td>
+                  <td style={{ color: '#95a5a6', textAlign: 'center' }}>{run.tickersSkipped || '—'}</td>
+                  <td style={{ color: run.tickersFailed > 0 ? '#e74c3c' : '#95a5a6', textAlign: 'center' }}>{run.tickersFailed || '—'}</td>
+                  <td style={{ color: '#95a5a6', fontSize: 12, maxWidth: 300, overflow: 'hidden' }}>
+                    {run.errorMessage ? (
+                      <span title={run.errorMessage} style={{ color: '#e74c3c', cursor: 'help' }}>
+                        {run.errorMessage.slice(0, 60)}{run.errorMessage.length > 60 ? '…' : ''}
+                      </span>
+                    ) : run.notes ? (
+                      <span title={run.notes}>
+                        {run.notes.slice(0, 60)}{run.notes.length > 60 ? '…' : ''}
+                      </span>
+                    ) : '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
       {/* ── Live Activity panel — visible only while a job is running or log not yet cleared ── */}
       {liveEvents.length > 0 && (() => {
         const last = liveEvents[liveEvents.length - 1]!;
@@ -439,55 +488,6 @@ export function BatchView() {
           </div>
         );
       })()}
-
-      {/* ── Bottom panel: run history ── */}
-      <div style={{ background: '#131b2e', borderRadius: 10, border: '1px solid #2d3748' }}>
-        <div style={{ padding: '12px 16px', borderBottom: '1px solid #2d3748', color: '#89b4fa', fontWeight: 600, fontSize: 13 }}>
-          Run History{selectedJob ? ` — ${selectedJob.name} (last 30 days)` : ''}
-        </div>
-        {!selectedJobId ? (
-          <div style={{ padding: 20, color: '#95a5a6', textAlign: 'center' }}>Select a job above to view history.</div>
-        ) : runs.length === 0 ? (
-          <div style={{ padding: 20, color: '#95a5a6', textAlign: 'center' }}>No runs recorded yet.</div>
-        ) : (
-          <table className="batch-table">
-            <thead>
-              <tr>
-                <th>Started</th>
-                <th>Duration</th>
-                <th>Status</th>
-                <th>Updated ✓</th>
-                <th>Skipped —</th>
-                <th>Failed ✗</th>
-                <th>Notes / Error</th>
-              </tr>
-            </thead>
-            <tbody>
-              {runs.map(run => (
-                <tr key={run.id}>
-                  <td style={{ color: '#95a5a6', fontSize: 12, whiteSpace: 'nowrap' }}>{formatTime(run.startedAt)}</td>
-                  <td style={{ color: '#95a5a6', fontSize: 12 }}>{formatDuration(run.startedAt, run.completedAt)}</td>
-                  <td><StatusBadge status={run.status} small /></td>
-                  <td style={{ color: '#2ecc71', textAlign: 'center' }}>{run.tickersUpdated || '—'}</td>
-                  <td style={{ color: '#95a5a6', textAlign: 'center' }}>{run.tickersSkipped || '—'}</td>
-                  <td style={{ color: run.tickersFailed > 0 ? '#e74c3c' : '#95a5a6', textAlign: 'center' }}>{run.tickersFailed || '—'}</td>
-                  <td style={{ color: '#95a5a6', fontSize: 12, maxWidth: 300, overflow: 'hidden' }}>
-                    {run.errorMessage ? (
-                      <span title={run.errorMessage} style={{ color: '#e74c3c', cursor: 'help' }}>
-                        {run.errorMessage.slice(0, 60)}{run.errorMessage.length > 60 ? '…' : ''}
-                      </span>
-                    ) : run.notes ? (
-                      <span title={run.notes}>
-                        {run.notes.slice(0, 60)}{run.notes.length > 60 ? '…' : ''}
-                      </span>
-                    ) : '—'}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
 
       {/* ── Edit modal ── */}
       {editJob && (
