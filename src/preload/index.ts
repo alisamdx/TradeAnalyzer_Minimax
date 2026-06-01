@@ -15,7 +15,10 @@ import type {
   Quote as CachedQuote,
   AnalysisModeInfo,
   AnalysisRunResult,
+  AnalysisAllModesRunResult,
+  AnalysisAllModesPayload,
   AnalysisSnapshotRow,
+  AnalysisProgressEvent,
   ValidateDashboardResult,
   JobRunInfo,
   TickerStatusRow,
@@ -171,15 +174,18 @@ function buildApi() {
     listModes: () => invoke<AnalysisModeInfo[]>('analysis:list-modes'),
     run: (watchlistId: number, mode: string, tickerSubset?: string[]) =>
       invoke<AnalysisRunResult>('analysis:run', { watchlistId, mode: mode as Parameters<typeof analysis.run>[1], tickerSubset }),
+    runAll: (watchlistId: number, tickerSubset?: string[]) =>
+      invoke<AnalysisAllModesRunResult>('analysis:run-all', { watchlistId, tickerSubset }),
     getSnapshots: (watchlistId: number) => invoke<AnalysisSnapshotRow[]>('analysis:get-snapshots', watchlistId),
     getSnapshot: (id: number) => invoke<{ id: number; watchlistId: number; mode: string; runAt: string; resultCount: number; results: unknown[] } | null>('analysis:get-snapshot', id),
+    getAllModesSnapshot: (id: number) => invoke<{ tickerCount: number; results: AnalysisAllModesPayload } | null>('analysis:get-all-modes-snapshot', id),
     deleteSnapshot: (id: number) => invoke<{ success: boolean }>('analysis:delete-snapshot', id),
     clearSnapshots: (watchlistId: number) => invoke<{ success: boolean }>('analysis:clear-snapshots', watchlistId),
     saveAsWatchlist: (snapshotId: number, resultIndices: number[], name: string) =>
       invoke<Watchlist>('analysis:save-as-watchlist', snapshotId, resultIndices, name),
     cancel: () => invoke<boolean>('analysis:cancel'),
-    onProgress: (callback: (data: { current: number; total: number; ticker: string }) => void) => {
-      const handler = (_: any, data: any) => callback(data);
+    onProgress: (callback: (data: AnalysisProgressEvent) => void) => {
+      const handler = (_: unknown, data: unknown) => callback(data as AnalysisProgressEvent);
       ipcRenderer.on('analysis:progress', handler);
       return () => ipcRenderer.removeListener('analysis:progress', handler);
     }

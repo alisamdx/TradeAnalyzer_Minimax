@@ -10,6 +10,7 @@ import type {
   AnalysisMode,
   AnalysisModeInfo,
   AnalysisRunResult,
+  AnalysisAllModesRunResult,
   ValidateAllResult,
   TickerStatusRow,
   JobRunInfo
@@ -164,6 +165,44 @@ export function registerAnalysisIpc(
       }
       return watchlistService.get(wl.id);
     })
+  );
+
+  // ── Run all modes ──────────────────────────────────────────────────────────
+  ipcMain.handle(
+    'analysis:run-all',
+    async (
+      e,
+      args: { watchlistId: number; tickerSubset?: string[] }
+    ): Promise<{ ok: true; value: AnalysisAllModesRunResult } | { ok: false; error: { code: string; message: string } }> => {
+      try {
+        const items = watchlistService.listItems(args.watchlistId);
+        const tickers = args.tickerSubset ?? items.map((i: import('@shared/types.js').WatchlistItem) => i.ticker);
+        if (tickers.length === 0) return fail(new Error('No tickers to analyze.'));
+
+        const onProgress = (current: number, total: number, ticker: string, mode: AnalysisMode) => {
+          e.sender.send('analysis:progress', { current, total, ticker, mode });
+        };
+
+        const results = await analysisService.analyzeWatchlistAllModes(tickers, onProgress);
+        const snapshot = analysisService.saveAllModesSnapshot(args.watchlistId, tickers.length, results);
+
+        return ok({
+          snapshotId: snapshot.id,
+          watchlistId: args.watchlistId,
+          runAt: snapshot.runAt,
+          tickerCount: tickers.length,
+          results
+        });
+      } catch (err) {
+        return fail(err);
+      }
+    }
+  );
+
+  // ── Get all-modes snapshot ─────────────────────────────────────────────────
+  ipcMain.handle(
+    'analysis:get-all-modes-snapshot',
+    wrap((id: number) => analysisService.getAllModesSnapshot(id))
   );
 
   // ── Cancel ─────────────────────────────────────────────────────────────────

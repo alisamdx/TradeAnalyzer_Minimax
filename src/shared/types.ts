@@ -184,11 +184,31 @@ export type AnalysisMode = 'buy' | 'options_income' | 'wheel' | 'bullish' | 'bea
 export interface AnalysisSnapshotRow {
   id: number;
   watchlistId: number;
-  mode: AnalysisMode;
+  /** 'all' for combined runs (all 5 modes); individual mode string for legacy single-mode runs. */
+  mode: AnalysisMode | 'all';
   runAt: string;
+  /** For 'all' snapshots: number of tickers analyzed. For single-mode: number of results. */
   resultCount: number;
-  /** JSON string — parse to get the full AnalysisResult[]. */
+  /** JSON string — structure depends on mode. */
   payloadJson: string;
+}
+
+/** All-modes payload stored in 'all' snapshots. */
+export interface AnalysisAllModesPayload {
+  buy: BuyResult[];
+  options_income: OptionsIncomeResult[];
+  wheel: WheelResult[];
+  bullish: StrategyResult[];
+  bearish: StrategyResult[];
+}
+
+/** Result returned by analysis:run-all. */
+export interface AnalysisAllModesRunResult {
+  snapshotId: number;
+  watchlistId: number;
+  runAt: string;
+  tickerCount: number;
+  results: AnalysisAllModesPayload;
 }
 
 /** Mode descriptor for the UI selector. */
@@ -208,6 +228,15 @@ export interface AnalysisRunResult {
   runAt: string;
   resultsJson: string;
   failedTickers: string[];
+}
+
+/** Per-ticker progress event emitted during analysis:run and analysis:run-all. */
+export interface AnalysisProgressEvent {
+  current: number;
+  total: number;
+  ticker: string;
+  /** Present during run-all to indicate which mode is currently executing. */
+  mode?: AnalysisMode;
 }
 
 /** Unified analysis result — union of all 5 mode outputs. */

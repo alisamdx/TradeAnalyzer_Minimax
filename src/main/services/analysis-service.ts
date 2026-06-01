@@ -12,6 +12,7 @@ import { JobQueue } from './job-queue.js';
 import type {
   AnalysisSnapshotRow,
   AnalysisMode,
+  AnalysisAllModesPayload,
   OptionsChain
 } from '@shared/types.js';
 
@@ -374,17 +375,14 @@ export class AnalysisService {
     }
   }
 
-  /** Analyze a full watchlist. */
-  async analyzeWatchlist(
-    watchlistId: number,
+  /** Inner loop — runs one mode over tickers without resetting the cancel flag. */
+  private async runMode(
     tickers: string[],
     mode: AnalysisMode,
     onProgress?: ProgressCallback
   ): Promise<AnalysisResult[]> {
-    this.resetCancel();
     const results: AnalysisResult[] = [];
     const total = tickers.length;
-
     for (let i = 0; i < tickers.length; i++) {
       if (this.cancelled) break;
       const ticker = tickers[i]!;
@@ -398,6 +396,44 @@ export class AnalysisService {
     }
     onProgress?.(total, total, tickers[tickers.length - 1] ?? '');
     return results;
+  }
+
+  /** Analyze a full watchlist in a single mode. */
+  async analyzeWatchlist(
+    _watchlistId: number,
+    tickers: string[],
+    mode: AnalysisMode,
+    onProgress?: ProgressCallback
+  ): Promise<AnalysisResult[]> {
+    this.resetCancel();
+    return this.runMode(tickers, mode, onProgress);
+  }
+
+  /** Analyze a full watchlist across all 5 modes sequentially. */
+  async analyzeWatchlistAllModes(
+    tickers: string[],
+    onProgress?: (current: number, total: number, ticker: string, mode: AnalysisMode) => void
+  ): Promise<AnalysisAllModesPayload> {
+    this.resetCancel();
+    const modes: AnalysisMode[] = ['buy', 'options_income', 'wheel', 'bullish', 'bearish'];
+    const payload: AnalysisAllModesPayload = {
+      buy: [], options_income: [], wheel: [], bullish: [], bearish: []
+    };
+
+    for (const mode of modes) {
+      if (this.cancelled) break;
+      const results = await this.runMode(
+        tickers,
+        mode,
+        (cur, tot, ticker) => onProgress?.(cur, tot, ticker, mode)
+      );
+      if (mode === 'buy') payload.buy = results as BuyResult[];
+      else if (mode === 'options_income') payload.options_income = results as OptionsIncomeResult[];
+      else if (mode === 'wheel') payload.wheel = results as WheelResult[];
+      else if (mode === 'bullish') payload.bullish = results.filter(r => r.mode === 'bullish') as StrategyResult[];
+      else if (mode === 'bearish') payload.bearish = results.filter(r => r.mode === 'bearish') as StrategyResult[];
+    }
+    return payload;
   }
 
   /** Save an analysis snapshot to the DB. */
@@ -422,12 +458,49 @@ export class AnalysisService {
       return {
         id: row.id,
         watchlistId: row.watchlist_id,
-        mode: row.mode as AnalysisMode,
+        mode: row.mode as AnalysisMode | 'all',
         runAt: row.run_at,
         resultCount: row.result_count,
         payloadJson
       };
     });
+  }
+
+  /** Save a combined all-modes snapshot to the DB. */
+  saveAllModesSnapshot(
+    watchlistId: number,
+    tickerCount: number,
+    results: AnalysisAllModesPayload
+  ): AnalysisSnapshotRow {
+    const payloadJson = JSON.stringify({ tickerCount, results });
+    return withTransaction(this.db, () => {
+      this.db.prepare(
+        `INSERT INTO analysis_snapshots (watchlist_id, mode, result_count, payload_json)
+         VALUES (?, 'all', ?, ?)`
+      ).run(watchlistId, tickerCount, payloadJson);
+
+      const row = this.db.prepare(
+        `SELECT id, watchlist_id, mode, run_at, result_count
+           FROM analysis_snapshots WHERE id = last_insert_rowid()`
+      ).get() as { id: number; watchlist_id: number; mode: string; run_at: string; result_count: number };
+
+      return {
+        id: row.id,
+        watchlistId: row.watchlist_id,
+        mode: 'all',
+        runAt: row.run_at,
+        resultCount: row.result_count,
+        payloadJson
+      };
+    });
+  }
+
+  /** Load a combined all-modes snapshot by id. Returns null if not found or wrong mode. */
+  getAllModesSnapshot(id: number): { tickerCount: number; results: AnalysisAllModesPayload } | null {
+    const snap = this.getSnapshot(id);
+    if (!snap || snap.mode !== 'all') return null;
+    const payload = JSON.parse(snap.payloadJson) as { tickerCount: number; results: AnalysisAllModesPayload };
+    return payload;
   }
 
   /** Load a snapshot by id. */
@@ -443,7 +516,7 @@ export class AnalysisService {
     return {
       id: r.id,
       watchlistId: r.watchlist_id,
-      mode: r.mode as AnalysisMode,
+      mode: r.mode as AnalysisMode | 'all',
       runAt: r.run_at,
       resultCount: r.result_count,
       payloadJson: r.payload_json
@@ -462,7 +535,7 @@ export class AnalysisService {
     return rows.map((r) => ({
       id: r.id,
       watchlistId: r.watchlist_id,
-      mode: r.mode as AnalysisMode,
+      mode: r.mode as AnalysisMode | 'all',
       runAt: r.run_at,
       resultCount: r.result_count,
       payloadJson: r.payload_json
