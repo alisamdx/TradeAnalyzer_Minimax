@@ -216,9 +216,19 @@ function PickCard({
 
       {/* Right column — all content */}
       <div>
-        {/* Row 1: ticker · score · validated · lab btn */}
+        {/* Row 1: ticker · price · capital · score · validated · lab btn */}
         <div className="pick-main-row">
           <span className="pick-ticker">{pick.ticker}</span>
+          {pick.price !== null && pick.price !== undefined && (
+            <>
+              <span className="pick-price">${pick.price.toFixed(2)}</span>
+              {strategy === 'wheel' && (
+                <span className="pick-capital" title="Cash needed to secure 1 CSP (100 shares)">
+                  ~${Math.round(pick.price * 100).toLocaleString()} cap
+                </span>
+              )}
+            </>
+          )}
           <span
             className="pick-score-badge"
             style={{ background: scoreBg(pick.compositeScore), color: scoreColor(pick.compositeScore) }}

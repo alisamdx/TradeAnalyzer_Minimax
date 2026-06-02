@@ -1512,6 +1512,7 @@ export interface BriefPick {
   aiRationale: string | null;
   rank: number;
   validated: boolean;
+  price: number | null;
 }
 
 export interface DailyBriefEntry {

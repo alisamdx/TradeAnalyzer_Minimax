@@ -3464,6 +3464,20 @@ input[type='checkbox'] {
   letter-spacing: 0.3px;
   color: var(--text);
 }
+.pick-price {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.pick-capital {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--warning);
+  background: rgba(210,153,34,0.1);
+  border: 1px solid rgba(210,153,34,0.25);
+  border-radius: 4px;
+  padding: 1px 7px;
+}
 .pick-score-badge {
   font-size: 12px;
   font-weight: 700;

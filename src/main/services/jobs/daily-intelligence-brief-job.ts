@@ -267,6 +267,7 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
         aiRationale: aiRationales.get(`${scored.ticker}:${strategy}`) ?? null,
         rank: idx + 1,
         validated: !!validationResults.get(scored.ticker) && validationResults.get(scored.ticker) !== null,
+        price: signalData.get(scored.ticker)?.lastPrice ?? null,
       }));
 
       runMeta['configVersions'] = {
