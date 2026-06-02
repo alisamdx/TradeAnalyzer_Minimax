@@ -171,6 +171,8 @@ Authoritative DDL is in `migrations/001_init.sql` + `002_screen_schema.sql`. Pha
 
 ## Recent Changes
 
+- **v0.22.14 (2026-06-01)** — Fix Payoff Assess Trade DTE bug. `payoff-service.ts` prompt builder now computes DTE from `leg.expiry` and appends `(45 DTE)` inline. Previously the year `2026` in the ISO date was misread as the DTE value.
+
 - **v0.22.13 (2026-06-01)** — Daily Brief: Payoff / Validate / Options quick-nav buttons on each pick card. `PickNavRow` reads `strategyLabResult.scores[0].setup` for expiry + legs; dispatches `navigate-to-payoff` (with `PayoffLeg[]` from `labLegToPayoffLeg()`), `navigate-to-validate`, `navigate-to-options` CustomEvents. Options button shows the expiry date from the best Strategy Lab structure.
 
 - **v0.22.12 (2026-06-01)** — Daily Brief: stock price + Wheel CSP capital requirement on pick cards.

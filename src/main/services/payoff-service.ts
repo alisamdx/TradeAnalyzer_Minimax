@@ -158,7 +158,8 @@ export class PayoffService {
         `Leg ${i + 1}: ${leg.side.toUpperCase()} ${leg.type.toUpperCase()}`,
       ];
       if (leg.type !== 'stock') {
-        parts.push(`strike $${leg.strike}`, `expiry ${leg.expiry}`, `premium $${leg.premium.toFixed(2)}`);
+        const dte = Math.max(0, Math.ceil((new Date(leg.expiry).getTime() - Date.now()) / 86_400_000));
+        parts.push(`strike $${leg.strike}`, `expiry ${leg.expiry} (${dte} DTE)`, `premium $${leg.premium.toFixed(2)}`);
       } else {
         parts.push(`entry $${leg.premium.toFixed(2)}`);
       }
