@@ -2,7 +2,7 @@
 // see Requirements/DAILY_INTELLIGENCE_BRIEF.md §6
 
 import { useState, useEffect, useCallback } from 'react';
-import type { DailyBriefEntry, BriefPick, ScoringStrategy } from '@shared/types.js';
+import type { DailyBriefEntry, BriefPick, ScoringStrategy, StrategyLabValidateResult, StrategyLabGrade } from '@shared/types.js';
 
 const STRATEGY_LABELS: Record<ScoringStrategy, string> = {
   wheel:   '🎡  Wheel — CSP / Covered Call',
@@ -34,6 +34,109 @@ const SIGNAL_LABELS: Record<string, string> = {
 };
 
 const STRATEGY_ORDER: ScoringStrategy[] = ['wheel', 'bullish', 'bearish', 'income', 'buy'];
+
+// Strategy Lab slugs that represent each Brief strategy.
+// Used to find the relevant structure grade inside strategyLabResult.
+const STRATEGY_TO_SLUGS: Record<ScoringStrategy, string[]> = {
+  wheel:   ['short-naked-put', 'covered-call'],
+  bullish: ['long-call-vertical', 'big-lizard', 'call-zebra', 'call-butterfly', 'poor-mans-covered-call'],
+  bearish: ['long-put-vertical', 'reverse-big-lizard', 'put-zebra', 'put-butterfly', 'poor-mans-covered-put'],
+  income:  ['short-strangle', 'iron-condor', 'short-straddle', 'dynamic-width-iron-condor', 'iron-fly'],
+  buy:     ['long-call-vertical', 'call-zebra', 'poor-mans-covered-call', 'call-calendar'],
+};
+
+// Human-readable short name for the primary slug shown on the card
+const SLUG_SHORT: Record<string, string> = {
+  'short-naked-put':           'CSP',
+  'covered-call':              'Covered Call',
+  'long-call-vertical':        'Call Spread',
+  'big-lizard':                'Big Lizard',
+  'call-zebra':                'Call Zebra',
+  'call-butterfly':            'Call Butterfly',
+  'poor-mans-covered-call':    'PMCC',
+  'long-put-vertical':         'Put Spread',
+  'reverse-big-lizard':        'Rev. Big Lizard',
+  'put-zebra':                 'Put Zebra',
+  'put-butterfly':             'Put Butterfly',
+  'poor-mans-covered-put':     'PMCP',
+  'short-strangle':            'Strangle',
+  'iron-condor':               'Iron Condor',
+  'short-straddle':            'Straddle',
+  'dynamic-width-iron-condor': 'Dyn. IC',
+  'iron-fly':                  'Iron Fly',
+  'call-calendar':             'Call Calendar',
+};
+
+const GRADE_COLOR: Record<StrategyLabGrade, string> = {
+  'A+': '#3fb950',
+  'A':  '#57cc6e',
+  'B':  '#e3a008',
+  'C':  '#f0783a',
+  'F':  '#f85149',
+};
+
+function gradeOf(result: StrategyLabValidateResult, slugs: string[]): { slug: string; name: string; grade: StrategyLabGrade; score: number } | null {
+  let best: (typeof result.scores)[number] | null = null;
+  for (const s of result.scores) {
+    if (slugs.includes(s.slug)) {
+      if (!best || s.totalScore > best.totalScore) best = s;
+    }
+  }
+  if (!best) return null;
+  return { slug: best.slug, name: best.name, grade: best.grade, score: best.totalScore };
+}
+
+function bestOverall(result: StrategyLabValidateResult): { name: string; grade: StrategyLabGrade } | null {
+  const top = result.scores[0];
+  return top ? { name: top.name, grade: top.grade } : null;
+}
+
+function StrategyLabSummary({
+  strategyLabResult,
+  strategy,
+}: {
+  strategyLabResult: object | null;
+  strategy: ScoringStrategy;
+}) {
+  if (!strategyLabResult) return null;
+
+  const result = strategyLabResult as StrategyLabValidateResult;
+  if (!result.scores?.length) return null;
+
+  const slugs = STRATEGY_TO_SLUGS[strategy];
+  const relevant = gradeOf(result, slugs);
+  const best = bestOverall(result);
+
+  if (!relevant && !best) return null;
+
+  const relevantIsBest = relevant && best && relevant.slug === result.scores[0]?.slug;
+
+  return (
+    <div className="pick-lab-summary">
+      {relevant ? (
+        <span className="lab-grade-item">
+          <span className="lab-grade-label">{SLUG_SHORT[relevant.slug] ?? relevant.name}</span>
+          <span className="lab-grade-badge" style={{ color: GRADE_COLOR[relevant.grade], borderColor: GRADE_COLOR[relevant.grade] }}>
+            {relevant.grade}
+          </span>
+        </span>
+      ) : (
+        <span className="lab-grade-item lab-grade-missing">No {strategy} structure graded</span>
+      )}
+      {best && !relevantIsBest && (
+        <>
+          <span className="lab-grade-sep">·  Best fit:</span>
+          <span className="lab-grade-item">
+            <span className="lab-grade-label">{best.name}</span>
+            <span className="lab-grade-badge" style={{ color: GRADE_COLOR[best.grade], borderColor: GRADE_COLOR[best.grade] }}>
+              {best.grade}
+            </span>
+          </span>
+        </>
+      )}
+    </div>
+  );
+}
 
 function fmtDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-US', {
@@ -97,9 +200,11 @@ function TopSignals({ signals }: { signals: BriefPick['signals'] }) {
 
 function PickCard({
   pick,
+  strategy,
   onGoToStrategyLab,
 }: {
   pick: BriefPick;
+  strategy: ScoringStrategy;
   onGoToStrategyLab: (ticker: string) => void;
 }) {
   return (
@@ -132,7 +237,10 @@ function PickCard({
         {/* Row 2: top signal chips */}
         <TopSignals signals={pick.signals} />
 
-        {/* Row 3: AI rationale */}
+        {/* Row 3: Strategy Lab grade alignment */}
+        <StrategyLabSummary strategyLabResult={pick.strategyLabResult ?? null} strategy={strategy} />
+
+        {/* Row 4: AI rationale */}
         {pick.aiRationale
           ? <p className="pick-rationale">{pick.aiRationale}</p>
           : <p className="pick-rationale muted">AI reasoning unavailable</p>
@@ -175,6 +283,7 @@ function StrategySection({
               <PickCard
                 key={pick.ticker}
                 pick={pick}
+                strategy={strategy}
                 onGoToStrategyLab={onGoToStrategyLab}
               />
             ))

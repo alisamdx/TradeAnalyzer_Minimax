@@ -3530,7 +3530,42 @@ input[type='checkbox'] {
   color: var(--text);
 }
 
-/* Row 3: AI rationale */
+/* Row 3: Strategy Lab grade alignment */
+.pick-lab-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 7px;
+}
+.lab-grade-item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+}
+.lab-grade-label {
+  color: var(--text-muted);
+}
+.lab-grade-badge {
+  font-size: 10px;
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: 3px;
+  border: 1px solid;
+  letter-spacing: 0.3px;
+}
+.lab-grade-sep {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.lab-grade-missing {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* Row 4: AI rationale */
 .pick-rationale {
   margin: 8px 0 0;
   font-size: 12px;

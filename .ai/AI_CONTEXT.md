@@ -171,6 +171,10 @@ Authoritative DDL is in `migrations/001_init.sql` + `002_screen_schema.sql`. Pha
 
 ## Recent Changes
 
+- **v0.22.10 (2026-06-01)** — Daily Brief: Strategy Lab grade alignment row on pick cards. Shows the relevant structure grade (e.g. `CSP  B`) and best overall if different (`·  Best fit: Reverse Big Lizard  A+`). `STRATEGY_TO_SLUGS` maps each Brief strategy to its Strategy Lab slugs; `StrategyLabSummary` component reads `strategyLabResult.scores` directly.
+
+- **v0.22.9 (2026-06-01)** — Daily Intelligence Brief UI redesign. Full CSS + JSX overhaul: bordered strategy sections, two-column pick cards with rank badge, color-coded score badge, human-readable signal chips with smart value formatting, italic AI rationale with left-border accent.
+
 - **v0.22.8 (2026-06-01)** — Daily Technical Signals batch job. New `DailyTechnicalSignalsJob` (migration 023, `technical_signals` table) computes MACD, RSI, Bollinger, SMA stack, candlestick patterns, and `buySignalScore` (0–100, mirrors Validate screen logic) nightly from `historical_prices` — no live API calls. `ScoringService.gatherSignalData()` now reads `buySignalScore` from `technical_signals`. Added `buySignalScore` signal to Buy (weight 20) and Bullish (weight 15) baseline configs.
 
 - **v0.22.7 (2026-06-01)** — Daily Intelligence Brief & Trade Scoring Engine. New `ScoringService` (5 strategies, configurable weights, `scoring_strategy_configs` table), `DailyIntelligenceBriefJob` (6-stage pipeline: Screen → Score → Filter → Strategy Lab → AI → Persist to `daily_briefs`), `DailyBriefView` (picks per strategy, AI rationale, history, → Strategy Lab), `TradeScoringView` (weight sliders, toggles, version labels, Reset to Baseline). Migration 022. Sidebar Intelligence section.
