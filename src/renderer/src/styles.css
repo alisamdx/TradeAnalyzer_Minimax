@@ -3593,6 +3593,34 @@ input[type='checkbox'] {
   opacity: 0.5;
 }
 
+/* ── Pick card quick-nav row ──────────────────────────────────── */
+.pick-nav-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.pick-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border: 1px solid #30363d;
+  border-radius: 5px;
+  background: #161b22;
+  color: #7dd3fc;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.pick-nav-btn:hover {
+  background: #1e2d3e;
+  border-color: #58a6ff;
+  color: #bae6fd;
+}
+
 /* Empty / loading states */
 .brief-empty-state {
   display: flex;

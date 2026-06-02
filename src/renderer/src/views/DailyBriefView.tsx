@@ -2,7 +2,7 @@
 // see Requirements/DAILY_INTELLIGENCE_BRIEF.md §6
 
 import { useState, useEffect, useCallback } from 'react';
-import type { DailyBriefEntry, BriefPick, ScoringStrategy, StrategyLabValidateResult, StrategyLabGrade } from '@shared/types.js';
+import type { DailyBriefEntry, BriefPick, ScoringStrategy, StrategyLabValidateResult, StrategyLabGrade, SetupLeg, PayoffLeg } from '@shared/types.js';
 
 const STRATEGY_LABELS: Record<ScoringStrategy, string> = {
   wheel:   '🎡  Wheel — CSP / Covered Call',
@@ -179,6 +179,26 @@ function fmtRaw(raw: number | null, key: string): string {
   return raw.toFixed(1);
 }
 
+// Convert a StrategySetup leg to a PayoffLeg for the Payoff Visualizer deep-link.
+function labLegToPayoffLeg(leg: SetupLeg, idx: number): PayoffLeg {
+  const side = leg.action === 'buy' ? 'Long' : 'Short';
+  const type = leg.side.charAt(0).toUpperCase() + leg.side.slice(1);
+  return {
+    id: `brief-leg-${idx}`,
+    side: leg.action,
+    type: leg.side,
+    strike: leg.strike,
+    expiry: leg.expiration,
+    premium: leg.mid,
+    quantity: leg.qty,
+    delta: leg.delta,
+    theta: null,
+    vega: null,
+    iv: leg.iv,
+    label: `${side} ${type} $${leg.strike}`,
+  };
+}
+
 function TopSignals({ signals }: { signals: BriefPick['signals'] }) {
   const entries = Object.entries(signals)
     .filter(([, v]) => !v.missing && v.raw !== null)
@@ -194,6 +214,57 @@ function TopSignals({ signals }: { signals: BriefPick['signals'] }) {
           <span className="signal-chip-value">{fmtRaw(v.raw, key)}</span>
         </span>
       ))}
+    </div>
+  );
+}
+
+// Quick-navigation row — Payoff, Validate, Options buttons pre-populated from strategyLabResult.
+function PickNavRow({ pick }: { pick: BriefPick }) {
+  const result = pick.strategyLabResult ? (pick.strategyLabResult as StrategyLabValidateResult) : null;
+  const best   = result?.scores?.[0] ?? null;
+  const setup  = best?.setup ?? null;
+  const expiry = setup?.expiration ?? null;
+  const legs   = setup?.legs?.length
+    ? setup.legs.map((l, i) => labLegToPayoffLeg(l, i))
+    : null;
+
+  const handleValidate = () => {
+    window.dispatchEvent(new CustomEvent('navigate-to-validate', {
+      detail: { ticker: pick.ticker },
+    }));
+  };
+
+  const handleOptions = () => {
+    window.dispatchEvent(new CustomEvent('navigate-to-options', {
+      detail: { ticker: pick.ticker, ...(expiry ? { expiry } : {}) },
+    }));
+  };
+
+  const handlePayoff = () => {
+    const detail: Record<string, unknown> = { ticker: pick.ticker };
+    if (pick.price != null)  detail.spot     = pick.price;
+    if (expiry)              detail.expiry   = expiry;
+    if (best)                detail.strategy = best.slug;
+    if (legs)                detail.legs     = legs;
+    window.dispatchEvent(new CustomEvent('navigate-to-payoff', { detail }));
+  };
+
+  const expiryLabel = expiry ? ` · ${expiry}` : '';
+
+  return (
+    <div className="pick-nav-row">
+      <button className="pick-nav-btn" onClick={handlePayoff}
+        title={legs ? `Open Payoff Visualizer pre-loaded with ${best?.name ?? 'strategy'} legs` : 'Open Payoff Visualizer for this ticker'}>
+        📊 Payoff
+      </button>
+      <button className="pick-nav-btn" onClick={handleValidate}
+        title="Open Validate for this ticker">
+        ✓ Validate
+      </button>
+      <button className="pick-nav-btn" onClick={handleOptions}
+        title={expiry ? `Open Options Chain — expiry ${expiry}` : 'Open Options Chain for this ticker'}>
+        📋 Options{expiryLabel}
+      </button>
     </div>
   );
 }
@@ -250,7 +321,10 @@ function PickCard({
         {/* Row 3: Strategy Lab grade alignment */}
         <StrategyLabSummary strategyLabResult={pick.strategyLabResult ?? null} strategy={strategy} />
 
-        {/* Row 4: AI rationale */}
+        {/* Row 4: Quick-navigation — Payoff / Validate / Options */}
+        <PickNavRow pick={pick} />
+
+        {/* Row 5: AI rationale */}
         {pick.aiRationale
           ? <p className="pick-rationale">{pick.aiRationale}</p>
           : <p className="pick-rationale muted">AI reasoning unavailable</p>

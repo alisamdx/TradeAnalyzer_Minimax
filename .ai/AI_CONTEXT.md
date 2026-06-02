@@ -171,6 +171,12 @@ Authoritative DDL is in `migrations/001_init.sql` + `002_screen_schema.sql`. Pha
 
 ## Recent Changes
 
+- **v0.22.13 (2026-06-01)** — Daily Brief: Payoff / Validate / Options quick-nav buttons on each pick card. `PickNavRow` reads `strategyLabResult.scores[0].setup` for expiry + legs; dispatches `navigate-to-payoff` (with `PayoffLeg[]` from `labLegToPayoffLeg()`), `navigate-to-validate`, `navigate-to-options` CustomEvents. Options button shows the expiry date from the best Strategy Lab structure.
+
+- **v0.22.12 (2026-06-01)** — Daily Brief: stock price + Wheel CSP capital requirement on pick cards.
+
+- **v0.22.11 (2026-06-01)** — Strategy Lab: fixed missing scrollbar (root div lacked `overflow-y: auto`; `.main` parent clips at ~6–8 rows).
+
 - **v0.22.10 (2026-06-01)** — Daily Brief: Strategy Lab grade alignment row on pick cards. Shows the relevant structure grade (e.g. `CSP  B`) and best overall if different (`·  Best fit: Reverse Big Lizard  A+`). `STRATEGY_TO_SLUGS` maps each Brief strategy to its Strategy Lab slugs; `StrategyLabSummary` component reads `strategyLabResult.scores` directly.
 
 - **v0.22.9 (2026-06-01)** — Daily Intelligence Brief UI redesign. Full CSS + JSX overhaul: bordered strategy sections, two-column pick cards with rank badge, color-coded score badge, human-readable signal chips with smart value formatting, italic AI rationale with left-border accent.
