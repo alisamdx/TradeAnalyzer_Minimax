@@ -171,6 +171,8 @@ Authoritative DDL is in `migrations/001_init.sql` + `002_screen_schema.sql`. Pha
 
 ## Recent Changes
 
+- **v0.22.7 (2026-06-01)** — Daily Intelligence Brief & Trade Scoring Engine. New `ScoringService` (5 strategies, configurable weights, `scoring_strategy_configs` table), `DailyIntelligenceBriefJob` (6-stage pipeline: Screen → Score → Filter → Strategy Lab → AI → Persist to `daily_briefs`), `DailyBriefView` (picks per strategy, AI rationale, history, → Strategy Lab), `TradeScoringView` (weight sliders, toggles, version labels, Reset to Baseline). Migration 022. Sidebar Intelligence section.
+
 - **v0.22.6 (2026-06-01)** — Batch Jobs sequence order moved to Edit modal. ▲/▼ buttons removed from table; `#` column is now read-only. `sequenceOrder` input added to Edit modal; `updateJobConfig` extended to handle `sequenceOrder` patch.
 
 - **v0.22.5 (2026-06-01)** — Fix Daily IV Update batch job ("no-data" on every ticker). Bug 1: `etrade-options.ts` looked for `currentPrice` in `OptionChainResponse` but E*Trade returns `nearPrice` — `underlyingPrice` was always null, so `captureFromEtradeChain` exited before writing any row. Bug 2: `OptionContract.iv` is a decimal fraction but `captureFromEtradeChain` stored it without `×100` — IV values would have been 100× too small. Both fixed.

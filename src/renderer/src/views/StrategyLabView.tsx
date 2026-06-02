@@ -746,9 +746,14 @@ function ExploreTab({ initialSlug, initialCtx, watchlists }: ExploreTabProps) {
 
 type Tab = 'validate' | 'explore';
 
-export function StrategyLabView() {
+interface StrategyLabViewProps {
+  initialTicker?: string | null;
+  clearInitialTicker?: () => void;
+}
+
+export function StrategyLabView({ initialTicker }: StrategyLabViewProps = {}) {
   const [tab, setTab]             = useState<Tab>('validate');
-  const [ticker, setTicker]       = useState('');
+  const [ticker, setTicker]       = useState(initialTicker ?? '');
   const [loading, setLoading]     = useState(false);
   const [error, setError]         = useState<string | null>(null);
   const [result, setResult]       = useState<StrategyLabValidateResult | null>(null);

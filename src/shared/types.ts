@@ -1465,3 +1465,60 @@ export interface BatchProgressEvent {
   total: number;
   message?: string;
 }
+
+// ─── Trade Scoring Engine + Daily Intelligence Brief (v0.22.7) ────────────────
+
+export type ScoringStrategy = 'wheel' | 'bullish' | 'bearish' | 'income' | 'buy';
+
+export interface ScoringSignal {
+  key: string;
+  label: string;
+  weight: number;
+  enabled: boolean;
+  description: string;
+  dataSource: string;
+  direction: 'higher_better' | 'lower_better' | 'target_range';
+  targetMin?: number;
+  targetMax?: number;
+  normMax?: number;
+  phase2?: boolean;
+}
+
+export interface SignalBreakdown {
+  raw: number | null;
+  normalized: number;
+  weight: number;
+  missing: boolean;
+}
+
+export interface ScoredTicker {
+  ticker: string;
+  compositeScore: number;
+  signals: Record<string, SignalBreakdown>;
+}
+
+export interface ScoringConfig {
+  strategy: ScoringStrategy;
+  signals: ScoringSignal[];
+  version: string;
+  updatedAt: string;
+}
+
+export interface BriefPick {
+  ticker: string;
+  compositeScore: number;
+  signals: Record<string, SignalBreakdown>;
+  strategyLabResult?: object | null;
+  aiRationale: string | null;
+  rank: number;
+  validated: boolean;
+}
+
+export interface DailyBriefEntry {
+  id: number;
+  generatedAt: string;
+  validUntil: string;
+  strategy: ScoringStrategy;
+  picks: BriefPick[];
+  runMeta: object | null;
+}

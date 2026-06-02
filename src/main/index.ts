@@ -51,6 +51,9 @@ import { DailyIvCaptureJob } from './services/jobs/daily-iv-capture.js';
 import { MarketSyncJob } from './services/jobs/market-sync-job.js';
 import { PriceGapFillJob } from './services/jobs/price-gap-fill-job.js';
 import { registerBatchIpc } from './ipc/ipc-batch.js';
+import { ScoringService } from './services/scoring-service.js';
+import { registerScoringIpc } from './ipc/ipc-scoring.js';
+import { DailyIntelligenceBriefJob } from './services/jobs/daily-intelligence-brief-job.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -357,6 +360,18 @@ app.whenReady().then(() => {
   registerBatchIpc(batchService, getMainWindow);
   batchService.startScheduler();
   batchService.runStartupJobs().catch(err => console.error('[batch] startup error:', err));
+
+  // v0.22.7 — Trade Scoring Engine + Daily Intelligence Brief
+  const scoringService = new ScoringService(db);
+  scoringService.seedBaselines();
+  registerScoringIpc(scoringService);
+
+  const briefJob = new DailyIntelligenceBriefJob(db, dataProvider, optionsProvider);
+  batchService.registerJob('daily-intelligence-brief', briefJob, {
+    dailyScheduleTime: '16:30',  // post-market, chains after price-gap-fill
+    startupDelaySeconds: 0,      // manual trigger only by default; no startup run
+    runOnStartup: false,
+  });
 
   // LEAPS + CSP strategy screener
   registerLeapsCspIpc(db, dataProvider, optionsProvider, rateLimiter);

@@ -27,10 +27,12 @@ import { IvHistoryView } from './views/IvHistoryView.js';
 import { KnowledgeView } from './views/KnowledgeView.js';
 import { StrategyLabView } from './views/StrategyLabView.js';
 import { BatchView } from './views/BatchView.js';
+import { DailyBriefView } from './views/DailyBriefView.js';
+import { TradeScoringView } from './views/TradeScoringView.js';
 
 declare const __APP_VERSION__: string;
 
-type View = 'watchlists' | 'screener' | 'filters' | 'analysis' | 'validate' | 'portfolio' | 'opportunity' | 'settings' | 'alerts' | 'data' | 'optionsChain' | 'payoff' | 'agent' | 'backtest' | 'leapsCsp' | 'collaredLeaps' | 'testApi' | 'ivHistory' | 'knowledge' | 'strategyLab' | 'batch';
+type View = 'watchlists' | 'screener' | 'filters' | 'analysis' | 'validate' | 'portfolio' | 'opportunity' | 'settings' | 'alerts' | 'data' | 'optionsChain' | 'payoff' | 'agent' | 'backtest' | 'leapsCsp' | 'collaredLeaps' | 'testApi' | 'ivHistory' | 'knowledge' | 'strategyLab' | 'batch' | 'dailyBrief' | 'tradeScoring';
 
 type NavEntry = {
   id: number;
@@ -45,6 +47,7 @@ type NavEntry = {
   payoffStrategy?: string | null;
   payoffStrike?: number | null;
   payoffLegs?: PayoffLeg[] | null;
+  strategyLabTicker?: string | null;
 };
 
 export function App() {
@@ -590,8 +593,18 @@ export function App() {
       case 'testApi': return <TestApiView />;
       case 'ivHistory': return <IvHistoryView />;
       case 'knowledge': return <KnowledgeView />;
-      case 'strategyLab': return <StrategyLabView />;
+      case 'strategyLab': return (
+        <StrategyLabView initialTicker={entry.strategyLabTicker ?? null} clearInitialTicker={() => {}} />
+      );
       case 'batch': return <BatchView />;
+      case 'dailyBrief': return (
+        <DailyBriefView
+          onGoToStrategyLab={(ticker) => {
+            setNavStack(prev => [...prev, { id: navIdRef.current++, view: 'strategyLab', strategyLabTicker: ticker }]);
+          }}
+        />
+      );
+      case 'tradeScoring': return <TradeScoringView />;
       case 'settings': return (
         <SettingsView
           etradeWarning={etradeWarning}
@@ -775,6 +788,21 @@ export function App() {
             onClick={() => navigateSidebar('batch')}
           >
             🔄 Batch Jobs
+          </button>
+
+          {/* ── Intelligence ── */}
+          <div className="nav-section-label">Intelligence</div>
+          <button
+            className={`nav-btn ${currentView === 'dailyBrief' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('dailyBrief')}
+          >
+            📋 Daily Brief
+          </button>
+          <button
+            className={`nav-btn ${currentView === 'tradeScoring' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('tradeScoring')}
+          >
+            ⚖ Trade Scoring
           </button>
 
           {/* ── Screeners ── */}

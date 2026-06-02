@@ -82,6 +82,10 @@ import type {
   BatchRun,
   AppNotification,
   BatchProgressEvent,
+  ScoringSignal,
+  ScoringConfig,
+  ScoringStrategy,
+  DailyBriefEntry,
 } from '@shared/types.js';
 export type {
   ScreenPreset, ScreenCriteria, ScreenRunResult, ScreenResultRow, Universe,
@@ -933,6 +937,21 @@ function buildApi() {
       invoke<string>('strategyLab:aiRationale', score, ctx),
   };
 
+  const scoring = {
+    getConfig: (strategy?: ScoringStrategy) =>
+      strategy
+        ? invoke<ScoringConfig>('scoring:get-config', strategy)
+        : invoke<ScoringConfig[]>('scoring:get-config'),
+    updateConfig: (strategy: ScoringStrategy, signals: ScoringSignal[], version: string) =>
+      invoke<boolean>('scoring:update-config', strategy, signals, version),
+    resetToBaseline: (strategy: ScoringStrategy) =>
+      invoke<ScoringConfig>('scoring:reset-to-baseline', strategy),
+    getLatestBrief: (strategy?: ScoringStrategy) =>
+      invoke<DailyBriefEntry[]>('scoring:get-latest-brief', strategy),
+    getBriefHistory: (limit?: number) =>
+      invoke<DailyBriefEntry[]>('scoring:get-brief-history', limit),
+  };
+
   const batch = {
     listJobs:   () => invoke<BatchJob[]>('batch:list-jobs'),
     listRuns:   (jobId: string) => invoke<BatchRun[]>('batch:list-runs', jobId),
@@ -955,7 +974,7 @@ function buildApi() {
   };
 
   return {
-    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, historical, portfolio, alerts, optionsChain, agent, backtest, leapsCsp, collaredLeaps, testApi, etrade, filters, payoff, ivHistory, opportunity, strategyLab, batch },
+    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, historical, portfolio, alerts, optionsChain, agent, backtest, leapsCsp, collaredLeaps, testApi, etrade, filters, payoff, ivHistory, opportunity, strategyLab, batch, scoring },
     dialog: {
       prompt: (opts: { title: string; defaultValue?: string }) =>
         invoke<string | null>('dialog:prompt', opts),
