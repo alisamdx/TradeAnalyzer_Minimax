@@ -5,11 +5,23 @@ import { useState, useEffect, useCallback } from 'react';
 import type { ScoringConfig, ScoringSignal, ScoringStrategy } from '@shared/types.js';
 
 const STRATEGY_LABELS: Record<ScoringStrategy, string> = {
-  wheel:   'Wheel',
-  bullish: 'Bullish',
-  bearish: 'Bearish',
-  income:  'Income',
-  buy:     'Buy / Swing',
+  wheel:   '🎡  Wheel',
+  bullish: '🐂  Bullish',
+  bearish: '🐻  Bearish',
+  income:  '💰  Income',
+  buy:     '📈  Buy / Swing',
+};
+
+const DIRECTION_ICON: Record<ScoringSignal['direction'], string> = {
+  higher_better: '↑',
+  lower_better:  '↓',
+  target_range:  '◎',
+};
+
+const DIRECTION_TITLE: Record<ScoringSignal['direction'], string> = {
+  higher_better: 'Higher is better',
+  lower_better:  'Lower is better',
+  target_range:  'Target range',
 };
 
 const STRATEGIES: ScoringStrategy[] = ['wheel', 'bullish', 'bearish', 'income', 'buy'];
@@ -41,41 +53,63 @@ function SignalRow({
   signal: ScoringSignal;
   onChange: (updated: ScoringSignal) => void;
 }) {
-  const isPhase2 = signal.phase2;
+  const isPhase2 = signal.phase2 ?? false;
+  const isActive = signal.enabled && !isPhase2;
 
   return (
-    <div className={`scoring-signal-row ${!signal.enabled || isPhase2 ? 'disabled' : ''}`}>
-      <div className="signal-toggle">
+    <div className={`scoring-signal-row${!isActive ? ' disabled' : ''}`}>
+      {/* Toggle */}
+      <div className="sig-toggle">
         <input
           type="checkbox"
           checked={signal.enabled}
           disabled={isPhase2}
+          title={isPhase2 ? 'Phase 2 — not yet available' : undefined}
           onChange={e => onChange({ ...signal, enabled: e.target.checked })}
         />
       </div>
-      <div className="signal-label">
-        <span className="signal-name">{signal.label}</span>
-        {isPhase2 && <span className="phase2-badge">Phase 2</span>}
-        <span className="signal-source">{signal.dataSource}</span>
+
+      {/* Label + source + direction */}
+      <div className="sig-label">
+        <div className="sig-name-row">
+          <span className="sig-name">{signal.label}</span>
+          <span
+            className={`sig-direction dir-${signal.direction}`}
+            title={DIRECTION_TITLE[signal.direction]}
+          >
+            {DIRECTION_ICON[signal.direction]}
+          </span>
+          {isPhase2 && <span className="sig-phase2-badge">Phase 2</span>}
+        </div>
+        <span className="sig-source">{signal.dataSource}</span>
       </div>
-      <div className="signal-weight">
-        <input
-          type="number"
-          min={0}
-          max={100}
-          value={signal.weight}
-          disabled={!signal.enabled || isPhase2}
-          onChange={e => {
-            const val = Math.min(100, Math.max(0, parseInt(e.target.value, 10) || 0));
-            onChange({ ...signal, weight: val });
-          }}
-          style={{ width: 60 }}
-        />
-        <span className="weight-pct">%</span>
+
+      {/* Weight input + bar */}
+      <div className="sig-weight">
+        <div className="sig-weight-input-row">
+          <input
+            type="number"
+            min={0}
+            max={100}
+            value={signal.weight}
+            disabled={!signal.enabled || isPhase2}
+            onChange={e => {
+              const val = Math.min(100, Math.max(0, parseInt(e.target.value, 10) || 0));
+              onChange({ ...signal, weight: val });
+            }}
+          />
+          <span className="sig-weight-pct">%</span>
+        </div>
+        <div className="sig-weight-bar-track">
+          <div
+            className="sig-weight-bar-fill"
+            style={{ width: `${Math.min(100, signal.weight)}%` }}
+          />
+        </div>
       </div>
-      <div className="signal-desc" title={signal.description}>
-        {signal.description}
-      </div>
+
+      {/* Description */}
+      <div className="sig-desc">{signal.description}</div>
     </div>
   );
 }
@@ -107,7 +141,6 @@ export function TradeScoringView() {
 
   useEffect(() => { load(); }, [load]);
 
-  // When strategy changes, reload signals from fetched config
   const handleStrategyChange = (strategy: ScoringStrategy) => {
     setSelectedStrategy(strategy);
     const cfg = configs[strategy];
@@ -119,15 +152,12 @@ export function TradeScoringView() {
 
   const handleSignalChange = (updated: ScoringSignal) => {
     setEditingSignals(prev => {
-      // If weight changed, redistribute
       const old = prev.find(s => s.key === updated.key);
       if (old && old.weight !== updated.weight) {
         return redistributeWeights(prev, updated.key, updated.weight);
       }
-      // If enabled toggled, also redistribute
       if (old && old.enabled !== updated.enabled) {
         const newSignals = prev.map(s => s.key === updated.key ? updated : s);
-        // Re-normalize weights among enabled signals
         const enabled = newSignals.filter(s => s.enabled && !s.phase2);
         const tot = enabled.reduce((sum, s) => sum + s.weight, 0);
         if (tot === 0) return newSignals;
@@ -145,7 +175,7 @@ export function TradeScoringView() {
     try {
       const version = versionInput.trim() || `v${Date.now()}`;
       await window.api.scoring.updateConfig(selectedStrategy, editingSignals, version);
-      setSavedMsg(`Saved as "${version}"`);
+      setSavedMsg(`✓ Saved as "${version}"`);
       setTimeout(() => setSavedMsg(''), 3000);
       await load();
     } catch (err) {
@@ -165,7 +195,7 @@ export function TradeScoringView() {
       const cfg = await window.api.scoring.resetToBaseline(selectedStrategy);
       setEditingSignals([...(cfg as ScoringConfig).signals]);
       setVersionInput((cfg as ScoringConfig).version);
-      setSavedMsg('Reset to baseline');
+      setSavedMsg('✓ Reset to baseline');
       setTimeout(() => setSavedMsg(''), 3000);
     } catch (err) {
       console.error('[scoring] reset error:', err);
@@ -175,81 +205,104 @@ export function TradeScoringView() {
   const cfg = configs[selectedStrategy];
   const enabledTotal = totalWeight(editingSignals);
   const isBalanced = enabledTotal === 100 || editingSignals.filter(s => s.enabled && !s.phase2).length === 0;
+  const activeSignals = editingSignals.filter(s => s.enabled && !s.phase2);
+  const phase2Signals = editingSignals.filter(s => s.phase2);
 
   return (
     <div className="view trade-scoring-view">
+      {/* ── Header ─────────────────────────────────────────────── */}
       <div className="toolbar">
         <h2>Trade Scoring Config</h2>
         <div style={{ flex: 1 }} />
+        {cfg && (
+          <span className="meta" style={{ fontSize: 12 }}>
+            v<strong>{cfg.version}</strong>
+            <span style={{ marginLeft: 12, color: '#64748b' }}>
+              saved {new Date(cfg.updatedAt).toLocaleDateString()}
+            </span>
+          </span>
+        )}
       </div>
 
-      {/* Strategy selector */}
-      <div className="scoring-strategy-bar">
+      {/* ── Strategy tabs ───────────────────────────────────────── */}
+      <div className="scoring-strategy-tabs">
         {STRATEGIES.map(s => (
           <button
             key={s}
-            className={`strategy-tab ${selectedStrategy === s ? 'active' : ''}`}
+            className={`scoring-tab${selectedStrategy === s ? ' active' : ''}`}
             onClick={() => handleStrategyChange(s)}
           >
             {STRATEGY_LABELS[s]}
           </button>
         ))}
+        <span className="scoring-tab-note">
+          Changes take effect on the next Brief run
+        </span>
       </div>
 
-      {cfg && (
-        <div className="scoring-meta">
-          <span className="meta">Version: <strong>{cfg.version}</strong></span>
-          <span className="meta" style={{ marginLeft: 16 }}>
-            Last saved: {new Date(cfg.updatedAt).toLocaleDateString()}
-          </span>
-          <span className="meta scoring-note" style={{ marginLeft: 'auto' }}>
-            Changes take effect on the next brief generation run.
-          </span>
-        </div>
-      )}
-
-      {/* Signal rows */}
-      <div className="scoring-signals-table">
+      {/* ── Signal table ────────────────────────────────────────── */}
+      <div className="scoring-signals-area">
+        {/* Column header */}
         <div className="scoring-signals-header">
-          <span style={{ width: 32 }} />
-          <span style={{ flex: 1 }}>Signal</span>
-          <span style={{ width: 80 }}>Weight</span>
-          <span style={{ flex: 2 }}>Expert rationale</span>
+          <span className="sh-toggle" />
+          <span className="sh-label">Signal</span>
+          <span className="sh-weight">Weight</span>
+          <span className="sh-desc">Expert rationale</span>
         </div>
-        {editingSignals.map(sig => (
+
+        {/* Active signals */}
+        {editingSignals.filter(s => !s.phase2).map(sig => (
           <SignalRow key={sig.key} signal={sig} onChange={handleSignalChange} />
         ))}
-        <div className={`scoring-total ${isBalanced ? 'ok' : 'warn'}`}>
-          <span>Total: <strong>{enabledTotal}%</strong></span>
+
+        {/* Phase 2 section */}
+        {phase2Signals.length > 0 && (
+          <>
+            <div className="scoring-phase2-divider">
+              <span>Phase 2 signals — not yet available</span>
+            </div>
+            {phase2Signals.map(sig => (
+              <SignalRow key={sig.key} signal={sig} onChange={handleSignalChange} />
+            ))}
+          </>
+        )}
+
+        {/* Weight total */}
+        <div className={`scoring-total-row${isBalanced ? ' ok' : ' warn'}`}>
+          <span className="total-label">Enabled weight total</span>
+          <span className="total-value">{enabledTotal}%</span>
           {!isBalanced && (
-            <span className="total-warn"> (must equal 100%)</span>
+            <span className="total-warn-msg">must equal 100%</span>
+          )}
+          {isBalanced && activeSignals.length > 0 && (
+            <span className="total-ok-msg">{activeSignals.length} signals active</span>
           )}
         </div>
       </div>
 
-      {/* Save / reset */}
-      <div className="scoring-actions">
-        <label>
-          Version label:
+      {/* ── Actions footer ──────────────────────────────────────── */}
+      <div className="scoring-footer">
+        <label className="scoring-version-label">
+          <span>Version label</span>
           <input
             type="text"
             value={versionInput}
             onChange={e => setVersionInput(e.target.value)}
             placeholder="e.g. tastytrade_v2"
-            style={{ marginLeft: 8, width: 180 }}
           />
         </label>
-        <button
-          onClick={handleSave}
-          disabled={saving || !isBalanced}
-          className="primary"
-        >
-          {saving ? 'Saving…' : 'Save'}
-        </button>
-        <button onClick={handleReset}>
+        <div style={{ flex: 1 }} />
+        {savedMsg && <span className="scoring-save-msg">{savedMsg}</span>}
+        <button className="btn-ghost" onClick={handleReset}>
           Reset to Baseline
         </button>
-        {savedMsg && <span className="save-msg">{savedMsg}</span>}
+        <button
+          className="btn-primary"
+          onClick={handleSave}
+          disabled={saving || !isBalanced}
+        >
+          {saving ? 'Saving…' : 'Save Config'}
+        </button>
       </div>
     </div>
   );

@@ -171,6 +171,8 @@ Authoritative DDL is in `migrations/001_init.sql` + `002_screen_schema.sql`. Pha
 
 ## Recent Changes
 
+- **v0.22.16 (2026-06-01)** — Trade Scoring Config full UI redesign. Pill tabs, 4-column signal grid, direction badges (↑↓◎), weight bars, Phase 2 divider, green/red total row, sticky footer.
+
 - **v0.22.15 (2026-06-01)** — Daily Brief hard liquidity gate + setup details. `hasAdequateLiquidity()` drops picks where the best relevant Strategy Lab structure scores `liquidityScore < 5` (OI=1 + wide spread = ~3). Pick cards now show `$240 · Jul 17 · $3.25 cr` below the grade badge via `primaryStrike()` / `fmtExpShort()`.
 
 - **v0.22.14 (2026-06-01)** — Fix Payoff Assess Trade DTE bug. `payoff-service.ts` prompt builder now computes DTE from `leg.expiry` and appends `(45 DTE)` inline. Previously the year `2026` in the ISO date was misread as the DTE value.
