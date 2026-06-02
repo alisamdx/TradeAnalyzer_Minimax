@@ -51,7 +51,7 @@ type NavEntry = {
 };
 
 export function App() {
-  const [navStack, setNavStack] = useState<NavEntry[]>([{ id: 0, view: 'data' }]);
+  const [navStack, setNavStack] = useState<NavEntry[]>([{ id: 0, view: 'batch' }]);
   const navIdRef = useRef(1);
   const [watchlists, setWatchlists] = useState<Watchlist[]>([]);
   const [activeId, setActiveId] = useState<number | null>(null);
@@ -778,12 +778,6 @@ export function App() {
             ⚙ Settings
           </button>
           <button
-            className={`nav-btn ${currentView === 'data' ? 'active' : ''}`}
-            onClick={() => navigateSidebar('data')}
-          >
-            🗄️ Data Sync
-          </button>
-          <button
             className={`nav-btn ${currentView === 'batch' ? 'active' : ''}`}
             onClick={() => navigateSidebar('batch')}
           >
@@ -899,6 +893,12 @@ export function App() {
             onClick={() => navigateSidebar('testApi')}
           >
             🔬 Test API
+          </button>
+          <button
+            className={`nav-btn ${currentView === 'data' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('data')}
+          >
+            🗄️ Data Sync
           </button>
           <button
             className={`nav-btn ${currentView === 'ivHistory' ? 'active' : ''}`}

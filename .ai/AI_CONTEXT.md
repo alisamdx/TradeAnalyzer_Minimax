@@ -171,6 +171,8 @@ Authoritative DDL is in `migrations/001_init.sql` + `002_screen_schema.sql`. Pha
 
 ## Recent Changes
 
+- **v0.22.17 (2026-06-01)** — Nav: Data Sync moved to Misc above History; Batch Jobs is default landing page.
+
 - **v0.22.16 (2026-06-01)** — Trade Scoring Config full UI redesign. Pill tabs, 4-column signal grid, direction badges (↑↓◎), weight bars, Phase 2 divider, green/red total row, sticky footer.
 
 - **v0.22.15 (2026-06-01)** — Daily Brief hard liquidity gate + setup details. `hasAdequateLiquidity()` drops picks where the best relevant Strategy Lab structure scores `liquidityScore < 5` (OI=1 + wide spread = ~3). Pick cards now show `$240 · Jul 17 · $3.25 cr` below the grade badge via `primaryStrike()` / `fmtExpShort()`.
