@@ -3593,6 +3593,43 @@ input[type='checkbox'] {
   opacity: 0.5;
 }
 
+/* ── Strategy Lab grade + setup detail ───────────────────────── */
+.pick-lab-grade-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.pick-setup-detail {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 11px;
+}
+.setup-strike {
+  font-weight: 600;
+  color: #e2e8f0;
+}
+.setup-expiry {
+  color: #94a3b8;
+}
+.setup-premium {
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+.setup-credit {
+  color: #3fb950;
+  background: rgba(63,185,80,0.12);
+}
+.setup-debit {
+  color: #f0783a;
+  background: rgba(240,120,58,0.12);
+}
+
 /* ── Pick card quick-nav row ──────────────────────────────────── */
 .pick-nav-row {
   display: flex;

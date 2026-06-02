@@ -2,7 +2,7 @@
 // see Requirements/DAILY_INTELLIGENCE_BRIEF.md §6
 
 import { useState, useEffect, useCallback } from 'react';
-import type { DailyBriefEntry, BriefPick, ScoringStrategy, StrategyLabValidateResult, StrategyLabGrade, SetupLeg, PayoffLeg } from '@shared/types.js';
+import type { DailyBriefEntry, BriefPick, ScoringStrategy, StrategyLabValidateResult, StrategyLabGrade, StrategySetup, SetupLeg, PayoffLeg } from '@shared/types.js';
 
 const STRATEGY_LABELS: Record<ScoringStrategy, string> = {
   wheel:   '🎡  Wheel — CSP / Covered Call',
@@ -75,7 +75,7 @@ const GRADE_COLOR: Record<StrategyLabGrade, string> = {
   'F':  '#f85149',
 };
 
-function gradeOf(result: StrategyLabValidateResult, slugs: string[]): { slug: string; name: string; grade: StrategyLabGrade; score: number } | null {
+function gradeOf(result: StrategyLabValidateResult, slugs: string[]): { slug: string; name: string; grade: StrategyLabGrade; score: number; setup: StrategySetup | null } | null {
   let best: (typeof result.scores)[number] | null = null;
   for (const s of result.scores) {
     if (slugs.includes(s.slug)) {
@@ -83,7 +83,18 @@ function gradeOf(result: StrategyLabValidateResult, slugs: string[]): { slug: st
     }
   }
   if (!best) return null;
-  return { slug: best.slug, name: best.name, grade: best.grade, score: best.totalScore };
+  return { slug: best.slug, name: best.name, grade: best.grade, score: best.totalScore, setup: best.setup };
+}
+
+// Format ISO expiry as "Jul 17"
+function fmtExpShort(iso: string): string {
+  return new Date(`${iso}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+// Return the primary (short-side) strike for a setup — the most relevant single number to show.
+function primaryStrike(setup: StrategySetup): number | null {
+  const shortLeg = setup.legs.find(l => l.action === 'sell');
+  return (shortLeg ?? setup.legs[0])?.strike ?? null;
 }
 
 function bestOverall(result: StrategyLabValidateResult): { name: string; grade: StrategyLabGrade } | null {
@@ -111,28 +122,48 @@ function StrategyLabSummary({
 
   const relevantIsBest = relevant && best && relevant.slug === result.scores[0]?.slug;
 
+  // Setup detail line for the relevant structure (strike · expiry · premium)
+  const setup = relevant?.setup ?? null;
+  const setupAvailable = setup !== null && !setup.unavailableReason;
+  const strike = setupAvailable ? primaryStrike(setup!) : null;
+  const credit = setupAvailable && setup!.netCredit !== null && setup!.netCredit > 0 ? setup!.netCredit : null;
+  const debit  = setupAvailable && setup!.netDebit  !== null && setup!.netDebit  > 0 ? setup!.netDebit  : null;
+
   return (
     <div className="pick-lab-summary">
-      {relevant ? (
-        <span className="lab-grade-item">
-          <span className="lab-grade-label">{SLUG_SHORT[relevant.slug] ?? relevant.name}</span>
-          <span className="lab-grade-badge" style={{ color: GRADE_COLOR[relevant.grade], borderColor: GRADE_COLOR[relevant.grade] }}>
-            {relevant.grade}
-          </span>
-        </span>
-      ) : (
-        <span className="lab-grade-item lab-grade-missing">No {strategy} structure graded</span>
-      )}
-      {best && !relevantIsBest && (
-        <>
-          <span className="lab-grade-sep">·  Best fit:</span>
+      {/* Grade row */}
+      <div className="pick-lab-grade-row">
+        {relevant ? (
           <span className="lab-grade-item">
-            <span className="lab-grade-label">{best.name}</span>
-            <span className="lab-grade-badge" style={{ color: GRADE_COLOR[best.grade], borderColor: GRADE_COLOR[best.grade] }}>
-              {best.grade}
+            <span className="lab-grade-label">{SLUG_SHORT[relevant.slug] ?? relevant.name}</span>
+            <span className="lab-grade-badge" style={{ color: GRADE_COLOR[relevant.grade], borderColor: GRADE_COLOR[relevant.grade] }}>
+              {relevant.grade}
             </span>
           </span>
-        </>
+        ) : (
+          <span className="lab-grade-item lab-grade-missing">No {strategy} structure graded</span>
+        )}
+        {best && !relevantIsBest && (
+          <>
+            <span className="lab-grade-sep">·  Best fit:</span>
+            <span className="lab-grade-item">
+              <span className="lab-grade-label">{best.name}</span>
+              <span className="lab-grade-badge" style={{ color: GRADE_COLOR[best.grade], borderColor: GRADE_COLOR[best.grade] }}>
+                {best.grade}
+              </span>
+            </span>
+          </>
+        )}
+      </div>
+
+      {/* Setup detail row — strike · expiry · premium */}
+      {setupAvailable && (
+        <div className="pick-setup-detail">
+          {strike !== null && <span className="setup-strike">${strike}</span>}
+          <span className="setup-expiry">{fmtExpShort(setup!.expiration)}</span>
+          {credit !== null && <span className="setup-premium setup-credit">${credit.toFixed(2)} cr</span>}
+          {debit  !== null && <span className="setup-premium setup-debit">${debit.toFixed(2)}  dr</span>}
+        </div>
       )}
     </div>
   );

@@ -20,6 +20,39 @@ const PICKS_PER_STRATEGY = 5;
 const STAGE_4_CAP = PICKS_PER_STRATEGY * STRATEGIES.length; // ≤ 25 total
 const RETENTION_DAYS = 90;
 
+// Minimum Strategy Lab liquidityScore (0–15) for a pick to survive the hard gate.
+// OI=1 + wide spread → ~3; OI<100 + moderate spread → ~7.
+// Gate at 5 drops OI=1 with any realistic spread while keeping OI≥100 picks.
+const MIN_LIQUIDITY_SCORE = 5;
+
+// Which Strategy Lab slugs represent each brief strategy.
+// Used for the liquidity gate — we check only structures the brief strategy would trade.
+const STRATEGY_RELEVANT_SLUGS: Record<string, string[]> = {
+  wheel:   ['short-naked-put', 'covered-call'],
+  bullish: ['long-call-vertical', 'big-lizard', 'call-zebra', 'call-butterfly', 'poor-mans-covered-call'],
+  bearish: ['long-put-vertical', 'reverse-big-lizard', 'put-zebra', 'put-butterfly', 'poor-mans-covered-put'],
+  income:  ['short-strangle', 'iron-condor', 'short-straddle', 'dynamic-width-iron-condor', 'iron-fly'],
+  buy:     ['long-call-vertical', 'call-zebra', 'poor-mans-covered-call', 'call-calendar'],
+};
+
+// Returns false when the best relevant structure has liquidityScore below the threshold.
+// Returns true when we have no lab result (can't gate) or no relevant structure available.
+function hasAdequateLiquidity(labResult: object | null, strategy: string): boolean {
+  if (!labResult) return true;
+  type SScore = { slug: string; liquidityScore: number; setup: { unavailableReason: string | null } | null };
+  type LabRes  = { scores?: SScore[] };
+  const result = labResult as LabRes;
+  const slugs  = STRATEGY_RELEVANT_SLUGS[strategy] ?? [];
+  let best: number | null = null;
+  for (const s of result.scores ?? []) {
+    if (slugs.includes(s.slug) && s.setup && !s.setup.unavailableReason) {
+      if (best === null || s.liquidityScore > best) best = s.liquidityScore;
+    }
+  }
+  if (best === null) return true; // structure unavailable — can't gate
+  return best >= MIN_LIQUIDITY_SCORE;
+}
+
 // Next trading day 9:30am ET — used as valid_until
 function nextTradingDayOpen(fromIso: string): string {
   const d = new Date(fromIso);
@@ -256,10 +289,21 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
     this.scoringService.pruneStaleBriefs(RETENTION_DAYS);
 
     let totalPicks = 0;
+    let totalGated = 0;
     for (const strategy of STRATEGIES) {
       if (signal.aborted) break;
       const top = topPerStrategy.get(strategy) ?? [];
-      const picks: BriefPick[] = top.map((scored, idx) => ({
+
+      // Hard liquidity gate — drop picks where the relevant strategy structure
+      // has liquidityScore < MIN_LIQUIDITY_SCORE (e.g. OI=1 with wide spreads)
+      const liquidFiltered = top.filter(scored => {
+        const labResult = validationResults.get(scored.ticker) ?? null;
+        return hasAdequateLiquidity(labResult, strategy);
+      });
+      const gated = top.length - liquidFiltered.length;
+      if (gated > 0) totalGated += gated;
+
+      const picks: BriefPick[] = liquidFiltered.map((scored, idx) => ({
         ticker: scored.ticker,
         compositeScore: scored.compositeScore,
         signals: scored.signals,
@@ -282,11 +326,12 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
     const totalMs = Date.now() - new Date(runMeta['startedAt'] as string).getTime();
     runMeta['totalMs'] = totalMs;
     runMeta['etradeFailed'] = etradeFailed;
-    emit(`Stage 6/6: Brief generated — ${totalPicks} picks across 5 strategies`, totalPicks, totalPicks);
+    const gatedMsg = totalGated > 0 ? ` | ${totalGated} dropped (low liquidity)` : '';
+    emit(`Stage 6/6: Brief generated — ${totalPicks} picks across 5 strategies${gatedMsg}`, totalPicks, totalPicks);
 
     return {
       status: 'success',
-      notes: `Brief generated: ${totalPicks} picks | AI cost ~$${aiCostEstimate.toFixed(3)} | ${Math.round(totalMs / 1000)}s`,
+      notes: `Brief generated: ${totalPicks} picks${totalGated > 0 ? ` (${totalGated} gated-illiquid)` : ''} | AI cost ~$${aiCostEstimate.toFixed(3)} | ${Math.round(totalMs / 1000)}s`,
       tickersAttempted: candidates.length,
       tickersUpdated: totalPicks,
       tickersSkipped: 0,
