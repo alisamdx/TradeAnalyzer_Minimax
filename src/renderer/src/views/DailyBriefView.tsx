@@ -5,11 +5,32 @@ import { useState, useEffect, useCallback } from 'react';
 import type { DailyBriefEntry, BriefPick, ScoringStrategy } from '@shared/types.js';
 
 const STRATEGY_LABELS: Record<ScoringStrategy, string> = {
-  wheel:   'Wheel (CSP / Covered Call)',
-  bullish: 'Bullish (Call Spread / Long Call)',
-  bearish: 'Bearish (Put Spread / Long Put)',
-  income:  'Options Income (Strangle / Iron Condor)',
-  buy:     'Buy / Swing Trade',
+  wheel:   '🎡  Wheel — CSP / Covered Call',
+  bullish: '🐂  Bullish — Call Spread / Long Call',
+  bearish: '🐻  Bearish — Put Spread / Long Put',
+  income:  '💰  Options Income — Strangle / Iron Condor',
+  buy:     '📈  Buy / Swing Trade',
+};
+
+// Human-readable labels for signal keys shown in chips
+const SIGNAL_LABELS: Record<string, string> = {
+  ivRank:           'IV Rank',
+  premiumYield:     'Prem Yield',
+  premiumRiskRatio: 'Prem/Risk',
+  fundamentalScore: 'Fundamentals',
+  fundamentalWeakness: 'Fund. Weakness',
+  technicalNeutral: 'RSI Neutral',
+  rsiMomentum:      'RSI',
+  rsiOverbought:    'RSI',
+  optionLiquidity:  'Liq.',
+  trendStrength:    'Trend Strength',
+  downtrendScore:   'Downtrend',
+  trendNeutral:     'Trend Neutral',
+  earningsGrowth:   'Earnings',
+  priceMomentumPct: '52w Momentum',
+  priceDecayPct:    '52w Decay',
+  breakoutScore:    'Breakout',
+  buySignalScore:   'Buy Signal',
 };
 
 const STRATEGY_ORDER: ScoringStrategy[] = ['wheel', 'bullish', 'bearish', 'income', 'buy'];
@@ -25,24 +46,49 @@ function isStale(validUntil: string): boolean {
   return new Date() > new Date(validUntil);
 }
 
+function scoreBg(score: number): string {
+  if (score >= 75) return '#1f6b38';
+  if (score >= 55) return '#7a5400';
+  return '#7a1f1a';
+}
 function scoreColor(score: number): string {
-  if (score >= 75) return '#27ae60';
-  if (score >= 55) return '#f39c12';
-  return '#e74c3c';
+  if (score >= 75) return '#3fb950';
+  if (score >= 55) return '#e3a008';
+  return '#f85149';
+}
+
+function fmtRaw(raw: number | null, key: string): string {
+  if (raw === null) return '—';
+  // Percentage signals
+  if (['ivRank','fundamentalScore','fundamentalWeakness','trendStrength',
+       'downtrendScore','earningsGrowth','breakoutScore','buySignalScore',
+       'rsiMomentum','rsiOverbought','technicalNeutral'].includes(key)) {
+    return raw.toFixed(0);
+  }
+  // Momentum — show sign + 1dp
+  if (key === 'priceMomentumPct' || key === 'priceDecayPct') {
+    return (raw >= 0 ? '+' : '') + raw.toFixed(1) + '%';
+  }
+  // Liquidity score 0–10
+  if (key === 'optionLiquidity') return raw.toFixed(1) + '/10';
+  // Yield/return — annualised %
+  if (key === 'premiumYield' || key === 'premiumRiskRatio') return raw.toFixed(1) + '%';
+  return raw.toFixed(1);
 }
 
 function TopSignals({ signals }: { signals: BriefPick['signals'] }) {
   const entries = Object.entries(signals)
     .filter(([, v]) => !v.missing && v.raw !== null)
     .sort((a, b) => (b[1].weight * b[1].normalized) - (a[1].weight * a[1].normalized))
-    .slice(0, 3);
+    .slice(0, 4);
 
   if (entries.length === 0) return null;
   return (
     <div className="pick-signals">
       {entries.map(([key, v]) => (
         <span key={key} className="signal-chip">
-          {key}: {typeof v.raw === 'number' ? v.raw.toFixed(1) : v.raw}
+          <span className="signal-chip-label">{SIGNAL_LABELS[key] ?? key}</span>
+          <span className="signal-chip-value">{fmtRaw(v.raw, key)}</span>
         </span>
       ))}
     </div>
@@ -58,30 +104,40 @@ function PickCard({
 }) {
   return (
     <div className="brief-pick-card">
-      <div className="pick-header">
+      {/* Left column — rank bubble */}
+      <div className="pick-rank-col">
         <span className="pick-rank">#{pick.rank}</span>
-        <span className="pick-ticker">{pick.ticker}</span>
-        <span className="pick-score" style={{ color: scoreColor(pick.compositeScore) }}>
-          Score {pick.compositeScore.toFixed(1)}
-        </span>
-        {pick.validated ? (
-          <span className="pick-badge validated">Validated</span>
-        ) : (
-          <span className="pick-badge unvalidated">Unvalidated</span>
-        )}
-        <button
-          className="pick-lab-btn"
-          onClick={() => onGoToStrategyLab(pick.ticker)}
-        >
-          Strategy Lab →
-        </button>
       </div>
-      <TopSignals signals={pick.signals} />
-      {pick.aiRationale ? (
-        <p className="pick-rationale">{pick.aiRationale}</p>
-      ) : (
-        <p className="pick-rationale muted">AI reasoning unavailable</p>
-      )}
+
+      {/* Right column — all content */}
+      <div>
+        {/* Row 1: ticker · score · validated · lab btn */}
+        <div className="pick-main-row">
+          <span className="pick-ticker">{pick.ticker}</span>
+          <span
+            className="pick-score-badge"
+            style={{ background: scoreBg(pick.compositeScore), color: scoreColor(pick.compositeScore) }}
+          >
+            Score {pick.compositeScore.toFixed(1)}
+          </span>
+          {pick.validated
+            ? <span className="pick-badge validated">✓ Validated</span>
+            : <span className="pick-badge unvalidated">Unvalidated</span>
+          }
+          <button className="pick-lab-btn" onClick={() => onGoToStrategyLab(pick.ticker)}>
+            Strategy Lab →
+          </button>
+        </div>
+
+        {/* Row 2: top signal chips */}
+        <TopSignals signals={pick.signals} />
+
+        {/* Row 3: AI rationale */}
+        {pick.aiRationale
+          ? <p className="pick-rationale">{pick.aiRationale}</p>
+          : <p className="pick-rationale muted">AI reasoning unavailable</p>
+        }
+      </div>
     </div>
   );
 }
