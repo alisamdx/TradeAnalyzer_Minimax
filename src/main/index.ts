@@ -54,6 +54,7 @@ import { registerBatchIpc } from './ipc/ipc-batch.js';
 import { ScoringService } from './services/scoring-service.js';
 import { registerScoringIpc } from './ipc/ipc-scoring.js';
 import { DailyIntelligenceBriefJob } from './services/jobs/daily-intelligence-brief-job.js';
+import { DailyTechnicalSignalsJob } from './services/jobs/daily-technical-signals-job.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -365,6 +366,13 @@ app.whenReady().then(() => {
   const scoringService = new ScoringService(db);
   scoringService.seedBaselines();
   registerScoringIpc(scoringService);
+
+  const technicalSignalsJob = new DailyTechnicalSignalsJob(db);
+  batchService.registerJob('daily-technical-signals', technicalSignalsJob, {
+    dailyScheduleTime: '16:30',  // chains after price-gap-fill so bars are fresh
+    startupDelaySeconds: 150,    // after gap fill (120 s delay + buffer)
+    runOnStartup: false,
+  });
 
   const briefJob = new DailyIntelligenceBriefJob(db, dataProvider, optionsProvider);
   batchService.registerJob('daily-intelligence-brief', briefJob, {

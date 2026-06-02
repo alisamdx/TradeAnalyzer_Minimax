@@ -104,6 +104,12 @@ const BASELINE_BULLISH: ScoringSignal[] = [
     direction: 'target_range', targetMin: 45, targetMax: 70,
   },
   {
+    key: 'buySignalScore', label: 'Buy Signal Score (technical composite)', weight: 15, enabled: true,
+    description: 'Composite of MACD, RSI zone, Bollinger, patterns, demand zone, trend alignment — nightly computed from historical_prices.',
+    dataSource: 'technical_signals.buy_signal_score (0–100)',
+    direction: 'higher_better', normMax: 100,
+  },
+  {
     key: 'relativeStrength', label: 'Relative Performance vs Universe', weight: 15, enabled: false,
     description: 'Leaders lead — if it\'s lagging peers in an up move, it\'s weak. Available in Phase 2 — requires SPY price bars in price_history.',
     dataSource: 'Phase 2: price_history SPY bars',
@@ -197,6 +203,12 @@ const BASELINE_BUY: ScoringSignal[] = [
     direction: 'higher_better', normMax: 100,
   },
   {
+    key: 'buySignalScore', label: 'Buy Signal Score (technical composite)', weight: 20, enabled: true,
+    description: 'Composite of MACD crossover, RSI zone, Bollinger position, patterns, trend, demand zone — from DailyTechnicalSignalsJob.',
+    dataSource: 'technical_signals.buy_signal_score (0–100)',
+    direction: 'higher_better', normMax: 100,
+  },
+  {
     key: 'relativeStrength', label: 'Relative Performance vs Universe', weight: 20, enabled: false,
     description: 'Confirms the stock is leading, not lagging — buy leaders. Available in Phase 2 — requires SPY price bars in price_history.',
     dataSource: 'Phase 2: price_history SPY bars',
@@ -266,6 +278,8 @@ interface TickerSignalData {
   snapshotAgeHours: number | null;
   // Computed
   priceMomentumPct: number | null;
+  // From technical_signals (DailyTechnicalSignalsJob)
+  buySignalScore: number | null;
 }
 
 // ─── Service ─────────────────────────────────────────────────────────────────
@@ -439,6 +453,9 @@ export class ScoringService {
       case 'breakoutScore':
         return this.computeBreakoutScore(d);
 
+      case 'buySignalScore':
+        return d.buySignalScore;
+
       // Phase 2 placeholders — should never reach here since phase2=true signals are excluded
       case 'relativeStrength':
       case 'relativeWeakness':
@@ -557,6 +574,7 @@ export class ScoringService {
         lastPrice: null, annualizedReturn: null, optionLiquidityScore: null,
         suitabilityScore: null, entryZoneLow: null, snapshotAgeHours: null,
         priceMomentumPct: null,
+        buySignalScore: null,
       }])
     );
 
@@ -564,6 +582,7 @@ export class ScoringService {
     this.loadFundamentals(tickers, result);
     this.loadAnalysisSnapshots(tickers, result);
     this.loadPriceMomentum(tickers, result);
+    this.loadTechnicalSignals(tickers, result);
 
     return result;
   }
@@ -732,6 +751,20 @@ export class ScoringService {
       } catch {
         // Malformed snapshot — skip
       }
+    }
+  }
+
+  private loadTechnicalSignals(tickers: string[], result: Map<string, TickerSignalData>): void {
+    const ph = tickers.map(() => '?').join(',');
+    type TsRow = { ticker: string; buy_signal_score: number | null };
+    const rows = this.db.prepare(`
+      SELECT ticker, buy_signal_score FROM technical_signals
+      WHERE ticker IN (${ph})
+    `).all(...tickers) as TsRow[];
+
+    for (const row of rows) {
+      const d = result.get(row.ticker);
+      if (d) d.buySignalScore = row.buy_signal_score;
     }
   }
 
