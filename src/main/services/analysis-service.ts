@@ -469,6 +469,23 @@ export class AnalysisService {
     });
   }
 
+  /**
+   * Save an analysis snapshot that is not associated with any watchlist.
+   * Used by batch jobs (e.g. DailyOptionsSnapshotJob) that operate on the
+   * full screener universe rather than a user-defined watchlist.
+   * Requires migration 024 (watchlist_id nullable).
+   */
+  saveGlobalSnapshot(
+    mode: AnalysisMode,
+    results: AnalysisResult[],
+  ): void {
+    const payloadJson = JSON.stringify({ jobRunId: null, results });
+    this.db.prepare(
+      `INSERT INTO analysis_snapshots (watchlist_id, mode, result_count, payload_json)
+       VALUES (NULL, ?, ?, ?)`
+    ).run(mode, results.length, payloadJson);
+  }
+
   /** Save a combined all-modes snapshot to the DB. */
   saveAllModesSnapshot(
     watchlistId: number,

@@ -171,6 +171,8 @@ Authoritative DDL is in `migrations/001_init.sql` + `002_screen_schema.sql`. Pha
 
 ## Recent Changes
 
+- **v0.22.18 (2026-06-01)** — Daily Options Snapshot batch job. Runs `analyzeTicker(wheel)` on top 300 screener candidates nightly (06:00 ET + startup +5 min). Migration 024: `analysis_snapshots.watchlist_id` nullable. `saveGlobalSnapshot()` on `AnalysisService`.
+
 - **v0.22.17 (2026-06-01)** — Nav: Data Sync moved to Misc above History; Batch Jobs is default landing page.
 
 - **v0.22.16 (2026-06-01)** — Trade Scoring Config full UI redesign. Pill tabs, 4-column signal grid, direction badges (↑↓◎), weight bars, Phase 2 divider, green/red total row, sticky footer.

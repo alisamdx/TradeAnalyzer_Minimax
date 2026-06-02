@@ -55,6 +55,7 @@ import { ScoringService } from './services/scoring-service.js';
 import { registerScoringIpc } from './ipc/ipc-scoring.js';
 import { DailyIntelligenceBriefJob } from './services/jobs/daily-intelligence-brief-job.js';
 import { DailyTechnicalSignalsJob } from './services/jobs/daily-technical-signals-job.js';
+import { DailyOptionsSnapshotJob } from './services/jobs/daily-options-snapshot-job.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -379,6 +380,19 @@ app.whenReady().then(() => {
     dailyScheduleTime: '16:30',  // post-market, chains after price-gap-fill
     startupDelaySeconds: 0,      // manual trigger only by default; no startup run
     runOnStartup: false,
+  });
+
+  // Nightly Wheel analysis snapshot — keeps optionLiquidityScore fresh for the
+  // Trade Scoring Engine so illiquid picks (OI=1) are caught by scoring, not just
+  // by the hard gate in Stage 6 of the brief.
+  // Runs at 06:00 ET (pre-market — OI reflects yesterday's close, which is stable).
+  // Also runs once on startup after a 5-minute delay so E*Trade tokens have time
+  // to load; a fresh snapshot beats any stale one from a prior session.
+  const optionsSnapshotJob = new DailyOptionsSnapshotJob(db, analysisService);
+  batchService.registerJob('daily-options-snapshot', optionsSnapshotJob, {
+    dailyScheduleTime: '06:00',
+    startupDelaySeconds: 300,    // 5 min — allow E*Trade auth to initialise
+    runOnStartup: true,
   });
 
   // LEAPS + CSP strategy screener
