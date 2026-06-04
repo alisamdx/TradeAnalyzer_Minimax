@@ -804,7 +804,7 @@ export function App() {
             className={`nav-btn ${currentView === 'retrospect' ? 'active' : ''}`}
             onClick={() => navigateSidebar('retrospect')}
           >
-            🔍 Retrospect
+            🪞 Retrospect
           </button>
 
           {/* ── Screeners ── */}
