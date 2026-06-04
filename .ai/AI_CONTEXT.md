@@ -171,6 +171,8 @@ Authoritative DDL is in `migrations/001_init.sql` + `002_screen_schema.sql`. Pha
 
 ## Recent Changes
 
+- **v0.22.23 (2026-06-03)** — Daily IV Capture switched from E*Trade to MarketData.app. Job now fully unattended — no OAuth token expiry. Uses `getLiveChain(ticker, nearestMonthlyExpFor30Dte())` (single call per ticker, `?expiration=` param). ATM IV computed inline; stored as `source='marketdata'`. IVolatility guard preserved. All E*Trade code untouched — only `DailyIvCaptureJob` and its constructor wiring changed.
+
 - **v0.22.22 (2026-06-03)** — Test API MarketData.app live chain. New **Live (today)** mode on the MarketData.app tab uses `?expiration=` (not `?date=` which is historical-only and was causing 400 errors). `getLiveChain()` / `getRawLiveChain()` added to `MarketDataProvider`; `nearestMonthlyExpFor30Dte()` helper exported. `test-api:get-marketdata-live-chain` IPC + `getMarketDataLiveChain` preload bridge. UI has Live/Historical toggle. Prerequisite for replacing E*Trade Daily IV Capture with MarketData.app.
 
 - **v0.22.21 (2026-06-02)** — Quality signals wired into Trade Scoring Engine: `scoreFundamentals()` uses ROIC + FCFToNetIncome; `computeEarningsGrowthScore()` blends 1Y + 5Y CAGR (1.5× weight on 5Y). New baseline signals: `leverageQuality` (Wheel wt 8), `leverageRisk` (Bearish wt 8), `revenueGrowth5Y` (Bullish wt 10, Buy wt 10), `epsGrowth5Y` (Buy wt 8). AI rationales now include ROIC, leverage, and 5Y growth context. Existing DB strategy configs need manual "Reset to Baseline" to pick up new signals.

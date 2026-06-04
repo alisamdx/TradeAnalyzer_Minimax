@@ -1,17 +1,17 @@
-// Daily IV Capture job — fetches today's ATM IV from E*Trade for all universe
-// tickers and stores it in iv_history. Used to compute IV Rank across the app
-// without a paid IV data subscription.
-// v0.21.0
+// Daily IV Capture job — fetches today's ATM IV from MarketData.app for all
+// universe tickers and stores it in iv_history. Used to compute IV Rank across
+// the app. Uses a static API key (no OAuth) so the job runs fully unattended.
+// v0.22.23
 
 import type { DbHandle } from '../../db/connection.js';
-import type { ETradeDataProvider } from '../etrade-data-provider.js';
+import type { MarketDataProvider } from '../marketdata-provider.js';
 import type { IvHistoryService } from '../iv-history-service.js';
-import { isTradingDay } from '../iv-history-service.js';
+import { isTradingDay, computeAtmIv } from '../iv-history-service.js';
+import { nearestMonthlyExpFor30Dte } from '../marketdata-provider.js';
 import type { ConstituentsService } from '../constituents-service.js';
 import type { BatchJobHandler, BatchJobResult } from '../batch-service.js';
 import type { BatchProgressEvent } from '@shared/types.js';
 
-/** 1100ms sleep between E*Trade calls — stays under rate limits. */
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -19,81 +19,43 @@ function sleep(ms: number): Promise<void> {
 export class DailyIvCaptureJob implements BatchJobHandler {
   readonly name = 'Daily IV Update';
   readonly description =
-    "Fetches today's ATM IV from E*Trade for all universe tickers and stores it in iv_history. " +
-    'Used to compute IV Rank across the app without a paid IV data subscription.';
+    "Fetches today's ATM IV from MarketData.app for all universe tickers and stores " +
+    'it in iv_history. Used to compute IV Rank across the app. Runs fully unattended ' +
+    '(static API key — no OAuth token expiry).';
 
   constructor(
     private readonly db: DbHandle,
-    private readonly optionsProvider: ETradeDataProvider,
+    private readonly marketdata: MarketDataProvider,
     private readonly ivHistoryService: IvHistoryService,
     private readonly constituentsService: ConstituentsService
   ) {}
 
   async run(
     onProgress: (evt: BatchProgressEvent) => void,
-    signal: AbortSignal
+    signal: AbortSignal,
+    force = false,
   ): Promise<BatchJobResult> {
     const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
 
-    // 1. Skip non-trading days
-    if (!isTradingDay(today)) {
+    // Skip non-trading days unless forced
+    if (!force && !isTradingDay(today)) {
       return {
         status: 'skipped',
         notes: 'Non-trading day — nothing to do',
-        tickersAttempted: 0,
-        tickersUpdated: 0,
-        tickersSkipped: 0,
-        tickersFailed: 0,
+        tickersAttempted: 0, tickersUpdated: 0, tickersSkipped: 0, tickersFailed: 0,
       };
     }
 
-    // 2. Validate E*Trade connectivity. On auth failure, attempt a token renewal
-    //    first (covers the "dormant after 2 h inactivity" case). If renewal also
-    //    fails, the token has rolled over midnight and needs manual re-auth.
-    const isAuthError = (e: unknown): boolean => {
-      const msg = (e instanceof Error ? e.message : String(e)).toLowerCase();
-      return msg.includes('401') || msg.includes('token') || msg.includes('auth') || msg.includes('oauth');
-    };
+    // Pick the expiration once for the whole run (nearest monthly 3rd Friday to 30 DTE)
+    const expiration = nearestMonthlyExpFor30Dte();
 
-    try {
-      await this.optionsProvider.getOptionsExpirations('SPY');
-    } catch (err) {
-      if (!isAuthError(err)) {
-        return {
-          status: 'failed',
-          errorMessage: `E*Trade connectivity check failed: ${err instanceof Error ? err.message : String(err)}`,
-          tickersAttempted: 0, tickersUpdated: 0, tickersSkipped: 0, tickersFailed: 0,
-        };
-      }
-
-      // Auth failure — try renewing the dormant token before giving up.
-      try {
-        await this.optionsProvider.renewToken();
-        // Verify the renewal actually worked
-        await this.optionsProvider.getOptionsExpirations('SPY');
-      } catch {
-        // Renewal failed too — token has expired past midnight, needs manual re-auth.
-        return {
-          status: 'failed',
-          errorMessage: 'E*Trade token expired. Open the app and go to Settings → E*Trade Connection to reconnect.',
-          tickersAttempted: 0, tickersUpdated: 0, tickersSkipped: 0, tickersFailed: 0,
-          notification: {
-            id: `etrade-expired-${Date.now()}`,
-            type: 'error',
-            message: 'E*Trade token expired — Daily IV update skipped.',
-            cta: { label: 'Reconnect', view: 'settings' },
-          },
-        };
-      }
-    }
-
-    // 4. Gather all unique tickers across universes
-    const sp500 = this.constituentsService.getConstituents('sp500').map(r => r.ticker.toUpperCase());
+    // Gather all unique tickers across universes
+    const sp500   = this.constituentsService.getConstituents('sp500').map(r => r.ticker.toUpperCase());
     const russell = this.constituentsService.getConstituents('russell1000').map(r => r.ticker.toUpperCase());
-    const etf = this.constituentsService.getConstituents('etf').map(r => r.ticker.toUpperCase());
+    const etf     = this.constituentsService.getConstituents('etf').map(r => r.ticker.toUpperCase());
     const allTickers = [...new Set([...sp500, ...russell, ...etf])];
 
-    // 5. Filter to tickers missing today's iv_history row
+    // Skip tickers that already have today's row
     type TickerRow = { ticker: string };
     const alreadyDone = new Set<string>(
       (this.db.prepare(
@@ -107,135 +69,118 @@ export class DailyIvCaptureJob implements BatchJobHandler {
       return {
         status: 'success',
         notes: 'All tickers already have today\'s IV data.',
-        tickersAttempted: 0,
-        tickersUpdated: 0,
-        tickersSkipped: 0,
-        tickersFailed: 0,
+        tickersAttempted: 0, tickersUpdated: 0, tickersSkipped: 0, tickersFailed: 0,
       };
     }
 
-    let attempted = 0;
-    let updated = 0;
-    let skipped = 0;
-    let failed = 0;
+    let attempted = 0, updated = 0, skipped = 0, failed = 0;
 
-    // 6. Process each missing ticker
     for (const ticker of missing) {
       if (signal.aborted) break;
-
       attempted++;
 
       try {
-        // 4a. Get expirations, pick closest to 30 DTE (between 20–45 DTE preferred)
-        const expirations = await this.optionsProvider.getOptionsExpirations(ticker);
+        const chain = await this.marketdata.getLiveChain(ticker, expiration);
 
-        if (expirations.length === 0) {
+        if (chain.s === 'no_data' || chain.contracts.length === 0) {
           skipped++;
           onProgress({
-            jobId: 'daily-iv-update',
-            runId: 0, // will be overwritten by BatchService
-            ticker,
-            status: 'skipped',
-            attempted,
-            updated,
-            skipped,
-            failed,
-            total,
-            message: 'No expirations available',
+            jobId: 'daily-iv-update', runId: 0, ticker, status: 'skipped',
+            attempted, updated, skipped, failed, total,
+            message: 'No contracts returned',
           });
           await sleep(1100);
           continue;
         }
 
-        // Pick expiration closest to 30 DTE, preferring 20–45 DTE range
-        const nowMs = Date.now();
-        const withDte = expirations.map(exp => {
-          const expMs = new Date(exp + 'T00:00:00Z').getTime();
-          const dte = Math.max(0, Math.round((expMs - nowMs) / 86_400_000));
-          return { exp, dte };
-        });
-
-        // Prefer range 20-45 DTE, else pick nearest 30 DTE overall
-        const inRange = withDte.filter(x => x.dte >= 20 && x.dte <= 45);
-        const candidates = inRange.length > 0 ? inRange : withDte;
-        const best = candidates.reduce((a, b) =>
-          Math.abs(a.dte - 30) <= Math.abs(b.dte - 30) ? a : b
-        );
-        const expiration = best.exp;
-
-        // 4b. Fetch options chain
-        const chain = await this.optionsProvider.getOptionsChain(ticker, expiration);
         const underlyingPx = chain.underlyingPrice;
-
-        // 4c. Capture IV
-        this.ivHistoryService.captureFromEtradeChain(ticker, chain.contracts, underlyingPx);
-
-        // 4d. Check if row was actually written
-        type IvRow = { atm_iv: number } | undefined;
-        const written = this.db.prepare(
-          `SELECT atm_iv FROM iv_history WHERE ticker = ? AND date = ?`
-        ).get(ticker, today) as IvRow;
-
-        if (written) {
-          updated++;
+        if (!underlyingPx) {
+          skipped++;
           onProgress({
-            jobId: 'daily-iv-update',
-            runId: 0,
-            ticker,
-            status: 'updated',
-            attempted,
-            updated,
-            skipped,
-            failed,
-            total,
+            jobId: 'daily-iv-update', runId: 0, ticker, status: 'skipped',
+            attempted, updated, skipped, failed, total,
+            message: 'No underlying price in chain',
           });
-        } else {
-          // captureFromEtradeChain returned nothing (insufficient data or existing ivolatility row)
+          await sleep(1100);
+          continue;
+        }
+
+        // Map to the shape computeAtmIv expects.
+        // MarketData.app iv is a decimal fraction (0.23 = 23%) — multiply by 100
+        // so computeAtmIv works in percentage space and the stored value is correct.
+        // see docs/formulas.md#atm-iv-storage
+        const mapped = chain.contracts.map(c => ({
+          expiration: c.expiration,
+          strike:     c.strike,
+          side:       c.side as 'call' | 'put',
+          iv:         c.iv !== null ? c.iv * 100 : null,
+          dte:        c.dte,
+        }));
+
+        const result = computeAtmIv(mapped, underlyingPx);
+
+        if (!result) {
+          skipped++;
           onProgress({
-            jobId: 'daily-iv-update',
-            runId: 0,
-            ticker,
-            status: 'no-data',
-            attempted,
-            updated,
-            skipped,
-            failed,
-            total,
+            jobId: 'daily-iv-update', runId: 0, ticker, status: 'skipped',
+            attempted, updated, skipped, failed, total,
             message: 'Could not compute ATM IV from chain',
           });
-          skipped++;
+          await sleep(1100);
+          continue;
         }
+
+        // Don't overwrite an existing IVolatility reading for today (higher quality)
+        type ExRow = { source: string } | undefined;
+        const existing = this.db.prepare(
+          `SELECT source FROM iv_history WHERE ticker = ? AND date = ?`
+        ).get(ticker.toUpperCase(), today) as ExRow;
+
+        if (existing?.source === 'ivolatility') {
+          skipped++;
+          onProgress({
+            jobId: 'daily-iv-update', runId: 0, ticker, status: 'skipped',
+            attempted, updated, skipped, failed, total,
+            message: 'IVolatility reading already present — skipped',
+          });
+          await sleep(1100);
+          continue;
+        }
+
+        this.ivHistoryService.storeReading(ticker, today, result.atmIv, {
+          underlyingPx,
+          expNear: result.expNear,
+          expFar:  result.expFar,
+          dteNear: result.dteNear,
+          dteFar:  result.dteFar,
+          source:  'marketdata',
+        });
+
+        updated++;
+        onProgress({
+          jobId: 'daily-iv-update', runId: 0, ticker, status: 'updated',
+          attempted, updated, skipped, failed, total,
+        });
       } catch (err) {
         failed++;
-        const message = err instanceof Error ? err.message : String(err);
         onProgress({
-          jobId: 'daily-iv-update',
-          runId: 0,
-          ticker,
-          status: 'failed',
-          attempted,
-          updated,
-          skipped,
-          failed,
-          total,
-          message,
+          jobId: 'daily-iv-update', runId: 0, ticker, status: 'failed',
+          attempted, updated, skipped, failed, total,
+          message: err instanceof Error ? err.message : String(err),
         });
       }
 
-      // 4g. Rate limit
       if (!signal.aborted) await sleep(1100);
     }
 
-    const finalStatus = signal.aborted ? 'failed' : 'success';
-
     return {
-      status: finalStatus,
+      status: signal.aborted ? 'failed' : 'success',
       notes: `${updated} updated, ${skipped} skipped, ${failed} failed out of ${attempted} attempted.`,
       errorMessage: signal.aborted ? 'Job was cancelled.' : undefined,
       tickersAttempted: attempted,
-      tickersUpdated: updated,
-      tickersSkipped: skipped,
-      tickersFailed: failed,
+      tickersUpdated:   updated,
+      tickersSkipped:   skipped,
+      tickersFailed:    failed,
     };
   }
 }

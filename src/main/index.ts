@@ -331,7 +331,7 @@ app.whenReady().then(() => {
   );
   const dailyIvJob = new DailyIvCaptureJob(
     db,
-    optionsProvider as ETradeDataProvider,
+    marketdataProvider,
     ivHistoryService,
     constituentsService
   );
