@@ -30,6 +30,21 @@ const VERDICT_COLOR: Record<string, string> = {
   neutral:   '#8b949e',
 };
 
+// Color stock return based on what's favorable for the strategy — not just sign.
+// Income wants small moves (green = small, red = large in either direction).
+// Bearish wants stock down (green = down, red = up).
+// All others want stock up (green = up, red = down).
+function stockReturnColor(pct: number | null, strategy: ScoringStrategy): string {
+  if (pct === null) return 'inherit';
+  if (strategy === 'income') {
+    return Math.abs(pct) <= 5 ? '#3fb950' : Math.abs(pct) <= 8 ? '#e3a008' : '#f85149';
+  }
+  if (strategy === 'bearish') {
+    return pct < -1 ? '#3fb950' : pct > 1 ? '#f85149' : '#8b949e';
+  }
+  return pct > 1 ? '#3fb950' : pct < -1 ? '#f85149' : '#8b949e';
+}
+
 const VERDICT_LABEL: Record<string, string> = {
   positive: 'Positive',
   negative: 'Negative',
@@ -231,6 +246,7 @@ function InProgressTab({
                 const stockPct = p.currentPrice !== null && p.entryPrice !== null && p.entryPrice > 0
                   ? (p.currentPrice - p.entryPrice) / p.entryPrice * 100
                   : null;
+                const stockColor = stockReturnColor(stockPct, p.briefStrategy);
                 const isExpanded = expanded.has(p.id);
                 const dteColor = p.daysToExpiry !== null
                   ? p.daysToExpiry <= 2 ? '#f85149'
@@ -248,7 +264,7 @@ function InProgressTab({
                       <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{p.strategyName ?? '—'}</td>
                       <td>{fmtPrice(p.entryPrice)}</td>
                       <td>{fmtPrice(p.currentPrice)}</td>
-                      <td style={{ color: stockPct !== null ? (stockPct >= 0 ? '#3fb950' : '#f85149') : 'inherit', fontWeight: 600 }}>
+                      <td style={{ color: stockColor, fontWeight: 600 }}>
                         {fmtPct(stockPct)}
                       </td>
                       <td style={{ color: p.estimatedPnl !== null ? (p.estimatedPnl >= 0 ? '#3fb950' : '#f85149') : 'var(--text-muted)', fontSize: 12 }}>
@@ -364,7 +380,7 @@ function HistoryTab({ trades, loading }: { trades: PaperTrade[]; loading: boolea
               <td style={{ fontSize: 12 }}>{fmtDate(t.briefDate)}</td>
               <td>{fmtPrice(t.entryPrice)}</td>
               <td>{fmtPrice(t.exitPrice)}</td>
-              <td style={{ color: t.stockReturnPct !== null ? (t.stockReturnPct >= 0 ? '#3fb950' : '#f85149') : 'inherit', fontWeight: 600 }}>
+              <td style={{ color: stockReturnColor(t.stockReturnPct, t.briefStrategy), fontWeight: 600 }}>
                 {fmtPct(t.stockReturnPct)}
               </td>
               <td style={{ fontSize: 12 }}>{fmtDate(t.exitDate)}</td>
