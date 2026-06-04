@@ -23,9 +23,20 @@ import type { BatchProgressEvent } from '@shared/types.js';
 import type { AnalysisService, WheelResult } from '../analysis-service.js';
 import type { AnalysisResult } from '../analysis-service.js';
 import { isTradingDay } from '../iv-history-service.js';
+import { SCORING_REFERENCE_TICKERS } from './price-gap-fill-job.js';
 
-const MAX_TICKERS   = 300;    // cap to keep runtime ≤ ~10 min
-const ETRADE_DELAY  = 1_100;  // ms between E*Trade chain calls (rate limit)
+const MAX_TICKERS      = 300;    // cap to keep runtime ≤ ~10 min
+const ETRADE_DELAY     = 1_100;  // ms between chain calls (rate limit)
+const PER_TICKER_TIMEOUT = 30_000; // ms — guards against hung HTTP (e.g. expired E*Trade token)
+
+function withTimeout<T>(promise: Promise<T>, ms: number, ticker: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`Timed out after ${ms / 1000}s — options provider may be unavailable (${ticker})`)), ms)
+    ),
+  ]);
+}
 
 export class DailyOptionsSnapshotJob implements BatchJobHandler {
   readonly name        = 'Daily Options Snapshot';
@@ -42,10 +53,11 @@ export class DailyOptionsSnapshotJob implements BatchJobHandler {
   async run(
     onProgress: (evt: BatchProgressEvent) => void,
     signal: AbortSignal,
+    force = false,
   ): Promise<BatchJobResult> {
     const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
 
-    if (!isTradingDay(today)) {
+    if (!force && !isTradingDay(today)) {
       return {
         status: 'skipped', notes: 'Non-trading day',
         tickersAttempted: 0, tickersUpdated: 0, tickersSkipped: 0, tickersFailed: 0,
@@ -90,14 +102,17 @@ export class DailyOptionsSnapshotJob implements BatchJobHandler {
       });
 
       try {
-        const result = await this.analysisService.analyzeTicker(ticker, 'wheel') as AnalysisResult;
+        const result = await withTimeout(
+          this.analysisService.analyzeTicker(ticker, 'wheel') as Promise<AnalysisResult>,
+          PER_TICKER_TIMEOUT,
+          ticker,
+        );
         if (result.mode === 'wheel') {
           results.push(result as WheelResult);
         }
       } catch (err) {
         failed++;
         const msg = err instanceof Error ? err.message : String(err);
-        // Log but continue — individual failures are not fatal
         console.warn(`[options-snapshot] ${ticker} failed:`, msg);
       }
 
@@ -164,12 +179,15 @@ export class DailyOptionsSnapshotJob implements BatchJobHandler {
       ORDER BY ticker ASC
     `).all(latestRun.id) as SRow[];
 
+    // Exclude scoring reference tickers (SPY + sector ETFs) — infrastructure only.
+    const refSet = new Set<string>(SCORING_REFERENCE_TICKERS);
+
     return rows
       .map(r => {
         const p = JSON.parse(r.payload_json) as { passScore?: number };
         return { ticker: r.ticker, passScore: p.passScore ?? 0 };
       })
-      .filter(r => r.passScore > 0)
+      .filter(r => r.passScore > 0 && !refSet.has(r.ticker))
       .sort((a, b) => b.passScore - a.passScore)
       .slice(0, limit)
       .map(r => r.ticker);
