@@ -48,7 +48,8 @@ const GRADE_COLOR_HEX: Record<string, string> = {
   'A+': '#2ea043', 'A': '#3fb950', 'B': '#d29922', 'C': '#e07d3a', 'F': '#f85149',
 };
 
-const STRATEGY_ORDER: ScoringStrategy[] = ['wheel', 'income', 'buy', 'bullish', 'bearish'];
+// Must match the screen order in DailyBriefView.tsx STRATEGY_ORDER
+const STRATEGY_ORDER: ScoringStrategy[] = ['wheel', 'bullish', 'bearish', 'income', 'buy'];
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 
@@ -71,6 +72,7 @@ function primaryStrike(setup: StrategySetup): number | null {
 
 function getRelevantSetup(pick: BriefPick, strategy: ScoringStrategy): {
   structureName: string;
+  labScore: number | null;  // Strategy Lab totalScore (0-100) — same scale as grade
   strike: number | null;
   expiration: string | null;
   dte: number | null;
@@ -94,6 +96,7 @@ function getRelevantSetup(pick: BriefPick, strategy: ScoringStrategy): {
   if (!setup || setup.unavailableReason) {
     return {
       structureName: SLUG_SHORT[best.slug] ?? best.name,
+      labScore: best.totalScore,
       strike: null, expiration: null, dte: null,
       credit: null, debit: null, maxLoss: null, annReturn: null, pop: null,
       grade: best.grade,
@@ -102,6 +105,7 @@ function getRelevantSetup(pick: BriefPick, strategy: ScoringStrategy): {
 
   return {
     structureName: SLUG_SHORT[best.slug] ?? best.name,
+    labScore: best.totalScore,
     strike: primaryStrike(setup),
     expiration: setup.expiration,
     dte: setup.dte,
@@ -134,7 +138,9 @@ export function buildEmailHtml(
       const setup = getRelevantSetup(pick, strategy);
       const grade = setup?.grade ?? '—';
       const gradeColor = GRADE_COLOR_HEX[grade] ?? '#666';
-      const score = Math.round(pick.compositeScore);
+      // labScore is the Strategy Lab totalScore (0-100) — same system as the grade.
+      // compositeScore is the scoring engine rank used to SELECT the pick (different scale).
+      const score = setup?.labScore != null ? Math.round(setup.labScore) : null;
 
       const structure = setup?.structureName ?? '—';
       const strike    = setup?.strike != null ? fmtPrice(setup.strike) : '—';
@@ -155,7 +161,7 @@ export function buildEmailHtml(
           <td style="padding:7px 8px;font-weight:700;font-size:14px">${pick.ticker}</td>
           <td style="padding:7px 8px;color:#555">${fmtPrice(pick.price)}</td>
           <td style="padding:7px 8px;font-weight:700;color:${gradeColor}">${grade}</td>
-          <td style="padding:7px 8px;color:#555;font-size:12px">${score}/100</td>
+          <td style="padding:7px 8px;color:#555;font-size:12px">${score != null ? `${score}/100` : '—'}</td>
           <td style="padding:7px 8px;color:#333">${structure}</td>
           <td style="padding:7px 8px;font-weight:600">${strike}</td>
           <td style="padding:7px 8px">${expiry}</td>
@@ -180,7 +186,7 @@ export function buildEmailHtml(
                 <th style="padding:6px 8px;text-align:left">Ticker</th>
                 <th style="padding:6px 8px;text-align:left">Price</th>
                 <th style="padding:6px 8px;text-align:left">Grade</th>
-                <th style="padding:6px 8px;text-align:left">Score</th>
+                <th style="padding:6px 8px;text-align:left">Lab Score</th>
                 <th style="padding:6px 8px;text-align:left">Structure</th>
                 <th style="padding:6px 8px;text-align:left">Strike</th>
                 <th style="padding:6px 8px;text-align:left">Expiry</th>
@@ -300,7 +306,7 @@ export async function buildPdf(
         const setup = getRelevantSetup(pick, strategy);
         const grade = setup?.grade ?? '?';
         const gradeColor = GRADE_COLOR_HEX[grade] ?? '#666666';
-        const score = Math.round(pick.compositeScore);
+        const score = setup?.labScore != null ? Math.round(setup.labScore) : null;
 
         // Pick card background
         const cardH = estimateCardHeight(pick);
@@ -322,9 +328,9 @@ export async function buildPdf(
         doc.fillColor('#ffffff').fontSize(13).font('Helvetica-Bold')
           .text(grade, W - 45, y + 11, { width: 30, align: 'center' });
 
-        // Score
+        // Lab score
         doc.fillColor(LGRAY).fontSize(9).font('Helvetica')
-          .text(`${score}/100`, W - 55, y + 32, { width: 50, align: 'center' });
+          .text(score != null ? `${score}/100` : '', W - 55, y + 32, { width: 50, align: 'center' });
 
         // Setup row
         if (setup) {

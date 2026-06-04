@@ -171,6 +171,8 @@ Authoritative DDL is in `migrations/001_init.sql` + `002_screen_schema.sql`. Pha
 
 ## Recent Changes
 
+- **v0.22.31 (2026-06-03)** — Daily Brief email: strategy order now matches screen (wheel→bullish→bearish→income→buy). Score column replaced with "Lab Score" (StrategyLab totalScore 0-100, same system as grade) instead of compositeScore (scoring engine rank — different system causing Grade A / Score 18 confusion).
+
 - **v0.22.30 (2026-06-03)** — Fix Daily Brief stale data from multiple same-day runs. `persistBrief()` now deletes existing records for the same strategy on the same ET day before inserting — each run is a clean replacement. Fixes UI showing mixed-run picks and email/UI mismatch. DST-safe via JS `toLocaleDateString` ET conversion.
 
 - **v0.22.29 (2026-06-03)** — Fix two Daily Brief bugs: (1) email used pre-liquidity-gate picks (25) vs UI post-gate (19) — now both use same `persistedPicks` map; (2) history showed UTC date (tomorrow) for evening ET runs — fixed with `toETDate()` ET conversion in DailyBriefView.
