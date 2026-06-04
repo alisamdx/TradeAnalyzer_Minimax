@@ -180,6 +180,12 @@ function isStale(validUntil: string): boolean {
   return new Date() > new Date(validUntil);
 }
 
+// generatedAt is stored as UTC by SQLite 'now'. Convert to ET date so a run
+// at 10:30pm ET on 6/3 doesn't display as 6/4 (which is what UTC would show).
+function toETDate(isoStr: string): string {
+  return new Date(isoStr).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+}
+
 function scoreBg(score: number): string {
   if (score >= 75) return '#1f6b38';
   if (score >= 55) return '#7a5400';
@@ -498,7 +504,7 @@ export function DailyBriefView({ onGoToStrategyLab }: DailyBriefViewProps) {
         // Show all strategies for the same run group (same generated_at prefix day)
         const sel = history.find(h => h.id === selectedHistoryId);
         if (!sel) return false;
-        return b.generatedAt.slice(0, 10) === sel.generatedAt.slice(0, 10);
+        return toETDate(b.generatedAt) === toETDate(sel.generatedAt);
       })
     : briefs;
 
@@ -511,7 +517,7 @@ export function DailyBriefView({ onGoToStrategyLab }: DailyBriefViewProps) {
 
   // Unique history dates for the dropdown
   const historyDates = Array.from(new Map(
-    history.map(h => [h.generatedAt.slice(0, 10), h])
+    history.map(h => [toETDate(h.generatedAt), h])
   ).values()).slice(0, 30);
 
   return (
@@ -545,10 +551,10 @@ export function DailyBriefView({ onGoToStrategyLab }: DailyBriefViewProps) {
           {historyDates.map(h => (
             <button
               key={h.id}
-              className={`history-date-btn ${selectedHistoryId !== null && h.generatedAt.slice(0, 10) === history.find(x => x.id === selectedHistoryId)?.generatedAt.slice(0, 10) ? 'active' : ''}`}
+              className={`history-date-btn ${selectedHistoryId !== null && toETDate(h.generatedAt) === toETDate(history.find(x => x.id === selectedHistoryId)?.generatedAt ?? '') ? 'active' : ''}`}
               onClick={() => setSelectedHistoryId(selectedHistoryId === h.id ? null : h.id)}
             >
-              {h.generatedAt.slice(0, 10)}
+              {toETDate(h.generatedAt)}
             </button>
           ))}
         </div>

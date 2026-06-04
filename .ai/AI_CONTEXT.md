@@ -171,6 +171,8 @@ Authoritative DDL is in `migrations/001_init.sql` + `002_screen_schema.sql`. Pha
 
 ## Recent Changes
 
+- **v0.22.29 (2026-06-03)** — Fix two Daily Brief bugs: (1) email used pre-liquidity-gate picks (25) vs UI post-gate (19) — now both use same `persistedPicks` map; (2) history showed UTC date (tomorrow) for evening ET runs — fixed with `toETDate()` ET conversion in DailyBriefView.
+
 - **v0.22.28 (2026-06-03)** — Daily Intelligence Brief: email + PDF attachment. After job completes, sends HTML email (trade-ready tables: ticker/grade/structure/strike/expiry/DTE/credit/ann.ret/POP/max loss per strategy) with full PDF attached (all 25 picks, AI rationale, signal breakdown). Uses Agent SMTP config. `EmailService` + `BriefReportBuilder` (pdfkit). Email failure does not fail the job.
 
 - **v0.22.27 (2026-06-03)** — Fix batch job stuck on "Running" / cancel does nothing. Two fixes in `BatchService`: (1) constructor now cleans up stale `running` rows on startup; (2) `cancelJob` immediately writes `cancelled` to DB and frees `runningJobId` instead of waiting for hung Promise to settle. Guard in `runJob` skips final DB write if signal was aborted.

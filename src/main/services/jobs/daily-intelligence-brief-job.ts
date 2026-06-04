@@ -320,6 +320,7 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
 
     let totalPicks = 0;
     let totalGated = 0;
+    const persistedPicks = new Map<ScoringStrategy, BriefPick[]>();
     for (const strategy of STRATEGIES) {
       if (signal.aborted) break;
       const top = topPerStrategy.get(strategy) ?? [];
@@ -350,6 +351,7 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
       };
 
       this.scoringService.persistBrief(strategy, picks, validUntil, runMeta);
+      persistedPicks.set(strategy, picks);
       totalPicks += picks.length;
     }
 
@@ -363,24 +365,12 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
     if (this.emailService?.isConfigured() && totalPicks > 0) {
       try {
         emit('Sending email…');
-        const briefsByStrategy = new Map<ScoringStrategy, BriefPick[]>();
-        for (const strategy of STRATEGIES) {
-          briefsByStrategy.set(strategy, topPerStrategy.get(strategy)?.slice(0, 5).map((scored, idx) => ({
-            ticker:           scored.ticker,
-            compositeScore:   scored.compositeScore,
-            signals:          scored.signals,
-            strategyLabResult: validationResults.get(scored.ticker) ?? null,
-            aiRationale:      aiRationales.get(`${scored.ticker}:${strategy}`) ?? null,
-            rank:             idx + 1,
-            validated:        !!validationResults.get(scored.ticker),
-            price:            signalData.get(scored.ticker)?.lastPrice ?? null,
-          })) ?? []);
-        }
-
+        // Use the same persisted picks (post-liquidity-gate) — not topPerStrategy (pre-gate)
+        // to ensure email and UI show identical data.
         const dateStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
         const [emailHtml, pdfBuffer] = await Promise.all([
-          Promise.resolve(buildEmailHtml(dateStr, briefsByStrategy)),
-          buildPdf(dateStr, briefsByStrategy),
+          Promise.resolve(buildEmailHtml(dateStr, persistedPicks)),
+          buildPdf(dateStr, persistedPicks),
         ]);
 
         const subject = `Daily Intelligence Brief — ${new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} — ${totalPicks} picks`;
