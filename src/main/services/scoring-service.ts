@@ -6,6 +6,25 @@ import type { Database } from 'better-sqlite3';
 import type { ScreenResultPayload } from '@shared/types.js';
 import type { BuyResult, WheelResult, StrategyResult, OptionsIncomeResult } from './analysis-service.js';
 
+// ─── Sector ETF mapping ───────────────────────────────────────────────────────
+// GICS sector name (as stored in ScreenResultPayload.sector) → SPDR sector ETF ticker.
+// Used by loadSectorMomentum() to assign sector 90-day return to each scored ticker.
+// see docs/formulas.md#sector-momentum
+
+const SECTOR_ETF: Record<string, string> = {
+  'Technology':             'XLK',
+  'Financials':             'XLF',
+  'Health Care':            'XLV',
+  'Energy':                 'XLE',
+  'Industrials':            'XLI',
+  'Consumer Staples':       'XLP',
+  'Consumer Discretionary': 'XLY',
+  'Materials':              'XLB',
+  'Real Estate':            'XLRE',
+  'Utilities':              'XLU',
+  'Communication Services': 'XLC',
+};
+
 // ─── Public types ─────────────────────────────────────────────────────────────
 
 export type ScoringStrategy = 'wheel' | 'bullish' | 'bearish' | 'income' | 'buy';
@@ -51,15 +70,16 @@ export interface ScoringConfig {
 // IBD CANSLIM (O'Neil), McMillan's Options as a Strategic Investment, Zacks.
 // see Requirements/DAILY_INTELLIGENCE_BRIEF.md §4.5
 
+// Weights sum = 100. ivRank/premiumYield trimmed slightly to fit leverageQuality.
 const BASELINE_WHEEL: ScoringSignal[] = [
   {
-    key: 'ivRank', label: 'IV Rank (30-day)', weight: 30, enabled: true,
+    key: 'ivRank', label: 'IV Rank (30-day)', weight: 27, enabled: true,
     description: 'tastytrade rule #1: IVR < 30 = don\'t sell. Higher IVR = more edge in premium.',
     dataSource: 'iv_history.atm_iv → IvHistoryService.getIvRank()',
     direction: 'higher_better', normMax: 100,
   },
   {
-    key: 'premiumYield', label: 'Premium Yield (annualized)', weight: 25, enabled: true,
+    key: 'premiumYield', label: 'Premium Yield (annualized)', weight: 23, enabled: true,
     description: 'Premium / strike × (365 / DTE). You\'re a yield business — this is your return.',
     dataSource: 'analysis_snapshots wheel.annualizedReturn',
     direction: 'higher_better', normMax: 60,
@@ -71,7 +91,7 @@ const BASELINE_WHEEL: ScoringSignal[] = [
     direction: 'higher_better', normMax: 100,
   },
   {
-    key: 'technicalNeutral', label: 'Technical Neutral (RSI 40–60)', weight: 15, enabled: true,
+    key: 'technicalNeutral', label: 'Technical Neutral (RSI 40–60)', weight: 14, enabled: true,
     description: 'Don\'t sell puts into a downtrend; neutral trend = safer assignment zone.',
     dataSource: 'analysis_snapshots buy.rsi',
     direction: 'target_range', targetMin: 40, targetMax: 60,
@@ -82,79 +102,111 @@ const BASELINE_WHEEL: ScoringSignal[] = [
     dataSource: 'analysis_snapshots wheel.optionLiquidityScore (0–10)',
     direction: 'higher_better', normMax: 10,
   },
-];
+  {
+    key: 'leverageQuality', label: 'Leverage Quality (ND/EBITDA)', weight: 6, enabled: true,
+    description: 'CSP assignment risk: highly leveraged companies can spiral on bad news. ND/EBITDA < 3 = safer stock to hold.',
+    dataSource: 'screen_results.payload_json netDebtToEbitda',
+    direction: 'lower_better', normMax: 5,
+  },
+]; // sum = 100
 
+// Weights sum = 100. All signals trimmed proportionally to fit 8 signals.
 const BASELINE_BULLISH: ScoringSignal[] = [
   {
-    key: 'trendStrength', label: 'Price Trend (above 50MA + 200MA, ADX > 20)', weight: 30, enabled: true,
+    key: 'trendStrength', label: 'Price Trend (above 50MA + 200MA, ADX > 20)', weight: 24, enabled: true,
     description: 'Institutional consensus — big money is already positioned long.',
     dataSource: 'analysis_snapshots buy.smaStack + bullish.trendStrength (ADX)',
     direction: 'higher_better', normMax: 100,
   },
   {
-    key: 'earningsGrowth', label: 'Earnings / Revenue Growth Quality', weight: 25, enabled: true,
+    key: 'earningsGrowth', label: 'Earnings / Revenue Growth Quality', weight: 20, enabled: true,
     description: 'CANSLIM: EPS + sales growth are the primary fundamental trigger for institutional buying.',
     dataSource: 'screen_results.payload_json epsGrowth + revenueGrowth',
     direction: 'higher_better', normMax: 100,
   },
   {
-    key: 'rsiMomentum', label: 'RSI Momentum (45–70 zone)', weight: 20, enabled: true,
+    key: 'rsiMomentum', label: 'RSI Momentum (45–70 zone)', weight: 15, enabled: true,
     description: 'Want momentum without being overextended. Below 45 = lagging; above 70 = chasing.',
     dataSource: 'analysis_snapshots buy.rsi',
     direction: 'target_range', targetMin: 45, targetMax: 70,
   },
   {
-    key: 'buySignalScore', label: 'Buy Signal Score (technical composite)', weight: 15, enabled: true,
+    key: 'buySignalScore', label: 'Buy Signal Score (technical composite)', weight: 12, enabled: true,
     description: 'Composite of MACD, RSI zone, Bollinger, patterns, demand zone, trend alignment — nightly computed from historical_prices.',
     dataSource: 'technical_signals.buy_signal_score (0–100)',
     direction: 'higher_better', normMax: 100,
   },
   {
-    key: 'relativeStrength', label: 'Relative Performance vs Universe', weight: 15, enabled: false,
-    description: 'Leaders lead — if it\'s lagging peers in an up move, it\'s weak. Available in Phase 2 — requires SPY price bars in price_history.',
-    dataSource: 'Phase 2: price_history SPY bars',
-    direction: 'higher_better', normMax: 100, phase2: true,
+    key: 'relativeStrength', label: 'Relative Performance vs SPY (90-day)', weight: 12, enabled: true,
+    description: 'Leaders lead — if it\'s lagging SPY in an up move, it\'s weak. Excess 90-day return vs S&P 500.',
+    dataSource: 'historical_prices SPY vs ticker 90-day return (ticker_90d − spy_90d)',
+    direction: 'higher_better', normMax: 50,
   },
   {
-    key: 'priceMomentumPct', label: 'Price Momentum % (52-week return)', weight: 10, enabled: true,
+    key: 'priceMomentumPct', label: 'Price Momentum % (52-week return)', weight: 7, enabled: true,
     description: 'Confirms sustained directional move, not just a 1-day spike.',
     dataSource: 'historical_prices (currentPrice - price_52w_ago) / price_52w_ago × 100',
     direction: 'higher_better', normMax: 150,
   },
-];
+  {
+    key: 'sectorMomentum', label: 'Sector Momentum (SPDR ETF 90-day return)', weight: 5, enabled: true,
+    description: 'Rising sector = institutional tailwind. Uses SPDR sector ETF (XLK, XLF, etc.) mapped from screener sector tag.',
+    dataSource: 'historical_prices SECTOR_ETF 90-day return',
+    direction: 'higher_better', normMax: 30,
+  },
+  {
+    key: 'revenueGrowth5Y', label: '5-Year Revenue CAGR', weight: 5, enabled: true,
+    description: 'CANSLIM: sustained multi-year revenue growth distinguishes compounders from one-hit wonders.',
+    dataSource: 'screen_results.payload_json revenueGrowth5Y',
+    direction: 'higher_better', normMax: 30,
+  },
+]; // sum = 100
 
+// Weights sum = 100. All signals trimmed proportionally to fit 7 signals.
 const BASELINE_BEARISH: ScoringSignal[] = [
   {
-    key: 'downtrendScore', label: 'Downtrend Confirmation (below 50MA + 200MA)', weight: 30, enabled: true,
+    key: 'downtrendScore', label: 'Downtrend Confirmation (below 50MA + 200MA)', weight: 26, enabled: true,
     description: 'Don\'t fight institutional selling — wait for MA confirmation.',
     dataSource: 'analysis_snapshots buy.smaStack + bearish.trendStrength (ADX)',
     direction: 'higher_better', normMax: 100,
   },
   {
-    key: 'fundamentalWeakness', label: 'Fundamental Deterioration', weight: 25, enabled: true,
+    key: 'fundamentalWeakness', label: 'Fundamental Deterioration', weight: 22, enabled: true,
     description: 'Earnings-driven declines are sustained; pure technical breakdowns often reverse.',
     dataSource: 'screen_results.payload_json → inverted scoreFundamentals()',
     direction: 'lower_better', normMax: 100,
   },
   {
-    key: 'rsiOverbought', label: 'RSI Overbought / Rolling Over (60–80 zone)', weight: 20, enabled: true,
+    key: 'rsiOverbought', label: 'RSI Overbought / Rolling Over (60–80 zone)', weight: 17, enabled: true,
     description: 'Overextended but not yet collapsed = best short entry window.',
     dataSource: 'analysis_snapshots buy.rsi',
     direction: 'target_range', targetMin: 60, targetMax: 80,
   },
   {
-    key: 'relativeWeakness', label: 'Relative Weakness vs Universe', weight: 15, enabled: false,
-    description: 'Weakest stocks in a weak market fall hardest. Available in Phase 2 — requires SPY price bars in price_history.',
-    dataSource: 'Phase 2: price_history SPY bars',
-    direction: 'lower_better', normMax: 100, phase2: true,
+    key: 'relativeWeakness', label: 'Relative Weakness vs SPY (90-day)', weight: 13, enabled: true,
+    description: 'Weakest stocks in a weak market fall hardest. Underperforming SPY confirms bearish thesis.',
+    dataSource: 'historical_prices SPY vs ticker 90-day return (ticker_90d − spy_90d, lower = more underperformance)',
+    direction: 'lower_better', normMax: 100,
   },
   {
-    key: 'priceDecayPct', label: 'Price Decay % (negative 52-week return)', weight: 10, enabled: true,
+    key: 'priceDecayPct', label: 'Price Decay % (negative 52-week return)', weight: 9, enabled: true,
     description: 'Confirms sustained downtrend, not a brief pullback.',
     dataSource: 'historical_prices (currentPrice - price_52w_ago) / price_52w_ago × 100 (inverted)',
     direction: 'lower_better', normMax: 150,
   },
-];
+  {
+    key: 'sectorWeakness', label: 'Sector Weakness (SPDR ETF 90-day, inverted)', weight: 7, enabled: true,
+    description: 'Declining sector = institutional headwind confirming short thesis. Higher score = sector down more.',
+    dataSource: 'historical_prices SECTOR_ETF 90-day return (inverted)',
+    direction: 'higher_better', normMax: 20,
+  },
+  {
+    key: 'leverageRisk', label: 'Leverage Risk (ND/EBITDA)', weight: 6, enabled: true,
+    description: 'High leverage amplifies drawdowns — overleveraged companies fall hardest in downturns. ND/EBITDA > 5 = elevated risk.',
+    dataSource: 'screen_results.payload_json netDebtToEbitda (higher = more risk = stronger bearish signal)',
+    direction: 'higher_better', normMax: 8,
+  },
+]; // sum = 100
 
 const BASELINE_INCOME: ScoringSignal[] = [
   {
@@ -183,38 +235,57 @@ const BASELINE_INCOME: ScoringSignal[] = [
   },
 ];
 
+// Weights sum = 100. All signals trimmed proportionally to fit 8 signals.
 const BASELINE_BUY: ScoringSignal[] = [
   {
-    key: 'priceMomentumPct', label: 'Price Momentum % (52-week return)', weight: 35, enabled: true,
+    key: 'priceMomentumPct', label: 'Price Momentum % (52-week return)', weight: 24, enabled: true,
     description: 'Momentum is the strongest documented return factor (Jegadeesh-Titman 1993).',
     dataSource: 'historical_prices (currentPrice - price_52w_ago) / price_52w_ago × 100',
     direction: 'higher_better', normMax: 150,
   },
   {
-    key: 'earningsGrowth', label: 'Earnings Quality (EPS consistency + growth)', weight: 25, enabled: true,
+    key: 'earningsGrowth', label: 'Earnings Quality (EPS consistency + growth)', weight: 18, enabled: true,
     description: 'Fundamental anchor — momentum without earnings support is speculation.',
     dataSource: 'screen_results.payload_json epsGrowth + revenueGrowth',
     direction: 'higher_better', normMax: 100,
   },
   {
-    key: 'breakoutScore', label: 'Breakout Quality Score', weight: 20, enabled: true,
+    key: 'breakoutScore', label: 'Breakout Quality Score', weight: 14, enabled: true,
     description: 'Entry timing: price near support, volume anomaly, MA alignment = defined risk entry.',
     dataSource: 'analysis_snapshots buy.smaStack + entryZoneLow + lastPrice',
     direction: 'higher_better', normMax: 100,
   },
   {
-    key: 'buySignalScore', label: 'Buy Signal Score (technical composite)', weight: 20, enabled: true,
+    key: 'buySignalScore', label: 'Buy Signal Score (technical composite)', weight: 14, enabled: true,
     description: 'Composite of MACD crossover, RSI zone, Bollinger position, patterns, trend, demand zone — from DailyTechnicalSignalsJob.',
     dataSource: 'technical_signals.buy_signal_score (0–100)',
     direction: 'higher_better', normMax: 100,
   },
   {
-    key: 'relativeStrength', label: 'Relative Performance vs Universe', weight: 20, enabled: false,
-    description: 'Confirms the stock is leading, not lagging — buy leaders. Available in Phase 2 — requires SPY price bars in price_history.',
-    dataSource: 'Phase 2: price_history SPY bars',
-    direction: 'higher_better', normMax: 100, phase2: true,
+    key: 'relativeStrength', label: 'Relative Performance vs SPY (90-day)', weight: 14, enabled: true,
+    description: 'Confirms the stock is leading, not lagging — buy leaders. Excess 90-day return vs S&P 500.',
+    dataSource: 'historical_prices SPY vs ticker 90-day return (ticker_90d − spy_90d)',
+    direction: 'higher_better', normMax: 50,
   },
-];
+  {
+    key: 'revenueGrowth5Y', label: '5-Year Revenue CAGR', weight: 7, enabled: true,
+    description: 'Long-term compounders outperform — filters out cyclical YoY spikes. Sustained growth attracts institutional buying.',
+    dataSource: 'screen_results.payload_json revenueGrowth5Y',
+    direction: 'higher_better', normMax: 30,
+  },
+  {
+    key: 'sectorMomentum', label: 'Sector Momentum (SPDR ETF 90-day return)', weight: 6, enabled: true,
+    description: 'Rising sector confirms trade direction — buy stocks in rising sectors.',
+    dataSource: 'historical_prices SECTOR_ETF 90-day return',
+    direction: 'higher_better', normMax: 30,
+  },
+  {
+    key: 'epsGrowth5Y', label: '5-Year EPS CAGR', weight: 3, enabled: true,
+    description: 'Sustained earnings growth is the primary driver of long-term stock returns (Novy-Marx 2013).',
+    dataSource: 'screen_results.payload_json epsGrowth5Y',
+    direction: 'higher_better', normMax: 40,
+  },
+]; // sum = 100
 
 export const BASELINE_CONFIGS: Record<ScoringStrategy, ScoringSignal[]> = {
   wheel:   BASELINE_WHEEL,
@@ -278,8 +349,19 @@ interface TickerSignalData {
   snapshotAgeHours: number | null;
   // Computed
   priceMomentumPct: number | null;
+  /** Excess 90-day return vs SPY: ticker_90d_return − spy_90d_return (percentage points). */
+  relativeStrengthVsSpy: number | null;
+  /** 90-day return of the ticker's SPDR sector ETF (XLK, XLF, etc.). */
+  sectorMomentumPct: number | null;
   // From technical_signals (DailyTechnicalSignalsJob)
   buySignalScore: number | null;
+  // Quality signals (v0.22.21) — from screen_results.payload_json
+  fcfToNetIncome: number | null;
+  roic: number | null;
+  netDebtToEbitda: number | null;
+  revenueGrowth5Y: number | null;
+  epsGrowth5Y: number | null;
+  stockGrade: number | null;
 }
 
 // ─── Service ─────────────────────────────────────────────────────────────────
@@ -456,12 +538,46 @@ export class ScoringService {
       case 'buySignalScore':
         return d.buySignalScore;
 
-      // Phase 2 placeholders — should never reach here since phase2=true signals are excluded
       case 'relativeStrength':
+        // Excess 90-day return vs SPY. direction=higher_better, normMax=50.
+        // +50pp outperformance = score 100; underperformers clamp to 0.
+        // see docs/formulas.md#relative-strength
+        return d.relativeStrengthVsSpy;
+
       case 'relativeWeakness':
+        // Same underlying data; direction=lower_better, normMax=100 inverts it.
+        // Underperforming SPY by 30pp → raw=-30 → score=(1-(-30)/100)*100=130→100.
+        // see docs/formulas.md#relative-strength
+        return d.relativeStrengthVsSpy;
+
       case 'sectorMomentum':
-      case 'relativeStrengthVsSpy':
-        return null;
+        // Sector ETF 90-day return. direction=higher_better, normMax=30.
+        // Sector up 30% = max score; flat/down = low score for bullish strategies.
+        // see docs/formulas.md#sector-momentum
+        return d.sectorMomentumPct;
+
+      case 'sectorWeakness':
+        // Inverted sector momentum for bearish strategies. direction=higher_better, normMax=20.
+        // Sector down 20% → raw=+20 → score=(20/20)*100=100.
+        // see docs/formulas.md#sector-momentum
+        return d.sectorMomentumPct !== null ? -d.sectorMomentumPct : null;
+
+      // Quality signals (v0.22.21)
+      case 'leverageQuality':
+        // Wheel: direction=lower_better, normMax=5.
+        // ND/EBITDA=1 → score=(1-1/5)*100=80. ND/EBITDA=5 → score=0. Net cash (<0) → clamped 100.
+        return d.netDebtToEbitda;
+
+      case 'leverageRisk':
+        // Bearish: direction=higher_better, normMax=8.
+        // ND/EBITDA=5 → score=(5/8)*100=62.5. Net cash → clamped 0.
+        return d.netDebtToEbitda;
+
+      case 'revenueGrowth5Y':
+        return d.revenueGrowth5Y;
+
+      case 'epsGrowth5Y':
+        return d.epsGrowth5Y;
 
       default:
         return null;
@@ -517,13 +633,22 @@ export class ScoringService {
     return components > 0 ? clamp(score) : null;
   }
 
-  // Earnings growth score: combined EPS + revenue growth (0–100)
+  // Earnings growth score: blends 1Y and 5Y EPS + revenue CAGR (0–100)
+  // 5Y signals get 1.5× weight when available — more reliable than YoY spikes.
+  // see docs/formulas.md#earnings-growth-score
   private computeEarningsGrowthScore(d: TickerSignalData): number | null {
-    if (d.epsGrowth === null && d.revenueGrowth === null) return null;
-    let total = 0;
-    let weight = 0;
-    if (d.epsGrowth !== null) { total += clamp((d.epsGrowth / 50) * 100); weight++; }
-    if (d.revenueGrowth !== null) { total += clamp((d.revenueGrowth / 30) * 100); weight++; }
+    const hasAny = d.epsGrowth !== null || d.revenueGrowth !== null
+                || d.epsGrowth5Y !== null || d.revenueGrowth5Y !== null;
+    if (!hasAny) return null;
+
+    let total = 0, weight = 0;
+    // 1-year growth (YoY)
+    if (d.epsGrowth !== null)     { total += clamp((d.epsGrowth / 50) * 100) * 1;    weight += 1; }
+    if (d.revenueGrowth !== null) { total += clamp((d.revenueGrowth / 30) * 100) * 1; weight += 1; }
+    // 5-year CAGR (1.5× weight — filters cyclical spikes, rewards compounders)
+    if (d.epsGrowth5Y !== null)     { total += clamp((d.epsGrowth5Y / 40) * 100) * 1.5;    weight += 1.5; }
+    if (d.revenueGrowth5Y !== null) { total += clamp((d.revenueGrowth5Y / 25) * 100) * 1.5; weight += 1.5; }
+
     return weight > 0 ? Math.round(total / weight) : null;
   }
 
@@ -574,7 +699,11 @@ export class ScoringService {
         lastPrice: null, annualizedReturn: null, optionLiquidityScore: null,
         suitabilityScore: null, entryZoneLow: null, snapshotAgeHours: null,
         priceMomentumPct: null,
+        relativeStrengthVsSpy: null,
+        sectorMomentumPct: null,
         buySignalScore: null,
+        fcfToNetIncome: null, roic: null, netDebtToEbitda: null,
+        revenueGrowth5Y: null, epsGrowth5Y: null, stockGrade: null,
       }])
     );
 
@@ -582,6 +711,8 @@ export class ScoringService {
     this.loadFundamentals(tickers, result);
     this.loadAnalysisSnapshots(tickers, result);
     this.loadPriceMomentum(tickers, result);
+    this.loadRelativeStrength(tickers, result);
+    this.loadSectorMomentum(tickers, result);
     this.loadTechnicalSignals(tickers, result);
 
     return result;
@@ -633,18 +764,33 @@ export class ScoringService {
       const p = JSON.parse(row.payload_json) as ScreenResultPayload;
       d.epsGrowth = p.epsGrowth;
       d.revenueGrowth = p.revenueGrowth;
+      // Quality signals (v0.22.21) — populated after fundamentals-computer upgrade
+      d.fcfToNetIncome = p.fcfToNetIncome ?? null;
+      d.roic = p.roic ?? null;
+      d.netDebtToEbitda = p.netDebtToEbitda ?? null;
+      d.revenueGrowth5Y = p.revenueGrowth5Y ?? null;
+      d.epsGrowth5Y = p.epsGrowth5Y ?? null;
+      d.stockGrade = p.stockGrade ?? null;
       d.fundamentalScore = this.scoreFundamentals(p);
     }
   }
 
   private scoreFundamentals(data: ScreenResultPayload): number | null {
+    // see docs/formulas.md#fundamental-quality-score
     let score = 0, max = 0;
-    if (data.roe !== null) { max += 20; score += clamp((data.roe / 20) * 20, 0, 20); }
-    if (data.epsGrowth !== null) { max += 20; score += clamp((data.epsGrowth / 20) * 20, 0, 20); }
-    if (data.profitMargin !== null) { max += 15; score += clamp((data.profitMargin / 15) * 15, 0, 15); }
-    if (data.revenueGrowth !== null) { max += 15; score += clamp((data.revenueGrowth / 15) * 15, 0, 15); }
-    if (data.debtToEquity !== null) { max += 15; score += clamp((1 - data.debtToEquity / 2) * 15, 0, 15); }
-    if (data.freeCashFlow !== null && data.freeCashFlow > 0) { max += 15; score += 15; }
+    // Profitability
+    if (data.roe !== null) { max += 15; score += clamp((data.roe / 20) * 15, 0, 15); }
+    if (data.profitMargin !== null) { max += 10; score += clamp((data.profitMargin / 15) * 10, 0, 10); }
+    // Capital efficiency (v0.22.21: ROIC replaces part of ROE weight — more informative)
+    if (data.roic !== null) { max += 15; score += clamp((data.roic / 20) * 15, 0, 15); }
+    // Cash quality (v0.22.21: FCF/NI confirms earnings quality)
+    if (data.fcfToNetIncome !== null) { max += 15; score += clamp((data.fcfToNetIncome / 100) * 15, 0, 15); }
+    // Growth (1Y)
+    if (data.epsGrowth !== null) { max += 15; score += clamp((data.epsGrowth / 20) * 15, 0, 15); }
+    if (data.revenueGrowth !== null) { max += 10; score += clamp((data.revenueGrowth / 15) * 10, 0, 10); }
+    // Balance sheet
+    if (data.debtToEquity !== null) { max += 10; score += clamp((1 - data.debtToEquity / 2) * 10, 0, 10); }
+    if (data.freeCashFlow !== null && data.freeCashFlow > 0) { max += 10; score += 10; }
     return max > 0 ? Math.round((score / max) * 100) : null;
   }
 
@@ -754,6 +900,138 @@ export class ScoringService {
     }
   }
 
+  // relativeStrengthVsSpy = ticker_90d_return − spy_90d_return (percentage points).
+  // Uses rn=90 as the 90-day base; falls back to oldest available row when < 90 bars exist.
+  // Minimum 60 bars required for SPY and for each ticker.
+  // see docs/formulas.md#relative-strength, FR-SE-06
+  private loadRelativeStrength(tickers: string[], result: Map<string, TickerSignalData>): void {
+    const allTickers = ['SPY', ...tickers];
+    const ph = allTickers.map(() => '?').join(',');
+
+    type RSRow = {
+      ticker: string;
+      current_close: number | null;
+      base_close: number | null;
+      row_count: number;
+    };
+
+    // CTE pulls rn=1 (current) and rn=90 (base) per ticker in a single scan.
+    // When fewer than 90 rows exist but ≥ 60, the oldest available row (rn=cnt) is used
+    // so new-to-DB tickers aren't always null.
+    const rows = this.db.prepare(`
+      WITH ranked AS (
+        SELECT ticker, close,
+               ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY date DESC) AS rn,
+               COUNT(*) OVER (PARTITION BY ticker)                         AS cnt
+        FROM historical_prices
+        WHERE ticker IN (${ph})
+      )
+      SELECT
+        ticker,
+        MAX(CASE WHEN rn = 1                                       THEN close END) AS current_close,
+        MAX(CASE WHEN rn = 90                                      THEN close
+                 WHEN cnt BETWEEN 60 AND 89 AND rn = cnt           THEN close
+                 END)                                                              AS base_close,
+        MAX(cnt)                                                                   AS row_count
+      FROM ranked
+      GROUP BY ticker
+    `).all(...allTickers) as RSRow[];
+
+    const toReturn = (row: RSRow): number | null => {
+      if (row.current_close === null || row.base_close === null ||
+          row.base_close <= 0 || row.row_count < 60) return null;
+      return ((row.current_close - row.base_close) / row.base_close) * 100;
+    };
+
+    const spyRow = rows.find(r => r.ticker === 'SPY');
+    const spyReturn = spyRow ? toReturn(spyRow) : null;
+    if (spyReturn === null) return;  // SPY bars unavailable — signal stays null
+
+    for (const row of rows) {
+      if (row.ticker === 'SPY') continue;
+      const d = result.get(row.ticker);
+      if (!d) continue;
+      const tickerReturn = toReturn(row);
+      if (tickerReturn !== null) {
+        d.relativeStrengthVsSpy = tickerReturn - spyReturn;
+      }
+    }
+  }
+
+  // sectorMomentumPct = 90-day return of the ticker's SPDR sector ETF.
+  // Sector is read from ScreenResultPayload.sector in the latest screen run.
+  // ETF bars come from historical_prices (maintained by PriceGapFillJob).
+  // see docs/formulas.md#sector-momentum, FR-SE-07
+  private loadSectorMomentum(tickers: string[], result: Map<string, TickerSignalData>): void {
+    const etfTickers = Object.values(SECTOR_ETF);
+    const etfPh = etfTickers.map(() => '?').join(',');
+
+    type EtfRow = {
+      ticker: string;
+      current_close: number | null;
+      base_close: number | null;
+      row_count: number;
+    };
+
+    // Same 90d-return CTE pattern as loadRelativeStrength
+    const etfRows = this.db.prepare(`
+      WITH ranked AS (
+        SELECT ticker, close,
+               ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY date DESC) AS rn,
+               COUNT(*) OVER (PARTITION BY ticker)                         AS cnt
+        FROM historical_prices
+        WHERE ticker IN (${etfPh})
+      )
+      SELECT
+        ticker,
+        MAX(CASE WHEN rn = 1                                       THEN close END) AS current_close,
+        MAX(CASE WHEN rn = 90                                      THEN close
+                 WHEN cnt BETWEEN 60 AND 89 AND rn = cnt           THEN close
+                 END)                                                              AS base_close,
+        MAX(cnt)                                                                   AS row_count
+      FROM ranked
+      GROUP BY ticker
+    `).all(...etfTickers) as EtfRow[];
+
+    // Build ETF → 90d return map
+    const etfReturns = new Map<string, number>();
+    for (const row of etfRows) {
+      if (row.current_close !== null && row.base_close !== null &&
+          row.base_close > 0 && row.row_count >= 60) {
+        etfReturns.set(row.ticker, ((row.current_close - row.base_close) / row.base_close) * 100);
+      }
+    }
+    if (etfReturns.size === 0) return;  // No ETF bars yet
+
+    // Look up each ticker's sector from the latest screen run
+    type RunRow = { id: number };
+    const latestRun = this.db.prepare(
+      'SELECT id FROM screen_runs ORDER BY id DESC LIMIT 1'
+    ).get() as RunRow | undefined;
+    if (!latestRun) return;
+
+    const tickerPh = tickers.map(() => '?').join(',');
+    type SectorRow = { ticker: string; payload_json: string };
+    const screenRows = this.db.prepare(`
+      SELECT ticker, payload_json FROM screen_results
+      WHERE screen_run_id = ? AND ticker IN (${tickerPh})
+    `).all(latestRun.id, ...tickers) as SectorRow[];
+
+    for (const row of screenRows) {
+      const d = result.get(row.ticker);
+      if (!d) continue;
+      const payload = JSON.parse(row.payload_json) as ScreenResultPayload;
+      const sector = payload.sector;
+      if (!sector) continue;
+      const etf = SECTOR_ETF[sector];
+      if (!etf) continue;
+      const etfReturn = etfReturns.get(etf);
+      if (etfReturn !== undefined) {
+        d.sectorMomentumPct = etfReturn;
+      }
+    }
+  }
+
   private loadTechnicalSignals(tickers: string[], result: Map<string, TickerSignalData>): void {
     const ph = tickers.map(() => '?').join(',');
     type TsRow = { ticker: string; buy_signal_score: number | null };
@@ -821,6 +1099,25 @@ export class ScoringService {
     validUntil: string,
     runMeta: object,
   ): number {
+    const todayET = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+
+    // Delete any records for this strategy generated today in ET.
+    // generated_at is stored as UTC, so we convert each row's timestamp to ET
+    // and compare — handles DST correctly via the JS Intl API.
+    type IdRow = { id: number; generated_at: string };
+    const existing = this.db.prepare(
+      `SELECT id, generated_at FROM daily_briefs WHERE strategy = ?`
+    ).all(strategy) as IdRow[];
+
+    const toDelete = existing
+      .filter(r => new Date(r.generated_at).toLocaleDateString('en-CA', { timeZone: 'America/New_York' }) === todayET)
+      .map(r => r.id);
+
+    if (toDelete.length > 0) {
+      const placeholders = toDelete.map(() => '?').join(',');
+      this.db.prepare(`DELETE FROM daily_briefs WHERE id IN (${placeholders})`).run(...toDelete);
+    }
+
     const result = this.db.prepare(`
       INSERT INTO daily_briefs (generated_at, valid_until, strategy, picks, run_meta)
       VALUES (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ?, ?, ?)
