@@ -171,6 +171,8 @@ Authoritative DDL is in `migrations/001_init.sql` + `002_screen_schema.sql`. Pha
 
 ## Recent Changes
 
+- **v0.22.24 (2026-06-03)** — Daily IV Capture: removed "already done today" skip — every run now overwrites with the latest snapshot. Supports intraday re-runs; 4:30pm job always writes EOD data. `storeReading()` upsert was already in place. ~1,500 credits/run, well within 10k/day MarketData.app limit.
+
 - **v0.22.23 (2026-06-03)** — Daily IV Capture switched from E*Trade to MarketData.app. Job now fully unattended — no OAuth token expiry. Uses `getLiveChain(ticker, nearestMonthlyExpFor30Dte())` (single call per ticker, `?expiration=` param). ATM IV computed inline; stored as `source='marketdata'`. IVolatility guard preserved. All E*Trade code untouched — only `DailyIvCaptureJob` and its constructor wiring changed.
 
 - **v0.22.22 (2026-06-03)** — Test API MarketData.app live chain. New **Live (today)** mode on the MarketData.app tab uses `?expiration=` (not `?date=` which is historical-only and was causing 400 errors). `getLiveChain()` / `getRawLiveChain()` added to `MarketDataProvider`; `nearestMonthlyExpFor30Dte()` helper exported. `test-api:get-marketdata-live-chain` IPC + `getMarketDataLiveChain` preload bridge. UI has Live/Historical toggle. Prerequisite for replacing E*Trade Daily IV Capture with MarketData.app.

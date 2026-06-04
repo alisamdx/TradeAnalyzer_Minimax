@@ -55,14 +55,10 @@ export class DailyIvCaptureJob implements BatchJobHandler {
     const etf     = this.constituentsService.getConstituents('etf').map(r => r.ticker.toUpperCase());
     const allTickers = [...new Set([...sp500, ...russell, ...etf])];
 
-    // Skip tickers that already have today's row
-    type TickerRow = { ticker: string };
-    const alreadyDone = new Set<string>(
-      (this.db.prepare(
-        `SELECT DISTINCT ticker FROM iv_history WHERE date = ?`
-      ).all(today) as TickerRow[]).map(r => r.ticker.toUpperCase())
-    );
-    const missing = allTickers.filter(t => !alreadyDone.has(t));
+    // Always process all tickers — storeReading uses ON CONFLICT DO UPDATE so each
+    // run overwrites with the latest snapshot. Supports multiple intraday runs and
+    // ensures the 4:30pm job always writes EOD data even if a mid-day run already ran.
+    const missing = allTickers;
     const total = missing.length;
 
     if (total === 0) {
