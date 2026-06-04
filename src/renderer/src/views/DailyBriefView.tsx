@@ -23,6 +23,7 @@ const SIGNAL_LABELS: Record<string, string> = {
   rsiMomentum:      'RSI',
   rsiOverbought:    'RSI',
   optionLiquidity:  'Liq.',
+  recentVolatility: 'Recent Vol',
   trendStrength:    'Trend Strength',
   downtrendScore:   'Downtrend',
   trendNeutral:     'Trend Neutral',
@@ -206,6 +207,7 @@ function fmtRaw(raw: number | null, key: string): string {
     return raw.toFixed(0);
   }
   // Momentum — show sign + 1dp
+  if (key === 'recentVolatility') return raw.toFixed(1) + '%';
   if (key === 'priceMomentumPct' || key === 'priceDecayPct') {
     return (raw >= 0 ? '+' : '') + raw.toFixed(1) + '%';
   }

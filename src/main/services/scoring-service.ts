@@ -70,40 +70,46 @@ export interface ScoringConfig {
 // IBD CANSLIM (O'Neil), McMillan's Options as a Strategic Investment, Zacks.
 // see Requirements/DAILY_INTELLIGENCE_BRIEF.md §4.5
 
-// Weights sum = 100. ivRank/premiumYield trimmed slightly to fit leverageQuality.
+// Weights sum = 100. Includes recentVolatility (v0.23.1) — high 20d vol = bad for CSP selling.
 const BASELINE_WHEEL: ScoringSignal[] = [
   {
-    key: 'ivRank', label: 'IV Rank (30-day)', weight: 27, enabled: true,
+    key: 'ivRank', label: 'IV Rank (30-day)', weight: 25, enabled: true,
     description: 'tastytrade rule #1: IVR < 30 = don\'t sell. Higher IVR = more edge in premium.',
     dataSource: 'iv_history.atm_iv → IvHistoryService.getIvRank()',
     direction: 'higher_better', normMax: 100,
   },
   {
-    key: 'premiumYield', label: 'Premium Yield (annualized)', weight: 23, enabled: true,
+    key: 'premiumYield', label: 'Premium Yield (annualized)', weight: 21, enabled: true,
     description: 'Premium / strike × (365 / DTE). You\'re a yield business — this is your return.',
     dataSource: 'analysis_snapshots wheel.annualizedReturn',
     direction: 'higher_better', normMax: 60,
   },
   {
-    key: 'fundamentalScore', label: 'Fundamental Quality', weight: 20, enabled: true,
+    key: 'fundamentalScore', label: 'Fundamental Quality', weight: 18, enabled: true,
     description: 'Wheel requires owning the stock — never sell a CSP on a stock you wouldn\'t hold.',
     dataSource: 'screen_results.payload_json → scoreFundamentals()',
     direction: 'higher_better', normMax: 100,
   },
   {
-    key: 'technicalNeutral', label: 'Technical Neutral (RSI 40–60)', weight: 14, enabled: true,
+    key: 'technicalNeutral', label: 'Technical Neutral (RSI 40–60)', weight: 13, enabled: true,
     description: 'Don\'t sell puts into a downtrend; neutral trend = safer assignment zone.',
     dataSource: 'analysis_snapshots buy.rsi',
     direction: 'target_range', targetMin: 40, targetMax: 60,
   },
   {
-    key: 'optionLiquidity', label: 'Option Liquidity', weight: 10, enabled: true,
+    key: 'recentVolatility', label: 'Recent Volatility (20-day realized vol)', weight: 10, enabled: true,
+    description: 'Stocks making large recent moves carry higher assignment risk. 20-day annualized realized vol — lower is better for CSP selling.',
+    dataSource: 'historical_prices 20-day log-return std dev × √252 × 100',
+    direction: 'lower_better', normMax: 60,
+  },
+  {
+    key: 'optionLiquidity', label: 'Option Liquidity', weight: 9, enabled: true,
     description: 'Wide bid-ask spreads kill theoretical edge; OI + spread composite.',
     dataSource: 'analysis_snapshots wheel.optionLiquidityScore (0–10)',
     direction: 'higher_better', normMax: 10,
   },
   {
-    key: 'leverageQuality', label: 'Leverage Quality (ND/EBITDA)', weight: 6, enabled: true,
+    key: 'leverageQuality', label: 'Leverage Quality (ND/EBITDA)', weight: 4, enabled: true,
     description: 'CSP assignment risk: highly leveraged companies can spiral on bad news. ND/EBITDA < 3 = safer stock to hold.',
     dataSource: 'screen_results.payload_json netDebtToEbitda',
     direction: 'lower_better', normMax: 5,
@@ -208,32 +214,40 @@ const BASELINE_BEARISH: ScoringSignal[] = [
   },
 ]; // sum = 100
 
+// Includes recentVolatility (v0.23.1) — the primary screen for income: is the stock actually range-bound?
+// ADX (trendNeutral) catches directional trend; recentVolatility catches realized choppiness/momentum.
 const BASELINE_INCOME: ScoringSignal[] = [
   {
-    key: 'ivRank', label: 'IV Rank (30-day)', weight: 35, enabled: true,
+    key: 'ivRank', label: 'IV Rank (30-day)', weight: 30, enabled: true,
     description: 'Higher weight than Wheel: no ownership backstop — IV edge is the entire thesis.',
     dataSource: 'iv_history.atm_iv → IvHistoryService.getIvRank()',
     direction: 'higher_better', normMax: 100,
   },
   {
-    key: 'premiumRiskRatio', label: 'Premium / Max Risk Ratio', weight: 25, enabled: true,
+    key: 'premiumRiskRatio', label: 'Premium / Max Risk Ratio', weight: 22, enabled: true,
     description: 'tastytrade: credit ≥ 1/3 of spread width. Below that, not worth the risk.',
     dataSource: 'analysis_snapshots options_income.annualizedReturn',
     direction: 'higher_better', normMax: 60,
   },
   {
-    key: 'trendNeutral', label: 'Underlying Trend Neutrality (range-bound)', weight: 20, enabled: true,
+    key: 'recentVolatility', label: 'Recent Volatility (20-day realized vol)', weight: 20, enabled: true,
+    description: 'Stock making large recent moves = strangle at risk on day 1. 20-day annualized realized vol — lower is better. Catches earnings runners, gap stocks, and trending names that ADX may miss.',
+    dataSource: 'historical_prices 20-day log-return std dev × √252 × 100',
+    direction: 'lower_better', normMax: 60,
+  },
+  {
+    key: 'trendNeutral', label: 'Underlying Trend Neutrality (range-bound)', weight: 15, enabled: true,
     description: 'Short strangles need the stock to stay in a range; strong trends kill this trade.',
     dataSource: 'analysis_snapshots bullish/bearish.trendStrength (ADX < 20 = range-bound)',
     direction: 'lower_better', normMax: 60,
   },
   {
-    key: 'optionLiquidity', label: 'Option Liquidity (OI, volume, tight spreads)', weight: 20, enabled: true,
+    key: 'optionLiquidity', label: 'Option Liquidity (OI, volume, tight spreads)', weight: 13, enabled: true,
     description: 'Multi-leg structures: slippage compounds. Liquidity is non-negotiable.',
     dataSource: 'analysis_snapshots wheel.optionLiquidityScore (0–10)',
     direction: 'higher_better', normMax: 10,
   },
-];
+]; // sum = 100
 
 // Weights sum = 100. All signals trimmed proportionally to fit 8 signals.
 const BASELINE_BUY: ScoringSignal[] = [
@@ -353,6 +367,8 @@ interface TickerSignalData {
   relativeStrengthVsSpy: number | null;
   /** 90-day return of the ticker's SPDR sector ETF (XLK, XLF, etc.). */
   sectorMomentumPct: number | null;
+  // 20-day annualized realized volatility (std dev of daily log returns × √252 × 100)
+  recentVolatility: number | null;
   // From technical_signals (DailyTechnicalSignalsJob)
   buySignalScore: number | null;
   // Quality signals (v0.22.21) — from screen_results.payload_json
@@ -374,7 +390,7 @@ export class ScoringService {
   seedBaselines(): void {
     const stmt = this.db.prepare(`
       INSERT OR IGNORE INTO scoring_strategy_configs (strategy, signals, version, updated_at)
-      VALUES (?, ?, 'baseline_v1', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+      VALUES (?, ?, 'baseline_v2', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     `);
     for (const [strategy, signals] of Object.entries(BASELINE_CONFIGS)) {
       stmt.run(strategy, JSON.stringify(signals));
@@ -392,7 +408,7 @@ export class ScoringService {
       return {
         strategy,
         signals: BASELINE_CONFIGS[strategy],
-        version: 'baseline_v1',
+        version: 'baseline_v2',
         updatedAt: new Date().toISOString(),
       };
     }
@@ -562,6 +578,11 @@ export class ScoringService {
         // see docs/formulas.md#sector-momentum
         return d.sectorMomentumPct !== null ? -d.sectorMomentumPct : null;
 
+      case 'recentVolatility':
+        // 20-day annualized realized vol (%). lower_better: high vol = bad for income/wheel.
+        // see docs/formulas.md#recent-volatility
+        return d.recentVolatility;
+
       // Quality signals (v0.22.21)
       case 'leverageQuality':
         // Wheel: direction=lower_better, normMax=5.
@@ -701,6 +722,7 @@ export class ScoringService {
         priceMomentumPct: null,
         relativeStrengthVsSpy: null,
         sectorMomentumPct: null,
+        recentVolatility: null,
         buySignalScore: null,
         fcfToNetIncome: null, roic: null, netDebtToEbitda: null,
         revenueGrowth5Y: null, epsGrowth5Y: null, stockGrade: null,
@@ -714,6 +736,7 @@ export class ScoringService {
     this.loadRelativeStrength(tickers, result);
     this.loadSectorMomentum(tickers, result);
     this.loadTechnicalSignals(tickers, result);
+    this.loadRecentVolatility(tickers, result);
 
     return result;
   }
@@ -1043,6 +1066,48 @@ export class ScoringService {
     for (const row of rows) {
       const d = result.get(row.ticker);
       if (d) d.buySignalScore = row.buy_signal_score;
+    }
+  }
+
+  // 20-day realized volatility — annualized std dev of daily log returns × 100 (as %).
+  // Requires ≥ 21 closing prices (20 returns). Minimum 15 required to produce a value.
+  // Income & Wheel use this as lower_better: high vol = stock making large moves = bad for premium selling.
+  // see docs/formulas.md#recent-volatility
+  private loadRecentVolatility(tickers: string[], result: Map<string, TickerSignalData>): void {
+    const ph = tickers.map(() => '?').join(',');
+    type PRow = { ticker: string; close: number; rn: number };
+    const rows = this.db.prepare(`
+      SELECT ticker, close,
+             ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY date DESC) AS rn
+      FROM historical_prices
+      WHERE ticker IN (${ph})
+    `).all(...tickers) as PRow[];
+
+    const byTicker = new Map<string, number[]>();
+    for (const r of rows) {
+      if (r.rn > 22) continue;  // only need 21 closes for 20 returns
+      if (!byTicker.has(r.ticker)) byTicker.set(r.ticker, []);
+      byTicker.get(r.ticker)!.push(r.close);
+    }
+
+    for (const [ticker, closes] of byTicker) {
+      const d = result.get(ticker);
+      if (!d || closes.length < 16) continue;  // need ≥ 15 returns
+
+      // closes are newest-first (rn=1 first); compute log returns oldest→newest
+      const sorted = [...closes].reverse();
+      const logReturns: number[] = [];
+      for (let i = 1; i < sorted.length; i++) {
+        const prev = sorted[i - 1]!;
+        const curr = sorted[i]!;
+        if (prev > 0 && curr > 0) logReturns.push(Math.log(curr / prev));
+      }
+      if (logReturns.length < 15) continue;
+
+      const mean = logReturns.reduce((s, r) => s + r, 0) / logReturns.length;
+      const variance = logReturns.reduce((s, r) => s + (r - mean) ** 2, 0) / (logReturns.length - 1);
+      // Annualize: × √252 × 100 to express as percentage
+      d.recentVolatility = Math.sqrt(variance * 252) * 100;
     }
   }
 

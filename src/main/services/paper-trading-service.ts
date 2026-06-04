@@ -275,13 +275,19 @@ export class PaperTradingService {
       let recommendation: TradeRecommendation = 'hold';
       let estimatedPnl: number | null = null;
 
-      if (currentPrice !== null && trade.entryPrice !== null && trade.entryPrice > 0) {
+      // Day 0: no full trading day has elapsed since capture — the historical_prices
+      // price may predate the brief, making any comparison a data-freshness artefact
+      // rather than real price movement. Suppress verdict until daysHeld >= 1.
+      const canComputeVerdict = daysHeld >= 1;
+
+      if (canComputeVerdict && currentPrice !== null && trade.entryPrice !== null && trade.entryPrice > 0) {
         const stockReturnPct = (currentPrice - trade.entryPrice) / trade.entryPrice * 100;
         const result = computeVerdict(trade.briefStrategy, stockReturnPct, daysToExpiry, settings);
         verdict = result.verdict;
         recommendation = result.recommendation;
 
         // Delta-based estimated P&L (approximation — label clearly in UI)
+        if (!canComputeVerdict) { estimatedPnl = null; }
         try {
           type Leg = { delta: number | null; qty: number; action: 'buy' | 'sell' };
           const legs = JSON.parse(trade.legsJson) as Leg[];
