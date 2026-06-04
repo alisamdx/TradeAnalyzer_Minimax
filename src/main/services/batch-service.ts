@@ -23,9 +23,14 @@ export interface BatchJobResult {
 export interface BatchJobHandler {
   name: string;
   description: string;
+  /**
+   * @param force When true, bypass "non-trading day" guards so the job always runs.
+   *              Used by the "Run All in Sequence" manual trigger.
+   */
   run(
     onProgress: (evt: BatchProgressEvent) => void,
-    signal: AbortSignal
+    signal: AbortSignal,
+    force?: boolean
   ): Promise<BatchJobResult>;
 }
 
@@ -82,7 +87,20 @@ export class BatchService {
     private readonly db: DbHandle,
     private readonly onNotification: (n: AppNotification) => void,
     private readonly onProgress: (evt: BatchProgressEvent) => void
-  ) {}
+  ) {
+    // Clean up any jobs left in 'running' state from a previous crashed/killed session.
+    // Without this, stuck rows persist forever and block new runs from starting.
+    const now = new Date().toISOString();
+    this.db.prepare(`
+      UPDATE batch_runs
+      SET status = 'failed', completed_at = ?, error_message = 'Interrupted by app restart'
+      WHERE status = 'running'
+    `).run(now);
+    this.db.prepare(`
+      UPDATE batch_jobs SET last_run_status = 'failed'
+      WHERE last_run_status = 'running'
+    `).run();
+  }
 
   // ── Job registration ──────────────────────────────────────────────────────
 
@@ -172,7 +190,7 @@ export class BatchService {
 
   // ── Run a job ─────────────────────────────────────────────────────────────
 
-  async runJob(jobId: string, trigger: 'startup' | 'schedule' | 'manual'): Promise<void> {
+  async runJob(jobId: string, trigger: 'startup' | 'schedule' | 'manual', force = false): Promise<void> {
     if (this.runningJobId !== null) {
       this.onNotification({
         id: `batch-busy-${Date.now()}`,
@@ -216,7 +234,8 @@ export class BatchService {
           // Enrich with runId and relay
           this.onProgress({ ...evt, runId });
         },
-        ac.signal
+        ac.signal,
+        force
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -232,6 +251,10 @@ export class BatchService {
       this.abortControllers.delete(jobId);
       this.runningJobId = null;
     }
+
+    // cancelJob() already wrote 'cancelled' to the DB and freed the running slot.
+    // Don't overwrite that state with the job's eventual return value.
+    if (ac.signal.aborted) return;
 
     const completedAt = new Date().toISOString();
 
@@ -310,6 +333,21 @@ export class BatchService {
     if (ac) {
       ac.abort();
       console.log(`[batch] cancel requested for "${jobId}"`);
+
+      // Immediately reflect cancellation in the DB so the UI updates right away,
+      // rather than waiting for the hung Promise to eventually settle.
+      const now = new Date().toISOString();
+      this.db.prepare(`
+        UPDATE batch_runs SET status = 'cancelled', completed_at = ?
+        WHERE job_id = ? AND status = 'running'
+      `).run(now, jobId);
+      this.db.prepare(`
+        UPDATE batch_jobs SET last_run_status = 'cancelled' WHERE id = ?
+      `).run(jobId);
+
+      // Free the running slot so new jobs can start without waiting for the
+      // hung Promise to resolve.
+      this.runningJobId = null;
     }
   }
 

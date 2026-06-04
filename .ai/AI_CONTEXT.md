@@ -171,6 +171,8 @@ Authoritative DDL is in `migrations/001_init.sql` + `002_screen_schema.sql`. Pha
 
 ## Recent Changes
 
+- **v0.22.27 (2026-06-03)** — Fix batch job stuck on "Running" / cancel does nothing. Two fixes in `BatchService`: (1) constructor now cleans up stale `running` rows on startup; (2) `cancelJob` immediately writes `cancelled` to DB and frees `runningJobId` instead of waiting for hung Promise to settle. Guard in `runJob` skips final DB write if signal was aborted.
+
 - **v0.22.26 (2026-06-03)** — Daily Options Snapshot + Daily Intelligence Brief: graceful skip when options provider is unavailable. Both jobs probe `getOptionsExpirations('SPY')` at startup and return `status: 'skipped'` immediately on auth/connectivity failure instead of hanging or timing out on every ticker. `DailyOptionsSnapshotJob` now takes `OptionsProvider` constructor arg.
 
 - **v0.22.25 (2026-06-03)** — Fix Daily Options Snapshot stuck on "Running". Added 30s per-ticker `withTimeout()` around each `analyzeTicker` call. Expired E*Trade token (or any hung HTTP call) caused the job to freeze indefinitely on the first ticker. Timed-out tickers now count as failed and the loop continues.
