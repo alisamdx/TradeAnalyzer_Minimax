@@ -388,7 +388,7 @@ app.whenReady().then(() => {
   // Runs at 06:00 ET (pre-market — OI reflects yesterday's close, which is stable).
   // Also runs once on startup after a 5-minute delay so E*Trade tokens have time
   // to load; a fresh snapshot beats any stale one from a prior session.
-  const optionsSnapshotJob = new DailyOptionsSnapshotJob(db, analysisService);
+  const optionsSnapshotJob = new DailyOptionsSnapshotJob(db, analysisService, optionsProvider);
   batchService.registerJob('daily-options-snapshot', optionsSnapshotJob, {
     dailyScheduleTime: '06:00',
     startupDelaySeconds: 300,    // 5 min — allow E*Trade auth to initialise

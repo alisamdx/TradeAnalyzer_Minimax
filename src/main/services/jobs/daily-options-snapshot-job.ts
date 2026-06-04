@@ -22,8 +22,14 @@ import type { BatchJobHandler, BatchJobResult } from '../batch-service.js';
 import type { BatchProgressEvent } from '@shared/types.js';
 import type { AnalysisService, WheelResult } from '../analysis-service.js';
 import type { AnalysisResult } from '../analysis-service.js';
+import type { OptionsProvider } from '../options-provider.js';
 import { isTradingDay } from '../iv-history-service.js';
 import { SCORING_REFERENCE_TICKERS } from './price-gap-fill-job.js';
+
+function isAuthError(e: unknown): boolean {
+  const msg = (e instanceof Error ? e.message : String(e)).toLowerCase();
+  return msg.includes('401') || msg.includes('token') || msg.includes('auth') || msg.includes('oauth');
+}
 
 const MAX_TICKERS      = 300;    // cap to keep runtime ≤ ~10 min
 const ETRADE_DELAY     = 1_100;  // ms between chain calls (rate limit)
@@ -48,6 +54,7 @@ export class DailyOptionsSnapshotJob implements BatchJobHandler {
   constructor(
     private readonly db: Database,
     private readonly analysisService: AnalysisService,
+    private readonly optionsProvider: OptionsProvider,
   ) {}
 
   async run(
@@ -69,6 +76,27 @@ export class DailyOptionsSnapshotJob implements BatchJobHandler {
         jobId: 'daily-options-snapshot', runId: 0, ticker: '', status: 'updated',
         attempted, updated: 0, skipped: 0, failed: 0, total, message: msg,
       });
+
+    // ── Options provider connectivity check ───────────────────────────────────
+    // Polygon works unattended; E*Trade tokens expire at midnight ET.
+    // A quick probe avoids running 300 tickers only to time out on every one.
+    try {
+      await this.optionsProvider.getOptionsExpirations('SPY');
+    } catch (err) {
+      if (isAuthError(err)) {
+        return {
+          status: 'skipped',
+          notes: 'Options provider not connected (E*Trade token expired). Reconnect in Settings → E*Trade Connection.',
+          tickersAttempted: 0, tickersUpdated: 0, tickersSkipped: 0, tickersFailed: 0,
+        };
+      }
+      // Non-auth errors (network blip etc.) — still skip rather than running blind
+      return {
+        status: 'skipped',
+        notes: `Options provider unavailable: ${err instanceof Error ? err.message : String(err)}`,
+        tickersAttempted: 0, tickersUpdated: 0, tickersSkipped: 0, tickersFailed: 0,
+      };
+    }
 
     // ── Load top screener candidates ──────────────────────────────────────────
     emit('Loading screener candidates…');

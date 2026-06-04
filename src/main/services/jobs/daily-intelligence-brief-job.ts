@@ -15,8 +15,14 @@ import type { DataProvider } from '../data-provider.js';
 import { StrategyLabService } from '../strategy-lab-service.js';
 import { secureGet } from '../secure-settings.js';
 import { isTradingDay } from '../iv-history-service.js';
+import { SCORING_REFERENCE_TICKERS } from './price-gap-fill-job.js';
 
 const PICKS_PER_STRATEGY = 5;
+
+function isAuthError(e: unknown): boolean {
+  const msg = (e instanceof Error ? e.message : String(e)).toLowerCase();
+  return msg.includes('401') || msg.includes('token') || msg.includes('auth') || msg.includes('oauth');
+}
 const STAGE_4_CAP = PICKS_PER_STRATEGY * STRATEGIES.length; // ≤ 25 total
 const RETENTION_DAYS = 90;
 
@@ -84,16 +90,37 @@ export class DailyIntelligenceBriefJob implements BatchJobHandler {
   async run(
     onProgress: (evt: BatchProgressEvent) => void,
     signal: AbortSignal,
+    force = false,
   ): Promise<BatchJobResult> {
     const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
 
-    if (!isTradingDay(today)) {
+    if (!force && !isTradingDay(today)) {
       return { status: 'skipped', notes: 'Non-trading day', tickersAttempted: 0, tickersUpdated: 0, tickersSkipped: 0, tickersFailed: 0 };
     }
 
     const runMeta: Record<string, unknown> = { startedAt: new Date().toISOString(), stages: {} };
     const emit = (msg: string, attempted = 0, total = 0) =>
       onProgress({ jobId: 'daily-intelligence-brief', runId: 0, ticker: '', status: 'updated', attempted, updated: 0, skipped: 0, failed: 0, total, message: msg });
+
+    // ── Options provider connectivity check ───────────────────────────────────
+    // Stage 4 (Strategy Lab) makes live options chain calls. Probe before starting
+    // the pipeline so we don't burn through stages 1–3 only to fail at stage 4.
+    try {
+      await this.optionsProvider.getOptionsExpirations('SPY');
+    } catch (err) {
+      if (isAuthError(err)) {
+        return {
+          status: 'skipped',
+          notes: 'Options provider not connected (E*Trade token expired). Reconnect in Settings → E*Trade Connection.',
+          tickersAttempted: 0, tickersUpdated: 0, tickersSkipped: 0, tickersFailed: 0,
+        };
+      }
+      return {
+        status: 'skipped',
+        notes: `Options provider unavailable: ${err instanceof Error ? err.message : String(err)}`,
+        tickersAttempted: 0, tickersUpdated: 0, tickersSkipped: 0, tickersFailed: 0,
+      };
+    }
 
     // ── Stage 1: Candidates from cached screen results ──────────────────────
     emit('Stage 1/6: Loading screener candidates…');
@@ -359,13 +386,16 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
       ORDER BY ticker ASC
     `).all(latestRun.id) as SRow[];
 
-    // Filter: keep tickers that passed at least 60% of enabled filters
+    // Exclude scoring reference tickers (SPY + sector ETFs) — these are infrastructure
+    // tickers for the relative-strength signal and are never valid trade picks.
+    const refSet = new Set<string>(SCORING_REFERENCE_TICKERS);
+
     return rows
       .map(r => {
         const p = JSON.parse(r.payload_json) as { passScore?: number; failedFilters?: string[] };
         return { ticker: r.ticker, passScore: p.passScore ?? 0 };
       })
-      .filter(r => r.passScore > 0)
+      .filter(r => r.passScore > 0 && !refSet.has(r.ticker))
       .map(r => r.ticker);
   }
 
