@@ -54,6 +54,7 @@ import { registerBatchIpc } from './ipc/ipc-batch.js';
 import { ScoringService } from './services/scoring-service.js';
 import { registerScoringIpc } from './ipc/ipc-scoring.js';
 import { DailyIntelligenceBriefJob } from './services/jobs/daily-intelligence-brief-job.js';
+import { EmailService } from './services/email-service.js';
 import { DailyTechnicalSignalsJob } from './services/jobs/daily-technical-signals-job.js';
 import { DailyOptionsSnapshotJob } from './services/jobs/daily-options-snapshot-job.js';
 
@@ -375,7 +376,10 @@ app.whenReady().then(() => {
     runOnStartup: false,
   });
 
-  const briefJob = new DailyIntelligenceBriefJob(db, dataProvider, optionsProvider);
+  const emailService = new EmailService(
+    () => { try { return secureGet(db, 'agentProjectPath') ?? ''; } catch { return ''; } }
+  );
+  const briefJob = new DailyIntelligenceBriefJob(db, dataProvider, optionsProvider, emailService);
   batchService.registerJob('daily-intelligence-brief', briefJob, {
     dailyScheduleTime: '16:30',  // post-market, chains after price-gap-fill
     startupDelaySeconds: 0,      // manual trigger only by default; no startup run

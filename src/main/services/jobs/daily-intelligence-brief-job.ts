@@ -7,7 +7,7 @@
 import type { Database } from 'better-sqlite3';
 import Anthropic from '@anthropic-ai/sdk';
 import type { BatchJobHandler, BatchJobResult } from '../batch-service.js';
-import type { BatchProgressEvent, BriefPick } from '@shared/types.js';
+import type { BatchProgressEvent, BriefPick, ScoringStrategy } from '@shared/types.js';
 import type { ScoredTicker } from '../scoring-service.js';
 import { ScoringService, STRATEGIES } from '../scoring-service.js';
 import type { OptionsProvider } from '../options-provider.js';
@@ -16,6 +16,8 @@ import { StrategyLabService } from '../strategy-lab-service.js';
 import { secureGet } from '../secure-settings.js';
 import { isTradingDay } from '../iv-history-service.js';
 import { SCORING_REFERENCE_TICKERS } from './price-gap-fill-job.js';
+import type { EmailService } from '../email-service.js';
+import { buildEmailHtml, buildPdf } from '../brief-report-builder.js';
 
 const PICKS_PER_STRATEGY = 5;
 
@@ -82,6 +84,7 @@ export class DailyIntelligenceBriefJob implements BatchJobHandler {
     private readonly db: Database,
     private readonly dataProvider: DataProvider,
     private readonly optionsProvider: OptionsProvider,
+    private readonly emailService: EmailService | null = null,
   ) {
     this.scoringService = new ScoringService(db);
     this.strategyLabService = new StrategyLabService(dataProvider, optionsProvider);
@@ -355,6 +358,43 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
     runMeta['etradeFailed'] = etradeFailed;
     const gatedMsg = totalGated > 0 ? ` | ${totalGated} dropped (low liquidity)` : '';
     emit(`Stage 6/6: Brief generated — ${totalPicks} picks across 5 strategies${gatedMsg}`, totalPicks, totalPicks);
+
+    // ── Email delivery ────────────────────────────────────────────────────────
+    if (this.emailService?.isConfigured() && totalPicks > 0) {
+      try {
+        emit('Sending email…');
+        const briefsByStrategy = new Map<ScoringStrategy, BriefPick[]>();
+        for (const strategy of STRATEGIES) {
+          briefsByStrategy.set(strategy, topPerStrategy.get(strategy)?.slice(0, 5).map((scored, idx) => ({
+            ticker:           scored.ticker,
+            compositeScore:   scored.compositeScore,
+            signals:          scored.signals,
+            strategyLabResult: validationResults.get(scored.ticker) ?? null,
+            aiRationale:      aiRationales.get(`${scored.ticker}:${strategy}`) ?? null,
+            rank:             idx + 1,
+            validated:        !!validationResults.get(scored.ticker),
+            price:            signalData.get(scored.ticker)?.lastPrice ?? null,
+          })) ?? []);
+        }
+
+        const dateStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+        const [emailHtml, pdfBuffer] = await Promise.all([
+          Promise.resolve(buildEmailHtml(dateStr, briefsByStrategy)),
+          buildPdf(dateStr, briefsByStrategy),
+        ]);
+
+        const subject = `Daily Intelligence Brief — ${new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} — ${totalPicks} picks`;
+        await this.emailService.send(subject, emailHtml, [{
+          filename: `daily-brief-${dateStr}.pdf`,
+          content: pdfBuffer,
+          contentType: 'application/pdf',
+        }]);
+        console.log('[brief] email sent successfully');
+      } catch (emailErr) {
+        // Email failure must not fail the job — brief is already persisted
+        console.warn('[brief] email send failed:', emailErr instanceof Error ? emailErr.message : String(emailErr));
+      }
+    }
 
     return {
       status: 'success',
