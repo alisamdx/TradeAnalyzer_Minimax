@@ -18,6 +18,7 @@ import { isTradingDay } from '../iv-history-service.js';
 import { SCORING_REFERENCE_TICKERS } from './price-gap-fill-job.js';
 import type { EmailService } from '../email-service.js';
 import { buildEmailHtml, buildPdf } from '../brief-report-builder.js';
+import type { PaperTradingService } from '../paper-trading-service.js';
 
 const PICKS_PER_STRATEGY = 5;
 
@@ -85,6 +86,7 @@ export class DailyIntelligenceBriefJob implements BatchJobHandler {
     private readonly dataProvider: DataProvider,
     private readonly optionsProvider: OptionsProvider,
     private readonly emailService: EmailService | null = null,
+    private readonly paperTradingService: PaperTradingService | null = null,
   ) {
     this.scoringService = new ScoringService(db);
     this.strategyLabService = new StrategyLabService(dataProvider, optionsProvider);
@@ -350,9 +352,18 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
         [strategy]: this.scoringService.getConfig(strategy).version,
       };
 
-      this.scoringService.persistBrief(strategy, picks, validUntil, runMeta);
+      const briefId = this.scoringService.persistBrief(strategy, picks, validUntil, runMeta);
       persistedPicks.set(strategy, picks);
       totalPicks += picks.length;
+
+      // Auto-capture post-gate picks as paper trades for Retrospect validation.
+      if (this.paperTradingService && picks.length > 0) {
+        try {
+          this.paperTradingService.autoCapture(strategy, picks, today, briefId);
+        } catch (err) {
+          console.warn('[brief] paper-trade auto-capture failed:', err instanceof Error ? err.message : String(err));
+        }
+      }
     }
 
     const totalMs = Date.now() - new Date(runMeta['startedAt'] as string).getTime();

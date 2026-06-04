@@ -104,6 +104,15 @@ export interface ScreenResultPayload {
   profitMargin: number | null;
   freeCashFlow: number | null;
   currentRatio: number | null;
+  // Quality signals (v0.22.20)
+  fcfToNetIncome: number | null;   // (operatingCashFlow / netIncome) × 100
+  roic: number | null;             // NOPAT / investedCapital × 100
+  netDebtToEbitda: number | null;  // (totalDebt − cash) / EBITDA
+  revenueGrowth5Y: number | null;  // 5-year revenue CAGR
+  epsGrowth5Y: number | null;      // 5-year EPS CAGR
+  valueScore: number | null;       // VS 0–6
+  growthScore: number | null;      // GS 0–6
+  stockGrade: number | null;       // 3=★★★  2=★★  1=★
   avgVolume: number | null;
   avgOptionVolume: number | null;
   price: number | null;
@@ -164,6 +173,15 @@ export interface DerivedRatios {
   currentRatio: number | null;
   dividendYield: number | null;
   beta: number | null;
+  // Quality signals (v0.22.20) — see docs/formulas.md#quality-signals
+  fcfToNetIncome: number | null;   // (operatingCashFlow / netIncome) × 100
+  roic: number | null;             // NOPAT / investedCapital × 100
+  netDebtToEbitda: number | null;  // (totalDebt − cash) / EBITDA; null if D&A unavailable
+  revenueGrowth5Y: number | null;  // 5-year revenue CAGR; null if < 20 quarterly filings
+  epsGrowth5Y: number | null;      // 5-year EPS CAGR; null if < 20 quarterly filings
+  valueScore: number | null;       // VS 0–6: passes value quality criteria count
+  growthScore: number | null;      // GS 0–6: passes growth quality criteria count
+  stockGrade: number | null;       // 3=★★★  2=★★  1=★  null=below threshold
   sector: string | null;
   industry: string | null;
   companyName: string | null;
@@ -1522,4 +1540,87 @@ export interface DailyBriefEntry {
   strategy: ScoringStrategy;
   picks: BriefPick[];
   runMeta: object | null;
+}
+
+// ─── Paper Trading / Retrospect (v0.23.0) ────────────────────────────────────
+
+export type TradeStatus = 'open' | 'closed' | 'expired';
+export type TradeOutcome = 'win' | 'loss' | 'breakeven';
+export type TradeVerdict = 'positive' | 'negative' | 'neutral';
+export type TradeRecommendation = 'hold' | 'close_signal';
+
+export interface RetroStrategySettings {
+  negThresholdPct: number;         // stock move % defining "negative" direction (default 5)
+  incomeRangeThresholdPct: number; // income only: move in EITHER direction beyond this = negative (default 8)
+  closeSignalDte: number;          // DTE at which Close Signal fires when trade is negative (default 7)
+  maxMoveAgainstPct: number;       // unconditional Close Signal regardless of DTE (default 15)
+}
+
+export interface RetroSettings {
+  wheel:   RetroStrategySettings;
+  bullish: RetroStrategySettings;
+  bearish: RetroStrategySettings;
+  income:  RetroStrategySettings;
+  buy:     RetroStrategySettings;
+}
+
+export interface PaperTrade {
+  id:             number;
+  briefId:        number | null;
+  briefStrategy:  ScoringStrategy;
+  briefScore:     number | null;
+  briefRank:      number | null;
+  ticker:         string;
+  briefDate:      string;       // YYYY-MM-DD ET
+  strategyName:   string | null;
+  legsJson:       string;       // JSON array of SetupLeg
+  entryDate:      string;       // YYYY-MM-DD
+  entryPrice:     number | null;
+  entryPremium:   number | null;
+  expiryDate:     string | null;
+  status:         TradeStatus;
+  exitDate:       string | null;
+  exitPrice:      number | null;
+  exitNotes:      string | null;
+  stockReturnPct: number | null;
+  outcome:        TradeOutcome | null;
+  createdAt:      string;
+}
+
+export interface PaperTradeWithPnl extends PaperTrade {
+  currentPrice:   number | null;
+  priceDate:      string | null;  // date of latest price in historical_prices
+  daysHeld:       number;
+  daysToExpiry:   number | null;
+  verdict:        TradeVerdict;
+  recommendation: TradeRecommendation;
+  estimatedPnl:   number | null;  // delta-based estimate; null if no delta data
+}
+
+export interface PaperTradeSummary {
+  totalTrades:  number;
+  openTrades:   number;
+  closedTrades: number;
+  winRate:      number | null;  // % of closed trades that were wins
+  avgReturn:    number | null;  // avg stock_return_pct of closed trades
+  bestTrade:    { ticker: string; returnPct: number } | null;
+  worstTrade:   { ticker: string; returnPct: number } | null;
+}
+
+export interface StrategyBreakdown {
+  strategy:   ScoringStrategy;
+  total:      number;
+  wins:       number;
+  losses:     number;
+  breakevens: number;
+  open:       number;
+  winRate:    number | null;
+  avgReturn:  number | null;
+}
+
+export interface BriefAccuracy {
+  date:        string;
+  totalClosed: number;
+  wins:        number;
+  accuracy:    number | null;  // null if < 3 closed trades (insufficient data)
 }

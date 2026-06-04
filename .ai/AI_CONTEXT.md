@@ -128,6 +128,7 @@ Authoritative DDL is in `migrations/001_init.sql` + `002_screen_schema.sql`. Pha
 | `analysis_snapshots` | Past analysis runs | persistent |
 | `job_runs` | Batch job metadata (status, type, config) | persistent |
 | `job_progress` | Per-ticker job status (pending/fetched/persisted/failed) | persistent |
+| `paper_trades` | Brief picks tracked as paper trades; unique (ticker, brief_strategy, brief_date) | persistent |
 | `fundamentals_cache` | Derived ratios, 24h TTL | cache |
 | `quote_cache` | Last price / volume / IV, 60s TTL | cache |
 | `options_cache` | Options chain, 5min TTL | cache |
@@ -170,6 +171,8 @@ Authoritative DDL is in `migrations/001_init.sql` + `002_screen_schema.sql`. Pha
 - **`npm run package` requires Windows Developer Mode.** electron-builder downloads `winCodeSign` (for PE resource stamping — icon, version info) even when code signing is disabled. The `winCodeSign` archive contains macOS symlinks; Windows blocks symlink creation for non-admin users unless Developer Mode is on. Fix: **Settings → System → For developers → Developer Mode → On** (no restart). One-time setup. Without it, the build fails with `Cannot create symbolic link : A required privilege is not held by the client`.
 
 ## Recent Changes
+
+- **v0.23.0 (2026-06-03)** — Paper Trading / Retrospect. Every brief run auto-captures all post-liquidity-gate picks as paper trades (server-side, via `PaperTradingService.autoCapture()` called from `DailyIntelligenceBriefJob` after Stage 6). New **🔍 Retrospect** sidebar screen: 4 tabs (In Progress, Summary, History, Settings). In Progress: open positions grouped by brief date with stock return %, delta-based estimated P&L, Positive/Negative/Neutral verdict, Hold/Close Signal recommendation, expandable legs, Close/Delete actions. Summary: win rate and avg return per strategy, best/worst trade. History: closed/expired trades. Settings: per-strategy thresholds (configurable). Auto-expires positions on view load from `historical_prices`. Daily Brief history bar shows accuracy chip + banner. Unique key `(ticker, brief_strategy, brief_date)` prevents duplicates on re-run. Migration 025. No new API calls (Tier 1 stock-return only).
 
 - **v0.22.31 (2026-06-03)** — Daily Brief email: strategy order now matches screen (wheel→bullish→bearish→income→buy). Score column replaced with "Lab Score" (StrategyLab totalScore 0-100, same system as grade) instead of compositeScore (scoring engine rank — different system causing Grade A / Score 18 confusion).
 

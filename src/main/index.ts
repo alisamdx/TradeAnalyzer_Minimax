@@ -57,6 +57,8 @@ import { DailyIntelligenceBriefJob } from './services/jobs/daily-intelligence-br
 import { EmailService } from './services/email-service.js';
 import { DailyTechnicalSignalsJob } from './services/jobs/daily-technical-signals-job.js';
 import { DailyOptionsSnapshotJob } from './services/jobs/daily-options-snapshot-job.js';
+import { PaperTradingService } from './services/paper-trading-service.js';
+import { registerPaperTradingIpc } from './ipc/ipc-paper-trading.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -379,7 +381,8 @@ app.whenReady().then(() => {
   const emailService = new EmailService(
     () => { try { return secureGet(db, 'agentProjectPath') ?? ''; } catch { return ''; } }
   );
-  const briefJob = new DailyIntelligenceBriefJob(db, dataProvider, optionsProvider, emailService);
+  const paperTradingService = new PaperTradingService(db);
+  const briefJob = new DailyIntelligenceBriefJob(db, dataProvider, optionsProvider, emailService, paperTradingService);
   batchService.registerJob('daily-intelligence-brief', briefJob, {
     dailyScheduleTime: '16:30',  // post-market, chains after price-gap-fill
     startupDelaySeconds: 0,      // manual trigger only by default; no startup run
@@ -404,6 +407,9 @@ app.whenReady().then(() => {
 
   // Collared LEAPS strategy screener
   registerCollaredLeapsIpc(db, dataProvider, optionsProvider, rateLimiter);
+
+  // Paper Trading / Retrospect
+  registerPaperTradingIpc(paperTradingService);
 
   // v0.13.0 — Backtesting engine
   const backtestEngine = new BacktestEngine(db);

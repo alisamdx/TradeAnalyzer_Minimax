@@ -86,6 +86,12 @@ import type {
   ScoringConfig,
   ScoringStrategy,
   DailyBriefEntry,
+  PaperTrade,
+  PaperTradeWithPnl,
+  PaperTradeSummary,
+  StrategyBreakdown,
+  RetroSettings,
+  BriefAccuracy,
 } from '@shared/types.js';
 export type {
   ScreenPreset, ScreenCriteria, ScreenRunResult, ScreenResultRow, Universe,
@@ -996,8 +1002,21 @@ function buildApi() {
     },
   };
 
+  const paper = {
+    listOpen:          (): Promise<PaperTradeWithPnl[]>  => invoke('paper:list-open'),
+    listClosed:        (limit?: number): Promise<PaperTrade[]> => invoke('paper:list-closed', limit),
+    close:             (id: number, notes?: string): Promise<boolean> => invoke('paper:close', id, notes),
+    delete:            (id: number): Promise<boolean> => invoke('paper:delete', id),
+    summary:           (): Promise<PaperTradeSummary> => invoke('paper:summary'),
+    strategyBreakdown: (): Promise<StrategyBreakdown[]> => invoke('paper:strategy-breakdown'),
+    expireStale:       (): Promise<number> => invoke('paper:expire-stale'),
+    getSettings:       (): Promise<RetroSettings> => invoke('paper:get-settings'),
+    saveSettings:      (settings: RetroSettings): Promise<boolean> => invoke('paper:save-settings', settings),
+    briefAccuracy:     (briefDates: string[]): Promise<BriefAccuracy[]> => invoke('paper:brief-accuracy', briefDates),
+  };
+
   return {
-    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, historical, portfolio, alerts, optionsChain, agent, backtest, leapsCsp, collaredLeaps, testApi, etrade, filters, payoff, ivHistory, opportunity, strategyLab, batch, scoring },
+    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, historical, portfolio, alerts, optionsChain, agent, backtest, leapsCsp, collaredLeaps, testApi, etrade, filters, payoff, ivHistory, opportunity, strategyLab, batch, scoring, paper },
     dialog: {
       prompt: (opts: { title: string; defaultValue?: string }) =>
         invoke<string | null>('dialog:prompt', opts),

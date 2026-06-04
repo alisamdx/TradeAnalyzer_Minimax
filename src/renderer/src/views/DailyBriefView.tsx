@@ -2,7 +2,7 @@
 // see Requirements/DAILY_INTELLIGENCE_BRIEF.md §6
 
 import { useState, useEffect, useCallback } from 'react';
-import type { DailyBriefEntry, BriefPick, ScoringStrategy, StrategyLabValidateResult, StrategyLabGrade, StrategySetup, SetupLeg, PayoffLeg } from '@shared/types.js';
+import type { DailyBriefEntry, BriefPick, ScoringStrategy, StrategyLabValidateResult, StrategyLabGrade, StrategySetup, SetupLeg, PayoffLeg, BriefAccuracy } from '@shared/types.js';
 
 const STRATEGY_LABELS: Record<ScoringStrategy, string> = {
   wheel:   '🎡  Wheel — CSP / Covered Call',
@@ -426,6 +426,7 @@ export function DailyBriefView({ onGoToStrategyLab }: DailyBriefViewProps) {
   const [running, setRunning] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [selectedHistoryId, setSelectedHistoryId] = useState<number | null>(null);
+  const [accuracyMap, setAccuracyMap] = useState<Map<string, BriefAccuracy>>(new Map());
 
   const [collapsed, setCollapsed] = useState<Record<ScoringStrategy, boolean>>(() => {
     try {
@@ -452,6 +453,14 @@ export function DailyBriefView({ onGoToStrategyLab }: DailyBriefViewProps) {
     try {
       const h = await window.api.scoring.getBriefHistory(30);
       setHistory(h as DailyBriefEntry[]);
+      // Load accuracy data for all history dates in one batch call
+      const dates = [...new Set((h as DailyBriefEntry[]).map(e => toETDate(e.generatedAt)))];
+      if (dates.length > 0) {
+        try {
+          const acc = await window.api.paper.briefAccuracy(dates);
+          setAccuracyMap(new Map(acc.map(a => [a.date, a])));
+        } catch { /* paper trading may not have data yet — non-fatal */ }
+      }
     } catch (err) {
       console.error('[brief] history error:', err);
     }
@@ -548,17 +557,48 @@ export function DailyBriefView({ onGoToStrategyLab }: DailyBriefViewProps) {
 
       {showHistory && history.length > 0 && (
         <div className="brief-history-bar">
-          {historyDates.map(h => (
-            <button
-              key={h.id}
-              className={`history-date-btn ${selectedHistoryId !== null && toETDate(h.generatedAt) === toETDate(history.find(x => x.id === selectedHistoryId)?.generatedAt ?? '') ? 'active' : ''}`}
-              onClick={() => setSelectedHistoryId(selectedHistoryId === h.id ? null : h.id)}
-            >
-              {toETDate(h.generatedAt)}
-            </button>
-          ))}
+          {historyDates.map(h => {
+            const date = toETDate(h.generatedAt);
+            const acc = accuracyMap.get(date);
+            const isActive = selectedHistoryId !== null && date === toETDate(history.find(x => x.id === selectedHistoryId)?.generatedAt ?? '');
+            return (
+              <button
+                key={h.id}
+                className={`history-date-btn ${isActive ? 'active' : ''}`}
+                onClick={() => setSelectedHistoryId(selectedHistoryId === h.id ? null : h.id)}
+                title={acc?.accuracy != null ? `${acc.wins}/${acc.totalClosed} picks profitable` : undefined}
+              >
+                {date}
+                {acc?.accuracy != null && (
+                  <span className="brief-accuracy-chip" style={{ color: acc.accuracy >= 60 ? '#3fb950' : acc.accuracy >= 40 ? '#e3a008' : '#f85149' }}>
+                    {acc.accuracy.toFixed(0)}%
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
       )}
+
+      {/* Accuracy banner for selected historical brief */}
+      {selectedHistoryId !== null && (() => {
+        const selDate = toETDate(history.find(x => x.id === selectedHistoryId)?.generatedAt ?? '');
+        const acc = accuracyMap.get(selDate);
+        if (!acc || acc.totalClosed === 0) return null;
+        const pct = acc.accuracy;
+        const color = pct !== null ? (pct >= 60 ? '#3fb950' : pct >= 40 ? '#e3a008' : '#f85149') : '#8b949e';
+        return (
+          <div className="brief-accuracy-banner" style={{ borderColor: color + '44', background: color + '11' }}>
+            <span style={{ color }}>
+              {pct !== null ? `${pct.toFixed(0)}% accurate` : 'Insufficient data'}
+            </span>
+            <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+              · {acc.wins} of {acc.totalClosed} picks closed profitably
+              {acc.accuracy === null ? ' (need ≥ 3 closed picks to report)' : ''}
+            </span>
+          </div>
+        );
+      })()}
 
       {loading ? (
         <div className="empty">Loading…</div>
