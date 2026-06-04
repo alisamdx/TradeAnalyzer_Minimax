@@ -753,6 +753,28 @@ function buildApi() {
         rawJsonSample: string;
       }>('test-api:get-marketdata-chain', ticker, date),
 
+    getMarketDataLiveChain: (ticker: string) =>
+      invoke<{
+        ticker: string; date: string; status: string;
+        contractCount: number; underlyingPrice: number | null;
+        sample: Array<{
+          optionSymbol: string; expiration: string; side: string;
+          strike: number; iv: number | null; delta: number | null;
+          underlyingPrice: number | null; dte: number | null;
+        }>;
+        atmIvResult: {
+          atmIv: number | null; atmIvPct: number | null;
+          expNear: string | null; expFar: string | null;
+          dteNear: number | null; dteFar: number | null;
+          estimatedFromDelta: boolean;
+        } | null;
+        withIv: number; withBsIv: number; withDelta: number; withUndPx: number;
+        rawTopLevelKeys: string[];
+        rawFieldTypes: Record<string, string>;
+        rawContractSample: string;
+        rawJsonSample: string;
+      }>('test-api:get-marketdata-live-chain', ticker),
+
     saveIVolatilityKey: (key: string) =>
       invoke<boolean>('test-api:save-ivolatility-key', key),
 
@@ -956,6 +978,7 @@ function buildApi() {
     listJobs:   () => invoke<BatchJob[]>('batch:list-jobs'),
     listRuns:   (jobId: string) => invoke<BatchRun[]>('batch:list-runs', jobId),
     runNow:     (jobId: string) => invoke<boolean>('batch:run-now', jobId),
+    runNowSync: (jobId: string) => invoke<boolean>('batch:run-now-sync', jobId),
     cancel:     (jobId: string) => invoke<boolean>('batch:cancel', jobId),
     updateJob:    (jobId: string, patch: Partial<BatchJob>) => invoke<boolean>('batch:update-job', jobId, patch),
     reorderJobs:  (jobIds: string[]) => invoke<boolean>('batch:reorder', jobIds),

@@ -1,6 +1,7 @@
 import { ipcMain, type IpcMainInvokeEvent } from 'electron';
 import type { PolygonDataProvider } from '../services/polygon-provider.js';
 import type { MarketDataProvider, MarketDataContract } from '../services/marketdata-provider.js';
+import { nearestMonthlyExpFor30Dte } from '../services/marketdata-provider.js';
 import type { IVolatilityProvider } from '../services/ivolatility-provider.js';
 import type { DbHandle } from '../db/connection.js';
 import { secureGet, secureSet } from '../services/secure-settings.js';
@@ -327,6 +328,110 @@ export function registerTestApiIpc(
             contractCount: contracts.length,
             withBsIv,
             expirations: [...new Set(contracts.map(c => c.expiration))],
+            parsedFirst4: (contracts as MarketDataContract[]).slice(0, 4).map(c => ({
+              sym: c.optionSymbol, exp: c.expiration, side: c.side,
+              strike: c.strike, iv: c.iv, ivSource: c.ivSource,
+              delta: c.delta, undPx: c.underlyingPrice, dte: c.dte,
+            })),
+          }, null, 2),
+        });
+      } catch (err) {
+        return fail(err);
+      }
+    }
+  );
+
+  // MarketData.app LIVE chain test — fetches today's chain using ?expiration= (not ?date=).
+  // Auto-selects the nearest monthly expiration to 30 DTE.
+  ipcMain.handle(
+    'test-api:get-marketdata-live-chain',
+    async (_e: IpcMainInvokeEvent, ticker: string) => {
+      try {
+        if (!marketdata) throw new Error('MarketData.app provider not initialised.');
+
+        const expiration = nearestMonthlyExpFor30Dte();
+
+        // Step 1 — raw unparsed response for field diagnostics.
+        const raw = await marketdata.getRawLiveChain(ticker.toUpperCase(), expiration);
+
+        const rawFieldTypes: Record<string, string> = {};
+        for (const [k, v] of Object.entries(raw)) {
+          if (Array.isArray(v)) {
+            const sample0 = v[0];
+            const elemType = sample0 === null ? 'null' : typeof sample0;
+            rawFieldTypes[k] = `array(${v.length}) of ${elemType} — first: ${JSON.stringify(sample0)}`;
+          } else {
+            rawFieldTypes[k] = `${typeof v} — ${JSON.stringify(v)}`;
+          }
+        }
+
+        const arrayFields = Object.entries(raw).filter(([, v]) => Array.isArray(v));
+        const rawContractRows: Record<string, unknown>[] = [];
+        for (let i = 0; i < Math.min(2, (arrayFields[0]?.[1] as unknown[])?.length ?? 0); i++) {
+          const row: Record<string, unknown> = {};
+          for (const [k, v] of arrayFields) row[k] = (v as unknown[])[i];
+          rawContractRows.push(row);
+        }
+
+        // Step 2 — live chain via ?expiration= param.
+        const chain = await marketdata.getLiveChain(ticker.toUpperCase(), expiration);
+        const { contracts, underlyingPrice } = chain;
+
+        const today = new Date().toISOString().slice(0, 10);
+
+        if (contracts.length === 0) {
+          return ok<MarketDataTestResult>({
+            ticker: ticker.toUpperCase(), date: today, status: 'no_data',
+            contractCount: 0, underlyingPrice: null,
+            sample: [], atmIvResult: null,
+            withIv: 0, withBsIv: 0, withDelta: 0, withUndPx: 0,
+            rawTopLevelKeys: Object.keys(raw),
+            rawFieldTypes,
+            rawContractSample: JSON.stringify(rawContractRows, null, 2),
+            rawJsonSample: JSON.stringify({ expiration, status: 'no_data' }, null, 2),
+          });
+        }
+
+        let resolvedUndPx = underlyingPrice;
+        let estimatedFromDelta = false;
+        if (resolvedUndPx === null) {
+          const byDelta = contracts
+            .filter(c => c.side === 'call' && c.delta !== null)
+            .sort((a, b) => Math.abs(Math.abs(a.delta!) - 0.5) - Math.abs(Math.abs(b.delta!) - 0.5));
+          if (byDelta[0]) { resolvedUndPx = byDelta[0].strike; estimatedFromDelta = true; }
+        }
+
+        const atmRaw = resolvedUndPx !== null ? computeAtmIv(contracts, resolvedUndPx) : null;
+        const atmIvResult = atmRaw
+          ? { ...atmRaw, atmIvPct: Math.round(atmRaw.atmIv * 10000) / 100, estimatedFromDelta }
+          : (resolvedUndPx !== null
+              ? { atmIv: null, atmIvPct: null, expNear: null, expFar: null, dteNear: null, dteFar: null, estimatedFromDelta }
+              : null);
+
+        const nearAtm = resolvedUndPx ?? 0;
+        const sorted = [...contracts].sort((a, b) => Math.abs(a.strike - nearAtm) - Math.abs(b.strike - nearAtm));
+        const sample = sorted.slice(0, 8).map(c => ({
+          optionSymbol: c.optionSymbol, expiration: c.expiration, side: c.side,
+          strike: c.strike, iv: c.iv, delta: c.delta,
+          underlyingPrice: c.underlyingPrice, dte: c.dte,
+        }));
+
+        const withBsIv = (contracts as MarketDataContract[]).filter(c => c.ivSource === 'bs').length;
+
+        return ok<MarketDataTestResult>({
+          ticker: ticker.toUpperCase(), date: today, status: 'ok',
+          contractCount: contracts.length, underlyingPrice,
+          sample, atmIvResult: atmIvResult ?? null,
+          withIv:    contracts.filter(c => c.iv !== null).length,
+          withBsIv,
+          withDelta: contracts.filter(c => c.delta !== null).length,
+          withUndPx: contracts.filter(c => c.underlyingPrice !== null).length,
+          rawTopLevelKeys: Object.keys(raw),
+          rawFieldTypes,
+          rawContractSample: JSON.stringify(rawContractRows, null, 2),
+          rawJsonSample: JSON.stringify({
+            mode: 'live', expiration, underlyingPrice,
+            contractCount: contracts.length, withBsIv,
             parsedFirst4: (contracts as MarketDataContract[]).slice(0, 4).map(c => ({
               sym: c.optionSymbol, exp: c.expiration, side: c.side,
               strike: c.strike, iv: c.iv, ivSource: c.ivSource,

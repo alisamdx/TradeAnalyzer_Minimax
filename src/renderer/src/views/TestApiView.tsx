@@ -473,12 +473,13 @@ type MDResult = Awaited<ReturnType<typeof window.api.testApi.getMarketDataChain>
 
 function MarketDataTab() {
   const [ticker, setTicker]   = useState('AAPL');
-  // Default date: most recent weekday (skip Saturday/Sunday — markets closed).
+  const [mode, setMode]       = useState<'live' | 'historical'>('live');
+  // Historical mode date: most recent weekday.
   const [date, setDate]       = useState(() => {
     const d = new Date();
-    d.setDate(d.getDate() - 1); // start from yesterday
+    d.setDate(d.getDate() - 1);
     while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() - 1);
-    return d.toLocaleDateString('en-CA'); // YYYY-MM-DD
+    return d.toLocaleDateString('en-CA');
   });
   const [loading, setLoading] = useState(false);
   const [result, setResult]   = useState<MDResult | null>(null);
@@ -486,12 +487,14 @@ function MarketDataTab() {
   const [showRaw, setShowRaw] = useState(false);
 
   const fetch = async () => {
-    if (!ticker.trim() || !date.trim()) return;
+    if (!ticker.trim()) return;
     setLoading(true);
     setError(null);
     setResult(null);
     try {
-      const r = await window.api.testApi.getMarketDataChain(ticker.trim().toUpperCase(), date.trim());
+      const r = mode === 'live'
+        ? await window.api.testApi.getMarketDataLiveChain(ticker.trim().toUpperCase())
+        : await window.api.testApi.getMarketDataChain(ticker.trim().toUpperCase(), date.trim());
       setResult(r);
     } catch (e) {
       setError((e as Error).message);
@@ -513,29 +516,45 @@ function MarketDataTab() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
 
-      {/* Input row */}
+      {/* Mode toggle + input row */}
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        {/* Mode toggle */}
+        <div style={{ display: 'flex', borderRadius: 5, overflow: 'hidden', border: '1px solid #313244' }}>
+          {(['live', 'historical'] as const).map(m => (
+            <button key={m} onClick={() => { setMode(m); setResult(null); setError(null); }}
+              style={{ padding: '4px 12px', border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 600,
+                background: mode === m ? '#89b4fa' : '#1e1e2e',
+                color: mode === m ? '#1e1e2e' : '#6c7086' }}>
+              {m === 'live' ? 'Live (today)' : 'Historical'}
+            </button>
+          ))}
+        </div>
+
         <input
           value={ticker}
           onChange={e => setTicker(e.target.value.toUpperCase())}
           placeholder="Ticker"
           style={{ width: 90, padding: '5px 10px', borderRadius: 5, border: '1px solid #313244', background: '#1e1e2e', color: '#cdd6f4', fontSize: 12 }}
         />
-        <input
-          value={date}
-          onChange={e => setDate(e.target.value)}
-          placeholder="YYYY-MM-DD"
-          style={{ width: 120, padding: '5px 10px', borderRadius: 5, border: '1px solid #313244', background: '#1e1e2e', color: '#cdd6f4', fontSize: 12 }}
-        />
-        <button
-          onClick={fetch}
-          disabled={loading}
-          style={{ padding: '5px 18px', borderRadius: 5, border: 'none', background: '#89b4fa', color: '#1e1e2e', fontSize: 12, fontWeight: 700, cursor: 'pointer', opacity: loading ? 0.6 : 1 }}
-        >
+
+        {mode === 'historical' && (
+          <input
+            value={date}
+            onChange={e => setDate(e.target.value)}
+            placeholder="YYYY-MM-DD"
+            style={{ width: 120, padding: '5px 10px', borderRadius: 5, border: '1px solid #313244', background: '#1e1e2e', color: '#cdd6f4', fontSize: 12 }}
+          />
+        )}
+
+        <button onClick={fetch} disabled={loading}
+          style={{ padding: '5px 18px', borderRadius: 5, border: 'none', background: '#89b4fa', color: '#1e1e2e', fontSize: 12, fontWeight: 700, cursor: 'pointer', opacity: loading ? 0.6 : 1 }}>
           {loading ? 'Fetching…' : 'Fetch Chain'}
         </button>
+
         <span style={{ fontSize: 11, color: '#6c7086' }}>
-          As-of date (weekday). Queries the two monthly expirations bracketing +30 days and computes ATM IV via Black-Scholes if the API returns null IV.
+          {mode === 'live'
+            ? 'Fetches today\'s live chain using ?expiration= (nearest 3rd Friday to 30 DTE). This is what the daily IV capture job will use.'
+            : 'Historical: as-of date — queries two monthly expirations bracketing +30 days.'}
         </span>
       </div>
 

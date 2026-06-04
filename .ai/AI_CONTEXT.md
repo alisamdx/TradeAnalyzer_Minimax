@@ -171,6 +171,13 @@ Authoritative DDL is in `migrations/001_init.sql` + `002_screen_schema.sql`. Pha
 
 ## Recent Changes
 
+- **v0.22.22 (2026-06-03)** — Test API MarketData.app live chain. New **Live (today)** mode on the MarketData.app tab uses `?expiration=` (not `?date=` which is historical-only and was causing 400 errors). `getLiveChain()` / `getRawLiveChain()` added to `MarketDataProvider`; `nearestMonthlyExpFor30Dte()` helper exported. `test-api:get-marketdata-live-chain` IPC + `getMarketDataLiveChain` preload bridge. UI has Live/Historical toggle. Prerequisite for replacing E*Trade Daily IV Capture with MarketData.app.
+
+- **v0.22.21 (2026-06-02)** — Quality signals wired into Trade Scoring Engine: `scoreFundamentals()` uses ROIC + FCFToNetIncome; `computeEarningsGrowthScore()` blends 1Y + 5Y CAGR (1.5× weight on 5Y). New baseline signals: `leverageQuality` (Wheel wt 8), `leverageRisk` (Bearish wt 8), `revenueGrowth5Y` (Bullish wt 10, Buy wt 10), `epsGrowth5Y` (Buy wt 8). AI rationales now include ROIC, leverage, and 5Y growth context. Existing DB strategy configs need manual "Reset to Baseline" to pick up new signals.
+- **v0.22.20 (2026-06-02)** — WheelMetrics quality signals: FCFToNetIncome, ROIC, NetDebtToEBITDA, RevenueGrowth5Y, EPSGrowth5Y, ValueScore (VS), GrowthScore (GS), StockGrade added to `DerivedRatios` and screener. All computed from existing Polygon quarterly filings (limit bumped 8→24). 8 new screener columns with ★ grade renderer. 13 new tests.
+
+- **v0.22.19 (2026-06-01)** — Phase 2 scoring signals: Relative Strength vs SPY + Sector Momentum. Four new signals in `ScoringService`: `relativeStrength` (Bullish 15, Buy 20), `relativeWeakness` (Bearish 15), `sectorMomentum` (Bullish 10, Buy 10), `sectorWeakness` (Bearish 10). All computed from `historical_prices` only — no live API calls. `PriceGapFillJob` now bootstraps SPY + 11 SPDR sector ETFs (6M bars) before the main loop. GICS sector → ETF mapping in `SECTOR_ETF` constant. 90-day return window; min 60 bars required.
+
 - **v0.22.18 (2026-06-01)** — Daily Options Snapshot batch job. Runs `analyzeTicker(wheel)` on top 300 screener candidates nightly (06:00 ET + startup +5 min). Migration 024: `analysis_snapshots.watchlist_id` nullable. `saveGlobalSnapshot()` on `AnalysisService`.
 
 - **v0.22.17 (2026-06-01)** — Nav: Data Sync moved to Misc above History; Batch Jobs is default landing page.

@@ -126,6 +126,25 @@ function toYMD(d: Date): string {
   return d.toISOString().split('T')[0] ?? '';
 }
 
+/**
+ * Return the nearest monthly expiration (3rd Friday) closest to 30 DTE,
+ * preferring the 20–45 DTE window. Used by the live daily IV capture path.
+ */
+export function nearestMonthlyExpFor30Dte(): string {
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+  const candidates: Array<{ date: Date; dte: number }> = [];
+  for (let m = 0; m < 6; m++) {
+    const exp = thirdFriday(today.getUTCFullYear(), today.getUTCMonth() + m);
+    const dte = Math.round((exp.getTime() - today.getTime()) / 86_400_000);
+    if (dte > 0) candidates.push({ date: exp, dte });
+  }
+  const inRange = candidates.filter(c => c.dte >= 20 && c.dte <= 45);
+  const pool = inRange.length > 0 ? inRange : candidates;
+  const best = pool.reduce((a, b) => Math.abs(a.dte - 30) <= Math.abs(b.dte - 30) ? a : b);
+  return toYMD(best.date);
+}
+
 // ─── Provider class ────────────────────────────────────────────────────────────
 
 export class MarketDataProvider {
@@ -140,6 +159,43 @@ export class MarketDataProvider {
 
   updateRate(rpm: number): void {
     this.limiter.setRate(rpm);
+  }
+
+  /**
+   * Fetch the LIVE (today's) options chain for a specific expiration.
+   * Uses ?expiration= instead of ?date= — the date param is for historical queries only.
+   */
+  async getLiveChain(ticker: string, expiration: string): Promise<MarketDataChainResult> {
+    await this.limiter.acquire();
+    const token = this.getToken();
+    if (!token) throw new Error('MarketData.app API token not configured. Add it in Settings → Data Sources.');
+    const url = `${BASE_URL}/options/chain/${encodeURIComponent(ticker.toUpperCase())}/?expiration=${encodeURIComponent(expiration)}`;
+    const res = await fetch(url, { headers: { Authorization: `Token ${token}`, Accept: 'application/json' } });
+    if (res.status === 404) return { s: 'no_data', contracts: [], underlyingPrice: null };
+    if (!res.ok) {
+      const body = await res.text();
+      if (res.status === 429) throw new Error('MarketData.app rate limit exceeded (429).');
+      throw new Error(`MarketData.app error (${res.status}) for ${ticker} exp ${expiration}: ${body.slice(0, 200)}`);
+    }
+    const raw = await res.json() as Record<string, unknown>;
+    if (raw['s'] === 'no_data') return { s: 'no_data', contracts: [], underlyingPrice: null };
+    if (raw['s'] === 'error') throw new Error(`MarketData.app: ${String(raw['errmsg'] ?? 'unknown error')}`);
+    const today = new Date().toISOString().slice(0, 10);
+    return parseChainResponse(raw, today);
+  }
+
+  /** Raw unparsed live chain — used by Test API diagnostics. */
+  async getRawLiveChain(ticker: string, expiration: string): Promise<Record<string, unknown>> {
+    await this.limiter.acquire();
+    const token = this.getToken();
+    if (!token) throw new Error('MarketData.app API token not configured.');
+    const url = `${BASE_URL}/options/chain/${encodeURIComponent(ticker.toUpperCase())}/?expiration=${encodeURIComponent(expiration)}`;
+    const res = await fetch(url, { headers: { Authorization: `Token ${token}`, Accept: 'application/json' } });
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`MarketData.app error (${res.status}): ${body.slice(0, 300)}`);
+    }
+    return res.json() as Promise<Record<string, unknown>>;
   }
 
   /** Returns the raw unparsed JSON object — used by the Test API screen to inspect field names. */
