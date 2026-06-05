@@ -1,7 +1,7 @@
 import Fastify from 'fastify';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, existsSync, unlinkSync } from 'node:fs';
 import type { Database } from 'better-sqlite3';
 import type { WatchlistService } from './services/watchlist-service.js';
 import type { ScreenerService } from './services/screener-service.js';
@@ -22,6 +22,8 @@ import { registerFundamentalsRoutes } from './api/routes-fundamentals.js';
 import { registerOptionsRoutes } from './api/routes-options.js';
 import { registerJobsRoutes } from './api/routes-jobs.js';
 import { registerSettingsRoutes } from './api/routes-settings.js';
+import { registerETradeRoutes } from './api/routes-etrade.js';
+import { secureGet, secureSet } from './services/secure-settings.js';
 
 const DATA_DIR = join(homedir(), '.tradeanalyzer');
 
@@ -43,6 +45,32 @@ function readOrCreateToken(): string {
 
 function writePort(port: number) {
   writeFileSync(join(DATA_DIR, 'api.port'), String(port));
+}
+
+/** Write consumer key/secret to a plain config file so the CLI login script
+ *  can do the OAuth flow even when the app is not running. */
+function writeETradeConfig(db: Database) {
+  const consumerKey    = secureGet(db, 'etradeConsumerKey');
+  const consumerSecret = secureGet(db, 'etradeConsumerSecret');
+  if (!consumerKey || !consumerSecret) return;
+  const configPath = join(DATA_DIR, 'etrade-config.json');
+  writeFileSync(configPath, JSON.stringify({ consumerKey, consumerSecret }), { mode: 0o600 });
+}
+
+/** Import any pending tokens written by the CLI login script while the app was offline. */
+function importPendingETradeTokens(db: Database) {
+  const pendingPath = join(DATA_DIR, 'etrade-tokens-pending.json');
+  if (!existsSync(pendingPath)) return;
+  try {
+    const { accessToken, accessSecret } = JSON.parse(readFileSync(pendingPath, 'utf8'));
+    if (accessToken && accessSecret) {
+      secureSet(db, 'etradeAccessToken',  accessToken);
+      secureSet(db, 'etradeAccessSecret', accessSecret);
+      console.log('[etrade] imported pending tokens from CLI login');
+    }
+  } catch { /* malformed file — ignore */ }
+  // Remove regardless so a corrupted file doesn't loop
+  try { unlinkSync(pendingPath); } catch { /* ignore */ }
 }
 
 export interface ApiServerServices {
@@ -98,12 +126,15 @@ export class ApiServer {
       registerOptionsRoutes(app, svc);
       registerJobsRoutes(app, svc);
       registerSettingsRoutes(app, svc);
+      registerETradeRoutes(app, svc);
     }, { prefix: '/api/v1' });
   }
 
   async start(port: number): Promise<void> {
     await this.fastify.listen({ port, host: '127.0.0.1' });
     writePort(port);
+    writeETradeConfig(this.svc.db);
+    importPendingETradeTokens(this.svc.db);
     console.log(`[api-server] listening on 127.0.0.1:${port}`);
   }
 
