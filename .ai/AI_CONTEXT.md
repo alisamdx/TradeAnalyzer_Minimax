@@ -172,6 +172,8 @@ Authoritative DDL is in `migrations/001_init.sql` + `002_screen_schema.sql`. Pha
 
 ## Recent Changes
 
+- **v0.23.3 (2026-06-04)** — E*Trade OAuth two-step non-interactive scripts. `etrade-step1.mjs` prints auth URL + saves state; `etrade-step2.mjs <verifier>` completes exchange with verifier as CLI arg — no readline TTY needed, works via Claude Code on phone. Original `etrade-login.mjs` kept for SSH terminal use.
+
 - **v0.23.2 (2026-06-04)** — E*Trade remote token refresh via SSH. `scripts/etrade-login.mjs`: full OAuth 1.0a flow in a terminal; reads consumer creds from running app API or `~/.tradeanalyzer/etrade-config.json` fallback; stores tokens live or writes pending file. New API routes: `GET /api/v1/etrade/credentials`, `POST /api/v1/etrade/token` (`routes-etrade.ts`). `api-server.ts` writes `etrade-config.json` + imports `etrade-tokens-pending.json` on every startup. `scripts/etrade-login.bat` for easy SSH execution.
 
 - **v0.23.1 (2026-06-04)** — (1) Retrospect: day-0 verdict suppressed (daysHeld < 1 → Neutral/Hold — historical_prices price may predate brief entry price). (2) New `recentVolatility` signal: 20-day annualized realized vol from historical_prices; lower_better for Income (wt 20) and Wheel (wt 10); high recent moves penalise income/wheel candidates. Baseline bumped to `baseline_v2` — users need Reset to Baseline in Trade Scoring.
