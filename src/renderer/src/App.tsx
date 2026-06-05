@@ -780,6 +780,12 @@ export function App() {
             ⚙ Settings
           </button>
           <button
+            className={`nav-btn ${currentView === 'tradeScoring' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('tradeScoring')}
+          >
+            ⚖ Trade Scoring
+          </button>
+          <button
             className={`nav-btn ${currentView === 'batch' ? 'active' : ''}`}
             onClick={() => navigateSidebar('batch')}
           >
@@ -793,12 +799,6 @@ export function App() {
             onClick={() => navigateSidebar('dailyBrief')}
           >
             📋 Daily Brief
-          </button>
-          <button
-            className={`nav-btn ${currentView === 'tradeScoring' ? 'active' : ''}`}
-            onClick={() => navigateSidebar('tradeScoring')}
-          >
-            ⚖ Trade Scoring
           </button>
           <button
             className={`nav-btn ${currentView === 'retrospect' ? 'active' : ''}`}
