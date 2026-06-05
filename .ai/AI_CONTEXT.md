@@ -172,6 +172,8 @@ Authoritative DDL is in `migrations/001_init.sql` + `002_screen_schema.sql`. Pha
 
 ## Recent Changes
 
+- **v0.23.7 (2026-06-05)** — Daily IV Capture: reverted from MarketData.app back to E*Trade (MarketData.app hit rate limits; E*Trade already used by 2 other jobs).
+
 - **v0.23.6 (2026-06-05)** — Batch Jobs: added scroll container so page scrolls correctly when Live Activity panel appears during a run (top panels were being pushed off-screen with no scrollbar).
 
 - **v0.23.5 (2026-06-05)** — Strategy Lab: fixed "Insufficient option data at target delta" error on most strategies. Three-part fix: (1) `includeGreeks: 'true'` added to E*Trade optionchains request so Greeks are always returned; (2) bid filter relaxed from `> 0` to `>= 0` to accept zero-bid contracts; (3) moneyness fallback in `findByDelta` selects by approximate strike when delta is still absent (pre/post-market).
