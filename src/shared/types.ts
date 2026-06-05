@@ -1624,3 +1624,49 @@ export interface BriefAccuracy {
   wins:        number;
   accuracy:    number | null;  // null if < 3 closed trades (insufficient data)
 }
+
+// ─── Conviction List (v0.24.0) ───────────────────────────────────────────────
+
+export type ConvictionZone = 'buy' | 'mid' | 'watch' | 'high' | 'unset';
+
+export interface ConvictionStock {
+  ticker: string;
+  priceLow: number | null;
+  priceMid: number | null;
+  priceHigh: number | null;
+  note: string | null;
+  addedAt: string;
+  updatedAt: string;
+  currentPrice: number | null;
+  iv: number | null;
+  ivRank: number | null;
+  zone: ConvictionZone;
+}
+
+export interface ConvictionBandHistory {
+  id: number;
+  ticker: string;
+  priceLow: number | null;
+  priceMid: number | null;
+  priceHigh: number | null;
+  note: string | null;
+  changedAt: string;
+}
+
+export interface ConvictionInput {
+  ticker: string;
+  priceLow?: number | null;
+  priceMid?: number | null;
+  priceHigh?: number | null;
+  note?: string | null;
+}
+
+export interface ConvictionRecommendation {
+  priceLow: number | null;
+  priceMid: number | null;
+  priceHigh: number | null;
+  priceLowBasis: string;
+  priceMidBasis: string;
+  priceHighBasis: string;
+  hasData: boolean;
+}

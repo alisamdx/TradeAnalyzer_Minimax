@@ -26,6 +26,8 @@ import { registerHistoricalIpc } from './ipc/ipc-historical.js';
 import { registerLeapsCspIpc } from './ipc/ipc-leaps-csp.js';
 import { registerCollaredLeapsIpc } from './ipc/ipc-collared-leaps.js';
 import { registerPortfolioIpc } from './ipc/ipc-portfolio.js';
+import { ConvictionService } from './services/conviction-service.js';
+import { registerConvictionIpc } from './ipc/ipc-conviction.js';
 import { registerOpportunityIpc } from './ipc/ipc-opportunity.js';
 import { OpportunityService } from './services/opportunity-service.js';
 import { registerAlertsIpc } from './ipc/ipc-alerts.js';
@@ -285,6 +287,7 @@ app.whenReady().then(() => {
 
   // Phase 6 - Portfolio tracking IPC (+ Phase 1–3 AI Portfolio Advisor)
   registerPortfolioIpc(db, analysisService);
+  registerConvictionIpc(new ConvictionService(db));
 
   // ENH-2 - Opportunity Dashboard
   const opportunityService = new OpportunityService(db, getConstituents);

@@ -92,6 +92,10 @@ import type {
   StrategyBreakdown,
   RetroSettings,
   BriefAccuracy,
+  ConvictionStock,
+  ConvictionBandHistory,
+  ConvictionInput,
+  ConvictionRecommendation,
 } from '@shared/types.js';
 export type {
   ScreenPreset, ScreenCriteria, ScreenRunResult, ScreenResultRow, Universe,
@@ -1015,8 +1019,18 @@ function buildApi() {
     briefAccuracy:     (briefDates: string[]): Promise<BriefAccuracy[]> => invoke('paper:brief-accuracy', briefDates),
   };
 
+  const conviction = {
+    list:                () => invoke<ConvictionStock[]>('conviction:list'),
+    add:                 (input: ConvictionInput) => invoke<ConvictionStock>('conviction:add', input),
+    update:              (ticker: string, input: Omit<ConvictionInput, 'ticker'>) => invoke<ConvictionStock>('conviction:update', ticker, input),
+    remove:              (ticker: string) => invoke<void>('conviction:remove', ticker),
+    history:             (ticker: string) => invoke<ConvictionBandHistory[]>('conviction:history', ticker),
+    recommend:           (ticker: string) => invoke<ConvictionRecommendation>('conviction:recommend', ticker),
+    syncDefaultWatchlist: () => invoke<{ added: string[]; skipped: string[] }>('conviction:sync-default-watchlist'),
+  };
+
   return {
-    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, historical, portfolio, alerts, optionsChain, agent, backtest, leapsCsp, collaredLeaps, testApi, etrade, filters, payoff, ivHistory, opportunity, strategyLab, batch, scoring, paper },
+    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, historical, portfolio, alerts, optionsChain, agent, backtest, leapsCsp, collaredLeaps, testApi, etrade, filters, payoff, ivHistory, opportunity, strategyLab, batch, scoring, paper, conviction },
     dialog: {
       prompt: (opts: { title: string; defaultValue?: string }) =>
         invoke<string | null>('dialog:prompt', opts),
