@@ -737,6 +737,9 @@ export class ScoringService {
     this.loadSectorMomentum(tickers, result);
     this.loadTechnicalSignals(tickers, result);
     this.loadRecentVolatility(tickers, result);
+    // Always override lastPrice with the freshest available quote so the Daily Brief
+    // never shows a stale EOD price when a live intraday quote is in quote_cache.
+    this.loadLivePrice(tickers, result);
 
     return result;
   }
@@ -1153,6 +1156,24 @@ export class ScoringService {
         }
       }
       if (d.lastPrice === null) d.lastPrice = entry.current;
+    }
+  }
+
+  // Override lastPrice with the most recent Polygon quote from quote_cache.
+  // quote_cache.last is refreshed whenever a ticker is viewed or market-synced,
+  // so it reflects intraday prices — unlike analysis_snapshots or historical_prices
+  // which only update overnight. This prevents the Daily Brief showing yesterday's
+  // EOD price during a mid-day run.
+  private loadLivePrice(tickers: string[], result: Map<string, TickerSignalData>): void {
+    if (tickers.length === 0) return;
+    const ph = tickers.map(() => '?').join(',');
+    type QuoteRow = { ticker: string; last: number };
+    const rows = this.db.prepare(
+      `SELECT ticker, last FROM quote_cache WHERE ticker IN (${ph}) AND last IS NOT NULL AND last > 0`
+    ).all(...tickers) as QuoteRow[];
+    for (const row of rows) {
+      const d = result.get(row.ticker);
+      if (d) d.lastPrice = row.last;
     }
   }
 

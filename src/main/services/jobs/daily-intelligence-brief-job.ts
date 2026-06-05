@@ -314,6 +314,38 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
     runMeta['stages'] = { ...runMeta['stages'] as object, stage5: { rationales: aiRationales.size, costUsd: aiCostEstimate, ms: stage5Ms } };
     emit('Stage 5/6: AI synthesis complete');
 
+    // ── Stage 5b: Refresh live prices for final picks ───────────────────────
+    // signalData.lastPrice comes from analysis_snapshots or historical_prices,
+    // which only update overnight. For intraday runs the displayed price in the
+    // brief would be yesterday's EOD close. Fetch live Polygon quotes for the
+    // ~25 final pick tickers so the brief always shows the current market price.
+    const finalPickTickers = [...new Set(
+      STRATEGIES.flatMap(s => (topPerStrategy.get(s) ?? []).map(p => p.ticker))
+    )];
+    if (finalPickTickers.length > 0) {
+      try {
+        await Promise.allSettled(
+          finalPickTickers.map(async (ticker) => {
+            try {
+              const quote = await this.dataProvider.getQuote(ticker);
+              if (quote?.last && quote.last > 0) {
+                const d = signalData.get(ticker);
+                if (d) d.lastPrice = quote.last;
+                // Also write back to quote_cache so other views benefit immediately
+                this.db.prepare(
+                  `UPDATE quote_cache SET last = ?, fetched_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE ticker = ?`
+                ).run(quote.last, ticker);
+              }
+            } catch {
+              // Non-fatal — stale price is better than no brief
+            }
+          })
+        );
+      } catch {
+        // Ignore bulk errors — proceed with whatever prices we have
+      }
+    }
+
     // ── Stage 6: Persist brief ───────────────────────────────────────────────
     emit('Stage 6/6: Persisting brief…');
     const validUntil = nextTradingDayOpen(new Date().toISOString());

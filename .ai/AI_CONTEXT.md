@@ -172,6 +172,8 @@ Authoritative DDL is in `migrations/001_init.sql` + `002_screen_schema.sql`. Pha
 
 ## Recent Changes
 
+- **v0.23.8 (2026-06-05)** — Daily Brief: fixed stale EOD price shown for brief picks. Now fetches live Polygon quote for final ~25 pick tickers (Step 5b) and overrides lastPrice from quote_cache.last in gatherSignalData().
+
 - **v0.23.7 (2026-06-05)** — Daily IV Capture: reverted from MarketData.app back to E*Trade (MarketData.app hit rate limits; E*Trade already used by 2 other jobs).
 
 - **v0.23.6 (2026-06-05)** — Batch Jobs: added scroll container so page scrolls correctly when Live Activity panel appears during a run (top panels were being pushed off-screen with no scrollbar).
