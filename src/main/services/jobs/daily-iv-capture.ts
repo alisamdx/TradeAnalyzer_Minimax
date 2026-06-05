@@ -119,9 +119,35 @@ export class DailyIvCaptureJob implements BatchJobHandler {
     let skipped = 0;
     let failed = 0;
 
+    // ── Helper: detect errors that mean "no listed options" or "unknown symbol" ──
+    // These are expected for some universe tickers (no listed options, class shares
+    // with dot notation E*Trade rejects, OTC-only names). Count as skipped, not failed.
+    const isNoOptionsError = (e: unknown): boolean => {
+      const msg = (e instanceof Error ? e.message : String(e));
+      return (
+        msg.includes('non-JSON') ||           // E*Trade returned XML (no options)
+        msg.includes('10033') ||              // "The symbol entered is invalid"
+        msg.includes('Invalid symbol') ||
+        msg.includes('invalid symbol')
+      );
+    };
+
     // 6. Process each missing ticker
     for (const ticker of missing) {
       if (signal.aborted) break;
+
+      // Pre-filter: tickers with dots (e.g. LEN.B, CWE.A) are class shares that
+      // E*Trade does not support for options — skip immediately rather than burning
+      // an API call and getting a 400.
+      if (ticker.includes('.')) {
+        skipped++;
+        onProgress({
+          jobId: 'daily-iv-update', runId: 0, ticker, status: 'skipped',
+          attempted: ++attempted, updated, skipped, failed, total,
+          message: 'Class share — no listed options',
+        });
+        continue;
+      }
 
       attempted++;
 
@@ -206,20 +232,24 @@ export class DailyIvCaptureJob implements BatchJobHandler {
           skipped++;
         }
       } catch (err) {
-        failed++;
         const message = err instanceof Error ? err.message : String(err);
-        onProgress({
-          jobId: 'daily-iv-update',
-          runId: 0,
-          ticker,
-          status: 'failed',
-          attempted,
-          updated,
-          skipped,
-          failed,
-          total,
-          message,
-        });
+        if (isNoOptionsError(err)) {
+          // No listed options or symbol not supported — expected for some universe
+          // tickers. Count as skipped, not failed, to keep job success metrics clean.
+          skipped++;
+          onProgress({
+            jobId: 'daily-iv-update', runId: 0, ticker, status: 'skipped',
+            attempted, updated, skipped, failed, total,
+            message: 'No listed options',
+          });
+        } else {
+          failed++;
+          onProgress({
+            jobId: 'daily-iv-update', runId: 0, ticker, status: 'failed',
+            attempted, updated, skipped, failed, total,
+            message,
+          });
+        }
       }
 
       // 4g. Rate limit
