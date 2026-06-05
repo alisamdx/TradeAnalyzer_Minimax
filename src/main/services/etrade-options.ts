@@ -155,12 +155,13 @@ export async function getETradeOptionsChain(
   const data = await etradeGet(
     '/v1/market/optionchains',
     {
-      symbol:     symbol.toUpperCase(),
-      expiryYear:  String(expiration.year),
-      expiryMonth: String(expiration.month),
-      expiryDay:   String(expiration.day),
-      chainType:  'CALLPUT',
-      priceType:  'ALL',
+      symbol:        symbol.toUpperCase(),
+      expiryYear:    String(expiration.year),
+      expiryMonth:   String(expiration.month),
+      expiryDay:     String(expiration.day),
+      chainType:     'CALLPUT',
+      priceType:     'ALL',
+      includeGreeks: 'true',
     },
     creds
   );

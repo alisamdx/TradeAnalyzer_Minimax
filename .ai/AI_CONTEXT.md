@@ -172,6 +172,8 @@ Authoritative DDL is in `migrations/001_init.sql` + `002_screen_schema.sql`. Pha
 
 ## Recent Changes
 
+- **v0.23.5 (2026-06-05)** — Strategy Lab: fixed "Insufficient option data at target delta" error on most strategies. Three-part fix: (1) `includeGreeks: 'true'` added to E*Trade optionchains request so Greeks are always returned; (2) bid filter relaxed from `> 0` to `>= 0` to accept zero-bid contracts; (3) moneyness fallback in `findByDelta` selects by approximate strike when delta is still absent (pre/post-market).
+
 - **v0.23.4 (2026-06-04)** — Sidebar: Trade Scoring moved from Intelligence to Data section, below Settings.
 
 - **v0.23.3 (2026-06-04)** — E*Trade OAuth two-step non-interactive scripts. `etrade-step1.mjs` prints auth URL + saves state; `etrade-step2.mjs <verifier>` completes exchange with verifier as CLI arg — no readline TTY needed, works via Claude Code on phone. Original `etrade-login.mjs` kept for SSH terminal use.

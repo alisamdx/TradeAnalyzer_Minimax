@@ -253,13 +253,34 @@ function computeIvRank(db: Database, ticker: string, currentIv: number): {
 }
 
 function findByDelta(
-  contracts: OptionContract[], side: 'call' | 'put', targetDelta: number
+  contracts: OptionContract[], side: 'call' | 'put', targetDelta: number,
+  underlyingPx?: number
 ): OptionContract | null {
-  const filtered = contracts.filter(c => c.side === side && c.delta !== null && c.bid > 0);
-  if (!filtered.length) return null;
-  return filtered.reduce((best, c) =>
-    Math.abs(Math.abs(c.delta!) - targetDelta) < Math.abs(Math.abs(best.delta!) - targetDelta) ? c : best
-  );
+  // Primary: use delta (available during market hours when Greeks are returned)
+  const withDelta = contracts.filter(c => c.side === side && c.delta !== null && c.bid >= 0);
+  if (withDelta.length) {
+    return withDelta.reduce((best, c) =>
+      Math.abs(Math.abs(c.delta!) - targetDelta) < Math.abs(Math.abs(best.delta!) - targetDelta) ? c : best
+    );
+  }
+
+  // Fallback: approximate by moneyness when Greeks are absent (pre/post-market)
+  // delta ~0.5 → ATM, delta ~0.3 → ~1 std dev OTM, delta ~0.16 → ~2 std dev OTM
+  if (underlyingPx && underlyingPx > 0) {
+    const all = contracts.filter(c => c.side === side);
+    if (!all.length) return null;
+    // Map targetDelta to an approximate strike offset fraction:
+    // calls: higher delta = lower strike (ITM); puts: higher |delta| = higher strike (ITM)
+    const otmFraction = 1 - targetDelta * 1.5; // rough: 0.5→0.25 OTM, 0.3→0.55 OTM, 0.16→0.76 OTM
+    const targetStrike = side === 'call'
+      ? underlyingPx * (1 + otmFraction * 0.15)
+      : underlyingPx * (1 - otmFraction * 0.15);
+    return all.reduce((best, c) =>
+      Math.abs(c.strike - targetStrike) < Math.abs(best.strike - targetStrike) ? c : best
+    );
+  }
+
+  return null;
 }
 
 function buildSetup(
@@ -288,7 +309,7 @@ function buildSetup(
   // Build legs
   const builtLegs: SetupLeg[] = [];
   for (const legDef of profile.legs) {
-    const contract = findByDelta(chain.contracts, legDef.side, legDef.deltaTarget);
+    const contract = findByDelta(chain.contracts, legDef.side, legDef.deltaTarget, underlyingPx);
     if (!contract) {
       return { ...base, legs: [], netCredit: null, netDebit: null, maxProfit: null, maxLoss: null,
         breakevens: [], annualizedReturn: null, popEstimate: null,
