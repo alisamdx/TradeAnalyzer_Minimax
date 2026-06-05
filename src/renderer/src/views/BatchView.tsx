@@ -177,6 +177,12 @@ export function BatchView() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const logEndRef = useRef<HTMLDivElement | null>(null);
 
+  // ── Run-all-in-sequence state ─────────────────────────────────────────────
+  const [seqActive, setSeqActive] = useState(false);
+  const [seqTotal, setSeqTotal] = useState(0);
+  const [seqCurrent, setSeqCurrent] = useState(0); // 1-based index of running job
+  const seqActiveRef = useRef(false);               // sync ref — checked inside async loop
+
   const loadJobs = useCallback(async () => {
     try {
       const list = await window.api.batch.listJobs();
@@ -293,6 +299,43 @@ export function BatchView() {
     await loadJobs();
   };
 
+  // ── Sequence: run every enabled job one at a time via sync IPC ───────────
+  // runNowSync awaits full job completion on the main side, so no event-watching
+  // race conditions. force=true bypasses non-trading-day guards in each job.
+  const handleRunAllSequence = async () => {
+    if (seqActive || runningJobId !== null) return;
+    const queue = jobs
+      .filter(j => j.enabled)
+      .sort((a, b) => a.sequenceOrder - b.sequenceOrder)
+      .map(j => j.id);
+    if (queue.length === 0) return;
+
+    seqActiveRef.current = true;
+    setSeqActive(true);
+    setSeqTotal(queue.length);
+    setSeqCurrent(0);
+
+    for (let i = 0; i < queue.length; i++) {
+      if (!seqActiveRef.current) break;
+      setSeqCurrent(i + 1);
+      await window.api.batch.runNowSync(queue[i]!);
+      await loadJobs();
+    }
+
+    seqActiveRef.current = false;
+    setSeqActive(false);
+    setSeqTotal(0);
+    setSeqCurrent(0);
+  };
+
+  const handleCancelSequence = async () => {
+    seqActiveRef.current = false; // stops the loop after current job finishes
+    setSeqActive(false);
+    setSeqTotal(0);
+    setSeqCurrent(0);
+    if (runningJobId) await handleCancel(runningJobId);
+  };
+
   const handleSaveConfig = async (jobId: string, patch: Partial<BatchJob>) => {
     await window.api.batch.updateJob(jobId, patch);
     await loadJobs();
@@ -303,6 +346,7 @@ export function BatchView() {
   const selectedJob = jobs.find(j => j.id === selectedJobId) ?? null;
 
   return (
+    <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
     <div style={{ padding: '20px 24px', maxWidth: 1100, margin: '0 auto' }}>
       <style>{`
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
@@ -323,7 +367,40 @@ export function BatchView() {
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
         <h2 style={{ color: '#ecf0f1', margin: 0 }}>⚙ Batch Jobs</h2>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', userSelect: 'none' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          {/* Sequence controls */}
+          {seqActive ? (
+            <>
+              <span style={{ color: '#89b4fa', fontSize: 13, fontWeight: 600 }}>
+                <span style={{ display: 'inline-block', animation: 'spin 1s linear infinite', marginRight: 6 }}>⟳</span>
+                Sequence: {seqCurrent} / {seqTotal}
+              </span>
+              <button
+                onClick={handleCancelSequence}
+                style={{ padding: '5px 14px', borderRadius: 6, border: '1px solid #e74c3c', background: '#1e2535', color: '#e74c3c', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}
+              >
+                ✕ Cancel Sequence
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={handleRunAllSequence}
+              disabled={runningJobId !== null || jobs.filter(j => j.enabled).length === 0}
+              title="Run all enabled jobs one at a time in sequence order"
+              style={{
+                padding: '5px 14px', borderRadius: 6,
+                border: '1px solid #2ecc71', background: '#1e2535',
+                color: runningJobId !== null ? '#555' : '#2ecc71',
+                borderColor: runningJobId !== null ? '#444' : '#2ecc71',
+                cursor: runningJobId !== null ? 'not-allowed' : 'pointer',
+                fontSize: 13, fontWeight: 600,
+              }}
+            >
+              ▶▶ Run All in Sequence
+            </button>
+          )}
+          {/* Jobs ON/OFF toggle */}
+          <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', userSelect: 'none' }}>
           <span style={{ color: batchEnabled ? '#2ecc71' : '#e74c3c', fontWeight: 600, fontSize: 13 }}>
             {batchEnabled ? 'Jobs ON' : 'Jobs OFF'}
           </span>
@@ -348,7 +425,8 @@ export function BatchView() {
               pointerEvents: 'none',
             }} />
           </span>
-        </label>
+          </label>
+        </div>
       </div>
 
       {!batchEnabled && (
@@ -557,6 +635,7 @@ export function BatchView() {
           onClose={() => setEditJob(null)}
         />
       )}
+    </div>
     </div>
   );
 }
