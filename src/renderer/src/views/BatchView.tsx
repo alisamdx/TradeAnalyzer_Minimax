@@ -519,42 +519,44 @@ export function BatchView() {
         ) : runs.length === 0 ? (
           <div style={{ padding: 20, color: '#95a5a6', textAlign: 'center' }}>No runs recorded yet.</div>
         ) : (
-          <table className="batch-table">
-            <thead>
-              <tr>
-                <th>Started</th>
-                <th>Duration</th>
-                <th>Status</th>
-                <th>Updated ✓</th>
-                <th>Skipped —</th>
-                <th>Failed ✗</th>
-                <th>Notes / Error</th>
-              </tr>
-            </thead>
-            <tbody>
-              {runs.map(run => (
-                <tr key={run.id}>
-                  <td style={{ color: '#95a5a6', fontSize: 12, whiteSpace: 'nowrap' }}>{formatTime(run.startedAt)}</td>
-                  <td style={{ color: '#95a5a6', fontSize: 12 }}>{formatDuration(run.startedAt, run.completedAt)}</td>
-                  <td><StatusBadge status={run.status} small /></td>
-                  <td style={{ color: '#2ecc71', textAlign: 'center' }}>{run.tickersUpdated || '—'}</td>
-                  <td style={{ color: '#95a5a6', textAlign: 'center' }}>{run.tickersSkipped || '—'}</td>
-                  <td style={{ color: run.tickersFailed > 0 ? '#e74c3c' : '#95a5a6', textAlign: 'center' }}>{run.tickersFailed || '—'}</td>
-                  <td style={{ color: '#95a5a6', fontSize: 12, maxWidth: 300, overflow: 'hidden' }}>
-                    {run.errorMessage ? (
-                      <span title={run.errorMessage} style={{ color: '#e74c3c', cursor: 'help' }}>
-                        {run.errorMessage.slice(0, 60)}{run.errorMessage.length > 60 ? '…' : ''}
-                      </span>
-                    ) : run.notes ? (
-                      <span title={run.notes}>
-                        {run.notes.slice(0, 60)}{run.notes.length > 60 ? '…' : ''}
-                      </span>
-                    ) : '—'}
-                  </td>
+          <div style={{ maxHeight: 374, overflowY: 'auto' }}>
+            <table className="batch-table">
+              <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
+                <tr>
+                  <th>Started</th>
+                  <th>Duration</th>
+                  <th>Status</th>
+                  <th>Updated ✓</th>
+                  <th>Skipped —</th>
+                  <th>Failed ✗</th>
+                  <th>Notes / Error</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {runs.map(run => (
+                  <tr key={run.id}>
+                    <td style={{ color: '#95a5a6', fontSize: 12, whiteSpace: 'nowrap' }}>{formatTime(run.startedAt)}</td>
+                    <td style={{ color: '#95a5a6', fontSize: 12 }}>{formatDuration(run.startedAt, run.completedAt)}</td>
+                    <td><StatusBadge status={run.status} small /></td>
+                    <td style={{ color: '#2ecc71', textAlign: 'center' }}>{run.tickersUpdated || '—'}</td>
+                    <td style={{ color: '#95a5a6', textAlign: 'center' }}>{run.tickersSkipped || '—'}</td>
+                    <td style={{ color: run.tickersFailed > 0 ? '#e74c3c' : '#95a5a6', textAlign: 'center' }}>{run.tickersFailed || '—'}</td>
+                    <td style={{ color: '#95a5a6', fontSize: 12, maxWidth: 300, overflow: 'hidden' }}>
+                      {run.errorMessage ? (
+                        <span title={run.errorMessage} style={{ color: '#e74c3c', cursor: 'help' }}>
+                          {run.errorMessage.slice(0, 60)}{run.errorMessage.length > 60 ? '…' : ''}
+                        </span>
+                      ) : run.notes ? (
+                        <span title={run.notes}>
+                          {run.notes.slice(0, 60)}{run.notes.length > 60 ? '…' : ''}
+                        </span>
+                      ) : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 
