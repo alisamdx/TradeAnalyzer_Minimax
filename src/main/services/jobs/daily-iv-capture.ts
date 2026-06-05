@@ -93,26 +93,11 @@ export class DailyIvCaptureJob implements BatchJobHandler {
     const etf = this.constituentsService.getConstituents('etf').map(r => r.ticker.toUpperCase());
     const allTickers = [...new Set([...sp500, ...russell, ...etf])];
 
-    // 5. Filter to tickers missing today's iv_history row
-    type TickerRow = { ticker: string };
-    const alreadyDone = new Set<string>(
-      (this.db.prepare(
-        `SELECT DISTINCT ticker FROM iv_history WHERE date = ?`
-      ).all(today) as TickerRow[]).map(r => r.ticker.toUpperCase())
-    );
-    const missing = allTickers.filter(t => !alreadyDone.has(t));
+    // 5. Process all tickers every run — always re-capture so intraday runs reflect
+    //    current IV movement. iv_history uses ON CONFLICT DO UPDATE so re-running
+    //    safely overwrites today's row with the latest ATM IV value.
+    const missing = allTickers;
     const total = missing.length;
-
-    if (total === 0) {
-      return {
-        status: 'success',
-        notes: 'All tickers already have today\'s IV data.',
-        tickersAttempted: 0,
-        tickersUpdated: 0,
-        tickersSkipped: 0,
-        tickersFailed: 0,
-      };
-    }
 
     let attempted = 0;
     let updated = 0;

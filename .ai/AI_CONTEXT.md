@@ -172,6 +172,8 @@ Authoritative DDL is in `migrations/001_init.sql` + `002_screen_schema.sql`. Pha
 
 ## Recent Changes
 
+- **v0.23.10 (2026-06-05)** — Daily IV Update: removed "already done today" filter so all ~1068 tickers are re-processed on every run (intraday IV tracking).
+
 - **v0.23.9 (2026-06-05)** — Daily IV Update: tickers with no listed options (dot class shares, NVR/DDS/GLIBA etc.) now correctly counted as skipped instead of failed.
 
 - **v0.23.8 (2026-06-05)** — Daily Brief: fixed stale EOD price shown for brief picks. Now fetches live Polygon quote for final ~25 pick tickers (Step 5b) and overrides lastPrice from quote_cache.last in gatherSignalData().
