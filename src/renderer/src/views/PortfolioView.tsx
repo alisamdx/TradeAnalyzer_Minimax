@@ -799,7 +799,7 @@ export function PortfolioView() {
           AI ADVISOR TAB
       ══════════════════════════════════════════════════════════════════════ */}
       {activeTab === 'advisor' && (
-        <div style={{ padding: '16px 0' }}>
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px 0' }}>
 
           {/* ── API key setup ── */}
           {!hasApiKey && !showApiKeyInput && (

@@ -172,6 +172,8 @@ Authoritative DDL is in `migrations/001_init.sql` + `002_screen_schema.sql`. Pha
 
 ## Recent Changes
 
+- **v0.24.1 (2026-06-05)** — Portfolio AI Advisor tab: added scrollbar so full analysis is visible.
+
 - **v0.24.0 (2026-06-05)** — My Stocks (Conviction List): personal stock reference with price bands (Low/Mid/High), zone badges, band history, system recommendation engine, sync from default watchlist. Sidebar: ⭐ My Stocks in Personal section.
 
 - **v0.23.11 (2026-06-05)** — Batch Jobs: Run History capped at fixed height (10 rows) with internal scroll and sticky header.
