@@ -1458,16 +1458,22 @@ export function PayoffView({ initialTicker, initialSpot, initialExpiry, initialS
   // Applies skeleton legs immediately, then auto-fills premiums from the live
   // chain when a ticker is set. Expiry is snapped to the nearest Friday expiry
   // available in the chain for each target DTE.
+  // Spot price is optional when a ticker is set — the chain provides it.
   const applyTemplateBySlug = useCallback(async (slug: string) => {
-    if (!spotNum) { setError('Enter a spot price first'); return; }
     const tpl = ALL_TEMPLATES.find(t => t.slug === slug);
     if (!tpl) return;
 
-    // Apply skeleton immediately — chart updates while chain loads
-    setLegs(tpl.build(spotNum));
+    const hasTicker = !!ticker.trim();
+    const hasSpot   = spotNum > 0;
+
+    // Need at least one source of spot price
+    if (!hasSpot && !hasTicker) { setError('Enter a ticker or spot price first'); return; }
+
+    // Show skeleton immediately if we have a spot to build from
+    if (hasSpot) setLegs(tpl.build(spotNum));
     setError(null);
 
-    if (!ticker.trim()) return; // no ticker → user fills premiums manually
+    if (!hasTicker) return; // no ticker → user fills premiums manually
 
     setChainLoading(true);
     try {
@@ -1475,7 +1481,8 @@ export function PayoffView({ initialTicker, initialSpot, initialExpiry, initialS
       const expResult = await window.api.optionsChain.getNearExpirations(ticker.toUpperCase());
       setChainExpirations(expResult.expirations);
 
-      const realSpot = expResult.currentPrice ?? spotNum;
+      const realSpot = expResult.currentPrice ?? (spotNum > 0 ? spotNum : null);
+      if (!realSpot) { setError('Could not determine spot price — enter it manually'); return; }
       if (expResult.currentPrice) setSpotStr(expResult.currentPrice.toFixed(2));
       if (expResult.expirations.length === 0) return;
 

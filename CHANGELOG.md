@@ -2,6 +2,10 @@
 
 Reverse-chronological. Per spec EP-2.3, this is the index; per-version detail lives in `changelogs/`.
 
+## v0.26.3 — 2026-06-06
+
+Payoff template selection: spot price is no longer required when a ticker is set. Chain load provides the live spot automatically. Error message updated: only fires when both ticker and spot are absent.
+
 ## v0.26.2 — 2026-06-06
 
 Payoff Visualizer: selecting a strategy template now auto-fills real premiums from the live chain when a ticker is set. Skeleton legs appear immediately; chain loads in background; each leg is snapped to the nearest real Friday expiry for that DTE and filled with the live mid-price + Greeks. Spot price updates to chain's live price. Chain panel opens automatically.
