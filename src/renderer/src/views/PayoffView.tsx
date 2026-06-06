@@ -1455,13 +1455,119 @@ export function PayoffView({ initialTicker, initialSpot, initialExpiry, initialS
   }, [legs, metrics, recognizedStrategy, spotNum, ticker]);
 
   // ── Template application ────────────────────────────────────────────────────
-  const applyTemplateBySlug = useCallback((slug: string) => {
+  // Applies skeleton legs immediately, then auto-fills premiums from the live
+  // chain when a ticker is set. Expiry is snapped to the nearest Friday expiry
+  // available in the chain for each target DTE.
+  const applyTemplateBySlug = useCallback(async (slug: string) => {
     if (!spotNum) { setError('Enter a spot price first'); return; }
     const tpl = ALL_TEMPLATES.find(t => t.slug === slug);
     if (!tpl) return;
+
+    // Apply skeleton immediately — chart updates while chain loads
     setLegs(tpl.build(spotNum));
     setError(null);
-  }, [spotNum]);
+
+    if (!ticker.trim()) return; // no ticker → user fills premiums manually
+
+    setChainLoading(true);
+    try {
+      // 1. Load available expirations and get live spot price
+      const expResult = await window.api.optionsChain.getNearExpirations(ticker.toUpperCase());
+      setChainExpirations(expResult.expirations);
+
+      const realSpot = expResult.currentPrice ?? spotNum;
+      if (expResult.currentPrice) setSpotStr(expResult.currentPrice.toFixed(2));
+      if (expResult.expirations.length === 0) return;
+
+      // Rebuild template targets using the real spot (accurate strike percentages)
+      const targetLegs = tpl.build(realSpot);
+
+      // 2. Find best Friday expiry for each unique target DTE.
+      //    Friday = standard options expiry; falls back to any expiry if none available.
+      const isFriday = (d: string) => {
+        const [y, m, dy] = d.split('-').map(Number);
+        return new Date(y!, m! - 1, dy!).getDay() === 5;
+      };
+
+      const findBestExpiry = (targetDateStr: string): string => {
+        const targetTs = new Date(targetDateStr).getTime();
+        const fridays = expResult.expirations.filter(e => isFriday(e.date));
+        const pool    = fridays.length > 0 ? fridays : expResult.expirations;
+        return pool.reduce((best, e) =>
+          Math.abs(new Date(e.date).getTime() - targetTs) <
+          Math.abs(new Date(best.date).getTime() - targetTs) ? e : best,
+        ).date;
+      };
+
+      // Map: template expiry string → best real Friday expiry
+      const expiryMap = new Map<string, string>();
+      for (const leg of targetLegs) {
+        if (leg.type === 'stock') continue;
+        if (!expiryMap.has(leg.expiry)) {
+          expiryMap.set(leg.expiry, findBestExpiry(leg.expiry));
+        }
+      }
+
+      // 3. Load chain for each unique real expiry (usually just 1, or 2 for calendars)
+      const chainCache = new Map<string, OptionsChainViewData>();
+      for (const realExpiry of new Set(expiryMap.values())) {
+        const chain = await window.api.optionsChain.getChain(ticker.toUpperCase(), realExpiry);
+        chainCache.set(realExpiry, chain);
+        if (chain.currentPrice) setSpotStr(chain.currentPrice.toFixed(2));
+      }
+
+      // Show the chain for the primary (first option) expiry
+      const primaryTemplateExpiry = targetLegs.find(l => l.type !== 'stock')?.expiry ?? '';
+      const primaryRealExpiry     = expiryMap.get(primaryTemplateExpiry) ?? '';
+      const primaryChain          = chainCache.get(primaryRealExpiry);
+      if (primaryChain && primaryRealExpiry) {
+        setChainData(primaryChain);
+        setSelectedExpiry(primaryRealExpiry);
+        setShowChain(true);
+      }
+
+      // 4. Fill each leg with nearest real contract and live mid-price
+      const filledLegs = targetLegs.map(leg => {
+        if (leg.type === 'stock') return leg;
+        const realExpiry = expiryMap.get(leg.expiry);
+        if (!realExpiry) return leg;
+        const chain = chainCache.get(realExpiry);
+        if (!chain) return leg;
+
+        const contracts = chain.contracts.filter(c => c.side === leg.type);
+        if (contracts.length === 0) return leg;
+
+        const nearest = contracts.reduce<OptionContract | null>((best, c) =>
+          best === null ? c : Math.abs(c.strike - leg.strike) < Math.abs(best.strike - leg.strike) ? c : best,
+        null);
+        if (!nearest) return leg;
+
+        const mid     = Math.max(0, parseFloat(((nearest.bid + nearest.ask) / 2).toFixed(2)));
+        const sideStr = leg.side === 'buy' ? 'Buy' : 'Sell';
+        const typeStr = leg.type.charAt(0).toUpperCase() + leg.type.slice(1);
+        const qtyStr  = leg.quantity > 1 ? ` ${leg.quantity}` : '';
+
+        return {
+          ...leg,
+          strike:  nearest.strike,
+          expiry:  realExpiry,
+          premium: mid,
+          delta:   nearest.delta ?? leg.delta,
+          theta:   nearest.theta ?? null,
+          vega:    nearest.vega  ?? null,
+          iv:      nearest.iv    ?? null,
+          label:   `${sideStr}${qtyStr} ${typeStr} $${nearest.strike}`,
+        };
+      });
+
+      setLegs(filledLegs);
+    } catch (e) {
+      // Non-fatal — skeleton legs already shown, user can fill manually
+      setError(`Chain load failed: ${(e as Error).message}`);
+    } finally {
+      setChainLoading(false);
+    }
+  }, [spotNum, ticker]);
 
   // ── Leg mutation helpers ────────────────────────────────────────────────────
   const removeLeg = (id: string) => setLegs(prev => prev.filter(l => l.id !== id));

@@ -174,6 +174,8 @@ Authoritative DDL is in `migrations/001_init.sql` + `002_screen_schema.sql`. Pha
 
 ## Recent Changes
 
+- **v0.26.2 (2026-06-06)** — Payoff template auto-fill: selecting a strategy template now loads the live chain (if ticker set), snaps each leg to the nearest real Friday expiry for that DTE, and fills premiums + Greeks from the live mid-price. Skeleton legs appear immediately while chain loads.
+
 - **v0.26.1 (2026-06-06)** — Payoff Visualizer: templates replaced with grouped dropdown covering all 31 Strategy Lab strategies. `recognizeStrategy` expanded to cover Jade/Big/Reverse Lizard, Zebras, Front Ratios, Call/Put Butterfly, Broken Wing/Heart Butterfly, Calendar, PMCC/PMCP, Iron Fly, Short/Long Straddle/Strangle, Covered Put.
 
 - **v0.26.0 (2026-06-06)** — AI Critic: second-opinion engine for Daily Brief picks. New `CriticService` (`src/main/services/critic-service.ts`) runs 6 rule checks (trend alignment, liquidity, missing signals, score concentration, cross-strategy conflict, market regime) then calls Claude haiku with adversarial system prompt per pick. Runs as Stage 5b (after AI synthesis, before persist). `CriticVerdict` + `CriticFlag` types added to `shared/types.ts`. `BriefPick.criticVerdict` field. `DailyBriefView` shows verdict badge + expandable rationale per pick and aggregate counts per strategy section. Email adds Critic column + sub-row rationale. See `Requirements/ai-critic.md`.
