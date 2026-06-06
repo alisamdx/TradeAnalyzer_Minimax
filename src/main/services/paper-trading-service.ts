@@ -4,7 +4,9 @@
 // see Requirements/paper-trading.md
 
 import type { Database } from 'better-sqlite3';
+import Anthropic from '@anthropic-ai/sdk';
 import { withTransaction } from '../db/connection.js';
+import { secureGet } from './secure-settings.js';
 import type {
   ScoringStrategy,
   BriefPick,
@@ -21,6 +23,8 @@ import type {
   TradeRecommendation,
   TradeOutcome,
   TradeStatus,
+  TradeInsight,
+  TradeLearning,
 } from '@shared/types.js';
 
 // Default thresholds — user can override via Settings tab in Retrospect screen.
@@ -62,9 +66,14 @@ type DbRow = {
   stock_return_pct: number | null;
   outcome: string | null;
   created_at: string;
+  learning_json: string | null;
 };
 
 function toTrade(row: DbRow): PaperTrade {
+  let learning: TradeLearning | null = null;
+  if (row.learning_json) {
+    try { learning = JSON.parse(row.learning_json) as TradeLearning; } catch { /* ignore */ }
+  }
   return {
     id:             row.id,
     briefId:        row.brief_id,
@@ -86,6 +95,7 @@ function toTrade(row: DbRow): PaperTrade {
     stockReturnPct: row.stock_return_pct,
     outcome:        row.outcome as TradeOutcome | null,
     createdAt:      row.created_at,
+    learning,
   };
 }
 
@@ -169,6 +179,96 @@ function computeVerdict(
   }
 
   return { verdict, recommendation };
+}
+
+// ── Rule-based trade insight ──────────────────────────────────────────────────
+// Gives a plain-English recommendation for each open position based on current
+// market state. No AI — purely deterministic from price data.
+function computeInsight(
+  strategy: ScoringStrategy,
+  stockReturnPct: number,
+  daysToExpiry: number | null,
+  verdict: TradeVerdict,
+  recommendation: TradeRecommendation,
+  settings: RetroSettings,
+): TradeInsight {
+  const cfg = settings[strategy];
+  const dte  = daysToExpiry;
+
+  // ── Pin risk: ≤ 3 DTE, close regardless of direction ─────────────────────
+  if (dte !== null && dte <= 3) {
+    return {
+      action: 'close', urgency: 'high',
+      reason: `${dte}d to expiry — avoid pin risk and potential assignment`,
+      suggestion: 'Close the entire position today',
+    };
+  }
+
+  // ── Close signal: move too large or DTE too low + negative ───────────────
+  if (recommendation === 'close_signal') {
+    const moveAgainst = strategy === 'bearish' ? stockReturnPct : stockReturnPct;
+    const isBigMove   = Math.abs(stockReturnPct) > cfg.maxMoveAgainstPct;
+    return {
+      action: 'close', urgency: 'high',
+      reason: isBigMove
+        ? `Stock moved ${Math.abs(stockReturnPct).toFixed(1)}% against position (limit: ${cfg.maxMoveAgainstPct}%)`
+        : `${dte}d left with negative verdict — close to limit loss`,
+      suggestion: 'Close position to prevent further loss',
+    };
+  }
+
+  // ── Take profit: credit strategies at ≤21 DTE while positive ─────────────
+  if ((strategy === 'wheel' || strategy === 'income') && verdict === 'positive' && dte !== null && dte <= 21) {
+    return {
+      action: 'take_profit', urgency: 'medium',
+      reason: `${dte}d left, position is positive — standard 50% profit rule applies`,
+      suggestion: 'Close for roughly 50% of max profit and redeploy capital',
+    };
+  }
+
+  // ── Take profit: directional strategies on big favourable moves ───────────
+  if ((strategy === 'bullish' || strategy === 'buy') && stockReturnPct >= 8 && dte !== null && dte <= 14) {
+    return {
+      action: 'take_profit', urgency: 'medium',
+      reason: `Stock up ${stockReturnPct.toFixed(1)}% with only ${dte}d remaining`,
+      suggestion: 'Lock in gains — most of the directional move may already be priced in',
+    };
+  }
+  if (strategy === 'bearish' && stockReturnPct <= -8 && dte !== null && dte <= 14) {
+    return {
+      action: 'take_profit', urgency: 'medium',
+      reason: `Stock down ${Math.abs(stockReturnPct).toFixed(1)}% with only ${dte}d remaining`,
+      suggestion: 'Lock in gains — consider closing the put spread',
+    };
+  }
+
+  // ── Roll: credit strategies with ≤14 DTE not losing badly ────────────────
+  if ((strategy === 'wheel' || strategy === 'income') && dte !== null && dte <= 14 && verdict !== 'negative') {
+    return {
+      action: 'roll', urgency: 'low',
+      reason: `${dte}d to expiry — ${verdict} position worth rolling for more premium`,
+      suggestion: `Close current expiry and sell the next monthly cycle`,
+    };
+  }
+
+  // ── Watch: negative but not yet at close-signal threshold ────────────────
+  if (verdict === 'negative') {
+    const buffer = cfg.maxMoveAgainstPct - Math.abs(stockReturnPct);
+    return {
+      action: 'watch', urgency: 'medium',
+      reason: `Position negative (${stockReturnPct >= 0 ? '+' : ''}${stockReturnPct.toFixed(1)}% stock) — ${buffer.toFixed(1)}% buffer to close signal`,
+      suggestion: null,
+    };
+  }
+
+  // ── Hold ──────────────────────────────────────────────────────────────────
+  return {
+    action: 'hold', urgency: 'low',
+    reason: verdict === 'positive'
+      ? `On track — stock ${stockReturnPct >= 0 ? '+' : ''}${stockReturnPct.toFixed(1)}%`
+      : `Range-bound — theta decaying as expected`,
+    suggestion: null,
+  };
 }
 
 function computeOutcome(strategy: ScoringStrategy, stockReturnPct: number): TradeOutcome {
@@ -277,6 +377,7 @@ export class PaperTradingService {
       let verdict: TradeVerdict = 'neutral';
       let recommendation: TradeRecommendation = 'hold';
       let estimatedPnl: number | null = null;
+      let stockReturnPct: number | null = null;
 
       // Day 0: no full trading day has elapsed since capture — the historical_prices
       // price may predate the brief, making any comparison a data-freshness artefact
@@ -284,13 +385,12 @@ export class PaperTradingService {
       const canComputeVerdict = daysHeld >= 1;
 
       if (canComputeVerdict && currentPrice !== null && trade.entryPrice !== null && trade.entryPrice > 0) {
-        const stockReturnPct = (currentPrice - trade.entryPrice) / trade.entryPrice * 100;
+        stockReturnPct = (currentPrice - trade.entryPrice) / trade.entryPrice * 100;
         const result = computeVerdict(trade.briefStrategy, stockReturnPct, daysToExpiry, settings);
         verdict = result.verdict;
         recommendation = result.recommendation;
 
         // Delta-based estimated P&L (approximation — label clearly in UI)
-        if (!canComputeVerdict) { estimatedPnl = null; }
         try {
           type Leg = { delta: number | null; qty: number; action: 'buy' | 'sell' };
           const legs = JSON.parse(trade.legsJson) as Leg[];
@@ -306,6 +406,11 @@ export class PaperTradingService {
         }
       }
 
+      const insight = computeInsight(
+        trade.briefStrategy, stockReturnPct ?? 0,
+        daysToExpiry, verdict, recommendation, settings,
+      );
+
       return {
         ...trade,
         currentPrice,
@@ -315,6 +420,7 @@ export class PaperTradingService {
         verdict,
         recommendation,
         estimatedPnl,
+        insight,
       };
     });
   }
@@ -359,10 +465,73 @@ export class PaperTradingService {
           stock_return_pct = ?, outcome = ?
       WHERE id = ?
     `).run(today, exitPrice, notes ?? null, stockReturnPct, outcome, id);
+
+    // Fire-and-forget AI learning capture — completes async, updates DB when done
+    this.captureCloseLearning(id).catch(() => { /* silent */ });
   }
 
   deleteTrade(id: number): void {
     this.db.prepare('DELETE FROM paper_trades WHERE id = ?').run(id);
+  }
+
+  // ── AI learning capture ───────────────────────────────────────────────────
+  // Called fire-and-forget after every close/expire. Silently skips if no
+  // Anthropic API key is configured or if the trade already has learning.
+  async captureCloseLearning(id: number): Promise<void> {
+    try {
+      const apiKey = secureGet(this.db, 'anthropicApiKey');
+      if (!apiKey) return;
+
+      const row = this.db.prepare('SELECT * FROM paper_trades WHERE id = ?').get(id) as DbRow | undefined;
+      if (!row || row.status === 'open' || row.learning_json) return;
+
+      const daysHeld = row.exit_date
+        ? Math.round((new Date(row.exit_date + 'T12:00:00Z').getTime() - new Date(row.entry_date + 'T12:00:00Z').getTime()) / 86_400_000)
+        : null;
+
+      const prompt = `Analyze this completed paper options trade and return JSON learning notes.
+
+Ticker: ${row.ticker}
+Strategy type: ${row.brief_strategy} — structure: ${row.strategy_name ?? 'unknown'}
+Duration: ${daysHeld !== null ? `${daysHeld} days` : 'unknown'} (${row.entry_date} → ${row.exit_date ?? 'today'})
+Entry stock price: $${row.entry_price?.toFixed(2) ?? '?'} | Exit: $${row.exit_price?.toFixed(2) ?? '?'}
+Stock return: ${row.stock_return_pct !== null ? row.stock_return_pct.toFixed(1) + '%' : 'unknown'}
+Outcome: ${row.outcome ?? 'unknown'} (${row.status})${row.exit_notes ? '\nExit notes: ' + row.exit_notes : ''}
+
+In exactly one sentence each:
+1. Did this strategy fit the trade conditions? (strategyWorked: true/false, entryFit: good/early/late/wrong)
+2. What was the key factor driving the outcome? (keyLesson)
+3. What specific tweak would improve the next similar trade? (suggestedTweak, or null if none)
+
+Respond with JSON only — no other text:
+{"strategyWorked":bool,"entryFit":"good"|"early"|"late"|"wrong","keyLesson":"...","suggestedTweak":"..."|null}`;
+
+      const client = new Anthropic({ apiKey });
+      const resp = await client.messages.create({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 300,
+        messages: [{ role: 'user', content: prompt }],
+      });
+
+      const text = resp.content.find(b => b.type === 'text')?.text ?? '';
+      const match = text.match(/\{[\s\S]*\}/);
+      if (!match) return;
+
+      const raw = JSON.parse(match[0]) as Record<string, unknown>;
+      const VALID_FIT = new Set(['good', 'early', 'late', 'wrong']);
+      const learning: TradeLearning = {
+        strategyWorked: Boolean(raw['strategyWorked']),
+        entryFit:       VALID_FIT.has(String(raw['entryFit'])) ? raw['entryFit'] as TradeLearning['entryFit'] : 'good',
+        keyLesson:      String(raw['keyLesson'] ?? ''),
+        suggestedTweak: raw['suggestedTweak'] ? String(raw['suggestedTweak']) : null,
+        capturedAt:     new Date().toISOString(),
+      };
+
+      this.db.prepare('UPDATE paper_trades SET learning_json = ? WHERE id = ?')
+        .run(JSON.stringify(learning), id);
+    } catch {
+      // Non-fatal — learning capture is best-effort
+    }
   }
 
   // ── Auto-expire positions past expiry_date ─────────────────────────────────
@@ -403,6 +572,9 @@ export class PaperTradingService {
         WHERE id = ?
       `).run(row.expiry_date, exitPrice, stockReturnPct, outcome, row.id);
       count++;
+
+      // Fire-and-forget AI learning capture
+      this.captureCloseLearning(row.id).catch(() => { /* silent */ });
     }
 
     return count;

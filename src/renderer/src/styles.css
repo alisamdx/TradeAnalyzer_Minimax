@@ -4258,6 +4258,71 @@ input[type='checkbox'] {
   white-space: nowrap;
 }
 
+/* Trade insight action badge */
+.retro-action-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 120px;
+}
+.retro-action-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid;
+  white-space: nowrap;
+  width: fit-content;
+}
+.retro-action-reason {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+
+/* Suggestion shown in expanded row */
+.retro-insight-suggestion {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 10px 7px 12px;
+  margin-bottom: 6px;
+  background: rgba(255,255,255,0.03);
+  border-left: 3px solid;
+  border-radius: 0 4px 4px 0;
+  font-size: 12px;
+  color: var(--text);
+}
+.retro-insight-icon {
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.2;
+  flex-shrink: 0;
+}
+
+/* History tab learning row */
+.retro-history-row { transition: background 0.1s; }
+.retro-has-learning:hover { background: rgba(255,255,255,0.03); }
+.retro-learning-row td { background: rgba(0,0,0,0.15); }
+.retro-learning-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 4px;
+}
+.retro-learning-fit {
+  font-size: 12px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.retro-learning-worked { color: #3fb950; font-weight: 400; font-size: 11px; }
+.retro-learning-failed { color: #f85149; font-weight: 400; font-size: 11px; }
+.retro-learning-lesson { font-size: 12px; color: var(--text); line-height: 1.4; }
+.retro-learning-tweak  { font-size: 11px; color: var(--text-muted); font-style: italic; }
+
 .retro-action-btn {
   padding: 3px 8px;
   border-radius: 4px;

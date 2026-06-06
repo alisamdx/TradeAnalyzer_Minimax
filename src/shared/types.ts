@@ -1584,6 +1584,25 @@ export interface RetroSettings {
   buy:     RetroStrategySettings;
 }
 
+/** Recommended action for an open paper trade, computed rule-based from current market state. */
+export type TradeActionType = 'hold' | 'take_profit' | 'close' | 'roll' | 'watch';
+
+export interface TradeInsight {
+  action:     TradeActionType;
+  urgency:    'high' | 'medium' | 'low';
+  reason:     string;   // plain-English explanation shown in the UI
+  suggestion: string | null;  // specific action to take, if any
+}
+
+/** AI-generated learning captured when a trade closes or expires. */
+export interface TradeLearning {
+  strategyWorked: boolean;
+  entryFit:       'good' | 'early' | 'late' | 'wrong';  // was entry timing correct?
+  keyLesson:      string;   // one sentence on the main takeaway
+  suggestedTweak: string | null;  // one sentence on what to adjust next time
+  capturedAt:     string;   // ISO timestamp
+}
+
 export interface PaperTrade {
   id:             number;
   briefId:        number | null;
@@ -1605,6 +1624,7 @@ export interface PaperTrade {
   stockReturnPct: number | null;
   outcome:        TradeOutcome | null;
   createdAt:      string;
+  learning:       TradeLearning | null;  // AI-captured on close/expire; null until then
 }
 
 export interface PaperTradeWithPnl extends PaperTrade {
@@ -1615,6 +1635,7 @@ export interface PaperTradeWithPnl extends PaperTrade {
   verdict:        TradeVerdict;
   recommendation: TradeRecommendation;
   estimatedPnl:   number | null;  // delta-based estimate; null if no delta data
+  insight:        TradeInsight;   // rule-based recommendation for this trade right now
 }
 
 export interface PaperTradeSummary {

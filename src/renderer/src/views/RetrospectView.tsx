@@ -13,6 +13,8 @@ import type {
   RetroStrategySettings,
   ScoringStrategy,
   SnapshotAccuracy,
+  TradeActionType,
+  TradeLearning,
 } from '@shared/types.js';
 
 type Tab = 'summary' | 'inprogress' | 'history' | 'settings';
@@ -29,6 +31,27 @@ const VERDICT_COLOR: Record<string, string> = {
   positive:  '#3fb950',
   negative:  '#f85149',
   neutral:   '#8b949e',
+};
+
+const ACTION_COLOR: Record<TradeActionType, string> = {
+  close:       '#f85149',
+  take_profit: '#3fb950',
+  roll:        '#58a6ff',
+  watch:       '#e3a008',
+  hold:        '#8b949e',
+};
+const ACTION_LABEL: Record<TradeActionType, string> = {
+  close:       '⚑ Close',
+  take_profit: '✓ Take Profit',
+  roll:        '↻ Roll',
+  watch:       '◉ Watch',
+  hold:        '— Hold',
+};
+const ENTRY_FIT_LABEL: Record<string, string> = {
+  good: 'Good entry', early: 'Entry too early', late: 'Entry too late', wrong: 'Wrong setup',
+};
+const ENTRY_FIT_COLOR: Record<string, string> = {
+  good: '#3fb950', early: '#e3a008', late: '#e3a008', wrong: '#f85149',
 };
 
 // Color stock return based on what's favorable for the strategy — not just sign.
@@ -395,7 +418,7 @@ function InProgressTab({
                 <th>Days</th>
                 <th>Expiry</th>
                 <th>Verdict</th>
-                <th>Signal</th>
+                <th>Action</th>
                 <th>Actions</th>
               </tr>
             </thead>
@@ -438,11 +461,15 @@ function InProgressTab({
                         </span>
                       </td>
                       <td>
-                        {p.recommendation === 'close_signal' ? (
-                          <span className="retro-close-signal">⚠ Close Signal</span>
-                        ) : (
-                          <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>Hold</span>
-                        )}
+                        <div className="retro-action-cell">
+                          <span
+                            className="retro-action-badge"
+                            style={{ background: ACTION_COLOR[p.insight.action] + '22', color: ACTION_COLOR[p.insight.action], borderColor: ACTION_COLOR[p.insight.action] + '55' }}
+                          >
+                            {ACTION_LABEL[p.insight.action]}
+                          </span>
+                          <span className="retro-action-reason">{p.insight.reason}</span>
+                        </div>
                       </td>
                       <td onClick={e => e.stopPropagation()} style={{ whiteSpace: 'nowrap' }}>
                         <button className="retro-action-btn retro-close-btn" onClick={() => onClose(p.id)}
@@ -458,6 +485,14 @@ function InProgressTab({
                     {isExpanded && (
                       <tr key={`${p.id}-detail`} className="retro-detail-row">
                         <td colSpan={13}>
+                          {/* Recommendation suggestion */}
+                          {p.insight.suggestion && (
+                            <div className="retro-insight-suggestion" style={{ borderLeftColor: ACTION_COLOR[p.insight.action] }}>
+                              <span className="retro-insight-icon" style={{ color: ACTION_COLOR[p.insight.action] }}>→</span>
+                              <span>{p.insight.suggestion}</span>
+                            </div>
+                          )}
+                          {/* Legs */}
                           <div className="retro-legs-detail">
                             <span style={{ color: 'var(--text-muted)', fontSize: 12, marginRight: 12 }}>Legs:</span>
                             {(() => {
@@ -502,7 +537,29 @@ function InProgressTab({
 
 // ── History Tab ───────────────────────────────────────────────────────────────
 
+function LearningCell({ learning }: { learning: TradeLearning | null }) {
+  if (!learning) return <span className="retro-no-data">capturing…</span>;
+  return (
+    <div className="retro-learning-cell">
+      <div className="retro-learning-fit" style={{ color: ENTRY_FIT_COLOR[learning.entryFit] }}>
+        {ENTRY_FIT_LABEL[learning.entryFit] ?? learning.entryFit}
+        {learning.strategyWorked
+          ? <span className="retro-learning-worked">· strategy worked</span>
+          : <span className="retro-learning-failed">· strategy missed</span>}
+      </div>
+      <div className="retro-learning-lesson">{learning.keyLesson}</div>
+      {learning.suggestedTweak && (
+        <div className="retro-learning-tweak">💡 {learning.suggestedTweak}</div>
+      )}
+    </div>
+  );
+}
+
 function HistoryTab({ trades, loading }: { trades: PaperTrade[]; loading: boolean }) {
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const toggleExpand = (id: number) =>
+    setExpanded(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
+
   if (loading) return <div className="empty">Loading…</div>;
   if (trades.length === 0) return (
     <div className="retro-empty-state">
@@ -516,6 +573,7 @@ function HistoryTab({ trades, loading }: { trades: PaperTrade[]; loading: boolea
       <table className="retro-table">
         <thead>
           <tr>
+            <th></th>
             <th>Ticker</th>
             <th>Strategy</th>
             <th>Structure</th>
@@ -529,28 +587,48 @@ function HistoryTab({ trades, loading }: { trades: PaperTrade[]; loading: boolea
           </tr>
         </thead>
         <tbody>
-          {trades.map(t => (
-            <tr key={t.id}>
-              <td style={{ fontWeight: 600, color: '#58a6ff' }}>{t.ticker}</td>
-              <td>{STRATEGY_LABELS[t.briefStrategy]}</td>
-              <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t.strategyName ?? '—'}</td>
-              <td style={{ fontSize: 12 }}>{fmtDate(t.briefDate)}</td>
-              <td>{fmtPrice(t.entryPrice)}</td>
-              <td>{fmtPrice(t.exitPrice)}</td>
-              <td style={{ color: stockReturnColor(t.stockReturnPct, t.briefStrategy), fontWeight: 600 }}>
-                {fmtPct(t.stockReturnPct)}
-              </td>
-              <td style={{ fontSize: 12 }}>{fmtDate(t.exitDate)}</td>
-              <td style={{ fontSize: 12, color: 'var(--text-muted)', textTransform: 'capitalize' }}>{t.status}</td>
-              <td>
-                {t.outcome ? (
-                  <span style={{ color: OUTCOME_COLOR[t.outcome], fontWeight: 600, textTransform: 'capitalize' }}>
-                    {t.outcome}
-                  </span>
-                ) : '—'}
-              </td>
-            </tr>
-          ))}
+          {trades.map(t => {
+            const hasLearning = t.learning !== null;
+            const isExpanded  = expanded.has(t.id);
+            return (
+              <>
+                <tr key={t.id}
+                    className={hasLearning ? 'retro-history-row retro-has-learning' : 'retro-history-row'}
+                    style={{ cursor: hasLearning ? 'pointer' : 'default' }}
+                    onClick={() => hasLearning && toggleExpand(t.id)}>
+                  <td style={{ color: 'var(--text-muted)', fontSize: 11 }}>
+                    {hasLearning ? (isExpanded ? '▼' : '▶') : ''}
+                  </td>
+                  <td style={{ fontWeight: 600, color: '#58a6ff' }}>{t.ticker}</td>
+                  <td>{STRATEGY_LABELS[t.briefStrategy]}</td>
+                  <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t.strategyName ?? '—'}</td>
+                  <td style={{ fontSize: 12 }}>{fmtDate(t.briefDate)}</td>
+                  <td>{fmtPrice(t.entryPrice)}</td>
+                  <td>{fmtPrice(t.exitPrice)}</td>
+                  <td style={{ color: stockReturnColor(t.stockReturnPct, t.briefStrategy), fontWeight: 600 }}>
+                    {fmtPct(t.stockReturnPct)}
+                  </td>
+                  <td style={{ fontSize: 12 }}>{fmtDate(t.exitDate)}</td>
+                  <td style={{ fontSize: 12, color: 'var(--text-muted)', textTransform: 'capitalize' }}>{t.status}</td>
+                  <td>
+                    {t.outcome ? (
+                      <span style={{ color: OUTCOME_COLOR[t.outcome], fontWeight: 600, textTransform: 'capitalize' }}>
+                        {t.outcome}
+                      </span>
+                    ) : '—'}
+                  </td>
+                </tr>
+                {isExpanded && t.learning && (
+                  <tr key={`${t.id}-learning`} className="retro-learning-row">
+                    <td></td>
+                    <td colSpan={10}>
+                      <LearningCell learning={t.learning} />
+                    </td>
+                  </tr>
+                )}
+              </>
+            );
+          })}
         </tbody>
       </table>
     </div>
