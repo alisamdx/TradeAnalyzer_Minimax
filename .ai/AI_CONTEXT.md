@@ -174,6 +174,8 @@ Authoritative DDL is in `migrations/001_init.sql` + `002_screen_schema.sql`. Pha
 
 ## Recent Changes
 
+- **v0.26.4 (2026-06-06)** — Payoff: fix false "∞ loss" on short-put strategies. Left-side slope removed from unlimited detection (stock can't go below $0). Max loss computed at price=$0 (true floor). Also fixes false "∞ profit" on long puts.
+
 - **v0.26.3 (2026-06-06)** — Payoff template: spot price no longer required when ticker is set; chain provides live spot automatically.
 
 - **v0.26.2 (2026-06-06)** — Payoff template auto-fill: selecting a strategy template now loads the live chain (if ticker set), snaps each leg to the nearest real Friday expiry for that DTE, and fills premiums + Greeks from the live mid-price. Skeleton legs appear immediately while chain loads.

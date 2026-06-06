@@ -112,17 +112,30 @@ function computePayoffMetrics(legs: PayoffLeg[], spot: number): PayoffMetrics {
     return sum + (leg.side === 'sell' ? 1 : -1) * leg.premium * leg.quantity * 100;
   }, 0);
 
-  // Detect unlimited by checking slope at the boundaries
-  const rSlope = (pnls[N - 1]! - pnls[N - 6]!);   // change over last 5 pts
-  const lSlope = (pnls[5]! - pnls[0]!);             // change over first 5 pts
-  const slopeThreshold = spot * 0.5;                // $0.50 per point roughly
+  // Compute P&L at price = $0 (stock bankruptcy floor).
+  // Stock price cannot go below $0, so left-side risk is always finite — only
+  // the right side (uncovered short calls) can be truly unlimited.
+  const pnlAtZero = legs.reduce((total, leg) => {
+    const qty = leg.quantity;
+    if (leg.type === 'stock') return total + (leg.side === 'buy' ? 1 : -1) * (0.01 - leg.premium) * qty * 100;
+    const intrinsic = leg.type === 'call' ? 0 : (leg.strike - 0.01); // calls worthless at $0
+    return total + (leg.side === 'buy'
+      ? (intrinsic - leg.premium)
+      : (leg.premium - intrinsic)) * qty * 100;
+  }, 0);
 
-  // Right boundary still moving → could be unlimited
-  const unlimitedProfit = rSlope > slopeThreshold || lSlope < -slopeThreshold;
-  const unlimitedLoss   = rSlope < -slopeThreshold || lSlope > slopeThreshold;
+  // Only check right-side slope for unlimited — left side is bounded by $0 floor.
+  // Removing lSlope from both checks fixes false "∞" on short-put strategies
+  // (CSP, straddle downside, jade/big lizard, etc.) where max loss is stock → $0.
+  const rSlope = (pnls[N - 1]! - pnls[N - 6]!);
+  const slopeThreshold = spot * 0.5;
 
-  const maxPnl = Math.max(...pnls);
-  const minPnl = Math.min(...pnls);
+  const unlimitedProfit = rSlope > slopeThreshold;   // still rising at high price (long call / long stock)
+  const unlimitedLoss   = rSlope < -slopeThreshold;  // still falling at high price (uncovered short call / short stock)
+
+  // Include pnlAtZero so max loss reflects the true downside (stock going bankrupt)
+  const maxPnl = Math.max(...pnls, pnlAtZero);
+  const minPnl = Math.min(...pnls, pnlAtZero);
 
   // Breakeven prices (zero crossings via linear interpolation)
   const breakevenPrices: number[] = [];
