@@ -174,6 +174,8 @@ Authoritative DDL is in `migrations/001_init.sql` + `002_screen_schema.sql`. Pha
 
 ## Recent Changes
 
+- **v0.26.8 (2026-06-06)** — Payoff chart: hover tooltip showing exact price + P&L with crosshair, dot on curve, and auto-flipping tooltip box.
+
 - **v0.26.7 (2026-06-06)** — Payoff: click-to-edit leg strikes with chain snap + lizard hedge recalculation on sell leg strike change.
 
 - **v0.26.6 (2026-06-06)** — Lizard hedge leg selection: Strategy Lab + Payoff auto-fill + Payoff reload all use "furthest strike where credit ≥ spread width" for jade/big/reverse lizard buy legs. Previously used nearest-to-target-%, causing formula panel ✗ failures.

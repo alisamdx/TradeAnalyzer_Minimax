@@ -1099,11 +1099,41 @@ function PayoffChart({
   const clipAbove = 'payoff-clip-above';
   const clipBelow = 'payoff-clip-below';
 
+  // ── Mouse tooltip ──────────────────────────────────────────────────────────
+  const svgRef = useRef<SVGSVGElement>(null);
+  const [tip, setTip] = useState<{ svgX: number; price: number; pnl: number } | null>(null);
+
+  const handleMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
+    if (!svgRef.current) return;
+    const rect = svgRef.current.getBoundingClientRect();
+    // Map screen coordinates to SVG viewBox coordinates
+    const svgX = ((e.clientX - rect.left) / rect.width)  * SVG_W;
+    if (svgX < PAD.l || svgX > PAD.l + PLOT_W) { setTip(null); return; }
+
+    // Invert toX to get price
+    const price = priceMin + ((svgX - PAD.l) / PLOT_W) * (priceMax - priceMin);
+
+    // Interpolate P&L between the two bracketing data points
+    const idx = prices.findIndex(p => p >= price);
+    let pnl: number;
+    if (idx <= 0)              pnl = pnls[0]!;
+    else if (idx >= prices.length) pnl = pnls[pnls.length - 1]!;
+    else {
+      const t = (price - prices[idx - 1]!) / (prices[idx]! - prices[idx - 1]!);
+      pnl = pnls[idx - 1]! + t * (pnls[idx]! - pnls[idx - 1]!);
+    }
+
+    setTip({ svgX, price, pnl });
+  };
+
   return (
     <svg
+      ref={svgRef}
       viewBox={`0 0 ${SVG_W} ${SVG_H}`}
-      style={{ width: '100%', display: 'block' }}
+      style={{ width: '100%', display: 'block', cursor: 'crosshair' }}
       aria-label="Payoff diagram"
+      onMouseMove={handleMouseMove}
+      onMouseLeave={() => setTip(null)}
     >
       <defs>
         {/* Green region: above zero line */}
@@ -1210,6 +1240,51 @@ function PayoffChart({
         stroke="#334155" strokeWidth={1} />
       <line x1={PAD.l} y1={PAD.t + PLOT_H} x2={PAD.l + PLOT_W} y2={PAD.t + PLOT_H}
         stroke="#334155" strokeWidth={1} />
+
+      {/* ── Mouse tooltip overlay ── */}
+      {tip && (() => {
+        const cx       = tip.svgX;
+        const cy       = toY(tip.pnl);
+        const inPlot   = cy >= PAD.t && cy <= PAD.t + PLOT_H;
+        const isProfit = tip.pnl >= 0;
+        const dotColor = isProfit ? '#22c55e' : '#ef4444';
+
+        const pnlAbs = Math.abs(tip.pnl);
+        const pnlStr = `${isProfit ? '+' : '−'}${pnlAbs >= 10_000 ? `$${(pnlAbs / 1_000).toFixed(1)}k` : `$${pnlAbs.toFixed(0)}`}`;
+        const priceStr = `$${tip.price >= 1000 ? `${(tip.price / 1000).toFixed(2)}k` : tip.price.toFixed(2)}`;
+
+        const TIP_W = 82, TIP_H = 34;
+        // Flip tooltip to left side when cursor is in the right half
+        const tipX = cx > PAD.l + PLOT_W / 2 ? cx - TIP_W - 6 : cx + 6;
+        const tipY = Math.max(PAD.t + 2, Math.min(PAD.t + PLOT_H - TIP_H - 2, cy - TIP_H / 2));
+
+        return (
+          <g pointerEvents="none">
+            {/* Vertical crosshair */}
+            <line x1={cx} y1={PAD.t} x2={cx} y2={PAD.t + PLOT_H}
+              stroke="#64748b" strokeWidth={1} strokeDasharray="3 2" />
+            {/* Horizontal hairline at P&L value */}
+            {inPlot && (
+              <line x1={PAD.l} y1={cy} x2={PAD.l + PLOT_W} y2={cy}
+                stroke={dotColor} strokeWidth={0.5} strokeDasharray="2 3" opacity={0.5} />
+            )}
+            {/* Dot on curve */}
+            {inPlot && (
+              <circle cx={cx} cy={cy} r={4}
+                fill={dotColor} stroke="#0f172a" strokeWidth={1.5} />
+            )}
+            {/* Tooltip box */}
+            <rect x={tipX} y={tipY} width={TIP_W} height={TIP_H}
+              rx={3} fill="#1e293b" stroke="#334155" strokeWidth={1} />
+            <text x={tipX + 7} y={tipY + 13} fill="#94a3b8" fontSize={9}>
+              {priceStr}
+            </text>
+            <text x={tipX + 7} y={tipY + 27} fill={dotColor} fontSize={11} fontWeight="700">
+              {pnlStr}
+            </text>
+          </g>
+        );
+      })()}
     </svg>
   );
 }
