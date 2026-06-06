@@ -3,6 +3,7 @@
 // see SPEC: FR-4 Historical Charts
 
 import type { DbHandle } from '../db/connection.js';
+import { withTransaction } from '../db/connection.js';
 import type { PolygonDataProvider } from './polygon-provider.js';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -263,6 +264,32 @@ export class HistoricalDataService {
     );
   }
 
+  /** Upsert all raw Polygon agg results for one ticker in a single transaction. */
+  storePriceBatch(ticker: string, results: unknown[]): number {
+    let count = 0;
+    withTransaction(this.db, () => {
+      for (const result of results) {
+        const r = result as Record<string, number>;
+        const timestamp = r['t'];
+        if (!timestamp) continue;
+        const date = new Date(timestamp).toISOString().slice(0, 10);
+        this.insertPriceStmt.run(
+          ticker,
+          date,
+          r['o'] ?? 0,
+          r['h'] ?? 0,
+          r['l'] ?? 0,
+          r['c'] ?? 0,
+          r['v'] ?? 0,
+          r['vw'] ?? null,
+          'polygon',
+        );
+        count++;
+      }
+    });
+    return count;
+  }
+
   getLatestPriceDate(ticker: string): string | null {
     const row = this.getLatestPriceStmt.get(
       ticker.toUpperCase()
@@ -424,9 +451,12 @@ export async function fetchAndStorePrices(
   service: HistoricalDataService,
   provider: PolygonDataProvider,
   ticker: string,
-  timeRange: TimeRange
+  timeRange: TimeRange,
+  /** Override the start date instead of computing from timeRange (e.g. "2026-06-05"). */
+  fromDateOverride?: string,
 ): Promise<number> {
-  const { from, to } = HistoricalDataService.getDateRangeFromTimeRange(timeRange);
+  const { from: rangeFrom, to } = HistoricalDataService.getDateRangeFromTimeRange(timeRange);
+  const from = fromDateOverride ?? rangeFrom;
 
   const data = await provider.fetchWithRetry(
     `/v2/aggs/ticker/${ticker.toUpperCase()}/range/1/day/${from}/${to}`,
@@ -434,30 +464,9 @@ export async function fetchAndStorePrices(
   );
 
   const results = (data.results as unknown[] | undefined) ?? [];
-  let count = 0;
+  if (results.length === 0) return 0;
 
-  for (const result of results) {
-    const r = result as Record<string, number>;
-    const timestamp = r['t'];
-    if (!timestamp) continue;
-
-    const date = new Date(timestamp).toISOString().slice(0, 10);
-
-    const hp: HistoricalPrice = {
-      ticker: ticker.toUpperCase(),
-      date,
-      open: r['o'] ?? 0,
-      high: r['h'] ?? 0,
-      low: r['l'] ?? 0,
-      close: r['c'] ?? 0,
-      volume: r['v'] ?? 0,
-      adjustedClose: r['vw'] ?? null, // Use VWAP as proxy for adjusted close
-      source: 'polygon'
-    };
-
-    service.upsertPrice(hp);
-    count++;
-  }
-
-  return count;
+  // Wrap all upserts in a single transaction — ~10-20× faster than individual
+  // auto-committed writes (was one commit per bar, ~22 per 1M range).
+  return service.storePriceBatch(ticker.toUpperCase(), results);
 }

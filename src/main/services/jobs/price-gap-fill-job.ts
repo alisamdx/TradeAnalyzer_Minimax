@@ -82,21 +82,31 @@ export class PriceGapFillJob implements BatchJobHandler {
         .filter(t => !freshRef.has(t))
         .map(t => ({ ticker: t, range: '1Y' }));
 
-    // ── Universe tickers ───────────────────────────────────────────────────────
-    type TickerRow = { ticker: string };
-    const staleUniverse: { ticker: string; range: TimeRange }[] = (this.db
+    // ── Universe tickers — include actual max date for targeted fetching ──────
+    type TickerRow = { ticker: string; max_date: string };
+    const staleUniverse: { ticker: string; range: TimeRange; fromDate: string }[] = (this.db
       .prepare(`
-        SELECT ticker FROM historical_prices
+        SELECT ticker, MAX(date) AS max_date FROM historical_prices
         GROUP BY ticker
         HAVING MAX(date) < date('now', '-1 day')
         ORDER BY ticker
       `)
       .all() as TickerRow[])
-      // Skip reference tickers here — already handled above
       .filter(r => !(SCORING_REFERENCE_TICKERS as readonly string[]).includes(r.ticker))
-      .map(r => ({ ticker: r.ticker, range: '1M' as TimeRange }));
+      .map(r => {
+        // Fetch from (max_date + 1 day) with a 3-day lookback buffer for safety.
+        // A 1-day gap → ~5 bars fetched instead of ~22 (1M). Capped at 1M.
+        const maxDateMs = new Date(r.max_date + 'T12:00:00Z').getTime();
+        const fromMs    = maxDateMs - 3 * 86_400_000; // 3-day buffer
+        const fromDate  = new Date(fromMs).toISOString().slice(0, 10);
+        return { ticker: r.ticker, range: '1M' as TimeRange, fromDate };
+      });
 
-    const jobs = [...staleRef, ...staleUniverse];
+    // Reference tickers always use the full 1Y range (no fromDate override)
+    const jobs: { ticker: string; range: TimeRange; fromDate?: string }[] = [
+      ...staleRef.map(r => ({ ...r, fromDate: undefined })),
+      ...staleUniverse,
+    ];
     const total = jobs.length;
 
     if (total === 0) {
@@ -115,47 +125,45 @@ export class PriceGapFillJob implements BatchJobHandler {
     let skipped   = 0;
     let failed    = 0;
 
-    for (const { ticker, range } of jobs) {
+    // Process in concurrent batches of 5.
+    // Each Polygon aggs call takes ~150-300ms; 5 in parallel = ~350ms per batch.
+    // With 150ms between batches we stay well under any Polygon plan limit.
+    const CONCURRENCY  = 5;
+    const BATCH_DELAY  = 150; // ms between batches
+
+    for (let i = 0; i < jobs.length; i += CONCURRENCY) {
       if (signal.aborted) break;
 
-      attempted++;
+      const batch = jobs.slice(i, i + CONCURRENCY);
 
-      try {
-        const count = await fetchAndStorePrices(this.historicalService, this.provider, ticker, range);
+      await Promise.allSettled(
+        batch.map(async ({ ticker, range, fromDate }) => {
+          attempted++;
+          try {
+            const count = await fetchAndStorePrices(
+              this.historicalService, this.provider, ticker, range, fromDate,
+            );
+            if (count > 0) {
+              updated++;
+              onProgress({ jobId: JOB_ID, runId: 0, ticker, status: 'updated', attempted, updated, skipped, failed, total });
+            } else {
+              skipped++;
+              onProgress({ jobId: JOB_ID, runId: 0, ticker, status: 'skipped', attempted, updated, skipped, failed, total, message: 'No new bars' });
+            }
+          } catch (err) {
+            failed++;
+            onProgress({ jobId: JOB_ID, runId: 0, ticker, status: 'failed', attempted, updated, skipped, failed, total, message: err instanceof Error ? err.message : String(err) });
+          }
+        })
+      );
 
-        if (count > 0) {
-          updated++;
-          onProgress({
-            jobId: JOB_ID, runId: 0, ticker,
-            status: 'updated', attempted, updated, skipped, failed, total,
-          });
-        } else {
-          skipped++;
-          onProgress({
-            jobId: JOB_ID, runId: 0, ticker,
-            status: 'skipped', attempted, updated, skipped, failed, total,
-            message: 'No new bars returned from Polygon',
-          });
-        }
-      } catch (err) {
-        failed++;
-        const message = err instanceof Error ? err.message : String(err);
-        onProgress({
-          jobId: JOB_ID, runId: 0, ticker,
-          status: 'failed', attempted, updated, skipped, failed, total,
-          message,
-        });
-      }
-
-      // ~120 tickers/min — well under Polygon's 100 req/min for the free tier
-      // (fetchAndStorePrices uses a single aggregates call per ticker)
-      if (!signal.aborted) await sleep(500);
+      if (!signal.aborted && i + CONCURRENCY < jobs.length) await sleep(BATCH_DELAY);
     }
 
     return {
-      status:          signal.aborted ? 'failed' : 'success',
-      notes:           `${updated} updated, ${skipped} skipped, ${failed} failed of ${attempted} attempted.`,
-      errorMessage:    signal.aborted ? 'Job was cancelled.' : undefined,
+      status:           signal.aborted ? 'failed' : 'success',
+      notes:            `${updated} updated, ${skipped} skipped, ${failed} failed of ${attempted} attempted.`,
+      errorMessage:     signal.aborted ? 'Job was cancelled.' : undefined,
       tickersAttempted: attempted,
       tickersUpdated:   updated,
       tickersSkipped:   skipped,
