@@ -190,16 +190,34 @@ export class DailyOptionsSnapshotJob implements BatchJobHandler {
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
 
-  /** Load top candidates from the full universe, limited to `limit` tickers. */
+  /** Load top candidates from the full universe, sorted by options quality. */
   private loadTopCandidates(limit: number): string[] {
-    // Use the full S&P 500 + Russell 1000 universe directly — same rationale
-    // as DailyIntelligenceBriefJob: the scoring engine handles quality ranking,
-    // so a screener pre-filter is not needed here either.
+    // Sort priority (descending quality for options premium hunting):
+    //   1. Tickers WITH iv_history data first (nulls last)
+    //   2. Most recent atm_iv DESC — high IV = rich premium
+    //   3. buy_signal_score DESC — strong technicals as tiebreaker
+    //   4. Alphabetical as final tiebreaker
+    // This ensures the 300-ticker cap covers the most actionable candidates,
+    // not just the first 300 alphabetically (the regression introduced in v0.24.4).
     type Row = { ticker: string };
     const rows = this.db.prepare(`
-      SELECT DISTINCT ticker FROM constituents
-      WHERE index_name IN ('sp500', 'russell1000')
-      ORDER BY ticker ASC
+      WITH latest_iv AS (
+        SELECT ticker, atm_iv
+        FROM iv_history
+        WHERE (ticker, date) IN (
+          SELECT ticker, MAX(date) FROM iv_history GROUP BY ticker
+        )
+      )
+      SELECT DISTINCT c.ticker
+      FROM constituents c
+      LEFT JOIN latest_iv iv  ON iv.ticker  = c.ticker
+      LEFT JOIN technical_signals ts ON ts.ticker = c.ticker
+      WHERE c.index_name IN ('sp500', 'russell1000')
+      ORDER BY
+        CASE WHEN iv.atm_iv IS NULL THEN 1 ELSE 0 END ASC,
+        COALESCE(iv.atm_iv, 0)            DESC,
+        COALESCE(ts.buy_signal_score, 0)  DESC,
+        c.ticker                          ASC
       LIMIT ?
     `).all(limit) as Row[];
 

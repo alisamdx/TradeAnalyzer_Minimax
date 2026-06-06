@@ -172,6 +172,8 @@ Authoritative DDL is in `migrations/001_init.sql` + `002_screen_schema.sql`. Pha
 
 ## Recent Changes
 
+- **v0.24.6 (2026-06-05)** — PERF-8: Fixed Options Snapshot candidate sort order regression. loadTopCandidates now sorts by most recent atm_iv DESC → buy_signal_score DESC → alphabetical, so the 300-ticker cap covers highest-IV (most premium-rich) candidates first, not first 300 alphabetically.
+
 - **v0.24.5 (2026-06-05)** — PERF-1: IV Update call delay now configurable per-job (200–2000ms, default 1100ms). Edit Job modal shows delay input + live run-time estimate for daily-iv-update. Migration 028 adds `config_json` to `batch_jobs`. `BatchJob.config` field added to shared types.
 
 - **v0.24.4 (2026-06-05)** — Daily Brief and Options Snapshot now score the full S&P 500 + Russell 1000 + ETF universe directly from `constituents` table instead of reading from `screen_results`. Scoring engine handles quality ranking per strategy — removes Bearish blind spot (strict screener was excluding weak stocks needed for bearish picks). Daily Screener job still runs for the Screener UI only.
