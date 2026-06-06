@@ -52,6 +52,7 @@ import { BatchService } from './services/batch-service.js';
 import { DailyIvCaptureJob } from './services/jobs/daily-iv-capture.js';
 import { MarketSyncJob } from './services/jobs/market-sync-job.js';
 import { PriceGapFillJob } from './services/jobs/price-gap-fill-job.js';
+import { DailyScreenerJob } from './services/jobs/daily-screener-job.js';
 import { registerBatchIpc } from './ipc/ipc-batch.js';
 import { ScoringService } from './services/scoring-service.js';
 import { registerScoringIpc } from './ipc/ipc-scoring.js';
@@ -359,9 +360,19 @@ app.whenReady().then(() => {
     startupDelaySeconds: 90,
   });
 
+  // Daily Screener — runs after both Market Sync jobs so caches are warm.
+  // Writes two screen_runs rows (stocks strict + ETFs soft) that the Daily Brief
+  // and Options Snapshot read from instead of a stale manual screener run.
+  const dailyScreenerJob = new DailyScreenerJob(db, screenerService);
+  batchService.registerJob('daily-screener', dailyScreenerJob, {
+    dailyScheduleTime: '16:30', // chains after Market Sync ETFs — same schedule slot
+    startupDelaySeconds: 110,   // after ETF sync (90 s) with a small buffer
+    runOnStartup: false,
+  });
+
   const priceGapFillJob = new PriceGapFillJob(db, () => getApiKey(db));
   batchService.registerJob('daily-price-gap-fill', priceGapFillJob, {
-    dailyScheduleTime: '16:30', // same time — chains after ETFs
+    dailyScheduleTime: '16:30', // same time — chains after screener
     startupDelaySeconds: 120,
   });
 

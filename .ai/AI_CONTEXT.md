@@ -172,6 +172,8 @@ Authoritative DDL is in `migrations/001_init.sql` + `002_screen_schema.sql`. Pha
 
 ## Recent Changes
 
+- **v0.24.3 (2026-06-05)** — New Daily Screener batch job (PERF-7): runs after Market Sync (sequence pos 3), two passes — stocks (S&P 500 + Russell 1000, strict, default preset) and ETFs (soft, avg_volume ≥ 500 k + price ≥ $10). `loadCandidates` in Daily Brief and Options Snapshot updated to merge all screen_runs created today (ET) instead of single most-recent row. Closes gap where Brief scored stale candidates if Screener tab hadn't been opened that day.
+
 - **v0.24.2 (2026-06-05)** — Portfolio AI Advisor: auto-loads most recent session on tab open; history sidebar shown even with only 1 past session.
 
 - **v0.24.1 (2026-06-05)** — Portfolio AI Advisor tab: added scrollbar so full analysis is visible.
