@@ -20,12 +20,14 @@ import type { BatchProgressEvent, ScreenCriteria } from '@shared/types.js';
 import { DEFAULT_FILTER_SPECS } from '@shared/screener-filters.js';
 import { isTradingDay } from '../iv-history-service.js';
 
-// ETF-appropriate filter set for soft-mode screening.
-// ETFs lack fundamental data (P/E, ROE, etc.) so we only check liquidity + price.
-// FilterDef.value shape mirrors what evaluateTicker reads: { min, max, enabled }.
+// ETF filter — soft mode with a single very permissive price floor (≥ $1).
+// In soft mode a ticker passes if it meets AT LEAST ONE enabled filter.
+// Using min: 1 means any ETF with a non-null price passes, regardless of whether
+// quote_cache has volume data. Our ETF list is 61 curated major names (SPY,
+// QQQ, IWM, etc.) so there is no need to aggressively filter them out — the
+// scoring engine handles weighting when they run through the Daily Brief.
 const ETF_FILTERS: ScreenCriteria['filters'] = [
-  { id: 'avg_volume', enabled: true, value: { min: 500_000 } },
-  { id: 'price',      enabled: true, value: { min: 10 } },
+  { id: 'price', enabled: true, value: { min: 1 } },
 ];
 
 export class DailyScreenerJob implements BatchJobHandler {
@@ -54,32 +56,33 @@ export class DailyScreenerJob implements BatchJobHandler {
       };
     }
 
-    let attempted = 0;
-    let updated   = 0;
-    let skipped   = 0;
-    let failed    = 0;
+    // Track each pass separately for clear reporting.
+    let stockScanned = 0;
+    let stockPassed  = 0;
+    let etfScanned   = 0;
+    let etfPassed    = 0;
+    let failed       = 0;
 
     // ── Pass 1: S&P 500 + Russell 1000, strict mode ────────────────────────
     try {
       const stockCriteria = this.buildStockCriteria();
+      const enabledCount = stockCriteria.filters.filter(f => f.enabled).length;
 
       onProgress({
         jobId: 'daily-screener', runId: 0, ticker: '',
-        status: 'updated', attempted, updated, skipped, failed, total: 0,
-        message: `Pass 1/2: Screening S&P 500 + Russell 1000 (strict, ${stockCriteria.filters.filter(f => f.enabled).length} filters)…`,
+        status: 'updated', attempted: 0, updated: 0, skipped: 0, failed, total: 0,
+        message: `Pass 1/2: Screening S&P 500 + Russell 1000 (strict, ${enabledCount} filters)…`,
       });
 
       const stockResult = await this.screenerService.runScreen(
         stockCriteria,
         (scanned, total, ticker) => {
           if (signal.aborted) return;
-          attempted = scanned;
-          updated   = scanned; // all evaluated rows count as processed
           onProgress({
             jobId: 'daily-screener', runId: 0,
             ticker: ticker ?? '',
             status: 'updated',
-            attempted: scanned, updated: scanned, skipped, failed, total,
+            attempted: scanned, updated: 0, skipped: 0, failed, total,
             message: ticker ? `Stocks: ${ticker}` : undefined,
           });
         },
@@ -88,11 +91,14 @@ export class DailyScreenerJob implements BatchJobHandler {
 
       if (!signal.aborted) {
         this.screenerService.saveRun(stockCriteria, 'both', stockResult.rows, null, 'Daily Screener — Stocks');
-        updated = stockResult.passed;
+        stockScanned = stockResult.scanned;
+        stockPassed  = stockResult.passed;
         onProgress({
           jobId: 'daily-screener', runId: 0, ticker: '',
-          status: 'updated', attempted, updated, skipped, failed, total: stockResult.scanned,
-          message: `Pass 1 done: ${stockResult.passed} passed / ${stockResult.scanned} scanned`,
+          status: 'updated',
+          attempted: stockScanned, updated: stockPassed, skipped: stockScanned - stockPassed, failed,
+          total: stockScanned,
+          message: `Pass 1 done: ${stockPassed} stocks passed / ${stockScanned} scanned`,
         });
       }
     } catch (err) {
@@ -100,21 +106,24 @@ export class DailyScreenerJob implements BatchJobHandler {
         failed++;
         onProgress({
           jobId: 'daily-screener', runId: 0, ticker: '',
-          status: 'failed', attempted, updated, skipped: skipped + 1, failed, total: 0,
+          status: 'failed', attempted: 0, updated: 0, skipped: 0, failed, total: 0,
           message: `Pass 1 failed: ${err instanceof Error ? err.message : String(err)}`,
         });
-        // Non-fatal — still attempt ETF pass
       }
     }
 
     if (signal.aborted) {
       return {
         status: 'failed', errorMessage: 'Cancelled',
-        tickersAttempted: attempted, tickersUpdated: updated, tickersSkipped: skipped, tickersFailed: failed,
+        tickersAttempted: stockScanned, tickersUpdated: stockPassed,
+        tickersSkipped: stockScanned - stockPassed, tickersFailed: failed,
       };
     }
 
     // ── Pass 2: ETFs, soft mode ────────────────────────────────────────────
+    // Uses a single permissive price ≥ $1 filter in soft mode so any ETF
+    // with quote_cache data passes.  Our ETF list is 61 curated major names
+    // — no aggressive gating needed; the scoring engine handles ranking.
     try {
       const etfCriteria: ScreenCriteria = {
         universe: 'etf',
@@ -122,12 +131,12 @@ export class DailyScreenerJob implements BatchJobHandler {
         filters: ETF_FILTERS,
       };
 
-      const etfBaseAttempted = attempted;
-
       onProgress({
         jobId: 'daily-screener', runId: 0, ticker: '',
-        status: 'updated', attempted, updated, skipped, failed, total: 0,
-        message: 'Pass 2/2: Screening ETFs (soft, volume + price)…',
+        status: 'updated',
+        attempted: stockScanned, updated: stockPassed, skipped: stockScanned - stockPassed, failed,
+        total: stockScanned,
+        message: 'Pass 2/2: Screening ETFs (soft, price ≥ $1)…',
       });
 
       const etfResult = await this.screenerService.runScreen(
@@ -138,8 +147,9 @@ export class DailyScreenerJob implements BatchJobHandler {
             jobId: 'daily-screener', runId: 0,
             ticker: ticker ?? '',
             status: 'updated',
-            attempted: etfBaseAttempted + scanned,
-            updated, skipped, failed, total: etfBaseAttempted + total,
+            attempted: stockScanned + scanned,
+            updated: stockPassed, skipped: stockScanned - stockPassed, failed,
+            total: stockScanned + total,
             message: ticker ? `ETFs: ${ticker}` : undefined,
           });
         },
@@ -148,12 +158,17 @@ export class DailyScreenerJob implements BatchJobHandler {
 
       if (!signal.aborted) {
         this.screenerService.saveRun(etfCriteria, 'etf', etfResult.rows, null, 'Daily Screener — ETFs');
-        attempted += etfResult.scanned;
-        skipped   += (etfResult.scanned - etfResult.passed);
+        etfScanned = etfResult.scanned;
+        etfPassed  = etfResult.passed;
         onProgress({
           jobId: 'daily-screener', runId: 0, ticker: '',
-          status: 'updated', attempted, updated, skipped, failed, total: attempted,
-          message: `Pass 2 done: ${etfResult.passed} passed / ${etfResult.scanned} ETFs scanned`,
+          status: 'updated',
+          attempted: stockScanned + etfScanned,
+          updated: stockPassed + etfPassed,
+          skipped: (stockScanned - stockPassed) + (etfScanned - etfPassed),
+          failed,
+          total: stockScanned + etfScanned,
+          message: `Pass 2 done: ${etfPassed} ETFs passed / ${etfScanned} scanned`,
         });
       }
     } catch (err) {
@@ -161,21 +176,26 @@ export class DailyScreenerJob implements BatchJobHandler {
         failed++;
         onProgress({
           jobId: 'daily-screener', runId: 0, ticker: '',
-          status: 'failed', attempted, updated, skipped, failed, total: 0,
+          status: 'failed',
+          attempted: stockScanned, updated: stockPassed, skipped: stockScanned - stockPassed, failed,
+          total: stockScanned,
           message: `Pass 2 failed: ${err instanceof Error ? err.message : String(err)}`,
         });
       }
     }
 
-    const finalStatus = signal.aborted ? 'failed' : (failed > 0 ? 'failed' : 'success');
+    const totalAttempted = stockScanned + etfScanned;
+    const totalPassed    = stockPassed  + etfPassed;
+    const totalSkipped   = totalAttempted - totalPassed;
+    const finalStatus    = signal.aborted ? 'failed' : (failed > 0 ? 'failed' : 'success');
 
     return {
       status: finalStatus,
-      notes: `Stocks + ETFs screened. ${updated} stocks passed strict filters; ${attempted} total evaluated.`,
+      notes: `Pass 1: ${stockPassed} stocks passed strict (${stockScanned} scanned). Pass 2: ${etfPassed} ETFs passed soft (${etfScanned} scanned).`,
       errorMessage: signal.aborted ? 'Job was cancelled.' : undefined,
-      tickersAttempted: attempted,
-      tickersUpdated:   updated,
-      tickersSkipped:   skipped,
+      tickersAttempted: totalAttempted,
+      tickersUpdated:   totalPassed,
+      tickersSkipped:   totalSkipped,
       tickersFailed:    failed,
     };
   }
