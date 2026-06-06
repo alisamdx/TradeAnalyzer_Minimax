@@ -238,6 +238,117 @@ export function buildEmailHtml(
 </html>`;
 }
 
+// ─── PDF helpers ─────────────────────────────────────────────────────────────
+
+const SIGNAL_LABEL_MAP: Record<string, string> = {
+  ivRank: 'IV Rank', premiumYield: 'Prem Yield', premiumRiskRatio: 'Prem/Risk',
+  fundamentalScore: 'Fundamentals', fundamentalWeakness: 'Fund Weakness',
+  technicalNeutral: 'RSI Neutral', rsiMomentum: 'RSI', rsiOverbought: 'RSI OB',
+  optionLiquidity: 'Liquidity', recentVolatility: 'Recent Vol',
+  trendStrength: 'Trend', downtrendScore: 'Downtrend', trendNeutral: 'Trend Neutral',
+  earningsGrowth: 'Earnings', priceMomentumPct: '52w Mom', priceDecayPct: '52w Decay',
+  breakoutScore: 'Breakout', buySignalScore: 'Buy Signal',
+  relativeStrength: 'Rel Strength', relativeWeakness: 'Rel Weakness',
+  sectorMomentum: 'Sector Mom', sectorWeakness: 'Sector Weak',
+  leverageQuality: 'Leverage', leverageRisk: 'Lev Risk',
+  revenueGrowth5Y: 'Rev Growth 5Y', epsGrowth5Y: 'EPS Growth 5Y',
+};
+
+function fmtSignalVal(raw: number | null, key: string): string {
+  if (raw == null) return '—';
+  if (['ivRank','fundamentalScore','fundamentalWeakness','trendStrength','downtrendScore',
+       'earningsGrowth','breakoutScore','buySignalScore','rsiMomentum','rsiOverbought',
+       'technicalNeutral','relativeStrength','relativeWeakness','sectorMomentum',
+       'sectorWeakness','leverageQuality','leverageRisk'].includes(key)) return raw.toFixed(0);
+  if (key === 'recentVolatility') return `${raw.toFixed(1)}%`;
+  if (key === 'priceMomentumPct' || key === 'priceDecayPct') return `${raw >= 0 ? '+' : ''}${raw.toFixed(1)}%`;
+  if (key === 'optionLiquidity') return `${raw.toFixed(1)}/10`;
+  if (key === 'premiumYield' || key === 'premiumRiskRatio') return `${raw.toFixed(1)}%`;
+  return raw.toFixed(1);
+}
+
+/** Estimate total pixel height for a pick card including all sections. */
+function estimateCardHeight(pick: BriefPick, strategy: ScoringStrategy): number {
+  const result = pick.strategyLabResult as StrategyLabValidateResult | null;
+  const slugs  = STRATEGY_TO_SLUGS[strategy];
+  const bestScore = result?.scores?.find(s => slugs.includes(s.slug)) ?? result?.scores?.[0];
+  const setup  = bestScore?.setup && !bestScore.setup.unavailableReason ? bestScore.setup : null;
+  const numLegs = setup?.legs?.length ?? 0;
+  const bucketScores = result?.scores?.filter(s => slugs.includes(s.slug)) ?? [];
+  const allSignalEntries  = Object.entries(pick.signals);
+  const activeSignals     = allSignalEntries.filter(([, s]) => !s.missing && s.normalized > 0);
+  const inactiveSignals   = allSignalEntries.filter(([, s]) => s.missing || s.normalized === 0);
+
+  let h = 52;  // header (rank, ticker, price, grade)
+
+  // Context block (ATM IV, IV Rank, bias, MA20/MA50, momentum)
+  if (result?.context) {
+    h += 6 + 4 + 10 + 12 + 13; // divider + gap + label + 2 lines
+  }
+
+  h += 14;     // setup line 1: structure · expiry · credit
+  h += 14;     // setup line 2: max profit · max loss · breakeven · POP
+
+  if (numLegs > 0) {
+    h += 18;           // legs section header bar
+    h += numLegs * 15; // leg rows
+    h += 4;
+  }
+
+  // Score breakdown + flags
+  if (bestScore) {
+    h += 6 + 4 + 10 + 12; // divider + gap + label + scores line
+    if (bestScore.flags.length > 0) h += 12;
+  }
+
+  // All structures in bucket
+  if (bucketScores.length > 1) {
+    h += 6 + 4 + 10 + 13;         // divider + gap + label + table header
+    h += bucketScores.length * 13 + 4;
+  }
+
+  // All signals (active + inactive)
+  if (allSignalEntries.length > 0) {
+    h += 6 + 4 + 10; // divider + gap + label
+    if (activeSignals.length > 0) {
+      const sigStr = activeSignals.map(([k, s]) => `${k}: ${s.raw} (${s.weight}%)`).join('  ·  ');
+      h += Math.ceil(sigStr.length / 80) * 12 + 4;
+    }
+    if (inactiveSignals.length > 0) {
+      const misStr = inactiveSignals.map(([k]) => k).join('  ·  ');
+      h += Math.ceil(('Missing/inactive: ' + misStr).length / 90) * 10 + 2;
+    }
+  }
+
+  // Strategy Lab AI rationale (from bestScore)
+  if (bestScore?.aiRationale) {
+    h += 6 + 4 + 10;
+    h += Math.ceil(bestScore.aiRationale.length / 88) * 12 + 4;
+  }
+
+  // Pick-level AI rationale
+  if (pick.aiRationale) {
+    h += 6 + 4 + 10;
+    h += Math.ceil(pick.aiRationale.length / 88) * 12 + 4;
+  }
+
+  // Critic verdict
+  if (pick.criticVerdict) {
+    h += 6 + 4 + 10; // divider + gap + label
+    if (pick.criticVerdict.rationale) {
+      h += Math.ceil(pick.criticVerdict.rationale.length / 88) * 12 + 4;
+    } else {
+      h += 13;
+    }
+    if (pick.criticVerdict.flags.length > 0) {
+      h += pick.criticVerdict.flags.length * 11 + 2;
+    }
+  }
+
+  h += 10; // bottom padding
+  return Math.max(h, 100);
+}
+
 // ─── PDF ──────────────────────────────────────────────────────────────────────
 
 export async function buildPdf(
@@ -248,163 +359,424 @@ export async function buildPdf(
     const doc = new PDFDocument({ margin: 50, size: 'LETTER', bufferPages: true });
     const chunks: Buffer[] = [];
     doc.on('data', c => chunks.push(c));
-    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.on('end',  () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
 
     const dateStr = new Date(date + 'T12:00:00Z').toLocaleDateString('en-US', {
       weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
     });
 
-    const W = doc.page.width - 100; // usable width
+    const W     = doc.page.width - 100; // usable width (512 on LETTER)
+    const LX    = 50;                    // left margin
+    const CX    = 82;                    // content indent inside card
+    const CW    = W - 36;               // content width inside card
     const DARK  = '#1a252f';
     const BLUE  = '#2980b9';
+    const GREEN = '#27ae60';
+    const RED   = '#c0392b';
     const GRAY  = '#555555';
     const LGRAY = '#888888';
+
     const totalPicks = STRATEGY_ORDER.reduce((n, s) => n + (briefsByStrategy.get(s)?.length ?? 0), 0);
 
-    // ── Cover page ──────────────────────────────────────────────────────────
-    doc.rect(50, 50, W, 120).fill('#2c3e50');
+    // ── Cover page ────────────────────────────────────────────────────────────
+    doc.rect(LX, 50, W, 120).fill('#2c3e50');
     doc.fillColor('#ffffff').fontSize(24).font('Helvetica-Bold')
-      .text('Daily Intelligence Brief', 70, 75);
+      .text('Daily Intelligence Brief', LX + 20, 75);
     doc.fontSize(13).font('Helvetica').fillColor('#bdc3c7')
-      .text(dateStr, 70, 108);
+      .text(dateStr, LX + 20, 108);
     doc.fontSize(12).fillColor('#ecf0f1')
-      .text(`${totalPicks} picks across 5 strategies`, 70, 130);
+      .text(`${totalPicks} picks across 5 strategies`, LX + 20, 130);
 
     doc.moveDown(8);
-
-    // Summary table of contents
-    doc.fillColor(DARK).fontSize(11).font('Helvetica-Bold').text('Contents', 50, doc.y);
+    doc.fillColor(DARK).fontSize(11).font('Helvetica-Bold').text('Contents', LX, doc.y);
     doc.moveDown(0.4);
-    STRATEGY_ORDER.forEach(strategy => {
-      const picks = briefsByStrategy.get(strategy);
+    STRATEGY_ORDER.forEach(s => {
+      const picks = briefsByStrategy.get(s);
       if (!picks?.length) return;
       doc.fontSize(10).font('Helvetica').fillColor(GRAY)
-        .text(`  ${STRATEGY_LABELS[strategy]}`, 50, doc.y, { continued: true })
+        .text(`  ${STRATEGY_LABELS[s]}`, LX, doc.y, { continued: true })
         .fillColor(LGRAY).text(`  ·  ${picks.length} picks`);
       doc.moveDown(0.3);
     });
-
     doc.moveDown(1);
     doc.fontSize(9).fillColor(LGRAY)
-      .text('Grades and setups are generated by the Strategy Lab validation engine. AI rationale is indicative, not financial advice.', 50, doc.y, { width: W });
+      .text('Grades and setups are generated by the Strategy Lab validation engine. ' +
+            'AI rationale is indicative, not financial advice.', LX, doc.y, { width: W });
 
-    // ── Strategy sections ──────────────────────────────────────────────────
+    // ── Per-strategy sections ─────────────────────────────────────────────────
     for (const strategy of STRATEGY_ORDER) {
       const picks = briefsByStrategy.get(strategy);
       if (!picks?.length) continue;
 
       doc.addPage();
-
-      // Strategy header bar
-      doc.rect(50, 50, W, 28).fill('#2c3e50');
+      doc.rect(LX, 50, W, 28).fill('#2c3e50');
       doc.fillColor('#ffffff').fontSize(13).font('Helvetica-Bold')
-        .text(`${STRATEGY_LABELS[strategy].toUpperCase()}  ·  ${picks.length} PICKS`, 60, 59);
+        .text(`${STRATEGY_LABELS[strategy].toUpperCase()}  ·  ${picks.length} PICKS`, LX + 10, 59);
 
       let y = 90;
 
       for (const pick of picks) {
-        // Check if we need a new page (each pick card is ~200-240px tall)
-        if (y > doc.page.height - 260) {
-          doc.addPage();
-          y = 50;
+        const cardH = estimateCardHeight(pick, strategy);
+        if (y + cardH > doc.page.height - 50) { doc.addPage(); y = 50; }
+
+        // Resolve Strategy Lab result for this strategy
+        const labResult  = pick.strategyLabResult as StrategyLabValidateResult | null;
+        const slugs      = STRATEGY_TO_SLUGS[strategy];
+        const bestScore  = labResult?.scores?.find(s => slugs.includes(s.slug)) ?? labResult?.scores?.[0];
+        const grade      = bestScore?.grade ?? '?';
+        const gradeColor = GRADE_COLOR_HEX[grade] ?? '#666666';
+        const labScore   = bestScore?.totalScore != null ? Math.round(bestScore.totalScore) : null;
+        const setup      = bestScore?.setup && !bestScore.setup.unavailableReason ? bestScore.setup : null;
+
+        // ── Card background ──────────────────────────────────────────────────
+        doc.rect(LX, y, W, cardH).fillAndStroke('#f8f9fa', '#d0d0d0');
+
+        // ── Header row ───────────────────────────────────────────────────────
+        // Rank badge
+        doc.circle(LX + 16, y + 14, 10).fill(DARK);
+        doc.fillColor('#ffffff').fontSize(9).font('Helvetica-Bold')
+          .text(`#${pick.rank}`, LX + 10, y + 9, { width: 12, align: 'center' });
+
+        // Ticker
+        doc.fillColor(DARK).fontSize(16).font('Helvetica-Bold')
+          .text(pick.ticker, CX, y + 5);
+
+        // Price + validated badge
+        let priceX = CX + 50;
+        if (pick.price != null) {
+          doc.fillColor(GRAY).fontSize(10).font('Helvetica')
+            .text(fmtPrice(pick.price), priceX, y + 9);
+          priceX += 48;
+        }
+        const validatedLabel = pick.validated ? '✓ Validated' : '⚠ Unvalidated';
+        const validatedColor = pick.validated ? GREEN : '#e67e22';
+        doc.fillColor(validatedColor).fontSize(8).font('Helvetica')
+          .text(validatedLabel, priceX, y + 10);
+
+        // Grade badge (top-right)
+        doc.rect(LX + W - 52, y + 5, 42, 22).fill(gradeColor);
+        doc.fillColor('#ffffff').fontSize(13).font('Helvetica-Bold')
+          .text(grade, LX + W - 47, y + 10, { width: 32, align: 'center' });
+        if (labScore != null) {
+          doc.fillColor(LGRAY).fontSize(8).font('Helvetica')
+            .text(`${labScore}/100`, LX + W - 52, y + 32, { width: 42, align: 'center' });
         }
 
-        const setup = getRelevantSetup(pick, strategy);
-        const grade = setup?.grade ?? '?';
-        const gradeColor = GRADE_COLOR_HEX[grade] ?? '#666666';
-        const score = setup?.labScore != null ? Math.round(setup.labScore) : null;
+        let cy = y + 42; // current y cursor inside card
 
-        // Pick card background
-        const cardH = estimateCardHeight(pick);
-        doc.rect(50, y, W, cardH).fillAndStroke('#f8f9fa', '#e0e0e0');
+        // ── Market context ───────────────────────────────────────────────────
+        const ctx = labResult?.context;
+        if (ctx) {
+          cy += 2;
+          doc.rect(CX, cy, CW, 1).fill('#d8d8d8');
+          cy += 4;
+          doc.fillColor(LGRAY).fontSize(7).font('Helvetica-Bold').text('MARKET CONTEXT', CX, cy);
+          cy += 10;
 
-        // Rank badge
-        doc.circle(68, y + 14, 10).fill(DARK);
-        doc.fillColor('#ffffff').fontSize(9).font('Helvetica-Bold')
-          .text(`#${pick.rank}`, 62, y + 9, { width: 12, align: 'center' });
+          const ctxParts1: string[] = [
+            `ATM IV: ${ctx.currentAtmIv.toFixed(0)}%`,
+          ];
+          if (ctx.ivRank != null)       ctxParts1.push(`IV Rank: ${ctx.ivRank.toFixed(0)}`);
+          if (ctx.ivPercentile != null) ctxParts1.push(`IV Pct: ${ctx.ivPercentile.toFixed(0)}%`);
+          ctxParts1.push(`Bias: ${ctx.directionBias.toUpperCase()}`);
+          if (ctx.momentum5d != null)   ctxParts1.push(`5d Mom: ${ctx.momentum5d >= 0 ? '+' : ''}${ctx.momentum5d.toFixed(1)}%`);
 
-        // Ticker + price
-        doc.fillColor(DARK).fontSize(16).font('Helvetica-Bold')
-          .text(pick.ticker, 85, y + 6);
-        doc.fillColor(GRAY).fontSize(10).font('Helvetica')
-          .text(fmtPrice(pick.price), 85, y + 26);
+          doc.fillColor('#333333').fontSize(8).font('Helvetica')
+            .text(ctxParts1.join('  ·  '), CX, cy, { width: CW });
+          cy += 12;
 
-        // Grade badge
-        doc.rect(W - 50, y + 6, 40, 22).fill(gradeColor);
-        doc.fillColor('#ffffff').fontSize(13).font('Helvetica-Bold')
-          .text(grade, W - 45, y + 11, { width: 30, align: 'center' });
+          const ctxParts2: string[] = [];
+          if (ctx.ma20 != null)  ctxParts2.push(`MA20: ${fmtPrice(ctx.ma20)}`);
+          if (ctx.ma50 != null)  ctxParts2.push(`MA50: ${fmtPrice(ctx.ma50)}`);
+          ctxParts2.push(`IV data pts: ${ctx.ivDataPoints}`);
+          doc.fillColor(GRAY).fontSize(8).font('Helvetica')
+            .text(ctxParts2.join('  ·  '), CX, cy, { width: CW });
+          cy += 13;
+        }
 
-        // Lab score
-        doc.fillColor(LGRAY).fontSize(9).font('Helvetica')
-          .text(score != null ? `${score}/100` : '', W - 55, y + 32, { width: 50, align: 'center' });
+        // ── Setup lines ──────────────────────────────────────────────────────
+        if (setup || bestScore) {
+          const sn = SLUG_SHORT[bestScore?.slug ?? ''] ?? bestScore?.name ?? '—';
 
-        // Setup row
-        if (setup) {
-          let setupLine = setup.structureName;
-          if (setup.strike != null) setupLine += `  ·  Strike ${fmtPrice(setup.strike)}`;
-          if (setup.expiration) setupLine += `  ·  ${fmtExpShort(setup.expiration)}`;
-          if (setup.dte != null) setupLine += `  ·  ${setup.dte}d`;
-          if (setup.credit != null) setupLine += `  ·  cr ${fmtPrice(setup.credit)}`;
-          else if (setup.debit != null) setupLine += `  ·  dr ${fmtPrice(setup.debit)}`;
-          if (setup.annReturn != null) setupLine += `  ·  Ann ${fmtPct(setup.annReturn)}`;
-          if (setup.pop != null) setupLine += `  ·  POP ${fmtPct(setup.pop)}`;
-          if (setup.maxLoss != null) setupLine += `  ·  Max Loss ${fmtPrice(setup.maxLoss)}`;
+          // Line 1: structure · expiry · DTE · credit/debit
+          const line1Parts: string[] = [sn];
+          if (setup?.expiration) line1Parts.push(fmtExpShort(setup.expiration));
+          if (setup?.dte        != null) line1Parts.push(`${setup.dte}d`);
+          if (setup?.netCredit  != null && setup.netCredit > 0) line1Parts.push(`Net Cr ${fmtPrice(setup.netCredit)}`);
+          else if (setup?.netDebit != null && setup.netDebit > 0) line1Parts.push(`Net Dr ${fmtPrice(setup.netDebit)}`);
+          if (setup?.annualizedReturn != null) line1Parts.push(`Ann ${fmtPct(setup.annualizedReturn)}`);
+          if (setup?.popEstimate != null) line1Parts.push(`POP ${fmtPct(setup.popEstimate)}`);
 
           doc.fillColor(BLUE).fontSize(9).font('Helvetica-Bold')
-            .text(setupLine, 85, y + 42, { width: W - 110 });
+            .text(line1Parts.join('  ·  '), CX, cy, { width: CW - 20 });
+          cy += 13;
+
+          // Line 2: max profit · max loss · breakevens
+          const line2Parts: string[] = [];
+          if (setup?.maxProfit != null) line2Parts.push(`Max Profit ${fmtPrice(setup.maxProfit)}`);
+          if (setup?.maxLoss != null) line2Parts.push(`Max Loss ${fmtPrice(setup.maxLoss)}`);
+          if (setup?.breakevens?.length) {
+            line2Parts.push(`BE ${setup.breakevens.map(b => fmtPrice(b)).join(' / ')}`);
+          }
+          if (line2Parts.length > 0) {
+            doc.fillColor(GRAY).fontSize(8).font('Helvetica')
+              .text(line2Parts.join('  ·  '), CX, cy, { width: CW - 20 });
+            cy += 13;
+          }
         }
 
-        // Top signals
-        // Signal contribution = normalized (0–1) × weight
-        const topSignals = Object.entries(pick.signals)
-          .filter(([, s]) => !s.missing && s.normalized > 0)
-          .sort(([, a], [, b]) => (b.normalized * b.weight) - (a.normalized * a.weight))
-          .slice(0, 5);
+        // ── Legs table ───────────────────────────────────────────────────────
+        if (setup?.legs?.length) {
+          cy += 2;
+          // Section header bar
+          doc.rect(CX, cy, CW, 14).fill('#e8edf2');
+          doc.fillColor('#2c3e50').fontSize(7).font('Helvetica-Bold')
+            .text('LEG', CX + 2, cy + 4, { width: 28 });
 
-        if (topSignals.length > 0) {
-          const sigY = y + 57;
-          doc.fillColor(LGRAY).fontSize(8).font('Helvetica')
-            .text('Signals: ', 85, sigY, { continued: true });
-          topSignals.forEach(([name, sig], i) => {
-            const label = name.replace(/([A-Z])/g, ' $1').trim();
-            const contrib = (sig.normalized * sig.weight).toFixed(0);
-            doc.fillColor('#444').text(`${label} (${contrib})${i < topSignals.length - 1 ? '  ' : ''}`, { continued: i < topSignals.length - 1 });
-          });
+          // Column x positions (relative to CX)
+          const COL = { action: 0, type: 30, strike: 60, mid: 105, delta: 148, iv: 185, oi: 218, bidask: 268 };
+
+          doc.fillColor(LGRAY).fontSize(7).font('Helvetica')
+            .text('TYPE',    CX + COL.type,   cy + 4, { width: 28 })
+            .text('STRIKE',  CX + COL.strike,  cy + 4, { width: 38, align: 'right' })
+            .text('MID',     CX + COL.mid,     cy + 4, { width: 38, align: 'right' })
+            .text('DELTA',   CX + COL.delta,   cy + 4, { width: 32, align: 'right' })
+            .text('IV%',     CX + COL.iv,      cy + 4, { width: 28, align: 'right' })
+            .text('OI',      CX + COL.oi,      cy + 4, { width: 44, align: 'right' })
+            .text('BID×ASK', CX + COL.bidask,  cy + 4, { width: CW - COL.bidask });
+          cy += 14;
+
+          for (const leg of setup.legs) {
+            const rowBg = leg.action === 'sell' ? '#fff8f0' : '#f0fff4';
+            doc.rect(CX, cy, CW, 14).fill(rowBg);
+
+            const actionColor = leg.action === 'sell' ? '#c0392b' : '#27ae60';
+            const deltaStr = leg.delta != null
+              ? `${leg.delta >= 0 ? '+' : ''}${leg.delta.toFixed(2)}`
+              : '—';
+            const ivStr  = leg.iv > 0 ? `${leg.iv.toFixed(0)}%` : '—';
+            const oiStr  = leg.openInterest != null && leg.openInterest > 0 ? leg.openInterest.toLocaleString() : '—';
+            const bidAsk = `${fmtPrice(leg.bid)} × ${fmtPrice(leg.ask)}`;
+            const qtyLabel = leg.qty > 1 ? `${leg.qty}×` : '';
+
+            doc.fillColor(actionColor).fontSize(8).font('Helvetica-Bold')
+              .text(qtyLabel + leg.action.toUpperCase(), CX + COL.action, cy + 3, { width: 28 });
+            doc.fillColor(DARK).fontSize(8).font('Helvetica')
+              .text(leg.side.toUpperCase(),   CX + COL.type,   cy + 3, { width: 28 })
+              .text(fmtPrice(leg.strike),     CX + COL.strike,  cy + 3, { width: 38, align: 'right' })
+              .text(fmtPrice(leg.mid),        CX + COL.mid,     cy + 3, { width: 38, align: 'right' });
+            doc.fillColor(leg.delta != null && Math.abs(leg.delta) > 0.45 ? '#e07d3a' : DARK)
+              .fontSize(8).font('Helvetica')
+              .text(deltaStr, CX + COL.delta, cy + 3, { width: 32, align: 'right' });
+            doc.fillColor(DARK).fontSize(8).font('Helvetica')
+              .text(ivStr,   CX + COL.iv,     cy + 3, { width: 28, align: 'right' })
+              .text(oiStr,   CX + COL.oi,     cy + 3, { width: 44, align: 'right' })
+              .text(bidAsk,  CX + COL.bidask, cy + 3, { width: CW - COL.bidask });
+            cy += 15;
+          }
+          cy += 4;
         }
 
-        // AI Rationale
-        if (pick.aiRationale) {
-          const rationaleY = y + 72;
-          doc.rect(85, rationaleY, W - 90, 1).fill('#e0e0e0');
-          doc.fillColor(LGRAY).fontSize(8).font('Helvetica-Bold')
-            .text('AI RATIONALE', 85, rationaleY + 5);
+        // ── Score breakdown ──────────────────────────────────────────────────
+        if (bestScore) {
+          cy += 2;
+          doc.rect(CX, cy, CW, 1).fill('#d8d8d8');
+          cy += 4;
+          doc.fillColor(LGRAY).fontSize(7).font('Helvetica-Bold')
+            .text('SCORE BREAKDOWN', CX, cy, { continued: true });
+          doc.fillColor(DARK).fontSize(7).font('Helvetica')
+            .text(`  Total: ${Math.round(bestScore.totalScore)}/100  ·  Complexity: ${bestScore.complexity}`);
+          cy += 10;
+
+          const subScoreLine = [
+            `IV: ${bestScore.ivScore.toFixed(0)}/30`,
+            `Direction: ${bestScore.directionScore.toFixed(0)}/30`,
+            `Premium: ${bestScore.premiumScore.toFixed(0)}/25`,
+            `Liquidity: ${bestScore.liquidityScore.toFixed(0)}/15`,
+          ].join('  ·  ');
+          doc.fillColor('#333333').fontSize(8).font('Helvetica')
+            .text(subScoreLine, CX, cy, { width: CW });
+          cy += 12;
+
+          if (bestScore.flags.length > 0) {
+            doc.fillColor(LGRAY).fontSize(7).font('Helvetica')
+              .text('Flags: ', CX, cy, { continued: true });
+            doc.fillColor('#555555').fontSize(7).font('Helvetica')
+              .text(bestScore.flags.join('  ·  '), { width: CW - 30 });
+            cy += 12;
+          }
+        }
+
+        // ── All structures evaluated in this bucket ──────────────────────────
+        const bucketScores = labResult?.scores?.filter(s => slugs.includes(s.slug)) ?? [];
+        if (bucketScores.length > 1) {
+          cy += 2;
+          doc.rect(CX, cy, CW, 1).fill('#d8d8d8');
+          cy += 4;
+          doc.fillColor(LGRAY).fontSize(7).font('Helvetica-Bold')
+            .text('ALL STRUCTURES EVALUATED', CX, cy);
+          cy += 10;
+
+          // Table header
+          doc.rect(CX, cy, CW, 13).fill('#e8edf2');
+          const SC = { name: 0, grade: 110, score: 135, iv: 165, dir: 193, prem: 221, liq: 249, setup: 273 };
+          doc.fillColor('#2c3e50').fontSize(7).font('Helvetica-Bold')
+            .text('STRUCTURE',  CX + SC.name,  cy + 3, { width: SC.grade - SC.name - 2 })
+            .text('GR',         CX + SC.grade, cy + 3, { width: SC.score - SC.grade - 2 })
+            .text('SCORE',      CX + SC.score, cy + 3, { width: SC.iv - SC.score - 2 })
+            .text('IV',         CX + SC.iv,    cy + 3, { width: SC.dir - SC.iv - 2 })
+            .text('DIR',        CX + SC.dir,   cy + 3, { width: SC.prem - SC.dir - 2 })
+            .text('PR',         CX + SC.prem,  cy + 3, { width: SC.liq - SC.prem - 2 })
+            .text('LQ',         CX + SC.liq,   cy + 3, { width: SC.setup - SC.liq - 2 })
+            .text('SETUP',      CX + SC.setup, cy + 3, { width: CW - SC.setup });
+          cy += 13;
+
+          for (const sc of bucketScores) {
+            const isBest = sc.slug === bestScore?.slug;
+            doc.rect(CX, cy, CW, 13).fill(isBest ? '#fffbf0' : '#ffffff');
+            const gc2 = GRADE_COLOR_HEX[sc.grade] ?? '#666666';
+
+            let setupSummary = '—';
+            if (sc.setup?.unavailableReason) {
+              setupSummary = sc.setup.unavailableReason;
+            } else if (sc.setup) {
+              const sp = sc.setup;
+              const parts: string[] = [];
+              if (sp.expiration) parts.push(fmtExpShort(sp.expiration));
+              const shortLeg = sp.legs.find(l => l.action === 'sell');
+              if (shortLeg) parts.push(`${shortLeg.side.charAt(0).toUpperCase()} ${fmtPrice(shortLeg.strike)}`);
+              if (sp.netCredit != null && sp.netCredit > 0) parts.push(`cr ${fmtPrice(sp.netCredit)}`);
+              else if (sp.netDebit != null && sp.netDebit > 0) parts.push(`dr ${fmtPrice(sp.netDebit)}`);
+              if (sp.popEstimate != null) parts.push(`POP ${fmtPct(sp.popEstimate)}`);
+              if (sp.annualizedReturn != null) parts.push(`Ann ${fmtPct(sp.annualizedReturn)}`);
+              setupSummary = parts.join(' · ');
+            }
+
+            doc.fillColor(DARK).fontSize(7.5).font(isBest ? 'Helvetica-Bold' : 'Helvetica')
+              .text(SLUG_SHORT[sc.slug] ?? sc.name, CX + SC.name, cy + 3, { width: SC.grade - SC.name - 2 });
+            doc.fillColor(gc2).fontSize(7.5).font('Helvetica-Bold')
+              .text(sc.grade, CX + SC.grade, cy + 3, { width: SC.score - SC.grade - 2 });
+            doc.fillColor(DARK).fontSize(7.5).font('Helvetica')
+              .text(Math.round(sc.totalScore).toString(),    CX + SC.score, cy + 3, { width: SC.iv - SC.score - 2 })
+              .text(sc.ivScore.toFixed(0),        CX + SC.iv,    cy + 3, { width: SC.dir - SC.iv - 2 })
+              .text(sc.directionScore.toFixed(0), CX + SC.dir,   cy + 3, { width: SC.prem - SC.dir - 2 })
+              .text(sc.premiumScore.toFixed(0),   CX + SC.prem,  cy + 3, { width: SC.liq - SC.prem - 2 })
+              .text(sc.liquidityScore.toFixed(0), CX + SC.liq,   cy + 3, { width: SC.setup - SC.liq - 2 });
+            doc.fillColor(LGRAY).fontSize(7).font('Helvetica')
+              .text(setupSummary, CX + SC.setup, cy + 3, { width: CW - SC.setup - 4 });
+            cy += 13;
+          }
+          cy += 4;
+        }
+
+        // ── All signals ──────────────────────────────────────────────────────
+        const allSignalEntries = Object.entries(pick.signals)
+          .sort(([, a], [, b]) => (b.normalized * b.weight) - (a.normalized * a.weight));
+        const activeSignals   = allSignalEntries.filter(([, s]) => !s.missing && s.normalized > 0);
+        const inactiveSignals = allSignalEntries.filter(([, s]) => s.missing || s.normalized === 0);
+
+        if (activeSignals.length > 0 || inactiveSignals.length > 0) {
+          cy += 2;
+          doc.rect(CX, cy, CW, 1).fill('#d8d8d8');
+          cy += 4;
+          doc.fillColor(LGRAY).fontSize(7).font('Helvetica-Bold')
+            .text('SCORING SIGNALS', CX, cy);
+          cy += 10;
+
+          if (activeSignals.length > 0) {
+            const sigParts = activeSignals.map(([key, sig]) => {
+              const label = SIGNAL_LABEL_MAP[key] ?? key.replace(/([A-Z])/g, ' $1').trim();
+              return `${label}: ${fmtSignalVal(sig.raw, key)} (wt ${sig.weight}%)`;
+            });
+            const sigStr = sigParts.join('  ·  ');
+            doc.fillColor('#333333').fontSize(8).font('Helvetica')
+              .text(sigStr, CX, cy, { width: CW, lineGap: 1 });
+            cy += Math.ceil(sigStr.length / 78) * 12 + 4;
+          }
+
+          if (inactiveSignals.length > 0) {
+            const misParts = inactiveSignals.map(([key, sig]) => {
+              const label = SIGNAL_LABEL_MAP[key] ?? key.replace(/([A-Z])/g, ' $1').trim();
+              return `${label}${sig.missing ? ' (n/a)' : ': 0'}`;
+            });
+            const misStr = 'Inactive/missing: ' + misParts.join('  ·  ');
+            doc.fillColor(LGRAY).fontSize(7).font('Helvetica')
+              .text(misStr, CX, cy, { width: CW, lineGap: 1 });
+            cy += Math.ceil(misStr.length / 90) * 10 + 2;
+          }
+        }
+
+        // ── Strategy Lab AI rationale (per-structure fit explanation) ────────
+        if (bestScore?.aiRationale) {
+          cy += 2;
+          doc.rect(CX, cy, CW, 1).fill('#d8d8d8');
+          cy += 4;
+          doc.fillColor(LGRAY).fontSize(7).font('Helvetica-Bold')
+            .text('STRATEGY FIT', CX, cy);
+          cy += 10;
           doc.fillColor('#333333').fontSize(9).font('Helvetica')
-            .text(pick.aiRationale, 85, rationaleY + 17, { width: W - 90, lineGap: 2 });
+            .text(bestScore.aiRationale, CX, cy, { width: CW, lineGap: 1 });
+          cy += Math.ceil(bestScore.aiRationale.length / 88) * 12 + 2;
         }
 
-        y += cardH + 10;
+        // ── AI Rationale ─────────────────────────────────────────────────────
+        if (pick.aiRationale) {
+          cy += 2;
+          doc.rect(CX, cy, CW, 1).fill('#d8d8d8');
+          cy += 4;
+          doc.fillColor(LGRAY).fontSize(7).font('Helvetica-Bold')
+            .text('AI RATIONALE', CX, cy);
+          cy += 10;
+          doc.fillColor('#333333').fontSize(9).font('Helvetica')
+            .text(pick.aiRationale, CX, cy, { width: CW, lineGap: 1 });
+          cy += Math.ceil(pick.aiRationale.length / 88) * 12 + 2;
+        }
+
+        // ── Critic verdict ───────────────────────────────────────────────────
+        const cv = pick.criticVerdict;
+        if (cv) {
+          cy += 2;
+          doc.rect(CX, cy, CW, 1).fill('#d8d8d8');
+          cy += 4;
+          const cvLabelColor = cv.verdict === 'pass' ? GREEN : cv.verdict === 'flag' ? RED : '#e67e22';
+          const cvLabel = { pass: '✓ PASS', caution: '⚠ CAUTION', flag: '⚑ FLAG' }[cv.verdict];
+          doc.fillColor(LGRAY).fontSize(7).font('Helvetica-Bold')
+            .text('SECOND OPINION  ', CX, cy, { continued: true });
+          doc.fillColor(cvLabelColor).fontSize(7).font('Helvetica-Bold')
+            .text(cvLabel);
+          cy += 10;
+
+          if (cv.rationale) {
+            doc.fillColor('#444444').fontSize(8).font('Helvetica')
+              .text(cv.rationale, CX, cy, { width: CW, lineGap: 1 });
+            cy += Math.ceil(cv.rationale.length / 88) * 12 + 2;
+          }
+
+          if (cv.flags.length > 0) {
+            for (const flag of cv.flags) {
+              const flagColor = flag.severity === 'warning' ? '#c0392b' : LGRAY;
+              const flagIcon  = flag.severity === 'warning' ? '⚠' : 'ℹ';
+              doc.fillColor(flagColor).fontSize(7.5).font('Helvetica')
+                .text(`${flagIcon} ${flag.description}`, CX + 4, cy, { width: CW - 4, lineGap: 1 });
+              cy += 11;
+            }
+          }
+        }
+
+        y += cardH + 8;
       }
     }
 
-    // Page numbers
+    // ── Page numbers ──────────────────────────────────────────────────────────
     const pages = doc.bufferedPageRange();
     for (let i = 0; i < pages.count; i++) {
       doc.switchToPage(pages.start + i);
       doc.fillColor(LGRAY).fontSize(8).font('Helvetica')
         .text(`TradeAnalyzer Daily Brief  ·  ${dateStr}  ·  Page ${i + 1} of ${pages.count}`,
-          50, doc.page.height - 30, { width: W, align: 'center' });
+          LX, doc.page.height - 30, { width: W, align: 'center' });
     }
 
     doc.end();
   });
-}
-
-function estimateCardHeight(pick: BriefPick): number {
-  const baseH = 90;
-  if (!pick.aiRationale) return baseH;
-  // Rough estimate: ~80 chars per line at 9pt, ~13px per line
-  const chars = pick.aiRationale.length;
-  const lines = Math.ceil(chars / 90);
-  return baseH + 22 + lines * 13;
 }
