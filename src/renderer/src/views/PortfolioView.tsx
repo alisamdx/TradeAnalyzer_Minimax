@@ -177,13 +177,21 @@ export function PortfolioView() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  // Load advisor history when switching to advisor tab
+  // Load advisor history when switching to advisor tab.
+  // Auto-select the most recent session so prior results are visible immediately.
   useEffect(() => {
     if (activeTab === 'advisor') {
       window.api.portfolio.advisor.history(10)
-        .then(h => setAdvisorHistory(h))
+        .then(h => {
+          setAdvisorHistory(h);
+          // If no live session is active and nothing is selected yet, show the latest
+          if (h.length > 0 && !advisorSession && !selectedHistoryId) {
+            setSelectedHistoryId(h[0]!.id);
+          }
+        })
         .catch(() => {});
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
   // ─── Sorting ───────────────────────────────────────────────────────────────
@@ -898,7 +906,7 @@ export function PortfolioView() {
             <div style={{ display: 'flex', gap: 16 }}>
 
               {/* History sidebar */}
-              {advisorHistory.length > 1 && (
+              {advisorHistory.length > 0 && (
                 <div style={{ width: 160, flexShrink: 0 }}>
                   <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 4 }}>History</div>
                   {advisorHistory.map(s => (
