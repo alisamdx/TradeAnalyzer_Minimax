@@ -4157,7 +4157,36 @@ input[type='checkbox'] {
 .retro-table tbody tr:hover td { background: rgba(255,255,255,0.025); }
 
 /* In Progress Tab */
-.retro-inprogress-tab { display: flex; flex-direction: column; gap: 24px; }
+.retro-inprogress-tab { display: flex; flex-direction: column; gap: 16px; }
+
+.retro-brief-selector {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+}
+.retro-brief-selector-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.retro-brief-select {
+  font-size: 13px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text);
+  cursor: pointer;
+  min-width: 180px;
+}
+.retro-brief-select:focus { outline: none; border-color: var(--accent); }
+.retro-brief-selector-count {
+  font-size: 12px;
+  color: var(--text-muted);
+}
 
 .retro-date-group { display: flex; flex-direction: column; gap: 8px; }
 .retro-date-header {

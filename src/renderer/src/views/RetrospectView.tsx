@@ -200,6 +200,15 @@ function InProgressTab({
 }) {
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
 
+  // Sorted unique brief dates, descending (latest first)
+  const briefDates = [...new Set(positions.map(p => p.briefDate))].sort((a, b) => b.localeCompare(a));
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+
+  // Always default to latest when positions reload
+  const effectiveDate = selectedDate && briefDates.includes(selectedDate)
+    ? selectedDate
+    : briefDates[0] ?? null;
+
   const toggleExpand = (id: number) =>
     setExpanded(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
 
@@ -211,19 +220,29 @@ function InProgressTab({
     </div>
   );
 
-  // Group by brief date
-  const byDate = new Map<string, PaperTradeWithPnl[]>();
-  for (const p of positions) {
-    if (!byDate.has(p.briefDate)) byDate.set(p.briefDate, []);
-    byDate.get(p.briefDate)!.push(p);
-  }
+  const trades = effectiveDate ? positions.filter(p => p.briefDate === effectiveDate) : [];
 
   return (
     <div className="retro-inprogress-tab">
-      {[...byDate.entries()].map(([date, trades]) => (
-        <div key={date} className="retro-date-group">
-          <div className="retro-date-header">Brief of {fmtDate(date)} · {trades.length} picks</div>
-          <table className="retro-table retro-open-table">
+      {/* Brief date selector */}
+      <div className="retro-brief-selector">
+        <label className="retro-brief-selector-label">Brief</label>
+        <select
+          className="retro-brief-select"
+          value={effectiveDate ?? ''}
+          onChange={e => { setSelectedDate(e.target.value); setExpanded(new Set()); }}
+        >
+          {briefDates.map(d => (
+            <option key={d} value={d}>
+              {fmtDate(d)}{d === briefDates[0] ? ' — latest' : ''}
+            </option>
+          ))}
+        </select>
+        <span className="retro-brief-selector-count">{trades.length} pick{trades.length !== 1 ? 's' : ''}</span>
+      </div>
+
+      <div className="retro-date-group">
+        <table className="retro-table retro-open-table">
             <thead>
               <tr>
                 <th></th>
@@ -338,7 +357,6 @@ function InProgressTab({
             </tbody>
           </table>
         </div>
-      ))}
     </div>
   );
 }
