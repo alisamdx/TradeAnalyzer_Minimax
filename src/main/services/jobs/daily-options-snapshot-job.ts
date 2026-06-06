@@ -31,9 +31,26 @@ function isAuthError(e: unknown): boolean {
   return msg.includes('401') || msg.includes('token') || msg.includes('auth') || msg.includes('oauth');
 }
 
-const MAX_TICKERS      = 300;    // cap to keep runtime ≤ ~10 min
-const ETRADE_DELAY     = 1_100;  // ms between chain calls (rate limit)
+const MAX_TICKERS        = 300;    // cap to keep runtime ≤ ~10 min
+const DEFAULT_DELAY_MS   = 1_100;  // safe default — stays under E*Trade rate limit
+const MIN_DELAY_MS       =   200;  // hard floor
+const MAX_DELAY_MS       = 2_000;  // hard ceiling
 const PER_TICKER_TIMEOUT = 30_000; // ms — guards against hung HTTP (e.g. expired E*Trade token)
+
+/** Read callDelayMs from this job's config_json row, clamped to [200, 2000]. */
+function readCallDelay(db: import('better-sqlite3').Database): number {
+  type Row = { config_json: string | null };
+  const row = db.prepare(`SELECT config_json FROM batch_jobs WHERE id = 'daily-options-snapshot'`).get() as Row | undefined;
+  if (!row?.config_json) return DEFAULT_DELAY_MS;
+  try {
+    const cfg = JSON.parse(row.config_json) as Record<string, unknown>;
+    const v = cfg['callDelayMs'];
+    if (typeof v === 'number' && Number.isFinite(v)) {
+      return Math.max(MIN_DELAY_MS, Math.min(MAX_DELAY_MS, Math.round(v)));
+    }
+  } catch { /* ignore */ }
+  return DEFAULT_DELAY_MS;
+}
 
 function withTimeout<T>(promise: Promise<T>, ms: number, ticker: string): Promise<T> {
   return Promise.race([
@@ -110,7 +127,9 @@ export class DailyOptionsSnapshotJob implements BatchJobHandler {
       };
     }
 
-    emit(`Running Wheel analysis on ${candidates.length} tickers…`, 0, candidates.length);
+    const callDelayMs = readCallDelay(this.db);
+    const estMins = Math.round((candidates.length * callDelayMs) / 60_000);
+    emit(`Running Wheel analysis on ${candidates.length} tickers (${callDelayMs}ms delay, ~${estMins}min)…`, 0, candidates.length);
 
     // ── Wheel analysis loop ───────────────────────────────────────────────────
     const results: WheelResult[] = [];
@@ -144,9 +163,9 @@ export class DailyOptionsSnapshotJob implements BatchJobHandler {
         console.warn(`[options-snapshot] ${ticker} failed:`, msg);
       }
 
-      // Rate-limit E*Trade calls — ~1.1 s gap between tickers
+      // Rate-limit E*Trade calls — configurable delay (default 1100ms)
       if (i < candidates.length - 1 && !signal.aborted) {
-        await new Promise(r => setTimeout(r, ETRADE_DELAY));
+        await new Promise(r => setTimeout(r, callDelayMs));
       }
     }
 

@@ -82,8 +82,8 @@ function EditModal({ job, onSave, onClose }: EditModalProps) {
   const [scheduleTime, setScheduleTime] = useState(job.dailyScheduleTime);
   const [sequenceOrder, setSequenceOrder] = useState(String(job.sequenceOrder));
 
-  // IV Update-specific: configurable call delay
-  const isIvUpdate = job.id === 'daily-iv-update';
+  // E*Trade delay — applies to IV Update and Options Snapshot
+  const hasDelayConfig = job.id === 'daily-iv-update' || job.id === 'daily-options-snapshot';
   const currentDelay = typeof job.config?.['callDelayMs'] === 'number'
     ? job.config['callDelayMs'] as number
     : 1100;
@@ -98,7 +98,7 @@ function EditModal({ job, onSave, onClose }: EditModalProps) {
       dailyScheduleTime: scheduleTime,
       sequenceOrder: Math.max(1, parseInt(sequenceOrder, 10) || 1),
     };
-    if (isIvUpdate) {
+    if (hasDelayConfig) {
       const delay = Math.max(200, Math.min(2000, parseInt(callDelayMs, 10) || 1100));
       patch.config = { callDelayMs: delay };
     }
@@ -161,7 +161,7 @@ function EditModal({ job, onSave, onClose }: EditModalProps) {
               style={{ width: 80 }}
             />
           </div>
-          {isIvUpdate && (
+          {hasDelayConfig && (
             <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid #2d3748' }}>
               <div style={{ color: '#89b4fa', fontWeight: 600, fontSize: 13, marginBottom: 10 }}>
                 E*Trade Rate Limit
@@ -181,7 +181,8 @@ function EditModal({ job, onSave, onClose }: EditModalProps) {
                 />
               </div>
               <div style={{ fontSize: 11, color: '#f39c12', marginTop: 6 }}>
-                Est. run time: ~{Math.round((1068 * (parseInt(callDelayMs, 10) || 1100)) / 60_000)} min at {callDelayMs}ms
+                {job.id === 'daily-iv-update' && <>Est. run time: ~{Math.round((1068 * (parseInt(callDelayMs, 10) || 1100)) / 60_000)} min at {callDelayMs}ms</>}
+                {job.id === 'daily-options-snapshot' && <>Est. run time: ~{Math.round((300 * (parseInt(callDelayMs, 10) || 1100)) / 60_000)} min at {callDelayMs}ms</>}
               </div>
             </div>
           )}
