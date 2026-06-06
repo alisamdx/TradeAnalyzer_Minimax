@@ -180,6 +180,103 @@ function computePayoffMetrics(legs: PayoffLeg[], spot: number): PayoffMetrics {
   };
 }
 
+// ─── Lizard hedge leg selection ───────────────────────────────────────────────
+// For Jade/Big/Reverse lizard strategies, the buy (hedge) leg must be at the
+// furthest available strike where: shortCredit ≥ spreadWidth (no upside/downside risk).
+
+const LIZARD_HEDGE_SLUGS = new Set([
+  'jade-lizard', 'big-lizard', 'reverse-jade-lizard', 'reverse-big-lizard',
+]);
+
+function findLizardHedgePayoff(
+  contracts: OptionContract[],
+  side: 'call' | 'put',
+  sellStrike: number,
+  shortCreditPerShare: number,
+): OptionContract | null {
+  const candidates = contracts
+    .filter(c => side === 'call' ? c.strike > sellStrike : c.strike < sellStrike)
+    .sort((a, b) => side === 'call' ? a.strike - b.strike : b.strike - a.strike);
+
+  if (!candidates.length) return null;
+
+  let bestValid: OptionContract | null = null;
+  for (const c of candidates) {
+    const spreadWidth = side === 'call' ? c.strike - sellStrike : sellStrike - c.strike;
+    const mid         = (c.bid + c.ask) / 2;
+    if (shortCreditPerShare - mid >= spreadWidth) {
+      bestValid = c;
+    } else {
+      break; // monotonically harder beyond this point
+    }
+  }
+  return bestValid ?? candidates[0] ?? null;
+}
+
+// Fills a set of template legs from a loaded options chain.
+// For lizard strategies the hedge leg uses smart strike selection;
+// all other legs use nearest-to-template-strike matching.
+function fillLegsFromChain(
+  slug:         string,
+  templateLegs: PayoffLeg[],
+  getChain:     (templateExpiry: string) => OptionsChainViewData | undefined,
+  getRealExpiry:(templateExpiry: string) => string | undefined,
+): PayoffLeg[] {
+  const isLizard = LIZARD_HEDGE_SLUGS.has(slug);
+  const result:   PayoffLeg[] = [];
+
+  for (const leg of templateLegs) {
+    if (leg.type === 'stock') { result.push(leg); continue; }
+
+    const realExpiry = getRealExpiry(leg.expiry);
+    const chain      = getChain(leg.expiry);
+    if (!realExpiry || !chain) { result.push(leg); continue; }
+
+    const contracts = chain.contracts.filter(c => c.side === leg.type);
+    if (!contracts.length) { result.push(leg); continue; }
+
+    let nearest: OptionContract | null = null;
+
+    if (isLizard && leg.side === 'buy') {
+      // Compute short credit from legs already filled in this pass
+      const shortCredit = result
+        .filter(l => l.type !== 'stock' && l.side === 'sell')
+        .reduce((s, l) => s + l.premium, 0);
+      const sellLeg = result.find(l => l.type === leg.type && l.side === 'sell');
+      if (sellLeg) {
+        nearest = findLizardHedgePayoff(contracts, leg.type, sellLeg.strike, shortCredit);
+      }
+    }
+
+    // Fallback: nearest strike to template target
+    if (!nearest) {
+      nearest = contracts.reduce<OptionContract | null>((best, c) =>
+        best === null ? c : Math.abs(c.strike - leg.strike) < Math.abs(best.strike - leg.strike) ? c : best,
+      null);
+    }
+
+    if (!nearest) { result.push(leg); continue; }
+
+    const mid     = Math.max(0, parseFloat(((nearest.bid + nearest.ask) / 2).toFixed(2)));
+    const sideStr = leg.side === 'buy' ? 'Buy' : 'Sell';
+    const typeStr = leg.type.charAt(0).toUpperCase() + leg.type.slice(1);
+    const qtyStr  = leg.quantity > 1 ? ` ${leg.quantity}` : '';
+    result.push({
+      ...leg,
+      strike:  nearest.strike,
+      expiry:  realExpiry,
+      premium: mid,
+      delta:   nearest.delta ?? leg.delta,
+      theta:   nearest.theta ?? null,
+      vega:    nearest.vega  ?? null,
+      iv:      nearest.iv    ?? null,
+      label:   `${sideStr}${qtyStr} ${typeStr} $${nearest.strike}`,
+    });
+  }
+
+  return result;
+}
+
 // ─── Strategy templates (all 31 Strategy Lab strategies) ─────────────────────
 
 interface StrategyTemplate {
@@ -1772,39 +1869,13 @@ export function PayoffView({ initialTicker, initialSpot, initialExpiry, initialS
         setShowChain(true);
       }
 
-      // 4. Fill each leg with nearest real contract and live mid-price
-      const filledLegs = targetLegs.map(leg => {
-        if (leg.type === 'stock') return leg;
-        const realExpiry = expiryMap.get(leg.expiry);
-        if (!realExpiry) return leg;
-        const chain = chainCache.get(realExpiry);
-        if (!chain) return leg;
-
-        const contracts = chain.contracts.filter(c => c.side === leg.type);
-        if (contracts.length === 0) return leg;
-
-        const nearest = contracts.reduce<OptionContract | null>((best, c) =>
-          best === null ? c : Math.abs(c.strike - leg.strike) < Math.abs(best.strike - leg.strike) ? c : best,
-        null);
-        if (!nearest) return leg;
-
-        const mid     = Math.max(0, parseFloat(((nearest.bid + nearest.ask) / 2).toFixed(2)));
-        const sideStr = leg.side === 'buy' ? 'Buy' : 'Sell';
-        const typeStr = leg.type.charAt(0).toUpperCase() + leg.type.slice(1);
-        const qtyStr  = leg.quantity > 1 ? ` ${leg.quantity}` : '';
-
-        return {
-          ...leg,
-          strike:  nearest.strike,
-          expiry:  realExpiry,
-          premium: mid,
-          delta:   nearest.delta ?? leg.delta,
-          theta:   nearest.theta ?? null,
-          vega:    nearest.vega  ?? null,
-          iv:      nearest.iv    ?? null,
-          label:   `${sideStr}${qtyStr} ${typeStr} $${nearest.strike}`,
-        };
-      });
+      // 4. Fill each leg — lizard hedge uses smart strike selection (credit ≥ spread width)
+      const filledLegs = fillLegsFromChain(
+        slug,
+        targetLegs,
+        (templateExpiry) => { const re = expiryMap.get(templateExpiry); return re ? chainCache.get(re) : undefined; },
+        (templateExpiry) => expiryMap.get(templateExpiry),
+      );
 
       setLegs(filledLegs);
     } catch (e) {
@@ -1838,30 +1909,12 @@ export function PayoffView({ initialTicker, initialSpot, initialExpiry, initialS
       }
       if (chain.currentPrice) setSpotStr(chain.currentPrice.toFixed(2));
 
-      const filledLegs: PayoffLeg[] = targetLegs.map(leg => {
-        if (leg.type === 'stock') return leg;
-        const contracts = chain.contracts.filter(c => c.side === leg.type);
-        if (!contracts.length) return leg;
-        const nearest = contracts.reduce<OptionContract | null>((best, c) =>
-          best === null ? c : Math.abs(c.strike - leg.strike) < Math.abs(best.strike - leg.strike) ? c : best,
-        null);
-        if (!nearest) return leg;
-        const mid     = Math.max(0, parseFloat(((nearest.bid + nearest.ask) / 2).toFixed(2)));
-        const sideStr = leg.side === 'buy' ? 'Buy' : 'Sell';
-        const typeStr = leg.type.charAt(0).toUpperCase() + leg.type.slice(1);
-        const qtyStr  = leg.quantity > 1 ? ` ${leg.quantity}` : '';
-        return {
-          ...leg,
-          strike:  nearest.strike,
-          expiry:  targetExpiry,
-          premium: mid,
-          delta:   nearest.delta ?? leg.delta,
-          theta:   nearest.theta ?? null,
-          vega:    nearest.vega  ?? null,
-          iv:      nearest.iv    ?? null,
-          label:   `${sideStr}${qtyStr} ${typeStr} $${nearest.strike}`,
-        };
-      });
+      const filledLegs = fillLegsFromChain(
+        slug,
+        targetLegs,
+        () => chain,         // all legs share the same chain
+        () => targetExpiry,  // all legs share the same expiry
+      );
       setLegs(filledLegs);
       setStatus(`Strategy reloaded for ${targetExpiry}`);
     } catch (e) {

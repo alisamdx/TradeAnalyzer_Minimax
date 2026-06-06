@@ -252,6 +252,44 @@ function computeIvRank(db: Database, ticker: string, currentIv: number): {
   return { ivRank: Math.max(0, Math.min(100, ivRank)), ivPercentile: ivPct, dataPoints: rows.length };
 }
 
+// Strategies where the buy (hedge) leg must satisfy: credit ≥ spread width
+// This guarantees no upside (for call hedges) or downside (for put hedges) risk.
+const LIZARD_HEDGE_SLUGS = new Set([
+  'jade-lizard', 'big-lizard', 'reverse-jade-lizard', 'reverse-big-lizard',
+]);
+
+// For lizard-family strategies: scan available contracts from nearest OTM outward
+// and return the furthest strike where shortCreditPerShare ≥ spread width.
+// Falls back to nearest OTM when no valid strike exists (rule simply can't be met).
+// see Requirements/ai-critic.md §4.1 and docs/formulas.md#lizard-hedge
+function findLizardHedge(
+  contracts: OptionContract[],
+  side: 'call' | 'put',
+  sellStrike: number,
+  shortCreditPerShare: number,
+): OptionContract | null {
+  // Filter to OTM side only and sort nearest-first
+  const candidates = contracts
+    .filter(c => c.side === side && c.bid >= 0 &&
+      (side === 'call' ? c.strike > sellStrike : c.strike < sellStrike))
+    .sort((a, b) => side === 'call' ? a.strike - b.strike : b.strike - a.strike);
+
+  if (!candidates.length) return null;
+
+  let bestValid: OptionContract | null = null;
+  for (const c of candidates) {
+    const spreadWidth = side === 'call' ? c.strike - sellStrike : sellStrike - c.strike;
+    const netCredit   = shortCreditPerShare - (c.bid + c.ask) / 2;
+    if (netCredit >= spreadWidth) {
+      bestValid = c; // rule passes — keep scanning for wider coverage
+    } else {
+      break;         // monotonically harder as spread widens — stop here
+    }
+  }
+
+  return bestValid ?? candidates[0] ?? null; // fallback: nearest OTM
+}
+
 function findByDelta(
   contracts: OptionContract[], side: 'call' | 'put', targetDelta: number,
   underlyingPx?: number
@@ -309,7 +347,22 @@ function buildSetup(
   // Build legs
   const builtLegs: SetupLeg[] = [];
   for (const legDef of profile.legs) {
-    const contract = findByDelta(chain.contracts, legDef.side, legDef.deltaTarget, underlyingPx);
+    let contract: OptionContract | null;
+
+    if (legDef.action === 'buy' && LIZARD_HEDGE_SLUGS.has(profile.slug)) {
+      // Lizard hedge: select the furthest OTM strike where credit ≥ spread width
+      // so the structure carries no upside (call) or downside (put) risk.
+      const shortCreditPerShare = builtLegs
+        .filter(l => l.action === 'sell')
+        .reduce((sum, l) => sum + l.mid * l.qty, 0);
+      const sellLeg = builtLegs.find(l => l.side === legDef.side && l.action === 'sell');
+      contract = sellLeg
+        ? findLizardHedge(chain.contracts, legDef.side, sellLeg.strike, shortCreditPerShare)
+        : findByDelta(chain.contracts, legDef.side, legDef.deltaTarget, underlyingPx);
+    } else {
+      contract = findByDelta(chain.contracts, legDef.side, legDef.deltaTarget, underlyingPx);
+    }
+
     if (!contract) {
       return { ...base, legs: [], netCredit: null, netDebit: null, maxProfit: null, maxLoss: null,
         breakevens: [], annualizedReturn: null, popEstimate: null,
