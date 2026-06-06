@@ -555,7 +555,7 @@ const ALL_TEMPLATES: StrategyTemplate[] = [
 
 // ─── InfoTip tooltip (portal-based — renders at document.body to avoid clipping) ──
 
-interface TooltipState { top: number; left: number }
+interface TooltipState { top: number; bottom: number; left: number }
 
 function InfoTip({ text }: { text: string }) {
   const [pos, setPos] = useState<TooltipState | null>(null);
@@ -564,10 +564,13 @@ function InfoTip({ text }: { text: string }) {
   const open = () => {
     if (!btnRef.current) return;
     const r = btnRef.current.getBoundingClientRect();
-    setPos({ top: r.top, left: r.left + r.width / 2 });
+    setPos({ top: r.top, bottom: r.bottom, left: r.left + r.width / 2 });
   };
 
   const close = () => setPos(null);
+
+  // Show below when trigger is in the upper half of the viewport (avoids hiding under title bar)
+  const showBelow = pos ? pos.top < window.innerHeight / 2 : false;
 
   return (
     <span style={{ display: 'inline-flex', verticalAlign: 'middle' }}>
@@ -586,7 +589,9 @@ function InfoTip({ text }: { text: string }) {
       {pos && createPortal(
         <div style={{
           position: 'fixed',
-          bottom: `calc(100vh - ${pos.top}px + 6px)`,
+          ...(showBelow
+            ? { top: pos.bottom + 6 }
+            : { bottom: `calc(100vh - ${pos.top}px + 6px)` }),
           left: pos.left,
           transform: 'translateX(-50%)',
           zIndex: 99999,

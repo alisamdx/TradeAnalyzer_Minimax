@@ -2,6 +2,10 @@
 
 Reverse-chronological. Per spec EP-2.3, this is the index; per-version detail lives in `changelogs/`.
 
+## v0.27.0 — 2026-06-06
+
+Payoff: InfoTip tooltip now flips to show below the trigger when the element is in the upper half of the viewport. Fixes the metrics bar tooltips being hidden under the title bar after the bar was moved to the top.
+
 ## v0.26.9 — 2026-06-06
 
 Payoff layout: Max Profit, Max Loss, Breakeven, Net Credit/Debit, Δ, Θ, V now fit in a single compact horizontal bar above the chart. Chart height reduced (SVG 160→120, tighter padding). Options chain drawer reduced from 70vh to 45vh so chart remains visible below it.

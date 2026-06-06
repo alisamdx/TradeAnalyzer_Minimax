@@ -174,6 +174,8 @@ Authoritative DDL is in `migrations/001_init.sql` + `002_screen_schema.sql`. Pha
 
 ## Recent Changes
 
+- **v0.27.0 (2026-06-06)** — Payoff InfoTip: tooltip flips below trigger when element is in top half of viewport; fixes metrics bar tooltips hidden under title bar.
+
 - **v0.26.9 (2026-06-06)** — Payoff layout: metrics + Greeks in single compact bar above chart; chart SVG 120px; chain drawer 45vh.
 
 - **v0.26.8 (2026-06-06)** — Payoff chart: hover tooltip showing exact price + P&L with crosshair, dot on curve, and auto-flipping tooltip box.
