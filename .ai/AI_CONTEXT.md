@@ -172,6 +172,8 @@ Authoritative DDL is in `migrations/001_init.sql` + `002_screen_schema.sql`. Pha
 
 ## Recent Changes
 
+- **v0.24.5 (2026-06-05)** — PERF-1: IV Update call delay now configurable per-job (200–2000ms, default 1100ms). Edit Job modal shows delay input + live run-time estimate for daily-iv-update. Migration 028 adds `config_json` to `batch_jobs`. `BatchJob.config` field added to shared types.
+
 - **v0.24.4 (2026-06-05)** — Daily Brief and Options Snapshot now score the full S&P 500 + Russell 1000 + ETF universe directly from `constituents` table instead of reading from `screen_results`. Scoring engine handles quality ranking per strategy — removes Bearish blind spot (strict screener was excluding weak stocks needed for bearish picks). Daily Screener job still runs for the Screener UI only.
 
 - **v0.24.3 (2026-06-05)** — New Daily Screener batch job (PERF-7): runs after Market Sync (sequence pos 3), two passes — stocks (S&P 500 + Russell 1000, strict, default preset) and ETFs (soft, price ≥ $1). Each pass saves its own `screen_runs` row for the Screener UI.

@@ -1448,6 +1448,8 @@ export interface BatchJob {
   lastRunStatus: 'running' | 'success' | 'failed' | 'skipped' | null;
   lastSuccessDate: string | null;
   sequenceOrder: number;
+  /** Free-form per-job config. For daily-iv-update: { callDelayMs: number }. */
+  config: Record<string, unknown>;
 }
 
 export interface BatchRun {

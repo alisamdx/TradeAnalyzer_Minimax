@@ -82,15 +82,27 @@ function EditModal({ job, onSave, onClose }: EditModalProps) {
   const [scheduleTime, setScheduleTime] = useState(job.dailyScheduleTime);
   const [sequenceOrder, setSequenceOrder] = useState(String(job.sequenceOrder));
 
+  // IV Update-specific: configurable call delay
+  const isIvUpdate = job.id === 'daily-iv-update';
+  const currentDelay = typeof job.config?.['callDelayMs'] === 'number'
+    ? job.config['callDelayMs'] as number
+    : 1100;
+  const [callDelayMs, setCallDelayMs] = useState(String(currentDelay));
+
   const handleSave = () => {
-    onSave({
+    const patch: Partial<BatchJob> = {
       enabled,
       runOnStartup,
       startupDelaySeconds: Math.max(0, parseInt(startupDelay, 10) || 0),
       dailyScheduleEnabled: scheduleEnabled,
       dailyScheduleTime: scheduleTime,
       sequenceOrder: Math.max(1, parseInt(sequenceOrder, 10) || 1),
-    });
+    };
+    if (isIvUpdate) {
+      const delay = Math.max(200, Math.min(2000, parseInt(callDelayMs, 10) || 1100));
+      patch.config = { callDelayMs: delay };
+    }
+    onSave(patch);
     onClose();
   };
 
@@ -149,6 +161,30 @@ function EditModal({ job, onSave, onClose }: EditModalProps) {
               style={{ width: 80 }}
             />
           </div>
+          {isIvUpdate && (
+            <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid #2d3748' }}>
+              <div style={{ color: '#89b4fa', fontWeight: 600, fontSize: 13, marginBottom: 10 }}>
+                E*Trade Rate Limit
+              </div>
+              <div className="settings-row">
+                <label style={{ flex: 1 }}>
+                  Call delay (ms)
+                  <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>
+                    200–2000ms · default 1100 · lower = faster but risks 429s
+                  </div>
+                </label>
+                <input
+                  type="number" min={200} max={2000} step={50}
+                  value={callDelayMs}
+                  onChange={e => setCallDelayMs(e.target.value)}
+                  style={{ width: 80 }}
+                />
+              </div>
+              <div style={{ fontSize: 11, color: '#f39c12', marginTop: 6 }}>
+                Est. run time: ~{Math.round((1068 * (parseInt(callDelayMs, 10) || 1100)) / 60_000)} min at {callDelayMs}ms
+              </div>
+            </div>
+          )}
         </div>
 
         <div style={{ display: 'flex', gap: 10, marginTop: 20, justifyContent: 'flex-end' }}>

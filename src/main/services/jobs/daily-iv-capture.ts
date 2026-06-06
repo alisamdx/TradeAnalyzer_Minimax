@@ -11,9 +11,27 @@ import type { ConstituentsService } from '../constituents-service.js';
 import type { BatchJobHandler, BatchJobResult } from '../batch-service.js';
 import type { BatchProgressEvent } from '@shared/types.js';
 
-/** 1100ms sleep between E*Trade calls — stays under rate limits. */
+const DEFAULT_CALL_DELAY_MS = 1_100; // safe default — stays under E*Trade rate limit
+const MIN_CALL_DELAY_MS     =   200; // hard floor — never go below 200ms
+const MAX_CALL_DELAY_MS     = 2_000; // hard ceiling
+
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/** Read callDelayMs from the job's config_json row, clamped to [200, 2000]. */
+function readCallDelay(db: import('../../db/connection.js').DbHandle): number {
+  type Row = { config_json: string | null };
+  const row = db.prepare(`SELECT config_json FROM batch_jobs WHERE id = 'daily-iv-update'`).get() as Row | undefined;
+  if (!row?.config_json) return DEFAULT_CALL_DELAY_MS;
+  try {
+    const cfg = JSON.parse(row.config_json) as Record<string, unknown>;
+    const v = cfg['callDelayMs'];
+    if (typeof v === 'number' && Number.isFinite(v)) {
+      return Math.max(MIN_CALL_DELAY_MS, Math.min(MAX_CALL_DELAY_MS, Math.round(v)));
+    }
+  } catch { /* ignore */ }
+  return DEFAULT_CALL_DELAY_MS;
 }
 
 export class DailyIvCaptureJob implements BatchJobHandler {
@@ -88,6 +106,7 @@ export class DailyIvCaptureJob implements BatchJobHandler {
     }
 
     // 4. Gather all unique tickers across universes
+    const callDelayMs = readCallDelay(this.db);
     const sp500 = this.constituentsService.getConstituents('sp500').map(r => r.ticker.toUpperCase());
     const russell = this.constituentsService.getConstituents('russell1000').map(r => r.ticker.toUpperCase());
     const etf = this.constituentsService.getConstituents('etf').map(r => r.ticker.toUpperCase());
@@ -98,6 +117,8 @@ export class DailyIvCaptureJob implements BatchJobHandler {
     //    safely overwrites today's row with the latest ATM IV value.
     const missing = allTickers;
     const total = missing.length;
+    const estMins = Math.round((total * callDelayMs) / 60_000);
+    console.log(`[daily-iv-update] callDelayMs=${callDelayMs} total=${total} est=${estMins}min`);
 
     let attempted = 0;
     let updated = 0;
@@ -154,7 +175,7 @@ export class DailyIvCaptureJob implements BatchJobHandler {
             total,
             message: 'No expirations available',
           });
-          await sleep(1100);
+          await sleep(callDelayMs);
           continue;
         }
 
@@ -238,7 +259,7 @@ export class DailyIvCaptureJob implements BatchJobHandler {
       }
 
       // 4g. Rate limit
-      if (!signal.aborted) await sleep(1100);
+      if (!signal.aborted) await sleep(callDelayMs);
     }
 
     const finalStatus = signal.aborted ? 'failed' : 'success';

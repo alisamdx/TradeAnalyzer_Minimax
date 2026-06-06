@@ -49,6 +49,7 @@ interface BatchJobRow {
   last_run_status: string | null;
   last_success_date: string | null;
   sequence_order: number;
+  config_json: string | null;
 }
 
 interface BatchRunRow {
@@ -368,7 +369,7 @@ export class BatchService {
 
   updateJobConfig(
     jobId: string,
-    patch: Partial<Pick<BatchJob, 'enabled' | 'runOnStartup' | 'startupDelaySeconds' | 'dailyScheduleEnabled' | 'dailyScheduleTime' | 'sequenceOrder'>>
+    patch: Partial<Pick<BatchJob, 'enabled' | 'runOnStartup' | 'startupDelaySeconds' | 'dailyScheduleEnabled' | 'dailyScheduleTime' | 'sequenceOrder' | 'config'>>
   ): void {
     if (patch.enabled !== undefined) {
       this.db.prepare(`UPDATE batch_jobs SET enabled = ? WHERE id = ?`).run(patch.enabled ? 1 : 0, jobId);
@@ -387,6 +388,13 @@ export class BatchService {
     }
     if (patch.sequenceOrder !== undefined) {
       this.db.prepare(`UPDATE batch_jobs SET sequence_order = ? WHERE id = ?`).run(patch.sequenceOrder, jobId);
+    }
+    if (patch.config !== undefined) {
+      // Merge into existing config so unrelated keys are preserved.
+      const existing = this._getJobRow(jobId);
+      const current = existing?.config_json ? (JSON.parse(existing.config_json) as Record<string, unknown>) : {};
+      const merged = { ...current, ...patch.config };
+      this.db.prepare(`UPDATE batch_jobs SET config_json = ? WHERE id = ?`).run(JSON.stringify(merged), jobId);
     }
   }
 
@@ -424,6 +432,7 @@ export class BatchService {
       lastRunStatus: (status === 'running' || status === 'success' || status === 'failed' || status === 'skipped') ? status : null,
       lastSuccessDate: row.last_success_date,
       sequenceOrder: row.sequence_order,
+      config: row.config_json ? (JSON.parse(row.config_json) as Record<string, unknown>) : {},
     };
   }
 
