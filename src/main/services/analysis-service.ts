@@ -356,17 +356,39 @@ export class AnalysisService {
     this.cancelled = false;
   }
 
-  /** Analyze a single ticker with a given mode. */
-  async analyzeTicker(ticker: string, mode: AnalysisMode): Promise<AnalysisResult> {
-    await this.rateLimiter.acquire(1);
+  /** Analyze a single ticker with a given mode.
+   *
+   * @param opts.forceCache — skip all Polygon API calls and read quote,
+   *   fundamentals, and price bars directly from the local DB/cache.
+   *   Use this in batch jobs that run after Market Sync so the data is
+   *   already warm — avoids 3 extra Polygon calls + rate-limiter waits
+   *   per ticker (saves ~1.4 s/ticker in DailyOptionsSnapshotJob).
+   */
+  async analyzeTicker(
+    ticker: string,
+    mode: AnalysisMode,
+    opts?: { forceCache?: boolean }
+  ): Promise<AnalysisResult> {
+    const forceCache = opts?.forceCache ?? false;
 
-    const quoteRaw = await this.fetchQuote(ticker);
+    if (!forceCache) await this.rateLimiter.acquire(1);
+
+    const quoteRaw = forceCache
+      ? this.fetchQuoteCached(ticker)
+      : await this.fetchQuote(ticker);
+
     // Polygon snapshot ivRank is always null — override from iv_history when available
     // see docs/formulas.md#iv-rank
     const ivRankHistory = this.lookupIvRankFromHistory(ticker);
     const quote = ivRankHistory !== null ? { ...quoteRaw, ivRank: ivRankHistory } : quoteRaw;
-    const fundamentals = await this.fetchFundamentals(ticker);
-    const bars = await this.dataProvider.getHistoricalBars(ticker, 'day', 378); // ~252 trading days ≈ 378 calendar days
+
+    const fundamentals = forceCache
+      ? this.fetchFundamentalsCached(ticker)
+      : await this.fetchFundamentals(ticker);
+
+    const bars = forceCache
+      ? this.getBarsFromDb(ticker, 378)
+      : await this.dataProvider.getHistoricalBars(ticker, 'day', 378); // ~252 trading days ≈ 378 calendar days
     const latestBars = bars.slice(-200); // last ~200 trading days
 
     switch (mode) {
@@ -594,6 +616,70 @@ export class AnalysisService {
     const ratios = await this.dataProvider.getFundamentals(ticker);
     try { this.fundamentalsCache.upsert(ticker, ratios); } catch { /* best effort */ }
     return ratios;
+  }
+
+  /** Quote from cache regardless of TTL — used by forceCache path. */
+  private fetchQuoteCached(ticker: string) {
+    try {
+      const cached = this.quoteCache.get(ticker);
+      if (cached) return cached;
+    } catch { /* fall through */ }
+    // Return a minimal null-filled quote so downstream analysis still runs.
+    return {
+      ticker, last: null, prevClose: null, bid: null, ask: null,
+      volume: null, dayHigh: null, dayLow: null,
+      ivRank: null, ivPercentile: null, currentIv: null,
+      fetchedAt: new Date().toISOString(),
+    };
+  }
+
+  /** Fundamentals from cache regardless of TTL — used by forceCache path.
+   *  Returns a null-filled DerivedRatios (never null itself) so mode functions
+   *  always receive the expected shape even when fundamentals aren't cached.
+   */
+  private fetchFundamentalsCached(ticker: string): import('@shared/types.js').DerivedRatios {
+    try {
+      const cached = this.fundamentalsCache.get(ticker);
+      if (cached) return cached.ratios;
+    } catch { /* fall through */ }
+    return {
+      peRatio: null, eps: null, marketCap: null, debtToEquity: null, roe: null,
+      profitMargin: null, revenueGrowth: null, epsGrowth: null, freeCashFlow: null,
+      currentRatio: null, dividendYield: null, beta: null,
+      fcfToNetIncome: null, roic: null, netDebtToEbitda: null,
+      revenueGrowth5Y: null, epsGrowth5Y: null,
+      valueScore: null, growthScore: null, stockGrade: null,
+      sector: null, industry: null, companyName: null,
+    };
+  }
+
+  /** Read historical price bars from the local DB (historical_prices table).
+   *  Used by forceCache path — avoids a Polygon API call when bars are
+   *  already populated by Market Sync / Price Gap Fill.
+   *  Returns bars in the same shape as DataProvider.getHistoricalBars().
+   */
+  private getBarsFromDb(
+    ticker: string,
+    calendarDaysLookback: number
+  ): Array<{ t: number; o: number; h: number; l: number; c: number; v: number }> {
+    type Row = { date: string; open: number; high: number; low: number; close: number; volume: number };
+    const cutoff = new Date(Date.now() - calendarDaysLookback * 86_400_000)
+      .toISOString().slice(0, 10);
+    const rows = this.db.prepare(`
+      SELECT date, open, high, low, close, volume
+      FROM historical_prices
+      WHERE ticker = ? AND date >= ?
+      ORDER BY date ASC
+    `).all(ticker, cutoff) as Row[];
+
+    return rows.map(r => ({
+      t: new Date(r.date + 'T00:00:00Z').getTime(),
+      o: r.open,
+      h: r.high,
+      l: r.low,
+      c: r.close,
+      v: r.volume,
+    }));
   }
 
   /** Compute IVR from the iv_history table (252-day rolling window).

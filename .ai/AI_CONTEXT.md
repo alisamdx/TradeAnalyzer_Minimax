@@ -172,6 +172,8 @@ Authoritative DDL is in `migrations/001_init.sql` + `002_screen_schema.sql`. Pha
 
 ## Recent Changes
 
+- **v0.24.8 (2026-06-05)** — Options Snapshot: `analyzeTicker` now accepts `forceCache: true` — reads quote/fundamentals/bars from local DB, skips 3 Polygon API calls + rate-limiter per ticker. Expected ~0.4s/ticker vs ~2s/ticker (~4 min for 300 tickers vs ~10 min).
+
 - **v0.24.6 (2026-06-05)** — PERF-8: Fixed Options Snapshot candidate sort order regression. loadTopCandidates now sorts by most recent atm_iv DESC → buy_signal_score DESC → alphabetical, so the 300-ticker cap covers highest-IV (most premium-rich) candidates first, not first 300 alphabetically.
 
 - **v0.24.5 (2026-06-05)** — PERF-1: IV Update call delay now configurable per-job (200–2000ms, default 1100ms). Edit Job modal shows delay input + live run-time estimate for daily-iv-update. Migration 028 adds `config_json` to `batch_jobs`. `BatchJob.config` field added to shared types.

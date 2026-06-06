@@ -150,7 +150,10 @@ export class DailyOptionsSnapshotJob implements BatchJobHandler {
 
       try {
         const result = await withTimeout(
-          this.analysisService.analyzeTicker(ticker, 'wheel') as Promise<AnalysisResult>,
+          // forceCache=true: reads quote/fundamentals/bars from local DB rather
+          // than making 3 extra Polygon API calls per ticker. Market Sync runs
+          // earlier in the batch sequence so the caches are already warm.
+          this.analysisService.analyzeTicker(ticker, 'wheel', { forceCache: true }) as Promise<AnalysisResult>,
           PER_TICKER_TIMEOUT,
           ticker,
         );
