@@ -223,9 +223,16 @@ function SummaryTab({
           <div className="retro-section-title">
             Next-Day Accuracy
             <span className="retro-snapshot-subtitle">
-              first trading-day close after brief · {snapAccuracy.totalSnapshots} snapshot{snapAccuracy.totalSnapshots !== 1 ? 's' : ''}
+              {snapAccuracy.totalSnapshots} snapshot{snapAccuracy.totalSnapshots !== 1 ? 's' : ''}
             </span>
           </div>
+          <p className="retro-snapshot-desc">
+            Measures whether each pick moved in the right direction by the <strong>first trading-day close after the brief</strong>.
+            Uses the same verdict thresholds as the live view (Positive / Negative / Neutral) so results are strategy-aware —
+            e.g. Bearish picks are Positive when the stock drops.
+            Unlike the Win Rate above (which only counts closed/expired options), this updates within one trading day
+            and lets you spot scoring-engine improvements quickly.
+          </p>
 
           {/* By strategy */}
           {snapAccuracy.byStrategy.length > 0 && (
@@ -267,6 +274,11 @@ function SummaryTab({
           {snapAccuracy.byBriefDate.length > 0 && (
             <>
               <div className="retro-section-title retro-section-title-sm">Brief Accuracy Trend</div>
+              <p className="retro-snapshot-desc retro-snapshot-desc-sm">
+                Each row is one brief. A brief only appears once its picks have at least one trading-day close in the price history —
+                so the most recent brief is often absent until the next day's prices load.
+                Use this to see whether accuracy is improving as you tune signal weights.
+              </p>
               <table className="retro-table retro-snapshot-table">
                 <thead>
                   <tr>

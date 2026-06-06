@@ -4154,6 +4154,15 @@ input[type='checkbox'] {
 }
 .retro-snapshot-table { margin-bottom: 4px; }
 .retro-snapshot-empty p { color: var(--text-muted); font-size: 13px; margin: 4px 0 0; }
+.retro-snapshot-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.55;
+  margin: 0 0 6px;
+  max-width: 720px;
+}
+.retro-snapshot-desc strong { color: var(--text); font-weight: 600; }
+.retro-snapshot-desc-sm { font-size: 11px; margin-bottom: 4px; }
 .retro-col-note { font-size: 10px; font-weight: 400; color: var(--text-muted); margin-left: 2px; text-transform: none; letter-spacing: 0; }
 .retro-no-data { color: var(--text-muted); font-size: 11px; }
 
