@@ -2,7 +2,7 @@
 // see Requirements/DAILY_INTELLIGENCE_BRIEF.md §6
 
 import { useState, useEffect, useCallback } from 'react';
-import type { DailyBriefEntry, BriefPick, ScoringStrategy, StrategyLabValidateResult, StrategyLabGrade, StrategySetup, SetupLeg, PayoffLeg, BriefAccuracy } from '@shared/types.js';
+import type { DailyBriefEntry, BriefPick, ScoringStrategy, StrategyLabValidateResult, StrategyLabGrade, StrategySetup, SetupLeg, PayoffLeg, BriefAccuracy, CriticVerdict } from '@shared/types.js';
 
 const STRATEGY_LABELS: Record<ScoringStrategy, string> = {
   wheel:   '🎡  Wheel — CSP / Covered Call',
@@ -238,6 +238,60 @@ function labLegToPayoffLeg(leg: SetupLeg, idx: number): PayoffLeg {
   };
 }
 
+const CRITIC_LABEL: Record<CriticVerdict['verdict'], string> = {
+  pass:    '✓ Pass',
+  caution: '⚠ Caution',
+  flag:    '⚑ Flag',
+};
+
+function CriticBadge({ verdict }: { verdict: CriticVerdict }) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className="critic-verdict">
+      <div className="critic-badge-row">
+        <span className="critic-label">🔍 Critic:</span>
+        <span className={`critic-badge critic-badge-${verdict.verdict}`}>
+          {CRITIC_LABEL[verdict.verdict]}
+        </span>
+        {verdict.confidence === 'low' && (
+          <span className="critic-confidence-low" title="Critic ran without LLM synthesis (API key missing or unavailable)">
+            low confidence
+          </span>
+        )}
+        <button
+          className="critic-expand-btn"
+          onClick={() => setExpanded(p => !p)}
+          aria-label={expanded ? 'Collapse critic details' : 'Expand critic details'}
+        >
+          {expanded ? '▲' : '▼'}
+        </button>
+      </div>
+
+      {expanded && (
+        <div className="critic-detail">
+          {verdict.rationale && (
+            <p className="critic-rationale-text">{verdict.rationale}</p>
+          )}
+          {verdict.flags.length > 0 && (
+            <ul className="critic-flags-list">
+              {verdict.flags.map((flag, i) => (
+                <li key={i} className={`critic-flag critic-flag-${flag.severity}`}>
+                  <span className="critic-flag-icon">{flag.severity === 'warning' ? '⚠' : 'ℹ'}</span>
+                  {flag.description}
+                </li>
+              ))}
+            </ul>
+          )}
+          {!verdict.rationale && verdict.flags.length === 0 && (
+            <p className="critic-rationale-text muted">No specific concerns identified.</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TopSignals({ signals }: { signals: BriefPick['signals'] }) {
   const entries = Object.entries(signals)
     .filter(([, v]) => !v.missing && v.raw !== null)
@@ -368,8 +422,26 @@ function PickCard({
           ? <p className="pick-rationale">{pick.aiRationale}</p>
           : <p className="pick-rationale muted">AI reasoning unavailable</p>
         }
+
+        {/* Row 6: AI Critic second opinion */}
+        {pick.criticVerdict
+          ? <CriticBadge verdict={pick.criticVerdict} />
+          : <div className="critic-verdict critic-unavailable">🔍 Second opinion unavailable</div>
+        }
       </div>
     </div>
+  );
+}
+
+function criticSummary(picks: BriefPick[]): { pass: number; caution: number; flag: number } | null {
+  if (!picks.some(p => p.criticVerdict)) return null;
+  return picks.reduce(
+    (acc, p) => {
+      if (!p.criticVerdict) return acc;
+      acc[p.criticVerdict.verdict]++;
+      return acc;
+    },
+    { pass: 0, caution: 0, flag: 0 },
   );
 }
 
@@ -386,6 +458,8 @@ function StrategySection({
   onToggle: () => void;
   onGoToStrategyLab: (ticker: string) => void;
 }) {
+  const summary = entry ? criticSummary(entry.picks) : null;
+
   return (
     <div className="brief-strategy-section">
       <button className="strategy-header" onClick={onToggle}>
@@ -393,6 +467,13 @@ function StrategySection({
         {entry && (
           <span className="strategy-pick-count">
             {entry.picks.length} pick{entry.picks.length !== 1 ? 's' : ''}
+          </span>
+        )}
+        {summary && (
+          <span className="strategy-critic-summary">
+            {summary.pass > 0 && <span className="critic-summary-pass">{summary.pass} pass</span>}
+            {summary.caution > 0 && <span className="critic-summary-caution">{summary.caution} caution</span>}
+            {summary.flag > 0 && <span className="critic-summary-flag">{summary.flag} flagged</span>}
           </span>
         )}
         <span className="strategy-chevron">{collapsed ? '▶' : '▼'}</span>

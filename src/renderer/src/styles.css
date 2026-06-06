@@ -4259,3 +4259,127 @@ input[type='checkbox'] {
   font-size: 13px;
   flex-shrink: 0;
 }
+
+/* ─── AI Critic verdict (Daily Brief) ────────────────────────────────────── */
+.critic-verdict {
+  margin: 8px 0 0;
+  font-size: 12px;
+}
+.critic-unavailable {
+  color: var(--text-muted);
+  opacity: 0.5;
+}
+.critic-badge-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.critic-label {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+.critic-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  border: 1px solid;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.critic-badge-pass {
+  background: rgba(63,185,80,0.12);
+  color: #3fb950;
+  border-color: rgba(63,185,80,0.3);
+}
+.critic-badge-caution {
+  background: rgba(227,160,8,0.12);
+  color: #e3a008;
+  border-color: rgba(227,160,8,0.35);
+}
+.critic-badge-flag {
+  background: rgba(248,81,73,0.12);
+  color: #f85149;
+  border-color: rgba(248,81,73,0.3);
+}
+.critic-confidence-low {
+  font-size: 10px;
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+.critic-expand-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 10px;
+  padding: 0 2px;
+  line-height: 1;
+}
+.critic-expand-btn:hover {
+  color: var(--text-secondary);
+}
+.critic-detail {
+  margin-top: 6px;
+  padding: 8px 10px;
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+  border-left: 2px solid var(--border);
+}
+.critic-rationale-text {
+  margin: 0 0 6px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+.critic-rationale-text.muted {
+  opacity: 0.55;
+}
+.critic-flags-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.critic-flag {
+  display: flex;
+  gap: 6px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+.critic-flag-warning {
+  color: #c99a00;
+}
+.critic-flag-info {
+  color: var(--text-muted);
+}
+.critic-flag-icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+/* ─── Strategy section critic aggregate summary ───────────────────────────── */
+.strategy-critic-summary {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-left: 4px;
+}
+.critic-summary-pass {
+  font-size: 11px;
+  color: #3fb950;
+}
+.critic-summary-caution {
+  font-size: 11px;
+  color: #e3a008;
+}
+.critic-summary-flag {
+  font-size: 11px;
+  color: #f85149;
+  font-weight: 700;
+}

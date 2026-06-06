@@ -155,6 +155,10 @@ export function buildEmailHtml(
       const pop     = setup?.pop != null ? fmtPct(setup.pop) : '—';
       const maxLoss = setup?.maxLoss != null ? fmtPrice(setup.maxLoss) : '—';
 
+      const cv = pick.criticVerdict;
+      const criticLabel = cv ? { pass: '✓ Pass', caution: '⚠ Caution', flag: '⚑ Flag' }[cv.verdict] : '—';
+      const criticColor = cv ? { pass: '#27ae60', caution: '#e67e22', flag: '#c0392b' }[cv.verdict] : '#aaa';
+
       return `
         <tr style="border-bottom:1px solid #e8e8e8">
           <td style="padding:7px 8px;font-weight:700;color:#1a1a1a">#${pick.rank}</td>
@@ -170,7 +174,9 @@ export function buildEmailHtml(
           <td style="padding:7px 8px;color:#2980b9">${annRet}</td>
           <td style="padding:7px 8px;color:#8e44ad">${pop}</td>
           <td style="padding:7px 8px;color:#c0392b;font-size:12px">${maxLoss}</td>
-        </tr>`;
+          <td style="padding:7px 8px;font-weight:600;color:${criticColor};font-size:12px">${criticLabel}</td>
+        </tr>
+        ${cv?.rationale ? `<tr style="background:#fafafa"><td></td><td colspan="13" style="padding:4px 8px 6px;font-size:11px;color:#555;font-style:italic"><strong>⚠ Second opinion:</strong> ${cv.rationale}</td></tr>` : ''}`;
     }).join('');
 
     return `
@@ -195,6 +201,7 @@ export function buildEmailHtml(
                 <th style="padding:6px 8px;text-align:left">Ann.Ret</th>
                 <th style="padding:6px 8px;text-align:left">POP</th>
                 <th style="padding:6px 8px;text-align:left">Max Loss</th>
+                <th style="padding:6px 8px;text-align:left">Critic</th>
               </tr>
             </thead>
             <tbody>${rows}</tbody>

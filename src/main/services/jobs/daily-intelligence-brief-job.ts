@@ -19,6 +19,7 @@ import { SCORING_REFERENCE_TICKERS } from './price-gap-fill-job.js';
 import type { EmailService } from '../email-service.js';
 import { buildEmailHtml, buildPdf } from '../brief-report-builder.js';
 import type { PaperTradingService } from '../paper-trading-service.js';
+import { CriticService } from '../critic-service.js';
 
 const PICKS_PER_STRATEGY = 5;
 
@@ -80,6 +81,7 @@ export class DailyIntelligenceBriefJob implements BatchJobHandler {
 
   private readonly scoringService: ScoringService;
   private readonly strategyLabService: StrategyLabService;
+  private readonly criticService: CriticService;
 
   constructor(
     private readonly db: Database,
@@ -90,6 +92,7 @@ export class DailyIntelligenceBriefJob implements BatchJobHandler {
   ) {
     this.scoringService = new ScoringService(db);
     this.strategyLabService = new StrategyLabService(dataProvider, optionsProvider);
+    this.criticService = new CriticService(db);
   }
 
   async run(
@@ -250,14 +253,16 @@ export class DailyIntelligenceBriefJob implements BatchJobHandler {
     emit('Stage 5/6: Running AI synthesis…');
     const t5 = Date.now();
 
+    // Retrieve API key once — reused by Stage 5 (advocate) and Stage 5b (critic)
+    const anthropicApiKey = secureGet(this.db, 'anthropicApiKey');
+
     const aiRationales = new Map<string, string | null>();
     let aiCostEstimate = 0;
 
     try {
-      const apiKey = secureGet(this.db, 'anthropicApiKey');
-      if (!apiKey) throw new Error('no_key');
+      if (!anthropicApiKey) throw new Error('no_key');
 
-      const client = new Anthropic({ apiKey });
+      const client = new Anthropic({ apiKey: anthropicApiKey });
 
       // Build structured summary for all top picks
       const picksForAI: Array<{ ticker: string; strategy: string; score: number; signals: Record<string, unknown> }> = [];
@@ -346,25 +351,18 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
       }
     }
 
-    // ── Stage 6: Persist brief ───────────────────────────────────────────────
-    emit('Stage 6/6: Persisting brief…');
-    const validUntil = nextTradingDayOpen(new Date().toISOString());
-
-    this.scoringService.pruneStaleBriefs(RETENTION_DAYS);
-
-    let totalPicks = 0;
+    // ── Assemble final picks (post-liquidity-gate, with AI rationale) ─────────
+    // Must happen before Stage 5b so the critic sees the complete pick data
+    // and can run cross-strategy conflict checks across all strategies at once.
     let totalGated = 0;
-    const persistedPicks = new Map<ScoringStrategy, BriefPick[]>();
-    for (const strategy of STRATEGIES) {
-      if (signal.aborted) break;
-      const top = topPerStrategy.get(strategy) ?? [];
+    const assembledPicks = new Map<ScoringStrategy, BriefPick[]>();
+    const strategyConfigs = new Map(STRATEGIES.map(s => [s, this.scoringService.getConfig(s)]));
 
-      // Hard liquidity gate — drop picks where the relevant strategy structure
-      // has liquidityScore < MIN_LIQUIDITY_SCORE (e.g. OI=1 with wide spreads)
-      const liquidFiltered = top.filter(scored => {
-        const labResult = validationResults.get(scored.ticker) ?? null;
-        return hasAdequateLiquidity(labResult, strategy);
-      });
+    for (const strategy of STRATEGIES) {
+      const top = topPerStrategy.get(strategy) ?? [];
+      const liquidFiltered = top.filter(scored =>
+        hasAdequateLiquidity(validationResults.get(scored.ticker) ?? null, strategy)
+      );
       const gated = top.length - liquidFiltered.length;
       if (gated > 0) totalGated += gated;
 
@@ -374,18 +372,92 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
         signals: scored.signals,
         strategyLabResult: validationResults.get(scored.ticker) ?? null,
         aiRationale: aiRationales.get(`${scored.ticker}:${strategy}`) ?? null,
+        criticVerdict: null,
         rank: idx + 1,
-        validated: !!validationResults.get(scored.ticker) && validationResults.get(scored.ticker) !== null,
+        validated: !!validationResults.get(scored.ticker),
         price: signalData.get(scored.ticker)?.lastPrice ?? null,
       }));
+      assembledPicks.set(strategy as ScoringStrategy, picks);
+    }
+
+    // ── Stage 5b: AI Critic ──────────────────────────────────────────────────
+    emit('Stage 5b/6: Running AI Critic…');
+    const t5b = Date.now();
+    let criticCostEstimate = 0;
+
+    if (anthropicApiKey) {
+      const marketContext = this.criticService.getMarketContext();
+
+      // Run rule checks + LLM critic in parallel across all picks
+      const criticTasks: Array<Promise<void>> = [];
+      for (const [strategy, picks] of assembledPicks) {
+        const config = strategyConfigs.get(strategy)!;
+        for (const pick of picks) {
+          criticTasks.push((async () => {
+            try {
+              const flags = this.criticService.runRuleChecks(
+                pick, strategy, config, assembledPicks as Map<string, BriefPick[]>, marketContext,
+              );
+              pick.criticVerdict = await this.criticService.synthesizeVerdict(
+                pick, strategy, flags, anthropicApiKey,
+              );
+            } catch (err) {
+              console.warn(`[critic] ${pick.ticker}/${strategy}:`, err instanceof Error ? err.message : String(err));
+            }
+          })());
+        }
+      }
+      await Promise.allSettled(criticTasks);
+
+      // Estimate: ~$0.002/pick (haiku)
+      const totalCriticPicks = [...assembledPicks.values()].reduce((n, p) => n + p.length, 0);
+      criticCostEstimate = totalCriticPicks * 0.002;
+    } else {
+      // No API key — run rule checks only, no LLM
+      const marketContext = this.criticService.getMarketContext();
+      for (const [strategy, picks] of assembledPicks) {
+        const config = strategyConfigs.get(strategy)!;
+        for (const pick of picks) {
+          try {
+            const flags = this.criticService.runRuleChecks(
+              pick, strategy, config, assembledPicks as Map<string, BriefPick[]>, marketContext,
+            );
+            const hasWarning = flags.some(f => f.severity === 'warning');
+            pick.criticVerdict = {
+              verdict: hasWarning ? 'flag' : flags.length > 0 ? 'caution' : 'pass',
+              confidence: 'low',
+              flags,
+              rationale: null,
+              generatedAt: new Date().toISOString(),
+            };
+          } catch { /* non-fatal */ }
+        }
+      }
+    }
+
+    const stage5bMs = Date.now() - t5b;
+    runMeta['stages'] = { ...runMeta['stages'] as object, stage5b: { costUsd: criticCostEstimate, ms: stage5bMs } };
+    emit('Stage 5b/6: AI Critic complete');
+
+    // ── Stage 6: Persist brief ───────────────────────────────────────────────
+    emit('Stage 6/6: Persisting brief…');
+    const validUntil = nextTradingDayOpen(new Date().toISOString());
+
+    this.scoringService.pruneStaleBriefs(RETENTION_DAYS);
+
+    let totalPicks = 0;
+    const persistedPicks = new Map<ScoringStrategy, BriefPick[]>();
+    for (const strategy of STRATEGIES) {
+      if (signal.aborted) break;
+      const picks = assembledPicks.get(strategy as ScoringStrategy) ?? [];
 
       runMeta['configVersions'] = {
         ...runMeta['configVersions'] as object ?? {},
-        [strategy]: this.scoringService.getConfig(strategy).version,
+        [strategy]: strategyConfigs.get(strategy)!.version,
       };
 
       const briefId = this.scoringService.persistBrief(strategy, picks, validUntil, runMeta);
-      persistedPicks.set(strategy, picks);
+      persistedPicks.set(strategy as ScoringStrategy, picks);
       totalPicks += picks.length;
 
       // Auto-capture post-gate picks as paper trades for Retrospect validation.
@@ -431,7 +503,7 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
 
     return {
       status: 'success',
-      notes: `Brief generated: ${totalPicks} picks${totalGated > 0 ? ` (${totalGated} gated-illiquid)` : ''} | AI cost ~$${aiCostEstimate.toFixed(3)} | ${Math.round(totalMs / 1000)}s`,
+      notes: `Brief generated: ${totalPicks} picks${totalGated > 0 ? ` (${totalGated} gated-illiquid)` : ''} | AI cost ~$${(aiCostEstimate + criticCostEstimate).toFixed(3)} | ${Math.round(totalMs / 1000)}s`,
       tickersAttempted: candidates.length,
       tickersUpdated: totalPicks,
       tickersSkipped: 0,

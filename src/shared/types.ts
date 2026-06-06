@@ -1524,12 +1524,27 @@ export interface ScoringConfig {
   updatedAt: string;
 }
 
+export interface CriticFlag {
+  key: string;
+  severity: 'warning' | 'info';
+  description: string;
+}
+
+export interface CriticVerdict {
+  verdict: 'pass' | 'caution' | 'flag';
+  confidence: 'high' | 'medium' | 'low';
+  flags: CriticFlag[];
+  rationale: string | null;
+  generatedAt: string;
+}
+
 export interface BriefPick {
   ticker: string;
   compositeScore: number;
   signals: Record<string, SignalBreakdown>;
   strategyLabResult?: object | null;
   aiRationale: string | null;
+  criticVerdict?: CriticVerdict | null;
   rank: number;
   validated: boolean;
   price: number | null;
