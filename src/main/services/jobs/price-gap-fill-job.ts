@@ -1,14 +1,37 @@
 // PriceGapFillJob — batch job that replicates the manual Data Sync → Price Gap Fill flow.
-// Finds tickers in historical_prices whose latest bar is > 2 days old and backfills 1 month.
+// Finds tickers in historical_prices whose latest bar is missing yesterday's close and backfills 1 month.
+// Also bootstraps SPY + 11 SPDR sector ETFs so ScoringService can compute relative strength
+// and sector momentum without separate fetch steps.
 // Runs on any day (including weekends) since it backfills historical data, not today's prices.
 
 import type { DbHandle } from '../../db/connection.js';
 import { HistoricalDataService, fetchAndStorePrices } from '../historical-service.js';
+import type { TimeRange } from '../historical-service.js';
 import { PolygonDataProvider } from '../polygon-provider.js';
 import type { BatchJobHandler, BatchJobResult } from '../batch-service.js';
 import type { BatchProgressEvent } from '@shared/types.js';
 
 const JOB_ID = 'daily-price-gap-fill';
+
+/**
+ * SPY + 11 SPDR sector ETFs used by ScoringService for relative-strength and
+ * sector-momentum signals. Always maintained in historical_prices regardless of
+ * whether they appear in the screener universe.
+ */
+export const SCORING_REFERENCE_TICKERS = [
+  'SPY',   // S&P 500 benchmark for relative strength
+  'XLK',   // Technology
+  'XLF',   // Financials
+  'XLV',   // Health Care
+  'XLE',   // Energy
+  'XLI',   // Industrials
+  'XLP',   // Consumer Staples
+  'XLY',   // Consumer Discretionary
+  'XLB',   // Materials
+  'XLRE',  // Real Estate
+  'XLU',   // Utilities
+  'XLC',   // Communication Services
+] as const;
 
 /** Pause between Polygon calls — keeps us well under the 100 req/min free tier limit. */
 function sleep(ms: number): Promise<void> {
@@ -36,18 +59,45 @@ export class PriceGapFillJob implements BatchJobHandler {
     onProgress: (evt: BatchProgressEvent) => void,
     signal: AbortSignal,
   ): Promise<BatchJobResult> {
-    // Tickers already tracked in historical_prices whose latest bar is > 2 days old
+    // ── Reference ticker bootstrap ─────────────────────────────────────────────
+    // SPY + sector ETFs must always be fresh for ScoringService relative-strength
+    // and sector-momentum signals. Fetch 6M (instead of 1M) so there are enough
+    // bars for the 90-day return calculation even on first run.
+    const refPh = SCORING_REFERENCE_TICKERS.map(() => '?').join(',');
+    type RefRow = { ticker: string };
+    const freshRef = new Set(
+      (this.db.prepare(`
+        SELECT ticker FROM historical_prices
+        WHERE ticker IN (${refPh})
+        GROUP BY ticker
+        HAVING MAX(date) >= date('now', '-1 day')
+      `).all(...SCORING_REFERENCE_TICKERS) as RefRow[]).map(r => r.ticker)
+    );
+    // Use '1Y' (≈252 trading days) for reference-ticker bootstrap — gives a comfortable
+    // 162-day buffer over the 90-day return window, handles holiday gaps, and future-proofs
+    // against any extension of the lookback period.  Cost: one extra Polygon call per ticker,
+    // done only once (subsequent runs hit the stale-ticker path with '1M').
+    const staleRef: { ticker: string; range: TimeRange }[] =
+      (SCORING_REFERENCE_TICKERS as readonly string[])
+        .filter(t => !freshRef.has(t))
+        .map(t => ({ ticker: t, range: '1Y' }));
+
+    // ── Universe tickers ───────────────────────────────────────────────────────
     type TickerRow = { ticker: string };
-    const stale = this.db
+    const staleUniverse: { ticker: string; range: TimeRange }[] = (this.db
       .prepare(`
         SELECT ticker FROM historical_prices
         GROUP BY ticker
-        HAVING MAX(date) < date('now', '-2 day')
+        HAVING MAX(date) < date('now', '-1 day')
         ORDER BY ticker
       `)
-      .all() as TickerRow[];
+      .all() as TickerRow[])
+      // Skip reference tickers here — already handled above
+      .filter(r => !(SCORING_REFERENCE_TICKERS as readonly string[]).includes(r.ticker))
+      .map(r => ({ ticker: r.ticker, range: '1M' as TimeRange }));
 
-    const total = stale.length;
+    const jobs = [...staleRef, ...staleUniverse];
+    const total = jobs.length;
 
     if (total === 0) {
       return {
@@ -65,13 +115,13 @@ export class PriceGapFillJob implements BatchJobHandler {
     let skipped   = 0;
     let failed    = 0;
 
-    for (const { ticker } of stale) {
+    for (const { ticker, range } of jobs) {
       if (signal.aborted) break;
 
       attempted++;
 
       try {
-        const count = await fetchAndStorePrices(this.historicalService, this.provider, ticker, '1M');
+        const count = await fetchAndStorePrices(this.historicalService, this.provider, ticker, range);
 
         if (count > 0) {
           updated++;
