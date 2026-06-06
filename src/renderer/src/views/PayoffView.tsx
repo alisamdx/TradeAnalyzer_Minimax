@@ -1054,9 +1054,9 @@ function recognizeStrategy(legs: PayoffLeg[]): StrategyInfo | null {
 
 // ─── Payoff SVG chart ─────────────────────────────────────────────────────────
 
-const PAD = { t: 18, r: 24, b: 30, l: 56 };
+const PAD = { t: 12, r: 20, b: 24, l: 52 };
 const SVG_W = 560;
-const SVG_H = 160;
+const SVG_H = 120;
 const PLOT_W = SVG_W - PAD.l - PAD.r;
 const PLOT_H = SVG_H - PAD.t - PAD.b;
 
@@ -2561,85 +2561,108 @@ export function PayoffView({ initialTicker, initialSpot, initialExpiry, initialS
           </div>
         )}
 
-        {/* ── Chart ── */}
+        {/* ── Chart + compact metrics ── */}
         {metrics && (
           <>
-            <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8, padding: '6px 8px 2px' }}>
+            {/* ── Single-line metrics + Greeks bar ── */}
+            <div style={{
+              background: '#0f172a', border: '1px solid #1e293b', borderRadius: 6,
+              padding: '5px 10px', display: 'flex', alignItems: 'center',
+              flexWrap: 'wrap', gap: 0, fontSize: 11, rowGap: 4,
+            }}>
+              {/* Separator helper */}
+              {(() => {
+                const sep = <span style={{ color: '#1e3a5f', margin: '0 8px', userSelect: 'none' }}>│</span>;
+
+                return (
+                  <>
+                    {/* Max Profit */}
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                      <span style={{ color: '#64748b' }}>Max Profit</span>
+                      <InfoTip text={'Highest P&L at expiration across 200 simulated price points (50%–155% of spot).\n\n• Short options: total premium collected × qty × 100\n• Spreads: capped at strike width − net debit\n• Long calls/stock: shown as ∞\n\nFormula: max(pnl[i]) across simulated prices'} />
+                      <strong style={{ color: '#22c55e', marginLeft: 3 }}>
+                        {fmtMetric(metrics.maxProfit, metrics.unlimitedProfit)}
+                      </strong>
+                    </span>
+                    {sep}
+                    {/* Max Loss */}
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                      <span style={{ color: '#64748b' }}>Max Loss</span>
+                      <InfoTip text={'Worst P&L at expiration across the same 200 simulated price points.\n\n• Long options: limited to premium paid × qty × 100\n• Short naked options: shown as ∞\n• Short puts: (strike − premium) × qty × 100\n\nFormula: min(pnl[i]) across simulated prices'} />
+                      <strong style={{ color: '#ef4444', marginLeft: 3 }}>
+                        {fmtMetric(metrics.maxLoss, metrics.unlimitedLoss)}
+                      </strong>
+                    </span>
+                    {sep}
+                    {/* Breakeven */}
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                      <span style={{ color: '#64748b' }}>
+                        {metrics.breakevenPrices.length > 1 ? `BE ×${metrics.breakevenPrices.length}` : 'BE'}
+                      </span>
+                      <InfoTip text={'Stock price(s) at expiration where total P&L = $0.\n\nDetected by linear interpolation wherever the payoff curve crosses the zero line. Complex strategies have two breakevens.\n\nCSP example: strike − net premium received\nLong call: strike + premium paid'} />
+                      <strong style={{ color: '#fbbf24', marginLeft: 3 }}>
+                        {metrics.breakevenPrices.length === 0
+                          ? '—'
+                          : metrics.breakevenPrices.map(p => fmtPrice(p)).join(' / ')}
+                      </strong>
+                    </span>
+                    {sep}
+                    {/* Net Credit / Debit */}
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                      <span style={{ color: '#64748b' }}>
+                        {metrics.netPremium >= 0 ? 'Net Cr' : 'Net Dr'}
+                      </span>
+                      <InfoTip text={'Total premium cash flow for the position.\n\n• Net Credit (positive): you received more than you paid — the credit is your buffer before a loss begins\n• Net Debit (negative): you paid net — the stock must move in your favour to profit\n\nFormula: Σ (sell: +premium, buy: −premium) × qty × 100'} />
+                      <strong style={{ color: metrics.netPremium >= 0 ? '#22c55e' : '#f97316', marginLeft: 3 }}>
+                        {fmtDollar(Math.abs(metrics.netPremium))}
+                      </strong>
+                    </span>
+                    {/* Greeks — only shown when available */}
+                    {metrics.netDelta != null && (
+                      <>
+                        {sep}
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                          <span style={{ color: '#94a3b8' }}>Δ</span>
+                          <InfoTip text={'Position delta — how much total P&L changes per $1 move in the stock.\n\n+1.00 ≈ long 100 shares\n−1.00 ≈ short 100 shares\n 0.00 = delta-neutral\n\nFormula: Σ (buy:+1, sell:−1) × leg.delta × qty'} />
+                          <strong style={{ color: metrics.netDelta > 0 ? '#22c55e' : '#ef4444', marginLeft: 2 }}>
+                            {metrics.netDelta >= 0 ? '+' : ''}{metrics.netDelta.toFixed(2)}
+                          </strong>
+                        </span>
+                      </>
+                    )}
+                    {metrics.netTheta != null && (
+                      <>
+                        {sep}
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                          <span style={{ color: '#94a3b8' }}>Θ</span>
+                          <InfoTip text={'Daily time decay for the full position (in dollars/day).\n\nPositive Θ: you collect decay each day (short options — favourable)\nNegative Θ: time erodes your position value (long options)\n\nFormula: Σ (buy:+1, sell:−1) × leg.theta × qty × 100'} />
+                          <strong style={{ color: metrics.netTheta > 0 ? '#22c55e' : '#f97316', marginLeft: 2 }}>
+                            {metrics.netTheta >= 0 ? '+' : ''}{fmtDollar(metrics.netTheta)}/d
+                          </strong>
+                        </span>
+                      </>
+                    )}
+                    {metrics.netVega != null && (
+                      <>
+                        {sep}
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                          <span style={{ color: '#94a3b8' }}>V</span>
+                          <InfoTip text={'How much the position gains or loses per 1% rise in implied volatility.\n\nPositive Vega: rising IV helps (long options, pre-earnings)\nNegative Vega: rising IV hurts (short options, sellers prefer IV crush)\n\nFormula: Σ (buy:+1, sell:−1) × leg.vega × qty × 100'} />
+                          <strong style={{ color: '#94a3b8', marginLeft: 2 }}>
+                            {metrics.netVega >= 0 ? '+' : ''}{fmtDollar(metrics.netVega)}/1%IV
+                          </strong>
+                        </span>
+                      </>
+                    )}
+                  </>
+                );
+              })()}
+            </div>
+
+            {/* ── Chart ── */}
+            <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8, padding: '4px 6px 1px' }}>
               <PayoffChart metrics={metrics} spot={spotNum} />
             </div>
-
-            {/* ── Metrics row ── */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
-              {([
-                {
-                  label: 'Max Profit',
-                  tip: 'Highest P&L at expiration, simulated across 200 price points (50%–155% of spot).\n\n• Short options: total premium collected × qty × 100\n• Spreads: capped at strike width − net debit\n• Long calls/stock: shown as ∞ (payoff rises indefinitely)\n\nFormula: max(pnl[i]) across simulated prices',
-                  value: fmtMetric(metrics.maxProfit, metrics.unlimitedProfit),
-                  color: '#22c55e',
-                },
-                {
-                  label: 'Max Loss',
-                  tip: 'Worst P&L at expiration across the same 200 simulated price points.\n\n• Long options: limited to premium paid × qty × 100\n• Short naked options: shown as ∞\n• Short puts: (strike − premium) × qty × 100\n\nFormula: min(pnl[i]) across simulated prices',
-                  value: fmtMetric(metrics.maxLoss, metrics.unlimitedLoss),
-                  color: '#ef4444',
-                },
-                {
-                  label: metrics.breakevenPrices.length > 1 ? `Breakeven ×${metrics.breakevenPrices.length}` : 'Breakeven',
-                  tip: 'Stock price(s) at expiration where total P&L = $0.\n\nDetected by linear interpolation wherever the payoff curve crosses the zero line. Complex strategies (straddles, condors, collars) have two breakevens.\n\nCSP example: strike − net premium received\nLong call: strike + premium paid',
-                  value: metrics.breakevenPrices.length === 0
-                    ? '—'
-                    : metrics.breakevenPrices.map(p => fmtPrice(p)).join(' / '),
-                  color: '#fbbf24',
-                },
-                {
-                  label: metrics.netPremium >= 0 ? 'Net Credit' : 'Net Debit',
-                  tip: 'Total premium cash flow for the position.\n\n• Net Credit (positive): you received more than you paid — the credit is your buffer before a loss begins\n• Net Debit (negative): you paid net — the stock must move in your favour to profit\n\nFormula: Σ (sell: +premium, buy: −premium) × qty × 100',
-                  value: fmtDollar(Math.abs(metrics.netPremium)),
-                  color: metrics.netPremium >= 0 ? '#22c55e' : '#f97316',
-                },
-              ] as Array<{ label: string; tip: string; value: string; color: string }>).map(m => (
-                <div key={m.label} style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 6, padding: '8px 10px' }}>
-                  <div style={{ fontSize: 10, color: '#64748b', marginBottom: 3, display: 'flex', alignItems: 'center' }}>
-                    {m.label}<InfoTip text={m.tip} />
-                  </div>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: m.color }}>{m.value}</div>
-                </div>
-              ))}
-            </div>
-
-            {/* ── Net Greeks ── */}
-            {(metrics.netDelta != null || metrics.netTheta != null || metrics.netVega != null) && (
-              <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 6, padding: '8px 14px', display: 'flex', gap: 20, fontSize: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-                <span style={{ color: '#64748b' }}>Net Greeks</span>
-                {metrics.netDelta != null && (
-                  <span style={{ display: 'flex', alignItems: 'center' }}>
-                    <span style={{ color: '#94a3b8' }}>Δ</span>
-                    <InfoTip text={'Position delta — how much total P&L changes per $1 move in the stock.\n\n+1.00 ≈ long 100 shares\n−1.00 ≈ short 100 shares\n 0.00 = delta-neutral\n\nFormula: Σ (buy:+1, sell:−1) × leg.delta × qty\nStock legs contribute ±1 per share × qty.'} />
-                    <strong style={{ color: metrics.netDelta > 0 ? '#22c55e' : '#ef4444', marginLeft: 4 }}>
-                      {metrics.netDelta >= 0 ? '+' : ''}{metrics.netDelta.toFixed(2)}
-                    </strong>
-                  </span>
-                )}
-                {metrics.netTheta != null && (
-                  <span style={{ display: 'flex', alignItems: 'center' }}>
-                    <span style={{ color: '#94a3b8' }}>Θ</span>
-                    <InfoTip text={'Daily time decay for the full position (in dollars/day).\n\nPositive Θ: you collect decay each day (short options — favourable)\nNegative Θ: time erodes your position value (long options)\n\nFormula: Σ (buy:+1, sell:−1) × leg.theta × qty × 100\nScaled by 100 shares per contract.'} />
-                    <strong style={{ color: metrics.netTheta > 0 ? '#22c55e' : '#f97316', marginLeft: 4 }}>
-                      {metrics.netTheta >= 0 ? '+' : ''}{fmtDollar(metrics.netTheta)}/day
-                    </strong>
-                  </span>
-                )}
-                {metrics.netVega != null && (
-                  <span style={{ display: 'flex', alignItems: 'center' }}>
-                    <span style={{ color: '#94a3b8' }}>V</span>
-                    <InfoTip text={'How much the position gains or loses per 1% rise in implied volatility.\n\nPositive Vega: rising IV helps (long options, pre-earnings)\nNegative Vega: rising IV hurts (short options, sellers prefer IV crush)\n\nFormula: Σ (buy:+1, sell:−1) × leg.vega × qty × 100\nScaled by 100 shares per contract.'} />
-                    <strong style={{ color: '#94a3b8', marginLeft: 4 }}>
-                      {metrics.netVega >= 0 ? '+' : ''}{fmtDollar(metrics.netVega)}/1%IV
-                    </strong>
-                  </span>
-                )}
-              </div>
-            )}
           </>
         )}
 
@@ -2817,7 +2840,7 @@ export function PayoffView({ initialTicker, initialSpot, initialExpiry, initialS
       {showChain && (
         <div style={{
           flexShrink: 0,
-          height: chainExpanded ? '70vh' : 44,
+          height: chainExpanded ? '45vh' : 44,
           transition: 'height 0.22s ease',
           borderTop: '2px solid #1e293b',
           background: '#0f172a',

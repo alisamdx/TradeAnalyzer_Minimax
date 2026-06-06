@@ -2,6 +2,10 @@
 
 Reverse-chronological. Per spec EP-2.3, this is the index; per-version detail lives in `changelogs/`.
 
+## v0.26.9 — 2026-06-06
+
+Payoff layout: Max Profit, Max Loss, Breakeven, Net Credit/Debit, Δ, Θ, V now fit in a single compact horizontal bar above the chart. Chart height reduced (SVG 160→120, tighter padding). Options chain drawer reduced from 70vh to 45vh so chart remains visible below it.
+
 ## v0.26.8 — 2026-06-06
 
 Payoff chart: hover tooltip. Mouse over shows a vertical crosshair, a dot on the P&L curve at that price, a faint horizontal hairline, and a tooltip box with exact price and P&L value (color-coded green/red). Tooltip flips to the opposite side when the cursor is in the right half of the chart.
