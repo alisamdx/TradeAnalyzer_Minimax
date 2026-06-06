@@ -2,6 +2,10 @@
 
 Reverse-chronological. Per spec EP-2.3, this is the index; per-version detail lives in `changelogs/`.
 
+## v0.26.1 — 2026-06-06
+
+Payoff Visualizer: templates section replaced with a grouped dropdown covering all 31 Strategy Lab strategies (Jade Lizard, Big Lizard, Reverse variants, Iron Fly, Zebras, Front Ratios, Butterflies, PMCC/PMCP, Calendars, etc.). `recognizeStrategy` expanded to identify all new structures including 3-leg lizard variants, zebras, front ratios, butterfly families (standard + broken-wing), calendar spreads, Poor Man's covered positions, and Short/Long Straddle/Strangle disambiguation.
+
 ## v0.26.0 — 2026-06-06
 
 AI Critic — second-opinion engine for the Daily Brief. Every pick now gets a `pass / caution / flag` verdict from an adversarially-prompted Claude haiku call, backed by 6 deterministic rule checks (trend alignment, liquidity, missing signals, score concentration, cross-strategy conflict, market regime). Verdict badge shown inline on each pick card in the Brief UI with expandable flags and rationale. Strategy section headers show aggregate counts. Email now includes a Critic column. See `Requirements/ai-critic.md` for full spec.

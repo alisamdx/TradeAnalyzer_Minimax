@@ -167,53 +167,279 @@ function computePayoffMetrics(legs: PayoffLeg[], spot: number): PayoffMetrics {
   };
 }
 
-// ─── Template definitions ─────────────────────────────────────────────────────
+// ─── Strategy templates (all 31 Strategy Lab strategies) ─────────────────────
 
-interface Template { label: string; icon: string; build: (spot: number) => PayoffLeg[] }
+interface StrategyTemplate {
+  slug: string;
+  name: string;
+  category: string;
+  build: (spot: number) => PayoffLeg[];
+}
 
-const TEMPLATES: Template[] = [
+const TEMPLATE_CATEGORY_LABELS: Record<string, string> = {
+  'neutral-bullish':  'Neutral / Bullish Bias',
+  'neutral-bearish':  'Neutral / Bearish Bias',
+  'neutral':          'Neutral',
+  'bullish':          'Bullish',
+  'bearish':          'Bearish',
+  'omnidirectional':  'Complex',
+};
+const TEMPLATE_CATEGORY_ORDER = ['neutral-bullish', 'neutral-bearish', 'neutral', 'bullish', 'bearish', 'omnidirectional'] as const;
+
+// Leg builder — premium: 0 for options so user fills from chain (shows orange)
+const mkLeg = (
+  side: PayoffLeg['side'], type: PayoffLeg['type'],
+  strike: number, dte: number, delta: number | null,
+  qty = 1, labelOverride?: string,
+): PayoffLeg => {
+  const s = type === 'stock' ? 0 : roundHalf(strike);
+  const baseLabel = type === 'stock'
+    ? (side === 'buy' ? 'Long 100 shares' : 'Short 100 shares')
+    : `${side === 'buy' ? 'Buy' : 'Sell'}${qty > 1 ? ` ${qty}` : ''} ${type.charAt(0).toUpperCase() + type.slice(1)} $${s}`;
+  return {
+    id: genId(), side, type, strike: s, expiry: addDays(dte),
+    premium: type === 'stock' ? strike : 0,
+    quantity: qty, delta, theta: null, vega: null, iv: null,
+    label: labelOverride ?? baseLabel,
+  };
+};
+
+const ALL_TEMPLATES: StrategyTemplate[] = [
+  // ── Neutral / Bullish Bias ───────────────────────────────────────────────
   {
-    label: 'CSP',
-    icon: '↓',
-    build: spot => [{
-      id: genId(), side: 'sell', type: 'put',
-      strike: roundHalf(spot * 0.95), expiry: addDays(45),
-      premium: 0, quantity: 1, delta: -0.30, theta: null, vega: null, iv: null,
-      label: `Sell Put $${roundHalf(spot * 0.95)}`,
-    }],
+    slug: 'short-naked-put', name: 'Short Naked Put (CSP)', category: 'neutral-bullish',
+    build: s => [mkLeg('sell', 'put', s * 0.95, 45, -0.30)],
   },
   {
-    label: 'Covered Call',
-    icon: '↗',
-    build: spot => [
-      { id: genId(), side: 'buy', type: 'stock', strike: 0, expiry: addDays(0), premium: spot, quantity: 1, delta: null, theta: null, vega: null, iv: null, label: 'Long 100 shares' },
-      { id: genId(), side: 'sell', type: 'call', strike: roundHalf(spot * 1.05), expiry: addDays(30), premium: 0, quantity: 1, delta: 0.25, theta: null, vega: null, iv: null, label: `Sell Call $${roundHalf(spot * 1.05)}` },
+    slug: 'short-put-vertical', name: 'Short Put Vertical', category: 'neutral-bullish',
+    build: s => [mkLeg('sell', 'put', s * 0.95, 45, -0.30), mkLeg('buy', 'put', s * 0.90, 45, -0.15)],
+  },
+  {
+    slug: 'jade-lizard', name: 'Jade Lizard', category: 'neutral-bullish',
+    build: s => [
+      mkLeg('sell', 'put',  s * 0.95, 45, -0.30),
+      mkLeg('sell', 'call', s * 1.05, 45,  0.25),
+      mkLeg('buy',  'call', s * 1.10, 45,  0.15),
+    ],
+  },
+  // ── Neutral / Bearish Bias ───────────────────────────────────────────────
+  {
+    slug: 'short-naked-call', name: 'Short Naked Call', category: 'neutral-bearish',
+    build: s => [mkLeg('sell', 'call', s * 1.05, 45, 0.25)],
+  },
+  {
+    slug: 'short-call-vertical', name: 'Short Call Vertical', category: 'neutral-bearish',
+    build: s => [mkLeg('sell', 'call', s * 1.05, 45, 0.25), mkLeg('buy', 'call', s * 1.10, 45, 0.15)],
+  },
+  {
+    slug: 'reverse-jade-lizard', name: 'Reverse Jade Lizard', category: 'neutral-bearish',
+    build: s => [
+      mkLeg('buy',  'put',  s * 0.90, 45, -0.15),
+      mkLeg('sell', 'put',  s * 0.95, 45, -0.30),
+      mkLeg('sell', 'call', s * 1.05, 45,  0.25),
+    ],
+  },
+  // ── Neutral ──────────────────────────────────────────────────────────────
+  {
+    slug: 'short-strangle', name: 'Short Strangle', category: 'neutral',
+    build: s => [mkLeg('sell', 'put', s * 0.90, 45, -0.16), mkLeg('sell', 'call', s * 1.10, 45, 0.16)],
+  },
+  {
+    slug: 'short-straddle', name: 'Short Straddle', category: 'neutral',
+    build: s => [mkLeg('sell', 'put', Math.round(s), 30, -0.50), mkLeg('sell', 'call', Math.round(s), 30, 0.50)],
+  },
+  {
+    slug: 'iron-condor', name: 'Iron Condor', category: 'neutral',
+    build: s => [
+      mkLeg('buy',  'put',  s * 0.85, 45, -0.10),
+      mkLeg('sell', 'put',  s * 0.92, 45, -0.20),
+      mkLeg('sell', 'call', s * 1.08, 45,  0.20),
+      mkLeg('buy',  'call', s * 1.15, 45,  0.10),
     ],
   },
   {
-    label: 'Collar',
-    icon: '⇅',
-    build: spot => [
-      { id: genId(), side: 'buy', type: 'stock', strike: 0, expiry: addDays(0), premium: spot, quantity: 1, delta: null, theta: null, vega: null, iv: null, label: 'Long 100 shares' },
-      { id: genId(), side: 'buy', type: 'put', strike: roundHalf(spot * 0.95), expiry: addDays(45), premium: 0, quantity: 1, delta: -0.25, theta: null, vega: null, iv: null, label: `Buy Put $${roundHalf(spot * 0.95)}` },
-      { id: genId(), side: 'sell', type: 'call', strike: roundHalf(spot * 1.05), expiry: addDays(45), premium: 0, quantity: 1, delta: 0.25, theta: null, vega: null, iv: null, label: `Sell Call $${roundHalf(spot * 1.05)}` },
+    slug: 'dynamic-width-iron-condor', name: 'Dynamic Width Iron Condor', category: 'neutral',
+    build: s => [
+      mkLeg('buy',  'put',  s * 0.82, 45, -0.08),
+      mkLeg('sell', 'put',  s * 0.90, 45, -0.20),
+      mkLeg('sell', 'call', s * 1.10, 45,  0.20),
+      mkLeg('buy',  'call', s * 1.18, 45,  0.08),
     ],
   },
   {
-    label: 'Bull Call Spread',
-    icon: '↑',
-    build: spot => [
-      { id: genId(), side: 'buy', type: 'call', strike: Math.round(spot), expiry: addDays(45), premium: 0, quantity: 1, delta: 0.50, theta: null, vega: null, iv: null, label: `Buy Call $${Math.round(spot)}` },
-      { id: genId(), side: 'sell', type: 'call', strike: roundHalf(spot * 1.05), expiry: addDays(45), premium: 0, quantity: 1, delta: 0.25, theta: null, vega: null, iv: null, label: `Sell Call $${roundHalf(spot * 1.05)}` },
+    slug: 'iron-fly', name: 'Iron Fly', category: 'neutral',
+    build: s => {
+      const atm = Math.round(s);
+      return [
+        mkLeg('buy',  'put',  s * 0.90, 30, -0.15),
+        mkLeg('sell', 'put',  atm,      30, -0.50),
+        mkLeg('sell', 'call', atm,      30,  0.50),
+        mkLeg('buy',  'call', s * 1.10, 30,  0.15),
+      ];
+    },
+  },
+  // ── Bullish ──────────────────────────────────────────────────────────────
+  {
+    slug: 'covered-call', name: 'Covered Call', category: 'bullish',
+    build: s => [mkLeg('buy', 'stock', s, 0, null), mkLeg('sell', 'call', s * 1.05, 30, 0.25)],
+  },
+  {
+    slug: 'long-call-vertical', name: 'Long Call Vertical', category: 'bullish',
+    build: s => [mkLeg('buy', 'call', Math.round(s), 45, 0.50), mkLeg('sell', 'call', s * 1.05, 45, 0.25)],
+  },
+  {
+    slug: 'big-lizard', name: 'Big Lizard', category: 'bullish',
+    build: s => {
+      const atm = Math.round(s);
+      return [mkLeg('sell', 'put', atm, 45, -0.50), mkLeg('sell', 'call', atm, 45, 0.50), mkLeg('buy', 'call', s * 1.10, 45, 0.15)];
+    },
+  },
+  {
+    slug: 'poor-mans-covered-call', name: "Poor Man's Covered Call (PMCC)", category: 'bullish',
+    build: s => [
+      mkLeg('buy',  'call', s * 0.80, 90, 0.80, 1, `Buy Call $${roundHalf(s * 0.80)} (deep ITM, 90d)`),
+      mkLeg('sell', 'call', s * 1.10, 30, 0.20),
     ],
   },
   {
-    label: 'Bear Put Spread',
-    icon: '↓',
-    build: spot => [
-      { id: genId(), side: 'buy', type: 'put', strike: Math.round(spot), expiry: addDays(45), premium: 0, quantity: 1, delta: -0.50, theta: null, vega: null, iv: null, label: `Buy Put $${Math.round(spot)}` },
-      { id: genId(), side: 'sell', type: 'put', strike: roundHalf(spot * 0.95), expiry: addDays(45), premium: 0, quantity: 1, delta: -0.25, theta: null, vega: null, iv: null, label: `Sell Put $${roundHalf(spot * 0.95)}` },
+    slug: 'call-calendar', name: 'Call Calendar', category: 'bullish',
+    build: s => {
+      const atm = Math.round(s);
+      return [
+        mkLeg('sell', 'call', atm, 30, 0.50, 1, `Sell Call $${atm} (30d)`),
+        mkLeg('buy',  'call', atm, 60, 0.50, 1, `Buy Call $${atm} (60d)`),
+      ];
+    },
+  },
+  {
+    slug: 'call-butterfly', name: 'Call Butterfly', category: 'bullish',
+    build: s => {
+      const atm  = Math.round(s);
+      const wing = Math.round(s * 0.05);
+      return [
+        mkLeg('buy',  'call', atm - wing, 45, 0.65),
+        mkLeg('sell', 'call', atm,        45, 0.50, 2),
+        mkLeg('buy',  'call', atm + wing, 45, 0.35),
+      ];
+    },
+  },
+  {
+    slug: 'call-zebra', name: 'Call Zebra', category: 'bullish',
+    build: s => [
+      mkLeg('buy',  'call', Math.round(s), 45, 0.65, 2),
+      mkLeg('sell', 'call', s * 1.10,      45, 0.20),
     ],
+  },
+  // ── Bearish ──────────────────────────────────────────────────────────────
+  {
+    slug: 'long-put-vertical', name: 'Long Put Vertical', category: 'bearish',
+    build: s => [mkLeg('buy', 'put', Math.round(s), 45, -0.50), mkLeg('sell', 'put', s * 0.95, 45, -0.25)],
+  },
+  {
+    slug: 'covered-put', name: 'Covered Put', category: 'bearish',
+    build: s => [mkLeg('sell', 'stock', s, 0, null), mkLeg('sell', 'put', s * 0.95, 30, -0.25)],
+  },
+  {
+    slug: 'reverse-big-lizard', name: 'Reverse Big Lizard', category: 'bearish',
+    build: s => {
+      const atm = Math.round(s);
+      return [mkLeg('sell', 'put', atm, 45, -0.50), mkLeg('sell', 'call', atm, 45, 0.50), mkLeg('buy', 'put', s * 0.90, 45, -0.15)];
+    },
+  },
+  {
+    slug: 'poor-mans-covered-put', name: "Poor Man's Covered Put (PMCP)", category: 'bearish',
+    build: s => [
+      mkLeg('buy',  'put', s * 1.20, 90, -0.80, 1, `Buy Put $${roundHalf(s * 1.20)} (deep ITM, 90d)`),
+      mkLeg('sell', 'put', s * 0.90, 30, -0.20),
+    ],
+  },
+  {
+    slug: 'put-calendar', name: 'Put Calendar', category: 'bearish',
+    build: s => {
+      const atm = Math.round(s);
+      return [
+        mkLeg('sell', 'put', atm, 30, -0.50, 1, `Sell Put $${atm} (30d)`),
+        mkLeg('buy',  'put', atm, 60, -0.50, 1, `Buy Put $${atm} (60d)`),
+      ];
+    },
+  },
+  {
+    slug: 'put-butterfly', name: 'Put Butterfly', category: 'bearish',
+    build: s => {
+      const atm  = Math.round(s);
+      const wing = Math.round(s * 0.05);
+      return [
+        mkLeg('buy',  'put', atm + wing, 45, -0.65),
+        mkLeg('sell', 'put', atm,        45, -0.50, 2),
+        mkLeg('buy',  'put', atm - wing, 45, -0.35),
+      ];
+    },
+  },
+  {
+    slug: 'put-zebra', name: 'Put Zebra', category: 'bearish',
+    build: s => [
+      mkLeg('buy',  'put', Math.round(s), 45, -0.65, 2),
+      mkLeg('sell', 'put', s * 0.90,      45, -0.20),
+    ],
+  },
+  // ── Complex / Omnidirectional ────────────────────────────────────────────
+  {
+    slug: 'put-front-ratio', name: 'Put Front Ratio', category: 'omnidirectional',
+    build: s => [
+      mkLeg('buy',  'put', s * 0.95, 45, -0.30),
+      mkLeg('sell', 'put', s * 0.90, 45, -0.20, 2),
+    ],
+  },
+  {
+    slug: 'call-front-ratio', name: 'Call Front Ratio', category: 'omnidirectional',
+    build: s => [
+      mkLeg('buy',  'call', s * 1.05, 45, 0.30),
+      mkLeg('sell', 'call', s * 1.10, 45, 0.15, 2),
+    ],
+  },
+  {
+    slug: 'put-broken-wing-butterfly', name: 'Put Broken Wing Butterfly', category: 'omnidirectional',
+    build: s => {
+      const atm = Math.round(s);
+      return [
+        mkLeg('buy',  'put', atm + Math.round(s * 0.05), 45, -0.65),
+        mkLeg('sell', 'put', atm,                         45, -0.50, 2),
+        mkLeg('buy',  'put', atm - Math.round(s * 0.12), 45, -0.12),
+      ];
+    },
+  },
+  {
+    slug: 'call-broken-wing-butterfly', name: 'Call Broken Wing Butterfly', category: 'omnidirectional',
+    build: s => {
+      const atm = Math.round(s);
+      return [
+        mkLeg('buy',  'call', atm - Math.round(s * 0.05), 45, 0.65),
+        mkLeg('sell', 'call', atm,                          45, 0.50, 2),
+        mkLeg('buy',  'call', atm + Math.round(s * 0.12), 45, 0.12),
+      ];
+    },
+  },
+  {
+    slug: 'call-broken-heart-butterfly', name: 'Call Broken Heart Butterfly', category: 'omnidirectional',
+    build: s => {
+      const atm = Math.round(s);
+      return [
+        mkLeg('buy',  'call', atm - Math.round(s * 0.10), 45, 0.70),
+        mkLeg('sell', 'call', atm,                          45, 0.50, 2),
+        mkLeg('buy',  'call', atm + Math.round(s * 0.05), 45, 0.30),
+      ];
+    },
+  },
+  {
+    slug: 'put-broken-heart-butterfly', name: 'Put Broken Heart Butterfly', category: 'omnidirectional',
+    build: s => {
+      const atm = Math.round(s);
+      return [
+        mkLeg('buy',  'put', atm + Math.round(s * 0.10), 45, -0.70),
+        mkLeg('sell', 'put', atm,                          45, -0.50, 2),
+        mkLeg('buy',  'put', atm - Math.round(s * 0.05), 45, -0.30),
+      ];
+    },
   },
 ];
 
@@ -287,19 +513,33 @@ interface StrategyInfo {
 function recognizeStrategy(legs: PayoffLeg[]): StrategyInfo | null {
   if (legs.length === 0) return null;
 
-  const opts      = legs.filter(l => l.type !== 'stock');
-  const stocks    = legs.filter(l => l.type === 'stock');
-  const puts      = opts.filter(l => l.type === 'put').sort((a, b) => a.strike - b.strike);
-  const calls     = opts.filter(l => l.type === 'call').sort((a, b) => a.strike - b.strike);
-  const sellPuts  = puts.filter(l => l.side === 'sell');
-  const buyPuts   = puts.filter(l => l.side === 'buy');
-  const sellCalls = calls.filter(l => l.side === 'sell');
-  const buyCalls  = calls.filter(l => l.side === 'buy');
-  const longStock = stocks.filter(l => l.side === 'buy');
+  const opts       = legs.filter(l => l.type !== 'stock');
+  const stocks     = legs.filter(l => l.type === 'stock');
+  const puts       = opts.filter(l => l.type === 'put').sort((a, b) => a.strike - b.strike);
+  const calls      = opts.filter(l => l.type === 'call').sort((a, b) => a.strike - b.strike);
+  const sellPuts   = puts.filter(l => l.side === 'sell');
+  const buyPuts    = puts.filter(l => l.side === 'buy');
+  const sellCalls  = calls.filter(l => l.side === 'sell');
+  const buyCalls   = calls.filter(l => l.side === 'buy');
+  const longStock  = stocks.filter(l => l.side === 'buy');
+  const shortStock = stocks.filter(l => l.side === 'sell');
 
-  // ── Single leg ────────────────────────────────────────────────────────────────
-  if (legs.length === 1) {
-    const l = legs[0]!;
+  // Quantity totals — handles legs with quantity > 1
+  const tBC = buyCalls.reduce((n, l) => n + l.quantity, 0);
+  const tSC = sellCalls.reduce((n, l) => n + l.quantity, 0);
+  const tBP = buyPuts.reduce((n, l) => n + l.quantity, 0);
+  const tSP = sellPuts.reduce((n, l) => n + l.quantity, 0);
+
+  // Expand legs by quantity for multi-unit strike analysis
+  const expandByQty = (ls: PayoffLeg[]) =>
+    ls.flatMap(l => Array.from({ length: l.quantity }, () => l)).sort((a, b) => a.strike - b.strike);
+
+  // Two strikes are near-same (within 3% relative)
+  const nearEq = (a: number, b: number) => Math.abs(a - b) / Math.max(a, b) < 0.03;
+
+  // ── Single option leg ─────────────────────────────────────────────────────
+  if (opts.length === 1 && stocks.length === 0) {
+    const l = opts[0]!;
     if (l.side === 'sell' && l.type === 'put')
       return { name: 'Cash-Secured Put', description: 'Collect premium; buy stock at strike if assigned', color: '#22c55e' };
     if (l.side === 'sell' && l.type === 'call')
@@ -308,76 +548,172 @@ function recognizeStrategy(legs: PayoffLeg[]): StrategyInfo | null {
       return { name: 'Long Call', description: 'Bullish; profit above breakeven, risk = premium paid', color: '#3b82f6' };
     if (l.side === 'buy' && l.type === 'put')
       return { name: 'Long Put', description: 'Bearish; profit below breakeven, risk = premium paid', color: '#f97316' };
-    if (l.type === 'stock')
-      return { name: l.side === 'buy' ? 'Long Stock' : 'Short Stock', description: 'Directional equity position', color: '#94a3b8' };
+  }
+  if (opts.length === 0 && stocks.length === 1) {
+    const l = stocks[0]!;
+    return { name: l.side === 'buy' ? 'Long Stock' : 'Short Stock', description: 'Directional equity position', color: '#94a3b8' };
   }
 
-  // ── Covered Call: long stock + sell call ──────────────────────────────────────
-  if (longStock.length === 1 && sellCalls.length === 1 && opts.length === 1)
+  // ── Stock + option combinations ───────────────────────────────────────────
+  if (longStock.length === 1 && tSC === 1 && opts.length === 1)
     return { name: 'Covered Call', description: 'Capped upside; premium reduces effective cost basis', color: '#22c55e' };
-
-  // ── Protective Put: long stock + buy put ──────────────────────────────────────
-  if (longStock.length === 1 && buyPuts.length === 1 && opts.length === 1)
+  if (longStock.length === 1 && tBP === 1 && opts.length === 1)
     return { name: 'Protective Put', description: 'Stock with a floor; unlimited upside, limited downside', color: '#3b82f6' };
-
-  // ── Collar: long stock + buy put + sell call ──────────────────────────────────
-  if (longStock.length === 1 && buyPuts.length === 1 && sellCalls.length === 1 && opts.length === 2)
+  if (longStock.length === 1 && tBP === 1 && tSC === 1 && opts.length === 2)
     return { name: 'Collar', description: 'Protected between put (floor) and call (cap)', color: '#8b5cf6' };
+  if (shortStock.length === 1 && tSP === 1 && opts.length === 1)
+    return { name: 'Covered Put', description: 'Short stock with obligation to buy back at put strike if assigned', color: '#f97316' };
 
-  // ── Two-leg option strategies ─────────────────────────────────────────────────
-  if (stocks.length === 0 && opts.length === 2) {
-    // Bull Call Spread / Bear Call Spread
-    if (buyCalls.length === 1 && sellCalls.length === 1 && puts.length === 0) {
-      const b = buyCalls[0]!, s = sellCalls[0]!;
-      return b.strike < s.strike
-        ? { name: 'Bull Call Spread', description: 'Defined-risk bullish; max profit at or above short call', color: '#22c55e' }
-        : { name: 'Bear Call Spread',  description: 'Credit spread; profit if stock stays below long call',   color: '#f97316' };
-    }
-    // Bear Put Spread / Bull Put Spread
-    if (buyPuts.length === 1 && sellPuts.length === 1 && calls.length === 0) {
-      const b = buyPuts[0]!, s = sellPuts[0]!;
-      return b.strike > s.strike
-        ? { name: 'Bear Put Spread', description: 'Defined-risk bearish; max profit at or below short put', color: '#ef4444' }
-        : { name: 'Bull Put Spread', description: 'Credit spread; profit if stock stays above short put',   color: '#22c55e' };
-    }
-    // Short Straddle / Strangle
-    if (sellPuts.length === 1 && sellCalls.length === 1 && buyPuts.length === 0 && buyCalls.length === 0) {
-      const p = sellPuts[0]!, c = sellCalls[0]!;
-      return p.strike === c.strike
-        ? { name: 'Short Straddle', description: 'Profit in tight range; ATM short put + call', color: '#f97316' }
-        : { name: 'Short Strangle', description: 'Profit if stock stays between strikes', color: '#f97316' };
-    }
-    // Long Straddle / Strangle
-    if (buyPuts.length === 1 && buyCalls.length === 1 && sellPuts.length === 0 && sellCalls.length === 0) {
-      const p = buyPuts[0]!, c = buyCalls[0]!;
-      return p.strike === c.strike
-        ? { name: 'Long Straddle', description: 'Profit on large move either direction', color: '#3b82f6' }
-        : { name: 'Long Strangle', description: 'Profit on large move; lower cost than straddle', color: '#3b82f6' };
+  // ── Pure option strategies (no stock) ────────────────────────────────────
+  if (stocks.length > 0) {
+    // Unrecognized stock + options combo
+    const netPremS = legs.reduce((s, l) => s + (l.side === 'sell' ? 1 : -1) * l.premium, 0);
+    return { name: 'Custom Strategy', description: netPremS >= 0 ? 'Net credit position' : 'Net debit position', color: '#94a3b8' };
+  }
+
+  // ── Calendar spreads (same strike/type, different expiries) ──────────────
+  if (opts.length === 2) {
+    const [a, b] = opts;
+    if (a && b && a.type === b.type && a.side !== b.side
+        && nearEq(a.strike, b.strike) && a.expiry !== b.expiry) {
+      return {
+        name: a.type === 'call' ? 'Call Calendar' : 'Put Calendar',
+        description: 'Sell near-term, buy far-term at same strike; profits from time-decay differential',
+        color: '#8b5cf6',
+      };
     }
   }
 
-  // ── Four-leg strategies ───────────────────────────────────────────────────────
-  if (stocks.length === 0 && buyPuts.length === 1 && sellPuts.length === 1
-      && buyCalls.length === 1 && sellCalls.length === 1) {
+  // ── Two-option single-type strategies ─────────────────────────────────────
+  if (tBC === 1 && tSC === 1 && tBP === 0 && tSP === 0) {
+    const bc = buyCalls[0]!, sc = sellCalls[0]!;
+    if (bc.expiry !== sc.expiry && bc.strike / sc.strike < 0.92)
+      return { name: "Poor Man's Covered Call", description: 'Deep ITM long call (diagonal) + short OTM call; synthetic covered call at lower capital', color: '#22c55e' };
+    return bc.strike < sc.strike
+      ? { name: 'Bull Call Spread', description: 'Defined-risk bullish; max profit at or above short call', color: '#22c55e' }
+      : { name: 'Bear Call Spread (Short Call Vertical)', description: 'Credit spread; profit if stock stays below long call', color: '#f97316' };
+  }
+
+  if (tBP === 1 && tSP === 1 && tBC === 0 && tSC === 0) {
+    const bp = buyPuts[0]!, sp = sellPuts[0]!;
+    if (bp.expiry !== sp.expiry && bp.strike / sp.strike > 1.10)
+      return { name: "Poor Man's Covered Put", description: 'Deep ITM long put (diagonal) + short OTM put; synthetic covered put at lower capital', color: '#ef4444' };
+    return bp.strike > sp.strike
+      ? { name: 'Bear Put Spread', description: 'Defined-risk bearish; max profit at or below short put', color: '#ef4444' }
+      : { name: 'Bull Put Spread (Short Put Vertical)', description: 'Credit spread; profit if stock stays above short put', color: '#22c55e' };
+  }
+
+  if (tSP === 1 && tSC === 1 && tBP === 0 && tBC === 0) {
+    const sp = sellPuts[0]!, sc = sellCalls[0]!;
+    return nearEq(sp.strike, sc.strike)
+      ? { name: 'Short Straddle', description: 'Max profit at strike; sells both ATM put and call', color: '#f97316' }
+      : { name: 'Short Strangle', description: 'Profit if stock stays between the two short strikes', color: '#f97316' };
+  }
+
+  if (tBP === 1 && tBC === 1 && tSP === 0 && tSC === 0) {
+    const bp = buyPuts[0]!, bc = buyCalls[0]!;
+    return nearEq(bp.strike, bc.strike)
+      ? { name: 'Long Straddle', description: 'Profit on large move either direction; unlimited potential', color: '#3b82f6' }
+      : { name: 'Long Strangle', description: 'Profit on large move either direction; lower cost than straddle', color: '#3b82f6' };
+  }
+
+  // ── Zebra (2 long + 1 short, same type) ──────────────────────────────────
+  if (tBC === 2 && tSC === 1 && tBP === 0 && tSP === 0) {
+    const sc = sellCalls[0]!;
+    if (expandByQty(buyCalls).every(l => l.strike <= sc.strike))
+      return { name: 'Call Zebra', description: 'Buy 2 calls near ATM, sell 1 OTM call; leveraged bullish with defined max loss', color: '#22c55e' };
+  }
+
+  if (tBP === 2 && tSP === 1 && tBC === 0 && tSC === 0) {
+    const sp = sellPuts[0]!;
+    if (expandByQty(buyPuts).every(l => l.strike >= sp.strike))
+      return { name: 'Put Zebra', description: 'Buy 2 puts near ATM, sell 1 OTM put; leveraged bearish with defined max loss', color: '#ef4444' };
+  }
+
+  // ── Front ratios (1 long + 2 short, same type) ────────────────────────────
+  if (tBC === 1 && tSC === 2 && tBP === 0 && tSP === 0) {
+    const bc = buyCalls[0]!;
+    if (expandByQty(sellCalls).every(l => l.strike > bc.strike))
+      return { name: 'Call Front Ratio', description: 'Buy 1 lower call, sell 2 higher calls; max profit near short strike, unlimited upside risk', color: '#f97316' };
+  }
+
+  if (tBP === 1 && tSP === 2 && tBC === 0 && tSC === 0) {
+    const bp = buyPuts[0]!;
+    if (expandByQty(sellPuts).every(l => l.strike < bp.strike))
+      return { name: 'Put Front Ratio', description: 'Buy 1 higher put, sell 2 lower puts; max profit near short strike, unlimited downside risk', color: '#f97316' };
+  }
+
+  // ── 3-leg mixed put + call strategies ────────────────────────────────────
+  if (tSP === 1 && tSC === 1 && tBC === 1 && tBP === 0) {
+    const sp = sellPuts[0]!, sc = sellCalls[0]!, bc = buyCalls[0]!;
+    if (bc.strike > sc.strike) {
+      return nearEq(sp.strike, sc.strike)
+        ? { name: 'Big Lizard', description: 'Short ATM straddle + long OTM call; large credit, no upside risk', color: '#8b5cf6' }
+        : { name: 'Jade Lizard', description: 'Short OTM put + short call spread; no upside risk when credit ≥ call spread width', color: '#8b5cf6' };
+    }
+  }
+
+  if (tSC === 1 && tSP === 1 && tBP === 1 && tBC === 0) {
+    const sc = sellCalls[0]!, sp = sellPuts[0]!, bp = buyPuts[0]!;
+    if (bp.strike < sp.strike) {
+      return nearEq(sp.strike, sc.strike)
+        ? { name: 'Reverse Big Lizard', description: 'Short ATM straddle + long OTM put; large credit, no downside risk', color: '#8b5cf6' }
+        : { name: 'Reverse Jade Lizard', description: 'Short OTM call + short put spread; no downside risk when credit ≥ put spread width', color: '#8b5cf6' };
+    }
+  }
+
+  // ── Butterfly families (2 buy + 2 sell, same type) ────────────────────────
+  if (tBC === 2 && tSC === 2 && tBP === 0 && tSP === 0) {
+    const allBC = expandByQty(buyCalls);
+    const allSC = expandByQty(sellCalls);
+    if (allBC.length >= 2 && allSC.length >= 2) {
+      const bcLow = allBC[0]!, bcHigh = allBC[allBC.length - 1]!, scMid = allSC[0]!;
+      if (bcLow.strike < scMid.strike && bcHigh.strike > scMid.strike) {
+        const lWing = scMid.strike - bcLow.strike;
+        const rWing = bcHigh.strike - scMid.strike;
+        const sym = Math.abs(lWing - rWing) / scMid.strike < 0.03;
+        return sym
+          ? { name: 'Call Butterfly', description: 'Max profit at middle strike; defined risk, typically low-cost debit', color: '#8b5cf6' }
+          : { name: 'Call Broken Wing Butterfly', description: 'Asymmetric butterfly; can be structured for a net credit with wider outer wing', color: '#8b5cf6' };
+      }
+    }
+  }
+
+  if (tBP === 2 && tSP === 2 && tBC === 0 && tSC === 0) {
+    const allBP = expandByQty(buyPuts);
+    const allSP = expandByQty(sellPuts);
+    if (allBP.length >= 2 && allSP.length >= 2) {
+      const bpLow = allBP[0]!, bpHigh = allBP[allBP.length - 1]!, spMid = allSP[0]!;
+      if (bpLow.strike < spMid.strike && bpHigh.strike > spMid.strike) {
+        const lWing = spMid.strike - bpLow.strike;
+        const rWing = bpHigh.strike - spMid.strike;
+        const sym = Math.abs(lWing - rWing) / spMid.strike < 0.03;
+        return sym
+          ? { name: 'Put Butterfly', description: 'Max profit at middle strike; defined risk, typically low-cost debit', color: '#8b5cf6' }
+          : { name: 'Put Broken Wing Butterfly', description: 'Asymmetric butterfly; can be structured for a net credit with wider outer wing', color: '#8b5cf6' };
+      }
+    }
+  }
+
+  // ── Iron Condor / Iron Fly ────────────────────────────────────────────────
+  if (tBP === 1 && tSP === 1 && tSC === 1 && tBC === 1) {
     const bp = buyPuts[0]!, sp = sellPuts[0]!, sc = sellCalls[0]!, bc = buyCalls[0]!;
     if (bp.strike < sp.strike && sp.strike <= sc.strike && sc.strike < bc.strike) {
-      return sp.strike === sc.strike
-        ? { name: 'Iron Butterfly', description: 'Max profit at middle strike; defined risk both sides', color: '#8b5cf6' }
-        : { name: 'Iron Condor',    description: 'Profit if stock stays between short strikes; defined risk', color: '#8b5cf6' };
+      return nearEq(sp.strike, sc.strike)
+        ? { name: 'Iron Fly', description: 'Max profit at middle strike; defined risk both sides, large credit', color: '#8b5cf6' }
+        : { name: 'Iron Condor', description: 'Profit if stock stays between short strikes; defined risk both sides', color: '#8b5cf6' };
     }
   }
 
-  // ── Partial / building state ──────────────────────────────────────────────────
-  if (sellPuts.length >= 1 && opts.length < 4)
-    return { name: 'Building…', description: `${sellPuts.length} short put${sellPuts.length > 1 ? 's' : ''} — add more legs to complete the strategy`, color: '#64748b', partial: true };
-  if (sellCalls.length >= 1 && opts.length < 4)
-    return { name: 'Building…', description: `${sellCalls.length} short call${sellCalls.length > 1 ? 's' : ''} — add more legs`, color: '#64748b', partial: true };
+  // ── Partial / building state ──────────────────────────────────────────────
+  if ((tSP > 0 || tSC > 0) && opts.length <= 3)
+    return { name: 'Building…', description: 'Add more legs to complete the strategy', color: '#64748b', partial: true };
 
-  // ── Generic fallback ──────────────────────────────────────────────────────────
+  // ── Generic fallback ──────────────────────────────────────────────────────
   const netPrem = legs.reduce((s, l) => s + (l.side === 'sell' ? 1 : -1) * l.premium, 0);
   return {
     name: 'Custom Strategy',
-    description: netPrem >= 0 ? 'Net credit spread' : 'Net debit spread',
+    description: netPrem >= 0 ? 'Net credit position' : 'Net debit position',
     color: '#94a3b8',
   };
 }
@@ -888,8 +1224,9 @@ export function PayoffView({ initialTicker, initialSpot, initialExpiry, initialS
   const thinkingRef = useRef<HTMLDivElement>(null);
 
   // UI state
-  const [error, setError]     = useState<string | null>(null);
-  const [statusMsg, setStatus] = useState<string | null>(null);
+  const [error, setError]         = useState<string | null>(null);
+  const [statusMsg, setStatus]    = useState<string | null>(null);
+  const [templateSlug, setTemplateSlug] = useState('');
 
   // Watchlist picker
   const [watchlists, setWatchlists]           = useState<Watchlist[]>([]);
@@ -1118,8 +1455,10 @@ export function PayoffView({ initialTicker, initialSpot, initialExpiry, initialS
   }, [legs, metrics, recognizedStrategy, spotNum, ticker]);
 
   // ── Template application ────────────────────────────────────────────────────
-  const applyTemplate = useCallback((tpl: Template) => {
+  const applyTemplateBySlug = useCallback((slug: string) => {
     if (!spotNum) { setError('Enter a spot price first'); return; }
+    const tpl = ALL_TEMPLATES.find(t => t.slug === slug);
+    if (!tpl) return;
     setLegs(tpl.build(spotNum));
     setError(null);
   }, [spotNum]);
@@ -1332,25 +1671,37 @@ export function PayoffView({ initialTicker, initialSpot, initialExpiry, initialS
           </div>
         </div>
 
-        {/* ── Quick templates ── */}
+        {/* ── Strategy templates dropdown (all 31 Strategy Lab strategies) ── */}
         <div>
-          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 5, textTransform: 'uppercase', letterSpacing: 1 }}>Templates</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-            {TEMPLATES.map(tpl => (
-              <button
-                key={tpl.label}
-                onClick={() => applyTemplate(tpl)}
-                title={`Build ${tpl.label} from current spot`}
-                style={{
-                  padding: '4px 8px', fontSize: 11, borderRadius: 4,
-                  background: '#1e293b', border: '1px solid #334155',
-                  color: '#cbd5e1', cursor: 'pointer',
-                }}
-              >
-                {tpl.icon} {tpl.label}
-              </button>
-            ))}
-          </div>
+          <label style={{ fontSize: 10, color: 'var(--text-muted)', display: 'block', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 }}>
+            Templates
+          </label>
+          <select
+            value={templateSlug}
+            onChange={e => {
+              const slug = e.target.value;
+              setTemplateSlug('');          // reset immediately so it shows placeholder
+              if (slug) applyTemplateBySlug(slug);
+            }}
+            style={{
+              width: '100%', padding: '5px 7px', fontSize: 12,
+              background: '#1e293b', color: '#e2e8f0',
+              border: '1px solid #334155', borderRadius: 4,
+            }}
+          >
+            <option value=''>— Select a strategy —</option>
+            {TEMPLATE_CATEGORY_ORDER.map(cat => {
+              const strategies = ALL_TEMPLATES.filter(t => t.category === cat);
+              if (strategies.length === 0) return null;
+              return (
+                <optgroup key={cat} label={TEMPLATE_CATEGORY_LABELS[cat]}>
+                  {strategies.map(t => (
+                    <option key={t.slug} value={t.slug}>{t.name}</option>
+                  ))}
+                </optgroup>
+              );
+            })}
+          </select>
         </div>
 
         {/* ── Legs list ── */}
