@@ -4114,6 +4114,9 @@ input[type='checkbox'] {
 .retro-bw-return { font-weight: 700; font-size: 15px; margin-left: auto; }
 
 .retro-section-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
   font-size: 13px;
   font-weight: 600;
   color: var(--text-muted);
@@ -4131,9 +4134,6 @@ input[type='checkbox'] {
   gap: 12px;
 }
 .retro-snapshot-section .retro-section-title {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
   margin-bottom: 4px;
 }
 .retro-snapshot-subtitle {
@@ -4154,6 +4154,8 @@ input[type='checkbox'] {
 }
 .retro-snapshot-table { margin-bottom: 4px; }
 .retro-snapshot-empty p { color: var(--text-muted); font-size: 13px; margin: 4px 0 0; }
+.retro-col-note { font-size: 10px; font-weight: 400; color: var(--text-muted); margin-left: 2px; text-transform: none; letter-spacing: 0; }
+.retro-no-data { color: var(--text-muted); font-size: 11px; }
 
 .retro-empty-state {
   text-align: center;

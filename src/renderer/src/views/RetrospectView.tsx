@@ -152,7 +152,10 @@ function SummaryTab({
       {/* Per-strategy breakdown */}
       {breakdown.length > 0 && (
         <div className="retro-breakdown">
-          <div className="retro-section-title">Strategy Accuracy</div>
+          <div className="retro-section-title">
+            Strategy Accuracy
+            <span className="retro-snapshot-subtitle">Win Rate and Avg Return reflect closed / expired trades only</span>
+          </div>
           <table className="retro-table">
             <thead>
               <tr>
@@ -161,24 +164,47 @@ function SummaryTab({
                 <th>Open</th>
                 <th>Wins</th>
                 <th>Losses</th>
-                <th>Win Rate</th>
-                <th>Avg Return</th>
+                <th>Win Rate <span className="retro-col-note">(closed)</span></th>
+                <th>Avg Return <span className="retro-col-note">(closed)</span></th>
+                {snapAccuracy && snapAccuracy.totalSnapshots > 0 && (
+                  <>
+                    <th>Day+1 Acc <span className="retro-col-note">(snapshots)</span></th>
+                    <th>Day+1 Avg <span className="retro-col-note">(snapshots)</span></th>
+                  </>
+                )}
               </tr>
             </thead>
             <tbody>
-              {breakdown.map(row => (
-                <tr key={row.strategy}>
-                  <td>{STRATEGY_LABELS[row.strategy]}</td>
-                  <td>{row.total}</td>
-                  <td style={{ color: '#58a6ff' }}>{row.open}</td>
-                  <td style={{ color: '#3fb950' }}>{row.wins}</td>
-                  <td style={{ color: '#f85149' }}>{row.losses}</td>
-                  <td style={{ minWidth: 120 }}>{winRateBar(row.winRate)}</td>
-                  <td style={{ color: row.avgReturn !== null && row.avgReturn >= 0 ? '#3fb950' : '#f85149' }}>
-                    {fmtPct(row.avgReturn)}
-                  </td>
-                </tr>
-              ))}
+              {breakdown.map(row => {
+                const snap = snapAccuracy?.byStrategy.find(s => s.strategy === row.strategy);
+                return (
+                  <tr key={row.strategy}>
+                    <td>{STRATEGY_LABELS[row.strategy]}</td>
+                    <td>{row.total}</td>
+                    <td style={{ color: '#58a6ff' }}>{row.open}</td>
+                    <td style={{ color: '#3fb950' }}>{row.wins}</td>
+                    <td style={{ color: '#f85149' }}>{row.losses}</td>
+                    <td style={{ minWidth: 110 }}>
+                      {row.winRate !== null ? winRateBar(row.winRate) : <span className="retro-no-data">no closed trades</span>}
+                    </td>
+                    <td style={{ color: row.avgReturn !== null && row.avgReturn >= 0 ? '#3fb950' : '#f85149' }}>
+                      {row.avgReturn !== null ? fmtPct(row.avgReturn) : <span className="retro-no-data">—</span>}
+                    </td>
+                    {snapAccuracy && snapAccuracy.totalSnapshots > 0 && (
+                      <>
+                        <td style={{ minWidth: 110 }}>
+                          {snap && snap.accuracy !== null
+                            ? winRateBar(snap.accuracy)
+                            : <span className="retro-no-data">{snap ? 'need ≥ 3' : '—'}</span>}
+                        </td>
+                        <td style={{ color: snap?.avgReturn != null && snap.avgReturn >= 0 ? '#3fb950' : '#f85149' }}>
+                          {snap?.avgReturn != null ? fmtPct(snap.avgReturn) : <span className="retro-no-data">—</span>}
+                        </td>
+                      </>
+                    )}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
