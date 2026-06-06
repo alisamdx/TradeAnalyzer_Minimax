@@ -3337,6 +3337,26 @@ input[type='checkbox'] {
 }
 .brief-run-btn:hover { background: rgba(88,166,255,0.2); }
 .brief-run-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.brief-resend-btn {
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.brief-resend-btn:hover { border-color: #27ae60; color: #27ae60; }
+.brief-resend-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.brief-resend-msg {
+  font-size: 11px;
+  color: #27ae60;
+  padding: 0 6px;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* History date strip */
 .brief-history-bar {

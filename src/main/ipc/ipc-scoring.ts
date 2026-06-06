@@ -5,7 +5,10 @@
 import { ipcMain, type IpcMainInvokeEvent } from 'electron';
 import type { ScoringService } from '../services/scoring-service.js';
 import type { ScoringSignal, ScoringStrategy } from '../services/scoring-service.js';
-import type { IpcResult } from '@shared/types.js';
+import type { IpcResult, BriefPick } from '@shared/types.js';
+import type { EmailService } from '../services/email-service.js';
+import { buildEmailHtml, buildPdf } from '../services/brief-report-builder.js';
+import { STRATEGIES } from '../services/scoring-service.js';
 
 function ok<T>(value: T): IpcResult<T> {
   return { ok: true, value };
@@ -23,7 +26,7 @@ function wrap<Args extends unknown[], R>(fn: (...args: Args) => R) {
   };
 }
 
-export function registerScoringIpc(scoringService: ScoringService): void {
+export function registerScoringIpc(scoringService: ScoringService, emailService: EmailService): void {
   // Get config for a strategy (or all strategies)
   ipcMain.handle(
     'scoring:get-config',
@@ -81,4 +84,50 @@ export function registerScoringIpc(scoringService: ScoringService): void {
       }));
     })
   );
+
+  // Resend the most recent brief as email+PDF without re-running the job.
+  // Useful for validating email/PDF layout changes or sending on non-trading days.
+  ipcMain.handle('scoring:resend-brief-email', async (_e: IpcMainInvokeEvent): Promise<IpcResult<{ sent: boolean; message: string }>> => {
+    try {
+      if (!emailService.isConfigured()) {
+        return ok({ sent: false, message: 'Email not configured — check Settings → Email.' });
+      }
+
+      const rows = scoringService.getLatestBrief();
+      if (rows.length === 0) {
+        return ok({ sent: false, message: 'No brief in database — run the job first.' });
+      }
+
+      // Reconstruct briefsByStrategy from persisted rows
+      const briefsByStrategy = new Map<ScoringStrategy, BriefPick[]>();
+      let generatedAt = rows[0]!.generated_at;
+
+      for (const strategy of STRATEGIES) {
+        const row = rows.find(r => r.strategy === strategy);
+        if (row) {
+          briefsByStrategy.set(strategy as ScoringStrategy, JSON.parse(row.picks) as BriefPick[]);
+          if (row.generated_at > generatedAt) generatedAt = row.generated_at;
+        }
+      }
+
+      const dateStr = new Date(generatedAt).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+      const [emailHtml, pdfBuffer] = await Promise.all([
+        Promise.resolve(buildEmailHtml(dateStr, briefsByStrategy)),
+        buildPdf(dateStr, briefsByStrategy),
+      ]);
+
+      const totalPicks = [...briefsByStrategy.values()].reduce((n, p) => n + p.length, 0);
+      const subject = `[Resend] Daily Intelligence Brief — ${new Date(generatedAt).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} — ${totalPicks} picks`;
+
+      await emailService.send(subject, emailHtml, [{
+        filename: `daily-brief-${dateStr}.pdf`,
+        content: pdfBuffer,
+        contentType: 'application/pdf',
+      }]);
+
+      return ok({ sent: true, message: `Resent brief from ${dateStr} (${totalPicks} picks).` });
+    } catch (err) {
+      return fail(err);
+    }
+  });
 }

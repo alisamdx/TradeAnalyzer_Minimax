@@ -383,7 +383,11 @@ app.whenReady().then(() => {
   // v0.22.7 — Trade Scoring Engine + Daily Intelligence Brief
   const scoringService = new ScoringService(db);
   scoringService.seedBaselines();
-  registerScoringIpc(scoringService);
+
+  const emailService = new EmailService(
+    () => { try { return secureGet(db, 'agentProjectPath') ?? ''; } catch { return ''; } }
+  );
+  registerScoringIpc(scoringService, emailService);
 
   const technicalSignalsJob = new DailyTechnicalSignalsJob(db);
   batchService.registerJob('daily-technical-signals', technicalSignalsJob, {
@@ -391,10 +395,6 @@ app.whenReady().then(() => {
     startupDelaySeconds: 150,    // after gap fill (120 s delay + buffer)
     runOnStartup: false,
   });
-
-  const emailService = new EmailService(
-    () => { try { return secureGet(db, 'agentProjectPath') ?? ''; } catch { return ''; } }
-  );
   const paperTradingService = new PaperTradingService(db);
   const briefJob = new DailyIntelligenceBriefJob(db, dataProvider, optionsProvider, emailService, paperTradingService);
   batchService.registerJob('daily-intelligence-brief', briefJob, {

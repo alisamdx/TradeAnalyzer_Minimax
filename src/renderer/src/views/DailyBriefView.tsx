@@ -507,6 +507,8 @@ export function DailyBriefView({ onGoToStrategyLab }: DailyBriefViewProps) {
   const [history, setHistory] = useState<DailyBriefEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
+  const [resending, setResending] = useState(false);
+  const [resendMsg, setResendMsg] = useState<string | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [selectedHistoryId, setSelectedHistoryId] = useState<number | null>(null);
   const [accuracyMap, setAccuracyMap] = useState<Map<string, BriefAccuracy>>(new Map());
@@ -578,6 +580,20 @@ export function DailyBriefView({ onGoToStrategyLab }: DailyBriefViewProps) {
     }
   };
 
+  const handleResendEmail = async () => {
+    setResending(true);
+    setResendMsg(null);
+    try {
+      const result = await window.api.scoring.resendBriefEmail();
+      setResendMsg(result.message);
+    } catch (err) {
+      setResendMsg(`Error: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setResending(false);
+      setTimeout(() => setResendMsg(null), 6000);
+    }
+  };
+
   const toggleCollapse = (strategy: ScoringStrategy) => {
     setCollapsed(prev => {
       const next = { ...prev, [strategy]: !prev[strategy] };
@@ -629,6 +645,17 @@ export function DailyBriefView({ onGoToStrategyLab }: DailyBriefViewProps) {
         >
           History {showHistory ? '▲' : '▼'}
         </button>
+        <button
+          className="brief-resend-btn"
+          onClick={handleResendEmail}
+          disabled={resending || running}
+          title="Re-generate email + PDF from the last saved brief and send to your inbox"
+        >
+          {resending ? 'Sending…' : 'Resend Email'}
+        </button>
+        {resendMsg && (
+          <span className="brief-resend-msg">{resendMsg}</span>
+        )}
         <button
           className="brief-run-btn"
           onClick={handleRunNow}

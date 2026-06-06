@@ -982,6 +982,8 @@ function buildApi() {
       invoke<DailyBriefEntry[]>('scoring:get-latest-brief', strategy),
     getBriefHistory: (limit?: number) =>
       invoke<DailyBriefEntry[]>('scoring:get-brief-history', limit),
+    resendBriefEmail: () =>
+      invoke<{ sent: boolean; message: string }>('scoring:resend-brief-email'),
   };
 
   const batch = {
