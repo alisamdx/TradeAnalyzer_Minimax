@@ -190,54 +190,21 @@ export class DailyOptionsSnapshotJob implements BatchJobHandler {
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
 
-  /** Load top screener candidates sorted by pass-score descending. */
+  /** Load top candidates from the full universe, limited to `limit` tickers. */
   private loadTopCandidates(limit: number): string[] {
-    // Prefer all screen_runs created today (ET) — captures both the stocks run
-    // and ETF run written by DailyScreenerJob.  Falls back to the single most-
-    // recent run when no today-runs exist.
-    const todayET = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-
-    type RunRow = { id: number };
-
-    let runIds: number[] = (this.db.prepare(`
-      SELECT id FROM screen_runs
-      WHERE substr(run_at, 1, 10) = ?
-      ORDER BY id ASC
-    `).all(todayET) as RunRow[]).map(r => r.id);
-
-    if (runIds.length === 0) {
-      const latestRun = this.db.prepare(
-        'SELECT id FROM screen_runs ORDER BY id DESC LIMIT 1'
-      ).get() as RunRow | undefined;
-      if (!latestRun) return [];
-      runIds = [latestRun.id];
-    }
-
-    type SRow = { ticker: string; payload_json: string };
-    const ph = runIds.map(() => '?').join(',');
+    // Use the full S&P 500 + Russell 1000 universe directly — same rationale
+    // as DailyIntelligenceBriefJob: the scoring engine handles quality ranking,
+    // so a screener pre-filter is not needed here either.
+    type Row = { ticker: string };
     const rows = this.db.prepare(`
-      SELECT ticker, payload_json
-      FROM screen_results
-      WHERE screen_run_id IN (${ph})
+      SELECT DISTINCT ticker FROM constituents
+      WHERE index_name IN ('sp500', 'russell1000')
       ORDER BY ticker ASC
-    `).all(...runIds) as SRow[];
+      LIMIT ?
+    `).all(limit) as Row[];
 
     // Exclude scoring reference tickers (SPY + sector ETFs) — infrastructure only.
     const refSet = new Set<string>(SCORING_REFERENCE_TICKERS);
-
-    const best = new Map<string, number>(); // ticker → best passScore
-    for (const row of rows) {
-      const p = JSON.parse(row.payload_json) as { passScore?: number };
-      const score = p.passScore ?? 0;
-      if (score > 0 && !refSet.has(row.ticker)) {
-        const prev = best.get(row.ticker) ?? -1;
-        if (score > prev) best.set(row.ticker, score);
-      }
-    }
-
-    return [...best.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, limit)
-      .map(([ticker]) => ticker);
+    return rows.map(r => r.ticker).filter(t => !refSet.has(t));
   }
 }

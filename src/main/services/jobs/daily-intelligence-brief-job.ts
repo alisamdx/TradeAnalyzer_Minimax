@@ -442,55 +442,26 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
   // ── Stage 1 helpers ────────────────────────────────────────────────────────
 
   private loadCandidates(): string[] {
-    // Prefer all screen_runs created today (ET) so that both the stocks run and the
-    // ETF run written by DailyScreenerJob are included in the candidate pool.
-    // Falls back to the single most-recent run when no today-runs exist (e.g. user
-    // manually ran the screener on a previous day and batch hasn't fired yet).
-    const todayET = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-
-    type RunRow = { id: number };
-
-    let runIds: number[] = (this.db.prepare(`
-      SELECT id FROM screen_runs
-      WHERE substr(run_at, 1, 10) = ?
-      ORDER BY id ASC
-    `).all(todayET) as RunRow[]).map(r => r.id);
-
-    if (runIds.length === 0) {
-      // No runs today — fall back to the single most recent run (may be stale).
-      const latestRun = this.db.prepare(
-        'SELECT id FROM screen_runs ORDER BY id DESC LIMIT 1'
-      ).get() as RunRow | undefined;
-      if (!latestRun) return [];
-      runIds = [latestRun.id];
-    }
-
-    // Load results from all relevant runs; deduplicate by ticker, keeping the
-    // entry with the highest passScore (stocks strict typically beats ETF soft).
-    type SRow = { ticker: string; payload_json: string };
-    const ph = runIds.map(() => '?').join(',');
+    // Score the full S&P 500 + Russell 1000 + ETF universe directly from the
+    // constituents table.  The scoring engine has fundamental quality signals
+    // (ROIC, FCF, earnings growth, leverage, relative strength) built in, so a
+    // separate screener pre-filter is redundant and harmful — in particular it
+    // would exclude overleveraged / declining stocks from the Bearish strategy
+    // which specifically needs them.
+    //
+    // The Daily Screener batch job still runs and populates screen_results for
+    // the Screener UI, but the Brief no longer depends on it.
+    type Row = { ticker: string };
     const rows = this.db.prepare(`
-      SELECT ticker, payload_json
-      FROM screen_results
-      WHERE screen_run_id IN (${ph})
+      SELECT DISTINCT ticker FROM constituents
+      WHERE index_name IN ('sp500', 'russell1000', 'etf')
       ORDER BY ticker ASC
-    `).all(...runIds) as SRow[];
+    `).all() as Row[];
 
-    // Exclude scoring reference tickers (SPY + sector ETFs) — these are infrastructure
-    // tickers for the relative-strength signal and are never valid trade picks.
+    // Exclude scoring reference tickers (SPY + sector ETFs) — these are
+    // infrastructure for the relative-strength signal and are never trade picks.
     const refSet = new Set<string>(SCORING_REFERENCE_TICKERS);
-
-    const best = new Map<string, number>(); // ticker → best passScore across runs
-    for (const row of rows) {
-      const p = JSON.parse(row.payload_json) as { passScore?: number };
-      const score = p.passScore ?? 0;
-      if (score > 0 && !refSet.has(row.ticker)) {
-        const prev = best.get(row.ticker) ?? -1;
-        if (score > prev) best.set(row.ticker, score);
-      }
-    }
-
-    return [...best.keys()];
+    return rows.map(r => r.ticker).filter(t => !refSet.has(t));
   }
 
   // ── Stage 3 helpers ────────────────────────────────────────────────────────
