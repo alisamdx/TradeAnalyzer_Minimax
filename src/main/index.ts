@@ -60,6 +60,7 @@ import { DailyIntelligenceBriefJob } from './services/jobs/daily-intelligence-br
 import { EmailService } from './services/email-service.js';
 import { DailyTechnicalSignalsJob } from './services/jobs/daily-technical-signals-job.js';
 import { DailyOptionsSnapshotJob } from './services/jobs/daily-options-snapshot-job.js';
+import { DailyPaperSnapshotJob } from './services/jobs/daily-paper-snapshot-job.js';
 import { PaperTradingService } from './services/paper-trading-service.js';
 import { registerPaperTradingIpc } from './ipc/ipc-paper-trading.js';
 
@@ -414,6 +415,15 @@ app.whenReady().then(() => {
     dailyScheduleTime: '06:00',
     startupDelaySeconds: 300,    // 5 min — allow E*Trade auth to initialise
     runOnStartup: true,
+  });
+
+  // Daily paper-trade price snapshots — runs after brief so today's prices are present.
+  // Idempotent: safe to trigger manually any number of times during the day.
+  const paperSnapshotJob = new DailyPaperSnapshotJob(db);
+  batchService.registerJob('daily-paper-snapshot', paperSnapshotJob, {
+    dailyScheduleTime: '17:00',    // after price-gap-fill (16:00) + brief (16:30)
+    startupDelaySeconds: 0,
+    runOnStartup: false,
   });
 
   // LEAPS + CSP strategy screener

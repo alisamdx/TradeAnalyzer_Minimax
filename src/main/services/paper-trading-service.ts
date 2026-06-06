@@ -513,6 +513,100 @@ export class PaperTradingService {
     };
   }
 
+  // ── Daily price snapshots (called by DailyPaperSnapshotJob) ──────────────
+  //
+  // For every paper trade whose entry_date is before today, insert one snapshot row
+  // per trading-day close available in historical_prices that we haven't snapshotted
+  // yet.  ON CONFLICT DO NOTHING makes this fully idempotent — safe to run many
+  // times per day.
+  //
+  // Returns the number of new snapshot rows written.
+  snapshotTrades(): number {
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+    const settings = this.getSettings();
+
+    // Load all trades that have at least one full trading day of history to snapshot.
+    type TradeRow = {
+      id: number;
+      brief_strategy: string;
+      entry_date: string;
+      entry_price: number | null;
+      expiry_date: string | null;
+      ticker: string;
+    };
+    const trades = this.db.prepare(`
+      SELECT id, brief_strategy, entry_date, entry_price, expiry_date, ticker
+      FROM paper_trades
+      WHERE entry_date < ?
+    `).all(today) as TradeRow[];
+
+    if (trades.length === 0) return 0;
+
+    // Build a set of (paper_trade_id, snapshot_date) already in the table so we
+    // can skip them without relying solely on the DB conflict (avoids lock churn).
+    type ExistingRow = { paper_trade_id: number; snapshot_date: string };
+    const existingRows = this.db.prepare(
+      'SELECT paper_trade_id, snapshot_date FROM paper_trade_snapshots'
+    ).all() as ExistingRow[];
+    const existing = new Set(existingRows.map(r => `${r.paper_trade_id}|${r.snapshot_date}`));
+
+    const insert = this.db.prepare(`
+      INSERT INTO paper_trade_snapshots
+        (paper_trade_id, snapshot_date, days_held, price, return_pct, verdict)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(paper_trade_id, snapshot_date) DO NOTHING
+    `);
+
+    // Price lookup: for a given ticker get all (date, close) after a given entry date.
+    type PriceRow = { date: string; close: number };
+
+    let written = 0;
+    withTransaction(this.db, () => {
+      for (const trade of trades) {
+        if (trade.entry_price == null || trade.entry_price <= 0) continue;
+
+        const prices = this.db.prepare(`
+          SELECT date, close
+          FROM historical_prices
+          WHERE ticker = ? AND date > ? AND date <= ?
+          ORDER BY date ASC
+        `).all(trade.ticker, trade.entry_date, today) as PriceRow[];
+
+        for (const { date: snapDate, close } of prices) {
+          if (existing.has(`${trade.id}|${snapDate}`)) continue;
+
+          const entryMs   = new Date(trade.entry_date + 'T12:00:00Z').getTime();
+          const snapMs    = new Date(snapDate        + 'T12:00:00Z').getTime();
+          const daysHeld  = Math.max(1, Math.round((snapMs - entryMs) / 86_400_000));
+
+          const returnPct = (close - trade.entry_price) / trade.entry_price * 100;
+
+          // DTE at snapshot date (for verdict thresholds — not the close_signal check)
+          let daysToExpiry: number | null = null;
+          if (trade.expiry_date) {
+            const expiryMs = new Date(trade.expiry_date + 'T12:00:00Z').getTime();
+            daysToExpiry = Math.max(0, Math.round((expiryMs - snapMs) / 86_400_000));
+          }
+
+          const { verdict } = computeVerdict(
+            trade.brief_strategy as ScoringStrategy,
+            returnPct,
+            daysToExpiry,
+            settings,
+          );
+
+          const result = insert.run(trade.id, snapDate, daysHeld, close, returnPct, verdict);
+          if (result.changes > 0) {
+            written++;
+            existing.add(`${trade.id}|${snapDate}`); // prevent double-insert within same tx
+          }
+        }
+      }
+    });
+
+    return written;
+  }
+
   // Returns accuracy for multiple brief dates in one query (for history banner)
   getBriefAccuracyBatch(briefDates: string[]): BriefAccuracy[] {
     if (briefDates.length === 0) return [];
