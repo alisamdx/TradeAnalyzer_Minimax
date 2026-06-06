@@ -4124,6 +4124,37 @@ input[type='checkbox'] {
 
 .retro-breakdown { display: flex; flex-direction: column; }
 
+.retro-snapshot-section {
+  margin-top: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.retro-snapshot-section .retro-section-title {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+.retro-snapshot-subtitle {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-muted);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.retro-section-title-sm {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-top: 8px;
+  margin-bottom: 4px;
+}
+.retro-snapshot-table { margin-bottom: 4px; }
+.retro-snapshot-empty p { color: var(--text-muted); font-size: 13px; margin: 4px 0 0; }
+
 .retro-empty-state {
   text-align: center;
   padding: 40px 20px;

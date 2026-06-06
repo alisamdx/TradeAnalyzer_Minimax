@@ -1645,6 +1645,33 @@ export interface BriefAccuracy {
   accuracy:    number | null;  // null if < 3 closed trades (insufficient data)
 }
 
+// Per-strategy next-day accuracy from paper_trade_snapshots
+export interface SnapshotStrategyRow {
+  strategy:  ScoringStrategy;
+  total:     number;       // trades with at least one snapshot
+  positives: number;
+  negatives: number;
+  neutrals:  number;
+  accuracy:  number | null;  // positives/total × 100; null if < 3 trades
+  avgReturn: number | null;
+}
+
+// Per-brief-date next-day accuracy from paper_trade_snapshots
+export interface SnapshotBriefRow {
+  briefDate:  string;
+  total:      number;
+  positives:  number;
+  negatives:  number;
+  accuracy:   number | null;
+  avgReturn:  number | null;
+}
+
+export interface SnapshotAccuracy {
+  totalSnapshots: number;
+  byStrategy:     SnapshotStrategyRow[];
+  byBriefDate:    SnapshotBriefRow[];
+}
+
 // ─── Conviction List (v0.24.0) ───────────────────────────────────────────────
 
 export type ConvictionZone = 'buy' | 'mid' | 'watch' | 'high' | 'unset';

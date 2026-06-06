@@ -14,6 +14,9 @@ import type {
   StrategyBreakdown,
   RetroSettings,
   BriefAccuracy,
+  SnapshotAccuracy,
+  SnapshotStrategyRow,
+  SnapshotBriefRow,
   TradeVerdict,
   TradeRecommendation,
   TradeOutcome,
@@ -605,6 +608,98 @@ export class PaperTradingService {
     });
 
     return written;
+  }
+
+  // ── Snapshot-based accuracy (next-day, from paper_trade_snapshots) ──────────
+  //
+  // Uses the FIRST available snapshot per trade (= next trading day's close) as the
+  // evaluation point so every brief and every strategy are measured on equal footing.
+  // Requires ≥ 3 trades per cell before reporting accuracy (avoid misleading 100%).
+  getSnapshotAccuracy(): SnapshotAccuracy {
+    // Total snapshot rows
+    type CountRow = { n: number };
+    const totalSnapshots = (this.db.prepare('SELECT COUNT(*) AS n FROM paper_trade_snapshots').get() as CountRow).n;
+
+    if (totalSnapshots === 0) {
+      return { totalSnapshots: 0, byStrategy: [], byBriefDate: [] };
+    }
+
+    // Common CTE: find the first snapshot (min days_held) per trade
+    const cte = `
+      WITH first_snap AS (
+        SELECT paper_trade_id, MIN(days_held) AS min_held
+        FROM paper_trade_snapshots
+        GROUP BY paper_trade_id
+      ),
+      day1 AS (
+        SELECT s.paper_trade_id, s.return_pct, s.verdict
+        FROM paper_trade_snapshots s
+        JOIN first_snap fs
+          ON fs.paper_trade_id = s.paper_trade_id AND s.days_held = fs.min_held
+      )
+    `;
+
+    // Per-strategy
+    type SRow = {
+      strategy: string; total: number;
+      positives: number; negatives: number; neutrals: number;
+      avg_return: number | null;
+    };
+    const stratRows = this.db.prepare(`
+      ${cte}
+      SELECT
+        pt.brief_strategy        AS strategy,
+        COUNT(*)                 AS total,
+        SUM(CASE WHEN d.verdict = 'positive' THEN 1 ELSE 0 END) AS positives,
+        SUM(CASE WHEN d.verdict = 'negative' THEN 1 ELSE 0 END) AS negatives,
+        SUM(CASE WHEN d.verdict = 'neutral'  THEN 1 ELSE 0 END) AS neutrals,
+        AVG(d.return_pct)        AS avg_return
+      FROM paper_trades pt
+      JOIN day1 d ON d.paper_trade_id = pt.id
+      GROUP BY pt.brief_strategy
+      ORDER BY pt.brief_strategy
+    `).all() as SRow[];
+
+    const byStrategy: SnapshotStrategyRow[] = stratRows.map(r => ({
+      strategy:  r.strategy as ScoringStrategy,
+      total:     r.total,
+      positives: r.positives,
+      negatives: r.negatives,
+      neutrals:  r.neutrals,
+      accuracy:  r.total >= 3 ? (r.positives / r.total) * 100 : null,
+      avgReturn: r.avg_return,
+    }));
+
+    // Per-brief-date
+    type BRow = {
+      brief_date: string; total: number;
+      positives: number; negatives: number;
+      avg_return: number | null;
+    };
+    const briefRows = this.db.prepare(`
+      ${cte}
+      SELECT
+        pt.brief_date            AS brief_date,
+        COUNT(*)                 AS total,
+        SUM(CASE WHEN d.verdict = 'positive' THEN 1 ELSE 0 END) AS positives,
+        SUM(CASE WHEN d.verdict = 'negative' THEN 1 ELSE 0 END) AS negatives,
+        AVG(d.return_pct)        AS avg_return
+      FROM paper_trades pt
+      JOIN day1 d ON d.paper_trade_id = pt.id
+      GROUP BY pt.brief_date
+      ORDER BY pt.brief_date DESC
+    `).all() as BRow[];
+
+    const byBriefDate: SnapshotBriefRow[] = briefRows.map(r => ({
+      briefDate:  r.brief_date,
+      total:      r.total,
+      positives:  r.positives,
+      negatives:  r.negatives,
+      accuracy:   r.total >= 3 ? (r.positives / r.total) * 100 : null,
+      avgReturn:  r.avg_return,
+    }));
+
+    return { totalSnapshots, byStrategy, byBriefDate };
   }
 
   // Returns accuracy for multiple brief dates in one query (for history banner)

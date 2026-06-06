@@ -12,6 +12,7 @@ import type {
   RetroSettings,
   RetroStrategySettings,
   ScoringStrategy,
+  SnapshotAccuracy,
 } from '@shared/types.js';
 
 type Tab = 'summary' | 'inprogress' | 'history' | 'settings';
@@ -87,7 +88,15 @@ function winRateBar(rate: number | null): React.ReactElement {
 
 // ── Summary Tab ───────────────────────────────────────────────────────────────
 
-function SummaryTab({ summary, breakdown }: { summary: PaperTradeSummary | null; breakdown: StrategyBreakdown[] }) {
+function SummaryTab({
+  summary,
+  breakdown,
+  snapAccuracy,
+}: {
+  summary: PaperTradeSummary | null;
+  breakdown: StrategyBreakdown[];
+  snapAccuracy: SnapshotAccuracy | null;
+}) {
   if (!summary) return <div className="empty">Loading…</div>;
 
   return (
@@ -179,6 +188,98 @@ function SummaryTab({ summary, breakdown }: { summary: PaperTradeSummary | null;
         <div className="retro-empty-state">
           <p>No paper trades yet.</p>
           <p className="meta">Run the Daily Intelligence Brief to start tracking picks automatically.</p>
+        </div>
+      )}
+
+      {/* ── Next-Day Accuracy (snapshot-based) ── */}
+      {snapAccuracy && snapAccuracy.totalSnapshots > 0 && (
+        <div className="retro-snapshot-section">
+          <div className="retro-section-title">
+            Next-Day Accuracy
+            <span className="retro-snapshot-subtitle">
+              first trading-day close after brief · {snapAccuracy.totalSnapshots} snapshot{snapAccuracy.totalSnapshots !== 1 ? 's' : ''}
+            </span>
+          </div>
+
+          {/* By strategy */}
+          {snapAccuracy.byStrategy.length > 0 && (
+            <table className="retro-table retro-snapshot-table">
+              <thead>
+                <tr>
+                  <th>Strategy</th>
+                  <th>Picks</th>
+                  <th style={{ color: '#3fb950' }}>Positive</th>
+                  <th style={{ color: '#f85149' }}>Negative</th>
+                  <th style={{ color: '#8b949e' }}>Neutral</th>
+                  <th>Accuracy</th>
+                  <th>Avg Return</th>
+                </tr>
+              </thead>
+              <tbody>
+                {snapAccuracy.byStrategy.map(row => (
+                  <tr key={row.strategy}>
+                    <td>{STRATEGY_LABELS[row.strategy]}</td>
+                    <td>{row.total}</td>
+                    <td style={{ color: '#3fb950' }}>{row.positives}</td>
+                    <td style={{ color: '#f85149' }}>{row.negatives}</td>
+                    <td style={{ color: '#8b949e' }}>{row.neutrals}</td>
+                    <td style={{ minWidth: 120 }}>
+                      {row.accuracy !== null
+                        ? winRateBar(row.accuracy)
+                        : <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>need ≥ 3</span>}
+                    </td>
+                    <td style={{ color: row.avgReturn != null && row.avgReturn >= 0 ? '#3fb950' : '#f85149' }}>
+                      {fmtPct(row.avgReturn)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          {/* By brief date */}
+          {snapAccuracy.byBriefDate.length > 0 && (
+            <>
+              <div className="retro-section-title retro-section-title-sm">Brief Accuracy Trend</div>
+              <table className="retro-table retro-snapshot-table">
+                <thead>
+                  <tr>
+                    <th>Brief Date</th>
+                    <th>Picks</th>
+                    <th style={{ color: '#3fb950' }}>Positive</th>
+                    <th style={{ color: '#f85149' }}>Negative</th>
+                    <th>Accuracy</th>
+                    <th>Avg Return</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {snapAccuracy.byBriefDate.map(row => (
+                    <tr key={row.briefDate}>
+                      <td style={{ fontWeight: 600 }}>{fmtDate(row.briefDate)}</td>
+                      <td>{row.total}</td>
+                      <td style={{ color: '#3fb950' }}>{row.positives}</td>
+                      <td style={{ color: '#f85149' }}>{row.negatives}</td>
+                      <td style={{ minWidth: 120 }}>
+                        {row.accuracy !== null
+                          ? winRateBar(row.accuracy)
+                          : <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>need ≥ 3</span>}
+                      </td>
+                      <td style={{ color: row.avgReturn != null && row.avgReturn >= 0 ? '#3fb950' : '#f85149' }}>
+                        {fmtPct(row.avgReturn)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
+        </div>
+      )}
+
+      {snapAccuracy && snapAccuracy.totalSnapshots === 0 && summary.totalTrades > 0 && (
+        <div className="retro-snapshot-section retro-snapshot-empty">
+          <div className="retro-section-title">Next-Day Accuracy</div>
+          <p className="meta">No snapshots yet — the Daily Paper Trade Snapshot job runs at 17:00 ET after market close.</p>
         </div>
       )}
     </div>
@@ -523,6 +624,7 @@ export function RetrospectView() {
   const [closedTrades, setClosedTrades] = useState<PaperTrade[]>([]);
   const [summary, setSummary] = useState<PaperTradeSummary | null>(null);
   const [breakdown, setBreakdown] = useState<StrategyBreakdown[]>([]);
+  const [snapAccuracy, setSnapAccuracy] = useState<SnapshotAccuracy | null>(null);
   const [settings, setSettings] = useState<RetroSettings | null>(null);
   const [loadingOpen, setLoadingOpen] = useState(false);
   const [loadingClosed, setLoadingClosed] = useState(false);
@@ -531,14 +633,16 @@ export function RetrospectView() {
   const loadOpen = useCallback(async () => {
     setLoadingOpen(true);
     try {
-      const [open, sum, bd] = await Promise.all([
+      const [open, sum, bd, snap] = await Promise.all([
         window.api.paper.listOpen(),
         window.api.paper.summary(),
         window.api.paper.strategyBreakdown(),
+        window.api.paper.snapshotAccuracy(),
       ]);
       setOpenPositions(open);
       setSummary(sum);
       setBreakdown(bd);
+      setSnapAccuracy(snap);
     } catch (err) {
       console.error('[retrospect] load open error:', err);
     } finally {
@@ -650,7 +754,7 @@ export function RetrospectView() {
 
       {/* Tab content */}
       <div className="retro-content">
-        {tab === 'summary'    && <SummaryTab summary={summary} breakdown={breakdown} />}
+        {tab === 'summary'    && <SummaryTab summary={summary} breakdown={breakdown} snapAccuracy={snapAccuracy} />}
         {tab === 'inprogress' && (
           <InProgressTab
             positions={openPositions}

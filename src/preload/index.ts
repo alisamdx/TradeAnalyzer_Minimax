@@ -92,6 +92,7 @@ import type {
   StrategyBreakdown,
   RetroSettings,
   BriefAccuracy,
+  SnapshotAccuracy,
   ConvictionStock,
   ConvictionBandHistory,
   ConvictionInput,
@@ -1019,6 +1020,7 @@ function buildApi() {
     getSettings:       (): Promise<RetroSettings> => invoke('paper:get-settings'),
     saveSettings:      (settings: RetroSettings): Promise<boolean> => invoke('paper:save-settings', settings),
     briefAccuracy:     (briefDates: string[]): Promise<BriefAccuracy[]> => invoke('paper:brief-accuracy', briefDates),
+    snapshotAccuracy:  (): Promise<SnapshotAccuracy> => invoke('paper:snapshot-accuracy'),
   };
 
   const conviction = {
