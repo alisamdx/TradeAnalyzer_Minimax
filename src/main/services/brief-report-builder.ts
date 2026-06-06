@@ -535,15 +535,19 @@ export async function buildPdf(
             .text('LEG', CX + 2, cy + 4, { width: 28 });
 
           // Column x positions (relative to CX)
-          const COL = { action: 0, type: 30, strike: 60, mid: 105, delta: 148, iv: 185, oi: 218, bidask: 268 };
+          // action(0) type(28) strike(56) mid(96) delta(132) gamma(162) theta(192) vega(222) iv(252) oi(278) bidask(322)
+          const COL = { action: 0, type: 28, strike: 56, mid: 96, delta: 132, gamma: 162, theta: 192, vega: 222, iv: 252, oi: 278, bidask: 322 };
 
           doc.fillColor(LGRAY).fontSize(7).font('Helvetica')
-            .text('TYPE',    CX + COL.type,   cy + 4, { width: 28 })
-            .text('STRIKE',  CX + COL.strike,  cy + 4, { width: 38, align: 'right' })
-            .text('MID',     CX + COL.mid,     cy + 4, { width: 38, align: 'right' })
-            .text('DELTA',   CX + COL.delta,   cy + 4, { width: 32, align: 'right' })
-            .text('IV%',     CX + COL.iv,      cy + 4, { width: 28, align: 'right' })
-            .text('OI',      CX + COL.oi,      cy + 4, { width: 44, align: 'right' })
+            .text('TYPE',    CX + COL.type,   cy + 4, { width: 26 })
+            .text('STRIKE',  CX + COL.strike,  cy + 4, { width: 36, align: 'right' })
+            .text('MID',     CX + COL.mid,     cy + 4, { width: 28, align: 'right' })
+            .text('DELTA',   CX + COL.delta,   cy + 4, { width: 28, align: 'right' })
+            .text('GAMMA',   CX + COL.gamma,   cy + 4, { width: 28, align: 'right' })
+            .text('THETA',   CX + COL.theta,   cy + 4, { width: 28, align: 'right' })
+            .text('VEGA',    CX + COL.vega,    cy + 4, { width: 28, align: 'right' })
+            .text('IV%',     CX + COL.iv,      cy + 4, { width: 22, align: 'right' })
+            .text('OI',      CX + COL.oi,      cy + 4, { width: 40, align: 'right' })
             .text('BID×ASK', CX + COL.bidask,  cy + 4, { width: CW - COL.bidask });
           cy += 14;
 
@@ -552,27 +556,37 @@ export async function buildPdf(
             doc.rect(CX, cy, CW, 14).fill(rowBg);
 
             const actionColor = leg.action === 'sell' ? '#c0392b' : '#27ae60';
-            const deltaStr = leg.delta != null
-              ? `${leg.delta >= 0 ? '+' : ''}${leg.delta.toFixed(2)}`
+            const fmtGreek = (v: number | null, decimals = 3) =>
+              v != null ? (v >= 0 ? '+' : '') + v.toFixed(decimals) : '—';
+            const deltaStr = fmtGreek(leg.delta, 2);
+            const gammaStr = fmtGreek(leg.gamma, 3);
+            const thetaStr = leg.theta != null
+              ? (leg.theta >= 0 ? '+' : '') + leg.theta.toFixed(2)
+              : '—';
+            const vegaStr  = leg.vega != null
+              ? (leg.vega >= 0 ? '+' : '') + leg.vega.toFixed(2)
               : '—';
             const ivStr  = leg.iv > 0 ? `${leg.iv.toFixed(0)}%` : '—';
             const oiStr  = leg.openInterest != null && leg.openInterest > 0 ? leg.openInterest.toLocaleString() : '—';
             const bidAsk = `${fmtPrice(leg.bid)} × ${fmtPrice(leg.ask)}`;
             const qtyLabel = leg.qty > 1 ? `${leg.qty}×` : '';
 
-            doc.fillColor(actionColor).fontSize(8).font('Helvetica-Bold')
-              .text(qtyLabel + leg.action.toUpperCase(), CX + COL.action, cy + 3, { width: 28 });
-            doc.fillColor(DARK).fontSize(8).font('Helvetica')
-              .text(leg.side.toUpperCase(),   CX + COL.type,   cy + 3, { width: 28 })
-              .text(fmtPrice(leg.strike),     CX + COL.strike,  cy + 3, { width: 38, align: 'right' })
-              .text(fmtPrice(leg.mid),        CX + COL.mid,     cy + 3, { width: 38, align: 'right' });
+            doc.fillColor(actionColor).fontSize(7.5).font('Helvetica-Bold')
+              .text(qtyLabel + leg.action.toUpperCase(), CX + COL.action, cy + 3, { width: 26 });
+            doc.fillColor(DARK).fontSize(7.5).font('Helvetica')
+              .text(leg.side.toUpperCase(),  CX + COL.type,   cy + 3, { width: 26 })
+              .text(fmtPrice(leg.strike),    CX + COL.strike,  cy + 3, { width: 36, align: 'right' })
+              .text(fmtPrice(leg.mid),       CX + COL.mid,     cy + 3, { width: 28, align: 'right' });
             doc.fillColor(leg.delta != null && Math.abs(leg.delta) > 0.45 ? '#e07d3a' : DARK)
-              .fontSize(8).font('Helvetica')
-              .text(deltaStr, CX + COL.delta, cy + 3, { width: 32, align: 'right' });
-            doc.fillColor(DARK).fontSize(8).font('Helvetica')
-              .text(ivStr,   CX + COL.iv,     cy + 3, { width: 28, align: 'right' })
-              .text(oiStr,   CX + COL.oi,     cy + 3, { width: 44, align: 'right' })
-              .text(bidAsk,  CX + COL.bidask, cy + 3, { width: CW - COL.bidask });
+              .fontSize(7.5).font('Helvetica')
+              .text(deltaStr, CX + COL.delta, cy + 3, { width: 28, align: 'right' });
+            doc.fillColor(DARK).fontSize(7.5).font('Helvetica')
+              .text(gammaStr, CX + COL.gamma, cy + 3, { width: 28, align: 'right' })
+              .text(thetaStr, CX + COL.theta, cy + 3, { width: 28, align: 'right' })
+              .text(vegaStr,  CX + COL.vega,  cy + 3, { width: 28, align: 'right' })
+              .text(ivStr,    CX + COL.iv,    cy + 3, { width: 22, align: 'right' })
+              .text(oiStr,    CX + COL.oi,    cy + 3, { width: 40, align: 'right' })
+              .text(bidAsk,   CX + COL.bidask, cy + 3, { width: CW - COL.bidask });
             cy += 15;
           }
           cy += 4;

@@ -371,6 +371,7 @@ function buildSetup(
     builtLegs.push({
       action: legDef.action, side: legDef.side, strike: contract.strike,
       expiration: chain.expiration, delta: contract.delta,
+      gamma: contract.gamma ?? null, theta: contract.theta ?? null, vega: contract.vega ?? null,
       bid: contract.bid, ask: contract.ask, mid: (contract.bid + contract.ask) / 2,
       iv: contract.iv * 100, // decimal fraction → percentage (see docs/formulas.md#iv-conventions)
       openInterest: contract.openInterest, qty: legDef.qty ?? 1,

@@ -1372,6 +1372,9 @@ export interface SetupLeg {
   strike:       number;
   expiration:   string;
   delta:        number | null;
+  gamma:        number | null;
+  theta:        number | null;
+  vega:         number | null;
   bid:          number;
   ask:          number;
   mid:          number;
