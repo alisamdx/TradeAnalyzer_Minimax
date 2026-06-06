@@ -2,6 +2,10 @@
 
 Reverse-chronological. Per spec EP-2.3, this is the index; per-version detail lives in `changelogs/`.
 
+## v0.26.7 — 2026-06-06
+
+Payoff Visualizer: leg strikes are now click-to-edit (underlined, same UX as premium). Changing a sell leg strike snaps to the nearest real chain contract and updates premium + Greeks. For lizard strategies (Jade/Big/Reverse), changing any sell leg automatically recalculates the buy hedge strike using the credit ≥ spread width rule.
+
 ## v0.26.6 — 2026-06-06
 
 Jade/Big/Reverse Lizard hedge leg selection: all three layers (Strategy Lab, Payoff auto-fill, Payoff reload) now select the buy call/put at the FURTHEST available strike where `credit ≥ spread width`, guaranteeing no upside/downside risk. Previously all three used nearest-to-percentage-of-spot, which could overshoot the credit due to $5 strike increments. Falls back to nearest OTM when no valid strike exists. `fillLegsFromChain` utility DRYs out Payoff template fill and reload logic.

@@ -1231,19 +1231,22 @@ function LegCard({
   const isCall = leg.type === 'call';
   const isPut  = leg.type === 'put';
 
-  const [editingPrem, setEditingPrem] = useState(false);
-  const [editingQty,  setEditingQty]  = useState(false);
-  const [premStr, setPremStr]         = useState(String(leg.premium));
-  const [qtyStr,  setQtyStr]          = useState(String(leg.quantity));
+  const [editingPrem,   setEditingPrem]   = useState(false);
+  const [editingQty,    setEditingQty]    = useState(false);
+  const [editingStrike, setEditingStrike] = useState(false);
+  const [premStr,   setPremStr]   = useState(String(leg.premium));
+  const [qtyStr,    setQtyStr]    = useState(String(leg.quantity));
+  const [strikeStr, setStrikeStr] = useState(String(leg.strike));
 
-  // Keep local strings in sync when leg prop changes (e.g. chain reload)
+  // Keep local strings in sync when leg prop changes (e.g. chain reload or hedge recalc)
   const prevPremRef = { current: leg.premium };
-  if (!editingPrem && leg.premium !== prevPremRef.current) setPremStr(String(leg.premium));
+  if (!editingPrem   && leg.premium !== prevPremRef.current)      setPremStr(String(leg.premium));
+  if (!editingStrike && leg.strike  !== parseFloat(strikeStr))    setStrikeStr(String(leg.strike));
 
   const commitPrem = () => {
     const v = parseFloat(premStr);
     if (!isNaN(v) && v >= 0) onUpdate({ premium: v });
-    else setPremStr(String(leg.premium));   // revert on bad input
+    else setPremStr(String(leg.premium));
     setEditingPrem(false);
   };
 
@@ -1254,8 +1257,14 @@ function LegCard({
     setEditingQty(false);
   };
 
-  const typeLabel = leg.type === 'stock' ? '100 shares'
-    : `${leg.type.toUpperCase()} $${leg.strike}`;
+  const commitStrike = () => {
+    const v = parseFloat(strikeStr);
+    if (!isNaN(v) && v > 0 && v !== leg.strike) onUpdate({ strike: v });
+    else setStrikeStr(String(leg.strike));
+    setEditingStrike(false);
+  };
+
+  const typeLabel = leg.type === 'stock' ? '100 shares' : leg.type.toUpperCase();
 
   const sideColor = isBuy ? '#22c55e' : '#f97316';
 
@@ -1288,7 +1297,31 @@ function LegCard({
             {isBuy ? 'BUY' : 'SELL'}
           </button>
           <span style={{ fontSize: 12, color: '#f1f5f9', fontWeight: 600 }}>
-            {typeLabel}
+            {typeLabel}{leg.type === 'stock' ? '' : ' '}
+            {leg.type !== 'stock' && (
+              editingStrike ? (
+                <input
+                  autoFocus
+                  type="number" step="0.5" min="0.5"
+                  value={strikeStr}
+                  onChange={e => setStrikeStr(e.target.value)}
+                  onBlur={commitStrike}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') commitStrike();
+                    if (e.key === 'Escape') { setStrikeStr(String(leg.strike)); setEditingStrike(false); }
+                  }}
+                  style={{ width: 65, padding: '1px 4px', fontSize: 11, background: '#0f172a', border: '1px solid #3b82f6', borderRadius: 3, color: '#f1f5f9', outline: 'none' }}
+                />
+              ) : (
+                <span
+                  onClick={() => { setStrikeStr(String(leg.strike)); setEditingStrike(true); }}
+                  title="Click to change strike — snaps to nearest chain contract"
+                  style={{ cursor: 'text', textDecoration: 'underline dotted', textUnderlineOffset: 2 }}
+                >
+                  ${leg.strike}
+                </span>
+              )
+            )}
           </span>
           {leg.type !== 'stock' && (
             <span style={{ fontSize: 10, color: '#94a3b8' }}>
@@ -1932,8 +1965,74 @@ export function PayoffView({ initialTicker, initialSpot, initialExpiry, initialS
       l.id === id ? { ...l, side: l.side === 'buy' ? 'sell' : 'buy' } : l
     ));
 
-  const updateLeg = (id: string, patch: Partial<PayoffLeg>) =>
+  const updateLeg = (id: string, patch: Partial<PayoffLeg>) => {
+    // When strike changes + chain loaded: snap to nearest real contract,
+    // then recalculate the lizard hedge if this is a sell leg of a lizard strategy.
+    if ('strike' in patch && patch.strike !== undefined && chainData) {
+      setLegs(prev => {
+        const targetLeg = prev.find(l => l.id === id);
+        if (!targetLeg || targetLeg.type === 'stock') {
+          return prev.map(l => l.id === id ? { ...l, ...patch } : l);
+        }
+
+        const contracts = chainData.contracts.filter(c => c.side === targetLeg.type);
+        const nearest = contracts.reduce<OptionContract | null>((best, c) =>
+          best === null ? c : Math.abs(c.strike - patch.strike!) < Math.abs(best.strike - patch.strike!) ? c : best,
+        null);
+        if (!nearest) return prev.map(l => l.id === id ? { ...l, ...patch } : l);
+
+        const mid     = Math.max(0, parseFloat(((nearest.bid + nearest.ask) / 2).toFixed(2)));
+        const sideStr = targetLeg.side === 'buy' ? 'Buy' : 'Sell';
+        const typeStr = targetLeg.type.charAt(0).toUpperCase() + targetLeg.type.slice(1);
+        const qtyStr  = targetLeg.quantity > 1 ? ` ${targetLeg.quantity}` : '';
+        const snapped: Partial<PayoffLeg> = {
+          strike:  nearest.strike,
+          premium: mid,
+          delta:   nearest.delta ?? targetLeg.delta,
+          theta:   nearest.theta ?? null,
+          vega:    nearest.vega  ?? null,
+          iv:      nearest.iv    ?? null,
+          label:   `${sideStr}${qtyStr} ${typeStr} $${nearest.strike}`,
+        };
+
+        const updated = prev.map(l => l.id === id ? { ...l, ...snapped } : l);
+
+        // For lizard strategies: recalculate the buy hedge whenever a sell leg moves
+        if (lastAppliedSlug && LIZARD_HEDGE_SLUGS.has(lastAppliedSlug) && targetLeg.side === 'sell') {
+          const shortCredit = updated
+            .filter(l => l.type !== 'stock' && l.side === 'sell')
+            .reduce((s, l) => s + l.premium, 0);
+          const buyLeg = updated.find(l => l.type !== 'stock' && l.side === 'buy');
+          if (buyLeg && (buyLeg.type === 'call' || buyLeg.type === 'put')) {
+            const hedgeContracts = chainData.contracts.filter(c => c.side === buyLeg.type);
+            const sellSameType = updated.find(l => l.type === buyLeg.type && l.side === 'sell');
+            if (sellSameType) {
+              const newHedge = findLizardHedgePayoff(hedgeContracts, buyLeg.type as 'call' | 'put', sellSameType.strike, shortCredit);
+              if (newHedge) {
+                const hedgeMid  = Math.max(0, parseFloat(((newHedge.bid + newHedge.ask) / 2).toFixed(2)));
+                const bQty      = buyLeg.quantity > 1 ? ` ${buyLeg.quantity}` : '';
+                const bType     = buyLeg.type.charAt(0).toUpperCase() + buyLeg.type.slice(1);
+                return updated.map(l => l.id !== buyLeg.id ? l : {
+                  ...l,
+                  strike:  newHedge.strike,
+                  premium: hedgeMid,
+                  delta:   newHedge.delta ?? l.delta,
+                  theta:   newHedge.theta ?? null,
+                  vega:    newHedge.vega  ?? null,
+                  iv:      newHedge.iv    ?? null,
+                  label:   `Buy${bQty} ${bType} $${newHedge.strike}`,
+                });
+              }
+            }
+          }
+        }
+
+        return updated;
+      });
+      return;
+    }
     setLegs(prev => prev.map(l => l.id === id ? { ...l, ...patch } : l));
+  };
 
   const addLeg = (leg: PayoffLeg) => {
     setLegs(prev => [...prev, leg]);
