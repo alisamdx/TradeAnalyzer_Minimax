@@ -14,8 +14,9 @@
 // Runs analyzeTicker(ticker, 'wheel') only — this is the one mode that makes
 // a live E*Trade options chain call. RSI/SMA/trend data is already covered by
 // DailyTechnicalSignalsJob which reads from cached historical_prices.
-// Capped at MAX_TICKERS (top candidates by screener pass-score) so the job
-// completes in ≤ 10 minutes even for large universes.
+// Runs against the full S&P 500 + Russell 1000 universe (~1,100 tickers) so
+// the Daily Brief has options signals for every candidate. At 0.57s/ticker
+// (200ms delay + ~370ms E*Trade response) this takes ~10-11 min.
 
 import type { Database } from 'better-sqlite3';
 import type { BatchJobHandler, BatchJobResult } from '../batch-service.js';
@@ -31,7 +32,7 @@ function isAuthError(e: unknown): boolean {
   return msg.includes('401') || msg.includes('token') || msg.includes('auth') || msg.includes('oauth');
 }
 
-const MAX_TICKERS        = 300;    // cap to keep runtime ≤ ~10 min
+const MAX_TICKERS        = 1_500;  // full universe (~1,100 tickers); at 0.57s/ticker ≈ 10-11 min
 const DEFAULT_DELAY_MS   = 1_100;  // safe default — stays under E*Trade rate limit
 const MIN_DELAY_MS       =   200;  // hard floor
 const MAX_DELAY_MS       = 2_000;  // hard ceiling

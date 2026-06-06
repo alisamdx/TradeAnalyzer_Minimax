@@ -2,6 +2,10 @@
 
 Reverse-chronological. Per spec EP-2.3, this is the index; per-version detail lives in `changelogs/`.
 
+## v0.25.0 — 2026-06-05
+
+Options Snapshot now runs against the full S&P 500 + Russell 1000 universe (~1,100 tickers) instead of the top 300. At confirmed 0.57s/ticker this takes ~10-11 min — same as before the performance work but now covers all tickers, giving the Daily Brief `annualizedReturn` and `optionLiquidityScore` for every candidate rather than just the top 300 by IV rank.
+
 ## v0.24.9 — 2026-06-05
 
 Options Snapshot speed fix (root cause found): `modeWheel` was making up to 9 E*Trade/Polygon calls per ticker. Two fixes: (1) `findSuitableChain` now checks DTE before calling `getOptionsChain` — cuts from 7 chain fetches to 1-2 per ticker since only the last 1-2 of the 7 generated Fridays fall in the 30-45 DTE window; (2) `forceCache=true` skips `getOptionsIV` (uses `iv_history.atm_iv` instead) and `getEarningsCalendar` (always returns null). Expected: ~2 E*Trade calls/ticker instead of ~9 → similar speed to IV Update.

@@ -182,7 +182,7 @@ function EditModal({ job, onSave, onClose }: EditModalProps) {
               </div>
               <div style={{ fontSize: 11, color: '#f39c12', marginTop: 6 }}>
                 {job.id === 'daily-iv-update' && <>Est. run time: ~{Math.round((1068 * (parseInt(callDelayMs, 10) || 1100)) / 60_000)} min at {callDelayMs}ms</>}
-                {job.id === 'daily-options-snapshot' && <>Est. run time: ~{Math.round((300 * (parseInt(callDelayMs, 10) || 1100)) / 60_000)} min at {callDelayMs}ms</>}
+                {job.id === 'daily-options-snapshot' && <>Est. run time: ~{Math.round((1100 * (parseInt(callDelayMs, 10) || 1100)) / 60_000)} min at {callDelayMs}ms (full universe ~1,100 tickers)</>}
               </div>
             </div>
           )}
