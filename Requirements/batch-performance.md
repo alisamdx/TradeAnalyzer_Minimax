@@ -22,32 +22,35 @@ Daily Brief — quickly enough to act on intraday market conditions.
 
 ## Current Timing Breakdown
 
-| Job | Approx Duration | Provider | Bottleneck |
-|-----|----------------|----------|------------|
-| Daily IV Update | 20–40 min | E*Trade | 1,100ms sleep × ~1,000+ tickers |
-| Options Snapshot | ~20 min | E*Trade | Sequential chain fetch per ticker |
-| Daily Brief | < 2 min | None (DB) | Not a bottleneck |
-| Market Sync (Stocks) | ~20–30 min | Polygon | Independent of E*Trade |
-| Market Sync (ETFs) | ~5 min | Polygon | Independent of E*Trade |
-| Price Gap Fill | ~5 min | Polygon | Independent of E*Trade |
-| **Total (sequential)** | **~75–90 min** | | |
+| Job | Approx Duration | Provider | Notes |
+|-----|----------------|----------|-------|
+| Daily Market Sync (Stocks) | 1–5 min | Polygon | Not a bottleneck |
+| Daily Market Sync (ETFs) | ~5 sec | Polygon | Negligible |
+| Daily Screener | ~10 sec | DB only | Pure cache reads after Market Sync |
+| Daily Price Gap Fill | ~0 | Polygon | Negligible |
+| Daily Technical Signals | ~0–1 sec | DB only | Negligible |
+| Daily IV Update | **~11 min** ✅ | E*Trade | Was 42 min at 1100ms; now 200ms |
+| Daily Options Snapshot | ~10 min | E*Trade | ~2s/ticker × 300 tickers |
+| Daily Intelligence Brief | ~1 min | DB + AI | Not a bottleneck |
+| **Total (sequential)** | **~25 min** | | Down from ~75–90 min |
 
 ---
 
 ## Requirements
 
-### PERF-1 — Reduce IV Update inter-call delay (High Priority)
+### PERF-1 — Reduce IV Update inter-call delay ✅ Done v0.24.5
 
-**Current:** 1,100ms hardcoded sleep between every E*Trade options chain call.  
-**Problem:** At 1,100ms × ~1,000 tickers = ~18 minutes minimum, just in sleep time.  
-**Requirement:**
-- Determine E*Trade's actual enforced rate limit (calls/minute) for `/v1/market/optionchains`
-- Make the sleep delay configurable per-job in the Edit Job modal (min 200ms, max 2000ms,
-  default tuned to actual limit with 10% safety margin)
-- Target: if E*Trade allows 120 calls/min, the safe floor is ~550ms — cutting IV Update
-  from ~18min sleep overhead to ~9min. If it allows 60 calls/min the floor is ~1,100ms
-  (current) and there is no gain here
-- Fall back to 1,100ms if not explicitly configured (safe default)
+**Result:** Tested 200ms, 300ms, 600ms — no 429 rate-limit errors at any level.
+200ms confirmed stable across full 1,068-ticker run.
+
+| Run | Time | Delay |
+|-----|------|-------|
+| Jun 5, 10:00 AM | 41m 59s | 1,100ms |
+| Jun 5, 9:40 PM  | 11m 10s | **200ms** |
+
+73% reduction. Per-ticker time also benefits from lower E*Trade server load post-market.
+Configurable delay (200–2000ms) wired into Edit Job modal for both IV Update and
+Options Snapshot. Default remains 1,100ms for safety on fresh installs.
 
 ### PERF-3 — Remove intraday skip for IV Update (High Priority)
 
@@ -110,6 +113,27 @@ Sync had refreshed all the underlying cache data.
   created today (ET date) so both the stocks and ETF runs feed into the candidate pool
 - Falls back to most-recent single run when no today-runs exist (backward-compatible
   with manual screener runs)
+
+---
+
+### PERF-8 — Options Snapshot candidate sort order regression (High Priority)
+
+**Problem:** Before v0.24.4, `loadTopCandidates()` in `DailyOptionsSnapshotJob` pulled
+the top 300 candidates sorted by `passScore` descending — highest-quality stocks first.
+After v0.24.4's full-universe refactor, the query reads from `constituents` directly and
+sorts `ORDER BY ticker ASC`, so it now takes the first 300 **alphabetically** (AAPL,
+ABBV, ABT… ZTS never gets included). This is a silent regression — the job still runs
+and produces results, but it no longer prioritises the best candidates.
+
+**Requirement:**
+- `loadTopCandidates(limit)` must select the 300 most actionable tickers, not
+  the first 300 alphabetically.
+- Sort priority (descending quality):
+  1. IV rank from `iv_history` (high IV = rich premium, best options candidates)
+  2. `buySignalScore` from `technical_signals` as secondary sort
+  3. Alphabetical as final tiebreaker
+- Tickers with no `iv_history` row are deprioritised (sorted after those that have IV data)
+- `MAX_TICKERS = 300` cap stays in place to keep runtime ≤ ~15 min
 
 ---
 
