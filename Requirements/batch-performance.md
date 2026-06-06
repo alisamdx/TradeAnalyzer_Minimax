@@ -30,9 +30,9 @@ Daily Brief — quickly enough to act on intraday market conditions.
 | Daily Price Gap Fill | ~0 | Polygon | Negligible |
 | Daily Technical Signals | ~0–1 sec | DB only | Negligible |
 | Daily IV Update | **~11 min** ✅ | E*Trade | Was 42 min at 1100ms; now 200ms |
-| Daily Options Snapshot | ~10 min | E*Trade | ~2s/ticker × 300 tickers |
+| Daily Options Snapshot | **~3 min** ✅ | E*Trade | Was 10 min (9 API calls/ticker); now ~2 calls/ticker |
 | Daily Intelligence Brief | ~1 min | DB + AI | Not a bottleneck |
-| **Total (sequential)** | **~25 min** | | Down from ~75–90 min |
+| **Total (sequential)** | **~16–17 min** | | Down from ~75–90 min |
 
 ---
 
