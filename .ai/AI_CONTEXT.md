@@ -174,6 +174,8 @@ Authoritative DDL is in `migrations/001_init.sql` + `002_screen_schema.sql`. Pha
 
 ## Recent Changes
 
+- **v0.26.5 (2026-06-06)** — Payoff: Strategy Formula Panel (key rules + computed values + ✓/✗ per recognized strategy). Reload Strategy button snaps all legs to a new chain expiry.
+
 - **v0.26.4 (2026-06-06)** — Payoff: fix false "∞ loss" on short-put strategies. Left-side slope removed from unlimited detection (stock can't go below $0). Max loss computed at price=$0 (true floor). Also fixes false "∞ profit" on long puts.
 
 - **v0.26.3 (2026-06-06)** — Payoff template: spot price no longer required when ticker is set; chain provides live spot automatically.

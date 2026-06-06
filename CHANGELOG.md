@@ -2,6 +2,10 @@
 
 Reverse-chronological. Per spec EP-2.3, this is the index; per-version detail lives in `changelogs/`.
 
+## v0.26.5 — 2026-06-06
+
+Payoff Visualizer: (1) Strategy Formula Panel — below the recognition badge, shows the key tastytrade rules for the detected strategy with actual computed values and ✓/✗ pass/fail. Covers Jade Lizard, Big Lizard, Reverse variants, Iron Condor, Iron Fly, Short Strangle/Straddle, CSP, Covered Call, vertical spreads, Bull/Bear spreads. (2) Reload Strategy button — appears at the top of the legs section when a template was applied and a chain expiry is selected; re-snaps all legs to the selected expiry using live mid-prices.
+
 ## v0.26.4 — 2026-06-06
 
 Payoff Visualizer: fix false "∞ loss" on short-put strategies (CSP, Big Lizard, Jade Lizard, Short Straddle downside, etc.). Max loss is now computed at stock price = $0 (the true floor) rather than the chart's 50% boundary. Left-side slope removed from unlimited detection — stock cannot go below $0 so downside is always bounded. Right-side slope detection preserved for genuinely unlimited positions (naked short calls, short stock). Also fixes false "∞ profit" on long puts.

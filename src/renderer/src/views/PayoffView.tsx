@@ -514,6 +514,230 @@ function InfoTip({ text }: { text: string }) {
   );
 }
 
+// ─── Strategy formula rules ──────────────────────────────────────────────────
+
+interface RuleResult {
+  label:  string;
+  detail: string;
+  pass:   boolean | null; // null = informational only
+}
+
+function computeStrategyRules(
+  strategyName: string,
+  legs: PayoffLeg[],
+  spot: number,
+): RuleResult[] {
+  if (!legs.length || spot <= 0) return [];
+
+  const opts      = legs.filter(l => l.type !== 'stock');
+  const puts      = opts.filter(l => l.type === 'put').sort((a, b) => a.strike - b.strike);
+  const calls     = opts.filter(l => l.type === 'call').sort((a, b) => a.strike - b.strike);
+  const sellPuts  = puts.filter(l => l.side === 'sell');
+  const buyPuts   = puts.filter(l => l.side === 'buy');
+  const sellCalls = calls.filter(l => l.side === 'sell');
+  const buyCalls  = calls.filter(l => l.side === 'buy');
+
+  // Net credit per share (positive = credit received)
+  const creditPerShare = opts.reduce((sum, l) =>
+    sum + (l.side === 'sell' ? 1 : -1) * l.premium, 0);
+
+  const f = (v: number) => `$${Math.abs(v).toFixed(2)}`;
+
+  const profitTarget = (pct: number): RuleResult => ({
+    label:  `Profit target (${pct}% of credit)`,
+    detail: creditPerShare > 0.001
+      ? `Close at ${f(creditPerShare * pct / 100)}/sh  ($${(creditPerShare * pct).toFixed(0)}/contract)`
+      : 'Enter premiums to see target',
+    pass: null,
+  });
+
+  const otmRule = (leg: PayoffLeg, dir: 'below' | 'above'): RuleResult => {
+    const ok = dir === 'below' ? leg.strike < spot : leg.strike > spot;
+    return {
+      label:  `${leg.type === 'put' ? 'Put' : 'Call'} strike OTM`,
+      detail: `$${leg.strike} ${dir === 'below' ? '<' : '>'} spot $${spot.toFixed(2)}`,
+      pass:   ok,
+    };
+  };
+
+  const atmRule = (leg: PayoffLeg): RuleResult => {
+    const pct = Math.abs(leg.strike / spot - 1) * 100;
+    const ok = pct <= 4;
+    return {
+      label:  `${leg.type === 'put' ? 'Put' : 'Call'} strike near ATM`,
+      detail: `$${leg.strike} is ${pct.toFixed(1)}% from spot (target ≤ 4%)`,
+      pass:   ok,
+    };
+  };
+
+  const creditVsSpread = (spreadWidth: number, side: 'call' | 'put'): RuleResult => {
+    const ok = creditPerShare >= spreadWidth;
+    return {
+      label:  `Credit ≥ ${side} spread width (no ${side === 'call' ? 'upside' : 'downside'} risk)`,
+      detail: `Credit ${f(creditPerShare)}/sh ${ok ? '≥' : '<'} spread width ${f(spreadWidth)}/sh`,
+      pass:   ok,
+    };
+  };
+
+  const minCreditRule = (spreadWidth: number): RuleResult => {
+    const minCredit = spreadWidth / 3;
+    const ok = creditPerShare >= minCredit;
+    return {
+      label:  'Credit ≥ ⅓ of spread width',
+      detail: `${f(creditPerShare)}/sh vs min ${f(minCredit)}/sh (⅓ of ${f(spreadWidth)} spread)`,
+      pass:   ok,
+    };
+  };
+
+  const n = strategyName;
+
+  if (n === 'Jade Lizard' || n === 'Big Lizard') {
+    const sc = sellCalls[0], bc = buyCalls[0], sp = sellPuts[0];
+    if (!sc || !bc || !sp) return [];
+    const width = bc.strike - sc.strike;
+    return [
+      creditVsSpread(width, 'call'),
+      ...(n === 'Jade Lizard' ? [otmRule(sp, 'below')] : [atmRule(sp), atmRule(sc)]),
+      profitTarget(n === 'Big Lizard' ? 25 : 50),
+    ];
+  }
+
+  if (n === 'Reverse Jade Lizard' || n === 'Reverse Big Lizard') {
+    const sc = sellCalls[0], sp = sellPuts[0], bp = buyPuts[0];
+    if (!sc || !sp || !bp) return [];
+    const width = sp.strike - bp.strike;
+    return [
+      creditVsSpread(width, 'put'),
+      ...(n === 'Reverse Jade Lizard' ? [otmRule(sc, 'above')] : [atmRule(sp), atmRule(sc)]),
+      profitTarget(n === 'Reverse Big Lizard' ? 25 : 50),
+    ];
+  }
+
+  if (n === 'Iron Condor' || n === 'Dynamic Width Iron Condor') {
+    const sp = sellPuts[0], bp = buyPuts[0], sc = sellCalls[0], bc = buyCalls[0];
+    if (!sp || !bp || !sc || !bc) return [];
+    const width = Math.max(sp.strike - bp.strike, bc.strike - sc.strike);
+    return [minCreditRule(width), otmRule(sp, 'below'), otmRule(sc, 'above'), profitTarget(50)];
+  }
+
+  if (n === 'Iron Fly') {
+    const sp = sellPuts[0], sc = sellCalls[0];
+    if (!sp || !sc) return [];
+    return [atmRule(sp), atmRule(sc), profitTarget(25)];
+  }
+
+  if (n === 'Short Strangle') {
+    const sp = sellPuts[0], sc = sellCalls[0];
+    if (!sp || !sc) return [];
+    return [otmRule(sp, 'below'), otmRule(sc, 'above'), profitTarget(50)];
+  }
+
+  if (n === 'Short Straddle') {
+    const sp = sellPuts[0], sc = sellCalls[0];
+    if (!sp || !sc) return [];
+    return [atmRule(sp), atmRule(sc), profitTarget(25)];
+  }
+
+  if (n === 'Cash-Secured Put') {
+    const sp = sellPuts[0];
+    if (!sp) return [];
+    return [otmRule(sp, 'below'), profitTarget(50)];
+  }
+
+  if (n === 'Covered Call') {
+    const sc = sellCalls[0];
+    if (!sc) return [];
+    return [otmRule(sc, 'above'), profitTarget(50)];
+  }
+
+  if (n === 'Bull Put Spread (Short Put Vertical)') {
+    const sp = sellPuts[0], bp = buyPuts[0];
+    if (!sp || !bp) return [];
+    return [minCreditRule(sp.strike - bp.strike), profitTarget(50)];
+  }
+
+  if (n === 'Bear Call Spread (Short Call Vertical)') {
+    const sc = sellCalls[0], bc = buyCalls[0];
+    if (!sc || !bc) return [];
+    return [minCreditRule(bc.strike - sc.strike), profitTarget(50)];
+  }
+
+  if (n === 'Bull Call Spread') {
+    const bc = buyCalls[0], sc = sellCalls[0];
+    if (!bc || !sc) return [];
+    const width = sc.strike - bc.strike;
+    const debit = Math.abs(creditPerShare);
+    const maxGain = width - debit;
+    return [
+      { label: 'Max profit = Spread − Debit', detail: `${f(width)} − ${f(debit)} = max ${f(maxGain)}/sh`, pass: maxGain > 0 },
+      { label: 'Profit target (50% of max profit)', detail: maxGain > 0 ? `Close at ${f(maxGain * 0.5)}/sh ($${(maxGain * 50).toFixed(0)}/contract)` : '—', pass: null },
+    ];
+  }
+
+  if (n === 'Bear Put Spread') {
+    const bp = buyPuts[0], sp = sellPuts[0];
+    if (!bp || !sp) return [];
+    const width = bp.strike - sp.strike;
+    const debit = Math.abs(creditPerShare);
+    const maxGain = width - debit;
+    return [
+      { label: 'Max profit = Spread − Debit', detail: `${f(width)} − ${f(debit)} = max ${f(maxGain)}/sh`, pass: maxGain > 0 },
+      { label: 'Profit target (50% of max profit)', detail: maxGain > 0 ? `Close at ${f(maxGain * 0.5)}/sh ($${(maxGain * 50).toFixed(0)}/contract)` : '—', pass: null },
+    ];
+  }
+
+  if (n === 'Naked Call') {
+    return [
+      { label: '⚠ Unlimited upside risk', detail: 'No cap on loss if stock rises — requires margin', pass: null },
+      profitTarget(50),
+    ];
+  }
+
+  return [];
+}
+
+// ─── Strategy formula panel component ────────────────────────────────────────
+
+function StrategyFormulaPanel({ strategyName, legs, spot }: {
+  strategyName: string;
+  legs:         PayoffLeg[];
+  spot:         number;
+}) {
+  const rules = computeStrategyRules(strategyName, legs, spot);
+  if (!rules.length) return null;
+
+  return (
+    <div style={{
+      background: '#08111a',
+      border: '1px solid #1e3a5f',
+      borderRadius: 5,
+      padding: '8px 10px',
+      marginTop: 4,
+    }}>
+      <div style={{ fontSize: 10, color: '#475569', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>
+        📐 Rules
+      </div>
+      {rules.map((rule, i) => (
+        <div key={i} style={{
+          marginBottom: i < rules.length - 1 ? 7 : 0,
+          paddingBottom: i < rules.length - 1 ? 7 : 0,
+          borderBottom: i < rules.length - 1 ? '1px solid #111827' : 'none',
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
+            <span style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.3 }}>{rule.label}</span>
+            {rule.pass !== null && (
+              <span style={{ fontSize: 13, fontWeight: 700, color: rule.pass ? '#22c55e' : '#ef4444', marginLeft: 6, flexShrink: 0 }}>
+                {rule.pass ? '✓' : '✗'}
+              </span>
+            )}
+          </div>
+          <div style={{ fontSize: 10, color: '#475569', lineHeight: 1.4 }}>{rule.detail}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ─── Strategy recognition ─────────────────────────────────────────────────────
 
 interface StrategyInfo {
@@ -1237,9 +1461,10 @@ export function PayoffView({ initialTicker, initialSpot, initialExpiry, initialS
   const thinkingRef = useRef<HTMLDivElement>(null);
 
   // UI state
-  const [error, setError]         = useState<string | null>(null);
-  const [statusMsg, setStatus]    = useState<string | null>(null);
+  const [error, setError]               = useState<string | null>(null);
+  const [statusMsg, setStatus]          = useState<string | null>(null);
   const [templateSlug, setTemplateSlug] = useState('');
+  const [lastAppliedSlug, setLastAppliedSlug] = useState<string | null>(null);
 
   // Watchlist picker
   const [watchlists, setWatchlists]           = useState<Watchlist[]>([]);
@@ -1485,6 +1710,7 @@ export function PayoffView({ initialTicker, initialSpot, initialExpiry, initialS
     // Show skeleton immediately if we have a spot to build from
     if (hasSpot) setLegs(tpl.build(spotNum));
     setError(null);
+    setLastAppliedSlug(slug);
 
     if (!hasTicker) return; // no ticker → user fills premiums manually
 
@@ -1588,6 +1814,62 @@ export function PayoffView({ initialTicker, initialSpot, initialExpiry, initialS
       setChainLoading(false);
     }
   }, [spotNum, ticker]);
+
+  // ── Reload legs for a new expiry ────────────────────────────────────────────
+  // Re-snaps all option legs from the last applied template to a new expiry date
+  // using the live chain for that expiry. All legs collapse to the same expiry.
+  const reloadLegsForExpiry = useCallback(async (slug: string, targetExpiry: string) => {
+    if (!ticker.trim()) return;
+    const tpl = ALL_TEMPLATES.find(t => t.slug === slug);
+    if (!tpl) return;
+
+    setChainLoading(true);
+    try {
+      const realSpot = parseFloat(spotStr) || spotNum || 100;
+      const targetLegs = tpl.build(realSpot);
+
+      const chain = (selectedExpiry === targetExpiry && chainData)
+        ? chainData
+        : await window.api.optionsChain.getChain(ticker.toUpperCase(), targetExpiry);
+
+      if (selectedExpiry !== targetExpiry || !chainData) {
+        setChainData(chain);
+        setSelectedExpiry(targetExpiry);
+      }
+      if (chain.currentPrice) setSpotStr(chain.currentPrice.toFixed(2));
+
+      const filledLegs: PayoffLeg[] = targetLegs.map(leg => {
+        if (leg.type === 'stock') return leg;
+        const contracts = chain.contracts.filter(c => c.side === leg.type);
+        if (!contracts.length) return leg;
+        const nearest = contracts.reduce<OptionContract | null>((best, c) =>
+          best === null ? c : Math.abs(c.strike - leg.strike) < Math.abs(best.strike - leg.strike) ? c : best,
+        null);
+        if (!nearest) return leg;
+        const mid     = Math.max(0, parseFloat(((nearest.bid + nearest.ask) / 2).toFixed(2)));
+        const sideStr = leg.side === 'buy' ? 'Buy' : 'Sell';
+        const typeStr = leg.type.charAt(0).toUpperCase() + leg.type.slice(1);
+        const qtyStr  = leg.quantity > 1 ? ` ${leg.quantity}` : '';
+        return {
+          ...leg,
+          strike:  nearest.strike,
+          expiry:  targetExpiry,
+          premium: mid,
+          delta:   nearest.delta ?? leg.delta,
+          theta:   nearest.theta ?? null,
+          vega:    nearest.vega  ?? null,
+          iv:      nearest.iv    ?? null,
+          label:   `${sideStr}${qtyStr} ${typeStr} $${nearest.strike}`,
+        };
+      });
+      setLegs(filledLegs);
+      setStatus(`Strategy reloaded for ${targetExpiry}`);
+    } catch (e) {
+      setError(`Reload failed: ${(e as Error).message}`);
+    } finally {
+      setChainLoading(false);
+    }
+  }, [ticker, spotStr, spotNum, chainData, selectedExpiry]);
 
   // ── Leg mutation helpers ────────────────────────────────────────────────────
   const removeLeg = (id: string) => setLegs(prev => prev.filter(l => l.id !== id));
@@ -1846,6 +2128,24 @@ export function PayoffView({ initialTicker, initialSpot, initialExpiry, initialS
             )}
           </div>
 
+          {/* ── Reload strategy for selected chain expiry ── */}
+          {lastAppliedSlug && selectedExpiry && ticker.trim() && (
+            <button
+              onClick={() => reloadLegsForExpiry(lastAppliedSlug, selectedExpiry)}
+              disabled={chainLoading}
+              title={`Re-snap all legs to ${selectedExpiry} using live chain prices`}
+              style={{
+                width: '100%', padding: '5px 8px', fontSize: 11, borderRadius: 4,
+                background: '#0c1a2e', border: '1px solid #1d4ed8',
+                color: chainLoading ? '#475569' : '#93c5fd',
+                cursor: chainLoading ? 'not-allowed' : 'pointer',
+                fontWeight: 600, marginBottom: 6,
+              }}
+            >
+              {chainLoading ? '⟳ Loading…' : `↻ Reload strategy for ${selectedExpiry}`}
+            </button>
+          )}
+
           {legs.length === 0 && !showAddForm && (
             <div style={{ fontSize: 12, color: '#475569', textAlign: 'center', padding: '16px 0' }}>
               Pick a template or add a leg manually.
@@ -1914,22 +2214,31 @@ export function PayoffView({ initialTicker, initialSpot, initialExpiry, initialS
           )}
         </div>
 
-        {/* ── Strategy recognition badge ── */}
+        {/* ── Strategy recognition badge + formula rules ── */}
         {recognizedStrategy && (
-          <div style={{
-            background: '#0f172a',
-            border: `1px solid ${recognizedStrategy.color}44`,
-            borderLeft: `3px solid ${recognizedStrategy.color}`,
-            borderRadius: 5, padding: '7px 10px',
-            opacity: recognizedStrategy.partial ? 0.65 : 1,
-          }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: recognizedStrategy.color, marginBottom: 2 }}>
-              {recognizedStrategy.partial ? '…' : '✓'} {recognizedStrategy.name}
+          <>
+            <div style={{
+              background: '#0f172a',
+              border: `1px solid ${recognizedStrategy.color}44`,
+              borderLeft: `3px solid ${recognizedStrategy.color}`,
+              borderRadius: 5, padding: '7px 10px',
+              opacity: recognizedStrategy.partial ? 0.65 : 1,
+            }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: recognizedStrategy.color, marginBottom: 2 }}>
+                {recognizedStrategy.partial ? '…' : '✓'} {recognizedStrategy.name}
+              </div>
+              <div style={{ fontSize: 10, color: '#94a3b8', lineHeight: 1.4 }}>
+                {recognizedStrategy.description}
+              </div>
             </div>
-            <div style={{ fontSize: 10, color: '#94a3b8', lineHeight: 1.4 }}>
-              {recognizedStrategy.description}
-            </div>
-          </div>
+            {!recognizedStrategy.partial && spotNum > 0 && (
+              <StrategyFormulaPanel
+                strategyName={recognizedStrategy.name}
+                legs={legs}
+                spot={spotNum}
+              />
+            )}
+          </>
         )}
 
         {/* ── Chain Loader ── */}
