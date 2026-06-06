@@ -394,7 +394,7 @@ export class AnalysisService {
     switch (mode) {
       case 'buy': return this.modeBuy(ticker, quote, fundamentals, latestBars);
       case 'options_income': return this.modeOptionsIncome(ticker, quote, fundamentals, latestBars);
-      case 'wheel': return this.modeWheel(ticker, quote, fundamentals, bars); // needs full 252 for 52-wk range
+      case 'wheel': return this.modeWheel(ticker, quote, fundamentals, bars, forceCache); // needs full 252 for 52-wk range
       case 'bullish': return this.modeDirectional(ticker, quote, fundamentals, latestBars, 'bullish');
       case 'bearish': return this.modeDirectional(ticker, quote, fundamentals, latestBars, 'bearish');
     }
@@ -894,17 +894,30 @@ export class AnalysisService {
     quote: { last: number | null; ivRank: number | null },
     fundamentals: { peRatio: number | null; eps: number | null; debtToEquity: number | null;
       roe: number | null; freeCashFlow: number | null },
-    bars: Bar[]
+    bars: Bar[],
+    forceCache = false
   ): Promise<WheelResult> {
     const price = quote.last ?? null;
     const ivRank = quote.ivRank ?? null;
 
-    // Fetch current IV from options chain
+    // Current IV — prefer iv_history (no API call) in forceCache mode.
+    // In live mode, fetch from options chain for the freshest value.
     let currentIv: number | null = null;
-    try {
-      const ivData = await (this.optionsProvider ?? this.dataProvider).getOptionsIV(ticker);
-      currentIv = ivData.currentIv;
-    } catch { /* ignore errors */ }
+    if (forceCache) {
+      // atm_iv is stored as a percentage (e.g. 28.5 = 28.5%) — see docs/formulas.md#iv-history
+      try {
+        type IvRow = { atm_iv: number };
+        const row = this.db.prepare(
+          `SELECT atm_iv FROM iv_history WHERE ticker = ? ORDER BY date DESC LIMIT 1`
+        ).get(ticker) as IvRow | undefined;
+        currentIv = row?.atm_iv ?? null;
+      } catch { /* leave null */ }
+    } else {
+      try {
+        const ivData = await (this.optionsProvider ?? this.dataProvider).getOptionsIV(ticker);
+        currentIv = ivData.currentIv;
+      } catch { /* ignore errors */ }
+    }
 
     // Stability check: price within 25% of 52-wk high, not at 52-wk low.
     if (bars.length < 252) {
@@ -920,11 +933,15 @@ export class AnalysisService {
 
     const stabilityPass = distFromHigh !== null && distFromHigh <= 25 && distFromLow !== null && distFromLow >= 15;
 
-    // Earnings check.
-    const earnings = await this.dataProvider.getEarningsCalendar(ticker);
-    const daysToEarnings = earnings.nextEarningsDate
-      ? Math.max(0, Math.round((new Date(earnings.nextEarningsDate).getTime() - Date.now()) / 86_400_000))
-      : null;
+    // Earnings check — skip in forceCache mode (Polygon earnings stub always
+    // returns null; skipping it saves one network call per ticker).
+    let daysToEarnings: number | null = null;
+    if (!forceCache) {
+      const earnings = await this.dataProvider.getEarningsCalendar(ticker);
+      daysToEarnings = earnings.nextEarningsDate
+        ? Math.max(0, Math.round((new Date(earnings.nextEarningsDate).getTime() - Date.now()) / 86_400_000))
+        : null;
+    }
     const earningsPass = daysToEarnings === null || daysToEarnings > 45;
 
     // IV rank check.
@@ -1159,6 +1176,12 @@ export class AnalysisService {
       return null;
     }
     for (const exp of expirations) {
+      // Check DTE BEFORE making the API call — avoids fetching chains for
+      // expirations outside the target window (typically 5 of 7 generated
+      // Fridays are < 30 DTE and would be wasted calls).
+      const dte = dteDays(exp);
+      if (!isDTEMatch(dte, minDTE, maxDTE)) continue;
+
       let chain: OptionsChain;
       try {
         chain = await (this.optionsProvider ?? this.dataProvider).getOptionsChain(ticker, exp);
@@ -1166,8 +1189,6 @@ export class AnalysisService {
         // E*Trade returns 10031 for expiry dates without listed options — skip and try next
         continue;
       }
-      const dte = dteDays(exp);
-      if (!isDTEMatch(dte, minDTE, maxDTE)) continue;
       // For puts, delta is negative (e.g. -0.25). Use absolute value for filtering.
       // Note: bid is lastPrice (day.close) from the v3 snapshot; OI is often 0/null.
       const puts = chain.contracts.filter(

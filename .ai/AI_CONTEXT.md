@@ -172,6 +172,8 @@ Authoritative DDL is in `migrations/001_init.sql` + `002_screen_schema.sql`. Pha
 
 ## Recent Changes
 
+- **v0.24.9 (2026-06-05)** — Options Snapshot root-cause fix: `findSuitableChain` now checks DTE before calling `getOptionsChain` (was making 7 chain fetches per ticker, now 1-2). `forceCache=true` also skips `getOptionsIV` (uses iv_history) and `getEarningsCalendar` (always null). Expected ~2 E*Trade calls/ticker vs 9 before.
+
 - **v0.24.8 (2026-06-05)** — Options Snapshot: `analyzeTicker` now accepts `forceCache: true` — reads quote/fundamentals/bars from local DB, skips 3 Polygon API calls + rate-limiter per ticker. Expected ~0.4s/ticker vs ~2s/ticker (~4 min for 300 tickers vs ~10 min).
 
 - **v0.24.6 (2026-06-05)** — PERF-8: Fixed Options Snapshot candidate sort order regression. loadTopCandidates now sorts by most recent atm_iv DESC → buy_signal_score DESC → alphabetical, so the 300-ticker cap covers highest-IV (most premium-rich) candidates first, not first 300 alphabetically.
