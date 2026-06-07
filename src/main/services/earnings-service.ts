@@ -195,14 +195,13 @@ export class EarningsService {
     ticker: string,
     creds: OAuthCredentials,
   ): Promise<{ date: string | null; time: 'bmo' | 'amc' | null; source: EarningsEntry['source']; confirmed: boolean } | null> {
-    // E*Trade: GET /v1/market/quote/{ticker}?detailFlag=ALL
-    // nextEarningDate lives in the All block (not Fundamental).
-    // NOTE: E*Trade's public API returns nextEarningDate as "" for most tickers even
-    // when the website shows a date — this is a known API limitation. The field will
-    // be populated when E*Trade does expose it (e.g. during earnings season).
+    // E*Trade: GET /v1/market/quote/{ticker}?detailFlag=ALL&requireEarningsDate=true
+    // requireEarningsDate=true is required to populate nextEarningDate in the All block.
+    // Without it the field is returned as "" per the official API docs:
+    // https://apisb.etrade.com/docs/api/market/api-quote-v1.html
     const raw = await etradeGet(
       `/v1/market/quote/${encodeURIComponent(ticker)}`,
-      { detailFlag: 'ALL' },
+      { detailFlag: 'ALL', requireEarningsDate: 'true' },
       creds,
     ) as Record<string, unknown>;
 
