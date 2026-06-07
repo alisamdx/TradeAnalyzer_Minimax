@@ -379,9 +379,8 @@ function QuoteInspector() {
     finally { setBusy(false); }
   };
 
-  const ivRelatedKeys = result
-    ? extractIvKeys(result.rawJson)
-    : [];
+  const ivRelatedKeys       = result ? extractIvKeys(result.rawJson)       : [];
+  const earningsRelatedKeys = result ? extractEarningsKeys(result.rawJson) : [];
 
   return (
     <div style={{ background: '#181825', border: '1px solid #313244', borderRadius: '6px', padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -425,6 +424,27 @@ function QuoteInspector() {
             )}
           </div>
 
+          {/* Earnings-related fields highlighted */}
+          <div style={{ background: '#12121e', border: '1px solid #45475a', borderRadius: '4px', padding: '10px 12px' }}>
+            <div style={{ fontSize: '13px', fontWeight: 700, color: '#f9e2af', marginBottom: '6px' }}>
+              📅 Earnings / date fields found ({earningsRelatedKeys.length === 0 ? 'none' : earningsRelatedKeys.length})
+            </div>
+            {earningsRelatedKeys.length === 0 ? (
+              <div style={{ fontSize: '13px', color: '#f38ba8' }}>
+                No earnings / earnings-date fields detected — E*Trade FUNDAMENTAL quote may not expose this data via this endpoint.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                {earningsRelatedKeys.map(({ path, value }) => (
+                  <div key={path} style={{ display: 'flex', gap: '8px', fontSize: '13px' }}>
+                    <span style={{ color: '#f9e2af', minWidth: '280px', fontFamily: 'monospace' }}>{path}</span>
+                    <span style={{ color: '#cdd6f4' }}>{String(value)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* Full raw response */}
           <details style={{ background: '#12121e', border: '1px solid #313244', borderRadius: '4px', padding: '8px 12px', fontSize: '13px' }}>
             <summary style={{ cursor: 'pointer', color: '#89b4fa', marginBottom: '6px' }}>
@@ -454,6 +474,38 @@ function extractIvKeys(rawJson: string): Array<{ path: string; value: unknown }>
       for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
         const lower = k.toLowerCase().replace(/[_\-]/g, '');
         if (ivTerms.some(t => lower.includes(t))) {
+          results.push({ path: path ? `${path}.${k}` : k, value: v });
+        }
+        walk(v, path ? `${path}.${k}` : k);
+      }
+    } else if (Array.isArray(obj)) {
+      obj.forEach((item, i) => walk(item, `${path}[${i}]`));
+    }
+  }
+
+  walk(parsed, '');
+  return results;
+}
+
+/** Walk the parsed JSON and return every key path that looks earnings/date-related. */
+function extractEarningsKeys(rawJson: string): Array<{ path: string; value: unknown }> {
+  let parsed: unknown;
+  try { parsed = JSON.parse(rawJson); } catch { return []; }
+
+  const results: Array<{ path: string; value: unknown }> = [];
+  // Cast a wide net — catch anything that might encode an earnings date
+  const earningsTerms = [
+    'earn', 'nextear', 'reportdate', 'earningdate', 'earningsdate',
+    'nextreport', 'quarterlydate', 'fiscaldate', 'announcementdate',
+    'eps', 'estimate', 'dividend', 'exdividend', 'dividendpay',
+  ];
+
+  function walk(obj: unknown, path: string) {
+    if (obj === null || obj === undefined) return;
+    if (typeof obj === 'object' && !Array.isArray(obj)) {
+      for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+        const lower = k.toLowerCase().replace(/[_\-]/g, '');
+        if (earningsTerms.some(t => lower.includes(t))) {
           results.push({ path: path ? `${path}.${k}` : k, value: v });
         }
         walk(v, path ? `${path}.${k}` : k);
