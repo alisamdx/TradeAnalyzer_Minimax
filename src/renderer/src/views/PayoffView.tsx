@@ -2181,6 +2181,17 @@ export function PayoffView({ initialTicker, initialSpot, initialExpiry, initialS
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // run only once on mount
 
+  // ── Earnings fetch — runs whenever ticker changes (covers all entry paths) ────
+  // This ensures the earnings annotation appears whether the view was opened via
+  // a strategy template, Options Chain B/S button, Opportunity, or manual entry.
+  useEffect(() => {
+    const t = ticker.trim().toUpperCase();
+    if (!t) { setEarningsDate(null); return; }
+    window.api.earnings.get(t)
+      .then(e => setEarningsDate(e?.reportDate ?? null))
+      .catch(() => setEarningsDate(null));
+  }, [ticker]);
+
   // ── Opportunity navigation: auto-load chain + pre-add leg(s) on mount ────────
   useEffect(() => {
     // Skip if Strategy Lab already supplied pre-built legs
@@ -2404,10 +2415,6 @@ export function PayoffView({ initialTicker, initialSpot, initialExpiry, initialS
     if (!hasTicker) return; // no ticker → user fills premiums manually
 
     setChainLoading(true);
-    // Fetch earnings in background alongside chain load
-    window.api.earnings.get(ticker.toUpperCase())
-      .then(e => setEarningsDate(e?.reportDate ?? null))
-      .catch(() => {});
     try {
       // 1. Load available expirations and get live spot price
       const expResult = await window.api.optionsChain.getNearExpirations(ticker.toUpperCase());
