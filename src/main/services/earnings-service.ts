@@ -27,6 +27,7 @@ export interface EarningsEntry {
 
 function toIso(raw: unknown): string | null {
   if (raw === null || raw === undefined || raw === '') return null;
+
   // Unix ms timestamp (13 digits, > year 2001)
   if (typeof raw === 'number' && raw > 1_000_000_000_000) {
     return new Date(raw).toISOString().slice(0, 10);
@@ -35,11 +36,26 @@ function toIso(raw: unknown): string | null {
   if (typeof raw === 'number' && raw > 1_000_000_000 && raw < 4_102_444_800) {
     return new Date(raw * 1000).toISOString().slice(0, 10);
   }
-  // Already ISO-ish string: "2026-06-18" or "Jun 18, 2026" etc.
+
   if (typeof raw === 'string' && raw.trim().length > 0) {
-    const d = new Date(raw);
+    const s = raw.trim();
+
+    // MM/DD/YYYY — E*Trade nextEarningDate format. Parse directly to avoid
+    // new Date() treating it as local time and shifting the date on UTC conversion.
+    const mdy = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(s);
+    if (mdy) {
+      return `${mdy[3]}-${mdy[1]!.padStart(2, '0')}-${mdy[2]!.padStart(2, '0')}`;
+    }
+
+    // ISO YYYY-MM-DD or any other parseable string (treated as UTC noon to avoid tz drift)
+    const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+    if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+
+    // Last resort: let JS parse it (e.g. "Jun 18, 2026") — UTC noon avoids drift
+    const d = new Date(s + 'T12:00:00Z');
     if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
   }
+
   return null;
 }
 
