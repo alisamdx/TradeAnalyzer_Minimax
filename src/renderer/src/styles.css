@@ -2249,7 +2249,8 @@ input[type='checkbox'] {
   color: var(--text);
 }
 
-.positions-table td.num {
+.positions-table td.num,
+.positions-table th.num {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }

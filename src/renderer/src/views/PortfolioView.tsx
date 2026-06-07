@@ -412,24 +412,24 @@ export function PortfolioView() {
   // ─── Column definitions ───────────────────────────────────────────────────────
 
   const columns = [
-    ...(activeTab === 'open'   ? [{ key: '_expand',       label: '',              sortable: false }] : []),
-    { key: 'ticker',             label: 'Ticker',          sortable: true },
-    { key: 'positionType',       label: 'Type',            sortable: true },
-    { key: 'quantity',           label: 'Qty',             sortable: true },
-    { key: 'entryPrice',         label: 'Entry',           sortable: true },
-    ...(activeTab === 'open'   ? [{ key: 'strike',         label: 'Strike/Exp',   sortable: false }] : []),
-    ...(activeTab === 'open'   ? [{ key: 'currentPrice',   label: 'Current',      sortable: true  }] : []),
-    ...(activeTab === 'closed' ? [{ key: 'exitPrice',      label: 'Exit',         sortable: true  }] : []),
-    ...(activeTab === 'open'   ? [{ key: 'marketValue',    label: 'Mkt Value',    sortable: false }] : []),
-    ...(activeTab === 'open'   ? [{ key: 'daysGain',       label: "Day's G/L",    sortable: false }] : []),
-    ...(activeTab === 'open'   ? [{ key: 'greeks',         label: 'Greeks',       sortable: false }] : []),
-    ...(activeTab === 'open'   ? [{ key: 'unrealizedPnl',  label: 'Unreal P&L',   sortable: true  }] : []),
-    ...(activeTab === 'closed' ? [{ key: 'realizedPnl',    label: 'Realized P&L', sortable: true  }] : []),
-    { key: 'entryDate',          label: 'Entry Date',      sortable: true },
-    ...(activeTab === 'open'   ? [{ key: 'verdict',        label: 'Verdict',      sortable: false }] : []),
-    ...(activeTab === 'open'   ? [{ key: 'action',         label: 'Analysis',     sortable: false }] : []),
-    { key: 'actions',            label: 'Actions',         sortable: false },
-  ].filter(Boolean) as { key: string; label: string; sortable: boolean }[];
+    ...(activeTab === 'open'   ? [{ key: '_expand',       label: '',              sortable: false, num: false }] : []),
+    { key: 'ticker',             label: 'Ticker',          sortable: true,  num: false },
+    { key: 'positionType',       label: 'Type',            sortable: true,  num: false },
+    { key: 'quantity',           label: 'Qty',             sortable: true,  num: true  },
+    { key: 'entryPrice',         label: 'Entry',           sortable: true,  num: true  },
+    ...(activeTab === 'open'   ? [{ key: 'strike',         label: 'Strike/Exp',   sortable: false, num: true  }] : []),
+    ...(activeTab === 'open'   ? [{ key: 'currentPrice',   label: 'Current',      sortable: true,  num: true  }] : []),
+    ...(activeTab === 'closed' ? [{ key: 'exitPrice',      label: 'Exit',         sortable: true,  num: true  }] : []),
+    ...(activeTab === 'open'   ? [{ key: 'marketValue',    label: 'Mkt Value',    sortable: false, num: true  }] : []),
+    ...(activeTab === 'open'   ? [{ key: 'daysGain',       label: "Day's G/L",    sortable: false, num: true  }] : []),
+    ...(activeTab === 'open'   ? [{ key: 'greeks',         label: 'Greeks',       sortable: false, num: false }] : []),
+    ...(activeTab === 'open'   ? [{ key: 'unrealizedPnl',  label: 'Unreal P&L',   sortable: true,  num: true  }] : []),
+    ...(activeTab === 'closed' ? [{ key: 'realizedPnl',    label: 'Realized P&L', sortable: true,  num: true  }] : []),
+    { key: 'entryDate',          label: 'Entry Date',      sortable: true,  num: false },
+    ...(activeTab === 'open'   ? [{ key: 'verdict',        label: 'Verdict',      sortable: false, num: false }] : []),
+    ...(activeTab === 'open'   ? [{ key: 'action',         label: 'Analysis',     sortable: false, num: false }] : []),
+    { key: 'actions',            label: 'Actions',         sortable: false, num: false },
+  ].filter(Boolean) as { key: string; label: string; sortable: boolean; num: boolean }[];
 
   // ─── Advisor tab content ──────────────────────────────────────────────────────
 
@@ -672,7 +672,7 @@ export function PortfolioView() {
                   {columns.map(col => (
                     <th
                       key={col.key}
-                      className={col.sortable ? 'sortable' : ''}
+                      className={[col.sortable ? 'sortable' : '', col.num ? 'num' : ''].filter(Boolean).join(' ') || undefined}
                       onClick={col.sortable ? () => requestSort(col.key) : undefined}
                       style={
                         col.key === '_expand'  ? { width: 20, minWidth: 20 } :
