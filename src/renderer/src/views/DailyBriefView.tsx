@@ -2,7 +2,7 @@
 // see Requirements/DAILY_INTELLIGENCE_BRIEF.md §6
 
 import { useState, useEffect, useCallback } from 'react';
-import type { DailyBriefEntry, BriefPick, ScoringStrategy, StrategyLabValidateResult, StrategyLabGrade, StrategySetup, SetupLeg, PayoffLeg, BriefAccuracy, CriticVerdict } from '@shared/types.js';
+import type { DailyBriefEntry, BriefPick, ScoringStrategy, StrategyLabValidateResult, StrategyLabGrade, StrategySetup, SetupLeg, PayoffLeg, BriefAccuracy, CriticVerdict, ConvictionStock } from '@shared/types.js';
 
 const STRATEGY_LABELS: Record<ScoringStrategy, string> = {
   wheel:   '🎡  Wheel — CSP / Covered Call',
@@ -498,6 +498,53 @@ function StrategySection({
   );
 }
 
+// FR-CV-02: Conviction Alerts section — stocks in Buy or Mid zone
+function ConvictionAlertsSection() {
+  const [alerts, setAlerts] = useState<ConvictionStock[]>([]);
+
+  useEffect(() => {
+    window.api.conviction.list().then(stocks => {
+      setAlerts(stocks.filter(s => s.zone === 'buy' || s.zone === 'mid'));
+    }).catch(() => { /* non-fatal */ });
+  }, []);
+
+  if (alerts.length === 0) return null;
+
+  const zoneBadge = (zone: ConvictionStock['zone']) => {
+    if (zone === 'buy') return <span className="conviction-zone-buy">✅ Buy Zone</span>;
+    if (zone === 'mid') return <span className="conviction-zone-mid">🟡 Mid Zone</span>;
+    return null;
+  };
+
+  return (
+    <div className="conviction-alerts-section">
+      <div className="conviction-alerts-title">⚡ Conviction Alerts</div>
+      <table className="conviction-alerts-table">
+        <thead>
+          <tr>
+            <th>Ticker</th>
+            <th>Price</th>
+            <th>Zone</th>
+            <th>IV</th>
+            <th>IVR</th>
+          </tr>
+        </thead>
+        <tbody>
+          {alerts.map(s => (
+            <tr key={s.ticker}>
+              <td><strong>{s.ticker}</strong></td>
+              <td>{s.currentPrice !== null ? `$${s.currentPrice.toFixed(2)}` : '—'}</td>
+              <td>{zoneBadge(s.zone)}</td>
+              <td>{s.iv !== null ? `${s.iv.toFixed(1)}%` : '—'}</td>
+              <td>{s.ivRank !== null ? Math.round(s.ivRank) : '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 interface DailyBriefViewProps {
   onGoToStrategyLab?: (ticker: string) => void;
 }
@@ -722,6 +769,7 @@ export function DailyBriefView({ onGoToStrategyLab }: DailyBriefViewProps) {
         </div>
       ) : (
         <div className="brief-strategies">
+          <ConvictionAlertsSection />
           {STRATEGY_ORDER.map(strategy => (
             <StrategySection
               key={strategy}

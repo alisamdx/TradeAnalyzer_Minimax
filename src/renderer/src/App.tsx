@@ -83,6 +83,10 @@ export function App() {
   // App notifications (batch jobs, etc.)
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
 
+  // Conviction zone tracking (FR-CV-01 alerts, FR-CV-03 badge)
+  const [convictionBuyCount, setConvictionBuyCount] = useState(0);
+  const prevConvictionZonesRef = useRef<Map<string, string>>(new Map());
+
   // Data sync state — lifted here so it survives tab navigation
   const [syncUniverseSelection, setSyncUniverseSelection] = useState<Universe>('sp500');
   const [isSyncing, setIsSyncing] = useState(false);
@@ -150,6 +154,52 @@ export function App() {
     });
     return () => unsub();
   }, []);
+
+  // FR-CV-01 / FR-CV-03: poll conviction zones every 5 min, detect Buy Zone entry
+  const pollConvictionZones = useCallback(async () => {
+    try {
+      const stocks = await window.api.conviction.list();
+      const prev = prevConvictionZonesRef.current;
+      const isFirstLoad = prev.size === 0 && stocks.length > 0;
+      let buyCount = 0;
+      const entered: Array<{ ticker: string; price: number | null; low: number | null }> = [];
+
+      for (const stock of stocks) {
+        if (stock.zone === 'buy') buyCount++;
+        const prevZone = prev.get(stock.ticker);
+        if (!isFirstLoad && prevZone !== undefined && prevZone !== 'buy' && stock.zone === 'buy') {
+          entered.push({ ticker: stock.ticker, price: stock.currentPrice, low: stock.priceLow });
+        }
+        prev.set(stock.ticker, stock.zone);
+      }
+
+      setConvictionBuyCount(buyCount);
+
+      for (const e of entered) {
+        const priceStr = e.price !== null ? `$${e.price.toFixed(2)}` : '';
+        const lowStr  = e.low  !== null ? `$${e.low.toFixed(2)}`  : '';
+        const msg = `⚡ ${e.ticker} entered your Buy Zone${priceStr && lowStr ? ` (${priceStr} ≤ ${lowStr})` : ''}`;
+        const notif: AppNotification = {
+          id: `conviction-buy-${e.ticker}-${Date.now()}`,
+          type: 'success',
+          message: msg,
+          cta: { label: 'View My Stocks', view: 'conviction' },
+        };
+        setNotifications(ns => [...ns, notif]);
+        setTimeout(() => {
+          setNotifications(ns => ns.filter(x => x.id !== notif.id));
+        }, 12_000);
+      }
+    } catch {
+      // conviction polling is non-critical
+    }
+  }, []);
+
+  useEffect(() => {
+    pollConvictionZones();
+    const id = setInterval(pollConvictionZones, 5 * 60_000);
+    return () => clearInterval(id);
+  }, [pollConvictionZones]);
 
   const handleStartSync = useCallback(async (universe: Universe): Promise<{ scanned: number }> => {
     setSyncUniverseSelection(universe);
@@ -967,6 +1017,9 @@ export function App() {
             style={{ position: 'relative' }}
           >
             ⭐ My Stocks
+            {convictionBuyCount > 0 && (
+              <span className="nav-badge">{convictionBuyCount}</span>
+            )}
           </button>
           <button
             className={`nav-btn ${currentView === 'portfolio' ? 'active' : ''}`}
