@@ -41,56 +41,121 @@ type TradeActionRec = {
 
 function computeTradeAction(t: AgentTrade): TradeActionRec {
   if (t.status !== 'open') return { label: '—', reason: '', severity: 'low', suggestedReason: 'Closed' };
+
   const dte    = liveDTE(t.expiration);
-  const isCall = t.strategy.toLowerCase().includes('call');
-  const dist   = t.lastPrice != null
+  const strat  = t.strategy.toLowerCase();
+  const isCall = strat.includes('call');
+
+  // Classify the structure so we can give strategy-specific guidance
+  const isCondor  = strat.includes('condor') || strat.includes('iron');
+  const isSpread  = strat.includes('spread') && !isCondor;
+  const isLong    = strat.includes('long') || strat.includes('bull') || strat.includes('bear') || strat.includes('leap');
+  const isShortPut  = !isCall && !isLong && !isSpread && !isCondor;  // CSP / wheel put
+  const isShortCall = isCall  && !isLong && !isSpread && !isCondor;  // covered call
+
+  // dist > 0 = OTM (safe), dist < 0 = ITM (at risk)
+  const dist  = t.lastPrice != null
     ? (isCall ? (t.strike - t.lastPrice) / t.strike : (t.lastPrice - t.strike) / t.strike)
     : null;
-  const isITM  = dist != null && dist < 0;
+  const isITM = dist != null && dist < 0;
 
+  // ── Imminent expiry (≤5 DTE) ─────────────────────────────────────────────
   if (dte <= 5) {
-    return {
-      label: 'Close / Roll', severity: 'high',
-      reason: `${dte} DTE — expiry imminent${isITM ? ', ITM' : ''}`,
-      suggestedReason: `Expiry risk — ${dte} DTE${isITM ? ', position is ITM' : ''}`,
-    };
+    let label = 'Close / Roll';
+    let suggestedReason = `Expiry risk — ${dte} DTE`;
+    if (isShortPut)  { label = isITM ? 'Roll CSP Down' : 'Close CSP';  suggestedReason = isITM ? `Rolling CSP — ${dte} DTE, put is ITM` : `Closing CSP at expiry — ${dte} DTE`; }
+    if (isShortCall) { label = isITM ? 'Roll CC Up'    : 'Close CC';   suggestedReason = isITM ? `Rolling CC — ${dte} DTE, call is ITM` : `Closing covered call at expiry — ${dte} DTE`; }
+    if (isCondor)    { label = 'Close Condor'; suggestedReason = `Closing iron condor — ${dte} DTE`; }
+    if (isSpread)    { label = 'Close Spread'; suggestedReason = `Closing spread — ${dte} DTE`; }
+    return { label, severity: 'high', reason: `${dte} DTE — expiry imminent${isITM ? ', position is ITM' : ''}`, suggestedReason };
   }
+
+  // ── Approaching expiry (6–14 DTE) ────────────────────────────────────────
   if (dte <= 14) {
     const distPct = dist != null ? (Math.abs(dist) * 100).toFixed(1) : null;
-    return {
-      label: isITM ? 'Roll (ITM)' : 'Roll',
-      severity: dte <= 7 ? 'high' : 'medium',
-      reason: `${dte} DTE${isITM ? ` — ${distPct}% ITM` : dist != null && dist < 0.05 ? ' — near strike' : ''}`,
-      suggestedReason: isITM
-        ? `Rolling — position is ${distPct}% ITM with ${dte} DTE`
-        : `Rolling for more time — ${dte} DTE remaining`,
-    };
+    const itmNote = isITM && distPct ? ` — ${distPct}% ITM` : dist != null && dist < 0.05 ? ' — near strike' : '';
+
+    let label = 'Roll';
+    let suggestedReason = `Rolling with ${dte} DTE remaining`;
+    if (isShortPut)  { label = isITM ? 'Roll CSP Down + Out' : 'Roll CSP Out';  suggestedReason = isITM ? `Rolling CSP down and out — ${distPct}% ITM with ${dte} DTE` : `Rolling CSP to next expiry — ${dte} DTE remaining`; }
+    if (isShortCall) { label = isITM ? 'Roll CC Up + Out'    : 'Roll CC Out';   suggestedReason = isITM ? `Rolling CC up and out — ${distPct}% ITM with ${dte} DTE` : `Rolling CC to next expiry — ${dte} DTE remaining`; }
+    if (isCondor)    { label = 'Roll Condor'; suggestedReason = `Rolling iron condor — ${dte} DTE remaining`; }
+    if (isSpread)    { label = 'Roll Spread'; suggestedReason = `Rolling spread — ${dte} DTE remaining`; }
+    return { label, severity: dte <= 7 ? 'high' : 'medium', reason: `${dte} DTE${itmNote}`, suggestedReason };
   }
+
+  // ── ITM with time remaining ───────────────────────────────────────────────
   if (isITM && dist != null) {
     const pct = (Math.abs(dist) * 100).toFixed(1);
+    const sev: 'high' | 'medium' = Math.abs(dist) > 0.05 ? 'high' : 'medium';
+
+    if (isShortPut) return {
+      label: 'Roll CSP Down',
+      severity: sev,
+      reason: `Put ${pct}% ITM — stock $${t.lastPrice?.toFixed(2)} below $${t.strike} strike`,
+      suggestedReason: `Rolling CSP down — stock is ${pct}% below the $${t.strike} strike`,
+    };
+    if (isShortCall) return {
+      label: 'Roll CC Up',
+      severity: sev,
+      reason: `Call ${pct}% ITM — stock $${t.lastPrice?.toFixed(2)} above $${t.strike} strike`,
+      suggestedReason: `Rolling CC up — stock is ${pct}% above the $${t.strike} strike, risk of assignment`,
+    };
+    if (isCondor) {
+      const side = isCall ? 'call' : 'put';
+      return {
+        label: `Roll ${side.charAt(0).toUpperCase() + side.slice(1)} Side`,
+        severity: sev,
+        reason: `${side.charAt(0).toUpperCase() + side.slice(1)} spread tested — ${pct}% ITM`,
+        suggestedReason: `Rolling ${side} spread of iron condor — tested ${pct}% ITM`,
+      };
+    }
+    if (isSpread || isLong) return {
+      label: 'Cut Loss',
+      severity: sev,
+      reason: `${pct}% against position — stock at $${t.lastPrice?.toFixed(2)}`,
+      suggestedReason: `Closing spread to limit loss — position ${pct}% against entry`,
+    };
+    // Fallback
     return {
-      label: 'Defend', severity: Math.abs(dist) > 0.05 ? 'high' : 'medium',
-      reason: `${pct}% ITM — $${t.lastPrice?.toFixed(2)} vs $${t.strike} strike`,
-      suggestedReason: `Defensive close — stock is ${pct}% ITM`,
+      label: 'Manage Position',
+      severity: sev,
+      reason: `${pct}% ITM — stock $${t.lastPrice?.toFixed(2)} vs $${t.strike} strike`,
+      suggestedReason: `Managing ITM position — ${pct}% through strike`,
     };
   }
+
+  // ── Near strike (OTM but within 3%) ──────────────────────────────────────
   if (dist != null && dist < 0.03) {
+    const pct = (dist * 100).toFixed(1);
+    let label = 'Watch Strike';
+    if (isShortPut)  label = 'Watch Support';
+    if (isShortCall) label = 'Watch Resistance';
+    if (isCondor)    label = 'Watch Wing';
     return {
-      label: 'Monitor', severity: 'low',
-      reason: `Within ${(dist * 100).toFixed(1)}% of $${t.strike} strike`,
-      suggestedReason: `Precautionary close — approaching strike`,
+      label, severity: 'low',
+      reason: `Stock within ${pct}% of $${t.strike} strike — $${t.lastPrice?.toFixed(2)}`,
+      suggestedReason: `Precautionary close — approaching $${t.strike} strike`,
     };
   }
+
+  // ── Take profit (premium decay ≥50%) ─────────────────────────────────────
   if (t.currentOptionMid != null && t.entryPremium > 0) {
     const captured = (t.entryPremium - t.currentOptionMid) / t.entryPremium;
     if (captured >= 0.5) {
+      let label = 'Take Profit';
+      if (isShortPut)  label = 'Close CSP (Profit)';
+      if (isShortCall) label = 'Close CC (Profit)';
+      if (isCondor)    label = 'Close Condor (Profit)';
       return {
-        label: 'Take Profit', severity: captured >= 0.75 ? 'medium' : 'low',
-        reason: `${(captured * 100).toFixed(0)}% of premium captured`,
-        suggestedReason: `Taking profit — ${(captured * 100).toFixed(0)}% of max premium captured`,
+        label, severity: captured >= 0.75 ? 'medium' : 'low',
+        reason: `${(captured * 100).toFixed(0)}% of max premium captured — entry $${t.entryPremium.toFixed(2)} → $${t.currentOptionMid.toFixed(2)}`,
+        suggestedReason: `Taking profit — ${(captured * 100).toFixed(0)}% of max premium collected`,
       };
     }
   }
+
+  // ── Hold ─────────────────────────────────────────────────────────────────
   return {
     label: 'Hold', severity: 'low',
     reason: 'No action needed',
