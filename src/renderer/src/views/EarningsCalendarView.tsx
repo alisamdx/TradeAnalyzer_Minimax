@@ -159,35 +159,40 @@ function CalendarGrid({
 
               {/* Ticker chips */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                {dayEntries.map(e => (
-                  <div key={e.ticker} style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    gap: 2, padding: '2px 4px', borderRadius: 3,
-                    background: e.confirmed ? '#1e3a5f' : '#1e2a3a',
-                    border: `1px solid ${e.confirmed ? '#2563eb44' : '#334155'}`,
-                    cursor: 'pointer',
-                  }}
-                    onClick={() => onTickerClick(e.ticker)}
-                    title={`${e.ticker} · ${e.reportTime ? (e.reportTime === 'bmo' ? 'Before Market Open' : 'After Market Close') : 'Time unknown'} · ${e.confirmed ? 'Confirmed' : 'Estimated'} · ${SOURCE_LABEL[e.source] ?? e.source}`}
-                  >
-                    <span style={{ fontSize: 10, fontWeight: 700, color: '#93c5fd' }}>{e.ticker}</span>
-                    <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-                      {e.reportTime && (
-                        <span style={{
-                          fontSize: 8, color: e.reportTime === 'bmo' ? '#86efac' : '#fca5a5',
-                          fontWeight: 600,
-                        }}>
-                          {e.reportTime.toUpperCase()}
-                        </span>
-                      )}
-                      <span
-                        onClick={ev => { ev.stopPropagation(); onDeleteTicker(e.ticker); }}
-                        style={{ fontSize: 9, color: '#374151', cursor: 'pointer', lineHeight: 1, paddingLeft: 1 }}
-                        title="Remove"
-                      >×</span>
+                {dayEntries.map(e => {
+                  const weekendWarning = isWeekend && !e.confirmed;
+                  return (
+                    <div key={e.ticker} style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      gap: 2, padding: '2px 4px', borderRadius: 3,
+                      background: weekendWarning ? '#2a1a00' : e.confirmed ? '#1e3a5f' : '#1e2a3a',
+                      border: `1px solid ${weekendWarning ? '#f59e0b66' : e.confirmed ? '#2563eb44' : '#334155'}`,
+                      cursor: 'pointer',
+                    }}
+                      onClick={() => onTickerClick(e.ticker)}
+                      title={`${e.ticker}${weekendWarning ? ' ⚠ Weekend date — likely approximate' : ''} · ${e.reportTime ? (e.reportTime === 'bmo' ? 'Before Market Open' : 'After Market Close') : 'Time unknown'} · ${e.confirmed ? 'Confirmed' : 'Estimated'} · ${SOURCE_LABEL[e.source] ?? e.source}`}
+                    >
+                      <span style={{ fontSize: 10, fontWeight: 700, color: weekendWarning ? '#fbbf24' : '#93c5fd' }}>
+                        {weekendWarning ? '⚠ ' : ''}{e.ticker}
+                      </span>
+                      <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+                        {e.reportTime && (
+                          <span style={{
+                            fontSize: 8, color: e.reportTime === 'bmo' ? '#86efac' : '#fca5a5',
+                            fontWeight: 600,
+                          }}>
+                            {e.reportTime.toUpperCase()}
+                          </span>
+                        )}
+                        <span
+                          onClick={ev => { ev.stopPropagation(); onDeleteTicker(e.ticker); }}
+                          style={{ fontSize: 9, color: '#374151', cursor: 'pointer', lineHeight: 1, paddingLeft: 1 }}
+                          title="Remove"
+                        >×</span>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           );
@@ -195,11 +200,12 @@ function CalendarGrid({
       </div>
 
       {/* Legend */}
-      <div style={{ display: 'flex', gap: 14, fontSize: 10, color: '#475569', paddingTop: 4 }}>
+      <div style={{ display: 'flex', gap: 14, fontSize: 10, color: '#475569', paddingTop: 4, flexWrap: 'wrap' }}>
         <span><span style={{ color: '#86efac' }}>BMO</span> = Before Market Open</span>
         <span><span style={{ color: '#fca5a5' }}>AMC</span> = After Market Close</span>
         <span><span style={{ color: '#2563eb' }}>Blue border</span> = Confirmed</span>
         <span><span style={{ color: '#334155' }}>Dim border</span> = Estimated</span>
+        <span><span style={{ color: '#fbbf24' }}>⚠ Amber</span> = Weekend date (approximate — verify manually)</span>
       </div>
     </div>
   );

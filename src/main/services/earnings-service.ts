@@ -235,7 +235,12 @@ export class EarningsService {
     // E*Trade does not expose a time-of-day flag for earnings through this endpoint
     const time: 'bmo' | 'amc' | null = null;
 
-    return { date, time, source: 'etrade', confirmed: true };
+    // Companies do not report on weekends. If E*Trade returns a Saturday or Sunday,
+    // the date is an approximation — mark as unconfirmed so the UI flags it for review.
+    const dow = new Date(`${date}T12:00:00Z`).getUTCDay(); // 0=Sun, 6=Sat
+    const isWeekend = dow === 0 || dow === 6;
+
+    return { date, time, source: 'etrade', confirmed: !isWeekend };
   }
 
   private upsert(
