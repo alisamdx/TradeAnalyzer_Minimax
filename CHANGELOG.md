@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.31.1] — 2026-06-07
+
+### Fixed
+- Earnings startup refresh (Earnings Refresh batch job) was missing — now fires on app open as a background task. 24h cache TTL means it is a no-op on most launches; only fetches stale or new tickers.
+
 Reverse-chronological. Per spec EP-2.3, this is the index; per-version detail lives in `changelogs/`.
 
 ## v0.31.0 — 2026-06-07
