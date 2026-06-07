@@ -17,7 +17,7 @@ import type { DbHandle } from '../../db/connection.js';
 
 const JOB_ID = 'earnings-refresh';
 const DEFAULT_CALL_DELAY_MS = 500; // conservative default — avoids E*Trade 429s
-const MIN_CALL_DELAY_MS = 200;
+const MIN_CALL_DELAY_MS = 0;       // 0 = no artificial delay; E*Trade API ~250ms natural rate
 const MAX_CALL_DELAY_MS = 2000;
 
 function sleep(ms: number): Promise<void> {

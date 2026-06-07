@@ -100,7 +100,8 @@ function EditModal({ job, onSave, onClose }: EditModalProps) {
       sequenceOrder: Math.max(1, parseInt(sequenceOrder, 10) || 1),
     };
     if (hasDelayConfig) {
-      const delay = Math.max(200, Math.min(2000, parseInt(callDelayMs, 10) || 1100));
+      const minDelay = job.id === 'earnings-refresh' ? 0 : 200;
+    const delay = Math.max(minDelay, Math.min(2000, parseInt(callDelayMs, 10) || 1100));
       patch.config = { callDelayMs: delay };
     }
     onSave(patch);
@@ -171,11 +172,13 @@ function EditModal({ job, onSave, onClose }: EditModalProps) {
                 <label style={{ flex: 1 }}>
                   Call delay (ms)
                   <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>
-                    200–2000ms · default 1100 · lower = faster but risks 429s
+                    {job.id === 'earnings-refresh'
+                      ? '0–2000ms · default 500 · 0 = no artificial delay (E*Trade API ~250ms natural)'
+                      : '200–2000ms · default 1100 · lower = faster but risks 429s'}
                   </div>
                 </label>
                 <input
-                  type="number" min={200} max={2000} step={50}
+                  type="number" min={job.id === 'earnings-refresh' ? 0 : 200} max={2000} step={50}
                   value={callDelayMs}
                   onChange={e => setCallDelayMs(e.target.value)}
                   style={{ width: 80 }}
@@ -184,7 +187,7 @@ function EditModal({ job, onSave, onClose }: EditModalProps) {
               <div style={{ fontSize: 11, color: '#f39c12', marginTop: 6 }}>
                 {job.id === 'daily-iv-update' && <>Est. run time: ~{Math.round((1068 * (parseInt(callDelayMs, 10) || 1100)) / 60_000)} min at {callDelayMs}ms</>}
                 {job.id === 'daily-options-snapshot' && <>Est. run time: ~{Math.round((1100 * (parseInt(callDelayMs, 10) || 1100)) / 60_000)} min at {callDelayMs}ms (full universe ~1,100 tickers)</>}
-                {job.id === 'earnings-refresh' && <>First run: ~{Math.round((1100 * (parseInt(callDelayMs, 10) || 500)) / 60_000)} min · Subsequent runs: mostly skipped (smart cache)</>}
+                {job.id === 'earnings-refresh' && <>First run: ~{Math.round((1100 * (250 + (parseInt(callDelayMs, 10) || 0))) / 60_000)} min (API ~250ms + {callDelayMs}ms delay) · Subsequent runs: mostly skipped</>}
               </div>
             </div>
           )}
