@@ -1046,19 +1046,20 @@ export function AgentView() {
               )}
             </div>
 
-            {/* Theory Checks — from the review phase */}
-            {theoryChecks.length > 0 && (
+            {/* Theory Checks — from the review phase, open trades only */}
+            {theoryChecks.filter(c => c.tradeStatus === 'open').length > 0 && (
               <div style={{ marginBottom: 24 }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 10 }}>
                   <h4 style={{ margin: 0 }}>Theory Validation</h4>
                   <span style={{ fontSize: 12, color: '#95a5a6' }}>
-                    {theoryChecks.filter(c => c.verdict === 'CONFIRMED').length} confirmed ·{' '}
-                    {theoryChecks.filter(c => c.verdict === 'AT_RISK').length} at risk ·{' '}
-                    {theoryChecks.filter(c => c.verdict === 'INVALIDATED').length} invalidated
+                    {theoryChecks.filter(c => c.tradeStatus === 'open' && c.verdict === 'CONFIRMED').length} confirmed ·{' '}
+                    {theoryChecks.filter(c => c.tradeStatus === 'open' && c.verdict === 'AT_RISK').length} at risk ·{' '}
+                    {theoryChecks.filter(c => c.tradeStatus === 'open' && c.verdict === 'INVALIDATED').length} invalidated
+                    <span style={{ marginLeft: 8, color: '#555' }}>· closed-trade checks hidden</span>
                   </span>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {theoryChecks.map((c) => {
+                  {theoryChecks.filter(c => c.tradeStatus === 'open').map((c) => {
                     const vColor = c.verdict === 'CONFIRMED' ? '#2ecc71' : c.verdict === 'AT_RISK' ? '#f39c12' : '#e74c3c';
                     const vBg    = c.verdict === 'CONFIRMED' ? '#1a3a2a' : c.verdict === 'AT_RISK' ? '#3a2a1a' : '#3a1a1a';
                     return (
@@ -1119,7 +1120,7 @@ export function AgentView() {
               </div>
             )}
 
-            {theoryChecks.length === 0 && lessons.length === 0 && (
+            {theoryChecks.filter(c => c.tradeStatus === 'open').length === 0 && lessons.length === 0 && (
               <div style={{ color: '#95a5a6', fontSize: 13 }}>
                 No theory checks or gap-analysis lessons yet. Run the <strong>review</strong> phase to validate open trade theories, or the <strong>learn</strong> phase after trades close to generate gap analysis.
               </div>
