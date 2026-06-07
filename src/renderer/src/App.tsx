@@ -615,149 +615,177 @@ export function App() {
           onEtradeWarningDismiss={() => setEtradeWarning(null)}
         />
       );
-      case 'watchlists': return !active ? (
-        <div className="empty">No watchlist selected.</div>
-      ) : (
+      case 'watchlists': return (
         <>
           <div className="toolbar">
-            <h1>{active?.name}</h1>
-            <span className="meta">
-              {active?.itemCount} ticker{active?.itemCount === 1 ? '' : 's'}
-            </span>
-            <button onClick={onRename}>Rename</button>
-            <button onClick={onExport} disabled={(active?.itemCount ?? 0) === 0}>
-              Export CSV
-            </button>
-            <button onClick={onImportIntoActive}>Import CSV</button>
-            <button onClick={onDelete} disabled={active?.isDefault ?? false} className="danger">
-              Delete
-            </button>
-            <div style={{ flex: 1 }} />
-            <CacheStatusIndicator
-              status={cacheStatus}
-              isLoading={isRefreshingCache}
-              onRefresh={async () => {
-                try {
-                  setIsRefreshingCache(true);
-                  await window.api.cache.refresh();
-                  await refreshCacheStatus();
-                  if (activeId !== null && items.length > 0) await refreshQuotes(items.map(i => i.ticker));
-                } catch (err) {
-                  console.error('Failed to refresh cache:', err);
-                } finally {
-                  setIsRefreshingCache(false);
-                }
+            {/* Watchlist selector dropdown */}
+            <select
+              className="wl-selector"
+              value={activeId ?? ''}
+              onChange={e => {
+                const id = parseInt(e.target.value, 10);
+                if (!isNaN(id)) setActiveId(id);
               }}
-            />
-            <button
-              onClick={() => activeId !== null && items.length > 0 && refreshQuotes(items.map(i => i.ticker))}
-              className="refresh-btn"
-              title="Refresh quotes"
+              disabled={watchlists.length === 0}
             >
-              ↻ Refresh quotes
-            </button>
-          </div>
-          <div className="add-row">
-            <input
-              type="text"
-              placeholder="Add ticker (e.g. AAPL)"
-              value={tickerInput}
-              onChange={(e) => setTickerInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && onAddTicker()}
-              style={{ width: 220 }}
-            />
-            <button onClick={onAddTicker} disabled={!tickerInput.trim()}>
-              Add
-            </button>
-            <span style={{ flex: 1 }} />
-            <button
-              onClick={onRemoveSelected}
-              disabled={selected.size === 0}
-              className="danger"
-            >
-              Remove {selected.size > 0 ? `(${selected.size})` : 'selected'}
-            </button>
-          </div>
-          <div className="items">
-            {items.length === 0 ? (
-              <div className="empty">Empty watchlist. Add a ticker above or import a CSV.</div>
-            ) : (
-              <table className="items-table">
-                <thead>
-                  <tr>
-                    <th style={{ width: 24 }}></th>
-                    <th className="sortable-header" onClick={() => requestSort('ticker')}>Ticker {getSortIndicator('ticker')}</th>
-                    <th className="sortable-header" onClick={() => requestSort('lastPrice')}>Last {getSortIndicator('lastPrice')}</th>
-                    <th className="sortable-header" onClick={() => requestSort('dayChangePct')}>Day % {getSortIndicator('dayChangePct')}</th>
-                    <th className="sortable-header" onClick={() => requestSort('volume')}>Volume {getSortIndicator('volume')}</th>
-                    <th className="sortable-header" onClick={() => requestSort('wheelSuitability')} title="Wheel Suitability Score">Wheel {getSortIndicator('wheelSuitability')}</th>
-                    <th className="sortable-header" onClick={() => requestSort('targetStrike')} title="Target Put Strike">Strike {getSortIndicator('targetStrike')}</th>
-                    <th className="sortable-header" onClick={() => requestSort('estimatedPremium')} title="Estimated Monthly Premium">Premium {getSortIndicator('estimatedPremium')}</th>
-                    <th>Sector</th>
-                    <th className="sortable-header num" title="ATM Implied Volatility">IV %</th>
-                    <th className="sortable-header" onClick={() => requestSort('notes')}>Notes {getSortIndicator('notes')}</th>
-                    <th className="sortable-header" onClick={() => requestSort('addedAt')}>Added {getSortIndicator('addedAt')}</th>
-                    <th style={{ width: 50 }}></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sortedData.map((it) => (
-                    <tr key={it.id} className={selected.has(it.id) ? 'selected' : ''}>
-                      <td>
-                        <input
-                          type="checkbox"
-                          checked={selected.has(it.id)}
-                          onChange={() => toggleSelected(it.id)}
-                        />
-                      </td>
-                      <td><strong>{it.ticker}</strong></td>
-                      <td className="num">{fmtPrice(it.ticker)}</td>
-                      <td className={`num ${dayPctClass(it.ticker)}`}>
-                        {fmtDayPct(it.ticker)}
-                      </td>
-                      <td className="num">
-                        {it.volume != null
-                          ? (it.volume / 1_000_000).toFixed(1) + 'M'
-                          : '—'}
-                      </td>
-                      <td className={`num wheel-score ${wheelScoreClass(it.ticker)}`}>
-                        {fmtWheelScore(it.ticker)}
-                      </td>
-                      <td className="num">{fmtTargetStrike(it.ticker)}</td>
-                      <td className="num">{fmtEstPremium(it.ticker)}</td>
-                      <td>{it.sector ?? ''}</td>
-                      <td className="num">
-                        {(() => {
-                          const iv = quoteMap[it.ticker]?.currentIv ?? it.currentIv;
-                          return iv !== null && iv !== undefined ? (
-                            <span
-                              style={{
-                                color: iv >= 30 ? '#2ecc71' : iv >= 20 ? '#f39c12' : '#95a5a6'
-                              }}
-                              title={iv >= 30 ? 'Good premium' : iv >= 20 ? 'Moderate premium' : 'Low premium'}
-                            >
-                              {iv.toFixed(1)}%
-                            </span>
-                          ) : '—';
-                        })()}
-                      </td>
-                      <td>{it.notes ?? ''}</td>
-                      <td>{it.addedAt.slice(0, 10)}</td>
-                      <td>
-                        <button
-                          className="action-btn"
-                          title="Validate this ticker"
-                          onClick={() => runValidateForTicker(it.ticker)}
-                        >
-                          🎯
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              {watchlists.length === 0
+                ? <option value="">No watchlists</option>
+                : watchlists.map(w => (
+                    <option key={w.id} value={w.id}>
+                      {w.name} ({w.itemCount})
+                    </option>
+                  ))
+              }
+            </select>
+            <button onClick={onCreate} title="Create new watchlist">+ New</button>
+            <button onClick={onImportNew} title="Import CSV into a new watchlist">Import new…</button>
+            {active && (
+              <>
+                <div className="toolbar-divider" />
+                <button onClick={onRename}>Rename</button>
+                <button onClick={onExport} disabled={(active.itemCount ?? 0) === 0}>Export CSV</button>
+                <button onClick={onImportIntoActive}>Import CSV</button>
+                <button onClick={onDelete} disabled={active.isDefault ?? false} className="danger">Delete</button>
+              </>
+            )}
+            <div style={{ flex: 1 }} />
+            {active && (
+              <>
+                <CacheStatusIndicator
+                  status={cacheStatus}
+                  isLoading={isRefreshingCache}
+                  onRefresh={async () => {
+                    try {
+                      setIsRefreshingCache(true);
+                      await window.api.cache.refresh();
+                      await refreshCacheStatus();
+                      if (activeId !== null && items.length > 0) await refreshQuotes(items.map(i => i.ticker));
+                    } catch (err) {
+                      console.error('Failed to refresh cache:', err);
+                    } finally {
+                      setIsRefreshingCache(false);
+                    }
+                  }}
+                />
+                <button
+                  onClick={() => activeId !== null && items.length > 0 && refreshQuotes(items.map(i => i.ticker))}
+                  className="refresh-btn"
+                  title="Refresh quotes"
+                >
+                  ↻ Refresh quotes
+                </button>
+              </>
             )}
           </div>
+          {!active ? (
+            <div className="empty" style={{ marginTop: 40 }}>
+              No watchlist selected. Create one with <strong>+ New</strong> or import a CSV.
+            </div>
+          ) : (
+            <>
+              <div className="add-row">
+                <input
+                  type="text"
+                  placeholder="Add ticker (e.g. AAPL)"
+                  value={tickerInput}
+                  onChange={(e) => setTickerInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && onAddTicker()}
+                  style={{ width: 220 }}
+                />
+                <button onClick={onAddTicker} disabled={!tickerInput.trim()}>
+                  Add
+                </button>
+                <span style={{ flex: 1 }} />
+                <button
+                  onClick={onRemoveSelected}
+                  disabled={selected.size === 0}
+                  className="danger"
+                >
+                  Remove {selected.size > 0 ? `(${selected.size})` : 'selected'}
+                </button>
+              </div>
+              <div className="items">
+                {items.length === 0 ? (
+                  <div className="empty">Empty watchlist. Add a ticker above or import a CSV.</div>
+                ) : (
+                  <table className="items-table">
+                    <thead>
+                      <tr>
+                        <th style={{ width: 24 }}></th>
+                        <th className="sortable-header" onClick={() => requestSort('ticker')}>Ticker {getSortIndicator('ticker')}</th>
+                        <th className="sortable-header" onClick={() => requestSort('lastPrice')}>Last {getSortIndicator('lastPrice')}</th>
+                        <th className="sortable-header" onClick={() => requestSort('dayChangePct')}>Day % {getSortIndicator('dayChangePct')}</th>
+                        <th className="sortable-header" onClick={() => requestSort('volume')}>Volume {getSortIndicator('volume')}</th>
+                        <th className="sortable-header" onClick={() => requestSort('wheelSuitability')} title="Wheel Suitability Score">Wheel {getSortIndicator('wheelSuitability')}</th>
+                        <th className="sortable-header" onClick={() => requestSort('targetStrike')} title="Target Put Strike">Strike {getSortIndicator('targetStrike')}</th>
+                        <th className="sortable-header" onClick={() => requestSort('estimatedPremium')} title="Estimated Monthly Premium">Premium {getSortIndicator('estimatedPremium')}</th>
+                        <th>Sector</th>
+                        <th className="sortable-header num" title="ATM Implied Volatility">IV %</th>
+                        <th className="sortable-header" onClick={() => requestSort('notes')}>Notes {getSortIndicator('notes')}</th>
+                        <th className="sortable-header" onClick={() => requestSort('addedAt')}>Added {getSortIndicator('addedAt')}</th>
+                        <th style={{ width: 50 }}></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sortedData.map((it) => (
+                        <tr key={it.id} className={selected.has(it.id) ? 'selected' : ''}>
+                          <td>
+                            <input
+                              type="checkbox"
+                              checked={selected.has(it.id)}
+                              onChange={() => toggleSelected(it.id)}
+                            />
+                          </td>
+                          <td><strong>{it.ticker}</strong></td>
+                          <td className="num">{fmtPrice(it.ticker)}</td>
+                          <td className={`num ${dayPctClass(it.ticker)}`}>
+                            {fmtDayPct(it.ticker)}
+                          </td>
+                          <td className="num">
+                            {it.volume != null
+                              ? (it.volume / 1_000_000).toFixed(1) + 'M'
+                              : '—'}
+                          </td>
+                          <td className={`num wheel-score ${wheelScoreClass(it.ticker)}`}>
+                            {fmtWheelScore(it.ticker)}
+                          </td>
+                          <td className="num">{fmtTargetStrike(it.ticker)}</td>
+                          <td className="num">{fmtEstPremium(it.ticker)}</td>
+                          <td>{it.sector ?? ''}</td>
+                          <td className="num">
+                            {(() => {
+                              const iv = quoteMap[it.ticker]?.currentIv ?? it.currentIv;
+                              return iv !== null && iv !== undefined ? (
+                                <span
+                                  style={{
+                                    color: iv >= 30 ? '#2ecc71' : iv >= 20 ? '#f39c12' : '#95a5a6'
+                                  }}
+                                  title={iv >= 30 ? 'Good premium' : iv >= 20 ? 'Moderate premium' : 'Low premium'}
+                                >
+                                  {iv.toFixed(1)}%
+                                </span>
+                              ) : '—';
+                            })()}
+                          </td>
+                          <td>{it.notes ?? ''}</td>
+                          <td>{it.addedAt.slice(0, 10)}</td>
+                          <td>
+                            <button
+                              className="action-btn"
+                              title="Validate this ticker"
+                              onClick={() => runValidateForTicker(it.ticker)}
+                            >
+                              🎯
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </>
+          )}
         </>
       );
       default: return null;
@@ -946,26 +974,6 @@ export function App() {
           </button>
         </div>
 
-        {currentView === 'watchlists' && (
-          <>
-            <ul className="watchlist-list">
-              {watchlists.map((w) => (
-                <li
-                  key={w.id}
-                  className={`${w.id === activeId ? 'active' : ''} ${w.isDefault ? 'is-default' : ''}`}
-                  onClick={() => setActiveId(w.id)}
-                >
-                  <span>{w.name}</span>
-                  <span className="count">{w.itemCount}</span>
-                </li>
-              ))}
-            </ul>
-            <div className="sidebar-actions">
-              <button onClick={onCreate}>+ New</button>
-              <button onClick={onImportNew}>Import…</button>
-            </div>
-          </>
-        )}
       </aside>
 
       <section className="main">

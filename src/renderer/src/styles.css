@@ -145,12 +145,6 @@ input[type='text']:focus {
   align-self: center;
 }
 
-.sidebar-actions {
-  display: flex;
-  gap: 6px;
-  padding: 8px 12px;
-  border-top: 1px solid var(--border);
-}
 
 .main {
   grid-area: main;
@@ -648,10 +642,38 @@ table.items-table {
   border-radius: 0;
 }
 
-.watchlist-list { padding: 0; }
 .refresh-btn { font-size: 11px; }
-.sidebar-actions { gap: 4px; }
-.sidebar-actions button { flex: 1; font-size: 11px; padding: 4px 6px; }
+
+/* Watchlist selector dropdown in the toolbar */
+.wl-selector {
+  padding: 5px 10px;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  color: #e2e8f0;
+  font-size: 13px;
+  font-weight: 600;
+  min-width: 180px;
+  max-width: 260px;
+  cursor: pointer;
+}
+.wl-selector:focus {
+  outline: none;
+  border-color: #58a6ff;
+}
+.wl-selector:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Vertical rule between button groups in toolbar */
+.toolbar-divider {
+  width: 1px;
+  height: 20px;
+  background: #30363d;
+  margin: 0 4px;
+  flex-shrink: 0;
+}
 
 /* ── AnalysisView ──────────────────────────────────────────────────────────── */
 
