@@ -428,7 +428,25 @@ function SummaryTab({ result }: { result: NewsResearchResult }) {
               <span className="nr-factor-tag" style={{ color: DIR_COLOR[f.direction] }}>
                 {TAG_LABEL[f.tag]}
               </span>
-              <span className="nr-factor-desc">{f.description}</span>
+              <span className="nr-factor-body">
+                <span className="nr-factor-desc">{f.description}</span>
+                {f.links && f.links.length > 0 && (
+                  <span className="nr-factor-links">
+                    {f.links.map((link, li) => (
+                      <a
+                        key={li}
+                        href={link.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="nr-factor-link"
+                        title={link.url}
+                      >
+                        {link.label}
+                      </a>
+                    ))}
+                  </span>
+                )}
+              </span>
             </div>
           ))}
         </div>

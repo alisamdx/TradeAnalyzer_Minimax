@@ -1797,10 +1797,17 @@ export type KeyFactorTag =
   | 'NEWS'
   | 'SEASONALITY';
 
+/** A source link attached to a key factor. */
+export interface KeyFactorLink {
+  label: string;   // Short display label e.g. "Article", "Fed", "BLS", "Search"
+  url: string;
+}
+
 export interface KeyFactor {
   tag: KeyFactorTag;
   direction: 'bull' | 'bear' | 'neutral';
   description: string;
+  links?: KeyFactorLink[];
 }
 
 export interface ResearchEvent {

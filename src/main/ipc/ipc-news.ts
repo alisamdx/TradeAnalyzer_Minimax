@@ -192,6 +192,7 @@ async function buildResultWithAI(
 }
 
 import type { AiTickerResult } from '../services/news-ai-service.js';
+import { enrichFactorsWithLinks } from '../services/news-link-builder.js';
 
 function buildResultFromSignals(
   ticker: string,
@@ -203,12 +204,19 @@ function buildResultFromSignals(
   // Derive rule-based values as fallback.
   const ruleInsights = newsFetcher.deriveInsights(ticker, signals);
 
+  // For AI-generated factors, attach source links (AI doesn't emit URLs).
+  // Rule-based factors already have links from deriveInsights.
+  const rawFactors = aiResult?.keyFactors ?? ruleInsights.keyFactors;
+  const keyFactors = aiResult
+    ? enrichFactorsWithLinks(rawFactors, ticker, signals.newsHeadlines)
+    : rawFactors; // rule-based already enriched
+
   return {
     ticker,
     cacheDate: today,
     impactScore: aiResult?.impactScore ?? ruleInsights.impactScore,
     bias:        aiResult?.bias        ?? ruleInsights.bias,
-    keyFactors:  aiResult?.keyFactors  ?? ruleInsights.keyFactors,
+    keyFactors,
     summary:     aiResult?.summary     ?? ruleInsights.summary,
     portfolioNote: null,
     events:      ruleInsights.events,

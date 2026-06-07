@@ -14,6 +14,7 @@ import type {
   NewsResearchBias,
   NewsBatchProgressEvent,
 } from '@shared/types.js';
+import { enrichFactorsWithLinks } from './news-link-builder.js';
 
 const POLYGON_BASE = 'https://api.polygon.io';
 
@@ -79,12 +80,14 @@ export class NewsDataFetcher {
     bias: NewsResearchBias;
     summary: string | null;
   } {
-    const keyFactors = computeKeyFactors(signals);
+    const rawFactors = computeKeyFactors(signals);
+    // Attach source links to each rule-based factor.
+    const keyFactors = enrichFactorsWithLinks(rawFactors, ticker, signals.newsHeadlines);
     const events = computeEvents(signals);
     const impactScore = computeImpactScore(signals, keyFactors);
     const bias = computeBias(keyFactors);
 
-    // Phase 1: plain rule-based summary.  Phase 2 replaces this with Claude AI.
+    // Plain rule-based summary; Phase 2 (AI) replaces this with Claude narrative.
     const summary = buildRuleSummary(ticker, keyFactors, signals);
 
     return { keyFactors, events, impactScore, bias, summary };
