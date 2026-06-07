@@ -2,6 +2,10 @@
 
 Reverse-chronological. Per spec EP-2.3, this is the index; per-version detail lives in `changelogs/`.
 
+## v0.30.1 — 2026-06-07
+
+Portfolio Greeks (ENH-3): "⚡ Refresh Greeks" button fetches live delta/theta/vega for all open CSP/CC positions from the options chain and writes them to the positions table. Portfolio Greeks bar now includes manually entered positions (not just E*Trade-synced ones). Short-position sign convention applied on write: positive theta/negative vega for premium sellers.
+
 ## v0.30.0 — 2026-06-07
 
 Conviction List Phase 2: zone-entry toast notifications (FR-CV-01) when a stock transitions into Buy Zone, green count badge on the "⭐ My Stocks" sidebar item (FR-CV-03), and a "⚡ Conviction Alerts" section at the top of the Daily Brief listing any stocks currently in Buy or Mid zone (FR-CV-02).

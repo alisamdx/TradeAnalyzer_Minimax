@@ -10,6 +10,7 @@ import { EtradePortfolioService } from '../services/etrade-portfolio-service.js'
 import { PositionAnalysisService } from '../services/position-analysis-service.js';
 import { AiAdvisorService } from '../services/ai-advisor-service.js';
 import type { AnalysisService } from '../services/analysis-service.js';
+import type { OptionsProvider } from '../services/options-provider.js';
 import { secureGet, secureSet } from '../services/secure-settings.js';
 import type { IpcResult, EtradeAccount, EtradeSyncResult, PositionAnalysis, PositionEtrade, AdvisorSession, AdvisorProgressEvent } from '@shared/types.js';
 
@@ -72,7 +73,7 @@ function wrap<Args extends unknown[], R>(fn: (...args: Args) => R) {
   };
 }
 
-export function registerPortfolioIpc(db: Database, analysisService?: AnalysisService): void {
+export function registerPortfolioIpc(db: Database, analysisService?: AnalysisService, optionsProvider?: OptionsProvider): void {
   const service          = new PortfolioService(db);
   const etradePortfolio  = new EtradePortfolioService();
   const positionAnalysis = analysisService ? new PositionAnalysisService(analysisService) : null;
@@ -131,6 +132,70 @@ export function registerPortfolioIpc(db: Database, analysisService?: AnalysisSer
     const positions = service.listByTicker(ticker);
     return { success: true, data: positions };
   }));
+
+  // ─── Live Greeks fetch (ENH-3) ────────────────────────────────────────────
+  // Fetches delta/theta/vega for open CSP/CC positions from the options chain
+  // and persists them to the positions table so the portfolio Greeks bar reflects
+  // manually entered positions (not just E*Trade-synced ones).
+
+  ipcMain.handle('portfolio:fetchGreeks', async (_e: IpcMainInvokeEvent): Promise<IpcResult<{ updated: number; failed: number; errors: string[] }>> => {
+    if (!optionsProvider) {
+      return fail(new Error('Options provider not available'));
+    }
+
+    const open = service.listPositions('open').filter(p => p.positionType !== 'Stock' && p.strikePrice !== null && p.expirationDate !== null);
+    if (open.length === 0) {
+      return ok({ updated: 0, failed: 0, errors: [] });
+    }
+
+    // Group positions by (ticker, expiry) to fetch one chain per combo
+    const groups = new Map<string, typeof open>();
+    for (const pos of open) {
+      const key = `${pos.ticker}::${pos.expirationDate}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(pos);
+    }
+
+    let updated = 0;
+    let failed = 0;
+    const errors: string[] = [];
+
+    for (const [key, positions] of groups) {
+      const [ticker, expiry] = key.split('::') as [string, string];
+      try {
+        const chain = await optionsProvider.getOptionsChain(ticker, expiry);
+
+        for (const pos of positions) {
+          const side = pos.positionType === 'CSP' ? 'put' : 'call';
+          const contract = chain.contracts.find(c =>
+            c.side === side && Math.abs(c.strike - (pos.strikePrice ?? 0)) < 0.51
+          );
+
+          if (!contract) {
+            failed++;
+            errors.push(`${pos.ticker} ${side} $${pos.strikePrice} ${expiry}: contract not found in chain`);
+            continue;
+          }
+
+          // Negate chain Greeks to get short-position convention:
+          // short put/call has positive theta (earns decay) and negative vega (loses on IV rise).
+          // Delta: short put → positive, short call → negative.
+          const delta = contract.delta !== null ? -(contract.delta) : null;
+          const theta = contract.theta !== null ? -(contract.theta) : null;
+          const vega  = contract.vega  !== null ? -(contract.vega)  : null;
+
+          service.updateGreeks(pos.id, delta, theta, vega);
+          updated++;
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        errors.push(`${ticker} ${expiry}: ${msg}`);
+        failed += positions.length;
+      }
+    }
+
+    return ok({ updated, failed, errors });
+  });
 
   // ─── Phase 1: E*Trade Sync ────────────────────────────────────────────────
 

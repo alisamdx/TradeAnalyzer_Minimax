@@ -501,6 +501,9 @@ function buildApi() {
       status: 'open' | 'closed';
       createdAt: string;
       updatedAt: string;
+      delta: number | null;
+      theta: number | null;
+      vega: number | null;
     }[]; error?: string }>('portfolio:list', status),
     get: (id: number) => invoke<{ success: boolean; data?: {
       id: number;
@@ -631,6 +634,8 @@ function buildApi() {
       createdAt: string;
       updatedAt: string;
     }[]; error?: string }>('portfolio:listByTicker', ticker),
+
+    fetchGreeks: () => invoke<{ updated: number; failed: number; errors: string[] }>('portfolio:fetchGreeks'),
 
     // ── Phase 1: E*Trade Sync ─────────────────────────────────────────────────
     etrade: {

@@ -293,7 +293,7 @@ app.whenReady().then(() => {
   registerHistoricalIpc(db, () => getApiKey(db));
 
   // Phase 6 - Portfolio tracking IPC (+ Phase 1–3 AI Portfolio Advisor)
-  registerPortfolioIpc(db, analysisService);
+  registerPortfolioIpc(db, analysisService, optionsProvider);
   registerConvictionIpc(new ConvictionService(db));
 
   // ENH-2 - Opportunity Dashboard

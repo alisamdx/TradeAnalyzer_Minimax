@@ -29,6 +29,10 @@ export interface Position {
   status: PositionStatus;
   createdAt: string;
   updatedAt: string;
+  // Greeks (stored from live options chain fetch; positive theta/negative vega = short-position convention)
+  delta: number | null;
+  theta: number | null;
+  vega: number | null;
 }
 
 export interface PositionInput {
@@ -331,6 +335,12 @@ export class PortfolioService {
     this.updateCurrentPriceStmt.run(currentPrice, currentPrice, id);
   }
 
+  updateGreeks(id: number, delta: number | null, theta: number | null, vega: number | null): void {
+    this.db.prepare(`
+      UPDATE positions SET delta = ?, theta = ?, vega = ? WHERE id = ?
+    `).run(delta, theta, vega, id);
+  }
+
   updatePricesForTicker(ticker: string, currentPrice: number): void {
     const positions = this.listByTicker(ticker);
     for (const position of positions) {
@@ -429,6 +439,9 @@ interface PositionRow {
   status: PositionStatus;
   created_at: string;
   updated_at: string;
+  delta: number | null;
+  theta: number | null;
+  vega: number | null;
 }
 
 function rowToPosition(r: PositionRow): Position {
@@ -451,6 +464,9 @@ function rowToPosition(r: PositionRow): Position {
     realizedPnl: r.realized_pnl,
     status: r.status,
     createdAt: r.created_at,
-    updatedAt: r.updated_at
+    updatedAt: r.updated_at,
+    delta: r.delta ?? null,
+    theta: r.theta ?? null,
+    vega: r.vega ?? null,
   };
 }

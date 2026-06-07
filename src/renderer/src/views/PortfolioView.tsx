@@ -29,6 +29,9 @@ interface Position {
   status: PositionStatus;
   createdAt: string;
   updatedAt: string;
+  delta: number | null;
+  theta: number | null;
+  vega: number | null;
 }
 
 interface PnLSummary {
@@ -157,6 +160,9 @@ export function PortfolioView() {
   // Account size for BP% calculation
   const [accountSize, setAccountSize]     = useState<number>(0);
 
+  // Greeks refresh state
+  const [fetchingGreeks, setFetchingGreeks] = useState(false);
+
   // Streaming state
   const [streamStatus, setStreamStatus]   = useState<string>('');
   const [thinkingText, setThinkingText]   = useState<string>('');
@@ -257,12 +263,18 @@ export function PortfolioView() {
       const multiplier = isOption ? pos.quantity * 100 : pos.quantity;
 
       if (et) {
+        // E*Trade sync data takes precedence (already position-adjusted)
         if (et.delta != null) netDelta += et.delta * multiplier;
         if (isOption) {
           if (et.theta != null) totalTheta += et.theta * multiplier;
           if (et.vega  != null) totalVega  += et.vega  * multiplier;
         }
-      } else if (!isOption) {
+      } else if (isOption) {
+        // Fallback: stored Greeks from live chain fetch (short-position convention)
+        if (pos.delta != null) netDelta    += pos.delta * multiplier;
+        if (pos.theta != null) totalTheta  += pos.theta * multiplier;
+        if (pos.vega  != null) totalVega   += pos.vega  * multiplier;
+      } else {
         netDelta += pos.quantity; // stock with no ET data: assume Δ=1/share
       }
 
@@ -357,6 +369,23 @@ export function PortfolioView() {
       loadData();
     } catch (e) { setError(`Sync closed failed: ${(e as Error).message}`); }
     finally { setSyncClosedBusy(false); }
+  };
+
+  // ─── Fetch live Greeks ────────────────────────────────────────────────────────
+
+  const handleFetchGreeks = async () => {
+    setFetchingGreeks(true); setError(null);
+    try {
+      const result = await window.api.portfolio.fetchGreeks();
+      const msg = result.updated > 0
+        ? `Greeks updated for ${result.updated} position${result.updated !== 1 ? 's' : ''}${result.failed > 0 ? ` (${result.failed} failed)` : ''}`
+        : result.failed > 0
+          ? `Greeks fetch failed for all ${result.failed} position${result.failed !== 1 ? 's' : ''}`
+          : 'No open options positions to update';
+      setStatusMsg(msg);
+      if (result.updated > 0) loadData();
+    } catch (e) { setError(`Greeks fetch failed: ${(e as Error).message}`); }
+    finally { setFetchingGreeks(false); }
   };
 
   // ─── Position analysis ────────────────────────────────────────────────────────
@@ -573,6 +602,14 @@ export function PortfolioView() {
               + Set account size
             </button>
           )}
+          <button
+            onClick={handleFetchGreeks}
+            disabled={fetchingGreeks}
+            style={{ fontSize: 10, padding: '4px 8px', background: 'transparent', border: '1px dashed #374151', borderRadius: 6, color: fetchingGreeks ? '#6b7280' : '#60a5fa', cursor: fetchingGreeks ? 'wait' : 'pointer', marginLeft: 'auto' }}
+            title="Fetch live delta/theta/vega for open options positions from the options chain"
+          >
+            {fetchingGreeks ? '⟳ Fetching…' : '⚡ Refresh Greeks'}
+          </button>
         </div>
       )}
 
