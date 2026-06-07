@@ -1886,4 +1886,5 @@ export interface NewsBatchProgressEvent {
   done: number;
   total: number;
   ticker: string;
+  phase?: 'fetch' | 'synthesis';
 }

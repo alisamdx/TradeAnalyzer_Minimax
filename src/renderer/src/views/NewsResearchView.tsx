@@ -68,7 +68,7 @@ export function NewsResearchView() {
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'summary' | 'events' | 'news'>('summary');
   const [batchRunning, setBatchRunning] = useState(false);
-  const [batchProgress, setBatchProgress] = useState<{ done: number; total: number } | null>(null);
+  const [batchProgress, setBatchProgress] = useState<{ done: number; total: number; phase?: 'fetch' | 'synthesis' } | null>(null);
   const [fetchingTicker, setFetchingTicker] = useState<string | null>(null);
   const [lastBatchTime, setLastBatchTime] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -173,7 +173,7 @@ export function NewsResearchView() {
     // Subscribe to progress events.
     batchUnsubRef.current?.();
     batchUnsubRef.current = window.api.news.onBatchProgress((p) => {
-      setBatchProgress({ done: p.done, total: p.total });
+      setBatchProgress({ done: p.done, total: p.total, phase: p.phase });
     });
 
     try {
@@ -250,7 +250,9 @@ export function NewsResearchView() {
             title={`Analyze all ${wlTickers.length} tickers in this watchlist`}
           >
             {batchRunning
-              ? `⏳ ${batchProgress ? `${batchProgress.done}/${batchProgress.total}` : '…'}`
+              ? batchProgress?.phase === 'synthesis'
+                ? '🤖 AI synthesis…'
+                : `⏳ ${batchProgress ? `${batchProgress.done}/${batchProgress.total}` : '…'}`
               : '▶ Run Watchlist'}
           </button>
 
@@ -436,25 +438,29 @@ function SummaryTab({ result }: { result: NewsResearchResult }) {
         </div>
       )}
 
-      {/* AI summary / rule-based narrative */}
+      {/* Summary / narrative */}
       {summary && (
         <div className="nr-narrative">
-          <div className="nr-section-label">Summary</div>
+          <div className="nr-section-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            Summary
+            {result.aiModel
+              ? <span className="nr-ai-badge">🤖 AI</span>
+              : <span className="nr-rule-badge">Rule-based</span>
+            }
+          </div>
           <p>{summary}</p>
-        </div>
-      )}
-
-      {/* Phase 2 teaser */}
-      {!result.aiModel && (
-        <div className="nr-ai-teaser">
-          🤖 <strong>AI Synthesis</strong> coming in Phase 2 — Claude will provide a narrative analysis with cross-signal reasoning.
         </div>
       )}
 
       {/* Signal coverage note */}
       <div className="nr-coverage-note">
-        <span>Data sources active: 📰 News</span>
-        <span style={{ color: '#30363d' }}>  ·  Coming: 📊 Earnings  ·  🏦 Analyst  ·  📋 Insider  ·  📉 Short Interest</span>
+        {result.aiModel
+          ? <span style={{ color: '#8b949e' }}>AI model: {result.aiModel}  ·  Data: 📰 News  ·  📅 Macro</span>
+          : <>
+              <span>Data: 📰 News  ·  📅 Macro</span>
+              <span style={{ color: '#30363d' }}>  ·  Coming: 📊 Earnings  ·  🏦 Analyst  ·  📋 Insider</span>
+            </>
+        }
       </div>
     </div>
   );

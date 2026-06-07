@@ -163,6 +163,11 @@ export class NewsDataFetcher {
     return results;
   }
 
+  /** Public skeleton builder — used by IPC handler when a ticker errors during batch. */
+  buildSkeletonResult(ticker: string, cacheDate: string): NewsResearchResult {
+    return buildSkeletonResult(ticker, cacheDate);
+  }
+
   // ─── Cache helpers ──────────────────────────────────────────────────────────
 
   readCache(ticker: string, date: string): NewsResearchResult | null {
@@ -463,7 +468,7 @@ function buildRuleSummary(ticker: string, factors: KeyFactor[], signals: RawSign
   return lines.join(' ') || null;
 }
 
-function buildSkeletonResult(ticker: string, cacheDate: string): NewsResearchResult {
+export function buildSkeletonResult(ticker: string, cacheDate: string): NewsResearchResult {
   return {
     ticker,
     cacheDate,

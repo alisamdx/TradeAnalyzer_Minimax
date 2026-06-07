@@ -66,6 +66,7 @@ import { registerPaperTradingIpc } from './ipc/ipc-paper-trading.js';
 import { StrategyLabService } from './services/strategy-lab-service.js';
 import { CriticService } from './services/critic-service.js';
 import { NewsDataFetcher } from './services/news-data-fetcher.js';
+import { NewsAIService } from './services/news-ai-service.js';
 import { registerNewsIpc } from './ipc/ipc-news.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -445,7 +446,8 @@ app.whenReady().then(() => {
 
   // News & Research module
   const newsFetcher = new NewsDataFetcher(() => getApiKey(db), db);
-  registerNewsIpc(newsFetcher, rateLimiter);
+  const newsAiService = new NewsAIService(db);
+  registerNewsIpc(newsFetcher, rateLimiter, newsAiService);
 
   // v0.12.0 — TraderAgent integration
   const agentDb = new AgentDbService();
