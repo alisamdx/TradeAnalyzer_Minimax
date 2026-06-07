@@ -2709,12 +2709,13 @@ input[type='checkbox'] {
 /* Expiration Tabs */
 .oc-exp-tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   margin-bottom: 12px;
 }
 
 .oc-exp-tab {
-  padding: 6px 12px;
+  padding: 6px 8px;
   border: 1px solid var(--border);
   border-radius: 4px;
   background: var(--bg);

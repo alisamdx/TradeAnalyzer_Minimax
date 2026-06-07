@@ -198,8 +198,8 @@ export function OptionsChainView({ initialTicker, initialExpiry, clearInitialTic
   const puts = filteredContracts.filter(c => c.side === 'put').sort((a, b) => a.strike - b.strike);
   const strikes = [...new Set(filteredContracts.map(c => c.strike))].sort((a, b) => a - b);
 
-  // Filter expirations: show up to 5 Fridays (current week + next 4)
-  const visibleExpirations = expirations.filter(e => e.callCount > 0 || e.putCount > 0).slice(0, 5);
+  // Show up to 8 expirations (fits a ~1280px window single-row; wraps gracefully below that)
+  const visibleExpirations = expirations.filter(e => e.callCount > 0 || e.putCount > 0).slice(0, 8);
 
   return (
     <div className="options-chain-view">
