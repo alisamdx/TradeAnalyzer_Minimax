@@ -8,7 +8,8 @@ import type {
   WatchlistItem,
   OptionContract,
   OptionsChainExpirationSummary,
-  OptionsChainViewData
+  OptionsChainViewData,
+  PayoffLeg,
 } from '@shared/types.js';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -167,6 +168,38 @@ export function OptionsChainView({ initialTicker, initialExpiry, clearInitialTic
       window.dispatchEvent(new CustomEvent('navigate-to-validate', { detail: { ticker: selectedTicker } }));
     }
   }, [selectedTicker]);
+
+  // Open Payoff view with a single pre-built leg from a chain row
+  const handleOpenPayoff = useCallback((
+    contract: OptionContract,
+    side: 'buy' | 'sell',
+    type: 'call' | 'put',
+  ) => {
+    if (!selectedTicker || !selectedExpiration) return;
+    const mid = parseFloat(((contract.bid + contract.ask) / 2).toFixed(2));
+    const leg: PayoffLeg = {
+      id:       String(Date.now()),
+      side,
+      type,
+      strike:   contract.strike,
+      expiry:   selectedExpiration,
+      premium:  mid,
+      quantity: 1,
+      delta:    contract.delta,
+      theta:    contract.theta,
+      vega:     contract.vega,
+      iv:       contract.iv,
+      label:    `${side === 'buy' ? 'Buy' : 'Sell'} ${type === 'call' ? 'Call' : 'Put'} $${contract.strike}`,
+    };
+    window.dispatchEvent(new CustomEvent('navigate-to-payoff', {
+      detail: {
+        ticker: selectedTicker,
+        spot:   currentPrice,
+        expiry: selectedExpiration,
+        legs:   [leg],
+      },
+    }));
+  }, [selectedTicker, selectedExpiration, currentPrice]);
 
   // Derive strategy cards from chain data
   const strategyCards = deriveStrategyCards(chainData, currentPrice);
@@ -353,19 +386,23 @@ export function OptionsChainView({ initialTicker, initialExpiry, clearInitialTic
                   <thead>
                     <tr>
                       {filterSide !== 'put' && <>
-                        <th colSpan={6} className="oc-side-header oc-call-header">Calls</th>
+                        <th colSpan={8} className="oc-side-header oc-call-header">Calls</th>
                       </>}
                       <th>Strike</th>
                       {filterSide !== 'call' && <>
-                        <th colSpan={6} className="oc-side-header oc-put-header">Puts</th>
+                        <th colSpan={8} className="oc-side-header oc-put-header">Puts</th>
                       </>}
                     </tr>
                     <tr>
                       {filterSide !== 'put' && <>
                         <th>Bid</th><th>Ask</th><th>Delta</th><th>IV%</th><th>OI</th><th>Vol</th>
+                        <th style={{ color: '#86efac' }}>B</th>
+                        <th style={{ color: '#fdba74' }}>S</th>
                       </>}
                       <th></th>
                       {filterSide !== 'call' && <>
+                        <th style={{ color: '#86efac' }}>B</th>
+                        <th style={{ color: '#fdba74' }}>S</th>
                         <th>Bid</th><th>Ask</th><th>Delta</th><th>IV%</th><th>OI</th><th>Vol</th>
                       </>}
                     </tr>
@@ -408,12 +445,28 @@ export function OptionsChainView({ initialTicker, initialExpiry, clearInitialTic
                               <td style={{ color: ivColor(call.iv * 100) }}>{(call.iv * 100).toFixed(1)}%</td>
                               <td>{fmtNum(call.openInterest, 0)}</td>
                               <td>{fmtNum(call.volume, 0)}</td>
+                              <td style={{ padding: '2px 3px', textAlign: 'center' }}>
+                                <button onClick={() => handleOpenPayoff(call, 'buy', 'call')}
+                                  style={{ fontSize: 9, padding: '1px 5px', background: '#14532d', color: '#86efac', border: 'none', borderRadius: 2, cursor: 'pointer', fontWeight: 700 }}>B</button>
+                              </td>
+                              <td style={{ padding: '2px 3px', textAlign: 'center' }}>
+                                <button onClick={() => handleOpenPayoff(call, 'sell', 'call')}
+                                  style={{ fontSize: 9, padding: '1px 5px', background: '#7c2d12', color: '#fdba74', border: 'none', borderRadius: 2, cursor: 'pointer', fontWeight: 700 }}>S</button>
+                              </td>
                             </>
                           )}
-                          {filterSide !== 'put' && !call && filterSide !== 'call' && <td colSpan={6} className="oc-empty-cell">—</td>}
+                          {filterSide !== 'put' && !call && filterSide !== 'call' && <td colSpan={8} className="oc-empty-cell">—</td>}
                           <td className="oc-strike-cell">{fmtPrice(strike)}</td>
                           {filterSide !== 'call' && put && (
                             <>
+                              <td style={{ padding: '2px 3px', textAlign: 'center' }}>
+                                <button onClick={() => handleOpenPayoff(put, 'buy', 'put')}
+                                  style={{ fontSize: 9, padding: '1px 5px', background: '#14532d', color: '#86efac', border: 'none', borderRadius: 2, cursor: 'pointer', fontWeight: 700 }}>B</button>
+                              </td>
+                              <td style={{ padding: '2px 3px', textAlign: 'center' }}>
+                                <button onClick={() => handleOpenPayoff(put, 'sell', 'put')}
+                                  style={{ fontSize: 9, padding: '1px 5px', background: '#7c2d12', color: '#fdba74', border: 'none', borderRadius: 2, cursor: 'pointer', fontWeight: 700 }}>S</button>
+                              </td>
                               <td className={putYield !== null && putYield > 15 ? 'oc-profitable' : ''}
                                   style={{ color: spreadColor(put.bid, put.ask) }}
                                   title={spreadTitle(put.bid, put.ask)}>
@@ -426,7 +479,7 @@ export function OptionsChainView({ initialTicker, initialExpiry, clearInitialTic
                               <td>{fmtNum(put.volume, 0)}</td>
                             </>
                           )}
-                          {filterSide !== 'call' && !put && filterSide !== 'put' && <td colSpan={6} className="oc-empty-cell">—</td>}
+                          {filterSide !== 'call' && !put && filterSide !== 'put' && <td colSpan={8} className="oc-empty-cell">—</td>}
                         </tr>
                       );
                     })}
