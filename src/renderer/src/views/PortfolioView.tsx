@@ -72,12 +72,30 @@ function dte(expirationDate: string | null): number | null {
 
 function actionColor(action: PositionAnalysis['action']): string {
   switch (action) {
-    case 'close':       return '#ef4444';
-    case 'roll':        return '#3b82f6';
-    case 'take_profits': return '#22c55e';
-    case 'hedge':       return '#f97316';
-    default:            return '#6b7280';
+    case 'close':        return '#f85149';
+    case 'roll':         return '#58a6ff';
+    case 'take_profits': return '#3fb950';
+    case 'hedge':        return '#f97316';
+    default:             return '#8b949e';
   }
+}
+
+const ACTION_LABEL: Record<PositionAnalysis['action'], string> = {
+  hold:         '— Hold',
+  close:        '⚑ Close',
+  roll:         '↻ Roll',
+  hedge:        '🛡 Hedge',
+  take_profits: '✓ Take Profits',
+};
+
+const VERDICT_COLOR = { positive: '#3fb950', negative: '#f85149', neutral: '#8b949e' };
+const VERDICT_LABEL = { positive: 'Positive', negative: 'Negative', neutral: 'Neutral' };
+
+function computeVerdict(returnPct: number | null): 'positive' | 'negative' | 'neutral' {
+  if (returnPct === null) return 'neutral';
+  if (returnPct > 2)  return 'positive';
+  if (returnPct < -2) return 'negative';
+  return 'neutral';
 }
 
 function urgencyColor(urgency: 'immediate' | 'this_week' | 'monitor'): string {
@@ -123,6 +141,9 @@ export function PortfolioView() {
   // Analysis state
   const [analyzingId, setAnalyzingId]     = useState<number | null>(null);
   const [analyzingAll, setAnalyzingAll]   = useState(false);
+  const [expanded, setExpanded]           = useState<Set<number>>(new Set());
+  const toggleExpand = (id: number) =>
+    setExpanded(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
 
   // Advisor state
   const [advisorBusy, setAdvisorBusy]           = useState(false);
@@ -391,21 +412,23 @@ export function PortfolioView() {
   // ─── Column definitions ───────────────────────────────────────────────────────
 
   const columns = [
-    { key: 'ticker',        label: 'Ticker',      sortable: true },
-    { key: 'positionType',  label: 'Type',        sortable: true },
-    { key: 'quantity',      label: 'Qty',         sortable: true },
-    { key: 'entryPrice',    label: 'Entry',       sortable: true },
-    ...(activeTab === 'open'   ? [{ key: 'strike',        label: 'Strike/Exp',  sortable: false }] : []),
-    ...(activeTab === 'open'   ? [{ key: 'currentPrice',  label: 'Current',     sortable: true  }] : []),
-    ...(activeTab === 'closed' ? [{ key: 'exitPrice',     label: 'Exit',        sortable: true  }] : []),
-    ...(activeTab === 'open'   ? [{ key: 'marketValue',   label: 'Mkt Value',   sortable: false }] : []),
-    ...(activeTab === 'open'   ? [{ key: 'daysGain',      label: "Day's G/L",   sortable: false }] : []),
-    ...(activeTab === 'open'   ? [{ key: 'greeks',        label: 'Greeks',      sortable: false }] : []),
-    ...(activeTab === 'open'   ? [{ key: 'unrealizedPnl', label: 'Unreal P&L',  sortable: true  }] : []),
-    ...(activeTab === 'closed' ? [{ key: 'realizedPnl',   label: 'Realized P&L',sortable: true  }] : []),
-    { key: 'entryDate',     label: 'Entry Date',  sortable: true },
-    ...(activeTab === 'open'   ? [{ key: 'analysis',      label: 'Analysis',    sortable: false }] : []),
-    { key: 'actions',       label: 'Actions',     sortable: false },
+    ...(activeTab === 'open'   ? [{ key: '_expand',       label: '',              sortable: false }] : []),
+    { key: 'ticker',             label: 'Ticker',          sortable: true },
+    { key: 'positionType',       label: 'Type',            sortable: true },
+    { key: 'quantity',           label: 'Qty',             sortable: true },
+    { key: 'entryPrice',         label: 'Entry',           sortable: true },
+    ...(activeTab === 'open'   ? [{ key: 'strike',         label: 'Strike/Exp',   sortable: false }] : []),
+    ...(activeTab === 'open'   ? [{ key: 'currentPrice',   label: 'Current',      sortable: true  }] : []),
+    ...(activeTab === 'closed' ? [{ key: 'exitPrice',      label: 'Exit',         sortable: true  }] : []),
+    ...(activeTab === 'open'   ? [{ key: 'marketValue',    label: 'Mkt Value',    sortable: false }] : []),
+    ...(activeTab === 'open'   ? [{ key: 'daysGain',       label: "Day's G/L",    sortable: false }] : []),
+    ...(activeTab === 'open'   ? [{ key: 'greeks',         label: 'Greeks',       sortable: false }] : []),
+    ...(activeTab === 'open'   ? [{ key: 'unrealizedPnl',  label: 'Unreal P&L',   sortable: true  }] : []),
+    ...(activeTab === 'closed' ? [{ key: 'realizedPnl',    label: 'Realized P&L', sortable: true  }] : []),
+    { key: 'entryDate',          label: 'Entry Date',      sortable: true },
+    ...(activeTab === 'open'   ? [{ key: 'verdict',        label: 'Verdict',      sortable: false }] : []),
+    ...(activeTab === 'open'   ? [{ key: 'action',         label: 'Action',       sortable: false }] : []),
+    { key: 'actions',            label: 'Actions',         sortable: false },
   ].filter(Boolean) as { key: string; label: string; sortable: boolean }[];
 
   // ─── Advisor tab content ──────────────────────────────────────────────────────
@@ -665,135 +688,207 @@ export function PortfolioView() {
                   </tr>
                 ) : (
                   sortedData.map(pos => {
-                    const et = etMap.get(pos.id);
-                    const an = analyses.get(pos.id);
-                    const daysLeft = dte(pos.expirationDate);
+                    const et        = etMap.get(pos.id);
+                    const an        = analyses.get(pos.id);
+                    const daysLeft  = dte(pos.expirationDate);
                     const isAnalyzing = analyzingId === pos.id;
+                    const isExpanded  = expanded.has(pos.id);
+                    const verdict     = an ? computeVerdict(an.currentReturnPct) : null;
 
                     return (
-                      <tr key={pos.id}>
-                        <td>
-                          <strong>{pos.ticker}</strong>
-                          {et?.etradePositionId && (
-                            <span style={{ fontSize: 9, color: '#3b82f6', marginLeft: 4 }} title="Synced from E*Trade">●ET</span>
+                      <>
+                        <tr
+                          key={pos.id}
+                          style={{ cursor: activeTab === 'open' ? 'pointer' : 'default' }}
+                          onClick={() => activeTab === 'open' && toggleExpand(pos.id)}
+                        >
+                          {/* Expand toggle */}
+                          {activeTab === 'open' && (
+                            <td style={{ color: 'var(--text-muted)', fontSize: 11, width: 20 }}>
+                              {isExpanded ? '▼' : '▶'}
+                            </td>
                           )}
-                        </td>
-                        <td>
-                          <span className={`type-badge ${pos.positionType.toLowerCase()}`}>
-                            {pos.positionType}
-                          </span>
-                        </td>
-                        <td className="num">{pos.quantity}</td>
-                        <td className="num">{fmtPrice(pos.entryPrice)}</td>
 
-                        {/* Strike / DTE */}
-                        {activeTab === 'open' && (
-                          <td className="num" style={{ fontSize: 11 }}>
-                            {pos.strikePrice ? (
-                              <>
-                                <div>{fmtPrice(pos.strikePrice)}</div>
-                                {daysLeft !== null && (
-                                  <div style={{ color: daysLeft <= 7 ? '#ef4444' : daysLeft <= 14 ? '#f59e0b' : '#9ca3af' }}>
-                                    {daysLeft}d
-                                  </div>
-                                )}
-                              </>
-                            ) : '—'}
-                          </td>
-                        )}
-
-                        {/* Current price */}
-                        {activeTab === 'open' && (
-                          <td className="num">{fmtPrice(et?.currentPrice ?? pos.currentPrice)}</td>
-                        )}
-                        {activeTab === 'closed' && (
-                          <td className="num">{fmtPrice(pos.exitPrice)}</td>
-                        )}
-
-                        {/* Market value (E*Trade) */}
-                        {activeTab === 'open' && (
-                          <td className="num" style={{ fontSize: 11 }}>
-                            {et?.marketValue != null ? fmtLargeNumber(et.marketValue) : '—'}
-                          </td>
-                        )}
-
-                        {/* Day's gain */}
-                        {activeTab === 'open' && (
-                          <td className="num" style={{ fontSize: 11 }}>
-                            {et?.daysGain != null ? (
-                              <span style={{ color: et.daysGain >= 0 ? '#22c55e' : '#ef4444' }}>
-                                {fmtLargeNumber(et.daysGain)}
-                                {et.daysGainPct != null && ` (${fmtPct(et.daysGainPct)})`}
-                              </span>
-                            ) : '—'}
-                          </td>
-                        )}
-
-                        {/* Greeks */}
-                        {activeTab === 'open' && (
-                          <td style={{ fontSize: 10, color: '#9ca3af' }}>
-                            {et && (et.delta != null || et.iv != null) ? (
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                                {et.delta != null && <span>Δ {et.delta.toFixed(2)}</span>}
-                                {et.theta != null && <span>Θ {et.theta.toFixed(2)}</span>}
-                                {et.iv    != null && <span>IV {et.iv.toFixed(1)}%</span>}
-                              </div>
-                            ) : '—'}
-                          </td>
-                        )}
-
-                        {/* P&L */}
-                        {activeTab === 'open' && (
-                          <td className={`num ${(pos.unrealizedPnl || 0) >= 0 ? 'positive' : 'negative'}`}>
-                            {fmtLargeNumber(pos.unrealizedPnl)}
-                          </td>
-                        )}
-                        {activeTab === 'closed' && (
-                          <td className={`num ${(pos.realizedPnl || 0) >= 0 ? 'positive' : 'negative'}`}>
-                            {fmtLargeNumber(pos.realizedPnl)}
-                          </td>
-                        )}
-
-                        <td>{formatDate(pos.entryDate)}</td>
-
-                        {/* Analysis badge */}
-                        {activeTab === 'open' && (
                           <td>
-                            {an ? (
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                                <span style={{
-                                  fontSize: 10, padding: '1px 5px', borderRadius: 3,
-                                  background: actionColor(an.action), color: '#fff', fontWeight: 600
-                                }}>
-                                  {an.action.replace('_', ' ').toUpperCase()}
-                                </span>
-                                <span style={{ fontSize: 9, color: '#9ca3af' }}>
-                                  {an.trend ?? '?'} · {an.compositeScore?.toFixed(1) ?? '?'}/10
-                                </span>
-                              </div>
-                            ) : (
-                              <button
-                                onClick={() => handleAnalyze(pos.id)}
-                                disabled={isAnalyzing}
-                                style={{ fontSize: 10, padding: '2px 6px', background: '#374151', border: 'none', borderRadius: 3, color: '#d1d5db', cursor: 'pointer' }}
-                              >
-                                {isAnalyzing ? '⟳' : '🔬'}
-                              </button>
+                            <strong>{pos.ticker}</strong>
+                            {et?.etradePositionId && (
+                              <span style={{ fontSize: 9, color: '#3b82f6', marginLeft: 4 }} title="Synced from E*Trade">●ET</span>
                             )}
                           </td>
-                        )}
+                          <td>
+                            <span className={`type-badge ${pos.positionType.toLowerCase()}`}>
+                              {pos.positionType}
+                            </span>
+                          </td>
+                          <td className="num">{pos.quantity}</td>
+                          <td className="num">{fmtPrice(pos.entryPrice)}</td>
 
-                        <td className="actions">
+                          {/* Strike / DTE */}
                           {activeTab === 'open' && (
-                            <button onClick={() => handleClosePosition(pos.id)} className="action-btn close" title="Close position">
-                              ✓ Close
-                            </button>
+                            <td className="num" style={{ fontSize: 11 }}>
+                              {pos.strikePrice ? (
+                                <>
+                                  <div>{fmtPrice(pos.strikePrice)}</div>
+                                  {daysLeft !== null && (
+                                    <div style={{ color: daysLeft <= 7 ? '#ef4444' : daysLeft <= 14 ? '#f59e0b' : '#9ca3af' }}>
+                                      {daysLeft}d
+                                    </div>
+                                  )}
+                                </>
+                              ) : '—'}
+                            </td>
                           )}
-                          <button onClick={() => handleDeletePosition(pos.id)} className="action-btn delete" title="Delete position">
-                            ✕
-                          </button>
-                        </td>
-                      </tr>
+
+                          {/* Current price */}
+                          {activeTab === 'open' && (
+                            <td className="num">{fmtPrice(et?.currentPrice ?? pos.currentPrice)}</td>
+                          )}
+                          {activeTab === 'closed' && (
+                            <td className="num">{fmtPrice(pos.exitPrice)}</td>
+                          )}
+
+                          {/* Market value */}
+                          {activeTab === 'open' && (
+                            <td className="num" style={{ fontSize: 11 }}>
+                              {et?.marketValue != null ? fmtLargeNumber(et.marketValue) : '—'}
+                            </td>
+                          )}
+
+                          {/* Day's gain */}
+                          {activeTab === 'open' && (
+                            <td className="num" style={{ fontSize: 11 }}>
+                              {et?.daysGain != null ? (
+                                <span style={{ color: et.daysGain >= 0 ? '#22c55e' : '#ef4444' }}>
+                                  {fmtLargeNumber(et.daysGain)}
+                                  {et.daysGainPct != null && ` (${fmtPct(et.daysGainPct)})`}
+                                </span>
+                              ) : '—'}
+                            </td>
+                          )}
+
+                          {/* Greeks */}
+                          {activeTab === 'open' && (
+                            <td style={{ fontSize: 10, color: '#9ca3af' }}>
+                              {et && (et.delta != null || et.iv != null) ? (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                                  {et.delta != null && <span>Δ {et.delta.toFixed(2)}</span>}
+                                  {et.theta != null && <span>Θ {et.theta.toFixed(2)}</span>}
+                                  {et.iv    != null && <span>IV {et.iv.toFixed(1)}%</span>}
+                                </div>
+                              ) : '—'}
+                            </td>
+                          )}
+
+                          {/* P&L */}
+                          {activeTab === 'open' && (
+                            <td className={`num ${(pos.unrealizedPnl || 0) >= 0 ? 'positive' : 'negative'}`}>
+                              {fmtLargeNumber(pos.unrealizedPnl)}
+                            </td>
+                          )}
+                          {activeTab === 'closed' && (
+                            <td className={`num ${(pos.realizedPnl || 0) >= 0 ? 'positive' : 'negative'}`}>
+                              {fmtLargeNumber(pos.realizedPnl)}
+                            </td>
+                          )}
+
+                          <td>{formatDate(pos.entryDate)}</td>
+
+                          {/* Verdict */}
+                          {activeTab === 'open' && (
+                            <td onClick={e => e.stopPropagation()}>
+                              {verdict ? (
+                                <span className="retro-verdict-chip" style={{
+                                  background: VERDICT_COLOR[verdict] + '22',
+                                  color: VERDICT_COLOR[verdict],
+                                  border: `1px solid ${VERDICT_COLOR[verdict]}44`,
+                                }}>
+                                  {VERDICT_LABEL[verdict]}
+                                </span>
+                              ) : (
+                                <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>—</span>
+                              )}
+                            </td>
+                          )}
+
+                          {/* Action + inline reason */}
+                          {activeTab === 'open' && (
+                            <td onClick={e => e.stopPropagation()}>
+                              {an ? (
+                                <div className="retro-action-cell">
+                                  <span
+                                    className="retro-action-badge"
+                                    style={{
+                                      background: actionColor(an.action) + '22',
+                                      color: actionColor(an.action),
+                                      borderColor: actionColor(an.action) + '55',
+                                    }}
+                                  >
+                                    {ACTION_LABEL[an.action]}
+                                  </span>
+                                  <span className="retro-action-reason" title={an.explanation}>
+                                    {an.explanation.length > 60
+                                      ? an.explanation.slice(0, 57) + '…'
+                                      : an.explanation}
+                                  </span>
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={e => { e.stopPropagation(); handleAnalyze(pos.id); }}
+                                  disabled={isAnalyzing}
+                                  style={{ fontSize: 10, padding: '2px 8px', background: '#374151', border: '1px solid #4b5563', borderRadius: 4, color: '#d1d5db', cursor: 'pointer' }}
+                                  title="Run position analysis"
+                                >
+                                  {isAnalyzing ? '⟳ …' : '🔬 Analyze'}
+                                </button>
+                              )}
+                            </td>
+                          )}
+
+                          <td className="actions" onClick={e => e.stopPropagation()}>
+                            {activeTab === 'open' && (
+                              <button onClick={() => handleClosePosition(pos.id)} className="action-btn close" title="Close position">
+                                ✓ Close
+                              </button>
+                            )}
+                            <button onClick={() => handleDeletePosition(pos.id)} className="action-btn delete" title="Delete position">
+                              ✕
+                            </button>
+                          </td>
+                        </tr>
+
+                        {/* Expanded detail row */}
+                        {activeTab === 'open' && isExpanded && (
+                          <tr key={`${pos.id}-detail`} style={{ background: '#0d1117' }}>
+                            <td colSpan={columns.length} style={{ padding: '10px 20px 12px 40px' }}>
+                              {an ? (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                  {/* Full explanation */}
+                                  <div style={{ fontSize: 13, color: '#c9d1d9', lineHeight: 1.5 }}>
+                                    <span style={{ color: actionColor(an.action), fontWeight: 600, marginRight: 8 }}>{ACTION_LABEL[an.action]}</span>
+                                    {an.explanation}
+                                  </div>
+                                  {/* Metrics row */}
+                                  <div style={{ display: 'flex', gap: 20, fontSize: 11, color: '#8b949e' }}>
+                                    {an.trend && <span>Trend: <strong style={{ color: an.trend === 'bullish' ? '#3fb950' : an.trend === 'bearish' ? '#f85149' : '#8b949e' }}>{an.trend}</strong></span>}
+                                    {an.currentReturnPct !== null && <span>Return: <strong style={{ color: an.currentReturnPct >= 0 ? '#3fb950' : '#f85149' }}>{an.currentReturnPct >= 0 ? '+' : ''}{an.currentReturnPct.toFixed(1)}%</strong></span>}
+                                    {an.rsi !== null && <span>RSI: <strong>{an.rsi.toFixed(0)}</strong></span>}
+                                    {an.assignmentRisk && <span>Assignment risk: <strong style={{ color: an.assignmentRisk === 'high' ? '#f85149' : an.assignmentRisk === 'medium' ? '#e3a008' : '#3fb950' }}>{an.assignmentRisk}</strong></span>}
+                                    {an.ivRank !== null && <span>IV Rank: <strong>{an.ivRank.toFixed(0)}</strong></span>}
+                                    {an.compositeScore !== null && <span>Score: <strong>{an.compositeScore.toFixed(1)}/10</strong></span>}
+                                    <span style={{ marginLeft: 'auto', color: '#4b5563' }}>
+                                      Conviction: {'★'.repeat(an.conviction)}{'☆'.repeat(3 - an.conviction)}
+                                    </span>
+                                  </div>
+                                </div>
+                              ) : (
+                                <span style={{ color: '#4b5563', fontSize: 12 }}>
+                                  No analysis yet — click <strong>🔬 Analyze</strong> to compute position metrics.
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        )}
+                      </>
                     );
                   })
                 )}
