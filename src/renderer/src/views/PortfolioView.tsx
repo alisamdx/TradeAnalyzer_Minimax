@@ -858,6 +858,13 @@ export function PortfolioView() {
 
                           <td className="actions" onClick={e => e.stopPropagation()}>
                             <div>
+                              <button
+                                onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-validate', { detail: { ticker: pos.ticker } }))}
+                                className="action-btn"
+                                title={`Validate ${pos.ticker}`}
+                              >
+                                🎯
+                              </button>
                               {activeTab === 'open' && (
                                 <button onClick={() => handleClosePosition(pos.id)} className="action-btn close" title="Close position">
                                   ✓ Close
