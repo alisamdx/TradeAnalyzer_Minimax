@@ -2,6 +2,10 @@
 
 Reverse-chronological. Per spec EP-2.3, this is the index; per-version detail lives in `changelogs/`.
 
+## v0.30.6 — 2026-06-07
+
+Risk Matrix fix: when no options chain is loaded (manually-entered legs), intermediate date columns are now generated automatically as weekly synthetic intervals between today and the leg's expiry. Previously only the "Today" column existed, making time decay invisible. Synthetic column dates marked with ~ in the header. Footer now shows separate notices for synthetic columns and missing IV.
+
 ## v0.30.5 — 2026-06-07
 
 Risk Matrix fix: strike rows now always include leg strikes and extend below them, even when the option strike is outside the ±25% spot range (e.g. TSLA CSP at $290 when stock is at $395). Previously all visible rows were above the strike showing only profit — now the table covers the full risk picture including losses below the strike. Leg strike rows highlighted in amber with "◀ strike" marker.

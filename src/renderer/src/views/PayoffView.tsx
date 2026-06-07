@@ -205,16 +205,40 @@ function bsPrice(S: number, K: number, T: number, r: number, sigma: number, type
 
 // ─── Risk Matrix helpers ──────────────────────────────────────────────────────
 
-function selectMatrixColumns(expirations: OptionsChainExpirationSummary[]): string[] {
-  const sorted = [...expirations]
-    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+function selectMatrixColumns(
+  expirations: OptionsChainExpirationSummary[],
+  legExpiries: string[], // fallback when chain not loaded
+): string[] {
+  // Chain loaded: use real expiry dates (rule: all ≤45 DTE, min 10)
+  if (expirations.length > 0) {
+    const sorted = [...expirations]
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    const todayMs = Date.now();
+    const within45 = sorted.filter(e => {
+      const dte = (new Date(e.date).getTime() - todayMs) / 86_400_000;
+      return dte >= 0 && dte <= 45;
+    });
+    const cols = within45.length >= 10 ? within45 : sorted.slice(0, 10);
+    return cols.map(e => e.date);
+  }
+
+  // No chain: generate synthetic weekly columns so the time dimension is visible
+  // even when legs were added manually. Columns go from ~1 week out to leg expiry.
+  const furthest = legExpiries.filter(Boolean).sort().pop();
+  if (!furthest) return [];
   const todayMs = Date.now();
-  const within45 = sorted.filter(e => {
-    const dte = (new Date(e.date).getTime() - todayMs) / 86_400_000;
-    return dte >= 0 && dte <= 45;
-  });
-  const cols = within45.length >= 10 ? within45 : sorted.slice(0, 10);
-  return cols.map(e => e.date);
+  const totalDays = Math.round((new Date(furthest).getTime() - todayMs) / 86_400_000);
+  if (totalDays <= 0) return [furthest];
+
+  // Interval: weekly for ≤60 DTE, bi-weekly beyond
+  const step = totalDays <= 60 ? 7 : 14;
+  const cols: string[] = [];
+  for (let d = step; d < totalDays; d += step) {
+    cols.push(new Date(todayMs + d * 86_400_000).toISOString().slice(0, 10));
+    if (cols.length >= 9) break; // cap at 9 intermediates + expiry = 10
+  }
+  cols.push(furthest); // always end at the actual expiry
+  return cols;
 }
 
 function selectMatrixStrikes(
@@ -367,12 +391,19 @@ function RiskMatrixTable({
   hasIv: boolean;
 }) {
   const today = new Date().toISOString().slice(0, 10);
-  const expiryDates = useMemo(() => selectMatrixColumns(chainExpirations), [chainExpirations]);
-  const colDates    = useMemo(() => [today, ...expiryDates], [today, expiryDates]);
   const legStrikes  = useMemo(
     () => legs.filter(l => l.type !== 'stock').map(l => l.strike),
     [legs],
   );
+  const legExpiries = useMemo(
+    () => [...new Set(legs.filter(l => l.type !== 'stock').map(l => l.expiry))],
+    [legs],
+  );
+  const expiryDates = useMemo(
+    () => selectMatrixColumns(chainExpirations, legExpiries),
+    [chainExpirations, legExpiries],
+  );
+  const colDates    = useMemo(() => [today, ...expiryDates], [today, expiryDates]);
   const strikes     = useMemo(
     () => selectMatrixStrikes(chainData, spotNum, legStrikes),
     [chainData, spotNum, legStrikes],
@@ -407,12 +438,21 @@ function RiskMatrixTable({
     return `${sign}$${val.toFixed(0)}`;
   }
 
+  const isSynthetic = chainExpirations.length === 0;
+
   function fmtColHeader(dateStr: string, idx: number): React.ReactNode {
     if (idx === 0) return 'Today';
     const d = new Date(`${dateStr}T12:00:00Z`);
     const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     const dte = Math.round((new Date(dateStr).getTime() - Date.now()) / 86_400_000);
-    return <>{label}<br/><span style={{ color: '#475569', fontSize: 9 }}>{dte}d</span></>;
+    return (
+      <>
+        {label}
+        {isSynthetic && <span style={{ color: '#6b7280', fontSize: 8 }}>~</span>}
+        <br/>
+        <span style={{ color: '#475569', fontSize: 9 }}>{dte}d</span>
+      </>
+    );
   }
 
   function zoneLabel(pnl: number, allExpiry: number[]): string {
@@ -530,9 +570,10 @@ function RiskMatrixTable({
             })}
           </tbody>
         </table>
-        {!hasIv && (
-          <div style={{ padding: '6px 12px', fontSize: 10, color: '#64748b', borderTop: '1px solid #1e293b', background: '#0a0f1a' }}>
-            ⚠ IV missing on some legs — intermediate columns use {Math.round(BS_FALLBACK_IV * 100)}% as estimate. Load from chain for accurate values.
+        {(isSynthetic || !hasIv) && (
+          <div style={{ padding: '6px 12px', fontSize: 10, color: '#64748b', borderTop: '1px solid #1e293b', background: '#0a0f1a', display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {isSynthetic && <span>~ Date columns are estimated weekly intervals — load the options chain for real expiry dates.</span>}
+            {!hasIv      && <span>⚠ IV not set on some legs — intermediate values use {Math.round(BS_FALLBACK_IV * 100)}% estimate. Load from chain or enter IV on the leg for accuracy.</span>}
           </div>
         )}
       </div>
