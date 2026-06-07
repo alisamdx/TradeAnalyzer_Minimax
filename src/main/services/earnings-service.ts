@@ -26,13 +26,17 @@ export interface EarningsEntry {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function toIso(raw: unknown): string | null {
-  if (!raw) return null;
-  // Unix ms timestamp
+  if (raw === null || raw === undefined || raw === '') return null;
+  // Unix ms timestamp (13 digits, > year 2001)
   if (typeof raw === 'number' && raw > 1_000_000_000_000) {
     return new Date(raw).toISOString().slice(0, 10);
   }
+  // Unix seconds timestamp (10 digits, > year 2001 and < year 2100)
+  if (typeof raw === 'number' && raw > 1_000_000_000 && raw < 4_102_444_800) {
+    return new Date(raw * 1000).toISOString().slice(0, 10);
+  }
   // Already ISO-ish string: "2026-06-18" or "Jun 18, 2026" etc.
-  if (typeof raw === 'string') {
+  if (typeof raw === 'string' && raw.trim().length > 0) {
     const d = new Date(raw);
     if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
   }
@@ -191,28 +195,30 @@ export class EarningsService {
     ticker: string,
     creds: OAuthCredentials,
   ): Promise<{ date: string | null; time: 'bmo' | 'amc' | null; source: EarningsEntry['source']; confirmed: boolean } | null> {
-    // E*Trade: GET /v1/market/quote/{ticker}?detailFlag=FUNDAMENTAL
+    // E*Trade: GET /v1/market/quote/{ticker}?detailFlag=ALL
+    // nextEarningDate lives in the All block (not Fundamental).
+    // NOTE: E*Trade's public API returns nextEarningDate as "" for most tickers even
+    // when the website shows a date — this is a known API limitation. The field will
+    // be populated when E*Trade does expose it (e.g. during earnings season).
     const raw = await etradeGet(
       `/v1/market/quote/${encodeURIComponent(ticker)}`,
-      { detailFlag: 'FUNDAMENTAL', requireEarningsDate: 'true' },
+      { detailFlag: 'ALL' },
       creds,
     ) as Record<string, unknown>;
 
-    const resp = raw['QuoteResponse'] as Record<string, unknown> | undefined;
+    const resp     = raw['QuoteResponse'] as Record<string, unknown> | undefined;
     const quoteData = resp?.['QuoteData'];
-    const first = Array.isArray(quoteData) ? quoteData[0] : quoteData;
-    const fund = (first as Record<string, unknown> | undefined)?.['Fundamental'] as Record<string, unknown> | undefined;
-    if (!fund) return null;
+    const first    = Array.isArray(quoteData) ? quoteData[0] : quoteData;
+    const all      = (first as Record<string, unknown> | undefined)?.['All'] as Record<string, unknown> | undefined;
+    if (!all) return null;
 
-    const rawDate = fund['nextEarningDate'] ?? fund['earningsDate'];
+    // Primary: nextEarningDate (may be empty string, ISO string, or Unix seconds)
+    const rawDate = all['nextEarningDate'] ?? all['earningsDate'];
     const date = toIso(rawDate);
     if (!date) return null;
 
-    // E*Trade sometimes provides a time-of-day flag
-    const timeRaw = (fund['earningsTime'] as string | undefined)?.toLowerCase() ?? '';
-    const time: 'bmo' | 'amc' | null =
-      timeRaw.includes('before') || timeRaw === 'bmo' ? 'bmo' :
-      timeRaw.includes('after')  || timeRaw === 'amc' ? 'amc' : null;
+    // E*Trade does not expose a time-of-day flag for earnings through this endpoint
+    const time: 'bmo' | 'amc' | null = null;
 
     return { date, time, source: 'etrade', confirmed: true };
   }
