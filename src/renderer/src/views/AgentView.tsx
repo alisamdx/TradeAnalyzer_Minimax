@@ -368,11 +368,12 @@ export function AgentView() {
     }
   };
 
-  const handleRunPhase = async () => {
+  const handleRunPhase = async (phaseOverride?: string) => {
     if (!agentProjectPath) {
       setError('Set the agent project path in Settings → Agent first.');
       return;
     }
+    const phase = phaseOverride ?? runPhase;
     // Auto-sync active strategy to .env before spawning so the CLI always
     // runs with the current strategy settings, not a potentially stale file.
     const activeStrat = strategies.find(s => s.id === activeStrategyId);
@@ -396,10 +397,10 @@ export function AgentView() {
       } catch { /* non-fatal — proceed with existing .env */ }
     }
     setRunning(true);
-    const stratLabel = activeStrat ? ` [strategy: ${activeStrat.name}]` : '';
-    setLogs((prev) => [...prev, `▶ Starting phase: ${runPhase}${stratLabel}`]);
+    const stratLabel = activeStrat && phase !== 'review' ? ` [strategy: ${activeStrat.name}]` : '';
+    setLogs((prev) => [...prev, `▶ Starting phase: ${phase}${stratLabel}`]);
     try {
-      await window.api.agent.runPhase(runPhase, agentProjectPath);
+      await window.api.agent.runPhase(phase, agentProjectPath);
     } catch (e) {
       setError((e as Error).message);
       setRunning(false);
@@ -1438,7 +1439,7 @@ export function AgentView() {
         {/* Run */}
         {tab === 'run' && (
           <div>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 10 }}>
               <h4 style={{ margin: 0 }}>Run Agent Phase</h4>
               {(() => {
                 const activeStrat = strategies.find(s => s.id === activeStrategyId);
@@ -1447,6 +1448,39 @@ export function AgentView() {
                   : <span style={{ fontSize: 12, color: '#95a5a6' }}>No active strategy</span>;
               })()}
             </div>
+
+            {/* ── Guidance card ── */}
+            <div style={{
+              background: '#12121e', border: '1px solid #2c3050', borderRadius: 6,
+              padding: '10px 14px', marginBottom: 14, fontSize: 12
+            }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 24px' }}>
+                <div>
+                  <div style={{ color: '#3498db', fontWeight: 600, marginBottom: 4 }}>▶ Run (daily)</div>
+                  <div style={{ color: '#95a5a6', lineHeight: 1.5 }}>
+                    Executes the full cycle in order:<br />
+                    <span style={{ color: '#bdc3c7' }}>scout → decide → trade → monitor</span><br />
+                    <span style={{ color: '#555', fontSize: 11 }}>learn fires automatically if any trade closes during monitor</span>
+                  </div>
+                </div>
+                <div>
+                  <div style={{ color: '#9b59b6', fontWeight: 600, marginBottom: 4 }}>🔍 Review Positions (weekly)</div>
+                  <div style={{ color: '#95a5a6', lineHeight: 1.5 }}>
+                    Fetches live option prices for all open positions and updates Theory Validation in the Lessons tab.<br />
+                    <span style={{ color: '#e74c3c', fontSize: 11 }}>Not included in Run — must be triggered separately.</span>
+                  </div>
+                </div>
+              </div>
+              <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid #2c2c2c', color: '#555', fontSize: 11 }}>
+                Individual phases: <span style={{ color: '#636e72' }}>scout</span> (find candidates) ·{' '}
+                <span style={{ color: '#636e72' }}>decide</span> (pick trades) ·{' '}
+                <span style={{ color: '#636e72' }}>trade</span> (enter positions) ·{' '}
+                <span style={{ color: '#636e72' }}>monitor</span> (check & close) ·{' '}
+                <span style={{ color: '#636e72' }}>learn</span> (gap-analysis on last 10 closed)
+              </div>
+            </div>
+
+            {/* ── Controls ── */}
             <div style={{ display: 'flex', gap: 10, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}>
               <select
                 value={runPhase}
@@ -1454,15 +1488,24 @@ export function AgentView() {
                 disabled={running}
                 style={{ fontSize: 13 }}
               >
-                {['run', 'scout', 'decide', 'trade', 'monitor', 'learn', 'review'].map((p) => (
+                {['run', 'scout', 'decide', 'trade', 'monitor', 'learn'].map((p) => (
                   <option key={p} value={p}>{p}</option>
                 ))}
               </select>
-              <button onClick={handleRunPhase} disabled={running || !agentProjectPath}
-                style={{ background: running ? '#2c2c2c' : '#2980b9', fontSize: 13 }}>
+              <button onClick={() => handleRunPhase()} disabled={running || !agentProjectPath}
+                style={{ background: running && !logs.at(-1)?.includes('review') ? '#2c2c2c' : '#2980b9', fontSize: 13 }}>
                 {running ? '⟳ Running…' : '▶ Run'}
               </button>
-              <button onClick={() => setLogs([])} disabled={running} style={{ fontSize: 12, background: '#2c2c2c' }}>
+              <div style={{ width: 1, height: 22, background: '#2c2c2c' }} />
+              <button
+                onClick={() => handleRunPhase('review')}
+                disabled={running || !agentProjectPath}
+                title="Fetch live option prices for open positions and update Theory Validation"
+                style={{ background: running ? '#2c2c2c' : '#6c3483', fontSize: 13, padding: '4px 12px' }}
+              >
+                {running ? '⟳' : '🔍'} Review Positions
+              </button>
+              <button onClick={() => setLogs([])} disabled={running} style={{ fontSize: 12, background: '#2c2c2c', marginLeft: 'auto' }}>
                 Clear logs
               </button>
               {!agentProjectPath && (
@@ -1471,13 +1514,14 @@ export function AgentView() {
                 </span>
               )}
             </div>
+
             <div style={{
               background: '#0d0d0d', borderRadius: 6, padding: 12, fontFamily: 'monospace',
-              fontSize: 12, color: '#bdc3c7', height: 440, overflowY: 'auto',
+              fontSize: 12, color: '#bdc3c7', height: 400, overflowY: 'auto',
               border: '1px solid #2c2c2c', whiteSpace: 'pre-wrap', wordBreak: 'break-all'
             }}>
               {logs.length === 0
-                ? <span style={{ color: '#444' }}>No output yet. Select a phase and click Run.</span>
+                ? <span style={{ color: '#444' }}>No output yet. Click Run for the daily cycle or Review Positions to refresh theory checks.</span>
                 : logs.map((l, i) => (
                   <div key={i} style={{
                     color: l.startsWith('[stderr]') ? '#e74c3c'
