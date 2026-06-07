@@ -670,7 +670,17 @@ export function PortfolioView() {
               <thead>
                 <tr>
                   {columns.map(col => (
-                    <th key={col.key} className={col.sortable ? 'sortable' : ''} onClick={col.sortable ? () => requestSort(col.key) : undefined}>
+                    <th
+                      key={col.key}
+                      className={col.sortable ? 'sortable' : ''}
+                      onClick={col.sortable ? () => requestSort(col.key) : undefined}
+                      style={
+                        col.key === '_expand'  ? { width: 20,  minWidth: 20  } :
+                        col.key === 'action'   ? { width: 220, minWidth: 220 } :
+                        col.key === 'actions'  ? { width: 1,   whiteSpace: 'nowrap' } :
+                        undefined
+                      }
+                    >
                       {col.label}
                       {col.sortable && getSortIndicator(col.key) && (
                         <span className="sort-indicator">{getSortIndicator(col.key)}</span>
@@ -812,7 +822,7 @@ export function PortfolioView() {
 
                           {/* Action + inline reason */}
                           {activeTab === 'open' && (
-                            <td onClick={e => e.stopPropagation()}>
+                            <td onClick={e => e.stopPropagation()} style={{ maxWidth: 220, width: 220 }}>
                               {an ? (
                                 <div className="retro-action-cell">
                                   <span
@@ -844,7 +854,7 @@ export function PortfolioView() {
                             </td>
                           )}
 
-                          <td className="actions" onClick={e => e.stopPropagation()}>
+                          <td className="actions" onClick={e => e.stopPropagation()} style={{ whiteSpace: 'nowrap', width: 1 }}>
                             {activeTab === 'open' && (
                               <button onClick={() => handleClosePosition(pos.id)} className="action-btn close" title="Close position">
                                 ✓ Close
