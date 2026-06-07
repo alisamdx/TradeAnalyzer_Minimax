@@ -180,6 +180,240 @@ function computePayoffMetrics(legs: PayoffLeg[], spot: number): PayoffMetrics {
   };
 }
 
+// ─── Black-Scholes pricer (for risk matrix pre-expiry cells) ─────────────────
+// see docs/formulas.md#black-scholes
+
+function normCdf(x: number): number {
+  const a1 =  0.254829592, a2 = -0.284496736, a3 =  1.421413741;
+  const a4 = -1.453152027, a5 =  1.061405429, p  =  0.3275911;
+  const sign = x < 0 ? -1 : 1;
+  const t = 1 / (1 + p * (Math.abs(x) / Math.SQRT2));
+  const y = 1 - ((((a5 * t + a4) * t + a3) * t + a2) * t + a1) * t * Math.exp(-(x * x) / 2);
+  return 0.5 * (1 + sign * y);
+}
+
+function bsPrice(S: number, K: number, T: number, r: number, sigma: number, type: 'call' | 'put'): number {
+  if (T <= 0 || S <= 0 || K <= 0) {
+    return type === 'call' ? Math.max(0, S - K) : Math.max(0, K - S);
+  }
+  const sq = Math.sqrt(T);
+  const d1 = (Math.log(S / K) + (r + 0.5 * sigma * sigma) * T) / (sigma * sq);
+  const d2 = d1 - sigma * sq;
+  if (type === 'call') return S * normCdf(d1) - K * Math.exp(-r * T) * normCdf(d2);
+  return K * Math.exp(-r * T) * normCdf(-d2) - S * normCdf(-d1);
+}
+
+// ─── Risk Matrix helpers ──────────────────────────────────────────────────────
+
+function selectMatrixColumns(expirations: OptionsChainExpirationSummary[]): string[] {
+  const sorted = [...expirations]
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  const todayMs = Date.now();
+  const within45 = sorted.filter(e => {
+    const dte = (new Date(e.date).getTime() - todayMs) / 86_400_000;
+    return dte >= 0 && dte <= 45;
+  });
+  const cols = within45.length >= 10 ? within45 : sorted.slice(0, 10);
+  return cols.map(e => e.date);
+}
+
+function selectMatrixStrikes(
+  chainData: { contracts: { strike: number }[] } | null,
+  spotNum: number,
+): number[] {
+  if (chainData && chainData.contracts.length > 0) {
+    const lo = spotNum * 0.75, hi = spotNum * 1.25;
+    const strikes = [...new Set(chainData.contracts.map(c => c.strike))]
+      .filter(k => k >= lo && k <= hi)
+      .sort((a, b) => a - b);
+    if (strikes.length >= 3) return strikes;
+  }
+  // Fallback: synthetic strikes at a round interval
+  const interval = spotNum > 500 ? 10 : spotNum > 100 ? 5 : spotNum > 50 ? 2.5 : 1;
+  const lo = Math.floor(spotNum * 0.75 / interval) * interval;
+  const hi = Math.ceil(spotNum * 1.25 / interval) * interval;
+  const result: number[] = [];
+  for (let k = lo; k <= hi + 0.001; k += interval) result.push(Math.round(k * 100) / 100);
+  return result;
+}
+
+const BS_RISK_FREE = 0.045;
+const BS_FALLBACK_IV = 0.30;
+
+function computeMatrixCell(legs: PayoffLeg[], S: number, colDateStr: string): number {
+  const colMs = new Date(colDateStr).getTime();
+  let total = 0;
+  for (const leg of legs) {
+    const qty = leg.quantity;
+    const sign = leg.side === 'buy' ? 1 : -1;
+    if (leg.type === 'stock') {
+      total += sign * (S - leg.premium) * qty * 100;
+      continue;
+    }
+    const T = (new Date(leg.expiry).getTime() - colMs) / (365.25 * 86_400_000);
+    const theoretical = T <= 0
+      ? (leg.type === 'call' ? Math.max(0, S - leg.strike) : Math.max(0, leg.strike - S))
+      : bsPrice(S, leg.strike, T, BS_RISK_FREE, (leg.iv ?? BS_FALLBACK_IV * 100) / 100, leg.type);
+    total += sign * (theoretical - leg.premium) * qty * 100;
+  }
+  return total;
+}
+
+function atExpiryPnl(legs: PayoffLeg[], S: number): number {
+  let total = 0;
+  for (const leg of legs) {
+    const qty = leg.quantity;
+    const sign = leg.side === 'buy' ? 1 : -1;
+    if (leg.type === 'stock') { total += sign * (S - leg.premium) * qty * 100; continue; }
+    const intrinsic = leg.type === 'call' ? Math.max(0, S - leg.strike) : Math.max(0, leg.strike - S);
+    total += sign * (intrinsic - leg.premium) * qty * 100;
+  }
+  return total;
+}
+
+// ─── Risk Matrix Table component ──────────────────────────────────────────────
+
+function RiskMatrixTable({
+  legs, spotNum, chainExpirations, chainData, hasIv,
+}: {
+  legs: PayoffLeg[];
+  spotNum: number;
+  chainExpirations: OptionsChainExpirationSummary[];
+  chainData: { contracts: { strike: number }[] } | null;
+  hasIv: boolean;
+}) {
+  const today = new Date().toISOString().slice(0, 10);
+  const expiryDates = useMemo(() => selectMatrixColumns(chainExpirations), [chainExpirations]);
+  const colDates    = useMemo(() => [today, ...expiryDates], [today, expiryDates]);
+  const strikes     = useMemo(() => selectMatrixStrikes(chainData, spotNum), [chainData, spotNum]);
+
+  // Full 2D grid: [strikeIdx][colIdx]
+  const grid = useMemo(
+    () => strikes.map(S => colDates.map(d => computeMatrixCell(legs, S, d))),
+    [legs, strikes, colDates],
+  );
+
+  // At-expiry P&L per row (for Zone column)
+  const expiryPnls = useMemo(() => strikes.map(S => atExpiryPnl(legs, S)), [legs, strikes]);
+
+  // Color scale bounds across entire grid
+  const allVals = grid.flat();
+  const maxVal = Math.max(...allVals, 0.01);
+  const minVal = Math.min(...allVals, -0.01);
+
+  function cellBg(val: number): string {
+    if (val > 0) return `rgba(34,197,94,${(0.12 + 0.55 * Math.min(1, val / maxVal)).toFixed(2)})`;
+    return `rgba(239,68,68,${(0.12 + 0.55 * Math.min(1, val / minVal)).toFixed(2)})`;
+  }
+
+  function fmtCell(val: number): string {
+    const sign = val >= 0 ? '+' : '';
+    if (Math.abs(val) >= 10_000) return `${sign}$${(val / 1_000).toFixed(0)}k`;
+    if (Math.abs(val) >= 1_000)  return `${sign}$${(val / 1_000).toFixed(1)}k`;
+    return `${sign}$${val.toFixed(0)}`;
+  }
+
+  function fmtColHeader(dateStr: string, idx: number): React.ReactNode {
+    if (idx === 0) return 'Today';
+    const d = new Date(`${dateStr}T12:00:00Z`);
+    const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    const dte = Math.round((new Date(dateStr).getTime() - Date.now()) / 86_400_000);
+    return <>{label}<br/><span style={{ color: '#475569', fontSize: 9 }}>{dte}d</span></>;
+  }
+
+  function zoneLabel(pnl: number, allExpiry: number[]): string {
+    const mx = Math.max(...allExpiry), mn = Math.min(...allExpiry);
+    if (Math.abs(pnl - mx) < 0.5) return '★ Max Profit';
+    if (Math.abs(pnl - mn) < 0.5) return '✕ Max Loss';
+    if (Math.abs(pnl) < 5)        return '— Breakeven';
+    return pnl > 0 ? '✓ Profit' : '✗ Loss';
+  }
+
+  function zoneColor(label: string): string {
+    if (label.includes('Max Profit') || label.includes('Profit')) return '#22c55e';
+    if (label.includes('Max Loss')   || label.includes('Loss'))   return '#ef4444';
+    if (label.includes('Breakeven'))                              return '#fbbf24';
+    return '#94a3b8';
+  }
+
+  // Row nearest to current spot
+  const spotRowIdx = strikes.reduce(
+    (best, k, i) => Math.abs(k - spotNum) < Math.abs(strikes[best]! - spotNum) ? i : best, 0,
+  );
+
+  if (strikes.length === 0 || legs.length === 0) {
+    return <div style={{ color: '#64748b', padding: 24, textAlign: 'center' }}>Add legs and a spot price to generate the risk matrix.</div>;
+  }
+
+  const thStyle: React.CSSProperties = {
+    padding: '5px 10px', textAlign: 'right', color: '#64748b',
+    fontWeight: 600, fontSize: 10, letterSpacing: 0.5, whiteSpace: 'nowrap',
+    borderBottom: '1px solid #1e293b', background: '#0a0f1a',
+    position: 'sticky', top: 0, zIndex: 2,
+  };
+
+  return (
+    <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 520, border: '1px solid #1e293b', borderRadius: 6 }}>
+      <table style={{ borderCollapse: 'collapse', fontSize: 11, width: '100%' }}>
+        <thead>
+          <tr>
+            <th style={{ ...thStyle, textAlign: 'right' }}>Strike</th>
+            <th style={{ ...thStyle, textAlign: 'right' }}>vs Spot</th>
+            {colDates.map((d, i) => (
+              <th key={d} style={{ ...thStyle, textAlign: 'right', minWidth: 68,
+                color: i === colDates.length - 1 ? '#fbbf24' : '#64748b',
+                borderLeft: i === colDates.length - 1 ? '2px solid #374151' : '1px solid #1e293b',
+              }}>
+                {fmtColHeader(d, i)}
+              </th>
+            ))}
+            <th style={{ ...thStyle, textAlign: 'left', borderLeft: '2px solid #374151', color: '#94a3b8' }}>Zone</th>
+          </tr>
+        </thead>
+        <tbody>
+          {strikes.map((strike, ri) => {
+            const isSpot = ri === spotRowIdx;
+            const row = grid[ri]!;
+            const expPnl = expiryPnls[ri]!;
+            const zone  = zoneLabel(expPnl, expiryPnls);
+
+            return (
+              <tr key={strike} style={{
+                outline: isSpot ? '2px solid #3b82f6' : undefined,
+                outlineOffset: isSpot ? '-2px' : undefined,
+              }}>
+                <td style={{ padding: '3px 10px', textAlign: 'right', color: '#e2e8f0', fontWeight: isSpot ? 700 : 400, borderRight: '1px solid #1e293b', whiteSpace: 'nowrap' }}>
+                  ${strike.toFixed(2)}{isSpot && <span style={{ color: '#3b82f6', marginLeft: 4, fontSize: 9 }}>◀</span>}
+                </td>
+                <td style={{ padding: '3px 8px', textAlign: 'right', color: strike >= spotNum ? '#22c55e' : '#ef4444', borderRight: '1px solid #1e293b' }}>
+                  {strike >= spotNum ? '+' : ''}{((strike - spotNum) / spotNum * 100).toFixed(1)}%
+                </td>
+                {row.map((pnl, ci) => (
+                  <td key={ci} style={{
+                    padding: '3px 10px', textAlign: 'right',
+                    background: cellBg(pnl), color: '#f1f5f9', fontWeight: 500,
+                    borderLeft: ci === colDates.length - 1 ? '2px solid #374151' : '1px solid #1e293b',
+                  }}>
+                    {fmtCell(pnl)}
+                  </td>
+                ))}
+                <td style={{ padding: '3px 12px', borderLeft: '2px solid #374151', color: zoneColor(zone), whiteSpace: 'nowrap', fontSize: 10 }}>
+                  {zone}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {!hasIv && (
+        <div style={{ padding: '6px 12px', fontSize: 10, color: '#64748b', borderTop: '1px solid #1e293b', background: '#0a0f1a' }}>
+          ⚠ IV missing on some legs — intermediate columns use {Math.round(BS_FALLBACK_IV * 100)}% as estimate. Load from chain for accurate values.
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Lizard hedge leg selection ───────────────────────────────────────────────
 // For Jade/Big/Reverse lizard strategies, the buy (hedge) leg must be at the
 // furthest available strike where: shortCredit ≥ spreadWidth (no upside/downside risk).
@@ -1675,6 +1909,7 @@ export function PayoffView({ initialTicker, initialSpot, initialExpiry, initialS
   const [statusMsg, setStatus]          = useState<string | null>(null);
   const [templateSlug, setTemplateSlug] = useState('');
   const [lastAppliedSlug, setLastAppliedSlug] = useState<string | null>(null);
+  const [viewMode, setViewMode]         = useState<'chart' | 'table'>('chart');
 
   // Watchlist picker
   const [watchlists, setWatchlists]           = useState<Watchlist[]>([]);
@@ -2566,9 +2801,27 @@ export function PayoffView({ initialTicker, initialSpot, initialExpiry, initialS
           </div>
         )}
 
-        {/* ── Chart + compact metrics ── */}
+        {/* ── Chart / Table toggle + content ── */}
         {metrics && (
           <>
+            {/* ── View toggle ── */}
+            <div style={{ display: 'flex', gap: 0, alignSelf: 'flex-start', border: '1px solid #1e293b', borderRadius: 5, overflow: 'hidden' }}>
+              {(['chart', 'table'] as const).map(mode => (
+                <button
+                  key={mode}
+                  onClick={() => setViewMode(mode)}
+                  style={{
+                    padding: '4px 14px', fontSize: 11, fontWeight: 600, cursor: 'pointer', border: 'none',
+                    background: viewMode === mode ? '#1d4ed8' : '#0f172a',
+                    color: viewMode === mode ? '#fff' : '#64748b',
+                    borderRight: mode === 'chart' ? '1px solid #1e293b' : 'none',
+                  }}
+                >
+                  {mode === 'chart' ? '📈 Chart' : '⬛ Risk Matrix'}
+                </button>
+              ))}
+            </div>
+
             {/* ── Single-line metrics + Greeks bar ── */}
             <div style={{
               background: '#0f172a', border: '1px solid #1e293b', borderRadius: 6,
@@ -2664,10 +2917,20 @@ export function PayoffView({ initialTicker, initialSpot, initialExpiry, initialS
               })()}
             </div>
 
-            {/* ── Chart ── */}
-            <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8, padding: '4px 6px 1px' }}>
-              <PayoffChart metrics={metrics} spot={spotNum} />
-            </div>
+            {/* ── Chart or Risk Matrix ── */}
+            {viewMode === 'chart' ? (
+              <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8, padding: '4px 6px 1px' }}>
+                <PayoffChart metrics={metrics} spot={spotNum} />
+              </div>
+            ) : (
+              <RiskMatrixTable
+                legs={legs}
+                spotNum={spotNum}
+                chainExpirations={chainExpirations}
+                chainData={chainData}
+                hasIv={legs.filter(l => l.type !== 'stock').every(l => l.iv !== null)}
+              />
+            )}
           </>
         )}
 

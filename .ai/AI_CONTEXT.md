@@ -236,6 +236,8 @@ Authoritative DDL is in `migrations/001_init.sql` + `002_screen_schema.sql`. Pha
 
 - **v0.23.2 (2026-06-04)** — E*Trade remote token refresh via SSH. `scripts/etrade-login.mjs`: full OAuth 1.0a flow in a terminal; reads consumer creds from running app API or `~/.tradeanalyzer/etrade-config.json` fallback; stores tokens live or writes pending file. New API routes: `GET /api/v1/etrade/credentials`, `POST /api/v1/etrade/token` (`routes-etrade.ts`). `api-server.ts` writes `etrade-config.json` + imports `etrade-tokens-pending.json` on every startup. `scripts/etrade-login.bat` for easy SSH execution.
 
+- **v0.30.3 (2026-06-07)** — Payoff Visualizer: "📈 Chart / ⬛ Risk Matrix" toggle. 2D P&L grid: rows = chain strikes ±25% of spot, columns = Today + chain expiries (all ≤45 DTE, min 10). Pre-expiry cells via Black-Scholes (r=4.5%, leg IV or 30% fallback). Zone column per row. Pure frontend, no backend changes.
+
 - **v0.30.2 (2026-06-07)** — Trade Management Alerts ENH-5: collapsible "⚡ Trade Management" banner above open positions table. Three rules: Take Profits (ET totalGainPct ≥ 50%), Manage Now (DTE ≤ 21), Delta Drift (|Δ| > 0.45). "View →" expands + scrolls to position row. Pure frontend, no new backend.
 
 - **v0.30.1 (2026-06-07)** — Portfolio Greeks ENH-3: "⚡ Refresh Greeks" button fetches live delta/theta/vega for open CSP/CC positions via `optionsProvider.getOptionsChain()`. Stores position-adjusted Greeks (short convention: +theta, −vega) in `positions.delta/theta/vega`. Greeks bar now includes manually entered positions. `optionsProvider` passed to `registerPortfolioIpc`.

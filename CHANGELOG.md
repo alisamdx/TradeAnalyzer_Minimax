@@ -2,6 +2,10 @@
 
 Reverse-chronological. Per spec EP-2.3, this is the index; per-version detail lives in `changelogs/`.
 
+## v0.30.3 — 2026-06-07
+
+Payoff Visualizer: "📈 Chart / ⬛ Risk Matrix" toggle. Risk Matrix is a 2D P&L grid — rows are chain strike prices (±25% of spot), columns are Today + available chain expiry dates (all within 45 DTE; extends to 10 expiries for monthly-only chains). Pre-expiry cells computed via Black-Scholes (r=4.5%, IV from each leg; falls back to 30% when IV missing). Final column uses intrinsic-only math. Color-coded green→red, spot row highlighted, Zone label per row at expiry.
+
 ## v0.30.2 — 2026-06-07
 
 Trade Management Alerts (ENH-5): collapsible "⚡ Trade Management" banner above the open positions table showing three rule-based alerts — Take Profits (≥50% gain via E*Trade totalGainPct), Manage Now (≤21 DTE), Delta Drift (|Δ| > 0.45). "View →" expands the relevant position row and scrolls to it. Pure frontend — no new backend code.
