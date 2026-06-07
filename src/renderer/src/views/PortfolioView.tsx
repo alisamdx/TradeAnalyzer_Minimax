@@ -874,6 +874,19 @@ export function PortfolioView() {
                               >
                                 🎯
                               </button>
+                              <button
+                                onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-payoff', { detail: {
+                                  ticker:   pos.ticker,
+                                  spot:     et?.currentPrice ?? pos.currentPrice ?? undefined,
+                                  strike:   pos.strikePrice ?? undefined,
+                                  expiry:   pos.expirationDate ?? undefined,
+                                  strategy: pos.positionType === 'CSP' ? 'csp' : pos.positionType === 'CC' ? 'cc' : undefined,
+                                }}))}
+                                className="action-btn"
+                                title={`Payoff diagram for ${pos.ticker}`}
+                              >
+                                📐
+                              </button>
                               {activeTab === 'open' && (
                                 <button onClick={() => handleClosePosition(pos.id)} className="action-btn close" title="Close position">
                                   ✓ Close
