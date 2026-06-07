@@ -440,7 +440,7 @@ export function PortfolioView() {
     ...(activeTab === 'open'   ? [{ key: 'marketValue',    label: 'Mkt Value',    sortable: false, num: true  }] : []),
     ...(activeTab === 'open'   ? [{ key: 'daysGain',       label: "Day's G/L",    sortable: false, num: true  }] : []),
     ...(activeTab === 'open'   ? [{ key: 'greeks',         label: 'Greeks',       sortable: false, num: false }] : []),
-    ...(activeTab === 'open'   ? [{ key: 'unrealizedPnl',  label: 'Unreal P&L',   sortable: true,  num: true  }] : []),
+    ...(activeTab === 'open'   ? [{ key: 'expiryDate',     label: 'Expiry',       sortable: true,  num: false }] : []),
     ...(activeTab === 'closed' ? [{ key: 'realizedPnl',    label: 'Realized P&L', sortable: true,  num: true  }] : []),
     { key: 'entryDate',          label: 'Entry Date',      sortable: true,  num: false },
     ...(activeTab === 'open'   ? [{ key: 'verdict',        label: 'Verdict',      sortable: false, num: false }] : []),
@@ -797,10 +797,19 @@ export function PortfolioView() {
                             </td>
                           )}
 
-                          {/* P&L */}
+                          {/* Expiry date */}
                           {activeTab === 'open' && (
-                            <td className={`num ${(pos.unrealizedPnl || 0) >= 0 ? 'positive' : 'negative'}`}>
-                              {fmtLargeNumber(pos.unrealizedPnl)}
+                            <td style={{ fontSize: 12 }}>
+                              {pos.expirationDate ? (
+                                <>
+                                  <div>{pos.expirationDate.slice(0, 10)}</div>
+                                  {daysLeft !== null && (
+                                    <div style={{ fontSize: 10, color: daysLeft <= 7 ? '#f85149' : daysLeft <= 14 ? '#e3a008' : 'var(--text-muted)' }}>
+                                      {daysLeft}d
+                                    </div>
+                                  )}
+                                </>
+                              ) : '—'}
                             </td>
                           )}
                           {activeTab === 'closed' && (
