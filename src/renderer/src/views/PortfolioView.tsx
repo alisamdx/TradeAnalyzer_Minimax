@@ -675,9 +675,9 @@ export function PortfolioView() {
                       className={col.sortable ? 'sortable' : ''}
                       onClick={col.sortable ? () => requestSort(col.key) : undefined}
                       style={
-                        col.key === '_expand'  ? { width: 20,  minWidth: 20  } :
-                        col.key === 'action'   ? { width: 220, minWidth: 220 } :
-                        col.key === 'actions'  ? { width: 1,   whiteSpace: 'nowrap' } :
+                        col.key === '_expand'  ? { width: 20, minWidth: 20 } :
+                        col.key === 'action'   ? { whiteSpace: 'nowrap' } :
+                        col.key === 'actions'  ? { width: 1, whiteSpace: 'nowrap' } :
                         undefined
                       }
                     >
@@ -820,27 +820,21 @@ export function PortfolioView() {
                             </td>
                           )}
 
-                          {/* Action + inline reason */}
+                          {/* Action badge — reason is in the expanded row */}
                           {activeTab === 'open' && (
-                            <td onClick={e => e.stopPropagation()} style={{ maxWidth: 220, width: 220 }}>
+                            <td onClick={e => e.stopPropagation()} style={{ whiteSpace: 'nowrap' }}>
                               {an ? (
-                                <div className="retro-action-cell">
-                                  <span
-                                    className="retro-action-badge"
-                                    style={{
-                                      background: actionColor(an.action) + '22',
-                                      color: actionColor(an.action),
-                                      borderColor: actionColor(an.action) + '55',
-                                    }}
-                                  >
-                                    {ACTION_LABEL[an.action]}
-                                  </span>
-                                  <span className="retro-action-reason" title={an.explanation}>
-                                    {an.explanation.length > 60
-                                      ? an.explanation.slice(0, 57) + '…'
-                                      : an.explanation}
-                                  </span>
-                                </div>
+                                <span
+                                  className="retro-action-badge"
+                                  title={an.explanation}
+                                  style={{
+                                    background: actionColor(an.action) + '22',
+                                    color: actionColor(an.action),
+                                    borderColor: actionColor(an.action) + '55',
+                                  }}
+                                >
+                                  {ACTION_LABEL[an.action]}
+                                </span>
                               ) : (
                                 <button
                                   onClick={e => { e.stopPropagation(); handleAnalyze(pos.id); }}
