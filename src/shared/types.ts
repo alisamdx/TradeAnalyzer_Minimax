@@ -1782,3 +1782,108 @@ export interface ConvictionRecommendation {
   priceHighBasis: string;
   hasData: boolean;
 }
+
+// ─── News & Research (FR-NR) ─────────────────────────────────────────────────
+
+export type NewsResearchBias = 'bull' | 'bear' | 'mixed';
+
+export type KeyFactorTag =
+  | 'EARNINGS'
+  | 'ANALYST'
+  | 'INSIDER'
+  | 'MACRO'
+  | 'REGULATORY'
+  | 'SHORT_SQUEEZE'
+  | 'NEWS'
+  | 'SEASONALITY';
+
+export interface KeyFactor {
+  tag: KeyFactorTag;
+  direction: 'bull' | 'bear' | 'neutral';
+  description: string;
+}
+
+export interface ResearchEvent {
+  date: string;          // YYYY-MM-DD
+  type: string;          // 'EARNINGS' | 'FOMC' | 'CPI' | 'JOBS' | 'OTHER'
+  description: string;
+  daysUntil: number;
+}
+
+export interface NewsHeadline {
+  headline: string;
+  source: string;
+  publishedUtc: string;
+  url: string;
+  sentiment: 'positive' | 'negative' | 'neutral' | null;
+}
+
+export interface EarningsSignal {
+  earningsDate: string | null;
+  daysToEarnings: number | null;
+  epsEstimate: number | null;
+  revenueEstimate: number | null;
+  priorEps: number | null;
+}
+
+export interface AnalystRating {
+  firm: string;
+  action: string;
+  ratingFrom: string | null;
+  ratingTo: string | null;
+  priceTargetFrom: number | null;
+  priceTargetTo: number | null;
+  date: string;
+}
+
+export interface InsiderTransaction {
+  filerName: string;
+  filerTitle: string | null;
+  transactionType: 'buy' | 'sell';
+  shares: number;
+  pricePerShare: number | null;
+  totalValue: number | null;
+  filingDate: string;
+}
+
+export interface ShortInterestSignal {
+  shortPctFloat: number | null;
+  daysToCover: number | null;
+}
+
+export interface MacroEvent {
+  id?: number;
+  date: string;
+  type: string;
+  description: string;
+}
+
+export interface RawSignals {
+  earnings: EarningsSignal | null;
+  analystRatings: AnalystRating[];
+  insiderTransactions: InsiderTransaction[];
+  shortInterest: ShortInterestSignal | null;
+  macroEvents: MacroEvent[];
+  newsHeadlines: NewsHeadline[];
+}
+
+export interface NewsResearchResult {
+  ticker: string;
+  cacheDate: string;
+  impactScore: number | null;
+  bias: NewsResearchBias | null;
+  keyFactors: KeyFactor[];
+  summary: string | null;
+  portfolioNote: string | null;
+  events: ResearchEvent[];
+  news: NewsHeadline[];
+  rawSignals: RawSignals;
+  aiModel: string | null;
+  updatedAt: string;
+}
+
+export interface NewsBatchProgressEvent {
+  done: number;
+  total: number;
+  ticker: string;
+}

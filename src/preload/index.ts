@@ -100,6 +100,9 @@ import type {
   ConvictionBandHistory,
   ConvictionInput,
   ConvictionRecommendation,
+  NewsResearchResult,
+  MacroEvent,
+  NewsBatchProgressEvent,
 } from '@shared/types.js';
 export type {
   ScreenPreset, ScreenCriteria, ScreenRunResult, ScreenResultRow, Universe,
@@ -1043,8 +1046,22 @@ function buildApi() {
     syncDefaultWatchlist: () => invoke<{ added: string[]; skipped: string[] }>('conviction:sync-default-watchlist'),
   };
 
+  const news = {
+    fetchTicker:    (ticker: string) => invoke<NewsResearchResult>('news:fetch-ticker', ticker),
+    refreshTicker:  (ticker: string) => invoke<NewsResearchResult>('news:refresh-ticker', ticker),
+    fetchWatchlist: (tickers: string[], forceRefresh?: boolean) =>
+      invoke<NewsResearchResult[]>('news:fetch-watchlist', tickers, forceRefresh),
+    getCached:      (ticker: string) => invoke<NewsResearchResult | null>('news:get-cached', ticker),
+    getMacroEvents: (daysAhead?: number) => invoke<MacroEvent[]>('news:get-macro-events', daysAhead),
+    onBatchProgress: (cb: (p: NewsBatchProgressEvent) => void): (() => void) => {
+      const handler = (_: unknown, p: NewsBatchProgressEvent) => cb(p);
+      ipcRenderer.on('news:batch-progress', handler as Parameters<typeof ipcRenderer.on>[1]);
+      return () => ipcRenderer.removeListener('news:batch-progress', handler as Parameters<typeof ipcRenderer.removeListener>[1]);
+    },
+  };
+
   return {
-    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, historical, portfolio, alerts, optionsChain, agent, backtest, leapsCsp, collaredLeaps, testApi, etrade, filters, payoff, ivHistory, opportunity, strategyLab, batch, scoring, paper, conviction },
+    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, historical, portfolio, alerts, optionsChain, agent, backtest, leapsCsp, collaredLeaps, testApi, etrade, filters, payoff, ivHistory, opportunity, strategyLab, batch, scoring, paper, conviction, news },
     dialog: {
       prompt: (opts: { title: string; defaultValue?: string }) =>
         invoke<string | null>('dialog:prompt', opts),

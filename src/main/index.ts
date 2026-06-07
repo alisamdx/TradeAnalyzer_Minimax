@@ -65,6 +65,8 @@ import { PaperTradingService } from './services/paper-trading-service.js';
 import { registerPaperTradingIpc } from './ipc/ipc-paper-trading.js';
 import { StrategyLabService } from './services/strategy-lab-service.js';
 import { CriticService } from './services/critic-service.js';
+import { NewsDataFetcher } from './services/news-data-fetcher.js';
+import { registerNewsIpc } from './ipc/ipc-news.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -440,6 +442,10 @@ app.whenReady().then(() => {
   // v0.13.0 — Backtesting engine
   const backtestEngine = new BacktestEngine(db);
   registerBacktestIpc(backtestEngine);
+
+  // News & Research module
+  const newsFetcher = new NewsDataFetcher(() => getApiKey(db), db);
+  registerNewsIpc(newsFetcher, rateLimiter);
 
   // v0.12.0 — TraderAgent integration
   const agentDb = new AgentDbService();

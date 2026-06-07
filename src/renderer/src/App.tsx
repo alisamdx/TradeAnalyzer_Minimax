@@ -31,10 +31,11 @@ import { DailyBriefView } from './views/DailyBriefView.js';
 import { TradeScoringView } from './views/TradeScoringView.js';
 import { RetrospectView } from './views/RetrospectView.js';
 import { ConvictionView } from './views/ConvictionView.js';
+import { NewsResearchView } from './views/NewsResearchView.js';
 
 declare const __APP_VERSION__: string;
 
-type View = 'watchlists' | 'screener' | 'filters' | 'analysis' | 'validate' | 'portfolio' | 'opportunity' | 'settings' | 'alerts' | 'data' | 'optionsChain' | 'payoff' | 'agent' | 'backtest' | 'leapsCsp' | 'collaredLeaps' | 'testApi' | 'ivHistory' | 'knowledge' | 'strategyLab' | 'batch' | 'dailyBrief' | 'tradeScoring' | 'retrospect' | 'conviction';
+type View = 'watchlists' | 'screener' | 'filters' | 'analysis' | 'validate' | 'portfolio' | 'opportunity' | 'settings' | 'alerts' | 'data' | 'optionsChain' | 'payoff' | 'agent' | 'backtest' | 'leapsCsp' | 'collaredLeaps' | 'testApi' | 'ivHistory' | 'knowledge' | 'strategyLab' | 'batch' | 'dailyBrief' | 'tradeScoring' | 'retrospect' | 'conviction' | 'newsResearch';
 
 type NavEntry = {
   id: number;
@@ -609,6 +610,7 @@ export function App() {
       case 'tradeScoring': return <TradeScoringView />;
       case 'retrospect': return <RetrospectView />;
       case 'conviction': return <ConvictionView />;
+      case 'newsResearch': return <NewsResearchView />;
       case 'settings': return (
         <SettingsView
           etradeWarning={etradeWarning}
@@ -844,6 +846,12 @@ export function App() {
             onClick={() => navigateSidebar('screener')}
           >
             🔍 Screener
+          </button>
+          <button
+            className={`nav-btn ${currentView === 'newsResearch' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('newsResearch')}
+          >
+            📡 News & Research
           </button>
           <button
             className={`nav-btn ${currentView === 'opportunity' ? 'active' : ''}`}
