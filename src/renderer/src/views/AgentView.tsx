@@ -1,5 +1,5 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
-import type { AgentStatus, AgentTrade, AgentLesson, AgentNativeLesson, AgentTheoryCheck, AgentDashboard, AgentRecommendation, AgentMemorySnapshot, AgentConfig, AgentStrategy, AgentStrategiesState, OptionStrategyType, Watchlist } from '@shared/types.js';
+import type { AgentStatus, AgentTrade, AgentLesson, AgentNativeLesson, AgentTheoryCheck, AgentDashboard, AgentRecommendation, AgentMemorySnapshot, AgentConfig, AgentStrategy, AgentStrategiesState, OptionStrategyType, Watchlist, AgentTradeLearning } from '@shared/types.js';
 
 type Tab = 'overview' | 'trades' | 'actions' | 'lessons' | 'recommendations' | 'memory' | 'run' | 'config';
 
@@ -30,6 +30,73 @@ function strikeRisk(stockPrice: number, strike: number, strategy: string): 'high
 
 const SEVERITY_COLOR = { high: '#e74c3c', medium: '#f39c12', low: '#95a5a6' } as const;
 const SEVERITY_BG    = { high: '#3a1a1a', medium: '#3a2a1a', low: '#2c2c2c' } as const;
+
+// ── Per-trade action recommendation ───────────────────────────────────────────
+type TradeActionRec = {
+  label:           string;
+  reason:          string;
+  severity:        'high' | 'medium' | 'low';
+  suggestedReason: string;  // pre-fill for close dialog
+};
+
+function computeTradeAction(t: AgentTrade): TradeActionRec {
+  if (t.status !== 'open') return { label: '—', reason: '', severity: 'low', suggestedReason: 'Closed' };
+  const dte    = liveDTE(t.expiration);
+  const isCall = t.strategy.toLowerCase().includes('call');
+  const dist   = t.lastPrice != null
+    ? (isCall ? (t.strike - t.lastPrice) / t.strike : (t.lastPrice - t.strike) / t.strike)
+    : null;
+  const isITM  = dist != null && dist < 0;
+
+  if (dte <= 5) {
+    return {
+      label: 'Close / Roll', severity: 'high',
+      reason: `${dte} DTE — expiry imminent${isITM ? ', ITM' : ''}`,
+      suggestedReason: `Expiry risk — ${dte} DTE${isITM ? ', position is ITM' : ''}`,
+    };
+  }
+  if (dte <= 14) {
+    const distPct = dist != null ? (Math.abs(dist) * 100).toFixed(1) : null;
+    return {
+      label: isITM ? 'Roll (ITM)' : 'Roll',
+      severity: dte <= 7 ? 'high' : 'medium',
+      reason: `${dte} DTE${isITM ? ` — ${distPct}% ITM` : dist != null && dist < 0.05 ? ' — near strike' : ''}`,
+      suggestedReason: isITM
+        ? `Rolling — position is ${distPct}% ITM with ${dte} DTE`
+        : `Rolling for more time — ${dte} DTE remaining`,
+    };
+  }
+  if (isITM && dist != null) {
+    const pct = (Math.abs(dist) * 100).toFixed(1);
+    return {
+      label: 'Defend', severity: Math.abs(dist) > 0.05 ? 'high' : 'medium',
+      reason: `${pct}% ITM — $${t.lastPrice?.toFixed(2)} vs $${t.strike} strike`,
+      suggestedReason: `Defensive close — stock is ${pct}% ITM`,
+    };
+  }
+  if (dist != null && dist < 0.03) {
+    return {
+      label: 'Monitor', severity: 'low',
+      reason: `Within ${(dist * 100).toFixed(1)}% of $${t.strike} strike`,
+      suggestedReason: `Precautionary close — approaching strike`,
+    };
+  }
+  if (t.currentOptionMid != null && t.entryPremium > 0) {
+    const captured = (t.entryPremium - t.currentOptionMid) / t.entryPremium;
+    if (captured >= 0.5) {
+      return {
+        label: 'Take Profit', severity: captured >= 0.75 ? 'medium' : 'low',
+        reason: `${(captured * 100).toFixed(0)}% of premium captured`,
+        suggestedReason: `Taking profit — ${(captured * 100).toFixed(0)}% of max premium captured`,
+      };
+    }
+  }
+  return {
+    label: 'Hold', severity: 'low',
+    reason: 'No action needed',
+    suggestedReason: 'Manual close',
+  };
+}
 
 const fmt$ = (n: number | null | undefined) =>
   n == null ? '—' : n >= 0 ? `+$${n.toFixed(2)}` : `-$${Math.abs(n).toFixed(2)}`;
@@ -80,6 +147,16 @@ export function AgentView() {
   // Email state
   const [emailSending, setEmailSending] = useState(false);
   const [emailMsg, setEmailMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+
+  // Close-trade inline panel state
+  const [closingTradeId, setClosingTradeId] = useState<number | null>(null);
+  const [closeReason, setCloseReason] = useState('');
+  const [closingSubmitting, setClosingSubmitting] = useState(false);
+  const [closeMsg, setCloseMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+
+  // Trade learnings — keyed by agent trade ID
+  const [learnings, setLearnings] = useState<Map<number, AgentTradeLearning>>(new Map());
+  const [capturingLearning, setCapturingLearning] = useState<Set<number>>(new Set());
 
   // Watchlist state
   const [watchlists, setWatchlists] = useState<Watchlist[]>([]);
@@ -156,7 +233,7 @@ export function AgentView() {
     setLoading(true);
     setError(null);
     try {
-      const [s, t, l, tc, nl, r, lr, m, d] = await Promise.all([
+      const [s, t, l, tc, nl, r, lr, m, d, lrn] = await Promise.all([
         window.api.agent.getStatus(),
         window.api.agent.getTrades('all'),
         window.api.agent.getLessons(50),
@@ -165,7 +242,8 @@ export function AgentView() {
         window.api.agent.getRecommendations(),
         window.api.agent.getLiveRecommendations(),
         window.api.agent.getMemory(),
-        window.api.agent.getDashboard()
+        window.api.agent.getDashboard(),
+        window.api.agent.getTradeLearnings(),
       ]);
       setStatus(s);
       setTrades(t);
@@ -176,12 +254,41 @@ export function AgentView() {
       setLiveRecs(lr);
       setMemory(m);
       setDashboard(d);
+      setLearnings(new Map(lrn.map(x => [x.agentTradeId, x])));
     } catch (e) {
       setError((e as Error).message);
     } finally {
       setLoading(false);
     }
   }, []);
+
+  const handleCloseTrade = useCallback(async (trade: AgentTrade) => {
+    if (!agentProjectPath) {
+      setCloseMsg({ type: 'err', text: 'Agent project path not set.' });
+      return;
+    }
+    setClosingSubmitting(true);
+    setCloseMsg(null);
+    try {
+      // 1. Trigger the agent close process
+      await window.api.agent.closeTrade(trade.id, closeReason || computeTradeAction(trade).suggestedReason, agentProjectPath);
+      setCloseMsg({ type: 'ok', text: `Close initiated for ${trade.ticker} — capturing learning…` });
+      setClosingTradeId(null);
+
+      // 2. Capture AI learning (async — fires then updates state when done)
+      setCapturingLearning(prev => new Set([...prev, trade.id]));
+      window.api.agent.captureTradeLearning(trade).then(learning => {
+        setLearnings(prev => new Map([...prev, [trade.id, learning]]));
+        setCapturingLearning(prev => { const s = new Set(prev); s.delete(trade.id); return s; });
+      }).catch(() => {
+        setCapturingLearning(prev => { const s = new Set(prev); s.delete(trade.id); return s; });
+      });
+    } catch (e) {
+      setCloseMsg({ type: 'err', text: (e as Error).message });
+    } finally {
+      setClosingSubmitting(false);
+    }
+  }, [agentProjectPath, closeReason]);
 
   const handleConnect = async () => {
     try {
@@ -398,71 +505,6 @@ export function AgentView() {
         {/* Trades */}
         {tab === 'trades' && (
           <div>
-            {/* ── Today's Actions panel ────────────────────────────────────── */}
-            {(() => {
-              const openTrades = trades.filter((t) => t.status === 'open');
-              if (openTrades.length === 0) return null;
-              const actions: Array<{ trade: AgentTrade; action: string; reason: string; severity: 'high' | 'medium' | 'low' }> = [];
-              for (const t of openTrades) {
-                const dte = liveDTE(t.expiration);
-                const isCall = t.strategy.toLowerCase().includes('call');
-                // dist > 0 = OTM (safe), dist < 0 = ITM (at risk)
-                const dist = t.lastPrice != null
-                  ? (isCall ? (t.strike - t.lastPrice) / t.strike : (t.lastPrice - t.strike) / t.strike)
-                  : null;
-
-                if (dte <= 5) {
-                  const itm = dist != null && dist < 0;
-                  actions.push({ trade: t, action: '🔴 Close/Roll', reason: `Only ${dte} DTE — expiry imminent${itm ? ', position is ITM' : ''}`, severity: 'high' });
-                } else if (dte <= 14) {
-                  const itm = dist != null && dist < 0;
-                  const nearMoney = dist != null && dist < 0.05;
-                  actions.push({ trade: t, action: '⏰ Roll', reason: `${dte} DTE${itm ? ` — ITM ($${t.lastPrice!.toFixed(2)} ${isCall ? 'above' : 'below'} $${t.strike} strike)` : nearMoney ? ' — near strike, watch closely' : ''}`, severity: dte <= 7 ? 'high' : 'medium' });
-                } else if (dist != null && dist < 0) {
-                  // Stock through strike with time still remaining
-                  const pct = (Math.abs(dist) * 100).toFixed(1);
-                  actions.push({ trade: t, action: '🛡 Defend', reason: `Stock ${pct}% ITM — $${t.lastPrice!.toFixed(2)} ${isCall ? 'above' : 'below'} $${t.strike} strike`, severity: Math.abs(dist) > 0.05 ? 'high' : 'medium' });
-                } else if (dist != null && dist < 0.03) {
-                  // Near strike but still OTM
-                  const pct = (dist * 100).toFixed(1);
-                  actions.push({ trade: t, action: '⚠ Monitor', reason: `Stock within ${pct}% of $${t.strike} strike — $${t.lastPrice!.toFixed(2)}`, severity: 'low' });
-                } else if (t.currentOptionMid != null && t.entryPremium > 0) {
-                  // Real close signal: actual option P&L from theory check
-                  const captured = (t.entryPremium - t.currentOptionMid) / t.entryPremium;
-                  if (captured >= 0.5) {
-                    const plPerContract = ((t.entryPremium - t.currentOptionMid) * 100).toFixed(0);
-                    actions.push({ trade: t, action: '💰 Consider Close', reason: `${(captured * 100).toFixed(0)}% of premium captured — entry $${t.entryPremium.toFixed(2)} → now $${t.currentOptionMid.toFixed(2)} (+$${plPerContract}/contract)`, severity: captured >= 0.75 ? 'medium' : 'low' });
-                  }
-                }
-              }
-              if (actions.length === 0) return null;
-              return (
-                <div style={{ marginBottom: 14, background: '#12121e', borderRadius: 6, border: '1px solid #2c3050' }}>
-                  <div style={{ padding: '7px 14px', borderBottom: '1px solid #2c2c2c', display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <span style={{ fontWeight: 600, fontSize: 13 }}>Today's Actions</span>
-                    <span style={{ fontSize: 11, color: '#95a5a6' }}>{actions.length} position{actions.length !== 1 ? 's' : ''} need attention</span>
-                  </div>
-                  <div style={{ padding: '8px 14px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    {actions.map(({ trade: t, action, reason, severity }) => (
-                      <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, flexWrap: 'wrap' }}>
-                        <span style={{ padding: '1px 6px', borderRadius: 3, fontSize: 11, fontWeight: 600, background: SEVERITY_BG[severity], color: SEVERITY_COLOR[severity], whiteSpace: 'nowrap' }}>
-                          {action}
-                        </span>
-                        <span style={{ fontWeight: 600, minWidth: 55 }}>{t.ticker}</span>
-                        <span style={{ color: '#95a5a6' }}>{t.strategy} ${t.strike}</span>
-                        <span style={{ color: '#bdc3c7', flex: 1 }}>{reason}</span>
-                        <div style={{ display: 'flex', gap: 4 }}>
-                          <button onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-analysis', { detail: { ticker: t.ticker } }))}
-                            style={{ fontSize: 10, padding: '1px 5px', background: '#1a2a3a', color: '#3498db', borderRadius: 3 }}>📊</button>
-                          <button onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-options', { detail: { ticker: t.ticker, expiry: t.expiration } }))}
-                            style={{ fontSize: 10, padding: '1px 5px', background: '#2a1a3a', color: '#9b59b6', borderRadius: 3 }}>⛓</button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              );
-            })()}
             <div style={{ display: 'flex', gap: 8, marginBottom: emailMsg ? 8 : 12, alignItems: 'center', flexWrap: 'wrap' }}>
               {(['all', 'open', 'closed'] as const).map((f) => (
                 <button key={f} onClick={() => setTradeFilter(f)}
@@ -493,6 +535,17 @@ export function AgentView() {
                 <span style={{ cursor: 'pointer', marginLeft: 12 }} onClick={() => setEmailMsg(null)}>✕</span>
               </div>
             )}
+            {closeMsg && (
+              <div style={{
+                marginBottom: 10, padding: '6px 10px', borderRadius: 4, fontSize: 12,
+                background: closeMsg.type === 'ok' ? '#1a3a2a' : '#3a1a1a',
+                color: closeMsg.type === 'ok' ? '#2ecc71' : '#e74c3c',
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+              }}>
+                {closeMsg.text}
+                <span style={{ cursor: 'pointer', marginLeft: 12 }} onClick={() => setCloseMsg(null)}>✕</span>
+              </div>
+            )}
             {wlMsg && (
               <div style={{
                 marginBottom: 10, padding: '6px 10px', borderRadius: 4, fontSize: 12,
@@ -510,7 +563,7 @@ export function AgentView() {
               <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ color: '#95a5a6', borderBottom: '1px solid #2c2c2c' }}>
-                    {['#', 'Ticker', 'Strategy', 'Strike', 'Exp', 'DTE', 'Premium', 'Option Now', 'Capital', 'Score', 'Status', 'Entry', 'Close', 'P&L', 'Reason', 'Entry $', 'Last $ / Chg', ''].map((h) => (
+                    {['#', 'Ticker', 'Strategy', 'Strike', 'Exp', 'DTE', 'Premium', 'Option Now', 'Capital', 'Score', 'Status', 'Entry', 'Close', 'P&L', 'Reason', 'Entry $', 'Last $ / Chg', 'Action', ''].map((h) => (
                       <th key={h} style={{ textAlign: 'left', padding: '4px 8px', fontWeight: 500 }}>{h}</th>
                     ))}
                   </tr>
@@ -656,7 +709,43 @@ export function AgentView() {
                               </span>
                             ) : '—'}
                           </td>
-                          <td style={{ padding: '4px 6px' }}>
+                          {/* Action badge */}
+                          <td style={{ padding: '4px 8px', minWidth: 130 }}>
+                            {t.status === 'open' ? (() => {
+                              const rec = computeTradeAction(t);
+                              if (rec.label === 'Hold') return <span style={{ color: '#555', fontSize: 11 }}>Hold</span>;
+                              return (
+                                <div>
+                                  <span style={{ padding: '1px 6px', borderRadius: 3, fontSize: 11, fontWeight: 600, background: SEVERITY_BG[rec.severity], color: SEVERITY_COLOR[rec.severity], whiteSpace: 'nowrap' }}>
+                                    {rec.label}
+                                  </span>
+                                  <div style={{ fontSize: 10, color: '#95a5a6', marginTop: 2 }}>{rec.reason}</div>
+                                </div>
+                              );
+                            })() : (
+                              learnings.has(t.id)
+                                ? <span style={{ fontSize: 10, color: '#2ecc71' }}>📚 Learning</span>
+                                : capturingLearning.has(t.id)
+                                  ? <span style={{ fontSize: 10, color: '#95a5a6' }}>⟳ Capturing…</span>
+                                  : null
+                            )}
+                          </td>
+                          {/* Buttons */}
+                          <td style={{ padding: '4px 6px', whiteSpace: 'nowrap' }} onClick={(e) => e.stopPropagation()}>
+                            {t.status === 'open' && (
+                              <button
+                                onClick={() => {
+                                  const rec = computeTradeAction(t);
+                                  setCloseReason(rec.suggestedReason);
+                                  setClosingTradeId(closingTradeId === t.id ? null : t.id);
+                                  setCloseMsg(null);
+                                }}
+                                title={`Close trade #${t.id}`}
+                                style={{ fontSize: 11, padding: '1px 6px', background: '#1a3a2a', color: '#2ecc71', borderRadius: 3, cursor: 'pointer', lineHeight: 1.4, marginRight: 3 }}
+                              >
+                                ✓ Close
+                              </button>
+                            )}
                             <button
                               onClick={(e) => { e.stopPropagation(); handleDeleteTrade(t); }}
                               title={`Delete trade #${t.id}`}
@@ -666,10 +755,78 @@ export function AgentView() {
                             </button>
                           </td>
                         </tr>
+
+                        {/* ── Inline close panel ── */}
+                        {closingTradeId === t.id && (
+                          <tr key={`${t.id}-close`}>
+                            <td colSpan={19} style={{ padding: 0, background: '#0d1117', borderBottom: '1px solid #2c2c2c' }}>
+                              <div style={{ padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                                <span style={{ fontSize: 13, fontWeight: 600, color: '#2ecc71' }}>Close {t.ticker} {t.strategy} ${t.strike}</span>
+                                <label style={{ fontSize: 12, color: '#95a5a6', flexShrink: 0 }}>Reason:</label>
+                                <input
+                                  type="text"
+                                  value={closeReason}
+                                  onChange={(e) => setCloseReason(e.target.value)}
+                                  style={{ flex: 1, minWidth: 200, maxWidth: 420, fontSize: 12 }}
+                                  placeholder="e.g. 50% profit captured, rolling to next expiry…"
+                                  onKeyDown={(e) => { if (e.key === 'Enter') handleCloseTrade(t); if (e.key === 'Escape') setClosingTradeId(null); }}
+                                />
+                                <button
+                                  onClick={() => handleCloseTrade(t)}
+                                  disabled={closingSubmitting || !agentProjectPath}
+                                  style={{ background: closingSubmitting ? '#2c2c2c' : '#27ae60', fontSize: 12, padding: '4px 12px' }}
+                                >
+                                  {closingSubmitting ? '⟳ Closing…' : 'Confirm Close'}
+                                </button>
+                                <button onClick={() => setClosingTradeId(null)} disabled={closingSubmitting} style={{ fontSize: 12, background: '#2c2c2c', padding: '4px 10px' }}>
+                                  Cancel
+                                </button>
+                                {!agentProjectPath && (
+                                  <span style={{ fontSize: 11, color: '#f39c12' }}>⚠ Set agent project path first</span>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+
+                        {/* ── Expanded detail + learning ── */}
                         {isSelected && (
                           <tr key={`${t.id}-detail`}>
-                            <td colSpan={18} style={{ padding: 0, borderBottom: '1px solid #2c2c2c' }}>
+                            <td colSpan={19} style={{ padding: 0, borderBottom: '1px solid #2c2c2c' }}>
                               <TradeDetail trade={t} />
+                              {/* Learning panel */}
+                              {(learnings.has(t.id) || capturingLearning.has(t.id)) && (
+                                <div style={{ background: '#0d1a12', borderTop: '1px solid #1a3a2a', padding: '10px 16px' }}>
+                                  <div style={{ fontSize: 11, color: '#2ecc71', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
+                                    📚 Trade Learning
+                                  </div>
+                                  {capturingLearning.has(t.id) && !learnings.has(t.id) ? (
+                                    <div style={{ fontSize: 12, color: '#95a5a6' }}>⟳ Capturing learning from Claude…</div>
+                                  ) : learnings.has(t.id) ? (() => {
+                                    const lrn = learnings.get(t.id)!;
+                                    return (
+                                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+                                          <span style={{ color: lrn.wasStrategySound ? '#2ecc71' : '#e74c3c', fontWeight: 600 }}>
+                                            {lrn.wasStrategySound ? '✓ Strategy was sound' : '✗ Strategy mismatch'}
+                                          </span>
+                                        </div>
+                                        <div style={{ fontSize: 12, color: '#ecf0f1', lineHeight: 1.5 }}>
+                                          {lrn.keyLesson}
+                                        </div>
+                                        {lrn.suggestedTweak && (
+                                          <div style={{ fontSize: 12, color: '#f39c12', fontStyle: 'italic' }}>
+                                            💡 {lrn.suggestedTweak}
+                                          </div>
+                                        )}
+                                        <div style={{ fontSize: 10, color: '#555' }}>
+                                          Captured {new Date(lrn.capturedAt).toLocaleDateString()}
+                                        </div>
+                                      </div>
+                                    );
+                                  })() : null}
+                                </div>
+                              )}
                             </td>
                           </tr>
                         )}

@@ -7,11 +7,13 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import nodemailer from 'nodemailer';
+import Anthropic from '@anthropic-ai/sdk';
 import type Database from 'better-sqlite3';
 import type { AgentDbService } from '../services/agent-db-service.js';
+import { secureGet } from '../services/secure-settings.js';
 import type {
   AgentStatus, AgentTrade, AgentLesson, AgentRecommendation, AgentMemorySnapshot,
-  AgentConfig, AgentStrategy, AgentStrategiesState
+  AgentConfig, AgentStrategy, AgentStrategiesState, AgentTradeLearning,
 } from '@shared/types.js';
 
 function ok<T>(value: T) { return { ok: true as const, value }; }
@@ -517,6 +519,89 @@ export function registerAgentIpc(agentDb: AgentDbService, db: Database.Database)
       });
 
       return ok({ sent: emailList.length });
+    } catch (err) { return fail(err); }
+  });
+
+  // ── Trade learning capture ─────────────────────────────────────────────────
+  // Generates an AI learning note for a closed trade and persists it.
+  // Uses the AgentTrade snapshot passed from the UI (captured before close so
+  // all pre-close data is available).
+
+  ipcMain.handle('agent:capture-trade-learning', async (_e, trade: AgentTrade) => {
+    try {
+      const apiKey = secureGet(db, 'anthropicApiKey');
+      if (!apiKey) return fail(new Error('Anthropic API key not configured — set it in Settings → API Keys.'));
+
+      // Check for existing learning first
+      type LRow = { learning_json: string };
+      const existing = db.prepare(
+        'SELECT learning_json FROM agent_trade_learnings WHERE agent_trade_id = ?'
+      ).get(trade.id) as LRow | undefined;
+      if (existing) return ok(JSON.parse(existing.learning_json) as AgentTradeLearning);
+
+      const stockMove = trade.lastPrice != null && trade.entryPrice != null
+        ? `${((trade.lastPrice - trade.entryPrice) / trade.entryPrice * 100).toFixed(1)}%`
+        : 'unknown';
+      const optionLine = trade.currentOptionMid != null
+        ? `entry $${trade.entryPremium.toFixed(2)} → current mid $${trade.currentOptionMid.toFixed(2)} (${((trade.entryPremium - trade.currentOptionMid) / trade.entryPremium * 100).toFixed(0)}% of premium captured)`
+        : `entry premium $${trade.entryPremium.toFixed(2)} — current option price unavailable`;
+
+      const prompt = `Analyze this options trade for brief learning insights.
+
+Trade: ${trade.strategy} on ${trade.ticker}
+Strike: $${trade.strike} | Expiration: ${trade.expiration} | DTE at entry: ${trade.dteAtEntry}
+${optionLine}
+Stock move since entry: ${stockMove}
+Close reason: ${trade.closeReason ?? 'manual close'}
+Original entry rationale: ${trade.rationale}
+
+In exactly one sentence each:
+1. Was the strategy setup sound for the conditions at entry?
+2. What was the key factor in the outcome?
+3. What specific change would improve the next similar trade? (null if nothing clear)
+
+Respond with JSON only:
+{"wasStrategySound":bool,"keyLesson":"...","suggestedTweak":"..."|null}`;
+
+      const client = new Anthropic({ apiKey });
+      const resp = await client.messages.create({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 300,
+        messages: [{ role: 'user', content: prompt }],
+      });
+
+      const text = resp.content.find(b => b.type === 'text')?.text ?? '';
+      const match = text.match(/\{[\s\S]*\}/);
+      if (!match) return fail(new Error('Model returned no JSON'));
+
+      const raw = JSON.parse(match[0]) as Record<string, unknown>;
+      const learning: AgentTradeLearning = {
+        agentTradeId:     trade.id,
+        ticker:           trade.ticker,
+        wasStrategySound: Boolean(raw['wasStrategySound']),
+        keyLesson:        String(raw['keyLesson'] ?? ''),
+        suggestedTweak:   raw['suggestedTweak'] ? String(raw['suggestedTweak']) : null,
+        capturedAt:       new Date().toISOString(),
+      };
+
+      db.prepare(`
+        INSERT OR REPLACE INTO agent_trade_learnings (agent_trade_id, ticker, learning_json)
+        VALUES (?, ?, ?)
+      `).run(trade.id, trade.ticker, JSON.stringify(learning));
+
+      return ok(learning);
+    } catch (err) { return fail(err); }
+  });
+
+  // Retrieve all persisted learnings (loaded on view mount alongside trades)
+  ipcMain.handle('agent:get-trade-learnings', (_e) => {
+    try {
+      type LRow = { agent_trade_id: number; learning_json: string };
+      const rows = db.prepare(
+        'SELECT agent_trade_id, learning_json FROM agent_trade_learnings ORDER BY created_at DESC'
+      ).all() as LRow[];
+      const result = rows.map(r => JSON.parse(r.learning_json) as AgentTradeLearning);
+      return ok(result);
     } catch (err) { return fail(err); }
   });
 }

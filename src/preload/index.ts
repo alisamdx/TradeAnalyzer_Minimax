@@ -42,6 +42,7 @@ import type {
   AgentConfig,
   AgentStrategy,
   AgentStrategiesState,
+  AgentTradeLearning,
   BacktestConfig,
   BacktestRun,
   BacktestTrade,
@@ -833,6 +834,9 @@ function buildApi() {
     sendPositionsEmail: (projectPath: string) =>
       invoke<{ sent: number }>('agent:send-positions-email', projectPath),
     deleteTrade: (id: number) => invoke<true>('agent:delete-trade', id),
+    captureTradeLearning: (trade: AgentTrade) =>
+      invoke<AgentTradeLearning>('agent:capture-trade-learning', trade),
+    getTradeLearnings: () => invoke<AgentTradeLearning[]>('agent:get-trade-learnings'),
     listStrategies: () => invoke<AgentStrategiesState>('agent:list-strategies'),
     saveStrategy: (strategy: AgentStrategy) => invoke<AgentStrategy>('agent:save-strategy', strategy),
     deleteStrategy: (id: string) => invoke<boolean>('agent:delete-strategy', id),

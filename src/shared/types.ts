@@ -602,6 +602,16 @@ export interface AgentDashboard {
   plByMonth: Record<string, number>;
 }
 
+/** AI-generated learning captured when an agent trade is closed. */
+export interface AgentTradeLearning {
+  agentTradeId:     number;
+  ticker:           string;
+  wasStrategySound: boolean;   // was the setup sound for the conditions?
+  keyLesson:        string;    // one sentence on the main takeaway
+  suggestedTweak:   string | null;  // one sentence on what to do differently
+  capturedAt:       string;    // ISO timestamp
+}
+
 export interface AgentNativeLesson {
   id: number;        // synthetic negative integer (never persisted)
   type: 'expiry_risk' | 'strike_breach' | 'strategy_losing_streak' | 'stale_position' | 'profit_target';
