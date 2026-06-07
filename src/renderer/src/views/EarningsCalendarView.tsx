@@ -368,7 +368,7 @@ export function EarningsCalendarView() {
   };
 
   const navigateToAnalysis = (ticker: string) => {
-    window.dispatchEvent(new CustomEvent('navigate-to-analysis', { detail: { ticker } }));
+    window.dispatchEvent(new CustomEvent('navigate-to-validate', { detail: { ticker } }));
   };
 
   const prevMonth = () => setViewMonth(({ year, month }) => {
