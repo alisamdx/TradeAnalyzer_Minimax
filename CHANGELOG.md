@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.31.3] — 2026-06-07
+
+### Fixed
+- Earnings Refresh: all tickers showed no-data due to a dead placeholder SQL query in `estimateFromPolygon` referencing `constituents.period_of_report_date` (column does not exist). SQLite validates column names at prepare() time even with WHERE 0. Removed the dead query; the analysis_snapshots fallback now runs correctly.
+
 ## [0.31.2] — 2026-06-07
 
 ### Changed

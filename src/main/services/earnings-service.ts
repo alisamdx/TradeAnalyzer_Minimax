@@ -209,19 +209,9 @@ export class EarningsService {
   private async estimateFromPolygon(
     ticker: string,
   ): Promise<{ date: string | null; time: 'bmo' | 'amc' | null; source: EarningsEntry['source']; confirmed: boolean } | null> {
-    // Use last filing_date from financials + 91 days as a quarterly estimate
-    type Row = { report_date: string | null };
-    const last = this.db.prepare(`
-      SELECT MAX(period_of_report_date) AS report_date
-      FROM (
-        SELECT DISTINCT period_of_report_date
-        FROM constituents
-        WHERE 0  -- placeholder; real data from cached financials below
-      )
-    `).get() as Row | undefined;
-
-    // Actually query from already-cached analysis data if available
-    // Look for daysToEarnings hint in recent analysis_snapshots for this ticker
+    // Look for a daysToEarnings hint in recent analysis_snapshots for this ticker.
+    // The analysis engine stores daysToEarnings (from Polygon fundamentals) in the
+    // payload JSON — back-calculate: estimatedDate = run_at + daysToEarnings days.
     type SnapRow = { payload_json: string; run_at: string };
     const snap = this.db.prepare(`
       SELECT payload_json, run_at FROM analysis_snapshots
@@ -250,11 +240,10 @@ export class EarningsService {
             };
           }
         }
-      } catch { /* skip malformed */ }
+      } catch { /* skip malformed snapshot */ }
     }
 
-    // Last resort: return null — no estimate possible
-    void last; // silence unused warning
+    // No estimate possible from cached data
     return null;
   }
 
