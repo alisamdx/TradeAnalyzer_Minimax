@@ -68,6 +68,8 @@ import { CriticService } from './services/critic-service.js';
 import { NewsDataFetcher } from './services/news-data-fetcher.js';
 import { NewsAIService } from './services/news-ai-service.js';
 import { registerNewsIpc } from './ipc/ipc-news.js';
+import { EarningsService } from './services/earnings-service.js';
+import { registerEarningsIpc } from './ipc/ipc-earnings.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -448,6 +450,20 @@ app.whenReady().then(() => {
   const newsFetcher = new NewsDataFetcher(() => getApiKey(db), db);
   const newsAiService = new NewsAIService(db);
   registerNewsIpc(newsFetcher, rateLimiter, newsAiService);
+
+  // Earnings calendar
+  const earningsService = new EarningsService(db);
+  registerEarningsIpc(earningsService, () => {
+    const accessToken  = secureGet(db, 'etradeAccessToken');
+    const accessSecret = secureGet(db, 'etradeAccessSecret');
+    if (!accessToken || !accessSecret) return null;
+    return {
+      consumerKey:    secureGet(db, 'etradeConsumerKey') ?? '',
+      consumerSecret: secureGet(db, 'etradeConsumerSecret') ?? '',
+      accessToken,
+      accessSecret,
+    };
+  });
 
   // v0.12.0 — TraderAgent integration
   const agentDb = new AgentDbService();

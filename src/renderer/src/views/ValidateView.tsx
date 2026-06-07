@@ -141,6 +141,7 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
+  const [earningsEntry, setEarningsEntry] = useState<{ reportDate: string; reportTime: 'bmo'|'amc'|null; confirmed: boolean; dte: number|null } | null>(null);
   const [timeframe, setTimeframe] = useState<TimeframeOption>({ label: '6M', days: 180 });
   const [isValidatingAll, setIsValidatingAll] = useState(false);
   const [validateProgress, setValidateProgress] = useState<{ done: number; total: number } | null>(null);
@@ -192,6 +193,9 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
       const data = await window.api.validate.openTickerById({ ticker });
       setResult(data);
       setTickerSignals(prev => ({ ...prev, [ticker]: data.indicators.buySignalStrength }));
+      // Fetch earnings in background — non-blocking
+      window.api.earnings.get(ticker).then(e => setEarningsEntry(e)).catch(() => {});
+      window.api.earnings.refresh([ticker]).catch(() => {});
       const lastBar = data.chart.bars[data.chart.bars.length - 1];
       setExportCache(prev => ({ ...prev, [ticker]: {
         ticker: data.ticker, companyName: data.companyName, lastPrice: lastBar?.c ?? null,
@@ -1123,6 +1127,26 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
 
           {result && !loading && (
             <>
+              {/* ── Earnings warning banner ── */}
+              {earningsEntry && earningsEntry.dte !== null && earningsEntry.dte <= 45 && (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '8px 14px', marginBottom: 8,
+                  background: earningsEntry.dte <= 7 ? 'rgba(239,68,68,0.1)' : 'rgba(245,158,11,0.1)',
+                  border: `1px solid ${earningsEntry.dte <= 7 ? '#ef444466' : '#f59e0b66'}`,
+                  borderRadius: 6, fontSize: 12,
+                }}>
+                  <span style={{ fontSize: 16 }}>📅</span>
+                  <span style={{ fontWeight: 600, color: earningsEntry.dte <= 7 ? '#ef4444' : '#f59e0b' }}>
+                    Earnings {new Date(`${earningsEntry.reportDate}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                    {earningsEntry.reportTime === 'bmo' ? ' BMO' : earningsEntry.reportTime === 'amc' ? ' AMC' : ''}
+                    {' '}· {earningsEntry.dte === 0 ? 'Today' : earningsEntry.dte === 1 ? 'Tomorrow' : `${earningsEntry.dte}d`}
+                  </span>
+                  {!earningsEntry.confirmed && <span style={{ color: '#64748b', fontSize: 10 }}>~estimated</span>}
+                  <span style={{ color: '#94a3b8', marginLeft: 4 }}>— IV crush risk after report if short options inside DTE window</span>
+                </div>
+              )}
+
               {/* ── Section A: Executive Summary ── */}
               <div className="section-card section-a">
                 <div className="section-header">

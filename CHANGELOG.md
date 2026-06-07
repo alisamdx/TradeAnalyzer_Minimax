@@ -2,6 +2,10 @@
 
 Reverse-chronological. Per spec EP-2.3, this is the index; per-version detail lives in `changelogs/`.
 
+## v0.31.0 — 2026-06-07
+
+Earnings Calendar: full feature shipping as v0.31.0. New migration 034, EarningsService (E*Trade FUNDAMENTAL quote primary, analysis-snapshot estimate fallback, manual override), IPC handlers, preload exposure. Dedicated "📅 Earnings" sidebar view with date groups, refresh, manual entry, and delete. Earnings warning banner in Validate view (fires when earnings ≤45 DTE from ticker selection). Earnings badge on Portfolio open positions (📅 with ! when before expiry). Payoff View: amber earnings annotation below P&L chart; Risk Matrix earnings column highlighted amber with 📅 icon.
+
 ## v0.30.7 — 2026-06-07
 
 Risk Matrix critical fix: Black-Scholes was dividing leg.iv by 100 a second time. OptionContract.iv from the E*Trade chain is already a decimal fraction (0.38 = 38%), so the formula was computing sigma = 0.0038 (0.38% IV) instead of 38% — making all OTM options appear worthless and showing +$2.2k everywhere. Formula corrected to use leg.iv directly as sigma.

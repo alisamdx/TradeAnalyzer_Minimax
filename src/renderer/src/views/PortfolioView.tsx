@@ -275,6 +275,9 @@ export function PortfolioView() {
   // Greeks refresh state
   const [fetchingGreeks, setFetchingGreeks] = useState(false);
 
+  // Earnings map: ticker → upcoming report date/dte
+  const [earningsMap, setEarningsMap] = useState<Map<string, { reportDate: string; dte: number|null }>>(new Map());
+
   // Streaming state
   const [streamStatus, setStreamStatus]   = useState<string>('');
   const [thinkingText, setThinkingText]   = useState<string>('');
@@ -314,7 +317,24 @@ export function PortfolioView() {
     }
   }, [activeTab]);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  // Load earnings for open options positions (non-blocking)
+  useEffect(() => {
+    const optionTickers = [...new Set(
+      positions.filter(p => p.status === 'open' && p.positionType !== 'Stock').map(p => p.ticker)
+    )];
+    if (optionTickers.length === 0) return;
+    Promise.all(optionTickers.map(t => window.api.earnings.get(t))).then(results => {
+      const m = new Map<string, { reportDate: string; dte: number|null }>();
+      results.forEach((e, i) => {
+        if (e) m.set(optionTickers[i]!, { reportDate: e.reportDate, dte: e.dte });
+      });
+      setEarningsMap(m);
+    }).catch(() => {});
+  }, [positions]);
 
   // Auto-analyze open positions whenever they load or their count changes.
   // Fires on initial page load and after E*Trade sync adds new positions.
@@ -895,6 +915,19 @@ export function PortfolioView() {
                             {et?.etradePositionId && (
                               <span style={{ fontSize: 9, color: '#3b82f6', marginLeft: 4 }} title="Synced from E*Trade">●ET</span>
                             )}
+                            {(() => {
+                              const ec = earningsMap.get(pos.ticker);
+                              if (!ec || pos.positionType === 'Stock') return null;
+                              const beforeExpiry = pos.expirationDate && ec.reportDate <= pos.expirationDate;
+                              if (!beforeExpiry && (ec.dte ?? 999) > 21) return null;
+                              const color = (ec.dte ?? 999) <= 7 ? '#ef4444' : '#f59e0b';
+                              return (
+                                <span title={`Earnings ${ec.reportDate} — ${beforeExpiry ? 'before expiry!' : ''}`}
+                                  style={{ fontSize: 9, color, marginLeft: 5, fontWeight: 700 }}>
+                                  📅{beforeExpiry ? '!' : ''}
+                                </span>
+                              );
+                            })()}
                           </td>
                           <td>
                             <span className={`type-badge ${pos.positionType.toLowerCase()}`}>

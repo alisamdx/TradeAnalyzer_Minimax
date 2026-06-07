@@ -1065,8 +1065,20 @@ function buildApi() {
     },
   };
 
+  const earnings = {
+    get:       (ticker: string) =>
+      invoke<{ ticker: string; reportDate: string; reportTime: 'bmo'|'amc'|null; source: string; confirmed: boolean; dte: number|null } | null>('earnings:get', ticker),
+    upcoming:  (days?: number) =>
+      invoke<{ ticker: string; reportDate: string; reportTime: 'bmo'|'amc'|null; source: string; confirmed: boolean; dte: number|null }[]>('earnings:upcoming', days),
+    refresh:   (tickers?: string[], force?: boolean) =>
+      invoke<{ updated: number; skipped: number; failed: number; errors: string[] }>('earnings:refresh', tickers, force),
+    setManual: (ticker: string, reportDate: string, reportTime?: 'bmo'|'amc'|null) =>
+      invoke<{ ticker: string; reportDate: string; reportTime: 'bmo'|'amc'|null; source: string; confirmed: boolean; dte: number|null }>('earnings:setManual', ticker, reportDate, reportTime),
+    delete:    (ticker: string) => invoke<void>('earnings:delete', ticker),
+  };
+
   return {
-    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, historical, portfolio, alerts, optionsChain, agent, backtest, leapsCsp, collaredLeaps, testApi, etrade, filters, payoff, ivHistory, opportunity, strategyLab, batch, scoring, paper, conviction, news },
+    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, historical, portfolio, alerts, optionsChain, agent, backtest, leapsCsp, collaredLeaps, testApi, etrade, filters, payoff, ivHistory, opportunity, strategyLab, batch, scoring, paper, conviction, news, earnings },
     dialog: {
       prompt: (opts: { title: string; defaultValue?: string }) =>
         invoke<string | null>('dialog:prompt', opts),

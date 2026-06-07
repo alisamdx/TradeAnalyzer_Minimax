@@ -382,13 +382,14 @@ function actionColor(action: LegScenario['action']): string {
 // ─── Risk Matrix Table component ──────────────────────────────────────────────
 
 function RiskMatrixTable({
-  legs, spotNum, chainExpirations, chainData, hasIv,
+  legs, spotNum, chainExpirations, chainData, hasIv, earningsDate,
 }: {
   legs: PayoffLeg[];
   spotNum: number;
   chainExpirations: OptionsChainExpirationSummary[];
   chainData: { contracts: { strike: number }[] } | null;
   hasIv: boolean;
+  earningsDate?: string | null;
 }) {
   const today = new Date().toISOString().slice(0, 10);
   const legStrikes  = useMemo(
@@ -440,15 +441,29 @@ function RiskMatrixTable({
 
   const isSynthetic = chainExpirations.length === 0;
 
+  // Find the column index nearest to the earnings date
+  const earningsColIdx = useMemo(() => {
+    if (!earningsDate) return -1;
+    const eMs = new Date(earningsDate).getTime();
+    let best = -1, bestDiff = Infinity;
+    colDates.forEach((d, i) => {
+      const diff = Math.abs(new Date(d).getTime() - eMs);
+      if (diff < bestDiff) { bestDiff = diff; best = i; }
+    });
+    return best;
+  }, [earningsDate, colDates]);
+
   function fmtColHeader(dateStr: string, idx: number): React.ReactNode {
     if (idx === 0) return 'Today';
     const d = new Date(`${dateStr}T12:00:00Z`);
     const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     const dte = Math.round((new Date(dateStr).getTime() - Date.now()) / 86_400_000);
+    const isEarnings = idx === earningsColIdx;
     return (
       <>
         {label}
-        {isSynthetic && <span style={{ color: '#6b7280', fontSize: 8 }}>~</span>}
+        {isSynthetic && !isEarnings && <span style={{ color: '#6b7280', fontSize: 8 }}>~</span>}
+        {isEarnings && <span style={{ fontSize: 9, marginLeft: 2 }}>📅</span>}
         <br/>
         <span style={{ color: '#475569', fontSize: 9 }}>{dte}d</span>
       </>
@@ -510,14 +525,19 @@ function RiskMatrixTable({
             <tr>
               <th style={{ ...thStyle, textAlign: 'right' }}>Strike</th>
               <th style={{ ...thStyle, textAlign: 'right' }}>vs Spot</th>
-              {colDates.map((d, i) => (
-                <th key={d} style={{ ...thStyle, textAlign: 'right', minWidth: 68,
-                  color: i === colDates.length - 1 ? '#fbbf24' : '#64748b',
-                  borderLeft: i === colDates.length - 1 ? '2px solid #374151' : '1px solid #1e293b',
-                }}>
-                  {fmtColHeader(d, i)}
-                </th>
-              ))}
+              {colDates.map((d, i) => {
+                const isExpiry   = i === colDates.length - 1;
+                const isEarnings = i === earningsColIdx;
+                return (
+                  <th key={d} style={{ ...thStyle, textAlign: 'right', minWidth: 68,
+                    color: isExpiry ? '#fbbf24' : isEarnings ? '#f59e0b' : '#64748b',
+                    borderLeft: isExpiry ? '2px solid #374151' : isEarnings ? '2px solid #f59e0b55' : '1px solid #1e293b',
+                    background: isEarnings ? 'rgba(245,158,11,0.07)' : '#0a0f1a',
+                  }}>
+                    {fmtColHeader(d, i)}
+                  </th>
+                );
+              })}
               <th style={{ ...thStyle, textAlign: 'left', borderLeft: '2px solid #374151', color: '#94a3b8' }}>Zone</th>
             </tr>
           </thead>
@@ -552,11 +572,11 @@ function RiskMatrixTable({
                           padding: '3px 10px', textAlign: 'right', cursor: 'pointer',
                           background: isSelected ? '#1d4ed8' : cellBg(pnl),
                           color: '#f1f5f9', fontWeight: isSelected ? 700 : 500,
-                          borderLeft: ci === colDates.length - 1 ? '2px solid #374151' : '1px solid #1e293b',
-                          outline: isSelected ? '2px solid #93c5fd' : undefined,
-                          outlineOffset: isSelected ? '-2px' : undefined,
+                          borderLeft: ci === colDates.length - 1 ? '2px solid #374151' : ci === earningsColIdx ? '2px solid #f59e0b55' : '1px solid #1e293b',
+                          outline: isSelected ? '2px solid #93c5fd' : ci === earningsColIdx ? '1px solid #f59e0b33' : undefined,
+                          outlineOffset: isSelected ? '-2px' : '-1px',
                         }}
-                        title="Click to see leg-by-leg breakdown"
+                        title={ci === earningsColIdx ? '📅 Earnings — click to see leg breakdown' : 'Click to see leg-by-leg breakdown'}
                       >
                         {fmtCell(pnl)}
                       </td>
@@ -2132,6 +2152,9 @@ export function PayoffView({ initialTicker, initialSpot, initialExpiry, initialS
   const [lastAppliedSlug, setLastAppliedSlug] = useState<string | null>(null);
   const [viewMode, setViewMode]         = useState<'chart' | 'table'>('chart');
 
+  // Earnings date for the current ticker
+  const [earningsDate, setEarningsDate] = useState<string | null>(null);
+
   // Watchlist picker
   const [watchlists, setWatchlists]           = useState<Watchlist[]>([]);
   const [selectedWlId, setSelectedWlId]       = useState<number | null>(null);
@@ -2381,6 +2404,10 @@ export function PayoffView({ initialTicker, initialSpot, initialExpiry, initialS
     if (!hasTicker) return; // no ticker → user fills premiums manually
 
     setChainLoading(true);
+    // Fetch earnings in background alongside chain load
+    window.api.earnings.get(ticker.toUpperCase())
+      .then(e => setEarningsDate(e?.reportDate ?? null))
+      .catch(() => {});
     try {
       // 1. Load available expirations and get live spot price
       const expResult = await window.api.optionsChain.getNearExpirations(ticker.toUpperCase());
@@ -3140,9 +3167,30 @@ export function PayoffView({ initialTicker, initialSpot, initialExpiry, initialS
 
             {/* ── Chart or Risk Matrix ── */}
             {viewMode === 'chart' ? (
-              <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8, padding: '4px 6px 1px' }}>
-                <PayoffChart metrics={metrics} spot={spotNum} />
-              </div>
+              <>
+                <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8, padding: '4px 6px 1px' }}>
+                  <PayoffChart metrics={metrics} spot={spotNum} />
+                </div>
+                {earningsDate && (() => {
+                  const dte = Math.round((new Date(earningsDate).getTime() - Date.now()) / 86_400_000);
+                  const withinDte = legs.some(l => l.type !== 'stock' && dte <= Math.round((new Date(l.expiry).getTime() - Date.now()) / 86_400_000));
+                  if (dte < 0) return null;
+                  return (
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: 8, padding: '5px 10px',
+                      background: withinDte ? 'rgba(239,68,68,0.08)' : 'rgba(245,158,11,0.08)',
+                      border: `1px solid ${withinDte ? '#ef444444' : '#f59e0b44'}`,
+                      borderRadius: 5, fontSize: 11,
+                    }}>
+                      <span>📅</span>
+                      <span style={{ fontWeight: 600, color: withinDte ? '#ef4444' : '#f59e0b' }}>
+                        Earnings {new Date(`${earningsDate}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} · {dte === 0 ? 'Today' : `${dte}d`}
+                      </span>
+                      {withinDte && <span style={{ color: '#94a3b8' }}>— inside option DTE window · IV crush risk after report</span>}
+                    </div>
+                  );
+                })()}
+              </>
             ) : (
               <RiskMatrixTable
                 legs={legs}
@@ -3150,6 +3198,7 @@ export function PayoffView({ initialTicker, initialSpot, initialExpiry, initialS
                 chainExpirations={chainExpirations}
                 chainData={chainData}
                 hasIv={legs.filter(l => l.type !== 'stock').every(l => l.iv !== null)}
+                earningsDate={earningsDate}
               />
             )}
           </>
