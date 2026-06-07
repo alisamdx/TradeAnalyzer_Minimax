@@ -236,6 +236,8 @@ Authoritative DDL is in `migrations/001_init.sql` + `002_screen_schema.sql`. Pha
 
 - **v0.23.2 (2026-06-04)** — E*Trade remote token refresh via SSH. `scripts/etrade-login.mjs`: full OAuth 1.0a flow in a terminal; reads consumer creds from running app API or `~/.tradeanalyzer/etrade-config.json` fallback; stores tokens live or writes pending file. New API routes: `GET /api/v1/etrade/credentials`, `POST /api/v1/etrade/token` (`routes-etrade.ts`). `api-server.ts` writes `etrade-config.json` + imports `etrade-tokens-pending.json` on every startup. `scripts/etrade-login.bat` for easy SSH execution.
 
+- **v0.30.7 (2026-06-07)** — Risk Matrix critical fix: `OptionContract.iv` is a decimal fraction (0.38 = 38%). Formula was dividing by 100 again → sigma = 0.0038 → all OTM puts = $0 → +$2.2k everywhere. Fixed: use `leg.iv ?? BS_FALLBACK_IV` directly (both already decimals).
+
 - **v0.30.6 (2026-06-07)** — Risk Matrix fix: when chain not loaded, `selectMatrixColumns` generates synthetic weekly date columns from today to leg expiry (step 7d if ≤60 DTE, else 14d). Synthetic columns marked with ~. Footer shows distinct notices for synthetic dates vs missing IV.
 
 - **v0.30.5 (2026-06-07)** — Risk Matrix fix: `selectMatrixStrikes` now extends the row range to cover all option leg strikes (×0.85 below, ×1.15 above) even when outside ±25% of spot. Leg strike rows highlighted amber with ◀ marker. Fixes "all rows show max profit" when strike is below the visible range.

@@ -2,6 +2,10 @@
 
 Reverse-chronological. Per spec EP-2.3, this is the index; per-version detail lives in `changelogs/`.
 
+## v0.30.7 — 2026-06-07
+
+Risk Matrix critical fix: Black-Scholes was dividing leg.iv by 100 a second time. OptionContract.iv from the E*Trade chain is already a decimal fraction (0.38 = 38%), so the formula was computing sigma = 0.0038 (0.38% IV) instead of 38% — making all OTM options appear worthless and showing +$2.2k everywhere. Formula corrected to use leg.iv directly as sigma.
+
 ## v0.30.6 — 2026-06-07
 
 Risk Matrix fix: when no options chain is loaded (manually-entered legs), intermediate date columns are now generated automatically as weekly synthetic intervals between today and the leg's expiry. Previously only the "Today" column existed, making time decay invisible. Synthetic column dates marked with ~ in the header. Footer now shows separate notices for synthetic columns and missing IV.

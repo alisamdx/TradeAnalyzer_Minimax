@@ -288,7 +288,7 @@ function computeMatrixCell(legs: PayoffLeg[], S: number, colDateStr: string): nu
     const T = (new Date(leg.expiry).getTime() - colMs) / (365.25 * 86_400_000);
     const theoretical = T <= 0
       ? (leg.type === 'call' ? Math.max(0, S - leg.strike) : Math.max(0, leg.strike - S))
-      : bsPrice(S, leg.strike, T, BS_RISK_FREE, (leg.iv ?? BS_FALLBACK_IV * 100) / 100, leg.type);
+      : bsPrice(S, leg.strike, T, BS_RISK_FREE, leg.iv ?? BS_FALLBACK_IV, leg.type);
     total += sign * (theoretical - leg.premium) * qty * 100;
   }
   return total;
@@ -330,7 +330,7 @@ function computeLegScenarios(legs: PayoffLeg[], S: number, colDateStr: string): 
     const T = (new Date(leg.expiry).getTime() - colMs) / (365.25 * 86_400_000);
     const theoretical = T <= 0
       ? (leg.type === 'call' ? Math.max(0, S - leg.strike) : Math.max(0, leg.strike - S))
-      : bsPrice(S, leg.strike, T, BS_RISK_FREE, (leg.iv ?? BS_FALLBACK_IV * 100) / 100, leg.type);
+      : bsPrice(S, leg.strike, T, BS_RISK_FREE, leg.iv ?? BS_FALLBACK_IV, leg.type);
 
     const pnl      = sign * (theoretical - leg.premium) * qty * 100;
     const capacity = leg.premium * qty * 100; // total premium per side (always positive)
