@@ -271,6 +271,79 @@ function atExpiryPnl(legs: PayoffLeg[], S: number): number {
   return total;
 }
 
+// ─── Per-leg scenario helpers ─────────────────────────────────────────────────
+
+interface LegScenario {
+  leg: PayoffLeg;
+  theoretical: number;   // per-share theoretical price at (S, colDate)
+  pnl: number;           // total P&L for this leg
+  action: 'take_profit' | 'consider_close' | 'close_loss' | 'watch' | 'hold';
+  actionLabel: string;
+}
+
+function computeLegScenarios(legs: PayoffLeg[], S: number, colDateStr: string): LegScenario[] {
+  const colMs = new Date(colDateStr).getTime();
+  return legs.map(leg => {
+    const qty  = leg.quantity;
+    const sign = leg.side === 'buy' ? 1 : -1;
+
+    if (leg.type === 'stock') {
+      const pnl = sign * (S - leg.premium) * qty * 100;
+      return { leg, theoretical: S, pnl, action: 'hold', actionLabel: pnl >= 0 ? 'Hold — gain' : 'Hold — loss' };
+    }
+
+    const T = (new Date(leg.expiry).getTime() - colMs) / (365.25 * 86_400_000);
+    const theoretical = T <= 0
+      ? (leg.type === 'call' ? Math.max(0, S - leg.strike) : Math.max(0, leg.strike - S))
+      : bsPrice(S, leg.strike, T, BS_RISK_FREE, (leg.iv ?? BS_FALLBACK_IV * 100) / 100, leg.type);
+
+    const pnl      = sign * (theoretical - leg.premium) * qty * 100;
+    const capacity = leg.premium * qty * 100; // total premium per side (always positive)
+
+    let action: LegScenario['action'] = 'hold';
+    let actionLabel = 'Hold';
+
+    if (leg.side === 'sell') {
+      const profitPct = capacity > 0 ? (pnl / capacity) * 100 : 0;
+      if (profitPct >= 80) {
+        action = 'take_profit'; actionLabel = `✓ Take profits — ${profitPct.toFixed(0)}% collected`;
+      } else if (profitPct >= 50) {
+        action = 'consider_close'; actionLabel = `✓ Consider closing — ${profitPct.toFixed(0)}% collected`;
+      } else if (pnl < 0 && Math.abs(pnl) >= capacity) {
+        action = 'close_loss'; actionLabel = `⚠ Close — loss exceeds premium collected`;
+      } else if (pnl < 0 && Math.abs(pnl) >= capacity * 0.5) {
+        action = 'watch'; actionLabel = `⚡ Watch — ${Math.abs(profitPct).toFixed(0)}% of premium at risk`;
+      } else {
+        actionLabel = profitPct >= 0
+          ? `Hold — ${profitPct.toFixed(0)}% collected`
+          : `Hold — ${Math.abs(profitPct).toFixed(0)}% at risk`;
+      }
+    } else {
+      // Buy (protection / long)
+      const entryDebit = leg.premium * qty * 100;
+      if (pnl > entryDebit * 0.5) {
+        action = 'take_profit'; actionLabel = `✓ Hedge profitable — can close`;
+      } else if (pnl < 0) {
+        actionLabel = 'Hold — protection active';
+      } else {
+        actionLabel = 'Hold';
+      }
+    }
+
+    return { leg, theoretical, pnl, action, actionLabel };
+  });
+}
+
+function actionColor(action: LegScenario['action']): string {
+  switch (action) {
+    case 'take_profit':    return '#22c55e';
+    case 'consider_close': return '#86efac';
+    case 'close_loss':     return '#ef4444';
+    case 'watch':          return '#f59e0b';
+    default:               return '#94a3b8';
+  }
+}
+
 // ─── Risk Matrix Table component ──────────────────────────────────────────────
 
 function RiskMatrixTable({
@@ -286,6 +359,9 @@ function RiskMatrixTable({
   const expiryDates = useMemo(() => selectMatrixColumns(chainExpirations), [chainExpirations]);
   const colDates    = useMemo(() => [today, ...expiryDates], [today, expiryDates]);
   const strikes     = useMemo(() => selectMatrixStrikes(chainData, spotNum), [chainData, spotNum]);
+
+  // Selected cell for leg breakdown panel
+  const [selectedCell, setSelectedCell] = useState<{ ri: number; ci: number } | null>(null);
 
   // Full 2D grid: [strikeIdx][colIdx]
   const grid = useMemo(
@@ -352,62 +428,142 @@ function RiskMatrixTable({
     position: 'sticky', top: 0, zIndex: 2,
   };
 
-  return (
-    <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 520, border: '1px solid #1e293b', borderRadius: 6 }}>
-      <table style={{ borderCollapse: 'collapse', fontSize: 11, width: '100%' }}>
-        <thead>
-          <tr>
-            <th style={{ ...thStyle, textAlign: 'right' }}>Strike</th>
-            <th style={{ ...thStyle, textAlign: 'right' }}>vs Spot</th>
-            {colDates.map((d, i) => (
-              <th key={d} style={{ ...thStyle, textAlign: 'right', minWidth: 68,
-                color: i === colDates.length - 1 ? '#fbbf24' : '#64748b',
-                borderLeft: i === colDates.length - 1 ? '2px solid #374151' : '1px solid #1e293b',
-              }}>
-                {fmtColHeader(d, i)}
-              </th>
-            ))}
-            <th style={{ ...thStyle, textAlign: 'left', borderLeft: '2px solid #374151', color: '#94a3b8' }}>Zone</th>
-          </tr>
-        </thead>
-        <tbody>
-          {strikes.map((strike, ri) => {
-            const isSpot = ri === spotRowIdx;
-            const row = grid[ri]!;
-            const expPnl = expiryPnls[ri]!;
-            const zone  = zoneLabel(expPnl, expiryPnls);
+  // Leg breakdown for selected cell
+  const legScenarios = useMemo(() => {
+    if (!selectedCell) return null;
+    const S = strikes[selectedCell.ri];
+    const d = colDates[selectedCell.ci];
+    if (S === undefined || d === undefined) return null;
+    return { S, d, scenarios: computeLegScenarios(legs, S, d) };
+  }, [selectedCell, strikes, colDates, legs]);
 
-            return (
-              <tr key={strike} style={{
-                outline: isSpot ? '2px solid #3b82f6' : undefined,
-                outlineOffset: isSpot ? '-2px' : undefined,
-              }}>
-                <td style={{ padding: '3px 10px', textAlign: 'right', color: '#e2e8f0', fontWeight: isSpot ? 700 : 400, borderRight: '1px solid #1e293b', whiteSpace: 'nowrap' }}>
-                  ${strike.toFixed(2)}{isSpot && <span style={{ color: '#3b82f6', marginLeft: 4, fontSize: 9 }}>◀</span>}
-                </td>
-                <td style={{ padding: '3px 8px', textAlign: 'right', color: strike >= spotNum ? '#22c55e' : '#ef4444', borderRight: '1px solid #1e293b' }}>
-                  {strike >= spotNum ? '+' : ''}{((strike - spotNum) / spotNum * 100).toFixed(1)}%
-                </td>
-                {row.map((pnl, ci) => (
-                  <td key={ci} style={{
-                    padding: '3px 10px', textAlign: 'right',
-                    background: cellBg(pnl), color: '#f1f5f9', fontWeight: 500,
-                    borderLeft: ci === colDates.length - 1 ? '2px solid #374151' : '1px solid #1e293b',
-                  }}>
-                    {fmtCell(pnl)}
+  const handleCellClick = (ri: number, ci: number) => {
+    setSelectedCell(prev => (prev?.ri === ri && prev?.ci === ci) ? null : { ri, ci });
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+      <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 440, border: '1px solid #1e293b', borderRadius: selectedCell ? '6px 6px 0 0' : 6 }}>
+        <table style={{ borderCollapse: 'collapse', fontSize: 11, width: '100%' }}>
+          <thead>
+            <tr>
+              <th style={{ ...thStyle, textAlign: 'right' }}>Strike</th>
+              <th style={{ ...thStyle, textAlign: 'right' }}>vs Spot</th>
+              {colDates.map((d, i) => (
+                <th key={d} style={{ ...thStyle, textAlign: 'right', minWidth: 68,
+                  color: i === colDates.length - 1 ? '#fbbf24' : '#64748b',
+                  borderLeft: i === colDates.length - 1 ? '2px solid #374151' : '1px solid #1e293b',
+                }}>
+                  {fmtColHeader(d, i)}
+                </th>
+              ))}
+              <th style={{ ...thStyle, textAlign: 'left', borderLeft: '2px solid #374151', color: '#94a3b8' }}>Zone</th>
+            </tr>
+          </thead>
+          <tbody>
+            {strikes.map((strike, ri) => {
+              const isSpot = ri === spotRowIdx;
+              const row = grid[ri]!;
+              const expPnl = expiryPnls[ri]!;
+              const zone  = zoneLabel(expPnl, expiryPnls);
+
+              return (
+                <tr key={strike} style={{
+                  outline: isSpot ? '2px solid #3b82f6' : undefined,
+                  outlineOffset: isSpot ? '-2px' : undefined,
+                }}>
+                  <td style={{ padding: '3px 10px', textAlign: 'right', color: '#e2e8f0', fontWeight: isSpot ? 700 : 400, borderRight: '1px solid #1e293b', whiteSpace: 'nowrap' }}>
+                    ${strike.toFixed(2)}{isSpot && <span style={{ color: '#3b82f6', marginLeft: 4, fontSize: 9 }}>◀</span>}
                   </td>
-                ))}
-                <td style={{ padding: '3px 12px', borderLeft: '2px solid #374151', color: zoneColor(zone), whiteSpace: 'nowrap', fontSize: 10 }}>
-                  {zone}
-                </td>
+                  <td style={{ padding: '3px 8px', textAlign: 'right', color: strike >= spotNum ? '#22c55e' : '#ef4444', borderRight: '1px solid #1e293b' }}>
+                    {strike >= spotNum ? '+' : ''}{((strike - spotNum) / spotNum * 100).toFixed(1)}%
+                  </td>
+                  {row.map((pnl, ci) => {
+                    const isSelected = selectedCell?.ri === ri && selectedCell?.ci === ci;
+                    return (
+                      <td
+                        key={ci}
+                        onClick={() => handleCellClick(ri, ci)}
+                        style={{
+                          padding: '3px 10px', textAlign: 'right', cursor: 'pointer',
+                          background: isSelected ? '#1d4ed8' : cellBg(pnl),
+                          color: '#f1f5f9', fontWeight: isSelected ? 700 : 500,
+                          borderLeft: ci === colDates.length - 1 ? '2px solid #374151' : '1px solid #1e293b',
+                          outline: isSelected ? '2px solid #93c5fd' : undefined,
+                          outlineOffset: isSelected ? '-2px' : undefined,
+                        }}
+                        title="Click to see leg-by-leg breakdown"
+                      >
+                        {fmtCell(pnl)}
+                      </td>
+                    );
+                  })}
+                  <td style={{ padding: '3px 12px', borderLeft: '2px solid #374151', color: zoneColor(zone), whiteSpace: 'nowrap', fontSize: 10 }}>
+                    {zone}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {!hasIv && (
+          <div style={{ padding: '6px 12px', fontSize: 10, color: '#64748b', borderTop: '1px solid #1e293b', background: '#0a0f1a' }}>
+            ⚠ IV missing on some legs — intermediate columns use {Math.round(BS_FALLBACK_IV * 100)}% as estimate. Load from chain for accurate values.
+          </div>
+        )}
+      </div>
+
+      {/* ── Leg breakdown panel ── */}
+      {legScenarios && (
+        <div style={{ border: '1px solid #1e293b', borderTop: '2px solid #1d4ed8', borderRadius: '0 0 6px 6px', background: '#0a0f1a', padding: '10px 14px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: '#e2e8f0' }}>
+              Scenario: ${legScenarios.S.toFixed(2)} · {
+                legScenarios.d === today ? 'Today' :
+                new Date(`${legScenarios.d}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+              }
+            </span>
+            <span style={{ fontSize: 11, color: (() => { const n = legScenarios.scenarios.reduce((s,x) => s + x.pnl, 0); return n >= 0 ? '#22c55e' : '#ef4444'; })(), fontWeight: 600 }}>
+              Net {fmtCell(legScenarios.scenarios.reduce((s, x) => s + x.pnl, 0))}
+            </span>
+            <button
+              onClick={() => setSelectedCell(null)}
+              style={{ marginLeft: 'auto', background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: 14, lineHeight: 1 }}
+            >×</button>
+          </div>
+
+          <table style={{ borderCollapse: 'collapse', fontSize: 11, width: '100%' }}>
+            <thead>
+              <tr style={{ color: '#64748b', fontSize: 10 }}>
+                <th style={{ textAlign: 'left',  padding: '2px 8px 4px 0', fontWeight: 600 }}>Leg</th>
+                <th style={{ textAlign: 'right', padding: '2px 8px 4px',   fontWeight: 600 }}>Entry</th>
+                <th style={{ textAlign: 'right', padding: '2px 8px 4px',   fontWeight: 600 }}>Current</th>
+                <th style={{ textAlign: 'right', padding: '2px 8px 4px',   fontWeight: 600 }}>P&L</th>
+                <th style={{ textAlign: 'left',  padding: '2px 0   4px 8px', fontWeight: 600 }}>Action</th>
               </tr>
-            );
-          })}
-        </tbody>
-      </table>
-      {!hasIv && (
-        <div style={{ padding: '6px 12px', fontSize: 10, color: '#64748b', borderTop: '1px solid #1e293b', background: '#0a0f1a' }}>
-          ⚠ IV missing on some legs — intermediate columns use {Math.round(BS_FALLBACK_IV * 100)}% as estimate. Load from chain for accurate values.
+            </thead>
+            <tbody>
+              {legScenarios.scenarios.map((sc, i) => (
+                <tr key={i} style={{ borderTop: i > 0 ? '1px solid #1e293b' : undefined }}>
+                  <td style={{ padding: '4px 8px 4px 0', color: '#cbd5e1', whiteSpace: 'nowrap' }}>
+                    {sc.leg.label}
+                  </td>
+                  <td style={{ padding: '4px 8px', textAlign: 'right', color: '#94a3b8' }}>
+                    {sc.leg.type === 'stock' ? `$${sc.leg.premium.toFixed(2)}` : `$${sc.leg.premium.toFixed(2)}/sh`}
+                  </td>
+                  <td style={{ padding: '4px 8px', textAlign: 'right', color: '#94a3b8' }}>
+                    {sc.leg.type === 'stock' ? `$${sc.theoretical.toFixed(2)}` : `$${sc.theoretical.toFixed(2)}/sh`}
+                  </td>
+                  <td style={{ padding: '4px 8px', textAlign: 'right', fontWeight: 600, color: sc.pnl >= 0 ? '#22c55e' : '#ef4444' }}>
+                    {fmtCell(sc.pnl)}
+                  </td>
+                  <td style={{ padding: '4px 0 4px 8px', color: actionColor(sc.action), whiteSpace: 'nowrap' }}>
+                    {sc.actionLabel}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>
