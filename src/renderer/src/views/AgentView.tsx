@@ -1522,14 +1522,22 @@ export function AgentView() {
             }}>
               {logs.length === 0
                 ? <span style={{ color: '#444' }}>No output yet. Click Run for the daily cycle or Review Positions to refresh theory checks.</span>
-                : logs.map((l, i) => (
-                  <div key={i} style={{
-                    color: l.startsWith('[stderr]') ? '#e74c3c'
-                      : l.startsWith('✓') ? '#2ecc71'
-                      : l.startsWith('▶') ? '#3498db'
-                      : '#bdc3c7'
-                  }}>{l}</div>
-                ))
+                : logs.map((l, i) => {
+                  const lower = l.toLowerCase();
+                  const isWarning = l.startsWith('[stderr]') && (lower.includes('warning') || lower.includes('experimentalwarning') || lower.includes('deprecat') || lower.includes('dep0'));
+                  const isError   = l.startsWith('[stderr]') && !isWarning;
+                  return (
+                    <div key={i} style={{
+                      color: isError   ? '#e74c3c'
+                           : isWarning ? '#555'
+                           : l.startsWith('✓') ? '#2ecc71'
+                           : l.startsWith('▶') ? '#3498db'
+                           : '#bdc3c7'
+                    }}>
+                      {isWarning ? l.replace('[stderr] ', '[warn] ') : l}
+                    </div>
+                  );
+                })
               }
               <div ref={logsEndRef} />
             </div>
