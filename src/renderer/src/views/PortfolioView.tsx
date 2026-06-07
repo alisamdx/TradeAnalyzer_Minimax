@@ -677,7 +677,7 @@ export function PortfolioView() {
                       style={
                         col.key === '_expand'  ? { width: 20, minWidth: 20 } :
                         col.key === 'action'   ? { whiteSpace: 'nowrap' } :
-                        col.key === 'actions'  ? { width: 1, whiteSpace: 'nowrap' } :
+                        col.key === 'actions'  ? { whiteSpace: 'nowrap' } :
                         undefined
                       }
                     >
@@ -848,15 +848,17 @@ export function PortfolioView() {
                             </td>
                           )}
 
-                          <td className="actions" onClick={e => e.stopPropagation()} style={{ whiteSpace: 'nowrap', width: 1 }}>
-                            {activeTab === 'open' && (
-                              <button onClick={() => handleClosePosition(pos.id)} className="action-btn close" title="Close position">
-                                ✓ Close
+                          <td className="actions" onClick={e => e.stopPropagation()}>
+                            <div>
+                              {activeTab === 'open' && (
+                                <button onClick={() => handleClosePosition(pos.id)} className="action-btn close" title="Close position">
+                                  ✓ Close
+                                </button>
+                              )}
+                              <button onClick={() => handleDeletePosition(pos.id)} className="action-btn delete" title="Delete position">
+                                ✕
                               </button>
-                            )}
-                            <button onClick={() => handleDeletePosition(pos.id)} className="action-btn delete" title="Delete position">
-                              ✕
-                            </button>
+                            </div>
                           </td>
                         </tr>
 

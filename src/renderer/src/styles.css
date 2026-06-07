@@ -2263,7 +2263,10 @@ input[type='checkbox'] {
 }
 
 .positions-table td.actions {
-  display: flex;
+  white-space: nowrap;
+}
+.positions-table td.actions > div {
+  display: inline-flex;
   gap: 4px;
 }
 
