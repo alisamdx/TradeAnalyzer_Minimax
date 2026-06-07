@@ -114,6 +114,17 @@ export function NewsResearchView() {
       })
     );
     setResultsMap(map);
+
+    // Re-sort by impact score if we have any scored results — persists ranking across
+    // navigations so the list doesn't revert to alphabetical on revisit.
+    const hasAnyScore = [...map.values()].some((r) => r.impactScore !== null);
+    if (hasAnyScore) {
+      setTickerOrder(
+        [...tickers].sort((a, b) =>
+          (map.get(b)?.impactScore ?? -1) - (map.get(a)?.impactScore ?? -1)
+        )
+      );
+    }
   }, []);
 
   // ── Select ticker — auto-fetch if no cache ─────────────────────────────────
@@ -271,7 +282,7 @@ export function NewsResearchView() {
             const isSelected = selectedTicker === ticker;
             const isFetching = fetchingTicker === ticker;
             const isStale = res && res.cacheDate !== today;
-            const hasBatchRanking = lastBatchTime !== null;
+            const hasBatchRanking = res?.impactScore != null;
 
             return (
               <div
