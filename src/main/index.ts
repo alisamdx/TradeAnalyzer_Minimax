@@ -63,6 +63,8 @@ import { DailyOptionsSnapshotJob } from './services/jobs/daily-options-snapshot-
 import { DailyPaperSnapshotJob } from './services/jobs/daily-paper-snapshot-job.js';
 import { PaperTradingService } from './services/paper-trading-service.js';
 import { registerPaperTradingIpc } from './ipc/ipc-paper-trading.js';
+import { StrategyLabService } from './services/strategy-lab-service.js';
+import { CriticService } from './services/critic-service.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -463,6 +465,9 @@ app.whenReady().then(() => {
     quoteCache,
     fundamentalsCache: new FundamentalsCache(db),
     rateLimiter,
+    strategyLabService: new StrategyLabService(dataProvider, optionsProvider),
+    criticService: new CriticService(db),
+    scoringService,
     appVersion: app.getVersion()
   });
   _apiServer.start(apiPort).catch((err) => {

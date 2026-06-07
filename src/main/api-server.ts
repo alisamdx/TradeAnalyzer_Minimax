@@ -12,6 +12,9 @@ import type { DataProvider } from './services/data-provider.js';
 import type { OptionsProvider } from './services/options-provider.js';
 import type { QuoteCache, FundamentalsCache } from './services/cache-service.js';
 import type { TokenBucketRateLimiter } from './services/rate-limiter.js';
+import type { StrategyLabService } from './services/strategy-lab-service.js';
+import type { CriticService } from './services/critic-service.js';
+import type { ScoringService } from './services/scoring-service.js';
 import { registerHealthRoutes } from './api/routes-health.js';
 import { registerWatchlistRoutes } from './api/routes-watchlists.js';
 import { registerQuotesRoutes } from './api/routes-quotes.js';
@@ -23,6 +26,8 @@ import { registerOptionsRoutes } from './api/routes-options.js';
 import { registerJobsRoutes } from './api/routes-jobs.js';
 import { registerSettingsRoutes } from './api/routes-settings.js';
 import { registerETradeRoutes } from './api/routes-etrade.js';
+import { registerStrategyLabRoutes } from './api/routes-strategy-lab.js';
+import { registerCriticRoutes } from './api/routes-critic.js';
 import { secureGet, secureSet } from './services/secure-settings.js';
 
 const DATA_DIR = join(homedir(), '.tradeanalyzer');
@@ -85,6 +90,9 @@ export interface ApiServerServices {
   quoteCache: QuoteCache;
   fundamentalsCache: FundamentalsCache;
   rateLimiter: TokenBucketRateLimiter;
+  strategyLabService: StrategyLabService;
+  criticService: CriticService;
+  scoringService: ScoringService;
   appVersion: string;
 }
 
@@ -127,6 +135,8 @@ export class ApiServer {
       registerJobsRoutes(app, svc);
       registerSettingsRoutes(app, svc);
       registerETradeRoutes(app, svc);
+      registerStrategyLabRoutes(app, svc);
+      registerCriticRoutes(app, svc);
     }, { prefix: '/api/v1' });
   }
 
