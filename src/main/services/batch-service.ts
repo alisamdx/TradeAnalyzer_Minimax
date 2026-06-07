@@ -109,29 +109,46 @@ export class BatchService {
    * Register a job handler and seed its DB row (INSERT OR IGNORE — existing
    * user config is never overwritten on restart).
    *
-   * @param options.dailyScheduleTime  Default 'HH:MM' in ET (only applied on first registration).
-   * @param options.runOnStartup       Whether to auto-run on app launch (default true).
+   * @param options.dailyScheduleTime    Default 'HH:MM' in ET (only applied on first registration).
+   * @param options.runOnStartup         Whether to auto-run on app launch (default true).
    * @param options.startupDelaySeconds  Seconds to wait before the startup run (default 30).
+   * @param options.defaultConfig        Initial config_json values (e.g. { callDelayMs: 500 }).
+   *                                     Only written on first registration (INSERT OR IGNORE).
    */
   registerJob(
     id: string,
     handler: BatchJobHandler,
-    options?: { dailyScheduleTime?: string; runOnStartup?: boolean; startupDelaySeconds?: number },
+    options?: {
+      dailyScheduleTime?: string;
+      runOnStartup?: boolean;
+      startupDelaySeconds?: number;
+      defaultConfig?: Record<string, unknown>;
+    },
   ): void {
     this.handlers.set(id, handler);
 
     const scheduleTime        = options?.dailyScheduleTime   ?? '16:00';
     const runOnStartup        = options?.runOnStartup        ?? true ? 1 : 0;
     const startupDelaySecs    = options?.startupDelaySeconds ?? 30;
+    const configJson          = options?.defaultConfig ? JSON.stringify(options.defaultConfig) : null;
 
     // Seed the batch_jobs row with INSERT OR IGNORE so config persists across restarts.
     // sequence_order is set to max+1 so new jobs always append to the end.
     this.db.prepare(`
       INSERT OR IGNORE INTO batch_jobs
         (id, name, description, enabled, run_on_startup, startup_delay_seconds,
-         daily_schedule_enabled, daily_schedule_time, sequence_order)
-      VALUES (?, ?, ?, 1, ?, ?, 1, ?, (SELECT COALESCE(MAX(sequence_order), 0) + 1 FROM batch_jobs))
-    `).run(id, handler.name, handler.description, runOnStartup, startupDelaySecs, scheduleTime);
+         daily_schedule_enabled, daily_schedule_time, sequence_order, config_json)
+      VALUES (?, ?, ?, 1, ?, ?, 1, ?, (SELECT COALESCE(MAX(sequence_order), 0) + 1 FROM batch_jobs), ?)
+    `).run(id, handler.name, handler.description, runOnStartup, startupDelaySecs, scheduleTime, configJson);
+
+    // For existing rows (INSERT OR IGNORE did nothing): backfill config_json if
+    // it is still NULL and a defaultConfig was supplied. This handles upgrades
+    // where the row was created before defaultConfig support was added.
+    if (configJson !== null) {
+      this.db.prepare(`
+        UPDATE batch_jobs SET config_json = ? WHERE id = ? AND config_json IS NULL
+      `).run(configJson, id);
+    }
   }
 
   // ── Startup jobs ─────────────────────────────────────────────────────────

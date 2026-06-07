@@ -473,8 +473,9 @@ app.whenReady().then(() => {
   const earningsRefreshJob = new EarningsRefreshJob(db, earningsService, getEtradeCreds);
   batchService.registerJob('earnings-refresh', earningsRefreshJob, {
     runOnStartup: true,
-    startupDelaySeconds: 60,    // after E*Trade tokens load from keychain
-    dailyScheduleTime: '16:00', // default schedule time (schedule disabled by default)
+    startupDelaySeconds: 60,          // after E*Trade tokens load from keychain
+    dailyScheduleTime: '16:00',       // default schedule time (schedule disabled by default)
+    defaultConfig: { callDelayMs: 500 }, // conservative default — avoids E*Trade 429s
   });
 
   // v0.12.0 — TraderAgent integration

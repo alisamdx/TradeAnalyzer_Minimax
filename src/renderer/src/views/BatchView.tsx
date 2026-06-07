@@ -84,9 +84,10 @@ function EditModal({ job, onSave, onClose }: EditModalProps) {
 
   // E*Trade delay — applies to IV Update, Options Snapshot, and Earnings Refresh
   const hasDelayConfig = job.id === 'daily-iv-update' || job.id === 'daily-options-snapshot' || job.id === 'earnings-refresh';
+  const defaultDelay = job.id === 'earnings-refresh' ? 500 : 1100;
   const currentDelay = typeof job.config?.['callDelayMs'] === 'number'
     ? job.config['callDelayMs'] as number
-    : 1100;
+    : defaultDelay;
   const [callDelayMs, setCallDelayMs] = useState(String(currentDelay));
 
   const handleSave = () => {

@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.31.5] — 2026-06-07
+
+### Fixed
+- Earnings Refresh Edit modal now shows correct default delay (500ms) instead of IV job's 1100ms
+- `registerJob` now accepts `defaultConfig` option — seeded to DB on first registration, backfilled for existing rows where `config_json IS NULL` (upgrade path)
+
 ## [0.31.4] — 2026-06-07
 
 ### Changed — Earnings Refresh redesign
