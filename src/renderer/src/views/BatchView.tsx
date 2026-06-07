@@ -82,8 +82,8 @@ function EditModal({ job, onSave, onClose }: EditModalProps) {
   const [scheduleTime, setScheduleTime] = useState(job.dailyScheduleTime);
   const [sequenceOrder, setSequenceOrder] = useState(String(job.sequenceOrder));
 
-  // E*Trade delay — applies to IV Update and Options Snapshot
-  const hasDelayConfig = job.id === 'daily-iv-update' || job.id === 'daily-options-snapshot';
+  // E*Trade delay — applies to IV Update, Options Snapshot, and Earnings Refresh
+  const hasDelayConfig = job.id === 'daily-iv-update' || job.id === 'daily-options-snapshot' || job.id === 'earnings-refresh';
   const currentDelay = typeof job.config?.['callDelayMs'] === 'number'
     ? job.config['callDelayMs'] as number
     : 1100;
@@ -183,6 +183,7 @@ function EditModal({ job, onSave, onClose }: EditModalProps) {
               <div style={{ fontSize: 11, color: '#f39c12', marginTop: 6 }}>
                 {job.id === 'daily-iv-update' && <>Est. run time: ~{Math.round((1068 * (parseInt(callDelayMs, 10) || 1100)) / 60_000)} min at {callDelayMs}ms</>}
                 {job.id === 'daily-options-snapshot' && <>Est. run time: ~{Math.round((1100 * (parseInt(callDelayMs, 10) || 1100)) / 60_000)} min at {callDelayMs}ms (full universe ~1,100 tickers)</>}
+                {job.id === 'earnings-refresh' && <>First run: ~{Math.round((1100 * (parseInt(callDelayMs, 10) || 500)) / 60_000)} min · Subsequent runs: mostly skipped (smart cache)</>}
               </div>
             </div>
           )}

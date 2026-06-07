@@ -1,7 +1,11 @@
 // Earnings calendar service — fetches upcoming earnings dates per ticker.
-// Priority: E*Trade FUNDAMENTAL quote → Polygon financial estimate → manual override.
-// All results cached in earnings_calendar table with a 24h TTL.
-// v0.31.0
+// Primary source: E*Trade FUNDAMENTAL quote (nextEarningDate / earningsDate field).
+// No fallback — if E*Trade doesn't return a date, the ticker is left as no-data.
+//
+// Smart caching: a ticker is skipped if it already has a future report_date stored.
+// Only re-fetched after that date passes (i.e. earnings have occurred → need next date).
+// Manual entries (source='manual') are never auto-overwritten.
+// v0.31.4
 
 import type { DbHandle } from '../db/connection.js';
 import { etradeGet, type OAuthCredentials } from './etrade-auth.js';
@@ -20,8 +24,6 @@ export interface EarningsEntry {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-const CACHE_TTL_MS = 24 * 60 * 60 * 1_000; // 24 hours
 
 function toIso(raw: unknown): string | null {
   if (!raw) return null;
@@ -100,8 +102,13 @@ export class EarningsService {
     this.db.prepare(`DELETE FROM earnings_calendar WHERE ticker = ?`).run(ticker.toUpperCase());
   }
 
-  // Refresh a batch of tickers. Skips tickers refreshed within the last 24h
-  // (unless force=true). Returns counts of updated/skipped/failed.
+  // Refresh a batch of tickers via E*Trade only (no fallback).
+  //
+  // Smart skip logic (unless force=true):
+  //   - Manual entries are never auto-overwritten.
+  //   - If a future report_date is already stored, skip — the date is still valid.
+  //   - If the stored date is in the past (earnings have occurred), fetch the next date.
+  //   - If no date stored at all, fetch.
   async refreshTickers(
     tickers: string[],
     etradeCreds: OAuthCredentials | null,
@@ -110,31 +117,35 @@ export class EarningsService {
     let updated = 0, skipped = 0, failed = 0;
     const errors: string[] = [];
 
+    const todayStr = new Date().toISOString().slice(0, 10);
+
     for (const ticker of tickers) {
       const t = ticker.toUpperCase();
       try {
         if (!force) {
           const existing = this.getForTicker(t);
+          // Never overwrite a manual entry
           if (existing?.source === 'manual') { skipped++; continue; }
-          if (existing && Date.now() - new Date(existing.cachedAt).getTime() < CACHE_TTL_MS) {
-            skipped++; continue;
-          }
+          // Skip if we already have a future date — still valid
+          if (existing?.reportDate && existing.reportDate > todayStr) { skipped++; continue; }
+          // If date is in the past (or missing), fall through to fetch the next date
+        }
+
+        if (!etradeCreds?.accessToken) {
+          // No E*Trade connection — nothing to do
+          failed++;
+          errors.push(`${t}: E*Trade not connected`);
+          continue;
         }
 
         let entry: { date: string | null; time: 'bmo' | 'amc' | null; source: EarningsEntry['source']; confirmed: boolean } | null = null;
 
-        // 1. Try E*Trade FUNDAMENTAL quote
-        if (etradeCreds?.accessToken) {
-          try {
-            entry = await this.fetchFromEtrade(t, etradeCreds);
-          } catch {
-            // fall through to Polygon
-          }
-        }
-
-        // 2. Fallback: Polygon financials estimate
-        if (!entry) {
-          entry = await this.estimateFromPolygon(t);
+        try {
+          entry = await this.fetchFromEtrade(t, etradeCreds);
+        } catch (err) {
+          failed++;
+          errors.push(`${t}: ${err instanceof Error ? err.message : String(err)}`);
+          continue;
         }
 
         if (entry?.date) {
@@ -142,7 +153,7 @@ export class EarningsService {
           updated++;
         } else {
           failed++;
-          errors.push(`${t}: no earnings date found`);
+          errors.push(`${t}: no earnings date returned by E*Trade`);
         }
       } catch (err) {
         failed++;
@@ -204,47 +215,6 @@ export class EarningsService {
       timeRaw.includes('after')  || timeRaw === 'amc' ? 'amc' : null;
 
     return { date, time, source: 'etrade', confirmed: true };
-  }
-
-  private async estimateFromPolygon(
-    ticker: string,
-  ): Promise<{ date: string | null; time: 'bmo' | 'amc' | null; source: EarningsEntry['source']; confirmed: boolean } | null> {
-    // Look for a daysToEarnings hint in recent analysis_snapshots for this ticker.
-    // The analysis engine stores daysToEarnings (from Polygon fundamentals) in the
-    // payload JSON — back-calculate: estimatedDate = run_at + daysToEarnings days.
-    type SnapRow = { payload_json: string; run_at: string };
-    const snap = this.db.prepare(`
-      SELECT payload_json, run_at FROM analysis_snapshots
-      WHERE mode IN ('wheel', 'options_income', 'buy')
-      ORDER BY id DESC LIMIT 20
-    `).all() as SnapRow[];
-
-    for (const s of snap) {
-      try {
-        const p = JSON.parse(s.payload_json) as Record<string, unknown>;
-        const results = (p['results'] ?? p) as Record<string, unknown[]>;
-        for (const mode of Object.values(results)) {
-          if (!Array.isArray(mode)) continue;
-          const match = mode.find((r) => {
-            const row = r as Record<string, unknown>;
-            return (row['ticker'] as string | undefined)?.toUpperCase() === ticker;
-          }) as Record<string, unknown> | undefined;
-          if (match?.['daysToEarnings'] && typeof match['daysToEarnings'] === 'number' && match['daysToEarnings'] > 0) {
-            const runAt = new Date(s.run_at);
-            const estimatedDate = new Date(runAt.getTime() + (match['daysToEarnings'] as number) * 86_400_000);
-            return {
-              date: estimatedDate.toISOString().slice(0, 10),
-              time: null,
-              source: 'polygon_est',
-              confirmed: false,
-            };
-          }
-        }
-      } catch { /* skip malformed snapshot */ }
-    }
-
-    // No estimate possible from cached data
-    return null;
   }
 
   private upsert(

@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.31.4] — 2026-06-07
+
+### Changed — Earnings Refresh redesign
+- **Universe**: now scans all unique tickers from `constituents` (S&P 500 + Russell 1000) instead of portfolio/watchlist/conviction only
+- **Smart caching**: a ticker is skipped if it already has a *future* report_date stored — no re-fetch needed until that date passes. Only tickers with past/missing dates are refreshed each run
+- **E*Trade only**: removed Polygon `analysis_snapshots` fallback — single source of truth, clearer failure mode
+- **Rate limit**: configurable `callDelayMs` (default 500ms) in Edit modal, clamped 200–2000ms. Skipped tickers (cached) incur no delay — only tickers that actually call E*Trade
+- **No-data clarity**: if E*Trade is not connected, job returns `skipped` with a message rather than looping 1,000 failed calls
+
 ## [0.31.3] — 2026-06-07
 
 ### Fixed
