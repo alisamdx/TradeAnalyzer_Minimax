@@ -235,12 +235,19 @@ export class EarningsService {
     // E*Trade does not expose a time-of-day flag for earnings through this endpoint
     const time: 'bmo' | 'amc' | null = null;
 
-    // Companies do not report on weekends. If E*Trade returns a Saturday or Sunday,
-    // the date is an approximation — mark as unconfirmed so the UI flags it for review.
-    const dow = new Date(`${date}T12:00:00Z`).getUTCDay(); // 0=Sun, 6=Sat
-    const isWeekend = dow === 0 || dow === 6;
+    // Timezone correction: E*Trade's API returns dates in UTC. Companies report
+    // after ET market close, so a date that is "Saturday UTC" is actually "Friday ET".
+    // Shift Saturday → Friday (subtract 1 day). Mark as unconfirmed since adjusted.
+    // Sunday dates are rare — leave as-is but also mark unconfirmed for the UI warning.
+    const d = new Date(`${date}T12:00:00Z`);
+    const dow = d.getUTCDay(); // 0=Sun, 6=Sat
+    if (dow === 6) {
+      const friday = new Date(d.getTime() - 86_400_000);
+      const fridayStr = friday.toISOString().slice(0, 10);
+      return { date: fridayStr, time, source: 'etrade', confirmed: false };
+    }
 
-    return { date, time, source: 'etrade', confirmed: !isWeekend };
+    return { date, time, source: 'etrade', confirmed: dow !== 0 };
   }
 
   private upsert(
