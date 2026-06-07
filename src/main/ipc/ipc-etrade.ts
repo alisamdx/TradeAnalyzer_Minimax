@@ -257,7 +257,7 @@ export function registerETradeIpc(db: Database): void {
         const { etradeGet } = await import('../services/etrade-auth.js');
         const raw = await etradeGet(
           `/v1/market/quote/${encodeURIComponent(symbol.toUpperCase())}`,
-          { detailFlag: 'ALL' },
+          { detailFlag: 'ALL', requireEarningsDate: 'true' },
           creds
         );
         return ok({

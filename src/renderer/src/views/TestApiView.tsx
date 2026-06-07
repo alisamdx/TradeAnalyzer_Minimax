@@ -387,7 +387,7 @@ function QuoteInspector() {
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
         <span style={{ fontSize: '13px', fontWeight: 700, color: '#cba6f7' }}>Quote Inspector</span>
         <span style={{ fontSize: '12px', color: '#6c7086' }}>
-          Calls <code style={{ color: '#fab387' }}>/v1/market/quote/TICKER?detailFlag=ALL</code> — inspect every field E*Trade returns
+          Calls <code style={{ color: '#fab387' }}>/v1/market/quote/TICKER?detailFlag=ALL&requireEarningsDate=true</code> — inspect every field E*Trade returns
         </span>
       </div>
       <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
