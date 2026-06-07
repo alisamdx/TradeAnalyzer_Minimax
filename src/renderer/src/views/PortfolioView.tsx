@@ -123,6 +123,118 @@ function GreeksChip({ label, value, color, title }: { label: string; value: stri
   );
 }
 
+// ─── Trade Management Alerts Banner (ENH-5) ───────────────────────────────────
+// Computed client-side from already-loaded positions + E*Trade data.
+// Three rules: 50% profit (ET data), 21 DTE (expiry date), delta drift (stored Greeks).
+
+const DELTA_DRIFT_THRESHOLD = 0.45;
+
+const ALERT_LABEL = { profit: '✓ Take Profits', dte: '⏱ Manage Now', delta: '⚠ Delta Drift' } as const;
+const ALERT_COLOR = { profit: '#22c55e', dte: '#f59e0b', delta: '#ef4444' } as const;
+
+interface TradeAlert {
+  positionId: number;
+  ticker: string;
+  positionType: 'CSP' | 'CC' | 'Stock';
+  strikePrice: number | null;
+  type: 'profit' | 'dte' | 'delta';
+  detail: string;
+}
+
+function TradeAlertsBanner({
+  positions,
+  etMap,
+  onView,
+}: {
+  positions: Position[];
+  etMap: Map<number, PositionEtrade>;
+  onView: (positionId: number) => void;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+
+  const alerts = useMemo((): TradeAlert[] => {
+    const result: TradeAlert[] = [];
+    const now = Date.now();
+
+    for (const pos of positions) {
+      if (pos.status !== 'open' || pos.positionType === 'Stock') continue;
+      const et = etMap.get(pos.id);
+
+      // 50% Profit — E*Trade totalGainPct (reliable source of P&L %)
+      if (et?.totalGainPct !== null && et?.totalGainPct !== undefined && et.totalGainPct >= 50) {
+        result.push({
+          positionId: pos.id, ticker: pos.ticker, positionType: pos.positionType,
+          strikePrice: pos.strikePrice, type: 'profit',
+          detail: `${et.totalGainPct.toFixed(0)}% gain`,
+        });
+      }
+
+      // 21 DTE — computed from expirationDate
+      if (pos.expirationDate) {
+        const daysLeft = Math.round((new Date(pos.expirationDate).getTime() - now) / 86_400_000);
+        if (daysLeft >= 0 && daysLeft <= 21) {
+          result.push({
+            positionId: pos.id, ticker: pos.ticker, positionType: pos.positionType,
+            strikePrice: pos.strikePrice, type: 'dte',
+            detail: `${daysLeft}d to expiry`,
+          });
+        }
+      }
+
+      // Delta Drift — E*Trade delta takes priority, falls back to stored Greeks
+      const delta = et?.delta ?? pos.delta;
+      if (delta !== null && Math.abs(delta) > DELTA_DRIFT_THRESHOLD) {
+        result.push({
+          positionId: pos.id, ticker: pos.ticker, positionType: pos.positionType,
+          strikePrice: pos.strikePrice, type: 'delta',
+          detail: `Δ ${delta >= 0 ? '+' : ''}${delta.toFixed(2)}`,
+        });
+      }
+    }
+
+    return result;
+  }, [positions, etMap]);
+
+  if (alerts.length === 0) return null;
+
+  return (
+    <div style={{ border: '1px solid #374151', borderLeft: '3px solid #f59e0b', borderRadius: 6, marginBottom: 10, background: '#1a1f2e', overflow: 'hidden' }}>
+      <button
+        onClick={() => setCollapsed(p => !p)}
+        style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, background: 'none', border: 'none', padding: '8px 12px', cursor: 'pointer', color: '#f9fafb', fontSize: 12, fontWeight: 600, textAlign: 'left' }}
+      >
+        <span style={{ color: '#f59e0b' }}>⚡ Trade Management</span>
+        <span style={{ background: '#f59e0b', color: '#000', borderRadius: 10, fontSize: 10, fontWeight: 700, padding: '1px 6px', lineHeight: 1.5 }}>
+          {alerts.length}
+        </span>
+        <span style={{ marginLeft: 'auto', color: '#6b7280', fontSize: 11 }}>{collapsed ? '▶' : '▼'}</span>
+      </button>
+      {!collapsed && (
+        <div style={{ padding: '0 12px 10px', display: 'flex', flexDirection: 'column', gap: 0 }}>
+          {alerts.map((a, i) => (
+            <div
+              key={i}
+              style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '5px 0', borderTop: i > 0 ? '1px solid #1f2937' : 'none', fontSize: 12 }}
+            >
+              <span style={{ color: ALERT_COLOR[a.type], fontWeight: 600, minWidth: 112 }}>{ALERT_LABEL[a.type]}</span>
+              <span style={{ color: '#60a5fa', fontWeight: 600, minWidth: 56 }}>{a.ticker}</span>
+              <span style={{ color: '#9ca3af', minWidth: 30 }}>{a.positionType}</span>
+              {a.strikePrice !== null && <span style={{ color: '#9ca3af' }}>${a.strikePrice}</span>}
+              <span style={{ color: '#d1d5db' }}>{a.detail}</span>
+              <button
+                onClick={() => onView(a.positionId)}
+                style={{ marginLeft: 'auto', fontSize: 11, padding: '2px 8px', background: '#1f2937', border: '1px solid #374151', borderRadius: 4, color: '#60a5fa', cursor: 'pointer' }}
+              >
+                View →
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function PortfolioView() {
@@ -710,6 +822,19 @@ export function PortfolioView() {
             </div>
           )}
 
+          {activeTab === 'open' && (
+            <TradeAlertsBanner
+              positions={positions}
+              etMap={etMap}
+              onView={(id) => {
+                setExpanded(prev => { const s = new Set(prev); s.add(id); return s; });
+                setTimeout(() => {
+                  document.getElementById(`pos-row-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }, 50);
+              }}
+            />
+          )}
+
           <div className="positions-table-wrap">
             <table className="positions-table">
               <thead>
@@ -754,6 +879,7 @@ export function PortfolioView() {
                       <>
                         <tr
                           key={pos.id}
+                          id={`pos-row-${pos.id}`}
                           style={{ cursor: activeTab === 'open' ? 'pointer' : 'default' }}
                           onClick={() => activeTab === 'open' && toggleExpand(pos.id)}
                         >
