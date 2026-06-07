@@ -7,6 +7,7 @@
 import type { BatchJobHandler, BatchJobResult } from '../batch-service.js';
 import type { BatchProgressEvent } from '@shared/types.js';
 import { computeSMA, computeRSI } from '../analysis-service.js';
+import { SCORING_REFERENCE_TICKERS } from './price-gap-fill-job.js';
 import { detectAllPatterns } from '../pattern-detector.js';
 import { findRecentDemandZone } from '../support-resistance.js';
 import type { Bar } from '@shared/types.js';
@@ -248,7 +249,11 @@ export class DailyTechnicalSignalsJob implements BatchJobHandler {
       return { status: 'skipped', notes: 'No tickers with sufficient price history (≥26 bars)', tickersAttempted: 0, tickersUpdated: 0, tickersSkipped: 0, tickersFailed: 0 };
     }
 
-    const tickers = tickerRows.map(r => r.ticker);
+    // Exclude scoring reference tickers (SPY + sector ETFs) — they are infrastructure
+    // for relative-strength computation, not trade candidates. Processing them here is
+    // wasteful and causes noise in the Batch Jobs live log.
+    const refSet = new Set<string>(SCORING_REFERENCE_TICKERS);
+    const tickers = tickerRows.map(r => r.ticker).filter(t => !refSet.has(t));
     const total = tickers.length;
     let processed = 0;
     let written = 0;

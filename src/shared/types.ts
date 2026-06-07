@@ -1604,13 +1604,47 @@ export interface TradeInsight {
   suggestion: string | null;  // specific action to take, if any
 }
 
+/** Structured cause of a trade's gap vs expectation — mirrors Agent's GapCause taxonomy. */
+export type TradeLearningGapCause =
+  | 'EARNINGS_GAP_RISK'     // earnings during hold period caused binary move
+  | 'IV_CRUSH'              // IV declined after entry, reducing premium value
+  | 'TREND_REVERSAL'        // stock direction reversed against the position
+  | 'THETA_UNDERESTIMATE'   // slower theta decay than expected
+  | 'EARLY_CLOSE_MISSED'    // closed a profitable trade before reaching full target
+  | 'MODEL_ERROR';          // loss not explained by the above
+
 /** AI-generated learning captured when a trade closes or expires. */
 export interface TradeLearning {
   strategyWorked: boolean;
-  entryFit:       'good' | 'early' | 'late' | 'wrong';  // was entry timing correct?
-  keyLesson:      string;   // one sentence on the main takeaway
-  suggestedTweak: string | null;  // one sentence on what to adjust next time
-  capturedAt:     string;   // ISO timestamp
+  entryFit:       'good' | 'early' | 'late' | 'wrong';
+  gapCause:       TradeLearningGapCause | null;
+  keyLesson:      string;
+  suggestedTweak: string | null;
+  capturedAt:     string;
+}
+
+/** Recurring-pattern recommendation — generated when same gap cause hits ≥3 times. */
+export interface BriefLearningRecommendation {
+  id:              number;
+  strategy:        string;
+  gapCause:        TradeLearningGapCause;
+  occurrenceCount: number;
+  description:     string;
+  proposedTweak:   string;
+  status:          'open' | 'acknowledged';
+  createdAt:       string;
+}
+
+/** Pearson-correlation signal weight suggestion for the scoring engine. */
+export interface SignalWeightSuggestion {
+  strategy:        ScoringStrategy;
+  signalKey:       string;
+  signalLabel:     string;
+  currentWeight:   number;    // current % weight in config
+  correlation:     number;    // Pearson r with Day+1 positive outcome
+  sampleSize:      number;    // paper trades used
+  suggestedWeight: number;    // proportional weight based on |correlation|
+  direction:       'increase' | 'decrease' | 'hold';
 }
 
 export interface PaperTrade {

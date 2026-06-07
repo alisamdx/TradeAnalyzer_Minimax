@@ -4010,6 +4010,53 @@ input[type='checkbox'] {
   color: #3fb950;
   font-style: italic;
 }
+
+/* ── Signal Correlation Suggestions panel ── */
+.scoring-suggestions-panel {
+  margin: 16px 24px 24px;
+  padding: 16px;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+.scoring-suggestions-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.scoring-suggestions-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #c9d1d9;
+}
+.scoring-suggestions-subtitle {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.scoring-sugg-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.scoring-sugg-table th {
+  text-align: left;
+  padding: 6px 10px;
+  color: #8b949e;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid #21262d;
+}
+.scoring-sugg-table td {
+  padding: 7px 10px;
+  border-bottom: 1px solid #21262d;
+}
+.scoring-sugg-table tbody tr:last-child td {
+  border-bottom: none;
+}
 .btn-primary {
   padding: 6px 18px;
   background: #238636;

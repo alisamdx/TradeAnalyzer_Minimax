@@ -2,7 +2,7 @@
 // see Requirements/DAILY_INTELLIGENCE_BRIEF.md §7
 
 import { useState, useEffect, useCallback } from 'react';
-import type { ScoringConfig, ScoringSignal, ScoringStrategy } from '@shared/types.js';
+import type { ScoringConfig, ScoringSignal, ScoringStrategy, SignalWeightSuggestion } from '@shared/types.js';
 
 const STRATEGY_LABELS: Record<ScoringStrategy, string> = {
   wheel:   '🎡  Wheel',
@@ -123,6 +123,8 @@ export function TradeScoringView() {
   const [versionInput, setVersionInput] = useState('');
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState('');
+  const [suggestions, setSuggestions] = useState<SignalWeightSuggestion[]>([]);
+  const [loadingSugg, setLoadingSugg] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -139,7 +141,21 @@ export function TradeScoringView() {
     }
   }, [selectedStrategy]);
 
+  const loadSuggestions = useCallback(async (strategy: ScoringStrategy) => {
+    setLoadingSugg(true);
+    try {
+      const sugg = await window.api.scoring.signalCorrelations(strategy);
+      setSuggestions(sugg as SignalWeightSuggestion[]);
+    } catch (err) {
+      console.error('[scoring] suggestions error:', err);
+      setSuggestions([]);
+    } finally {
+      setLoadingSugg(false);
+    }
+  }, []);
+
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { loadSuggestions(selectedStrategy); }, [selectedStrategy, loadSuggestions]);
 
   const handleStrategyChange = (strategy: ScoringStrategy) => {
     setSelectedStrategy(strategy);
@@ -303,6 +319,55 @@ export function TradeScoringView() {
         >
           {saving ? 'Saving…' : 'Save Config'}
         </button>
+      </div>
+
+      {/* ── Signal weight suggestions (1e) ──────────────────────── */}
+      <div className="scoring-suggestions-panel">
+        <div className="scoring-suggestions-header">
+          <span className="scoring-suggestions-title">Signal Correlation Suggestions</span>
+          <span className="scoring-suggestions-subtitle">
+            Pearson correlation between signal values and Day+1 positive outcomes · needs ≥ 10 snapshots
+          </span>
+        </div>
+        {loadingSugg ? (
+          <div style={{ padding: '12px 0', color: 'var(--text-muted)', fontSize: 13 }}>Computing…</div>
+        ) : suggestions.length === 0 ? (
+          <div style={{ padding: '12px 0', color: 'var(--text-muted)', fontSize: 13 }}>
+            Not enough data yet — accumulate more Day+1 snapshots by running the Daily Brief regularly.
+          </div>
+        ) : (
+          <table className="scoring-sugg-table">
+            <thead>
+              <tr>
+                <th>Signal</th>
+                <th>Current Weight</th>
+                <th>Correlation (r)</th>
+                <th>Suggested Weight</th>
+                <th>Direction</th>
+                <th>Samples</th>
+              </tr>
+            </thead>
+            <tbody>
+              {suggestions.map(s => {
+                const dirColor = s.direction === 'increase' ? '#3fb950' : s.direction === 'decrease' ? '#f85149' : '#8b949e';
+                const dirLabel = s.direction === 'increase' ? '↑ Increase' : s.direction === 'decrease' ? '↓ Decrease' : '— Hold';
+                const corrColor = Math.abs(s.correlation) > 0.3 ? '#3fb950' : Math.abs(s.correlation) > 0.1 ? '#e3a008' : '#8b949e';
+                return (
+                  <tr key={s.signalKey}>
+                    <td style={{ fontWeight: 500 }}>{s.signalLabel}</td>
+                    <td style={{ color: '#c9d1d9' }}>{s.currentWeight}%</td>
+                    <td style={{ color: corrColor, fontFamily: 'monospace' }}>{s.correlation >= 0 ? '+' : ''}{s.correlation.toFixed(3)}</td>
+                    <td style={{ color: s.suggestedWeight !== s.currentWeight ? '#58a6ff' : '#8b949e', fontWeight: s.suggestedWeight !== s.currentWeight ? 600 : 400 }}>
+                      {s.suggestedWeight}%
+                    </td>
+                    <td style={{ color: dirColor, fontWeight: 600 }}>{dirLabel}</td>
+                    <td style={{ color: 'var(--text-muted)', fontSize: 12 }}>{s.sampleSize}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   );

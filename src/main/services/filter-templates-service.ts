@@ -483,6 +483,9 @@ export class FilterTemplatesService {
         peRatio: null, eps: null, marketCap: null, debtToEquity: null,
         roe: null, profitMargin: null, revenueGrowth: null, epsGrowth: null,
         freeCashFlow: null, currentRatio: null, dividendYield: null, beta: null,
+        fcfToNetIncome: null, roic: null, netDebtToEbitda: null,
+        revenueGrowth5Y: null, epsGrowth5Y: null,
+        valueScore: null, growthScore: null, stockGrade: null,
         sector: null, industry: null, companyName: null
       };
     }

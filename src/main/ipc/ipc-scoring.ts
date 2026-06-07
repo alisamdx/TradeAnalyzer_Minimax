@@ -5,7 +5,7 @@
 import { ipcMain, type IpcMainInvokeEvent } from 'electron';
 import type { ScoringService } from '../services/scoring-service.js';
 import type { ScoringSignal, ScoringStrategy } from '../services/scoring-service.js';
-import type { IpcResult, BriefPick } from '@shared/types.js';
+import type { IpcResult, BriefPick, ScoringStrategy as ScoringStrategyAlias } from '@shared/types.js';
 import type { EmailService } from '../services/email-service.js';
 import { buildEmailHtml, buildPdf } from '../services/brief-report-builder.js';
 import { STRATEGIES } from '../services/scoring-service.js';
@@ -87,6 +87,11 @@ export function registerScoringIpc(scoringService: ScoringService, emailService:
 
   // Resend the most recent brief as email+PDF without re-running the job.
   // Useful for validating email/PDF layout changes or sending on non-trading days.
+  // Signal weight suggestions from Pearson correlation (1e)
+  ipcMain.handle('scoring:signal-correlations', wrap((strategy: ScoringStrategyAlias) =>
+    scoringService.computeSignalCorrelations(strategy)
+  ));
+
   ipcMain.handle('scoring:resend-brief-email', async (_e: IpcMainInvokeEvent): Promise<IpcResult<{ sent: boolean; message: string }>> => {
     try {
       if (!emailService.isConfigured()) {

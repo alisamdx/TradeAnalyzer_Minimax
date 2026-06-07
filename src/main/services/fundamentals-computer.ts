@@ -22,12 +22,14 @@ export interface PolygonFinancials {
         revenues?: { value: number; unit?: string; label?: string };
         net_income_loss?: { value: number; unit?: string; label?: string };
         operating_income_loss?: { value: number; unit?: string; label?: string };
+        depreciation_and_amortization?: { value: number; unit?: string; label?: string };
       };
       balance_sheet?: {
         equity?: { value: number; unit?: string; label?: string };
         current_assets?: { value: number; unit?: string; label?: string };
         current_liabilities?: { value: number; unit?: string; label?: string };
         long_term_debt?: { value: number; unit?: string; label?: string };
+        cash_and_cash_equivalents?: { value: number; unit?: string; label?: string };
       };
       cash_flow_statement?: {
         net_cash_flow_from_operating_activities?: { value: number; unit?: string; label?: string };
@@ -65,11 +67,13 @@ interface RawFinancials {
   revenue: number | null;
   netIncome: number | null;
   operatingIncome: number | null;
+  depreciation: number | null;    // D&A (TTM) — for EBITDA computation
   // Balance sheet
   shareholdersEquity: number | null;
   totalCurrentAssets: number | null;
   totalCurrentLiabilities: number | null;
   totalDebt: number | null;
+  cash: number | null;            // cash & equivalents (point-in-time) — for net debt
   // Cash flow
   operatingCashFlow: number | null;
   capex: number | null;
@@ -130,6 +134,8 @@ export function parseFinancials(raw: PolygonFinancials): RawFinancials {
   const netIncome = sumTtm(f => latestValue(f?.income_statement?.net_income_loss));
   const operatingIncome = sumTtm(f => latestValue(f?.income_statement?.operating_income_loss));
   const operatingCashFlow = sumTtm(f => latestValue(f?.cash_flow_statement?.net_cash_flow_from_operating_activities));
+  // D&A (TTM) — used for EBITDA; may be null if Polygon doesn't return it
+  const depreciation = sumTtm(f => latestValue(f?.income_statement?.depreciation_and_amortization));
   // Note: capital_expenditures is not consistently available in Polygon data
   // FCF will be based on operating cash flow only if capex unavailable
   const capex = null;
@@ -138,10 +144,13 @@ export function parseFinancials(raw: PolygonFinancials): RawFinancials {
     revenue,
     netIncome,
     operatingIncome,
+    depreciation,
     shareholdersEquity: latestValue(balance?.equity),
     totalCurrentAssets: latestValue(balance?.current_assets),
     totalCurrentLiabilities: latestValue(balance?.current_liabilities),
     totalDebt: latestValue(balance?.long_term_debt),
+    // Cash is point-in-time (balance sheet), not TTM — use latest filing only
+    cash: latestValue(balance?.cash_and_cash_equivalents),
     operatingCashFlow,
     capex,
     shareCount: null,
@@ -188,11 +197,30 @@ export function computeRatios(input: FundamentalsComputerInput): DerivedRatios {
   // Get prior-year financials for YoY growth calculations.
   // We need the TTM from exactly 1 year ago (i.e. filings 4 through 7).
   const filings = financials.filings ?? [];
-  
+
   function sumPriorTtm(extractor: (financials: NonNullable<PolygonFinancials['filings']>[0]['financials']) => number | null): number | null {
     let sum = 0;
     let found = 0;
     for (let i = 4; i < Math.min(8, filings.length); i++) {
+      const f = filings[i]?.financials;
+      if (f) {
+        const val = extractor(f);
+        if (val !== null) {
+          sum += val;
+          found++;
+        }
+      }
+    }
+    return found > 0 ? sum : null;
+  }
+
+  // 5-year-ago TTM: filings 16–19 (requires limit=24 in polygon-provider).
+  // Returns null if fewer than 20 filings are available.
+  function sumFiveYearAgoTtm(extractor: (financials: NonNullable<PolygonFinancials['filings']>[0]['financials']) => number | null): number | null {
+    if (filings.length < 20) return null;
+    let sum = 0;
+    let found = 0;
+    for (let i = 16; i < Math.min(20, filings.length); i++) {
       const f = filings[i]?.financials;
       if (f) {
         const val = extractor(f);
@@ -272,6 +300,95 @@ export function computeRatios(input: FundamentalsComputerInput): DerivedRatios {
   // may be added in Phase 3 when we query /v3/reference/dividends).
   const dividendYield: null = null;
 
+  // ── Quality signals (v0.22.20) ─────────────────────────────────────────────
+  // see docs/formulas.md#quality-signals
+
+  // FCFToNetIncome = (operatingCashFlow / netIncome) × 100
+  // Quality-of-earnings check. Null if netIncome ≤ 0 (ratio not meaningful for loss companies).
+  const fcfToNetIncome =
+    raw.operatingCashFlow != null && raw.netIncome != null && raw.netIncome > 0
+      ? (raw.operatingCashFlow / raw.netIncome) * 100
+      : null;
+
+  // ROIC = NOPAT / Invested Capital × 100
+  // Tax rate inferred from net/operating income, clamped to [5%, 50%] to suppress outliers.
+  // NOPAT = operatingIncome × (1 − taxRate)
+  // Invested Capital = totalDebt + shareholdersEquity
+  let roic: number | null = null;
+  if (raw.operatingIncome != null && raw.operatingIncome > 0 &&
+      raw.netIncome != null && raw.shareholdersEquity != null) {
+    const impliedTaxRate = 1 - (raw.netIncome / raw.operatingIncome);
+    const taxRate = Math.max(0.05, Math.min(0.50, impliedTaxRate));
+    const nopat = raw.operatingIncome * (1 - taxRate);
+    const investedCapital = (raw.totalDebt ?? 0) + raw.shareholdersEquity;
+    if (investedCapital > 0) {
+      roic = (nopat / investedCapital) * 100;
+    }
+  }
+
+  // NetDebtToEBITDA = (totalDebt − cash) / (operatingIncome + D&A)
+  // Only computed when D&A is available — publishing EBIT/debt ratio as EBITDA would mislead.
+  // Null if EBITDA ≤ 0 (not meaningful for loss companies).
+  let netDebtToEbitda: number | null = null;
+  if (raw.depreciation != null && raw.operatingIncome != null &&
+      raw.totalDebt != null) {
+    const ebitda = raw.operatingIncome + raw.depreciation;
+    if (ebitda > 0) {
+      const netDebt = raw.totalDebt - (raw.cash ?? 0);
+      netDebtToEbitda = netDebt / ebitda;
+    }
+  }
+
+  // 5Y CAGR helper: ((current / base)^(1/5) − 1) × 100
+  function cagr5Y(current: number | null, base: number | null): number | null {
+    if (current == null || base == null || base <= 0 || current <= 0) return null;
+    return (Math.pow(current / base, 1 / 5) - 1) * 100;
+  }
+
+  // RevenueGrowth5Y — TTM revenue vs TTM revenue from 5 years ago
+  const ttmRevenue5YAgo = sumFiveYearAgoTtm(f => latestValue(f?.income_statement?.revenues));
+  const revenueGrowth5Y = cagr5Y(raw.revenue, ttmRevenue5YAgo);
+
+  // EPSGrowth5Y — TTM EPS vs TTM EPS from 5 years ago
+  const ttmNetIncome5YAgo = sumFiveYearAgoTtm(f => latestValue(f?.income_statement?.net_income_loss));
+  const eps5YAgo = ttmNetIncome5YAgo != null && shareCount != null && shareCount > 0
+    ? ttmNetIncome5YAgo / shareCount
+    : null;
+  const epsGrowth5Y = cagr5Y(eps, eps5YAgo);
+
+  // VS (Value Score) — count of 6 criteria that pass
+  // Criteria: RevenueGrowth5Y ≥ 5, EPSGrowth5Y ≥ 7, FCFToNetIncome ≥ 80,
+  //           ROIC ≥ 15, NetDebtToEBITDA ≤ 3, DebtToEquity ≤ 0.8
+  const passGte = (v: number | null, threshold: number) => v != null && v >= threshold;
+  const passLte = (v: number | null, threshold: number) => v != null && v <= threshold;
+  const valueScore = [
+    passGte(revenueGrowth5Y, 5),
+    passGte(epsGrowth5Y,     7),
+    passGte(fcfToNetIncome,  80),
+    passGte(roic,            15),
+    passLte(netDebtToEbitda, 3),
+    passLte(debtToEquity,    0.8),
+  ].filter(Boolean).length;
+
+  // GS (Growth Score) — count of 6 criteria that pass
+  // Criteria: RevenueGrowth5Y ≥ 5, EPSGrowth5Y ≥ 7, FCFToNetIncome ≥ 80,
+  //           ProfitMargin ≥ 10, ROIC ≥ 15, NetDebtToEBITDA ≤ 3
+  const growthScore = [
+    passGte(revenueGrowth5Y, 5),
+    passGte(epsGrowth5Y,     7),
+    passGte(fcfToNetIncome,  80),
+    passGte(profitMargin,    10),
+    passGte(roic,            15),
+    passLte(netDebtToEbitda, 3),
+  ].filter(Boolean).length;
+
+  // StockGrade: 3=★★★ (VS≥4 AND GS≥4), 2=★★ (VS≥4 OR GS≥4), 1=★ (VS≥2 OR GS≥2), null=below
+  const stockGrade: number | null =
+    (valueScore >= 4 && growthScore >= 4) ? 3 :
+    (valueScore >= 4 || growthScore >= 4) ? 2 :
+    (valueScore >= 2 || growthScore >= 2) ? 1 :
+    null;
+
   return {
     peRatio: peRatio !== null ? Math.round(peRatio * 100) / 100 : null,
     eps: eps !== null ? Math.round(eps * 100) / 100 : null,
@@ -285,6 +402,15 @@ export function computeRatios(input: FundamentalsComputerInput): DerivedRatios {
     currentRatio: currentRatio !== null ? Math.round(currentRatio * 1000) / 1000 : null,
     dividendYield,
     beta,
+    // Quality signals
+    fcfToNetIncome: fcfToNetIncome !== null ? Math.round(fcfToNetIncome * 100) / 100 : null,
+    roic: roic !== null ? Math.round(roic * 100) / 100 : null,
+    netDebtToEbitda: netDebtToEbitda !== null ? Math.round(netDebtToEbitda * 100) / 100 : null,
+    revenueGrowth5Y: revenueGrowth5Y !== null ? Math.round(revenueGrowth5Y * 100) / 100 : null,
+    epsGrowth5Y: epsGrowth5Y !== null ? Math.round(epsGrowth5Y * 100) / 100 : null,
+    valueScore,
+    growthScore,
+    stockGrade,
     sector,
     industry: details.industry ?? null,
     companyName: financials.company_name ?? null

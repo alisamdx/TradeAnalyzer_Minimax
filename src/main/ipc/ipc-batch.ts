@@ -63,6 +63,16 @@ export function registerBatchIpc(
     })
   );
 
+  // Trigger a job and await full completion (used by Run All in Sequence).
+  // force=true bypasses non-trading-day guards so every job actually runs.
+  ipcMain.handle(
+    'batch:run-now-sync',
+    wrapAsync(async (jobId: string) => {
+      await batchService.runJob(jobId, 'manual', true);
+      return true;
+    })
+  );
+
   // Cancel a running job
   ipcMain.handle(
     'batch:cancel',

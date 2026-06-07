@@ -289,6 +289,9 @@ function estimateCardHeight(pick: BriefPick, strategy: ScoringStrategy): number 
   h += 14;     // setup line 1: structure · expiry · credit
   h += 14;     // setup line 2: max profit · max loss · breakeven · POP
 
+  // Exit plan
+  h += 6 + 4 + 10 + 24; // divider + gap + label + 1 line (take profit · stop · DTE)
+
   if (numLegs > 0) {
     h += 18;           // legs section header bar
     h += numLegs * 15; // leg rows
@@ -590,6 +593,35 @@ export async function buildPdf(
             cy += 15;
           }
           cy += 4;
+        }
+
+        // ── Exit plan ────────────────────────────────────────────────────────
+        if (setup) {
+          cy += 2;
+          doc.rect(CX, cy, CW, 1).fill('#d8d8d8');
+          cy += 4;
+          doc.fillColor(LGRAY).fontSize(7).font('Helvetica-Bold').text('EXIT PLAN', CX, cy);
+          cy += 10;
+
+          const exitParts: string[] = [];
+          // Target: 50% of credit (or debit recovery target)
+          if (setup.netCredit != null && setup.netCredit > 0) {
+            exitParts.push(`Take profit: ${fmtPrice(setup.netCredit * 0.5)} (50% of ${fmtPrice(setup.netCredit)} credit)`);
+            exitParts.push(`Hard stop: ${fmtPrice(setup.netCredit * 2)} loss (2× credit)`);
+          } else if (setup.netDebit != null && setup.netDebit > 0) {
+            exitParts.push(`Target: ${fmtPrice(setup.netDebit * 2)} (2× debit return)`);
+            exitParts.push(`Stop: ${fmtPrice(setup.netDebit * 0.5)} loss (50% of debit)`);
+          }
+          // DTE target
+          if (setup.dte != null) {
+            const targetDte = Math.max(1, Math.round(setup.dte * 0.45)); // 21 DTE rule for ~45-day positions
+            exitParts.push(`Close by: ${targetDte} DTE (before gamma risk accelerates)`);
+          }
+          if (exitParts.length > 0) {
+            doc.fillColor('#333333').fontSize(8).font('Helvetica')
+              .text(exitParts.join('  ·  '), CX, cy, { width: CW, lineGap: 1 });
+            cy += Math.ceil(exitParts.join('  ·  ').length / 80) * 12 + 4;
+          }
         }
 
         // ── Score breakdown ──────────────────────────────────────────────────

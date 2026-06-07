@@ -12,6 +12,40 @@ import type {
   PayoffAssessment,
 } from '@shared/types.js';
 
+// ─── Assessment normalizer ────────────────────────────────────────────────────
+// Claude's tool_use response is untyped — fields can be missing, null, or wrong
+// type when the model produces slightly malformed output. This normalizer fills
+// defaults so the renderer never crashes on undefined access or .map() on null.
+
+const VALID_RATINGS = new Set(['excellent', 'good', 'neutral', 'caution', 'avoid']);
+
+function normalizeAssessment(raw: unknown): PayoffAssessment {
+  const a = (raw ?? {}) as Record<string, unknown>;
+  const exit  = ((a.exit  ?? {}) as Record<string, unknown>);
+  const ca    = ((exit.closeAll ?? {}) as Record<string, unknown>);
+  const bull  = ((exit.bullish  ?? {}) as Record<string, unknown>);
+  const bear  = ((exit.bearish  ?? {}) as Record<string, unknown>);
+  const toStr = (v: unknown, fallback = '') => (v != null ? String(v) : fallback);
+  const toArr = (v: unknown): string[] =>
+    Array.isArray(v) ? v.map(x => String(x ?? '')).filter(Boolean) : [];
+
+  return {
+    strategyName:  toStr(a.strategyName, 'Options Strategy'),
+    rating:        VALID_RATINGS.has(String(a.rating)) ? (a.rating as PayoffAssessment['rating']) : 'neutral',
+    ratingReason:  toStr(a.ratingReason),
+    pros:          toArr(a.pros),
+    cons:          toArr(a.cons),
+    idealMarket:   toStr(a.idealMarket),
+    keyRisks:      toArr(a.keyRisks),
+    probOfProfit:  a.probOfProfit && String(a.probOfProfit).trim() ? String(a.probOfProfit) : null,
+    exit: {
+      closeAll: { trigger: toStr(ca.trigger), details:   toStr(ca.details)   },
+      bullish:  { trigger: toStr(bull.trigger), exitFirst: toStr(bull.exitFirst), holdLast: toStr(bull.holdLast) },
+      bearish:  { trigger: toStr(bear.trigger), exitFirst: toStr(bear.exitFirst), holdLast: toStr(bear.holdLast) },
+    },
+  };
+}
+
 // ─── Assessment tool schema ────────────────────────────────────────────────────
 
 const ASSESS_TOOL: Anthropic.Messages.Tool = {
@@ -241,6 +275,6 @@ export class PayoffService {
           : 'Assessment failed — model did not return structured data. Try again.'
       );
     }
-    return toolBlock.input as PayoffAssessment;
+    return normalizeAssessment(toolBlock.input);
   }
 }

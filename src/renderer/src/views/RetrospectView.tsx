@@ -15,6 +15,8 @@ import type {
   SnapshotAccuracy,
   TradeActionType,
   TradeLearning,
+  TradeLearningGapCause,
+  BriefLearningRecommendation,
 } from '@shared/types.js';
 
 type Tab = 'summary' | 'inprogress' | 'history' | 'settings';
@@ -52,6 +54,22 @@ const ENTRY_FIT_LABEL: Record<string, string> = {
 };
 const ENTRY_FIT_COLOR: Record<string, string> = {
   good: '#3fb950', early: '#e3a008', late: '#e3a008', wrong: '#f85149',
+};
+const GAP_CAUSE_LABEL: Record<TradeLearningGapCause, string> = {
+  EARNINGS_GAP_RISK:   '📅 Earnings gap',
+  IV_CRUSH:            '📉 IV crush',
+  TREND_REVERSAL:      '↩ Trend reversal',
+  THETA_UNDERESTIMATE: '⏱ Theta underestimate',
+  EARLY_CLOSE_MISSED:  '💸 Early close',
+  MODEL_ERROR:         '❓ Model error',
+};
+const GAP_CAUSE_COLOR: Record<TradeLearningGapCause, string> = {
+  EARNINGS_GAP_RISK:   '#f85149',
+  IV_CRUSH:            '#e3a008',
+  TREND_REVERSAL:      '#f85149',
+  THETA_UNDERESTIMATE: '#58a6ff',
+  EARLY_CLOSE_MISSED:  '#3fb950',
+  MODEL_ERROR:         '#8b949e',
 };
 
 // Color stock return based on what's favorable for the strategy — not just sign.
@@ -109,16 +127,29 @@ function winRateBar(rate: number | null): React.ReactElement {
   );
 }
 
+const GAP_CAUSE_BADGE_STYLE = (cause: TradeLearningGapCause) => ({
+  display: 'inline-block',
+  padding: '2px 8px',
+  borderRadius: 4,
+  fontSize: 11,
+  fontWeight: 600,
+  background: GAP_CAUSE_COLOR[cause] + '22',
+  color: GAP_CAUSE_COLOR[cause],
+  border: `1px solid ${GAP_CAUSE_COLOR[cause]}44`,
+});
+
 // ── Summary Tab ───────────────────────────────────────────────────────────────
 
 function SummaryTab({
   summary,
   breakdown,
   snapAccuracy,
+  recommendations,
 }: {
   summary: PaperTradeSummary | null;
   breakdown: StrategyBreakdown[];
   snapAccuracy: SnapshotAccuracy | null;
+  recommendations: BriefLearningRecommendation[];
 }) {
   if (!summary) return <div className="empty">Loading…</div>;
 
@@ -237,6 +268,39 @@ function SummaryTab({
         <div className="retro-empty-state">
           <p>No paper trades yet.</p>
           <p className="meta">Run the Daily Intelligence Brief to start tracking picks automatically.</p>
+        </div>
+      )}
+
+      {/* Pattern Recommendations (1c) */}
+      {recommendations.length > 0 && (
+        <div className="retro-snapshot-section">
+          <div className="retro-section-title">
+            Pattern Recommendations
+            <span className="retro-snapshot-subtitle">Auto-generated from recurring gap causes (≥ 3 occurrences)</span>
+          </div>
+          <p className="retro-snapshot-desc">
+            These suggestions are based on patterns detected across your closed paper trades.
+            Apply them in <strong>Trade Scoring Config</strong> or <strong>Retrospect Settings</strong>.
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {recommendations.map(rec => (
+              <div key={rec.id} style={{ background: '#161b22', border: '1px solid #30363d', borderRadius: 8, padding: '12px 16px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+                  <span style={GAP_CAUSE_BADGE_STYLE(rec.gapCause)}>{GAP_CAUSE_LABEL[rec.gapCause]}</span>
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                    {STRATEGY_LABELS[rec.strategy as ScoringStrategy] ?? rec.strategy} · {rec.occurrenceCount}× observed
+                  </span>
+                  {rec.status === 'acknowledged' && (
+                    <span style={{ marginLeft: 'auto', fontSize: 11, color: '#8b949e', fontWeight: 600 }}>✓ Acknowledged</span>
+                  )}
+                </div>
+                <div style={{ fontSize: 13, color: '#c9d1d9', marginBottom: 4 }}>{rec.description}</div>
+                {rec.proposedTweak && (
+                  <div style={{ fontSize: 12, color: '#58a6ff', fontStyle: 'italic' }}>💡 {rec.proposedTweak}</div>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -541,11 +605,23 @@ function LearningCell({ learning }: { learning: TradeLearning | null }) {
   if (!learning) return <span className="retro-no-data">capturing…</span>;
   return (
     <div className="retro-learning-cell">
-      <div className="retro-learning-fit" style={{ color: ENTRY_FIT_COLOR[learning.entryFit] }}>
-        {ENTRY_FIT_LABEL[learning.entryFit] ?? learning.entryFit}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <span className="retro-learning-fit" style={{ color: ENTRY_FIT_COLOR[learning.entryFit] }}>
+          {ENTRY_FIT_LABEL[learning.entryFit] ?? learning.entryFit}
+        </span>
         {learning.strategyWorked
-          ? <span className="retro-learning-worked">· strategy worked</span>
-          : <span className="retro-learning-failed">· strategy missed</span>}
+          ? <span className="retro-learning-worked">strategy worked</span>
+          : <span className="retro-learning-failed">strategy missed</span>}
+        {learning.gapCause && (
+          <span style={{
+            fontSize: 10, padding: '1px 6px', borderRadius: 3, fontWeight: 600,
+            background: GAP_CAUSE_COLOR[learning.gapCause] + '22',
+            color: GAP_CAUSE_COLOR[learning.gapCause],
+            border: `1px solid ${GAP_CAUSE_COLOR[learning.gapCause]}44`,
+          }}>
+            {GAP_CAUSE_LABEL[learning.gapCause]}
+          </span>
+        )}
       </div>
       <div className="retro-learning-lesson">{learning.keyLesson}</div>
       {learning.suggestedTweak && (
@@ -742,6 +818,7 @@ export function RetrospectView() {
   const [breakdown, setBreakdown] = useState<StrategyBreakdown[]>([]);
   const [snapAccuracy, setSnapAccuracy] = useState<SnapshotAccuracy | null>(null);
   const [settings, setSettings] = useState<RetroSettings | null>(null);
+  const [recommendations, setRecommendations] = useState<BriefLearningRecommendation[]>([]);
   const [loadingOpen, setLoadingOpen] = useState(false);
   const [loadingClosed, setLoadingClosed] = useState(false);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
@@ -749,16 +826,18 @@ export function RetrospectView() {
   const loadOpen = useCallback(async () => {
     setLoadingOpen(true);
     try {
-      const [open, sum, bd, snap] = await Promise.all([
+      const [open, sum, bd, snap, recs] = await Promise.all([
         window.api.paper.listOpen(),
         window.api.paper.summary(),
         window.api.paper.strategyBreakdown(),
         window.api.paper.snapshotAccuracy(),
+        window.api.paper.getLearningRecommendations(),
       ]);
       setOpenPositions(open);
       setSummary(sum);
       setBreakdown(bd);
       setSnapAccuracy(snap);
+      setRecommendations(recs);
     } catch (err) {
       console.error('[retrospect] load open error:', err);
     } finally {
@@ -870,7 +949,7 @@ export function RetrospectView() {
 
       {/* Tab content */}
       <div className="retro-content">
-        {tab === 'summary'    && <SummaryTab summary={summary} breakdown={breakdown} snapAccuracy={snapAccuracy} />}
+        {tab === 'summary'    && <SummaryTab summary={summary} breakdown={breakdown} snapAccuracy={snapAccuracy} recommendations={recommendations} />}
         {tab === 'inprogress' && (
           <InProgressTab
             positions={openPositions}

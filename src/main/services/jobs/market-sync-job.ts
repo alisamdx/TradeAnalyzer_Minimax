@@ -34,10 +34,11 @@ export class MarketSyncJob implements BatchJobHandler {
   async run(
     onProgress: (evt: BatchProgressEvent) => void,
     signal: AbortSignal,
+    force = false,
   ): Promise<BatchJobResult> {
     const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
 
-    if (!isTradingDay(today)) {
+    if (!force && !isTradingDay(today)) {
       return {
         status: 'skipped',
         notes: 'Non-trading day — no new market data available.',

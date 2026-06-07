@@ -70,6 +70,15 @@ export interface TickerScreenData {
   profitMargin: number | null;
   freeCashFlow: number | null;
   currentRatio: number | null;
+  // Quality signals (v0.22.20)
+  fcfToNetIncome: number | null;
+  roic: number | null;
+  netDebtToEbitda: number | null;
+  revenueGrowth5Y: number | null;
+  epsGrowth5Y: number | null;
+  valueScore: number | null;
+  growthScore: number | null;
+  stockGrade: number | null;
   avgVolume: number | null;
   avgOptionVolume: number | null;
   price: number | null;
@@ -264,6 +273,14 @@ export class ScreenerService {
         currentRatio: null,
         dividendYield: null,
         beta: null,
+        fcfToNetIncome: null,
+        roic: null,
+        netDebtToEbitda: null,
+        revenueGrowth5Y: null,
+        epsGrowth5Y: null,
+        valueScore: null,
+        growthScore: null,
+        stockGrade: null,
         sector: null,
         industry: null,
         companyName: null
@@ -406,6 +423,14 @@ export class ScreenerService {
       profitMargin: ratios.profitMargin,
       freeCashFlow: ratios.freeCashFlow,
       currentRatio: ratios.currentRatio,
+      fcfToNetIncome: ratios.fcfToNetIncome,
+      roic: ratios.roic,
+      netDebtToEbitda: ratios.netDebtToEbitda,
+      revenueGrowth5Y: ratios.revenueGrowth5Y,
+      epsGrowth5Y: ratios.epsGrowth5Y,
+      valueScore: ratios.valueScore,
+      growthScore: ratios.growthScore,
+      stockGrade: ratios.stockGrade,
       avgVolume,
       avgOptionVolume: null,
       price,
@@ -522,6 +547,10 @@ export class ScreenerService {
           revenueGrowth: row.revenueGrowth, epsGrowth: row.epsGrowth,
           debtToEquity: row.debtToEquity, roe: row.roe, profitMargin: row.profitMargin,
           freeCashFlow: row.freeCashFlow, currentRatio: row.currentRatio,
+          fcfToNetIncome: row.fcfToNetIncome, roic: row.roic,
+          netDebtToEbitda: row.netDebtToEbitda,
+          revenueGrowth5Y: row.revenueGrowth5Y, epsGrowth5Y: row.epsGrowth5Y,
+          valueScore: row.valueScore, growthScore: row.growthScore, stockGrade: row.stockGrade,
           avgVolume: row.avgVolume, avgOptionVolume: row.avgOptionVolume,
           price: row.price, distance52WkHigh: row.distance52WkHigh,
           distance52WkLow: row.distance52WkLow, beta: row.beta,

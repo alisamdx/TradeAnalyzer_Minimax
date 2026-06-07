@@ -25,6 +25,8 @@ import type {
   TradeStatus,
   TradeInsight,
   TradeLearning,
+  TradeLearningGapCause,
+  BriefLearningRecommendation,
 } from '@shared/types.js';
 
 // Default thresholds — user can override via Settings tab in Retrospect screen.
@@ -191,7 +193,21 @@ function computeInsight(
   verdict: TradeVerdict,
   recommendation: TradeRecommendation,
   settings: RetroSettings,
+  entryPremium?: number | null,
+  estimatedPnl?: number | null,
 ): TradeInsight {
+  // 2× credit stop triggered by option P&L (not stock move)
+  if (
+    recommendation === 'close_signal' &&
+    entryPremium != null && entryPremium > 0 &&
+    estimatedPnl != null && estimatedPnl < -(entryPremium * 2)
+  ) {
+    return {
+      action: 'close', urgency: 'high',
+      reason: `Option P&L stop: est. loss $${Math.abs(estimatedPnl).toFixed(0)} exceeds 2× credit ($${(entryPremium * 2).toFixed(0)})`,
+      suggestion: 'Close position — loss has exceeded 2× the credit received (hard stop)',
+    };
+  }
   const cfg = settings[strategy];
   const dte  = daysToExpiry;
 
@@ -406,9 +422,21 @@ export class PaperTradingService {
         }
       }
 
+      // 1a: Option P&L stop — 2× credit received, regardless of stock move.
+      // Uses delta-estimated P&L. Only fires for credit strategies (entryPremium > 0).
+      if (
+        recommendation !== 'close_signal' &&
+        trade.entryPremium !== null && trade.entryPremium > 0 &&
+        estimatedPnl !== null && estimatedPnl < -(trade.entryPremium * 2)
+      ) {
+        recommendation = 'close_signal';
+        verdict = 'negative';
+      }
+
       const insight = computeInsight(
         trade.briefStrategy, stockReturnPct ?? 0,
         daysToExpiry, verdict, recommendation, settings,
+        trade.entryPremium, estimatedPnl,
       );
 
       return {
@@ -499,17 +527,24 @@ Stock return: ${row.stock_return_pct !== null ? row.stock_return_pct.toFixed(1) 
 Outcome: ${row.outcome ?? 'unknown'} (${row.status})${row.exit_notes ? '\nExit notes: ' + row.exit_notes : ''}
 
 In exactly one sentence each:
-1. Did this strategy fit the trade conditions? (strategyWorked: true/false, entryFit: good/early/late/wrong)
-2. What was the key factor driving the outcome? (keyLesson)
-3. What specific tweak would improve the next similar trade? (suggestedTweak, or null if none)
+1. Did the setup fit conditions? (strategyWorked: true/false, entryFit: good/early/late/wrong)
+2. What was the key outcome driver? (keyLesson)
+3. Specific tweak for next similar trade? (suggestedTweak, or null)
+4. Which gap cause best classifies this outcome? Pick EXACTLY ONE:
+   EARNINGS_GAP_RISK = earnings during hold caused binary move
+   IV_CRUSH = IV declined after entry reducing premium value
+   TREND_REVERSAL = stock direction reversed against the position
+   THETA_UNDERESTIMATE = slower theta decay than expected
+   EARLY_CLOSE_MISSED = closed profitable trade before reaching full target
+   MODEL_ERROR = loss unexplained by the above
 
-Respond with JSON only — no other text:
-{"strategyWorked":bool,"entryFit":"good"|"early"|"late"|"wrong","keyLesson":"...","suggestedTweak":"..."|null}`;
+Respond with JSON only:
+{"strategyWorked":bool,"entryFit":"good"|"early"|"late"|"wrong","gapCause":"EARNINGS_GAP_RISK"|"IV_CRUSH"|"TREND_REVERSAL"|"THETA_UNDERESTIMATE"|"EARLY_CLOSE_MISSED"|"MODEL_ERROR","keyLesson":"...","suggestedTweak":"..."|null}`;
 
       const client = new Anthropic({ apiKey });
       const resp = await client.messages.create({
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 300,
+        max_tokens: 350,
         messages: [{ role: 'user', content: prompt }],
       });
 
@@ -518,10 +553,16 @@ Respond with JSON only — no other text:
       if (!match) return;
 
       const raw = JSON.parse(match[0]) as Record<string, unknown>;
-      const VALID_FIT = new Set(['good', 'early', 'late', 'wrong']);
+      const VALID_FIT  = new Set(['good', 'early', 'late', 'wrong']);
+      const VALID_CAUSE = new Set<TradeLearningGapCause>([
+        'EARNINGS_GAP_RISK', 'IV_CRUSH', 'TREND_REVERSAL',
+        'THETA_UNDERESTIMATE', 'EARLY_CLOSE_MISSED', 'MODEL_ERROR',
+      ]);
+      const rawCause = String(raw['gapCause'] ?? '');
       const learning: TradeLearning = {
         strategyWorked: Boolean(raw['strategyWorked']),
         entryFit:       VALID_FIT.has(String(raw['entryFit'])) ? raw['entryFit'] as TradeLearning['entryFit'] : 'good',
+        gapCause:       VALID_CAUSE.has(rawCause as TradeLearningGapCause) ? rawCause as TradeLearningGapCause : null,
         keyLesson:      String(raw['keyLesson'] ?? ''),
         suggestedTweak: raw['suggestedTweak'] ? String(raw['suggestedTweak']) : null,
         capturedAt:     new Date().toISOString(),
@@ -529,9 +570,97 @@ Respond with JSON only — no other text:
 
       this.db.prepare('UPDATE paper_trades SET learning_json = ? WHERE id = ?')
         .run(JSON.stringify(learning), id);
+
+      // 1c: Check if this gap cause has now recurred ≥3 times → generate recommendation
+      if (learning.gapCause) {
+        this.checkForPatternRecommendations(row.brief_strategy as ScoringStrategy, learning.gapCause);
+      }
     } catch {
       // Non-fatal — learning capture is best-effort
     }
+  }
+
+  // ── 1c: Pattern-based recommendations ─────────────────────────────────────
+  private checkForPatternRecommendations(strategy: ScoringStrategy, gapCause: TradeLearningGapCause): void {
+    try {
+      type CountRow = { n: number };
+      const count = (this.db.prepare(`
+        SELECT COUNT(*) AS n FROM paper_trades
+        WHERE brief_strategy = ?
+          AND json_extract(learning_json, '$.gapCause') = ?
+          AND status IN ('closed', 'expired')
+      `).get(strategy, gapCause) as CountRow).n;
+
+      if (count < 3) return;
+
+      const { description, proposedTweak } = this.buildPatternRecommendation(strategy, gapCause, count);
+
+      this.db.prepare(`
+        INSERT INTO brief_learning_recommendations
+          (strategy, gap_cause, occurrence_count, description, proposed_tweak, status)
+        VALUES (?, ?, ?, ?, ?, 'open')
+        ON CONFLICT(strategy, gap_cause) DO UPDATE SET
+          occurrence_count = excluded.occurrence_count,
+          description      = excluded.description,
+          proposed_tweak   = excluded.proposed_tweak,
+          status           = CASE WHEN status = 'acknowledged' THEN 'open' ELSE status END,
+          created_at       = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+      `).run(strategy, gapCause, count, description, proposedTweak);
+    } catch { /* non-fatal */ }
+  }
+
+  private buildPatternRecommendation(
+    strategy: ScoringStrategy, cause: TradeLearningGapCause, count: number,
+  ): { description: string; proposedTweak: string } {
+    const s = strategy.charAt(0).toUpperCase() + strategy.slice(1);
+    const descMap: Record<TradeLearningGapCause, string> = {
+      EARNINGS_GAP_RISK:   `${count} ${s} picks were caught in earnings moves. IV spikes and binary gaps are eroding premium.`,
+      IV_CRUSH:            `${count} ${s} picks suffered IV crush after entry — premium decayed faster than the stock moved.`,
+      TREND_REVERSAL:      `${count} ${s} picks had the underlying reverse direction after entry.`,
+      THETA_UNDERESTIMATE: `${count} ${s} picks showed slower theta decay than expected.`,
+      EARLY_CLOSE_MISSED:  `${count} ${s} picks were closed profitably before reaching full target — leaving premium on the table.`,
+      MODEL_ERROR:         `${count} ${s} picks had unexplained losses — composite score may be missing a key factor.`,
+    };
+    const tweakMap: Record<TradeLearningGapCause, string> = {
+      EARNINGS_GAP_RISK:   'Tighten earnings exclusion or require IV rank > 40 for earnings-sensitive names.',
+      IV_CRUSH:            'Only enter when IV rank ≥ 50 and IV percentile ≥ 60 — avoid entering after a recent IV spike has already peaked.',
+      TREND_REVERSAL:      'Add trend-confirmation: require MA20 > MA50 (bullish/wheel) or MA20 < MA50 (bearish) at brief time.',
+      THETA_UNDERESTIMATE: 'Target 40% profit instead of 50% to capture gains before theta plateaus in the back half of the position.',
+      EARLY_CLOSE_MISSED:  'Review close-signal thresholds — early closes have lower average return than full holds to the 50% target.',
+      MODEL_ERROR:         `Review ${s} signal weights — consider increasing IV rank and liquidity weights which have the clearest options-theory basis.`,
+    };
+    return { description: descMap[cause], proposedTweak: tweakMap[cause] };
+  }
+
+  getLearningRecommendations(): BriefLearningRecommendation[] {
+    type Row = {
+      id: number; strategy: string; gap_cause: string; occurrence_count: number;
+      description: string; proposed_tweak: string; status: string; created_at: string;
+    };
+    try {
+      const rows = this.db.prepare(`
+        SELECT id, strategy, gap_cause, occurrence_count, description, proposed_tweak, status, created_at
+        FROM brief_learning_recommendations
+        WHERE status = 'open'
+        ORDER BY occurrence_count DESC, created_at DESC
+      `).all() as Row[];
+      return rows.map(r => ({
+        id:              r.id,
+        strategy:        r.strategy,
+        gapCause:        r.gap_cause as TradeLearningGapCause,
+        occurrenceCount: r.occurrence_count,
+        description:     r.description,
+        proposedTweak:   r.proposed_tweak,
+        status:          r.status as 'open' | 'acknowledged',
+        createdAt:       r.created_at,
+      }));
+    } catch { return []; }
+  }
+
+  acknowledgeLearningRecommendation(id: number): void {
+    this.db.prepare(
+      "UPDATE brief_learning_recommendations SET status = 'acknowledged' WHERE id = ?"
+    ).run(id);
   }
 
   // ── Auto-expire positions past expiry_date ─────────────────────────────────

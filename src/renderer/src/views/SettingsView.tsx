@@ -247,8 +247,7 @@ export function SettingsView({ etradeWarning, onEtradeWarningDismiss }: Settings
   const [backupMsg, setBackupMsg] = useState<string | null>(null);
   const [restoreMsg, setRestoreMsg] = useState<string | null>(null);
 
-  // If we arrived here due to an E*Trade warning, default to the API & Data tab
-  const [activeTab, setActiveTab] = useState(etradeWarning ? 'API & Data' : 'General');
+  const [activeTab, setActiveTab] = useState('API & Data');
   // optionsProvider is locked to 'etrade' — no state needed
 
   // Load settings on mount.

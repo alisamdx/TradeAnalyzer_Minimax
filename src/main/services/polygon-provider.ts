@@ -192,7 +192,7 @@ export class PolygonDataProvider implements DataProvider, OptionsProvider {
       this.fetchWithRetry('/vX/reference/financials', {
         ticker,
         timeframe: 'quarterly',
-        limit: '8'
+        limit: '24'  // 6 years of quarterly data — needed for 5Y CAGR (filings[16..19])
       }),
       this.fetchWithRetry(`/v3/reference/tickers/${ticker}`)
     ]);

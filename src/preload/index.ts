@@ -94,6 +94,8 @@ import type {
   RetroSettings,
   BriefAccuracy,
   SnapshotAccuracy,
+  BriefLearningRecommendation,
+  SignalWeightSuggestion,
   ConvictionStock,
   ConvictionBandHistory,
   ConvictionInput,
@@ -989,6 +991,8 @@ function buildApi() {
       invoke<DailyBriefEntry[]>('scoring:get-brief-history', limit),
     resendBriefEmail: () =>
       invoke<{ sent: boolean; message: string }>('scoring:resend-brief-email'),
+    signalCorrelations: (strategy: ScoringStrategy) =>
+      invoke<SignalWeightSuggestion[]>('scoring:signal-correlations', strategy),
   };
 
   const batch = {
@@ -1024,7 +1028,9 @@ function buildApi() {
     getSettings:       (): Promise<RetroSettings> => invoke('paper:get-settings'),
     saveSettings:      (settings: RetroSettings): Promise<boolean> => invoke('paper:save-settings', settings),
     briefAccuracy:     (briefDates: string[]): Promise<BriefAccuracy[]> => invoke('paper:brief-accuracy', briefDates),
-    snapshotAccuracy:  (): Promise<SnapshotAccuracy> => invoke('paper:snapshot-accuracy'),
+    snapshotAccuracy:           (): Promise<SnapshotAccuracy> => invoke('paper:snapshot-accuracy'),
+    getLearningRecommendations: (): Promise<BriefLearningRecommendation[]> => invoke('paper:get-learning-recommendations'),
+    acknowledgeRecommendation:  (id: number): Promise<boolean> => invoke('paper:acknowledge-recommendation', id),
   };
 
   const conviction = {

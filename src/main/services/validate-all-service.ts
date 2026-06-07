@@ -75,7 +75,15 @@ export class ValidateAllService {
     if (ivRankHistory !== null) quote.ivRank = ivRankHistory;
 
     // Fetch fundamentals - optional, some tickers may not have data
-    let fundamentals: DerivedRatios = { peRatio: null, eps: null, revenueGrowth: null, profitMargin: null, debtToEquity: null, roe: null, companyName: null, marketCap: null, freeCashFlow: null, currentRatio: null, dividendYield: null, beta: null, sector: null, industry: null, epsGrowth: null };
+    let fundamentals: DerivedRatios = {
+      peRatio: null, eps: null, revenueGrowth: null, profitMargin: null,
+      debtToEquity: null, roe: null, companyName: null, marketCap: null,
+      freeCashFlow: null, currentRatio: null, dividendYield: null, beta: null,
+      fcfToNetIncome: null, roic: null, netDebtToEbitda: null,
+      revenueGrowth5Y: null, epsGrowth5Y: null,
+      valueScore: null, growthScore: null, stockGrade: null,
+      sector: null, industry: null, epsGrowth: null
+    };
     try {
       fundamentals = await this.fetchFundamentals(ticker);
     } catch (err) {

@@ -207,6 +207,14 @@ export function ScreenerView() {
       beta: r.payload.beta,
       currentIv: r.payload.currentIv,
       ivRank: r.payload.ivRank,
+      fcfToNetIncome: r.payload.fcfToNetIncome,
+      roic: r.payload.roic,
+      netDebtToEbitda: r.payload.netDebtToEbitda,
+      revenueGrowth5Y: r.payload.revenueGrowth5Y,
+      epsGrowth5Y: r.payload.epsGrowth5Y,
+      valueScore: r.payload.valueScore,
+      growthScore: r.payload.growthScore,
+      stockGrade: r.payload.stockGrade,
       passScore: r.payload.passScore
     }));
   }, [results]);
@@ -431,6 +439,8 @@ export function ScreenerView() {
       'Ticker', 'Company', 'Last Price', 'Day Change %', 'IV%', 'IV Rank', 'P/E',
       'EPS', 'Revenue Growth %', 'EPS Growth %', 'D/E',
       'ROE %', 'Profit Margin %', 'Current Ratio',
+      'FCF/NI %', 'ROIC %', 'Net Debt/EBITDA', 'Rev 5Y CAGR %', 'EPS 5Y CAGR %',
+      'Value Score', 'Growth Score', 'Stock Grade',
       'Avg Volume'
     ];
     if (mode === 'soft') headers.push('Pass Score');
@@ -450,6 +460,14 @@ export function ScreenerView() {
       r.payload.roe ?? '',
       r.payload.profitMargin ?? '',
       r.payload.currentRatio ?? '',
+      r.payload.fcfToNetIncome ?? '',
+      r.payload.roic ?? '',
+      r.payload.netDebtToEbitda ?? '',
+      r.payload.revenueGrowth5Y ?? '',
+      r.payload.epsGrowth5Y ?? '',
+      r.payload.valueScore ?? '',
+      r.payload.growthScore ?? '',
+      r.payload.stockGrade != null ? (r.payload.stockGrade === 3 ? '3star' : r.payload.stockGrade === 2 ? '2star' : '1star') : '',
       r.payload.avgVolume ?? '',
       mode === 'soft' ? r.payload.passScore : ''
     ].join(','));
@@ -508,7 +526,15 @@ export function ScreenerView() {
     { key: 'debtToEquity', label: 'D/E', title: 'Debt / Equity', sortable: true },
     { key: 'roe', label: 'ROE%', title: 'Return on Equity', sortable: true },
     { key: 'profitMargin', label: 'Margin%', title: 'Profit Margin', sortable: true },
-    { key: 'currentRatio', label: 'Curr%', title: 'Current Ratio', sortable: true },
+    { key: 'currentRatio',    label: 'Curr%',     title: 'Current Ratio',                        sortable: true },
+    { key: 'fcfToNetIncome',  label: 'FCF/NI%',   title: 'Free Cash Flow / Net Income %',        sortable: true },
+    { key: 'roic',            label: 'ROIC%',      title: 'Return on Invested Capital',            sortable: true },
+    { key: 'netDebtToEbitda', label: 'ND/EBITDA',  title: 'Net Debt / EBITDA (leverage quality)', sortable: true },
+    { key: 'revenueGrowth5Y', label: 'Rev5Y%',     title: '5-Year Revenue CAGR',                  sortable: true },
+    { key: 'epsGrowth5Y',     label: 'EPS5Y%',     title: '5-Year EPS CAGR',                      sortable: true },
+    { key: 'valueScore',      label: 'VS',          title: 'Value Score 0–6',                      sortable: true },
+    { key: 'growthScore',     label: 'GS',          title: 'Growth Score 0–6',                     sortable: true },
+    { key: 'stockGrade',      label: 'Grade',       title: 'Stock Grade (★=1, ★★=2, ★★★=3)',      sortable: true },
     { key: 'avgVolume', label: 'Vol', title: 'Average Volume', sortable: true },
     ...(mode === 'soft' ? [{ key: 'passScore', label: 'Pass', title: 'Pass score', sortable: true }] : [])
   ];
@@ -877,6 +903,14 @@ export function ScreenerView() {
                         <td className="num">{fmt((r as unknown as ScreenResultRow & { roe: number | null }).roe, '', '%')}</td>
                         <td className="num">{fmt((r as unknown as ScreenResultRow & { profitMargin: number | null }).profitMargin, '', '%')}</td>
                         <td className="num">{fmt((r as unknown as ScreenResultRow & { currentRatio: number | null }).currentRatio)}</td>
+                        <td className="num">{fmt((r as unknown as ScreenResultRow & { fcfToNetIncome: number | null }).fcfToNetIncome, '', '%')}</td>
+                        <td className="num">{fmt((r as unknown as ScreenResultRow & { roic: number | null }).roic, '', '%')}</td>
+                        <td className="num">{fmt((r as unknown as ScreenResultRow & { netDebtToEbitda: number | null }).netDebtToEbitda)}</td>
+                        <td className="num">{fmt((r as unknown as ScreenResultRow & { revenueGrowth5Y: number | null }).revenueGrowth5Y, '', '%')}</td>
+                        <td className="num">{fmt((r as unknown as ScreenResultRow & { epsGrowth5Y: number | null }).epsGrowth5Y, '', '%')}</td>
+                        <td className="num">{(r as unknown as ScreenResultRow & { valueScore: number | null }).valueScore ?? '—'}</td>
+                        <td className="num">{(r as unknown as ScreenResultRow & { growthScore: number | null }).growthScore ?? '—'}</td>
+                        <td className="num">{(() => { const g = (r as unknown as ScreenResultRow & { stockGrade: number | null }).stockGrade; return g === 3 ? '★★★' : g === 2 ? '★★' : g === 1 ? '★' : '—'; })()}</td>
                         <td className="num">{formatLargeNumber((r as unknown as ScreenResultRow & { avgVolume: number | null }).avgVolume)}</td>
                         {mode === 'soft' && (
                           <td className="num pass-score">

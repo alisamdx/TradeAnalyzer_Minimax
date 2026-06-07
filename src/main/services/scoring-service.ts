@@ -3,7 +3,7 @@
 // see Requirements/DAILY_INTELLIGENCE_BRIEF.md §4
 
 import type { Database } from 'better-sqlite3';
-import type { ScreenResultPayload } from '@shared/types.js';
+import type { ScreenResultPayload, SignalWeightSuggestion, ScoringStrategy as ScoringStrategyType } from '@shared/types.js';
 import type { BuyResult, WheelResult, StrategyResult, OptionsIncomeResult } from './analysis-service.js';
 
 // ─── Sector ETF mapping ───────────────────────────────────────────────────────
@@ -1245,4 +1245,96 @@ export class ScoringService {
     const cutoff = new Date(Date.now() - retentionDays * 86_400_000).toISOString();
     this.db.prepare('DELETE FROM daily_briefs WHERE generated_at < ?').run(cutoff);
   }
+
+  // ── 1e: Signal weight suggestions from Pearson correlation ────────────────
+  // Joins paper_trades.signals (SignalBreakdown per key) with the first-snapshot
+  // Day+1 verdict for each trade. For each signal key, computes Pearson r between
+  // the normalised signal value (0–1) and a binary outcome (positive=1, else=0).
+  // Compares to current config weights and suggests direction of adjustment.
+  // Requires ≥ 10 trades with snapshots per strategy to report.
+  computeSignalCorrelations(strategy: ScoringStrategyType): SignalWeightSuggestion[] {
+    type Row = { signals: string; verdict: string };
+    const rows = this.db.prepare(`
+      SELECT pt.signals, pts.verdict
+      FROM paper_trades pt
+      JOIN (
+        SELECT paper_trade_id, MIN(days_held) AS min_held
+        FROM paper_trade_snapshots
+        GROUP BY paper_trade_id
+      ) ms ON ms.paper_trade_id = pt.id
+      JOIN paper_trade_snapshots pts
+        ON pts.paper_trade_id = pt.id AND pts.days_held = ms.min_held
+      WHERE pt.brief_strategy = ?
+    `).all(strategy) as Row[];
+
+    if (rows.length < 10) return [];
+
+    // Parse signals JSON and build per-key arrays of (normalised, binary_outcome)
+    type SignalBreakdownRow = { normalized: number; weight: number; missing: boolean };
+    const signalData = new Map<string, { values: number[]; outcomes: number[] }>();
+
+    for (const row of rows) {
+      const binaryOutcome = row.verdict === 'positive' ? 1 : 0;
+      let signals: Record<string, SignalBreakdownRow>;
+      try { signals = JSON.parse(row.signals) as Record<string, SignalBreakdownRow>; }
+      catch { continue; }
+
+      for (const [key, sig] of Object.entries(signals)) {
+        if (sig.missing || sig.normalized == null) continue;
+        if (!signalData.has(key)) signalData.set(key, { values: [], outcomes: [] });
+        signalData.get(key)!.values.push(sig.normalized);
+        signalData.get(key)!.outcomes.push(binaryOutcome);
+      }
+    }
+
+    // Get current config for this strategy
+    const config = this.getConfig(strategy);
+    const signalMap = new Map(config.signals.map(s => [s.key, s]));
+
+    // Compute total positive correlation mass for proportional weight suggestions
+    const correlations: Array<{ key: string; r: number; n: number }> = [];
+    for (const [key, data] of signalData) {
+      if (data.values.length < 10) continue;
+      const r = pearsonR(data.values, data.outcomes);
+      correlations.push({ key, r, n: data.values.length });
+    }
+
+    const totalPosMass = correlations.reduce((s, c) => s + Math.max(0, c.r), 0);
+
+    return correlations
+      .filter(c => signalMap.has(c.key))
+      .map(({ key, r, n }) => {
+        const sig  = signalMap.get(key)!;
+        const curr = sig.weight;
+        // Proportional suggested weight based on positive correlation share
+        const suggested = totalPosMass > 0
+          ? Math.round((Math.max(0, r) / totalPosMass) * 100 * 10) / 10
+          : curr;
+        const diff = suggested - curr;
+        const direction: 'increase' | 'decrease' | 'hold' =
+          diff > 2 ? 'increase' : diff < -2 ? 'decrease' : 'hold';
+        return {
+          strategy,
+          signalKey:       key,
+          signalLabel:     sig.label ?? key,
+          currentWeight:   curr,
+          correlation:     Math.round(r * 100) / 100,
+          sampleSize:      n,
+          suggestedWeight: suggested,
+          direction,
+        };
+      })
+      .sort((a, b) => Math.abs(b.correlation) - Math.abs(a.correlation));
+  }
+}
+
+function pearsonR(xs: number[], ys: number[]): number {
+  const n = xs.length;
+  if (n < 2) return 0;
+  const xm = xs.reduce((s, v) => s + v, 0) / n;
+  const ym = ys.reduce((s, v) => s + v, 0) / n;
+  const num  = xs.reduce((s, x, i) => s + (x - xm) * ((ys[i] ?? 0) - ym), 0);
+  const denX = Math.sqrt(xs.reduce((s, x) => s + (x - xm) ** 2, 0));
+  const denY = Math.sqrt(ys.reduce((s, y) => s + (y - ym) ** 2, 0));
+  return denX * denY === 0 ? 0 : num / (denX * denY);
 }
