@@ -63,8 +63,13 @@ export function registerOptionsIpc(
         if (expirations.length === 0) {
           expirations = generateNextFridays(8);
         } else {
-          // Limit to nearest 12 to avoid overloading the UI.
-          expirations = expirations.slice(0, 12);
+          // Filter to standard weekly expiry dates only: Fridays (or Thursday when
+          // Friday is a US market holiday). This strips out LEAPS, quarterlies, and
+          // any non-standard dates that E*Trade may return.
+          expirations = expirations.filter(isWeeklyExpiryDate);
+          // If filtering leaves nothing (unusual ticker / provider), fall back to generated Fridays
+          if (expirations.length === 0) expirations = generateNextFridays(8);
+          expirations = expirations.slice(0, 8);
         }
 
         // Fetch current price and IV.
@@ -136,6 +141,28 @@ export function registerOptionsIpc(
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Returns true if the date string is a valid standard weekly expiry:
+ *   - A Friday that is NOT a US market holiday, OR
+ *   - A Thursday where the next day (Friday) IS a US market holiday.
+ * Using noon UTC so the local-time day-of-week is stable across US timezones.
+ */
+function isWeeklyExpiryDate(dateStr: string): boolean {
+  const d = new Date(dateStr + 'T12:00:00Z');
+  const dow = d.getDay(); // local day — stable at noon UTC for US timezones
+  if (dow === 5) {
+    // Friday that's not a holiday
+    return !isMarketHoliday(d);
+  }
+  if (dow === 4) {
+    // Thursday — accept only if next day (Friday) is a holiday
+    const fri = new Date(d);
+    fri.setDate(d.getDate() + 1);
+    return isMarketHoliday(fri);
+  }
+  return false;
+}
 
 /** Generate the next N standard weekly expiration Fridays, shifting holidays to Thursday. */
 function generateNextFridays(count: number): string[] {
