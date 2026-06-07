@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.31.2] — 2026-06-07
+
+### Changed
+- Earnings Refresh is now a proper batch job visible in Batch Jobs screen (was a silent fire-and-forget in App.tsx)
+- Runs on startup with 60s delay (after E*Trade tokens load) — respects 24h TTL so most launches are all-skips
+- Manually triggerable via Run Now; shows per-ticker progress in live log
+- Reverted silent App.tsx useEffect (v0.31.1) — batch job is the correct home
+
 ## [0.31.1] — 2026-06-07
 
 ### Fixed

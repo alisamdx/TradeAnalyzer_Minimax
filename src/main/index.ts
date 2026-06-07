@@ -70,6 +70,7 @@ import { NewsAIService } from './services/news-ai-service.js';
 import { registerNewsIpc } from './ipc/ipc-news.js';
 import { EarningsService } from './services/earnings-service.js';
 import { registerEarningsIpc } from './ipc/ipc-earnings.js';
+import { EarningsRefreshJob } from './services/jobs/earnings-refresh-job.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -453,7 +454,7 @@ app.whenReady().then(() => {
 
   // Earnings calendar
   const earningsService = new EarningsService(db);
-  registerEarningsIpc(earningsService, () => {
+  const getEtradeCreds = (): import('./services/etrade-auth.js').OAuthCredentials | null => {
     const accessToken  = secureGet(db, 'etradeAccessToken');
     const accessSecret = secureGet(db, 'etradeAccessSecret');
     if (!accessToken || !accessSecret) return null;
@@ -463,6 +464,17 @@ app.whenReady().then(() => {
       accessToken,
       accessSecret,
     };
+  };
+  registerEarningsIpc(earningsService, getEtradeCreds);
+
+  // Earnings Refresh batch job — runs on startup (60s delay) + manually.
+  // Covers all tickers across open positions + watchlists + conviction list.
+  // 24h TTL is respected per ticker so most launches result in all skips.
+  const earningsRefreshJob = new EarningsRefreshJob(db, earningsService, getEtradeCreds);
+  batchService.registerJob('earnings-refresh', earningsRefreshJob, {
+    runOnStartup: true,
+    startupDelaySeconds: 60,    // after E*Trade tokens load from keychain
+    dailyScheduleTime: '16:00', // default schedule time (schedule disabled by default)
   });
 
   // v0.12.0 — TraderAgent integration

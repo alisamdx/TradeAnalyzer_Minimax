@@ -156,14 +156,6 @@ export function App() {
     return () => unsub();
   }, []);
 
-  // On mount: background earnings refresh for all relevant tickers (portfolio + watchlists + conviction).
-  // 24h cache means this is a no-op on most launches; only fetches when stale.
-  useEffect(() => {
-    window.api.earnings.refresh([], false).catch(() => {
-      // Non-critical — silently swallow; user can manually refresh from Earnings view
-    });
-  }, []);
-
   // FR-CV-01 / FR-CV-03: poll conviction zones every 5 min, detect Buy Zone entry
   const pollConvictionZones = useCallback(async () => {
     try {
