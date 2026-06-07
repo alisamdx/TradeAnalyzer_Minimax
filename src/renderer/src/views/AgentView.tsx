@@ -181,7 +181,7 @@ export function AgentView() {
   const [liveRecs, setLiveRecs] = useState<AgentRecommendation[]>([]);
   const [memory, setMemory] = useState<AgentMemorySnapshot | null>(null);
   const [dashboard, setDashboard] = useState<AgentDashboard | null>(null);
-  const [tradeFilter, setTradeFilter] = useState<'open' | 'closed' | 'all'>('all');
+  const [tradeFilter, setTradeFilter] = useState<'open' | 'closed' | 'all'>('open');
   const [selectedTradeId, setSelectedTradeId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
