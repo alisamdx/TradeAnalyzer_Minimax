@@ -198,6 +198,23 @@ export function PortfolioView() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
+  // Auto-analyze open positions whenever they load or their count changes.
+  // Fires on initial page load and after E*Trade sync adds new positions.
+  useEffect(() => {
+    if (activeTab !== 'open' || positions.length === 0 || analyzingAll) return;
+    setAnalyzingAll(true);
+    window.api.portfolio.analysis.runAll()
+      .then(results => {
+        const m = new Map<number, PositionAnalysis>();
+        for (const r of results) m.set(r.positionId, r);
+        setAnalyses(m);
+      })
+      .catch(() => {/* silent — analysis is best-effort */})
+      .finally(() => setAnalyzingAll(false));
+  // positions.length (not positions) avoids firing on every re-render
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, positions.length]);
+
   // Load advisor history when switching to advisor tab.
   // Auto-select the most recent session so prior results are visible immediately.
   useEffect(() => {
@@ -650,18 +667,9 @@ export function PortfolioView() {
             </div>
           )}
 
-          {activeTab === 'open' && positions.length > 0 && (
-            <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-              <button
-                onClick={handleAnalyzeAll}
-                disabled={analyzingAll}
-                style={{ padding: '4px 12px', background: '#7c3aed', color: '#fff', border: 'none', borderRadius: 4, cursor: analyzingAll ? 'wait' : 'pointer', fontSize: 12 }}
-              >
-                {analyzingAll ? '⟳ Analyzing…' : '🔬 Analyze All Positions'}
-              </button>
-              <span style={{ fontSize: 11, color: '#9ca3af', alignSelf: 'center' }}>
-                {analyses.size > 0 ? `${analyses.size} analyzed` : 'No analysis yet — click to run'}
-              </span>
+          {activeTab === 'open' && analyzingAll && (
+            <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 8 }}>
+              ⟳ Analyzing positions…
             </div>
           )}
 
