@@ -263,14 +263,10 @@ export function AgentView() {
   }, []);
 
   const handleCloseTrade = useCallback(async (trade: AgentTrade) => {
-    if (!agentProjectPath) {
-      setCloseMsg({ type: 'err', text: 'Agent project path not set.' });
-      return;
-    }
     setClosingSubmitting(true);
     setCloseMsg(null);
     try {
-      // 1. Trigger the agent close process
+      // 1. Write close directly to the agent DB
       await window.api.agent.closeTrade(trade.id, closeReason || computeTradeAction(trade).suggestedReason, agentProjectPath);
       setCloseMsg({ type: 'ok', text: `Close initiated for ${trade.ticker} — capturing learning…` });
       setClosingTradeId(null);
@@ -773,7 +769,7 @@ export function AgentView() {
                                 />
                                 <button
                                   onClick={() => handleCloseTrade(t)}
-                                  disabled={closingSubmitting || !agentProjectPath}
+                                  disabled={closingSubmitting}
                                   style={{ background: closingSubmitting ? '#2c2c2c' : '#27ae60', fontSize: 12, padding: '4px 12px' }}
                                 >
                                   {closingSubmitting ? '⟳ Closing…' : 'Confirm Close'}
@@ -781,9 +777,6 @@ export function AgentView() {
                                 <button onClick={() => setClosingTradeId(null)} disabled={closingSubmitting} style={{ fontSize: 12, background: '#2c2c2c', padding: '4px 10px' }}>
                                   Cancel
                                 </button>
-                                {!agentProjectPath && (
-                                  <span style={{ fontSize: 11, color: '#f39c12' }}>⚠ Set agent project path first</span>
-                                )}
                               </div>
                             </td>
                           </tr>

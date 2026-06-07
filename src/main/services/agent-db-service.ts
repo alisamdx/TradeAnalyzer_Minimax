@@ -648,6 +648,23 @@ export class AgentDbService {
     }));
   }
 
+  closeTrade(id: number, reason: string, actualPl: number | null): void {
+    if (!this.dbPath) throw new Error('No database open');
+    const today = new Date().toISOString().slice(0, 10);
+    // Open a separate writable connection — the main handle is readonly
+    const writeDb = new Database(this.dbPath);
+    try {
+      const result = writeDb.prepare(`
+        UPDATE agent_trades
+        SET status = 'closed', close_date = ?, close_reason = ?, actual_pl = ?
+        WHERE id = ? AND status = 'open'
+      `).run(today, reason, actualPl, id);
+      if (result.changes === 0) throw new Error(`Trade #${id} not found or already closed`);
+    } finally {
+      writeDb.close();
+    }
+  }
+
   deleteTrade(id: number): void {
     if (!this.dbPath) throw new Error('No database open');
     // Open a separate writable connection — the main handle is readonly

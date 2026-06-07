@@ -340,54 +340,34 @@ export function registerAgentIpc(agentDb: AgentDbService, db: Database.Database)
     } catch (err) { return fail(err); }
   });
 
-  // ── Close trade (delegates to agent CLI) ──────────────────────────────────
+  // ── Close trade (direct DB write — no external CLI dependency) ──────────────
+  // Computes P&L from currentOptionMid if available, then marks the trade closed.
+  // Returns immediately once the DB write succeeds.
 
-  ipcMain.handle('agent:close-trade', (_e, tradeId: number, reason: string, projectPath: string) => {
+  ipcMain.handle('agent:close-trade', (_e, tradeId: number, reason: string, _projectPath: string) => {
     try {
-      if (!projectPath || !existsSync(projectPath)) {
-        return fail(new Error(`Agent project path not found: ${projectPath}`));
+      // Look up current option mid to compute P&L (from latest theory check if present)
+      const trades = agentDb.getTrades('open');
+      const trade  = trades.find(t => t.id === tradeId);
+      if (!trade) return fail(new Error(`Trade #${tradeId} not found or not open`));
+
+      let actualPl: number | null = null;
+      if (trade.currentOptionMid != null) {
+        // For short premium strategies (sell): profit = entry - current (premium decayed)
+        // per-contract dollar value (× 100 shares)
+        actualPl = (trade.entryPremium - trade.currentOptionMid) * 100;
       }
 
-      const pkgJson = join(projectPath, 'package.json');
-      if (!existsSync(pkgJson)) {
-        return fail(new Error('No package.json in agent project path'));
+      agentDb.closeTrade(tradeId, reason, actualPl);
+
+      // Emit phase-done so the UI refreshes trade list
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.isDestroyed()) {
+          win.webContents.send('agent:phase-done', { pid: -1, phase: 'close-trade', code: 0 });
+        }
       }
 
-      const child = spawn(
-        'npm',
-        ['run', 'agent:close-trade', '--', '--id', String(tradeId), '--reason', reason],
-        { cwd: projectPath, shell: true, env: { ...process.env } }
-      );
-
-      const sendLog = (line: string) => {
-        for (const win of BrowserWindow.getAllWindows()) {
-          if (!win.isDestroyed()) {
-            win.webContents.send('agent:log', { pid: child.pid ?? -1, phase: 'close-trade', line });
-          }
-        }
-      };
-
-      child.stdout?.on('data', (chunk: Buffer) => {
-        for (const line of chunk.toString().split('\n')) {
-          if (line.trim()) sendLog(line);
-        }
-      });
-      child.stderr?.on('data', (chunk: Buffer) => {
-        for (const line of chunk.toString().split('\n')) {
-          if (line.trim()) sendLog(`[stderr] ${line}`);
-        }
-      });
-
-      child.on('exit', (code) => {
-        sendLog(`[exit] close-trade id=${tradeId} code=${code ?? '?'}`);
-        for (const win of BrowserWindow.getAllWindows()) {
-          if (!win.isDestroyed()) {
-            win.webContents.send('agent:phase-done', { pid: child.pid ?? -1, phase: 'close-trade', code });
-          }
-        }
-      });
-
-      return ok({ pid: child.pid ?? -1, tradeId });
+      return ok({ pid: -1, tradeId });
     } catch (err) { return fail(err); }
   });
 
