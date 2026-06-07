@@ -427,7 +427,7 @@ export function PortfolioView() {
     ...(activeTab === 'closed' ? [{ key: 'realizedPnl',    label: 'Realized P&L', sortable: true  }] : []),
     { key: 'entryDate',          label: 'Entry Date',      sortable: true },
     ...(activeTab === 'open'   ? [{ key: 'verdict',        label: 'Verdict',      sortable: false }] : []),
-    ...(activeTab === 'open'   ? [{ key: 'action',         label: 'Action',       sortable: false }] : []),
+    ...(activeTab === 'open'   ? [{ key: 'action',         label: 'Analysis',     sortable: false }] : []),
     { key: 'actions',            label: 'Actions',         sortable: false },
   ].filter(Boolean) as { key: string; label: string; sortable: boolean }[];
 
