@@ -77,7 +77,8 @@ export function OptionsChainView({ initialTicker, initialExpiry, clearInitialTic
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
 
   // Chain data state
-  const [expirations, setExpirations] = useState<OptionsChainExpirationSummary[]>([]);
+  const [expirations, setExpirations]       = useState<OptionsChainExpirationSummary[]>([]);
+  const [allExpirations, setAllExpirations] = useState<string[]>([]);
   const [selectedExpiration, setSelectedExpiration] = useState<string | null>(null);
   const [chainData, setChainData] = useState<OptionsChainViewData | null>(null);
   const [currentPrice, setCurrentPrice] = useState<number | null>(null);
@@ -115,6 +116,7 @@ export function OptionsChainView({ initialTicker, initialExpiry, clearInitialTic
     try {
       const result = await window.api.optionsChain.getNearExpirations(ticker);
       setExpirations(result.expirations);
+      setAllExpirations(result.allExpirations ?? []);
       setCurrentPrice(result.currentPrice);
       setCurrentIv(result.currentIv);
       // Prefer the requested expiry; fall back to first expiration with contracts
@@ -198,8 +200,8 @@ export function OptionsChainView({ initialTicker, initialExpiry, clearInitialTic
   const puts = filteredContracts.filter(c => c.side === 'put').sort((a, b) => a.strike - b.strike);
   const strikes = [...new Set(filteredContracts.map(c => c.strike))].sort((a, b) => a - b);
 
-  // Show up to 8 expirations (fits a ~1280px window single-row; wraps gracefully below that)
-  const visibleExpirations = expirations.filter(e => e.callCount > 0 || e.putCount > 0).slice(0, 8);
+  // 7 weekly Friday tabs (pre-filtered by backend)
+  const visibleExpirations = expirations.filter(e => e.callCount > 0 || e.putCount > 0).slice(0, 7);
 
   return (
     <div className="options-chain-view">
@@ -264,9 +266,26 @@ export function OptionsChainView({ initialTicker, initialExpiry, clearInitialTic
               )}
             </div>
 
-            {/* Expiration Tabs — Fridays only, current week + next 4 */}
-            {visibleExpirations.length > 0 && (
+            {/* Expiration selector: dropdown (all dates) + 7 Friday quick-tabs */}
+            {(visibleExpirations.length > 0 || allExpirations.length > 0) && (
               <div className="oc-exp-tabs">
+                {/* Dropdown — all expirations from E*Trade */}
+                {allExpirations.length > 0 && (
+                  <select
+                    className="oc-exp-dropdown"
+                    value={selectedExpiration ?? ''}
+                    onChange={e => setSelectedExpiration(e.target.value)}
+                    title="All available expirations"
+                  >
+                    <option value="" disabled>Expiry…</option>
+                    {allExpirations.map(d => (
+                      <option key={d} value={d}>
+                        {formatExpDate(d)} · {dteDays(d)}d
+                      </option>
+                    ))}
+                  </select>
+                )}
+                {/* 7 weekly Friday quick-tabs */}
                 {visibleExpirations.map(exp => (
                   <button key={exp.date}
                     className={`oc-exp-tab ${exp.date === selectedExpiration ? 'active' : ''}`}

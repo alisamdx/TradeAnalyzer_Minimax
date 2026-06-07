@@ -662,7 +662,7 @@ function buildApi() {
 
   const optionsChain = {
     getNearExpirations: (ticker: string) =>
-      invoke<{ expirations: OptionsChainExpirationSummary[]; currentPrice: number | null; currentIv: number | null }>('options:get-near-expirations', ticker),
+      invoke<{ expirations: OptionsChainExpirationSummary[]; allExpirations: string[]; currentPrice: number | null; currentIv: number | null }>('options:get-near-expirations', ticker),
     getChain: (ticker: string, expiration: string) =>
       invoke<OptionsChainViewData>('options:get-chain', ticker, expiration)
   };

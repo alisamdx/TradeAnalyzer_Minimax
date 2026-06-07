@@ -2714,6 +2714,22 @@ input[type='checkbox'] {
   margin-bottom: 12px;
 }
 
+.oc-exp-dropdown {
+  padding: 5px 8px;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+  color: #c9d1d9;
+  font-size: 12px;
+  cursor: pointer;
+  height: 32px;
+  align-self: center;
+}
+.oc-exp-dropdown:focus {
+  outline: none;
+  border-color: #58a6ff;
+}
+
 .oc-exp-tab {
   padding: 6px 12px;
   border: 1px solid var(--border);

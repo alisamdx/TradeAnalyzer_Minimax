@@ -59,17 +59,15 @@ export function registerOptionsIpc(
       try {
         // Try to get real expirations from the provider (E*Trade supports this).
         // Fall back to generating next 8 Fridays when the provider returns [] (Polygon).
-        let expirations: string[] = await optionsProvider.getOptionsExpirations(ticker);
-        if (expirations.length === 0) {
-          expirations = generateNextFridays(8);
-        } else {
-          // Filter to standard weekly expiry dates only: Fridays (or Thursday when
-          // Friday is a US market holiday). This strips out LEAPS, quarterlies, and
-          // any non-standard dates that E*Trade may return.
-          expirations = expirations.filter(isWeeklyExpiryDate);
-          // If filtering leaves nothing (unusual ticker / provider), fall back to generated Fridays
-          if (expirations.length === 0) expirations = generateNextFridays(8);
-          expirations = expirations.slice(0, 8);
+        // All expirations from provider — used to populate the dropdown (no chain fetch).
+        let allExpirations: string[] = await optionsProvider.getOptionsExpirations(ticker);
+
+        // Weekly tabs: next 7 standard Friday expirations (or Thursday when Friday is holiday).
+        let weeklyDates: string[] = allExpirations.filter(isWeeklyExpiryDate).slice(0, 7);
+        if (weeklyDates.length === 0) {
+          // Provider returned nothing or no weeklies — generate locally and use as both lists.
+          weeklyDates = generateNextFridays(7);
+          allExpirations = weeklyDates;
         }
 
         // Fetch current price and IV.
@@ -83,9 +81,9 @@ export function registerOptionsIpc(
           } catch { /* IV unavailable */ }
         }
 
-        // Fetch chain metadata for each expiration.
+        // Fetch chain metadata only for the 7 weekly tabs (not the full allExpirations list).
         const summaries: ExpirationSummary[] = [];
-        for (const exp of expirations) {
+        for (const exp of weeklyDates) {
           try {
             await rateLimiter.acquire(1);
             const chain = await optionsProvider.getOptionsChain(ticker, exp);
@@ -94,12 +92,11 @@ export function registerOptionsIpc(
             const putCount = chain.contracts.filter(c => c.side === 'put').length;
             summaries.push({ date: exp, dte, callCount, putCount });
           } catch {
-            // Skip this expiration if it fails (e.g. no contracts).
             summaries.push({ date: exp, dte: dteDays(exp), callCount: 0, putCount: 0 });
           }
         }
 
-        return ok({ expirations: summaries, currentPrice, currentIv });
+        return ok({ expirations: summaries, allExpirations, currentPrice, currentIv });
       } catch (err) {
         return fail(err);
       }
