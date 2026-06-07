@@ -2,6 +2,10 @@
 
 Reverse-chronological. Per spec EP-2.3, this is the index; per-version detail lives in `changelogs/`.
 
+## v0.30.5 — 2026-06-07
+
+Risk Matrix fix: strike rows now always include leg strikes and extend below them, even when the option strike is outside the ±25% spot range (e.g. TSLA CSP at $290 when stock is at $395). Previously all visible rows were above the strike showing only profit — now the table covers the full risk picture including losses below the strike. Leg strike rows highlighted in amber with "◀ strike" marker.
+
 ## v0.30.4 — 2026-06-07
 
 Risk Matrix: click any cell to expand a per-leg breakdown panel showing each leg's entry price, current theoretical value, P&L, and action recommendation (Take profits / Consider closing / Close — loss exceeds premium / Watch / Hold). Click same cell or × to dismiss. Net P&L shown in header. Selected cell highlights blue.

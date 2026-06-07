@@ -220,20 +220,31 @@ function selectMatrixColumns(expirations: OptionsChainExpirationSummary[]): stri
 function selectMatrixStrikes(
   chainData: { contracts: { strike: number }[] } | null,
   spotNum: number,
+  legStrikes: number[], // option leg strikes — always included in range
 ): number[] {
+  // Base range: ±25% of spot. Extended to cover all leg strikes so the risk
+  // picture is never cut off (e.g. short put at $290 when stock is at $395).
+  const spotLo = spotNum * 0.75, spotHi = spotNum * 1.25;
+  const lo = legStrikes.length
+    ? Math.min(spotLo, Math.min(...legStrikes) * 0.85)
+    : spotLo;
+  const hi = legStrikes.length
+    ? Math.max(spotHi, Math.max(...legStrikes) * 1.15)
+    : spotHi;
+
   if (chainData && chainData.contracts.length > 0) {
-    const lo = spotNum * 0.75, hi = spotNum * 1.25;
     const strikes = [...new Set(chainData.contracts.map(c => c.strike))]
       .filter(k => k >= lo && k <= hi)
       .sort((a, b) => a - b);
     if (strikes.length >= 3) return strikes;
   }
   // Fallback: synthetic strikes at a round interval
-  const interval = spotNum > 500 ? 10 : spotNum > 100 ? 5 : spotNum > 50 ? 2.5 : 1;
-  const lo = Math.floor(spotNum * 0.75 / interval) * interval;
-  const hi = Math.ceil(spotNum * 1.25 / interval) * interval;
+  const ref = Math.min(spotNum, ...legStrikes.filter(Boolean));
+  const interval = ref > 500 ? 10 : ref > 100 ? 5 : ref > 50 ? 2.5 : 1;
+  const synLo = Math.floor(lo / interval) * interval;
+  const synHi = Math.ceil(hi  / interval) * interval;
   const result: number[] = [];
-  for (let k = lo; k <= hi + 0.001; k += interval) result.push(Math.round(k * 100) / 100);
+  for (let k = synLo; k <= synHi + 0.001; k += interval) result.push(Math.round(k * 100) / 100);
   return result;
 }
 
@@ -358,7 +369,14 @@ function RiskMatrixTable({
   const today = new Date().toISOString().slice(0, 10);
   const expiryDates = useMemo(() => selectMatrixColumns(chainExpirations), [chainExpirations]);
   const colDates    = useMemo(() => [today, ...expiryDates], [today, expiryDates]);
-  const strikes     = useMemo(() => selectMatrixStrikes(chainData, spotNum), [chainData, spotNum]);
+  const legStrikes  = useMemo(
+    () => legs.filter(l => l.type !== 'stock').map(l => l.strike),
+    [legs],
+  );
+  const strikes     = useMemo(
+    () => selectMatrixStrikes(chainData, spotNum, legStrikes),
+    [chainData, spotNum, legStrikes],
+  );
 
   // Selected cell for leg breakdown panel
   const [selectedCell, setSelectedCell] = useState<{ ri: number; ci: number } | null>(null);
@@ -417,6 +435,9 @@ function RiskMatrixTable({
     (best, k, i) => Math.abs(k - spotNum) < Math.abs(strikes[best]! - spotNum) ? i : best, 0,
   );
 
+  // Set of leg strikes for row highlighting
+  const legStrikeSet = useMemo(() => new Set(legStrikes.map(k => k.toFixed(2))), [legStrikes]);
+
   if (strikes.length === 0 || legs.length === 0) {
     return <div style={{ color: '#64748b', padding: 24, textAlign: 'center' }}>Add legs and a spot price to generate the risk matrix.</div>;
   }
@@ -462,18 +483,21 @@ function RiskMatrixTable({
           </thead>
           <tbody>
             {strikes.map((strike, ri) => {
-              const isSpot = ri === spotRowIdx;
+              const isSpot     = ri === spotRowIdx;
+              const isLegStrike = legStrikeSet.has(strike.toFixed(2));
               const row = grid[ri]!;
               const expPnl = expiryPnls[ri]!;
               const zone  = zoneLabel(expPnl, expiryPnls);
 
               return (
                 <tr key={strike} style={{
-                  outline: isSpot ? '2px solid #3b82f6' : undefined,
-                  outlineOffset: isSpot ? '-2px' : undefined,
+                  outline: isSpot ? '2px solid #3b82f6' : isLegStrike ? '1px solid #f59e0b55' : undefined,
+                  outlineOffset: isSpot ? '-2px' : '-1px',
                 }}>
-                  <td style={{ padding: '3px 10px', textAlign: 'right', color: '#e2e8f0', fontWeight: isSpot ? 700 : 400, borderRight: '1px solid #1e293b', whiteSpace: 'nowrap' }}>
-                    ${strike.toFixed(2)}{isSpot && <span style={{ color: '#3b82f6', marginLeft: 4, fontSize: 9 }}>◀</span>}
+                  <td style={{ padding: '3px 10px', textAlign: 'right', color: isLegStrike ? '#fbbf24' : '#e2e8f0', fontWeight: (isSpot || isLegStrike) ? 700 : 400, borderRight: '1px solid #1e293b', whiteSpace: 'nowrap' }}>
+                    ${strike.toFixed(2)}
+                    {isSpot      && <span style={{ color: '#3b82f6', marginLeft: 4, fontSize: 9 }}>◀ spot</span>}
+                    {isLegStrike && !isSpot && <span style={{ color: '#f59e0b', marginLeft: 4, fontSize: 9 }}>◀ strike</span>}
                   </td>
                   <td style={{ padding: '3px 8px', textAlign: 'right', color: strike >= spotNum ? '#22c55e' : '#ef4444', borderRight: '1px solid #1e293b' }}>
                     {strike >= spotNum ? '+' : ''}{((strike - spotNum) / spotNum * 100).toFixed(1)}%

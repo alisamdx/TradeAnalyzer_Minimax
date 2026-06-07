@@ -236,6 +236,8 @@ Authoritative DDL is in `migrations/001_init.sql` + `002_screen_schema.sql`. Pha
 
 - **v0.23.2 (2026-06-04)** — E*Trade remote token refresh via SSH. `scripts/etrade-login.mjs`: full OAuth 1.0a flow in a terminal; reads consumer creds from running app API or `~/.tradeanalyzer/etrade-config.json` fallback; stores tokens live or writes pending file. New API routes: `GET /api/v1/etrade/credentials`, `POST /api/v1/etrade/token` (`routes-etrade.ts`). `api-server.ts` writes `etrade-config.json` + imports `etrade-tokens-pending.json` on every startup. `scripts/etrade-login.bat` for easy SSH execution.
 
+- **v0.30.5 (2026-06-07)** — Risk Matrix fix: `selectMatrixStrikes` now extends the row range to cover all option leg strikes (×0.85 below, ×1.15 above) even when outside ±25% of spot. Leg strike rows highlighted amber with ◀ marker. Fixes "all rows show max profit" when strike is below the visible range.
+
 - **v0.30.4 (2026-06-07)** — Risk Matrix: click-to-expand per-leg breakdown panel. Shows entry/current/P&L per leg plus action label (Take profits ≥80%, Consider ≥50%, Close loss >100%, Watch >50% at risk, Hold). Selected cell turns blue; × to dismiss.
 
 - **v0.30.3 (2026-06-07)** — Payoff Visualizer: "📈 Chart / ⬛ Risk Matrix" toggle. 2D P&L grid: rows = chain strikes ±25% of spot, columns = Today + chain expiries (all ≤45 DTE, min 10). Pre-expiry cells via Black-Scholes (r=4.5%, leg IV or 30% fallback). Zone column per row. Pure frontend, no backend changes.
