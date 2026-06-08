@@ -536,4 +536,68 @@ export function registerTestApiIpc(
       }
     }
   );
+
+  // ── Finnhub handlers ──────────────────────────────────────────────────────
+
+  ipcMain.handle('test-api:save-finnhub-key', (_e, key: string) => {
+    try { secureSet(db, 'finnhubApiKey', key.trim()); return ok(true); }
+    catch (err) { return fail(err); }
+  });
+
+  ipcMain.handle('test-api:get-finnhub-key-configured', () => {
+    try { return ok(Boolean(secureGet(db, 'finnhubApiKey'))); }
+    catch { return ok(false); }
+  });
+
+  ipcMain.handle(
+    'test-api:get-finnhub-earnings',
+    async (_e: IpcMainInvokeEvent, from: string, to: string, symbol?: string) => {
+      try {
+        const token = secureGet(db, 'finnhubApiKey');
+        if (!token) throw new Error('Finnhub API key not configured.');
+
+        const url = new URL('https://finnhub.io/api/v1/calendar/earnings');
+        url.searchParams.set('from', from);
+        url.searchParams.set('to', to);
+        url.searchParams.set('token', token);
+        if (symbol?.trim()) url.searchParams.set('symbol', symbol.trim().toUpperCase());
+
+        const resp = await fetch(url.toString());
+        if (!resp.ok) throw new Error(`Finnhub HTTP ${resp.status}: ${await resp.text()}`);
+        const json = await resp.json() as { earningsCalendar?: FinnhubEarningsEntry[] };
+
+        const entries: FinnhubEarningsEntry[] = json.earningsCalendar ?? [];
+
+        // Coverage check: how many returned tickers are in our constituents universe?
+        type TRow = { ticker: string };
+        const constituentTickers = new Set<string>(
+          (db.prepare('SELECT DISTINCT ticker FROM constituents').all() as TRow[]).map(r => r.ticker)
+        );
+        const matched = entries.filter(e => constituentTickers.has(e.symbol));
+
+        return ok({
+          from, to,
+          totalEntries: entries.length,
+          matchedConstituents: matched.length,
+          constituentCount: constituentTickers.size,
+          entries: entries.slice(0, 200),  // cap for display
+          rawSample: JSON.stringify(entries.slice(0, 3), null, 2),
+        });
+      } catch (err) {
+        return fail(err);
+      }
+    }
+  );
+}
+
+interface FinnhubEarningsEntry {
+  date: string;
+  symbol: string;
+  epsActual: number | null;
+  epsEstimate: number | null;
+  hour: string | null;  // 'bmo' | 'amc' | 'dmh'
+  quarter: number | null;
+  year: number | null;
+  revenueActual: number | null;
+  revenueEstimate: number | null;
 }

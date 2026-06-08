@@ -1278,20 +1278,195 @@ function IVolatilityTab() {
 
 // ─── Root view ────────────────────────────────────────────────────────────────
 
+// ─── Finnhub Tab ──────────────────────────────────────────────────────────────
+
+function FinnhubTab() {
+  const [apiKey, setApiKey]   = useState('');
+  const [showKey, setShowKey] = useState(false);
+  const [keySaved, setKeySaved] = useState(false);
+  const [keyOk, setKeyOk]     = useState<boolean | null>(null);
+  const [from, setFrom]       = useState(() => new Date().toISOString().slice(0, 10));
+  const [to, setTo]           = useState(() => {
+    const d = new Date(); d.setDate(d.getDate() + 90); return d.toISOString().slice(0, 10);
+  });
+  const [symbol, setSymbol]   = useState('');
+  const [loading, setLoading] = useState(false);
+  const [result, setResult]   = useState<Awaited<ReturnType<typeof window.api.testApi.getFinnhubEarnings>> | null>(null);
+  const [error, setError]     = useState<string | null>(null);
+  const [showRaw, setShowRaw] = useState(false);
+
+  useEffect(() => {
+    window.api.testApi.getFinnhubKeyConfigured().then(ok => setKeyOk(ok)).catch(() => setKeyOk(false));
+  }, []);
+
+  const saveKey = async () => {
+    if (!apiKey.trim()) return;
+    await window.api.testApi.saveFinnhubKey(apiKey.trim());
+    setKeySaved(true); setKeyOk(true); setApiKey('');
+    setTimeout(() => setKeySaved(false), 2500);
+  };
+
+  const fetchEarnings = async () => {
+    if (!from || !to) return;
+    setLoading(true); setError(null); setResult(null);
+    try {
+      const r = await window.api.testApi.getFinnhubEarnings(from, to, symbol || undefined);
+      setResult(r);
+    } catch (e) { setError((e as Error).message); }
+    finally { setLoading(false); }
+  };
+
+  const S = {
+    card:  { background: '#1e1e2e', border: '1px solid #313244', borderRadius: 8, padding: '12px 16px', marginBottom: 12 },
+    label: { color: '#6c7086', minWidth: 120 },
+    val:   { color: '#cdd6f4' },
+    good:  { color: '#a6e3a1' },
+    warn:  { color: '#f9e2af' },
+    bad:   { color: '#f38ba8' },
+  };
+
+  const hourLabel = (h: string | null) => {
+    if (!h) return '—';
+    if (h === 'bmo') return 'BMO';
+    if (h === 'amc') return 'AMC';
+    return h.toUpperCase();
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+
+      {/* ── API key row ── */}
+      <div style={S.card}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: '#89b4fa', marginBottom: 8 }}>
+          Finnhub API Key{' '}
+          {keyOk === true  && <span style={S.good}>✓ configured</span>}
+          {keyOk === false && <span style={S.bad}>⚠ not set</span>}
+        </div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <input
+            type={showKey ? 'text' : 'password'}
+            value={apiKey}
+            onChange={e => setApiKey(e.target.value)}
+            placeholder="Paste API key…"
+            style={{ flex: 1, padding: '5px 10px', borderRadius: 5, border: '1px solid #313244', background: '#181825', color: '#cdd6f4', fontSize: 12 }}
+          />
+          <button onClick={() => setShowKey(v => !v)}
+            style={{ padding: '4px 10px', borderRadius: 5, border: '1px solid #313244', background: 'transparent', color: '#6c7086', fontSize: 11, cursor: 'pointer' }}>
+            {showKey ? 'Hide' : 'Show'}
+          </button>
+          <button onClick={saveKey} disabled={!apiKey.trim()}
+            style={{ padding: '5px 14px', borderRadius: 5, border: 'none', background: '#89b4fa', color: '#1e1e2e', fontSize: 12, fontWeight: 700, cursor: 'pointer', opacity: apiKey.trim() ? 1 : 0.5 }}>
+            {keySaved ? 'Saved ✓' : 'Save'}
+          </button>
+        </div>
+        <div style={{ fontSize: 11, color: '#6c7086', marginTop: 6 }}>
+          Free API key at <span style={{ color: '#89b4fa' }}>finnhub.io/register</span> — 60 calls/min, no daily cap.
+        </div>
+      </div>
+
+      {/* ── Query row ── */}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <label style={{ ...S.label, fontSize: 11 }}>From</label>
+        <input value={from} onChange={e => setFrom(e.target.value)} placeholder="YYYY-MM-DD"
+          style={{ width: 120, padding: '5px 10px', borderRadius: 5, border: '1px solid #313244', background: '#1e1e2e', color: '#cdd6f4', fontSize: 12 }} />
+        <label style={{ ...S.label, fontSize: 11, minWidth: 0 }}>To</label>
+        <input value={to} onChange={e => setTo(e.target.value)} placeholder="YYYY-MM-DD"
+          style={{ width: 120, padding: '5px 10px', borderRadius: 5, border: '1px solid #313244', background: '#1e1e2e', color: '#cdd6f4', fontSize: 12 }} />
+        <label style={{ ...S.label, fontSize: 11, minWidth: 0 }}>Symbol (optional)</label>
+        <input value={symbol} onChange={e => setSymbol(e.target.value.toUpperCase())} placeholder="AAPL"
+          style={{ width: 80, padding: '5px 10px', borderRadius: 5, border: '1px solid #313244', background: '#1e1e2e', color: '#cdd6f4', fontSize: 12 }} />
+        <button onClick={fetchEarnings} disabled={loading || !from || !to}
+          style={{ padding: '5px 14px', borderRadius: 5, border: 'none', background: loading ? '#313244' : '#89b4fa', color: '#1e1e2e', fontSize: 12, fontWeight: 700, cursor: loading ? 'wait' : 'pointer' }}>
+          {loading ? 'Fetching…' : 'Fetch Earnings'}
+        </button>
+      </div>
+
+      {error && <div style={{ ...S.card, borderColor: '#f38ba8', color: '#f38ba8' }}>{error}</div>}
+
+      {/* ── Coverage summary ── */}
+      {result && (
+        <div style={S.card}>
+          <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', fontSize: 12 }}>
+            <span><span style={S.label}>Total entries</span>{' '}<span style={S.val}>{result.totalEntries}</span></span>
+            <span>
+              <span style={S.label}>Constituent matches</span>{' '}
+              <span style={result.matchedConstituents > 0 ? S.good : S.warn}>
+                {result.matchedConstituents} / {result.constituentCount}
+              </span>
+            </span>
+            <span><span style={S.label}>Date range</span>{' '}<span style={S.val}>{result.from} → {result.to}</span></span>
+            {result.entries.length < result.totalEntries && (
+              <span style={S.warn}>Showing first {result.entries.length} of {result.totalEntries}</span>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Results table ── */}
+      {result && result.entries.length > 0 && (
+        <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 400, border: '1px solid #313244', borderRadius: 6 }}>
+          <table style={{ borderCollapse: 'collapse', fontSize: 11, width: '100%' }}>
+            <thead>
+              <tr style={{ background: '#181825', position: 'sticky', top: 0, zIndex: 1 }}>
+                {['Date', 'Symbol', 'Time', 'Q', 'EPS Est', 'EPS Actual', 'Rev Est', 'Rev Actual'].map(h => (
+                  <th key={h} style={{ padding: '5px 10px', textAlign: 'left', color: '#6c7086', fontWeight: 600, borderBottom: '1px solid #313244', whiteSpace: 'nowrap' }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {result.entries.map((e, i) => (
+                <tr key={i} style={{ borderBottom: '1px solid #1e1e2e' }}>
+                  <td style={{ padding: '3px 10px', color: '#cdd6f4' }}>{e.date}</td>
+                  <td style={{ padding: '3px 10px', color: '#89b4fa', fontWeight: 600 }}>{e.symbol}</td>
+                  <td style={{ padding: '3px 10px', color: e.hour === 'bmo' ? '#a6e3a1' : e.hour === 'amc' ? '#f38ba8' : '#6c7086' }}>{hourLabel(e.hour)}</td>
+                  <td style={{ padding: '3px 10px', color: '#6c7086' }}>{e.quarter ? `Q${e.quarter}` : '—'}</td>
+                  <td style={{ padding: '3px 10px', color: '#f9e2af' }}>{e.epsEstimate != null ? e.epsEstimate.toFixed(2) : '—'}</td>
+                  <td style={{ padding: '3px 10px', color: e.epsActual != null ? '#a6e3a1' : '#6c7086' }}>{e.epsActual != null ? e.epsActual.toFixed(2) : '—'}</td>
+                  <td style={{ padding: '3px 10px', color: '#6c7086' }}>{e.revenueEstimate != null ? `$${(e.revenueEstimate / 1e9).toFixed(1)}B` : '—'}</td>
+                  <td style={{ padding: '3px 10px', color: e.revenueActual != null ? '#a6e3a1' : '#6c7086' }}>{e.revenueActual != null ? `$${(e.revenueActual / 1e9).toFixed(1)}B` : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* ── Raw JSON ── */}
+      {result && (
+        <div>
+          <button onClick={() => setShowRaw(v => !v)}
+            style={{ padding: '3px 10px', borderRadius: 4, border: '1px solid #313244', background: 'transparent', color: '#6c7086', fontSize: 11, cursor: 'pointer', marginBottom: 6 }}>
+            {showRaw ? 'Hide' : 'Show'} raw sample (first 3 entries)
+          </button>
+          {showRaw && (
+            <pre style={{ background: '#181825', border: '1px solid #313244', borderRadius: 6, padding: 12, fontSize: 10, color: '#cdd6f4', overflowX: 'auto', maxHeight: 300 }}>
+              {result.rawSample}
+            </pre>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Main View ────────────────────────────────────────────────────────────────
+
 export function TestApiView() {
-  const [provider, setProvider] = useState<'polygon' | 'etrade' | 'marketdata' | 'ivolatility'>('polygon');
+  const [provider, setProvider] = useState<'polygon' | 'etrade' | 'marketdata' | 'ivolatility' | 'finnhub'>('polygon');
 
   const TAB_LABELS: Record<typeof provider, string> = {
     polygon:     'Polygon',
     etrade:      'E*Trade',
     marketdata:  'MarketData.app',
     ivolatility: 'IVolatility',
+    finnhub:     'Finnhub',
   };
   const TAB_DESC: Record<typeof provider, string> = {
     polygon:     'Current provider — validates data quality & plan coverage',
     etrade:      'Options provider — validate before full integration',
     marketdata:  'IV history source — verify chain parsing & ATM IV computation',
     ivolatility: 'IV history source — pre-computed 30-day CM ATM IVX, true as-of-date snapshots',
+    finnhub:     'Earnings calendar — bulk date-range query, free tier (60 calls/min)',
   };
 
   return (
@@ -1301,7 +1476,7 @@ export function TestApiView() {
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
         <h2 style={{ margin: 0, color: '#89b4fa', fontSize: '14px', fontWeight: 700 }}>🔬 Test API</h2>
         <div style={{ display: 'flex', borderRadius: '6px', overflow: 'hidden', border: '1px solid #313244' }}>
-          {(['polygon', 'etrade', 'marketdata', 'ivolatility'] as const).map(p => (
+          {(['polygon', 'etrade', 'marketdata', 'ivolatility', 'finnhub'] as const).map(p => (
             <button key={p} onClick={() => setProvider(p)} style={{
               padding: '4px 16px', border: 'none', cursor: 'pointer', fontSize: '12px', fontWeight: 600,
               background: provider === p ? '#89b4fa' : '#1e1e2e',
@@ -1315,7 +1490,7 @@ export function TestApiView() {
       </div>
 
       {/* ── Legend (Polygon / E*Trade only) ── */}
-      {provider !== 'marketdata' && provider !== 'ivolatility' && (
+      {provider !== 'marketdata' && provider !== 'ivolatility' && provider !== 'finnhub' && (
         <div style={{ display: 'flex', gap: '16px', fontSize: '11px', color: '#6c7086', flexWrap: 'wrap' }}>
           <span><span style={{ color: '#a6e3a1' }}>Mid</span> = (bid+ask)/2</span>
           <span><span style={{ color: '#fab387' }}>Last</span> = most recent trade / day close</span>
@@ -1329,6 +1504,7 @@ export function TestApiView() {
       {provider === 'etrade'       && <ETradeTab />}
       {provider === 'marketdata'   && <MarketDataTab />}
       {provider === 'ivolatility'  && <IVolatilityTab />}
+      {provider === 'finnhub'      && <FinnhubTab />}
     </div>
   );
 }

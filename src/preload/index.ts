@@ -819,6 +819,27 @@ function buildApi() {
         rawFieldTypes: Record<string, string>;
         rawSample: string;
       }>('test-api:get-ivolatility-ivx', symbol, from, to),
+
+    saveFinnhubKey: (key: string) =>
+      invoke<boolean>('test-api:save-finnhub-key', key),
+
+    getFinnhubKeyConfigured: () =>
+      invoke<boolean>('test-api:get-finnhub-key-configured'),
+
+    getFinnhubEarnings: (from: string, to: string, symbol?: string) =>
+      invoke<{
+        from: string; to: string;
+        totalEntries: number;
+        matchedConstituents: number;
+        constituentCount: number;
+        entries: Array<{
+          date: string; symbol: string;
+          epsActual: number | null; epsEstimate: number | null;
+          hour: string | null; quarter: number | null; year: number | null;
+          revenueActual: number | null; revenueEstimate: number | null;
+        }>;
+        rawSample: string;
+      }>('test-api:get-finnhub-earnings', from, to, symbol),
   };
 
   const agent = {

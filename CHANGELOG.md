@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.27] — 2026-06-08
+
+### Added
+- **Test API — Finnhub tab**: API key save/load, date-range earnings calendar fetch (bulk, not per-ticker), constituent coverage counter, results table (Date · Symbol · BMO/AMC · Quarter · EPS Est/Actual · Revenue Est/Actual), raw JSON sample. Pre-implementation validation before wiring Finnhub into the earnings pipeline.
+
 ## [0.32.26] — 2026-06-08
 
 ### Fixed
