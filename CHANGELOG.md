@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.24] — 2026-06-08
+
+### Added
+- **My Stocks actions column**: four navigation buttons added — 🎯 Validate, 🔬 Lab, 📐 Payoff, 📉 Options — alongside the existing Edit / History / Remove buttons
+
 ## [0.32.23] — 2026-06-08
 
 ### Fixed
