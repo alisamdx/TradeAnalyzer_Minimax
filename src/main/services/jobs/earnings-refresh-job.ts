@@ -42,8 +42,9 @@ export class EarningsRefreshJob implements BatchJobHandler {
   readonly name = 'Earnings Refresh';
   readonly description =
     'Refreshes upcoming earnings dates for all S&P 500 + Russell 1000 tickers via E*Trade. ' +
-    'Smart caching: skips tickers that already have a future earnings date stored. ' +
-    'Only re-fetches after a stored date passes (next earnings cycle).';
+    'Delta mode: only fetches tickers with no stored date or whose stored date has passed. ' +
+    'The day after a full run, only tickers whose earnings just occurred are re-fetched. ' +
+    'Manual entries and tickers with future dates are excluded before the loop starts.';
 
   constructor(
     private readonly db: DbHandle,
@@ -90,9 +91,37 @@ export class EarningsRefreshJob implements BatchJobHandler {
       };
     }
 
+    // Delta filter: only fetch tickers that have no stored date, or whose stored date
+    // is today/past (earnings occurred → need the next cycle date).
+    // Manual entries are never overwritten — excluded here, not just in refreshTickers.
+    const todayStr = new Date().toISOString().slice(0, 10);
+    type DeltaRow = { ticker: string };
+    const deltaRows = (force ? rows : this.db.prepare(`
+      SELECT DISTINCT c.ticker
+      FROM constituents c
+      LEFT JOIN earnings_calendar ec ON ec.ticker = c.ticker
+      WHERE ec.ticker IS NULL
+         OR (ec.source != 'manual' AND ec.report_date <= ?)
+      ORDER BY c.ticker
+    `).all(todayStr)) as DeltaRow[];
+
+    const deltaCount = deltaRows.length;
+    const cachedCount = tickers.length - deltaCount;
+
+    if (deltaCount === 0) {
+      return {
+        status: 'skipped',
+        notes: `All ${tickers.length} tickers already have future dates cached — nothing to refresh`,
+        tickersAttempted: 0,
+        tickersUpdated: 0,
+        tickersSkipped: tickers.length,
+        tickersFailed: 0,
+      };
+    }
+
     let attempted = 0, updated = 0, skipped = 0, failed = 0;
 
-    for (const ticker of tickers) {
+    for (const { ticker } of deltaRows) {
       if (signal.aborted) break;
 
       attempted++;
@@ -105,7 +134,7 @@ export class EarningsRefreshJob implements BatchJobHandler {
           onProgress({
             jobId: JOB_ID, runId: 0, ticker,
             status: 'updated',
-            attempted, updated, skipped, failed, total: tickers.length,
+            attempted, updated, skipped, failed, total: deltaCount,
           });
           // Delay after a real API call to respect E*Trade rate limits
           if (!signal.aborted) await sleep(callDelayMs);
@@ -114,42 +143,38 @@ export class EarningsRefreshJob implements BatchJobHandler {
           onProgress({
             jobId: JOB_ID, runId: 0, ticker,
             status: 'no-data',
-            attempted, updated, skipped, failed, total: tickers.length,
+            attempted, updated, skipped, failed, total: deltaCount,
             message: result.errors[0],
           });
           // Still delay — even a failed call hit the API
           if (!signal.aborted) await sleep(callDelayMs);
         } else {
-          // Skipped — future date already cached or manual entry
+          // Skipped — manual entry slipped through (safety net)
           skipped++;
           onProgress({
             jobId: JOB_ID, runId: 0, ticker,
             status: 'skipped',
-            attempted, updated, skipped, failed, total: tickers.length,
+            attempted, updated, skipped, failed, total: deltaCount,
           });
-          // No delay needed — no API call was made
         }
       } catch (err) {
         failed++;
         onProgress({
           jobId: JOB_ID, runId: 0, ticker,
           status: 'failed',
-          attempted, updated, skipped, failed, total: tickers.length,
+          attempted, updated, skipped, failed, total: deltaCount,
           message: err instanceof Error ? err.message : String(err),
         });
         if (!signal.aborted) await sleep(callDelayMs);
       }
     }
 
-    const allSkipped = attempted > 0 && updated === 0 && failed === 0;
     return {
       status: signal.aborted ? 'failed' : 'success',
-      notes: allSkipped
-        ? `All ${skipped} tickers have valid future dates cached`
-        : `${updated} updated, ${skipped} cached (future date), ${failed} no-data`,
+      notes: `${updated} updated, ${failed} no-data; ${cachedCount} of ${tickers.length} already had future dates cached`,
       tickersAttempted: attempted,
       tickersUpdated: updated,
-      tickersSkipped: skipped,
+      tickersSkipped: skipped + cachedCount,
       tickersFailed: failed,
     };
   }

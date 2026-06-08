@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.23] — 2026-06-08
+
+### Fixed
+- **Earnings Refresh batch job**: switched from full-population iteration to delta mode — a single SQL LEFT JOIN now pre-filters the ticker list to only those with no stored date or a past/today date. The day after a full run, only tickers whose earnings just occurred are fetched instead of all 1000+. Manual entries and tickers with future dates are excluded before the loop even starts.
+
 ## [0.32.22] — 2026-06-08
 
 ### Fixed
