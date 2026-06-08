@@ -487,15 +487,13 @@ export function ConvictionView() {
                     <td>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                         <div style={{ display: 'flex', gap: 4 }}>
-                          <button className="cv-btn" onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-validate',    { detail: { ticker: stock.ticker } }))} title="Validate">🎯 Validate</button>
-                          <button className="cv-btn" onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-strategyLab', { detail: { ticker: stock.ticker } }))} title="Strategy Lab">🔬 Lab</button>
-                          <button className="cv-btn" onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-payoff',      { detail: { ticker: stock.ticker, spot: stock.currentPrice } }))} title="Payoff">📐 Payoff</button>
-                          <button className="cv-btn" onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-options',     { detail: { ticker: stock.ticker } }))} title="Options">📉 Options</button>
-                        </div>
-                        <div style={{ display: 'flex', gap: 4 }}>
-                          <button className="cv-btn" onClick={() => setEditStock(stock)} title="Edit">✎ Edit</button>
-                          <button className="cv-btn" onClick={() => setHistoryTicker(stock.ticker)} title="Band history">🕓 History</button>
-                          <button className="cv-btn danger" onClick={() => handleRemove(stock.ticker)} title="Remove">✕ Remove</button>
+                          <button className="cv-btn" onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-validate',    { detail: { ticker: stock.ticker } }))} title="Validate">🎯</button>
+                          <button className="cv-btn" onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-strategyLab', { detail: { ticker: stock.ticker } }))} title="Strategy Lab">🔬</button>
+                          <button className="cv-btn" onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-payoff',      { detail: { ticker: stock.ticker, spot: stock.currentPrice } }))} title="Payoff">📐</button>
+                          <button className="cv-btn" onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-options',     { detail: { ticker: stock.ticker } }))} title="Options">📉</button>
+                          <button className="cv-btn" onClick={() => setEditStock(stock)} title="Edit">✎</button>
+                          <button className="cv-btn" onClick={() => setHistoryTicker(stock.ticker)} title="Band history">🕓</button>
+                          <button className="cv-btn danger" onClick={() => handleRemove(stock.ticker)} title="Remove">✕</button>
                         </div>
                       </div>
                     </td>

@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.25] — 2026-06-08
+
+### Changed
+- **My Stocks actions**: buttons consolidated to single row, icon-only (🎯🔬📐📉✎🕓✕) with tooltips — prevents 2-line wrapping
+
 ## [0.32.24] — 2026-06-08
 
 ### Added
