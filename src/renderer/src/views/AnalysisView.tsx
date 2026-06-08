@@ -340,30 +340,30 @@ export function AnalysisView({ initialTicker, clearInitialTicker }: AnalysisView
       detail.expiry = result.expiration;
     } else if ((result.mode === 'jade_lizard' || result.mode === 'big_lizard') &&
                result.putStrike && result.shortCallStrike && result.longCallStrike &&
-               result.expiration && result.putPremium != null &&
-               result.shortCallPremium != null && result.longCallPremium != null) {
+               result.expiration) {
       const mkId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
       const expiry = result.expiration;
       const stratLabel = result.mode === 'jade_lizard' ? 'Jade Lizard' : 'Big Lizard';
+      // Premiums may be null on snapshots run before v0.32.20 — default to 0 so structure is still pre-filled
       const legs: PayoffLeg[] = [
         {
           id: mkId(), side: 'sell', type: 'put',
           strike: result.putStrike, expiry,
-          premium: result.putPremium, quantity: 1,
+          premium: result.putPremium ?? 0, quantity: 1,
           delta: null, theta: null, vega: null, iv: null,
           label: `Sell ${result.putStrike} Put`,
         },
         {
           id: mkId(), side: 'sell', type: 'call',
           strike: result.shortCallStrike, expiry,
-          premium: result.shortCallPremium, quantity: 1,
+          premium: result.shortCallPremium ?? 0, quantity: 1,
           delta: null, theta: null, vega: null, iv: null,
           label: `Sell ${result.shortCallStrike} Call`,
         },
         {
           id: mkId(), side: 'buy', type: 'call',
           strike: result.longCallStrike, expiry,
-          premium: result.longCallPremium, quantity: 1,
+          premium: result.longCallPremium ?? 0, quantity: 1,
           delta: null, theta: null, vega: null, iv: null,
           label: `Buy ${result.longCallStrike} Call`,
         },

@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.21] — 2026-06-08
+
+### Fixed
+- **Lizard → Payoff**: legs now always pre-populate when strikes + expiry are available; per-leg premiums default to 0 for snapshots run before v0.32.20 so the structure is pre-filled even on older data
+
 ## [0.32.20] — 2026-06-08
 
 ### Fixed
