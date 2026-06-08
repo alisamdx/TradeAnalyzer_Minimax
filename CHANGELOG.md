@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.32.7] — 2026-06-07
+
+### Changed
+- **Scoring engine**: removed vestigial `phase2` signal infrastructure — the field existed in `ScoringSignal` but no current baseline used it; all `!s.phase2` guards removed from scoring-service, critic-service, daily-intelligence-brief-job, and TradeScoringView. The "Phase 2" section and badge in the Trade Scoring config UI are gone. All signals are now fully active or disabled by the user toggle with no hidden suppression.
+- **Daily Brief AI model**: upgraded from `claude-haiku-4-5-20251001` to `claude-sonnet-4-6` for both the pick rationale synthesis (stage 5) and the AI Critic (stage 5b). Sonnet produces deeper second-order reasoning on signal interactions; cost estimate updated accordingly (~$3/M input, ~$15/M output).
+
 ## [0.31.5] — 2026-06-07
 
 ### Fixed

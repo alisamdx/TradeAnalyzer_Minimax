@@ -22,10 +22,10 @@ describe('screener-filters', () => {
       expect(f.defaultMin).toBe(2_000_000_000);
     });
 
-    it('default P/E is 0–50', () => {
+    it('default P/E is 0–80', () => {
       const f = DEFAULT_FILTER_SPECS.find((f) => f.id === 'pe_ratio')!;
       expect(f.defaultMin).toBe(0);
-      expect(f.defaultMax).toBe(50);
+      expect(f.defaultMax).toBe(80);
     });
 
     it('P/E is enabled by default', () => {
@@ -38,9 +38,9 @@ describe('screener-filters', () => {
       expect(f.defaultMin).toBe(0.01); // > 0
     });
 
-    it('default D/E is < 1.5', () => {
+    it('default D/E is < 2.0', () => {
       const f = DEFAULT_FILTER_SPECS.find((f) => f.id === 'debt_to_equity')!;
-      expect(f.defaultMax).toBe(1.5);
+      expect(f.defaultMax).toBe(2.0);
     });
 
     it('ROE is ≥ 10% by default', () => {

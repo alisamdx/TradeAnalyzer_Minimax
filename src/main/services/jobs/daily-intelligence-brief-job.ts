@@ -156,7 +156,7 @@ export class DailyIntelligenceBriefJob implements BatchJobHandler {
     const rankedByStrategy = new Map<string, ScoredTicker[]>();
     for (const strategy of STRATEGIES) {
       const config = this.scoringService.getConfig(strategy);
-      const enabledSignals = config.signals.filter(s => s.enabled && !s.phase2);
+      const enabledSignals = config.signals.filter(s => s.enabled);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const scored = candidates.map(ticker => (this.scoringService as any).scoreTicker(ticker, signalData.get(ticker) ?? null, enabledSignals, config.signals) as ScoredTicker);
       scored.sort((a, b) => b.compositeScore - a.compositeScore);
@@ -289,7 +289,7 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
       const userPrompt = `Review these top trade candidates and provide rationale for each:\n\n${JSON.stringify(picksForAI, null, 2)}\n\nRespond with a JSON array: [{"ticker":"X","strategy":"wheel","rationale":"..."}]`;
 
       const response = await client.messages.create({
-        model: 'claude-haiku-4-5-20251001',
+        model: 'claude-sonnet-4-6',
         max_tokens: 2048,
         system: systemPrompt,
         messages: [{ role: 'user', content: userPrompt }],
@@ -306,10 +306,10 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
         }
       }
 
-      // Rough cost estimate: haiku input ~$0.25/M + output ~$1.25/M tokens
+      // Rough cost estimate: sonnet-4-6 input ~$3/M + output ~$15/M tokens
       const inputTokens = response.usage?.input_tokens ?? 0;
       const outputTokens = response.usage?.output_tokens ?? 0;
-      aiCostEstimate = (inputTokens / 1_000_000) * 0.25 + (outputTokens / 1_000_000) * 1.25;
+      aiCostEstimate = (inputTokens / 1_000_000) * 3.00 + (outputTokens / 1_000_000) * 15.00;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       runMeta['aiError'] = msg === 'no_key' ? 'Anthropic API key not configured' : msg;
@@ -409,7 +409,7 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
       }
       await Promise.allSettled(criticTasks);
 
-      // Estimate: ~$0.002/pick (haiku)
+      // Estimate: ~$0.008/pick (sonnet-4-6)
       const totalCriticPicks = [...assembledPicks.values()].reduce((n, p) => n + p.length, 0);
       criticCostEstimate = totalCriticPicks * 0.002;
     } else {

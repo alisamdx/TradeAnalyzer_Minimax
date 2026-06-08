@@ -1514,7 +1514,6 @@ export interface ScoringSignal {
   targetMin?: number;
   targetMax?: number;
   normMax?: number;
-  phase2?: boolean;
 }
 
 export interface SignalBreakdown {

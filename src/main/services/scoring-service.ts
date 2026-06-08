@@ -41,8 +41,6 @@ export interface ScoringSignal {
   targetMax?: number;
   /** Expected max value for higher_better / lower_better normalization. */
   normMax?: number;
-  /** Phase 2 placeholder — not computed in Phase 1; always scores 0. */
-  phase2?: boolean;
 }
 
 export interface SignalBreakdown {
@@ -450,7 +448,7 @@ export class ScoringService {
     if (tickers.length === 0) return [];
 
     const config = this.getConfig(strategy);
-    const enabledSignals = config.signals.filter(s => s.enabled && !s.phase2);
+    const enabledSignals = config.signals.filter(s => s.enabled);
 
     // Gather all signal data in batched DB queries
     const signalData = this.gatherSignalData(tickers);
@@ -468,7 +466,7 @@ export class ScoringService {
   ): ScoredTicker {
     const signals: Record<string, SignalBreakdown> = {};
 
-    // Initialize all signals (including phase2 placeholders)
+    // Initialize all signals
     for (const sig of allSignals) {
       signals[sig.key] = { raw: null, normalized: 0, weight: sig.weight, missing: true };
     }

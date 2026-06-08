@@ -138,7 +138,7 @@ End your response with a JSON object on its own line: {"verdict":"pass","confide
 Use verdict: pass, caution, or flag. Use confidence: high, medium, or low.`;
 
       const response = await client.messages.create({
-        model: 'claude-haiku-4-5-20251001',
+        model: 'claude-sonnet-4-6',
         max_tokens: 256,
         system: systemPrompt,
         messages: [{ role: 'user', content: JSON.stringify(context) }],
@@ -257,7 +257,7 @@ Use verdict: pass, caution, or flag. Use confidence: high, medium, or low.`;
 
   private checkCriticalSignalMissing(pick: BriefPick, config: ScoringConfig): CriticFlag | null {
     const top2 = [...config.signals]
-      .filter(s => s.enabled && !s.phase2)
+      .filter(s => s.enabled)
       .sort((a, b) => b.weight - a.weight)
       .slice(0, 2);
 

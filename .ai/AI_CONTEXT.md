@@ -2,7 +2,7 @@
 
 > **Read this first.** Self-contained snapshot of *what the app is today* so a fresh AI session is productive without re-reading the whole codebase. This file describes **current state** — not history. Release history lives in `CHANGELOG.md` / `changelogs/`. Operating rules live in `/CLAUDE.md`. Full spec lives in `Requirements/`.
 >
-> Last verified against code: 2026-06-07 (v0.32.6). When you make a material change, update the relevant section here in the same commit.
+> Last verified against code: 2026-06-07 (v0.32.7). When you make a material change, update the relevant section here in the same commit.
 
 ---
 
@@ -48,7 +48,7 @@ The app no longer routes everything through Polygon. Current split:
 
 - **Options provider is switchable** via the `optionsProvider` setting (`'polygon'` | `'etrade'`), read at startup in `index.ts`. **E*Trade is the active default** — Polygon Options Starter was cancelled.
 - `DataProvider` (quotes/fundamentals/bars) is always Polygon.
-- AI models in use: `claude-opus-4-7` (portfolio advisor, payoff assess), `claude-haiku-4-5` (daily brief, critic, news, strategy-lab rationale, paper-trade learning). Update these in one place per service if models are rotated.
+- AI models in use: `claude-opus-4-7` (portfolio advisor, payoff assess), `claude-sonnet-4-6` (daily brief rationale + AI critic), `claude-haiku-4-5` (news, strategy-lab rationale, paper-trade learning). Update these in one place per service if models are rotated.
 
 ### E*Trade auth quirks
 - OAuth 1.0a flow in `etrade-auth.ts`; all calls go through `etradeGet()` which signs requests — never build auth headers by hand.

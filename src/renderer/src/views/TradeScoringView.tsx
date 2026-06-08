@@ -27,12 +27,12 @@ const DIRECTION_TITLE: Record<ScoringSignal['direction'], string> = {
 const STRATEGIES: ScoringStrategy[] = ['wheel', 'bullish', 'bearish', 'income', 'buy'];
 
 function totalWeight(signals: ScoringSignal[]): number {
-  return signals.filter(s => s.enabled && !s.phase2).reduce((sum, s) => sum + s.weight, 0);
+  return signals.filter(s => s.enabled).reduce((sum, s) => sum + s.weight, 0);
 }
 
 /** Redistribute weight when one signal changes so enabled total stays at 100. */
 function redistributeWeights(signals: ScoringSignal[], changedKey: string, newWeight: number): ScoringSignal[] {
-  const others = signals.filter(s => s.key !== changedKey && s.enabled && !s.phase2);
+  const others = signals.filter(s => s.key !== changedKey && s.enabled);
   if (others.length === 0) return signals.map(s => s.key === changedKey ? { ...s, weight: 100 } : s);
 
   const oldOtherTotal = others.reduce((sum, s) => sum + s.weight, 0);
@@ -40,7 +40,7 @@ function redistributeWeights(signals: ScoringSignal[], changedKey: string, newWe
 
   return signals.map(s => {
     if (s.key === changedKey) return { ...s, weight: newWeight };
-    if (!s.enabled || s.phase2) return s;
+    if (!s.enabled) return s;
     if (oldOtherTotal === 0) return { ...s, weight: remaining / others.length };
     return { ...s, weight: Math.round((s.weight / oldOtherTotal) * remaining) };
   });
@@ -53,8 +53,7 @@ function SignalRow({
   signal: ScoringSignal;
   onChange: (updated: ScoringSignal) => void;
 }) {
-  const isPhase2 = signal.phase2 ?? false;
-  const isActive = signal.enabled && !isPhase2;
+  const isActive = signal.enabled;
 
   return (
     <div className={`scoring-signal-row${!isActive ? ' disabled' : ''}`}>
@@ -63,8 +62,6 @@ function SignalRow({
         <input
           type="checkbox"
           checked={signal.enabled}
-          disabled={isPhase2}
-          title={isPhase2 ? 'Phase 2 — not yet available' : undefined}
           onChange={e => onChange({ ...signal, enabled: e.target.checked })}
         />
       </div>
@@ -79,7 +76,7 @@ function SignalRow({
           >
             {DIRECTION_ICON[signal.direction]}
           </span>
-          {isPhase2 && <span className="sig-phase2-badge">Phase 2</span>}
+
         </div>
         <span className="sig-source">{signal.dataSource}</span>
       </div>
@@ -92,7 +89,7 @@ function SignalRow({
             min={0}
             max={100}
             value={signal.weight}
-            disabled={!signal.enabled || isPhase2}
+            disabled={!signal.enabled}
             onChange={e => {
               const val = Math.min(100, Math.max(0, parseInt(e.target.value, 10) || 0));
               onChange({ ...signal, weight: val });
@@ -174,12 +171,12 @@ export function TradeScoringView() {
       }
       if (old && old.enabled !== updated.enabled) {
         const newSignals = prev.map(s => s.key === updated.key ? updated : s);
-        const enabled = newSignals.filter(s => s.enabled && !s.phase2);
+        const enabled = newSignals.filter(s => s.enabled);
         const tot = enabled.reduce((sum, s) => sum + s.weight, 0);
         if (tot === 0) return newSignals;
         const scale = 100 / tot;
         return newSignals.map(s =>
-          s.enabled && !s.phase2 ? { ...s, weight: Math.round(s.weight * scale) } : s
+          s.enabled ? { ...s, weight: Math.round(s.weight * scale) } : s
         );
       }
       return prev.map(s => s.key === updated.key ? updated : s);
@@ -220,9 +217,8 @@ export function TradeScoringView() {
 
   const cfg = configs[selectedStrategy];
   const enabledTotal = totalWeight(editingSignals);
-  const isBalanced = enabledTotal === 100 || editingSignals.filter(s => s.enabled && !s.phase2).length === 0;
-  const activeSignals = editingSignals.filter(s => s.enabled && !s.phase2);
-  const phase2Signals = editingSignals.filter(s => s.phase2);
+  const isBalanced = enabledTotal === 100 || editingSignals.filter(s => s.enabled).length === 0;
+  const activeSignals = editingSignals.filter(s => s.enabled);
 
   return (
     <div className="view trade-scoring-view">
@@ -266,22 +262,9 @@ export function TradeScoringView() {
           <span className="sh-desc">Expert rationale</span>
         </div>
 
-        {/* Active signals */}
-        {editingSignals.filter(s => !s.phase2).map(sig => (
+        {editingSignals.map(sig => (
           <SignalRow key={sig.key} signal={sig} onChange={handleSignalChange} />
         ))}
-
-        {/* Phase 2 section */}
-        {phase2Signals.length > 0 && (
-          <>
-            <div className="scoring-phase2-divider">
-              <span>Phase 2 signals — not yet available</span>
-            </div>
-            {phase2Signals.map(sig => (
-              <SignalRow key={sig.key} signal={sig} onChange={handleSignalChange} />
-            ))}
-          </>
-        )}
 
         {/* Weight total */}
         <div className={`scoring-total-row${isBalanced ? ' ok' : ' warn'}`}>
