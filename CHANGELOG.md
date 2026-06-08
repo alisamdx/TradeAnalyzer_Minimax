@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.29] — 2026-06-08
+
+### Changed
+- **Earnings Refresh**: Finnhub dates stored as `confirmed=true` — calendar shows "✓ Confirmed" instead of "~ Estimated"; Finnhub data quality verified to be reliable (ABNB, ADBE etc.). E*Trade Phase 2 loop still runs for tickers Finnhub didn't cover, but cannot overwrite Finnhub future dates (delta filter excludes them).
+
 ## [0.32.28] — 2026-06-08
 
 ### Added

@@ -119,7 +119,9 @@ export class EarningsRefreshJob implements BatchJobHandler {
             // Map Finnhub hour to our report_time
             const reportTime: 'bmo' | 'amc' | null =
               e.hour === 'bmo' ? 'bmo' : e.hour === 'amc' ? 'amc' : null;
-            this.earningsService.upsertFromProvider(e.symbol, e.date, reportTime, 'finnhub', false);
+            // Finnhub data is confirmed-quality — store as confirmed=true so the
+            // calendar shows "✓ Confirmed" rather than "~ Estimated".
+            this.earningsService.upsertFromProvider(e.symbol, e.date, reportTime, 'finnhub', true);
             finnhubFilled++;
           }
         } else {
