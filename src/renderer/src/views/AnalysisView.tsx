@@ -446,7 +446,7 @@ export function AnalysisView({ initialTicker, clearInitialTicker }: AnalysisView
   const pct = progress ? Math.round((progress.current / Math.max(progress.total, 1)) * 100) : 0;
 
   return (
-    <div style={{ padding: '20px 24px', maxWidth: 1200, margin: '0 auto' }}>
+    <div style={{ padding: '20px 24px' }}>
       <style>{`
         .an-tab { padding: 7px 16px; border-radius: 6px 6px 0 0; border: 1px solid #2d3748; border-bottom: none; background: #131b2e; color: #95a5a6; cursor: pointer; font-size: 13px; font-weight: 500; transition: background 0.15s; }
         .an-tab:hover { background: #1a2535; color: #ecf0f1; }

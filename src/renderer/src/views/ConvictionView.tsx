@@ -391,7 +391,7 @@ export function ConvictionView() {
 
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-      <div style={{ padding: '20px 24px', maxWidth: 1200, margin: '0 auto' }}>
+      <div style={{ padding: '20px 24px' }}>
         <style>{`
           .cv-table { width: 100%; border-collapse: collapse; font-size: 13px; }
           .cv-table th { background: #1a2235; color: #89b4fa; text-align: left; padding: 8px 10px; font-weight: 600; border-bottom: 1px solid #2d3748; white-space: nowrap; }

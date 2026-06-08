@@ -389,7 +389,7 @@ export function BatchView() {
 
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-    <div style={{ padding: '20px 24px', maxWidth: 1100, margin: '0 auto' }}>
+    <div style={{ padding: '20px 24px' }}>
       <style>{`
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         .batch-table { width: 100%; border-collapse: collapse; font-size: 13px; }

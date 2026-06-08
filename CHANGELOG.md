@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.19] — 2026-06-08
+
+### Changed
+- **Grid width**: removed fixed `maxWidth` caps from Analysis Engine (1200px), My Stocks (1200px), Batch Jobs (1100px), and Strategy Lab (1000px) — grids now use full available width, eliminating horizontal scrollbars
+
 ## [0.32.18] — 2026-06-07
 
 ### Added

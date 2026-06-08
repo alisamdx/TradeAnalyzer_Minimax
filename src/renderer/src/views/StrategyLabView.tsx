@@ -791,7 +791,7 @@ export function StrategyLabView({ initialTicker }: StrategyLabViewProps = {}) {
   };
 
   return (
-    <div style={{ padding: '20px 24px', color: '#e2e8f0', maxWidth: 1000, margin: '0 auto', height: '100%', overflowY: 'auto', boxSizing: 'border-box' }}>
+    <div style={{ padding: '20px 24px', color: '#e2e8f0', height: '100%', overflowY: 'auto', boxSizing: 'border-box' }}>
       {/* Header */}
       <div style={{ marginBottom: 20 }}>
         <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: '#f8fafc' }}>🔬 Strategy Lab</h2>
