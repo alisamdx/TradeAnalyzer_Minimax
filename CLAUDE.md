@@ -93,6 +93,7 @@ Update only what the change touches — don't regenerate everything:
 | Services/views/IPC/providers | `.ai/AI_CONTEXT.md` (state map) + the relevant `spec/` section |
 | A non-obvious gotcha | `CLAUDE.md` Known quirks + `.ai/AI_CONTEXT.md §10` |
 | Install/run/config | `README.md` |
+| A user-facing workflow/screen | `UserManual/USER_GUIDE.md`, then regenerate the PDF (`python UserManual/build_pdf.py`) |
 
 `Requirements/spec/` is authoritative and per-section — patch the one affected section, not the whole set. A full spec regeneration is a deliberate, occasional task, not a per-commit one. `Requirements/_legacy/` is frozen — never edit it.
 
