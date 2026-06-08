@@ -127,24 +127,81 @@ export class EarningsRefreshJob implements BatchJobHandler {
       attempted: 0, updated: finnhubFilled, skipped: 0, failed: finnhubErrors,
       total: tickers.length,
       message: finnhubKey
-        ? `Finnhub pre-fill: ${finnhubFilled} entries stored (0–180d, 2 calls)`
-        : 'Finnhub key not configured — skipping Phase 1',
+        ? `Finnhub bulk: ${finnhubFilled} entries (0–180d). Now querying missing tickers individually…`
+        : 'Finnhub key not configured — add key in Settings → API & Data',
     });
 
-    // E*Trade loop removed — companies that haven't announced their next date yet
-    // simply won't appear in Finnhub's response until they publish it. Polling
-    // E*Trade for unannounced dates returns nothing useful and wastes time.
-    // Re-run this job daily; dates will appear in Finnhub as companies announce them.
+    if (!finnhubKey || signal.aborted) {
+      return {
+        status: signal.aborted ? 'failed' : 'skipped',
+        notes: 'No Finnhub key configured — add key in Settings → API & Data',
+        tickersAttempted: 0, tickersUpdated: 0, tickersSkipped: tickers.length, tickersFailed: 0,
+      };
+    }
+
+    // ── Phase 2: per-ticker Finnhub fallback ─────────────────────────────────
+    // The bulk call has a result cap (~1500 global entries). Tickers like AAPL
+    // that have confirmed dates but weren't returned in the bulk are fetched here.
+    // Rate-limited to 1 call/second (well within Finnhub free tier 60/min).
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const needsLookup = tickers.filter(t => {
+      const e = this.earningsService.getForTicker(t);
+      return !e || (e.source !== 'manual' && e.reportDate <= todayStr);
+    });
+
+    let perTickerFilled = 0;
+    let perTickerFailed = 0;
+    const perTotal = needsLookup.length;
+
+    for (let i = 0; i < needsLookup.length; i++) {
+      if (signal.aborted) break;
+      const ticker = needsLookup[i]!;
+      try {
+        const url = `https://finnhub.io/api/v1/calendar/earnings?symbol=${ticker}&token=${finnhubKey}`;
+        const resp = await fetch(url);
+        if (resp.ok) {
+          const json = await resp.json() as { earningsCalendar?: FinnhubEntry[] };
+          const entries = (json.earningsCalendar ?? []).filter(e => e.date > todayStr);
+          if (entries.length > 0) {
+            // Pick the nearest future date
+            entries.sort((a, b) => a.date.localeCompare(b.date));
+            const e = entries[0]!;
+            const reportTime: 'bmo' | 'amc' | null =
+              e.hour === 'bmo' ? 'bmo' : e.hour === 'amc' ? 'amc' : null;
+            this.earningsService.upsertFromProvider(ticker, e.date, reportTime, 'finnhub', true);
+            perTickerFilled++;
+            onProgress({
+              jobId: JOB_ID, runId: 0, ticker,
+              status: 'updated',
+              attempted: i + 1, updated: perTickerFilled, skipped: 0, failed: perTickerFailed,
+              total: perTotal,
+            });
+          } else {
+            // Finnhub has no announced date for this ticker yet — normal during quiet periods
+            onProgress({
+              jobId: JOB_ID, runId: 0, ticker,
+              status: 'skipped',
+              attempted: i + 1, updated: perTickerFilled, skipped: 0, failed: perTickerFailed,
+              total: perTotal,
+            });
+          }
+        } else {
+          perTickerFailed++;
+        }
+      } catch {
+        perTickerFailed++;
+      }
+      // 1 call/second — well within 60/min free tier limit
+      if (!signal.aborted) await sleep(1000);
+    }
 
     return {
       status: signal.aborted ? 'failed' : 'success',
-      notes: finnhubKey
-        ? `Finnhub: ${finnhubFilled} dates stored across 0–180d window`
-        : 'No Finnhub key configured — add key in Settings → API & Data',
-      tickersAttempted: finnhubFilled,
-      tickersUpdated: finnhubFilled,
-      tickersSkipped: tickers.length - finnhubFilled,
-      tickersFailed: finnhubErrors,
+      notes: `Bulk: ${finnhubFilled} entries · Per-ticker: ${perTickerFilled} found, ${needsLookup.length - perTickerFilled} not yet announced`,
+      tickersAttempted: tickers.length,
+      tickersUpdated: finnhubFilled + perTickerFilled,
+      tickersSkipped: tickers.length - needsLookup.length,
+      tickersFailed: finnhubErrors + perTickerFailed,
     };
   }
 }

@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.32] — 2026-06-08
+
+### Fixed
+- **Earnings Refresh Phase 2**: Finnhub's free-tier bulk call has a result cap (~1500 global entries); confirmed tickers like AAPL (Jul 29) were missing because they didn't fit in the bulk response. Added per-ticker Finnhub fallback loop for all constituents still missing a future date after the bulk calls. Rate-limited to 1 call/second (within 60/min free tier). Run notes show both bulk and per-ticker counts.
+
 ## [0.32.31] — 2026-06-08
 
 ### Changed
