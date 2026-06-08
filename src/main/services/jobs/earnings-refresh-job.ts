@@ -95,40 +95,44 @@ export class EarningsRefreshJob implements BatchJobHandler {
       };
     }
 
-    // ── Phase 1: Finnhub bulk pre-fill ──────────────────────────────────────
-    // One API call for the next 90 days fills earnings_calendar for all tickers
-    // the Finnhub response covers, including tickers E*Trade's API silently drops.
-    // E*Trade will overwrite these in Phase 2 when it has a confirmed date.
+    // ── Phase 1: Finnhub bulk pre-fill (two 90-day windows = 180 days) ──────
+    // Free tier returns ~1500 entries per call. Two calls cover more of the
+    // universe than a single call and avoid result-cap cut-offs (e.g. ABNB).
+    // Delta query runs AFTER this so E*Trade only sees tickers Finnhub missed.
     const finnhubKey = secureGet(this.db, 'finnhubApiKey');
     let finnhubFilled = 0;
     let finnhubErrors = 0;
     if (finnhubKey) {
-      try {
-        const todayIso  = new Date().toISOString().slice(0, 10);
-        const ninetyOut = new Date(Date.now() + 90 * 86_400_000).toISOString().slice(0, 10);
-        const url = `https://finnhub.io/api/v1/calendar/earnings?from=${todayIso}&to=${ninetyOut}&token=${finnhubKey}`;
-        const resp = await fetch(url);
-        if (resp.ok) {
-          const json = await resp.json() as { earningsCalendar?: FinnhubEntry[] };
-          const entries = json.earningsCalendar ?? [];
-          for (const e of entries) {
-            if (!e.symbol || !e.date) continue;
-            // Only store if the ticker is in our universe and not already a manual entry
-            const existing = this.earningsService.getForTicker(e.symbol);
-            if (existing?.source === 'manual') continue;
-            // Map Finnhub hour to our report_time
-            const reportTime: 'bmo' | 'amc' | null =
-              e.hour === 'bmo' ? 'bmo' : e.hour === 'amc' ? 'amc' : null;
-            // Finnhub data is confirmed-quality — store as confirmed=true so the
-            // calendar shows "✓ Confirmed" rather than "~ Estimated".
-            this.earningsService.upsertFromProvider(e.symbol, e.date, reportTime, 'finnhub', true);
-            finnhubFilled++;
+      const windows = [
+        { from: 0,  to: 90  },   // today → +90d
+        { from: 90, to: 180 },   // +90d  → +180d
+      ];
+      for (const win of windows) {
+        if (signal.aborted) break;
+        try {
+          const fromDate = new Date(Date.now() + win.from * 86_400_000).toISOString().slice(0, 10);
+          const toDate   = new Date(Date.now() + win.to   * 86_400_000).toISOString().slice(0, 10);
+          const url = `https://finnhub.io/api/v1/calendar/earnings?from=${fromDate}&to=${toDate}&token=${finnhubKey}`;
+          const resp = await fetch(url);
+          if (resp.ok) {
+            const json = await resp.json() as { earningsCalendar?: FinnhubEntry[] };
+            for (const e of json.earningsCalendar ?? []) {
+              if (!e.symbol || !e.date) continue;
+              const existing = this.earningsService.getForTicker(e.symbol);
+              if (existing?.source === 'manual') continue;
+              const reportTime: 'bmo' | 'amc' | null =
+                e.hour === 'bmo' ? 'bmo' : e.hour === 'amc' ? 'amc' : null;
+              this.earningsService.upsertFromProvider(e.symbol, e.date, reportTime, 'finnhub', true);
+              finnhubFilled++;
+            }
+          } else {
+            finnhubErrors++;
           }
-        } else {
+        } catch {
           finnhubErrors++;
         }
-      } catch {
-        finnhubErrors++;
+        // Small pause between Finnhub calls to be polite to the rate limiter
+        if (!signal.aborted) await sleep(1000);
       }
     }
 
@@ -138,7 +142,7 @@ export class EarningsRefreshJob implements BatchJobHandler {
       attempted: 0, updated: finnhubFilled, skipped: 0, failed: finnhubErrors,
       total: tickers.length,
       message: finnhubKey
-        ? `Finnhub pre-fill: ${finnhubFilled} entries stored`
+        ? `Finnhub pre-fill: ${finnhubFilled} entries stored (0–180d, 2 calls)`
         : 'Finnhub key not configured — skipping Phase 1',
     });
 

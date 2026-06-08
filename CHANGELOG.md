@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.32.30] — 2026-06-08
+
+### Added
+- **Earnings Calendar**: 🗑 Reset button clears all non-manual entries (manual dates kept) — use before a clean Finnhub re-fetch
+
+### Fixed
+- **Earnings Refresh Phase 1**: Finnhub now makes two bulk calls (today→+90d and +90d→+180d) instead of one, doubling coverage and avoiding the free-tier result cap that left tickers like ABNB out of the first call. E*Trade Phase 2 delta is computed after both Finnhub calls.
+
 ## [0.32.29] — 2026-06-08
 
 ### Changed

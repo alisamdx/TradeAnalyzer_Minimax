@@ -122,6 +122,12 @@ export class EarningsService {
     this.db.prepare(`DELETE FROM earnings_calendar WHERE ticker = ?`).run(ticker.toUpperCase());
   }
 
+  /** Delete all non-manual entries — used for a clean reset before a full re-fetch. */
+  clearNonManual(): number {
+    const result = this.db.prepare(`DELETE FROM earnings_calendar WHERE source != 'manual'`).run();
+    return result.changes;
+  }
+
   /** Public write for external providers (e.g. Finnhub bulk pre-fill).
    *  Never overwrites manual entries. */
   upsertFromProvider(

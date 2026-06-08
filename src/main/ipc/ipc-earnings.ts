@@ -54,4 +54,8 @@ export function registerEarningsIpc(
   ipcMain.handle('earnings:delete', (_e: IpcMainInvokeEvent, ticker: string): IpcResult<void> => {
     try { service.deleteTicker(ticker); return ok(undefined); } catch (e) { return fail(e); }
   });
+
+  ipcMain.handle('earnings:clearNonManual', (): IpcResult<number> => {
+    try { return ok(service.clearNonManual()); } catch (e) { return fail(e); }
+  });
 }

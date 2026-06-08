@@ -1097,7 +1097,8 @@ function buildApi() {
       invoke<{ updated: number; skipped: number; failed: number; errors: string[] }>('earnings:refresh', tickers, force),
     setManual: (ticker: string, reportDate: string, reportTime?: 'bmo'|'amc'|null) =>
       invoke<{ ticker: string; reportDate: string; reportTime: 'bmo'|'amc'|null; source: string; confirmed: boolean; dte: number|null }>('earnings:setManual', ticker, reportDate, reportTime),
-    delete:    (ticker: string) => invoke<void>('earnings:delete', ticker),
+    delete:        (ticker: string) => invoke<void>('earnings:delete', ticker),
+    clearNonManual: () => invoke<number>('earnings:clearNonManual'),
   };
 
   return {

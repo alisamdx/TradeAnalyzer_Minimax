@@ -421,6 +421,18 @@ export function EarningsCalendarView() {
         <button onClick={() => handleRefresh(true)} disabled={refreshing} title="Force refresh — ignore smart cache" style={{ fontSize: 11, padding: '4px 10px', background: '#1e293b', border: '1px solid #374151', borderRadius: 4, color: '#6b7280', cursor: refreshing ? 'wait' : 'pointer' }}>
           Force refresh
         </button>
+        <button
+          onClick={async () => {
+            const n = await window.api.earnings.clearNonManual();
+            setEntries([]);
+            setStatusMsg(`Cleared ${n} entries (manual entries kept)`);
+          }}
+          disabled={refreshing}
+          title="Delete all non-manual earnings data — run batch job to repopulate"
+          style={{ fontSize: 11, padding: '4px 10px', background: '#2a1010', border: '1px solid #e74c3c', borderRadius: 4, color: '#e74c3c', cursor: 'pointer' }}
+        >
+          🗑 Reset
+        </button>
       </div>
 
       {/* ── Toasts ── */}
