@@ -87,6 +87,8 @@ export class EarningsRefreshJob implements BatchJobHandler {
     const finnhubKey = secureGet(this.db, 'finnhubApiKey');
     let finnhubFilled = 0;
     let finnhubErrors = 0;
+    // Only store entries for tickers in our universe — bulk returns global companies
+    const constituentSet = new Set(tickers);
     if (finnhubKey) {
       const windows = [
         { from: 0,  to: 90  },   // today → +90d
@@ -103,6 +105,7 @@ export class EarningsRefreshJob implements BatchJobHandler {
             const json = await resp.json() as { earningsCalendar?: FinnhubEntry[] };
             for (const e of json.earningsCalendar ?? []) {
               if (!e.symbol || !e.date) continue;
+              if (!constituentSet.has(e.symbol)) continue;   // skip non-constituents
               const existing = this.earningsService.getForTicker(e.symbol);
               if (existing?.source === 'manual') continue;
               const reportTime: 'bmo' | 'amc' | null =

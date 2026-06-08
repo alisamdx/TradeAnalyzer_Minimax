@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.34] — 2026-06-08
+
+### Fixed
+- **Earnings Refresh bulk**: filter Finnhub bulk entries to constituent tickers only — bulk was storing 1500+ global entries (random small caps, international) of which only ~100 were S&P500/Russell1000. Counter and per-ticker delta now reflect actual constituent coverage.
+
 ## [0.32.33] — 2026-06-08
 
 ### Fixed
