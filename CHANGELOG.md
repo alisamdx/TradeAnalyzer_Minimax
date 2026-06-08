@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.10] — 2026-06-07
+
+### Changed
+- **Sidebar**: moved 🤖 Agent to Intelligence section below 📡 News & Research; moved 🔔 Alerts to the bottom of the menu (below 📋 Watchlists)
+
 ## [0.32.9] — 2026-06-07
 
 ### Changed

@@ -899,6 +899,12 @@ export function App() {
           >
             📡 News & Research
           </button>
+          <button
+            className={`nav-btn ${currentView === 'agent' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('agent')}
+          >
+            🤖 Agent
+          </button>
 
           {/* ── Screeners ── */}
           <div className="nav-section-label">Screeners</div>
@@ -966,12 +972,6 @@ export function App() {
           {/* ── Misc ── */}
           <div className="nav-section-label">Misc</div>
           <button
-            className={`nav-btn ${currentView === 'agent' ? 'active' : ''}`}
-            onClick={() => navigateSidebar('agent')}
-          >
-            🤖 Agent
-          </button>
-          <button
             className={`nav-btn ${currentView === 'backtest' ? 'active' : ''}`}
             onClick={() => navigateSidebar('backtest')}
           >
@@ -994,12 +994,6 @@ export function App() {
             onClick={() => navigateSidebar('ivHistory')}
           >
             🗓️ History
-          </button>
-          <button
-            className={`nav-btn ${currentView === 'alerts' ? 'active' : ''}`}
-            onClick={() => navigateSidebar('alerts')}
-          >
-            🔔 Alerts
           </button>
 
           {/* ── Personal ── */}
@@ -1025,6 +1019,12 @@ export function App() {
             onClick={() => navigateSidebar('watchlists')}
           >
             📋 Watchlists
+          </button>
+          <button
+            className={`nav-btn ${currentView === 'alerts' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('alerts')}
+          >
+            🔔 Alerts
           </button>
         </div>
 
