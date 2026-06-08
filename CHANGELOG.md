@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.22] — 2026-06-08
+
+### Fixed
+- **Payoff risk matrix**: spot row is now vertically centred in the visible table area on load and whenever the strike list changes — no more scrolling to find current price
+
 ## [0.32.21] — 2026-06-08
 
 ### Fixed

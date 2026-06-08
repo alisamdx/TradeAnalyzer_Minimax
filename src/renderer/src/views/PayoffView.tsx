@@ -413,6 +413,9 @@ function RiskMatrixTable({
   // Selected cell for leg breakdown panel
   const [selectedCell, setSelectedCell] = useState<{ ri: number; ci: number } | null>(null);
 
+  const containerRef = useRef<HTMLDivElement>(null);
+  const spotRowRef   = useRef<HTMLTableRowElement>(null);
+
   // Full 2D grid: [strikeIdx][colIdx]
   const grid = useMemo(
     () => strikes.map(S => colDates.map(d => computeMatrixCell(legs, S, d))),
@@ -490,6 +493,14 @@ function RiskMatrixTable({
     (best, k, i) => Math.abs(k - spotNum) < Math.abs(strikes[best]! - spotNum) ? i : best, 0,
   );
 
+  // Scroll so the spot row is vertically centred whenever strikes change
+  useEffect(() => {
+    const container = containerRef.current;
+    const row = spotRowRef.current;
+    if (!container || !row) return;
+    container.scrollTop = row.offsetTop - container.clientHeight / 2 + row.offsetHeight / 2;
+  }, [spotRowIdx]);
+
   // Set of leg strikes for row highlighting
   const legStrikeSet = useMemo(() => new Set(legStrikes.map(k => k.toFixed(2))), [legStrikes]);
 
@@ -519,7 +530,7 @@ function RiskMatrixTable({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-      <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 440, border: '1px solid #1e293b', borderRadius: selectedCell ? '6px 6px 0 0' : 6 }}>
+      <div ref={containerRef} style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 440, border: '1px solid #1e293b', borderRadius: selectedCell ? '6px 6px 0 0' : 6 }}>
         <table style={{ borderCollapse: 'collapse', fontSize: 11, width: '100%' }}>
           <thead>
             <tr>
@@ -550,7 +561,7 @@ function RiskMatrixTable({
               const zone  = zoneLabel(expPnl, expiryPnls);
 
               return (
-                <tr key={strike} style={{
+                <tr key={strike} ref={isSpot ? spotRowRef : undefined} style={{
                   outline: isSpot ? '2px solid #3b82f6' : isLegStrike ? '1px solid #f59e0b55' : undefined,
                   outlineOffset: isSpot ? '-2px' : '-1px',
                 }}>
