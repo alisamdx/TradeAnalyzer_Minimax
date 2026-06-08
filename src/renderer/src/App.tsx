@@ -18,14 +18,12 @@ import { DataView } from './views/DataView.js';
 import { OptionsChainView } from './views/OptionsChainView.js';
 import { AgentView } from './views/AgentView.js';
 import { BacktestView } from './views/BacktestView.js';
-import { LeapsCspView } from './views/LeapsCspView.js';
-import { CollaredLeapsView } from './views/CollaredLeapsView.js';
+import { StrategyLabShellView } from './views/StrategyLabShellView.js';
 import { FiltersView } from './views/FiltersView.js';
 import { TestApiView } from './views/TestApiView.js';
 import { PayoffView } from './views/PayoffView.js';
 import { IvHistoryView } from './views/IvHistoryView.js';
 import { KnowledgeView } from './views/KnowledgeView.js';
-import { StrategyLabView } from './views/StrategyLabView.js';
 import { BatchView } from './views/BatchView.js';
 import { DailyBriefView } from './views/DailyBriefView.js';
 import { TradeScoringView } from './views/TradeScoringView.js';
@@ -36,7 +34,7 @@ import { EarningsCalendarView } from './views/EarningsCalendarView.js';
 
 declare const __APP_VERSION__: string;
 
-type View = 'watchlists' | 'screener' | 'filters' | 'analysis' | 'validate' | 'portfolio' | 'opportunity' | 'settings' | 'alerts' | 'data' | 'optionsChain' | 'payoff' | 'agent' | 'backtest' | 'leapsCsp' | 'collaredLeaps' | 'testApi' | 'ivHistory' | 'knowledge' | 'strategyLab' | 'batch' | 'dailyBrief' | 'tradeScoring' | 'retrospect' | 'conviction' | 'newsResearch' | 'earningsCalendar';
+type View = 'watchlists' | 'screener' | 'filters' | 'analysis' | 'validate' | 'portfolio' | 'opportunity' | 'settings' | 'alerts' | 'data' | 'optionsChain' | 'payoff' | 'agent' | 'backtest' | 'testApi' | 'ivHistory' | 'knowledge' | 'strategyLab' | 'batch' | 'dailyBrief' | 'tradeScoring' | 'retrospect' | 'conviction' | 'newsResearch' | 'earningsCalendar';
 
 type NavEntry = {
   id: number;
@@ -642,13 +640,11 @@ export function App() {
       );
       case 'agent': return <AgentView />;
       case 'backtest': return <BacktestView />;
-      case 'leapsCsp': return <LeapsCspView />;
-      case 'collaredLeaps': return <CollaredLeapsView />;
       case 'testApi': return <TestApiView />;
       case 'ivHistory': return <IvHistoryView />;
       case 'knowledge': return <KnowledgeView />;
       case 'strategyLab': return (
-        <StrategyLabView initialTicker={entry.strategyLabTicker ?? null} clearInitialTicker={() => {}} />
+        <StrategyLabShellView initialTicker={entry.strategyLabTicker ?? null} />
       );
       case 'batch': return <BatchView />;
       case 'dailyBrief': return (
@@ -965,18 +961,6 @@ export function App() {
             onClick={() => navigateSidebar('strategyLab')}
           >
             🔬 Strategy Lab
-          </button>
-          <button
-            className={`nav-btn ${currentView === 'leapsCsp' ? 'active' : ''}`}
-            onClick={() => navigateSidebar('leapsCsp')}
-          >
-            ⚡ LEAPS
-          </button>
-          <button
-            className={`nav-btn ${currentView === 'collaredLeaps' ? 'active' : ''}`}
-            onClick={() => navigateSidebar('collaredLeaps')}
-          >
-            🛡️ Collared LEAPS
           </button>
 
           {/* ── Misc ── */}

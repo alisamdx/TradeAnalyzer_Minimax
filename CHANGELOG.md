@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.9] — 2026-06-07
+
+### Changed
+- **Sidebar**: merged ⚡ LEAPS and 🛡️ Collared LEAPS into 🔬 Strategy Lab as in-view tabs — reduces sidebar from 26 to 24 entries; LEAPS and Collared LEAPS are now tab buttons at the top of the Strategy Lab screen
+
 ## [0.32.8] — 2026-06-07
 
 ### Changed
