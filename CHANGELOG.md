@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.14] — 2026-06-07
+
+### Changed
+- **Earnings Calendar**: reverted screen chrome (toolbar, background, buttons, list rows) back to app dark theme; calendar cell colors preserved for follow-up tuning
+
 ## [0.32.13] — 2026-06-07
 
 ### Changed
