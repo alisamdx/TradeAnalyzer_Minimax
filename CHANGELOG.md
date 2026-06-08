@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.12] — 2026-06-07
+
+### Changed
+- **Sidebar**: Portfolio moved above My Stocks in the Personal section
+
 ## [0.32.11] — 2026-06-07
 
 ### Changed

@@ -972,6 +972,12 @@ export function App() {
           {/* ── Personal ── */}
           <div className="nav-section-label">Personal</div>
           <button
+            className={`nav-btn ${currentView === 'portfolio' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('portfolio')}
+          >
+            💼 Portfolio
+          </button>
+          <button
             className={`nav-btn ${currentView === 'conviction' ? 'active' : ''}`}
             onClick={() => navigateSidebar('conviction')}
             style={{ position: 'relative' }}
@@ -980,12 +986,6 @@ export function App() {
             {convictionBuyCount > 0 && (
               <span className="nav-badge">{convictionBuyCount}</span>
             )}
-          </button>
-          <button
-            className={`nav-btn ${currentView === 'portfolio' ? 'active' : ''}`}
-            onClick={() => navigateSidebar('portfolio')}
-          >
-            💼 Portfolio
           </button>
           <button
             className={`nav-btn ${currentView === 'watchlists' ? 'active' : ''}`}
