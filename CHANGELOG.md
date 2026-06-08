@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.33] — 2026-06-08
+
+### Fixed
+- **Earnings Refresh per-ticker loop**: Finnhub earnings calendar requires `from`/`to` date parameters — omitting them returns an empty response. Per-ticker calls now include a 365-day window so AAPL, MSFT etc. are correctly retrieved.
+
 ## [0.32.32] — 2026-06-08
 
 ### Fixed

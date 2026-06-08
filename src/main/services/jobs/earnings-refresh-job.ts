@@ -157,7 +157,10 @@ export class EarningsRefreshJob implements BatchJobHandler {
       if (signal.aborted) break;
       const ticker = needsLookup[i]!;
       try {
-        const url = `https://finnhub.io/api/v1/calendar/earnings?symbol=${ticker}&token=${finnhubKey}`;
+        // Finnhub requires from/to — use a wide 365-day window to catch any quarter
+        const fromDate = new Date().toISOString().slice(0, 10);
+        const toDate   = new Date(Date.now() + 365 * 86_400_000).toISOString().slice(0, 10);
+        const url = `https://finnhub.io/api/v1/calendar/earnings?symbol=${ticker}&from=${fromDate}&to=${toDate}&token=${finnhubKey}`;
         const resp = await fetch(url);
         if (resp.ok) {
           const json = await resp.json() as { earningsCalendar?: FinnhubEntry[] };
