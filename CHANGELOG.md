@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.13] — 2026-06-07
+
+### Changed
+- **Earnings Calendar**: replaced near-black navy palette with a light blue theme — cell backgrounds `#eff6ff`/`#e0ecff`/`#bfdbfe`, borders `#bfdbfe`/`#93c5fd`, text `#1e3a5f`, toolbar `#dbeafe`
+
 ## [0.32.12] — 2026-06-07
 
 ### Changed

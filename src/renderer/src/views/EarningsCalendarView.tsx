@@ -1,5 +1,5 @@
 // EarningsCalendarView — upcoming earnings in calendar grid or list format.
-// v0.32.2
+// v0.32.12
 
 import { useCallback, useEffect, useState } from 'react';
 
@@ -107,10 +107,10 @@ function CalendarGrid({
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <button onClick={onPrev} style={navBtnStyle}>‹</button>
         <button onClick={onNext} style={navBtnStyle}>›</button>
-        <span style={{ fontSize: 15, fontWeight: 700, color: '#e2e8f0', minWidth: 160 }}>{monthLabel}</span>
+        <span style={{ fontSize: 15, fontWeight: 700, color: '#1e3a5f', minWidth: 160 }}>{monthLabel}</span>
         <button onClick={onToday} style={{ ...navBtnStyle, fontSize: 11, padding: '3px 10px' }}>Today</button>
         {thisMonthEntries.length > 0 && (
-          <span style={{ fontSize: 11, color: '#64748b', marginLeft: 4 }}>
+          <span style={{ fontSize: 11, color: '#4a7fa5', marginLeft: 4 }}>
             {thisMonthEntries.length} earning{thisMonthEntries.length !== 1 ? 's' : ''} this month
           </span>
         )}
@@ -121,7 +121,7 @@ function CalendarGrid({
         {DOW.map(d => (
           <div key={d} style={{
             textAlign: 'center', fontSize: 10, fontWeight: 600,
-            color: '#475569', padding: '4px 0', letterSpacing: '0.05em',
+            color: '#4a7fa5', padding: '4px 0', letterSpacing: '0.05em',
           }}>
             {d}
           </div>
@@ -136,18 +136,18 @@ function CalendarGrid({
           return (
             <div key={dateStr} style={{
               minHeight: 72,
-              background: isToday ? '#0c1e3a' : isWeekend ? '#070d1a' : '#0a1020',
-              border: `1px solid ${isToday ? '#2563eb' : hasEntries ? '#1e3a5f' : '#111827'}`,
+              background: isToday ? '#bfdbfe' : isWeekend ? '#e0ecff' : '#eff6ff',
+              border: `1px solid ${isToday ? '#3b82f6' : hasEntries ? '#93c5fd' : '#bfdbfe'}`,
               borderRadius: 4,
               padding: '4px 5px',
-              opacity: inMonth ? 1 : 0.3,
+              opacity: inMonth ? 1 : 0.35,
               position: 'relative',
             }}>
               {/* Day number */}
               <div style={{
                 fontSize: 10,
                 fontWeight: isToday ? 700 : 400,
-                color: isToday ? '#60a5fa' : isWeekend ? '#374151' : '#4b5563',
+                color: isToday ? '#1d4ed8' : isWeekend ? '#7ea5c8' : '#64748b',
                 marginBottom: 3,
                 display: 'flex',
                 justifyContent: 'space-between',
@@ -165,20 +165,20 @@ function CalendarGrid({
                     <div key={e.ticker} style={{
                       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                       gap: 2, padding: '2px 4px', borderRadius: 3,
-                      background: weekendWarning ? '#2a1a00' : e.confirmed ? '#1e3a5f' : '#1e2a3a',
-                      border: `1px solid ${weekendWarning ? '#f59e0b66' : e.confirmed ? '#2563eb44' : '#334155'}`,
+                      background: weekendWarning ? '#fef3c7' : e.confirmed ? '#dbeafe' : '#e8f4ff',
+                      border: `1px solid ${weekendWarning ? '#f59e0b88' : e.confirmed ? '#93c5fd' : '#bfdbfe'}`,
                       cursor: 'pointer',
                     }}
                       onClick={() => onTickerClick(e.ticker)}
                       title={`${e.ticker}${weekendWarning ? ' ⚠ Weekend date — likely approximate' : ''} · ${e.reportTime ? (e.reportTime === 'bmo' ? 'Before Market Open' : 'After Market Close') : 'Time unknown'} · ${e.confirmed ? 'Confirmed' : 'Estimated'} · ${SOURCE_LABEL[e.source] ?? e.source}`}
                     >
-                      <span style={{ fontSize: 10, fontWeight: 700, color: weekendWarning ? '#fbbf24' : '#93c5fd' }}>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: weekendWarning ? '#b45309' : '#1d4ed8' }}>
                         {weekendWarning ? '⚠ ' : ''}{e.ticker}
                       </span>
                       <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
                         {e.reportTime && (
                           <span style={{
-                            fontSize: 8, color: e.reportTime === 'bmo' ? '#86efac' : '#fca5a5',
+                            fontSize: 8, color: e.reportTime === 'bmo' ? '#16a34a' : '#dc2626',
                             fontWeight: 600,
                           }}>
                             {e.reportTime.toUpperCase()}
@@ -186,7 +186,7 @@ function CalendarGrid({
                         )}
                         <span
                           onClick={ev => { ev.stopPropagation(); onDeleteTicker(e.ticker); }}
-                          style={{ fontSize: 9, color: '#374151', cursor: 'pointer', lineHeight: 1, paddingLeft: 1 }}
+                          style={{ fontSize: 9, color: '#94a3b8', cursor: 'pointer', lineHeight: 1, paddingLeft: 1 }}
                           title="Remove"
                         >×</span>
                       </div>
@@ -200,12 +200,12 @@ function CalendarGrid({
       </div>
 
       {/* Legend */}
-      <div style={{ display: 'flex', gap: 14, fontSize: 10, color: '#475569', paddingTop: 4, flexWrap: 'wrap' }}>
-        <span><span style={{ color: '#86efac' }}>BMO</span> = Before Market Open</span>
-        <span><span style={{ color: '#fca5a5' }}>AMC</span> = After Market Close</span>
+      <div style={{ display: 'flex', gap: 14, fontSize: 10, color: '#4a7fa5', paddingTop: 4, flexWrap: 'wrap' }}>
+        <span><span style={{ color: '#16a34a' }}>BMO</span> = Before Market Open</span>
+        <span><span style={{ color: '#dc2626' }}>AMC</span> = After Market Close</span>
         <span><span style={{ color: '#2563eb' }}>Blue border</span> = Confirmed</span>
-        <span><span style={{ color: '#334155' }}>Dim border</span> = Estimated</span>
-        <span><span style={{ color: '#fbbf24' }}>⚠ Amber</span> = Weekend date (approximate — verify manually)</span>
+        <span><span style={{ color: '#bfdbfe' }}>Light border</span> = Estimated</span>
+        <span><span style={{ color: '#b45309' }}>⚠ Amber</span> = Weekend date (approximate — verify manually)</span>
       </div>
     </div>
   );
@@ -240,12 +240,12 @@ function ListView({ entries, filter, onFilterChange, onTickerClick, onDelete, on
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
       {/* Filter toggle */}
-      <div style={{ display: 'flex', gap: 0, border: '1px solid #1e293b', borderRadius: 4, overflow: 'hidden', marginBottom: 12, alignSelf: 'flex-start' }}>
+      <div style={{ display: 'flex', gap: 0, border: '1px solid #bfdbfe', borderRadius: 4, overflow: 'hidden', marginBottom: 12, alignSelf: 'flex-start' }}>
         {(['all', 'week'] as Filter[]).map(f => (
           <button key={f} onClick={() => onFilterChange(f)} style={{
             padding: '4px 12px', fontSize: 11, border: 'none', cursor: 'pointer',
-            background: filter === f ? '#1d4ed8' : '#0f172a',
-            color: filter === f ? '#fff' : '#64748b',
+            background: filter === f ? '#1d4ed8' : '#eff6ff',
+            color: filter === f ? '#fff' : '#4a7fa5',
           }}>
             {f === 'all' ? 'All (180d)' : 'This week'}
           </button>
@@ -266,8 +266,8 @@ function ListView({ entries, filter, onFilterChange, onTickerClick, onDelete, on
           const daysOut = dayEntries[0]?.dte ?? 0;
           return (
             <div key={date} style={{ marginBottom: 16 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6, paddingBottom: 4, borderBottom: '1px solid #1e293b' }}>
-                <span style={{ fontSize: 13, fontWeight: 700, color: '#e2e8f0' }}>{fmtDate(date)}</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6, paddingBottom: 4, borderBottom: '1px solid #bfdbfe' }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: '#1e3a5f' }}>{fmtDate(date)}</span>
                 <span style={{ fontSize: 11, fontWeight: 600, color: dteColor(daysOut), background: dteColor(daysOut) + '22', padding: '1px 7px', borderRadius: 10 }}>
                   {daysOut === 0 ? 'Today' : daysOut === 1 ? 'Tomorrow' : `${daysOut}d`}
                 </span>
@@ -276,23 +276,23 @@ function ListView({ entries, filter, onFilterChange, onTickerClick, onDelete, on
                 {dayEntries.map(e => (
                   <div key={e.ticker} style={{
                     display: 'flex', alignItems: 'center', gap: 12, padding: '7px 10px',
-                    background: '#0f172a', border: '1px solid #1e293b', borderRadius: 6,
+                    background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 6,
                   }}>
-                    <button onClick={() => onTickerClick(e.ticker)} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 13, fontWeight: 700, color: '#60a5fa' }}>
+                    <button onClick={() => onTickerClick(e.ticker)} style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 13, fontWeight: 700, color: '#1d4ed8' }}>
                       {e.ticker}
                     </button>
                     {e.reportTime && (
-                      <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 4, background: '#1e293b', color: '#94a3b8' }}>
+                      <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 4, background: '#dbeafe', color: '#4a7fa5' }}>
                         {e.reportTime === 'bmo' ? 'BMO' : 'AMC'}
                       </span>
                     )}
-                    <span style={{ fontSize: 10, color: e.confirmed ? '#22c55e' : '#f59e0b' }}>
+                    <span style={{ fontSize: 10, color: e.confirmed ? '#16a34a' : '#d97706' }}>
                       {e.confirmed ? '✓ Confirmed' : '~ Estimated'}
                     </span>
-                    <span style={{ fontSize: 10, color: '#475569', marginLeft: 'auto' }}>
+                    <span style={{ fontSize: 10, color: '#64748b', marginLeft: 'auto' }}>
                       {SOURCE_LABEL[e.source] ?? e.source}
                     </span>
-                    <button onClick={() => onDelete(e.ticker)} title="Remove" style={{ background: 'none', border: 'none', color: '#374151', cursor: 'pointer', fontSize: 13, lineHeight: 1 }}>×</button>
+                    <button onClick={() => onDelete(e.ticker)} title="Remove" style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: 13, lineHeight: 1 }}>×</button>
                   </div>
                 ))}
               </div>
@@ -307,8 +307,8 @@ function ListView({ entries, filter, onFilterChange, onTickerClick, onDelete, on
 // ── Shared styles ─────────────────────────────────────────────────────────────
 
 const navBtnStyle: React.CSSProperties = {
-  padding: '4px 10px', fontSize: 14, background: '#1e293b',
-  border: '1px solid #334155', borderRadius: 4, color: '#94a3b8',
+  padding: '4px 10px', fontSize: 14, background: '#dbeafe',
+  border: '1px solid #93c5fd', borderRadius: 4, color: '#1e3a5f',
   cursor: 'pointer', lineHeight: 1,
 };
 
@@ -391,33 +391,33 @@ export function EarningsCalendarView() {
   };
 
   return (
-    <div className="view" style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+    <div className="view" style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', background: '#f0f7ff' }}>
 
       {/* ── Header ── */}
-      <div className="toolbar" style={{ flexShrink: 0 }}>
-        <h2 style={{ margin: 0, fontSize: 16 }}>📅 Earnings Calendar</h2>
+      <div className="toolbar" style={{ flexShrink: 0, background: '#dbeafe', borderBottom: '1px solid #93c5fd' }}>
+        <h2 style={{ margin: 0, fontSize: 16, color: '#1e3a5f' }}>📅 Earnings Calendar</h2>
         <div style={{ flex: 1 }} />
 
         {/* View mode toggle */}
-        <div style={{ display: 'flex', gap: 0, border: '1px solid #1e293b', borderRadius: 4, overflow: 'hidden' }}>
+        <div style={{ display: 'flex', gap: 0, border: '1px solid #93c5fd', borderRadius: 4, overflow: 'hidden' }}>
           {(['calendar', 'list'] as ViewMode[]).map(m => (
             <button key={m} onClick={() => setViewMode(m)} style={{
               padding: '4px 12px', fontSize: 11, border: 'none', cursor: 'pointer',
-              background: viewMode === m ? '#1d4ed8' : '#0f172a',
-              color: viewMode === m ? '#fff' : '#64748b',
+              background: viewMode === m ? '#1d4ed8' : '#eff6ff',
+              color: viewMode === m ? '#fff' : '#4a7fa5',
             }}>
               {m === 'calendar' ? '📅 Calendar' : '☰ List'}
             </button>
           ))}
         </div>
 
-        <button onClick={() => setShowAddForm(p => !p)} style={{ fontSize: 11, padding: '4px 10px', background: '#1e293b', border: '1px solid #374151', borderRadius: 4, color: '#94a3b8', cursor: 'pointer' }}>
+        <button onClick={() => setShowAddForm(p => !p)} style={{ fontSize: 11, padding: '4px 10px', background: '#eff6ff', border: '1px solid #93c5fd', borderRadius: 4, color: '#1e3a5f', cursor: 'pointer' }}>
           + Manual
         </button>
-        <button onClick={() => handleRefresh(false)} disabled={refreshing} style={{ fontSize: 11, padding: '4px 10px', background: '#1e293b', border: '1px solid #374151', borderRadius: 4, color: refreshing ? '#64748b' : '#60a5fa', cursor: refreshing ? 'wait' : 'pointer' }}>
+        <button onClick={() => handleRefresh(false)} disabled={refreshing} style={{ fontSize: 11, padding: '4px 10px', background: '#eff6ff', border: '1px solid #93c5fd', borderRadius: 4, color: refreshing ? '#94a3b8' : '#1d4ed8', cursor: refreshing ? 'wait' : 'pointer' }}>
           {refreshing ? '⟳ Refreshing…' : '⟳ Refresh'}
         </button>
-        <button onClick={() => handleRefresh(true)} disabled={refreshing} title="Force refresh — ignore smart cache" style={{ fontSize: 11, padding: '4px 10px', background: '#1e293b', border: '1px solid #374151', borderRadius: 4, color: '#6b7280', cursor: refreshing ? 'wait' : 'pointer' }}>
+        <button onClick={() => handleRefresh(true)} disabled={refreshing} title="Force refresh — ignore smart cache" style={{ fontSize: 11, padding: '4px 10px', background: '#eff6ff', border: '1px solid #93c5fd', borderRadius: 4, color: '#64748b', cursor: refreshing ? 'wait' : 'pointer' }}>
           Force refresh
         </button>
       </div>
@@ -428,30 +428,30 @@ export function EarningsCalendarView() {
 
       {/* ── Manual add form ── */}
       {showAddForm && (
-        <div style={{ padding: '10px 16px', background: '#0f172a', borderBottom: '1px solid #1e293b', display: 'flex', gap: 8, alignItems: 'flex-end', flexShrink: 0 }}>
+        <div style={{ padding: '10px 16px', background: '#eff6ff', borderBottom: '1px solid #bfdbfe', display: 'flex', gap: 8, alignItems: 'flex-end', flexShrink: 0 }}>
           <div>
-            <div style={{ fontSize: 10, color: '#64748b', marginBottom: 3 }}>Ticker</div>
+            <div style={{ fontSize: 10, color: '#4a7fa5', marginBottom: 3 }}>Ticker</div>
             <input value={addTicker} onChange={e => setAddTicker(e.target.value.toUpperCase())} placeholder="AAPL" style={{ width: 80, padding: '5px 8px', fontSize: 12 }} />
           </div>
           <div>
-            <div style={{ fontSize: 10, color: '#64748b', marginBottom: 3 }}>Earnings date</div>
+            <div style={{ fontSize: 10, color: '#4a7fa5', marginBottom: 3 }}>Earnings date</div>
             <input type="date" value={addDate} onChange={e => setAddDate(e.target.value)} style={{ padding: '5px 8px', fontSize: 12 }} />
           </div>
           <div>
-            <div style={{ fontSize: 10, color: '#64748b', marginBottom: 3 }}>Time</div>
-            <select value={addTime} onChange={e => setAddTime(e.target.value as 'bmo' | 'amc' | '')} style={{ padding: '5px 8px', fontSize: 12, background: '#1e293b', color: '#e2e8f0', border: '1px solid #374151', borderRadius: 4 }}>
+            <div style={{ fontSize: 10, color: '#4a7fa5', marginBottom: 3 }}>Time</div>
+            <select value={addTime} onChange={e => setAddTime(e.target.value as 'bmo' | 'amc' | '')} style={{ padding: '5px 8px', fontSize: 12, background: '#dbeafe', color: '#1e3a5f', border: '1px solid #93c5fd', borderRadius: 4 }}>
               <option value="">Unknown</option>
               <option value="bmo">BMO (Before Market Open)</option>
               <option value="amc">AMC (After Market Close)</option>
             </select>
           </div>
           <button onClick={handleAddManual} style={{ padding: '6px 14px', background: '#1d4ed8', color: '#fff', border: 'none', borderRadius: 4, fontSize: 12, cursor: 'pointer' }}>Save</button>
-          <button onClick={() => setShowAddForm(false)} style={{ padding: '6px 10px', background: '#1e293b', color: '#94a3b8', border: '1px solid #374151', borderRadius: 4, fontSize: 12, cursor: 'pointer' }}>Cancel</button>
+          <button onClick={() => setShowAddForm(false)} style={{ padding: '6px 10px', background: '#eff6ff', color: '#1e3a5f', border: '1px solid #93c5fd', borderRadius: 4, fontSize: 12, cursor: 'pointer' }}>Cancel</button>
         </div>
       )}
 
       {/* ── Content ── */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px' }}>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px', background: '#f0f7ff' }}>
         {loading ? (
           <div className="empty">Loading…</div>
         ) : viewMode === 'calendar' ? (
