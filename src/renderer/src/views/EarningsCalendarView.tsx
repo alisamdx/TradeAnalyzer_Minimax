@@ -19,6 +19,7 @@ const SOURCE_LABEL: Record<string, string> = {
   etrade:      'E*Trade',
   polygon_est: '~Estimated',
   manual:      'Manual',
+  finnhub:     'Finnhub',
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

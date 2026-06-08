@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.32.28] — 2026-06-08
+
+### Added
+- **Finnhub API key in Settings** (API & Data tab) — stored encrypted alongside Polygon/IVolatility keys; saved by the same Save Settings button
+- **Earnings Refresh — Finnhub Phase 1**: when a Finnhub key is configured, the batch job now opens with a single bulk call (`today → +90d`) that pre-fills `earnings_calendar` for every ticker Finnhub covers (including ABNB, ADBE, AA, AAL etc. that E*Trade's API silently drops). Source stored as `'finnhub'`, `confirmed=false`. E*Trade Phase 2 then overwrites with confirmed dates for the remaining delta. Run notes show both phases.
+
 ## [0.32.27] — 2026-06-08
 
 ### Added

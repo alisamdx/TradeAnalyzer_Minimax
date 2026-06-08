@@ -173,6 +173,16 @@ export function registerSettingsIpc(
     catch (err) { return fail(err); }
   });
 
+  ipcMain.handle('settings:get-finnhub-key', () => {
+    try { return ok<string>(secureGet(db, 'finnhubApiKey')); }
+    catch (err) { return fail(err); }
+  });
+
+  ipcMain.handle('settings:set-finnhub-key', (_e, key: string) => {
+    try { secureSet(db, 'finnhubApiKey', key.trim()); return ok(true); }
+    catch (err) { return fail(err); }
+  });
+
   ipcMain.handle('settings:encryption-status', () => {
     return ok({ available: encryptionAvailable() });
   });

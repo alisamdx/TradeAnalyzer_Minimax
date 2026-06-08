@@ -17,7 +17,7 @@ export interface EarningsEntry {
   reportDate:  string;          // ISO YYYY-MM-DD
   reportTime:  'bmo' | 'amc' | null;
   epsEstimate: number | null;
-  source:      'etrade' | 'polygon_est' | 'manual';
+  source:      'etrade' | 'polygon_est' | 'manual' | 'finnhub';
   confirmed:   boolean;
   cachedAt:    string;
   dte:         number | null;   // days from today to reportDate (computed at read time)
@@ -120,6 +120,18 @@ export class EarningsService {
 
   deleteTicker(ticker: string): void {
     this.db.prepare(`DELETE FROM earnings_calendar WHERE ticker = ?`).run(ticker.toUpperCase());
+  }
+
+  /** Public write for external providers (e.g. Finnhub bulk pre-fill).
+   *  Never overwrites manual entries. */
+  upsertFromProvider(
+    ticker: string,
+    reportDate: string,
+    reportTime: 'bmo' | 'amc' | null,
+    source: EarningsEntry['source'],
+    confirmed: boolean,
+  ): void {
+    this.upsert(ticker.toUpperCase(), reportDate, reportTime, null, source, confirmed);
   }
 
   // Refresh a batch of tickers via E*Trade only (no fallback).

@@ -1,19 +1,23 @@
 // EarningsRefreshJob — batch job that refreshes upcoming earnings dates for the full
 // S&P 500 + Russell 1000 universe (unique tickers from the constituents table).
 //
-// Smart caching: a ticker is skipped if it already has a future report_date stored.
-// Only re-fetched after that date passes (earnings occurred → need next date).
-// Manual entries are never overwritten.
+// Two-phase approach:
+//   Phase 1 (Finnhub, optional): one bulk API call for a 90-day window → pre-fills
+//     earnings_calendar for every ticker in the response. Covers tickers that
+//     E*Trade's per-ticker API silently drops (e.g. ABNB, ADBE). Source='finnhub',
+//     confirmed=false. Key stored in secure settings as 'finnhubApiKey'.
+//   Phase 2 (E*Trade): delta loop — only tickers still missing a future date after
+//     Phase 1. E*Trade results overwrite Finnhub entries and mark confirmed=true.
 //
-// Data source: E*Trade FUNDAMENTAL quote only. No fallback.
-// Runs on startup with 60s delay (after E*Trade tokens load) + manually.
-// v0.31.4
+// Manual entries are never overwritten. Delta filter applied before both phases.
+// v0.32.28
 
 import type { BatchJobHandler, BatchJobResult } from '../batch-service.js';
 import type { BatchProgressEvent } from '@shared/types.js';
 import type { EarningsService } from '../earnings-service.js';
 import type { OAuthCredentials } from '../etrade-auth.js';
 import type { DbHandle } from '../../db/connection.js';
+import { secureGet } from '../secure-settings.js';
 
 const JOB_ID = 'earnings-refresh';
 const DEFAULT_CALL_DELAY_MS = 500; // conservative default — avoids E*Trade 429s
@@ -41,10 +45,10 @@ function readCallDelay(db: DbHandle): number {
 export class EarningsRefreshJob implements BatchJobHandler {
   readonly name = 'Earnings Refresh';
   readonly description =
-    'Refreshes upcoming earnings dates for all S&P 500 + Russell 1000 tickers via E*Trade. ' +
-    'Delta mode: only fetches tickers with no stored date or whose stored date has passed. ' +
-    'The day after a full run, only tickers whose earnings just occurred are re-fetched. ' +
-    'Manual entries and tickers with future dates are excluded before the loop starts.';
+    'Phase 1: Finnhub bulk fetch (1 API call, 90-day window) pre-fills earnings dates for ' +
+    'the full universe including tickers E*Trade API misses. ' +
+    'Phase 2: E*Trade delta loop for tickers still missing a future date — overwrites Finnhub ' +
+    'entries with confirmed dates. Manual entries never overwritten.';
 
   constructor(
     private readonly db: DbHandle,
@@ -91,6 +95,52 @@ export class EarningsRefreshJob implements BatchJobHandler {
       };
     }
 
+    // ── Phase 1: Finnhub bulk pre-fill ──────────────────────────────────────
+    // One API call for the next 90 days fills earnings_calendar for all tickers
+    // the Finnhub response covers, including tickers E*Trade's API silently drops.
+    // E*Trade will overwrite these in Phase 2 when it has a confirmed date.
+    const finnhubKey = secureGet(this.db, 'finnhubApiKey');
+    let finnhubFilled = 0;
+    let finnhubErrors = 0;
+    if (finnhubKey) {
+      try {
+        const todayIso  = new Date().toISOString().slice(0, 10);
+        const ninetyOut = new Date(Date.now() + 90 * 86_400_000).toISOString().slice(0, 10);
+        const url = `https://finnhub.io/api/v1/calendar/earnings?from=${todayIso}&to=${ninetyOut}&token=${finnhubKey}`;
+        const resp = await fetch(url);
+        if (resp.ok) {
+          const json = await resp.json() as { earningsCalendar?: FinnhubEntry[] };
+          const entries = json.earningsCalendar ?? [];
+          for (const e of entries) {
+            if (!e.symbol || !e.date) continue;
+            // Only store if the ticker is in our universe and not already a manual entry
+            const existing = this.earningsService.getForTicker(e.symbol);
+            if (existing?.source === 'manual') continue;
+            // Map Finnhub hour to our report_time
+            const reportTime: 'bmo' | 'amc' | null =
+              e.hour === 'bmo' ? 'bmo' : e.hour === 'amc' ? 'amc' : null;
+            this.earningsService.upsertFromProvider(e.symbol, e.date, reportTime, 'finnhub', false);
+            finnhubFilled++;
+          }
+        } else {
+          finnhubErrors++;
+        }
+      } catch {
+        finnhubErrors++;
+      }
+    }
+
+    onProgress({
+      jobId: JOB_ID, runId: 0, ticker: '',
+      status: finnhubKey ? 'updated' : 'skipped',
+      attempted: 0, updated: finnhubFilled, skipped: 0, failed: finnhubErrors,
+      total: tickers.length,
+      message: finnhubKey
+        ? `Finnhub pre-fill: ${finnhubFilled} entries stored`
+        : 'Finnhub key not configured — skipping Phase 1',
+    });
+
+    // ── Phase 2: E*Trade delta loop ──────────────────────────────────────────
     // Delta filter: only fetch tickers that have no stored date, or whose stored date
     // is today/past (earnings occurred → need the next cycle date).
     // Manual entries are never overwritten — excluded here, not just in refreshTickers.
@@ -174,11 +224,27 @@ export class EarningsRefreshJob implements BatchJobHandler {
 
     return {
       status: signal.aborted ? 'failed' : 'success',
-      notes: `${updated} updated, ${failed} no-data; ${cachedCount} of ${tickers.length} already had future dates cached`,
+      notes: [
+        finnhubKey ? `Finnhub: ${finnhubFilled} pre-filled` : null,
+        `E*Trade: ${updated} updated, ${failed} no-data`,
+        `${cachedCount} of ${tickers.length} already cached`,
+      ].filter(Boolean).join(' · '),
       tickersAttempted: attempted,
-      tickersUpdated: updated,
+      tickersUpdated: updated + finnhubFilled,
       tickersSkipped: skipped + cachedCount,
-      tickersFailed: failed,
+      tickersFailed: failed + finnhubErrors,
     };
   }
+}
+
+interface FinnhubEntry {
+  date: string;
+  symbol: string;
+  hour: string | null;
+  epsActual: number | null;
+  epsEstimate: number | null;
+  quarter: number | null;
+  year: number | null;
+  revenueActual: number | null;
+  revenueEstimate: number | null;
 }

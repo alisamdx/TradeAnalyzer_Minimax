@@ -257,6 +257,8 @@ function buildApi() {
     setApiKey: (key: string) => invoke<boolean>('settings:set-api-key', key),
     getIvolatilityKey: () => invoke<string>('settings:get-ivolatility-key'),
     setIvolatilityKey: (key: string) => invoke<boolean>('settings:set-ivolatility-key', key),
+    getFinnhubKey: () => invoke<string>('settings:get-finnhub-key'),
+    setFinnhubKey: (key: string) => invoke<boolean>('settings:set-finnhub-key', key),
     openLogsDir: () => invoke<boolean>('settings:open-logs-dir'),
     backup: () => invoke<{ backupPath: string; message: string } | null>('settings:backup-everything'),
     restore: () => invoke<{ restored: boolean; message: string } | null>('settings:restore-backup'),

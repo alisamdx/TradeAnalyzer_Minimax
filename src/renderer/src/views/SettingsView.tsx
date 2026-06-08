@@ -241,6 +241,8 @@ export function SettingsView({ etradeWarning, onEtradeWarningDismiss }: Settings
   const [apiKeyVisible, setApiKeyVisible] = useState(false);
   const [ivolatilityKey, setIvolatilityKey] = useState('');
   const [ivolatilityKeyVisible, setIvolatilityKeyVisible] = useState(false);
+  const [finnhubKey, setFinnhubKey] = useState('');
+  const [finnhubKeyVisible, setFinnhubKeyVisible] = useState(false);
   const [diagnostics, setDiagnostics] = useState<DiagnosticsResult | null>(null);
   const [diagRunning, setDiagRunning] = useState(false);
   const [diagError, setDiagError] = useState<string | null>(null);
@@ -272,6 +274,13 @@ export function SettingsView({ etradeWarning, onEtradeWarningDismiss }: Settings
       .catch(() => setIvolatilityKey(''));
   }, []);
 
+  // Load Finnhub API key.
+  useEffect(() => {
+    window.api.settings.getFinnhubKey()
+      .then(setFinnhubKey)
+      .catch(() => setFinnhubKey(''));
+  }, []);
+
 
   const saveSettings = useCallback(async (partial: Partial<AppSettings>) => {
     if (!settings) return;
@@ -290,6 +299,7 @@ export function SettingsView({ etradeWarning, onEtradeWarningDismiss }: Settings
       await Promise.all([
         window.api.settings.setApiKey(apiKey),
         window.api.settings.setIvolatilityKey(ivolatilityKey),
+        window.api.settings.setFinnhubKey(finnhubKey),
       ]);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
@@ -544,6 +554,23 @@ export function SettingsView({ etradeWarning, onEtradeWarningDismiss }: Settings
                 </button>
               </div>
               <p className="hint">Used for IV history (true as-of-date daily IVX snapshots). Get a key at <a href="https://www.ivolatility.com/data-cloud-api/" target="_blank" rel="noreferrer" style={{ color: '#89b4fa' }}>ivolatility.com</a>.</p>
+            </div>
+
+            <div className="settings-row">
+              <label>Finnhub API Key</label>
+              <div className="api-key-row">
+                <input
+                  type={finnhubKeyVisible ? 'text' : 'password'}
+                  value={finnhubKey}
+                  onChange={e => setFinnhubKey(e.target.value)}
+                  placeholder="Enter your Finnhub API key"
+                  style={{ fontFamily: finnhubKeyVisible ? 'monospace' : 'inherit', width: 300 }}
+                />
+                <button className="tiny-btn" onClick={() => setFinnhubKeyVisible(v => !v)}>
+                  {finnhubKeyVisible ? 'Hide' : 'Show'}
+                </button>
+              </div>
+              <p className="hint">Used for earnings calendar (bulk date-range fetch, covers tickers E*Trade API misses). Free key at <a href="https://finnhub.io/register" target="_blank" rel="noreferrer" style={{ color: '#89b4fa' }}>finnhub.io/register</a>.</p>
             </div>
 
             <div className="settings-row">
