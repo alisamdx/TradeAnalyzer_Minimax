@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.11] — 2026-06-07
+
+### Changed
+- **Sidebar**: swapped Personal and Misc section order — Personal now follows Strategy, Misc is last
+
 ## [0.32.10] — 2026-06-07
 
 ### Changed

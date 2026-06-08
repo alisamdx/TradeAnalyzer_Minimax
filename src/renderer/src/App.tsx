@@ -969,33 +969,6 @@ export function App() {
             🔬 Strategy Lab
           </button>
 
-          {/* ── Misc ── */}
-          <div className="nav-section-label">Misc</div>
-          <button
-            className={`nav-btn ${currentView === 'backtest' ? 'active' : ''}`}
-            onClick={() => navigateSidebar('backtest')}
-          >
-            🔁 Backtest
-          </button>
-          <button
-            className={`nav-btn ${currentView === 'testApi' ? 'active' : ''}`}
-            onClick={() => navigateSidebar('testApi')}
-          >
-            🔬 Test API
-          </button>
-          <button
-            className={`nav-btn ${currentView === 'data' ? 'active' : ''}`}
-            onClick={() => navigateSidebar('data')}
-          >
-            🗄️ Data Sync
-          </button>
-          <button
-            className={`nav-btn ${currentView === 'ivHistory' ? 'active' : ''}`}
-            onClick={() => navigateSidebar('ivHistory')}
-          >
-            🗓️ History
-          </button>
-
           {/* ── Personal ── */}
           <div className="nav-section-label">Personal</div>
           <button
@@ -1025,6 +998,33 @@ export function App() {
             onClick={() => navigateSidebar('alerts')}
           >
             🔔 Alerts
+          </button>
+
+          {/* ── Misc ── */}
+          <div className="nav-section-label">Misc</div>
+          <button
+            className={`nav-btn ${currentView === 'backtest' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('backtest')}
+          >
+            🔁 Backtest
+          </button>
+          <button
+            className={`nav-btn ${currentView === 'testApi' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('testApi')}
+          >
+            🔬 Test API
+          </button>
+          <button
+            className={`nav-btn ${currentView === 'data' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('data')}
+          >
+            🗄️ Data Sync
+          </button>
+          <button
+            className={`nav-btn ${currentView === 'ivHistory' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('ivHistory')}
+          >
+            🗓️ History
           </button>
         </div>
 
