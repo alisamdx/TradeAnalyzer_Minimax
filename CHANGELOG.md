@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.15] — 2026-06-07
+
+### Changed
+- **Earnings Calendar grid**: cells and ticker chips now use the Batch Jobs color palette (`#131b2e` cells, `#2d3748` borders, `#89b4fa` blue accent, `#95a5a6` muted text)
+
 ## [0.32.14] — 2026-06-07
 
 ### Changed
