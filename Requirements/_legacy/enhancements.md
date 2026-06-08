@@ -147,4 +147,4 @@ IV Percentile = count(days where iv < current_iv) / total_days × 100
 
 ---
 
-_This document supplements `REQUIREMENTS.md`. Each enhancement should be implemented as a versioned release following the conventions in `CLAUDE.md` and `.ai/AI_PROMPT.md`._
+_This document supplements `REQUIREMENTS.md`. Each enhancement should be implemented as a versioned release following the conventions in `CLAUDE.md` and `.ai/AI_CONTEXT.md`._

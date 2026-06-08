@@ -1,16 +1,35 @@
 # TradeAnalyzer
 
-Cross-platform desktop application for a single retail options/swing trader. Manages watchlists, screens index universes, runs analysis modes, and provides per-stock validation dashboards.
+A cross-platform desktop application for a single retail **options / swing trader**. It screens the S&P 500 + Russell 1000 + ETF universe for sound trade candidates, scores and ranks them, produces a daily AI intelligence brief, models multi-leg option payoffs, tracks a live portfolio synced from E*Trade, and flags earnings and news risk — all locally, with no cloud sync and no broker order execution.
 
-> **Status:** v0.4.0 — Phases 1-4 complete (Watchlists, Screener, Analysis Engine, Validation Dashboard, Settings). Polygon integration active.
+> **Status:** approaching **v1.0.0**. All v1 spec requirements, the five enhancement tracks, the News & Research module, the scoring engine, and the Agent integration are implemented. The remaining gate is a week of real-world usage validation.
 
-For the full spec, see [`REQUIREMENTS.md`](Requirements/REQUIREMENTS.md). For AI session bootstrapping, see [`.ai/AI_CONTEXT.md`](.ai/AI_CONTEXT.md) and [`.ai/AI_PROMPT.md`](.ai/AI_PROMPT.md). For per-version notes, see [`CHANGELOG.md`](CHANGELOG.md).
+For AI session bootstrapping, read [`CLAUDE.md`](CLAUDE.md) (operating rules) then [`.ai/AI_CONTEXT.md`](.ai/AI_CONTEXT.md) (build-state snapshot). For the full spec, see [`Requirements/spec/`](Requirements/spec/00-index.md) (the authoritative, rebuild-from-scratch specification). For release history, see [`CHANGELOG.md`](CHANGELOG.md).
+
+---
+
+## What it does
+
+| Area | Capabilities |
+| --- | --- |
+| **Screening** | Index screener (17 default filters, strict/soft modes, presets), Opportunity dashboard (composite score), Filters templates, News & Research dossiers with AI impact scoring |
+| **Analysis** | Five modes (Buy, Options Income, Wheel, Bullish, Bearish), per-stock Validation dashboard (fundamentals, trend, candlesticks, indicators, IV rank), Strategy Lab (scores all 31 tastylive strategies) |
+| **Options** | Live options chain (E*Trade), multi-leg Payoff visualizer with risk matrix + AI assessment, LEAPS+CSP and Collared-LEAPS screeners |
+| **Intelligence** | Daily AI Intelligence Brief (scored picks per strategy + rationale + email/PDF), AI Critic second-opinion, Trade Scoring engine (configurable weights), Retrospect paper-trade tracking |
+| **Portfolio** | Positions synced from E*Trade, P&L, aggregate Greeks, trade-management alerts, AI Portfolio Advisor |
+| **Risk** | Earnings calendar (list + grid), earnings/news annotations across Validate/Payoff/Portfolio, price/expiration/delta alerts |
+| **Data** | IV-history backfill (true IV rank), historical price/financials, batch job scheduler, backtesting engine |
+| **Personal** | My Stocks conviction list with price bands and buy-zone alerts |
+
+The app exposes a local HTTP API (Fastify, `127.0.0.1:7432`) consumed by an external TraderAgent.
+
+---
 
 ## Prerequisites
 
-- **Node.js ≥ 22.5** (tested on 24.15)
+- **Node.js ≥ 22.5** (tested on 24.x)
 - **npm ≥ 10**
-- **Windows**: Visual Studio Build Tools 2022 with the *Desktop development with C++* workload, for `electron-rebuild` of `better-sqlite3` against Electron's Node ABI. Most fresh installs run on the prebuilt binary, but the rebuild path needs the toolchain.
+- **Windows**: Visual Studio Build Tools 2022 (*Desktop development with C++*) for the `better-sqlite3` Electron rebuild path. **Developer Mode must be ON** (Settings → System → For developers) for `npm run package` — electron-builder's winCodeSign archive contains macOS symlinks that non-admin users can't create otherwise.
 - **macOS**: Xcode Command Line Tools (`xcode-select --install`).
 
 ## Install
@@ -19,22 +38,26 @@ For the full spec, see [`REQUIREMENTS.md`](Requirements/REQUIREMENTS.md). For AI
 npm install
 ```
 
-> **Native module note:** the `better-sqlite3` binary has to match either Electron's Node ABI (for `dev`/`build`) or the system Node ABI (for `vitest`). Only one can live in `node_modules` at a time. The npm scripts handle the dance:
+> **Native module note:** the `better-sqlite3` binary must match either Electron's Node ABI (for `dev`/`build`/`package`) or the system Node ABI (for `vitest`). Only one can live in `node_modules` at a time, so the npm scripts swap it automatically:
+> - `npm run dev` / `build` / `package` run `rebuild:electron` first.
+> - `npm test` runs `rebuild:node` first.
 >
-> - `npm run dev`, `npm run build`, `npm run package` automatically run `rebuild:electron` first (Electron ABI).
-> - `npm test` automatically runs `rebuild:node` first (system Node ABI).
->
-> If you ever see `NODE_MODULE_VERSION 128 vs 137`, run the matching script manually.
+> If you see `NODE_MODULE_VERSION 128 vs 137`, run the matching `rebuild:*` script manually.
 
-## Configuration (Polygon API key)
+## Configuration
 
-The application requires a Polygon.io API key. The key is sourced in this priority order:
+The app integrates several providers. Keys are stored in the OS keychain or encrypted settings (Windows DPAPI) — never committed, never logged.
 
-1. OS keychain (via `keytar`) — preferred.
-2. Environment variable `POLYGON_API_KEY` from a local `.env` (gitignored).
-3. Settings UI input.
+| Provider | Used for | Required? |
+| --- | --- | --- |
+| **Polygon.io** (Stocks Starter) | Quotes, fundamentals, historical bars, news | Yes |
+| **E*Trade** (OAuth 1.0a) | Options chains, IV/Greeks, earnings, portfolio sync | Yes (active options + portfolio source) |
+| **Anthropic Claude** | Daily brief, critic, advisor, news synthesis, payoff/strategy AI | Optional (AI features degrade gracefully without a key) |
+| **MarketData.app / IVolatility** | IV-history backfill (true IV rank) | Optional |
 
-A template lives at `.env.example`. Never commit a real key.
+Polygon key sourcing priority: OS keychain → `POLYGON_API_KEY` in a local `.env` (gitignored, template at `.env.example`) → Settings UI. E*Trade credentials and other keys are entered in the Settings screen.
+
+> **E*Trade tokens expire at midnight ET** and go dormant after ~2h idle. Batch jobs auto-renew where possible; otherwise reconnect from Settings.
 
 ## Running
 
@@ -43,50 +66,40 @@ npm run dev          # development with HMR
 npm run typecheck    # TypeScript across main + preload + renderer
 npm run lint         # ESLint
 npm test             # offline test suite (Vitest)
-npm run build        # production installer
+npm run build        # production build + installer
+npm run package      # build without installer (--dir)
 ```
 
-## Testing
+## Architecture (at a glance)
 
-The offline suite must complete in under 90 seconds (per spec EP-6.5). Live-Polygon smoke tests are gated behind `POLYGON_LIVE_TESTS=1` and not part of the default run.
+Standard Electron tri-process app:
 
-```bash
-npm test                       # offline
-POLYGON_LIVE_TESTS=1 npm test  # includes live-API smoke (Phase ≥ 2)
 ```
+React view  →  window.api.<ns>.<method>()        (src/renderer)
+            →  contextBridge / ipcRenderer.invoke (src/preload)
+            →  ipcMain.handle in ipc-*.ts          (src/main/ipc)
+            →  Service                              (src/main/services)
+            →  better-sqlite3 (withTransaction) + DataProvider/OptionsProvider
+```
+
+- **Main** owns SQLite, the rate limiter, all provider calls, the batch scheduler, and the Fastify API server.
+- **Preload** exposes a typed, sandboxed `window.api.*` surface (33 namespaces).
+- **Renderer** is pure React — no Node, FS, or network access.
+- Long-running jobs use a token-bucket rate limiter + a SQLite-backed resumable queue.
+
+Full detail: [`docs/architecture.md`](docs/architecture.md) and [`.ai/AI_CONTEXT.md`](.ai/AI_CONTEXT.md). Data-provider contract: [`docs/data-provider.md`](docs/data-provider.md). Every financial formula: [`docs/formulas.md`](docs/formulas.md).
+
+## Design decisions
+
+- **Electron + React + TypeScript via electron-vite** — the spec's recommended stack; electron-vite unifies main/preload/renderer in one Vite config with HMR. TypeScript strict everywhere; shared types in `src/shared` cross the IPC boundary.
+- **better-sqlite3 12.x** — synchronous API maps cleanly to per-IPC handlers in the main process. Wrapped in `src/main/db/connection.ts` (`openDatabase`, `withTransaction`) so the driver isn't leaked across the codebase.
+- **Pluggable providers** — `DataProvider` (Polygon) and `OptionsProvider` (E*Trade, switchable) are interfaces, so a provider swap is a single-class change.
+- **lightweight-charts + recharts** — finance-first candlesticks plus general charting for dashboards.
+- **Local-only** — single SQLite file under `app.getPath('userData')`; no multi-user, no cloud, no order execution.
 
 ## Repository layout
 
-See `AI_CONTEXT.md → Repository Map` for the authoritative layout.
-
-## Design Decisions
-
-This section answers the "Open Questions" in spec §10.
-
-### Stack: Electron + React + TypeScript via electron-vite
-
-- The spec recommends Electron + React + TypeScript explicitly. Picking the recommended option keeps the focus on product logic.
-- `electron-vite` consolidates main, preload, and renderer into a single Vite-based config with HMR for both processes. Avoids hand-rolling five separate tsconfigs.
-- TypeScript strict mode is on in all three contexts; types in `src/shared` cross the IPC boundary.
-
-### SQLite: better-sqlite3 12.x
-
-- Synchronous API maps cleanly to per-IPC-call request handlers in the main process — no need to model async DB latency in service code that already runs off the renderer thread.
-- Mature ecosystem and feature surface (WAL tuning, attached DBs, JSON1/FTS5 baked in).
-- Native binding rebuilt for Electron's ABI via `electron-rebuild`, wired through `electron-builder install-app-deps` as `postinstall`.
-- Wrapped in `src/main/db/connection.ts` (`openDatabase`, `withTransaction`) so the driver isn't leaked across the codebase.
-
-### Charting library: deferred
-
-- Decide in Phase 4 (validation dashboard) when overlay/indicator needs are concrete. Candidates: `lightweight-charts` (smaller, finance-first) vs `ApexCharts` (more general). No installation cost yet.
-
-### Producer/consumer pipeline: deferred to Phase 3
-
-- Will use Node `worker_threads` + in-process queues + token-bucket rate limiter. No external broker (Redis/BullMQ would add deployment complexity for a single-user app).
-
-### Suitability-score (wheel) and ratios mapping: deferred
-
-- Spec §10 defers these to be documented in `docs/formulas.md` and `docs/data-provider.md` before code lands. Will be filled in with Phase 3 (analysis) and Phase 2 (screener) respectively.
+See [`.ai/AI_CONTEXT.md → Repository map`](.ai/AI_CONTEXT.md) for the authoritative, current layout.
 
 ## Troubleshooting
 
@@ -94,7 +107,7 @@ See [`docs/troubleshooting.md`](docs/troubleshooting.md).
 
 ## Contributing / AI sessions
 
-Read `AI_PROMPT.md` and `AI_CONTEXT.md` first. Every material commit must update version + changelog + AI_CONTEXT.
+Read [`CLAUDE.md`](CLAUDE.md) then [`.ai/AI_CONTEXT.md`](.ai/AI_CONTEXT.md) first. Every material commit bumps the version and updates `CHANGELOG.md`, the per-version `changelogs/` file, and `.ai/AI_CONTEXT.md` in the same commit; bug fixes ship a regression test.
 
 ## License
 

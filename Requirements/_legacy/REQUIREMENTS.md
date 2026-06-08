@@ -327,7 +327,7 @@ This is critical for working with an AI coding model across sessions. The AI mus
   - Recent Changes — last 5 changelog summaries, newest first.
   - How to Run — install, run dev, run tests, build production, all in copy-pasteable commands.
 - EP-5.4: AI_CONTEXT.md must stay under 1,500 lines. When it grows beyond that, the AI must compact older 'Recent Changes' into the changelog folder and prune.
-- EP-5.5: A short /AI_PROMPT.md sibling file contains the standing instructions for any AI session ('Read AI_CONTEXT.md first. Follow the practices in the Requirements doc. Never bypass rate limiter. Always update CHANGELOG and AI_CONTEXT for material changes.').
+- EP-5.5: Standing instructions for any AI session live in the root `/CLAUDE.md` operating manual ('Read .ai/AI_CONTEXT.md first. Follow the practices in this Requirements doc. Never bypass the rate limiter. Always update CHANGELOG and AI_CONTEXT for material changes.'). (Originally a separate `AI_PROMPT.md`; consolidated into `CLAUDE.md` in the v1 documentation refresh to keep one source of AI rules.)
 
 ## 7.6 Automated Testing & Regression Suite
 - EP-6.1: All non-trivial logic must have unit tests: fundamentals computer, indicator calculations (RSI, MACD, ADX, etc.), screening filter logic, suitability score formula, rate limiter, queue/batch sizing math, CSV import/export round-trip, options strategy structure builders.

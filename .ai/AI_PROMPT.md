@@ -1,26 +1,22 @@
-# AI_PROMPT — Standing instructions for any AI session on this repo
+# AI_PROMPT — session kickoff
 
-You are picking up a multi-phase build of the **TradeAnalyzer_Minimax** desktop app. Before writing code:
+> This is a **thin bootstrap pointer**, not a rulebook. It exists so you can start a session by saying *"read `.ai/AI_PROMPT.md`"* instead of retyping the opener. The actual rules live in `CLAUDE.md`; the build state lives in `.ai/AI_CONTEXT.md`. Do **not** copy rules into this file — point to them, so nothing drifts.
 
-1. **Read `.ai/AI_CONTEXT.md` first.** It is the source of truth for stack, structure, schema, conventions, and recent decisions. If anything in this prompt conflicts with `.ai/AI_CONTEXT.md`, prefer `.ai/AI_CONTEXT.md`.
-2. **Read `Requirements/REQUIREMENTS.md`** for the full functional/non-functional spec. Treat every `FR-*` and `NFR-*` as an acceptance test.
-3. **Section 7 of `Requirements/REQUIREMENTS.md` is mandatory infrastructure.** Versioning, changelogs, API/error logs, AI context, tests, migrations, and the git workflow described there must be maintained on every change.
+## Standing opener
 
-## Hard rules
+Read `CLAUDE.md` and `.ai/AI_CONTEXT.md` first. Then do the task below.
 
-- **Phased delivery.** Build the requested phase only. Do not jump ahead. Each phase ends with: tests green, changelog entry, `.ai/AI_CONTEXT.md` updated, single git commit (Conventional Commits).
-- **Never bypass the rate limiter.** All Polygon traffic must go through the producer/consumer pipeline once it exists (Phase ≥ 3). No ad-hoc `fetch` to Polygon from anywhere else.
-- **Never invent market data.** If a provider field is missing, surface it as missing — do not synthesize a plausible number.
-- **Never log secrets.** API keys live in OS keychain or `.env` and are scrubbed from logs at write time.
-- **Every material change updates `CHANGELOG.md` + `changelogs/v{version}_{date}.md` + `.ai/AI_CONTEXT.md` in the same commit.** Bump the version per semver (PATCH/MINOR/MAJOR).
-- **Every formula in code that derives a financial metric** has a `// see docs/formulas.md#anchor` comment and a corresponding entry in `docs/formulas.md`.
-- **At the end of every session, commit all staged changes** in a single Conventional Commit that includes the version bump, changelog entries, and `AI_CONTEXT.md` update. Do not leave material changes uncommitted.
-- **After committing, always run `npm run package`** to rebuild the production exe so it reflects the latest code. The packaged exe is what the user runs day-to-day — leaving it stale defeats the purpose of the change. Announce when the build starts and when it finishes.
-- **Every bug fix ships with a regression test** that fails before the fix and passes after.
+When done, follow the **Documentation maintenance** rules in `CLAUDE.md`: update the changelog (`CHANGELOG.md` + `changelogs/v{version}_{date}.md`), `.ai/AI_CONTEXT.md`, and the affected `Requirements/spec/` section; bump the version; commit (single Conventional Commit); and run `npm run package`.
 
-## Working agreement
+## Task
 
-- Prefer the simplest implementation that satisfies all requirements in scope. Don't add features outside the spec; if you think one is needed, add it to `Open Decisions` in `.ai/AI_CONTEXT.md` and surface it in the response.
-- Keep `.ai/AI_CONTEXT.md` under 1,500 lines. When older `Recent Changes` start to push it over, move them to the changelog folder and prune.
-- If you discover a non-obvious gotcha, add it to `Known Quirks & Gotchas` in `.ai/AI_CONTEXT.md`.
-- Use `// TODO(phase-N):` comments to mark deferred work tied to a future phase, with a brief reason.
+[Describe the task here.]
+
+---
+
+### Where things live (reference)
+- **`CLAUDE.md`** — operating rules, conventions, key files, known quirks, the doc-maintenance checklist. *(loads automatically in Claude Code)*
+- **`.ai/AI_CONTEXT.md`** — current build state: providers, schema, services, views, quirks.
+- **`Requirements/spec/`** — authoritative, rebuild-from-scratch spec (start at `00-index.md`). `Requirements/_legacy/` is frozen.
+- **`CHANGELOG.md` + `changelogs/`** — release history.
+- **`docs/`** — formulas, architecture, troubleshooting.
