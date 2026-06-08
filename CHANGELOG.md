@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.26] — 2026-06-08
+
+### Fixed
+- **Earnings Refresh delta filter**: the `force=true` flag passed by "Run All in Sequence" was bypassing the delta query and falling back to all 1000+ tickers. The delta filter now always runs regardless of the force flag — `force` is for non-trading-day guards in other jobs, not earnings caching.
+
 ## [0.32.25] — 2026-06-08
 
 ### Changed

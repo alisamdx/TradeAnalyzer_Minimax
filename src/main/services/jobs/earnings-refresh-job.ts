@@ -94,16 +94,19 @@ export class EarningsRefreshJob implements BatchJobHandler {
     // Delta filter: only fetch tickers that have no stored date, or whose stored date
     // is today/past (earnings occurred → need the next cycle date).
     // Manual entries are never overwritten — excluded here, not just in refreshTickers.
+    // Note: the `force` flag bypasses non-trading-day guards in other jobs but should NOT
+    // bypass this delta filter — use the Earnings Calendar's own "Force Refresh" button
+    // if you want to re-fetch all dates regardless of cache.
     const todayStr = new Date().toISOString().slice(0, 10);
     type DeltaRow = { ticker: string };
-    const deltaRows = (force ? rows : this.db.prepare(`
+    const deltaRows = this.db.prepare(`
       SELECT DISTINCT c.ticker
       FROM constituents c
       LEFT JOIN earnings_calendar ec ON ec.ticker = c.ticker
       WHERE ec.ticker IS NULL
          OR (ec.source != 'manual' AND ec.report_date <= ?)
       ORDER BY c.ticker
-    `).all(todayStr)) as DeltaRow[];
+    `).all(todayStr) as DeltaRow[];
 
     const deltaCount = deltaRows.length;
     const cachedCount = tickers.length - deltaCount;
