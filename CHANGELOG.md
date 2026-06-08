@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.31] — 2026-06-08
+
+### Changed
+- **Earnings Refresh**: removed E*Trade loop entirely — job is now Finnhub-only. Companies without an announced next date simply have nothing to return yet; they appear on the next daily run once published. No more 950+ useless E*Trade no-data calls.
+
 ## [0.32.30] — 2026-06-08
 
 ### Added
