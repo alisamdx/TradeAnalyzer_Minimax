@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.17] — 2026-06-07
+
+### Added
+- **Analysis Engine**: Actions column in all five mode grids (Buy, Options, Wheel, Bullish, Bearish) with 📐 Payoff, 📉 Options, and 🔬 Lab buttons — navigate directly to the respective view with the ticker (and strike/expiry where available) pre-filled
+
 ## [0.32.16] — 2026-06-07
 
 ### Changed

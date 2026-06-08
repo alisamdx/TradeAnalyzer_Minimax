@@ -251,6 +251,12 @@ export function App() {
     };
     window.addEventListener('navigate-to-payoff', handleNavigateToPayoff as EventListener);
 
+    // Listen for "Strategy Lab" from analysis view
+    const handleNavigateToStrategyLab = (e: CustomEvent<{ ticker: string }>) => {
+      setNavStack(prev => [...prev, { id: navIdRef.current++, view: 'strategyLab', strategyLabTicker: e.detail.ticker }]);
+    };
+    window.addEventListener('navigate-to-strategyLab', handleNavigateToStrategyLab as EventListener);
+
     // Listen for E*Trade auth errors from any view → redirect to Settings
     const handleEtradeAuthError = (e: CustomEvent<{ warning: string }>) => {
       setEtradeWarning(e.detail.warning);
@@ -279,6 +285,7 @@ export function App() {
       window.removeEventListener('navigate-to-validate', handleNavigateToValidate as EventListener);
       window.removeEventListener('navigate-to-options', handleNavigateToOptions as EventListener);
       window.removeEventListener('navigate-to-payoff', handleNavigateToPayoff as EventListener);
+      window.removeEventListener('navigate-to-strategyLab', handleNavigateToStrategyLab as EventListener);
       window.removeEventListener('navigate-to-settings-etrade', handleEtradeAuthError as EventListener);
       window.removeEventListener('watchlist-created', handleWatchlistCreated as EventListener);
       window.removeEventListener('show-prompt-dialog', handleShowPrompt as EventListener);

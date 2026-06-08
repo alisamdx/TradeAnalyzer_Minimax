@@ -57,11 +57,11 @@ const MODE_LABEL: Record<string, string> = {
 
 function modeColumns(mode: AnalysisMode): string[] {
   switch (mode) {
-    case 'buy':           return ['Ticker', 'Price', 'Score/10', 'Trend', 'RSI', 'Entry Low', 'Stop', 'Target', 'R:R', 'Fund OK'];
-    case 'options_income': return ['Ticker', 'Price', 'Strategy', 'Strike', 'Exp', 'DTE', 'Delta', 'Bid', 'Ask', 'Premium', 'Ann Return%', 'OI', 'Capital'];
-    case 'wheel':         return ['Ticker', 'Price', 'Strike', 'Exp', 'DTE', 'Premium', 'Ann Return%', 'IV %', 'Suitability', 'Liquidity'];
+    case 'buy':           return ['Ticker', 'Price', 'Score/10', 'Trend', 'RSI', 'Entry Low', 'Stop', 'Target', 'R:R', 'Fund OK', 'Actions'];
+    case 'options_income': return ['Ticker', 'Price', 'Strategy', 'Strike', 'Exp', 'DTE', 'Delta', 'Bid', 'Ask', 'Premium', 'Ann Return%', 'OI', 'Capital', 'Actions'];
+    case 'wheel':         return ['Ticker', 'Price', 'Strike', 'Exp', 'DTE', 'Premium', 'Ann Return%', 'IV %', 'Suitability', 'Liquidity', 'Actions'];
     case 'bullish':
-    case 'bearish':       return ['Ticker', 'Price', 'ADX', 'Strategy', 'Structure', 'Max Profit', 'Max Loss', 'Breakeven', 'POP'];
+    case 'bearish':       return ['Ticker', 'Price', 'ADX', 'Strategy', 'Structure', 'Max Profit', 'Max Loss', 'Breakeven', 'POP', 'Actions'];
   }
 }
 
@@ -309,7 +309,36 @@ export function AnalysisView({ initialTicker, clearInitialTicker }: AnalysisView
     window.dispatchEvent(new CustomEvent('navigate-to-validate', { detail: { ticker } }));
   };
 
+  const openPayoff = (result: DecodedResult) => {
+    const detail: Record<string, unknown> = { ticker: result.ticker, spot: result.lastPrice };
+    if (result.mode === 'options_income') {
+      detail.strike = result.strike;
+      detail.expiry = result.expiration;
+    } else if (result.mode === 'wheel') {
+      detail.strike = result.recommendedStrike;
+      detail.expiry = result.expiration;
+    }
+    window.dispatchEvent(new CustomEvent('navigate-to-payoff', { detail }));
+  };
+
+  const openOptions = (ticker: string) => {
+    window.dispatchEvent(new CustomEvent('navigate-to-options', { detail: { ticker } }));
+  };
+
+  const openStrategyLab = (ticker: string) => {
+    window.dispatchEvent(new CustomEvent('navigate-to-strategyLab', { detail: { ticker } }));
+  };
+
   const renderCell = (result: DecodedResult, col: string): React.ReactNode => {
+    if (col === 'Actions') {
+      return (
+        <div style={{ display: 'flex', gap: 4 }}>
+          <button className="an-action-btn" onClick={() => openPayoff(result)}>📐 Payoff</button>
+          <button className="an-action-btn" onClick={() => openOptions(result.ticker)}>📉 Options</button>
+          <button className="an-action-btn" onClick={() => openStrategyLab(result.ticker)}>🔬 Lab</button>
+        </div>
+      );
+    }
     if (result.mode === 'buy') {
       switch (col) {
         case 'Ticker':    return <span className="clickable-ticker" onClick={() => openValidateForTicker(result.ticker)} title="Click to validate">{result.ticker}</span>;
@@ -398,6 +427,8 @@ export function AnalysisView({ initialTicker, clearInitialTicker }: AnalysisView
         .snap-badge { padding: 2px 7px; border-radius: 10px; font-size: 11px; font-weight: 600; background: #1e2a3a; color: #89b4fa; }
         .an-del-btn { background: none; border: none; color: #555; cursor: pointer; font-size: 14px; padding: 2px 6px; border-radius: 4px; }
         .an-del-btn:hover { color: #e74c3c; background: #2a1a1a; }
+        .an-action-btn { padding: 3px 8px; border-radius: 4px; border: 1px solid #3d4f6e; background: #1e2a3a; color: #89b4fa; cursor: pointer; font-size: 11px; white-space: nowrap; }
+        .an-action-btn:hover { background: #2a3a5a; color: #ecf0f1; }
       `}</style>
 
       {error && (
@@ -515,12 +546,15 @@ export function AnalysisView({ initialTicker, clearInitialTicker }: AnalysisView
                     <tr>
                       {modeColumns(activeTab).map(col => {
                         const isSorted = sortCol === col;
+                        const isActions = col === 'Actions';
                         return (
-                          <th key={col} onClick={() => handleSortClick(col)}>
+                          <th key={col} onClick={isActions ? undefined : () => handleSortClick(col)} style={isActions ? { cursor: 'default' } : {}}>
                             {col}
-                            <span style={{ marginLeft: 4, opacity: 0.6, fontSize: 10 }}>
-                              {isSorted ? (sortDir === 'asc' ? '▲' : '▼') : '⇅'}
-                            </span>
+                            {!isActions && (
+                              <span style={{ marginLeft: 4, opacity: 0.6, fontSize: 10 }}>
+                                {isSorted ? (sortDir === 'asc' ? '▲' : '▼') : '⇅'}
+                              </span>
+                            )}
                           </th>
                         );
                       })}
