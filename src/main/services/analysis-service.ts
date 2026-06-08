@@ -96,11 +96,31 @@ export interface StrategyResult {
   explanation: string;
 }
 
+export interface LizardResult {
+  mode: 'jade_lizard' | 'big_lizard';
+  ticker: string;
+  lastPrice: number | null;
+  expiration: string | null;
+  dte: number | null;
+  putStrike: number | null;
+  shortCallStrike: number | null;
+  longCallStrike: number | null;
+  netCredit: number | null;
+  spreadWidth: number | null;
+  hasNoUpsideRisk: boolean | null;
+  maxProfit: number | null;
+  maxLossDown: number | null;
+  breakevenDown: number | null;
+  ivRank: number | null;
+  explanation: string;
+}
+
 export type AnalysisResult =
   | BuyResult
   | OptionsIncomeResult
   | WheelResult
-  | StrategyResult;
+  | StrategyResult
+  | LizardResult;
 
 // ─── Indicator calculations (pure, unit-testable) ────────────────────────────
 
@@ -397,6 +417,8 @@ export class AnalysisService {
       case 'wheel': return this.modeWheel(ticker, quote, fundamentals, bars, forceCache); // needs full 252 for 52-wk range
       case 'bullish': return this.modeDirectional(ticker, quote, fundamentals, latestBars, 'bullish');
       case 'bearish': return this.modeDirectional(ticker, quote, fundamentals, latestBars, 'bearish');
+      case 'jade_lizard': return this.modeJadeLizard(ticker, quote);
+      case 'big_lizard': return this.modeBigLizard(ticker, quote);
     }
   }
 
@@ -440,9 +462,10 @@ export class AnalysisService {
     onProgress?: (current: number, total: number, ticker: string, mode: AnalysisMode) => void
   ): Promise<AnalysisAllModesPayload> {
     this.resetCancel();
-    const modes: AnalysisMode[] = ['buy', 'options_income', 'wheel', 'bullish', 'bearish'];
+    const modes: AnalysisMode[] = ['buy', 'options_income', 'wheel', 'bullish', 'bearish', 'jade_lizard', 'big_lizard'];
     const payload: AnalysisAllModesPayload = {
-      buy: [], options_income: [], wheel: [], bullish: [], bearish: []
+      buy: [], options_income: [], wheel: [], bullish: [], bearish: [],
+      jade_lizard: [], big_lizard: []
     };
 
     for (const mode of modes) {
@@ -457,6 +480,8 @@ export class AnalysisService {
       else if (mode === 'wheel') payload.wheel = results as WheelResult[];
       else if (mode === 'bullish') payload.bullish = results.filter(r => r.mode === 'bullish') as StrategyResult[];
       else if (mode === 'bearish') payload.bearish = results.filter(r => r.mode === 'bearish') as StrategyResult[];
+      else if (mode === 'jade_lizard') payload.jade_lizard = results as LizardResult[];
+      else if (mode === 'big_lizard') payload.big_lizard = results as LizardResult[];
     }
     return payload;
   }
@@ -1157,6 +1182,161 @@ export class AnalysisService {
       probabilityOfProfit,
       explanation
     };
+  }
+
+  // ─── Mode: Jade Lizard ────────────────────────────────────────────────────────
+
+  private async modeJadeLizard(
+    ticker: string,
+    quote: { last: number | null; ivRank: number | null }
+  ): Promise<LizardResult> {
+    const price = quote.last;
+    const ivRank = quote.ivRank;
+    const empty = (reason: string): LizardResult => ({
+      mode: 'jade_lizard', ticker, lastPrice: price, expiration: null, dte: null,
+      putStrike: null, shortCallStrike: null, longCallStrike: null,
+      netCredit: null, spreadWidth: null, hasNoUpsideRisk: null,
+      maxProfit: null, maxLossDown: null, breakevenDown: null, ivRank, explanation: reason
+    });
+
+    if (!price) return empty('No quote available.');
+
+    const chainData = await this.findLizardChain(ticker, 30, 45);
+    if (!chainData) return empty('No options chain found for 30–45 DTE.');
+
+    const { contracts, dte, expiration } = chainData;
+
+    // Short OTM put: |delta| ~0.30, range 0.20–0.40
+    const puts = contracts.filter(c => c.side === 'put' && c.delta !== null &&
+      Math.abs(c.delta) >= 0.20 && Math.abs(c.delta) <= 0.40 && c.bid > 0);
+    if (!puts.length) return empty('No liquid OTM puts found (delta 0.20–0.40).');
+    const shortPut = puts.reduce((a, b) =>
+      Math.abs(Math.abs(a.delta ?? 0) - 0.30) <= Math.abs(Math.abs(b.delta ?? 0) - 0.30) ? a : b);
+
+    // Short OTM call: delta ~0.20, range 0.10–0.30
+    const otmCalls = contracts.filter(c => c.side === 'call' && c.delta !== null &&
+      c.delta >= 0.10 && c.delta <= 0.30 && c.bid > 0);
+    if (!otmCalls.length) return empty('No liquid OTM calls found (delta 0.10–0.30).');
+    const shortCall = otmCalls.reduce((a, b) =>
+      Math.abs((a.delta ?? 0) - 0.20) <= Math.abs((b.delta ?? 0) - 0.20) ? a : b);
+
+    // Long call: nearest strike above short call (forms the bear call spread)
+    const longCallCandidates = contracts.filter(c => c.side === 'call' && c.strike > shortCall.strike && c.ask > 0);
+    if (!longCallCandidates.length) return empty('No long call available above short call strike.');
+    const longCall = longCallCandidates.reduce((a, b) => a.strike < b.strike ? a : b);
+
+    const putMid       = (shortPut.bid  + shortPut.ask)  / 2;
+    const sCallMid     = (shortCall.bid + shortCall.ask) / 2;
+    const lCallMid     = (longCall.bid  + longCall.ask)  / 2;
+    const netCredit    = putMid + sCallMid - lCallMid;
+    const spreadWidth  = longCall.strike - shortCall.strike;
+    const hasNoUpsideRisk = netCredit > spreadWidth;
+    const breakevenDown   = shortPut.strike - netCredit;
+
+    const explanation =
+      `Jade Lizard: Sell $${shortPut.strike} put + Sell $${shortCall.strike}/$${longCall.strike} call spread. ` +
+      `Net credit $${netCredit.toFixed(2)}/share (spread width $${spreadWidth.toFixed(2)}). ` +
+      `${hasNoUpsideRisk ? '✓ No upside risk' : '⚠ Credit < spread width — upside risk exists'}. ` +
+      `Downside break-even $${breakevenDown.toFixed(2)}.`;
+
+    return {
+      mode: 'jade_lizard', ticker, lastPrice: price, expiration, dte,
+      putStrike: shortPut.strike, shortCallStrike: shortCall.strike, longCallStrike: longCall.strike,
+      netCredit, spreadWidth, hasNoUpsideRisk,
+      maxProfit: netCredit,
+      maxLossDown: shortPut.strike - netCredit,
+      breakevenDown, ivRank, explanation
+    };
+  }
+
+  // ─── Mode: Big Lizard ─────────────────────────────────────────────────────────
+
+  private async modeBigLizard(
+    ticker: string,
+    quote: { last: number | null; ivRank: number | null }
+  ): Promise<LizardResult> {
+    const price = quote.last;
+    const ivRank = quote.ivRank;
+    const empty = (reason: string): LizardResult => ({
+      mode: 'big_lizard', ticker, lastPrice: price, expiration: null, dte: null,
+      putStrike: null, shortCallStrike: null, longCallStrike: null,
+      netCredit: null, spreadWidth: null, hasNoUpsideRisk: null,
+      maxProfit: null, maxLossDown: null, breakevenDown: null, ivRank, explanation: reason
+    });
+
+    if (!price) return empty('No quote available.');
+
+    const chainData = await this.findLizardChain(ticker, 30, 45);
+    if (!chainData) return empty('No options chain found for 30–45 DTE.');
+
+    const { contracts, dte, expiration } = chainData;
+
+    // ATM strike: nearest to current price
+    const strikes = [...new Set(contracts.map(c => c.strike))].sort((a, b) => a - b);
+    if (!strikes.length) return empty('No strikes in chain.');
+    const atmStrike = strikes.reduce((a, b) => Math.abs(a - price) <= Math.abs(b - price) ? a : b);
+
+    const atmPut  = contracts.find(c => c.side === 'put'  && c.strike === atmStrike && c.bid > 0);
+    const atmCall = contracts.find(c => c.side === 'call' && c.strike === atmStrike && c.bid > 0);
+    if (!atmPut || !atmCall) return empty(`No liquid ATM straddle at $${atmStrike}.`);
+
+    // Long call: nearest strike above ATM
+    const longCallCandidates = contracts.filter(c => c.side === 'call' && c.strike > atmStrike && c.ask > 0);
+    if (!longCallCandidates.length) return empty('No long call available above ATM strike.');
+    const longCall = longCallCandidates.reduce((a, b) => a.strike < b.strike ? a : b);
+
+    const putMid      = (atmPut.bid  + atmPut.ask)  / 2;
+    const callMid     = (atmCall.bid + atmCall.ask) / 2;
+    const lCallMid    = (longCall.bid + longCall.ask) / 2;
+    const netCredit   = putMid + callMid - lCallMid;
+    const spreadWidth = longCall.strike - atmStrike;
+    const hasNoUpsideRisk = netCredit > spreadWidth;
+    const breakevenDown   = atmStrike - netCredit;
+
+    const explanation =
+      `Big Lizard: Sell $${atmStrike} straddle + Buy $${longCall.strike} call (spread width $${spreadWidth.toFixed(2)}). ` +
+      `Net credit $${netCredit.toFixed(2)}/share. ` +
+      `${hasNoUpsideRisk ? '✓ No upside risk' : '⚠ Credit < spread width — upside risk exists'}. ` +
+      `Downside break-even $${breakevenDown.toFixed(2)}.`;
+
+    return {
+      mode: 'big_lizard', ticker, lastPrice: price, expiration, dte,
+      putStrike: atmStrike, shortCallStrike: atmStrike, longCallStrike: longCall.strike,
+      netCredit, spreadWidth, hasNoUpsideRisk,
+      maxProfit: netCredit,
+      maxLossDown: atmStrike - netCredit,
+      breakevenDown, ivRank, explanation
+    };
+  }
+
+  // ─── Private: lizard chain helper ────────────────────────────────────────────
+
+  /** Fetch first expiration in [minDTE, maxDTE] that has a non-empty chain. */
+  private async findLizardChain(
+    ticker: string,
+    minDTE: number,
+    maxDTE: number
+  ): Promise<{ contracts: NonNullable<OptionsChain['contracts']>; dte: number; expiration: string } | null> {
+    let expirations: string[];
+    try {
+      expirations = await this.getNearTermExpirations(ticker, 7);
+    } catch {
+      return null;
+    }
+    for (const exp of expirations) {
+      const dte = dteDays(exp);
+      if (!isDTEMatch(dte, minDTE, maxDTE)) continue;
+      let chain: OptionsChain;
+      try {
+        chain = await (this.optionsProvider ?? this.dataProvider).getOptionsChain(ticker, exp);
+      } catch {
+        continue;
+      }
+      if (chain.contracts.length > 0) {
+        return { contracts: chain.contracts, dte, expiration: exp };
+      }
+    }
+    return null;
   }
 
   // ─── Private: options chain helper ───────────────────────────────────────────

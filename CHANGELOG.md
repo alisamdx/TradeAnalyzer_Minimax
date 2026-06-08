@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.32.18] — 2026-06-07
+
+### Added
+- **Analysis Engine — Jade Lizard & Big Lizard modes**: two new watchlist-screening tabs that find the best setup for each ticker (30–45 DTE), calculate net credit received, verify the "no upside risk" constraint (credit > spread width), and sort by total premium descending
+  - **Jade Lizard** 🦎: short OTM put (~30Δ) + short OTM call (~20Δ) + long call one strike above
+  - **Big Lizard** 🐊: short ATM straddle + long call one strike above ATM
+  - Columns: Ticker · Price · Exp · DTE · Put Strike · Short Call · Long Call · Net Credit · Spread W · No ↑ Risk · Breakeven↓ · IV Rank · Actions
+  - Both use the E*Trade options chain (same pipeline as Wheel/Options Income)
+
 ## [0.32.17] — 2026-06-07
 
 ### Added

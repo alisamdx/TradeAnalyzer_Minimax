@@ -36,7 +36,8 @@ type BuyRow = { mode: 'buy'; ticker: string; lastPrice: number | null; composite
 type OptionsRow = { mode: 'options_income'; ticker: string; lastPrice: number | null; strategy: 'CSP' | 'CC'; strike: number | null; expiration: string | null; dte: number | null; delta: number | null; bid: number | null; ask: number | null; premium: number | null; annualizedReturn: number | null; ivRank: number | null; openInterest: number | null; breakeven: number | null; capitalRequired: number | null; explanation: string };
 type WheelRow = { mode: 'wheel'; ticker: string; lastPrice: number | null; recommendedStrike: number | null; expiration: string | null; dte: number | null; delta: number | null; premium: number | null; annualizedReturn: number | null; currentIv: number | null; ivRank: number | null; daysToEarnings: number | null; optionLiquidityScore: number; suitabilityScore: number; explanation: string };
 type StrategyRow = { mode: 'bullish' | 'bearish'; ticker: string; lastPrice: number | null; trendStrength: number | null; suggestedStrategy: string; structure: string; maxProfit: number | null; maxLoss: number | null; breakeven: number | null; probabilityOfProfit: number | null; explanation: string };
-type DecodedResult = BuyRow | OptionsRow | WheelRow | StrategyRow;
+type LizardRow = { mode: 'jade_lizard' | 'big_lizard'; ticker: string; lastPrice: number | null; expiration: string | null; dte: number | null; putStrike: number | null; shortCallStrike: number | null; longCallStrike: number | null; netCredit: number | null; spreadWidth: number | null; hasNoUpsideRisk: boolean | null; maxProfit: number | null; maxLossDown: number | null; breakevenDown: number | null; ivRank: number | null; explanation: string };
+type DecodedResult = BuyRow | OptionsRow | WheelRow | StrategyRow | LizardRow;
 
 // ─── Tab config ───────────────────────────────────────────────────────────────
 
@@ -46,11 +47,14 @@ const TABS: { mode: AnalysisMode; icon: string; label: string; key: keyof Analys
   { mode: 'wheel',         icon: '🎯', label: 'Wheel Strategy',    key: 'wheel' },
   { mode: 'bullish',       icon: '🐂', label: 'Bullish',           key: 'bullish' },
   { mode: 'bearish',       icon: '🐻', label: 'Bearish',           key: 'bearish' },
+  { mode: 'jade_lizard',   icon: '🦎', label: 'Jade Lizard',       key: 'jade_lizard' },
+  { mode: 'big_lizard',    icon: '🐊', label: 'Big Lizard',        key: 'big_lizard' },
 ];
 
 const MODE_LABEL: Record<string, string> = {
   buy: 'Buy Opportunities', options_income: 'Options Income',
   wheel: 'Wheel Strategy', bullish: 'Bullish Strategies', bearish: 'Bearish Strategies',
+  jade_lizard: 'Jade Lizard', big_lizard: 'Big Lizard',
 };
 
 // ─── Column definitions ───────────────────────────────────────────────────────
@@ -62,6 +66,8 @@ function modeColumns(mode: AnalysisMode): string[] {
     case 'wheel':         return ['Ticker', 'Price', 'Strike', 'Exp', 'DTE', 'Premium', 'Ann Return%', 'IV %', 'Suitability', 'Liquidity', 'Actions'];
     case 'bullish':
     case 'bearish':       return ['Ticker', 'Price', 'ADX', 'Strategy', 'Structure', 'Max Profit', 'Max Loss', 'Breakeven', 'POP', 'Actions'];
+    case 'jade_lizard':
+    case 'big_lizard':    return ['Ticker', 'Price', 'Exp', 'DTE', 'Put Strike', 'Short Call', 'Long Call', 'Net Credit', 'Spread W', 'No ↑ Risk', 'Breakeven↓', 'IV Rank', 'Actions'];
   }
 }
 
@@ -83,6 +89,8 @@ function parseSnapshotCounts(snap: AnalysisSnapshotRow) {
       wheel: p.results?.wheel?.length ?? 0,
       bullish: p.results?.bullish?.length ?? 0,
       bearish: p.results?.bearish?.length ?? 0,
+      jade_lizard: p.results?.jade_lizard?.length ?? 0,
+      big_lizard: p.results?.big_lizard?.length ?? 0,
     };
   } catch { return null; }
 }
@@ -223,7 +231,9 @@ export function AnalysisView({ initialTicker, clearInitialTicker }: AnalysisView
       case 'options_income': return { col: 'Premium',   dir: 'desc' };
       case 'wheel':         return { col: 'Suitability', dir: 'desc' };
       case 'bullish':
-      case 'bearish':       return { col: 'Max Loss',   dir: 'desc' };
+      case 'bearish':       return { col: 'Max Loss',    dir: 'desc' };
+      case 'jade_lizard':
+      case 'big_lizard':    return { col: 'Net Credit',  dir: 'desc' };
     }
   };
 
@@ -269,13 +279,22 @@ export function AnalysisView({ initialTicker, clearInitialTicker }: AnalysisView
         case 'Ann Return%': return result.annualizedReturn; case 'IV %': return result.currentIv;
         case 'Suitability': return result.suitabilityScore; case 'Liquidity': return result.optionLiquidityScore;
       }
-    } else {
+    } else if (result.mode === 'bullish' || result.mode === 'bearish') {
       switch (col) {
         case 'Ticker': return result.ticker; case 'Price': return result.lastPrice;
         case 'ADX': return result.trendStrength; case 'Strategy': return result.suggestedStrategy;
         case 'Structure': return result.structure; case 'Max Profit': return result.maxProfit;
         case 'Max Loss': return result.maxLoss; case 'Breakeven': return result.breakeven;
         case 'POP': return result.probabilityOfProfit;
+      }
+    } else if (result.mode === 'jade_lizard' || result.mode === 'big_lizard') {
+      switch (col) {
+        case 'Ticker': return result.ticker; case 'Price': return result.lastPrice;
+        case 'Exp': return result.expiration; case 'DTE': return result.dte;
+        case 'Put Strike': return result.putStrike; case 'Short Call': return result.shortCallStrike;
+        case 'Long Call': return result.longCallStrike; case 'Net Credit': return result.netCredit;
+        case 'Spread W': return result.spreadWidth; case 'Breakeven↓': return result.breakevenDown;
+        case 'IV Rank': return result.ivRank;
       }
     }
     return null;
@@ -385,7 +404,7 @@ export function AnalysisView({ initialTicker, clearInitialTicker }: AnalysisView
         case 'Suitability': return `${result.suitabilityScore}/10`;
         case 'Liquidity':   return `${result.optionLiquidityScore}/10`;
       }
-    } else {
+    } else if (result.mode === 'bullish' || result.mode === 'bearish') {
       switch (col) {
         case 'Ticker':     return <span className="clickable-ticker" onClick={() => openValidateForTicker(result.ticker)} title="Click to validate">{result.ticker}</span>;
         case 'Price':      return fmtPrice(result.lastPrice);
@@ -396,6 +415,26 @@ export function AnalysisView({ initialTicker, clearInitialTicker }: AnalysisView
         case 'Max Loss':   return result.maxLoss !== null ? `$${result.maxLoss.toLocaleString()}` : 'Unlimited';
         case 'Breakeven':  return fmtPrice(result.breakeven);
         case 'POP':        return result.probabilityOfProfit !== null ? `${(result.probabilityOfProfit * 100).toFixed(0)}%` : '—';
+      }
+    } else if (result.mode === 'jade_lizard' || result.mode === 'big_lizard') {
+      switch (col) {
+        case 'Ticker':      return <span className="clickable-ticker" onClick={() => openValidateForTicker(result.ticker)} title="Click to validate">{result.ticker}</span>;
+        case 'Price':       return fmtPrice(result.lastPrice);
+        case 'Exp':         return result.expiration ?? '—';
+        case 'DTE':         return result.dte?.toString() ?? '—';
+        case 'Put Strike':  return fmtPrice(result.putStrike);
+        case 'Short Call':  return fmtPrice(result.shortCallStrike);
+        case 'Long Call':   return fmtPrice(result.longCallStrike);
+        case 'Net Credit':  return result.netCredit !== null
+          ? <span style={{ color: '#2ecc71', fontWeight: 700 }}>${result.netCredit.toFixed(2)}</span>
+          : '—';
+        case 'Spread W':    return result.spreadWidth !== null ? `$${result.spreadWidth.toFixed(2)}` : '—';
+        case 'No ↑ Risk':   return result.hasNoUpsideRisk === null ? '—'
+          : result.hasNoUpsideRisk
+            ? <span style={{ color: '#2ecc71' }}>✓</span>
+            : <span style={{ color: '#e74c3c' }}>✗</span>;
+        case 'Breakeven↓':  return fmtPrice(result.breakevenDown);
+        case 'IV Rank':     return result.ivRank !== null ? `${result.ivRank.toFixed(0)}%` : '—';
       }
     }
     return '—';
@@ -637,6 +676,8 @@ export function AnalysisView({ initialTicker, clearInitialTicker }: AnalysisView
                             <span className="snap-badge">🎯 {counts.wheel}</span>
                             <span className="snap-badge">🐂 {counts.bullish}</span>
                             <span className="snap-badge">🐻 {counts.bearish}</span>
+                            <span className="snap-badge">🦎 {counts.jade_lizard}</span>
+                            <span className="snap-badge">🐊 {counts.big_lizard}</span>
                           </div>
                         )}
                       </div>

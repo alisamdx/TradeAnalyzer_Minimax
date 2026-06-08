@@ -196,7 +196,7 @@ export interface FundamentalsCache {
 // ─── Analysis Engine (Phase 3) ────────────────────────────────────────────────
 
 /** Analysis mode types, one per FR-3.3 mode. */
-export type AnalysisMode = 'buy' | 'options_income' | 'wheel' | 'bullish' | 'bearish';
+export type AnalysisMode = 'buy' | 'options_income' | 'wheel' | 'bullish' | 'bearish' | 'jade_lizard' | 'big_lizard';
 
 /** List-item shape for the analysis snapshot selector. */
 export interface AnalysisSnapshotRow {
@@ -218,6 +218,8 @@ export interface AnalysisAllModesPayload {
   wheel: WheelResult[];
   bullish: StrategyResult[];
   bearish: StrategyResult[];
+  jade_lizard: LizardResult[];
+  big_lizard: LizardResult[];
 }
 
 /** Result returned by analysis:run-all. */
@@ -257,12 +259,13 @@ export interface AnalysisProgressEvent {
   mode?: AnalysisMode;
 }
 
-/** Unified analysis result — union of all 5 mode outputs. */
+/** Unified analysis result — union of all 7 mode outputs. */
 export type AnalysisResult =
   | BuyResult
   | OptionsIncomeResult
   | WheelResult
-  | StrategyResult;
+  | StrategyResult
+  | LizardResult;
 
 export interface BuyResult {
   mode: 'buy';
@@ -335,6 +338,27 @@ export interface StrategyResult {
   maxLoss: number | null;
   breakeven: number | null;
   probabilityOfProfit: number | null;
+  explanation: string;
+}
+
+export interface LizardResult {
+  mode: 'jade_lizard' | 'big_lizard';
+  ticker: string;
+  lastPrice: number | null;
+  expiration: string | null;
+  dte: number | null;
+  putStrike: number | null;
+  shortCallStrike: number | null;
+  longCallStrike: number | null;
+  /** Total net credit received per share — primary sort field. */
+  netCredit: number | null;
+  spreadWidth: number | null;
+  /** True when netCredit > spreadWidth — no upside risk. */
+  hasNoUpsideRisk: boolean | null;
+  maxProfit: number | null;    // = netCredit per share
+  maxLossDown: number | null;  // putStrike − netCredit per share
+  breakevenDown: number | null;
+  ivRank: number | null;
   explanation: string;
 }
 
