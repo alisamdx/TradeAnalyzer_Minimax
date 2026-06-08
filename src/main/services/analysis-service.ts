@@ -112,6 +112,9 @@ export interface LizardResult {
   maxLossDown: number | null;
   breakevenDown: number | null;
   ivRank: number | null;
+  putPremium: number | null;
+  shortCallPremium: number | null;
+  longCallPremium: number | null;
   explanation: string;
 }
 
@@ -1196,7 +1199,8 @@ export class AnalysisService {
       mode: 'jade_lizard', ticker, lastPrice: price, expiration: null, dte: null,
       putStrike: null, shortCallStrike: null, longCallStrike: null,
       netCredit: null, spreadWidth: null, hasNoUpsideRisk: null,
-      maxProfit: null, maxLossDown: null, breakevenDown: null, ivRank, explanation: reason
+      maxProfit: null, maxLossDown: null, breakevenDown: null, ivRank,
+      putPremium: null, shortCallPremium: null, longCallPremium: null, explanation: reason
     });
 
     if (!price) return empty('No quote available.');
@@ -1245,7 +1249,9 @@ export class AnalysisService {
       netCredit, spreadWidth, hasNoUpsideRisk,
       maxProfit: netCredit,
       maxLossDown: shortPut.strike - netCredit,
-      breakevenDown, ivRank, explanation
+      breakevenDown, ivRank,
+      putPremium: putMid, shortCallPremium: sCallMid, longCallPremium: lCallMid,
+      explanation
     };
   }
 
@@ -1261,7 +1267,8 @@ export class AnalysisService {
       mode: 'big_lizard', ticker, lastPrice: price, expiration: null, dte: null,
       putStrike: null, shortCallStrike: null, longCallStrike: null,
       netCredit: null, spreadWidth: null, hasNoUpsideRisk: null,
-      maxProfit: null, maxLossDown: null, breakevenDown: null, ivRank, explanation: reason
+      maxProfit: null, maxLossDown: null, breakevenDown: null, ivRank,
+      putPremium: null, shortCallPremium: null, longCallPremium: null, explanation: reason
     });
 
     if (!price) return empty('No quote available.');
@@ -1305,7 +1312,9 @@ export class AnalysisService {
       netCredit, spreadWidth, hasNoUpsideRisk,
       maxProfit: netCredit,
       maxLossDown: atmStrike - netCredit,
-      breakevenDown, ivRank, explanation
+      breakevenDown, ivRank,
+      putPremium: putMid, shortCallPremium: callMid, longCallPremium: lCallMid,
+      explanation
     };
   }
 

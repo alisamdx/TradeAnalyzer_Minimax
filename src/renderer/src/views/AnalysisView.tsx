@@ -9,7 +9,8 @@ import type {
   Watchlist,
   AnalysisAllModesPayload,
   AnalysisSnapshotRow,
-  AnalysisMode
+  AnalysisMode,
+  PayoffLeg,
 } from '@shared/types.js';
 
 interface AnalysisViewProps {
@@ -36,7 +37,7 @@ type BuyRow = { mode: 'buy'; ticker: string; lastPrice: number | null; composite
 type OptionsRow = { mode: 'options_income'; ticker: string; lastPrice: number | null; strategy: 'CSP' | 'CC'; strike: number | null; expiration: string | null; dte: number | null; delta: number | null; bid: number | null; ask: number | null; premium: number | null; annualizedReturn: number | null; ivRank: number | null; openInterest: number | null; breakeven: number | null; capitalRequired: number | null; explanation: string };
 type WheelRow = { mode: 'wheel'; ticker: string; lastPrice: number | null; recommendedStrike: number | null; expiration: string | null; dte: number | null; delta: number | null; premium: number | null; annualizedReturn: number | null; currentIv: number | null; ivRank: number | null; daysToEarnings: number | null; optionLiquidityScore: number; suitabilityScore: number; explanation: string };
 type StrategyRow = { mode: 'bullish' | 'bearish'; ticker: string; lastPrice: number | null; trendStrength: number | null; suggestedStrategy: string; structure: string; maxProfit: number | null; maxLoss: number | null; breakeven: number | null; probabilityOfProfit: number | null; explanation: string };
-type LizardRow = { mode: 'jade_lizard' | 'big_lizard'; ticker: string; lastPrice: number | null; expiration: string | null; dte: number | null; putStrike: number | null; shortCallStrike: number | null; longCallStrike: number | null; netCredit: number | null; spreadWidth: number | null; hasNoUpsideRisk: boolean | null; maxProfit: number | null; maxLossDown: number | null; breakevenDown: number | null; ivRank: number | null; explanation: string };
+type LizardRow = { mode: 'jade_lizard' | 'big_lizard'; ticker: string; lastPrice: number | null; expiration: string | null; dte: number | null; putStrike: number | null; shortCallStrike: number | null; longCallStrike: number | null; netCredit: number | null; spreadWidth: number | null; hasNoUpsideRisk: boolean | null; maxProfit: number | null; maxLossDown: number | null; breakevenDown: number | null; ivRank: number | null; putPremium: number | null; shortCallPremium: number | null; longCallPremium: number | null; explanation: string };
 type DecodedResult = BuyRow | OptionsRow | WheelRow | StrategyRow | LizardRow;
 
 // ─── Tab config ───────────────────────────────────────────────────────────────
@@ -330,13 +331,48 @@ export function AnalysisView({ initialTicker, clearInitialTicker }: AnalysisView
 
   const openPayoff = (result: DecodedResult) => {
     const detail: Record<string, unknown> = { ticker: result.ticker, spot: result.lastPrice };
+
     if (result.mode === 'options_income') {
       detail.strike = result.strike;
       detail.expiry = result.expiration;
     } else if (result.mode === 'wheel') {
       detail.strike = result.recommendedStrike;
       detail.expiry = result.expiration;
+    } else if ((result.mode === 'jade_lizard' || result.mode === 'big_lizard') &&
+               result.putStrike && result.shortCallStrike && result.longCallStrike &&
+               result.expiration && result.putPremium != null &&
+               result.shortCallPremium != null && result.longCallPremium != null) {
+      const mkId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+      const expiry = result.expiration;
+      const stratLabel = result.mode === 'jade_lizard' ? 'Jade Lizard' : 'Big Lizard';
+      const legs: PayoffLeg[] = [
+        {
+          id: mkId(), side: 'sell', type: 'put',
+          strike: result.putStrike, expiry,
+          premium: result.putPremium, quantity: 1,
+          delta: null, theta: null, vega: null, iv: null,
+          label: `Sell ${result.putStrike} Put`,
+        },
+        {
+          id: mkId(), side: 'sell', type: 'call',
+          strike: result.shortCallStrike, expiry,
+          premium: result.shortCallPremium, quantity: 1,
+          delta: null, theta: null, vega: null, iv: null,
+          label: `Sell ${result.shortCallStrike} Call`,
+        },
+        {
+          id: mkId(), side: 'buy', type: 'call',
+          strike: result.longCallStrike, expiry,
+          premium: result.longCallPremium, quantity: 1,
+          delta: null, theta: null, vega: null, iv: null,
+          label: `Buy ${result.longCallStrike} Call`,
+        },
+      ];
+      detail.legs = legs;
+      detail.strategy = stratLabel;
+      detail.expiry = expiry;
     }
+
     window.dispatchEvent(new CustomEvent('navigate-to-payoff', { detail }));
   };
 

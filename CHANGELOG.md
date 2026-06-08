@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.20] — 2026-06-08
+
+### Fixed
+- **Lizard → Payoff navigation**: clicking 📐 Payoff from Jade Lizard or Big Lizard grid rows now pre-populates all 3 legs (sell put, sell call, buy call) with correct strikes and mid-premiums. `LizardResult` now stores per-leg premiums (`putPremium`, `shortCallPremium`, `longCallPremium`).
+
 ## [0.32.19] — 2026-06-08
 
 ### Changed

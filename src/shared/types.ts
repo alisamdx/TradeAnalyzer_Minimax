@@ -359,6 +359,10 @@ export interface LizardResult {
   maxLossDown: number | null;  // putStrike − netCredit per share
   breakevenDown: number | null;
   ivRank: number | null;
+  /** Per-leg mid premiums — used to pre-build PayoffLeg[] when navigating to Payoff. */
+  putPremium: number | null;
+  shortCallPremium: number | null;
+  longCallPremium: number | null;
   explanation: string;
 }
 
