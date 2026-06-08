@@ -2,7 +2,7 @@
 
 > **Read this first.** Self-contained snapshot of *what the app is today* so a fresh AI session is productive without re-reading the whole codebase. This file describes **current state** — not history. Release history lives in `CHANGELOG.md` / `changelogs/`. Operating rules live in `/CLAUDE.md`. Full spec lives in `Requirements/`.
 >
-> Last verified against code: 2026-06-07 (v0.32.7). When you make a material change, update the relevant section here in the same commit.
+> Last verified against code: 2026-06-07 (v0.32.8). When you make a material change, update the relevant section here in the same commit.
 
 ---
 
@@ -117,8 +117,8 @@ Routing is a `currentView` string in `App.tsx`; cross-view navigation fires Cust
 | Section | Views |
 | --- | --- |
 | **Data** | ⚙ Settings · ⚖ Trade Scoring (`TradeScoringView`) · 🔄 Batch Jobs (`BatchView`) |
-| **Intelligence** | 📋 Daily Brief (`DailyBriefView`) · 🪞 Retrospect (`RetrospectView`) · 📅 Earnings (`EarningsCalendarView`) |
-| **Screeners** | 🔍 Screener · 📡 News & Research (`NewsResearchView`) · 🎯 Opportunity · 🎛️ Filters |
+| **Intelligence** | 📋 Daily Brief (`DailyBriefView`) · 🪞 Retrospect (`RetrospectView`) · 📅 Earnings (`EarningsCalendarView`) · 📡 News & Research (`NewsResearchView`) |
+| **Screeners** | 🔍 Screener · 🎯 Opportunity · 🎛️ Filters |
 | **Analysis** | 📐 Payoff (`PayoffView`) · 🎯 Validate · 📉 Options (`OptionsChainView`) |
 | **Strategy** | 📚 Knowledge · 📊 Analysis · 🔬 Strategy Lab · ⚡ LEAPS (`LeapsCspView`) · 🛡️ Collared LEAPS |
 | **Misc** | 🤖 Agent · 🔁 Backtest · 🔬 Test API · 🗄️ Data Sync (`DataView`) · 🗓️ History (`IvHistoryView`) · 🔔 Alerts |

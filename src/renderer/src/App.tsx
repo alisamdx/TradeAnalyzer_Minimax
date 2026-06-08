@@ -897,6 +897,12 @@ export function App() {
           >
             📅 Earnings
           </button>
+          <button
+            className={`nav-btn ${currentView === 'newsResearch' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('newsResearch')}
+          >
+            📡 News & Research
+          </button>
 
           {/* ── Screeners ── */}
           <div className="nav-section-label">Screeners</div>
@@ -905,12 +911,6 @@ export function App() {
             onClick={() => navigateSidebar('screener')}
           >
             🔍 Screener
-          </button>
-          <button
-            className={`nav-btn ${currentView === 'newsResearch' ? 'active' : ''}`}
-            onClick={() => navigateSidebar('newsResearch')}
-          >
-            📡 News & Research
           </button>
           <button
             className={`nav-btn ${currentView === 'opportunity' ? 'active' : ''}`}

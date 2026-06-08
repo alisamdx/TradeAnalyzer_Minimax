@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.8] — 2026-06-07
+
+### Changed
+- **Sidebar**: moved 📡 News & Research from the Screeners section to the Intelligence section, directly below 📅 Earnings
+
 ## [0.32.7] — 2026-06-07
 
 ### Changed
