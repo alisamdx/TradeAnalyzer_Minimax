@@ -769,18 +769,15 @@ export class ScoringService {
   }
 
   private loadFundamentals(tickers: string[], result: Map<string, TickerSignalData>): void {
-    type RunRow = { id: number };
-    const latestRun = this.db.prepare(
-      'SELECT id FROM screen_runs ORDER BY id DESC LIMIT 1'
-    ).get() as RunRow | undefined;
-    if (!latestRun) return;
-
+    // Source: fundamentals_cache — populated daily by market-sync batch jobs for the full
+    // constituent universe. Decoupled from screen_results so brief quality is independent
+    // of which screener preset the user ran last.
     const ph = tickers.map(() => '?').join(',');
-    type SRow = { ticker: string; payload_json: string };
+    type CacheRow = { ticker: string; payload_json: string };
     const rows = this.db.prepare(`
-      SELECT ticker, payload_json FROM screen_results
-      WHERE screen_run_id = ? AND ticker IN (${ph})
-    `).all(latestRun.id, ...tickers) as SRow[];
+      SELECT ticker, payload_json FROM fundamentals_cache
+      WHERE ticker IN (${ph})
+    `).all(...tickers) as CacheRow[];
 
     for (const row of rows) {
       const d = result.get(row.ticker);
@@ -788,7 +785,6 @@ export class ScoringService {
       const p = JSON.parse(row.payload_json) as ScreenResultPayload;
       d.epsGrowth = p.epsGrowth;
       d.revenueGrowth = p.revenueGrowth;
-      // Quality signals (v0.22.21) — populated after fundamentals-computer upgrade
       d.fcfToNetIncome = p.fcfToNetIncome ?? null;
       d.roic = p.roic ?? null;
       d.netDebtToEbitda = p.netDebtToEbitda ?? null;
@@ -1027,27 +1023,20 @@ export class ScoringService {
     }
     if (etfReturns.size === 0) return;  // No ETF bars yet
 
-    // Look up each ticker's sector from the latest screen run
-    type RunRow = { id: number };
-    const latestRun = this.db.prepare(
-      'SELECT id FROM screen_runs ORDER BY id DESC LIMIT 1'
-    ).get() as RunRow | undefined;
-    if (!latestRun) return;
-
+    // Look up each ticker's sector from fundamentals_cache — batch-populated daily,
+    // full constituent coverage, independent of screener run scope.
     const tickerPh = tickers.map(() => '?').join(',');
-    type SectorRow = { ticker: string; payload_json: string };
-    const screenRows = this.db.prepare(`
-      SELECT ticker, payload_json FROM screen_results
-      WHERE screen_run_id = ? AND ticker IN (${tickerPh})
-    `).all(latestRun.id, ...tickers) as SectorRow[];
+    type SectorRow = { ticker: string; sector: string | null };
+    const cacheRows = this.db.prepare(`
+      SELECT ticker, json_extract(payload_json, '$.sector') AS sector
+      FROM fundamentals_cache
+      WHERE ticker IN (${tickerPh})
+    `).all(...tickers) as SectorRow[];
 
-    for (const row of screenRows) {
+    for (const row of cacheRows) {
       const d = result.get(row.ticker);
-      if (!d) continue;
-      const payload = JSON.parse(row.payload_json) as ScreenResultPayload;
-      const sector = payload.sector;
-      if (!sector) continue;
-      const etf = SECTOR_ETF[sector];
+      if (!d || !row.sector) continue;
+      const etf = SECTOR_ETF[row.sector];
       if (!etf) continue;
       const etfReturn = etfReturns.get(etf);
       if (etfReturn !== undefined) {
@@ -1057,16 +1046,33 @@ export class ScoringService {
   }
 
   private loadTechnicalSignals(tickers: string[], result: Map<string, TickerSignalData>): void {
+    // Source: technical_signals — populated nightly by DailyTechnicalSignalsJob for the
+    // full constituent universe. Also provides rsi, smaStack, and lastPrice as fallbacks
+    // for tickers not covered by analysis_snapshots (which are watchlist-scoped).
     const ph = tickers.map(() => '?').join(',');
-    type TsRow = { ticker: string; buy_signal_score: number | null };
+    type TsRow = {
+      ticker: string;
+      buy_signal_score: number | null;
+      rsi: number | null;
+      sma20: number | null; sma50: number | null; sma200: number | null;
+      price: number | null;
+    };
     const rows = this.db.prepare(`
-      SELECT ticker, buy_signal_score FROM technical_signals
+      SELECT ticker, buy_signal_score, rsi, sma20, sma50, sma200, price
+      FROM technical_signals
       WHERE ticker IN (${ph})
     `).all(...tickers) as TsRow[];
 
     for (const row of rows) {
       const d = result.get(row.ticker);
-      if (d) d.buySignalScore = row.buy_signal_score;
+      if (!d) continue;
+      d.buySignalScore = row.buy_signal_score;
+      // Fill rsi / smaStack / lastPrice only when analysis_snapshots had no data
+      if (d.rsi === null) d.rsi = row.rsi;
+      if (d.smaStack === null && (row.sma20 !== null || row.sma50 !== null || row.sma200 !== null)) {
+        d.smaStack = { sma20: row.sma20, sma50: row.sma50, sma200: row.sma200 };
+      }
+      if (d.lastPrice === null && row.price !== null && row.price > 0) d.lastPrice = row.price;
     }
   }
 

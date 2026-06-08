@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.35] — 2026-06-08
+
+### Fixed
+- **Daily Brief scoring — fundamental signals always missing**: `loadFundamentals()` was reading from `screen_results` (the last screener run), so any ticker not in that run had null earningsGrowth, fundamentalScore, revenueGrowth5Y, epsGrowth5Y, leverageQuality etc. — which the AI Critic immediately flagged as `critical_signal_missing`. Root cause: the last screener run used the ETF universe (60 tickers), leaving all ~1000 stock picks with no fundamental data. Fix: `loadFundamentals()` and `loadSectorMomentum()` now read from `fundamentals_cache`, which is populated by the market-sync batch jobs for the full constituent universe (1067 rows, updated daily). `loadTechnicalSignals()` also now provides `rsi`, `smaStack`, and `lastPrice` as fallbacks from the nightly `DailyTechnicalSignalsJob` (1055 tickers), so those signals are no longer watchlist-scoped.
+
 ## [0.32.34] — 2026-06-08
 
 ### Fixed

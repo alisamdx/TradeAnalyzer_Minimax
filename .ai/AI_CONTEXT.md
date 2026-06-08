@@ -2,7 +2,7 @@
 
 > **Read this first.** Self-contained snapshot of *what the app is today* so a fresh AI session is productive without re-reading the whole codebase. This file describes **current state** — not history. Release history lives in `CHANGELOG.md` / `changelogs/`. Operating rules live in `/CLAUDE.md`. Full spec lives in `Requirements/`.
 >
-> Last verified against code: 2026-06-08 (v0.32.34). When you make a material change, update the relevant section here in the same commit.
+> Last verified against code: 2026-06-08 (v0.32.35). When you make a material change, update the relevant section here in the same commit.
 
 ---
 
@@ -192,6 +192,7 @@ Authoritative DDL is in `migrations/`. Tables are created lazily (`CREATE TABLE 
 - **`node:fetch` does not exist** in Node 24 — use the global `fetch`.
 - **E*Trade IV is a decimal fraction**; **E*Trade dates are UTC** → a Thursday-evening ET earnings report shows as Saturday UTC. `earnings-service.ts` shifts Saturday → Friday and marks it unconfirmed.
 - **IV rank/percentile are null** from the Polygon snapshot — computed from `iv_history`, which requires the MarketData.app/IVolatility backfill to be populated first.
+- **Brief scoring reads fundamentals from `fundamentals_cache`** (not `screen_results`) — decoupled from screener run scope. Sector names in `fundamentals_cache` are SIC descriptions; `SECTOR_ETF` keys are GICS names — `sectorMomentum` signal is effectively null for all stocks (pre-existing, not a regression).
 - **Earnings & analyst data** are E*Trade-sourced (earnings) / Polygon-sourced; no Polygon public earnings endpoint exists.
 - **Production DB path**: packaged → `app.getPath('userData')/trade-analyzer.sqlite` (`%AppData%/trade-analyzer/`); dev → `<appPath>/data/`.
 - **Fake-timer tests** use `flushTimersUntil()`, not `vi.runAllTimers()` (the rate limiter's promise chain won't drain otherwise).
