@@ -137,7 +137,7 @@ function CalendarGrid({
             <div key={dateStr} style={{
               minHeight: 72,
               background: isToday ? '#1a2a3a' : isWeekend ? '#0f1624' : '#131b2e',
-              border: `1px solid ${isToday ? '#89b4fa' : hasEntries ? '#2d4a6e' : '#2d3748'}`,
+              border: `2px solid ${isToday ? '#89b4fa' : hasEntries ? '#2d4a6e' : '#2d3748'}`,
               borderRadius: 4,
               padding: '4px 5px',
               opacity: inMonth ? 1 : 0.3,
@@ -166,7 +166,7 @@ function CalendarGrid({
                       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                       gap: 2, padding: '2px 4px', borderRadius: 3,
                       background: weekendWarning ? '#2a1a00' : e.confirmed ? '#1a2a3a' : '#1e2535',
-                      border: `1px solid ${weekendWarning ? '#f59e0b66' : e.confirmed ? '#2d4a6e' : '#2d3748'}`,
+                      border: `2px solid ${weekendWarning ? '#f59e0b66' : e.confirmed ? '#2d4a6e' : '#2d3748'}`,
                       cursor: 'pointer',
                     }}
                       onClick={() => onTickerClick(e.ticker)}

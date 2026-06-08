@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.16] — 2026-06-07
+
+### Changed
+- **Earnings Calendar grid**: cell and chip borders thickened from 1px to 2px
+
 ## [0.32.15] — 2026-06-07
 
 ### Changed
