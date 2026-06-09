@@ -399,7 +399,7 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
                 pick, strategy, config, assembledPicks as Map<string, BriefPick[]>, marketContext,
               );
               pick.criticVerdict = await this.criticService.synthesizeVerdict(
-                pick, strategy, flags, anthropicApiKey,
+                pick, strategy, flags, anthropicApiKey, marketContext,
               );
             } catch (err) {
               console.warn(`[critic] ${pick.ticker}/${strategy}:`, err instanceof Error ? err.message : String(err));

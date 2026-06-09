@@ -97,7 +97,7 @@ export function registerCriticRoutes(app: FastifyInstance, svc: ApiServerService
         // LLM synthesis (if API key available)
         const apiKey = secureGet(svc.db, 'anthropicApiKey') ?? '';
         const verdict = apiKey
-          ? await svc.criticService.synthesizeVerdict(pick, strategy, flags, apiKey)
+          ? await svc.criticService.synthesizeVerdict(pick, strategy, flags, apiKey, market)
           : {
               verdict: (flags.some(f => f.severity === 'warning') ? 'flag' : flags.length > 0 ? 'caution' : 'pass') as 'pass' | 'caution' | 'flag',
               confidence: 'low' as const,

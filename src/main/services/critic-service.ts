@@ -71,14 +71,16 @@ export class CriticService {
     return flags;
   }
 
-  // LLM synthesis — one haiku call per pick with adversarial system prompt.
+  // LLM synthesis — one sonnet call per pick with adversarial system prompt.
   async synthesizeVerdict(
     pick: BriefPick,
     strategy: string,
     flags: CriticFlag[],
     apiKey: string,
+    market: MarketContext,
   ): Promise<CriticVerdict> {
     const generatedAt = new Date().toISOString();
+    const today = new Date().toISOString().slice(0, 10);
     const hasWarning = flags.some(f => f.severity === 'warning');
     const baseVerdict: CriticVerdict['verdict'] = hasWarning ? 'flag' : flags.length > 0 ? 'caution' : 'pass';
     const baseConfidence: CriticVerdict['confidence'] =
@@ -98,18 +100,43 @@ export class CriticService {
       type LabRes = { scores?: SScore[] };
       const labResult = pick.strategyLabResult as LabRes | null;
       const slugs = STRATEGY_RELEVANT_SLUGS[strategy] ?? [];
-      let structure: object | null = null;
+      let structure: Record<string, unknown> | null = null;
+      let structureExpiry: string | null = null;
+
       if (labResult?.scores) {
         const best = labResult.scores.find(s => slugs.includes(s.slug) && s.setup != null);
         if (best?.setup) {
           const shortLeg = best.setup.legs.find(l => l.action === 'sell');
+          const credit = best.setup.netCredit;
+          const strike = shortLeg?.strike ?? null;
+          const price = pick.price;
+          structureExpiry = best.setup.expiration;
+
+          // DTE: pre-computed — removes LLM date arithmetic errors
+          const dte = structureExpiry
+            ? Math.round((new Date(structureExpiry).getTime() - new Date(today).getTime()) / 86400000)
+            : null;
+
+          // Strike OTM %: how far is the short strike from current price (positive = OTM)
+          const strikeOtmPct = (strike !== null && price !== null && price > 0)
+            ? +((price - strike) / price * 100).toFixed(1)
+            : null;
+
+          // Breakeven distance %: for income, how far price can move before structure loses
+          const breakevenDistancePct = (strategy === 'income' && credit !== null && price !== null && price > 0)
+            ? +(Math.abs(credit) / price * 100).toFixed(1)
+            : null;
+
           structure = {
             type: best.slug,
             grade: best.grade,
-            strike: shortLeg?.strike ?? null,
-            expiry: best.setup.expiration,
-            credit: best.setup.netCredit,
+            strike,
+            expiry: structureExpiry,
+            dte,
+            credit,
             liquidityScore: best.liquidityScore,
+            ...(strikeOtmPct !== null && { strikeOtmPct }),
+            ...(breakevenDistancePct !== null && { breakevenDistancePct }),
           };
         }
       }
@@ -120,15 +147,31 @@ export class CriticService {
         ? (pick.signals['priceMomentumPct']?.raw ?? null)
         : null;
 
+      // Earnings within the hold window — single most important event risk for options
+      const earningsInWindow = structureExpiry
+        ? this.getEarningsBeforeExpiry(pick.ticker, structureExpiry, today)
+        : null;
+
       const context = {
         ticker: pick.ticker,
         strategy,
         compositeScore: pick.compositeScore,
         marketData: {
           price: pick.price,
-          date: new Date().toISOString().slice(0, 10),
-          price52wReturnPct: price52wReturn,  // e.g. 320.5 means stock is up 320% vs 1 year ago
+          date: today,
+          price52wReturnPct: price52wReturn,
         },
+        marketContext: {
+          vix: market.vix,
+          vixLevel: market.vix === null ? null
+            : market.vix < 15 ? 'low — complacency regime (<15)'
+            : market.vix > 25 ? 'high — fear regime (>25)'
+            : 'normal (15–25)',
+          spyTrend: market.spyAbove200ma === null ? null
+            : market.spyAbove200ma ? 'bullish — SPY above 200-day MA'
+            : 'bearish — SPY below 200-day MA',
+        },
+        earningsInWindow,  // null = no earnings before expiry; otherwise { date, daysFromNow, confirmed }
         topSignals,
         structure,
         advocateRationale: pick.aiRationale,
@@ -138,7 +181,10 @@ export class CriticService {
       const systemPrompt = `You are a risk-focused options trading analyst reviewing daily trade recommendations.
 Your job is to find problems, not validate decisions. Be skeptical and specific.
 
-IMPORTANT: All market data in the \`marketData\` field is live and current as of the \`date\` provided — sourced directly from real-time market data feeds, not estimates. Do not use your training knowledge to assess whether a price is "too high", "wrong", or "unrealistic" — stock prices change dramatically over time and your training data may be years out of date. If \`price52wReturnPct\` shows +300, the stock genuinely is up 300% from a year ago; treat the provided price as ground truth.
+MARKET DATA: All values in \`marketData\` are live as of \`date\` from real-time feeds — treat them as ground truth. Do not use training knowledge to contradict provided prices; stocks change dramatically over years of training lag. \`price52wReturnPct\` shows the 1-year return so you can calibrate price level without recalling historical absolutes.
+STRUCTURE: \`dte\` is pre-computed calendar days to expiry. \`strikeOtmPct\` is how far the short strike is from current price (positive = OTM). \`breakevenDistancePct\` (income only) is how far price can move before the structure loses.
+MARKET CONTEXT: \`vixLevel\` and \`spyTrend\` describe today's macro environment.
+EARNINGS: \`earningsInWindow\` is non-null if there is a known earnings event before expiry — this is the single biggest event risk for any options position.
 
 Write exactly 2 sentences:
 1. Your verdict on the most significant risk or concern you see (or confirm it looks clean if genuinely clear).
@@ -322,6 +368,28 @@ Use verdict: pass, caution, or flag. Use confidence: high, medium, or low.`;
       };
     }
     return null;
+  }
+
+  private getEarningsBeforeExpiry(
+    ticker: string,
+    expiryDate: string,
+    today: string,
+  ): { date: string; daysFromNow: number; confirmed: boolean } | null {
+    try {
+      type ERow = { report_date: string; confirmed: number };
+      const row = this.db.prepare(`
+        SELECT report_date, confirmed FROM earnings_calendar
+        WHERE ticker = ? AND report_date > ? AND report_date <= ?
+        ORDER BY report_date ASC LIMIT 1
+      `).get(ticker, today, expiryDate) as ERow | undefined;
+      if (!row) return null;
+      const daysFromNow = Math.round(
+        (new Date(row.report_date).getTime() - new Date(today).getTime()) / 86400000
+      );
+      return { date: row.report_date, daysFromNow, confirmed: row.confirmed === 1 };
+    } catch {
+      return null;
+    }
   }
 
   private checkMarketRisk(strategy: string, market: MarketContext): CriticFlag | null {

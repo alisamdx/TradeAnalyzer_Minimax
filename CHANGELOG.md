@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.32.37] — 2026-06-08
+
+### Improved
+- **AI Critic context enrichment**: four grounding improvements to reduce LLM hallucinations and improve verdict accuracy:
+  - **DTE pre-computed**: `structure.dte` (calendar days to expiry) is now calculated server-side and passed directly — removes LLM date arithmetic errors (e.g. treating a 39-DTE July expiry as a "12-month hold")
+  - **Market context**: VIX level and SPY trend (vs 200MA) now passed to the LLM as `marketContext` — model previously had no visibility into the macro environment
+  - **Earnings in window**: `earningsInWindow` field added — queries `earnings_calendar` for any event between today and expiry; non-null result tells the model the exact date, days from now, and confirmation status of the biggest event risk
+  - **Pre-computed risk metrics**: `strikeOtmPct` (how far the short strike is from current price) and `breakevenDistancePct` (income only — how far price can move before loss) are now computed server-side, removing another class of LLM arithmetic errors
+
 ## [0.32.36] — 2026-06-08
 
 ### Fixed
