@@ -3,7 +3,7 @@
 // see Requirements/DAILY_INTELLIGENCE_BRIEF.md §4
 
 import type { Database } from 'better-sqlite3';
-import type { ScreenResultPayload, SignalWeightSuggestion, ScoringStrategy as ScoringStrategyType } from '@shared/types.js';
+import type { ScreenResultPayload, SignalWeightSuggestion, ScoringStrategy as ScoringStrategyType, BriefHealthTrend, BriefHealthPoint } from '@shared/types.js';
 import type { BuyResult, WheelResult, StrategyResult, OptionsIncomeResult } from './analysis-service.js';
 
 // ─── Sector ETF mapping ───────────────────────────────────────────────────────
@@ -1337,6 +1337,89 @@ export class ScoringService {
   pruneStaleBriefs(retentionDays = 90): void {
     const cutoff = new Date(Date.now() - retentionDays * 86_400_000).toISOString();
     this.db.prepare('DELETE FROM daily_briefs WHERE generated_at < ?').run(cutoff);
+  }
+
+  // ── B-02: Critic pass-rate trend over recent briefs ──────────────────────
+  // For each strategy, takes the most-recent `limit` distinct brief dates,
+  // parses picks JSON, counts criticVerdict distributions, and derives a
+  // trend direction by comparing the older half vs newer half of pass rates.
+  getBriefHealthTrend(limit = 7): BriefHealthTrend[] {
+    const STRATEGIES: ScoringStrategyType[] = ['wheel', 'bullish', 'bearish', 'income', 'buy'];
+
+    // Latest brief per (strategy, calendar-date) — avoids double-counting same-day re-runs
+    type Row = { strategy: string; brief_date: string; picks: string };
+    const rows = this.db.prepare(`
+      WITH ranked AS (
+        SELECT strategy,
+               DATE(generated_at) AS brief_date,
+               picks,
+               ROW_NUMBER() OVER (
+                 PARTITION BY strategy, DATE(generated_at)
+                 ORDER BY generated_at DESC
+               ) AS rn
+        FROM daily_briefs
+      )
+      SELECT strategy, brief_date, picks
+      FROM ranked
+      WHERE rn = 1
+      ORDER BY strategy, brief_date DESC
+    `).all() as Row[];
+
+    // Group by strategy, cap at `limit` rows each
+    const byStrategy = new Map<string, Row[]>();
+    for (const r of rows) {
+      if (!byStrategy.has(r.strategy)) byStrategy.set(r.strategy, []);
+      const arr = byStrategy.get(r.strategy)!;
+      if (arr.length < limit) arr.push(r);
+    }
+
+    return STRATEGIES.map(strategy => {
+      const stratRows = byStrategy.get(strategy) ?? [];
+
+      // Parse and aggregate per date (oldest → newest)
+      const points: BriefHealthPoint[] = stratRows.map(r => {
+        type Pick = { criticVerdict?: { verdict?: string } | null };
+        let passes = 0, cautions = 0, flags = 0, total = 0;
+        try {
+          const picks = JSON.parse(r.picks) as Pick[];
+          for (const p of picks) {
+            const v = p.criticVerdict?.verdict;
+            if (!v) continue;
+            total++;
+            if (v === 'pass')    passes++;
+            else if (v === 'caution') cautions++;
+            else if (v === 'flag')    flags++;
+          }
+        } catch { /* skip malformed */ }
+        return {
+          date:     r.brief_date,
+          total,
+          passes,
+          cautions,
+          flags,
+          passRate: total >= 2 ? Math.round((passes / total) * 100) : null,
+        };
+      }).reverse(); // chronological order
+
+      // Trend: compare older-half avg vs newer-half avg
+      const rated = points.filter(p => p.passRate !== null);
+      let trend: BriefHealthTrend['trend'] = 'insufficient';
+      let currentPct: number | null = null;
+
+      if (rated.length >= 3) {
+        currentPct = rated[rated.length - 1]!.passRate;
+        const half = Math.floor(rated.length / 2);
+        const older = rated.slice(0, half).map(p => p.passRate!);
+        const newer = rated.slice(rated.length - half).map(p => p.passRate!);
+        const avg = (arr: number[]) => arr.reduce((a, b) => a + b, 0) / arr.length;
+        const diff = avg(newer) - avg(older);
+        trend = diff > 8 ? 'improving' : diff < -8 ? 'declining' : 'stable';
+      } else if (rated.length > 0) {
+        currentPct = rated[rated.length - 1]!.passRate;
+      }
+
+      return { strategy, points, trend, currentPct };
+    });
   }
 
   // ── 1e: Signal weight suggestions from Pearson correlation ────────────────

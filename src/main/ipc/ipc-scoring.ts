@@ -92,6 +92,9 @@ export function registerScoringIpc(scoringService: ScoringService, emailService:
     scoringService.computeSignalCorrelations(strategy)
   ));
 
+  // B-02: critic pass-rate trend per strategy (last 7 briefs)
+  ipcMain.handle('scoring:brief-health-trend', wrap(() => scoringService.getBriefHealthTrend()));
+
   ipcMain.handle('scoring:resend-brief-email', async (_e: IpcMainInvokeEvent): Promise<IpcResult<{ sent: boolean; message: string }>> => {
     try {
       if (!emailService.isConfigured()) {

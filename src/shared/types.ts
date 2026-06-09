@@ -1764,6 +1764,23 @@ export interface SnapshotAccuracy {
   byBriefDate:    SnapshotBriefRow[];
 }
 
+// Brief health trend — critic pass/caution/flag rates over recent briefs (B-02)
+export interface BriefHealthPoint {
+  date:      string;        // YYYY-MM-DD of the brief
+  total:     number;        // picks that had a criticVerdict
+  passes:    number;
+  cautions:  number;
+  flags:     number;
+  passRate:  number | null; // passes/total × 100; null if total < 2
+}
+
+export interface BriefHealthTrend {
+  strategy:   ScoringStrategy;
+  points:     BriefHealthPoint[];  // chronological (oldest → newest), up to 7
+  trend:      'improving' | 'declining' | 'stable' | 'insufficient';
+  currentPct: number | null;       // pass rate of the most recent brief
+}
+
 // Brief performance summary for the Daily Brief header banner (B-01)
 // Shows last brief's Day+5 hit-rate and avg return per strategy.
 export interface BriefPerformanceStrategy {

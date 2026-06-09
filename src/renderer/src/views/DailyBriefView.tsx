@@ -2,7 +2,7 @@
 // see Requirements/DAILY_INTELLIGENCE_BRIEF.md §6
 
 import { useState, useEffect, useCallback } from 'react';
-import type { DailyBriefEntry, BriefPick, ScoringStrategy, StrategyLabValidateResult, StrategyLabGrade, StrategySetup, SetupLeg, PayoffLeg, BriefAccuracy, CriticVerdict, BriefPerformanceSummary } from '@shared/types.js';
+import type { DailyBriefEntry, BriefPick, ScoringStrategy, StrategyLabValidateResult, StrategyLabGrade, StrategySetup, SetupLeg, PayoffLeg, BriefAccuracy, CriticVerdict, BriefPerformanceSummary, BriefHealthTrend } from '@shared/types.js';
 
 const STRATEGY_LABELS: Record<ScoringStrategy, string> = {
   wheel:   '🎡  Wheel — CSP / Covered Call',
@@ -523,7 +523,8 @@ export function DailyBriefView({ onGoToStrategyLab }: DailyBriefViewProps) {
   const [selectedHistoryId, setSelectedHistoryId] = useState<number | null>(null);
   const [accuracyMap, setAccuracyMap] = useState<Map<string, BriefAccuracy>>(new Map());
 
-  const [perfSummary, setPerfSummary] = useState<BriefPerformanceSummary | null>(null);
+  const [perfSummary, setPerfSummary]     = useState<BriefPerformanceSummary | null>(null);
+  const [healthTrend, setHealthTrend]     = useState<BriefHealthTrend[]>([]);
 
   const [collapsed, setCollapsed] = useState<Record<ScoringStrategy, boolean>>(() => {
     try {
@@ -570,6 +571,13 @@ export function DailyBriefView({ onGoToStrategyLab }: DailyBriefViewProps) {
     window.api.paper.briefPerformanceSummary()
       .then(summary => setPerfSummary(summary))
       .catch(() => { /* non-fatal — no paper data yet */ });
+  }, []);
+
+  // Load critic pass-rate trend per strategy (B-02)
+  useEffect(() => {
+    window.api.scoring.briefHealthTrend()
+      .then(trends => setHealthTrend(trends))
+      .catch(() => { /* non-fatal */ });
   }, []);
 
   useEffect(() => {
@@ -710,6 +718,34 @@ export function DailyBriefView({ onGoToStrategyLab }: DailyBriefViewProps) {
               </span>
             );
           })}
+        </div>
+      )}
+
+      {/* B-02: Critic pass-rate trend banner */}
+      {healthTrend.some(t => t.currentPct !== null) && (
+        <div className="brief-perf-banner" style={{ gap: 12 }}>
+          <span className="brief-perf-label">🔬 Critic trend (last 7 briefs):</span>
+          {healthTrend
+            .filter(t => t.currentPct !== null)
+            .map(t => {
+              const arrow =
+                t.trend === 'improving'  ? '↑' :
+                t.trend === 'declining'  ? '↓' :
+                t.trend === 'stable'     ? '→' : '—';
+              const arrowColor =
+                t.trend === 'improving'  ? '#3fb950' :
+                t.trend === 'declining'  ? '#f85149' : '#e3a008';
+              const pct = t.currentPct!;
+              const pctColor = pct >= 60 ? '#3fb950' : pct >= 40 ? '#e3a008' : '#f85149';
+              return (
+                <span key={t.strategy} className="brief-perf-chip">
+                  <span style={{ color: '#89b4fa', textTransform: 'capitalize' }}>{t.strategy}</span>
+                  {' '}
+                  <span style={{ color: arrowColor, fontWeight: 700 }}>{arrow}</span>
+                  <span style={{ color: pctColor, marginLeft: 2 }}>{pct}%</span>
+                </span>
+              );
+            })}
         </div>
       )}
 

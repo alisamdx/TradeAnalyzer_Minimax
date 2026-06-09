@@ -95,6 +95,7 @@ import type {
   BriefAccuracy,
   SnapshotAccuracy,
   BriefPerformanceSummary,
+  BriefHealthTrend,
   BriefLearningRecommendation,
   SignalWeightSuggestion,
   ConvictionStock,
@@ -1034,6 +1035,8 @@ function buildApi() {
       invoke<{ sent: boolean; message: string }>('scoring:resend-brief-email'),
     signalCorrelations: (strategy: ScoringStrategy) =>
       invoke<SignalWeightSuggestion[]>('scoring:signal-correlations', strategy),
+    briefHealthTrend: () =>
+      invoke<BriefHealthTrend[]>('scoring:brief-health-trend'),
   };
 
   const batch = {

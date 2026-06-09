@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.48] — 2026-06-09
+
+### Added
+- **Daily Brief: critic health trend banner (B-02)** — a second slim bar appears in the brief header showing per-strategy critic pass-rate trend across the last 7 briefs (e.g. `wheel ↑55% · buy →42% · bullish ↓28%`). Trend direction is computed by comparing the older half vs newer half of pass rates (>8pp difference = improving ↑ / declining ↓, otherwise stable →). Colour-coded: green ≥60% / amber ≥40% / red <40%; arrow coloured green (improving) / red (declining) / amber (stable). Only shows when at least one strategy has enough critic data; silently absent otherwise. New `getBriefHealthTrend()` method in `scoring-service.ts` queries `daily_briefs`, deduplicates per calendar-date, parses `picks` JSON for `criticVerdict.verdict` counts. New IPC `scoring:brief-health-trend` + preload entry.
+
 ## [0.32.47] — 2026-06-09
 
 ### Improved
