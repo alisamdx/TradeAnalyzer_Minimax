@@ -10,11 +10,13 @@
  *   - App not running: tokens are saved to a pending file; app imports on next launch
  *
  * Usage:
- *   node scripts/etrade-login.mjs
+ *   node scripts/etrade-login.mjs auth     # Step 1: get request token + auth URL
+ *   node scripts/etrade-login.mjs token VERIFIER   # Step 2: exchange verifier for access token
+ *   node scripts/etrade-login.mjs         # Interactive: both steps in one go
  */
 
 import { createHmac } from 'node:crypto';
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import * as rl from 'node:readline/promises';
@@ -26,6 +28,7 @@ const TOKEN_FILE    = join(DATA_DIR, 'agent.token');
 const PORT_FILE     = join(DATA_DIR, 'api.port');
 const CONFIG_FILE   = join(DATA_DIR, 'etrade-config.json');
 const PENDING_FILE  = join(DATA_DIR, 'etrade-tokens-pending.json');
+const REQUEST_TOKEN_FILE = join(DATA_DIR, 'etrade-request-token.json');
 
 const BASE_URL = 'https://api.etrade.com';
 const AUTH_URL = 'https://us.etrade.com/e/t/etws/authorize';
@@ -85,12 +88,10 @@ async function tryAppPost(port, agentToken, path, body) {
   if (!json.ok) throw new Error(json.error);
 }
 
-// ─── Main ─────────────────────────────────────────────────────────────────────
+// ─── Step 1: auth ─────────────────────────────────────────────────────────────
 
-const io = rl.createInterface({ input: process.stdin, output: process.stdout });
-
-try {
-  console.log('\n=== E*Trade Token Refresh ===\n');
+async function doAuth() {
+  console.log('\n=== E*Trade Auth — Step 1: Get Request Token ===\n');
 
   // Get consumer credentials — try live app first, fall back to config file
   let consumerKey, consumerSecret, livePort, liveToken;
@@ -123,6 +124,109 @@ try {
 
   console.log(`Consumer key: ${consumerKey.slice(0, 8)}...`);
 
+  // Fetch request token
+  process.stdout.write('\nFetching request token... ');
+  const r1 = await fetch(`${BASE_URL}/oauth/request_token`, {
+    headers: { Authorization: buildAuthHeader('GET', `${BASE_URL}/oauth/request_token`, consumerKey, consumerSecret, '', '', { oauth_callback: 'oob' }) },
+  });
+  const p1 = Object.fromEntries(new URLSearchParams(await r1.text()));
+  if (!p1.oauth_token) throw new Error(`E*Trade request token failed: ${JSON.stringify(p1)}`);
+  console.log('done.');
+
+  // Save request token + credentials for step 2
+  writeFileSync(REQUEST_TOKEN_FILE, JSON.stringify({
+    oauth_token: p1.oauth_token,
+    oauth_token_secret: p1.oauth_token_secret,
+    consumerKey,
+    consumerSecret,
+    livePort: livePort || null,
+    liveToken: liveToken || null,
+  }), { mode: 0o600 });
+
+  const authUrl = `${AUTH_URL}?key=${encodeURIComponent(consumerKey)}&token=${encodeURIComponent(p1.oauth_token)}`;
+  console.log(`\nOpen this URL in your browser:\n\n  ${authUrl}\n`);
+  console.log('After authorizing, run:');
+  console.log('\n  node scripts/etrade-login.mjs token <verifier>\n');
+}
+
+// ─── Step 2: token ────────────────────────────────────────────────────────────
+
+async function doToken(verifier) {
+  console.log('\n=== E*Trade Auth — Step 2: Exchange Verifier ===\n');
+
+  if (!existsSync(REQUEST_TOKEN_FILE)) {
+    throw new Error('No request token found. Run `node scripts/etrade-login.mjs auth` first.');
+  }
+
+  const saved = JSON.parse(readFileSync(REQUEST_TOKEN_FILE, 'utf8'));
+  const { oauth_token, oauth_token_secret, consumerKey, consumerSecret, livePort, liveToken } = saved;
+
+  console.log(`Consumer key: ${consumerKey.slice(0, 8)}...`);
+  console.log(`Verifier: ${verifier.slice(0, 4)}...`);
+
+  // Exchange for access token
+  process.stdout.write('\nExchanging verifier for access token... ');
+  const r2 = await fetch(`${BASE_URL}/oauth/access_token`, {
+    headers: { Authorization: buildAuthHeader('GET', `${BASE_URL}/oauth/access_token`, consumerKey, consumerSecret, oauth_token, oauth_token_secret, { oauth_verifier: verifier }) },
+  });
+  const p2 = Object.fromEntries(new URLSearchParams(await r2.text()));
+  if (!p2.oauth_token) throw new Error(`E*Trade access token failed: ${JSON.stringify(p2)}`);
+  console.log('done.');
+
+  const accessToken  = p2.oauth_token;
+  const accessSecret = p2.oauth_token_secret;
+
+  // Store tokens
+  process.stdout.write('Storing tokens... ');
+  if (livePort && liveToken) {
+    await tryAppPost(livePort, liveToken, '/etrade/token', { accessToken, accessSecret });
+    console.log('stored in app.');
+  } else {
+    writeFileSync(PENDING_FILE, JSON.stringify({ accessToken, accessSecret }), { mode: 0o600 });
+    console.log('saved — will be imported when app starts.');
+  }
+
+  // Clean up request token file
+  unlinkSync(REQUEST_TOKEN_FILE);
+
+  console.log('\nDone. E*Trade token valid until midnight ET.\n');
+}
+
+// ─── Interactive mode ──────────────────────────────────────────────────────────
+
+async function doInteractive() {
+  console.log('\n=== E*Trade Token Refresh (Interactive) ===\n');
+
+  let consumerKey, consumerSecret, livePort, liveToken;
+
+  if (isAppRunning()) {
+    try {
+      const result = await tryAppGet('/etrade/credentials');
+      consumerKey    = result.data.consumerKey;
+      consumerSecret = result.data.consumerSecret;
+      livePort       = result.port;
+      liveToken      = result.agentToken;
+      console.log('App is running — tokens will be stored immediately.');
+    } catch {
+      // fall through to config file
+    }
+  }
+
+  if (!consumerKey) {
+    if (!existsSync(CONFIG_FILE)) {
+      throw new Error(
+        `App is not running and no config file found at ${CONFIG_FILE}.\n` +
+        `Start TradeAnalyzer once to generate the config file, then re-run this script.`
+      );
+    }
+    const cfg = JSON.parse(readFileSync(CONFIG_FILE, 'utf8'));
+    consumerKey    = cfg.consumerKey;
+    consumerSecret = cfg.consumerSecret;
+    console.log('App is offline — tokens will be stored on next app launch.');
+  }
+
+  console.log(`Consumer key: ${consumerKey.slice(0, 8)}...`);
+
   // Step 1: Request token
   process.stdout.write('\nFetching request token... ');
   const r1 = await fetch(`${BASE_URL}/oauth/request_token`, {
@@ -136,41 +240,59 @@ try {
   const authUrl = `${AUTH_URL}?key=${encodeURIComponent(consumerKey)}&token=${encodeURIComponent(p1.oauth_token)}`;
   console.log(`\nOpen this URL in your browser:\n\n  ${authUrl}\n`);
 
-  let verifier;
-  if (process.argv[2]) {
-    verifier = process.argv[2].trim();
-    console.log(`Using verifier from command line: ${verifier.slice(0, 4)}...`);
-  } else {
-    verifier = (await io.question('Paste the verifier code: ')).trim();
+  const io = rl.createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const verifier = (await io.question('Paste the verifier code: ')).trim();
+    if (!verifier) throw new Error('No verifier entered');
+
+    // Step 3: Exchange for access token
+    process.stdout.write('\nExchanging verifier for access token... ');
+    const r2 = await fetch(`${BASE_URL}/oauth/access_token`, {
+      headers: { Authorization: buildAuthHeader('GET', `${BASE_URL}/oauth/access_token`, consumerKey, consumerSecret, p1.oauth_token, p1.oauth_token_secret, { oauth_verifier: verifier }) },
+    });
+    const p2 = Object.fromEntries(new URLSearchParams(await r2.text()));
+    if (!p2.oauth_token) throw new Error(`E*Trade access token failed: ${JSON.stringify(p2)}`);
+    console.log('done.');
+
+    const accessToken  = p2.oauth_token;
+    const accessSecret = p2.oauth_token_secret;
+
+    // Step 4: Store tokens
+    process.stdout.write('Storing tokens... ');
+    if (livePort && liveToken) {
+      await tryAppPost(livePort, liveToken, '/etrade/token', { accessToken, accessSecret });
+      console.log('stored in app.');
+    } else {
+      writeFileSync(PENDING_FILE, JSON.stringify({ accessToken, accessSecret }), { mode: 0o600 });
+      console.log('saved — will be imported when app starts.');
+    }
+
+    console.log('\nDone. E*Trade token valid until midnight ET.\n');
+  } finally {
+    io.close();
   }
-  if (!verifier) throw new Error('No verifier entered');
+}
 
-  // Step 3: Exchange for access token
-  process.stdout.write('\nExchanging verifier for access token... ');
-  const r2 = await fetch(`${BASE_URL}/oauth/access_token`, {
-    headers: { Authorization: buildAuthHeader('GET', `${BASE_URL}/oauth/access_token`, consumerKey, consumerSecret, p1.oauth_token, p1.oauth_token_secret, { oauth_verifier: verifier }) },
-  });
-  const p2 = Object.fromEntries(new URLSearchParams(await r2.text()));
-  if (!p2.oauth_token) throw new Error(`E*Trade access token failed: ${JSON.stringify(p2)}`);
-  console.log('done.');
+// ─── Main ─────────────────────────────────────────────────────────────────────
 
-  const accessToken  = p2.oauth_token;
-  const accessSecret = p2.oauth_token_secret;
+const command = process.argv[2];
 
-  // Step 4: Store tokens
-  process.stdout.write('Storing tokens... ');
-  if (livePort && liveToken) {
-    await tryAppPost(livePort, liveToken, '/etrade/token', { accessToken, accessSecret });
-    console.log('stored in app.');
+try {
+  if (command === 'auth') {
+    await doAuth();
+  } else if (command === 'token' && process.argv[3]) {
+    await doToken(process.argv[3].trim());
+  } else if (!command) {
+    await doInteractive();
   } else {
-    writeFileSync(PENDING_FILE, JSON.stringify({ accessToken, accessSecret }), { mode: 0o600 });
-    console.log('saved — will be imported when app starts.');
+    console.log(`Usage:
+  node scripts/etrade-login.mjs              Interactive: both steps in one go
+  node scripts/etrade-login.mjs auth         Step 1: get request token + auth URL
+  node scripts/etrade-login.mjs token CODE   Step 2: exchange verifier for access token
+`);
+    process.exit(1);
   }
-
-  console.log('\nDone. E*Trade token valid until midnight ET.\n');
 } catch (err) {
   console.error(`\nError: ${err.message}\n`);
   process.exit(1);
-} finally {
-  io.close();
 }
