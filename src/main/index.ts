@@ -405,7 +405,10 @@ app.whenReady().then(() => {
     runOnStartup: false,
   });
   const paperTradingService = new PaperTradingService(db);
-  const briefJob = new DailyIntelligenceBriefJob(db, dataProvider, optionsProvider, emailService, paperTradingService);
+  const briefJob = new DailyIntelligenceBriefJob(
+    db, dataProvider, optionsProvider, emailService, paperTradingService,
+    () => getMainWindow()?.webContents.send('watchlists:updated'),
+  );
   batchService.registerJob('daily-intelligence-brief', briefJob, {
     dailyScheduleTime: '16:30',  // post-market, chains after price-gap-fill
     startupDelaySeconds: 0,      // manual trigger only by default; no startup run

@@ -146,7 +146,15 @@ function buildApi() {
         invoke<CsvExportResult | null>('watchlists:csv:export', watchlistId),
       import: (args: { watchlistId?: number; createWithName?: string }) =>
         invoke<CsvImportResult>('watchlists:csv:import', args)
-    }
+    },
+    /** Subscribe to push notifications from the main process when a watchlist is
+     *  created or modified by a background job (e.g. Daily Brief auto-watchlist).
+     *  Returns an unsubscribe function. */
+    onUpdated: (cb: () => void): (() => void) => {
+      const handler = () => cb();
+      ipcRenderer.on('watchlists:updated', handler);
+      return () => ipcRenderer.removeListener('watchlists:updated', handler);
+    },
   };
 
   const screen = {

@@ -375,6 +375,14 @@ export function App() {
     });
   }, [refreshLists]);
 
+  // Push refresh from main process (e.g. Daily Brief auto-watchlist creation)
+  useEffect(() => {
+    const unsub = window.api.watchlists.onUpdated(() => {
+      refreshLists().catch((e) => console.error('[App] watchlist push-refresh error:', e));
+    });
+    return unsub;
+  }, [refreshLists]);
+
   // Load items when watchlist changes
   useEffect(() => {
     if (activeId === null) return;

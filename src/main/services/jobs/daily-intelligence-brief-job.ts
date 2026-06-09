@@ -90,6 +90,7 @@ export class DailyIntelligenceBriefJob implements BatchJobHandler {
     private readonly optionsProvider: OptionsProvider,
     private readonly emailService: EmailService | null = null,
     private readonly paperTradingService: PaperTradingService | null = null,
+    private readonly onWatchlistUpdated: (() => void) | null = null,
   ) {
     this.scoringService = new ScoringService(db);
     this.strategyLabService = new StrategyLabService(dataProvider, optionsProvider);
@@ -563,6 +564,8 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
       }
 
       console.log(`[brief] watchlist "${wlName}" updated — ${items.length} tickers`);
+      // Notify renderer so it refreshes the watchlist dropdown immediately
+      this.onWatchlistUpdated?.();
     } catch (err) {
       // Non-fatal — brief is already persisted
       console.warn('[brief] watchlist update failed:', err instanceof Error ? err.message : String(err));

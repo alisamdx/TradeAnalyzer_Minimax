@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.41] — 2026-06-08
+
+### Fixed
+- **DailyBrief watchlist not appearing in dropdown**: after the brief job creates or refreshes the `DailyBrief-MMDD` watchlist, the main process now sends a `watchlists:updated` IPC push to the renderer. `App.tsx` subscribes via `window.api.watchlists.onUpdated` and calls `refreshLists()` immediately — the new watchlist appears in every dropdown without requiring an app restart or manual navigation. New `onUpdated` push listener added to the preload `watchlists` namespace.
+
 ## [0.32.40] — 2026-06-08
 
 ### Added
