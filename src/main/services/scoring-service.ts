@@ -1047,8 +1047,8 @@ export class ScoringService {
 
   private loadTechnicalSignals(tickers: string[], result: Map<string, TickerSignalData>): void {
     // Source: technical_signals — populated nightly by DailyTechnicalSignalsJob for the
-    // full constituent universe. Also provides rsi, smaStack, and lastPrice as fallbacks
-    // for tickers not covered by analysis_snapshots (which are watchlist-scoped).
+    // full constituent universe. Also provides rsi, smaStack, lastPrice, adx, and
+    // supportLevel as fallbacks for tickers not covered by analysis_snapshots.
     const ph = tickers.map(() => '?').join(',');
     type TsRow = {
       ticker: string;
@@ -1056,9 +1056,11 @@ export class ScoringService {
       rsi: number | null;
       sma20: number | null; sma50: number | null; sma200: number | null;
       price: number | null;
+      adx: number | null;
+      support_level: number | null;
     };
     const rows = this.db.prepare(`
-      SELECT ticker, buy_signal_score, rsi, sma20, sma50, sma200, price
+      SELECT ticker, buy_signal_score, rsi, sma20, sma50, sma200, price, adx, support_level
       FROM technical_signals
       WHERE ticker IN (${ph})
     `).all(...tickers) as TsRow[];
@@ -1067,12 +1069,16 @@ export class ScoringService {
       const d = result.get(row.ticker);
       if (!d) continue;
       d.buySignalScore = row.buy_signal_score;
-      // Fill rsi / smaStack / lastPrice only when analysis_snapshots had no data
+      // Fill only when analysis_snapshots had no data for this ticker
       if (d.rsi === null) d.rsi = row.rsi;
       if (d.smaStack === null && (row.sma20 !== null || row.sma50 !== null || row.sma200 !== null)) {
         d.smaStack = { sma20: row.sma20, sma50: row.sma50, sma200: row.sma200 };
       }
       if (d.lastPrice === null && row.price !== null && row.price > 0) d.lastPrice = row.price;
+      // ADX → trendStrengthAdx (trendNeutral signal for income; trendStrength for bullish/bearish)
+      if (d.trendStrengthAdx === null) d.trendStrengthAdx = row.adx;
+      // 20-day low → entryZoneLow proxy for breakoutScore priceNearSupport component
+      if (d.entryZoneLow === null) d.entryZoneLow = row.support_level;
     }
   }
 

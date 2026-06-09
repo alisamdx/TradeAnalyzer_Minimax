@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.32.38] — 2026-06-08
+
+### Fixed
+- **trendNeutral signal (income)**: ADX was only available from watchlist analysis runs. `DailyTechnicalSignalsJob` now computes 14-period Wilder ADX for all ~1055 universe tickers and stores it in `technical_signals.adx` (migration 035). `loadTechnicalSignals()` populates `trendStrengthAdx` from it as a fallback, so income picks are now range-bound filtered even without a prior analysis run.
+- **breakoutScore signal (buy)**: `entryZoneLow` was only available from watchlist analysis runs. `DailyTechnicalSignalsJob` now computes the 20-day price low as a support-zone proxy and stores it in `technical_signals.support_level`. `loadTechnicalSignals()` populates `entryZoneLow` from it, enabling the `priceNearSupport` component of `breakoutScore` for all batch-scored tickers.
+
 ## [0.32.37] — 2026-06-08
 
 ### Improved

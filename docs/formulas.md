@@ -243,7 +243,17 @@ ADX = Wilder_smoothing(DX, n)
 ```
 
 Trend confirmed: ADX > 20 AND appropriate price/SMA relationship.
-Implemented in `computeADX()` in `analysis-service.ts`. see docs/formulas.md#adx
+Implemented in `computeADX()` in `analysis-service.ts` and `daily-technical-signals-job.ts`. see docs/formulas.md#adx
+
+### support-level
+
+20-day low — used as a support zone proxy for the `breakoutScore` `priceNearSupport` component when no `analysis_snapshots` entry exists for the ticker.
+
+```
+support_level = min(low) over last 20 bars
+```
+
+Stored in `technical_signals.support_level`, populated by `DailyTechnicalSignalsJob`.
 
 ### bollinger-bands
 

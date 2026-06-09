@@ -42,6 +42,53 @@ function emaFromNullable(values: (number | null)[], period: number): (number | n
   return result;
 }
 
+// ─── ADX (Wilder 14-period) ───────────────────────────────────────────────────
+// Returns the current ADX value (0–100). Below 20 = range-bound; above 25 = trending.
+// Requires ≥ 28 bars (14 for initial TR/DM smoothing + 14 for ADX smoothing).
+// see docs/formulas.md#adx
+function computeADX(bars: Bar[], period = 14): number | null {
+  if (bars.length < period * 2) return null;
+
+  const tr: number[] = [];
+  const plusDM: number[] = [];
+  const minusDM: number[] = [];
+
+  for (let i = 1; i < bars.length; i++) {
+    const h = bars[i]!.h, l = bars[i]!.l, c = bars[i - 1]!.c;
+    const ph = bars[i - 1]!.h, pl = bars[i - 1]!.l;
+    tr.push(Math.max(h - l, Math.abs(h - c), Math.abs(l - c)));
+    const upMove = h - ph, downMove = pl - l;
+    plusDM.push(upMove > downMove && upMove > 0 ? upMove : 0);
+    minusDM.push(downMove > upMove && downMove > 0 ? downMove : 0);
+  }
+
+  // Wilder smoothing: first value = sum of first N, then smoothed
+  let smoothTR = tr.slice(0, period).reduce((a, b) => a + b, 0);
+  let smoothPDM = plusDM.slice(0, period).reduce((a, b) => a + b, 0);
+  let smoothMDM = minusDM.slice(0, period).reduce((a, b) => a + b, 0);
+
+  const dx: number[] = [];
+  for (let i = period; i < tr.length; i++) {
+    smoothTR  = smoothTR  - smoothTR  / period + tr[i]!;
+    smoothPDM = smoothPDM - smoothPDM / period + plusDM[i]!;
+    smoothMDM = smoothMDM - smoothMDM / period + minusDM[i]!;
+    if (smoothTR === 0) { dx.push(0); continue; }
+    const pdi = (smoothPDM / smoothTR) * 100;
+    const mdi = (smoothMDM / smoothTR) * 100;
+    const sum = pdi + mdi;
+    dx.push(sum === 0 ? 0 : (Math.abs(pdi - mdi) / sum) * 100);
+  }
+
+  if (dx.length < period) return null;
+
+  // ADX = Wilder-smoothed DX
+  let adx = dx.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  for (let i = period; i < dx.length; i++) {
+    adx = (adx * (period - 1) + dx[i]!) / period;
+  }
+  return adx;
+}
+
 // ─── Per-ticker signal computation ───────────────────────────────────────────
 
 interface TechnicalResult {
@@ -59,6 +106,8 @@ interface TechnicalResult {
   buySignalScore: number;
   buySignalStrength: 'strong' | 'moderate' | 'none';
   patternNames: string[];
+  adx: number | null;
+  supportLevel: number | null;  // 20-day low — support zone proxy for breakoutScore
 }
 
 // Mirrors validate-all-service.ts buildValidateResult() buy signal logic.
@@ -122,6 +171,14 @@ function computeSignals(ticker: string, bars: Bar[]): TechnicalResult | null {
       macdBullishCross = true; break;
     }
   }
+
+  // ADX (14-period) — trend strength; low ADX = range-bound (good for income)
+  const adx = computeADX(bars);
+
+  // 20-day low — support zone proxy for buy strategy breakoutScore
+  const supportLevel = bars.length >= 20
+    ? Math.min(...bars.slice(-20).map(b => b.l))
+    : null;
 
   // Patterns + demand zone
   const patterns = detectAllPatterns(bars, 5);
@@ -204,6 +261,8 @@ function computeSignals(ticker: string, bars: Bar[]): TechnicalResult | null {
     buySignalScore: buyScore,
     buySignalStrength,
     patternNames: bullishPatternNames,
+    adx,
+    supportLevel,
   };
 }
 
@@ -263,12 +322,14 @@ export class DailyTechnicalSignalsJob implements BatchJobHandler {
         (ticker, computed_at, price, sma20, sma50, sma200, rsi,
          macd_value, macd_signal_line, macd_bullish_cross,
          bollinger_position, trend_label,
-         buy_signal_score, buy_signal_strength, pattern_names)
+         buy_signal_score, buy_signal_strength, pattern_names,
+         adx, support_level)
       VALUES
         (?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ?, ?, ?, ?,
          ?, ?, ?,
          ?, ?,
-         ?, ?, ?)
+         ?, ?, ?,
+         ?, ?)
       ON CONFLICT(ticker) DO UPDATE SET
         computed_at         = excluded.computed_at,
         price               = excluded.price,
@@ -283,7 +344,9 @@ export class DailyTechnicalSignalsJob implements BatchJobHandler {
         trend_label         = excluded.trend_label,
         buy_signal_score    = excluded.buy_signal_score,
         buy_signal_strength = excluded.buy_signal_strength,
-        pattern_names       = excluded.pattern_names
+        pattern_names       = excluded.pattern_names,
+        adx                 = excluded.adx,
+        support_level       = excluded.support_level
     `);
 
     const BATCH = 100;
@@ -332,6 +395,8 @@ export class DailyTechnicalSignalsJob implements BatchJobHandler {
             result.buySignalScore,
             result.buySignalStrength,
             JSON.stringify(result.patternNames),
+            result.adx,
+            result.supportLevel,
           );
           written++;
         }
