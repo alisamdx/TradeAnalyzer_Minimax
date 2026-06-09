@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.49] — 2026-06-09
+
+### Improved
+- **Daily Brief banners: hover tooltips** — both header banners now show explanatory tooltips on hover. The B-01 label explains "Day+5 hit-rate" and colour thresholds; each strategy chip shows exact hit counts and avg return. The B-02 label explains "critic pass-rate", trend arrow direction, and colour thresholds; each strategy chip shows the current pass-rate, trend description, and a full per-date pass-rate history (oldest → newest).
+
 ## [0.32.48] — 2026-06-09
 
 ### Added

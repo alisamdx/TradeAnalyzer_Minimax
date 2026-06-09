@@ -695,7 +695,15 @@ export function DailyBriefView({ onGoToStrategyLab }: DailyBriefViewProps) {
       {/* B-01: Prior-brief performance banner */}
       {perfSummary && perfSummary.strategies.length > 0 && (
         <div className="brief-perf-banner">
-          <span className="brief-perf-label">
+          <span
+            className="brief-perf-label"
+            title={
+              'Day+5 hit-rate: how many picks from the last brief closed profitable within 5 calendar days.\n' +
+              'Format per strategy:  hits / total picks  (avg % return across all closed picks)\n' +
+              'Colour: green ≥60% hit-rate · amber ≥40% · red <40%'
+            }
+            style={{ cursor: 'help' }}
+          >
             📊 Last brief ({perfSummary.briefDate}):
           </span>
           {perfSummary.strategies.map(s => {
@@ -705,8 +713,11 @@ export function DailyBriefView({ onGoToStrategyLab }: DailyBriefViewProps) {
               ? (ret >= 0 ? `+${ret.toFixed(1)}%` : `${ret.toFixed(1)}%`)
               : null;
             const color = hitRate >= 60 ? '#3fb950' : hitRate >= 40 ? '#e3a008' : '#f85149';
+            const chipTip =
+              `${s.strategy}: ${s.hits} of ${s.picks} picks were profitable by Day+5 (${hitRate}% hit-rate)` +
+              (retStr ? `\nAvg return across all ${s.picks} picks: ${retStr}` : '');
             return (
-              <span key={s.strategy} className="brief-perf-chip">
+              <span key={s.strategy} className="brief-perf-chip" title={chipTip} style={{ cursor: 'help' }}>
                 <span style={{ color: '#89b4fa', textTransform: 'capitalize' }}>{s.strategy}</span>
                 {' '}
                 <span style={{ color, fontWeight: 700 }}>{s.hits}/{s.picks}</span>
@@ -724,7 +735,18 @@ export function DailyBriefView({ onGoToStrategyLab }: DailyBriefViewProps) {
       {/* B-02: Critic pass-rate trend banner */}
       {healthTrend.some(t => t.currentPct !== null) && (
         <div className="brief-perf-banner" style={{ gap: 12 }}>
-          <span className="brief-perf-label">🔬 Critic trend (last 7 briefs):</span>
+          <span
+            className="brief-perf-label"
+            title={
+              'AI-critic pass-rate: % of picks rated "pass" (vs "caution" or "flag") by the post-brief critic across up to 7 recent briefs.\n' +
+              'Trend arrow: ↑ improving · → stable · ↓ declining\n' +
+              '  (computed by comparing older-half vs newer-half average pass rates; >8pp shift = directional)\n' +
+              'Colour: green ≥60% pass-rate · amber ≥40% · red <40%'
+            }
+            style={{ cursor: 'help' }}
+          >
+            🔬 Critic trend (last 7 briefs):
+          </span>
           {healthTrend
             .filter(t => t.currentPct !== null)
             .map(t => {
@@ -737,8 +759,23 @@ export function DailyBriefView({ onGoToStrategyLab }: DailyBriefViewProps) {
                 t.trend === 'declining'  ? '#f85149' : '#e3a008';
               const pct = t.currentPct!;
               const pctColor = pct >= 60 ? '#3fb950' : pct >= 40 ? '#e3a008' : '#f85149';
+
+              // Build sparkline history string from rated points
+              const ratedPoints = t.points.filter(p => p.passRate !== null);
+              const historyStr = ratedPoints.length > 1
+                ? ratedPoints.map(p => `${p.date}: ${p.passes}/${p.total} pass (${p.passRate}%)`).join('\n')
+                : '';
+              const trendLabel =
+                t.trend === 'improving' ? 'improving (pass-rate rising)' :
+                t.trend === 'declining' ? 'declining (pass-rate falling)' :
+                t.trend === 'stable'    ? 'stable (pass-rate flat)' : 'insufficient data';
+              const chipTip =
+                `${t.strategy}: ${pct}% critic pass-rate on most recent brief\n` +
+                `Trend: ${trendLabel}\n` +
+                (historyStr ? `\nPass-rate history (oldest → newest):\n${historyStr}` : '');
+
               return (
-                <span key={t.strategy} className="brief-perf-chip">
+                <span key={t.strategy} className="brief-perf-chip" title={chipTip} style={{ cursor: 'help' }}>
                   <span style={{ color: '#89b4fa', textTransform: 'capitalize' }}>{t.strategy}</span>
                   {' '}
                   <span style={{ color: arrowColor, fontWeight: 700 }}>{arrow}</span>
