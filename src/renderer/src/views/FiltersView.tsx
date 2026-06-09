@@ -131,6 +131,10 @@ export function FiltersView() {
     window.dispatchEvent(new CustomEvent('navigate-to-options', { detail: { ticker } }));
   };
 
+  const runStrategyLabForTicker = (ticker: string) => {
+    window.dispatchEvent(new CustomEvent('navigate-to-strategyLab', { detail: { ticker } }));
+  };
+
   const openInPayoff = (r: FilterTemplateResult) => {
     // Compute a target ~30 DTE expiry; PayoffView will snap to the nearest real expiry.
     const thirtyDTE = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
@@ -353,7 +357,7 @@ export function FiltersView() {
                       </th>
                     ))}
                     <th>Match Reason</th>
-                    <th style={{ width: 90 }}>Actions</th>
+                    <th style={{ width: 112 }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -399,6 +403,13 @@ export function FiltersView() {
                             onClick={() => openInPayoff(r)}
                           >
                             📐
+                          </button>
+                          <button
+                            className="action-btn"
+                            title="Strategy Lab"
+                            onClick={() => runStrategyLabForTicker(r.ticker)}
+                          >
+                            🔬
                           </button>
                         </div>
                       </td>

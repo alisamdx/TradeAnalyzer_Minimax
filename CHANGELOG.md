@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.44] — 2026-06-09
+
+### Improved
+- **Filters screen: Strategy Lab button in results grid** — added 🔬 button to each row's action column, alongside the existing Analysis, Validate, Options chain, and Payoff buttons. Clicking navigates directly to Strategy Lab pre-loaded with that ticker.
+
 ## [0.32.43] — 2026-06-09
 
 ### Fixed
