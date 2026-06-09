@@ -24,4 +24,12 @@ export function registerConvictionIpc(service: ConvictionService): void {
   ipcMain.handle('conviction:history', wrap((ticker: string) => service.getHistory(ticker)));
   ipcMain.handle('conviction:recommend', wrap((ticker: string) => service.recommend(ticker)));
   ipcMain.handle('conviction:sync-default-watchlist', wrap(() => service.syncFromDefaultWatchlist()));
+
+  ipcMain.handle('conviction:ai-review', async (_e) => {
+    try {
+      return ok(await service.aiReview());
+    } catch (err) {
+      return fail(err);
+    }
+  });
 }

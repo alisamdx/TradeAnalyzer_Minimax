@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.45] — 2026-06-09
+
+### Added
+- **My Stocks: AI Advisor** — new 🤖 AI Advisor button reviews all conviction stocks in a single Claude call and returns per-stock action signals + recommended price zones. For each stock it receives: current price, zone status, bands, trend direction, RSI, SMA50/200, P/E, EPS growth, grade, IV/IVR, and days to earnings. Claude returns `add` / `hold` / `reduce` / `remove` action, `keep` / `adjust` zone verdict, recommended Low/Mid/High prices, a short risk flag, and a one-sentence rationale. Results appear in a panel below the table with checkboxes per row; clicking **Apply Selected** (or **Apply All**) updates the zones in one pass (history snapshot written automatically for each change). Stocks with `adjust` verdict are pre-checked; `remove` action stocks start unchecked to prevent accidental deletion.
+
 ## [0.32.44] — 2026-06-09
 
 ### Improved

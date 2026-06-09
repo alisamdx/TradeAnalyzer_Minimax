@@ -1810,6 +1810,22 @@ export interface ConvictionRecommendation {
   hasData: boolean;
 }
 
+export interface ConvictionAiReview {
+  ticker: string;
+  currentZone: ConvictionZone;
+  currentPrice: number | null;
+  currentLow: number | null;
+  currentMid: number | null;
+  currentHigh: number | null;
+  action: 'add' | 'hold' | 'reduce' | 'remove';
+  zoneVerdict: 'keep' | 'adjust';
+  recommendedLow: number | null;
+  recommendedMid: number | null;
+  recommendedHigh: number | null;
+  riskFlag: string | null;
+  rationale: string;
+}
+
 // ─── News & Research (FR-NR) ─────────────────────────────────────────────────
 
 export type NewsResearchBias = 'bull' | 'bear' | 'mixed';

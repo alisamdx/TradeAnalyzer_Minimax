@@ -4,8 +4,10 @@
 // Recommendation engine derives suggested bands from existing analysis data.
 // v0.24.0
 
+import Anthropic from '@anthropic-ai/sdk';
 import type { DbHandle } from '../db/connection.js';
 import { withTransaction } from '../db/connection.js';
+import { secureGet } from './secure-settings.js';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -52,6 +54,22 @@ export interface ConvictionRecommendation {
   priceMidBasis: string;
   priceHighBasis: string;
   hasData: boolean;
+}
+
+export interface ConvictionAiReview {
+  ticker: string;
+  currentZone: ConvictionZone;
+  currentPrice: number | null;
+  currentLow: number | null;
+  currentMid: number | null;
+  currentHigh: number | null;
+  action: 'add' | 'hold' | 'reduce' | 'remove';
+  zoneVerdict: 'keep' | 'adjust';
+  recommendedLow: number | null;
+  recommendedMid: number | null;
+  recommendedHigh: number | null;
+  riskFlag: string | null;
+  rationale: string;
 }
 
 // ─── Zone computation ─────────────────────────────────────────────────────────
@@ -331,6 +349,150 @@ export class ConvictionService {
       priceHighBasis,
       hasData: true,
     };
+  }
+
+  // ── AI Advisor ────────────────────────────────────────────────────────────
+  // Gathers technical, fundamental, and IV context for all conviction stocks,
+  // sends a single structured prompt to Claude, and returns per-stock
+  // action signals + recommended price zones.
+
+  async aiReview(): Promise<ConvictionAiReview[]> {
+    const apiKey = secureGet(this.db, 'anthropicApiKey');
+    if (!apiKey) throw new Error('Anthropic API key not configured — add it in Settings → AI.');
+
+    const stocks = this.list();
+    if (stocks.length === 0) return [];
+
+    const tickers = stocks.map(s => s.ticker);
+    const ph = tickers.map(() => '?').join(',');
+
+    // Technical signals
+    type TechRow = { ticker: string; trend_label: string | null; rsi: number | null; sma50: number | null; sma200: number | null };
+    const techMap = new Map<string, TechRow>(
+      (this.db.prepare(
+        `SELECT ticker, trend_label, rsi, sma50, sma200 FROM technical_signals WHERE ticker IN (${ph})`
+      ).all(...tickers) as TechRow[]).map(r => [r.ticker, r])
+    );
+
+    // Fundamentals — extract key fields from JSON payload
+    type FundRow = { ticker: string; payload_json: string };
+    const fundMap = new Map<string, { pe: number | null; epsGrowth: number | null; grade: number | null }>();
+    (this.db.prepare(
+      `SELECT ticker, payload_json FROM fundamentals_cache WHERE ticker IN (${ph})`
+    ).all(...tickers) as FundRow[]).forEach(r => {
+      try {
+        const p = JSON.parse(r.payload_json) as { peRatio?: number | null; epsGrowth?: number | null; stockGrade?: number | null };
+        fundMap.set(r.ticker, { pe: p.peRatio ?? null, epsGrowth: p.epsGrowth ?? null, grade: p.stockGrade ?? null });
+      } catch { /* skip malformed */ }
+    });
+
+    // Upcoming earnings (within 45 days)
+    type EarRow = { ticker: string; report_date: string };
+    const earningsMap = new Map<string, number>(); // ticker → days away
+    const todayMs = Date.now();
+    (this.db.prepare(
+      `SELECT ticker, report_date FROM earnings_calendar WHERE ticker IN (${ph})`
+    ).all(...tickers) as EarRow[]).forEach(r => {
+      const days = Math.round((new Date(r.report_date).getTime() - todayMs) / 86_400_000);
+      if (days >= 0 && days <= 45) earningsMap.set(r.ticker, days);
+    });
+
+    // Build compact per-ticker context lines
+    const stockLines = stocks.map(s => {
+      const tech = techMap.get(s.ticker);
+      const fund = fundMap.get(s.ticker);
+      const earnDays = earningsMap.get(s.ticker);
+      const bands = `low=${s.priceLow != null ? `$${s.priceLow}` : '?'} mid=${s.priceMid != null ? `$${s.priceMid}` : '?'} high=${s.priceHigh != null ? `$${s.priceHigh}` : '?'}`;
+      const techPart = tech
+        ? `trend=${tech.trend_label ?? 'unknown'} RSI=${tech.rsi?.toFixed(0) ?? '?'} SMA50=${tech.sma50?.toFixed(0) ?? '?'} SMA200=${tech.sma200?.toFixed(0) ?? '?'}`
+        : 'no-tech';
+      const fundPart = fund
+        ? `PE=${fund.pe?.toFixed(1) ?? '?'} EPS_g=${fund.epsGrowth?.toFixed(1) ?? '?'}% grade=${fund.grade != null ? `${fund.grade}★` : '?'}`
+        : 'no-fund';
+      const ivPart = `IV=${s.iv?.toFixed(1) ?? '?'}% IVR=${s.ivRank != null ? Math.round(s.ivRank) : '?'}`;
+      const earnPart = earnDays !== undefined ? ` earnings_in=${earnDays}d` : '';
+      return `${s.ticker}: price=$${s.currentPrice?.toFixed(2) ?? '?'} zone=${s.zone} ${bands} | ${techPart} | ${fundPart} | ${ivPart}${earnPart}`;
+    });
+
+    const today = new Date().toISOString().slice(0, 10);
+    const prompt = `You are a disciplined retail swing/options trader reviewing your personal conviction watchlist.
+Assess each stock and recommend whether to act now, wait, reduce exposure, or remove it.
+
+Today: ${today}
+
+PRICE BAND DEFINITIONS:
+  Low  (green): ideal entry — buy aggressively here
+  Mid  (yellow): acceptable entry — still worth adding
+  High (red): never buy above this price; potential exit/covered-call target
+
+STOCKS (one per line):
+${stockLines.join('\n')}
+
+Return ONLY a valid JSON array (no markdown, no commentary) — one object per ticker:
+{
+  "ticker": "...",
+  "action": "add"|"hold"|"reduce"|"remove",
+  "zoneVerdict": "keep"|"adjust",
+  "recommendedLow": number|null,
+  "recommendedMid": number|null,
+  "recommendedHigh": number|null,
+  "riskFlag": string|null,
+  "rationale": string
+}
+
+ACTION:
+  add    = in buy/mid zone AND tech+fundamentals support entry NOW
+  hold   = thesis intact, wait for better entry
+  reduce = thesis weakening (trend reversal, stretched valuation, or analyst deterioration)
+  remove = thesis broken — confirmed downtrend + poor fundamentals
+
+ZONE ADJUST:
+  keep   = current bands still appropriate
+  adjust = recalibrate bands; anchor Low near SMA200 or key support, Mid near SMA50 or midpoint, High = 15-25% above current price
+
+RISKFLAG: null if none, else max 60 chars (e.g. "Earnings in 4 days", "Trend reversed bearish", "52-wk high reached")
+RATIONALE: 1 direct sentence, max 100 chars, no hedging.`;
+
+    const client = new Anthropic({ apiKey });
+    const response = await client.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 2048,
+      messages: [{ role: 'user', content: prompt }],
+    });
+
+    const raw = response.content[0]?.type === 'text' ? response.content[0].text.trim() : '[]';
+    const jsonStr = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '');
+
+    type RawReview = {
+      ticker: string; action: string; zoneVerdict: string;
+      recommendedLow: number | null; recommendedMid: number | null; recommendedHigh: number | null;
+      riskFlag: string | null; rationale: string;
+    };
+    const parsed = JSON.parse(jsonStr) as RawReview[];
+    const stockMap = new Map(stocks.map(s => [s.ticker, s]));
+
+    return parsed.map(r => {
+      const s = stockMap.get(r.ticker);
+      const validActions = ['add', 'hold', 'reduce', 'remove'] as const;
+      const action = validActions.includes(r.action as ConvictionAiReview['action'])
+        ? (r.action as ConvictionAiReview['action'])
+        : 'hold';
+      return {
+        ticker: r.ticker,
+        currentZone: s?.zone ?? 'unset',
+        currentPrice: s?.currentPrice ?? null,
+        currentLow: s?.priceLow ?? null,
+        currentMid: s?.priceMid ?? null,
+        currentHigh: s?.priceHigh ?? null,
+        action,
+        zoneVerdict: r.zoneVerdict === 'adjust' ? 'adjust' : 'keep',
+        recommendedLow: r.recommendedLow,
+        recommendedMid: r.recommendedMid,
+        recommendedHigh: r.recommendedHigh,
+        riskFlag: r.riskFlag,
+        rationale: r.rationale,
+      } satisfies ConvictionAiReview;
+    });
   }
 
   // ── Sync from default watchlist ───────────────────────────────────────────

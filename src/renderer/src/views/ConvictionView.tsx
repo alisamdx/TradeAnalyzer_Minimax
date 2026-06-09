@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type {
   ConvictionStock, ConvictionZone, ConvictionBandHistory,
-  ConvictionInput, ConvictionRecommendation,
+  ConvictionInput, ConvictionRecommendation, ConvictionAiReview,
 } from '@shared/types.js';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -341,6 +341,13 @@ export function ConvictionView() {
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState('');
 
+  // AI Advisor state
+  const [aiReview, setAiReview] = useState<ConvictionAiReview[] | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiSelected, setAiSelected] = useState<Set<string>>(new Set());
+  const [aiApplying, setAiApplying] = useState(false);
+
   const load = useCallback(async () => {
     try {
       setStocks(await window.api.conviction.list());
@@ -382,6 +389,49 @@ export function ConvictionView() {
     }
   };
 
+  const handleAiReview = async () => {
+    setAiLoading(true);
+    setAiError(null);
+    setAiReview(null);
+    try {
+      const reviews = await window.api.conviction.aiReview();
+      setAiReview(reviews);
+      // Pre-select all stocks with an 'adjust' verdict
+      setAiSelected(new Set(reviews.filter(r => r.zoneVerdict === 'adjust').map(r => r.ticker)));
+    } catch (e) {
+      setAiError((e as Error).message);
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const handleAiApply = async () => {
+    if (!aiReview) return;
+    const toApply = aiReview.filter(r => aiSelected.has(r.ticker));
+    if (toApply.length === 0) return;
+    setAiApplying(true);
+    try {
+      for (const r of toApply) {
+        const stock = stocks.find(s => s.ticker === r.ticker);
+        if (r.action === 'remove') {
+          await window.api.conviction.remove(r.ticker);
+        } else {
+          await window.api.conviction.update(r.ticker, {
+            priceLow: r.recommendedLow ?? stock?.priceLow ?? null,
+            priceMid: r.recommendedMid ?? stock?.priceMid ?? null,
+            priceHigh: r.recommendedHigh ?? stock?.priceHigh ?? null,
+            note: stock?.note ?? null,
+          });
+        }
+      }
+      setAiReview(null);
+      setAiSelected(new Set());
+      load();
+    } finally {
+      setAiApplying(false);
+    }
+  };
+
   // Sort: buy zone first, then mid, watch, unset, high
   const zoneOrder: Record<ConvictionZone, number> = { buy: 0, mid: 1, watch: 2, unset: 3, high: 4 };
   const sorted = [...stocks].sort((a, b) => zoneOrder[a.zone] - zoneOrder[b.zone] || a.ticker.localeCompare(b.ticker));
@@ -419,6 +469,13 @@ export function ConvictionView() {
               style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid #3d4f6e', background: '#1e2535', color: '#95a5a6', cursor: syncing ? 'not-allowed' : 'pointer', fontSize: 13 }}
             >
               {syncing ? '⟳ Syncing…' : '↓ Sync from Default Watchlist'}
+            </button>
+            <button
+              onClick={handleAiReview}
+              disabled={aiLoading || stocks.length === 0}
+              style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid #6c5ce7', background: '#1e2535', color: '#a29bfe', cursor: aiLoading || stocks.length === 0 ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 600 }}
+            >
+              {aiLoading ? '⟳ Reviewing…' : '🤖 AI Advisor'}
             </button>
             <button
               onClick={() => setEditStock(null)}
@@ -503,6 +560,140 @@ export function ConvictionView() {
             </table>
           )}
         </div>
+
+        {/* AI Error */}
+        {aiError && (
+          <div style={{ marginTop: 16, background: '#2a1a1a', border: '1px solid #e74c3c', borderRadius: 8, padding: '10px 16px', color: '#e74c3c', fontSize: 13, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>🤖 AI Advisor error: {aiError}</span>
+            <button onClick={() => setAiError(null)} style={{ background: 'none', border: 'none', color: '#e74c3c', cursor: 'pointer', fontSize: 16 }}>✕</button>
+          </div>
+        )}
+
+        {/* AI Review Panel */}
+        {aiReview && aiReview.length > 0 && (
+          <div style={{ marginTop: 24, background: '#131b2e', border: '1px solid #6c5ce7', borderRadius: 10 }}>
+            {/* Panel header */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderBottom: '1px solid #2d3748' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <span style={{ color: '#a29bfe', fontWeight: 700, fontSize: 15 }}>🤖 AI Portfolio Review</span>
+                <span style={{ color: '#636e72', fontSize: 12 }}>{aiReview.length} stocks reviewed</span>
+                <span style={{ color: '#636e72', fontSize: 12 }}>·</span>
+                <span style={{ color: '#a29bfe', fontSize: 12 }}>{aiSelected.size} selected</span>
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  onClick={() => setAiSelected(new Set(aiReview.map(r => r.ticker)))}
+                  style={{ padding: '4px 12px', borderRadius: 5, border: '1px solid #3d4f6e', background: '#1e2a3a', color: '#89b4fa', cursor: 'pointer', fontSize: 12 }}
+                >
+                  Select All
+                </button>
+                <button
+                  onClick={() => setAiSelected(new Set())}
+                  style={{ padding: '4px 12px', borderRadius: 5, border: '1px solid #3d4f6e', background: '#1e2a3a', color: '#95a5a6', cursor: 'pointer', fontSize: 12 }}
+                >
+                  Clear
+                </button>
+                <button
+                  onClick={handleAiApply}
+                  disabled={aiApplying || aiSelected.size === 0}
+                  style={{ padding: '4px 14px', borderRadius: 5, border: '1px solid #6c5ce7', background: aiSelected.size > 0 ? '#3d2b8a' : '#1e2535', color: '#a29bfe', cursor: aiApplying || aiSelected.size === 0 ? 'not-allowed' : 'pointer', fontSize: 12, fontWeight: 600 }}
+                >
+                  {aiApplying ? '⟳ Applying…' : `✔ Apply Selected (${aiSelected.size})`}
+                </button>
+                <button
+                  onClick={() => { setAiReview(null); setAiSelected(new Set()); setAiError(null); }}
+                  style={{ padding: '4px 10px', borderRadius: 5, border: '1px solid #3d4f6e', background: '#1e2a3a', color: '#95a5a6', cursor: 'pointer', fontSize: 12 }}
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+
+            {/* Review rows */}
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <thead>
+                  <tr style={{ background: '#1a2235' }}>
+                    <th style={{ padding: '6px 10px', color: '#89b4fa', fontWeight: 600, textAlign: 'center', width: 32 }}>☑</th>
+                    <th style={{ padding: '6px 10px', color: '#89b4fa', fontWeight: 600, textAlign: 'left' }}>Ticker</th>
+                    <th style={{ padding: '6px 10px', color: '#89b4fa', fontWeight: 600, textAlign: 'center' }}>Action</th>
+                    <th style={{ padding: '6px 10px', color: '#2ecc71', fontWeight: 600, textAlign: 'right' }}>Rec Low</th>
+                    <th style={{ padding: '6px 10px', color: '#f1c40f', fontWeight: 600, textAlign: 'right' }}>Rec Mid</th>
+                    <th style={{ padding: '6px 10px', color: '#e74c3c', fontWeight: 600, textAlign: 'right' }}>Rec High</th>
+                    <th style={{ padding: '6px 10px', color: '#89b4fa', fontWeight: 600, textAlign: 'left' }}>Risk Flag</th>
+                    <th style={{ padding: '6px 10px', color: '#89b4fa', fontWeight: 600, textAlign: 'left' }}>Rationale</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {aiReview.map(r => {
+                    const isSelected = aiSelected.has(r.ticker);
+                    const actionColors: Record<ConvictionAiReview['action'], { bg: string; color: string; label: string }> = {
+                      add:    { bg: '#1a3a1a', color: '#2ecc71', label: '✅ Add' },
+                      hold:   { bg: '#1a2235', color: '#89b4fa', label: '🔵 Hold' },
+                      reduce: { bg: '#2a2a0a', color: '#f1c40f', label: '🟡 Reduce' },
+                      remove: { bg: '#3a1a1a', color: '#e74c3c', label: '🚫 Remove' },
+                    };
+                    const ac = actionColors[r.action];
+                    const zonesChanged = r.zoneVerdict === 'adjust';
+                    return (
+                      <tr key={r.ticker} style={{ borderBottom: '1px solid #1e2535', background: isSelected ? '#1a2235' : 'transparent' }}>
+                        <td style={{ padding: '8px 10px', textAlign: 'center' }}>
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={e => {
+                              const next = new Set(aiSelected);
+                              if (e.target.checked) next.add(r.ticker); else next.delete(r.ticker);
+                              setAiSelected(next);
+                            }}
+                            style={{ cursor: 'pointer', width: 14, height: 14 }}
+                          />
+                        </td>
+                        <td style={{ padding: '8px 10px' }}>
+                          <strong style={{ color: '#ecf0f1' }}>{r.ticker}</strong>
+                          <span style={{ marginLeft: 6, fontSize: 11 }}><ZoneBadge zone={r.currentZone} /></span>
+                        </td>
+                        <td style={{ padding: '8px 10px', textAlign: 'center' }}>
+                          <span style={{ background: ac.bg, color: ac.color, padding: '2px 8px', borderRadius: 8, fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap' }}>
+                            {ac.label}
+                          </span>
+                        </td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right', color: zonesChanged ? '#2ecc71' : '#4a6a4a' }}>
+                          {r.recommendedLow != null ? `$${r.recommendedLow.toFixed(2)}` : '—'}
+                          {zonesChanged && r.currentLow != null && r.recommendedLow != null && r.currentLow !== r.recommendedLow && (
+                            <span style={{ color: '#4a6a4a', fontSize: 10, marginLeft: 4 }}>(was ${r.currentLow.toFixed(2)})</span>
+                          )}
+                        </td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right', color: zonesChanged ? '#f1c40f' : '#6a6a0a' }}>
+                          {r.recommendedMid != null ? `$${r.recommendedMid.toFixed(2)}` : '—'}
+                          {zonesChanged && r.currentMid != null && r.recommendedMid != null && r.currentMid !== r.recommendedMid && (
+                            <span style={{ color: '#6a6a0a', fontSize: 10, marginLeft: 4 }}>(was ${r.currentMid.toFixed(2)})</span>
+                          )}
+                        </td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right', color: zonesChanged ? '#e74c3c' : '#6a1a1a' }}>
+                          {r.recommendedHigh != null ? `$${r.recommendedHigh.toFixed(2)}` : '—'}
+                          {zonesChanged && r.currentHigh != null && r.recommendedHigh != null && r.currentHigh !== r.recommendedHigh && (
+                            <span style={{ color: '#6a1a1a', fontSize: 10, marginLeft: 4 }}>(was ${r.currentHigh.toFixed(2)})</span>
+                          )}
+                        </td>
+                        <td style={{ padding: '8px 10px' }}>
+                          {r.riskFlag
+                            ? <span style={{ color: '#e67e22', fontSize: 12 }}>⚠ {r.riskFlag}</span>
+                            : <span style={{ color: '#333' }}>—</span>
+                          }
+                        </td>
+                        <td style={{ padding: '8px 10px', color: '#95a5a6', fontSize: 12, maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                            title={r.rationale}>
+                          {r.rationale}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Modals */}

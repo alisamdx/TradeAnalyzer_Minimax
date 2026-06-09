@@ -100,6 +100,7 @@ import type {
   ConvictionBandHistory,
   ConvictionInput,
   ConvictionRecommendation,
+  ConvictionAiReview,
   NewsResearchResult,
   MacroEvent,
   NewsBatchProgressEvent,
@@ -1080,6 +1081,7 @@ function buildApi() {
     history:             (ticker: string) => invoke<ConvictionBandHistory[]>('conviction:history', ticker),
     recommend:           (ticker: string) => invoke<ConvictionRecommendation>('conviction:recommend', ticker),
     syncDefaultWatchlist: () => invoke<{ added: string[]; skipped: string[] }>('conviction:sync-default-watchlist'),
+    aiReview:            () => invoke<ConvictionAiReview[]>('conviction:ai-review'),
   };
 
   const news = {
