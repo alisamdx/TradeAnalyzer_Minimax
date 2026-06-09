@@ -2,7 +2,7 @@
 // see Requirements/DAILY_INTELLIGENCE_BRIEF.md §6
 
 import { useState, useEffect, useCallback } from 'react';
-import type { DailyBriefEntry, BriefPick, ScoringStrategy, StrategyLabValidateResult, StrategyLabGrade, StrategySetup, SetupLeg, PayoffLeg, BriefAccuracy, CriticVerdict, ConvictionStock } from '@shared/types.js';
+import type { DailyBriefEntry, BriefPick, ScoringStrategy, StrategyLabValidateResult, StrategyLabGrade, StrategySetup, SetupLeg, PayoffLeg, BriefAccuracy, CriticVerdict, ConvictionStock, BriefPerformanceSummary } from '@shared/types.js';
 
 const STRATEGY_LABELS: Record<ScoringStrategy, string> = {
   wheel:   '🎡  Wheel — CSP / Covered Call',
@@ -569,6 +569,8 @@ export function DailyBriefView({ onGoToStrategyLab }: DailyBriefViewProps) {
   const [selectedHistoryId, setSelectedHistoryId] = useState<number | null>(null);
   const [accuracyMap, setAccuracyMap] = useState<Map<string, BriefAccuracy>>(new Map());
 
+  const [perfSummary, setPerfSummary] = useState<BriefPerformanceSummary | null>(null);
+
   const [collapsed, setCollapsed] = useState<Record<ScoringStrategy, boolean>>(() => {
     try {
       const saved = localStorage.getItem('brief-collapsed');
@@ -608,6 +610,13 @@ export function DailyBriefView({ onGoToStrategyLab }: DailyBriefViewProps) {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  // Load prior-brief performance summary for the header banner (B-01)
+  useEffect(() => {
+    window.api.paper.briefPerformanceSummary()
+      .then(summary => setPerfSummary(summary))
+      .catch(() => { /* non-fatal — no paper data yet */ });
+  }, []);
 
   useEffect(() => {
     if (showHistory) loadHistory();
@@ -720,6 +729,35 @@ export function DailyBriefView({ onGoToStrategyLab }: DailyBriefViewProps) {
           {running ? 'Running…' : 'Run Now'}
         </button>
       </div>
+
+      {/* B-01: Prior-brief performance banner */}
+      {perfSummary && perfSummary.strategies.length > 0 && (
+        <div className="brief-perf-banner">
+          <span className="brief-perf-label">
+            📊 Last brief ({perfSummary.briefDate}):
+          </span>
+          {perfSummary.strategies.map(s => {
+            const hitRate = s.picks > 0 ? Math.round((s.hits / s.picks) * 100) : 0;
+            const ret = s.avgReturnPct;
+            const retStr = ret !== null
+              ? (ret >= 0 ? `+${ret.toFixed(1)}%` : `${ret.toFixed(1)}%`)
+              : null;
+            const color = hitRate >= 60 ? '#3fb950' : hitRate >= 40 ? '#e3a008' : '#f85149';
+            return (
+              <span key={s.strategy} className="brief-perf-chip">
+                <span style={{ color: '#89b4fa', textTransform: 'capitalize' }}>{s.strategy}</span>
+                {' '}
+                <span style={{ color, fontWeight: 700 }}>{s.hits}/{s.picks}</span>
+                {retStr && (
+                  <span style={{ color: ret! >= 0 ? '#3fb950' : '#f85149', marginLeft: 3 }}>
+                    {retStr} avg
+                  </span>
+                )}
+              </span>
+            );
+          })}
+        </div>
+      )}
 
       {showHistory && history.length > 0 && (
         <div className="brief-history-bar">

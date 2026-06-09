@@ -27,6 +27,7 @@ import type {
   TradeLearning,
   TradeLearningGapCause,
   BriefLearningRecommendation,
+  BriefPerformanceSummary,
 } from '@shared/types.js';
 
 // Default thresholds — user can override via Settings tab in Retrospect screen.
@@ -1001,6 +1002,68 @@ Respond with JSON only:
     }));
 
     return { totalSnapshots, byStrategy, byBriefDate };
+  }
+
+  // Returns Day+5 performance for the most recent brief that has mature snapshot data.
+  // Used by the Daily Brief header banner (B-01). Returns null when no Day+5 data exists yet.
+  getBriefPerformanceSummary(): BriefPerformanceSummary | null {
+    // 1. Find the most-recent brief_date that has at least one trade with a Day+5 snapshot
+    type DateRow = { brief_date: string };
+    const latestRow = this.db.prepare(`
+      SELECT DISTINCT pt.brief_date
+      FROM paper_trades pt
+      WHERE EXISTS (
+        SELECT 1 FROM paper_trade_snapshots s
+        WHERE s.paper_trade_id = pt.id AND s.days_held >= 5
+      )
+      ORDER BY pt.brief_date DESC
+      LIMIT 1
+    `).get() as DateRow | undefined;
+
+    if (!latestRow) return null;
+    const { brief_date: briefDate } = latestRow;
+
+    // 2. For that brief_date, per strategy: pick the snapshot closest to Day+5
+    //    (first snapshot with days_held >= 5 per trade)
+    type StratRow = { strategy: string; picks: number; hits: number; avg_return: number | null };
+    const rows = this.db.prepare(`
+      WITH day5 AS (
+        SELECT
+          s.paper_trade_id,
+          s.return_pct,
+          s.verdict
+        FROM paper_trade_snapshots s
+        JOIN (
+          SELECT paper_trade_id, MIN(days_held) AS min_held
+          FROM paper_trade_snapshots
+          WHERE days_held >= 5
+          GROUP BY paper_trade_id
+        ) best ON best.paper_trade_id = s.paper_trade_id
+               AND s.days_held = best.min_held
+      )
+      SELECT
+        pt.brief_strategy              AS strategy,
+        COUNT(*)                       AS picks,
+        SUM(CASE WHEN d.verdict = 'positive' THEN 1 ELSE 0 END) AS hits,
+        AVG(d.return_pct)              AS avg_return
+      FROM paper_trades pt
+      JOIN day5 d ON d.paper_trade_id = pt.id
+      WHERE pt.brief_date = ?
+      GROUP BY pt.brief_strategy
+      ORDER BY pt.brief_strategy
+    `).all(briefDate) as StratRow[];
+
+    if (rows.length === 0) return null;
+
+    return {
+      briefDate,
+      strategies: rows.map(r => ({
+        strategy:     r.strategy as BriefPerformanceSummary['strategies'][number]['strategy'],
+        picks:        r.picks,
+        hits:         r.hits,
+        avgReturnPct: r.avg_return,
+      })),
+    };
   }
 
   // Returns accuracy for multiple brief dates in one query (for history banner)

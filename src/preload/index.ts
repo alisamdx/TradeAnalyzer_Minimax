@@ -94,6 +94,7 @@ import type {
   RetroSettings,
   BriefAccuracy,
   SnapshotAccuracy,
+  BriefPerformanceSummary,
   BriefLearningRecommendation,
   SignalWeightSuggestion,
   ConvictionStock,
@@ -1068,7 +1069,8 @@ function buildApi() {
     getSettings:       (): Promise<RetroSettings> => invoke('paper:get-settings'),
     saveSettings:      (settings: RetroSettings): Promise<boolean> => invoke('paper:save-settings', settings),
     briefAccuracy:     (briefDates: string[]): Promise<BriefAccuracy[]> => invoke('paper:brief-accuracy', briefDates),
-    snapshotAccuracy:           (): Promise<SnapshotAccuracy> => invoke('paper:snapshot-accuracy'),
+    snapshotAccuracy:             (): Promise<SnapshotAccuracy> => invoke('paper:snapshot-accuracy'),
+    briefPerformanceSummary:      (): Promise<BriefPerformanceSummary | null> => invoke('paper:brief-performance-summary'),
     getLearningRecommendations: (): Promise<BriefLearningRecommendation[]> => invoke('paper:get-learning-recommendations'),
     acknowledgeRecommendation:  (id: number): Promise<boolean> => invoke('paper:acknowledge-recommendation', id),
   };

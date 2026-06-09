@@ -1764,6 +1764,20 @@ export interface SnapshotAccuracy {
   byBriefDate:    SnapshotBriefRow[];
 }
 
+// Brief performance summary for the Daily Brief header banner (B-01)
+// Shows last brief's Day+5 hit-rate and avg return per strategy.
+export interface BriefPerformanceStrategy {
+  strategy:      ScoringStrategy;
+  picks:         number;    // total picks that have Day+5 data
+  hits:          number;    // count with positive verdict at Day+5
+  avgReturnPct:  number | null;
+}
+
+export interface BriefPerformanceSummary {
+  briefDate:   string;   // YYYY-MM-DD of the brief being summarised
+  strategies:  BriefPerformanceStrategy[];
+}
+
 // ─── Conviction List (v0.24.0) ───────────────────────────────────────────────
 
 export type ConvictionZone = 'buy' | 'mid' | 'watch' | 'high' | 'unset';

@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.46] — 2026-06-09
+
+### Added
+- **Daily Brief: prior-brief performance banner (B-01)** — a slim bar appears directly below the brief toolbar showing last brief's Day+5 hit-rate and average return per strategy (e.g. `wheel 3/5 +1.8% avg · buy 2/4 +3.2% avg`). Colour-coded green ≥60% / amber ≥40% / red <40%. Only visible once Day+5 snapshot data exists for a prior brief; silently absent otherwise. New `getBriefPerformanceSummary()` service method uses a CTE to find the most-recent mature brief_date and aggregate per-strategy Day+5 metrics from `paper_trade_snapshots`. New IPC `paper:brief-performance-summary` + preload entry.
+
 ## [0.32.45] — 2026-06-09
 
 ### Added

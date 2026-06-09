@@ -3420,6 +3420,35 @@ input[type='checkbox'] {
 }
 
 /* History date strip */
+/* B-01: Prior-brief performance banner */
+.brief-perf-banner {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  padding: 7px 20px;
+  background: rgba(88, 166, 255, 0.04);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.brief-perf-label {
+  color: var(--text-muted);
+  white-space: nowrap;
+  margin-right: 4px;
+}
+.brief-perf-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  white-space: nowrap;
+  font-size: 11px;
+}
+
 .brief-history-bar {
   display: flex;
   gap: 6px;
