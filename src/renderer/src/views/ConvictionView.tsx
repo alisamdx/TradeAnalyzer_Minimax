@@ -486,6 +486,41 @@ export function ConvictionView() {
           </div>
         </div>
 
+        {/* ⚡ Conviction Alerts — stocks currently in Buy or Mid zone */}
+        {!loading && (stocks.filter(s => s.zone === 'buy' || s.zone === 'mid').length > 0) && (
+          <div style={{ marginBottom: 16, background: '#131b2e', border: '1px solid #2d3748', borderRadius: 8, padding: '10px 14px' }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#89b4fa', marginBottom: 8, letterSpacing: 0.5 }}>
+              ⚡ Conviction Alerts — stocks in entry zone
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {sorted.filter(s => s.zone === 'buy' || s.zone === 'mid').map(s => (
+                <div
+                  key={s.ticker}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                    padding: '4px 10px', borderRadius: 8,
+                    background: s.zone === 'buy' ? 'rgba(46,204,113,0.08)' : 'rgba(241,196,15,0.08)',
+                    border: `1px solid ${s.zone === 'buy' ? '#2ecc71' : '#f1c40f'}`,
+                    fontSize: 12,
+                  }}
+                >
+                  <strong style={{ color: '#ecf0f1' }}>{s.ticker}</strong>
+                  <ZoneBadge zone={s.zone} />
+                  <span style={{ color: s.zone === 'buy' ? '#2ecc71' : '#f1c40f' }}>
+                    {fmt(s.currentPrice)}
+                  </span>
+                  {s.iv !== null && (
+                    <span style={{ color: '#95a5a6', fontSize: 11 }}>IV {fmtPct(s.iv)}</span>
+                  )}
+                  {s.ivRank !== null && (
+                    <span style={{ color: '#95a5a6', fontSize: 11 }}>IVR {Math.round(s.ivRank)}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {syncMsg && (
           <div style={{ background: '#1a2235', border: '1px solid #2d3748', borderRadius: 6, padding: '8px 14px', marginBottom: 16, color: '#89b4fa', fontSize: 13 }}>
             {syncMsg}

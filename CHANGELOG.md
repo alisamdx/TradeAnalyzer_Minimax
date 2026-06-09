@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.47] — 2026-06-09
+
+### Improved
+- **Conviction Alerts moved to My Stocks** — the ⚡ entry-zone alert strip now lives at the top of the My Stocks screen where it belongs, reusing the already-loaded stocks list (no extra API call). Each in-zone stock shows as a colour-coded chip (green = Buy Zone, yellow = Mid Zone) with ticker, zone badge, current price, IV, and IVR. Removed from Daily Brief where it was a detour.
+
 ## [0.32.46] — 2026-06-09
 
 ### Added
