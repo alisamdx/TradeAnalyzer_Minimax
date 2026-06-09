@@ -136,7 +136,13 @@ try {
   const authUrl = `${AUTH_URL}?key=${encodeURIComponent(consumerKey)}&token=${encodeURIComponent(p1.oauth_token)}`;
   console.log(`\nOpen this URL in your browser:\n\n  ${authUrl}\n`);
 
-  const verifier = (await io.question('Paste the verifier code: ')).trim();
+  let verifier;
+  if (process.argv[2]) {
+    verifier = process.argv[2].trim();
+    console.log(`Using verifier from command line: ${verifier.slice(0, 4)}...`);
+  } else {
+    verifier = (await io.question('Paste the verifier code: ')).trim();
+  }
   if (!verifier) throw new Error('No verifier entered');
 
   // Step 3: Exchange for access token
