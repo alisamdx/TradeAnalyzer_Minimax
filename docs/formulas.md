@@ -356,3 +356,33 @@ The × 100 multiplier converts to per-contract position-level impact.
 
 Implemented in `greeksSummary` useMemo in `src/renderer/src/views/PortfolioView.tsx`.
 
+
+
+## Scoring Engine — Trend Alignment
+
+### trend-alignment
+
+Used by `computeTrendDirectionScore()` in `scoring-service.ts` for signals `trendAlignment` (Buy, Bullish) and `notDowntrend` (Wheel).
+
+**Direction resolution (in priority order):**
+
+1. `d.trendLabel` from `analysis_snapshots` (buy mode) — explicit label set by the analysis engine
+2. Derived from `smaStack` + `lastPrice` (populated from `technical_signals` for all universe tickers):
+   - `price > sma50 > sma200` → `'bullish'`
+   - `price < sma50 < sma200` → `'bearish'`
+   - mixed alignment → `'sideways'`
+   - only SMA200 available: `price > sma200` → `'bullish'`, else `'bearish'`
+   - only SMA50 available: cannot reliably determine → `null` (signal missing)
+
+**Raw score mapping:**
+
+| Direction | `mode='directional'` (Buy, Bullish) | `mode='wheel'` (Wheel) |
+|-----------|--------------------------------------|------------------------|
+| bullish   | 100                                  | 100                    |
+| sideways  | 25                                   | 75                     |
+| bearish   | 0                                    | 10                     |
+| null      | signal missing (counts as 0)         | signal missing         |
+
+**Rationale:**
+- *Directional* (Buy / Bullish): sideways = ~7.5 pt composite penalty at weight 10; bearish = full 10 pt penalty. A sideways stock is an income candidate, not a directional one.
+- *Wheel*: downtrend = ~7 pt composite penalty at weight 8 (avoid falling-knife CSP assignment); sideways (75) is acceptable — CSP selling on stable range-bound stocks is the wheel's native environment.

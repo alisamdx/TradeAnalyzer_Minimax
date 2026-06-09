@@ -71,28 +71,34 @@ export interface ScoringConfig {
 // Weights sum = 100. Includes recentVolatility (v0.23.1) — high 20d vol = bad for CSP selling.
 const BASELINE_WHEEL: ScoringSignal[] = [
   {
-    key: 'ivRank', label: 'IV Rank (30-day)', weight: 25, enabled: true,
+    key: 'ivRank', label: 'IV Rank (30-day)', weight: 22, enabled: true,
     description: 'tastytrade rule #1: IVR < 30 = don\'t sell. Higher IVR = more edge in premium.',
     dataSource: 'iv_history.atm_iv → IvHistoryService.getIvRank()',
     direction: 'higher_better', normMax: 100,
   },
   {
-    key: 'premiumYield', label: 'Premium Yield (annualized)', weight: 21, enabled: true,
+    key: 'premiumYield', label: 'Premium Yield (annualized)', weight: 19, enabled: true,
     description: 'Premium / strike × (365 / DTE). You\'re a yield business — this is your return.',
     dataSource: 'analysis_snapshots wheel.annualizedReturn',
     direction: 'higher_better', normMax: 60,
   },
   {
-    key: 'fundamentalScore', label: 'Fundamental Quality', weight: 18, enabled: true,
+    key: 'fundamentalScore', label: 'Fundamental Quality', weight: 17, enabled: true,
     description: 'Wheel requires owning the stock — never sell a CSP on a stock you wouldn\'t hold.',
     dataSource: 'screen_results.payload_json → scoreFundamentals()',
     direction: 'higher_better', normMax: 100,
   },
   {
-    key: 'technicalNeutral', label: 'Technical Neutral (RSI 40–60)', weight: 13, enabled: true,
+    key: 'technicalNeutral', label: 'Technical Neutral (RSI 40–60)', weight: 11, enabled: true,
     description: 'Don\'t sell puts into a downtrend; neutral trend = safer assignment zone.',
     dataSource: 'analysis_snapshots buy.rsi',
     direction: 'target_range', targetMin: 40, targetMax: 60,
+  },
+  {
+    key: 'notDowntrend', label: 'Not in Downtrend (avoid falling knives)', weight: 8, enabled: true,
+    description: 'Never sell CSPs on stocks in confirmed downtrends — assignment at the top of a decline is the wheel\'s core risk. Uptrend = full score; Sideways = acceptable; Downtrend = severe penalty.',
+    dataSource: 'analysis_snapshots buy.trend OR technical_signals sma50/sma200 (derived)',
+    direction: 'higher_better', normMax: 100,
   },
   {
     key: 'recentVolatility', label: 'Recent Volatility (20-day realized vol)', weight: 10, enabled: true,
@@ -117,19 +123,19 @@ const BASELINE_WHEEL: ScoringSignal[] = [
 // Weights sum = 100. All signals trimmed proportionally to fit 8 signals.
 const BASELINE_BULLISH: ScoringSignal[] = [
   {
-    key: 'trendStrength', label: 'Price Trend (above 50MA + 200MA, ADX > 20)', weight: 24, enabled: true,
+    key: 'trendStrength', label: 'Price Trend (above 50MA + 200MA, ADX > 20)', weight: 21, enabled: true,
     description: 'Institutional consensus — big money is already positioned long.',
     dataSource: 'analysis_snapshots buy.smaStack + bullish.trendStrength (ADX)',
     direction: 'higher_better', normMax: 100,
   },
   {
-    key: 'earningsGrowth', label: 'Earnings / Revenue Growth Quality', weight: 20, enabled: true,
+    key: 'earningsGrowth', label: 'Earnings / Revenue Growth Quality', weight: 18, enabled: true,
     description: 'CANSLIM: EPS + sales growth are the primary fundamental trigger for institutional buying.',
     dataSource: 'screen_results.payload_json epsGrowth + revenueGrowth',
     direction: 'higher_better', normMax: 100,
   },
   {
-    key: 'rsiMomentum', label: 'RSI Momentum (45–70 zone)', weight: 15, enabled: true,
+    key: 'rsiMomentum', label: 'RSI Momentum (45–70 zone)', weight: 13, enabled: true,
     description: 'Want momentum without being overextended. Below 45 = lagging; above 70 = chasing.',
     dataSource: 'analysis_snapshots buy.rsi',
     direction: 'target_range', targetMin: 45, targetMax: 70,
@@ -145,6 +151,12 @@ const BASELINE_BULLISH: ScoringSignal[] = [
     description: 'Leaders lead — if it\'s lagging SPY in an up move, it\'s weak. Excess 90-day return vs S&P 500.',
     dataSource: 'historical_prices SPY vs ticker 90-day return (ticker_90d − spy_90d)',
     direction: 'higher_better', normMax: 50,
+  },
+  {
+    key: 'trendAlignment', label: 'Trend Direction (Bullish / Sideways / Bearish)', weight: 7, enabled: true,
+    description: 'Bullish spreads need the underlying in an uptrend — sideways = income play, not a directional trade. Derived from trendLabel or SMA50/200 stack.',
+    dataSource: 'analysis_snapshots buy.trend OR technical_signals sma50/sma200 (derived)',
+    direction: 'higher_better', normMax: 100,
   },
   {
     key: 'priceMomentumPct', label: 'Price Momentum % (52-week return)', weight: 7, enabled: true,
@@ -250,13 +262,13 @@ const BASELINE_INCOME: ScoringSignal[] = [
 // Weights sum = 100. All signals trimmed proportionally to fit 8 signals.
 const BASELINE_BUY: ScoringSignal[] = [
   {
-    key: 'priceMomentumPct', label: 'Price Momentum % (52-week return)', weight: 24, enabled: true,
+    key: 'priceMomentumPct', label: 'Price Momentum % (52-week return)', weight: 22, enabled: true,
     description: 'Momentum is the strongest documented return factor (Jegadeesh-Titman 1993).',
     dataSource: 'historical_prices (currentPrice - price_52w_ago) / price_52w_ago × 100',
     direction: 'higher_better', normMax: 150,
   },
   {
-    key: 'earningsGrowth', label: 'Earnings Quality (EPS consistency + growth)', weight: 18, enabled: true,
+    key: 'earningsGrowth', label: 'Earnings Quality (EPS consistency + growth)', weight: 17, enabled: true,
     description: 'Fundamental anchor — momentum without earnings support is speculation.',
     dataSource: 'screen_results.payload_json epsGrowth + revenueGrowth',
     direction: 'higher_better', normMax: 100,
@@ -274,25 +286,31 @@ const BASELINE_BUY: ScoringSignal[] = [
     direction: 'higher_better', normMax: 100,
   },
   {
-    key: 'relativeStrength', label: 'Relative Performance vs SPY (90-day)', weight: 14, enabled: true,
+    key: 'relativeStrength', label: 'Relative Performance vs SPY (90-day)', weight: 12, enabled: true,
     description: 'Confirms the stock is leading, not lagging — buy leaders. Excess 90-day return vs S&P 500.',
     dataSource: 'historical_prices SPY vs ticker 90-day return (ticker_90d − spy_90d)',
     direction: 'higher_better', normMax: 50,
   },
   {
-    key: 'revenueGrowth5Y', label: '5-Year Revenue CAGR', weight: 7, enabled: true,
+    key: 'trendAlignment', label: 'Trend Direction (Bullish / Sideways / Bearish)', weight: 10, enabled: true,
+    description: 'Buy trades need a directional tailwind — sideways = poor entry timing; downtrend = fighting institutional selling. Derived from trendLabel or SMA50/200 stack.',
+    dataSource: 'analysis_snapshots buy.trend OR technical_signals sma50/sma200 (derived)',
+    direction: 'higher_better', normMax: 100,
+  },
+  {
+    key: 'revenueGrowth5Y', label: '5-Year Revenue CAGR', weight: 5, enabled: true,
     description: 'Long-term compounders outperform — filters out cyclical YoY spikes. Sustained growth attracts institutional buying.',
     dataSource: 'screen_results.payload_json revenueGrowth5Y',
     direction: 'higher_better', normMax: 30,
   },
   {
-    key: 'sectorMomentum', label: 'Sector Momentum (SPDR ETF 90-day return)', weight: 6, enabled: true,
+    key: 'sectorMomentum', label: 'Sector Momentum (SPDR ETF 90-day return)', weight: 4, enabled: true,
     description: 'Rising sector confirms trade direction — buy stocks in rising sectors.',
     dataSource: 'historical_prices SECTOR_ETF 90-day return',
     direction: 'higher_better', normMax: 30,
   },
   {
-    key: 'epsGrowth5Y', label: '5-Year EPS CAGR', weight: 3, enabled: true,
+    key: 'epsGrowth5Y', label: '5-Year EPS CAGR', weight: 2, enabled: true,
     description: 'Sustained earnings growth is the primary driver of long-term stock returns (Novy-Marx 2013).',
     dataSource: 'screen_results.payload_json epsGrowth5Y',
     direction: 'higher_better', normMax: 40,
@@ -386,12 +404,21 @@ export class ScoringService {
   // ── Config management ─────────────────────────────────────────────────────
 
   seedBaselines(): void {
-    const stmt = this.db.prepare(`
+    // Insert if this is a fresh DB (no configs yet)
+    const insertStmt = this.db.prepare(`
       INSERT OR IGNORE INTO scoring_strategy_configs (strategy, signals, version, updated_at)
-      VALUES (?, ?, 'baseline_v2', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+      VALUES (?, ?, 'baseline_v3', strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    `);
+    // Auto-upgrade any prior baseline version → v3 (adds trendAlignment / notDowntrend).
+    // Manually customised configs (different version string) are intentionally left alone.
+    const upgradeStmt = this.db.prepare(`
+      UPDATE scoring_strategy_configs
+      SET signals = ?, version = 'baseline_v3', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+      WHERE strategy = ? AND version IN ('baseline_v1', 'baseline_v2')
     `);
     for (const [strategy, signals] of Object.entries(BASELINE_CONFIGS)) {
-      stmt.run(strategy, JSON.stringify(signals));
+      insertStmt.run(strategy, JSON.stringify(signals));
+      upgradeStmt.run(JSON.stringify(signals), strategy);
     }
   }
 
@@ -436,7 +463,7 @@ export class ScoringService {
   resetToBaseline(strategy: ScoringStrategy): void {
     this.db.prepare(`
       UPDATE scoring_strategy_configs
-      SET signals = ?, version = 'baseline_v1', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+      SET signals = ?, version = 'baseline_v3', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
       WHERE strategy = ?
     `).run(JSON.stringify(BASELINE_CONFIGS[strategy]), strategy);
   }
@@ -598,6 +625,17 @@ export class ScoringService {
       case 'epsGrowth5Y':
         return d.epsGrowth5Y;
 
+      case 'trendAlignment':
+        // Buy / Bullish: directional trades need an uptrend.
+        // Sideways = significant penalty; downtrend = disqualifying.
+        // see docs/formulas.md#trend-alignment
+        return this.computeTrendDirectionScore(d, 'directional');
+
+      case 'notDowntrend':
+        // Wheel: avoid selling CSPs into confirmed downtrends; sideways is acceptable.
+        // see docs/formulas.md#trend-alignment
+        return this.computeTrendDirectionScore(d, 'wheel');
+
       default:
         return null;
     }
@@ -703,6 +741,51 @@ export class ScoringService {
     return totalWeight > 0
       ? clamp(Math.round((total / totalWeight) * 10) / 10)
       : null;
+  }
+
+  // Trend direction score — resolves 'bullish' | 'sideways' | 'bearish' for a ticker
+  // and maps it to a 0–100 raw value appropriate for each use case.
+  //
+  // Primary source: d.trendLabel from analysis_snapshots (buy mode).
+  // Fallback: derived from SMA50/SMA200 stack in technical_signals (covers all ~1055 universe tickers).
+  //   price > sma50 > sma200  →  bullish
+  //   price < sma50 < sma200  →  bearish
+  //   mixed                   →  sideways
+  //
+  // mode='directional' (Buy, Bullish): trend must align with trade direction.
+  //   bullish=100, sideways=25, bearish=0
+  //   Sideways is a heavy penalty (~7.5 pt composite impact at wt=10) — a sideways
+  //   range-bound stock is an income play, not a directional one.
+  //
+  // mode='wheel': avoids falling knives without penalizing range-bound CSP candidates.
+  //   bullish=100, sideways=75, bearish=10
+  //   Downtrend is severely penalized (~7 pts at wt=8); sideways is acceptable.
+  //
+  // see docs/formulas.md#trend-alignment
+  private computeTrendDirectionScore(d: TickerSignalData, mode: 'directional' | 'wheel'): number | null {
+    // Primary: explicit trend label from analysis_snapshots (buy mode)
+    let direction: 'bullish' | 'sideways' | 'bearish' | null = d.trendLabel;
+
+    // Fallback: derive from SMA stack + price (available for all tickers via technical_signals)
+    if (direction === null && d.smaStack !== null && d.lastPrice !== null && d.lastPrice > 0) {
+      const { sma50, sma200 } = d.smaStack;
+      if (sma50 !== null && sma200 !== null) {
+        if (d.lastPrice > sma50 && sma50 > sma200)       direction = 'bullish';
+        else if (d.lastPrice < sma50 && sma50 < sma200)  direction = 'bearish';
+        else                                              direction = 'sideways';
+      } else if (sma200 !== null) {
+        // Only 200MA available — rough cut
+        direction = d.lastPrice > sma200 ? 'bullish' : 'bearish';
+      }
+      // If only SMA50 available, can't reliably distinguish sideways from bearish — leave null
+    }
+
+    if (direction === null) return null;
+
+    if (mode === 'directional') {
+      return direction === 'bullish' ? 100 : direction === 'sideways' ? 25 : 0;
+    }
+    return direction === 'bullish' ? 100 : direction === 'sideways' ? 75 : 10;
   }
 
   // ── Batch signal data gathering ───────────────────────────────────────────

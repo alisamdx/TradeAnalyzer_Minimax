@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.32.42] — 2026-06-09
+
+### Improved
+- **Scoring engine: trend direction signals** — three strategies now penalize picks that conflict with the current price trend, making the Daily Brief's recommendations more directionally actionable:
+  - **Buy** (`trendAlignment`, weight 10): uptrend=100, sideways=25, bearish=0. A sideways stock costs ~7.5 pts on the composite — enough to push a range-bound name below better-aligned alternatives. Previously sideways and uptrend stocks scored identically on this dimension.
+  - **Bullish** (`trendAlignment`, weight 7): same mapping, same penalty logic. Bullish spreads need a directional tailwind.
+  - **Wheel** (`notDowntrend`, weight 8): uptrend=100, sideways=75, bearish=10. Avoids selling CSPs into confirmed downtrends (falling-knife assignment risk); sideways remains acceptable for premium selling.
+  - **Bearish** and **Income** unchanged — `downtrendScore` and `trendNeutral` already capture direction for those strategies.
+- **Seed upgrade**: `seedBaselines()` auto-upgrades `baseline_v1`/`v2` DB configs → `baseline_v3` on startup, so existing installs pick up the new signals without resetting manual customizations.
+- **Trend derivation**: when `trendLabel` is unavailable from analysis snapshots, direction is derived from `sma50`/`sma200` stack in `technical_signals` — providing coverage for all ~1055 universe tickers without requiring a prior analysis run.
+
 ## [0.32.41] — 2026-06-08
 
 ### Fixed

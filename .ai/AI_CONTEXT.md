@@ -2,7 +2,7 @@
 
 > **Read this first.** Self-contained snapshot of *what the app is today* so a fresh AI session is productive without re-reading the whole codebase. This file describes **current state** — not history. Release history lives in `CHANGELOG.md` / `changelogs/`. Operating rules live in `/CLAUDE.md`. Full spec lives in `Requirements/`.
 >
-> Last verified against code: 2026-06-08 (v0.32.41). When you make a material change, update the relevant section here in the same commit.
+> Last verified against code: 2026-06-09 (v0.32.42). When you make a material change, update the relevant section here in the same commit.
 
 ---
 
@@ -194,6 +194,7 @@ Authoritative DDL is in `migrations/`. Tables are created lazily (`CREATE TABLE 
 - **IV rank/percentile are null** from the Polygon snapshot — computed from `iv_history`, which requires the MarketData.app/IVolatility backfill to be populated first.
 - **Brief scoring reads fundamentals from `fundamentals_cache`** (not `screen_results`) — decoupled from screener run scope. Sector names in `fundamentals_cache` are SIC descriptions; `SECTOR_ETF` keys are GICS names — `sectorMomentum` signal is effectively null for all stocks (pre-existing, not a regression).
 - **`technical_signals` now includes `adx` and `support_level`** (migration 035) — populated by `DailyTechnicalSignalsJob`. `loadTechnicalSignals()` uses these to fill `trendStrengthAdx` (income `trendNeutral` signal) and `entryZoneLow` (buy `breakoutScore`) as batch-job fallbacks.
+- **Scoring engine v3 (baseline_v3)**: `trendAlignment` signal added to Buy (wt 10) and Bullish (wt 7); `notDowntrend` added to Wheel (wt 8). Derived from `trendLabel` (analysis_snapshots) or SMA50/200 stack (technical_signals). `seedBaselines()` auto-upgrades v1/v2 → v3 on startup. Bearish and Income unchanged.
 - **Daily Brief auto-creates `DailyBrief-MMDD` watchlist** — at end of each brief run, all final picks (all 5 strategies, post-liquidity-gate) are upserted into a watchlist named e.g. `DailyBrief-0608`. Existing items are cleared on refresh. Notes field shows strategies per ticker (`wheel · buy`). Uses new `WatchlistService.findByName()` / `clearItems()` methods.
 - **Earnings & analyst data** are E*Trade-sourced (earnings) / Polygon-sourced; no Polygon public earnings endpoint exists.
 - **Production DB path**: packaged → `app.getPath('userData')/trade-analyzer.sqlite` (`%AppData%/trade-analyzer/`); dev → `<appPath>/data/`.
