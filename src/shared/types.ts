@@ -1599,6 +1599,32 @@ export interface DailyBriefEntry {
   runMeta: object | null;
 }
 
+// ─── Brief Trend: per-pick drilldown (v0.32.50) ──────────────────────────────
+
+/** One row in the Brief Trend drilldown table — combines paper trade entry,
+ *  Day+5 snapshot outcome, brief-day entry zone (buy mode only), and the
+ *  AI critic verdict from the brief's picks JSON. */
+export interface BriefPickDetail {
+  ticker: string;
+  strategy: ScoringStrategy;
+  briefScore: number;
+  briefRank: number;
+  /** Stock price on brief day (= paper_trades.entry_price). */
+  briefPrice: number | null;
+  /** Entry zone from nearest buy-mode analysis_snapshot at or before brief date. Null for non-buy strategies. */
+  entryZoneLow: number | null;
+  entryZoneHigh: number | null;
+  /** Price at Day+5 snapshot (first snapshot with days_held ≥ 5). */
+  day5Price: number | null;
+  day5ReturnPct: number | null;
+  day5Verdict: 'positive' | 'negative' | 'neutral' | null;
+  /** Actual days_held of the snapshot used (≥5, typically 5-7). */
+  day5DaysActual: number | null;
+  criticVerdict: 'pass' | 'caution' | 'flag' | null;
+  criticRationale: string | null;
+  aiRationale: string | null;
+}
+
 // ─── Paper Trading / Retrospect (v0.23.0) ────────────────────────────────────
 
 export type TradeStatus = 'open' | 'closed' | 'expired';

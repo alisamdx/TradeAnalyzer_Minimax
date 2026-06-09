@@ -17,9 +17,10 @@ import type {
   TradeLearning,
   TradeLearningGapCause,
   BriefLearningRecommendation,
+  BriefPickDetail,
 } from '@shared/types.js';
 
-type Tab = 'summary' | 'inprogress' | 'history' | 'settings';
+type Tab = 'summary' | 'inprogress' | 'history' | 'settings' | 'brieftrend';
 
 const STRATEGY_LABELS: Record<ScoringStrategy, string> = {
   wheel:   '🎡 Wheel',
@@ -808,6 +809,255 @@ function SettingsTab({ settings, onSave }: { settings: RetroSettings | null; onS
   );
 }
 
+// ── Brief Trend Tab ───────────────────────────────────────────────────────────
+
+const CRITIC_COLORS: Record<string, string> = {
+  pass:    '#3fb950',
+  caution: '#e3a008',
+  flag:    '#f85149',
+};
+
+function BriefTrendTab() {
+  const [dates, setDates]           = useState<string[]>([]);
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [picks, setPicks]           = useState<BriefPickDetail[]>([]);
+  const [loading, setLoading]       = useState(false);
+  const [stratFilter, setStratFilter] = useState<ScoringStrategy | 'all'>('all');
+
+  // Load available brief dates on mount
+  useEffect(() => {
+    window.api.paper.briefDates().then(d => {
+      setDates(d);
+      if (d.length > 0) setSelectedDate(d[0]!);
+    }).catch(() => {});
+  }, []);
+
+  // Reload picks when date changes
+  useEffect(() => {
+    if (!selectedDate) return;
+    setLoading(true);
+    window.api.paper.briefPickDrilldown(selectedDate)
+      .then(p => setPicks(p))
+      .catch(() => setPicks([]))
+      .finally(() => setLoading(false));
+  }, [selectedDate]);
+
+  const filtered = stratFilter === 'all'
+    ? picks
+    : picks.filter(p => p.strategy === stratFilter);
+
+  const ratedPicks  = filtered.filter(p => p.day5Verdict !== null);
+  const hits        = ratedPicks.filter(p => p.day5Verdict === 'positive').length;
+  const avgReturn   = ratedPicks.length > 0
+    ? ratedPicks.reduce((s, p) => s + (p.day5ReturnPct ?? 0), 0) / ratedPicks.length
+    : null;
+
+  // Which strategies actually appear in this brief (for filter chips)
+  const presentStrategies = [...new Set(picks.map(p => p.strategy))] as ScoringStrategy[];
+
+  return (
+    <div>
+      {/* Controls row */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
+        <label style={{ color: 'var(--text-muted)', fontSize: 13 }}>Brief date:</label>
+        <select
+          value={selectedDate ?? ''}
+          onChange={e => setSelectedDate(e.target.value)}
+          style={{
+            background: '#161b22', border: '1px solid #30363d', color: '#c9d1d9',
+            borderRadius: 6, padding: '4px 10px', fontSize: 13, cursor: 'pointer',
+          }}
+        >
+          {dates.length === 0 && <option value="">No briefs yet</option>}
+          {dates.map(d => <option key={d} value={d}>{d}</option>)}
+        </select>
+
+        {/* Strategy filter chips */}
+        {presentStrategies.length > 1 && (
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {(['all', ...presentStrategies] as const).map(s => (
+              <button
+                key={s}
+                onClick={() => setStratFilter(s)}
+                style={{
+                  padding: '3px 10px', borderRadius: 12, fontSize: 12, cursor: 'pointer', fontWeight: 500,
+                  background: stratFilter === s ? '#1f6feb' : '#21262d',
+                  border: `1px solid ${stratFilter === s ? '#388bfd' : '#30363d'}`,
+                  color: stratFilter === s ? '#fff' : '#8b949e',
+                }}
+              >
+                {s === 'all' ? 'All' : STRATEGY_LABELS[s]}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Summary bar */}
+      {ratedPicks.length > 0 && (
+        <div className="brief-perf-banner" style={{ marginBottom: 14 }}>
+          <span className="brief-perf-label" style={{ cursor: 'default' }}>
+            📋 {selectedDate}:
+          </span>
+          <span className="brief-perf-chip">
+            <span style={{ color: '#8b949e' }}>{filtered.length} picks</span>
+          </span>
+          <span className="brief-perf-chip">
+            <span style={{ color: '#8b949e' }}>Day+5 rated:</span>
+            {' '}
+            <span style={{
+              color: hits / ratedPicks.length >= 0.6 ? '#3fb950' : hits / ratedPicks.length >= 0.4 ? '#e3a008' : '#f85149',
+              fontWeight: 700,
+            }}>
+              {hits}/{ratedPicks.length}
+            </span>
+          </span>
+          {avgReturn !== null && (
+            <span className="brief-perf-chip">
+              <span style={{ color: '#8b949e' }}>avg return:</span>
+              {' '}
+              <span style={{ color: avgReturn >= 0 ? '#3fb950' : '#f85149', fontWeight: 700 }}>
+                {fmtPct(avgReturn)}
+              </span>
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Table */}
+      {loading && <div style={{ color: 'var(--text-muted)', padding: '24px 0' }}>Loading…</div>}
+
+      {!loading && filtered.length > 0 && (
+        <div style={{ overflowX: 'auto' }}>
+          <table className="retro-table" style={{ minWidth: 820 }}>
+            <thead>
+              <tr>
+                <th title="Ticker symbol">Ticker</th>
+                <th title="Scoring strategy this pick came from">Strategy</th>
+                <th title="Composite score (0–100) on brief day">Score</th>
+                <th title="Stock price at time the brief was generated">Brief Price</th>
+                <th title="Recommended entry zone from buy-mode analysis snapshot (buy strategy only)">Entry Zone</th>
+                <th title="Was the brief-day price inside the entry zone? (buy strategy only)">In Zone?</th>
+                <th title="Stock price at Day+5 (first snapshot with days_held ≥ 5). Number in parentheses = actual days elapsed.">Day+5 Price</th>
+                <th title="Return % from brief price to Day+5 price. Colour interpretation: green = favorable for strategy, red = unfavorable (bearish strategy: green = price fell).">Return %</th>
+                <th title="Outcome verdict at Day+5: ✅ positive · ❌ negative · ➖ neutral · ⏳ awaiting snapshot">Outcome</th>
+                <th title="AI critic verdict from the brief: pass (confident pick) · caution (proceed with care) · flag (risk concern). Hover for the critic's rationale.">Critic</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(p => {
+                const inZone =
+                  p.entryZoneLow !== null && p.entryZoneHigh !== null && p.briefPrice !== null
+                    ? p.briefPrice >= p.entryZoneLow && p.briefPrice <= p.entryZoneHigh
+                    : null;
+
+                const scoreColor = p.briefScore >= 70 ? '#3fb950' : p.briefScore >= 50 ? '#e3a008' : '#f85149';
+
+                const outcomeEl =
+                  p.day5Verdict === 'positive' ? <span title="Profitable at Day+5">✅</span> :
+                  p.day5Verdict === 'negative' ? <span title="Loss at Day+5">❌</span> :
+                  p.day5Verdict === 'neutral'  ? <span title="Roughly flat at Day+5" style={{ color: '#8b949e' }}>➖</span> :
+                  <span title="Day+5 snapshot not yet available" style={{ color: '#8b949e' }}>⏳</span>;
+
+                const criticEl = p.criticVerdict ? (
+                  <span
+                    title={p.criticRationale ?? p.criticVerdict}
+                    style={{
+                      display: 'inline-block', padding: '2px 8px', borderRadius: 4,
+                      fontSize: 11, fontWeight: 600, cursor: p.criticRationale ? 'help' : 'default',
+                      background: CRITIC_COLORS[p.criticVerdict] + '22',
+                      color: CRITIC_COLORS[p.criticVerdict],
+                      border: `1px solid ${CRITIC_COLORS[p.criticVerdict]}44`,
+                    }}
+                  >
+                    {p.criticVerdict}
+                  </span>
+                ) : <span style={{ color: '#8b949e' }}>—</span>;
+
+                const entryZoneEl = p.entryZoneLow !== null && p.entryZoneHigh !== null
+                  ? <span title="Entry zone computed from buy analysis snapshot nearest to brief date">
+                      {fmtPrice(p.entryZoneLow)} – {fmtPrice(p.entryZoneHigh)}
+                    </span>
+                  : <span style={{ color: '#8b949e' }}>—</span>;
+
+                const inZoneEl =
+                  inZone === true  ? <span style={{ color: '#3fb950' }} title="Brief price was inside the entry zone">✓</span> :
+                  inZone === false ? <span style={{ color: '#e3a008' }} title="Brief price was outside the entry zone">✗</span> :
+                  <span style={{ color: '#8b949e' }}>—</span>;
+
+                const day5El = p.day5Price !== null
+                  ? <span title={p.day5DaysActual !== null ? `Snapshot at Day+${p.day5DaysActual}` : undefined}>
+                      {fmtPrice(p.day5Price)}
+                      {p.day5DaysActual !== null && (
+                        <span style={{ color: '#8b949e', fontSize: 11, marginLeft: 4 }}>
+                          (D+{p.day5DaysActual})
+                        </span>
+                      )}
+                    </span>
+                  : <span style={{ color: '#8b949e' }}>⏳</span>;
+
+                return (
+                  <tr key={`${p.strategy}:${p.ticker}`}>
+                    <td>
+                      <span
+                        style={{ fontFamily: 'monospace', fontWeight: 700, color: '#58a6ff', cursor: 'help' }}
+                        title={p.aiRationale ?? p.ticker}
+                      >
+                        {p.ticker}
+                      </span>
+                    </td>
+                    <td>
+                      <span style={{
+                        display: 'inline-block', padding: '1px 7px', borderRadius: 4,
+                        fontSize: 11, fontWeight: 600,
+                        background: '#1f6feb22', color: '#89b4fa',
+                        border: '1px solid #1f6feb44',
+                      }}>
+                        {STRATEGY_LABELS[p.strategy]}
+                      </span>
+                    </td>
+                    <td style={{ color: scoreColor, fontWeight: 600 }}>{p.briefScore.toFixed(0)}</td>
+                    <td>{fmtPrice(p.briefPrice)}</td>
+                    <td>{entryZoneEl}</td>
+                    <td style={{ textAlign: 'center' }}>{inZoneEl}</td>
+                    <td>{day5El}</td>
+                    <td style={{
+                      color: p.day5ReturnPct !== null ? stockReturnColor(p.day5ReturnPct, p.strategy) : 'inherit',
+                      fontWeight: p.day5ReturnPct !== null ? 600 : 400,
+                    }}>
+                      {fmtPct(p.day5ReturnPct)}
+                    </td>
+                    <td style={{ textAlign: 'center' }}>{outcomeEl}</td>
+                    <td>{criticEl}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {!loading && picks.length === 0 && dates.length > 0 && (
+        <div style={{ color: 'var(--text-muted)', padding: '32px 0', textAlign: 'center', fontSize: 14 }}>
+          No paper trades found for {selectedDate}.
+          <div style={{ fontSize: 12, marginTop: 6 }}>
+            Trades are created automatically when the Daily Brief runs.
+          </div>
+        </div>
+      )}
+
+      {!loading && dates.length === 0 && (
+        <div style={{ color: 'var(--text-muted)', padding: '32px 0', textAlign: 'center', fontSize: 14 }}>
+          No briefs with paper trades yet.
+          <div style={{ fontSize: 12, marginTop: 6 }}>
+            Run the Daily Brief job — picks are automatically tracked as paper trades.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main View ─────────────────────────────────────────────────────────────────
 
 export function RetrospectView() {
@@ -932,10 +1182,11 @@ export function RetrospectView() {
       {/* Tabs */}
       <div className="retro-tabs">
         {([
-          ['inprogress', 'In Progress', openPositions.length],
-          ['summary',    'Summary',     null],
-          ['history',    'History',     null],
-          ['settings',   'Settings',    null],
+          ['inprogress',  'In Progress',  openPositions.length],
+          ['summary',     'Summary',      null],
+          ['history',     'History',      null],
+          ['brieftrend',  'Brief Trend',  null],
+          ['settings',    'Settings',     null],
         ] as [Tab, string, number | null][]).map(([id, label, count]) => (
           <button
             key={id}
@@ -958,8 +1209,9 @@ export function RetrospectView() {
             loading={loadingOpen}
           />
         )}
-        {tab === 'history'  && <HistoryTab trades={closedTrades} loading={loadingClosed} />}
-        {tab === 'settings' && <SettingsTab settings={settings} onSave={handleSaveSettings} />}
+        {tab === 'history'    && <HistoryTab trades={closedTrades} loading={loadingClosed} />}
+        {tab === 'brieftrend' && <BriefTrendTab />}
+        {tab === 'settings'   && <SettingsTab settings={settings} onSave={handleSaveSettings} />}
       </div>
     </div>
   );

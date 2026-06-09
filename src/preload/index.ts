@@ -96,6 +96,7 @@ import type {
   SnapshotAccuracy,
   BriefPerformanceSummary,
   BriefHealthTrend,
+  BriefPickDetail,
   BriefLearningRecommendation,
   SignalWeightSuggestion,
   ConvictionStock,
@@ -1074,6 +1075,8 @@ function buildApi() {
     briefAccuracy:     (briefDates: string[]): Promise<BriefAccuracy[]> => invoke('paper:brief-accuracy', briefDates),
     snapshotAccuracy:             (): Promise<SnapshotAccuracy> => invoke('paper:snapshot-accuracy'),
     briefPerformanceSummary:      (): Promise<BriefPerformanceSummary | null> => invoke('paper:brief-performance-summary'),
+    briefDates:                   (): Promise<string[]> => invoke('paper:brief-dates'),
+    briefPickDrilldown:           (briefDate: string): Promise<BriefPickDetail[]> => invoke('paper:brief-pick-drilldown', briefDate),
     getLearningRecommendations: (): Promise<BriefLearningRecommendation[]> => invoke('paper:get-learning-recommendations'),
     acknowledgeRecommendation:  (id: number): Promise<boolean> => invoke('paper:acknowledge-recommendation', id),
   };

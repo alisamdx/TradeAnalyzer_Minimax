@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.50] — 2026-06-09
+
+### Added
+- **Retrospect: Brief Trend tab** — new tab next to History that lets you drill into any individual brief's picks and compare prediction vs Day+5 outcome. Select a brief date from the dropdown, optionally filter by strategy. Table columns: Ticker (hover = AI rationale), Strategy, Score, Brief Price, Entry Zone (buy strategy only, from nearest analysis snapshot), In Zone? (was brief-day price inside the zone), Day+5 Price with actual days elapsed, Return % colour-coded per strategy direction, Outcome emoji (✅/❌/➖/⏳), Critic verdict badge with critic rationale on hover. Summary bar at top shows hit count, rated pick count, and average Day+5 return. New service methods `getBriefDates()` + `getBriefPickDrilldown()` in `paper-trading-service.ts`; new IPC `paper:brief-dates` + `paper:brief-pick-drilldown`; new `BriefPickDetail` shared type.
+
 ## [0.32.49] — 2026-06-09
 
 ### Improved

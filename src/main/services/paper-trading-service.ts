@@ -28,6 +28,7 @@ import type {
   TradeLearningGapCause,
   BriefLearningRecommendation,
   BriefPerformanceSummary,
+  BriefPickDetail,
 } from '@shared/types.js';
 
 // Default thresholds — user can override via Settings tab in Retrospect screen.
@@ -1064,6 +1065,134 @@ Respond with JSON only:
         avgReturnPct: r.avg_return,
       })),
     };
+  }
+
+  // ── Brief Trend: available brief dates ───────────────────────────────────────
+  getBriefDates(): string[] {
+    type Row = { brief_date: string };
+    return (this.db.prepare(
+      'SELECT DISTINCT brief_date FROM paper_trades ORDER BY brief_date DESC'
+    ).all() as Row[]).map(r => r.brief_date);
+  }
+
+  // ── Brief Trend: per-pick drilldown for one brief date ───────────────────────
+  // Joins paper_trades with Day+5 snapshots, then enriches each pick with
+  // the critic verdict/rationale from daily_briefs.picks JSON, and the
+  // entry zone from analysis_snapshots (buy strategy only).
+  getBriefPickDrilldown(briefDate: string): BriefPickDetail[] {
+    type TradeRow = {
+      id: number;
+      ticker: string;
+      brief_strategy: string;
+      brief_score: number;
+      brief_rank: number;
+      entry_price: number | null;
+      day5_price: number | null;
+      day5_return_pct: number | null;
+      day5_verdict: string | null;
+      day5_days_actual: number | null;
+    };
+
+    const trades = this.db.prepare(`
+      WITH day5 AS (
+        SELECT paper_trade_id, MIN(days_held) AS min_held
+        FROM paper_trade_snapshots
+        WHERE days_held >= 5
+        GROUP BY paper_trade_id
+      ),
+      day5_snap AS (
+        SELECT s.paper_trade_id, s.price AS day5_price,
+               s.return_pct, s.verdict, s.days_held
+        FROM paper_trade_snapshots s
+        JOIN day5 d ON s.paper_trade_id = d.paper_trade_id
+                   AND s.days_held = d.min_held
+      )
+      SELECT pt.id, pt.ticker, pt.brief_strategy, pt.brief_score, pt.brief_rank,
+             pt.entry_price,
+             s.day5_price, s.return_pct AS day5_return_pct,
+             s.verdict AS day5_verdict, s.days_held AS day5_days_actual
+      FROM paper_trades pt
+      LEFT JOIN day5_snap s ON s.paper_trade_id = pt.id
+      WHERE pt.brief_date = ?
+      ORDER BY pt.brief_strategy, pt.brief_rank
+    `).all(briefDate) as TradeRow[];
+
+    if (trades.length === 0) return [];
+
+    // Load brief picks JSON → critic verdict + AI rationale
+    // Use the most-recent brief row per strategy for this calendar date
+    type BriefRow = { strategy: string; picks: string };
+    const briefRows = this.db.prepare(`
+      WITH ranked AS (
+        SELECT strategy, picks,
+               ROW_NUMBER() OVER (PARTITION BY strategy ORDER BY generated_at DESC) AS rn
+        FROM daily_briefs
+        WHERE DATE(generated_at) = ?
+      )
+      SELECT strategy, picks FROM ranked WHERE rn = 1
+    `).all(briefDate) as BriefRow[];
+
+    type PickMeta = { criticVerdict: string | null; criticRationale: string | null; aiRationale: string | null };
+    const pickMeta = new Map<string, PickMeta>();
+    for (const row of briefRows) {
+      try {
+        const picks = JSON.parse(row.picks) as Array<{
+          ticker: string;
+          criticVerdict?: { verdict?: string; rationale?: string | null } | null;
+          aiRationale?: string | null;
+        }>;
+        for (const p of picks) {
+          pickMeta.set(`${row.strategy}:${p.ticker}`, {
+            criticVerdict:   p.criticVerdict?.verdict   ?? null,
+            criticRationale: p.criticVerdict?.rationale ?? null,
+            aiRationale:     p.aiRationale              ?? null,
+          });
+        }
+      } catch { /* skip malformed rows */ }
+    }
+
+    // Entry zone — buy strategy only, from nearest analysis_snapshot ≤ brief date
+    // payload_json stores { jobRunId, results: AnalysisResult[] }
+    const entryZoneStmt = this.db.prepare(`
+      SELECT json_extract(je.value, '$.entryZoneLow')  AS entry_zone_low,
+             json_extract(je.value, '$.entryZoneHigh') AS entry_zone_high
+      FROM analysis_snapshots,
+           json_each(json_extract(analysis_snapshots.payload_json, '$.results')) AS je
+      WHERE analysis_snapshots.mode = 'buy'
+        AND analysis_snapshots.run_at <= ?
+        AND json_extract(je.value, '$.ticker') = ?
+      ORDER BY analysis_snapshots.run_at DESC
+      LIMIT 1
+    `);
+
+    return trades.map(t => {
+      const meta = pickMeta.get(`${t.brief_strategy}:${t.ticker}`);
+
+      let entryZoneLow: number | null = null;
+      let entryZoneHigh: number | null = null;
+      if (t.brief_strategy === 'buy') {
+        type ZoneRow = { entry_zone_low: number | null; entry_zone_high: number | null };
+        const zr = entryZoneStmt.get(`${briefDate}T23:59:59`, t.ticker) as ZoneRow | undefined;
+        if (zr) { entryZoneLow = zr.entry_zone_low; entryZoneHigh = zr.entry_zone_high; }
+      }
+
+      return {
+        ticker:          t.ticker,
+        strategy:        t.brief_strategy as ScoringStrategy,
+        briefScore:      t.brief_score,
+        briefRank:       t.brief_rank,
+        briefPrice:      t.entry_price,
+        entryZoneLow,
+        entryZoneHigh,
+        day5Price:       t.day5_price,
+        day5ReturnPct:   t.day5_return_pct,
+        day5Verdict:     (t.day5_verdict ?? null) as BriefPickDetail['day5Verdict'],
+        day5DaysActual:  t.day5_days_actual,
+        criticVerdict:   ((meta?.criticVerdict) ?? null) as BriefPickDetail['criticVerdict'],
+        criticRationale: meta?.criticRationale ?? null,
+        aiRationale:     meta?.aiRationale     ?? null,
+      };
+    });
   }
 
   // Returns accuracy for multiple brief dates in one query (for history banner)

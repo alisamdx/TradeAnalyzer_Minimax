@@ -31,7 +31,9 @@ export function registerPaperTradingIpc(svc: PaperTradingService): void {
   ipcMain.handle('paper:expire-stale',       wrap(() => svc.expireStalePositions()));
   ipcMain.handle('paper:get-settings',       wrap(() => svc.getSettings()));
   ipcMain.handle('paper:save-settings',      wrap((settings: RetroSettings) => { svc.saveSettings(settings); return true; }));
-  ipcMain.handle('paper:brief-accuracy',     wrap((briefDates: string[]) => svc.getBriefAccuracyBatch(briefDates)));
+  ipcMain.handle('paper:brief-accuracy',          wrap((briefDates: string[]) => svc.getBriefAccuracyBatch(briefDates)));
+  ipcMain.handle('paper:brief-dates',             wrap(() => svc.getBriefDates()));
+  ipcMain.handle('paper:brief-pick-drilldown',    wrap((briefDate: string) => svc.getBriefPickDrilldown(briefDate)));
   ipcMain.handle('paper:snapshot-accuracy',              wrap(() => svc.getSnapshotAccuracy()));
   ipcMain.handle('paper:brief-performance-summary',      wrap(() => svc.getBriefPerformanceSummary()));
   ipcMain.handle('paper:get-learning-recommendations',   wrap(() => svc.getLearningRecommendations()));
