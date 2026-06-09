@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.39] — 2026-06-08
+
+### Improved
+- **Daily Brief: collapsible pick cards** — each pick is now a single-line summary row (rank · ticker · price · score · structure grade · critic verdict) that expands on click to reveal signals, strategy lab detail, nav buttons, AI rationale, and full critic analysis. Collapsed by default to reduce scrolling.
+
 ## [0.32.38] — 2026-06-08
 
 ### Fixed

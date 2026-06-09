@@ -371,64 +371,73 @@ function PickCard({
   strategy: ScoringStrategy;
   onGoToStrategyLab: (ticker: string) => void;
 }) {
+  const [expanded, setExpanded] = useState(false);
+
+  const result = pick.strategyLabResult ? (pick.strategyLabResult as StrategyLabValidateResult) : null;
+  const labGrade = result ? gradeOf(result, STRATEGY_TO_SLUGS[strategy]) : null;
+  const verdict = pick.criticVerdict?.verdict ?? null;
+
   return (
-    <div className="brief-pick-card">
-      {/* Left column — rank bubble */}
-      <div className="pick-rank-col">
+    <div className={`brief-pick-card brief-pick-card--collapsible${expanded ? ' brief-pick-card--expanded' : ''}`}>
+      {/* Summary row — always visible, click to expand/collapse */}
+      <button className="pick-summary-row" onClick={() => setExpanded(p => !p)}>
         <span className="pick-rank">#{pick.rank}</span>
-      </div>
-
-      {/* Right column — all content */}
-      <div>
-        {/* Row 1: ticker · price · capital · score · validated · lab btn */}
-        <div className="pick-main-row">
-          <span className="pick-ticker">{pick.ticker}</span>
-          {pick.price !== null && pick.price !== undefined && (
-            <>
-              <span className="pick-price">${pick.price.toFixed(2)}</span>
-              {strategy === 'wheel' && (
-                <span className="pick-capital" title="Cash needed to secure 1 CSP (100 shares)">
-                  ~${Math.round(pick.price * 100).toLocaleString()} cap
-                </span>
-              )}
-            </>
-          )}
-          <span
-            className="pick-score-badge"
-            style={{ background: scoreBg(pick.compositeScore), color: scoreColor(pick.compositeScore) }}
-          >
-            Score {pick.compositeScore.toFixed(1)}
+        <span className="pick-ticker">{pick.ticker}</span>
+        {pick.price != null && (
+          <span className="pick-price">${pick.price.toFixed(2)}</span>
+        )}
+        <span
+          className="pick-score-badge"
+          style={{ background: scoreBg(pick.compositeScore), color: scoreColor(pick.compositeScore) }}
+        >
+          {pick.compositeScore.toFixed(1)}
+        </span>
+        {labGrade && (
+          <span className="pick-summary-lab">
+            <span className="lab-grade-label">{SLUG_SHORT[labGrade.slug] ?? labGrade.name}</span>
+            <span className="lab-grade-badge" style={{ color: GRADE_COLOR[labGrade.grade], borderColor: GRADE_COLOR[labGrade.grade] }}>
+              {labGrade.grade}
+            </span>
           </span>
-          {pick.validated
-            ? <span className="pick-badge validated">✓ Validated</span>
-            : <span className="pick-badge unvalidated">Unvalidated</span>
+        )}
+        {verdict && (
+          <span className={`pick-summary-verdict critic-badge-${verdict}`}>
+            {CRITIC_LABEL[verdict]}
+          </span>
+        )}
+        {strategy === 'wheel' && pick.price != null && (
+          <span className="pick-capital" title="Cash needed to secure 1 CSP (100 shares)">
+            ~${Math.round(pick.price * 100).toLocaleString()}
+          </span>
+        )}
+        <span className="pick-summary-chevron">{expanded ? '▼' : '▶'}</span>
+      </button>
+
+      {/* Detail section — visible when expanded */}
+      {expanded && (
+        <div className="pick-detail">
+          <div className="pick-detail-actions">
+            {pick.validated
+              ? <span className="pick-badge validated">✓ Validated</span>
+              : <span className="pick-badge unvalidated">Unvalidated</span>
+            }
+            <button className="pick-lab-btn" onClick={() => onGoToStrategyLab(pick.ticker)}>
+              Strategy Lab →
+            </button>
+          </div>
+          <TopSignals signals={pick.signals} />
+          <StrategyLabSummary strategyLabResult={pick.strategyLabResult ?? null} strategy={strategy} />
+          <PickNavRow pick={pick} />
+          {pick.aiRationale
+            ? <p className="pick-rationale">{pick.aiRationale}</p>
+            : <p className="pick-rationale muted">AI reasoning unavailable</p>
           }
-          <button className="pick-lab-btn" onClick={() => onGoToStrategyLab(pick.ticker)}>
-            Strategy Lab →
-          </button>
+          {pick.criticVerdict
+            ? <CriticBadge verdict={pick.criticVerdict} />
+            : <div className="critic-verdict critic-unavailable">🔍 Second opinion unavailable</div>
+          }
         </div>
-
-        {/* Row 2: top signal chips */}
-        <TopSignals signals={pick.signals} />
-
-        {/* Row 3: Strategy Lab grade alignment */}
-        <StrategyLabSummary strategyLabResult={pick.strategyLabResult ?? null} strategy={strategy} />
-
-        {/* Row 4: Quick-navigation — Payoff / Validate / Options */}
-        <PickNavRow pick={pick} />
-
-        {/* Row 5: AI rationale */}
-        {pick.aiRationale
-          ? <p className="pick-rationale">{pick.aiRationale}</p>
-          : <p className="pick-rationale muted">AI reasoning unavailable</p>
-        }
-
-        {/* Row 6: AI Critic second opinion */}
-        {pick.criticVerdict
-          ? <CriticBadge verdict={pick.criticVerdict} />
-          : <div className="critic-verdict critic-unavailable">🔍 Second opinion unavailable</div>
-        }
-      </div>
+      )}
     </div>
   );
 }
