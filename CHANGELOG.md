@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.43] — 2026-06-09
+
+### Fixed
+- **My Stocks (ConvictionView): IV showing as thousands percent** — `conviction-service.ts` was multiplying `atm_iv` values by 100 before using them, but `iv_history.atm_iv` is already stored as a percentage (e.g., 31.726 = 31.7% IV). The double-multiply produced values like 3172.6%. Removed the erroneous `* 100` from all three locations: the `list()` display path, the `recommend()` IV rank computation, and the `get()` single-ticker fetch.
+
 ## [0.32.42] — 2026-06-09
 
 ### Improved

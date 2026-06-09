@@ -129,8 +129,8 @@ export class ConvictionService {
     return rows.map(r => {
       const currentPrice = quotes.get(r.ticker) ?? null;
       const ivs = ivByTicker.get(r.ticker) ?? [];
-      const latestIv = ivs.length > 0 ? ivs[0]! * 100 : null; // decimal → percentage
-      const ivRank = computeIvRank(ivs.map(v => v * 100));
+      const latestIv = ivs.length > 0 ? ivs[0]! : null; // already stored as percentage
+      const ivRank = computeIvRank(ivs);
       return {
         ticker: r.ticker,
         priceLow: r.price_low,
@@ -279,7 +279,7 @@ export class ConvictionService {
       SELECT atm_iv FROM iv_history WHERE ticker = ?
       ORDER BY date DESC LIMIT 252
     `).all(t) as IvRow[];
-    const ivs = ivRows.map(r => r.atm_iv * 100);
+    const ivs = ivRows.map(r => r.atm_iv); // already stored as percentage
     const ivRank = computeIvRank(ivs);
 
     // ── Compute Low ──────────────────────────────────────────────────────────
@@ -395,7 +395,7 @@ export class ConvictionService {
     type IvRow = { atm_iv: number };
     const ivRows = (this.db.prepare(
       `SELECT atm_iv FROM iv_history WHERE ticker = ? ORDER BY date DESC LIMIT 252`
-    ).all(ticker) as IvRow[]).map(r => r.atm_iv * 100);
+    ).all(ticker) as IvRow[]).map(r => r.atm_iv); // already stored as percentage
 
     return {
       ticker: row.ticker,
