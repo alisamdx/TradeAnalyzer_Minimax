@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.40] — 2026-06-08
+
+### Added
+- **Daily Brief auto-watchlist**: after each brief run, a watchlist named `DailyBrief-MMDD` is automatically created (or cleared and refreshed if it already exists for today). All final picks from all 5 strategies are added as items; the notes field shows which strategies each ticker was picked for (e.g. `wheel · buy`). The watchlist is immediately available in Watchlists, Screener, Analysis, and anywhere else watchlists are consumed. New public methods `findByName()` and `clearItems()` added to `WatchlistService`.
+
 ## [0.32.39] — 2026-06-08
 
 ### Improved

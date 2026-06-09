@@ -84,6 +84,7 @@ export class WatchlistService {
   private readonly deleteItemsStmt;
   private readonly touchUpdatedAtStmt;
   private readonly findItemByIdStmt;
+  private readonly findByNameFullStmt;
   private readonly findDefaultStmt;
 
   constructor(private readonly db: DbHandle) {
@@ -142,6 +143,11 @@ export class WatchlistService {
        LEFT JOIN constituents c ON upper(wi.ticker) = upper(c.ticker)
        WHERE wi.id = ?`
     );
+    this.findByNameFullStmt = db.prepare(`
+      SELECT w.id, w.name, w.is_default, w.created_at, w.updated_at,
+             (SELECT COUNT(*) FROM watchlist_items i WHERE i.watchlist_id = w.id) AS item_count
+      FROM watchlists w WHERE lower(w.name) = lower(?)
+    `);
     this.findDefaultStmt = db.prepare(`
       SELECT w.id, w.name, w.is_default, w.created_at, w.updated_at,
              (SELECT COUNT(*) FROM watchlist_items i WHERE i.watchlist_id = w.id) AS item_count
@@ -158,6 +164,23 @@ export class WatchlistService {
     const created = this.getOneStmt.get(Number(result.lastInsertRowid)) as WatchlistRow | undefined;
     if (!created) throw new Error('Failed to create Default watchlist');
     return rowToWatchlist(created);
+  }
+
+  /** Find a watchlist by name (case-insensitive). Returns null if not found. */
+  findByName(name: string): Watchlist | null {
+    const row = this.findByNameFullStmt.get(name) as WatchlistRow | undefined;
+    return row ? rowToWatchlist(row) : null;
+  }
+
+  /**
+   * Remove all items from a watchlist without deleting the watchlist itself.
+   * Used by the Daily Brief job to refresh the DailyBrief-MMDD watchlist each run.
+   */
+  clearItems(watchlistId: number): number {
+    this.get(watchlistId); // ensure exists
+    const result = this.deleteItemsStmt.run(watchlistId);
+    if (result.changes > 0) this.touchUpdatedAtStmt.run(watchlistId);
+    return Number(result.changes);
   }
 
   list(): Watchlist[] {

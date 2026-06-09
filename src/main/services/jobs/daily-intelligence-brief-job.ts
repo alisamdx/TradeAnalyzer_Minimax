@@ -20,6 +20,7 @@ import type { EmailService } from '../email-service.js';
 import { buildEmailHtml, buildPdf } from '../brief-report-builder.js';
 import type { PaperTradingService } from '../paper-trading-service.js';
 import { CriticService } from '../critic-service.js';
+import { WatchlistService } from '../watchlist-service.js';
 
 const PICKS_PER_STRATEGY = 5;
 
@@ -476,6 +477,9 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
     const gatedMsg = totalGated > 0 ? ` | ${totalGated} dropped (low liquidity)` : '';
     emit(`Stage 6/6: Brief generated — ${totalPicks} picks across 5 strategies${gatedMsg}`, totalPicks, totalPicks);
 
+    // ── Stage 6b: Update DailyBrief-MMDD watchlist ──────────────────────────
+    this.upsertBriefWatchlist(persistedPicks, today);
+
     // ── Email delivery ────────────────────────────────────────────────────────
     if (this.emailService?.isConfigured() && totalPicks > 0) {
       try {
@@ -509,6 +513,60 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
       tickersSkipped: 0,
       tickersFailed: stage4Failed,
     };
+  }
+
+  // ── Stage 6b: DailyBrief watchlist sync ────────────────────────────────────
+
+  /**
+   * Create or refresh the DailyBrief-MMDD watchlist with today's final picks.
+   * If the watchlist already exists for today, all items are cleared and replaced.
+   * Each item's notes field contains the strategies the ticker was picked for
+   * (e.g. "wheel · buy"), making the watchlist useful across other app views.
+   * Non-fatal: failures are logged but never propagate to the job result.
+   */
+  private upsertBriefWatchlist(
+    picks: Map<ScoringStrategy, BriefPick[]>,
+    today: string,
+  ): void {
+    try {
+      // today is always YYYY-MM-DD
+      const mm = today.slice(5, 7);
+      const dd = today.slice(8, 10);
+      const wlName = `DailyBrief-${mm}${dd}`;
+
+      const watchlistService = new WatchlistService(this.db);
+
+      // Find or create
+      let wl = watchlistService.findByName(wlName);
+      if (wl) {
+        watchlistService.clearItems(wl.id);
+      } else {
+        wl = watchlistService.create(wlName);
+      }
+
+      // Collect unique tickers, merging strategies when a ticker appears in multiple
+      const tickerStrategies = new Map<string, string[]>();
+      for (const [strategy, stratPicks] of picks) {
+        for (const pick of stratPicks) {
+          if (!tickerStrategies.has(pick.ticker)) tickerStrategies.set(pick.ticker, []);
+          tickerStrategies.get(pick.ticker)!.push(strategy);
+        }
+      }
+
+      const items = [...tickerStrategies.entries()].map(([ticker, strategies]) => ({
+        ticker,
+        notes: strategies.join(' · '),
+      }));
+
+      if (items.length > 0) {
+        watchlistService.addItemsBulk(wl.id, items);
+      }
+
+      console.log(`[brief] watchlist "${wlName}" updated — ${items.length} tickers`);
+    } catch (err) {
+      // Non-fatal — brief is already persisted
+      console.warn('[brief] watchlist update failed:', err instanceof Error ? err.message : String(err));
+    }
   }
 
   // ── Stage 1 helpers ────────────────────────────────────────────────────────
