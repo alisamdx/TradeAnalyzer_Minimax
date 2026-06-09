@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.36] — 2026-06-08
+
+### Fixed
+- **AI Critic price hallucination**: critic LLM was overriding correct live prices with stale training-data prices (e.g. flagging AMD at $490 as "fabricated" because it "remembered" AMD at ~$110). Fix: system prompt now explicitly instructs the model that all `marketData` fields are live and authoritative — training knowledge about prices is years out of date and must not be used to contradict provided data. Context also now includes `price52wReturnPct` so the model can calibrate price level from the known 1-year return without needing to recall an absolute price from training.
+
 ## [0.32.35] — 2026-06-08
 
 ### Fixed

@@ -114,11 +114,21 @@ export class CriticService {
         }
       }
 
+      // Include 52-week return so the model can calibrate price level without relying
+      // on training data (e.g. a stock up 300% YoY is correctly priced at 4× its old level).
+      const price52wReturn = pick.signals['priceMomentumPct']?.missing === false
+        ? (pick.signals['priceMomentumPct']?.raw ?? null)
+        : null;
+
       const context = {
         ticker: pick.ticker,
         strategy,
         compositeScore: pick.compositeScore,
-        price: pick.price,
+        marketData: {
+          price: pick.price,
+          date: new Date().toISOString().slice(0, 10),
+          price52wReturnPct: price52wReturn,  // e.g. 320.5 means stock is up 320% vs 1 year ago
+        },
         topSignals,
         structure,
         advocateRationale: pick.aiRationale,
@@ -127,6 +137,8 @@ export class CriticService {
 
       const systemPrompt = `You are a risk-focused options trading analyst reviewing daily trade recommendations.
 Your job is to find problems, not validate decisions. Be skeptical and specific.
+
+IMPORTANT: All market data in the \`marketData\` field is live and current as of the \`date\` provided — sourced directly from real-time market data feeds, not estimates. Do not use your training knowledge to assess whether a price is "too high", "wrong", or "unrealistic" — stock prices change dramatically over time and your training data may be years out of date. If \`price52wReturnPct\` shows +300, the stock genuinely is up 300% from a year ago; treat the provided price as ground truth.
 
 Write exactly 2 sentences:
 1. Your verdict on the most significant risk or concern you see (or confirm it looks clean if genuinely clear).
