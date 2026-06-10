@@ -46,10 +46,10 @@ const STRATEGY_RELEVANT_SLUGS: Record<string, string[]> = {
   buy:     ['long-call-vertical', 'call-zebra', 'poor-mans-covered-call', 'call-calendar'],
 };
 
-// Returns false when the best relevant structure has liquidityScore below the threshold.
-// Returns true when we have no lab result (can't gate) or no relevant structure available.
-function hasAdequateLiquidity(labResult: object | null, strategy: string): boolean {
-  if (!labResult) return true;
+// Returns the best liquidityScore (0–15) among the strategy-relevant structures,
+// or null when no lab result or no relevant structure is available.
+function getBestLiquidityScore(labResult: object | null, strategy: string): number | null {
+  if (!labResult) return null;
   type SScore = { slug: string; liquidityScore: number; setup: { unavailableReason: string | null } | null };
   type LabRes  = { scores?: SScore[] };
   const result = labResult as LabRes;
@@ -60,7 +60,14 @@ function hasAdequateLiquidity(labResult: object | null, strategy: string): boole
       if (best === null || s.liquidityScore > best) best = s.liquidityScore;
     }
   }
-  if (best === null) return true; // structure unavailable — can't gate
+  return best;
+}
+
+// Returns false when the best relevant structure has liquidityScore below the threshold.
+// Returns true when we have no lab result (can't gate) or no relevant structure available.
+function hasAdequateLiquidity(labResult: object | null, strategy: string): boolean {
+  const best = getBestLiquidityScore(labResult, strategy);
+  if (best === null) return true; // no lab result or structure unavailable — can't gate
   return best >= MIN_LIQUIDITY_SCORE;
 }
 
@@ -367,12 +374,18 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
       );
       const gated = top.length - liquidFiltered.length;
       if (gated > 0) totalGated += gated;
-      // Funnel log: helps diagnose whether income/other strategies are scarce due to
-      // the liquidity gate or genuine absence of qualifying candidates.
+      // Funnel log: shows per-strategy liquidity gate results including score for each
+      // gated ticker so we can distinguish "gate too aggressive" from genuine scarcity.
       console.log(
         `[brief funnel] ${strategy}: ${top.length} pre-gate → ${liquidFiltered.length} final` +
         (gated > 0
-          ? ` (gated: ${top.filter(s => !liquidFiltered.includes(s)).map(s => s.ticker).join(', ')})`
+          ? ` (gated: ${top
+              .filter(s => !liquidFiltered.includes(s))
+              .map(s => {
+                const liq = getBestLiquidityScore(validationResults.get(s.ticker) ?? null, strategy);
+                return `${s.ticker}(liq=${liq ?? '?'}/15)`;
+              })
+              .join(', ')})`
           : '')
       );
 

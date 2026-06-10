@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.57] — 2026-06-09
+
+### Changed
+- **Brief funnel log: show liquidity score for each gated ticker** — log now reads e.g. `income: 5 pre-gate → 2 final (gated: CSX(liq=4/15), FWONA(liq=2/15), OGE(liq=1/15))`. Extracted `getBestLiquidityScore()` helper; `hasAdequateLiquidity()` delegates to it. No behavior change.
+
 ## [0.32.56] — 2026-06-09
 
 ### Fixed
