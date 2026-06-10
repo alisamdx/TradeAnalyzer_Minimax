@@ -327,6 +327,13 @@ export class PaperTradingService {
     briefId: number,
   ): void {
     withTransaction(this.db, () => {
+      // Replace any open picks from earlier runs on the same date.
+      // Each brief run is the authoritative source for its date — stale picks
+      // from previous runs (e.g. debugging iterations) must not pollute Retrospect.
+      this.db.prepare(
+        `DELETE FROM paper_trades WHERE brief_strategy = ? AND brief_date = ? AND status = 'open'`
+      ).run(strategy, briefDate);
+
       for (const pick of picks) {
         const { strategyName, legsJson, entryPremium, expiryDate } =
           extractLabSetup(pick.strategyLabResult ?? null, strategy);
@@ -337,16 +344,6 @@ export class PaperTradingService {
             ticker, brief_date, strategy_name, legs_json,
             entry_date, entry_price, entry_premium, expiry_date, status
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open')
-          ON CONFLICT(ticker, brief_strategy, brief_date) DO UPDATE SET
-            brief_id      = excluded.brief_id,
-            brief_score   = excluded.brief_score,
-            brief_rank    = excluded.brief_rank,
-            strategy_name = excluded.strategy_name,
-            legs_json     = excluded.legs_json,
-            entry_price   = excluded.entry_price,
-            entry_premium = excluded.entry_premium,
-            expiry_date   = excluded.expiry_date
-          WHERE paper_trades.status = 'open'
         `).run(
           briefId, strategy, pick.compositeScore, pick.rank,
           pick.ticker, briefDate, strategyName, legsJson,
@@ -354,6 +351,30 @@ export class PaperTradingService {
         );
       }
     });
+  }
+
+  // Purge open paper trades whose ticker is not in the latest brief run for that date.
+  // Handles historical pollution from days where the brief was run multiple times.
+  cleanupStalePicksAllDates(): number {
+    const result = this.db.prepare(`
+      DELETE FROM paper_trades
+      WHERE status = 'open'
+      AND id IN (
+        SELECT pt.id
+        FROM paper_trades pt
+        JOIN (
+          SELECT strategy, DATE(generated_at, '-5 hours') AS brief_date, MAX(id) AS max_id
+          FROM daily_briefs
+          GROUP BY strategy, DATE(generated_at, '-5 hours')
+        ) latest ON latest.strategy = pt.brief_strategy AND latest.brief_date = pt.brief_date
+        JOIN daily_briefs db ON db.id = latest.max_id
+        WHERE NOT EXISTS (
+          SELECT 1 FROM json_each(db.picks) je
+          WHERE json_extract(je.value, '$.ticker') = pt.ticker
+        )
+      )
+    `).run();
+    return result.changes;
   }
 
   // ── Open positions with live P&L ──────────────────────────────────────────

@@ -1,6 +1,6 @@
 {
   "name": "trade-analyzer",
-  "version": "0.32.61",
+  "version": "0.32.62",
   "private": true,
   "description": "Stock screening and analysis desktop app for a single retail trader.",
   "main": "out/main/index.js",

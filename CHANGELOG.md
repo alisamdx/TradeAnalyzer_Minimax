@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.32.62] — 2026-06-09
+
+### Fixed
+- **Paper trades: stale picks from multi-run days now replaced, not accumulated** — each time the brief runs on the same date, `autoCapture` now deletes all existing open picks for that strategy/date before inserting the current run's picks. Previously, picks from earlier runs (e.g. debugging iterations) were permanently retained alongside the final run's picks via the `ON CONFLICT DO UPDATE` upsert that only updated matching tickers and couldn't remove ones that were dropped. Result: income could accumulate 13 picks across 7 runs when only 5 are correct.
+- **Historical cleanup on next brief run** — `cleanupStalePicksAllDates()` is called once at the start of each Stage 6. Uses `json_each(picks)` to compare open paper trades against the latest brief for each date/strategy, and deletes any ticker not present in that final run. Removes stale picks from all past dates on the next brief generation (61 stale picks identified across June 3, 5, 8, 9 from dev/debugging runs).
+
 ## [0.32.61] — 2026-06-09
 
 ### Fixed

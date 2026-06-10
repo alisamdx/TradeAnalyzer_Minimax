@@ -507,6 +507,18 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
 
     this.scoringService.pruneStaleBriefs(RETENTION_DAYS);
 
+    // One-time cleanup: purge open paper trades from stale earlier runs on any date.
+    // autoCapture below clears today's stale picks per-strategy before inserting;
+    // this handles historical multi-run pollution from past dates.
+    if (this.paperTradingService) {
+      try {
+        const deleted = this.paperTradingService.cleanupStalePicksAllDates();
+        if (deleted > 0) console.log(`[brief] pruned ${deleted} stale paper picks from multi-run days`);
+      } catch (err) {
+        console.warn('[brief] stale pick cleanup failed:', err instanceof Error ? err.message : String(err));
+      }
+    }
+
     let totalPicks = 0;
     const persistedPicks = new Map<ScoringStrategy, BriefPick[]>();
     for (const strategy of STRATEGIES) {
