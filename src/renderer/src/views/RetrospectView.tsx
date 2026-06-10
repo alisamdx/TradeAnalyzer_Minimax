@@ -817,6 +817,8 @@ const CRITIC_COLORS: Record<string, string> = {
   flag:    '#f85149',
 };
 
+const DAY_PENDING = <span style={{ color: '#8b949e' }}>⏳</span>;
+
 function BriefTrendTab() {
   const [dates, setDates]           = useState<string[]>([]);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
@@ -824,7 +826,6 @@ function BriefTrendTab() {
   const [loading, setLoading]       = useState(false);
   const [stratFilter, setStratFilter] = useState<ScoringStrategy | 'all'>('all');
 
-  // Load available brief dates on mount
   useEffect(() => {
     window.api.paper.briefDates().then(d => {
       setDates(d);
@@ -832,7 +833,6 @@ function BriefTrendTab() {
     }).catch(() => {});
   }, []);
 
-  // Reload picks when date changes
   useEffect(() => {
     if (!selectedDate) return;
     setLoading(true);
@@ -846,13 +846,12 @@ function BriefTrendTab() {
     ? picks
     : picks.filter(p => p.strategy === stratFilter);
 
-  const ratedPicks  = filtered.filter(p => p.day5Verdict !== null);
-  const hits        = ratedPicks.filter(p => p.day5Verdict === 'positive').length;
-  const avgReturn   = ratedPicks.length > 0
-    ? ratedPicks.reduce((s, p) => s + (p.day5ReturnPct ?? 0), 0) / ratedPicks.length
+  const ratedPicks = filtered.filter(p => p.latestVerdict !== null);
+  const hits       = ratedPicks.filter(p => p.latestVerdict === 'positive').length;
+  const avgReturn  = ratedPicks.length > 0
+    ? ratedPicks.reduce((s, p) => s + (p.returnPct ?? 0), 0) / ratedPicks.length
     : null;
 
-  // Which strategies actually appear in this brief (for filter chips)
   const presentStrategies = [...new Set(picks.map(p => p.strategy))] as ScoringStrategy[];
 
   return (
@@ -872,7 +871,6 @@ function BriefTrendTab() {
           {dates.map(d => <option key={d} value={d}>{d}</option>)}
         </select>
 
-        {/* Strategy filter chips */}
         {presentStrategies.length > 1 && (
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             {(['all', ...presentStrategies] as const).map(s => (
@@ -903,7 +901,7 @@ function BriefTrendTab() {
             <span style={{ color: '#8b949e' }}>{filtered.length} picks</span>
           </span>
           <span className="brief-perf-chip">
-            <span style={{ color: '#8b949e' }}>Day+5 rated:</span>
+            <span style={{ color: '#8b949e' }}>rated:</span>
             {' '}
             <span style={{
               color: hits / ratedPicks.length >= 0.6 ? '#3fb950' : hits / ratedPicks.length >= 0.4 ? '#e3a008' : '#f85149',
@@ -929,35 +927,32 @@ function BriefTrendTab() {
 
       {!loading && filtered.length > 0 && (
         <div style={{ overflowX: 'auto' }}>
-          <table className="retro-table" style={{ minWidth: 820 }}>
+          <table className="retro-table" style={{ minWidth: 920 }}>
             <thead>
               <tr>
                 <th title="Ticker symbol">Ticker</th>
                 <th title="Scoring strategy this pick came from">Strategy</th>
                 <th title="Composite score (0–100) on brief day">Score</th>
                 <th title="Stock price at time the brief was generated">Brief Price</th>
-                <th title="Recommended entry zone from buy-mode analysis snapshot (buy strategy only)">Entry Zone</th>
-                <th title="Was the brief-day price inside the entry zone? (buy strategy only)">In Zone?</th>
-                <th title="Stock price at Day+5 (first snapshot with days_held ≥ 5). Number in parentheses = actual days elapsed.">Day+5 Price</th>
-                <th title="Return % from brief price to Day+5 price. Colour interpretation: green = favorable for strategy, red = unfavorable (bearish strategy: green = price fell).">Return %</th>
-                <th title="Outcome verdict at Day+5: ✅ positive · ❌ negative · ➖ neutral · ⏳ awaiting snapshot">Outcome</th>
-                <th title="AI critic verdict from the brief: pass (confident pick) · caution (proceed with care) · flag (risk concern). Hover for the critic's rationale.">Critic</th>
+                <th title="Closing price on the 1st trading day after the brief date">Day 1</th>
+                <th title="Closing price on the 2nd trading day after the brief date">Day 2</th>
+                <th title="Closing price on the 3rd trading day after the brief date">Day 3</th>
+                <th title="Closing price on the 4th trading day after the brief date">Day 4</th>
+                <th title="Closing price on the 5th trading day after the brief date">Day 5</th>
+                <th title="Return % from brief price to the most recent available day. Green = favourable for the strategy.">Return %</th>
+                <th title="Outcome based on the most recent available day: ✅ positive · ❌ negative · ➖ neutral">Outcome</th>
+                <th title="AI critic verdict from the brief: pass · caution · flag. Hover for rationale.">Critic</th>
               </tr>
             </thead>
             <tbody>
               {filtered.map(p => {
-                const inZone =
-                  p.entryZoneLow !== null && p.entryZoneHigh !== null && p.briefPrice !== null
-                    ? p.briefPrice >= p.entryZoneLow && p.briefPrice <= p.entryZoneHigh
-                    : null;
-
                 const scoreColor = p.briefScore >= 70 ? '#3fb950' : p.briefScore >= 50 ? '#e3a008' : '#f85149';
 
                 const outcomeEl =
-                  p.day5Verdict === 'positive' ? <span title="Profitable at Day+5">✅</span> :
-                  p.day5Verdict === 'negative' ? <span title="Loss at Day+5">❌</span> :
-                  p.day5Verdict === 'neutral'  ? <span title="Roughly flat at Day+5" style={{ color: '#8b949e' }}>➖</span> :
-                  <span title="Day+5 snapshot not yet available" style={{ color: '#8b949e' }}>⏳</span>;
+                  p.latestVerdict === 'positive' ? <span title="Positive — moved in the right direction">✅</span> :
+                  p.latestVerdict === 'negative' ? <span title="Negative — moved against the trade">❌</span> :
+                  p.latestVerdict === 'neutral'  ? <span title="Neutral — roughly flat" style={{ color: '#8b949e' }}>➖</span> :
+                  <span title="No price data yet — populates after market close" style={{ color: '#8b949e' }}>⏳</span>;
 
                 const criticEl = p.criticVerdict ? (
                   <span
@@ -974,27 +969,10 @@ function BriefTrendTab() {
                   </span>
                 ) : <span style={{ color: '#8b949e' }}>—</span>;
 
-                const entryZoneEl = p.entryZoneLow !== null && p.entryZoneHigh !== null
-                  ? <span title="Entry zone computed from buy analysis snapshot nearest to brief date">
-                      {fmtPrice(p.entryZoneLow)} – {fmtPrice(p.entryZoneHigh)}
-                    </span>
-                  : <span style={{ color: '#8b949e' }}>—</span>;
-
-                const inZoneEl =
-                  inZone === true  ? <span style={{ color: '#3fb950' }} title="Brief price was inside the entry zone">✓</span> :
-                  inZone === false ? <span style={{ color: '#e3a008' }} title="Brief price was outside the entry zone">✗</span> :
-                  <span style={{ color: '#8b949e' }}>—</span>;
-
-                const day5El = p.day5Price !== null
-                  ? <span title={p.day5DaysActual !== null ? `Snapshot at Day+${p.day5DaysActual}` : undefined}>
-                      {fmtPrice(p.day5Price)}
-                      {p.day5DaysActual !== null && (
-                        <span style={{ color: '#8b949e', fontSize: 11, marginLeft: 4 }}>
-                          (D+{p.day5DaysActual})
-                        </span>
-                      )}
-                    </span>
-                  : <span style={{ color: '#8b949e' }}>⏳</span>;
+                const dayCell = (price: number | null) =>
+                  price !== null
+                    ? <span style={{ fontSize: 12 }}>{fmtPrice(price)}</span>
+                    : DAY_PENDING;
 
                 return (
                   <tr key={`${p.strategy}:${p.ticker}`}>
@@ -1017,15 +995,17 @@ function BriefTrendTab() {
                       </span>
                     </td>
                     <td style={{ color: scoreColor, fontWeight: 600 }}>{p.briefScore.toFixed(0)}</td>
-                    <td>{fmtPrice(p.briefPrice)}</td>
-                    <td>{entryZoneEl}</td>
-                    <td style={{ textAlign: 'center' }}>{inZoneEl}</td>
-                    <td>{day5El}</td>
+                    <td style={{ fontWeight: 600 }}>{fmtPrice(p.briefPrice)}</td>
+                    <td>{dayCell(p.day1Price)}</td>
+                    <td>{dayCell(p.day2Price)}</td>
+                    <td>{dayCell(p.day3Price)}</td>
+                    <td>{dayCell(p.day4Price)}</td>
+                    <td>{dayCell(p.day5Price)}</td>
                     <td style={{
-                      color: p.day5ReturnPct !== null ? stockReturnColor(p.day5ReturnPct, p.strategy) : 'inherit',
-                      fontWeight: p.day5ReturnPct !== null ? 600 : 400,
+                      color: p.returnPct !== null ? stockReturnColor(p.returnPct, p.strategy) : 'inherit',
+                      fontWeight: p.returnPct !== null ? 600 : 400,
                     }}>
-                      {fmtPct(p.day5ReturnPct)}
+                      {fmtPct(p.returnPct)}
                     </td>
                     <td style={{ textAlign: 'center' }}>{outcomeEl}</td>
                     <td>{criticEl}</td>

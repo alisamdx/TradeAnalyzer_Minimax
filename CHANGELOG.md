@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.32.51] — 2026-06-09
+
+### Changed
+- **Retrospect › Brief Trend: 5-day trading-day price columns** — replaces the single Day+5 Price column with five individual columns (Day 1 – Day 5) showing the closing price on each of the first 5 trading days after the brief date. Weekends and market holidays are skipped naturally because data comes directly from `historical_prices` (which only contains market-open days). Each cell shows the price when available or ⏳ while that day is still in the future. Return % always reflects brief price → most recent available day; Outcome updates progressively as each day populates. Data caps at Day 5 — no tracking beyond 5 business days.
+- **Retrospect › Brief Trend: drop Entry Zone / In Zone columns** — removed the buy-strategy entry zone and in-zone check columns to reduce clutter.
+- **Service**: `getBriefPickDrilldown` now queries `historical_prices` directly via ROW_NUMBER() partition instead of `paper_trade_snapshots`; entry-zone lookup removed. `BriefPickDetail` type updated accordingly (`day1-5Price`, `returnPct`, `latestVerdict` replacing old day5 fields).
+
 ## [0.32.50] — 2026-06-09
 
 ### Added

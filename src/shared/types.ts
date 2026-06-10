@@ -1599,11 +1599,12 @@ export interface DailyBriefEntry {
   runMeta: object | null;
 }
 
-// ─── Brief Trend: per-pick drilldown (v0.32.50) ──────────────────────────────
+// ─── Brief Trend: per-pick drilldown ─────────────────────────────────────────
 
-/** One row in the Brief Trend drilldown table — combines paper trade entry,
- *  Day+5 snapshot outcome, brief-day entry zone (buy mode only), and the
- *  AI critic verdict from the brief's picks JSON. */
+/** One row in the Brief Trend drilldown table.
+ *  Day 1–5 are the closing prices on the 1st–5th trading day after the brief date.
+ *  historical_prices only contains market-open days, so ROW_NUMBER() naturally
+ *  skips weekends and holidays. Null = that trading day has not yet passed. */
 export interface BriefPickDetail {
   ticker: string;
   strategy: ScoringStrategy;
@@ -1611,15 +1612,15 @@ export interface BriefPickDetail {
   briefRank: number;
   /** Stock price on brief day (= paper_trades.entry_price). */
   briefPrice: number | null;
-  /** Entry zone from nearest buy-mode analysis_snapshot at or before brief date. Null for non-buy strategies. */
-  entryZoneLow: number | null;
-  entryZoneHigh: number | null;
-  /** Price at Day+5 snapshot (first snapshot with days_held ≥ 5). */
+  day1Price: number | null;
+  day2Price: number | null;
+  day3Price: number | null;
+  day4Price: number | null;
   day5Price: number | null;
-  day5ReturnPct: number | null;
-  day5Verdict: 'positive' | 'negative' | 'neutral' | null;
-  /** Actual days_held of the snapshot used (≥5, typically 5-7). */
-  day5DaysActual: number | null;
+  /** Return % from brief price to the most recent available day price. */
+  returnPct: number | null;
+  /** Verdict based on the latest available day. Null until at least Day 1 is available. */
+  latestVerdict: 'positive' | 'negative' | 'neutral' | null;
   criticVerdict: 'pass' | 'caution' | 'flag' | null;
   criticRationale: string | null;
   aiRationale: string | null;

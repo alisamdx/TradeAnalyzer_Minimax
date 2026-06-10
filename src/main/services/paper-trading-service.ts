@@ -1076,51 +1076,28 @@ Respond with JSON only:
   }
 
   // ── Brief Trend: per-pick drilldown for one brief date ───────────────────────
-  // Joins paper_trades with Day+5 snapshots, then enriches each pick with
-  // the critic verdict/rationale from daily_briefs.picks JSON, and the
-  // entry zone from analysis_snapshots (buy strategy only).
+  // Returns the 5 trading-day closing prices after the brief date for each pick,
+  // sourced directly from historical_prices (market-open days only, so ROW_NUMBER
+  // naturally skips weekends and holidays). No paper_trade_snapshots dependency.
   getBriefPickDrilldown(briefDate: string): BriefPickDetail[] {
     type TradeRow = {
-      id: number;
       ticker: string;
       brief_strategy: string;
       brief_score: number;
       brief_rank: number;
       entry_price: number | null;
-      day5_price: number | null;
-      day5_return_pct: number | null;
-      day5_verdict: string | null;
-      day5_days_actual: number | null;
     };
 
     const trades = this.db.prepare(`
-      WITH day5 AS (
-        SELECT paper_trade_id, MIN(days_held) AS min_held
-        FROM paper_trade_snapshots
-        WHERE days_held >= 5
-        GROUP BY paper_trade_id
-      ),
-      day5_snap AS (
-        SELECT s.paper_trade_id, s.price AS day5_price,
-               s.return_pct, s.verdict, s.days_held
-        FROM paper_trade_snapshots s
-        JOIN day5 d ON s.paper_trade_id = d.paper_trade_id
-                   AND s.days_held = d.min_held
-      )
-      SELECT pt.id, pt.ticker, pt.brief_strategy, pt.brief_score, pt.brief_rank,
-             pt.entry_price,
-             s.day5_price, s.return_pct AS day5_return_pct,
-             s.verdict AS day5_verdict, s.days_held AS day5_days_actual
-      FROM paper_trades pt
-      LEFT JOIN day5_snap s ON s.paper_trade_id = pt.id
-      WHERE pt.brief_date = ?
-      ORDER BY pt.brief_strategy, pt.brief_rank
+      SELECT ticker, brief_strategy, brief_score, brief_rank, entry_price
+      FROM paper_trades
+      WHERE brief_date = ?
+      ORDER BY brief_strategy, brief_rank
     `).all(briefDate) as TradeRow[];
 
     if (trades.length === 0) return [];
 
     // Load brief picks JSON → critic verdict + AI rationale
-    // Use the most-recent brief row per strategy for this calendar date
     type BriefRow = { strategy: string; picks: string };
     const briefRows = this.db.prepare(`
       WITH ranked AS (
@@ -1151,29 +1128,52 @@ Respond with JSON only:
       } catch { /* skip malformed rows */ }
     }
 
-    // Entry zone — buy strategy only, from nearest analysis_snapshot ≤ brief date
-    // payload_json stores { jobRunId, results: AnalysisResult[] }
-    const entryZoneStmt = this.db.prepare(`
-      SELECT json_extract(je.value, '$.entryZoneLow')  AS entry_zone_low,
-             json_extract(je.value, '$.entryZoneHigh') AS entry_zone_high
-      FROM analysis_snapshots,
-           json_each(json_extract(analysis_snapshots.payload_json, '$.results')) AS je
-      WHERE analysis_snapshots.mode = 'buy'
-        AND analysis_snapshots.run_at <= ?
-        AND json_extract(je.value, '$.ticker') = ?
-      ORDER BY analysis_snapshots.run_at DESC
-      LIMIT 1
-    `);
+    // Fetch the 5 trading-day closing prices per ticker after the brief date.
+    // historical_prices only contains market-open days, so ROW_NUMBER() over
+    // date ASC gives: day_num=1 = first trading day, day_num=2 = second, etc.
+    const tickers = [...new Set(trades.map(t => t.ticker))];
+    const placeholders = tickers.map(() => '?').join(',');
+
+    type PriceRow = { ticker: string; day_num: number; close: number };
+    const priceRows = this.db.prepare(`
+      WITH ranked AS (
+        SELECT ticker, close,
+               ROW_NUMBER() OVER (PARTITION BY ticker ORDER BY date ASC) AS day_num
+        FROM historical_prices
+        WHERE ticker IN (${placeholders}) AND date > ?
+      )
+      SELECT ticker, day_num, close FROM ranked WHERE day_num <= 5
+    `).all(...tickers, briefDate) as PriceRow[];
+
+    type DayPrices = { d1: number | null; d2: number | null; d3: number | null; d4: number | null; d5: number | null };
+    const priceMap = new Map<string, DayPrices>();
+    for (const ticker of tickers) priceMap.set(ticker, { d1: null, d2: null, d3: null, d4: null, d5: null });
+    for (const row of priceRows) {
+      const p = priceMap.get(row.ticker);
+      if (!p) continue;
+      if (row.day_num === 1)      p.d1 = row.close;
+      else if (row.day_num === 2) p.d2 = row.close;
+      else if (row.day_num === 3) p.d3 = row.close;
+      else if (row.day_num === 4) p.d4 = row.close;
+      else if (row.day_num === 5) p.d5 = row.close;
+    }
+
+    const settings = this.getSettings();
 
     return trades.map(t => {
-      const meta = pickMeta.get(`${t.brief_strategy}:${t.ticker}`);
+      const meta  = pickMeta.get(`${t.brief_strategy}:${t.ticker}`);
+      const days  = priceMap.get(t.ticker) ?? { d1: null, d2: null, d3: null, d4: null, d5: null };
+      const latest = days.d5 ?? days.d4 ?? days.d3 ?? days.d2 ?? days.d1 ?? null;
 
-      let entryZoneLow: number | null = null;
-      let entryZoneHigh: number | null = null;
-      if (t.brief_strategy === 'buy') {
-        type ZoneRow = { entry_zone_low: number | null; entry_zone_high: number | null };
-        const zr = entryZoneStmt.get(`${briefDate}T23:59:59`, t.ticker) as ZoneRow | undefined;
-        if (zr) { entryZoneLow = zr.entry_zone_low; entryZoneHigh = zr.entry_zone_high; }
+      let returnPct: number | null = null;
+      let latestVerdict: BriefPickDetail['latestVerdict'] = null;
+
+      if (latest !== null && t.entry_price !== null && t.entry_price > 0) {
+        returnPct = (latest - t.entry_price) / t.entry_price * 100;
+        const { verdict } = computeVerdict(
+          t.brief_strategy as ScoringStrategy, returnPct, null, settings,
+        );
+        latestVerdict = verdict;
       }
 
       return {
@@ -1182,12 +1182,13 @@ Respond with JSON only:
         briefScore:      t.brief_score,
         briefRank:       t.brief_rank,
         briefPrice:      t.entry_price,
-        entryZoneLow,
-        entryZoneHigh,
-        day5Price:       t.day5_price,
-        day5ReturnPct:   t.day5_return_pct,
-        day5Verdict:     (t.day5_verdict ?? null) as BriefPickDetail['day5Verdict'],
-        day5DaysActual:  t.day5_days_actual,
+        day1Price:       days.d1,
+        day2Price:       days.d2,
+        day3Price:       days.d3,
+        day4Price:       days.d4,
+        day5Price:       days.d5,
+        returnPct,
+        latestVerdict,
         criticVerdict:   ((meta?.criticVerdict) ?? null) as BriefPickDetail['criticVerdict'],
         criticRationale: meta?.criticRationale ?? null,
         aiRationale:     meta?.aiRationale     ?? null,
