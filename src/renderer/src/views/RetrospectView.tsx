@@ -4,6 +4,7 @@
 // see Requirements/paper-trading.md
 
 import { useState, useEffect, useCallback } from 'react';
+import BriefPriceChartModal from '../components/BriefPriceChartModal.js';
 import type {
   PaperTradeWithPnl,
   PaperTrade,
@@ -825,6 +826,7 @@ function BriefTrendTab() {
   const [picks, setPicks]           = useState<BriefPickDetail[]>([]);
   const [loading, setLoading]       = useState(false);
   const [stratFilter, setStratFilter] = useState<ScoringStrategy | 'all'>('all');
+  const [chartPick, setChartPick]   = useState<BriefPickDetail | null>(null);
 
   useEffect(() => {
     window.api.paper.briefDates().then(d => {
@@ -978,8 +980,9 @@ function BriefTrendTab() {
                   <tr key={`${p.strategy}:${p.ticker}`}>
                     <td>
                       <span
-                        style={{ fontFamily: 'monospace', fontWeight: 700, color: '#58a6ff', cursor: 'help' }}
-                        title={p.aiRationale ?? p.ticker}
+                        style={{ fontFamily: 'monospace', fontWeight: 700, color: '#58a6ff', cursor: 'pointer', textDecoration: 'underline', textDecorationStyle: 'dotted', textUnderlineOffset: 3 }}
+                        title={p.aiRationale ? `${p.aiRationale}\n\nClick to view 45-day chart` : 'Click to view 45-day chart'}
+                        onClick={() => setChartPick(p)}
                       >
                         {p.ticker}
                       </span>
@@ -1033,6 +1036,14 @@ function BriefTrendTab() {
             Run the Daily Brief job — picks are automatically tracked as paper trades.
           </div>
         </div>
+      )}
+
+      {chartPick && selectedDate && (
+        <BriefPriceChartModal
+          pick={chartPick}
+          briefDate={selectedDate}
+          onClose={() => setChartPick(null)}
+        />
       )}
     </div>
   );

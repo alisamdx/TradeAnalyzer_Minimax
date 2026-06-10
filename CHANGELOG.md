@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.54] — 2026-06-09
+
+### Added
+- **Retrospect › Brief Trend: click ticker to view 45-day chart** — clicking any ticker in the grid opens a candlestick popup showing price from the brief date through a 45-calendar-day window (the typical options expiry horizon). Overlays: dashed blue horizontal line at the brief price, `Brief` arrowUp marker on the brief date bar, `D5` arrowDown marker on the Day-5 bar (when available). Click outside the card or press Escape to close. No new IPC — reuses `historical.getPrices`. Data is partial for recent briefs (shows what's available in `historical_prices` through today).
+
 ## [0.32.53] — 2026-06-09
 
 ### Fixed
