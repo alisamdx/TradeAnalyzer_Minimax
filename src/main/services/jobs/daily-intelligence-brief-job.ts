@@ -7,7 +7,7 @@
 import type { Database } from 'better-sqlite3';
 import Anthropic from '@anthropic-ai/sdk';
 import type { BatchJobHandler, BatchJobResult } from '../batch-service.js';
-import type { BatchProgressEvent, BriefPick, ScoringStrategy } from '@shared/types.js';
+import type { BatchProgressEvent, BriefPick, CriticFlag, ScoringStrategy } from '@shared/types.js';
 import type { ScoredTicker } from '../scoring-service.js';
 import { ScoringService, STRATEGIES } from '../scoring-service.js';
 import type { OptionsProvider } from '../options-provider.js';
@@ -390,21 +390,38 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
     if (anthropicApiKey) {
       const marketContext = this.criticService.getMarketContext();
 
-      // Run rule checks + LLM critic in parallel across all picks
+      // Run rule checks + LLM critic in parallel across all picks.
+      // If the LLM call fails, fall back to rule-check-only verdict so criticVerdict
+      // is never left null (null causes the critic column to be invisible in Brief Trend).
       const criticTasks: Array<Promise<void>> = [];
       for (const [strategy, picks] of assembledPicks) {
         const config = strategyConfigs.get(strategy)!;
         for (const pick of picks) {
           criticTasks.push((async () => {
+            let flags: CriticFlag[] = [];
             try {
-              const flags = this.criticService.runRuleChecks(
+              flags = this.criticService.runRuleChecks(
                 pick, strategy, config, assembledPicks as Map<string, BriefPick[]>, marketContext,
               );
+            } catch (err) {
+              console.warn(`[critic rule-check] ${pick.ticker}/${strategy}:`, err instanceof Error ? err.message : String(err));
+              return;
+            }
+            try {
               pick.criticVerdict = await this.criticService.synthesizeVerdict(
                 pick, strategy, flags, anthropicApiKey, marketContext,
               );
             } catch (err) {
-              console.warn(`[critic] ${pick.ticker}/${strategy}:`, err instanceof Error ? err.message : String(err));
+              console.warn(`[critic llm] ${pick.ticker}/${strategy}:`, err instanceof Error ? err.message : String(err));
+              // LLM failed — persist rule-check verdict so the column is never blank
+              const hasWarning = flags.some(f => f.severity === 'warning');
+              pick.criticVerdict = {
+                verdict: hasWarning ? 'flag' : flags.length > 0 ? 'caution' : 'pass',
+                confidence: 'low',
+                flags,
+                rationale: null,
+                generatedAt: new Date().toISOString(),
+              };
             }
           })());
         }

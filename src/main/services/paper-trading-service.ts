@@ -1097,16 +1097,18 @@ Respond with JSON only:
 
     if (trades.length === 0) return [];
 
-    // Load brief picks JSON → critic verdict + AI rationale
+    // Load brief picks JSON → critic verdict + AI rationale.
+    // Join via paper_trades.brief_id (direct FK) rather than DATE(generated_at)
+    // to avoid any UTC-vs-ET date mismatch on stored timestamps.
     type BriefRow = { strategy: string; picks: string };
     const briefRows = this.db.prepare(`
-      WITH ranked AS (
-        SELECT strategy, picks,
-               ROW_NUMBER() OVER (PARTITION BY strategy ORDER BY generated_at DESC) AS rn
-        FROM daily_briefs
-        WHERE DATE(generated_at) = ?
+      SELECT db.strategy, db.picks
+      FROM daily_briefs db
+      WHERE db.id IN (
+        SELECT MAX(brief_id) FROM paper_trades
+        WHERE brief_date = ? AND brief_id IS NOT NULL
+        GROUP BY brief_strategy
       )
-      SELECT strategy, picks FROM ranked WHERE rn = 1
     `).all(briefDate) as BriefRow[];
 
     type PickMeta = { criticVerdict: string | null; criticRationale: string | null; aiRationale: string | null };

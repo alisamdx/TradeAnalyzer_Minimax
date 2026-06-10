@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.53] — 2026-06-09
+
+### Fixed
+- **Brief Trend: critic column blank for all brief dates except today** — two bugs combined: (1) when the Anthropic LLM call inside `synthesizeVerdict` threw (rate-limit, transient API error, expired E*Trade token), the catch block only logged a warning and left `criticVerdict = null` with no fallback. Now falls back to a rule-check-only verdict (`confidence: 'low'`) so the column is never blank. (2) `getBriefPickDrilldown` looked up critic data via `WHERE DATE(generated_at) = ?` (UTC date) against `paper_trades.brief_date` (ET date), which is fragile. Replaced with a `brief_id` join (`MAX(brief_id) … GROUP BY brief_strategy`) that uses the direct FK already stored in `paper_trades`.
+
 ## [0.32.52] — 2026-06-09
 
 ### Fixed
