@@ -388,7 +388,8 @@ function PickCard({
         )}
         <span
           className="pick-score-badge"
-          style={{ background: scoreBg(pick.compositeScore), color: scoreColor(pick.compositeScore) }}
+          style={{ background: scoreBg(pick.compositeScore), color: scoreColor(pick.compositeScore), cursor: 'help' }}
+          title={`Composite score: ${pick.compositeScore.toFixed(1)}\nScores are strategy-specific — not comparable across strategies (each uses different signals and weights).`}
         >
           {pick.compositeScore.toFixed(1)}
         </span>

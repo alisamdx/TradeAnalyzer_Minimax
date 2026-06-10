@@ -25,6 +25,36 @@ const SECTOR_ETF: Record<string, string> = {
   'Communication Services': 'XLC',
 };
 
+// Polygon returns lowercase SIC descriptions (e.g. "electronic computers") rather than
+// GICS sector names. This function maps those descriptions to SPDR sector ETFs via
+// keyword matching so sectorMomentum works without an exhaustive exact-string table.
+function sectorStringToEtf(raw: string): string | undefined {
+  const s = raw.toLowerCase();
+  // XLK — Technology
+  if (/semiconductor|electronic computer|prepackaged software|computer integrated|computer storage|computer communication|computer programming|data processing|computer processing|telephone apparatus|communications equipment|electronic component|printed circuit|optical instrument|industrial instrument|laboratory.*instrument|analytical instrument/.test(s)) return 'XLK';
+  // XLC — Communication Services
+  if (/telephone communication|cable.*television|pay television|radio broadcasting|television broadcasting|motion picture|newspaper.*publish|video.*rental/.test(s)) return 'XLC';
+  // XLF — Financials
+  if (/commercial bank|savings institution|fire.*insurance|life insurance|accident.*insurance|investment advice|security broker|personal credit|mortgage banker|insurance agent/.test(s)) return 'XLF';
+  // XLV — Health Care
+  if (/pharmaceutical|biological product|diagnostic substance|surgical.*instrument|medical instrument|electromedical|hospital|health service|home health/.test(s)) return 'XLV';
+  // XLE — Energy
+  if (/crude petroleum|natural gas|oil.*gas field|petroleum refin|drilling.*oil/.test(s)) return 'XLE';
+  // XLI — Industrials (electrical equipment before XLK catch to handle "no computer equip" variants)
+  if (/air transportation|air courier|railroad|trucking.*courier|aerospace|aircraft|engineering service|industrial.*machiner|ship building|electrical equipment/.test(s)) return 'XLI';
+  // XLY — Consumer Discretionary
+  if (/auto dealer|retail-eating|eating.*drinking|apparel.*accessor|home furniture|hotels.*motel|motor vehicle|automotive part/.test(s)) return 'XLY';
+  // XLP — Consumer Staples
+  if (/food.*kindred|beverages|retail-variety|food store|drug store|soap.*detergent|tobacco product/.test(s)) return 'XLP';
+  // XLB — Materials
+  if (/steel work|chemicals.*allied|plastics material|metal mining|paper.*allied/.test(s)) return 'XLB';
+  // XLRE — Real Estate
+  if (/real estate investment trust|real estate dealer|land subdivider/.test(s)) return 'XLRE';
+  // XLU — Utilities
+  if (/electric service|electric.*combined|gas transmission|water supply|combination electric.*gas/.test(s)) return 'XLU';
+  return undefined;
+}
+
 // ─── Public types ─────────────────────────────────────────────────────────────
 
 export type ScoringStrategy = 'wheel' | 'bullish' | 'bearish' | 'income' | 'buy';
@@ -870,7 +900,10 @@ export class ScoringService {
       d.revenueGrowth = p.revenueGrowth;
       d.fcfToNetIncome = p.fcfToNetIncome ?? null;
       d.roic = p.roic ?? null;
-      d.netDebtToEbitda = p.netDebtToEbitda ?? null;
+      // netDebtToEbitda has ~9% coverage from Polygon. Fall back to debtToEquity * 2.5
+      // as a rough proxy (D/E 1.0 ≈ ND/EBITDA 2.5 for non-financial companies).
+      // see docs/formulas.md#leverage-quality
+      d.netDebtToEbitda = p.netDebtToEbitda ?? (p.debtToEquity != null ? +(p.debtToEquity * 2.5).toFixed(2) : null);
       d.revenueGrowth5Y = p.revenueGrowth5Y ?? null;
       d.epsGrowth5Y = p.epsGrowth5Y ?? null;
       d.stockGrade = p.stockGrade ?? null;
@@ -1119,7 +1152,8 @@ export class ScoringService {
     for (const row of cacheRows) {
       const d = result.get(row.ticker);
       if (!d || !row.sector) continue;
-      const etf = SECTOR_ETF[row.sector];
+      // Try exact GICS name first (backward compat), then keyword-match Polygon SIC description
+      const etf = SECTOR_ETF[row.sector] ?? sectorStringToEtf(row.sector);
       if (!etf) continue;
       const etfReturn = etfReturns.get(etf);
       if (etfReturn !== undefined) {

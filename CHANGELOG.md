@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.32.56] — 2026-06-09
+
+### Fixed
+- **`sectorMomentum` signal: ~50% null rate fixed** — `SECTOR_ETF` used GICS sector names ("Technology") but Polygon stores lowercase SIC descriptions ("electronic computers", "semiconductors & related devices"). Added `sectorStringToEtf()` keyword-matching fallback that maps Polygon SIC descriptions to SPDR sector ETFs. Coverage goes from ~0% (only GICS exact matches) to ~58% of tickers in `fundamentals_cache`. Affects `sectorMomentum` (bullish/buy) and `sectorWeakness` (bearish) signals.
+- **`leverageQuality` signal: always-null fixed for wheel/bearish** — `netDebtToEbitda` has only ~9% coverage in Polygon fundamentals. Falls back to `debtToEquity * 2.5` as an approximation (D/E 1.0 ≈ ND/EBITDA 2.5) when ND/EBITDA is null. Raises signal coverage from 9% to ~30% for wheel and bearish strategies.
+
+### Added
+- **Daily brief funnel logging** — `[brief funnel]` console log per strategy at the liquidity gate showing pre-gate count, post-gate count, and names of gated tickers. Diagnostic only — no behavior change. Helps distinguish liquidity-gate scarcity from genuine candidate scarcity.
+- **Score badge tooltip in Daily Brief** — hovering the composite score badge shows "Scores are strategy-specific — not comparable across strategies" to prevent cross-strategy score misinterpretation.
+
 ## [0.32.55] — 2026-06-09
 
 ### Fixed

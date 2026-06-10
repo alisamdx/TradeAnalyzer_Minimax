@@ -367,6 +367,14 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
       );
       const gated = top.length - liquidFiltered.length;
       if (gated > 0) totalGated += gated;
+      // Funnel log: helps diagnose whether income/other strategies are scarce due to
+      // the liquidity gate or genuine absence of qualifying candidates.
+      console.log(
+        `[brief funnel] ${strategy}: ${top.length} pre-gate → ${liquidFiltered.length} final` +
+        (gated > 0
+          ? ` (gated: ${top.filter(s => !liquidFiltered.includes(s)).map(s => s.ticker).join(', ')})`
+          : '')
+      );
 
       const picks: BriefPick[] = liquidFiltered.map((scored, idx) => ({
         ticker: scored.ticker,
