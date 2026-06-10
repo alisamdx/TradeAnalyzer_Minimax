@@ -15,6 +15,9 @@ const STRATEGY_RELEVANT_SLUGS: Record<string, string[]> = {
   buy:     ['long-call-vertical', 'call-zebra', 'poor-mans-covered-call', 'call-calendar'],
 };
 
+// Grade ordering for structure quality checks (A=best, F=worst)
+const GRADE_RANK: Record<string, number> = { A: 5, B: 4, C: 3, D: 2, F: 1 };
+
 export interface MarketContext {
   vix: number | null;
   spyAbove200ma: boolean | null;
@@ -69,6 +72,7 @@ export class CriticService {
     f(this.checkMarketRisk(strategy, market));
     f(this.checkAnomalousMomentum(pick));
     f(this.checkEarningsInWindow(pick, strategy));
+    f(this.checkStructureGrade(pick, strategy));
 
     return flags;
   }
@@ -97,8 +101,10 @@ export class CriticService {
         .slice(0, 4)
         .map(([key, v]) => ({ key, raw: v.raw, normalized: v.normalized, weight: v.weight }));
 
-      // Extract best relevant structure from strategy lab result for context
-      type SScore = { slug: string; grade: string; liquidityScore: number; setup: { expiration: string; netCredit: number | null; legs: Array<{ strike: number; action: string }> } | null };
+      // Extract best relevant structure from strategy lab result for context.
+      // Must exclude structures with unavailableReason — they have non-null setup objects
+      // but no actionable legs/strikes, so the LLM would see misleading grade-F ghost data.
+      type SScore = { slug: string; grade: string; liquidityScore: number; setup: { expiration: string; netCredit: number | null; legs: Array<{ strike: number; action: string }>; unavailableReason?: string | null } | null };
       type LabRes = { scores?: SScore[] };
       const labResult = pick.strategyLabResult as LabRes | null;
       const slugs = STRATEGY_RELEVANT_SLUGS[strategy] ?? [];
@@ -106,7 +112,7 @@ export class CriticService {
       let structureExpiry: string | null = null;
 
       if (labResult?.scores) {
-        const best = labResult.scores.find(s => slugs.includes(s.slug) && s.setup != null);
+        const best = labResult.scores.find(s => slugs.includes(s.slug) && s.setup != null && !s.setup.unavailableReason);
         if (best?.setup) {
           const shortLeg = best.setup.legs.find(l => l.action === 'sell');
           const credit = best.setup.netCredit;
@@ -184,16 +190,20 @@ export class CriticService {
       };
 
       const systemPrompt = `You are a risk-focused options trading analyst reviewing daily trade recommendations.
-Your job is to find problems, not validate decisions. Be skeptical and specific.
+Be skeptical and specific — but calibrate your verdict to the actual risk level.
+
+VERDICT CALIBRATION (apply precisely):
+- 'pass': No material concern — the setup is sound for the strategy. Use this when you cannot identify a specific, non-generic issue a prudent trader should address before acting.
+- 'caution': A real but manageable risk exists, or an important condition to verify before acting.
+- 'flag': A significant risk that may invalidate the thesis or cause material loss.
+Do NOT default to 'caution' — only raise an issue if it is specific and actionable. Generic market risk is not a caution.
 
 MARKET DATA: All values in \`marketData\` are live as of \`date\` from real-time feeds — treat them as ground truth. Do not use training knowledge to contradict provided prices; stocks change dramatically over years of training lag. \`price52wReturnPct\` shows the 1-year return so you can calibrate price level without recalling historical absolutes.
-STRUCTURE: \`dte\` is pre-computed calendar days to expiry. \`strikeOtmPct\` is how far the short strike is from current price (positive = OTM). \`breakevenDistancePct\` (income only) is how far price can move before the structure loses.
+STRUCTURE: \`dte\` is pre-computed calendar days to expiry. \`strikeOtmPct\` is how far the short strike is from current price (positive = OTM). \`breakevenDistancePct\` (income only) is how far price can move before the structure loses — compare this to expected 1-sigma move (annualized vol / sqrt(365/dte)) to assess real risk.
 MARKET CONTEXT: \`vixLevel\` and \`spyTrend\` describe today's macro environment.
 EARNINGS: \`earningsInWindow\` is non-null if there is a known earnings event before expiry — this is the single biggest event risk for any options position.
 
-Write exactly 2 sentences:
-1. Your verdict on the most significant risk or concern you see (or confirm it looks clean if genuinely clear).
-2. The specific condition the user should check or monitor before acting on this pick.
+Write 1–2 sentences. If no material concern exists, one sentence confirming the pick looks clean is sufficient — do not manufacture a concern to fill a second sentence. If a concern exists, describe it specifically (sentence 1), then what to verify (sentence 2).
 
 If rule-based flags are present, address the most severe one. Do not repeat the advocate's rationale.
 Be direct. Do not hedge with "potentially" or "may" unless genuinely uncertain.
@@ -376,12 +386,12 @@ Use verdict: pass, caution, or flag. Use confidence: high, medium, or low.`;
   }
 
   private getStructureExpiry(pick: BriefPick, strategy: string): string | null {
-    type SScore = { slug: string; setup: { expiration: string } | null };
+    type SScore = { slug: string; setup: { expiration: string; unavailableReason?: string | null } | null };
     type LabRes = { scores?: SScore[] };
     const labResult = pick.strategyLabResult as LabRes | null;
     const slugs = STRATEGY_RELEVANT_SLUGS[strategy] ?? [];
     if (!labResult?.scores) return null;
-    const best = labResult.scores.find(s => slugs.includes(s.slug) && s.setup != null);
+    const best = labResult.scores.find(s => slugs.includes(s.slug) && s.setup != null && !s.setup.unavailableReason);
     return best?.setup?.expiration ?? null;
   }
 
@@ -430,6 +440,31 @@ Use verdict: pass, caution, or flag. Use confidence: high, medium, or low.`;
     } catch {
       return null;
     }
+  }
+
+  private checkStructureGrade(pick: BriefPick, strategy: string): CriticFlag | null {
+    if (!pick.strategyLabResult) return null;
+
+    type SScore = { slug: string; grade: string; setup: { unavailableReason?: string | null } | null };
+    type LabRes = { scores?: SScore[] };
+    const result = pick.strategyLabResult as LabRes;
+    const slugs = STRATEGY_RELEVANT_SLUGS[strategy] ?? [];
+
+    let bestGrade: string | null = null;
+    for (const s of result.scores ?? []) {
+      if (slugs.includes(s.slug) && s.setup && !s.setup.unavailableReason) {
+        const rank = GRADE_RANK[s.grade] ?? 0;
+        if (bestGrade === null || rank > (GRADE_RANK[bestGrade] ?? 0)) bestGrade = s.grade;
+      }
+    }
+
+    if (bestGrade === 'F') {
+      return {
+        key: 'poor_structure_grade', severity: 'warning',
+        description: `Best available structure for ${strategy} strategy is grade F — risk/reward is unfavorable at current price and IV levels. Consider waiting for better conditions or choosing a different ticker.`,
+      };
+    }
+    return null;
   }
 
   private checkMarketRisk(strategy: string, market: MarketContext): CriticFlag | null {

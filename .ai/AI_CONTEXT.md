@@ -2,7 +2,7 @@
 
 > **Read this first.** Self-contained snapshot of *what the app is today* so a fresh AI session is productive without re-reading the whole codebase. This file describes **current state** — not history. Release history lives in `CHANGELOG.md` / `changelogs/`. Operating rules live in `/CLAUDE.md`. Full spec lives in `Requirements/`.
 >
-> Last verified against code: 2026-06-09 (v0.32.60). When you make a material change, update the relevant section here in the same commit.
+> Last verified against code: 2026-06-09 (v0.32.61). When you make a material change, update the relevant section here in the same commit.
 
 ---
 
@@ -197,6 +197,9 @@ Authoritative DDL is in `migrations/`. Tables are created lazily (`CREATE TABLE 
 - **Brief liquidity gate (`hasAdequateLiquidity`)**: returns `true` only when `labResult === null` (validation failed, can't gate). If the lab ran but all relevant structures have `unavailableReason`, it returns `false` (no valid structure = gated out). Previously this case returned `true`, letting F-grade picks like VRT-PMCC through.
 - **Income earnings penalty (Stage 3)**: `loadIncomeEarningsPenalty()` applies −20 composite points for income candidates with earnings in the next 45 days. Re-sorts income ranked list after penalty so earnings-risk picks fall below clean alternatives.
 - **Critic LLM rate-limit**: 25 concurrent Anthropic calls per brief hit rate limits (~50% failure). Now runs one strategy batch (≤5 picks) at a time via `for…of assembledPicks { await Promise.allSettled(picks.map(…)) }`. `low_liquidity` severity is `info` (not `warning`) so borderline picks produce `caution`, not `flag`.
+- **Critic context must exclude `unavailableReason` structures**: `synthesizeVerdict` and `getStructureExpiry` use `s.setup != null && !s.setup.unavailableReason` — a structure with `unavailableReason` has a non-null setup object, so the naive `setup != null` check would select ghost data (no legs, no strike) instead of the actual valid structure.
+- **`checkStructureGrade` rule** fires `warning` when all valid (non-unavailable) strategy-relevant structures are grade F. Uses `GRADE_RANK = { A:5, B:4, C:3, D:2, F:1 }`. Catches picks like VRT where the options chain exists but no structure is viable.
+- **Critic prompt calibration**: `pass` is explicitly defined ("no material concern — use this when you cannot identify a specific, non-generic issue"). Output is 1–2 sentences (single sentence allowed for clean picks). Without this, the adversarial framing caused the LLM to give `caution` even for picks with 0 rule flags.
 - **`technical_signals` now includes `adx` and `support_level`** (migration 035) — populated by `DailyTechnicalSignalsJob`. `loadTechnicalSignals()` uses these to fill `trendStrengthAdx` (income `trendNeutral` signal) and `entryZoneLow` (buy `breakoutScore`) as batch-job fallbacks.
 - **Scoring engine v3 (baseline_v3)**: `trendAlignment` signal added to Buy (wt 10) and Bullish (wt 7); `notDowntrend` added to Wheel (wt 8). Derived from `trendLabel` (analysis_snapshots) or SMA50/200 stack (technical_signals). `seedBaselines()` auto-upgrades v1/v2 → v3 on startup. Bearish and Income unchanged.
 - **Daily Brief auto-creates `DailyBrief-MMDD` watchlist** — at end of each brief run, all final picks (all 5 strategies, post-liquidity-gate) are upserted into a watchlist named e.g. `DailyBrief-0608`. Existing items are cleared on refresh. Notes field shows strategies per ticker (`wheel · buy`). Uses new `WatchlistService.findByName()` / `clearItems()` methods.

@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.32.61] — 2026-06-09
+
+### Fixed
+- **Critic context mismatch: structures with `unavailableReason` excluded from LLM context** — `synthesizeVerdict` was selecting the first structure where `setup != null`, but an unavailable structure (e.g. PMCC requiring two expirations) has a non-null `setup` object with `unavailableReason` set. The LLM was seeing grade-F ghost data (no legs, no credit, no strike) instead of the actual gate-passing structure. Fixed in both `synthesizeVerdict` and `getStructureExpiry` to require `!s.setup.unavailableReason`.
+- **Critic prompt: LLM never gave `pass` verdict** — system prompt framing ("your job is to find problems") and the mandatory second sentence ("what should the user check") structurally biased the LLM to give `caution` even for clean picks. Updated prompt with explicit verdict calibration definitions, allows 1–2 sentences, and instructs "do not default to caution."
+
+### Added
+- **`checkStructureGrade` critic rule** — fires `warning` when every valid structure for the strategy is grade F. Catches picks like VRT (all buy structures grade F) via a deterministic rule rather than relying solely on LLM analysis. Severity `warning` → forces `flag` verdict and surfaces as an explicit rule flag in the UI.
+
 ## [0.32.60] — 2026-06-09
 
 ### Fixed
