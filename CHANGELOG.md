@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.32.60] — 2026-06-09
+
+### Fixed
+- **`breakevenDistancePct` formula was 100× too high** — `netCredit` is stored per-contract (×100 shares) but the formula was also multiplying by 100, causing every income pick to show e.g. 760% instead of 7.6%. Fixed by removing the `* 100` (dividing per-contract credit by per-share price already yields a percentage). Added formula documentation to `docs/formulas.md#breakeven-distance`.
+- **`low_liquidity` critic rule inflating flag count** — severity was `'warning'` for picks at liqScore=5/15 (the gate minimum), which forced verdict to `flag` even when the LLM was unavailable. Downgraded to `'info'` so borderline-liquid picks that passed the gate become `caution` rather than false positives.
+- **Grade-F structures passing the liquidity gate** — picks where the Strategy Lab ran but all relevant structures had `unavailableReason` set (e.g. PMCC requiring two expirations) were passing `hasAdequateLiquidity()` via the `best === null → true` fallback. Fixed: now only passes when `labResult` is `null` (validation failed entirely); a lab result with no valid structure returns `false`.
+
+### Changed
+- **Critic LLM batching: 25 concurrent → 5×5 serial** — AI critic calls were all fired in parallel across all 25 picks, causing ~50% LLM failure (rate limiting). Now runs one strategy's picks (≤5) in parallel, then the next strategy. Drastically reduces rate-limit failures while still completing all 5 strategies in sequence.
+- **Income scoring: −20 penalty for earnings within 45 days** — income candidates (strangles, condors) with an earnings event in the next 45 days are penalised −20 composite points before the liquidity gate. Replaces the current pattern of scoring them highly and then flagging them via the critic; keeps them out of the top 5 unless no clean alternatives exist. Configurable via `loadIncomeEarningsPenalty()` in the brief job.
+
 ## [0.32.59] — 2026-06-09
 
 ### Fixed

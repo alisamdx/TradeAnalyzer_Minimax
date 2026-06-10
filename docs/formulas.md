@@ -101,6 +101,20 @@ Implementation: `computeRatios()` → `currentRatio` field.
 
 ## Strategy math (Phase 3)
 
+### breakeven-distance
+
+For income structures (strangles, condors, iron-flies), how far the underlying can move before the net credit is consumed:
+
+```
+breakevenDistancePct (%) = |netCredit| / underlyingPrice
+```
+
+**Key invariant:** `netCredit` from the Strategy Lab is stored **per-contract** (= per-share value × 100). `underlyingPrice` is **per-share**. Therefore `netCredit / price` already yields a percentage directly — do **not** multiply by 100.
+
+Example: XOM credit $1,132.50/contract ÷ $148.91/share = 7.6% breakeven distance.
+
+Used in `CriticService.synthesizeVerdict()` → `structure.breakevenDistancePct` field passed to the critic LLM prompt.
+
 ### annualized-options-return
 
 ```

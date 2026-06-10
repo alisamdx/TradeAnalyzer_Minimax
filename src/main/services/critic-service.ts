@@ -125,9 +125,11 @@ export class CriticService {
             ? +((strike - price) / price * 100).toFixed(1)
             : null;
 
-          // Breakeven distance %: for income, how far price can move before structure loses
+          // Breakeven distance %: for income, how far price can move before structure loses.
+          // netCredit is per-contract (×100 shares); dividing by per-share price gives % directly.
+          // see docs/formulas.md#breakeven-distance
           const breakevenDistancePct = (strategy === 'income' && credit !== null && price !== null && price > 0)
-            ? +(Math.abs(credit) / price * 100).toFixed(1)
+            ? +(Math.abs(credit) / price).toFixed(1)
             : null;
 
           structure = {
@@ -308,9 +310,9 @@ Use verdict: pass, caution, or flag. Use confidence: high, medium, or low.`;
     if (best === null) return null; // no relevant structure graded — can't assess
     if (best < 6) {
       return {
-        key: 'low_liquidity', severity: 'warning',
-        description: `Liquidity score ${best.toFixed(0)}/15 — just above the minimum gate. ` +
-          `Expect wider spreads and potential fill slippage. Check bid-ask before entering.`,
+        key: 'low_liquidity', severity: 'info',
+        description: `Liquidity score ${best.toFixed(0)}/15 — borderline. ` +
+          `Expect wider spreads; check bid-ask before entering.`,
       };
     }
     return null;

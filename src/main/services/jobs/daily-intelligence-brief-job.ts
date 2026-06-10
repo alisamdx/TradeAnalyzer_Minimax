@@ -65,11 +65,13 @@ function getBestLiquidityScore(labResult: object | null, strategy: string): numb
   return best;
 }
 
-// Returns false when the best relevant structure has liquidityScore below the threshold.
-// Returns true when we have no lab result (can't gate) or no relevant structure available.
+// Returns false when the best relevant structure has liquidityScore below the threshold,
+// or when the lab ran but produced no valid structure for this strategy (all unavailable).
+// Returns true only when no lab result exists at all (validation failed — can't gate).
 function hasAdequateLiquidity(labResult: object | null, strategy: string): boolean {
+  if (!labResult) return true; // validation failed entirely — can't gate what we didn't measure
   const best = getBestLiquidityScore(labResult, strategy);
-  if (best === null) return true; // no lab result or structure unavailable — can't gate
+  if (best === null) return false; // lab ran but no valid structure found for this strategy
   return best >= MIN_LIQUIDITY_SCORE;
 }
 
@@ -192,6 +194,26 @@ export class DailyIntelligenceBriefJob implements BatchJobHandler {
         scored.sort((a, b) => b.compositeScore - a.compositeScore);
       }
     }
+
+    // Penalise income candidates with earnings in the next 45 days (-20 pts).
+    // Income structures (strangles, condors) are short premium — an earnings event
+    // within the hold window causes outsized moves that blow through the wings.
+    const incomeEarningsPenalty = this.loadIncomeEarningsPenalty();
+    if (incomeEarningsPenalty.size > 0) {
+      const incomeList = rankedByStrategy.get('income') ?? [];
+      let penalised = 0;
+      for (const s of incomeList) {
+        if (incomeEarningsPenalty.has(s.ticker)) {
+          s.compositeScore = Math.max(0, s.compositeScore - 20);
+          penalised++;
+        }
+      }
+      if (penalised > 0) {
+        incomeList.sort((a, b) => b.compositeScore - a.compositeScore);
+        console.log(`[brief stage3] income: penalised ${penalised} tickers for earnings within 45d`);
+      }
+    }
+
     emit('Stage 3/6: Filter overlay applied');
 
     // ── Stage 4: Strategy Lab deep validation (live E*Trade) ───────────────
@@ -415,43 +437,39 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
     if (anthropicApiKey) {
       const marketContext = this.criticService.getMarketContext();
 
-      // Run rule checks + LLM critic in parallel across all picks.
-      // If the LLM call fails, fall back to rule-check-only verdict so criticVerdict
-      // is never left null (null causes the critic column to be invisible in Brief Trend).
-      const criticTasks: Array<Promise<void>> = [];
+      // Run critic in serial batches of one strategy at a time (up to 5 picks in parallel).
+      // 25 fully-concurrent calls hit Anthropic rate limits (~50% LLM failure).
+      // Processing one strategy batch at a time keeps concurrent calls ≤5 and cuts failures.
       for (const [strategy, picks] of assembledPicks) {
         const config = strategyConfigs.get(strategy)!;
-        for (const pick of picks) {
-          criticTasks.push((async () => {
-            let flags: CriticFlag[] = [];
-            try {
-              flags = this.criticService.runRuleChecks(
-                pick, strategy, config, assembledPicks as Map<string, BriefPick[]>, marketContext,
-              );
-            } catch (err) {
-              console.warn(`[critic rule-check] ${pick.ticker}/${strategy}:`, err instanceof Error ? err.message : String(err));
-              return;
-            }
-            try {
-              pick.criticVerdict = await this.criticService.synthesizeVerdict(
-                pick, strategy, flags, anthropicApiKey, marketContext,
-              );
-            } catch (err) {
-              console.warn(`[critic llm] ${pick.ticker}/${strategy}:`, err instanceof Error ? err.message : String(err));
-              // LLM failed — persist rule-check verdict so the column is never blank
-              const hasWarning = flags.some(f => f.severity === 'warning');
-              pick.criticVerdict = {
-                verdict: hasWarning ? 'flag' : flags.length > 0 ? 'caution' : 'pass',
-                confidence: 'low',
-                flags,
-                rationale: null,
-                generatedAt: new Date().toISOString(),
-              };
-            }
-          })());
-        }
+        await Promise.allSettled(picks.map(pick => (async () => {
+          let flags: CriticFlag[] = [];
+          try {
+            flags = this.criticService.runRuleChecks(
+              pick, strategy, config, assembledPicks as Map<string, BriefPick[]>, marketContext,
+            );
+          } catch (err) {
+            console.warn(`[critic rule-check] ${pick.ticker}/${strategy}:`, err instanceof Error ? err.message : String(err));
+            return;
+          }
+          try {
+            pick.criticVerdict = await this.criticService.synthesizeVerdict(
+              pick, strategy, flags, anthropicApiKey, marketContext,
+            );
+          } catch (err) {
+            console.warn(`[critic llm] ${pick.ticker}/${strategy}:`, err instanceof Error ? err.message : String(err));
+            // LLM failed — persist rule-check verdict so the column is never blank
+            const hasWarning = flags.some(f => f.severity === 'warning');
+            pick.criticVerdict = {
+              verdict: hasWarning ? 'flag' : flags.length > 0 ? 'caution' : 'pass',
+              confidence: 'low',
+              flags,
+              rationale: null,
+              generatedAt: new Date().toISOString(),
+            };
+          }
+        })()));
       }
-      await Promise.allSettled(criticTasks);
 
       // Estimate: ~$0.008/pick (sonnet-4-6)
       const totalCriticPicks = [...assembledPicks.values()].reduce((n, p) => n + p.length, 0);
@@ -653,6 +671,27 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
       const bonus = new Map<string, number>();
       for (const r of triggered) bonus.set(r.ticker, (bonus.get(r.ticker) ?? 0) + 5);
       return bonus;
+    } catch {
+      return new Map();
+    }
+  }
+
+  private loadIncomeEarningsPenalty(): Map<string, number> {
+    // Returns -20 for any ticker with earnings in the next 45 days.
+    // 45d matches the outer edge of the income hold window (30–45 DTE structures).
+    try {
+      const todayET = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+      const [y, m, d] = todayET.split('-').map(Number);
+      const horizonDate = new Date(Date.UTC(y!, m! - 1, d! + 45));
+      const horizonStr = horizonDate.toISOString().slice(0, 10);
+      type ERow = { ticker: string };
+      const rows = this.db.prepare(`
+        SELECT DISTINCT ticker FROM earnings_calendar
+        WHERE report_date > ? AND report_date <= ?
+      `).all(todayET, horizonStr) as ERow[];
+      const penalty = new Map<string, number>();
+      for (const r of rows) penalty.set(r.ticker, -20);
+      return penalty;
     } catch {
       return new Map();
     }

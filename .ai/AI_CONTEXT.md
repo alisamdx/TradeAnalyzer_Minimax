@@ -2,7 +2,7 @@
 
 > **Read this first.** Self-contained snapshot of *what the app is today* so a fresh AI session is productive without re-reading the whole codebase. This file describes **current state** — not history. Release history lives in `CHANGELOG.md` / `changelogs/`. Operating rules live in `/CLAUDE.md`. Full spec lives in `Requirements/`.
 >
-> Last verified against code: 2026-06-09 (v0.32.54). When you make a material change, update the relevant section here in the same commit.
+> Last verified against code: 2026-06-09 (v0.32.60). When you make a material change, update the relevant section here in the same commit.
 
 ---
 
@@ -193,6 +193,10 @@ Authoritative DDL is in `migrations/`. Tables are created lazily (`CREATE TABLE 
 - **E*Trade IV is a decimal fraction**; **E*Trade dates are UTC** → a Thursday-evening ET earnings report shows as Saturday UTC. `earnings-service.ts` shifts Saturday → Friday and marks it unconfirmed.
 - **IV rank/percentile are null** from the Polygon snapshot — computed from `iv_history`, which requires the MarketData.app/IVolatility backfill to be populated first.
 - **Brief scoring reads fundamentals from `fundamentals_cache`** (not `screen_results`) — decoupled from screener run scope. Sector stored as Polygon SIC descriptions (lowercase, e.g. "electronic computers"). `loadSectorMomentum` uses `sectorStringToEtf()` keyword-match fallback (covers ~58% of tickers) after checking the exact `SECTOR_ETF` GICS-name map. `leverageQuality`/`leverageRisk` fall back to `debtToEquity * 2.5` when `netDebtToEbitda` is null (~9% coverage → ~30%).
+- **`breakevenDistancePct` in critic-service.ts**: `netCredit` is per-contract (×100 shares), dividing by per-share `price` already gives the % — do NOT also `* 100`. See `docs/formulas.md#breakeven-distance`.
+- **Brief liquidity gate (`hasAdequateLiquidity`)**: returns `true` only when `labResult === null` (validation failed, can't gate). If the lab ran but all relevant structures have `unavailableReason`, it returns `false` (no valid structure = gated out). Previously this case returned `true`, letting F-grade picks like VRT-PMCC through.
+- **Income earnings penalty (Stage 3)**: `loadIncomeEarningsPenalty()` applies −20 composite points for income candidates with earnings in the next 45 days. Re-sorts income ranked list after penalty so earnings-risk picks fall below clean alternatives.
+- **Critic LLM rate-limit**: 25 concurrent Anthropic calls per brief hit rate limits (~50% failure). Now runs one strategy batch (≤5 picks) at a time via `for…of assembledPicks { await Promise.allSettled(picks.map(…)) }`. `low_liquidity` severity is `info` (not `warning`) so borderline picks produce `caution`, not `flag`.
 - **`technical_signals` now includes `adx` and `support_level`** (migration 035) — populated by `DailyTechnicalSignalsJob`. `loadTechnicalSignals()` uses these to fill `trendStrengthAdx` (income `trendNeutral` signal) and `entryZoneLow` (buy `breakoutScore`) as batch-job fallbacks.
 - **Scoring engine v3 (baseline_v3)**: `trendAlignment` signal added to Buy (wt 10) and Bullish (wt 7); `notDowntrend` added to Wheel (wt 8). Derived from `trendLabel` (analysis_snapshots) or SMA50/200 stack (technical_signals). `seedBaselines()` auto-upgrades v1/v2 → v3 on startup. Bearish and Income unchanged.
 - **Daily Brief auto-creates `DailyBrief-MMDD` watchlist** — at end of each brief run, all final picks (all 5 strategies, post-liquidity-gate) are upserted into a watchlist named e.g. `DailyBrief-0608`. Existing items are cleared on refresh. Notes field shows strategies per ticker (`wheel · buy`). Uses new `WatchlistService.findByName()` / `clearItems()` methods.
