@@ -22,13 +22,15 @@ import type { PaperTradingService } from '../paper-trading-service.js';
 import { CriticService } from '../critic-service.js';
 import { WatchlistService } from '../watchlist-service.js';
 
-const PICKS_PER_STRATEGY = 5;
+const PICKS_PER_STRATEGY = 5;   // final picks shown in brief per strategy (post-gate cap)
+const STAGE4_POOL_SIZE   = 10;  // candidates sent to E*Trade validation per strategy
+const MAX_PICK_PRICE     = 750; // USD — stocks above this price are excluded from all brief picks
 
 function isAuthError(e: unknown): boolean {
   const msg = (e instanceof Error ? e.message : String(e)).toLowerCase();
   return msg.includes('401') || msg.includes('token') || msg.includes('auth') || msg.includes('oauth');
 }
-const STAGE_4_CAP = PICKS_PER_STRATEGY * STRATEGIES.length; // ≤ 25 total
+const STAGE_4_CAP = STAGE4_POOL_SIZE * STRATEGIES.length; // ≤ 50 unique tickers through E*Trade
 const RETENTION_DAYS = 90;
 
 // Minimum Strategy Lab liquidityScore (0–15) for a pick to survive the hard gate.
@@ -204,7 +206,11 @@ export class DailyIntelligenceBriefJob implements BatchJobHandler {
     for (const strategy of STRATEGIES) {
       const top = (rankedByStrategy.get(strategy) ?? [])
         .filter(s => s.compositeScore > 0)
-        .slice(0, PICKS_PER_STRATEGY);
+        .filter(s => {
+          const price = signalData.get(s.ticker)?.lastPrice;
+          return price === null || price === undefined || price <= MAX_PICK_PRICE;
+        })
+        .slice(0, STAGE4_POOL_SIZE);
       topPerStrategy.set(strategy, top);
       for (const s of top) {
         if (!seenTickers.has(s.ticker)) seenTickers.set(s.ticker, []);
@@ -369,13 +375,13 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
 
     for (const strategy of STRATEGIES) {
       const top = topPerStrategy.get(strategy) ?? [];
-      const liquidFiltered = top.filter(scored =>
-        hasAdequateLiquidity(validationResults.get(scored.ticker) ?? null, strategy)
-      );
+      const liquidFiltered = top
+        .filter(scored => hasAdequateLiquidity(validationResults.get(scored.ticker) ?? null, strategy))
+        .slice(0, PICKS_PER_STRATEGY);
       const gated = top.length - liquidFiltered.length;
       if (gated > 0) totalGated += gated;
-      // Funnel log: shows per-strategy liquidity gate results including score for each
-      // gated ticker so we can distinguish "gate too aggressive" from genuine scarcity.
+      // Funnel log: top.length reflects pool after price filter (≤$750) + STAGE4_POOL_SIZE cap.
+      // Shows liquidity score per gated ticker to distinguish gate-aggressive vs genuine scarcity.
       console.log(
         `[brief funnel] ${strategy}: ${top.length} pre-gate → ${liquidFiltered.length} final` +
         (gated > 0

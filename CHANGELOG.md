@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.32.58] — 2026-06-09
+
+### Changed
+- **Brief: pre-gate pool widened from 5 → 10 per strategy** — each strategy now sends its top 10 scored candidates to E*Trade validation (was top 5). Post-gate output is still capped at 5 picks per strategy. Gives the liquidity gate more candidates to work with — especially for income, which frequently loses 3+ picks to the gate in low-VIX trending markets. `STAGE_4_CAP` updated from 25 → 50 unique tickers.
+- **Brief: $750 price cap** — stocks priced above $750 are excluded from all brief picks before Stage 4 validation. Avoids options with very large notional size (e.g. FIX at $1,860, COST at $935). Applied after scoring so high-priced stocks still contribute to relative-strength benchmarks. Configurable via `MAX_PICK_PRICE` constant in `daily-intelligence-brief-job.ts`.
+
 ## [0.32.57] — 2026-06-09
 
 ### Changed
