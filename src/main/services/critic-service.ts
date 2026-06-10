@@ -67,6 +67,8 @@ export class CriticService {
     f(this.checkScoreConcentration(pick));
     f(this.checkCrossStrategyConflict(pick, strategy, allPicksByStrategy));
     f(this.checkMarketRisk(strategy, market));
+    f(this.checkAnomalousMomentum(pick));
+    f(this.checkEarningsInWindow(pick, strategy));
 
     return flags;
   }
@@ -117,9 +119,10 @@ export class CriticService {
             ? Math.round((new Date(structureExpiry).getTime() - new Date(today).getTime()) / 86400000)
             : null;
 
-          // Strike OTM %: how far is the short strike from current price (positive = OTM)
+          // Strike OTM %: how far is the short strike from current price (positive = OTM for short calls/puts)
+          // (strike - price) / price: >0 when strike > price (short call OTM) ✓
           const strikeOtmPct = (strike !== null && price !== null && price > 0)
-            ? +((price - strike) / price * 100).toFixed(1)
+            ? +((strike - price) / price * 100).toFixed(1)
             : null;
 
           // Breakeven distance %: for income, how far price can move before structure loses
@@ -368,6 +371,41 @@ Use verdict: pass, caution, or flag. Use confidence: high, medium, or low.`;
       };
     }
     return null;
+  }
+
+  private getStructureExpiry(pick: BriefPick, strategy: string): string | null {
+    type SScore = { slug: string; setup: { expiration: string } | null };
+    type LabRes = { scores?: SScore[] };
+    const labResult = pick.strategyLabResult as LabRes | null;
+    const slugs = STRATEGY_RELEVANT_SLUGS[strategy] ?? [];
+    if (!labResult?.scores) return null;
+    const best = labResult.scores.find(s => slugs.includes(s.slug) && s.setup != null);
+    return best?.setup?.expiration ?? null;
+  }
+
+  private checkAnomalousMomentum(pick: BriefPick): CriticFlag | null {
+    const sig = pick.signals['priceMomentumPct'];
+    if (!sig || sig.missing || sig.raw === null) return null;
+    if (sig.raw <= 500) return null;
+    return {
+      key: 'data_anomaly_suspected', severity: 'info',
+      description: `1Y price return of ${sig.raw.toFixed(0)}% is extreme — likely reflects a corporate event ` +
+        `(spinoff, reverse merger, relisting). Verify price history is accurate before acting on this pick.`,
+    };
+  }
+
+  private checkEarningsInWindow(pick: BriefPick, strategy: string): CriticFlag | null {
+    const today = new Date().toISOString().slice(0, 10);
+    const expiry = this.getStructureExpiry(pick, strategy);
+    if (!expiry) return null;
+    const earnings = this.getEarningsBeforeExpiry(pick.ticker, expiry, today);
+    if (!earnings) return null;
+    const status = earnings.confirmed ? 'confirmed' : 'unconfirmed';
+    return {
+      key: 'earnings_in_window', severity: 'warning',
+      description: `Earnings on ${earnings.date} (${earnings.daysFromNow}d away, ${status}) fall before expiry ${expiry}. ` +
+        `Earnings events cause outsized moves — consider avoiding or sizing down.`,
+    };
   }
 
   private getEarningsBeforeExpiry(

@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.32.55] — 2026-06-09
+
+### Fixed
+- **Critic: `strikeOtmPct` formula was inverted** — `(price - strike) / price` produces a negative value when the short strike is OTM (above current price for a call), directly contradicting the "positive = OTM" description sent in the LLM system prompt. Corrected to `(strike - price) / price`. This eliminates the ~3 false bullish flags (e.g. COHR, ALAB, MRVL) produced each brief run.
+
+### Added
+- **Critic rule: `data_anomaly_suspected`** — new `info`-severity rule flag emitted when `priceMomentumPct` exceeds 500%. Catches spinoff/reverse-merger tickers (e.g. SNDK after the WD spinoff) where the oldest available bar gives a nonsensical 1-year return, causing the pick to slip through as a false PASS when the LLM is unavailable.
+- **Critic rule: `earnings_in_window`** — new `warning`-severity rule flag emitted when a known earnings date falls between today and the structure's expiry. Previously earnings were only passed as LLM context and disappeared when the LLM was rate-limited or unavailable. Now always present in `criticVerdict.flags` regardless of LLM status.
+
 ## [0.32.54] — 2026-06-09
 
 ### Added
