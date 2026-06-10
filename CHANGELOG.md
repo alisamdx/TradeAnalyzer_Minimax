@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.52] — 2026-06-09
+
+### Fixed
+- **Price Gap Fill: today's close never loaded on the same evening** — the stale-ticker threshold was `MAX(date) < date('now', '-1 day')`, so a ticker whose latest bar was yesterday was considered "fresh" and skipped. Changed threshold to `date('now')` so any ticker missing today's date is fetched. Same fix applied to the reference-ticker freshness check. Reference tickers that exist but are missing today now use a `fromDate` override (3-day lookback) instead of refetching the full 1Y range.
+
 ## [0.32.51] — 2026-06-09
 
 ### Changed

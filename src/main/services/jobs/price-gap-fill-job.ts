@@ -61,50 +61,67 @@ export class PriceGapFillJob implements BatchJobHandler {
   ): Promise<BatchJobResult> {
     // ── Reference ticker bootstrap ─────────────────────────────────────────────
     // SPY + sector ETFs must always be fresh for ScoringService relative-strength
-    // and sector-momentum signals. Fetch 6M (instead of 1M) so there are enough
-    // bars for the 90-day return calculation even on first run.
+    // and sector-momentum signals.
+    // Stale threshold is date('now') — not date('now','-1 day') — so that after
+    // yesterday's bars are stored, today's close is still fetched the same evening.
     const refPh = SCORING_REFERENCE_TICKERS.map(() => '?').join(',');
+
     type RefRow = { ticker: string };
     const freshRef = new Set(
       (this.db.prepare(`
         SELECT ticker FROM historical_prices
         WHERE ticker IN (${refPh})
         GROUP BY ticker
-        HAVING MAX(date) >= date('now', '-1 day')
+        HAVING MAX(date) >= date('now')
       `).all(...SCORING_REFERENCE_TICKERS) as RefRow[]).map(r => r.ticker)
     );
-    // Use '1Y' (≈252 trading days) for reference-ticker bootstrap — gives a comfortable
-    // 162-day buffer over the 90-day return window, handles holiday gaps, and future-proofs
-    // against any extension of the lookback period.  Cost: one extra Polygon call per ticker,
-    // done only once (subsequent runs hit the stale-ticker path with '1M').
-    const staleRef: { ticker: string; range: TimeRange }[] =
-      (SCORING_REFERENCE_TICKERS as readonly string[])
-        .filter(t => !freshRef.has(t))
-        .map(t => ({ ticker: t, range: '1Y' }));
+
+    // Reference tickers that exist but are missing today's bar — use fromDate so we
+    // don't re-fetch the full 1Y range just to add one day.
+    type RefMaxRow = { ticker: string; max_date: string };
+    const staleRefRows = (this.db.prepare(`
+      SELECT ticker, MAX(date) AS max_date FROM historical_prices
+      WHERE ticker IN (${refPh})
+      GROUP BY ticker
+      HAVING MAX(date) < date('now')
+    `).all(...SCORING_REFERENCE_TICKERS) as RefMaxRow[]).filter(r => !freshRef.has(r.ticker));
+
+    // Reference tickers with no history at all — bootstrap with full 1Y range so
+    // there are enough bars for the 90-day return calculation.
+    const existingRef = new Set([...freshRef, ...staleRefRows.map(r => r.ticker)]);
+    const bootstrapRef = (SCORING_REFERENCE_TICKERS as readonly string[]).filter(t => !existingRef.has(t));
+
+    const staleRef: { ticker: string; range: TimeRange; fromDate?: string }[] = [
+      ...bootstrapRef.map(t => ({ ticker: t, range: '1Y' as TimeRange, fromDate: undefined })),
+      ...staleRefRows.map(r => {
+        const fromMs = new Date(r.max_date + 'T12:00:00Z').getTime() - 3 * 86_400_000;
+        return { ticker: r.ticker, range: '1M' as TimeRange, fromDate: new Date(fromMs).toISOString().slice(0, 10) };
+      }),
+    ];
 
     // ── Universe tickers — include actual max date for targeted fetching ──────
+    // Same date('now') threshold: a ticker whose latest bar is yesterday is stale
+    // and needs today's close fetched.
     type TickerRow = { ticker: string; max_date: string };
     const staleUniverse: { ticker: string; range: TimeRange; fromDate: string }[] = (this.db
       .prepare(`
         SELECT ticker, MAX(date) AS max_date FROM historical_prices
         GROUP BY ticker
-        HAVING MAX(date) < date('now', '-1 day')
+        HAVING MAX(date) < date('now')
         ORDER BY ticker
       `)
       .all() as TickerRow[])
       .filter(r => !(SCORING_REFERENCE_TICKERS as readonly string[]).includes(r.ticker))
       .map(r => {
-        // Fetch from (max_date + 1 day) with a 3-day lookback buffer for safety.
-        // A 1-day gap → ~5 bars fetched instead of ~22 (1M). Capped at 1M.
+        // Fetch from (max_date − 3 days) for a small safety buffer.
         const maxDateMs = new Date(r.max_date + 'T12:00:00Z').getTime();
-        const fromMs    = maxDateMs - 3 * 86_400_000; // 3-day buffer
+        const fromMs    = maxDateMs - 3 * 86_400_000;
         const fromDate  = new Date(fromMs).toISOString().slice(0, 10);
         return { ticker: r.ticker, range: '1M' as TimeRange, fromDate };
       });
 
-    // Reference tickers always use the full 1Y range (no fromDate override)
     const jobs: { ticker: string; range: TimeRange; fromDate?: string }[] = [
-      ...staleRef.map(r => ({ ...r, fromDate: undefined })),
+      ...staleRef,
       ...staleUniverse,
     ];
     const total = jobs.length;
