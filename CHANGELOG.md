@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.59] — 2026-06-09
+
+### Fixed
+- **Brief funnel log: distinguish liq-failed vs outranked** — the previous log conflated two different exclusion reasons under "gated": tickers that failed the liquidity gate (liq < 5) and tickers that passed the gate but were cut by the 5-pick output cap. Log now shows `liq-failed: FWONA(3/15), CSX(3/15)` separately from `outranked: MSFT(9/15), MPC(11/15)`. `totalGated` now only counts true gate failures, not cap-cuts.
+
 ## [0.32.58] — 2026-06-09
 
 ### Changed

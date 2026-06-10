@@ -375,25 +375,23 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
 
     for (const strategy of STRATEGIES) {
       const top = topPerStrategy.get(strategy) ?? [];
-      const liquidFiltered = top
-        .filter(scored => hasAdequateLiquidity(validationResults.get(scored.ticker) ?? null, strategy))
-        .slice(0, PICKS_PER_STRATEGY);
-      const gated = top.length - liquidFiltered.length;
-      if (gated > 0) totalGated += gated;
-      // Funnel log: top.length reflects pool after price filter (≤$750) + STAGE4_POOL_SIZE cap.
-      // Shows liquidity score per gated ticker to distinguish gate-aggressive vs genuine scarcity.
-      console.log(
-        `[brief funnel] ${strategy}: ${top.length} pre-gate → ${liquidFiltered.length} final` +
-        (gated > 0
-          ? ` (gated: ${top
-              .filter(s => !liquidFiltered.includes(s))
-              .map(s => {
-                const liq = getBestLiquidityScore(validationResults.get(s.ticker) ?? null, strategy);
-                return `${s.ticker}(liq=${liq ?? '?'}/15)`;
-              })
-              .join(', ')})`
-          : '')
+      const passedGate = top.filter(scored =>
+        hasAdequateLiquidity(validationResults.get(scored.ticker) ?? null, strategy)
       );
+      const liquidFiltered = passedGate.slice(0, PICKS_PER_STRATEGY);
+      // failedGate: rejected by liquidity. cappedOut: liquid but outranked by top 5.
+      const failedGate = top.filter(s => !passedGate.includes(s));
+      const cappedOut  = passedGate.slice(PICKS_PER_STRATEGY);
+      if (failedGate.length > 0) totalGated += failedGate.length;
+
+      const fmt = (s: ScoredTicker) => {
+        const liq = getBestLiquidityScore(validationResults.get(s.ticker) ?? null, strategy);
+        return `${s.ticker}(${liq ?? '?'}/15)`;
+      };
+      let logLine = `[brief funnel] ${strategy}: ${top.length} → ${liquidFiltered.length} final`;
+      if (failedGate.length > 0) logLine += ` | liq-failed: ${failedGate.map(fmt).join(', ')}`;
+      if (cappedOut.length  > 0) logLine += ` | outranked: ${cappedOut.map(fmt).join(', ')}`;
+      console.log(logLine);
 
       const picks: BriefPick[] = liquidFiltered.map((scored, idx) => ({
         ticker: scored.ticker,
