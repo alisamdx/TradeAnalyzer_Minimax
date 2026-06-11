@@ -145,6 +145,7 @@ Update only what the change touches — don't regenerate everything:
 - **Earnings** come from E*Trade (no Polygon public endpoint). **E*Trade dates are UTC** → Thursday-evening ET reports show as Saturday UTC; `earnings-service.ts` shifts Saturday→Friday, marks unconfirmed.
 - **E*Trade IV** is a decimal fraction (0.3882 = 38.82%). `* 100` when ingesting into percentage storage; pass directly to Black-Scholes as sigma.
 - **Fake-timer tests** use `flushTimersUntil()`, not `vi.runAllTimers()`.
+- **Inspecting the production DB while the app is running**: open it with a **write-capable** better-sqlite3 connection (`new Database(path)`), never `readonly: true`. On Windows a readonly connection can't attach the live WAL index (needs write access to `-shm`) and silently reads only up to the last checkpoint — writes from minutes ago (e.g. a just-finished brief) appear missing. Write-capable read-only queries are safe in WAL mode.
 
 ## Standing instructions for AI sessions
 
