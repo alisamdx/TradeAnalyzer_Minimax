@@ -116,8 +116,8 @@ export class PolygonDataProvider implements DataProvider, OptionsProvider {
       jobRunId: null
     });
 
-    // Retry on 5xx or network errors, up to maxRetries.
-    if (!response.ok && retryCount < this.maxRetries) {
+    // Retry 5xx (server errors) and 429 (rate limit) only — never retry 4xx auth/plan errors.
+    if ((response.status === 429 || response.status >= 500) && retryCount < this.maxRetries) {
       const delay = Math.pow(2, retryCount) * 200;
       await new Promise((r) => setTimeout(r, delay));
       return this.fetchWithRetry(path, params, retryCount + 1);

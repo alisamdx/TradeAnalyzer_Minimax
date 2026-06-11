@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.32.75] — 2026-06-11
+
+### Fixed
+- **Market sync: false "Invalid Polygon API Key" abort on 403 plan-restriction responses** — Polygon returns 403 (not 401) for plan-tier restrictions, and their 403 body frequently contains the phrase "apiKey" (e.g. "your apiKey plan does not include this endpoint"). The screener's `includes('api key')` check matched this and aborted the entire sync with a misleading "Invalid or missing Polygon API Key" error even though the key was perfectly valid. Fix: only hard-abort on a genuine HTTP 401 (`'Polygon HTTP 401'`); 403 plan-restriction errors now silently skip that ticker, matching the existing behaviour for other per-ticker failures.
+- **Polygon provider: 4xx auth/plan errors were retried unnecessarily** — `fetchWithRetry` retried all non-ok responses including 401 and 403. These will never recover on retry. Fix: only retry 429 (rate limit) and 5xx (server errors), matching the comment that was already in the code.
+
 ## [0.32.74] — 2026-06-11
 
 ### Fixed

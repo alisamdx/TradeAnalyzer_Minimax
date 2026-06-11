@@ -193,10 +193,13 @@ export class ScreenerService {
           this.fundamentalsCache.upsert(ticker, ratios);
         }
       } catch (err) {
-        if (err instanceof Error && (err.message.includes('401') || err.message.toLowerCase().includes('unauthorized') || err.message.toLowerCase().includes('api key'))) {
-          throw new Error('Invalid or missing Polygon API Key. Please update it in Settings.');
+        // Only a genuine 401 (invalid/missing API key) aborts the whole sync.
+        // 403 plan-restriction responses can mention "api key" in their body but
+        // are NOT auth failures — previously they caused a false "Invalid API key"
+        // abort. Per-ticker fundamentals failures are otherwise silently skipped.
+        if (err instanceof Error && err.message.includes('Polygon HTTP 401')) {
+          throw new Error('Polygon API key is invalid or missing. Please update it in Settings.');
         }
-        // Silently skip failed fundamentals, typical for OTC or delisted
       }
 
       // Fetch and cache Quotes
@@ -221,8 +224,8 @@ export class ScreenerService {
           });
         }
       } catch (err) {
-        if (err instanceof Error && (err.message.includes('401') || err.message.toLowerCase().includes('unauthorized') || err.message.toLowerCase().includes('api key'))) {
-          throw new Error('Invalid or missing Polygon API Key. Please update it in Settings.');
+        if (err instanceof Error && err.message.includes('Polygon HTTP 401')) {
+          throw new Error('Polygon API key is invalid or missing. Please update it in Settings.');
         }
         // Silently skip failed quotes
       }
