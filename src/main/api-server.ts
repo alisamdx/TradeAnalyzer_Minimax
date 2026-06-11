@@ -15,6 +15,7 @@ import type { TokenBucketRateLimiter } from './services/rate-limiter.js';
 import type { StrategyLabService } from './services/strategy-lab-service.js';
 import type { CriticService } from './services/critic-service.js';
 import type { ScoringService } from './services/scoring-service.js';
+import type { BatchService } from './services/batch-service.js';
 import { registerHealthRoutes } from './api/routes-health.js';
 import { registerWatchlistRoutes } from './api/routes-watchlists.js';
 import { registerQuotesRoutes } from './api/routes-quotes.js';
@@ -28,6 +29,7 @@ import { registerSettingsRoutes } from './api/routes-settings.js';
 import { registerETradeRoutes } from './api/routes-etrade.js';
 import { registerStrategyLabRoutes } from './api/routes-strategy-lab.js';
 import { registerCriticRoutes } from './api/routes-critic.js';
+import { registerOrchestratorRoutes } from './api/routes-orchestrator.js';
 import { secureGet, secureSet } from './services/secure-settings.js';
 
 const DATA_DIR = join(homedir(), '.tradeanalyzer');
@@ -93,6 +95,7 @@ export interface ApiServerServices {
   strategyLabService: StrategyLabService;
   criticService: CriticService;
   scoringService: ScoringService;
+  batchService: BatchService;
   appVersion: string;
 }
 
@@ -137,6 +140,7 @@ export class ApiServer {
       registerETradeRoutes(app, svc);
       registerStrategyLabRoutes(app, svc);
       registerCriticRoutes(app, svc);
+      registerOrchestratorRoutes(app, svc);
     }, { prefix: '/api/v1' });
   }
 

@@ -1,10 +1,10 @@
 // Batch service — manages scheduled background jobs (startup + daily schedule).
-// Jobs are pluggable via BatchJobHandler. Only one job runs at a time.
+// Jobs are pluggable via BatchJobHandler. Only one job runs at a time (mutex).
 // Progress and completion events stream to the renderer via callbacks.
-// v0.21.0
+// v0.33.0 — Orchestrator support: runJobDirect, multi-slot scheduler, trigger context.
 
 import type { DbHandle } from '../db/connection.js';
-import type { BatchJob, BatchRun, AppNotification, BatchProgressEvent } from '@shared/types.js';
+import type { BatchJob, BatchRun, AppNotification, BatchProgressEvent, OrchestratorJobConfig, OrchestratorJobEntry } from '@shared/types.js';
 
 // ─── Job handler interface ────────────────────────────────────────────────────
 
@@ -20,17 +20,22 @@ export interface BatchJobResult {
   notification?: AppNotification;
 }
 
+export type RunTrigger = 'startup' | 'schedule' | 'manual';
+
 export interface BatchJobHandler {
   name: string;
   description: string;
   /**
-   * @param force When true, bypass "non-trading day" guards so the job always runs.
-   *              Used by the "Run All in Sequence" manual trigger.
+   * @param force   When true, bypass "non-trading day" guards so the job always runs.
+   * @param trigger How the job was started — passed through for handler-level branching.
+   * @param slotTime Which scheduler slot fired this run (null for manual/startup/API).
    */
   run(
     onProgress: (evt: BatchProgressEvent) => void,
     signal: AbortSignal,
-    force?: boolean
+    force?: boolean,
+    trigger?: RunTrigger,
+    slotTime?: string | null,
   ): Promise<BatchJobResult>;
 }
 
@@ -64,6 +69,8 @@ interface BatchRunRow {
   tickers_failed: number;
   notes: string | null;
   error_message: string | null;
+  trigger: string;
+  slot_time: string | null;
 }
 
 // ─── Service ─────────────────────────────────────────────────────────────────
@@ -84,13 +91,16 @@ export class BatchService {
     return this.batchJobsEnabled;
   }
 
+  getRunningJobId(): string | null {
+    return this.runningJobId;
+  }
+
   constructor(
     private readonly db: DbHandle,
     private readonly onNotification: (n: AppNotification) => void,
     private readonly onProgress: (evt: BatchProgressEvent) => void
   ) {
     // Clean up any jobs left in 'running' state from a previous crashed/killed session.
-    // Without this, stuck rows persist forever and block new runs from starting.
     const now = new Date().toISOString();
     this.db.prepare(`
       UPDATE batch_runs
@@ -106,20 +116,21 @@ export class BatchService {
   // ── Job registration ──────────────────────────────────────────────────────
 
   /**
-   * Register a job handler and seed its DB row (INSERT OR IGNORE — existing
-   * user config is never overwritten on restart).
+   * Register a job handler and seed its DB row (INSERT OR IGNORE).
    *
-   * @param options.dailyScheduleTime    Default 'HH:MM' in ET (only applied on first registration).
-   * @param options.runOnStartup         Whether to auto-run on app launch (default true).
-   * @param options.startupDelaySeconds  Seconds to wait before the startup run (default 30).
-   * @param options.defaultConfig        Initial config_json values (e.g. { callDelayMs: 500 }).
-   *                                     Only written on first registration (INSERT OR IGNORE).
+   * @param options.sequenceOrder       Explicit position; overrides MAX+1 when provided.
+   * @param options.dailyScheduleTime   Default 'HH:MM' ET (only applied on first registration).
+   * @param options.runOnStartup        Whether to auto-run on app launch (default true).
+   * @param options.startupDelaySeconds Seconds to wait before the startup run (default 30).
+   * @param options.defaultConfig       Initial config_json values. Only written on first registration.
    */
   registerJob(
     id: string,
     handler: BatchJobHandler,
     options?: {
+      sequenceOrder?: number;
       dailyScheduleTime?: string;
+      dailyScheduleEnabled?: boolean;
       runOnStartup?: boolean;
       startupDelaySeconds?: number;
       defaultConfig?: Record<string, unknown>;
@@ -127,23 +138,25 @@ export class BatchService {
   ): void {
     this.handlers.set(id, handler);
 
-    const scheduleTime        = options?.dailyScheduleTime   ?? '16:00';
-    const runOnStartup        = options?.runOnStartup        ?? true ? 1 : 0;
-    const startupDelaySecs    = options?.startupDelaySeconds ?? 30;
+    const scheduleTime        = options?.dailyScheduleTime    ?? '16:00';
+    const scheduleEnabled     = (options?.dailyScheduleEnabled ?? true) ? 1 : 0;
+    const runOnStartup        = options?.runOnStartup         ?? true ? 1 : 0;
+    const startupDelaySecs    = options?.startupDelaySeconds  ?? 30;
     const configJson          = options?.defaultConfig ? JSON.stringify(options.defaultConfig) : null;
 
-    // Seed the batch_jobs row with INSERT OR IGNORE so config persists across restarts.
-    // sequence_order is set to max+1 so new jobs always append to the end.
+    // Determine sequence_order: explicit > MAX+1
+    const seqOrderExpr = options?.sequenceOrder != null
+      ? String(options.sequenceOrder)
+      : `(SELECT COALESCE(MAX(sequence_order), 0) + 1 FROM batch_jobs)`;
+
     this.db.prepare(`
       INSERT OR IGNORE INTO batch_jobs
         (id, name, description, enabled, run_on_startup, startup_delay_seconds,
          daily_schedule_enabled, daily_schedule_time, sequence_order, config_json)
-      VALUES (?, ?, ?, 1, ?, ?, 1, ?, (SELECT COALESCE(MAX(sequence_order), 0) + 1 FROM batch_jobs), ?)
-    `).run(id, handler.name, handler.description, runOnStartup, startupDelaySecs, scheduleTime, configJson);
+      VALUES (?, ?, ?, 1, ?, ?, ?, ?, ${seqOrderExpr}, ?)
+    `).run(id, handler.name, handler.description, runOnStartup, startupDelaySecs, scheduleEnabled, scheduleTime, configJson);
 
-    // For existing rows (INSERT OR IGNORE did nothing): backfill config_json if
-    // it is still NULL and a defaultConfig was supplied. This handles upgrades
-    // where the row was created before defaultConfig support was added.
+    // Backfill config_json if it is still NULL (handles upgrades).
     if (configJson !== null) {
       this.db.prepare(`
         UPDATE batch_jobs SET config_json = ? WHERE id = ? AND config_json IS NULL
@@ -161,7 +174,7 @@ export class BatchService {
     const jobs = this._getJobRows().filter(j => j.enabled && j.run_on_startup);
     for (const job of jobs) {
       const today = this.todayET();
-      if (job.last_success_date === today) continue; // already ran today
+      if (job.last_success_date === today) continue;
 
       const delayMs = job.startup_delay_seconds * 1000;
       const jobId = job.id;
@@ -178,7 +191,6 @@ export class BatchService {
 
   startScheduler(): void {
     if (this.scheduleTimer) clearInterval(this.scheduleTimer);
-    // Check every 5 minutes
     this.scheduleTimer = setInterval(() => {
       this.checkSchedule().catch(err =>
         console.error('[batch] scheduler check error:', err)
@@ -196,19 +208,51 @@ export class BatchService {
     );
 
     for (const job of jobs) {
-      if (job.last_success_date === today) continue; // already ran today
-      if (now < job.daily_schedule_time) continue;   // not yet time
+      // Multi-slot jobs (orchestrator) store their schedule in config_json.scheduleSlots.
+      const config = job.config_json ? (JSON.parse(job.config_json) as Record<string, unknown>) : null;
+      const slots = Array.isArray(config?.['scheduleSlots'])
+        ? (config['scheduleSlots'] as unknown[]).filter((s): s is string => typeof s === 'string')
+        : null;
 
-      console.log(`[batch] schedule trigger for "${job.id}" (now=${now} >= ${job.daily_schedule_time})`);
-      await this.runJob(job.id, 'schedule').catch(err =>
-        console.error(`[batch] schedule job "${job.id}" error:`, err)
-      );
+      if (slots && slots.length > 0) {
+        for (const slotTime of slots) {
+          if (now < slotTime) continue;
+          if (this._hasSlotFiredToday(job.id, slotTime, today)) continue;
+          console.log(`[batch] schedule slot trigger for "${job.id}" slot=${slotTime}`);
+          await this.runJob(job.id, 'schedule', false, slotTime).catch(err =>
+            console.error(`[batch] schedule job "${job.id}" slot "${slotTime}" error:`, err)
+          );
+        }
+      } else {
+        // Original single-slot logic
+        if (job.last_success_date === today) continue;
+        if (now < job.daily_schedule_time) continue;
+        console.log(`[batch] schedule trigger for "${job.id}" (now=${now} >= ${job.daily_schedule_time})`);
+        await this.runJob(job.id, 'schedule').catch(err =>
+          console.error(`[batch] schedule job "${job.id}" error:`, err)
+        );
+      }
     }
   }
 
-  // ── Run a job ─────────────────────────────────────────────────────────────
+  /** Returns true if any batch_run for this job+slot exists on today's date (any status). */
+  private _hasSlotFiredToday(jobId: string, slotTime: string, today: string): boolean {
+    const row = this.db.prepare(`
+      SELECT id FROM batch_runs
+      WHERE job_id = ? AND slot_time = ? AND date(started_at, 'localtime') = ?
+      LIMIT 1
+    `).get(jobId, slotTime, today);
+    return !!row;
+  }
 
-  async runJob(jobId: string, trigger: 'startup' | 'schedule' | 'manual', force = false): Promise<void> {
+  // ── Run a job (public, holds the mutex) ───────────────────────────────────
+
+  async runJob(
+    jobId: string,
+    trigger: RunTrigger,
+    force = false,
+    slotTime?: string,
+  ): Promise<void> {
     if (this.runningJobId !== null) {
       this.onNotification({
         id: `batch-busy-${Date.now()}`,
@@ -227,33 +271,29 @@ export class BatchService {
     const startedAt = new Date().toISOString();
     this.runningJobId = jobId;
 
-    // Create run record
     const insertResult = this.db.prepare(`
-      INSERT INTO batch_runs (job_id, started_at, status)
-      VALUES (?, ?, 'running')
-    `).run(jobId, startedAt);
+      INSERT INTO batch_runs (job_id, started_at, status, trigger, slot_time)
+      VALUES (?, ?, 'running', ?, ?)
+    `).run(jobId, startedAt, trigger, slotTime ?? null);
     const runId = insertResult.lastInsertRowid as number;
 
-    // Update job last_run_at + status = running
     this.db.prepare(`
       UPDATE batch_jobs SET last_run_at = ?, last_run_status = 'running' WHERE id = ?
     `).run(startedAt, jobId);
 
-    // Create abort controller
     const ac = new AbortController();
     this.abortControllers.set(jobId, ac);
 
-    console.log(`[batch] starting job "${jobId}" (trigger=${trigger}, runId=${runId})`);
+    console.log(`[batch] starting job "${jobId}" (trigger=${trigger}, slot=${slotTime ?? 'none'}, runId=${runId})`);
 
     let result: BatchJobResult;
     try {
       result = await handler.run(
-        (evt) => {
-          // Enrich with runId and relay
-          this.onProgress({ ...evt, runId });
-        },
+        (evt) => { this.onProgress({ ...evt, runId }); },
         ac.signal,
-        force
+        force,
+        trigger,
+        slotTime ?? null,
       );
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -270,43 +310,11 @@ export class BatchService {
       this.runningJobId = null;
     }
 
-    // cancelJob() already wrote 'cancelled' to the DB and freed the running slot.
-    // Don't overwrite that state with the job's eventual return value.
     if (ac.signal.aborted) return;
 
     const completedAt = new Date().toISOString();
+    this._writeRunResult(runId, jobId, completedAt, result);
 
-    // Update run record
-    this.db.prepare(`
-      UPDATE batch_runs
-      SET completed_at = ?, status = ?,
-          tickers_attempted = ?, tickers_updated = ?,
-          tickers_skipped = ?, tickers_failed = ?,
-          notes = ?, error_message = ?
-      WHERE id = ?
-    `).run(
-      completedAt,
-      result.status,
-      result.tickersAttempted,
-      result.tickersUpdated,
-      result.tickersSkipped,
-      result.tickersFailed,
-      result.notes ?? null,
-      result.errorMessage ?? null,
-      runId
-    );
-
-    // Update job metadata
-    const today = this.todayET();
-    const lastSuccessDate = (result.status === 'success' || result.status === 'skipped') ? today : null;
-    this.db.prepare(`
-      UPDATE batch_jobs
-      SET last_run_at = ?, last_run_status = ?, last_success_date = COALESCE(?, last_success_date)
-      WHERE id = ?
-    `).run(completedAt, result.status, lastSuccessDate, jobId);
-
-    // Emit notification — job-supplied notification takes priority (e.g. auth CTA),
-    // otherwise fall back to the standard success / failed / skipped messages.
     const jobRow = this._getJobRow(jobId);
     const jobName = jobRow?.name ?? jobId;
     if (result.notification) {
@@ -335,13 +343,78 @@ export class BatchService {
       });
     }
 
-    // Prune runs older than 30 days for this job
     this.db.prepare(`
       DELETE FROM batch_runs
       WHERE job_id = ? AND started_at < datetime('now', '-30 days')
     `).run(jobId);
 
     console.log(`[batch] job "${jobId}" finished: status=${result.status}`);
+  }
+
+  // ── Run a job directly (called by orchestrator — no mutex, no notification) ─
+
+  /**
+   * Run a job handler directly without acquiring the outer mutex.
+   * Intended for use by the BatchOrchestratorJob, which already holds the slot.
+   * Records the run in batch_runs (with trigger + slot_time) and updates
+   * batch_jobs metadata so per-job history is preserved exactly as if the
+   * job had been called via runJob().
+   *
+   * Does NOT emit AppNotifications — the orchestrator owns messaging.
+   */
+  async runJobDirect(
+    jobId: string,
+    trigger: RunTrigger,
+    slotTime: string | null,
+    signal: AbortSignal,
+    force = false,
+  ): Promise<BatchJobResult> {
+    const handler = this.handlers.get(jobId);
+    if (!handler) {
+      return {
+        status: 'failed',
+        errorMessage: `No handler registered for job "${jobId}"`,
+        tickersAttempted: 0, tickersUpdated: 0, tickersSkipped: 0, tickersFailed: 0,
+      };
+    }
+
+    const startedAt = new Date().toISOString();
+
+    const insertResult = this.db.prepare(`
+      INSERT INTO batch_runs (job_id, started_at, status, trigger, slot_time)
+      VALUES (?, ?, 'running', ?, ?)
+    `).run(jobId, startedAt, trigger, slotTime);
+    const runId = insertResult.lastInsertRowid as number;
+
+    this.db.prepare(`
+      UPDATE batch_jobs SET last_run_at = ?, last_run_status = 'running' WHERE id = ?
+    `).run(startedAt, jobId);
+
+    console.log(`[batch] runJobDirect "${jobId}" (trigger=${trigger}, slot=${slotTime ?? 'none'}, runId=${runId})`);
+
+    let result: BatchJobResult;
+    try {
+      result = await handler.run(
+        (evt) => { this.onProgress({ ...evt, runId }); },
+        signal,
+        force,
+        trigger,
+        slotTime,
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      result = {
+        status: 'failed',
+        errorMessage: msg,
+        tickersAttempted: 0, tickersUpdated: 0, tickersSkipped: 0, tickersFailed: 0,
+      };
+    }
+
+    if (!signal.aborted) {
+      this._writeRunResult(runId, jobId, new Date().toISOString(), result);
+    }
+
+    return result;
   }
 
   // ── Cancel a running job ──────────────────────────────────────────────────
@@ -352,8 +425,6 @@ export class BatchService {
       ac.abort();
       console.log(`[batch] cancel requested for "${jobId}"`);
 
-      // Immediately reflect cancellation in the DB so the UI updates right away,
-      // rather than waiting for the hung Promise to eventually settle.
       const now = new Date().toISOString();
       this.db.prepare(`
         UPDATE batch_runs SET status = 'cancelled', completed_at = ?
@@ -363,10 +434,42 @@ export class BatchService {
         UPDATE batch_jobs SET last_run_status = 'cancelled' WHERE id = ?
       `).run(jobId);
 
-      // Free the running slot so new jobs can start without waiting for the
-      // hung Promise to resolve.
       this.runningJobId = null;
     }
+  }
+
+  // ── Orchestrator helpers ──────────────────────────────────────────────────
+
+  /**
+   * Returns all non-orchestrator jobs in sequence_order, filtered to those
+   * enabled in the orchestrator config. Jobs not present in configJobs default
+   * to enabled (handles new jobs added after config was last saved).
+   */
+  getSubJobs(configJobs: OrchestratorJobEntry[]): BatchJob[] {
+    const all = this._getJobRows()
+      .filter(j => j.id !== 'batch-orchestrator')
+      .sort((a, b) => a.sequence_order - b.sequence_order)
+      .map(j => this._mapJobRow(j));
+
+    if (configJobs.length === 0) return all;
+
+    const enabledById = new Map(configJobs.map(c => [c.id, c.enabled]));
+    return all.filter(j => enabledById.get(j.id) !== false);
+  }
+
+  getOrchestratorConfig(): OrchestratorJobConfig {
+    const row = this._getJobRow('batch-orchestrator');
+    if (!row?.config_json) {
+      return { scheduleSlots: [], validateEtradeToken: true, emailOnStart: true, jobs: [] };
+    }
+    return JSON.parse(row.config_json) as OrchestratorJobConfig;
+  }
+
+  getLastRun(jobId: string): BatchRun | null {
+    const row = this.db.prepare(`
+      SELECT * FROM batch_runs WHERE job_id = ? ORDER BY started_at DESC LIMIT 1
+    `).get(jobId) as BatchRunRow | undefined;
+    return row ? this._mapRunRow(row) : null;
   }
 
   // ── Queries ───────────────────────────────────────────────────────────────
@@ -407,7 +510,6 @@ export class BatchService {
       this.db.prepare(`UPDATE batch_jobs SET sequence_order = ? WHERE id = ?`).run(patch.sequenceOrder, jobId);
     }
     if (patch.config !== undefined) {
-      // Merge into existing config so unrelated keys are preserved.
       const existing = this._getJobRow(jobId);
       const current = existing?.config_json ? (JSON.parse(existing.config_json) as Record<string, unknown>) : {};
       const merged = { ...current, ...patch.config };
@@ -415,16 +517,41 @@ export class BatchService {
     }
   }
 
-  /**
-   * Persist a new sequence order for all jobs. `jobIds` is the full ordered list;
-   * each job gets sequence_order = its 1-based position in the array.
-   */
   reorderJobs(jobIds: string[]): void {
     const stmt = this.db.prepare(`UPDATE batch_jobs SET sequence_order = ? WHERE id = ?`);
     jobIds.forEach((id, idx) => stmt.run(idx + 1, id));
   }
 
   // ── Internal helpers ──────────────────────────────────────────────────────
+
+  private _writeRunResult(runId: number, jobId: string, completedAt: string, result: BatchJobResult): void {
+    this.db.prepare(`
+      UPDATE batch_runs
+      SET completed_at = ?, status = ?,
+          tickers_attempted = ?, tickers_updated = ?,
+          tickers_skipped = ?, tickers_failed = ?,
+          notes = ?, error_message = ?
+      WHERE id = ?
+    `).run(
+      completedAt,
+      result.status,
+      result.tickersAttempted,
+      result.tickersUpdated,
+      result.tickersSkipped,
+      result.tickersFailed,
+      result.notes ?? null,
+      result.errorMessage ?? null,
+      runId
+    );
+
+    const today = this.todayET();
+    const lastSuccessDate = (result.status === 'success' || result.status === 'skipped') ? today : null;
+    this.db.prepare(`
+      UPDATE batch_jobs
+      SET last_run_at = ?, last_run_status = ?, last_success_date = COALESCE(?, last_success_date)
+      WHERE id = ?
+    `).run(completedAt, result.status, lastSuccessDate, jobId);
+  }
 
   private _getJobRows(): BatchJobRow[] {
     return this.db.prepare(`SELECT * FROM batch_jobs ORDER BY sequence_order ASC, id`).all() as BatchJobRow[];
@@ -455,12 +582,15 @@ export class BatchService {
 
   private _mapRunRow(row: BatchRunRow): BatchRun {
     const status = row.status as BatchRun['status'];
+    const trigger = (['manual', 'schedule', 'startup'] as const).includes(row.trigger as BatchRun['trigger'])
+      ? (row.trigger as BatchRun['trigger'])
+      : 'manual';
     return {
       id: row.id,
       jobId: row.job_id,
       startedAt: row.started_at,
       completedAt: row.completed_at,
-      status: (['running', 'success', 'failed', 'skipped', 'cancelled'] as const).includes(status as BatchRun['status'])
+      status: (['running', 'success', 'failed', 'skipped', 'cancelled'] as const).includes(status)
         ? status
         : 'failed',
       tickersAttempted: row.tickers_attempted,
@@ -469,6 +599,8 @@ export class BatchService {
       tickersFailed: row.tickers_failed,
       notes: row.notes,
       errorMessage: row.error_message,
+      trigger,
+      slotTime: row.slot_time,
     };
   }
 

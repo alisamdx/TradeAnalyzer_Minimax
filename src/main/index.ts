@@ -71,6 +71,7 @@ import { registerNewsIpc } from './ipc/ipc-news.js';
 import { EarningsService } from './services/earnings-service.js';
 import { registerEarningsIpc } from './ipc/ipc-earnings.js';
 import { EarningsRefreshJob } from './services/jobs/earnings-refresh-job.js';
+import { BatchOrchestratorJob } from './services/jobs/batch-orchestrator-job.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -481,6 +482,25 @@ app.whenReady().then(() => {
     defaultConfig: { callDelayMs: 500 }, // conservative default — avoids E*Trade 429s
   });
 
+  // Batch Orchestrator — registered last so all sub-jobs are already in batch_jobs.
+  // Seeded at sequence_order=1 (migration 037 shifted all others by +1).
+  // Reads its own schedule from config_json.scheduleSlots; daily_schedule_time
+  // is set to '10:15' only for legacy display fallback.
+  const orchestratorJob = new BatchOrchestratorJob(batchService, getEtradeCreds, emailService);
+  const orchestratorSeedConfig = {
+    scheduleSlots: [] as string[],
+    validateEtradeToken: true,
+    emailOnStart: true,
+    jobs: batchService.getJobs().map(j => ({ id: j.id, enabled: true })),
+  };
+  batchService.registerJob('batch-orchestrator', orchestratorJob, {
+    sequenceOrder: 1,
+    runOnStartup: false,
+    dailyScheduleEnabled: true,
+    dailyScheduleTime: '10:15',
+    defaultConfig: orchestratorSeedConfig,
+  });
+
   // v0.12.0 — TraderAgent integration
   const agentDb = new AgentDbService();
   // Open the agent DB if a path is already saved in settings
@@ -508,6 +528,7 @@ app.whenReady().then(() => {
     strategyLabService: new StrategyLabService(dataProvider, optionsProvider),
     criticService: new CriticService(db),
     scoringService,
+    batchService,
     appVersion: app.getVersion()
   });
   _apiServer.start(apiPort).catch((err) => {

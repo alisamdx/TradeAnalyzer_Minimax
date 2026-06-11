@@ -1,10 +1,10 @@
 // BatchView — shows registered batch jobs and their run history.
 // Top panel: job table with edit/run controls.
 // Bottom panel: run history for selected job.
-// v0.21.0
+// v0.33.0 — Orchestrator: dedicated config modal, trigger/slotTime in history, excluded from sequence.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { BatchJob, BatchRun, BatchProgressEvent } from '@shared/types.js';
+import type { BatchJob, BatchRun, BatchProgressEvent, OrchestratorJobConfig } from '@shared/types.js';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -202,6 +202,114 @@ function EditModal({ job, onSave, onClose }: EditModalProps) {
   );
 }
 
+// ─── Orchestrator config modal ────────────────────────────────────────────────
+
+interface OrchestratorEditModalProps {
+  job: BatchJob;
+  allJobs: BatchJob[];
+  onSave: (patch: Partial<BatchJob>) => void;
+  onClose: () => void;
+}
+
+function OrchestratorEditModal({ job, allJobs, onSave, onClose }: OrchestratorEditModalProps) {
+  const cfg = (job.config ?? {}) as Partial<OrchestratorJobConfig>;
+  const subJobs = allJobs.filter(j => j.id !== 'batch-orchestrator');
+
+  const [enabled, setEnabled] = useState(job.enabled);
+  const [scheduleEnabled, setScheduleEnabled] = useState(job.dailyScheduleEnabled);
+  const [validateToken, setValidateToken] = useState(cfg.validateEtradeToken ?? true);
+  const [emailOnStart, setEmailOnStart] = useState(cfg.emailOnStart ?? true);
+
+  // Build a map of enabled flags from config; default to true for any unlisted job
+  const initialEnabled = Object.fromEntries(
+    subJobs.map(j => {
+      const entry = (cfg.jobs ?? []).find(c => c.id === j.id);
+      return [j.id, entry ? entry.enabled : true];
+    })
+  );
+  const [jobEnabled, setJobEnabled] = useState<Record<string, boolean>>(initialEnabled);
+
+  const handleSave = () => {
+    const updatedConfig: OrchestratorJobConfig = {
+      scheduleSlots: cfg.scheduleSlots ?? [],
+      validateEtradeToken: validateToken,
+      emailOnStart,
+      jobs: subJobs.map(j => ({ id: j.id, enabled: jobEnabled[j.id] ?? true })),
+    };
+    onSave({
+      enabled,
+      dailyScheduleEnabled: scheduleEnabled,
+      config: updatedConfig as unknown as Record<string, unknown>,
+    });
+    onClose();
+  };
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 10000,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }}>
+      <div style={{
+        background: '#1e2535', border: '1px solid #2d3748', borderRadius: 10,
+        padding: 24, minWidth: 420, maxWidth: 520, maxHeight: '85vh', overflowY: 'auto',
+      }}>
+        <h3 style={{ margin: '0 0 16px', color: '#ecf0f1' }}>⚙ Edit: Batch Orchestrator</h3>
+
+        <div className="settings-section">
+          <div className="settings-row">
+            <label>Enabled</label>
+            <input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} />
+          </div>
+          <div className="settings-row">
+            <label>Daily schedule enabled</label>
+            <input type="checkbox" checked={scheduleEnabled} onChange={e => setScheduleEnabled(e.target.checked)} />
+          </div>
+        </div>
+
+        <div style={{ color: '#666', fontSize: 11, marginTop: 6, marginBottom: 16 }}>
+          Schedule slot times (e.g. "10:15", "16:30") are stored in config_json.scheduleSlots — edit via the raw config editor.
+        </div>
+
+        <div style={{ color: '#89b4fa', fontWeight: 600, fontSize: 13, marginBottom: 8 }}>Settings</div>
+        <div className="settings-section">
+          <div className="settings-row">
+            <label>Validate E*Trade token before start</label>
+            <input type="checkbox" checked={validateToken} onChange={e => setValidateToken(e.target.checked)} />
+          </div>
+          <div className="settings-row">
+            <label>Send email on start</label>
+            <input type="checkbox" checked={emailOnStart} onChange={e => setEmailOnStart(e.target.checked)} />
+          </div>
+        </div>
+
+        <div style={{ color: '#89b4fa', fontWeight: 600, fontSize: 13, margin: '16px 0 8px' }}>
+          Jobs to run <span style={{ color: '#666', fontWeight: 400 }}>(in current sequence order)</span>
+        </div>
+        <div className="settings-section">
+          {subJobs.map(j => (
+            <div key={j.id} className="settings-row">
+              <label style={{ flex: 1 }}>
+                {j.name}
+                {!j.enabled && <span style={{ marginLeft: 6, fontSize: 11, color: '#555' }}>(job disabled)</span>}
+              </label>
+              <input
+                type="checkbox"
+                checked={jobEnabled[j.id] ?? true}
+                onChange={e => setJobEnabled(prev => ({ ...prev, [j.id]: e.target.checked }))}
+              />
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display: 'flex', gap: 10, marginTop: 20, justifyContent: 'flex-end' }}>
+          <button onClick={onClose}>Cancel</button>
+          <button className="action-btn" onClick={handleSave} style={{ background: '#2980b9', color: '#fff', border: 'none', padding: '6px 18px', borderRadius: 6 }}>Save</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main view ────────────────────────────────────────────────────────────────
 
 const MAX_LIVE_EVENTS = 300;
@@ -346,7 +454,7 @@ export function BatchView() {
   const handleRunAllSequence = async () => {
     if (seqActive || runningJobId !== null) return;
     const queue = jobs
-      .filter(j => j.enabled)
+      .filter(j => j.enabled && j.id !== 'batch-orchestrator')
       .sort((a, b) => a.sequenceOrder - b.sequenceOrder)
       .map(j => j.id);
     if (queue.length === 0) return;
@@ -508,16 +616,19 @@ export function BatchView() {
             <tbody>
               {jobs.map(job => {
                 const isRunning = job.lastRunStatus === 'running';
+                const isOrch = job.id === 'batch-orchestrator';
                 return (
                   <tr
                     key={job.id}
                     className={selectedJobId === job.id ? 'selected' : ''}
                     onClick={() => setSelectedJobId(job.id)}
-                    style={{ cursor: 'pointer' }}
+                    style={{ cursor: 'pointer', background: isOrch ? 'rgba(137,180,250,0.04)' : undefined }}
                   >
                     <td style={{ textAlign: 'center', color: '#555', fontSize: 12 }}>{job.sequenceOrder}</td>
                     <td>
-                      <strong style={{ color: job.enabled ? '#ecf0f1' : '#666' }}>{job.name}</strong>
+                      <strong style={{ color: job.enabled ? (isOrch ? '#89b4fa' : '#ecf0f1') : '#666' }}>
+                        {isOrch ? '⚙ ' : ''}{job.name}
+                      </strong>
                       {!job.enabled && <span style={{ marginLeft: 6, fontSize: 11, color: '#555' }}>(disabled)</span>}
                     </td>
                     <td style={{ color: '#95a5a6', maxWidth: 280, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -572,6 +683,7 @@ export function BatchView() {
                   <th>Started</th>
                   <th>Duration</th>
                   <th>Status</th>
+                  <th>Trigger</th>
                   <th>Updated ✓</th>
                   <th>Skipped —</th>
                   <th>Failed ✗</th>
@@ -579,11 +691,18 @@ export function BatchView() {
                 </tr>
               </thead>
               <tbody>
-                {runs.map(run => (
+                {runs.map(run => {
+                  const triggerLabel = run.slotTime
+                    ? `sched ${run.slotTime}`
+                    : run.trigger === 'schedule' ? 'sched'
+                    : run.trigger === 'startup'  ? 'startup'
+                    : 'manual';
+                  return (
                   <tr key={run.id}>
                     <td style={{ color: '#95a5a6', fontSize: 12, whiteSpace: 'nowrap' }}>{formatTime(run.startedAt)}</td>
                     <td style={{ color: '#95a5a6', fontSize: 12 }}>{formatDuration(run.startedAt, run.completedAt)}</td>
                     <td><StatusBadge status={run.status} small /></td>
+                    <td style={{ color: '#89b4fa', fontSize: 11 }}>{triggerLabel}</td>
                     <td style={{ color: '#2ecc71', textAlign: 'center' }}>{run.tickersUpdated || '—'}</td>
                     <td style={{ color: '#95a5a6', textAlign: 'center' }}>{run.tickersSkipped || '—'}</td>
                     <td style={{ color: run.tickersFailed > 0 ? '#e74c3c' : '#95a5a6', textAlign: 'center' }}>{run.tickersFailed || '—'}</td>
@@ -599,7 +718,8 @@ export function BatchView() {
                       ) : '—'}
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
         )}
@@ -699,11 +819,20 @@ export function BatchView() {
 
       {/* ── Edit modal ── */}
       {editJob && (
-        <EditModal
-          job={editJob}
-          onSave={(patch) => handleSaveConfig(editJob.id, patch)}
-          onClose={() => setEditJob(null)}
-        />
+        editJob.id === 'batch-orchestrator' ? (
+          <OrchestratorEditModal
+            job={editJob}
+            allJobs={jobs}
+            onSave={(patch) => handleSaveConfig(editJob.id, patch)}
+            onClose={() => setEditJob(null)}
+          />
+        ) : (
+          <EditModal
+            job={editJob}
+            onSave={(patch) => handleSaveConfig(editJob.id, patch)}
+            onClose={() => setEditJob(null)}
+          />
+        )
       )}
     </div>
     </div>

@@ -1505,6 +1505,20 @@ export interface BatchRun {
   tickersFailed: number;
   notes: string | null;
   errorMessage: string | null;
+  trigger: 'manual' | 'schedule' | 'startup';
+  slotTime: string | null;
+}
+
+export interface OrchestratorJobEntry {
+  id: string;
+  enabled: boolean;
+}
+
+export interface OrchestratorJobConfig {
+  scheduleSlots: string[];
+  validateEtradeToken: boolean;
+  emailOnStart: boolean;
+  jobs: OrchestratorJobEntry[];
 }
 
 export interface AppNotification {
