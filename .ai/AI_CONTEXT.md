@@ -2,7 +2,7 @@
 
 > **Read this first.** Self-contained snapshot of *what the app is today* so a fresh AI session is productive without re-reading the whole codebase. This file describes **current state** — not history. Release history lives in `CHANGELOG.md` / `changelogs/`. Operating rules live in `/CLAUDE.md`. Full spec lives in `Requirements/`.
 >
-> Last verified against code: 2026-06-10 (v0.32.70). When you make a material change, update the relevant section here in the same commit.
+> Last verified against code: 2026-06-11 (v0.32.72). When you make a material change, update the relevant section here in the same commit.
 
 ---
 
@@ -140,7 +140,7 @@ Routing is a `currentView` string in `App.tsx`; cross-view navigation fires Cust
 
 **Infra**: `batch-service.ts`, `rate-limiter.ts`, `job-queue.ts`, `secure-settings.ts`, `logger.ts`, `csv.ts`, `backtest-engine.ts`, `backtest-metrics.ts`, `alerts-service.ts`, `agent-db-service.ts`.
 
-**Batch jobs** (`services/jobs/`, registered in `index.ts`): `daily-iv-capture` · `daily-market-sync-stocks`/`-etfs` (`market-sync-job.ts`) · `daily-screener-job` · `price-gap-fill-job` · `daily-technical-signals-job` · `daily-intelligence-brief-job` · `daily-options-snapshot-job` · `daily-paper-snapshot-job` · `earnings-refresh-job`. Most chain at 16:30 ET under the scheduler mutex.
+**Batch jobs** (`services/jobs/`, registered in `index.ts`): `batch-orchestrator-job` (sequence 1) · `daily-iv-capture` · `daily-market-sync-stocks`/`-etfs` (`market-sync-job.ts`) · `daily-screener-job` · `price-gap-fill-job` · `daily-technical-signals-job` · `daily-intelligence-brief-job` · `daily-options-snapshot-job` · `daily-paper-snapshot-job` · `earnings-refresh-job`.
 
 ---
 
@@ -148,7 +148,7 @@ Routing is a `currentView` string in `App.tsx`; cross-view navigation fires Cust
 
 Authoritative DDL is in `migrations/`. Tables are created lazily (`CREATE TABLE IF NOT EXISTS`) and migrations are idempotent + count-agnostic in tests.
 
-35 migrations. `positions.position_type` CHECK now includes `'Long Put'` and `'Long Call'` (migration 036) — all multi-leg strategy legs are tracked.
+37 migrations. `positions.position_type` CHECK now includes `'Long Put'` and `'Long Call'` (migration 036). `batch_runs` has `trigger TEXT NOT NULL DEFAULT 'manual'` and `slot_time TEXT` (migration 037). Migration 037 also shifted all `batch_jobs.sequence_order` +1 to reserve position 1 for the orchestrator — all multi-leg strategy legs are tracked.
 
 | Domain | Tables |
 | --- | --- |
@@ -216,6 +216,8 @@ Authoritative DDL is in `migrations/`. Tables are created lazily (`CREATE TABLE 
 - **Earnings & analyst data** are E*Trade-sourced (earnings) / Polygon-sourced; no Polygon public earnings endpoint exists.
 - **Production DB path**: packaged → `app.getPath('userData')/trade-analyzer.sqlite` (`%AppData%/trade-analyzer/`); dev → `<appPath>/data/`.
 - **Live-DB inspection needs a write-capable connection** — `readonly: true` on Windows can't attach the WAL's `-shm` index and silently reads only pre-checkpoint state (recent writes look missing for minutes). Use `new Database(path)` for ad-hoc queries while the app runs; plain SELECTs are safe in WAL mode.
+- **Batch Orchestrator** (`batch-orchestrator-job.ts`, id `batch-orchestrator`) is the only job that should have a schedule. Its schedule slots live in `config_json.scheduleSlots` (string array of `'HH:MM'` ET times); `daily_schedule_time` is kept as a display fallback. The `checkSchedule()` multi-slot path fires each slot at most once per day (tracked via `batch_runs.slot_time`). All other jobs should have their individual schedules disabled. The orchestrator calls sub-jobs via `BatchService.runJobDirect()` (no mutex, no notifications). "Run All in Sequence" button excludes the orchestrator (`id !== 'batch-orchestrator'` filter). Remote trigger via `POST /api/v1/orchestrator/run` (X-Agent-Token auth) returns immediately; poll `GET /api/v1/orchestrator/status`.
+- **`batch_runs.trigger`** (`'manual'|'schedule'|'startup'`) and **`batch_runs.slot_time`** are set on every run including sub-jobs called by the orchestrator (they inherit the orchestrator's trigger and slot_time).
 - **Fake-timer tests** use `flushTimersUntil()`, not `vi.runAllTimers()` (the rate limiter's promise chain won't drain otherwise).
 
 ---

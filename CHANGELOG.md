@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.32.72] — 2026-06-11
+
+### Fixed
+- **Orchestrator Edit modal: schedule slots now editable** — replaced the "use raw config editor" note with a full slot manager: list current slots with remove (✕) buttons, add new slots via HH:MM input (Enter or + Add), auto-sorted, duplicate/format validation. The Schedule column in the jobs table now shows the orchestrator's actual `scheduleSlots` instead of the unused `dailyScheduleTime` fallback.
+
+## [0.32.71] — 2026-06-11
+
+### Added
+- **Batch Orchestrator** — new `BatchOrchestratorJob` (`batch-orchestrator`, sequence position 1) is the single scheduled job that drives all others. Features: non-trading day guard (scheduled runs only), E*Trade token renewal check, consolidated start email (token status + resume state + outcome), stop-on-first-failure, natural resume via per-job `last_success_date`, multi-slot scheduling (`config_json.scheduleSlots` — each slot fires at most once per day). Sub-jobs are called via `BatchService.runJobDirect()` so their full run history is preserved. "Run All in Sequence" button excludes the orchestrator. Custom orchestrator config modal in Batch Jobs view: job enable/disable list (in sequence order), validateEtradeToken + emailOnStart toggles.
+- **Remote trigger** — `POST /api/v1/orchestrator/run` + `GET /api/v1/orchestrator/status` routes (X-Agent-Token auth) allow triggering and polling from Termius / Claude Code CLI when away from home.
+- **Trigger context in run history** — `batch_runs.trigger` (`manual|schedule|startup`) and `batch_runs.slot_time` are recorded on every run. Batch Jobs view shows a Trigger column in run history.
+- **Migration 037** — shifts all `batch_jobs.sequence_order` +1 to reserve position 1 for the orchestrator; adds `trigger` and `slot_time` columns to `batch_runs`.
+
 ## [0.32.70] — 2026-06-10
 
 ### Changed

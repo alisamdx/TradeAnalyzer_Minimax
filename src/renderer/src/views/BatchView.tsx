@@ -219,8 +219,10 @@ function OrchestratorEditModal({ job, allJobs, onSave, onClose }: OrchestratorEd
   const [scheduleEnabled, setScheduleEnabled] = useState(job.dailyScheduleEnabled);
   const [validateToken, setValidateToken] = useState(cfg.validateEtradeToken ?? true);
   const [emailOnStart, setEmailOnStart] = useState(cfg.emailOnStart ?? true);
+  const [slots, setSlots] = useState<string[]>(cfg.scheduleSlots ?? []);
+  const [newSlot, setNewSlot] = useState('');
+  const [slotError, setSlotError] = useState('');
 
-  // Build a map of enabled flags from config; default to true for any unlisted job
   const initialEnabled = Object.fromEntries(
     subJobs.map(j => {
       const entry = (cfg.jobs ?? []).find(c => c.id === j.id);
@@ -229,9 +231,22 @@ function OrchestratorEditModal({ job, allJobs, onSave, onClose }: OrchestratorEd
   );
   const [jobEnabled, setJobEnabled] = useState<Record<string, boolean>>(initialEnabled);
 
+  const addSlot = () => {
+    const trimmed = newSlot.trim();
+    if (!/^\d{2}:\d{2}$/.test(trimmed)) { setSlotError('Use HH:MM format (e.g. 10:15)'); return; }
+    const [h, m] = trimmed.split(':').map(Number);
+    if (h! > 23 || m! > 59) { setSlotError('Invalid time'); return; }
+    if (slots.includes(trimmed)) { setSlotError('Slot already added'); return; }
+    setSlots(prev => [...prev, trimmed].sort());
+    setNewSlot('');
+    setSlotError('');
+  };
+
+  const removeSlot = (s: string) => setSlots(prev => prev.filter(x => x !== s));
+
   const handleSave = () => {
     const updatedConfig: OrchestratorJobConfig = {
-      scheduleSlots: cfg.scheduleSlots ?? [],
+      scheduleSlots: slots,
       validateEtradeToken: validateToken,
       emailOnStart,
       jobs: subJobs.map(j => ({ id: j.id, enabled: jobEnabled[j.id] ?? true })),
@@ -266,11 +281,43 @@ function OrchestratorEditModal({ job, allJobs, onSave, onClose }: OrchestratorEd
           </div>
         </div>
 
-        <div style={{ color: '#666', fontSize: 11, marginTop: 6, marginBottom: 16 }}>
-          Schedule slot times (e.g. "10:15", "16:30") are stored in config_json.scheduleSlots — edit via the raw config editor.
+        {/* ── Schedule slots ── */}
+        <div style={{ color: '#89b4fa', fontWeight: 600, fontSize: 13, margin: '16px 0 8px' }}>
+          Schedule Slots <span style={{ color: '#666', fontWeight: 400 }}>(ET times — each fires at most once per day)</span>
+        </div>
+        <div className="settings-section">
+          {slots.length === 0 ? (
+            <div style={{ color: '#555', fontSize: 12, padding: '6px 0' }}>No slots configured — add one below.</div>
+          ) : (
+            slots.map(s => (
+              <div key={s} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid #2d3748' }}>
+                <span style={{ color: '#89b4fa', fontFamily: 'monospace', fontSize: 13 }}>{s} ET</span>
+                <button
+                  onClick={() => removeSlot(s)}
+                  style={{ background: 'none', border: 'none', color: '#e74c3c', cursor: 'pointer', fontSize: 14, padding: '0 4px' }}
+                  title="Remove slot"
+                >✕</button>
+              </div>
+            ))
+          )}
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 10 }}>
+            <input
+              type="text"
+              placeholder="HH:MM"
+              value={newSlot}
+              onChange={e => { setNewSlot(e.target.value); setSlotError(''); }}
+              onKeyDown={e => e.key === 'Enter' && addSlot()}
+              style={{ width: 70, background: '#131b2e', border: '1px solid #3d4f6e', borderRadius: 4, color: '#ecf0f1', padding: '4px 8px', fontSize: 13 }}
+            />
+            <button
+              onClick={addSlot}
+              style={{ padding: '4px 12px', borderRadius: 5, border: '1px solid #2ecc71', background: '#1e2535', color: '#2ecc71', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}
+            >+ Add</button>
+            {slotError && <span style={{ color: '#e74c3c', fontSize: 11 }}>{slotError}</span>}
+          </div>
         </div>
 
-        <div style={{ color: '#89b4fa', fontWeight: 600, fontSize: 13, marginBottom: 8 }}>Settings</div>
+        <div style={{ color: '#89b4fa', fontWeight: 600, fontSize: 13, margin: '16px 0 8px' }}>Settings</div>
         <div className="settings-section">
           <div className="settings-row">
             <label>Validate E*Trade token before start</label>
@@ -640,7 +687,14 @@ export function BatchView() {
                         : <span style={{ color: '#555', fontSize: 11 }}>off</span>}
                     </td>
                     <td>
-                      {job.dailyScheduleEnabled
+                      {isOrch ? (
+                        (() => {
+                          const orchSlots = (job.config as Partial<OrchestratorJobConfig> | undefined)?.scheduleSlots ?? [];
+                          return job.dailyScheduleEnabled && orchSlots.length > 0
+                            ? <span style={{ color: '#89b4fa', fontSize: 11 }}>{orchSlots.join(', ')} ET</span>
+                            : <span style={{ color: '#555', fontSize: 11 }}>{job.dailyScheduleEnabled ? 'on (no slots)' : 'off'}</span>;
+                        })()
+                      ) : job.dailyScheduleEnabled
                         ? <span style={{ color: '#89b4fa', fontSize: 11 }}>{job.dailyScheduleTime} ET</span>
                         : <span style={{ color: '#555', fontSize: 11 }}>off</span>}
                     </td>
