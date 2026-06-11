@@ -15,8 +15,26 @@ const STRATEGY_RELEVANT_SLUGS: Record<string, string[]> = {
   buy:     ['long-call-vertical', 'call-zebra', 'poor-mans-covered-call', 'call-calendar'],
 };
 
-// Grade ordering for structure quality checks (A=best, F=worst)
-const GRADE_RANK: Record<string, number> = { A: 5, B: 4, C: 3, D: 2, F: 1 };
+// Grade ordering for structure quality checks (A+=best, F=worst).
+// 'A+' must be present: lab grades include it, and a missing key ranks 0 (below F).
+const GRADE_RANK: Record<string, number> = { 'A+': 6, A: 5, B: 4, C: 3, D: 2, F: 1 };
+
+// Shape of strategy-lab scores embedded in BriefPick.strategyLabResult.
+// One definition shared by every rule/context consumer so they all select
+// the SAME structure — a flag citing one structure's liquidity while the
+// LLM context shows another's confuses the critic (observed: HAYW 5/15 vs 3/15).
+interface LabStructureScore {
+  slug: string;
+  grade: string;
+  liquidityScore: number;
+  setup: {
+    expiration: string;
+    netCredit: number | null;
+    legs: Array<{ strike: number; action: string }>;
+    unavailableReason?: string | null;
+  } | null;
+}
+interface LabResultShape { scores?: LabStructureScore[] }
 
 export interface MarketContext {
   vix: number | null;
@@ -73,6 +91,7 @@ export class CriticService {
     f(this.checkAnomalousMomentum(pick));
     f(this.checkEarningsInWindow(pick, strategy));
     f(this.checkStructureGrade(pick, strategy));
+    f(this.checkCounterTrendStrike(pick, strategy, market));
 
     return flags;
   }
@@ -101,18 +120,15 @@ export class CriticService {
         .slice(0, 4)
         .map(([key, v]) => ({ key, raw: v.raw, normalized: v.normalized, weight: v.weight }));
 
-      // Extract best relevant structure from strategy lab result for context.
-      // Must exclude structures with unavailableReason — they have non-null setup objects
-      // but no actionable legs/strikes, so the LLM would see misleading grade-F ghost data.
-      type SScore = { slug: string; grade: string; liquidityScore: number; setup: { expiration: string; netCredit: number | null; legs: Array<{ strike: number; action: string }>; unavailableReason?: string | null } | null };
-      type LabRes = { scores?: SScore[] };
-      const labResult = pick.strategyLabResult as LabRes | null;
-      const slugs = STRATEGY_RELEVANT_SLUGS[strategy] ?? [];
+      // Extract the chosen relevant structure for context via the shared selector —
+      // the same structure every rule check refers to. Structures with
+      // unavailableReason are excluded (non-null setup but no actionable legs).
       let structure: Record<string, unknown> | null = null;
       let structureExpiry: string | null = null;
+      const presentAsStock = this.shouldPresentAsStock(pick, strategy);
 
-      if (labResult?.scores) {
-        const best = labResult.scores.find(s => slugs.includes(s.slug) && s.setup != null && !s.setup.unavailableReason);
+      {
+        const best = this.selectRelevantStructure(pick, strategy);
         if (best?.setup) {
           const shortLeg = best.setup.legs.find(l => l.action === 'sell');
           const credit = best.setup.netCredit;
@@ -148,6 +164,10 @@ export class CriticService {
             liquidityScore: best.liquidityScore,
             ...(strikeOtmPct !== null && { strikeOtmPct }),
             ...(breakevenDistancePct !== null && { breakevenDistancePct }),
+            ...(presentAsStock && {
+              presentation: 'stock purchase — all option structures graded C/F in the current IV regime; ' +
+                'the structure above is an optional alternative, not the recommendation',
+            }),
           };
         }
       }
@@ -197,15 +217,16 @@ VERDICT CALIBRATION (apply precisely):
 - 'caution': A real but manageable risk exists, or an important condition to verify before acting.
 - 'flag': A significant risk that may invalidate the thesis or cause material loss.
 Do NOT default to 'caution' — only raise an issue if it is specific and actionable. Generic market risk is not a caution.
+FLAG SEVERITIES: 'warning' flags indicate material risk. 'info' flags are advisory only — a pick whose only flags are info-severity can still merit 'pass'; mention the advisory briefly but do not let it alone drive a 'caution'.
 
 MARKET DATA: All values in \`marketData\` are live as of \`date\` from real-time feeds — treat them as ground truth. Do not use training knowledge to contradict provided prices; stocks change dramatically over years of training lag. \`price52wReturnPct\` shows the 1-year return so you can calibrate price level without recalling historical absolutes.
-STRUCTURE: \`dte\` is pre-computed calendar days to expiry. \`strikeOtmPct\` is how far the short strike is from current price (positive = OTM). \`breakevenDistancePct\` (income only) is how far price can move before the structure loses — compare this to expected 1-sigma move (annualized vol / sqrt(365/dte)) to assess real risk.
+STRUCTURE: \`dte\` is pre-computed calendar days to expiry. \`strikeOtmPct\` is how far the short strike is from current price (positive = OTM). \`breakevenDistancePct\` (income only) is how far price can move before the structure loses — compare this to expected 1-sigma move (annualized vol / sqrt(365/dte)) to assess real risk. If \`structure.presentation\` says stock purchase, evaluate the pick as a plain stock buy — the option structure shown is an optional alternative; do not penalize the stock thesis for the structure's grade.
 MARKET CONTEXT: \`vixLevel\` and \`spyTrend\` describe today's macro environment.
 EARNINGS: \`earningsInWindow\` is non-null if there is a known earnings event before expiry — this is the single biggest event risk for any options position.
 
 Write 1–2 sentences. If no material concern exists, one sentence confirming the pick looks clean is sufficient — do not manufacture a concern to fill a second sentence. If a concern exists, describe it specifically (sentence 1), then what to verify (sentence 2).
 
-If rule-based flags are present, address the most severe one. Do not repeat the advocate's rationale.
+If warning-severity flags are present, address the most severe one. Do not repeat the advocate's rationale.
 Be direct. Do not hedge with "potentially" or "may" unless genuinely uncertain.
 End your response with a JSON object on its own line: {"verdict":"pass","confidence":"high"}
 Use verdict: pass, caution, or flag. Use confidence: high, medium, or low.`;
@@ -297,6 +318,39 @@ Use verdict: pass, caution, or flag. Use confidence: high, medium, or low.`;
     return null;
   }
 
+  /**
+   * The single structure every critic consumer (rules + LLM context) refers to:
+   * the first strategy-relevant score with a valid (non-unavailable) setup.
+   * Lab scores are ordered best-first, so first match = the chosen structure.
+   */
+  private selectRelevantStructure(pick: BriefPick, strategy: string): LabStructureScore | null {
+    const labResult = pick.strategyLabResult as LabResultShape | null;
+    const slugs = STRATEGY_RELEVANT_SLUGS[strategy] ?? [];
+    return labResult?.scores?.find(
+      s => slugs.includes(s.slug) && s.setup != null && !s.setup.unavailableReason
+    ) ?? null;
+  }
+
+  /**
+   * Buy strategy is stock-first: its relevant option structures are all debit
+   * (zebra/vertical/calendar), which systematically grade C/F in high-IV regimes.
+   * When no relevant structure grades B or better, the pick is presented as a
+   * plain stock purchase and the structure grade must not drag the verdict.
+   */
+  shouldPresentAsStock(pick: BriefPick, strategy: string): boolean {
+    if (strategy !== 'buy') return false;
+    const labResult = pick.strategyLabResult as LabResultShape | null;
+    if (!labResult?.scores) return false;
+    const slugs = STRATEGY_RELEVANT_SLUGS[strategy] ?? [];
+    for (const s of labResult.scores) {
+      if (slugs.includes(s.slug) && s.setup && !s.setup.unavailableReason &&
+          (GRADE_RANK[s.grade] ?? 0) >= GRADE_RANK['B']!) {
+        return false; // a B-or-better structure exists — present it
+      }
+    }
+    return true;
+  }
+
   private checkLiquidity(pick: BriefPick, strategy: string): CriticFlag | null {
     if (!pick.strategyLabResult) {
       return {
@@ -305,23 +359,17 @@ Use verdict: pass, caution, or flag. Use confidence: high, medium, or low.`;
       };
     }
 
-    type SScore = { slug: string; liquidityScore: number; setup: { unavailableReason?: string | null } | null };
-    type LabRes = { scores?: SScore[] };
-    const result = pick.strategyLabResult as LabRes;
-    const slugs  = STRATEGY_RELEVANT_SLUGS[strategy] ?? [];
-    let best: number | null = null;
+    // Use the SAME structure the LLM context shows — flagging a different
+    // structure's liquidity produces contradictory numbers in the prompt.
+    const chosen = this.selectRelevantStructure(pick, strategy);
+    if (chosen === null) return null; // no relevant structure graded — can't assess
 
-    for (const sc of result.scores ?? []) {
-      if (slugs.includes(sc.slug) && sc.setup && !sc.setup.unavailableReason) {
-        if (best === null || sc.liquidityScore > best) best = sc.liquidityScore;
-      }
-    }
-
-    if (best === null) return null; // no relevant structure graded — can't assess
-    if (best < 6) {
+    // < 4 is genuinely thin (OI ≈ single digits / very wide spreads).
+    // 4–6 is normal for single-name large caps and should not preclude a pass.
+    if (chosen.liquidityScore < 4) {
       return {
         key: 'low_liquidity', severity: 'info',
-        description: `Liquidity score ${best.toFixed(0)}/15 — borderline. ` +
+        description: `Liquidity score ${chosen.liquidityScore.toFixed(0)}/15 on the ${chosen.slug} structure — thin. ` +
           `Expect wider spreads; check bid-ask before entering.`,
       };
     }
@@ -386,13 +434,7 @@ Use verdict: pass, caution, or flag. Use confidence: high, medium, or low.`;
   }
 
   private getStructureExpiry(pick: BriefPick, strategy: string): string | null {
-    type SScore = { slug: string; setup: { expiration: string; unavailableReason?: string | null } | null };
-    type LabRes = { scores?: SScore[] };
-    const labResult = pick.strategyLabResult as LabRes | null;
-    const slugs = STRATEGY_RELEVANT_SLUGS[strategy] ?? [];
-    if (!labResult?.scores) return null;
-    const best = labResult.scores.find(s => slugs.includes(s.slug) && s.setup != null && !s.setup.unavailableReason);
-    return best?.setup?.expiration ?? null;
+    return this.selectRelevantStructure(pick, strategy)?.setup?.expiration ?? null;
   }
 
   private checkAnomalousMomentum(pick: BriefPick): CriticFlag | null {
@@ -445,9 +487,11 @@ Use verdict: pass, caution, or flag. Use confidence: high, medium, or low.`;
   private checkStructureGrade(pick: BriefPick, strategy: string): CriticFlag | null {
     if (!pick.strategyLabResult) return null;
 
-    type SScore = { slug: string; grade: string; setup: { unavailableReason?: string | null } | null };
-    type LabRes = { scores?: SScore[] };
-    const result = pick.strategyLabResult as LabRes;
+    // Stock-first buy picks: the thesis is the shares, not the options structure —
+    // a poorly graded debit structure (normal in high-IV regimes) is not a warning.
+    if (this.shouldPresentAsStock(pick, strategy)) return null;
+
+    const result = pick.strategyLabResult as LabResultShape;
     const slugs = STRATEGY_RELEVANT_SLUGS[strategy] ?? [];
 
     let bestGrade: string | null = null;
@@ -493,8 +537,44 @@ Use verdict: pass, caution, or flag. Use confidence: high, medium, or low.`;
             `Bullish single-stock setups face macro headwinds; extra confirmation recommended.`,
         };
       }
+      // Mirror of the above: bearish picks fighting a confirmed market uptrend.
+      if (strategy === 'bearish' && market.spyAbove200ma) {
+        return {
+          key: 'elevated_market_risk', severity: 'info',
+          description: `SPY is above its 200-day MA — broad market in an uptrend. ` +
+            `Bearish single-stock setups are counter-trend; require independent weakness catalysts.`,
+        };
+      }
     }
 
+    return null;
+  }
+
+  /**
+   * Bearish structure entering with the short strike at or below the current
+   * price (zero upside cushion) while the broad market trends up — the position
+   * starts under directional pressure with no buffer. Observed pattern: 3 of 5
+   * bearish picks on 2026-06-10 had ATM/ITM short strikes on a bullish SPY tape.
+   */
+  private checkCounterTrendStrike(pick: BriefPick, strategy: string, market: MarketContext): CriticFlag | null {
+    if (strategy !== 'bearish' || market.spyAbove200ma !== true) return null;
+
+    const chosen = this.selectRelevantStructure(pick, strategy);
+    const shortLeg = chosen?.setup?.legs.find(l => l.action === 'sell');
+    const strike = shortLeg?.strike ?? null;
+    const price = pick.price;
+    if (strike === null || price === null || price <= 0) return null;
+
+    // (strike - price) / price: ≤ 0 means the short strike is at or below price — no cushion.
+    const otmPct = (strike - price) / price * 100;
+    if (otmPct <= 0) {
+      return {
+        key: 'counter_trend_itm_strike', severity: 'warning',
+        description: `Short strike $${strike} is ${otmPct.toFixed(1)}% OTM (at/in the money) with SPY in an uptrend — ` +
+          `the bearish position starts with zero cushion against the prevailing market direction. ` +
+          `A modest continuation rally immediately pressures the structure.`,
+      };
+    }
     return null;
   }
 }

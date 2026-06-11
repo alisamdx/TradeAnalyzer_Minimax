@@ -118,10 +118,13 @@ Used in `CriticService.synthesizeVerdict()` → `structure.breakevenDistancePct`
 ### annualized-options-return
 
 ```
-Annualized Return (%) = (premium / (strike × 100)) × (365 / DTE) × 100
+Annualized Return (%) = (premium / strike) × (365 / DTE) × 100
 ```
 
 Premium = mid-price credit received per share. Strike = strike price. DTE = days to expiration.
+Both premium and strike are **per-share**, so `premium / strike` is the period return on collateral
+directly. (Before v0.32.67 this divided by `strike × 100` — per-contract collateral against per-share
+premium — understating the result 100× and zeroing the `premiumYield` / `premiumRiskRatio` scoring signals.)
 Used in `AnalysisService.modeOptionsIncome()` and `modeWheel()`. see SPEC: §5.3, Mode 2.
 
 ### wheel-suitability-score

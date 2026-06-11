@@ -26,6 +26,10 @@ const PICKS_PER_STRATEGY = 5;   // final picks shown in brief per strategy (post
 const STAGE4_POOL_SIZE   = 10;  // candidates sent to E*Trade validation per strategy
 const MAX_PICK_PRICE     = 750; // USD — stocks above this price are excluded from all brief picks
 
+// Strategies whose structures carry naked short legs through the hold window —
+// all get the -20 earnings-within-45d composite penalty in Stage 3.
+export const EARNINGS_PENALTY_STRATEGIES = ['income', 'wheel', 'bearish'] as const;
+
 function isAuthError(e: unknown): boolean {
   const msg = (e instanceof Error ? e.message : String(e)).toLowerCase();
   return msg.includes('401') || msg.includes('token') || msg.includes('auth') || msg.includes('oauth');
@@ -195,22 +199,26 @@ export class DailyIntelligenceBriefJob implements BatchJobHandler {
       }
     }
 
-    // Penalise income candidates with earnings in the next 45 days (-20 pts).
-    // Income structures (strangles, condors) are short premium — an earnings event
-    // within the hold window causes outsized moves that blow through the wings.
-    const incomeEarningsPenalty = this.loadIncomeEarningsPenalty();
-    if (incomeEarningsPenalty.size > 0) {
-      const incomeList = rankedByStrategy.get('income') ?? [];
-      let penalised = 0;
-      for (const s of incomeList) {
-        if (incomeEarningsPenalty.has(s.ticker)) {
-          s.compositeScore = Math.max(0, s.compositeScore - 20);
-          penalised++;
+    // Penalise short-premium candidates with earnings in the next 45 days (-20 pts).
+    // Income (strangles/condors), wheel (naked puts), and bearish (reverse lizards)
+    // all carry naked short legs — an earnings event within the hold window causes
+    // outsized moves that blow through the strikes. High IVR driven by a known event
+    // is a trap, not an opportunity.
+    const earningsPenalty = this.loadEarningsPenalty();
+    if (earningsPenalty.size > 0) {
+      for (const strategy of EARNINGS_PENALTY_STRATEGIES) {
+        const list = rankedByStrategy.get(strategy) ?? [];
+        let penalised = 0;
+        for (const s of list) {
+          if (earningsPenalty.has(s.ticker)) {
+            s.compositeScore = Math.max(0, s.compositeScore - 20);
+            penalised++;
+          }
         }
-      }
-      if (penalised > 0) {
-        incomeList.sort((a, b) => b.compositeScore - a.compositeScore);
-        console.log(`[brief stage3] income: penalised ${penalised} tickers for earnings within 45d`);
+        if (penalised > 0) {
+          list.sort((a, b) => b.compositeScore - a.compositeScore);
+          console.log(`[brief stage3] ${strategy}: penalised ${penalised} tickers for earnings within 45d`);
+        }
       }
     }
 
@@ -688,9 +696,10 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
     }
   }
 
-  private loadIncomeEarningsPenalty(): Map<string, number> {
+  private loadEarningsPenalty(): Map<string, number> {
     // Returns -20 for any ticker with earnings in the next 45 days.
-    // 45d matches the outer edge of the income hold window (30–45 DTE structures).
+    // 45d matches the outer edge of the short-premium hold window (30–45 DTE structures).
+    // Applied to EARNINGS_PENALTY_STRATEGIES (income, wheel, bearish) in Stage 3.
     try {
       const todayET = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
       const [y, m, d] = todayET.split('-').map(Number);

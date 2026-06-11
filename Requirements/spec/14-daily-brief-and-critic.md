@@ -8,7 +8,7 @@ Runs as a batch job (§20), post-market, manual-trigger by default:
 
 1. **Screen** — start from the full S&P 500 + Russell 1000 + ETF universe (read from `constituents`, not a pre-filtered screen, so weak names needed for bearish picks aren't excluded).
 2. **Score** — run the Scoring Engine (§13) for all five strategies; rank candidates per strategy.
-3. **Filter** — take the top candidates per strategy; apply a **hard liquidity gate**: drop any pick whose best relevant Strategy-Lab structure scores `liquidityScore < 5`.
+3. **Filter** — take the top candidates per strategy; apply a **hard liquidity gate**: drop any pick whose best relevant Strategy-Lab structure scores `liquidityScore < 5`. Short-premium strategies (**income, wheel, bearish**) additionally apply a **−20 composite earnings penalty** to any ticker with earnings in the next 45 days — high IVR driven by a known event is a trap, not an opportunity.
 4. **Strategy Lab** — for each surviving pick, build the concrete structure (§09): legs, strikes, expiry, credit/debit, POP, grade.
 5. **AI synthesis** — Claude (`claude-haiku-4-5`) writes a 2-sentence rationale per pick from the structured signals (instructed never to invent figures). For final picks, a live Polygon quote overrides any stale EOD price.
    - **5b. AI Critic** (see §14.3).
@@ -24,7 +24,7 @@ Exit plan per pick (in the PDF): target close at 50% credit, stop at 2× max los
 
 ## 14.3 AI Critic (Stage 5b)
 
-`critic-service.ts` is an adversarial second opinion run after synthesis, before persist. For each pick it first runs **6 rule checks** — trend alignment, liquidity, missing signals, score concentration, cross-strategy conflict, market regime — then calls Claude (`claude-haiku-4-5`) with an adversarial system prompt. It returns a `CriticVerdict`: `pass | caution | flag` + rationale + `CriticFlag[]`.
+`critic-service.ts` is an adversarial second opinion run after synthesis, before persist. For each pick it first runs **10 rule checks** — trend alignment, liquidity (chosen structure, score < 4), missing signals, score concentration, cross-strategy conflict, market regime (incl. bearish-vs-SPY-uptrend mirror), anomalous momentum, earnings-in-window, structure grade, and counter-trend ITM strike (bearish short strike at/below price on a bullish tape → warning) — then calls Claude (`claude-sonnet-4-6`) with an adversarial system prompt. All rule checks and the LLM context refer to the **same chosen structure** (first strategy-relevant score with a valid setup). Info-severity flags are advisory: the prompt instructs the LLM that a pick whose only flags are info can still merit `pass`. For **buy** picks where no relevant structure grades B or better (`shouldPresentAsStock`), the pick is presented as a plain stock purchase — the structure grade is excluded from the verdict and the view shows a `📈 Buy Shares` chip with the structure as optional. It returns a `CriticVerdict`: `pass | caution | flag` + rationale + `CriticFlag[]`.
 
 The brief shows the verdict badge per pick and aggregate counts per strategy section; the email adds a Critic column + rationale sub-row. The same Critic is exposed to the external agent via the local API (`POST /critic/evaluate`, §22): the agent blocks entry on `flag`, warns on `caution`.
 

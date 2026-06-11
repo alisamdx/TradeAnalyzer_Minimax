@@ -5,10 +5,33 @@ import {
   computeRSI,
   computeATR,
   computeADX,
-  findSwingHighLow
+  findSwingHighLow,
+  annualizedReturn
 } from '../src/main/services/analysis-service.js';
 
 type Bar = { t: number; o: number; h: number; l: number; c: number; v: number };
+
+// ─── annualizedReturn tests ──────────────────────────────────────────────────
+// see docs/formulas.md#annualized-options-return
+
+describe('annualizedReturn', () => {
+  it('computes per-share premium over per-share strike (regression: was 100× too small)', () => {
+    // $1.50/share premium on a $50 strike over 36.5 days:
+    // 1.50/50 × (365/36.5) × 100 = 3% × 10 = 30%/yr
+    expect(annualizedReturn(1.5, 50, 36.5)).toBeCloseTo(30, 6);
+  });
+
+  it('matches a realistic CSP example', () => {
+    // $3.025 mid → premium 3.025 on a $50 strike, 37 DTE:
+    // 3.025/50 × (365/37) × 100 ≈ 59.68%
+    expect(annualizedReturn(3.025, 50, 37)).toBeCloseTo(59.68, 1);
+  });
+
+  it('returns null for non-positive dte or strike', () => {
+    expect(annualizedReturn(1.5, 50, 0)).toBeNull();
+    expect(annualizedReturn(1.5, 0, 30)).toBeNull();
+  });
+});
 
 // ─── Bar helpers ────────────────────────────────────────────────────────────
 

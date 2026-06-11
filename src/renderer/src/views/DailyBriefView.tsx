@@ -87,6 +87,25 @@ function gradeOf(result: StrategyLabValidateResult, slugs: string[]): { slug: st
   return { slug: best.slug, name: best.name, grade: best.grade, score: best.totalScore, setup: best.setup };
 }
 
+// Grade ordering — mirrors CriticService.GRADE_RANK ('A+' must be present).
+const GRADE_RANK: Record<StrategyLabGrade, number> = { 'A+': 6, 'A': 5, 'B': 4, 'C': 3, 'F': 1 };
+
+// Buy is stock-first: its relevant structures are all debit and grade C/F
+// systematically in high-IV regimes. When no available relevant structure is
+// B or better, the pick is presented as a plain stock purchase.
+// Mirrors CriticService.shouldPresentAsStock().
+function presentAsStock(result: StrategyLabValidateResult, strategy: ScoringStrategy): boolean {
+  if (strategy !== 'buy') return false;
+  const slugs = STRATEGY_TO_SLUGS[strategy];
+  for (const s of result.scores) {
+    if (slugs.includes(s.slug) && s.setup && !s.setup.unavailableReason &&
+        (GRADE_RANK[s.grade] ?? 0) >= GRADE_RANK['B']) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // Format ISO expiry as "Jul 17"
 function fmtExpShort(iso: string): string {
   return new Date(`${iso}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
@@ -122,6 +141,7 @@ function StrategyLabSummary({
   if (!relevant && !best) return null;
 
   const relevantIsBest = relevant && best && relevant.slug === result.scores[0]?.slug;
+  const stockFirst = presentAsStock(result, strategy);
 
   // Setup detail line for the relevant structure (strike · expiry · premium)
   const setup = relevant?.setup ?? null;
@@ -134,15 +154,21 @@ function StrategyLabSummary({
     <div className="pick-lab-summary">
       {/* Grade row */}
       <div className="pick-lab-grade-row">
+        {stockFirst && (
+          <span className="lab-grade-item" title="All option structures graded C/F in the current IV regime — buy shares; the structure shown is an optional alternative">
+            <span className="lab-grade-label" style={{ color: '#3fb950', fontWeight: 700 }}>📈 Buy Shares</span>
+          </span>
+        )}
         {relevant ? (
-          <span className="lab-grade-item">
+          <span className="lab-grade-item" style={stockFirst ? { opacity: 0.7 } : undefined}>
+            {stockFirst && <span className="lab-grade-sep">·  Optional:</span>}
             <span className="lab-grade-label">{SLUG_SHORT[relevant.slug] ?? relevant.name}</span>
             <span className="lab-grade-badge" style={{ color: GRADE_COLOR[relevant.grade], borderColor: GRADE_COLOR[relevant.grade] }}>
               {relevant.grade}
             </span>
           </span>
         ) : (
-          <span className="lab-grade-item lab-grade-missing">No {strategy} structure graded</span>
+          !stockFirst && <span className="lab-grade-item lab-grade-missing">No {strategy} structure graded</span>
         )}
         {best && !relevantIsBest && (
           <>

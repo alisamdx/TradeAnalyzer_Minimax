@@ -341,13 +341,18 @@ function isDTEMatch(dte: number, min: number, max: number): boolean {
   return dte >= min && dte <= max;
 }
 
-function annualizedReturn(
+// Annualized return on collateral for a short option.
+// premium and strike are both per-share, so premium/strike is the period return
+// directly — do NOT divide by (strike × 100); that treats per-share premium as
+// per-contract and understates the result 100×.
+// see docs/formulas.md#annualized-options-return
+export function annualizedReturn(
   premium: number,
   strike: number,
   dte: number
 ): number | null {
   if (dte <= 0 || strike <= 0) return null;
-  const annual = premium / (strike * 100) * (365 / dte) * 100;
+  const annual = premium / strike * (365 / dte) * 100;
   return annual;
 }
 

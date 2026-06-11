@@ -31,9 +31,12 @@ Quality signals (same source): ROIC, FCF-to-net-income, net-debt-to-EBITDA, 5-ye
 
 ### annualized-options-return
 ```
-Annualized Return (%) = (premium / (strike × 100)) × (365 / DTE) × 100
+Annualized Return (%) = (premium / strike) × (365 / DTE) × 100
 ```
-premium = mid-price credit per share; used in Options Income & Wheel modes.
+premium = mid-price credit per share; strike is also per-share, so premium/strike is the period
+return on collateral directly. (Pre-v0.32.67 divided by strike × 100 — per-contract collateral
+against per-share premium — understating results 100× and zeroing the premiumYield /
+premiumRiskRatio scoring signals.) Used in Options Income & Wheel modes.
 
 ### wheel-suitability-score (1–10)
 ```

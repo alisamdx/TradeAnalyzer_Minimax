@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.32.67] — 2026-06-10
+
+### Fixed
+- **`annualizedReturn` 100× unit bug** — per-share premium was divided by per-contract collateral (`strike × 100`), understating annualized options return 100×. This zeroed the wheel `premiumYield` (wt 19) and income `premiumRiskRatio` (wt 22) scoring signals for every ticker — both strategies effectively ranked without their premium signal, letting earnings-pumped high-IVR names float to rank 1. Values self-correct on the next analysis snapshot refresh.
+- **`GRADE_RANK` missing `'A+'`** — an A+ structure ranked 0 (below F); a pick whose only available structures were A+ and F would incorrectly fire `poor_structure_grade`.
+- **Critic liquidity flag now reads the chosen structure** — previously it reported the *best* liquidity across relevant structures while the LLM context showed the *chosen* structure's, producing contradictory numbers in the same prompt (observed: HAYW flagged 5/15, context said 3/15 — the LLM called out the discrepancy).
+
+### Changed
+- **Earnings penalty extended to wheel + bearish** — the −20 composite penalty for earnings within 45 days (previously income-only) now applies to all short-premium strategies. 3 of 5 wheel picks on 2026-06-10 carried confirmed earnings inside the expiry window.
+- **Critic calibration: info flags are advisory** — prompt now states a pick whose only flags are info-severity can still merit `pass`; `low_liquidity` threshold lowered from <6 to <4 (4–6 is normal for single-name large caps).
+- **Buy strategy is stock-first** — when no buy-relevant structure grades B or better (systematic in high-IV regimes, where all debit structures grade C/F), the pick is presented as a plain stock purchase: `📈 Buy Shares` chip in the brief view, structure demoted to "Optional", `poor_structure_grade` suppressed, and the critic LLM told to evaluate the stock thesis.
+
+### Added
+- **Critic rule: bearish SPY mirror** — bearish picks now get an info flag when SPY is above its 200-day MA (the bullish/buy macro-headwind check already existed; the mirror didn't).
+- **Critic rule: `counter_trend_itm_strike`** — warning when a bearish short strike sits at/below the current price (zero cushion) while SPY trends up. 3 of 5 bearish picks on 2026-06-10 had ATM/ITM short strikes on a bullish tape.
+
 ## [0.32.66] — 2026-06-10
 
 ### Added
