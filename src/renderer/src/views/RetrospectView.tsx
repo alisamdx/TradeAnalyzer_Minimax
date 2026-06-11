@@ -820,6 +820,22 @@ const CRITIC_COLORS: Record<string, string> = {
 
 const DAY_PENDING = <span style={{ color: '#8b949e' }}>⏳</span>;
 
+type BriefSortCol = keyof BriefPickDetail;
+
+function sortBriefPicks(picks: BriefPickDetail[], col: BriefSortCol, dir: 'asc' | 'desc'): BriefPickDetail[] {
+  return [...picks].sort((a, b) => {
+    const av = a[col];
+    const bv = b[col];
+    if (av === null && bv === null) return 0;
+    if (av === null) return 1;
+    if (bv === null) return -1;
+    let cmp = 0;
+    if (typeof av === 'string' && typeof bv === 'string') cmp = av.localeCompare(bv);
+    else if (typeof av === 'number' && typeof bv === 'number') cmp = av - bv;
+    return dir === 'asc' ? cmp : -cmp;
+  });
+}
+
 function BriefTrendTab() {
   const [dates, setDates]           = useState<string[]>([]);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
@@ -827,6 +843,8 @@ function BriefTrendTab() {
   const [loading, setLoading]       = useState(false);
   const [stratFilter, setStratFilter] = useState<ScoringStrategy | 'all'>('all');
   const [chartPick, setChartPick]   = useState<BriefPickDetail | null>(null);
+  const [sortCol, setSortCol]       = useState<BriefSortCol | null>(null);
+  const [sortDir, setSortDir]       = useState<'asc' | 'desc'>('asc');
 
   useEffect(() => {
     window.api.paper.briefDates().then(d => {
@@ -855,6 +873,19 @@ function BriefTrendTab() {
     : null;
 
   const presentStrategies = [...new Set(picks.map(p => p.strategy))] as ScoringStrategy[];
+
+  const handleSort = (col: BriefSortCol) => {
+    if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortCol(col); setSortDir('asc'); }
+  };
+
+  const sorted = sortCol ? sortBriefPicks(filtered, sortCol, sortDir) : filtered;
+
+  const sortInd = (col: BriefSortCol) => sortCol === col
+    ? <span style={{ marginLeft: 4, fontSize: 10 }}>{sortDir === 'asc' ? '▲' : '▼'}</span>
+    : <span style={{ marginLeft: 4, fontSize: 10, color: '#30363d' }}>⇅</span>;
+
+  const thStyle: React.CSSProperties = { cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' };
 
   return (
     <div>
@@ -932,22 +963,22 @@ function BriefTrendTab() {
           <table className="retro-table" style={{ minWidth: 920 }}>
             <thead>
               <tr>
-                <th title="Ticker symbol">Ticker</th>
-                <th title="Scoring strategy this pick came from">Strategy</th>
-                <th title="Composite score (0–100) on brief day">Score</th>
-                <th title="Stock price at time the brief was generated">Brief Price</th>
-                <th title="Closing price on the 1st trading day after the brief date">Day 1</th>
-                <th title="Closing price on the 2nd trading day after the brief date">Day 2</th>
-                <th title="Closing price on the 3rd trading day after the brief date">Day 3</th>
-                <th title="Closing price on the 4th trading day after the brief date">Day 4</th>
-                <th title="Closing price on the 5th trading day after the brief date">Day 5</th>
-                <th title="Return % from brief price to the most recent available day. Green = favourable for the strategy.">Return %</th>
-                <th title="Outcome based on the most recent available day: ✅ positive · ❌ negative · ➖ neutral">Outcome</th>
-                <th title="AI critic verdict from the brief: pass · caution · flag. Hover for rationale.">Critic</th>
+                <th style={thStyle} title="Ticker symbol — click to sort" onClick={() => handleSort('ticker')}>Ticker{sortInd('ticker')}</th>
+                <th style={thStyle} title="Scoring strategy — click to sort" onClick={() => handleSort('strategy')}>Strategy{sortInd('strategy')}</th>
+                <th style={thStyle} title="Composite score (0–100) on brief day — click to sort" onClick={() => handleSort('briefScore')}>Score{sortInd('briefScore')}</th>
+                <th style={thStyle} title="Stock price at time the brief was generated — click to sort" onClick={() => handleSort('briefPrice')}>Brief Price{sortInd('briefPrice')}</th>
+                <th style={thStyle} title="Closing price on the 1st trading day after the brief date — click to sort" onClick={() => handleSort('day1Price')}>Day 1{sortInd('day1Price')}</th>
+                <th style={thStyle} title="Closing price on the 2nd trading day after the brief date — click to sort" onClick={() => handleSort('day2Price')}>Day 2{sortInd('day2Price')}</th>
+                <th style={thStyle} title="Closing price on the 3rd trading day after the brief date — click to sort" onClick={() => handleSort('day3Price')}>Day 3{sortInd('day3Price')}</th>
+                <th style={thStyle} title="Closing price on the 4th trading day after the brief date — click to sort" onClick={() => handleSort('day4Price')}>Day 4{sortInd('day4Price')}</th>
+                <th style={thStyle} title="Closing price on the 5th trading day after the brief date — click to sort" onClick={() => handleSort('day5Price')}>Day 5{sortInd('day5Price')}</th>
+                <th style={thStyle} title="Return % from brief price to the most recent available day — click to sort" onClick={() => handleSort('returnPct')}>Return %{sortInd('returnPct')}</th>
+                <th style={thStyle} title="Outcome based on the most recent available day — click to sort" onClick={() => handleSort('latestVerdict')}>Outcome{sortInd('latestVerdict')}</th>
+                <th style={thStyle} title="AI critic verdict from the brief: pass · caution · flag — click to sort" onClick={() => handleSort('criticVerdict')}>Critic{sortInd('criticVerdict')}</th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map(p => {
+              {sorted.map(p => {
                 const scoreColor = p.briefScore >= 70 ? '#3fb950' : p.briefScore >= 50 ? '#e3a008' : '#f85149';
 
                 const outcomeEl =

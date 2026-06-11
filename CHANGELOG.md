@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.64] — 2026-06-10
+
+### Added
+- **Brief Trend: all columns sortable** — click any column header to sort ascending; click again to flip to descending. Active column shows ▲/▼; inactive columns show a faint ⇅. Nulls always sort last. Sort resets when changing the brief date or strategy filter.
+
 ## [0.32.63] — 2026-06-10
 
 ### Fixed
