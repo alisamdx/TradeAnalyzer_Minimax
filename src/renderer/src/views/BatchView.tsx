@@ -217,7 +217,7 @@ export function BatchView() {
   const [liveRunId, setLiveRunId] = useState<number | null>(null);
   const [batchEnabled, setBatchEnabled] = useState(true);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const logEndRef = useRef<HTMLDivElement | null>(null);
+  const logRef = useRef<HTMLDivElement | null>(null);
 
   // ── Run-all-in-sequence state ─────────────────────────────────────────────
   const [seqActive, setSeqActive] = useState(false);
@@ -300,18 +300,17 @@ export function BatchView() {
     return () => unsub();
   }, [selectedJobId, loadJobs, loadRuns]);
 
-  // Auto-scroll live log to bottom on new events
+  // Auto-scroll live log to bottom on new events — scroll ONLY the log
+  // container (scrollIntoView scrolls every ancestor, yanking the whole page
+  // down on each event and pushing the jobs grid out of view).
   useEffect(() => {
-    logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const el = logRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
   }, [liveEvents]);
 
-  // Clear live log 3 s after job finishes so it doesn't linger forever
-  useEffect(() => {
-    if (!runningJobId && liveEvents.length > 0) {
-      const t = setTimeout(() => setLiveEvents([]), 3000);
-      return () => clearTimeout(t);
-    }
-  }, [runningJobId, liveEvents.length]);
+  // The log is NOT auto-cleared after a run — it stays visible so failures can
+  // be inspected/copied. It resets automatically when the next run starts
+  // (runId change in the progress subscription).
 
   // Auto-poll while a job is running
   useEffect(() => {
@@ -394,6 +393,7 @@ export function BatchView() {
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         .batch-table { width: 100%; border-collapse: collapse; font-size: 13px; }
         .batch-table th { background: #1a2235; color: #89b4fa; text-align: left; padding: 8px 10px; font-weight: 600; border-bottom: 1px solid #2d3748; }
+        .batch-table thead { position: sticky; top: 0; z-index: 1; }
         .batch-table td { padding: 8px 10px; border-bottom: 1px solid #1e2535; vertical-align: middle; }
         .batch-table tr:hover td { background: #1a2535; }
         .batch-table tr.selected td { background: #1a2a3a; }
@@ -485,6 +485,8 @@ export function BatchView() {
         <div style={{ padding: '12px 16px', borderBottom: '1px solid #2d3748', color: '#89b4fa', fontWeight: 600, fontSize: 13 }}>
           Registered Jobs
         </div>
+        {/* Fixed height — all three panels keep constant size so the layout never shifts */}
+        <div style={{ height: 300, overflowY: 'auto' }}>
         {loading ? (
           <div style={{ padding: 20, color: '#95a5a6', textAlign: 'center' }}>Loading…</div>
         ) : jobs.length === 0 ? (
@@ -549,6 +551,7 @@ export function BatchView() {
             </tbody>
           </table>
         )}
+        </div>
       </div>
 
       {/* ── Bottom panel: run history ── */}
@@ -556,14 +559,15 @@ export function BatchView() {
         <div style={{ padding: '12px 16px', borderBottom: '1px solid #2d3748', color: '#89b4fa', fontWeight: 600, fontSize: 13 }}>
           Run History{selectedJob ? ` — ${selectedJob.name} (last 30 days)` : ''}
         </div>
+        {/* Fixed height ≈ 4 rows — constant regardless of state */}
+        <div style={{ height: 160, overflowY: 'auto' }}>
         {!selectedJobId ? (
           <div style={{ padding: 20, color: '#95a5a6', textAlign: 'center' }}>Select a job above to view history.</div>
         ) : runs.length === 0 ? (
           <div style={{ padding: 20, color: '#95a5a6', textAlign: 'center' }}>No runs recorded yet.</div>
         ) : (
-          <div style={{ maxHeight: 374, overflowY: 'auto' }}>
             <table className="batch-table">
-              <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
+              <thead>
                 <tr>
                   <th>Started</th>
                   <th>Duration</th>
@@ -598,19 +602,26 @@ export function BatchView() {
                 ))}
               </tbody>
             </table>
-          </div>
         )}
+        </div>
       </div>
 
-      {/* ── Live Activity panel — visible only while a job is running or log not yet cleared ── */}
-      {liveEvents.length > 0 && (() => {
-        const last = liveEvents[liveEvents.length - 1]!;
-        const total = last.total ?? 0;
-        const attempted = last.attempted ?? 0;
-        const updated = last.updated ?? 0;
-        const skipped = last.skipped ?? 0;
-        const failed = last.failed ?? 0;
+      {/* ── Live Activity panel — always visible, fixed height (no layout shift) ── */}
+      {(() => {
+        const last = liveEvents.length > 0 ? liveEvents[liveEvents.length - 1]! : null;
+        const total = last?.total ?? 0;
+        const attempted = last?.attempted ?? 0;
+        const updated = last?.updated ?? 0;
+        const skipped = last?.skipped ?? 0;
+        const failed = last?.failed ?? 0;
         const pct = total > 0 ? Math.round((attempted / total) * 100) : 0;
+
+        const copyLog = () => {
+          const text = liveEvents
+            .map(evt => `${evt.status === 'updated' ? '✓' : evt.status === 'failed' ? '✗' : '—'} ${evt.ticker} ${evt.status}${evt.message ? ` — ${evt.message}` : ''}`)
+            .join('\n');
+          void navigator.clipboard.writeText(text);
+        };
 
         return (
           <div style={{ background: '#131b2e', borderRadius: 10, border: '1px solid #2d3748', marginBottom: 24 }}>
@@ -618,17 +629,29 @@ export function BatchView() {
               <span style={{ color: '#89b4fa', fontWeight: 600, fontSize: 13 }}>
                 {runningJobId
                   ? <><span style={{ display: 'inline-block', animation: 'spin 1s linear infinite' }}>⟳</span> Live Activity</>
-                  : '✓ Run Complete'}
+                  : liveEvents.length > 0 ? '✓ Run Complete' : 'Live Activity — idle'}
               </span>
-              <span style={{ color: '#95a5a6', fontSize: 12 }}>
-                {attempted} / {total} tickers &nbsp;·&nbsp;
-                <span style={{ color: '#2ecc71' }}>✓ {updated}</span> &nbsp;
-                <span style={{ color: '#95a5a6' }}>— {skipped}</span> &nbsp;
-                <span style={{ color: failed > 0 ? '#e74c3c' : '#95a5a6' }}>✗ {failed}</span>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                {liveEvents.length > 0 && (
+                  <span style={{ color: '#95a5a6', fontSize: 12 }}>
+                    {attempted} / {total} tickers &nbsp;·&nbsp;
+                    <span style={{ color: '#2ecc71' }}>✓ {updated}</span> &nbsp;
+                    <span style={{ color: '#95a5a6' }}>— {skipped}</span> &nbsp;
+                    <span style={{ color: failed > 0 ? '#e74c3c' : '#95a5a6' }}>✗ {failed}</span>
+                  </span>
+                )}
+                <button className="batch-btn" onClick={copyLog} disabled={liveEvents.length === 0}
+                  title="Copy the full log to clipboard">
+                  ⧉ Copy
+                </button>
+                <button className="batch-btn" onClick={() => setLiveEvents([])} disabled={liveEvents.length === 0}
+                  title="Clear the log">
+                  ✕ Clear
+                </button>
               </span>
             </div>
 
-            {/* Progress bar */}
+            {/* Progress bar — always rendered so the panel height is constant */}
             <div style={{ padding: '8px 16px', borderBottom: '1px solid #1e2535' }}>
               <div style={{ background: '#1a2235', borderRadius: 4, height: 6, overflow: 'hidden' }}>
                 <div style={{
@@ -640,14 +663,18 @@ export function BatchView() {
                 }} />
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4, fontSize: 11, color: '#666' }}>
-                <span>{pct}%</span>
-                <span>{total - attempted} remaining</span>
+                <span>{total > 0 ? `${pct}%` : '—'}</span>
+                <span>{total > 0 ? `${total - attempted} remaining` : 'no run in progress'}</span>
               </div>
             </div>
 
-            {/* Ticker log */}
-            <div style={{ maxHeight: 220, overflowY: 'auto', fontFamily: 'monospace', fontSize: 12, padding: '4px 0' }}>
-              {liveEvents.map((evt, i) => {
+            {/* Ticker log — fixed height; auto-scrolls its own scrollbar only */}
+            <div ref={logRef} style={{ height: 200, overflowY: 'auto', fontFamily: 'monospace', fontSize: 12, padding: '4px 0' }}>
+              {liveEvents.length === 0 ? (
+                <div style={{ padding: 20, color: '#555', textAlign: 'center', fontFamily: 'inherit' }}>
+                  No activity yet — run a job to see live progress. The log stays here after the run finishes until the next run starts.
+                </div>
+              ) : liveEvents.map((evt, i) => {
                 const statusColor: Record<string, string> = {
                   updated:  '#2ecc71',
                   skipped:  '#95a5a6',
@@ -665,7 +692,6 @@ export function BatchView() {
                   </div>
                 );
               })}
-              <div ref={logEndRef} />
             </div>
           </div>
         );

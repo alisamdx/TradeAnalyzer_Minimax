@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.68] — 2026-06-10
+
+### Changed
+- **Batch Jobs screen: stable three-panel layout** — all three panels now have fixed heights (Registered Jobs 300px, Run History ~4 rows, Live Activity log 200px) so nothing shifts or "dances" while a job runs. The Live Activity panel is permanently visible (placeholder when idle) and the log is no longer auto-cleared 3s after a run — it persists until the next run starts, so failures can be inspected. Added ⧉ Copy (clipboard) and ✕ Clear buttons. Auto-scroll now scrolls only the log's own scrollbar; previously `scrollIntoView` yanked the entire page down on every progress event, pushing the jobs grid out of view.
+
 ## [0.32.67] — 2026-06-10
 
 ### Fixed
