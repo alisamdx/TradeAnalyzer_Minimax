@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.32.69] — 2026-06-10
+
+### Fixed
+- **Strategy Lab: stale E*Trade Greeks no longer poison structures** — E*Trade serves months-old deltas on thin (OI=0) chains while option *prices* stay correct (2026-06-10 brief: WSO chain claimed delta −0.50 at $450 with spot at $375.66 → wheel put built 11.8% ITM; AWI income straddle struck 31% above spot *passed* the critic; MIDD, ALGM also affected — 4 of 25 picks). The lab estimated the underlying from those deltas. Now: underlying price comes from `chain.underlyingPrice` (E*Trade's real-time spot, was always available but unused) → live Polygon quote → chain-delta estimate as last resort. When the delta-implied ATM deviates >8% from real spot, chain deltas are distrusted and leg selection uses moneyness.
+- **Critic prompt: `strikeOtmPct` defined side-aware** — the "positive = OTM" gloss is wrong for puts; it made the LLM read AWI's broken +31% straddle as "safely OTM". Now defined as strike-vs-spot with explicit per-side ITM/OTM semantics.
+
+### Added
+- **Critic rule: `stale_lab_price`** (warning) — fires when the lab's underlying price deviates >5% from the live pick price; deterministic catch-all for structure-data integrity regardless of LLM judgment.
+
 ## [0.32.68] — 2026-06-10
 
 ### Changed

@@ -292,10 +292,13 @@ function findLizardHedge(
 
 function findByDelta(
   contracts: OptionContract[], side: 'call' | 'put', targetDelta: number,
-  underlyingPx?: number
+  underlyingPx?: number, trustDeltas = true
 ): OptionContract | null {
-  // Primary: use delta (available during market hours when Greeks are returned)
-  const withDelta = contracts.filter(c => c.side === side && c.delta !== null && c.bid >= 0);
+  // Primary: use delta (available during market hours when Greeks are returned).
+  // Skipped when trustDeltas=false — E*Trade serves stale Greeks on thin (OI=0)
+  // chains (observed: delta −0.50 at a strike ~20% above spot), which would
+  // select wildly ITM/OTM legs. Moneyness selection below is then authoritative.
+  const withDelta = trustDeltas ? contracts.filter(c => c.side === side && c.delta !== null && c.bid >= 0) : [];
   if (withDelta.length) {
     return withDelta.reduce((best, c) =>
       Math.abs(Math.abs(c.delta!) - targetDelta) < Math.abs(Math.abs(best.delta!) - targetDelta) ? c : best
@@ -323,7 +326,7 @@ function findByDelta(
 
 function buildSetup(
   profile: StrategyProfile, chain: OptionsChain, underlyingPx: number, dte: number,
-  currentAtmIv: number
+  currentAtmIv: number, trustDeltas = true
 ): StrategySetup {
   const ticker = chain.ticker;
   const base: Omit<StrategySetup, 'legs' | 'netCredit' | 'netDebit' | 'maxProfit' | 'maxLoss' | 'breakevens' | 'annualizedReturn' | 'popEstimate' | 'unavailableReason'> = {
@@ -358,9 +361,9 @@ function buildSetup(
       const sellLeg = builtLegs.find(l => l.side === legDef.side && l.action === 'sell');
       contract = sellLeg
         ? findLizardHedge(chain.contracts, legDef.side, sellLeg.strike, shortCreditPerShare)
-        : findByDelta(chain.contracts, legDef.side, legDef.deltaTarget, underlyingPx);
+        : findByDelta(chain.contracts, legDef.side, legDef.deltaTarget, underlyingPx, trustDeltas);
     } else {
-      contract = findByDelta(chain.contracts, legDef.side, legDef.deltaTarget, underlyingPx);
+      contract = findByDelta(chain.contracts, legDef.side, legDef.deltaTarget, underlyingPx, trustDeltas);
     }
 
     if (!contract) {
@@ -616,8 +619,8 @@ export class StrategyLabService {
     const chain = await this.optionsProvider.getOptionsChain(t, expInfo.expiration);
     if (!chain.contracts.length) throw new Error(`Empty options chain for ${t} at ${expInfo.expiration}`);
 
-    // 4. Underlying price (mid of ATM call/put, or first contract's reference)
-    const underlyingPx = this.estimateUnderlyingPrice(chain);
+    // 4. Underlying price — live quote, chain-delta estimate as fallback
+    const { underlyingPx, trustDeltas } = await this.resolveUnderlyingPrice(t, chain);
 
     // 5. ATM IV from chain
     const currentAtmIv = computeAtmIv(chain, underlyingPx);
@@ -647,7 +650,7 @@ export class StrategyLabService {
 
     // 7. Score all strategies
     const scores: StrategyScore[] = PROFILES.map(profile => {
-      const setup = buildSetup(profile, chain, underlyingPx, expInfo.dte, currentAtmIv);
+      const setup = buildSetup(profile, chain, underlyingPx, expInfo.dte, currentAtmIv, trustDeltas);
       setup.ticker = t;
       return scoreStrategy(profile, { ivRank: ctx.ivRank, ivDataPoints: ctx.ivDataPoints, bias: ctx.directionBias, isEtf }, setup);
     });
@@ -674,10 +677,10 @@ export class StrategyLabService {
     const chain = await this.optionsProvider.getOptionsChain(t, expInfo.expiration);
     if (!chain.contracts.length) throw new Error(`Empty options chain for ${t}`);
 
-    const underlyingPx = this.estimateUnderlyingPrice(chain);
+    const { underlyingPx, trustDeltas } = await this.resolveUnderlyingPrice(t, chain);
     const currentAtmIv = computeAtmIv(chain, underlyingPx);
 
-    const setup = buildSetup(profile, chain, underlyingPx, expInfo.dte, currentAtmIv);
+    const setup = buildSetup(profile, chain, underlyingPx, expInfo.dte, currentAtmIv, trustDeltas);
     setup.ticker = t;
     return setup;
   }
@@ -691,7 +694,7 @@ export class StrategyLabService {
     const expInfo     = selectExpiration(expirations);
     if (!expInfo) throw new Error(`No suitable expiration for ${t}`);
     const chain        = await this.optionsProvider.getOptionsChain(t, expInfo.expiration);
-    const underlyingPx = this.estimateUnderlyingPrice(chain);
+    const { underlyingPx } = await this.resolveUnderlyingPrice(t, chain);
     const currentAtmIv = computeAtmIv(chain, underlyingPx);
     const ivRankResult = computeIvRank(db, t, currentAtmIv);
     return {
@@ -700,6 +703,43 @@ export class StrategyLabService {
       ivDataPoints: ivRankResult.dataPoints, directionBias: dir.bias,
       ma20: dir.ma20, ma50: dir.ma50, momentum5d: dir.momentum5d,
     };
+  }
+
+  /**
+   * Resolve the underlying price. Priority:
+   *   1. chain.underlyingPrice — E*Trade supplies its own real-time spot with
+   *      the chain (no extra API call; Polygon chains return null here)
+   *   2. DataProvider.getQuote() — live Polygon quote
+   *   3. chain-delta estimate — last resort (offline/tests)
+   *
+   * Also decides whether the chain's Greeks can be trusted: E*Trade serves
+   * stale deltas on thin chains (observed 2026-06-10: WSO delta −0.50 at a
+   * $450 strike with spot at $375.66, OI=0 — option PRICES were correct,
+   * deltas were computed at a months-old spot). When the delta-implied ATM
+   * deviates > 8% from the real spot, leg selection must use moneyness.
+   */
+  private async resolveUnderlyingPrice(
+    ticker: string,
+    chain: OptionsChain,
+  ): Promise<{ underlyingPx: number; trustDeltas: boolean }> {
+    const deltaEstimate = this.estimateUnderlyingPrice(chain);
+
+    let spot: number | null =
+      (chain.underlyingPrice !== null && chain.underlyingPrice > 0) ? chain.underlyingPrice : null;
+
+    if (spot === null) {
+      try {
+        const q = await this.dataProvider.getQuote(ticker);
+        spot = q.last ?? q.prevClose ?? null;
+      } catch { /* provider offline — fall back to chain estimate */ }
+    }
+
+    if (spot !== null && spot > 0) {
+      const trustDeltas = deltaEstimate > 0 &&
+        Math.abs(deltaEstimate - spot) / spot <= 0.08;
+      return { underlyingPx: spot, trustDeltas };
+    }
+    return { underlyingPx: deltaEstimate, trustDeltas: true };
   }
 
   private estimateUnderlyingPrice(chain: OptionsChain): number {

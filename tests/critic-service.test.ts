@@ -32,12 +32,15 @@ function makeSetup(shortStrike: number, expiration = '2099-01-15', unavailableRe
   };
 }
 
-function makePick(scores: LabScore[] | null, price = 100): BriefPick {
+function makePick(scores: LabScore[] | null, price = 100, labUnderlyingPx?: number): BriefPick {
   return {
     ticker: 'TEST',
     compositeScore: 70,
     signals: {},
-    strategyLabResult: scores === null ? null : { scores },
+    strategyLabResult: scores === null ? null : {
+      context: { underlyingPx: labUnderlyingPx ?? price },
+      scores,
+    },
     aiRationale: null,
     rank: 1,
     validated: true,
@@ -191,6 +194,35 @@ describe('CriticService rule checks', () => {
       ]);
       const flags = runChecks(svc, pick, 'wheel');
       expect(flags.find(f => f.key === 'poor_structure_grade')).toBeDefined();
+    });
+  });
+
+  describe('checkLabPriceConsistency — stale lab price guard', () => {
+    it('warns when the lab underlying price deviates > 5% from the live price', () => {
+      // Regression: 2026-06-10 WSO lab ran at $450 vs live $375.66 (stale E*Trade
+      // Greeks) and built a wheel put 11.8% ITM; AWI was 31% off and passed.
+      const pick = makePick([
+        { slug: 'short-naked-put', grade: 'A', liquidityScore: 8, setup: makeSetup(420) },
+      ], 375.66, 450);
+      const flags = runChecks(svc, pick, 'wheel');
+      const f = flags.find(fl => fl.key === 'stale_lab_price');
+      expect(f).toBeDefined();
+      expect(f!.severity).toBe('warning');
+      expect(f!.description).toContain('450');
+      expect(f!.description).toContain('375.66');
+    });
+
+    it('does not warn when lab and live prices agree within 5%', () => {
+      const pick = makePick([
+        { slug: 'short-naked-put', grade: 'A', liquidityScore: 8, setup: makeSetup(95) },
+      ], 100, 102);
+      const flags = runChecks(svc, pick, 'wheel');
+      expect(flags.find(fl => fl.key === 'stale_lab_price')).toBeUndefined();
+    });
+
+    it('skips silently when the lab context or price is missing', () => {
+      const flags = runChecks(svc, makePick(null), 'wheel');
+      expect(flags.find(fl => fl.key === 'stale_lab_price')).toBeUndefined();
     });
   });
 

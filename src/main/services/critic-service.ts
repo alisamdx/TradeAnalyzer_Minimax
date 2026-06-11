@@ -34,7 +34,10 @@ interface LabStructureScore {
     unavailableReason?: string | null;
   } | null;
 }
-interface LabResultShape { scores?: LabStructureScore[] }
+interface LabResultShape {
+  context?: { underlyingPx?: number };
+  scores?: LabStructureScore[];
+}
 
 export interface MarketContext {
   vix: number | null;
@@ -92,6 +95,7 @@ export class CriticService {
     f(this.checkEarningsInWindow(pick, strategy));
     f(this.checkStructureGrade(pick, strategy));
     f(this.checkCounterTrendStrike(pick, strategy, market));
+    f(this.checkLabPriceConsistency(pick));
 
     return flags;
   }
@@ -141,8 +145,9 @@ export class CriticService {
             ? Math.round((new Date(structureExpiry).getTime() - new Date(today).getTime()) / 86400000)
             : null;
 
-          // Strike OTM %: how far is the short strike from current price (positive = OTM for short calls/puts)
-          // (strike - price) / price: >0 when strike > price (short call OTM) ✓
+          // Strike-vs-spot %: (strike - price) / price. Positive = strike above spot
+          // (OTM for short calls, ITM for short puts). The prompt defines this
+          // side-aware — do not describe it as simply "positive = OTM".
           const strikeOtmPct = (strike !== null && price !== null && price > 0)
             ? +((strike - price) / price * 100).toFixed(1)
             : null;
@@ -220,7 +225,7 @@ Do NOT default to 'caution' — only raise an issue if it is specific and action
 FLAG SEVERITIES: 'warning' flags indicate material risk. 'info' flags are advisory only — a pick whose only flags are info-severity can still merit 'pass'; mention the advisory briefly but do not let it alone drive a 'caution'.
 
 MARKET DATA: All values in \`marketData\` are live as of \`date\` from real-time feeds — treat them as ground truth. Do not use training knowledge to contradict provided prices; stocks change dramatically over years of training lag. \`price52wReturnPct\` shows the 1-year return so you can calibrate price level without recalling historical absolutes.
-STRUCTURE: \`dte\` is pre-computed calendar days to expiry. \`strikeOtmPct\` is how far the short strike is from current price (positive = OTM). \`breakevenDistancePct\` (income only) is how far price can move before the structure loses — compare this to expected 1-sigma move (annualized vol / sqrt(365/dte)) to assess real risk. If \`structure.presentation\` says stock purchase, evaluate the pick as a plain stock buy — the option structure shown is an optional alternative; do not penalize the stock thesis for the structure's grade.
+STRUCTURE: \`dte\` is pre-computed calendar days to expiry. \`strikeOtmPct\` = (short strike − current price) / price × 100: positive means the strike is ABOVE spot (OTM for short calls, ITM for short puts); negative means BELOW spot (OTM for short puts, ITM for short calls). Judge moneyness by the leg's side — a short put with strikeOtmPct of +30% is deeply ITM and broken, not safe. \`breakevenDistancePct\` (income only) is how far price can move before the structure loses — compare this to expected 1-sigma move (annualized vol / sqrt(365/dte)) to assess real risk. If \`structure.presentation\` says stock purchase, evaluate the pick as a plain stock buy — the option structure shown is an optional alternative; do not penalize the stock thesis for the structure's grade.
 MARKET CONTEXT: \`vixLevel\` and \`spyTrend\` describe today's macro environment.
 EARNINGS: \`earningsInWindow\` is non-null if there is a known earnings event before expiry — this is the single biggest event risk for any options position.
 
@@ -556,6 +561,30 @@ Use verdict: pass, caution, or flag. Use confidence: high, medium, or low.`;
    * starts under directional pressure with no buffer. Observed pattern: 3 of 5
    * bearish picks on 2026-06-10 had ATM/ITM short strikes on a bullish SPY tape.
    */
+  /**
+   * Data-integrity guard: the lab's underlying price must agree with the live
+   * pick price. E*Trade serves stale Greeks on thin chains, which (pre-fix)
+   * anchored structures to a months-old spot — WSO built a wheel put 11.8% ITM,
+   * AWI an income straddle struck 31% above spot that the LLM passed. A >5%
+   * deviation means every strike, credit, and grade in the lab result is suspect.
+   */
+  private checkLabPriceConsistency(pick: BriefPick): CriticFlag | null {
+    const labPx = (pick.strategyLabResult as LabResultShape | null)?.context?.underlyingPx ?? null;
+    const price = pick.price;
+    if (labPx === null || price === null || price <= 0 || labPx <= 0) return null;
+
+    const devPct = Math.abs(labPx - price) / price * 100;
+    if (devPct > 5) {
+      return {
+        key: 'stale_lab_price', severity: 'warning',
+        description: `Strategy Lab built structures at $${labPx} but the live price is $${price} ` +
+          `(${devPct.toFixed(1)}% apart) — strikes, credits, and grades are unreliable. ` +
+          `Data integrity issue (stale chain Greeks); do not trade this structure as shown.`,
+      };
+    }
+    return null;
+  }
+
   private checkCounterTrendStrike(pick: BriefPick, strategy: string, market: MarketContext): CriticFlag | null {
     if (strategy !== 'bearish' || market.spyAbove200ma !== true) return null;
 

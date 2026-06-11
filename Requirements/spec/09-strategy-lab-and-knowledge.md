@@ -28,6 +28,7 @@ Each strategy profile defines its leg construction rules (delta/strike targets, 
 Given a ticker, the service fetches **entirely fresh live data** (no cache):
 - 90-day daily bars → direction bias (MA20 vs MA50).
 - Live options expirations + chain for the nearest **20–50 DTE** expiry (`includeGreeks=true`).
+- Underlying price resolution (`resolveUnderlyingPrice`): `chain.underlyingPrice` (E*Trade real-time spot) → `DataProvider.getQuote()` → chain-delta estimate (last resort). E*Trade serves stale Greeks on thin OI=0 chains while prices stay live; if the delta-implied ATM strike deviates >8% from the real spot, chain deltas are distrusted and leg selection falls back to moneyness offsets from spot.
 - `iv_history` → IV rank / percentile.
 
 Each strategy is scored 0–100 as the sum of four components, then graded:
