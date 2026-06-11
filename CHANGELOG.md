@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.74] — 2026-06-11
+
+### Fixed
+- **Orchestrator: second daily slot re-runs all jobs instead of skipping everything** — the previous skip rule (`lastSuccessDate === today`) caused the 16:30 slot to skip all 10 jobs because the 10:15 slot had already marked them as "succeeded today". Replaced with a 90-minute time window: a job is skipped only if its last successful run completed within the past 90 minutes. This means a resume (re-trigger minutes after a failure) still skips the already-done jobs, while a second scheduled slot hours later re-runs everything. Skip log message now shows how long ago the job ran (e.g. "skipped (succeeded 12m ago)").
+
 ## [0.32.73] — 2026-06-11
 
 ### Fixed

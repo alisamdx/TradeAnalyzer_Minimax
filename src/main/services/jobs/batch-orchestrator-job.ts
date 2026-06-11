@@ -53,8 +53,15 @@ export class BatchOrchestratorJob implements BatchJobHandler {
       tokenStatus = await this._checkEtradeToken();
     }
 
-    // ── 3. Resume state ─────────────────────────────────────────────────────
-    const alreadyDone = enabledJobs.filter(j => j.lastSuccessDate === today);
+    // ── 3. Resume/skip state ────────────────────────────────────────────────
+    // A job is skipped when its last successful run completed within the past
+    // SKIP_WINDOW_MS. This handles two distinct cases:
+    //   • Resume: orchestrator stopped mid-run; re-trigger skips jobs that
+    //     already succeeded moments ago and picks up from the failure point.
+    //   • Multi-slot: 16:30 slot re-runs everything that succeeded at 10:15
+    //     (well outside the window) rather than skipping it all.
+    const nowMs = Date.now();
+    const alreadyDone = enabledJobs.filter(j => this._isRecentSuccess(j, nowMs));
     const resumeStep  = alreadyDone.length + 1;
     const isFreshStart = alreadyDone.length === 0;
     const canStart = tokenStatus === 'valid';
@@ -72,7 +79,7 @@ export class BatchOrchestratorJob implements BatchJobHandler {
         resumeStep,
         total,
         alreadyDoneNames: alreadyDone.map(j => j.name),
-        pendingCount: enabledJobs.filter(j => j.lastSuccessDate !== today).length,
+        pendingCount: enabledJobs.filter(j => !this._isRecentSuccess(j, nowMs)).length,
         canStart,
       }).catch(err => console.error('[orchestrator] start email error:', err));
     }
@@ -96,10 +103,11 @@ export class BatchOrchestratorJob implements BatchJobHandler {
       const job       = enabledJobs[i]!;
       const stepLabel = `[${i + 1}/${total}]`;
 
-      if (job.lastSuccessDate === today) {
+      if (this._isRecentSuccess(job, nowMs)) {
         skipped++;
+        const minsAgo = Math.round((nowMs - new Date(job.lastRunAt!).getTime()) / 60_000);
         onProgress(this._evt(job.id, 'skipped', i + 1, succeeded, skipped, 0, total,
-          `${stepLabel} ${job.name} — skipped (already succeeded today)`));
+          `${stepLabel} ${job.name} — skipped (succeeded ${minsAgo}m ago)`));
         continue;
       }
 
@@ -137,6 +145,17 @@ export class BatchOrchestratorJob implements BatchJobHandler {
   }
 
   // ── Private helpers ───────────────────────────────────────────────────────
+
+  // Jobs that succeeded within this window are skipped; older successes are re-run.
+  private static readonly SKIP_WINDOW_MS = 90 * 60 * 1000;
+
+  private _isRecentSuccess(job: import('@shared/types.js').BatchJob, nowMs: number): boolean {
+    return (
+      job.lastRunStatus === 'success' &&
+      job.lastRunAt !== null &&
+      nowMs - new Date(job.lastRunAt).getTime() < BatchOrchestratorJob.SKIP_WINDOW_MS
+    );
+  }
 
   private async _checkEtradeToken(): Promise<TokenStatus> {
     const creds = this.getEtradeCreds();
