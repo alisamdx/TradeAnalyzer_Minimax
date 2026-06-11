@@ -306,7 +306,7 @@ export class EtradePortfolioService {
     const { Product, Complete } = raw;
 
     // ── Determine local position type ────────────────────────────────────────
-    let positionType: 'CSP' | 'CC' | 'Stock';
+    let positionType: 'CSP' | 'CC' | 'Stock' | 'Long Put' | 'Long Call';
     let ticker: string;
     let strikePrice: number | null = null;
     let expirationDate: string | null = null;
@@ -315,15 +315,12 @@ export class EtradePortfolioService {
       positionType = 'Stock';
       ticker = Product.symbol;
     } else if (Product.securityType === 'OPTN') {
-      // Only track SHORT options
-      if (raw.positionType !== 'SHORT' && raw.quantity >= 0) {
-        return false; // long option — skip
-      }
+      const isShort = raw.positionType === 'SHORT' || raw.quantity < 0;
 
       if (Product.callPut === 'PUT') {
-        positionType = 'CSP';
+        positionType = isShort ? 'CSP' : 'Long Put';
       } else if (Product.callPut === 'CALL') {
-        positionType = 'CC';
+        positionType = isShort ? 'CC' : 'Long Call';
       } else {
         return false; // unknown option type
       }
@@ -363,8 +360,8 @@ export class EtradePortfolioService {
     const entryPrice = num(raw.pricePaid) ?? num(raw.costPerShare) ?? 0;
     const entryDate  = epochToDate(raw.dateAcquired);
 
-    // ── Premium received (for CSP/CC: cost per share = premium collected) ────
-    const premiumReceived = positionType !== 'Stock'
+    // ── Premium received (short options only — long options pay premium) ────
+    const premiumReceived = (positionType === 'CSP' || positionType === 'CC')
       ? (num(raw.pricePaid) ?? num(raw.costPerShare))
       : null;
 

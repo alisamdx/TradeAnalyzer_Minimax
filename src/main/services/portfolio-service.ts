@@ -6,7 +6,7 @@ import type { DbHandle } from '../db/connection.js';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type PositionType = 'CSP' | 'CC' | 'Stock';
+export type PositionType = 'CSP' | 'CC' | 'Stock' | 'Long Put' | 'Long Call';
 export type PositionStatus = 'open' | 'closed';
 
 export interface Position {
@@ -200,7 +200,7 @@ export class PortfolioService {
   private validatePositionInput(input: PositionInput): void {
     this.validateTicker(input.ticker);
 
-    if (!['CSP', 'CC', 'Stock'].includes(input.positionType)) {
+    if (!['CSP', 'CC', 'Stock', 'Long Put', 'Long Call'].includes(input.positionType)) {
       throw new PortfolioError('INVALID_TYPE', `Invalid position type: ${input.positionType}`);
     }
 
@@ -364,6 +364,8 @@ export class PortfolioService {
     const totalCapital = allPositions.reduce((sum, p) => {
       if (p.positionType === 'Stock') {
         return sum + (p.entryPrice * p.quantity);
+      } else if (p.positionType === 'Long Put' || p.positionType === 'Long Call') {
+        return sum + (p.entryPrice * p.quantity * 100);
       } else {
         return sum + ((p.strikePrice ?? 0) * p.quantity * 100);
       }
@@ -391,7 +393,9 @@ export class PortfolioService {
 
     const capitalRequired = position.positionType === 'Stock'
       ? position.entryPrice * position.quantity
-      : (position.strikePrice ?? 0) * position.quantity * 100;
+      : (position.positionType === 'Long Put' || position.positionType === 'Long Call')
+        ? position.entryPrice * position.quantity * 100
+        : (position.strikePrice ?? 0) * position.quantity * 100;
 
     const daysHeld = position.exitDate && position.entryDate
       ? Math.floor((new Date(position.exitDate).getTime() - new Date(position.entryDate).getTime()) / (1000 * 60 * 60 * 24))

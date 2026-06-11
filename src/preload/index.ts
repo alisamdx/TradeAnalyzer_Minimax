@@ -466,7 +466,7 @@ function buildApi() {
   const portfolio = {
     add: (input: {
       ticker: string;
-      positionType: 'CSP' | 'CC' | 'Stock';
+      positionType: 'CSP' | 'CC' | 'Stock' | 'Long Put' | 'Long Call';
       quantity: number;
       entryPrice: number;
       entryDate: string;
@@ -477,7 +477,7 @@ function buildApi() {
     }) => invoke<{ success: boolean; data?: {
       id: number;
       ticker: string;
-      positionType: 'CSP' | 'CC' | 'Stock';
+      positionType: 'CSP' | 'CC' | 'Stock' | 'Long Put' | 'Long Call';
       quantity: number;
       entryPrice: number;
       entryDate: string;
@@ -498,7 +498,7 @@ function buildApi() {
     list: (status?: 'open' | 'closed') => invoke<{ success: boolean; data?: {
       id: number;
       ticker: string;
-      positionType: 'CSP' | 'CC' | 'Stock';
+      positionType: 'CSP' | 'CC' | 'Stock' | 'Long Put' | 'Long Call';
       quantity: number;
       entryPrice: number;
       entryDate: string;
@@ -522,7 +522,7 @@ function buildApi() {
     get: (id: number) => invoke<{ success: boolean; data?: {
       id: number;
       ticker: string;
-      positionType: 'CSP' | 'CC' | 'Stock';
+      positionType: 'CSP' | 'CC' | 'Stock' | 'Long Put' | 'Long Call';
       quantity: number;
       entryPrice: number;
       entryDate: string;
@@ -551,7 +551,7 @@ function buildApi() {
     }) => invoke<{ success: boolean; data?: {
       id: number;
       ticker: string;
-      positionType: 'CSP' | 'CC' | 'Stock';
+      positionType: 'CSP' | 'CC' | 'Stock' | 'Long Put' | 'Long Call';
       quantity: number;
       entryPrice: number;
       entryDate: string;
@@ -572,7 +572,7 @@ function buildApi() {
     close: (id: number, input: { exitPrice: number; exitDate: string; exitNotes?: string | null }) => invoke<{ success: boolean; data?: {
       id: number;
       ticker: string;
-      positionType: 'CSP' | 'CC' | 'Stock';
+      positionType: 'CSP' | 'CC' | 'Stock' | 'Long Put' | 'Long Call';
       quantity: number;
       entryPrice: number;
       entryDate: string;
@@ -604,7 +604,7 @@ function buildApi() {
     getWithMetrics: (id: number) => invoke<{ success: boolean; data?: {
       id: number;
       ticker: string;
-      positionType: 'CSP' | 'CC' | 'Stock';
+      positionType: 'CSP' | 'CC' | 'Stock' | 'Long Put' | 'Long Call';
       quantity: number;
       entryPrice: number;
       entryDate: string;
@@ -630,7 +630,7 @@ function buildApi() {
     listByTicker: (ticker: string) => invoke<{ success: boolean; data?: {
       id: number;
       ticker: string;
-      positionType: 'CSP' | 'CC' | 'Stock';
+      positionType: 'CSP' | 'CC' | 'Stock' | 'Long Put' | 'Long Call';
       quantity: number;
       entryPrice: number;
       entryDate: string;

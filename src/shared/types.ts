@@ -1150,7 +1150,7 @@ export interface EtradeSyncResult {
 export interface PositionEtrade {
   id: number;
   ticker: string;
-  positionType: 'CSP' | 'CC' | 'Stock';
+  positionType: 'CSP' | 'CC' | 'Stock' | 'Long Put' | 'Long Call';
   quantity: number;
   entryPrice: number;
   entryDate: string;

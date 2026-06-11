@@ -17,7 +17,7 @@ import type { IpcResult, EtradeAccount, EtradeSyncResult, PositionAnalysis, Posi
 export interface PositionDto {
   id: number;
   ticker: string;
-  positionType: 'CSP' | 'CC' | 'Stock';
+  positionType: 'CSP' | 'CC' | 'Stock' | 'Long Put' | 'Long Call';
   quantity: number;
   entryPrice: number;
   entryDate: string;
@@ -166,7 +166,7 @@ export function registerPortfolioIpc(db: Database, analysisService?: AnalysisSer
         const chain = await optionsProvider.getOptionsChain(ticker, expiry);
 
         for (const pos of positions) {
-          const side = pos.positionType === 'CSP' ? 'put' : 'call';
+          const side = (pos.positionType === 'CSP' || pos.positionType === 'Long Put') ? 'put' : 'call';
           const contract = chain.contracts.find(c =>
             c.side === side && Math.abs(c.strike - (pos.strikePrice ?? 0)) < 0.51
           );
@@ -177,12 +177,13 @@ export function registerPortfolioIpc(db: Database, analysisService?: AnalysisSer
             continue;
           }
 
-          // Negate chain Greeks to get short-position convention:
-          // short put/call has positive theta (earns decay) and negative vega (loses on IV rise).
-          // Delta: short put → positive, short call → negative.
-          const delta = contract.delta !== null ? -(contract.delta) : null;
-          const theta = contract.theta !== null ? -(contract.theta) : null;
-          const vega  = contract.vega  !== null ? -(contract.vega)  : null;
+          // Short positions (CSP/CC) negate chain Greeks: positive theta, negative vega.
+          // Long positions (Long Put/Long Call) keep natural chain Greeks.
+          const isShort = pos.positionType === 'CSP' || pos.positionType === 'CC';
+          const sign = isShort ? -1 : 1;
+          const delta = contract.delta !== null ? sign * contract.delta : null;
+          const theta = contract.theta !== null ? sign * contract.theta : null;
+          const vega  = contract.vega  !== null ? sign * contract.vega  : null;
 
           service.updateGreeks(pos.id, delta, theta, vega);
           updated++;
@@ -349,7 +350,7 @@ function mapPositionEtrade(r: Record<string, unknown>): PositionEtrade {
   return {
     id:               r['id'] as number,
     ticker:           r['ticker'] as string,
-    positionType:     r['position_type'] as 'CSP' | 'CC' | 'Stock',
+    positionType:     r['position_type'] as 'CSP' | 'CC' | 'Stock' | 'Long Put' | 'Long Call',
     quantity:         r['quantity'] as number,
     entryPrice:       r['entry_price'] as number,
     entryDate:        r['entry_date'] as string,

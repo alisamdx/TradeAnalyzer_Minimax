@@ -2,7 +2,7 @@
 
 > **Read this first.** Self-contained snapshot of *what the app is today* so a fresh AI session is productive without re-reading the whole codebase. This file describes **current state** — not history. Release history lives in `CHANGELOG.md` / `changelogs/`. Operating rules live in `/CLAUDE.md`. Full spec lives in `Requirements/`.
 >
-> Last verified against code: 2026-06-09 (v0.32.62). When you make a material change, update the relevant section here in the same commit.
+> Last verified against code: 2026-06-10 (v0.32.63). When you make a material change, update the relevant section here in the same commit.
 
 ---
 
@@ -147,6 +147,8 @@ Routing is a `currentView` string in `App.tsx`; cross-view navigation fires Cust
 ## 8. Data model (~50 tables, 34 migrations)
 
 Authoritative DDL is in `migrations/`. Tables are created lazily (`CREATE TABLE IF NOT EXISTS`) and migrations are idempotent + count-agnostic in tests.
+
+35 migrations. `positions.position_type` CHECK now includes `'Long Put'` and `'Long Call'` (migration 036) — all multi-leg strategy legs are tracked.
 
 | Domain | Tables |
 | --- | --- |

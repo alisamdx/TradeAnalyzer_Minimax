@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSortable } from '../hooks/useSortable.js';
 import type { PositionEtrade, PositionAnalysis, AdvisorSession, AdvisorProgressEvent } from '@shared/types.js';
 
-type PositionType = 'CSP' | 'CC' | 'Stock';
+type PositionType = 'CSP' | 'CC' | 'Stock' | 'Long Put' | 'Long Call';
 type PositionStatus = 'open' | 'closed';
 
 interface Position {
@@ -135,7 +135,7 @@ const ALERT_COLOR = { profit: '#22c55e', dte: '#f59e0b', delta: '#ef4444' } as c
 interface TradeAlert {
   positionId: number;
   ticker: string;
-  positionType: 'CSP' | 'CC' | 'Stock';
+  positionType: PositionType;
   strikePrice: number | null;
   type: 'profit' | 'dte' | 'delta';
   detail: string;
@@ -760,6 +760,8 @@ export function PortfolioView() {
                 <option value="Stock">Stock</option>
                 <option value="CSP">Cash-Secured Put</option>
                 <option value="CC">Covered Call</option>
+                <option value="Long Put">Long Put</option>
+                <option value="Long Call">Long Call</option>
               </select>
             </div>
             <div className="form-field">
@@ -930,7 +932,7 @@ export function PortfolioView() {
                             })()}
                           </td>
                           <td>
-                            <span className={`type-badge ${pos.positionType.toLowerCase()}`}>
+                            <span className={`type-badge ${pos.positionType.toLowerCase().replace(/\s+/g, '-')}`}>
                               {pos.positionType}
                             </span>
                           </td>

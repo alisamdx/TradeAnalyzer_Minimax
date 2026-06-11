@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.63] — 2026-06-10
+
+### Fixed
+- **Portfolio sync now captures all legs of multi-leg strategies** — long option legs (e.g. the long call in a jade/big lizard) were silently skipped during E*Trade sync. Added `'Long Put'` and `'Long Call'` position types; upsertPosition now maps LONG CALL → `Long Call` and LONG PUT → `Long Put` instead of dropping them. Greeks for long positions use natural (un-negated) chain values. Migration 036 expands the `position_type` CHECK constraint via table recreation.
+
 ## [0.32.62] — 2026-06-09
 
 ### Fixed
