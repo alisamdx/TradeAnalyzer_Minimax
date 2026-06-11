@@ -23,7 +23,7 @@ import { CriticService } from '../critic-service.js';
 import { WatchlistService } from '../watchlist-service.js';
 
 const PICKS_PER_STRATEGY = 5;   // final picks shown in brief per strategy (post-gate cap)
-const STAGE4_POOL_SIZE   = 10;  // candidates sent to E*Trade validation per strategy
+const STAGE4_POOL_SIZE   = 15;  // candidates sent to E*Trade validation per strategy — deepened from 10 in v0.32.70 so the liquidity gate (which now correctly rejects thin chains) still leaves 5 picks per strategy
 const MAX_PICK_PRICE     = 750; // USD — stocks above this price are excluded from all brief picks
 
 // Strategies whose structures carry naked short legs through the hold window —
@@ -34,7 +34,7 @@ function isAuthError(e: unknown): boolean {
   const msg = (e instanceof Error ? e.message : String(e)).toLowerCase();
   return msg.includes('401') || msg.includes('token') || msg.includes('auth') || msg.includes('oauth');
 }
-const STAGE_4_CAP = STAGE4_POOL_SIZE * STRATEGIES.length; // ≤ 50 unique tickers through E*Trade
+const STAGE_4_CAP = STAGE4_POOL_SIZE * STRATEGIES.length; // ≤ 75 unique tickers through E*Trade (usually far fewer — cross-strategy overlap)
 const RETENTION_DAYS = 90;
 
 // Minimum Strategy Lab liquidityScore (0–15) for a pick to survive the hard gate.

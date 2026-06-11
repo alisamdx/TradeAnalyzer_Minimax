@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.70] — 2026-06-10
+
+### Changed
+- **Brief Stage-4 pool deepened 10 → 15 per strategy** — the liquidity gate now correctly rejects thin chains (v0.32.69), which left wheel with 4 picks and income with 3. A deeper validation pool gives the gate more candidates so each strategy can still fill 5 picks. Worst-case E*Trade cap rises to 75 unique tickers/run (typically far fewer due to cross-strategy overlap).
+
 ## [0.32.69] — 2026-06-10
 
 ### Fixed
