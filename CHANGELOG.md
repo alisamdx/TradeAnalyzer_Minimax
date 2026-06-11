@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.66] — 2026-06-10
+
+### Added
+- **Brief Trend: total Return $ in summary bar** — sum of dollar returns across all rated picks shown next to avg return.
+
 ## [0.32.65] — 2026-06-10
 
 ### Added

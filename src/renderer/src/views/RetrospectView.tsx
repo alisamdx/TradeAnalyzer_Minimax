@@ -876,6 +876,8 @@ function BriefTrendTab() {
   const avgReturn  = ratedPicks.length > 0
     ? ratedPicks.reduce((s, p) => s + (p.returnPct ?? 0), 0) / ratedPicks.length
     : null;
+  const returnDollars    = ratedPicks.map(p => getReturnDollar(p)).filter((v): v is number => v !== null);
+  const totalReturnDollar = returnDollars.length > 0 ? returnDollars.reduce((s, v) => s + v, 0) : null;
 
   const presentStrategies = [...new Set(picks.map(p => p.strategy))] as ScoringStrategy[];
 
@@ -954,6 +956,15 @@ function BriefTrendTab() {
               {' '}
               <span style={{ color: avgReturn >= 0 ? '#3fb950' : '#f85149', fontWeight: 700 }}>
                 {fmtPct(avgReturn)}
+              </span>
+            </span>
+          )}
+          {totalReturnDollar !== null && (
+            <span className="brief-perf-chip">
+              <span style={{ color: '#8b949e' }}>total return:</span>
+              {' '}
+              <span style={{ color: totalReturnDollar >= 0 ? '#3fb950' : '#f85149', fontWeight: 700 }}>
+                {(totalReturnDollar >= 0 ? '+$' : '-$') + Math.abs(totalReturnDollar).toFixed(2)}
               </span>
             </span>
           )}
