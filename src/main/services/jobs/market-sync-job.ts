@@ -85,9 +85,11 @@ export class MarketSyncJob implements BatchJobHandler {
         };
       }
 
+      const syncNotes = [`${result.scanned} tickers synced into cache.`];
+      if (result.notes) syncNotes.push(result.notes);
       return {
         status: 'success',
-        notes: `${result.scanned} tickers synced into cache.`,
+        notes: syncNotes.join(' '),
         tickersAttempted: result.scanned,
         tickersUpdated:   result.scanned,
         tickersSkipped:   0,

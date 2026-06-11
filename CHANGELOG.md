@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.32.76] — 2026-06-11
+
+### Fixed
+- **Market sync: Polygon fundamentals plan restriction (403) is now visible, not silent** — `/vX/reference/financials` requires a Polygon Developer plan or higher; the Stocks Starter plan (currently in use) returns 403. Previously v0.32.75 silently skipped the 403 per-ticker, which meant fundamentals data was quietly missing with no indication in the job history. New behaviour: on the first 403 from the fundamentals endpoint the flag `fundamentalsPlanRestricted` is set, all subsequent tickers skip the fundamentals call (avoiding ~1000 redundant 403 round-trips), and the job completes with status `success` but with a note: "Fundamentals skipped — /vX/reference/financials requires a Polygon Developer plan or higher (current plan: Stocks Starter)." Quotes still sync normally. The note is visible in Batch Jobs → run history.
+- **Root cause of "why only with the orchestrator"** — the fundamentals cache TTL is 24 hours (`TTL_SECONDS.FUNDAMENTALS = 86_400`). All prior manual runs happened within 24 hours of each other, so `isStale()` always returned false and `getFundamentals()` was never called. The orchestrator's strict daily schedule is the first code path that reliably runs with a stale cache, triggering the live Polygon call and exposing the plan restriction.
+
 ## [0.32.75] — 2026-06-11
 
 ### Fixed

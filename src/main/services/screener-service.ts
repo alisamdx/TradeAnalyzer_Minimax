@@ -169,7 +169,7 @@ export class ScreenerService {
     universe: Universe,
     onProgress?: (scanned: number, total: number, ticker?: string) => void,
     checkCancelled?: () => boolean
-  ): Promise<{ scanned: number }> {
+  ): Promise<{ scanned: number; notes?: string }> {
     const constituents = this.getConstituents(universe);
     const total = constituents.length;
 
@@ -177,6 +177,10 @@ export class ScreenerService {
       const label = universe === 'both' ? 'S&P 500 and Russell 1000 lists are' : universe === 'etf' ? 'ETF list is' : universe + ' list is';
       throw new Error(`The ${label} empty. Please click "Update Ticker Lists" above first.`);
     }
+
+    // Track plan restriction for fundamentals endpoint (403 applies to the whole account,
+    // not per-ticker — once detected, stop calling it for the rest of this run).
+    let fundamentalsPlanRestricted = false;
 
     for (let i = 0; i < total; i++) {
       if (checkCancelled && checkCancelled()) {
@@ -187,18 +191,26 @@ export class ScreenerService {
       onProgress?.(i, total, ticker);
 
       // Fetch and cache Fundamentals
-      try {
-        if (this.fundamentalsCache.isStale(ticker)) {
-          const ratios = await this.dataProvider.getFundamentals(ticker);
-          this.fundamentalsCache.upsert(ticker, ratios);
-        }
-      } catch (err) {
-        // Only a genuine 401 (invalid/missing API key) aborts the whole sync.
-        // 403 plan-restriction responses can mention "api key" in their body but
-        // are NOT auth failures — previously they caused a false "Invalid API key"
-        // abort. Per-ticker fundamentals failures are otherwise silently skipped.
-        if (err instanceof Error && err.message.includes('Polygon HTTP 401')) {
-          throw new Error('Polygon API key is invalid or missing. Please update it in Settings.');
+      if (!fundamentalsPlanRestricted) {
+        try {
+          if (this.fundamentalsCache.isStale(ticker)) {
+            const ratios = await this.dataProvider.getFundamentals(ticker);
+            this.fundamentalsCache.upsert(ticker, ratios);
+          }
+        } catch (err) {
+          if (err instanceof Error) {
+            if (err.message.includes('Polygon HTTP 401')) {
+              throw new Error('Polygon API key is invalid or missing. Please update it in Settings.');
+            }
+            if (err.message.includes('Polygon HTTP 403')) {
+              // Plan restriction — applies to the whole account, not just this ticker.
+              // Stop calling the fundamentals endpoint for the rest of this run;
+              // quotes still sync normally.
+              fundamentalsPlanRestricted = true;
+              console.warn('[screener] Fundamentals endpoint returned 403 (plan restriction). Skipping fundamentals for this run.');
+            }
+            // All other errors (OTC tickers, delisted, etc.): silently skip per-ticker.
+          }
         }
       }
 
@@ -233,7 +245,11 @@ export class ScreenerService {
 
     onProgress?.(total, total);
     this.cacheManager.updateLastRun(total);
-    return { scanned: total };
+
+    const notes = fundamentalsPlanRestricted
+      ? 'Fundamentals skipped — /vX/reference/financials requires a Polygon Developer plan or higher (current plan: Stocks Starter).'
+      : undefined;
+    return { scanned: total, notes };
   }
 
   /** Evaluate a single ticker against the screen criteria. */
