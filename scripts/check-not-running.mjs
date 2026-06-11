@@ -1,21 +1,29 @@
 // check-not-running.mjs
 // Runs as part of prepackage / prebuild.
 // Exits 1 with a clear message if TradeAnalyzer.exe is currently running
-// so the package step fails loudly instead of silently overwriting a locked build.
+// so the package step fails loudly instead of silently building a stale bundle.
 
 import { execSync } from 'child_process';
 
-const EXE = 'TradeAnalyzer.exe';
+const EXE_NAME = 'TradeAnalyzer';
+
+let running = false;
 
 try {
-  const out = execSync(`tasklist /FI "IMAGENAME eq ${EXE}" /NH 2>NUL`, { encoding: 'utf8' });
-  if (out.includes(EXE)) {
-    console.error('');
-    console.error(`  ❌  ${EXE} is currently running.`);
-    console.error(`      Stop the app first, then re-run:  npm run package`);
-    console.error('');
-    process.exit(1);
-  }
+  // Use PowerShell explicitly — reliable from any parent shell (cmd, Git Bash, PS).
+  const out = execSync(
+    `powershell.exe -NoProfile -NonInteractive -Command "Get-Process -Name '${EXE_NAME}' -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Name"`,
+    { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
+  ).trim();
+  running = out.toLowerCase() === EXE_NAME.toLowerCase();
 } catch {
-  // tasklist unavailable or failed — don't block the build
+  // PowerShell unavailable or Get-Process failed — don't block the build
+}
+
+if (running) {
+  console.error('');
+  console.error(`  ❌  ${EXE_NAME}.exe is currently running.`);
+  console.error(`      Stop the app first, then re-run:  npm run package`);
+  console.error('');
+  process.exit(1);
 }
