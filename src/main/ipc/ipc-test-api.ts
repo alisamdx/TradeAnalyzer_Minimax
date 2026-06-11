@@ -632,39 +632,59 @@ export function registerTestApiIpc(
       const totalConceptCount = Object.keys(gaap).length;
 
       const fields: EdgarFieldResult[] = EDGAR_FIELD_SPECS.map(spec => {
+        // Collect ALL matching candidates, then pick the one with the most recent
+        // annual data. This handles ASC 606-style transitions where a company has
+        // both an old concept (e.g. "Revenues", last used 2018) and a new concept
+        // (e.g. "RevenueFromContractWithCustomer…", used from 2019 onward). Taking
+        // the first-found would silently return stale data.
+        type Candidate = {
+          concept: string; unit: string; entries: EdgarEntry[];
+          latestAnnual: EdgarEntry | null; latestQtr: EdgarEntry | null;
+        };
+        const candidates: Candidate[] = [];
         for (const concept of spec.concepts) {
           const node = gaap[concept];
           if (!node?.units) continue;
-          // Prefer USD for monetary fields; USD/shares for EPS; shares for share counts.
+          // Prefer USD for monetary, USD/shares for EPS, then whatever unit exists.
           const unitEntry = Object.entries(node.units).find(([u]) => u === 'USD') ??
                             Object.entries(node.units).find(([u]) => u === 'USD/shares') ??
                             Object.entries(node.units)[0];
           if (!unitEntry) continue;
           const [unit, entries] = unitEntry;
           if (!entries?.length) continue;
+          candidates.push({
+            concept, unit, entries,
+            latestAnnual: pickEdgarLatest(entries, '10-K'),
+            latestQtr:    pickEdgarLatest(entries, '10-Q'),
+          });
+        }
 
-          const latestAnnual = pickEdgarLatest(entries, '10-K');
-          const latestQtr    = pickEdgarLatest(entries, '10-Q');
-
+        if (candidates.length === 0) {
           return {
             role: spec.role, label: spec.label,
-            conceptUsed: concept, conceptsTried: [...spec.concepts],
-            unit, found: true,
-            latestAnnualVal:  latestAnnual?.val  ?? null,
-            latestAnnualDate: latestAnnual?.end  ?? null,
-            latestQtrVal:     latestQtr?.val     ?? null,
-            latestQtrDate:    latestQtr?.end     ?? null,
-            annualCount:    entries.filter(e => e.form === '10-K').length,
-            quarterlyCount: entries.filter(e => e.form === '10-Q').length,
+            conceptUsed: null, conceptsTried: [...spec.concepts],
+            unit: null, found: false,
+            latestAnnualVal: null, latestAnnualDate: null,
+            latestQtrVal: null, latestQtrDate: null,
+            annualCount: 0, quarterlyCount: 0,
           };
         }
+
+        // Pick the candidate whose most recent 10-K is latest.
+        candidates.sort((a, b) =>
+          (b.latestAnnual?.end ?? '').localeCompare(a.latestAnnual?.end ?? '')
+        );
+        const best = candidates[0]!;
         return {
           role: spec.role, label: spec.label,
-          conceptUsed: null, conceptsTried: [...spec.concepts],
-          unit: null, found: false,
-          latestAnnualVal: null, latestAnnualDate: null,
-          latestQtrVal: null, latestQtrDate: null,
-          annualCount: 0, quarterlyCount: 0,
+          conceptUsed: best.concept, conceptsTried: [...spec.concepts],
+          unit: best.unit, found: true,
+          latestAnnualVal:  best.latestAnnual?.val ?? null,
+          latestAnnualDate: best.latestAnnual?.end ?? null,
+          latestQtrVal:     best.latestQtr?.val    ?? null,
+          latestQtrDate:    best.latestQtr?.end    ?? null,
+          annualCount:    best.entries.filter(e => e.form === '10-K').length,
+          quarterlyCount: best.entries.filter(e => e.form === '10-Q').length,
         };
       });
 

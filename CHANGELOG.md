@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.78] — 2026-06-11
+
+### Fixed
+- **EDGAR test: concept selection picks most-recent data, not first-found** — when a company has multiple matching US-GAAP concepts (e.g. Apple has both `Revenues` with 2018 data and `RevenueFromContractWithCustomerExcludingAssessedTax` with current data), the old code returned the first one that had any entries, giving stale 2018 revenue. Fix: collect all matching candidates and pick the one with the most recent 10-K filing date.
+
 ## [0.32.77] — 2026-06-11
 
 ### Added
