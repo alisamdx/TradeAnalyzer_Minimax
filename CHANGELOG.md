@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.73] — 2026-06-11
+
+### Fixed
+- **Orchestrator: false "token invalid" on active E*Trade sessions** — the orchestrator was calling `renewAccessToken()` as the validity check, but E*Trade rejects that call when the token is active (recently used, non-dormant). This caused the orchestrator to abort with "E*Trade token invalid — renewal failed" even though Settings showed "✓ Connected". Fix: use the same date-stamp check that `checkConnection` (Settings page) uses — if `etradeTokenDate` matches today's ET date the token is valid. `renewAccessToken()` is now called as a best-effort wakeup for dormant tokens only; a failure on an active token is silently ignored.
+
 ## [0.32.72] — 2026-06-11
 
 ### Fixed

@@ -458,7 +458,7 @@ app.whenReady().then(() => {
 
   // Earnings calendar
   const earningsService = new EarningsService(db);
-  const getEtradeCreds = (): import('./services/etrade-auth.js').OAuthCredentials | null => {
+  const getEtradeCreds = (): (import('./services/etrade-auth.js').OAuthCredentials & { tokenDate: string | null }) | null => {
     const accessToken  = secureGet(db, 'etradeAccessToken');
     const accessSecret = secureGet(db, 'etradeAccessSecret');
     if (!accessToken || !accessSecret) return null;
@@ -467,6 +467,7 @@ app.whenReady().then(() => {
       consumerSecret: secureGet(db, 'etradeConsumerSecret') ?? '',
       accessToken,
       accessSecret,
+      tokenDate: secureGet(db, 'etradeTokenDate'),
     };
   };
   registerEarningsIpc(earningsService, getEtradeCreds);

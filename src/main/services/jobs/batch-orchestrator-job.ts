@@ -11,6 +11,7 @@ import { renewAccessToken } from '../etrade-auth.js';
 import { isTradingDay } from '../iv-history-service.js';
 
 type TokenStatus = 'valid' | 'invalid';
+type EtradeCredsWithDate = OAuthCredentials & { tokenDate: string | null };
 
 export class BatchOrchestratorJob implements BatchJobHandler {
   readonly name = 'Batch Orchestrator';
@@ -20,7 +21,7 @@ export class BatchOrchestratorJob implements BatchJobHandler {
 
   constructor(
     private readonly batchService: BatchService,
-    private readonly getEtradeCreds: () => OAuthCredentials | null,
+    private readonly getEtradeCreds: () => EtradeCredsWithDate | null,
     private readonly emailService: EmailService,
   ) {}
 
@@ -140,12 +141,19 @@ export class BatchOrchestratorJob implements BatchJobHandler {
   private async _checkEtradeToken(): Promise<TokenStatus> {
     const creds = this.getEtradeCreds();
     if (!creds?.accessToken) return 'invalid';
-    try {
-      await renewAccessToken(creds);
-      return 'valid';
-    } catch {
-      return 'invalid';
-    }
+
+    // E*Trade tokens expire at midnight ET — the issue date is the authoritative gate.
+    // This mirrors the checkConnection IPC handler (ipc-etrade.ts) which uses the same
+    // date-stamp approach and intentionally avoids calling renewAccessToken() on startup
+    // because calling it on an ACTIVE token causes E*Trade to return an error.
+    const today = this.batchService.todayET();
+    if (!creds.tokenDate || creds.tokenDate !== today) return 'invalid';
+
+    // Token is date-valid. Attempt renewal to pre-wake a dormant token (inactive >2h).
+    // Active tokens will fail this call — that is expected and does NOT mean the token
+    // is invalid. Individual jobs surface real 401s if the token somehow isn't working.
+    try { await renewAccessToken(creds); } catch { /* expected for recently-used tokens */ }
+    return 'valid';
   }
 
   private _evt(
