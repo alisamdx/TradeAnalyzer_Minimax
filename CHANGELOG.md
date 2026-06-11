@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.77] — 2026-06-11
+
+### Added
+- **Test API — SEC EDGAR tab** — new tab in Test API screen for validating the SEC EDGAR XBRL data source before full provider implementation. Enter any ticker to: (1) resolve CIK via `company_tickers.json` (cached for the session); (2) fetch `companyfacts/{CIK}.json`; (3) check all 11 US-GAAP concepts that `computeRatios()` needs (revenue, net income, operating income, D&A, stockholders' equity, current assets/liabilities, long-term debt, cash, operating CF, CapEx). Results show per-field found/not-found, concept name used, latest annual (10-K) and quarterly (10-Q) values with dates, and filing counts. Concept browser shows all available GAAP concepts, highlighting the ones in use. No API key required; SEC rate limit is 10 req/s.
+
 ## [0.32.76] — 2026-06-11
 
 ### Fixed

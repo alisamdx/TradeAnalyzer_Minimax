@@ -193,6 +193,79 @@ export interface IVolatilityTestResult {
   rawSample:       string;   // JSON of first 3 raw rows
 }
 
+// ─── SEC EDGAR helpers (module-level) ────────────────────────────────────────
+
+const EDGAR_HEADERS = { 'User-Agent': 'TradeAnalyzer/1.0 trader@local' };
+
+// Session-level CIK lookup cache — avoids re-fetching the 500 KB tickers file.
+let _edgarCikCache: Map<string, { cikPadded: string; title: string }> | null = null;
+
+async function resolveEdgarCik(ticker: string): Promise<{ cikPadded: string; title: string }> {
+  if (!_edgarCikCache) {
+    const r = await fetch('https://www.sec.gov/files/company_tickers.json', { headers: EDGAR_HEADERS });
+    if (!r.ok) throw new Error(`SEC company_tickers.json HTTP ${r.status}`);
+    const raw = await r.json() as Record<string, { cik_str: number | string; ticker: string; title: string }>;
+    _edgarCikCache = new Map();
+    for (const entry of Object.values(raw)) {
+      const cikNum = typeof entry.cik_str === 'string' ? parseInt(entry.cik_str, 10) : entry.cik_str;
+      _edgarCikCache.set(entry.ticker.toUpperCase(), {
+        cikPadded: String(cikNum).padStart(10, '0'),
+        title: entry.title,
+      });
+    }
+  }
+  const info = _edgarCikCache.get(ticker);
+  if (!info) throw new Error(`"${ticker}" not found in SEC company_tickers.json (${_edgarCikCache.size} tickers indexed — OTC/foreign tickers may not be listed)`);
+  return info;
+}
+
+interface EdgarEntry { end: string; val: number; fp: string; form: string; filed: string }
+
+function pickEdgarLatest(entries: EdgarEntry[], form: '10-K' | '10-Q'): EdgarEntry | null {
+  return [...entries].filter(e => e.form === form).sort((a, b) => b.end.localeCompare(a.end))[0] ?? null;
+}
+
+// The 11 financial concepts that computeRatios() needs, mapped to US-GAAP concept name(s).
+// Listed in priority order — first match wins.
+const EDGAR_FIELD_SPECS: ReadonlyArray<{ role: string; label: string; concepts: readonly string[] }> = [
+  { role: 'revenue',      label: 'Revenue',               concepts: ['Revenues', 'RevenueFromContractWithCustomerExcludingAssessedTax', 'SalesRevenueNet', 'RevenueFromContractWithCustomerIncludingAssessedTax'] },
+  { role: 'net_income',   label: 'Net Income',            concepts: ['NetIncomeLoss', 'NetIncome', 'ProfitLoss'] },
+  { role: 'op_income',    label: 'Operating Income',      concepts: ['OperatingIncomeLoss'] },
+  { role: 'depreciation', label: 'Depreciation & Amort',  concepts: ['DepreciationDepletionAndAmortization', 'DepreciationAndAmortization', 'DepreciationAmortizationAndAccretionNet'] },
+  { role: 'equity',       label: "Stockholders' Equity",  concepts: ['StockholdersEquity', 'StockholdersEquityAttributableToParent'] },
+  { role: 'assets_cur',   label: 'Current Assets',        concepts: ['AssetsCurrent'] },
+  { role: 'liab_cur',     label: 'Current Liabilities',   concepts: ['LiabilitiesCurrent'] },
+  { role: 'debt_lt',      label: 'Long-term Debt',        concepts: ['LongTermDebt', 'LongTermDebtNoncurrent', 'LongTermDebtAndCapitalLeaseObligations'] },
+  { role: 'cash',         label: 'Cash & Equivalents',    concepts: ['CashAndCashEquivalentsAtCarryingValue', 'Cash', 'CashCashEquivalentsAndShortTermInvestments'] },
+  { role: 'op_cf',        label: 'Operating Cash Flow',   concepts: ['NetCashProvidedByUsedInOperatingActivities'] },
+  { role: 'capex',        label: 'CapEx',                  concepts: ['PaymentsToAcquirePropertyPlantAndEquipment', 'CapitalExpendituresIncurringObligation'] },
+];
+
+export interface EdgarFieldResult {
+  role: string;
+  label: string;
+  conceptUsed: string | null;
+  conceptsTried: string[];
+  unit: string | null;
+  found: boolean;
+  latestAnnualVal: number | null;
+  latestAnnualDate: string | null;
+  latestQtrVal: number | null;
+  latestQtrDate: string | null;
+  annualCount: number;
+  quarterlyCount: number;
+}
+
+export interface EdgarTestResult {
+  ticker: string;
+  cik: string;
+  entityName: string;
+  fields: EdgarFieldResult[];
+  totalConceptCount: number;
+  topGaapConcepts: string[];
+  rawSample: string;
+}
+
 export function registerTestApiIpc(
   dataProvider: PolygonDataProvider,
   db: DbHandle,
@@ -536,6 +609,88 @@ export function registerTestApiIpc(
       }
     }
   );
+
+  // ── SEC EDGAR handlers ────────────────────────────────────────────────────
+
+  ipcMain.handle('test-api:edgar-fundamentals', async (_e: IpcMainInvokeEvent, ticker: string) => {
+    try {
+      const { cikPadded, title } = await resolveEdgarCik(ticker.toUpperCase().trim());
+      const resp = await fetch(
+        `https://data.sec.gov/api/xbrl/companyfacts/CIK${cikPadded}.json`,
+        { headers: EDGAR_HEADERS }
+      );
+      if (!resp.ok) throw new Error(`SEC companyfacts HTTP ${resp.status}: ${await resp.text().then(t => t.slice(0, 200))}`);
+
+      const data = await resp.json() as {
+        cik: number;
+        entityName: string;
+        facts: { 'us-gaap'?: Record<string, { label: string; units: Record<string, EdgarEntry[]> }> };
+      };
+
+      const gaap = data.facts['us-gaap'] ?? {};
+      const topGaapConcepts = Object.keys(gaap).slice(0, 40);
+      const totalConceptCount = Object.keys(gaap).length;
+
+      const fields: EdgarFieldResult[] = EDGAR_FIELD_SPECS.map(spec => {
+        for (const concept of spec.concepts) {
+          const node = gaap[concept];
+          if (!node?.units) continue;
+          // Prefer USD for monetary fields; USD/shares for EPS; shares for share counts.
+          const unitEntry = Object.entries(node.units).find(([u]) => u === 'USD') ??
+                            Object.entries(node.units).find(([u]) => u === 'USD/shares') ??
+                            Object.entries(node.units)[0];
+          if (!unitEntry) continue;
+          const [unit, entries] = unitEntry;
+          if (!entries?.length) continue;
+
+          const latestAnnual = pickEdgarLatest(entries, '10-K');
+          const latestQtr    = pickEdgarLatest(entries, '10-Q');
+
+          return {
+            role: spec.role, label: spec.label,
+            conceptUsed: concept, conceptsTried: [...spec.concepts],
+            unit, found: true,
+            latestAnnualVal:  latestAnnual?.val  ?? null,
+            latestAnnualDate: latestAnnual?.end  ?? null,
+            latestQtrVal:     latestQtr?.val     ?? null,
+            latestQtrDate:    latestQtr?.end     ?? null,
+            annualCount:    entries.filter(e => e.form === '10-K').length,
+            quarterlyCount: entries.filter(e => e.form === '10-Q').length,
+          };
+        }
+        return {
+          role: spec.role, label: spec.label,
+          conceptUsed: null, conceptsTried: [...spec.concepts],
+          unit: null, found: false,
+          latestAnnualVal: null, latestAnnualDate: null,
+          latestQtrVal: null, latestQtrDate: null,
+          annualCount: 0, quarterlyCount: 0,
+        };
+      });
+
+      // Raw sample: first 3 entries of the first found concept's USD array.
+      const firstFound = fields.find(f => f.found && f.conceptUsed);
+      let rawSample = '{}';
+      if (firstFound?.conceptUsed) {
+        const sampleEntries = Object.values(
+          gaap[firstFound.conceptUsed]?.units ?? {}
+        )[0]?.slice(-5) ?? [];
+        rawSample = JSON.stringify({ [firstFound.conceptUsed]: sampleEntries }, null, 2);
+      }
+
+      return ok<EdgarTestResult>({
+        ticker: ticker.toUpperCase().trim(),
+        cik: cikPadded,
+        entityName: data.entityName || title,
+        fields,
+        totalConceptCount,
+        topGaapConcepts,
+        rawSample,
+      });
+    } catch (err) {
+      return fail(err);
+    }
+  });
 
   // ── Finnhub handlers ──────────────────────────────────────────────────────
 

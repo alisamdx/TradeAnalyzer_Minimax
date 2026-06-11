@@ -854,6 +854,30 @@ function buildApi() {
         }>;
         rawSample: string;
       }>('test-api:get-finnhub-earnings', from, to, symbol),
+
+    getEdgarFundamentals: (ticker: string) =>
+      invoke<{
+        ticker: string;
+        cik: string;
+        entityName: string;
+        fields: Array<{
+          role: string;
+          label: string;
+          conceptUsed: string | null;
+          conceptsTried: string[];
+          unit: string | null;
+          found: boolean;
+          latestAnnualVal: number | null;
+          latestAnnualDate: string | null;
+          latestQtrVal: number | null;
+          latestQtrDate: string | null;
+          annualCount: number;
+          quarterlyCount: number;
+        }>;
+        totalConceptCount: number;
+        topGaapConcepts: string[];
+        rawSample: string;
+      }>('test-api:edgar-fundamentals', ticker),
   };
 
   const agent = {

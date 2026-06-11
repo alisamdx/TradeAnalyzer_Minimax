@@ -1276,6 +1276,205 @@ function IVolatilityTab() {
   );
 }
 
+// ─── SEC EDGAR tab ───────────────────────────────────────────────────────────
+
+type EdgarResult = Awaited<ReturnType<typeof window.api.testApi.getEdgarFundamentals>>;
+
+function fmtDollars(v: number | null, unit: string | null): string {
+  if (v === null) return '—';
+  if (unit === 'USD/shares') return `$${v.toFixed(2)}`;
+  const abs = Math.abs(v);
+  if (abs >= 1e12) return `$${(v / 1e12).toFixed(2)}T`;
+  if (abs >= 1e9)  return `$${(v / 1e9).toFixed(2)}B`;
+  if (abs >= 1e6)  return `$${(v / 1e6).toFixed(2)}M`;
+  return `$${v.toLocaleString()}`;
+}
+
+function EdgarTab() {
+  const [ticker, setTicker]   = useState('AAPL');
+  const [loading, setLoading] = useState(false);
+  const [result, setResult]   = useState<EdgarResult | null>(null);
+  const [error, setError]     = useState<string | null>(null);
+  const [showRaw, setShowRaw] = useState(false);
+  const [showAllConcepts, setShowAllConcepts] = useState(false);
+
+  const fetch = async () => {
+    const t = ticker.trim().toUpperCase();
+    if (!t) return;
+    setLoading(true); setError(null); setResult(null);
+    try {
+      const r = await window.api.testApi.getEdgarFundamentals(t);
+      setResult(r);
+    } catch (e) { setError((e as Error).message); }
+    finally { setLoading(false); }
+  };
+
+  const S = {
+    card:  { background: '#1e1e2e', border: '1px solid #313244', borderRadius: 8, padding: '12px 16px', marginBottom: 12 },
+    label: { color: '#6c7086', minWidth: 120 } as React.CSSProperties,
+    good:  { color: '#a6e3a1' },
+    warn:  { color: '#f9e2af' },
+    bad:   { color: '#f38ba8' },
+    val:   { color: '#cdd6f4' },
+  };
+
+  const foundCount  = result?.fields.filter(f => f.found).length ?? 0;
+  const totalFields = result?.fields.length ?? 0;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+
+      {/* ── Description ── */}
+      <div style={{ fontSize: 11, color: '#6c7086', lineHeight: 1.5 }}>
+        SEC EDGAR XBRL company facts — free, no API key, 10 req/s limit.{' '}
+        Validates the 11 US-GAAP concepts needed by <code style={{ color: '#fab387' }}>computeRatios()</code>.{' '}
+        First call downloads <code style={{ color: '#89b4fa' }}>company_tickers.json</code> (~500 KB) and caches it for the session.
+      </div>
+
+      {/* ── Query row ── */}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <input
+          value={ticker}
+          onChange={e => setTicker(e.target.value.toUpperCase())}
+          onKeyDown={e => e.key === 'Enter' && fetch()}
+          placeholder="Ticker (e.g. AAPL)"
+          style={{ width: 120, padding: '5px 10px', borderRadius: 5, border: '1px solid #313244', background: '#1e1e2e', color: '#cdd6f4', fontSize: 12 }}
+        />
+        <button onClick={fetch} disabled={loading}
+          style={{ padding: '5px 18px', borderRadius: 5, border: 'none', background: '#89b4fa', color: '#1e1e2e', fontSize: 12, fontWeight: 700, cursor: 'pointer', opacity: loading ? 0.6 : 1 }}>
+          {loading ? 'Fetching…' : 'Fetch'}
+        </button>
+        <span style={{ fontSize: 11, color: '#6c7086' }}>
+          Calls data.sec.gov — response may take 2–5 s for large filers
+        </span>
+      </div>
+
+      {error && (
+        <div style={{ color: '#f38ba8', fontSize: 12, background: '#1e1e2e', padding: '8px 12px', borderRadius: 6 }}>
+          Error: {error}
+        </div>
+      )}
+
+      {result && (
+        <>
+          {/* ── Company header ── */}
+          <div style={S.card}>
+            <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', fontSize: 12 }}>
+              <span><span style={S.label}>Entity</span>{' '}
+                <span style={{ color: '#cba6f7', fontWeight: 700 }}>{result.entityName}</span>
+              </span>
+              <span><span style={S.label}>Ticker</span>{' '}<span style={S.val}>{result.ticker}</span></span>
+              <span><span style={S.label}>CIK</span>{' '}<span style={{ color: '#89b4fa', fontFamily: 'monospace' }}>{result.cik}</span></span>
+              <span><span style={S.label}>Total GAAP concepts</span>{' '}
+                <span style={result.totalConceptCount > 0 ? S.good : S.bad}>{result.totalConceptCount.toLocaleString()}</span>
+              </span>
+              <span><span style={S.label}>Fields found</span>{' '}
+                <span style={{ color: foundCount === totalFields ? '#a6e3a1' : foundCount >= totalFields * 0.8 ? '#f9e2af' : '#f38ba8', fontWeight: 700 }}>
+                  {foundCount} / {totalFields}
+                </span>
+              </span>
+            </div>
+          </div>
+
+          {/* ── Field coverage table ── */}
+          <div style={S.card}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#89b4fa', marginBottom: 8 }}>
+              Financial Field Coverage
+            </div>
+            <div style={{ fontSize: 11, color: '#6c7086', marginBottom: 8 }}>
+              These are the 11 concepts <code>computeRatios()</code> needs. Green = found. "Annual" = latest 10-K value; "Qtr" = latest 10-Q value.
+            </div>
+            <div style={{ overflowX: 'auto', border: '1px solid #313244', borderRadius: 4 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                <thead style={{ position: 'sticky', top: 0, background: '#181825', zIndex: 1 }}>
+                  <tr style={{ color: '#6c7086', borderBottom: '1px solid #313244' }}>
+                    <th style={{ textAlign: 'left',  padding: '4px 8px', width: 160 }}>Field</th>
+                    <th style={{ textAlign: 'left',  padding: '4px 8px', width: 36  }}>OK</th>
+                    <th style={{ textAlign: 'left',  padding: '4px 8px'             }}>Concept Used</th>
+                    <th style={{ textAlign: 'right', padding: '4px 8px', width: 90  }}>Annual</th>
+                    <th style={{ textAlign: 'left',  padding: '4px 8px', width: 80  }}>Date</th>
+                    <th style={{ textAlign: 'right', padding: '4px 8px', width: 90  }}>Qtr</th>
+                    <th style={{ textAlign: 'left',  padding: '4px 8px', width: 80  }}>Date</th>
+                    <th style={{ textAlign: 'right', padding: '4px 8px', width: 44  }}>10-Ks</th>
+                    <th style={{ textAlign: 'right', padding: '4px 8px', width: 44  }}>10-Qs</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.fields.map(f => (
+                    <tr key={f.role} style={{ borderBottom: '1px solid #1e1e2e', background: !f.found ? 'rgba(243,139,168,0.04)' : 'transparent' }}>
+                      <td style={{ padding: '3px 8px', color: '#cdd6f4', fontWeight: 600 }}>{f.label}</td>
+                      <td style={{ padding: '3px 8px', textAlign: 'center', fontSize: 13 }}>
+                        {f.found ? <span style={S.good}>✓</span> : <span style={S.bad}>✗</span>}
+                      </td>
+                      <td style={{ padding: '3px 8px', fontFamily: 'monospace', fontSize: 10, color: f.found ? '#89b4fa' : '#f38ba8' }}>
+                        {f.conceptUsed ?? f.conceptsTried.join(' | ')}
+                      </td>
+                      <td style={{ padding: '3px 8px', textAlign: 'right', color: f.latestAnnualVal !== null ? '#a6e3a1' : '#6c7086', fontWeight: 600 }}>
+                        {fmtDollars(f.latestAnnualVal, f.unit)}
+                      </td>
+                      <td style={{ padding: '3px 8px', color: '#6c7086', fontSize: 10 }}>{f.latestAnnualDate ?? '—'}</td>
+                      <td style={{ padding: '3px 8px', textAlign: 'right', color: f.latestQtrVal !== null ? '#cdd6f4' : '#6c7086' }}>
+                        {fmtDollars(f.latestQtrVal, f.unit)}
+                      </td>
+                      <td style={{ padding: '3px 8px', color: '#6c7086', fontSize: 10 }}>{f.latestQtrDate ?? '—'}</td>
+                      <td style={{ padding: '3px 8px', textAlign: 'right', color: '#6c7086' }}>{f.annualCount || '—'}</td>
+                      <td style={{ padding: '3px 8px', textAlign: 'right', color: '#6c7086' }}>{f.quarterlyCount || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* ── Concepts browser ── */}
+          <div style={S.card}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#89b4fa' }}>
+                Available US-GAAP Concepts ({result.totalConceptCount} total)
+              </div>
+              {result.topGaapConcepts.length < result.totalConceptCount && (
+                <button onClick={() => setShowAllConcepts(v => !v)}
+                  style={{ padding: '3px 10px', borderRadius: 4, border: '1px solid #313244', background: 'transparent', color: '#6c7086', fontSize: 11, cursor: 'pointer' }}>
+                  {showAllConcepts ? `Show first ${result.topGaapConcepts.length}` : `Show first ${result.topGaapConcepts.length} (of ${result.totalConceptCount})`}
+                </button>
+              )}
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+              {result.topGaapConcepts.map(c => {
+                const isUsed = result.fields.some(f => f.conceptUsed === c);
+                return (
+                  <span key={c} style={{
+                    fontSize: 10, fontFamily: 'monospace',
+                    padding: '2px 6px', borderRadius: 3,
+                    background: isUsed ? '#1a3a1a' : '#181825',
+                    border: `1px solid ${isUsed ? '#a6e3a1' : '#313244'}`,
+                    color: isUsed ? '#a6e3a1' : '#6c7086',
+                  }}>
+                    {c}
+                  </span>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* ── Raw sample ── */}
+          <div>
+            <button onClick={() => setShowRaw(v => !v)}
+              style={{ padding: '4px 12px', borderRadius: 5, border: '1px solid #313244', background: 'transparent', color: '#6c7086', fontSize: 11, cursor: 'pointer' }}>
+              {showRaw ? 'Hide' : 'Show'} raw entries (last 5 of first found concept)
+            </button>
+            {showRaw && (
+              <pre style={{ marginTop: 8, background: '#1e1e2e', border: '1px solid #313244', borderRadius: 6, padding: '10px 14px', fontSize: 10, color: '#a6e3a1', overflowX: 'auto', maxHeight: 300, overflowY: 'auto' }}>
+                {result.rawSample}
+              </pre>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ─── Root view ────────────────────────────────────────────────────────────────
 
 // ─── Finnhub Tab ──────────────────────────────────────────────────────────────
@@ -1452,7 +1651,7 @@ function FinnhubTab() {
 // ─── Main View ────────────────────────────────────────────────────────────────
 
 export function TestApiView() {
-  const [provider, setProvider] = useState<'polygon' | 'etrade' | 'marketdata' | 'ivolatility' | 'finnhub'>('polygon');
+  const [provider, setProvider] = useState<'polygon' | 'etrade' | 'marketdata' | 'ivolatility' | 'finnhub' | 'edgar'>('polygon');
 
   const TAB_LABELS: Record<typeof provider, string> = {
     polygon:     'Polygon',
@@ -1460,6 +1659,7 @@ export function TestApiView() {
     marketdata:  'MarketData.app',
     ivolatility: 'IVolatility',
     finnhub:     'Finnhub',
+    edgar:       'SEC EDGAR',
   };
   const TAB_DESC: Record<typeof provider, string> = {
     polygon:     'Current provider — validates data quality & plan coverage',
@@ -1467,6 +1667,7 @@ export function TestApiView() {
     marketdata:  'IV history source — verify chain parsing & ATM IV computation',
     ivolatility: 'IV history source — pre-computed 30-day CM ATM IVX, true as-of-date snapshots',
     finnhub:     'Earnings calendar — bulk date-range query, free tier (60 calls/min)',
+    edgar:       'SEC EDGAR XBRL — free fundamentals source (no API key); validates coverage before provider implementation',
   };
 
   return (
@@ -1476,7 +1677,7 @@ export function TestApiView() {
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
         <h2 style={{ margin: 0, color: '#89b4fa', fontSize: '14px', fontWeight: 700 }}>🔬 Test API</h2>
         <div style={{ display: 'flex', borderRadius: '6px', overflow: 'hidden', border: '1px solid #313244' }}>
-          {(['polygon', 'etrade', 'marketdata', 'ivolatility', 'finnhub'] as const).map(p => (
+          {(['polygon', 'etrade', 'marketdata', 'ivolatility', 'finnhub', 'edgar'] as const).map(p => (
             <button key={p} onClick={() => setProvider(p)} style={{
               padding: '4px 16px', border: 'none', cursor: 'pointer', fontSize: '12px', fontWeight: 600,
               background: provider === p ? '#89b4fa' : '#1e1e2e',
@@ -1490,7 +1691,7 @@ export function TestApiView() {
       </div>
 
       {/* ── Legend (Polygon / E*Trade only) ── */}
-      {provider !== 'marketdata' && provider !== 'ivolatility' && provider !== 'finnhub' && (
+      {(provider === 'polygon' || provider === 'etrade') && (
         <div style={{ display: 'flex', gap: '16px', fontSize: '11px', color: '#6c7086', flexWrap: 'wrap' }}>
           <span><span style={{ color: '#a6e3a1' }}>Mid</span> = (bid+ask)/2</span>
           <span><span style={{ color: '#fab387' }}>Last</span> = most recent trade / day close</span>
@@ -1505,6 +1706,7 @@ export function TestApiView() {
       {provider === 'marketdata'   && <MarketDataTab />}
       {provider === 'ivolatility'  && <IVolatilityTab />}
       {provider === 'finnhub'      && <FinnhubTab />}
+      {provider === 'edgar'        && <EdgarTab />}
     </div>
   );
 }
