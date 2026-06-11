@@ -820,12 +820,17 @@ const CRITIC_COLORS: Record<string, string> = {
 
 const DAY_PENDING = <span style={{ color: '#8b949e' }}>⏳</span>;
 
-type BriefSortCol = keyof BriefPickDetail;
+type BriefSortCol = keyof BriefPickDetail | 'returnDollar';
+
+function getReturnDollar(p: BriefPickDetail): number | null {
+  if (p.briefPrice === null || p.returnPct === null) return null;
+  return p.briefPrice * p.returnPct / 100;
+}
 
 function sortBriefPicks(picks: BriefPickDetail[], col: BriefSortCol, dir: 'asc' | 'desc'): BriefPickDetail[] {
   return [...picks].sort((a, b) => {
-    const av = a[col];
-    const bv = b[col];
+    const av = col === 'returnDollar' ? getReturnDollar(a) : a[col];
+    const bv = col === 'returnDollar' ? getReturnDollar(b) : b[col];
     if (av === null && bv === null) return 0;
     if (av === null) return 1;
     if (bv === null) return -1;
@@ -973,6 +978,7 @@ function BriefTrendTab() {
                 <th style={thStyle} title="Closing price on the 4th trading day after the brief date — click to sort" onClick={() => handleSort('day4Price')}>Day 4{sortInd('day4Price')}</th>
                 <th style={thStyle} title="Closing price on the 5th trading day after the brief date — click to sort" onClick={() => handleSort('day5Price')}>Day 5{sortInd('day5Price')}</th>
                 <th style={thStyle} title="Return % from brief price to the most recent available day — click to sort" onClick={() => handleSort('returnPct')}>Return %{sortInd('returnPct')}</th>
+                <th style={thStyle} title="Dollar return (latest price − brief price) — click to sort" onClick={() => handleSort('returnDollar')}>Return ${sortInd('returnDollar')}</th>
                 <th style={thStyle} title="Outcome based on the most recent available day — click to sort" onClick={() => handleSort('latestVerdict')}>Outcome{sortInd('latestVerdict')}</th>
                 <th style={thStyle} title="AI critic verdict from the brief: pass · caution · flag — click to sort" onClick={() => handleSort('criticVerdict')}>Critic{sortInd('criticVerdict')}</th>
               </tr>
@@ -1040,6 +1046,16 @@ function BriefTrendTab() {
                       fontWeight: p.returnPct !== null ? 600 : 400,
                     }}>
                       {fmtPct(p.returnPct)}
+                    </td>
+                    <td style={{
+                      color: p.returnPct !== null ? stockReturnColor(p.returnPct, p.strategy) : 'inherit',
+                      fontWeight: p.returnPct !== null ? 600 : 400,
+                    }}>
+                      {(() => {
+                        const d = getReturnDollar(p);
+                        if (d === null) return '—';
+                        return (d >= 0 ? '+$' : '-$') + Math.abs(d).toFixed(2);
+                      })()}
                     </td>
                     <td style={{ textAlign: 'center' }}>{outcomeEl}</td>
                     <td>{criticEl}</td>

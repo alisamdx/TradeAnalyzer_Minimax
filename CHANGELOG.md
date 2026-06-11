@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.65] — 2026-06-10
+
+### Added
+- **Brief Trend: Return $ column** — shows dollar return (latest available price − brief price) alongside Return %. Uses the same colour coding as Return %. Sortable.
+
 ## [0.32.64] — 2026-06-10
 
 ### Added
