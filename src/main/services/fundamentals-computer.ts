@@ -33,7 +33,7 @@ export interface PolygonFinancials {
       };
       cash_flow_statement?: {
         net_cash_flow_from_operating_activities?: { value: number; unit?: string; label?: string };
-        // Note: capital_expenditures is not consistently available in Polygon data
+        capital_expenditures?: { value: number; unit?: string; label?: string };
       };
     };
   }>;
@@ -136,9 +136,8 @@ export function parseFinancials(raw: PolygonFinancials): RawFinancials {
   const operatingCashFlow = sumTtm(f => latestValue(f?.cash_flow_statement?.net_cash_flow_from_operating_activities));
   // D&A (TTM) — used for EBITDA; may be null if Polygon doesn't return it
   const depreciation = sumTtm(f => latestValue(f?.income_statement?.depreciation_and_amortization));
-  // Note: capital_expenditures is not consistently available in Polygon data
-  // FCF will be based on operating cash flow only if capex unavailable
-  const capex = null;
+  // see docs/formulas.md#free-cash-flow
+  const capex = sumTtm(f => latestValue(f?.cash_flow_statement?.capital_expenditures));
 
   return {
     revenue,

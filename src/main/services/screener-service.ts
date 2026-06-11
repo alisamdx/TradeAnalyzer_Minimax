@@ -178,10 +178,6 @@ export class ScreenerService {
       throw new Error(`The ${label} empty. Please click "Update Ticker Lists" above first.`);
     }
 
-    // Track plan restriction for fundamentals endpoint (403 applies to the whole account,
-    // not per-ticker — once detected, stop calling it for the rest of this run).
-    let fundamentalsPlanRestricted = false;
-
     for (let i = 0; i < total; i++) {
       if (checkCancelled && checkCancelled()) {
         throw new Error('Data sync cancelled by user');
@@ -191,27 +187,16 @@ export class ScreenerService {
       onProgress?.(i, total, ticker);
 
       // Fetch and cache Fundamentals
-      if (!fundamentalsPlanRestricted) {
-        try {
-          if (this.fundamentalsCache.isStale(ticker)) {
-            const ratios = await this.dataProvider.getFundamentals(ticker);
-            this.fundamentalsCache.upsert(ticker, ratios);
-          }
-        } catch (err) {
-          if (err instanceof Error) {
-            if (err.message.includes('Polygon HTTP 401')) {
-              throw new Error('Polygon API key is invalid or missing. Please update it in Settings.');
-            }
-            if (err.message.includes('Polygon HTTP 403')) {
-              // Plan restriction — applies to the whole account, not just this ticker.
-              // Stop calling the fundamentals endpoint for the rest of this run;
-              // quotes still sync normally.
-              fundamentalsPlanRestricted = true;
-              console.warn('[screener] Fundamentals endpoint returned 403 (plan restriction). Skipping fundamentals for this run.');
-            }
-            // All other errors (OTC tickers, delisted, etc.): silently skip per-ticker.
-          }
+      try {
+        if (this.fundamentalsCache.isStale(ticker)) {
+          const ratios = await this.dataProvider.getFundamentals(ticker);
+          this.fundamentalsCache.upsert(ticker, ratios);
         }
+      } catch (err) {
+        if (err instanceof Error && err.message.includes('Polygon HTTP 401')) {
+          throw new Error('Polygon API key is invalid or missing. Please update it in Settings.');
+        }
+        // All other errors (OTC tickers, delisted, EDGAR not found, etc.): silently skip per-ticker.
       }
 
       // Fetch and cache Quotes
@@ -245,11 +230,7 @@ export class ScreenerService {
 
     onProgress?.(total, total);
     this.cacheManager.updateLastRun(total);
-
-    const notes = fundamentalsPlanRestricted
-      ? 'Fundamentals skipped — /vX/reference/financials requires a Polygon Developer plan or higher (current plan: Stocks Starter).'
-      : undefined;
-    return { scanned: total, notes };
+    return { scanned: total };
   }
 
   /** Evaluate a single ticker against the screen criteria. */

@@ -19,8 +19,10 @@ import type {
 import { logApiCall, scrubObject } from './logger.js';
 import {
   computeRatios,
-  type FundamentalsComputerInput
+  type FundamentalsComputerInput,
+  type PolygonTickerDetails,
 } from './fundamentals-computer.js';
+import { getEdgarFundamentals } from './sec-edgar-provider.js';
 
 const BASE_URL = 'https://api.polygon.io';
 
@@ -34,7 +36,6 @@ const ENDPOINT_LABELS: Record<string, string> = {
   '/v3/reference/tickers': 'reference:tickers',
   '/v2/snapshot/locale/us/markets/stocks/tickers': 'snapshot:ticker',
   '/v3/snapshot/options': 'snapshot:options',
-  '/vX/reference/financials': 'reference:financials',
   '/v3/reference/tickers/{ticker}': 'reference:ticker_details',
   '/v2/aggs/ticker/{ticker}/range': 'aggs:bars',
   '/v3/reference/dividends': 'reference:dividends'
@@ -187,54 +188,34 @@ export class PolygonDataProvider implements DataProvider, OptionsProvider {
   }
 
   async getFundamentals(ticker: string): Promise<DerivedRatios> {
-    // Fetch financials + ticker details in parallel.
-    const [finData, detailsData] = await Promise.all([
-      this.fetchWithRetry('/vX/reference/financials', {
-        ticker,
-        timeframe: 'quarterly',
-        limit: '24'  // 6 years of quarterly data — needed for 5Y CAGR (filings[16..19])
-      }),
-      this.fetchWithRetry(`/v3/reference/tickers/${ticker}`)
+    // EDGAR provides financial statements (free, replaces plan-restricted /vX/reference/financials).
+    // Polygon /v3/reference/tickers provides market cap, shares outstanding, and sector/industry.
+    const [financials, detailsData] = await Promise.all([
+      getEdgarFundamentals(ticker),
+      this.fetchWithRetry(`/v3/reference/tickers/${ticker}`),
     ]);
 
-    const finResults = (finData.results as unknown[] | undefined) ?? [];
     const details = (detailsData.results as Record<string, unknown> | undefined) ?? {};
 
-    // Patch up the Polygon shapes to match our expected interfaces.
-    const financials = {
-      ticker,
-      company_name: String(details['name'] ?? ticker),
-      filings: finResults.map((f) => {
-        const ff = f as Record<string, unknown>;
-        return {
-          date: String(ff['filing_date'] ?? ''),
-          start_date: String(ff['start_date'] ?? ''),
-          end_date: String(ff['end_date'] ?? ''),
-          financials: ff['financials']
-        };
-      })
+    const tickerDetails: PolygonTickerDetails = {
+      market_cap:                        (details['market_cap'] as number | null) ?? null,
+      share_class_shares_outstanding:    (details['share_class_shares_outstanding'] as number | null) ?? null,
+      sector:                            (details['sector'] as string | null) ?? null,
+      industry:                          (details['industry'] as string | null) ?? null,
+      sic_description:                   (details['sic_description'] as string | null) ?? null,
     };
 
-    const tickerDetails = {
-      market_cap: (details['market_cap'] as number | null) ?? null,
-      share_class_shares_outstanding: (details['share_class_shares_outstanding'] as number | null) ?? null,
-      sector: (details['sector'] as string | null) ?? null,
-      industry: (details['industry'] as string | null) ?? null,
-      sic_description: (details['sic_description'] as string | null) ?? null
-    };
-
-    // Snapshot is needed for current price.
     const snapshot = await this.getQuote(ticker);
 
     const input: FundamentalsComputerInput = {
-      financials: financials as Parameters<typeof computeRatios>[0]['financials'],
-      details: tickerDetails as Parameters<typeof computeRatios>[0]['details'],
+      financials,
+      details: tickerDetails,
       snapshot: {
         ticker,
-        last: { c: snapshot.last ?? undefined, tr: undefined },
-        prev_day: { c: snapshot.prevClose ?? undefined, v: undefined, h: undefined, l: undefined }
+        last:     { c: snapshot.last     ?? undefined, tr: undefined },
+        prev_day: { c: snapshot.prevClose ?? undefined, v: undefined, h: undefined, l: undefined },
       },
-      beta: null
+      beta: null,
     };
 
     return computeRatios(input);

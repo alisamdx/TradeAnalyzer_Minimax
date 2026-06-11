@@ -6,6 +6,13 @@ import type { IVolatilityProvider } from '../services/ivolatility-provider.js';
 import type { DbHandle } from '../db/connection.js';
 import { secureGet, secureSet } from '../services/secure-settings.js';
 import { computeAtmIv } from '../services/iv-history-service.js';
+import {
+  EDGAR_HEADERS,
+  resolveEdgarCik,
+  pickEdgarLatest,
+  EDGAR_FIELD_SPECS,
+  type EdgarEntry,
+} from '../services/sec-edgar-provider.js';
 
 function ok<T>(value: T): { ok: true; value: T } { return { ok: true, value }; }
 function fail(err: unknown): { ok: false; error: { code: string; message: string } } {
@@ -193,53 +200,7 @@ export interface IVolatilityTestResult {
   rawSample:       string;   // JSON of first 3 raw rows
 }
 
-// ─── SEC EDGAR helpers (module-level) ────────────────────────────────────────
-
-const EDGAR_HEADERS = { 'User-Agent': 'TradeAnalyzer/1.0 trader@local' };
-
-// Session-level CIK lookup cache — avoids re-fetching the 500 KB tickers file.
-let _edgarCikCache: Map<string, { cikPadded: string; title: string }> | null = null;
-
-async function resolveEdgarCik(ticker: string): Promise<{ cikPadded: string; title: string }> {
-  if (!_edgarCikCache) {
-    const r = await fetch('https://www.sec.gov/files/company_tickers.json', { headers: EDGAR_HEADERS });
-    if (!r.ok) throw new Error(`SEC company_tickers.json HTTP ${r.status}`);
-    const raw = await r.json() as Record<string, { cik_str: number | string; ticker: string; title: string }>;
-    _edgarCikCache = new Map();
-    for (const entry of Object.values(raw)) {
-      const cikNum = typeof entry.cik_str === 'string' ? parseInt(entry.cik_str, 10) : entry.cik_str;
-      _edgarCikCache.set(entry.ticker.toUpperCase(), {
-        cikPadded: String(cikNum).padStart(10, '0'),
-        title: entry.title,
-      });
-    }
-  }
-  const info = _edgarCikCache.get(ticker);
-  if (!info) throw new Error(`"${ticker}" not found in SEC company_tickers.json (${_edgarCikCache.size} tickers indexed — OTC/foreign tickers may not be listed)`);
-  return info;
-}
-
-interface EdgarEntry { end: string; val: number; fp: string; form: string; filed: string }
-
-function pickEdgarLatest(entries: EdgarEntry[], form: '10-K' | '10-Q'): EdgarEntry | null {
-  return [...entries].filter(e => e.form === form).sort((a, b) => b.end.localeCompare(a.end))[0] ?? null;
-}
-
-// The 11 financial concepts that computeRatios() needs, mapped to US-GAAP concept name(s).
-// Listed in priority order — first match wins.
-const EDGAR_FIELD_SPECS: ReadonlyArray<{ role: string; label: string; concepts: readonly string[] }> = [
-  { role: 'revenue',      label: 'Revenue',               concepts: ['Revenues', 'RevenueFromContractWithCustomerExcludingAssessedTax', 'SalesRevenueNet', 'RevenueFromContractWithCustomerIncludingAssessedTax'] },
-  { role: 'net_income',   label: 'Net Income',            concepts: ['NetIncomeLoss', 'NetIncome', 'ProfitLoss'] },
-  { role: 'op_income',    label: 'Operating Income',      concepts: ['OperatingIncomeLoss'] },
-  { role: 'depreciation', label: 'Depreciation & Amort',  concepts: ['DepreciationDepletionAndAmortization', 'DepreciationAndAmortization', 'DepreciationAmortizationAndAccretionNet'] },
-  { role: 'equity',       label: "Stockholders' Equity",  concepts: ['StockholdersEquity', 'StockholdersEquityAttributableToParent'] },
-  { role: 'assets_cur',   label: 'Current Assets',        concepts: ['AssetsCurrent'] },
-  { role: 'liab_cur',     label: 'Current Liabilities',   concepts: ['LiabilitiesCurrent'] },
-  { role: 'debt_lt',      label: 'Long-term Debt',        concepts: ['LongTermDebt', 'LongTermDebtNoncurrent', 'LongTermDebtAndCapitalLeaseObligations'] },
-  { role: 'cash',         label: 'Cash & Equivalents',    concepts: ['CashAndCashEquivalentsAtCarryingValue', 'Cash', 'CashCashEquivalentsAndShortTermInvestments'] },
-  { role: 'op_cf',        label: 'Operating Cash Flow',   concepts: ['NetCashProvidedByUsedInOperatingActivities'] },
-  { role: 'capex',        label: 'CapEx',                  concepts: ['PaymentsToAcquirePropertyPlantAndEquipment', 'CapitalExpendituresIncurringObligation'] },
-];
+// ─── SEC EDGAR result types (test-UI-specific) ───────────────────────────────
 
 export interface EdgarFieldResult {
   role: string;

@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.32.79] — 2026-06-11
+
+### Changed
+- **Fundamentals now sourced from SEC EDGAR instead of Polygon** — Polygon `/vX/reference/financials` requires a Developer plan ($199/mo); the current Stocks Starter plan returns 403. Replaced with the free SEC EDGAR XBRL API (`data.sec.gov`), which requires no API key and exposes the same financial data via US-GAAP concept tags.
+- **CapEx now included in FCF calculation** — EDGAR exposes CapEx (`PaymentsToAcquirePropertyPlantAndEquipment`), which Polygon never reliably provided. Added `capital_expenditures` to `PolygonFinancials.cash_flow_statement` so `computeRatios()` can compute proper FCF = Operating CF − |CapEx| instead of using Operating CF alone.
+- **Removed Polygon plan-restriction workaround** — the `fundamentalsPlanRestricted` flag and 403 branch in `screener-service.syncUniverse()` have been removed. EDGAR does not have plan tiers.
+
+### Implementation notes
+- New `src/main/services/sec-edgar-provider.ts`: `resolveEdgarCik()` (ticker → CIK, cached per process), `getEdgarFundamentals()` (companyfacts fetch → `PolygonFinancials`). Concept selection uses "most-recent annual date wins" heuristic to handle ASC-606-style transitions (e.g. Apple: `Revenues` → `RevenueFromContractWithCustomer…` in 2019).
+- Filing array layout: 20 slots (so `sumFiveYearAgoTtm()` length check passes). Real data at slots 0 (current annual), 4 (prior year), 16 (5-years-ago). All other slots hold an empty placeholder so `sumTtm()` skips them gracefully.
+- Balance sheet at slot 0 uses the most-recent entry regardless of form (10-Q preferred over 10-K for currency).
+- `EDGAR_HEADERS`, `resolveEdgarCik`, `pickEdgarLatest`, `EDGAR_FIELD_SPECS`, and `EdgarEntry` are exported from `sec-edgar-provider.ts` and imported by `ipc-test-api.ts` (no duplication).
+
 ## [0.32.78] — 2026-06-11
 
 ### Fixed
