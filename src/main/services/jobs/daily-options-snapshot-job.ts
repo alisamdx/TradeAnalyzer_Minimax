@@ -15,8 +15,9 @@
 // a live E*Trade options chain call. RSI/SMA/trend data is already covered by
 // DailyTechnicalSignalsJob which reads from cached historical_prices.
 // Runs against the full S&P 500 + Russell 1000 universe (~1,100 tickers) so
-// the Daily Brief has options signals for every candidate. At 0.57s/ticker
-// (200ms delay + ~370ms E*Trade response) this takes ~10-11 min.
+// the Daily Brief has options signals for every candidate. At the default
+// 1,100ms delay + ~400ms E*Trade response ≈ 1.5s/ticker → ~25-30 min.
+// (200ms floor delay would be ~10-11 min but risks the E*Trade rate limit.)
 
 import type { Database } from 'better-sqlite3';
 import type { BatchJobHandler, BatchJobResult } from '../batch-service.js';
@@ -32,7 +33,7 @@ function isAuthError(e: unknown): boolean {
   return msg.includes('401') || msg.includes('token') || msg.includes('auth') || msg.includes('oauth');
 }
 
-const MAX_TICKERS        = 1_500;  // full universe (~1,100 tickers); at 0.57s/ticker ≈ 10-11 min
+const MAX_TICKERS        = 1_500;  // full universe (~1,100 tickers); ~25-30 min at default delay
 const DEFAULT_DELAY_MS   = 1_100;  // safe default — stays under E*Trade rate limit
 const MIN_DELAY_MS       =   200;  // hard floor
 const MAX_DELAY_MS       = 2_000;  // hard ceiling
@@ -65,9 +66,10 @@ function withTimeout<T>(promise: Promise<T>, ms: number, ticker: string): Promis
 export class DailyOptionsSnapshotJob implements BatchJobHandler {
   readonly name        = 'Daily Options Snapshot';
   readonly description =
-    'Runs Wheel analysis on the top screener candidates to refresh ' +
-    'optionLiquidityScore in analysis_snapshots. Keeps the Trade Scoring ' +
-    'Engine liquidity data current without waiting for a manual analysis run.';
+    'Runs Wheel analysis on the full S&P 500 + Russell 1000 universe (~1,100 ' +
+    'tickers, highest-IV first, ~25–30 min) to refresh options signals ' +
+    '(annualized premium, optionLiquidityScore) in analysis_snapshots for the ' +
+    'Trade Scoring Engine and Daily Brief.';
 
   constructor(
     private readonly db: Database,
