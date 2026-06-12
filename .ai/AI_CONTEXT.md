@@ -226,6 +226,7 @@ Authoritative DDL is in `migrations/`. Tables are created lazily (`CREATE TABLE 
 
 ## 11. Open decisions
 
+- **Brief Replay (point-in-time brief backtest)**: spec'd in `Requirements/BRIEF_REPLAY_SPEC.md` (2026-06-11). Replays the brief for past dates using bars/iv_history `<= asOf` and EDGAR facts filtered by `filed <= asOf` (true point-in-time fundamentals — no history table needed); same ScoringService/configs; structures skipped or synthesized (no historical E*Trade chains); outcomes from forward bars into new `replay_briefs`/`replay_outcomes` tables. Open questions in spec §8 (iv_history depth, stage-4 option, output surface).
 - **Second expiration fetch for PMCC/calendar (Strategy Lab)**: the lab fetches one chain (25–45 DTE); two-expiration structures (PMCC, calendars) are stubbed with `unavailableReason`. Making them real requires construction logic in `strategy-lab-service.ts` + one extra E*Trade chain call per ticker (~50/night). Would give buy/bullish strategies a B-grade-capable structure in high-IV regimes. Deferred from the v0.32.67 brief-audit pass.
 - **v1.0.0 cut**: pending one week of real usage validation, then bump 0.32.6 → 1.0.0.
 - **Requirements/ and UserManual/ expansion**: queued after the documentation refresh (items #2 and #3 of the docs task).
