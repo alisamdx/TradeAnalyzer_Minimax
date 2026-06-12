@@ -48,15 +48,15 @@ function SummaryTable({ summaries }: { summaries: ReplaySummary[] }) {
         <thead>
           <tr>
             <th style={{ textAlign: 'left' }}>Strategy</th>
-            <th>Days</th>
-            <th>Picks</th>
-            <th>Eval'd</th>
-            <th>HR 5d</th>
-            <th>HR 10d</th>
-            <th>HR 21d</th>
-            <th>Avg 5d</th>
-            <th>Avg 10d</th>
-            <th>Avg 21d</th>
+            <th style={{ textAlign: 'right' }}>Days</th>
+            <th style={{ textAlign: 'right' }}>Picks</th>
+            <th style={{ textAlign: 'right' }}>Eval'd</th>
+            <th style={{ textAlign: 'right' }}>HR 5d</th>
+            <th style={{ textAlign: 'right' }}>HR 10d</th>
+            <th style={{ textAlign: 'right' }}>HR 21d</th>
+            <th style={{ textAlign: 'right' }}>Avg 5d</th>
+            <th style={{ textAlign: 'right' }}>Avg 10d</th>
+            <th style={{ textAlign: 'right' }}>Avg 21d</th>
           </tr>
         </thead>
         <tbody>
@@ -102,13 +102,13 @@ function PicksTable({ picks }: { picks: ReplayPickRow[] }) {
             <th style={{ textAlign: 'left' }}>Date</th>
             <th style={{ textAlign: 'left' }}>Strategy</th>
             <th style={{ textAlign: 'left' }}>Ticker</th>
-            <th>Rank</th>
-            <th>Score</th>
-            <th>Entry</th>
-            <th>5d</th>
-            <th>10d</th>
-            <th>21d</th>
-            <th>Drawdown</th>
+            <th style={{ textAlign: 'right' }}>Rank</th>
+            <th style={{ textAlign: 'right' }}>Score</th>
+            <th style={{ textAlign: 'right' }}>Entry</th>
+            <th style={{ textAlign: 'right' }}>5d</th>
+            <th style={{ textAlign: 'right' }}>10d</th>
+            <th style={{ textAlign: 'right' }}>21d</th>
+            <th style={{ textAlign: 'right' }}>Drawdown</th>
           </tr>
         </thead>
         <tbody>
