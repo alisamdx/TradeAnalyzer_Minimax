@@ -450,8 +450,6 @@ export class BriefReplayService {
       priceMap.get(p.ticker)!.push(p);
     }
 
-    const today = new Date().toISOString().slice(0, 10);
-
     const updateStmt = this.db.prepare(`
       UPDATE replay_outcomes
       SET ret_5d = ?, ret_10d = ?, ret_21d = ?, max_drawdown_21d = ?,
@@ -470,22 +468,19 @@ export class BriefReplayService {
 
         const entryPrice = row.entry_price ?? prices[entryIdx]!.close;
 
-        // Build forward price array (trading days after entry, including entry)
+        // Build forward price array (trading days at and after entry)
+        // forward[0] = entry day, forward[5] = 5 trading days later, etc.
         const forward = prices.slice(entryIdx);
 
-        // Need at least 22 rows (entry + 21 forward) for full evaluation
-        // Partial evaluation if we have 6+ rows (can at least compute 5d)
+        // Need at least entry day + 5 forward days to compute ret_5d
         if (forward.length < 6) continue;
 
-        // Check that we have data through today (don't evaluate future dates with missing data)
-        const lastForwardDate = forward[forward.length - 1]!.date;
-        if (lastForwardDate < today && forward.length < 22) continue; // not enough forward data yet
+        // Use exact indices — null when not enough forward data
+        const close5  = forward.length > 5  ? forward[5]!.close  : null;
+        const close10 = forward.length > 10 ? forward[10]!.close : null;
+        const close21 = forward.length > 21 ? forward[21]!.close : null;
 
-        const close5  = forward[Math.min(5, forward.length - 1)]!.close;
-        const close10 = forward.length > 10 ? forward[Math.min(10, forward.length - 1)]!.close : null;
-        const close21 = forward.length > 21 ? forward[Math.min(21, forward.length - 1)]!.close : null;
-
-        const ret5d  = entryPrice > 0 ? ((close5  - entryPrice) / entryPrice) * 100 : null;
+        const ret5d  = (close5  !== null && entryPrice > 0) ? ((close5  - entryPrice) / entryPrice) * 100 : null;
         const ret10d = (close10 !== null && entryPrice > 0) ? ((close10 - entryPrice) / entryPrice) * 100 : null;
         const ret21d = (close21 !== null && entryPrice > 0) ? ((close21 - entryPrice) / entryPrice) * 100 : null;
 
