@@ -388,7 +388,7 @@ function normalizeSignal(raw: number, signal: ScoringSignal): number {
 
 // ─── Gathered signal data per ticker ─────────────────────────────────────────
 
-interface TickerSignalData {
+export interface TickerSignalData {
   ticker: string;
   // IV
   ivRank: number | null;
@@ -499,6 +499,16 @@ export class ScoringService {
   }
 
   // ── Scoring ───────────────────────────────────────────────────────────────
+
+  /** Score tickers using pre-built signal data (e.g. from Brief Replay). Bypasses live DB queries. */
+  scoreFromSignalData(data: Map<string, TickerSignalData>, strategy: ScoringStrategy): ScoredTicker[] {
+    if (data.size === 0) return [];
+    const config = this.getConfig(strategy);
+    const enabledSignals = config.signals.filter(s => s.enabled);
+    return [...data.keys()]
+      .map(ticker => this.scoreTicker(ticker, data.get(ticker) ?? null, enabledSignals, config.signals))
+      .sort((a, b) => b.compositeScore - a.compositeScore);
+  }
 
   /** Score a batch of tickers for a single strategy. Returns all tickers sorted by score desc. */
   scoreTickers(tickers: string[], strategy: ScoringStrategy): ScoredTicker[] {

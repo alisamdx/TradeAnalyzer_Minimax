@@ -73,6 +73,8 @@ import { registerEarningsIpc } from './ipc/ipc-earnings.js';
 import { EarningsRefreshJob } from './services/jobs/earnings-refresh-job.js';
 import { BatchOrchestratorJob } from './services/jobs/batch-orchestrator-job.js';
 import { BetaService } from './services/beta-service.js';
+import { BriefReplayService } from './services/brief-replay-service.js';
+import { registerBriefReplayIpc } from './ipc/ipc-brief-replay.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -404,6 +406,10 @@ app.whenReady().then(() => {
     () => { try { return secureGet(db, 'agentProjectPath') ?? ''; } catch { return ''; } }
   );
   registerScoringIpc(scoringService, emailService);
+
+  // v0.32.89 — Brief Replay (point-in-time scoring back-test)
+  const briefReplayService = new BriefReplayService(db, scoringService);
+  registerBriefReplayIpc(briefReplayService);
 
   const technicalSignalsJob = new DailyTechnicalSignalsJob(db);
   batchService.registerJob('daily-technical-signals', technicalSignalsJob, {

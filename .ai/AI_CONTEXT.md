@@ -2,7 +2,7 @@
 
 > **Read this first.** Self-contained snapshot of *what the app is today* so a fresh AI session is productive without re-reading the whole codebase. This file describes **current state** — not history. Release history lives in `CHANGELOG.md` / `changelogs/`. Operating rules live in `/CLAUDE.md`. Full spec lives in `Requirements/`.
 >
-> Last verified against code: 2026-06-11 (v0.32.84). When you make a material change, update the relevant section here in the same commit.
+> Last verified against code: 2026-06-12 (v0.32.89). When you make a material change, update the relevant section here in the same commit.
 
 ---
 
@@ -93,7 +93,7 @@ src/main/
   db/migrations.ts          Runs numbered migrations from /migrations
   api-server.ts             Fastify local API (port 7432)
   api/                       REST route modules
-  ipc/ipc-*.ts              27 IPC handler modules (one per feature area)
+  ipc/ipc-*.ts              28 IPC handler modules (one per feature area)
   services/                  60 service classes (see §7)
   services/jobs/             9 batch job handlers
 src/preload/index.ts        window.api.* bridge (33 namespaces)
@@ -112,14 +112,14 @@ changelogs/                  Per-version notes
 
 ---
 
-## 6. Views & sidebar (26 views, 8 sections)
+## 6. Views & sidebar (27 views, 8 sections)
 
 Routing is a `currentView` string in `App.tsx`; cross-view navigation fires CustomEvents (`navigate-to-payoff`, `navigate-to-validate`, `navigate-to-analysis`, `navigate-to-options`).
 
 | Section | Views |
 | --- | --- |
 | **Data** | ⚙ Settings · ⚖ Trade Scoring (`TradeScoringView`) · 🔄 Batch Jobs (`BatchView`) |
-| **Intelligence** | 📋 Daily Brief (`DailyBriefView`) · 🪞 Retrospect (`RetrospectView`) · 📅 Earnings (`EarningsCalendarView`) · 📡 News & Research (`NewsResearchView`) · 🤖 Agent (`AgentView`) |
+| **Intelligence** | 📋 Daily Brief (`DailyBriefView`) · 🪞 Retrospect (`RetrospectView`) · ⏪ Replay (`BriefReplayView`) · 📅 Earnings (`EarningsCalendarView`) · 📡 News & Research (`NewsResearchView`) · 🤖 Agent (`AgentView`) |
 | **Screeners** | 🔍 Screener · 🎯 Opportunity · 🎛️ Filters |
 | **Analysis** | 📐 Payoff (`PayoffView`) · 🎯 Validate · 📉 Options (`OptionsChainView`) |
 | **Strategy** | 📚 Knowledge · 📊 Analysis · 🔬 Strategy Lab (`StrategyLabShellView` — tabs: Strategy Lab / ⚡ LEAPS / 🛡️ Collared LEAPS) |
@@ -146,11 +146,11 @@ Routing is a `currentView` string in `App.tsx`; cross-view navigation fires Cust
 
 ---
 
-## 8. Data model (~50 tables, 34 migrations)
+## 8. Data model (~52 tables, 38 migrations)
 
 Authoritative DDL is in `migrations/`. Tables are created lazily (`CREATE TABLE IF NOT EXISTS`) and migrations are idempotent + count-agnostic in tests.
 
-37 migrations. `positions.position_type` CHECK now includes `'Long Put'` and `'Long Call'` (migration 036). `batch_runs` has `trigger TEXT NOT NULL DEFAULT 'manual'` and `slot_time TEXT` (migration 037). Migration 037 also shifted all `batch_jobs.sequence_order` +1 to reserve position 1 for the orchestrator — all multi-leg strategy legs are tracked.
+38 migrations. `positions.position_type` CHECK now includes `'Long Put'` and `'Long Call'` (migration 036). `batch_runs` has `trigger TEXT NOT NULL DEFAULT 'manual'` and `slot_time TEXT` (migration 037). Migration 037 also shifted all `batch_jobs.sequence_order` +1 to reserve position 1 for the orchestrator. Migration 038 adds `replay_briefs` + `replay_outcomes` for Brief Replay.
 
 | Domain | Tables |
 | --- | --- |
@@ -166,6 +166,7 @@ Authoritative DDL is in `migrations/`. Tables are created lazily (`CREATE TABLE 
 | Alerts | `alerts` |
 | Batch | `batch_jobs` (incl. `config_json`, `sequence_order`), `batch_runs` |
 | Scoring / brief | `scoring_strategy_configs`, `daily_briefs`, `technical_signals`, `brief_learning_recommendations` |
+| Brief Replay | `replay_briefs` (UNIQUE as_of_date + strategy), `replay_outcomes` (forward returns, synth strike) |
 | Paper trading | `paper_trades`, `paper_trade_snapshots` |
 | Conviction | `conviction_stocks`, `conviction_band_history` |
 | Agent | `agent_trade_learnings` |

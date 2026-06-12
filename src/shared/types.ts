@@ -2010,3 +2010,42 @@ export interface NewsBatchProgressEvent {
   ticker: string;
   phase?: 'fetch' | 'synthesis';
 }
+
+// ─── Brief Replay ─────────────────────────────────────────────────────────────
+
+export interface ReplayProgressEvent {
+  phase: 'scoring' | 'outcomes' | 'done' | 'error';
+  current: number;
+  total: number;
+  currentDate: string;
+  message: string;
+}
+
+export interface ReplayPickRow {
+  replayBriefId: number;
+  asOfDate: string;
+  strategy: string;
+  ticker: string;
+  rank: number;
+  compositeScore: number;
+  entryPrice: number | null;
+  ret5d: number | null;
+  ret10d: number | null;
+  ret21d: number | null;
+  maxDrawdown21d: number | null;
+  stayedAboveStrike: boolean | null;
+  evaluatedAt: string | null;
+}
+
+export interface ReplaySummary {
+  strategy: string;
+  totalDates: number;
+  totalPicks: number;
+  evaluatedPicks: number;
+  hitRate5d: number | null;
+  hitRate10d: number | null;
+  hitRate21d: number | null;
+  avgReturn5d: number | null;
+  avgReturn10d: number | null;
+  avgReturn21d: number | null;
+}

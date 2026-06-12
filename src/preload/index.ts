@@ -107,6 +107,9 @@ import type {
   NewsResearchResult,
   MacroEvent,
   NewsBatchProgressEvent,
+  ReplayProgressEvent,
+  ReplayPickRow,
+  ReplaySummary,
 } from '@shared/types.js';
 export type {
   ScreenPreset, ScreenCriteria, ScreenRunResult, ScreenResultRow, Universe,
@@ -1143,8 +1146,24 @@ function buildApi() {
     clearNonManual: () => invoke<number>('earnings:clearNonManual'),
   };
 
+  const briefReplay = {
+    runRange:   (from: string, to: string) =>
+      invoke<{ started: boolean }>('replay:run-range', from, to),
+    cancel:     () => invoke<{ cancelled: boolean }>('replay:cancel'),
+    clear:      () => invoke<{ cleared: boolean }>('replay:clear'),
+    getSummaries: () => invoke<ReplaySummary[]>('replay:get-summaries'),
+    getPicks:   (strategy?: string, limit?: number) =>
+      invoke<ReplayPickRow[]>('replay:get-picks', strategy, limit),
+    getDateRange: () => invoke<{ from: string | null; to: string | null }>('replay:get-date-range'),
+    onProgress: (cb: (p: ReplayProgressEvent) => void): (() => void) => {
+      const handler = (_: unknown, p: ReplayProgressEvent) => cb(p);
+      ipcRenderer.on('replay:progress', handler as Parameters<typeof ipcRenderer.on>[1]);
+      return () => ipcRenderer.removeListener('replay:progress', handler as Parameters<typeof ipcRenderer.removeListener>[1]);
+    },
+  };
+
   return {
-    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, historical, portfolio, alerts, optionsChain, agent, backtest, leapsCsp, collaredLeaps, testApi, etrade, filters, payoff, ivHistory, opportunity, strategyLab, batch, scoring, paper, conviction, news, earnings },
+    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, historical, portfolio, alerts, optionsChain, agent, backtest, leapsCsp, collaredLeaps, testApi, etrade, filters, payoff, ivHistory, opportunity, strategyLab, batch, scoring, paper, conviction, news, earnings, briefReplay },
     dialog: {
       prompt: (opts: { title: string; defaultValue?: string }) =>
         invoke<string | null>('dialog:prompt', opts),

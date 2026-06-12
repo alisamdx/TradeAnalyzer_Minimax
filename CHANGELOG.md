@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.89] — 2026-06-12
+
+### Added
+- **Brief Replay** — new Intelligence section screen that back-tests the 5-strategy scoring pipeline against historical dates. Pick a date range, hit Run, and the pipeline scores every NYSE trading day in the window using point-in-time price/IV data and current fundamentals. Produces a hit-rate summary table (5d/10d/21d) per strategy and a drillable picks detail table with entry price, forward returns, and max drawdown. No E*Trade options chains (Option A liquidity proxy: avgVolume ≥ 1 M + price ≥ $5). New tables: `replay_briefs`, `replay_outcomes` (migration 038). Cancellable in-progress runs; data cleared and re-populated on each Run.
+
 ## [0.32.88] — 2026-06-12
 
 ### Added
