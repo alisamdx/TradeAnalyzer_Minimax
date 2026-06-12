@@ -40,27 +40,56 @@ interface RunState {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
+type SummarySortKey = keyof ReplaySummary;
+
+function sortSummaries(rows: ReplaySummary[], key: SummarySortKey, dir: 'asc' | 'desc'): ReplaySummary[] {
+  return [...rows].sort((a, b) => {
+    const av = a[key], bv = b[key];
+    if (av === null && bv === null) return 0;
+    if (av === null) return 1;
+    if (bv === null) return -1;
+    const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+    return dir === 'asc' ? cmp : -cmp;
+  });
+}
+
 function SummaryTable({ summaries }: { summaries: ReplaySummary[] }) {
+  const [sortKey, setSortKey] = useState<SummarySortKey>('strategy');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+
   if (summaries.length === 0) return null;
+
+  const handleSort = (key: SummarySortKey) => {
+    if (key === sortKey) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortKey(key); setSortDir('desc'); }
+  };
+
+  const sorted = sortSummaries(summaries, sortKey, sortDir);
+  const arrow = (key: SummarySortKey) => sortKey === key ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
+  const thStyle = (key: SummarySortKey, align: 'left' | 'right' = 'right'): React.CSSProperties => ({
+    textAlign: align, cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap',
+    color: sortKey === key ? 'var(--accent)' : undefined,
+  });
+
   return (
     <div style={{ overflowX: 'auto', marginBottom: 24 }}>
       <table className="data-table" style={{ width: '100%', fontSize: 13 }}>
         <thead>
           <tr>
-            <th style={{ textAlign: 'left' }}>Strategy</th>
-            <th style={{ textAlign: 'right' }}>Days</th>
-            <th style={{ textAlign: 'right' }}>Picks</th>
-            <th style={{ textAlign: 'right' }}>Eval'd</th>
-            <th style={{ textAlign: 'right' }}>HR 5d</th>
-            <th style={{ textAlign: 'right' }}>HR 10d</th>
-            <th style={{ textAlign: 'right' }}>HR 21d</th>
-            <th style={{ textAlign: 'right' }}>Avg 5d</th>
-            <th style={{ textAlign: 'right' }}>Avg 10d</th>
-            <th style={{ textAlign: 'right' }}>Avg 21d</th>
+            <th style={thStyle('strategy', 'left')}    onClick={() => handleSort('strategy')}>Strategy{arrow('strategy')}</th>
+            <th style={thStyle('totalDates')}          onClick={() => handleSort('totalDates')}>Days{arrow('totalDates')}</th>
+            <th style={thStyle('totalPicks')}          onClick={() => handleSort('totalPicks')}>Picks{arrow('totalPicks')}</th>
+            <th style={thStyle('evaluatedPicks')}      onClick={() => handleSort('evaluatedPicks')}>Eval'd{arrow('evaluatedPicks')}</th>
+            <th style={thStyle('hitRate5d')}           onClick={() => handleSort('hitRate5d')}>HR 5d{arrow('hitRate5d')}</th>
+            <th style={thStyle('hitRate10d')}          onClick={() => handleSort('hitRate10d')}>HR 10d{arrow('hitRate10d')}</th>
+            <th style={thStyle('hitRate21d')}          onClick={() => handleSort('hitRate21d')}>HR 21d{arrow('hitRate21d')}</th>
+            <th style={thStyle('avgReturn5d')}         onClick={() => handleSort('avgReturn5d')}>Avg 5d{arrow('avgReturn5d')}</th>
+            <th style={thStyle('avgReturn10d')}        onClick={() => handleSort('avgReturn10d')}>Avg 10d{arrow('avgReturn10d')}</th>
+            <th style={thStyle('avgReturn21d')}        onClick={() => handleSort('avgReturn21d')}>Avg 21d{arrow('avgReturn21d')}</th>
           </tr>
         </thead>
         <tbody>
-          {summaries.map(s => (
+          {sorted.map(s => (
             <tr key={s.strategy}>
               <td style={{ fontWeight: 600, textTransform: 'capitalize' }}>{s.strategy}</td>
               <td style={{ textAlign: 'right' }}>{s.totalDates}</td>
@@ -75,15 +104,9 @@ function SummaryTable({ summaries }: { summaries: ReplaySummary[] }) {
               <td style={{ textAlign: 'right', color: hitRateColor(s.hitRate21d) }}>
                 {s.hitRate21d !== null ? `${s.hitRate21d}%` : '—'}
               </td>
-              <td style={{ textAlign: 'right', color: retColor(s.avgReturn5d) }}>
-                {fmtPct(s.avgReturn5d)}
-              </td>
-              <td style={{ textAlign: 'right', color: retColor(s.avgReturn10d) }}>
-                {fmtPct(s.avgReturn10d)}
-              </td>
-              <td style={{ textAlign: 'right', color: retColor(s.avgReturn21d) }}>
-                {fmtPct(s.avgReturn21d)}
-              </td>
+              <td style={{ textAlign: 'right', color: retColor(s.avgReturn5d) }}>{fmtPct(s.avgReturn5d)}</td>
+              <td style={{ textAlign: 'right', color: retColor(s.avgReturn10d) }}>{fmtPct(s.avgReturn10d)}</td>
+              <td style={{ textAlign: 'right', color: retColor(s.avgReturn21d) }}>{fmtPct(s.avgReturn21d)}</td>
             </tr>
           ))}
         </tbody>
@@ -92,27 +115,57 @@ function SummaryTable({ summaries }: { summaries: ReplaySummary[] }) {
   );
 }
 
+type PickSortKey = 'asOfDate' | 'strategy' | 'ticker' | 'rank' | 'compositeScore' | 'entryPrice' | 'ret5d' | 'ret10d' | 'ret21d' | 'maxDrawdown21d';
+
+function sortPicks(rows: ReplayPickRow[], key: PickSortKey, dir: 'asc' | 'desc'): ReplayPickRow[] {
+  return [...rows].sort((a, b) => {
+    const av = a[key], bv = b[key];
+    // nulls last regardless of direction
+    if (av === null && bv === null) return 0;
+    if (av === null) return 1;
+    if (bv === null) return -1;
+    const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+    return dir === 'asc' ? cmp : -cmp;
+  });
+}
+
 function PicksTable({ picks }: { picks: ReplayPickRow[] }) {
+  const [sortKey, setSortKey] = useState<PickSortKey>('asOfDate');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+
   if (picks.length === 0) return <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>No picks yet.</p>;
+
+  const handleSort = (key: PickSortKey) => {
+    if (key === sortKey) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortKey(key); setSortDir('desc'); }
+  };
+
+  const sorted = sortPicks(picks, sortKey, sortDir);
+  const arrow = (key: PickSortKey) => sortKey === key ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
+  const thStyle = (key: PickSortKey, align: 'left' | 'right' = 'right'): React.CSSProperties => ({
+    textAlign: align, cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap',
+    color: sortKey === key ? 'var(--accent)' : undefined,
+  });
+
   return (
     <div style={{ overflowX: 'auto' }}>
       <table className="data-table" style={{ width: '100%', fontSize: 12 }}>
         <thead>
           <tr>
-            <th style={{ textAlign: 'left' }}>Date</th>
-            <th style={{ textAlign: 'left' }}>Strategy</th>
-            <th style={{ textAlign: 'left' }}>Ticker</th>
-            <th style={{ textAlign: 'right' }}>Rank</th>
-            <th style={{ textAlign: 'right' }}>Score</th>
-            <th style={{ textAlign: 'right' }}>Entry</th>
-            <th style={{ textAlign: 'right' }}>5d</th>
-            <th style={{ textAlign: 'right' }}>10d</th>
-            <th style={{ textAlign: 'right' }}>21d</th>
-            <th style={{ textAlign: 'right' }}>Drawdown</th>
+            <th style={thStyle('asOfDate', 'left')}    onClick={() => handleSort('asOfDate')}>Date{arrow('asOfDate')}</th>
+            <th style={thStyle('strategy', 'left')}    onClick={() => handleSort('strategy')}>Strategy{arrow('strategy')}</th>
+            <th style={thStyle('ticker', 'left')}      onClick={() => handleSort('ticker')}>Ticker{arrow('ticker')}</th>
+            <th style={thStyle('rank')}                onClick={() => handleSort('rank')}>Rank{arrow('rank')}</th>
+            <th style={thStyle('compositeScore')}      onClick={() => handleSort('compositeScore')}>Score{arrow('compositeScore')}</th>
+            <th style={thStyle('entryPrice')}          onClick={() => handleSort('entryPrice')}>Entry{arrow('entryPrice')}</th>
+            <th style={thStyle('ret5d')}               onClick={() => handleSort('ret5d')}>5d{arrow('ret5d')}</th>
+            <th style={thStyle('ret10d')}              onClick={() => handleSort('ret10d')}>10d{arrow('ret10d')}</th>
+            <th style={thStyle('ret21d')}              onClick={() => handleSort('ret21d')}>21d{arrow('ret21d')}</th>
+            <th style={thStyle('maxDrawdown21d')}      onClick={() => handleSort('maxDrawdown21d')}>Drawdown{arrow('maxDrawdown21d')}</th>
           </tr>
         </thead>
         <tbody>
-          {picks.map((p, i) => (
+          {sorted.map((p, i) => (
             <tr key={i}>
               <td>{p.asOfDate}</td>
               <td style={{ textTransform: 'capitalize' }}>{p.strategy}</td>
