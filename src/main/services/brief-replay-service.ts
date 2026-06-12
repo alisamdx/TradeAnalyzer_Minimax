@@ -542,30 +542,28 @@ export class BriefReplayService {
 
       type PickRow = {
         total_picks: number;
-        evaluated_picks: number;
         avg_ret5d: number | null;
         avg_ret10d: number | null;
         avg_ret21d: number | null;
         positive_5d: number;
         positive_10d: number;
         positive_21d: number;
-        eval_5d: number;
-        eval_10d: number;
-        eval_21d: number;
+        n_5d: number;
+        n_10d: number;
+        n_21d: number;
       };
       const picks = this.db.prepare(`
         SELECT
           COUNT(*) as total_picks,
-          COUNT(CASE WHEN ro.evaluated_at IS NOT NULL THEN 1 END) as evaluated_picks,
-          AVG(CASE WHEN ro.ret_5d IS NOT NULL THEN ro.ret_5d END) as avg_ret5d,
+          AVG(CASE WHEN ro.ret_5d  IS NOT NULL THEN ro.ret_5d  END) as avg_ret5d,
           AVG(CASE WHEN ro.ret_10d IS NOT NULL THEN ro.ret_10d END) as avg_ret10d,
           AVG(CASE WHEN ro.ret_21d IS NOT NULL THEN ro.ret_21d END) as avg_ret21d,
-          SUM(CASE WHEN ro.ret_5d > 0 THEN 1 ELSE 0 END) as positive_5d,
+          SUM(CASE WHEN ro.ret_5d  > 0 THEN 1 ELSE 0 END) as positive_5d,
           SUM(CASE WHEN ro.ret_10d > 0 THEN 1 ELSE 0 END) as positive_10d,
           SUM(CASE WHEN ro.ret_21d > 0 THEN 1 ELSE 0 END) as positive_21d,
-          COUNT(CASE WHEN ro.ret_5d IS NOT NULL THEN 1 END) as eval_5d,
-          COUNT(CASE WHEN ro.ret_10d IS NOT NULL THEN 1 END) as eval_10d,
-          COUNT(CASE WHEN ro.ret_21d IS NOT NULL THEN 1 END) as eval_21d
+          COUNT(CASE WHEN ro.ret_5d  IS NOT NULL THEN 1 END) as n_5d,
+          COUNT(CASE WHEN ro.ret_10d IS NOT NULL THEN 1 END) as n_10d,
+          COUNT(CASE WHEN ro.ret_21d IS NOT NULL THEN 1 END) as n_21d
         FROM replay_outcomes ro
         JOIN replay_briefs rb ON rb.id = ro.replay_brief_id
         WHERE rb.strategy = ?
@@ -575,12 +573,14 @@ export class BriefReplayService {
 
       return {
         strategy,
-        totalDates:     briefs.total_dates,
-        totalPicks:     picks.total_picks,
-        evaluatedPicks: picks.evaluated_picks,
-        hitRate5d:  hitRate(picks.positive_5d,  picks.eval_5d),
-        hitRate10d: hitRate(picks.positive_10d, picks.eval_10d),
-        hitRate21d: hitRate(picks.positive_21d, picks.eval_21d),
+        totalDates:  briefs.total_dates,
+        totalPicks:  picks.total_picks,
+        n5d:  picks.n_5d,
+        n10d: picks.n_10d,
+        n21d: picks.n_21d,
+        hitRate5d:  hitRate(picks.positive_5d,  picks.n_5d),
+        hitRate10d: hitRate(picks.positive_10d, picks.n_10d),
+        hitRate21d: hitRate(picks.positive_21d, picks.n_21d),
         avgReturn5d:  picks.avg_ret5d  !== null ? Math.round(picks.avg_ret5d  * 100) / 100 : null,
         avgReturn10d: picks.avg_ret10d !== null ? Math.round(picks.avg_ret10d * 100) / 100 : null,
         avgReturn21d: picks.avg_ret21d !== null ? Math.round(picks.avg_ret21d * 100) / 100 : null,

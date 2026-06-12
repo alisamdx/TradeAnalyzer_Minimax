@@ -2043,7 +2043,9 @@ export interface ReplaySummary {
   strategy: string;
   totalDates: number;
   totalPicks: number;
-  evaluatedPicks: number;
+  n5d: number;   // picks with 5d data (denominator of HR 5d)
+  n10d: number;  // picks with 10d data
+  n21d: number;  // picks with 21d data
   hitRate5d: number | null;
   hitRate10d: number | null;
   hitRate21d: number | null;

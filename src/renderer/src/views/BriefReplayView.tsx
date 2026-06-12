@@ -77,12 +77,14 @@ function SummaryTable({ summaries }: { summaries: ReplaySummary[] }) {
         <thead>
           <tr>
             <th style={thStyle('strategy', 'left')}    onClick={() => handleSort('strategy')}>Strategy{arrow('strategy')}</th>
-            <th style={thStyle('totalDates')}          onClick={() => handleSort('totalDates')}>Days{arrow('totalDates')}</th>
-            <th style={thStyle('totalPicks')}          onClick={() => handleSort('totalPicks')}>Picks{arrow('totalPicks')}</th>
-            <th style={thStyle('evaluatedPicks')}      onClick={() => handleSort('evaluatedPicks')}>Eval'd{arrow('evaluatedPicks')}</th>
-            <th style={thStyle('hitRate5d')}           onClick={() => handleSort('hitRate5d')}>HR 5d{arrow('hitRate5d')}</th>
-            <th style={thStyle('hitRate10d')}          onClick={() => handleSort('hitRate10d')}>HR 10d{arrow('hitRate10d')}</th>
-            <th style={thStyle('hitRate21d')}          onClick={() => handleSort('hitRate21d')}>HR 21d{arrow('hitRate21d')}</th>
+            <th style={thStyle('totalDates')}  onClick={() => handleSort('totalDates')}>Days{arrow('totalDates')}</th>
+            <th style={thStyle('totalPicks')}  onClick={() => handleSort('totalPicks')}>Picks{arrow('totalPicks')}</th>
+            <th style={thStyle('n5d')}         onClick={() => handleSort('n5d')} title="Picks with 5d data">n(5d){arrow('n5d')}</th>
+            <th style={thStyle('hitRate5d')}   onClick={() => handleSort('hitRate5d')}>HR 5d{arrow('hitRate5d')}</th>
+            <th style={thStyle('n10d')}        onClick={() => handleSort('n10d')} title="Picks with 10d data">n(10d){arrow('n10d')}</th>
+            <th style={thStyle('hitRate10d')}  onClick={() => handleSort('hitRate10d')}>HR 10d{arrow('hitRate10d')}</th>
+            <th style={thStyle('n21d')}        onClick={() => handleSort('n21d')} title="Picks with 21d data">n(21d){arrow('n21d')}</th>
+            <th style={thStyle('hitRate21d')}  onClick={() => handleSort('hitRate21d')}>HR 21d{arrow('hitRate21d')}</th>
             <th style={thStyle('avgReturn5d')}         onClick={() => handleSort('avgReturn5d')}>Avg 5d{arrow('avgReturn5d')}</th>
             <th style={thStyle('avgReturn10d')}        onClick={() => handleSort('avgReturn10d')}>Avg 10d{arrow('avgReturn10d')}</th>
             <th style={thStyle('avgReturn21d')}        onClick={() => handleSort('avgReturn21d')}>Avg 21d{arrow('avgReturn21d')}</th>
@@ -94,13 +96,15 @@ function SummaryTable({ summaries }: { summaries: ReplaySummary[] }) {
               <td style={{ fontWeight: 600, textTransform: 'capitalize' }}>{s.strategy}</td>
               <td style={{ textAlign: 'right' }}>{s.totalDates}</td>
               <td style={{ textAlign: 'right' }}>{s.totalPicks}</td>
-              <td style={{ textAlign: 'right' }}>{s.evaluatedPicks}</td>
+              <td style={{ textAlign: 'right', color: 'var(--text-muted)' }}>{s.n5d}</td>
               <td style={{ textAlign: 'right', color: hitRateColor(s.hitRate5d) }}>
                 {s.hitRate5d !== null ? `${s.hitRate5d}%` : '—'}
               </td>
+              <td style={{ textAlign: 'right', color: 'var(--text-muted)' }}>{s.n10d}</td>
               <td style={{ textAlign: 'right', color: hitRateColor(s.hitRate10d) }}>
                 {s.hitRate10d !== null ? `${s.hitRate10d}%` : '—'}
               </td>
+              <td style={{ textAlign: 'right', color: 'var(--text-muted)' }}>{s.n21d}</td>
               <td style={{ textAlign: 'right', color: hitRateColor(s.hitRate21d) }}>
                 {s.hitRate21d !== null ? `${s.hitRate21d}%` : '—'}
               </td>
