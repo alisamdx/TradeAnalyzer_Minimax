@@ -162,7 +162,7 @@ export function buildEmailHtml(
       return `
         <tr style="border-bottom:1px solid #e8e8e8">
           <td style="padding:7px 8px;font-weight:700;color:#1a1a1a">#${pick.rank}</td>
-          <td style="padding:7px 8px;font-weight:700;font-size:14px">${pick.ticker}</td>
+          <td style="padding:7px 8px;font-weight:700;font-size:14px"><a href="https://us.etrade.com/e/t/invest/quotesandresearch?content=3&amp;sym=${pick.ticker.toLowerCase()}" style="color:#1a1a1a;text-decoration:underline" target="_blank">${pick.ticker}</a></td>
           <td style="padding:7px 8px;color:#555">${fmtPrice(pick.price)}</td>
           <td style="padding:7px 8px;font-weight:700;color:${gradeColor}">${grade}</td>
           <td style="padding:7px 8px;color:#555;font-size:12px">${score != null ? `${score}/100` : '—'}</td>

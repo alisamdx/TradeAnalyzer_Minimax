@@ -46,7 +46,7 @@ Once set up, the app auto-launches at login and keeps its data warm via backgrou
 A typical morning:
 
 1. **Open the app.** Background jobs have already refreshed quotes, fundamentals, technical signals, and IV overnight (16:30 ET the prior session).
-2. **📋 Daily Brief** (Intelligence section) — read today's top scored picks per strategy (wheel / bullish / bearish / income / buy). Each pick shows a structure, an AI rationale, the AI Critic's verdict, and quick buttons to Payoff / Validate / Options. The **⚡ Conviction Alerts** strip at the top flags any of your "My Stocks" that just entered a buy zone.
+2. **📋 Daily Brief** (Intelligence section) — read today's top scored picks per strategy (wheel / bullish / bearish / income / buy). Each pick shows a structure, an AI rationale, the AI Critic's verdict, and quick buttons to Payoff / Validate / Options / Analysis / E*Trade (opens the ticker's E*Trade quote page in your browser; ticker symbols in the brief email link there too). The **⚡ Conviction Alerts** strip at the top flags any of your "My Stocks" that just entered a buy zone.
 3. **Triage.** For any pick worth pursuing, jump into Validate or Payoff (next section) to confirm and model it.
 4. **Manage open positions.** Open **💼 Portfolio** and check the **⚡ Trade Management** banner — it flags positions at 50% profit, ≤ 21 DTE, or delta drift, and any earnings before expiry.
 

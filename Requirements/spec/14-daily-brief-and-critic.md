@@ -18,7 +18,7 @@ After persist, **paper trades are auto-captured** for every post-gate pick (§15
 
 ## 14.2 Brief view
 
-Per-strategy sections (order: wheel → bullish → bearish → income → buy), each a list of pick cards showing: rank badge, ticker, color-coded score badge, the primary structure (`$240 · Jul 17 · $3.25 cr`), human-readable signal chips, italic AI rationale, the relevant Strategy-Lab grade (and best-fit if different), stock price + CSP capital requirement, the Critic verdict badge (expandable), and quick-nav buttons (📈 Payoff / 🎯 Validate / 📉 Options). A history bar shows past briefs with an accuracy chip (§15). A **⚡ Conviction Alerts** section at the top surfaces conviction-list stocks in Buy/Mid zones (§19).
+Per-strategy sections (order: wheel → bullish → bearish → income → buy), each a list of pick cards showing: rank badge, ticker, color-coded score badge, the primary structure (`$240 · Jul 17 · $3.25 cr`), human-readable signal chips, italic AI rationale, the relevant Strategy-Lab grade (and best-fit if different), stock price + CSP capital requirement, the Critic verdict badge (expandable), and quick-nav buttons (📊 Payoff / ✓ Validate / 📋 Options / 🔍 Analysis / 🏦 E*Trade — the last opens `us.etrade.com/e/t/invest/quotesandresearch?content=3&sym={ticker}` in the system browser, same deep-link as the Opportunity screen, v0.32.88). A history bar shows past briefs with an accuracy chip (§15). A **⚡ Conviction Alerts** section at the top surfaces conviction-list stocks in Buy/Mid zones (§19).
 
 Exit plan per pick (in the PDF): target close at 50% credit, stop at 2× max loss, hold DTE.
 
@@ -30,7 +30,7 @@ The brief shows the verdict badge per pick and aggregate counts per strategy sec
 
 ## 14.4 Email & PDF
 
-After the job, `email-service.ts` sends an HTML email (trade-ready tables: ticker / grade / structure / strike / expiry / DTE / credit / ann. return / POP / max loss per strategy, plus the Lab Score and Critic columns) with a full PDF attachment (`brief-report-builder.ts`, pdfkit — all picks, AI rationale, signal breakdown, exit plan). Email uses the configured SMTP settings; email failure does not fail the job. `resendBriefEmail()` re-sends the latest.
+After the job, `email-service.ts` sends an HTML email (trade-ready tables: ticker — hyperlinked to the ticker's E*Trade quote page, v0.32.88 — / grade / structure / strike / expiry / DTE / credit / ann. return / POP / max loss per strategy, plus the Lab Score and Critic columns) with a full PDF attachment (`brief-report-builder.ts`, pdfkit — all picks, AI rationale, signal breakdown, exit plan). Email uses the configured SMTP settings; email failure does not fail the job. `resendBriefEmail()` re-sends the latest.
 
 ## 14.5 Cross-pollination with the learning loop
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.32.88] — 2026-06-12
+
+### Added
+- **Daily Brief: 🔍 Analysis and 🏦 E*Trade quick-nav buttons** on every pick card, next to Payoff/Validate/Options. Analysis navigates to the Analysis view pre-loaded with the ticker; E*Trade opens the ticker's quote page (`us.etrade.com/e/t/invest/quotesandresearch?content=3&sym={ticker}`) in the system browser — same deep-link the Opportunity screen uses.
+- **Brief email: ticker symbols are now E*Trade links** — each ticker in the per-strategy tables links to its E*Trade quote page, so you can jump from the morning email straight to the order screen.
+
 ## [0.32.87] — 2026-06-12
 
 ### Fixed

@@ -337,7 +337,8 @@ function TopSignals({ signals }: { signals: BriefPick['signals'] }) {
   );
 }
 
-// Quick-navigation row — Payoff, Validate, Options buttons pre-populated from strategyLabResult.
+// Quick-navigation row — Payoff, Validate, Options, Analysis, E*Trade buttons
+// pre-populated from strategyLabResult.
 function PickNavRow({ pick }: { pick: BriefPick }) {
   const result = pick.strategyLabResult ? (pick.strategyLabResult as StrategyLabValidateResult) : null;
   const best   = result?.scores?.[0] ?? null;
@@ -351,6 +352,19 @@ function PickNavRow({ pick }: { pick: BriefPick }) {
     window.dispatchEvent(new CustomEvent('navigate-to-validate', {
       detail: { ticker: pick.ticker },
     }));
+  };
+
+  const handleAnalysis = () => {
+    window.dispatchEvent(new CustomEvent('navigate-to-analysis', {
+      detail: { ticker: pick.ticker },
+    }));
+  };
+
+  const handleEtrade = () => {
+    window.open(
+      `https://us.etrade.com/e/t/invest/quotesandresearch?content=3&sym=${pick.ticker.toLowerCase()}`,
+      '_blank'
+    );
   };
 
   const handleOptions = () => {
@@ -383,6 +397,14 @@ function PickNavRow({ pick }: { pick: BriefPick }) {
       <button className="pick-nav-btn" onClick={handleOptions}
         title={expiry ? `Open Options Chain — expiry ${expiry}` : 'Open Options Chain for this ticker'}>
         📋 Options{expiryLabel}
+      </button>
+      <button className="pick-nav-btn" onClick={handleAnalysis}
+        title="Run Analysis for this ticker">
+        🔍 Analysis
+      </button>
+      <button className="pick-nav-btn" onClick={handleEtrade}
+        title="Open on E*Trade">
+        🏦 E*Trade
       </button>
     </div>
   );
