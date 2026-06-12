@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.85] — 2026-06-11
+
+### Fixed
+- **Brief rationales: max_tokens sized for the real request volume** — stage 5 requests rationales for all stage-4 candidates (up to 15 per strategy = 75, not the final 25), because the liquidity gate runs later at assembly. The v0.32.81 cap of 4096 still truncated: the first live run salvaged 38/75 and the income/buy strategies (last in the array) got zero rationales. Raised to 16384 (~7K actually needed). The v0.32.81 salvage + `runMeta.aiError` visibility is what made this immediately diagnosable from run history.
+
 ## [0.32.84] — 2026-06-11
 
 ### Added

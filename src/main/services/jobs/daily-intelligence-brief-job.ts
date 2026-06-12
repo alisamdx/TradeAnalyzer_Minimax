@@ -340,9 +340,11 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
 
       const response = await client.messages.create({
         model: 'claude-sonnet-4-6',
-        // 25 picks × ~90 tokens each ≈ 2.3K — 2048 used to truncate the JSON
-        // mid-array and silently drop every rationale.
-        max_tokens: 4096,
+        // Rationales are requested for ALL stage-4 candidates (up to 15 per
+        // strategy = 75 picks, not just the final 25) since the liquidity gate
+        // runs at assembly, after this stage. 75 × ~90 tokens ≈ 7K output —
+        // the previous 4096 cap still truncated (38/75 salvaged on 2026-06-11).
+        max_tokens: 16384,
         system: systemPrompt,
         messages: [{ role: 'user', content: userPrompt }],
       });
