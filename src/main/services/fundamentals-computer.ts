@@ -181,6 +181,9 @@ export interface FundamentalsComputerInput {
   details: PolygonTickerDetails;
   snapshot: PolygonSnapshot;
   beta: number | null;
+  /** Sum of regular cash dividends per share over the trailing 12 months.
+   *  0 = confirmed non-payer; null = unknown (fetch failed). */
+  ttmDividendsPerShare?: number | null;
 }
 
 export function computeRatios(input: FundamentalsComputerInput): DerivedRatios {
@@ -295,9 +298,13 @@ export function computeRatios(input: FundamentalsComputerInput): DerivedRatios {
       ? raw.totalCurrentAssets / raw.totalCurrentLiabilities
       : null;
 
-  // Dividend yield (Polygon snapshot has no dividend data, so null here;
-  // may be added in Phase 3 when we query /v3/reference/dividends).
-  const dividendYield: null = null;
+  // Dividend yield = TTM regular cash dividends per share / current price × 100
+  // see docs/formulas.md#dividend-yield
+  const ttmDiv = input.ttmDividendsPerShare ?? null;
+  const dividendYield =
+    ttmDiv != null && currentPrice != null && currentPrice > 0
+      ? (ttmDiv / currentPrice) * 100
+      : null;
 
   // ── Quality signals (v0.22.20) ─────────────────────────────────────────────
   // see docs/formulas.md#quality-signals
@@ -399,7 +406,7 @@ export function computeRatios(input: FundamentalsComputerInput): DerivedRatios {
     epsGrowth: epsGrowth !== null ? Math.round(epsGrowth * 100) / 100 : null,
     freeCashFlow: freeCashFlow !== null ? Math.round(freeCashFlow * 100) / 100 : null,
     currentRatio: currentRatio !== null ? Math.round(currentRatio * 1000) / 1000 : null,
-    dividendYield,
+    dividendYield: dividendYield !== null ? Math.round(dividendYield * 100) / 100 : null,
     beta,
     // Quality signals
     fcfToNetIncome: fcfToNetIncome !== null ? Math.round(fcfToNetIncome * 100) / 100 : null,

@@ -2,7 +2,7 @@
 
 > **Read this first.** Self-contained snapshot of *what the app is today* so a fresh AI session is productive without re-reading the whole codebase. This file describes **current state** — not history. Release history lives in `CHANGELOG.md` / `changelogs/`. Operating rules live in `/CLAUDE.md`. Full spec lives in `Requirements/`.
 >
-> Last verified against code: 2026-06-11 (v0.32.79). When you make a material change, update the relevant section here in the same commit.
+> Last verified against code: 2026-06-11 (v0.32.84). When you make a material change, update the relevant section here in the same commit.
 
 ---
 
@@ -39,8 +39,9 @@ The app no longer routes everything through Polygon. Current split:
 
 | Provider | Used for | Interface / entry point |
 | --- | --- | --- |
-| **Polygon.io** (Stocks Starter) | Quotes, historical OHLCV bars, ticker details (market cap/sector/shares), news headlines | `DataProvider` → `polygon-provider.ts` |
-| **SEC EDGAR XBRL** | Financial statements (income/balance/CF) for fundamentals — replaces plan-restricted Polygon `/vX/reference/financials` | `sec-edgar-provider.ts` (called by `polygon-provider.getFundamentals()`) |
+| **Polygon.io** (Stocks Starter) | Quotes, historical OHLCV bars, ticker details (market cap/sector/shares), dividends (TTM yield), news headlines | `DataProvider` → `polygon-provider.ts` |
+| **SEC EDGAR XBRL** | Financial statements (income/balance/CF) for fundamentals — replaces plan-restricted Polygon `/vX/reference/financials`. True TTM via 10-Q roll-forward (`ttmPair`); deduped annual series for 5Y CAGR (`annualSeries`) | `sec-edgar-provider.ts` (called by `polygon-provider.getFundamentals()`) |
+| **Local DB** | Beta (1Y daily vs SPY from `historical_prices` — zero API cost) | `beta-service.ts` (injected into `PolygonDataProvider`) |
 | **E*Trade** (OAuth 1.0a) | Options chains, per-contract IV/Greeks, expirations, earnings date, portfolio sync | `OptionsProvider` → `etrade-data-provider.ts`, `etrade-auth.ts`, `etrade-portfolio-service.ts` |
 | **MarketData.app** | IV-history backfill (historical 30-day ATM IV) | `marketdata-provider.ts` |
 | **IVolatility** | Alternative IV-history source | `ivolatility-provider.ts` |

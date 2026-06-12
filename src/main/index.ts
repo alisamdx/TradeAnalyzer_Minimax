@@ -72,6 +72,7 @@ import { EarningsService } from './services/earnings-service.js';
 import { registerEarningsIpc } from './ipc/ipc-earnings.js';
 import { EarningsRefreshJob } from './services/jobs/earnings-refresh-job.js';
 import { BatchOrchestratorJob } from './services/jobs/batch-orchestrator-job.js';
+import { BetaService } from './services/beta-service.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -248,7 +249,12 @@ app.whenReady().then(() => {
 
   // Phase 2 — market data services.
   initCacheTables(db);
-  const dataProvider = new PolygonDataProvider(() => getApiKey(db));
+  const betaService = new BetaService(db);
+  const dataProvider = new PolygonDataProvider(
+    () => getApiKey(db),
+    undefined,
+    (ticker) => betaService.getBeta(ticker),
+  );
   const quoteCache = new QuoteCache(db);
   new FundamentalsCache(db);
 

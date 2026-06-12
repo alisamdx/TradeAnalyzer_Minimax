@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.32.84] — 2026-06-11
+
+### Added
+- **Dividend yield wired (was 100% null)** — `getFundamentals()` now also queries Polygon `/v3/reference/dividends` (included in the Stocks Starter plan): trailing yield = sum of regular cash dividends with ex-date in the last 365 days / current price × 100. Special dividends (`dividend_type='SC'`) are excluded so one-off payouts don't inflate the yield the wheel/income scoring sees. 0 = confirmed non-payer; null only when the fetch fails. see docs/formulas.md#dividend-yield
+- **Beta wired (was 100% null)** — new `BetaService` computes 1-year daily beta vs SPY from local `historical_prices` (1,046/1,067 tickers have ≥250 bars; zero API cost): cov/var over date-joined returns, `adjusted_close` preferred, null under 200 overlapping observations. Injected into `PolygonDataProvider` as an optional callback. see docs/formulas.md#beta
+
 ## [0.32.83] — 2026-06-11
 
 ### Changed

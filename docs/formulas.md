@@ -93,6 +93,31 @@ Source: standard. Spec §5.2.2. Null when liabilities are zero.
 
 Implementation: `computeRatios()` → `currentRatio` field.
 
+### dividend-yield
+
+```
+Dividend yield (%) = TTM_regular_cash_dividends_per_share / current_price × 100
+```
+Source: standard trailing yield. Numerator = sum of `cash_amount` from Polygon
+`/v3/reference/dividends` with `ex_dividend_date` in the last 365 days, excluding
+special dividends (`dividend_type = 'SC'`) so one-off payouts don't inflate the
+yield the wheel/income scoring sees. 0 = confirmed non-payer; null = fetch failed.
+
+Implementation: `PolygonDataProvider.getTtmDividendsPerShare()` → `computeRatios()` → `dividendYield` field. (v0.32.84)
+
+### beta
+
+```
+Beta = cov(r_stock, r_SPY) / var(r_SPY)
+```
+over the last 252 daily returns (253 closes), joined on date so holidays/gaps in
+either series can't misalign returns. Closes use `adjusted_close` when available.
+Null when fewer than 200 overlapping observations (new listings, sparse backfill)
+or when market variance is ~0 — never a synthesized value.
+
+Implementation: `beta-service.ts` (`computeBeta` pure function + `BetaService.getBeta`
+reading local `historical_prices`) → injected into `PolygonDataProvider` → `computeRatios()` → `beta` field. (v0.32.84)
+
 ## Indicators (Phase 4)
 
 ### sma, ema, rsi-14, macd, adx, bollinger-bands

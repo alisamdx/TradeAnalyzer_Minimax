@@ -57,7 +57,9 @@ export class PolygonDataProvider implements DataProvider, OptionsProvider {
 
   constructor(
     private readonly getApiKey: () => string,
-    _config?: PolygonConfig
+    _config?: PolygonConfig,
+    /** Optional local beta lookup (computed from historical_prices vs SPY — no API cost). */
+    private readonly getBeta?: (ticker: string) => number | null
   ) {}
 
   correlationId(): string {
@@ -187,12 +189,39 @@ export class PolygonDataProvider implements DataProvider, OptionsProvider {
     };
   }
 
+  /** Sum of regular cash dividends per share over the trailing 12 months.
+   *  0 = confirmed non-payer (API succeeded, no rows); null = fetch failed. */
+  private async getTtmDividendsPerShare(ticker: string): Promise<number | null> {
+    try {
+      const since = new Date(Date.now() - 365 * 86_400_000).toISOString().slice(0, 10);
+      const data = await this.fetchWithRetry('/v3/reference/dividends', {
+        ticker,
+        'ex_dividend_date.gte': since,
+        limit: '50',
+      });
+      const results = (data.results as Array<Record<string, unknown>> | undefined) ?? [];
+      let sum = 0;
+      for (const d of results) {
+        // 'CD' = regular cash dividend. Exclude specials ('SC') so a one-off payout
+        // doesn't inflate the trailing yield the wheel/income scoring sees.
+        const type = String(d['dividend_type'] ?? 'CD');
+        const cash = typeof d['cash_amount'] === 'number' ? d['cash_amount'] : 0;
+        if (type !== 'SC') sum += cash;
+      }
+      return Math.round(sum * 10000) / 10000;
+    } catch {
+      return null;
+    }
+  }
+
   async getFundamentals(ticker: string): Promise<DerivedRatios> {
     // EDGAR provides financial statements (free, replaces plan-restricted /vX/reference/financials).
-    // Polygon /v3/reference/tickers provides market cap, shares outstanding, and sector/industry.
-    const [financials, detailsData] = await Promise.all([
+    // Polygon /v3/reference/tickers provides market cap, shares outstanding, and sector/industry;
+    // /v3/reference/dividends provides the trailing yield numerator.
+    const [financials, detailsData, ttmDividendsPerShare] = await Promise.all([
       getEdgarFundamentals(ticker),
       this.fetchWithRetry(`/v3/reference/tickers/${ticker}`),
+      this.getTtmDividendsPerShare(ticker),
     ]);
 
     const details = (detailsData.results as Record<string, unknown> | undefined) ?? {};
@@ -215,7 +244,8 @@ export class PolygonDataProvider implements DataProvider, OptionsProvider {
         last:     { c: snapshot.last     ?? undefined, tr: undefined },
         prev_day: { c: snapshot.prevClose ?? undefined, v: undefined, h: undefined, l: undefined },
       },
-      beta: null,
+      beta: this.getBeta?.(ticker) ?? null,
+      ttmDividendsPerShare,
     };
 
     return computeRatios(input);

@@ -20,10 +20,14 @@ Revenue growth = (rev_TTM − rev_prior_TTM) / |rev_prior_TTM| × 100   (null if
 EPS growth     = (EPS_TTM − EPS_prior_TTM) / |EPS_prior_TTM| × 100
 FCF (TTM)      = operating_cash_flow_TTM − |capex_TTM|
 Current ratio  = current_assets / current_liabilities            (null if liabilities = 0)
+Dividend yield = TTM_regular_cash_dividends_per_share / price × 100   (specials excluded; 0 = non-payer, null = fetch failed)
+Beta           = cov(r_stock, r_SPY) / var(r_SPY)                (252 daily returns, date-joined, from local bars; null < 200 obs)
 ```
 \* Financial-sector detection: sector string contains `bank`, `financial`, `insurance`, or `investment` → D/E returned null.
 
-Quality signals (same source): ROIC, FCF-to-net-income, net-debt-to-EBITDA, 5-year revenue/EPS CAGR (compound annual growth), value/growth composite scores, beta, dividend yield.
+TTM figures use the EDGAR 10-Q roll-forward (`TTM = FY + YTD_current − YTD_prior_year`, §3.3); 5Y CAGR uses the deduped annual series base.
+
+Quality signals (same source): ROIC, FCF-to-net-income, net-debt-to-EBITDA, 5-year revenue/EPS CAGR (compound annual growth), value/growth composite scores.
 
 ---
 

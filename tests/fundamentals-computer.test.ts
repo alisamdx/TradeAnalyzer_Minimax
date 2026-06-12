@@ -187,6 +187,40 @@ describe('fundamentals-computer', () => {
       expect(result.debtToEquity).toBeNull();
     });
 
+    // see docs/formulas.md#dividend-yield (v0.32.84)
+    it('computes dividend yield from TTM dividends per share and price', () => {
+      const result = computeRatios({
+        financials: makeFinancials({ filings: [] }),
+        details: makeDetails(),
+        snapshot: makeSnapshot({ last: { c: 100, tr: undefined } }),
+        beta: null,
+        ttmDividendsPerShare: 2.5
+      });
+      expect(result.dividendYield).toBe(2.5);
+    });
+
+    it('dividend yield is 0 for confirmed non-payers, null when unknown', () => {
+      const base = {
+        financials: makeFinancials({ filings: [] }),
+        details: makeDetails(),
+        snapshot: makeSnapshot({ last: { c: 100, tr: undefined } }),
+        beta: null
+      };
+      expect(computeRatios({ ...base, ttmDividendsPerShare: 0 }).dividendYield).toBe(0);
+      expect(computeRatios({ ...base, ttmDividendsPerShare: null }).dividendYield).toBeNull();
+      expect(computeRatios(base).dividendYield).toBeNull();
+    });
+
+    it('passes beta through to the result', () => {
+      const result = computeRatios({
+        financials: makeFinancials({ filings: [] }),
+        details: makeDetails(),
+        snapshot: makeSnapshot(),
+        beta: 1.34
+      });
+      expect(result.beta).toBe(1.34);
+    });
+
     it('computes profit margin', () => {
       const result = computeRatios({
         financials: makeFinancials({

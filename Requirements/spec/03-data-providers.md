@@ -35,20 +35,31 @@ interface DataProvider {
 - Tickers / details: `/v3/reference/tickers`, `/v3/reference/tickers/{ticker}` (name, sector, market cap, shares).
 - Aggregates (OHLCV): `/v2/aggs/ticker/{ticker}/range/{mult}/{span}/{from}/{to}`.
 - Snapshot: `/v2/snapshot/locale/us/markets/stocks/tickers/{ticker}`.
-- Financials: `/vX/reference/financials` (raw statements — ratios computed locally, see §3.3).
 - Options snapshot: `/v3/snapshot/options/{underlying}` (used only when `optionsProvider='polygon'`).
 - News: `/v2/reference/news?ticker={ticker}`.
-- Dividends / splits: `/v3/reference/dividends`, `/v3/reference/splits`.
+- Dividends / splits: `/v3/reference/dividends` (TTM dividend yield numerator, v0.32.84), `/v3/reference/splits`.
 - WebSocket (delayed): `wss://delayed.polygon.io` for optional live price ticker.
+
+> **Financial statements do NOT come from Polygon** (v0.32.79): `/vX/reference/financials`
+> requires a Developer plan. `getFundamentals()` sources statements from **SEC EDGAR XBRL**
+> (`sec-edgar-provider.ts`, see §3.3) and keeps Polygon for ticker details, snapshot price,
+> and dividends.
 
 ### Important Polygon facts
 - **IV rank / IV percentile are null** from the snapshot endpoint — computed separately from `iv_history` (§11).
 - **No public earnings calendar** — earnings come from E*Trade (§17).
 - `getIndexConstituents` is a **no-op**; constituents are loaded from bundled CSVs + the `constituents` table by `ConstituentsService`.
 
-## 3.3 Fundamentals computer
+## 3.3 Fundamentals pipeline (SEC EDGAR + computer)
 
-`fundamentals-computer.ts` derives all ratios from raw Polygon financial statements (it does **not** trust any pre-computed provider ratio). It pulls up to 24 quarterly filings and computes TTM/LTM figures. Outputs `DerivedRatios`: P/E, EPS, profit margin, ROE, D/E (financial sector exempt → null), revenue growth YoY, EPS growth YoY, FCF, current ratio, plus quality signals (ROIC, FCF-to-net-income, net-debt-to-EBITDA, 5Y revenue/EPS CAGR, value/growth/grade scores, beta, dividend yield, sector, industry, market cap). Every formula is written out in §23. Results are cached 24h in `fundamentals_cache`.
+Financial statements come from the free **SEC EDGAR XBRL API** (`sec-edgar-provider.ts`, v0.32.79+):
+- CIK resolution via `company_tickers.json` (cached per process); facts via `companyfacts/CIK{padded10}.json`. No API key; `User-Agent` header required; 10 req/s limit. OTC/foreign tickers absent from the SEC list are skipped (fundamentals null).
+- Per field role, candidate US-GAAP concepts are ranked by **most-recent annual date wins** (handles ASC-606-style concept transitions).
+- `annualSeries()` dedupes 10-K comparative re-reports by period end (latest filed wins; restatements honored) and drops non-annual durations — without this, "5 years ago" lands on FY-2 (v0.32.80).
+- `ttmPair()` builds **true TTM**: FY + current 10-Q YTD − prior-year same-period YTD; the YoY denominator rolls the same way with the two-years-back comparative. TTM only when the full quarterly chain exists, else a consistent FY pair (v0.32.83).
+- Output is translated into the legacy `PolygonFinancials` filings shape: slot 0 = current TTM + most-recent balance sheet, slot 4 = prior TTM, slot 16 = 5-years-ago annual (CAGR base), 20 slots total.
+
+`fundamentals-computer.ts` then derives all ratios (it does **not** trust any pre-computed provider ratio). Outputs `DerivedRatios`: P/E, EPS, profit margin, ROE, D/E (financial sector exempt → null), revenue growth YoY, EPS growth YoY, FCF (= op CF − |capex|, capex from EDGAR), current ratio, plus quality signals (ROIC, FCF-to-net-income, net-debt-to-EBITDA, 5Y revenue/EPS CAGR, value/growth/grade scores), **dividend yield** (TTM regular cash dividends / price, Polygon dividends endpoint, v0.32.84), **beta** (1Y daily vs SPY from local `historical_prices`, `beta-service.ts`, v0.32.84), sector, industry, market cap. Every formula is written out in §23. Results are cached 24h in `fundamentals_cache`.
 
 ## 3.4 `OptionsProvider` interface
 
