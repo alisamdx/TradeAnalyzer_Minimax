@@ -335,13 +335,19 @@ export function computeRatios(input: FundamentalsComputerInput): DerivedRatios {
   // NetDebtToEBITDA = (totalDebt − cash) / (operatingIncome + D&A)
   // Only computed when D&A is available — publishing EBIT/debt ratio as EBITDA would mislead.
   // Null if EBITDA ≤ 0 (not meaningful for loss companies).
+  // Financial sector exempted like D/E — EBITDA is meaningless for banks, and their
+  // huge cash positions produced absurd negatives (RF: −176) that spuriously passed
+  // the ≤3 value-score criterion.
   let netDebtToEbitda: number | null = null;
-  if (raw.depreciation != null && raw.operatingIncome != null &&
+  if (!isFinancial && raw.depreciation != null && raw.operatingIncome != null &&
       raw.totalDebt != null) {
     const ebitda = raw.operatingIncome + raw.depreciation;
     if (ebitda > 0) {
       const netDebt = raw.totalDebt - (raw.cash ?? 0);
       netDebtToEbitda = netDebt / ebitda;
+      // Near-zero EBITDA denominators produce meaningless extremes (observed: 252, 909).
+      // Beyond ±50 the ratio carries no signal — treat as not computable.
+      if (Math.abs(netDebtToEbitda) > 50) netDebtToEbitda = null;
     }
   }
 

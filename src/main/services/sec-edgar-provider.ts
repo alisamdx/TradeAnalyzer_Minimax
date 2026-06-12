@@ -80,6 +80,20 @@ type GaapFacts = Record<string, GaapConcept>;
  * (e.g. Apple migrated revenue from `Revenues` to `RevenueFromContractWithCustomer…`
  * after ASC 606 adoption in 2019 — the old concept still has data back to 2004).
  */
+/** A concept whose newest entry (any form) is older than this is abandoned —
+ *  any active filer has a 10-Q or 10-K entry within ~120 days. 540 days gives
+ *  generous slack and still rejects concepts last tagged years ago. */
+const STALE_CONCEPT_DAYS = 540;
+
+/** True when the concept's newest entry is too old to describe the present.
+ *  ORCL's only `LongTermDebt` entry is a $0 value from FY2022 — serving that as
+ *  "current debt" against current cash produced a fake net-cash position. */
+export function conceptIsStale(entries: EdgarEntry[], now = Date.now()): boolean {
+  const latest = latestEntry(entries);
+  if (!latest) return true;
+  return (now - Date.parse(latest.end)) / 86_400_000 > STALE_CONCEPT_DAYS;
+}
+
 function pickBestConcept(
   gaap: GaapFacts,
   concepts: readonly string[],
@@ -96,6 +110,7 @@ function pickBestConcept(
     if (!unitEntry) continue;
     const [unit, entries] = unitEntry;
     if (!entries?.length) continue;
+    if (conceptIsStale(entries)) continue;  // null beats years-old data
     const annual = annualSeries(entries);
     if (annual.length === 0) continue;
     candidates.push({ entries, unit, latestAnnualEnd: annual[0]!.end });
@@ -359,7 +374,7 @@ export async function getEdgarFundamentals(ticker: string): Promise<PolygonFinan
   // both "no combined concept at all" and "combined concept abandoned years ago").
   {
     const baseDa = gaap['Depreciation']?.units?.['USD'] ?? [];
-    if (baseDa.length > 0) {
+    if (baseDa.length > 0 && !conceptIsStale(baseDa)) {
       const synthetic = compositeEntries(
         baseDa,
         DA_COMPOSITE_ADDONS.map(c => gaap[c]?.units?.['USD'] ?? []),

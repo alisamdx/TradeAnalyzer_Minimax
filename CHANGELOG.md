@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.32.87] — 2026-06-12
+
+### Fixed
+- **ORCL fake net-cash: stale EDGAR concepts no longer serve as current data** — Oracle's only `LongTermDebt` entry in us-gaap is a $0 value from FY2022 (its real ~$90B of debt lives in dimensioned per-instrument contexts that `companyfacts['us-gaap']` doesn't aggregate). The provider served that 4-year-old zero as "current debt" against $38B of current cash → `netDebtToEbitda` −1.37. New `conceptIsStale()` guard: any concept whose newest entry (any form) is older than 540 days is skipped during concept selection — active filers always have an entry within ~120 days, so this only rejects abandoned tags. ORCL's debt now correctly resolves to null (no fake numbers). Also applied to the composite D&A base. T/VZ/MO verified unaffected (current concepts).
+- **Banks no longer spuriously pass the leverage value-score criterion** — `netDebtToEbitda` is now null for the financial sector (same detection as the existing D/E exemption): EBITDA is meaningless for banks, and their cash positions produced absurd negatives (RF: −176) that passed `passLte(≤3)` and inflated valueScore/growthScore. Also nulled when |ratio| > 50 (near-zero EBITDA denominators — observed 252, 909). Legitimate negatives for true net-cash companies are kept.
+- **docs/formulas.md `#quality-signals` anchor now exists** — code comments referenced it but the section was never written; added with the FCF/NI, ROIC, and NetDebtToEBITDA formulas and null conditions.
+
 ## [0.32.86] — 2026-06-11
 
 ### Fixed

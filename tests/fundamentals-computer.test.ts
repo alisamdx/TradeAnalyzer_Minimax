@@ -221,6 +221,67 @@ describe('fundamentals-computer', () => {
       expect(result.beta).toBe(1.34);
     });
 
+    // see docs/formulas.md#quality-signals (v0.32.87)
+    describe('netDebtToEbitda exemptions', () => {
+      const leveragedFiling = (opIncome: number, da: number, debt: number, cash: number) => ({
+        date: '', start_date: '', end_date: '',
+        financials: {
+          income_statement: {
+            operating_income_loss: { value: opIncome },
+            depreciation_and_amortization: { value: da },
+          },
+          balance_sheet: {
+            long_term_debt: { value: debt },
+            cash_and_cash_equivalents: { value: cash },
+            equity: { value: 1_000 },
+          },
+        },
+      });
+
+      it('computes normally for non-financials', () => {
+        const result = computeRatios({
+          financials: makeFinancials({ filings: [leveragedFiling(800, 200, 2_500, 500)] }),
+          details: makeDetails({ sector: 'Technology' }),
+          snapshot: makeSnapshot(),
+          beta: null
+        });
+        // (2500 − 500) / (800 + 200) = 2.0
+        expect(result.netDebtToEbitda).toBe(2);
+      });
+
+      it('nulls the ratio for the financial sector (EBITDA meaningless for banks)', () => {
+        const result = computeRatios({
+          financials: makeFinancials({ filings: [leveragedFiling(800, 200, 2_500, 500)] }),
+          details: makeDetails({ sector: 'National Commercial Banks' }),
+          snapshot: makeSnapshot(),
+          beta: null
+        });
+        expect(result.netDebtToEbitda).toBeNull();
+      });
+
+      it('nulls absurd magnitudes from near-zero EBITDA denominators', () => {
+        // (10000 − 0) / (5 + 5) = 1000 — no signal, just a tiny denominator
+        const result = computeRatios({
+          financials: makeFinancials({ filings: [leveragedFiling(5, 5, 10_000, 0)] }),
+          details: makeDetails({ sector: 'Technology' }),
+          snapshot: makeSnapshot(),
+          beta: null
+        });
+        expect(result.netDebtToEbitda).toBeNull();
+      });
+
+      it('keeps legitimate negative ratios (true net-cash companies)', () => {
+        // (100 − 2000) / (800 + 200) = −1.9
+        const result = computeRatios({
+          financials: makeFinancials({ filings: [leveragedFiling(800, 200, 100, 2_000)] }),
+          details: makeDetails({ sector: 'Technology' }),
+          snapshot: makeSnapshot(),
+          beta: null
+        });
+        expect(result.netDebtToEbitda).toBe(-1.9);
+      });
+    });
+
     it('computes profit margin', () => {
       const result = computeRatios({
         financials: makeFinancials({

@@ -27,7 +27,7 @@ Beta           = cov(r_stock, r_SPY) / var(r_SPY)                (252 daily retu
 
 TTM figures use the EDGAR 10-Q roll-forward (`TTM = FY + YTD_current − YTD_prior_year`, §3.3); 5Y CAGR uses the deduped annual series base.
 
-Quality signals (same source): ROIC, FCF-to-net-income, net-debt-to-EBITDA, 5-year revenue/EPS CAGR (compound annual growth), value/growth composite scores.
+Quality signals (same source): ROIC, FCF-to-net-income, net-debt-to-EBITDA (null for the financial sector — same detection as D/E — and when |ratio| > 50, v0.32.87), 5-year revenue/EPS CAGR (compound annual growth), value/growth composite scores. EDGAR concepts whose newest entry is older than 540 days are treated as abandoned and never serve "current" values (v0.32.87).
 
 ---
 

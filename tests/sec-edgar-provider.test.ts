@@ -8,6 +8,7 @@ import {
   annualSeries,
   ttmPair,
   compositeEntries,
+  conceptIsStale,
   type EdgarEntry,
 } from '../src/main/services/sec-edgar-provider.js';
 
@@ -160,6 +161,35 @@ describe('ttmPair', () => {
 
   it('returns null when there is no annual at all', () => {
     expect(ttmPair([h1Cur])).toBeNull();
+  });
+});
+
+// ─── conceptIsStale (v0.32.87) ────────────────────────────────────────────────
+// ORCL's only LongTermDebt entry is a $0 value from FY2022 — serving years-old
+// data as "current" produced a fake net-cash position (ndEbitda −1.37 vs ~$90B
+// of real debt). Stale concepts must yield null, not ancient values.
+
+describe('conceptIsStale', () => {
+  const NOW = Date.parse('2026-06-12');
+
+  it('flags a concept whose newest entry is years old (the ORCL case)', () => {
+    const stale: EdgarEntry = { end: '2022-05-31', val: 0, fp: 'FY', form: '10-K', filed: '2022-06-20' };
+    expect(conceptIsStale([stale], NOW)).toBe(true);
+  });
+
+  it('accepts a concept with a recent entry', () => {
+    const fresh: EdgarEntry = { end: '2026-02-28', val: 43e9, fp: 'Q3', form: '10-Q', filed: '2026-03-10' };
+    expect(conceptIsStale([fresh], NOW)).toBe(false);
+  });
+
+  it('accepts an annual-only filer inside the 540-day window', () => {
+    // 10-K ended ~14 months ago, next one not yet filed — must NOT be stale.
+    const annualOnly: EdgarEntry = { end: '2025-03-29', val: 1e9, fp: 'FY', form: '10-K', filed: '2025-05-15' };
+    expect(conceptIsStale([annualOnly], NOW)).toBe(false);
+  });
+
+  it('treats an empty entry list as stale', () => {
+    expect(conceptIsStale([], NOW)).toBe(true);
   });
 });
 

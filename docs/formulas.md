@@ -118,6 +118,25 @@ or when market variance is ~0 — never a synthesized value.
 Implementation: `beta-service.ts` (`computeBeta` pure function + `BetaService.getBeta`
 reading local `historical_prices`) → injected into `PolygonDataProvider` → `computeRatios()` → `beta` field. (v0.32.84)
 
+### quality-signals
+
+```
+FCFToNetIncome  = operating_cash_flow_TTM / net_income_TTM × 100      (null if NI ≤ 0)
+ROIC            = NOPAT / (total_debt + equity) × 100
+                  NOPAT = op_income × (1 − taxRate); implied taxRate clamped [5%, 50%]
+NetDebtToEBITDA = (total_debt − cash) / (op_income_TTM + D&A_TTM)
+```
+
+`NetDebtToEBITDA` null conditions (v0.32.87):
+- **Financial sector** (same detection as D/E) — EBITDA is meaningless for banks, and
+  their cash positions produced absurd negatives (RF: −176) that spuriously passed
+  the ≤3 value-score criterion.
+- **|ratio| > 50** — near-zero EBITDA denominators carry no signal (observed: 252, 909).
+- EBITDA ≤ 0, or D&A unavailable (publishing EBIT/debt as "EBITDA" would mislead).
+- Legitimate negative values (true net-cash companies) are kept.
+
+Implementation: `computeRatios()` → `fcfToNetIncome`, `roic`, `netDebtToEbitda` fields.
+
 ## Indicators (Phase 4)
 
 ### sma, ema, rsi-14, macd, adx, bollinger-bands
