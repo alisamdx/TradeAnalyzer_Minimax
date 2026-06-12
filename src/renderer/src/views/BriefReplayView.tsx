@@ -138,16 +138,22 @@ function PicksTable({ picks }: { picks: ReplayPickRow[] }) {
 
 // ─── Main view ────────────────────────────────────────────────────────────────
 
+// Approx 21 trading days = 30 calendar days before today
+function subtractDays(dateStr: string, days: number): string {
+  const d = new Date(dateStr + 'T12:00:00Z');
+  d.setDate(d.getDate() - days);
+  return d.toISOString().slice(0, 10);
+}
+
 export default function BriefReplayView() {
   const today = new Date().toISOString().slice(0, 10);
-  const oneMonthAgo = (() => {
-    const d = new Date(today + 'T12:00:00Z');
-    d.setMonth(d.getMonth() - 1);
-    return d.toISOString().slice(0, 10);
-  })();
+  // Default "to" = 30 cal days back (≈21 trading days) so 21d returns can be evaluated.
+  // Default "from" = 60 cal days back for a ~1-month scoring window.
+  const defaultTo   = subtractDays(today, 30);
+  const defaultFrom = subtractDays(today, 60);
 
-  const [fromDate, setFromDate] = useState(oneMonthAgo);
-  const [toDate, setToDate]     = useState(today);
+  const [fromDate, setFromDate] = useState(defaultFrom);
+  const [toDate, setToDate]     = useState(defaultTo);
   const [runState, setRunState] = useState<RunState>({
     running: false, phase: 'done', current: 0, total: 0, message: '',
   });
@@ -220,8 +226,14 @@ export default function BriefReplayView() {
   return (
     <div style={{ padding: '20px 24px', maxWidth: 1200, margin: '0 auto' }}>
       <h2 style={{ marginBottom: 4, fontSize: 18, fontWeight: 700 }}>Brief Replay</h2>
-      <p style={{ color: 'var(--text-muted)', fontSize: 13, marginTop: 0, marginBottom: 20 }}>
+      <p style={{ color: 'var(--text-muted)', fontSize: 13, marginTop: 0, marginBottom: 8 }}>
         Back-test the scoring pipeline against historical dates. Clears existing replay data on each run.
+      </p>
+      <p style={{ color: 'var(--text-muted)', fontSize: 12, marginTop: 0, marginBottom: 20 }}>
+        <strong style={{ color: 'var(--text-secondary)' }}>Note:</strong> Forward returns require price data <em>after</em> the pick date.
+        For 5d returns, <strong>To</strong> must be at least 5 trading days before today (&asymp;7 cal days).
+        For all three columns, set <strong>To</strong> at least 21 trading days back (&asymp;30 cal days).
+        Picks from recent days will show &mdash; until those dates have passed.
       </p>
 
       {/* Controls */}
@@ -243,6 +255,11 @@ export default function BriefReplayView() {
             disabled={runState.running}
             style={{ marginLeft: 4 }}
           />
+          {toDate > subtractDays(today, 7) && (
+            <span style={{ marginLeft: 6, fontSize: 11, color: '#ff9800' }} title="To date is within 7 calendar days of today — forward returns may be missing">
+              ⚠ recent
+            </span>
+          )}
         </label>
         {!runState.running ? (
           <button className="btn-primary" onClick={handleRun} style={{ minWidth: 80 }}>
