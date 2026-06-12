@@ -63,11 +63,50 @@ function runChecks(svc: CriticService, pick: BriefPick, strategy: string, market
 
 describe('CriticService rule checks', () => {
   let svc: CriticService;
+  let db: InstanceType<typeof Database>;
 
   beforeEach(() => {
-    const db = new Database(':memory:');
+    db = new Database(':memory:');
     db.exec(`CREATE TABLE earnings_calendar (ticker TEXT, report_date TEXT, confirmed INTEGER)`);
     svc = new CriticService(db);
+  });
+
+  describe('checkEarningsInWindow — unknown vs known-clear (v0.32.82)', () => {
+    // ~11% of the universe has no earnings_calendar row; "no row" must read as
+    // "unverified", not "no earnings risk".
+    const liquidPick = () => makePick([
+      { slug: 'big-lizard', grade: 'A', liquidityScore: 8, setup: makeSetup(105, '2099-01-15') },
+    ]);
+
+    it('emits an info-severity earnings_unknown flag when the ticker has no future earnings row', () => {
+      const flags = runChecks(svc, liquidPick(), 'bullish');
+      const f = flags.find(x => x.key === 'earnings_unknown');
+      expect(f).toBeDefined();
+      expect(f!.severity).toBe('info');
+      expect(f!.description).toContain('TEST');
+    });
+
+    it('stays silent when a future earnings date exists beyond expiry (known clear)', () => {
+      db.prepare(`INSERT INTO earnings_calendar VALUES ('TEST', '2099-06-01', 1)`).run();
+      const flags = runChecks(svc, liquidPick(), 'bullish');
+      expect(flags.find(x => x.key === 'earnings_unknown')).toBeUndefined();
+      expect(flags.find(x => x.key === 'earnings_in_window')).toBeUndefined();
+    });
+
+    it('flags earnings_in_window (warning) when the report falls before expiry', () => {
+      db.prepare(`INSERT INTO earnings_calendar VALUES ('TEST', '2098-12-01', 1)`).run();
+      const flags = runChecks(svc, liquidPick(), 'bullish');
+      const f = flags.find(x => x.key === 'earnings_in_window');
+      expect(f).toBeDefined();
+      expect(f!.severity).toBe('warning');
+      expect(flags.find(x => x.key === 'earnings_unknown')).toBeUndefined();
+    });
+
+    it('does not emit earnings flags when the pick has no options structure', () => {
+      const flags = runChecks(svc, makePick(null), 'bullish');
+      expect(flags.find(x => x.key === 'earnings_unknown')).toBeUndefined();
+      expect(flags.find(x => x.key === 'earnings_in_window')).toBeUndefined();
+    });
   });
 
   describe('checkLiquidity — chosen structure, threshold < 4', () => {

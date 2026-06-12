@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.82] — 2026-06-11
+
+### Fixed
+- **Earnings blind spot: "no earnings data" no longer reads as "no earnings risk"** — ~11% of the universe (119/1,068 tickers) has no future row in `earnings_calendar` (Finnhub bulk-fill gaps; DELL was picked tonight while invisible to the earnings check). Three changes: (1) the brief job now runs a per-pick E*Trade earnings fallback for the ~25 final pick tickers before the critic stage — `refreshTickers` smart-skips tickers that already have valid future dates, so this is typically only a handful of API calls; result recorded in `runMeta.earningsFallback`. (2) The critic's rule check now distinguishes "known clear" from "no data": a pick with an options structure but no future earnings row gets an info-severity `earnings_unknown` flag telling the trader to verify the report date manually. (3) The critic's AI context gains `earningsKnown` so the LLM treats missing calendar data as unverified risk rather than absence of risk.
+
 ## [0.32.81] — 2026-06-11
 
 ### Fixed

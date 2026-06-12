@@ -406,9 +406,27 @@ app.whenReady().then(() => {
     runOnStartup: false,
   });
   const paperTradingService = new PaperTradingService(db);
+
+  // Earnings calendar service + E*Trade creds factory — needed here by the brief
+  // job's per-pick earnings fallback; also used by the earnings IPC/job below.
+  const earningsService = new EarningsService(db);
+  const getEtradeCreds = (): (import('./services/etrade-auth.js').OAuthCredentials & { tokenDate: string | null }) | null => {
+    const accessToken  = secureGet(db, 'etradeAccessToken');
+    const accessSecret = secureGet(db, 'etradeAccessSecret');
+    if (!accessToken || !accessSecret) return null;
+    return {
+      consumerKey:    secureGet(db, 'etradeConsumerKey') ?? '',
+      consumerSecret: secureGet(db, 'etradeConsumerSecret') ?? '',
+      accessToken,
+      accessSecret,
+      tokenDate: secureGet(db, 'etradeTokenDate'),
+    };
+  };
+
   const briefJob = new DailyIntelligenceBriefJob(
     db, dataProvider, optionsProvider, emailService, paperTradingService,
     () => getMainWindow()?.webContents.send('watchlists:updated'),
+    earningsService, getEtradeCreds,
   );
   batchService.registerJob('daily-intelligence-brief', briefJob, {
     dailyScheduleTime: '16:30',  // post-market, chains after price-gap-fill
@@ -456,20 +474,8 @@ app.whenReady().then(() => {
   const newsAiService = new NewsAIService(db);
   registerNewsIpc(newsFetcher, rateLimiter, newsAiService);
 
-  // Earnings calendar
-  const earningsService = new EarningsService(db);
-  const getEtradeCreds = (): (import('./services/etrade-auth.js').OAuthCredentials & { tokenDate: string | null }) | null => {
-    const accessToken  = secureGet(db, 'etradeAccessToken');
-    const accessSecret = secureGet(db, 'etradeAccessSecret');
-    if (!accessToken || !accessSecret) return null;
-    return {
-      consumerKey:    secureGet(db, 'etradeConsumerKey') ?? '',
-      consumerSecret: secureGet(db, 'etradeConsumerSecret') ?? '',
-      accessToken,
-      accessSecret,
-      tokenDate: secureGet(db, 'etradeTokenDate'),
-    };
-  };
+  // Earnings calendar (earningsService + getEtradeCreds constructed earlier,
+  // before the brief job — see v0.32.82 earnings fallback)
   registerEarningsIpc(earningsService, getEtradeCreds);
 
   // Earnings Refresh batch job — runs on startup (60s delay) + manually.

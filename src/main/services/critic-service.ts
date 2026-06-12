@@ -187,6 +187,9 @@ export class CriticService {
       const earningsInWindow = structureExpiry
         ? this.getEarningsBeforeExpiry(pick.ticker, structureExpiry, today)
         : null;
+      // Distinguish "known clear" from "no data": ~11% of the universe has no
+      // future earnings row, and the AI must not read that absence as safety.
+      const earningsKnown = this.hasFutureEarningsRow(pick.ticker, today);
 
       const context = {
         ticker: pick.ticker,
@@ -208,6 +211,7 @@ export class CriticService {
             : 'bearish — SPY below 200-day MA',
         },
         earningsInWindow,  // null = no earnings before expiry; otherwise { date, daysFromNow, confirmed }
+        earningsKnown,     // false = calendar has no future earnings data for this ticker at all
         topSignals,
         structure,
         advocateRationale: pick.aiRationale,
@@ -227,7 +231,7 @@ FLAG SEVERITIES: 'warning' flags indicate material risk. 'info' flags are adviso
 MARKET DATA: All values in \`marketData\` are live as of \`date\` from real-time feeds — treat them as ground truth. Do not use training knowledge to contradict provided prices; stocks change dramatically over years of training lag. \`price52wReturnPct\` shows the 1-year return so you can calibrate price level without recalling historical absolutes.
 STRUCTURE: \`dte\` is pre-computed calendar days to expiry. \`strikeOtmPct\` = (short strike − current price) / price × 100: positive means the strike is ABOVE spot (OTM for short calls, ITM for short puts); negative means BELOW spot (OTM for short puts, ITM for short calls). Judge moneyness by the leg's side — a short put with strikeOtmPct of +30% is deeply ITM and broken, not safe. \`breakevenDistancePct\` (income only) is how far price can move before the structure loses — compare this to expected 1-sigma move (annualized vol / sqrt(365/dte)) to assess real risk. If \`structure.presentation\` says stock purchase, evaluate the pick as a plain stock buy — the option structure shown is an optional alternative; do not penalize the stock thesis for the structure's grade.
 MARKET CONTEXT: \`vixLevel\` and \`spyTrend\` describe today's macro environment.
-EARNINGS: \`earningsInWindow\` is non-null if there is a known earnings event before expiry — this is the single biggest event risk for any options position.
+EARNINGS: \`earningsInWindow\` is non-null if there is a known earnings event before expiry — this is the single biggest event risk for any options position. If \`earningsKnown\` is false the calendar has NO future earnings data for this ticker, so treat earnings risk as unverified rather than absent — for options positions, note that the report date must be checked manually.
 
 Write 1–2 sentences. If no material concern exists, one sentence confirming the pick looks clean is sufficient — do not manufacture a concern to fill a second sentence. If a concern exists, describe it specifically (sentence 1), then what to verify (sentence 2).
 
@@ -458,13 +462,36 @@ Use verdict: pass, caution, or flag. Use confidence: high, medium, or low.`;
     const expiry = this.getStructureExpiry(pick, strategy);
     if (!expiry) return null;
     const earnings = this.getEarningsBeforeExpiry(pick.ticker, expiry, today);
-    if (!earnings) return null;
+    if (!earnings) {
+      // "No earnings in window" is only meaningful if the calendar actually has
+      // data for this ticker. With no future-dated row at all, an earnings event
+      // inside the hold window is unverified — not absent.
+      if (!this.hasFutureEarningsRow(pick.ticker, today)) {
+        return {
+          key: 'earnings_unknown', severity: 'info',
+          description: `No earnings date on file for ${pick.ticker} — the position spans ${expiry} ` +
+            `but earnings risk inside that window is unverified. Check the report date before entering.`,
+        };
+      }
+      return null;
+    }
     const status = earnings.confirmed ? 'confirmed' : 'unconfirmed';
     return {
       key: 'earnings_in_window', severity: 'warning',
       description: `Earnings on ${earnings.date} (${earnings.daysFromNow}d away, ${status}) fall before expiry ${expiry}. ` +
         `Earnings events cause outsized moves — consider avoiding or sizing down.`,
     };
+  }
+
+  private hasFutureEarningsRow(ticker: string, today: string): boolean {
+    try {
+      const row = this.db.prepare(
+        `SELECT 1 FROM earnings_calendar WHERE ticker = ? AND report_date > ? LIMIT 1`
+      ).get(ticker, today);
+      return row !== undefined;
+    } catch {
+      return false;
+    }
   }
 
   private getEarningsBeforeExpiry(

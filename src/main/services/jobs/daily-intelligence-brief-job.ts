@@ -22,6 +22,8 @@ import type { PaperTradingService } from '../paper-trading-service.js';
 import { CriticService } from '../critic-service.js';
 import { WatchlistService } from '../watchlist-service.js';
 import { parseRationaleResponse } from '../brief-rationale-parser.js';
+import type { EarningsService } from '../earnings-service.js';
+import type { OAuthCredentials } from '../etrade-auth.js';
 
 const PICKS_PER_STRATEGY = 5;   // final picks shown in brief per strategy (post-gate cap)
 const STAGE4_POOL_SIZE   = 15;  // candidates sent to E*Trade validation per strategy — deepened from 10 in v0.32.70 so the liquidity gate (which now correctly rejects thin chains) still leaves 5 picks per strategy
@@ -107,6 +109,8 @@ export class DailyIntelligenceBriefJob implements BatchJobHandler {
     private readonly emailService: EmailService | null = null,
     private readonly paperTradingService: PaperTradingService | null = null,
     private readonly onWatchlistUpdated: (() => void) | null = null,
+    private readonly earningsService: EarningsService | null = null,
+    private readonly getEtradeCreds: (() => OAuthCredentials | null) | null = null,
   ) {
     this.scoringService = new ScoringService(db);
     this.strategyLabService = new StrategyLabService(dataProvider, optionsProvider);
@@ -396,6 +400,22 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
         );
       } catch {
         // Ignore bulk errors — proceed with whatever prices we have
+      }
+    }
+
+    // ── Earnings fallback for final picks ────────────────────────────────────
+    // ~11% of the universe has no future earnings row (Finnhub bulk-fill gaps),
+    // and the critic treats a ticker with no calendar data as unverified event
+    // risk. Fetch the missing dates from E*Trade for just the ~25 final pick
+    // tickers — refreshTickers smart-skips any ticker that already has a valid
+    // future date, so this is typically only a handful of calls.
+    if (this.earningsService && finalPickTickers.length > 0) {
+      try {
+        const creds = this.getEtradeCreds?.() ?? null;
+        const res = await this.earningsService.refreshTickers(finalPickTickers, creds);
+        runMeta['earningsFallback'] = { updated: res.updated, skipped: res.skipped, failed: res.failed };
+      } catch (err) {
+        runMeta['earningsFallback'] = { error: err instanceof Error ? err.message : String(err) };
       }
     }
 
