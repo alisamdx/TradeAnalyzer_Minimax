@@ -450,10 +450,17 @@ export class BriefReplayService {
       priceMap.get(p.ticker)!.push(p);
     }
 
+    // Global "To" date = last scored trading day across all briefs in this run.
+    // close_price / close_date show each ticker's price at this single endpoint
+    // so all picks can be compared at the same moment (like a portfolio snapshot).
+    const globalToDate = (this.db.prepare(
+      'SELECT MAX(as_of_date) as d FROM replay_briefs'
+    ).get() as { d: string | null }).d ?? '';
+
     const updateStmt = this.db.prepare(`
       UPDATE replay_outcomes
       SET ret_5d = ?, ret_10d = ?, ret_21d = ?, max_drawdown_21d = ?,
-          synth_strike = ?, stayed_above_strike = ?, evaluated_at = ?
+          synth_strike = ?, stayed_above_strike = ?, close_price = ?, close_date = ?, evaluated_at = ?
       WHERE id = ?
     `);
 
@@ -500,9 +507,23 @@ export class BriefReplayService {
           stayedAbove = fwd21.every(p => p.low >= synthStrike!) ? 1 : 0;
         }
 
+        // Close price: ticker's price on the global replay To date (or closest prior bar)
+        let closePrice: number | null = null;
+        let closeDate: string | null = null;
+        if (globalToDate) {
+          for (let i = prices.length - 1; i >= 0; i--) {
+            if (prices[i]!.date <= globalToDate) {
+              closePrice = prices[i]!.close;
+              closeDate  = prices[i]!.date;
+              break;
+            }
+          }
+        }
+
         updateStmt.run(
           ret5d, ret10d, ret21d, maxDrawdown21d,
           synthStrike, stayedAbove,
+          closePrice, closeDate,
           new Date().toISOString(),
           row.id,
         );
@@ -584,6 +605,8 @@ export class BriefReplayService {
       ret_21d: number | null;
       max_drawdown_21d: number | null;
       stayed_above_strike: number | null;
+      close_price: number | null;
+      close_date: string | null;
       evaluated_at: string | null;
     };
 
@@ -592,7 +615,8 @@ export class BriefReplayService {
         ro.replay_brief_id, rb.as_of_date, rb.strategy,
         ro.ticker, ro.rank, ro.composite_score,
         ro.entry_price, ro.ret_5d, ro.ret_10d, ro.ret_21d,
-        ro.max_drawdown_21d, ro.stayed_above_strike, ro.evaluated_at
+        ro.max_drawdown_21d, ro.stayed_above_strike,
+        ro.close_price, ro.close_date, ro.evaluated_at
       FROM replay_outcomes ro
       JOIN replay_briefs rb ON rb.id = ro.replay_brief_id
       WHERE 1=1 ${strategyFilter}
@@ -613,6 +637,8 @@ export class BriefReplayService {
       ret21d:             r.ret_21d,
       maxDrawdown21d:     r.max_drawdown_21d,
       stayedAboveStrike:  r.stayed_above_strike === null ? null : r.stayed_above_strike === 1,
+      closePrice:         r.close_price,
+      closeDate:          r.close_date,
       evaluatedAt:        r.evaluated_at,
     }));
   }

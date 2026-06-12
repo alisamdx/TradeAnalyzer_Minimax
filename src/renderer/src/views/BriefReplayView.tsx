@@ -115,7 +115,7 @@ function SummaryTable({ summaries }: { summaries: ReplaySummary[] }) {
   );
 }
 
-type PickSortKey = 'asOfDate' | 'strategy' | 'ticker' | 'rank' | 'compositeScore' | 'entryPrice' | 'ret5d' | 'ret10d' | 'ret21d' | 'maxDrawdown21d';
+type PickSortKey = 'asOfDate' | 'strategy' | 'ticker' | 'rank' | 'compositeScore' | 'entryPrice' | 'ret5d' | 'ret10d' | 'ret21d' | 'closeDate' | 'closePrice' | 'maxDrawdown21d';
 
 function sortPicks(rows: ReplayPickRow[], key: PickSortKey, dir: 'asc' | 'desc'): ReplayPickRow[] {
   return [...rows].sort((a, b) => {
@@ -161,6 +161,8 @@ function PicksTable({ picks }: { picks: ReplayPickRow[] }) {
             <th style={thStyle('ret5d')}               onClick={() => handleSort('ret5d')}>5d{arrow('ret5d')}</th>
             <th style={thStyle('ret10d')}              onClick={() => handleSort('ret10d')}>10d{arrow('ret10d')}</th>
             <th style={thStyle('ret21d')}              onClick={() => handleSort('ret21d')}>21d{arrow('ret21d')}</th>
+            <th style={thStyle('closeDate')}           onClick={() => handleSort('closeDate')}>Close Date{arrow('closeDate')}</th>
+            <th style={thStyle('closePrice')}          onClick={() => handleSort('closePrice')}>Close{arrow('closePrice')}</th>
             <th style={thStyle('maxDrawdown21d')}      onClick={() => handleSort('maxDrawdown21d')}>Drawdown{arrow('maxDrawdown21d')}</th>
           </tr>
         </thead>
@@ -178,6 +180,10 @@ function PicksTable({ picks }: { picks: ReplayPickRow[] }) {
               <td style={{ textAlign: 'right', color: retColor(p.ret5d) }}>{fmtPct(p.ret5d)}</td>
               <td style={{ textAlign: 'right', color: retColor(p.ret10d) }}>{fmtPct(p.ret10d)}</td>
               <td style={{ textAlign: 'right', color: retColor(p.ret21d) }}>{fmtPct(p.ret21d)}</td>
+              <td style={{ textAlign: 'right' }}>{p.closeDate ?? '—'}</td>
+              <td style={{ textAlign: 'right' }}>
+                {p.closePrice !== null ? `$${p.closePrice.toFixed(2)}` : '—'}
+              </td>
               <td style={{ textAlign: 'right', color: p.maxDrawdown21d !== null && p.maxDrawdown21d < -5 ? '#ef5350' : '' }}>
                 {fmtPct(p.maxDrawdown21d)}
               </td>

@@ -2034,6 +2034,8 @@ export interface ReplayPickRow {
   ret21d: number | null;
   maxDrawdown21d: number | null;
   stayedAboveStrike: boolean | null;
+  closePrice: number | null;
+  closeDate: string | null;
   evaluatedAt: string | null;
 }
 
