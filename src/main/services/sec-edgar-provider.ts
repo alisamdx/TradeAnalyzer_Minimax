@@ -37,6 +37,8 @@ export async function resolveEdgarCik(ticker: string): Promise<{ cikPadded: stri
 // ─── EDGAR entry type ─────────────────────────────────────────────────────────
 
 export interface EdgarEntry {
+  /** Period start — present on duration facts (income/CF), absent on instants (balance sheet). */
+  start?: string;
   end: string;
   val: number;
   fp: string;
@@ -94,7 +96,7 @@ function pickBestConcept(
     if (!unitEntry) continue;
     const [unit, entries] = unitEntry;
     if (!entries?.length) continue;
-    const annual = [...entries].filter(e => e.form === '10-K').sort((a, b) => b.end.localeCompare(a.end));
+    const annual = annualSeries(entries);
     if (annual.length === 0) continue;
     candidates.push({ entries, unit, latestAnnualEnd: annual[0]!.end });
   }
@@ -103,14 +105,40 @@ function pickBestConcept(
   return { entries: candidates[0]!.entries, unit: candidates[0]!.unit };
 }
 
-/** 10-K entries only, sorted newest-first. */
-function sortedAnnualEntries(entries: EdgarEntry[]): EdgarEntry[] {
-  return [...entries].filter(e => e.form === '10-K').sort((a, b) => b.end.localeCompare(a.end));
+/**
+ * True annual series: one entry per fiscal year, sorted newest-first.
+ *
+ * Every 10-K re-reports the two prior fiscal years as comparatives, so the raw
+ * entry list contains each year 2–3 times (FY25, FY24, FY24, FY23, FY23, FY23…).
+ * Without dedupe, index N is NOT N years back — index 5 lands on FY-2, which
+ * silently turned the 5Y CAGR into a 2-year change annualized over 5.
+ *
+ * - Dedupe by period `end`; the most recently `filed` entry wins (restatements).
+ * - Duration facts (income/CF, have `start`) are kept only if the period is
+ *   ~12 months (300–400 days — fiscal-week calendars produce 363/370-day years).
+ *   Some filers tag quarterly comparatives in 10-Ks; those must not enter the
+ *   annual series. Instant facts (balance sheet, no `start`) pass through.
+ */
+export function annualSeries(entries: EdgarEntry[]): EdgarEntry[] {
+  const byEnd = new Map<string, EdgarEntry>();
+  for (const e of entries) {
+    if (e.form !== '10-K') continue;
+    if (e.start) {
+      const days = (Date.parse(e.end) - Date.parse(e.start)) / 86_400_000;
+      if (days < 300 || days > 400) continue;
+    }
+    const prev = byEnd.get(e.end);
+    if (!prev || e.filed > prev.filed) byEnd.set(e.end, e);
+  }
+  return [...byEnd.values()].sort((a, b) => b.end.localeCompare(a.end));
 }
 
-/** Most-recent entry regardless of form (10-Q preferred for balance-sheet currency). */
+/** Most-recent entry regardless of form (10-Q preferred for balance-sheet currency).
+ *  Ties on `end` break by latest `filed` so restated values win. */
 function latestEntry(entries: EdgarEntry[]): EdgarEntry | null {
-  return [...entries].sort((a, b) => b.end.localeCompare(a.end))[0] ?? null;
+  return [...entries].sort(
+    (a, b) => b.end.localeCompare(a.end) || b.filed.localeCompare(a.filed)
+  )[0] ?? null;
 }
 
 type FilingEntry = NonNullable<PolygonFinancials['filings']>[0];
@@ -201,7 +229,7 @@ export async function getEdgarFundamentals(ticker: string): Promise<PolygonFinan
 
   function annuals(role: string): EdgarEntry[] {
     const c = resolved[role];
-    return c ? sortedAnnualEntries(c.entries) : [];
+    return c ? annualSeries(c.entries) : [];
   }
 
   function annualVal(role: string, idx: number): number | null {
@@ -218,11 +246,11 @@ export async function getEdgarFundamentals(ticker: string): Promise<PolygonFinan
   const today = new Date().toISOString().slice(0, 10);
   const endDate0  = refAnnuals[0]?.end ?? today;
   const endDate4  = refAnnuals[1]?.end ?? endDate0;
-  // For 5Y CAGR pick index 5 (N-5 = exactly 5 years back); fall back to whatever is available
-  const cagr5yIdx = refAnnuals.length >= 6 ? 5
-    : refAnnuals.length >= 5 ? 4
-    : refAnnuals.length >= 4 ? 3
-    : -1;
+  // 5Y CAGR base: index 5 in the deduped series = exactly 5 fiscal years back.
+  // No nearer fallback — a "5Y CAGR" computed from a 3–4 year base is mislabeled;
+  // companies with shorter history (recent IPOs, concept transitions) get null,
+  // which the scoring engine treats as a missing signal and reweights.
+  const cagr5yIdx = refAnnuals.length >= 6 ? 5 : -1;
   const endDate16 = cagr5yIdx >= 0 ? (refAnnuals[cagr5yIdx]?.end ?? endDate0) : endDate0;
 
   // 20-element filing array — empty by default, filled at slots 0, 4, and 16

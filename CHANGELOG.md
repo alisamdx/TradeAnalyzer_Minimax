@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.32.80] — 2026-06-11
+
+### Fixed
+- **EDGAR 5Y CAGR was computed from a 2-years-ago base, not 5** — every 10-K re-reports the two prior fiscal years as comparatives, so the raw 10-K entry list contains each year 2–3 times (FY25, FY24, FY24, FY23, FY23, FY23…). The provider indexed this list as if entry N were N years back, landing the "5 years ago" slot on FY-2. Result: `revenueGrowth5Y`/`epsGrowth5Y` systematically understated for every steady grower (AAPL: computed 1.66% vs true 8.68%), which suppressed the `earningsGrowth`, `revenueGrowth5Y`, and `epsGrowth5Y` signals in the bullish/buy strategies plus valueScore/growthScore/stockGrade universe-wide. Fix: new `annualSeries()` dedupes by period end (most recently filed wins, so restatements are honored) and drops non-annual durations (<300 or >400 days) that some filers tag inside 10-Ks. `EdgarEntry` now captures `start` to enable the duration check.
+- **5Y CAGR no longer silently degrades to a 3–4 year base** — the old fallback computed a "5Y" CAGR from whatever history existed. Now companies with fewer than 6 deduped annuals get null, which the scoring engine correctly treats as a missing signal and reweights.
+
 ## [0.32.79] — 2026-06-11
 
 ### Changed
