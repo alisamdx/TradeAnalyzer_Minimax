@@ -21,6 +21,7 @@ import { buildEmailHtml, buildPdf } from '../brief-report-builder.js';
 import type { PaperTradingService } from '../paper-trading-service.js';
 import { CriticService } from '../critic-service.js';
 import { WatchlistService } from '../watchlist-service.js';
+import { parseRationaleResponse } from '../brief-rationale-parser.js';
 
 const PICKS_PER_STRATEGY = 5;   // final picks shown in brief per strategy (post-gate cap)
 const STAGE4_POOL_SIZE   = 15;  // candidates sent to E*Trade validation per strategy — deepened from 10 in v0.32.70 so the liquidity gate (which now correctly rejects thin chains) still leaves 5 picks per strategy
@@ -335,20 +336,22 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
 
       const response = await client.messages.create({
         model: 'claude-sonnet-4-6',
-        max_tokens: 2048,
+        // 25 picks × ~90 tokens each ≈ 2.3K — 2048 used to truncate the JSON
+        // mid-array and silently drop every rationale.
+        max_tokens: 4096,
         system: systemPrompt,
         messages: [{ role: 'user', content: userPrompt }],
       });
 
       const text = response.content.find(b => b.type === 'text')?.text ?? '';
-      // Extract JSON array from response
-      const jsonMatch = text.match(/\[[\s\S]*\]/);
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]) as Array<{ ticker: string; strategy: string; rationale: string }>;
-        for (const item of parsed) {
-          const key = `${item.ticker}:${item.strategy}`;
-          aiRationales.set(key, item.rationale);
-        }
+      for (const item of parseRationaleResponse(text)) {
+        aiRationales.set(`${item.ticker}:${item.strategy}`, item.rationale);
+      }
+      if (response.stop_reason === 'max_tokens') {
+        runMeta['aiError'] =
+          `rationale response hit max_tokens — salvaged ${aiRationales.size}/${picksForAI.length}`;
+      } else if (aiRationales.size === 0 && picksForAI.length > 0) {
+        runMeta['aiError'] = 'rationale response could not be parsed (0 rationales extracted)';
       }
 
       // Rough cost estimate: sonnet-4-6 input ~$3/M + output ~$15/M tokens

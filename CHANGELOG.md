@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.81] — 2026-06-11
+
+### Fixed
+- **Daily brief: all 25 AI rationales were dropped silently** — Stage 5 asks for 25 pick rationales in one call with `max_tokens: 2048`, but 25 × ~90 tokens needs ~2.3K+. The response truncated mid-JSON, the `\[[\s\S]*\]` extraction regex found no closing bracket, and every `aiRationale` stayed null while the ~$0.07 API spend was still incurred — with no error recorded. Fixes: (1) `max_tokens` raised to 4096; (2) new `parseRationaleResponse()` (own module, unit-tested) salvages every complete object from a truncated array instead of all-or-nothing regex matching; (3) `stop_reason === 'max_tokens'` and zero-parse outcomes are now recorded in `runMeta.aiError` so partial/failed synthesis is visible in the run history instead of silent.
+
 ## [0.32.80] — 2026-06-11
 
 ### Fixed
