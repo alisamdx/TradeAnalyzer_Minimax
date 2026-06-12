@@ -141,6 +141,56 @@ function latestEntry(entries: EdgarEntry[]): EdgarEntry | null {
   )[0] ?? null;
 }
 
+/**
+ * Synthetic entry list built by summing component concepts per reporting period.
+ *
+ * Modern filers (MSFT, GOOGL, ORCL) no longer tag a combined D&A concept in
+ * us-gaap — they tag `Depreciation` and amortization parts separately, with the
+ * combined cash-flow line often in a company extension namespace that
+ * facts['us-gaap'] never exposes. Summing the parts recovers the combined value.
+ *
+ * - Periods are keyed by exact `start|end`; components filed together share
+ *   period dates, so the join is exact.
+ * - Each component list is deduped per period first (latest `filed` wins) so a
+ *   comparative re-report can't be double-counted into the sum.
+ * - A period is emitted only when the BASE concept has it; addon values join in
+ *   when present. Base alone is acceptable for D&A: it understates the total,
+ *   which overstates net-debt-to-EBITDA — the conservative direction for a
+ *   leverage-risk signal.
+ */
+export function compositeEntries(
+  base: EdgarEntry[],
+  addons: ReadonlyArray<EdgarEntry[]>,
+): EdgarEntry[] {
+  const key = (e: EdgarEntry): string => `${e.start ?? ''}|${e.end}|${e.form}`;
+  const dedupe = (list: EdgarEntry[]): Map<string, EdgarEntry> => {
+    const m = new Map<string, EdgarEntry>();
+    for (const e of list) {
+      const k = key(e);
+      const prev = m.get(k);
+      if (!prev || e.filed > prev.filed) m.set(k, e);
+    }
+    return m;
+  };
+  const addonMaps = addons.map(dedupe);
+  const out: EdgarEntry[] = [];
+  for (const [k, b] of dedupe(base)) {
+    let val = b.val;
+    for (const am of addonMaps) {
+      const a = am.get(k);
+      if (a) val += a.val;
+    }
+    out.push({ ...b, val });
+  }
+  return out;
+}
+
+/** Addon concepts summed onto `Depreciation` when no combined D&A concept is current. */
+const DA_COMPOSITE_ADDONS = [
+  'AmortizationOfIntangibleAssets',
+  'FinanceLeaseRightOfUseAssetAmortization',
+] as const;
+
 function durationDays(e: EdgarEntry): number {
   return e.start ? Math.round((Date.parse(e.end) - Date.parse(e.start)) / 86_400_000) : 0;
 }
@@ -300,6 +350,29 @@ export async function getEdgarFundamentals(ticker: string): Promise<PolygonFinan
   const resolved: Record<string, ConceptResult> = {};
   for (const spec of EDGAR_FIELD_SPECS) {
     resolved[spec.role] = pickBestConcept(gaap, spec.concepts);
+  }
+
+  // Composite D&A fallback: when no combined D&A concept is current, sum
+  // Depreciation + amortization parts per period. Selection follows the same
+  // most-recent-annual-wins rule as pickBestConcept — the composite replaces the
+  // combined concept only when its annual series is strictly more recent (covers
+  // both "no combined concept at all" and "combined concept abandoned years ago").
+  {
+    const baseDa = gaap['Depreciation']?.units?.['USD'] ?? [];
+    if (baseDa.length > 0) {
+      const synthetic = compositeEntries(
+        baseDa,
+        DA_COMPOSITE_ADDONS.map(c => gaap[c]?.units?.['USD'] ?? []),
+      );
+      const compositeAnnual = annualSeries(synthetic);
+      if (compositeAnnual.length > 0) {
+        const combined = resolved['depreciation'];
+        const combinedEnd = combined ? (annualSeries(combined.entries)[0]?.end ?? '') : '';
+        if (compositeAnnual[0]!.end > combinedEnd) {
+          resolved['depreciation'] = { entries: synthetic, unit: 'USD' };
+        }
+      }
+    }
   }
 
   function annuals(role: string): EdgarEntry[] {

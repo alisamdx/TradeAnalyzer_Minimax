@@ -54,7 +54,7 @@ interface DataProvider {
 
 Financial statements come from the free **SEC EDGAR XBRL API** (`sec-edgar-provider.ts`, v0.32.79+):
 - CIK resolution via `company_tickers.json` (cached per process); facts via `companyfacts/CIK{padded10}.json`. No API key; `User-Agent` header required; 10 req/s limit. OTC/foreign tickers absent from the SEC list are skipped (fundamentals null).
-- Per field role, candidate US-GAAP concepts are ranked by **most-recent annual date wins** (handles ASC-606-style concept transitions).
+- Per field role, candidate US-GAAP concepts are ranked by **most-recent annual date wins** (handles ASC-606-style concept transitions). The depreciation role additionally has a **composite fallback** (`compositeEntries`, v0.32.86): when no combined D&A concept is current, `Depreciation` + `AmortizationOfIntangibleAssets` + `FinanceLeaseRightOfUseAssetAmortization` are summed per exact reporting period (modern filers tag the parts separately; the combined line often lives in extension namespaces invisible to us-gaap).
 - `annualSeries()` dedupes 10-K comparative re-reports by period end (latest filed wins; restatements honored) and drops non-annual durations — without this, "5 years ago" lands on FY-2 (v0.32.80).
 - `ttmPair()` builds **true TTM**: FY + current 10-Q YTD − prior-year same-period YTD; the YoY denominator rolls the same way with the two-years-back comparative. TTM only when the full quarterly chain exists, else a consistent FY pair (v0.32.83).
 - Output is translated into the legacy `PolygonFinancials` filings shape: slot 0 = current TTM + most-recent balance sheet, slot 4 = prior TTM, slot 16 = 5-years-ago annual (CAGR base), 20 slots total.

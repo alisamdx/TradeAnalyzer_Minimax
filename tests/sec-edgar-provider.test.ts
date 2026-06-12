@@ -4,7 +4,12 @@
 // N years back made the "5Y CAGR" base land on FY-2 (AAPL: computed 1.66% vs true 8.68%).
 
 import { describe, it, expect } from 'vitest';
-import { annualSeries, ttmPair, type EdgarEntry } from '../src/main/services/sec-edgar-provider.js';
+import {
+  annualSeries,
+  ttmPair,
+  compositeEntries,
+  type EdgarEntry,
+} from '../src/main/services/sec-edgar-provider.js';
 
 /** Annual duration fact as it appears in companyfacts (income/CF concepts). */
 function fy(year: number, val: number, filedYear: number): EdgarEntry {
@@ -155,5 +160,71 @@ describe('ttmPair', () => {
 
   it('returns null when there is no annual at all', () => {
     expect(ttmPair([h1Cur])).toBeNull();
+  });
+});
+
+// ─── compositeEntries (v0.32.86) ──────────────────────────────────────────────
+// Modern filers (MSFT, GOOGL, ORCL) tag Depreciation and amortization parts
+// separately instead of a combined D&A concept — the composite sums them per
+// reporting period so netDebtToEbitda stops coming up null.
+
+describe('compositeEntries', () => {
+  const dep  = (year: number, val: number, filedYear = year): EdgarEntry => fy(year, val, filedYear);
+  const amort = (year: number, val: number, filedYear = year): EdgarEntry => fy(year, val, filedYear);
+
+  it('sums base + addons for matching periods', () => {
+    const out = compositeEntries(
+      [dep(2025, 100), dep(2024, 90)],
+      [[amort(2025, 30), amort(2024, 25)], [amort(2025, 5)]],
+    );
+    const series = annualSeries(out);
+    expect(series.map(e => e.val)).toEqual([135, 115]);  // 100+30+5, 90+25
+  });
+
+  it('emits base-only periods when addons are missing (conservative understatement)', () => {
+    const out = compositeEntries([dep(2025, 100)], [[], []]);
+    expect(annualSeries(out).map(e => e.val)).toEqual([100]);
+  });
+
+  it('never emits a period the base concept lacks', () => {
+    const out = compositeEntries([dep(2025, 100)], [[amort(2024, 25)]]);
+    expect(annualSeries(out).map(e => e.val)).toEqual([100]);
+  });
+
+  it('dedupes comparative re-reports per component before summing (no double count)', () => {
+    // FY2024 reported in both the FY24 and FY25 10-Ks for base and addon —
+    // each must contribute once.
+    const out = compositeEntries(
+      [dep(2024, 90, 2024), dep(2024, 90, 2025)],
+      [[amort(2024, 25, 2024), amort(2024, 25, 2025)]],
+    );
+    expect(annualSeries(out).map(e => e.val)).toEqual([115]);
+  });
+
+  it('restated component values win within a period', () => {
+    const out = compositeEntries(
+      [dep(2024, 90, 2024), { ...dep(2024, 85, 2025) }],
+      [],
+    );
+    expect(annualSeries(out).map(e => e.val)).toEqual([85]);
+  });
+
+  it('feeds ttmPair like a native concept (10-Q periods join across components)', () => {
+    const q = (start: string, end: string, val: number, filed: string): EdgarEntry =>
+      ({ start, end, val, fp: 'Q2', form: '10-Q', filed });
+    const out = compositeEntries(
+      [dep(2025, 100), dep(2024, 90),
+       q('2025-09-28', '2026-03-28', 55, '2026-05-01'),
+       q('2024-09-29', '2025-03-29', 50, '2026-05-01'),
+       q('2023-10-01', '2024-03-30', 45, '2025-05-02')],
+      [[amort(2025, 30), amort(2024, 25),
+        q('2025-09-28', '2026-03-28', 15, '2026-05-01'),
+        q('2024-09-29', '2025-03-29', 14, '2026-05-01'),
+        q('2023-10-01', '2024-03-30', 13, '2025-05-02')]],
+    );
+    const p = ttmPair(out);
+    expect(p!.source).toBe('ttm');
+    // TTM = (100+30) + (55+15) − (50+14) = 136
+    expect(p!.current.val).toBe(136);
   });
 });

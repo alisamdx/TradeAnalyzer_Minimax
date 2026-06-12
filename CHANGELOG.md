@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.86] — 2026-06-11
+
+### Fixed
+- **netDebtToEbitda null for 373/1,002 tickers — composite D&A fallback** — modern filers (MSFT, GOOGL, ORCL) no longer tag a combined D&A concept in us-gaap: they tag `Depreciation` (PP&E only) and amortization parts separately, with the combined cash-flow line often in a company extension namespace invisible to `facts['us-gaap']`. New `compositeEntries()` sums `Depreciation` + `AmortizationOfIntangibleAssets` + `FinanceLeaseRightOfUseAssetAmortization` per exact reporting period (each component deduped per period first so comparative re-reports can't double-count), producing a synthetic entry list that flows through the normal `annualSeries`/`ttmPair` machinery. Selection keeps the most-recent-annual-wins rule: the composite replaces a combined concept only when its annual series is strictly more recent — covering both "no combined concept at all" and "combined concept abandoned years ago". Base-only periods are acceptable: understating D&A overstates net-debt-to-EBITDA, the conservative direction for a leverage-risk signal. Validated against live filings: MSFT D&A $31.4B, GOOGL $21.7B, ORCL $6.2B. Banks/energy nulls (no `OperatingIncomeLoss`) are structural and remain null by design.
+
 ## [0.32.85] — 2026-06-11
 
 ### Fixed
