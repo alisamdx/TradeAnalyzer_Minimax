@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.83] — 2026-06-11
+
+### Changed
+- **EDGAR fundamentals: true TTM from 10-Q roll-forward** — slot-0 income/cash-flow values were the last 10-K, which is up to ~11 months stale for companies early in their fiscal year (MSFT's FY ends in June; its "TTM" revenue was from June 2025 while P/E used today's price). New `ttmPair()` implements the standard XBRL roll-forward: TTM = FY + YTD(current 10-Qs) − YTD(prior year same period). The prior-year TTM (YoY denominator) rolls the same way using the two-years-back comparative. TTM mode engages only when the full quarterly chain exists; otherwise both values fall back to consistent fiscal years — a TTM numerator over an FY denominator would misstate YoY growth by the stub-period difference. Verified live: MSFT TTM revenue now $318.3B through 2026-03-31 (was $282B through 2025-06-30), NI $125.2B (was $102B). 5Y CAGR keeps its annual base.
+
 ## [0.32.82] — 2026-06-11
 
 ### Fixed

@@ -4,7 +4,7 @@
 // N years back made the "5Y CAGR" base land on FY-2 (AAPL: computed 1.66% vs true 8.68%).
 
 import { describe, it, expect } from 'vitest';
-import { annualSeries, type EdgarEntry } from '../src/main/services/sec-edgar-provider.js';
+import { annualSeries, ttmPair, type EdgarEntry } from '../src/main/services/sec-edgar-provider.js';
 
 /** Annual duration fact as it appears in companyfacts (income/CF concepts). */
 function fy(year: number, val: number, filedYear: number): EdgarEntry {
@@ -94,5 +94,66 @@ describe('annualSeries', () => {
       filed: '2023-11-03',
     };
     expect(annualSeries([wk53])).toHaveLength(1);
+  });
+});
+
+// ─── ttmPair (v0.32.83) ───────────────────────────────────────────────────────
+// TTM = FY + YTD(current) − YTD(prior year same period). Without the roll-forward,
+// "TTM" was just the last 10-K — up to ~11 months stale for June-fiscal companies.
+
+function ytd(start: string, end: string, val: number, form: '10-Q' | '10-K', filed: string): EdgarEntry {
+  return { start, end, val, fp: 'Q2', form, filed };
+}
+
+describe('ttmPair', () => {
+  // Sept-fiscal company (Apple-like): FY25 = 400, FY24 = 380.
+  const fy25 = fy(2025, 400, 2025);
+  const fy24 = fy(2024, 380, 2024);
+
+  // H1 YTD facts: current FY26 H1 = 220, FY25 H1 = 200, FY24 H1 = 185.
+  const h1Cur    = ytd('2025-09-28', '2026-03-28', 220, '10-Q', '2026-05-01');
+  const h1Prior  = ytd('2024-09-29', '2025-03-29', 200, '10-Q', '2026-05-01');
+  const h1Prior2 = ytd('2023-10-01', '2024-03-30', 185, '10-Q', '2025-05-02');
+
+  it('rolls TTM forward with 10-Q YTD facts when the full chain exists', () => {
+    const p = ttmPair([fy25, fy24, h1Cur, h1Prior, h1Prior2]);
+    expect(p).not.toBeNull();
+    expect(p!.source).toBe('ttm');
+    // TTM = 400 + 220 − 200
+    expect(p!.current.val).toBe(420);
+    expect(p!.current.end).toBe('2026-03-28');
+    // Prior TTM = 380 + 200 − 185
+    expect(p!.prior!.val).toBe(395);
+  });
+
+  it('prefers the cumulative YTD over the single-quarter fact at the same end date', () => {
+    const q2Only = ytd('2025-12-28', '2026-03-28', 110, '10-Q', '2026-05-01');
+    const p = ttmPair([fy25, fy24, h1Cur, q2Only, h1Prior, h1Prior2]);
+    expect(p!.source).toBe('ttm');
+    expect(p!.current.val).toBe(420);  // used 220 (H1), not 110 (Q2 only)
+  });
+
+  it('falls back to consistent fiscal years when the YTD chain is incomplete', () => {
+    // No two-years-back comparative → both values must be FY, never TTM-vs-FY mixed.
+    const p = ttmPair([fy25, fy24, h1Cur, h1Prior]);
+    expect(p!.source).toBe('fy');
+    expect(p!.current.val).toBe(400);
+    expect(p!.prior!.val).toBe(380);
+  });
+
+  it('uses plain FY values when no 10-Q is newer than the FY end', () => {
+    const p = ttmPair([fy25, fy24, h1Prior, h1Prior2]);
+    expect(p!.source).toBe('fy');
+    expect(p!.current.val).toBe(400);
+  });
+
+  it('returns null prior when only one fiscal year exists', () => {
+    const p = ttmPair([fy25]);
+    expect(p!.current.val).toBe(400);
+    expect(p!.prior).toBeNull();
+  });
+
+  it('returns null when there is no annual at all', () => {
+    expect(ttmPair([h1Cur])).toBeNull();
   });
 });

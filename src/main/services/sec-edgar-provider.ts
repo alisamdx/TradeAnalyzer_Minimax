@@ -141,6 +141,77 @@ function latestEntry(entries: EdgarEntry[]): EdgarEntry | null {
   )[0] ?? null;
 }
 
+function durationDays(e: EdgarEntry): number {
+  return e.start ? Math.round((Date.parse(e.end) - Date.parse(e.start)) / 86_400_000) : 0;
+}
+
+export interface TtmPair {
+  current: { val: number; end: string };
+  prior: { val: number; end: string } | null;
+  /** 'ttm' = rolled forward with 10-Q YTD facts; 'fy' = plain fiscal-year values. */
+  source: 'ttm' | 'fy';
+}
+
+/**
+ * Trailing-twelve-month value pair for a duration concept (income/CF).
+ *
+ * Standard XBRL TTM roll-forward: TTM = FY + YTD(current) − YTD(prior year same
+ * period). Without this, "TTM" is just the last 10-K — up to ~11 months stale for
+ * companies early in their fiscal year (MSFT's FY ends in June).
+ *
+ * The prior-year TTM (YoY denominator) rolls the same way using the two-years-back
+ * YTD, which appears as the comparative inside the year-ago 10-Q. TTM mode engages
+ * only when the full chain exists (YTD, YTD−1y, YTD−2y); otherwise both values fall
+ * back to consistent fiscal years — mixing a TTM numerator with an FY denominator
+ * would misstate YoY growth by the stub-period difference.
+ */
+export function ttmPair(entries: EdgarEntry[]): TtmPair | null {
+  const annual = annualSeries(entries);
+  const fy = annual[0];
+  if (!fy) return null;
+  const fyPrev = annual[1] ?? null;
+
+  // Current-year-to-date: the longest 10-Q duration fact starting after the FY end.
+  // At a given period end both the single-quarter and the cumulative YTD fact may
+  // exist — same end date, different start — so ties break by longest duration.
+  const ytdCur = entries
+    .filter(e => e.form === '10-Q' && e.start && e.start > fy.end && durationDays(e) >= 60)
+    .sort((a, b) => b.end.localeCompare(a.end) || durationDays(b) - durationDays(a))[0] ?? null;
+
+  // Same-duration fact ending N years before the reference (±15 days per year for
+  // 52/53-week calendars). Comparatives come from any form.
+  const matchYtd = (ref: EdgarEntry, yearsBack: number): EdgarEntry | null => {
+    const refDur = durationDays(ref);
+    const refEnd = Date.parse(ref.end);
+    return entries
+      .filter(e => {
+        if (!e.start) return false;
+        if (Math.abs(durationDays(e) - refDur) > 21) return false;
+        const gapDays = (refEnd - Date.parse(e.end)) / 86_400_000;
+        return gapDays >= 350 * yearsBack && gapDays <= 380 * yearsBack;
+      })
+      .sort((a, b) => b.filed.localeCompare(a.filed))[0] ?? null;
+  };
+
+  if (ytdCur && fyPrev) {
+    const ytd1 = matchYtd(ytdCur, 1);
+    const ytd2 = matchYtd(ytdCur, 2);
+    if (ytd1 && ytd2) {
+      return {
+        current: { val: fy.val + ytdCur.val - ytd1.val, end: ytdCur.end },
+        prior:   { val: fyPrev.val + ytd1.val - ytd2.val, end: ytd1.end },
+        source: 'ttm',
+      };
+    }
+  }
+
+  return {
+    current: { val: fy.val, end: fy.end },
+    prior: fyPrev ? { val: fyPrev.val, end: fyPrev.end } : null,
+    source: 'fy',
+  };
+}
+
 type FilingEntry = NonNullable<PolygonFinancials['filings']>[0];
 
 function mkFiling(
@@ -201,12 +272,16 @@ const EMPTY_FILING: FilingEntry = { date: '', start_date: '', end_date: '', fina
  * PolygonFinancials shape expected by computeRatios().
  *
  * Filing array layout (20 slots, sparse):
- *   [0]  Most-recent annual 10-K — income statement + cash flow for TTM;
+ *   [0]  Current TTM — income statement + cash flow;
  *        most-recent balance sheet (10-Q preferred for currency over 10-K)
- *   [4]  Prior-year annual 10-K — for YoY revenue/earnings growth
+ *   [4]  Prior-year TTM — for YoY revenue/earnings growth
  *  [16]  Five-years-ago annual 10-K — for 5Y CAGR (sumFiveYearAgoTtm reads [16..19])
  * All other slots hold EMPTY_FILING (financials: undefined) so sumTtm() skips them.
  * Array length is always 20 so the `filings.length < 20` guard in sumFiveYearAgoTtm passes.
+ *
+ * Income/CF values at slots 0 and 4 are true TTM (FY rolled forward with 10-Q YTD
+ * facts via ttmPair) when the quarterly chain exists; otherwise consistent fiscal
+ * years. Slot 16 stays annual — the CAGR base predates reliable YTD comparatives.
  */
 export async function getEdgarFundamentals(ticker: string): Promise<PolygonFinancials> {
   const { cikPadded, title } = await resolveEdgarCik(ticker);
@@ -241,11 +316,23 @@ export async function getEdgarFundamentals(ticker: string): Promise<PolygonFinan
     return c ? (latestEntry(c.entries)?.val ?? null) : null;
   }
 
-  // Reference annual series for period end-dates (revenue first, fall back to net income)
+  // TTM pair per duration role (income/CF): rolled forward with 10-Q YTD facts
+  // when the full chain exists, consistent fiscal-year pair otherwise.
+  const pairs = new Map<string, TtmPair | null>();
+  function pair(role: string): TtmPair | null {
+    if (!pairs.has(role)) {
+      const c = resolved[role];
+      pairs.set(role, c ? ttmPair(c.entries) : null);
+    }
+    return pairs.get(role) ?? null;
+  }
+
+  // Reference series for period end-dates (revenue first, fall back to net income)
+  const refPair = pair('revenue') ?? pair('net_income');
   const refAnnuals = annuals('revenue').length > 0 ? annuals('revenue') : annuals('net_income');
   const today = new Date().toISOString().slice(0, 10);
-  const endDate0  = refAnnuals[0]?.end ?? today;
-  const endDate4  = refAnnuals[1]?.end ?? endDate0;
+  const endDate0  = refPair?.current.end ?? today;
+  const endDate4  = refPair?.prior?.end ?? endDate0;
   // 5Y CAGR base: index 5 in the deduped series = exactly 5 fiscal years back.
   // No nearer fallback — a "5Y CAGR" computed from a 3–4 year base is mislabeled;
   // companies with shorter history (recent IPOs, concept transitions) get null,
@@ -256,14 +343,14 @@ export async function getEdgarFundamentals(ticker: string): Promise<PolygonFinan
   // 20-element filing array — empty by default, filled at slots 0, 4, and 16
   const filings: FilingEntry[] = new Array(20).fill(EMPTY_FILING) as FilingEntry[];
 
-  // Slot 0 — current annual (TTM income statement + CF) + most-recent balance sheet
+  // Slot 0 — TTM income statement + CF, most-recent balance sheet
   filings[0] = mkFiling(
     endDate0,
     {
-      revenues:                       annualVal('revenue',      0),
-      net_income_loss:                annualVal('net_income',   0),
-      operating_income_loss:          annualVal('op_income',    0),
-      depreciation_and_amortization:  annualVal('depreciation', 0),
+      revenues:                       pair('revenue')?.current.val      ?? null,
+      net_income_loss:                pair('net_income')?.current.val   ?? null,
+      operating_income_loss:          pair('op_income')?.current.val    ?? null,
+      depreciation_and_amortization:  pair('depreciation')?.current.val ?? null,
     },
     {
       // Use most-recent entry (10-Q preferred — more current than the annual 10-K)
@@ -274,25 +361,25 @@ export async function getEdgarFundamentals(ticker: string): Promise<PolygonFinan
       cash_and_cash_equivalents: latestVal('cash'),
     },
     {
-      net_cash_flow_from_operating_activities: annualVal('op_cf',  0),
-      capital_expenditures:                   annualVal('capex', 0),
+      net_cash_flow_from_operating_activities: pair('op_cf')?.current.val ?? null,
+      capital_expenditures:                   pair('capex')?.current.val ?? null,
     },
   );
 
-  // Slot 4 — prior-year annual (YoY growth denominator)
-  if (refAnnuals.length >= 2) {
+  // Slot 4 — prior-year TTM (YoY growth denominator)
+  if (refPair?.prior) {
     filings[4] = mkFiling(
       endDate4,
       {
-        revenues:                       annualVal('revenue',      1),
-        net_income_loss:                annualVal('net_income',   1),
-        operating_income_loss:          annualVal('op_income',    1),
-        depreciation_and_amortization:  annualVal('depreciation', 1),
+        revenues:                       pair('revenue')?.prior?.val      ?? null,
+        net_income_loss:                pair('net_income')?.prior?.val   ?? null,
+        operating_income_loss:          pair('op_income')?.prior?.val    ?? null,
+        depreciation_and_amortization:  pair('depreciation')?.prior?.val ?? null,
       },
       null,
       {
-        net_cash_flow_from_operating_activities: annualVal('op_cf',  1),
-        capital_expenditures:                   annualVal('capex', 1),
+        net_cash_flow_from_operating_activities: pair('op_cf')?.prior?.val ?? null,
+        capital_expenditures:                   pair('capex')?.prior?.val ?? null,
       },
     );
   }
