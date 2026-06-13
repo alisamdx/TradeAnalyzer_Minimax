@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.32.91] — 2026-06-13
+
+### Fixed
+- **Daily Brief: $5 price floor for briefing candidates** — the screener candidate SQL in `BriefingService` now filters `lastPrice >= 5`, preventing sub-$5 penny stocks (e.g. NWL at $4.92) from appearing in income/wheel/buy picks. The same screener data already had this filter in Brief Replay (replay job enforced it) but the live briefing query did not.
+
+### Added
+- **Critic: `high_vol_naked_structure` rule** — fires `warning` when the income strategy selects a `short-straddle` or `short-strangle` (unlimited-risk structures) for a stock whose 1Y price return exceeds 100%. High directional momentum contradicts the range-bound thesis required for straddles/strangles; rule recommends a defined-risk alternative (iron condor or iron fly).
+- **Critic: `thin_breakeven` rule** — fires `warning` when income or wheel strategy has a breakeven buffer below 2%. Computed the same way as the LLM context: `|netCredit| / price` (per-contract ÷ per-share = %). A thin buffer means a small adverse move wipes the premium entirely.
+
 ## [0.32.90] — 2026-06-12
 
 ### Added

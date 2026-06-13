@@ -94,6 +94,8 @@ export class CriticService {
     f(this.checkAnomalousMomentum(pick));
     f(this.checkEarningsInWindow(pick, strategy));
     f(this.checkStructureGrade(pick, strategy));
+    f(this.checkHighVolNakedStructure(pick, strategy));
+    f(this.checkThinBreakeven(pick, strategy));
     f(this.checkCounterTrendStrike(pick, strategy, market));
     f(this.checkLabPriceConsistency(pick));
 
@@ -610,6 +612,48 @@ Use verdict: pass, caution, or flag. Use confidence: high, medium, or low.`;
       };
     }
     return null;
+  }
+
+  /**
+   * Income straddles/strangles are unlimited-risk and require range-bound action.
+   * Selecting one for a stock with strong directional momentum contradicts the thesis.
+   * Threshold: 1Y return > 100% — clearly directional; defined-risk alternatives exist.
+   */
+  private checkHighVolNakedStructure(pick: BriefPick, strategy: string): CriticFlag | null {
+    if (strategy !== 'income') return null;
+    const chosen = this.selectRelevantStructure(pick, strategy);
+    if (!chosen || !['short-straddle', 'short-strangle'].includes(chosen.slug)) return null;
+    const sig = pick.signals['priceMomentumPct'];
+    if (!sig || sig.missing || sig.raw === null || sig.raw <= 100) return null;
+    return {
+      key: 'high_vol_naked_structure',
+      severity: 'warning',
+      description: `Income strategy selected a ${chosen.slug} (unlimited-risk) for a stock with ` +
+        `${sig.raw.toFixed(0)}% 1Y return — strong directional momentum contradicts the range-bound ` +
+        `thesis. Prefer a defined-risk structure (iron condor or iron fly) instead.`,
+    };
+  }
+
+  /**
+   * Short-premium structures with very thin breakeven offer minimal cushion against
+   * adverse moves. < 2% means a 2% move wipes the entire premium collected.
+   * see docs/formulas.md#breakeven-distance
+   */
+  private checkThinBreakeven(pick: BriefPick, strategy: string): CriticFlag | null {
+    if (strategy !== 'income' && strategy !== 'wheel') return null;
+    const chosen = this.selectRelevantStructure(pick, strategy);
+    if (!chosen?.setup || chosen.setup.netCredit === null || !pick.price || pick.price <= 0) return null;
+    // netCredit is per-contract (100 shares); dividing by per-share price gives breakeven %
+    // see docs/formulas.md#breakeven-distance
+    const breakevenPct = Math.abs(chosen.setup.netCredit) / pick.price;
+    if (breakevenPct >= 2.0) return null;
+    return {
+      key: 'thin_breakeven',
+      severity: 'warning',
+      description: `Breakeven buffer is ${breakevenPct.toFixed(1)}% on this ${chosen.slug} — thin for a ` +
+        `short-premium structure. A ${breakevenPct.toFixed(1)}% adverse move erases the entire premium; ` +
+        `verify realized vol and size accordingly.`,
+    };
   }
 
   private checkCounterTrendStrike(pick: BriefPick, strategy: string, market: MarketContext): CriticFlag | null {

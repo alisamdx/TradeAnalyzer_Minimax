@@ -304,6 +304,7 @@ export class BriefingService {
         AND CAST(json_extract(sr.payload_json, '$.debtToEquity') AS REAL) < 1.0
         AND json_extract(sr.payload_json, '$.marketCap') IS NOT NULL
         AND CAST(json_extract(sr.payload_json, '$.marketCap') AS REAL) > 10000000000
+        AND CAST(json_extract(sr.payload_json, '$.lastPrice') AS REAL) >= 5
         ORDER BY CAST(json_extract(sr.payload_json, '$.roe') AS REAL) DESC
         LIMIT 15
       `).all() as Array<{
