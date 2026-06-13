@@ -622,11 +622,11 @@ export class ScoringService {
     return { ticker, compositeScore, signals };
   }
 
-  /** Inflection eligibility. Phase 2 surfaces BULLISH (up) breakouts only, so the Brief
-   *  Replay "stock up = win" aggregation is correct. Bearish inflection (down-breakout →
-   *  bear call spread) is a follow-up that needs direction-aware replay outcomes. */
+  /** Inflection eligibility: any fresh with-trend breakout, up (→ bull put spread) or
+   *  down (→ bear call spread). Replay outcomes are direction-aware (replay_outcomes.direction)
+   *  so the win/return aggregation is correct for both. */
   private hasBreakout(d: TickerSignalData): boolean {
-    return d.breakoutState === 1;
+    return d.breakoutState === 1 || d.breakoutState === -1;
   }
 
   private extractSignalRaw(key: string, d: TickerSignalData): number | null {

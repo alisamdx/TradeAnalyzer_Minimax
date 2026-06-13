@@ -337,9 +337,17 @@ Use verdict: pass, caution, or flag. Use confidence: high, medium, or low.`;
   private selectRelevantStructure(pick: BriefPick, strategy: string): LabStructureScore | null {
     const labResult = pick.strategyLabResult as LabResultShape | null;
     const slugs = STRATEGY_RELEVANT_SLUGS[strategy] ?? [];
-    return labResult?.scores?.find(
+    const valid = (labResult?.scores ?? []).filter(
       s => slugs.includes(s.slug) && s.setup != null && !s.setup.unavailableReason
-    ) ?? null;
+    );
+    if (valid.length === 0) return null;
+    // Inflection's two relevant verticals are direction-opposite (bull put vs bear call);
+    // the higher-graded one matches the breakout direction (lab direction bias). Other
+    // strategies keep their preference order (first valid).
+    if (strategy === 'inflection') {
+      return valid.reduce((best, s) => (GRADE_RANK[s.grade] ?? 0) > (GRADE_RANK[best.grade] ?? 0) ? s : best);
+    }
+    return valid[0] ?? null;
   }
 
   /**

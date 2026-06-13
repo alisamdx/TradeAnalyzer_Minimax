@@ -435,11 +435,16 @@ export class BriefReplayService {
           for (let idx = 0; idx < top5.length; idx++) {
             const pick = top5[idx]!;
             const price = signalMap.get(pick.ticker)?.lastPrice ?? null;
+            // Trade direction: inflection follows the breakout sign (up→long, down→short);
+            // bearish is short; everything else is long. Drives direction-aware win/return.
+            const direction = strategy === 'inflection'
+              ? ((signalMap.get(pick.ticker)?.breakoutState ?? 1) < 0 ? -1 : 1)
+              : (strategy === 'bearish' ? -1 : 1);
             this.db.prepare(`
               INSERT OR IGNORE INTO replay_outcomes
-                (replay_brief_id, ticker, rank, composite_score, entry_price)
-              VALUES (?, ?, ?, ?, ?)
-            `).run(briefId, pick.ticker, idx + 1, pick.compositeScore, price);
+                (replay_brief_id, ticker, rank, composite_score, entry_price, direction)
+              VALUES (?, ?, ?, ?, ?, ?)
+            `).run(briefId, pick.ticker, idx + 1, pick.compositeScore, price, direction);
           }
           void entryPrice;
         }
@@ -594,16 +599,24 @@ export class BriefReplayService {
         n_10d: number;
         n_21d: number;
       };
+      // Per-pick trade direction (1 long / -1 short); legacy rows (NULL) fall back to the
+      // strategy-implied direction. A pick wins when the stock moves the thesis way.
+      const dir = `COALESCE(ro.direction, CASE WHEN rb.strategy = 'bearish' THEN -1 ELSE 1 END)`;
+      const win = (col: string) => `(${dir} > 0 AND ${col} > 0) OR (${dir} < 0 AND ${col} < 0)`;
+      // Inflection mixes long/short picks, so raw returns cancel — report a direction-adjusted
+      // average (positive = thesis worked). Other strategies keep their raw stock-return average.
+      const avg = (col: string) => strategy === 'inflection'
+        ? `AVG(CASE WHEN ${col} IS NOT NULL THEN ${dir} * ${col} END)`
+        : `AVG(CASE WHEN ${col} IS NOT NULL THEN ${col} END)`;
       const picks = this.db.prepare(`
         SELECT
           COUNT(*) as total_picks,
-          AVG(CASE WHEN ro.ret_5d  IS NOT NULL THEN ro.ret_5d  END) as avg_ret5d,
-          AVG(CASE WHEN ro.ret_10d IS NOT NULL THEN ro.ret_10d END) as avg_ret10d,
-          AVG(CASE WHEN ro.ret_21d IS NOT NULL THEN ro.ret_21d END) as avg_ret21d,
-          -- bearish wins when stock goes DOWN; all others win when stock goes UP
-          SUM(CASE WHEN (rb.strategy = 'bearish' AND ro.ret_5d  < 0) OR (rb.strategy != 'bearish' AND ro.ret_5d  > 0) THEN 1 ELSE 0 END) as positive_5d,
-          SUM(CASE WHEN (rb.strategy = 'bearish' AND ro.ret_10d < 0) OR (rb.strategy != 'bearish' AND ro.ret_10d > 0) THEN 1 ELSE 0 END) as positive_10d,
-          SUM(CASE WHEN (rb.strategy = 'bearish' AND ro.ret_21d < 0) OR (rb.strategy != 'bearish' AND ro.ret_21d > 0) THEN 1 ELSE 0 END) as positive_21d,
+          ${avg('ro.ret_5d')}  as avg_ret5d,
+          ${avg('ro.ret_10d')} as avg_ret10d,
+          ${avg('ro.ret_21d')} as avg_ret21d,
+          SUM(CASE WHEN ${win('ro.ret_5d')}  THEN 1 ELSE 0 END) as positive_5d,
+          SUM(CASE WHEN ${win('ro.ret_10d')} THEN 1 ELSE 0 END) as positive_10d,
+          SUM(CASE WHEN ${win('ro.ret_21d')} THEN 1 ELSE 0 END) as positive_21d,
           COUNT(CASE WHEN ro.ret_5d  IS NOT NULL THEN 1 END) as n_5d,
           COUNT(CASE WHEN ro.ret_10d IS NOT NULL THEN 1 END) as n_10d,
           COUNT(CASE WHEN ro.ret_21d IS NOT NULL THEN 1 END) as n_21d
@@ -739,8 +752,14 @@ export class BriefReplayService {
     const regimeMap = this.computeSpyRegimes();
 
     type ORow = { as_of_date: string; strategy: string; ticker: string; rank: number; composite_score: number; ret_21d: number | null };
+    // Inflection mixes long/short picks, so direction-adjust its 21d return here
+    // (positive = thesis worked) — the rest of the chart math then treats it like a
+    // long strategy (rev=false). Other strategies keep their raw return.
     const outcomes = this.db.prepare(`
-      SELECT rb.as_of_date, rb.strategy, ro.ticker, ro.rank, ro.composite_score, ro.ret_21d
+      SELECT rb.as_of_date, rb.strategy, ro.ticker, ro.rank, ro.composite_score,
+             CASE WHEN rb.strategy = 'inflection'
+                  THEN COALESCE(ro.direction, 1) * ro.ret_21d
+                  ELSE ro.ret_21d END AS ret_21d
       FROM replay_outcomes ro
       JOIN replay_briefs rb ON rb.id = ro.replay_brief_id
       ORDER BY rb.as_of_date, rb.strategy, ro.rank

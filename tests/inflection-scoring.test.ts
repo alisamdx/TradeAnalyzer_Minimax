@@ -44,11 +44,11 @@ describe('Inflection scoring', () => {
     expect(s.scoreFromSignalData(m, 'inflection')[0]!.compositeScore).toBe(0);
   });
 
-  it('scores a down-breakout 0 in Phase 2 (bullish-only)', () => {
+  it('scores a down-breakout > 0 (bearish enabled — both directions)', () => {
     const s = svc();
     const m = new Map<string, TickerSignalData>();
     m.set('CCC', { ...emptySignal('CCC'), breakoutState: -1, breakoutDecisiveness: 3, volumeSurge: 3, atrPct: 6, ivRank: 90 });
-    expect(s.scoreFromSignalData(m, 'inflection')[0]!.compositeScore).toBe(0);
+    expect(s.scoreFromSignalData(m, 'inflection')[0]!.compositeScore).toBeGreaterThan(40);
   });
 
   it('ranks a more decisive, higher-volume, higher-IV breakout above a marginal one', () => {

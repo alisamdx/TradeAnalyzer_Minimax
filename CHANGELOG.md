@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.33.1] — 2026-06-13
+
+### Added
+- **Bearish inflection (both directions complete)** — the Inflection strategy now also takes **down breakouts** (fresh 20-day-low break in a downtrend → **bear call spread**, `short-call-vertical`), not just up breakouts. `hasBreakout` accepts `breakout_state === ±1`. To make the metrics correct for a mixed long/short strategy, **Brief Replay outcomes are now direction-aware**: migration 042 adds `replay_outcomes.direction` (1 long / −1 short, populated per pick from the breakout sign; bearish = −1, others = 1; legacy rows fall back to the strategy-implied direction). The replay summary hit-rate uses it uniformly, and inflection's average return is direction-adjusted (positive = thesis worked) so long and short picks don't cancel; the charts direction-adjust inflection's 21-day return likewise. The critic now selects inflection's **higher-graded** relevant vertical (the lab's direction bias makes the correct one — bull put for up-breaks, bear call for down — grade higher), matching the brief card's existing best-score pick.
+
 ## [0.33.0] — 2026-06-13
 
 ### Added
