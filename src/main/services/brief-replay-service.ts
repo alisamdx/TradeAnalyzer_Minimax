@@ -558,9 +558,10 @@ export class BriefReplayService {
           AVG(CASE WHEN ro.ret_5d  IS NOT NULL THEN ro.ret_5d  END) as avg_ret5d,
           AVG(CASE WHEN ro.ret_10d IS NOT NULL THEN ro.ret_10d END) as avg_ret10d,
           AVG(CASE WHEN ro.ret_21d IS NOT NULL THEN ro.ret_21d END) as avg_ret21d,
-          SUM(CASE WHEN ro.ret_5d  > 0 THEN 1 ELSE 0 END) as positive_5d,
-          SUM(CASE WHEN ro.ret_10d > 0 THEN 1 ELSE 0 END) as positive_10d,
-          SUM(CASE WHEN ro.ret_21d > 0 THEN 1 ELSE 0 END) as positive_21d,
+          -- bearish wins when stock goes DOWN; all others win when stock goes UP
+          SUM(CASE WHEN (rb.strategy = 'bearish' AND ro.ret_5d  < 0) OR (rb.strategy != 'bearish' AND ro.ret_5d  > 0) THEN 1 ELSE 0 END) as positive_5d,
+          SUM(CASE WHEN (rb.strategy = 'bearish' AND ro.ret_10d < 0) OR (rb.strategy != 'bearish' AND ro.ret_10d > 0) THEN 1 ELSE 0 END) as positive_10d,
+          SUM(CASE WHEN (rb.strategy = 'bearish' AND ro.ret_21d < 0) OR (rb.strategy != 'bearish' AND ro.ret_21d > 0) THEN 1 ELSE 0 END) as positive_21d,
           COUNT(CASE WHEN ro.ret_5d  IS NOT NULL THEN 1 END) as n_5d,
           COUNT(CASE WHEN ro.ret_10d IS NOT NULL THEN 1 END) as n_10d,
           COUNT(CASE WHEN ro.ret_21d IS NOT NULL THEN 1 END) as n_21d

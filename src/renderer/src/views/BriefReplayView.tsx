@@ -23,9 +23,10 @@ function hitRateColor(v: number | null): string {
   return '#ef5350';
 }
 
-function retColor(v: number | null): string {
+function retColor(v: number | null, strategy?: string): string {
   if (v === null) return '';
-  return v >= 0 ? '#4caf50' : '#ef5350';
+  const win = strategy === 'bearish' ? v < 0 : v > 0;
+  return win ? '#4caf50' : '#ef5350';
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -108,9 +109,9 @@ function SummaryTable({ summaries }: { summaries: ReplaySummary[] }) {
               <td style={{ textAlign: 'right', color: hitRateColor(s.hitRate21d) }}>
                 {s.hitRate21d !== null ? `${s.hitRate21d}%` : '—'}
               </td>
-              <td style={{ textAlign: 'right', color: retColor(s.avgReturn5d) }}>{fmtPct(s.avgReturn5d)}</td>
-              <td style={{ textAlign: 'right', color: retColor(s.avgReturn10d) }}>{fmtPct(s.avgReturn10d)}</td>
-              <td style={{ textAlign: 'right', color: retColor(s.avgReturn21d) }}>{fmtPct(s.avgReturn21d)}</td>
+              <td style={{ textAlign: 'right', color: retColor(s.avgReturn5d,  s.strategy) }}>{fmtPct(s.avgReturn5d)}</td>
+              <td style={{ textAlign: 'right', color: retColor(s.avgReturn10d, s.strategy) }}>{fmtPct(s.avgReturn10d)}</td>
+              <td style={{ textAlign: 'right', color: retColor(s.avgReturn21d, s.strategy) }}>{fmtPct(s.avgReturn21d)}</td>
             </tr>
           ))}
         </tbody>
@@ -181,9 +182,9 @@ function PicksTable({ picks }: { picks: ReplayPickRow[] }) {
               <td style={{ textAlign: 'right' }}>
                 {p.entryPrice !== null ? `$${p.entryPrice.toFixed(2)}` : '—'}
               </td>
-              <td style={{ textAlign: 'right', color: retColor(p.ret5d) }}>{fmtPct(p.ret5d)}</td>
-              <td style={{ textAlign: 'right', color: retColor(p.ret10d) }}>{fmtPct(p.ret10d)}</td>
-              <td style={{ textAlign: 'right', color: retColor(p.ret21d) }}>{fmtPct(p.ret21d)}</td>
+              <td style={{ textAlign: 'right', color: retColor(p.ret5d,  p.strategy) }}>{fmtPct(p.ret5d)}</td>
+              <td style={{ textAlign: 'right', color: retColor(p.ret10d, p.strategy) }}>{fmtPct(p.ret10d)}</td>
+              <td style={{ textAlign: 'right', color: retColor(p.ret21d, p.strategy) }}>{fmtPct(p.ret21d)}</td>
               <td style={{ textAlign: 'right' }}>{p.closeDate ?? '—'}</td>
               <td style={{ textAlign: 'right' }}>
                 {p.closePrice !== null ? `$${p.closePrice.toFixed(2)}` : '—'}
