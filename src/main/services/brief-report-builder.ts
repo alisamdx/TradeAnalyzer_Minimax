@@ -22,7 +22,7 @@ const STRATEGY_TO_SLUGS: Record<ScoringStrategy, string[]> = {
   bearish: ['long-put-vertical', 'reverse-big-lizard', 'put-zebra', 'put-butterfly', 'poor-mans-covered-put'],
   income:  ['short-strangle', 'iron-condor', 'short-straddle', 'dynamic-width-iron-condor', 'iron-fly'],
   buy:     ['long-call-vertical', 'call-zebra', 'poor-mans-covered-call', 'call-calendar'],
-  inflection: ['bull-put-spread', 'bear-call-spread'],
+  inflection: ['short-put-vertical', 'short-call-vertical'],
 };
 
 const SLUG_SHORT: Record<string, string> = {
@@ -44,6 +44,8 @@ const SLUG_SHORT: Record<string, string> = {
   'dynamic-width-iron-condor': 'Dyn. IC',
   'iron-fly':                  'Iron Fly',
   'call-calendar':             'Call Calendar',
+  'short-put-vertical':        'Bull Put Spread',
+  'short-call-vertical':       'Bear Call Spread',
 };
 
 const GRADE_COLOR_HEX: Record<string, string> = {
@@ -51,7 +53,7 @@ const GRADE_COLOR_HEX: Record<string, string> = {
 };
 
 // Must match the screen order in DailyBriefView.tsx STRATEGY_ORDER
-const STRATEGY_ORDER: ScoringStrategy[] = ['wheel', 'bullish', 'bearish', 'income', 'buy'];
+const STRATEGY_ORDER: ScoringStrategy[] = ['wheel', 'bullish', 'bearish', 'income', 'buy', 'inflection'];
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 

@@ -35,7 +35,7 @@ const SIGNAL_LABELS: Record<string, string> = {
   buySignalScore:   'Buy Signal',
 };
 
-const STRATEGY_ORDER: ScoringStrategy[] = ['wheel', 'bullish', 'bearish', 'income', 'buy'];
+const STRATEGY_ORDER: ScoringStrategy[] = ['wheel', 'bullish', 'bearish', 'income', 'buy', 'inflection'];
 
 // Strategy Lab slugs that represent each Brief strategy.
 // Used to find the relevant structure grade inside strategyLabResult.
@@ -45,7 +45,7 @@ const STRATEGY_TO_SLUGS: Record<ScoringStrategy, string[]> = {
   bearish: ['long-put-vertical', 'reverse-big-lizard', 'put-zebra', 'put-butterfly', 'poor-mans-covered-put'],
   income:  ['short-strangle', 'iron-condor', 'short-straddle', 'dynamic-width-iron-condor', 'iron-fly'],
   buy:     ['long-call-vertical', 'call-zebra', 'poor-mans-covered-call', 'call-calendar'],
-  inflection: ['bull-put-spread', 'bear-call-spread'],
+  inflection: ['short-put-vertical', 'short-call-vertical'],
 };
 
 // Human-readable short name for the primary slug shown on the card
@@ -68,6 +68,8 @@ const SLUG_SHORT: Record<string, string> = {
   'dynamic-width-iron-condor': 'Dyn. IC',
   'iron-fly':                  'Iron Fly',
   'call-calendar':             'Call Calendar',
+  'short-put-vertical':        'Bull Put Spread',
+  'short-call-vertical':       'Bear Call Spread',
 };
 
 const GRADE_COLOR: Record<StrategyLabGrade, string> = {

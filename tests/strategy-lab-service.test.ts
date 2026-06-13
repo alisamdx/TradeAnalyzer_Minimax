@@ -260,6 +260,24 @@ describe('StrategyLabService calendar/PMCC two-expiration build', () => {
     expect(liqActive).toBeGreaterThan(liqDead);
   });
 
+  it('builds the inflection structure (short put vertical) as a bounded-risk credit spread', async () => {
+    const { dataProvider, optionsProvider } = calProviders([NEAR_EXP, FAR_EXP]);
+    const svc = new StrategyLabService(dataProvider, optionsProvider);
+    const result = await svc.validate(makeDb(), 'TST');
+
+    const spv = result.scores.find(s => s.slug === 'short-put-vertical')!;
+    expect(spv.setup?.unavailableReason).toBeNull();
+    expect(spv.setup!.legs).toHaveLength(2);
+    const sell = spv.setup!.legs.find(l => l.action === 'sell')!;
+    const buy  = spv.setup!.legs.find(l => l.action === 'buy')!;
+    expect(sell.side).toBe('put');
+    expect(buy.side).toBe('put');
+    expect(sell.strike).toBeGreaterThan(buy.strike);   // bull put: short strike above long
+    expect(spv.setup!.netCredit!).toBeGreaterThan(0);   // credit received
+    expect(spv.setup!.maxLoss!).toBeLessThan(0);        // defined risk
+    expect(Number.isFinite(spv.setup!.maxLoss!)).toBe(true);
+  });
+
   it('models credits below mid (slippage haircut), reducing net credit', async () => {
     const { dataProvider, optionsProvider } = calProviders([NEAR_EXP, FAR_EXP]);
     const svc = new StrategyLabService(dataProvider, optionsProvider);

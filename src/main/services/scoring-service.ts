@@ -401,12 +401,11 @@ export const BASELINE_CONFIGS: Record<ScoringStrategy, ScoringSignal[]> = {
   inflection: BASELINE_INFLECTION,
 };
 
-// Strategies surfaced in the live Daily Brief (5). Inflection is validated in Brief
-// Replay first (REPLAY_STRATEGIES) and joins the live brief in Phase 3.
-export const STRATEGIES: ScoringStrategy[] = ['wheel', 'bullish', 'bearish', 'income', 'buy'];
+// Strategies surfaced in the live Daily Brief (6 — inflection joined in v0.33.0).
+export const STRATEGIES: ScoringStrategy[] = ['wheel', 'bullish', 'bearish', 'income', 'buy', 'inflection'];
 
-// Strategies scored in Brief Replay — includes inflection for point-in-time validation.
-export const REPLAY_STRATEGIES: ScoringStrategy[] = [...STRATEGIES, 'inflection'];
+// Brief Replay scores the same set as the live brief.
+export const REPLAY_STRATEGIES: ScoringStrategy[] = STRATEGIES;
 
 // ─── Normalization helpers ────────────────────────────────────────────────────
 // see Requirements/DAILY_INTELLIGENCE_BRIEF.md §4.6

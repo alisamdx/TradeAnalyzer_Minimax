@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.33.0] — 2026-06-13
+
+### Added
+- **Inflection strategy live in the Daily Brief (Phase 3 of 3)** — `inflection` joins the live brief as a 6th strategy: a **directional credit spread anchored at a fresh 20-day breakout** (bullish). It surfaces up to 5 top-ranked breakout picks per day; on days with few breakouts it shows fewer (the signal scores 0 without a fresh with-trend breakout). The structure is the existing **`short-put-vertical` (bull put spread)** credit vertical — already defined-risk with correct credit P&L; mapped via `STRATEGY_RELEVANT_SLUGS` so the liquidity gate, critic, and brief card all use it. Added a 6th section to the Daily Brief view (and the PDF/email report), with `short-put-vertical`/`short-call-vertical` shown as "Bull Put Spread"/"Bear Call Spread". Brief Replay scores the same 6 strategies (`REPLAY_STRATEGIES` now aliases `STRATEGIES`). **Still bullish-only**; bearish inflection (down-break → bear call spread) remains a follow-up needing direction-aware replay outcomes.
+
+### Fixed
+- Corrected the inflection relevant-slug mapping introduced in v0.32.99 — it referenced non-existent `bull-put-spread`/`bear-call-spread` slugs; the real Strategy Lab credit verticals are `short-put-vertical`/`short-call-vertical`.
+
 ## [0.32.99] — 2026-06-13
 
 ### Added

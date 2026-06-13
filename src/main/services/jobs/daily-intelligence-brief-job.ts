@@ -53,6 +53,9 @@ const STRATEGY_RELEVANT_SLUGS: Record<string, string[]> = {
   bearish: ['long-put-vertical', 'reverse-big-lizard', 'put-zebra', 'put-butterfly', 'poor-mans-covered-put'],
   income:  ['short-strangle', 'iron-condor', 'short-straddle', 'dynamic-width-iron-condor', 'iron-fly'],
   buy:     ['long-call-vertical', 'call-zebra', 'poor-mans-covered-call', 'call-calendar'],
+  // Inflection = directional credit spread at the breakout level. Bull put first
+  // (Phase 2/3 is bullish-only); bear call is for the bearish follow-up.
+  inflection: ['short-put-vertical', 'short-call-vertical'],
 };
 
 // Returns the best liquidityScore (0–15) among the strategy-relevant structures,
