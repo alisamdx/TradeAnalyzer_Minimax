@@ -82,19 +82,18 @@ export default function ReplayChartsModal({ data, onClose }: { data: ReplayChart
 
   const quintileData = ['Q1', 'Q2', 'Q3', 'Q4', 'Q5'].map((q, i) => {
     const row: Record<string, string | number | null> = { name: q };
-    for (const s of data.strategies.filter(x => ['buy', 'bullish', 'bearish'].includes(x.strategy))) {
-      row[s.strategy] = s.scoreQuintiles[i] ?? null;
-    }
+    for (const s of data.strategies) row[s.strategy] = s.scoreQuintiles[i] ?? null;
     return row;
   });
 
   const rankData = [1, 2, 3, 4, 5].map((r, i) => {
     const row: Record<string, string | number | null> = { name: `#${r}` };
-    for (const s of data.strategies.filter(x => ['buy', 'bullish', 'wheel'].includes(x.strategy))) {
-      row[s.strategy] = s.rankAvg[i] ?? null;
-    }
+    for (const s of data.strategies) row[s.strategy] = s.rankAvg[i] ?? null;
     return row;
   });
+
+  // All strategies present in the chart payload, in display order.
+  const signalStrats = data.strategies.map(s => s.strategy);
 
   const tabStyle = (active: boolean): React.CSSProperties => ({
     padding: '7px 16px',
@@ -302,11 +301,11 @@ export default function ReplayChartsModal({ data, onClose }: { data: ReplayChart
         {tab === 'signals' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
             <div style={{ padding: '8px 12px', background: 'rgba(239,83,80,0.08)', border: '1px solid rgba(239,83,80,0.25)', borderRadius: 6, fontSize: 12, color: '#ef9a9a' }}>
-              ⚠ Scoring is anti-predictive: lower-scored picks (Q1) consistently outperform Q5 for buy, bullish, and bearish. Higher rank does not mean better outcome. Score filtering actively reduces returns.
+              ⚠ Scoring is anti-predictive for the directional strategies: lower-scored picks (Q1) often outperform Q5 for buy/bullish/bearish, and higher brief rank does not mean better outcome. (Inflection returns are direction-adjusted.)
             </div>
             <TwoCol>
               <div>
-                <SectionTitle label="Score quintile → avg 21d return (buy · bullish · bearish)" />
+                <SectionTitle label="Score quintile → avg 21d return (all strategies)" />
                 <ResponsiveContainer width="100%" height={220}>
                   <BarChart data={quintileData} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(128,128,128,0.12)" />
@@ -314,14 +313,14 @@ export default function ReplayChartsModal({ data, onClose }: { data: ReplayChart
                     <YAxis tickFormatter={pctFmt} tick={{ fontSize: 11 }} width={52} />
                     <Tooltip formatter={makeFmt(pctFmt)} contentStyle={TOOLTIP_STYLE} labelStyle={{ color: 'var(--text-muted)' }} />
                     <ReferenceLine y={0} stroke="rgba(255,255,255,0.25)" />
-                    {(['buy', 'bullish', 'bearish'] as const).map(s => (
-                      <Bar key={s} dataKey={s} name={s} fill={STRAT_COLORS[s]} radius={[3, 3, 0, 0]} />
+                    {signalStrats.map(s => (
+                      <Bar key={s} dataKey={s} name={s} fill={STRAT_COLORS[s] ?? '#888'} radius={[3, 3, 0, 0]} />
                     ))}
                   </BarChart>
                 </ResponsiveContainer>
               </div>
               <div>
-                <SectionTitle label="Pick rank in brief → avg 21d return (buy · bullish · wheel)" />
+                <SectionTitle label="Pick rank in brief → avg 21d return (all strategies)" />
                 <ResponsiveContainer width="100%" height={220}>
                   <BarChart data={rankData} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(128,128,128,0.12)" />
@@ -329,18 +328,18 @@ export default function ReplayChartsModal({ data, onClose }: { data: ReplayChart
                     <YAxis tickFormatter={pctFmt} tick={{ fontSize: 11 }} width={52} />
                     <Tooltip formatter={makeFmt(pctFmt)} contentStyle={TOOLTIP_STYLE} labelStyle={{ color: 'var(--text-muted)' }} />
                     <ReferenceLine y={0} stroke="rgba(255,255,255,0.25)" />
-                    {(['buy', 'bullish', 'wheel'] as const).map(s => (
-                      <Bar key={s} dataKey={s} name={s} fill={STRAT_COLORS[s]} radius={[3, 3, 0, 0]} />
+                    {signalStrats.map(s => (
+                      <Bar key={s} dataKey={s} name={s} fill={STRAT_COLORS[s] ?? '#888'} radius={[3, 3, 0, 0]} />
                     ))}
                   </BarChart>
                 </ResponsiveContainer>
               </div>
             </TwoCol>
-            <div style={{ display: 'flex', gap: 16, fontSize: 12 }}>
-              {(['buy', 'bullish', 'bearish', 'wheel'] as const).map(s => (
+            <div style={{ display: 'flex', gap: 16, fontSize: 12, flexWrap: 'wrap' }}>
+              {signalStrats.map(s => (
                 <span key={s} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                  <span style={{ width: 10, height: 10, background: STRAT_COLORS[s], borderRadius: 2, display: 'inline-block' }} />
-                  <span style={{ color: 'var(--text-muted)' }}>{STRAT_LABEL[s]}</span>
+                  <span style={{ width: 10, height: 10, background: STRAT_COLORS[s] ?? '#888', borderRadius: 2, display: 'inline-block' }} />
+                  <span style={{ color: 'var(--text-muted)' }}>{STRAT_LABEL[s] ?? s}</span>
                 </span>
               ))}
             </div>

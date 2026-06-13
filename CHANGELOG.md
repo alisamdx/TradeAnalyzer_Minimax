@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.33.3] — 2026-06-13
+
+### Changed
+- **Brief Replay Score-Signal tab now shows all strategies** — the score-quintile and pick-rank charts were hardcoded to curated 3-strategy subsets (buy·bullish·bearish / buy·bullish·wheel), so inflection (and income/wheel) didn't appear. Both charts now render every strategy in the chart payload, driven by `data.strategies` with a per-strategy color fallback. Inflection's bars use its direction-adjusted 21d return.
+
 ## [0.33.2] — 2026-06-13
 
 ### Fixed
