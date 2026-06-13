@@ -37,6 +37,19 @@ const SIGNAL_LABELS: Record<string, string> = {
 
 const STRATEGY_ORDER: ScoringStrategy[] = ['wheel', 'bullish', 'bearish', 'income', 'buy', 'inflection'];
 
+// Order sections by the day's TOP composite score per strategy (highest first);
+// STRATEGY_ORDER breaks ties and orders strategies with no picks last. Composite scores
+// are strategy-specific (each uses different signals/weights), so this is a surfacing
+// heuristic — it floats the day's strongest-scored pick to the top, not a cross-strategy
+// ranking. Mirrored in brief-report-builder.ts (email/PDF) to keep surfaces in sync.
+function orderByTopComposite(order: ScoringStrategy[], briefMap: Map<ScoringStrategy, DailyBriefEntry>): ScoringStrategy[] {
+  const top = (s: ScoringStrategy): number => {
+    const picks = briefMap.get(s)?.picks ?? [];
+    return picks.length ? Math.max(...picks.map(p => p.compositeScore)) : -1;
+  };
+  return [...order].sort((a, b) => (top(b) - top(a)) || (order.indexOf(a) - order.indexOf(b)));
+}
+
 // Strategy Lab slugs that represent each Brief strategy.
 // Used to find the relevant structure grade inside strategyLabResult.
 const STRATEGY_TO_SLUGS: Record<ScoringStrategy, string[]> = {
@@ -896,7 +909,7 @@ export function DailyBriefView({ onGoToStrategyLab }: DailyBriefViewProps) {
         </div>
       ) : (
         <div className="brief-strategies">
-          {STRATEGY_ORDER.map(strategy => (
+          {orderByTopComposite(STRATEGY_ORDER, briefMap).map(strategy => (
             <StrategySection
               key={strategy}
               strategy={strategy}

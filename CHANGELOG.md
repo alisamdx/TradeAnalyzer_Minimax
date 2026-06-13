@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.33.4] — 2026-06-13
+
+### Changed
+- **Daily Brief & email/PDF: strategy sections now ordered by the day's top composite score** — instead of a fixed sequence, the strategy with the highest-scoring single pick that day appears first, then descending. The previous fixed order (wheel→bullish→bearish→income→buy→inflection) is the tiebreaker and orders strategies with no picks last. Applied consistently to the on-screen brief, the HTML email, and the PDF (shared `orderByTopComposite`). Note: composite scores are strategy-specific (different signals/weights per strategy), so this is a surfacing heuristic — it floats the strongest-scored pick to the top, not a cross-strategy quality ranking (the score-badge tooltip already flags this). Also fixed the PDF cover's hardcoded "across 5 strategies" → actual count.
+
 ## [0.33.3] — 2026-06-13
 
 ### Changed

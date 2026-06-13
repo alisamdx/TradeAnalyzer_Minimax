@@ -52,8 +52,23 @@ const GRADE_COLOR_HEX: Record<string, string> = {
   'A+': '#2ea043', 'A': '#3fb950', 'B': '#d29922', 'C': '#e07d3a', 'F': '#f85149',
 };
 
-// Must match the screen order in DailyBriefView.tsx STRATEGY_ORDER
+// Fallback / tiebreak order — must match DailyBriefView.tsx STRATEGY_ORDER.
 const STRATEGY_ORDER: ScoringStrategy[] = ['wheel', 'bullish', 'bearish', 'income', 'buy', 'inflection'];
+
+// Sections are ordered by the day's TOP composite score per strategy (highest first);
+// STRATEGY_ORDER breaks ties and orders strategies with no picks last. Composite scores
+// are strategy-specific (not strictly comparable across strategies), so this is a
+// surfacing heuristic — it floats the day's strongest-scored pick to the top.
+// Mirrored in DailyBriefView.tsx so screen + email/PDF stay in sync.
+export function orderByTopComposite(briefsByStrategy: Map<ScoringStrategy, BriefPick[]>): ScoringStrategy[] {
+  const top = (s: ScoringStrategy): number => {
+    const picks = briefsByStrategy.get(s) ?? [];
+    return picks.length ? Math.max(...picks.map(p => p.compositeScore)) : -1;
+  };
+  return [...STRATEGY_ORDER].sort(
+    (a, b) => (top(b) - top(a)) || (STRATEGY_ORDER.indexOf(a) - STRATEGY_ORDER.indexOf(b))
+  );
+}
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 
@@ -134,7 +149,7 @@ export function buildEmailHtml(
 
   const totalPicks = STRATEGY_ORDER.reduce((n, s) => n + (briefsByStrategy.get(s)?.length ?? 0), 0);
 
-  const strategyBlocks = STRATEGY_ORDER.map(strategy => {
+  const strategyBlocks = orderByTopComposite(briefsByStrategy).map(strategy => {
     const picks = briefsByStrategy.get(strategy);
     if (!picks?.length) return '';
 
@@ -385,6 +400,8 @@ export async function buildPdf(
     const LGRAY = '#888888';
 
     const totalPicks = STRATEGY_ORDER.reduce((n, s) => n + (briefsByStrategy.get(s)?.length ?? 0), 0);
+    const order = orderByTopComposite(briefsByStrategy);
+    const nStrats = STRATEGY_ORDER.filter(s => (briefsByStrategy.get(s)?.length ?? 0) > 0).length;
 
     // ── Cover page ────────────────────────────────────────────────────────────
     doc.rect(LX, 50, W, 120).fill('#2c3e50');
@@ -393,12 +410,12 @@ export async function buildPdf(
     doc.fontSize(13).font('Helvetica').fillColor('#bdc3c7')
       .text(dateStr, LX + 20, 108);
     doc.fontSize(12).fillColor('#ecf0f1')
-      .text(`${totalPicks} picks across 5 strategies`, LX + 20, 130);
+      .text(`${totalPicks} picks across ${nStrats} ${nStrats === 1 ? 'strategy' : 'strategies'}`, LX + 20, 130);
 
     doc.moveDown(8);
     doc.fillColor(DARK).fontSize(11).font('Helvetica-Bold').text('Contents', LX, doc.y);
     doc.moveDown(0.4);
-    STRATEGY_ORDER.forEach(s => {
+    order.forEach(s => {
       const picks = briefsByStrategy.get(s);
       if (!picks?.length) return;
       doc.fontSize(10).font('Helvetica').fillColor(GRAY)
@@ -412,7 +429,7 @@ export async function buildPdf(
             'AI rationale is indicative, not financial advice.', LX, doc.y, { width: W });
 
     // ── Per-strategy sections ─────────────────────────────────────────────────
-    for (const strategy of STRATEGY_ORDER) {
+    for (const strategy of order) {
       const picks = briefsByStrategy.get(strategy);
       if (!picks?.length) continue;
 
