@@ -147,16 +147,13 @@ function PicksTable({ picks }: { picks: ReplayPickRow[] }) {
   const sorted = sortPicks(picks, sortKey, sortDir);
   const arrow = (key: PickSortKey) => sortKey === key ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
   const thStyle = (key: PickSortKey, align: 'left' | 'right' = 'right'): React.CSSProperties => ({
-    textAlign: align, cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap',
+    textAlign: align, cursor: 'pointer', userSelect: 'none',
     color: sortKey === key ? 'var(--accent)' : undefined,
-    position: 'sticky', top: 0, zIndex: 1,
-    background: 'var(--bg-elevated)',
-    boxShadow: 'inset 0 -1px 0 var(--border)',
   });
 
   return (
-    <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 480, border: '1px solid var(--border)' }}>
-      <table className="data-table" style={{ width: '100%', fontSize: 12 }}>
+    <div className="results-table-wrap" style={{ maxHeight: 480 }}>
+      <table className="results-table">
         <thead>
           <tr>
             <th style={thStyle('asOfDate', 'left')}    onClick={() => handleSort('asOfDate')}>Date{arrow('asOfDate')}</th>
