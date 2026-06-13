@@ -152,9 +152,9 @@ function PicksTable({ picks }: { picks: ReplayPickRow[] }) {
   });
 
   return (
-    <div style={{ overflowX: 'auto' }}>
+    <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 480, border: '1px solid var(--border)' }}>
       <table className="data-table" style={{ width: '100%', fontSize: 12 }}>
-        <thead>
+        <thead style={{ position: 'sticky', top: 0, zIndex: 1, background: 'var(--bg-elevated)' }}>
           <tr>
             <th style={thStyle('asOfDate', 'left')}    onClick={() => handleSort('asOfDate')}>Date{arrow('asOfDate')}</th>
             <th style={thStyle('strategy', 'left')}    onClick={() => handleSort('strategy')}>Strategy{arrow('strategy')}</th>
