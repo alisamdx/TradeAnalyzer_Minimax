@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.32.93] — 2026-06-13
+
+### Added
+- **Bearish composite quality gate (≥70)** — bearish picks now require a composite score ≥70 to surface in the daily brief and Brief Replay (`minCompositeForStrategy()` in `scoring-service.ts`; applied at the Stage-4 pool filter in `daily-intelligence-brief-job.ts` and at replay pick selection in `brief-replay-service.ts`). Full-year replay (2025-05 → 2026-06, 1,300 bearish picks) shows sub-70 picks have ~0 alpha vs SPY and lose money in aggregate (short P&L −1.8%, win 46%), while ≥70 picks underperform SPY by ~3.3% — a real short edge (short P&L +1.0%, win 56%). The gate is rank-agnostic (a rank-2/3 pick clearing 70 is kept; a top-ranked pick below 70 is dropped) and self-suppresses bearish on weak days (~42% of dates yield zero ≥70 picks). Other strategies are ungated.
+
+### Removed
+- **Brief Replay: SPY regime risk gate / ⚠ badge (reverted from 0.32.90)** — the regime badge in the summary and picks tables (and `ReplaySummary.regimeRiskDates` / `ReplayPickRow.spyRegime`) is removed. Its "bearish HR ~25% in bullish regime vs ~79% in bearish regime" basis was a 5-month small-sample artifact; the full-year replay *inverts* it — gating bearish to bear-regime dates (SPY below its 50-day SMA at entry) actually performed worse (short P&L −6.7%, win 38%), because below-SMA dips kept V-bouncing and squeezing shorts. Replaced by the composite quality gate above. `computeSpyRegimes()` is retained solely for the descriptive Regime chart tab (no longer drives any filter or badge).
+
 ## [0.32.92] — 2026-06-13
 
 ### Added

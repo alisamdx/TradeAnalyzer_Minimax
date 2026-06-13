@@ -9,7 +9,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import type { BatchJobHandler, BatchJobResult } from '../batch-service.js';
 import type { BatchProgressEvent, BriefPick, CriticFlag, ScoringStrategy } from '@shared/types.js';
 import type { ScoredTicker } from '../scoring-service.js';
-import { ScoringService, STRATEGIES } from '../scoring-service.js';
+import { ScoringService, STRATEGIES, minCompositeForStrategy } from '../scoring-service.js';
 import type { OptionsProvider } from '../options-provider.js';
 import type { DataProvider } from '../data-provider.js';
 import { StrategyLabService } from '../strategy-lab-service.js';
@@ -239,8 +239,12 @@ export class DailyIntelligenceBriefJob implements BatchJobHandler {
     const seenTickers = new Map<string, string[]>(); // ticker → strategies
 
     for (const strategy of STRATEGIES) {
+      // Per-strategy quality gate (bearish ≥70; others ungated). Applied before
+      // validation so weak bearish picks never consume an E*Trade call, and weak
+      // days surface zero bearish picks. see minCompositeForStrategy().
+      const minComposite = minCompositeForStrategy(strategy);
       const top = (rankedByStrategy.get(strategy) ?? [])
-        .filter(s => s.compositeScore > 0)
+        .filter(s => s.compositeScore > 0 && s.compositeScore >= minComposite)
         .filter(s => {
           const price = signalData.get(s.ticker)?.lastPrice;
           return price === null || price === undefined || price <= MAX_PICK_PRICE;

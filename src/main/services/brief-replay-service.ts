@@ -9,7 +9,7 @@
 
 import type { Database } from 'better-sqlite3';
 import type { ScoringService, TickerSignalData } from './scoring-service.js';
-import { STRATEGIES } from './scoring-service.js';
+import { STRATEGIES, minCompositeForStrategy } from './scoring-service.js';
 import { isTradingDay } from './iv-history-service.js';
 import type { ReplayProgressEvent, ReplayPickRow, ReplaySummary, ReplayChartData, ReplayChartMonthlyRow, ScreenResultPayload } from '@shared/types.js';
 import { withTransaction } from '../db/connection.js';
@@ -363,10 +363,14 @@ export class BriefReplayService {
           const scored   = this.scoringService.scoreFromSignalData(signalMap, strategy);
 
           // Liquidity proxy (Option A): volume >= 1M, price >= $5
+          // Plus per-strategy quality gate (bearish ≥70; others ungated) — mirrors the
+          // live brief so replay validates the same picks. see minCompositeForStrategy().
+          const minComposite = minCompositeForStrategy(strategy);
           const liquid = scored.filter(s => {
             const vol = volumeMap.get(s.ticker) ?? 0;
             const sig = signalMap.get(s.ticker);
-            return vol >= MIN_AVG_VOLUME && (sig?.lastPrice ?? 0) >= MIN_PRICE;
+            return vol >= MIN_AVG_VOLUME && (sig?.lastPrice ?? 0) >= MIN_PRICE
+              && s.compositeScore >= minComposite;
           });
 
           const top5 = liquid.slice(0, PICKS_PER_STRATEGY);
@@ -534,8 +538,6 @@ export class BriefReplayService {
   // ── Query methods ─────────────────────────────────────────────────────────
 
   getSummaries(): ReplaySummary[] {
-    const regimeMap = this.computeSpyRegimes();
-
     return STRATEGIES.map(strategy => {
       type BriefRow = { total_dates: number };
       const briefs = this.db.prepare(`
@@ -574,16 +576,6 @@ export class BriefReplayService {
 
       const hitRate = (pos: number, n: number) => n > 0 ? Math.round((pos / n) * 1000) / 10 : null;
 
-      // Count replay dates where SPY was in a bullish regime (regime risk for bearish strategy only)
-      let regimeRiskDates: number | null = null;
-      if (strategy === 'bearish' && regimeMap.size > 0) {
-        type DateRow = { as_of_date: string };
-        const bearishDates = (this.db.prepare(
-          "SELECT DISTINCT as_of_date FROM replay_briefs WHERE strategy = 'bearish'"
-        ).all() as DateRow[]).map(r => r.as_of_date);
-        regimeRiskDates = bearishDates.filter(d => regimeMap.get(d) === 'bullish').length;
-      }
-
       return {
         strategy,
         totalDates:  briefs.total_dates,
@@ -597,7 +589,6 @@ export class BriefReplayService {
         avgReturn5d:  picks.avg_ret5d  !== null ? Math.round(picks.avg_ret5d  * 100) / 100 : null,
         avgReturn10d: picks.avg_ret10d !== null ? Math.round(picks.avg_ret10d * 100) / 100 : null,
         avgReturn21d: picks.avg_ret21d !== null ? Math.round(picks.avg_ret21d * 100) / 100 : null,
-        regimeRiskDates,
       };
     });
   }
@@ -638,8 +629,6 @@ export class BriefReplayService {
       LIMIT ?
     `).all(...args) as Row[];
 
-    const regimeMap = this.computeSpyRegimes();
-
     return rows.map(r => ({
       replayBriefId:      r.replay_brief_id,
       asOfDate:           r.as_of_date,
@@ -656,13 +645,15 @@ export class BriefReplayService {
       closePrice:         r.close_price,
       closeDate:          r.close_date,
       evaluatedAt:        r.evaluated_at,
-      spyRegime:          (regimeMap.get(r.as_of_date) ?? null) as 'bullish' | 'bearish' | null,
     }));
   }
 
-  // ── SPY regime (50-day SMA gate) ─────────────────────────────────────────
-  // Returns a map of as_of_date → 'bullish' | 'bearish'.
-  // 'bullish' means SPY closed above its 50-day SMA on that date — regime risk for bearish picks.
+  // ── SPY regime (50-day SMA) ──────────────────────────────────────────────
+  // Returns a map of as_of_date → 'bullish' | 'bearish' ('bullish' = SPY closed above
+  // its 50-day SMA on that date). Used only for the descriptive regime-split chart
+  // (ReplayChartsModal "Regime" tab). NOT a trade gate: the full-year replay showed
+  // gating bearish to bear-regime dates inverted vs. the early 5-month sample, so no
+  // regime filter is applied to pick selection. see minCompositeForStrategy().
   private computeSpyRegimes(): Map<string, 'bullish' | 'bearish'> {
     type DateRange = { min_date: string | null; max_date: string | null };
     const range = this.db.prepare(

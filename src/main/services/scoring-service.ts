@@ -59,6 +59,19 @@ function sectorStringToEtf(raw: string): string | undefined {
 
 export type ScoringStrategy = 'wheel' | 'bullish' | 'bearish' | 'income' | 'buy';
 
+// ─── Per-strategy quality gate ──────────────────────────────────────────────
+// Minimum composite score required to surface a pick in the daily brief / replay.
+// Bearish is gated at 70: the full-year Brief Replay (2025-05 → 2026-06, 1,300 picks)
+// shows sub-70 bearish picks have ~0 alpha vs SPY and lose money in aggregate
+// (short P&L −1.8%, win 46%), while ≥70 picks underperform SPY by ~3.3% (real short
+// edge: short P&L +1.0%, win 56%). The gate self-suppresses bearish on weak days
+// (~42% of dates yield zero ≥70 picks). Replaces the rejected SPY-regime gate, whose
+// 5-month basis inverted on full-year data. Other strategies are ungated (0).
+const MIN_COMPOSITE_BY_STRATEGY: Partial<Record<ScoringStrategy, number>> = { bearish: 70 };
+export function minCompositeForStrategy(strategy: ScoringStrategy): number {
+  return MIN_COMPOSITE_BY_STRATEGY[strategy] ?? 0;
+}
+
 export interface ScoringSignal {
   key: string;
   label: string;
