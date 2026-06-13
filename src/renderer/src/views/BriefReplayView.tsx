@@ -94,7 +94,17 @@ function SummaryTable({ summaries }: { summaries: ReplaySummary[] }) {
         <tbody>
           {sorted.map(s => (
             <tr key={s.strategy}>
-              <td style={{ fontWeight: 600, textTransform: 'capitalize' }}>{s.strategy}</td>
+              <td style={{ fontWeight: 600, textTransform: 'capitalize' }}>
+                {s.strategy}
+                {s.strategy === 'bearish' && s.regimeRiskDates !== null && s.totalDates > 0 && (
+                  <span
+                    style={{ marginLeft: 7, fontSize: 11, color: '#ff9800', fontWeight: 400 }}
+                    title={`${s.regimeRiskDates} of ${s.totalDates} dates had SPY above its 50-day SMA (bullish regime). Bearish HR averages ~25% in bullish regime vs ~79% in bearish regime.`}
+                  >
+                    ⚠ {s.regimeRiskDates}/{s.totalDates} regime risk
+                  </span>
+                )}
+              </td>
               <td style={{ textAlign: 'right' }}>{s.totalDates}</td>
               <td style={{ textAlign: 'right' }}>{s.totalPicks}</td>
               <td style={{ textAlign: 'right', color: 'var(--text-muted)' }}>{s.n5d}</td>
@@ -175,7 +185,17 @@ function PicksTable({ picks }: { picks: ReplayPickRow[] }) {
           {sorted.map((p, i) => (
             <tr key={i}>
               <td>{p.asOfDate}</td>
-              <td style={{ textTransform: 'capitalize' }}>{p.strategy}</td>
+              <td style={{ textTransform: 'capitalize' }}>
+                {p.strategy}
+                {p.strategy === 'bearish' && p.spyRegime === 'bullish' && (
+                  <span
+                    style={{ marginLeft: 6, fontSize: 10, color: '#ff9800', fontWeight: 600, verticalAlign: 'middle' }}
+                    title="SPY above 50-day SMA on this date — bullish market regime reduces bearish win rate"
+                  >
+                    ⚠
+                  </span>
+                )}
+              </td>
               <td style={{ fontWeight: 600 }}>{p.ticker}</td>
               <td style={{ textAlign: 'right' }}>{p.rank}</td>
               <td style={{ textAlign: 'right' }}>{fmtScore(p.compositeScore)}</td>

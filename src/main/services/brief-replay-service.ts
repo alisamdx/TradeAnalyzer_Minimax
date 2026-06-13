@@ -534,6 +534,8 @@ export class BriefReplayService {
   // ── Query methods ─────────────────────────────────────────────────────────
 
   getSummaries(): ReplaySummary[] {
+    const regimeMap = this.computeSpyRegimes();
+
     return STRATEGIES.map(strategy => {
       type BriefRow = { total_dates: number };
       const briefs = this.db.prepare(`
@@ -572,6 +574,16 @@ export class BriefReplayService {
 
       const hitRate = (pos: number, n: number) => n > 0 ? Math.round((pos / n) * 1000) / 10 : null;
 
+      // Count replay dates where SPY was in a bullish regime (regime risk for bearish strategy only)
+      let regimeRiskDates: number | null = null;
+      if (strategy === 'bearish' && regimeMap.size > 0) {
+        type DateRow = { as_of_date: string };
+        const bearishDates = (this.db.prepare(
+          "SELECT DISTINCT as_of_date FROM replay_briefs WHERE strategy = 'bearish'"
+        ).all() as DateRow[]).map(r => r.as_of_date);
+        regimeRiskDates = bearishDates.filter(d => regimeMap.get(d) === 'bullish').length;
+      }
+
       return {
         strategy,
         totalDates:  briefs.total_dates,
@@ -585,6 +597,7 @@ export class BriefReplayService {
         avgReturn5d:  picks.avg_ret5d  !== null ? Math.round(picks.avg_ret5d  * 100) / 100 : null,
         avgReturn10d: picks.avg_ret10d !== null ? Math.round(picks.avg_ret10d * 100) / 100 : null,
         avgReturn21d: picks.avg_ret21d !== null ? Math.round(picks.avg_ret21d * 100) / 100 : null,
+        regimeRiskDates,
       };
     });
   }
@@ -625,6 +638,8 @@ export class BriefReplayService {
       LIMIT ?
     `).all(...args) as Row[];
 
+    const regimeMap = this.computeSpyRegimes();
+
     return rows.map(r => ({
       replayBriefId:      r.replay_brief_id,
       asOfDate:           r.as_of_date,
@@ -641,7 +656,48 @@ export class BriefReplayService {
       closePrice:         r.close_price,
       closeDate:          r.close_date,
       evaluatedAt:        r.evaluated_at,
+      spyRegime:          (regimeMap.get(r.as_of_date) ?? null) as 'bullish' | 'bearish' | null,
     }));
+  }
+
+  // ── SPY regime (50-day SMA gate) ─────────────────────────────────────────
+  // Returns a map of as_of_date → 'bullish' | 'bearish'.
+  // 'bullish' means SPY closed above its 50-day SMA on that date — regime risk for bearish picks.
+  private computeSpyRegimes(): Map<string, 'bullish' | 'bearish'> {
+    type DateRange = { min_date: string | null; max_date: string | null };
+    const range = this.db.prepare(
+      'SELECT MIN(as_of_date) as min_date, MAX(as_of_date) as max_date FROM replay_briefs'
+    ).get() as DateRange;
+    if (!range.min_date || !range.max_date) return new Map();
+
+    // Need 50 trading days of SPY history before the first replay date
+    const from = subtractCalendarDays(range.min_date, 100);
+    type SpyRow = { date: string; close: number };
+    const spyPrices = this.db.prepare(`
+      SELECT date, close FROM historical_prices
+      WHERE ticker = 'SPY' AND date >= ? AND date <= ?
+      ORDER BY date ASC
+    `).all(from, range.max_date) as SpyRow[];
+
+    if (spyPrices.length === 0) return new Map();
+
+    type DateRow = { as_of_date: string };
+    const dates = (this.db.prepare(
+      'SELECT DISTINCT as_of_date FROM replay_briefs ORDER BY as_of_date'
+    ).all() as DateRow[]).map(r => r.as_of_date);
+
+    const regimeMap = new Map<string, 'bullish' | 'bearish'>();
+    for (const date of dates) {
+      let endIdx = -1;
+      for (let i = spyPrices.length - 1; i >= 0; i--) {
+        if (spyPrices[i]!.date <= date) { endIdx = i; break; }
+      }
+      if (endIdx < 49) continue; // need 50 bars
+      const close = spyPrices[endIdx]!.close;
+      const sma50  = avg(spyPrices.slice(endIdx - 49, endIdx + 1).map(p => p.close));
+      regimeMap.set(date, close > sma50 ? 'bullish' : 'bearish');
+    }
+    return regimeMap;
   }
 
   getDateRange(): { from: string | null; to: string | null } {

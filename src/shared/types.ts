@@ -2037,6 +2037,8 @@ export interface ReplayPickRow {
   closePrice: number | null;
   closeDate: string | null;
   evaluatedAt: string | null;
+  // SPY 50-day SMA regime on the pick date ('bullish' = SPY above SMA50 = regime risk for bearish picks)
+  spyRegime: 'bullish' | 'bearish' | null;
 }
 
 export interface ReplaySummary {
@@ -2052,4 +2054,6 @@ export interface ReplaySummary {
   avgReturn5d: number | null;
   avgReturn10d: number | null;
   avgReturn21d: number | null;
+  // bearish only: count of dates where SPY was above its 50-day SMA (bullish regime → lower bearish HR)
+  regimeRiskDates: number | null;
 }

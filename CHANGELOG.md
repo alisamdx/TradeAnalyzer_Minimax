@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.90] — 2026-06-12
+
+### Added
+- **Brief Replay: SPY regime risk gate for bearish picks** — `BriefReplayService.computeSpyRegimes()` checks whether SPY closed above its 50-day SMA on each replay date. Bearish picks on bullish-regime dates are flagged with a ⚠ badge in the picks table (tooltip: "SPY above 50-day SMA — bullish regime reduces bearish win rate"). The hit-rate summary table shows a "⚠ N/Total regime risk" count on the bearish row (e.g. "⚠ 76/98 regime risk"), derived from replay data showing bearish HR averages ~25% in bullish regimes vs ~79% in bearish regimes. No schema change — computed at query time from existing `historical_prices` SPY bars.
+
 ## [0.32.89] — 2026-06-12
 
 ### Added
