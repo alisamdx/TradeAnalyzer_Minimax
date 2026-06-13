@@ -38,6 +38,7 @@ const DEFAULT_RETRO_SETTINGS: RetroSettings = {
   bearish: { negThresholdPct: 5, incomeRangeThresholdPct: 8, closeSignalDte: 7, maxMoveAgainstPct: 15 },
   income:  { negThresholdPct: 8, incomeRangeThresholdPct: 8, closeSignalDte: 7, maxMoveAgainstPct: 15 },
   buy:     { negThresholdPct: 5, incomeRangeThresholdPct: 8, closeSignalDte: 7, maxMoveAgainstPct: 15 },
+  inflection: { negThresholdPct: 5, incomeRangeThresholdPct: 8, closeSignalDte: 7, maxMoveAgainstPct: 15 },
 };
 
 // Which StrategyLab slugs represent each brief strategy — mirrors DailyIntelligenceBriefJob.
@@ -47,6 +48,7 @@ const STRATEGY_RELEVANT_SLUGS: Record<ScoringStrategy, string[]> = {
   bearish: ['long-put-vertical', 'reverse-big-lizard', 'put-zebra', 'put-butterfly', 'poor-mans-covered-put'],
   income:  ['short-strangle', 'iron-condor', 'short-straddle', 'dynamic-width-iron-condor', 'iron-fly'],
   buy:     ['long-call-vertical', 'call-zebra', 'poor-mans-covered-call', 'call-calendar'],
+  inflection: ['bull-put-spread', 'bear-call-spread'],
 };
 
 type DbRow = {

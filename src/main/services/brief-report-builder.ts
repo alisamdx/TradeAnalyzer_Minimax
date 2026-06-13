@@ -13,6 +13,7 @@ const STRATEGY_LABELS: Record<ScoringStrategy, string> = {
   bearish: 'Bearish',
   income:  'Options Income',
   buy:     'Buy Zone',
+  inflection: 'Inflection (Breakout)',
 };
 
 const STRATEGY_TO_SLUGS: Record<ScoringStrategy, string[]> = {
@@ -21,6 +22,7 @@ const STRATEGY_TO_SLUGS: Record<ScoringStrategy, string[]> = {
   bearish: ['long-put-vertical', 'reverse-big-lizard', 'put-zebra', 'put-butterfly', 'poor-mans-covered-put'],
   income:  ['short-strangle', 'iron-condor', 'short-straddle', 'dynamic-width-iron-condor', 'iron-fly'],
   buy:     ['long-call-vertical', 'call-zebra', 'poor-mans-covered-call', 'call-calendar'],
+  inflection: ['bull-put-spread', 'bear-call-spread'],
 };
 
 const SLUG_SHORT: Record<string, string> = {

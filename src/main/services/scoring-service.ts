@@ -57,7 +57,7 @@ function sectorStringToEtf(raw: string): string | undefined {
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
-export type ScoringStrategy = 'wheel' | 'bullish' | 'bearish' | 'income' | 'buy';
+export type ScoringStrategy = 'wheel' | 'bullish' | 'bearish' | 'income' | 'buy' | 'inflection';
 
 // ─── Per-strategy quality gate ──────────────────────────────────────────────
 // Minimum composite score required to surface a pick in the daily brief / replay.
@@ -360,15 +360,53 @@ const BASELINE_BUY: ScoringSignal[] = [
   },
 ]; // sum = 100
 
+// Inflection: a directional credit spread anchored at a fresh 20-day breakout level.
+// All signals are GATED on breakout_state ≠ 0 (extractSignalRaw returns null otherwise),
+// so a ticker with no fresh with-trend breakout scores 0 and never surfaces. Ranks the
+// quality of the breakout setup; direction (bull put vs bear call) comes from breakout_state.
+// see docs/formulas.md#breakout-signals
+const BASELINE_INFLECTION: ScoringSignal[] = [
+  {
+    key: 'breakoutDecisiveness', label: 'Breakout Decisiveness (ATR beyond level)', weight: 30, enabled: true,
+    description: 'How far price closed beyond the 20-day level, in ATR units. Decisive breaks continue; marginal pokes fade.',
+    dataSource: 'technical_signals.breakout_decisiveness (gated on breakout_state)',
+    direction: 'higher_better', normMax: 3,
+  },
+  {
+    key: 'volumeSurge', label: 'Volume Surge (vs 20-day avg)', weight: 25, enabled: true,
+    description: "Today's volume / 20-day average — institutional confirmation of the break.",
+    dataSource: 'technical_signals.volume_surge (gated on breakout_state)',
+    direction: 'higher_better', normMax: 3,
+  },
+  {
+    key: 'breakoutIvRank', label: 'IV Rank (premium richness)', weight: 25, enabled: true,
+    description: 'High IV rank = richer credit on the spread. Validated to cost only ~2% win rate.',
+    dataSource: 'iv_history IV rank (gated on breakout_state)',
+    direction: 'higher_better', normMax: 100,
+  },
+  {
+    key: 'breakoutAtrPct', label: 'Move Potential (ATR %)', weight: 20, enabled: true,
+    description: 'ATR / price — expected range. More room for the move and a richer, safer credit spread.',
+    dataSource: 'technical_signals.atr_pct (gated on breakout_state)',
+    direction: 'higher_better', normMax: 6,
+  },
+]; // sum = 100
+
 export const BASELINE_CONFIGS: Record<ScoringStrategy, ScoringSignal[]> = {
-  wheel:   BASELINE_WHEEL,
-  bullish: BASELINE_BULLISH,
-  bearish: BASELINE_BEARISH,
-  income:  BASELINE_INCOME,
-  buy:     BASELINE_BUY,
+  wheel:      BASELINE_WHEEL,
+  bullish:    BASELINE_BULLISH,
+  bearish:    BASELINE_BEARISH,
+  income:     BASELINE_INCOME,
+  buy:        BASELINE_BUY,
+  inflection: BASELINE_INFLECTION,
 };
 
+// Strategies surfaced in the live Daily Brief (5). Inflection is validated in Brief
+// Replay first (REPLAY_STRATEGIES) and joins the live brief in Phase 3.
 export const STRATEGIES: ScoringStrategy[] = ['wheel', 'bullish', 'bearish', 'income', 'buy'];
+
+// Strategies scored in Brief Replay — includes inflection for point-in-time validation.
+export const REPLAY_STRATEGIES: ScoringStrategy[] = [...STRATEGIES, 'inflection'];
 
 // ─── Normalization helpers ────────────────────────────────────────────────────
 // see Requirements/DAILY_INTELLIGENCE_BRIEF.md §4.6
@@ -437,6 +475,12 @@ export interface TickerSignalData {
   revenueGrowth5Y: number | null;
   epsGrowth5Y: number | null;
   stockGrade: number | null;
+  // Breakout/continuation (Inflection strategy) — from technical_signals (migration 041)
+  breakoutState: number | null;          // -1 down / 0 none / 1 up (with-trend)
+  breakoutDecisiveness: number | null;   // |close − level| / ATR14
+  volumeSurge: number | null;            // today vol / 20d avg vol
+  atrPct: number | null;                 // ATR14 / close × 100
+  breakoutLevel: number | null;          // the broken 20d high/low
 }
 
 // ─── Service ─────────────────────────────────────────────────────────────────
@@ -579,6 +623,13 @@ export class ScoringService {
     return { ticker, compositeScore, signals };
   }
 
+  /** Inflection eligibility. Phase 2 surfaces BULLISH (up) breakouts only, so the Brief
+   *  Replay "stock up = win" aggregation is correct. Bearish inflection (down-breakout →
+   *  bear call spread) is a follow-up that needs direction-aware replay outcomes. */
+  private hasBreakout(d: TickerSignalData): boolean {
+    return d.breakoutState === 1;
+  }
+
   private extractSignalRaw(key: string, d: TickerSignalData): number | null {
     switch (key) {
       case 'ivRank':
@@ -628,6 +679,17 @@ export class ScoringService {
 
       case 'breakoutScore':
         return this.computeBreakoutScore(d);
+
+      // ── Inflection signals — all gated on a fresh with-trend breakout. A ticker with
+      // breakoutState 0/null returns null for every one (→ composite 0, never surfaces).
+      case 'breakoutDecisiveness':
+        return this.hasBreakout(d) ? d.breakoutDecisiveness : null;
+      case 'volumeSurge':
+        return this.hasBreakout(d) ? d.volumeSurge : null;
+      case 'breakoutAtrPct':
+        return this.hasBreakout(d) ? d.atrPct : null;
+      case 'breakoutIvRank':
+        return this.hasBreakout(d) ? d.ivRank : null;
 
       case 'buySignalScore':
         return d.buySignalScore;
@@ -860,6 +922,8 @@ export class ScoringService {
         buySignalScore: null,
         fcfToNetIncome: null, roic: null, netDebtToEbitda: null,
         revenueGrowth5Y: null, epsGrowth5Y: null, stockGrade: null,
+        breakoutState: null, breakoutDecisiveness: null, volumeSurge: null,
+        atrPct: null, breakoutLevel: null,
       }])
     );
 
@@ -1198,9 +1262,15 @@ export class ScoringService {
       price: number | null;
       adx: number | null;
       support_level: number | null;
+      breakout_state: number | null;
+      breakout_decisiveness: number | null;
+      volume_surge: number | null;
+      atr_pct: number | null;
+      breakout_level: number | null;
     };
     const rows = this.db.prepare(`
-      SELECT ticker, buy_signal_score, rsi, sma20, sma50, sma200, price, adx, support_level
+      SELECT ticker, buy_signal_score, rsi, sma20, sma50, sma200, price, adx, support_level,
+             breakout_state, breakout_decisiveness, volume_surge, atr_pct, breakout_level
       FROM technical_signals
       WHERE ticker IN (${ph})
     `).all(...tickers) as TsRow[];
@@ -1209,6 +1279,11 @@ export class ScoringService {
       const d = result.get(row.ticker);
       if (!d) continue;
       d.buySignalScore = row.buy_signal_score;
+      d.breakoutState = row.breakout_state;
+      d.breakoutDecisiveness = row.breakout_decisiveness;
+      d.volumeSurge = row.volume_surge;
+      d.atrPct = row.atr_pct;
+      d.breakoutLevel = row.breakout_level;
       // Fill only when analysis_snapshots had no data for this ticker
       if (d.rsi === null) d.rsi = row.rsi;
       if (d.smaStack === null && (row.sma20 !== null || row.sma50 !== null || row.sma200 !== null)) {

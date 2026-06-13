@@ -1544,7 +1544,7 @@ export interface BatchProgressEvent {
 
 // ─── Trade Scoring Engine + Daily Intelligence Brief (v0.22.7) ────────────────
 
-export type ScoringStrategy = 'wheel' | 'bullish' | 'bearish' | 'income' | 'buy';
+export type ScoringStrategy = 'wheel' | 'bullish' | 'bearish' | 'income' | 'buy' | 'inflection';
 
 export interface ScoringSignal {
   key: string;
@@ -1661,6 +1661,7 @@ export interface RetroSettings {
   bearish: RetroStrategySettings;
   income:  RetroStrategySettings;
   buy:     RetroStrategySettings;
+  inflection: RetroStrategySettings;
 }
 
 /** Recommended action for an open paper trade, computed rule-based from current market state. */

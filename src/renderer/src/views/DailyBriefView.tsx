@@ -10,6 +10,7 @@ const STRATEGY_LABELS: Record<ScoringStrategy, string> = {
   bearish: '🐻  Bearish — Put Spread / Long Put',
   income:  '💰  Options Income — Strangle / Iron Condor',
   buy:     '📈  Buy / Swing Trade',
+  inflection: '🎯  Inflection — Breakout Credit Spread',
 };
 
 // Human-readable labels for signal keys shown in chips
@@ -44,6 +45,7 @@ const STRATEGY_TO_SLUGS: Record<ScoringStrategy, string[]> = {
   bearish: ['long-put-vertical', 'reverse-big-lizard', 'put-zebra', 'put-butterfly', 'poor-mans-covered-put'],
   income:  ['short-strangle', 'iron-condor', 'short-straddle', 'dynamic-width-iron-condor', 'iron-fly'],
   buy:     ['long-call-vertical', 'call-zebra', 'poor-mans-covered-call', 'call-calendar'],
+  inflection: ['bull-put-spread', 'bear-call-spread'],
 };
 
 // Human-readable short name for the primary slug shown on the card

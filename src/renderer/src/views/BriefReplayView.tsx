@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReplayPickRow, ReplayProgressEvent, ReplaySummary, ReplayChartData, PremiumHistoryReadiness } from '@shared/types.js';
 import ReplayChartsModal from '../components/ReplayChartsModal.js';
 
-const STRATEGIES = ['wheel', 'bullish', 'bearish', 'income', 'buy'] as const;
+const STRATEGIES = ['wheel', 'bullish', 'bearish', 'income', 'buy', 'inflection'] as const;
 type Strategy = (typeof STRATEGIES)[number];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

@@ -10,6 +10,7 @@ const STRATEGY_LABELS: Record<ScoringStrategy, string> = {
   bearish: '🐻  Bearish',
   income:  '💰  Income',
   buy:     '📈  Buy / Swing',
+  inflection: '🎯  Inflection',
 };
 
 const DIRECTION_ICON: Record<ScoringSignal['direction'], string> = {

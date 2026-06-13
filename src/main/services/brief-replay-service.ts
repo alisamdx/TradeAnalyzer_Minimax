@@ -9,7 +9,7 @@
 
 import type { Database } from 'better-sqlite3';
 import type { ScoringService, TickerSignalData } from './scoring-service.js';
-import { STRATEGIES, minCompositeForStrategy } from './scoring-service.js';
+import { REPLAY_STRATEGIES, minCompositeForStrategy } from './scoring-service.js';
 import { isTradingDay } from './iv-history-service.js';
 import type { ReplayProgressEvent, ReplayPickRow, ReplaySummary, ReplayChartData, ReplayChartMonthlyRow, ScreenResultPayload, PremiumHistoryReadiness } from '@shared/types.js';
 import { withTransaction } from '../db/connection.js';
@@ -313,6 +313,38 @@ export class BriefReplayService {
         // IV rank (from iv_history filtered to asOf)
         const ivRank = this.computeIvRankAsOf(ticker, asOf, ivCache);
 
+        // Breakout/continuation (Inflection) — point-in-time from bars ≤ asOf.
+        // see docs/formulas.md#breakout-signals
+        let breakoutState = 0;
+        let breakoutLevel: number | null = null;
+        let breakoutDecisiveness: number | null = null;
+        let volumeSurge: number | null = null;
+        let atrPct: number | null = null;
+        if (n >= 35) {
+          const window = available.slice(n - 21, n - 1); // prior 20, excl. today
+          const prior20High = Math.max(...window.map(p => p.high));
+          const prior20Low  = Math.min(...window.map(p => p.low));
+          let trSum = 0;
+          for (let j = n - 14; j < n; j++) {
+            const h = available[j]!.high, l = available[j]!.low, pc = available[j - 1]!.close;
+            trSum += Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc));
+          }
+          const atr = trSum / 14;
+          if (atr > 0) {
+            atrPct = (atr / lastPrice) * 100;
+            const prevClose = available[n - 2]!.close;
+            const up   = lastPrice > prior20High && prevClose <= prior20High && sma50 !== null && lastPrice > sma50;
+            const down = lastPrice < prior20Low  && prevClose >= prior20Low  && sma50 !== null && lastPrice < sma50;
+            if (up || down) {
+              breakoutState = up ? 1 : -1;
+              breakoutLevel = up ? prior20High : prior20Low;
+              breakoutDecisiveness = Math.abs(lastPrice - breakoutLevel) / atr;
+              const priorVol = avg(window.map(p => p.volume));
+              volumeSurge = priorVol > 0 ? available[n - 1]!.volume / priorVol : null;
+            }
+          }
+        }
+
         // Fundamentals from cache
         const fund = fundamentals.get(ticker);
 
@@ -351,6 +383,12 @@ export class BriefReplayService {
           revenueGrowth5Y:     fund?.revenueGrowth5Y  ?? null,
           epsGrowth5Y:         fund?.epsGrowth5Y      ?? null,
           stockGrade:          null,
+          // Breakout/continuation (Inflection)
+          breakoutState,
+          breakoutDecisiveness,
+          volumeSurge,
+          atrPct,
+          breakoutLevel,
         });
       }
 
@@ -358,7 +396,7 @@ export class BriefReplayService {
 
       // Score + filter + persist for each strategy
       withTransaction(this.db, () => {
-        for (const strategy of STRATEGIES) {
+        for (const strategy of REPLAY_STRATEGIES) {
           const config   = this.scoringService.getConfig(strategy);
           const scored   = this.scoringService.scoreFromSignalData(signalMap, strategy);
 
@@ -538,7 +576,7 @@ export class BriefReplayService {
   // ── Query methods ─────────────────────────────────────────────────────────
 
   getSummaries(): ReplaySummary[] {
-    return STRATEGIES.map(strategy => {
+    return REPLAY_STRATEGIES.map(strategy => {
       type BriefRow = { total_dates: number };
       const briefs = this.db.prepare(`
         SELECT COUNT(*) as total_dates FROM replay_briefs WHERE strategy = ?
@@ -717,7 +755,7 @@ export class BriefReplayService {
     const hrFn = (arr: number[], reverse = false): number | null =>
       arr.length ? Math.round(arr.filter(v => reverse ? v < 0 : v > 0).length / arr.length * 100) : null;
 
-    const STRATS = ['buy', 'bullish', 'income', 'wheel', 'bearish'] as const;
+    const STRATS = ['buy', 'bullish', 'income', 'wheel', 'bearish', 'inflection'] as const;
 
     const strategies = STRATS.map(s => {
       const sRows = outcomes.filter(r => r.strategy === s);

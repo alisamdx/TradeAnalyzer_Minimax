@@ -29,6 +29,7 @@ const STRATEGY_LABELS: Record<ScoringStrategy, string> = {
   bearish: '🐻 Bearish',
   income:  '💰 Income',
   buy:     '📈 Buy',
+  inflection: '🎯 Inflection',
 };
 
 const VERDICT_COLOR: Record<string, string> = {

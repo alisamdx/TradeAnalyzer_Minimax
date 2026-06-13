@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.99] — 2026-06-13
+
+### Added
+- **Inflection scoring strategy (Phase 2 of 3)** — `inflection` is now a 6th `ScoringStrategy`. Its composite ranks breakout-setup quality from four signals, **all gated on a fresh with-trend breakout** (`breakout_state`): `breakoutDecisiveness` (30), `volumeSurge` (25), `breakoutIvRank` (25, premium richness), `breakoutAtrPct` (20). A ticker with no fresh breakout scores 0 and never surfaces. Signals are read live from `technical_signals` (`gatherSignalData`) and point-in-time in Brief Replay. **Phase 2 surfaces bullish (up) breakouts only** so the replay "stock-up = win" aggregation is correct; bearish (down → bear call spread) is a follow-up needing direction-aware outcomes. The strategy scores in **Brief Replay** (`REPLAY_STRATEGIES`) for validation but is **not yet in the live Daily Brief** (`STRATEGIES` stays at 5) — that's Phase 3. Tune its weights in the Trade Scoring view.
+
 ## [0.32.98] — 2026-06-13
 
 ### Added
