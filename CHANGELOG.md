@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.95] — 2026-06-13
+
+### Added
+- **Brief Replay: premium-history readiness banner** — an in-app check that surfaces in the Brief Replay view once enough `options_premium_history` has accumulated to compute real income/wheel ROC. `BriefReplayService.getPremiumHistoryReadiness()` (IPC `replay:premium-history-readiness`) reports total rows, distinct days, date range, and **matured** days (entries older than ~45 days, so the recommended option would have expired). While accumulating it shows a muted progress note (`N/40 matured days`); once ≥40 matured days exist it shows a green "ready — ask Claude to build the ROC view" prompt. Renders nothing when the table is empty, so it stays invisible until the new daily capture job (v0.32.94) has run for a while.
+
 ## [0.32.94] — 2026-06-13
 
 ### Added

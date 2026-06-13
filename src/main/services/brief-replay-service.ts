@@ -11,7 +11,7 @@ import type { Database } from 'better-sqlite3';
 import type { ScoringService, TickerSignalData } from './scoring-service.js';
 import { STRATEGIES, minCompositeForStrategy } from './scoring-service.js';
 import { isTradingDay } from './iv-history-service.js';
-import type { ReplayProgressEvent, ReplayPickRow, ReplaySummary, ReplayChartData, ReplayChartMonthlyRow, ScreenResultPayload } from '@shared/types.js';
+import type { ReplayProgressEvent, ReplayPickRow, ReplaySummary, ReplayChartData, ReplayChartMonthlyRow, ScreenResultPayload, PremiumHistoryReadiness } from '@shared/types.js';
 import { withTransaction } from '../db/connection.js';
 
 // Liquidity proxy thresholds (Option A — no options chains)
@@ -820,6 +820,37 @@ export class BriefReplayService {
       'SELECT MIN(as_of_date) as min_date, MAX(as_of_date) as max_date FROM replay_briefs'
     ).get() as Row;
     return { from: row.min_date, to: row.max_date };
+  }
+
+  // Coverage of options_premium_history (populated by daily-options-premium-history
+  // job). "Matured" = captured at least MATURITY_DAYS ago, so the recommended option
+  // would have expired and realized ROC is computable. Surfaces an in-app note in
+  // Brief Replay once enough matured days accrue to make real income/wheel ROC worthwhile.
+  getPremiumHistoryReadiness(): PremiumHistoryReadiness {
+    const MATURITY_DAYS  = 45; // ~max DTE of the recommended structures
+    const THRESHOLD_DAYS = 40; // ~2 months of matured captures before ROC is meaningful
+
+    type Row = { total: number; days: number; min_d: string | null; max_d: string | null; matured: number };
+    const row = this.db.prepare(`
+      SELECT
+        COUNT(*)                                   AS total,
+        COUNT(DISTINCT as_of_date)                 AS days,
+        MIN(as_of_date)                            AS min_d,
+        MAX(as_of_date)                            AS max_d,
+        COUNT(DISTINCT CASE WHEN as_of_date <= date('now', '-${MATURITY_DAYS} days')
+                            THEN as_of_date END)   AS matured
+      FROM options_premium_history
+    `).get() as Row;
+
+    return {
+      totalRows:     row.total,
+      days:          row.days,
+      fromDate:      row.min_d,
+      toDate:        row.max_d,
+      maturedDays:   row.matured,
+      thresholdDays: THRESHOLD_DAYS,
+      ready:         row.matured >= THRESHOLD_DAYS,
+    };
   }
 
   // ── Private helpers ───────────────────────────────────────────────────────

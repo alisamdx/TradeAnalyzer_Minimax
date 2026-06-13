@@ -2039,6 +2039,19 @@ export interface ReplayPickRow {
   evaluatedAt: string | null;
 }
 
+// Coverage/readiness of the options_premium_history table — drives the in-app
+// "ready to build real income/wheel ROC" note in Brief Replay. An entry is
+// "matured" once its option would have expired (~45 calendar days old).
+export interface PremiumHistoryReadiness {
+  totalRows: number;
+  days: number;            // distinct as_of_date captured
+  fromDate: string | null;
+  toDate: string | null;
+  maturedDays: number;     // distinct captured dates older than the maturity window
+  thresholdDays: number;   // matured-days target before ROC analysis is worthwhile
+  ready: boolean;          // maturedDays >= thresholdDays
+}
+
 export interface ReplaySummary {
   strategy: string;
   totalDates: number;

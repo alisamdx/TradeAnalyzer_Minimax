@@ -12,6 +12,8 @@ import {
   type PremiumHistoryRow,
 } from '../src/main/services/jobs/daily-options-premium-history-job.js';
 import type { WheelResult, OptionsIncomeResult } from '../src/main/services/analysis-service.js';
+import { BriefReplayService } from '../src/main/services/brief-replay-service.js';
+import { ScoringService } from '../src/main/services/scoring-service.js';
 
 const wheel: WheelResult = {
   mode: 'wheel', ticker: 'AAPL', lastPrice: 200, recommendedStrike: 190,
@@ -74,6 +76,54 @@ describe('options_premium_history migration', () => {
     insert(db, incomeResultToRow({ ...income, ticker: 'AAPL' }, '2026-06-13'));
     const count = db.prepare(`SELECT COUNT(*) n FROM options_premium_history WHERE ticker='AAPL'`).get() as { n: number };
     expect(count.n).toBe(2);
+    db.close();
+  });
+});
+
+describe('getPremiumHistoryReadiness', () => {
+  function dayOffset(n: number): string {
+    const d = new Date();
+    d.setDate(d.getDate() - n);
+    return d.toISOString().slice(0, 10);
+  }
+  function seed(db: ReturnType<typeof openDatabase>, dates: string[]) {
+    const stmt = db.prepare(`INSERT OR REPLACE INTO options_premium_history
+      (as_of_date, ticker, strategy, premium) VALUES (?, 'AAPL', 'wheel', 1.0)`);
+    for (const d of dates) stmt.run(d);
+  }
+
+  it('reports not-ready while matured days are below threshold, ignoring recent dates', () => {
+    const db = openDatabase(':memory:');
+    runMigrations(db, MIGRATIONS_DIR);
+    // 3 matured (>45d old) + 2 recent (<45d, not counted as matured)
+    seed(db, [dayOffset(120), dayOffset(90), dayOffset(60), dayOffset(10), dayOffset(2)]);
+
+    const svc = new BriefReplayService(db, new ScoringService(db));
+    const r = svc.getPremiumHistoryReadiness();
+    expect(r.days).toBe(5);
+    expect(r.maturedDays).toBe(3);   // only the >45d dates
+    expect(r.ready).toBe(false);     // 3 < thresholdDays
+    db.close();
+  });
+
+  it('reports ready once matured days reach the threshold', () => {
+    const db = openDatabase(':memory:');
+    runMigrations(db, MIGRATIONS_DIR);
+    const matured = Array.from({ length: 45 }, (_, i) => dayOffset(50 + i)); // all >45d old, distinct
+    seed(db, matured);
+
+    const svc = new BriefReplayService(db, new ScoringService(db));
+    const r = svc.getPremiumHistoryReadiness();
+    expect(r.maturedDays).toBeGreaterThanOrEqual(r.thresholdDays);
+    expect(r.ready).toBe(true);
+    db.close();
+  });
+
+  it('returns an empty, not-ready state when the table is empty', () => {
+    const db = openDatabase(':memory:');
+    runMigrations(db, MIGRATIONS_DIR);
+    const r = new BriefReplayService(db, new ScoringService(db)).getPremiumHistoryReadiness();
+    expect(r).toMatchObject({ totalRows: 0, days: 0, maturedDays: 0, ready: false, fromDate: null });
     db.close();
   });
 });

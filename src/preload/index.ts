@@ -1156,6 +1156,7 @@ function buildApi() {
       invoke<ReplayPickRow[]>('replay:get-picks', strategy, limit),
     getDateRange: () => invoke<{ from: string | null; to: string | null }>('replay:get-date-range'),
     getChartData: () => invoke<import('@shared/types.js').ReplayChartData | null>('replay:get-chart-data'),
+    premiumHistoryReadiness: () => invoke<import('@shared/types.js').PremiumHistoryReadiness>('replay:premium-history-readiness'),
     onProgress: (cb: (p: ReplayProgressEvent) => void): (() => void) => {
       const handler = (_: unknown, p: ReplayProgressEvent) => cb(p);
       ipcRenderer.on('replay:progress', handler as Parameters<typeof ipcRenderer.on>[1]);

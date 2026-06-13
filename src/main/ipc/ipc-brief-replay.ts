@@ -90,4 +90,12 @@ export function registerBriefReplayIpc(service: BriefReplayService): void {
       return fail(err instanceof Error ? err.message : String(err));
     }
   });
+
+  ipcMain.handle('replay:premium-history-readiness', (): IpcResult<ReturnType<BriefReplayService['getPremiumHistoryReadiness']>> => {
+    try {
+      return ok(service.getPremiumHistoryReadiness());
+    } catch (err) {
+      return fail(err instanceof Error ? err.message : String(err));
+    }
+  });
 }

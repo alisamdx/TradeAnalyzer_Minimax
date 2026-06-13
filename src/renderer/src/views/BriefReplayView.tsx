@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import type { ReplayPickRow, ReplayProgressEvent, ReplaySummary, ReplayChartData } from '@shared/types.js';
+import type { ReplayPickRow, ReplayProgressEvent, ReplaySummary, ReplayChartData, PremiumHistoryReadiness } from '@shared/types.js';
 import ReplayChartsModal from '../components/ReplayChartsModal.js';
 
 const STRATEGIES = ['wheel', 'bullish', 'bearish', 'income', 'buy'] as const;
@@ -210,6 +210,39 @@ function subtractDays(dateStr: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+// In-app readiness note for the options_premium_history table. Stays out of the way
+// while data accumulates, then surfaces a prompt to build real income/wheel ROC once
+// enough matured premium history exists. Renders nothing until the table has any rows.
+function PremiumHistoryBanner({ readiness }: { readiness: PremiumHistoryReadiness | null }) {
+  if (!readiness || readiness.days === 0) return null;
+
+  const { ready, maturedDays, thresholdDays, days, fromDate } = readiness;
+  const style: React.CSSProperties = {
+    borderRadius: 6, padding: '8px 12px', marginBottom: 16, fontSize: 13,
+    border: ready ? '1px solid #4caf50' : '1px solid var(--border)',
+    background: ready ? '#0c1a0c' : 'var(--bg-elevated)',
+    color: ready ? '#a5d6a7' : 'var(--text-muted)',
+  };
+
+  return (
+    <div style={style}>
+      {ready ? (
+        <>
+          📊 <strong>Options premium history is ready</strong> — {maturedDays} matured days captured
+          {fromDate ? ` since ${fromDate}` : ''}. Real income/wheel return-on-capital can now be computed
+          from actual premium (not the stayed-above-strike proxy). Ask Claude to build the ROC view.
+        </>
+      ) : (
+        <>
+          ⏳ Options premium history accumulating: <strong>{maturedDays}/{thresholdDays}</strong> matured days
+          ({days} captured{fromDate ? ` since ${fromDate}` : ''}). Real income/wheel ROC unlocks once enough
+          premium entries have matured past expiry.
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function BriefReplayView() {
   const today = new Date().toISOString().slice(0, 10);
   // Default "to" = 30 cal days back (≈21 trading days) so 21d returns can be evaluated.
@@ -229,18 +262,21 @@ export default function BriefReplayView() {
   const [error,            setError]             = useState<string | null>(null);
   const [showCharts,       setShowCharts]        = useState(false);
   const [chartData,        setChartData]         = useState<ReplayChartData | null>(null);
+  const [premiumReadiness, setPremiumReadiness]  = useState<PremiumHistoryReadiness | null>(null);
 
   const unsubRef = useRef<(() => void) | null>(null);
 
   const loadData = useCallback(async () => {
-    const [sums, pickRows, range] = await Promise.all([
+    const [sums, pickRows, range, readiness] = await Promise.all([
       window.api.briefReplay.getSummaries(),
       window.api.briefReplay.getPicks(filterStrategy || undefined, 1000),
       window.api.briefReplay.getDateRange(),
+      window.api.briefReplay.premiumHistoryReadiness(),
     ]);
     setSummaries(sums);
     setPicks(pickRows);
     setExistingRange(range);
+    setPremiumReadiness(readiness);
   }, [filterStrategy]);
 
   useEffect(() => { loadData(); }, [loadData]);
@@ -310,6 +346,8 @@ export default function BriefReplayView() {
         For all three columns, set <strong>To</strong> at least 21 trading days back (&asymp;30 cal days).
         Picks from recent days will show &mdash; until those dates have passed.
       </p>
+
+      <PremiumHistoryBanner readiness={premiumReadiness} />
 
       {/* Controls */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
