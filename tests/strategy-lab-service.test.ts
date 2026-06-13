@@ -10,6 +10,7 @@
 import { describe, it, expect } from 'vitest';
 import Database from 'better-sqlite3';
 import { StrategyLabService } from '../src/main/services/strategy-lab-service.js';
+import { bsPrice, normCdf, RISK_FREE_RATE } from '../src/main/services/black-scholes.js';
 import type { DataProvider, OptionsChain, OptionContract } from '../src/main/services/data-provider.js';
 import type { OptionsProvider } from '../src/main/services/options-provider.js';
 import type { Bar } from '../src/shared/types.js';
@@ -149,5 +150,101 @@ describe('StrategyLabService underlying-price resolution', () => {
     const snp = result.scores.find(s => s.slug === 'short-naked-put');
     const put = snp!.setup!.legs.find(l => l.side === 'put' && l.action === 'sell');
     expect(put!.strike).toBeLessThan(REAL_SPOT); // delta-targeted OTM put, sane
+  });
+});
+
+// ─── Calendar / PMCC two-expiration construction (v0.32.96) ────────────────────
+// Prior to this, any strategy with a far-expiration leg returned unavailableReason
+// ('Requires two expirations'). The lab now fetches a second far chain and builds
+// these diagonals/calendars, valuing the long leg's residual at the short leg's
+// expiry via Black-Scholes. Chain prices are generated WITH bsPrice so entry cost
+// and the residual valuation are arbitrage-consistent.
+
+const CAL_SPOT = 100;
+const CAL_IV = 0.30;
+const NEAR_EXP = isoDaysFromNow(30);
+const FAR_EXP  = isoDaysFromNow(120);
+
+function bsDelta(strike: number, dte: number, isCall: boolean): number {
+  const T = dte / 365;
+  const d1 = (Math.log(CAL_SPOT / strike) + (RISK_FREE_RATE + 0.5 * CAL_IV * CAL_IV) * T) / (CAL_IV * Math.sqrt(T));
+  return isCall ? normCdf(d1) : normCdf(d1) - 1;
+}
+
+function calContract(side: 'call' | 'put', strike: number, exp: string, dte: number): OptionContract {
+  const mid = bsPrice(CAL_SPOT, strike, dte / 365, CAL_IV, RISK_FREE_RATE, side === 'call');
+  return {
+    ticker: `TST${exp.replace(/-/g, '')}${side === 'call' ? 'C' : 'P'}${strike}`,
+    expiration: exp, strike, side,
+    bid: Math.max(0.01, mid - 0.1), ask: mid + 0.1,
+    delta: bsDelta(strike, dte, side === 'call'),
+    gamma: 0.01, theta: -0.05, vega: 0.1, iv: CAL_IV,
+    openInterest: 500, volume: 100,
+  };
+}
+
+function calChain(exp: string, dte: number): OptionsChain {
+  const contracts: OptionContract[] = [];
+  for (let strike = 70; strike <= 130; strike += 5) {
+    contracts.push(calContract('call', strike, exp, dte));
+    contracts.push(calContract('put', strike, exp, dte));
+  }
+  return { ticker: 'TST', expiration: exp, contracts, underlyingPrice: CAL_SPOT };
+}
+
+function calProviders(expirations: string[]) {
+  const dataProvider = {
+    getQuote: async () => ({ ticker: 'TST', last: CAL_SPOT, prevClose: CAL_SPOT, bid: null, ask: null, volume: null, dayHigh: null, dayLow: null }),
+    getHistoricalBars: async () => makeBars(90, CAL_SPOT),
+  } as unknown as DataProvider;
+  const optionsProvider = {
+    getOptionsExpirations: async () => expirations,
+    getOptionsChain: async (_t: string, exp: string) =>
+      exp === FAR_EXP ? calChain(FAR_EXP, 120) : calChain(NEAR_EXP, 30),
+  } as unknown as OptionsProvider;
+  return { dataProvider, optionsProvider };
+}
+
+describe('StrategyLabService calendar/PMCC two-expiration build', () => {
+  it('builds a call calendar across two expirations with positive max profit', async () => {
+    const { dataProvider, optionsProvider } = calProviders([NEAR_EXP, FAR_EXP]);
+    const svc = new StrategyLabService(dataProvider, optionsProvider);
+    const result = await svc.validate(makeDb(), 'TST');
+
+    const cal = result.scores.find(s => s.slug === 'call-calendar')!;
+    expect(cal.setup?.unavailableReason).toBeNull();
+    expect(cal.setup?.legs).toHaveLength(2);
+    // One leg in each expiration
+    const exps = new Set(cal.setup!.legs.map(l => l.expiration));
+    expect(exps.has(NEAR_EXP)).toBe(true);
+    expect(exps.has(FAR_EXP)).toBe(true);
+    expect(cal.setup!.netDebit!).toBeGreaterThan(0);
+    expect(cal.setup!.maxProfit!).toBeGreaterThan(0); // short decays faster than long
+    expect(cal.setup!.maxLoss!).toBeLessThan(0);
+  });
+
+  it('builds a PMCC diagonal (long far ITM call + short near OTM call)', async () => {
+    const { dataProvider, optionsProvider } = calProviders([NEAR_EXP, FAR_EXP]);
+    const svc = new StrategyLabService(dataProvider, optionsProvider);
+    const result = await svc.validate(makeDb(), 'TST');
+
+    const pmcc = result.scores.find(s => s.slug === 'poor-mans-covered-call')!;
+    expect(pmcc.setup?.unavailableReason).toBeNull();
+    const longCall  = pmcc.setup!.legs.find(l => l.action === 'buy')!;
+    const shortCall = pmcc.setup!.legs.find(l => l.action === 'sell')!;
+    expect(longCall.expiration).toBe(FAR_EXP);
+    expect(shortCall.expiration).toBe(NEAR_EXP);
+    expect(longCall.strike).toBeLessThan(shortCall.strike); // long ITM, short OTM
+    expect(pmcc.setup!.netDebit!).toBeGreaterThan(0);
+  });
+
+  it('leaves calendar/PMCC unavailable when no far expiration exists', async () => {
+    const { dataProvider, optionsProvider } = calProviders([NEAR_EXP]); // near only
+    const svc = new StrategyLabService(dataProvider, optionsProvider);
+    const result = await svc.validate(makeDb(), 'TST');
+
+    const cal = result.scores.find(s => s.slug === 'call-calendar')!;
+    expect(cal.setup?.unavailableReason).toBe('No suitable far expiration available');
+    expect(cal.setup?.legs).toHaveLength(0);
   });
 });

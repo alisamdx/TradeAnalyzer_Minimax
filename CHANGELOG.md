@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.32.96] — 2026-06-13
+
+### Added
+- **Strategy Lab: PMCC & calendar second-expiration construction** — the lab now fetches a second far-dated chain (~120 DTE) so the four two-expiration structures (Poor Man's Covered Call/Put, Call/Put Calendar) build real legs instead of returning `unavailableReason: 'Requires two expirations'`. The long leg is drawn from the far chain, the short leg from the near chain. Max profit (which has no closed form for diagonals/calendars) is computed by valuing the long leg's residual time value at the short leg's expiry via Black-Scholes (`bsPrice`), assuming the underlying pins the short strike. This gives buy/bullish a defined-risk, B-grade-capable structure in high-IV regimes where single-leg debits grade C/F. One extra E*Trade `getOptionsChain` call per ticker in `validate()` (graceful: those strategies stay unavailable if no suitable far expiration exists). See `docs/formulas.md#calendar-diagonal-pnl`.
+
+### Changed
+- **Black-Scholes extracted to a shared util** (`src/main/services/black-scholes.ts`, exports `bsPrice` / `normCdf` / `RISK_FREE_RATE`); `collared-leaps-service.ts` and the new Strategy Lab calendar/PMCC math both use it (was duplicated).
+
 ## [0.32.95] — 2026-06-13
 
 ### Added

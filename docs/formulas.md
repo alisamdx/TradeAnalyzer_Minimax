@@ -447,3 +447,33 @@ Used by `computeTrendDirectionScore()` in `scoring-service.ts` for signals `tren
 **Rationale:**
 - *Directional* (Buy / Bullish): sideways = ~7.5 pt composite penalty at weight 10; bearish = full 10 pt penalty. A sideways stock is an income candidate, not a directional one.
 - *Wheel*: downtrend = ~7 pt composite penalty at weight 8 (avoid falling-knife CSP assignment); sideways (75) is acceptable — CSP selling on stable range-bound stocks is the wheel's native environment.
+
+## Black-Scholes {#black-scholes}
+
+European option price, used wherever a leg must be valued before its own expiry (collared-LEAPS P&L grids; Strategy Lab calendar/diagonal max profit). Implemented in `src/main/services/black-scholes.ts`.
+
+```
+d1 = [ ln(S/K) + (r + σ²/2)·T ] / (σ·√T)
+d2 = d1 − σ·√T
+Call = S·N(d1) − K·e^(−rT)·N(d2)
+Put  = K·e^(−rT)·N(−d2) − S·N(−d1)
+```
+
+- `S` spot, `K` strike, `T` years to expiry, `σ` IV (fraction), `r` risk-free rate (`RISK_FREE_RATE = 0.05`).
+- `N(·)` is the standard normal CDF (Abramowitz & Stegun approximation, error < 7.5e-8).
+- `T ≤ 0` (or any degenerate input) returns intrinsic value only.
+
+## Calendar / diagonal (PMCC) max profit {#calendar-diagonal-pnl}
+
+Calendars (same strike, short near + long far) and diagonals (PMCC/PMCP: long far ITM + short near OTM, same side) have **no closed-form max profit** — the long (far) leg still carries time value when the short (near) leg expires. Strategy Lab estimates it at the profit peak, where the underlying pins the **short strike** at the near expiry:
+
+```
+remYears      = (farDTE − nearDTE) / 365
+longResidual  = bsPrice(shortStrike, longStrike, remYears, longIV, r, isCall)   // per share
+shortIntrinsic= max(0, ±(shortStrike − shortStrike)) = 0  at the pin
+posValue/sh   = longResidual·longQty − shortIntrinsic·shortQty
+maxProfit     = posValue/sh × 100 − netDebit          // close both legs at near expiry
+maxLoss       = −netDebit                              // worst case ≈ the debit paid
+```
+
+`netDebit = (longMid·longQty − shortMid·shortQty) × 100`. For a calendar the edge is the short leg decaying faster than the long; `maxProfit` is positive when the short premium captured exceeds the long leg's decay over the period. Breakevens are not computed (no closed form). See `buildSetup()` in `strategy-lab-service.ts`.

@@ -12,6 +12,7 @@
 import type { Database } from 'better-sqlite3';
 import type { DataProvider, HistoricalBar, OptionContract, OptionsChain } from './data-provider.js';
 import type { OptionsProvider } from './options-provider.js';
+import { bsPrice, RISK_FREE_RATE } from './black-scholes.js';
 import type {
   StrategyLabContext,
   StrategyLabDirectionBias,
@@ -200,6 +201,21 @@ function selectExpiration(expirations: string[]): { expiration: string; dte: num
   return fallbacks[0] ?? null;
 }
 
+// Far-dated expiration for the long leg of calendars / PMCC diagonals. Targets ~120
+// DTE (LEAPS-lite for PMCC; acceptably wide back month for calendars), and must sit at
+// least 25 DTE beyond the near leg so there is a real time spread. Returns null when no
+// suitable long expiration exists → the strategy stays unavailable rather than synthesized.
+function selectFarExpiration(
+  expirations: string[], nearDte: number, targetDte = 120
+): { expiration: string; dte: number } | null {
+  const now = Date.now();
+  const candidates = expirations
+    .map(exp => ({ expiration: exp, dte: Math.round((new Date(exp + 'T16:00:00').getTime() - now) / 86_400_000) }))
+    .filter(({ dte }) => dte >= nearDte + 25 && dte <= 220)
+    .sort((a, b) => Math.abs(a.dte - targetDte) - Math.abs(b.dte - targetDte));
+  return candidates[0] ?? null;
+}
+
 function computeDirectionBias(bars: HistoricalBar[]): {
   bias: StrategyLabDirectionBias; ma20: number | null; ma50: number | null; momentum5d: number | null;
 } {
@@ -326,18 +342,21 @@ function findByDelta(
 
 function buildSetup(
   profile: StrategyProfile, chain: OptionsChain, underlyingPx: number, dte: number,
-  currentAtmIv: number, trustDeltas = true
+  currentAtmIv: number, trustDeltas = true, farChain: OptionsChain | null = null, farDte: number | null = null
 ): StrategySetup {
   const ticker = chain.ticker;
   const base: Omit<StrategySetup, 'legs' | 'netCredit' | 'netDebit' | 'maxProfit' | 'maxLoss' | 'breakevens' | 'annualizedReturn' | 'popEstimate' | 'unavailableReason'> = {
     slug: profile.slug, ticker, expiration: chain.expiration, dte, underlyingPrice: underlyingPx, currentAtmIv,
   };
 
-  // Strategies requiring a far expiration can't be built with a single chain
-  if (profile.legs.some(l => l.farExpiration)) {
+  const hasFarLeg = profile.legs.some(l => l.farExpiration);
+
+  // Calendars / PMCC need a second (far) expiration chain. If none is available, the
+  // structure stays unavailable rather than being synthesized from a single expiry.
+  if (hasFarLeg && (!farChain || farChain.contracts.length === 0 || farDte === null)) {
     return { ...base, legs: [], netCredit: null, netDebit: null, maxProfit: null, maxLoss: null,
       breakevens: [], annualizedReturn: null, popEstimate: null,
-      unavailableReason: 'Requires two expirations — select strikes manually' };
+      unavailableReason: 'No suitable far expiration available' };
   }
 
   // Requires existing stock position
@@ -347,9 +366,10 @@ function buildSetup(
       unavailableReason: 'Requires an existing stock/short-stock position' };
   }
 
-  // Build legs
+  // Build legs — far-expiration legs draw from farChain; all others from the near chain.
   const builtLegs: SetupLeg[] = [];
   for (const legDef of profile.legs) {
+    const legChain = legDef.farExpiration ? farChain! : chain;
     let contract: OptionContract | null;
 
     if (legDef.action === 'buy' && LIZARD_HEDGE_SLUGS.has(profile.slug)) {
@@ -360,10 +380,10 @@ function buildSetup(
         .reduce((sum, l) => sum + l.mid * l.qty, 0);
       const sellLeg = builtLegs.find(l => l.side === legDef.side && l.action === 'sell');
       contract = sellLeg
-        ? findLizardHedge(chain.contracts, legDef.side, sellLeg.strike, shortCreditPerShare)
-        : findByDelta(chain.contracts, legDef.side, legDef.deltaTarget, underlyingPx, trustDeltas);
+        ? findLizardHedge(legChain.contracts, legDef.side, sellLeg.strike, shortCreditPerShare)
+        : findByDelta(legChain.contracts, legDef.side, legDef.deltaTarget, underlyingPx, trustDeltas);
     } else {
-      contract = findByDelta(chain.contracts, legDef.side, legDef.deltaTarget, underlyingPx, trustDeltas);
+      contract = findByDelta(legChain.contracts, legDef.side, legDef.deltaTarget, underlyingPx, trustDeltas);
     }
 
     if (!contract) {
@@ -373,7 +393,7 @@ function buildSetup(
     }
     builtLegs.push({
       action: legDef.action, side: legDef.side, strike: contract.strike,
-      expiration: chain.expiration, delta: contract.delta,
+      expiration: legChain.expiration, delta: contract.delta,
       gamma: contract.gamma ?? null, theta: contract.theta ?? null, vega: contract.vega ?? null,
       bid: contract.bid, ask: contract.ask, mid: (contract.bid + contract.ask) / 2,
       iv: contract.iv * 100, // decimal fraction → percentage (see docs/formulas.md#iv-conventions)
@@ -398,7 +418,26 @@ function buildSetup(
   let maxLoss:   number | null = null;
   let breakevens: number[]    = [];
 
-  if (putSell && !putBuy && !callSell && !callBuy) {
+  if (hasFarLeg) {
+    // Calendar / PMCC diagonal: legs span two expirations, so max profit is not
+    // closed-form (the long/far leg retains time value when the short/near leg expires).
+    // Value the long leg's residual at the short leg's expiry via Black-Scholes, assuming
+    // the underlying pins the short strike — the calendar/diagonal profit peak.
+    // see docs/formulas.md#calendar-diagonal-pnl
+    const longLeg  = builtLegs.find(l => l.action === 'buy');
+    const shortLeg = builtLegs.find(l => l.action === 'sell');
+    if (longLeg && shortLeg && farDte !== null) {
+      const isCall    = longLeg.side === 'call';
+      const evalSpot  = shortLeg.strike;                       // underlying ≈ short strike at near expiry
+      const remYears  = Math.max(0, farDte - dte) / 365;       // long leg's life left after short expires
+      const longResidual   = bsPrice(evalSpot, longLeg.strike, remYears, longLeg.iv / 100, RISK_FREE_RATE, isCall);
+      const shortIntrinsic = isCall ? Math.max(0, evalSpot - shortLeg.strike) : Math.max(0, shortLeg.strike - evalSpot);
+      const posValuePerShare = longResidual * longLeg.qty - shortIntrinsic * shortLeg.qty;
+      maxProfit  = posValuePerShare * 100 - Math.abs(dollarCredit); // close both at near expiry
+      maxLoss    = -Math.abs(dollarCredit);                         // worst case ≈ net debit paid
+      breakevens = [];                                              // not closed-form here
+    }
+  } else if (putSell && !putBuy && !callSell && !callBuy) {
     // Naked put
     maxProfit  = dollarCredit;
     maxLoss    = -(putSell.strike * 100 - dollarCredit);
@@ -619,6 +658,9 @@ export class StrategyLabService {
     const chain = await this.optionsProvider.getOptionsChain(t, expInfo.expiration);
     if (!chain.contracts.length) throw new Error(`Empty options chain for ${t} at ${expInfo.expiration}`);
 
+    // 3b. Far chain for calendar/PMCC long legs (one extra E*Trade call; null on failure)
+    const { farChain, farDte } = await this.fetchFarChain(t, expirations, expInfo.dte);
+
     // 4. Underlying price — live quote, chain-delta estimate as fallback
     const { underlyingPx, trustDeltas } = await this.resolveUnderlyingPrice(t, chain);
 
@@ -650,7 +692,7 @@ export class StrategyLabService {
 
     // 7. Score all strategies
     const scores: StrategyScore[] = PROFILES.map(profile => {
-      const setup = buildSetup(profile, chain, underlyingPx, expInfo.dte, currentAtmIv, trustDeltas);
+      const setup = buildSetup(profile, chain, underlyingPx, expInfo.dte, currentAtmIv, trustDeltas, farChain, farDte);
       setup.ticker = t;
       return scoreStrategy(profile, { ivRank: ctx.ivRank, ivDataPoints: ctx.ivDataPoints, bias: ctx.directionBias, isEtf }, setup);
     });
@@ -680,9 +722,30 @@ export class StrategyLabService {
     const { underlyingPx, trustDeltas } = await this.resolveUnderlyingPrice(t, chain);
     const currentAtmIv = computeAtmIv(chain, underlyingPx);
 
-    const setup = buildSetup(profile, chain, underlyingPx, expInfo.dte, currentAtmIv, trustDeltas);
+    // Far chain only needed for calendar/PMCC strategies — skip the extra call otherwise.
+    const { farChain, farDte } = profile.legs.some(l => l.farExpiration)
+      ? await this.fetchFarChain(t, expirations, expInfo.dte)
+      : { farChain: null, farDte: null };
+
+    const setup = buildSetup(profile, chain, underlyingPx, expInfo.dte, currentAtmIv, trustDeltas, farChain, farDte);
     setup.ticker = t;
     return setup;
+  }
+
+  /** Fetch the long-leg chain for calendar/PMCC structures. Returns nulls on any failure
+   *  so the caller degrades gracefully (those strategies show as unavailable). */
+  private async fetchFarChain(
+    ticker: string, expirations: string[], nearDte: number
+  ): Promise<{ farChain: OptionsChain | null; farDte: number | null }> {
+    const farInfo = selectFarExpiration(expirations, nearDte);
+    if (!farInfo) return { farChain: null, farDte: null };
+    try {
+      const farChain = await this.optionsProvider.getOptionsChain(ticker, farInfo.expiration);
+      if (!farChain.contracts.length) return { farChain: null, farDte: null };
+      return { farChain, farDte: farInfo.dte };
+    } catch {
+      return { farChain: null, farDte: null };
+    }
   }
 
   /** Get full scoring context without rebuilding setups (fast re-score for AI rationale). */
