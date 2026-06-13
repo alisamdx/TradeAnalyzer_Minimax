@@ -40,6 +40,21 @@ describe('direction-aware inflection replay summary', () => {
     db.close();
   });
 
+  it('includes inflection in chart data (strategies + direction-adjusted monthly HR)', () => {
+    const db = openDatabase(':memory:');
+    runMigrations(db, MIGRATIONS_DIR);
+    seedInflection(db, [
+      { ticker: 'UP_WIN',  dir: 1,  ret21: 5 },
+      { ticker: 'DN_WIN',  dir: -1, ret21: -4 },
+    ]);
+    const charts = new BriefReplayService(db, new ScoringService(db)).getChartData()!;
+    expect(charts.strategies.some(s => s.strategy === 'inflection')).toBe(true);
+    // monthly rows carry an inflection field; both seeded picks are wins (direction-adjusted)
+    const m = charts.monthly.find(r => r.month === '2026-01')!;
+    expect(m.inflection).toBe(100);
+    db.close();
+  });
+
   it('still treats bearish (legacy, direction NULL) as stock-down = win via fallback', () => {
     const db = openDatabase(':memory:');
     runMigrations(db, MIGRATIONS_DIR);

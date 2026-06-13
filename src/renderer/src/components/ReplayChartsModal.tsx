@@ -16,15 +16,17 @@ const TABS: { key: ChartTab; label: string }[] = [
 ];
 
 const STRAT_COLORS: Record<string, string> = {
-  buy:     '#4caf50',
-  bullish: '#2196f3',
-  income:  '#ff9800',
-  wheel:   '#9c27b0',
-  bearish: '#f44336',
+  buy:        '#4caf50',
+  bullish:    '#2196f3',
+  income:     '#ff9800',
+  wheel:      '#9c27b0',
+  bearish:    '#f44336',
+  inflection: '#00bcd4',
 };
 
 const STRAT_LABEL: Record<string, string> = {
   buy: 'Buy', bullish: 'Bullish', income: 'Income', wheel: 'Wheel', bearish: 'Bearish',
+  inflection: 'Inflection',
 };
 
 const TOOLTIP_STYLE: React.CSSProperties = {
@@ -271,7 +273,7 @@ export default function ReplayChartsModal({ data, onClose }: { data: ReplayChart
                 <YAxis domain={[0, 100]} tickFormatter={v => v + '%'} tick={{ fontSize: 11 }} width={40} />
                 <Tooltip formatter={makeFmt(v => v.toFixed(0) + '%')} contentStyle={TOOLTIP_STYLE} labelStyle={{ color: 'var(--text-muted)' }} />
                 <ReferenceLine y={50} stroke="rgba(255,255,255,0.2)" strokeDasharray="4 4" />
-                {(['buy', 'bullish', 'income', 'wheel', 'bearish'] as const).map(s => (
+                {(['buy', 'bullish', 'income', 'wheel', 'bearish', 'inflection'] as const).map(s => (
                   <Line
                     key={s}
                     type="monotone"
@@ -286,7 +288,7 @@ export default function ReplayChartsModal({ data, onClose }: { data: ReplayChart
               </LineChart>
             </ResponsiveContainer>
             <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginTop: 4, fontSize: 12 }}>
-              {(['buy', 'bullish', 'income', 'wheel', 'bearish'] as const).map(s => (
+              {(['buy', 'bullish', 'income', 'wheel', 'bearish', 'inflection'] as const).map(s => (
                 <span key={s} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                   <span style={{ width: 14, height: 2, background: STRAT_COLORS[s], display: 'inline-block' }} />
                   <span style={{ color: 'var(--text-muted)' }}>{STRAT_LABEL[s]}</span>

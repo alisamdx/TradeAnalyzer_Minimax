@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.33.2] — 2026-06-13
+
+### Fixed
+- **Brief Replay charts now include the Inflection strategy** — the Monthly hit-rate chart (labeled "all strategies") used a hardcoded 5-strategy list that omitted inflection, and the charts modal's color/label maps had no `inflection` entry (so it rendered gray/uncapitalized in the Performance, Regime, and Ticker tabs). Added inflection to `ReplayChartMonthlyRow` + the backend monthly builder (`mHr('inflection')`, using the already-direction-adjusted 21d return), and to `STRAT_COLORS`/`STRAT_LABEL` + the Monthly chart's line/legend lists. The curated Score-Signal and Rank charts (explicitly buy·bullish·bearish / buy·bullish·wheel) are unchanged by design.
+
 ## [0.33.1] — 2026-06-13
 
 ### Added

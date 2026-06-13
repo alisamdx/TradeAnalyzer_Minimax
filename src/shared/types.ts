@@ -2095,6 +2095,7 @@ export interface ReplayChartMonthlyRow {
   income: number | null;
   wheel: number | null;
   bearish: number | null;
+  inflection: number | null;
 }
 
 export interface ReplayChartData {

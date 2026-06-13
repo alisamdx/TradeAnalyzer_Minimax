@@ -855,6 +855,7 @@ export class BriefReplayService {
         income: mHr('income'),
         wheel: mHr('wheel'),
         bearish: mHr('bearish'),
+        inflection: mHr('inflection'),  // ret_21d already direction-adjusted above → up=win
       };
     });
 

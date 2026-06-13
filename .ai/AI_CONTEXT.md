@@ -2,7 +2,7 @@
 
 > **Read this first.** Self-contained snapshot of *what the app is today* so a fresh AI session is productive without re-reading the whole codebase. This file describes **current state** — not history. Release history lives in `CHANGELOG.md` / `changelogs/`. Operating rules live in `/CLAUDE.md`. Full spec lives in `Requirements/`.
 >
-> Last verified against code: 2026-06-13 (v0.33.1). When you make a material change, update the relevant section here in the same commit.
+> Last verified against code: 2026-06-13 (v0.33.2). When you make a material change, update the relevant section here in the same commit.
 
 ---
 
