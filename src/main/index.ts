@@ -60,6 +60,7 @@ import { DailyIntelligenceBriefJob } from './services/jobs/daily-intelligence-br
 import { EmailService } from './services/email-service.js';
 import { DailyTechnicalSignalsJob } from './services/jobs/daily-technical-signals-job.js';
 import { DailyOptionsSnapshotJob } from './services/jobs/daily-options-snapshot-job.js';
+import { DailyOptionsPremiumHistoryJob } from './services/jobs/daily-options-premium-history-job.js';
 import { DailyPaperSnapshotJob } from './services/jobs/daily-paper-snapshot-job.js';
 import { PaperTradingService } from './services/paper-trading-service.js';
 import { registerPaperTradingIpc } from './ipc/ipc-paper-trading.js';
@@ -499,6 +500,19 @@ app.whenReady().then(() => {
     startupDelaySeconds: 60,          // after E*Trade tokens load from keychain
     dailyScheduleTime: '16:00',       // default schedule time (schedule disabled by default)
     defaultConfig: { callDelayMs: 500 }, // conservative default — avoids E*Trade 429s
+  });
+
+  // Daily Options Premium History — captures durable, query-friendly option-premium
+  // history (wheel CSP + income CSP/CC) for long-term ROC analysis. Registered last
+  // among sub-jobs → highest sequence_order (runs at the bottom of the batch sequence,
+  // after the 06:00 wheel snapshot so it can reuse that snapshot for wheel rows).
+  // No startup run (heavy E*Trade pass); driven by the orchestrator / manual trigger.
+  const optionsPremiumHistoryJob = new DailyOptionsPremiumHistoryJob(db, analysisService, optionsProvider);
+  batchService.registerJob('daily-options-premium-history', optionsPremiumHistoryJob, {
+    dailyScheduleTime: '07:00',   // after the 06:00 wheel snapshot (schedule disabled by default)
+    startupDelaySeconds: 0,
+    runOnStartup: false,
+    defaultConfig: { callDelayMs: 1100, maxTickers: 1500, captureWheel: true, captureIncome: true },
   });
 
   // Batch Orchestrator — registered last so all sub-jobs are already in batch_jobs.

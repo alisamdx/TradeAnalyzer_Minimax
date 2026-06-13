@@ -115,6 +115,8 @@ Views `v_open_positions`, `v_closed_positions`, `v_portfolio_summary` provide ca
 
 **`batch_runs`** — `id PK`, `job_id → batch_jobs`, `started_at`, `completed_at`, `status`, `tickers_attempted`, `tickers_updated`, `tickers_skipped`, `tickers_failed`, `notes`, `error_message`.
 
+**`options_premium_history`** (migration 040) — `id PK`, `as_of_date`, `ticker`, `strategy` (`wheel|income`), `structure` (`CSP|CC`), `last_price`, `strike`, `expiration`, `dte`, `delta`, `bid`, `ask`, `premium` (per-share credit), `annualized_return`, `iv`, `iv_rank`, `open_interest`, `breakeven`, `captured_at`; `UNIQUE(as_of_date, ticker, strategy)`. Durable daily capture of the recommended option structure for premium-based strategies, populated by the `daily-options-premium-history` batch job (wheel reused from the same-day snapshot; income fetched live). Never pruned — exists to enable true return-on-capital analysis over time.
+
 ## 2.14 Scoring & daily brief (migrations 022, 023, 030, 032)
 
 **`scoring_strategy_configs`** — `strategy PK` (`wheel|bullish|bearish|income|buy`), `signals` (JSON `ScoringSignal[]`), `version` (e.g. `baseline_v2`), `updated_at`.

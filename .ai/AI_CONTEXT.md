@@ -2,7 +2,7 @@
 
 > **Read this first.** Self-contained snapshot of *what the app is today* so a fresh AI session is productive without re-reading the whole codebase. This file describes **current state** — not history. Release history lives in `CHANGELOG.md` / `changelogs/`. Operating rules live in `/CLAUDE.md`. Full spec lives in `Requirements/`.
 >
-> Last verified against code: 2026-06-13 (v0.32.93). When you make a material change, update the relevant section here in the same commit.
+> Last verified against code: 2026-06-13 (v0.32.94). When you make a material change, update the relevant section here in the same commit.
 
 ---
 
@@ -142,15 +142,15 @@ Routing is a `currentView` string in `App.tsx`; cross-view navigation fires Cust
 
 **Infra**: `batch-service.ts`, `rate-limiter.ts`, `job-queue.ts`, `secure-settings.ts`, `logger.ts`, `csv.ts`, `backtest-engine.ts`, `backtest-metrics.ts`, `alerts-service.ts`, `agent-db-service.ts`.
 
-**Batch jobs** (`services/jobs/`, registered in `index.ts`): `batch-orchestrator-job` (sequence 1) · `daily-iv-capture` · `daily-market-sync-stocks`/`-etfs` (`market-sync-job.ts`) · `daily-screener-job` · `price-gap-fill-job` · `daily-technical-signals-job` · `daily-intelligence-brief-job` · `daily-options-snapshot-job` · `daily-paper-snapshot-job` · `earnings-refresh-job`.
+**Batch jobs** (`services/jobs/`, registered in `index.ts`): `batch-orchestrator-job` (sequence 1) · `daily-iv-capture` · `daily-market-sync-stocks`/`-etfs` (`market-sync-job.ts`) · `daily-screener-job` · `price-gap-fill-job` · `daily-technical-signals-job` · `daily-intelligence-brief-job` · `daily-options-snapshot-job` · `daily-paper-snapshot-job` · `earnings-refresh-job` · `daily-options-premium-history-job` (registered last = bottom of sequence; captures durable option-premium history).
 
 ---
 
-## 8. Data model (~52 tables, 38 migrations)
+## 8. Data model (~53 tables, 40 migrations)
 
 Authoritative DDL is in `migrations/`. Tables are created lazily (`CREATE TABLE IF NOT EXISTS`) and migrations are idempotent + count-agnostic in tests.
 
-38 migrations. `positions.position_type` CHECK now includes `'Long Put'` and `'Long Call'` (migration 036). `batch_runs` has `trigger TEXT NOT NULL DEFAULT 'manual'` and `slot_time TEXT` (migration 037). Migration 037 also shifted all `batch_jobs.sequence_order` +1 to reserve position 1 for the orchestrator. Migration 038 adds `replay_briefs` + `replay_outcomes` for Brief Replay.
+40 migrations. `positions.position_type` CHECK now includes `'Long Put'` and `'Long Call'` (migration 036). `batch_runs` has `trigger TEXT NOT NULL DEFAULT 'manual'` and `slot_time TEXT` (migration 037). Migration 037 also shifted all `batch_jobs.sequence_order` +1 to reserve position 1 for the orchestrator. Migration 038 adds `replay_briefs` + `replay_outcomes` for Brief Replay; 039 adds `replay_outcomes.close_price`/`close_date`. Migration 040 adds `options_premium_history` (durable daily option-premium capture).
 
 | Domain | Tables |
 | --- | --- |
@@ -162,6 +162,7 @@ Authoritative DDL is in `migrations/`. Tables are created lazily (`CREATE TABLE 
 | IV | `iv_history` (one row per ticker per trading day; 30-day ATM IV) |
 | Portfolio | `positions`, `position_analysis`, `advisor_sessions` |
 | Options strategy | `leaps_csp_runs`/`_opportunities`/`_opened`, `collared_leaps_runs`/`_opportunities`/`_opened`, `payoff_strategies` |
+| Options premium history | `options_premium_history` (one row per as_of_date+ticker+strategy; wheel/income strike+premium+IV; never pruned) |
 | Backtest | `backtest_configs`, `backtest_runs`, `backtest_trades`, `backtest_metrics` |
 | Alerts | `alerts` |
 | Batch | `batch_jobs` (incl. `config_json`, `sequence_order`), `batch_runs` |

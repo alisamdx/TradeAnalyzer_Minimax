@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.94] — 2026-06-13
+
+### Added
+- **Daily Options Premium History job + table** — a new batch job (`daily-options-premium-history`, registered last in the sequence) and table (`options_premium_history`, migration 040) that captures a durable, query-friendly daily time series of the recommended option structure (strike, expiry, premium, delta, bid/ask, IV, annualized return) per ticker for **premium-based strategies**. Wheel CSP rows are reused from the same-day wheel snapshot (`analysis_snapshots`) so no extra E*Trade calls are made; income CSP/CC rows are fetched live via `analyzeTicker('options_income')` — the previously-missing data. One row per `(as_of_date, ticker, strategy)`, **never pruned**. This closes the gap where income/wheel premium had no durable history: a year from now this enables **true return-on-capital** analysis (and real income/wheel ROC in Brief Replay, replacing the stayed-above-strike proxy). Configurable via `config_json` (`callDelayMs`, `maxTickers`, `captureWheel`, `captureIncome`). No startup run; driven by the orchestrator or manual trigger.
+
 ## [0.32.93] — 2026-06-13
 
 ### Added
