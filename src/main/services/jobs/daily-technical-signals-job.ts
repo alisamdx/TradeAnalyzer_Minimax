@@ -108,6 +108,53 @@ interface TechnicalResult {
   patternNames: string[];
   adx: number | null;
   supportLevel: number | null;  // 20-day low — support zone proxy for breakoutScore
+  // Breakout/continuation signals for the Inflection strategy. see docs/formulas.md#breakout-signals
+  breakoutState: number;             // -1 down breakdown / 0 none / 1 up breakout (with-trend only)
+  breakoutLevel: number | null;      // the 20d high (up) / low (down) broken
+  breakoutDecisiveness: number | null; // |close − level| / ATR(14)
+  volumeSurge: number | null;        // today vol / 20d avg vol
+  atrPct: number | null;             // ATR(14) / close × 100
+}
+
+// ─── ATR(14) on the most recent bar (Wilder-simple average of true range) ──────
+function computeAtr14(bars: Bar[]): number | null {
+  if (bars.length < 15) return null;
+  const tr: number[] = [];
+  for (let i = bars.length - 14; i < bars.length; i++) {
+    const h = bars[i]!.h, l = bars[i]!.l, pc = bars[i - 1]!.c;
+    tr.push(Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc)));
+  }
+  return tr.reduce((a, b) => a + b, 0) / tr.length;
+}
+
+// Fresh 20-day breakout/breakdown, gated to with-trend (continuation, not fade).
+// see docs/formulas.md#breakout-signals
+export function computeBreakout(
+  bars: Bar[], sma50: number | null
+): Pick<TechnicalResult, 'breakoutState' | 'breakoutLevel' | 'breakoutDecisiveness' | 'volumeSurge' | 'atrPct'> {
+  const none = { breakoutState: 0, breakoutLevel: null, breakoutDecisiveness: null, volumeSurge: null, atrPct: null };
+  if (bars.length < 35) return none;
+  const n = bars.length;
+  const close = bars[n - 1]!.c, prevClose = bars[n - 2]!.c;
+  const window = bars.slice(n - 21, n - 1); // prior 20 bars, excluding today
+  const prior20High = Math.max(...window.map(b => b.h));
+  const prior20Low  = Math.min(...window.map(b => b.l));
+  const atr = computeAtr14(bars);
+  if (!atr || atr <= 0) return none;
+  const vol20 = window.reduce((a, b) => a + b.v, 0) / window.length;
+
+  const up   = close > prior20High && prevClose <= prior20High && sma50 !== null && close > sma50;
+  const down = close < prior20Low  && prevClose >= prior20Low  && sma50 !== null && close < sma50;
+  if (!up && !down) return { ...none, atrPct: (atr / close) * 100 };
+
+  const level = up ? prior20High : prior20Low;
+  return {
+    breakoutState: up ? 1 : -1,
+    breakoutLevel: level,
+    breakoutDecisiveness: Math.abs(close - level) / atr,
+    volumeSurge: vol20 > 0 ? bars[n - 1]!.v / vol20 : null,
+    atrPct: (atr / close) * 100,
+  };
 }
 
 // Mirrors validate-all-service.ts buildValidateResult() buy signal logic.
@@ -179,6 +226,9 @@ function computeSignals(ticker: string, bars: Bar[]): TechnicalResult | null {
   const supportLevel = bars.length >= 20
     ? Math.min(...bars.slice(-20).map(b => b.l))
     : null;
+
+  // Breakout/continuation signals (Inflection strategy)
+  const breakout = computeBreakout(bars, sma50);
 
   // Patterns + demand zone
   const patterns = detectAllPatterns(bars, 5);
@@ -263,6 +313,7 @@ function computeSignals(ticker: string, bars: Bar[]): TechnicalResult | null {
     patternNames: bullishPatternNames,
     adx,
     supportLevel,
+    ...breakout,
   };
 }
 
@@ -323,13 +374,15 @@ export class DailyTechnicalSignalsJob implements BatchJobHandler {
          macd_value, macd_signal_line, macd_bullish_cross,
          bollinger_position, trend_label,
          buy_signal_score, buy_signal_strength, pattern_names,
-         adx, support_level)
+         adx, support_level,
+         breakout_state, breakout_level, breakout_decisiveness, volume_surge, atr_pct)
       VALUES
         (?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ?, ?, ?, ?,
          ?, ?, ?,
          ?, ?,
          ?, ?, ?,
-         ?, ?)
+         ?, ?,
+         ?, ?, ?, ?, ?)
       ON CONFLICT(ticker) DO UPDATE SET
         computed_at         = excluded.computed_at,
         price               = excluded.price,
@@ -346,7 +399,12 @@ export class DailyTechnicalSignalsJob implements BatchJobHandler {
         buy_signal_strength = excluded.buy_signal_strength,
         pattern_names       = excluded.pattern_names,
         adx                 = excluded.adx,
-        support_level       = excluded.support_level
+        support_level       = excluded.support_level,
+        breakout_state         = excluded.breakout_state,
+        breakout_level         = excluded.breakout_level,
+        breakout_decisiveness  = excluded.breakout_decisiveness,
+        volume_surge           = excluded.volume_surge,
+        atr_pct                = excluded.atr_pct
     `);
 
     const BATCH = 100;
@@ -397,6 +455,11 @@ export class DailyTechnicalSignalsJob implements BatchJobHandler {
             JSON.stringify(result.patternNames),
             result.adx,
             result.supportLevel,
+            result.breakoutState,
+            result.breakoutLevel,
+            result.breakoutDecisiveness,
+            result.volumeSurge,
+            result.atrPct,
           );
           written++;
         }

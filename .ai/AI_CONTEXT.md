@@ -2,7 +2,7 @@
 
 > **Read this first.** Self-contained snapshot of *what the app is today* so a fresh AI session is productive without re-reading the whole codebase. This file describes **current state** — not history. Release history lives in `CHANGELOG.md` / `changelogs/`. Operating rules live in `/CLAUDE.md`. Full spec lives in `Requirements/`.
 >
-> Last verified against code: 2026-06-13 (v0.32.97). When you make a material change, update the relevant section here in the same commit.
+> Last verified against code: 2026-06-13 (v0.32.98). When you make a material change, update the relevant section here in the same commit.
 
 ---
 
@@ -146,11 +146,11 @@ Routing is a `currentView` string in `App.tsx`; cross-view navigation fires Cust
 
 ---
 
-## 8. Data model (~53 tables, 40 migrations)
+## 8. Data model (~53 tables, 41 migrations)
 
 Authoritative DDL is in `migrations/`. Tables are created lazily (`CREATE TABLE IF NOT EXISTS`) and migrations are idempotent + count-agnostic in tests.
 
-40 migrations. `positions.position_type` CHECK now includes `'Long Put'` and `'Long Call'` (migration 036). `batch_runs` has `trigger TEXT NOT NULL DEFAULT 'manual'` and `slot_time TEXT` (migration 037). Migration 037 also shifted all `batch_jobs.sequence_order` +1 to reserve position 1 for the orchestrator. Migration 038 adds `replay_briefs` + `replay_outcomes` for Brief Replay; 039 adds `replay_outcomes.close_price`/`close_date`. Migration 040 adds `options_premium_history` (durable daily option-premium capture).
+40 migrations. `positions.position_type` CHECK now includes `'Long Put'` and `'Long Call'` (migration 036). `batch_runs` has `trigger TEXT NOT NULL DEFAULT 'manual'` and `slot_time TEXT` (migration 037). Migration 037 also shifted all `batch_jobs.sequence_order` +1 to reserve position 1 for the orchestrator. Migration 038 adds `replay_briefs` + `replay_outcomes` for Brief Replay; 039 adds `replay_outcomes.close_price`/`close_date`. Migration 040 adds `options_premium_history` (durable daily option-premium capture). Migration 041 adds breakout signals to `technical_signals` (`breakout_state`, `breakout_level`, `breakout_decisiveness`, `volume_surge`, `atr_pct`) for the forthcoming Inflection strategy.
 
 | Domain | Tables |
 | --- | --- |
@@ -236,6 +236,7 @@ Authoritative DDL is in `migrations/`. Tables are created lazily (`CREATE TABLE 
 - **Brief Replay (point-in-time brief backtest)**: spec'd in `Requirements/BRIEF_REPLAY_SPEC.md` (2026-06-11). Replays the brief for past dates using bars/iv_history `<= asOf` and EDGAR facts filtered by `filed <= asOf` (true point-in-time fundamentals — no history table needed); same ScoringService/configs; structures skipped or synthesized (no historical E*Trade chains); outcomes from forward bars into new `replay_briefs`/`replay_outcomes` tables. Open questions in spec §8 (iv_history depth, stage-4 option, output surface).
 - ~~**Second expiration fetch for PMCC/calendar (Strategy Lab)**~~ — DONE (v0.32.96). The lab fetches a far chain (~120 DTE) via `selectFarExpiration` + `fetchFarChain`; `buildSetup` builds PMCC/PMCP/calendars across two expirations; calendar/diagonal max profit via Black-Scholes (`black-scholes.ts`, `docs/formulas.md#calendar-diagonal-pnl`). One extra E*Trade chain call per `validate()`.
 - **Real income/wheel ROC view (deferred until data matures)**: `options_premium_history` (v0.32.94) accumulates real CSP/CC premium daily; the Brief Replay readiness banner (v0.32.95) flips to "ready" at ~40 matured days (≈ a quarter out). When ready, build a true income/wheel ROC analysis off `options_premium_history` joined to forward `historical_prices` (premium kept if expired OTM, else assignment P&L) — replaces the stayed-above-strike proxy. Could also feed real income/wheel ROC into Brief Replay outcomes.
+- **Inflection strategy (breakout credit spread) — Phases 2 & 3**: Phase 1 (v0.32.98) ships the breakout signals on `technical_signals` (migration 041; `breakout_state`/`level`/`decisiveness`/`volume_surge`/`atr_pct`). **Phase 2**: add `inflection` as a 6th `ScoringStrategy` (type in scoring-service.ts + types.ts; `STRATEGIES` arrays in scoring-service, brief job, DailyBriefView, BriefReplayView; `BASELINE_CONFIGS` + `seedBaselines`; scorer reads the new signals via `gatherSignalData`/`scoreFromSignalData`) — validate in Brief Replay first. **Phase 3**: credit-vertical construction in `strategy-lab-service.ts` (bull-put-spread / bear-call-spread, short strike at `breakout_level ∓ ~0.5 ATR`, IV-rank filter), brief `STRATEGY_RELEVANT_SLUGS` + liquidity gate, 6th brief section in DailyBriefView. Offline validation: top-quintile breakout credit spreads expire OTM ~84–90%; high-IV filter ~free. Design decided 2026-06-13: breakout/continuation (not fade), both directions, credit spreads, validate-first.
 - **v1.0.0 cut**: pending one week of real usage validation, then bump 0.32.6 → 1.0.0.
 - **Requirements/ and UserManual/ expansion**: queued after the documentation refresh (items #2 and #3 of the docs task).
 - Wheel suitability formula and portfolio Greeks math are documented in `docs/formulas.md`.

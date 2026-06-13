@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.98] — 2026-06-13
+
+### Added
+- **Breakout/continuation signals (Inflection strategy — Phase 1 of 3)** — `DailyTechnicalSignalsJob` now computes and stores five breakout signals per ticker (migration 041 adds them to `technical_signals`): `breakout_state` (−1 fresh 20-day-low breakdown in a downtrend / 0 none / 1 fresh 20-day-high breakout in an uptrend), `breakout_level` (the broken 20-day high/low), `breakout_decisiveness` (`|close − level| / ATR14`), `volume_surge` (today vs 20-day avg volume), and `atr_pct` (`ATR14 / close × 100`). Gated to **with-trend continuation** (up-breaks above SMA50, down-breaks below). These feed the forthcoming Inflection strategy (a directional credit spread anchored at the breakout level); nothing reads them yet, so this phase is purely additive. Validated offline: top-quintile breakouts let a credit spread placed ~0.5–1 ATR beyond the level expire OTM ~84–90% of the time. See `docs/formulas.md#breakout-signals`.
+
 ## [0.32.97] — 2026-06-13
 
 ### Changed

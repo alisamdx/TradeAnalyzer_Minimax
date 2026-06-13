@@ -507,3 +507,22 @@ Two scores measure tradability; both now weigh same-day **volume** alongside ope
 **Wheel `optionLiquidityScore` (0–10)** — on the recommended CSP contract: open interest ≥50 → +4, relative spread ≤5% → +4, volume ≥50 → +2.
 
 Rationale: open interest is *standing* interest; volume is *today's* activity. A high-OI/zero-volume strike (stale interest) is no longer scored as fully liquid, and an actively traded low-OI strike is credited. The brief's hard liquidity gate (drop best relevant structure `< 5/15`) is unchanged.
+
+## Breakout / continuation signals {#breakout-signals}
+
+Inputs to the **Inflection** strategy (a directional credit spread anchored at a breakout level), computed nightly by `DailyTechnicalSignalsJob` and stored on `technical_signals`. A breakout is **fresh** (today crosses, yesterday hadn't) and **with-trend** (continuation, not fade):
+
+```
+prior20High = max(high[t−20 … t−1]) ;  prior20Low = min(low[t−20 … t−1])
+ATR14       = mean(trueRange) over the last 14 bars
+up-break    = close > prior20High AND prevClose ≤ prior20High AND close > SMA50
+down-break  = close < prior20Low  AND prevClose ≥ prior20Low  AND close < SMA50
+
+breakout_state         = +1 (up) | −1 (down) | 0 (none)
+breakout_level         = prior20High (up) | prior20Low (down)
+breakout_decisiveness  = |close − level| / ATR14        (how far beyond, in ATR units)
+volume_surge           = volume[t] / mean(volume[t−20 … t−1])
+atr_pct                = ATR14 / close × 100             (expected-move / range potential)
+```
+
+The strategy ranks top-quintile breakouts by a composite of decisiveness + volume_surge + atr_pct and sells a credit spread with the short strike placed ~0.5–1 ATR beyond `breakout_level` (further OTM), filtered to high IV rank. Validation: top-quintile breakouts let that spread expire OTM ~84–90% of the time; requiring high IV costs ~2% win rate.
