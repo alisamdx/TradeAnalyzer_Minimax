@@ -1418,6 +1418,7 @@ export interface SetupLeg {
   mid:          number;
   iv:           number;
   openInterest: number | null;
+  volume:       number | null;
   qty:          number;
 }
 

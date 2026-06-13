@@ -7,6 +7,7 @@ import { withTransaction } from '../db/connection.js';
 import type { DataProvider } from './data-provider.js';
 import type { OptionsProvider } from './options-provider.js';
 import { QuoteCache, FundamentalsCache } from './cache-service.js';
+import { fillPrice } from './options-fill.js';
 import { TokenBucketRateLimiter } from './rate-limiter.js';
 import { JobQueue } from './job-queue.js';
 import type {
@@ -880,8 +881,9 @@ export class AnalysisService {
     }
 
     const { contract, dte } = chain;
-    const mid = (contract.bid + contract.ask) / 2;
-    const premium = mid / 2; // credit received (mid-price / 2 = conservative estimate)
+    // Credit received, modeled at a realistic short fill (below mid toward the bid) rather
+    // than the optimistic mid or the old flat mid/2 hack. see docs/formulas.md#fill-model
+    const premium = fillPrice(contract.bid, contract.ask, 'sell');
 
     if (!price) {
       return this.emptyOptionsIncome(ticker, price, ivRank, 'No quote available.');
@@ -991,10 +993,14 @@ export class AnalysisService {
       const spread = (bid > 0 && ask > 0 && ask > bid)
         ? ((ask - bid) / ((ask + bid) / 2)) * 100
         : 0;
+      // OI (standing interest) + spread (fill cost) + same-day volume (today's activity),
+      // so a high-OI/zero-volume strike isn't scored as fully liquid. see docs/formulas.md#liquidity-score
       const oiPass = (chain.contract.openInterest ?? 0) >= 50;
       const spreadPass = spread <= 5;
-      if (oiPass) liquidityScore += 5;
-      if (spreadPass) liquidityScore += 5;
+      const volPass = (chain.contract.volume ?? 0) >= 50;
+      if (oiPass) liquidityScore += 4;
+      if (spreadPass) liquidityScore += 4;
+      if (volPass) liquidityScore += 2;
     }
 
     // Detect ETF: ROE and FCF are N/A (null) — award those points automatically.
@@ -1025,8 +1031,8 @@ export class AnalysisService {
     }
 
     const { contract, dte } = chain;
-    const mid = (contract.bid + contract.ask) / 2;
-    const premium = mid / 2;
+    // CSP credit at a realistic short fill (below mid toward the bid). see docs/formulas.md#fill-model
+    const premium = fillPrice(contract.bid, contract.ask, 'sell');
     const annual = annualizedReturn(premium, contract.strike, dte);
 
     return {

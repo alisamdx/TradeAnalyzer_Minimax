@@ -13,6 +13,7 @@ import type { Database } from 'better-sqlite3';
 import type { DataProvider, HistoricalBar, OptionContract, OptionsChain } from './data-provider.js';
 import type { OptionsProvider } from './options-provider.js';
 import { bsPrice, RISK_FREE_RATE } from './black-scholes.js';
+import { fillPrice } from './options-fill.js';
 import type {
   StrategyLabContext,
   StrategyLabDirectionBias,
@@ -397,14 +398,16 @@ function buildSetup(
       gamma: contract.gamma ?? null, theta: contract.theta ?? null, vega: contract.vega ?? null,
       bid: contract.bid, ask: contract.ask, mid: (contract.bid + contract.ask) / 2,
       iv: contract.iv * 100, // decimal fraction → percentage (see docs/formulas.md#iv-conventions)
-      openInterest: contract.openInterest, qty: legDef.qty ?? 1,
+      openInterest: contract.openInterest, volume: contract.volume ?? null, qty: legDef.qty ?? 1,
     });
   }
 
-  // Net credit per share (multiply by 100 for dollars)
+  // Net credit per share, priced at the modeled fill (sells below mid, buys above) rather
+  // than the optimistic mid — see docs/formulas.md#fill-model.
   let netCreditPerShare = 0;
   for (const leg of builtLegs) {
-    netCreditPerShare += leg.action === 'sell' ? leg.mid * leg.qty : -leg.mid * leg.qty;
+    const px = fillPrice(leg.bid, leg.ask, leg.action);
+    netCreditPerShare += leg.action === 'sell' ? px * leg.qty : -px * leg.qty;
   }
   const dollarCredit = netCreditPerShare * 100;
 
@@ -599,15 +602,20 @@ function scoreStrategy(
   // ── Liquidity Score (15 pts) ──────────────────────────────────────────────
   if (setup && setup.legs.length > 0 && !setup.unavailableReason) {
     const n = setup.legs.length;
-    let oiPts = 0, spreadPts = 0;
+    // Three components, summed per leg and averaged: bid-ask spread (8 — drives fill cost),
+    // open interest (4 — standing interest), and same-day volume (3 — today's activity, so a
+    // high-OI/zero-volume strike no longer scores as fully liquid). see docs/formulas.md#liquidity-score
+    let oiPts = 0, spreadPts = 0, volPts = 0;
     for (const leg of setup.legs) {
       const oi   = leg.openInterest ?? 0;
-      oiPts     += oi >= 500 ? 5 / n : oi >= 100 ? 3 / n : 1 / n;
+      oiPts     += oi >= 500 ? 4 / n : oi >= 100 ? 2.5 / n : 0.5 / n;
       const mid  = (leg.bid + leg.ask) / 2;
       const spd  = mid > 0 ? (leg.ask - leg.bid) / mid : 1;
-      spreadPts += spd <= 0.05 ? 10 / n : spd <= 0.15 ? 6 / n : 2 / n;
+      spreadPts += spd <= 0.05 ? 8 / n : spd <= 0.15 ? 5 / n : 1 / n;
+      const vol  = leg.volume ?? 0;
+      volPts    += vol >= 100 ? 3 / n : vol >= 10 ? 1.5 / n : 0;
     }
-    liquidityScore = Math.min(15, Math.round(oiPts + spreadPts));
+    liquidityScore = Math.min(15, Math.round(oiPts + spreadPts + volPts));
     const avgOi = setup.legs.reduce((s, l) => s + (l.openInterest ?? 0), 0) / n;
     if (liquidityScore >= 12) flags.push(`✓ Good liquidity (avg OI: ${Math.round(avgOi).toLocaleString()})`);
     else if (liquidityScore >= 7) flags.push(`~ Moderate liquidity (avg OI: ${Math.round(avgOi).toLocaleString()})`);

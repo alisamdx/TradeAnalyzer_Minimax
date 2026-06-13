@@ -171,7 +171,7 @@ function bsDelta(strike: number, dte: number, isCall: boolean): number {
   return isCall ? normCdf(d1) : normCdf(d1) - 1;
 }
 
-function calContract(side: 'call' | 'put', strike: number, exp: string, dte: number): OptionContract {
+function calContract(side: 'call' | 'put', strike: number, exp: string, dte: number, volume = 100): OptionContract {
   const mid = bsPrice(CAL_SPOT, strike, dte / 365, CAL_IV, RISK_FREE_RATE, side === 'call');
   return {
     ticker: `TST${exp.replace(/-/g, '')}${side === 'call' ? 'C' : 'P'}${strike}`,
@@ -179,20 +179,20 @@ function calContract(side: 'call' | 'put', strike: number, exp: string, dte: num
     bid: Math.max(0.01, mid - 0.1), ask: mid + 0.1,
     delta: bsDelta(strike, dte, side === 'call'),
     gamma: 0.01, theta: -0.05, vega: 0.1, iv: CAL_IV,
-    openInterest: 500, volume: 100,
+    openInterest: 500, volume,
   };
 }
 
-function calChain(exp: string, dte: number): OptionsChain {
+function calChain(exp: string, dte: number, volume = 100): OptionsChain {
   const contracts: OptionContract[] = [];
   for (let strike = 70; strike <= 130; strike += 5) {
-    contracts.push(calContract('call', strike, exp, dte));
-    contracts.push(calContract('put', strike, exp, dte));
+    contracts.push(calContract('call', strike, exp, dte, volume));
+    contracts.push(calContract('put', strike, exp, dte, volume));
   }
   return { ticker: 'TST', expiration: exp, contracts, underlyingPrice: CAL_SPOT };
 }
 
-function calProviders(expirations: string[]) {
+function calProviders(expirations: string[], volume = 100) {
   const dataProvider = {
     getQuote: async () => ({ ticker: 'TST', last: CAL_SPOT, prevClose: CAL_SPOT, bid: null, ask: null, volume: null, dayHigh: null, dayLow: null }),
     getHistoricalBars: async () => makeBars(90, CAL_SPOT),
@@ -200,7 +200,7 @@ function calProviders(expirations: string[]) {
   const optionsProvider = {
     getOptionsExpirations: async () => expirations,
     getOptionsChain: async (_t: string, exp: string) =>
-      exp === FAR_EXP ? calChain(FAR_EXP, 120) : calChain(NEAR_EXP, 30),
+      exp === FAR_EXP ? calChain(FAR_EXP, 120, volume) : calChain(NEAR_EXP, 30, volume),
   } as unknown as OptionsProvider;
   return { dataProvider, optionsProvider };
 }
@@ -246,5 +246,30 @@ describe('StrategyLabService calendar/PMCC two-expiration build', () => {
     const cal = result.scores.find(s => s.slug === 'call-calendar')!;
     expect(cal.setup?.unavailableReason).toBe('No suitable far expiration available');
     expect(cal.setup?.legs).toHaveLength(0);
+  });
+
+  it('scores liquidity lower when same-day volume is absent (volume now counts)', async () => {
+    const p1 = calProviders([NEAR_EXP, FAR_EXP], 100);
+    const p0 = calProviders([NEAR_EXP, FAR_EXP], 0);
+    const active = await new StrategyLabService(p1.dataProvider, p1.optionsProvider).validate(makeDb(), 'TST');
+    const dead   = await new StrategyLabService(p0.dataProvider, p0.optionsProvider).validate(makeDb(), 'TST');
+
+    const liqActive = active.scores.find(s => s.slug === 'call-calendar')!.liquidityScore;
+    const liqDead   = dead.scores.find(s => s.slug === 'call-calendar')!.liquidityScore;
+    // Identical OI + spread; only same-day volume differs → the dead-volume structure scores lower.
+    expect(liqActive).toBeGreaterThan(liqDead);
+  });
+
+  it('models credits below mid (slippage haircut), reducing net credit', async () => {
+    const { dataProvider, optionsProvider } = calProviders([NEAR_EXP, FAR_EXP]);
+    const svc = new StrategyLabService(dataProvider, optionsProvider);
+    const result = await svc.validate(makeDb(), 'TST');
+
+    // Short naked put: single sell leg → credit must be below the mid-based credit.
+    const snp = result.scores.find(s => s.slug === 'short-naked-put')!;
+    const leg = snp.setup!.legs[0]!;
+    const midCredit = leg.mid * 100;
+    expect(snp.setup!.netCredit!).toBeLessThan(midCredit);     // haircut applied
+    expect(snp.setup!.netCredit!).toBeGreaterThan(leg.bid * 100); // but not worse than natural
   });
 });

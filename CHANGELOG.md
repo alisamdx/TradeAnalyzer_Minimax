@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.32.97] — 2026-06-13
+
+### Changed
+- **Realistic option fill modeling (slippage haircut)** — credits/debits are no longer priced at the optimistic mid. A new shared `fillPrice()` (`options-fill.ts`) models a leg's fill toward the disadvantageous side: sells fill below mid (toward the bid), buys above mid (toward the ask), by `SLIPPAGE_FRACTION` (0.5) × the half-spread. Applied to Strategy Lab `buildSetup` net credit/debit (incl. PMCC/calendar net debit) and to wheel/income premium in `analysis-service.ts`. **Wheel & income previously used `premium = mid/2`** — an indefensible flat 50% haircut; they now use the realistic fill (premiums rise toward accurate, which shifts their scoring rankings and the values captured in `options_premium_history`). The Strategy Lab previously used raw mid (optimistic); its credits now drop slightly. The effect is largest where liquidity is worst — exactly where it should be. See `docs/formulas.md#fill-model`.
+- **Liquidity score now counts same-day volume** — the Strategy Lab `liquidityScore` (0–15) is rebalanced to spread 8 / open interest 4 / **volume 3**, and the wheel `optionLiquidityScore` (0–10) to OI 4 / spread 4 / **volume 2**. A high-OI/zero-volume strike (stale interest that won't fill well) no longer scores as fully liquid; an actively-traded low-OI strike is credited. `SetupLeg` gains a `volume` field. See `docs/formulas.md#liquidity-score`.
+
 ## [0.32.96] — 2026-06-13
 
 ### Added

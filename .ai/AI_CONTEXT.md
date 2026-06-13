@@ -2,7 +2,7 @@
 
 > **Read this first.** Self-contained snapshot of *what the app is today* so a fresh AI session is productive without re-reading the whole codebase. This file describes **current state** — not history. Release history lives in `CHANGELOG.md` / `changelogs/`. Operating rules live in `/CLAUDE.md`. Full spec lives in `Requirements/`.
 >
-> Last verified against code: 2026-06-13 (v0.32.96). When you make a material change, update the relevant section here in the same commit.
+> Last verified against code: 2026-06-13 (v0.32.97). When you make a material change, update the relevant section here in the same commit.
 
 ---
 
@@ -225,6 +225,8 @@ Authoritative DDL is in `migrations/`. Tables are created lazily (`CREATE TABLE 
 - **Live-DB inspection needs a write-capable connection** — `readonly: true` on Windows can't attach the WAL's `-shm` index and silently reads only pre-checkpoint state (recent writes look missing for minutes). Use `new Database(path)` for ad-hoc queries while the app runs; plain SELECTs are safe in WAL mode.
 - **Batch Orchestrator** (`batch-orchestrator-job.ts`, id `batch-orchestrator`) is the only job that should have a schedule. Its schedule slots live in `config_json.scheduleSlots` (string array of `'HH:MM'` ET times); `daily_schedule_time` is kept as a display fallback. The `checkSchedule()` multi-slot path fires each slot at most once per day (tracked via `batch_runs.slot_time`). All other jobs should have their individual schedules disabled. The orchestrator calls sub-jobs via `BatchService.runJobDirect()` (no mutex, no notifications). "Run All in Sequence" button excludes the orchestrator (`id !== 'batch-orchestrator'` filter). Remote trigger via `POST /api/v1/orchestrator/run` (X-Agent-Token auth) returns immediately; poll `GET /api/v1/orchestrator/status`.
 - **`batch_runs.trigger`** (`'manual'|'schedule'|'startup'`) and **`batch_runs.slot_time`** are set on every run including sub-jobs called by the orchestrator (they inherit the orchestrator's trigger and slot_time).
+- **Option P&L is priced at the modeled fill, not mid** (`options-fill.ts` `fillPrice`, `SLIPPAGE_FRACTION=0.5`): sells fill below mid toward the bid, buys above toward the ask, by 0.5×half-spread. Used by Strategy Lab `buildSetup` net credit/debit and wheel/income `premium` (which **replaced the old `premium = mid/2` placeholder** — wheel/income premiums are now higher/realistic, which shifted their scoring rankings and the `options_premium_history` capture). `docs/formulas.md#fill-model`.
+- **Liquidity scores weigh same-day volume** (v0.32.97): Strategy Lab `liquidityScore` (0–15) = spread 8 / OI 4 / volume 3; wheel `optionLiquidityScore` (0–10) = OI 4 / spread 4 / volume 2. `SetupLeg` has a `volume` field. Brief hard gate still drops best relevant structure `<5/15`. `docs/formulas.md#liquidity-score`.
 - **Fake-timer tests** use `flushTimersUntil()`, not `vi.runAllTimers()` (the rate limiter's promise chain won't drain otherwise).
 
 ---

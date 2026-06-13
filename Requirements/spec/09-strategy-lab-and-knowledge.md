@@ -38,8 +38,8 @@ Each strategy is scored 0–100 as the sum of four components, then graded:
 | --- | --- | --- |
 | IV score | 30 | IV rank vs the strategy's volatility preference (premium-sellers want high IV rank; debit strategies want low) |
 | Direction score | 30 | Alignment of the 90-day bias with the strategy's directional bucket |
-| Premium score | 25 | Credit/debit quality at the target structure |
-| Liquidity score | 15 | OI + bid-ask spread at the structure's strikes |
+| Premium score | 25 | Credit/debit quality at the target structure — credits/debits are priced at the modeled **fill** (sells below mid, buys above; `SLIPPAGE_FRACTION`×half-spread), not the optimistic mid. See `23-formulas.md` / `docs/formulas.md#fill-model`. |
+| Liquidity score | 15 | Bid-ask spread (8) + open interest (4) + same-day volume (3) at the structure's strikes, per leg, averaged. Volume distinguishes stale high-OI strikes from actively traded ones. See `docs/formulas.md#liquidity-score`. |
 
 Grade: **A+ / A / B / C / F** thresholds over the 0–100 total. Results sorted best-first. Each card shows expandable score bars, condition flags (✓ / ~ / ✗), the leg table, and action buttons:
 - **→ Explore Strategy** (switch to Explore tab),

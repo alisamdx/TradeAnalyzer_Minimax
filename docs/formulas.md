@@ -476,4 +476,34 @@ maxProfit     = posValue/sh × 100 − netDebit          // close both legs at n
 maxLoss       = −netDebit                              // worst case ≈ the debit paid
 ```
 
-`netDebit = (longMid·longQty − shortMid·shortQty) × 100`. For a calendar the edge is the short leg decaying faster than the long; `maxProfit` is positive when the short premium captured exceeds the long leg's decay over the period. Breakevens are not computed (no closed form). See `buildSetup()` in `strategy-lab-service.ts`.
+`netDebit = (longMid·longQty − shortMid·shortQty) × 100`. For a calendar the edge is the short leg decaying faster than the long; `maxProfit` is positive when the short premium captured exceeds the long leg's decay over the period. Breakevens are not computed (no closed form). See `buildSetup()` in `strategy-lab-service.ts`. (Net debit/credit are priced at the modeled fill, not mid — see below.)
+
+## Option fill model (slippage) {#fill-model}
+
+Mid is the best case; real fills cross the spread. A leg's modeled execution price is haircut toward the disadvantageous side (`src/main/services/options-fill.ts`):
+
+```
+mid        = (bid + ask) / 2
+fill_sell  = mid − slip · (ask − bid)/2        // sell below mid, toward the bid
+fill_buy   = mid + slip · (ask − bid)/2        // buy above mid, toward the ask
+```
+
+- `slip = SLIPPAGE_FRACTION = 0.5` — the fraction of the half-spread given up. `slip=0` → mid (optimistic), `slip=1` → natural price (bid for sells / ask for buys).
+- Locked / crossed / degenerate quotes (`ask ≤ bid` or `mid ≤ 0`) fall back to mid. Result is floored at 0.
+- Applied to: Strategy Lab `buildSetup` net credit/debit (and thus PMCC/calendar net debit + reward/risk), and wheel/income `premium` in `analysis-service.ts` (which replaced the old flat `mid/2` placeholder). The haircut is largest on wide-spread (illiquid) legs — where mid is least achievable.
+
+## Option liquidity score {#liquidity-score}
+
+Two scores measure tradability; both now weigh same-day **volume** alongside open interest and spread.
+
+**Strategy Lab `liquidityScore` (0–15)** — per leg, averaged across legs:
+
+| Component | Max | Thresholds |
+|---|---|---|
+| Bid-ask spread (relative `(ask−bid)/mid`) | 8 | ≤5% → 8, ≤15% → 5, else 1 |
+| Open interest | 4 | ≥500 → 4, ≥100 → 2.5, else 0.5 |
+| Same-day volume | 3 | ≥100 → 3, ≥10 → 1.5, else 0 |
+
+**Wheel `optionLiquidityScore` (0–10)** — on the recommended CSP contract: open interest ≥50 → +4, relative spread ≤5% → +4, volume ≥50 → +2.
+
+Rationale: open interest is *standing* interest; volume is *today's* activity. A high-OI/zero-volume strike (stale interest) is no longer scored as fully liquid, and an actively traded low-OI strike is credited. The brief's hard liquidity gate (drop best relevant structure `< 5/15`) is unchanged.
