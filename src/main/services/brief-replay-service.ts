@@ -11,7 +11,7 @@ import type { Database } from 'better-sqlite3';
 import type { ScoringService, TickerSignalData } from './scoring-service.js';
 import { STRATEGIES } from './scoring-service.js';
 import { isTradingDay } from './iv-history-service.js';
-import type { ReplayProgressEvent, ReplayPickRow, ReplaySummary, ScreenResultPayload } from '@shared/types.js';
+import type { ReplayProgressEvent, ReplayPickRow, ReplaySummary, ReplayChartData, ReplayChartMonthlyRow, ScreenResultPayload } from '@shared/types.js';
 import { withTransaction } from '../db/connection.js';
 
 // Liquidity proxy thresholds (Option A — no options chains)
@@ -698,6 +698,129 @@ export class BriefReplayService {
       regimeMap.set(date, close > sma50 ? 'bullish' : 'bearish');
     }
     return regimeMap;
+  }
+
+  getChartData(): ReplayChartData | null {
+    type MetaRow = { n: number; mn: string | null; mx: string | null };
+    const meta = this.db.prepare(
+      'SELECT COUNT(DISTINCT as_of_date) as n, MIN(as_of_date) as mn, MAX(as_of_date) as mx FROM replay_briefs'
+    ).get() as MetaRow;
+    if (!meta.n) return null;
+
+    const regimeMap = this.computeSpyRegimes();
+
+    type ORow = { as_of_date: string; strategy: string; ticker: string; rank: number; composite_score: number; ret_21d: number | null };
+    const outcomes = this.db.prepare(`
+      SELECT rb.as_of_date, rb.strategy, ro.ticker, ro.rank, ro.composite_score, ro.ret_21d
+      FROM replay_outcomes ro
+      JOIN replay_briefs rb ON rb.id = ro.replay_brief_id
+      ORDER BY rb.as_of_date, rb.strategy, ro.rank
+    `).all() as ORow[];
+
+    const allDates = [...new Set(outcomes.map(r => r.as_of_date))].sort();
+    const bullSet = new Set(allDates.filter(d => regimeMap.get(d) === 'bullish'));
+    const bearSet = new Set(allDates.filter(d => regimeMap.get(d) === 'bearish'));
+
+    const avgFn = (arr: number[]): number | null =>
+      arr.length ? Math.round(arr.reduce((s, v) => s + v, 0) / arr.length * 10) / 10 : null;
+    const hrFn = (arr: number[], reverse = false): number | null =>
+      arr.length ? Math.round(arr.filter(v => reverse ? v < 0 : v > 0).length / arr.length * 100) : null;
+
+    const STRATS = ['buy', 'bullish', 'income', 'wheel', 'bearish'] as const;
+
+    const strategies = STRATS.map(s => {
+      const sRows = outcomes.filter(r => r.strategy === s);
+      const r21  = sRows.filter(r => r.ret_21d !== null).map(r => r.ret_21d as number);
+      const bullR = sRows.filter(r => bullSet.has(r.as_of_date) && r.ret_21d !== null).map(r => r.ret_21d as number);
+      const bearR = sRows.filter(r => bearSet.has(r.as_of_date) && r.ret_21d !== null).map(r => r.ret_21d as number);
+
+      // Score quintiles: split by composite_score rank, compute avg21d per quintile
+      const scored = sRows.filter(r => r.ret_21d !== null).slice().sort((a, b) => a.composite_score - b.composite_score);
+      const qn = Math.floor(scored.length / 5);
+      const scoreQuintiles = [0, 1, 2, 3, 4].map(i => {
+        const slice = scored.slice(i * qn, i === 4 ? scored.length : (i + 1) * qn);
+        return avgFn(slice.map(r => r.ret_21d as number));
+      });
+
+      // Rank 1–5 avg21d
+      const rankAvg = [1, 2, 3, 4, 5].map(rank =>
+        avgFn(sRows.filter(x => x.rank === rank && x.ret_21d !== null).map(x => x.ret_21d as number))
+      );
+
+      // Per-ticker aggregation (min 4 appearances)
+      const tickerMap = new Map<string, number[]>();
+      for (const row of sRows.filter(r => r.ret_21d !== null)) {
+        const arr = tickerMap.get(row.ticker) ?? [];
+        arr.push(row.ret_21d as number);
+        tickerMap.set(row.ticker, arr);
+      }
+      const rev = s === 'bearish';
+      const tickerStats = [...tickerMap.entries()]
+        .filter(([, arr]) => arr.length >= 4)
+        .map(([ticker, arr]) => ({
+          ticker, n: arr.length,
+          avg21d: avgFn(arr) ?? 0,
+          hr: hrFn(arr, rev) ?? 0,
+        }))
+        // bearish: best = most negative (stock fell); others: best = most positive
+        .sort((a, b) => rev ? a.avg21d - b.avg21d : b.avg21d - a.avg21d);
+
+      return {
+        strategy: s,
+        n: sRows.length,
+        avg21d: avgFn(r21),
+        hr21d: hrFn(r21, rev),
+        bullAvg21d: avgFn(bullR),
+        bullHr21d: hrFn(bullR, rev),
+        bullN: bullR.length,
+        bearAvg21d: avgFn(bearR),
+        bearHr21d: hrFn(bearR, rev),
+        bearN: bearR.length,
+        scoreQuintiles,
+        rankAvg,
+        topTickers: tickerStats.slice(0, 5),
+        worstTickers: tickerStats.slice(-5).reverse(),
+      };
+    });
+
+    // Monthly hit rate breakdown
+    const months = [...new Set(allDates.map(d => d.slice(0, 7)))].sort();
+    const monthly: ReplayChartMonthlyRow[] = months.map(ym => {
+      const mDates = allDates.filter(d => d.startsWith(ym));
+      const bul = mDates.filter(d => bullSet.has(d)).length;
+      const bea = mDates.filter(d => bearSet.has(d)).length;
+      const regime: ReplayChartMonthlyRow['regime'] =
+        bul > bea * 2 ? 'bull' : bea > bul * 2 ? 'bear' : 'mix';
+
+      const mHr = (strat: string): number | null => {
+        const r = outcomes.filter(x => x.strategy === strat && x.as_of_date.startsWith(ym) && x.ret_21d !== null);
+        const isRev = strat === 'bearish';
+        return r.length ? Math.round(r.filter(x => isRev ? (x.ret_21d as number) < 0 : (x.ret_21d as number) > 0).length / r.length * 100) : null;
+      };
+
+      return {
+        month: ym,
+        label: new Date(ym + '-15').toLocaleDateString('en-US', { month: 'short', year: '2-digit' }),
+        regime,
+        buy: mHr('buy'),
+        bullish: mHr('bullish'),
+        income: mHr('income'),
+        wheel: mHr('wheel'),
+        bearish: mHr('bearish'),
+      };
+    });
+
+    return {
+      dateRange: {
+        from: meta.mn ?? '',
+        to: meta.mx ?? '',
+        dates: meta.n,
+        picks: outcomes.filter(r => r.ret_21d !== null).length,
+      },
+      regimeDates: { bull: bullSet.size, bear: bearSet.size },
+      strategies,
+      monthly,
+    };
   }
 
   getDateRange(): { from: string | null; to: string | null } {

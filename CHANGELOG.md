@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.32.92] — 2026-06-13
+
+### Added
+- **Brief Replay: performance charts modal** — a "Charts" button appears after a replay run. Clicking it opens a full-screen modal with five tabs: Performance (avg 21d return + hit rate per strategy), Regime (bull vs bear SPY regime split), Monthly (HR21d line chart), Score Signal (score quintile → return chart exposing the anti-predictive scoring pattern, plus rank-order chart), and Tickers (top/worst tickers per strategy with at least 4 appearances). All aggregations are computed server-side in `BriefReplayService.getChartData()` using `computeSpyRegimes()` for regime splits. Bearish strategy HR/sorting is direction-aware (stock down = win). Charts use Recharts (existing dependency).
+
 ## [0.32.91] — 2026-06-13
 
 ### Fixed

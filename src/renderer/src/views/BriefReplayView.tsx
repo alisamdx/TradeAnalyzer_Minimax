@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import type { ReplayPickRow, ReplayProgressEvent, ReplaySummary } from '@shared/types.js';
+import type { ReplayPickRow, ReplayProgressEvent, ReplaySummary, ReplayChartData } from '@shared/types.js';
+import ReplayChartsModal from '../components/ReplayChartsModal.js';
 
 const STRATEGIES = ['wheel', 'bullish', 'bearish', 'income', 'buy'] as const;
 type Strategy = (typeof STRATEGIES)[number];
@@ -246,6 +247,8 @@ export default function BriefReplayView() {
   const [filterStrategy,   setFilterStrategy]   = useState<Strategy | ''>('');
   const [existingRange,    setExistingRange]     = useState<{ from: string | null; to: string | null }>({ from: null, to: null });
   const [error,            setError]             = useState<string | null>(null);
+  const [showCharts,       setShowCharts]        = useState(false);
+  const [chartData,        setChartData]         = useState<ReplayChartData | null>(null);
 
   const unsubRef = useRef<(() => void) | null>(null);
 
@@ -300,6 +303,14 @@ export default function BriefReplayView() {
     setSummaries([]);
     setPicks([]);
     setExistingRange({ from: null, to: null });
+  };
+
+  const handleCharts = async () => {
+    const data = await window.api.briefReplay.getChartData();
+    if (data) {
+      setChartData(data);
+      setShowCharts(true);
+    }
   };
 
   // Cleanup subscription on unmount
@@ -357,6 +368,11 @@ export default function BriefReplayView() {
         {!runState.running && (summaries.length > 0 || picks.length > 0) && (
           <button className="btn-ghost" onClick={handleClear} style={{ fontSize: 12, color: 'var(--text-muted)' }}>
             Clear data
+          </button>
+        )}
+        {!runState.running && summaries.length > 0 && (
+          <button className="btn-secondary" onClick={handleCharts} style={{ fontSize: 13 }}>
+            Charts
           </button>
         )}
       </div>
@@ -428,6 +444,10 @@ export default function BriefReplayView() {
           </div>
           <PicksTable picks={picks} />
         </>
+      )}
+
+      {showCharts && chartData && (
+        <ReplayChartsModal data={chartData} onClose={() => setShowCharts(false)} />
       )}
     </div>
   );

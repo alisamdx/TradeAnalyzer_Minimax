@@ -82,4 +82,12 @@ export function registerBriefReplayIpc(service: BriefReplayService): void {
       return fail(err instanceof Error ? err.message : String(err));
     }
   });
+
+  ipcMain.handle('replay:get-chart-data', (): IpcResult<ReturnType<BriefReplayService['getChartData']>> => {
+    try {
+      return ok(service.getChartData());
+    } catch (err) {
+      return fail(err instanceof Error ? err.message : String(err));
+    }
+  });
 }

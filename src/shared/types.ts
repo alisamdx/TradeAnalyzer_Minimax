@@ -2057,3 +2057,38 @@ export interface ReplaySummary {
   // bearish only: count of dates where SPY was above its 50-day SMA (bullish regime → lower bearish HR)
   regimeRiskDates: number | null;
 }
+
+export interface ReplayChartStrategyStats {
+  strategy: string;
+  n: number;
+  avg21d: number | null;
+  hr21d: number | null;
+  bullAvg21d: number | null;
+  bullHr21d: number | null;
+  bullN: number;
+  bearAvg21d: number | null;
+  bearHr21d: number | null;
+  bearN: number;
+  scoreQuintiles: (number | null)[];  // Q1..Q5 avg21d
+  rankAvg: (number | null)[];         // rank 1..5 avg21d
+  topTickers: Array<{ ticker: string; n: number; avg21d: number; hr: number }>;
+  worstTickers: Array<{ ticker: string; n: number; avg21d: number; hr: number }>;
+}
+
+export interface ReplayChartMonthlyRow {
+  month: string;
+  label: string;
+  regime: 'bull' | 'bear' | 'mix' | null;
+  buy: number | null;
+  bullish: number | null;
+  income: number | null;
+  wheel: number | null;
+  bearish: number | null;
+}
+
+export interface ReplayChartData {
+  dateRange: { from: string; to: string; dates: number; picks: number };
+  regimeDates: { bull: number; bear: number };
+  strategies: ReplayChartStrategyStats[];
+  monthly: ReplayChartMonthlyRow[];
+}
