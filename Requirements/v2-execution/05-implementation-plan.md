@@ -68,7 +68,16 @@ Phase-4 `onBriefReady` hook), and an SSE stream (`/exec/events`) of the core's e
 - Control API (Fastify `:7433`) + SSE; `POST /exec/brief-ready` handoff (§1.3b/1.6).
 - **Deliverable:** a running headless engine (mock-fed) exposing live state over the API.
 
-## Phase 4 — Entry & exit policy *(no broker)* — 🚧 4a+4b DONE (v1.1.5, v1.1.6); 4c (exit policy) next
+## Phase 4 — Entry & exit policy *(no broker)* — ✅ DONE (4a v1.1.5, 4b v1.1.6, 4c v1.1.7)
+
+**4c (v1.1.7):** migration 048 (exit config columns + `exec_proposals.position_id`/`close_reason`)
++ `exit-policy.ts` (`ExitPolicy.evaluate`: priority-ordered stop/defensive [protective] +
+profit-target/time [discretionary]) + `position-manager.ts` (`ManagementLoop.runOnce`:
+protective → auto `submitClose`, discretionary → propose or auto per mode; `approveExitProposal`).
+**Remaining integration glue (Phase 4d / folded into Phase 6):** an `ExecutionEngine` assembly
+wiring management into the core's market-cycle hook + a brief→`PickInput` source feeding
+`generateEntries` on `/exec/brief-ready` (the latter needs real brief data to map
+`strategyLabResult` → legs, so it lands with the IBKR integration).
 
 **4a (v1.1.5):** migration 046 (entry-policy config columns) + `entry-policy.ts` (`EntryPolicy`:
 `filterPick` configurable filters, `buildProposal` price→size→gate→persist, `generateEntries`

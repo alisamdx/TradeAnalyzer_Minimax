@@ -2175,6 +2175,14 @@ export interface ExecConfig {
   entryWindowStart: string;                // ET HH:MM
   entryWindowEnd: string;                  // ET HH:MM
   repriceTolerancePct: number;
+  // exit policy (§3.3)
+  stopMultiple: number;                    // protective stop at × credit
+  defensiveDte: number;                    // protective defensive-expiry close
+  profitTargetPct: number;                 // discretionary, % of credit
+  holdDays: number;                        // discretionary planned exit
+  timeExitDte: number;                     // discretionary, 0 = off
+  profitTargetMode: 'propose' | 'auto';
+  timeExitMode: 'propose' | 'auto';
   updatedAt: string;
 }
 

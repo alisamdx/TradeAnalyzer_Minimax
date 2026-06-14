@@ -29,6 +29,13 @@ interface ConfigRow {
   entry_window_start: string;
   entry_window_end: string;
   reprice_tolerance_pct: number;
+  stop_multiple: number;
+  defensive_dte: number;
+  profit_target_pct: number;
+  hold_days: number;
+  time_exit_dte: number;
+  profit_target_mode: string;
+  time_exit_mode: string;
   updated_at: string;
 }
 
@@ -60,6 +67,13 @@ const CONFIG_COLUMN: Record<keyof ExecConfig, string> = {
   entryWindowStart: 'entry_window_start',
   entryWindowEnd: 'entry_window_end',
   repriceTolerancePct: 'reprice_tolerance_pct',
+  stopMultiple: 'stop_multiple',
+  defensiveDte: 'defensive_dte',
+  profitTargetPct: 'profit_target_pct',
+  holdDays: 'hold_days',
+  timeExitDte: 'time_exit_dte',
+  profitTargetMode: 'profit_target_mode',
+  timeExitMode: 'time_exit_mode',
   updatedAt: 'updated_at',
 };
 
@@ -96,6 +110,13 @@ export class RiskGovernor {
       entryWindowStart: r.entry_window_start,
       entryWindowEnd: r.entry_window_end,
       repriceTolerancePct: r.reprice_tolerance_pct,
+      stopMultiple: r.stop_multiple,
+      defensiveDte: r.defensive_dte,
+      profitTargetPct: r.profit_target_pct,
+      holdDays: r.hold_days,
+      timeExitDte: r.time_exit_dte,
+      profitTargetMode: r.profit_target_mode === 'auto' ? 'auto' : 'propose',
+      timeExitMode: r.time_exit_mode === 'auto' ? 'auto' : 'propose',
       updatedAt: r.updated_at,
     };
   }

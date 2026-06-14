@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.7] — 2026-06-14
+
+### Added
+- **v2 execution subsystem — Phase 4c (exit policy), completing Phase 4.** The position-management half of the trade logic. Migration **048** adds the configurable exit rules to `exec_config` (`stop_multiple` 2×, `defensive_dte` 2, `profit_target_pct` 50, `hold_days` 5, `time_exit_dte`, plus `profit_target_mode`/`time_exit_mode` propose|auto) and `exec_proposals.position_id`/`close_reason` (for exit proposals). `src/main/execution/exit-policy.ts` (`ExitPolicy.evaluate`, pure): priority-ordered rules — **protective** stop (loss ≥ 2× credit) and defensive-expiry close (auto, §0.3 invariant), then **discretionary** profit-target (≤ 50% of credit) and planned/time exit. `src/main/execution/position-manager.ts` (`ManagementLoop`): each cycle evaluates every open position and acts — protective → auto `submitClose`; discretionary → auto-close if the mode is `auto`, else raise an exit proposal (one pending per position); `approveExitProposal` closes on approval. Tests: `tests/exit-policy.test.ts` (9, every rule + priority + unpriced) and `tests/position-manager.test.ts` (6, protective auto-close, discretionary propose/auto, no-dup, no-trigger, approve-exit). Still dormant — wired to nothing yet; the engine assembly + brief→pick source land with the IBKR integration.
+
 ## [1.1.6] — 2026-06-14
 
 ### Added

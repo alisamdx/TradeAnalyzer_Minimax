@@ -21,6 +21,13 @@ const CONFIG: ExecConfig = {
   entryWindowStart: '10:00',
   entryWindowEnd: '15:00',
   repriceTolerancePct: 10,
+  stopMultiple: 2,
+  defensiveDte: 2,
+  profitTargetPct: 50,
+  holdDays: 5,
+  timeExitDte: 0,
+  profitTargetMode: 'propose',
+  timeExitMode: 'propose',
   updatedAt: '2026-06-14T00:00:00.000Z',
 };
 
