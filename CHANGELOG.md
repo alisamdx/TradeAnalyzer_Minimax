@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.4] — 2026-06-14
+
+### Added
+- **v2 execution subsystem — Phase 3b (control API + SSE), completing Phase 3.** `src/main/execution/control-api.ts` (`ExecutionControlApi`): a Fastify server on `127.0.0.1:7433` — separate from the v1 agent API (`:7432`) so it's reachable when the app window is closed — that wraps the `ExecutionCore` + `RiskGovernor`. Token-authed via `X-Agent-Token` (reuses `~/.tradeanalyzer/agent.token`), with a public `/exec/health` probe. Routes: engine control (`POST /exec/engine/start|stop|pause`, `POST /exec/kill-switch/trip|clear`), reads (`GET /exec/state|config|risk|positions|audit`), the zero-latency `POST /exec/brief-ready` handoff (audits + invokes an optional Phase-4 `onBriefReady` hook), and an SSE stream `GET /exec/events` of the core's engine-state/cycle/health/reconcile events. `tests/control-api.test.ts` (9 tests, via `fastify.inject`): auth gating, state, engine start/pause/stop, pause-409, kill trip/clear, config/risk/positions/audit reads, brief-ready hook, SSE frame formatting. Still dormant — wired to nothing yet.
+
 ## [1.1.3] — 2026-06-14
 
 ### Added

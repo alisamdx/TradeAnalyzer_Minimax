@@ -80,6 +80,9 @@ export class ExecutionCore {
   onEvent(cb: (e: CoreEvent) => void): void {
     this.emitter.on('event', cb);
   }
+  offEvent(cb: (e: CoreEvent) => void): void {
+    this.emitter.off('event', cb);
+  }
   private emit(e: CoreEvent): void {
     this.emitter.emit('event', e);
   }
