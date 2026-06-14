@@ -14,6 +14,13 @@ const CONFIG: ExecConfig = {
   maxPositionsPerStrategy: null,
   eligibleStrategies: ['inflection'],
   proposalShelfLifeMin: 120,
+  minCompositeScore: 70,
+  maxNewEntriesPerDay: 1,
+  maxNewEntriesPerWeek: 3,
+  avoidEarningsBeforeExpiry: true,
+  entryWindowStart: '10:00',
+  entryWindowEnd: '15:00',
+  repriceTolerancePct: 10,
   updatedAt: '2026-06-14T00:00:00.000Z',
 };
 

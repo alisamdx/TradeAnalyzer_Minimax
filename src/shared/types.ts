@@ -2155,7 +2155,8 @@ export interface ExecLeg {
   ratio: number;             // contracts multiple within the structure (usually 1)
 }
 
-/** The governor's rules — single row (exec_config). Limits in 02-risk-governor §2.3. */
+/** The governor's rules — single row (exec_config). Limits in 02-risk-governor §2.3,
+ *  entry policy in 03-lifecycle §3.6. */
 export interface ExecConfig {
   executionMode: ExecutionMode;
   capitalCeiling: number;                  // $ capital base
@@ -2166,6 +2167,14 @@ export interface ExecConfig {
   maxPositionsPerStrategy: number | null;  // null = off
   eligibleStrategies: string[];            // launch: ['inflection']
   proposalShelfLifeMin: number;
+  // entry policy (§3.6)
+  minCompositeScore: number;
+  maxNewEntriesPerDay: number;
+  maxNewEntriesPerWeek: number;
+  avoidEarningsBeforeExpiry: boolean;
+  entryWindowStart: string;                // ET HH:MM
+  entryWindowEnd: string;                  // ET HH:MM
+  repriceTolerancePct: number;
   updatedAt: string;
 }
 

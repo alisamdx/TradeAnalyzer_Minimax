@@ -22,6 +22,13 @@ interface ConfigRow {
   max_positions_per_strategy: number | null;
   eligible_strategies: string;
   proposal_shelf_life_min: number;
+  min_composite_score: number;
+  max_new_entries_per_day: number;
+  max_new_entries_per_week: number;
+  avoid_earnings_before_expiry: number;
+  entry_window_start: string;
+  entry_window_end: string;
+  reprice_tolerance_pct: number;
   updated_at: string;
 }
 
@@ -46,6 +53,13 @@ const CONFIG_COLUMN: Record<keyof ExecConfig, string> = {
   maxPositionsPerStrategy: 'max_positions_per_strategy',
   eligibleStrategies: 'eligible_strategies',
   proposalShelfLifeMin: 'proposal_shelf_life_min',
+  minCompositeScore: 'min_composite_score',
+  maxNewEntriesPerDay: 'max_new_entries_per_day',
+  maxNewEntriesPerWeek: 'max_new_entries_per_week',
+  avoidEarningsBeforeExpiry: 'avoid_earnings_before_expiry',
+  entryWindowStart: 'entry_window_start',
+  entryWindowEnd: 'entry_window_end',
+  repriceTolerancePct: 'reprice_tolerance_pct',
   updatedAt: 'updated_at',
 };
 
@@ -75,6 +89,13 @@ export class RiskGovernor {
         .map((s) => s.trim())
         .filter((s) => s.length > 0),
       proposalShelfLifeMin: r.proposal_shelf_life_min,
+      minCompositeScore: r.min_composite_score,
+      maxNewEntriesPerDay: r.max_new_entries_per_day,
+      maxNewEntriesPerWeek: r.max_new_entries_per_week,
+      avoidEarningsBeforeExpiry: r.avoid_earnings_before_expiry === 1,
+      entryWindowStart: r.entry_window_start,
+      entryWindowEnd: r.entry_window_end,
+      repriceTolerancePct: r.reprice_tolerance_pct,
       updatedAt: r.updated_at,
     };
   }
@@ -87,7 +108,9 @@ export class RiskGovernor {
       const col = CONFIG_COLUMN[key];
       if (!col) continue;
       cols.push(`${col} = ?`);
-      vals.push(key === 'eligibleStrategies' ? (value as string[]).join(',') : (value as string | number | null));
+      if (key === 'eligibleStrategies') vals.push((value as string[]).join(','));
+      else if (typeof value === 'boolean') vals.push(value ? 1 : 0);
+      else vals.push(value as string | number | null);
     }
     if (cols.length > 0) {
       cols.push("updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')");

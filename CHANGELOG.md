@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.5] — 2026-06-14
+
+### Added
+- **v2 execution subsystem — Phase 4a (entry policy).** The first half of the trade logic: turning eligible brief picks into priced, risk-gated proposals awaiting approval. Migration **046** adds the configurable entry-policy columns to `exec_config` (`min_composite_score` 70, `max_new_entries_per_day` 1, `max_new_entries_per_week` 3, `avoid_earnings_before_expiry`, `entry_window_start`/`_end` 10:00–15:00 ET, `reprice_tolerance_pct`), surfaced through `ExecConfig` + the governor. `src/main/execution/entry-policy.ts` (`EntryPolicy`, on a normalized `PickInput` so it's decoupled from v1 brief internals): `filterPick` (eligible strategy · critic pass/caution · composite ≥ floor · liquidity · earnings · entry window), `buildProposal` (price the combo at the venue → size via the governor → run the pre-trade gate → persist a pending `exec_proposals` row with shelf-life, audited), and `generateEntries` (daily/weekly caps, highest-composite first). Helpers `etMinutesOfDay`/`hhmmToMinutes` added to `market-hours.ts`. Tests: `tests/entry-policy.test.ts` (14). Still dormant — wired to nothing yet.
+
 ## [1.1.4] — 2026-06-14
 
 ### Added

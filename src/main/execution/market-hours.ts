@@ -55,6 +55,17 @@ export function etDateString(date: Date): string {
   return etParts(date).date;
 }
 
+/** Minutes since ET midnight for `date` — used for the entry-window check (§3.2). */
+export function etMinutesOfDay(date: Date): number {
+  return etParts(date).minutes;
+}
+
+/** Parse an 'HH:MM' string to minutes-of-day. */
+export function hhmmToMinutes(hhmm: string): number {
+  const [h, m] = hhmm.split(':');
+  return (parseInt(h ?? '0', 10) || 0) * 60 + (parseInt(m ?? '0', 10) || 0);
+}
+
 /** True when US equity options are in regular trading hours (Mon–Fri 09:30–16:00 ET, non-holiday). */
 export function isMarketOpen(date: Date, opts: MarketHoursOptions = {}): boolean {
   const { date: etDate, weekday, minutes } = etParts(date);

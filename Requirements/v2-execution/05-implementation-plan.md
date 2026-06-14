@@ -68,7 +68,13 @@ Phase-4 `onBriefReady` hook), and an SSE stream (`/exec/events`) of the core's e
 - Control API (Fastify `:7433`) + SSE; `POST /exec/brief-ready` handoff (§1.3b/1.6).
 - **Deliverable:** a running headless engine (mock-fed) exposing live state over the API.
 
-## Phase 4 — Entry & exit policy *(no broker)*
+## Phase 4 — Entry & exit policy *(no broker)* — 🚧 4a DONE (v1.1.5); 4b (order manager) + 4c (exit policy) next
+
+**4a (v1.1.5):** migration 046 (entry-policy config columns) + `entry-policy.ts` (`EntryPolicy`:
+`filterPick` configurable filters, `buildProposal` price→size→gate→persist, `generateEntries`
+with daily/weekly caps) operating on a normalized `PickInput`. **4b (next):** `OrderManager`
+(approve proposal → COID order → fill → open/close `exec_positions`). **4c:** `ExitPolicy` +
+the management loop wired into the `ExecutionCore` market-cycle hook.
 
 - Entry: read inflection brief picks via the freshness path, apply filters (§3.2), build +
   price proposals (via `broker.priceCombo`, mock), shelf-life + re-price guard.
