@@ -169,7 +169,7 @@ CREATE TABLE IF NOT EXISTS exec_config (
   daily_loss_trip_pct REAL NOT NULL DEFAULT 10,
   max_positions_per_ticker INTEGER NOT NULL DEFAULT 1,
   max_positions_per_strategy INTEGER,             -- NULL = off
-  eligible_strategies TEXT NOT NULL DEFAULT 'inflection,wheel,income',
+  eligible_strategies TEXT NOT NULL DEFAULT 'inflection',  -- launch: inflection only; add wheel later
   proposal_shelf_life_min INTEGER NOT NULL DEFAULT 120,
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -284,5 +284,10 @@ trip/clear, engine-state change, reconciliation mismatch. It is the forensic rec
   session. **Lean: manual.** Confirm.
 - **Per-strategy cap** — left **off** by default (concurrency + per-ticker suffice for
   weekly-swing). Enable later if one strategy crowds the book.
-- **Eligible strategies at launch** — `exec_config.eligible_strategies` defaults to
-  `inflection,wheel,income` (the defined-risk set). Entry policy detail is `03-lifecycle`.
+- **Eligible strategies at launch — CONFIRMED: `inflection` only.** `exec_config.
+  eligible_strategies` defaults to `inflection` (the breakout bull-put/bear-call credit
+  spreads — the most contained, fully defined-risk structure). **Wheel CSPs are added once
+  the plumbing is proven**; income later (and only its defined-risk variants, since the
+  defined-risk gate filters naked structures). Entry policy detail is `03-lifecycle`.
+- **CONFIRMED:** day's-loss basis = **realized + unrealized, halt-new-entries only**;
+  kill-switch reset = **manual clear only**.
