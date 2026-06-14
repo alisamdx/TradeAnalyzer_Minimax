@@ -202,8 +202,7 @@ Confirmed against current sources before committing to IBKR:
 | 02 | `02-risk-governor.md` | Capital model, pre-trade gate, kill switch, idempotency, reconciliation (the safety core) |
 | 03 | `03-lifecycle.md` | Entry policy (configurable), exit policy, order state machine, failure handling |
 | 04 | `04-ux.md` | Trading Desk view, proposal/approval flow, rules-config surface, notifications |
-
-*(01–04 to be drafted next.)*
+| 05 | `05-implementation-plan.md` | Phased build order (mock-broker-first; phases 0–5 need no IBKR account) |
 
 ## 0.8 Glossary (v2 additions)
 

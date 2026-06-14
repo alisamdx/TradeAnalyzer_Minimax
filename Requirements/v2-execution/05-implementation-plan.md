@@ -1,0 +1,127 @@
+# v2 Execution Subsystem — Implementation Plan
+
+> **Status:** Build sequencing for the requirements in `00`–`04`. The guiding principle:
+> **build inside-out against a `MockExecutionBroker` so phases 0–5 are fully implementable
+> and testable with no IBKR account.** Only phases 6–7 need the (pending) paper account.
+> Each phase ships per the repo's discipline: tests green, `CHANGELOG` + changelog file +
+> `.ai/AI_CONTEXT.md` + the relevant requirement section updated, Conventional Commit, then
+> `npm run package`.
+
+---
+
+## Strategy
+
+The `ExecutionBroker` interface (§1.4) is the seam. A **deterministic mock** behind it lets
+the entire engine — schema, risk governor, loops, policy, UI — be built and exhaustively
+tested *offline*. When IBKR approves, we implement `IbkrExecutionBroker` behind the same
+interface and flip a config value. **No throwaway work; the account is only needed to prove
+the last mile.**
+
+Versioning: increments land as `1.1.x` milestones; cut **`2.0.0` when live execution
+ships** (paper-validated). The requirement docs graduate into `spec/` (40-series) as each
+phase lands.
+
+---
+
+## Phase 0 — Foundations *(no broker)*
+
+- Migrations **045–051** for the `exec_*` tables (§2.10); idempotent, count-agnostic
+  migration tests.
+- Seed `exec_config` (locked defaults) and `exec_risk_state` (`engine_state='stopped'`).
+- Shared **path + secret resolution** module that works outside Electron (§1.3c).
+- Execution types in `src/shared/types.ts` (Proposal, Order, Fill, ManagedPosition,
+  RiskState, ExecConfig, gate-result).
+- **Deliverable:** schema + types + config, migration tests green.
+
+## Phase 1 — Broker seam + mock *(no broker)*
+
+- Define `ExecutionBroker` (§1.4).
+- `MockExecutionBroker`: deterministic combo pricing, controllable fills (full/partial/
+  reject), simulated positions/buying-power — the test + offline-dev backbone.
+- Unit tests against the mock.
+- **Deliverable:** the seam everything else builds on.
+
+## Phase 2 — Risk governor *(no broker — the safety core)*
+
+- Pre-trade gate (10 checks, §2.5), position sizing (§2.4), capital accounting, kill switch
+  (§2.6), engine state machine (§2.7), COID idempotency + order state machine (§2.8).
+- **Exhaustive unit tests** — this is the safety core; test every limit, every fail-closed
+  path, every state transition, double-submit prevention. Include the **data-freshness
+  regression test** (write-capable connection sees a fresh cross-connection commit — §1.3b).
+- **Deliverable:** a governor that can be trusted, proven entirely offline.
+
+## Phase 3 — Headless core + loops *(no broker)*
+
+- Core entrypoint launched via `ELECTRON_RUN_AS_NODE` (§1.3a).
+- The three loops (entry-proposal / position-management / reconciliation) wired to the mock.
+- Cold-start **reconcile-before-act**, market-hours/calendar gate, health watchdog (§1.8).
+- Control API (Fastify `:7433`) + SSE; `POST /exec/brief-ready` handoff (§1.3b/1.6).
+- **Deliverable:** a running headless engine (mock-fed) exposing live state over the API.
+
+## Phase 4 — Entry & exit policy *(no broker)*
+
+- Entry: read inflection brief picks via the freshness path, apply filters (§3.2), build +
+  price proposals (via `broker.priceCombo`, mock), shelf-life + re-price guard.
+- Exit: management loop evaluates rules in priority order (§3.3) — protective auto,
+  discretionary propose.
+- Integration tests: seed a brief → proposal → approve (via API) → mock fill → manage →
+  exit → reconcile → audit, end-to-end on the mock.
+- **Deliverable:** the full trade lifecycle working against the mock.
+
+## Phase 5 — Control panel (Electron UI) *(no broker)*
+
+- **🤝 Execution** sidebar section: **Trading Desk** + **Execution Settings** (§4).
+- Connect to core API/SSE; "Engine offline → Start". Master control header (PAPER/LIVE
+  badge, engine state, hard-Stop, broker health, kill switch, capital gauges), proposals
+  queue, open positions, activity log.
+- Approval flow (paper 1-click; live type-to-confirm scaffolded), rules-config editor over
+  `exec_config`, notifications (desktop + core email/push).
+- **Deliverable:** the human can drive the whole mock-backed system from the UI. **At this
+  point the entire product is demonstrable end-to-end without IBKR.**
+
+## Phase 6 — IBKR adapter *(needs paper account)*
+
+- `IbkrExecutionBroker` via `@stoqey/ib`: connect through IB Gateway (port **4002** paper),
+  IBC-supervised weekly auth + reconnection (§1.5), contract qualification, combo/BAG
+  orders, order/exec subscriptions, live combo pricing, buying-power.
+- Flip `exec_config.execution_mode` to select IBKR vs mock — **no engine/UI changes.**
+- Contract/conformance tests: the same interface test-suite the mock passes, run against
+  the IBKR paper adapter.
+- **Deliverable:** real (paper) fills through the same engine.
+
+## Phase 7 — Paper-mode validation *(needs paper account)*
+
+- Run the full pipeline on the **IBKR paper account** for weeks: brief → proposal →
+  approve → fill → manage → exit → reconcile.
+- Tune the §3.7 knobs (stop multiple, profit-target/time-exit, composite floor) against
+  **real inflection results** via the audit log. Confirm paper fills track the modeled
+  prices; validate the watchdog, reconciliation, and kill switch fire correctly live.
+- **Deliverable:** evidence the system behaves as specified on a real venue.
+
+## Phase 8 — Live promotion *(after paper validation)*
+
+- The guarded **paper→live** toggle (§4.5): engine Stopped + checklist + type-to-confirm,
+  live account (port **4001**), $10k ceiling.
+- Start small; the risk governor + kill switch are the safety net.
+- **Cut `2.0.0`.**
+
+---
+
+## What the pending account does / doesn't gate
+
+| Buildable **now** (no account) | Needs the paper account |
+| --- | --- |
+| Phases 0–5: schema, governor, core, loops, full policy, **entire UI** — all tested against the mock | Phases 6–7: the IBKR adapter + paper-mode validation |
+
+**Recommended first milestone:** Phases 0–2 (schema + broker seam + the fully-tested risk
+governor). It's the highest-value, highest-assurance core, needs no account, and everything
+else stands on it.
+
+## Open sequencing notes
+
+- **Service install** (Scheduled-Task-at-logon, §1.10) can come late in Phase 3 / early
+  Phase 6 — during dev the core runs in a terminal.
+- **`spec/` graduation**: fold each landed phase's behavior into a new `spec/` 40-series
+  section as part of that phase's doc updates.
+- **Brief dependency**: the engine only *reads* inflection picks; no change to the v1 brief
+  is required for Phase 4 (the `brief-ready` ping is an additive call from the existing job).
