@@ -268,6 +268,23 @@ export class BacktestEngine {
     const equityCurve: EquityPoint[] = [];
     const closes: number[] = allBars.slice(0, allBars.findIndex(b => b.date === simBars[0]!.date) + 1).map(b => b.close);
 
+    // Implied volatility from iv_history (ATM IV, stored as a percentage). Premium sellers
+    // are paid IV, which typically runs above realized vol — using IV here prices the
+    // premium realistically instead of under-pricing it from 20-day realized vol. Falls
+    // back to realized vol on dates with no IV history. As-of lookup via a monotonic pointer
+    // (simBars are date-ascending). see docs/formulas.md#backtest-iv
+    type IvRow = { date: string; atm_iv: number };
+    const ivRows = this.db.prepare(
+      `SELECT date, atm_iv FROM iv_history WHERE ticker = ? AND atm_iv > 0 ORDER BY date ASC`
+    ).all(cfg.ticker) as IvRow[];
+    let ivIdx = 0;
+    const ivAsOf = (dateStr: string): number | null => {
+      while (ivIdx + 1 < ivRows.length && ivRows[ivIdx + 1]!.date <= dateStr) ivIdx++;
+      const row = ivRows[ivIdx];
+      if (!row || row.date > dateStr) return null; // no IV on/before this date
+      return row.atm_iv / 100; // percentage → fraction for Black-Scholes sigma
+    };
+
     for (let i = 0; i < simBars.length; i++) {
       if (this.cancelToken.cancelled) {
         this.db.prepare(`UPDATE backtest_runs SET status = 'cancelled', completed_at = datetime('now') WHERE id = ?`).run(runId);
@@ -278,7 +295,8 @@ export class BacktestEngine {
       const S = bar.close;
       closes.push(S);
 
-      const sigma = rollingVol(closes, 20);
+      // Prefer historical implied vol; fall back to 20-day realized vol when IV is absent.
+      const sigma = ivAsOf(bar.date) ?? rollingVol(closes, 20);
       const equity = capital + shares * S;
 
       // ── Check open position ──────────────────────────────────────────────

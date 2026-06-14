@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.33.8] — 2026-06-13
+
+### Changed
+- **Backtest engine prices off historical implied volatility** — the simulator now uses `iv_history` ATM IV (as-of the entry date) for its Black-Scholes volatility input, falling back to 20-day realized vol only when no IV history exists. Previously it always used realized vol, which understated the premium a CSP/CC/Wheel actually collects (sellers are paid IV, which runs above realized — the variance risk premium). The same `sigma` drives strike selection, entry premium, and daily mark-to-market. See `docs/formulas.md#backtest-iv`.
+
 ## [0.33.7] — 2026-06-13
 
 ### Added

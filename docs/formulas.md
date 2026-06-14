@@ -526,3 +526,15 @@ atr_pct                = ATR14 / close × 100             (expected-move / range
 ```
 
 The strategy ranks top-quintile breakouts by a composite of decisiveness + volume_surge + atr_pct and sells a credit spread with the short strike placed ~0.5–1 ATR beyond `breakout_level` (further OTM), filtered to high IV rank. Validation: top-quintile breakouts let that spread expire OTM ~84–90% of the time; requiring high IV costs ~2% win rate.
+
+## Backtest volatility input {#backtest-iv}
+
+The backtest engine (`backtest-engine.ts`) prices options via Black-Scholes (`#black-scholes`); the volatility input (`sigma`) per simulated day is:
+
+```
+sigma = ivAsOf(date)  ?? rollingVol(closes, 20)
+ivAsOf(date) = (latest iv_history.atm_iv on/before date) / 100   // % → fraction
+rollingVol   = stddev(daily log returns over last 20) × √252,  floored at 0.05
+```
+
+Historical ATM IV (`iv_history`) is preferred because premium sellers are paid IV, which typically exceeds realized volatility (the variance risk premium) — pricing off realized vol systematically under-states the premium a CSP/CC/Wheel would have collected. Realized vol is the fallback only on dates with no IV history. The same `sigma` is used for strike selection (target delta), entry premium, and daily mark-to-market of the open position.

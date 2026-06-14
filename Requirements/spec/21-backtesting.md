@@ -1,6 +1,6 @@
 # 21 — Backtesting Engine
 
-Simulates CSP / CC / Wheel strategies over historical data to estimate performance. Services: `backtest-engine.ts`, `backtest-metrics.ts`. IPC: `window.api.backtest.*`. View: `BacktestView.tsx` (🔁 Backtest). Tables: `backtest_configs`, `backtest_runs`, `backtest_trades`, `backtest_metrics` (§2.11).
+Simulates CSP / CC / Wheel strategies over historical data to estimate performance. Services: `backtest-engine.ts`, `backtest-metrics.ts`. IPC: `window.api.backtest.*`. View: `BacktestView.tsx` (🔁 Backtest). Tables: `backtest_configs`, `backtest_runs`, `backtest_trades`, `backtest_metrics` (§2.11). Options are priced via Black-Scholes; the volatility input is **historical ATM IV** (`iv_history`, as-of the entry date), falling back to 20-day realized vol when IV history is missing — see `23-formulas.md` / `docs/formulas.md#backtest-iv`.
 
 ## 21.1 Configuration
 

@@ -1,0 +1,64 @@
+// Regression test: the backtest engine prices premium off historical IV (iv_history)
+// when available, falling back to 20-day realized vol. Same price path → higher entry
+// premium when IV history (high IV) is present. (v0.33.8)
+
+import { describe, it, expect } from 'vitest';
+import { openDatabase, type DbHandle } from '../src/main/db/connection.js';
+import { runMigrations } from '../src/main/db/migrations.js';
+import { MIGRATIONS_DIR } from './helpers.js';
+import { BacktestEngine } from '../src/main/services/backtest-engine.js';
+
+function seedPrices(db: DbHandle, ticker: string) {
+  // ~180 sequential days of a gently drifting price → LOW realized vol.
+  const ins = db.prepare(
+    `INSERT INTO historical_prices (ticker, date, open, high, low, close, volume) VALUES (?, ?, ?, ?, ?, ?, ?)`
+  );
+  const start = new Date('2023-01-01T00:00:00Z');
+  for (let i = 0; i < 180; i++) {
+    const d = new Date(start.getTime() + i * 86_400_000).toISOString().slice(0, 10);
+    const px = 100 + Math.sin(i / 30) * 1.5; // small wiggle, low realized vol
+    ins.run(ticker, d, px, px + 0.3, px - 0.3, px, 2_000_000);
+  }
+}
+
+function seedIv(db: DbHandle, ticker: string, ivPct: number) {
+  const ins = db.prepare(`INSERT INTO iv_history (ticker, date, atm_iv) VALUES (?, ?, ?)`);
+  const start = new Date('2023-01-01T00:00:00Z');
+  for (let i = 0; i < 180; i++) {
+    const d = new Date(start.getTime() + i * 86_400_000).toISOString().slice(0, 10);
+    ins.run(ticker, d, ivPct);
+  }
+}
+
+function firstEntryPremium(db: DbHandle, ticker: string): number {
+  const eng = new BacktestEngine(db);
+  const id = eng.createConfig({
+    name: 't', strategy: 'CSP', ticker, startDate: '2023-02-01', endDate: '2023-06-15',
+    startingCapital: 25_000, dteTarget: 30, deltaTarget: 0.30, profitTargetPct: 50, stopLossPct: 200,
+  });
+  const { runId } = eng.simulate(id, () => {});
+  const trades = eng.getTrades(runId);
+  expect(trades.length).toBeGreaterThan(0);
+  return trades[0]!.entryPremium;
+}
+
+describe('backtest engine uses historical IV', () => {
+  it('prices a higher entry premium when IV history (high IV) is present', () => {
+    // Run A — no IV history → falls back to ~5% realized vol on the flat series.
+    const dbA = openDatabase(':memory:');
+    runMigrations(dbA, MIGRATIONS_DIR);
+    seedPrices(dbA, 'TST');
+    const premRealized = firstEntryPremium(dbA, 'TST');
+    dbA.close();
+
+    // Run B — same prices, with 60% IV history.
+    const dbB = openDatabase(':memory:');
+    runMigrations(dbB, MIGRATIONS_DIR);
+    seedPrices(dbB, 'TST');
+    seedIv(dbB, 'TST', 60);
+    const premIv = firstEntryPremium(dbB, 'TST');
+    dbB.close();
+
+    expect(premIv).toBeGreaterThan(premRealized * 2); // IV-priced premium is far richer
+  });
+});
