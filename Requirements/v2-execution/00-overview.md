@@ -97,6 +97,31 @@ an explicit `brief-ready` handoff for zero poll-latency, and the panel reading e
 state only via the core's API/SSE. Mechanics + regression test in `01-architecture.md`
 §1.3(b).
 
+## 0.37 Master engine control (user-operated)
+
+The user has a top-level master switch for the engine, distinct from the automatic kill
+switch. **Stop is the primary control and is a *hard stop*: the engine completely ceases
+all activity** — no new entries, and no management of open positions. Persisted states:
+
+- **Running** — proposes entries (user approves) and actively manages open positions
+  (protective + discretionary exits).
+- **Stopped (hard stop — primary)** — engine does **nothing**: no entries, no exits, no
+  management. **Open positions are unmanaged**, so the **defined-risk cap is the only
+  backstop** (this is by design and why v2.0 is defined-risk-only). Because hitting Stop
+  with open positions leaves them unmanaged, Stop is **guarded by confirmation** and
+  offers a **"Flatten & Stop"** option (close all open positions, then halt) for a clean
+  exit. The user may still choose to Stop and leave positions open — the warning makes the
+  consequence explicit.
+- **Paused (optional secondary)** — **no new entries** but **keeps managing/protecting
+  open positions**. A convenience for "stop opening new trades but keep my open ones
+  watched"; not the primary off-switch.
+
+`Start` always runs **reconcile-before-act** (§1.8) before resuming. Engine state is
+**persisted**: a crash/restart resumes *Paused* if paused, never silently auto-resumes to
+*Running*, and never clears a tripped kill switch. Control hierarchy: **master switch
+(user) › kill switch (auto/manual safety) › per-trade approval (semi-auto)**. Full state
+machine in §2; the control surface in §4.
+
 ## 0.4 Scope of v2.0 (deliberately narrow)
 
 **In:**
