@@ -73,7 +73,7 @@ export function registerBacktestIpc(engine: BacktestEngine): void {
   });
 
   // Aggregate backtest over historical Brief-Replay picks for a premium strategy.
-  ipcMain.handle('backtest:replay-picks', (_e, strategy: 'wheel' | 'income') => {
+  ipcMain.handle('backtest:replay-picks', (_e, strategy: 'wheel' | 'income' | 'inflection') => {
     try { return ok(engine.backtestReplayPicks(strategy)); }
     catch (err) { return fail(err); }
   });

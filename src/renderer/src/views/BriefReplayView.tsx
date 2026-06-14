@@ -56,7 +56,7 @@ function sortSummaries(rows: ReplaySummary[], key: SummarySortKey, dir: 'asc' | 
   });
 }
 
-function SummaryTable({ summaries, onBacktest }: { summaries: ReplaySummary[]; onBacktest: (s: 'wheel' | 'income') => void }) {
+function SummaryTable({ summaries, onBacktest }: { summaries: ReplaySummary[]; onBacktest: (s: 'wheel' | 'income' | 'inflection') => void }) {
   const [sortKey, setSortKey] = useState<SummarySortKey>('strategy');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
 
@@ -116,10 +116,12 @@ function SummaryTable({ summaries, onBacktest }: { summaries: ReplaySummary[]; o
               <td style={{ textAlign: 'right', color: retColor(s.avgReturn10d, s.strategy) }}>{fmtPct(s.avgReturn10d)}</td>
               <td style={{ textAlign: 'right', color: retColor(s.avgReturn21d, s.strategy) }}>{fmtPct(s.avgReturn21d)}</td>
               <td style={{ textAlign: 'center' }}>
-                {(s.strategy === 'wheel' || s.strategy === 'income') ? (
+                {(s.strategy === 'wheel' || s.strategy === 'income' || s.strategy === 'inflection') ? (
                   <button className="btn-secondary" style={{ fontSize: 11, padding: '2px 8px' }}
-                    onClick={() => onBacktest(s.strategy as 'wheel' | 'income')}
-                    title="Backtest a CSP on every pick for this strategy (real option P&L)">💰</button>
+                    onClick={() => onBacktest(s.strategy as 'wheel' | 'income' | 'inflection')}
+                    title={s.strategy === 'inflection'
+                      ? 'Backtest the directional credit spread on every pick (real option P&L)'
+                      : 'Backtest a CSP on every pick for this strategy (real option P&L)'}>💰</button>
                 ) : '—'}
               </td>
             </tr>
@@ -147,11 +149,14 @@ function PickPnlModal({ result, onClose }: { result: AggregatePickBacktest; onCl
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <div onClick={e => e.stopPropagation()} style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 10, padding: 20, width: 740, maxWidth: '92vw', maxHeight: '88vh', overflowY: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-          <h3 style={{ margin: 0, textTransform: 'capitalize' }}>💰 {r.strategy} — CSP backtest over every pick</h3>
+          <h3 style={{ margin: 0, textTransform: 'capitalize' }}>💰 {r.strategy} — {r.structure === 'credit-spread' ? 'credit-spread' : 'CSP'} backtest over every pick</h3>
           <button className="btn-secondary" onClick={onClose}>✕</button>
         </div>
         <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 14 }}>
-          One {r.params.deltaTarget}-delta CSP per pick · {r.params.dteTarget} DTE · +{r.params.profitTargetPct}% profit / {r.params.stopLossPct}% stop · priced off historical IV. Equal-weight, capital unconstrained.
+          {r.structure === 'credit-spread'
+            ? `One directional credit spread per pick (short ${r.params.deltaTarget}Δ / long 0.15Δ, bull put for up-breaks · bear call for down)`
+            : `One ${r.params.deltaTarget}-delta CSP per pick`}
+          {' '}· {r.params.dteTarget} DTE · +{r.params.profitTargetPct}% profit / {r.params.stopLossPct}% stop · priced off historical IV. Equal-weight, capital unconstrained.
         </div>
         {r.tradeCount === 0 ? (
           <div style={{ color: 'var(--text-muted)', padding: 20 }}>No resolvable trades — picks lacked enough forward price/IV data.</div>
@@ -181,9 +186,11 @@ function PickPnlModal({ result, onClose }: { result: AggregatePickBacktest; onCl
             </ResponsiveContainer>
             <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 10 }}>
               Real option P&L (Black-Scholes from historical price + IV) — the premium actually collected, not the stock move the main table shows.
-              {r.totalPnl < 0 && r.winRate >= 60 && (
-                <> <strong style={{ color: '#e0a030' }}>Note:</strong> a high win rate with a net dollar loss is the classic short-premium asymmetry — many small premium wins, a few large assignment losses (heavier on high-priced names). Avg ROC is equal-weight per trade; Total P&L is collateral-weighted, so they can diverge.</>
-              )}
+              {r.structure === 'credit-spread'
+                ? <> Defined-risk: each loss is capped at the spread width, so ROC is return on max-loss capital and Total P&L is the sum of one spread per pick.</>
+                : (r.totalPnl < 0 && r.winRate >= 60 && (
+                  <> <strong style={{ color: '#e0a030' }}>Note:</strong> a high win rate with a net dollar loss is the classic short-premium asymmetry — many small premium wins, a few large assignment losses (heavier on high-priced names). Avg ROC is equal-weight per trade; Total P&L is collateral-weighted, so they can diverge.</>
+                ))}
             </div>
           </>
         )}
@@ -395,7 +402,7 @@ export default function BriefReplayView() {
     setExistingRange({ from: null, to: null });
   };
 
-  const handlePnlBacktest = async (strategy: 'wheel' | 'income') => {
+  const handlePnlBacktest = async (strategy: 'wheel' | 'income' | 'inflection') => {
     setPnlLoading(true); setPnlError(null);
     try {
       setPnl(await window.api.backtest.replayPicks(strategy));

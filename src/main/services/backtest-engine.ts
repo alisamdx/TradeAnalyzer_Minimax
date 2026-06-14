@@ -461,17 +461,20 @@ export class BacktestEngine {
   }
 
   // ── Aggregate pick backtest ─────────────────────────────────────────────────
-  // Simulate one CSP per historical Brief-Replay pick for a premium strategy and pool
-  // the results — "if I'd traded every wheel/income pick, what would they have returned?"
+  // Simulate the strategy's structure on every historical Brief-Replay pick and pool the
+  // results — "if I'd traded every wheel/income/inflection pick, what would they have made?"
+  // wheel/income → one CSP; inflection → a directional credit spread (bull put / bear call).
   // Prices off historical IV with realized-vol fallback. see docs/formulas.md#backtest-iv
   backtestReplayPicks(
-    strategy: 'wheel' | 'income',
+    strategy: 'wheel' | 'income' | 'inflection',
     params: { deltaTarget: number; dteTarget: number; profitTargetPct: number; stopLossPct: number } =
       { deltaTarget: 0.30, dteTarget: 30, profitTargetPct: 50, stopLossPct: 200 },
   ): import('@shared/types.js').AggregatePickBacktest {
-    type PickRow = { as_of_date: string; ticker: string };
+    const isInflection = strategy === 'inflection';
+    const structure: 'csp' | 'credit-spread' = isInflection ? 'credit-spread' : 'csp';
+    type PickRow = { as_of_date: string; ticker: string; direction: number };
     const picks = this.db.prepare(`
-      SELECT DISTINCT rb.as_of_date, ro.ticker
+      SELECT DISTINCT rb.as_of_date, ro.ticker, COALESCE(ro.direction, 1) AS direction
       FROM replay_outcomes ro JOIN replay_briefs rb ON rb.id = ro.replay_brief_id
       WHERE rb.strategy = ? ORDER BY rb.as_of_date ASC
     `).all(strategy) as PickRow[];
@@ -479,13 +482,15 @@ export class BacktestEngine {
     const trades: { exitDate: string; returnPct: number; pnl: number; daysHeld: number }[] = [];
     let skipped = 0;
     for (const p of picks) {
-      const t = this.simulateSingleCsp(p.ticker, p.as_of_date, params);
+      const t = isInflection
+        ? this.simulateSingleSpread(p.ticker, p.as_of_date, p.direction >= 0 ? 1 : -1, params)
+        : this.simulateSingleCsp(p.ticker, p.as_of_date, params);
       if (t) trades.push(t); else skipped++;
     }
 
     const n = trades.length;
     if (n === 0) {
-      return { strategy, tradeCount: 0, skipped, winRate: 0, avgReturnPct: 0, medianReturnPct: 0,
+      return { strategy, structure, tradeCount: 0, skipped, winRate: 0, avgReturnPct: 0, medianReturnPct: 0,
         bestReturnPct: 0, worstReturnPct: 0, totalPnl: 0, avgDaysHeld: 0, maxDrawdownPnl: 0, equityCurve: [], params };
     }
 
@@ -508,7 +513,7 @@ export class BacktestEngine {
     }
 
     return {
-      strategy, tradeCount: n, skipped,
+      strategy, structure, tradeCount: n, skipped,
       winRate: Math.round((wins / n) * 1000) / 10,
       avgReturnPct: r2(rets.reduce((a, b) => a + b, 0) / n),
       medianReturnPct: r2(sortedRets[Math.floor(n / 2)]!),
@@ -572,6 +577,68 @@ export class BacktestEngine {
       if (opt * 100 >= premCollected * (p.stopLossPct / 100)) return out(pnlSoFar);
     }
     return null; // unresolved (too recent — not enough forward bars)
+  }
+
+  // Simulate one directional CREDIT SPREAD for an inflection pick (defined risk):
+  //   direction +1 (up-breakout)  → bull put spread  (sell put 0.30Δ, buy put 0.15Δ)
+  //   direction -1 (down-breakout) → bear call spread (sell call 0.30Δ, buy call 0.15Δ)
+  // Mirrors the live `short-put-vertical` / `short-call-vertical` structures. Return on the
+  // spread's defined-risk capital (max loss). IV-priced with realized-vol fallback.
+  private simulateSingleSpread(
+    ticker: string, entryDate: string, direction: 1 | -1,
+    p: { deltaTarget: number; dteTarget: number; profitTargetPct: number; stopLossPct: number },
+  ): { exitDate: string; returnPct: number; pnl: number; daysHeld: number } | null {
+    const R = 0.02;
+    const side: 'put' | 'call' = direction > 0 ? 'put' : 'call';
+    const bars = this.db.prepare(`
+      SELECT date, close FROM historical_prices
+      WHERE ticker = ? AND date >= ? AND date <= ? ORDER BY date ASC
+    `).all(ticker, addCalendarDays(entryDate, -60), addCalendarDays(entryDate, p.dteTarget + 10)) as { date: string; close: number }[];
+    if (bars.length < 5) return null;
+    const entryIdx = bars.findIndex(b => b.date >= entryDate);
+    if (entryIdx < 0) return null;
+
+    const ivRows = this.db.prepare(
+      `SELECT date, atm_iv FROM iv_history WHERE ticker = ? AND atm_iv > 0 ORDER BY date ASC`
+    ).all(ticker) as { date: string; atm_iv: number }[];
+    const ivAsOf = (d: string): number | null => {
+      let lo = 0, hi = ivRows.length - 1, ans = -1;
+      while (lo <= hi) { const m = (lo + hi) >> 1; if (ivRows[m]!.date <= d) { ans = m; lo = m + 1; } else hi = m - 1; }
+      return ans >= 0 ? ivRows[ans]!.atm_iv / 100 : null;
+    };
+
+    const S0 = bars[entryIdx]!.close;
+    if (!(S0 > 0)) return null;
+    const sigma0 = ivAsOf(entryDate) ?? rollingVol(bars.slice(0, entryIdx + 1).map(b => b.close), 20);
+    const T = p.dteTarget / 365;
+    const shortK = findStrikeForDelta(S0, T, sigma0, p.deltaTarget, side, R);
+    const longK  = findStrikeForDelta(S0, T, sigma0, 0.15, side, R); // protective wing
+    if (shortK === longK) return null;
+    const creditPerShare = bsPrice(S0, shortK, T, R, sigma0, side) - bsPrice(S0, longK, T, R, sigma0, side);
+    const credit = creditPerShare * 100;
+    if (credit < 5) return null; // < $0.05/share — not worth it
+    const width = Math.abs(shortK - longK) * 100;
+    const maxLoss = width - credit;
+    if (!(maxLoss > 0)) return null; // degenerate (credit ≥ width)
+    const expiration = addCalendarDays(entryDate, p.dteTarget);
+
+    for (let i = entryIdx + 1; i < bars.length; i++) {
+      const bar = bars[i]!;
+      const out = (pnl: number) => ({ exitDate: bar.date, pnl, returnPct: pnl / maxLoss * 100, daysHeld: daysBetween(entryDate, bar.date) });
+      if (bar.date >= expiration) {
+        const intrinsic = side === 'put'
+          ? (Math.max(0, shortK - bar.close) - Math.max(0, longK - bar.close)) * 100
+          : (Math.max(0, bar.close - shortK) - Math.max(0, bar.close - longK)) * 100;
+        return out(credit - intrinsic);
+      }
+      const sig = ivAsOf(bar.date) ?? sigma0;
+      const val = (bsPrice(bar.close, shortK, Math.max(0, daysBetween(bar.date, expiration)) / 365, R, sig, side)
+                 - bsPrice(bar.close, longK, Math.max(0, daysBetween(bar.date, expiration)) / 365, R, sig, side)) * 100;
+      const pnlSoFar = credit - val;
+      if (pnlSoFar >= credit * (p.profitTargetPct / 100)) return out(pnlSoFar);
+      if (val >= credit * (p.stopLossPct / 100)) return out(pnlSoFar); // stop: cost ≥ X% of credit
+    }
+    return null; // unresolved
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────

@@ -102,6 +102,25 @@ describe('aggregate pick backtest (phase 2)', () => {
     db.close();
   });
 
+  it('inflection backtests a directional credit spread (defined risk)', () => {
+    const db = openDatabase(':memory:');
+    runMigrations(db, MIGRATIONS_DIR);
+    seedPrices(db, 'TST', 100);
+    const brief = db.prepare(
+      `INSERT INTO replay_briefs (as_of_date, strategy, picks, config_version) VALUES ('2023-02-01','inflection','[]','baseline_v3')`
+    ).run();
+    // direction +1 = up-breakout → bull put spread
+    db.prepare(
+      `INSERT INTO replay_outcomes (replay_brief_id, ticker, rank, composite_score, entry_price, direction) VALUES (?, 'TST', 1, 72, 100, 1)`
+    ).run(brief.lastInsertRowid as number);
+
+    const res = new BacktestEngine(db).backtestReplayPicks('inflection');
+    expect(res.structure).toBe('credit-spread');
+    expect(res.tradeCount).toBeGreaterThan(0);
+    expect(res.equityCurve.at(-1)!.cumPnl).toBe(res.totalPnl);
+    db.close();
+  });
+
   it('ivHistoryStart returns the oldest IV date (null when empty)', () => {
     const db = openDatabase(':memory:');
     runMigrations(db, MIGRATIONS_DIR);

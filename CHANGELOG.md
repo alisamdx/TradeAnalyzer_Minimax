@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.34.9] — 2026-06-13
+
+### Added
+- **💰 aggregate backtest now covers Inflection (directional credit spread)** — the Brief Replay summary's 💰 button now appears on the **inflection** row too, not just wheel/income. Because inflection is a directional credit spread (not a CSP), it runs a new `simulateSingleSpread`: a **bull put spread** for up-breakouts / **bear call spread** for down-breakouts (sell ~0.30Δ, buy 0.15Δ — mirroring the live `short-put-vertical`/`short-call-vertical`), per pick, IV-priced, **defined-risk** (return on max-loss capital, each loss capped at the spread width). The modal labels and footnote adapt to the credit-spread structure. `AggregatePickBacktest` gains a `structure` ('csp' | 'credit-spread') field.
+
 ## [0.34.8] — 2026-06-13
 
 ### Fixed
