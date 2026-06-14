@@ -17,6 +17,7 @@ export interface ConvictionStock {
   priceMid: number | null;
   priceHigh: number | null;
   note: string | null;
+  inPlay: boolean;            // on/off "pay attention / may act on this" flag
   addedAt: string;
   updatedAt: string;
   // Live overlays (joined at read time)
@@ -109,11 +110,11 @@ export class ConvictionService {
   list(): ConvictionStock[] {
     type Row = {
       ticker: string; price_low: number | null; price_mid: number | null;
-      price_high: number | null; note: string | null;
+      price_high: number | null; note: string | null; in_play: number;
       added_at: string; updated_at: string;
     };
     const rows = this.db.prepare(
-      `SELECT ticker, price_low, price_mid, price_high, note, added_at, updated_at
+      `SELECT ticker, price_low, price_mid, price_high, note, in_play, added_at, updated_at
        FROM conviction_stocks ORDER BY ticker ASC`
     ).all() as Row[];
 
@@ -155,6 +156,7 @@ export class ConvictionService {
         priceMid: r.price_mid,
         priceHigh: r.price_high,
         note: r.note,
+        inPlay: r.in_play === 1,
         addedAt: r.added_at,
         updatedAt: r.updated_at,
         currentPrice,
@@ -163,6 +165,16 @@ export class ConvictionService {
         zone: computeZone(currentPrice, r.price_low, r.price_mid, r.price_high),
       };
     });
+  }
+
+  // ── In-play flag ────────────────────────────────────────────────────────────
+  // Transient on/off marker ("pay attention / may act on this"). Not a band change,
+  // so no band-history snapshot is written.
+  setInPlay(ticker: string, inPlay: boolean): ConvictionStock {
+    const t = ticker.trim().toUpperCase();
+    this.db.prepare(`UPDATE conviction_stocks SET in_play = ? WHERE ticker = ?`)
+      .run(inPlay ? 1 : 0, t);
+    return this.get(t);
   }
 
   // ── Add ───────────────────────────────────────────────────────────────────
@@ -539,11 +551,11 @@ RATIONALE: 1 direct sentence, max 100 chars, no hedging.`;
   private get(ticker: string): ConvictionStock {
     type Row = {
       ticker: string; price_low: number | null; price_mid: number | null;
-      price_high: number | null; note: string | null;
+      price_high: number | null; note: string | null; in_play: number;
       added_at: string; updated_at: string;
     };
     const row = this.db.prepare(
-      `SELECT ticker, price_low, price_mid, price_high, note, added_at, updated_at
+      `SELECT ticker, price_low, price_mid, price_high, note, in_play, added_at, updated_at
        FROM conviction_stocks WHERE ticker = ?`
     ).get(ticker) as Row | undefined;
     if (!row) throw new Error(`Conviction stock not found: ${ticker}`);
@@ -565,6 +577,7 @@ RATIONALE: 1 direct sentence, max 100 chars, no hedging.`;
       priceMid: row.price_mid,
       priceHigh: row.price_high,
       note: row.note,
+      inPlay: row.in_play === 1,
       addedAt: row.added_at,
       updatedAt: row.updated_at,
       currentPrice,
@@ -572,6 +585,62 @@ RATIONALE: 1 direct sentence, max 100 chars, no hedging.`;
       ivRank: computeIvRank(ivRows),
       zone: computeZone(currentPrice, row.price_low, row.price_mid, row.price_high),
     };
+  }
+
+  // ── Email report ────────────────────────────────────────────────────────────
+  // Builds the My Stocks list as an HTML table for email. Includes the in-play flag;
+  // omits the Actions column (UI-only, carries no information). In-play stocks sort
+  // first, then by zone (buy → mid → watch → unset → high), then ticker.
+  buildEmailReport(): { subject: string; html: string } {
+    const stocks = this.list();
+    const zoneRank: Record<ConvictionZone, number> = { buy: 0, mid: 1, watch: 2, unset: 3, high: 4 };
+    const zoneLabel: Record<ConvictionZone, string> = {
+      buy: 'Buy Zone', mid: 'Mid Zone', watch: 'Watch', high: 'Too High', unset: 'No Bands',
+    };
+    const sorted = [...stocks].sort((a, b) =>
+      (Number(b.inPlay) - Number(a.inPlay)) ||
+      (zoneRank[a.zone] - zoneRank[b.zone]) ||
+      a.ticker.localeCompare(b.ticker)
+    );
+
+    const dollar = (v: number | null) => v === null ? '—' : `$${v.toFixed(2)}`;
+    const pct = (v: number | null) => v === null ? '—' : `${v.toFixed(1)}%`;
+    const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+    const inPlayCount = stocks.filter(s => s.inPlay).length;
+
+    const headers = ['', 'Ticker', 'Zone', 'Current', 'Low', 'Mid', 'Never Above', 'IV', 'IVR', 'Note'];
+    const th = headers.map(h =>
+      `<th style="text-align:left;padding:6px 10px;border-bottom:2px solid #ccc;font-size:12px;color:#333;white-space:nowrap">${h}</th>`
+    ).join('');
+
+    const rows = sorted.map(s => {
+      const flag = s.inPlay ? '🚩' : '';
+      const zoneColor = s.zone === 'buy' ? '#1a7a3a' : s.zone === 'mid' ? '#9a7d0a' : s.zone === 'high' ? '#b3261e' : '#555';
+      const bg = s.inPlay ? 'background:#fff8e1;' : '';
+      const cell = (v: string, extra = '') => `<td style="padding:6px 10px;border-bottom:1px solid #eee;${extra}">${v}</td>`;
+      return `<tr style="${bg}">
+        ${cell(flag, 'text-align:center;font-size:14px')}
+        ${cell(`<strong>${esc(s.ticker)}</strong>`)}
+        ${cell(zoneLabel[s.zone], `color:${zoneColor};font-weight:600;white-space:nowrap`)}
+        ${cell(dollar(s.currentPrice), 'text-align:right;font-weight:600')}
+        ${cell(dollar(s.priceLow), 'text-align:right;color:#1a7a3a')}
+        ${cell(dollar(s.priceMid), 'text-align:right;color:#9a7d0a')}
+        ${cell(dollar(s.priceHigh), 'text-align:right;color:#b3261e')}
+        ${cell(pct(s.iv), 'text-align:right;color:#555')}
+        ${cell(s.ivRank !== null ? String(Math.round(s.ivRank)) : '—', 'text-align:right;color:#555')}
+        ${cell(s.note ? esc(s.note) : '—', 'color:#555;max-width:280px')}
+      </tr>`;
+    }).join('');
+
+    const html = `<div style="font-family:Arial,Helvetica,sans-serif;color:#222">
+      <h2 style="margin:0 0 4px">⭐ My Stocks — Conviction List</h2>
+      <div style="color:#666;font-size:13px;margin-bottom:14px">${today} · ${stocks.length} stock${stocks.length !== 1 ? 's' : ''}${inPlayCount > 0 ? ` · 🚩 ${inPlayCount} in play` : ''}</div>
+      <table style="border-collapse:collapse;font-size:13px;width:100%"><thead><tr>${th}</tr></thead><tbody>${rows || `<tr><td colspan="${headers.length}" style="padding:16px;color:#888">No stocks in your list.</td></tr>`}</tbody></table>
+      <div style="color:#999;font-size:11px;margin-top:14px">🚩 = in play (flagged for attention). Zones: Buy ≤ Low, Mid ≤ Mid, Too High ≥ Never-Above.</div>
+    </div>`;
+
+    return { subject: `⭐ My Stocks${inPlayCount > 0 ? ` — ${inPlayCount} in play` : ''} (${today})`, html };
   }
 }
 

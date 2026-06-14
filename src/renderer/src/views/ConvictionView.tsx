@@ -341,6 +341,11 @@ export function ConvictionView() {
   const [syncing, setSyncing] = useState(false);
   const [syncMsg, setSyncMsg] = useState('');
 
+  // Email state
+  const [emailConfigured, setEmailConfigured] = useState(false);
+  const [emailSending, setEmailSending] = useState(false);
+  const [emailMsg, setEmailMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
   // AI Advisor state
   const [aiReview, setAiReview] = useState<ConvictionAiReview[] | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
@@ -357,6 +362,30 @@ export function ConvictionView() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { window.api.conviction.emailConfigured().then(setEmailConfigured).catch(() => setEmailConfigured(false)); }, []);
+
+  const handleToggleInPlay = async (ticker: string, current: boolean) => {
+    // Optimistic flip for snappy UX; reload on failure to resync.
+    setStocks(prev => prev.map(s => s.ticker === ticker ? { ...s, inPlay: !current } : s));
+    try {
+      await window.api.conviction.setInPlay(ticker, !current);
+    } catch {
+      load();
+    }
+  };
+
+  const handleEmail = async () => {
+    setEmailSending(true);
+    setEmailMsg(null);
+    try {
+      await window.api.conviction.sendEmail();
+      setEmailMsg({ ok: true, text: 'Email sent.' });
+    } catch (e) {
+      setEmailMsg({ ok: false, text: e instanceof Error ? e.message : 'Failed to send email.' });
+    } finally {
+      setEmailSending(false);
+    }
+  };
 
   const handleSave = async (input: ConvictionInput) => {
     if (editStock === null) {
@@ -438,6 +467,7 @@ export function ConvictionView() {
 
   const buyZoneCount = stocks.filter(s => s.zone === 'buy').length;
   const midZoneCount = stocks.filter(s => s.zone === 'mid').length;
+  const inPlayCount = stocks.filter(s => s.inPlay).length;
 
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
@@ -461,6 +491,7 @@ export function ConvictionView() {
               {stocks.length} stock{stocks.length !== 1 ? 's' : ''}
               {buyZoneCount > 0 && <span style={{ color: '#2ecc71', marginLeft: 10 }}>✅ {buyZoneCount} in buy zone</span>}
               {midZoneCount > 0 && <span style={{ color: '#f1c40f', marginLeft: 8 }}>🟡 {midZoneCount} in mid zone</span>}
+              {inPlayCount > 0 && <span style={{ color: '#e67e22', marginLeft: 8 }}>🚩 {inPlayCount} in play</span>}
             </span>
           </div>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
@@ -469,6 +500,14 @@ export function ConvictionView() {
               style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid #3d4f6e', background: '#1e2535', color: '#95a5a6', cursor: syncing ? 'not-allowed' : 'pointer', fontSize: 13 }}
             >
               {syncing ? '⟳ Syncing…' : '↓ Sync from Default Watchlist'}
+            </button>
+            <button
+              onClick={handleEmail}
+              disabled={emailSending || stocks.length === 0 || !emailConfigured}
+              title={emailConfigured ? 'Email my stocks list (with flags)' : 'Email not configured — set SMTP in Agent → Config → Email'}
+              style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid #3d4f6e', background: '#1e2535', color: '#95a5a6', cursor: emailSending || stocks.length === 0 || !emailConfigured ? 'not-allowed' : 'pointer', fontSize: 13, opacity: emailConfigured ? 1 : 0.5 }}
+            >
+              {emailSending ? '⟳ Sending…' : '✉ Email My Stocks'}
             </button>
             <button
               onClick={handleAiReview}
@@ -528,6 +567,13 @@ export function ConvictionView() {
           </div>
         )}
 
+        {emailMsg && (
+          <div style={{ background: emailMsg.ok ? '#11261a' : '#2a1a1a', border: `1px solid ${emailMsg.ok ? '#2ecc71' : '#e74c3c'}`, borderRadius: 6, padding: '8px 14px', marginBottom: 16, color: emailMsg.ok ? '#2ecc71' : '#e74c3c', fontSize: 13 }}>
+            {emailMsg.ok ? '✓ ' : '⚠ '}{emailMsg.text}
+            <button onClick={() => setEmailMsg(null)} style={{ marginLeft: 10, background: 'none', border: 'none', color: '#555', cursor: 'pointer' }}>✕</button>
+          </div>
+        )}
+
         {/* Table */}
         <div style={{ background: '#131b2e', borderRadius: 10, border: '1px solid #2d3748' }}>
           {loading ? (
@@ -541,6 +587,7 @@ export function ConvictionView() {
             <table className="cv-table">
               <thead>
                 <tr>
+                  <th style={{ textAlign: 'center' }} title="In play — flag stocks to watch / may act on">🚩</th>
                   <th>Ticker</th>
                   <th>Zone</th>
                   <th style={{ textAlign: 'right' }}>Current</th>
@@ -556,7 +603,20 @@ export function ConvictionView() {
               </thead>
               <tbody>
                 {sorted.map(stock => (
-                  <tr key={stock.ticker}>
+                  <tr key={stock.ticker} style={stock.inPlay ? { background: 'rgba(230,126,34,0.07)' } : undefined}>
+                    <td style={{ textAlign: 'center' }}>
+                      <button
+                        onClick={() => handleToggleInPlay(stock.ticker, stock.inPlay)}
+                        title={stock.inPlay ? 'In play — click to clear' : 'Flag as in play'}
+                        style={{
+                          background: 'none', border: 'none', cursor: 'pointer', fontSize: 15, lineHeight: 1,
+                          padding: 2, opacity: stock.inPlay ? 1 : 0.28,
+                          filter: stock.inPlay ? 'none' : 'grayscale(1)',
+                        }}
+                      >
+                        🚩
+                      </button>
+                    </td>
                     <td>
                       <strong style={{ color: '#ecf0f1', fontSize: 14 }}>{stock.ticker}</strong>
                     </td>

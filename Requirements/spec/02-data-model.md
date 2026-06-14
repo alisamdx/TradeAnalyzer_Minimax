@@ -135,7 +135,7 @@ Views `v_open_positions`, `v_closed_positions`, `v_portfolio_summary` provide ca
 
 ## 2.16 Conviction list (migration 026)
 
-**`conviction_stocks`** — `ticker PK`, `price_low` (comfortable entry), `price_mid` (experimental), `price_high` (never enter above), `note`, `added_at`, `updated_at`. A single permanent list (not multi-list).
+**`conviction_stocks`** — `ticker PK`, `price_low` (comfortable entry), `price_mid` (experimental), `price_high` (never enter above), `note`, `in_play` (043 — on/off attention flag), `added_at`, `updated_at`. A single permanent list (not multi-list).
 
 **`conviction_band_history`** — `id PK`, `ticker → conviction_stocks (CASCADE)`, `price_low/mid/high`, `note`, `changed_at`. Audit trail on every band change.
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.33.5] — 2026-06-13
+
+### Added
+- **My Stocks: "in play" flag** — each stock in the conviction list has an on/off 🚩 flag (migration 043 adds `conviction_stocks.in_play`) to mark stocks you want to pay attention to / may act on. Toggle it from a new flag column in the table (flagged rows are highlighted and counted in the header). It's a transient marker — toggling does **not** write a band-history snapshot.
+- **My Stocks: email the list** — a new "✉ Email My Stocks" button sends the list (via the existing SMTP/email config) as an HTML table including the 🚩 flag, sorted in-play first then by zone. The **Actions** column is omitted (UI-only, no information). The button is disabled with a tooltip when email isn't configured. New IPC: `conviction:set-in-play`, `conviction:send-email`, `conviction:email-configured`.
+
 ## [0.33.4] — 2026-06-13
 
 ### Changed

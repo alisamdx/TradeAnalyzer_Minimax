@@ -2,7 +2,7 @@
 
 > **Read this first.** Self-contained snapshot of *what the app is today* so a fresh AI session is productive without re-reading the whole codebase. This file describes **current state** — not history. Release history lives in `CHANGELOG.md` / `changelogs/`. Operating rules live in `/CLAUDE.md`. Full spec lives in `Requirements/`.
 >
-> Last verified against code: 2026-06-13 (v0.33.4). When you make a material change, update the relevant section here in the same commit.
+> Last verified against code: 2026-06-13 (v0.33.5). When you make a material change, update the relevant section here in the same commit.
 
 ---
 
@@ -104,7 +104,7 @@ src/renderer/src/
   knowledge/                 Embedded tastylive strategy guide (images + JSON)
   styles.css
 src/shared/types.ts         All cross-process types
-migrations/                  42 numbered SQL migrations
+migrations/                  43 numbered SQL migrations
 docs/                        architecture.md, data-provider.md, formulas.md, troubleshooting.md
 Requirements/                Spec + per-feature design docs
 changelogs/                  Per-version notes
@@ -146,11 +146,11 @@ Routing is a `currentView` string in `App.tsx`; cross-view navigation fires Cust
 
 ---
 
-## 8. Data model (~53 tables, 42 migrations)
+## 8. Data model (~53 tables, 43 migrations)
 
 Authoritative DDL is in `migrations/`. Tables are created lazily (`CREATE TABLE IF NOT EXISTS`) and migrations are idempotent + count-agnostic in tests.
 
-42 migrations. `positions.position_type` CHECK now includes `'Long Put'` and `'Long Call'` (migration 036). `batch_runs` has `trigger TEXT NOT NULL DEFAULT 'manual'` and `slot_time TEXT` (migration 037). Migration 037 also shifted all `batch_jobs.sequence_order` +1 to reserve position 1 for the orchestrator. Migration 038 adds `replay_briefs` + `replay_outcomes` for Brief Replay; 039 adds `replay_outcomes.close_price`/`close_date`. Migration 040 adds `options_premium_history` (durable daily option-premium capture). Migration 041 adds breakout signals to `technical_signals` (`breakout_state`, `breakout_level`, `breakout_decisiveness`, `volume_surge`, `atr_pct`) for the Inflection strategy. Migration 042 adds `replay_outcomes.direction` (1 long / −1 short) for direction-aware win/return aggregation (needed by inflection's mixed long/short picks).
+42 migrations. `positions.position_type` CHECK now includes `'Long Put'` and `'Long Call'` (migration 036). `batch_runs` has `trigger TEXT NOT NULL DEFAULT 'manual'` and `slot_time TEXT` (migration 037). Migration 037 also shifted all `batch_jobs.sequence_order` +1 to reserve position 1 for the orchestrator. Migration 038 adds `replay_briefs` + `replay_outcomes` for Brief Replay; 039 adds `replay_outcomes.close_price`/`close_date`. Migration 040 adds `options_premium_history` (durable daily option-premium capture). Migration 041 adds breakout signals to `technical_signals` (`breakout_state`, `breakout_level`, `breakout_decisiveness`, `volume_surge`, `atr_pct`) for the Inflection strategy. Migration 042 adds `replay_outcomes.direction` (1 long / −1 short) for direction-aware win/return aggregation (needed by inflection's mixed long/short picks). Migration 043 adds `conviction_stocks.in_play` (My Stocks on/off attention flag).
 
 | Domain | Tables |
 | --- | --- |
@@ -169,7 +169,7 @@ Authoritative DDL is in `migrations/`. Tables are created lazily (`CREATE TABLE 
 | Scoring / brief | `scoring_strategy_configs`, `daily_briefs`, `technical_signals`, `brief_learning_recommendations` |
 | Brief Replay | `replay_briefs` (UNIQUE as_of_date + strategy), `replay_outcomes` (forward returns, synth strike) |
 | Paper trading | `paper_trades`, `paper_trade_snapshots` |
-| Conviction | `conviction_stocks`, `conviction_band_history` |
+| Conviction | `conviction_stocks` (incl. `in_play` flag), `conviction_band_history`. Email via `ConvictionService.buildEmailReport()` / IPC `conviction:send-email` |
 | Agent | `agent_trade_learnings` |
 | News | `news_research_cache`, `macro_events` |
 | Earnings | `earnings_calendar` |

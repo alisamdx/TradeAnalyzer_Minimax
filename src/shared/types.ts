@@ -1848,6 +1848,7 @@ export interface ConvictionStock {
   priceMid: number | null;
   priceHigh: number | null;
   note: string | null;
+  inPlay: boolean;        // on/off "pay attention / may act on this" flag
   addedAt: string;
   updatedAt: string;
   currentPrice: number | null;

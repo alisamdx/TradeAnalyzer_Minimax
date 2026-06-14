@@ -307,7 +307,8 @@ app.whenReady().then(() => {
 
   // Phase 6 - Portfolio tracking IPC (+ Phase 1–3 AI Portfolio Advisor)
   registerPortfolioIpc(db, analysisService, optionsProvider);
-  registerConvictionIpc(new ConvictionService(db));
+  // Conviction IPC registered after emailService is constructed (see below) — it needs it
+  // for the "email my stocks" feature.
 
   // ENH-2 - Opportunity Dashboard
   const opportunityService = new OpportunityService(db, getConstituents);
@@ -407,6 +408,7 @@ app.whenReady().then(() => {
     () => { try { return secureGet(db, 'agentProjectPath') ?? ''; } catch { return ''; } }
   );
   registerScoringIpc(scoringService, emailService);
+  registerConvictionIpc(new ConvictionService(db), emailService);
 
   // v0.32.89 — Brief Replay (point-in-time scoring back-test)
   const briefReplayService = new BriefReplayService(db, scoringService);
