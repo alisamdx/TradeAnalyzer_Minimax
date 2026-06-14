@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.11] — 2026-06-14
+
+### Fixed
+- **Sidebar now scrolls when the menu is taller than the window.** The nav lives in a single `.nav-section` inside `.sidebar` (which is `overflow: hidden`), so on shorter windows the bottom items (Misc → History, and the new Execution section) were clipped and unreachable. `.nav-section` now fills the sidebar and scrolls (`flex: 1; min-height: 0; overflow-y: auto`) — `min-height: 0` lets the flex child shrink below its content height so the overflow scrolls instead of clipping. CSS-only; no testable unit (visual layout fix).
+
 ## [1.1.10] — 2026-06-14
 
 ### Added

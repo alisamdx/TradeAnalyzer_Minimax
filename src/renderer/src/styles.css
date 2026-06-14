@@ -590,10 +590,16 @@ table.items-table {
 /* ── Sidebar nav ─────────────────────────────────────────────────────────── */
 
 .nav-section {
-  padding: 8px 8px 0;
+  padding: 8px 8px 8px;
   display: flex;
   flex-direction: column;
   gap: 2px;
+  /* Fill the sidebar and scroll when the menu is taller than the viewport.
+     min-height:0 is required so this flex child can shrink below its content
+     height — otherwise .sidebar's overflow:hidden just clips the bottom items. */
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 .nav-btn {
   background: none;
