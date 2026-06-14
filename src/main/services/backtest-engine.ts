@@ -257,12 +257,14 @@ export class BacktestEngine {
     const insertTrade = this.db.prepare(`
       INSERT INTO backtest_trades
         (run_id, ticker, strategy, side, entry_date, expiration, strike, entry_premium,
-         exit_date, exit_premium, exit_reason, pnl, stock_shares, stock_cost_basis, capital_required)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         exit_date, exit_premium, exit_reason, pnl, stock_shares, stock_cost_basis, capital_required,
+         entry_spot)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const updateTrade = this.db.prepare(`
       UPDATE backtest_trades
-      SET exit_date = ?, exit_premium = ?, exit_reason = ?, pnl = ?, stock_shares = ?, stock_cost_basis = ?
+      SET exit_date = ?, exit_premium = ?, exit_reason = ?, pnl = ?, stock_shares = ?,
+          stock_cost_basis = ?, exit_spot = ?
       WHERE id = ?
     `);
 
@@ -365,7 +367,7 @@ export class BacktestEngine {
             capital += openPos.capitalReserved + tradePnl; // release - loss
           }
 
-          updateTrade.run(bar.date, exitPremium, exitReason, tradePnl, newShares, newCostBasis || null, openPos.tradeId);
+          updateTrade.run(bar.date, exitPremium, exitReason, tradePnl, newShares, newCostBasis || null, S, openPos.tradeId);
           shares = newShares;
           costBasis = newCostBasis;
 
@@ -399,7 +401,8 @@ export class BacktestEngine {
               const row = insertTrade.run(
                 runId, cfg.ticker, cfg.strategy, side,
                 bar.date, expirationDate, strike, optPrice,
-                null, null, null, null, shares, costBasis || null, capitalRequired
+                null, null, null, null, shares, costBasis || null, capitalRequired,
+                S
               );
               openPos = {
                 tradeId: row.lastInsertRowid as number,
@@ -435,7 +438,7 @@ export class BacktestEngine {
       const tradePnl = openPos.side === 'put'
         ? (openPos.entryPremium * 100) - Math.max(0, openPos.strike - S) * 100
         : (openPos.entryPremium * 100) - Math.max(0, S - openPos.strike) * 100;
-      updateTrade.run(lastBar.date, null, 'expiration', tradePnl, shares, costBasis || null, openPos.tradeId);
+      updateTrade.run(lastBar.date, null, 'expiration', tradePnl, shares, costBasis || null, S, openPos.tradeId);
       capital += openPos.capitalReserved + tradePnl;
       const t = this.getTrade(openPos.tradeId);
       if (t) trades.push(t);
@@ -650,7 +653,9 @@ export class BacktestEngine {
       pnl: r.pnl,
       stockShares: r.stock_shares,
       stockCostBasis: r.stock_cost_basis,
-      capitalRequired: r.capital_required
+      capitalRequired: r.capital_required,
+      entrySpot: r.entry_spot ?? null,
+      exitSpot: r.exit_spot ?? null
     };
   }
 }

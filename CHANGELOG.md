@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.34.3] — 2026-06-13
+
+### Added
+- **Backtest trade log shows the underlying stock price at entry & exit** — new **Stk@Entry** and **Stk@Exit** columns (migration 044 adds `backtest_trades.entry_spot` / `exit_spot`, populated by the engine from the simulated spot at open and close). Makes each trade readable — you can see where the stock sat relative to the strike. Existing runs show "—" for these until re-run.
+
 ## [0.34.2] — 2026-06-13
 
 ### Added

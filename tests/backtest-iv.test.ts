@@ -111,4 +111,22 @@ describe('backtest engine uses historical IV', () => {
 
     expect(premIv).toBeGreaterThan(premRealized * 2); // IV-priced premium is far richer
   });
+
+  it('records the underlying stock price at entry and exit on each trade', () => {
+    const db = openDatabase(':memory:');
+    runMigrations(db, MIGRATIONS_DIR);
+    seedPrices(db, 'TST');
+    const eng = new BacktestEngine(db);
+    const id = eng.createConfig({
+      name: 't', strategy: 'CSP', ticker: 'TST', startDate: '2023-02-01', endDate: '2023-06-15',
+      startingCapital: 25_000, dteTarget: 30, deltaTarget: 0.30, profitTargetPct: 50, stopLossPct: 200,
+    });
+    const { runId } = eng.simulate(id, () => {});
+    const trades = eng.getTrades(runId);
+    expect(trades.length).toBeGreaterThan(0);
+    expect(trades[0]!.entrySpot).toBeGreaterThan(90);   // flat series ≈ 100
+    const closed = trades.find(t => t.exitDate !== null);
+    expect(closed?.exitSpot).toBeGreaterThan(90);
+    db.close();
+  });
 });

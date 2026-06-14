@@ -101,7 +101,7 @@ Views `v_open_positions`, `v_closed_positions`, `v_portfolio_summary` provide ca
 
 **`backtest_runs`** — `id PK`, `config_id (CASCADE)`, `status` (`pending|running|completed|failed|cancelled`), `started_at`, `completed_at`, `error_msg`, `total_days`, `simulated_days`, `created_at`.
 
-**`backtest_trades`** — `id PK`, `run_id (CASCADE)`, `ticker`, `strategy`, `side` (`put|call`), `entry_date`, `expiration`, `strike`, `entry_premium`, `exit_date`, `exit_premium`, `exit_reason` (`profit_target|stop_loss|expiration|assigned`), `pnl`, `stock_shares`, `stock_cost_basis`, `capital_required`.
+**`backtest_trades`** — `id PK`, `run_id (CASCADE)`, `ticker`, `strategy`, `side` (`put|call`), `entry_date`, `expiration`, `strike`, `entry_premium`, `exit_date`, `exit_premium`, `exit_reason` (`profit_target|stop_loss|expiration|assigned`), `pnl`, `stock_shares`, `stock_cost_basis`, `capital_required`, `entry_spot`/`exit_spot` (044 — underlying price at open/close).
 
 **`backtest_metrics`** — `run_id PK (CASCADE)`, `net_pnl`, `total_return_pct`, `annualized_return_pct`, `max_drawdown_pct`, `sharpe_ratio`, `win_rate`, `total_trades`, `winning_trades`, `losing_trades`, `avg_trade_pnl`, `avg_days_held`, `equity_curve_json`, `computed_at`.
 

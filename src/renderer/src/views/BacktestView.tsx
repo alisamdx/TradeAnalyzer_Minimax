@@ -72,7 +72,7 @@ function TradeTable({ trades }: { trades: BacktestTrade[] }) {
         <thead>
           <tr>
             <th>Entry</th><th>Exp.</th><th>Side</th><th>Strike</th>
-            <th>Entry Px</th><th>Exit</th><th>Exit Px</th><th>Exit Reason</th><th>P&L</th>
+            <th>Entry Px</th><th>Stk@Entry</th><th>Exit</th><th>Exit Px</th><th>Stk@Exit</th><th>Exit Reason</th><th>P&L</th>
           </tr>
         </thead>
         <tbody>
@@ -83,8 +83,10 @@ function TradeTable({ trades }: { trades: BacktestTrade[] }) {
               <td className={t.side === 'put' ? 'bt-put' : 'bt-call'}>{t.side.toUpperCase()}</td>
               <td>{fmt$(t.strike, 2)}</td>
               <td>{fmt$(t.entryPremium, 2)}</td>
+              <td>{t.entrySpot !== null ? fmt$(t.entrySpot, 2) : '—'}</td>
               <td>{t.exitDate ?? '—'}</td>
               <td>{t.exitPremium !== null ? fmt$(t.exitPremium, 2) : '—'}</td>
+              <td>{t.exitSpot !== null ? fmt$(t.exitSpot, 2) : '—'}</td>
               <td>{t.exitReason?.replace('_', ' ') ?? '—'}</td>
               <td className={t.pnl !== null && t.pnl >= 0 ? 'up' : 'down'}>{fmt$(t.pnl, 0)}</td>
             </tr>

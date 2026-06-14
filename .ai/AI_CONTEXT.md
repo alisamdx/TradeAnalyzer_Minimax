@@ -2,7 +2,7 @@
 
 > **Read this first.** Self-contained snapshot of *what the app is today* so a fresh AI session is productive without re-reading the whole codebase. This file describes **current state** — not history. Release history lives in `CHANGELOG.md` / `changelogs/`. Operating rules live in `/CLAUDE.md`. Full spec lives in `Requirements/`.
 >
-> Last verified against code: 2026-06-13 (v0.34.2). When you make a material change, update the relevant section here in the same commit.
+> Last verified against code: 2026-06-13 (v0.34.3). When you make a material change, update the relevant section here in the same commit.
 
 ---
 
@@ -104,7 +104,7 @@ src/renderer/src/
   knowledge/                 Embedded tastylive strategy guide (images + JSON)
   styles.css
 src/shared/types.ts         All cross-process types
-migrations/                  43 numbered SQL migrations
+migrations/                  44 numbered SQL migrations
 docs/                        architecture.md, data-provider.md, formulas.md, troubleshooting.md
 Requirements/                Spec + per-feature design docs
 changelogs/                  Per-version notes
@@ -146,11 +146,11 @@ Routing is a `currentView` string in `App.tsx`; cross-view navigation fires Cust
 
 ---
 
-## 8. Data model (~53 tables, 43 migrations)
+## 8. Data model (~53 tables, 44 migrations)
 
 Authoritative DDL is in `migrations/`. Tables are created lazily (`CREATE TABLE IF NOT EXISTS`) and migrations are idempotent + count-agnostic in tests.
 
-42 migrations. `positions.position_type` CHECK now includes `'Long Put'` and `'Long Call'` (migration 036). `batch_runs` has `trigger TEXT NOT NULL DEFAULT 'manual'` and `slot_time TEXT` (migration 037). Migration 037 also shifted all `batch_jobs.sequence_order` +1 to reserve position 1 for the orchestrator. Migration 038 adds `replay_briefs` + `replay_outcomes` for Brief Replay; 039 adds `replay_outcomes.close_price`/`close_date`. Migration 040 adds `options_premium_history` (durable daily option-premium capture). Migration 041 adds breakout signals to `technical_signals` (`breakout_state`, `breakout_level`, `breakout_decisiveness`, `volume_surge`, `atr_pct`) for the Inflection strategy. Migration 042 adds `replay_outcomes.direction` (1 long / −1 short) for direction-aware win/return aggregation (needed by inflection's mixed long/short picks). Migration 043 adds `conviction_stocks.in_play` (My Stocks on/off attention flag).
+44 migrations. `positions.position_type` CHECK now includes `'Long Put'` and `'Long Call'` (migration 036). `batch_runs` has `trigger TEXT NOT NULL DEFAULT 'manual'` and `slot_time TEXT` (migration 037). Migration 037 also shifted all `batch_jobs.sequence_order` +1 to reserve position 1 for the orchestrator. Migration 038 adds `replay_briefs` + `replay_outcomes` for Brief Replay; 039 adds `replay_outcomes.close_price`/`close_date`. Migration 040 adds `options_premium_history` (durable daily option-premium capture). Migration 041 adds breakout signals to `technical_signals` (`breakout_state`, `breakout_level`, `breakout_decisiveness`, `volume_surge`, `atr_pct`) for the Inflection strategy. Migration 042 adds `replay_outcomes.direction` (1 long / −1 short) for direction-aware win/return aggregation (needed by inflection's mixed long/short picks). Migration 043 adds `conviction_stocks.in_play` (My Stocks on/off attention flag). Migration 044 adds `backtest_trades.entry_spot`/`exit_spot` (underlying price at trade open/close).
 
 | Domain | Tables |
 | --- | --- |

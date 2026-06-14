@@ -854,6 +854,8 @@ export interface BacktestTrade {
   stockShares: number;
   stockCostBasis: number | null;
   capitalRequired: number;
+  entrySpot: number | null;   // underlying price at entry
+  exitSpot: number | null;    // underlying price at exit
 }
 
 export interface BacktestMetrics {
