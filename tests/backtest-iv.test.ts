@@ -81,6 +81,27 @@ describe('aggregate pick backtest (phase 2)', () => {
     db.close();
   });
 
+  it('aggregate equity curve is cumulative dollars ending at total P&L', () => {
+    const db = openDatabase(':memory:');
+    runMigrations(db, MIGRATIONS_DIR);
+    seedPrices(db, 'TST', 100); // 180 days from 2023-01-01
+    // One income replay pick whose CSP can resolve within the seeded price range.
+    const brief = db.prepare(
+      `INSERT INTO replay_briefs (as_of_date, strategy, picks, config_version) VALUES ('2023-02-01','income','[]','baseline_v3')`
+    ).run();
+    db.prepare(
+      `INSERT INTO replay_outcomes (replay_brief_id, ticker, rank, composite_score, entry_price) VALUES (?, 'TST', 1, 70, 100)`
+    ).run(brief.lastInsertRowid as number);
+
+    const res = new BacktestEngine(db).backtestReplayPicks('income');
+    expect(res.tradeCount).toBeGreaterThan(0);
+    expect(res.equityCurve.length).toBe(res.tradeCount);
+    // Curve is in dollars and its last point equals the reported total P&L.
+    expect(res.equityCurve.at(-1)!.cumPnl).toBe(res.totalPnl);
+    expect(res.maxDrawdownPnl).toBeGreaterThanOrEqual(0);
+    db.close();
+  });
+
   it('ivHistoryStart returns the oldest IV date (null when empty)', () => {
     const db = openDatabase(':memory:');
     runMigrations(db, MIGRATIONS_DIR);

@@ -486,7 +486,7 @@ export class BacktestEngine {
     const n = trades.length;
     if (n === 0) {
       return { strategy, tradeCount: 0, skipped, winRate: 0, avgReturnPct: 0, medianReturnPct: 0,
-        bestReturnPct: 0, worstReturnPct: 0, totalPnl: 0, avgDaysHeld: 0, maxDrawdownPct: 0, equityCurve: [], params };
+        bestReturnPct: 0, worstReturnPct: 0, totalPnl: 0, avgDaysHeld: 0, maxDrawdownPnl: 0, equityCurve: [], params };
     }
 
     const rets = trades.map(t => t.returnPct);
@@ -494,13 +494,15 @@ export class BacktestEngine {
     const wins = trades.filter(t => t.pnl > 0).length;
     const r2 = (v: number) => Math.round(v * 100) / 100;
 
-    // Cumulative return-on-capital curve by exit date (equal weight, capital recycled).
+    // Cumulative realized dollar P&L by exit date (1 contract per pick) — ends at totalPnl.
+    // Drawdown is the largest peak-to-trough drop in dollars (a real money figure, not a
+    // sum of per-trade percentages which is dimensionally meaningless).
     const byExit = [...trades].sort((a, b) => a.exitDate.localeCompare(b.exitDate));
-    const equityCurve: { date: string; cumReturnPct: number }[] = [];
+    const equityCurve: { date: string; cumPnl: number }[] = [];
     let cum = 0, peak = 0, maxDd = 0;
     for (const t of byExit) {
-      cum += t.returnPct;
-      equityCurve.push({ date: t.exitDate, cumReturnPct: r2(cum) });
+      cum += t.pnl;
+      equityCurve.push({ date: t.exitDate, cumPnl: Math.round(cum) });
       if (cum > peak) peak = cum;
       if (peak - cum > maxDd) maxDd = peak - cum;
     }
@@ -514,7 +516,7 @@ export class BacktestEngine {
       worstReturnPct: r2(sortedRets[0]!),
       totalPnl: Math.round(trades.reduce((s, t) => s + t.pnl, 0)),
       avgDaysHeld: Math.round((trades.reduce((s, t) => s + t.daysHeld, 0) / n) * 10) / 10,
-      maxDrawdownPct: r2(maxDd),
+      maxDrawdownPnl: Math.round(maxDd),
       equityCurve, params,
     };
   }

@@ -137,7 +137,6 @@ function PickPnlModal({ result, onClose }: { result: AggregatePickBacktest; onCl
   const sign = (v: number) => `${v >= 0 ? '+' : ''}${v}%`;
   const dollar = (v: number) => `${v < 0 ? '-$' : '$'}${Math.abs(Math.round(v)).toLocaleString()}`;
   const avgPnl = r.tradeCount ? r.totalPnl / r.tradeCount : 0;
-  const cum = r.equityCurve.length ? r.equityCurve[r.equityCurve.length - 1]!.cumReturnPct : 0;
   const metric = (label: string, value: string, color?: string) => (
     <div style={{ background: 'var(--bg-elevated)', borderRadius: 6, padding: '8px 12px', minWidth: 104 }}>
       <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{label}</div>
@@ -164,25 +163,27 @@ function PickPnlModal({ result, onClose }: { result: AggregatePickBacktest; onCl
               {metric('Avg $/trade', dollar(avgPnl), pos(avgPnl))}
               {metric('Win rate', `${r.winRate}%`, pos(r.winRate - 50))}
               {metric('Avg ROC/trade', sign(r.avgReturnPct), pos(r.avgReturnPct))}
-              {metric('Median', sign(r.medianReturnPct), pos(r.medianReturnPct))}
-              {metric('Cumulative ROC', sign(cum), pos(cum))}
-              {metric('Max drawdown', `-${r.maxDrawdownPct}%`, '#ef5350')}
+              {metric('Median ROC', sign(r.medianReturnPct), pos(r.medianReturnPct))}
+              {metric('Max drawdown', dollar(-r.maxDrawdownPnl), '#ef5350')}
               {metric('Avg days held', String(r.avgDaysHeld))}
               {metric('Skipped', String(r.skipped))}
             </div>
-            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>Cumulative return-on-capital (%) by exit date</div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>Cumulative dollar P&L by exit date (1 contract per pick)</div>
             <ResponsiveContainer width="100%" height={260}>
               <LineChart data={r.equityCurve} margin={{ top: 8, right: 16, bottom: 24, left: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(128,128,128,0.12)" />
                 <XAxis dataKey="date" tick={{ fontSize: 10 }} angle={-35} textAnchor="end" height={50} minTickGap={24} />
-                <YAxis tickFormatter={v => v + '%'} tick={{ fontSize: 11 }} width={48} />
-                <Tooltip formatter={(v) => `${Number(v ?? 0).toFixed(1)}%`} />
+                <YAxis tickFormatter={(v) => dollar(Number(v))} tick={{ fontSize: 11 }} width={64} />
+                <Tooltip formatter={(v) => dollar(Number(v ?? 0))} />
                 <ReferenceLine y={0} stroke="rgba(255,255,255,0.2)" />
-                <Line type="monotone" dataKey="cumReturnPct" stroke="#4caf50" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="cumPnl" stroke={r.totalPnl >= 0 ? '#4caf50' : '#ef5350'} strokeWidth={2} dot={false} />
               </LineChart>
             </ResponsiveContainer>
             <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 10 }}>
-              Real option P&L (Black-Scholes from historical price + IV) — the premium actually collected, not the stock move the main table shows. Total P&L = sum of one CSP contract (100 shares) per pick; Cumulative ROC sums per-trade return on CSP collateral.
+              Real option P&L (Black-Scholes from historical price + IV) — the premium actually collected, not the stock move the main table shows.
+              {r.totalPnl < 0 && r.winRate >= 60 && (
+                <> <strong style={{ color: '#e0a030' }}>Note:</strong> a high win rate with a net dollar loss is the classic short-premium asymmetry — many small premium wins, a few large assignment losses (heavier on high-priced names). Avg ROC is equal-weight per trade; Total P&L is collateral-weighted, so they can diverge.</>
+              )}
             </div>
           </>
         )}

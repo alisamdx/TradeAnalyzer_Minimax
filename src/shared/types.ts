@@ -902,12 +902,12 @@ export interface AggregatePickBacktest {
   medianReturnPct: number;
   bestReturnPct: number;
   worstReturnPct: number;
-  totalPnl: number;          // sum of per-contract P&L ($)
+  totalPnl: number;          // sum of per-contract P&L ($) — 1 contract per pick
   avgDaysHeld: number;
-  maxDrawdownPct: number;    // on the cumulative return-on-capital curve
-  // Cumulative sum of per-trade return-on-capital (%) ordered by exit date —
-  // "equal-weight, capital recycled" strategy edge over time.
-  equityCurve: Array<{ date: string; cumReturnPct: number }>;
+  maxDrawdownPnl: number;    // largest peak-to-trough drop ($) on the cumulative-$ curve
+  // Cumulative realized dollar P&L (1 contract per pick) ordered by exit date — ends at
+  // totalPnl. Real money, unlike a sum of per-trade percentages.
+  equityCurve: Array<{ date: string; cumPnl: number }>;
   params: { deltaTarget: number; dteTarget: number; profitTargetPct: number; stopLossPct: number };
 }
 

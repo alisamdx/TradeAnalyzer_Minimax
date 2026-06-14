@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.34.8] — 2026-06-13
+
+### Fixed
+- **💰 aggregate backtest: dollar-based equity curve + drawdown (was misleading)** — the modal previously showed a "Cumulative ROC" that summed per-trade *percentages* across all trades (e.g. +407%) and a "Max drawdown" of −158% — dimensionally meaningless (you can't draw down 158% of capital). The equity curve is now **cumulative realized dollar P&L** (ending exactly at Total P&L), and **Max drawdown is a real dollar figure** (largest peak-to-trough drop). The line turns red when the strategy is net-negative. Added an explanatory note for the common case of a **high win rate but net dollar loss** — the short-premium asymmetry (many small premium wins, a few large assignment losses; avg ROC is equal-weight per trade while Total P&L is collateral-weighted, so they legitimately diverge). Type: `AggregatePickBacktest.equityCurve[].cumReturnPct → cumPnl`, `maxDrawdownPct → maxDrawdownPnl`.
+
 ## [0.34.7] — 2026-06-13
 
 ### Added
