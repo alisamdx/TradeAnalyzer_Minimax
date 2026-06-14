@@ -271,6 +271,8 @@ export class BacktestEngine {
     let capital = cfg.startingCapital;
     let shares = 0;
     let costBasis = 0;
+    let capitalBlocked = false;  // a CSP entry was skipped because capital < collateral
+    let maxCapReq = 0;           // largest collateral a skipped entry would have needed
     let wheelPhase: 'csp' | 'cc' = 'csp'; // only used for Wheel strategy
     let openPos: OpenPosition | null = null;
     const trades: BacktestTrade[] = [];
@@ -394,6 +396,10 @@ export class BacktestEngine {
             // Premium too low to be meaningful — skip
           } else {
             const capitalRequired = side === 'put' ? strike * 100 : 0;
+            if (capital < capitalRequired) {
+              capitalBlocked = true;
+              if (capitalRequired > maxCapReq) maxCapReq = capitalRequired;
+            }
             if (capital >= capitalRequired) {
               capital -= capitalRequired; // reserve cash for put (CC requires no cash)
               capital += optPrice * 100;  // collect premium upfront
@@ -442,6 +448,19 @@ export class BacktestEngine {
       capital += openPos.capitalReserved + tradePnl;
       const t = this.getTrade(openPos.tradeId);
       if (t) trades.push(t);
+    }
+
+    // No trades is almost always a too-small starting capital for a high-priced stock —
+    // surface why instead of returning a silent flat-zero curve.
+    if (trades.length === 0 && !this.cancelToken.cancelled) {
+      if (capitalBlocked) {
+        throw new Error(
+          `No trades: starting capital ($${cfg.startingCapital.toLocaleString()}) is below the ` +
+          `~$${Math.round(maxCapReq).toLocaleString()} collateral a ${cfg.deltaTarget}-delta CSP needs for ` +
+          `${cfg.ticker}. Raise Starting Capital to at least that.`
+        );
+      }
+      throw new Error(`No trades opened for ${cfg.ticker} — premiums too thin or insufficient price/IV data in range.`);
     }
 
     // Ensure last equity point

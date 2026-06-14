@@ -8,7 +8,7 @@ import { runMigrations } from '../src/main/db/migrations.js';
 import { MIGRATIONS_DIR } from './helpers.js';
 import { BacktestEngine } from '../src/main/services/backtest-engine.js';
 
-function seedPrices(db: DbHandle, ticker: string) {
+function seedPrices(db: DbHandle, ticker: string, base = 100) {
   // ~180 sequential days of a gently drifting price → LOW realized vol.
   const ins = db.prepare(
     `INSERT INTO historical_prices (ticker, date, open, high, low, close, volume) VALUES (?, ?, ?, ?, ?, ?, ?)`
@@ -16,7 +16,7 @@ function seedPrices(db: DbHandle, ticker: string) {
   const start = new Date('2023-01-01T00:00:00Z');
   for (let i = 0; i < 180; i++) {
     const d = new Date(start.getTime() + i * 86_400_000).toISOString().slice(0, 10);
-    const px = 100 + Math.sin(i / 30) * 1.5; // small wiggle, low realized vol
+    const px = base + Math.sin(i / 30) * (base * 0.015); // small wiggle, low realized vol
     ins.run(ticker, d, px, px + 0.3, px - 0.3, px, 2_000_000);
   }
 }
@@ -110,6 +110,19 @@ describe('backtest engine uses historical IV', () => {
     dbB.close();
 
     expect(premIv).toBeGreaterThan(premRealized * 2); // IV-priced premium is far richer
+  });
+
+  it('errors clearly when starting capital is below one CSP\'s collateral (high-priced stock)', () => {
+    const db = openDatabase(':memory:');
+    runMigrations(db, MIGRATIONS_DIR);
+    seedPrices(db, 'BIG', 645); // ~$645 stock → CSP collateral ~$60k
+    const eng = new BacktestEngine(db);
+    const id = eng.createConfig({
+      name: 't', strategy: 'CSP', ticker: 'BIG', startDate: '2023-02-01', endDate: '2023-06-15',
+      startingCapital: 25_000, dteTarget: 30, deltaTarget: 0.30, profitTargetPct: 50, stopLossPct: 200,
+    });
+    expect(() => eng.simulate(id, () => {})).toThrow(/Starting Capital/i);
+    db.close();
   });
 
   it('records the underlying stock price at entry and exit on each trade', () => {

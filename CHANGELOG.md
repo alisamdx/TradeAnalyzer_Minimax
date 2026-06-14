@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.34.4] — 2026-06-13
+
+### Fixed
+- **Backtest no longer silently returns a flat-zero curve when capital is too small** — a CSP/Wheel backtest on a high-priced stock (e.g. META ~$645 → ~$60k collateral) with the default $25k starting capital could never open a position, producing a flat equity curve and all-zero metrics with no explanation. The engine now throws a clear error: *"No trades: starting capital ($25,000) is below the ~$60,000 collateral a 0.30-delta CSP needs for META. Raise Starting Capital."* (Also covers the no-premium/insufficient-data case.) Note: the aggregate 💰 P&L backtest is unaffected — it's per-trade ROC, not capital-constrained.
+
 ## [0.34.3] — 2026-06-13
 
 ### Added
