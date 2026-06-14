@@ -5,7 +5,7 @@ Do not hand-edit the PDF. This .md is the source of truth and lives in the doc-m
 
 # TradeAnalyzer — User Guide
 
-*A practical operator's guide. Version-tracked alongside the app. Last updated for v0.32.6.*
+*A practical operator's guide. Version-tracked alongside the app. Last updated for v1.1.10.*
 
 ---
 
@@ -13,7 +13,9 @@ Do not hand-edit the PDF. This .md is the source of truth and lives in the doc-m
 
 TradeAnalyzer helps you find, time, model, enter, and manage 1–2 month options-income and swing trades using math instead of gut feel. It scans the S&P 500 + Russell 1000 + ETF universe, ranks the best setups, builds a daily prioritized brief, models option payoffs, and tracks your portfolio synced from E*Trade.
 
-It does **not** place orders. E*Trade is read-only — it reads quotes, option chains, and your positions. You always place trades yourself in your broker.
+For its core decision-support work it does **not** place orders: E*Trade is read-only — it reads quotes, option chains, and your positions, and you place those trades yourself in your broker.
+
+A separate, **opt-in automated-execution engine** (v2) can place and manage defined-risk option trades for you — but it is **off by default**, **semi-automatic** (it proposes every order and you approve each one), and currently runs in **paper/simulation mode** (no real money). See §6.
 
 **The mental model — five steps:**
 
@@ -37,7 +39,7 @@ Open **⚙ Settings** (Data section of the sidebar) and work through these. Seve
 5. **Account size** — set this in Settings so the Portfolio screen can show Buying Power %.
 6. **Email/SMTP** (optional) — lets the Daily Brief email itself to you with a PDF attached.
 
-Once set up, the app auto-launches at login and keeps its data warm via background jobs (see §7).
+Once set up, the app auto-launches at login and keeps its data warm via background jobs (see §8).
 
 ---
 
@@ -104,13 +106,17 @@ Not sure which structure fits? Open **🔬 Strategy Lab**, enter a ticker, and t
 
 **Data**
 - **⚙ Settings** — API keys, E*Trade connection, account size, email, options-provider choice.
-- **⚖ Trade Scoring** — tune the scoring weights per strategy (see §8).
-- **🔄 Batch Jobs** — the background job scheduler (see §7).
+- **⚖ Trade Scoring** — tune the scoring weights per strategy (see §9).
+- **🔄 Batch Jobs** — the background job scheduler (see §8).
 
 **Intelligence**
 - **📋 Daily Brief** — today's top scored picks per strategy, with AI rationale + critic.
 - **🪞 Retrospect** — paper-trade tracking of past picks; win rates and learnings.
 - **📅 Earnings** — earnings calendar (month/list) across the universe.
+
+**Execution** (v2 — opt-in, paper/mock for now)
+- **🤝 Trading Desk** — start/stop the execution engine, approve/reject order proposals, watch open positions and the activity log (see §6).
+- **🎚️ Execution Settings** — the engine's rules: risk limits, entry/exit policy, paper/live mode (see §6).
 
 **Screeners**
 - **🔍 Screener** — full fundamental filter run over a universe; save results as a watchlist.
@@ -144,13 +150,52 @@ Not sure which structure fits? Open **🔬 Strategy Lab**, enter a ticker, and t
 
 ---
 
-## 6. Watchlists
+## 6. Automated execution (Trading Desk)
+
+> **New in v2, and deliberately conservative.** The execution engine can place and manage
+> trades for you, but it is **off by default**, **semi-automatic**, **defined-risk only**,
+> and currently trades in **paper/simulation mode** (a built-in mock broker — no real money
+> and no broker account required). Think of it as a co-pilot you approve every move for, not
+> an autopilot.
+
+### How it works
+
+The engine proposes a trade; **you approve it** before anything is placed; then the engine
+manages the position to its exit per your rules. Nothing happens while the engine is
+**Stopped** (its default state), and a master **Stop** is a hard stop. Two screens drive it:
+
+**🤝 Trading Desk** — the control room:
+- **Status header** — a **PAPER/LIVE** badge and the engine state (Stopped / Running / Paused / Kill-tripped).
+- **Engine** — **Start**, **Pause**, and **Stop** (hard stop), plus broker-connection and health readouts.
+- **Kill switch** — a one-click halt that blocks new entries; it also trips automatically if the day's loss hits your limit. Clear it manually when you're ready to resume.
+- **Capital** — how much of your capital ceiling is deployed, today's realized + unrealized P&L, and the daily-loss trip level.
+- **Proposals** — pending order proposals (entries and exits). **Approve** or **Reject** each. In paper mode approval is one click; in live mode you must type the ticker to confirm (a guard against fat-finger orders).
+- **Open positions** and an **activity log** of everything the engine has done.
+
+**🎚️ Execution Settings** — the rule book the engine obeys (it re-reads these every cycle):
+- **Mode** — paper vs live, and which strategies are eligible (launch scope is *inflection* spreads only).
+- **Risk limits** — capital ceiling, max risk per trade, max concurrent positions, daily-loss trip %, and per-ticker / per-strategy caps.
+- **Entry policy** — minimum score, max new entries per day/week, the entry time window, proposal shelf-life, and a re-price tolerance.
+- **Exit policy** — protective stop (× credit) and defensive-expiry close, plus a profit target and time-based exit that can either *propose* or act *automatically*.
+
+Edit a value, **Save**, and it applies on the next cycle. Switching to **live** mode is confirmation-gated.
+
+### What it won't do (yet)
+
+Right now there is **no broker account wired in**, so the engine runs entirely on the paper
+mock and won't generate its own entry proposals — the live-data hookup arrives with the
+broker integration. You can still start the engine, watch it manage state, and exercise the
+controls end-to-end in paper mode. Real-money trading is a later, deliberately gated step.
+
+---
+
+## 7. Watchlists
 
 Watchlists feed Analysis and Validate. Create as many as you like (names are unique). The **Default** list can be renamed but not deleted. Add tickers individually or import a CSV (the only required column is `ticker`). You can also save any screener or analysis result set straight into a new watchlist.
 
 ---
 
-## 7. Background jobs (Batch Jobs)
+## 8. Background jobs (Batch Jobs)
 
 **🔄 Batch Jobs** runs the daily maintenance that keeps everything fast. You rarely touch it, but it's worth knowing:
 
@@ -163,13 +208,13 @@ If a job shows "skipped," it usually means E*Trade isn't connected — reconnect
 
 ---
 
-## 8. Tuning the scoring engine
+## 9. Tuning the scoring engine
 
 **⚖ Trade Scoring** lets you adjust how candidates are ranked for each of the five strategies. Each strategy has a set of weighted signals (IV rank, trend, growth, liquidity, momentum, etc.) whose weights sum to 100. Drag the weights, toggle signals on/off, and the Daily Brief uses your config on its next run. **Reset to Baseline** restores the shipped defaults. The Retrospect feedback loop suggests which signals correlated with winners.
 
 ---
 
-## 9. Troubleshooting
+## 10. Troubleshooting
 
 | Symptom | Fix |
 |---|---|
@@ -180,10 +225,12 @@ If a job shows "skipped," it usually means E*Trade isn't connected — reconnect
 | Daily Brief didn't appear | Trigger it manually: **🔄 Batch Jobs** → Daily Intelligence Brief → Run Now. |
 | Numbers look stale | Check the freshness timestamp on the screen; run **🗄️ Data Sync** or the relevant batch job. |
 | Earnings date looks a day off | E*Trade returns UTC dates; the app shifts weekend dates to Friday and marks them unconfirmed (amber ⚠). |
+| Trading Desk shows no proposals | Expected for now — the engine runs on the paper mock with no live-data hookup yet, so it generates no entries (see §6). |
+| Execution engine won't start | It refuses to start if it can't reconcile state; check the activity log. The engine is also Stopped by default — that's normal. |
 
 ---
 
-## 10. A note on discipline
+## 11. A note on discipline
 
 The app is built around a few hard rules that consistently improve premium-selling results. Let it enforce them:
 - Don't sell premium when **IV rank is low** (the market is underpaying).
