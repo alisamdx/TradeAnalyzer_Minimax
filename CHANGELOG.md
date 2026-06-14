@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.1] — 2026-06-14
+
+### Added
+- **v2 execution subsystem — Phase 1 (broker seam + mock).** Added the `ExecutionBroker` interface (`src/main/execution/execution-broker.ts`) — the abstraction over the venue that prices, places, and fills orders, so the engine never depends on a concrete broker (paper vs live becomes a config of the IBKR implementation, not a code branch). Added `MockExecutionBroker` (`src/main/execution/mock-execution-broker.ts`): a deterministic, fully controllable in-memory broker (configurable pricing, fills full/partial/reject/manual, connection state, buying power, marks) that lets the entire engine — risk governor, loops, control panel — be built and tested with **no IBKR account**. It is idempotent on `clientOrderId` (a repeated COID never duplicates an order) and matches closing orders to their opening position regardless of leg direction. `tests/mock-execution-broker.test.ts` (12 tests) pins the contract: pricing, auto/manual/partial/reject fills, idempotency, fail-closed-when-disconnected, position open/close, marks, cancel. Still dormant — wired to nothing yet.
+
 ## [1.1.0] — 2026-06-14
 
 ### Added

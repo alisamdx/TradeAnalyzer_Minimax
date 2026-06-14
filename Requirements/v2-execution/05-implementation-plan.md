@@ -33,7 +33,7 @@ phase lands.
   RiskState, ExecConfig, gate-result).
 - **Deliverable:** schema + types + config, migration tests green.
 
-## Phase 1 — Broker seam + mock *(no broker)*
+## Phase 1 — Broker seam + mock *(no broker)* — ✅ DONE (v1.1.1)
 
 - Define `ExecutionBroker` (§1.4).
 - `MockExecutionBroker`: deterministic combo pricing, controllable fills (full/partial/
