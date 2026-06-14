@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.0.0] — 2026-06-14
+
+### Milestone
+- **v1.0.0 — the decision-support app is feature-complete.** This release draws the line under v1: watchlists, screener, five-mode analysis, the configurable scoring engine, the daily AI intelligence brief + critic, Brief Replay, validation dashboards, multi-leg payoff modeling, E\*Trade-synced portfolio tracking, LEAPS+CSP / collared-LEAPS screeners, earnings calendar, News & Research, the Agent overhaul, and backtesting — all shipped and verified against the v1 spec (`Requirements/spec/`). The app remains **read-only at the broker** by design: it analyzes, recommends, and validates, but never places an order.
+- **Next phase is v2: automated execution.** Work begins on a headless execution core (semi-auto, approve-each), trading a segregated IBKR account in paper first, then real capital under hard risk limits. This is a new subsystem with its own requirement set — see the new execution spec section and `.ai/AI_CONTEXT.md §11`. No behavior change in this release; it is the version marker that separates decision-support (v1) from execution (v2).
+
 ## [0.34.10] — 2026-06-14
 
 ### Added
