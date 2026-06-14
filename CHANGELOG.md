@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.6] — 2026-06-14
+
+### Added
+- **v2 execution subsystem — Phase 4b (order manager).** The bridge between proposals/exits and the broker. Migration **047** adds `exec_orders.position_id` (links an order to the position it opens/closes). `src/main/execution/order-manager.ts` (`OrderManager`): `approveProposal` re-runs the pre-trade gate at submission (§2.5), mints a client order id and persists the order row **before** the broker send (idempotency, §2.8), then submits an open combo order; broker status/fill callbacks drive the order state machine and **open an `exec_positions` row** on fill (recomputing deployed capital). `submitClose` reverses the position's legs into a close order, marking the position `closing → closed` with its `close_reason` on fill. Fills are de-duplicated by broker exec id; expired/already-approved proposals and gate failures are rejected with reasons; everything is audited (`proposal_approved`, `order_submitted`, `fill`, `position_opened`, `position_closed`). `tests/order-manager.test.ts` (6): full approve→fill→position, not-pending, expired, gate-recheck reject, close→freed capital, already-closed. Still dormant — wired to nothing yet.
+
 ## [1.1.5] — 2026-06-14
 
 ### Added
