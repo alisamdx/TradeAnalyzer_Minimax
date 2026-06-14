@@ -50,7 +50,14 @@ phase lands.
   regression test** (write-capable connection sees a fresh cross-connection commit — §1.3b).
 - **Deliverable:** a governor that can be trusted, proven entirely offline.
 
-## Phase 3 — Headless core + loops *(no broker)*
+## Phase 3 — Headless core + loops *(no broker)* — 🚧 3a DONE (v1.1.3); 3b (control API + SSE) next
+
+**3a (done, v1.1.3):** `market-hours.ts` (DST-correct RTH gate), `reconciliation.ts`
+(broker-is-truth sync + drift detection), `execution-core.ts` (`ExecutionCore`: owns
+broker+governor, cold-start reconcile-before-act / refuse-to-start, the management cycle
+with market-hours gate + fail-closed disconnect handling + trip-on-drift, a market-cycle
+hook for Phase 4 policy, health watchdog, and an event stream for the SSE layer).
+**3b (next):** the Fastify control API on `:7433` + SSE + `POST /exec/brief-ready`.
 
 - Core entrypoint launched via `ELECTRON_RUN_AS_NODE` (§1.3a).
 - The three loops (entry-proposal / position-management / reconciliation) wired to the mock.

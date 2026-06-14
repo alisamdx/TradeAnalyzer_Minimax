@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.3] — 2026-06-14
+
+### Added
+- **v2 execution subsystem — Phase 3a (headless core runtime).** The always-on engine that ties the governor + broker together (control API/SSE follow in 3b). `src/main/execution/market-hours.ts`: a DST-correct US RTH gate (`isMarketOpen`, Mon–Fri 09:30–16:00 ET via `Intl`, configurable holidays) + `etDateString` (ET date for the day-P&L anchor). `src/main/execution/reconciliation.ts`: `reconcile()` — the broker is the source of truth; syncs order status + position marks into `exec_*` and detects drift (positions the broker holds that the core doesn't, and vice-versa), plus `markNeedsAttention()`. `src/main/execution/execution-core.ts` (`ExecutionCore`): owns the broker + governor and runs the management cycle — **cold-start reconcile-before-act** (refuses to start on drift, flags the positions), a per-cycle flow that **fails closed** on a disconnected broker and **trips the kill switch** on drift, only invokes the entry/exit policy hook while the market is open (the hook is filled in Phase 4), a health watchdog (broker-disconnected / stale-cycle), and an event stream for the SSE layer. Tests: `tests/market-hours.test.ts` (7), `tests/reconciliation.test.ts` (5), `tests/execution-core.test.ts` (11). Still dormant — wired to nothing yet.
+
 ## [1.1.2] — 2026-06-14
 
 ### Added
