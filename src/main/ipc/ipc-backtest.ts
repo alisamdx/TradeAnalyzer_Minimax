@@ -72,11 +72,14 @@ export function registerBacktestIpc(engine: BacktestEngine): void {
     catch (err) { return fail(err); }
   });
 
-  // Aggregate backtest over historical Brief-Replay picks for a premium strategy.
-  ipcMain.handle('backtest:replay-picks', (_e, strategy: 'wheel' | 'income' | 'inflection') => {
-    try { return ok(engine.backtestReplayPicks(strategy)); }
-    catch (err) { return fail(err); }
-  });
+  // Aggregate backtest over historical Brief-Replay picks. Premium strategies (wheel/income/
+  // inflection) run option sims; directional strategies (buy/bullish/bearish) run a
+  // fixed-notional stock position from the replay's forward returns.
+  ipcMain.handle('backtest:replay-picks',
+    (_e, strategy: 'wheel' | 'income' | 'inflection' | 'buy' | 'bullish' | 'bearish') => {
+      try { return ok(engine.backtestReplayPicks(strategy)); }
+      catch (err) { return fail(err); }
+    });
 
   // Oldest IV-history date — backtests are IV-priced from here; earlier = realized vol.
   ipcMain.handle('backtest:iv-coverage', () => {

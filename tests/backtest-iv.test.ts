@@ -121,6 +121,66 @@ describe('aggregate pick backtest (phase 2)', () => {
     db.close();
   });
 
+  it('directional strategies (buy/bullish) backtest a fixed-notional long stock position', () => {
+    const db = openDatabase(':memory:');
+    runMigrations(db, MIGRATIONS_DIR);
+    // Two bullish picks with known forward returns: +10% and -4%.
+    const b = db.prepare(
+      `INSERT INTO replay_briefs (as_of_date, strategy, picks, config_version) VALUES ('2025-06-01','bullish','[]','baseline_v3')`
+    ).run();
+    const addPick = (ticker: string, ret: number, dir: number) => db.prepare(
+      `INSERT INTO replay_outcomes (replay_brief_id, ticker, rank, composite_score, entry_price, ret_21d, close_date, direction)
+       VALUES (?, ?, 1, 70, 100, ?, '2025-07-01', ?)`
+    ).run(b.lastInsertRowid as number, ticker, ret, dir);
+    addPick('TST', 10, 1);
+    addPick('OTH', -4, 1);
+
+    const res = new BacktestEngine(db).backtestReplayPicks('bullish');
+    expect(res.structure).toBe('stock');
+    expect(res.notionalPerTrade).toBe(10_000);
+    expect(res.tradeCount).toBe(2);
+    // $10k × +10% = +$1000 ; $10k × -4% = -$400 → total +$600
+    expect(res.totalPnl).toBe(600);
+    expect(res.winRate).toBe(50);
+    expect(res.equityCurve.at(-1)!.cumPnl).toBe(res.totalPnl);
+    db.close();
+  });
+
+  it('bearish backtest shorts the shares — a stock drop is a gain', () => {
+    const db = openDatabase(':memory:');
+    runMigrations(db, MIGRATIONS_DIR);
+    const b = db.prepare(
+      `INSERT INTO replay_briefs (as_of_date, strategy, picks, config_version) VALUES ('2025-06-01','bearish','[]','baseline_v3')`
+    ).run();
+    // Stock fell 8% → short position profits $800 on $10k.
+    db.prepare(
+      `INSERT INTO replay_outcomes (replay_brief_id, ticker, rank, composite_score, entry_price, ret_21d, close_date, direction)
+       VALUES (?, 'TST', 1, 75, 100, -8, '2025-07-01', -1)`
+    ).run(b.lastInsertRowid as number);
+
+    const res = new BacktestEngine(db).backtestReplayPicks('bearish');
+    expect(res.structure).toBe('stock');
+    expect(res.totalPnl).toBe(800);
+    expect(res.winRate).toBe(100);
+    db.close();
+  });
+
+  it('directional picks without a resolved 21d return are skipped', () => {
+    const db = openDatabase(':memory:');
+    runMigrations(db, MIGRATIONS_DIR);
+    const b = db.prepare(
+      `INSERT INTO replay_briefs (as_of_date, strategy, picks, config_version) VALUES ('2025-06-01','buy','[]','baseline_v3')`
+    ).run();
+    db.prepare(
+      `INSERT INTO replay_outcomes (replay_brief_id, ticker, rank, composite_score, entry_price, ret_21d) VALUES (?, 'TST', 1, 70, 100, NULL)`
+    ).run(b.lastInsertRowid as number);
+
+    const res = new BacktestEngine(db).backtestReplayPicks('buy');
+    expect(res.tradeCount).toBe(0);
+    expect(res.skipped).toBe(1);
+    db.close();
+  });
+
   it('ivHistoryStart returns the oldest IV date (null when empty)', () => {
     const db = openDatabase(':memory:');
     runMigrations(db, MIGRATIONS_DIR);

@@ -987,7 +987,7 @@ function buildApi() {
         return () => ipcRenderer.removeListener('backtest:progress', handler);
       }
     },
-    replayPicks: (strategy: 'wheel' | 'income' | 'inflection') =>
+    replayPicks: (strategy: 'wheel' | 'income' | 'inflection' | 'buy' | 'bullish' | 'bearish') =>
       invoke<import('@shared/types.js').AggregatePickBacktest>('backtest:replay-picks', strategy),
     ivCoverage: () => invoke<string | null>('backtest:iv-coverage'),
   };

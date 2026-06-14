@@ -894,9 +894,11 @@ export interface BacktestRunSummary {
 // one CSP simulated per (date, ticker) pick, then pooled. Answers "if I'd traded all my
 // wheel/income picks, what would they have returned?" see docs/formulas.md#backtest-iv
 export interface AggregatePickBacktest {
-  strategy: 'wheel' | 'income' | 'inflection';
-  // Structure simulated: 'csp' for wheel/income, 'credit-spread' for inflection (directional).
-  structure?: 'csp' | 'credit-spread';
+  strategy: ScoringStrategy;
+  // Structure simulated: 'csp' (wheel/income), 'credit-spread' (inflection), or 'stock'
+  // (buy/bullish/bearish — fixed-notional directional stock position, dollar-comparable).
+  structure?: 'csp' | 'credit-spread' | 'stock';
+  notionalPerTrade?: number;  // $ deployed per pick for 'stock' structure
   tradeCount: number;        // picks that produced a simulated trade
   skipped: number;           // picks with no usable price/option data
   winRate: number;           // % of trades with pnl > 0

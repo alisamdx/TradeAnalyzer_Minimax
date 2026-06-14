@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.34.10] — 2026-06-14
+
+### Added
+- **💰 dollar P&L for directional strategies (buy / bullish / bearish)** — the Brief Replay summary's 💰 button now appears on the three directional rows too, so you can compare **buy vs bullish dollar-to-dollar**. These aren't premium structures, so instead of an option sim they run a **fixed-notional stock position**: $10,000 deployed per pick (long for buy/bullish, **short for bearish**), marked at the replay's 21-day forward close. Every pick uses the same $10k, so Total P&L is directly comparable between buy and bullish; the modal notes the premium strategies above use a different capital base (option collateral), so those are compared by ROC, not headline dollars. `AggregatePickBacktest.structure` gains `'stock'`; new `notionalPerTrade` field. The modal labels, subtitle, chart caption, and footnote adapt to the stock structure (ROC → "return").
+
 ## [0.34.9] — 2026-06-13
 
 ### Added

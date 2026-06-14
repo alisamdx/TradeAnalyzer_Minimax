@@ -460,37 +460,75 @@ export class BacktestEngine {
     return { trades, equityCurve, startingCapital };
   }
 
+  // Fixed dollars deployed per directional (stock) pick — makes buy/bullish/bearish
+  // dollar-to-dollar comparable on a common capital base.
+  private static readonly STOCK_NOTIONAL = 10_000;
+
   // ── Aggregate pick backtest ─────────────────────────────────────────────────
   // Simulate the strategy's structure on every historical Brief-Replay pick and pool the
-  // results — "if I'd traded every wheel/income/inflection pick, what would they have made?"
-  // wheel/income → one CSP; inflection → a directional credit spread (bull put / bear call).
+  // results — "if I'd traded every pick, what would they have made?"
+  //   wheel/income → one CSP; inflection → a directional credit spread (bull put / bear call);
+  //   buy/bullish/bearish → a fixed-notional directional STOCK position (long, or short for
+  //   bearish) held to the replay's 21-day forward window — no option sim, just the forward
+  //   return the replay already records. This is what makes the directional signals show a
+  //   dollar P&L that's apples-to-apples between buy and bullish.
   // Prices off historical IV with realized-vol fallback. see docs/formulas.md#backtest-iv
   backtestReplayPicks(
-    strategy: 'wheel' | 'income' | 'inflection',
+    strategy: 'wheel' | 'income' | 'inflection' | 'buy' | 'bullish' | 'bearish',
     params: { deltaTarget: number; dteTarget: number; profitTargetPct: number; stopLossPct: number } =
       { deltaTarget: 0.30, dteTarget: 30, profitTargetPct: 50, stopLossPct: 200 },
   ): import('@shared/types.js').AggregatePickBacktest {
     const isInflection = strategy === 'inflection';
-    const structure: 'csp' | 'credit-spread' = isInflection ? 'credit-spread' : 'csp';
-    type PickRow = { as_of_date: string; ticker: string; direction: number };
-    const picks = this.db.prepare(`
-      SELECT DISTINCT rb.as_of_date, ro.ticker, COALESCE(ro.direction, 1) AS direction
-      FROM replay_outcomes ro JOIN replay_briefs rb ON rb.id = ro.replay_brief_id
-      WHERE rb.strategy = ? ORDER BY rb.as_of_date ASC
-    `).all(strategy) as PickRow[];
+    const isDirectionalStock = strategy === 'buy' || strategy === 'bullish' || strategy === 'bearish';
+    const structure: 'csp' | 'credit-spread' | 'stock' =
+      isDirectionalStock ? 'stock' : isInflection ? 'credit-spread' : 'csp';
+    const notionalPerTrade = isDirectionalStock ? BacktestEngine.STOCK_NOTIONAL : undefined;
 
     const trades: { exitDate: string; returnPct: number; pnl: number; daysHeld: number }[] = [];
     let skipped = 0;
-    for (const p of picks) {
-      const t = isInflection
-        ? this.simulateSingleSpread(p.ticker, p.as_of_date, p.direction >= 0 ? 1 : -1, params)
-        : this.simulateSingleCsp(p.ticker, p.as_of_date, params);
-      if (t) trades.push(t); else skipped++;
+
+    if (isDirectionalStock) {
+      // Long for buy/bullish, short for bearish. Use the stored per-pick direction when present.
+      const defaultDir = strategy === 'bearish' ? -1 : 1;
+      type DRow = { as_of_date: string; close_date: string | null; ret_21d: number | null; direction: number };
+      const rows = this.db.prepare(`
+        SELECT rb.as_of_date, ro.close_date, ro.ret_21d, COALESCE(ro.direction, ?) AS direction
+        FROM replay_outcomes ro JOIN replay_briefs rb ON rb.id = ro.replay_brief_id
+        WHERE rb.strategy = ? ORDER BY rb.as_of_date ASC
+      `).all(defaultDir, strategy) as DRow[];
+      for (const r of rows) {
+        if (r.ret_21d === null) { skipped++; continue; }
+        const dir = r.direction >= 0 ? 1 : -1;
+        const signedRet = dir * r.ret_21d;
+        const exitDate = r.close_date ?? r.as_of_date;
+        const daysHeld = r.close_date
+          ? Math.max(1, Math.round((Date.parse(exitDate) - Date.parse(r.as_of_date)) / 86_400_000))
+          : 30;
+        trades.push({
+          exitDate,
+          returnPct: signedRet,
+          pnl: (BacktestEngine.STOCK_NOTIONAL * signedRet) / 100,
+          daysHeld,
+        });
+      }
+    } else {
+      type PickRow = { as_of_date: string; ticker: string; direction: number };
+      const picks = this.db.prepare(`
+        SELECT DISTINCT rb.as_of_date, ro.ticker, COALESCE(ro.direction, 1) AS direction
+        FROM replay_outcomes ro JOIN replay_briefs rb ON rb.id = ro.replay_brief_id
+        WHERE rb.strategy = ? ORDER BY rb.as_of_date ASC
+      `).all(strategy) as PickRow[];
+      for (const p of picks) {
+        const t = isInflection
+          ? this.simulateSingleSpread(p.ticker, p.as_of_date, p.direction >= 0 ? 1 : -1, params)
+          : this.simulateSingleCsp(p.ticker, p.as_of_date, params);
+        if (t) trades.push(t); else skipped++;
+      }
     }
 
     const n = trades.length;
     if (n === 0) {
-      return { strategy, structure, tradeCount: 0, skipped, winRate: 0, avgReturnPct: 0, medianReturnPct: 0,
+      return { strategy, structure, notionalPerTrade, tradeCount: 0, skipped, winRate: 0, avgReturnPct: 0, medianReturnPct: 0,
         bestReturnPct: 0, worstReturnPct: 0, totalPnl: 0, avgDaysHeld: 0, maxDrawdownPnl: 0, equityCurve: [], params };
     }
 
@@ -513,7 +551,7 @@ export class BacktestEngine {
     }
 
     return {
-      strategy, structure, tradeCount: n, skipped,
+      strategy, structure, notionalPerTrade, tradeCount: n, skipped,
       winRate: Math.round((wins / n) * 1000) / 10,
       avgReturnPct: r2(rets.reduce((a, b) => a + b, 0) / n),
       medianReturnPct: r2(sortedRets[Math.floor(n / 2)]!),
