@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.8] — 2026-06-14
+
+### Added
+- **v2 execution subsystem — Phase 5a (engine assembly).** `src/main/execution/execution-engine.ts` (`ExecutionEngine`) wires the whole subsystem into one object: governor, order manager, entry/exit policy, management loop, and the headless core — with the management loop bound to the core's market-cycle hook (so each market-open cycle evaluates exits and acts). The broker is **injected**, so the same assembly runs the `MockExecutionBroker` (tests/dev) or the IBKR adapter (Phase 6) with no code change. Exposes the small facade the IPC/control-API layers will call: lifecycle (`startEngine`/`stopEngine`/`pauseEngine`/kill-switch), `generateEntries`, approval routing (`approveProposal` dispatches entry→order-manager / exit→management; `rejectProposal`), and reads (`getState`/`getConfig`/`updateConfig`/`getRiskState`/`getPositions`/`getProposals`/`getAudit`). Constructing it is inert — engine starts `stopped`, no broker connection, no orders. `tests/execution-engine.test.ts` (6): start, generate→approve→open, the full open→mark-moves→protective-stop-close loop, discretionary exit-proposal approval routing, reject, config/risk reads. Still dormant — **not yet instantiated in the app.**
+
 ## [1.1.7] — 2026-06-14
 
 ### Added

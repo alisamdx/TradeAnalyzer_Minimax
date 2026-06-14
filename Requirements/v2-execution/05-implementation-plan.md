@@ -74,10 +74,11 @@ Phase-4 `onBriefReady` hook), and an SSE stream (`/exec/events`) of the core's e
 + `exit-policy.ts` (`ExitPolicy.evaluate`: priority-ordered stop/defensive [protective] +
 profit-target/time [discretionary]) + `position-manager.ts` (`ManagementLoop.runOnce`:
 protective → auto `submitClose`, discretionary → propose or auto per mode; `approveExitProposal`).
-**Remaining integration glue (Phase 4d / folded into Phase 6):** an `ExecutionEngine` assembly
-wiring management into the core's market-cycle hook + a brief→`PickInput` source feeding
-`generateEntries` on `/exec/brief-ready` (the latter needs real brief data to map
-`strategyLabResult` → legs, so it lands with the IBKR integration).
+**Integration glue:** `ExecutionEngine` assembly (v1.1.8, `execution-engine.ts`) wires governor
++ broker + order manager + entry/exit policy + management loop + core (management → core
+market-cycle hook) and exposes the facade the IPC/control-API call. Still dormant. **Still
+pending:** a brief→`PickInput` source feeding `generateEntries` on `/exec/brief-ready` (needs
+real brief data to map `strategyLabResult` → legs → lands with the IBKR integration, Phase 6).
 
 **4a (v1.1.5):** migration 046 (entry-policy config columns) + `entry-policy.ts` (`EntryPolicy`:
 `filterPick` configurable filters, `buildProposal` price→size→gate→persist, `generateEntries`
@@ -95,7 +96,7 @@ idempotent COID + fill dedup; both open/close flows drive the order state machin
   exit → reconcile → audit, end-to-end on the mock.
 - **Deliverable:** the full trade lifecycle working against the mock.
 
-## Phase 5 — Control panel (Electron UI) *(no broker)*
+## Phase 5 — Control panel (Electron UI) *(no broker)* — 🚧 5a engine assembly DONE (v1.1.8); activation + UI next
 
 - **🤝 Execution** sidebar section: **Trading Desk** + **Execution Settings** (§4).
 - Connect to core API/SSE; "Engine offline → Start". Master control header (PAPER/LIVE
