@@ -23,10 +23,10 @@ phase lands.
 
 ---
 
-## Phase 0 — Foundations *(no broker)*
+## Phase 0 — Foundations *(no broker)* — ✅ DONE (v1.1.0)
 
-- Migrations **045–051** for the `exec_*` tables (§2.10); idempotent, count-agnostic
-  migration tests.
+- Migration **045** (`045_execution_engine.sql`) — all seven `exec_*` tables in one
+  cohesive migration (§2.10); idempotent, count-agnostic tests (`tests/exec-schema.test.ts`).
 - Seed `exec_config` (locked defaults) and `exec_risk_state` (`engine_state='stopped'`).
 - Shared **path + secret resolution** module that works outside Electron (§1.3c).
 - Execution types in `src/shared/types.ts` (Proposal, Order, Fill, ManagedPosition,

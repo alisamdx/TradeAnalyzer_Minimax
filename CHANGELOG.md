@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.0] — 2026-06-14
+
+### Added
+- **v2 execution subsystem — Phase 0 (schema foundation).** First increment toward automated trade execution (full requirements in `Requirements/v2-execution/`). Migration **045** creates the seven namespaced `exec_*` tables — `exec_config`, `exec_risk_state`, `exec_proposals`, `exec_orders`, `exec_fills`, `exec_positions`, and the append-only `exec_audit_log` — and seeds the singleton config + risk-state rows with the locked v2.0 defaults ($10k ceiling · 5% max-risk/trade · 5 concurrent · 10% daily-loss trip · 1 position/ticker · inflection-only · engine `stopped`). Added the `Exec*` domain types to `src/shared/types.ts` and `tests/exec-schema.test.ts` (table presence, seeded defaults, single-row + enum CHECK constraints, idempotent seeding, COID uniqueness). **The tables are dormant** — created and seeded but not yet wired to any service or UI; the headless execution core, risk governor, loops, and control panel come in later phases. No behavior change to the existing app.
+
 ## [1.0.0] — 2026-06-14
 
 ### Milestone

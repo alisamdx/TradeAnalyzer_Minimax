@@ -2132,3 +2132,141 @@ export interface ReplayChartData {
   strategies: ReplayChartStrategyStats[];
   monthly: ReplayChartMonthlyRow[];
 }
+
+// ─── v2 Execution Subsystem ──────────────────────────────────────────────────
+// Domain types for the automated-execution engine. See Requirements/v2-execution/.
+// The headless core owns the exec_* tables (migration 045); these are the parsed,
+// camelCase domain shapes services map rows to. Phase 0: schema + types + config seed.
+
+export type ExecutionMode = 'paper' | 'live';
+
+/** Master engine lifecycle (00-overview §0.37, 02-risk-governor §2.7). */
+export type EngineState = 'running' | 'stopped' | 'paused' | 'kill_tripped';
+
+/** Defined-risk structures eligible in v2.0 (00-overview §0.4). */
+export type ExecStructure = 'short-put-vertical' | 'short-call-vertical' | 'csp';
+
+/** A single persisted option leg of a structure. */
+export interface ExecLeg {
+  right: 'P' | 'C';
+  action: 'buy' | 'sell';
+  strike: number;
+  expiry: string;            // YYYY-MM-DD
+  ratio: number;             // contracts multiple within the structure (usually 1)
+}
+
+/** The governor's rules — single row (exec_config). Limits in 02-risk-governor §2.3. */
+export interface ExecConfig {
+  executionMode: ExecutionMode;
+  capitalCeiling: number;                  // $ capital base
+  maxRiskPerTradePct: number;              // % of ceiling
+  maxConcurrentPositions: number;
+  dailyLossTripPct: number;                // kill-switch trip %
+  maxPositionsPerTicker: number;
+  maxPositionsPerStrategy: number | null;  // null = off
+  eligibleStrategies: string[];            // launch: ['inflection']
+  proposalShelfLifeMin: number;
+  updatedAt: string;
+}
+
+/** Live risk ledger + engine state — single row (exec_risk_state). 02 §2.6/§2.7. */
+export interface ExecRiskState {
+  engineState: EngineState;
+  killSwitchTripped: boolean;
+  killSwitchReason: string | null;
+  capitalDeployed: number;                 // Σ open-position max loss
+  dayRealizedPnl: number;
+  dayUnrealizedPnl: number;
+  dayAnchorDate: string | null;
+  updatedAt: string;
+}
+
+export type ExecProposalStatus = 'pending' | 'approved' | 'rejected' | 'expired' | 'superseded';
+export type ExecProposalKind = 'entry' | 'exit';
+
+/** A candidate order awaiting approval (semi-auto). 03-lifecycle §3.2. */
+export interface ExecProposal {
+  id: number;
+  createdAt: string;
+  expiresAt: string;
+  status: ExecProposalStatus;
+  kind: ExecProposalKind;
+  ticker: string;
+  strategy: string;
+  structure: ExecStructure;
+  legs: ExecLeg[];
+  netCredit: number | null;                // per-share
+  maxLoss: number;                         // per-contract $
+  contracts: number;
+  sourceBriefId: number | null;
+  riskCheck: ExecGateResult | null;
+  rejectReason: string | null;
+}
+
+export type ExecOrderStatus =
+  | 'pending' | 'submitted' | 'working' | 'filled' | 'partially_filled' | 'rejected' | 'cancelled';
+export type ExecOrderSide = 'open' | 'close';
+
+/** An order in the state machine (idempotent via clientOrderId). 02 §2.8. */
+export interface ExecOrder {
+  id: number;
+  clientOrderId: string;                   // COID — idempotency key
+  proposalId: number | null;
+  brokerOrderId: string | null;
+  status: ExecOrderStatus;
+  side: ExecOrderSide;
+  rejectReason: string | null;
+  submittedAt: string | null;
+  updatedAt: string;
+}
+
+/** A fill reconciled from broker truth (exec_fills). 02 §2.9. */
+export interface ExecFill {
+  id: number;
+  orderId: number;
+  brokerExecId: string | null;
+  filledAt: string;
+  price: number;                           // net per-share for the combo
+  quantity: number;                        // contracts
+  commission: number | null;
+}
+
+export type ExecPositionStatus = 'open' | 'closing' | 'closed' | 'needs_attention';
+export type ExecCloseReason =
+  | 'profit_target' | 'stop' | 'time_stop' | 'defensive' | 'manual' | 'flatten';
+
+/** A bot-managed position (distinct from the v1 E*Trade portfolio mirror). 02 §2.10. */
+export interface ExecPosition {
+  id: number;
+  ticker: string;
+  strategy: string;
+  structure: ExecStructure;
+  legs: ExecLeg[];
+  contracts: number;
+  entryOrderId: number | null;
+  entryNetCredit: number | null;
+  maxLoss: number;                         // capital this position ties up
+  openedAt: string;
+  status: ExecPositionStatus;
+  currentMark: number | null;
+  currentPnl: number | null;
+  closedAt: string | null;
+  closeReason: ExecCloseReason | null;
+}
+
+/** Result of the pre-trade risk gate (02 §2.5) — snapshot stored on a proposal. */
+export interface ExecGateResult {
+  passed: boolean;
+  checks: Array<{ name: string; passed: boolean; detail?: string }>;
+  rejectReason: string | null;             // the first failing check's reason, if any
+}
+
+/** One append-only audit record (exec_audit_log). 02 §2.11. */
+export interface ExecAuditEntry {
+  id: number;
+  at: string;
+  event: string;
+  refTable: string | null;
+  refId: number | null;
+  detail: unknown;                         // parsed detail_json
+}

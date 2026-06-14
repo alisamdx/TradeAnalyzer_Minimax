@@ -153,9 +153,14 @@ States (persisted in `exec_risk_state`): `running`, `stopped`, `paused`,
   position `needs_attention`, notify the user. The engine never *guesses* its way back into
   a consistent state by trading.
 
-## 2.10 Schema (`exec_*`, migrations 045+)
+## 2.10 Schema (`exec_*`, migration 045)
 
-Idempotent `CREATE TABLE IF NOT EXISTS`, count-agnostic in tests. Representative DDL:
+All seven `exec_*` tables ship in a **single cohesive migration `045_execution_engine.sql`**
+(matching the precedent of `022_scoring_engine.sql`), with the singleton `exec_config` /
+`exec_risk_state` rows seeded in-migration via `INSERT OR IGNORE`. The migration file is the
+authoritative DDL; the block below is representative (the `-- NNN:` labels are logical
+groupings, not separate migrations). Idempotent `CREATE TABLE IF NOT EXISTS`, count-agnostic
+in tests. Timestamps use the repo idiom `strftime('%Y-%m-%dT%H:%M:%fZ','now')`.
 
 ```sql
 -- 045: execution configuration (single row, id=1)
