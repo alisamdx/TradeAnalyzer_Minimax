@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.9] — 2026-06-14
+
+### Added
+- **v2 execution subsystem — Phase 5b (activation).** The first **non-dormant** step: `ExecutionEngine` is now instantiated in `src/main/index.ts` against the deterministic `MockExecutionBroker` and starts `stopped` (constructing it opens no broker connection and places no orders), and its event stream is forwarded to the renderer (`webContents.send('execution:event', …)`). New `src/main/ipc/ipc-execution.ts` (`registerExecutionIpc`) exposes the engine facade as a thin pass-through — reads (`execution:get-state`/`:get-config`/`:get-risk-state`/`:get-positions`/`:get-proposals`/`:get-audit`), config (`:update-config`), control (`:start`/`:stop`/`:pause`, `:kill-trip`/`:kill-clear`), and approvals (`:approve-proposal` routing entry→order-manager, exit→management; `:reject-proposal`). New `window.api.execution.*` preload namespace (34th) mirrors it, with `onEvent(cb)` subscribing to the live event stream. New renderer-facing facade types in `src/shared/types.ts` (`ExecEngineStateView`, `ExecEngineHealth`, `ExecEngineEvent`, `ExecPositionRow`, `ExecProposalRow`, `ExecAuditRow`, `ExecApproveResult`, `ExecStartResult`). No new tests — the facade is covered by `tests/execution-engine.test.ts` and the IPC layer is a pure pass-through; full suite green (441). The Electron Trading Desk / Settings UI lands next (Phase 5c/d); live auto-entries (brief→`PickInput`) land with the IBKR adapter (Phase 6).
+
 ## [1.1.8] — 2026-06-14
 
 ### Added

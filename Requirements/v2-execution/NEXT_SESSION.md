@@ -2,17 +2,21 @@
 
 > Hand-off note so a fresh session resumes exactly where the build stopped. The auto-memory
 > (`project_v2_execution_engine.md`) and `.ai/AI_CONTEXT.md §11` also carry this; this file
-> is the explicit, paste-ready version. Last updated after **v1.1.8** (Phase 5a).
+> is the explicit, paste-ready version. Last updated after **v1.1.9** (Phase 5b activation).
 
 ## Where we are
 
-- The **entire execution-engine backend is built, tested (~490 tests green), and committed
-  through v1.1.8** — all in `src/main/execution/`, and **still DORMANT** (not instantiated
-  in `index.ts`; zero impact on the running app).
+- The **entire execution-engine backend is built, tested (441 tests green), committed, and
+  now ACTIVATED (mock mode)** through v1.1.9. `ExecutionEngine` is instantiated in
+  `index.ts` with the `MockExecutionBroker`, engine `stopped` — drivable from the renderer
+  via `ipc-execution` / `window.api.execution.*`, but **no UI yet** and **no live broker /
+  auto-entries**.
 - **Done:** Phase 0 (schema, migrations 045–048) · Phase 1 (`ExecutionBroker` + `MockExecutionBroker`)
   · Phase 2 (`RiskGovernor` + `risk-gate`) · Phase 3 (`ExecutionCore` + `reconciliation` +
   `market-hours` + control API `:7433`/SSE) · Phase 4 (`EntryPolicy`, `OrderManager`,
-  `ExitPolicy` + `ManagementLoop`) · Phase 5a (`ExecutionEngine` assembly facade).
+  `ExitPolicy` + `ManagementLoop`) · Phase 5a (`ExecutionEngine` assembly facade) · **Phase 5b
+  (activation: instantiated in `index.ts` + `ipc-execution.ts` + `window.api.execution.*`
+  + facade types in `shared/types.ts` + `execution:event` stream forwarding).**
 - **Locked decisions:** headless core + Electron control panel · semi-auto approve-each ·
   segregated IBKR margin account · defined-risk only · **inflection-only at launch** ·
   limits `$10k / 5% per-trade / 5 concurrent / 10% daily-loss trip / 1 per ticker` ·
@@ -29,23 +33,24 @@
 Read .ai/AI_CONTEXT.md §11 and Requirements/v2-execution/05-implementation-plan.md,
 then continue the v2 execution build exactly where we left off.
 
-Status: the entire execution engine BACKEND is built, tested (~490 tests green),
-and committed through v1.1.8 — all in src/main/execution/, still DORMANT (not
-instantiated in index.ts). Phases 0–4 done; Phase 5a (ExecutionEngine assembly) done.
+Status: the execution engine is built, tested (441 green), committed, and now
+ACTIVATED in mock mode through v1.1.9. ExecutionEngine is instantiated in
+src/main/index.ts with the MockExecutionBroker (engine 'stopped'); it's drivable
+from the renderer via src/main/ipc/ipc-execution.ts and window.api.execution.*
+(facade types in src/shared/types.ts), with engine events forwarded over
+'execution:event'. Phases 0–4 done; Phase 5a (assembly) + 5b (activation) done.
 
-Next = Phase 5b: ACTIVATION (the first non-dormant step). Build it carefully and
-incrementally:
-  1. Instantiate ExecutionEngine in src/main/index.ts using the MockExecutionBroker,
-     engine starts 'stopped' (no real orders).
-  2. Add src/main/ipc/ipc-execution.ts exposing the ExecutionEngine facade
-     (getState/getConfig/updateConfig/getRiskState/getPositions/getProposals/getAudit,
-     start/stop/pause, kill trip/clear, approveProposal/rejectProposal), register it.
-  3. Bridge it in src/preload/index.ts as window.api.execution.* and type it in
-     src/renderer/src/global.d.ts (only place window.api is declared).
-  4. Forward ExecutionEngine.onEvent → webContents.send for live UI updates.
-Then Phase 5c/d: the Electron "🤝 Execution" sidebar section — Trading Desk view
-(PAPER/LIVE badge, engine state, start/stop/kill, positions, proposals queue +
-approval flow, audit log) and Execution Settings (config editor over exec_config).
+Next = Phase 5c/d: the Electron "🤝 Execution" sidebar section (App.tsx routing),
+two views in src/renderer/src/views/:
+  - Trading Desk: master header (PAPER/LIVE badge from getState().executionMode,
+    engine state, Start/Stop/Pause, hard-Stop, kill switch trip/clear, broker
+    health, capital gauges from getRiskState()), proposals queue with the approval
+    flow (paper = 1-click approve/reject; live type-to-confirm scaffolded), open
+    positions table, activity/audit log. Subscribe to window.api.execution.onEvent
+    for live refresh.
+  - Execution Settings: a config editor over exec_config via getConfig/updateConfig
+    (limits, entry/exit policy knobs, eligible strategies).
+Use window.api.execution.* exclusively — the backend is done; this is pure UI.
 
 Still NO IBKR account needed for Phase 5 — keep using the mock. The account is the
 wall at Phase 6 (IbkrExecutionBroker). Follow the repo discipline: tests green +

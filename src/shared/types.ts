@@ -2287,3 +2287,89 @@ export interface ExecAuditEntry {
   refId: number | null;
   detail: unknown;                         // parsed detail_json
 }
+
+// ── Execution facade shapes (renderer-facing) ────────────────────────────────
+// What the ExecutionEngine facade returns over IPC (`window.api.execution.*`).
+// Reads come straight off the SQL selects, so positions/proposals/audit are the
+// raw snake_case rows; the UI maps as needed. State/config/risk are camelCase
+// domain shapes from the governor.
+
+/** Broker/cycle health snapshot (mirrors ExecutionCore's CoreHealth). */
+export interface ExecEngineHealth {
+  brokerConnected: boolean;
+  lastCycleAt: string | null;
+  healthy: boolean;
+  degradedReason: string | null;           // null when healthy
+}
+
+/** Engine snapshot from `getState()`. */
+export interface ExecEngineStateView {
+  engineState: EngineState;
+  killSwitch: { tripped: boolean; reason: string | null };
+  executionMode: ExecutionMode;
+  health: ExecEngineHealth;
+}
+
+/** Live event stream the core pushes to the renderer (`execution:event`). */
+export type ExecEngineEvent =
+  | { type: 'engine_state'; state: EngineState }
+  | { type: 'cycle'; result: unknown }
+  | { type: 'health'; health: ExecEngineHealth }
+  | { type: 'reconcile_mismatch'; detail: unknown };
+
+/** Open-position row as selected by the facade. */
+export interface ExecPositionRow {
+  id: number;
+  ticker: string;
+  strategy: string;
+  structure: string;
+  contracts: number;
+  max_loss: number;
+  entry_net_credit: number | null;
+  current_mark: number | null;
+  current_pnl: number | null;
+  status: string;
+  opened_at: string;
+  closed_at: string | null;
+  close_reason: string | null;
+}
+
+/** Pending-proposal row as selected by the facade. */
+export interface ExecProposalRow {
+  id: number;
+  created_at: string;
+  expires_at: string;
+  status: string;
+  kind: string;
+  ticker: string;
+  strategy: string;
+  structure: string;
+  net_credit: number | null;
+  max_loss: number;
+  contracts: number;
+  position_id: number | null;
+  close_reason: string | null;
+}
+
+/** Audit-log row as selected by the facade. */
+export interface ExecAuditRow {
+  id: number;
+  at: string;
+  event: string;
+  ref_table: string | null;
+  ref_id: number | null;
+  detail_json: string | null;
+}
+
+/** Result of approving an entry/exit proposal. */
+export interface ExecApproveResult {
+  ok: boolean;
+  orderId: number | null;
+  reason: string | null;
+}
+
+/** Result of starting the engine (refusal carries a reason). */
+export interface ExecStartResult {
+  started: boolean;
+  reason: string | null;
+}

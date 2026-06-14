@@ -110,6 +110,15 @@ import type {
   ReplayProgressEvent,
   ReplayPickRow,
   ReplaySummary,
+  ExecConfig,
+  ExecRiskState,
+  ExecEngineStateView,
+  ExecEngineEvent,
+  ExecPositionRow,
+  ExecProposalRow,
+  ExecAuditRow,
+  ExecApproveResult,
+  ExecStartResult,
 } from '@shared/types.js';
 export type {
   ScreenPreset, ScreenCriteria, ScreenRunResult, ScreenResultRow, Universe,
@@ -1170,8 +1179,35 @@ function buildApi() {
     },
   };
 
+  const execution = {
+    // reads
+    getState:     () => invoke<ExecEngineStateView>('execution:get-state'),
+    getConfig:    () => invoke<ExecConfig>('execution:get-config'),
+    getRiskState: () => invoke<ExecRiskState>('execution:get-risk-state'),
+    getPositions: () => invoke<ExecPositionRow[]>('execution:get-positions'),
+    getProposals: () => invoke<ExecProposalRow[]>('execution:get-proposals'),
+    getAudit:     (limit?: number) => invoke<ExecAuditRow[]>('execution:get-audit', limit),
+    // config
+    updateConfig: (patch: Partial<ExecConfig>) => invoke<ExecConfig>('execution:update-config', patch),
+    // lifecycle / control
+    start:     () => invoke<ExecStartResult>('execution:start'),
+    stop:      () => invoke<{ ok: true }>('execution:stop'),
+    pause:     () => invoke<{ ok: true }>('execution:pause'),
+    killTrip:  () => invoke<{ ok: true }>('execution:kill-trip'),
+    killClear: () => invoke<{ ok: true }>('execution:kill-clear'),
+    // approvals
+    approveProposal: (proposalId: number) => invoke<ExecApproveResult>('execution:approve-proposal', proposalId),
+    rejectProposal:  (proposalId: number) => invoke<{ ok: boolean }>('execution:reject-proposal', proposalId),
+    /** Subscribe to live engine events (state/cycle/health/reconcile). Returns an unsubscribe fn. */
+    onEvent: (cb: (evt: ExecEngineEvent) => void): (() => void) => {
+      const handler = (_: unknown, evt: ExecEngineEvent) => cb(evt);
+      ipcRenderer.on('execution:event', handler as Parameters<typeof ipcRenderer.on>[1]);
+      return () => ipcRenderer.removeListener('execution:event', handler as Parameters<typeof ipcRenderer.removeListener>[1]);
+    },
+  };
+
   return {
-    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, historical, portfolio, alerts, optionsChain, agent, backtest, leapsCsp, collaredLeaps, testApi, etrade, filters, payoff, ivHistory, opportunity, strategyLab, batch, scoring, paper, conviction, news, earnings, briefReplay },
+    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, historical, portfolio, alerts, optionsChain, agent, backtest, leapsCsp, collaredLeaps, testApi, etrade, filters, payoff, ivHistory, opportunity, strategyLab, batch, scoring, paper, conviction, news, earnings, briefReplay, execution },
     dialog: {
       prompt: (opts: { title: string; defaultValue?: string }) =>
         invoke<string | null>('dialog:prompt', opts),

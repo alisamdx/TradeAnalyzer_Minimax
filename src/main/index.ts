@@ -76,6 +76,9 @@ import { BatchOrchestratorJob } from './services/jobs/batch-orchestrator-job.js'
 import { BetaService } from './services/beta-service.js';
 import { BriefReplayService } from './services/brief-replay-service.js';
 import { registerBriefReplayIpc } from './ipc/ipc-brief-replay.js';
+import { ExecutionEngine } from './execution/execution-engine.js';
+import { MockExecutionBroker } from './execution/mock-execution-broker.js';
+import { registerExecutionIpc } from './ipc/ipc-execution.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -413,6 +416,16 @@ app.whenReady().then(() => {
   // v0.32.89 — Brief Replay (point-in-time scoring back-test)
   const briefReplayService = new BriefReplayService(db, scoringService);
   registerBriefReplayIpc(briefReplayService);
+
+  // v1.1.9 — v2 execution subsystem, Phase 5b activation (first non-dormant step).
+  // The engine is assembled against the deterministic MockExecutionBroker and starts
+  // `stopped`: constructing it opens no broker connection and places no orders. It is
+  // fully driven from the renderer (Trading Desk / Execution Settings) via ipc-execution;
+  // the IBKR adapter swaps in behind the same ExecutionBroker interface at Phase 6.
+  const executionBroker = new MockExecutionBroker();
+  const executionEngine = new ExecutionEngine(db, executionBroker);
+  executionEngine.onEvent((evt) => getMainWindow()?.webContents.send('execution:event', evt));
+  registerExecutionIpc(executionEngine);
 
   const technicalSignalsJob = new DailyTechnicalSignalsJob(db);
   batchService.registerJob('daily-technical-signals', technicalSignalsJob, {

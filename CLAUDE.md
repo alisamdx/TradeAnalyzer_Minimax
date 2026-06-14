@@ -130,7 +130,7 @@ Update only what the change touches — don't regenerate everything:
 | `src/renderer/src/views/*.tsx` | 26 feature views |
 | `src/renderer/src/global.d.ts` | `window.api` type declaration (only place) |
 | `src/shared/types.ts` | All cross-process types |
-| `src/preload/index.ts` | `window.api.*` bridge (33 namespaces) |
+| `src/preload/index.ts` | `window.api.*` bridge (34 namespaces) |
 
 ## Known quirks
 

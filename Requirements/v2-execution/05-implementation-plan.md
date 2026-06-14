@@ -96,7 +96,15 @@ idempotent COID + fill dedup; both open/close flows drive the order state machin
   exit → reconcile → audit, end-to-end on the mock.
 - **Deliverable:** the full trade lifecycle working against the mock.
 
-## Phase 5 — Control panel (Electron UI) *(no broker)* — 🚧 5a engine assembly DONE (v1.1.8); activation + UI next
+## Phase 5 — Control panel (Electron UI) *(no broker)* — 🚧 5a assembly DONE (v1.1.8) · 5b activation DONE (v1.1.9); UI (5c/d) next
+
+**5b (v1.1.9) — activation, the first non-dormant step.** `ExecutionEngine` is instantiated
+in `src/main/index.ts` against the `MockExecutionBroker`, engine `stopped` (inert
+construction). `src/main/ipc/ipc-execution.ts` (`registerExecutionIpc`) exposes the facade
+(reads / config / control / approvals) as a thin pass-through; `window.api.execution.*`
+(34th preload namespace) mirrors it with an `onEvent` subscription to the forwarded
+`execution:event` stream. Renderer-facing facade types added to `src/shared/types.ts`. The
+subsystem is now live and drivable (mock mode) — UI pending.
 
 - **🤝 Execution** sidebar section: **Trading Desk** + **Execution Settings** (§4).
 - Connect to core API/SSE; "Engine offline → Start". Master control header (PAPER/LIVE
