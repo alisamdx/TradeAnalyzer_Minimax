@@ -366,9 +366,11 @@ export function BacktestView({ initialTicker = null, initialStrategy = null }: {
   const [progress, setProgress] = useState<BacktestProgressEvent | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [ivStart, setIvStart] = useState<string | null>(null);
+  const [ivLoaded, setIvLoaded] = useState(false);
+  const autoRanFor = useRef<string | null>(null);
   const unsubRef = useRef<(() => void) | null>(null);
 
-  useEffect(() => { window.api.backtest.ivCoverage().then(setIvStart).catch(() => setIvStart(null)); }, []);
+  useEffect(() => { window.api.backtest.ivCoverage().then(setIvStart).catch(() => setIvStart(null)).finally(() => setIvLoaded(true)); }, []);
 
   const loadRuns = useCallback(async () => {
     try {
@@ -428,6 +430,18 @@ export function BacktestView({ initialTicker = null, initialStrategy = null }: {
       setProgress(null);
     }
   }, [loadRuns, selectRun]);
+
+  // Deep-link from another screen (My Stocks / Brief) auto-runs the backtest once IV
+  // coverage has loaded (so the start date defaults to the IV-accurate range), instead of
+  // waiting for a manual click. Re-arms only when the deep-linked ticker changes.
+  useEffect(() => {
+    if (!initialTicker || !ivLoaded) return;
+    if (autoRanFor.current === initialTicker) return;
+    autoRanFor.current = initialTicker;
+    const strategy = initialStrategy ?? 'CSP';
+    const startDate = ivStart ?? DEFAULT_FORM.startDate;
+    handleRunSubmit({ ...DEFAULT_FORM, ticker: initialTicker, strategy, startDate, name: `${initialTicker} ${strategy} ${startDate}` });
+  }, [initialTicker, initialStrategy, ivLoaded, ivStart, handleRunSubmit]);
 
   const handleDelete = useCallback(async (runId: number, e: React.MouseEvent) => {
     e.stopPropagation();

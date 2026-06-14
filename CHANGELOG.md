@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.34.6] — 2026-06-13
+
+### Changed
+- **Backtest auto-runs when opened from a deep-link** — landing on Backtest via the 🔁 action (My Stocks / Brief picks) now runs the backtest automatically with the pre-filled ticker + strategy, instead of waiting for a manual "Run" click. It waits for IV coverage to load first so the start date defaults to the IV-accurate range, then kicks off. Manually opening the Backtest view still shows the form for you to fill in.
+
 ## [0.34.5] — 2026-06-13
 
 ### Changed
