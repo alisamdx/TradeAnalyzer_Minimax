@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.34.7] — 2026-06-13
+
+### Added
+- **💰 aggregate CSP backtest shows dollar P&L** — the "CSP backtest over every pick" modal now displays **Total P&L** ($) and **Avg $/trade** alongside the ROC metrics (the backend already computed `totalPnl`; it just wasn't surfaced). Total P&L = sum of one CSP contract (100 shares) per pick.
+
 ## [0.34.6] — 2026-06-13
 
 ### Changed

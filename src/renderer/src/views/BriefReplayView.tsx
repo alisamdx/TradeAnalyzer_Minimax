@@ -135,6 +135,8 @@ function PickPnlModal({ result, onClose }: { result: AggregatePickBacktest; onCl
   const r = result;
   const pos = (v: number) => (v >= 0 ? '#4caf50' : '#ef5350');
   const sign = (v: number) => `${v >= 0 ? '+' : ''}${v}%`;
+  const dollar = (v: number) => `${v < 0 ? '-$' : '$'}${Math.abs(Math.round(v)).toLocaleString()}`;
+  const avgPnl = r.tradeCount ? r.totalPnl / r.tradeCount : 0;
   const cum = r.equityCurve.length ? r.equityCurve[r.equityCurve.length - 1]!.cumReturnPct : 0;
   const metric = (label: string, value: string, color?: string) => (
     <div style={{ background: 'var(--bg-elevated)', borderRadius: 6, padding: '8px 12px', minWidth: 104 }}>
@@ -158,6 +160,8 @@ function PickPnlModal({ result, onClose }: { result: AggregatePickBacktest; onCl
           <>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 16 }}>
               {metric('Trades', String(r.tradeCount))}
+              {metric('Total P&L', dollar(r.totalPnl), pos(r.totalPnl))}
+              {metric('Avg $/trade', dollar(avgPnl), pos(avgPnl))}
               {metric('Win rate', `${r.winRate}%`, pos(r.winRate - 50))}
               {metric('Avg ROC/trade', sign(r.avgReturnPct), pos(r.avgReturnPct))}
               {metric('Median', sign(r.medianReturnPct), pos(r.medianReturnPct))}
@@ -178,7 +182,7 @@ function PickPnlModal({ result, onClose }: { result: AggregatePickBacktest; onCl
               </LineChart>
             </ResponsiveContainer>
             <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 10 }}>
-              Real option P&L (Black-Scholes from historical price + IV) — the premium actually collected, not the stock move the main table shows. Cumulative ROC sums per-trade return on CSP collateral.
+              Real option P&L (Black-Scholes from historical price + IV) — the premium actually collected, not the stock move the main table shows. Total P&L = sum of one CSP contract (100 shares) per pick; Cumulative ROC sums per-trade return on CSP collateral.
             </div>
           </>
         )}
