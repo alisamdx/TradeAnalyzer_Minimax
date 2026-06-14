@@ -77,4 +77,10 @@ export function registerBacktestIpc(engine: BacktestEngine): void {
     try { return ok(engine.backtestReplayPicks(strategy)); }
     catch (err) { return fail(err); }
   });
+
+  // Oldest IV-history date — backtests are IV-priced from here; earlier = realized vol.
+  ipcMain.handle('backtest:iv-coverage', () => {
+    try { return ok(engine.ivHistoryStart()); }
+    catch (err) { return fail(err); }
+  });
 }

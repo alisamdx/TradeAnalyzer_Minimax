@@ -103,6 +103,13 @@ export class BacktestEngine {
     return result.lastInsertRowid as number;
   }
 
+  /** Oldest date in iv_history — the point from which backtests are IV-priced
+   *  (earlier dates fall back to realized vol). Null when no IV history exists. */
+  ivHistoryStart(): string | null {
+    const r = this.db.prepare('SELECT MIN(date) AS d FROM iv_history').get() as { d: string | null };
+    return r?.d ?? null;
+  }
+
   listConfigs(): BacktestConfig[] {
     return (this.db.prepare('SELECT * FROM backtest_configs ORDER BY created_at DESC').all() as any[])
       .map(r => this.rowToConfig(r));

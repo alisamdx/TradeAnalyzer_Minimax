@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.34.1] — 2026-06-13
+
+### Added
+- **Backtest form guides toward IV-accurate start dates** — the New Backtest form now defaults its start date to the oldest date in `iv_history` (when available) and sets that as the date input's `min`, so backtests are IV-priced by default. If a start date earlier than IV coverage is chosen, an inline ⚠ warning explains that earlier dates are priced from realized vol (not implied vol) and offers a one-click "Use {date}". When the start is within coverage, a "✓ IV-priced" hint confirms it. `BacktestEngine.ivHistoryStart()` + IPC `backtest:iv-coverage`. (IV history currently begins 2025-05-29 — ~1 year — so older backtests were silently realized-vol priced.)
+
 ## [0.34.0] — 2026-06-13
 
 ### Added

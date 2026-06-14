@@ -80,6 +80,16 @@ describe('aggregate pick backtest (phase 2)', () => {
     expect(res.equityCurve).toEqual([]);
     db.close();
   });
+
+  it('ivHistoryStart returns the oldest IV date (null when empty)', () => {
+    const db = openDatabase(':memory:');
+    runMigrations(db, MIGRATIONS_DIR);
+    const eng = new BacktestEngine(db);
+    expect(eng.ivHistoryStart()).toBeNull();
+    db.prepare(`INSERT INTO iv_history (ticker, date, atm_iv) VALUES ('X','2025-05-29',30),('X','2025-06-01',31)`).run();
+    expect(eng.ivHistoryStart()).toBe('2025-05-29');
+    db.close();
+  });
 });
 
 describe('backtest engine uses historical IV', () => {

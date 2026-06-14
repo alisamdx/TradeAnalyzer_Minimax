@@ -161,11 +161,13 @@ function ResultsPanel({ run, metrics, trades }: { run: BacktestRun; metrics: Bac
 function ConfigForm({
   initial,
   onSubmit,
-  onCancel
+  onCancel,
+  ivHistoryStart
 }: {
   initial?: Partial<BacktestConfig>;
   onSubmit: (cfg: Omit<BacktestConfig, 'id' | 'createdAt'>) => void;
   onCancel?: () => void;
+  ivHistoryStart?: string | null;
 }) {
   const [form, setForm] = useState<Omit<BacktestConfig, 'id' | 'createdAt'>>({
     ...DEFAULT_FORM,
@@ -220,10 +222,25 @@ function ConfigForm({
       <div className="bt-form-row">
         <label>Date Range</label>
         <div className="bt-date-range">
-          <input type="date" value={form.startDate} onChange={e => set('startDate', e.target.value)} required />
+          <input type="date" value={form.startDate} min={ivHistoryStart ?? undefined} onChange={e => set('startDate', e.target.value)} required />
           <span>→</span>
           <input type="date" value={form.endDate} onChange={e => set('endDate', e.target.value)} required />
         </div>
+        {ivHistoryStart && (
+          form.startDate < ivHistoryStart ? (
+            <div style={{ fontSize: 12, color: '#e0a030', marginTop: 6 }}>
+              ⚠ IV history starts {ivHistoryStart}. Before that, premium is priced from realized vol (less accurate), not implied vol.{' '}
+              <button type="button" onClick={() => set('startDate', ivHistoryStart)}
+                style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', textDecoration: 'underline', padding: 0, fontSize: 12 }}>
+                Use {ivHistoryStart}
+              </button>
+            </div>
+          ) : (
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 6 }}>
+              ✓ IV-priced (historical IV available from {ivHistoryStart}).
+            </div>
+          )
+        )}
       </div>
 
       <div className="bt-form-row">
@@ -325,7 +342,10 @@ export function BacktestView({ initialTicker = null, initialStrategy = null }: {
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<BacktestProgressEvent | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [ivStart, setIvStart] = useState<string | null>(null);
   const unsubRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => { window.api.backtest.ivCoverage().then(setIvStart).catch(() => setIvStart(null)); }, []);
 
   const loadRuns = useCallback(async () => {
     try {
@@ -461,8 +481,12 @@ export function BacktestView({ initialTicker = null, initialStrategy = null }: {
 
         {panel === 'new' && !running && (
           <ConfigForm
-            key={initialTicker ?? 'manual'}
-            initial={initialTicker ? { ticker: initialTicker, strategy: initialStrategy ?? 'CSP' } : undefined}
+            key={`${initialTicker ?? 'manual'}-${ivStart ?? ''}`}
+            initial={{
+              ...(initialTicker ? { ticker: initialTicker, strategy: initialStrategy ?? 'CSP' } : {}),
+              ...(ivStart ? { startDate: ivStart } : {}),
+            }}
+            ivHistoryStart={ivStart}
             onSubmit={handleRunSubmit}
           />
         )}

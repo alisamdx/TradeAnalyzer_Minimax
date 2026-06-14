@@ -989,6 +989,7 @@ function buildApi() {
     },
     replayPicks: (strategy: 'wheel' | 'income') =>
       invoke<import('@shared/types.js').AggregatePickBacktest>('backtest:replay-picks', strategy),
+    ivCoverage: () => invoke<string | null>('backtest:iv-coverage'),
   };
 
   const filters = {
