@@ -52,11 +52,41 @@ function MetricCard({ label, value, sub, positive }: { label: string; value: str
 
 // ─── Trade Table ─────────────────────────────────────────────────────────────
 
+type TradeSortKey = 'entryDate' | 'expiration' | 'side' | 'strike' | 'entryPremium' | 'entrySpot' | 'exitDate' | 'exitPremium' | 'exitSpot' | 'exitReason' | 'pnl';
+
+const TRADE_COLS: { key: TradeSortKey; label: string }[] = [
+  { key: 'entryDate', label: 'Entry' }, { key: 'expiration', label: 'Exp.' },
+  { key: 'side', label: 'Side' }, { key: 'strike', label: 'Strike' },
+  { key: 'entryPremium', label: 'Entry Px' }, { key: 'entrySpot', label: 'Stk@Entry' },
+  { key: 'exitDate', label: 'Exit' }, { key: 'exitPremium', label: 'Exit Px' },
+  { key: 'exitSpot', label: 'Stk@Exit' }, { key: 'exitReason', label: 'Exit Reason' },
+  { key: 'pnl', label: 'P&L' },
+];
+
 function TradeTable({ trades }: { trades: BacktestTrade[] }) {
   const [page, setPage] = useState(0);
+  const [sortKey, setSortKey] = useState<TradeSortKey>('entryDate');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const pageSize = 20;
   const total = trades.length;
-  const slice = trades.slice(page * pageSize, (page + 1) * pageSize);
+
+  const handleSort = (key: TradeSortKey) => {
+    if (key === sortKey) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
+    else { setSortKey(key); setSortDir(key === 'entryDate' || key === 'exitDate' ? 'desc' : 'asc'); }
+    setPage(0);
+  };
+
+  const sorted = [...trades].sort((a, b) => {
+    const av = a[sortKey], bv = b[sortKey];
+    if (av === null || av === undefined) return 1;   // nulls last regardless of dir
+    if (bv === null || bv === undefined) return -1;
+    const cmp = typeof av === 'number' && typeof bv === 'number'
+      ? av - bv
+      : String(av).localeCompare(String(bv));
+    return sortDir === 'asc' ? cmp : -cmp;
+  });
+  const slice = sorted.slice(page * pageSize, (page + 1) * pageSize);
+  const arrow = (key: TradeSortKey) => (sortKey === key ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '');
 
   return (
     <div className="bt-trades">
@@ -64,15 +94,20 @@ function TradeTable({ trades }: { trades: BacktestTrade[] }) {
         <span>Trade Log ({total} trades)</span>
         <div className="bt-pagination">
           <button disabled={page === 0} onClick={() => setPage(p => p - 1)}>◀</button>
-          <span>{page + 1} / {Math.ceil(total / pageSize)}</span>
+          <span>{page + 1} / {Math.max(1, Math.ceil(total / pageSize))}</span>
           <button disabled={(page + 1) * pageSize >= total} onClick={() => setPage(p => p + 1)}>▶</button>
         </div>
       </div>
       <table className="bt-trade-table">
         <thead>
           <tr>
-            <th>Entry</th><th>Exp.</th><th>Side</th><th>Strike</th>
-            <th>Entry Px</th><th>Stk@Entry</th><th>Exit</th><th>Exit Px</th><th>Stk@Exit</th><th>Exit Reason</th><th>P&L</th>
+            {TRADE_COLS.map(c => (
+              <th key={c.key} onClick={() => handleSort(c.key)}
+                style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap', color: sortKey === c.key ? 'var(--accent)' : undefined }}
+                title="Click to sort">
+                {c.label}{arrow(c.key)}
+              </th>
+            ))}
           </tr>
         </thead>
         <tbody>
@@ -244,21 +279,6 @@ function ConfigForm({
             </div>
           )
         )}
-      </div>
-
-      <div className="bt-form-row">
-        <label>Starting Capital ($)</label>
-        <input
-          type="number"
-          min={1000}
-          step={1000}
-          value={form.startingCapital}
-          onChange={e => set('startingCapital', Number(e.target.value))}
-          required
-        />
-        <span className="hint" style={{ fontSize: '0.8em', marginTop: '4px', display: 'block' }}>
-          Must cover strike × 100 shares per CSP contract (e.g. $18k+ for AAPL)
-        </span>
       </div>
 
       <div className="bt-form-row bt-form-row-inline">

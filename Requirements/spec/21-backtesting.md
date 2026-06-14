@@ -4,7 +4,7 @@ Simulates CSP / CC / Wheel strategies over historical data to estimate performan
 
 ## 21.1 Configuration
 
-A saved `backtest_config`: `name`, `strategy` (`CSP|CC|Wheel`), `ticker`, `start_date`, `end_date`, `starting_capital` (default 10,000), `dte_target` (30), `delta_target` (0.30), `profit_target_pct` (50), `stop_loss_pct` (200). IPC: `config.list`, `config.create(cfg)`, `config.delete(id)`.
+A saved `backtest_config`: `name`, `strategy` (`CSP|CC|Wheel`), `ticker`, `start_date`, `end_date`, `dte_target` (30), `delta_target` (0.30), `profit_target_pct` (50), `stop_loss_pct` (200). IPC: `config.list`, `config.create(cfg)`, `config.delete(id)`. (`starting_capital` remains in the schema/type but is no longer user-facing or used since v0.34.5 — the engine auto-sizes the capital base to one contract: `max spot × 100`. Metrics are "return on the capital one contract ties up." This removed the capital gate that previously made high-priced stocks like META flat-zero.)
 
 ## 21.2 Simulation
 
@@ -24,7 +24,7 @@ IPC: `run.list(configId?)`, `run.get(runId)`, `run.start(configId)`, `run.cancel
 
 ## 21.4 UI
 
-Pick/create a config → run → view the equity curve, the metrics summary, and the trade-by-trade table. Past runs are listed and re-openable.
+Pick/create a config → run → view the equity curve, the metrics summary, and the trade-by-trade table. Past runs are listed and re-openable. The trade log shows entry/exit dates, strike, option premiums (Entry Px / Exit Px), and underlying price at entry/exit (Stk@Entry / Stk@Exit); columns are click-sortable, defaulting to entry date descending.
 
 **Deep-link from recommendations** (v0.33.7): a 🔁 Backtest action on My Stocks rows and Daily Brief wheel/income pick cards fires `navigate-to-backtest` with `{ ticker, strategy }` (My Stocks → CSP; brief wheel → Wheel, income → CSP). `BacktestView` accepts `initialTicker`/`initialStrategy` and opens the New form pre-filled, so a recommendation can be backtested without manual entry. Only premium-selling strategies the engine supports surface the action.
 

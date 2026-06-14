@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.34.5] — 2026-06-13
+
+### Changed
+- **Backtest: dropped the Starting Capital input** — the field is gone; the engine auto-sizes the capital base to exactly one contract (`max spot × 100`) and reports metrics as return on the capital one contract ties up. This also **removes the capital gate** entirely, so high-priced stocks (META, etc.) just run — no more flat-zero curve and no need for the "raise capital" error added in v0.34.4. (`starting_capital` stays in the schema for back-compat but is unused.)
+- **Backtest trade log is now sortable** — click any column header to sort (toggles asc/desc; nulls last). Defaults to **entry date, descending** (most recent trades first).
+
 ## [0.34.4] — 2026-06-13
 
 ### Fixed

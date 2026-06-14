@@ -220,10 +220,10 @@ export class BacktestEngine {
       this.db.prepare('UPDATE backtest_runs SET total_days = ? WHERE id = ?').run(simBars.length, runId);
 
       // Run simulation
-      const { trades, equityCurve } = this.runSimulation(cfg, runId, simBars, allBars, onProgress);
+      const { trades, equityCurve, startingCapital } = this.runSimulation(cfg, runId, simBars, allBars, onProgress);
 
-      // Compute and persist metrics
-      const metrics = computeMetrics(runId, trades, equityCurve, cfg.startingCapital);
+      // Compute and persist metrics (capital base auto-sized to one contract — see runSimulation)
+      const metrics = computeMetrics(runId, trades, equityCurve, startingCapital);
       this.persistMetrics(metrics);
 
       // Mark run complete
@@ -252,7 +252,7 @@ export class BacktestEngine {
     simBars: PriceBar[],
     allBars: PriceBar[],
     onProgress: (evt: BacktestProgressEvent) => void
-  ): { trades: BacktestTrade[]; equityCurve: EquityPoint[] } {
+  ): { trades: BacktestTrade[]; equityCurve: EquityPoint[]; startingCapital: number } {
     const R = 0.02; // risk-free rate
     const insertTrade = this.db.prepare(`
       INSERT INTO backtest_trades
@@ -268,11 +268,13 @@ export class BacktestEngine {
       WHERE id = ?
     `);
 
-    let capital = cfg.startingCapital;
+    // No user-supplied starting capital: this is a one-contract-at-a-time strategy, so we
+    // size the notional account to exactly what one position ties up (max spot × 100 ≥ any
+    // CSP collateral). Metrics are then "return on the capital one contract requires."
+    const startingCapital = Math.max(...simBars.map(b => b.close)) * 100;
+    let capital = startingCapital;
     let shares = 0;
     let costBasis = 0;
-    let capitalBlocked = false;  // a CSP entry was skipped because capital < collateral
-    let maxCapReq = 0;           // largest collateral a skipped entry would have needed
     let wheelPhase: 'csp' | 'cc' = 'csp'; // only used for Wheel strategy
     let openPos: OpenPosition | null = null;
     const trades: BacktestTrade[] = [];
@@ -396,27 +398,22 @@ export class BacktestEngine {
             // Premium too low to be meaningful — skip
           } else {
             const capitalRequired = side === 'put' ? strike * 100 : 0;
-            if (capital < capitalRequired) {
-              capitalBlocked = true;
-              if (capitalRequired > maxCapReq) maxCapReq = capitalRequired;
-            }
-            if (capital >= capitalRequired) {
-              capital -= capitalRequired; // reserve cash for put (CC requires no cash)
-              capital += optPrice * 100;  // collect premium upfront
+            // One position at a time (enforced by openPos); no capital gate.
+            capital -= capitalRequired; // reserve cash for put (CC requires no cash)
+            capital += optPrice * 100;  // collect premium upfront
 
-              const row = insertTrade.run(
-                runId, cfg.ticker, cfg.strategy, side,
-                bar.date, expirationDate, strike, optPrice,
-                null, null, null, null, shares, costBasis || null, capitalRequired,
-                S
-              );
-              openPos = {
-                tradeId: row.lastInsertRowid as number,
-                side, strike, entryPremium: optPrice,
-                entryDate: bar.date, expiration: expirationDate,
-                capitalReserved: capitalRequired
-              };
-            }
+            const row = insertTrade.run(
+              runId, cfg.ticker, cfg.strategy, side,
+              bar.date, expirationDate, strike, optPrice,
+              null, null, null, null, shares, costBasis || null, capitalRequired,
+              S
+            );
+            openPos = {
+              tradeId: row.lastInsertRowid as number,
+              side, strike, entryPremium: optPrice,
+              entryDate: bar.date, expiration: expirationDate,
+              capitalReserved: capitalRequired
+            };
           }
         }
       }
@@ -450,16 +447,8 @@ export class BacktestEngine {
       if (t) trades.push(t);
     }
 
-    // No trades is almost always a too-small starting capital for a high-priced stock —
-    // surface why instead of returning a silent flat-zero curve.
+    // Zero trades now means thin premium / insufficient data (capital no longer gates).
     if (trades.length === 0 && !this.cancelToken.cancelled) {
-      if (capitalBlocked) {
-        throw new Error(
-          `No trades: starting capital ($${cfg.startingCapital.toLocaleString()}) is below the ` +
-          `~$${Math.round(maxCapReq).toLocaleString()} collateral a ${cfg.deltaTarget}-delta CSP needs for ` +
-          `${cfg.ticker}. Raise Starting Capital to at least that.`
-        );
-      }
       throw new Error(`No trades opened for ${cfg.ticker} — premiums too thin or insufficient price/IV data in range.`);
     }
 
@@ -468,7 +457,7 @@ export class BacktestEngine {
       equityCurve.push({ date: simBars.at(-1)!.date, equity: capital + shares * simBars.at(-1)!.close });
     }
 
-    return { trades, equityCurve };
+    return { trades, equityCurve, startingCapital };
   }
 
   // ── Aggregate pick backtest ─────────────────────────────────────────────────

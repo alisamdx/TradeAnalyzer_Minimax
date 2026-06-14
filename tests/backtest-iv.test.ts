@@ -112,16 +112,17 @@ describe('backtest engine uses historical IV', () => {
     expect(premIv).toBeGreaterThan(premRealized * 2); // IV-priced premium is far richer
   });
 
-  it('errors clearly when starting capital is below one CSP\'s collateral (high-priced stock)', () => {
+  it('runs a high-priced stock without a starting-capital input (capital auto-sized)', () => {
     const db = openDatabase(':memory:');
     runMigrations(db, MIGRATIONS_DIR);
-    seedPrices(db, 'BIG', 645); // ~$645 stock → CSP collateral ~$60k
+    seedPrices(db, 'BIG', 645); // ~$645 stock → CSP collateral ~$60k; used to flat-zero with $25k
     const eng = new BacktestEngine(db);
     const id = eng.createConfig({
       name: 't', strategy: 'CSP', ticker: 'BIG', startDate: '2023-02-01', endDate: '2023-06-15',
       startingCapital: 25_000, dteTarget: 30, deltaTarget: 0.30, profitTargetPct: 50, stopLossPct: 200,
     });
-    expect(() => eng.simulate(id, () => {})).toThrow(/Starting Capital/i);
+    const { runId } = eng.simulate(id, () => {});
+    expect(eng.getTrades(runId).length).toBeGreaterThan(0); // no longer capital-gated
     db.close();
   });
 
