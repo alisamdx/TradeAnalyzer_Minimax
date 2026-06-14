@@ -442,6 +442,118 @@ export class BacktestEngine {
     return { trades, equityCurve };
   }
 
+  // ── Aggregate pick backtest ─────────────────────────────────────────────────
+  // Simulate one CSP per historical Brief-Replay pick for a premium strategy and pool
+  // the results — "if I'd traded every wheel/income pick, what would they have returned?"
+  // Prices off historical IV with realized-vol fallback. see docs/formulas.md#backtest-iv
+  backtestReplayPicks(
+    strategy: 'wheel' | 'income',
+    params: { deltaTarget: number; dteTarget: number; profitTargetPct: number; stopLossPct: number } =
+      { deltaTarget: 0.30, dteTarget: 30, profitTargetPct: 50, stopLossPct: 200 },
+  ): import('@shared/types.js').AggregatePickBacktest {
+    type PickRow = { as_of_date: string; ticker: string };
+    const picks = this.db.prepare(`
+      SELECT DISTINCT rb.as_of_date, ro.ticker
+      FROM replay_outcomes ro JOIN replay_briefs rb ON rb.id = ro.replay_brief_id
+      WHERE rb.strategy = ? ORDER BY rb.as_of_date ASC
+    `).all(strategy) as PickRow[];
+
+    const trades: { exitDate: string; returnPct: number; pnl: number; daysHeld: number }[] = [];
+    let skipped = 0;
+    for (const p of picks) {
+      const t = this.simulateSingleCsp(p.ticker, p.as_of_date, params);
+      if (t) trades.push(t); else skipped++;
+    }
+
+    const n = trades.length;
+    if (n === 0) {
+      return { strategy, tradeCount: 0, skipped, winRate: 0, avgReturnPct: 0, medianReturnPct: 0,
+        bestReturnPct: 0, worstReturnPct: 0, totalPnl: 0, avgDaysHeld: 0, maxDrawdownPct: 0, equityCurve: [], params };
+    }
+
+    const rets = trades.map(t => t.returnPct);
+    const sortedRets = [...rets].sort((a, b) => a - b);
+    const wins = trades.filter(t => t.pnl > 0).length;
+    const r2 = (v: number) => Math.round(v * 100) / 100;
+
+    // Cumulative return-on-capital curve by exit date (equal weight, capital recycled).
+    const byExit = [...trades].sort((a, b) => a.exitDate.localeCompare(b.exitDate));
+    const equityCurve: { date: string; cumReturnPct: number }[] = [];
+    let cum = 0, peak = 0, maxDd = 0;
+    for (const t of byExit) {
+      cum += t.returnPct;
+      equityCurve.push({ date: t.exitDate, cumReturnPct: r2(cum) });
+      if (cum > peak) peak = cum;
+      if (peak - cum > maxDd) maxDd = peak - cum;
+    }
+
+    return {
+      strategy, tradeCount: n, skipped,
+      winRate: Math.round((wins / n) * 1000) / 10,
+      avgReturnPct: r2(rets.reduce((a, b) => a + b, 0) / n),
+      medianReturnPct: r2(sortedRets[Math.floor(n / 2)]!),
+      bestReturnPct: r2(sortedRets[n - 1]!),
+      worstReturnPct: r2(sortedRets[0]!),
+      totalPnl: Math.round(trades.reduce((s, t) => s + t.pnl, 0)),
+      avgDaysHeld: Math.round((trades.reduce((s, t) => s + t.daysHeld, 0) / n) * 10) / 10,
+      maxDrawdownPct: r2(maxDd),
+      equityCurve, params,
+    };
+  }
+
+  // Simulate one cash-secured put entered on `entryDate`. Returns null when price/option
+  // data is insufficient or the trade can't resolve (too recent). IV-priced with fallback.
+  private simulateSingleCsp(
+    ticker: string, entryDate: string,
+    p: { deltaTarget: number; dteTarget: number; profitTargetPct: number; stopLossPct: number },
+  ): { exitDate: string; returnPct: number; pnl: number; daysHeld: number } | null {
+    const R = 0.02;
+    const fromDate = addCalendarDays(entryDate, -60);
+    const toDate = addCalendarDays(entryDate, p.dteTarget + 10);
+    const bars = this.db.prepare(`
+      SELECT date, close FROM historical_prices
+      WHERE ticker = ? AND date >= ? AND date <= ? ORDER BY date ASC
+    `).all(ticker, fromDate, toDate) as { date: string; close: number }[];
+    if (bars.length < 5) return null;
+    const entryIdx = bars.findIndex(b => b.date >= entryDate);
+    if (entryIdx < 0) return null;
+
+    const ivRows = this.db.prepare(
+      `SELECT date, atm_iv FROM iv_history WHERE ticker = ? AND atm_iv > 0 ORDER BY date ASC`
+    ).all(ticker) as { date: string; atm_iv: number }[];
+    const ivAsOf = (d: string): number | null => {
+      let lo = 0, hi = ivRows.length - 1, ans = -1;
+      while (lo <= hi) { const m = (lo + hi) >> 1; if (ivRows[m]!.date <= d) { ans = m; lo = m + 1; } else hi = m - 1; }
+      return ans >= 0 ? ivRows[ans]!.atm_iv / 100 : null;
+    };
+
+    const S0 = bars[entryIdx]!.close;
+    if (!(S0 > 0)) return null;
+    const sigma0 = ivAsOf(entryDate) ?? rollingVol(bars.slice(0, entryIdx + 1).map(b => b.close), 20);
+    const Tentry = p.dteTarget / 365;
+    const strike = findStrikeForDelta(S0, Tentry, sigma0, p.deltaTarget, 'put', R);
+    const entryPremium = bsPrice(S0, strike, Tentry, R, sigma0, 'put');
+    if (entryPremium < 0.05) return null;
+    const premCollected = entryPremium * 100;
+    const capitalRequired = strike * 100;
+    if (!(capitalRequired > 0)) return null;
+    const expiration = addCalendarDays(entryDate, p.dteTarget);
+
+    for (let i = entryIdx + 1; i < bars.length; i++) {
+      const bar = bars[i]!;
+      const out = (pnl: number) => ({ exitDate: bar.date, pnl, returnPct: pnl / capitalRequired * 100, daysHeld: daysBetween(entryDate, bar.date) });
+      if (bar.date >= expiration) {
+        return out(bar.close < strike ? premCollected - (strike - bar.close) * 100 : premCollected);
+      }
+      const sigma = ivAsOf(bar.date) ?? sigma0;
+      const opt = bsPrice(bar.close, strike, Math.max(0, daysBetween(bar.date, expiration)) / 365, R, sigma, 'put');
+      const pnlSoFar = premCollected - opt * 100;
+      if (pnlSoFar >= premCollected * (p.profitTargetPct / 100)) return out(pnlSoFar);
+      if (opt * 100 >= premCollected * (p.stopLossPct / 100)) return out(pnlSoFar);
+    }
+    return null; // unresolved (too recent — not enough forward bars)
+  }
+
   // ── Helpers ───────────────────────────────────────────────────────────────
 
   private getSide(strategy: BacktestConfig['strategy'], wheelPhase: 'csp' | 'cc'): 'put' | 'call' {

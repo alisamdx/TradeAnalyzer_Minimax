@@ -888,6 +888,27 @@ export interface BacktestRunSummary {
   tradeCount: number;
 }
 
+// Aggregate backtest of every historical Brief-Replay pick for a premium strategy:
+// one CSP simulated per (date, ticker) pick, then pooled. Answers "if I'd traded all my
+// wheel/income picks, what would they have returned?" see docs/formulas.md#backtest-iv
+export interface AggregatePickBacktest {
+  strategy: 'wheel' | 'income';
+  tradeCount: number;        // picks that produced a simulated trade
+  skipped: number;           // picks with no usable price/option data
+  winRate: number;           // % of trades with pnl > 0
+  avgReturnPct: number;      // mean return on capital per trade
+  medianReturnPct: number;
+  bestReturnPct: number;
+  worstReturnPct: number;
+  totalPnl: number;          // sum of per-contract P&L ($)
+  avgDaysHeld: number;
+  maxDrawdownPct: number;    // on the cumulative return-on-capital curve
+  // Cumulative sum of per-trade return-on-capital (%) ordered by exit date —
+  // "equal-weight, capital recycled" strategy edge over time.
+  equityCurve: Array<{ date: string; cumReturnPct: number }>;
+  params: { deltaTarget: number; dteTarget: number; profitTargetPct: number; stopLossPct: number };
+}
+
 // ─── LEAPS Strategy Module (v0.22.0) ──────────────────────────────────────────
 // Pure LEAPS screener — finds deep-ITM long calls (365–730 DTE) ranked by score.
 // CSP pairing removed: CSP is covered by Analysis and Strategy Lab.

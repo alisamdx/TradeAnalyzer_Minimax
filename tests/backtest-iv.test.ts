@@ -42,6 +42,46 @@ function firstEntryPremium(db: DbHandle, ticker: string): number {
   return trades[0]!.entryPremium;
 }
 
+function seedReplayPicks(db: DbHandle, strategy: string, ticker: string, dates: string[]) {
+  for (const d of dates) {
+    const b = db.prepare(
+      `INSERT INTO replay_briefs (as_of_date, strategy, picks, config_version) VALUES (?, ?, '[]', 'baseline_v3')`
+    ).run(d, strategy);
+    db.prepare(
+      `INSERT INTO replay_outcomes (replay_brief_id, ticker, rank, composite_score, entry_price) VALUES (?, ?, 1, 70, 100)`
+    ).run(b.lastInsertRowid as number, ticker);
+  }
+}
+
+describe('aggregate pick backtest (phase 2)', () => {
+  it('simulates a CSP per replay pick and pools the results', () => {
+    const db = openDatabase(':memory:');
+    runMigrations(db, MIGRATIONS_DIR);
+    seedPrices(db, 'TST');
+    seedIv(db, 'TST', 40);
+    // Picks on dates that have ≥40 forward calendar days of price data.
+    seedReplayPicks(db, 'wheel', 'TST', ['2023-02-10', '2023-03-01', '2023-03-20', '2023-04-05']);
+
+    const res = new BacktestEngine(db).backtestReplayPicks('wheel');
+    expect(res.strategy).toBe('wheel');
+    expect(res.tradeCount).toBeGreaterThan(0);
+    expect(res.winRate).toBeGreaterThanOrEqual(0);
+    expect(res.winRate).toBeLessThanOrEqual(100);
+    expect(res.equityCurve.length).toBe(res.tradeCount);
+    expect(Number.isFinite(res.avgReturnPct)).toBe(true);
+    db.close();
+  });
+
+  it('returns an empty result when the strategy has no picks', () => {
+    const db = openDatabase(':memory:');
+    runMigrations(db, MIGRATIONS_DIR);
+    const res = new BacktestEngine(db).backtestReplayPicks('income');
+    expect(res.tradeCount).toBe(0);
+    expect(res.equityCurve).toEqual([]);
+    db.close();
+  });
+});
+
 describe('backtest engine uses historical IV', () => {
   it('prices a higher entry premium when IV history (high IV) is present', () => {
     // Run A — no IV history → falls back to ~5% realized vol on the flat series.

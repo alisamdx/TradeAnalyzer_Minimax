@@ -986,7 +986,9 @@ function buildApi() {
         ipcRenderer.on('backtest:progress', handler);
         return () => ipcRenderer.removeListener('backtest:progress', handler);
       }
-    }
+    },
+    replayPicks: (strategy: 'wheel' | 'income') =>
+      invoke<import('@shared/types.js').AggregatePickBacktest>('backtest:replay-picks', strategy),
   };
 
   const filters = {

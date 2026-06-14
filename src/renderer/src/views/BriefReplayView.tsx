@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import type { ReplayPickRow, ReplayProgressEvent, ReplaySummary, ReplayChartData, PremiumHistoryReadiness } from '@shared/types.js';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
+import type { ReplayPickRow, ReplayProgressEvent, ReplaySummary, ReplayChartData, PremiumHistoryReadiness, AggregatePickBacktest } from '@shared/types.js';
 import ReplayChartsModal from '../components/ReplayChartsModal.js';
 
 const STRATEGIES = ['wheel', 'bullish', 'bearish', 'income', 'buy', 'inflection'] as const;
@@ -55,7 +56,7 @@ function sortSummaries(rows: ReplaySummary[], key: SummarySortKey, dir: 'asc' | 
   });
 }
 
-function SummaryTable({ summaries }: { summaries: ReplaySummary[] }) {
+function SummaryTable({ summaries, onBacktest }: { summaries: ReplaySummary[]; onBacktest: (s: 'wheel' | 'income') => void }) {
   const [sortKey, setSortKey] = useState<SummarySortKey>('strategy');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
 
@@ -90,6 +91,7 @@ function SummaryTable({ summaries }: { summaries: ReplaySummary[] }) {
             <th style={thStyle('avgReturn5d')}         onClick={() => handleSort('avgReturn5d')}>Avg 5d{arrow('avgReturn5d')}</th>
             <th style={thStyle('avgReturn10d')}        onClick={() => handleSort('avgReturn10d')}>Avg 10d{arrow('avgReturn10d')}</th>
             <th style={thStyle('avgReturn21d')}        onClick={() => handleSort('avgReturn21d')}>Avg 21d{arrow('avgReturn21d')}</th>
+            <th style={{ textAlign: 'center', whiteSpace: 'nowrap' }} title="Backtest a CSP on every pick (real option P&L)">P&L</th>
           </tr>
         </thead>
         <tbody>
@@ -113,10 +115,74 @@ function SummaryTable({ summaries }: { summaries: ReplaySummary[] }) {
               <td style={{ textAlign: 'right', color: retColor(s.avgReturn5d,  s.strategy) }}>{fmtPct(s.avgReturn5d)}</td>
               <td style={{ textAlign: 'right', color: retColor(s.avgReturn10d, s.strategy) }}>{fmtPct(s.avgReturn10d)}</td>
               <td style={{ textAlign: 'right', color: retColor(s.avgReturn21d, s.strategy) }}>{fmtPct(s.avgReturn21d)}</td>
+              <td style={{ textAlign: 'center' }}>
+                {(s.strategy === 'wheel' || s.strategy === 'income') ? (
+                  <button className="btn-secondary" style={{ fontSize: 11, padding: '2px 8px' }}
+                    onClick={() => onBacktest(s.strategy as 'wheel' | 'income')}
+                    title="Backtest a CSP on every pick for this strategy (real option P&L)">💰</button>
+                ) : '—'}
+              </td>
             </tr>
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+// ── Aggregate P&L backtest modal ───────────────────────────────────────────────
+function PickPnlModal({ result, onClose }: { result: AggregatePickBacktest; onClose: () => void }) {
+  const r = result;
+  const pos = (v: number) => (v >= 0 ? '#4caf50' : '#ef5350');
+  const sign = (v: number) => `${v >= 0 ? '+' : ''}${v}%`;
+  const cum = r.equityCurve.length ? r.equityCurve[r.equityCurve.length - 1]!.cumReturnPct : 0;
+  const metric = (label: string, value: string, color?: string) => (
+    <div style={{ background: 'var(--bg-elevated)', borderRadius: 6, padding: '8px 12px', minWidth: 104 }}>
+      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{label}</div>
+      <div style={{ fontSize: 16, fontWeight: 700, color: color ?? 'var(--text)' }}>{value}</div>
+    </div>
+  );
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 10, padding: 20, width: 740, maxWidth: '92vw', maxHeight: '88vh', overflowY: 'auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <h3 style={{ margin: 0, textTransform: 'capitalize' }}>💰 {r.strategy} — CSP backtest over every pick</h3>
+          <button className="btn-secondary" onClick={onClose}>✕</button>
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 14 }}>
+          One {r.params.deltaTarget}-delta CSP per pick · {r.params.dteTarget} DTE · +{r.params.profitTargetPct}% profit / {r.params.stopLossPct}% stop · priced off historical IV. Equal-weight, capital unconstrained.
+        </div>
+        {r.tradeCount === 0 ? (
+          <div style={{ color: 'var(--text-muted)', padding: 20 }}>No resolvable trades — picks lacked enough forward price/IV data.</div>
+        ) : (
+          <>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 16 }}>
+              {metric('Trades', String(r.tradeCount))}
+              {metric('Win rate', `${r.winRate}%`, pos(r.winRate - 50))}
+              {metric('Avg ROC/trade', sign(r.avgReturnPct), pos(r.avgReturnPct))}
+              {metric('Median', sign(r.medianReturnPct), pos(r.medianReturnPct))}
+              {metric('Cumulative ROC', sign(cum), pos(cum))}
+              {metric('Max drawdown', `-${r.maxDrawdownPct}%`, '#ef5350')}
+              {metric('Avg days held', String(r.avgDaysHeld))}
+              {metric('Skipped', String(r.skipped))}
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>Cumulative return-on-capital (%) by exit date</div>
+            <ResponsiveContainer width="100%" height={260}>
+              <LineChart data={r.equityCurve} margin={{ top: 8, right: 16, bottom: 24, left: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(128,128,128,0.12)" />
+                <XAxis dataKey="date" tick={{ fontSize: 10 }} angle={-35} textAnchor="end" height={50} minTickGap={24} />
+                <YAxis tickFormatter={v => v + '%'} tick={{ fontSize: 11 }} width={48} />
+                <Tooltip formatter={(v) => `${Number(v ?? 0).toFixed(1)}%`} />
+                <ReferenceLine y={0} stroke="rgba(255,255,255,0.2)" />
+                <Line type="monotone" dataKey="cumReturnPct" stroke="#4caf50" strokeWidth={2} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 10 }}>
+              Real option P&L (Black-Scholes from historical price + IV) — the premium actually collected, not the stock move the main table shows. Cumulative ROC sums per-trade return on CSP collateral.
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -262,6 +328,9 @@ export default function BriefReplayView() {
   const [error,            setError]             = useState<string | null>(null);
   const [showCharts,       setShowCharts]        = useState(false);
   const [chartData,        setChartData]         = useState<ReplayChartData | null>(null);
+  const [pnl,              setPnl]               = useState<AggregatePickBacktest | null>(null);
+  const [pnlLoading,       setPnlLoading]        = useState(false);
+  const [pnlError,         setPnlError]          = useState<string | null>(null);
   const [premiumReadiness, setPremiumReadiness]  = useState<PremiumHistoryReadiness | null>(null);
 
   const unsubRef = useRef<(() => void) | null>(null);
@@ -319,6 +388,17 @@ export default function BriefReplayView() {
     setSummaries([]);
     setPicks([]);
     setExistingRange({ from: null, to: null });
+  };
+
+  const handlePnlBacktest = async (strategy: 'wheel' | 'income') => {
+    setPnlLoading(true); setPnlError(null);
+    try {
+      setPnl(await window.api.backtest.replayPicks(strategy));
+    } catch (e) {
+      setPnlError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPnlLoading(false);
+    }
   };
 
   const handleCharts = async () => {
@@ -435,7 +515,7 @@ export default function BriefReplayView() {
       {summaries.length > 0 && (
         <>
           <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 10, marginTop: 8 }}>Hit-Rate Summary</h3>
-          <SummaryTable summaries={summaries} />
+          <SummaryTable summaries={summaries} onBacktest={handlePnlBacktest} />
         </>
       )}
 
@@ -467,6 +547,21 @@ export default function BriefReplayView() {
       {showCharts && chartData && (
         <ReplayChartsModal data={chartData} onClose={() => setShowCharts(false)} />
       )}
+
+      {pnlLoading && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '16px 24px' }}>
+            ⟳ Running CSP backtest over every pick…
+          </div>
+        </div>
+      )}
+      {pnlError && (
+        <div style={{ position: 'fixed', bottom: 20, right: 20, zIndex: 10001, background: '#2a1a1a', border: '1px solid #ef5350', color: '#ef9a9a', borderRadius: 6, padding: '8px 14px', fontSize: 13 }}>
+          P&L backtest failed: {pnlError}
+          <button onClick={() => setPnlError(null)} style={{ marginLeft: 10, background: 'none', border: 'none', color: '#888', cursor: 'pointer' }}>✕</button>
+        </div>
+      )}
+      {pnl && <PickPnlModal result={pnl} onClose={() => setPnl(null)} />}
     </div>
   );
 }

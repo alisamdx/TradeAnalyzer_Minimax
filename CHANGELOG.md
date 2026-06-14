@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.34.0] — 2026-06-13
+
+### Added
+- **Aggregate "backtest my picks" in Brief Replay (integration phase 2 of 2)** — the summary table's new **💰 P&L** button (on the wheel & income rows) simulates a cash-secured put on **every** historical Brief-Replay pick for that strategy and pools the results into one view: trade count, win rate, avg/median return-on-capital, cumulative ROC, max drawdown, avg days held, and an **equity curve** (cumulative ROC by exit date). This answers *"if I'd traded every wheel/income pick, what would they have actually returned?"* — using **real option P&L** (Black-Scholes from historical price + IV), not the stock-move proxy the summary columns show. `BacktestEngine.backtestReplayPicks(strategy)`; IPC `backtest:replay-picks`. Each pick is one 0.30-delta / 30-DTE CSP with 50%-profit / 200%-stop exits; equal-weight, capital unconstrained. Completes the backtest integration begun in v0.33.7.
+
 ## [0.33.8] — 2026-06-13
 
 ### Changed
