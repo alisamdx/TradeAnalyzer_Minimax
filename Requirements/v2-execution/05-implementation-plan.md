@@ -96,15 +96,25 @@ idempotent COID + fill dedup; both open/close flows drive the order state machin
   exit → reconcile → audit, end-to-end on the mock.
 - **Deliverable:** the full trade lifecycle working against the mock.
 
-## Phase 5 — Control panel (Electron UI) *(no broker)* — 🚧 5a assembly DONE (v1.1.8) · 5b activation DONE (v1.1.9); UI (5c/d) next
+## Phase 5 — Control panel (Electron UI) *(no broker)* — ✅ DONE (5a v1.1.8 · 5b v1.1.9 · 5c/d v1.1.10)
 
 **5b (v1.1.9) — activation, the first non-dormant step.** `ExecutionEngine` is instantiated
 in `src/main/index.ts` against the `MockExecutionBroker`, engine `stopped` (inert
 construction). `src/main/ipc/ipc-execution.ts` (`registerExecutionIpc`) exposes the facade
 (reads / config / control / approvals) as a thin pass-through; `window.api.execution.*`
 (34th preload namespace) mirrors it with an `onEvent` subscription to the forwarded
-`execution:event` stream. Renderer-facing facade types added to `src/shared/types.ts`. The
-subsystem is now live and drivable (mock mode) — UI pending.
+`execution:event` stream. Renderer-facing facade types added to `src/shared/types.ts`.
+
+**5c/d (v1.1.10) — control panel UI.** New **🤝 Execution** sidebar section (`App.tsx`) with
+`TradingDeskView` (master PAPER/LIVE badge + engine-state pill; Engine Start/Pause/Stop
+[master Stop = hard stop] + broker/health/last-cycle; Kill Switch trip/clear; Capital
+deployed-vs-ceiling gauge + day P&L + trip threshold; proposals queue with Approve
+[paper 1-click / live type-to-confirm] / Reject; open-positions table; audit activity log;
+live via `execution.onEvent` + 15 s poll) and `ExecutionSettingsView` (editor over
+`exec_config` via `getConfig`/`updateConfig`, grouped Mode/Risk/Entry/Exit, dirty-track
+Save/Revert, live-mode confirmation gate). **The entire product is now demonstrable
+end-to-end on the mock with no IBKR.** No auto-generated entries until the Phase-6
+brief→`PickInput` source.
 
 - **🤝 Execution** sidebar section: **Trading Desk** + **Execution Settings** (§4).
 - Connect to core API/SSE; "Engine offline → Start". Master control header (PAPER/LIVE

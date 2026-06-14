@@ -32,10 +32,12 @@ import { ConvictionView } from './views/ConvictionView.js';
 import { NewsResearchView } from './views/NewsResearchView.js';
 import { EarningsCalendarView } from './views/EarningsCalendarView.js';
 import BriefReplayView from './views/BriefReplayView.js';
+import { TradingDeskView } from './views/TradingDeskView.js';
+import { ExecutionSettingsView } from './views/ExecutionSettingsView.js';
 
 declare const __APP_VERSION__: string;
 
-type View = 'watchlists' | 'screener' | 'filters' | 'analysis' | 'validate' | 'portfolio' | 'opportunity' | 'settings' | 'alerts' | 'data' | 'optionsChain' | 'payoff' | 'agent' | 'backtest' | 'testApi' | 'ivHistory' | 'knowledge' | 'strategyLab' | 'batch' | 'dailyBrief' | 'tradeScoring' | 'retrospect' | 'conviction' | 'newsResearch' | 'earningsCalendar' | 'briefReplay';
+type View = 'watchlists' | 'screener' | 'filters' | 'analysis' | 'validate' | 'portfolio' | 'opportunity' | 'settings' | 'alerts' | 'data' | 'optionsChain' | 'payoff' | 'agent' | 'backtest' | 'testApi' | 'ivHistory' | 'knowledge' | 'strategyLab' | 'batch' | 'dailyBrief' | 'tradeScoring' | 'retrospect' | 'conviction' | 'newsResearch' | 'earningsCalendar' | 'briefReplay' | 'tradingDesk' | 'executionSettings';
 
 type NavEntry = {
   id: number;
@@ -693,6 +695,8 @@ export function App() {
       case 'newsResearch': return <NewsResearchView />;
       case 'earningsCalendar': return <EarningsCalendarView />;
       case 'briefReplay': return <BriefReplayView />;
+      case 'tradingDesk': return <TradingDeskView />;
+      case 'executionSettings': return <ExecutionSettingsView />;
       case 'settings': return (
         <SettingsView
           etradeWarning={etradeWarning}
@@ -945,6 +949,21 @@ export function App() {
             onClick={() => navigateSidebar('agent')}
           >
             🤖 Agent
+          </button>
+
+          {/* ── Execution ── */}
+          <div className="nav-section-label">Execution</div>
+          <button
+            className={`nav-btn ${currentView === 'tradingDesk' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('tradingDesk')}
+          >
+            🤝 Trading Desk
+          </button>
+          <button
+            className={`nav-btn ${currentView === 'executionSettings' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('executionSettings')}
+          >
+            🎚️ Execution Settings
           </button>
 
           {/* ── Screeners ── */}

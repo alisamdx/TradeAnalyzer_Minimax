@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.10] — 2026-06-14
+
+### Added
+- **v2 execution subsystem — Phase 5c/d (control panel UI), completing Phase 5.** New **🤝 Execution** sidebar section with two Electron views, both driving the (mock-backed) engine through `window.api.execution.*`. **Trading Desk** (`src/renderer/src/views/TradingDeskView.tsx`): master header with PAPER/LIVE badge + engine-state pill; Engine panel (Start/Pause/Stop — master Stop = hard stop — + broker/health/last-cycle); Kill Switch panel (status + Trip/Clear); Capital panel (deployed-vs-ceiling gauge, day P&L, trip threshold); proposals queue with Approve/Reject (**paper = 1-click, live = type-to-confirm**); open-positions table; activity log off the audit trail. Live-updates via `execution:event` + a 15 s poll fallback. **Execution Settings** (`src/renderer/src/views/ExecutionSettingsView.tsx`): an editor over the `exec_config` row (`getConfig`/`updateConfig`) grouped into Mode / Risk limits / Entry policy / Exit policy, with dirty-tracking, Save/Revert, and a confirmation gate on switching to live mode. `src/renderer/src/App.tsx` adds the section, `View` union entries, and `renderEntry` cases. No new automated tests (renderer views; underlying engine/IPC already covered — full suite green, 441). No auto-generated entries yet (brief→`PickInput` lands with Phase 6); the desk otherwise reflects live engine state. The product is now demonstrable end-to-end without IBKR.
+
 ## [1.1.9] — 2026-06-14
 
 ### Added
