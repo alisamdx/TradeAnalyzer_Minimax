@@ -41,7 +41,7 @@ phase lands.
 - Unit tests against the mock.
 - **Deliverable:** the seam everything else builds on.
 
-## Phase 2 — Risk governor *(no broker — the safety core)*
+## Phase 2 — Risk governor *(no broker — the safety core)* — ✅ DONE (v1.1.2)
 
 - Pre-trade gate (10 checks, §2.5), position sizing (§2.4), capital accounting, kill switch
   (§2.6), engine state machine (§2.7), COID idempotency + order state machine (§2.8).

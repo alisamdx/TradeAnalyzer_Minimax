@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.2] — 2026-06-14
+
+### Added
+- **v2 execution subsystem — Phase 2 (risk governor, the safety core).** Added the fail-closed risk layer that no order may bypass, split into a pure decision layer and a stateful service. `src/main/execution/risk-gate.ts` (pure, no I/O): `sizePosition()` (contracts = floor(per-trade-risk / max-loss), capped by remaining deployable capital) and `evaluateGate()` — the ordered 10-check pre-trade gate (engine running · broker connected · defined-risk & eligible strategy · per-trade risk · max concurrent · per-ticker · per-strategy · capital ceiling · buying power · daily-loss headroom), first failure supplies the reject reason. `src/main/execution/risk-governor.ts` (`RiskGovernor`, DB-backed): the single source of risk truth — reads/writes `exec_config` + `exec_risk_state`, the engine state machine (`start`/`stop`/`pause`/`tripKillSwitch`/`clearKillSwitch` with validated transitions — can't start while kill-tripped, manual clear only), day-P&L accounting that auto-trips the kill switch at the configured % loss (realized + unrealized, resets at session anchor), deployed-capital recompute, COID minting, and the append-only audit log; every state change commits atomically with its audit entry. `checkEntry()` assembles a context from the DB + broker and runs the pure gate. Tests: `tests/risk-gate.test.ts` (17) + `tests/risk-governor.test.ts` (18). Still dormant — wired to nothing yet.
+
 ## [1.1.1] — 2026-06-14
 
 ### Added
