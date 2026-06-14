@@ -51,6 +51,8 @@ type NavEntry = {
   payoffStrike?: number | null;
   payoffLegs?: PayoffLeg[] | null;
   strategyLabTicker?: string | null;
+  backtestTicker?: string | null;
+  backtestStrategy?: string | null;
 };
 
 export function App() {
@@ -258,6 +260,15 @@ export function App() {
     };
     window.addEventListener('navigate-to-strategyLab', handleNavigateToStrategyLab as EventListener);
 
+    // Listen for "Backtest this" from Brief / My Stocks — opens Backtest pre-filled
+    const handleNavigateToBacktest = (e: CustomEvent<{ ticker: string; strategy?: string }>) => {
+      setNavStack(prev => [...prev, {
+        id: navIdRef.current++, view: 'backtest',
+        backtestTicker: e.detail.ticker, backtestStrategy: e.detail.strategy ?? null,
+      }]);
+    };
+    window.addEventListener('navigate-to-backtest', handleNavigateToBacktest as EventListener);
+
     // Listen for E*Trade auth errors from any view → redirect to Settings
     const handleEtradeAuthError = (e: CustomEvent<{ warning: string }>) => {
       setEtradeWarning(e.detail.warning);
@@ -287,6 +298,7 @@ export function App() {
       window.removeEventListener('navigate-to-options', handleNavigateToOptions as EventListener);
       window.removeEventListener('navigate-to-payoff', handleNavigateToPayoff as EventListener);
       window.removeEventListener('navigate-to-strategyLab', handleNavigateToStrategyLab as EventListener);
+    window.removeEventListener('navigate-to-backtest', handleNavigateToBacktest as EventListener);
       window.removeEventListener('navigate-to-settings-etrade', handleEtradeAuthError as EventListener);
       window.removeEventListener('watchlist-created', handleWatchlistCreated as EventListener);
       window.removeEventListener('show-prompt-dialog', handleShowPrompt as EventListener);
@@ -655,7 +667,12 @@ export function App() {
         />
       );
       case 'agent': return <AgentView />;
-      case 'backtest': return <BacktestView />;
+      case 'backtest': return (
+        <BacktestView
+          initialTicker={entry.backtestTicker ?? null}
+          initialStrategy={(entry.backtestStrategy as 'CSP' | 'CC' | 'Wheel' | null) ?? null}
+        />
+      );
       case 'testApi': return <TestApiView />;
       case 'ivHistory': return <IvHistoryView />;
       case 'knowledge': return <KnowledgeView />;

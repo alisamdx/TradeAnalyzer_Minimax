@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.33.7] — 2026-06-13
+
+### Added
+- **Backtest deep-link from recommendations (integration phase 1 of 2)** — a "🔁 Backtest" action now appears on **My Stocks** rows (every stock → pre-fills a CSP) and on **Daily Brief** wheel/income pick cards (wheel → Wheel, income → CSP), opening the Backtest view pre-filled with the ticker + strategy. No more manual one-stock data entry to test a recommendation. (Backtest only appears where its engine applies — premium-selling strategies; buy/bullish/bearish/inflection brief picks don't show it.) New `navigate-to-backtest` event; `BacktestView` accepts `initialTicker`/`initialStrategy`. Phase 2 (aggregate "backtest all my picks" with one equity curve) is next.
+
 ## [0.33.6] — 2026-06-13
 
 ### Fixed

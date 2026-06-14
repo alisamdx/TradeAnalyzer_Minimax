@@ -356,7 +356,16 @@ function TopSignals({ signals }: { signals: BriefPick['signals'] }) {
 
 // Quick-navigation row — Payoff, Validate, Options, Analysis, E*Trade buttons
 // pre-populated from strategyLabResult.
-function PickNavRow({ pick }: { pick: BriefPick }) {
+function PickNavRow({ pick, strategy }: { pick: BriefPick; strategy: ScoringStrategy }) {
+  // Backtest only applies to premium-selling strategies the engine supports.
+  const backtestStrategy: 'CSP' | 'Wheel' | null =
+    strategy === 'wheel' ? 'Wheel' : strategy === 'income' ? 'CSP' : null;
+  const handleBacktest = () => {
+    window.dispatchEvent(new CustomEvent('navigate-to-backtest', {
+      detail: { ticker: pick.ticker, strategy: backtestStrategy },
+    }));
+  };
+
   const result = pick.strategyLabResult ? (pick.strategyLabResult as StrategyLabValidateResult) : null;
   const best   = result?.scores?.[0] ?? null;
   const setup  = best?.setup ?? null;
@@ -423,6 +432,12 @@ function PickNavRow({ pick }: { pick: BriefPick }) {
         title="Open on E*Trade">
         🏦 E*Trade
       </button>
+      {backtestStrategy && (
+        <button className="pick-nav-btn" onClick={handleBacktest}
+          title={`Backtest a ${backtestStrategy} on this ticker`}>
+          🔁 Backtest
+        </button>
+      )}
     </div>
   );
 }
@@ -493,7 +508,7 @@ function PickCard({
           </div>
           <TopSignals signals={pick.signals} />
           <StrategyLabSummary strategyLabResult={pick.strategyLabResult ?? null} strategy={strategy} />
-          <PickNavRow pick={pick} />
+          <PickNavRow pick={pick} strategy={strategy} />
           {pick.aiRationale
             ? <p className="pick-rationale">{pick.aiRationale}</p>
             : <p className="pick-rationale muted">AI reasoning unavailable</p>

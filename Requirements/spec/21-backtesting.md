@@ -25,3 +25,5 @@ IPC: `run.list(configId?)`, `run.get(runId)`, `run.start(configId)`, `run.cancel
 ## 21.4 UI
 
 Pick/create a config → run → view the equity curve, the metrics summary, and the trade-by-trade table. Past runs are listed and re-openable.
+
+**Deep-link from recommendations** (v0.33.7): a 🔁 Backtest action on My Stocks rows and Daily Brief wheel/income pick cards fires `navigate-to-backtest` with `{ ticker, strategy }` (My Stocks → CSP; brief wheel → Wheel, income → CSP). `BacktestView` accepts `initialTicker`/`initialStrategy` and opens the New form pre-filled, so a recommendation can be backtested without manual entry. Only premium-selling strategies the engine supports surface the action.

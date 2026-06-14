@@ -313,7 +313,10 @@ function ConfigForm({
 
 // ─── Main BacktestView ────────────────────────────────────────────────────────
 
-export function BacktestView() {
+export function BacktestView({ initialTicker = null, initialStrategy = null }: {
+  initialTicker?: string | null;
+  initialStrategy?: BacktestStrategy | null;
+} = {}) {
   const [runs, setRuns] = useState<BacktestRun[]>([]);
   const [panel, setPanel] = useState<Panel>('new');
   const [selectedRunId, setSelectedRunId] = useState<number | null>(null);
@@ -334,6 +337,11 @@ export function BacktestView() {
   }, []);
 
   useEffect(() => { loadRuns(); }, [loadRuns]);
+
+  // Deep-link from Brief / My Stocks: open the New form pre-filled for this ticker.
+  useEffect(() => {
+    if (initialTicker) { setPanel('new'); setSelectedRunId(null); }
+  }, [initialTicker, initialStrategy]);
 
   // Subscribe to progress events
   useEffect(() => {
@@ -452,7 +460,11 @@ export function BacktestView() {
         )}
 
         {panel === 'new' && !running && (
-          <ConfigForm onSubmit={handleRunSubmit} />
+          <ConfigForm
+            key={initialTicker ?? 'manual'}
+            initial={initialTicker ? { ticker: initialTicker, strategy: initialStrategy ?? 'CSP' } : undefined}
+            onSubmit={handleRunSubmit}
+          />
         )}
 
         {panel === 'run' && selectedRun && (

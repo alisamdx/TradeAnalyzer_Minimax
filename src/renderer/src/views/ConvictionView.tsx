@@ -643,6 +643,7 @@ export function ConvictionView() {
                           <button className="cv-btn" onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-strategyLab', { detail: { ticker: stock.ticker } }))} title="Strategy Lab">🔬</button>
                           <button className="cv-btn" onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-payoff',      { detail: { ticker: stock.ticker, spot: stock.currentPrice } }))} title="Payoff">📐</button>
                           <button className="cv-btn" onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-options',     { detail: { ticker: stock.ticker } }))} title="Options">📉</button>
+                          <button className="cv-btn" onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-backtest',   { detail: { ticker: stock.ticker, strategy: 'CSP' } }))} title="Backtest a CSP / wheel on this">🔁</button>
                           <button className="cv-btn" onClick={() => setEditStock(stock)} title="Edit">✎</button>
                           <button className="cv-btn" onClick={() => setHistoryTicker(stock.ticker)} title="Band history">🕓</button>
                           <button className="cv-btn danger" onClick={() => handleRemove(stock.ticker)} title="Remove">✕</button>
