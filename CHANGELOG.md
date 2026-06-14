@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.34.2] — 2026-06-13
+
+### Added
+- **Backtest trade log shows exit price** — the trade table now has an **Exit Px** column (the option's settlement/buyback price per share at close: the closing mid on a profit/stop exit, intrinsic on assignment, 0 on a worthless expiry). The entry premium column is relabeled **Entry Px** for symmetry. (No data change — `exitPremium` was already captured per trade.)
+
 ## [0.34.1] — 2026-06-13
 
 ### Added
