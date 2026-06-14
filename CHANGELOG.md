@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.33.6] — 2026-06-13
+
+### Fixed
+- **My Stocks email: header/data column alignment** — the email table's header cells were all left-aligned while the numeric data cells were right-aligned, so headers didn't line up over their columns. Header and data alignment are now driven by a single per-column definition (numeric columns right, text columns left, flag centered).
+
 ## [0.33.5] — 2026-06-13
 
 ### Added

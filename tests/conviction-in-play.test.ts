@@ -48,6 +48,9 @@ describe('conviction email report', () => {
     expect(subject).toContain('1 in play');
     // In-play ZZZ should appear before AAA despite alphabetical order
     expect(html.indexOf('ZZZ')).toBeLessThan(html.indexOf('AAA'));
+    // Numeric column headers are right-aligned to match their data cells
+    expect(html).toMatch(/text-align:right[^>]*>Current<\/th>/);
+    expect(html).toMatch(/text-align:left[^>]*>Ticker<\/th>/);
   });
 
   it('subject omits the in-play count when none are flagged', () => {

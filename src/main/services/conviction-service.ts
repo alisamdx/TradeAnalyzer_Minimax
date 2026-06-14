@@ -609,34 +609,47 @@ RATIONALE: 1 direct sentence, max 100 chars, no hedging.`;
     const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
     const inPlayCount = stocks.filter(s => s.inPlay).length;
 
-    const headers = ['', 'Ticker', 'Zone', 'Current', 'Low', 'Mid', 'Never Above', 'IV', 'IVR', 'Note'];
-    const th = headers.map(h =>
-      `<th style="text-align:left;padding:6px 10px;border-bottom:2px solid #ccc;font-size:12px;color:#333;white-space:nowrap">${h}</th>`
+    // Column definitions — alignment is shared by header and data cells so they line up.
+    type Align = 'left' | 'right' | 'center';
+    const cols: { label: string; align: Align }[] = [
+      { label: '🚩',          align: 'center' },
+      { label: 'Ticker',      align: 'left' },
+      { label: 'Zone',        align: 'left' },
+      { label: 'Current',     align: 'right' },
+      { label: 'Low',         align: 'right' },
+      { label: 'Mid',         align: 'right' },
+      { label: 'Never Above', align: 'right' },
+      { label: 'IV',          align: 'right' },
+      { label: 'IVR',         align: 'right' },
+      { label: 'Note',        align: 'left' },
+    ];
+    const th = cols.map(c =>
+      `<th style="text-align:${c.align};padding:6px 10px;border-bottom:2px solid #ccc;font-size:12px;color:#333;white-space:nowrap">${c.label}</th>`
     ).join('');
 
     const rows = sorted.map(s => {
-      const flag = s.inPlay ? '🚩' : '';
       const zoneColor = s.zone === 'buy' ? '#1a7a3a' : s.zone === 'mid' ? '#9a7d0a' : s.zone === 'high' ? '#b3261e' : '#555';
       const bg = s.inPlay ? 'background:#fff8e1;' : '';
-      const cell = (v: string, extra = '') => `<td style="padding:6px 10px;border-bottom:1px solid #eee;${extra}">${v}</td>`;
+      const td = (v: string, align: Align, extra = '') =>
+        `<td style="text-align:${align};padding:6px 10px;border-bottom:1px solid #eee;${extra}">${v}</td>`;
       return `<tr style="${bg}">
-        ${cell(flag, 'text-align:center;font-size:14px')}
-        ${cell(`<strong>${esc(s.ticker)}</strong>`)}
-        ${cell(zoneLabel[s.zone], `color:${zoneColor};font-weight:600;white-space:nowrap`)}
-        ${cell(dollar(s.currentPrice), 'text-align:right;font-weight:600')}
-        ${cell(dollar(s.priceLow), 'text-align:right;color:#1a7a3a')}
-        ${cell(dollar(s.priceMid), 'text-align:right;color:#9a7d0a')}
-        ${cell(dollar(s.priceHigh), 'text-align:right;color:#b3261e')}
-        ${cell(pct(s.iv), 'text-align:right;color:#555')}
-        ${cell(s.ivRank !== null ? String(Math.round(s.ivRank)) : '—', 'text-align:right;color:#555')}
-        ${cell(s.note ? esc(s.note) : '—', 'color:#555;max-width:280px')}
+        ${td(s.inPlay ? '🚩' : '', 'center', 'font-size:14px')}
+        ${td(`<strong>${esc(s.ticker)}</strong>`, 'left')}
+        ${td(zoneLabel[s.zone], 'left', `color:${zoneColor};font-weight:600;white-space:nowrap`)}
+        ${td(dollar(s.currentPrice), 'right', 'font-weight:600')}
+        ${td(dollar(s.priceLow), 'right', 'color:#1a7a3a')}
+        ${td(dollar(s.priceMid), 'right', 'color:#9a7d0a')}
+        ${td(dollar(s.priceHigh), 'right', 'color:#b3261e')}
+        ${td(pct(s.iv), 'right', 'color:#555')}
+        ${td(s.ivRank !== null ? String(Math.round(s.ivRank)) : '—', 'right', 'color:#555')}
+        ${td(s.note ? esc(s.note) : '—', 'left', 'color:#555;max-width:280px')}
       </tr>`;
     }).join('');
 
     const html = `<div style="font-family:Arial,Helvetica,sans-serif;color:#222">
       <h2 style="margin:0 0 4px">⭐ My Stocks — Conviction List</h2>
       <div style="color:#666;font-size:13px;margin-bottom:14px">${today} · ${stocks.length} stock${stocks.length !== 1 ? 's' : ''}${inPlayCount > 0 ? ` · 🚩 ${inPlayCount} in play` : ''}</div>
-      <table style="border-collapse:collapse;font-size:13px;width:100%"><thead><tr>${th}</tr></thead><tbody>${rows || `<tr><td colspan="${headers.length}" style="padding:16px;color:#888">No stocks in your list.</td></tr>`}</tbody></table>
+      <table style="border-collapse:collapse;font-size:13px;width:100%"><thead><tr>${th}</tr></thead><tbody>${rows || `<tr><td colspan="${cols.length}" style="padding:16px;color:#888">No stocks in your list.</td></tr>`}</tbody></table>
       <div style="color:#999;font-size:11px;margin-top:14px">🚩 = in play (flagged for attention). Zones: Buy ≤ Low, Mid ≤ Mid, Too High ≥ Never-Above.</div>
     </div>`;
 
