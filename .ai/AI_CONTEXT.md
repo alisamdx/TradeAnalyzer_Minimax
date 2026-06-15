@@ -2,7 +2,7 @@
 
 > **Read this first.** Self-contained snapshot of *what the app is today* so a fresh AI session is productive without re-reading the whole codebase. This file describes **current state** — not history. Release history lives in `CHANGELOG.md` / `changelogs/`. Operating rules live in `/CLAUDE.md`. Full spec lives in `Requirements/`.
 >
-> Last verified against code: 2026-06-14 (v1.1.12). When you make a material change, update the relevant section here in the same commit.
+> Last verified against code: 2026-06-14 (v1.1.13). When you make a material change, update the relevant section here in the same commit.
 
 ---
 
@@ -125,8 +125,8 @@ Routing is a `currentView` string in `App.tsx`; cross-view navigation fires Cust
 | **Screeners** | 🔍 Screener · 🎯 Opportunity · 🎛️ Filters |
 | **Analysis** | 📐 Payoff (`PayoffView`) · 🎯 Validate · 📉 Options (`OptionsChainView`) |
 | **Strategy** | 📚 Knowledge · 📊 Analysis · 🔬 Strategy Lab (`StrategyLabShellView` — tabs: Strategy Lab / ⚡ LEAPS / 🛡️ Collared LEAPS) |
-| **Misc** | 🗂️ Misc (`MiscView` — landing screen; cards push onto the nav stack) → 🔁 Backtest · 🔬 Test API · 🗄️ Data Sync (`DataView`) · 🗓️ History (`IvHistoryView`) |
-| **Personal** | ⭐ My Stocks (`ConvictionView`, with buy-zone count badge) · 💼 Portfolio · 📋 Watchlists · 🔔 Alerts |
+| **Misc** | 🗂️ Misc (`MiscView` — landing screen; cards push onto the nav stack) → 🔔 Alerts · 🔁 Backtest · 🔬 Test API · 🗄️ Data Sync (`DataView`) · 🗓️ History (`IvHistoryView`) |
+| **Personal** | ⭐ My Stocks (`ConvictionView`, with buy-zone count badge) · 💼 Portfolio · 📋 Watchlists |
 
 ---
 

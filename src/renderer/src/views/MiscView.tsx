@@ -1,9 +1,10 @@
 // Landing screen for the less-used "Misc" tools, to keep the sidebar uncluttered.
 // Each card pushes the target view onto the nav stack (so the user gets a ← Back).
 
-export type MiscTarget = 'backtest' | 'testApi' | 'data' | 'ivHistory';
+export type MiscTarget = 'backtest' | 'testApi' | 'data' | 'ivHistory' | 'alerts';
 
 const TOOLS: { view: MiscTarget; icon: string; title: string; desc: string }[] = [
+  { view: 'alerts',    icon: '🔔', title: 'Alerts',    desc: 'Price, expiration, and delta alerts.' },
   { view: 'backtest',  icon: '🔁', title: 'Backtest',  desc: 'Simulate CSP / CC / Wheel strategies on historical data.' },
   { view: 'testApi',   icon: '🔬', title: 'Test API',  desc: 'Inspect raw provider responses (diagnostics).' },
   { view: 'data',      icon: '🗄️', title: 'Data Sync', desc: 'Manual universe and price refreshes.' },

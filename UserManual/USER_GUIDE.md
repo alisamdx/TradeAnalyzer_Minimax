@@ -5,7 +5,7 @@ Do not hand-edit the PDF. This .md is the source of truth and lives in the doc-m
 
 # TradeAnalyzer — User Guide
 
-*A practical operator's guide. Version-tracked alongside the app. Last updated for v1.1.12.*
+*A practical operator's guide. Version-tracked alongside the app. Last updated for v1.1.13.*
 
 ---
 
@@ -138,6 +138,7 @@ Not sure which structure fits? Open **🔬 Strategy Lab**, enter a ticker, and t
 - **🛡️ Collared LEAPS** — deep-ITM LEAPS + protective put screener.
 
 **Misc** — a single **🗂️ Misc** entry opens a landing screen with these occasional tools:
+- **🔔 Alerts** — price/expiration/delta alerts.
 - **🔁 Backtest** — simulate CSP/CC/Wheel strategies on history.
 - **🔬 Test API** — inspect raw provider responses (diagnostics).
 - **🗄️ Data Sync** — manual universe/price refreshes.
@@ -146,7 +147,6 @@ Not sure which structure fits? Open **🔬 Strategy Lab**, enter a ticker, and t
 **Personal**
 - **⭐ My Stocks** — conviction list with price bands.
 - **💼 Portfolio** — positions, P&L, Greeks, advisor.
-- **🔔 Alerts** — price/expiration/delta alerts.
 
 ---
 

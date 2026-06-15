@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.13] — 2026-06-14
+
+### Changed
+- **Moved 🔔 Alerts into the 🗂️ Misc landing screen.** Alerts was a standalone button under the Personal section; it's now a card on the Misc screen alongside Backtest / Test API / Data Sync / History, further trimming the sidebar. The 🗂️ Misc button highlights while Alerts (or any other Misc tool) is open. AlertsView and its IPC are unchanged.
+
 ## [1.1.12] — 2026-06-14
 
 ### Changed

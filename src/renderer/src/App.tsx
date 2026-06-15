@@ -1059,17 +1059,11 @@ export function App() {
           >
             📋 Watchlists
           </button>
-          <button
-            className={`nav-btn ${currentView === 'alerts' ? 'active' : ''}`}
-            onClick={() => navigateSidebar('alerts')}
-          >
-            🔔 Alerts
-          </button>
 
           {/* ── Misc ── */}
           <div className="nav-section-label">Misc</div>
           <button
-            className={`nav-btn ${['misc', 'backtest', 'testApi', 'data', 'ivHistory'].includes(currentView) ? 'active' : ''}`}
+            className={`nav-btn ${['misc', 'alerts', 'backtest', 'testApi', 'data', 'ivHistory'].includes(currentView) ? 'active' : ''}`}
             onClick={() => navigateSidebar('misc')}
           >
             🗂️ Misc
