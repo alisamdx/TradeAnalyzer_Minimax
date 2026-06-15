@@ -196,6 +196,14 @@ export function TradingDeskView() {
             {tripThreshold !== null && (
               <div style={{ color: 'var(--text-muted)' }}>trip at {fmtMoney(tripThreshold)} ({config?.dailyLossTripPct}%)</div>
             )}
+            {state && (
+              <div style={{ color: (state.drawdownPct ?? 0) > 0 ? 'var(--warning)' : 'var(--text-muted)' }}>
+                drawdown {(state.drawdownPct ?? 0).toFixed(1)}% · HWM {fmtMoney(risk?.equityHighWater)}
+                {config && config.drawdownThrottlePct > 0 && (state.drawdownPct ?? 0) >= config.drawdownThrottlePct
+                  ? ` · throttled ×${config.drawdownThrottleFactor}`
+                  : ''}
+              </div>
+            )}
           </div>
         </Panel>
       </div>

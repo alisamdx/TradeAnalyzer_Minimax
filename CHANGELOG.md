@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.14] — 2026-06-14
+
+### Added
+- **v2 execution — FR-SEY-2: drawdown-scaled risk (Seykota "equity-curve money management").** The risk governor now tracks a **closed-equity high-water mark** and, when drawdown from it reaches `drawdownThrottlePct`, multiplies the effective per-trade risk by `drawdownThrottleFactor` (e.g. 0.5 = half size) until the curve recovers — a graduated step between "normal" and the binary daily kill switch. **Default OFF** (`drawdownThrottlePct = 0`), so behaviour is unchanged until the operator opts in (Execution Settings → Risk limits). Migration **049** adds `exec_config.drawdown_throttle_pct`/`_factor` and `exec_risk_state.equity_high_water` (seeded to the ceiling, ratchets up only). Pure helper `drawdownThrottleFactor()` in `risk-gate.ts`; the gate's `per_trade_risk` check uses a new optional `effectiveMaxRiskPct`; `risk-governor` computes drawdown (closed-equity, to avoid unrealized-swing thrash), applies the throttle in `sizeEntry` + `checkEntry`, and exposes `drawdownPct` on the engine state view. The Trading Desk shows drawdown + HWM + throttle status. Tests: `risk-gate.test.ts` (+5) and `risk-governor.test.ts` (+4); full suite 450 green. Per FR-SEY-5 it ships **disabled by default** (a conservative size-reducer, not an edge claim — enabling is the operator's risk choice).
+
 ## [1.1.13] — 2026-06-14
 
 ### Changed

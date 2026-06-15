@@ -88,6 +88,8 @@ export function ExecutionSettingsView() {
         <Num label="Daily-loss trip (%)" v={draft.dailyLossTripPct} on={v => set('dailyLossTripPct', v)} step={0.5} />
         <Num label="Max positions per ticker" v={draft.maxPositionsPerTicker} on={v => set('maxPositionsPerTicker', v)} step={1} />
         <NumNullable label="Max positions per strategy" v={draft.maxPositionsPerStrategy} on={v => set('maxPositionsPerStrategy', v)} help="Blank = off" />
+        <Num label="Drawdown throttle at (%)" v={draft.drawdownThrottlePct} on={v => set('drawdownThrottlePct', v)} step={1} help="0 = off (FR-SEY-2)" />
+        <Num label="Throttle size factor" v={draft.drawdownThrottleFactor} on={v => set('drawdownThrottleFactor', v)} step={0.05} help="× per-trade size while throttled" />
       </Section>
 
       <Section title="Entry policy">

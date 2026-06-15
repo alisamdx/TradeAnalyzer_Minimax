@@ -38,6 +38,22 @@ export function sizePosition(maxLossPerContract: number, limits: SizingLimits): 
   return { contracts, reason: null };
 }
 
+// ── Drawdown-scaled risk (FR-SEY-2, 06-seykota-risk-extensions) ───────────────
+
+/**
+ * Size multiplier to apply to the per-trade risk budget given the current closed-equity
+ * drawdown. Returns 1 (no throttle) when the feature is off (`drawdownThrottlePct <= 0`) or
+ * the drawdown is below the threshold; otherwise the configured factor, clamped to [0, 1]
+ * (0 = no new entries during deep drawdown; ≥1 = effectively no throttle). Pure.
+ */
+export function drawdownThrottleFactor(drawdownPct: number, config: ExecConfig): number {
+  if (!(config.drawdownThrottlePct > 0)) return 1;
+  if (drawdownPct < config.drawdownThrottlePct) return 1;
+  const f = config.drawdownThrottleFactor;
+  if (!(f > 0)) return 0;
+  return f < 1 ? f : 1;
+}
+
 // ── Pre-trade gate (§2.5) ─────────────────────────────────────────────────────
 
 export interface GateContext {
@@ -45,10 +61,12 @@ export interface GateContext {
   engineState: EngineState;
   killSwitchTripped: boolean;
   dayLossPct: number; // current day loss as a positive % of ceiling (0 if flat/up)
-  openPositions: Array<{ ticker: string; strategy: string; maxLoss: number }>;
+  openPositions: Array<{ ticker: string; strategy: string; maxLoss: number; sector?: string | null }>;
   capitalDeployed: number;
   buyingPowerAvailable: number;
   brokerConnected: boolean;
+  /** Drawdown-throttled per-trade risk % (FR-SEY-2). Defaults to config.maxRiskPerTradePct. */
+  effectiveMaxRiskPct?: number;
 }
 
 export interface GateCandidate {
@@ -74,7 +92,8 @@ interface Check {
 export function evaluateGate(ctx: GateContext, cand: GateCandidate): ExecGateResult {
   const { config } = ctx;
   const totalMaxLoss = cand.contracts * cand.maxLossPerContract;
-  const perTradeLimit = (config.maxRiskPerTradePct / 100) * config.capitalCeiling;
+  const effectiveRiskPct = ctx.effectiveMaxRiskPct ?? config.maxRiskPerTradePct;
+  const perTradeLimit = (effectiveRiskPct / 100) * config.capitalCeiling;
   const tickerCount = ctx.openPositions.filter((p) => p.ticker === cand.ticker).length;
   const strategyCount = ctx.openPositions.filter((p) => p.strategy === cand.strategy).length;
 

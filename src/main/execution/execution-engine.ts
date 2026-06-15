@@ -26,6 +26,7 @@ export interface EngineStateView {
   engineState: ReturnType<RiskGovernor['getEngineState']>;
   killSwitch: { tripped: boolean; reason: string | null };
   executionMode: ExecConfig['executionMode'];
+  drawdownPct: number;
   health: CoreHealth;
 }
 
@@ -107,6 +108,7 @@ export class ExecutionEngine {
       engineState: rs.engineState,
       killSwitch: { tripped: rs.killSwitchTripped, reason: rs.killSwitchReason },
       executionMode: this.governor.getConfig().executionMode,
+      drawdownPct: this.governor.getDrawdownPct(),
       health: this.core.getHealth(),
     };
   }

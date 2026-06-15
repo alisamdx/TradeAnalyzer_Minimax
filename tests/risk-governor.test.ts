@@ -199,3 +199,47 @@ describe('RiskGovernor — COID + audit', () => {
     expect(events).toContain('gate_pass');
   });
 });
+
+function insertClosed(db: DbHandle, ticker: string, pnl: number): void {
+  db.prepare(
+    `INSERT INTO exec_positions (ticker, strategy, structure, legs_json, contracts, max_loss, opened_at, status, current_pnl)
+     VALUES (?, 'inflection', 'short-put-vertical', '[]', 1, 100, '2026-06-14', 'closed', ?)`
+  ).run(ticker, pnl);
+}
+
+describe('RiskGovernor — drawdown-scaled risk (FR-SEY-2)', () => {
+  it('ratchets the equity high-water mark up on a winning close (drawdown 0 at a new peak)', () => {
+    const { db, gov } = setup();
+    expect(gov.getDrawdownPct()).toBe(0);
+    insertClosed(db, 'W', 500);
+    expect(gov.getDrawdownPct()).toBe(0);
+    expect(gov.getRiskState().equityHighWater).toBe(10500);
+  });
+
+  it('reports a positive drawdown below the high-water mark', () => {
+    const { db, gov } = setup();
+    insertClosed(db, 'W', 500); // hwm → 10500
+    gov.getDrawdownPct();
+    insertClosed(db, 'L', -1500); // closed total -1000 → equity 9000
+    expect(gov.getDrawdownPct()).toBeCloseTo(((10500 - 9000) / 10500) * 100, 5);
+  });
+
+  it('throttles sizing only when enabled and past the threshold', () => {
+    const { db, gov } = setup();
+    insertClosed(db, 'L', -1500); // equity 8500 → 15% drawdown (hwm 10000)
+    expect(gov.sizeEntry(100).contracts).toBe(5); // throttle off by default → $500/100
+    gov.updateConfig({ drawdownThrottlePct: 10, drawdownThrottleFactor: 0.5 });
+    expect(gov.sizeEntry(100).contracts).toBe(2); // throttled $250/100
+  });
+
+  it('applies the throttle to the pre-trade gate', async () => {
+    const { db, gov } = setup();
+    const broker = new MockExecutionBroker();
+    await broker.connect();
+    gov.start();
+    insertClosed(db, 'L', -1500); // 15% drawdown
+    gov.updateConfig({ drawdownThrottlePct: 10, drawdownThrottleFactor: 0.5 });
+    const r = await gov.checkEntry(CAND, broker); // CAND maxLoss 350 > throttled $250 budget
+    expect(r.rejectReason).toBe('per_trade_risk');
+  });
+});

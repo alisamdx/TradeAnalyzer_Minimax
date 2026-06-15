@@ -50,7 +50,7 @@ not shipped (it may ship **disabled**, as a configurable option, with the findin
 
 ---
 
-## FR-SEY-2 — Drawdown-scaled risk (equity-curve money management) — 📋
+## FR-SEY-2 — Drawdown-scaled risk (equity-curve money management) — ✅ (v1.1.14, default OFF)
 
 **Principle:** Reduce exposure during drawdowns; the equity curve is itself a signal. Today
 the only step between "normal" and "halt" is the binary 10% daily kill switch — nothing

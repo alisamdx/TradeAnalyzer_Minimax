@@ -2167,6 +2167,9 @@ export interface ExecConfig {
   maxPositionsPerStrategy: number | null;  // null = off
   eligibleStrategies: string[];            // launch: ['inflection']
   proposalShelfLifeMin: number;
+  // drawdown-scaled risk (FR-SEY-2)
+  drawdownThrottlePct: number;             // 0 = off; throttle per-trade size at/above this DD%
+  drawdownThrottleFactor: number;          // size multiplier applied when throttled (e.g. 0.5)
   // entry policy (§3.6)
   minCompositeScore: number;
   maxNewEntriesPerDay: number;
@@ -2195,6 +2198,7 @@ export interface ExecRiskState {
   dayRealizedPnl: number;
   dayUnrealizedPnl: number;
   dayAnchorDate: string | null;
+  equityHighWater: number;                 // closed-equity peak (ratchets up) — FR-SEY-2
   updatedAt: string;
 }
 
@@ -2307,6 +2311,7 @@ export interface ExecEngineStateView {
   engineState: EngineState;
   killSwitch: { tripped: boolean; reason: string | null };
   executionMode: ExecutionMode;
+  drawdownPct: number;                      // closed-equity drawdown from HWM (FR-SEY-2)
   health: ExecEngineHealth;
 }
 

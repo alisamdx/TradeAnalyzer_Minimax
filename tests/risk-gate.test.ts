@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sizePosition, evaluateGate, type GateContext, type GateCandidate } from '../src/main/execution/risk-gate.js';
+import { sizePosition, evaluateGate, drawdownThrottleFactor, type GateContext, type GateCandidate } from '../src/main/execution/risk-gate.js';
 import type { ExecConfig } from '../src/shared/types.js';
 
 // Phase 2: the pure risk-gate logic (no I/O). Exhaustive — every check, every fail path.
@@ -14,6 +14,8 @@ const CONFIG: ExecConfig = {
   maxPositionsPerStrategy: null,
   eligibleStrategies: ['inflection'],
   proposalShelfLifeMin: 120,
+  drawdownThrottlePct: 0,
+  drawdownThrottleFactor: 0.5,
   minCompositeScore: 70,
   maxNewEntriesPerDay: 1,
   maxNewEntriesPerWeek: 3,
@@ -135,5 +137,31 @@ describe('evaluateGate (§2.5)', () => {
       ],
     });
     expect(evaluateGate(ctx, passingCand()).rejectReason).toBe('per_strategy');
+  });
+
+  it('uses the throttled effectiveMaxRiskPct for the per-trade limit (FR-SEY-2)', () => {
+    // $350 maxLoss passes at 5% ($500) but fails at a throttled 2.5% ($250).
+    expect(evaluateGate(passingCtx(), passingCand()).passed).toBe(true);
+    const ctx = passingCtx({ effectiveMaxRiskPct: 2.5 });
+    expect(evaluateGate(ctx, passingCand()).rejectReason).toBe('per_trade_risk');
+  });
+});
+
+describe('drawdownThrottleFactor (FR-SEY-2)', () => {
+  const cfg = (pct: number, factor: number): ExecConfig => ({ ...CONFIG, drawdownThrottlePct: pct, drawdownThrottleFactor: factor });
+
+  it('is 1 (no throttle) when disabled (pct = 0)', () => {
+    expect(drawdownThrottleFactor(50, cfg(0, 0.5))).toBe(1);
+  });
+  it('is 1 below the threshold', () => {
+    expect(drawdownThrottleFactor(9.9, cfg(10, 0.5))).toBe(1);
+  });
+  it('applies the factor at/above the threshold', () => {
+    expect(drawdownThrottleFactor(10, cfg(10, 0.5))).toBe(0.5);
+    expect(drawdownThrottleFactor(25, cfg(10, 0.5))).toBe(0.5);
+  });
+  it('clamps factor ≥ 1 to no-throttle and factor ≤ 0 to a full halt', () => {
+    expect(drawdownThrottleFactor(20, cfg(10, 1.5))).toBe(1);
+    expect(drawdownThrottleFactor(20, cfg(10, 0))).toBe(0);
   });
 });

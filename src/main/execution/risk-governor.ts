@@ -10,7 +10,7 @@ import type { DbHandle } from '../db/connection.js';
 import { withTransaction } from '../db/connection.js';
 import type { ExecConfig, ExecRiskState, EngineState } from '../../shared/types.js';
 import type { ExecutionBroker } from './execution-broker.js';
-import { evaluateGate, sizePosition, type GateCandidate, type GateContext, type SizingResult } from './risk-gate.js';
+import { drawdownThrottleFactor, evaluateGate, sizePosition, type GateCandidate, type GateContext, type SizingResult } from './risk-gate.js';
 
 interface ConfigRow {
   execution_mode: string;
@@ -22,6 +22,8 @@ interface ConfigRow {
   max_positions_per_strategy: number | null;
   eligible_strategies: string;
   proposal_shelf_life_min: number;
+  drawdown_throttle_pct: number;
+  drawdown_throttle_factor: number;
   min_composite_score: number;
   max_new_entries_per_day: number;
   max_new_entries_per_week: number;
@@ -47,6 +49,7 @@ interface RiskStateRow {
   day_realized_pnl: number;
   day_unrealized_pnl: number;
   day_anchor_date: string | null;
+  equity_high_water: number;
   updated_at: string;
 }
 
@@ -60,6 +63,8 @@ const CONFIG_COLUMN: Record<keyof ExecConfig, string> = {
   maxPositionsPerStrategy: 'max_positions_per_strategy',
   eligibleStrategies: 'eligible_strategies',
   proposalShelfLifeMin: 'proposal_shelf_life_min',
+  drawdownThrottlePct: 'drawdown_throttle_pct',
+  drawdownThrottleFactor: 'drawdown_throttle_factor',
   minCompositeScore: 'min_composite_score',
   maxNewEntriesPerDay: 'max_new_entries_per_day',
   maxNewEntriesPerWeek: 'max_new_entries_per_week',
@@ -103,6 +108,8 @@ export class RiskGovernor {
         .map((s) => s.trim())
         .filter((s) => s.length > 0),
       proposalShelfLifeMin: r.proposal_shelf_life_min,
+      drawdownThrottlePct: r.drawdown_throttle_pct,
+      drawdownThrottleFactor: r.drawdown_throttle_factor,
       minCompositeScore: r.min_composite_score,
       maxNewEntriesPerDay: r.max_new_entries_per_day,
       maxNewEntriesPerWeek: r.max_new_entries_per_week,
@@ -152,6 +159,7 @@ export class RiskGovernor {
       dayRealizedPnl: r.day_realized_pnl,
       dayUnrealizedPnl: r.day_unrealized_pnl,
       dayAnchorDate: r.day_anchor_date,
+      equityHighWater: r.equity_high_water,
       updatedAt: r.updated_at,
     };
   }
@@ -254,13 +262,41 @@ export class RiskGovernor {
     return dayLossPctFrom(rs.dayRealizedPnl, rs.dayUnrealizedPnl, this.getConfig().capitalCeiling);
   }
 
+  // ── drawdown-scaled risk (FR-SEY-2) ────────────────────────────────────────────
+
+  /** Realized P&L across closed positions (the closed-equity component). */
+  private closedRealizedPnl(): number {
+    return (this.db
+      .prepare("SELECT COALESCE(SUM(current_pnl), 0) AS p FROM exec_positions WHERE status = 'closed'")
+      .get() as { p: number }).p;
+  }
+
+  /**
+   * Closed-equity drawdown from the high-water mark, as a positive % (0 when at/above the
+   * HWM). Ratchets the persisted HWM up when a new peak is reached — a benign side effect
+   * so the throttle stays accurate without a separate update path. Closed-equity (not
+   * mark-to-market) avoids unrealized-swing thrash.
+   */
+  getDrawdownPct(): number {
+    const cfg = this.getConfig();
+    const equity = cfg.capitalCeiling + this.closedRealizedPnl();
+    const hwm = this.getRiskState().equityHighWater;
+    if (equity > hwm) {
+      this.writeState({ equity_high_water: equity });
+      return 0;
+    }
+    if (hwm <= 0) return 0;
+    return ((hwm - equity) / hwm) * 100;
+  }
+
   // ── sizing + gate ─────────────────────────────────────────────────────────────
 
   sizeEntry(maxLossPerContract: number): SizingResult {
     const cfg = this.getConfig();
     const deployed = this.recomputeDeployed();
+    const factor = drawdownThrottleFactor(this.getDrawdownPct(), cfg);
     return sizePosition(maxLossPerContract, {
-      perTradeRiskDollar: (cfg.maxRiskPerTradePct / 100) * cfg.capitalCeiling,
+      perTradeRiskDollar: (cfg.maxRiskPerTradePct / 100) * cfg.capitalCeiling * factor,
       remainingDeployableDollar: cfg.capitalCeiling - deployed,
     });
   }
@@ -279,6 +315,7 @@ export class RiskGovernor {
 
     const connected = broker.isConnected();
     const buyingPowerAvailable = connected ? (await broker.getBuyingPower()).available : 0;
+    const throttle = drawdownThrottleFactor(this.getDrawdownPct(), cfg);
 
     const ctx: GateContext = {
       config: cfg,
@@ -289,6 +326,7 @@ export class RiskGovernor {
       capitalDeployed: deployed,
       buyingPowerAvailable,
       brokerConnected: connected,
+      effectiveMaxRiskPct: cfg.maxRiskPerTradePct * throttle,
     };
 
     const result = evaluateGate(ctx, cand);
