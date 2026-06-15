@@ -34,10 +34,11 @@ import { EarningsCalendarView } from './views/EarningsCalendarView.js';
 import BriefReplayView from './views/BriefReplayView.js';
 import { TradingDeskView } from './views/TradingDeskView.js';
 import { ExecutionSettingsView } from './views/ExecutionSettingsView.js';
+import { MiscView } from './views/MiscView.js';
 
 declare const __APP_VERSION__: string;
 
-type View = 'watchlists' | 'screener' | 'filters' | 'analysis' | 'validate' | 'portfolio' | 'opportunity' | 'settings' | 'alerts' | 'data' | 'optionsChain' | 'payoff' | 'agent' | 'backtest' | 'testApi' | 'ivHistory' | 'knowledge' | 'strategyLab' | 'batch' | 'dailyBrief' | 'tradeScoring' | 'retrospect' | 'conviction' | 'newsResearch' | 'earningsCalendar' | 'briefReplay' | 'tradingDesk' | 'executionSettings';
+type View = 'watchlists' | 'screener' | 'filters' | 'analysis' | 'validate' | 'portfolio' | 'opportunity' | 'settings' | 'alerts' | 'data' | 'optionsChain' | 'payoff' | 'agent' | 'backtest' | 'testApi' | 'ivHistory' | 'knowledge' | 'strategyLab' | 'batch' | 'dailyBrief' | 'tradeScoring' | 'retrospect' | 'conviction' | 'newsResearch' | 'earningsCalendar' | 'briefReplay' | 'tradingDesk' | 'executionSettings' | 'misc';
 
 type NavEntry = {
   id: number;
@@ -697,6 +698,11 @@ export function App() {
       case 'briefReplay': return <BriefReplayView />;
       case 'tradingDesk': return <TradingDeskView />;
       case 'executionSettings': return <ExecutionSettingsView />;
+      case 'misc': return (
+        <MiscView
+          onNavigate={(v) => setNavStack(prev => [...prev, { id: navIdRef.current++, view: v }])}
+        />
+      );
       case 'settings': return (
         <SettingsView
           etradeWarning={etradeWarning}
@@ -1063,28 +1069,10 @@ export function App() {
           {/* ── Misc ── */}
           <div className="nav-section-label">Misc</div>
           <button
-            className={`nav-btn ${currentView === 'backtest' ? 'active' : ''}`}
-            onClick={() => navigateSidebar('backtest')}
+            className={`nav-btn ${['misc', 'backtest', 'testApi', 'data', 'ivHistory'].includes(currentView) ? 'active' : ''}`}
+            onClick={() => navigateSidebar('misc')}
           >
-            🔁 Backtest
-          </button>
-          <button
-            className={`nav-btn ${currentView === 'testApi' ? 'active' : ''}`}
-            onClick={() => navigateSidebar('testApi')}
-          >
-            🔬 Test API
-          </button>
-          <button
-            className={`nav-btn ${currentView === 'data' ? 'active' : ''}`}
-            onClick={() => navigateSidebar('data')}
-          >
-            🗄️ Data Sync
-          </button>
-          <button
-            className={`nav-btn ${currentView === 'ivHistory' ? 'active' : ''}`}
-            onClick={() => navigateSidebar('ivHistory')}
-          >
-            🗓️ History
+            🗂️ Misc
           </button>
         </div>
 

@@ -5,7 +5,7 @@ Do not hand-edit the PDF. This .md is the source of truth and lives in the doc-m
 
 # TradeAnalyzer — User Guide
 
-*A practical operator's guide. Version-tracked alongside the app. Last updated for v1.1.10.*
+*A practical operator's guide. Version-tracked alongside the app. Last updated for v1.1.12.*
 
 ---
 
@@ -113,6 +113,7 @@ Not sure which structure fits? Open **🔬 Strategy Lab**, enter a ticker, and t
 - **📋 Daily Brief** — today's top scored picks per strategy, with AI rationale + critic.
 - **🪞 Retrospect** — paper-trade tracking of past picks; win rates and learnings.
 - **📅 Earnings** — earnings calendar (month/list) across the universe.
+- **🤖 Agent** — view/run the external autonomous TraderAgent.
 
 **Execution** (v2 — opt-in, paper/mock for now)
 - **🤝 Trading Desk** — start/stop the execution engine, approve/reject order proposals, watch open positions and the activity log (see §6).
@@ -136,17 +137,16 @@ Not sure which structure fits? Open **🔬 Strategy Lab**, enter a ticker, and t
 - **⚡ LEAPS** — LEAPS + CSP pairing screener.
 - **🛡️ Collared LEAPS** — deep-ITM LEAPS + protective put screener.
 
-**Misc**
-- **🤖 Agent** — view/run the external autonomous TraderAgent.
+**Misc** — a single **🗂️ Misc** entry opens a landing screen with these occasional tools:
 - **🔁 Backtest** — simulate CSP/CC/Wheel strategies on history.
 - **🔬 Test API** — inspect raw provider responses (diagnostics).
 - **🗄️ Data Sync** — manual universe/price refreshes.
 - **🗓️ History** — IV-history backfill + bulk price loading.
-- **🔔 Alerts** — price/expiration/delta alerts.
 
 **Personal**
 - **⭐ My Stocks** — conviction list with price bands.
 - **💼 Portfolio** — positions, P&L, Greeks, advisor.
+- **🔔 Alerts** — price/expiration/delta alerts.
 
 ---
 

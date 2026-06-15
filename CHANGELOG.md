@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.12] — 2026-06-14
+
+### Changed
+- **Decluttered the sidebar: the Misc section is now a single 🗂️ Misc entry** that opens a landing screen with the four occasional tools as cards — **Backtest**, **Test API**, **Data Sync**, **History** (`src/renderer/src/views/MiscView.tsx`). Selecting one pushes it onto the nav stack, so a **← Back** returns to the Misc screen. The Misc sidebar button highlights while any of those four views is open. No functionality removed — the views and their IPC are unchanged; only the navigation path changed.
+
 ## [1.1.11] — 2026-06-14
 
 ### Fixed

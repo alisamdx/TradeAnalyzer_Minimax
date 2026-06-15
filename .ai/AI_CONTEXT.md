@@ -2,7 +2,7 @@
 
 > **Read this first.** Self-contained snapshot of *what the app is today* so a fresh AI session is productive without re-reading the whole codebase. This file describes **current state** — not history. Release history lives in `CHANGELOG.md` / `changelogs/`. Operating rules live in `/CLAUDE.md`. Full spec lives in `Requirements/`.
 >
-> Last verified against code: 2026-06-14 (v1.1.11). When you make a material change, update the relevant section here in the same commit.
+> Last verified against code: 2026-06-14 (v1.1.12). When you make a material change, update the relevant section here in the same commit.
 
 ---
 
@@ -100,7 +100,7 @@ src/main/
 src/preload/index.ts        window.api.* bridge (34 namespaces)
 src/renderer/src/
   App.tsx                    Sidebar routing + layout + status bar + cross-view nav events
-  views/                     28 feature views (see §6)
+  views/                     29 feature views (see §6)
   global.d.ts                window.api type declaration (ONLY place it's declared)
   knowledge/                 Embedded tastylive strategy guide (images + JSON)
   styles.css
@@ -113,7 +113,7 @@ changelogs/                  Per-version notes
 
 ---
 
-## 6. Views & sidebar (29 views, 9 sections)
+## 6. Views & sidebar (30 views, 9 sections)
 
 Routing is a `currentView` string in `App.tsx`; cross-view navigation fires CustomEvents (`navigate-to-payoff`, `navigate-to-validate`, `navigate-to-analysis`, `navigate-to-options`).
 
@@ -125,7 +125,7 @@ Routing is a `currentView` string in `App.tsx`; cross-view navigation fires Cust
 | **Screeners** | 🔍 Screener · 🎯 Opportunity · 🎛️ Filters |
 | **Analysis** | 📐 Payoff (`PayoffView`) · 🎯 Validate · 📉 Options (`OptionsChainView`) |
 | **Strategy** | 📚 Knowledge · 📊 Analysis · 🔬 Strategy Lab (`StrategyLabShellView` — tabs: Strategy Lab / ⚡ LEAPS / 🛡️ Collared LEAPS) |
-| **Misc** | 🔁 Backtest · 🔬 Test API · 🗄️ Data Sync (`DataView`) · 🗓️ History (`IvHistoryView`) |
+| **Misc** | 🗂️ Misc (`MiscView` — landing screen; cards push onto the nav stack) → 🔁 Backtest · 🔬 Test API · 🗄️ Data Sync (`DataView`) · 🗓️ History (`IvHistoryView`) |
 | **Personal** | ⭐ My Stocks (`ConvictionView`, with buy-zone count badge) · 💼 Portfolio · 📋 Watchlists · 🔔 Alerts |
 
 ---
