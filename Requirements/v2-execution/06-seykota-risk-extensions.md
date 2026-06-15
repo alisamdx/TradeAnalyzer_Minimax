@@ -104,22 +104,37 @@ Disabled when `maxPositionsPerSector` is null.
 
 ---
 
-## FR-SEY-3 — Per-name trend-alignment filter for inflection — 📋 (validate first)
+## FR-SEY-3 — Per-name trend-alignment filter for inflection — ❌ NOT SHIPPED (validated, rejected)
 
 **Principle:** Trade in the direction of the established trend — at the *name* level, not the
 market level (the market-level version is rejected; see non-goals).
 
-**Requirement (provisional, pending validation):** Only take an inflection credit spread when
-the underlying's own trend agrees with the breakout direction — e.g. price vs its 50-day SMA,
-or an ADX floor (`technical_signals` already has `adx` and `atr_pct`). Bull-put verticals
-require an up-trend/non-downtrend; bear-call verticals require a down-trend.
+**Validation study (2026-06-14, Brief Replay, 1,300 inflection picks; `scripts/fr-sey-3-*`):**
 
-**Validation gate (FR-SEY-5):** Before any code ships active, run this filter through Brief
-Replay on inflection picks and confirm it improves (or is neutral on) direction-aware hit
-rate / return. If it doesn't help, it ships **disabled** (or not at all) with the finding
-recorded here.
+1. **Naive price-vs-SMA filter (the originally-specified rule) is redundant.** Every pick
+   already "agrees" (0 filtered) — a breakout *by definition* puts price on the trend-agreeing
+   side of its own short SMA. Zero signal added.
+2. **50/200 SMA regime stack helps only the up side.** Bull-put (up-breakout) picks with
+   50>200 lift stock-HR 58.4%→63.8% (dir-adj 21d return 4.8%→7.6%), dropping ~40% of picks.
+   Bear-call (down-breakout) picks are unaffected by regime.
+3. **The down side isn't actually weak — that was a stock-HR artifact.** On the proper
+   credit-spread metric (OTM-expiry within a ±7.5% short-strike buffer), bear calls win
+   **68.3%** (±10% → 74.5%) vs bull puts 77.1%. Profitable, not broken — do **not** drop it.
+4. **Gating the down side is neutral-to-harmful.** Composite score is *monotonically
+   anti-predictive* for bear-call inflection (OTM-win: all 68.3%, ≥70 66.5%, ≥80 62.1%,
+   ≥85 58.6%; top score quintile 60.8% vs bottom 71.7%). A min-composite gate would *reduce*
+   win rate. The 50/200 regime filter doesn't help the down side either.
 
-**Acceptance:** TBD after the replay study.
+**Resolution:** **Ship no per-name trend/composite gate for inflection.** The naive filter is
+redundant; the down side works as-is and every gate we'd reach for makes it worse. The one
+positive (up-breakout 50/200 regime filter) is parked, not shipped — it needs confirmation on
+real `simulateSingleSpread` P&L (the study used a stock-move proxy; inflection has no stored
+strikes in replay). Validate-first (FR-SEY-5) did its job: it stopped us from gating a
+profitable strategy into a worse one.
+
+**Follow-ups (not blocking, future):** (a) re-confirm the up-breakout regime filter on real
+spread P&L before any ship; (b) investigate *why* composite is anti-predictive on bear-call
+inflection — the breakout score weights may not translate to the short-call side.
 
 ---
 
@@ -127,4 +142,10 @@ recorded here.
 
 Build order (operator-approved): **FR-SEY-5 → FR-SEY-2 → FR-SEY-1 → FR-SEY-3.** Each ships
 per repo discipline (tests green, version bump, CHANGELOG + changelog + AI_CONTEXT + this
-doc, one Conventional Commit, then `npm run package`). FR-SEY-3 is gated on its replay study.
+doc, one Conventional Commit, then `npm run package`).
+
+**Status:** FR-SEY-5 ✅ (v—, process rule) · FR-SEY-2 ✅ (v1.1.14, default OFF) ·
+FR-SEY-1 ✅ (v1.1.15, default OFF) · FR-SEY-3 ❌ (validated 2026-06-14, **not shipped** —
+naive filter redundant, down side works as-is, gating it is harmful). The set is **complete**:
+two configurable risk controls shipped (off by default) and one rule correctly rejected on the
+data.
