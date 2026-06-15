@@ -136,6 +136,36 @@ profitable strategy into a worse one.
 spread P&L before any ship; (b) investigate *why* composite is anti-predictive on bear-call
 inflection — the breakout score weights may not translate to the short-call side.
 
+### UPDATE (2026-06-14) — authoritative spread-P&L confirmation (`scripts/fr-sey-spread-pnl-confirm.mjs`)
+
+Both follow-ups were run through a faithful offline replica of `BacktestEngine.simulateSingleSpread`
+(Black-Scholes, IV-priced 0.30/0.15-delta vertical, 30 DTE, 50% PT / 200% stop) over every
+inflection replay pick. Returns below are **% of the spread's max-loss capital** (credit-correct,
+so this resolves the IV/credit confound the buffer proxy had). **This overturns two proxy-based
+conclusions above:**
+
+| Subset | n | win | avg ret / max-loss |
+| --- | --- | --- | --- |
+| up-breakout (bull put) | 742 | 76.0% | **+6.1%** |
+| down-breakout (bear call) | 616 | 66.6% | **−1.4%** (net loser) |
+| up, regime agrees / disagrees | 413 / 305 | 77.0 / 75.7% | +6.8% / +6.1% (no real edge) |
+| down, ATR% high / IV high | 206 / 196 | 59.7 / 62.8% | −4.2% / −3.1% (worst, but no slice is good) |
+
+1. **Down-breakout (bear call) inflection is a net loser (−1.4%/trade)** on real P&L — the buffer
+   proxy's "≈68% OTM-win, marginally fine" was too generous. The earlier "don't drop it" was a
+   proxy artifact and is **superseded**.
+2. **The up-breakout 50/200 regime filter adds no meaningful real edge** (+6.8% vs +6.1%
+   return-on-capital). Do **not** ship it. (The stock-HR / OTM-win gap washes out under real
+   credits + management.)
+3. **No ATR%/IV slice rescues the down side** — every tercile is ≤ marginal.
+
+**Validated conclusion: inflection should be up-breakout-only.** Bull puts on up-breakouts are
+solidly profitable (+6.1%, 76% win); the bear-call side is a structural loser no filter fixes.
+Excluding it is the highest-confidence improvement — pending the operator's decision on *where*
+to implement (execution-side entry filter vs strategy-level). This is the validate-before-ship
+rule (FR-SEY-5) earning its keep twice over: it caught a profitable-looking-but-losing side and
+a helpful-looking-but-inert filter.
+
 ---
 
 ## Sequencing
