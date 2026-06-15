@@ -79,6 +79,13 @@ export function ExecutionSettingsView() {
         <Field label="Eligible strategies" help="Comma-separated. Launch scope is inflection-only.">
           <input type="text" value={draft.eligibleStrategiesText} onChange={e => set('eligibleStrategiesText', e.target.value)} style={{ width: 280 }} />
         </Field>
+        <Field label="Inflection direction" help="Bear-call/down side is a validated net loser (FR-SEY-3) — default up.">
+          <select value={draft.inflectionDirection} onChange={e => set('inflectionDirection', e.target.value as ExecConfig['inflectionDirection'])}>
+            <option value="up">up-breakouts only</option>
+            <option value="down">down-breakouts only</option>
+            <option value="both">both</option>
+          </select>
+        </Field>
       </Section>
 
       <Section title="Risk limits">

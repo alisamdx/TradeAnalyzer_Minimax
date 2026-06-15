@@ -2175,6 +2175,8 @@ export interface ExecConfig {
   drawdownThrottleFactor: number;          // size multiplier applied when throttled (e.g. 0.5)
   // sector-concentration cap (FR-SEY-1)
   maxPositionsPerSector: number | null;    // null = off; max concurrent open positions per sector bucket
+  // inflection-direction guard (FR-SEY-3 follow-up; mirrors the app `inflectionDirection` setting)
+  inflectionDirection: 'both' | 'up' | 'down';
   // entry policy (§3.6)
   minCompositeScore: number;
   maxNewEntriesPerDay: number;

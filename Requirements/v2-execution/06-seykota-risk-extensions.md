@@ -161,10 +161,20 @@ conclusions above:**
 
 **Validated conclusion: inflection should be up-breakout-only.** Bull puts on up-breakouts are
 solidly profitable (+6.1%, 76% win); the bear-call side is a structural loser no filter fixes.
-Excluding it is the highest-confidence improvement — pending the operator's decision on *where*
-to implement (execution-side entry filter vs strategy-level). This is the validate-before-ship
-rule (FR-SEY-5) earning its keep twice over: it caught a profitable-looking-but-losing side and
-a helpful-looking-but-inert filter.
+This is the validate-before-ship rule (FR-SEY-5) earning its keep twice over: it caught a
+profitable-looking-but-losing side and a helpful-looking-but-inert filter.
+
+**IMPLEMENTED (configurable, default up-only) in both layers:**
+- **Strategy/brief (v1.1.16):** `inflectionDirection` app setting ('up'/'down'/'both'),
+  enforced in `ScoringService.hasBreakout`; the Daily Brief and Brief Replay inherit it via
+  `scoreFromSignalData`. ⚙ Settings → General.
+- **Execution engine (v1.1.17):** `exec_config.inflection_direction` (migration 051),
+  enforced in `EntryPolicy.filterPick` (reason `inflection_direction`). 🤝 Execution Settings → Mode.
+  Defense-in-depth: even a down-breakout pick reaching the engine is rejected.
+
+**Still open (future, non-blocking):** investigate *why* the inflection composite is
+anti-predictive on bear-call setups (high ATR%/IV reward = violent-reversal risk) — a
+potential scoring-engine recalibration, validated separately.
 
 ---
 

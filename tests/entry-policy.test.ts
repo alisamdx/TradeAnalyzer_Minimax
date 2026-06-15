@@ -57,6 +57,19 @@ describe('EntryPolicy.filterPick', () => {
     });
   }
 
+  it('rejects a down-breakout (bear call) inflection pick by default (FR-SEY-3 guard)', () => {
+    const { policy, governor } = setup();
+    const downPick = pick({ structure: 'short-call-vertical' });
+    expect(policy.filterPick(downPick, governor.getConfig(), NOW).reason).toBe('inflection_direction');
+  });
+
+  it("accepts a down-breakout pick when inflectionDirection = 'both'", () => {
+    const { policy, governor } = setup();
+    governor.updateConfig({ inflectionDirection: 'both' });
+    const downPick = pick({ structure: 'short-call-vertical' });
+    expect(policy.filterPick(downPick, governor.getConfig(), NOW).accepted).toBe(true);
+  });
+
   it('rejects outside the entry window', () => {
     const { policy, governor } = setup();
     const late = new Date('2026-06-15T21:00:00Z'); // 17:00 ET

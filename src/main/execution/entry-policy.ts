@@ -47,6 +47,12 @@ export class EntryPolicy {
   filterPick(pick: PickInput, config: ExecConfig, now: Date): FilterResult {
     const rej = (reason: string): FilterResult => ({ accepted: false, reason });
     if (!config.eligibleStrategies.includes(pick.strategy)) return rej('strategy_not_eligible');
+    // Inflection-direction guard (FR-SEY-3 follow-up): the bear-call/down-breakout side is a
+    // validated net loser. short-put-vertical = up (bull put), short-call-vertical = down.
+    if (pick.strategy === 'inflection') {
+      const dir = pick.structure === 'short-call-vertical' ? 'down' : pick.structure === 'short-put-vertical' ? 'up' : null;
+      if (dir && config.inflectionDirection !== 'both' && config.inflectionDirection !== dir) return rej('inflection_direction');
+    }
     if (pick.criticVerdict !== 'pass' && pick.criticVerdict !== 'caution') return rej('critic_verdict');
     if (pick.compositeScore < config.minCompositeScore) return rej('below_min_composite');
     if (!pick.hasAdequateLiquidity) return rej('inadequate_liquidity');

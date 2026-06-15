@@ -22,6 +22,7 @@ interface ConfigRow {
   max_positions_per_ticker: number;
   max_positions_per_strategy: number | null;
   max_positions_per_sector: number | null;
+  inflection_direction: string;
   eligible_strategies: string;
   proposal_shelf_life_min: number;
   drawdown_throttle_pct: number;
@@ -64,6 +65,7 @@ const CONFIG_COLUMN: Record<keyof ExecConfig, string> = {
   maxPositionsPerTicker: 'max_positions_per_ticker',
   maxPositionsPerStrategy: 'max_positions_per_strategy',
   maxPositionsPerSector: 'max_positions_per_sector',
+  inflectionDirection: 'inflection_direction',
   eligibleStrategies: 'eligible_strategies',
   proposalShelfLifeMin: 'proposal_shelf_life_min',
   drawdownThrottlePct: 'drawdown_throttle_pct',
@@ -107,6 +109,7 @@ export class RiskGovernor {
       maxPositionsPerTicker: r.max_positions_per_ticker,
       maxPositionsPerStrategy: r.max_positions_per_strategy,
       maxPositionsPerSector: r.max_positions_per_sector,
+      inflectionDirection: r.inflection_direction === 'both' || r.inflection_direction === 'down' ? r.inflection_direction : 'up',
       eligibleStrategies: r.eligible_strategies
         .split(',')
         .map((s) => s.trim())

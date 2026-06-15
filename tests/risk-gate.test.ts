@@ -17,6 +17,7 @@ const CONFIG: ExecConfig = {
   drawdownThrottlePct: 0,
   drawdownThrottleFactor: 0.5,
   maxPositionsPerSector: null,
+  inflectionDirection: 'both',
   minCompositeScore: 70,
   maxNewEntriesPerDay: 1,
   maxNewEntriesPerWeek: 3,

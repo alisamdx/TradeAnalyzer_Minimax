@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.17] — 2026-06-14
+
+### Added
+- **v2 execution — inflection-direction guard (FR-SEY-3 follow-up, execution layer).** Completes the "both, configurable" rollout: the execution engine now also refuses to propose the validated-losing inflection side. Migration **051** adds `exec_config.inflection_direction` (`'up'` default / `'down'` / `'both'`, CHECK-constrained). `EntryPolicy.filterPick` rejects an inflection pick whose breakout direction isn't allowed (`short-put-vertical` = up, `short-call-vertical` = down) with reason `inflection_direction`. Mapped in `RiskGovernor` config; editable in 🤝 Execution Settings → Mode. So whether picks come from the brief (app `inflectionDirection` setting) or the engine's own entry policy (`exec_config`), the same up-only-by-default policy holds. Tests: `entry-policy.test.ts` (+2: default rejects down, `'both'` accepts). Full suite 459 green.
+
 ## [1.1.16] — 2026-06-14
 
 ### Changed
