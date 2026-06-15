@@ -140,7 +140,7 @@ export function TradingDeskView() {
   const tripThreshold = ceiling > 0 && config ? -(ceiling * config.dailyLossTripPct / 100) : null;
 
   return (
-    <div style={{ padding: 16, maxWidth: 1200 }}>
+    <div style={{ padding: 16, maxWidth: 1200, flex: 1, minHeight: 0, overflowY: 'auto' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
         <h2 style={{ margin: 0 }}>🤝 Trading Desk</h2>
         {config && pill(isLive ? 'LIVE' : 'PAPER', isLive ? 'var(--danger)' : 'var(--accent)')}

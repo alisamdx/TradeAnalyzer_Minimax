@@ -59,7 +59,7 @@ export function ExecutionSettingsView() {
   }
 
   return (
-    <div style={{ padding: 16, maxWidth: 760 }}>
+    <div style={{ padding: 16, maxWidth: 760, flex: 1, minHeight: 0, overflowY: 'auto' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
         <h2 style={{ margin: 0 }}>🤝 Execution Settings</h2>
         <span style={{ flex: 1 }} />

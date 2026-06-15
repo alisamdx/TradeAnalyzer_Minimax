@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.18] — 2026-06-14
+
+### Fixed
+- **🤝 Execution views now scroll — the Execution Settings Save button was unreachable.** `.main` is `overflow: hidden`, so each view must manage its own scroll; the Trading Desk and Execution Settings root divs didn't, so on shorter windows the tall Settings form (and its Save/Revert buttons) was clipped with no scrollbar. Both view roots now fill and scroll (`flex: 1; min-height: 0; overflow-y: auto`) — same pattern as the v1.1.11 sidebar fix. CSS-only; no testable unit.
+
 ## [1.1.17] — 2026-06-14
 
 ### Added
