@@ -76,6 +76,7 @@ export interface GateCandidate {
   isDefinedRisk: boolean;
   contracts: number; // already sized
   maxLossPerContract: number;
+  sector?: string | null; // correlation bucket (FR-SEY-1); null/undefined = unmapped → uncapped
 }
 
 interface Check {
@@ -96,6 +97,10 @@ export function evaluateGate(ctx: GateContext, cand: GateCandidate): ExecGateRes
   const perTradeLimit = (effectiveRiskPct / 100) * config.capitalCeiling;
   const tickerCount = ctx.openPositions.filter((p) => p.ticker === cand.ticker).length;
   const strategyCount = ctx.openPositions.filter((p) => p.strategy === cand.strategy).length;
+  // Sector cap (FR-SEY-1): only constrains when enabled AND the candidate maps to a bucket.
+  const sectorCap = config.maxPositionsPerSector;
+  const sectorActive = sectorCap != null && cand.sector != null;
+  const sectorCount = sectorActive ? ctx.openPositions.filter((p) => p.sector != null && p.sector === cand.sector).length : 0;
 
   const checks: Check[] = [
     {
@@ -139,6 +144,15 @@ export function evaluateGate(ctx: GateContext, cand: GateCandidate): ExecGateRes
         config.maxPositionsPerStrategy == null
           ? 'off'
           : `${cand.strategy}: ${strategyCount}/${config.maxPositionsPerStrategy}`,
+    },
+    {
+      name: 'per_sector',
+      passed: !sectorActive || sectorCount < (sectorCap as number),
+      detail: !sectorActive
+        ? sectorCap == null
+          ? 'off'
+          : `${cand.ticker} sector unmapped`
+        : `${cand.sector}: ${sectorCount}/${sectorCap}`,
     },
     {
       name: 'capital_ceiling',

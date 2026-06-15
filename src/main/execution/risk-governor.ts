@@ -11,6 +11,7 @@ import { withTransaction } from '../db/connection.js';
 import type { ExecConfig, ExecRiskState, EngineState } from '../../shared/types.js';
 import type { ExecutionBroker } from './execution-broker.js';
 import { drawdownThrottleFactor, evaluateGate, sizePosition, type GateCandidate, type GateContext, type SizingResult } from './risk-gate.js';
+import { sectorStringToEtf } from '../services/sector-etf.js';
 
 interface ConfigRow {
   execution_mode: string;
@@ -20,6 +21,7 @@ interface ConfigRow {
   daily_loss_trip_pct: number;
   max_positions_per_ticker: number;
   max_positions_per_strategy: number | null;
+  max_positions_per_sector: number | null;
   eligible_strategies: string;
   proposal_shelf_life_min: number;
   drawdown_throttle_pct: number;
@@ -61,6 +63,7 @@ const CONFIG_COLUMN: Record<keyof ExecConfig, string> = {
   dailyLossTripPct: 'daily_loss_trip_pct',
   maxPositionsPerTicker: 'max_positions_per_ticker',
   maxPositionsPerStrategy: 'max_positions_per_strategy',
+  maxPositionsPerSector: 'max_positions_per_sector',
   eligibleStrategies: 'eligible_strategies',
   proposalShelfLifeMin: 'proposal_shelf_life_min',
   drawdownThrottlePct: 'drawdown_throttle_pct',
@@ -103,6 +106,7 @@ export class RiskGovernor {
       dailyLossTripPct: r.daily_loss_trip_pct,
       maxPositionsPerTicker: r.max_positions_per_ticker,
       maxPositionsPerStrategy: r.max_positions_per_strategy,
+      maxPositionsPerSector: r.max_positions_per_sector,
       eligibleStrategies: r.eligible_strategies
         .split(',')
         .map((s) => s.trim())
@@ -264,6 +268,24 @@ export class RiskGovernor {
 
   // ── drawdown-scaled risk (FR-SEY-2) ────────────────────────────────────────────
 
+  /**
+   * The correlation bucket (SPDR sector ETF) for a ticker, from fundamentals_cache via
+   * sectorStringToEtf (FR-SEY-1). null when the ticker is uncached or its sector is unmapped
+   * — unmapped names are left uncapped by design.
+   */
+  private sectorBucket(ticker: string): string | null {
+    const row = this.db.prepare('SELECT payload_json FROM fundamentals_cache WHERE ticker = ?').get(ticker) as
+      | { payload_json: string }
+      | undefined;
+    if (!row) return null;
+    try {
+      const sec = (JSON.parse(row.payload_json) as { sector?: string | null }).sector;
+      return sec ? sectorStringToEtf(sec) ?? null : null;
+    } catch {
+      return null;
+    }
+  }
+
   /** Realized P&L across closed positions (the closed-equity component). */
   private closedRealizedPnl(): number {
     return (this.db
@@ -305,12 +327,15 @@ export class RiskGovernor {
     const cfg = this.getConfig();
     const rs = this.getRiskState();
     const deployed = this.recomputeDeployed();
+    // Resolve sector buckets only when the FR-SEY-1 cap is enabled (avoids needless reads).
+    const sectorCapOn = cfg.maxPositionsPerSector != null;
     const openPositions = (this.db
       .prepare("SELECT ticker, strategy, max_loss FROM exec_positions WHERE status IN ('open','closing','needs_attention')")
       .all() as Array<{ ticker: string; strategy: string; max_loss: number }>).map((r) => ({
       ticker: r.ticker,
       strategy: r.strategy,
       maxLoss: r.max_loss,
+      sector: sectorCapOn ? this.sectorBucket(r.ticker) : null,
     }));
 
     const connected = broker.isConnected();
@@ -329,7 +354,8 @@ export class RiskGovernor {
       effectiveMaxRiskPct: cfg.maxRiskPerTradePct * throttle,
     };
 
-    const result = evaluateGate(ctx, cand);
+    const enriched: GateCandidate = sectorCapOn ? { ...cand, sector: cand.sector ?? this.sectorBucket(cand.ticker) } : cand;
+    const result = evaluateGate(ctx, enriched);
     this.audit(result.passed ? 'gate_pass' : 'gate_reject', {
       detail: { ticker: cand.ticker, strategy: cand.strategy, contracts: cand.contracts, reason: result.rejectReason },
     });

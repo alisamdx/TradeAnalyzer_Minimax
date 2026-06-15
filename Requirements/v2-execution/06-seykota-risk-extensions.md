@@ -80,7 +80,7 @@ threshold. Disabled when `drawdownThrottlePct = 0`.
 
 ---
 
-## FR-SEY-1 — Correlation / sector concentration cap — 📋
+## FR-SEY-1 — Correlation / sector concentration cap — ✅ (v1.1.15, default OFF)
 
 **Principle:** Diversify across *uncorrelated* bets. Five semiconductor spreads is one bet,
 not five — the count caps (5 concurrent, 1/ticker) don't see that.

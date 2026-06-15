@@ -16,6 +16,7 @@ const CONFIG: ExecConfig = {
   proposalShelfLifeMin: 120,
   drawdownThrottlePct: 0,
   drawdownThrottleFactor: 0.5,
+  maxPositionsPerSector: null,
   minCompositeScore: 70,
   maxNewEntriesPerDay: 1,
   maxNewEntriesPerWeek: 3,
@@ -92,7 +93,7 @@ describe('evaluateGate (§2.5)', () => {
     const r = evaluateGate(passingCtx(), passingCand());
     expect(r.passed).toBe(true);
     expect(r.rejectReason).toBeNull();
-    expect(r.checks).toHaveLength(10);
+    expect(r.checks).toHaveLength(11);
   });
 
   const cases: Array<[string, GateContext, GateCandidate, string]> = [
@@ -137,6 +138,32 @@ describe('evaluateGate (§2.5)', () => {
       ],
     });
     expect(evaluateGate(ctx, passingCand()).rejectReason).toBe('per_strategy');
+  });
+
+  it('honours an enabled sector cap (FR-SEY-1)', () => {
+    const cfg: ExecConfig = { ...CONFIG, maxPositionsPerSector: 2 };
+    const ctx = passingCtx({
+      config: cfg,
+      openPositions: [
+        { ticker: 'B', strategy: 'inflection', maxLoss: 100, sector: 'XLK' },
+        { ticker: 'C', strategy: 'inflection', maxLoss: 100, sector: 'XLK' },
+      ],
+    });
+    expect(evaluateGate(ctx, passingCand({ sector: 'XLK' })).rejectReason).toBe('per_sector');
+    // A different sector is unaffected.
+    expect(evaluateGate(ctx, passingCand({ sector: 'XLF' })).passed).toBe(true);
+    // An unmapped candidate (no sector) is never capped.
+    expect(evaluateGate(ctx, passingCand({ sector: null })).passed).toBe(true);
+  });
+
+  it('does not constrain by sector when the cap is off (null)', () => {
+    const ctx = passingCtx({
+      openPositions: [
+        { ticker: 'B', strategy: 'inflection', maxLoss: 100, sector: 'XLK' },
+        { ticker: 'C', strategy: 'inflection', maxLoss: 100, sector: 'XLK' },
+      ],
+    });
+    expect(evaluateGate(ctx, passingCand({ sector: 'XLK' })).passed).toBe(true);
   });
 
   it('uses the throttled effectiveMaxRiskPct for the per-trade limit (FR-SEY-2)', () => {

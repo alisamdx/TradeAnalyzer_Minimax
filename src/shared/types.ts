@@ -2170,6 +2170,8 @@ export interface ExecConfig {
   // drawdown-scaled risk (FR-SEY-2)
   drawdownThrottlePct: number;             // 0 = off; throttle per-trade size at/above this DD%
   drawdownThrottleFactor: number;          // size multiplier applied when throttled (e.g. 0.5)
+  // sector-concentration cap (FR-SEY-1)
+  maxPositionsPerSector: number | null;    // null = off; max concurrent open positions per sector bucket
   // entry policy (§3.6)
   minCompositeScore: number;
   maxNewEntriesPerDay: number;

@@ -243,3 +243,48 @@ describe('RiskGovernor — drawdown-scaled risk (FR-SEY-2)', () => {
     expect(r.rejectReason).toBe('per_trade_risk');
   });
 });
+
+function setFundSector(db: DbHandle, ticker: string, sector: string): void {
+  db.prepare('INSERT OR REPLACE INTO fundamentals_cache (ticker, payload_json) VALUES (?, ?)').run(
+    ticker,
+    JSON.stringify({ sector })
+  );
+}
+
+describe('RiskGovernor — sector concentration cap (FR-SEY-1)', () => {
+  it('rejects a candidate that would breach the per-sector cap (same bucket)', async () => {
+    const { db, gov } = setup();
+    const broker = new MockExecutionBroker();
+    await broker.connect();
+    gov.start();
+    gov.updateConfig({ maxPositionsPerSector: 1 });
+    setFundSector(db, 'AAA', 'semiconductors & related devices'); // → XLK
+    setFundSector(db, 'BBB', 'prepackaged software');             // → XLK
+    insertPosition(db, { ticker: 'BBB', strategy: 'inflection', maxLoss: 100 });
+    const r = await gov.checkEntry(CAND, broker); // CAND ticker AAA, also XLK
+    expect(r.rejectReason).toBe('per_sector');
+  });
+
+  it('allows a candidate in a different sector', async () => {
+    const { db, gov } = setup();
+    const broker = new MockExecutionBroker();
+    await broker.connect();
+    gov.start();
+    gov.updateConfig({ maxPositionsPerSector: 1 });
+    setFundSector(db, 'AAA', 'crude petroleum & natural gas'); // → XLE
+    setFundSector(db, 'BBB', 'prepackaged software');          // → XLK
+    insertPosition(db, { ticker: 'BBB', strategy: 'inflection', maxLoss: 100 });
+    expect((await gov.checkEntry(CAND, broker)).passed).toBe(true);
+  });
+
+  it('does not constrain by sector when the cap is off (default)', async () => {
+    const { db, gov } = setup();
+    const broker = new MockExecutionBroker();
+    await broker.connect();
+    gov.start();
+    setFundSector(db, 'AAA', 'semiconductors & related devices');
+    setFundSector(db, 'BBB', 'prepackaged software');
+    insertPosition(db, { ticker: 'BBB', strategy: 'inflection', maxLoss: 100 });
+    expect((await gov.checkEntry(CAND, broker)).passed).toBe(true);
+  });
+});

@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.15] — 2026-06-14
+
+### Added
+- **v2 execution — FR-SEY-1: sector-concentration cap (Seykota diversification).** Caps concurrent open positions sharing a correlation bucket so "five semiconductor spreads" count as one bet, not five — a gap the count caps (5 concurrent, 1/ticker) couldn't see. Bucket = SPDR sector ETF, derived from `fundamentals_cache` via `sectorStringToEtf` (coarse enough that "semiconductors" and "electronic computers" both map to XLK); unmapped names stay uncapped. **Default OFF** (`maxPositionsPerSector = null`). Migration **050** adds `exec_config.max_positions_per_sector`. New pure `per_sector` check in `evaluateGate` (skipped when off); `risk-governor` resolves sectors from `fundamentals_cache` only when the cap is enabled. Extracted the sector→ETF mapper into a shared `src/main/services/sector-etf.ts` (was private in `scoring-service.ts`) so both the scorer and the governor use one source. Exposed in Execution Settings → Risk limits. Tests: `risk-gate.test.ts` (+2) and `risk-governor.test.ts` (+3); full suite 455 green. Ships disabled by default per FR-SEY-5 (a conservative concentration limit, not an edge claim).
+
 ## [1.1.14] — 2026-06-14
 
 ### Added
