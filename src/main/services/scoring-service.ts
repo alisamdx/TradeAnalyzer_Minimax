@@ -513,6 +513,7 @@ export class ScoringService {
   /** Score tickers using pre-built signal data (e.g. from Brief Replay). Bypasses live DB queries. */
   scoreFromSignalData(data: Map<string, TickerSignalData>, strategy: ScoringStrategy): ScoredTicker[] {
     if (data.size === 0) return [];
+    this.refreshInflectionDirection();
     const config = this.getConfig(strategy);
     const enabledSignals = config.signals.filter(s => s.enabled);
     return [...data.keys()]
@@ -524,6 +525,7 @@ export class ScoringService {
   scoreTickers(tickers: string[], strategy: ScoringStrategy): ScoredTicker[] {
     if (tickers.length === 0) return [];
 
+    this.refreshInflectionDirection();
     const config = this.getConfig(strategy);
     const enabledSignals = config.signals.filter(s => s.enabled);
 
@@ -576,11 +578,28 @@ export class ScoringService {
     return { ticker, compositeScore, signals };
   }
 
-  /** Inflection eligibility: any fresh with-trend breakout, up (→ bull put spread) or
-   *  down (→ bear call spread). Replay outcomes are direction-aware (replay_outcomes.direction)
-   *  so the win/return aggregation is correct for both. */
+  /** Inflection eligibility: a fresh with-trend breakout in an allowed direction. The
+   *  `inflectionDirection` setting (default 'up') gates which sides surface — the FR-SEY-3
+   *  follow-up validated bear-call/down-breakout inflection as a net loser on spread P&L
+   *  (Requirements/v2-execution/06-seykota-risk-extensions.md), so 'down' is off by default.
+   *  Applies to the live brief and Brief Replay (both score via scoreFromSignalData). */
   private hasBreakout(d: TickerSignalData): boolean {
-    return d.breakoutState === 1 || d.breakoutState === -1;
+    if (d.breakoutState === 1) return this.inflectionDirection !== 'down';
+    if (d.breakoutState === -1) return this.inflectionDirection !== 'up';
+    return false;
+  }
+
+  private inflectionDirection: 'both' | 'up' | 'down' = 'up';
+
+  /** Refresh the inflection-direction gate from settings (default 'up'). Called once per
+   *  scoring pass so runtime changes take effect without a restart. */
+  private refreshInflectionDirection(): void {
+    try {
+      const row = this.db.prepare("SELECT value FROM settings WHERE key = 'inflectionDirection'").get() as { value?: string } | undefined;
+      this.inflectionDirection = row?.value === 'both' || row?.value === 'down' ? row.value : 'up';
+    } catch {
+      this.inflectionDirection = 'up';
+    }
   }
 
   private extractSignalRaw(key: string, d: TickerSignalData): number | null {

@@ -484,6 +484,21 @@ export function SettingsView({ etradeWarning, onEtradeWarningDismiss }: Settings
               </select>
             </div>
 
+            <div className="settings-row">
+              <label title="Validated on Brief Replay: bear-call/down-breakout inflection is a net loser on spread P&L, so 'Up only' is the default.">
+                Inflection breakout direction
+              </label>
+              <select
+                value={settings.inflectionDirection}
+                onChange={e => saveSettings({ inflectionDirection: e.target.value as AppSettings['inflectionDirection'] })}
+                style={{ width: 200 }}
+              >
+                <option value="up">Up-breakouts only (bull puts)</option>
+                <option value="down">Down-breakouts only (bear calls)</option>
+                <option value="both">Both directions</option>
+              </select>
+            </div>
+
             <div className="settings-row" style={{ marginTop: '20px' }}>
                <button className="run-btn" onClick={() => saveSettings({})} style={{ width: 'auto', padding: '6px 16px' }}>Save Settings</button>
             </div>

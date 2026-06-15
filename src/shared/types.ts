@@ -567,6 +567,9 @@ export interface AppSettings {
   soundAlertsEnabled: boolean;
   defaultScreenerIndex: 'sp500' | 'russell1000' | 'both';
   theme: 'dark' | 'light';
+  /** Which inflection breakout directions the brief/scoring will surface (FR-SEY-3 follow-up:
+   *  bear-call/down-breakout inflection is a validated net loser, so default 'up'). */
+  inflectionDirection: 'both' | 'up' | 'down';
   keyboardShortcuts: KeyboardShortcutsConfig;
   // v0.12.0: TraderAgent integration
   agentDbPath: string;

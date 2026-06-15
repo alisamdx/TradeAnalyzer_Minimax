@@ -34,6 +34,7 @@ export interface AppSettings {
   soundAlertsEnabled: boolean;
   defaultScreenerIndex: 'sp500' | 'russell1000' | 'both';
   theme: 'dark' | 'light';
+  inflectionDirection: 'both' | 'up' | 'down';
   keyboardShortcuts: {
     refreshQuotes: string;
     runAnalysis: string;
@@ -64,6 +65,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   soundAlertsEnabled: true,
   defaultScreenerIndex: 'both',
   theme: 'dark',
+  inflectionDirection: 'up',
   keyboardShortcuts: {
     refreshQuotes: 'F5',
     runAnalysis: 'Ctrl+Shift+A',
@@ -120,6 +122,7 @@ export function registerSettingsIpc(
           else if (k === 'soundAlertsEnabled') settings.soundAlertsEnabled = v === 'true';
           else if (k === 'defaultScreenerIndex') settings.defaultScreenerIndex = (v as AppSettings['defaultScreenerIndex']) ?? DEFAULT_SETTINGS.defaultScreenerIndex;
           else if (k === 'theme') settings.theme = (v as AppSettings['theme']) ?? DEFAULT_SETTINGS.theme;
+          else if (k === 'inflectionDirection') settings.inflectionDirection = (v as AppSettings['inflectionDirection']) ?? DEFAULT_SETTINGS.inflectionDirection;
           else if (k === 'keyboardShortcuts') {
             try {
               settings.keyboardShortcuts = v ? JSON.parse(v) : DEFAULT_SETTINGS.keyboardShortcuts;

@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.16] — 2026-06-14
+
+### Changed
+- **Inflection is now up-breakout-only by default (configurable) — strategy layer.** The FR-SEY-3 follow-up validated (on authoritative `simulateSingleSpread` P&L) that down-breakout/bear-call inflection is a net loser (−1.4%/trade) while up-breakout/bull-put is solidly profitable (+6.1%, 76% win). A new **`inflectionDirection`** app setting (`'up'` default / `'down'` / `'both'`) gates which breakout sides the scoring engine surfaces: `ScoringService.hasBreakout` honours it, so both the **Daily Brief** and **Brief Replay** (both score via `scoreFromSignalData`) stop recommending the losing bear-call side. Set it in **⚙ Settings → General**. Refreshed once per scoring pass (runtime changes apply without restart). Wired through `AppSettings` + `settings:get-all/set-all`. Regression tests in `tests/inflection-scoring.test.ts` (default gates down to 0; `'both'` re-enables; `'down'` gates up to 0). Full suite 457 green. (Execution-engine guard for the same setting lands next.)
+
 ## [1.1.15] — 2026-06-14
 
 ### Added
