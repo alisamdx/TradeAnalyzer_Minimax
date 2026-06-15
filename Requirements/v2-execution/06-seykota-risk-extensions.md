@@ -172,9 +172,30 @@ profitable-looking-but-losing side and a helpful-looking-but-inert filter.
   enforced in `EntryPolicy.filterPick` (reason `inflection_direction`). 🤝 Execution Settings → Mode.
   Defense-in-depth: even a down-breakout pick reaching the engine is rejected.
 
-**Still open (future, non-blocking):** investigate *why* the inflection composite is
-anti-predictive on bear-call setups (high ATR%/IV reward = violent-reversal risk) — a
-potential scoring-engine recalibration, validated separately.
+### Recalibration study (2026-06-14) — DECLINED (`scripts/fr-sey-recalibration-study.mjs`)
+
+Tested whether *any* alternative ranking of down-breakout picks yields a profitable bear-call
+book on real spread P&L (616 resolved trades; bar to beat = up-breakout book +6.1%/trade,
+76% win):
+
+| down-breakout ranking | top 20% | top 33% |
+| --- | --- | --- |
+| baseline (all down) | −1.4% / 66.6% | — |
+| current composite (DESC) | **−6.2% / 56%** (worst) | −3.6% |
+| composite ASC (invert) | +0.5% | +0.9% |
+| ATR% ascending (calmest) | **+2.4% / 74%** | −1.3% |
+| IV ascending | −3.0% | −1.3% |
+| low-ATR + low-IV ("safe") | −1.1% | −1.2% |
+
+**Findings:** the current composite is the *worst* ranking for bear calls (it actively selects
+losers — top 20% = −6.2%). The only positive ranking is "prefer the calmest names" (low ATR%)
+at +2.4%/74%, but it's fragile (negative once widened past the top quintile) and still ~⅓ the
+up side's edge. **No ranking produces a robust, sizeable, profitable bear-call book.**
+
+**Resolution: recalibration declined — no scoring change makes bear-call inflection worth
+trading.** Keep inflection up-only (shipped v1.1.16/v1.1.17). This also confirms the up-only
+default is right: flipping to `'down'`/`'both'` surfaces actively-losing, worst-selected picks.
+The Seykota workstream is now fully closed.
 
 ---
 
