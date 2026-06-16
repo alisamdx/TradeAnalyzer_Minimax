@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.26] — 2026-06-16
+
+### Fixed
+- **Brief `valid_until` is now based on the ET calendar date and is DST-correct.** `nextTradingDayOpen()` had two date bugs. (1) It computed the next trading day from the **UTC** date of `generated_at`; for an evening-ET run (already "tomorrow" in UTC — e.g. a Monday 8:57pm EDT brief is `00:57Z` Tuesday) it skipped a trading day, so the brief was marked valid until Wednesday instead of Tuesday. It now keys off the **ET** calendar date. (2) It hardcoded 9:30 ET as `13:30Z`, which is correct only under EDT — all winter (EST) 9:30 ET is `14:30Z`, so `valid_until` was an hour early. It now derives the ET↔UTC offset for the target date. Cosmetic-only (affects the "valid until" label / auto-supersede timing, never pick data), surfaced while reviewing overnight-run behavior. Regression test: `tests/next-trading-day-open.test.ts` (+6: evening-ET no-skip, winter EST instant, weekend/holiday skips, host-TZ independence).
+
 ## [1.1.25] — 2026-06-16
 
 ### Changed

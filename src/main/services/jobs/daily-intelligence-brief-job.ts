@@ -114,14 +114,32 @@ function summarizeRelevantStructure(labResult: object | null, strategy: string):
   };
 }
 
-// Next trading day 9:30am ET — used as valid_until
-function nextTradingDayOpen(fromIso: string): string {
-  const d = new Date(fromIso);
-  d.setUTCHours(13, 30, 0, 0); // 9:30am ET = 13:30 UTC (EST; ET = UTC-5 standard)
+// America/New_York UTC offset (minutes, negative = west) on the given ET calendar date.
+// EDT = −240, EST = −300. Probe at noon UTC (= morning ET, safely past the 2am DST switch).
+function etUtcOffsetMinutes(etDate: string): number {
+  const probe = new Date(etDate + 'T12:00:00Z');
+  const asUtc = new Date(probe.toLocaleString('en-US', { timeZone: 'UTC' }));
+  const asEt  = new Date(probe.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  return Math.round((asEt.getTime() - asUtc.getTime()) / 60000);
+}
+
+// 9:30am ET on the next trading day STRICTLY AFTER `fromIso`'s ET date — used as valid_until.
+// Keyed off the ET *calendar date*, not the UTC date: an evening-ET run is already "tomorrow"
+// in UTC, so the old UTC-based version skipped a trading day (a Mon-evening brief expired Wed
+// instead of Tue). DST-aware: 9:30 ET = 13:30Z under EDT, 14:30Z under EST (the old hardcoded
+// 13:30Z was an hour early all winter). see docs/formulas.md#trading-days
+export function nextTradingDayOpen(fromIso: string): string {
+  const todayEt = new Date(fromIso).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+  // Advance ET calendar date to the next trading day. Noon-UTC anchor keeps date math DST-safe.
+  const d = new Date(todayEt + 'T12:00:00Z');
   do {
-    d.setDate(d.getDate() + 1);
-  } while (!isTradingDay(d.toLocaleDateString('en-CA', { timeZone: 'America/New_York' })));
-  return d.toISOString();
+    d.setUTCDate(d.getUTCDate() + 1);
+  } while (!isTradingDay(d.toISOString().slice(0, 10)));
+  const target = d.toISOString().slice(0, 10); // next trading day, YYYY-MM-DD (ET)
+  // 9:30 ET on `target` as a UTC instant: take 9:30 as-if-UTC, then shift by the ET offset.
+  const [y, m, day] = target.split('-').map(Number);
+  const wallAsUtcMs = Date.UTC(y!, m! - 1, day!, 9, 30, 0, 0);
+  return new Date(wallAsUtcMs - etUtcOffsetMinutes(target) * 60000).toISOString();
 }
 
 export class DailyIntelligenceBriefJob implements BatchJobHandler {

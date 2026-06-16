@@ -2,7 +2,7 @@
 
 > **Read this first.** Self-contained snapshot of *what the app is today* so a fresh AI session is productive without re-reading the whole codebase. This file describes **current state** — not history. Release history lives in `CHANGELOG.md` / `changelogs/`. Operating rules live in `/CLAUDE.md`. Full spec lives in `Requirements/`.
 >
-> Last verified against code: 2026-06-16 (v1.1.25). When you make a material change, update the relevant section here in the same commit.
+> Last verified against code: 2026-06-16 (v1.1.26). When you make a material change, update the relevant section here in the same commit.
 
 ---
 
@@ -237,6 +237,7 @@ Authoritative DDL is in `migrations/`. Tables are created lazily (`CREATE TABLE 
 - **Option P&L is priced at the modeled fill, not mid** (`options-fill.ts` `fillPrice`, `SLIPPAGE_FRACTION=0.5`): sells fill below mid toward the bid, buys above toward the ask, by 0.5×half-spread. Used by Strategy Lab `buildSetup` net credit/debit and wheel/income `premium` (which **replaced the old `premium = mid/2` placeholder** — wheel/income premiums are now higher/realistic, which shifted their scoring rankings and the `options_premium_history` capture). `docs/formulas.md#fill-model`.
 - **Structure max-loss classification is the exported pure `classifySingleExpiryPnl()`** (`strategy-lab-service.ts`; `buildSetup` delegates the non-calendar case to it). `maxLoss === null` means **unbounded** — any naked short option without a covering long on that side: naked call, strangle/straddle, and the **reverse lizards** (`reverse-big-lizard`/`reverse-jade-lizard` = short put spread + NAKED short call). Pre-v1.1.24 the reverse lizards were mis-classified as bounded (reported the protected put-spread residual as maxLoss, e.g. FLUT −$11), hiding unlimited upside risk and producing ~100,000% annualized returns. `annualizedReturn` is null whenever maxLoss is null. The fix is **ranking-neutral** — `premiumScore` falls back to `shortPutStrike×100` capital when maxLoss is null (same score band). `docs/formulas.md#structure-pnl`.
 - **Liquidity scores weigh same-day volume** (v0.32.97): Strategy Lab `liquidityScore` (0–15) = spread 8 / OI 4 / volume 3; wheel `optionLiquidityScore` (0–10) = OI 4 / spread 4 / volume 2. `SetupLeg` has a `volume` field. Brief hard gate still drops best relevant structure `<5/15`. `docs/formulas.md#liquidity-score`.
+- **Brief `valid_until` (`nextTradingDayOpen`, v1.1.26)** is keyed off the **ET calendar date** of `generated_at`, not its UTC date — an evening-ET run is already "tomorrow" in UTC and the old version skipped a trading day (Mon-evening brief expired Wed not Tue). The 9:30-ET instant is **DST-aware** (`etUtcOffsetMinutes`: EDT→13:30Z, EST→14:30Z; the old hardcoded 13:30Z was an hour early all winter). Cosmetic (label + auto-supersede timing only). Separately, **E*Trade tokens hard-expire at midnight ET** — a post-midnight brief run fail-safe skips Stage 4 at the E*Trade probe ("reconnect" notice), it does not produce bad data.
 - **Fake-timer tests** use `flushTimersUntil()`, not `vi.runAllTimers()` (the rate limiter's promise chain won't drain otherwise).
 
 ---
