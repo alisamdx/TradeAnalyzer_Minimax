@@ -24,6 +24,13 @@ import { WatchlistService } from '../watchlist-service.js';
 import { parseRationaleResponse } from '../brief-rationale-parser.js';
 import type { EarningsService } from '../earnings-service.js';
 import type { OAuthCredentials } from '../etrade-auth.js';
+import { getETradeLastPrice } from '../etrade-options.js';
+import { withTransaction } from '../../db/connection.js';
+
+// VIX sane range — reject anything outside this (a quote typo can return an unrelated
+// symbol). Historical VIX spans ~9 (2017) to ~82 (COVID); [5,150] is a safe guard.
+const VIX_MIN = 5;
+const VIX_MAX = 150;
 
 const PICKS_PER_STRATEGY = 5;   // final picks shown in brief per strategy (post-gate cap)
 const STAGE4_POOL_SIZE   = 15;  // candidates sent to E*Trade validation per strategy — deepened from 10 in v0.32.70 so the liquidity gate (which now correctly rejects thin chains) still leaves 5 picks per strategy
@@ -474,6 +481,11 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
     const t5b = Date.now();
     let criticCostEstimate = 0;
 
+    // Refresh VIX into quote_cache so the critic's macro context (and its VIX rules)
+    // have a value. Fail-closed — on any problem the critic falls back to null VIX.
+    const vix = await this.refreshVixQuote();
+    runMeta['vix'] = vix; // surfaced so the operator can eyeball it vs the real VIX day 1
+
     if (anthropicApiKey) {
       const marketContext = this.criticService.getMarketContext();
 
@@ -637,6 +649,36 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
    * (e.g. "wheel · buy"), making the watchlist useful across other app views.
    * Non-fatal: failures are logged but never propagate to the job result.
    */
+  /**
+   * Fetch the VIX index via E*Trade and upsert it into quote_cache (ticker 'VIX'),
+   * where CriticService.getMarketContext() reads it. Fail-closed: any missing creds,
+   * fetch error, or out-of-range value leaves quote_cache untouched, so the critic
+   * keeps its safe null-VIX behavior. Returns the value written, or null.
+   * see CLAUDE.md "Known quirks" (VIX), .ai/AI_CONTEXT.md §10.
+   */
+  private async refreshVixQuote(): Promise<number | null> {
+    try {
+      const creds = this.getEtradeCreds?.() ?? null;
+      if (!creds) return null;
+      const vix = await getETradeLastPrice('VIX', creds);
+      if (vix === null || vix < VIX_MIN || vix > VIX_MAX) {
+        if (vix !== null) console.warn(`[brief] VIX ${vix} outside [${VIX_MIN},${VIX_MAX}] — ignored (suspect wrong symbol)`);
+        return null;
+      }
+      withTransaction(this.db, () => {
+        this.db.prepare(
+          `INSERT INTO quote_cache (ticker, last, fetched_at)
+             VALUES ('VIX', @last, @fetchedAt)
+           ON CONFLICT(ticker) DO UPDATE SET last = @last, fetched_at = @fetchedAt`
+        ).run({ last: vix, fetchedAt: new Date().toISOString() });
+      });
+      return vix;
+    } catch (err) {
+      console.warn('[brief] VIX refresh failed (non-fatal):', err instanceof Error ? err.message : String(err));
+      return null;
+    }
+  }
+
   private upsertBriefWatchlist(
     picks: Map<ScoringStrategy, BriefPick[]>,
     today: string,

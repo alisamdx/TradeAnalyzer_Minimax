@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.1.21] — 2026-06-15
+
+### Added
+- **VIX is now wired into the critic's macro context (E*Trade).** Follow-up to the v1.1.20 audit's documented VIX gap. The brief job's new `refreshVixQuote()` fetches VIX via E*Trade `/v1/market/quote/VIX` (`getETradeLastPrice` in `etrade-options.ts`), sane-range-validates it (`[5,150]` — a quote typo can return an unrelated symbol), and upserts it into `quote_cache` (ticker `'VIX'`) before the critic stage runs; `CriticService.getMarketContext()` reads it there. This re-activates the two previously-dormant VIX rules (wheel/income caution at VIX>30, bearish complacency at VIX<14) and fills the macro "fear/complacency regime" context. **Fail-closed at every step** — no E*Trade creds, fetch error, out-of-range value, or wrong account index symbol leaves `quote_cache` untouched and the critic keeps its safe null-VIX behavior. The fetched value is surfaced in `runMeta.vix` so the operator can verify it against the real VIX on the first run (**the E*Trade index symbol `'VIX'` is unverified offline**). Tests: `critic-service.test.ts` (+3: reads populated VIX, wheel fear rule fires at VIX>30, dormant when null).
+
+### Verified (no change needed)
+- **The advocate rationale does not fabricate volatility.** Audited all 30 picks (`scripts/advocate-rationale-audit.mjs`): every number the advocate cites maps to a real scoring signal it was given (`0/30` cite a vol figure without an IV/vol signal). This also explains the v1.1.20 critic "140.8% IV": that's the wheel `recentVolatility` **signal** (140.8, realized vol), which the advocate correctly labels "recent volatility 140.8" — the **critic** received it via `advocateRationale` and mislabeled it as *implied* volatility. The v1.1.20 F1 fix (real `impliedVolPct` + forbid inventing/relabeling vol) addresses exactly that conflation.
+
+### Note
+- `briefing-service.getQuote('VIX')` (a separate market-summary consumer) still uses the broken Polygon stocks-snapshot path and is **not** migrated to read `quote_cache` — left as a follow-up.
+
 ## [1.1.20] — 2026-06-15
 
 ### Fixed — daily-brief accuracy audit (pre-real-money)

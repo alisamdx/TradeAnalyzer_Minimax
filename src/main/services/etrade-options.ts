@@ -145,6 +145,34 @@ export async function getETradeExpirations(
   }).sort((a, b) => a.dateStr.localeCompare(b.dateStr));
 }
 
+// ─── Index / single-symbol last price ──────────────────────────────────────────
+
+/**
+ * Last traded price for a single symbol via E*Trade's /v1/market/quote endpoint —
+ * used for the VIX index (the macro-regime input for the critic). Returns the last
+ * trade, or null on any error / unparseable response. The CALLER must sane-range
+ * validate (a quote endpoint can return an unrelated symbol on a typo). The E*Trade
+ * symbol for the CBOE Volatility Index is 'VIX' on most accounts; if yours differs,
+ * pass the right symbol. Fail-closed: never throws.
+ */
+export async function getETradeLastPrice(
+  symbol: string,
+  creds: OAuthCredentials,
+): Promise<number | null> {
+  try {
+    // Symbols go in the PATH for the quote endpoint (not a query param).
+    const data = await etradeGet(`/v1/market/quote/${encodeURIComponent(symbol.toUpperCase())}`, {}, creds);
+    const wrapper = (data['QuoteResponse'] ?? data) as Record<string, unknown>;
+    const list = wrapper['QuoteData'];
+    if (!Array.isArray(list) || list.length === 0) return null;
+    const all = (list[0] as Record<string, unknown>)['All'] as Record<string, unknown> | undefined;
+    const last = all?.['lastTrade'];
+    return typeof last === 'number' && Number.isFinite(last) ? last : null;
+  } catch {
+    return null;
+  }
+}
+
 // ─── Options Chain ────────────────────────────────────────────────────────────
 
 export async function getETradeOptionsChain(

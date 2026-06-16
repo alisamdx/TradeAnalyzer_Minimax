@@ -375,6 +375,40 @@ describe('checkThinBreakeven — strike-aware', () => {
   });
 });
 
+// F3: once VIX is populated in quote_cache, getMarketContext reads it and the
+// previously-dormant VIX rules fire.
+describe('getMarketContext + VIX rules (F3)', () => {
+  function makeSvc(vix: number | null) {
+    const db = new Database(':memory:');
+    db.exec(`CREATE TABLE earnings_calendar (ticker TEXT, report_date TEXT, confirmed INTEGER)`);
+    db.exec(`CREATE TABLE quote_cache (ticker TEXT PRIMARY KEY, last REAL, fetched_at TEXT)`);
+    db.exec(`CREATE TABLE historical_prices (ticker TEXT, date TEXT, close REAL)`);
+    if (vix !== null) db.prepare(`INSERT INTO quote_cache (ticker, last, fetched_at) VALUES ('VIX', ?, '2026-06-15')`).run(vix);
+    return new CriticService(db);
+  }
+
+  it('reads a populated VIX from quote_cache (was always null before)', () => {
+    expect(makeSvc(31.5).getMarketContext().vix).toBe(31.5);
+    expect(makeSvc(null).getMarketContext().vix).toBeNull();
+  });
+
+  it('fires elevated_market_risk on wheel/income when VIX > 30', () => {
+    const svc = makeSvc(34);
+    const pick = makePick([{ slug: 'short-naked-put', grade: 'A', liquidityScore: 8, setup: makeSetup(95) }], 100);
+    const market = svc.getMarketContext();
+    const f = runChecks(svc, pick, 'wheel', market).find(x => x.key === 'elevated_market_risk');
+    expect(f).toBeDefined();
+    expect(f!.description).toContain('elevated market fear');
+  });
+
+  it('does not fire the VIX fear rule when VIX is null (dormant, fail-safe)', () => {
+    const svc = makeSvc(null);
+    const pick = makePick([{ slug: 'short-naked-put', grade: 'A', liquidityScore: 8, setup: makeSetup(95) }], 100);
+    const f = runChecks(svc, pick, 'wheel', svc.getMarketContext()).find(x => x.key === 'elevated_market_risk');
+    expect(f).toBeUndefined();
+  });
+});
+
 // F1: real IV is extracted for the critic so it never invents a volatility figure.
 describe('extractVolatilityContext', () => {
   it('extracts and rounds implied vol + IV rank from the lab context', () => {

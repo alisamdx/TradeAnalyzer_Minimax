@@ -111,14 +111,13 @@ export class CriticService {
   // Reads VIX from quote_cache and SPY 200MA from historical_prices.
   getMarketContext(): MarketContext {
     type QuoteRow = { last: number };
-    // KNOWN GAP: VIX is effectively always null today — nothing writes a 'VIX' row to
-    // quote_cache, and the only VIX fetch (briefing-service) hits Polygon's *stocks*
-    // snapshot for ticker 'VIX', which returns nothing (VIX is an index = I:VIX, an
-    // Indices-plan ticker the Stocks Starter plan lacks). So the macro context is
-    // SPY-trend only and the two VIX rules (wheel/income >30, bearish <14) are dormant.
-    // This null path is fail-safe (vixLevel null, rules skip). A real fix needs a
-    // verified index-quote source (E*Trade /market/quote, or a Polygon Indices plan).
-    // see CLAUDE.md "Known quirks" / .ai/AI_CONTEXT.md §10.
+    // VIX is populated daily by the brief job (`refreshVixQuote` → E*Trade /market/quote,
+    // sane-range-validated, upserted to quote_cache). It is null when E*Trade is not
+    // connected, the fetch fails, the value is out of range, or the account's index
+    // symbol differs from 'VIX' — in which case the macro context is SPY-trend only and
+    // the two VIX rules (wheel/income >30, bearish <14) skip (fail-safe). NOTE: Polygon's
+    // *stocks* snapshot cannot serve VIX (it is an index, I:VIX), so this is the only
+    // source. see CLAUDE.md "Known quirks" / .ai/AI_CONTEXT.md §10.
     const vixRow = this.db.prepare(
       `SELECT last FROM quote_cache WHERE ticker = 'VIX' LIMIT 1`
     ).get() as QuoteRow | undefined;
