@@ -471,6 +471,22 @@ Put  = K·e^(−rT)·N(−d2) − S·N(−d1)
 - `N(·)` is the standard normal CDF (Abramowitz & Stegun approximation, error < 7.5e-8).
 - `T ≤ 0` (or any degenerate input) returns intrinsic value only.
 
+## Single-expiration structure P&L {#structure-pnl}
+
+`classifySingleExpiryPnl(legs, dollarCredit, netCreditPerShare)` (in `strategy-lab-service.ts`) returns `maxProfit` / `maxLoss` / `breakevens` for a single-expiration structure, classified by its leg signature. **`maxLoss = null` means the loss is unbounded** — a short option with no covering long on that side:
+
+| Structure (leg signature) | maxLoss |
+|---|---|
+| Naked put (sell put) | `−(putStrike·100 − credit)` — bounded at the strike |
+| **Naked call** (sell call) | **`null` — unbounded** |
+| Put/call vertical (sell + buy, same side) | `−(width − credit)` if credit, else `−|debit|` — defined |
+| **Strangle / straddle** (sell put + sell call) | **`null` — unbounded both sides** |
+| Iron condor / fly (both spreads) | `−(max(putW, callW) − credit)` — defined |
+| Jade / Big Lizard (sell put + sell call + **buy call**) | `−(putStrike·100 − credit)` — upside capped, bounded naked-put downside |
+| **Reverse Jade / Reverse Big Lizard** (sell put + **buy put** + sell call) | **`null` — unbounded** (the short call is naked; the put spread only caps the downside) |
+
+The reverse-lizard row was a bug before v1.1.24: it reported the *bounded put-spread residual* (`−(putW − credit)`, e.g. FLUT −$11) as the max loss, hiding the naked short call's unlimited upside risk. That tiny "capital" then produced an absurd annualized return (~100,000%) via `annualizedReturn = credit/|maxLoss| × 365/dte`. `annualizedReturn` is `null` whenever `maxLoss` is `null` (capital undefined).
+
 ## Calendar / diagonal (PMCC) max profit {#calendar-diagonal-pnl}
 
 Calendars (same strike, short near + long far) and diagonals (PMCC/PMCP: long far ITM + short near OTM, same side) have **no closed-form max profit** — the long (far) leg still carries time value when the short (near) leg expires. Strategy Lab estimates it at the profit peak, where the underlying pins the **short strike** at the near expiry:

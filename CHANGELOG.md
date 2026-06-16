@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.24] — 2026-06-16
+
+### Fixed
+- **Reverse Big Lizard / Reverse Jade Lizard now report their unbounded risk honestly.** These structures pair a short put *spread* with a **naked short call**, so the upside loss is unlimited. `buildSetup` mis-classified them into the bounded-risk branch and reported `maxLoss` as the small put-spread residual — e.g. FLUT's bearish #1-ish pick showed **max loss −$11.25** and an **annualized return of 100,248%** on a position that can lose without bound (LBRDK 15,154%, ARE a *positive* +$43.75 "max loss"). The P&L classifier now returns `maxLoss = null` (unbounded) for any naked-short-call structure, which cascades correctly: `annualizedReturn` becomes `null` (capital is undefined). The single-expiration P&L logic was extracted into a pure, exported `classifySingleExpiryPnl()` with direct unit coverage of every branch. **Ranking is unchanged** — the structure's `premiumScore` falls back to the short-put-strike capital basis (line 614–616), which yields the same score band, so this is a risk-display correctness fix, not a scoring change (no FR-SEY-5 gate). Found in the 2026-06-16 brief audit. See `docs/formulas.md#structure-pnl`.
+
 ## [1.1.23] — 2026-06-15
 
 ### Fixed

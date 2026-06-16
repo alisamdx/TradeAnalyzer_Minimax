@@ -42,6 +42,25 @@ return on collateral directly. (Pre-v0.32.67 divided by strike × 100 — per-co
 against per-share premium — understating results 100× and zeroing the premiumYield /
 premiumRiskRatio scoring signals.) Used in Options Income & Wheel modes.
 
+### structure-max-loss (single-expiration classification)
+`classifySingleExpiryPnl(legs, dollarCredit, netCreditPerShare)` classifies a structure's
+maxProfit / maxLoss / breakevens by its leg signature. **`maxLoss = null` ⇒ unbounded** (a naked
+short option with no covering long on that side):
+```
+naked put                     : maxLoss = −(putStrike·100 − credit)            (bounded)
+naked call                    : maxLoss = null                                 (UNBOUNDED)
+vertical (put/call spread)    : maxLoss = −(width − credit)  [credit] / −|debit|
+strangle / straddle           : maxLoss = null                                 (UNBOUNDED, both sides)
+iron condor / fly             : maxLoss = −(max(putW, callW) − credit)
+jade / big lizard             : maxLoss = −(putStrike·100 − credit)            (upside capped, naked-put downside)
+reverse jade / reverse big    : maxLoss = null                                 (UNBOUNDED — naked short call)
+```
+The structure's lab `annualizedReturn = credit/|maxLoss| × 365/dte` is `null` when `maxLoss` is null.
+(Pre-v1.1.24 the reverse lizards were mis-classified as bounded — reported the protected put-spread
+residual as maxLoss, e.g. FLUT −$11 — hiding the naked call's unlimited upside and yielding
+~100,000% annualized returns.) `premiumScore` falls back to `shortPutStrike·100` capital when maxLoss
+is null, so the fix is ranking-neutral.
+
 ### wheel-suitability-score (1–10)
 ```
 base = 1

@@ -9,7 +9,7 @@
 
 import { describe, it, expect } from 'vitest';
 import Database from 'better-sqlite3';
-import { StrategyLabService } from '../src/main/services/strategy-lab-service.js';
+import { StrategyLabService, classifySingleExpiryPnl } from '../src/main/services/strategy-lab-service.js';
 import { bsPrice, normCdf, RISK_FREE_RATE } from '../src/main/services/black-scholes.js';
 import type { DataProvider, OptionsChain, OptionContract } from '../src/main/services/data-provider.js';
 import type { OptionsProvider } from '../src/main/services/options-provider.js';
@@ -289,5 +289,71 @@ describe('StrategyLabService calendar/PMCC two-expiration build', () => {
     const midCredit = leg.mid * 100;
     expect(snp.setup!.netCredit!).toBeLessThan(midCredit);     // haircut applied
     expect(snp.setup!.netCredit!).toBeGreaterThan(leg.bid * 100); // but not worse than natural
+  });
+});
+
+describe('classifySingleExpiryPnl — structure max-loss classification', () => {
+  type L = { side: 'call' | 'put'; action: 'buy' | 'sell'; strike: number };
+
+  it('reports UNBOUNDED max loss for a reverse big lizard (naked short call)', () => {
+    // FLUT-shaped: short straddle at 110 + protective long put at 100. The short
+    // call is naked → upside loss is unlimited. Pre-fix this reported maxLoss ≈ −$11
+    // (the bounded put-spread residual) and annualizedReturn ~100,000%.
+    const legs: L[] = [
+      { side: 'call', action: 'sell', strike: 110 },
+      { side: 'put',  action: 'sell', strike: 110 },
+      { side: 'put',  action: 'buy',  strike: 100 },
+    ];
+    const credit = 988.75;
+    const { maxLoss, maxProfit, breakevens } = classifySingleExpiryPnl(legs, credit, credit / 100);
+    expect(maxLoss).toBeNull();                 // unbounded (naked short call)
+    expect(maxProfit).toBe(credit);
+    expect(breakevens).toEqual([110 + credit / 100]); // upside breakeven only
+  });
+
+  it('reports UNBOUNDED max loss for a reverse jade lizard (naked short call)', () => {
+    const legs: L[] = [
+      { side: 'call', action: 'sell', strike: 500 },
+      { side: 'put',  action: 'sell', strike: 340 },
+      { side: 'put',  action: 'buy',  strike: 320 },
+    ];
+    expect(classifySingleExpiryPnl(legs, 2217.5, 22.175).maxLoss).toBeNull();
+  });
+
+  it('keeps BOUNDED max loss for a (big/jade) lizard — naked put, capped upside', () => {
+    // Mirror structure: short straddle + protective long CALL. Upside capped by the
+    // call spread, downside is the naked put (bounded at the put strike).
+    const legs: L[] = [
+      { side: 'put',  action: 'sell', strike: 320 },
+      { side: 'call', action: 'sell', strike: 320 },
+      { side: 'call', action: 'buy',  strike: 380 },
+    ];
+    const credit = 5941.25;
+    const { maxLoss } = classifySingleExpiryPnl(legs, credit, credit / 100);
+    expect(maxLoss).toBe(-(320 * 100 - credit)); // bounded naked-put downside
+  });
+
+  it('classifies the standard branches (naked put/call, spreads, condor, strangle)', () => {
+    const nakedPut = classifySingleExpiryPnl([{ side: 'put', action: 'sell', strike: 100 }], 250, 2.5);
+    expect(nakedPut.maxLoss).toBe(-(100 * 100 - 250));
+
+    const nakedCall = classifySingleExpiryPnl([{ side: 'call', action: 'sell', strike: 100 }], 250, 2.5);
+    expect(nakedCall.maxLoss).toBeNull(); // unbounded
+
+    const bullPut = classifySingleExpiryPnl(
+      [{ side: 'put', action: 'sell', strike: 100 }, { side: 'put', action: 'buy', strike: 95 }], 200, 2,
+    );
+    expect(bullPut.maxLoss).toBe(-((100 - 95) * 100 - 200)); // defined risk
+
+    const strangle = classifySingleExpiryPnl(
+      [{ side: 'put', action: 'sell', strike: 90 }, { side: 'call', action: 'sell', strike: 110 }], 300, 3,
+    );
+    expect(strangle.maxLoss).toBeNull(); // unbounded both sides
+
+    const condor = classifySingleExpiryPnl([
+      { side: 'put', action: 'sell', strike: 90 }, { side: 'put', action: 'buy', strike: 85 },
+      { side: 'call', action: 'sell', strike: 110 }, { side: 'call', action: 'buy', strike: 115 },
+    ], 200, 2);
+    expect(condor.maxLoss).toBe(-((5) * 100 - 200)); // defined risk = wing − credit
   });
 });

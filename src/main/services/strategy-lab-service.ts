@@ -341,6 +341,91 @@ function findByDelta(
   return null;
 }
 
+/**
+ * Closed-form max-profit / max-loss / breakevens for a SINGLE-expiration option
+ * structure, classified by its leg signature. Pure and exported for direct testing.
+ *
+ * `dollarCredit` is the net credit in dollars (negative = net debit); `netCreditPerShare`
+ * is the per-share credit used for breakeven offsets. A **null `maxLoss` means the loss is
+ * unbounded** — a naked short option with no covering long on that side (naked call,
+ * strangle/straddle, and the reverse lizards, whose naked short call has unlimited upside).
+ * see docs/formulas.md#structure-pnl
+ */
+export function classifySingleExpiryPnl(
+  legs: Array<{ side: 'call' | 'put'; action: 'buy' | 'sell'; strike: number; qty?: number }>,
+  dollarCredit: number,
+  netCreditPerShare: number,
+): { maxProfit: number | null; maxLoss: number | null; breakevens: number[] } {
+  const putSell  = legs.find(l => l.side === 'put'  && l.action === 'sell');
+  const putBuy   = legs.find(l => l.side === 'put'  && l.action === 'buy');
+  const callSell = legs.find(l => l.side === 'call' && l.action === 'sell');
+  const callBuy  = legs.find(l => l.side === 'call' && l.action === 'buy');
+
+  let maxProfit: number | null = null;
+  let maxLoss:   number | null = null;
+  let breakevens: number[]     = [];
+
+  if (putSell && !putBuy && !callSell && !callBuy) {
+    // Naked put
+    maxProfit  = dollarCredit;
+    maxLoss    = -(putSell.strike * 100 - dollarCredit);
+    breakevens = [putSell.strike - netCreditPerShare];
+  } else if (callSell && !callBuy && !putSell && !putBuy) {
+    // Naked call — unbounded upside loss
+    maxProfit  = dollarCredit;
+    maxLoss    = null;
+    breakevens = [callSell.strike + netCreditPerShare];
+  } else if (putSell && putBuy && !callSell && !callBuy) {
+    // Put spread (short or long)
+    const width = (putSell.strike - putBuy.strike) * 100;
+    maxProfit  = netCreditPerShare > 0 ? dollarCredit : width + dollarCredit;
+    maxLoss    = netCreditPerShare > 0 ? -(width - dollarCredit) : -Math.abs(dollarCredit);
+    breakevens = [putSell.strike - netCreditPerShare];
+  } else if (callSell && callBuy && !putSell && !putBuy) {
+    // Call spread
+    const width = (callBuy.strike - callSell.strike) * 100;
+    maxProfit  = netCreditPerShare > 0 ? dollarCredit : width + dollarCredit;
+    maxLoss    = netCreditPerShare > 0 ? -(width - dollarCredit) : -Math.abs(dollarCredit);
+    breakevens = [callSell.strike + netCreditPerShare];
+  } else if (putSell && callSell && !putBuy && !callBuy) {
+    // Strangle / straddle — naked on both sides, unbounded upside loss
+    maxProfit  = dollarCredit;
+    maxLoss    = null;
+    breakevens = [putSell.strike - netCreditPerShare, callSell.strike + netCreditPerShare];
+  } else if (putSell && putBuy && callSell && callBuy) {
+    // Iron condor / iron fly
+    const putW  = (putSell.strike - putBuy.strike) * 100;
+    const callW = (callBuy.strike - callSell.strike) * 100;
+    const wing  = Math.max(putW, callW);
+    maxProfit  = dollarCredit;
+    maxLoss    = -(wing - dollarCredit);
+    breakevens = [putSell.strike - netCreditPerShare, callSell.strike + netCreditPerShare];
+  } else if (putSell && callSell && callBuy && !putBuy) {
+    // Jade Lizard / Big Lizard — short put + short call SPREAD. Upside is capped by
+    // the call spread, so the binding risk is the naked-put downside (bounded at the
+    // put strike).
+    maxProfit  = dollarCredit;
+    maxLoss    = -(putSell.strike * 100 - dollarCredit);
+    breakevens = [putSell.strike - netCreditPerShare];
+  } else if (callSell && putSell && putBuy && !callBuy) {
+    // Reverse Jade Lizard / Reverse Big Lizard — short put SPREAD + a NAKED short call.
+    // The naked call makes the UPSIDE loss unbounded; the put spread only caps the
+    // downside. Pre-v1.1.24 this reported the bounded put-spread residual as maxLoss
+    // (e.g. FLUT −$11), hiding the real risk and inflating annualizedReturn to ~100,000%
+    // and the structure's premiumScore/grade → these floated to the top of the bearish
+    // brief. The true max loss is unbounded.
+    maxProfit  = dollarCredit;
+    maxLoss    = null;
+    breakevens = [callSell.strike + netCreditPerShare];
+  } else {
+    // General fallback
+    maxProfit = dollarCredit > 0 ? dollarCredit : null;
+    maxLoss   = dollarCredit < 0 ? dollarCredit : null;
+  }
+
+  return { maxProfit, maxLoss, breakevens };
+}
+
 function buildSetup(
   profile: StrategyProfile, chain: OptionsChain, underlyingPx: number, dte: number,
   currentAtmIv: number, trustDeltas = true, farChain: OptionsChain | null = null, farDte: number | null = null
@@ -412,11 +497,6 @@ function buildSetup(
   const dollarCredit = netCreditPerShare * 100;
 
   // P&L based on leg structure
-  const putSell  = builtLegs.find(l => l.side === 'put'  && l.action === 'sell');
-  const putBuy   = builtLegs.find(l => l.side === 'put'  && l.action === 'buy');
-  const callSell = builtLegs.find(l => l.side === 'call' && l.action === 'sell');
-  const callBuy  = builtLegs.find(l => l.side === 'call' && l.action === 'buy');
-
   let maxProfit: number | null = null;
   let maxLoss:   number | null = null;
   let breakevens: number[]    = [];
@@ -440,56 +520,9 @@ function buildSetup(
       maxLoss    = -Math.abs(dollarCredit);                         // worst case ≈ net debit paid
       breakevens = [];                                              // not closed-form here
     }
-  } else if (putSell && !putBuy && !callSell && !callBuy) {
-    // Naked put
-    maxProfit  = dollarCredit;
-    maxLoss    = -(putSell.strike * 100 - dollarCredit);
-    breakevens = [putSell.strike - netCreditPerShare];
-  } else if (callSell && !callBuy && !putSell && !putBuy) {
-    // Naked call
-    maxProfit  = dollarCredit;
-    maxLoss    = null;  // theoretically unlimited
-    breakevens = [callSell.strike + netCreditPerShare];
-  } else if (putSell && putBuy && !callSell && !callBuy) {
-    // Put spread (short or long)
-    const width = (putSell.strike - putBuy.strike) * 100;
-    maxProfit  = netCreditPerShare > 0 ? dollarCredit : width + dollarCredit;
-    maxLoss    = netCreditPerShare > 0 ? -(width - dollarCredit) : -Math.abs(dollarCredit);
-    breakevens = [putSell.strike - netCreditPerShare];
-  } else if (callSell && callBuy && !putSell && !putBuy) {
-    // Call spread
-    const width = (callBuy.strike - callSell.strike) * 100;
-    maxProfit  = netCreditPerShare > 0 ? dollarCredit : width + dollarCredit;
-    maxLoss    = netCreditPerShare > 0 ? -(width - dollarCredit) : -Math.abs(dollarCredit);
-    breakevens = [callSell.strike + netCreditPerShare];
-  } else if (putSell && callSell && !putBuy && !callBuy) {
-    // Strangle / straddle
-    maxProfit  = dollarCredit;
-    maxLoss    = null;
-    breakevens = [putSell.strike - netCreditPerShare, callSell.strike + netCreditPerShare];
-  } else if (putSell && putBuy && callSell && callBuy) {
-    // Iron condor / iron fly
-    const putW  = (putSell.strike - putBuy.strike) * 100;
-    const callW = (callBuy.strike - callSell.strike) * 100;
-    const wing  = Math.max(putW, callW);
-    maxProfit  = dollarCredit;
-    maxLoss    = -(wing - dollarCredit);
-    breakevens = [putSell.strike - netCreditPerShare, callSell.strike + netCreditPerShare];
-  } else if (putSell && callSell && callBuy) {
-    // Jade Lizard — upside risk capped by the call spread, so max loss is the naked put downside
-    maxProfit  = dollarCredit;
-    maxLoss    = -(putSell.strike * 100 - dollarCredit);
-    breakevens = [putSell.strike - netCreditPerShare];
-  } else if (callSell && putSell && putBuy) {
-    // Reverse Jade Lizard
-    const putW = (putSell.strike - putBuy.strike) * 100;
-    maxProfit  = dollarCredit;
-    maxLoss    = -(putW - dollarCredit);
-    breakevens = [callSell.strike + netCreditPerShare];
   } else {
-    // General fallback
-    maxProfit = dollarCredit > 0 ? dollarCredit : null;
-    maxLoss   = dollarCredit < 0 ? dollarCredit : null;
+    ({ maxProfit, maxLoss, breakevens } =
+      classifySingleExpiryPnl(builtLegs, dollarCredit, netCreditPerShare));
   }
 
   // Annualized return on capital
