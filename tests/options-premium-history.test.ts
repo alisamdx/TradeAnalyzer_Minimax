@@ -30,13 +30,28 @@ const income: OptionsIncomeResult = {
 };
 
 describe('premium history mappers', () => {
-  it('maps a WheelResult to a CSP wheel row', () => {
+  it('maps a WheelResult to a CSP wheel row (negative delta = put)', () => {
     const r = wheelResultToRow(wheel, '2026-06-13');
     expect(r).toMatchObject({
       asOfDate: '2026-06-13', ticker: 'AAPL', strategy: 'wheel', structure: 'CSP',
       strike: 190, premium: 3.25, annualizedReturn: 18.4, iv: 28.5, ivRank: 42,
       bid: null, ask: null, openInterest: null,
     });
+  });
+
+  it('labels a covered-call fallback as CC (positive delta = call)', () => {
+    // findSuitableChain falls back to a call when no suitable CSP exists; the
+    // contract then has a positive delta + strike above spot. The row must record
+    // it as CC, not the old hardcoded CSP.
+    const cc: WheelResult = {
+      ...wheel, ticker: 'AA', lastPrice: 64.16, recommendedStrike: 75, delta: 0.2258,
+    };
+    expect(wheelResultToRow(cc, '2026-06-13')).toMatchObject({ ticker: 'AA', structure: 'CC' });
+  });
+
+  it('defaults to CSP when delta is null', () => {
+    const noDelta: WheelResult = { ...wheel, delta: null };
+    expect(wheelResultToRow(noDelta, '2026-06-13').structure).toBe('CSP');
   });
 
   it('maps an OptionsIncomeResult, preserving CSP/CC + bid/ask/OI', () => {

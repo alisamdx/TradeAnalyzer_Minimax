@@ -59,10 +59,17 @@ export interface PremiumHistoryRow {
   breakeven: number | null;
 }
 
-/** Map a WheelResult (recommended CSP) to a history row. Pure — unit-tested. */
+/** Map a WheelResult (recommended CSP or CC) to a history row. Pure — unit-tested. */
 export function wheelResultToRow(r: WheelResult, asOfDate: string): PremiumHistoryRow {
+  // A wheel rec is a cash-secured put unless findSuitableChain found no suitable
+  // put and fell back to a covered call (analysis-service findSuitableChain). The
+  // contract's put/call side isn't carried on WheelResult, but delta sign is a
+  // robust proxy: puts are ≤0, calls >0 (sign survives E*Trade stale-greek drift,
+  // which only skews magnitude). findSuitableChain guarantees a non-null delta on
+  // any real recommendation. see docs/formulas.md#wheel-structure-label
+  const structure: 'CSP' | 'CC' = r.delta != null && r.delta > 0 ? 'CC' : 'CSP';
   return {
-    asOfDate, ticker: r.ticker, strategy: 'wheel', structure: 'CSP',
+    asOfDate, ticker: r.ticker, strategy: 'wheel', structure,
     lastPrice: r.lastPrice, strike: r.recommendedStrike, expiration: r.expiration,
     dte: r.dte, delta: r.delta, bid: null, ask: null, premium: r.premium,
     annualizedReturn: r.annualizedReturn, iv: r.currentIv, ivRank: r.ivRank,

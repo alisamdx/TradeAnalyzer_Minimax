@@ -508,6 +508,10 @@ Two scores measure tradability; both now weigh same-day **volume** alongside ope
 
 Rationale: open interest is *standing* interest; volume is *today's* activity. A high-OI/zero-volume strike (stale interest) is no longer scored as fully liquid, and an actively traded low-OI strike is credited. The brief's hard liquidity gate (drop best relevant structure `< 5/15`) is unchanged.
 
+## Wheel structure label (CSP vs CC) {#wheel-structure-label}
+
+The wheel analysis (`findSuitableChain`) recommends a **cash-secured put** when a put exists in the 0.20–0.30 delta band with a live bid; if none does, it **falls back to a covered call** in the same band. Both are valid wheel legs. `WheelResult` doesn't carry the contract's put/call side, so when recording the recommendation into `options_premium_history`, the structure is derived from **delta sign**: a put has delta ≤ 0 → `CSP`; a call has delta > 0 → `CC`. Sign is robust because it's fixed by option type, not the spot level — so it survives E*Trade's stale-greek drift (which only skews magnitude). `findSuitableChain` guarantees a non-null delta on any real recommendation; a null delta defaults to `CSP`. Without this, covered-call fallbacks (~12% of daily wheel picks, concentrated in lower-priced names where the coarse strike grid has no put in the tight band) were mislabeled `CSP`, which would corrupt future CSP-vs-CC return-on-capital analysis.
+
 ## Breakout / continuation signals {#breakout-signals}
 
 Inputs to the **Inflection** strategy (a directional credit spread anchored at a breakout level), computed nightly by `DailyTechnicalSignalsJob` and stored on `technical_signals`. A breakout is **fresh** (today crosses, yesterday hadn't) and **with-trend** (continuation, not fade):

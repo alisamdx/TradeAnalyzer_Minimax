@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.19] — 2026-06-15
+
+### Fixed
+- **Premium-history wheel rows now label covered-call fallbacks as `CC`, not `CSP`.** The wheel analysis (`findSuitableChain`) recommends a cash-secured put when one exists in the 0.20–0.30 delta band, and otherwise **falls back to a covered call** in the same band (intended behavior — both are valid wheel legs). But `wheelResultToRow` hardcoded `structure: 'CSP'`, so ~12% of daily wheel picks (the CC fallbacks, concentrated in lower-priced names whose coarse strike grid has no put in the tight band — e.g. AA, ACGL) were recorded as `CSP` in `options_premium_history`. That would corrupt the future CSP-vs-CC return-on-capital analysis the table exists to enable. The structure is now derived from **delta sign** (put ≤ 0 → `CSP`, call > 0 → `CC`; null delta → `CSP`) — robust because sign is fixed by option type, surviving E*Trade's stale-greek magnitude drift, and `findSuitableChain` guarantees a non-null delta on any real recommendation. No trade-logic change: the recommendation itself is untouched, only its recorded label. Self-heals already-persisted rows on the next capture. Regression tests in `tests/options-premium-history.test.ts` (+2: positive-delta → CC, null-delta → CSP). `docs/formulas.md#wheel-structure-label`.
+
 ## [1.1.18] — 2026-06-14
 
 ### Fixed
