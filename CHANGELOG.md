@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.1.27] — 2026-06-16
+
+### Changed
+- **Directional strategies now de-prioritise narrow-range "pin bet" butterflies in favour of directional structures.** A put/call butterfly only pays off if the underlying lands in a tight window at expiry (low probability of profit), so it's a poor expression of a directional bullish/bearish thesis — yet because butterflies can post a high reward/risk score, the defined-risk preference (v1.1.25) was surfacing them as the recommended structure (e.g. 3 of 5 bearish picks on the 2026-06-16 brief). `pickRelevantStructure` now, for directional strategies (bullish/bearish/buy), prefers a directional structure over a butterfly — **but only when a reasonably graded (≥ C) directional alternative exists**; it keeps the butterfly when the only directional options are badly priced (D/F), so it never trades a viable structure for a broken one. On the 2026-06-16 bearish brief this switches LBRDK (put-butterfly A → poor-man's-covered-put B, directional) while correctly keeping ARE/FLUT's C butterflies (their only directional alternatives were grade F). No-op for income (range-bound — iron flies/condors are appropriate) and inflection/wheel.
+- **Ticker selection is unchanged** (composite-driven, independent of the lab structure), so this is neutral on Brief Replay returns by construction — same picks, only the structure-per-pick differs. No FR-SEY-5 gate (verified on the live 2026-06-16 brief: only one pick's structure changed, no ticker/order change).
+
 ## [1.1.26] — 2026-06-16
 
 ### Fixed

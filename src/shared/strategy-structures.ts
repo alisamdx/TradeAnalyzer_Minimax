@@ -24,6 +24,20 @@ export const STRATEGY_RELEVANT_SLUGS: Record<string, string[]> = {
 // Grade ordering (A+ best). A missing key ranks 0 — below F.
 const GRADE_RANK: Record<string, number> = { 'A+': 6, A: 5, B: 4, C: 3, D: 2, F: 1 };
 
+// Narrow-range "pin bet" structures: max profit only if the underlying lands in a tight
+// window at expiry (low probability of profit), so they don't express a directional thesis.
+// For directional strategies we present a directional structure instead when a reasonably
+// graded one exists. (Calendars are deliberately NOT here — only the butterflies.)
+const PIN_BET_SLUGS = new Set(['put-butterfly', 'call-butterfly']);
+
+// Strategies whose thesis is a directional move (not range-bound income). For these, a pin
+// bet is a poor structural fit — see the de-prioritisation in pickRelevantStructure.
+const DIRECTIONAL_STRATEGIES = new Set(['bullish', 'bearish', 'buy']);
+
+// A directional structure must be at least this graded to displace a viable pin bet — we
+// won't surface a badly-priced (D/F) directional structure just to avoid a butterfly.
+const MIN_DIRECTIONAL_GRADE = GRADE_RANK['C']!;
+
 /** Minimal shape needed to choose a structure — any Strategy Lab score satisfies it. */
 export interface RelevantScoreLike {
   slug: string;
@@ -48,6 +62,12 @@ export interface RelevantScoreLike {
  * picks (strangle/straddle → iron condor) toward defined risk. It is a no-op for
  * inflection/wheel/bullish/buy, whose relevant structures are already all defined-risk.
  *
+ * **Directional-fit preference (real-money suitability):** for a directional strategy
+ * (bullish/bearish/buy), a narrow-range "pin bet" butterfly is a poor expression of the
+ * thesis, so a directional structure is presented instead — but only when a reasonably
+ * graded one (≥ C) exists; we won't surface a badly-priced (D/F) directional structure
+ * just to avoid a butterfly, so a viable butterfly is kept when the alternatives are broken.
+ *
  * Inflection is special: its two relevant verticals are direction-opposite (bull put vs
  * bear call), so the higher-graded one — matching the breakout direction — is chosen.
  */
@@ -60,9 +80,17 @@ export function pickRelevantStructure<T extends RelevantScoreLike>(
     s => slugs.includes(s.slug) && s.setup != null && !s.setup.unavailableReason,
   );
   if (valid.length === 0) return null;
-  // Prefer defined-risk (finite max loss); fall back to the full set only when none exist.
+  // 1. Prefer defined-risk (finite max loss); fall back to the full set only when none exist.
   const definedRisk = valid.filter(s => s.setup?.maxLoss != null);
-  const pool = definedRisk.length > 0 ? definedRisk : valid;
+  let pool = definedRisk.length > 0 ? definedRisk : valid;
+  // 2. Directional strategies: prefer a reasonably-graded directional structure over a
+  //    pin-bet butterfly. Keep the butterfly only when no directional alternative grades ≥ C.
+  if (DIRECTIONAL_STRATEGIES.has(strategy)) {
+    const directional = pool.filter(
+      s => !PIN_BET_SLUGS.has(s.slug) && (GRADE_RANK[s.grade] ?? 0) >= MIN_DIRECTIONAL_GRADE,
+    );
+    if (directional.length > 0) pool = directional;
+  }
   if (strategy === 'inflection') {
     return pool.reduce((best, s) => ((GRADE_RANK[s.grade] ?? 0) > (GRADE_RANK[best.grade] ?? 0) ? s : best));
   }

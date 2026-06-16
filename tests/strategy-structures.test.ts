@@ -112,6 +112,57 @@ describe('pickRelevantStructure — defined-risk preference', () => {
   });
 });
 
+describe('pickRelevantStructure — directional-fit preference (de-prioritise pin bets)', () => {
+  // Inputs are given best-first (highest totalScore first), mirroring lab output.
+  it('bearish: prefers a viable directional vertical over a higher-graded pin butterfly', () => {
+    const chosen = pickRelevantStructure(
+      [defined('put-butterfly', 'A'), defined('long-put-vertical', 'B')],
+      'bearish',
+    );
+    expect(chosen?.slug).toBe('long-put-vertical'); // butterfly A is a pin bet; vertical B is directional
+  });
+
+  it('bearish: KEEPS the butterfly when the only directional alternatives are grade F', () => {
+    const chosen = pickRelevantStructure(
+      [defined('put-butterfly', 'C'), defined('poor-mans-covered-put', 'F'), defined('long-put-vertical', 'F')],
+      'bearish',
+    );
+    expect(chosen?.slug).toBe('put-butterfly'); // no directional structure grades ≥ C
+  });
+
+  it('bearish: KEEPS the butterfly when the best directional is only grade D', () => {
+    const chosen = pickRelevantStructure(
+      [defined('put-butterfly', 'B'), defined('put-zebra', 'D')],
+      'bearish',
+    );
+    expect(chosen?.slug).toBe('put-butterfly');
+  });
+
+  it('bullish: de-prioritises a call butterfly the same way', () => {
+    const chosen = pickRelevantStructure(
+      [defined('call-butterfly', 'A'), defined('long-call-vertical', 'B')],
+      'bullish',
+    );
+    expect(chosen?.slug).toBe('long-call-vertical');
+  });
+
+  it('is a no-op when no butterfly is in the pool (keeps the best non-pin structure)', () => {
+    const chosen = pickRelevantStructure(
+      [defined('big-lizard', 'A'), defined('long-call-vertical', 'B')],
+      'bullish',
+    );
+    expect(chosen?.slug).toBe('big-lizard'); // big-lizard is not a pin bet — best-first wins
+  });
+
+  it('does not apply to non-directional strategies (income iron fly is kept)', () => {
+    const chosen = pickRelevantStructure(
+      [defined('iron-fly', 'A'), defined('iron-condor', 'B')],
+      'income',
+    );
+    expect(chosen?.slug).toBe('iron-fly'); // income is range-bound; pin-tent structures are fine
+  });
+});
+
 describe('pickDisplayStructure — selection with display fallback', () => {
   it('returns the chosen valid structure (defined-risk preferred)', () => {
     expect(pickDisplayStructure(
