@@ -30,12 +30,14 @@ interface LabStructureScore {
   setup: {
     expiration: string;
     netCredit: number | null;
-    legs: Array<{ strike: number; action: string }>;
+    legs: Array<{ strike: number; action: string; side?: 'call' | 'put' }>;
     unavailableReason?: string | null;
   } | null;
 }
 interface LabResultShape {
-  context?: { underlyingPx?: number };
+  // currentAtmIv / ivRank are the underlying's annualized ATM implied vol (percentage)
+  // and its 1-year rank — fed to the LLM so it never has to invent a volatility figure.
+  context?: { underlyingPx?: number; currentAtmIv?: number; ivRank?: number; ivPercentile?: number };
   scores?: LabStructureScore[];
 }
 
@@ -44,12 +46,79 @@ export interface MarketContext {
   spyAbove200ma: boolean | null;
 }
 
+/**
+ * Distance (% of spot) from the current price to the NEAREST breakeven of a
+ * short-premium structure — how far price can move before the structure loses.
+ *
+ * For an at-the-money short straddle this equals credit/price, but for short
+ * strangles, iron condors, and OTM-strike cash-secured puts the short strikes
+ * sit away from spot, so the true breakeven is `shortStrike ± credit` and
+ * credit/price badly UNDERSTATES it (e.g. a 25%-OTM iron condor reads ~2% on
+ * the old proxy but is really ~28%). Returns the binding (nearer) side, or null
+ * when there is no short leg or an input is missing.
+ *
+ * `netCredit` is per-contract (×100 shares). Leg `side` is used when present;
+ * older data without it infers put/call from strike-vs-spot.
+ * see docs/formulas.md#breakeven-distance
+ */
+export function breakevenDistancePct(
+  legs: Array<{ strike: number; action: string; side?: 'call' | 'put' }>,
+  netCredit: number | null,
+  price: number | null,
+): number | null {
+  if (netCredit === null || price === null || price <= 0) return null;
+  const sells = legs.filter(l => l.action === 'sell');
+  if (sells.length === 0) return null;
+  const creditPerShare = Math.abs(netCredit) / 100;
+  const sideOf = (l: { strike: number; side?: 'call' | 'put' }): 'call' | 'put' =>
+    l.side ?? (l.strike <= price ? 'put' : 'call');
+  const putStrikes  = sells.filter(l => sideOf(l) === 'put').map(l => l.strike);
+  const callStrikes = sells.filter(l => sideOf(l) === 'call').map(l => l.strike);
+  const dists: number[] = [];
+  if (putStrikes.length) {
+    const shortPut = Math.max(...putStrikes);          // nearest put = highest strike
+    dists.push(((price - (shortPut - creditPerShare)) / price) * 100);
+  }
+  if (callStrikes.length) {
+    const shortCall = Math.min(...callStrikes);        // nearest call = lowest strike
+    dists.push((((shortCall + creditPerShare) - price) / price) * 100);
+  }
+  if (dists.length === 0) return null;
+  return +Math.min(...dists).toFixed(1);
+}
+
+/**
+ * Pull the real volatility figures out of a pick's lab context for the critic
+ * LLM, so it never has to invent an IV. Returns null (→ the prompt forbids
+ * citing any vol figure) when the lab did not measure IV. impliedVolPct is the
+ * underlying's annualized ATM implied vol as a percentage.
+ */
+export function extractVolatilityContext(
+  labResult: { context?: { currentAtmIv?: number; ivRank?: number } } | null,
+): { impliedVolPct: number; ivRank: number | null } | null {
+  const iv = labResult?.context?.currentAtmIv;
+  if (typeof iv !== 'number' || !Number.isFinite(iv)) return null;
+  const rank = labResult?.context?.ivRank;
+  return {
+    impliedVolPct: +iv.toFixed(1),
+    ivRank: typeof rank === 'number' && Number.isFinite(rank) ? +rank.toFixed(0) : null,
+  };
+}
+
 export class CriticService {
   constructor(private readonly db: Database) {}
 
   // Reads VIX from quote_cache and SPY 200MA from historical_prices.
   getMarketContext(): MarketContext {
     type QuoteRow = { last: number };
+    // KNOWN GAP: VIX is effectively always null today — nothing writes a 'VIX' row to
+    // quote_cache, and the only VIX fetch (briefing-service) hits Polygon's *stocks*
+    // snapshot for ticker 'VIX', which returns nothing (VIX is an index = I:VIX, an
+    // Indices-plan ticker the Stocks Starter plan lacks). So the macro context is
+    // SPY-trend only and the two VIX rules (wheel/income >30, bearish <14) are dormant.
+    // This null path is fail-safe (vixLevel null, rules skip). A real fix needs a
+    // verified index-quote source (E*Trade /market/quote, or a Polygon Indices plan).
+    // see CLAUDE.md "Known quirks" / .ai/AI_CONTEXT.md §10.
     const vixRow = this.db.prepare(
       `SELECT last FROM quote_cache WHERE ticker = 'VIX' LIMIT 1`
     ).get() as QuoteRow | undefined;
@@ -154,11 +223,11 @@ export class CriticService {
             ? +((strike - price) / price * 100).toFixed(1)
             : null;
 
-          // Breakeven distance %: for income, how far price can move before structure loses.
-          // netCredit is per-contract (×100 shares); dividing by per-share price gives % directly.
+          // Breakeven distance %: for income, how far price can move before the structure
+          // loses — strike-aware (correct for strangles/condors, not just ATM straddles).
           // see docs/formulas.md#breakeven-distance
-          const breakevenDistancePct = (strategy === 'income' && credit !== null && price !== null && price > 0)
-            ? +(Math.abs(credit) / price).toFixed(1)
+          const beDistancePct = strategy === 'income'
+            ? breakevenDistancePct(best.setup.legs, credit, price)
             : null;
 
           structure = {
@@ -170,7 +239,7 @@ export class CriticService {
             credit,
             liquidityScore: best.liquidityScore,
             ...(strikeOtmPct !== null && { strikeOtmPct }),
-            ...(breakevenDistancePct !== null && { breakevenDistancePct }),
+            ...(beDistancePct !== null && { breakevenDistancePct: beDistancePct }),
             ...(presentAsStock && {
               presentation: 'stock purchase — all option structures graded C/F in the current IV regime; ' +
                 'the structure above is an optional alternative, not the recommendation',
@@ -184,6 +253,12 @@ export class CriticService {
       const price52wReturn = pick.signals['priceMomentumPct']?.missing === false
         ? (pick.signals['priceMomentumPct']?.raw ?? null)
         : null;
+
+      // Real volatility, so the model never invents an IV/realized-vol figure. The lab
+      // context carries the underlying's annualized ATM implied vol (a percentage) and
+      // its 1-year rank — without these the prompt's "expected 1-sigma move" instruction
+      // forced the LLM to fabricate a vol number (e.g. "140.8% IV" vs the true 104.7%).
+      const volatility = extractVolatilityContext(pick.strategyLabResult as LabResultShape | null);
 
       // Earnings within the hold window — single most important event risk for options
       const earningsInWindow = structureExpiry
@@ -214,6 +289,7 @@ export class CriticService {
         },
         earningsInWindow,  // null = no earnings before expiry; otherwise { date, daysFromNow, confirmed }
         earningsKnown,     // false = calendar has no future earnings data for this ticker at all
+        volatility,        // { impliedVolPct, ivRank } from real data — or null when unavailable
         topSignals,
         structure,
         advocateRationale: pick.aiRationale,
@@ -231,7 +307,8 @@ Do NOT default to 'caution' — only raise an issue if it is specific and action
 FLAG SEVERITIES: 'warning' flags indicate material risk. 'info' flags are advisory only — a pick whose only flags are info-severity can still merit 'pass'; mention the advisory briefly but do not let it alone drive a 'caution'.
 
 MARKET DATA: All values in \`marketData\` are live as of \`date\` from real-time feeds — treat them as ground truth. Do not use training knowledge to contradict provided prices; stocks change dramatically over years of training lag. \`price52wReturnPct\` shows the 1-year return so you can calibrate price level without recalling historical absolutes.
-STRUCTURE: \`dte\` is pre-computed calendar days to expiry. \`strikeOtmPct\` = (short strike − current price) / price × 100: positive means the strike is ABOVE spot (OTM for short calls, ITM for short puts); negative means BELOW spot (OTM for short puts, ITM for short calls). Judge moneyness by the leg's side — a short put with strikeOtmPct of +30% is deeply ITM and broken, not safe. \`breakevenDistancePct\` (income only) is how far price can move before the structure loses — compare this to expected 1-sigma move (annualized vol / sqrt(365/dte)) to assess real risk. If \`structure.presentation\` says stock purchase, evaluate the pick as a plain stock buy — the option structure shown is an optional alternative; do not penalize the stock thesis for the structure's grade.
+STRUCTURE: \`dte\` is pre-computed calendar days to expiry. \`strikeOtmPct\` = (short strike − current price) / price × 100: positive means the strike is ABOVE spot (OTM for short calls, ITM for short puts); negative means BELOW spot (OTM for short puts, ITM for short calls). Judge moneyness by the leg's side — a short put with strikeOtmPct of +30% is deeply ITM and broken, not safe. \`breakevenDistancePct\` (income only) is the distance to the structure's nearest breakeven — how far price can move before it loses; compare this to the expected 1-sigma move to assess real risk. If \`structure.presentation\` says stock purchase, evaluate the pick as a plain stock buy — the option structure shown is an optional alternative; do not penalize the stock thesis for the structure's grade.
+VOLATILITY: \`volatility.impliedVolPct\` is the underlying's current annualized at-the-money implied volatility, already expressed as a percentage (e.g. 104.7 means 104.7%). Use ONLY this value for any expected-move or 1-sigma reasoning: expected 1-sigma move over the hold ≈ impliedVolPct × sqrt(dte/365). \`volatility.ivRank\` (0–100) shows where current IV sits in its 1-year range. CRITICAL: do NOT state any implied-volatility or realized-volatility number that is not \`volatility.impliedVolPct\` — never recall or estimate a volatility figure from training knowledge. If \`volatility\` is null, do not cite any volatility number; say it could not be measured.
 MARKET CONTEXT: \`vixLevel\` and \`spyTrend\` describe today's macro environment.
 EARNINGS: \`earningsInWindow\` is non-null if there is a known earnings event before expiry — this is the single biggest event risk for any options position. If \`earningsKnown\` is false the calendar has NO future earnings data for this ticker, so treat earnings risk as unverified rather than absent — for options positions, note that the report date must be checked manually.
 
@@ -651,10 +728,10 @@ Use verdict: pass, caution, or flag. Use confidence: high, medium, or low.`;
     if (strategy !== 'income' && strategy !== 'wheel') return null;
     const chosen = this.selectRelevantStructure(pick, strategy);
     if (!chosen?.setup || chosen.setup.netCredit === null || !pick.price || pick.price <= 0) return null;
-    // netCredit is per-contract (100 shares); dividing by per-share price gives breakeven %
-    // see docs/formulas.md#breakeven-distance
-    const breakevenPct = Math.abs(chosen.setup.netCredit) / pick.price;
-    if (breakevenPct >= 2.0) return null;
+    // Strike-aware nearest breakeven — credit/price alone understates it for
+    // strangles/condors/OTM CSPs (a wide condor is not "thin"). see docs/formulas.md#breakeven-distance
+    const breakevenPct = breakevenDistancePct(chosen.setup.legs, chosen.setup.netCredit, pick.price);
+    if (breakevenPct === null || breakevenPct >= 2.0) return null;
     return {
       key: 'thin_breakeven',
       severity: 'warning',

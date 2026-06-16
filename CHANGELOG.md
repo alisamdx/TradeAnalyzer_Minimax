@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.20] — 2026-06-15
+
+### Fixed — daily-brief accuracy audit (pre-real-money)
+- **Critic no longer fabricates volatility figures.** The critic's LLM context carried **no** implied- or realized-vol field, yet its system prompt instructed the model to compute an "expected 1-sigma move (annualized vol / sqrt(365/dte))." With nothing to anchor to, the model **invented** precise vol numbers shown to the user as risk rationale (e.g. MRVL wheel cited "140.8% implied volatility" against the true 104.7% ATM IV; RKLB "~108% realized," ASTS "~139%"). Now `extractVolatilityContext()` feeds the real `{ impliedVolPct, ivRank }` from the lab context, the prompt uses that field for all expected-move reasoning, and it **forbids** citing any volatility figure not provided (null → "could not be measured"). Rationale-accuracy only — no change to which trades are taken. Tests: `critic-service.test.ts` (+3).
+- **Breakeven-distance is now strike-aware.** `breakevenDistancePct` was `|netCredit| / price`, which equals the breakeven distance only for an **at-the-money short straddle**; for short strangles, iron condors, and OTM-strike CSPs the short strikes sit away from spot, so it understated the true breakeven ~10× (MRVL iron condor read **2.3%** vs the real **~28%**) and made the critic falsely flag structurally-wide condors `thin_breakeven`. Replaced with an exported pure `breakevenDistancePct(legs, netCredit, price)` that computes the distance to the nearest `shortStrike ± credit` using only the short legs (long wings cap loss, not breakeven). Fixes both the LLM context value (income) and the `thin_breakeven` rule (income/wheel). Tests: `critic-service.test.ts` (+8); `docs/formulas.md#breakeven-distance` rewritten.
+- **Brief diagnostic `scripts/brief-deep-dive.mjs` repaired.** The script used to vet a brief before relying on it was itself unreliable: it crashed on a stale `analysis_snapshots` schema, printed `undefined` in its verdict summary (read `f.rule`; flags carry `f.key`), displayed `scores[0]` (the overall top structure) instead of the strategy-relevant one — which made bearish picks *look* like they had bullish structures — and omitted the 6th `inflection` strategy entirely. Now shows the actual presented structure, includes all six strategies, fixes the freshness query (`technical_signals`), and adds a "no relevant structure" anomaly check.
+
+### Known gap (documented, not yet fixed)
+- **VIX is always null** in the critic's macro context. Nothing writes a `'VIX'` row to `quote_cache`, and the only fetch hits Polygon's *stocks* snapshot for ticker `VIX` (an index = `I:VIX`, an Indices-plan ticker the Stocks Starter plan lacks). The macro context is SPY-trend-only and the two VIX critic rules (wheel/income VIX>30, bearish VIX<14) are dormant — fail-safe (null → rules skip). A real fix needs a verified index-quote source (E*Trade `/market/quote` or a Polygon Indices plan) and is deferred until live-verifiable. Documented in `CLAUDE.md` Known quirks + `.ai/AI_CONTEXT.md §10`.
+
+### Not changed (validated, deliberately left alone)
+- Bearish picks can surface on stocks in short-term uptrends (lab `directionBias: bullish`, `trend: Sideways/Bullish`) driven by fundamental-weakness + the `rsiOverbought` signal saturating below RSI 70. This is a **validated** characteristic of the bearish ≥70 composite (real short edge on full-year replay), an overbought guard was already tested and **rejected** on the same sample (FR-SEY-5), and the critic surfaces the risk (`elevated_market_risk`, `counter_trend_itm_strike`). Not re-engineered.
+
 ## [1.1.19] — 2026-06-15
 
 ### Fixed

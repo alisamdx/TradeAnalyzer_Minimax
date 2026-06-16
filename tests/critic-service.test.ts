@@ -5,12 +5,18 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import Database from 'better-sqlite3';
-import { CriticService, type MarketContext } from '../src/main/services/critic-service.js';
+import {
+  CriticService,
+  breakevenDistancePct,
+  extractVolatilityContext,
+  type MarketContext,
+} from '../src/main/services/critic-service.js';
 import { EARNINGS_PENALTY_STRATEGIES } from '../src/main/services/jobs/daily-intelligence-brief-job.js';
 import type { BriefPick, ScoringConfig } from '../src/shared/types.js';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
+type Leg = { strike: number; action: string; side?: 'call' | 'put' };
 type LabScore = {
   slug: string;
   grade: string;
@@ -18,7 +24,7 @@ type LabScore = {
   setup: {
     expiration: string;
     netCredit: number | null;
-    legs: Array<{ strike: number; action: string }>;
+    legs: Leg[];
     unavailableReason?: string | null;
   } | null;
 };
@@ -30,6 +36,10 @@ function makeSetup(shortStrike: number, expiration = '2099-01-15', unavailableRe
     legs: [{ strike: shortStrike, action: 'sell' }],
     unavailableReason,
   };
+}
+
+function makeMultiLegSetup(legs: Leg[], netCredit: number, expiration = '2099-01-15') {
+  return { expiration, netCredit, legs, unavailableReason: null };
 }
 
 function makePick(scores: LabScore[] | null, price = 100, labUnderlyingPx?: number): BriefPick {
@@ -283,5 +293,103 @@ describe('EARNINGS_PENALTY_STRATEGIES', () => {
     expect(EARNINGS_PENALTY_STRATEGIES).toContain('income');
     expect(EARNINGS_PENALTY_STRATEGIES).toContain('wheel');
     expect(EARNINGS_PENALTY_STRATEGIES).toContain('bearish');
+  });
+});
+
+// F2: strike-aware breakeven distance — credit/price only holds for ATM straddles.
+describe('breakevenDistancePct (strike-aware)', () => {
+  it('equals credit/price for an ATM short straddle (backward compatible)', () => {
+    // sell put + sell call both at 100, $8/share credit, spot 100 → BE 92/108 → 8%.
+    const legs: Leg[] = [
+      { strike: 100, action: 'sell', side: 'put' },
+      { strike: 100, action: 'sell', side: 'call' },
+    ];
+    expect(breakevenDistancePct(legs, 800, 100)).toBe(8.0);
+  });
+
+  it('is much wider than credit/price for an OTM short strangle', () => {
+    // sell put 90 / sell call 110, $4/share credit, spot 100. Old proxy = 4%.
+    const legs: Leg[] = [
+      { strike: 90, action: 'sell', side: 'put' },
+      { strike: 110, action: 'sell', side: 'call' },
+    ];
+    expect(breakevenDistancePct(legs, 400, 100)).toBe(14.0); // (100-(90-4))/100
+  });
+
+  it('uses the inner short strikes (not the long wings) for an iron condor', () => {
+    // short 80/120, long 70/130, $3/share credit, spot 100. Real BE ≈ 23%, old proxy = 3%.
+    const legs: Leg[] = [
+      { strike: 70, action: 'buy', side: 'put' },
+      { strike: 80, action: 'sell', side: 'put' },
+      { strike: 120, action: 'sell', side: 'call' },
+      { strike: 130, action: 'buy', side: 'call' },
+    ];
+    expect(breakevenDistancePct(legs, 300, 100)).toBe(23.0);
+  });
+
+  it('includes the OTM distance for a single short put (CSP)', () => {
+    // sell put 95, $2.5/share credit, spot 100 → BE 92.5 → 7.5% (old proxy = 2.5%).
+    expect(breakevenDistancePct([{ strike: 95, action: 'sell', side: 'put' }], 250, 100)).toBe(7.5);
+  });
+
+  it('infers put/call from strike-vs-spot when side is absent', () => {
+    expect(breakevenDistancePct([{ strike: 90, action: 'sell' }], 400, 100)).toBe(14.0);
+  });
+
+  it('returns null for missing credit, no short leg, or non-positive price', () => {
+    expect(breakevenDistancePct([{ strike: 95, action: 'sell' }], null, 100)).toBeNull();
+    expect(breakevenDistancePct([{ strike: 95, action: 'buy' }], 250, 100)).toBeNull();
+    expect(breakevenDistancePct([{ strike: 95, action: 'sell' }], 250, 0)).toBeNull();
+  });
+});
+
+// F2: the thin_breakeven warning must not fire on structurally-wide condors.
+describe('checkThinBreakeven — strike-aware', () => {
+  let svc: CriticService;
+  beforeEach(() => {
+    const db = new Database(':memory:');
+    db.exec(`CREATE TABLE earnings_calendar (ticker TEXT, report_date TEXT, confirmed INTEGER)`);
+    svc = new CriticService(db);
+  });
+
+  it('does NOT flag a wide iron condor as thin (was the bug: reported ~2%)', () => {
+    const pick = makePick([
+      { slug: 'iron-condor', grade: 'A', liquidityScore: 8, setup: makeMultiLegSetup([
+        { strike: 70, action: 'buy', side: 'put' },
+        { strike: 80, action: 'sell', side: 'put' },
+        { strike: 120, action: 'sell', side: 'call' },
+        { strike: 130, action: 'buy', side: 'call' },
+      ], 300) },
+    ], 100);
+    expect(runChecks(svc, pick, 'income').find(f => f.key === 'thin_breakeven')).toBeUndefined();
+  });
+
+  it('still flags a genuinely thin ATM short straddle', () => {
+    const pick = makePick([
+      { slug: 'short-straddle', grade: 'A', liquidityScore: 8, setup: makeMultiLegSetup([
+        { strike: 100, action: 'sell', side: 'put' },
+        { strike: 100, action: 'sell', side: 'call' },
+      ], 100) }, // $1/share credit, spot 100 → BE 1% < 2%
+    ], 100);
+    expect(runChecks(svc, pick, 'income').find(f => f.key === 'thin_breakeven')).toBeDefined();
+  });
+});
+
+// F1: real IV is extracted for the critic so it never invents a volatility figure.
+describe('extractVolatilityContext', () => {
+  it('extracts and rounds implied vol + IV rank from the lab context', () => {
+    expect(extractVolatilityContext({ context: { currentAtmIv: 104.74, ivRank: 89.88 } }))
+      .toEqual({ impliedVolPct: 104.7, ivRank: 90 });
+  });
+
+  it('returns ivRank null when only IV is present', () => {
+    expect(extractVolatilityContext({ context: { currentAtmIv: 40 } }))
+      .toEqual({ impliedVolPct: 40, ivRank: null });
+  });
+
+  it('returns null when IV is missing or not finite (→ prompt forbids citing vol)', () => {
+    expect(extractVolatilityContext(null)).toBeNull();
+    expect(extractVolatilityContext({ context: {} })).toBeNull();
+    expect(extractVolatilityContext({ context: { currentAtmIv: NaN } })).toBeNull();
   });
 });

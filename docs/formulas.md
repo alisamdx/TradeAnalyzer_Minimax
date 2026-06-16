@@ -147,17 +147,25 @@ Implementation: `computeRatios()` → `fcfToNetIncome`, `roic`, `netDebtToEbitda
 
 ### breakeven-distance
 
-For income structures (strangles, condors, iron-flies), how far the underlying can move before the net credit is consumed:
+How far the underlying can move before a short-premium structure loses — the distance from spot to the **nearest** breakeven. This is **strike-aware**: the breakeven sits at `shortStrike ± credit`, so where the short strikes sit relative to spot matters.
 
 ```
-breakevenDistancePct (%) = |netCredit| / underlyingPrice
+creditPerShare = |netCredit| / 100                       (netCredit is per-contract = per-share × 100)
+lower breakeven = (nearest short put strike)  − creditPerShare
+upper breakeven = (nearest short call strike) + creditPerShare
+breakevenDistancePct (%) = min( present sides ) of:
+    (price − lowerBE) / price × 100        // downside, if a short put exists
+    (upperBE − price) / price × 100        // upside,   if a short call exists
 ```
 
-**Key invariant:** `netCredit` from the Strategy Lab is stored **per-contract** (= per-share value × 100). `underlyingPrice` is **per-share**. Therefore `netCredit / price` already yields a percentage directly — do **not** multiply by 100.
+**Why not `|netCredit| / price`?** That older proxy is the credit as a percent of spot, which equals the breakeven distance **only for an at-the-money short straddle** (both legs at spot). For a short strangle, iron condor, or an OTM-strike cash-secured put the short strikes sit *away* from spot, so the true breakeven is much farther and `credit/price` badly **understates** it — e.g. a 25%-OTM iron condor reads ~2% on the old proxy but is really ~28%, which made the critic flag structurally-wide condors as "thin breakeven."
 
-Example: XOM credit $1,132.50/contract ÷ $148.91/share = 7.6% breakeven distance.
+Example (ATM short straddle, where old and new agree): credit $8.00/share, spot $100 → BE 92/108 → **8.0%**.
+Example (iron condor): short put 80 / short call 120, $3.00/share credit, spot $100 → lower BE 77, upper BE 123 → **23.0%** (old proxy would say 3.0%).
 
-Used in `CriticService.synthesizeVerdict()` → `structure.breakevenDistancePct` field passed to the critic LLM prompt.
+Long wings (the bought legs of a condor/fly) cap loss, not breakeven, so only the **short** legs enter the calculation. Leg `side` (`put`/`call`) is used when present; older data without it infers side from strike-vs-spot.
+
+Implemented as the exported pure `breakevenDistancePct(legs, netCredit, price)` in `critic-service.ts`; used by `synthesizeVerdict()` (the `structure.breakevenDistancePct` field for income) and the `thin_breakeven` rule (income/wheel).
 
 ### annualized-options-return
 
