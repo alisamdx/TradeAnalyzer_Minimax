@@ -38,6 +38,22 @@ const DIRECTIONAL_STRATEGIES = new Set(['bullish', 'bearish', 'buy']);
 // won't surface a badly-priced (D/F) directional structure just to avoid a butterfly.
 const MIN_DIRECTIONAL_GRADE = GRADE_RANK['C']!;
 
+/**
+ * Human-readable leg list for a structure, e.g. ["buy 2× put $37.5", "sell put $35"].
+ * Shared by the advocate (Stage-5 rationale) and the critic's LLM context so both describe
+ * the SAME complete structure — a single short strike misled the critic on multi-leg
+ * structures (a put zebra's financing short leg read as a lone ITM strike). Includes the
+ * quantity so 2:1 ratio legs (zebra body, butterfly body) are unambiguous.
+ */
+export function formatStructureLegs(
+  legs: ReadonlyArray<{ action: string; side?: 'call' | 'put' | null; strike: number; qty?: number }>,
+): string[] {
+  return legs.map(l => {
+    const q = (l.qty ?? 1) > 1 ? `${l.qty}× ` : '';
+    return `${l.action} ${q}${l.side ?? ''} $${l.strike}`.replace(/\s+/g, ' ').trim();
+  });
+}
+
 /** Minimal shape needed to choose a structure — any Strategy Lab score satisfies it. */
 export interface RelevantScoreLike {
   slug: string;

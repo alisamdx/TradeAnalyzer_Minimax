@@ -5,7 +5,7 @@
 import type { Database } from 'better-sqlite3';
 import Anthropic from '@anthropic-ai/sdk';
 import type { BriefPick, CriticFlag, CriticVerdict, ScoringConfig } from '@shared/types.js';
-import { STRATEGY_RELEVANT_SLUGS, pickRelevantStructure } from '@shared/strategy-structures.js';
+import { STRATEGY_RELEVANT_SLUGS, pickRelevantStructure, formatStructureLegs } from '@shared/strategy-structures.js';
 
 // Grade ordering for structure quality checks (A+=best, F=worst).
 // 'A+' must be present: lab grades include it, and a missing key ranks 0 (below F).
@@ -23,7 +23,7 @@ interface LabStructureScore {
     expiration: string;
     netCredit: number | null;
     maxLoss?: number | null;   // null/absent ⇒ unbounded risk (drives defined-risk preference)
-    legs: Array<{ strike: number; action: string; side?: 'call' | 'put' }>;
+    legs: Array<{ strike: number; action: string; side?: 'call' | 'put'; qty?: number }>;
     unavailableReason?: string | null;
   } | null;
 }
@@ -81,20 +81,25 @@ export function breakevenDistancePct(
 }
 
 /**
- * Pull the real volatility figures out of a pick's lab context for the critic
- * LLM, so it never has to invent an IV. Returns null (→ the prompt forbids
- * citing any vol figure) when the lab did not measure IV. impliedVolPct is the
- * underlying's annualized ATM implied vol as a percentage.
+ * Pull the real volatility figures out of a pick's lab context for the critic LLM, so it
+ * never has to invent one. impliedVolPct is the underlying's annualized ATM implied vol (%);
+ * `realizedVolPct` (the recentVolatility scoring signal the advocate cites as "recent
+ * volatility") is included when known so the critic can reconcile the advocate's number
+ * instead of mistaking it for an IV discrepancy. Returns null (→ the prompt forbids citing
+ * any vol figure) only when NEITHER measure is available.
  */
 export function extractVolatilityContext(
   labResult: { context?: { currentAtmIv?: number; ivRank?: number } } | null,
-): { impliedVolPct: number; ivRank: number | null } | null {
+  realizedVolPct: number | null = null,
+): { impliedVolPct: number | null; ivRank: number | null; realizedVolPct?: number } | null {
   const iv = labResult?.context?.currentAtmIv;
-  if (typeof iv !== 'number' || !Number.isFinite(iv)) return null;
+  const hasIv = typeof iv === 'number' && Number.isFinite(iv);
+  if (!hasIv && realizedVolPct === null) return null;
   const rank = labResult?.context?.ivRank;
   return {
-    impliedVolPct: +iv.toFixed(1),
-    ivRank: typeof rank === 'number' && Number.isFinite(rank) ? +rank.toFixed(0) : null,
+    impliedVolPct: hasIv ? +iv!.toFixed(1) : null,
+    ivRank: hasIv && typeof rank === 'number' && Number.isFinite(rank) ? +rank.toFixed(0) : null,
+    ...(realizedVolPct !== null && { realizedVolPct }),
   };
 }
 
@@ -225,7 +230,10 @@ export class CriticService {
           structure = {
             type: best.slug,
             grade: best.grade,
-            strike,
+            // Full leg list so the critic sees the WHOLE structure, not just the short
+            // strike — multi-leg structures (zebra/butterfly/condor) were misread otherwise.
+            legs: formatStructureLegs(best.setup.legs),
+            shortStrike: strike,
             expiry: structureExpiry,
             dte,
             credit,
@@ -250,7 +258,13 @@ export class CriticService {
       // context carries the underlying's annualized ATM implied vol (a percentage) and
       // its 1-year rank — without these the prompt's "expected 1-sigma move" instruction
       // forced the LLM to fabricate a vol number (e.g. "140.8% IV" vs the true 104.7%).
-      const volatility = extractVolatilityContext(pick.strategyLabResult as LabResultShape | null);
+      // Also surface the realized-vol scoring signal the advocate cites as "recent
+      // volatility" — without it the critic mistook the advocate's realized figure for an
+      // IV claim and flagged a phantom "IV discrepancy" (e.g. ASTS 138.7% vs IV 111.6%).
+      const rvSig = pick.signals['recentVolatility'];
+      const realizedVolPct = rvSig && rvSig.missing === false && typeof rvSig.raw === 'number'
+        ? +rvSig.raw.toFixed(1) : null;
+      const volatility = extractVolatilityContext(pick.strategyLabResult as LabResultShape | null, realizedVolPct);
 
       // Earnings within the hold window — single most important event risk for options
       const earningsInWindow = structureExpiry
@@ -281,7 +295,7 @@ export class CriticService {
         },
         earningsInWindow,  // null = no earnings before expiry; otherwise { date, daysFromNow, confirmed }
         earningsKnown,     // false = calendar has no future earnings data for this ticker at all
-        volatility,        // { impliedVolPct, ivRank } from real data — or null when unavailable
+        volatility,        // { impliedVolPct, ivRank, realizedVolPct? } from real data — or null
         topSignals,
         structure,
         advocateRationale: pick.aiRationale,
@@ -299,8 +313,8 @@ Do NOT default to 'caution' — only raise an issue if it is specific and action
 FLAG SEVERITIES: 'warning' flags indicate material risk. 'info' flags are advisory only — a pick whose only flags are info-severity can still merit 'pass'; mention the advisory briefly but do not let it alone drive a 'caution'.
 
 MARKET DATA: All values in \`marketData\` are live as of \`date\` from real-time feeds — treat them as ground truth. Do not use training knowledge to contradict provided prices; stocks change dramatically over years of training lag. \`price52wReturnPct\` shows the 1-year return so you can calibrate price level without recalling historical absolutes.
-STRUCTURE: \`dte\` is pre-computed calendar days to expiry. \`strikeOtmPct\` = (short strike − current price) / price × 100: positive means the strike is ABOVE spot (OTM for short calls, ITM for short puts); negative means BELOW spot (OTM for short puts, ITM for short calls). Judge moneyness by the leg's side — a short put with strikeOtmPct of +30% is deeply ITM and broken, not safe. \`breakevenDistancePct\` (income only) is the distance to the structure's nearest breakeven — how far price can move before it loses; compare this to the expected 1-sigma move to assess real risk. If \`structure.presentation\` says stock purchase, evaluate the pick as a plain stock buy — the option structure shown is an optional alternative; do not penalize the stock thesis for the structure's grade.
-VOLATILITY: \`volatility.impliedVolPct\` is the underlying's current annualized at-the-money implied volatility, already expressed as a percentage (e.g. 104.7 means 104.7%). Use ONLY this value for any expected-move or 1-sigma reasoning: expected 1-sigma move over the hold ≈ impliedVolPct × sqrt(dte/365). \`volatility.ivRank\` (0–100) shows where current IV sits in its 1-year range. CRITICAL: do NOT state any implied-volatility or realized-volatility number that is not \`volatility.impliedVolPct\` — never recall or estimate a volatility figure from training knowledge. If \`volatility\` is null, do not cite any volatility number; say it could not be measured.
+STRUCTURE: \`structure.legs\` is the COMPLETE trade — judge the whole structure from it, not from any single leg. Multi-leg structures (zebra = 2:1 long/short same side, butterfly = 1-2-1, condor) are defined by all their legs; do not treat one leg in isolation (e.g. a put zebra's short leg sitting at/above spot is normal financing, not a broken ITM strike). \`dte\` is pre-computed calendar days to expiry. \`shortStrike\` / \`strikeOtmPct\` refer to the primary SHORT leg: \`strikeOtmPct\` = (shortStrike − current price) / price × 100: positive means ABOVE spot (OTM for short calls, ITM for short puts); negative means BELOW spot (OTM for short puts, ITM for short calls). Judge moneyness by the leg's side. \`breakevenDistancePct\` (income only) is the distance to the structure's nearest breakeven — compare it to the expected 1-sigma move. If \`structure.presentation\` says stock purchase, evaluate the pick as a plain stock buy — the option structure shown is optional; do not penalize the stock thesis for the structure's grade.
+VOLATILITY: \`volatility.impliedVolPct\` is the underlying's current annualized at-the-money implied volatility as a percentage (e.g. 104.7 = 104.7%). Use ONLY this for expected-move/1-sigma reasoning: expected 1-sigma move over the hold ≈ impliedVolPct × sqrt(dte/365) (if impliedVolPct is null, do not attempt expected-move reasoning). \`volatility.ivRank\` (0–100) is where IV sits in its 1-year range. \`volatility.realizedVolPct\`, when present, is the stock's RECENT REALIZED volatility — a momentum signal, NOT implied vol; the advocate may cite it as "recent volatility". It is normal and expected for realized vol to differ from impliedVolPct — do NOT treat that gap as a discrepancy, error, or red flag. CRITICAL: do NOT state any implied- or realized-volatility number that is not in \`volatility\`; never recall or estimate one from training knowledge. If \`volatility\` is null, do not cite any volatility number; say it could not be measured.
 MARKET CONTEXT: \`vixLevel\` and \`spyTrend\` describe today's macro environment.
 EARNINGS: \`earningsInWindow\` is non-null if there is a known earnings event before expiry — this is the single biggest event risk for any options position. If \`earningsKnown\` is false the calendar has NO future earnings data for this ticker, so treat earnings risk as unverified rather than absent — for options positions, note that the report date must be checked manually.
 

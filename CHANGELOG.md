@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.29] — 2026-06-16
+
+### Fixed
+- **The critic now sees the full structure (all legs), not just the short strike.** The advocate was given the complete leg list (v1.1.23) but the critic's LLM context still passed only the single short-leg `strike`, so on multi-leg structures the critic misread the trade — on the latest brief it called a **put zebra**'s $35 financing short leg a lone in-the-money strike and flagged an "inconsistency" against the advocate's fuller "$37.5/$35" description (LBRDK, EL). The critic context now carries `structure.legs` (e.g. `["buy 2× put $37.5", "sell put $35"]`) via a single shared `formatStructureLegs` used by both the advocate and the critic — so both reason about the same complete structure, with leg quantities shown for ratio structures (zebra/butterfly bodies). The old single short strike is retained as `shortStrike`/`strikeOtmPct`.
+- **The critic no longer mistakes the advocate's "recent volatility" for an implied-vol discrepancy.** The advocate cites the realized-vol scoring signal (e.g. ASTS "recent volatility 138.7"); the critic only had `impliedVolPct` (111.6) and flagged a phantom "unexplained IV discrepancy," inflating the verdict to `flag`. `extractVolatilityContext` now also surfaces `volatility.realizedVolPct` (the recentVolatility signal), and the prompt states it is realized vol — a momentum signal, expected to differ from implied vol — so the gap is not treated as an error. Residual of the v1.1.20 IV-conflation class, from the advocate-number angle.
+
+### Notes
+- Critic-context completeness only — no risk was hidden and no recommendation changed; these removed muddled reasoning and ~1 phantom flag. The persisted brief carries the critic verdicts from its generation run; **re-run the brief to get verdicts from the improved context.**
+
 ## [1.1.28] — 2026-06-16
 
 ### Fixed

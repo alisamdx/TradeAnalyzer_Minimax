@@ -457,4 +457,21 @@ describe('extractVolatilityContext', () => {
     expect(extractVolatilityContext({ context: {} })).toBeNull();
     expect(extractVolatilityContext({ context: { currentAtmIv: NaN } })).toBeNull();
   });
+
+  // The critic flagged a phantom "IV discrepancy" when the advocate cited the realized-vol
+  // signal ("recent volatility 138.7") and the critic only had impliedVolPct (111.6).
+  it('includes the realized-vol signal alongside IV so the critic can reconcile it', () => {
+    expect(extractVolatilityContext({ context: { currentAtmIv: 111.6, ivRank: 71 } }, 138.7))
+      .toEqual({ impliedVolPct: 111.6, ivRank: 71, realizedVolPct: 138.7 });
+  });
+
+  it('surfaces realized vol even when IV was not measured (impliedVolPct null, not null object)', () => {
+    expect(extractVolatilityContext({ context: {} }, 80))
+      .toEqual({ impliedVolPct: null, ivRank: null, realizedVolPct: 80 });
+  });
+
+  it('omits realizedVolPct when not provided (unchanged shape for non-vol strategies)', () => {
+    expect(extractVolatilityContext({ context: { currentAtmIv: 40 } }))
+      .toEqual({ impliedVolPct: 40, ivRank: null });
+  });
 });

@@ -3,7 +3,7 @@
 // making it structure-blind on the v2 launch strategy.
 
 import { describe, it, expect } from 'vitest';
-import { STRATEGY_RELEVANT_SLUGS, pickRelevantStructure, pickDisplayStructure } from '../src/shared/strategy-structures.js';
+import { STRATEGY_RELEVANT_SLUGS, pickRelevantStructure, pickDisplayStructure, formatStructureLegs } from '../src/shared/strategy-structures.js';
 import { STRATEGIES } from '../src/main/services/scoring-service.js';
 
 type Score = { slug: string; grade: string; setup: { unavailableReason?: string | null; maxLoss?: number | null } | null };
@@ -11,6 +11,22 @@ const valid = (slug: string, grade: string): Score => ({ slug, grade, setup: { u
 // Defined-risk (bounded maxLoss) vs unbounded (null maxLoss) structures.
 const defined   = (slug: string, grade: string): Score => ({ slug, grade, setup: { unavailableReason: null, maxLoss: -5000 } });
 const unbounded = (slug: string, grade: string): Score => ({ slug, grade, setup: { unavailableReason: null, maxLoss: null } });
+
+describe('formatStructureLegs', () => {
+  it('renders a put zebra with the 2× body so it is not mistaken for a single strike', () => {
+    expect(formatStructureLegs([
+      { action: 'buy', side: 'put', strike: 37.5, qty: 2 },
+      { action: 'sell', side: 'put', strike: 35 },
+    ])).toEqual(['buy 2× put $37.5', 'sell put $35']);
+  });
+
+  it('omits the multiplier for single-quantity legs', () => {
+    expect(formatStructureLegs([
+      { action: 'buy', side: 'put', strike: 67.5 },
+      { action: 'sell', side: 'put', strike: 62.5, qty: 1 },
+    ])).toEqual(['buy put $67.5', 'sell put $62.5']);
+  });
+});
 
 describe('STRATEGY_RELEVANT_SLUGS — coverage parity', () => {
   it('covers every scoring strategy with a non-empty slug list', () => {

@@ -26,7 +26,7 @@ import type { EarningsService } from '../earnings-service.js';
 import type { OAuthCredentials } from '../etrade-auth.js';
 import { getETradeLastPrice } from '../etrade-options.js';
 import { withTransaction } from '../../db/connection.js';
-import { STRATEGY_RELEVANT_SLUGS, pickRelevantStructure } from '@shared/strategy-structures.js';
+import { STRATEGY_RELEVANT_SLUGS, pickRelevantStructure, formatStructureLegs } from '@shared/strategy-structures.js';
 
 // VIX sane range — reject anything outside this (a quote typo can return an unrelated
 // symbol). Historical VIX spans ~9 (2017) to ~82 (COVID); [5,150] is a safe guard.
@@ -92,7 +92,7 @@ function hasAdequateLiquidity(labResult: object | null, strategy: string): boole
 // IV was bad (it's favorable when you sell premium). Returns null when no relevant
 // validated structure exists.
 function summarizeRelevantStructure(labResult: object | null, strategy: string): Record<string, unknown> | null {
-  type Leg = { action: string; side?: 'call' | 'put'; strike: number };
+  type Leg = { action: string; side?: 'call' | 'put'; strike: number; qty?: number };
   type SSetup = { legs: Leg[]; netCredit: number | null; netDebit: number | null; maxLoss?: number | null; unavailableReason?: string | null };
   type SScore = { slug: string; grade: string; setup: SSetup | null };
   const scores = (labResult as { scores?: SScore[] } | null)?.scores;
@@ -108,7 +108,7 @@ function summarizeRelevantStructure(labResult: object | null, strategy: string):
     premiumDirection: isCredit
       ? 'credit — you SELL premium; high IV/IVR is FAVORABLE (richer premium collected)'
       : 'debit — you BUY premium; high IV/IVR RAISES the cost',
-    legs: s.legs.map(l => `${l.action} ${l.side ?? ''} $${l.strike}`.replace(/\s+/g, ' ').trim()),
+    legs: formatStructureLegs(s.legs),
     netCredit: s.netCredit,
     netDebit: s.netDebit,
   };
