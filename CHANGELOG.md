@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.28] — 2026-06-16
+
+### Fixed
+- **Structure P&L is now computed from the actual expiry payoff, fixing wrong max-profit on debit verticals and dangerously understated max-loss on butterflies.** `classifySingleExpiryPnl` previously classified by leg signature, which broke two ways the defined-risk/directional preferences (v1.1.25/27) newly surfaced: **(a)** long/*debit* verticals (`long-put-vertical`, `long-call-vertical`) used a wrong-sign width → **negative max profit** (GPN −698.75, EL −753.75; should be +301.25 / +246.25) and a breakeven off the wrong leg; **(b)** 3-leg **butterflies** fell through the 2-leg branch and reported max loss as just the debit, **understating the true risk ~5–30×** on the broken-wing flies the lab builds (ARE reported −$8.75, true −$258.75; FLUT −$115, true −$615). It now evaluates the position's piecewise-linear payoff (entry cash flow + each leg's intrinsic at every kink), taking extrema for max profit/loss and sign-changes for breakevens, with explicit unbounded detection (net-short calls → `null` loss, net-long calls → `null` profit; puts always bounded since S ≥ 0). This prices verticals (both orientations), balanced and broken-wing butterflies, condors, lizards, and ratio/zebra structures correctly, and surfaces breakevens the old code missed (e.g. a big lizard's upper breakeven). Iron condors/flies and the calendar/PMCC diagonal branch are unchanged.
+- **Debit reward/risk now uses the actual max loss, not the debit paid.** The lab's premium score for debit structures divided max profit by `netDebit`; for a broken-wing butterfly the true max loss exceeds the debit, so this overstated attractiveness. It now divides by `|maxLoss|` (equal to the debit for a simple vertical, larger for a broken-wing fly), so the corrected risk flows into the grade.
+- **Degenerate spread wings are rejected.** When a spread's long and short legs on the same side collapse to the *same strike* (no further-OTM strike available — observed on an ASTS "iron condor" built sell-call \$100 / buy-call \$100, really a mislabeled put spread), the structure is now marked unavailable instead of presenting a phantom wing.
+
+### Notes
+- Ticker selection is unchanged (composite-driven). The corrected max-loss/max-profit do shift some lab **grades** (directional debit verticals up; broken-wing butterflies to an honest, lower reward/risk), but only the structure shown per already-selected pick — neutral on Brief Replay by construction, no FR-SEY-5 gate. The persisted 2026-06-16 brief still holds the old values; **a fresh brief run is needed for the corrected figures to appear.**
+
 ## [1.1.27] — 2026-06-16
 
 ### Changed

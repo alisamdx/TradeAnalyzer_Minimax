@@ -342,13 +342,19 @@ function findByDelta(
 }
 
 /**
- * Closed-form max-profit / max-loss / breakevens for a SINGLE-expiration option
- * structure, classified by its leg signature. Pure and exported for direct testing.
+ * Max-profit / max-loss / breakevens for a SINGLE-expiration option structure, computed
+ * from the actual expiry payoff. Pure and exported for direct testing.
  *
- * `dollarCredit` is the net credit in dollars (negative = net debit); `netCreditPerShare`
- * is the per-share credit used for breakeven offsets. A **null `maxLoss` means the loss is
- * unbounded** — a naked short option with no covering long on that side (naked call,
- * strangle/straddle, and the reverse lizards, whose naked short call has unlimited upside).
+ * Rather than classify by leg signature (which mis-prices long/debit verticals — wrong-sign
+ * width → negative max profit — and 3-leg / ratio / broken-wing structures — understated max
+ * loss), it evaluates the position's per-share P&L across the piecewise-linear payoff: the
+ * entry cash flow (`netCreditPerShare`) plus each leg's intrinsic value, sampled at every
+ * kink (0, each strike, and a far point beyond the last strike). Extrema over those kinks give
+ * max profit / loss; sign changes between adjacent kinks give breakevens.
+ *
+ * **A `null` max loss/profit means that side is UNBOUNDED.** Only net-short CALLS are
+ * open-ended (loss as S→∞); net-long CALLS give unbounded profit. PUTS are always bounded
+ * because the underlying cannot fall below 0. `dollarCredit` is `netCreditPerShare × 100`.
  * see docs/formulas.md#structure-pnl
  */
 export function classifySingleExpiryPnl(
@@ -356,74 +362,57 @@ export function classifySingleExpiryPnl(
   dollarCredit: number,
   netCreditPerShare: number,
 ): { maxProfit: number | null; maxLoss: number | null; breakevens: number[] } {
-  const putSell  = legs.find(l => l.side === 'put'  && l.action === 'sell');
-  const putBuy   = legs.find(l => l.side === 'put'  && l.action === 'buy');
-  const callSell = legs.find(l => l.side === 'call' && l.action === 'sell');
-  const callBuy  = legs.find(l => l.side === 'call' && l.action === 'buy');
-
-  let maxProfit: number | null = null;
-  let maxLoss:   number | null = null;
-  let breakevens: number[]     = [];
-
-  if (putSell && !putBuy && !callSell && !callBuy) {
-    // Naked put
-    maxProfit  = dollarCredit;
-    maxLoss    = -(putSell.strike * 100 - dollarCredit);
-    breakevens = [putSell.strike - netCreditPerShare];
-  } else if (callSell && !callBuy && !putSell && !putBuy) {
-    // Naked call — unbounded upside loss
-    maxProfit  = dollarCredit;
-    maxLoss    = null;
-    breakevens = [callSell.strike + netCreditPerShare];
-  } else if (putSell && putBuy && !callSell && !callBuy) {
-    // Put spread (short or long)
-    const width = (putSell.strike - putBuy.strike) * 100;
-    maxProfit  = netCreditPerShare > 0 ? dollarCredit : width + dollarCredit;
-    maxLoss    = netCreditPerShare > 0 ? -(width - dollarCredit) : -Math.abs(dollarCredit);
-    breakevens = [putSell.strike - netCreditPerShare];
-  } else if (callSell && callBuy && !putSell && !putBuy) {
-    // Call spread
-    const width = (callBuy.strike - callSell.strike) * 100;
-    maxProfit  = netCreditPerShare > 0 ? dollarCredit : width + dollarCredit;
-    maxLoss    = netCreditPerShare > 0 ? -(width - dollarCredit) : -Math.abs(dollarCredit);
-    breakevens = [callSell.strike + netCreditPerShare];
-  } else if (putSell && callSell && !putBuy && !callBuy) {
-    // Strangle / straddle — naked on both sides, unbounded upside loss
-    maxProfit  = dollarCredit;
-    maxLoss    = null;
-    breakevens = [putSell.strike - netCreditPerShare, callSell.strike + netCreditPerShare];
-  } else if (putSell && putBuy && callSell && callBuy) {
-    // Iron condor / iron fly
-    const putW  = (putSell.strike - putBuy.strike) * 100;
-    const callW = (callBuy.strike - callSell.strike) * 100;
-    const wing  = Math.max(putW, callW);
-    maxProfit  = dollarCredit;
-    maxLoss    = -(wing - dollarCredit);
-    breakevens = [putSell.strike - netCreditPerShare, callSell.strike + netCreditPerShare];
-  } else if (putSell && callSell && callBuy && !putBuy) {
-    // Jade Lizard / Big Lizard — short put + short call SPREAD. Upside is capped by
-    // the call spread, so the binding risk is the naked-put downside (bounded at the
-    // put strike).
-    maxProfit  = dollarCredit;
-    maxLoss    = -(putSell.strike * 100 - dollarCredit);
-    breakevens = [putSell.strike - netCreditPerShare];
-  } else if (callSell && putSell && putBuy && !callBuy) {
-    // Reverse Jade Lizard / Reverse Big Lizard — short put SPREAD + a NAKED short call.
-    // The naked call makes the UPSIDE loss unbounded; the put spread only caps the
-    // downside. Pre-v1.1.24 this reported the bounded put-spread residual as maxLoss
-    // (e.g. FLUT −$11), hiding the real risk and inflating annualizedReturn to ~100,000%
-    // and the structure's premiumScore/grade → these floated to the top of the bearish
-    // brief. The true max loss is unbounded.
-    maxProfit  = dollarCredit;
-    maxLoss    = null;
-    breakevens = [callSell.strike + netCreditPerShare];
-  } else {
-    // General fallback
-    maxProfit = dollarCredit > 0 ? dollarCredit : null;
-    maxLoss   = dollarCredit < 0 ? dollarCredit : null;
+  if (legs.length === 0) {
+    return {
+      maxProfit: dollarCredit > 0 ? dollarCredit : null,
+      maxLoss:   dollarCredit < 0 ? dollarCredit : null,
+      breakevens: [],
+    };
   }
 
-  return { maxProfit, maxLoss, breakevens };
+  const dir   = (l: { action: 'buy' | 'sell' }) => (l.action === 'buy' ? 1 : -1);
+  const qtyOf = (l: { qty?: number }) => l.qty ?? 1;
+
+  // Position P&L per share at expiry for an underlying price S: entry cash flow plus the
+  // intrinsic value of each leg (long collects intrinsic, short pays it).
+  const pnlPerShareAt = (S: number): number => {
+    let v = netCreditPerShare;
+    for (const l of legs) {
+      const intrinsic = l.side === 'call' ? Math.max(S - l.strike, 0) : Math.max(l.strike - S, 0);
+      v += dir(l) * qtyOf(l) * intrinsic;
+    }
+    return v;
+  };
+
+  // Net call exposure as S→∞ decides unboundedness (puts are bounded since S ≥ 0).
+  const callSlope = legs.filter(l => l.side === 'call').reduce((s, l) => s + dir(l) * qtyOf(l), 0);
+
+  const strikes = [...new Set(legs.map(l => l.strike))].sort((a, b) => a - b);
+  const sFar = strikes[strikes.length - 1]! * 3 + 1000; // safely into the linear tail
+  const xs = [0, ...strikes, sFar];
+  const pnls = xs.map(pnlPerShareAt);
+
+  const toContract = (perShare: number) => +(perShare * 100).toFixed(2);
+  const maxProfit = callSlope > 0 ? null : toContract(Math.max(...pnls));
+  const maxLoss   = callSlope < 0 ? null : toContract(Math.min(...pnls));
+
+  // Breakevens: zero-crossings of the piecewise-linear payoff (exact via linear interpolation
+  // between kinks, plus any kink that sits exactly at zero).
+  const EPS = 1e-9;
+  const breakevens: number[] = [];
+  for (let i = 0; i < xs.length; i++) {
+    if (Math.abs(pnls[i]!) < EPS) breakevens.push(xs[i]!);
+  }
+  for (let i = 0; i < xs.length - 1; i++) {
+    const y0 = pnls[i]!, y1 = pnls[i + 1]!;
+    if (Math.abs(y0) > EPS && Math.abs(y1) > EPS && (y0 < 0) !== (y1 < 0)) {
+      const x0 = xs[i]!, x1 = xs[i + 1]!;
+      breakevens.push(x0 + (x1 - x0) * (-y0 / (y1 - y0)));
+    }
+  }
+  const be = [...new Set(breakevens.map(b => +b.toFixed(2)))].sort((a, b) => a - b);
+
+  return { maxProfit, maxLoss, breakevens: be };
 }
 
 function buildSetup(
@@ -485,6 +474,21 @@ function buildSetup(
       iv: contract.iv * 100, // decimal fraction → percentage (see docs/formulas.md#iv-conventions)
       openInterest: contract.openInterest, volume: contract.volume ?? null, qty: legDef.qty ?? 1,
     });
+  }
+
+  // Degenerate-wing guard: if a spread's long and short legs on the SAME side collapsed to
+  // the SAME strike (e.g. no further-OTM strike was available, so findByDelta returned the
+  // same contract for both), the structure is malformed — that wing pays no premium and gives
+  // no protection. Observed: an "iron condor" built sell-call $100 / buy-call $100 (really
+  // just a put spread mislabeled). Mark unavailable rather than presenting a phantom structure.
+  for (const side of ['call', 'put'] as const) {
+    const sells = builtLegs.filter(l => l.side === side && l.action === 'sell').map(l => l.strike);
+    const buys  = builtLegs.filter(l => l.side === side && l.action === 'buy').map(l => l.strike);
+    if (sells.some(s => buys.includes(s))) {
+      return { ...base, legs: [], netCredit: null, netDebit: null, maxProfit: null, maxLoss: null,
+        breakevens: [], annualizedReturn: null, popEstimate: null,
+        unavailableReason: 'Degenerate spread — no suitable OTM strike for one wing' };
+    }
   }
 
   // Net credit per share, priced at the modeled fill (sells below mid, buys above) rather
@@ -619,8 +623,12 @@ function scoreStrategy(
       else if (ret30d >= 0.8) { premiumScore = 15; flags.push(`~ ${ret30d.toFixed(1)}% return/30d — adequate premium`); }
       else                    { premiumScore = 5;  flags.push(`✗ ${ret30d.toFixed(1)}% return/30d — thin premium`); }
     } else if (!profile.shortPremium && setup.netDebit !== null && setup.netDebit > 0) {
-      const rr = setup.maxProfit !== null && setup.netDebit > 0
-        ? setup.maxProfit / setup.netDebit : 0;
+      // Reward-to-risk on the ACTUAL max loss, not the debit paid. They're equal for a
+      // simple long vertical (max loss = debit), but for a broken-wing butterfly the true
+      // max loss exceeds the debit, so dividing by the debit overstates attractiveness.
+      const risk = setup.maxLoss !== null ? Math.abs(setup.maxLoss) : setup.netDebit;
+      const rr = setup.maxProfit !== null && risk > 0
+        ? setup.maxProfit / risk : 0;
       if (rr >= 1.5)      { premiumScore = 25; flags.push(`✓ ${rr.toFixed(1)}:1 reward/risk`); }
       else if (rr >= 0.8) { premiumScore = 15; flags.push(`~ ${rr.toFixed(1)}:1 reward/risk`); }
       else                { premiumScore = 5;  flags.push(`✗ ${rr.toFixed(1)}:1 reward/risk — unfavorable`); }

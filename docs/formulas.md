@@ -473,19 +473,26 @@ Put  = K·e^(−rT)·N(−d2) − S·N(−d1)
 
 ## Single-expiration structure P&L {#structure-pnl}
 
-`classifySingleExpiryPnl(legs, dollarCredit, netCreditPerShare)` (in `strategy-lab-service.ts`) returns `maxProfit` / `maxLoss` / `breakevens` for a single-expiration structure, classified by its leg signature. **`maxLoss = null` means the loss is unbounded** — a short option with no covering long on that side:
+`classifySingleExpiryPnl(legs, dollarCredit, netCreditPerShare)` (in `strategy-lab-service.ts`) returns `maxProfit` / `maxLoss` / `breakevens` for a single-expiration structure by evaluating its **actual expiry payoff** (v1.1.28 — replaced the earlier leg-signature classifier, which mis-priced long/debit verticals and broken-wing butterflies).
 
-| Structure (leg signature) | maxLoss |
-|---|---|
-| Naked put (sell put) | `−(putStrike·100 − credit)` — bounded at the strike |
-| **Naked call** (sell call) | **`null` — unbounded** |
-| Put/call vertical (sell + buy, same side) | `−(width − credit)` if credit, else `−|debit|` — defined |
-| **Strangle / straddle** (sell put + sell call) | **`null` — unbounded both sides** |
-| Iron condor / fly (both spreads) | `−(max(putW, callW) − credit)` — defined |
-| Jade / Big Lizard (sell put + sell call + **buy call**) | `−(putStrike·100 − credit)` — upside capped, bounded naked-put downside |
-| **Reverse Jade / Reverse Big Lizard** (sell put + **buy put** + sell call) | **`null` — unbounded** (the short call is naked; the put spread only caps the downside) |
+Per-share P&L at an underlying expiry price `S`:
+```
+pnl(S) = netCreditPerShare + Σ_legs  dir(leg) · qty(leg) · intrinsic(leg, S)
+         dir   = +1 long (buy), −1 short (sell)
+         intrinsic(call) = max(S − strike, 0)
+         intrinsic(put)  = max(strike − S, 0)
+```
+The payoff is piecewise-linear with kinks only at the strikes, so it is sampled at `xs = {0, …each strike…, sFar}` (`sFar` = last strike·3 + 1000, safely into the linear tail):
+```
+maxProfit = 100 · max(pnl(x) for x in xs)      (null if net-long calls → unbounded upside)
+maxLoss   = 100 · min(pnl(x) for x in xs)      (null if net-short calls → unbounded loss)
+breakevens = zero-crossings of pnl, linearly interpolated between adjacent kinks
+```
+**Unbounded detection (→ `null`)** is driven by net call exposure as `S→∞`, `callSlope = Σ dir·qty` over call legs: `< 0` ⇒ unbounded loss (net-short calls — naked call, strangle, reverse lizard); `> 0` ⇒ unbounded profit (net-long calls — long call, zebra). **Puts are always bounded** because `S ≥ 0`. `dollarCredit = netCreditPerShare · 100`.
 
-The reverse-lizard row was a bug before v1.1.24: it reported the *bounded put-spread residual* (`−(putW − credit)`, e.g. FLUT −$11) as the max loss, hiding the naked short call's unlimited upside risk. That tiny "capital" then produced an absurd annualized return (~100,000%) via `annualizedReturn = credit/|maxLoss| × 365/dte`. `annualizedReturn` is `null` whenever `maxLoss` is `null` (capital undefined).
+This prices every single-expiration structure from first principles — verticals in *both* orientations (a long/debit vertical's max profit = `width − debit`, not a wrong-sign negative), balanced **and broken-wing** butterflies (whose true max loss is the wing imbalance, not just the debit), condors, lizards, and ratio/zebra structures — and recovers breakevens the old classifier dropped (e.g. a big lizard's upper breakeven). `annualizedReturn` (computed in `buildSetup`) is `null` whenever `maxLoss` is `null` (capital undefined). The calendar/PMCC diagonal P&L uses a separate Black-Scholes branch (below), not this function.
+
+History: before v1.1.24 the reverse lizards reported the bounded put-spread residual as max loss (FLUT −$11), hiding the naked call's unlimited risk and yielding ~100,000% annualized returns. Before v1.1.28, long/debit verticals showed a negative max profit and broken-wing butterflies understated max loss ~5–30× (ARE −$8.75 vs −$258.75). The payoff evaluator fixes the whole class.
 
 ## Calendar / diagonal (PMCC) max profit {#calendar-diagonal-pnl}
 

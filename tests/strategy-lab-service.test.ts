@@ -308,7 +308,9 @@ describe('classifySingleExpiryPnl — structure max-loss classification', () => 
     const { maxLoss, maxProfit, breakevens } = classifySingleExpiryPnl(legs, credit, credit / 100);
     expect(maxLoss).toBeNull();                 // unbounded (naked short call)
     expect(maxProfit).toBe(credit);
-    expect(breakevens).toEqual([110 + credit / 100]); // upside breakeven only
+    // Profitable between the bull-put-spread's lower breakeven and the short-call upside
+    // breakeven (the old leg-signature code reported only the upside one).
+    expect(breakevens).toEqual([100.11, 119.89]);
   });
 
   it('reports UNBOUNDED max loss for a reverse jade lizard (naked short call)', () => {
@@ -355,5 +357,72 @@ describe('classifySingleExpiryPnl — structure max-loss classification', () => 
       { side: 'call', action: 'sell', strike: 110 }, { side: 'call', action: 'buy', strike: 115 },
     ], 200, 2);
     expect(condor.maxLoss).toBe(-((5) * 100 - 200)); // defined risk = wing − credit
+  });
+
+  it('LONG (debit) put vertical: positive max profit + correct breakeven (was negative)', () => {
+    // GPN-shaped: buy $67.5 put / sell $62.5 put, $1.9875/sh debit. Pre-fix the wrong-sign
+    // width gave maxProfit = −698.75 and breakeven 64.4875 (using the short leg).
+    const debit = -198.75; // net debit → negative credit
+    const r = classifySingleExpiryPnl(
+      [{ side: 'put', action: 'buy', strike: 67.5 }, { side: 'put', action: 'sell', strike: 62.5 }],
+      debit, debit / 100,
+    );
+    expect(r.maxProfit).toBe(301.25);          // (5-wide − 1.9875 debit) × 100
+    expect(r.maxLoss).toBe(-198.75);           // = debit paid
+    expect(r.breakevens).toEqual([65.51]);     // long strike 67.5 − debit/sh
+  });
+
+  it('LONG (debit) call vertical: positive max profit + correct breakeven', () => {
+    const debit = -253.75;
+    const r = classifySingleExpiryPnl(
+      [{ side: 'call', action: 'buy', strike: 90 }, { side: 'call', action: 'sell', strike: 95 }],
+      debit, debit / 100,
+    );
+    expect(r.maxProfit).toBe(246.25);          // (5-wide − 2.5375) × 100
+    expect(r.maxLoss).toBe(-253.75);
+    expect(r.breakevens).toEqual([92.54]);     // long strike 90 + debit/sh
+  });
+
+  it('BALANCED long put butterfly: max loss = debit, max profit = wing − debit, two breakevens', () => {
+    // buy 105 / sell 2×100 / buy 95, equal 5-wide wings, $1.00/sh debit.
+    const debit = -100;
+    const r = classifySingleExpiryPnl(
+      [
+        { side: 'put', action: 'buy',  strike: 105 },
+        { side: 'put', action: 'sell', strike: 100, qty: 2 },
+        { side: 'put', action: 'buy',  strike: 95 },
+      ],
+      debit, debit / 100,
+    );
+    expect(r.maxLoss).toBe(-100);              // = debit (balanced fly)
+    expect(r.maxProfit).toBe(400);             // 5-wing − 1.00 debit
+    expect(r.breakevens).toEqual([96, 104]);   // body ± (profit per share)
+  });
+
+  it('BROKEN-WING put butterfly: max loss is the wing imbalance, NOT just the debit', () => {
+    // ARE-shaped: buy $50 / sell 2×$47.5 / buy $42.5 — lower wing (5) wider than upper (2.5).
+    // The uncovered short between the wings makes the true max loss ≫ the $8.75 debit
+    // (the old code reported −8.75, hiding ~30× the risk).
+    const debit = -8.75;
+    const r = classifySingleExpiryPnl(
+      [
+        { side: 'put', action: 'buy',  strike: 50 },
+        { side: 'put', action: 'sell', strike: 47.5, qty: 2 },
+        { side: 'put', action: 'buy',  strike: 42.5 },
+      ],
+      debit, debit / 100,
+    );
+    expect(r.maxLoss).toBe(-258.75);           // (5 − 2.5)·100 + debit, NOT −8.75
+    expect(r.maxProfit).toBe(241.25);          // upper wing 2.5·100 − debit
+  });
+
+  it('net-long calls (zebra/long call) report UNBOUNDED profit', () => {
+    // Call zebra: buy 2 ITM calls, sell 1 — net long → unlimited upside.
+    const r = classifySingleExpiryPnl(
+      [{ side: 'call', action: 'buy', strike: 90, qty: 2 }, { side: 'call', action: 'sell', strike: 100 }],
+      -500, -5,
+    );
+    expect(r.maxProfit).toBeNull();            // unbounded upside (net long calls)
+    expect(r.maxLoss).not.toBeNull();          // downside bounded
   });
 });

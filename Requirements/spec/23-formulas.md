@@ -42,24 +42,25 @@ return on collateral directly. (Pre-v0.32.67 divided by strike × 100 — per-co
 against per-share premium — understating results 100× and zeroing the premiumYield /
 premiumRiskRatio scoring signals.) Used in Options Income & Wheel modes.
 
-### structure-max-loss (single-expiration classification)
-`classifySingleExpiryPnl(legs, dollarCredit, netCreditPerShare)` classifies a structure's
-maxProfit / maxLoss / breakevens by its leg signature. **`maxLoss = null` ⇒ unbounded** (a naked
-short option with no covering long on that side):
+### structure-pnl (single-expiration max profit / loss / breakevens)
+`classifySingleExpiryPnl(legs, dollarCredit, netCreditPerShare)` computes a structure's
+maxProfit / maxLoss / breakevens from its **actual expiry payoff** (v1.1.28; replaced an
+earlier leg-signature classifier that mis-priced long/debit verticals and broken-wing flies):
 ```
-naked put                     : maxLoss = −(putStrike·100 − credit)            (bounded)
-naked call                    : maxLoss = null                                 (UNBOUNDED)
-vertical (put/call spread)    : maxLoss = −(width − credit)  [credit] / −|debit|
-strangle / straddle           : maxLoss = null                                 (UNBOUNDED, both sides)
-iron condor / fly             : maxLoss = −(max(putW, callW) − credit)
-jade / big lizard             : maxLoss = −(putStrike·100 − credit)            (upside capped, naked-put downside)
-reverse jade / reverse big    : maxLoss = null                                 (UNBOUNDED — naked short call)
+pnl(S) = netCreditPerShare + Σ_legs dir·qty·intrinsic(leg, S)     dir = +1 buy / −1 sell
+         intrinsic(call)=max(S−K,0)   intrinsic(put)=max(K−S,0)
+sample xs = {0, …strikes…, lastStrike·3+1000}
+maxProfit = 100·max(pnl(xs))   (null if net-long calls → unbounded profit)
+maxLoss   = 100·min(pnl(xs))   (null if net-short calls → unbounded loss)
+breakevens = zero-crossings of pnl, interpolated between adjacent kinks
 ```
-The structure's lab `annualizedReturn = credit/|maxLoss| × 365/dte` is `null` when `maxLoss` is null.
-(Pre-v1.1.24 the reverse lizards were mis-classified as bounded — reported the protected put-spread
-residual as maxLoss, e.g. FLUT −$11 — hiding the naked call's unlimited upside and yielding
-~100,000% annualized returns.) `premiumScore` falls back to `shortPutStrike·100` capital when maxLoss
-is null, so the fix is ranking-neutral.
+Unboundedness is decided by `callSlope = Σ dir·qty` over call legs (`<0` short → unbounded loss;
+`>0` long → unbounded profit); puts are always bounded (`S ≥ 0`). This prices verticals in both
+orientations, balanced and broken-wing butterflies, condors, lizards, and zebra/ratio structures
+correctly. `annualizedReturn = credit/|maxLoss| × 365/dte` is `null` when `maxLoss` is null.
+`premiumScore` reward/risk uses `|maxLoss|` (= debit for a simple vertical, larger for a broken-wing
+fly). Calendars/PMCC use a separate Black-Scholes branch. Ranking-neutral on ticker selection
+(composite-driven); only per-pick structure grade/display shifts.
 
 ### wheel-suitability-score (1–10)
 ```
