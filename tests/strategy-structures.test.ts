@@ -3,11 +3,14 @@
 // making it structure-blind on the v2 launch strategy.
 
 import { describe, it, expect } from 'vitest';
-import { STRATEGY_RELEVANT_SLUGS, pickRelevantStructure } from '../src/shared/strategy-structures.js';
+import { STRATEGY_RELEVANT_SLUGS, pickRelevantStructure, pickDisplayStructure } from '../src/shared/strategy-structures.js';
 import { STRATEGIES } from '../src/main/services/scoring-service.js';
 
-type Score = { slug: string; grade: string; setup: { unavailableReason?: string | null } | null };
+type Score = { slug: string; grade: string; setup: { unavailableReason?: string | null; maxLoss?: number | null } | null };
 const valid = (slug: string, grade: string): Score => ({ slug, grade, setup: { unavailableReason: null } });
+// Defined-risk (bounded maxLoss) vs unbounded (null maxLoss) structures.
+const defined   = (slug: string, grade: string): Score => ({ slug, grade, setup: { unavailableReason: null, maxLoss: -5000 } });
+const unbounded = (slug: string, grade: string): Score => ({ slug, grade, setup: { unavailableReason: null, maxLoss: null } });
 
 describe('STRATEGY_RELEVANT_SLUGS — coverage parity', () => {
   it('covers every scoring strategy with a non-empty slug list', () => {
@@ -66,5 +69,66 @@ describe('pickRelevantStructure', () => {
     expect(pickRelevantStructure([valid('iron-condor', 'A+')], 'wheel')).toBeNull();
     expect(pickRelevantStructure([], 'inflection')).toBeNull();
     expect(pickRelevantStructure(null, 'wheel')).toBeNull();
+  });
+});
+
+describe('pickRelevantStructure — defined-risk preference', () => {
+  it('income: prefers a defined-risk iron condor over a higher-scored unbounded straddle', () => {
+    // Straddle sorts first (best totalScore) but is unbounded; the iron condor is capped-risk.
+    const chosen = pickRelevantStructure(
+      [unbounded('short-straddle', 'A+'), defined('iron-condor', 'B')],
+      'income',
+    );
+    expect(chosen?.slug).toBe('iron-condor');
+  });
+
+  it('bearish: prefers a defined-risk put vertical over an unbounded reverse big lizard', () => {
+    const chosen = pickRelevantStructure(
+      [unbounded('reverse-big-lizard', 'A+'), defined('long-put-vertical', 'A')],
+      'bearish',
+    );
+    expect(chosen?.slug).toBe('long-put-vertical');
+  });
+
+  it('falls back to the unbounded structure when no defined-risk alternative is viable', () => {
+    const chosen = pickRelevantStructure([unbounded('short-strangle', 'A+')], 'income');
+    expect(chosen?.slug).toBe('short-strangle');
+  });
+
+  it('among multiple defined-risk structures, keeps best-first (lab) order', () => {
+    const chosen = pickRelevantStructure(
+      [unbounded('short-straddle', 'A+'), defined('iron-fly', 'A'), defined('iron-condor', 'B')],
+      'income',
+    );
+    expect(chosen?.slug).toBe('iron-fly'); // first defined-risk in best-first order
+  });
+
+  it('is a no-op for inflection (both verticals are already defined-risk)', () => {
+    const chosen = pickRelevantStructure(
+      [defined('short-put-vertical', 'A'), defined('short-call-vertical', 'A+')],
+      'inflection',
+    );
+    expect(chosen?.slug).toBe('short-call-vertical'); // still higher-graded vertical
+  });
+});
+
+describe('pickDisplayStructure — selection with display fallback', () => {
+  it('returns the chosen valid structure (defined-risk preferred)', () => {
+    expect(pickDisplayStructure(
+      [unbounded('short-straddle', 'A+'), defined('iron-condor', 'B')], 'income',
+    )?.slug).toBe('iron-condor');
+  });
+
+  it('falls back to the first relevant structure when none are valid', () => {
+    const chosen = pickDisplayStructure(
+      [{ slug: 'long-put-vertical', grade: 'F', setup: { unavailableReason: 'no chain' } }],
+      'bearish',
+    );
+    expect(chosen?.slug).toBe('long-put-vertical'); // unavailable, but still labelled
+  });
+
+  it('falls back to the top-overall structure when nothing is relevant', () => {
+    const chosen = pickDisplayStructure([valid('iron-condor', 'A+')], 'wheel');
+    expect(chosen?.slug).toBe('iron-condor'); // not wheel-relevant, but something to render
   });
 });

@@ -28,17 +28,28 @@ const GRADE_RANK: Record<string, number> = { 'A+': 6, A: 5, B: 4, C: 3, D: 2, F:
 export interface RelevantScoreLike {
   slug: string;
   grade: string;
-  setup: { unavailableReason?: string | null } | null;
+  // `maxLoss === null` (or absent) ⇒ unbounded loss (naked short call / strangle /
+  // reverse lizard); a finite value ⇒ defined risk. Drives the defined-risk preference.
+  setup: { unavailableReason?: string | null; maxLoss?: number | null } | null;
 }
 
 /**
- * The single structure the Brief / Critic presents for a strategy: the first
- * strategy-relevant score with a valid (non-unavailable) setup. Lab scores are
- * ordered best-first, so the first match is the chosen structure.
+ * The single structure the Brief / Critic presents for a strategy: the best valid
+ * (non-unavailable) strategy-relevant structure, **preferring defined-risk over
+ * unbounded-risk**. Lab scores are ordered best-first, so within a risk tier the first
+ * match is the chosen structure.
  *
- * Inflection is special: its two relevant verticals are direction-opposite
- * (bull put vs bear call), so the higher-graded one — which matches the breakout
- * direction — is chosen instead of preference order.
+ * **Defined-risk preference (real-money safety):** when a viable structure with a bounded
+ * max loss exists, it is presented instead of an unbounded-risk one (naked short call,
+ * strangle/straddle, reverse lizard — all `maxLoss === null`). We never surface an
+ * unlimited-risk structure as the recommendation when a capped-risk alternative is
+ * available; only when no defined-risk structure is viable do we fall back to the
+ * unbounded set. This shifts bearish picks (reverse-big-lizard → put vertical) and income
+ * picks (strangle/straddle → iron condor) toward defined risk. It is a no-op for
+ * inflection/wheel/bullish/buy, whose relevant structures are already all defined-risk.
+ *
+ * Inflection is special: its two relevant verticals are direction-opposite (bull put vs
+ * bear call), so the higher-graded one — matching the breakout direction — is chosen.
  */
 export function pickRelevantStructure<T extends RelevantScoreLike>(
   scores: readonly T[] | undefined | null,
@@ -49,8 +60,28 @@ export function pickRelevantStructure<T extends RelevantScoreLike>(
     s => slugs.includes(s.slug) && s.setup != null && !s.setup.unavailableReason,
   );
   if (valid.length === 0) return null;
+  // Prefer defined-risk (finite max loss); fall back to the full set only when none exist.
+  const definedRisk = valid.filter(s => s.setup?.maxLoss != null);
+  const pool = definedRisk.length > 0 ? definedRisk : valid;
   if (strategy === 'inflection') {
-    return valid.reduce((best, s) => ((GRADE_RANK[s.grade] ?? 0) > (GRADE_RANK[best.grade] ?? 0) ? s : best));
+    return pool.reduce((best, s) => ((GRADE_RANK[s.grade] ?? 0) > (GRADE_RANK[best.grade] ?? 0) ? s : best));
   }
-  return valid[0] ?? null;
+  return pool[0] ?? null;
+}
+
+/**
+ * Display-oriented selection used by the Brief view / email / PDF: the chosen valid
+ * structure (defined-risk preferred), else the first strategy-relevant structure even if
+ * unavailable (so its name can still be labelled), else the top-overall structure.
+ * Never null when any score exists — UIs always have something to render.
+ */
+export function pickDisplayStructure<T extends RelevantScoreLike>(
+  scores: readonly T[] | undefined | null,
+  strategy: string,
+): T | null {
+  const chosen = pickRelevantStructure(scores, strategy);
+  if (chosen) return chosen;
+  const slugs = STRATEGY_RELEVANT_SLUGS[strategy] ?? [];
+  const list = scores ?? [];
+  return list.find(s => slugs.includes(s.slug)) ?? list[0] ?? null;
 }

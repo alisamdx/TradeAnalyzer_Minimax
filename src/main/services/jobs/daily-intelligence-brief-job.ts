@@ -93,7 +93,7 @@ function hasAdequateLiquidity(labResult: object | null, strategy: string): boole
 // validated structure exists.
 function summarizeRelevantStructure(labResult: object | null, strategy: string): Record<string, unknown> | null {
   type Leg = { action: string; side?: 'call' | 'put'; strike: number };
-  type SSetup = { legs: Leg[]; netCredit: number | null; netDebit: number | null; unavailableReason?: string | null };
+  type SSetup = { legs: Leg[]; netCredit: number | null; netDebit: number | null; maxLoss?: number | null; unavailableReason?: string | null };
   type SScore = { slug: string; grade: string; setup: SSetup | null };
   const scores = (labResult as { scores?: SScore[] } | null)?.scores;
   const chosen = pickRelevantStructure<SScore>(scores, strategy);

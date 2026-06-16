@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.25] — 2026-06-16
+
+### Changed
+- **The Brief now prefers defined-risk structures over unbounded-risk ones when a viable alternative exists.** `pickRelevantStructure` partitions a strategy's relevant validated structures into defined-risk (finite `maxLoss`) vs unbounded (`maxLoss === null` — naked short call, strangle/straddle, reverse lizard) and presents the best **defined-risk** one, falling back to the unbounded set only when no capped-risk structure is viable. Real-money safety: the brief never *recommends* an unlimited-risk structure when a capped-risk alternative is on the table. On the 2026-06-16 brief this shifts **income** picks from short straddles/strangles to iron flies/condors (4 of 5; all still A+/B grade) and — combined with the v1.1.24 unbounded-maxLoss fix — **bearish** reverse-big-lizards to long put verticals. It is a **no-op for inflection/wheel/bullish/buy**, whose relevant structures are already all defined-risk (the v2 execution engine, inflection-only, is unaffected).
+- **All four brief structure selectors are now unified on the shared `pickRelevantStructure` / `pickDisplayStructure`** (critic, advocate, `DailyBriefView`, `brief-report-builder`). Previously each had subtly different ad-hoc logic (first-relevant vs max-score vs first-valid), so the card, the email/PDF, and the critic could feature *different* structures for the same pick. Now the displayed structure always matches what the critic evaluated.
+
+### Notes
+- **Ticker selection is unchanged.** Composite scores (which tickers are picked and in what order) come from the scoring engine, independent of the lab structure/grade; this change only swaps *which structure* is shown per already-selected pick. Brief Replay outcomes are ticker-return-based and therefore unaffected — so this is neutral on the historical sample by construction (no FR-SEY-5 trade-selection delta to validate). Verified on the 2026-06-16 brief: same tickers, same order, only the structure-per-pick changed.
+
 ## [1.1.24] — 2026-06-16
 
 ### Fixed

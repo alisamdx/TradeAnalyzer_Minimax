@@ -22,6 +22,7 @@ interface LabStructureScore {
   setup: {
     expiration: string;
     netCredit: number | null;
+    maxLoss?: number | null;   // null/absent ⇒ unbounded risk (drives defined-risk preference)
     legs: Array<{ strike: number; action: string; side?: 'call' | 'put' }>;
     unavailableReason?: string | null;
   } | null;

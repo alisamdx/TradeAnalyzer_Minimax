@@ -3,7 +3,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import type { DailyBriefEntry, BriefPick, ScoringStrategy, StrategyLabValidateResult, StrategyLabGrade, StrategySetup, SetupLeg, PayoffLeg, BriefAccuracy, CriticVerdict, BriefPerformanceSummary, BriefHealthTrend } from '@shared/types.js';
-import { STRATEGY_RELEVANT_SLUGS } from '@shared/strategy-structures.js';
+import { STRATEGY_RELEVANT_SLUGS, pickDisplayStructure } from '@shared/strategy-structures.js';
 
 const STRATEGY_LABELS: Record<ScoringStrategy, string> = {
   wheel:   '🎡  Wheel — CSP / Covered Call',
@@ -89,13 +89,10 @@ const GRADE_COLOR: Record<StrategyLabGrade, string> = {
   'F':  '#f85149',
 };
 
-function gradeOf(result: StrategyLabValidateResult, slugs: string[]): { slug: string; name: string; grade: StrategyLabGrade; score: number; setup: StrategySetup | null } | null {
-  let best: (typeof result.scores)[number] | null = null;
-  for (const s of result.scores) {
-    if (slugs.includes(s.slug)) {
-      if (!best || s.totalScore > best.totalScore) best = s;
-    }
-  }
+// Relevant structure to feature for a pick — shared selector (defined-risk preferred over
+// unbounded), so the card matches what the Critic evaluated and the email/PDF show.
+function gradeOf(result: StrategyLabValidateResult, strategy: ScoringStrategy): { slug: string; name: string; grade: StrategyLabGrade; score: number; setup: StrategySetup | null } | null {
+  const best = pickDisplayStructure(result.scores, strategy);
   if (!best) return null;
   return { slug: best.slug, name: best.name, grade: best.grade, score: best.totalScore, setup: best.setup };
 }
@@ -147,8 +144,7 @@ function StrategyLabSummary({
   const result = strategyLabResult as StrategyLabValidateResult;
   if (!result.scores?.length) return null;
 
-  const slugs = STRATEGY_TO_SLUGS[strategy];
-  const relevant = gradeOf(result, slugs);
+  const relevant = gradeOf(result, strategy);
   const best = bestOverall(result);
 
   if (!relevant && !best) return null;
@@ -450,7 +446,7 @@ function PickCard({
   const [expanded, setExpanded] = useState(false);
 
   const result = pick.strategyLabResult ? (pick.strategyLabResult as StrategyLabValidateResult) : null;
-  const labGrade = result ? gradeOf(result, STRATEGY_TO_SLUGS[strategy]) : null;
+  const labGrade = result ? gradeOf(result, strategy) : null;
   const verdict = pick.criticVerdict?.verdict ?? null;
 
   return (

@@ -4,7 +4,7 @@
 
 import PDFDocument from 'pdfkit';
 import type { BriefPick, ScoringStrategy, StrategyLabValidateResult, StrategySetup } from '@shared/types.js';
-import { STRATEGY_RELEVANT_SLUGS } from '@shared/strategy-structures.js';
+import { STRATEGY_RELEVANT_SLUGS, pickDisplayStructure } from '@shared/strategy-structures.js';
 
 // ─── Strategy metadata ────────────────────────────────────────────────────────
 
@@ -102,9 +102,7 @@ function getRelevantSetup(pick: BriefPick, strategy: ScoringStrategy): {
   const result = pick.strategyLabResult as StrategyLabValidateResult;
   if (!result.scores?.length) return null;
 
-  const slugs = STRATEGY_TO_SLUGS[strategy];
-  let best = result.scores.find(s => slugs.includes(s.slug));
-  if (!best) best = result.scores[0];
+  const best = pickDisplayStructure(result.scores, strategy);
   if (!best) return null;
 
   const setup = best.setup;
@@ -286,7 +284,7 @@ function fmtSignalVal(raw: number | null, key: string): string {
 function estimateCardHeight(pick: BriefPick, strategy: ScoringStrategy): number {
   const result = pick.strategyLabResult as StrategyLabValidateResult | null;
   const slugs  = STRATEGY_TO_SLUGS[strategy];
-  const bestScore = result?.scores?.find(s => slugs.includes(s.slug)) ?? result?.scores?.[0];
+  const bestScore = pickDisplayStructure(result?.scores, strategy);
   const setup  = bestScore?.setup && !bestScore.setup.unavailableReason ? bestScore.setup : null;
   const numLegs = setup?.legs?.length ?? 0;
   const bucketScores = result?.scores?.filter(s => slugs.includes(s.slug)) ?? [];
@@ -443,7 +441,7 @@ export async function buildPdf(
         // Resolve Strategy Lab result for this strategy
         const labResult  = pick.strategyLabResult as StrategyLabValidateResult | null;
         const slugs      = STRATEGY_TO_SLUGS[strategy];
-        const bestScore  = labResult?.scores?.find(s => slugs.includes(s.slug)) ?? labResult?.scores?.[0];
+        const bestScore  = pickDisplayStructure(labResult?.scores, strategy);
         const grade      = bestScore?.grade ?? '?';
         const gradeColor = GRADE_COLOR_HEX[grade] ?? '#666666';
         const labScore   = bestScore?.totalScore != null ? Math.round(bestScore.totalScore) : null;
