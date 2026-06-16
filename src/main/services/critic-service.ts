@@ -5,15 +5,7 @@
 import type { Database } from 'better-sqlite3';
 import Anthropic from '@anthropic-ai/sdk';
 import type { BriefPick, CriticFlag, CriticVerdict, ScoringConfig } from '@shared/types.js';
-
-// Strategy Lab slugs relevant to each brief strategy (mirrors the brief job constant)
-const STRATEGY_RELEVANT_SLUGS: Record<string, string[]> = {
-  wheel:   ['short-naked-put', 'covered-call'],
-  bullish: ['long-call-vertical', 'big-lizard', 'call-zebra', 'call-butterfly', 'poor-mans-covered-call'],
-  bearish: ['long-put-vertical', 'reverse-big-lizard', 'put-zebra', 'put-butterfly', 'poor-mans-covered-put'],
-  income:  ['short-strangle', 'iron-condor', 'short-straddle', 'dynamic-width-iron-condor', 'iron-fly'],
-  buy:     ['long-call-vertical', 'call-zebra', 'poor-mans-covered-call', 'call-calendar'],
-};
+import { STRATEGY_RELEVANT_SLUGS, pickRelevantStructure } from '@shared/strategy-structures.js';
 
 // Grade ordering for structure quality checks (A+=best, F=worst).
 // 'A+' must be present: lab grades include it, and a missing key ranks 0 (below F).
@@ -412,18 +404,7 @@ Use verdict: pass, caution, or flag. Use confidence: high, medium, or low.`;
    */
   private selectRelevantStructure(pick: BriefPick, strategy: string): LabStructureScore | null {
     const labResult = pick.strategyLabResult as LabResultShape | null;
-    const slugs = STRATEGY_RELEVANT_SLUGS[strategy] ?? [];
-    const valid = (labResult?.scores ?? []).filter(
-      s => slugs.includes(s.slug) && s.setup != null && !s.setup.unavailableReason
-    );
-    if (valid.length === 0) return null;
-    // Inflection's two relevant verticals are direction-opposite (bull put vs bear call);
-    // the higher-graded one matches the breakout direction (lab direction bias). Other
-    // strategies keep their preference order (first valid).
-    if (strategy === 'inflection') {
-      return valid.reduce((best, s) => (GRADE_RANK[s.grade] ?? 0) > (GRADE_RANK[best.grade] ?? 0) ? s : best);
-    }
-    return valid[0] ?? null;
+    return pickRelevantStructure<LabStructureScore>(labResult?.scores, strategy);
   }
 
   /**
@@ -744,19 +725,28 @@ Use verdict: pass, caution, or flag. Use confidence: high, medium, or low.`;
     if (strategy !== 'bearish' || market.spyAbove200ma !== true) return null;
 
     const chosen = this.selectRelevantStructure(pick, strategy);
-    const shortLeg = chosen?.setup?.legs.find(l => l.action === 'sell');
-    const strike = shortLeg?.strike ?? null;
     const price = pick.price;
-    if (strike === null || price === null || price <= 0) return null;
+    if (price === null || price <= 0) return null;
 
-    // (strike - price) / price: ≤ 0 means the short strike is at or below price — no cushion.
+    // Only a SHORT CALL is exposed to a continuation rally with limited/no upside
+    // cushion. A bearish DEBIT put vertical (long-put-vertical) has defined risk and
+    // its short put correctly sits BELOW spot — that is not "zero cushion", so the
+    // old "first sell leg" logic wrongly flagged it (e.g. a 7% OTM short put as
+    // "at/in the money"). Pick the nearest short call (lowest strike); skip if none.
+    const sells = chosen?.setup?.legs.filter(l => l.action === 'sell') ?? [];
+    const sideOf = (l: { strike: number; side?: 'call' | 'put' }): 'call' | 'put' =>
+      l.side ?? (l.strike <= price ? 'put' : 'call');
+    const shortCallStrikes = sells.filter(l => sideOf(l) === 'call').map(l => l.strike);
+    if (shortCallStrikes.length === 0) return null;
+    const strike = Math.min(...shortCallStrikes);
+
+    // (strike - price) / price ≤ 0 means the short call is at or below spot — no cushion.
     const otmPct = (strike - price) / price * 100;
     if (otmPct <= 0) {
       return {
         key: 'counter_trend_itm_strike', severity: 'warning',
-        description: `Short strike $${strike} is ${otmPct.toFixed(1)}% OTM (at/in the money) with SPY in an uptrend — ` +
-          `the bearish position starts with zero cushion against the prevailing market direction. ` +
-          `A modest continuation rally immediately pressures the structure.`,
+        description: `Short call $${strike} is at or below spot (${otmPct.toFixed(1)}% from price) with SPY in an uptrend — ` +
+          `the bearish structure starts with no upside cushion. A modest continuation rally immediately pressures the short call.`,
       };
     }
     return null;

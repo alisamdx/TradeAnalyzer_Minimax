@@ -176,30 +176,61 @@ describe('CriticService rule checks', () => {
     });
   });
 
-  describe('checkCounterTrendStrike — bearish ATM/ITM strike in uptrend', () => {
-    it('warns when the short strike is at/below price with SPY bullish', () => {
+  describe('checkCounterTrendStrike — bearish short-call cushion in uptrend', () => {
+    // reverse-big-lizard = short straddle + protective long put → the rally-exposed
+    // leg is the SHORT CALL. The rule must judge that leg, not just any sell leg.
+    const revLizard = (callStrike: number) => makeMultiLegSetup(
+      [
+        { strike: callStrike, action: 'sell', side: 'call' },
+        { strike: callStrike, action: 'sell', side: 'put' },
+        { strike: callStrike - 5, action: 'buy', side: 'put' },
+      ],
+      250,
+    );
+
+    it('warns when the short call is at/below price with SPY bullish', () => {
       const pick = makePick([
-        { slug: 'reverse-big-lizard', grade: 'A', liquidityScore: 8, setup: makeSetup(99) },
-      ], 100); // strike 99 ≤ price 100 → no cushion
+        { slug: 'reverse-big-lizard', grade: 'A', liquidityScore: 8, setup: revLizard(99) },
+      ], 100); // short call 99 ≤ price 100 → no upside cushion
       const flags = runChecks(svc, pick, 'bearish', bullMarket);
       const ct = flags.find(f => f.key === 'counter_trend_itm_strike');
       expect(ct).toBeDefined();
       expect(ct!.severity).toBe('warning');
+      expect(ct!.description).toContain('Short call');
     });
 
-    it('does not warn when the short strike has OTM cushion', () => {
+    it('does not warn when the short call has OTM cushion', () => {
       const pick = makePick([
-        { slug: 'reverse-big-lizard', grade: 'A', liquidityScore: 8, setup: makeSetup(105) },
-      ], 100); // strike 105 > price 100 → 5% cushion
+        { slug: 'reverse-big-lizard', grade: 'A', liquidityScore: 8, setup: revLizard(105) },
+      ], 100); // short call 105 > price 100 → 5% cushion
       const flags = runChecks(svc, pick, 'bearish', bullMarket);
       expect(flags.find(f => f.key === 'counter_trend_itm_strike')).toBeUndefined();
     });
 
     it('does not warn when SPY is not in an uptrend', () => {
       const pick = makePick([
-        { slug: 'reverse-big-lizard', grade: 'A', liquidityScore: 8, setup: makeSetup(99) },
+        { slug: 'reverse-big-lizard', grade: 'A', liquidityScore: 8, setup: revLizard(99) },
       ], 100);
       const flags = runChecks(svc, pick, 'bearish', { vix: 18, spyAbove200ma: false });
+      expect(flags.find(f => f.key === 'counter_trend_itm_strike')).toBeUndefined();
+    });
+
+    // Regression: a bearish long-put-vertical is a DEBIT spread whose short put
+    // correctly sits below spot. The old "first sell leg ≤ price" rule wrongly
+    // flagged it as "at/in the money — zero cushion" (GPN/EL on the 2026-06-16
+    // brief), derailing the critic's rationale. No short call → no flag.
+    it('does not warn on a bearish long-put-vertical (short put below spot by design)', () => {
+      const pick = makePick([
+        {
+          slug: 'long-put-vertical', grade: 'A', liquidityScore: 8,
+          setup: { expiration: '2099-01-15', netCredit: null,
+            legs: [
+              { strike: 67.5, action: 'buy', side: 'put' },
+              { strike: 62.5, action: 'sell', side: 'put' },
+            ] },
+        },
+      ], 67.48); // short put 62.5 is 7.4% OTM — a cushion, not a deficit
+      const flags = runChecks(svc, pick, 'bearish', bullMarket);
       expect(flags.find(f => f.key === 'counter_trend_itm_strike')).toBeUndefined();
     });
   });

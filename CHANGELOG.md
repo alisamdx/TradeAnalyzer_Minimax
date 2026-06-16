@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.23] — 2026-06-15
+
+### Fixed
+- **Critic is no longer structure-blind on inflection (the v2 launch strategy).** The critic's copy of the strategy→relevant-structure-slug map (`STRATEGY_RELEVANT_SLUGS` in `critic-service.ts`) had drifted from the brief job's and was **missing the `inflection` entry**. So `selectRelevantStructure()` returned null for every inflection pick: the LLM context carried *no structure*, the structure-aware rule checks (liquidity, grade) silently skipped, and the `if (strategy === 'inflection')` direction branch was dead code. With no structure, the critic invented a non-existent straddle and reasoned **backwards** — warning that high IV made options "severely overpriced" for *buying*, when the actual `short-put-vertical` *sells* premium (high IV is favorable). Found in the 2026-06-16 brief audit (AMD inflection critic literally said *"the absence of a `structure` field means no specific trade parameters exist to evaluate"*).
+- **All four copies of the strategy→slug map are now one shared source of truth** (`src/shared/strategy-structures.ts`, imported by the critic, brief job, report builder, and `DailyBriefView`). This is the drift class that caused the bug above. `tests/strategy-structures.test.ts` asserts every `ScoringStrategy` is covered (the guarantee the critic lacked) and that `pickRelevantStructure` resolves an inflection structure.
+- **The advocate (Stage-5 rationale) now describes the actual trade, not an invented one.** It previously received only ticker/strategy/score/signals — no structure — so it guessed the structure from the strategy name. For inflection it recommended "straddle sells / iron condors / directional calls" (the inverse of the real bull-put credit spread) and argued high IV was bad. It now gets a compact `structure` summary (type, credit-vs-debit with the IV implication spelled out, and legs) and is instructed to base the rationale on it and never suggest a different structure.
+- **`counter_trend_itm_strike` critic flag no longer false-fires on bearish debit verticals.** The rule judged the first `sell` leg of the structure; for a `long-put-vertical` (a defined-risk *debit* spread) that leg is the lower short put, which correctly sits *below* spot. The rule mislabeled a 7–11% **OTM** short put as "at/in the money — zero cushion" (GPN, EL on the 2026-06-16 brief), and both critics burned their entire rationale rebutting the bad flag. The rule now evaluates only the rally-exposed **short call** (skipping structures without one), and the contradictory "(at/in the money)" wording is gone. Regression test added; existing counter-trend tests updated to model the short call explicitly.
+
 ## [1.1.22] — 2026-06-15
 
 ### Fixed

@@ -26,6 +26,7 @@ import type { EarningsService } from '../earnings-service.js';
 import type { OAuthCredentials } from '../etrade-auth.js';
 import { getETradeLastPrice } from '../etrade-options.js';
 import { withTransaction } from '../../db/connection.js';
+import { STRATEGY_RELEVANT_SLUGS, pickRelevantStructure } from '@shared/strategy-structures.js';
 
 // VIX sane range — reject anything outside this (a quote typo can return an unrelated
 // symbol). Historical VIX spans ~9 (2017) to ~82 (COVID); [5,150] is a safe guard.
@@ -52,18 +53,9 @@ const RETENTION_DAYS = 90;
 // Gate at 5 drops OI=1 with any realistic spread while keeping OI≥100 picks.
 const MIN_LIQUIDITY_SCORE = 5;
 
-// Which Strategy Lab slugs represent each brief strategy.
-// Used for the liquidity gate — we check only structures the brief strategy would trade.
-const STRATEGY_RELEVANT_SLUGS: Record<string, string[]> = {
-  wheel:   ['short-naked-put', 'covered-call'],
-  bullish: ['long-call-vertical', 'big-lizard', 'call-zebra', 'call-butterfly', 'poor-mans-covered-call'],
-  bearish: ['long-put-vertical', 'reverse-big-lizard', 'put-zebra', 'put-butterfly', 'poor-mans-covered-put'],
-  income:  ['short-strangle', 'iron-condor', 'short-straddle', 'dynamic-width-iron-condor', 'iron-fly'],
-  buy:     ['long-call-vertical', 'call-zebra', 'poor-mans-covered-call', 'call-calendar'],
-  // Inflection = directional credit spread at the breakout level. Bull put first
-  // (Phase 2/3 is bullish-only); bear call is for the bearish follow-up.
-  inflection: ['short-put-vertical', 'short-call-vertical'],
-};
+// Which Strategy Lab slugs represent each brief strategy (STRATEGY_RELEVANT_SLUGS,
+// shared with the critic / report / UI via '@shared/strategy-structures.js') drive the
+// liquidity gate — we check only structures the brief strategy would trade.
 
 // Returns the best liquidityScore (0–15) among the strategy-relevant structures,
 // or null when no lab result or no relevant structure is available.
@@ -90,6 +82,36 @@ function hasAdequateLiquidity(labResult: object | null, strategy: string): boole
   const best = getBestLiquidityScore(labResult, strategy);
   if (best === null) return false; // lab ran but no valid structure found for this strategy
   return best >= MIN_LIQUIDITY_SCORE;
+}
+
+// Compact summary of the structure a strategy would actually trade — fed to the
+// Stage-5 advocate so its rationale describes THIS trade (credit vs debit, legs)
+// rather than guessing one from the strategy name. Without it the advocate
+// hallucinated structures: e.g. recommending "straddle sells / iron condors" for an
+// inflection pick whose real structure is a bull-put CREDIT spread, then arguing high
+// IV was bad (it's favorable when you sell premium). Returns null when no relevant
+// validated structure exists.
+function summarizeRelevantStructure(labResult: object | null, strategy: string): Record<string, unknown> | null {
+  type Leg = { action: string; side?: 'call' | 'put'; strike: number };
+  type SSetup = { legs: Leg[]; netCredit: number | null; netDebit: number | null; unavailableReason?: string | null };
+  type SScore = { slug: string; grade: string; setup: SSetup | null };
+  const scores = (labResult as { scores?: SScore[] } | null)?.scores;
+  const chosen = pickRelevantStructure<SScore>(scores, strategy);
+  if (!chosen?.setup) return null;
+  const s = chosen.setup;
+  const isCredit = s.netCredit !== null && s.netCredit > 0;
+  return {
+    type: chosen.slug,
+    grade: chosen.grade,
+    // The single most-misread fact: credit structures SELL premium (high IV good),
+    // debit structures BUY it (high IV bad).
+    premiumDirection: isCredit
+      ? 'credit — you SELL premium; high IV/IVR is FAVORABLE (richer premium collected)'
+      : 'debit — you BUY premium; high IV/IVR RAISES the cost',
+    legs: s.legs.map(l => `${l.action} ${l.side ?? ''} $${l.strike}`.replace(/\s+/g, ' ').trim()),
+    netCredit: s.netCredit,
+    netDebit: s.netDebit,
+  };
 }
 
 // Next trading day 9:30am ET — used as valid_until
@@ -329,7 +351,7 @@ export class DailyIntelligenceBriefJob implements BatchJobHandler {
       const client = new Anthropic({ apiKey: anthropicApiKey });
 
       // Build structured summary for all top picks
-      const picksForAI: Array<{ ticker: string; strategy: string; score: number; signals: Record<string, unknown> }> = [];
+      const picksForAI: Array<{ ticker: string; strategy: string; score: number; signals: Record<string, unknown>; structure: Record<string, unknown> | null }> = [];
       for (const strategy of STRATEGIES) {
         const top = topPerStrategy.get(strategy) ?? [];
         for (const pick of top) {
@@ -342,11 +364,15 @@ export class DailyIntelligenceBriefJob implements BatchJobHandler {
                 .filter(([, v]) => !v.missing)
                 .map(([k, v]) => [k, v.raw])
             ),
+            // The actual trade being proposed, so the rationale matches it (credit vs
+            // debit, legs) instead of being invented from the strategy name.
+            structure: summarizeRelevantStructure(validationResults.get(pick.ticker) ?? null, strategy),
           });
         }
       }
 
       const systemPrompt = `You are an experienced retail options trader reviewing today's top trade candidates.
+Each candidate includes a \`structure\` object describing the EXACT trade being proposed: its type, whether it is a CREDIT structure (you sell premium — high IV/IVR is favorable) or a DEBIT structure (you buy premium — high IV/IVR raises cost), and its legs. Base your rationale on THAT structure — never invent or recommend a different one (do not suggest a straddle/condor/long option when the structure says otherwise). When \`structure\` is null, the pick was not validated against a live chain — speak to the signals only, not a specific structure.
 Write a concise 2–3 sentence rationale for each pick explaining WHY it is a top candidate for that specific strategy today, citing the 2–3 key signals that drove its score.
 Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). Keep each rationale under 60 words.`;
 

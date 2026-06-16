@@ -4,6 +4,7 @@
 
 import PDFDocument from 'pdfkit';
 import type { BriefPick, ScoringStrategy, StrategyLabValidateResult, StrategySetup } from '@shared/types.js';
+import { STRATEGY_RELEVANT_SLUGS } from '@shared/strategy-structures.js';
 
 // ─── Strategy metadata ────────────────────────────────────────────────────────
 
@@ -16,14 +17,9 @@ const STRATEGY_LABELS: Record<ScoringStrategy, string> = {
   inflection: 'Inflection (Breakout)',
 };
 
-const STRATEGY_TO_SLUGS: Record<ScoringStrategy, string[]> = {
-  wheel:   ['short-naked-put', 'covered-call'],
-  bullish: ['long-call-vertical', 'big-lizard', 'call-zebra', 'call-butterfly', 'poor-mans-covered-call'],
-  bearish: ['long-put-vertical', 'reverse-big-lizard', 'put-zebra', 'put-butterfly', 'poor-mans-covered-put'],
-  income:  ['short-strangle', 'iron-condor', 'short-straddle', 'dynamic-width-iron-condor', 'iron-fly'],
-  buy:     ['long-call-vertical', 'call-zebra', 'poor-mans-covered-call', 'call-calendar'],
-  inflection: ['short-put-vertical', 'short-call-vertical'],
-};
+// Shared single source of truth (see '@shared/strategy-structures.js'); re-asserted
+// with the finite-key type so existing ScoringStrategy-indexed reads stay defined.
+const STRATEGY_TO_SLUGS = STRATEGY_RELEVANT_SLUGS as Record<ScoringStrategy, string[]>;
 
 const SLUG_SHORT: Record<string, string> = {
   'short-naked-put':           'CSP',
