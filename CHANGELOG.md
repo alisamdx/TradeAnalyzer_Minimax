@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.22] — 2026-06-15
+
+### Fixed
+- **Morning Briefing market regime now reads the real VIX.** `BriefingService.getMarketRegime()` fetched VIX via `dataProvider.getQuote('VIX')` — Polygon's *stocks* snapshot, which can't serve an index, so it always returned null (and burned a rate-limited API call each call). It now reads VIX from `quote_cache`, where the brief job's `refreshVixQuote()` writes the E*Trade-sourced value (v1.1.21). So the dashboard's `vixValue`/`vixLevel` and regime summary reflect the actual VIX, consistently with the critic. Completes the VIX migration — both consumers now use one E*Trade-sourced value. Regression test: `briefing-service.test.ts` (+3; asserts `getQuote('VIX')` is never called and the level is classified from `quote_cache`).
+
 ## [1.1.21] — 2026-06-15
 
 ### Added

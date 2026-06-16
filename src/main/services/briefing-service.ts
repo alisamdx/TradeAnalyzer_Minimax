@@ -132,20 +132,25 @@ export class BriefingService {
         }
       }
 
-      // Fetch VIX
+      // VIX from quote_cache, populated daily by the brief job via E*Trade
+      // (refreshVixQuote). Polygon's stocks snapshot can't serve an index, so the
+      // old getQuote('VIX') here always returned null and burned a rate-limited call.
+      // see CLAUDE.md "Known quirks" (VIX comes from E*Trade, not Polygon).
       let vixValue: number | null = null;
       let vixLevel: VixLevel = 'normal';
       try {
-        await this.rateLimiter.acquire(1);
-        const vixQuote = await this.dataProvider.getQuote('VIX');
-        vixValue = vixQuote?.last ?? null;
+        type VixRow = { last: number | null };
+        const row = this.db
+          .prepare(`SELECT last FROM quote_cache WHERE ticker = 'VIX' LIMIT 1`)
+          .get() as VixRow | undefined;
+        vixValue = row?.last ?? null;
         if (vixValue !== null) {
           if (vixValue < 15) vixLevel = 'low';
           else if (vixValue > 25) vixLevel = 'high';
           else vixLevel = 'normal';
         }
       } catch {
-        // VIX may not be available from all providers
+        // VIX may not be populated yet (no brief run / E*Trade disconnected)
       }
 
       // Generate summary
