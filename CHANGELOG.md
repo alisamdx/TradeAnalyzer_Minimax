@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.40] — 2026-06-17
+
+### Added
+- **One-click "🔧 Fix" in the Payoff strategy-rules panel.** When a credit spread fails the "credit ≥ ⅓ of spread width" rule (shown with a ✗), a Fix button appears that adjusts the legs to pass it — **narrowing the protective wing toward the short strike while keeping your short strike** (the thesis), re-priced from the live option chain at mid, choosing the widest strike that passes (least narrowing). E.g. a bull put $620/$590 ($30 wide, $9.40 credit, ✗) becomes $620/$595 ($25 wide, credit ≥ ⅓). Scope: the two vertical credit spreads (Bull Put Spread / Bear Call Spread — the inflection launch structures and the common failing case); the button is hidden when no fix applies (chain not loaded, unsupported strategy, or no strike narrows enough). Implemented as the pure, unit-tested `fixLegsForStrategy` (`src/shared/payoff-fix.ts`).
+
 ## [1.1.39] — 2026-06-17
 
 ### Fixed

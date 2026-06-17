@@ -16,6 +16,7 @@ import type {
   Watchlist,
   WatchlistItem,
 } from '@shared/types.js';
+import { fixLegsForStrategy } from '@shared/payoff-fix.js';
 
 // ─── Pure math helpers ────────────────────────────────────────────────────────
 
@@ -1286,13 +1287,19 @@ function computeStrategyRules(
 
 // ─── Strategy formula panel component ────────────────────────────────────────
 
-function StrategyFormulaPanel({ strategyName, legs, spot }: {
+function StrategyFormulaPanel({ strategyName, legs, spot, chainContracts, onFix }: {
   strategyName: string;
   legs:         PayoffLeg[];
   spot:         number;
+  chainContracts?: OptionContract[];
+  onFix?:       (legs: PayoffLeg[], note: string) => void;
 }) {
   const rules = computeStrategyRules(strategyName, legs, spot);
   if (!rules.length) return null;
+
+  // Offer a one-click Fix only when a rule is failing AND we can narrow the wing to pass it.
+  const hasFailing = rules.some(r => r.pass === false);
+  const fix = hasFailing && onFix ? fixLegsForStrategy(strategyName, legs, chainContracts) : null;
 
   return (
     <div style={{
@@ -1302,8 +1309,21 @@ function StrategyFormulaPanel({ strategyName, legs, spot }: {
       padding: '8px 10px',
       marginTop: 4,
     }}>
-      <div style={{ fontSize: 10, color: '#475569', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>
-        📐 Rules
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+        <div style={{ fontSize: 10, color: '#475569', textTransform: 'uppercase', letterSpacing: 1 }}>
+          📐 Rules
+        </div>
+        {fix && onFix && (
+          <button
+            onClick={() => onFix(fix.legs, fix.note)}
+            title={`Narrow the protective wing to satisfy the rule — keeps your short strike. ${fix.note}`}
+            style={{
+              fontSize: 10, fontWeight: 700, color: '#fbbf24', background: 'transparent',
+              border: '1px solid #b45309', borderRadius: 4, padding: '2px 8px', cursor: 'pointer',
+            }}>
+            🔧 Fix
+          </button>
+        )}
       </div>
       {rules.map((rule, i) => (
         <div key={i} style={{
@@ -2997,6 +3017,8 @@ export function PayoffView({ initialTicker, initialSpot, initialExpiry, initialS
                 strategyName={recognizedStrategy.name}
                 legs={legs}
                 spot={spotNum}
+                chainContracts={chainData?.contracts}
+                onFix={(fixedLegs, note) => { setLegs(fixedLegs); setStatus(`Fixed: ${note}`); }}
               />
             )}
           </>
