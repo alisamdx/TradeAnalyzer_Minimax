@@ -8,13 +8,15 @@ import { EtradePortfolioService } from '../src/main/services/etrade-portfolio-se
 type DB = InstanceType<typeof Database>;
 let db: DB;
 
-function insert(p: { id: number; ticker: string; status?: string; etId?: string | null; acct: string }) {
+function insert(p: { id: number; ticker: string; status?: string; etId?: string | null; acct: string; unrealizedPnl?: number | null; realizedPnl?: number | null }) {
   db.prepare(
-    `INSERT INTO positions (id, ticker, status, etrade_position_id, etrade_account_id, last_synced_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, '', '')`
-  ).run(p.id, p.ticker, p.status ?? 'open', p.etId === undefined ? null : p.etId, p.acct);
+    `INSERT INTO positions (id, ticker, status, etrade_position_id, etrade_account_id, unrealized_pnl, realized_pnl, last_synced_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, '', '')`
+  ).run(p.id, p.ticker, p.status ?? 'open', p.etId === undefined ? null : p.etId, p.acct,
+        p.unrealizedPnl ?? null, p.realizedPnl ?? null);
 }
 const statusOf = (id: number) => (db.prepare('SELECT status FROM positions WHERE id = ?').get(id) as { status: string }).status;
+const realizedOf = (id: number) => (db.prepare('SELECT realized_pnl FROM positions WHERE id = ?').get(id) as { realized_pnl: number | null }).realized_pnl;
 const close = (acct: string, seen: string[]) =>
   (new EtradePortfolioService() as unknown as { closeMissingPositions(db: DB, a: string, s: string[]): number })
     .closeMissingPositions(db, acct, seen);
@@ -24,7 +26,9 @@ describe('closeMissingPositions — full-sync reconciliation', () => {
     db = new Database(':memory:');
     db.exec(`CREATE TABLE positions (
       id INTEGER PRIMARY KEY, ticker TEXT, status TEXT,
-      etrade_position_id TEXT, etrade_account_id TEXT, last_synced_at TEXT, updated_at TEXT);`);
+      etrade_position_id TEXT, etrade_account_id TEXT,
+      unrealized_pnl REAL, realized_pnl REAL, exit_date TEXT, exit_notes TEXT,
+      last_synced_at TEXT, updated_at TEXT);`);
   });
 
   it('closes an open broker position the broker no longer reports (the NVDA case)', () => {
@@ -62,6 +66,19 @@ describe('closeMissingPositions — full-sync reconciliation', () => {
     insert({ id: 1, ticker: 'NVDA', status: 'closed', etId: '222', acct: 'A' });
     expect(close('A', [])).toBe(0);
     expect(statusOf(1)).toBe('closed');
+  });
+
+  it('estimates realized P&L from the last mark (unrealized_pnl) when closing', () => {
+    insert({ id: 1, ticker: 'NVDA', etId: '222', acct: 'A', unrealizedPnl: 305 });
+    close('A', []);
+    expect(statusOf(1)).toBe('closed');
+    expect(realizedOf(1)).toBe(305); // last E*Trade mark becomes the estimate
+  });
+
+  it('does NOT overwrite a realized P&L already set (transaction-history sync wins)', () => {
+    insert({ id: 1, ticker: 'NVDA', etId: '222', acct: 'A', unrealizedPnl: 305, realizedPnl: 412.5 });
+    close('A', []);
+    expect(realizedOf(1)).toBe(412.5); // COALESCE keeps the existing exact figure
   });
 });
 

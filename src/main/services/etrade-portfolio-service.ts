@@ -271,9 +271,14 @@ export class EtradePortfolioService {
   /**
    * Mark as closed any OPEN, E*Trade-sourced position for `accountId` whose broker position id
    * is NOT in `seenIds` (the ids returned by the just-completed fetch) — i.e. positions closed
-   * at the broker. Preserves the row (notes / realized P&L / history); the portfolio view shows
-   * only `status='open'`. Manual positions (no `etrade_position_id`) are left untouched.
-   * Returns the number of positions closed.
+   * at the broker. Preserves the row (notes / history); the portfolio view shows only
+   * `status='open'`. Manual positions (no `etrade_position_id`) are left untouched.
+   *
+   * Realized P&L: estimated from the position's last mark (E*Trade `totalGain`, stored in
+   * `unrealized_pnl`) so the Closed tab isn't blank — `COALESCE(realized_pnl, unrealized_pnl)`
+   * never overwrites a value already set by the transaction-history sync, which remains the
+   * authoritative source. `exit_date` defaults to the detection time and `exit_notes` flags the
+   * estimate. Returns the number of positions closed.
    */
   private closeMissingPositions(db: Database, accountId: string, seenIds: string[]): number {
     const open = db.prepare(
@@ -284,13 +289,21 @@ export class EtradePortfolioService {
 
     const seen = new Set(seenIds);
     const now = new Date().toISOString();
+    const note = 'Closed via E*Trade sync (no longer at broker); realized P&L estimated from last mark — run Sync Closed Positions for exact figures';
     const closeStmt = db.prepare(
-      `UPDATE positions SET status = 'closed', last_synced_at = ?, updated_at = ? WHERE id = ?`
+      `UPDATE positions SET
+         status       = 'closed',
+         realized_pnl = COALESCE(realized_pnl, unrealized_pnl),
+         exit_date    = COALESCE(exit_date, ?),
+         exit_notes   = COALESCE(exit_notes, ?),
+         last_synced_at = ?,
+         updated_at     = ?
+       WHERE id = ?`
     );
     let closed = 0;
     for (const row of open) {
       if (!seen.has(String(row.etrade_position_id))) {
-        closeStmt.run(now, now, row.id);
+        closeStmt.run(now, note, now, now, row.id);
         closed++;
       }
     }

@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.44] — 2026-06-17
+
+### Added
+- **Full-sync close now records an estimated realized P&L**, so a position closed at the broker no longer lands in the Closed tab with a blank P&L. When `closeMissingPositions` marks a position closed it sets `realized_pnl = COALESCE(realized_pnl, unrealized_pnl)` — i.e. its last E\*Trade mark (`totalGain`, persisted since v1.1.43) — and stamps `exit_date` + an `exit_notes` flag that it's an estimate. **It never overwrites a realized P&L already set** (e.g. by the transaction-history "Sync Closed Positions", which stays the authoritative exact source).
+
+### Notes
+- Applies to positions closed **going forward** (the estimate needs the last mark, stored only since v1.1.43). A position that was already closed before these builds (no stored mark) stays blank — run **Sync Closed Positions** to pull its exact figure from transaction history. Regression coverage in `tests/etrade-portfolio-reconcile.test.ts` (estimates from the last mark; doesn't overwrite an existing realized figure).
+
 ## [1.1.43] — 2026-06-17
 
 ### Fixed
