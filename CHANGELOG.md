@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.32] — 2026-06-16
+
+### Changed
+- **One canonical ATM-IV definition shared by the lab and the live E\*Trade provider — the provider no longer uses a "closest call only" measure.** An audit of the 2026-06-16 brief flagged AMD reading **70.27%** ATM IV in the brief/critic vs **81.83%** in `quote_cache`. Investigation showed the bulk of that gap is a legitimate *tenor* difference (the brief measures its ~30-DTE expiration; the chain-view value measures the **nearest** expiration, which spikes hardest on AMD's −7.3% day) — **the brief was correct and never reads the chain-view value.** But it also surfaced a real definitional inconsistency: `etrade-data-provider.getOptionsIV` computed ATM IV from the **closest call only**, while the lab (`computeAtmIv`) and `iv_history` use the **call+put average** at the closest strike, so the same expiration could read differently by the put/call skew. Both now share the single pure `atmIvAtClosestStrike(items, underlyingPx)` (`src/main/services/iv-utils.ts`) = average IV of every contract at the strike nearest spot. The lab's number is **unchanged** (the helper replicates its prior call+put average exactly); the E\*Trade chain-view / dashboard / screener IV now includes the put side. No trade-logic or brief change — the brief/critic path was already self-consistent on the 30-DTE value. see `docs/formulas.md#atm-iv`.
+
+### Notes
+- Affects display surfaces only (options-chain view, Morning-Briefing dashboard, screener wheel metrics, `quote_cache.current_iv`); the brief, critic, IV-rank, and execution paths are untouched. Regression coverage in `tests/iv-utils.test.ts` (call+put average vs calls-only, nearest-strike selection, unit pass-through, null/empty guards).
+
 ## [1.1.31] — 2026-06-16
 
 ### Fixed

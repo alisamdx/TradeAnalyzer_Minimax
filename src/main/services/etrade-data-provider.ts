@@ -21,6 +21,7 @@ import {
 } from './etrade-options.js';
 import type { OptionsProvider } from './options-provider.js';
 import type { OptionsChain, OptionContract } from './data-provider.js';
+import { atmIvAtClosestStrike } from './iv-utils.js';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -149,17 +150,14 @@ export class ETradeDataProvider implements OptionsProvider {
 
       if (allIvsPct.length === 0) return noData;
 
-      // ATM IV — find the call whose strike is closest to the underlying price.
-      let atmIv: number | null = null;
-      if (result.underlyingPrice !== null) {
-        let minDist = Infinity;
-        for (const leg of result.calls) {
-          if (leg.greek.iv !== null && leg.greek.iv > 0) {
-            const d = Math.abs(leg.strikePrice - result.underlyingPrice);
-            if (d < minDist) { minDist = d; atmIv = leg.greek.iv * 100; }
-          }
-        }
-      }
+      // ATM IV — call+put average at the strike closest to spot (the shared canonical
+      // definition; previously this used the closest CALL only, which read differently from
+      // the lab's call+put average for the same expiration). see docs/formulas.md#atm-iv
+      const atmDecimal = atmIvAtClosestStrike(
+        allLegs.map(leg => ({ strike: leg.strikePrice, iv: leg.greek.iv })),
+        result.underlyingPrice,
+      );
+      let atmIv: number | null = atmDecimal !== null ? atmDecimal * 100 : null;
       // Fallback: use the median IV across all legs.
       if (atmIv === null) {
         const sorted = [...allIvsPct].sort((a, b) => a - b);

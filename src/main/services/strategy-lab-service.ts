@@ -14,6 +14,7 @@ import type { DataProvider, HistoricalBar, OptionContract, OptionsChain } from '
 import type { OptionsProvider } from './options-provider.js';
 import { bsPrice, RISK_FREE_RATE } from './black-scholes.js';
 import { fillPrice } from './options-fill.js';
+import { atmIvAtClosestStrike } from './iv-utils.js';
 import type {
   StrategyLabContext,
   StrategyLabDirectionBias,
@@ -240,18 +241,12 @@ function computeDirectionBias(bars: HistoricalBar[]): {
 }
 
 function computeAtmIv(chain: OptionsChain, underlyingPx: number): number {
-  if (!chain.contracts.length) return 0;
-  const atmStrike = chain.contracts.reduce((best, c) =>
-    Math.abs(c.strike - underlyingPx) < Math.abs(best - underlyingPx) ? c.strike : best,
-    chain.contracts[0]?.strike ?? underlyingPx
-  );
-  const ivs = chain.contracts
-    .filter(c => c.strike === atmStrike && c.iv > 0)
-    .map(c => c.iv);
-  // OptionContract.iv is a decimal fraction (0.285) from both Polygon and E*Trade.
-  // Multiply by 100 to get percentage consistent with iv_history storage.
-  // see docs/formulas.md#iv-conventions
-  return ivs.length ? avg(ivs) * 100 : 0;
+  // Canonical ATM IV = call+put average at the strike closest to spot (shared with the live
+  // providers via atmIvAtClosestStrike so the brief and the chain view can't drift apart).
+  // OptionContract.iv is a decimal fraction (0.285) from both Polygon and E*Trade; multiply by
+  // 100 for the percentage consistent with iv_history storage. see docs/formulas.md#atm-iv
+  const atm = atmIvAtClosestStrike(chain.contracts, underlyingPx);
+  return atm !== null ? atm * 100 : 0;
 }
 
 function computeIvRank(db: Database, ticker: string, currentIv: number): {

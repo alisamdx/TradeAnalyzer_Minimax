@@ -382,6 +382,24 @@ IV Percentile = count(days where iv < current_iv) / total_days × 100
 
 Implemented in `IvHistoryService.getIvRank()` in `src/main/services/iv-history-service.ts`.
 
+### atm-iv
+
+Single-expiration ATM implied vol — the **average IV of the call and the put at the strike closest to spot** (plus any duplicate contracts at that strike):
+
+```
+atmStrike = strike (among contracts with IV > 0) minimising |strike − underlyingPx|
+ATM_IV    = mean( IV of every contract at atmStrike )
+```
+
+Averaging both sides captures put/call skew. Implemented once as the pure `atmIvAtClosestStrike(items, underlyingPx)` in `src/main/services/iv-utils.ts` (units pass through unchanged — decimal in → decimal out; callers ×100 for percentage storage), and shared by:
+
+- **`strategy-lab-service.computeAtmIv`** → the brief/critic `context.currentAtmIv`, for the lab's chosen ~30-DTE expiration.
+- **`etrade-data-provider.getOptionsIVAndPremium`** → `quote_cache.current_iv` and the options-chain / dashboard / screener surfaces, for the **nearest** expiration (with a median-IV fallback when no strike has a usable IV).
+
+Both now share this one definition; before v1.1.32 the E*Trade path used the closest **call only**, so the same expiration could read differently from the lab's call+put average.
+
+**Tenor matters — two correct ATM-IVs can legitimately differ.** The lab/brief measures the ~30-DTE expiration it actually trades; the provider's chain-view value measures the *nearest* expiration. On a sharp move these diverge (short-dated IV spikes hardest) — e.g. AMD on 2026-06-16 (−7.3% day): ~70% at 30 DTE vs ~82% at the nearest weekly. The brief uses only the horizon-matched 30-DTE value; `quote_cache.current_iv` is for the live chain view and never feeds a trade decision. The 30-day constant-maturity figure for `iv_history` is a separate, interpolated measure — see below.
+
 ### atm-iv-interpolation
 
 30-day constant-maturity ATM IV is computed from two expirations bracketing 30 DTE:
