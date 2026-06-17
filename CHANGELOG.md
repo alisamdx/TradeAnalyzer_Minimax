@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.41] — 2026-06-17
+
+### Added
+- **Payoff "🔧 Fix" now covers lizards and iron condors** (was the two vertical credit spreads only). It still narrows the protective wing(s) toward the short strike(s) — keeping your shorts — re-priced from the live chain, widest passing strike first:
+  - **Jade Lizard / Big Lizard** — narrows the long **call** so total credit ≥ the call-spread width (the "no upside risk" condition).
+  - **Reverse Jade / Reverse Big Lizard** — narrows the long **put** so credit ≥ the put-spread width.
+  - **Iron Condor / Dynamic Width Iron Condor** — greedily narrows whichever wing is currently **wider** (the binding side) until credit ≥ ⅓ × max(put width, call width).
+  Refactored into a generalized single-wing path + a two-wing condor path in `src/shared/payoff-fix.ts`; the button stays hidden when the rule already passes or no strike narrows enough.
+
 ## [1.1.40] — 2026-06-17
 
 ### Added
