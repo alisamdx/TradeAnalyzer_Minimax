@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.36] — 2026-06-17
+
+### Fixed
+- **The Daily Brief's Payoff/Options buttons now load the recommended structure, not the best-overall one.** On a pick whose recommended trade isn't the single highest-scoring lab structure, `PickNavRow` used `scores[0]` (the best-OVERALL structure across all 31 strategies) for the Payoff visualizer and the Options expiry — so clicking **Payoff** on a wheel **CSP** pick (AMD $470 / \$2,305) loaded a **Big Lizard** (\~\$6,200) instead. This affected wheel, income, buy, and **inflection** (the v2 launch strategy — its Payoff loaded a Big Lizard rather than the bull-put credit spread). The nav row now resolves the structure via the same `pickDisplayStructure(scores, strategy, breakoutDirection)` selector the card uses, so Payoff/Options/legs match the recommended trade shown on the card.
+- **The brief card's setup line is now labeled with its structure.** The `strike · expiry · premium` line describes the *relevant* structure (e.g. the CSP), but it visually trailed the "Best fit: Big Lizard A+" tag, making it ambiguous which structure the `$470 / $2,305` belonged to. It's now prefixed with the structure name (`CSP: $470 · Jul 17 · $2305.00 cr`).
+
+### Notes
+- Renderer-only change — **no brief re-run needed**; relaunch the app and the persisted brief renders correctly. The relevant-structure selector (`pickDisplayStructure`) is covered by `tests/strategy-structures.test.ts`; this routes the nav row through it (same pattern as the v1.1.30 inflection-direction fix). Found via user report (wheel AMD).
+
 ## [1.1.35] — 2026-06-17
 
 ### Fixed

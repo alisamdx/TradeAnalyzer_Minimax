@@ -3799,6 +3799,12 @@ input[type='checkbox'] {
   margin-top: 4px;
   font-size: 11px;
 }
+.setup-struct-label {
+  font-weight: 700;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
 .setup-strike {
   font-weight: 600;
   color: #e2e8f0;

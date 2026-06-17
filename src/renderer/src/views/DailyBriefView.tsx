@@ -194,9 +194,11 @@ function StrategyLabSummary({
         )}
       </div>
 
-      {/* Setup detail row — strike · expiry · premium */}
+      {/* Setup detail row — labeled with the RELEVANT structure so its strike/expiry/premium
+          aren't misread as belonging to the "Best fit" structure shown on the grade row. */}
       {setupAvailable && (
         <div className="pick-setup-detail">
+          {relevant && <span className="setup-struct-label">{SLUG_SHORT[relevant.slug] ?? relevant.name}:</span>}
           {strike !== null && <span className="setup-strike">${strike}</span>}
           <span className="setup-expiry">{fmtExpShort(setup!.expiration)}</span>
           {credit !== null && <span className="setup-premium setup-credit">${credit.toFixed(2)} cr</span>}
@@ -361,8 +363,11 @@ function PickNavRow({ pick, strategy }: { pick: BriefPick; strategy: ScoringStra
   };
 
   const result = pick.strategyLabResult ? (pick.strategyLabResult as StrategyLabValidateResult) : null;
-  const best   = result?.scores?.[0] ?? null;
-  const setup  = best?.setup ?? null;
+  // Use the STRATEGY-RELEVANT structure (the recommended trade shown on the card), not the
+  // best-overall scores[0]. Otherwise Payoff for a wheel CSP pick loaded the best-overall
+  // structure (a Big Lizard) instead of the CSP, contradicting the card's setup line.
+  const chosen = result ? pickDisplayStructure(result.scores, strategy, pick.breakoutDirection) : null;
+  const setup  = chosen?.setup && !chosen.setup.unavailableReason ? chosen.setup : null;
   const expiry = setup?.expiration ?? null;
   const legs   = setup?.legs?.length
     ? setup.legs.map((l, i) => labLegToPayoffLeg(l, i))
@@ -397,7 +402,7 @@ function PickNavRow({ pick, strategy }: { pick: BriefPick; strategy: ScoringStra
     const detail: Record<string, unknown> = { ticker: pick.ticker };
     if (pick.price != null)  detail.spot     = pick.price;
     if (expiry)              detail.expiry   = expiry;
-    if (best)                detail.strategy = best.slug;
+    if (chosen)              detail.strategy = chosen.slug;
     if (legs)                detail.legs     = legs;
     window.dispatchEvent(new CustomEvent('navigate-to-payoff', { detail }));
   };
@@ -407,7 +412,7 @@ function PickNavRow({ pick, strategy }: { pick: BriefPick; strategy: ScoringStra
   return (
     <div className="pick-nav-row">
       <button className="pick-nav-btn" onClick={handlePayoff}
-        title={legs ? `Open Payoff Visualizer pre-loaded with ${best?.name ?? 'strategy'} legs` : 'Open Payoff Visualizer for this ticker'}>
+        title={legs ? `Open Payoff Visualizer pre-loaded with ${chosen?.name ?? 'strategy'} legs` : 'Open Payoff Visualizer for this ticker'}>
         📊 Payoff
       </button>
       <button className="pick-nav-btn" onClick={handleValidate}
