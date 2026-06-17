@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.37] — 2026-06-17
+
+### Changed
+- **Renamed the brief card's "Best fit" cross-reference to "Top lab pick".** On a pick whose recommended structure isn't the single highest-scoring lab structure, the card shows that top structure as an FYI (e.g. a Big Lizard on a wheel CSP card). "Best fit" implied it was a *better* choice for the strategy; it's actually just the highest-scoring structure overall for the ticker across all strategies. "Top lab pick" reads as informational, not a competing recommendation. Display-label only.
+
 ## [1.1.36] — 2026-06-17
 
 ### Fixed

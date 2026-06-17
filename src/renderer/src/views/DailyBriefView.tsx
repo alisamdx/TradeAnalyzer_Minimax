@@ -183,7 +183,7 @@ function StrategyLabSummary({
         )}
         {best && !relevantIsBest && (
           <>
-            <span className="lab-grade-sep">·  Best fit:</span>
+            <span className="lab-grade-sep">·  Top lab pick:</span>
             <span className="lab-grade-item">
               <span className="lab-grade-label">{best.name}</span>
               <span className="lab-grade-badge" style={{ color: GRADE_COLOR[best.grade], borderColor: GRADE_COLOR[best.grade] }}>
@@ -195,7 +195,7 @@ function StrategyLabSummary({
       </div>
 
       {/* Setup detail row — labeled with the RELEVANT structure so its strike/expiry/premium
-          aren't misread as belonging to the "Best fit" structure shown on the grade row. */}
+          aren't misread as belonging to the "Top lab pick" structure shown on the grade row. */}
       {setupAvailable && (
         <div className="pick-setup-detail">
           {relevant && <span className="setup-struct-label">{SLUG_SHORT[relevant.slug] ?? relevant.name}:</span>}
