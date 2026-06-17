@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.39] — 2026-06-17
+
+### Fixed
+- **Opening Payoff from the Daily Brief now loads the option chain for the pick's own expiry, not the nearest weekly.** When navigating to the Payoff visualizer from a brief pick (which supplies pre-built legs), the brief-nav effect only set the legs and never loaded the chain or set `selectedExpiry` — so the chain panel and the "Suggested next leg" / manual leg-add buttons fell back to this week's Friday, adding legs at the wrong expiry (e.g. this Friday instead of the 7/17 the pick used). The effect now also loads the chain for `initialExpiry` (snapped to the nearest available expiry, which is an exact match when the brief's expiry is listed) and sets `selectedExpiry`, so all leg operations use the pick's expiry. Mirrors the existing Opportunity-navigation behavior.
+
+### Notes
+- Renderer-only — **no brief re-run needed**; relaunch the app. Found via user report (added next leg landed on this Friday instead of the 7/17 expiry from the brief).
+
 ## [1.1.38] — 2026-06-17
 
 ### Changed

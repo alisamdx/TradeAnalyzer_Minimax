@@ -2185,10 +2185,38 @@ export function PayoffView({ initialTicker, initialSpot, initialExpiry, initialS
     window.api.watchlists.items.list(selectedWlId).then(setWatchlistItems).catch(() => setWatchlistItems([]));
   }, [selectedWlId]);
 
-  // ── Strategy Lab navigation: pre-built legs supplied directly ────────────────
+  // ── Strategy Lab / Daily Brief navigation: pre-built legs supplied directly ──
   useEffect(() => {
     if (!initialLegs || initialLegs.length === 0) return;
     setLegs(initialLegs);
+
+    // Also load the option chain for the pick's OWN expiry (e.g. 7/17), so the chain panel
+    // and the "Suggested next leg" / manual leg-adds operate on that expiry — not the nearest
+    // weekly Friday. Without this the chain stayed unloaded and added legs defaulted to a
+    // different (this-week) expiry than the legs that came from the brief.
+    if (!initialTicker || !initialExpiry) return;
+    (async () => {
+      try {
+        const expResult = await window.api.optionsChain.getNearExpirations(initialTicker.toUpperCase());
+        setChainExpirations(expResult.expirations);
+        if (expResult.currentPrice) setSpotStr(expResult.currentPrice.toFixed(2));
+
+        // Snap to the nearest available expiry (exact match when the brief's expiry is listed).
+        const targetTs = new Date(initialExpiry).getTime();
+        const bestExpiry = expResult.expirations.length === 0
+          ? initialExpiry
+          : expResult.expirations.reduce((best, e) =>
+              Math.abs(new Date(e.date).getTime() - targetTs) <
+              Math.abs(new Date(best.date).getTime() - targetTs) ? e : best,
+            ).date;
+        setSelectedExpiry(bestExpiry);
+
+        const chainResult = await window.api.optionsChain.getChain(initialTicker.toUpperCase(), bestExpiry);
+        setChainData(chainResult);
+        if (chainResult.currentPrice) setSpotStr(chainResult.currentPrice.toFixed(2));
+        setShowChain(true);
+      } catch { /* chain is optional — the pre-built legs are already shown */ }
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // run only once on mount
 
