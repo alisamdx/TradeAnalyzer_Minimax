@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.34] — 2026-06-17
+
+### Fixed
+- **ATM (0.50-delta) structure bodies are now centered on spot, fixing a silent directional skew from stale E\*Trade Greeks.** The neutral body legs of straddles / iron-flies (income) and big-lizards (bullish) target 0.50 delta, but E\*Trade can serve deltas computed at an old spot whose deviation still slips under the `trustDeltas` 8% guard — e.g. on the 2026-06-17 brief MRVL's delta-implied ATM was \$300 vs spot \$278.67 (7.65%), so the "neutral" iron-fly/big-lizard body was placed at \$300, **7.7% above spot** (an ITM short put that needs a rally to profit). The critic flagged this on nearly every income/bullish pick (AMD \$520/+2.5%, COHR \$400/+4.5%, Z \$35/+5.2%, ALAB \$380/+5.1%). `findByDelta` now selects `deltaTarget ≈ 0.50` legs by **moneyness** (the strike nearest spot — correct for ATM by definition and robust to stale Greeks); OTM-wing selection (0.16/0.20/0.05 delta) is unchanged. This re-centers the income iron-flies and bullish big-lizards on spot.
+- **The degenerate-spread guard is now expiration-aware.** With ATM bodies selected by moneyness, a calendar's two 0.50-delta legs legitimately land on the same strike (different expirations) — the guard compared strike only and falsely rejected them as degenerate. It now requires same strike **and** same expiration, so calendars/diagonals build correctly while a real same-expiry collision (mislabeled condor) is still caught.
+
+### Notes
+- Structure-quality fix on already-selected picks — **ticker selection is unchanged** (income/bullish composites come from `analysis-service` signals, not the lab structures), so it's neutral on Brief Replay by construction (no FR-SEY-5 gate). Income/bullish are decision-support (not in the v2 inflection-only launch scope). The persisted 2026-06-17 brief keeps the skewed bodies; **re-run the brief** for centered structures. Regression coverage in `tests/strategy-lab-service.test.ts` (`findByDelta` ATM-by-moneyness vs stale delta; calendar same-strike build).
+
 ## [1.1.33] — 2026-06-17
 
 ### Fixed

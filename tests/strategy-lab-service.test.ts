@@ -9,7 +9,7 @@
 
 import { describe, it, expect } from 'vitest';
 import Database from 'better-sqlite3';
-import { StrategyLabService, classifySingleExpiryPnl } from '../src/main/services/strategy-lab-service.js';
+import { StrategyLabService, classifySingleExpiryPnl, findByDelta } from '../src/main/services/strategy-lab-service.js';
 import { bsPrice, normCdf, RISK_FREE_RATE } from '../src/main/services/black-scholes.js';
 import type { DataProvider, OptionsChain, OptionContract } from '../src/main/services/data-provider.js';
 import type { OptionsProvider } from '../src/main/services/options-provider.js';
@@ -94,6 +94,37 @@ function makeDb(): InstanceType<typeof Database> {
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
+
+// ATM (0.50-delta) legs must be selected by moneyness, not by (possibly stale) delta — the
+// makeContract fixture anchors DELTAS to STALE_SPOT (450) but PRICES to REAL_SPOT (375.66), so
+// the delta-ATM strike is ~450 while the true ATM is the strike nearest 375.66 (= 380). Without
+// the moneyness override, neutral straddle/iron-fly/big-lizard bodies land ~5–8% above spot.
+describe('findByDelta — ATM legs by moneyness (stale-Greeks skew fix)', () => {
+  const chain = makeChain(REAL_SPOT);
+
+  it('selects the 0.50-delta PUT body at the strike nearest spot, not the stale-delta strike', () => {
+    const leg = findByDelta(chain.contracts, 'put', 0.50, REAL_SPOT, true);
+    expect(leg?.strike).toBe(380); // nearest to 375.66 — NOT ~450 (stale delta-ATM)
+  });
+
+  it('selects the 0.50-delta CALL body at the same near-spot strike (centered straddle)', () => {
+    const leg = findByDelta(chain.contracts, 'call', 0.50, REAL_SPOT, true);
+    expect(leg?.strike).toBe(380);
+  });
+
+  it('still uses delta for OTM wing legs (0.20 delta is unchanged by the ATM override)', () => {
+    // The 0.20-delta put resolves via the (stale) delta path, landing well away from spot —
+    // proving only the ATM branch changed, not OTM selection.
+    const leg = findByDelta(chain.contracts, 'put', 0.20, REAL_SPOT, true);
+    expect(leg?.strike).not.toBe(380);
+    expect(Math.abs(leg!.delta!)).toBeCloseTo(0.20, 1);
+  });
+
+  it('falls back to delta/the existing path when no underlying price is available', () => {
+    const leg = findByDelta(chain.contracts, 'put', 0.50, undefined, true);
+    expect(leg).not.toBeNull(); // delta path still resolves something
+  });
+});
 
 describe('StrategyLabService underlying-price resolution', () => {
   it('uses chain.underlyingPrice over the chain-delta estimate (stale Greeks regression)', async () => {

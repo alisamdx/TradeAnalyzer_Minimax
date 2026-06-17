@@ -302,10 +302,26 @@ function findLizardHedge(
   return bestValid ?? candidates[0] ?? null; // fallback: nearest OTM
 }
 
-function findByDelta(
+export function findByDelta(
   contracts: OptionContract[], side: 'call' | 'put', targetDelta: number,
   underlyingPx?: number, trustDeltas = true
 ): OptionContract | null {
+  // ATM legs (deltaTarget ≈ 0.50) are the strike nearest spot BY DEFINITION, so select them by
+  // MONEYNESS — robust to stale Greeks. E*Trade can serve deltas computed at an old spot whose
+  // deviation still slips under the trustDeltas 8% guard (e.g. MRVL: delta-ATM $300 vs spot
+  // $278.67 = 7.65%), which placed a "neutral" straddle / iron-fly / big-lizard BODY 5–8% above
+  // spot — a silent directional skew (an ITM short put needing a rally to profit). The nearest
+  // strike to spot fixes the centering; OTM legs keep delta-based selection below.
+  if (underlyingPx && underlyingPx > 0 && Math.abs(targetDelta - 0.50) < 0.05) {
+    const sameSide = contracts.filter(c => c.side === side && c.bid >= 0);
+    const pool = sameSide.length ? sameSide : contracts.filter(c => c.side === side);
+    if (pool.length) {
+      return pool.reduce((best, c) =>
+        Math.abs(c.strike - underlyingPx) < Math.abs(best.strike - underlyingPx) ? c : best
+      );
+    }
+  }
+
   // Primary: use delta (available during market hours when Greeks are returned).
   // Skipped when trustDeltas=false — E*Trade serves stale Greeks on thin (OI=0)
   // chains (observed: delta −0.50 at a strike ~20% above spot), which would
@@ -476,10 +492,13 @@ function buildSetup(
   // same contract for both), the structure is malformed — that wing pays no premium and gives
   // no protection. Observed: an "iron condor" built sell-call $100 / buy-call $100 (really
   // just a put spread mislabeled). Mark unavailable rather than presenting a phantom structure.
+  // Same strike at DIFFERENT expirations is a legitimate calendar/diagonal (and the ATM-by-
+  // moneyness body fix legitimately lands both 0.50-delta legs on the same strike), so compare
+  // strike AND expiration — only a same-expiry same-side collision is degenerate.
   for (const side of ['call', 'put'] as const) {
-    const sells = builtLegs.filter(l => l.side === side && l.action === 'sell').map(l => l.strike);
-    const buys  = builtLegs.filter(l => l.side === side && l.action === 'buy').map(l => l.strike);
-    if (sells.some(s => buys.includes(s))) {
+    const sells = builtLegs.filter(l => l.side === side && l.action === 'sell');
+    const buys  = builtLegs.filter(l => l.side === side && l.action === 'buy');
+    if (sells.some(s => buys.some(b => b.strike === s.strike && b.expiration === s.expiration))) {
       return { ...base, legs: [], netCredit: null, netDebit: null, maxProfit: null, maxLoss: null,
         breakevens: [], annualizedReturn: null, popEstimate: null,
         unavailableReason: 'Degenerate spread — no suitable OTM strike for one wing' };
