@@ -34,6 +34,36 @@ const PIN_BET_SLUGS = new Set(['put-butterfly', 'call-butterfly']);
 // bet is a poor structural fit — see the de-prioritisation in pickRelevantStructure.
 const DIRECTIONAL_STRATEGIES = new Set(['bullish', 'bearish', 'buy']);
 
+// Inflection's two relevant verticals are direction-OPPOSITE, and both are always
+// constructible on any chain (you can place a bull-put below spot AND a bear-call above it).
+// So the structure MUST be locked to the breakout side, not chosen by grade: an up breakout
+// trades the bull-put (short-put-vertical), a down breakout the bear-call (short-call-vertical).
+// (The earlier "higher-graded of the two" rule could surface the OPPOSITE-direction trade —
+// observed: MCHP up-breakout where short-call A+ out-graded short-put A+ by 1 pt, producing a
+// BEARISH structure on a BULLISH breakout. This mirrors how Brief Replay / Backtest
+// (simulateSingleSpread) already select the spread.)
+const INFLECTION_SLUG_BY_DIRECTION: Record<'up' | 'down', string> = {
+  up: 'short-put-vertical',
+  down: 'short-call-vertical',
+};
+
+/**
+ * Strategy-relevant Strategy Lab slugs, narrowed to the breakout side for inflection
+ * (up → bull-put, down → bear-call; defaults to 'up' — the launch/default config, since
+ * down breakouts are off by default). For every other strategy this is the full
+ * `STRATEGY_RELEVANT_SLUGS[strategy]` list. Centralising the direction lock here keeps the
+ * structure selector AND the brief's liquidity gate evaluating the SAME structure.
+ */
+export function relevantSlugsForPick(
+  strategy: string,
+  breakoutDirection?: 'up' | 'down' | null,
+): string[] {
+  if (strategy === 'inflection') {
+    return [INFLECTION_SLUG_BY_DIRECTION[breakoutDirection ?? 'up']];
+  }
+  return STRATEGY_RELEVANT_SLUGS[strategy] ?? [];
+}
+
 // A directional structure must be at least this graded to displace a viable pin bet — we
 // won't surface a badly-priced (D/F) directional structure just to avoid a butterfly.
 const MIN_DIRECTIONAL_GRADE = GRADE_RANK['C']!;
@@ -84,14 +114,16 @@ export interface RelevantScoreLike {
  * graded one (≥ C) exists; we won't surface a badly-priced (D/F) directional structure
  * just to avoid a butterfly, so a viable butterfly is kept when the alternatives are broken.
  *
- * Inflection is special: its two relevant verticals are direction-opposite (bull put vs
- * bear call), so the higher-graded one — matching the breakout direction — is chosen.
+ * Inflection is direction-locked (see `relevantSlugsForPick`): its structure must match the
+ * breakout side (up → bull-put, down → bear-call), never be chosen by grade — both verticals
+ * are always constructible, so grading would surface the opposite-direction trade.
  */
 export function pickRelevantStructure<T extends RelevantScoreLike>(
   scores: readonly T[] | undefined | null,
   strategy: string,
+  breakoutDirection?: 'up' | 'down' | null,
 ): T | null {
-  const slugs = STRATEGY_RELEVANT_SLUGS[strategy] ?? [];
+  const slugs = relevantSlugsForPick(strategy, breakoutDirection);
   const valid = (scores ?? []).filter(
     s => slugs.includes(s.slug) && s.setup != null && !s.setup.unavailableReason,
   );
@@ -107,9 +139,8 @@ export function pickRelevantStructure<T extends RelevantScoreLike>(
     );
     if (directional.length > 0) pool = directional;
   }
-  if (strategy === 'inflection') {
-    return pool.reduce((best, s) => ((GRADE_RANK[s.grade] ?? 0) > (GRADE_RANK[best.grade] ?? 0) ? s : best));
-  }
+  // Lab scores arrive best-first, so the first pool member is the highest-graded in tier.
+  // (Inflection's slug list is already a single direction-matched slug, so this is it.)
   return pool[0] ?? null;
 }
 
@@ -122,10 +153,11 @@ export function pickRelevantStructure<T extends RelevantScoreLike>(
 export function pickDisplayStructure<T extends RelevantScoreLike>(
   scores: readonly T[] | undefined | null,
   strategy: string,
+  breakoutDirection?: 'up' | 'down' | null,
 ): T | null {
-  const chosen = pickRelevantStructure(scores, strategy);
+  const chosen = pickRelevantStructure(scores, strategy, breakoutDirection);
   if (chosen) return chosen;
-  const slugs = STRATEGY_RELEVANT_SLUGS[strategy] ?? [];
+  const slugs = relevantSlugsForPick(strategy, breakoutDirection);
   const list = scores ?? [];
   return list.find(s => slugs.includes(s.slug)) ?? list[0] ?? null;
 }

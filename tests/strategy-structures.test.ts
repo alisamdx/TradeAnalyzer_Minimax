@@ -3,7 +3,7 @@
 // making it structure-blind on the v2 launch strategy.
 
 import { describe, it, expect } from 'vitest';
-import { STRATEGY_RELEVANT_SLUGS, pickRelevantStructure, pickDisplayStructure, formatStructureLegs } from '../src/shared/strategy-structures.js';
+import { STRATEGY_RELEVANT_SLUGS, relevantSlugsForPick, pickRelevantStructure, pickDisplayStructure, formatStructureLegs } from '../src/shared/strategy-structures.js';
 import { STRATEGIES } from '../src/main/services/scoring-service.js';
 
 type Score = { slug: string; grade: string; setup: { unavailableReason?: string | null; maxLoss?: number | null } | null };
@@ -43,6 +43,22 @@ describe('STRATEGY_RELEVANT_SLUGS — coverage parity', () => {
   });
 });
 
+describe('relevantSlugsForPick — inflection direction lock', () => {
+  it('narrows inflection to the bull-put on an up breakout (and by default)', () => {
+    expect(relevantSlugsForPick('inflection', 'up')).toEqual(['short-put-vertical']);
+    expect(relevantSlugsForPick('inflection')).toEqual(['short-put-vertical']);
+  });
+
+  it('narrows inflection to the bear-call on a down breakout', () => {
+    expect(relevantSlugsForPick('inflection', 'down')).toEqual(['short-call-vertical']);
+  });
+
+  it('leaves non-inflection strategies at their full slug list', () => {
+    expect(relevantSlugsForPick('wheel', 'up')).toEqual(STRATEGY_RELEVANT_SLUGS['wheel']);
+    expect(relevantSlugsForPick('bearish')).toEqual(STRATEGY_RELEVANT_SLUGS['bearish']);
+  });
+});
+
 describe('pickRelevantStructure', () => {
   it('resolves an inflection structure (regression: critic returned null before the fix)', () => {
     const chosen = pickRelevantStructure(
@@ -52,12 +68,47 @@ describe('pickRelevantStructure', () => {
     expect(chosen?.slug).toBe('short-put-vertical'); // big-lizard is not inflection-relevant
   });
 
-  it('for inflection, prefers the higher-graded of the two opposite verticals', () => {
+  it('for inflection, LOCKS to the breakout-side vertical — NOT the higher grade (MCHP regression)', () => {
+    // MCHP: an UP breakout where the bear-call (short-call-vertical, A+) out-graded the
+    // bull-put (short-put-vertical, A+/B) by a hair. The old "higher-graded" rule surfaced a
+    // BEARISH structure on a BULLISH breakout. With the direction lock, up → bull-put always.
     const chosen = pickRelevantStructure(
-      [valid('short-put-vertical', 'B'), valid('short-call-vertical', 'A+')],
+      [valid('short-call-vertical', 'A+'), valid('short-put-vertical', 'B')],
       'inflection',
+      'up',
+    );
+    expect(chosen?.slug).toBe('short-put-vertical');
+  });
+
+  it('for inflection, a down breakout locks to the bear-call (short-call-vertical)', () => {
+    const chosen = pickRelevantStructure(
+      [valid('short-put-vertical', 'A+'), valid('short-call-vertical', 'B')],
+      'inflection',
+      'down',
     );
     expect(chosen?.slug).toBe('short-call-vertical');
+  });
+
+  it('for inflection, defaults to the up side (bull-put) when no direction is given', () => {
+    // Launch/default config is up-only, so an absent direction must never surface a bear-call.
+    const chosen = pickRelevantStructure(
+      [valid('short-call-vertical', 'A+'), valid('short-put-vertical', 'F')],
+      'inflection',
+    );
+    expect(chosen?.slug).toBe('short-put-vertical');
+  });
+
+  it('for inflection, returns null when the breakout-side vertical is unavailable (never the opposite side)', () => {
+    // Up breakout but only the bear-call is valid → surface nothing rather than the wrong trade.
+    const chosen = pickRelevantStructure(
+      [
+        valid('short-call-vertical', 'A+'),
+        { slug: 'short-put-vertical', grade: 'A', setup: { unavailableReason: 'no chain' } },
+      ],
+      'inflection',
+      'up',
+    );
+    expect(chosen).toBeNull();
   });
 
   it('for non-inflection, returns the first relevant valid structure in lab (best-first) order', () => {
@@ -119,12 +170,13 @@ describe('pickRelevantStructure — defined-risk preference', () => {
     expect(chosen?.slug).toBe('iron-fly'); // first defined-risk in best-first order
   });
 
-  it('is a no-op for inflection (both verticals are already defined-risk)', () => {
+  it('is a no-op for inflection (direction lock dominates; both verticals are already defined-risk)', () => {
     const chosen = pickRelevantStructure(
-      [defined('short-put-vertical', 'A'), defined('short-call-vertical', 'A+')],
+      [defined('short-call-vertical', 'A+'), defined('short-put-vertical', 'A')],
       'inflection',
+      'up',
     );
-    expect(chosen?.slug).toBe('short-call-vertical'); // still higher-graded vertical
+    expect(chosen?.slug).toBe('short-put-vertical'); // up breakout → bull-put, regardless of grade
   });
 });
 

@@ -419,7 +419,9 @@ Use verdict: pass, caution, or flag. Use confidence: high, medium, or low.`;
    */
   private selectRelevantStructure(pick: BriefPick, strategy: string): LabStructureScore | null {
     const labResult = pick.strategyLabResult as LabResultShape | null;
-    return pickRelevantStructure<LabStructureScore>(labResult?.scores, strategy);
+    // breakoutDirection locks inflection to the breakout-side vertical (up → bull-put,
+    // down → bear-call) so the critic evaluates the same structure the advocate proposed.
+    return pickRelevantStructure<LabStructureScore>(labResult?.scores, strategy, pick.breakoutDirection);
   }
 
   /**

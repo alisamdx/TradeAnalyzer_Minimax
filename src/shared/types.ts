@@ -1633,6 +1633,11 @@ export interface BriefPick {
   rank: number;
   validated: boolean;
   price: number | null;
+  /** Inflection only: the breakout side that earned the pick ('up' → bull-put vertical,
+   *  'down' → bear-call vertical). Locks structure selection to the breakout direction so an
+   *  up breakout never surfaces a bearish bear-call. Absent for non-inflection / legacy picks
+   *  (selection then defaults to 'up', the launch/default config). */
+  breakoutDirection?: 'up' | 'down';
 }
 
 export interface DailyBriefEntry {

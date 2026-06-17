@@ -91,8 +91,8 @@ const GRADE_COLOR: Record<StrategyLabGrade, string> = {
 
 // Relevant structure to feature for a pick — shared selector (defined-risk preferred over
 // unbounded), so the card matches what the Critic evaluated and the email/PDF show.
-function gradeOf(result: StrategyLabValidateResult, strategy: ScoringStrategy): { slug: string; name: string; grade: StrategyLabGrade; score: number; setup: StrategySetup | null } | null {
-  const best = pickDisplayStructure(result.scores, strategy);
+function gradeOf(result: StrategyLabValidateResult, strategy: ScoringStrategy, breakoutDirection?: 'up' | 'down'): { slug: string; name: string; grade: StrategyLabGrade; score: number; setup: StrategySetup | null } | null {
+  const best = pickDisplayStructure(result.scores, strategy, breakoutDirection);
   if (!best) return null;
   return { slug: best.slug, name: best.name, grade: best.grade, score: best.totalScore, setup: best.setup };
 }
@@ -135,16 +135,18 @@ function bestOverall(result: StrategyLabValidateResult): { name: string; grade: 
 function StrategyLabSummary({
   strategyLabResult,
   strategy,
+  breakoutDirection,
 }: {
   strategyLabResult: object | null;
   strategy: ScoringStrategy;
+  breakoutDirection?: 'up' | 'down';
 }) {
   if (!strategyLabResult) return null;
 
   const result = strategyLabResult as StrategyLabValidateResult;
   if (!result.scores?.length) return null;
 
-  const relevant = gradeOf(result, strategy);
+  const relevant = gradeOf(result, strategy, breakoutDirection);
   const best = bestOverall(result);
 
   if (!relevant && !best) return null;
@@ -446,7 +448,7 @@ function PickCard({
   const [expanded, setExpanded] = useState(false);
 
   const result = pick.strategyLabResult ? (pick.strategyLabResult as StrategyLabValidateResult) : null;
-  const labGrade = result ? gradeOf(result, strategy) : null;
+  const labGrade = result ? gradeOf(result, strategy, pick.breakoutDirection) : null;
   const verdict = pick.criticVerdict?.verdict ?? null;
 
   return (
@@ -499,7 +501,7 @@ function PickCard({
             </button>
           </div>
           <TopSignals signals={pick.signals} />
-          <StrategyLabSummary strategyLabResult={pick.strategyLabResult ?? null} strategy={strategy} />
+          <StrategyLabSummary strategyLabResult={pick.strategyLabResult ?? null} strategy={strategy} breakoutDirection={pick.breakoutDirection} />
           <PickNavRow pick={pick} strategy={strategy} />
           {pick.aiRationale
             ? <p className="pick-rationale">{pick.aiRationale}</p>

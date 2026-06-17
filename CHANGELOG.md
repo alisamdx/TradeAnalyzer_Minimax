@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.30] — 2026-06-16
+
+### Fixed
+- **Inflection structure selection is now LOCKED to the breakout direction, so an up breakout can never surface a bearish bear-call spread.** Inflection's two relevant verticals are direction-opposite (bull-put `short-put-vertical` for an up breakout, bear-call `short-call-vertical` for a down breakout) and **both are always constructible on any chain**. `pickRelevantStructure` chose the *higher-graded* of the two — so on the 2026-06-16 brief **MCHP** (an UP breakout, `breakout_state = 1`) surfaced a **short-call vertical** because the bear-call (A+, 94) out-graded the bull-put (A+, 93) by a single point. The advocate rationale even flagged it ("notably this is a call-side structure, implying bearish inflection") — a bearish trade recommended on a bullish breakout. This is the v2 launch strategy (real-money path), and it diverged from how **Brief Replay / Backtest** (`simulateSingleSpread`) already select the spread (up → bull-put, down → bear-call). Selection now narrows to the breakout-side slug via a new shared `relevantSlugsForPick(strategy, breakoutDirection)`; the breakout side is persisted on each pick as `BriefPick.breakoutDirection` (`'up'`/`'down'`, set from `technical_signals.breakout_state`) so the advocate, critic, PDF/email report, and Daily Brief card all lock to the **same** direction-matched structure. The brief's liquidity gate (`getBestLiquidityScore`/`hasAdequateLiquidity`) is direction-aware too, so it evaluates the structure actually recommended. Defaults to `'up'` (the launch/default config — down breakouts are off by default) when direction is absent, and surfaces **nothing** rather than the opposite-side trade if the breakout-side vertical is unavailable.
+
+### Notes
+- **Ticker selection is unchanged** (composite-driven, independent of lab grade) — only the structure shown per already-selected inflection pick changes, so this is neutral on Brief Replay returns by construction (no FR-SEY-5 gate). It in fact brings the live brief into line with the direction-locked spread the backtest already simulates. The persisted 2026-06-16 brief still holds the old (grade-locked) structure; **re-run the brief** for MCHP to show its correct bull-put vertical. Regression coverage in `tests/strategy-structures.test.ts` (MCHP up-breakout, down-breakout lock, up-default, unavailable-side → null).
+
 ## [1.1.29] — 2026-06-16
 
 ### Fixed

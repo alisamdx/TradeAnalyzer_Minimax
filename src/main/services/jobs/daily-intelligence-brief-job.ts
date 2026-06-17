@@ -26,7 +26,7 @@ import type { EarningsService } from '../earnings-service.js';
 import type { OAuthCredentials } from '../etrade-auth.js';
 import { getETradeLastPrice } from '../etrade-options.js';
 import { withTransaction } from '../../db/connection.js';
-import { STRATEGY_RELEVANT_SLUGS, pickRelevantStructure, formatStructureLegs } from '@shared/strategy-structures.js';
+import { STRATEGY_RELEVANT_SLUGS, pickRelevantStructure, relevantSlugsForPick, formatStructureLegs } from '@shared/strategy-structures.js';
 
 // VIX sane range — reject anything outside this (a quote typo can return an unrelated
 // symbol). Historical VIX spans ~9 (2017) to ~82 (COVID); [5,150] is a safe guard.
@@ -59,12 +59,18 @@ const MIN_LIQUIDITY_SCORE = 5;
 
 // Returns the best liquidityScore (0–15) among the strategy-relevant structures,
 // or null when no lab result or no relevant structure is available.
-function getBestLiquidityScore(labResult: object | null, strategy: string): number | null {
+function getBestLiquidityScore(
+  labResult: object | null,
+  strategy: string,
+  breakoutDirection?: 'up' | 'down',
+): number | null {
   if (!labResult) return null;
   type SScore = { slug: string; liquidityScore: number; setup: { unavailableReason: string | null } | null };
   type LabRes  = { scores?: SScore[] };
   const result = labResult as LabRes;
-  const slugs  = STRATEGY_RELEVANT_SLUGS[strategy] ?? [];
+  // Direction-locked slugs for inflection so the gate evaluates the SAME structure the
+  // brief recommends (an up breakout's bull-put, never the opposite-side bear-call).
+  const slugs  = relevantSlugsForPick(strategy, breakoutDirection);
   let best: number | null = null;
   for (const s of result.scores ?? []) {
     if (slugs.includes(s.slug) && s.setup && !s.setup.unavailableReason) {
@@ -77,11 +83,22 @@ function getBestLiquidityScore(labResult: object | null, strategy: string): numb
 // Returns false when the best relevant structure has liquidityScore below the threshold,
 // or when the lab ran but produced no valid structure for this strategy (all unavailable).
 // Returns true only when no lab result exists at all (validation failed — can't gate).
-function hasAdequateLiquidity(labResult: object | null, strategy: string): boolean {
+function hasAdequateLiquidity(
+  labResult: object | null,
+  strategy: string,
+  breakoutDirection?: 'up' | 'down',
+): boolean {
   if (!labResult) return true; // validation failed entirely — can't gate what we didn't measure
-  const best = getBestLiquidityScore(labResult, strategy);
+  const best = getBestLiquidityScore(labResult, strategy, breakoutDirection);
   if (best === null) return false; // lab ran but no valid structure found for this strategy
   return best >= MIN_LIQUIDITY_SCORE;
+}
+
+// Map a ticker's breakout signal to the inflection trade direction. 1 → up (bull-put),
+// −1 → down (bear-call), else undefined (non-breakout / non-inflection).
+function breakoutDirectionOf(sd: { breakoutState?: number | null } | undefined | null): 'up' | 'down' | undefined {
+  const st = sd?.breakoutState;
+  return st === 1 ? 'up' : st === -1 ? 'down' : undefined;
 }
 
 // Compact summary of the structure a strategy would actually trade — fed to the
@@ -91,12 +108,16 @@ function hasAdequateLiquidity(labResult: object | null, strategy: string): boole
 // inflection pick whose real structure is a bull-put CREDIT spread, then arguing high
 // IV was bad (it's favorable when you sell premium). Returns null when no relevant
 // validated structure exists.
-function summarizeRelevantStructure(labResult: object | null, strategy: string): Record<string, unknown> | null {
+function summarizeRelevantStructure(
+  labResult: object | null,
+  strategy: string,
+  breakoutDirection?: 'up' | 'down',
+): Record<string, unknown> | null {
   type Leg = { action: string; side?: 'call' | 'put'; strike: number; qty?: number };
   type SSetup = { legs: Leg[]; netCredit: number | null; netDebit: number | null; maxLoss?: number | null; unavailableReason?: string | null };
   type SScore = { slug: string; grade: string; setup: SSetup | null };
   const scores = (labResult as { scores?: SScore[] } | null)?.scores;
-  const chosen = pickRelevantStructure<SScore>(scores, strategy);
+  const chosen = pickRelevantStructure<SScore>(scores, strategy, breakoutDirection);
   if (!chosen?.setup) return null;
   const s = chosen.setup;
   const isCredit = s.netCredit !== null && s.netCredit > 0;
@@ -384,7 +405,10 @@ export class DailyIntelligenceBriefJob implements BatchJobHandler {
             ),
             // The actual trade being proposed, so the rationale matches it (credit vs
             // debit, legs) instead of being invented from the strategy name.
-            structure: summarizeRelevantStructure(validationResults.get(pick.ticker) ?? null, strategy),
+            structure: summarizeRelevantStructure(
+              validationResults.get(pick.ticker) ?? null, strategy,
+              breakoutDirectionOf(signalData.get(pick.ticker)),
+            ),
           });
         }
       }
@@ -489,7 +513,10 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
     for (const strategy of STRATEGIES) {
       const top = topPerStrategy.get(strategy) ?? [];
       const passedGate = top.filter(scored =>
-        hasAdequateLiquidity(validationResults.get(scored.ticker) ?? null, strategy)
+        hasAdequateLiquidity(
+          validationResults.get(scored.ticker) ?? null, strategy,
+          breakoutDirectionOf(signalData.get(scored.ticker)),
+        )
       );
       const liquidFiltered = passedGate.slice(0, PICKS_PER_STRATEGY);
       // failedGate: rejected by liquidity. cappedOut: liquid but outranked by top 5.
@@ -498,7 +525,10 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
       if (failedGate.length > 0) totalGated += failedGate.length;
 
       const fmt = (s: ScoredTicker) => {
-        const liq = getBestLiquidityScore(validationResults.get(s.ticker) ?? null, strategy);
+        const liq = getBestLiquidityScore(
+          validationResults.get(s.ticker) ?? null, strategy,
+          breakoutDirectionOf(signalData.get(s.ticker)),
+        );
         return `${s.ticker}(${liq ?? '?'}/15)`;
       };
       let logLine = `[brief funnel] ${strategy}: ${top.length} → ${liquidFiltered.length} final`;
@@ -516,6 +546,9 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
         rank: idx + 1,
         validated: !!validationResults.get(scored.ticker),
         price: signalData.get(scored.ticker)?.lastPrice ?? null,
+        // Persist breakout side so the critic / report / renderer lock to the SAME
+        // direction-matched structure as the advocate (inflection only; undefined → omitted).
+        breakoutDirection: breakoutDirectionOf(signalData.get(scored.ticker)),
       }));
       assembledPicks.set(strategy as ScoringStrategy, picks);
     }
