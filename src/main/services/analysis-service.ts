@@ -259,11 +259,15 @@ export function computeADX(bars: Bar[], period = 14): (number | null)[] {
     dxs.push(pd + nd === 0 ? 0 : Math.abs(pd - nd) / (pd + nd) * 100);
   }
 
-  // ADX = Wilder smoothed DX.
+  // ADX = Wilder smoothed AVERAGE of DX. `smooth` returns the Wilder running SUM (≈ period ×
+  // average), which is correct for the +DI/−DI ratios above (the sums cancel) but NOT for ADX,
+  // which is the average — so the result must be divided by `period`. Omitting this inflated
+  // ADX ~`period`× (e.g. AMD 648 vs the true ~46), saturating the trendStrength/trendNeutral
+  // signals. `smoothDX/period` equals the exact Wilder ADX recursion. see docs/formulas.md#adx
   const smoothDX = smooth(dxs, period);
   for (let i = period - 1; i < bars.length; i++) {
     const idx = i - (period - 1);
-    if (smoothDX[idx] !== null && smoothDX[idx] !== undefined) result[i] = smoothDX[idx] as number;
+    if (smoothDX[idx] !== null && smoothDX[idx] !== undefined) result[i] = (smoothDX[idx] as number) / period;
   }
   return result;
 }

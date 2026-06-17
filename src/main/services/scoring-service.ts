@@ -117,6 +117,18 @@ const BASELINE_WHEEL: ScoringSignal[] = [
   },
 ]; // sum = 100
 
+// ADX is NOT fed into the composite. A full-year Brief-Replay A/B (FR-SEY-5; the corrected
+// ADX vs ADX-absent) showed enabling it is net-negative — bullish −1.50pp, bearish −1.15pp,
+// income −0.43pp on direction-aware forward returns, with lower hit-rates — because strong-
+// trend (high-ADX) names mean-revert over the next ~21 days. (Replay never fed ADX into
+// scoring; the live brief did, but only via a 14×-inflated ADX bug that SATURATED the signal
+// to a non-discriminating constant — so the live brief was already ≈ the ADX-absent state.)
+// computeADX is corrected (analysis-service) and retained for DISPLAY only (Validate dashboard,
+// analysis text). With this false, trendStrength/downtrendScore use their MA-stack component
+// only and income's trendNeutral goes missing — the validated state. Flip to re-enable, but
+// RE-VALIDATE on Brief Replay first (tests/adx-replay-validation.test.ts, REPLAY_WITH_ADX).
+const USE_ADX_IN_SCORING = false;
+
 // Weights sum = 100. All signals trimmed proportionally to fit 8 signals.
 const BASELINE_BULLISH: ScoringSignal[] = [
   {
@@ -1030,7 +1042,7 @@ export class ScoringService {
             if (!d) continue;
             if (!seen.has(`adx:${item.ticker}`)) {
               seen.add(`adx:${item.ticker}`);
-              d.trendStrengthAdx = item.trendStrength;
+              if (USE_ADX_IN_SCORING) d.trendStrengthAdx = item.trendStrength;
             }
           }
           for (const item of r.wheel ?? []) {
@@ -1086,7 +1098,7 @@ export class ScoringService {
           for (const item of items) {
             if (!tickerSet.has(item.ticker) || seen.has(`adx:${item.ticker}`)) continue;
             seen.add(`adx:${item.ticker}`);
-            result.get(item.ticker)!.trendStrengthAdx = item.trendStrength;
+            if (USE_ADX_IN_SCORING) result.get(item.ticker)!.trendStrengthAdx = item.trendStrength;
           }
         }
       } catch {
@@ -1262,8 +1274,8 @@ export class ScoringService {
         d.smaStack = { sma20: row.sma20, sma50: row.sma50, sma200: row.sma200 };
       }
       if (d.lastPrice === null && row.price !== null && row.price > 0) d.lastPrice = row.price;
-      // ADX → trendStrengthAdx (trendNeutral signal for income; trendStrength for bullish/bearish)
-      if (d.trendStrengthAdx === null) d.trendStrengthAdx = row.adx;
+      // ADX → trendStrengthAdx (display-time fallback). Gated out of scoring (see USE_ADX_IN_SCORING).
+      if (USE_ADX_IN_SCORING && d.trendStrengthAdx === null) d.trendStrengthAdx = row.adx;
       // 20-day low → entryZoneLow proxy for breakoutScore priceNearSupport component
       if (d.entryZoneLow === null) d.entryZoneLow = row.support_level;
     }

@@ -11,6 +11,7 @@ import type { Database } from 'better-sqlite3';
 import type { ScoringService, TickerSignalData } from './scoring-service.js';
 import { REPLAY_STRATEGIES, minCompositeForStrategy } from './scoring-service.js';
 import { isTradingDay } from './iv-history-service.js';
+import { computeADX, type Bar } from './analysis-service.js';
 import type { ReplayProgressEvent, ReplayPickRow, ReplaySummary, ReplayChartData, ReplayChartMonthlyRow, ScreenResultPayload, PremiumHistoryReadiness } from '@shared/types.js';
 import { withTransaction } from '../db/connection.js';
 
@@ -348,6 +349,21 @@ export class BriefReplayService {
         // Fundamentals from cache
         const fund = fundamentals.get(ticker);
 
+        // ADX point-in-time from the same bars used for ATR/breakout, so replay scores the
+        // trendNeutral (income, wt 15) / trendStrength (bullish/bearish, wt 21) signals the
+        // live brief uses — previously null, so replay silently omitted them (an unfaithful
+        // backtest of those strategies). Uses the shared (period-corrected) computeADX.
+        // ADX is intentionally absent from scoring (see scoring-service USE_ADX_IN_SCORING — the
+        // FR-SEY-5 replay A/B showed it is net-negative). Replay therefore matches the live brief
+        // (no ADX) by default. REPLAY_WITH_ADX re-enables the point-in-time computation so the
+        // A/B (tests/adx-replay-validation.test.ts) can re-measure the ADX-on arm on demand.
+        let trendStrengthAdx: number | null = null;
+        if (process.env.REPLAY_WITH_ADX) {
+          const adxBars: Bar[] = available.map(p => ({ t: 0, o: p.close, h: p.high, l: p.low, c: p.close, v: p.volume }));
+          const adxSeries = computeADX(adxBars, 14);
+          trendStrengthAdx = adxSeries[adxSeries.length - 1] ?? null;
+        }
+
         signalMap.set(ticker, {
           ticker,
           // IV
@@ -356,9 +372,9 @@ export class BriefReplayService {
           fundamentalScore:   fund?.fundamentalScore ?? null,
           epsGrowth:          fund?.epsGrowth        ?? null,
           revenueGrowth:      fund?.revenueGrowth    ?? null,
-          // Analysis snapshots — not available for replay
+          // Analysis (point-in-time)
           rsi,
-          trendStrengthAdx:   null,  // ADX skipped for replay
+          trendStrengthAdx,
           trendLabel,
           smaStack:           (sma20 !== null || sma50 !== null || sma200 !== null)
                                 ? { sma20, sma50, sma200 }

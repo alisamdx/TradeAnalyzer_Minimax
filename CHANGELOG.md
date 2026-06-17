@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.1.33] — 2026-06-17
+
+### Fixed
+- **ADX is no longer ~14× too large (Wilder average, not sum).** `analysis-service.computeADX` reused the Wilder running-**sum** helper for the final ADX step and never divided by `period` — correct for the +DI/−DI ratios (the sums cancel) but wrong for ADX, which is the **average** of DX. So ADX came out an impossible ~648 for AMD (true ~46), saturating the trend signals and surfacing "trendNeutral score of 630" in a brief rationale. Fixed by `÷ period` (the exact Wilder ADX recursion); ADX is now bounded [0, 100]. The companion `daily-technical-signals-job.computeADX` was already correct.
+
+### Changed
+- **ADX removed from composite scoring (FR-SEY-5 validated).** A full-year Brief-Replay A/B (the corrected ADX fed into scoring vs absent) showed enabling it is **net-negative on every strategy that uses it** — bullish **−1.50pp**, bearish **−1.15pp**, income **−0.43pp** on direction-aware forward returns, with lower hit-rates — because strong-trend (high-ADX) names mean-revert over the next ~21 days. The live brief was *accidentally protected* because the 14× bug saturated the signal to a non-discriminating constant, so naively shipping the arithmetic fix would have silently degraded those strategies. `ScoringService.USE_ADX_IN_SCORING = false`: `trendStrength` (bullish) and `downtrendScore` (bearish) now use only their MA-stack component, and income's `trendNeutral` goes missing — the validated-best state (≈ prior behaviour; replay never fed ADX into scoring). The corrected ADX is retained for **display only** (Validate dashboard, Analysis view).
+
+### Notes
+- Net effect on the brief: bullish/bearish/income rankings unchanged-or-better, no more "ADX 630", and the "fixing the bug silently hurts" trap is defused. Buy/wheel/inflection never used ADX (unaffected). The A/B harness `tests/adx-replay-validation.test.ts` (gated behind `RUN_ADX_AB`, ADX-on arm via `REPLAY_WITH_ADX`) stays for future re-validation. see `docs/formulas.md#adx`.
+
 ## [1.1.32] — 2026-06-16
 
 ### Changed

@@ -184,6 +184,40 @@ describe('computeADX', () => {
       if (v !== null) expect(v!).toBeGreaterThanOrEqual(0);
     });
   });
+
+  // Regression for the ~period× inflation bug: ADX is a bounded index in [0, 100]. The old
+  // code returned the Wilder running SUM of DX (≈ period × average) without dividing by
+  // period, so a strong trend produced impossible values like ~648 (AMD) / ~1400 (synthetic),
+  // saturating the trendStrength (wt 21) / trendNeutral (wt 15) scoring signals.
+  it('never exceeds 100, even for a maximally strong trend', () => {
+    const bars: Bar[] = [makeBar(100, 102, 99)];
+    for (let i = 1; i < 60; i++) {
+      const prev = bars[i - 1]!.c;
+      bars.push(makeBar(prev + 2, prev + 3, prev + 1)); // relentless uptrend → DX ≈ 100
+    }
+    const adx = computeADX(bars, 14).filter((v): v is number => v !== null);
+    adx.forEach((v) => expect(v).toBeLessThanOrEqual(100));
+    // A relentless trend pins ADX high (but still ≤ 100), not to ~1400.
+    expect(adx[adx.length - 1]!).toBeGreaterThan(40);
+    expect(adx[adx.length - 1]!).toBeLessThanOrEqual(100);
+  });
+
+  it('reads low on a choppy, directionless series and high on a clean trend (discriminates)', () => {
+    const choppy: Bar[] = [];
+    for (let i = 0; i < 60; i++) {
+      const base = 100 + (i % 2 === 0 ? 1 : -1); // oscillate, no net direction
+      choppy.push(makeBar(base, base + 1, base - 1));
+    }
+    const trend: Bar[] = [makeBar(100, 102, 99)];
+    for (let i = 1; i < 60; i++) {
+      const prev = trend[i - 1]!.c;
+      trend.push(makeBar(prev + 1, prev + 2, prev + 0.5));
+    }
+    const lastChoppy = computeADX(choppy, 14).filter((v): v is number => v !== null).at(-1)!;
+    const lastTrend  = computeADX(trend, 14).filter((v): v is number => v !== null).at(-1)!;
+    expect(lastChoppy).toBeLessThan(lastTrend);
+    expect(lastChoppy).toBeLessThanOrEqual(100);
+  });
 });
 
 // ─── Swing high/low tests ───────────────────────────────────────────────────

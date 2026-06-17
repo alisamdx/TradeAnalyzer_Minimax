@@ -321,11 +321,15 @@ Smoothed values over period n using Wilder's method.
 +DI = 100 × (+DM_smooth / TR_smooth)
 −DI = 100 × (−DM_smooth / TR_smooth)
 DX = |+DI − −DI| / (+DI + −DI) × 100
-ADX = Wilder_smoothing(DX, n)
+ADX = Wilder_smoothing(DX, n)            // a running AVERAGE of DX → bounded [0, 100]
 ```
 
 Trend confirmed: ADX > 20 AND appropriate price/SMA relationship.
-Implemented in `computeADX()` in `analysis-service.ts` and `daily-technical-signals-job.ts`. see docs/formulas.md#adx
+Implemented in `computeADX()` in `analysis-service.ts` and `daily-technical-signals-job.ts`.
+
+**Bounded [0, 100] (v1.1.x fix).** The final step is the Wilder *average* of DX, not the sum. `analysis-service.computeADX` reused the Wilder running-SUM helper (correct for the +DI/−DI ratios, where the sums cancel) for the ADX step too, omitting the `÷ period` — so ADX came out ≈ `period`× too large (AMD ~648 vs the true ~46), saturating the trend signals. Fixed by dividing the smoothed DX by `period` (`smoothDX/period` is the exact Wilder ADX recursion).
+
+**ADX is NOT used in the composite scoring (FR-SEY-5).** A full-year Brief-Replay A/B (corrected ADX vs ADX-absent) showed feeding ADX into scoring is net-negative — bullish −1.50pp, bearish −1.15pp, income −0.43pp on direction-aware forward returns (high-ADX names mean-revert over ~21d). So `ScoringService.USE_ADX_IN_SCORING = false`: `trendStrength`/`downtrendScore` use only their MA-stack component and income's `trendNeutral` goes missing. The corrected ADX is retained for **display** (Validate dashboard, Analysis view) only. Re-validate on `tests/adx-replay-validation.test.ts` (`REPLAY_WITH_ADX`) before re-enabling.
 
 ### support-level
 
