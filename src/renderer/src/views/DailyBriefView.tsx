@@ -163,7 +163,9 @@ function StrategyLabSummary({
 
   return (
     <div className="pick-lab-summary">
-      {/* Grade row */}
+      {/* Single line: relevant structure + its setup, then the Top-lab-pick cross-reference:
+          "CSP A+ : $470 Jul 17 $2305.00 cr | Top lab pick: Big Lizard A+". The setup sits right
+          after the relevant grade so its strike/expiry/premium read as that structure's. */}
       <div className="pick-lab-grade-row">
         {stockFirst && (
           <span className="lab-grade-item" title="All option structures graded C/F in the current IV regime — buy shares; the structure shown is an optional alternative">
@@ -181,9 +183,22 @@ function StrategyLabSummary({
         ) : (
           !stockFirst && <span className="lab-grade-item lab-grade-missing">No {strategy} structure graded</span>
         )}
+
+        {/* Relevant structure's setup, inline right after its grade. */}
+        {setupAvailable && (
+          <span className="pick-setup-detail">
+            <span className="setup-struct-sep">:</span>
+            {strike !== null && <span className="setup-strike">${strike}</span>}
+            <span className="setup-expiry">{fmtExpShort(setup!.expiration)}</span>
+            {credit !== null && <span className="setup-premium setup-credit">${credit.toFixed(2)} cr</span>}
+            {debit  !== null && <span className="setup-premium setup-debit">${debit.toFixed(2)}  dr</span>}
+          </span>
+        )}
+
+        {/* Top lab pick — informational cross-reference (best-overall structure), after the trade. */}
         {best && !relevantIsBest && (
           <>
-            <span className="lab-grade-sep">·  Top lab pick:</span>
+            <span className="lab-grade-sep">|  Top lab pick:</span>
             <span className="lab-grade-item">
               <span className="lab-grade-label">{best.name}</span>
               <span className="lab-grade-badge" style={{ color: GRADE_COLOR[best.grade], borderColor: GRADE_COLOR[best.grade] }}>
@@ -193,18 +208,6 @@ function StrategyLabSummary({
           </>
         )}
       </div>
-
-      {/* Setup detail row — labeled with the RELEVANT structure so its strike/expiry/premium
-          aren't misread as belonging to the "Top lab pick" structure shown on the grade row. */}
-      {setupAvailable && (
-        <div className="pick-setup-detail">
-          {relevant && <span className="setup-struct-label">{SLUG_SHORT[relevant.slug] ?? relevant.name}:</span>}
-          {strike !== null && <span className="setup-strike">${strike}</span>}
-          <span className="setup-expiry">{fmtExpShort(setup!.expiration)}</span>
-          {credit !== null && <span className="setup-premium setup-credit">${credit.toFixed(2)} cr</span>}
-          {debit  !== null && <span className="setup-premium setup-debit">${debit.toFixed(2)}  dr</span>}
-        </div>
-      )}
     </div>
   );
 }

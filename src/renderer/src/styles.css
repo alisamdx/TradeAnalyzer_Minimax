@@ -3792,18 +3792,14 @@ input[type='checkbox'] {
   gap: 6px;
 }
 .pick-setup-detail {
-  display: flex;
+  display: inline-flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  margin-top: 4px;
   font-size: 11px;
 }
-.setup-struct-label {
-  font-weight: 700;
-  color: #94a3b8;
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
+.setup-struct-sep {
+  color: var(--text-muted);
 }
 .setup-strike {
   font-weight: 600;

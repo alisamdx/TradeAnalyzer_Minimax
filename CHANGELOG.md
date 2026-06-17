@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.38] — 2026-06-17
+
+### Changed
+- **Brief card lab line is now a single row** with the setup inline after the recommended structure: `CSP A+ : $470 Jul 17 $2305.00 cr | Top lab pick: Big Lizard A+` (was a two-row layout with the setup under the grade). The setup sits right after its structure's grade (`:` separator) so it can't be misread; the Top-lab-pick cross-reference follows after a `|`. Display layout only.
+
 ## [1.1.37] — 2026-06-17
 
 ### Changed
