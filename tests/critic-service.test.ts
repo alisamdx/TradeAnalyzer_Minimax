@@ -9,6 +9,7 @@ import {
   CriticService,
   breakevenDistancePct,
   extractVolatilityContext,
+  expectedOneSigmaMove,
   type MarketContext,
 } from '../src/main/services/critic-service.js';
 import { EARNINGS_PENALTY_STRATEGIES } from '../src/main/services/jobs/daily-intelligence-brief-job.js';
@@ -473,5 +474,31 @@ describe('extractVolatilityContext', () => {
   it('omits realizedVolPct when not provided (unchanged shape for non-vol strategies)', () => {
     expect(extractVolatilityContext({ context: { currentAtmIv: 40 } }))
       .toEqual({ impliedVolPct: 40, ivRank: null });
+  });
+});
+
+// The critic LLM routinely overstated the 1-sigma move when asked to compute it (AMD wheel
+// "±$149/29%" vs true ±$104/20.5%). It is now precomputed and the prompt forbids the LLM
+// from deriving its own — same remediation as the IV-fabrication fix above.
+describe('expectedOneSigmaMove', () => {
+  it('computes the 1-sigma move in % and $ (AMD regression: ~$104 / 20.5%, NOT the critic\'s $149/29%)', () => {
+    // 507.29 × 0.70271 × √(31/365) = 20.5% → $103.89
+    expect(expectedOneSigmaMove(70.271, 31, 507.29)).toEqual({ pct: 20.5, usd: 103.89 });
+  });
+
+  it('computes the MRVL bullish case (~$82 / 29.5%, NOT the critic\'s ~$152)', () => {
+    // 278.67 × 1.01334 × √(31/365) ≈ 29.5% → $82.30
+    expect(expectedOneSigmaMove(101.334, 31, 278.67)).toEqual({ pct: 29.5, usd: 82.3 });
+  });
+
+  it('returns a pct but null usd when price is unknown', () => {
+    expect(expectedOneSigmaMove(70.271, 31, null)).toEqual({ pct: 20.5, usd: null });
+  });
+
+  it('returns nulls when IV is missing/non-finite or DTE ≤ 0 (→ prompt skips expected-move reasoning)', () => {
+    expect(expectedOneSigmaMove(null, 31, 507.29)).toEqual({ pct: null, usd: null });
+    expect(expectedOneSigmaMove(NaN, 31, 507.29)).toEqual({ pct: null, usd: null });
+    expect(expectedOneSigmaMove(70, null, 507.29)).toEqual({ pct: null, usd: null });
+    expect(expectedOneSigmaMove(70, 0, 507.29)).toEqual({ pct: null, usd: null });
   });
 });

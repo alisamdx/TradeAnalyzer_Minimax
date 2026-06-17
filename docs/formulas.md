@@ -167,6 +167,19 @@ Long wings (the bought legs of a condor/fly) cap loss, not breakeven, so only th
 
 Implemented as the exported pure `breakevenDistancePct(legs, netCredit, price)` in `critic-service.ts`; used by `synthesizeVerdict()` (the `structure.breakevenDistancePct` field for income) and the `thin_breakeven` rule (income/wheel).
 
+### expected-move
+
+The expected **1-sigma move** of the underlying over the hold — how far it is expected to move (≈68% probability band) by expiry, from its annualized at-the-money implied volatility.
+
+```
+expectedMove1SigmaPct ($%) = impliedVolPct × √(DTE / 365)
+expectedMove1SigmaUsd ($)  = price × expectedMove1SigmaPct / 100
+```
+
+`impliedVolPct` is the annualized ATM IV as a **percentage** (e.g. 70.3 = 70.3%); DTE is calendar days; `√(DTE/365)` scales annual vol to the hold. Example (AMD, 2026-06-16): IV 70.271%, 31 DTE, spot $507.29 → `70.271 × √(31/365)` = **20.5%** → `507.29 × 0.205` = **±$104**.
+
+This is **precomputed** and passed to the Daily-Brief critic in `volatility.expectedMove1SigmaPct` / `expectedMove1SigmaUsd`, with the prompt instructing the LLM to cite the provided numbers and **not** compute the move itself — its manual arithmetic routinely overstated it (AMD wheel "±$149 (~29%)" vs the true ±$104/20.5%; MRVL bullish "~$152" vs ±$82/29.5%), the same class of error as the IV fabrication the volatility context already eliminated. Implemented as the exported pure `expectedOneSigmaMove(impliedVolPct, dte, price)` in `critic-service.ts`; returns nulls (→ the prompt skips expected-move reasoning) when IV is missing or DTE ≤ 0.
+
 ### annualized-options-return
 
 ```

@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.31] — 2026-06-16
+
+### Fixed
+- **The critic no longer computes the expected 1-sigma move itself — it now cites a precomputed value, fixing rationales that overstated the move by 40–85%.** The critic prompt handed the LLM the formula (`impliedVolPct × √(dte/365)`) and asked it to compute the expected/1-sigma move; the model's manual arithmetic was unreliable, routinely overstating it on the 2026-06-16 brief — **AMD** (wheel) "the 1-sigma downside move … is roughly ±\$149 (~29%)" when the true figure is **±\$104 (20.5%)** (70.271% IV, 31 DTE, \$507.29 — confirmed against live data); **MRVL** (bullish) "~\$152" vs the true **±\$82 (29.5%)**. This is the same class of error as the IV fabrication already eliminated from the volatility context (v1.1.20/29): a number the critic reasons about numerically must be *given* to it, not derived. The expected move is now precomputed via the exported pure `expectedOneSigmaMove(impliedVolPct, dte, price)` and passed in `volatility.expectedMove1SigmaPct` / `expectedMove1SigmaUsd`; the prompt instructs the model to cite the provided numbers verbatim and **never** compute the move itself (and to skip expected-move reasoning entirely when they're absent). see `docs/formulas.md#expected-move`.
+
+### Notes
+- Rationale-accuracy only — no rule check, gate, or trade selection changes; the deterministic rule layer never relied on the LLM's move estimate. The persisted 2026-06-16 brief still carries the old (LLM-computed) rationales; **re-run the brief** for rationales that cite the precomputed move. Regression coverage in `tests/critic-service.test.ts` (AMD ±\$104/20.5%, MRVL ±\$82/29.5%, null-IV/zero-DTE → no move).
+
 ## [1.1.30] — 2026-06-16
 
 ### Fixed

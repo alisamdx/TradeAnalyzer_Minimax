@@ -88,6 +88,27 @@ export function breakevenDistancePct(
  * instead of mistaking it for an IV discrepancy. Returns null (→ the prompt forbids citing
  * any vol figure) only when NEITHER measure is available.
  */
+/**
+ * Expected 1-sigma move of the underlying over the hold: impliedVolPct × √(dte/365), returned
+ * as both a percentage and (when price is known) a dollar amount. PRECOMPUTED so the critic
+ * LLM cites it instead of doing the arithmetic itself — it routinely overstated the move (AMD
+ * wheel "±$149 (~29%)" vs the true ±$104/20.5%; MRVL bullish "~$152" vs ±$82/29.5%), the same
+ * class of error as the IV fabrication the volatility context already fixed. Returns nulls when
+ * IV is missing/non-finite or dte ≤ 0. see docs/formulas.md#expected-move
+ */
+export function expectedOneSigmaMove(
+  impliedVolPct: number | null | undefined,
+  dte: number | null,
+  price: number | null,
+): { pct: number | null; usd: number | null } {
+  if (typeof impliedVolPct !== 'number' || !Number.isFinite(impliedVolPct) || dte === null || dte <= 0) {
+    return { pct: null, usd: null };
+  }
+  const pct = impliedVolPct * Math.sqrt(dte / 365);
+  const usd = typeof price === 'number' && Number.isFinite(price) && price > 0 ? (price * pct) / 100 : null;
+  return { pct: +pct.toFixed(1), usd: usd !== null ? +usd.toFixed(2) : null };
+}
+
 export function extractVolatilityContext(
   labResult: { context?: { currentAtmIv?: number; ivRank?: number } } | null,
   realizedVolPct: number | null = null,
@@ -197,6 +218,7 @@ export class CriticService {
       // unavailableReason are excluded (non-null setup but no actionable legs).
       let structure: Record<string, unknown> | null = null;
       let structureExpiry: string | null = null;
+      let structureDte: number | null = null; // hoisted: also feeds the precomputed expected move
       const presentAsStock = this.shouldPresentAsStock(pick, strategy);
 
       {
@@ -212,6 +234,7 @@ export class CriticService {
           const dte = structureExpiry
             ? Math.round((new Date(structureExpiry).getTime() - new Date(today).getTime()) / 86400000)
             : null;
+          structureDte = dte;
 
           // Strike-vs-spot %: (strike - price) / price. Positive = strike above spot
           // (OTM for short calls, ITM for short puts). The prompt defines this
@@ -264,7 +287,14 @@ export class CriticService {
       const rvSig = pick.signals['recentVolatility'];
       const realizedVolPct = rvSig && rvSig.missing === false && typeof rvSig.raw === 'number'
         ? +rvSig.raw.toFixed(1) : null;
-      const volatility = extractVolatilityContext(pick.strategyLabResult as LabResultShape | null, realizedVolPct);
+      const volatilityBase = extractVolatilityContext(pick.strategyLabResult as LabResultShape | null, realizedVolPct);
+      // Precompute the expected 1-sigma move so the LLM cites it rather than (mis)computing it.
+      const expMove = expectedOneSigmaMove(volatilityBase?.impliedVolPct ?? null, structureDte, pick.price);
+      const volatility = volatilityBase && {
+        ...volatilityBase,
+        ...(expMove.pct !== null && { expectedMove1SigmaPct: expMove.pct }),
+        ...(expMove.usd !== null && { expectedMove1SigmaUsd: expMove.usd }),
+      };
 
       // Earnings within the hold window — single most important event risk for options
       const earningsInWindow = structureExpiry
@@ -295,7 +325,7 @@ export class CriticService {
         },
         earningsInWindow,  // null = no earnings before expiry; otherwise { date, daysFromNow, confirmed }
         earningsKnown,     // false = calendar has no future earnings data for this ticker at all
-        volatility,        // { impliedVolPct, ivRank, realizedVolPct? } from real data — or null
+        volatility,        // { impliedVolPct, ivRank, realizedVolPct?, expectedMove1SigmaPct?, expectedMove1SigmaUsd? } — or null
         topSignals,
         structure,
         advocateRationale: pick.aiRationale,
@@ -314,7 +344,7 @@ FLAG SEVERITIES: 'warning' flags indicate material risk. 'info' flags are adviso
 
 MARKET DATA: All values in \`marketData\` are live as of \`date\` from real-time feeds — treat them as ground truth. Do not use training knowledge to contradict provided prices; stocks change dramatically over years of training lag. \`price52wReturnPct\` shows the 1-year return so you can calibrate price level without recalling historical absolutes.
 STRUCTURE: \`structure.legs\` is the COMPLETE trade — judge the whole structure from it, not from any single leg. Multi-leg structures (zebra = 2:1 long/short same side, butterfly = 1-2-1, condor) are defined by all their legs; do not treat one leg in isolation (e.g. a put zebra's short leg sitting at/above spot is normal financing, not a broken ITM strike). \`dte\` is pre-computed calendar days to expiry. \`shortStrike\` / \`strikeOtmPct\` refer to the primary SHORT leg: \`strikeOtmPct\` = (shortStrike − current price) / price × 100: positive means ABOVE spot (OTM for short calls, ITM for short puts); negative means BELOW spot (OTM for short puts, ITM for short calls). Judge moneyness by the leg's side. \`breakevenDistancePct\` (income only) is the distance to the structure's nearest breakeven — compare it to the expected 1-sigma move. If \`structure.presentation\` says stock purchase, evaluate the pick as a plain stock buy — the option structure shown is optional; do not penalize the stock thesis for the structure's grade.
-VOLATILITY: \`volatility.impliedVolPct\` is the underlying's current annualized at-the-money implied volatility as a percentage (e.g. 104.7 = 104.7%). Use ONLY this for expected-move/1-sigma reasoning: expected 1-sigma move over the hold ≈ impliedVolPct × sqrt(dte/365) (if impliedVolPct is null, do not attempt expected-move reasoning). \`volatility.ivRank\` (0–100) is where IV sits in its 1-year range. \`volatility.realizedVolPct\`, when present, is the stock's RECENT REALIZED volatility — a momentum signal, NOT implied vol; the advocate may cite it as "recent volatility". It is normal and expected for realized vol to differ from impliedVolPct — do NOT treat that gap as a discrepancy, error, or red flag. CRITICAL: do NOT state any implied- or realized-volatility number that is not in \`volatility\`; never recall or estimate one from training knowledge. If \`volatility\` is null, do not cite any volatility number; say it could not be measured.
+VOLATILITY: \`volatility.impliedVolPct\` is the underlying's current annualized at-the-money implied volatility as a percentage (e.g. 104.7 = 104.7%). \`volatility.expectedMove1SigmaPct\` and \`volatility.expectedMove1SigmaUsd\` are the PRECOMPUTED expected 1-sigma move of the underlying over the hold (= impliedVolPct × sqrt(dte/365)), in percent and in dollars. When you discuss the expected or 1-sigma move, cite THESE provided numbers verbatim — do NOT compute, derive, or estimate the move yourself (your manual arithmetic has been unreliable and overstated it). If they are absent (e.g. impliedVolPct is null), do not attempt any expected-move reasoning. \`volatility.ivRank\` (0–100) is where IV sits in its 1-year range. \`volatility.realizedVolPct\`, when present, is the stock's RECENT REALIZED volatility — a momentum signal, NOT implied vol; the advocate may cite it as "recent volatility". It is normal and expected for realized vol to differ from impliedVolPct — do NOT treat that gap as a discrepancy, error, or red flag. CRITICAL: do NOT state any implied- or realized-volatility number that is not in \`volatility\`; never recall or estimate one from training knowledge. If \`volatility\` is null, do not cite any volatility number; say it could not be measured.
 MARKET CONTEXT: \`vixLevel\` and \`spyTrend\` describe today's macro environment.
 EARNINGS: \`earningsInWindow\` is non-null if there is a known earnings event before expiry — this is the single biggest event risk for any options position. If \`earningsKnown\` is false the calendar has NO future earnings data for this ticker, so treat earnings risk as unverified rather than absent — for options positions, note that the report date must be checked manually.
 
