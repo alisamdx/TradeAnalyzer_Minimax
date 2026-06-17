@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.42] — 2026-06-17
+
+### Fixed
+- **Portfolio E\*Trade sync is now a full sync — positions closed at the broker drop off.** The sync only *upserted* the positions E\*Trade returned; a position you closed (e.g. NVDA) stayed in the local DB and kept showing as open. The sync now **reconciles**: after a successful fetch, any OPEN, E\*Trade-sourced position for that account whose broker id is no longer in the response is marked `closed` (the row is kept, so notes / realized P&L / history are preserved; the portfolio shows only open positions). The sync result reports the count (e.g. "Synced: 8 updated, 0 skipped, **1 closed**"). Safety: reconciliation runs **only after a successful fetch** (a fetch error never closes anything), is **scoped to the synced account(s)**, and **never touches manual positions** (those without an `etrade_position_id`); the upsert also re-asserts `status='open'`, so a position the broker reports again self-heals back to open.
+
+### Notes
+- Found via user report (closed NVDA still showing). Regression coverage in `tests/etrade-portfolio-reconcile.test.ts` (closes a gone position; leaves manual / other-account / already-closed alone; closes all when the account is flat).
+
 ## [1.1.41] — 2026-06-17
 
 ### Added

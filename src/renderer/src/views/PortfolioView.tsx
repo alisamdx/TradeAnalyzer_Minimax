@@ -485,7 +485,8 @@ export function PortfolioView() {
     try {
       const result = await window.api.portfolio.etrade.sync();
       setLastSyncedAt(result.syncedAt);
-      const msg = `Synced: ${result.positionsUpserted} positions updated, ${result.positionsSkipped} skipped`;
+      const closedMsg = result.positionsClosed ? `, ${result.positionsClosed} closed` : '';
+      const msg = `Synced: ${result.positionsUpserted} positions updated, ${result.positionsSkipped} skipped${closedMsg}`;
       setStatusMsg(result.errors.length > 0 ? `${msg}. Errors: ${result.errors.join('; ')}` : msg);
       loadData();
     } catch (e) { setError(`Sync failed: ${(e as Error).message}`); }

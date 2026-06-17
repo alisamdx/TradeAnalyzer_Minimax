@@ -213,6 +213,7 @@ export class EtradePortfolioService {
       accountsScanned:  0,
       positionsUpserted: 0,
       positionsSkipped: 0,
+      positionsClosed: 0,
       errors: [],
       syncedAt: new Date().toISOString(),
     };
@@ -251,6 +252,12 @@ export class EtradePortfolioService {
             );
           }
         }
+        // ── Reconcile: full sync. Any OPEN broker-synced position for THIS account that
+        // E*Trade no longer reports (e.g. a closed NVDA) is marked closed so it drops off the
+        // portfolio. Runs only after a SUCCESSFUL fetch (so a fetch error never closes
+        // everything); never touches manual positions (etrade_position_id IS NULL).
+        result.positionsClosed = (result.positionsClosed ?? 0)
+          + this.closeMissingPositions(db, acct.accountId, positions.map(p => String(p.positionId)));
       } catch (err) {
         result.errors.push(
           `Account ${acct.accountId}: ${err instanceof Error ? err.message : String(err)}`
@@ -259,6 +266,35 @@ export class EtradePortfolioService {
     }
 
     return result;
+  }
+
+  /**
+   * Mark as closed any OPEN, E*Trade-sourced position for `accountId` whose broker position id
+   * is NOT in `seenIds` (the ids returned by the just-completed fetch) — i.e. positions closed
+   * at the broker. Preserves the row (notes / realized P&L / history); the portfolio view shows
+   * only `status='open'`. Manual positions (no `etrade_position_id`) are left untouched.
+   * Returns the number of positions closed.
+   */
+  private closeMissingPositions(db: Database, accountId: string, seenIds: string[]): number {
+    const open = db.prepare(
+      `SELECT id, etrade_position_id FROM positions
+       WHERE etrade_account_id = ? AND status = 'open' AND etrade_position_id IS NOT NULL`
+    ).all(accountId) as Array<{ id: number; etrade_position_id: string | number }>;
+    if (open.length === 0) return 0;
+
+    const seen = new Set(seenIds);
+    const now = new Date().toISOString();
+    const closeStmt = db.prepare(
+      `UPDATE positions SET status = 'closed', last_synced_at = ?, updated_at = ? WHERE id = ?`
+    );
+    let closed = 0;
+    for (const row of open) {
+      if (!seen.has(String(row.etrade_position_id))) {
+        closeStmt.run(now, now, row.id);
+        closed++;
+      }
+    }
+    return closed;
   }
 
   // ─── Fetch positions for one account ─────────────────────────────────────
@@ -377,6 +413,7 @@ export class EtradePortfolioService {
     if (existing) {
       db.prepare(`
         UPDATE positions SET
+          status               = 'open',
           ticker               = ?,
           position_type        = ?,
           quantity             = ?,

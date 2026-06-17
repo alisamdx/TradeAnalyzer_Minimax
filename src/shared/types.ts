@@ -1172,6 +1172,8 @@ export interface EtradeSyncResult {
   accountsScanned: number;
   positionsUpserted: number;
   positionsSkipped: number;
+  /** Open broker-synced positions marked closed because they no longer exist at E*Trade. */
+  positionsClosed?: number;
   errors: string[];
   syncedAt: string;
 }
