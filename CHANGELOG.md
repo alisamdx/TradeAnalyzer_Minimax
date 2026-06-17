@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.35] — 2026-06-17
+
+### Fixed
+- **The critic no longer calls a bounded short-put loss "unlimited/uncapped" — it now cites the precomputed max loss.** The critic's structure context omitted `maxProfit`/`maxLoss`, so on every bullish big-lizard the LLM described the short-put downside as "uncapped … nearly unlimited" — technically wrong: a short put's loss is **bounded** (worst case at underlying → 0), and the figure was already computed (e.g. AMD −\$44,836, ALAB −\$29,931). Only a naked short **call** is truly unbounded. The critic context now carries `structure.maxProfit` / `structure.maxLoss` (per-contract ×100; `null` ⇒ genuinely unbounded — naked short call) and `structure.breakevens`, and the prompt instructs the model to cite these for any reward/risk or max-loss statement and to never call a finite `maxLoss` "unlimited/uncapped". Same remediation pattern as the precomputed expected-move (v1.1.31) and IV (v1.1.20/29) — a number the critic reasons about must be given, not invented. This also lets the critic affirm the **defined-risk max loss** on inflection credit spreads (the v2 launch structures).
+
+### Notes
+- Rationale-accuracy only — no rule check, gate, or trade selection changed (the deterministic defined-risk preference already used `maxLoss`; this only surfaces it to the LLM). The bounded-short-put / unbounded-short-call facts are covered by `classifySingleExpiryPnl` tests (`tests/strategy-lab-service.test.ts`). The persisted 2026-06-17 brief keeps the old wording; **re-run the brief** for rationales that cite the real max loss.
+
 ## [1.1.34] — 2026-06-17
 
 ### Fixed

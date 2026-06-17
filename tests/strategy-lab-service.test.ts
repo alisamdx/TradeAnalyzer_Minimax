@@ -355,7 +355,9 @@ describe('classifySingleExpiryPnl — structure max-loss classification', () => 
 
   it('keeps BOUNDED max loss for a (big/jade) lizard — naked put, capped upside', () => {
     // Mirror structure: short straddle + protective long CALL. Upside capped by the
-    // call spread, downside is the naked put (bounded at the put strike).
+    // call spread, downside is the naked put (bounded at the put strike). This finite
+    // maxLoss is fed to the critic (v1.1.35) so it cites the real worst case instead of
+    // mischaracterising a short put's downside as "unlimited/uncapped".
     const legs: L[] = [
       { side: 'put',  action: 'sell', strike: 320 },
       { side: 'call', action: 'sell', strike: 320 },
