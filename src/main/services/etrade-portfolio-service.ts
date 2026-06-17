@@ -401,6 +401,11 @@ export class EtradePortfolioService {
       ? (num(raw.pricePaid) ?? num(raw.costPerShare))
       : null;
 
+    // Unrealized P&L: E*Trade gives the dollar total gain/loss directly. Without persisting it
+    // the per-position P&L and the "Unrealized P&L" summary read $0 (getPnLSummary sums
+    // unrealized_pnl), even though only total_gain_PCT was being stored.
+    const unrealizedPnl = num(raw.totalGain);
+
     const now = new Date().toISOString();
 
     // ── Upsert ────────────────────────────────────────────────────────────────
@@ -425,6 +430,7 @@ export class EtradePortfolioService {
           etrade_account_id    = ?,
           market_value         = ?,
           total_gain_pct       = ?,
+          unrealized_pnl       = ?,
           days_gain            = ?,
           days_gain_pct        = ?,
           cost_per_share       = ?,
@@ -442,7 +448,7 @@ export class EtradePortfolioService {
         ticker, positionType, qty, entryPrice, entryDate,
         strikePrice, expirationDate, premiumReceived,
         accountId,
-        num(raw.marketValue), num(raw.totalGainPct),
+        num(raw.marketValue), num(raw.totalGainPct), unrealizedPnl,
         num(raw.daysGain), num(raw.daysGainPct),
         num(raw.costPerShare), num(raw.pctOfPortfolio),
         delta, gamma, theta, vega, iv, beta,
@@ -455,7 +461,7 @@ export class EtradePortfolioService {
           ticker, position_type, quantity, entry_price, entry_date,
           strike_price, expiration_date, premium_received, status,
           etrade_position_id, etrade_account_id,
-          market_value, total_gain_pct, days_gain, days_gain_pct,
+          market_value, total_gain_pct, unrealized_pnl, days_gain, days_gain_pct,
           cost_per_share, pct_of_portfolio,
           delta, gamma, theta, vega, iv, beta,
           last_synced_at, created_at, updated_at
@@ -463,7 +469,7 @@ export class EtradePortfolioService {
           ?, ?, ?, ?, ?,
           ?, ?, ?, 'open',
           ?, ?,
-          ?, ?, ?, ?,
+          ?, ?, ?, ?, ?,
           ?, ?,
           ?, ?, ?, ?, ?, ?,
           ?, ?, ?
@@ -472,7 +478,7 @@ export class EtradePortfolioService {
         ticker, positionType, qty, entryPrice, entryDate,
         strikePrice, expirationDate, premiumReceived,
         raw.positionId, accountId,
-        num(raw.marketValue), num(raw.totalGainPct),
+        num(raw.marketValue), num(raw.totalGainPct), unrealizedPnl,
         num(raw.daysGain), num(raw.daysGainPct),
         num(raw.costPerShare), num(raw.pctOfPortfolio),
         delta, gamma, theta, vega, iv, beta,

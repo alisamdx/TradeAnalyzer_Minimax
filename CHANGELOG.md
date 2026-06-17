@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.43] — 2026-06-17
+
+### Fixed
+- **Portfolio Unrealized P&L now populates from the E\*Trade sync (was always $0).** E\*Trade's portfolio response includes the dollar gain/loss per position (`totalGain`), but `upsertPosition` only stored the *percentage* (`total_gain_pct`) and never set `unrealized_pnl`. Since `getPnLSummary` sums `unrealized_pnl` (null for every synced position), the **Unrealized P&L** summary card read $0. The sync now stores `raw.totalGain` into `unrealized_pnl` on both insert and update, so per-position and total unrealized P&L show after a sync. (`current_price` stays driven by the live-quote refresh — short options can't derive a clean per-share price from market value.)
+
+### Notes
+- **Re-sync required**: existing rows have `unrealized_pnl = null`; run the portfolio E\*Trade sync once on the new build to backfill them. Found via user report ("not showing P&L"). Regression coverage in `tests/etrade-portfolio-reconcile.test.ts` (totalGain → unrealized_pnl on insert and re-sync update).
+
 ## [1.1.42] — 2026-06-17
 
 ### Fixed

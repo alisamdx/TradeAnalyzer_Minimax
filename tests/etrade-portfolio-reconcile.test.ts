@@ -64,3 +64,42 @@ describe('closeMissingPositions — full-sync reconciliation', () => {
     expect(statusOf(1)).toBe('closed');
   });
 });
+
+describe('upsertPosition — unrealized P&L from E*Trade totalGain', () => {
+  let udb: DB;
+  beforeEach(() => {
+    udb = new Database(':memory:');
+    udb.exec(`CREATE TABLE positions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, ticker TEXT, position_type TEXT, quantity REAL,
+      entry_price REAL, entry_date TEXT, strike_price REAL, expiration_date TEXT,
+      premium_received REAL, status TEXT, etrade_position_id TEXT, etrade_account_id TEXT,
+      market_value REAL, total_gain_pct REAL, unrealized_pnl REAL, realized_pnl REAL,
+      days_gain REAL, days_gain_pct REAL, cost_per_share REAL, pct_of_portfolio REAL,
+      delta REAL, gamma REAL, theta REAL, vega REAL, iv REAL, beta REAL,
+      current_price REAL, entry_notes TEXT, exit_price REAL,
+      last_synced_at TEXT, created_at TEXT, updated_at TEXT);`);
+  });
+
+  const stockRaw = (totalGain: number) => ({
+    positionId: 'p1', symbolDescription: 'AAPL', quantity: 100, positionType: 'LONG',
+    Product: { securityType: 'EQ', symbol: 'AAPL' },
+    pricePaid: 150, costPerShare: 150, dateAcquired: Date.UTC(2026, 0, 2),
+    marketValue: 15500, totalGain, totalGainPct: 3.33, daysGain: 50, daysGainPct: 0.3,
+    pctOfPortfolio: 10, Complete: {},
+  });
+  const upsert = (db: DB, acct: string, raw: unknown) =>
+    (new EtradePortfolioService() as unknown as { upsertPosition(db: DB, a: string, r: unknown): boolean })
+      .upsertPosition(db, acct, raw);
+  const pnl = () => (udb.prepare('SELECT unrealized_pnl FROM positions WHERE ticker = ?').get('AAPL') as { unrealized_pnl: number | null }).unrealized_pnl;
+
+  it('stores E*Trade dollar totalGain into unrealized_pnl on INSERT', () => {
+    upsert(udb, 'A', stockRaw(500));
+    expect(pnl()).toBe(500);
+  });
+
+  it('refreshes unrealized_pnl from totalGain on UPDATE (re-sync)', () => {
+    upsert(udb, 'A', stockRaw(500));
+    upsert(udb, 'A', stockRaw(-120)); // same positionId → UPDATE path
+    expect(pnl()).toBe(-120);
+  });
+});
