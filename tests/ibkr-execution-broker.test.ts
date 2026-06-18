@@ -5,6 +5,7 @@ import {
   legToOptionContract,
   comboLimitOrderParams,
   ibkrFillToNetCredit,
+  comboQuoteFromLegs,
   mapIbkrOrderStatus,
   isBenignNotice,
 } from '../src/main/execution/ibkr-execution-broker.js';
@@ -60,6 +61,46 @@ describe('IBKR adapter — combo net-price convention', () => {
     const credit = 0.42;
     const { lmtPrice } = comboLimitOrderParams(credit);
     expect(ibkrFillToNetCredit(lmtPrice)).toBeCloseTo(credit, 5);
+  });
+});
+
+describe('IBKR adapter — combo pricing from legs', () => {
+  // short put vertical: SELL 280P (1.90/2.00), BUY 275P (1.30/1.41)
+  const vertical: LegSpec[] = [
+    { ticker: 'AAPL', right: 'P', action: 'sell', strike: 280, expiry: '2026-07-17', ratio: 1 },
+    { ticker: 'AAPL', right: 'P', action: 'buy', strike: 275, expiry: '2026-07-17', ratio: 1 },
+  ];
+
+  it('nets a credit spread from leg top-of-book', () => {
+    const q = comboQuoteFromLegs(vertical, [{ bid: 1.9, ask: 2.0 }, { bid: 1.3, ask: 1.41 }]);
+    expect(q.mid).toBeCloseTo(0.59, 2); // (1.95) - (1.355)
+    expect(q.bid).toBeCloseTo(0.49, 2); // sell.bid - buy.ask = 1.90 - 1.41
+    expect(q.ask).toBeCloseTo(0.7, 2); // sell.ask - buy.bid = 2.00 - 1.30
+    expect(q.netCredit).toBe(q.mid);
+    expect(q.bid).toBeLessThanOrEqual(q.ask);
+  });
+
+  it('prices a lone short put (CSP) as a positive credit', () => {
+    const csp: LegSpec[] = [{ ticker: 'XYZ', right: 'P', action: 'sell', strike: 100, expiry: '2026-07-17', ratio: 1 }];
+    const q = comboQuoteFromLegs(csp, [{ bid: 1.0, ask: 1.2 }]);
+    expect(q.mid).toBeCloseTo(1.1, 2);
+    expect(q.bid).toBeCloseTo(1.0, 2);
+    expect(q.ask).toBeCloseTo(1.2, 2);
+  });
+
+  it('returns a negative net (debit) when the bought leg costs more', () => {
+    const debit: LegSpec[] = [
+      { ticker: 'XYZ', right: 'C', action: 'buy', strike: 100, expiry: '2026-07-17', ratio: 1 },
+      { ticker: 'XYZ', right: 'C', action: 'sell', strike: 105, expiry: '2026-07-17', ratio: 1 },
+    ];
+    const q = comboQuoteFromLegs(debit, [{ bid: 3.0, ask: 3.2 }, { bid: 1.0, ask: 1.1 }]);
+    expect(q.mid).toBeLessThan(0); // net debit
+  });
+
+  it('honours leg ratios', () => {
+    const ratioed: LegSpec[] = [{ ticker: 'XYZ', right: 'P', action: 'sell', strike: 100, expiry: '2026-07-17', ratio: 2 }];
+    const q = comboQuoteFromLegs(ratioed, [{ bid: 1.0, ask: 1.2 }]);
+    expect(q.mid).toBeCloseTo(2.2, 2); // 1.1 * 2
   });
 });
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.51] — 2026-06-18
+
+### Fixed
+- **IBKR combo pricing now prices from the individual legs, not the BAG.** During live Phase 7 calibration on the paper account, `IbkrExecutionBroker.priceCombo` returned no bid/ask: IBKR doesn't serve market data for smart-routed BAG combos (single-leg option data works fine). `priceCombo` now requests top-of-book for **each leg** and nets them into the combo quote (new pure helper `comboQuoteFromLegs`): a sold leg adds its premium, a bought leg subtracts it; `bid` is the conservative side (sell each short leg at its bid, buy each long leg at its ask), `ask` the other, `mid`/`netCredit` from leg mids. Validated live (AAPL 280/275 put vertical → ~$0.59 credit at mid, bid $0.49 / ask $0.70). Requires an **options market-data subscription** on the account (OPRA); a leg with no quote raises a clear error.
+
+### Notes
+- This needs the account's US options data subscription (OPRA add-on) — confirmed active on the paper account. Order placement/fills don't need data, but pricing proposals does. New unit tests for `comboQuoteFromLegs` (credit spread, lone CSP, debit, ratios) in `tests/ibkr-execution-broker.test.ts`. Diagnostic scripts added: `ibkr-md-diagnose.mjs` (single-leg vs combo data) and `ibkr-price-from-legs.mjs` (live leg-based pricing check). Full suite: **604 passing**.
+
 ## [1.1.50] — 2026-06-18
 
 ### Changed

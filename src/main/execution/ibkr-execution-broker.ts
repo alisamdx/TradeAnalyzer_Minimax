@@ -95,6 +95,43 @@ export function ibkrFillToNetCredit(ibkrPrice: number): number {
   return Number((-ibkrPrice).toFixed(2));
 }
 
+/** Per-leg top-of-book used to price a combo from its legs. */
+export interface LegQuote {
+  bid: number;
+  ask: number;
+}
+
+/**
+ * Compute a credit-positive combo quote from each leg's top-of-book. IBKR returns no market
+ * data for smart-routed BAG combos, so the adapter prices from the legs that *do* have data.
+ * A sold leg adds its premium (credit), a bought leg subtracts it (debit). `bid` is the
+ * conservative side (sell at each sold-leg bid, buy at each bought-leg ask); `ask` the other.
+ */
+export function comboQuoteFromLegs(
+  legs: LegSpec[],
+  quotes: LegQuote[]
+): { netCredit: number; bid: number; ask: number; mid: number } {
+  let mid = 0;
+  let low = 0;
+  let high = 0;
+  legs.forEach((leg, i) => {
+    const q = quotes[i]!;
+    const legMid = (q.bid + q.ask) / 2;
+    const r = leg.ratio;
+    if (leg.action === 'sell') {
+      mid += legMid * r;
+      low += q.bid * r;
+      high += q.ask * r;
+    } else {
+      mid -= legMid * r;
+      low -= q.ask * r;
+      high -= q.bid * r;
+    }
+  });
+  const round = (n: number): number => Number(n.toFixed(2));
+  return { netCredit: round(mid), bid: round(Math.min(low, high)), ask: round(Math.max(low, high)), mid: round(mid) };
+}
+
 /** Map IBKR order-status strings to the seam's BrokerOrderStatus. */
 export function mapIbkrOrderStatus(status: string): BrokerOrderStatus {
   switch (status) {
@@ -164,12 +201,15 @@ export class IbkrExecutionBroker implements ExecutionBroker {
   private readonly commissionByExecId = new Map<string, number>();
   private positionReqId: number | null = null; // single in-flight reqPositions slot
   private openOrderReqId: number | null = null; // single in-flight reqAllOpenOrders slot
+  private readonly mdPending = new Map<number, (field: number, price: number) => void>(); // per-leg quote subs
+  private readonly mdTimeoutMs: number;
 
   constructor(opts: IbkrBrokerOptions) {
     this.host = opts.host ?? '127.0.0.1';
     this.port = opts.port;
     this.clientId = opts.clientId ?? 7;
     this.reqTimeoutMs = opts.reqTimeoutMs ?? 12_000;
+    this.mdTimeoutMs = 5_000; // per-leg quote collection window before resolving with what arrived
     this.exchange = opts.exchange ?? 'SMART';
     this.currency = opts.currency ?? 'USD';
     this.accountId = opts.account ?? null;
@@ -239,28 +279,43 @@ export class IbkrExecutionBroker implements ExecutionBroker {
   }
 
   async priceCombo(legs: LegSpec[]): Promise<ComboQuote> {
-    const bag = await this.buildComboContract(legs);
+    // IBKR returns no market data for smart-routed BAG combos, so price from the individual
+    // legs (which do have data) and net them — see comboQuoteFromLegs.
+    const quotes = await Promise.all(legs.map((leg) => this.quoteLeg(leg)));
+    const missing = quotes.findIndex((q) => q.bid <= 0 && q.ask <= 0);
+    if (missing >= 0) {
+      const l = legs[missing]!;
+      throw new Error(`no market data for ${l.ticker} ${l.right}${l.strike} ${l.expiry} (options data subscription?)`);
+    }
+    const q = comboQuoteFromLegs(legs, quotes);
+    return { legs, ...q, asOf: new Date().toISOString() };
+  }
+
+  /** Top-of-book for a single option leg via a short streaming subscription. */
+  private quoteLeg(leg: LegSpec): Promise<LegQuote> {
+    const contract = legToOptionContract(leg, { exchange: this.exchange, currency: this.currency });
     const reqId = this.nextReqId();
-    // Snapshot market data for the combo. Net combo ticks come back as bid(1)/ask(2).
-    const ticks = await this.request<{ field: number; price: number }>(reqId, () =>
-      this.ib.reqMktData(reqId, bag, '', true, false)
-    );
-    let bidRaw: number | null = null;
-    let askRaw: number | null = null;
-    for (const t of ticks) {
-      if (t.field === 1) bidRaw = t.price;
-      else if (t.field === 2) askRaw = t.price;
-    }
-    if (bidRaw == null || askRaw == null) {
-      throw new Error('IBKR combo pricing returned no bid/ask (market-data permission or closed market?)');
-    }
-    // IBKR combo prices are credit-negative; convert to credit-positive and order bid≤ask.
-    const a = ibkrFillToNetCredit(bidRaw);
-    const b = ibkrFillToNetCredit(askRaw);
-    const bid = Math.min(a, b);
-    const ask = Math.max(a, b);
-    const mid = Number(((bid + ask) / 2).toFixed(2));
-    return { legs, netCredit: mid, bid, ask, mid, asOf: new Date().toISOString() };
+    return new Promise<LegQuote>((resolve) => {
+      const acc: { bid?: number; ask?: number } = {};
+      const settle = (): void => {
+        clearTimeout(timer);
+        this.mdPending.delete(reqId);
+        try {
+          this.ib.cancelMktData(reqId);
+        } catch {
+          /* already gone */
+        }
+        resolve({ bid: acc.bid ?? 0, ask: acc.ask ?? 0 });
+      };
+      const timer = setTimeout(settle, this.mdTimeoutMs);
+      this.mdPending.set(reqId, (field, price) => {
+        if (price < 0) return;
+        if (field === 1 || field === 66) acc.bid = price; // bid / delayed-bid
+        else if (field === 2 || field === 67) acc.ask = price; // ask / delayed-ask
+        if (acc.bid != null && acc.ask != null) settle();
+      });
+      this.ib.reqMktData(reqId, contract, '', false, false);
+    });
   }
 
   async getBuyingPower(): Promise<BuyingPower> {
@@ -502,8 +557,9 @@ export class IbkrExecutionBroker implements ExecutionBroker {
       this.push(reqId, { tag, value, currency })
     );
     this.ib.on(EventName.accountSummaryEnd, (reqId: number) => this.settle(reqId, 'resolve'));
-    this.ib.on(EventName.tickPrice, (reqId: number, field: number, price: number) => this.push(reqId, { field, price }));
-    this.ib.on(EventName.tickSnapshotEnd, (reqId: number) => this.settle(reqId, 'resolve'));
+    this.ib.on(EventName.tickPrice, (reqId: number, field: number, price: number) => {
+      this.mdPending.get(reqId)?.(field, price);
+    });
     // reqPositions/reqAllOpenOrders are account-wide subscriptions whose `*End` events
     // carry no reqId, so route them to the single in-flight request slot.
     this.ib.on(EventName.position, (account: string, contract: Contract, pos: number, avgCost?: number) => {
