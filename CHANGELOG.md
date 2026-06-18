@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.46] — 2026-06-17
+
+### Added
+- **v2 execution — Phase 6b (part 1): the brief→entry source.** The execution engine can now turn the daily brief's **inflection** picks into entry proposals. A new `brief-entry-source.ts` reads the latest committed inflection brief, selects the direction-locked defined-risk vertical from each pick's Strategy Lab result (`pickRelevantStructure`: up-breakout → short-put-vertical, down → short-call-vertical), and maps it to the normalized `PickInput` the `EntryPolicy` consumes — legs, composite score, critic verdict, liquidity, earnings-before-expiry (resolved from `earnings_calendar`), and per-contract max loss. The engine runs this on each **market-open cycle** (not at brief-commit), so the entry window (10:00–15:00 ET), daily/weekly caps, critic/composite filters, and live IBKR re-pricing all apply; a stale brief never trades a stale price, and the daily cap stops repeats across cycles.
+
+### Notes
+- Wired on the existing `ExecutionEngine` market-cycle hook — **no engine/UI changes** beyond the new source. Entries only generate while the engine is **running**, the broker is **connected**, and the market is **open**; generation is fail-safe (never throws into the management cycle). With the mock broker this runs offline; against IBKR it prices each candidate on the live chain. **Still pending (Phase 7): live combo pricing + order/fill calibration on the paper account once options-spread approval lands.**
+- Pure mapping + the loader covered by `tests/brief-entry-source.test.ts` (15 tests). Full suite: **590 passing**.
+
 ## [1.1.45] — 2026-06-17
 
 ### Added

@@ -143,10 +143,19 @@ unchanged — paper↔live is a port.** *Account caveat:* the live account is cu
 Options **Pending Approval**; credit spreads need a Reg-T margin upgrade + spread-level options. The
 **paper** account is a margin account, so paper validation is unblocked.
 
-**6b (next) — the entry source + live order calibration.** Map a brief's `strategyLabResult` →
-spread legs → `PickInput[]`, fed to `engine.generateEntries` on the `/exec/brief-ready` hook (already
-exists). Then verify `priceCombo` + combo `placeOrder` + the fill/commission pipeline against real
-paper fills (needs options-spread approval on the paper account).
+**6b part 1 (v1.1.46) — the entry source. DONE.** `brief-entry-source.ts`: `briefPickToPickInput`
+(pure) selects the direction-locked defined-risk vertical from a brief pick's Strategy Lab result
+(`pickRelevantStructure`) and maps it to `PickInput` (legs, composite, critic verdict, liquidity from
+lab `liquidityScore` + two-sided legs, earnings-before-expiry from `earnings_calendar`, abs max loss);
+`loadInflectionPickInputs` reads the latest committed inflection brief. The `ExecutionEngine`
+market-cycle hook now runs **manage-then-generate** (`generateEntriesFromLatestBrief`, fail-safe).
+Generation runs on the **market-open cycle**, not at brief-commit (16:30 ET), so the entry window
+(10:00–15:00), caps, critic/composite filters, and live re-pricing apply; the daily cap stops repeats.
+`tests/brief-entry-source.test.ts` (15).
+
+**6b part 2 (next) — live order calibration.** Verify `priceCombo` (BAG snapshot) + combo `placeOrder`
++ the fill/commission pipeline against real paper fills. Needs options-spread approval on the paper
+account; runs offline on the mock broker today.
 
 - **Deliverable:** real (paper) fills through the same engine.
 

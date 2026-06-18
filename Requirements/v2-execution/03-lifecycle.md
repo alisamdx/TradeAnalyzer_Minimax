@@ -36,6 +36,14 @@ from the v1 tables via the freshness-guaranteed path (§1.3b) after the `brief-r
 handoff. The brief already emits the structure (`short-put-vertical` for an up-breakout,
 `short-call-vertical` for a down-breakout) with strikes/legs from Strategy Lab.
 
+> **Implemented (v1.1.46).** `brief-entry-source.ts` (`briefPickToPickInput` + `loadInflectionPickInputs`)
+> maps the latest committed inflection brief's picks → `PickInput[]` (direction-locked structure via
+> `pickRelevantStructure`; legs, composite, critic verdict, lab-liquidity, earnings-before-expiry from
+> `earnings_calendar`, abs max loss). The `ExecutionEngine` generates entries on each **market-open
+> cycle** (`generateEntriesFromLatestBrief`, fail-safe) — **not at brief-commit (16:30 ET)** — so the
+> entry window, caps, filters, and live re-pricing all apply and the daily cap prevents repeats. (The
+> `brief-ready` POST handoff remains for the future always-on headless service.)
+
 **Filters (all configurable in `exec_config`; defaults shown):**
 
 | Filter | Default | Rationale |

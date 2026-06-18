@@ -15,6 +15,7 @@ import { EntryPolicy, type EntryOutcome, type PickInput } from './entry-policy.j
 import { ExitPolicy } from './exit-policy.js';
 import { ManagementLoop } from './position-manager.js';
 import { ExecutionCore, type CoreEvent, type CoreHealth, type StartResult } from './execution-core.js';
+import { loadInflectionPickInputs } from './brief-entry-source.js';
 
 export interface ExecutionEngineOptions {
   holidays?: ReadonlySet<string>;
@@ -50,9 +51,12 @@ export class ExecutionEngine {
     this.entryPolicy = new EntryPolicy(db, this.governor);
     this.management = new ManagementLoop(db, this.governor, this.orderManager, new ExitPolicy());
     this.core = new ExecutionCore(db, broker, this.governor, opts);
-    // Each management cycle (market open) evaluates exits + acts (§3.3).
+    // Each market-open cycle: manage open positions (§3.3), then look for new entries from the
+    // latest brief (§3.2). Entries run on the cycle — not at brief-commit — so the entry window,
+    // caps, and live re-pricing apply; the daily cap stops repeats across cycles.
     this.core.setMarketCycleHook(async (now) => {
       await this.management.runOnce(now);
+      await this.tryGenerateEntries(now);
     });
   }
 
@@ -79,9 +83,29 @@ export class ExecutionEngine {
     this.core.onEvent(cb);
   }
 
-  // ── entries (called on the brief-ready handoff once a pick source exists) ──
+  // ── entries ──
   generateEntries(picks: PickInput[]): Promise<EntryOutcome[]> {
     return this.entryPolicy.generateEntries(picks, this.broker, this.now());
+  }
+
+  /** Generate entry proposals from the latest committed inflection brief (semi-auto). The
+   *  entry-window / caps / critic / composite filters are enforced by EntryPolicy, and each
+   *  proposal is re-priced against the live IBKR chain — so a stale brief never trades a stale
+   *  price. No-op when the broker is disconnected or no brief/picks exist. */
+  generateEntriesFromLatestBrief(now: Date = this.now()): Promise<EntryOutcome[]> {
+    if (!this.broker.isConnected()) return Promise.resolve([]);
+    const { picks } = loadInflectionPickInputs(this.db, now);
+    if (picks.length === 0) return Promise.resolve([]);
+    return this.entryPolicy.generateEntries(picks, this.broker, now);
+  }
+
+  /** Cycle-safe wrapper: entry generation must never throw into the management cycle. */
+  private async tryGenerateEntries(now: Date): Promise<void> {
+    try {
+      await this.generateEntriesFromLatestBrief(now);
+    } catch (e) {
+      console.error('[execution] entry generation error:', e instanceof Error ? e.message : e);
+    }
   }
 
   // ── approvals (route by proposal kind) ──

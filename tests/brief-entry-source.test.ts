@@ -1,0 +1,186 @@
+import { describe, it, expect } from 'vitest';
+import { openDatabase, type DbHandle } from '../src/main/db/connection.js';
+import { runMigrations } from '../src/main/db/migrations.js';
+import { MIGRATIONS_DIR } from './helpers.js';
+import {
+  briefPickToPickInput,
+  setupLegToLegSpec,
+  loadInflectionPickInputs,
+} from '../src/main/execution/brief-entry-source.js';
+import type {
+  BriefPick,
+  CriticVerdict,
+  SetupLeg,
+  StrategyScore,
+  StrategySetup,
+} from '../src/shared/types.js';
+
+// Phase 6b: the brief → PickInput entry source. Pins the mapping of an inflection brief pick
+// (Strategy Lab structure) onto the normalized PickInput the EntryPolicy consumes.
+
+const NOW = new Date('2026-06-15T18:00:00Z'); // Mon
+
+function leg(side: 'put' | 'call', action: 'buy' | 'sell', strike: number, over: Partial<SetupLeg> = {}): SetupLeg {
+  return {
+    action, side, strike,
+    expiration: '2026-07-17',
+    delta: null, gamma: null, theta: null, vega: null,
+    bid: 1.0, ask: 1.1, mid: 1.05, iv: 30,
+    openInterest: 500, volume: 100, qty: 1,
+    ...over,
+  };
+}
+
+function setup(over: Partial<StrategySetup> = {}, legs?: SetupLeg[]): StrategySetup {
+  return {
+    slug: 'short-put-vertical', ticker: 'AAA', expiration: '2026-07-17', dte: 30, underlyingPrice: 100,
+    legs: legs ?? [leg('put', 'sell', 100), leg('put', 'buy', 95)],
+    netCredit: 1.0, netDebit: null, maxProfit: 100, maxLoss: -400, breakevens: [99],
+    annualizedReturn: 50, popEstimate: 70, currentAtmIv: 30, unavailableReason: null,
+    ...over,
+  };
+}
+
+function score(slug: string, setupOver: Partial<StrategySetup> = {}, over: Partial<StrategyScore> = {}, legs?: SetupLeg[]): StrategyScore {
+  return {
+    slug, name: slug, category: 'directional', totalScore: 80, grade: 'A',
+    ivScore: 20, directionScore: 20, premiumScore: 20, liquidityScore: 12,
+    requiresStock: false, complexity: 'moderate', flags: [], aiRationale: null,
+    setup: setup({ slug, ...setupOver }, legs),
+    ...over,
+  };
+}
+
+function critic(verdict: 'pass' | 'caution' | 'flag'): CriticVerdict {
+  return { verdict, confidence: 'high', flags: [], rationale: null, generatedAt: NOW.toISOString() };
+}
+
+function briefPick(over: Partial<BriefPick> = {}, scores?: StrategyScore[]): BriefPick {
+  return {
+    ticker: 'AAA', compositeScore: 80, signals: {},
+    strategyLabResult: { context: {} as never, scores: scores ?? [score('short-put-vertical')] },
+    aiRationale: null, criticVerdict: critic('pass'), rank: 1, validated: true, price: 100,
+    breakoutDirection: 'up',
+    ...over,
+  };
+}
+
+describe('setupLegToLegSpec', () => {
+  it('maps side/action/strike/expiry/ratio', () => {
+    const spec = setupLegToLegSpec('AAA', leg('call', 'sell', 105, { qty: 2, expiration: '2026-07-17T00:00:00Z' }));
+    expect(spec).toEqual({ ticker: 'AAA', right: 'C', action: 'sell', strike: 105, expiry: '2026-07-17', ratio: 2 });
+  });
+});
+
+describe('briefPickToPickInput', () => {
+  it('maps an up-breakout pick to a short-put-vertical PickInput', () => {
+    const p = briefPickToPickInput(briefPick(), 42);
+    expect(p).not.toBeNull();
+    expect(p!.ticker).toBe('AAA');
+    expect(p!.strategy).toBe('inflection');
+    expect(p!.structure).toBe('short-put-vertical');
+    expect(p!.legs).toHaveLength(2);
+    expect(p!.legs[0]).toEqual({ ticker: 'AAA', right: 'P', action: 'sell', strike: 100, expiry: '2026-07-17', ratio: 1 });
+    expect(p!.compositeScore).toBe(80);
+    expect(p!.criticVerdict).toBe('pass');
+    expect(p!.hasAdequateLiquidity).toBe(true);
+    expect(p!.earningsBeforeExpiry).toBe(false);
+    expect(p!.maxLossPerContract).toBe(400); // abs of -400
+    expect(p!.sourceBriefId).toBe(42);
+  });
+
+  it('locks a down-breakout to the short-call-vertical', () => {
+    const scores = [score('short-call-vertical', {}, {}, [leg('call', 'sell', 100), leg('call', 'buy', 105)])];
+    const p = briefPickToPickInput(briefPick({ breakoutDirection: 'down' }, scores), null);
+    expect(p!.structure).toBe('short-call-vertical');
+    expect(p!.legs.map((l) => l.right)).toEqual(['C', 'C']);
+  });
+
+  it('maps the critic verdict (pass/caution/flag/null)', () => {
+    expect(briefPickToPickInput(briefPick({ criticVerdict: critic('caution') }), null)!.criticVerdict).toBe('caution');
+    expect(briefPickToPickInput(briefPick({ criticVerdict: critic('flag') }), null)!.criticVerdict).toBe('flag');
+    expect(briefPickToPickInput(briefPick({ criticVerdict: null }), null)!.criticVerdict).toBeNull();
+  });
+
+  it('flags earnings before expiry when an earnings date falls on/before the expiry', () => {
+    expect(briefPickToPickInput(briefPick(), null, { nextEarningsDate: '2026-07-10' })!.earningsBeforeExpiry).toBe(true);
+    expect(briefPickToPickInput(briefPick(), null, { nextEarningsDate: '2026-08-01' })!.earningsBeforeExpiry).toBe(false);
+  });
+
+  it('marks liquidity inadequate on a low lab liquidityScore', () => {
+    const scores = [score('short-put-vertical', {}, { liquidityScore: 4 })];
+    expect(briefPickToPickInput(briefPick({}, scores), null)!.hasAdequateLiquidity).toBe(false);
+  });
+
+  it('marks liquidity inadequate when a leg has no two-sided quote', () => {
+    const scores = [score('short-put-vertical', {}, {}, [leg('put', 'sell', 100, { bid: 0 }), leg('put', 'buy', 95)])];
+    expect(briefPickToPickInput(briefPick({}, scores), null)!.hasAdequateLiquidity).toBe(false);
+  });
+
+  it('returns null when the setup is unavailable', () => {
+    const scores = [score('short-put-vertical', { unavailableReason: 'no chain' })];
+    expect(briefPickToPickInput(briefPick({}, scores), null)).toBeNull();
+  });
+
+  it('returns null when max loss is unbounded/absent', () => {
+    const scores = [score('short-put-vertical', { maxLoss: null })];
+    expect(briefPickToPickInput(briefPick({}, scores), null)).toBeNull();
+  });
+
+  it('returns null when there is no inflection structure in the scores', () => {
+    const scores = [score('iron-condor')];
+    expect(briefPickToPickInput(briefPick({}, scores), null)).toBeNull();
+  });
+});
+
+describe('loadInflectionPickInputs', () => {
+  function db(): DbHandle {
+    const d = openDatabase(':memory:');
+    runMigrations(d, MIGRATIONS_DIR);
+    return d;
+  }
+
+  function insertBrief(d: DbHandle, picks: BriefPick[], generatedAt = '2026-06-15T20:30:00Z'): number {
+    const info = d
+      .prepare("INSERT INTO daily_briefs (generated_at, valid_until, strategy, picks, run_meta) VALUES (?, ?, 'inflection', ?, '{}')")
+      .run(generatedAt, '2026-06-16T13:30:00Z', JSON.stringify(picks));
+    return Number(info.lastInsertRowid);
+  }
+
+  it('returns empty when there is no inflection brief', () => {
+    expect(loadInflectionPickInputs(db(), NOW)).toEqual({ briefId: null, picks: [] });
+  });
+
+  it('maps the latest brief and stamps its id as sourceBriefId', () => {
+    const d = db();
+    insertBrief(d, [briefPick()], '2026-06-14T20:30:00Z'); // older
+    const newId = insertBrief(d, [briefPick({ ticker: 'BBB' })], '2026-06-15T20:30:00Z'); // latest
+    const { briefId, picks } = loadInflectionPickInputs(d, NOW);
+    expect(briefId).toBe(newId);
+    expect(picks).toHaveLength(1);
+    expect(picks[0]!.ticker).toBe('BBB');
+    expect(picks[0]!.sourceBriefId).toBe(newId);
+  });
+
+  it('resolves earnings-before-expiry from earnings_calendar', () => {
+    const d = db();
+    d.prepare("INSERT INTO earnings_calendar (ticker, report_date, source) VALUES ('AAA', '2026-07-01', 'etrade')").run();
+    insertBrief(d, [briefPick()]);
+    expect(loadInflectionPickInputs(d, NOW).picks[0]!.earningsBeforeExpiry).toBe(true);
+  });
+
+  it('skips picks with no viable defined-risk structure', () => {
+    const d = db();
+    insertBrief(d, [briefPick({}, [score('short-put-vertical', { unavailableReason: 'no chain' })]), briefPick({ ticker: 'CCC' })]);
+    const { picks } = loadInflectionPickInputs(d, NOW);
+    expect(picks.map((p) => p.ticker)).toEqual(['CCC']);
+  });
+
+  it('returns the brief id but no picks when picks JSON is malformed', () => {
+    const d = db();
+    const id = Number(
+      d.prepare("INSERT INTO daily_briefs (generated_at, valid_until, strategy, picks, run_meta) VALUES ('2026-06-15T20:30:00Z', '2026-06-16T13:30:00Z', 'inflection', 'not json', '{}')").run().lastInsertRowid
+    );
+    expect(loadInflectionPickInputs(d, NOW)).toEqual({ briefId: id, picks: [] });
+  });
+});
