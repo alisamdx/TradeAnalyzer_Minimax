@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.48] — 2026-06-17
+
+### Fixed
+- **The on-demand E\*Trade options path now self-heals from token dormancy** — the second half of the "TraderAgent makes no trades on evening runs" problem (the first was the v1.1.47 Saturday-expiration bug). E\*Trade access tokens go dormant after ~2 h of inactivity and the API then returns 401. The nightly batch jobs already renew-and-retry, but `ETradeDataProvider.getOptionsChain` / `getOptionsExpirations` — the path the API-server options route, the TraderAgent scout, and the Strategy Lab all use — did **not**. So any options fetch made more than ~2 h after the last E\*Trade activity threw a 401, which the options route swallowed into an empty chain (and the agent recorded zero contracts). The provider now wraps both calls in `withRenew`: on a dormant-token auth error it calls `renewAccessToken` once and retries. A fully expired token (past midnight ET) still propagates — that needs a manual re-auth in Settings → E\*Trade Connection.
+
+### Notes
+- This rescues **early-evening** agent runs (token idle but E\*Trade still serving quotes). It cannot manufacture data if E\*Trade is fully dark late at night; for reliability, run the agent during or within ~1–2 h of the close. Combined with v1.1.47, a market-hours run now produces trades again.
+- Regression test: `tests/etrade-dormant-token-renew.test.ts` (4 tests — renew-and-retry on 401 for both chain and expirations, no renew on non-auth errors, propagate a failed renew). Full suite: **599 passing**.
+
 ## [1.1.47] — 2026-06-17
 
 ### Fixed

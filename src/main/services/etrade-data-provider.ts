@@ -54,6 +54,14 @@ function legToContract(
   };
 }
 
+// E*Trade returns a 401 (surfaced by etradeGet as "E*Trade API error (401) …")
+// when the access token has gone dormant (inactive > 2 h). Same detection the
+// nightly jobs use. see CLAUDE.md (E*Trade dormancy)
+function isEtradeAuthError(e: unknown): boolean {
+  const msg = (e instanceof Error ? e.message : String(e)).toLowerCase();
+  return msg.includes('401') || msg.includes('token') || msg.includes('auth') || msg.includes('oauth');
+}
+
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
 export class ETradeDataProvider implements OptionsProvider {
@@ -70,24 +78,42 @@ export class ETradeDataProvider implements OptionsProvider {
     await renewAccessToken(this.getCreds());
   }
 
+  /**
+   * Run an E*Trade call; on a dormant-token auth failure, renew the token once
+   * and retry. This makes the on-demand options path (API-server options route,
+   * TraderAgent scout, Strategy Lab) self-heal from token dormancy the same way
+   * the nightly batch jobs already do — without it, any options fetch made > 2 h
+   * after the last E*Trade activity returned an empty chain (silently swallowed
+   * by the route's per-expiration catch). A fully expired token (past midnight
+   * ET) makes the renew throw, which propagates — the caller can't fix that
+   * without a manual re-auth. see CLAUDE.md (E*Trade dormancy)
+   */
+  private async withRenew<T>(fn: (creds: OAuthCredentials) => Promise<T>): Promise<T> {
+    try {
+      return await fn(this.getCreds());
+    } catch (err) {
+      if (!isEtradeAuthError(err)) throw err;
+      await renewAccessToken(this.getCreds());
+      return await fn(this.getCreds());
+    }
+  }
+
   // ── Expiration Discovery ───────────────────────────────────────────────────
 
   async getOptionsExpirations(ticker: string): Promise<string[]> {
-    const creds = this.getCreds();
-    const expirations = await getETradeExpirations(ticker, creds);
+    const expirations = await this.withRenew(creds => getETradeExpirations(ticker, creds));
     return expirations.map(e => e.dateStr);
   }
 
   // ── Chain Fetch ───────────────────────────────────────────────────────────
 
   async getOptionsChain(ticker: string, expiration: string): Promise<OptionsChain> {
-    const creds = this.getCreds();
     const expObj = {
       ...parseExpiry(expiration),
       expiryType: 'UNKNOWN',
       dateStr: expiration,
     };
-    const result = await getETradeOptionsChain(ticker, expObj, creds);
+    const result = await this.withRenew(creds => getETradeOptionsChain(ticker, expObj, creds));
 
     const contracts: OptionContract[] = [
       ...result.calls.map(leg => legToContract(leg, ticker, expiration)),
