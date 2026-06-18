@@ -19,11 +19,16 @@
   app with `TA_EXEC_BROKER=ibkr`. Gateway instead of TWS: add `TA_IBKR_GATEWAY=1` (port 4002).
 - **Account caveat:** the live account is **Cash** with Options **Pending Approval**. Credit spreads
   (the engine's structures) need a **Reg-T margin upgrade + spread-level options approval** before
-  *live* trading. The **paper** account is a margin account, so paper validation is unblocked once
-  options approval propagates to paper.
+  *live* trading. The **paper** account is a margin account **with options already enabled**
+  (verified — see next bullet), so paper validation is unblocked **now**.
+- **Paper options permission VERIFIED (2026-06-17).** `scripts/ibkr-options-permission-test.mjs`
+  placed a no-fill SELL put on paper acct `DUQ795672` → **accepted** (PreSubmitted, queued for next
+  open since market was closed), not permission-rejected. IBKR enables options (incl. Level 3 short
+  puts) on the paper account regardless of the live account's pending status. **Phase 7 paper
+  validation is NOT blocked.** (`scripts/ibkr-cancel-all.mjs` = global-cancel cleanup.)
 - **Next: Phase 6b part 2 / Phase 7** — live `priceCombo` (BAG snapshot) + combo `placeOrder` +
-  fill/commission calibration against real paper fills, once options-spread approval lands on the
-  paper account. Runs offline on the mock broker today.
+  fill/commission calibration against real paper fills. Do it **during market hours** (the order/
+  pricing paths need an open market). Runs offline on the mock broker anytime.
 - **Done:** Phase 0 (schema, migrations 045–048) · Phase 1 (`ExecutionBroker` + `MockExecutionBroker`)
   · Phase 2 (`RiskGovernor` + `risk-gate`) · Phase 3 (`ExecutionCore` + `reconciliation` +
   `market-hours` + control API `:7433`/SSE) · Phase 4 (`EntryPolicy`, `OrderManager`,
@@ -61,17 +66,18 @@ brief-entry-source (15). NO engine/UI changes.
 Phase 6b part 2 / Phase 7 = live order/pricing calibration on PAPER:
   verify priceCombo (BAG snapshot) + combo placeOrder (net-LMT, sign convention in
   comboLimitOrderParams) + the fill/commission pipeline against real paper fills.
-  NEEDS options-spread approval on the paper account (currently pending). Until then,
-  6a's connection/account/positions paths + the offline mock path are the verified
-  surface; the brief→entry pipeline runs end-to-end on the mock today.
+  PAPER OPTIONS PERMISSION IS VERIFIED (2026-06-17, ibkr-options-permission-test.mjs:
+  a no-fill SELL put was accepted, not permission-rejected) — so this is NOT blocked.
+  Do it during MARKET HOURS (combo pricing + fills need an open market). The mock path
+  runs the full brief→entry→fill→exit loop offline anytime.
 
 To run IBKR locally: TWS logged into Paper, API enabled (port 7497, trusted IP
 127.0.0.1, Read-Only OFF), launch app with TA_EXEC_BROKER=ibkr. Gateway: add
 TA_IBKR_GATEWAY=1 (port 4002).
 
 Account caveat: live account is Cash + Options Pending Approval — credit spreads need
-a Reg-T margin upgrade + spread-level options before LIVE. Paper is a margin account,
-so paper validation is unblocked once options approval reaches paper.
+a Reg-T margin upgrade + spread-level options before LIVE. Paper is a margin account
+with options ALREADY enabled (verified empirically), so paper validation is unblocked now.
 
 Repo discipline: tests green + typecheck + lint, version bump + CHANGELOG +
 changelog file + AI_CONTEXT, one Conventional Commit per increment, then
