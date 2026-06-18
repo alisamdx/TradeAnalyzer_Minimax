@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.50] — 2026-06-18
+
+### Changed
+- **Lowered the v2 inflection entry gate `min_composite_score` from 70 → 50** (migration 052; configurable, preserves a user override). Backtest-validated, not a guess: over **5 years / 32,760 with-trend up-breakouts**, on a bull-put-spread outcome proxy (short strike 5% OTM, ~30-day hold) the inflection composite is **non- to mildly *anti*-predictive**. Any breakout wins ~75.9% (random-day baseline 74.9%); the composite ≥70 slice wins only ~69.7% while admitting <3% of breakouts, and `volume_surge`/`decisiveness` are monotonically *anti*-predictive (higher value → lower win rate). So the 70 gate wasn't protecting quality — it selected slightly-worse trades **and** starved the inflection-only engine of entries (no inflection pick ever reached 70). A ~50 sanity floor admits genuine breakouts at the base rate (~76%) — at worst neutral per FR-SEY-5 — and leaves real quality control to the critic gate + defined-risk structures + 2× stop / profit target + 1/day, 3/week caps.
+
+### Notes
+- **`volume_surge`/`breakoutDecisiveness` `normMax` scaling intentionally left unchanged.** `decisiveness` normMax:3 is technically too harsh (real breakouts top ~1.5 at p95 → norm 50), but the signal is anti-predictive, so re-scaling it to drive the score *more* would amplify the wrong signal. The "miscalibration" isn't worth fixing because the signal doesn't predict outcomes.
+- This is a directional proxy (no credit/IV/stop modeling) — it shows the *directional* signals don't predict the stock holding up; it does **not** claim inflection is unprofitable (the credit/IV economics need the app's option-priced Backtest engine, which only has forward data from now). Re-validate once live inflection trades accumulate.
+- `entry-policy.test.ts` seeded-default assertion updated to 50. Full suite: **600 passing**.
+
 ## [1.1.49] — 2026-06-18
 
 ### Fixed

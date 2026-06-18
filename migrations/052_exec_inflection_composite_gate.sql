@@ -1,0 +1,18 @@
+-- Migration 052: lower the v2 inflection composite-score entry gate from 70 to 50.
+--
+-- Validated 2026-06-18 with a 5-year, 32,760-breakout backtest (see CHANGELOG
+-- v1.1.50 / changelogs/v1.1.50_2026-06-18.md). On a bull-put-spread outcome
+-- proxy the inflection composite is non- to mildly *anti*-predictive: any
+-- breakout wins ~75.9% (random-day baseline 74.9%), and the ≥70 slice wins only
+-- ~69.7% while admitting <3% of breakouts. So the 70 gate did not protect
+-- quality — it selected slightly-worse trades AND starved the inflection-only
+-- engine of entries. A ~50 sanity floor admits genuine breakouts at the base
+-- rate (~76%): at worst neutral per FR-SEY-5. Quality control stays with the
+-- critic gate + defined-risk structures + 2× stop / profit target + 1-per-day,
+-- 3-per-week caps. normMax scaling is intentionally left unchanged — volume_surge
+-- and decisiveness are anti-predictive, so re-scaling them up would amplify the
+-- wrong signal.
+--
+-- Only rows still at the shipped default (70) are changed, so a user override is
+-- preserved.
+UPDATE exec_config SET min_composite_score = 50 WHERE min_composite_score = 70;

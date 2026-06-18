@@ -121,7 +121,11 @@ Every transition is appended to `exec_audit_log`.
 ## 3.6 Entry/exit parameters (added to `exec_config`)
 
 Beyond the §2.3 risk limits, the lifecycle adds (all configurable): `min_composite_score`
-(70), `max_new_entries_per_day` (1), `max_new_entries_per_week` (3),
+(50 — lowered from 70 in migration 052; a 5-year/32,760-breakout backtest showed the
+inflection composite is non- to mildly *anti*-predictive of spread outcomes, so the 70
+gate selected slightly-worse trades and starved the engine — the gate is a sanity floor,
+not an edge; quality control is the critic gate + defined-risk + stops/targets + caps),
+`max_new_entries_per_day` (1), `max_new_entries_per_week` (3),
 `avoid_earnings_before_expiry` (on), `entry_window_start`/`_end` (10:00/15:00 ET),
 `proposal_shelf_life_min` (120), `reprice_tolerance_pct`, `stop_multiple` (2),
 `defensive_dte` (2), `profit_target_pct` (50), `hold_days` (5), `time_exit_dte`

@@ -46,7 +46,7 @@ describe('EntryPolicy.filterPick', () => {
     ['ineligible strategy', { strategy: 'wheel' }, 'strategy_not_eligible'],
     ['flag verdict', { criticVerdict: 'flag' }, 'critic_verdict'],
     ['no verdict', { criticVerdict: null }, 'critic_verdict'],
-    ['below composite', { compositeScore: 60 }, 'below_min_composite'],
+    ['below composite', { compositeScore: 40 }, 'below_min_composite'], // gate is 50 (migration 052)
     ['thin liquidity', { hasAdequateLiquidity: false }, 'inadequate_liquidity'],
     ['earnings before expiry', { earningsBeforeExpiry: true }, 'earnings_before_expiry'],
   ];
@@ -136,7 +136,7 @@ describe('exec_config entry params (migration 046)', () => {
   it('exposes the seeded entry-policy defaults', () => {
     const { governor } = setup();
     const c = governor.getConfig();
-    expect(c.minCompositeScore).toBe(70);
+    expect(c.minCompositeScore).toBe(50); // lowered 70 -> 50 in migration 052 (backtest-validated)
     expect(c.maxNewEntriesPerDay).toBe(1);
     expect(c.maxNewEntriesPerWeek).toBe(3);
     expect(c.avoidEarningsBeforeExpiry).toBe(true);
