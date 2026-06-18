@@ -1,6 +1,6 @@
 {
   "name": "trade-analyzer",
-  "version": "1.1.44",
+  "version": "1.1.45",
   "private": true,
   "description": "Stock screening and analysis desktop app for a single retail trader.",
   "main": "out/main/index.js",
@@ -29,6 +29,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.100.1",
+    "@stoqey/ib": "^1.5.6",
     "better-sqlite3": "^12.10.0",
     "fastify": "^5.8.5",
     "lightweight-charts": "^4.1.0",

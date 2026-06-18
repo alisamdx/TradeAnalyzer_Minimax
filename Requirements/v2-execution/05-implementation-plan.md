@@ -125,14 +125,29 @@ brief→`PickInput` source.
 - **Deliverable:** the human can drive the whole mock-backed system from the UI. **At this
   point the entire product is demonstrable end-to-end without IBKR.**
 
-## Phase 6 — IBKR adapter *(needs paper account)*
+## Phase 6 — IBKR adapter *(needs paper account)* — 🚧 6a DONE (v1.1.45), 6b next
 
-- `IbkrExecutionBroker` via `@stoqey/ib`: connect through IB Gateway (port **4002** paper),
-  IBC-supervised weekly auth + reconnection (§1.5), contract qualification, combo/BAG
-  orders, order/exec subscriptions, live combo pricing, buying-power.
-- Flip `exec_config.execution_mode` to select IBKR vs mock — **no engine/UI changes.**
-- Contract/conformance tests: the same interface test-suite the mock passes, run against
-  the IBKR paper adapter.
+**6a (v1.1.45) — the adapter + factory.** IBKR account approved; a live **TWS** paper session
+connects. `IbkrExecutionBroker` (`src/main/execution/ibkr-execution-broker.ts`) implements the
+`ExecutionBroker` seam via `@stoqey/ib`: lifecycle (connect on `nextValidId`, fail-closed on
+1100/502/504, ignore benign data-farm notices), `qualifyContract` / `priceCombo` (BAG snapshot) /
+`getBuyingPower`, idempotent combo `placeOrder` (BAG net-LMT keyed on COID) + cancel + status/fill
+subscriptions, and `getOpenPositions`/`getOrders` for reconciliation. The combo net-price sign
+convention is centralised in `comboLimitOrderParams()` for paper calibration. New `broker-factory.ts`
+selects mock (default) vs IBKR (`TA_EXEC_BROKER=ibkr`), resolving host/port/clientId from the
+`executionMode` (TWS 7497/7496, Gateway 4002/4001 via `TA_IBKR_GATEWAY=1`, or explicit
+`TA_IBKR_PORT`); `index.ts` builds the broker through it. **Live-verified on paper** (no options
+permission needed): handshake, `reqAccountSummary`, `reqPositions` via `scripts/ibkr-probe.mjs`.
+Pure mapping + factory covered by `tests/ibkr-execution-broker.test.ts` (16). **Connection/UI/engine
+unchanged — paper↔live is a port.** *Account caveat:* the live account is currently **Cash** with
+Options **Pending Approval**; credit spreads need a Reg-T margin upgrade + spread-level options. The
+**paper** account is a margin account, so paper validation is unblocked.
+
+**6b (next) — the entry source + live order calibration.** Map a brief's `strategyLabResult` →
+spread legs → `PickInput[]`, fed to `engine.generateEntries` on the `/exec/brief-ready` hook (already
+exists). Then verify `priceCombo` + combo `placeOrder` + the fill/commission pipeline against real
+paper fills (needs options-spread approval on the paper account).
+
 - **Deliverable:** real (paper) fills through the same engine.
 
 ## Phase 7 — Paper-mode validation *(needs paper account)*

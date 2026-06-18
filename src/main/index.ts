@@ -77,7 +77,8 @@ import { BetaService } from './services/beta-service.js';
 import { BriefReplayService } from './services/brief-replay-service.js';
 import { registerBriefReplayIpc } from './ipc/ipc-brief-replay.js';
 import { ExecutionEngine } from './execution/execution-engine.js';
-import { MockExecutionBroker } from './execution/mock-execution-broker.js';
+import { RiskGovernor } from './execution/risk-governor.js';
+import { resolveBrokerSettings, createExecutionBroker } from './execution/broker-factory.js';
 import { registerExecutionIpc } from './ipc/ipc-execution.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -417,12 +418,18 @@ app.whenReady().then(() => {
   const briefReplayService = new BriefReplayService(db, scoringService);
   registerBriefReplayIpc(briefReplayService);
 
-  // v1.1.9 — v2 execution subsystem, Phase 5b activation (first non-dormant step).
-  // The engine is assembled against the deterministic MockExecutionBroker and starts
-  // `stopped`: constructing it opens no broker connection and places no orders. It is
-  // fully driven from the renderer (Trading Desk / Execution Settings) via ipc-execution;
-  // the IBKR adapter swaps in behind the same ExecutionBroker interface at Phase 6.
-  const executionBroker = new MockExecutionBroker();
+  // v2 execution subsystem. The engine is assembled behind the ExecutionBroker seam and
+  // starts `stopped`: constructing it opens no broker connection and places no orders.
+  // Phase 6: the broker is chosen by the factory — MockExecutionBroker by default, the
+  // IbkrExecutionBroker (live TWS/Gateway) when TA_EXEC_BROKER=ibkr. Paper vs live is just
+  // the connection port (mode from exec_config), never an engine/UI change.
+  const execMode = new RiskGovernor(db).getConfig().executionMode;
+  const brokerSettings = resolveBrokerSettings(execMode);
+  const executionBroker = createExecutionBroker(brokerSettings);
+  console.log(
+    `[execution] broker=${brokerSettings.kind} mode=${execMode}` +
+      (brokerSettings.kind === 'ibkr' ? ` @ ${brokerSettings.host}:${brokerSettings.port}` : '')
+  );
   const executionEngine = new ExecutionEngine(db, executionBroker);
   executionEngine.onEvent((evt) => getMainWindow()?.webContents.send('execution:event', evt));
   registerExecutionIpc(executionEngine);

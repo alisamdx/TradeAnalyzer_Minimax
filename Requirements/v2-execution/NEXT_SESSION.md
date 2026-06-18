@@ -2,14 +2,24 @@
 
 > Hand-off note so a fresh session resumes exactly where the build stopped. The auto-memory
 > (`project_v2_execution_engine.md`) and `.ai/AI_CONTEXT.md §11` also carry this; this file
-> is the explicit, paste-ready version. Last updated after **v1.1.10** (Phase 5c/d UI — Phase 5 COMPLETE).
+> is the explicit, paste-ready version. Last updated after **v1.1.45** (Phase 6a — IBKR adapter).
 
 ## Where we are
 
-- **Phases 0–5 are COMPLETE.** The execution engine is built, tested (441 green), committed,
-  **activated in mock mode, and fully drivable from the Electron UI** through v1.1.10. The
-  whole product is demonstrable end-to-end with **no IBKR account**.
-- **The next step (Phase 6) is THE WALL — it needs the pending IBKR paper account.**
+- **Phases 0–5 COMPLETE + Phase 6a DONE (v1.1.45).** IBKR account approved; a live **TWS** paper
+  session (`DUQ795672`) connects. `IbkrExecutionBroker` implements the `ExecutionBroker` seam via
+  `@stoqey/ib`; `broker-factory.ts` selects mock (default) vs IBKR (`TA_EXEC_BROKER=ibkr`). The
+  connection, account-summary (buying power), and positions paths are **live-verified** on paper
+  (`scripts/ibkr-probe.mjs`). Pure mapping + factory tested (`tests/ibkr-execution-broker.test.ts`).
+- **To run IBKR locally:** start **TWS**, log into **Paper**, enable API (Global Config → API →
+  Settings: socket clients ON, port **7497**, trusted IP 127.0.0.1, Read-Only OFF), then launch the
+  app with `TA_EXEC_BROKER=ibkr`. Gateway instead of TWS: add `TA_IBKR_GATEWAY=1` (port 4002).
+- **Account caveat:** the live account is **Cash** with Options **Pending Approval**. Credit spreads
+  (the engine's structures) need a **Reg-T margin upgrade + spread-level options approval** before
+  *live* trading. The **paper** account is a margin account, so paper validation is unblocked once
+  options approval propagates to paper.
+- **Next: Phase 6b** — the brief→`PickInput` entry source, then live order/pricing calibration on
+  paper (`priceCombo` + combo `placeOrder` + fill/commission) once options-spread approval lands.
 - **Done:** Phase 0 (schema, migrations 045–048) · Phase 1 (`ExecutionBroker` + `MockExecutionBroker`)
   · Phase 2 (`RiskGovernor` + `risk-gate`) · Phase 3 (`ExecutionCore` + `reconciliation` +
   `market-hours` + control API `:7433`/SSE) · Phase 4 (`EntryPolicy`, `OrderManager`,
@@ -32,27 +42,32 @@
 ```
 Read .ai/AI_CONTEXT.md §11 and Requirements/v2-execution/05-implementation-plan.md
 (+ 01-architecture.md §1.4/§1.5 and 03-lifecycle.md §3.2), then continue the v2
-execution build at Phase 6.
+execution build at Phase 6b.
 
-Status: Phases 0–5 are COMPLETE through v1.1.10 — engine built, tested (441 green),
-activated in mock mode, and fully drivable from the Electron "🤝 Execution" UI
-(TradingDeskView + ExecutionSettingsView). Everything runs on the MockExecutionBroker.
+Status: Phases 0–5 COMPLETE + Phase 6a DONE (v1.1.45). IbkrExecutionBroker
+(src/main/execution/ibkr-execution-broker.ts) implements the ExecutionBroker seam
+via @stoqey/ib; broker-factory.ts selects mock (default) vs IBKR (TA_EXEC_BROKER=ibkr).
+A live TWS paper session connects; connect + reqAccountSummary (buying power) +
+reqPositions are live-verified on paper (scripts/ibkr-probe.mjs). Pure mapping +
+factory tested (tests/ibkr-execution-broker.test.ts, 16). NO engine/UI changes.
 
-Phase 6 = THE WALL: it needs the IBKR PAPER ACCOUNT (check it's approved first).
-Two pieces, both behind seams that already exist — NO engine/UI changes:
-  1. IbkrExecutionBroker (new src/main/execution/ibkr-execution-broker.ts)
-     implementing the ExecutionBroker interface via @stoqey/ib + IB Gateway/IBC:
-     connect (paper port 4002), contract qualification, combo/BAG orders, order +
-     exec subscriptions, live combo pricing, buying-power. Run the SAME interface
-     test-suite the mock passes against this adapter. Select it via
-     exec_config.executionMode / a broker factory in index.ts (mock vs ibkr).
-  2. The brief→PickInput entry source: map an inflection brief's strategyLabResult
+Phase 6b = two things:
+  1. The brief→PickInput entry source: map an inflection brief's strategyLabResult
      → spread legs → PickInput[], call engine.generateEntries on the
      /exec/brief-ready handoff (the hook already exists in execution-core/control-api).
+  2. Live order/pricing calibration on PAPER: verify priceCombo (BAG snapshot) +
+     combo placeOrder (net-LMT, sign convention in comboLimitOrderParams) + the
+     fill/commission pipeline against real paper fills. NEEDS options-spread approval
+     on the paper account (currently pending). Until then, 6a's connection/account/
+     positions paths are the verified surface.
 
-If the account is NOT yet approved, there is no further mock work — Phase 5 is the
-end of the no-account road. Options while waiting: polish the UI, add renderer
-tests, or tune §3.7 knobs in ExecutionSettings defaults.
+To run IBKR locally: TWS logged into Paper, API enabled (port 7497, trusted IP
+127.0.0.1, Read-Only OFF), launch app with TA_EXEC_BROKER=ibkr. Gateway: add
+TA_IBKR_GATEWAY=1 (port 4002).
+
+Account caveat: live account is Cash + Options Pending Approval — credit spreads need
+a Reg-T margin upgrade + spread-level options before LIVE. Paper is a margin account,
+so paper validation is unblocked once options approval reaches paper.
 
 Repo discipline: tests green + typecheck + lint, version bump + CHANGELOG +
 changelog file + AI_CONTEXT, one Conventional Commit per increment, then

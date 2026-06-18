@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.45] — 2026-06-17
+
+### Added
+- **v2 execution — Phase 6a: the IBKR adapter (`IbkrExecutionBroker`).** A live implementation of the `ExecutionBroker` seam over the TWS socket API (via `@stoqey/ib`), so the engine can place/manage real orders through a locally-running **TWS or IB Gateway**. Paper vs live is purely the connection port (TWS paper 7497 / live 7496, Gateway paper 4002 / live 4001) — never an engine or UI change. A new **broker factory** (`broker-factory.ts`) selects mock vs IBKR: the default stays the deterministic `MockExecutionBroker`, and IBKR is **opt-in** via `TA_EXEC_BROKER=ibkr` (with `TA_IBKR_HOST` / `TA_IBKR_PORT` / `TA_IBKR_GATEWAY` / `TA_IBKR_CLIENT_ID` overrides), so existing installs are unaffected. The IBKR combo net-price sign convention (credit-positive → IBKR's credit-negative BUY limit) is centralised in one helper for paper calibration.
+
+### Notes
+- **Connection, contract qualification, buying-power, and position/order reads are live-verified** against the IBKR paper account (account-summary + positions smoke via `scripts/ibkr-probe.mjs`); these need no options permission. **Combo order placement + fills are implemented to IBKR's documented combo conventions but are calibrated/verified on paper in Phase 7**, once the account's options-spread permission is approved. The paper account is a *margin* paper account, so credit-spread paper validation is possible there even though a live **cash** account would need a Reg-T margin upgrade first.
+- Pure mapping logic (expiry/contract/status/net-price conversions + factory settings) covered by `tests/ibkr-execution-broker.test.ts` (16 tests). Full suite: **575 passing**.
+
 ## [1.1.44] — 2026-06-17
 
 ### Added
