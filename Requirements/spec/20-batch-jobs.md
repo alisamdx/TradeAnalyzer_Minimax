@@ -24,7 +24,7 @@ While a job runs, `BatchView` streams a per-ticker log between the job table and
 | `daily-market-sync-stocks` | `MarketSyncJob('both')` | 16:30 | +60s | `syncUniverse('both')` → refresh `quote_cache` + `fundamentals_cache` for S&P 500 + Russell 1000. |
 | `daily-market-sync-etfs` | `MarketSyncJob('etf')` | 16:30 | +90s | Same for the ETF universe (chains after stocks via the mutex). |
 | `daily-screener` | `DailyScreenerJob` | 16:30 | +110s | Two passes (stocks strict, ETFs soft) → `screen_runs` rows for the Screener UI. |
-| `daily-price-gap-fill` | `PriceGapFillJob` | 16:30 | +120s | Backfill stale `historical_prices`; also bootstraps SPY + 11 SPDR sector ETFs (6M bars) for scoring signals. |
+| `daily-price-gap-fill` | `PriceGapFillJob` | 16:30 | +120s | Re-fetch the recent daily-bar window for **every** ticker with history (+ bootstrap SPY + 11 SPDR sector ETFs). `historical_prices` is `INSERT OR REPLACE` on (ticker, date), so re-running **overwrites** an existing same-day bar — the after-close run replaces the morning run's partial intraday bar with the finalized close. (It does **not** gate on `MAX(date) < today`; that gate previously made the evening run skip a ticker that already had a partial morning bar — see §20.5.) |
 | `daily-technical-signals` | `DailyTechnicalSignalsJob` | 16:30 | +150s | Compute MACD/RSI/Bollinger/SMA-stack/patterns + buy-signal score → `technical_signals` (§13). |
 | `daily-intelligence-brief` | `DailyIntelligenceBriefJob` | 16:30 | manual | The 6-stage brief pipeline + critic + email/PDF + paper-trade capture (§14, §15). |
 | `daily-options-snapshot` | `DailyOptionsSnapshotJob` | 06:00 | +300s, runOnStartup | Nightly Wheel `analyzeTicker(forceCache)` over the universe → keeps `optionLiquidityScore`/`atm_iv` fresh; saves global `analysis_snapshots`. |
@@ -37,3 +37,9 @@ Jobs probe connectivity (e.g. `getOptionsExpirations('SPY')`) and return `status
 ## 20.4 Startup behavior
 
 On Windows the app auto-launches at login and acquires a single-instance lock (a second launch focuses the existing window). Startup jobs fire after their delays; the 16:30 chain and the 06:00 snapshot keep all caches warm without user action.
+
+## 20.5 Two daily slots — every job must refresh + overwrite
+
+The orchestrator runs the full chain **twice on a trading day**: an early slot (≈10:15 ET, ~45 min after the open — an intraday opportunity scan) and an after-close slot (≈16:30+ ET — the definitive end-of-day brief). The 90-minute skip window (`SKIP_WINDOW_MS`) is *only* a mid-run resume guard, so the after-close slot **re-runs every job** that the morning slot ran.
+
+**Invariant: each job must fetch the latest data and overwrite anything it wrote in the earlier slot.** A job that instead skips work it "already did today" (e.g. on `MAX(date) = today`) leaves the morning's **partial** intraday data in place — most damagingly a partial daily price bar, on which breakout detection and `volume_surge` (§13, §scoring) are computed. Current write semantics: `historical_prices`, `options_premium_history` → `INSERT OR REPLACE`; `technical_signals`, `iv_history` → `ON CONFLICT DO UPDATE`; `paper_trade_snapshots` → past days immutable, **today** `DO UPDATE` (after-close close overwrites the morning intraday snapshot). The daily-bar window must be **final** by the after-close slot — run it late enough that the data provider has settled the day's bar (≈17:00 ET is safer than 16:30 for a fully-final bar).

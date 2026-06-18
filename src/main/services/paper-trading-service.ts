@@ -879,11 +879,19 @@ Respond with JSON only:
     ).all() as ExistingRow[];
     const existing = new Set(existingRows.map(r => `${r.paper_trade_id}|${r.snapshot_date}`));
 
+    // Today's snapshot is overwritten on a same-day re-run (DO UPDATE) so the
+    // evening (after-close) run replaces the morning run's intraday/partial-bar
+    // close with the finalized close. Past snapshots are immutable closes and are
+    // skipped before reaching here (see the `snapDate !== today` guard below).
     const insert = this.db.prepare(`
       INSERT INTO paper_trade_snapshots
         (paper_trade_id, snapshot_date, days_held, price, return_pct, verdict)
       VALUES (?, ?, ?, ?, ?, ?)
-      ON CONFLICT(paper_trade_id, snapshot_date) DO NOTHING
+      ON CONFLICT(paper_trade_id, snapshot_date) DO UPDATE SET
+        days_held  = excluded.days_held,
+        price      = excluded.price,
+        return_pct = excluded.return_pct,
+        verdict    = excluded.verdict
     `);
 
     // Price lookup: for a given ticker get all (date, close) after a given entry date.
@@ -902,7 +910,9 @@ Respond with JSON only:
         `).all(trade.ticker, trade.entry_date, today) as PriceRow[];
 
         for (const { date: snapDate, close } of prices) {
-          if (existing.has(`${trade.id}|${snapDate}`)) continue;
+          // Past snapshots are final closes — skip them. Today's is re-processed
+          // every run so the after-close run overwrites the morning partial bar.
+          if (snapDate !== today && existing.has(`${trade.id}|${snapDate}`)) continue;
 
           const entryMs   = new Date(trade.entry_date + 'T12:00:00Z').getTime();
           const snapMs    = new Date(snapDate        + 'T12:00:00Z').getTime();

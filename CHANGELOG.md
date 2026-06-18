@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.1.49] — 2026-06-18
+
+### Fixed
+- **The after-close batch run failed to overwrite the morning run's *partial* daily price bar — silently corrupting breakout/inflection scoring.** The batch runs twice a trading day: an intraday scan (≈10:15 ET) and an after-close run (≈16:30+ ET). The morning run stores a partial same-day bar (only the session-so-far volume + an intraday "close"). `PriceGapFillJob`'s staleness gate (`HAVING MAX(date) < date('now')`) then treated that partial bar as "fresh," so the after-close run **skipped the ticker entirely** and never refreshed it. The evening brief therefore computed breakouts on a non-final close and read `volume_surge` at ~10–25% of average for *every* candidate (today's bar held only the first ~50 min of volume). Because `volume_surge` is 25% of the inflection composite weight, this structurally capped inflection composites well below the v2 entry gate (`min_composite_score = 70`). The job now re-fetches the recent daily-bar window for **every** ticker with history on every run; `historical_prices` is `INSERT OR REPLACE` on (ticker, date), so the finalized after-close bar overwrites the partial morning one.
+- **Paper-trade snapshots now overwrite today's row on a same-day re-run** (`paper_trade_snapshots` ON CONFLICT `DO NOTHING` → `DO UPDATE` for today only). The after-close run replaces the morning intraday/partial-bar close with the finalized close; past snapshots stay immutable.
+
+### Notes
+- Root cause of the inflection brief's "no tradeable picks" symptom found in the brief-accuracy audit: with full-volume bars, `volume_surge` will reflect real breakout participation and inflection composites can clear 70. The audit-found data bug is fixed at the source; no scoring weights were changed.
+- Audit of all batch jobs' same-day write semantics: `historical_prices`/`options_premium_history` (INSERT OR REPLACE), `technical_signals`/`iv_history` (ON CONFLICT DO UPDATE), `daily_briefs` (newest row) all already overwrite; only price-gap-fill (skip) and paper-snapshot (DO NOTHING) needed fixing.
+- New spec §20.5 documents the two-slot "refresh + overwrite" invariant. Regression test `tests/price-gap-fill-refetch-today.test.ts`. Full suite: **600 passing**.
+
 ## [1.1.48] — 2026-06-17
 
 ### Fixed

@@ -59,66 +59,50 @@ export class PriceGapFillJob implements BatchJobHandler {
     onProgress: (evt: BatchProgressEvent) => void,
     signal: AbortSignal,
   ): Promise<BatchJobResult> {
-    // ── Reference ticker bootstrap ─────────────────────────────────────────────
-    // SPY + sector ETFs must always be fresh for ScoringService relative-strength
-    // and sector-momentum signals.
-    // Stale threshold is date('now') — not date('now','-1 day') — so that after
-    // yesterday's bars are stored, today's close is still fetched the same evening.
+    // ── Always re-fetch the recent window (incl. today), every run ─────────────
+    // The batch runs twice a day: ~10:15 ET (45 min after open, intraday
+    // opportunity scan) and ~16:30+ ET (after close). The morning run stores a
+    // PARTIAL same-day bar (only the session-so-far volume + an intraday "close").
+    // The old gate (`HAVING MAX(date) < date('now')`) then treated that partial
+    // bar as "fresh" and the evening run SKIPPED the ticker — so the brief reused
+    // the morning's partial bar (volume read ~10-25% of average, breakouts fired
+    // on a non-final close). We now re-fetch the recent window for EVERY ticker on
+    // EVERY run; `historical_prices` is `INSERT OR REPLACE` keyed on (ticker,date),
+    // so the finalized end-of-day bar overwrites the partial morning one. Bounded
+    // to a small window (from max_date − 3 days), so this is cheap per ticker.
     const refPh = SCORING_REFERENCE_TICKERS.map(() => '?').join(',');
+    const FROM_BUFFER_DAYS = 3;
+    const fromDateFor = (maxDate: string): string =>
+      new Date(new Date(maxDate + 'T12:00:00Z').getTime() - FROM_BUFFER_DAYS * 86_400_000)
+        .toISOString().slice(0, 10);
 
-    type RefRow = { ticker: string };
-    const freshRef = new Set(
-      (this.db.prepare(`
-        SELECT ticker FROM historical_prices
-        WHERE ticker IN (${refPh})
-        GROUP BY ticker
-        HAVING MAX(date) >= date('now')
-      `).all(...SCORING_REFERENCE_TICKERS) as RefRow[]).map(r => r.ticker)
-    );
-
-    // Reference tickers that exist but are missing today's bar — use fromDate so we
-    // don't re-fetch the full 1Y range just to add one day.
+    // Reference tickers (SPY + sector ETFs) — re-fetch recent window if they have
+    // history, bootstrap full 1Y if they don't.
     type RefMaxRow = { ticker: string; max_date: string };
-    const staleRefRows = (this.db.prepare(`
+    const refWithHistory = this.db.prepare(`
       SELECT ticker, MAX(date) AS max_date FROM historical_prices
       WHERE ticker IN (${refPh})
       GROUP BY ticker
-      HAVING MAX(date) < date('now')
-    `).all(...SCORING_REFERENCE_TICKERS) as RefMaxRow[]).filter(r => !freshRef.has(r.ticker));
-
-    // Reference tickers with no history at all — bootstrap with full 1Y range so
-    // there are enough bars for the 90-day return calculation.
-    const existingRef = new Set([...freshRef, ...staleRefRows.map(r => r.ticker)]);
-    const bootstrapRef = (SCORING_REFERENCE_TICKERS as readonly string[]).filter(t => !existingRef.has(t));
+    `).all(...SCORING_REFERENCE_TICKERS) as RefMaxRow[];
+    const refWithHistorySet = new Set(refWithHistory.map(r => r.ticker));
+    const bootstrapRef = (SCORING_REFERENCE_TICKERS as readonly string[]).filter(t => !refWithHistorySet.has(t));
 
     const staleRef: { ticker: string; range: TimeRange; fromDate?: string }[] = [
       ...bootstrapRef.map(t => ({ ticker: t, range: '1Y' as TimeRange, fromDate: undefined })),
-      ...staleRefRows.map(r => {
-        const fromMs = new Date(r.max_date + 'T12:00:00Z').getTime() - 3 * 86_400_000;
-        return { ticker: r.ticker, range: '1M' as TimeRange, fromDate: new Date(fromMs).toISOString().slice(0, 10) };
-      }),
+      ...refWithHistory.map(r => ({ ticker: r.ticker, range: '1M' as TimeRange, fromDate: fromDateFor(r.max_date) })),
     ];
 
-    // ── Universe tickers — include actual max date for targeted fetching ──────
-    // Same date('now') threshold: a ticker whose latest bar is yesterday is stale
-    // and needs today's close fetched.
+    // ── Universe tickers — re-fetch the recent window for every ticker with history.
     type TickerRow = { ticker: string; max_date: string };
     const staleUniverse: { ticker: string; range: TimeRange; fromDate: string }[] = (this.db
       .prepare(`
         SELECT ticker, MAX(date) AS max_date FROM historical_prices
         GROUP BY ticker
-        HAVING MAX(date) < date('now')
         ORDER BY ticker
       `)
       .all() as TickerRow[])
       .filter(r => !(SCORING_REFERENCE_TICKERS as readonly string[]).includes(r.ticker))
-      .map(r => {
-        // Fetch from (max_date − 3 days) for a small safety buffer.
-        const maxDateMs = new Date(r.max_date + 'T12:00:00Z').getTime();
-        const fromMs    = maxDateMs - 3 * 86_400_000;
-        const fromDate  = new Date(fromMs).toISOString().slice(0, 10);
-        return { ticker: r.ticker, range: '1M' as TimeRange, fromDate };
-      });
+      .map(r => ({ ticker: r.ticker, range: '1M' as TimeRange, fromDate: fromDateFor(r.max_date) }));
 
     const jobs: { ticker: string; range: TimeRange; fromDate?: string }[] = [
       ...staleRef,
