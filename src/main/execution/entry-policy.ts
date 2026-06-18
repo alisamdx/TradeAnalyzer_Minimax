@@ -69,6 +69,15 @@ export class EntryPolicy {
     const config = this.governor.getConfig();
     const quote = await broker.priceCombo(pick.legs);
 
+    // Liquidity gate (§3.2): skip names whose combo bid/ask is too wide vs the credit — crossing
+    // them bleeds the edge to slippage (AMAT ~23% live). Off when maxComboSpreadPct ≤ 0.
+    if (config.maxComboSpreadPct > 0 && quote.mid > 0) {
+      const relSpread = (quote.ask - quote.bid) / Math.abs(quote.mid);
+      if (relSpread > config.maxComboSpreadPct) {
+        return { ticker: pick.ticker, proposalId: null, rejected: 'wide_market' };
+      }
+    }
+
     const sizing = this.governor.sizeEntry(pick.maxLossPerContract);
     if (sizing.contracts < 1) return { ticker: pick.ticker, proposalId: null, rejected: sizing.reason };
 

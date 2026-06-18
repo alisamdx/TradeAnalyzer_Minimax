@@ -338,6 +338,17 @@ export class DailyIntelligenceBriefJob implements BatchJobHandler {
     let etradeFailed = false;
     let stage4Attempted = 0, stage4Failed = 0;
 
+    // Risk-budget-driven spread width (v2 execution, default off — see migration 053). When on,
+    // size the inflection vertical's hedge leg to the per-trade budget so it's tradeable on a
+    // small account. Read once from exec_config; null = current delta-based width.
+    const execCfg = this.db
+      .prepare('SELECT capital_ceiling, max_risk_per_trade_pct, budget_width_enabled FROM exec_config WHERE id = 1')
+      .get() as { capital_ceiling: number; max_risk_per_trade_pct: number; budget_width_enabled: number } | undefined;
+    const maxLossBudget =
+      execCfg && execCfg.budget_width_enabled === 1
+        ? (execCfg.max_risk_per_trade_pct / 100) * execCfg.capital_ceiling
+        : null;
+
     for (let i = 0; i < stage4Queue.length; i++) {
       if (signal.aborted) break;
       const { ticker } = stage4Queue[i]!;
@@ -352,7 +363,7 @@ export class DailyIntelligenceBriefJob implements BatchJobHandler {
       });
 
       try {
-        const result = await this.strategyLabService.validate(this.db, ticker);
+        const result = await this.strategyLabService.validate(this.db, ticker, maxLossBudget);
         validationResults.set(ticker, result as unknown as object);
       } catch (err) {
         stage4Failed++;

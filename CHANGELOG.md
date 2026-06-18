@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.52] — 2026-06-18
+
+### Added
+- **v2 execution — small-account spread fitness (infrastructure, default OFF).** Two gaps that Phase 7 paper calibration surfaced — both shipped disabled pending FR-SEY-5 validation:
+  - **Risk-budget-driven spread width** (`exec_config.budget_width_enabled`, migration 053). The strategy lab builds short verticals with delta-targeted legs (sell 0.30Δ, buy 0.15Δ), so width is uncontrolled — $60 wide on AMAT (580/520), max loss $4,428, which the risk gate sizes at **0 contracts** under a $10k/5% ($500) budget. When enabled, the brief passes the per-trade budget to the lab and `findBudgetWidthHedge` picks the **widest** hedge leg whose max loss still fits the budget (~$5 wide on AMAT → sizeable). Returns `unavailable` ("No spread within the per-trade risk budget") if even the narrowest spread busts the budget.
+  - **Liquidity / economics gate** (`exec_config.max_combo_spread_pct`, migration 054). Even when sized, wide-bid/ask names bleed the edge to slippage (live AMAT round-trip crossed ~23% of the credit). When > 0, `EntryPolicy.buildProposal` rejects a proposal (`wide_market`) whose combo relative spread `(ask−bid)/|mid|` exceeds the threshold.
+
+### Notes
+- **Both default OFF** (`budget_width_enabled = 0`, `max_combo_spread_pct = 0`) — no behavior change until validated. Per FR-SEY-5, a backtest delta on the budget-sized width must show at-worst-neutral before either ships enabled. New formula doc: `docs/formulas.md#budget-width`. Tests: `findBudgetWidthHedge` (4) in `tests/strategy-lab-service.test.ts`; liquidity gate (2) in `tests/entry-policy.test.ts`. Full suite: **610 passing**.
+
 ## [1.1.51] — 2026-06-18
 
 ### Fixed

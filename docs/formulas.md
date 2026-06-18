@@ -558,6 +558,19 @@ fill_buy   = mid + slip · (ask − bid)/2        // buy above mid, toward the a
 - Locked / crossed / degenerate quotes (`ask ≤ bid` or `mid ≤ 0`) fall back to mid. Result is floored at 0.
 - Applied to: Strategy Lab `buildSetup` net credit/debit (and thus PMCC/calendar net debit + reward/risk), and wheel/income `premium` in `analysis-service.ts` (which replaced the old flat `mid/2` placeholder). The haircut is largest on wide-spread (illiquid) legs — where mid is least achievable.
 
+## Risk-budget spread width {#budget-width}
+
+For v2 execution, a short vertical's hedge (long) leg can be sized to a **per-trade risk budget** instead of a fixed delta, so the spread is sizeable on a small account. The default delta legs (sell 0.30Δ, buy 0.15Δ) produce an uncontrolled width — $60 wide on a high-priced/high-IV name (e.g. AMAT 580/520), whose ~$4,400 max loss can't be sized into a $500 budget (5% of $10k) → the risk gate rejects it.
+
+When `exec_config.budget_width_enabled = 1`, the brief passes the per-trade budget `B = (max_risk_per_trade_pct / 100) × capital_ceiling` to the lab, and `findBudgetWidthHedge()` selects the **widest** long strike whose per-contract max loss still fits `B`:
+
+```
+maxLoss(L) = (|S − L|) × 100 − (shortMid − longMid(L)) × 100   // monotonically ↑ with width
+choose L* = argmax |S − L|   s.t.  maxLoss(L) ≤ B   and   |S − L| ≤ maxWidth
+```
+
+The hedge is further OTM than the short (puts below S, calls above). Returns null — structure `unavailable` ("No spread within the per-trade risk budget") — when even the nearest one-strike spread exceeds `B`; skipping is correct (better than an un-sizeable pick). Wider spreads collect more credit and carry better reward/risk, so taking the widest within budget is preferred. Default off pending FR-SEY-5 validation. See `findBudgetWidthHedge` / `buildSetup` in `strategy-lab-service.ts`.
+
 ## Option liquidity score {#liquidity-score}
 
 Two scores measure tradability; both now weigh same-day **volume** alongside open interest and spread.

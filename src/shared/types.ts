@@ -2184,11 +2184,15 @@ export interface ExecConfig {
   maxPositionsPerSector: number | null;    // null = off; max concurrent open positions per sector bucket
   // inflection-direction guard (FR-SEY-3 follow-up; mirrors the app `inflectionDirection` setting)
   inflectionDirection: 'both' | 'up' | 'down';
+  // risk-budget-driven spread width (default off; brief sizes the inflection vertical's hedge leg
+  // to the per-trade budget so it's sizeable on a small account — see docs/formulas.md#budget-width)
+  budgetWidthEnabled: boolean;
   // entry policy (§3.6)
   minCompositeScore: number;
   maxNewEntriesPerDay: number;
   maxNewEntriesPerWeek: number;
   avoidEarningsBeforeExpiry: boolean;
+  maxComboSpreadPct: number;               // 0 = off; reject when (ask−bid)/|mid| exceeds this (liquidity gate)
   entryWindowStart: string;                // ET HH:MM
   entryWindowEnd: string;                  // ET HH:MM
   repriceTolerancePct: number;

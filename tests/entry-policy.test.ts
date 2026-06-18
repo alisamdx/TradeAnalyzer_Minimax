@@ -109,6 +109,26 @@ describe('EntryPolicy.buildProposal', () => {
     const out = await policy.buildProposal(pick(), broker, NOW);
     expect(out.rejected).toBe('engine_running');
   });
+
+  it('rejects a wide-market combo when the liquidity gate is on', async () => {
+    const { governor, policy } = setup();
+    governor.start();
+    governor.updateConfig({ maxComboSpreadPct: 0.2 });
+    const wide = new MockExecutionBroker(); // halfSpread 0.05 vs ~0.10 credit → relSpread ~1.0
+    await wide.connect();
+    const out = await policy.buildProposal(pick(), wide, NOW);
+    expect(out.rejected).toBe('wide_market');
+  });
+
+  it('passes a tight-market combo with the liquidity gate on', async () => {
+    const { governor, policy } = setup();
+    governor.start();
+    governor.updateConfig({ maxComboSpreadPct: 0.2 });
+    const tight = new MockExecutionBroker({ halfSpread: 0.005 }); // relSpread ~0.1
+    await tight.connect();
+    const out = await policy.buildProposal(pick(), tight, NOW);
+    expect(out.proposalId).not.toBeNull();
+  });
 });
 
 describe('EntryPolicy.generateEntries', () => {

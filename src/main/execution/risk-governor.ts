@@ -23,6 +23,7 @@ interface ConfigRow {
   max_positions_per_strategy: number | null;
   max_positions_per_sector: number | null;
   inflection_direction: string;
+  budget_width_enabled: number;
   eligible_strategies: string;
   proposal_shelf_life_min: number;
   drawdown_throttle_pct: number;
@@ -31,6 +32,7 @@ interface ConfigRow {
   max_new_entries_per_day: number;
   max_new_entries_per_week: number;
   avoid_earnings_before_expiry: number;
+  max_combo_spread_pct: number;
   entry_window_start: string;
   entry_window_end: string;
   reprice_tolerance_pct: number;
@@ -66,6 +68,7 @@ const CONFIG_COLUMN: Record<keyof ExecConfig, string> = {
   maxPositionsPerStrategy: 'max_positions_per_strategy',
   maxPositionsPerSector: 'max_positions_per_sector',
   inflectionDirection: 'inflection_direction',
+  budgetWidthEnabled: 'budget_width_enabled',
   eligibleStrategies: 'eligible_strategies',
   proposalShelfLifeMin: 'proposal_shelf_life_min',
   drawdownThrottlePct: 'drawdown_throttle_pct',
@@ -74,6 +77,7 @@ const CONFIG_COLUMN: Record<keyof ExecConfig, string> = {
   maxNewEntriesPerDay: 'max_new_entries_per_day',
   maxNewEntriesPerWeek: 'max_new_entries_per_week',
   avoidEarningsBeforeExpiry: 'avoid_earnings_before_expiry',
+  maxComboSpreadPct: 'max_combo_spread_pct',
   entryWindowStart: 'entry_window_start',
   entryWindowEnd: 'entry_window_end',
   repriceTolerancePct: 'reprice_tolerance_pct',
@@ -110,6 +114,7 @@ export class RiskGovernor {
       maxPositionsPerStrategy: r.max_positions_per_strategy,
       maxPositionsPerSector: r.max_positions_per_sector,
       inflectionDirection: r.inflection_direction === 'both' || r.inflection_direction === 'down' ? r.inflection_direction : 'up',
+      budgetWidthEnabled: r.budget_width_enabled === 1,
       eligibleStrategies: r.eligible_strategies
         .split(',')
         .map((s) => s.trim())
@@ -121,6 +126,7 @@ export class RiskGovernor {
       maxNewEntriesPerDay: r.max_new_entries_per_day,
       maxNewEntriesPerWeek: r.max_new_entries_per_week,
       avoidEarningsBeforeExpiry: r.avoid_earnings_before_expiry === 1,
+      maxComboSpreadPct: r.max_combo_spread_pct,
       entryWindowStart: r.entry_window_start,
       entryWindowEnd: r.entry_window_end,
       repriceTolerancePct: r.reprice_tolerance_pct,

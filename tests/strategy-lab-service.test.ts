@@ -9,7 +9,7 @@
 
 import { describe, it, expect } from 'vitest';
 import Database from 'better-sqlite3';
-import { StrategyLabService, classifySingleExpiryPnl, findByDelta } from '../src/main/services/strategy-lab-service.js';
+import { StrategyLabService, classifySingleExpiryPnl, findByDelta, findBudgetWidthHedge } from '../src/main/services/strategy-lab-service.js';
 import { bsPrice, normCdf, RISK_FREE_RATE } from '../src/main/services/black-scholes.js';
 import type { DataProvider, OptionsChain, OptionContract } from '../src/main/services/data-provider.js';
 import type { OptionsProvider } from '../src/main/services/options-provider.js';
@@ -457,5 +457,41 @@ describe('classifySingleExpiryPnl — structure max-loss classification', () => 
     );
     expect(r.maxProfit).toBeNull();            // unbounded upside (net long calls)
     expect(r.maxLoss).not.toBeNull();          // downside bounded
+  });
+});
+
+describe('findBudgetWidthHedge (risk-budget spread width)', () => {
+  function put(strike: number, mid: number, halfSpread = 0.1): OptionContract {
+    return {
+      ticker: `X${strike}P`, expiration: EXPIRATION, strike, side: 'put',
+      bid: +(mid - halfSpread).toFixed(2), ask: +(mid + halfSpread).toFixed(2),
+      delta: null, gamma: null, theta: null, vega: null, iv: 0.3, openInterest: 100, volume: 10,
+    };
+  }
+  // Short 580P @ mid 15; hedges below it. maxLoss = width*100 − (15 − longMid)*100.
+  const chain = [put(575, 12.5), put(570, 10.8), put(560, 8.0), put(580, 15)];
+
+  it('picks the widest hedge whose max loss fits the budget', () => {
+    // $500 budget: 575 → maxLoss 250 ✓; 570 → 580 ✗ → choose 575 ($5 wide).
+    expect(findBudgetWidthHedge(chain, 'put', 580, 15, 500)?.strike).toBe(575);
+    // $700 budget: 570 → 580 ✓; 560 (width 20) → 1300 ✗ → choose 570 ($10 wide).
+    expect(findBudgetWidthHedge(chain, 'put', 580, 15, 700)?.strike).toBe(570);
+  });
+
+  it('returns null when even the narrowest spread busts the budget', () => {
+    expect(findBudgetWidthHedge(chain, 'put', 580, 15, 100)).toBeNull();
+  });
+
+  it('selects call-side hedges above the short strike', () => {
+    const calls: OptionContract[] = [
+      { ...put(585, 12.5), strike: 585, side: 'call', ticker: 'X585C' },
+      { ...put(590, 10.8), strike: 590, side: 'call', ticker: 'X590C' },
+    ];
+    expect(findBudgetWidthHedge(calls, 'call', 580, 15, 500)?.strike).toBe(585);
+  });
+
+  it('honours the max-width cap', () => {
+    // Wide budget but cap width at $5 → can't go past 575.
+    expect(findBudgetWidthHedge(chain, 'put', 580, 15, 5000, 5)?.strike).toBe(575);
   });
 });

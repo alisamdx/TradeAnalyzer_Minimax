@@ -1,0 +1,12 @@
+-- Migration 053: risk-budget-driven spread width for v2 inflection verticals (default OFF).
+--
+-- The strategy lab builds short-put-vertical / short-call-vertical with delta-targeted legs
+-- (sell 0.30Δ, buy 0.15Δ), so width = wherever those deltas land — $60 wide on a high-priced
+-- high-IV name like AMAT (max loss $4,428/contract). At $10k capital / 5% per-trade ($500),
+-- the risk gate sizes that at 0 contracts → the engine can never trade it. With this flag ON,
+-- the brief passes the per-trade budget to the lab, which selects the WIDEST hedge leg whose
+-- max loss still fits the budget (~$5 wide on AMAT → sizeable). see docs/formulas.md#budget-width
+--
+-- Default 0 (off) pending FR-SEY-5 validation: a backtest delta on the budget-sized width must
+-- show it is at worst neutral vs the current wide spread before it ships enabled.
+ALTER TABLE exec_config ADD COLUMN budget_width_enabled INTEGER NOT NULL DEFAULT 0;  -- 0/1

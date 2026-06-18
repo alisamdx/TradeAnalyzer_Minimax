@@ -352,6 +352,42 @@ export function findByDelta(
   return null;
 }
 
+// Short verticals whose hedge leg can be sized to a risk budget instead of a fixed delta
+// (v2 execution: small-account spreads must fit the per-trade budget — a 0.30/0.15Δ vertical
+// on a high-priced/high-IV name is $60 wide and un-sizeable at $10k/5%). see docs/formulas.md#budget-width
+const BUDGET_WIDTH_SLUGS = new Set(['short-put-vertical', 'short-call-vertical']);
+
+/**
+ * Risk-budget-driven hedge-leg selection for short verticals. Picks the WIDEST long strike
+ * whose resulting per-contract max loss still fits `budgetDollars`, so the spread is sizeable
+ * on a small account (wider = more credit + better risk/reward, up to the budget). The hedge is
+ * further OTM than the short (puts below, calls above). Returns null when even the narrowest
+ * one-strike spread exceeds the budget — the structure is then unavailable, which is correct:
+ * better to skip than to surface an un-sizeable pick. see docs/formulas.md#budget-width
+ */
+export function findBudgetWidthHedge(
+  contracts: OptionContract[],
+  side: 'call' | 'put',
+  shortStrike: number,
+  shortMid: number,
+  budgetDollars: number,
+  maxWidth = 25,
+): OptionContract | null {
+  const otm = contracts
+    .filter(c => c.side === side && c.bid >= 0 && (side === 'put' ? c.strike < shortStrike : c.strike > shortStrike))
+    .sort((a, b) => Math.abs(a.strike - shortStrike) - Math.abs(b.strike - shortStrike)); // nearest (narrowest) first
+  let best: OptionContract | null = null;
+  for (const c of otm) {
+    const width = Math.abs(shortStrike - c.strike);
+    if (width > maxWidth) break;
+    const longMid = (c.bid + c.ask) / 2;
+    const maxLoss = width * 100 - (shortMid - longMid) * 100; // monotonically ↑ with width
+    if (maxLoss <= budgetDollars) best = c; // keep widening while it still fits
+    else break;
+  }
+  return best;
+}
+
 /**
  * Max-profit / max-loss / breakevens for a SINGLE-expiration option structure, computed
  * from the actual expiry payoff. Pure and exported for direct testing.
@@ -428,7 +464,8 @@ export function classifySingleExpiryPnl(
 
 function buildSetup(
   profile: StrategyProfile, chain: OptionsChain, underlyingPx: number, dte: number,
-  currentAtmIv: number, trustDeltas = true, farChain: OptionsChain | null = null, farDte: number | null = null
+  currentAtmIv: number, trustDeltas = true, farChain: OptionsChain | null = null, farDte: number | null = null,
+  maxLossBudget: number | null = null
 ): StrategySetup {
   const ticker = chain.ticker;
   const base: Omit<StrategySetup, 'legs' | 'netCredit' | 'netDebit' | 'maxProfit' | 'maxLoss' | 'breakevens' | 'annualizedReturn' | 'popEstimate' | 'unavailableReason'> = {
@@ -458,6 +495,7 @@ function buildSetup(
     const legChain = legDef.farExpiration ? farChain! : chain;
     let contract: OptionContract | null;
 
+    let budgetHedgeUnmet = false;
     if (legDef.action === 'buy' && LIZARD_HEDGE_SLUGS.has(profile.slug)) {
       // Lizard hedge: select the furthest OTM strike where credit ≥ spread width
       // so the structure carries no upside (call) or downside (put) risk.
@@ -468,6 +506,14 @@ function buildSetup(
       contract = sellLeg
         ? findLizardHedge(legChain.contracts, legDef.side, sellLeg.strike, shortCreditPerShare)
         : findByDelta(legChain.contracts, legDef.side, legDef.deltaTarget, underlyingPx, trustDeltas);
+    } else if (legDef.action === 'buy' && maxLossBudget != null && BUDGET_WIDTH_SLUGS.has(profile.slug)) {
+      // Risk-budget-driven hedge: widest spread whose max loss fits the per-trade budget
+      // (v2 small-account sizeability). Falls back to delta only if the short leg is missing.
+      const sellLeg = builtLegs.find(l => l.side === legDef.side && l.action === 'sell');
+      contract = sellLeg
+        ? findBudgetWidthHedge(legChain.contracts, legDef.side, sellLeg.strike, sellLeg.mid, maxLossBudget)
+        : findByDelta(legChain.contracts, legDef.side, legDef.deltaTarget, underlyingPx, trustDeltas);
+      if (sellLeg && !contract) budgetHedgeUnmet = true;
     } else {
       contract = findByDelta(legChain.contracts, legDef.side, legDef.deltaTarget, underlyingPx, trustDeltas);
     }
@@ -475,7 +521,9 @@ function buildSetup(
     if (!contract) {
       return { ...base, legs: [], netCredit: null, netDebit: null, maxProfit: null, maxLoss: null,
         breakevens: [], annualizedReturn: null, popEstimate: null,
-        unavailableReason: 'Insufficient option data at target delta' };
+        unavailableReason: budgetHedgeUnmet
+          ? 'No spread within the per-trade risk budget'
+          : 'Insufficient option data at target delta' };
     }
     builtLegs.push({
       action: legDef.action, side: legDef.side, strike: contract.strike,
@@ -705,7 +753,7 @@ export class StrategyLabService {
   ) {}
 
   /** Run all 31 strategies for a ticker with entirely fresh data. */
-  async validate(db: Database, ticker: string): Promise<StrategyLabValidateResult> {
+  async validate(db: Database, ticker: string, maxLossBudget: number | null = null): Promise<StrategyLabValidateResult> {
     const t = ticker.trim().toUpperCase();
 
     // 1. Fresh price bars for direction bias
@@ -755,7 +803,7 @@ export class StrategyLabService {
 
     // 7. Score all strategies
     const scores: StrategyScore[] = PROFILES.map(profile => {
-      const setup = buildSetup(profile, chain, underlyingPx, expInfo.dte, currentAtmIv, trustDeltas, farChain, farDte);
+      const setup = buildSetup(profile, chain, underlyingPx, expInfo.dte, currentAtmIv, trustDeltas, farChain, farDte, maxLossBudget);
       setup.ticker = t;
       return scoreStrategy(profile, { ivRank: ctx.ivRank, ivDataPoints: ctx.ivDataPoints, bias: ctx.directionBias, isEtf }, setup);
     });
