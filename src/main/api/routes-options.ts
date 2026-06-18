@@ -7,16 +7,26 @@ function dteDays(expiration: string): number {
   return Math.max(0, Math.round((exp.getTime() - Date.now()) / 86_400_000));
 }
 
-function nextFridays(count: number): string[] {
+// Upcoming Friday expirations, computed entirely in UTC.
+//
+// The previous implementation mixed local-time weekday math (`getDay()` /
+// `getDate()`) with UTC serialization (`toISOString()`). When run after the
+// local clock had crossed UTC midnight — i.e. any evening run in a timezone
+// behind UTC — every "Friday" it produced serialized to the *Saturday* UTC
+// date. E*Trade lists Friday expirations only, so the chain lookups missed
+// every guessed expiration and the endpoint returned an empty array. This in
+// turn starved the TraderAgent scout of option contracts (zero new trades).
+// Matches the UTC pattern already used in analysis-service / filter-templates.
+export function nextFridays(count: number): string[] {
   const results: string[] = [];
   const now = new Date();
-  const day = now.getDay();
-  const daysUntilFriday = day <= 5 ? 5 - day : 6;
-  const first = new Date(now);
-  first.setDate(now.getDate() + (daysUntilFriday === 0 ? 7 : daysUntilFriday));
+  const day = now.getUTCDay();
+  const daysUntilFriday = (5 - day + 7) % 7;
+  const first = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  first.setUTCDate(first.getUTCDate() + (daysUntilFriday === 0 ? 7 : daysUntilFriday));
   for (let w = 0; w < count; w++) {
     const d = new Date(first);
-    d.setDate(first.getDate() + w * 7);
+    d.setUTCDate(first.getUTCDate() + w * 7);
     results.push(d.toISOString().slice(0, 10));
   }
   return results;

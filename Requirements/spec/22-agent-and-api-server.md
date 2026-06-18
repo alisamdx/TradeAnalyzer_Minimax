@@ -39,6 +39,7 @@ Route modules cover all service groups: health, watchlists, screener, analysis, 
 - **`GET /api/v1/strategy-lab/:ticker`** — runs Strategy Lab (§09), returns all 31 scored strategies + per-category recommendations (`bestOverall`, `bestIncome`, `bestBullish`, `bestBearish`). The agent calls this in its decide phase instead of always defaulting to CSP/CC.
 - **`POST /api/v1/critic/evaluate`** — accepts a candidate pick payload and returns a `CriticVerdict` (§14.3). The agent blocks entry on `flag`, warns on `caution`.
 - E*Trade helper routes: `GET /api/v1/etrade/credentials`, `POST /api/v1/etrade/token` — let a remote SSH session complete the OAuth flow and push tokens into the running app (`scripts/etrade-login.mjs`, two-step verifier flow).
+- **`GET /api/v1/options/:ticker`** — when called without an explicit `expiration`, the route guesses the next 8 weekly **Friday** expirations and fetches each chain. This date math MUST be computed entirely in UTC: a local-weekday/UTC-serialization mix shifts every guessed date to Saturday on evening runs (local clock past UTC midnight), which silently returns an empty chain because E\*Trade lists Friday expirations only. (Fixed v1.1.47 — had starved the agent of contracts for ~10 days.)
 
 ### 22.B.3 Remote token refresh
 Because E*Trade tokens expire at midnight ET, a non-interactive two-step script flow (`etrade-step1.mjs` prints the auth URL + saves state; `etrade-step2.mjs <verifier>` completes the exchange) lets the user re-auth from a phone/SSH without a desktop TTY.

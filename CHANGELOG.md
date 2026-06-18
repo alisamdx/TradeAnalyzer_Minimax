@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.47] — 2026-06-17
+
+### Fixed
+- **The local API options endpoint returned an empty chain on evening runs — which silently starved the TraderAgent of trades (zero new positions for ~10 days).** `GET /api/v1/options/:ticker`, when called without an explicit `expiration`, guesses the next 8 weekly Friday expirations. That helper (`nextFridays`) computed the weekday from **local** time (`getDay()`/`getDate()`) but serialized the result with **UTC** (`toISOString()`). Run after the local clock crossed UTC midnight — i.e. any evening run in a timezone behind UTC — every "Friday" it produced shifted to the **Saturday** UTC date. E\*Trade lists Friday expirations only, so each chain lookup missed, the route swallowed the per-expiration miss, and returned `{ ok: true, [] }`. The TraderAgent scout therefore recorded **zero option contracts** for every survivor, and `decide` had nothing to select. Verified against the data: the agent's last trade was June 8 (a daytime run); every evening run June 9→18 produced 80–130 survivors but 0 contracts, while the app's own snapshot job (which resolves real expirations) kept pulling Friday chains the whole time. `nextFridays` now computes entirely in UTC, matching the pattern already used in `analysis-service` / `filter-templates-service`.
+
+### Notes
+- Root cause was purely the expiration-date math in `routes-options.ts`; E\*Trade auth, the screener (Polygon), and the agent's own pipeline were all healthy. The two other Friday-expiration helpers (`ipc-options.generateNextFridays`, `opportunity-service.nearestFridayAtLeast`) serialize with **local** methods throughout, so they were internally consistent and unaffected.
+- Regression test: `tests/options-route-fridays.test.ts` (2 tests) pins the helper to UTC Fridays under a fake evening clock. Full suite: **595 passing**.
+
 ## [1.1.46] — 2026-06-17
 
 ### Added
