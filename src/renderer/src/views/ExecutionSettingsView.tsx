@@ -114,6 +114,10 @@ export function ExecutionSettingsView() {
         <Field label="Avoid earnings before expiry">
           <input type="checkbox" checked={draft.avoidEarningsBeforeExpiry} onChange={e => set('avoidEarningsBeforeExpiry', e.target.checked)} />
         </Field>
+        <Field label="Risk-budget spread width" help="Size the inflection vertical's hedge leg to the per-trade budget so it's tradeable on a small account. Validated FR-SEY-5: neutral-to-better on return, makes high-priced names sizeable.">
+          <input type="checkbox" checked={draft.budgetWidthEnabled} onChange={e => set('budgetWidthEnabled', e.target.checked)} />
+        </Field>
+        <Num label="Max combo spread (rel.)" v={draft.maxComboSpreadPct} on={v => set('maxComboSpreadPct', v)} step={0.05} help="0 = off. Liquidity gate: reject when (ask−bid)/|mid| exceeds this. ~0.20 live (can't be backtested — no historical bid/ask)." />
       </Section>
 
       <Section title="Exit policy">

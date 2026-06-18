@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.1.53] — 2026-06-18
+
+### Changed
+- **Risk-budget spread width is now ON by default** (migration 055) — FR-SEY-5 validated. The inflection vertical's hedge leg is sized to the per-trade budget (5% of capital), so high-priced names become tradeable on a small account instead of being silently rejected. Validation (`scripts/fr-budget-width-study.mjs`, faithful `simulateSingleSpread` replica over 1,386 inflection replay picks, same 0.30Δ short + same picks, only the wing differs), at the operative **$500** budget: return/max-loss **5.6% → 6.1%** (Δ **+0.5 pts**), win rate **75.0% → 75.1%** (unchanged), **sizeable at $500: 58% → 100%**. Narrower spreads carry a higher credit/max-loss ratio on wins → return-on-capital is neutral-to-better while every pick becomes sizeable. (Sensitivity: +0.9 pts at $250, −1.2 pts at $1,000 — wider budgets widen spreads and lose efficiency, which the 5% cap already prevents.) Toggle in **Execution Settings → Entry policy**.
+
+### Added
+- **Execution Settings** exposes the two new controls: **Risk-budget spread width** (toggle, now on) and **Max combo spread (rel.)** (the liquidity gate).
+
+### Notes
+- The **liquidity gate** (`max_combo_spread_pct`, v1.1.52) stays **OFF**: it can't be backtested (no historical bid/ask to compute a combo spread), so per FR-SEY-5 it ships disabled with the finding recorded. Live evidence — the Phase 7 AMAT round-trip crossed ~23% of the credit — is the rationale to enable it (~0.20) manually. Validation script committed as `scripts/fr-budget-width-study.mjs`. Full suite: **610 passing**.
+
 ## [1.1.52] — 2026-06-18
 
 ### Added
