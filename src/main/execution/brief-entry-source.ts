@@ -1,14 +1,18 @@
 // Brief → PickInput entry source (Requirements/v2-execution 03-lifecycle §3.2, Phase 6b).
 //
-// Maps the daily brief's inflection picks into the normalized `PickInput` the EntryPolicy
-// consumes. The brief already emits the direction-locked structure (short-put-vertical for an
-// up-breakout, short-call-vertical for a down-breakout) with strikes/legs from Strategy Lab;
-// this reads the latest committed inflection brief and projects each viable pick onto a
-// PickInput. The mapping is pure + testable; the loader is a thin DB read.
+// Maps the daily brief's picks into the normalized `PickInput` the EntryPolicy consumes, per
+// eligible strategy. Each strategy maps to the defined-risk credit structure the engine trades:
+//   inflection → direction-locked vertical (short-put-vertical up / short-call-vertical down)
+//   wheel      → short-put-vertical (the small-account, defined-risk "wheel": sell a put credit
+//                spread on a name you'd own — a naked CSP can't be sized at $10k)
+// The lab computes every structure for every ticker, so a wheel pick already carries a
+// (budget-sized) short-put-vertical setup. The mapping is pure + testable; the loader is a thin
+// per-strategy DB read.
 //
-// Note: this only *selects and shapes* candidates. All eligibility (composite floor, critic
-// verdict, entry window, caps) is enforced downstream by EntryPolicy, and every proposal is
-// re-priced against the live IBKR chain — so a stale brief never trades a stale price.
+// Note: this only *selects and shapes* candidates. All eligibility (eligible-strategy set,
+// composite floor, critic verdict, entry window, caps) is enforced downstream by EntryPolicy,
+// and every proposal is re-priced against the live IBKR chain — so a stale brief never trades a
+// stale price.
 
 import type { DbHandle } from '../db/connection.js';
 import type {
@@ -53,22 +57,43 @@ export interface MapPickOptions {
   nextEarningsDate?: string | null;
 }
 
-/**
- * Project one inflection BriefPick onto a PickInput, or null when it can't be traded as a
- * defined-risk vertical (no viable direction-matched structure, unavailable setup, or
- * unbounded/absent max loss). Pure — earnings is injected, not queried.
- */
-export function briefPickToPickInput(
-  pick: BriefPick,
-  sourceBriefId: number | null,
-  opts: MapPickOptions = {}
-): PickInput | null {
+// Strategies traded as a defined-risk put credit spread (short-put-vertical) — the small-account
+// premium-selling vehicle. Their lab result already carries a (budget-sized) short-put-vertical.
+const PUT_CREDIT_SPREAD_STRATEGIES = new Set(['wheel']);
+
+/** The Strategy Lab score the engine trades for `strategy` on this pick (null = none viable). */
+function chosenScore(pick: BriefPick, strategy: string): StrategyScore | null {
   const scores = (pick.strategyLabResult as StrategyLabValidateResult | null)?.scores as
     | StrategyScore[]
     | undefined;
-  const chosen = pickRelevantStructure(scores, 'inflection', pick.breakoutDirection);
+  if (!scores) return null;
+  if (strategy === 'inflection') {
+    const c = pickRelevantStructure(scores, 'inflection', pick.breakoutDirection);
+    return c && (c.slug === 'short-put-vertical' || c.slug === 'short-call-vertical') ? c : null;
+  }
+  if (PUT_CREDIT_SPREAD_STRATEGIES.has(strategy)) {
+    return (
+      scores.find(
+        (s) => s.slug === 'short-put-vertical' && s.setup && !s.setup.unavailableReason && s.setup.maxLoss != null
+      ) ?? null
+    );
+  }
+  return null;
+}
+
+/**
+ * Project one BriefPick onto a PickInput for `strategy`, or null when it can't be traded as a
+ * defined-risk credit structure (no viable structure, unavailable setup, unbounded/absent max
+ * loss). Pure — earnings is injected, not queried.
+ */
+export function briefPickToPickInput(
+  pick: BriefPick,
+  strategy: string,
+  sourceBriefId: number | null,
+  opts: MapPickOptions = {}
+): PickInput | null {
+  const chosen = chosenScore(pick, strategy);
   if (!chosen) return null;
-  if (chosen.slug !== 'short-put-vertical' && chosen.slug !== 'short-call-vertical') return null;
 
   const setup = chosen.setup;
   if (!setup || setup.unavailableReason || setup.maxLoss == null) return null;
@@ -82,7 +107,7 @@ export function briefPickToPickInput(
 
   return {
     ticker: pick.ticker,
-    strategy: 'inflection',
+    strategy,
     structure: chosen.slug as ExecStructure,
     legs,
     compositeScore: pick.compositeScore,
@@ -95,38 +120,49 @@ export function briefPickToPickInput(
 }
 
 /**
- * Load the latest committed inflection brief and map its picks to PickInput[]. Resolves each
- * ticker's next earnings date from `earnings_calendar` for the earnings-before-expiry filter.
- * Returns an empty list (never throws) when there is no brief or it can't be parsed.
+ * Load the latest committed brief for each eligible strategy and map its picks to PickInput[].
+ * Resolves each ticker's next earnings date from `earnings_calendar` for the earnings filter.
+ * Never throws; skips strategies with no brief or unparseable picks.
  */
-export function loadInflectionPickInputs(
+export function loadBriefPickInputs(
   db: DbHandle,
+  strategies: readonly string[],
   now: Date = new Date()
-): { briefId: number | null; picks: PickInput[] } {
-  const row = db
-    .prepare(
-      "SELECT id, picks FROM daily_briefs WHERE strategy = 'inflection' ORDER BY generated_at DESC LIMIT 1"
-    )
-    .get() as { id: number; picks: string } | undefined;
-  if (!row) return { briefId: null, picks: [] };
-
-  let parsed: BriefPick[];
-  try {
-    parsed = JSON.parse(row.picks) as BriefPick[];
-  } catch {
-    return { briefId: row.id, picks: [] };
-  }
-
+): { picks: PickInput[]; briefIds: Record<string, number> } {
   const today = etDateString(now);
+  const briefStmt = db.prepare(
+    'SELECT id, picks FROM daily_briefs WHERE strategy = ? ORDER BY generated_at DESC LIMIT 1'
+  );
   const earningsStmt = db.prepare(
     'SELECT report_date FROM earnings_calendar WHERE ticker = ? AND report_date >= ? ORDER BY report_date LIMIT 1'
   );
 
   const picks: PickInput[] = [];
-  for (const pick of parsed) {
-    const er = earningsStmt.get(pick.ticker, today) as { report_date: string } | undefined;
-    const mapped = briefPickToPickInput(pick, row.id, { nextEarningsDate: er?.report_date ?? null });
-    if (mapped) picks.push(mapped);
+  const briefIds: Record<string, number> = {};
+  for (const strategy of strategies) {
+    const row = briefStmt.get(strategy) as { id: number; picks: string } | undefined;
+    if (!row) continue;
+    briefIds[strategy] = row.id; // record the brief even if its picks don't parse
+    let parsed: BriefPick[];
+    try {
+      parsed = JSON.parse(row.picks) as BriefPick[];
+    } catch {
+      continue;
+    }
+    for (const pick of parsed) {
+      const er = earningsStmt.get(pick.ticker, today) as { report_date: string } | undefined;
+      const mapped = briefPickToPickInput(pick, strategy, row.id, { nextEarningsDate: er?.report_date ?? null });
+      if (mapped) picks.push(mapped);
+    }
   }
-  return { briefId: row.id, picks };
+  return { picks, briefIds };
+}
+
+/** Back-compat convenience: just the inflection strategy. */
+export function loadInflectionPickInputs(
+  db: DbHandle,
+  now: Date = new Date()
+): { briefId: number | null; picks: PickInput[] } {
+  const { picks, briefIds } = loadBriefPickInputs(db, ['inflection'], now);
+  return { briefId: briefIds['inflection'] ?? null, picks };
 }

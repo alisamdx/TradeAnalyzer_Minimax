@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.54] — 2026-06-18
+
+### Added
+- **v2 execution now trades the Wheel** (as a defined-risk put credit spread) — the first step in broadening the engine from a single-setup sniper to a multi-strategy book. The entry source is generalized: it reads the latest brief for **every eligible strategy** (`exec_config.eligible_strategies`, now `inflection,wheel`) and maps each to the credit structure the engine trades — inflection → direction-locked vertical, **wheel → short-put-vertical** (the small-account "wheel"; a naked CSP can't be sized at $10k, the put credit spread can). All existing gates/caps/pricing/fills are reused unchanged. FR-SEY-5 validated (`scripts/fr-wheel-spread-study.mjs`, 1,388 wheel replay picks, budget-sized put credit spread, 30 DTE, 50% PT / 2× stop): **wheel win 79.8% / return-on-capital 8.2%**, vs inflection 75.1% / 6.1% and a random-day baseline of 74.3% / 3.7% — a real selection edge that beats the already-shipped inflection edge. Wheel composites (66–75) clear the 50 floor and all picks carry critic verdicts, so the existing filters apply cleanly. Migration 056 (preserves a user override).
+
+### Notes
+- The daily/weekly caps still apply across the **union** of strategies, so adding wheel widens the candidate pool (more days have something tradeable) without raising the trade rate — consistent with the "capital deployed in validated edges, not trades/day" goal. Iron condors (income) are the next strategy to add. `brief-entry-source` generalized to `loadBriefPickInputs(db, strategies, now)` + `briefPickToPickInput(pick, strategy, …)`; tests in `tests/brief-entry-source.test.ts`. Full suite: **614 passing**.
+
 ## [1.1.53] — 2026-06-18
 
 ### Changed

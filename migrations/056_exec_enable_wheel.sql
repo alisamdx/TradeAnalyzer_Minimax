@@ -1,0 +1,19 @@
+-- Migration 056: add WHEEL to the execution engine's eligible strategies (FR-SEY-5 validated).
+--
+-- Wheel picks are traded as the small-account, defined-risk "wheel": a budget-sized put credit
+-- spread (short-put-vertical) on a name the wheel scorer flagged as a good put-selling candidate.
+-- A naked CSP can't be sized at $10k (a $50 put = $5,000 cash-secured); the put credit spread is
+-- its defined-risk cousin and fits budget-width.
+--
+-- Validated 2026-06-18 (scripts/fr-wheel-spread-study.mjs) over 1,388 wheel replay picks, same
+-- budget-width short-put-vertical sim (30 DTE, 50% PT / 2x stop, $500 budget):
+--   wheel     win 79.8%  return/max-loss 8.2%
+--   inflection win 75.1% return/max-loss 6.1%   (already-shipped benchmark)
+--   baseline  win 74.3%  return/max-loss 3.7%   (same tickers, entry -180d = a nothing day)
+-- Wheel beats its own random-day baseline (+5.5 pts win, +4.5 pts return) — a real selection edge,
+-- not just the structural high win-rate of put spreads — and exceeds the inflection benchmark.
+-- Wheel composites (66-75) clear the min_composite_score floor (50) and all picks carry critic
+-- verdicts, so the existing gates apply cleanly. At worst neutral per FR-SEY-5 -> ship enabled.
+--
+-- Only rows still at the shipped default ('inflection') are changed, preserving a user override.
+UPDATE exec_config SET eligible_strategies = 'inflection,wheel' WHERE eligible_strategies = 'inflection';

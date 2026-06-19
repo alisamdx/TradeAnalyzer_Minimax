@@ -6,6 +6,7 @@ import {
   briefPickToPickInput,
   setupLegToLegSpec,
   loadInflectionPickInputs,
+  loadBriefPickInputs,
 } from '../src/main/execution/brief-entry-source.js';
 import type {
   BriefPick,
@@ -74,7 +75,7 @@ describe('setupLegToLegSpec', () => {
 
 describe('briefPickToPickInput', () => {
   it('maps an up-breakout pick to a short-put-vertical PickInput', () => {
-    const p = briefPickToPickInput(briefPick(), 42);
+    const p = briefPickToPickInput(briefPick(), 'inflection', 42);
     expect(p).not.toBeNull();
     expect(p!.ticker).toBe('AAA');
     expect(p!.strategy).toBe('inflection');
@@ -91,45 +92,60 @@ describe('briefPickToPickInput', () => {
 
   it('locks a down-breakout to the short-call-vertical', () => {
     const scores = [score('short-call-vertical', {}, {}, [leg('call', 'sell', 100), leg('call', 'buy', 105)])];
-    const p = briefPickToPickInput(briefPick({ breakoutDirection: 'down' }, scores), null);
+    const p = briefPickToPickInput(briefPick({ breakoutDirection: 'down' }, scores), 'inflection', null);
     expect(p!.structure).toBe('short-call-vertical');
     expect(p!.legs.map((l) => l.right)).toEqual(['C', 'C']);
   });
 
   it('maps the critic verdict (pass/caution/flag/null)', () => {
-    expect(briefPickToPickInput(briefPick({ criticVerdict: critic('caution') }), null)!.criticVerdict).toBe('caution');
-    expect(briefPickToPickInput(briefPick({ criticVerdict: critic('flag') }), null)!.criticVerdict).toBe('flag');
-    expect(briefPickToPickInput(briefPick({ criticVerdict: null }), null)!.criticVerdict).toBeNull();
+    expect(briefPickToPickInput(briefPick({ criticVerdict: critic('caution') }), 'inflection', null)!.criticVerdict).toBe('caution');
+    expect(briefPickToPickInput(briefPick({ criticVerdict: critic('flag') }), 'inflection', null)!.criticVerdict).toBe('flag');
+    expect(briefPickToPickInput(briefPick({ criticVerdict: null }), 'inflection', null)!.criticVerdict).toBeNull();
   });
 
   it('flags earnings before expiry when an earnings date falls on/before the expiry', () => {
-    expect(briefPickToPickInput(briefPick(), null, { nextEarningsDate: '2026-07-10' })!.earningsBeforeExpiry).toBe(true);
-    expect(briefPickToPickInput(briefPick(), null, { nextEarningsDate: '2026-08-01' })!.earningsBeforeExpiry).toBe(false);
+    expect(briefPickToPickInput(briefPick(), 'inflection', null,{ nextEarningsDate: '2026-07-10' })!.earningsBeforeExpiry).toBe(true);
+    expect(briefPickToPickInput(briefPick(), 'inflection', null,{ nextEarningsDate: '2026-08-01' })!.earningsBeforeExpiry).toBe(false);
   });
 
   it('marks liquidity inadequate on a low lab liquidityScore', () => {
     const scores = [score('short-put-vertical', {}, { liquidityScore: 4 })];
-    expect(briefPickToPickInput(briefPick({}, scores), null)!.hasAdequateLiquidity).toBe(false);
+    expect(briefPickToPickInput(briefPick({}, scores), 'inflection', null)!.hasAdequateLiquidity).toBe(false);
   });
 
   it('marks liquidity inadequate when a leg has no two-sided quote', () => {
     const scores = [score('short-put-vertical', {}, {}, [leg('put', 'sell', 100, { bid: 0 }), leg('put', 'buy', 95)])];
-    expect(briefPickToPickInput(briefPick({}, scores), null)!.hasAdequateLiquidity).toBe(false);
+    expect(briefPickToPickInput(briefPick({}, scores), 'inflection', null)!.hasAdequateLiquidity).toBe(false);
   });
 
   it('returns null when the setup is unavailable', () => {
     const scores = [score('short-put-vertical', { unavailableReason: 'no chain' })];
-    expect(briefPickToPickInput(briefPick({}, scores), null)).toBeNull();
+    expect(briefPickToPickInput(briefPick({}, scores), 'inflection', null)).toBeNull();
   });
 
   it('returns null when max loss is unbounded/absent', () => {
     const scores = [score('short-put-vertical', { maxLoss: null })];
-    expect(briefPickToPickInput(briefPick({}, scores), null)).toBeNull();
+    expect(briefPickToPickInput(briefPick({}, scores), 'inflection', null)).toBeNull();
   });
 
   it('returns null when there is no inflection structure in the scores', () => {
     const scores = [score('iron-condor')];
-    expect(briefPickToPickInput(briefPick({}, scores), null)).toBeNull();
+    expect(briefPickToPickInput(briefPick({}, scores), 'inflection', null)).toBeNull();
+  });
+
+  it('maps a wheel pick to the defined-risk short-put-vertical', () => {
+    // A wheel pick carries a short-put-vertical in its lab result; trade it as a put credit spread.
+    const p = briefPickToPickInput(briefPick({ breakoutDirection: undefined }), 'wheel', 7);
+    expect(p).not.toBeNull();
+    expect(p!.strategy).toBe('wheel');
+    expect(p!.structure).toBe('short-put-vertical');
+    expect(p!.legs.map((l) => l.right)).toEqual(['P', 'P']);
+    expect(p!.maxLossPerContract).toBe(400);
+  });
+
+  it('returns null for a wheel pick with no short-put-vertical setup', () => {
+    const scores = [score('short-naked-put')]; // wheel's native structure, not a spread
+    expect(briefPickToPickInput(briefPick({}, scores), 'wheel', null)).toBeNull();
   });
 });
 
@@ -182,5 +198,37 @@ describe('loadInflectionPickInputs', () => {
       d.prepare("INSERT INTO daily_briefs (generated_at, valid_until, strategy, picks, run_meta) VALUES ('2026-06-15T20:30:00Z', '2026-06-16T13:30:00Z', 'inflection', 'not json', '{}')").run().lastInsertRowid
     );
     expect(loadInflectionPickInputs(d, NOW)).toEqual({ briefId: id, picks: [] });
+  });
+});
+
+describe('loadBriefPickInputs (multi-strategy)', () => {
+  function db(): DbHandle {
+    const d = openDatabase(':memory:');
+    runMigrations(d, MIGRATIONS_DIR);
+    return d;
+  }
+  function insert(d: DbHandle, strategy: string, picks: BriefPick[]): number {
+    return Number(
+      d.prepare("INSERT INTO daily_briefs (generated_at, valid_until, strategy, picks, run_meta) VALUES ('2026-06-15T20:30:00Z', '2026-06-16T13:30:00Z', ?, ?, '{}')")
+        .run(strategy, JSON.stringify(picks)).lastInsertRowid
+    );
+  }
+
+  it('pulls picks from every eligible strategy, tagging each with its strategy', () => {
+    const d = db();
+    insert(d, 'inflection', [briefPick({ ticker: 'INF' })]);
+    insert(d, 'wheel', [briefPick({ ticker: 'WHL', breakoutDirection: undefined })]);
+    const { picks } = loadBriefPickInputs(d, ['inflection', 'wheel'], NOW);
+    const byTicker = Object.fromEntries(picks.map((p) => [p.ticker, p.strategy]));
+    expect(byTicker).toEqual({ INF: 'inflection', WHL: 'wheel' });
+    expect(picks.every((p) => p.structure === 'short-put-vertical')).toBe(true);
+  });
+
+  it('only loads the requested strategies (inflection-only = today default)', () => {
+    const d = db();
+    insert(d, 'inflection', [briefPick({ ticker: 'INF' })]);
+    insert(d, 'wheel', [briefPick({ ticker: 'WHL', breakoutDirection: undefined })]);
+    const { picks } = loadBriefPickInputs(d, ['inflection'], NOW);
+    expect(picks.map((p) => p.ticker)).toEqual(['INF']);
   });
 });

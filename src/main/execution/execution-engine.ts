@@ -15,7 +15,7 @@ import { EntryPolicy, type EntryOutcome, type PickInput } from './entry-policy.j
 import { ExitPolicy } from './exit-policy.js';
 import { ManagementLoop } from './position-manager.js';
 import { ExecutionCore, type CoreEvent, type CoreHealth, type StartResult } from './execution-core.js';
-import { loadInflectionPickInputs } from './brief-entry-source.js';
+import { loadBriefPickInputs } from './brief-entry-source.js';
 
 export interface ExecutionEngineOptions {
   holidays?: ReadonlySet<string>;
@@ -94,7 +94,9 @@ export class ExecutionEngine {
    *  price. No-op when the broker is disconnected or no brief/picks exist. */
   generateEntriesFromLatestBrief(now: Date = this.now()): Promise<EntryOutcome[]> {
     if (!this.broker.isConnected()) return Promise.resolve([]);
-    const { picks } = loadInflectionPickInputs(this.db, now);
+    // Pull picks from every eligible strategy's latest brief (inflection at launch; wheel etc.
+    // once enabled in eligibleStrategies). EntryPolicy then filters + caps across the union.
+    const { picks } = loadBriefPickInputs(this.db, this.governor.getConfig().eligibleStrategies, now);
     if (picks.length === 0) return Promise.resolve([]);
     return this.entryPolicy.generateEntries(picks, this.broker, now);
   }
