@@ -147,6 +147,26 @@ describe('briefPickToPickInput', () => {
     const scores = [score('short-naked-put')]; // wheel's native structure, not a spread
     expect(briefPickToPickInput(briefPick({}, scores), 'wheel', null)).toBeNull();
   });
+
+  it('maps an income pick to a 4-leg iron condor', () => {
+    const icLegs = [
+      leg('put', 'sell', 95), leg('put', 'buy', 90),
+      leg('call', 'sell', 110), leg('call', 'buy', 115),
+    ];
+    const scores = [score('iron-condor', { maxLoss: -450 }, {}, icLegs)];
+    const p = briefPickToPickInput(briefPick({}, scores), 'income', 9);
+    expect(p).not.toBeNull();
+    expect(p!.strategy).toBe('income');
+    expect(p!.structure).toBe('iron-condor');
+    expect(p!.legs).toHaveLength(4);
+    expect(p!.legs.map((l) => `${l.action}${l.right}`)).toEqual(['sellP', 'buyP', 'sellC', 'buyC']);
+    expect(p!.maxLossPerContract).toBe(450);
+  });
+
+  it('returns null for an income pick with no iron-condor setup', () => {
+    const scores = [score('short-strangle')]; // undefined-risk; not what the engine trades
+    expect(briefPickToPickInput(briefPick({}, scores), 'income', null)).toBeNull();
+  });
 });
 
 describe('loadInflectionPickInputs', () => {

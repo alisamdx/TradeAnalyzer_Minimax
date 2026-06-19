@@ -24,6 +24,7 @@ const CONFIG: ExecConfig = {
   maxNewEntriesPerWeek: 3,
   avoidEarningsBeforeExpiry: true,
   maxComboSpreadPct: 0,
+  minCompositeByStrategy: {},
   entryWindowStart: '10:00',
   entryWindowEnd: '15:00',
   repriceTolerancePct: 10,

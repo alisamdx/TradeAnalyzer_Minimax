@@ -60,6 +60,13 @@ export interface MapPickOptions {
 // Strategies traded as a defined-risk put credit spread (short-put-vertical) — the small-account
 // premium-selling vehicle. Their lab result already carries a (budget-sized) short-put-vertical.
 const PUT_CREDIT_SPREAD_STRATEGIES = new Set(['wheel']);
+// Strategies traded as a defined-risk iron condor (4-leg, budget-sized wings) — neutral/high-IV income.
+const IRON_CONDOR_STRATEGIES = new Set(['income']);
+
+/** Find a viable (constructible, defined-risk) lab score for `slug`. */
+function viableSlug(scores: StrategyScore[], slug: string): StrategyScore | null {
+  return scores.find((s) => s.slug === slug && s.setup && !s.setup.unavailableReason && s.setup.maxLoss != null) ?? null;
+}
 
 /** The Strategy Lab score the engine trades for `strategy` on this pick (null = none viable). */
 function chosenScore(pick: BriefPick, strategy: string): StrategyScore | null {
@@ -71,13 +78,8 @@ function chosenScore(pick: BriefPick, strategy: string): StrategyScore | null {
     const c = pickRelevantStructure(scores, 'inflection', pick.breakoutDirection);
     return c && (c.slug === 'short-put-vertical' || c.slug === 'short-call-vertical') ? c : null;
   }
-  if (PUT_CREDIT_SPREAD_STRATEGIES.has(strategy)) {
-    return (
-      scores.find(
-        (s) => s.slug === 'short-put-vertical' && s.setup && !s.setup.unavailableReason && s.setup.maxLoss != null
-      ) ?? null
-    );
-  }
+  if (PUT_CREDIT_SPREAD_STRATEGIES.has(strategy)) return viableSlug(scores, 'short-put-vertical');
+  if (IRON_CONDOR_STRATEGIES.has(strategy)) return viableSlug(scores, 'iron-condor');
   return null;
 }
 

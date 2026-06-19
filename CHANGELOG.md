@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.55] — 2026-06-18
+
+### Added
+- **v2 execution now trades Iron Condors** (income) — the neutral, high-IV, two-sided theta workhorse, and the second strategy in the multi-strategy book. New 4-leg `iron-condor` `ExecStructure`; income picks map to the lab's iron-condor setup. **Budget-width extended to the condor**: each long wing is sized to the per-trade budget via the existing per-wing selector, so a condor that was $2.7k–$12.6k max loss (today's income brief) becomes ≤ budget (~$400). The exit policy (credit + DTE based) already handled it with no changes. FR-SEY-5 validated (`scripts/fr-iron-condor-study.mjs`, 1,397 income replay picks, budget-sized IC, 0.16Δ shorts, 30 DTE, 50% PT / 2× stop): **win 82.3% / return-on-capital 5.7% / avg max loss $403**, vs a random-day baseline of 75.4% / 1.9% — a real edge and the highest win rate of any strategy. Migration 057.
+- **Per-strategy composite floors** (`exec_config.min_composite_by_strategy`, JSON `{strategy: floor}`). A single global `min_composite_score` is wrong for a multi-strategy book — composites aren't comparable across strategies. Income scores on a lower scale (replay picks all < 50) and composite isn't predictive for condors, so the inflection-calibrated 50 floor would gate out **every** income pick; income's floor is set to 0 (the validated population). Strategies without an override fall back to the global floor (inflection/wheel unchanged).
+
+### Notes
+- `eligible_strategies` is now `inflection,wheel,income`. Caps still bind across the union (the engine takes its best 1/day, 3/week), so income adds neutral-market coverage without raising the trade rate. Iron condor exit/order/sizing reused the existing structure-agnostic machinery (4-leg BAG, credit-based exits). Tests: income→IC mapping, per-strategy floor round-trip; `tests/{brief-entry-source,entry-policy}.test.ts`. Full suite: **617 passing**.
+
 ## [1.1.54] — 2026-06-18
 
 ### Added

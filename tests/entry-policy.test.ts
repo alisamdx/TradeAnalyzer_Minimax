@@ -43,7 +43,7 @@ describe('EntryPolicy.filterPick', () => {
   });
 
   const rejects: Array<[string, Partial<PickInput>, string]> = [
-    ['ineligible strategy', { strategy: 'wheel' }, 'strategy_not_eligible'],
+    ['ineligible strategy', { strategy: 'bullish' }, 'strategy_not_eligible'], // bullish (debit) isn't an eligible exec strategy
     ['flag verdict', { criticVerdict: 'flag' }, 'critic_verdict'],
     ['no verdict', { criticVerdict: null }, 'critic_verdict'],
     ['below composite', { compositeScore: 40 }, 'below_min_composite'], // gate is 50 (migration 052)
@@ -74,6 +74,17 @@ describe('EntryPolicy.filterPick', () => {
     const { policy, governor } = setup();
     const late = new Date('2026-06-15T21:00:00Z'); // 17:00 ET
     expect(policy.filterPick(pick(), governor.getConfig(), late).reason).toBe('outside_entry_window');
+  });
+
+  it('applies a per-strategy composite floor (income overrides the global floor)', () => {
+    const { policy, governor } = setup();
+    governor.updateConfig({ eligibleStrategies: ['inflection', 'income'], minCompositeByStrategy: { income: 0 } });
+    const cfg = governor.getConfig();
+    expect(cfg.minCompositeByStrategy.income).toBe(0); // round-trips through JSON config
+    // income floor 0 → a low-composite income pick clears the composite gate
+    expect(policy.filterPick(pick({ strategy: 'income', compositeScore: 10 }), cfg, NOW).reason).not.toBe('below_min_composite');
+    // inflection still uses the global 50 floor
+    expect(policy.filterPick(pick({ compositeScore: 10 }), cfg, NOW).reason).toBe('below_min_composite');
   });
 });
 

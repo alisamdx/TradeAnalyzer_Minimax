@@ -37,7 +37,7 @@ describe('RiskGovernor — config', () => {
     const c = gov.getConfig();
     expect(c.capitalCeiling).toBe(10000);
     expect(c.maxRiskPerTradePct).toBe(5);
-    expect(c.eligibleStrategies).toEqual(['inflection']);
+    expect(c.eligibleStrategies).toEqual(['inflection', 'wheel', 'income']);
     expect(c.maxPositionsPerStrategy).toBeNull();
   });
 

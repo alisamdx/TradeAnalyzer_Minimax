@@ -2154,7 +2154,7 @@ export type ExecutionMode = 'paper' | 'live';
 export type EngineState = 'running' | 'stopped' | 'paused' | 'kill_tripped';
 
 /** Defined-risk structures eligible in v2.0 (00-overview §0.4). */
-export type ExecStructure = 'short-put-vertical' | 'short-call-vertical' | 'csp';
+export type ExecStructure = 'short-put-vertical' | 'short-call-vertical' | 'csp' | 'iron-condor';
 
 /** A single persisted option leg of a structure. */
 export interface ExecLeg {
@@ -2188,7 +2188,8 @@ export interface ExecConfig {
   // to the per-trade budget so it's sizeable on a small account — see docs/formulas.md#budget-width)
   budgetWidthEnabled: boolean;
   // entry policy (§3.6)
-  minCompositeScore: number;
+  minCompositeScore: number;                 // global floor; per-strategy override below
+  minCompositeByStrategy: Record<string, number>; // {strategy: floor} — overrides the global floor (composites aren't comparable across strategies)
   maxNewEntriesPerDay: number;
   maxNewEntriesPerWeek: number;
   avoidEarningsBeforeExpiry: boolean;

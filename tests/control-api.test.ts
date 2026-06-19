@@ -71,7 +71,7 @@ describe('ExecutionControlApi — reads', () => {
     const { api } = setup();
     const cfg = (await api.inject({ method: 'GET', url: '/exec/config', headers: AUTH })).json();
     expect(cfg.capitalCeiling).toBe(10000);
-    expect(cfg.eligibleStrategies).toEqual(['inflection']);
+    expect(cfg.eligibleStrategies).toEqual(['inflection', 'wheel', 'income']);
     const risk = (await api.inject({ method: 'GET', url: '/exec/risk', headers: AUTH })).json();
     expect(risk.engineState).toBe('stopped');
   });

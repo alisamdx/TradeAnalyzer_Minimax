@@ -45,7 +45,7 @@ describe('exec_* schema (migration 045)', () => {
     expect(row.daily_loss_trip_pct).toBe(10);
     expect(row.max_positions_per_ticker).toBe(1);
     expect(row.max_positions_per_strategy).toBeNull();
-    expect(row.eligible_strategies).toBe('inflection');
+    expect(row.eligible_strategies).toBe('inflection,wheel,income'); // wheel (056) + income (057) enabled
     expect(row.proposal_shelf_life_min).toBe(120);
   });
 

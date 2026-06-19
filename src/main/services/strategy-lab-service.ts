@@ -352,10 +352,13 @@ export function findByDelta(
   return null;
 }
 
-// Short verticals whose hedge leg can be sized to a risk budget instead of a fixed delta
-// (v2 execution: small-account spreads must fit the per-trade budget — a 0.30/0.15Δ vertical
-// on a high-priced/high-IV name is $60 wide and un-sizeable at $10k/5%). see docs/formulas.md#budget-width
-const BUDGET_WIDTH_SLUGS = new Set(['short-put-vertical', 'short-call-vertical']);
+// Credit structures whose buy/hedge leg(s) can be sized to a risk budget instead of a fixed delta
+// (v2 execution: small-account spreads must fit the per-trade budget — a 0.30/0.15Δ vertical on a
+// high-priced/high-IV name is $60 wide and un-sizeable at $10k/5%). For the iron condor each long
+// wing matches its same-side short in the build loop, so the same per-wing selector applies — each
+// wing sized ≤ budget makes the condor's max loss ≤ budget (conservative: the other wing's credit
+// further offsets it). see docs/formulas.md#budget-width
+const BUDGET_WIDTH_SLUGS = new Set(['short-put-vertical', 'short-call-vertical', 'iron-condor']);
 
 /**
  * Risk-budget-driven hedge-leg selection for short verticals. Picks the WIDEST long strike

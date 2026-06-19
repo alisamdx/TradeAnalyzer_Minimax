@@ -33,6 +33,7 @@ interface ConfigRow {
   max_new_entries_per_week: number;
   avoid_earnings_before_expiry: number;
   max_combo_spread_pct: number;
+  min_composite_by_strategy: string;
   entry_window_start: string;
   entry_window_end: string;
   reprice_tolerance_pct: number;
@@ -78,6 +79,7 @@ const CONFIG_COLUMN: Record<keyof ExecConfig, string> = {
   maxNewEntriesPerWeek: 'max_new_entries_per_week',
   avoidEarningsBeforeExpiry: 'avoid_earnings_before_expiry',
   maxComboSpreadPct: 'max_combo_spread_pct',
+  minCompositeByStrategy: 'min_composite_by_strategy',
   entryWindowStart: 'entry_window_start',
   entryWindowEnd: 'entry_window_end',
   repriceTolerancePct: 'reprice_tolerance_pct',
@@ -90,6 +92,18 @@ const CONFIG_COLUMN: Record<keyof ExecConfig, string> = {
   timeExitMode: 'time_exit_mode',
   updatedAt: 'updated_at',
 };
+
+/** Parse the per-strategy composite-floor JSON ({strategy: number}); {} on any malformed input. */
+function parseStrategyFloors(json: string): Record<string, number> {
+  try {
+    const obj = JSON.parse(json || '{}') as Record<string, unknown>;
+    const out: Record<string, number> = {};
+    for (const [k, v] of Object.entries(obj)) if (typeof v === 'number') out[k] = v;
+    return out;
+  } catch {
+    return {};
+  }
+}
 
 export interface AuditOptions {
   refTable?: string;
@@ -127,6 +141,7 @@ export class RiskGovernor {
       maxNewEntriesPerWeek: r.max_new_entries_per_week,
       avoidEarningsBeforeExpiry: r.avoid_earnings_before_expiry === 1,
       maxComboSpreadPct: r.max_combo_spread_pct,
+      minCompositeByStrategy: parseStrategyFloors(r.min_composite_by_strategy),
       entryWindowStart: r.entry_window_start,
       entryWindowEnd: r.entry_window_end,
       repriceTolerancePct: r.reprice_tolerance_pct,
@@ -150,6 +165,7 @@ export class RiskGovernor {
       if (!col) continue;
       cols.push(`${col} = ?`);
       if (key === 'eligibleStrategies') vals.push((value as string[]).join(','));
+      else if (key === 'minCompositeByStrategy') vals.push(JSON.stringify(value ?? {}));
       else if (typeof value === 'boolean') vals.push(value ? 1 : 0);
       else vals.push(value as string | number | null);
     }

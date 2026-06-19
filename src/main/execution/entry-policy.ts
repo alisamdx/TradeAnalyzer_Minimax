@@ -54,7 +54,10 @@ export class EntryPolicy {
       if (dir && config.inflectionDirection !== 'both' && config.inflectionDirection !== dir) return rej('inflection_direction');
     }
     if (pick.criticVerdict !== 'pass' && pick.criticVerdict !== 'caution') return rej('critic_verdict');
-    if (pick.compositeScore < config.minCompositeScore) return rej('below_min_composite');
+    // Per-strategy composite floor (composites aren't comparable across strategies); falls back
+    // to the global floor when a strategy has no override.
+    const floor = config.minCompositeByStrategy[pick.strategy] ?? config.minCompositeScore;
+    if (pick.compositeScore < floor) return rej('below_min_composite');
     if (!pick.hasAdequateLiquidity) return rej('inadequate_liquidity');
     if (config.avoidEarningsBeforeExpiry && pick.earningsBeforeExpiry) return rej('earnings_before_expiry');
     const mins = etMinutesOfDay(now);
