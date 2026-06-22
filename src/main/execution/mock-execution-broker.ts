@@ -18,6 +18,7 @@ import type {
   OrderAck,
   OrderRequest,
   OrderStatusUpdate,
+  PermissionCheck,
   QualifiedContract,
 } from './execution-broker.js';
 
@@ -133,6 +134,11 @@ export class MockExecutionBroker implements ExecutionBroker {
 
   getBuyingPower(): Promise<BuyingPower> {
     return Promise.resolve({ available: this.buyingPower, total: this.buyingPower, currency: 'USD' });
+  }
+
+  /** A simulator always has full permissions — paper/mock never models a broker entitlement. */
+  checkSpreadPermission(): Promise<PermissionCheck> {
+    return Promise.resolve({ ok: true, code: 'ok', message: 'mock broker: spread permission simulated' });
   }
 
   // ── orders ──

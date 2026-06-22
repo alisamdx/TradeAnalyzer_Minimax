@@ -8,7 +8,11 @@ import {
   comboQuoteFromLegs,
   mapIbkrOrderStatus,
   isBenignNotice,
+  classifyPermissionError,
+  interpretWhatIfState,
+  pickProbeSpread,
 } from '../src/main/execution/ibkr-execution-broker.js';
+import type { ContractDetails } from '@stoqey/ib';
 import { resolveBrokerSettings } from '../src/main/execution/broker-factory.js';
 import type { LegSpec } from '../src/main/execution/execution-broker.js';
 
@@ -146,5 +150,53 @@ describe('broker factory — settings resolution', () => {
     const s = resolveBrokerSettings('paper', { TA_EXEC_BROKER: 'ibkr', TA_IBKR_HOST: '10.0.0.5', TA_IBKR_CLIENT_ID: '12' });
     expect(s.host).toBe('10.0.0.5');
     expect(s.clientId).toBe(12);
+  });
+});
+
+describe('IBKR adapter — spread-permission preflight', () => {
+  it('classifies a permission/eligibility error as a missing spread permission (fail-closed)', () => {
+    const r = classifyPermissionError(201, 'Order rejected - reason: Trading permissions not sufficient for this option spread');
+    expect(r.ok).toBe(false);
+    expect(r.code).toBe('no_spread_permission');
+    expect(r.message).toContain('201');
+  });
+  it('treats an unrelated order error as check_failed (still fail-closed)', () => {
+    const r = classifyPermissionError(478, 'Invalid combo leg conId');
+    expect(r.ok).toBe(false);
+    expect(r.code).toBe('check_failed');
+  });
+  it('reads a whatIf OrderState as permission granted, surfacing margin', () => {
+    const r = interpretWhatIfState({ initMarginAfter: 512.34 });
+    expect(r.ok).toBe(true);
+    expect(r.code).toBe('ok');
+    expect(r.message).toContain('512.34');
+  });
+  it('reads a margin-less whatIf OrderState as permission granted', () => {
+    expect(interpretWhatIfState(undefined).ok).toBe(true);
+  });
+
+  const det = (expiry: string, strike: number): ContractDetails =>
+    ({ contract: { symbol: 'SPY', lastTradeDateOrContractMonth: expiry, strike } } as ContractDetails);
+
+  it('picks a put credit spread (sell higher / buy lower) on the soonest two-strike expiry', () => {
+    const legs = pickProbeSpread('SPY', [
+      det('20260717', 400),
+      det('20260717', 410),
+      det('20260717', 420),
+      det('20260821', 400),
+    ]);
+    expect(legs).not.toBeNull();
+    expect(legs).toHaveLength(2);
+    const sell = legs![0]!;
+    const buy = legs![1]!;
+    expect(sell.action).toBe('sell');
+    expect(buy.action).toBe('buy');
+    expect(sell.strike).toBeGreaterThan(buy.strike);
+    expect(sell.expiry).toBe('2026-07-17'); // soonest, not the August expiry
+    expect(sell.right).toBe('P');
+  });
+  it('returns null when no expiry has two strikes', () => {
+    expect(pickProbeSpread('SPY', [det('20260717', 400)])).toBeNull();
+    expect(pickProbeSpread('SPY', [])).toBeNull();
   });
 });

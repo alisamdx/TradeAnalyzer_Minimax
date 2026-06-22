@@ -48,6 +48,18 @@ export interface BuyingPower {
   currency: string;
 }
 
+/**
+ * Result of the pre-live spread-permission preflight (§2.13). `ok: false` is fail-closed —
+ * the engine refuses to go live so a Level-1 / cash account can never sit silently getting
+ * every multi-leg order rejected. `code` distinguishes a confirmed missing permission from a
+ * check that could not complete (both refuse, but the operator sees why).
+ */
+export interface PermissionCheck {
+  ok: boolean;
+  code: 'ok' | 'no_spread_permission' | 'not_connected' | 'check_failed';
+  message: string;
+}
+
 /** A request to place a combo order. `clientOrderId` (COID) is the idempotency key. */
 export interface OrderRequest {
   clientOrderId: string;
@@ -124,6 +136,14 @@ export interface ExecutionBroker {
   qualifyContract(spec: LegSpec): Promise<QualifiedContract>;
   priceCombo(legs: LegSpec[]): Promise<ComboQuote>;
   getBuyingPower(): Promise<BuyingPower>;
+
+  /**
+   * Confirm the account can actually place a defined-risk option spread before the engine
+   * goes live (§2.13). Implementations may probe with a non-transmitted whatIf combo order.
+   * Must be fail-closed: any failure to confirm returns `ok: false`. An optional `probe`
+   * spread can be supplied; otherwise the implementation chooses a reference spread.
+   */
+  checkSpreadPermission(probe?: LegSpec[]): Promise<PermissionCheck>;
 
   // ── orders (idempotent on clientOrderId) ──
   placeOrder(o: OrderRequest): Promise<OrderAck>;

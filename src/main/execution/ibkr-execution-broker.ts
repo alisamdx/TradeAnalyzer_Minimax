@@ -24,6 +24,7 @@ import {
   TimeInForce,
   type Contract,
   type Order,
+  type OrderState,
   type OrderStatus,
   type ContractDetails,
   type Execution,
@@ -43,6 +44,7 @@ import type {
   OrderAck,
   OrderRequest,
   OrderStatusUpdate,
+  PermissionCheck,
   QualifiedContract,
 } from './execution-broker.js';
 
@@ -156,6 +158,69 @@ export function mapIbkrOrderStatus(status: string): BrokerOrderStatus {
  *  these specific notices are benign session/data-farm chatter (reqId === -1). */
 export function isBenignNotice(code: number): boolean {
   return [2104, 2106, 2107, 2108, 2158, 2119, 2100, 1102].includes(code);
+}
+
+// ── spread-permission preflight helpers (pure — unit tested) ─────────────────
+
+/**
+ * Classify an IBKR order error that came back from a whatIf permission probe. The TWS API
+ * does NOT expose the options trading level directly, so we probe with a non-transmitted
+ * combo order and read the response: an error here means the account can't place the spread.
+ * We match on the message (codes vary by build) and fail closed either way — a confirmed
+ * permission/eligibility error is `no_spread_permission`; anything else is `check_failed`.
+ */
+export function classifyPermissionError(code: number, message: string): PermissionCheck {
+  const looksPermission =
+    /permission|not permitted|not allowed|trading permission|option(s)? (trading )?level|spread|eligib|not authorized/i.test(
+      message
+    );
+  return looksPermission
+    ? { ok: false, code: 'no_spread_permission', message: `IBKR ${code}: ${message}` }
+    : { ok: false, code: 'check_failed', message: `IBKR ${code}: ${message}` };
+}
+
+/**
+ * Interpret the OrderState a whatIf combo returns. Reaching this point at all means IBKR
+ * accepted the order as placeable (permission failures arrive as an `error`, never here), so
+ * the spread is permitted; we surface the margin figure when present for the audit log.
+ */
+export function interpretWhatIfState(state: OrderState | undefined): PermissionCheck {
+  const margin = state?.initMarginAfter ?? state?.initMarginChange ?? state?.maintMarginAfter;
+  const detail = margin != null ? ` (init margin ${margin})` : '';
+  return { ok: true, code: 'ok', message: `whatIf accepted — spread permitted${detail}` };
+}
+
+/**
+ * Choose a probe spread from a reference underlying's option contract details: two adjacent
+ * strikes on the soonest expiry that has at least two (a put credit spread — sell the higher
+ * strike, buy the lower). Absolute moneyness is irrelevant — IBKR checks permission before
+ * margin, so any valid, qualifiable vertical exercises the entitlement. Returns null when no
+ * expiry has two strikes.
+ */
+export function pickProbeSpread(symbol: string, details: ContractDetails[]): LegSpec[] | null {
+  const byExpiry = new Map<string, Set<number>>();
+  for (const d of details) {
+    const c = d.contract;
+    if (!c) continue;
+    const exp = String(c.lastTradeDateOrContractMonth ?? '');
+    const strike = Number(c.strike ?? 0);
+    if (exp.length !== 8 || !(strike > 0)) continue;
+    if (!byExpiry.has(exp)) byExpiry.set(exp, new Set());
+    byExpiry.get(exp)!.add(strike);
+  }
+  for (const exp of [...byExpiry.keys()].sort()) {
+    const strikes = [...byExpiry.get(exp)!].sort((a, b) => a - b);
+    if (strikes.length < 2) continue;
+    const i = Math.floor(strikes.length / 2);
+    const buy = strikes[i - 1]!;
+    const sell = strikes[i]!; // higher strike → short put (credit)
+    const expiry = fromIbkrExpiry(exp);
+    return [
+      { ticker: symbol, right: 'P', action: 'sell', strike: sell, expiry, ratio: 1 },
+      { ticker: symbol, right: 'P', action: 'buy', strike: buy, expiry, ratio: 1 },
+    ];
+  }
+  return null;
 }
 
 // ── adapter ─────────────────────────────────────────────────────────────────
@@ -330,6 +395,91 @@ export class IbkrExecutionBroker implements ExecutionBroker {
     };
     const currency = rows[0]?.currency ?? this.currency;
     return { available: pick('AvailableFunds'), total: pick('NetLiquidation'), currency };
+  }
+
+  /**
+   * Pre-live spread-permission preflight (§2.13). Submits a non-transmitted whatIf combo
+   * order and reads the response: an OrderState back ⇒ the account can place spreads; an
+   * order error ⇒ it cannot (e.g. Options Level 1 / cash account). Fail-closed: not connected,
+   * no probe buildable, an error, or a timeout all return `ok: false`. The whatIf never rests
+   * an order, so it is safe to run on connect.
+   */
+  async checkSpreadPermission(probe?: LegSpec[]): Promise<PermissionCheck> {
+    if (!this.connected) return { ok: false, code: 'not_connected', message: 'broker not connected' };
+    try {
+      const legs = probe && probe.length >= 2 ? probe : await this.discoverProbeSpread();
+      if (!legs || legs.length < 2) {
+        return { ok: false, code: 'check_failed', message: 'could not build a probe spread' };
+      }
+      const bag = await this.buildComboContract(legs);
+      return await this.whatIfProbe(bag);
+    } catch (e) {
+      return { ok: false, code: 'check_failed', message: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
+  /** Discover a probe vertical on a reference underlying (default SPY, always listed). */
+  private async discoverProbeSpread(symbol = 'SPY'): Promise<LegSpec[] | null> {
+    const reqId = this.nextReqId();
+    const probe: Contract = {
+      symbol,
+      secType: SecType.OPT,
+      right: OptionType.Put,
+      exchange: this.exchange,
+      currency: this.currency,
+    };
+    const details = await this.request<ContractDetails>(reqId, () => this.ib.reqContractDetails(reqId, probe));
+    return pickProbeSpread(symbol, details);
+  }
+
+  /** Place a whatIf BAG order and resolve once IBKR replies with margin (permitted) or errors. */
+  private whatIfProbe(bag: Contract): Promise<PermissionCheck> {
+    return new Promise<PermissionCheck>((resolve) => {
+      const orderId = this.takeOrderId();
+      const { action, lmtPrice } = comboLimitOrderParams(0.05); // price irrelevant for whatIf
+      const order: Order = {
+        action,
+        orderType: OrderType.LMT,
+        totalQuantity: 1,
+        lmtPrice,
+        tif: TimeInForce.DAY,
+        transmit: true,
+        whatIf: true, // margin/eligibility check only — never executes
+        smartComboRoutingParams: [{ tag: 'NonGuaranteed', value: '1' }],
+        ...(this.accountId ? { account: this.accountId } : {}),
+      };
+
+      let done = false;
+      const finish = (r: PermissionCheck): void => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        this.ib.off(EventName.openOrder, onOpen);
+        this.ib.off(EventName.error, onErr);
+        resolve(r);
+      };
+      const onOpen = (oid: number, _c: Contract, _o: Order, state?: OrderState): void => {
+        if (oid === orderId) finish(interpretWhatIfState(state));
+      };
+      const onErr = (err: Error, code: ErrorCode | number, reqId: number): void => {
+        if (reqId !== orderId) return;
+        const num = Number(code);
+        if (isBenignNotice(num)) return; // ignore warnings; wait for the real verdict/timeout
+        finish(classifyPermissionError(num, err instanceof Error ? err.message : String(err)));
+      };
+      const timer = setTimeout(
+        () => finish({ ok: false, code: 'check_failed', message: 'permission preflight timed out' }),
+        this.reqTimeoutMs
+      );
+
+      this.ib.on(EventName.openOrder, onOpen);
+      this.ib.on(EventName.error, onErr);
+      try {
+        this.ib.placeOrder(orderId, bag, order);
+      } catch (e) {
+        finish({ ok: false, code: 'check_failed', message: e instanceof Error ? e.message : String(e) });
+      }
+    });
   }
 
   // ── orders (idempotent on clientOrderId — §2.8) ──

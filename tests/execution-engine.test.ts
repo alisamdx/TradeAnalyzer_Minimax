@@ -101,4 +101,46 @@ describe('ExecutionEngine', () => {
     expect(engine.getConfig().capitalCeiling).toBe(25000);
     expect(engine.getRiskState().engineState).toBe('stopped');
   });
+
+  describe('live spread-permission preflight', () => {
+    it('paper mode skips the preflight (broker is never probed)', async () => {
+      const { db, engine, broker } = setup();
+      let probed = false;
+      broker.checkSpreadPermission = () => {
+        probed = true;
+        return Promise.resolve({ ok: true as const, code: 'ok' as const, message: '' });
+      };
+      const r = await engine.startEngine();
+      expect(r.started).toBe(true);
+      expect(probed).toBe(false);
+      const audit = db.prepare("SELECT event FROM exec_audit_log WHERE event LIKE 'preflight%'").all();
+      expect(audit).toHaveLength(0);
+    });
+
+    it('live mode refuses to start when the account lacks spread permission', async () => {
+      const { db, engine, broker } = setup();
+      engine.updateConfig({ executionMode: 'live' });
+      broker.checkSpreadPermission = () =>
+        Promise.resolve({ ok: false as const, code: 'no_spread_permission' as const, message: 'options level 1' });
+      const r = await engine.startEngine();
+      expect(r.started).toBe(false);
+      expect(r.reason).toBe('spread_permission:no_spread_permission');
+      expect(engine.getState().engineState).toBe('stopped');
+      const failed = db.prepare("SELECT detail_json FROM exec_audit_log WHERE event = 'preflight_permission_failed'").get() as
+        | { detail_json: string }
+        | undefined;
+      expect(failed).toBeTruthy();
+      expect(failed!.detail_json).toContain('no_spread_permission');
+    });
+
+    it('live mode starts when the account has spread permission', async () => {
+      const { db, engine } = setup(); // MockExecutionBroker grants permission by default
+      engine.updateConfig({ executionMode: 'live' });
+      const r = await engine.startEngine();
+      expect(r.started).toBe(true);
+      expect(engine.getState().engineState).toBe('running');
+      const ok = db.prepare("SELECT 1 FROM exec_audit_log WHERE event = 'preflight_permission_ok'").get();
+      expect(ok).toBeTruthy();
+    });
+  });
 });

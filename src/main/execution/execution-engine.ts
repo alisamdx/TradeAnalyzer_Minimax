@@ -61,7 +61,30 @@ export class ExecutionEngine {
   }
 
   // ── lifecycle / control ──
-  startEngine(): Promise<StartResult> {
+  /**
+   * Start the engine. In LIVE mode, run a fail-closed broker preflight first: confirm the
+   * account can actually place a defined-risk spread (§2.13) so a Level-1 / cash account never
+   * goes live and sits silently getting every multi-leg order rejected. Paper is skipped — the
+   * paper account has full permissions and we don't want to add a probe to the soak path.
+   */
+  async startEngine(): Promise<StartResult> {
+    if (this.governor.getConfig().executionMode === 'live') {
+      if (!this.broker.isConnected()) {
+        try {
+          await this.broker.connect();
+        } catch (e) {
+          const reason = e instanceof Error ? e.message : String(e);
+          this.governor.audit('preflight_connect_failed', { detail: { reason } });
+          return { started: false, reason: `broker_connect_failed:${reason}` };
+        }
+      }
+      const perm = await this.broker.checkSpreadPermission();
+      if (!perm.ok) {
+        this.governor.audit('preflight_permission_failed', { detail: perm });
+        return { started: false, reason: `spread_permission:${perm.code}` };
+      }
+      this.governor.audit('preflight_permission_ok', { detail: perm });
+    }
     return this.core.startEngine();
   }
   stopEngine(): void {

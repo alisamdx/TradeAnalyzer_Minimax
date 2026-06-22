@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.57] — 2026-06-22
+
+### Added
+- **Live preflight: broker spread-permission gate (fail-closed).** Before the engine goes **live**, `startEngine()` now confirms the broker account can actually place a defined-risk option spread, and **refuses to start** if it can't — so a Level-1 / cash IBKR account can never go live and sit silently getting every multi-leg order rejected. The TWS API doesn't expose the options trading level directly, so the IBKR adapter probes with a **non-transmitted `whatIf` combo order** on a reference vertical (default SPY): an `OrderState` back ⇒ permitted; an order error ⇒ not permitted. Any failure to confirm (not connected, no probe buildable, permission/eligibility error, unrelated error, or timeout) is fail-closed (`started:false`, reason `spread_permission:<code>` / `broker_connect_failed:…`), with outcomes written to the audit log (`preflight_permission_ok` / `_failed`). New `ExecutionBroker.checkSpreadPermission()` (mock always grants — a simulator models no entitlement). Spec: `Requirements/v2-execution/02-risk-governor.md §2.13`.
+
+### Notes
+- **Context:** IBKR approved the *live* account for **Options Level 1 only** (covered calls / protective puts), which can't place the engine's credit spreads; the live flip is deferred pending an account upgrade to Level 3, and the operator is staying **paper-only** for now. This gate is defensive insurance for the eventual live flip. **PAPER IS UNAFFECTED** — the preflight runs in LIVE mode only (paper has full permissions and is left out of the soak path), and the broker still defaults to mock with IBKR strictly opt-in. New tests: engine paper-skips / live-refuses / live-allows; IBKR pure helpers (`classifyPermissionError`, `interpretWhatIfState`, `pickProbeSpread`). Full suite: **626 passing**.
+
 ## [1.1.56] — 2026-06-21
 
 ### Added

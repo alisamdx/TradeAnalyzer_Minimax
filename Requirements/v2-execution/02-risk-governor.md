@@ -296,3 +296,28 @@ trip/clear, engine-state change, reconciliation mismatch. It is the forensic rec
   defined-risk gate filters naked structures). Entry policy detail is `03-lifecycle`.
 - **CONFIRMED:** day's-loss basis = **realized + unrealized, halt-new-entries only**;
   kill-switch reset = **manual clear only**.
+
+## 2.13 Live preflight: spread-permission gate
+
+The engine's entire book is **defined-risk multi-leg spreads** (inflection vertical, wheel put
+credit spread, income iron condor). A broker account that lacks spread-level options permission
+(e.g. IBKR **Options Level 1**, or a cash account) will *accept the connection and then reject
+every combo order* — leaving the engine live but unable to trade, silently. To make that
+fail-closed, **`startEngine()` runs a permission preflight in LIVE mode only** (paper is skipped
+— the paper account always has full permissions, and we don't burden the soak path with a probe):
+
+1. Connect the broker if needed (a connect failure refuses to start, reason
+   `broker_connect_failed:…`).
+2. `ExecutionBroker.checkSpreadPermission()` confirms the account can place a spread. The TWS API
+   does **not** expose the options trading level directly, so the IBKR adapter probes with a
+   **non-transmitted `whatIf` combo order** on a reference vertical (default SPY, two adjacent
+   strikes on the soonest expiry): an `OrderState` back ⇒ permitted; an order **error** ⇒ not
+   permitted. The whatIf never rests an order.
+3. The check is **fail-closed**: not-connected, no probe buildable, a permission/eligibility
+   error, an unrelated order error, or a timeout all return `ok: false`, and the engine refuses
+   to start with reason `spread_permission:<code>` (`no_spread_permission` for a confirmed
+   entitlement gap, `check_failed` otherwise). Outcomes are written to the audit log
+   (`preflight_permission_ok` / `_failed` / `preflight_connect_failed`).
+
+The mock broker always grants permission (a simulator models no entitlement). This is defensive
+insurance for the eventual live flip; it has no effect on paper-mode operation.
