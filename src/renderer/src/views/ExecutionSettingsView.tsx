@@ -102,6 +102,12 @@ export function ExecutionSettingsView() {
 
       <Section title="Entry policy">
         <Num label="Min composite score" v={draft.minCompositeScore} on={v => set('minCompositeScore', v)} step={1} />
+        <StrategyFloors
+          strategies={draft.eligibleStrategiesText.split(',').map(s => s.trim()).filter(Boolean)}
+          floors={draft.minCompositeByStrategy}
+          globalFloor={draft.minCompositeScore}
+          onChange={m => set('minCompositeByStrategy', m)}
+        />
         <Num label="Max new entries / day" v={draft.maxNewEntriesPerDay} on={v => set('maxNewEntriesPerDay', v)} step={1} />
         <Num label="Max new entries / week" v={draft.maxNewEntriesPerWeek} on={v => set('maxNewEntriesPerWeek', v)} step={1} />
         <Num label="Proposal shelf-life (min)" v={draft.proposalShelfLifeMin} on={v => set('proposalShelfLifeMin', v)} step={1} />
@@ -177,6 +183,55 @@ function Field({ label, help, children }: { label: string; help?: string; childr
       </label>
       <div>{children}</div>
     </div>
+  );
+}
+
+// Per-strategy composite floors: {strategy: floor} overrides the global Min composite score
+// (composites aren't comparable across strategies). Blank = inherit the global floor.
+// EntryPolicy reads minCompositeByStrategy[strategy] ?? minCompositeScore.
+function StrategyFloors({
+  strategies,
+  floors,
+  globalFloor,
+  onChange,
+}: {
+  strategies: string[];
+  floors: Record<string, number>;
+  globalFloor: number;
+  onChange: (m: Record<string, number>) => void;
+}) {
+  // Show every eligible strategy plus any existing override key (so stale overrides are visible/removable).
+  const rows = Array.from(new Set([...strategies, ...Object.keys(floors)]));
+  if (rows.length === 0) return null;
+  const setFloor = (strategy: string, value: number | null) => {
+    const next = { ...floors };
+    if (value === null) delete next[strategy];
+    else next[strategy] = value;
+    onChange(next);
+  };
+  return (
+    <Field label="Per-strategy composite floors" help={`Overrides the global floor for one strategy. Blank = inherit global (${globalFloor}).`}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {rows.map(s => {
+          const stale = !strategies.includes(s);
+          return (
+            <div key={s} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ width: 110, fontSize: 13, color: stale ? 'var(--warning)' : undefined }}>
+                {s}{stale ? ' (not eligible)' : ''}
+              </span>
+              <input
+                type="number"
+                value={floors[s] ?? ''}
+                placeholder={String(globalFloor)}
+                step={1}
+                onChange={e => setFloor(s, e.target.value === '' ? null : Number(e.target.value))}
+                style={{ width: 100 }}
+              />
+            </div>
+          );
+        })}
+      </div>
+    </Field>
   );
 }
 

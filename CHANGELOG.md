@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.56] — 2026-06-21
+
+### Added
+- **Per-strategy composite floors are now editable in Execution Settings → Entry policy.** The `exec_config.min_composite_by_strategy` map (shipped v1.1.55) was migration-set only; it now has a UI editor — one floor input per eligible strategy (plus any stale override key, flagged "not eligible" so it can be removed). A blank input inherits the global **Min composite score** (shown as the placeholder); a value overrides it. Reads/writes the existing config field, so it round-trips through `getConfig`/`updateConfig` with no engine changes. This makes the income=0 floor (and any future per-strategy calibration) adjustable without a migration.
+
+### Notes
+- No behavior change to the engine — `EntryPolicy.filterPick` already used `minCompositeByStrategy[strategy] ?? minCompositeScore`. UI-only (renderer). The **liquidity gate** (`max_combo_spread_pct`) remains in the UI and **off** by default (FR-SEY-5: not backtestable). Full suite: **617 passing**.
+
 ## [1.1.55] — 2026-06-18
 
 ### Added
