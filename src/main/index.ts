@@ -512,6 +512,7 @@ app.whenReady().then(() => {
     dailyScheduleTime: '06:00',
     startupDelaySeconds: 300,    // 5 min — allow E*Trade auth to initialise
     runOnStartup: true,
+    afterCloseOnly: true,        // runs after the brief → skip in the lean intraday slot (spec 08 §4)
   });
 
   // Daily paper-trade price snapshots — runs after brief so today's prices are present.
@@ -521,6 +522,7 @@ app.whenReady().then(() => {
     dailyScheduleTime: '17:00',    // after price-gap-fill (16:00) + brief (16:30)
     startupDelaySeconds: 0,
     runOnStartup: false,
+    afterCloseOnly: true,          // forward perf tracking — skip in the lean intraday slot (spec 08 §4)
   });
 
   // LEAPS + CSP strategy screener
@@ -553,6 +555,7 @@ app.whenReady().then(() => {
     runOnStartup: true,
     startupDelaySeconds: 60,          // after E*Trade tokens load from keychain
     dailyScheduleTime: '16:00',       // default schedule time (schedule disabled by default)
+    afterCloseOnly: true,             // earnings dates are slow-moving → skip in the lean intraday slot (spec 08 §4)
     defaultConfig: { callDelayMs: 500 }, // conservative default — avoids E*Trade 429s
   });
 
@@ -566,6 +569,7 @@ app.whenReady().then(() => {
     dailyScheduleTime: '07:00',   // after the 06:00 wheel snapshot (schedule disabled by default)
     startupDelaySeconds: 0,
     runOnStartup: false,
+    afterCloseOnly: true,         // durable capture for future ROC → skip in the lean intraday slot (spec 08 §4)
     defaultConfig: { callDelayMs: 1100, maxTickers: 1500, captureWheel: true, captureIncome: true },
   });
 

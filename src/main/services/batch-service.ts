@@ -54,6 +54,7 @@ interface BatchJobRow {
   last_run_status: string | null;
   last_success_date: string | null;
   sequence_order: number;
+  after_close_only: number;
   config_json: string | null;
 }
 
@@ -133,6 +134,7 @@ export class BatchService {
       dailyScheduleEnabled?: boolean;
       runOnStartup?: boolean;
       startupDelaySeconds?: number;
+      afterCloseOnly?: boolean;
       defaultConfig?: Record<string, unknown>;
     },
   ): void {
@@ -142,6 +144,7 @@ export class BatchService {
     const scheduleEnabled     = (options?.dailyScheduleEnabled ?? true) ? 1 : 0;
     const runOnStartup        = options?.runOnStartup         ?? true ? 1 : 0;
     const startupDelaySecs    = options?.startupDelaySeconds  ?? 30;
+    const afterCloseOnly      = options?.afterCloseOnly ? 1 : 0;
     const configJson          = options?.defaultConfig ? JSON.stringify(options.defaultConfig) : null;
 
     // Determine sequence_order: explicit > MAX+1
@@ -149,12 +152,13 @@ export class BatchService {
       ? String(options.sequenceOrder)
       : `(SELECT COALESCE(MAX(sequence_order), 0) + 1 FROM batch_jobs)`;
 
+    // INSERT OR IGNORE = first install seeds these defaults; later startups preserve user edits.
     this.db.prepare(`
       INSERT OR IGNORE INTO batch_jobs
         (id, name, description, enabled, run_on_startup, startup_delay_seconds,
-         daily_schedule_enabled, daily_schedule_time, sequence_order, config_json)
-      VALUES (?, ?, ?, 1, ?, ?, ?, ?, ${seqOrderExpr}, ?)
-    `).run(id, handler.name, handler.description, runOnStartup, startupDelaySecs, scheduleEnabled, scheduleTime, configJson);
+         daily_schedule_enabled, daily_schedule_time, sequence_order, after_close_only, config_json)
+      VALUES (?, ?, ?, 1, ?, ?, ?, ?, ${seqOrderExpr}, ?, ?)
+    `).run(id, handler.name, handler.description, runOnStartup, startupDelaySecs, scheduleEnabled, scheduleTime, afterCloseOnly, configJson);
 
     // Backfill config_json if it is still NULL (handles upgrades).
     if (configJson !== null) {
@@ -489,8 +493,11 @@ export class BatchService {
 
   updateJobConfig(
     jobId: string,
-    patch: Partial<Pick<BatchJob, 'enabled' | 'runOnStartup' | 'startupDelaySeconds' | 'dailyScheduleEnabled' | 'dailyScheduleTime' | 'sequenceOrder' | 'config'>>
+    patch: Partial<Pick<BatchJob, 'enabled' | 'runOnStartup' | 'startupDelaySeconds' | 'dailyScheduleEnabled' | 'dailyScheduleTime' | 'sequenceOrder' | 'afterCloseOnly' | 'config'>>
   ): void {
+    if (patch.afterCloseOnly !== undefined) {
+      this.db.prepare(`UPDATE batch_jobs SET after_close_only = ? WHERE id = ?`).run(patch.afterCloseOnly ? 1 : 0, jobId);
+    }
     if (patch.enabled !== undefined) {
       this.db.prepare(`UPDATE batch_jobs SET enabled = ? WHERE id = ?`).run(patch.enabled ? 1 : 0, jobId);
     }
@@ -576,6 +583,7 @@ export class BatchService {
       lastRunStatus: (status === 'running' || status === 'success' || status === 'failed' || status === 'skipped') ? status : null,
       lastSuccessDate: row.last_success_date,
       sequenceOrder: row.sequence_order,
+      afterCloseOnly: row.after_close_only === 1,
       config: row.config_json ? (JSON.parse(row.config_json) as Record<string, unknown>) : {},
     };
   }
@@ -607,6 +615,18 @@ export class BatchService {
   /** Returns today's date in ET timezone as YYYY-MM-DD. */
   todayET(): string {
     return new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+  }
+
+  /** Freshness of the latest daily brief (spec 08 §5.4): is the most recent brief from today (ET)?
+   *  The execution engine acts only on a same-day brief, so this tells the operator at a glance
+   *  whether a fresh brief is available to trade. */
+  getBriefFreshness(): { generatedAt: string | null; etDate: string | null; isToday: boolean } {
+    const row = this.db
+      .prepare('SELECT generated_at FROM daily_briefs ORDER BY generated_at DESC LIMIT 1')
+      .get() as { generated_at: string } | undefined;
+    if (!row) return { generatedAt: null, etDate: null, isToday: false };
+    const etDate = new Date(row.generated_at).toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+    return { generatedAt: row.generated_at, etDate, isToday: etDate === this.todayET() };
   }
 
   /** Returns the current time in ET as 'HH:MM'. */

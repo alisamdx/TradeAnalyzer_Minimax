@@ -379,6 +379,7 @@ export function BatchView() {
   const [seqTotal, setSeqTotal] = useState(0);
   const [seqCurrent, setSeqCurrent] = useState(0); // 1-based index of running job
   const seqActiveRef = useRef(false);               // sync ref — checked inside async loop
+  const [freshness, setFreshness] = useState<{ generatedAt: string | null; isToday: boolean } | null>(null);
 
   const loadJobs = useCallback(async () => {
     try {
@@ -391,10 +392,17 @@ export function BatchView() {
       // Track running job
       const running = list.find(j => j.lastRunStatus === 'running');
       setRunningJobId(running?.id ?? null);
+      try { setFreshness(await window.api.batch.briefFreshness()); } catch { /* non-fatal */ }
     } catch (err) {
       console.error('[BatchView] loadJobs error:', err);
     }
   }, [selectedJobId]);
+
+  // Toggle whether a sub-job is after-close-only (skipped by the lean intraday slot) — spec 08 §4.
+  const toggleAfterClose = useCallback(async (job: BatchJob) => {
+    await window.api.batch.updateJob(job.id, { afterCloseOnly: !job.afterCloseOnly });
+    await loadJobs();
+  }, [loadJobs]);
 
   const loadRuns = useCallback(async (jobId: string) => {
     try {
@@ -635,10 +643,26 @@ export function BatchView() {
         </div>
       )}
 
+      {/* ── Brief-freshness banner (spec 08 §5.4): does the engine have a fresh same-day brief? ── */}
+      {freshness && (
+        <div style={{
+          background: freshness.isToday ? 'rgba(46,204,113,0.10)' : 'rgba(243,156,18,0.10)',
+          border: `1px solid ${freshness.isToday ? '#2ecc71' : '#f39c12'}`,
+          borderRadius: 8, padding: '8px 14px', marginBottom: 16, fontSize: 13,
+          color: freshness.isToday ? '#2ecc71' : '#f39c12',
+        }}>
+          {freshness.generatedAt
+            ? (freshness.isToday
+                ? `✓ Today's brief committed ${new Date(freshness.generatedAt).toLocaleString()} — the engine has a fresh brief to act on.`
+                : `⚠ Latest brief is ${new Date(freshness.generatedAt).toLocaleString()} (not today). The engine will not act until today's brief commits.`)
+            : 'No brief found yet.'}
+        </div>
+      )}
+
       {/* ── Top panel: job table ── */}
       <div style={{ background: '#131b2e', borderRadius: 10, border: '1px solid #2d3748', marginBottom: 24 }}>
         <div style={{ padding: '12px 16px', borderBottom: '1px solid #2d3748', color: '#89b4fa', fontWeight: 600, fontSize: 13 }}>
-          Registered Jobs
+          Registered Jobs <span style={{ color: '#95a5a6', fontWeight: 400 }}>· the lean ~10:15 slot skips “After-close” jobs</span>
         </div>
         {/* Fixed height — all three panels keep constant size so the layout never shifts */}
         <div style={{ height: 300, overflowY: 'auto' }}>
@@ -655,6 +679,7 @@ export function BatchView() {
                 <th>Description</th>
                 <th>Startup</th>
                 <th>Schedule</th>
+                <th>Slot</th>
                 <th>Status</th>
                 <th>Last Run</th>
                 <th>Actions</th>
@@ -697,6 +722,32 @@ export function BatchView() {
                       ) : job.dailyScheduleEnabled
                         ? <span style={{ color: '#89b4fa', fontSize: 11 }}>{job.dailyScheduleTime} ET</span>
                         : <span style={{ color: '#555', fontSize: 11 }}>off</span>}
+                    </td>
+                    <td onClick={e => e.stopPropagation()}>
+                      {isOrch ? (
+                        (() => {
+                          const cfg = job.config as Partial<OrchestratorJobConfig> | undefined;
+                          const slots = cfg?.scheduleSlots ?? [];
+                          const lean = cfg?.leanSlots ?? (slots.length > 1 ? slots.slice(0, -1) : []);
+                          return <span style={{ fontSize: 11, color: '#95a5a6' }} title="Slots that run lean (skip after-close-only jobs)">
+                            {lean.length ? `lean: ${lean.join(', ')}` : '—'}
+                          </span>;
+                        })()
+                      ) : (
+                        <button
+                          className="batch-btn"
+                          onClick={() => toggleAfterClose(job)}
+                          title={job.afterCloseOnly
+                            ? 'After-close only — runs in the full ~17:00 slot. Click to also run in the lean ~10:15 slot.'
+                            : 'Lean — runs in both the ~10:15 and ~17:00 slots. Click to defer to after-close only.'}
+                          style={{
+                            fontSize: 11, padding: '2px 8px',
+                            background: job.afterCloseOnly ? 'rgba(243,156,18,0.16)' : 'rgba(46,204,113,0.16)',
+                            color: job.afterCloseOnly ? '#f39c12' : '#2ecc71',
+                          }}>
+                          {job.afterCloseOnly ? 'After-close' : 'Lean'}
+                        </button>
+                      )}
                     </td>
                     <td><StatusBadge status={job.lastRunStatus} small /></td>
                     <td style={{ color: '#95a5a6', fontSize: 12 }}>{relativeTime(job.lastRunAt)}</td>

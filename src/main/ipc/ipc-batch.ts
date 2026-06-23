@@ -52,6 +52,12 @@ export function registerBatchIpc(
     wrap((jobId: string) => batchService.getRuns(jobId))
   );
 
+  // Latest daily-brief freshness (is the most recent brief from today, ET?) — spec 08 §5.4.
+  ipcMain.handle(
+    'batch:brief-freshness',
+    wrap(() => batchService.getBriefFreshness())
+  );
+
   // Trigger a job manually (fire-and-forget; returns immediately)
   ipcMain.handle(
     'batch:run-now',

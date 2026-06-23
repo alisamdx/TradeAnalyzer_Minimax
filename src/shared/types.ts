@@ -1522,6 +1522,9 @@ export interface BatchJob {
   lastRunStatus: 'running' | 'success' | 'failed' | 'skipped' | null;
   lastSuccessDate: string | null;
   sequenceOrder: number;
+  /** Runs only in the after-close (full) batch slot — skipped by the lean intraday slot because it
+   *  runs after the brief and can't contribute to it (spec 08 §4). Editable per-job in the Batch view. */
+  afterCloseOnly: boolean;
   /** Free-form per-job config. For daily-iv-update: { callDelayMs: number }. */
   config: Record<string, unknown>;
 }
@@ -1549,6 +1552,9 @@ export interface OrchestratorJobEntry {
 
 export interface OrchestratorJobConfig {
   scheduleSlots: string[];
+  /** Slot times ('HH:MM' ET) that run LEAN (skip after_close_only jobs). When omitted, the default
+   *  is every slot except the latest — the after-close slot runs everything (spec 08 §4). */
+  leanSlots?: string[];
   validateEtradeToken: boolean;
   emailOnStart: boolean;
   jobs: OrchestratorJobEntry[];

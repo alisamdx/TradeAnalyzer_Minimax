@@ -1083,6 +1083,7 @@ function buildApi() {
   const batch = {
     listJobs:   () => invoke<BatchJob[]>('batch:list-jobs'),
     listRuns:   (jobId: string) => invoke<BatchRun[]>('batch:list-runs', jobId),
+    briefFreshness: () => invoke<{ generatedAt: string | null; etDate: string | null; isToday: boolean }>('batch:brief-freshness'),
     runNow:     (jobId: string) => invoke<boolean>('batch:run-now', jobId),
     runNowSync: (jobId: string) => invoke<boolean>('batch:run-now-sync', jobId),
     cancel:     (jobId: string) => invoke<boolean>('batch:cancel', jobId),

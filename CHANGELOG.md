@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.59] — 2026-06-22
+
+### Added
+- **Lean intraday batch (spec 08 §4, #4).** The daily brief sits at position 8 in the job sequence; everything after it (options snapshot, paper snapshot, earnings refresh, options-premium history) runs *after* the brief commits and can't contribute to it. A new per-job flag **`batch_jobs.after_close_only`** lets the orchestrator's **lean ~10:15 slot skip that post-brief tail** while still running the brief's full upstream closure (jobs 2–8) — so the brief is **identical**, and the morning run is faster (the tail is options-API-heavy). The after-close ~17:00 slot runs everything.
+- **Slot lean-ness** is `OrchestratorJobConfig.leanSlots` (explicit) or the default — **every slot except the latest** (the after-close slot is the full run); manual/startup runs always do the full batch. Pure `isLeanSlot` helper.
+- **Batch view:** a per-job **Slot** column with a **Lean / After-close** toggle (re-classify a job without a code change), and a **brief-freshness banner** (`batch:brief-freshness`) showing whether the engine has a fresh same-day brief to act on.
+
+### Notes
+- Validation-exempt per FR-SEY-5 — the lean brief is bit-identical (same upstream job closure); only the post-brief housekeeping is deferred. The 4 tail jobs are seeded `after_close_only=1` (migration 059 UPDATE for existing installs; `registerJob({afterCloseOnly:true})` for fresh); user toggles persist via `INSERT OR IGNORE`. New tests (`tests/lean-batch.test.ts`): `isLeanSlot` cases, the per-job flag + lean filter expression, freshness. Full suite: **643 passing**. Still deferred: the Part D Trading Desk visual redesign (tabs + activity timeline).
+
 ## [1.1.58] — 2026-06-22
 
 ### Added

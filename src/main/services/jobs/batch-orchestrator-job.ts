@@ -13,6 +13,18 @@ import { isTradingDay } from '../iv-history-service.js';
 type TokenStatus = 'valid' | 'invalid';
 type EtradeCredsWithDate = OAuthCredentials & { tokenDate: string | null };
 
+/**
+ * Whether a schedule slot runs LEAN (skips after_close_only jobs) — pure + unit-tested.
+ * Explicit `leanSlots` wins; otherwise the default is every slot except the latest (the after-close
+ * slot runs everything). Manual / startup runs (no slotTime) are never lean — they do the full batch.
+ */
+export function isLeanSlot(slotTime: string | null, scheduleSlots: string[], leanSlots?: string[]): boolean {
+  if (!slotTime) return false;
+  if (Array.isArray(leanSlots)) return leanSlots.includes(slotTime);
+  const slots = [...(scheduleSlots ?? [])].sort();
+  return slots.length > 1 && slotTime !== slots[slots.length - 1];
+}
+
 export class BatchOrchestratorJob implements BatchJobHandler {
   readonly name = 'Batch Orchestrator';
   readonly description =
@@ -44,7 +56,11 @@ export class BatchOrchestratorJob implements BatchJobHandler {
     }
 
     const config = this.batchService.getOrchestratorConfig();
-    const enabledJobs = this.batchService.getSubJobs(config.jobs);
+    // Lean intraday slot (spec 08 §4): the ~10:15 morning slot skips after_close_only jobs (the
+    // post-brief tail) — the brief and its upstream closure still run, so the brief is identical.
+    // Manual/startup runs (no slotTime) and the after-close slot run the full set.
+    const lean = this._isLeanSlot(slotTime, config);
+    const enabledJobs = this.batchService.getSubJobs(config.jobs).filter(j => !lean || !j.afterCloseOnly);
     const total = enabledJobs.length;
 
     // ── 2. E*Trade token check ──────────────────────────────────────────────
@@ -148,6 +164,10 @@ export class BatchOrchestratorJob implements BatchJobHandler {
 
   // Jobs that succeeded within this window are skipped; older successes are re-run.
   private static readonly SKIP_WINDOW_MS = 90 * 60 * 1000;
+
+  private _isLeanSlot(slotTime: string | null, config: OrchestratorJobConfig): boolean {
+    return isLeanSlot(slotTime, config.scheduleSlots, config.leanSlots);
+  }
 
   private _isRecentSuccess(job: import('@shared/types.js').BatchJob, nowMs: number): boolean {
     return (

@@ -177,13 +177,16 @@ today's brief (it's already committed).
 all 12.** The deferred tail is options-API-heavy (9, 12), so skipping it in the morning is the free
 speedup that gets the operator trade-ready sooner — with **zero brief-quality loss**.
 
-### 4.2 Mechanism — configurable per-job flag
+### 4.2 Mechanism — configurable per-job flag — IMPLEMENTED (v1.1.59)
 
-- New per-job flag **`after_close_only`** (in `batch_jobs`; default `0`, set `1` for jobs 9–12).
-- The orchestrator's slots gain a **"lean" mode**: the ~10:15 slot **skips `after_close_only` jobs**;
-  the ~17:00 slot runs everything. Slot lean-ness lives in the orchestrator `config_json.scheduleSlots`
-  (e.g. `[{time:'10:15', lean:true}, {time:'17:00', lean:false}]`).
-- Editable from the Batch view (§5.4) so a job can be re-classified without a code change.
+- Per-job flag **`batch_jobs.after_close_only`** (migration 059; default `0`, set `1` for jobs 9–12
+  via the migration UPDATE for existing installs + `registerJob({afterCloseOnly:true})` for fresh).
+- The orchestrator runs a **lean filter per slot** (`isLeanSlot` pure helper): a lean slot skips
+  `after_close_only` jobs; the after-close slot runs everything. Slot lean-ness = `OrchestratorJobConfig.
+  leanSlots` (explicit) **or the default = every slot except the latest** (the after-close slot is the
+  full run). Manual/startup runs (no slotTime) always run the full batch.
+- Editable from the Batch view (§5.4) — a per-job **Lean / After-close** toggle (`batch:update-job`
+  with `afterCloseOnly`), so a job can be re-classified without a code change.
 
 ### 4.3 Guardrail
 
@@ -217,11 +220,12 @@ speed. Any future intra-upstream trimming changes brief output and must clear FR
 | 6 | **Positions** | All open positions. |
 | 7 | **Activity Log** | Full audit trail. |
 
-### 5.4 Batch view additions
-- Per-job **lean / after-close badge** reflecting `after_close_only`, **toggleable inline**.
-- **Brief-freshness banner**: "Today's brief: committed 10:17 ET ✓" / "not yet today" / "⚠ stale
-  (yesterday)" — at-a-glance whether the engine has a fresh brief to act on.
-- **Next-slot indicator**: lean (~10:15) vs full (~17:00) and what it will run.
+### 5.4 Batch view additions — IMPLEMENTED (v1.1.59)
+- Per-job **Lean / After-close** badge (a **Slot** column) reflecting `after_close_only`, **toggleable
+  inline**; the orchestrator row shows its lean slots.
+- **Brief-freshness banner** (`batch:brief-freshness`): "✓ Today's brief committed …" / "⚠ Latest brief
+  is … (not today)" — at-a-glance whether the engine has a fresh brief to act on.
+- (Not built: a dedicated next-slot-preview beyond the orchestrator row's lean-slot label.)
 
 ### 5.5 Daily activity timeline
 A horizontal "story of the day" at the top of the Live tab: market open/close markers, shaded entry
