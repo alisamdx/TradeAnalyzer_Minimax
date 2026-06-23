@@ -110,6 +110,18 @@ Reuses §2.8. The full path, with the idempotency and crash-safety points called
 
 Every transition is appended to `exec_audit_log`.
 
+### Boot reconciliation (force-stopped-on-boot)
+`engine_state` is **persisted** in `exec_risk_state`, but the **broker connection and the cycle
+loop are process-local** — they are created only by `startEngine()` (`broker.connect()` +
+`startLoop()`) and are **not** restored on a process restart. To avoid the engine showing
+`running`/`armed` after a relaunch while actually inert (no connection, no loop → silently no
+trades), app boot resets any persisted `running`/`paused` state to `stopped`
+(`RiskGovernor.forceStopOnBoot()`, audited as `engine_state { action: "boot_reset" }`). A tripped
+kill switch is left tripped (manual-clear only). The operator must explicitly **Start** after a
+restart, which reconnects the broker and restarts the loop. (Auto-resume-on-boot was considered and
+rejected as too surprising/risk-bearing for a trading engine — force-stopped is strictly more
+conservative.)
+
 ## 3.5 Failure handling (all fail-closed)
 
 | Failure | Behavior |

@@ -86,6 +86,40 @@ describe('RiskGovernor — engine state machine', () => {
     gov.tripKillSwitch('manual');
     expect(gov.getRiskState().killSwitchReason).toBe('daily_loss');
   });
+
+  it('forceStopOnBoot resets a persisted running state to stopped', () => {
+    const { gov } = setup();
+    gov.start();
+    expect(gov.getEngineState()).toBe('running');
+    expect(gov.forceStopOnBoot()).toBe(true);
+    expect(gov.getEngineState()).toBe('stopped');
+  });
+
+  it('forceStopOnBoot resets a persisted paused state to stopped', () => {
+    const { gov } = setup();
+    gov.start();
+    gov.pause();
+    expect(gov.getEngineState()).toBe('paused');
+    expect(gov.forceStopOnBoot()).toBe(true);
+    expect(gov.getEngineState()).toBe('stopped');
+  });
+
+  it('forceStopOnBoot is a no-op (returns false) when already stopped', () => {
+    const { gov } = setup();
+    expect(gov.getEngineState()).toBe('stopped');
+    expect(gov.forceStopOnBoot()).toBe(false);
+    expect(gov.getEngineState()).toBe('stopped');
+  });
+
+  it('forceStopOnBoot leaves a tripped kill switch tripped (manual-clear only)', () => {
+    const { gov } = setup();
+    gov.start();
+    gov.tripKillSwitch('manual');
+    expect(gov.getEngineState()).toBe('kill_tripped');
+    expect(gov.forceStopOnBoot()).toBe(false);
+    expect(gov.getEngineState()).toBe('kill_tripped');
+    expect(gov.getRiskState().killSwitchTripped).toBe(true);
+  });
 });
 
 describe('RiskGovernor — day P&L + kill switch', () => {

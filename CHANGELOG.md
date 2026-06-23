@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.63] — 2026-06-23
+
+### Fixed
+- **Engine showed "running + armed" after a restart but was inert — no broker connection, no cycle loop, no trades.** `engine_state` is persisted in `exec_risk_state`, but the broker connection and the cycle loop are process-local and were never restored on restart, and nothing at boot re-ran `startEngine()`. So after a relaunch (crash, reboot, repackage-and-relaunch) the Trading Desk/`/exec/state` reported `engineState:"running"`, `armed:true` while `brokerConnected:false` and `lastCycleAt:null` — the engine took no trades, silently. Surfaced when an IBKR-paper relaunch sat "armed" with no socket to TWS.
+- **Boot reconciliation (operator choice: force-stopped-on-boot).** On boot, any persisted `running`/`paused` engine state is now reset to `stopped` (`RiskGovernor.forceStopOnBoot()` → audited distinctly as `boot_reset`), so the UI tells the truth and the operator must explicitly **Start** — which reconnects the broker and restarts the loop — after every restart. A tripped kill switch is left tripped (manual-clear only).
+
+### Notes
+- Engine **lifecycle** change, not trade logic — no change to selection/sizing/exits; strictly more conservative (won't trade after a restart until an explicit Start). Validation-exempt per FR-SEY-5. New regression tests cover `forceStopOnBoot` (running→stopped, paused→stopped, no-op when stopped, kill-tripped left tripped). Full suite **651 passing**.
+
 ## [1.1.62] — 2026-06-23
 
 ### Fixed

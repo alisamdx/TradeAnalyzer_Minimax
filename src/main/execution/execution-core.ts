@@ -86,6 +86,10 @@ export class ExecutionCore {
   private emit(e: CoreEvent): void {
     this.emitter.emit('event', e);
   }
+  /** Re-broadcast the current persisted engine state (used after an out-of-band transition). */
+  emitEngineState(): void {
+    this.emit({ type: 'engine_state', state: this.governor.getEngineState() });
+  }
 
   setMarketCycleHook(hook: MarketCycleHook | null): void {
     this.marketCycleHook = hook;

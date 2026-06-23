@@ -147,6 +147,19 @@ export class ExecutionEngine {
   runCycle() {
     return this.core.runCycle();
   }
+  /**
+   * Boot reconciliation (force-stopped-on-boot): the engine never restores a live broker
+   * connection or cycle loop on restart, so a persisted 'running'/'paused' state is reset to
+   * 'stopped' here at app boot. The operator must explicitly Start to reconnect. Emits an
+   * engine_state event (so the UI updates) and refreshes the armed flag when it changes state.
+   * Returns true if the persisted state was running/paused and got reset.
+   */
+  reconcileStateOnBoot(): boolean {
+    const changed = this.governor.forceStopOnBoot();
+    if (changed) this.core.emitEngineState();
+    this.refreshArmed();
+    return changed;
+  }
   onEvent(cb: (e: CoreEvent) => void): void {
     this.core.onEvent(cb);
   }

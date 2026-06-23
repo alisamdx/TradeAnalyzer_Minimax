@@ -238,6 +238,25 @@ export class RiskGovernor {
     });
   }
 
+  /**
+   * Boot reconciliation: `engine_state` is persisted in `exec_risk_state`, but the broker
+   * connection and the cycle loop are process-local and are NOT restored on restart. A persisted
+   * 'running'/'paused' would otherwise show the engine armed+running after a relaunch while it is
+   * actually inert (no broker connection, no loop) — dangerous for an unattended engine. The
+   * operator chose force-stopped-on-boot: reset any running/paused state back to 'stopped' so the
+   * UI tells the truth and an explicit Start is required to reconnect. A tripped kill switch is
+   * left tripped (manual-clear only); 'stopped' is a no-op. Audited distinctly as `boot_reset` so
+   * the audit log shows it was the restart, not an operator Stop. Returns true if it changed.
+   */
+  forceStopOnBoot(): boolean {
+    return withTransaction(this.db, () => {
+      const s = this.getEngineState();
+      if (s !== 'running' && s !== 'paused') return false;
+      this.transitionEngine(s, 'stopped', {}, 'boot_reset');
+      return true;
+    });
+  }
+
   /** Optional soft pause: no new entries, keeps managing open positions. */
   pause(): void {
     withTransaction(this.db, () => {

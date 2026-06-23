@@ -467,6 +467,15 @@ app.whenReady().then(() => {
   executionEngine.onEvent((evt) => getMainWindow()?.webContents.send('execution:event', evt));
   registerExecutionIpc(executionEngine);
 
+  // Boot reconciliation (force-stopped-on-boot): engine_state is persisted, but the broker
+  // connection + cycle loop are process-local and are NOT restored on restart. Without this, a
+  // relaunch leaves the engine showing armed+running while actually inert (no connection, no
+  // loop) — it would silently take no trades. Reset any persisted running/paused to stopped so
+  // the operator must explicitly Start (which reconnects) after every restart.
+  if (executionEngine.reconcileStateOnBoot()) {
+    console.log('[execution] persisted running/paused state reset to stopped on boot — Start to reconnect');
+  }
+
   // Headless control API on 127.0.0.1:7433 (token-authed, agent.token). Lets an external
   // operator/agent read live engine state — broker (mock vs ibkr), engine-state, automation_mode,
   // armed — and drive control while the window is closed. /exec/state now carries broker +
