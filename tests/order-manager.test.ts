@@ -79,6 +79,24 @@ describe('OrderManager.approveProposal', () => {
     for (const e of ['proposal_approved', 'order_submitted', 'fill', 'position_opened']) expect(events).toContain(e);
   });
 
+  it('persists a broker reject reason onto the order', async () => {
+    const db: DbHandle = openDatabase(':memory:');
+    runMigrations(db, MIGRATIONS_DIR);
+    const broker = new MockExecutionBroker({ fillMode: 'reject' });
+    const governor = new RiskGovernor(db);
+    const entryPolicy = new EntryPolicy(db, governor);
+    const om = new OrderManager(db, broker, governor);
+    om.wire();
+    await broker.connect();
+    governor.start();
+    const proposalId = (await entryPolicy.buildProposal(pick(), broker, NOW)).proposalId!;
+    const res = await om.approveProposal(proposalId, NOW);
+
+    const order = db.prepare('SELECT status, reject_reason FROM exec_orders WHERE id = ?').get(res.orderId) as { status: string; reject_reason: string | null };
+    expect(order.status).toBe('rejected');
+    expect(order.reject_reason).toBe('mock_reject'); // reason captured from the status update, not dropped
+  });
+
   it('refuses a non-pending proposal', async () => {
     const ctx = await setup();
     const proposalId = await makeProposal(ctx);

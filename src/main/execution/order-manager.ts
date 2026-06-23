@@ -200,11 +200,14 @@ export class OrderManager {
   // ── broker callbacks ──
 
   private handleStatus(u: OrderStatusUpdate): void {
+    // Persist the reject reason when present (TWS sends it on the error channel, separately from the
+    // 'cancelled'/'rejected' orderStatus). COALESCE keeps an already-captured reason regardless of
+    // whether the error or the status event lands last, and never clobbers it with a null.
     this.db
       .prepare(
-        "UPDATE exec_orders SET status = ?, broker_order_id = COALESCE(?, broker_order_id), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE client_order_id = ?"
+        "UPDATE exec_orders SET status = ?, broker_order_id = COALESCE(?, broker_order_id), reject_reason = COALESCE(?, reject_reason), updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE client_order_id = ?"
       )
-      .run(u.status, u.brokerOrderId, u.clientOrderId);
+      .run(u.status, u.brokerOrderId, u.rejectReason, u.clientOrderId);
   }
 
   private handleFill(fill: Fill): void {

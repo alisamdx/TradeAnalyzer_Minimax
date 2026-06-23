@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.65] — 2026-06-23
+
+### Fixed
+- **TWS order-rejection reasons were silently dropped — orders ended `cancelled` with no reason.** With the eTradeOnly/firmQuoteOnly fix (v1.1.62), the engine's combo orders now reach TWS — but TWS was rejecting/cancelling them, and the reason was lost: IBKR reports an order's reject reason on the **error channel** (keyed by order id), which `IbkrExecutionBroker` only handled for *data* requests, and `onIbkrOrderStatus` set `rejectReason` only for a literal `'rejected'` status (not `'cancelled'`/`'inactive'`). So every rejected order showed `status='cancelled', reject_reason=NULL` and the operator had no idea why. The broker now matches an order-id error to its tracked order, logs it (`[ibkr] order N … error`), and surfaces it as a status update carrying the reason; `OrderManager.handleStatus` persists it into `exec_orders.reject_reason` via `COALESCE` (robust to error/status event ordering).
+
+### Notes
+- Diagnostic/observability fix — no change to order construction or trade logic. Validation-exempt per FR-SEY-5. New regression test asserts a broker reject reason lands on the order row. Full suite **658 passing**. **This unblocks diagnosing why TWS rejects the paper combos** — the next rejected order will record the IBKR reason in `exec_orders.reject_reason` (and the app log).
+
 ## [1.1.64] — 2026-06-23
 
 ### Fixed

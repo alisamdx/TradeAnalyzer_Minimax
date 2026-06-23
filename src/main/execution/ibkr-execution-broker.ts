@@ -792,6 +792,26 @@ export class IbkrExecutionBroker implements ExecutionBroker {
         }
         return;
       }
+      // Order-level errors carry the order id in reqId. TWS reports a rejected/cancelled order's
+      // REASON here (not on orderStatus), so without this the order silently ends 'cancelled' with
+      // no reject_reason and the operator can't tell why. Surface it as a status update carrying the
+      // reason (persisted by OrderManager via COALESCE, regardless of error/orderStatus ordering).
+      const tracked = this.ordersByBrokerId.get(String(reqId));
+      if (tracked) {
+        const reason = `IBKR ${num}: ${err instanceof Error ? err.message : String(err)}`;
+        console.warn(`[ibkr] order ${reqId} (${tracked.clientOrderId}) error — ${reason}`);
+        for (const cb of this.statusCbs) {
+          cb({
+            clientOrderId: tracked.clientOrderId,
+            brokerOrderId: String(reqId),
+            status: tracked.status,
+            filledContracts: tracked.filled,
+            remainingContracts: Math.max(0, tracked.contracts - tracked.filled),
+            rejectReason: reason,
+          });
+        }
+        return;
+      }
       if (this.pending.has(reqId)) this.settle(reqId, 'reject', err instanceof Error ? err : new Error(String(err)));
     });
   }
