@@ -75,20 +75,31 @@ today. Build:
 ### 2.4 Dry-run mechanics
 
 - In `dry_run`, the cycle runs entry/exit **evaluation** but short-circuits before any
-  `placeOrder`/`submitClose`. Would-be decisions are recorded (proposed table row flagged
-  `dry_run`, or a dedicated `exec_dry_run_log` — decide at build) and surfaced in the Entries/Exits
-  tabs marked **"dry-run — not placed."**
+  `placeOrder`/`submitClose`. Would-be decisions are written to a **dedicated `exec_dry_run_log`
+  table** (RESOLVED — not a flag on `exec_proposals`, so dry-run never pollutes the real
+  proposal/position/audit streams) and surfaced in the Entries/Exits tabs marked **"dry-run — not
+  placed."**
 - No positions open, no capital deploys, no broker contact beyond pricing reads. Lets the operator
   watch the brief→entry pipeline and freshness gate / caps behave for a few days before arming.
 
 ### 2.5 Notifications (real-time per-action + EOD digest)
 
-Three surfaces, all reusing `email-service.ts`:
+Four surfaces:
 1. **In-app live feed** — the Trading Desk **Live tab** (§5).
-2. **Per-trade email** — on each entry, each exit, each kill-switch trip. Toggle
-   `exec_config.notify_per_action`.
-3. **End-of-day digest email** — one summary at/after close: entries, exits, P&L, rejects, any
-   trips. Toggle `exec_config.notify_eod_digest`.
+2. **Per-action email** — on each entry, each exit, each kill-switch trip (`email-service.ts`).
+   Toggle `exec_config.notify_per_action`.
+3. **Desktop / OS push** (RESOLVED — wanted in addition to email) — a native OS notification on the
+   same per-action events, via Electron's `Notification`. Toggle `exec_config.notify_push`.
+4. **End-of-day digest email** — one summary at/after close (entries, exits, P&L, rejects, any
+   trips). Toggle `exec_config.notify_eod_digest`. **Fires only when Armed** (RESOLVED — no digest in
+   semi/dry-run).
+
+### 2.6 Keeping the machine awake (all-day runs)
+
+The operator **disables OS sleep for all-day runs** (RESOLVED). Implement defensively in-app: while
+**Armed** (engine running + `automation_mode='unattended'`), start an Electron
+`powerSaveBlocker.start('prevent-display-sleep')` to keep the system awake; release it on
+disarm/stop. Document the OS-level "don't sleep on AC" setting as the operator's belt-and-suspenders.
 
 ---
 
@@ -197,7 +208,7 @@ speed. Any future intra-upstream trimming changes brief output and must clear FR
 | # | Tab | Grid / content |
 |---|---|---|
 | 1 | **Live / Notifications** | Default landing. Real-time activity feed + the **daily activity timeline** (§5.5). The live display. |
-| 2 | **Proposals** | **Surfaced/badged only when human intervention is needed** (pending approve/reject). Quietly empty when armed-unattended; lights up + can auto-focus when a click is needed. |
+| 2 | **Proposals** | **Surfaced/badged only when human intervention is needed** (pending approve/reject). Quietly empty when armed-unattended; **auto-focuses** (RESOLVED) the moment a new pending proposal appears. |
 | 3 | **Entries** | Today's entries + reason (incl. dry-run "not placed" rows). |
 | 4 | **Exits** | Today's exits + reason (protective vs discretionary). |
 | 5 | **Rejects** | Today's rejected candidates + gate reason. |
@@ -224,12 +235,15 @@ profit-target exit XYZ · kill clear`). Turns the audit log into a glanceable da
 - `entry_mode TEXT NOT NULL DEFAULT 'propose'    CHECK (entry_mode IN ('propose','auto'))`
 - `cycle_interval_sec INTEGER NOT NULL DEFAULT 120`
 - `notify_per_action INTEGER NOT NULL DEFAULT 1`
-- `notify_eod_digest INTEGER NOT NULL DEFAULT 1`
+- `notify_push INTEGER NOT NULL DEFAULT 1`
+- `notify_eod_digest INTEGER NOT NULL DEFAULT 1`  (digest only emitted when Armed)
 
 `batch_jobs` (new column):
 - `after_close_only INTEGER NOT NULL DEFAULT 0` (set `1` for jobs 9–12 in the migration)
 
-Optional: `exec_dry_run_log` table (or a `dry_run` flag on `exec_proposals`) — decide at build.
+New table **`exec_dry_run_log`** (dry-run decisions, kept separate from `exec_proposals`): at minimum
+`id, at, kind ('entry'|'exit'), ticker, strategy, structure, legs_json, net_credit, max_loss,
+contracts, would_be_action, reason`.
 
 `ExecConfig` (src/shared/types.ts) gains the matching fields; `RiskGovernor` get/updateConfig map
 them; orchestrator slot config carries `lean`.
@@ -266,11 +280,12 @@ change).
 
 ---
 
-## 9. Open questions
-- Dry-run storage: flag on `exec_proposals` vs a dedicated `exec_dry_run_log`?
-- Should the EOD digest also fire in semi/dry-run modes, or only when armed?
-- Laptop-sleep handling for true all-day runs (disable OS sleep vs reconcile-on-wake) — document for
-  the operator.
-- Notification channel: email is reused now; is a desktop/OS push wanted in addition (vs the in-app
-  Live feed)?
-- Does the Proposals tab auto-focus on a new pending proposal, or just badge?
+## 9. Resolved decisions (2026-06-22)
+- **Dry-run storage** → a dedicated **`exec_dry_run_log`** table (§2.4, §6).
+- **EOD digest** → fires **only when Armed** (§2.5).
+- **Laptop sleep** → **disable OS sleep** for all-day runs; in-app `powerSaveBlocker` while Armed +
+  operator OS setting (§2.6).
+- **Notification channel** → email **and** desktop/OS push, plus the in-app Live feed (§2.5).
+- **Proposals tab** → **auto-focus** on a new pending proposal (§5.3).
+
+All open questions resolved — requirements are final pending operator sign-off.
