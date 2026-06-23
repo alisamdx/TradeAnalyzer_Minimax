@@ -17,7 +17,7 @@ import type { BriefPick, ScoringConfig } from '../src/shared/types.js';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
-type Leg = { strike: number; action: string; side?: 'call' | 'put' };
+type Leg = { strike: number; action: string; side?: 'call' | 'put'; bid?: number; ask?: number };
 type LabScore = {
   slug: string;
   grade: string;
@@ -25,6 +25,7 @@ type LabScore = {
   setup: {
     expiration: string;
     netCredit: number | null;
+    maxLoss?: number | null;
     legs: Leg[];
     unavailableReason?: string | null;
   } | null;
@@ -153,6 +154,47 @@ describe('CriticService rule checks', () => {
     it('flags unvalidated picks (no lab result)', () => {
       const flags = runChecks(svc, makePick(null), 'bullish');
       expect(flags.find(f => f.key === 'low_liquidity')).toBeDefined();
+    });
+  });
+
+  describe('checkLiquidity — defined-risk spread aligns with the engine tradability bar (v1.1.68)', () => {
+    // A 2-leg defined-risk spread (maxLoss finite, legs quoted) — the kind the v2 engine trades.
+    // The engine rejects it below MIN_TRADABLE_LIQUIDITY_SCORE (8); the critic must caution to match.
+    const spread = (liq: number, opts: { noBid?: boolean } = {}) => makePick([
+      {
+        slug: 'long-put-vertical', grade: 'A', liquidityScore: liq,
+        setup: {
+          expiration: '2099-01-15', netCredit: null, maxLoss: -400,
+          legs: [
+            { strike: 100, action: 'sell', side: 'put', bid: opts.noBid ? 0 : 0.8, ask: 1.2 },
+            { strike: 95, action: 'buy', side: 'put', bid: 0.3, ask: 0.6 },
+          ],
+        },
+      },
+    ]);
+
+    it('warns when a tradable spread is below the bar (6 < 8) — was a silent pass before', () => {
+      const liq = runChecks(svc, spread(6), 'bearish').find(f => f.key === 'low_liquidity');
+      expect(liq).toBeDefined();
+      expect(liq!.severity).toBe('warning');
+      expect(liq!.description).toContain('6/15');
+    });
+
+    it('does not flag a spread at/above the bar (10)', () => {
+      expect(runChecks(svc, spread(10), 'bearish').find(f => f.key === 'low_liquidity')).toBeUndefined();
+    });
+
+    it('warns on a no-bid leg even when the score is decent', () => {
+      const liq = runChecks(svc, spread(10, { noBid: true }), 'bearish').find(f => f.key === 'low_liquidity');
+      expect(liq).toBeDefined();
+      expect(liq!.severity).toBe('warning');
+      expect(liq!.description).toContain('no bid');
+    });
+
+    it('leaves single-leg short-premium (4–7 normal) un-flagged', () => {
+      // wheel short-naked-put, single leg, no maxLoss → not a spread → old <4 rule only.
+      const pick = makePick([{ slug: 'short-naked-put', grade: 'A', liquidityScore: 5, setup: makeSetup(95) }]);
+      expect(runChecks(svc, pick, 'wheel').find(f => f.key === 'low_liquidity')).toBeUndefined();
     });
   });
 

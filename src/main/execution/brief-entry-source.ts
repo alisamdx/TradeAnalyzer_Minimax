@@ -24,12 +24,12 @@ import type {
 } from '../../shared/types.js';
 import type { LegSpec } from './execution-broker.js';
 import type { PickInput } from './entry-policy.js';
-import { pickRelevantStructure } from '../../shared/strategy-structures.js';
+import { pickRelevantStructure, MIN_TRADABLE_LIQUIDITY_SCORE } from '../../shared/strategy-structures.js';
 import { etDateString } from './market-hours.js';
 
 // The lab's liquidityScore is 0–15; require a reasonable floor as the execution proxy for the
 // brief's liquidity assessment (legs must also have two-sided quotes). Calibrated in Phase 7.
-const MIN_LIQUIDITY_SCORE = 8;
+const MIN_LIQUIDITY_SCORE = MIN_TRADABLE_LIQUIDITY_SCORE;
 
 /** YYYY-MM-DD (strip any time component a setup expiration might carry). */
 function normalizeExpiry(s: string): string {

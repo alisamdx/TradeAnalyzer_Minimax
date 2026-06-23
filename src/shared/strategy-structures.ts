@@ -9,6 +9,15 @@
 // non-existent straddle. Keeping one exported constant makes that class of drift
 // impossible; `tests/strategy-structures.test.ts` asserts every strategy is covered.
 
+/**
+ * Minimum structure liquidity score (0–15) the v2 execution engine will trade — the
+ * tradability bar. The engine's entry gate (`brief-entry-source.hasAdequateLiquidity`) rejects
+ * any chosen structure below this, and the critic (`checkLiquidity`) cautions below it for
+ * defined-risk spreads, so the brief's displayed verdict matches what's actually tradable.
+ * Shared so the two never drift apart (they did once, on the slug map above).
+ */
+export const MIN_TRADABLE_LIQUIDITY_SCORE = 8;
+
 /** Strategy Lab slugs relevant to each Brief strategy (best-first preference order). */
 export const STRATEGY_RELEVANT_SLUGS: Record<string, string[]> = {
   wheel:   ['short-naked-put', 'covered-call'],

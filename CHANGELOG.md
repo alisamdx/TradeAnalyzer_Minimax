@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.68] — 2026-06-23
+
+### Fixed
+- **The critic now cautions on liquidity in step with what the engine will actually trade — a "clean Pass" can no longer hide an untradeable spread.** A brief deep-dive found the critic flagged `low_liquidity` only below score 4, while the v2 entry gate rejects anything below 8 (or with a $0-bid leg). So a defined-risk spread scoring 4–7 got a green "✓ Pass" from the critic yet would be **rejected** by the engine — e.g. today's inflection #1 AEP (liq 6, grade A, "clean pass") sat in that gap, and BALL's long leg had a $0 bid (can't be exited). A human trading the brief's verdict could enter spreads the engine itself refuses.
+  - The two thresholds are now one shared constant (`MIN_TRADABLE_LIQUIDITY_SCORE = 8` in `strategy-structures.ts`), used by both the engine gate and the critic, so they can't drift.
+  - For **defined-risk multi-leg spreads** (what the engine trades), the critic raises a **warning** when the chosen structure is below the tradability bar, or has a no-bid leg — so the verdict reflects real tradability. Single-name short-premium (where 4–7 liquidity is normal) is unchanged.
+
+### Notes
+- Decision-support / display change — the engine's liquidity gate (8) is **unchanged**; this aligns the *critic's* caution to it. Strictly more conservative (the critic can only add caution). Validation-exempt per FR-SEY-5. 4 new critic regression tests. Full suite **665 passing**. Surfaced by the real-money readiness audit of the after-close brief.
+
 ## [1.1.67] — 2026-06-23
 
 ### Fixed

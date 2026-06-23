@@ -5,7 +5,7 @@
 import type { Database } from 'better-sqlite3';
 import Anthropic from '@anthropic-ai/sdk';
 import type { BriefPick, CriticFlag, CriticVerdict, ScoringConfig } from '@shared/types.js';
-import { STRATEGY_RELEVANT_SLUGS, pickRelevantStructure, formatStructureLegs } from '@shared/strategy-structures.js';
+import { STRATEGY_RELEVANT_SLUGS, pickRelevantStructure, formatStructureLegs, MIN_TRADABLE_LIQUIDITY_SCORE } from '@shared/strategy-structures.js';
 
 // Grade ordering for structure quality checks (A+=best, F=worst).
 // 'A+' must be present: lab grades include it, and a missing key ranks 0 (below F).
@@ -25,7 +25,7 @@ interface LabStructureScore {
     maxLoss?: number | null;   // null/absent ⇒ unbounded risk (drives defined-risk preference)
     maxProfit?: number | null; // null ⇒ unbounded profit (net-long calls)
     breakevens?: number[];
-    legs: Array<{ strike: number; action: string; side?: 'call' | 'put'; qty?: number }>;
+    legs: Array<{ strike: number; action: string; side?: 'call' | 'put'; qty?: number; bid?: number; ask?: number }>;
     unavailableReason?: string | null;
   } | null;
 }
@@ -500,8 +500,27 @@ Use verdict: pass, caution, or flag. Use confidence: high, medium, or low.`;
     const chosen = this.selectRelevantStructure(pick, strategy);
     if (chosen === null) return null; // no relevant structure graded — can't assess
 
-    // < 4 is genuinely thin (OI ≈ single digits / very wide spreads).
-    // 4–6 is normal for single-name large caps and should not preclude a pass.
+    const legs = chosen.setup?.legs ?? [];
+    // A defined-risk multi-leg spread (the kind the v2 engine trades): you cross two+ spreads to
+    // open AND to exit, so liquidity matters far more than for a single-name short option.
+    const isDefinedRiskSpread = legs.length > 1 && chosen.setup?.maxLoss != null;
+    const hasNoBidLeg = legs.some((l) => (l.bid ?? 0) <= 0); // a $0-bid leg can't be reliably exited
+
+    // For tradable defined-risk spreads, align the critic with the engine's tradability bar
+    // (MIN_TRADABLE_LIQUIDITY_SCORE): a structure below it — or with a no-bid leg — would be
+    // REJECTED by the entry gate, so it must not read as a clean pass. warning severity so the
+    // verdict reflects it (a human trading the brief sees the same liquidity wall the engine enforces).
+    if (isDefinedRiskSpread && (chosen.liquidityScore < MIN_TRADABLE_LIQUIDITY_SCORE || hasNoBidLeg)) {
+      return {
+        key: 'low_liquidity', severity: 'warning',
+        description: hasNoBidLeg
+          ? `A leg of the ${chosen.slug} has no bid — you may be unable to exit it. Liquidity ${chosen.liquidityScore.toFixed(0)}/15; below the tradability bar (${MIN_TRADABLE_LIQUIDITY_SCORE}), so the engine would reject this entry. Confirm bid-ask before trading.`
+          : `Liquidity ${chosen.liquidityScore.toFixed(0)}/15 on the ${chosen.slug} — below the tradability bar (${MIN_TRADABLE_LIQUIDITY_SCORE}). Crossing the spread will bleed a meaningful share of the credit, and the engine would reject this entry. Confirm bid-ask before trading.`,
+      };
+    }
+
+    // < 4 is genuinely thin (OI ≈ single digits / very wide spreads); for a single-name short
+    // option, 4–7 is normal and should not preclude a pass.
     if (chosen.liquidityScore < 4) {
       return {
         key: 'low_liquidity', severity: 'info',
