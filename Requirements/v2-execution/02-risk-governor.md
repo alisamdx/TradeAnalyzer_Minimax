@@ -297,14 +297,16 @@ trip/clear, engine-state change, reconciliation mismatch. It is the forensic rec
 - **CONFIRMED:** day's-loss basis = **realized + unrealized, halt-new-entries only**;
   kill-switch reset = **manual clear only**.
 
-## 2.13 Live preflight: spread-permission gate
+## 2.13 Preflight: spread-permission gate (paper **and** live)
 
 The engine's entire book is **defined-risk multi-leg spreads** (inflection vertical, wheel put
 credit spread, income iron condor). A broker account that lacks spread-level options permission
 (e.g. IBKR **Options Level 1**, or a cash account) will *accept the connection and then reject
-every combo order* — leaving the engine live but unable to trade, silently. To make that
-fail-closed, **`startEngine()` runs a permission preflight in LIVE mode only** (paper is skipped
-— the paper account always has full permissions, and we don't burden the soak path with a probe):
+every combo order* — leaving the engine armed but unable to trade, silently. To make that
+fail-closed, **`startEngine()` runs the permission preflight in BOTH paper and live mode**
+(changed v1.1.66 — it was live-only on the false assumption that paper always has full
+permissions; an IBKR paper account with only CSP-level permission armed and silently got every
+combo rejected, 2026-06-23):
 
 1. Connect the broker if needed (a connect failure refuses to start, reason
    `broker_connect_failed:…`).
@@ -319,5 +321,7 @@ fail-closed, **`startEngine()` runs a permission preflight in LIVE mode only** (
    entitlement gap, `check_failed` otherwise). Outcomes are written to the audit log
    (`preflight_permission_ok` / `_failed` / `preflight_connect_failed`).
 
-The mock broker always grants permission (a simulator models no entitlement). This is defensive
-insurance for the eventual live flip; it has no effect on paper-mode operation.
+The mock broker always grants permission (a simulator models no entitlement), so tests/dev are
+unaffected. The Trading Desk surfaces a refused start as `Engine refused to start:
+spread_permission:<code>` so the operator sees *why* it won't arm instead of debugging silent
+rejections.

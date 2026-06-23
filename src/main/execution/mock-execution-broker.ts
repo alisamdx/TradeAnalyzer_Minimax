@@ -32,6 +32,8 @@ export interface MockOptions {
   pricer?: (leg: LegSpec) => number;
   fillMode?: MockFillMode; // default 'auto'
   commissionPerContractLeg?: number; // default 0.65
+  /** Drive the spread-permission preflight result (default: granted). */
+  spreadPermission?: PermissionCheck;
 }
 
 interface InternalOrder {
@@ -72,6 +74,7 @@ export class MockExecutionBroker implements ExecutionBroker {
   private readonly pricer: (leg: LegSpec) => number;
   private readonly fillMode: MockFillMode;
   private readonly commissionPerContractLeg: number;
+  private readonly spreadPermission: PermissionCheck;
 
   private readonly connCbs: Array<(s: ConnState) => void> = [];
   private readonly statusCbs: Array<(u: OrderStatusUpdate) => void> = [];
@@ -88,6 +91,7 @@ export class MockExecutionBroker implements ExecutionBroker {
     this.pricer = opts.pricer ?? ((leg) => Number((leg.strike * 0.02).toFixed(2)));
     this.fillMode = opts.fillMode ?? 'auto';
     this.commissionPerContractLeg = opts.commissionPerContractLeg ?? 0.65;
+    this.spreadPermission = opts.spreadPermission ?? { ok: true, code: 'ok', message: 'mock broker: spread permission simulated' };
   }
 
   // ── lifecycle ──
@@ -136,9 +140,10 @@ export class MockExecutionBroker implements ExecutionBroker {
     return Promise.resolve({ available: this.buyingPower, total: this.buyingPower, currency: 'USD' });
   }
 
-  /** A simulator always has full permissions — paper/mock never models a broker entitlement. */
+  /** Spread permission — granted by default; drive a denial via `spreadPermission` to exercise
+   *  the engine's fail-closed preflight (the real IBKR broker probes this with a whatIf combo). */
   checkSpreadPermission(): Promise<PermissionCheck> {
-    return Promise.resolve({ ok: true, code: 'ok', message: 'mock broker: spread permission simulated' });
+    return Promise.resolve(this.spreadPermission);
   }
 
   // ── orders ──

@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.66] — 2026-06-23
+
+### Changed
+- **The spread-permission preflight now runs in PAPER mode too (not just live).** Root cause of the day's "armed but nothing trades": the IBKR **paper** account (`DUQ795672`) lacks options **spread** (multi-leg) trading permission, so IBKR rejected/cancelled every 2-leg combo the engine sent. `startEngine()` previously ran the fail-closed permission probe in **live mode only** — paper was skipped on the (false) assumption it always has full permissions — so the engine armed and silently spammed rejected orders. Now paper runs the same preflight: `startEngine()` connects, probes `checkSpreadPermission()` (the IBKR adapter uses a non-transmitted whatIf combo), and **refuses to start** with reason `spread_permission:<code>` if the account can't place a spread. The Trading Desk already surfaces this as `Engine refused to start: spread_permission:no_spread_permission`, turning a multi-hour silent failure into a one-line message.
+
+### Notes
+- Fail-closed safety change — strictly more conservative (won't arm an account that can't trade the engine's defined-risk spreads); no change to selection/sizing/exits. Validation-exempt per FR-SEY-5. The mock broker grants permission, so tests/dev are unaffected. Updated the existing preflight tests (paper now probes) + added a paper-denied regression test. Full suite **659 passing**. **Operator action required:** enable options spread permission on the IBKR account (Client Portal → Trading Permissions → Options; paper mirrors live) before the engine can trade.
+
 ## [1.1.65] — 2026-06-23
 
 ### Fixed

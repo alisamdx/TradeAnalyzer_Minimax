@@ -102,8 +102,11 @@ describe('ExecutionEngine', () => {
     expect(engine.getRiskState().engineState).toBe('stopped');
   });
 
-  describe('live spread-permission preflight', () => {
-    it('paper mode skips the preflight (broker is never probed)', async () => {
+  describe('spread-permission preflight (paper + live)', () => {
+    it('paper mode also runs the preflight (it is probed)', async () => {
+      // Changed v1.1.66: paper used to skip the probe on the false assumption it always has full
+      // permissions — a paper account with only CSP-level permission armed and silently got every
+      // combo rejected. Paper now runs the same fail-closed preflight.
       const { db, engine, broker } = setup();
       let probed = false;
       broker.checkSpreadPermission = () => {
@@ -112,9 +115,25 @@ describe('ExecutionEngine', () => {
       };
       const r = await engine.startEngine();
       expect(r.started).toBe(true);
-      expect(probed).toBe(false);
-      const audit = db.prepare("SELECT event FROM exec_audit_log WHERE event LIKE 'preflight%'").all();
-      expect(audit).toHaveLength(0);
+      expect(probed).toBe(true);
+      const ok = db.prepare("SELECT 1 FROM exec_audit_log WHERE event = 'preflight_permission_ok'").get();
+      expect(ok).toBeTruthy();
+    });
+
+    it('paper mode refuses to start when the account lacks spread permission', async () => {
+      // The exact 2026-06-23 failure: paper account without options spread permission.
+      const db: DbHandle = openDatabase(':memory:');
+      runMigrations(db, MIGRATIONS_DIR);
+      const broker = new MockExecutionBroker({
+        spreadPermission: { ok: false, code: 'no_spread_permission', message: 'Trading permissions not sufficient for this option spread' },
+      });
+      const engine = new ExecutionEngine(db, broker, { now: () => new Date(MARKET_OPEN) });
+      const r = await engine.startEngine();
+      expect(r.started).toBe(false);
+      expect(r.reason).toBe('spread_permission:no_spread_permission');
+      expect(engine.getState().engineState).toBe('stopped'); // never armed into silent rejections
+      const events = (db.prepare('SELECT event FROM exec_audit_log').all() as Array<{ event: string }>).map((e) => e.event);
+      expect(events).toContain('preflight_permission_failed');
     });
 
     it('live mode refuses to start when the account lacks spread permission', async () => {
@@ -133,7 +152,7 @@ describe('ExecutionEngine', () => {
       expect(failed!.detail_json).toContain('no_spread_permission');
     });
 
-    it('live mode starts when the account has spread permission', async () => {
+    it('starts when the account has spread permission (live)', async () => {
       const { db, engine } = setup(); // MockExecutionBroker grants permission by default
       engine.updateConfig({ executionMode: 'live' });
       const r = await engine.startEngine();
