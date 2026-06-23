@@ -111,22 +111,51 @@ function place() {
   ib.placeOrder(orderId, bag, order);
 }
 
+// Verdict logic. A market-CLOSED order queues as PreSubmitted, but IBKR can STILL reject it on
+// permission grounds a moment later (→ Inactive + an error). So a queued status is only TENTATIVE:
+// confirm "permitted" only if it survives a few seconds with no rejection. A real Filled confirms
+// at once; an Inactive/Cancelled (or a permission error) is a denial.
 let reported = false;
-function accepted(via, status) {
+let pendingTimer = null;
+const clearPending = () => { if (pendingTimer) { clearTimeout(pendingTimer); pendingTimer = null; } };
+function report(fn) {
+  if (reported) return;
+  reported = true;
+  clearTimeout(watchdog);
+  clearPending();
+  fn();
+}
+const confirm = (note) => report(() => {
+  log('\n──────── VERDICT ────────');
+  log('✅ LEVEL 3 CONFIRMED — the short put SPREAD was accepted (not permission-rejected).');
+  if (note) log(`   ${note}`);
+  log(`   Order ${orderId} is queued/working in TWS — clear it with: node scripts/ibkr-cancel-all.mjs`);
+  setTimeout(() => finish(0), 600);
+});
+const deny = (msg) => report(() => {
+  log(`\n⛔ LEVEL 3 NOT permitted — ${msg}`);
+  setTimeout(() => finish(0), 600);
+});
+
+function onStatus(via, status) {
   log(`  ${via}: ${status}`);
   if (reported) return;
-  if (['PreSubmitted', 'Submitted', 'Filled'].includes(status)) {
-    reported = true;
-    clearTimeout(watchdog);
-    log('\n──────── VERDICT ────────');
-    log('✅ LEVEL 3 CONFIRMED — the short put SPREAD was accepted (not permission-rejected).');
-    log(`   Order ${orderId} is now WORKING in TWS for you to review/validate.`);
-    log('   → When you\'re done, tell me and I\'ll clear it (scripts/ibkr-cancel-all.mjs).');
-    setTimeout(() => finish(0), 800); // disconnect; the order stays live in TWS/IBKR
+  if (status === 'Filled') return confirm('order filled.');
+  if (['Inactive', 'Cancelled', 'ApiCancelled'].includes(status)) {
+    // Rejected/inactivated. Give the error event a moment to deliver the reason, else report denial.
+    clearPending();
+    pendingTimer = setTimeout(() => deny('order went Inactive/Cancelled (rejected) — no fill, no working order.'), 2500);
+    return;
+  }
+  if (status === 'PreSubmitted' || status === 'Submitted') {
+    // Tentative: confirm only if it is NOT rejected within the window (covers the market-closed queue).
+    clearPending();
+    pendingTimer = setTimeout(() => confirm('order queued (market closed) and not rejected within 6s.'), 6000);
+    return;
   }
 }
-ib.on(EventName.orderStatus, (id, status) => { if (id === orderId) accepted('orderStatus', status); });
-ib.on(EventName.openOrder, (id, _c, _o, st) => { if (id === orderId) accepted('openOrder', st?.status ?? '(no status)'); });
+ib.on(EventName.orderStatus, (id, status) => { if (id === orderId) onStatus('orderStatus', status); });
+ib.on(EventName.openOrder, (id, _c, _o, st) => { if (id === orderId) onStatus('openOrder', st?.status ?? '(no status)'); });
 
 ib.on(EventName.error, (err, code, reqId) => {
   const n = Number(code);
@@ -135,10 +164,8 @@ ib.on(EventName.error, (err, code, reqId) => {
   if (n === 200 && reqId === LONG_REQ) { longIdx++; return nextLong(); }
   if (reqId === orderId && orderId != null) {
     const msg = err?.message ?? String(err);
-    if (/permission|not allowed|trade options/i.test(msg)) {
-      clearTimeout(watchdog);
-      log(`\n⛔ LEVEL 3 NOT permitted — order rejected on permission grounds: ${msg}`);
-      return finish(0);
+    if (/permission|not allowed|trade options|do not have trading permission/i.test(msg)) {
+      return deny(`order rejected on permission grounds: ${msg}`);
     }
     log(`  order msg (code ${n}): ${msg}`); // 399 = market-closed warning, etc.
     return;

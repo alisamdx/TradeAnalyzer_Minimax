@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.69] — 2026-06-23
+
+### Fixed
+- **Spread-permission preflight timed out instead of returning a verdict — would have blocked arming even *with* permission.** The first live run of the preflight (paper, validating Level 3) showed `check_failed: IBKR request … timed out after 12000ms`. Cause: `discoverProbeSpread` asked TWS for the reference underlying's option contract details with **no expiry/strike filter**, so IBKR tried to return the *entire* SPY put chain (tens of thousands of contracts) and blew past the 12s timeout. The probe now constrains the request to **one near monthly expiry** (`nextMonthlyExpiry` — the next 3rd-Friday ≥10 days out, computed all-UTC), so it returns a few hundred contracts and resolves fast, then picks two strikes as before. (Latent until now: paper skipped the preflight pre-v1.1.66, and live was never reached.)
+- **`scripts/ibkr-level3-spread-test.mjs` gave a false "✅ CONFIRMED" after hours.** A market-closed order queues as `PreSubmitted`, but IBKR can still reject it on permission grounds a moment later (→ `Inactive` + error). The script declared victory on the first `PreSubmitted`, then also printed the real "⛔ NOT permitted." It now treats a queued status as **tentative** — confirming only if it survives ~6s with no rejection, and reporting denial on `Inactive`/`Cancelled` or a permission error.
+
+### Notes
+- Infrastructure/diagnostic fix to the permission probe — no trade-logic change. Validation-exempt per FR-SEY-5. 4 new tests for `nextMonthlyExpiry` (3rd-Friday math + month roll). Full suite **669 passing**. (Tonight's validation verdict stands: the IBKR paper account is **still not** spread-permitted — an explicit IBKR rejection — so this fix is what makes the engine's own Start give a clean "permitted / not permitted" once the account is upgraded.)
+
 ## [1.1.68] — 2026-06-23
 
 ### Fixed

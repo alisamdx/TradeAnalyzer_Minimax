@@ -12,6 +12,7 @@ import {
   classifyPermissionError,
   interpretWhatIfState,
   pickProbeSpread,
+  nextMonthlyExpiry,
 } from '../src/main/execution/ibkr-execution-broker.js';
 import { OrderAction, type ContractDetails } from '@stoqey/ib';
 import { resolveBrokerSettings } from '../src/main/execution/broker-factory.js';
@@ -227,5 +228,35 @@ describe('IBKR adapter — spread-permission preflight', () => {
   it('returns null when no expiry has two strikes', () => {
     expect(pickProbeSpread('SPY', [det('20260717', 400)])).toBeNull();
     expect(pickProbeSpread('SPY', [])).toBeNull();
+  });
+});
+
+describe('IBKR adapter — probe expiry (constrains the permission-probe chain request)', () => {
+  // The probe MUST request one expiry, not the whole chain (a full SPY chain reqContractDetails
+  // returns tens of thousands of contracts and times out — observed live 2026-06-23).
+  const dow = (ymd: string) =>
+    new Date(Date.UTC(+ymd.slice(0, 4), +ymd.slice(4, 6) - 1, +ymd.slice(6, 8))).getUTCDay();
+
+  it('returns a 3rd-Friday YYYYMMDD (the 15th–21st, a Friday)', () => {
+    const exp = nextMonthlyExpiry(new Date('2026-06-01T00:00:00Z'), 10);
+    expect(exp).toMatch(/^\d{8}$/);
+    expect(dow(exp)).toBe(5); // Friday
+    const day = Number(exp.slice(6, 8));
+    expect(day).toBeGreaterThanOrEqual(15);
+    expect(day).toBeLessThanOrEqual(21);
+  });
+
+  it('June 2026 → 2026-06-19', () => {
+    expect(nextMonthlyExpiry(new Date('2026-06-01T00:00:00Z'), 10)).toBe('20260619');
+  });
+
+  it('rolls to the next month when this month is within minDaysOut (2026-06-18 → July)', () => {
+    expect(nextMonthlyExpiry(new Date('2026-06-18T00:00:00Z'), 10)).toBe('20260717');
+  });
+
+  it('on the live failure date 2026-06-23 picks a valid forward expiry', () => {
+    const exp = nextMonthlyExpiry(new Date('2026-06-23T14:00:00Z'), 10);
+    expect(exp).toBe('20260717');
+    expect(dow(exp)).toBe(5);
   });
 });

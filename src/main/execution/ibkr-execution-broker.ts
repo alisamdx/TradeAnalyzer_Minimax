@@ -231,6 +231,31 @@ export function interpretWhatIfState(state: OrderState | undefined): PermissionC
  * margin, so any valid, qualifiable vertical exercises the entitlement. Returns null when no
  * expiry has two strikes.
  */
+/**
+ * The next standard monthly option expiry (3rd Friday) at least `minDaysOut` days away, as an IBKR
+ * `YYYYMMDD` string. All UTC (same time base end-to-end — mixing local/UTC shifts the date a day).
+ * Used to CONSTRAIN the permission probe's contract-details request to one expiry: an unconstrained
+ * `reqContractDetails` for a whole underlying's option chain (e.g. SPY) returns tens of thousands of
+ * contracts and times out (observed live, 2026-06-23). A 3rd-Friday monthly always exists and is
+ * deeply listed, so the probe reliably finds two strikes.
+ */
+export function nextMonthlyExpiry(now: Date = new Date(), minDaysOut = 10): string {
+  const cutoff = now.getTime() + minDaysOut * 86_400_000;
+  let y = now.getUTCFullYear();
+  let m = now.getUTCMonth();
+  for (let i = 0; i < 6; i++) {
+    const firstDow = new Date(Date.UTC(y, m, 1)).getUTCDay(); // 0=Sun … 5=Fri
+    const firstFriday = 1 + ((5 - firstDow + 7) % 7);
+    const thirdFriday = firstFriday + 14;
+    if (Date.UTC(y, m, thirdFriday) >= cutoff) {
+      return `${y}${String(m + 1).padStart(2, '0')}${String(thirdFriday).padStart(2, '0')}`;
+    }
+    if (++m > 11) { m = 0; y++; }
+  }
+  // Unreachable in practice (a qualifying 3rd Friday always exists within 6 months).
+  return `${y}${String(m + 1).padStart(2, '0')}15`;
+}
+
 export function pickProbeSpread(symbol: string, details: ContractDetails[]): LegSpec[] | null {
   const byExpiry = new Map<string, Set<number>>();
   for (const d of details) {
@@ -452,7 +477,9 @@ export class IbkrExecutionBroker implements ExecutionBroker {
     }
   }
 
-  /** Discover a probe vertical on a reference underlying (default SPY, always listed). */
+  /** Discover a probe vertical on a reference underlying (default SPY, always listed). The
+   *  contract-details request is CONSTRAINED to one near monthly expiry — an unconstrained
+   *  full-chain request returns tens of thousands of contracts and times out (live, 2026-06-23). */
   private async discoverProbeSpread(symbol = 'SPY'): Promise<LegSpec[] | null> {
     const reqId = this.nextReqId();
     const probe: Contract = {
@@ -461,6 +488,7 @@ export class IbkrExecutionBroker implements ExecutionBroker {
       right: OptionType.Put,
       exchange: this.exchange,
       currency: this.currency,
+      lastTradeDateOrContractMonth: nextMonthlyExpiry(),
     };
     const details = await this.request<ContractDetails>(reqId, () => this.ib.reqContractDetails(reqId, probe));
     return pickProbeSpread(symbol, details);
