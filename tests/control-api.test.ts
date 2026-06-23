@@ -36,6 +36,33 @@ describe('ExecutionControlApi — state + engine control', () => {
     expect(body.engineState).toBe('stopped');
     expect(body.executionMode).toBe('paper');
     expect(body.killSwitch.tripped).toBe(false);
+    expect(body.broker).toBe('mock'); // fallback default when no brokerKind wired
+  });
+
+  it('surfaces broker kind + automationMode + armed when the engine view is wired', async () => {
+    const db: DbHandle = openDatabase(':memory:');
+    runMigrations(db, MIGRATIONS_DIR);
+    const broker = new MockExecutionBroker();
+    const governor = new RiskGovernor(db);
+    const core = new ExecutionCore(db, broker, governor, { now: () => new Date('2026-06-15T18:00:00Z') });
+    const api = new ExecutionControlApi({
+      db, core, governor, token: 'test-token',
+      brokerKind: 'ibkr',
+      getStateView: () => ({
+        engineState: 'running',
+        killSwitch: { tripped: false, reason: null },
+        executionMode: 'paper',
+        automationMode: 'unattended',
+        armed: true,
+        drawdownPct: 0,
+        health: core.getHealth(),
+      }),
+    });
+    const body = (await api.inject({ method: 'GET', url: '/exec/state', headers: AUTH })).json();
+    expect(body.broker).toBe('ibkr');
+    expect(body.automationMode).toBe('unattended');
+    expect(body.armed).toBe(true);
+    expect(body.engineState).toBe('running');
   });
 
   it('starts, pauses, and stops the engine', async () => {

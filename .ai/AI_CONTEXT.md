@@ -2,7 +2,7 @@
 
 > **Read this first.** Self-contained snapshot of *what the app is today* so a fresh AI session is productive without re-reading the whole codebase. This file describes **current state** — not history. Release history lives in `CHANGELOG.md` / `changelogs/`. Operating rules live in `/CLAUDE.md`. Full spec lives in `Requirements/`.
 >
-> Last verified against code: 2026-06-23 (v1.1.60). When you make a material change, update the relevant section here in the same commit.
+> Last verified against code: 2026-06-23 (v1.1.61). When you make a material change, update the relevant section here in the same commit.
 
 ---
 
@@ -96,7 +96,7 @@ src/main/
   ipc/ipc-*.ts              29 IPC handler modules (one per feature area; incl. ipc-execution Ph5b)
   services/                  62 service classes (see §7)
   services/jobs/             10 batch job handlers
-  execution/                 v2 execution subsystem — ExecutionBroker+mock (Ph1), risk-gate+RiskGovernor (Ph2), market-hours+reconciliation+ExecutionCore (Ph3a), control-api :7433+SSE (Ph3b), entry-policy EntryPolicy (Ph4a), order-manager OrderManager (Ph4b), exit-policy ExitPolicy + position-manager ManagementLoop (Ph4c), execution-engine ExecutionEngine assembly (Ph5a). ACTIVE (Ph5b): ExecutionEngine instantiated in index.ts with MockExecutionBroker, engine `stopped` — drivable via ipc-execution + window.api.execution.* but UI not built yet (Ph5c/d) and no live broker/auto-entries (Ph6)
+  execution/                 v2 execution subsystem — ExecutionBroker+mock (Ph1), risk-gate+RiskGovernor (Ph2), market-hours+reconciliation+ExecutionCore (Ph3a), control-api :7433+SSE (Ph3b — STARTED at boot v1.1.61; /exec/state surfaces broker/automationMode/armed), entry-policy EntryPolicy (Ph4a), order-manager OrderManager (Ph4b), exit-policy ExitPolicy + position-manager ManagementLoop (Ph4c), execution-engine ExecutionEngine assembly (Ph5a). ACTIVE (Ph5b): ExecutionEngine instantiated in index.ts with MockExecutionBroker, engine `stopped` — drivable via ipc-execution + window.api.execution.* but UI not built yet (Ph5c/d) and no live broker/auto-entries (Ph6)
 src/preload/index.ts        window.api.* bridge (34 namespaces)
 src/renderer/src/
   App.tsx                    Sidebar routing + layout + status bar + cross-view nav events

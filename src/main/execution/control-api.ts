@@ -11,6 +11,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import type { DbHandle } from '../db/connection.js';
+import type { ExecEngineStateView } from '../../shared/types.js';
 import type { RiskGovernor } from './risk-governor.js';
 import type { ExecutionCore, CoreEvent } from './execution-core.js';
 
@@ -39,6 +40,11 @@ export interface ControlApiOptions {
   token?: string; // default: read/create the agent token
   /** Phase 4 wires entry-proposal generation here; absent for now. */
   onBriefReady?: () => Promise<void> | void;
+  /** Which broker the engine was assembled with (mock vs ibkr) — surfaced on /exec/state. */
+  brokerKind?: string;
+  /** The engine facade's full state view (adds automationMode + armed + drawdownPct over the
+   *  core/governor-derived shape). When present, /exec/state returns it (plus broker). */
+  getStateView?: () => ExecEngineStateView;
 }
 
 export class ExecutionControlApi {
@@ -78,11 +84,17 @@ export class ExecutionControlApi {
     fastify.get('/exec/health', async () => ({ ok: true }));
 
     fastify.get('/exec/state', async () => {
+      const broker = this.opts.brokerKind ?? 'mock';
+      // Prefer the engine facade's view (adds automationMode + armed + drawdownPct) when wired.
+      if (this.opts.getStateView) {
+        return { ...this.opts.getStateView(), broker };
+      }
       const rs = governor.getRiskState();
       return {
         engineState: rs.engineState,
         killSwitch: { tripped: rs.killSwitchTripped, reason: rs.killSwitchReason },
         executionMode: governor.getConfig().executionMode,
+        broker,
         health: core.getHealth(),
       };
     });

@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.61] — 2026-06-23
+
+### Added
+- **Execution control API wired into boot.** `ExecutionControlApi` (Fastify on `127.0.0.1:7433`, token-authed via `~/.tradeanalyzer/agent.token`) was built in Phase 3b but never started; it now launches at app boot and stops on `will-quit`. This lets an external operator/agent read live engine state and drive control (start/pause/stop, kill switch) **while the app window is closed** — and, concretely, lets you confirm whether the three switches for an unattended day are set without eyeballing UI pills.
+- **`/exec/state` now surfaces `broker` (mock vs ibkr), `automationMode`, and `armed`.** When wired with the engine facade's `getState()`, the endpoint returns the full state view (engine-state, kill switch, executionMode, **automationMode**, **armed**, drawdownPct, health) plus the **broker kind** — the exact fields needed to verify "is it really on IBKR, running, and armed?". `GET http://127.0.0.1:7433/exec/state` with header `X-Agent-Token: <token>`.
+
+### Notes
+- Back-compatible: the endpoint still works from core+governor alone (broker defaults to `mock`). No engine/trade-logic change — validation-exempt per FR-SEY-5. New regression test (`tests/control-api.test.ts`) covers the broker/automationMode/armed pass-through. Full suite: **644 passing**.
+
 ## [1.1.60] — 2026-06-23
 
 ### Added

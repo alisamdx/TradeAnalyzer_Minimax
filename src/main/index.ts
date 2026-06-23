@@ -79,6 +79,7 @@ import { registerBriefReplayIpc } from './ipc/ipc-brief-replay.js';
 import { ExecutionEngine, type ExecNotifier } from './execution/execution-engine.js';
 import { RiskGovernor } from './execution/risk-governor.js';
 import { resolveBrokerSettings, createExecutionBroker } from './execution/broker-factory.js';
+import { ExecutionControlApi } from './execution/control-api.js';
 import { registerExecutionIpc } from './ipc/ipc-execution.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -465,6 +466,22 @@ app.whenReady().then(() => {
   });
   executionEngine.onEvent((evt) => getMainWindow()?.webContents.send('execution:event', evt));
   registerExecutionIpc(executionEngine);
+
+  // Headless control API on 127.0.0.1:7433 (token-authed, agent.token). Lets an external
+  // operator/agent read live engine state — broker (mock vs ibkr), engine-state, automation_mode,
+  // armed — and drive control while the window is closed. /exec/state now carries broker +
+  // automationMode + armed via the engine facade's getState().
+  const executionControlApi = new ExecutionControlApi({
+    db,
+    core: executionEngine.core,
+    governor: executionEngine.governor,
+    brokerKind: brokerSettings.kind,
+    getStateView: () => executionEngine.getState(),
+  });
+  executionControlApi.start(7433)
+    .then(() => console.log('[execution] control API listening on 127.0.0.1:7433'))
+    .catch((e) => console.error('[execution] control API failed to start:', e instanceof Error ? e.message : e));
+  app.on('will-quit', () => { void executionControlApi.stop(); });
 
   const technicalSignalsJob = new DailyTechnicalSignalsJob(db);
   batchService.registerJob('daily-technical-signals', technicalSignalsJob, {
