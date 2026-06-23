@@ -1187,6 +1187,7 @@ function buildApi() {
     getConfig:    () => invoke<ExecConfig>('execution:get-config'),
     getRiskState: () => invoke<ExecRiskState>('execution:get-risk-state'),
     getPositions: () => invoke<ExecPositionRow[]>('execution:get-positions'),
+    getRecentPositions: (limit?: number) => invoke<ExecPositionRow[]>('execution:get-recent-positions', limit),
     getProposals: () => invoke<ExecProposalRow[]>('execution:get-proposals'),
     getAudit:     (limit?: number) => invoke<ExecAuditRow[]>('execution:get-audit', limit),
     getDryRunLog: (limit?: number) => invoke<ExecDryRunRow[]>('execution:get-dry-run-log', limit),

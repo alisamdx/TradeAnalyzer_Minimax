@@ -249,6 +249,21 @@ export class ExecutionEngine {
       )
       .all();
   }
+  /**
+   * Open + recently-closed positions, newest activity first — feeds the Trading Desk
+   * Entries (opened today) and Exits (closed today) tabs (spec 08 §5.3). `getPositions`
+   * stays open-only for the Positions tab / count badge.
+   */
+  getRecentPositions(limit = 200) {
+    const n = Math.min(Math.max(limit, 1), 1000);
+    return this.db
+      .prepare(
+        `SELECT id, ticker, strategy, structure, contracts, max_loss, entry_net_credit, current_mark,
+                current_pnl, status, opened_at, closed_at, close_reason
+         FROM exec_positions ORDER BY COALESCE(closed_at, opened_at) DESC LIMIT ?`
+      )
+      .all(n);
+  }
   getProposals() {
     return this.db
       .prepare(

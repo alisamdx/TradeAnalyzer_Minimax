@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.1.60] — 2026-06-23
+
+### Added
+- **Trading Desk redesign (spec 08 §5, Part D — the last piece of the unattended-operation feature).** The desk is now **tabbed** so each grid stays large enough for many rows, with a proper stylesheet, **aligned column headers**, and **click-to-sort** on every grid (via the shared `useSortable` hook). The always-visible header (PAPER/LIVE + engine pill, arm switch with the paper-only guard, Start/Pause/Stop, kill switch, capital gauge + day P&L + health) sits above the tabs unchanged.
+- **Seven tabs:** **Live** (default landing) · **Proposals** · **Entries** · **Exits** · **Rejects** · **Positions** · **Activity**. Each tab badges its row count; **Proposals** badges/highlights (⚠) only when something needs approval and **auto-focuses** the moment a new pending proposal appears.
+- **Live tab = the day's story.** A horizontal **daily activity timeline** (9:30 open / 4:00 close markers, shaded entry window, pinned events — brief committed, entries, exits, kill trip/clear) above a friendly **live activity feed** (today's audit events rendered as readable one-liners with colored dots).
+- **Entries / Exits / Rejects** are derived per-day (ET): Entries = positions opened today **+ dry-run "not placed" rows**; Exits = positions closed today **+ dry-run exits**, tagged **protective vs discretionary**; Rejects = today's gate/proposal/order rejections with the gate reason.
+
+### Notes
+- Validation-exempt per FR-SEY-5 — pure presentation; no change to trade selection, sizing, or exits. One small backend read added: `ExecutionEngine.getRecentPositions` (open + recently-closed, for the Entries/Exits day tabs) → `execution:get-recent-positions` IPC + `window.api.execution.getRecentPositions`; `getPositions` stays open-only for the Positions tab. Trading Desk stylesheet (`.td-*`) added to `styles.css`. This completes spec 08 (Parts A–D all shipped). Full suite: **643 passing**.
+
 ## [1.1.59] — 2026-06-22
 
 ### Added

@@ -5127,3 +5127,196 @@ input[type='checkbox'] {
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
+
+/* ── Trading Desk (v2 execution) ──────────────────────────────────────────── */
+
+.td-tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--border);
+  margin: 4px 0 16px;
+  flex-wrap: wrap;
+}
+.td-tab {
+  padding: 8px 14px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: color 0.15s, border-color 0.15s;
+}
+.td-tab:hover { color: var(--text); }
+.td-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+.td-tab-count {
+  font-size: 11px;
+  font-weight: 700;
+  min-width: 16px;
+  text-align: center;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--border);
+  color: var(--text-muted);
+}
+.td-tab.attn .td-tab-count {
+  background: var(--warning);
+  color: #1a1a1a;
+}
+.td-tab.attn {
+  color: var(--warning);
+}
+
+/* sortable grids */
+.td-grid {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.td-grid th,
+.td-grid td {
+  padding: 7px 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.td-grid th {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-muted);
+  font-weight: 600;
+  background: var(--bg-elev);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.td-grid th.num,
+.td-grid td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.td-grid th.sortable { cursor: pointer; user-select: none; }
+.td-grid th.sortable:hover { color: var(--text); }
+.td-grid th.sortable .sort-indicator {
+  margin-left: 4px;
+  font-size: 9px;
+  opacity: 0.35;
+}
+.td-grid th.sortable:hover .sort-indicator,
+.td-grid th.sortable[data-active] .sort-indicator {
+  opacity: 1;
+  color: var(--accent);
+}
+.td-grid tbody tr:hover { background: rgba(255,255,255,0.03); }
+.td-grid td.pos { color: var(--success); }
+.td-grid td.neg { color: var(--danger); }
+.td-grid-empty {
+  padding: 28px;
+  text-align: center;
+  color: var(--text-muted);
+}
+.td-grid-wrap {
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+/* small inline badges */
+.td-badge {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.td-badge.protective { background: rgba(248,81,73,0.16);  color: var(--danger); }
+.td-badge.discretionary { background: rgba(88,166,255,0.16); color: var(--accent); }
+.td-badge.dryrun { background: rgba(210,153,34,0.18); color: var(--warning); }
+.td-badge.placed { background: rgba(63,185,80,0.16); color: var(--success); }
+
+/* live feed */
+.td-feed { list-style: none; margin: 0; padding: 0; }
+.td-feed-item {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 7px 4px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.td-feed-time {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  white-space: nowrap;
+  min-width: 64px;
+}
+.td-feed-dot {
+  font-size: 11px;
+  line-height: 1.4;
+}
+.td-feed-text { flex: 1; }
+.td-feed-text .muted { color: var(--text-muted); }
+
+/* daily activity timeline */
+.td-timeline {
+  position: relative;
+  height: 56px;
+  margin: 6px 2px 22px;
+  border-radius: 8px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+}
+.td-timeline-track {
+  position: absolute;
+  left: 12px; right: 12px; top: 28px;
+  height: 3px;
+  background: var(--border);
+  border-radius: 2px;
+}
+.td-timeline-window {
+  position: absolute;
+  top: 24px;
+  height: 11px;
+  background: rgba(88,166,255,0.18);
+  border-left: 1px dashed var(--accent);
+  border-right: 1px dashed var(--accent);
+  border-radius: 2px;
+}
+.td-timeline-ev {
+  position: absolute;
+  top: 22px;
+  transform: translateX(-50%);
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 2px solid var(--bg);
+  cursor: default;
+}
+.td-timeline-label {
+  position: absolute;
+  top: 2px;
+  font-size: 10px;
+  color: var(--text-muted);
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+.td-timeline-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 12px;
+}

@@ -51,6 +51,8 @@ export function registerExecutionIpc(engine: ExecutionEngine): void {
     guard(() => engine.getRiskState()));
   ipcMain.handle('execution:get-positions', (): IpcResult<ExecPositionRow[]> =>
     guard(() => engine.getPositions() as ExecPositionRow[]));
+  ipcMain.handle('execution:get-recent-positions', (_evt, limit?: number): IpcResult<ExecPositionRow[]> =>
+    guard(() => engine.getRecentPositions(limit) as ExecPositionRow[]));
   ipcMain.handle('execution:get-proposals', (): IpcResult<ExecProposalRow[]> =>
     guard(() => engine.getProposals() as ExecProposalRow[]));
   ipcMain.handle('execution:get-audit', (_evt, limit?: number): IpcResult<ExecAuditRow[]> =>

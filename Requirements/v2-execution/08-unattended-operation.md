@@ -1,8 +1,9 @@
 # v2 Execution Subsystem — Unattended Paper Operation
 
-> **Status:** requirements / design (not yet built). Captured 2026-06-22. Treats three coupled
-> threads — full paper automation, brief orchestration, and a lean intraday batch — plus a Trading
-> Desk UI redesign as **one feature**: *run a complete unattended paper trading day*.
+> **Status:** IMPLEMENTED (v1.1.58–v1.1.60). Captured 2026-06-22. Treats three coupled
+> threads — full paper automation (Part A, v1.1.58), brief orchestration / freshness gate (Part B,
+> v1.1.58), and a lean intraday batch (Part C, v1.1.59) — plus a Trading Desk UI redesign (Part D,
+> v1.1.60) as **one feature**: *run a complete unattended paper trading day*.
 >
 > Companion: `01-architecture.md` (the 3 loops, control API, `ExecutionBroker` seam),
 > `02-risk-governor.md` (gate, caps, kill switch, §2.13 live preflight), `03-lifecycle.md`
@@ -195,7 +196,7 @@ speed. Any future intra-upstream trimming changes brief output and must clear FR
 
 ---
 
-## 5. Part D — Trading Desk UI redesign
+## 5. Part D — Trading Desk UI redesign — IMPLEMENTED (v1.1.60)
 
 ### 5.1 Presentation requirements (all grids)
 - Proper stylesheet; **aligned column headers**; **click-to-sort**; comfortable row density.
