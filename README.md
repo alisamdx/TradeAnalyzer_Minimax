@@ -88,6 +88,16 @@ in to the paper account with the API enabled (Global Config → API → Settings
 Socket Clients*, port open, `127.0.0.1` trusted). Confirm the `broker=ibkr` log line; `broker=mock`
 means the env var didn't reach the process.
 
+Spot-check the live engine state any time with `exec-state.ps1` (reads `/exec/state` on the control
+API at `127.0.0.1:7433`, token-authed) — a PASS/WARN readout of broker, engine-state,
+automation_mode/armed, broker-connected, and health:
+
+```powershell
+.\exec-state.ps1               # one-shot readout
+.\exec-state.ps1 -Watch        # refresh every 5s (e.g. to watch the startup stale_cycle clear)
+.\exec-state.ps1 -Raw          # also dump the full JSON
+```
+
 ## Architecture (at a glance)
 
 Standard Electron tri-process app:
