@@ -92,6 +92,40 @@ export function comboLimitOrderParams(netLimit: number): { action: OrderAction; 
   return { action: OrderAction.BUY, lmtPrice: Number((-netLimit).toFixed(2)) };
 }
 
+/**
+ * Build the IBKR combo LMT Order shared by the live placement and the whatIf preflight.
+ *
+ * `eTradeOnly`/`firmQuoteOnly` MUST be explicitly false: newer TWS SILENTLY DROPS combo
+ * orders when they are absent — no `orderStatus`, no `error`, no fill, nothing at the broker
+ * — while the API call itself returns cleanly. Symptom is an `order_submitted` audit row that
+ * never progresses. Validated live on paper 2026-06-18 via scripts/ibkr-*.mjs. See
+ * CLAUDE.md "IBKR gotchas".
+ */
+export function buildComboOrder(params: {
+  action: OrderAction;
+  lmtPrice: number;
+  totalQuantity: number;
+  orderRef?: string;
+  whatIf?: boolean;
+  account?: string;
+}): Order {
+  return {
+    action: params.action,
+    orderType: OrderType.LMT,
+    totalQuantity: params.totalQuantity,
+    lmtPrice: params.lmtPrice,
+    tif: TimeInForce.DAY,
+    transmit: true,
+    eTradeOnly: false,
+    firmQuoteOnly: false,
+    // Combos legging into different exchanges fill non-guaranteed; required or IBKR rejects.
+    smartComboRoutingParams: [{ tag: 'NonGuaranteed', value: '1' }],
+    ...(params.orderRef ? { orderRef: params.orderRef } : {}),
+    ...(params.whatIf ? { whatIf: true } : {}),
+    ...(params.account ? { account: params.account } : {}),
+  };
+}
+
 /** The inverse of {@link comboLimitOrderParams}: an IBKR combo fill price → credit-positive. */
 export function ibkrFillToNetCredit(ibkrPrice: number): number {
   return Number((-ibkrPrice).toFixed(2));
@@ -437,17 +471,13 @@ export class IbkrExecutionBroker implements ExecutionBroker {
     return new Promise<PermissionCheck>((resolve) => {
       const orderId = this.takeOrderId();
       const { action, lmtPrice } = comboLimitOrderParams(0.05); // price irrelevant for whatIf
-      const order: Order = {
+      const order = buildComboOrder({
         action,
-        orderType: OrderType.LMT,
-        totalQuantity: 1,
         lmtPrice,
-        tif: TimeInForce.DAY,
-        transmit: true,
+        totalQuantity: 1,
         whatIf: true, // margin/eligibility check only — never executes
-        smartComboRoutingParams: [{ tag: 'NonGuaranteed', value: '1' }],
-        ...(this.accountId ? { account: this.accountId } : {}),
-      };
+        account: this.accountId ?? undefined,
+      });
 
       let done = false;
       const finish = (r: PermissionCheck): void => {
@@ -505,18 +535,13 @@ export class IbkrExecutionBroker implements ExecutionBroker {
     const orderId = this.takeOrderId();
     const brokerOrderId = String(orderId);
     const { action, lmtPrice } = comboLimitOrderParams(o.netLimit);
-    const order: Order = {
+    const order = buildComboOrder({
       action,
-      orderType: OrderType.LMT,
-      totalQuantity: o.contracts,
       lmtPrice,
-      tif: TimeInForce.DAY,
+      totalQuantity: o.contracts,
       orderRef: o.clientOrderId,
-      transmit: true,
-      // Combos legging into different exchanges fill non-guaranteed; required or IBKR rejects.
-      smartComboRoutingParams: [{ tag: 'NonGuaranteed', value: '1' }],
-      ...(this.accountId ? { account: this.accountId } : {}),
-    };
+      account: this.accountId ?? undefined,
+    });
 
     const tracked: TrackedOrder = {
       clientOrderId: o.clientOrderId,

@@ -4,6 +4,7 @@ import {
   fromIbkrExpiry,
   legToOptionContract,
   comboLimitOrderParams,
+  buildComboOrder,
   ibkrFillToNetCredit,
   comboQuoteFromLegs,
   mapIbkrOrderStatus,
@@ -12,7 +13,7 @@ import {
   interpretWhatIfState,
   pickProbeSpread,
 } from '../src/main/execution/ibkr-execution-broker.js';
-import type { ContractDetails } from '@stoqey/ib';
+import { OrderAction, type ContractDetails } from '@stoqey/ib';
 import { resolveBrokerSettings } from '../src/main/execution/broker-factory.js';
 import type { LegSpec } from '../src/main/execution/execution-broker.js';
 
@@ -105,6 +106,34 @@ describe('IBKR adapter — combo pricing from legs', () => {
     const ratioed: LegSpec[] = [{ ticker: 'XYZ', right: 'P', action: 'sell', strike: 100, expiry: '2026-07-17', ratio: 2 }];
     const q = comboQuoteFromLegs(ratioed, [{ bid: 1.0, ask: 1.2 }]);
     expect(q.mid).toBeCloseTo(2.2, 2); // 1.1 * 2
+  });
+});
+
+describe('IBKR adapter — combo order construction', () => {
+  // Regression: newer TWS silently drops combo orders (no status/error/fill, nothing at the
+  // broker) unless eTradeOnly/firmQuoteOnly are explicitly false. Both flags MUST be present
+  // and false on every combo order, live and whatIf. See CLAUDE.md "IBKR gotchas".
+  it('sets eTradeOnly/firmQuoteOnly false on a live order', () => {
+    const o = buildComboOrder({ action: OrderAction.BUY, lmtPrice: -0.5, totalQuantity: 1, orderRef: 'ta_x' });
+    expect(o.eTradeOnly).toBe(false);
+    expect(o.firmQuoteOnly).toBe(false);
+    expect(o.transmit).toBe(true);
+    expect(o.orderRef).toBe('ta_x');
+    expect(o.whatIf).toBeUndefined();
+    expect(o.smartComboRoutingParams).toEqual([{ tag: 'NonGuaranteed', value: '1' }]);
+  });
+  it('sets eTradeOnly/firmQuoteOnly false on a whatIf probe too', () => {
+    const o = buildComboOrder({ action: OrderAction.BUY, lmtPrice: -0.05, totalQuantity: 1, whatIf: true });
+    expect(o.eTradeOnly).toBe(false);
+    expect(o.firmQuoteOnly).toBe(false);
+    expect(o.whatIf).toBe(true);
+  });
+  it('omits orderRef/account/whatIf when not provided', () => {
+    const o = buildComboOrder({ action: OrderAction.BUY, lmtPrice: -0.5, totalQuantity: 2 });
+    expect('orderRef' in o).toBe(false);
+    expect('account' in o).toBe(false);
+    expect('whatIf' in o).toBe(false);
+    expect(o.totalQuantity).toBe(2);
   });
 });
 

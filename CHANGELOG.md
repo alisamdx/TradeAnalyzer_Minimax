@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.62] — 2026-06-23
+
+### Fixed
+- **IBKR combo orders silently dropped by TWS — nothing reached the paper account.** The armed unattended engine logged `proposal → gate_pass → approved → order_submitted` for live AVGO wheel entries, but no fills came back and nothing appeared at the broker. Cause: the production `IbkrExecutionBroker` order object omitted the legacy compliance flags **`eTradeOnly: false`** and **`firmQuoteOnly: false`**. Newer TWS **silently drops** combo orders that lack them — no `orderStatus`, no `error`, no fill — while the `placeOrder()` API call returns cleanly, so the engine recorded "submitted" and waited forever. The three validated diagnostic scripts (`scripts/ibkr-*.mjs`) already set both flags; the engine's own placement path never did. Both the live order and the whatIf permission-preflight order now go through a single shared `buildComboOrder()` that always sets the flags.
+
+### Notes
+- Bug fix to order **delivery**, not trade logic — no change to which trades are selected, how they're sized, or how they exit. Validation-exempt per FR-SEY-5. New regression test asserts `eTradeOnly`/`firmQuoteOnly` are `false` on both live and whatIf combo orders (`tests/ibkr-execution-broker.test.ts`, 29 tests). **Re-arm and re-run on paper to confirm fills now land at IBKR.**
+
 ## [1.1.61] — 2026-06-23
 
 ### Added

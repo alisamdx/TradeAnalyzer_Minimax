@@ -95,7 +95,11 @@ Reuses §2.8. The full path, with the idempotency and crash-safety points called
    writes the `exec_orders` row **before** any network call.
 2. **`submitted`** — combo/BAG sent to IBKR (single net-limit order, never legged). The
    `submitted_at` marker is persisted pre-send, so a crash mid-send is recoverable by
-   reconciliation (§2.9), not a blind re-send.
+   reconciliation (§2.9), not a blind re-send. **The combo order MUST set `eTradeOnly:false`
+   + `firmQuoteOnly:false`** (built via the shared `buildComboOrder()`): newer TWS *silently
+   drops* a combo order lacking them — no `orderStatus`, no error, no fill — so the order
+   would sit in `submitted` forever with nothing at the broker (bug fixed v1.1.62; the engine
+   path had been missing the flags even though the diagnostic scripts always set them).
 3. **`working`** — IBKR acknowledges; `broker_order_id` recorded.
 4. Terminal: **`filled`** (→ open/close the `exec_positions` row), **`partially_filled`**
    (flag `needs_attention`, cancel remainder, notify — §2.8), **`rejected`** (record
