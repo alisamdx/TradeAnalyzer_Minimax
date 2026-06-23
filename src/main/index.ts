@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell } from 'electron';
+import { app, BrowserWindow, shell, powerSaveBlocker, Notification } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { readFileSync, existsSync } from 'node:fs';
@@ -76,7 +76,7 @@ import { BatchOrchestratorJob } from './services/jobs/batch-orchestrator-job.js'
 import { BetaService } from './services/beta-service.js';
 import { BriefReplayService } from './services/brief-replay-service.js';
 import { registerBriefReplayIpc } from './ipc/ipc-brief-replay.js';
-import { ExecutionEngine } from './execution/execution-engine.js';
+import { ExecutionEngine, type ExecNotifier } from './execution/execution-engine.js';
 import { RiskGovernor } from './execution/risk-governor.js';
 import { resolveBrokerSettings, createExecutionBroker } from './execution/broker-factory.js';
 import { registerExecutionIpc } from './ipc/ipc-execution.js';
@@ -430,7 +430,39 @@ app.whenReady().then(() => {
     `[execution] broker=${brokerSettings.kind} mode=${execMode}` +
       (brokerSettings.kind === 'ibkr' ? ` @ ${brokerSettings.host}:${brokerSettings.port}` : '')
   );
-  const executionEngine = new ExecutionEngine(db, executionBroker);
+  // Notifications for unattended operation (spec 08 §2.5): per-action OS push (gated by
+  // exec_config.notify_push) + email (when SMTP is configured). The engine gates notify_per_action.
+  const execNotifier: ExecNotifier = {
+    notify: async (n) => {
+      const pushOn =
+        (db.prepare('SELECT notify_push AS v FROM exec_config WHERE id = 1').get() as { v: number } | undefined)?.v === 1;
+      if (pushOn && Notification.isSupported()) {
+        try { new Notification({ title: n.title, body: n.body }).show(); } catch { /* push best-effort */ }
+      }
+      if (emailService.isConfigured()) {
+        try { await emailService.send(n.title, n.html ?? `<p>${n.body}</p>`); }
+        catch (e) { console.error('[execution] email notify failed:', e instanceof Error ? e.message : e); }
+      }
+    },
+  };
+  // Keep the machine awake while armed (running + unattended + paper) so an all-day run survives
+  // OS sleep (spec 08 §2.6); released on disarm/stop.
+  let armedBlockerId: number | null = null;
+  const onArmedChange = (armed: boolean): void => {
+    if (armed && armedBlockerId == null) {
+      armedBlockerId = powerSaveBlocker.start('prevent-display-sleep');
+      console.log('[execution] armed — OS sleep blocked');
+    } else if (!armed && armedBlockerId != null) {
+      powerSaveBlocker.stop(armedBlockerId);
+      armedBlockerId = null;
+      console.log('[execution] disarmed — OS sleep allowed');
+    }
+  };
+  const executionEngine = new ExecutionEngine(db, executionBroker, {
+    notifier: execNotifier,
+    enableCycleLoop: true, // start the management/entry loop when the engine goes running
+    onArmedChange,
+  });
   executionEngine.onEvent((evt) => getMainWindow()?.webContents.send('execution:event', evt));
   registerExecutionIpc(executionEngine);
 

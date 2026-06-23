@@ -55,12 +55,14 @@ axis** set by an arm switch in the Trading Desk header, persisted as `exec_confi
 - **Live guard:** selecting **Armed** is disabled in live mode; and the engine enforces paper-only
   auto-entry regardless of config (defense in depth).
 
-### 2.2 Auto-entry
+### 2.2 Auto-entry — IMPLEMENTED (v1.1.58)
 
-- New `exec_config.entry_mode: 'propose' | 'auto'` (mirrors the existing exit modes). Derived from
-  `automation_mode` (`unattended` ⇒ `auto`), or settable directly in advanced config.
-- When `auto` (and paper), the cycle's entry step routes each freshly-generated proposal straight
-  through `OrderManager.approveProposal` (re-price + full gate) — same path as a UI click.
+- **`automation_mode` is the single control** (the planned separate `entry_mode` column was folded
+  in — one source of truth). `unattended` ⇒ auto-entry; discretionary exits also auto-fire.
+- When `unattended` **and paper**, the cycle's entry step routes each freshly-generated proposal
+  straight through `OrderManager.approveProposal` (re-price + full gate) — same path as a UI click.
+- **Paper-only enforced in the engine:** `tryGenerateEntries` auto-approves only when
+  `executionMode === 'paper'`; live always stays semi-auto regardless of `automation_mode`.
 
 ### 2.3 The cycle loop driver (currently missing)
 
@@ -230,9 +232,9 @@ profit-target exit XYZ · kill clear`). Turns the audit log into a glanceable da
 
 ## 6. Config / schema additions (consolidated)
 
-`exec_config` (new columns):
-- `automation_mode TEXT NOT NULL DEFAULT 'semi'  CHECK (automation_mode IN ('semi','dry_run','unattended'))`
-- `entry_mode TEXT NOT NULL DEFAULT 'propose'    CHECK (entry_mode IN ('propose','auto'))`
+`exec_config` (new columns — migration 058, IMPLEMENTED; no CHECK constraints, governor validates
+the `automation_mode` enum defensively):
+- `automation_mode TEXT NOT NULL DEFAULT 'semi'`   (semi | dry_run | unattended — sole control)
 - `cycle_interval_sec INTEGER NOT NULL DEFAULT 120`
 - `notify_per_action INTEGER NOT NULL DEFAULT 1`
 - `notify_push INTEGER NOT NULL DEFAULT 1`

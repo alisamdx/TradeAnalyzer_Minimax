@@ -251,4 +251,17 @@ describe('loadBriefPickInputs (multi-strategy)', () => {
     const { picks } = loadBriefPickInputs(d, ['inflection'], NOW);
     expect(picks.map((p) => p.ticker)).toEqual(['INF']);
   });
+
+  it('freshness gate (requireToday): skips a prior-day brief, keeps today\'s', () => {
+    const d = db();
+    // A prior-day brief (generated 2026-06-12, ET date != NOW's 2026-06-15).
+    d.prepare("INSERT INTO daily_briefs (generated_at, valid_until, strategy, picks, run_meta) VALUES ('2026-06-12T20:30:00Z', '2026-06-13T13:30:00Z', 'inflection', ?, '{}')")
+      .run(JSON.stringify([briefPick({ ticker: 'OLD' })]));
+    expect(loadBriefPickInputs(d, ['inflection'], NOW, true).picks).toHaveLength(0);
+    // requireToday=false still returns the latest regardless of date.
+    expect(loadBriefPickInputs(d, ['inflection'], NOW, false).picks.map((p) => p.ticker)).toEqual(['OLD']);
+    // Today's brief (generated 2026-06-15) is now the latest → the gate lets it through.
+    insert(d, 'inflection', [briefPick({ ticker: 'NEW' })]);
+    expect(loadBriefPickInputs(d, ['inflection'], NOW, true).picks.map((p) => p.ticker)).toEqual(['NEW']);
+  });
 });

@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.58] — 2026-06-22
+
+### Added
+- **Unattended paper operation (spec 08, Part A).** The execution engine can now run a full unattended paper trading day. A single **arm switch** (`exec_config.automation_mode`) has three stances: **Off** (`semi` — approve each, current), **Dry-run** (decide everything, place nothing → `exec_dry_run_log`), and **Armed** (`unattended` — auto-approve entries + auto-fire discretionary exits). **Auto-entry is PAPER-ONLY** — enforced in the engine (`tryGenerateEntries` auto-approves only when `executionMode==='paper'`); live always stays semi-auto.
+- **Cycle loop driver wired.** `ExecutionCore.startLoop` was previously unwired (nothing ticked unattended); the engine now starts the management/entry loop on start at `exec_config.cycle_interval_sec` (default 120s) and stops it on stop. index.ts opts in via `enableCycleLoop`.
+- **Brief-freshness gate.** The engine acts only on a brief generated **today (ET)** — `loadBriefPickInputs(..., requireToday=true)` — never yesterday's after-close brief. Eliminates the 10:00–10:15 stale-brief window.
+- **Notifications.** Per-action OS push (gated by `notify_push`) + email on each entry/exit/kill-trip (`notify_per_action`), and an **end-of-day digest email** that fires **only when armed** (`notify_eod_digest`). Wired in index.ts via Electron `Notification` + the existing `EmailService`.
+- **Keep-awake while armed.** index.ts starts an Electron `powerSaveBlocker('prevent-display-sleep')` whenever the engine is armed (running + unattended + paper), released on disarm/stop, so an all-day run doesn't sleep.
+- **UI.** Trading Desk gains an **Automation (arm switch)** panel + prominent `⚡ ARMED` / `DRY-RUN` header pills; Execution Settings gains an **Automation & notifications** section. New `exec_config` columns + `exec_dry_run_log` table (migration 058); `execution:get-dry-run-log` IPC + `window.api.execution.getDryRunLog`.
+
+### Notes
+- Validation-exempt per FR-SEY-5 — nothing changes which trades are selected or how they're sized/exited; auto-entry only removes the human click on already-selected picks, the freshness gate only prevents acting on stale picks, and every auto-entry passes the full risk gate (re-priced) exactly as a human approval does. Caps (1/day etc.) and the kill switch bind unchanged. The planned separate `entry_mode` column was folded into `automation_mode` (one source of truth). Deferred to a later pass (Part D): the full tabbed Trading Desk redesign + activity timeline, the lean intraday batch (#4), and the in-app live notification feed. New tests: freshness gate, unattended/semi/live/dry-run cycle behavior, dry-run dedupe + no audit pollution, armed state. Full suite: **633 passing**.
+
 ## [1.1.57] — 2026-06-22
 
 ### Added

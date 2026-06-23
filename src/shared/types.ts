@@ -2205,6 +2205,12 @@ export interface ExecConfig {
   timeExitDte: number;                     // discretionary, 0 = off
   profitTargetMode: 'propose' | 'auto';
   timeExitMode: 'propose' | 'auto';
+  // unattended operation (spec 08) — the arm switch + loop + notifications
+  automationMode: 'semi' | 'dry_run' | 'unattended'; // semi=approve-each · dry_run=decide,place nothing · unattended=auto (paper-only)
+  cycleIntervalSec: number;                 // management/entry loop tick
+  notifyPerAction: boolean;                 // email + OS push on entry/exit/kill
+  notifyPush: boolean;                      // include the desktop/OS notification surface
+  notifyEodDigest: boolean;                 // end-of-day digest email (fires only when armed)
   updatedAt: string;
 }
 
@@ -2330,6 +2336,8 @@ export interface ExecEngineStateView {
   engineState: EngineState;
   killSwitch: { tripped: boolean; reason: string | null };
   executionMode: ExecutionMode;
+  automationMode: 'semi' | 'dry_run' | 'unattended'; // the arm switch (spec 08)
+  armed: boolean;                           // running + unattended + paper (auto-entry active)
   drawdownPct: number;                      // closed-equity drawdown from HWM (FR-SEY-2)
   health: ExecEngineHealth;
 }
@@ -2373,6 +2381,21 @@ export interface ExecProposalRow {
   contracts: number;
   position_id: number | null;
   close_reason: string | null;
+}
+
+/** Dry-run would-be decision row (spec 08 §2.4) as selected by the facade. */
+export interface ExecDryRunRow {
+  id: number;
+  at: string;
+  et_date: string;
+  kind: string; // 'entry' | 'exit'
+  ticker: string;
+  strategy: string | null;
+  structure: string | null;
+  net_credit: number | null;
+  max_loss: number | null;
+  contracts: number | null;
+  reason: string | null;
 }
 
 /** Audit-log row as selected by the facade. */

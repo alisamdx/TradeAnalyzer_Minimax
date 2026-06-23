@@ -117,6 +117,7 @@ import type {
   ExecPositionRow,
   ExecProposalRow,
   ExecAuditRow,
+  ExecDryRunRow,
   ExecApproveResult,
   ExecStartResult,
 } from '@shared/types.js';
@@ -1187,6 +1188,7 @@ function buildApi() {
     getPositions: () => invoke<ExecPositionRow[]>('execution:get-positions'),
     getProposals: () => invoke<ExecProposalRow[]>('execution:get-proposals'),
     getAudit:     (limit?: number) => invoke<ExecAuditRow[]>('execution:get-audit', limit),
+    getDryRunLog: (limit?: number) => invoke<ExecDryRunRow[]>('execution:get-dry-run-log', limit),
     // config
     updateConfig: (patch: Partial<ExecConfig>) => invoke<ExecConfig>('execution:update-config', patch),
     // lifecycle / control

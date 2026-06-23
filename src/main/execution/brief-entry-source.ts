@@ -129,11 +129,12 @@ export function briefPickToPickInput(
 export function loadBriefPickInputs(
   db: DbHandle,
   strategies: readonly string[],
-  now: Date = new Date()
+  now: Date = new Date(),
+  requireToday = false
 ): { picks: PickInput[]; briefIds: Record<string, number> } {
   const today = etDateString(now);
   const briefStmt = db.prepare(
-    'SELECT id, picks FROM daily_briefs WHERE strategy = ? ORDER BY generated_at DESC LIMIT 1'
+    'SELECT id, picks, generated_at FROM daily_briefs WHERE strategy = ? ORDER BY generated_at DESC LIMIT 1'
   );
   const earningsStmt = db.prepare(
     'SELECT report_date FROM earnings_calendar WHERE ticker = ? AND report_date >= ? ORDER BY report_date LIMIT 1'
@@ -142,8 +143,12 @@ export function loadBriefPickInputs(
   const picks: PickInput[] = [];
   const briefIds: Record<string, number> = {};
   for (const strategy of strategies) {
-    const row = briefStmt.get(strategy) as { id: number; picks: string } | undefined;
+    const row = briefStmt.get(strategy) as { id: number; picks: string; generated_at: string } | undefined;
     if (!row) continue;
+    // Brief-freshness gate (spec 08 §3.2): the engine acts only on a brief generated TODAY (ET) —
+    // never yesterday's after-close brief. Stale → skip entirely (no picks, no briefId), so the
+    // engine no-ops until today's ~10:15 intraday brief commits.
+    if (requireToday && etDateString(new Date(row.generated_at)) !== today) continue;
     briefIds[strategy] = row.id; // record the brief even if its picks don't parse
     let parsed: BriefPick[];
     try {

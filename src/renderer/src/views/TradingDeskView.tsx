@@ -110,6 +110,23 @@ export function TradingDeskView() {
   const onKillTrip = () => run(() => window.api.execution.killTrip());
   const onKillClear = () => run(() => window.api.execution.killClear());
 
+  const automationMode = state?.automationMode ?? config?.automationMode ?? 'semi';
+  const armed = state?.armed ?? false;
+  const onSetAutomation = (mode: 'semi' | 'dry_run' | 'unattended') => run(async () => {
+    if (mode === 'unattended' && isLive) {
+      setError('Unattended auto-entry is PAPER-ONLY. Switch to paper to arm.');
+      return;
+    }
+    if (mode === 'unattended') {
+      const okc = await window.dialog.confirm({
+        title: 'Arm unattended mode',
+        message: 'While running on paper, the engine will auto-enter and auto-exit trades with NO approval. Continue?',
+      });
+      if (!okc) return;
+    }
+    await window.api.execution.updateConfig({ automationMode: mode });
+  });
+
   const onApprove = (p: ExecProposalRow) => run(async () => {
     // Paper = 1-click. Live = type-to-confirm (guard against fat-finger live orders).
     if (isLive) {
@@ -145,6 +162,8 @@ export function TradingDeskView() {
         <h2 style={{ margin: 0 }}>🤝 Trading Desk</h2>
         {config && pill(isLive ? 'LIVE' : 'PAPER', isLive ? 'var(--danger)' : 'var(--accent)')}
         {pill(engineState.replace('_', ' ').toUpperCase(), STATE_COLOR[engineState] ?? 'var(--text-muted)')}
+        {automationMode === 'unattended' && pill(armed ? '⚡ ARMED' : 'UNATTENDED', '#7c3aed')}
+        {automationMode === 'dry_run' && pill('DRY-RUN', 'var(--warning)')}
         <span style={{ flex: 1 }} />
         <button onClick={refresh} disabled={busy}>↻ Refresh</button>
       </div>
@@ -168,6 +187,26 @@ export function TradingDeskView() {
             Broker: {state?.health.brokerConnected ? '🟢 connected' : '⚪ disconnected'}
             {' · '}health: {state?.health.healthy ? 'OK' : (state?.health.degradedReason ?? 'degraded')}
             <br />last cycle: {fmtTime(state?.health.lastCycleAt)}
+          </div>
+        </Panel>
+
+        <Panel title="Automation (arm switch)">
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <button onClick={() => onSetAutomation('semi')} disabled={busy || automationMode === 'semi'}
+              title="Approve every entry manually">Off</button>
+            <button onClick={() => onSetAutomation('dry_run')} disabled={busy || automationMode === 'dry_run'}
+              title="Decide everything, place nothing">Dry-run</button>
+            <button onClick={() => onSetAutomation('unattended')} disabled={busy || automationMode === 'unattended' || isLive}
+              title={isLive ? 'PAPER ONLY — auto-entry is disabled in live' : 'Auto-enter + auto-exit, unattended'}
+              style={armed ? { background: '#7c3aed', color: '#fff' } : undefined}>⚡ Armed</button>
+          </div>
+          <div style={{ marginTop: 10, fontSize: 12, color: 'var(--text-muted)' }}>
+            {automationMode === 'unattended'
+              ? (armed ? '⚡ Armed — auto-entry active (paper).' : 'Unattended set; arms once running on paper.')
+              : automationMode === 'dry_run'
+                ? 'Decides everything, places nothing → dry-run log.'
+                : 'Manual — every entry needs approval.'}
+            <br /><strong style={{ color: 'var(--warning)' }}>Paper-only</strong> — live always requires approval.
           </div>
         </Panel>
 

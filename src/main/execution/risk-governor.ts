@@ -44,6 +44,11 @@ interface ConfigRow {
   time_exit_dte: number;
   profit_target_mode: string;
   time_exit_mode: string;
+  automation_mode: string;
+  cycle_interval_sec: number;
+  notify_per_action: number;
+  notify_push: number;
+  notify_eod_digest: number;
   updated_at: string;
 }
 
@@ -90,6 +95,11 @@ const CONFIG_COLUMN: Record<keyof ExecConfig, string> = {
   timeExitDte: 'time_exit_dte',
   profitTargetMode: 'profit_target_mode',
   timeExitMode: 'time_exit_mode',
+  automationMode: 'automation_mode',
+  cycleIntervalSec: 'cycle_interval_sec',
+  notifyPerAction: 'notify_per_action',
+  notifyPush: 'notify_push',
+  notifyEodDigest: 'notify_eod_digest',
   updatedAt: 'updated_at',
 };
 
@@ -152,6 +162,12 @@ export class RiskGovernor {
       timeExitDte: r.time_exit_dte,
       profitTargetMode: r.profit_target_mode === 'auto' ? 'auto' : 'propose',
       timeExitMode: r.time_exit_mode === 'auto' ? 'auto' : 'propose',
+      automationMode:
+        r.automation_mode === 'unattended' || r.automation_mode === 'dry_run' ? r.automation_mode : 'semi',
+      cycleIntervalSec: r.cycle_interval_sec,
+      notifyPerAction: r.notify_per_action === 1,
+      notifyPush: r.notify_push === 1,
+      notifyEodDigest: r.notify_eod_digest === 1,
       updatedAt: r.updated_at,
     };
   }
@@ -348,7 +364,7 @@ export class RiskGovernor {
     });
   }
 
-  async checkEntry(cand: GateCandidate, broker: ExecutionBroker) {
+  async checkEntry(cand: GateCandidate, broker: ExecutionBroker, opts: { audit?: boolean } = {}) {
     const cfg = this.getConfig();
     const rs = this.getRiskState();
     const deployed = this.recomputeDeployed();
@@ -381,9 +397,12 @@ export class RiskGovernor {
 
     const enriched: GateCandidate = sectorCapOn ? { ...cand, sector: cand.sector ?? this.sectorBucket(cand.ticker) } : cand;
     const result = evaluateGate(ctx, enriched);
-    this.audit(result.passed ? 'gate_pass' : 'gate_reject', {
-      detail: { ticker: cand.ticker, strategy: cand.strategy, contracts: cand.contracts, reason: result.rejectReason },
-    });
+    // Dry-run evaluation passes audit:false so it never writes to the real audit stream (spec 08 §2.4).
+    if (opts.audit !== false) {
+      this.audit(result.passed ? 'gate_pass' : 'gate_reject', {
+        detail: { ticker: cand.ticker, strategy: cand.strategy, contracts: cand.contracts, reason: result.rejectReason },
+      });
+    }
     return result;
   }
 

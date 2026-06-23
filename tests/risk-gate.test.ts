@@ -35,6 +35,11 @@ const CONFIG: ExecConfig = {
   timeExitDte: 0,
   profitTargetMode: 'propose',
   timeExitMode: 'propose',
+  automationMode: 'semi',
+  cycleIntervalSec: 120,
+  notifyPerAction: true,
+  notifyPush: true,
+  notifyEodDigest: true,
   updatedAt: '2026-06-14T00:00:00.000Z',
 };
 

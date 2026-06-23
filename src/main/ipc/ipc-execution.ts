@@ -17,6 +17,7 @@ import type {
   ExecPositionRow,
   ExecProposalRow,
   ExecAuditRow,
+  ExecDryRunRow,
   ExecApproveResult,
   ExecStartResult,
 } from '@shared/types.js';
@@ -54,6 +55,8 @@ export function registerExecutionIpc(engine: ExecutionEngine): void {
     guard(() => engine.getProposals() as ExecProposalRow[]));
   ipcMain.handle('execution:get-audit', (_evt, limit?: number): IpcResult<ExecAuditRow[]> =>
     guard(() => engine.getAudit(limit) as ExecAuditRow[]));
+  ipcMain.handle('execution:get-dry-run-log', (_evt, limit?: number): IpcResult<ExecDryRunRow[]> =>
+    guard(() => engine.getDryRunLog(limit) as ExecDryRunRow[]));
 
   // ── config ──
   ipcMain.handle('execution:update-config', (_evt, patch: Partial<ExecConfig>): IpcResult<ExecConfig> =>

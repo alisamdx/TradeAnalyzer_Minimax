@@ -11,22 +11,44 @@ import type { ExecConfig } from '../../shared/types.js';
 import type { ExecutionBroker } from './execution-broker.js';
 import { RiskGovernor } from './risk-governor.js';
 import { OrderManager, type ApproveResult } from './order-manager.js';
-import { EntryPolicy, type EntryOutcome, type PickInput } from './entry-policy.js';
+import { EntryPolicy, type EntryMode, type EntryOutcome, type PickInput } from './entry-policy.js';
 import { ExitPolicy } from './exit-policy.js';
-import { ManagementLoop } from './position-manager.js';
+import { ManagementLoop, type ManagementOutcome } from './position-manager.js';
 import { ExecutionCore, type CoreEvent, type CoreHealth, type StartResult } from './execution-core.js';
 import { loadBriefPickInputs } from './brief-entry-source.js';
+import { etDateString } from './market-hours.js';
+
+/** A per-action / digest notification the engine raises; the concrete sink (email + OS push) is
+ *  injected so the engine has no Electron/SMTP dependency (and tests get a no-op). */
+export interface ExecNotification {
+  kind: 'entry' | 'exit' | 'kill_trip' | 'eod_digest';
+  title: string;
+  body: string;
+  html?: string;
+}
+export interface ExecNotifier {
+  notify(n: ExecNotification): void | Promise<void>;
+}
 
 export interface ExecutionEngineOptions {
   holidays?: ReadonlySet<string>;
   watchdogMaxGapMs?: number;
   now?: () => Date;
+  /** Sink for per-action + digest notifications. Defaults to a no-op (tests/headless-less). */
+  notifier?: ExecNotifier;
+  /** When true, startEngine starts the management/entry loop timer (index.ts sets this; tests omit). */
+  enableCycleLoop?: boolean;
+  /** Called when the "armed" state (running + unattended + paper) changes — index.ts toggles the
+   *  OS power-save blocker so an all-day run doesn't sleep. */
+  onArmedChange?: (armed: boolean) => void;
 }
 
 export interface EngineStateView {
   engineState: ReturnType<RiskGovernor['getEngineState']>;
   killSwitch: { tripped: boolean; reason: string | null };
   executionMode: ExecConfig['executionMode'];
+  automationMode: ExecConfig['automationMode'];
+  armed: boolean; // running + unattended + paper (auto-entry active)
   drawdownPct: number;
   health: CoreHealth;
 }
@@ -38,6 +60,12 @@ export class ExecutionEngine {
   readonly management: ManagementLoop;
   readonly core: ExecutionCore;
   private readonly now: () => Date;
+  private readonly notifier: ExecNotifier;
+  private readonly enableCycleLoop: boolean;
+  private readonly onArmedChange?: (armed: boolean) => void;
+  private lastArmed = false;
+  private lastMarketOpen = false;
+  private lastDigestDate: string | null = null;
 
   constructor(
     private readonly db: DbHandle,
@@ -45,6 +73,9 @@ export class ExecutionEngine {
     opts: ExecutionEngineOptions = {}
   ) {
     this.now = opts.now ?? (() => new Date());
+    this.notifier = opts.notifier ?? { notify: () => {} };
+    this.enableCycleLoop = opts.enableCycleLoop ?? false;
+    this.onArmedChange = opts.onArmedChange;
     this.governor = new RiskGovernor(db);
     this.orderManager = new OrderManager(db, broker, this.governor);
     this.orderManager.wire();
@@ -53,11 +84,17 @@ export class ExecutionEngine {
     this.core = new ExecutionCore(db, broker, this.governor, opts);
     // Each market-open cycle: manage open positions (§3.3), then look for new entries from the
     // latest brief (§3.2). Entries run on the cycle — not at brief-commit — so the entry window,
-    // caps, and live re-pricing apply; the daily cap stops repeats across cycles.
+    // caps, and live re-pricing apply; the daily cap stops repeats across cycles. The automation
+    // mode (semi/dry_run/unattended) decides whether entries auto-approve and exits auto-fire.
     this.core.setMarketCycleHook(async (now) => {
-      await this.management.runOnce(now);
-      await this.tryGenerateEntries(now);
+      const config = this.governor.getConfig();
+      const mode: EntryMode = config.automationMode === 'dry_run' ? 'dry_run' : 'live';
+      const exits = await this.management.runOnce(now, mode);
+      if (mode === 'live') await this.notifyExits(exits);
+      await this.tryGenerateEntries(now, mode, config);
     });
+    // Internal observer: EOD digest on market-close + kill-trip notification + armed tracking.
+    this.core.onEvent((e) => this.onCoreEvent(e));
   }
 
   // ── lifecycle / control ──
@@ -85,13 +122,21 @@ export class ExecutionEngine {
       }
       this.governor.audit('preflight_permission_ok', { detail: perm });
     }
-    return this.core.startEngine();
+    const result = await this.core.startEngine();
+    if (result.started && this.enableCycleLoop) {
+      const sec = this.governor.getConfig().cycleIntervalSec;
+      this.core.startLoop(Math.max(1, sec) * 1000);
+    }
+    this.refreshArmed();
+    return result;
   }
   stopEngine(): void {
     this.core.stopEngine();
+    this.refreshArmed();
   }
   pauseEngine(): void {
     this.core.pauseEngine();
+    this.refreshArmed();
   }
   tripKillSwitch(): void {
     this.governor.tripKillSwitch('manual');
@@ -115,19 +160,29 @@ export class ExecutionEngine {
    *  entry-window / caps / critic / composite filters are enforced by EntryPolicy, and each
    *  proposal is re-priced against the live IBKR chain — so a stale brief never trades a stale
    *  price. No-op when the broker is disconnected or no brief/picks exist. */
-  generateEntriesFromLatestBrief(now: Date = this.now()): Promise<EntryOutcome[]> {
+  generateEntriesFromLatestBrief(now: Date = this.now(), mode: EntryMode = 'live'): Promise<EntryOutcome[]> {
     if (!this.broker.isConnected()) return Promise.resolve([]);
-    // Pull picks from every eligible strategy's latest brief (inflection at launch; wheel etc.
-    // once enabled in eligibleStrategies). EntryPolicy then filters + caps across the union.
-    const { picks } = loadBriefPickInputs(this.db, this.governor.getConfig().eligibleStrategies, now);
+    // Pull picks from every eligible strategy's latest brief — but only TODAY's brief (freshness
+    // gate, spec 08 §3.2): the engine never acts on a stale prior-day brief. EntryPolicy then
+    // filters + caps across the union.
+    const { picks } = loadBriefPickInputs(this.db, this.governor.getConfig().eligibleStrategies, now, true);
     if (picks.length === 0) return Promise.resolve([]);
-    return this.entryPolicy.generateEntries(picks, this.broker, now);
+    return this.entryPolicy.generateEntries(picks, this.broker, now, mode);
   }
 
-  /** Cycle-safe wrapper: entry generation must never throw into the management cycle. */
-  private async tryGenerateEntries(now: Date): Promise<void> {
+  /** Cycle-safe wrapper: entry generation must never throw into the management cycle. In
+   *  unattended PAPER mode it auto-approves each fresh proposal (same gate path as a UI click);
+   *  live always stays semi-auto (paper-only invariant). */
+  private async tryGenerateEntries(now: Date, mode: EntryMode, config: ExecConfig): Promise<void> {
     try {
-      await this.generateEntriesFromLatestBrief(now);
+      const outcomes = await this.generateEntriesFromLatestBrief(now, mode);
+      const autoEntry = config.automationMode === 'unattended' && config.executionMode === 'paper' && mode === 'live';
+      if (!autoEntry) return;
+      for (const o of outcomes) {
+        if (o.proposalId == null) continue;
+        const res = await this.orderManager.approveProposal(o.proposalId, now);
+        if (res.ok) await this.notifyEntry(o.proposalId);
+      }
     } catch (e) {
       console.error('[execution] entry generation error:', e instanceof Error ? e.message : e);
     }
@@ -153,10 +208,13 @@ export class ExecutionEngine {
   // ── reads (for the control surface) ──
   getState(): EngineStateView {
     const rs = this.governor.getRiskState();
+    const config = this.governor.getConfig();
     return {
       engineState: rs.engineState,
       killSwitch: { tripped: rs.killSwitchTripped, reason: rs.killSwitchReason },
-      executionMode: this.governor.getConfig().executionMode,
+      executionMode: config.executionMode,
+      automationMode: config.automationMode,
+      armed: this.computeArmed(),
       drawdownPct: this.governor.getDrawdownPct(),
       health: this.core.getHealth(),
     };
@@ -165,7 +223,19 @@ export class ExecutionEngine {
     return this.governor.getConfig();
   }
   updateConfig(patch: Partial<ExecConfig>): ExecConfig {
-    return this.governor.updateConfig(patch);
+    const config = this.governor.updateConfig(patch);
+    this.refreshArmed(); // arming via the settings switch must toggle the power-save blocker
+    return config;
+  }
+  /** Today's dry-run would-be decisions (newest first), for the control surface. */
+  getDryRunLog(limit = 100) {
+    const n = Math.min(Math.max(limit, 1), 1000);
+    return this.db
+      .prepare(
+        `SELECT id, at, et_date, kind, ticker, strategy, structure, net_credit, max_loss, contracts, reason
+         FROM exec_dry_run_log ORDER BY id DESC LIMIT ?`
+      )
+      .all(n);
   }
   getRiskState() {
     return this.governor.getRiskState();
@@ -191,5 +261,110 @@ export class ExecutionEngine {
   getAudit(limit = 100) {
     const n = Math.min(Math.max(limit, 1), 1000);
     return this.db.prepare('SELECT id, at, event, ref_table, ref_id, detail_json FROM exec_audit_log ORDER BY id DESC LIMIT ?').all(n);
+  }
+
+  // ── notifications + armed tracking ──
+  private dispatch(n: ExecNotification): void {
+    const config = this.governor.getConfig();
+    if (n.kind !== 'eod_digest' && !config.notifyPerAction) return;
+    void Promise.resolve(this.notifier.notify(n)).catch((e) =>
+      console.error('[execution] notify error:', e instanceof Error ? e.message : e)
+    );
+  }
+
+  private async notifyEntry(proposalId: number): Promise<void> {
+    const p = this.db
+      .prepare('SELECT ticker, strategy, structure, net_credit, contracts FROM exec_proposals WHERE id = ?')
+      .get(proposalId) as
+      | { ticker: string; strategy: string; structure: string; net_credit: number | null; contracts: number }
+      | undefined;
+    if (!p) return;
+    this.dispatch({
+      kind: 'entry',
+      title: `Auto-entry: ${p.ticker} ${p.strategy}`,
+      body: `${p.contracts}× ${p.structure} @ net ${p.net_credit ?? '—'} (auto-approved, paper)`,
+    });
+  }
+
+  private async notifyExits(outcomes: ManagementOutcome[]): Promise<void> {
+    for (const o of outcomes) {
+      if (o.action !== 'closed') continue;
+      const pos = this.db.prepare('SELECT ticker, strategy FROM exec_positions WHERE id = ?').get(o.positionId) as
+        | { ticker: string; strategy: string }
+        | undefined;
+      this.dispatch({
+        kind: 'exit',
+        title: `Auto-exit: ${pos?.ticker ?? `#${o.positionId}`}`,
+        body: `${pos?.strategy ?? ''} closed — ${o.reason ?? 'exit'}`,
+      });
+    }
+  }
+
+  private onCoreEvent(e: CoreEvent): void {
+    if (e.type === 'engine_state' && e.state === 'kill_tripped') {
+      const rs = this.governor.getRiskState();
+      this.dispatch({
+        kind: 'kill_trip',
+        title: 'Kill switch tripped — new entries halted',
+        body: `Reason: ${rs.killSwitchReason ?? 'unknown'}. Open positions are still managed; clear manually to resume.`,
+      });
+    }
+    if (e.type === 'cycle') {
+      // Market just closed → send the once-per-day EOD digest (armed only). The cycle hook only
+      // runs while the market is open, so detect the open→closed transition here instead.
+      if (this.lastMarketOpen && !e.result.marketOpen) this.maybeSendEodDigest();
+      this.lastMarketOpen = e.result.marketOpen;
+    }
+    this.refreshArmed();
+  }
+
+  private maybeSendEodDigest(): void {
+    const config = this.governor.getConfig();
+    const today = etDateString(this.now());
+    if (config.automationMode !== 'unattended' || !config.notifyEodDigest) return;
+    if (this.lastDigestDate === today) return;
+    this.lastDigestDate = today;
+
+    const entries = this.db
+      .prepare("SELECT ticker, strategy, structure, contracts, entry_net_credit FROM exec_positions WHERE substr(opened_at,1,10) = ? ORDER BY opened_at")
+      .all(today) as Array<{ ticker: string; strategy: string; structure: string; contracts: number; entry_net_credit: number | null }>;
+    const exits = this.db
+      .prepare("SELECT ticker, close_reason, current_pnl FROM exec_positions WHERE status = 'closed' AND substr(closed_at,1,10) = ? ORDER BY closed_at")
+      .all(today) as Array<{ ticker: string; close_reason: string | null; current_pnl: number | null }>;
+    const rs = this.governor.getRiskState();
+
+    const li = (s: string): string => `<li>${s}</li>`;
+    const html =
+      `<h2>Unattended paper — end of day ${today}</h2>` +
+      `<p><b>Day P&amp;L:</b> realized ${rs.dayRealizedPnl.toFixed(2)}, unrealized ${rs.dayUnrealizedPnl.toFixed(2)}</p>` +
+      `<h3>Entries (${entries.length})</h3><ul>` +
+      (entries.map((e) => li(`${e.ticker} ${e.strategy} — ${e.contracts}× ${e.structure} @ ${e.entry_net_credit ?? '—'}`)).join('') || li('none')) +
+      `</ul><h3>Exits (${exits.length})</h3><ul>` +
+      (exits.map((e) => li(`${e.ticker} — ${e.close_reason ?? 'exit'} (P&amp;L ${e.current_pnl?.toFixed(2) ?? '—'})`)).join('') || li('none')) +
+      `</ul>`;
+
+    this.dispatch({
+      kind: 'eod_digest',
+      title: `Unattended paper — EOD ${today}: ${entries.length} entries, ${exits.length} exits`,
+      body: `Day P&L realized ${rs.dayRealizedPnl.toFixed(2)} / unrealized ${rs.dayUnrealizedPnl.toFixed(2)}`,
+      html,
+    });
+  }
+
+  /** Armed = the auto-entry posture is active: engine running, unattended, and paper. */
+  private computeArmed(): boolean {
+    const config = this.governor.getConfig();
+    return (
+      this.governor.getEngineState() === 'running' &&
+      config.automationMode === 'unattended' &&
+      config.executionMode === 'paper'
+    );
+  }
+
+  private refreshArmed(): void {
+    const armed = this.computeArmed();
+    if (armed === this.lastArmed) return;
+    this.lastArmed = armed;
+    this.onArmedChange?.(armed);
   }
 }

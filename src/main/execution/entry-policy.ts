@@ -35,7 +35,11 @@ export interface EntryOutcome {
   ticker: string;
   proposalId: number | null; // set when a proposal was created
   rejected: string | null; // reason when not
+  dryRun?: boolean; // true when this was a dry-run would-be entry (logged, not placed)
 }
+
+/** Entry generation mode: 'live' persists real proposals; 'dry_run' only records would-be entries. */
+export type EntryMode = 'live' | 'dry_run';
 
 export class EntryPolicy {
   constructor(
@@ -67,9 +71,17 @@ export class EntryPolicy {
     return { accepted: true, reason: null };
   }
 
-  /** Price at the venue, size, gate, and persist a pending proposal (or report why not). */
-  async buildProposal(pick: PickInput, broker: ExecutionBroker, now: Date): Promise<EntryOutcome> {
+  /** Price at the venue, size, gate, and persist a pending proposal (or report why not). In
+   *  'dry_run' mode it evaluates identically but records a would-be entry to exec_dry_run_log
+   *  instead of creating a real proposal (no audit, no proposal/position — spec 08 §2.4). */
+  async buildProposal(
+    pick: PickInput,
+    broker: ExecutionBroker,
+    now: Date,
+    mode: EntryMode = 'live'
+  ): Promise<EntryOutcome> {
     const config = this.governor.getConfig();
+    const dry = mode === 'dry_run';
     const quote = await broker.priceCombo(pick.legs);
 
     // Liquidity gate (§3.2): skip names whose combo bid/ask is too wide vs the credit — crossing
@@ -92,8 +104,13 @@ export class EntryPolicy {
       contracts: sizing.contracts,
       maxLossPerContract: pick.maxLossPerContract,
     };
-    const gate = await this.governor.checkEntry(cand, broker);
+    const gate = await this.governor.checkEntry(cand, broker, { audit: !dry });
     if (!gate.passed) return { ticker: pick.ticker, proposalId: null, rejected: gate.rejectReason };
+
+    if (dry) {
+      this.logDryRunEntry(pick, quote.netCredit, sizing.contracts, now);
+      return { ticker: pick.ticker, proposalId: null, rejected: null, dryRun: true };
+    }
 
     const createdAt = now.toISOString();
     const expiresAt = new Date(now.getTime() + config.proposalShelfLifeMin * 60_000).toISOString();
@@ -127,10 +144,15 @@ export class EntryPolicy {
   }
 
   /** Apply daily/weekly caps + filters across a batch, highest composite first. */
-  async generateEntries(picks: PickInput[], broker: ExecutionBroker, now: Date): Promise<EntryOutcome[]> {
+  async generateEntries(
+    picks: PickInput[],
+    broker: ExecutionBroker,
+    now: Date,
+    mode: EntryMode = 'live'
+  ): Promise<EntryOutcome[]> {
     const config = this.governor.getConfig();
-    let dayUsed = this.countNewEntries(now, 'day');
-    let weekUsed = this.countNewEntries(now, 'week');
+    let dayUsed = this.countNewEntries(now, 'day', mode);
+    let weekUsed = this.countNewEntries(now, 'week', mode);
     const outcomes: EntryOutcome[] = [];
 
     for (const pick of [...picks].sort((a, b) => b.compositeScore - a.compositeScore)) {
@@ -147,9 +169,9 @@ export class EntryPolicy {
         outcomes.push({ ticker: pick.ticker, proposalId: null, rejected: f.reason });
         continue;
       }
-      const outcome = await this.buildProposal(pick, broker, now);
+      const outcome = await this.buildProposal(pick, broker, now, mode);
       outcomes.push(outcome);
-      if (outcome.proposalId != null) {
+      if (outcome.proposalId != null || outcome.dryRun) {
         dayUsed += 1;
         weekUsed += 1;
       }
@@ -157,16 +179,49 @@ export class EntryPolicy {
     return outcomes;
   }
 
-  /** Count entries already initiated (pending/approved proposals + non-closed positions). */
-  private countNewEntries(now: Date, scope: 'day' | 'week'): number {
-    const stamps = [
-      ...(this.db
-        .prepare("SELECT created_at AS t FROM exec_proposals WHERE kind = 'entry' AND status IN ('pending','approved')")
-        .all() as Array<{ t: string }>).map((r) => r.t),
-      ...(this.db.prepare("SELECT opened_at AS t FROM exec_positions WHERE status != 'closed'").all() as Array<{
-        t: string;
-      }>).map((r) => r.t),
-    ];
+  /** Record a would-be entry to exec_dry_run_log, deduped per ET-date+ticker so a re-evaluated
+   *  brief doesn't log the same would-be entry every cycle. */
+  private logDryRunEntry(pick: PickInput, netCredit: number, contracts: number, now: Date): void {
+    const etDate = etDateString(now);
+    const dup = this.db
+      .prepare("SELECT 1 FROM exec_dry_run_log WHERE et_date = ? AND kind = 'entry' AND ticker = ?")
+      .get(etDate, pick.ticker);
+    if (dup) return;
+    this.db
+      .prepare(
+        `INSERT INTO exec_dry_run_log (at, et_date, kind, ticker, strategy, structure, legs_json, net_credit, max_loss, contracts, reason)
+         VALUES (?, ?, 'entry', ?, ?, ?, ?, ?, ?, ?, NULL)`
+      )
+      .run(
+        now.toISOString(),
+        etDate,
+        pick.ticker,
+        pick.strategy,
+        pick.structure,
+        JSON.stringify(pick.legs),
+        netCredit,
+        pick.maxLossPerContract,
+        contracts
+      );
+  }
+
+  /** Count entries already initiated this day/week. In live mode = pending/approved proposals +
+   *  non-closed positions; in dry-run = would-be entries logged to exec_dry_run_log (so the caps
+   *  still bind a dry-run day exactly as they would a live one). */
+  private countNewEntries(now: Date, scope: 'day' | 'week', mode: EntryMode = 'live'): number {
+    const stamps =
+      mode === 'dry_run'
+        ? (this.db.prepare("SELECT at AS t FROM exec_dry_run_log WHERE kind = 'entry'").all() as Array<{ t: string }>).map(
+            (r) => r.t
+          )
+        : [
+            ...(this.db
+              .prepare("SELECT created_at AS t FROM exec_proposals WHERE kind = 'entry' AND status IN ('pending','approved')")
+              .all() as Array<{ t: string }>).map((r) => r.t),
+            ...(this.db.prepare("SELECT opened_at AS t FROM exec_positions WHERE status != 'closed'").all() as Array<{
+              t: string;
+            }>).map((r) => r.t),
+          ];
     if (scope === 'day') {
       const today = etDateString(now);
       return stamps.filter((t) => etDateString(new Date(t)) === today).length;

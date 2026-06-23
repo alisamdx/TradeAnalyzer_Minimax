@@ -143,4 +143,98 @@ describe('ExecutionEngine', () => {
       expect(ok).toBeTruthy();
     });
   });
+
+  describe('unattended automation', () => {
+    // A minimal valid inflection brief pick (today's date), so the cycle's entry source produces one.
+    function seedBrief(db: DbHandle, strategy = 'inflection', ticker = 'AAA'): void {
+      const leg = (side: string, action: string, strike: number) => ({
+        action, side, strike, expiration: '2026-07-17', delta: null, gamma: null, theta: null, vega: null,
+        bid: 1.0, ask: 1.1, mid: 1.05, iv: 30, openInterest: 500, volume: 100, qty: 1,
+      });
+      const lab = {
+        slug: 'short-put-vertical', ticker, expiration: '2026-07-17', dte: 30, underlyingPrice: 100,
+        legs: [leg('put', 'sell', 100), leg('put', 'buy', 95)],
+        netCredit: 1.0, netDebit: null, maxProfit: 100, maxLoss: -400, breakevens: [99],
+        annualizedReturn: 50, popEstimate: 70, currentAtmIv: 30, unavailableReason: null,
+      };
+      const score = {
+        slug: 'short-put-vertical', name: 'spv', category: 'directional', totalScore: 80, grade: 'A',
+        ivScore: 20, directionScore: 20, premiumScore: 20, liquidityScore: 12, requiresStock: false,
+        complexity: 'moderate', flags: [], aiRationale: null, setup: lab,
+      };
+      const pick = {
+        ticker, compositeScore: 80, signals: {}, strategyLabResult: { context: {}, scores: [score] },
+        aiRationale: null, criticVerdict: { verdict: 'pass', confidence: 'high', flags: [], rationale: null, generatedAt: MARKET_OPEN },
+        rank: 1, validated: true, price: 100, breakoutDirection: 'up',
+      };
+      // generated_at = same ET date as MARKET_OPEN (2026-06-15) → passes the freshness gate.
+      db.prepare("INSERT INTO daily_briefs (generated_at, valid_until, strategy, picks, run_meta) VALUES (?, ?, ?, ?, '{}')")
+        .run('2026-06-15T18:30:00Z', '2026-06-16T13:30:00Z', strategy, JSON.stringify([pick]));
+    }
+
+    it('unattended paper: auto-enters from a fresh brief (no pending proposal)', async () => {
+      const { db, engine } = setup();
+      seedBrief(db);
+      engine.updateConfig({ automationMode: 'unattended' }); // paper by default
+      await engine.startEngine();
+      await engine.runCycle();
+      expect(engine.getPositions()).toHaveLength(1);
+      expect(engine.getProposals()).toHaveLength(0); // auto-approved
+    });
+
+    it('semi mode: the cycle proposes but does not auto-approve', async () => {
+      const { db, engine } = setup();
+      seedBrief(db);
+      // automationMode defaults to 'semi'
+      await engine.startEngine();
+      await engine.runCycle();
+      expect(engine.getProposals()).toHaveLength(1);
+      expect(engine.getPositions()).toHaveLength(0);
+    });
+
+    it('live + unattended: never auto-enters (paper-only invariant)', async () => {
+      const { db, engine } = setup();
+      seedBrief(db);
+      engine.updateConfig({ automationMode: 'unattended', executionMode: 'live' });
+      await engine.startEngine();
+      await engine.runCycle();
+      expect(engine.getPositions()).toHaveLength(0); // no auto-entry in live
+      expect(engine.getProposals()).toHaveLength(1); // proposed, awaiting human approval
+    });
+
+    it('dry-run: records a would-be entry, places nothing', async () => {
+      const { db, engine } = setup();
+      seedBrief(db);
+      engine.updateConfig({ automationMode: 'dry_run' });
+      await engine.startEngine();
+      await engine.runCycle();
+      expect(engine.getPositions()).toHaveLength(0);
+      expect(engine.getProposals()).toHaveLength(0);
+      const dry = engine.getDryRunLog() as Array<{ ticker: string; kind: string }>;
+      expect(dry).toHaveLength(1);
+      expect(dry[0]!.ticker).toBe('AAA');
+      expect(dry[0]!.kind).toBe('entry');
+      // No gate_pass audit pollution from the dry-run evaluation.
+      expect(db.prepare("SELECT 1 FROM exec_audit_log WHERE event = 'gate_pass'").get()).toBeUndefined();
+    });
+
+    it('dry-run dedupes the same would-be entry across cycles', async () => {
+      const { db, engine } = setup();
+      seedBrief(db);
+      engine.updateConfig({ automationMode: 'dry_run' });
+      await engine.startEngine();
+      await engine.runCycle();
+      await engine.runCycle();
+      expect(engine.getDryRunLog()).toHaveLength(1);
+    });
+
+    it('exposes automationMode + armed in state', async () => {
+      const { engine } = setup();
+      engine.updateConfig({ automationMode: 'unattended' });
+      await engine.startEngine();
+      const st = engine.getState();
+      expect(st.automationMode).toBe('unattended');
+      expect(st.armed).toBe(true); // running + unattended + paper
+    });
+  });
 });

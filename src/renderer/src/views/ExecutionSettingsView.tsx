@@ -146,6 +146,26 @@ export function ExecutionSettingsView() {
         </Field>
       </Section>
 
+      <Section title="Automation & notifications">
+        <Field label="Automation mode" help="Off = approve each. Dry-run = decide everything, place nothing. Unattended = auto-enter + auto-exit (PAPER-ONLY — live always requires approval). The Trading Desk arm switch sets this too.">
+          <select value={draft.automationMode} onChange={e => set('automationMode', e.target.value as ExecConfig['automationMode'])}>
+            <option value="semi">Off (approve each)</option>
+            <option value="dry_run">Dry-run</option>
+            <option value="unattended">Unattended (paper-only)</option>
+          </select>
+        </Field>
+        <Num label="Cycle interval (sec)" v={draft.cycleIntervalSec} on={v => set('cycleIntervalSec', v)} step={30} help="Management/entry loop tick while the engine runs." />
+        <Field label="Per-action email + push" help="Notify on each entry, exit, and kill-switch trip.">
+          <input type="checkbox" checked={draft.notifyPerAction} onChange={e => set('notifyPerAction', e.target.checked)} />
+        </Field>
+        <Field label="Desktop / OS push" help="Include the native OS notification surface (email still sent when SMTP is configured).">
+          <input type="checkbox" checked={draft.notifyPush} onChange={e => set('notifyPush', e.target.checked)} />
+        </Field>
+        <Field label="End-of-day digest email" help="One summary at market close — fires only when armed (unattended).">
+          <input type="checkbox" checked={draft.notifyEodDigest} onChange={e => set('notifyEodDigest', e.target.checked)} />
+        </Field>
+      </Section>
+
       <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
         <button onClick={onSave} disabled={busy || !dirty}>{busy ? 'Saving…' : 'Save changes'}</button>
         <button onClick={() => config && setDraft(toDraft(config))} disabled={busy || !dirty}>Revert</button>

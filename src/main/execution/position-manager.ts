@@ -12,6 +12,10 @@ import type { LegSpec } from './execution-broker.js';
 import type { RiskGovernor } from './risk-governor.js';
 import type { OrderManager, ApproveResult } from './order-manager.js';
 import { ExitPolicy, type ManagedPositionView } from './exit-policy.js';
+import { etDateString } from './market-hours.js';
+
+/** Management mode: 'live' acts on decisions; 'dry_run' only records would-be exits. */
+export type ManagementMode = 'live' | 'dry_run';
 
 interface PosRow {
   id: number;
@@ -47,7 +51,7 @@ export class ManagementLoop {
     private readonly exitPolicy: ExitPolicy = new ExitPolicy()
   ) {}
 
-  async runOnce(now: Date): Promise<ManagementOutcome[]> {
+  async runOnce(now: Date, mode: ManagementMode = 'live'): Promise<ManagementOutcome[]> {
     const config = this.governor.getConfig();
     const rows = this.db.prepare("SELECT * FROM exec_positions WHERE status = 'open'").all() as PosRow[];
     const outcomes: ManagementOutcome[] = [];
@@ -59,8 +63,18 @@ export class ManagementLoop {
         continue;
       }
 
+      // Dry-run touches nothing — record the would-be exit and move on (spec 08 §2.4).
+      if (mode === 'dry_run') {
+        this.logDryRunExit(row, decision.reason, now);
+        outcomes.push({ positionId: row.id, action: 'none', reason: decision.reason });
+        continue;
+      }
+
+      // Unattended auto-fires discretionary exits too (protective always auto). Otherwise the
+      // per-action exit modes decide.
       const auto =
         decision.cls === 'protective' ||
+        config.automationMode === 'unattended' ||
         (decision.reason === 'profit_target' ? config.profitTargetMode : config.timeExitMode) === 'auto';
 
       if (auto) {
@@ -89,6 +103,33 @@ export class ManagementLoop {
     if (p.position_id == null) return { ok: false, orderId: null, reason: 'no_position' };
     this.db.prepare("UPDATE exec_proposals SET status = 'approved' WHERE id = ?").run(proposalId);
     return this.orderManager.submitClose(p.position_id, (p.close_reason as ExecCloseReason) ?? 'manual', now);
+  }
+
+  /** Record a would-be exit to exec_dry_run_log, deduped per ET-date+position so a re-evaluated
+   *  cycle doesn't log it every tick. */
+  private logDryRunExit(row: PosRow, reason: ExecCloseReason, now: Date): void {
+    const etDate = etDateString(now);
+    const dup = this.db
+      .prepare("SELECT 1 FROM exec_dry_run_log WHERE et_date = ? AND kind = 'exit' AND ticker = ? AND reason = ?")
+      .get(etDate, row.ticker, reason);
+    if (dup) return;
+    this.db
+      .prepare(
+        `INSERT INTO exec_dry_run_log (at, et_date, kind, ticker, strategy, structure, legs_json, net_credit, max_loss, contracts, reason)
+         VALUES (?, ?, 'exit', ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        now.toISOString(),
+        etDate,
+        row.ticker,
+        row.strategy,
+        row.structure,
+        row.legs_json,
+        row.current_mark,
+        row.max_loss,
+        row.contracts,
+        reason
+      );
   }
 
   private createExitProposal(row: PosRow, reason: ExecCloseReason, now: Date): boolean {
