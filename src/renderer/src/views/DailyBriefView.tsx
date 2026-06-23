@@ -293,10 +293,14 @@ function CriticBadge({ verdict }: { verdict: CriticVerdict }) {
     <div className="critic-verdict">
       <div className="critic-badge-row">
         <span className="critic-label">🔍 Critic:</span>
-        <span className={`critic-badge critic-badge-${verdict.verdict}`}>
-          {CRITIC_LABEL[verdict.verdict]}
+        <span className={`critic-badge critic-badge-${verdict.degraded ? 'degraded' : verdict.verdict}`}>
+          {verdict.degraded ? '⚠ Critic unavailable' : CRITIC_LABEL[verdict.verdict]}
         </span>
-        {verdict.confidence === 'low' && (
+        {verdict.degraded ? (
+          <span className="critic-confidence-low" title="The LLM critic did NOT run (e.g. the AI service was overloaded). This is a rule-based fallback, not a vetted pass — re-run the brief.">
+            not vetted
+          </span>
+        ) : verdict.confidence === 'low' && (
           <span className="critic-confidence-low" title="Critic ran without LLM synthesis (API key missing or unavailable)">
             low confidence
           </span>
@@ -312,6 +316,9 @@ function CriticBadge({ verdict }: { verdict: CriticVerdict }) {
 
       {expanded && (
         <div className="critic-detail">
+          {verdict.degraded && (
+            <p className="critic-rationale-text muted">⚠ The LLM critic did not run for this pick (the AI service was unavailable or overloaded), so this verdict is a rule-based fallback only — <strong>not</strong> an adversarial review. Re-run the brief to get a real verdict.</p>
+          )}
           {verdict.rationale && (
             <p className="critic-rationale-text">{verdict.rationale}</p>
           )}
@@ -325,7 +332,7 @@ function CriticBadge({ verdict }: { verdict: CriticVerdict }) {
               ))}
             </ul>
           )}
-          {!verdict.rationale && verdict.flags.length === 0 && (
+          {!verdict.degraded && !verdict.rationale && verdict.flags.length === 0 && (
             <p className="critic-rationale-text muted">No specific concerns identified.</p>
           )}
         </div>
@@ -484,8 +491,11 @@ function PickCard({
           </span>
         )}
         {verdict && (
-          <span className={`pick-summary-verdict critic-badge-${verdict}`}>
-            {CRITIC_LABEL[verdict]}
+          <span
+            className={`pick-summary-verdict critic-badge-${pick.criticVerdict?.degraded ? 'degraded' : verdict}`}
+            title={pick.criticVerdict?.degraded ? 'LLM critic did not run — not a vetted pass' : undefined}
+          >
+            {pick.criticVerdict?.degraded ? '⚠ Critic n/a' : CRITIC_LABEL[verdict]}
           </span>
         )}
         {strategy === 'wheel' && pick.price != null && (

@@ -49,6 +49,9 @@ describe('EntryPolicy.filterPick', () => {
     ['below composite', { compositeScore: 40 }, 'below_min_composite'], // gate is 50 (migration 052)
     ['thin liquidity', { hasAdequateLiquidity: false }, 'inadequate_liquidity'],
     ['earnings before expiry', { earningsBeforeExpiry: true }, 'earnings_before_expiry'],
+    // Fail-closed: a degraded critic (LLM didn't run, e.g. Anthropic 529) must not trade, even
+    // though its rule-only fallback verdict is 'pass'. Checked before the verdict.
+    ['degraded critic', { criticDegraded: true }, 'critic_degraded'],
   ];
   for (const [label, override, reason] of rejects) {
     it(`rejects ${label}`, () => {

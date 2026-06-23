@@ -20,6 +20,9 @@ export interface PickInput {
   legs: LegSpec[];
   compositeScore: number;
   criticVerdict: 'pass' | 'caution' | 'flag' | null;
+  /** True when the LLM critic did not actually run for this pick (Anthropic overload/failure), so
+   *  `criticVerdict` is a rule-only fallback, not an adversarial review. The gate rejects it. */
+  criticDegraded?: boolean;
   hasAdequateLiquidity: boolean;
   earningsBeforeExpiry: boolean;
   maxLossPerContract: number; // defined-risk $ per contract
@@ -57,6 +60,10 @@ export class EntryPolicy {
       const dir = pick.structure === 'short-call-vertical' ? 'down' : pick.structure === 'short-put-vertical' ? 'up' : null;
       if (dir && config.inflectionDirection !== 'both' && config.inflectionDirection !== dir) return rej('inflection_direction');
     }
+    // Fail-closed on a degraded critic: if the LLM critic didn't run (e.g. Anthropic 529), its
+    // 'pass' is a rule-only fallback, NOT an adversarial all-clear — never trade on an un-vetted
+    // brief. (Checked before the verdict so the reason is specific.)
+    if (pick.criticDegraded) return rej('critic_degraded');
     if (pick.criticVerdict !== 'pass' && pick.criticVerdict !== 'caution') return rej('critic_verdict');
     // Per-strategy composite floor (composites aren't comparable across strategies); falls back
     // to the global floor when a strategy has no override.

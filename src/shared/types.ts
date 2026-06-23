@@ -1629,6 +1629,10 @@ export interface CriticVerdict {
   flags: CriticFlag[];
   rationale: string | null;
   generatedAt: string;
+  /** True when the LLM critic did NOT run (e.g. Anthropic 529/overload) and `verdict` is the
+   *  rule-based fallback only — NOT an adversarial all-clear. Consumers must treat a degraded
+   *  verdict as un-vetted: the v2 entry gate rejects it (fail-closed), and the UI marks it. */
+  degraded?: boolean;
 }
 
 export interface BriefPick {

@@ -4679,6 +4679,12 @@ input[type='checkbox'] {
   color: #f85149;
   border-color: rgba(248,81,73,0.3);
 }
+/* Degraded: the LLM critic did not run — neutral/muted, never the green "pass" look. */
+.critic-badge-degraded {
+  background: rgba(139,148,158,0.14);
+  color: var(--text-muted);
+  border-color: rgba(139,148,158,0.35);
+}
 .critic-confidence-low {
   font-size: 10px;
   color: var(--text-muted);

@@ -49,7 +49,7 @@ handoff. The brief already emits the structure (`short-put-vertical` for an up-b
 | Filter | Default | Rationale |
 | --- | --- | --- |
 | Eligible strategy | `inflection` | Launch scope (§2.12). |
-| Critic verdict | `pass` or `caution` only — **never `flag`** | The existing adversarial gate becomes a hard pre-trade filter. |
+| Critic verdict | `pass` or `caution` only — **never `flag`**, and **never a degraded verdict** | The existing adversarial gate becomes a hard pre-trade filter. **Fail-closed (v1.1.67):** if the LLM critic didn't actually run (e.g. Anthropic 529 → `CriticVerdict.degraded=true`, a rule-only fallback `pass`), the pick is rejected `critic_degraded` — the engine never trades an un-vetted brief. |
 | Min composite score | `70` | Configurable entry-quality floor (inflection has no min-composite gate in v1; the engine adds one). |
 | Liquidity | reuse brief `hasAdequateLiquidity` | No execution into thin chains. |
 | Max new entries / day | `1` | Weekly-swing, quality-over-quantity. |

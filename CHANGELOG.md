@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.67] — 2026-06-23
+
+### Fixed
+- **A degraded (LLM-failed) critic no longer reads as an all-clear, and the engine won't trade on it.** When the Anthropic API is overloaded (today's 10:28 brief hit a `529 overloaded_error`), the critic falls back to the rule-based verdict only — which is `pass` when no rule flag fires. Every pick then showed `✓ Pass / low confidence / no rationale`, looking like 21 clean adversarial passes when in fact the LLM critic never ran. Worse, the v2 entry gate accepted that fallback `pass` (it ignored `confidence`/`rationale`), so the engine would have entered trades from an **un-vetted** brief — fail-*open* on AI failure.
+  - `CriticVerdict.degraded` now marks a fallback verdict; `EntryPolicy` rejects degraded picks with `critic_degraded` (**fail-closed** — never trade an un-vetted pick).
+  - The Daily Brief UI shows **"⚠ Critic unavailable / not vetted"** (neutral, not a green Pass) instead of `✓ Pass` for degraded verdicts, with an explanation on expand.
+
+### Changed
+- **Critic AI calls retry harder on transient overload.** The critic's Anthropic client now uses `maxRetries: 4` (above the SDK default of 2) so a brief 429/500/`529` overload rides out on exponential backoff instead of blanking the whole critic layer.
+
+### Notes
+- Surfaced by a deep-dive on today's 10:15 brief (user saw "too many pass"). Root cause was the API 529, not lenient scoring. The fail-closed guard is strictly more conservative (it can only *remove* un-vetted trades, never add or re-rank). Validation-exempt per FR-SEY-5. 3 new regression tests (gate rejects `critic_degraded`; brief→PickInput maps `degraded`; clean stays un-degraded). Full suite **661 passing**. (Separately noted from the same audit: the 10:15 lean run can't be trusted for **inflection** — partial-bar `volumeSurge` collapses the composite — and skips the earnings-refresh; trust the after-close run for those.)
+
 ## [1.1.66] — 2026-06-23
 
 ### Changed

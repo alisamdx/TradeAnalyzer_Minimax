@@ -207,7 +207,10 @@ export class CriticService {
       flags.some(f => f.key === 'critical_signal_missing') ? 'medium' : 'high';
 
     try {
-      const client = new Anthropic({ apiKey });
+      // maxRetries above the SDK default (2): the critic is the engine's adversarial gate, and a
+      // transient Anthropic overload (429/500/529) blanking it degrades the whole brief (and used
+      // to fail OPEN). 4 retries with the SDK's exponential backoff rides out brief overloads.
+      const client = new Anthropic({ apiKey, maxRetries: 4 });
 
       const topSignals = Object.entries(pick.signals)
         .filter(([, v]) => !v.missing && v.raw !== null)
@@ -380,8 +383,10 @@ Use verdict: pass, caution, or flag. Use confidence: high, medium, or low.`;
 
       return { verdict, confidence, flags, rationale, generatedAt };
     } catch {
-      // LLM unavailable — fall back to rule-based verdict only
-      return { verdict: baseVerdict, confidence: 'low', flags, rationale: null, generatedAt };
+      // LLM unavailable (e.g. Anthropic 529/overload) — fall back to the rule-based verdict only.
+      // `degraded: true` marks it as un-vetted so consumers DON'T treat this as an adversarial
+      // all-clear: the v2 entry gate rejects it (fail-closed) and the UI flags it.
+      return { verdict: baseVerdict, confidence: 'low', flags, rationale: null, generatedAt, degraded: true };
     }
   }
 

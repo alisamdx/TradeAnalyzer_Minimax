@@ -103,6 +103,18 @@ describe('briefPickToPickInput', () => {
     expect(briefPickToPickInput(briefPick({ criticVerdict: null }), 'inflection', null)!.criticVerdict).toBeNull();
   });
 
+  it('flags a degraded critic verdict (LLM did not run) so the entry gate fails closed', () => {
+    const clean = briefPickToPickInput(briefPick({ criticVerdict: critic('pass') }), 'inflection', null)!;
+    expect(clean.criticDegraded).toBe(false);
+    const degraded = briefPickToPickInput(
+      briefPick({ criticVerdict: { ...critic('pass'), degraded: true } }),
+      'inflection',
+      null
+    )!;
+    expect(degraded.criticVerdict).toBe('pass'); // verdict still reads 'pass' (rule fallback)…
+    expect(degraded.criticDegraded).toBe(true); // …but it's marked un-vetted → gate rejects it
+  });
+
   it('flags earnings before expiry when an earnings date falls on/before the expiry', () => {
     expect(briefPickToPickInput(briefPick(), 'inflection', null,{ nextEarningsDate: '2026-07-10' })!.earningsBeforeExpiry).toBe(true);
     expect(briefPickToPickInput(briefPick(), 'inflection', null,{ nextEarningsDate: '2026-08-01' })!.earningsBeforeExpiry).toBe(false);

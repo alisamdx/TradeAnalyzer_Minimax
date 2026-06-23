@@ -114,6 +114,7 @@ export function briefPickToPickInput(
     legs,
     compositeScore: pick.compositeScore,
     criticVerdict: pick.criticVerdict?.verdict ?? null,
+    criticDegraded: pick.criticVerdict?.degraded === true,
     hasAdequateLiquidity,
     earningsBeforeExpiry,
     maxLossPerContract: Math.abs(setup.maxLoss),
