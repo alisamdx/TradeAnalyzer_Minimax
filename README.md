@@ -70,6 +70,24 @@ npm run build        # production build + installer
 npm run package      # build without installer (--dir)
 ```
 
+### Running the v2 execution engine against IBKR (paper)
+
+The execution engine defaults to the deterministic **mock broker**; IBKR (TWS/Gateway) is opt-in via
+the `TA_EXEC_BROKER=ibkr` environment variable. Because the app is single-instance, any running mock
+instance must be closed first. The `run-ibkr.ps1` launcher does both — it stops a running instance,
+sets the env var, and starts the packaged exe:
+
+```powershell
+.\run-ibkr.ps1                 # stop mock, TA_EXEC_BROKER=ibkr, launch → expect [execution] broker=ibkr mode=paper @ 127.0.0.1:7497
+.\run-ibkr.ps1 -Gateway        # IB Gateway ports (4002 paper) instead of TWS
+.\run-ibkr.ps1 -Port 7497      # explicit socket-port override
+```
+
+Paper vs live comes from `exec_config.executionMode` (not the script). Requires TWS/Gateway logged
+in to the paper account with the API enabled (Global Config → API → Settings → *Enable ActiveX and
+Socket Clients*, port open, `127.0.0.1` trusted). Confirm the `broker=ibkr` log line; `broker=mock`
+means the env var didn't reach the process.
+
 ## Architecture (at a glance)
 
 Standard Electron tri-process app:
