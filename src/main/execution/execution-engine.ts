@@ -30,6 +30,11 @@ export interface ExecNotifier {
   notify(n: ExecNotification): void | Promise<void>;
 }
 
+/** An OPEN/CLOSE order stuck pre-ack (`pending`/`submitted`) longer than this is treated as
+ *  silently dropped by the broker and reconciled (cancelled; the entry's cap slot freed). A
+ *  healthy IBKR order acks in ~1–2s, so this is generously above any normal ack latency. */
+const STALE_ORDER_MS = 90_000;
+
 export interface ExecutionEngineOptions {
   holidays?: ReadonlySet<string>;
   watchdogMaxGapMs?: number;
@@ -89,6 +94,8 @@ export class ExecutionEngine {
     this.core.setMarketCycleHook(async (now) => {
       const config = this.governor.getConfig();
       const mode: EntryMode = config.automationMode === 'dry_run' ? 'dry_run' : 'live';
+      // Sweep silently-dropped orders first so their cap slots free before this cycle's entry pass.
+      await this.orderManager.reconcileStaleOrders(now, STALE_ORDER_MS);
       const exits = await this.management.runOnce(now, mode);
       if (mode === 'live') await this.notifyExits(exits);
       await this.tryGenerateEntries(now, mode, config);

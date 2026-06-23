@@ -53,8 +53,10 @@ describe('OrderManager.approveProposal', () => {
     const res = await ctx.om.approveProposal(proposalId, NOW);
     expect(res.ok).toBe(true);
 
+    // The mock fills synchronously on placeOrder, so by here the entry is a position and its
+    // proposal is retired to 'superseded' (counts the entry once — via the position — not twice).
     const proposal = ctx.db.prepare('SELECT status FROM exec_proposals WHERE id = ?').get(proposalId) as { status: string };
-    expect(proposal.status).toBe('approved');
+    expect(proposal.status).toBe('superseded');
 
     const order = ctx.db.prepare('SELECT * FROM exec_orders WHERE id = ?').get(res.orderId) as Record<string, unknown>;
     expect(order.status).toBe('filled');
@@ -137,5 +139,68 @@ describe('OrderManager.submitClose', () => {
     await ctx.om.submitClose(positionId, 'manual', NOW);
     const again = await ctx.om.submitClose(positionId, 'manual', NOW);
     expect(again.reason).toBe('already_closed');
+  });
+});
+
+describe('OrderManager.reconcileStaleOrders', () => {
+  // A combo order the broker silently drops sits 'submitted' forever; its approved proposal would
+  // otherwise hold the daily-cap slot indefinitely. The sweep cancels it and frees the slot.
+  const stuckOpenOrder = (ctx: Awaited<ReturnType<typeof setup>>, proposalId: number, submittedAt: string): number => {
+    ctx.db.prepare("UPDATE exec_proposals SET status = 'approved' WHERE id = ?").run(proposalId);
+    const info = ctx.db
+      .prepare("INSERT INTO exec_orders (client_order_id, proposal_id, status, side, submitted_at) VALUES ('ta_stuck_open', ?, 'submitted', 'open', ?)")
+      .run(proposalId, submittedAt);
+    return Number(info.lastInsertRowid);
+  };
+
+  it('cancels a stale submitted OPEN order and expires its proposal to free the cap', async () => {
+    const ctx = await setup();
+    const proposalId = await makeProposal(ctx);
+    const orderId = stuckOpenOrder(ctx, proposalId, new Date(NOW.getTime() - 5 * 60_000).toISOString()); // 5 min old
+
+    const swept = await ctx.om.reconcileStaleOrders(NOW, 90_000);
+    expect(swept).toBe(1);
+
+    const order = ctx.db.prepare('SELECT status, reject_reason FROM exec_orders WHERE id = ?').get(orderId) as { status: string; reject_reason: string };
+    expect(order.status).toBe('cancelled');
+    expect(order.reject_reason).toBe('stale_no_ack');
+
+    const proposal = ctx.db.prepare('SELECT status FROM exec_proposals WHERE id = ?').get(proposalId) as { status: string };
+    expect(proposal.status).toBe('expired'); // cap slot freed
+
+    const events = (ctx.db.prepare('SELECT event FROM exec_audit_log').all() as Array<{ event: string }>).map((r) => r.event);
+    expect(events).toContain('order_stale_cancelled');
+    expect(events).toContain('proposal_expired');
+  });
+
+  it('leaves a fresh (not-yet-stale) submitted order untouched', async () => {
+    const ctx = await setup();
+    const proposalId = await makeProposal(ctx);
+    const orderId = stuckOpenOrder(ctx, proposalId, NOW.toISOString()); // just submitted
+
+    const swept = await ctx.om.reconcileStaleOrders(NOW, 90_000);
+    expect(swept).toBe(0);
+    const order = ctx.db.prepare('SELECT status FROM exec_orders WHERE id = ?').get(orderId) as { status: string };
+    expect(order.status).toBe('submitted');
+    const proposal = ctx.db.prepare('SELECT status FROM exec_proposals WHERE id = ?').get(proposalId) as { status: string };
+    expect(proposal.status).toBe('approved');
+  });
+
+  it('un-sticks a position when a stale CLOSE order is swept', async () => {
+    const ctx = await setup();
+    const proposalId = await makeProposal(ctx);
+    await ctx.om.approveProposal(proposalId, NOW); // open + fill a position
+    const positionId = (ctx.db.prepare('SELECT id FROM exec_positions').get() as { id: number }).id;
+    // Simulate a close order that was submitted but never acked: position stuck 'closing'.
+    ctx.db.prepare("UPDATE exec_positions SET status = 'closing', close_reason = 'profit_target' WHERE id = ?").run(positionId);
+    ctx.db
+      .prepare("INSERT INTO exec_orders (client_order_id, position_id, status, side, submitted_at) VALUES ('ta_stuck_close', ?, 'submitted', 'close', ?)")
+      .run(positionId, new Date(NOW.getTime() - 5 * 60_000).toISOString());
+
+    const swept = await ctx.om.reconcileStaleOrders(NOW, 90_000);
+    expect(swept).toBe(1);
+    const pos = ctx.db.prepare('SELECT status, close_reason FROM exec_positions WHERE id = ?').get(positionId) as { status: string; close_reason: string | null };
+    expect(pos.status).toBe('open'); // re-openable so management retries the close
+    expect(pos.close_reason).toBeNull();
   });
 });

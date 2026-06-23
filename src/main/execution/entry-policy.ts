@@ -153,9 +153,18 @@ export class EntryPolicy {
     const config = this.governor.getConfig();
     let dayUsed = this.countNewEntries(now, 'day', mode);
     let weekUsed = this.countNewEntries(now, 'week', mode);
+    const inFlight = this.tickersInFlight(now, mode);
     const outcomes: EntryOutcome[] = [];
 
     for (const pick of [...picks].sort((a, b) => b.compositeScore - a.compositeScore)) {
+      // Per-ticker dedup: never stack a name the engine already holds or has an entry in flight
+      // for. Without this, a pick whose first order hasn't filled yet (so no position exists) gets
+      // re-proposed every cycle — the daily cap was the only thing limiting it. Also dedups repeats
+      // within this same batch (a ticker is added to inFlight once it builds a proposal below).
+      if (inFlight.has(pick.ticker)) {
+        outcomes.push({ ticker: pick.ticker, proposalId: null, rejected: 'duplicate_ticker' });
+        continue;
+      }
       if (dayUsed >= config.maxNewEntriesPerDay) {
         outcomes.push({ ticker: pick.ticker, proposalId: null, rejected: 'daily_cap' });
         continue;
@@ -174,9 +183,30 @@ export class EntryPolicy {
       if (outcome.proposalId != null || outcome.dryRun) {
         dayUsed += 1;
         weekUsed += 1;
+        inFlight.add(pick.ticker);
       }
     }
     return outcomes;
+  }
+
+  /** Tickers the engine already holds or has an entry in flight for — used to dedup new entries.
+   *  Live: non-closed positions + pending/approved entry proposals. Dry-run: today's would-be
+   *  entries in `exec_dry_run_log` (so a dry-run day dedups exactly as a live one would). */
+  private tickersInFlight(now: Date, mode: EntryMode): Set<string> {
+    if (mode === 'dry_run') {
+      const today = etDateString(now);
+      const rows = this.db
+        .prepare("SELECT DISTINCT ticker FROM exec_dry_run_log WHERE kind = 'entry' AND et_date = ?")
+        .all(today) as Array<{ ticker: string }>;
+      return new Set(rows.map((r) => r.ticker));
+    }
+    const rows = [
+      ...(this.db.prepare("SELECT DISTINCT ticker FROM exec_positions WHERE status != 'closed'").all() as Array<{ ticker: string }>),
+      ...(this.db
+        .prepare("SELECT DISTINCT ticker FROM exec_proposals WHERE kind = 'entry' AND status IN ('pending','approved')")
+        .all() as Array<{ ticker: string }>),
+    ];
+    return new Set(rows.map((r) => r.ticker));
   }
 
   /** Record a would-be entry to exec_dry_run_log, deduped per ET-date+ticker so a re-evaluated

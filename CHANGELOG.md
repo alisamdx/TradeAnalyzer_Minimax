@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.64] — 2026-06-23
+
+### Fixed
+- **Dropped/never-acked orders permanently consumed the daily entry cap, so the engine stopped entering.** An order the broker silently drops (the eTradeOnly/firmQuoteOnly TWS bug, v1.1.62) sits `submitted` forever, and its `approved` proposal kept counting against `max_new_entries_per_day`/`_per_week` indefinitely. After the two dropped AVGO orders this morning, `dayUsed` was stuck at 2/2 and every subsequent cycle silently rejected all picks with `daily_cap`. New `OrderManager.reconcileStaleOrders()` runs at the start of each market cycle: any order stuck `pending`/`submitted` past 90s with no broker ack is cancelled (best-effort broker cancel + `stale_no_ack`), and its proposal is `expired` (OPEN) — freeing the cap — or its position un-stuck to `open` for a retry (CLOSE). This also **auto-clears today's two phantom AVGO entries** on the first cycle after restart.
+- **No per-ticker entry dedup — the same name could be entered repeatedly.** AVGO was proposed twice today because the first order never filled (no position to dedup against), and the daily cap was the *only* thing limiting the stacking. `EntryPolicy.generateEntries` now skips any pick whose ticker already has a non-closed position or a `pending`/`approved` entry proposal (and dedups repeats within a batch), rejecting with `duplicate_ticker`.
+- **A filled entry was counted twice against the cap.** On fill, the position was opened but its proposal stayed `approved`, so `countNewEntries` (which counts approved proposals **and** open positions) counted one entry twice — a single fill could consume the whole `cap=2`. The proposal is now retired to `superseded` when its position opens, so each entry counts exactly once throughout its life.
+
+### Notes
+- Correctness/safety fixes to engine plumbing (cap accounting, stuck-order cleanup, concentration dedup) — no change to scoring weights, signals, or entry/exit thresholds; the dedup is strictly more conservative (won't stack a name). Validation-exempt per FR-SEY-5. 6 new regression tests across `tests/order-manager.test.ts` + `tests/entry-policy.test.ts`. Full suite **657 passing**. **Relaunch + Start: the stale-order sweep clears today's stuck cap automatically.**
+
 ## [1.1.63] — 2026-06-23
 
 ### Fixed

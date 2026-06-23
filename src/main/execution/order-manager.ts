@@ -144,6 +144,59 @@ export class OrderManager {
     return { ok: true, orderId, reason: null };
   }
 
+  /**
+   * Reconcile orders stuck in a pre-ack state (`pending`/`submitted`) with no broker callback past
+   * `staleMs`. A combo order the broker silently drops (the eTradeOnly/firmQuoteOnly TWS bug, or any
+   * never-acked send) otherwise sits `submitted` forever — and for an OPEN order its `approved`
+   * proposal keeps consuming the daily/weekly entry cap indefinitely, so the engine stops entering.
+   *
+   * For each stale order: best-effort cancel at the broker, mark the order `cancelled`
+   * (`stale_no_ack`), then — only if the order row actually transitioned (guards against a fill that
+   * landed during the async cancel) — free the entry by expiring its `approved` proposal (OPEN), or
+   * un-stick the position back to `open` so management can retry the close (CLOSE). Returns the
+   * number of orders swept. Runs at the start of each market cycle.
+   */
+  async reconcileStaleOrders(now: Date, staleMs: number): Promise<number> {
+    const cutoff = new Date(now.getTime() - staleMs).toISOString();
+    const stale = this.db
+      .prepare(
+        `SELECT id, client_order_id AS coid, proposal_id, position_id, side
+           FROM exec_orders
+          WHERE status IN ('pending', 'submitted')
+            AND COALESCE(submitted_at, updated_at) <= ?`
+      )
+      .all(cutoff) as Array<{ id: number; coid: string; proposal_id: number | null; position_id: number | null; side: string }>;
+
+    let swept = 0;
+    for (const o of stale) {
+      try {
+        await this.broker.cancelOrder(o.coid); // harmless if it never reached the broker
+      } catch {
+        /* best-effort */
+      }
+      withTransaction(this.db, () => {
+        const res = this.db
+          .prepare(
+            "UPDATE exec_orders SET status = 'cancelled', reject_reason = 'stale_no_ack', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ? AND status IN ('pending','submitted')"
+          )
+          .run(o.id);
+        if (res.changes === 0) return; // a fill/status landed during the cancel — leave it alone
+        if (o.side === 'open' && o.proposal_id != null) {
+          // Free the cap: the approved entry never became a position.
+          this.db.prepare("UPDATE exec_proposals SET status = 'expired' WHERE id = ? AND status = 'approved'").run(o.proposal_id);
+          this.governor.audit('proposal_expired', { refTable: 'exec_proposals', refId: o.proposal_id, detail: { reason: 'stale_order_no_ack' } });
+        } else if (o.side === 'close' && o.position_id != null) {
+          // Un-stick the position so the management loop can re-attempt the close.
+          this.db.prepare("UPDATE exec_positions SET status = 'open', close_reason = NULL WHERE id = ? AND status = 'closing'").run(o.position_id);
+        }
+        this.governor.audit('order_stale_cancelled', { refTable: 'exec_orders', refId: o.id, detail: { coid: o.coid, side: o.side } });
+        swept += 1;
+      });
+    }
+    if (swept > 0) this.governor.recomputeDeployed();
+    return swept;
+  }
+
   // ── broker callbacks ──
 
   private handleStatus(u: OrderStatusUpdate): void {
@@ -185,6 +238,12 @@ export class OrderManager {
       .run(p.ticker, p.strategy, p.structure, p.legs_json, fill.contracts, order.id, fill.price, p.max_loss * fill.contracts, fill.filledAt, fill.price);
     const positionId = Number(info.lastInsertRowid);
     this.db.prepare('UPDATE exec_orders SET position_id = ? WHERE id = ?').run(positionId, order.id);
+    // The entry is now a position; retire its proposal so the daily/weekly cap counts the entry
+    // ONCE (via the open position) — not twice (approved proposal + position). 'superseded' is a
+    // non-counting terminal status; the open position carries the per-ticker dedup from here.
+    if (order.proposal_id != null) {
+      this.db.prepare("UPDATE exec_proposals SET status = 'superseded' WHERE id = ? AND status = 'approved'").run(order.proposal_id);
+    }
     this.governor.recomputeDeployed();
     this.governor.audit('position_opened', { refTable: 'exec_positions', refId: positionId, detail: { ticker: p.ticker, contracts: fill.contracts } });
   }

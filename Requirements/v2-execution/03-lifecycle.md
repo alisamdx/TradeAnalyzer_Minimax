@@ -62,6 +62,15 @@ the structure/strikes against **IBKR's live chain** (§0.6) → size contracts p
 run the full risk gate (§2.5) → if it passes, persist an `exec_proposals` row with a
 **shelf-life** (`proposal_shelf_life_min`, default 120 min) and emit the SSE/notification.
 
+**Per-ticker dedup + count-once cap (v1.1.64):** a pick is skipped (`duplicate_ticker`) if the
+engine already holds a non-closed position **or** has a `pending`/`approved` entry proposal for
+that ticker — the engine never stacks a name it's already in or has in flight; the cap is a
+quantity limit, not the only dedup. Repeats within one entry batch are deduped too. The daily/weekly
+caps count each entry **exactly once**: a `pending`/`approved` proposal while in flight, then the
+open position once filled (the proposal is retired to `superseded` on fill so it stops counting).
+Without this, a fill double-counted (approved proposal *and* position), and an order that never
+filled left its `approved` proposal counting forever (see §3.5 stale-order reconciliation).
+
 **Re-price guard:** if the IBKR net credit drifts beyond a configurable tolerance between
 proposal and approval, the proposal **re-prices** (new credit shown) or **expires** — the
 user never approves a number that's no longer fillable.
@@ -128,6 +137,7 @@ conservative.)
 | --- | --- |
 | **Broker disconnected / reauth needed** | No new entries (gate check 2 fails). Working orders remain at the broker; on reconnect, **reconcile before acting**. Protective management resumes once data/connection is back. Notify. |
 | **Order rejected** | Persist the reject reason, mark the proposal/position, **notify; no blind retry**. A rejected *close* on a position needing protection escalates the notification. |
+| **Order silently dropped / never acked** (v1.1.64) | An order stuck `pending`/`submitted` past `STALE_ORDER_MS` (90s) with no broker callback is treated as dropped: best-effort broker cancel, mark `cancelled` (`stale_no_ack`), then free the entry — OPEN → proposal `expired` (releases the cap slot); CLOSE → position back to `open` for a management retry. Runs at the start of each market cycle (`OrderManager.reconcileStaleOrders`). Guards against a fill that lands during the cancel (only frees the entry if the order row actually transitioned). |
 | **Partial fill on a combo** | Position `needs_attention`; cancel working remainder; notify. Never left silently broken-legged. |
 | **Data gap (no marks)** | Cannot evaluate exits → **fail-closed**: do not fire discretionary exits; protective rules that need a mark can't be computed, so **notify** and lean on the defined-risk cap + watchdog (§1.8). No guessing. |
 | **Re-price drift before approval** | Proposal re-prices or expires (§3.2) — never fills at a worse-than-shown price. |

@@ -161,6 +161,43 @@ describe('EntryPolicy.generateEntries', () => {
     const outcomes = await policy.generateEntries([pick({ criticVerdict: 'flag' })], broker, NOW);
     expect(outcomes[0]!.rejected).toBe('critic_verdict');
   });
+
+  it('dedups a ticker already held as an open position', async () => {
+    const { db, broker, governor, policy } = setup();
+    await broker.connect();
+    governor.start();
+    db.prepare(
+      `INSERT INTO exec_positions (ticker, strategy, structure, legs_json, contracts, entry_order_id,
+         entry_net_credit, max_loss, opened_at, status, current_mark, current_pnl)
+       VALUES ('AAA','inflection','short-put-vertical','[]',1,NULL,0.1,350,?,'open',0.1,0)`
+    ).run(NOW.toISOString());
+    const outcomes = await policy.generateEntries([pick({ ticker: 'AAA' })], broker, NOW);
+    expect(outcomes[0]!.rejected).toBe('duplicate_ticker');
+    expect(outcomes[0]!.proposalId).toBeNull();
+  });
+
+  it('dedups a ticker with an entry proposal already in flight', async () => {
+    const { broker, governor, policy } = setup();
+    await broker.connect();
+    governor.start();
+    await policy.buildProposal(pick({ ticker: 'AAA' }), broker, NOW); // creates a pending AAA proposal
+    const outcomes = await policy.generateEntries([pick({ ticker: 'AAA' })], broker, NOW);
+    expect(outcomes[0]!.rejected).toBe('duplicate_ticker');
+  });
+
+  it('dedups a repeated ticker within the same batch', async () => {
+    const { broker, governor, policy } = setup();
+    await broker.connect();
+    governor.start();
+    governor.updateConfig({ maxNewEntriesPerDay: 5 }); // ensure the cap isn't what stops the 2nd
+    const outcomes = await policy.generateEntries(
+      [pick({ ticker: 'AAA', compositeScore: 80 }), pick({ ticker: 'AAA', compositeScore: 75 })],
+      broker,
+      NOW
+    );
+    expect(outcomes[0]!.proposalId).not.toBeNull();
+    expect(outcomes[1]!.rejected).toBe('duplicate_ticker');
+  });
 });
 
 describe('exec_config entry params (migration 046)', () => {
