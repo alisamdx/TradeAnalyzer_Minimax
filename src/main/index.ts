@@ -424,12 +424,19 @@ app.whenReady().then(() => {
   // Phase 6: the broker is chosen by the factory — MockExecutionBroker by default, the
   // IbkrExecutionBroker (live TWS/Gateway) when TA_EXEC_BROKER=ibkr. Paper vs live is just
   // the connection port (mode from exec_config), never an engine/UI change.
-  const execMode = new RiskGovernor(db).getConfig().executionMode;
-  const brokerSettings = resolveBrokerSettings(execMode);
+  const execCfg = new RiskGovernor(db).getConfig();
+  const execMode = execCfg.executionMode;
+  // Settings-driven selection (07-broker-alternatives §3): the persisted paper/live broker choice,
+  // with TA_EXEC_BROKER env still overriding for dev/tests.
+  const brokerSettings = resolveBrokerSettings(execMode, process.env, {
+    paperBroker: execCfg.paperBroker,
+    liveBroker: execCfg.liveBroker,
+  });
   const executionBroker = createExecutionBroker(brokerSettings);
   console.log(
     `[execution] broker=${brokerSettings.kind} mode=${execMode}` +
-      (brokerSettings.kind === 'ibkr' ? ` @ ${brokerSettings.host}:${brokerSettings.port}` : '')
+      (brokerSettings.kind === 'ibkr' ? ` @ ${brokerSettings.host}:${brokerSettings.port}` : '') +
+      (brokerSettings.kind === 'tradier' ? ` @ ${brokerSettings.tradier.env}` : '')
   );
   // Notifications for unattended operation (spec 08 §2.5): per-action OS push (gated by
   // exec_config.notify_push) + email (when SMTP is configured). The engine gates notify_per_action.

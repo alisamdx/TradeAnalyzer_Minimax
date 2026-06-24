@@ -8,13 +8,15 @@
 import { randomUUID } from 'node:crypto';
 import type { DbHandle } from '../db/connection.js';
 import { withTransaction } from '../db/connection.js';
-import type { ExecConfig, ExecRiskState, EngineState } from '../../shared/types.js';
+import type { ExecConfig, ExecRiskState, EngineState, ExecBrokerKind } from '../../shared/types.js';
 import type { ExecutionBroker } from './execution-broker.js';
 import { drawdownThrottleFactor, evaluateGate, sizePosition, type GateCandidate, type GateContext, type SizingResult } from './risk-gate.js';
 import { sectorStringToEtf } from '../services/sector-etf.js';
 
 interface ConfigRow {
   execution_mode: string;
+  paper_broker: string;
+  live_broker: string;
   capital_ceiling: number;
   max_risk_per_trade_pct: number;
   max_concurrent_positions: number;
@@ -66,6 +68,8 @@ interface RiskStateRow {
 
 const CONFIG_COLUMN: Record<keyof ExecConfig, string> = {
   executionMode: 'execution_mode',
+  paperBroker: 'paper_broker',
+  liveBroker: 'live_broker',
   capitalCeiling: 'capital_ceiling',
   maxRiskPerTradePct: 'max_risk_per_trade_pct',
   maxConcurrentPositions: 'max_concurrent_positions',
@@ -103,6 +107,11 @@ const CONFIG_COLUMN: Record<keyof ExecConfig, string> = {
   updatedAt: 'updated_at',
 };
 
+/** Coerce a stored broker string to a known kind; unknown/null falls back to the safe 'mock'. */
+function asBrokerKind(s: string | null | undefined): ExecBrokerKind {
+  return s === 'ibkr' || s === 'tradier' ? s : 'mock';
+}
+
 /** Parse the per-strategy composite-floor JSON ({strategy: number}); {} on any malformed input. */
 function parseStrategyFloors(json: string): Record<string, number> {
   try {
@@ -130,6 +139,8 @@ export class RiskGovernor {
     const r = this.db.prepare('SELECT * FROM exec_config WHERE id = 1').get() as ConfigRow;
     return {
       executionMode: r.execution_mode === 'live' ? 'live' : 'paper',
+      paperBroker: asBrokerKind(r.paper_broker),
+      liveBroker: asBrokerKind(r.live_broker),
       capitalCeiling: r.capital_ceiling,
       maxRiskPerTradePct: r.max_risk_per_trade_pct,
       maxConcurrentPositions: r.max_concurrent_positions,

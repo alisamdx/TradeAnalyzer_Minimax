@@ -181,6 +181,34 @@ describe('broker factory — settings resolution', () => {
     expect(s.host).toBe('10.0.0.5');
     expect(s.clientId).toBe(12);
   });
+
+  // ── settings-driven selection (07-broker-alternatives §3) ──
+  it('uses the persisted paper_broker in paper mode when no env override', () => {
+    expect(resolveBrokerSettings('paper', {}, { paperBroker: 'tradier', liveBroker: 'ibkr' }).kind).toBe('tradier');
+  });
+  it('uses the persisted live_broker in live mode when no env override', () => {
+    expect(resolveBrokerSettings('live', {}, { paperBroker: 'tradier', liveBroker: 'ibkr' }).kind).toBe('ibkr');
+  });
+  it('TA_EXEC_BROKER env overrides the persisted config', () => {
+    expect(resolveBrokerSettings('paper', { TA_EXEC_BROKER: 'mock' }, { paperBroker: 'tradier', liveBroker: 'tradier' }).kind).toBe('mock');
+  });
+  it('falls back to mock when config has no usable value', () => {
+    expect(resolveBrokerSettings('paper', {}).kind).toBe('mock');
+  });
+  it('maps Tradier base URL + env by mode (sandbox in paper, production in live)', () => {
+    const paper = resolveBrokerSettings('paper', {}, { paperBroker: 'tradier', liveBroker: 'tradier' });
+    expect(paper.tradier.env).toBe('sandbox');
+    expect(paper.tradier.baseUrl).toContain('sandbox.tradier.com');
+    const live = resolveBrokerSettings('live', {}, { paperBroker: 'tradier', liveBroker: 'tradier' });
+    expect(live.tradier.env).toBe('production');
+    expect(live.tradier.baseUrl).toBe('https://api.tradier.com');
+  });
+  it('picks the environment-specific Tradier token, then the shared fallback', () => {
+    const s = resolveBrokerSettings('paper', { TA_TRADIER_TOKEN_SANDBOX: 'sand', TA_TRADIER_TOKEN: 'shared' }, { paperBroker: 'tradier', liveBroker: 'tradier' });
+    expect(s.tradier.token).toBe('sand');
+    const shared = resolveBrokerSettings('paper', { TA_TRADIER_TOKEN: 'shared' }, { paperBroker: 'tradier', liveBroker: 'tradier' });
+    expect(shared.tradier.token).toBe('shared');
+  });
 });
 
 describe('IBKR adapter — spread-permission preflight', () => {

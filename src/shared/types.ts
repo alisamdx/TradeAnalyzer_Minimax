@@ -2177,8 +2177,15 @@ export interface ExecLeg {
 
 /** The governor's rules — single row (exec_config). Limits in 02-risk-governor §2.3,
  *  entry policy in 03-lifecycle §3.6. */
+/** Execution venue behind the ExecutionBroker seam. paper/live are selected independently. */
+export type ExecBrokerKind = 'mock' | 'ibkr' | 'tradier';
+
 export interface ExecConfig {
   executionMode: ExecutionMode;
+  // per-mode broker selection (07-broker-alternatives §3) — the paper/soak venue and the
+  // live/real-money venue are chosen independently. TA_EXEC_BROKER env overrides both (dev/test).
+  paperBroker: ExecBrokerKind;             // venue when executionMode = 'paper'
+  liveBroker: ExecBrokerKind;              // venue when executionMode = 'live'
   capitalCeiling: number;                  // $ capital base
   maxRiskPerTradePct: number;              // % of ceiling
   maxConcurrentPositions: number;

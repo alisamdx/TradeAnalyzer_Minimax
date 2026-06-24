@@ -1,13 +1,25 @@
 # v2 Execution Subsystem — Broker Alternatives & Selection
 
-> **Status:** design / decision doc (not yet built). Captured 2026-06-22 after IBKR
-> approved the live account for **Options Level 1 only** (can't place credit spreads). This
-> records the fallback broker options and the settings-driven selection model so a future
-> session can pick any path and build it without re-deriving the analysis.
+> **Status:** DECIDED → **Tradier** is the chosen venue; the **§3 settings substrate** and the
+> **Tradier adapter skeleton** are **SHIPPED (v1.1.70, 2026-06-24)**. Remaining: live-sandbox
+> calibration of the adapter once the account + L3 + tokens land (see §8). IBKR stays supported
+> behind the seam (a dropdown away) if its L3 is ever approved.
+>
+> **Why IBKR is a dead end (updated 2026-06-24):** the initial live denial was Options **Level 1**.
+> Re-application got the live account to **Level 2 only** (long calls/puts — still no spreads), with
+> a **30-day cooldown** before the next L3 attempt. The **paper** account never had spread permission
+> either (this *corrects* §1's earlier optimistic "IBKR paper has full L3, verified 2026-06-17" — it
+> does not, per the v1.1.66 paper-mode preflight and live rejections). So IBKR can place **none** of
+> the engine's defined-risk multi-leg combos in paper *or* live.
+>
+> **Why Tradier (not E\*Trade):** E\*Trade has **no API paper** at all (sandbox = canned data), so it
+> can only ever be a live venue. With IBKR's paper soak gone, only Tradier offers a *real* sandbox
+> **and** production on one REST API with native multi-leg orders — the one venue that satisfies both
+> the soak and a route to live.
 >
 > Companion context: `00-overview.md`, `01-architecture.md` (§1.4 the `ExecutionBroker`
 > seam), `02-risk-governor.md` (§2.13 live spread-permission preflight). Memory:
-> `project_v2_execution_engine`.
+> `project_v2_execution_engine`, `project_ibkr_paper_spread_permission`.
 
 ---
 
@@ -36,11 +48,10 @@ the implementation, so two adapters can coexist; mode picks which one runs.
 - **Seam:** `src/main/execution/execution-broker.ts` — the `ExecutionBroker` interface (see §6).
 - **Factory:** `src/main/execution/broker-factory.ts` — `resolveBrokerSettings(mode, env)` +
   `createExecutionBroker(settings)`.
-- **Selection today is ENV-driven:** broker = `mock` unless `TA_EXEC_BROKER=ibkr`; port derived
-  from `executionMode` (paper/live) and `TA_IBKR_GATEWAY`. `index.ts` builds the broker from
-  `exec_config.executionMode` + env and logs `[execution] broker=… mode=…`.
-- **Gap for this work:** selection is env-only. The user wants a **settings-driven** selector so
-  the running app honors a persisted choice (no env editing). See §3.
+- **Selection is now SETTINGS-driven (v1.1.70).** `resolveBrokerSettings(mode, env, config)` resolves
+  the kind by precedence: explicit `TA_EXEC_BROKER` env → `exec_config.{paper,live}_broker` by mode →
+  `mock`. `createExecutionBroker` has `mock` / `ibkr` / `tradier` cases. `index.ts` reads the config
+  and logs `[execution] broker=… mode=… @ …`. (Was env-only before §3 shipped.)
 
 ---
 
@@ -227,6 +238,31 @@ live entirely inside the adapter — the governor, loops, order manager, reconci
 live preflight are all broker-agnostic and unchanged.
 
 ---
+
+## 8. Build status (v1.1.70, 2026-06-24)
+
+**Shipped (no account needed):**
+- **§3 settings substrate** — migration 060 (`paper_broker`/`live_broker`, default `mock`),
+  `ExecConfig.paperBroker/liveBroker` + `ExecBrokerKind`, validated governor mapping, config-driven
+  `broker-factory` (env override → config → mock), Execution Settings dropdowns + live-broker confirm
+  gate.
+- **`TradierExecutionBroker` skeleton** (`src/main/execution/tradier-execution-broker.ts`) —
+  fully unit-tested pure helpers (OCC/OSI symbols + parse, multileg payload with COID `tag`, net
+  credit/debit/even sign convention + inverse, status mapping, combo pricing from legs, preview
+  classifier) and a fail-closed network shell to Tradier's documented REST shapes (Bearer auth,
+  sandbox/production by mode, **polling** status/fills, idempotency via `tag`, 401→`reauth_needed`).
+  Every endpoint/field is marked `// VERIFY`.
+
+**Remaining for live Tradier trading (needs the account + L3 + tokens):**
+1. Generate sandbox + production tokens; move token storage from env into `secure-settings` + a
+   settings field (currently `TA_TRADIER_TOKEN_SANDBOX` / `_PROD` / `TA_TRADIER_TOKEN`,
+   `TA_TRADIER_ACCOUNT_ID`).
+2. **Calibrate every `// VERIFY`** against the live sandbox: `/markets/quotes`, `/accounts/{id}/balances`,
+   order `preview`→`place`, `/accounts/{id}/orders`, `/accounts/{id}/positions` payload shapes, and
+   commission surfacing on fills.
+3. Wire **chain-discovery** for `checkSpreadPermission`'s reference probe (it fails closed without a
+   supplied probe today).
+4. **Live canary** (1 contract, smallest spread) before normal sizing.
 
 ## 7. Open questions to resolve at build time
 - Confirm E\*Trade exact order endpoints/fields + whether `clientOrderId` is honored for idempotency on **multi-leg** orders.

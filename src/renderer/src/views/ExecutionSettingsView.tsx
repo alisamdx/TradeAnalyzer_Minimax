@@ -43,6 +43,13 @@ export function ExecutionSettingsView() {
       });
       if (!ok) return;
     }
+    if (draft.liveBroker !== config.liveBroker && draft.liveBroker !== 'mock') {
+      const ok = await window.dialog.confirm({
+        title: 'Change LIVE broker',
+        message: `This sets the real-money venue to "${draft.liveBroker}". Live orders will route there once the engine runs live. Continue?`,
+      });
+      if (!ok) return;
+    }
     setBusy(true);
     try {
       const { eligibleStrategiesText, ...rest } = draft;
@@ -70,10 +77,24 @@ export function ExecutionSettingsView() {
       {status && <div style={{ background: '#13361f', border: '1px solid var(--success)', borderRadius: 6, padding: '8px 12px', marginBottom: 12 }}>{status}</div>}
 
       <Section title="Mode">
-        <Field label="Execution mode" help="Paper uses the mock/paper broker; live points at the real account.">
+        <Field label="Execution mode" help="Paper uses the paper/soak broker; live points at the real account.">
           <select value={draft.executionMode} onChange={e => set('executionMode', e.target.value as ExecConfig['executionMode'])}>
             <option value="paper">paper</option>
             <option value="live">live</option>
+          </select>
+        </Field>
+        <Field label="Paper broker" help="Venue used in PAPER mode (the soak). Tradier sandbox is a real paper environment; mock is the offline simulator. TA_EXEC_BROKER env overrides this.">
+          <select value={draft.paperBroker} onChange={e => set('paperBroker', e.target.value as ExecConfig['paperBroker'])}>
+            <option value="mock">mock (offline simulator)</option>
+            <option value="ibkr">ibkr (TWS/Gateway paper)</option>
+            <option value="tradier">tradier (sandbox)</option>
+          </select>
+        </Field>
+        <Field label="Live broker" help="Venue used in LIVE mode (real money). Inherits the same fail-closed spread-permission preflight + live confirm gate regardless of which broker.">
+          <select value={draft.liveBroker} onChange={e => set('liveBroker', e.target.value as ExecConfig['liveBroker'])}>
+            <option value="mock">mock (offline simulator)</option>
+            <option value="ibkr">ibkr (TWS/Gateway live)</option>
+            <option value="tradier">tradier (production)</option>
           </select>
         </Field>
         <Field label="Eligible strategies" help="Comma-separated. Launch scope is inflection-only.">

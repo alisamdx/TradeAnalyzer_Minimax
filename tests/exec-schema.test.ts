@@ -47,6 +47,8 @@ describe('exec_* schema (migration 045)', () => {
     expect(row.max_positions_per_strategy).toBeNull();
     expect(row.eligible_strategies).toBe('inflection,wheel,income'); // wheel (056) + income (057) enabled
     expect(row.proposal_shelf_life_min).toBe(120);
+    expect(row.paper_broker).toBe('mock'); // 060 — opt-in default preserves existing behaviour
+    expect(row.live_broker).toBe('mock');
   });
 
   it('seeds the singleton exec_risk_state row in the stopped state', () => {

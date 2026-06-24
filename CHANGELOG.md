@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.70] — 2026-06-24
+
+### Added
+- **Settings-driven, per-mode broker selection** (07-broker-alternatives §3). `exec_config` now carries `paper_broker` / `live_broker` (`mock | ibkr | tradier`), editable as dropdowns in **Execution Settings → Mode**. The active venue is chosen by mode (paper→paper_broker, live→live_broker), with `TA_EXEC_BROKER` env still overriding for dev/tests. Default `mock` preserves the existing opt-in behaviour. Changing the **live** broker requires a confirm gate; the fail-closed spread-permission preflight and live confirm gate are broker-agnostic, so any venue inherits them.
+- **Tradier execution adapter (`TradierExecutionBroker`) — skeleton.** Chosen as the path off IBKR (which approved only Options **Level 2** on the live account — no spreads — with a 30-day cooldown, and never had paper spread permission). Tradier is the only venue with a *real* sandbox **and** production on one REST API with native multi-leg orders. Ships fully **unit-tested pure mapping helpers** (OCC/OSI symbols, multileg payload, net credit/debit sign convention, status mapping, combo pricing, preview classification) plus a **fail-closed network shell** implemented to Tradier's documented REST shapes — Bearer auth, sandbox/production by mode, polling-based status/fills, COID idempotency via the order `tag`. Network endpoints are marked `// VERIFY` pending live-sandbox calibration (account + L3 approval + tokens still required). IBKR remains fully supported behind the seam.
+
+### Notes
+- Validation-exempt per FR-SEY-5 — broker selection changes neither which trades are selected nor how they're sized/exited. New `tests/tradier-execution-broker.test.ts` + extended factory/schema tests. Full suite **692 passing**.
+
 ## [1.1.69] — 2026-06-23
 
 ### Fixed

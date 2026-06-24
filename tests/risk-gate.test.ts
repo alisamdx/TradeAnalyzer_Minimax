@@ -6,6 +6,8 @@ import type { ExecConfig } from '../src/shared/types.js';
 
 const CONFIG: ExecConfig = {
   executionMode: 'paper',
+  paperBroker: 'mock',
+  liveBroker: 'mock',
   capitalCeiling: 10000,
   maxRiskPerTradePct: 5, // $500 per trade
   maxConcurrentPositions: 5,
