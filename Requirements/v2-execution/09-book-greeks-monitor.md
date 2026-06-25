@@ -32,8 +32,13 @@ makes that visible; the optional tier-2 gate keeps a new entry from making it wo
 **The infrastructure already exists** — this is mostly an aggregation, not new machinery:
 
 - `positions` carries per-position `delta`/`gamma`/`theta`/`vega` (migration 014), stored
-  **position-signed** (`positive theta / negative vega = short-position convention`, per the
-  `Position` type comment).
+  **RAW (per-contract, long-option convention)** exactly as E\*Trade returns them
+  (`etrade-portfolio-service.ts` writes `Complete.delta/...` verbatim and stores
+  `quantity = Math.abs(raw.quantity)`). **The stored Greeks are NOT position-signed and the
+  quantity is unsigned — direction lives only in `position_type`.** (Verified 2026-06-25
+  against the live synced book: every CSP had δ<0 / θ<0 / ν>0, i.e. raw long-put Greeks, even
+  though a short put is +δ / +θ / −ν. The old `Position`-type comment claiming a
+  "short-position convention" was wrong and has been corrected.)
 - `BetaService` (`beta-service.ts`) computes beta to SPY from local `historical_prices`
   (252-day window, pure, unit-tested, zero API cost; `docs/formulas.md#beta`).
 - SPY history + per-ticker underlying prices are already local (`quote_cache` /
@@ -66,18 +71,23 @@ export interface BookGreeks {
 
 ### Aggregation formula
 
-For each open position with a non-null `delta`:
+The stored Greeks are **raw long-option** values; derive position direction from
+`positionType`:
 
 ```
+dir_i =  positionType ∈ {CSP, CC}        ? -1   // short option → negate raw greeks
+         positionType ∈ {Long Put, Long Call} ? +1
+         positionType === Stock          ? +1   // long stock (current model is long-only)
+
 sharesEquivalent_i =
-   positionType === 'Stock'  ?  quantity                  // delta = ±1, qty in shares
-                             :  delta_i × quantity × 100   // options: qty in contracts
+   positionType === 'Stock'  ?  quantity                       // qty in shares, delta = +1
+                             :  delta_i × dir_i × quantity × 100 // options: qty in contracts
 
 dollarDelta_i   = sharesEquivalent_i × beta_ticker × underlyingPx_ticker
 netDeltaDollars = Σ dollarDelta_i
 
-netTheta = Σ theta_i × quantity × 100
-netVega  = Σ vega_i  × quantity × 100
+netTheta = Σ theta_i × dir_i × quantity × 100
+netVega  = Σ vega_i  × dir_i × quantity × 100
 ```
 
 The SPY price **cancels** out of the dollar-delta term (`shares × beta × Px_underlying`), so
@@ -86,20 +96,23 @@ The SPY price **cancels** out of the dollar-delta term (`shares × beta × Px_un
 
 ### The one correctness rule — sign convention (the whole ballgame)
 
-The stored Greeks are **position-signed**, so the aggregation sums them **as-is, with no extra
-sign flips**. A unit test must pin that this holds end-to-end:
+Because the stored Greeks are raw and the quantity is unsigned, **`positionType` is the sole
+source of direction** — apply `dir_i` above; never trust the stored Greek sign. A unit test
+must pin that the *resulting position-level* sign is correct end-to-end:
 
-| Position        | net delta      | net theta | net vega |
-|-----------------|----------------|-----------|----------|
-| CSP (short put) | **+** (bullish)| **+**     | **−**    |
-| CC (short call) | **−**          | **+**     | **−**    |
-| Long Call       | **+**          | **−**     | **+**    |
-| Long Put        | **−**          | **−**     | **+**    |
+| Position        | raw stored (δ/θ/ν) | → position net delta | net theta | net vega |
+|-----------------|--------------------|----------------------|-----------|----------|
+| CSP (short put) | −/−/+              | **+** (bullish)      | **+**     | **−**    |
+| CC (short call) | +/−/+              | **−**                | **+**     | **−**    |
+| Long Call       | +/−/+              | **+**                | **−**     | **+**    |
+| Long Put        | −/−/+              | **−**                | **−**     | **+**    |
 
-> ⚠ **Implementation step zero:** verify how `PortfolioService.updateGreeks` callers sign the
-> values *before* trusting the sum. If `updateGreeks` is ever fed raw *option* delta instead of
-> *position* delta, the book delta silently **inverts** — the most dangerous possible failure
-> for a directional-exposure monitor. The table above is the regression test that guards it.
+> ⚠ **This is not hypothetical.** The live synced book (2026-06-25) stores CSPs with δ<0 /
+> θ<0 / ν>0 (raw long-put Greeks) and `quantity = +1`. Summing as-is would report the book as
+> net-short-delta / paying-theta when the CSPs are actually net-long-delta / collecting-theta
+> — a fully **inverted** exposure. The `dir_i` derivation above is mandatory; the table is its
+> regression test. (Do **not** instead "fix" the sign at sync time — other readers may depend
+> on the raw E\*Trade values; normalize only at aggregation.)
 
 ### Edge cases (explicit)
 
