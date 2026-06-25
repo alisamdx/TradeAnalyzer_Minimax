@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.75] — 2026-06-24
+
+### Fixed
+- **Earnings calendar dropped the *next* earnings date for actively-reporting names — a real-money risk for the premium-selling book.** The Earnings Refresh job fetches Finnhub in two windows (today→+90d, then +90d→+180d) and the upsert overwrites unconditionally, so any quarterly reporter present in **both** windows had its **near** date (window 1) overwritten by the **following** quarter (window 2). Confirmed live: NVDA stored 2026-11-17 when Finnhub also returned 2026-08-25; same for MRVL/AMAT/ADI (all stored Nov, dropped the real Aug report). Because `earnings_calendar` holds one row per ticker, all three consumers read the wrong date: the v2 **entry gate** (`brief-entry-source` earnings-before-expiry), the **critic** earnings flag, and the brief's **Stage-3 −20 earnings penalty** — so the engine could sell a credit spread / iron condor straight **through** an earnings report believing the window was clear. Fix: Phase 1 now keeps the **nearest** future date (skips a candidate on/after an already-stored future date), matching the per-ticker Phase-2 path. Poisoned data self-heals on the next Earnings Refresh run (runs on startup + after-close). Regression test `tests/earnings-refresh-job.test.ts`.
+
+### Notes
+- Found during the iterative Daily Brief accuracy deep-dive (round 9). The rest of the latest brief verified clean: credit/maxLoss/breakeven/annualized all tie out to an independent recompute (conservative slippage-modeled fill at the mid↔adverse-side midpoint), prices fresh + internally consistent, no earnings actually inside today's July expiries (the bug was latent today, not biting). Full suite **707 passing**.
+
 ## [1.1.74] — 2026-06-24
 
 ### Added

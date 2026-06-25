@@ -68,6 +68,7 @@ export class EarningsRefreshJob implements BatchJobHandler {
     `).all() as Row[];
 
     const tickers = rows.map(r => r.ticker);
+    const todayStr = new Date().toISOString().slice(0, 10);
 
     if (tickers.length === 0) {
       return {
@@ -106,8 +107,21 @@ export class EarningsRefreshJob implements BatchJobHandler {
             for (const e of json.earningsCalendar ?? []) {
               if (!e.symbol || !e.date) continue;
               if (!constituentSet.has(e.symbol)) continue;   // skip non-constituents
+              if (e.date <= todayStr) continue;              // ignore past/today dates
               const existing = this.earningsService.getForTicker(e.symbol);
               if (existing?.source === 'manual') continue;
+              // Keep the NEAREST future earnings date. The two windows are fetched in
+              // order (0–90d, then 90–180d), and the upsert overwrites unconditionally,
+              // so without this guard a quarterly reporter that appears in BOTH windows
+              // would have its near date (window 1, e.g. an Aug report) overwritten by
+              // the FOLLOWING quarter (window 2, e.g. Nov) — silently hiding the next
+              // earnings from the earnings-before-expiry risk gate (critic +
+              // brief-entry-source), the single most important gate for a premium-selling
+              // book. Only overwrite when there is no stored future date, the stored date
+              // has already passed, or this candidate is strictly nearer.
+              if (existing?.reportDate && existing.reportDate > todayStr && e.date >= existing.reportDate) {
+                continue;
+              }
               const reportTime: 'bmo' | 'amc' | null =
                 e.hour === 'bmo' ? 'bmo' : e.hour === 'amc' ? 'amc' : null;
               this.earningsService.upsertFromProvider(e.symbol, e.date, reportTime, 'finnhub', true);
@@ -146,7 +160,6 @@ export class EarningsRefreshJob implements BatchJobHandler {
     // The bulk call has a result cap (~1500 global entries). Tickers like AAPL
     // that have confirmed dates but weren't returned in the bulk are fetched here.
     // Rate-limited to 1 call/second (well within Finnhub free tier 60/min).
-    const todayStr = new Date().toISOString().slice(0, 10);
     const needsLookup = tickers.filter(t => {
       const e = this.earningsService.getForTicker(t);
       return !e || (e.source !== 'manual' && e.reportDate <= todayStr);
