@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.72] — 2026-06-24
+
+### Added
+- **Retrospect header now shows a "Take Profit" signal count** alongside the existing Close Signal badge. A green `✓ N Take Profits` chip appears whenever open paper trades have a take-profit recommendation (counts `insight.action === 'take_profit'`, matching the In Progress grid's Action column). Shows only when N > 0.
+
 ## [1.1.71] — 2026-06-24
 
 ### Fixed

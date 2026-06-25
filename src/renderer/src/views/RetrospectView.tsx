@@ -1210,6 +1210,7 @@ export function RetrospectView() {
   };
 
   const closeSignalCount = openPositions.filter(p => p.recommendation === 'close_signal').length;
+  const takeProfitCount = openPositions.filter(p => p.insight.action === 'take_profit').length;
 
   return (
     <div className="view retro-view">
@@ -1220,6 +1221,11 @@ export function RetrospectView() {
         {closeSignalCount > 0 && (
           <span className="retro-alert-badge">
             ⚠ {closeSignalCount} Close Signal{closeSignalCount !== 1 ? 's' : ''}
+          </span>
+        )}
+        {takeProfitCount > 0 && (
+          <span className="retro-profit-badge">
+            ✓ {takeProfitCount} Take Profit{takeProfitCount !== 1 ? 's' : ''}
           </span>
         )}
         <div style={{ flex: 1 }} />
