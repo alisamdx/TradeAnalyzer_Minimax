@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.71] — 2026-06-24
+
+### Fixed
+- **Retrospect → In Progress: the Brief dropdown now stays pinned to the top while you scroll the picks grid.** It used to scroll away with the table, so switching to a different brief meant scrolling all the way back up. The selector bar is now `position: sticky` at the top of the scroll area (full-width with a divider; rows scroll underneath it). CSS-only.
+
 ## [1.1.70] — 2026-06-24
 
 ### Added
