@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.76] — 2026-06-25
+
+### Added
+- **Pre-Trade Validator on the Payoff view** — build a structure, declare your **intent** (purpose · happy-to-own? · multi-quarter thesis), and click **Validate Trade** to get a **good / caution / bad** verdict with concrete, deterministic checks: reward-vs-risk (only for defined-risk spreads — a CSP's structural max-loss no longer false-flags it), undefined-risk, **IV-regime fit** (warns when you're selling cheap vol / buying expensive vol), direction-vs-trend (intent-gated — a deliberate ownership fade is info, not a warning), **earnings-before-expiry** (warning, or info if you're happy to own), **cushion-vs-ATR** (flags a thin short-strike on a high-volatility name), horizon match, and effective ownership basis. When a trade is flagged, the **Strategy Lab suggests a better structure** for the same name (intent + IV-regime filtered — and it may say "don't sell premium here"). Each validation is **persisted** (`pretrade_validations`, migration 061). Verdict is **intent-aware** because the same trade can be a bad income trade but a fine ownership trade. Decision-support only — it does not place orders and is not wired to the execution engine. New `pretrade-validator-service.ts` + pure, unit-tested `pretrade-checks.ts` (21 tests); `window.api.pretradeValidator.*`. Thresholds are first-pass and tunable. See `Requirements/PRE_TRADE_VALIDATOR_SPEC.md` + `spec/08`.
+
+### Notes
+- ~80% reuse: payoff metrics (renderer), the Strategy Lab (`validate` → IV rank / direction / candidate structures, cached 10 min with a Refresh action), `earnings_calendar` (nearest-date fix v1.1.75), and `technical_signals.atr_pct`. Full suite **728 passing**.
+
 ## [1.1.75] — 2026-06-24
 
 ### Fixed

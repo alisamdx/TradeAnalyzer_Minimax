@@ -1346,6 +1346,103 @@ export interface PayoffAssessment {
   };
 }
 
+// ─── Pre-Trade Validator (Payoff view) ─────────────────────────────────────────
+// Validates a hand-built Payoff structure against the user's intent before placing
+// it. Decision-support only — see Requirements/PRE_TRADE_VALIDATOR_SPEC.md.
+
+export type PretradeTradePurpose = 'income' | 'directional' | 'ownership' | 'hedge';
+export type PretradeVerdict = 'good' | 'caution' | 'bad';
+export type PretradeCheckStatus = 'pass' | 'warn' | 'fail' | 'info';
+
+/** The user's declared intent — the verdict is thesis-aware (same trade can be a bad
+ *  income trade but a fine ownership trade), so this is required input. */
+export interface PretradeIntent {
+  /** Genuinely happy to own the stock at the short strike? null = N/A (no short put). */
+  happyToOwn: boolean | null;
+  purpose: PretradeTradePurpose;
+  /** True when the thesis extends well beyond the structure's expiry. */
+  multiQuarterThesis: boolean;
+}
+
+export interface PretradeCheck {
+  key: string;
+  status: PretradeCheckStatus;
+  title: string;
+  detail: string;
+}
+
+/** Live market context resolved for the validated ticker. */
+export interface PretradeMarketContext {
+  ivRank: number | null;
+  ivPercentile: number | null;
+  currentAtmIv: number | null;
+  directionBias: StrategyLabDirectionBias | null;
+  ma20: number | null;
+  ma50: number | null;
+  atrPct: number | null;
+  nextEarningsDate: string | null;
+}
+
+/** A better structure the Strategy Lab suggests when the user's trade is flagged. */
+export interface PretradeSuggestion {
+  slug: string;
+  name: string;
+  grade: string;
+  rationale: string;
+  legs: { action: 'buy' | 'sell'; side: 'call' | 'put'; strike: number; expiration: string; qty: number }[];
+  netCredit: number | null;
+  netDebit: number | null;
+  maxProfit: number | null;
+  maxLoss: number | null;
+  breakevens: number[];
+  annualizedReturn: number | null;
+}
+
+/** Renderer → main: the hand-built structure + the metrics the Payoff view already
+ *  computes + the declared intent. */
+export interface PretradeValidateInput {
+  ticker: string | null;
+  strategyName: string;
+  spot: number;
+  legs: PayoffLeg[];
+  metrics: {
+    maxProfit: number | null;
+    maxLoss: number | null;
+    unlimitedProfit: boolean;
+    unlimitedLoss: boolean;
+    breakevenPrices: number[];
+    netPremium: number;
+    netDelta: number | null;
+    netTheta: number | null;
+    netVega: number | null;
+  };
+  intent: PretradeIntent;
+  /** Bypass cached lab data and fetch a fresh chain for the suggestion. */
+  refresh?: boolean;
+}
+
+export interface PretradeValidationResult {
+  verdict: PretradeVerdict;
+  checks: PretradeCheck[];
+  context: PretradeMarketContext;
+  suggestion: PretradeSuggestion | null;
+  /** True when the lab context/suggestion came from cache rather than a fresh fetch. */
+  fromCache: boolean;
+  generatedAt: string;
+}
+
+export interface PretradeValidationRow {
+  id: number;
+  ticker: string | null;
+  strategyName: string;
+  spot: number | null;
+  verdict: PretradeVerdict;
+  checks: PretradeCheck[];
+  suggestion: PretradeSuggestion | null;
+  intent: PretradeIntent;
+  createdAt: string;
+}
+
 // ─── IV History (v0.17.0) ──────────────────────────────────────────────────────
 
 /** Which backfill phase to run. gap_fill fills holes in existing history. */

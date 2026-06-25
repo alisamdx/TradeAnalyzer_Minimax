@@ -66,3 +66,20 @@ A "📈 Chart / ⬛ Risk Matrix" toggle. The matrix is a 2D P&L grid:
 
 ### 8.B.6 Persistence
 `save(name, ticker, legs)`, `list()`, `delete(id)` for named reusable structures.
+
+### 8.B.7 Pre-Trade Validator (v1.1.76)
+A **PRE-TRADE VALIDATION** panel above the AI assessment: validate the hand-built structure
+against declared **intent** (purpose income/ownership/directional/hedge · happy-to-own? ·
+multi-quarter thesis) and get a **good / caution / bad** verdict from deterministic checks
+(reward-vs-risk for defined-risk spreads only — a CSP's structural max-loss is *not* false-flagged;
+undefined-risk; IV-regime fit — warns selling cheap / buying expensive vol; direction-vs-trend,
+intent-gated; earnings-before-expiry, intent-gated; cushion-vs-`atr_pct`; horizon match;
+ownership basis). When flagged, the Strategy Lab **suggests a better structure** for the same
+ticker (intent + IV-regime filtered; may advise not selling premium). Verdict roll-up: any
+`fail` → bad, any `warn` → caution, else good. **Intent-aware** because the same trade can be a
+bad income trade but a fine ownership trade. Decision-support only — places no orders, not wired
+to the execution engine. `window.api.pretradeValidator.validate/history`; pure core
+`pretrade-checks.ts` (`PRETRADE_THRESHOLDS` tunable); `pretrade-validator-service.ts` (lab
+context cached 10 min + Refresh action); every validation persisted to `pretrade_validations`
+(migration 061). Design doc: `Requirements/PRE_TRADE_VALIDATOR_SPEC.md`. Acceptance:
+`tests/pretrade-checks.test.ts`.

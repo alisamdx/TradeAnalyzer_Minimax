@@ -10,6 +10,9 @@ import type {
   SavedPayoffStrategy,
   PayoffAssessInput,
   PayoffAssessment,
+  PretradeValidationResult,
+  PretradeValidateInput,
+  PretradeTradePurpose,
   OptionsChainExpirationSummary,
   OptionsChainViewData,
   OptionContract,
@@ -2176,6 +2179,14 @@ export function PayoffView({ initialTicker, initialSpot, initialExpiry, initialS
   const [assessThinking, setAssessThinking] = useState('');
   const thinkingRef = useRef<HTMLDivElement>(null);
 
+  // Pre-trade validation state (decision-support — Requirements/PRE_TRADE_VALIDATOR_SPEC.md)
+  const [validation, setValidation]       = useState<PretradeValidationResult | null>(null);
+  const [validateLoading, setValidateLoading] = useState(false);
+  // Intent — remembered last-used across validations this session.
+  const [intentHappyToOwn, setIntentHappyToOwn] = useState<'yes' | 'no' | 'na'>('na');
+  const [intentPurpose, setIntentPurpose]       = useState<PretradeTradePurpose>('income');
+  const [intentMultiQuarter, setIntentMultiQuarter] = useState(false);
+
   // UI state
   const [error, setError]               = useState<string | null>(null);
   const [statusMsg, setStatus]          = useState<string | null>(null);
@@ -2450,6 +2461,44 @@ export function PayoffView({ initialTicker, initialSpot, initialExpiry, initialS
       setAssessLoading(false);
     }
   }, [legs, metrics, recognizedStrategy, spotNum, ticker]);
+
+  // ── Pre-trade validation ────────────────────────────────────────────────────
+  const handleValidate = useCallback(async (refresh = false) => {
+    if (!metrics || legs.length === 0) { setError('Add legs and a spot price first'); return; }
+    setValidateLoading(true);
+    setError(null);
+    const input: PretradeValidateInput = {
+      ticker:       ticker.trim() || null,
+      strategyName: recognizedStrategy?.name ?? 'Custom Strategy',
+      spot:         spotNum,
+      legs,
+      metrics: {
+        maxProfit:       metrics.maxProfit,
+        maxLoss:         metrics.maxLoss,
+        unlimitedProfit: metrics.unlimitedProfit,
+        unlimitedLoss:   metrics.unlimitedLoss,
+        breakevenPrices: metrics.breakevenPrices,
+        netPremium:      metrics.netPremium,
+        netDelta:        metrics.netDelta,
+        netTheta:        metrics.netTheta,
+        netVega:         metrics.netVega,
+      },
+      intent: {
+        happyToOwn: intentHappyToOwn === 'na' ? null : intentHappyToOwn === 'yes',
+        purpose:    intentPurpose,
+        multiQuarterThesis: intentMultiQuarter,
+      },
+      refresh,
+    };
+    try {
+      const result = await window.api.pretradeValidator.validate(input);
+      setValidation(result);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setValidateLoading(false);
+    }
+  }, [legs, metrics, recognizedStrategy, spotNum, ticker, intentHappyToOwn, intentPurpose, intentMultiQuarter]);
 
   // ── Template application ────────────────────────────────────────────────────
   // Applies skeleton legs immediately, then auto-fills premiums from the live
@@ -3270,6 +3319,108 @@ export function PayoffView({ initialTicker, initialSpot, initialExpiry, initialS
               />
             )}
           </>
+        )}
+
+        {/* ════════════════════════════════════════════════════════════════════
+            PRE-TRADE VALIDATION (decision-support — Requirements/PRE_TRADE_VALIDATOR_SPEC.md)
+        ════════════════════════════════════════════════════════════════════ */}
+        {legs.length > 0 && spotNum > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, borderTop: '1px solid #1e293b', paddingTop: 12 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#cbd5e1', letterSpacing: 0.5 }}>
+              PRE-TRADE VALIDATION
+              <span style={{ color: '#64748b', fontWeight: 400, marginLeft: 8 }}>— is this a good idea, given your intent?</span>
+            </div>
+
+            {/* Intent inputs */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, fontSize: 11, color: '#94a3b8', alignItems: 'center' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                Purpose
+                <select value={intentPurpose} onChange={e => setIntentPurpose(e.target.value as PretradeTradePurpose)}
+                  style={{ background: '#0f172a', color: '#e2e8f0', border: '1px solid #334155', borderRadius: 4, padding: '3px 6px', fontSize: 11 }}>
+                  <option value="income">Income</option>
+                  <option value="ownership">Ownership (wheel)</option>
+                  <option value="directional">Directional</option>
+                  <option value="hedge">Hedge</option>
+                </select>
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                Happy to own at strike?
+                <select value={intentHappyToOwn} onChange={e => setIntentHappyToOwn(e.target.value as 'yes' | 'no' | 'na')}
+                  style={{ background: '#0f172a', color: '#e2e8f0', border: '1px solid #334155', borderRadius: 4, padding: '3px 6px', fontSize: 11 }}>
+                  <option value="na">N/A</option>
+                  <option value="yes">Yes</option>
+                  <option value="no">No</option>
+                </select>
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
+                <input type="checkbox" checked={intentMultiQuarter} onChange={e => setIntentMultiQuarter(e.target.checked)} />
+                Multi-quarter thesis
+              </label>
+            </div>
+
+            <button
+              onClick={() => handleValidate(false)}
+              disabled={validateLoading}
+              style={{
+                padding: '8px 16px', fontSize: 13, fontWeight: 600, borderRadius: 5,
+                cursor: validateLoading ? 'default' : 'pointer',
+                background: validateLoading ? '#1e293b' : '#0e7490',
+                color: validateLoading ? '#64748b' : '#fff',
+                border: '1px solid #334155',
+                display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center',
+              }}
+            >
+              {validateLoading
+                ? <><span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>⟳</span> Validating…</>
+                : <><span>✓</span> {validation ? 'Re-validate' : 'Validate Trade'}</>}
+            </button>
+
+            {validation && !validateLoading && (() => {
+              const vColors: Record<string, string> = { good: '#22c55e', caution: '#f97316', bad: '#ef4444' };
+              const vLabel: Record<string, string> = { good: 'GOOD IDEA', caution: 'CAUTION', bad: 'BAD IDEA' };
+              const sColors: Record<string, string> = { pass: '#22c55e', warn: '#f97316', fail: '#ef4444', info: '#94a3b8' };
+              const sIcon: Record<string, string> = { pass: '✓', warn: '!', fail: '✕', info: 'i' };
+              const vc = vColors[validation.verdict] ?? '#94a3b8';
+              return (
+                <div style={{ background: '#0f172a', border: `1px solid ${vc}44`, borderRadius: 8, overflow: 'hidden' }}>
+                  <div style={{ padding: '10px 14px', borderBottom: '1px solid #1e293b', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: vc }}>{vLabel[validation.verdict]}</span>
+                    {validation.context.ivRank != null && (
+                      <span style={{ fontSize: 10, color: '#64748b' }}>IV rank {validation.context.ivRank.toFixed(0)}%</span>)}
+                    {validation.context.directionBias && (
+                      <span style={{ fontSize: 10, color: '#64748b' }}>trend {validation.context.directionBias}</span>)}
+                    {validation.fromCache && (
+                      <span style={{ fontSize: 10, color: '#64748b' }} title="Lab data from cache">cached</span>)}
+                  </div>
+                  <div style={{ padding: '8px 14px', display: 'flex', flexDirection: 'column', gap: 7 }}>
+                    {validation.checks.map((c, i) => (
+                      <div key={i} style={{ display: 'flex', gap: 8, fontSize: 11, lineHeight: 1.45 }}>
+                        <span style={{ color: sColors[c.status], fontWeight: 700, minWidth: 12 }}>{sIcon[c.status]}</span>
+                        <span><span style={{ color: '#e2e8f0', fontWeight: 600 }}>{c.title}.</span> <span style={{ color: '#94a3b8' }}>{c.detail}</span></span>
+                      </div>
+                    ))}
+                  </div>
+                  {validation.suggestion && (
+                    <div style={{ padding: '10px 14px', borderTop: '1px solid #1e293b', background: '#0c1425' }}>
+                      <div style={{ fontSize: 10, fontWeight: 700, color: '#38bdf8', marginBottom: 4 }}>LAB SUGGESTS INSTEAD</div>
+                      <div style={{ fontSize: 11, color: '#cbd5e1' }}>{validation.suggestion.name} (grade {validation.suggestion.grade})</div>
+                      <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 3 }}>
+                        {validation.suggestion.legs.map(l => `${l.action} ${l.side} $${l.strike}`).join(' · ')}
+                      </div>
+                      <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 3 }}>{validation.suggestion.rationale}</div>
+                      <button onClick={() => handleValidate(true)}
+                        style={{ marginTop: 6, padding: '3px 10px', fontSize: 10, borderRadius: 4, cursor: 'pointer', background: '#1e293b', color: '#94a3b8', border: '1px solid #334155' }}>
+                        ⟳ Refresh with live chain
+                      </button>
+                    </div>
+                  )}
+                  <div style={{ padding: '6px 14px', borderTop: '1px solid #1e293b', fontSize: 9, color: '#475569' }}>
+                    Decision-support only — not a recommendation to trade. Thresholds are first-pass and tunable.
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
         )}
 
         {/* ════════════════════════════════════════════════════════════════════

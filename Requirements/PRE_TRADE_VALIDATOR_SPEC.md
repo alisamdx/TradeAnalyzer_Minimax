@@ -1,8 +1,9 @@
 # Pre-Trade Validator — design spec (Payoff view)
 
-> **Status: 📋 designed, not built (2026-06-25).** Decision-support only — it judges a trade
-> you hand-build; it does **not** place orders and is **not** wired to the v2 execution engine.
-> Graduates into `spec/08-options-chain-and-payoff.md` when shipped.
+> **Status: ✅ SHIPPED v1.1.76 (2026-06-25)** — graduated into `spec/08-options-chain-and-payoff.md`
+> §8.B.7 (authoritative). Decision-support only — it judges a trade you hand-build; it does
+> **not** place orders and is **not** wired to the v2 execution engine. This doc remains the
+> detailed design rationale + deferred-questions record.
 
 ## Goal
 
@@ -95,19 +96,23 @@ structure, the validator just picks the right existing one for the regime + inte
 - Reuses live data already in the app; "suggest better" may reuse cached lab data or trigger
   one chain fetch (see open questions).
 
-## Recommended defaults (overridable)
+## Decisions (locked 2026-06-25)
 
+- **Validation history = PERSISTED.** A `pretrade_validations` table logs each validation
+  (ticker, legs JSON, intent, verdict, flags JSON, suggested-alternative JSON, created_at) for
+  later review and eventual outcome-learning. Migration + a "Validation history" list on the
+  panel.
+- **"Suggest better" = reuse cached lab data, with a Refresh action.** Default to cached
+  strikes/scores for speed; a **Refresh** button triggers one fresh chain fetch when the user
+  wants accurate live strikes. (Stale-cache risk is acceptable for an advisory suggestion;
+  refresh covers the "about to actually place it" moment.)
 - **LLM critic = opt-in** per validation (deterministic checks run free + instant; the LLM adds
-  cost + latency, so make it a "get AI narrative" button, not automatic).
-- **Validation history = ephemeral** (no persistence) for v1; revisit if the user wants a log.
+  cost + latency, so it's a "get AI narrative" button, not automatic).
 - **Intent = remembered last-used**, re-confirmed each validation.
 
-## Open questions
+## Open questions (deferred, non-blocking)
 
-1. Should validations be **logged/persisted** (review later / learn from outcomes) or ephemeral?
-2. "Suggest better" — **reuse cached lab data** (fast, possibly stale strikes) or **fetch a
-   fresh chain** (one E*Trade call, accurate)? Lean: reuse cache, with a "refresh" action.
-3. Should the validator also accept an **existing open position** as input later (scope (b))?
+1. Should the validator also accept an **existing open position** as input later (scope (b))?
    Out of scope now, natural follow-up.
-4. Do we want the intent inputs to **pre-populate** from the structure (e.g. infer "income" from
-   a net-credit build) to reduce friction?
+2. Do we want the intent inputs to **pre-populate** from the structure (e.g. infer "income" from
+   a net-credit build) to reduce friction? (Nice-to-have; not v1-blocking.)

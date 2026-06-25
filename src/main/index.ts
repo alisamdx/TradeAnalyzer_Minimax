@@ -49,6 +49,7 @@ import { IVolatilityProvider } from './services/ivolatility-provider.js';
 import { IvHistoryService } from './services/iv-history-service.js';
 import { registerIvHistoryIpc } from './ipc/ipc-iv-history.js';
 import { registerStrategyLabIpc } from './ipc/ipc-strategy-lab.js';
+import { registerPretradeValidatorIpc } from './ipc/ipc-pretrade-validator.js';
 import { BatchService } from './services/batch-service.js';
 import { DailyIvCaptureJob } from './services/jobs/daily-iv-capture.js';
 import { MarketSyncJob } from './services/jobs/market-sync-job.js';
@@ -367,6 +368,9 @@ app.whenReady().then(() => {
 
   // Strategy Lab — score / explore all 31 strategies for a single ticker
   registerStrategyLabIpc(db, dataProvider, optionsProvider);
+
+  // Pre-Trade Validator — verdict a hand-built Payoff structure before placing it
+  registerPretradeValidatorIpc(db, dataProvider, optionsProvider);
 
   // v0.21.0 — Batch job scheduler
   // Use a getter so callbacks always send to the current window (created later).
