@@ -287,6 +287,8 @@ function buildApi() {
     openLogsDir: () => invoke<boolean>('settings:open-logs-dir'),
     backup: () => invoke<{ backupPath: string; message: string } | null>('settings:backup-everything'),
     restore: () => invoke<{ restored: boolean; message: string } | null>('settings:restore-backup'),
+    /** Opens a folder picker; returns the chosen absolute path, or null if cancelled. */
+    pickDirectory: () => invoke<string | null>('settings:pick-directory'),
     /** Returns which options data provider is active ('polygon' or 'etrade'). */
     getOptionsProvider: () => invoke<'polygon' | 'etrade'>('settings:get-options-provider'),
     /** Saves the options provider selection. Takes effect after next app restart. */

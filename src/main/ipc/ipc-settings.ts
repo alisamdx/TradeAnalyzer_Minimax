@@ -31,6 +31,7 @@ export interface AppSettings {
   errorLogRetentionDays: number;
   autoBackupEnabled: boolean;
   autoBackupIntervalDays: number;
+  autoBackupDir: string;
   // Priority 9: Settings Enhancements
   soundAlertsEnabled: boolean;
   defaultScreenerIndex: 'sp500' | 'russell1000' | 'both';
@@ -62,6 +63,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   errorLogRetentionDays: 90,
   autoBackupEnabled: false,
   autoBackupIntervalDays: 7,
+  autoBackupDir: '',
   // Priority 9 defaults
   soundAlertsEnabled: true,
   defaultScreenerIndex: 'both',
@@ -119,6 +121,7 @@ export function registerSettingsIpc(
           else if (k === 'errorLogRetentionDays') settings.errorLogRetentionDays = v !== undefined ? parseInt(v, 10) : DEFAULT_SETTINGS.errorLogRetentionDays;
           else if (k === 'autoBackupEnabled') settings.autoBackupEnabled = v === 'true';
           else if (k === 'autoBackupIntervalDays') settings.autoBackupIntervalDays = v !== undefined ? parseInt(v, 10) : DEFAULT_SETTINGS.autoBackupIntervalDays;
+          else if (k === 'autoBackupDir') settings.autoBackupDir = v ?? '';
           // Priority 9: Settings Enhancements
           else if (k === 'soundAlertsEnabled') settings.soundAlertsEnabled = v === 'true';
           else if (k === 'defaultScreenerIndex') settings.defaultScreenerIndex = (v as AppSettings['defaultScreenerIndex']) ?? DEFAULT_SETTINGS.defaultScreenerIndex;
@@ -208,6 +211,19 @@ export function registerSettingsIpc(
   });
 
   // ── Backup / Restore (EP-11) ─────────────────────────────────────────────
+  ipcMain.handle('settings:pick-directory', async () => {
+    try {
+      const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+      if (!win) return fail(new Error('No window available'));
+      const result = await dialog.showOpenDialog(win, {
+        title: 'Choose auto-backup folder',
+        properties: ['openDirectory', 'createDirectory'],
+      });
+      if (result.canceled || result.filePaths.length === 0) return ok(null);
+      return ok<string>(result.filePaths[0]!);
+    } catch (err) { return fail(err); }
+  });
+
   ipcMain.handle('settings:backup-everything', async () => {
     try {
       const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];

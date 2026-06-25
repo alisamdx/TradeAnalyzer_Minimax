@@ -146,7 +146,11 @@ export async function runAutoBackupIfDue(
   }
 
   try {
-    const autoDir = join(backupsDir, 'auto');
+    // Honor a user-chosen folder if set; otherwise the default userData/backups/auto. Always write
+    // into a dedicated subfolder so the prune step can never delete the user's own files that happen
+    // to share the chosen directory.
+    const customDir = (get('autoBackupDir') ?? '').trim();
+    const autoDir = customDir ? join(customDir, 'TradeAnalyzer-AutoBackups') : join(backupsDir, 'auto');
     mkdirSync(autoDir, { recursive: true });
     const zipPath = join(autoDir, `trade-analyzer-backup-${new Date().toISOString().slice(0, 10)}.zip`);
     await createBackupZip(db, zipPath, appVersion, sources);

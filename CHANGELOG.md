@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.74] — 2026-06-24
+
+### Added
+- **Auto-backup location is now configurable.** Settings → Backup → Automatic Backup has a **Backup folder** picker ("Choose…" / "Reset to default"). When set, auto-backups are written into a `TradeAnalyzer-AutoBackups` subfolder of your chosen folder (e.g. a cloud-synced or external drive); otherwise the default app-data location is used. Backups always go into that dedicated subfolder so the newest-5 prune only ever touches its own files, never anything else in the folder you picked. New `autoBackupDir` setting + `settings:pick-directory` IPC.
+
 ## [1.1.73] — 2026-06-24
 
 ### Fixed / Changed

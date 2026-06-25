@@ -332,6 +332,15 @@ export function SettingsView({ etradeWarning, onEtradeWarningDismiss }: Settings
     }
   }, []);
 
+  const handlePickBackupDir = useCallback(async () => {
+    try {
+      const dir = await window.api.settings.pickDirectory();
+      if (dir) saveSettings({ autoBackupDir: dir });
+    } catch (e) {
+      setBackupMsg(`Could not pick folder: ${(e as Error).message}`);
+    }
+  }, [saveSettings]);
+
   const handleRestore = useCallback(async () => {
     const confirmed = await window.dialog.confirm({
       title: 'Restore from backup',
@@ -825,6 +834,26 @@ export function SettingsView({ etradeWarning, onEtradeWarningDismiss }: Settings
                   style={{ width: 60 }}
                 />
                 <span>day(s)</span>
+              </div>
+
+              <div style={{ marginTop: 12 }}>
+                <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>Backup folder</label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <code style={{ fontSize: 12, padding: '4px 8px', background: 'var(--bg-elev)', border: '1px solid var(--border)', borderRadius: 4, maxWidth: 420, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {settings.autoBackupDir
+                      ? `${settings.autoBackupDir}\\TradeAnalyzer-AutoBackups`
+                      : 'Default (app data folder)'}
+                  </code>
+                  <button className="run-btn" onClick={handlePickBackupDir} style={{ width: 'auto', padding: '4px 12px' }}>
+                    Choose…
+                  </button>
+                  {settings.autoBackupDir && (
+                    <button className="run-btn" onClick={() => saveSettings({ autoBackupDir: '' })} style={{ width: 'auto', padding: '4px 12px' }}>
+                      Reset to default
+                    </button>
+                  )}
+                </div>
+                <p className="hint" style={{ marginTop: 6 }}>Auto-backups are written into a <code>TradeAnalyzer-AutoBackups</code> subfolder here (only its own files are pruned).</p>
               </div>
             </div>
           </div>

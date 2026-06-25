@@ -126,6 +126,19 @@ describe('runAutoBackupIfDue', () => {
     expect(r).toEqual({ ran: false, reason: 'not_due' });
   });
 
+  it('writes into a scoped subfolder of a user-chosen autoBackupDir', async () => {
+    const custom = join(dir, 'my-cloud-folder');
+    mkdirSync(custom);
+    db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('autoBackupEnabled', 'true');
+    db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('autoBackupDir', custom);
+    const r = await runAutoBackupIfDue(db, '1.0.0', backupsDir());
+    expect(r.ran).toBe(true);
+    expect(r.zipPath!.startsWith(join(custom, 'TradeAnalyzer-AutoBackups'))).toBe(true);
+    expect(existsSync(r.zipPath!)).toBe(true);
+    // The default location was NOT used.
+    expect(existsSync(join(backupsDir(), 'auto'))).toBe(false);
+  });
+
   it('runs when the interval has elapsed', async () => {
     db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('autoBackupEnabled', 'true');
     db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('autoBackupIntervalDays', '1');

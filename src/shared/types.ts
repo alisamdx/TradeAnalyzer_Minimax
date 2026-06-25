@@ -563,6 +563,7 @@ export interface AppSettings {
   errorLogRetentionDays: number;
   autoBackupEnabled: boolean;
   autoBackupIntervalDays: number;
+  autoBackupDir: string;                  // '' = default (userData/backups/auto); else a chosen folder
   // Priority 9: Settings Enhancements
   soundAlertsEnabled: boolean;
   defaultScreenerIndex: 'sp500' | 'russell1000' | 'both';
