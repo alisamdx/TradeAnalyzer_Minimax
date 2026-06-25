@@ -7,9 +7,10 @@ type Tab = 'lab' | 'leaps' | 'collared';
 
 interface Props {
   initialTicker?: string | null;
+  initialSlug?: string | null;
 }
 
-export function StrategyLabShellView({ initialTicker }: Props = {}) {
+export function StrategyLabShellView({ initialTicker, initialSlug }: Props = {}) {
   const [tab, setTab] = useState<Tab>('lab');
 
   return (
@@ -26,7 +27,7 @@ export function StrategyLabShellView({ initialTicker }: Props = {}) {
         </button>
       </div>
       <div style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        {tab === 'lab' && <StrategyLabView initialTicker={initialTicker} />}
+        {tab === 'lab' && <StrategyLabView initialTicker={initialTicker} initialSlug={initialSlug} />}
         {tab === 'leaps' && <LeapsCspView />}
         {tab === 'collared' && <CollaredLeapsView />}
       </div>

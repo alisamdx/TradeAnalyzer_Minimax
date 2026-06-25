@@ -54,6 +54,7 @@ type NavEntry = {
   payoffStrike?: number | null;
   payoffLegs?: PayoffLeg[] | null;
   strategyLabTicker?: string | null;
+  strategyLabSlug?: string | null;
   backtestTicker?: string | null;
   backtestStrategy?: string | null;
 };
@@ -258,8 +259,8 @@ export function App() {
     window.addEventListener('navigate-to-payoff', handleNavigateToPayoff as EventListener);
 
     // Listen for "Strategy Lab" from analysis view
-    const handleNavigateToStrategyLab = (e: CustomEvent<{ ticker: string }>) => {
-      setNavStack(prev => [...prev, { id: navIdRef.current++, view: 'strategyLab', strategyLabTicker: e.detail.ticker }]);
+    const handleNavigateToStrategyLab = (e: CustomEvent<{ ticker: string; slug?: string }>) => {
+      setNavStack(prev => [...prev, { id: navIdRef.current++, view: 'strategyLab', strategyLabTicker: e.detail.ticker, strategyLabSlug: e.detail.slug ?? null }]);
     };
     window.addEventListener('navigate-to-strategyLab', handleNavigateToStrategyLab as EventListener);
 
@@ -680,7 +681,7 @@ export function App() {
       case 'ivHistory': return <IvHistoryView />;
       case 'knowledge': return <KnowledgeView />;
       case 'strategyLab': return (
-        <StrategyLabShellView initialTicker={entry.strategyLabTicker ?? null} />
+        <StrategyLabShellView initialTicker={entry.strategyLabTicker ?? null} initialSlug={entry.strategyLabSlug ?? null} />
       );
       case 'batch': return <BatchView />;
       case 'dailyBrief': return (

@@ -3402,7 +3402,19 @@ export function PayoffView({ initialTicker, initialSpot, initialExpiry, initialS
                   </div>
                   {validation.suggestion && (
                     <div style={{ padding: '10px 14px', borderTop: '1px solid #1e293b', background: '#0c1425' }}>
-                      <div style={{ fontSize: 10, fontWeight: 700, color: '#38bdf8', marginBottom: 4 }}>LAB SUGGESTS INSTEAD</div>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 4 }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: '#38bdf8' }}>LAB SUGGESTS INSTEAD</span>
+                        {ticker.trim() && (
+                          <button
+                            onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-strategyLab', {
+                              detail: { ticker: ticker.trim().toUpperCase(), slug: validation.suggestion?.slug },
+                            }))}
+                            title="Open this structure in the Strategy Lab"
+                            style={{ padding: '2px 8px', fontSize: 9, fontWeight: 600, borderRadius: 4, cursor: 'pointer', background: '#0e7490', color: '#fff', border: '1px solid #334155' }}>
+                            Open in Lab →
+                          </button>
+                        )}
+                      </div>
                       <div style={{ fontSize: 11, color: '#cbd5e1' }}>{validation.suggestion.name} (grade {validation.suggestion.grade})</div>
                       <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 3 }}>
                         {validation.suggestion.legs.map(l => `${l.action} ${l.side} $${l.strike}`).join(' · ')}

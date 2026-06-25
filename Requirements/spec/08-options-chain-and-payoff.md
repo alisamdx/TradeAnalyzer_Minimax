@@ -75,7 +75,9 @@ multi-quarter thesis) and get a **good / caution / bad** verdict from determinis
 undefined-risk; IV-regime fit — warns selling cheap / buying expensive vol; direction-vs-trend,
 intent-gated; earnings-before-expiry, intent-gated; cushion-vs-`atr_pct`; horizon match;
 ownership basis). When flagged, the Strategy Lab **suggests a better structure** for the same
-ticker (intent + IV-regime filtered; may advise not selling premium). Verdict roll-up: any
+ticker (intent + IV-regime filtered; may advise not selling premium) — with an **Open in Lab →**
+button (v1.1.77) that jumps to the Strategy Lab's Explore tab pre-populated with that
+ticker + structure and auto-builds the setup. Verdict roll-up: any
 `fail` → bad, any `warn` → caution, else good. **Intent-aware** because the same trade can be a
 bad income trade but a fine ownership trade. Decision-support only — places no orders, not wired
 to the execution engine. `window.api.pretradeValidator.validate/history`; pure core

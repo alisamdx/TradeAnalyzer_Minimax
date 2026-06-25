@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.77] — 2026-06-25
+
+### Added
+- **"Open in Lab →" from the Pre-Trade Validator suggestion.** When the validator flags your trade and the Strategy Lab suggests a better structure, a button next to **LAB SUGGESTS INSTEAD** jumps straight to the Strategy Lab's **Explore** tab, pre-populated with that ticker + structure and **auto-built** (the concrete setup loads without a manual click). Reuses the existing `navigate-to-strategyLab` deep-link (now carries an optional `slug`); `StrategyLabView`/`ExploreTab` accept the slug, land on Explore, and fire a single auto-explore on arrival.
+
 ## [1.1.76] — 2026-06-25
 
 ### Added

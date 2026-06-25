@@ -4,7 +4,7 @@
  *
  * v0.20.0
  */
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import type {
   StrategyLabValidateResult,
   StrategyLabContext,
@@ -518,11 +518,12 @@ const CATEGORY_COLORS: Record<string, string> = {
 interface ExploreTabProps {
   initialSlug?: string;
   initialCtx?: StrategyLabContext;
+  initialTicker?: string;
   watchlists: Watchlist[];
 }
 
-function ExploreTab({ initialSlug, initialCtx, watchlists }: ExploreTabProps) {
-  const [ticker, setTicker]       = useState(initialCtx?.ticker ?? '');
+function ExploreTab({ initialSlug, initialCtx, initialTicker, watchlists }: ExploreTabProps) {
+  const [ticker, setTicker]       = useState(initialCtx?.ticker ?? initialTicker ?? '');
   const [slug, setSlug]           = useState(initialSlug ?? 'short-naked-put');
   const [loading, setLoading]     = useState(false);
   const [error, setError]         = useState<string | null>(null);
@@ -550,6 +551,19 @@ function ExploreTab({ initialSlug, initialCtx, watchlists }: ExploreTabProps) {
       setLoading(false);
     }
   };
+
+  // Auto-build once when arriving pre-populated (e.g. "Open in Lab" from the Pre-Trade
+  // Validator carries ticker + slug). Fires a single explore so the details show without a
+  // manual click. Guarded so it never re-runs on later edits.
+  const autoRanRef = useRef(false);
+  useEffect(() => {
+    if (autoRanRef.current) return;
+    if (initialSlug && ticker.trim() && !setup) {
+      autoRanRef.current = true;
+      void run();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const fetchAi = async () => {
     if (!setup) return;
@@ -748,11 +762,14 @@ type Tab = 'validate' | 'explore';
 
 interface StrategyLabViewProps {
   initialTicker?: string | null;
+  initialSlug?: string | null;
   clearInitialTicker?: () => void;
 }
 
-export function StrategyLabView({ initialTicker }: StrategyLabViewProps = {}) {
-  const [tab, setTab]             = useState<Tab>('validate');
+export function StrategyLabView({ initialTicker, initialSlug }: StrategyLabViewProps = {}) {
+  // Arriving with a slug (e.g. "Open in Lab" from the Pre-Trade Validator) lands on Explore,
+  // pre-populated with that structure; otherwise the default Validate tab.
+  const [tab, setTab]             = useState<Tab>(initialSlug ? 'explore' : 'validate');
   const [ticker, setTicker]       = useState(initialTicker ?? '');
   const [loading, setLoading]     = useState(false);
   const [error, setError]         = useState<string | null>(null);
@@ -764,8 +781,8 @@ export function StrategyLabView({ initialTicker }: StrategyLabViewProps = {}) {
     window.api.watchlists.list().then(setWatchlists).catch(() => {});
   }, []);
 
-  // When user clicks "→ Explore Strategy" from Validate tab
-  const [exploreSlug, setExploreSlug]   = useState<string | undefined>(undefined);
+  // When user clicks "→ Explore Strategy" from Validate tab — or arrives with an initialSlug.
+  const [exploreSlug, setExploreSlug]   = useState<string | undefined>(initialSlug ?? undefined);
   const [exploreCtx, setExploreCtx]     = useState<StrategyLabContext | undefined>(undefined);
 
   const handleExplore = useCallback((slug: string) => {
@@ -876,7 +893,7 @@ export function StrategyLabView({ initialTicker }: StrategyLabViewProps = {}) {
 
       {/* Explore tab */}
       {tab === 'explore' && (
-        <ExploreTab initialSlug={exploreSlug} initialCtx={exploreCtx} watchlists={watchlists} />
+        <ExploreTab initialSlug={exploreSlug} initialCtx={exploreCtx} initialTicker={initialTicker ?? undefined} watchlists={watchlists} />
       )}
     </div>
   );
