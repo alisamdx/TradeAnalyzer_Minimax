@@ -6,6 +6,7 @@ import { ApiServer } from './api-server.js';
 import { openDatabase } from './db/connection.js';
 import { runMigrations, currentSchemaVersion } from './db/migrations.js';
 import { WatchlistService } from './services/watchlist-service.js';
+import { runAutoBackupIfDue, defaultBackupSources } from './services/backup-service.js';
 import { registerWatchlistIpc } from './ipc/ipc-watchlists.js';
 import { ConstituentsService } from './services/constituents-service.js';
 import { ScreenerService } from './services/screener-service.js';
@@ -250,6 +251,20 @@ app.whenReady().then(() => {
 
   // Encrypt any plain-text secrets left from before safeStorage was introduced.
   migratePlaintextSecrets(db);
+
+  // Scheduled auto-backup (EP-11): if enabled in Settings and the interval has elapsed, write a
+  // zip to userData/backups/auto. Fire-and-forget so it never blocks startup.
+  void runAutoBackupIfDue(
+    db,
+    app.getVersion(),
+    join(app.getPath('userData'), 'backups'),
+    defaultBackupSources(app.getAppPath(), app.getPath('userData'))
+  )
+    .then((r) => {
+      if (r.ran) console.log(`[backup] auto-backup written: ${r.zipPath}`);
+      else if (r.reason === 'error') console.warn(`[backup] auto-backup failed: ${r.error}`);
+    })
+    .catch((e) => console.warn('[backup] auto-backup error:', e instanceof Error ? e.message : e));
 
   // Phase 1 — watchlist service.
   const watchlistService = new WatchlistService(db);

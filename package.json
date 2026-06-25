@@ -1,6 +1,6 @@
 {
   "name": "trade-analyzer",
-  "version": "1.1.72",
+  "version": "1.1.73",
   "private": true,
   "description": "Stock screening and analysis desktop app for a single retail trader.",
   "main": "out/main/index.js",
@@ -30,6 +30,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.100.1",
     "@stoqey/ib": "^1.5.6",
+    "adm-zip": "^0.5.17",
     "better-sqlite3": "^12.10.0",
     "fastify": "^5.8.5",
     "lightweight-charts": "^4.1.0",
@@ -40,6 +41,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.14.0",
+    "@types/adm-zip": "^0.5.8",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.9.0",
     "@types/nodemailer": "^8.0.0",

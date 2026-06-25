@@ -3,13 +3,14 @@
 // see SPEC: NFR-3, NFR-5, NFR-6, EP-10, EP-11
 
 import { ipcMain, dialog, app, BrowserWindow, shell } from 'electron';
-import { existsSync, statSync, readFileSync, writeFileSync, copyFileSync, mkdirSync, readdirSync } from 'node:fs';
+import { statSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { DbHandle } from '../db/connection.js';
 import type { TokenBucketRateLimiter } from '../services/rate-limiter.js';
 import type { QuoteCache, FundamentalsCache } from '../services/cache-service.js';
 import { TTL_SECONDS } from '../services/cache-service.js';
 import { secureGet, secureSet, encryptionAvailable } from '../services/secure-settings.js';
+import { createBackupZip, restoreDbFromFile, defaultBackupSources } from '../services/backup-service.js';
 
 function ok<T>(value: T) { return { ok: true as const, value }; }
 function fail(err: unknown) {
@@ -218,37 +219,11 @@ export function registerSettingsIpc(
       });
       if (result.canceled || !result.filePath) return ok(null);
 
-      const dbPath = join(app.getPath('userData'), 'trade-analyzer.sqlite');
-      const backupsDir = join(app.getPath('userData'), 'backups');
-      mkdirSync(backupsDir, { recursive: true });
+      const outZipPath = result.filePath.toLowerCase().endsWith('.zip') ? result.filePath : `${result.filePath}.zip`;
+      const sources = defaultBackupSources(app.getAppPath(), app.getPath('userData'));
+      const { entries } = await createBackupZip(db, outZipPath, app.getVersion(), sources);
 
-      const timestamp = Date.now();
-      const backupDir = join(backupsDir, `backup-${timestamp}`);
-      mkdirSync(backupDir, { recursive: true });
-
-      // Copy DB
-      if (existsSync(dbPath)) {
-        copyFileSync(dbPath, join(backupDir, 'trade-analyzer.sqlite'));
-      }
-
-      // Copy logs dir
-      const srcLogsDir = join(app.getPath('userData'), 'logs');
-      if (existsSync(srcLogsDir)) {
-        copyDirRecursive(srcLogsDir, join(backupDir, 'logs'));
-      }
-
-      // Copy AI_CONTEXT if present at repo root (not in userData — use user's app dir)
-      const aiCtxSrc = join(app.getAppPath().replace(/[\\/]out[\\/]renderer$/, ''), '.ai', 'AI_CONTEXT.md');
-      const aiCtxDst = join(backupDir, 'AI_CONTEXT.md');
-      if (existsSync(aiCtxSrc)) {
-        copyFileSync(aiCtxSrc, aiCtxDst);
-      }
-
-      // Use Node's built-in archiver-free approach: write the backup manifest.
-      const manifest = JSON.stringify({ createdAt: new Date().toISOString(), appVersion: app.getVersion() }, null, 2);
-      writeFileSync(join(backupDir, 'manifest.json'), manifest, 'utf8');
-
-      return ok({ backupPath: backupDir, message: `Backup ready at ${backupDir}. Note: not zipped yet — copy the backup folder manually.` });
+      return ok({ backupPath: outZipPath, message: `Backup saved to ${outZipPath} (${entries} item${entries !== 1 ? 's' : ''}).` });
     } catch (err) { return fail(err); }
   });
 
@@ -259,7 +234,7 @@ export function registerSettingsIpc(
       const result = await dialog.showOpenDialog(win, {
         title: 'Restore from Backup',
         filters: [
-          { name: 'SQLite Database', extensions: ['sqlite', 'db'] },
+          { name: 'Backup / Database', extensions: ['zip', 'sqlite', 'db'] },
           { name: 'All Files', extensions: ['*'] }
         ],
         properties: ['openFile']
@@ -267,11 +242,9 @@ export function registerSettingsIpc(
       if (result.canceled || result.filePaths.length === 0) return ok(null);
 
       const selectedPath = result.filePaths[0]!;
-      const dbPath = join(app.getPath('userData'), 'trade-analyzer.sqlite');
-
-      if (selectedPath.endsWith('.sqlite') || selectedPath.endsWith('.db')) {
-        copyFileSync(selectedPath, dbPath);
-      }
+      const dbPath = db.name; // the live DB file path (better-sqlite3 exposes it)
+      const restored = restoreDbFromFile(selectedPath, dbPath);
+      if (!restored) return fail(new Error('Selected file is not a recognized backup (.zip with a database, or a .sqlite/.db file).'));
 
       return ok({ restored: true, message: 'Restore applied. Restart the app to load restored data.' });
     } catch (err) { return fail(err); }
@@ -365,19 +338,6 @@ export function registerDiagnosticsIpc(
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function copyDirRecursive(src: string, dst: string): void {
-  mkdirSync(dst, { recursive: true });
-  for (const entry of readdirSync(src, { withFileTypes: true })) {
-    const srcPath = join(src, entry.name);
-    const dstPath = join(dst, entry.name);
-    if (entry.isDirectory()) {
-      copyDirRecursive(srcPath, dstPath);
-    } else {
-      try { copyFileSync(srcPath, dstPath); } catch { /* skip */ }
-    }
-  }
-}
 
 function walkDirSize(dir: string): number {
   let total = 0;

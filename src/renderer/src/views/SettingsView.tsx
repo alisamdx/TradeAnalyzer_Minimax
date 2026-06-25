@@ -430,18 +430,6 @@ export function SettingsView({ etradeWarning, onEtradeWarningDismiss }: Settings
             </div>
 
             <div className="settings-row">
-              <label>Auto-Backup</label>
-              <div className="toggle-row">
-                <input
-                  type="checkbox"
-                  checked={settings.autoBackupEnabled}
-                  onChange={e => saveSettings({ autoBackupEnabled: e.target.checked })}
-                />
-                <span>Enable weekly auto-backup</span>
-              </div>
-            </div>
-
-            <div className="settings-row">
               <label>Theme</label>
               <div className="preset-btns">
                 <button
@@ -799,7 +787,7 @@ export function SettingsView({ etradeWarning, onEtradeWarningDismiss }: Settings
 
             <div className="backup-card">
               <h3>Backup Everything</h3>
-              <p>Creates a backup folder containing the SQLite database, recent logs, and .ai/AI_CONTEXT.md. Keep backups in a safe location.</p>
+              <p>Saves a single <strong>.zip</strong> to the location you choose, containing a consistent snapshot of the database, recent logs, and (in dev) .ai/AI_CONTEXT.md. Keep it somewhere safe.</p>
               <button className="run-btn" onClick={handleBackup} style={{ width: 'auto', padding: '6px 16px' }}>
                 Backup Everything
               </button>
@@ -808,11 +796,36 @@ export function SettingsView({ etradeWarning, onEtradeWarningDismiss }: Settings
 
             <div className="backup-card" style={{ marginTop: 16 }}>
               <h3>Restore from Backup</h3>
-              <p>Replace the current database with a backed-up SQLite file. The app will load the restored data on next launch.</p>
+              <p>Replace the current database with one from a backup <strong>.zip</strong> (or a bare .sqlite/.db file). Restart the app after restoring to load the data.</p>
               <button className="run-btn danger" onClick={handleRestore} style={{ width: 'auto', padding: '6px 16px' }}>
                 Restore from Backup
               </button>
               {restoreMsg && <p className="hint" style={{ marginTop: 8 }}>{restoreMsg}</p>}
+            </div>
+
+            <div className="backup-card" style={{ marginTop: 16 }}>
+              <h3>Automatic Backup</h3>
+              <p>When enabled, the app writes a backup zip on launch if at least the chosen number of days has passed since the last one. Auto-backups are kept under your app data folder (newest 5 retained).</p>
+              <div className="toggle-row" style={{ marginBottom: 10 }}>
+                <input
+                  type="checkbox"
+                  checked={settings.autoBackupEnabled}
+                  onChange={e => saveSettings({ autoBackupEnabled: e.target.checked })}
+                />
+                <span>Enable automatic backup</span>
+              </div>
+              <div className="inline-inputs">
+                <span>Every</span>
+                <input
+                  type="number"
+                  min={1} max={90}
+                  value={settings.autoBackupIntervalDays}
+                  disabled={!settings.autoBackupEnabled}
+                  onChange={e => saveSettings({ autoBackupIntervalDays: Math.max(1, parseInt(e.target.value) || 7) })}
+                  style={{ width: 60 }}
+                />
+                <span>day(s)</span>
+              </div>
             </div>
           </div>
           )}

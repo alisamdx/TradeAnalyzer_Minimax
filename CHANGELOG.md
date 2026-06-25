@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.73] — 2026-06-24
+
+### Fixed / Changed
+- **Backup now produces a real `.zip` at the location you choose.** Previously the "Save as .zip" dialog was misleading — it ignored your chosen path and instead dumped an *un-zipped* folder into AppData, telling you to copy it manually. Backup now writes a single zip to the path you pick, containing a **consistent** database snapshot (via SQLite's online backup — WAL-safe, so in-flight data is included, unlike the old live-file copy), plus recent logs, AI_CONTEXT (in dev), and a manifest.
+- **Restore now accepts a backup `.zip`** (the database is extracted from it) as well as a bare `.sqlite`/`.db` file. It overwrites the live DB and prompts you to restart.
+- **Auto-backup now actually works.** The setting existed but nothing ran it. On launch, if enabled and the chosen interval has elapsed since the last one, the app writes a backup zip to `userData/backups/auto/` (newest 5 retained). The control was also **moved from General to the Backup tab** (where you'd expect it) and gained an **interval (days)** field.
+
+### Notes
+- New `src/main/services/backup-service.ts` (shared by the IPC handlers + startup auto-backup); new `adm-zip` dependency. 12 new tests (`tests/backup-service.test.ts`). Full suite **704 passing**.
+
 ## [1.1.72] — 2026-06-24
 
 ### Added
