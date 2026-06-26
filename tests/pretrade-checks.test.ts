@@ -199,4 +199,18 @@ describe('pickSuggestedStructure', () => {
     const s = pickSuggestedStructure([lowGrade, highGrade], { happyToOwn: true, purpose: 'ownership', multiQuarterThesis: false }, 55);
     expect(s!.grade).toBe('A+');
   });
+
+  it('never suggests a pin-bet butterfly for an ownership intent, even at a higher grade', () => {
+    const butterfly = score({ slug: 'put-butterfly', grade: 'A+', totalScore: 90 });
+    const csp = score({ slug: 'short-naked-put', grade: 'B', totalScore: 70 });
+    const s = pickSuggestedStructure([butterfly, csp], { happyToOwn: true, purpose: 'ownership', multiQuarterThesis: false }, 25);
+    expect(s!.slug).toBe('short-naked-put'); // NOT put-butterfly
+  });
+
+  it('does not surface a pin-bet butterfly even when it is the only directional-graded option', () => {
+    const butterfly = score({ slug: 'call-butterfly', category: 'bullish', grade: 'A+', totalScore: 90 });
+    const vertical = score({ slug: 'long-call-vertical', category: 'bullish', grade: 'B', totalScore: 68 });
+    const s = pickSuggestedStructure([butterfly, vertical], { happyToOwn: null, purpose: 'directional', multiQuarterThesis: false }, 55);
+    expect(s!.slug).toBe('long-call-vertical');
+  });
 });

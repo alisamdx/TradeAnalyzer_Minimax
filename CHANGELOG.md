@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.82] — 2026-06-25
+
+### Fixed
+- **Pre-Trade Validator "Lab suggests instead" no longer recommends a pin-bet butterfly.** For an *ownership* (wheel) intent it was surfacing a grade-A **Put Butterfly** — a neutral structure that pays only if the underlying pins a narrow window at expiry and never acquires shares — because the filter matched any slug containing "put". The suggestion picker now uses explicit per-intent slug allowlists (ownership → `short-naked-put` / `short-put-vertical`; income → the validated short-premium structures; directional → bull/bear categories; hedge → long puts) and **globally excludes pin-bet butterflies** (incl. broken-wing/heart variants) from every suggestion. Regression tests added (`tests/pretrade-checks.test.ts`, 24).
+
 ## [1.1.81] — 2026-06-25
 
 ### Fixed

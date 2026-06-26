@@ -237,25 +237,40 @@ export function pickSuggestedStructure(
   const cat = (s: StrategyScore) => (s.category ?? '').toLowerCase();
   const lowIv = ivRank != null && ivRank < PRETRADE_THRESHOLDS.lowIvRank;
 
-  let pool = valid;
+  // Never suggest a "pin bet" — butterflies (and broken-wing/heart variants) only pay if the
+  // underlying lands in a tight window at expiry; they express no directional/ownership thesis
+  // and are a poor "better structure" recommendation. (A grade-A put butterfly was wrongly
+  // surfaced as an "ownership fit" before this guard.)
+  const PIN_BETS = new Set([
+    'put-butterfly', 'call-butterfly',
+    'put-broken-wing-butterfly', 'call-broken-wing-butterfly',
+    'put-broken-heart-butterfly', 'call-broken-heart-butterfly',
+  ]);
+  // Ownership/wheel = acquire shares via short puts (CSP) or a defined-risk put credit spread.
+  const OWNERSHIP_SLUGS = new Set(['short-naked-put', 'short-put-vertical']);
+  // Income = the validated short-premium structures.
+  const INCOME_SLUGS = new Set([
+    'iron-condor', 'dynamic-width-iron-condor', 'iron-fly',
+    'short-strangle', 'short-straddle', 'short-put-vertical', 'short-call-vertical',
+  ]);
+
+  const base = valid.filter(s => !PIN_BETS.has(s.slug));
+  let pool = base;
   switch (intent.purpose) {
     case 'income':
-      // Income wants to SELL premium — but not into cheap vol. If IV is low, prefer
-      // defined-risk credit and let the rationale flag the regime.
-      pool = valid.filter(isCredit);
+      pool = base.filter(s => INCOME_SLUGS.has(s.slug) && isCredit(s));
       break;
     case 'ownership':
-      // Wheel: put-based credit structures (own on a dip).
-      pool = valid.filter(s => isCredit(s) && (s.slug.includes('put') || s.slug === 'short-naked-put'));
+      pool = base.filter(s => OWNERSHIP_SLUGS.has(s.slug));
       break;
     case 'directional':
-      pool = valid.filter(s => cat(s).includes('bull') || cat(s).includes('bear'));
+      pool = base.filter(s => cat(s).includes('bull') || cat(s).includes('bear'));
       break;
     case 'hedge':
-      pool = valid.filter(s => s.slug.includes('long-put') || s.slug.includes('put-vertical'));
+      pool = base.filter(s => s.slug.startsWith('long-put') || s.slug === 'poor-mans-covered-put');
       break;
   }
-  if (pool.length === 0) pool = valid;
+  if (pool.length === 0) pool = base.length ? base : valid;
 
   // Prefer defined-risk (finite max loss), then higher grade.
   const GRADE: Record<string, number> = { 'A+': 6, A: 5, B: 4, C: 3, F: 1 };

@@ -75,7 +75,9 @@ multi-quarter thesis) and get a **good / caution / bad** verdict from determinis
 undefined-risk; IV-regime fit — buying expensive vol → warn; selling cheap vol → warn for income/directional but **info** for ownership/happy-to-own (intent-gated, premium-secondary, v1.1.78); direction-vs-trend,
 intent-gated; earnings-before-expiry, intent-gated; cushion-vs-`atr_pct`; horizon match;
 ownership basis). When flagged, the Strategy Lab **suggests a better structure** for the same
-ticker (intent + IV-regime filtered; may advise not selling premium) — with an **Open in Lab →**
+ticker (explicit per-intent slug allowlists — ownership→short put / put credit spread,
+income→short-premium, directional→bull/bear, hedge→long puts; pin-bet butterflies excluded;
+IV-regime aware; may advise not selling premium) — with an **Open in Lab →**
 button (v1.1.77) that jumps to the Strategy Lab's Explore tab pre-populated with that
 ticker + structure and auto-builds the setup. Verdict roll-up: any
 `fail` → bad, any `warn` → caution, else good. **Intent-aware** because the same trade can be a
