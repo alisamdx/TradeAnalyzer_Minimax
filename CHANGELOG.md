@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.83] — 2026-06-25
+
+### Fixed
+- **Validator no longer suggests your own trade back as a "better" structure.** When the Strategy Lab's best pick is effectively the structure you're already evaluating (same legs — e.g. a held NVDA 185 CSP whose lab-best is also a 185 short put), the suggestion now shows **"LAB: NO BETTER ALTERNATIVE"** with a note ("the lab has no higher-graded structure than the one you're evaluating — shown for context") instead of the misleading "LAB SUGGESTS INSTEAD." The useful signal in that case — the grade and the IV-regime note ("consider waiting for higher IV / just own it") — is preserved. New `PretradeSuggestion.sameAsCurrent` flag computed by `suggestionMatchesInput` (leg-set comparison, order-independent). Regression test `tests/pretrade-suggestion-match.test.ts` (5).
+
 ## [1.1.82] — 2026-06-25
 
 ### Fixed

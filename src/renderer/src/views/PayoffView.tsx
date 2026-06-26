@@ -3403,7 +3403,9 @@ export function PayoffView({ initialTicker, initialSpot, initialExpiry, initialS
                   {validation.suggestion && (
                     <div style={{ padding: '10px 14px', borderTop: '1px solid #1e293b', background: '#0c1425' }}>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 4 }}>
-                        <span style={{ fontSize: 10, fontWeight: 700, color: '#38bdf8' }}>LAB SUGGESTS INSTEAD</span>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: validation.suggestion.sameAsCurrent ? '#94a3b8' : '#38bdf8' }}>
+                          {validation.suggestion.sameAsCurrent ? 'LAB: NO BETTER ALTERNATIVE' : 'LAB SUGGESTS INSTEAD'}
+                        </span>
                         {ticker.trim() && (
                           <button
                             onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-strategyLab', {
@@ -3415,6 +3417,11 @@ export function PayoffView({ initialTicker, initialSpot, initialExpiry, initialS
                           </button>
                         )}
                       </div>
+                      {validation.suggestion.sameAsCurrent && (
+                        <div style={{ fontSize: 10, color: '#94a3b8', marginBottom: 3, fontStyle: 'italic' }}>
+                          The lab has no higher-graded structure than the one you're evaluating — shown for context.
+                        </div>
+                      )}
                       <div style={{ fontSize: 11, color: '#cbd5e1' }}>{validation.suggestion.name} (grade {validation.suggestion.grade})</div>
                       <div style={{ fontSize: 10, color: '#94a3b8', marginTop: 3 }}>
                         {validation.suggestion.legs.map(l => `${l.action} ${l.side} $${l.strike}`).join(' · ')}

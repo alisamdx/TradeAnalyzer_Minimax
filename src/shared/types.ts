@@ -1396,6 +1396,9 @@ export interface PretradeSuggestion {
   maxLoss: number | null;
   breakevens: number[];
   annualizedReturn: number | null;
+  /** True when the lab's best pick is effectively the structure the user already built
+   *  (same legs) — so it's "no better alternative", not a different recommendation. */
+  sameAsCurrent?: boolean;
 }
 
 /** Renderer → main: the hand-built structure + the metrics the Payoff view already

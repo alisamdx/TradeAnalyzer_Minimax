@@ -76,6 +76,10 @@ export class PretradeValidatorService {
     let suggestion: PretradeSuggestion | null = null;
     if (verdict !== 'good' && lab) {
       suggestion = pickSuggestedStructure(lab.scores, input.intent, context.ivRank);
+      // If the lab's best pick is the SAME structure the user already built, it's "no better
+      // alternative" — not a different recommendation. Flag it so the UI doesn't present the
+      // user's own trade back to them as an alternative.
+      if (suggestion) suggestion.sameAsCurrent = suggestionMatchesInput(input.legs, suggestion);
     }
 
     this.persist(db, input, verdict, checks, suggestion);
@@ -143,4 +147,16 @@ export class PretradeValidatorService {
 function safeParse<T>(json: string | null, fallback: T): T {
   if (!json) return fallback;
   try { return JSON.parse(json) as T; } catch { return fallback; }
+}
+
+/** True when the suggestion's option legs are the same set as the user's built structure
+ *  (same buy/sell + put/call + strike). Note PayoffLeg uses `side`/`type`; the suggestion uses
+ *  `action`/`side`. Stock legs are ignored (suggestions are option structures). */
+export function suggestionMatchesInput(inputLegs: PretradeValidateInput['legs'], sug: PretradeSuggestion): boolean {
+  const opt = inputLegs.filter(l => l.type !== 'stock');
+  if (opt.length === 0 || opt.length !== sug.legs.length) return false;
+  const sig = (action: string, side: string, strike: number) => `${action}:${side}:${strike.toFixed(2)}`;
+  const a = opt.map(l => sig(l.side, l.type, l.strike)).sort();
+  const b = sug.legs.map(l => sig(l.action, l.side, l.strike)).sort();
+  return a.every((x, i) => x === b[i]);
 }
