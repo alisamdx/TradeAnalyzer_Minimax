@@ -8,11 +8,11 @@ After each brief run (Stage 6, §14), `autoCapture()` inserts every post-liquidi
 
 ## 15.2 Daily snapshots
 
-`daily-paper-snapshot-job.ts` (§20) writes one `paper_trade_snapshots` row per open trade per trading day after entry: EOD close (from `historical_prices`), `days_held`, `return_pct`, and a strategy-aware `verdict` (positive / negative / neutral). Idempotent via the `(paper_trade_id, snapshot_date)` unique key. These fixed-horizon snapshots (Day+1, Day+5, …) drive accuracy metrics and signal correlations.
+`daily-paper-snapshot-job.ts` (§20) writes one `paper_trade_snapshots` row per open trade per trading day after entry: EOD close (from `historical_prices`), `days_held`, `return_pct` (stock), a strategy-aware `verdict` (positive / negative / neutral), and — since v1.1.84 — the real **`structure_pnl` / `structure_return_pct`** (Black-Scholes-marked from the trade's legs at entry IV, per-leg expiry; `structure-mark.ts`, `docs/formulas.md#structure-mark`). Idempotent via the `(paper_trade_id, snapshot_date)` unique key. These fixed-horizon snapshots (Day+1, Day+5, …) drive accuracy metrics and signal correlations.
 
 ## 15.3 Expiry & close
 
-On view load, open trades past expiry are auto-expired from `historical_prices`. The user can also Close or Delete a trade. `outcome` (win / loss / breakeven) and `stock_return_pct` are set at close/expire. Day-0 verdicts are suppressed (`daysHeld < 1` → Neutral/Hold, since the price may predate the entry).
+On view load, open trades past expiry are auto-expired from `historical_prices`. The user can also Close or Delete a trade. At close/expire `stock_return_pct` and realized `structure_pnl` are set, and **`outcome` (win/loss/breakeven) derives from `structure_pnl`** — the real option-structure money outcome (win > +$5 / loss < −$5), falling back to the stock-direction proxy (income = within ±8%, bearish = stock fell, else = stock rose) only when the legs can't be priced (v1.1.84). The Retrospect History table shows a **Struct P&L** column beside the stock %. Day-0 verdicts are suppressed (`daysHeld < 1` → Neutral/Hold, since the price may predate the entry).
 
 ## 15.4 Retrospect view (4 tabs)
 

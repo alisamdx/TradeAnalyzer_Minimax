@@ -621,3 +621,23 @@ rollingVol   = stddev(daily log returns over last 20) × √252,  floored at 0.0
 ```
 
 Historical ATM IV (`iv_history`) is preferred because premium sellers are paid IV, which typically exceeds realized volatility (the variance risk premium) — pricing off realized vol systematically under-states the premium a CSP/CC/Wheel would have collected. Realized vol is the fallback only on dates with no IV history. The same `sigma` is used for strike selection (target delta), entry premium, and daily mark-to-market of the open position.
+
+## structure-mark
+
+Mark-to-market P&L of a brief pick's actual option structure (CSP / credit spread / iron condor),
+used by the paper-tracking layer (`structure-mark.ts`) to score brief performance on the real
+options outcome rather than the underlying's direction. Both ends are Black-Scholes-priced at the
+**entry IV** (historical per-strike IV isn't available), so the result isolates the underlying
+move + theta; per-leg expiry is honored (PMCC/calendar):
+
+```
+T_leg(d)      = max(0, daysBetween(d, leg.expiration)) / 365
+legValue(S,d) = bsPrice(S, leg.strike, T_leg(d), leg.iv/100, r=0.04, leg.side==='call')
+P&L_leg       = (leg.action==='buy' ? +1 : -1) × (legValue(S_now, asOf) − legValue(S_entry, entry)) × qty × 100
+structurePnl  = Σ P&L_leg                      // sold leg profits when its value falls
+structureReturnPct = structurePnl / |entryPremium| × 100   // % of entry credit/debit captured
+```
+
+Day-0 (asOf == entry, same price) is exactly 0. A closed trade's `outcome` derives from the sign
+of `structurePnl` (win > +$5, loss < −$5, else breakeven), falling back to the stock-direction
+proxy only when legs can't be priced. `stock_return_pct` is retained for reference.

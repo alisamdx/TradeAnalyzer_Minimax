@@ -7,6 +7,7 @@ import type { Database } from 'better-sqlite3';
 import Anthropic from '@anthropic-ai/sdk';
 import { withTransaction } from '../db/connection.js';
 import { secureGet } from './secure-settings.js';
+import { markStructurePnl, structureReturnPct, type MarkLeg } from './structure-mark.js';
 import type {
   ScoringStrategy,
   BriefPick,
@@ -70,6 +71,7 @@ type DbRow = {
   exit_price: number | null;
   exit_notes: string | null;
   stock_return_pct: number | null;
+  structure_pnl: number | null;
   outcome: string | null;
   created_at: string;
   learning_json: string | null;
@@ -99,6 +101,7 @@ function toTrade(row: DbRow): PaperTrade {
     exitPrice:      row.exit_price,
     exitNotes:      row.exit_notes,
     stockReturnPct: row.stock_return_pct,
+    structurePnl:   row.structure_pnl,
     outcome:        row.outcome as TradeOutcome | null,
     createdAt:      row.created_at,
     learning,
@@ -296,6 +299,33 @@ function computeOutcome(strategy: ScoringStrategy, stockReturnPct: number): Trad
   if (strategy === 'income') return Math.abs(stockReturnPct) <= 8 ? 'win' : 'loss';
   if (strategy === 'bearish') return stockReturnPct < 0 ? 'win' : 'loss';
   return stockReturnPct > 0 ? 'win' : 'loss';
+}
+
+/**
+ * Outcome from the actual STRUCTURE P&L (the real money question) rather than stock direction.
+ * Used at close when the structure could be marked; falls back to the stock-direction proxy
+ * (`computeOutcome`) only when legs can't be priced. A break-even band of ±$5 avoids labeling
+ * rounding noise. see structure-mark.ts
+ */
+function computeStructureOutcome(structurePnl: number): TradeOutcome {
+  if (Math.abs(structurePnl) <= 5) return 'breakeven';
+  return structurePnl > 0 ? 'win' : 'loss';
+}
+
+/** Parse legs_json into the minimal shape the structure marker needs. */
+function parseMarkLegs(legsJson: string | null): MarkLeg[] {
+  if (!legsJson) return [];
+  try {
+    const raw = JSON.parse(legsJson) as Array<Record<string, unknown>>;
+    return raw.filter(l => l['side'] !== 'stock').map(l => ({
+      action: l['action'] as 'buy' | 'sell',
+      side:   l['side'] as 'call' | 'put',
+      strike: Number(l['strike']),
+      expiration: String(l['expiration'] ?? '').slice(0, 10),
+      iv:     l['iv'] == null ? null : Number(l['iv']),
+      qty:    Number(l['qty'] ?? 1),
+    }));
+  } catch { return []; }
 }
 
 export class PaperTradingService {
@@ -506,18 +536,24 @@ export class PaperTradingService {
     const exitPrice = priceRow?.close ?? null;
     let stockReturnPct: number | null = null;
     let outcome: TradeOutcome | null = null;
+    let structurePnl: number | null = null;
 
     if (exitPrice !== null && row.entry_price !== null && row.entry_price > 0) {
       stockReturnPct = (exitPrice - row.entry_price) / row.entry_price * 100;
-      outcome = computeOutcome(row.brief_strategy as ScoringStrategy, stockReturnPct);
+      // Prefer the real structure P&L; fall back to the stock-direction proxy only if the
+      // legs can't be priced (e.g. missing IV / stock-only position).
+      structurePnl = markStructurePnl(parseMarkLegs(row.legs_json), row.entry_price, row.entry_date, exitPrice, today);
+      outcome = structurePnl !== null
+        ? computeStructureOutcome(structurePnl)
+        : computeOutcome(row.brief_strategy as ScoringStrategy, stockReturnPct);
     }
 
     this.db.prepare(`
       UPDATE paper_trades
       SET status = 'closed', exit_date = ?, exit_price = ?, exit_notes = ?,
-          stock_return_pct = ?, outcome = ?
+          stock_return_pct = ?, structure_pnl = ?, outcome = ?
       WHERE id = ?
-    `).run(today, exitPrice, notes ?? null, stockReturnPct, outcome, id);
+    `).run(today, exitPrice, notes ?? null, stockReturnPct, structurePnl, outcome, id);
 
     // Fire-and-forget AI learning capture — completes async, updates DB when done
     this.captureCloseLearning(id).catch(() => { /* silent */ });
@@ -693,9 +729,9 @@ Respond with JSON only:
   expireStalePositions(): number {
     const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
 
-    type ExpiredRow = { id: number; ticker: string; expiry_date: string; entry_price: number | null; brief_strategy: string };
+    type ExpiredRow = { id: number; ticker: string; expiry_date: string; entry_date: string; entry_price: number | null; brief_strategy: string; legs_json: string | null };
     const stale = this.db.prepare(`
-      SELECT id, ticker, expiry_date, entry_price, brief_strategy
+      SELECT id, ticker, expiry_date, entry_date, entry_price, brief_strategy, legs_json
       FROM paper_trades
       WHERE status = 'open' AND expiry_date IS NOT NULL AND expiry_date < ?
     `).all(today) as ExpiredRow[];
@@ -713,18 +749,22 @@ Respond with JSON only:
       const exitPrice = priceRow?.close ?? null;
       let stockReturnPct: number | null = null;
       let outcome: TradeOutcome | null = null;
+      let structurePnl: number | null = null;
 
       if (exitPrice !== null && row.entry_price !== null && row.entry_price > 0) {
         stockReturnPct = (exitPrice - row.entry_price) / row.entry_price * 100;
-        outcome = computeOutcome(row.brief_strategy as ScoringStrategy, stockReturnPct);
+        structurePnl = markStructurePnl(parseMarkLegs(row.legs_json), row.entry_price, row.entry_date, exitPrice, row.expiry_date);
+        outcome = structurePnl !== null
+          ? computeStructureOutcome(structurePnl)
+          : computeOutcome(row.brief_strategy as ScoringStrategy, stockReturnPct);
       }
 
       this.db.prepare(`
         UPDATE paper_trades
         SET status = 'expired', exit_date = ?, exit_price = ?,
-            stock_return_pct = ?, outcome = ?
+            stock_return_pct = ?, structure_pnl = ?, outcome = ?
         WHERE id = ?
-      `).run(row.expiry_date, exitPrice, stockReturnPct, outcome, row.id);
+      `).run(row.expiry_date, exitPrice, stockReturnPct, structurePnl, outcome, row.id);
       count++;
 
       // Fire-and-forget AI learning capture
@@ -860,11 +900,13 @@ Respond with JSON only:
       brief_strategy: string;
       entry_date: string;
       entry_price: number | null;
+      entry_premium: number | null;
       expiry_date: string | null;
       ticker: string;
+      legs_json: string | null;
     };
     const trades = this.db.prepare(`
-      SELECT id, brief_strategy, entry_date, entry_price, expiry_date, ticker
+      SELECT id, brief_strategy, entry_date, entry_price, entry_premium, expiry_date, ticker, legs_json
       FROM paper_trades
       WHERE entry_date < ?
     `).all(today) as TradeRow[];
@@ -885,13 +927,15 @@ Respond with JSON only:
     // skipped before reaching here (see the `snapDate !== today` guard below).
     const insert = this.db.prepare(`
       INSERT INTO paper_trade_snapshots
-        (paper_trade_id, snapshot_date, days_held, price, return_pct, verdict)
-      VALUES (?, ?, ?, ?, ?, ?)
+        (paper_trade_id, snapshot_date, days_held, price, return_pct, verdict, structure_pnl, structure_return_pct)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(paper_trade_id, snapshot_date) DO UPDATE SET
-        days_held  = excluded.days_held,
-        price      = excluded.price,
-        return_pct = excluded.return_pct,
-        verdict    = excluded.verdict
+        days_held            = excluded.days_held,
+        price                = excluded.price,
+        return_pct           = excluded.return_pct,
+        verdict              = excluded.verdict,
+        structure_pnl        = excluded.structure_pnl,
+        structure_return_pct = excluded.structure_return_pct
     `);
 
     // Price lookup: for a given ticker get all (date, close) after a given entry date.
@@ -901,6 +945,7 @@ Respond with JSON only:
     withTransaction(this.db, () => {
       for (const trade of trades) {
         if (trade.entry_price == null || trade.entry_price <= 0) continue;
+        const markLegs = parseMarkLegs(trade.legs_json);
 
         const prices = this.db.prepare(`
           SELECT date, close
@@ -934,7 +979,14 @@ Respond with JSON only:
             settings,
           );
 
-          const result = insert.run(trade.id, snapDate, daysHeld, close, returnPct, verdict);
+          // Real structure P&L (BS-marked from the legs) — the money metric, alongside the
+          // stock-direction return_pct kept for reference.
+          const structurePnl = markLegs.length > 0
+            ? markStructurePnl(markLegs, trade.entry_price, trade.entry_date, close, snapDate)
+            : null;
+          const structRet = structureReturnPct(structurePnl, trade.entry_premium);
+
+          const result = insert.run(trade.id, snapDate, daysHeld, close, returnPct, verdict, structurePnl, structRet);
           if (result.changes > 0) {
             written++;
             existing.add(`${trade.id}|${snapDate}`); // prevent double-insert within same tx

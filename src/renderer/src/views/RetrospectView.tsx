@@ -660,6 +660,7 @@ function HistoryTab({ trades, loading }: { trades: PaperTrade[]; loading: boolea
             <th>Entry $</th>
             <th>Exit $</th>
             <th>Stock %</th>
+            <th>Struct P&amp;L</th>
             <th>Exit Date</th>
             <th>Status</th>
             <th>Outcome</th>
@@ -687,6 +688,10 @@ function HistoryTab({ trades, loading }: { trades: PaperTrade[]; loading: boolea
                   <td style={{ color: stockReturnColor(t.stockReturnPct, t.briefStrategy), fontWeight: 600 }}>
                     {fmtPct(t.stockReturnPct)}
                   </td>
+                  <td style={{ color: t.structurePnl == null ? 'var(--text-muted)' : t.structurePnl >= 0 ? '#3fb950' : '#f85149', fontWeight: 600 }}
+                      title="Realized option-structure P&L (Black-Scholes-marked) — the metric Outcome derives from">
+                    {t.structurePnl == null ? '—' : `${t.structurePnl >= 0 ? '+' : '−'}$${Math.abs(t.structurePnl).toFixed(0)}`}
+                  </td>
                   <td style={{ fontSize: 12 }}>{fmtDate(t.exitDate)}</td>
                   <td style={{ fontSize: 12, color: 'var(--text-muted)', textTransform: 'capitalize' }}>{t.status}</td>
                   <td>
@@ -700,7 +705,7 @@ function HistoryTab({ trades, loading }: { trades: PaperTrade[]; loading: boolea
                 {isExpanded && t.learning && (
                   <tr key={`${t.id}-learning`} className="retro-learning-row">
                     <td></td>
-                    <td colSpan={10}>
+                    <td colSpan={11}>
                       <LearningCell learning={t.learning} />
                     </td>
                   </tr>

@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.84] — 2026-06-25
+
+### Changed
+- **Paper-tracking now scores brief picks on real structure P&L, not stock direction.** The Retrospect paper-tracking layer (which auto-records every brief pick and snapshots it daily) measured `stock_return_pct` and decided win/loss by a crude proxy (income = within ±8%, others = stock up/down) — which mis-scores the premium-sellers (a wheel CSP "lost" if the stock dipped 1% even when the put expired worthless). It now **Black-Scholes-marks the actual structure from its legs** (`structure-mark.ts`, reusing `black-scholes.ts`) at each daily snapshot and at close, honoring per-leg expiry; the closed-trade **`outcome` now derives from the real structure P&L** (falling back to the stock proxy only when legs can't be priced). New `structure_pnl` / `structure_return_pct` on `paper_trade_snapshots` and `structure_pnl` on `paper_trades` (migration 062); Retrospect History table gains a **Struct P&L** column. `stock_return_pct` is retained for reference. Not FR-SEY-5 (measurement only — changes no trade logic). Regression test `tests/structure-mark.test.ts` (7).
+
+### Notes
+- A one-time backfill (`scripts/backfill-structure-pnl.mjs`) re-scores the existing 2,608 snapshots + closed trades; run it once with the app closed **after** launching the new build (so migration 062 has added the columns). Marking holds IV at entry-IV (no historical per-strike IV), so it isolates the underlying move + theta — accurate for direction/theta, approximate across a vol crush. Full suite **756 passing**.
+
 ## [1.1.83] — 2026-06-25
 
 ### Fixed

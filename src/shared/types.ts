@@ -1884,6 +1884,9 @@ export interface PaperTrade {
   exitPrice:      number | null;
   exitNotes:      string | null;
   stockReturnPct: number | null;
+  /** Realized structure (option) P&L in dollars at close — the money metric `outcome` derives
+   *  from (Black-Scholes-marked from the legs). Null for open trades or unpriceable legs. */
+  structurePnl:   number | null;
   outcome:        TradeOutcome | null;
   createdAt:      string;
   learning:       TradeLearning | null;  // AI-captured on close/expire; null until then
