@@ -72,7 +72,7 @@ A **PRE-TRADE VALIDATION** panel above the AI assessment: validate the hand-buil
 against declared **intent** (purpose income/ownership/directional/hedge · happy-to-own? ·
 multi-quarter thesis) and get a **good / caution / bad** verdict from deterministic checks
 (reward-vs-risk for defined-risk spreads only — a CSP's structural max-loss is *not* false-flagged;
-undefined-risk; IV-regime fit — warns selling cheap / buying expensive vol; direction-vs-trend,
+undefined-risk; IV-regime fit — buying expensive vol → warn; selling cheap vol → warn for income/directional but **info** for ownership/happy-to-own (intent-gated, premium-secondary, v1.1.78); direction-vs-trend,
 intent-gated; earnings-before-expiry, intent-gated; cushion-vs-`atr_pct`; horizon match;
 ownership basis). When flagged, the Strategy Lab **suggests a better structure** for the same
 ticker (intent + IV-regime filtered; may advise not selling premium) — with an **Open in Lab →**

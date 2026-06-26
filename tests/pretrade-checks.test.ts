@@ -79,10 +79,16 @@ describe('runPretradeChecks — reward/risk', () => {
 });
 
 describe('runPretradeChecks — IV regime', () => {
-  it('warns when selling premium into low IV rank', () => {
-    const checks = runPretradeChecks(input({ context: ctx({ ivRank: 25 }) }));
+  it('warns when selling premium into low IV rank for an income trade', () => {
+    const checks = runPretradeChecks(input({ context: ctx({ ivRank: 25 }), intent: intent({ purpose: 'income' }) }));
     expect(byKey(checks, 'iv_regime')?.status).toBe('warn');
     expect(byKey(checks, 'iv_regime')?.title).toMatch(/cheap/i);
+  });
+  it('downgrades cheap-vol to info when premium is secondary (ownership / happy-to-own)', () => {
+    const owns = runPretradeChecks(input({ context: ctx({ ivRank: 25 }), intent: intent({ purpose: 'ownership' }) }));
+    expect(byKey(owns, 'iv_regime')?.status).toBe('info');
+    const happy = runPretradeChecks(input({ context: ctx({ ivRank: 25 }), intent: intent({ purpose: 'income', happyToOwn: true }) }));
+    expect(byKey(happy, 'iv_regime')?.status).toBe('info');
   });
   it('warns when buying premium into high IV rank', () => {
     const checks = runPretradeChecks(input({

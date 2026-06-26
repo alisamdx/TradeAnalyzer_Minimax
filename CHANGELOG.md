@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.78] — 2026-06-25
+
+### Changed
+- **Pre-Trade Validator: the IV-regime "selling cheap volatility" check is now intent-gated** (first threshold tuning, from validating the live wheel book). When premium isn't your edge — **ownership** purpose or **happy-to-own = yes** — selling into low IV rank is reported as **info** (context), not a warning; for **income / directional** it stays a **warning** (there premium *is* the edge). This matches how the direction and earnings checks already gate on intent, so the verdict reflects *is this good for what you're trying to do*. Net effect on a happy-to-own wheel book: names selling cheap vol (e.g. NVDA IVR 24, TSLA IVR 28) no longer get pushed to caution on the IV check alone — only genuine issues (thin cushion, etc.) do. Regression test added (`tests/pretrade-checks.test.ts`, 22).
+
 ## [1.1.77] — 2026-06-25
 
 ### Added

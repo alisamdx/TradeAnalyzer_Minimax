@@ -111,9 +111,17 @@ export function runPretradeChecks(input: PretradeCheckInput): PretradeCheck[] {
       detail: 'No IV-rank data for this ticker — can\'t judge whether premium is rich or cheap. Check IV before relying on premium.',
     });
   } else if (isCredit && context.ivRank < PRETRADE_THRESHOLDS.lowIvRank) {
+    // Intent-gated like direction/earnings: when premium isn't the edge (you're happy to own /
+    // running a wheel), selling cheap vol is context, not a red flag. For income/directional it
+    // stays a warning — there the premium IS the edge.
+    const premiumSecondary = intent.purpose === 'ownership' || intent.happyToOwn === true;
     checks.push({
-      key: 'iv_regime', status: 'warn', title: 'Selling cheap volatility',
-      detail: `You're selling net premium with IV rank at ${context.ivRank.toFixed(0)}% — below ${PRETRADE_THRESHOLDS.lowIvRank}%. The dollar credit can look big on a high-priced name while being cheap relative to its own history; the premium edge isn't really there.`,
+      key: 'iv_regime', status: premiumSecondary ? 'info' : 'warn',
+      title: premiumSecondary ? 'Selling cheap volatility (premium secondary)' : 'Selling cheap volatility',
+      detail: `IV rank ${context.ivRank.toFixed(0)}% is below ${PRETRADE_THRESHOLDS.lowIvRank}% — you're selling cheap premium relative to this name's own history.`
+        + (premiumSecondary
+          ? ` Premium isn't your edge here (you're happy to own), so it's context, not a red flag — just know you're not richly paid for the downside.`
+          : ` The dollar credit can look big on a high-priced name while being cheap; the premium edge isn't really there.`),
     });
   } else if (!isCredit && context.ivRank > PRETRADE_THRESHOLDS.highIvRank) {
     checks.push({
