@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.79] — 2026-06-25
+
+### Fixed
+- **Portfolio → Payoff (📐) now shows your *actual* position, not a generic rebuild.** The button used to route through the chain-rebuild path, which snapped the expiry to the nearest of only the **7 weekly Fridays** loaded (so a 57-DTE position like a NOW 80 put expiring 08-21 landed on 08-07), snapped to the nearest weekly strike (80 → 82), and re-priced at the current market mid (your $4.32 entry credit showed as $3.77) — i.e. a brand-new near-term CSP that merely *approximated* your holding. It now reconstructs the position exactly: same strike, same expiry, your entry premium, contract quantity, and stored greeks. New pure helper `src/shared/position-payoff.ts` (`positionToPayoffLegs`) with `tests/position-payoff.test.ts` (6); falls back to the old behavior only if a position lacks the strike/expiry to rebuild.
+
 ## [1.1.78] — 2026-06-25
 
 ### Changed

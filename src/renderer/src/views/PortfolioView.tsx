@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSortable } from '../hooks/useSortable.js';
 import type { PositionEtrade, PositionAnalysis, AdvisorSession, AdvisorProgressEvent } from '@shared/types.js';
+import { positionToPayoffLegs } from '@shared/position-payoff.js';
 
 type PositionType = 'CSP' | 'CC' | 'Stock' | 'Long Put' | 'Long Call';
 type PositionStatus = 'open' | 'closed';
@@ -1074,13 +1075,20 @@ export function PortfolioView() {
                                 🎯
                               </button>
                               <button
-                                onClick={() => window.dispatchEvent(new CustomEvent('navigate-to-payoff', { detail: {
-                                  ticker:   pos.ticker,
-                                  spot:     et?.currentPrice ?? pos.currentPrice ?? undefined,
-                                  strike:   pos.strikePrice ?? undefined,
-                                  expiry:   pos.expirationDate ?? undefined,
-                                  strategy: pos.positionType === 'CSP' ? 'csp' : pos.positionType === 'CC' ? 'cc' : undefined,
-                                }}))}
+                                onClick={() => {
+                                  // Reconstruct the ACTUAL held position (exact strike/expiry/entry
+                                  // premium) rather than rebuilding a generic CSP off the live chain.
+                                  const legs = positionToPayoffLegs(pos);
+                                  window.dispatchEvent(new CustomEvent('navigate-to-payoff', { detail: {
+                                    ticker:   pos.ticker,
+                                    spot:     et?.currentPrice ?? pos.currentPrice ?? undefined,
+                                    expiry:   pos.expirationDate ?? undefined,
+                                    legs,
+                                    // Fall back to the old chain-rebuild only if we couldn't build legs.
+                                    strike:   legs ? undefined : (pos.strikePrice ?? undefined),
+                                    strategy: legs ? undefined : (pos.positionType === 'CSP' ? 'csp' : pos.positionType === 'CC' ? 'cc' : undefined),
+                                  }}));
+                                }}
                                 className="action-btn"
                                 title={`Payoff diagram for ${pos.ticker}`}
                               >
