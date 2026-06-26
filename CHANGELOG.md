@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.81] — 2026-06-25
+
+### Fixed
+- **Root cause of the unstable position-greek signs: two write paths with opposite conventions.** The E\*Trade portfolio sync stored greeks **raw** (verbatim from E\*Trade — a short put's δ negative), while the "refresh greeks from chain" action stored them **position-signed** (negating shorts → +δ/+θ/−ν). Whichever ran last set the sign, so the *same* position flipped convention between a sync and a refresh — which is what made a CSP read as "bearish" in the validator (v1.1.80 patched the symptom downstream; this fixes the source). Both paths now go through one shared helper, `shared/position-greeks.ts` `toPositionSignedGreeks`, so the stored convention is deterministically **position-signed** and the two paths can't drift again. The Portfolio net-greek aggregation and the planned Book Greeks monitor already expect this convention. Regression test `tests/position-greeks.test.ts` (6). (Rows last written by the sync before this version may still be raw until the next portfolio sync re-writes them; the defensive normalization in `position-payoff.ts` keeps the Payoff/validator correct in the meantime.)
+
 ## [1.1.80] — 2026-06-25
 
 ### Fixed

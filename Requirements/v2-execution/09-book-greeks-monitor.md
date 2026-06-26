@@ -31,15 +31,15 @@ makes that visible; the optional tier-2 gate keeps a new entry from making it wo
 
 **The infrastructure already exists** — this is mostly an aggregation, not new machinery:
 
-- `positions` carries per-position `delta`/`gamma`/`theta`/`vega` (migration 014), stored from
-  E\*Trade verbatim, and **the sign convention is UNSTABLE across syncs** — the *same* short
-  put was observed stored raw (δ<0 / θ<0 / ν>0) on one 2026-06-25 sync and position-signed
-  (δ>0 / θ>0 / ν<0) on a later one (v1.1.80). `quantity` is an unsigned magnitude
-  (`Math.abs`). **So the monitor MUST NOT trust the stored sign:** normalize each leg's greeks
-  to a canonical convention by **leg type** (put δ negative / call δ positive; a long option
-  always pays θ and is long ν — see `shared/position-payoff.ts` `rawGreeks`), then apply the
-  position direction from `position_type`. (The underlying sync inconsistency is a separate
-  open data-integrity bug; normalizing by type makes the monitor correct regardless.)
+- `positions` carries per-position `delta`/`gamma`/`theta`/`vega` (migration 014), stored
+  **POSITION-SIGNED** (short-position convention: CSP/CC negated → short put +δ/+θ/−ν; longs
+  keep sign). This was made **deterministic in v1.1.81** — both write paths (E\*Trade sync +
+  chain-refresh) go through `shared/position-greeks.ts` `toPositionSignedGreeks` (before that the
+  sync stored raw and the sign flipped per-sync — the v1.1.80 "CSP reads bearish" bug).
+  `quantity` is an unsigned magnitude (`Math.abs`). **So the monitor SUMS THE STORED GREEKS
+  DIRECTLY — it must NOT re-apply a `position_type` sign** (doing so would double-sign). Caveat:
+  rows last written by a pre-v1.1.81 sync may still be raw until re-synced, so a defensive
+  per-type normalization is still acceptable belt-and-braces.
 - `BetaService` (`beta-service.ts`) computes beta to SPY from local `historical_prices`
   (252-day window, pure, unit-tested, zero API cost; `docs/formulas.md#beta`).
 - SPY history + per-ticker underlying prices are already local (`quote_cache` /
@@ -72,24 +72,24 @@ export interface BookGreeks {
 
 ### Aggregation formula
 
-The stored Greeks are **raw long-option** values; derive position direction from
-`positionType`:
+The stored Greeks are already **position-signed** (v1.1.81), so the monitor sums them directly —
+**no `positionType` sign is applied** (that would double-sign). `quantity` is magnitude.
 
 ```
-dir_i =  positionType ∈ {CSP, CC}        ? -1   // short option → negate raw greeks
-         positionType ∈ {Long Put, Long Call} ? +1
-         positionType === Stock          ? +1   // long stock (current model is long-only)
-
 sharesEquivalent_i =
-   positionType === 'Stock'  ?  quantity                       // qty in shares, delta = +1
-                             :  delta_i × dir_i × quantity × 100 // options: qty in contracts
+   positionType === 'Stock'  ?  quantity                  // qty in shares, delta = +1
+                             :  delta_i × quantity × 100   // options: delta_i already signed
 
 dollarDelta_i   = sharesEquivalent_i × beta_ticker × underlyingPx_ticker
 netDeltaDollars = Σ dollarDelta_i
 
-netTheta = Σ theta_i × dir_i × quantity × 100
-netVega  = Σ vega_i  × dir_i × quantity × 100
+netTheta = Σ theta_i × quantity × 100   // theta_i already signed (short = +)
+netVega  = Σ vega_i  × quantity × 100   // vega_i  already signed (short = −)
 ```
+
+(Belt-and-braces: if supporting pre-v1.1.81 rows that might still be raw, first pass each leg
+through a per-type normalizer keyed on `positionType` — but do this *instead of*, never *in
+addition to*, trusting the stored sign.)
 
 The SPY price **cancels** out of the dollar-delta term (`shares × beta × Px_underlying`), so
 `spyPx` is needed only for the optional `netDeltaSpyShares` display. Document at
@@ -97,23 +97,22 @@ The SPY price **cancels** out of the dollar-delta term (`shares × beta × Px_un
 
 ### The one correctness rule — sign convention (the whole ballgame)
 
-Because the stored Greeks are raw and the quantity is unsigned, **`positionType` is the sole
-source of direction** — apply `dir_i` above; never trust the stored Greek sign. A unit test
-must pin that the *resulting position-level* sign is correct end-to-end:
+As of **v1.1.81** the stored Greeks are **position-signed at the write paths** (via
+`shared/position-greeks.ts` `toPositionSignedGreeks`), so the monitor's job is simply to **sum
+them directly** and *not* re-apply any direction. The end-to-end position-level signs are:
 
-| Position        | raw stored (δ/θ/ν) | → position net delta | net theta | net vega |
-|-----------------|--------------------|----------------------|-----------|----------|
-| CSP (short put) | −/−/+              | **+** (bullish)      | **+**     | **−**    |
-| CC (short call) | +/−/+              | **−**                | **+**     | **−**    |
-| Long Call       | +/−/+              | **+**                | **−**     | **+**    |
-| Long Put        | −/−/+              | **−**                | **−**     | **+**    |
+| Position        | stored (δ/θ/ν) | net delta | net theta | net vega |
+|-----------------|----------------|-----------|-----------|----------|
+| CSP (short put) | +/+/−          | **+** (bullish) | **+** | **−** |
+| CC (short call) | −/+/−          | **−**     | **+**     | **−**    |
+| Long Call       | +/−/+          | **+**     | **−**     | **+**    |
+| Long Put        | −/−/+          | **−**     | **−**     | **+**    |
 
-> ⚠ **This is not hypothetical.** The live synced book (2026-06-25) stores CSPs with δ<0 /
-> θ<0 / ν>0 (raw long-put Greeks) and `quantity = +1`. Summing as-is would report the book as
-> net-short-delta / paying-theta when the CSPs are actually net-long-delta / collecting-theta
-> — a fully **inverted** exposure. The `dir_i` derivation above is mandatory; the table is its
-> regression test. (Do **not** instead "fix" the sign at sync time — other readers may depend
-> on the raw E\*Trade values; normalize only at aggregation.)
+> ⚠ **History (why this rule exists):** before v1.1.81 the sync stored *raw* greeks while the
+> chain-refresh stored *position-signed* ones, so the same CSP flipped sign between syncs and the
+> Pre-Trade Validator read it as "bearish" (v1.1.80). The lesson: there must be exactly ONE place
+> that decides the sign. Re-applying a `positionType` sign on top of the now-signed storage would
+> re-introduce the inversion — sum directly.
 
 ### Edge cases (explicit)
 

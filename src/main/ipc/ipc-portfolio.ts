@@ -12,6 +12,7 @@ import { AiAdvisorService } from '../services/ai-advisor-service.js';
 import type { AnalysisService } from '../services/analysis-service.js';
 import type { OptionsProvider } from '../services/options-provider.js';
 import { secureGet, secureSet } from '../services/secure-settings.js';
+import { toPositionSignedGreeks } from '@shared/position-greeks.js';
 import type { IpcResult, EtradeAccount, EtradeSyncResult, PositionAnalysis, PositionEtrade, AdvisorSession, AdvisorProgressEvent } from '@shared/types.js';
 
 export interface PositionDto {
@@ -177,14 +178,12 @@ export function registerPortfolioIpc(db: Database, analysisService?: AnalysisSer
             continue;
           }
 
-          // Short positions (CSP/CC) negate chain Greeks: positive theta, negative vega.
-          // Long positions (Long Put/Long Call) keep natural chain Greeks.
-          const isShort = pos.positionType === 'CSP' || pos.positionType === 'CC';
-          const sign = isShort ? -1 : 1;
-          const delta = contract.delta !== null ? sign * contract.delta : null;
-          const theta = contract.theta !== null ? sign * contract.theta : null;
-          const vega  = contract.vega  !== null ? sign * contract.vega  : null;
-
+          // Store POSITION-SIGNED greeks via the shared helper (short CSP/CC negate the raw
+          // chain greeks → +theta/−vega) — same convention the E*Trade sync now uses, so the
+          // two write paths can't drift (the v1.1.80 bug).
+          const { delta, theta, vega } = toPositionSignedGreeks(
+            pos.positionType, contract.delta, contract.theta, contract.vega,
+          );
           service.updateGreeks(pos.id, delta, theta, vega);
           updated++;
         }

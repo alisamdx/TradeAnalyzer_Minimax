@@ -24,6 +24,7 @@
 import type { Database } from 'better-sqlite3';
 import { etradeGet, type OAuthCredentials } from './etrade-auth.js';
 import type { EtradeAccount, EtradeSyncResult } from '@shared/types.js';
+import { toPositionSignedGreeks } from '@shared/position-greeks.js';
 
 // ─── E*Trade API response shapes ─────────────────────────────────────────────
 
@@ -393,10 +394,16 @@ export class EtradePortfolioService {
     }
 
     // ── Greeks + IV ──────────────────────────────────────────────────────────
-    const delta = num(Complete?.delta);
-    const gamma = num(Complete?.gamma);
-    const theta = num(Complete?.theta);
-    const vega  = num(Complete?.vega);
+    // E*Trade returns RAW contract greeks (a short put's delta is negative). Store them
+    // POSITION-SIGNED via the shared helper so the convention matches the chain-refresh path
+    // and every consumer (they used to disagree — the v1.1.80 "CSP reads bearish" bug).
+    const gamma = num(Complete?.gamma); // gamma stays raw (not part of the signed convention)
+    const { delta, theta, vega } = toPositionSignedGreeks(
+      positionType,
+      num(Complete?.delta),
+      num(Complete?.theta),
+      num(Complete?.vega),
+    );
     // IV: E*Trade returns decimal fraction (0.3882) — convert to percentage
     const ivRaw = num(Complete?.iv);
     const iv    = ivRaw !== null ? ivRaw * 100 : null;
