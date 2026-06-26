@@ -28,6 +28,14 @@ limits ($10k / 5% per-trade / 5 concurrent / 10% daily-loss trip / 1 per ticker)
   v0.32.90) — it inverted on full-year replay. FR-SEY-3 is deliberately *per-name*, not
   market-wide, to avoid repeating this.
 - **Full autonomous entry.** Out of scope by the v2.0 semi-auto (approve-each) design.
+- **"Bearish credit" strategy (sell bear call spreads on bearish picks).** Proposed 2026-06-25
+  after a discretionary MSFT scan looked clean (bearish + IV rank 84 + liquid + no earnings).
+  Validated first (`scripts/fr-bearish-credit-study.mjs`) and **rejected** — bear call spreads on
+  the bearish replay picks win 80.5% / 2.8% return-on-capital vs an **84.1% / 4.6% random-day
+  baseline** (worse on every metric). High IV rank is mildly predictive (≥70 → 82.3%/3.5%) but
+  still sub-baseline. Same anti-predictiveness as the rejected debit verticals: the bearish
+  scorer flags already-fallen names, and selling calls into them invites the bounce. No edge to
+  bake into the brief; a discretionary one-off is fine but it's not a systematic strategy.
 
 ---
 
