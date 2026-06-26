@@ -31,14 +31,15 @@ makes that visible; the optional tier-2 gate keeps a new entry from making it wo
 
 **The infrastructure already exists** — this is mostly an aggregation, not new machinery:
 
-- `positions` carries per-position `delta`/`gamma`/`theta`/`vega` (migration 014), stored
-  **RAW (per-contract, long-option convention)** exactly as E\*Trade returns them
-  (`etrade-portfolio-service.ts` writes `Complete.delta/...` verbatim and stores
-  `quantity = Math.abs(raw.quantity)`). **The stored Greeks are NOT position-signed and the
-  quantity is unsigned — direction lives only in `position_type`.** (Verified 2026-06-25
-  against the live synced book: every CSP had δ<0 / θ<0 / ν>0, i.e. raw long-put Greeks, even
-  though a short put is +δ / +θ / −ν. The old `Position`-type comment claiming a
-  "short-position convention" was wrong and has been corrected.)
+- `positions` carries per-position `delta`/`gamma`/`theta`/`vega` (migration 014), stored from
+  E\*Trade verbatim, and **the sign convention is UNSTABLE across syncs** — the *same* short
+  put was observed stored raw (δ<0 / θ<0 / ν>0) on one 2026-06-25 sync and position-signed
+  (δ>0 / θ>0 / ν<0) on a later one (v1.1.80). `quantity` is an unsigned magnitude
+  (`Math.abs`). **So the monitor MUST NOT trust the stored sign:** normalize each leg's greeks
+  to a canonical convention by **leg type** (put δ negative / call δ positive; a long option
+  always pays θ and is long ν — see `shared/position-payoff.ts` `rawGreeks`), then apply the
+  position direction from `position_type`. (The underlying sync inconsistency is a separate
+  open data-integrity bug; normalizing by type makes the monitor correct regardless.)
 - `BetaService` (`beta-service.ts`) computes beta to SPY from local `historical_prices`
   (252-day window, pure, unit-tested, zero API cost; `docs/formulas.md#beta`).
 - SPY history + per-ticker underlying prices are already local (`quote_cache` /

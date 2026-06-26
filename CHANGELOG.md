@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.80] — 2026-06-25
+
+### Fixed
+- **A reconstructed position no longer reads with inverted greeks (a CSP showed as "bearish").** When opening a held position in Payoff (v1.1.79), the Pre-Trade Validator's direction check labeled a cash-secured put — a *bullish* structure — as "bearish, aligns with the bearish trend." Root cause: the portfolio sync's greek **sign convention is unstable** (the same short put was stored *raw* on one sync and *position-signed* on another), so the position's `+`delta got the sell-side flip applied a second time → net delta inverted. Fix: `positionToPayoffLegs` now **normalizes greeks to canonical raw by leg type** (`rawGreeks`: put δ<0 / call δ>0; long-option θ<0, ν>0) before the Payoff engine applies the side sign — correct whichever way the source stored them. Now a CSP correctly reads bullish (→ "against the trend, by intent" when you're a happy owner in a downtrend), and net θ/ν display correctly. Also corrects the (now-wrong) "greeks are always raw" comment in `portfolio-service.ts`. Regression tests added (`tests/position-payoff.test.ts`, 8).
+
+### Known issue (flagged, not yet fixed)
+- The **E*Trade greek sign convention is inconsistent across syncs** — the underlying data-integrity cause is still open. All current consumers normalize defensively by type, but the sync itself should be made deterministic (and the planned Book Greeks monitor must normalize, not trust the stored sign).
+
 ## [1.1.79] — 2026-06-25
 
 ### Fixed

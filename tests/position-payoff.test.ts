@@ -15,9 +15,21 @@ describe('positionToPayoffLegs', () => {
     expect(legs).toHaveLength(1);
     const l = legs[0]!;
     expect(l).toMatchObject({ side: 'sell', type: 'put', strike: 80, expiry: '2026-08-21', premium: 4.32, quantity: 1 });
-    // raw greeks pass through unchanged (side sign is applied later by computePayoffMetrics)
-    expect(l.delta).toBe(-0.29);
-    expect(l.theta).toBe(-0.06);
+  });
+
+  it('normalizes greeks to canonical raw (put δ<0, θ<0, ν>0) regardless of stored sign', () => {
+    // raw-stored input (put delta negative)
+    const raw = positionToPayoffLegs(pos({ delta: -0.29, theta: -0.06, vega: 0.09 }))![0]!;
+    expect(raw.delta).toBe(-0.29); expect(raw.theta).toBe(-0.06); expect(raw.vega).toBe(0.09);
+    // position-signed input (short put delta positive) → must normalize to the SAME raw signs,
+    // so the Payoff engine's side flip yields the correct bullish position delta (not bearish).
+    const signed = positionToPayoffLegs(pos({ delta: 0.27, theta: 0.066, vega: -0.117 }))![0]!;
+    expect(signed.delta).toBe(-0.27); expect(signed.theta).toBe(-0.066); expect(signed.vega).toBe(0.117);
+  });
+
+  it('normalizes a call leg to canonical raw (call δ>0)', () => {
+    const l = positionToPayoffLegs(pos({ positionType: 'CC', strikePrice: 95, delta: -0.3, theta: 0.05, vega: -0.1 }))![0]!;
+    expect(l.delta).toBe(0.3); expect(l.theta).toBe(-0.05); expect(l.vega).toBe(0.1);
   });
 
   it('reconstructs a CC as a sold call', () => {

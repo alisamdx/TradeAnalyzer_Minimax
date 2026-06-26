@@ -29,13 +29,15 @@ export interface Position {
   status: PositionStatus;
   createdAt: string;
   updatedAt: string;
-  // Greeks — stored RAW (per-contract, long-option convention) exactly as E*Trade returns
-  // them (see etrade-portfolio-service.ts); they are NOT position-signed and `quantity` is
-  // stored as an unsigned magnitude (`Math.abs`). Direction lives ONLY in `positionType`:
-  // a CSP (short put) or CC (short call) is the NEGATION of these raw values (e.g. a CSP's
-  // true position theta is +|theta|, vega is −|vega|, delta is +|delta|). Any aggregation of
-  // these across positions MUST derive the sign from `positionType`, never trust the stored
-  // sign — see Requirements/v2-execution/09-book-greeks-monitor.md (FR-GRK-1).
+  // Greeks — stored from E*Trade verbatim (see etrade-portfolio-service.ts). ⚠ The sign
+  // convention is UNSTABLE: the same short-put position has been observed stored BOTH raw
+  // (long-option: put δ<0, θ<0, ν>0) on one sync and position-signed (short put δ>0, θ>0,
+  // ν<0) on another. `quantity` is an unsigned magnitude (`Math.abs`), and direction is fully
+  // determined by `positionType`. Therefore any consumer MUST NOT trust the stored sign:
+  // normalize to a canonical convention by leg type + positionType (puts δ negative / calls δ
+  // positive; a long option always pays θ and is long ν), then apply the position direction.
+  // See `shared/position-payoff.ts` `rawGreeks` (reference impl) and
+  // Requirements/v2-execution/09-book-greeks-monitor.md (FR-GRK-1).
   delta: number | null;
   theta: number | null;
   vega: number | null;
