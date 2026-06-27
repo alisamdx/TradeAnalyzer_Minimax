@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.85] — 2026-06-26
+
+### Added
+- **Daily Intelligence Brief — Ranked Grid tab + critic pass-filter.** The brief now has two tabs: **Grouped** (the existing expand-by-strategy accordion) and **Ranked Grid** — one flat, sortable row per pick across every strategy. Columns: Ticker · Price · **Conviction** · Strategy · Composite · Best Structure (→ Payoff) · Expiry · Strike · Premium · Rating · Flag · RSI · Actions (Payoff/Validate/Options/Analysis/E*Trade icons). All columns sortable; default sort is **Conviction** descending.
+  - **Conviction** is the one ranking that *is* comparable across strategies. Raw composite scores are strategy-specific (different signals/weights) and can't be ranked head-to-head, so Conviction = the **Strategy-Lab structure score** (0–100, shared IV+direction+premium+liquidity rubric) **minus a critic penalty** (caution −15, flag −35, not-vetted −25). It is a quality/triage ordering, **not** a backtested profit forecast — labelled as such in the header tooltip. Composite remains as a (non-comparable) column for reference.
+  - A **Critic** segmented filter (All / Pass + Caution / Pass only) is honoured by **both** tabs; pass filters exclude not-vetted picks (no verdict / degraded critic). Tab + filter selections persist to `localStorage`.
+  - RSI is shown where available (buy/bullish/bearish picks); wheel/income/inflection render `—`. Ranking + filter logic extracted to `src/shared/brief-ranking.ts`; regression test `tests/brief-ranking.test.ts` (9). Not FR-SEY-5 (display/surfacing only — changes no trade logic).
+
 ## [1.1.84] — 2026-06-25
 
 ### Changed

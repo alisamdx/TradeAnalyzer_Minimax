@@ -4,6 +4,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { DailyBriefEntry, BriefPick, ScoringStrategy, StrategyLabValidateResult, StrategyLabGrade, StrategySetup, SetupLeg, PayoffLeg, BriefAccuracy, CriticVerdict, BriefPerformanceSummary, BriefHealthTrend } from '@shared/types.js';
 import { STRATEGY_RELEVANT_SLUGS, pickDisplayStructure } from '@shared/strategy-structures.js';
+import { convictionOf, rsiOf, passesFilter, type PassFilter } from '@shared/brief-ranking.js';
 
 const STRATEGY_LABELS: Record<ScoringStrategy, string> = {
   wheel:   '🎡  Wheel — CSP / Covered Call',
@@ -286,6 +287,36 @@ const CRITIC_LABEL: Record<CriticVerdict['verdict'], string> = {
   flag:    '⚑ Flag',
 };
 
+// Shared deep-link handlers for a brief pick — used by both the card's nav row and the
+// Ranked-Grid Actions cell so both navigate identically (same chosen structure → same
+// Payoff legs, same options-chain expiry).
+function pickNav(pick: BriefPick, strategy: ScoringStrategy) {
+  const result = pick.strategyLabResult ? (pick.strategyLabResult as StrategyLabValidateResult) : null;
+  const chosen = result ? pickDisplayStructure(result.scores, strategy, pick.breakoutDirection) : null;
+  const setup  = chosen?.setup && !chosen.setup.unavailableReason ? chosen.setup : null;
+  const expiry = setup?.expiration ?? null;
+  const legs   = setup?.legs?.length ? setup.legs.map((l, i) => labLegToPayoffLeg(l, i)) : null;
+
+  return {
+    chosen, setup, expiry, legs,
+    payoff: () => {
+      const detail: Record<string, unknown> = { ticker: pick.ticker };
+      if (pick.price != null) detail.spot     = pick.price;
+      if (expiry)             detail.expiry   = expiry;
+      if (chosen)             detail.strategy = chosen.slug;
+      if (legs)               detail.legs     = legs;
+      window.dispatchEvent(new CustomEvent('navigate-to-payoff', { detail }));
+    },
+    validate: () => window.dispatchEvent(new CustomEvent('navigate-to-validate', { detail: { ticker: pick.ticker } })),
+    options:  () => window.dispatchEvent(new CustomEvent('navigate-to-options',  { detail: { ticker: pick.ticker, ...(expiry ? { expiry } : {}) } })),
+    analysis: () => window.dispatchEvent(new CustomEvent('navigate-to-analysis', { detail: { ticker: pick.ticker } })),
+    etrade:   () => window.open(`https://us.etrade.com/e/t/invest/quotesandresearch?content=3&sym=${pick.ticker.toLowerCase()}`, '_blank'),
+  };
+}
+
+// Cross-strategy Conviction ranking, RSI extraction, and the critic pass-filter all live in
+// '@shared/brief-ranking.js' (imported above) so the same logic is unit-tested in isolation.
+
 function CriticBadge({ verdict }: { verdict: CriticVerdict }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -363,6 +394,11 @@ function TopSignals({ signals }: { signals: BriefPick['signals'] }) {
 // Quick-navigation row — Payoff, Validate, Options, Analysis, E*Trade buttons
 // pre-populated from strategyLabResult.
 function PickNavRow({ pick, strategy }: { pick: BriefPick; strategy: ScoringStrategy }) {
+  // Shared deep-link handlers — uses the STRATEGY-RELEVANT structure (the recommended trade
+  // shown on the card), not the best-overall scores[0], so Payoff for a wheel CSP loads the
+  // CSP and not the best-overall Big Lizard.
+  const nav = pickNav(pick, strategy);
+
   // Backtest only applies to premium-selling strategies the engine supports.
   const backtestStrategy: 'CSP' | 'Wheel' | null =
     strategy === 'wheel' ? 'Wheel' : strategy === 'income' ? 'CSP' : null;
@@ -372,72 +408,27 @@ function PickNavRow({ pick, strategy }: { pick: BriefPick; strategy: ScoringStra
     }));
   };
 
-  const result = pick.strategyLabResult ? (pick.strategyLabResult as StrategyLabValidateResult) : null;
-  // Use the STRATEGY-RELEVANT structure (the recommended trade shown on the card), not the
-  // best-overall scores[0]. Otherwise Payoff for a wheel CSP pick loaded the best-overall
-  // structure (a Big Lizard) instead of the CSP, contradicting the card's setup line.
-  const chosen = result ? pickDisplayStructure(result.scores, strategy, pick.breakoutDirection) : null;
-  const setup  = chosen?.setup && !chosen.setup.unavailableReason ? chosen.setup : null;
-  const expiry = setup?.expiration ?? null;
-  const legs   = setup?.legs?.length
-    ? setup.legs.map((l, i) => labLegToPayoffLeg(l, i))
-    : null;
-
-  const handleValidate = () => {
-    window.dispatchEvent(new CustomEvent('navigate-to-validate', {
-      detail: { ticker: pick.ticker },
-    }));
-  };
-
-  const handleAnalysis = () => {
-    window.dispatchEvent(new CustomEvent('navigate-to-analysis', {
-      detail: { ticker: pick.ticker },
-    }));
-  };
-
-  const handleEtrade = () => {
-    window.open(
-      `https://us.etrade.com/e/t/invest/quotesandresearch?content=3&sym=${pick.ticker.toLowerCase()}`,
-      '_blank'
-    );
-  };
-
-  const handleOptions = () => {
-    window.dispatchEvent(new CustomEvent('navigate-to-options', {
-      detail: { ticker: pick.ticker, ...(expiry ? { expiry } : {}) },
-    }));
-  };
-
-  const handlePayoff = () => {
-    const detail: Record<string, unknown> = { ticker: pick.ticker };
-    if (pick.price != null)  detail.spot     = pick.price;
-    if (expiry)              detail.expiry   = expiry;
-    if (chosen)              detail.strategy = chosen.slug;
-    if (legs)                detail.legs     = legs;
-    window.dispatchEvent(new CustomEvent('navigate-to-payoff', { detail }));
-  };
-
-  const expiryLabel = expiry ? ` · ${expiry}` : '';
+  const expiryLabel = nav.expiry ? ` · ${nav.expiry}` : '';
 
   return (
     <div className="pick-nav-row">
-      <button className="pick-nav-btn" onClick={handlePayoff}
-        title={legs ? `Open Payoff Visualizer pre-loaded with ${chosen?.name ?? 'strategy'} legs` : 'Open Payoff Visualizer for this ticker'}>
+      <button className="pick-nav-btn" onClick={nav.payoff}
+        title={nav.legs ? `Open Payoff Visualizer pre-loaded with ${nav.chosen?.name ?? 'strategy'} legs` : 'Open Payoff Visualizer for this ticker'}>
         📊 Payoff
       </button>
-      <button className="pick-nav-btn" onClick={handleValidate}
+      <button className="pick-nav-btn" onClick={nav.validate}
         title="Open Validate for this ticker">
         ✓ Validate
       </button>
-      <button className="pick-nav-btn" onClick={handleOptions}
-        title={expiry ? `Open Options Chain — expiry ${expiry}` : 'Open Options Chain for this ticker'}>
+      <button className="pick-nav-btn" onClick={nav.options}
+        title={nav.expiry ? `Open Options Chain — expiry ${nav.expiry}` : 'Open Options Chain for this ticker'}>
         📋 Options{expiryLabel}
       </button>
-      <button className="pick-nav-btn" onClick={handleAnalysis}
+      <button className="pick-nav-btn" onClick={nav.analysis}
         title="Run Analysis for this ticker">
         🔍 Analysis
       </button>
-      <button className="pick-nav-btn" onClick={handleEtrade}
+      <button className="pick-nav-btn" onClick={nav.etrade}
         title="Open on E*Trade">
         🏦 E*Trade
       </button>
@@ -601,6 +592,184 @@ function StrategySection({
 }
 
 
+// ── Ranked Grid (Tab B) ─────────────────────────────────────────────────────
+// One flat, sortable row per pick across every strategy. Default-sorted by Conviction
+// (the cross-strategy ranking) so the strongest setups float to the top.
+
+interface GridRow {
+  pick: BriefPick;
+  strategy: ScoringStrategy;
+  conviction: number;
+  rsi: number | null;
+  structure: { slug: string; name: string; grade: StrategyLabGrade } | null;
+  expiry: string | null;
+  strike: number | null;
+  premium: { value: number; kind: 'cr' | 'dr' } | null;
+}
+
+function buildGridRow(pick: BriefPick, strategy: ScoringStrategy): GridRow {
+  const result = pick.strategyLabResult ? (pick.strategyLabResult as StrategyLabValidateResult) : null;
+  const lab    = result ? gradeOf(result, strategy, pick.breakoutDirection) : null;
+  const setup  = lab?.setup && !lab.setup.unavailableReason ? lab.setup : null;
+  const credit = setup && setup.netCredit !== null && setup.netCredit > 0 ? setup.netCredit : null;
+  const debit  = setup && setup.netDebit  !== null && setup.netDebit  > 0 ? setup.netDebit  : null;
+  return {
+    pick, strategy,
+    conviction: convictionOf(pick, strategy),
+    rsi:        rsiOf(pick),
+    structure:  lab ? { slug: lab.slug, name: lab.name, grade: lab.grade } : null,
+    expiry:     setup?.expiration ?? null,
+    strike:     setup ? primaryStrike(setup) : null,
+    premium:    credit !== null ? { value: credit, kind: 'cr' } : debit !== null ? { value: debit, kind: 'dr' } : null,
+  };
+}
+
+type SortKey = 'conviction' | 'ticker' | 'price' | 'composite' | 'strategy'
+             | 'structure' | 'expiry' | 'strike' | 'premium' | 'grade' | 'verdict' | 'rsi';
+const TEXT_SORT_KEYS = new Set<SortKey>(['ticker', 'strategy', 'structure', 'expiry']);
+const VERDICT_RANK: Record<string, number> = { pass: 3, caution: 2, flag: 1 };
+
+function sortValue(row: GridRow, key: SortKey): number | string | null {
+  switch (key) {
+    case 'conviction': return row.conviction;
+    case 'ticker':     return row.pick.ticker;
+    case 'price':      return row.pick.price;
+    case 'composite':  return row.pick.compositeScore;
+    case 'strategy':   return row.strategy;
+    case 'structure':  return row.structure?.name ?? null;
+    case 'expiry':     return row.expiry;
+    case 'strike':     return row.strike;
+    case 'premium':    return row.premium?.value ?? null;
+    case 'grade':      return row.structure ? (GRADE_RANK[row.structure.grade] ?? 0) : null;
+    case 'verdict': {
+      const v = row.pick.criticVerdict;
+      return !v || v.degraded ? 0 : (VERDICT_RANK[v.verdict] ?? 0);
+    }
+    case 'rsi':        return row.rsi;
+  }
+}
+
+function BriefGrid({ rows }: { rows: GridRow[] }) {
+  const [sortKey, setSortKey] = useState<SortKey>('conviction');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+
+  const clickHeader = (key: SortKey) => {
+    if (key === sortKey) {
+      setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir(TEXT_SORT_KEYS.has(key) ? 'asc' : 'desc');
+    }
+  };
+
+  const sorted = [...rows].sort((a, b) => {
+    const av = sortValue(a, sortKey);
+    const bv = sortValue(b, sortKey);
+    // Nulls always sort last, regardless of direction.
+    if (av === null && bv === null) return 0;
+    if (av === null) return 1;
+    if (bv === null) return -1;
+    const r = typeof av === 'string'
+      ? av.localeCompare(bv as string)
+      : (av as number) - (bv as number);
+    return sortDir === 'asc' ? r : -r;
+  });
+
+  if (rows.length === 0) {
+    return <div className="empty-section">No picks match the current filter.</div>;
+  }
+
+  const arrow = (key: SortKey) => (key === sortKey ? <span className="sort-arrow">{sortDir === 'asc' ? '▲' : '▼'}</span> : null);
+  const cols: { key: SortKey; label: string; title?: string }[] = [
+    { key: 'ticker',     label: 'Ticker' },
+    { key: 'price',      label: 'Price' },
+    { key: 'conviction', label: 'Conviction', title: 'Cross-strategy ranking: Strategy-Lab structure score (0–100, shared rubric) minus a critic penalty (caution −15, flag/not-vetted −25 to −35). A quality/triage order — not a profit forecast.' },
+    { key: 'strategy',   label: 'Strategy' },
+    { key: 'composite',  label: 'Composite', title: 'Strategy-specific score — NOT comparable across strategies (each uses different signals and weights). Use Conviction to rank across strategies.' },
+    { key: 'structure',  label: 'Best Structure', title: 'Recommended structure (click → Payoff Visualizer)' },
+    { key: 'expiry',     label: 'Expiry' },
+    { key: 'strike',     label: 'Strike' },
+    { key: 'premium',    label: 'Premium' },
+    { key: 'grade',      label: 'Rating', title: 'Strategy-Lab grade of the recommended structure' },
+    { key: 'verdict',    label: 'Flag', title: 'AI critic verdict' },
+    { key: 'rsi',        label: 'RSI', title: 'Only scored for buy / bullish / bearish picks' },
+  ];
+
+  return (
+    <table className="brief-grid-table">
+      <thead>
+        <tr>
+          {cols.map(c => (
+            <th key={c.key} onClick={() => clickHeader(c.key)} title={c.title}>
+              {c.label}{arrow(c.key)}
+            </th>
+          ))}
+          <th className="grid-actions-head">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {sorted.map(row => {
+          const { pick, strategy } = row;
+          const nav = pickNav(pick, strategy);
+          const v = pick.criticVerdict;
+          const verdictClass = v ? (v.degraded ? 'degraded' : v.verdict) : null;
+          return (
+            <tr key={`${strategy}-${pick.ticker}`}>
+              <td className="grid-ticker">{pick.ticker}</td>
+              <td>{pick.price != null ? `$${pick.price.toFixed(2)}` : <span className="grid-muted">—</span>}</td>
+              <td>
+                <span className="grid-conviction" style={{ background: scoreBg(row.conviction), color: scoreColor(row.conviction) }}>
+                  {row.conviction}
+                </span>
+              </td>
+              <td className="grid-strategy">{strategy}</td>
+              <td title="Strategy-specific — not comparable across strategies">{pick.compositeScore.toFixed(1)}</td>
+              <td>
+                {row.structure
+                  ? <button className="grid-structure-link" onClick={nav.payoff}
+                      title={nav.legs ? `Open Payoff Visualizer pre-loaded with ${row.structure.name} legs` : 'Open Payoff Visualizer'}>
+                      {SLUG_SHORT[row.structure.slug] ?? row.structure.name}
+                    </button>
+                  : <span className="grid-muted">—</span>}
+              </td>
+              <td>{row.expiry ? fmtExpShort(row.expiry) : <span className="grid-muted">—</span>}</td>
+              <td>{row.strike != null ? `$${row.strike}` : <span className="grid-muted">—</span>}</td>
+              <td>
+                {row.premium
+                  ? <span className={row.premium.kind === 'cr' ? 'setup-credit' : 'setup-debit'}>${row.premium.value.toFixed(2)} {row.premium.kind}</span>
+                  : <span className="grid-muted">—</span>}
+              </td>
+              <td>
+                {row.structure
+                  ? <span className="lab-grade-badge" style={{ color: GRADE_COLOR[row.structure.grade], borderColor: GRADE_COLOR[row.structure.grade] }}>{row.structure.grade}</span>
+                  : <span className="grid-muted">—</span>}
+              </td>
+              <td>
+                {verdictClass
+                  ? <span className={`pick-summary-verdict critic-badge-${verdictClass}`}
+                      title={v!.degraded ? 'LLM critic did not run — not a vetted pass' : undefined}>
+                      {v!.degraded ? '⚠ n/a' : CRITIC_LABEL[v!.verdict]}
+                    </span>
+                  : <span className="grid-muted">—</span>}
+              </td>
+              <td>{row.rsi != null ? row.rsi.toFixed(0) : <span className="grid-muted">—</span>}</td>
+              <td>
+                <div className="grid-actions">
+                  <button className="grid-action-btn" onClick={nav.payoff}   title="Payoff">📊</button>
+                  <button className="grid-action-btn" onClick={nav.validate} title="Validate">✓</button>
+                  <button className="grid-action-btn" onClick={nav.options}  title="Options Chain">📋</button>
+                  <button className="grid-action-btn" onClick={nav.analysis} title="Analysis">🔍</button>
+                  <button className="grid-action-btn" onClick={nav.etrade}   title="E*Trade">🏦</button>
+                </div>
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+
 interface DailyBriefViewProps {
   onGoToStrategyLab?: (ticker: string) => void;
 }
@@ -627,6 +796,16 @@ export function DailyBriefView({ onGoToStrategyLab }: DailyBriefViewProps) {
       return {};
     }
   });
+
+  const [activeTab, setActiveTab] = useState<'grouped' | 'grid'>(
+    () => (localStorage.getItem('brief-tab') === 'grid' ? 'grid' : 'grouped'),
+  );
+  const [passFilter, setPassFilter] = useState<PassFilter>(() => {
+    const saved = localStorage.getItem('brief-pass-filter');
+    return saved === 'pass' || saved === 'pass-caution' ? saved : 'all';
+  });
+  const selectTab = (t: 'grouped' | 'grid') => { setActiveTab(t); localStorage.setItem('brief-tab', t); };
+  const selectFilter = (f: PassFilter) => { setPassFilter(f); localStorage.setItem('brief-pass-filter', f); };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -741,7 +920,15 @@ export function DailyBriefView({ onGoToStrategyLab }: DailyBriefViewProps) {
   const validUntil = latestEntry?.validUntil ?? null;
   const stale = validUntil ? isStale(validUntil) : false;
 
-  const briefMap = new Map(displayedBriefs.map(b => [b.strategy as ScoringStrategy, b]));
+  // Apply the critic pass-filter to both tabs by filtering each entry's picks up front.
+  const filteredBriefs = displayedBriefs.map(b => ({
+    ...b,
+    picks: b.picks.filter(p => passesFilter(p, passFilter)),
+  }));
+  const briefMap = new Map(filteredBriefs.map(b => [b.strategy as ScoringStrategy, b]));
+  const gridRows = filteredBriefs.flatMap(b =>
+    b.picks.map(p => buildGridRow(p, b.strategy as ScoringStrategy)),
+  );
 
   // Unique history dates for the dropdown
   const historyDates = Array.from(new Map(
@@ -924,6 +1111,26 @@ export function DailyBriefView({ onGoToStrategyLab }: DailyBriefViewProps) {
         );
       })()}
 
+      {!loading && displayedBriefs.length > 0 && (
+        <div className="brief-subtoolbar">
+          <div className="brief-tabs">
+            <button className={`brief-tab ${activeTab === 'grouped' ? 'active' : ''}`} onClick={() => selectTab('grouped')}>
+              Grouped
+            </button>
+            <button className={`brief-tab ${activeTab === 'grid' ? 'active' : ''}`} onClick={() => selectTab('grid')}>
+              Ranked Grid
+            </button>
+          </div>
+          <div style={{ flex: 1 }} />
+          <div className="brief-filter-seg" title="Filter by AI-critic verdict. Pass filters exclude not-vetted picks.">
+            <span className="brief-filter-label">Critic:</span>
+            <button className={passFilter === 'all' ? 'active' : ''} onClick={() => selectFilter('all')}>All</button>
+            <button className={passFilter === 'pass-caution' ? 'active' : ''} onClick={() => selectFilter('pass-caution')}>Pass + Caution</button>
+            <button className={passFilter === 'pass' ? 'active' : ''} onClick={() => selectFilter('pass')}>Pass only</button>
+          </div>
+        </div>
+      )}
+
       {loading ? (
         <div className="empty">Loading…</div>
       ) : displayedBriefs.length === 0 ? (
@@ -934,18 +1141,25 @@ export function DailyBriefView({ onGoToStrategyLab }: DailyBriefViewProps) {
             {running ? 'Running…' : 'Run Now'}
           </button>
         </div>
+      ) : activeTab === 'grid' ? (
+        <div className="brief-grid-scroll">
+          <BriefGrid rows={gridRows} />
+        </div>
       ) : (
         <div className="brief-strategies">
-          {orderByTopComposite(STRATEGY_ORDER, briefMap).map(strategy => (
-            <StrategySection
-              key={strategy}
-              strategy={strategy}
-              entry={briefMap.get(strategy)}
-              collapsed={collapsed[strategy] ?? false}
-              onToggle={() => toggleCollapse(strategy)}
-              onGoToStrategyLab={goToStrategyLab}
-            />
-          ))}
+          {orderByTopComposite(STRATEGY_ORDER, briefMap)
+            // When a pass-filter is active, hide strategies left with no matching picks.
+            .filter(strategy => passFilter === 'all' || (briefMap.get(strategy)?.picks.length ?? 0) > 0)
+            .map(strategy => (
+              <StrategySection
+                key={strategy}
+                strategy={strategy}
+                entry={briefMap.get(strategy)}
+                collapsed={collapsed[strategy] ?? false}
+                onToggle={() => toggleCollapse(strategy)}
+                onGoToStrategyLab={goToStrategyLab}
+              />
+            ))}
         </div>
       )}
     </div>
