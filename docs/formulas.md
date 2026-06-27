@@ -641,3 +641,35 @@ structureReturnPct = structurePnl / |entryPremium| × 100   // % of entry credit
 Day-0 (asOf == entry, same price) is exactly 0. A closed trade's `outcome` derives from the sign
 of `structurePnl` (win > +$5, loss < −$5, else breakeven), falling back to the stock-direction
 proxy only when legs can't be priced. `stock_return_pct` is retained for reference.
+
+## structure-settle (hold-to-expiry intrinsic) {#structure-settle}
+
+Realized P&L of a structure held to expiry, settled at **intrinsic** value — no IV / time-value
+assumptions (at expiry an option is worth exactly its intrinsic). Used by the lizard-vs-spread
+validation harness (`src/shared/structure-settle.ts`, `scripts/backtest-lizard-vs-spread.mjs`):
+
+```
+intrinsic(leg, S) = leg.side==='call' ? max(0, S − strike) : max(0, strike − S)
+P&L_leg           = (leg.action==='buy' ? +1 : −1) × (intrinsic(leg, S) − leg.mid) × qty
+settlePnl         = Σ P&L_leg × 100        // S = close on the last trading day ≤ expiration
+```
+
+Entry prices are leg mids (no slippage haircut, consistent with the backtest engine).
+
+## pop-weighted-premium (EXPERIMENTAL, disabled) {#pop-weighted-premium}
+
+Alternative Strategy-Lab `premiumScore` for short-premium structures, gated behind
+`USE_POP_WEIGHTED_PREMIUM` (**default false**). The shipped score saturates — any structure
+returning ≥1.5%/30d on capital gets the full 25 pts — so a Big Lizard (return-on-risk ~16%, PoP
+~52%, a coin-flip ATM range trade) ties a bull put spread (~30% return-on-risk, PoP ~71%). This
+term re-grades by graduated capital-efficiency × probability-of-profit:
+
+```
+eff   = clamp(ret30dPct / 3.0, 0, 1)                 // capital-efficiency ramp (0 → full at 3%/30d)
+popF  = popEstimate==null ? 0.7 : clamp((popEstimate − 40) / 35, 0.3, 1)   // PoP weight (52%→0.36, 71%→0.87)
+premiumScore = round(25 × eff × popF)                // ∈ [0,25], preserves grade calibration
+```
+
+Constants are **provisional** — disabled pending an FR-SEY-5 realized-P&L backtest delta
+(`scripts/backtest-lizard-vs-spread.mjs`; the bullish sample doesn't settle until Jul 2026). See
+`Requirements/v2-execution/06-seykota-risk-extensions.md`.

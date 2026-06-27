@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.86] — 2026-06-27
+
+### Added
+- **Experimental PoP-weighted premium scoring (disabled) + lizard-vs-spread backtest harness.** Investigation into why the bullish brief recommends a Big Lizard over a bull put spread found the lab's `premiumScore` **saturates** (any short-premium structure returning ≥1.5%/30d on capital pegs the 25-pt cap) and ignores probability-of-profit. A static risk-geometry study of 102 historical bullish picks (using the lab's own stored `maxLoss`/`popEstimate`) showed the bull put spread is risk-adjusted *superior* — higher return-on-risk in 86% of picks, higher PoP in **100%** (70.6% vs the lizard's coin-flip 52.7%), for ~15× less capital — yet the lab grades the lizard ~1.8 pts **higher**. New `USE_POP_WEIGHTED_PREMIUM` flag (**default false**) re-grades the short-premium `premiumScore` as `25 × clamp(ret30d/3,0,1) × clamp((PoP−40)/35,0.3,1)` (`popWeightedPremiumScore`, `docs/formulas.md#pop-weighted-premium`), which on the sample flips selection toward the spread. **Shipped disabled pending an FR-SEY-5 realized-P&L backtest** — the 2026-06 bullish sample doesn't settle until Jul 2–24 2026 (none had expired). Harness `scripts/backtest-lizard-vs-spread.mjs` settles each structure at hold-to-expiry **intrinsic** (no IV assumptions; `src/shared/structure-settle.ts`) from the stored legs + price paths — re-run after Jul 24 to get the delta and decide whether to enable. Finding recorded in `Requirements/v2-execution/06-seykota-risk-extensions.md`. Regression tests: `tests/structure-settle.test.ts` (5), `tests/lab-pop-premium.test.ts` (5). Selection/grading is unchanged with the flag off.
+
 ## [1.1.85] — 2026-06-26
 
 ### Added

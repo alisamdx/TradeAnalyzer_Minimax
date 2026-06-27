@@ -207,6 +207,47 @@ The Seykota workstream is now fully closed.
 
 ---
 
+## Structure-grading: PoP-weighted premium (lizard vs bull put spread) — ⏸ DISABLED, pending realized backtest (v1.1.86)
+
+**Question.** For *bullish* brief picks the recommended structure is almost always a **Big Lizard**
+(87.7% of 114 historical picks; Jun 2026 sample). A bull put spread (`short-put-vertical`) expresses
+the same bullish + high-IV thesis with defined risk — should the lab grade favour it?
+
+**Static finding (102 picks where both constructible; lab's own stored `maxLoss`/`popEstimate`).**
+The Big Lizard is risk-adjusted *worse* on every axis yet grades ~1.8 pts **higher**:
+
+| | Big Lizard | Bull Put Spread |
+|---|---|---|
+| avg lab totalScore | 84.1 | 82.3 |
+| avg max loss / capital | $34,175 | $2,298 |
+| avg return-on-risk | 15.7% | **30.3%** |
+| avg PoP (lab estimate) | **52.7%** | **70.6%** |
+| breakeven cushion | 12.8% | 11.3% |
+
+Spread has higher return-on-risk in 86% of picks, higher PoP in **100%**, for ~15× less capital.
+The Big Lizard's "no upside risk" property only holds when net credit ≥ call-spread width — often
+**not** met (the hedge picker falls back to the nearest strike), so it's frequently a coin-flip
+range trade (PoP ~52%), not a one-sided premium play.
+
+**Diagnosis.** The shipped `premiumScore` already divides credit by capital, but **saturates** at a
+1.5%/30d threshold (both structures peg the 25-pt cap) and ignores PoP entirely. The blindspot is
+PoP-weighting + graduated capital-efficiency, not the candidate list (adding the slug to the bullish
+bucket changed selection in only 22.6% of picks, by ~1 pt — rejected as ineffective).
+
+**Change (disabled).** `USE_POP_WEIGHTED_PREMIUM` (default **false**) re-grades the short-premium
+`premiumScore` as `25 × clamp(ret30d/3,0,1) × clamp((PoP−40)/35,0.3,1)` (see
+`docs/formulas.md#pop-weighted-premium`). On the sample it docks the lizard ~25→9 and the spread
+~25→22, flipping selection toward the spread.
+
+**Why not shipped on.** Static + PoP geometry is *necessary but not sufficient* — it shows better
+probability-weighted risk-adjusted shape, not realized dollars (the lizard's larger absolute credit
+means it wins bigger in the ~53% it wins). Per FR-SEY-5 a structure-selection change needs a realized
+delta showing it is at-worst-neutral. The 2026-06 bullish sample **does not settle until Jul 2–24
+2026** (none had expired at analysis time), so the realized backtest cannot run yet. Harness:
+`scripts/backtest-lizard-vs-spread.mjs` (hold-to-expiry intrinsic, no IV assumptions; legs + price
+paths already stored). **Re-run after Jul 24 2026; flip the flag on only if `spv − lizard` realized
+return-on-capital ≥ 0.**
+
 ## Sequencing
 
 Build order (operator-approved): **FR-SEY-5 → FR-SEY-2 → FR-SEY-1 → FR-SEY-3.** Each ships

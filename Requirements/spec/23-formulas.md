@@ -256,3 +256,20 @@ Sharpe (from daily equity returns, ≥ 3 points):
   r[i]     = (equity[i] − equity[i−1]) / equity[i−1]
   Sharpe   = (mean(r) − daily_rf) / stddev(r) × sqrt(252)
 ```
+
+## 23.8 Hold-to-expiry settlement + PoP-weighted premium (§14, §20)
+
+```
+structure-settle (intrinsic at expiry — no IV/time-value; src/shared/structure-settle.ts):
+  intrinsic(leg, S) = leg.side==='call' ? max(0, S − strike) : max(0, strike − S)
+  P&L_leg           = (leg.action==='buy' ? +1 : −1) × (intrinsic(leg, S) − leg.mid) × qty
+  settlePnl         = Σ P&L_leg × 100      (S = close on last trading day ≤ expiration)
+
+pop-weighted-premium (EXPERIMENTAL, USE_POP_WEIGHTED_PREMIUM default false):
+  eff          = clamp(ret30dPct / 3.0, 0, 1)
+  popF         = popEstimate==null ? 0.7 : clamp((popEstimate − 40)/35, 0.3, 1)
+  premiumScore = round(25 × eff × popF)    ∈ [0,25]
+```
+
+Disabled pending an FR-SEY-5 realized backtest (`scripts/backtest-lizard-vs-spread.mjs`).
+see `docs/formulas.md#structure-settle` / `#pop-weighted-premium`.

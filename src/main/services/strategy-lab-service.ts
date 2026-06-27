@@ -26,6 +26,34 @@ import type {
   StrategyLabComplexity,
 } from '@shared/types.js';
 
+// ─── PoP-weighted premium scoring (EXPERIMENTAL, DISABLED) ────────────────────
+// The current premiumScore saturates: any short-premium structure returning ≥1.5%/30d on
+// capital gets the full 25 pts, so a Big Lizard (return-on-risk ~16%, but PoP ~52% — a
+// coin-flip ATM range trade) ties a bull put spread (~30% return-on-risk AND PoP ~71%).
+// Static risk-geometry analysis of 102 historical bullish picks found the spread superior on
+// return-on-risk (86% of picks) and PoP (100%) for ~15× less capital at risk, yet the lab
+// graded the lizard ~1.8 pts HIGHER. This term re-grades the short-premium premium score by a
+// graduated capital-efficiency factor AND a probability-of-profit weight, so the higher-PoP,
+// more capital-efficient structure out-grades the coin-flip one.
+//
+// DISABLED by default pending an FR-SEY-5 realized-P&L backtest delta (the bullish sample
+// doesn't settle until Jul 2026 — none had expired at analysis time). Constants are provisional
+// and must be confirmed before this flips on. see docs/formulas.md#pop-weighted-premium and
+// Requirements/v2-execution/06-seykota-risk-extensions.md.
+export const USE_POP_WEIGHTED_PREMIUM = false;
+
+/**
+ * PoP-weighted short-premium score ∈ [0,25] (preserves grade calibration). `ret30dPct` is the
+ * credit as a % of capital-at-risk over the holding period; `popEstimate` is 0–100 (null → a
+ * neutral 0.7 factor). Capital efficiency ramps 0→full by 3%/30d; PoP scales 40%→0.3 up to
+ * 75%→1.0, so a 52% coin-flip is docked ~0.36 while a 71% spread keeps ~0.87.
+ */
+export function popWeightedPremiumScore(ret30dPct: number, popEstimate: number | null): number {
+  const eff = Math.max(0, Math.min(1, ret30dPct / 3.0));
+  const pop = popEstimate != null ? Math.max(0.3, Math.min(1, (popEstimate - 40) / 35)) : 0.7;
+  return Math.round(25 * eff * pop);
+}
+
 // ─── Strategy Profile definitions ─────────────────────────────────────────────
 
 interface LegDef {
@@ -684,9 +712,13 @@ function scoreStrategy(
         : setup.legs.find(l => l.side === 'put' && l.action === 'sell')?.strike
           ? (setup.legs.find(l => l.side === 'put' && l.action === 'sell')!.strike * 100) : 0;
       const ret30d = capital > 0 ? (setup.netCredit / capital) * 100 : 0;
-      if (ret30d >= 1.5)      { premiumScore = 25; flags.push(`✓ ${ret30d.toFixed(1)}% return/30d — strong premium`); }
-      else if (ret30d >= 0.8) { premiumScore = 15; flags.push(`~ ${ret30d.toFixed(1)}% return/30d — adequate premium`); }
-      else                    { premiumScore = 5;  flags.push(`✗ ${ret30d.toFixed(1)}% return/30d — thin premium`); }
+      if (USE_POP_WEIGHTED_PREMIUM) {
+        // EXPERIMENTAL (disabled): graduated capital-efficiency × PoP weight. see header note.
+        premiumScore = popWeightedPremiumScore(ret30d, setup.popEstimate);
+        flags.push(`${ret30d.toFixed(1)}% return/30d · PoP ${setup.popEstimate?.toFixed(0) ?? '—'}% → premium ${premiumScore}/25`);
+      } else if (ret30d >= 1.5) { premiumScore = 25; flags.push(`✓ ${ret30d.toFixed(1)}% return/30d — strong premium`); }
+      else if (ret30d >= 0.8)   { premiumScore = 15; flags.push(`~ ${ret30d.toFixed(1)}% return/30d — adequate premium`); }
+      else                      { premiumScore = 5;  flags.push(`✗ ${ret30d.toFixed(1)}% return/30d — thin premium`); }
     } else if (!profile.shortPremium && setup.netDebit !== null && setup.netDebit > 0) {
       // Reward-to-risk on the ACTUAL max loss, not the debit paid. They're equal for a
       // simple long vertical (max loss = debit), but for a broken-wing butterfly the true
