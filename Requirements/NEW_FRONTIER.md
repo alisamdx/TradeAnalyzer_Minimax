@@ -506,6 +506,116 @@ or (ii) a richer gap model (short interest, OI/gamma walls, intraday) — i.e. t
 
 -----
 
+## 10. Spike scope — §3.2 VRP decomposition (added 2026-06-27)
+
+*Second research thread, the doc's §3.2. Scoped to what the panel supports today, with the
+data-blocked components named explicitly so we don't over-promise (cf. the §3.5 earnings inversion).*
+
+### 10.1 The thesis (the doc's §3.2)
+
+The volatility risk premium (VRP = IV − subsequent realized vol, positive on average — you're paid
+to sell vol) is **not uniform**: it varies by sector, IV regime, event type, macro regime. If we can
+**measure where the VRP is reliably fat vs thin**, we can rank short-premium candidates by *expected
+VRP harvest* instead of blanket-selling vol.
+
+### 10.2 Metric definition (computable now)
+
+For a ticker on IV-observation date `d` (from `iv_history.atm_iv`, a 30-day ATM IV in %):
+
+```
+fwdRV30(d)  = annualized realized vol of daily log returns over the next ~21 trading days
+              = √(252 · var(Δln close)) × 100        (from historical_prices)
+VRP(d)      = atm_iv(d) − fwdRV30(d)                  // vol points; >0 = IV was rich
+```
+
+Only usable for `d ≤ maxPriceDate − ~30 days` (need the forward window to have closed). With
+`iv_history` spanning 2025-05 → 2026-06, that's **~12 months** of VRP observations per name.
+
+### 10.3 Decomposition — what we can vs. can't tag (the honest split)
+
+| Component (doc's §3.2) | Tag source | Feasible now? |
+|---|---|---|
+| **Sector premium** | `fundamentals_cache.sector` (SIC) | ✅ yes |
+| **IV-regime premium** | IV-rank bucket from trailing `iv_history` | ✅ yes |
+| **Realized-vol regime** | trailing RV20 bucket from `historical_prices` | ✅ yes |
+| **Idiosyncratic vs market** | VRP residual after regressing on SPY VRP / beta | ⚠️ partial (beta exists; SPY IV30 panel is the same 12mo) |
+| **Earnings premium** | earnings date inside the forward window | ❌ no historical earnings stored (same block as §3.5) |
+| **Macro premium** | macro regime / VIX over the window | ❌ `macro_events` sparse (32 rows), VIX not historized |
+
+So the **answerable v1 question** is: *does VRP vary systematically by sector × IV-regime × RV-regime
+on our 12-month panel, enough to rank short-premium candidates?* The earnings/macro components are
+parked behind the same data purchases §3.5 needs.
+
+### 10.4 Falsifiable hypothesis (one sentence)
+
+> The forward VRP (`atm_iv − fwdRV30`) is **not** uniform across IV-rank / sector / RV-regime buckets
+> — at least one tag splits the cross-section into reliably-fatter vs reliably-thinner VRP cohorts
+> (monotone, not a single fragile bucket) — and selecting the fat-VRP cohort improves short-premium
+> replay P&L (the §9 CSP harness) vs blanket selling.
+
+Null result ⇒ VRP is effectively a monolith on our data and there's nothing to rank on (record it,
+don't build a VRP overlay).
+
+### 10.5 The study & ship path
+
+- **Measure:** `scripts/vrp-measure.mjs` — VRP per ticker-day, aggregated overall and by IV-rank /
+  sector / RV-regime bucket (mean, median, % positive, n). **First read run below (§10.6).**
+- **Validate (if a split appears):** reuse the §9 naked-CSP harness (`fr-gap-risk-csp.mjs`) — does
+  picking the fat-VRP cohort beat the baseline book on win/mean/tail? FR-SEY-5 gate.
+- **Ship (if it survives):** a `vrpBucket` / `expectedVrp` **display column** on the screener or
+  Validate dashboard first (like Gap Risk); a scoring-weight or entry-gate only after a Replay delta.
+
+### 10.6 First-read result (2026-06-27) — ✅ VRP is real and NOT a monolith
+
+Ran `scripts/vrp-measure.mjs` over **260,198 ticker-day observations** (1,059 tickers, ~12mo).
+**The premium exists and splits cleanly — the §10.4 hypothesis holds on the answerable components.**
+
+| cut | n | mean VRP | median VRP | % positive | (IV − RV) |
+|---|---|---|---|---|---|
+| **ALL** | 260,198 | **+2.9** | **+4.0** | **70%** | 37.3 − 34.5 |
+| IVR **low** (0–33) | 92,227 | +1.8 | +2.8 | 68% | 31.5 − 29.7 |
+| IVR **mid** (33–66) | 92,675 | +2.9 | +4.1 | 71% | 37.2 − 34.3 |
+| IVR **high** (66–100) | 74,243 | **+4.1** | **+6.1** | **73%** | 44.8 − 40.7 |
+| RV20 **low/calm** | 86,449 | +2.3 | +3.4 | **73%** | 25.9 − 23.6 |
+| RV20 **high/stormy** | 86,449 | +3.7 | +5.1 | 68% | 50.6 − 46.9 |
+| sector range (≥200 obs) | — | **+15.2 … −20.7** | (medians mostly +) | — | wide |
+
+**Findings:**
+1. **There is a real, positive VRP on our panel** — mean +2.9 vol pts, median +4.0, **positive 70%
+   of the time** (IV 37.3 vs subsequent RV 34.5). Selling ATM vol was paid, on average.
+2. **IV-rank is the clean, monotone splitter** — VRP rises low→mid→high (+1.8 → +2.9 → +4.1 mean;
+   68% → 71% → 73% positive). **Rich IV was genuinely richer**, not mean-reverting in premium terms
+   on this sample. This is the most robust, actionable cut.
+3. **RV regime is a *trade-off*, not a free lunch** — stormy names carry a higher *average* VRP
+   (+3.7) but a *lower* hit rate (68% vs calm's 73%): the mean is dragged up by fat wins and is less
+   reliable. Calm names give a smaller-but-steadier premium.
+4. **Sector dispersion is large but tail-fragile** — top sectors run +10 to +15 mean VRP, bottom
+   ones negative (optical instruments −20.7), but the negative sectors' *medians* are ~0-to-positive,
+   so the negative means are outlier-driven (a vol explosion in one or two names). Sector is a real
+   axis but means are noisy in thin buckets; trust the median.
+
+**Verdict: the thesis survives the first cut** — VRP is non-uniform and IV-rank ranks it cleanly.
+**But the honest caveat for shipping:** the engine's short-premium scoring **already weights IV rank
+heavily**, so the open question isn't "does VRP vary" (it does) but "does an explicit VRP/expected-
+harvest score add anything *beyond* the IV-rank the engine already uses?" That's the FR-SEY-5 test:
+A/B the fat-VRP cohort against the baseline CSP book (§9 harness) **and** against an IVR-matched
+control, to isolate marginal value. If VRP-bucketing only re-expresses IVR, it ships as a clearer
+*display* (expected-harvest column), not a new scoring weight.
+
+**Recommended next step:** the IVR-matched A/B above — the one cut here (RV-regime trade-off, sector
+median vs mean) that *isn't* just IV-rank in disguise is where any genuinely new edge would live.
+
+### 10.7 Honest limits
+
+- **~12 months, overlapping 30-day windows** → ~12 quasi-independent obs/ticker, **one regime**
+  (the 2025–26 negative-beta energy/staples year noted in the Replay spec). Trend-only: use it to
+  *reject* a uniform-VRP null or find a gross sector/IV split, **not** to calibrate weights.
+- **ATM-only IV** → this is ATM VRP, not a skew/term-structure-aware VRP. The richer decomposition
+  (variance risk premium across the surface) needs the wider IV panel we don't have.
+- **Survivorship**: current `fundamentals_cache` sector mapping applied backward; negligible at 12mo.
+
+-----
+
 ## Appendix: Reading List Starter Pack
 
 **Books:**
