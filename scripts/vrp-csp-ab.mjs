@@ -154,4 +154,26 @@ console.log('\n=== STEP 4: standalone RV-regime (for reference) ===');
   show('  mid', mid);
   show('  stormy (high RV20)', storm);
 }
+
+// STEP 5: ranking A/B. The engine ALREADY scores short premium with ivRank (higher_better) +
+// recentVolatility (lower_better, normMax 60). Does that calm term earn its keep vs an IVR-only
+// ranking, and is it well-weighted? Rank by each composite, take the top quantile, measure CSP P&L.
+console.log('\n=== STEP 5: ranking A/B — does the existing recentVolatility term add value? ===');
+{
+  const ivrN = r => Math.min(1, Math.max(0, r.ivr / 100));
+  const calmN = r => Math.min(1, Math.max(0, 1 - r.rv20 / 60)); // mirrors normMax 60, lower_better
+  const rankings = {
+    'IVR only            ': r => ivrN(r),
+    'engine WHEEL (22:10)': r => (22 * ivrN(r) + 10 * calmN(r)) / 32,
+    'engine INCOME(30:20)': r => (30 * ivrN(r) + 20 * calmN(r)) / 50,
+    'calm-HEAVY  (30:40) ': r => (30 * ivrN(r) + 40 * calmN(r)) / 70,
+  };
+  for (const frac of [0.20, 0.30]) {
+    console.log(`  -- top ${(frac * 100).toFixed(0)}% by composite --`);
+    for (const [name, fn] of Object.entries(rankings)) {
+      const sorted = [...rows].sort((a, b) => fn(b) - fn(a));
+      show(`    ${name}`, sorted.slice(0, Math.floor(rows.length * frac)));
+    }
+  }
+}
 db.close();

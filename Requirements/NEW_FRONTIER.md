@@ -640,6 +640,49 @@ regime, so the magnitude needs confirmation even though the direction is clean a
 sound. Likely home: a `realizedVolGate` / `ivToRvRatio` config on `exec_config` + a scoring signal,
 mirroring the FR-SEY-1/2 disabled-by-default pattern.
 
+### 10.9 Resolution (2026-06-27) — ⚠️ THE TERM ALREADY EXISTS; no change justified
+
+Before building anything, checked the scoring path — **the IV/RV signal is already in the live
+engine.** Short-premium scoring already combines `ivRank` (higher-better) with **`recentVolatility`**
+(20-day realized vol, *lower-better*, `normMax 60`): **income weights it 20/100, wheel 10/100**
+(`scoring-service.ts` `BASELINE_INCOME` / `BASELINE_WHEEL`). So §10.8 didn't find a *new* signal —
+it re-derived an existing one. The honest question collapses to: *is that term pulling its weight,
+and is it weighted right?*
+
+**Ranking A/B** (`scripts/vrp-csp-ab.mjs` STEP 5 — rank the CSP book by each composite, take the top
+quantile, measure real P&L):
+
+| top 20% by composite | win | avgRet | CVaR5 |
+|---|---|---|---|
+| **IVR only** | **87.7%** | **+0.28%** | −1.8% |
+| engine WHEEL (22:10) | 82.8% | +0.22% | −1.5% |
+| engine INCOME (30:20) | 84.0% | +0.24% | −1.0% |
+| **calm-HEAVY (30:40)** | 84.2% | +0.23% | **−0.8%** |
+
+**The calm term is a TAIL-HEDGE that costs a little return — not a free lunch.** IVR-only ranking has
+the *best* win and mean but the *worst* tail; adding calm weight monotonically tightens CVaR
+(−1.8% → −0.8%) while shaving win/mean. This **refines §10.8**: the "calm is better on *both* mean and
+tail" result was an artifact of conditioning on IVR≈100 (max IVR). In a full ranking, calm competes
+with IVR for selection slots, so weighting it more trades expected return for a safer left tail —
+a *preference*, not a strict improvement.
+
+**Decision: ship no scoring change.** (1) The signal already exists; a new term would double-count.
+(2) The only lever is its *weight*, and more-calm is a return-vs-tail trade-off, not a Pareto win, on
+a single ~12-month regime — exactly the kind of weight-tuning FR-SEY-5 and prior precedent
+(`project_scoring_replay_validation`) say not to do on this sample. (3) The current weights (income
+20, wheel 10) already sit sensibly between the extremes. **FR-SEY-5 did its job: it stopped a
+redundant signal and an unjustified re-weight.**
+
+**One parked observation (not a ship):** wheel weights calm at 10 vs income's 20, and the tail is
+where CSP/wheel assignment risk actually lives — so *if* a future, multi-regime sample confirms the
+tail benefit is worth the mean cost, the cleanest single change would be nudging **wheel's
+`recentVolatility` weight toward income's**. Not now — recorded for the next deeper IV panel.
+
+**Net for §3.2:** VRP is real and non-uniform (§10.6), and the engine already harvests its most
+robust, IVR-orthogonal piece (low realized vol) as a tail control. There is no new short-premium
+edge to ship from this thread on current data — the value was *confirming the existing design is
+sound* and identifying the wheel-weight question for later.
+
 ### 10.7 Honest limits
 
 - **~12 months, overlapping 30-day windows** → ~12 quasi-independent obs/ticker, **one regime**
