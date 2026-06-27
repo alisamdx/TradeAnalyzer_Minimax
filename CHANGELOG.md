@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.87] — 2026-06-27
+
+### Added
+- **Daily Brief surfaces a defined-risk alternative for bullish picks (display-only).** Bullish picks almost always recommend a **Big Lizard** (a coin-flip ATM range trade with a large tail), while the lab also scores a defined-risk **bull put spread** (`short-put-vertical`) that the bullish bucket can't recommend (it's filed under `inflection`). Both the **Grouped** card (expanded detail) and the **Ranked Grid** (under the Best Structure cell) now show a `⚖ Defined-risk alt: Bull Put Spread A+ · $strike · expiry · credit · PoP%` chip when the spread is constructible and carries a strictly smaller max loss than the recommended structure. Clicking it opens the Payoff Visualizer pre-loaded with the spread's legs. This is **purely informational** — it does NOT change which structure the brief recommends or the engine trades, so it's not FR-SEY-5-gated (the engine-side rubric change remains disabled behind `USE_POP_WEIGHTED_PREMIUM` pending the July backtest). Computed client-side from the already-stored lab scores (no job re-run). Bullish-scoped to match the validated finding. New `definedRiskAlternative()` in `src/shared/brief-ranking.ts`; regression tests in `tests/brief-ranking.test.ts` (+5, 14 total).
+
 ## [1.1.86] — 2026-06-27
 
 ### Added

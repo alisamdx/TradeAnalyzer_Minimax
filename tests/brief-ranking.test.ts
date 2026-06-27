@@ -3,7 +3,7 @@
 // the one ranking that IS comparable across strategies; the pass-filter gates both tabs.
 
 import { describe, it, expect } from 'vitest';
-import { convictionOf, rsiOf, passesFilter } from '../src/shared/brief-ranking.js';
+import { convictionOf, rsiOf, passesFilter, definedRiskAlternative } from '../src/shared/brief-ranking.js';
 import type { BriefPick, CriticVerdict, ScoringStrategy } from '../src/shared/types.js';
 
 // A minimal strategyLabResult whose top structure scores `totalScore`. pickDisplayStructure
@@ -76,6 +76,46 @@ describe('rsiOf', () => {
   it('is null when the strategy does not score RSI', () => {
     expect(rsiOf(pick({ signals: { ivRank: { raw: 40, missing: false, weight: 1, normalized: 0.5 } as never } }))).toBeNull();
     expect(rsiOf(pick({ signals: { rsiMomentum: { raw: null, missing: true, weight: 1, normalized: 0 } as never } }))).toBeNull();
+  });
+});
+
+describe('definedRiskAlternative', () => {
+  // Bullish lab result: a Big Lizard (recommended, large tail) + a smaller-risk bull put spread.
+  function bullishLab(opts: { spvLoss?: number; spvUnavail?: boolean; spvPop?: number | null } = {}) {
+    const { spvLoss = -774.5, spvUnavail = false, spvPop = 71 } = opts;
+    const leg = (action: string, strike: number, mid: number) => ({ action, side: 'put', strike, expiration: '2026-07-17', qty: 1, mid });
+    return {
+      scores: [
+        { slug: 'big-lizard', name: 'Big Lizard', grade: 'A', totalScore: 84,
+          setup: { legs: [leg('sell', 225, 10)], netCredit: 1800, netDebit: null, maxProfit: 1800, maxLoss: -34000, breakevens: [], expiration: '2026-07-17', popEstimate: 52, unavailableReason: null } },
+        { slug: 'short-put-vertical', name: 'Short Put Vertical', grade: 'A+', totalScore: 82,
+          setup: { legs: [leg('sell', 210, 4.65), leg('buy', 200, 2.395)], netCredit: 225.5, netDebit: null, maxProfit: 225.5, maxLoss: spvLoss, breakevens: [207.745], expiration: '2026-07-17', popEstimate: spvPop, unavailableReason: spvUnavail ? 'no chain' : null } },
+      ],
+    };
+  }
+
+  it('surfaces the smaller-risk bull put spread for a bullish pick', () => {
+    const alt = definedRiskAlternative(pick({ strategyLabResult: bullishLab() }), 'bullish');
+    expect(alt?.slug).toBe('short-put-vertical');
+    expect(alt?.grade).toBe('A+');
+    expect(alt?.popEstimate).toBe(71);
+  });
+
+  it('is null for non-bullish strategies', () => {
+    expect(definedRiskAlternative(pick({ strategyLabResult: bullishLab() }), 'wheel')).toBeNull();
+    expect(definedRiskAlternative(pick({ strategyLabResult: bullishLab() }), 'income')).toBeNull();
+  });
+
+  it('is null when the spread is not constructible', () => {
+    expect(definedRiskAlternative(pick({ strategyLabResult: bullishLab({ spvUnavail: true }) }), 'bullish')).toBeNull();
+  });
+
+  it('is null when the spread is not actually smaller-risk', () => {
+    expect(definedRiskAlternative(pick({ strategyLabResult: bullishLab({ spvLoss: -40000 }) }), 'bullish')).toBeNull();
+  });
+
+  it('is null when there is no lab result', () => {
+    expect(definedRiskAlternative(pick({ strategyLabResult: null }), 'bullish')).toBeNull();
   });
 });
 

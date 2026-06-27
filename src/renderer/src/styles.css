@@ -3965,6 +3965,35 @@ input[type='checkbox'] {
 }
 .grid-action-btn:hover { border-color: var(--accent); background: rgba(88,166,255,0.1); }
 
+/* Defined-risk alternative (display-only bull put spread surfaced for bullish picks) */
+.defined-risk-alt {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 4px 10px;
+  border: 1px dashed rgba(63,185,80,0.4);
+  border-radius: 6px;
+  background: rgba(63,185,80,0.06);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+.defined-risk-alt:hover { border-color: #3fb950; background: rgba(63,185,80,0.12); }
+.defined-risk-alt .alt-tag { color: #3fb950; font-weight: 600; }
+.defined-risk-alt .alt-pop { color: var(--text-muted); }
+/* Compact variant for the Ranked Grid cell — sits under the recommended structure link */
+.defined-risk-alt--compact {
+  margin-top: 4px;
+  padding: 1px 6px;
+  gap: 4px;
+  font-size: 10.5px;
+  border-radius: 4px;
+}
+.defined-risk-alt--compact .alt-tag { font-size: 10.5px; }
+
 /* Empty / loading states */
 .brief-empty-state {
   display: flex;

@@ -9,7 +9,7 @@
 // backtested profit forecast (brief-replay found composites weak-to-anti-predictive
 // cross-strategy; see Requirements/v2-execution/06-seykota-risk-extensions.md).
 
-import type { BriefPick, ScoringStrategy, StrategyLabValidateResult, CriticVerdict } from './types.js';
+import type { BriefPick, ScoringStrategy, StrategyLabValidateResult, CriticVerdict, StrategySetup, StrategyLabGrade } from './types.js';
 import { pickDisplayStructure } from './strategy-structures.js';
 
 export const CRITIC_PENALTY: Record<CriticVerdict['verdict'], number> = { pass: 0, caution: 15, flag: 35 };
@@ -32,6 +32,39 @@ export function rsiOf(pick: BriefPick): number | null {
     if (s && !s.missing && s.raw !== null) return s.raw;
   }
   return null;
+}
+
+/** A defined-risk credit-spread alternative to surface alongside a recommended structure. */
+export interface DefinedRiskAlt {
+  slug: string;
+  name: string;
+  grade: StrategyLabGrade;
+  setup: StrategySetup;
+  popEstimate: number | null;
+  maxLoss: number | null;
+}
+
+/**
+ * Display-only: the defined-risk bull put spread (`short-put-vertical`) to surface as an
+ * alternative for a BULLISH pick whose recommended structure (usually a Big Lizard) carries a
+ * larger max-loss tail. Returns null unless the spread is constructible, isn't already the
+ * recommended structure, and has a strictly smaller max loss. Purely informational — it does
+ * NOT change which structure the brief recommends or the engine trades (no FR-SEY-5 impact).
+ * (Bullish-scoped to match the validated finding; the spread is the wrong direction/intent
+ * for the other strategies.) see Requirements/v2-execution/06-seykota-risk-extensions.md.
+ */
+export function definedRiskAlternative(pick: BriefPick, strategy: ScoringStrategy): DefinedRiskAlt | null {
+  if (strategy !== 'bullish') return null;
+  const result = pick.strategyLabResult ? (pick.strategyLabResult as StrategyLabValidateResult) : null;
+  const scores = result?.scores;
+  if (!scores?.length) return null;
+  const rec = pickDisplayStructure(scores, strategy, pick.breakoutDirection);
+  const spv = scores.find(s => s.slug === 'short-put-vertical');
+  if (!rec || rec.slug === 'short-put-vertical' || !spv?.setup || spv.setup.unavailableReason) return null;
+  const recLoss = rec.setup?.maxLoss != null ? Math.abs(rec.setup.maxLoss) : null;
+  const spvLoss = spv.setup.maxLoss != null ? Math.abs(spv.setup.maxLoss) : null;
+  if (recLoss != null && spvLoss != null && spvLoss >= recLoss) return null; // not actually smaller-risk
+  return { slug: spv.slug, name: spv.name, grade: spv.grade, setup: spv.setup, popEstimate: spv.setup.popEstimate, maxLoss: spv.setup.maxLoss };
 }
 
 export type PassFilter = 'all' | 'pass-caution' | 'pass';

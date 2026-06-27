@@ -4,7 +4,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { DailyBriefEntry, BriefPick, ScoringStrategy, StrategyLabValidateResult, StrategyLabGrade, StrategySetup, SetupLeg, PayoffLeg, BriefAccuracy, CriticVerdict, BriefPerformanceSummary, BriefHealthTrend } from '@shared/types.js';
 import { STRATEGY_RELEVANT_SLUGS, pickDisplayStructure } from '@shared/strategy-structures.js';
-import { convictionOf, rsiOf, passesFilter, type PassFilter } from '@shared/brief-ranking.js';
+import { convictionOf, rsiOf, passesFilter, definedRiskAlternative, type PassFilter } from '@shared/brief-ranking.js';
 
 const STRATEGY_LABELS: Record<ScoringStrategy, string> = {
   wheel:   '🎡  Wheel — CSP / Covered Call',
@@ -442,6 +442,41 @@ function PickNavRow({ pick, strategy }: { pick: BriefPick; strategy: ScoringStra
   );
 }
 
+// Display-only defined-risk alternative (bull put spread) for a bullish pick whose
+// recommended structure carries a larger tail. Click → Payoff pre-loaded with the spread.
+// Informational only — does not change what the brief recommends (no FR-SEY-5 impact).
+function DefinedRiskAltLine({ pick, strategy, compact }: { pick: BriefPick; strategy: ScoringStrategy; compact?: boolean }) {
+  const alt = definedRiskAlternative(pick, strategy);
+  if (!alt) return null;
+  const setup = alt.setup;
+  const strike = primaryStrike(setup);
+  const credit = setup.netCredit !== null && setup.netCredit > 0 ? setup.netCredit : null;
+  const tail = alt.maxLoss != null ? Math.abs(alt.maxLoss) : null;
+
+  const handlePayoff = () => {
+    const detail: Record<string, unknown> = { ticker: pick.ticker, strategy: alt.slug, expiry: setup.expiration };
+    if (pick.price != null) detail.spot = pick.price;
+    detail.legs = setup.legs.map((l, i) => labLegToPayoffLeg(l, i));
+    window.dispatchEvent(new CustomEvent('navigate-to-payoff', { detail }));
+  };
+
+  return (
+    <button
+      className={`defined-risk-alt${compact ? ' defined-risk-alt--compact' : ''}`}
+      onClick={handlePayoff}
+      title={`Defined-risk alternative to the recommended structure${tail != null ? ` — max loss $${tail.toLocaleString()}` : ''}${alt.popEstimate != null ? `, PoP ${alt.popEstimate.toFixed(0)}%` : ''}. Click → Payoff Visualizer.`}
+    >
+      <span className="alt-tag">⚖ Defined-risk alt</span>
+      <span className="lab-grade-label">{SLUG_SHORT[alt.slug] ?? alt.name}</span>
+      <span className="lab-grade-badge" style={{ color: GRADE_COLOR[alt.grade], borderColor: GRADE_COLOR[alt.grade] }}>{alt.grade}</span>
+      {strike !== null && <span className="setup-strike">${strike}</span>}
+      <span className="setup-expiry">{fmtExpShort(setup.expiration)}</span>
+      {credit !== null && <span className="setup-premium setup-credit">${credit.toFixed(2)} cr</span>}
+      {alt.popEstimate != null && <span className="alt-pop">PoP {alt.popEstimate.toFixed(0)}%</span>}
+    </button>
+  );
+}
+
 function PickCard({
   pick,
   strategy,
@@ -511,6 +546,7 @@ function PickCard({
           </div>
           <TopSignals signals={pick.signals} />
           <StrategyLabSummary strategyLabResult={pick.strategyLabResult ?? null} strategy={strategy} breakoutDirection={pick.breakoutDirection} />
+          <DefinedRiskAltLine pick={pick} strategy={strategy} />
           <PickNavRow pick={pick} strategy={strategy} />
           {pick.aiRationale
             ? <p className="pick-rationale">{pick.aiRationale}</p>
@@ -731,6 +767,7 @@ function BriefGrid({ rows }: { rows: GridRow[] }) {
                       {SLUG_SHORT[row.structure.slug] ?? row.structure.name}
                     </button>
                   : <span className="grid-muted">—</span>}
+                <DefinedRiskAltLine pick={pick} strategy={strategy} compact />
               </td>
               <td>{row.expiry ? fmtExpShort(row.expiry) : <span className="grid-muted">—</span>}</td>
               <td>{row.strike != null ? `$${row.strike}` : <span className="grid-muted">—</span>}</td>
