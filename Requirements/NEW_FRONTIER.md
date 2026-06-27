@@ -452,6 +452,48 @@ for the wheel/income replay picks (gap → fill at the gapped-through price, not
 re-run the same A/B. Until then, **§3.3 is parked** — the cheap-and-easy version is disproven on
 the only book we can price, and the version that *might* work needs a new evaluator.
 
+### 9.9 Second-run result (2026-06-27) — ⚠️ PARTIAL on the unbounded book (CSP/wheel)
+
+Built the assignment-cost evaluator (`scripts/fr-gap-risk-csp.mjs`): a **naked cash-secured put**
+at the stored delta-30 `synth_strike`, BS-priced premium, 30 DTE, 50% PT / 200% stop checked at
+each **daily close** (so an overnight gap-down through the strike realizes an uncapped loss — the
+mechanism the vertical lacked). Return = % of cash collateral (`K×100`). Run over 2,060 resolved
+wheel+income replay picks (758 skipped — too recent for 30 DTE forward bars).
+
+| CSP book | n | win | avgRet | worstDecile | CVaR5 | worst |
+|---|---|---|---|---|---|---|
+| **BASELINE (all)** | 2060 | 83.7% | +0.19% | −1.7% | −2.9% | −24% |
+| keep score ≤1.00 (drop 22%) | 1602 | **85.5%** | +0.23% | −1.7% | −3.0% | −18% |
+| keep score ≤0.80 (drop 40%) | 1246 | **85.9%** | +0.22% | −1.8% | −3.3% | −18% |
+| gap tercile **LOW** | 686 | **87.0%** | **+0.25%** | −2.3% | **−4.3%** | −18% |
+| gap tercile **MID** | 686 | 84.5% | +0.21% | −1.1% | −1.9% | −8% |
+| gap tercile **HIGH** | 688 | **79.7%** | **+0.11%** | −1.7% | −2.7% | **−24%** |
+
+**The signal is now directionally correct on win rate and mean** — unlike the defined-risk spread,
+which inverted. High-gap-risk names win **less** (79.7% vs 87.0% low tercile) and earn **less**
+(+0.11% vs +0.25%); filtering them lifts the book's win rate +2pp and mean ~+0.03pp. **This
+confirms the spread's vertical cap was genuinely masking the gap signal** (swing-1 diagnosis #1 was
+right).
+
+**But it fails on the thing it was supposed to fix — the tail.** Dropping high-gap names does **not**
+shrink the left tail (CVaR −2.9% → −3.3%, slightly *worse*). The low-gap tercile carries its *own*
+fat tail (CVaR −4.3%) — those names lose via slow grinds / intraday moves the **overnight-gap**
+metric can't see. A gap filter is not a tail hedge here; it's a mild quality/win-rate nudge.
+
+**Verdict: do NOT ship enabled.** The win-rate/mean lift is real but (a) tiny in absolute terms
+(+0.03pp on a 0.19% base), (b) on heavily overlapping ~13-month samples (effective N ≪ 2,060), and
+(c) accompanied by **no tail improvement**, which was the entire justification. Per FR-SEY-5 this
+clears neither the "helps" nor the robustness bar. **Resolution:** keep `GapRiskScore` as a
+**Validate-dashboard display column** (it does rank win-quality), and re-run this A/B once
+`iv_history` carries 2–3 years so the tail has enough gap events to be conclusive — the predicted
+"inconclusive on the tail, revisit when the panel deepens" outcome (§9.5, last row) is what landed.
+
+**Net for §3.3:** the cheap price-based gap score is **not a shippable edge today** on either book —
+inverted on defined-risk, marginal-and-tail-blind on naked. The thesis isn't dead, but the version
+that would justify the doc's "negative EV despite high IV" claim needs either (i) a longer IV panel,
+or (ii) a richer gap model (short interest, OI/gamma walls, intraday) — i.e. the *paid-data* inputs
+§3.3 lists, not the free subset. Parked there.
+
 ### 9.7 Honest limits (print on the study output)
 
 - **Tail study on a short sample.** Gap blow-ups are rare; 13 months of IV + overlapping replay
