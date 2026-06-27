@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.1.88] — 2026-06-27
+
+### Added
+- **Gap Risk metric on the Validate dashboard (display-only).** Each single-ticker validation now shows a **Gap Risk** indicator: the stock's trailing ~252-day **95th-percentile downside overnight gap** divided by its **IV-implied 1-day move** (`atmIv/√252`). A score **> 1** means the name historically gaps *down* harder than its implied volatility prices — i.e. you're under-compensated by option premium for its jump risk (relevant to owning the stock or selling cash-secured puts); **< 1** means realized gaps sit within what IV implies. Badged High/Mid/Low with the underlying figures (`gap X% vs IV Y%/day`). Pure metric in `src/shared/gap-risk.ts` (`computeGapRisk`, `docs/formulas.md#gap-risk`), wired through `ValidateDashboardResult.gapRisk`. Regression tests: `tests/gap-risk.test.ts` (6).
+  - **Context metric, not a trade gate.** A Brief-Replay study (`scripts/fr-gap-risk-study.mjs`, `scripts/fr-gap-risk-csp.mjs`; recorded in `Requirements/NEW_FRONTIER.md §9` as draft FR-SEY-6) found the score is **not** a shippable entry filter on the current ~13-month IV panel: it *inverts* on defined-risk spreads (whose long wing already caps gap loss) and is only a mild, tail-blind win-quality nudge on naked short puts. It is surfaced for the trader to eyeball, never enforced — no FR-SEY-5 gate.
+
 ## [1.1.87] — 2026-06-27
 
 ### Added

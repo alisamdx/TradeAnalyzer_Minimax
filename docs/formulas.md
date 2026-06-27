@@ -673,3 +673,22 @@ premiumScore = round(25 × eff × popF)                // ∈ [0,25], preserves 
 Constants are **provisional** — disabled pending an FR-SEY-5 realized-P&L backtest delta
 (`scripts/backtest-lizard-vs-spread.mjs`; the bullish sample doesn't settle until Jul 2026). See
 `Requirements/v2-execution/06-seykota-risk-extensions.md`.
+
+## gap-risk (display-only) {#gap-risk}
+
+Downside overnight gap risk relative to what implied volatility is pricing. Surfaced on the
+Validate dashboard as a context metric — **not** a trade gate (see the FR-SEY-6 finding in
+`Requirements/NEW_FRONTIER.md §9`). Computed in `src/shared/gap-risk.ts` (`computeGapRisk`).
+
+```
+gap_t          = (open_t − close_{t-1}) / close_{t-1}     // overnight gap, daily bars
+adverseGapP95  = P95 of |gap_t| over downside gaps (gap_t < 0), trailing ~252 trading days
+ivDailyMove    = atmIv / √252                              // IV-implied 1-day move (atmIv as %)
+gapRiskScore   = adverseGapP95 / ivDailyMove
+```
+
+`score > 1` ⇒ the name's realized downside-gap tail is fatter than IV implies (historically
+under-compensated by premium for jump risk — relevant to owning the stock or selling CSPs).
+P95 (not the max) keeps it robust to a single outlier and naturally mostly ex-earnings (the few
+earnings gaps/yr sit above P95). `atmIv` is the latest stored `iv_history.atm_iv` (a percentage),
+falling back to the live ATM IV; needs ≥60 bars and ≥10 downside-gap observations or returns null.

@@ -15,6 +15,7 @@ import { computeADX } from './analysis-service.js';
 import { detectAllPatterns } from './pattern-detector.js';
 import { findRecentDemandZone, findRecentSupplyZone, computeEntryZoneAndStop } from './support-resistance.js';
 import type { ValidateDashboardResult, Bar, Zone, ValidateTickerItem, Quote, DerivedRatios } from '@shared/types.js';
+import { computeGapRisk } from '@shared/gap-risk.js';
 
 // ─── Validate All service ────────────────────────────────────────────────────
 
@@ -503,8 +504,28 @@ export class ValidateAllService {
         ivRank: quote.ivRank,
         ivPercentile: quote.ivPercentile
       },
+      gapRisk: (() => {
+        // see docs/formulas.md#gap-risk — downside gap tail vs IV-implied move (display-only)
+        const atmIv = this.latestAtmIv(ticker) ?? ivData.currentIv;
+        const g = computeGapRisk(bars, atmIv);
+        return g
+          ? { score: g.score, adverseGapP95Pct: g.adverseGapP95Pct, ivDailyMovePct: g.ivDailyMovePct, sampleDays: g.sampleDays }
+          : { score: null, adverseGapP95Pct: null, ivDailyMovePct: null, sampleDays: 0 };
+      })(),
       fetchedAt: new Date().toISOString()
     } satisfies ValidateDashboardResult;
+  }
+
+  /** Latest stored ATM IV (percentage) for a ticker, or null. */
+  private latestAtmIv(ticker: string): number | null {
+    try {
+      const r = this.db.prepare(
+        `SELECT atm_iv FROM iv_history WHERE ticker = ? AND atm_iv > 0 ORDER BY date DESC LIMIT 1`
+      ).get(ticker) as { atm_iv: number } | undefined;
+      return r?.atm_iv ?? null;
+    } catch {
+      return null;
+    }
   }
 
   private emaSeries(bars: Array<{ c: number }>, period: number): (number | null)[] {

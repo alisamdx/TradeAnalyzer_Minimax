@@ -1664,6 +1664,27 @@ export function ValidateView({ initialTicker, clearInitialTicker }: ValidateView
                       <span className="ind-value meta">—</span>
                     )}
                   </div>
+                  <div className="indicator-card">
+                    <span className="ind-label" title="Gap Risk (display-only). The stock's 95th-percentile downside overnight gap over the past year divided by the IV-implied 1-day move. Above 1.0 means the name historically gaps DOWN harder than its implied volatility prices — you are under-compensated by option premium for its jump risk (relevant to owning the stock or selling cash-secured puts). Below 1.0 means realized gaps are within what IV implies. Context metric, not a trade gate — see docs/formulas.md#gap-risk. Requires Data Sync → IV History.">Gap Risk</span>
+                    {result.gapRisk.score !== null ? (() => {
+                      const s = result.gapRisk.score!;
+                      const badge = s >= 1.25 ? 'High' : s <= 0.85 ? 'Low' : 'Mid';
+                      const colorClass = s >= 1.25 ? 'overbought' : s <= 0.85 ? 'oversold' : '';
+                      return (
+                        <>
+                          <span className={`ind-value ${colorClass}`}>{s.toFixed(2)}×</span>
+                          <span className="ind-badge">{badge}</span>
+                          {result.gapRisk.adverseGapP95Pct !== null && (
+                            <span className="meta" style={{ fontSize: 10 }}>
+                              gap {result.gapRisk.adverseGapP95Pct.toFixed(1)}% vs IV {result.gapRisk.ivDailyMovePct?.toFixed(1)}%/day
+                            </span>
+                          )}
+                        </>
+                      );
+                    })() : (
+                      <span className="ind-value meta">—</span>
+                    )}
+                  </div>
                 </div>
               </div>
             </>

@@ -28,6 +28,7 @@ Daily candlestick, default 6-month window, toggleable 1M / 3M / 1Y / 5Y. Overlay
 - Volume profile: 30-day average vs today's volume, % anomaly.
 - Supply/demand zones: most recent demand zone (base before an up-move) and supply zone (base before a down-move), shaded.
 - Implied volatility: current IV, 52-week IV range, **IV rank, IV percentile** (from `iv_history`, §11).
+- **Gap Risk** (display-only): trailing ~252-day 95th-percentile downside overnight gap ÷ IV-implied 1-day move (`atmIv/√252`). Score > 1 = the name gaps down harder than IV prices (under-compensated for jump risk); < 1 = within IV. Badged High/Mid/Low. Context metric, **not** a trade gate — a Brief-Replay study (`NEW_FRONTIER.md §9`, draft FR-SEY-6) found it isn't a shippable entry filter on the current IV-history depth. See `docs/formulas.md#gap-risk`.
 - Short interest % of float (if the provider supplies it).
 
 ## 7.3 Buy-signal strength

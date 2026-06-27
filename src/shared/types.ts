@@ -503,6 +503,13 @@ export interface ValidateDashboardResult {
     ivRank: number | null;
     ivPercentile: number | null;
   };
+  /** Downside overnight gap-risk vs IV-implied move (display-only). see docs/formulas.md#gap-risk */
+  gapRisk: {
+    score: number | null;
+    adverseGapP95Pct: number | null;
+    ivDailyMovePct: number | null;
+    sampleDays: number;
+  };
   fetchedAt: string;
 }
 
