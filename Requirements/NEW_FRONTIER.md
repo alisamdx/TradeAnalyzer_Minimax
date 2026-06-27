@@ -605,6 +605,41 @@ control, to isolate marginal value. If VRP-bucketing only re-expresses IVR, it s
 **Recommended next step:** the IVR-matched A/B above — the one cut here (RV-regime trade-off, sector
 median vs mean) that *isn't* just IV-rank in disguise is where any genuinely new edge would live.
 
+### 10.8 IVR-matched A/B (2026-06-27) — ✅ VRP ADDS VALUE BEYOND IV-RANK (first shippable signal)
+
+Ran `scripts/vrp-csp-ab.mjs`: attached **entry-time** (point-in-time, no look-ahead) IVR, trailing
+RV20, and sector-historical-VRP to the real naked-CSP P&L (§9 harness) over 2,032 wheel+income
+replay picks, then tested whether the VRP axis discriminates **within** an IVR-matched control.
+
+| cohort | n | win | avgRet | CVaR5 |
+|---|---|---|---|---|
+| BASELINE (all) | 2032 | 83.7% | +0.19% | −3.0% |
+| **STEP 1 — IVR alone** (picks are already high-IVR: terciles 53–93 / ~100 / 100) | | | | |
+| IVR low | 677 | 83.0% | +0.16% | −1.8% |
+| IVR high | 678 | 84.4% | +0.29% | −4.0% |
+| **STEP 2 — within high-IVR, split by RV-regime** ← the marginal test | | | | |
+| high-IVR (control) | 678 | 84.4% | +0.29% | −4.0% |
+| **high-IVR ∩ calm (low RV20)** | 226 | **85.4%** | **+0.41%** | **−0.5%** |
+| high-IVR ∩ stormy (high RV20) | 226 | 84.1% | +0.19% | **−7.1%** |
+
+**The VRP axis is NOT just IVR.** Holding IV-rank high (the engine's existing signal) and *adding* a
+**low-realized-vol** condition lifts mean return **+0.29% → +0.41%** (~40% relative) **and tightens
+the tail 8× (CVaR −4.0% → −0.5%)**. The stormy mirror at the same IVR has a −7.1% tail. This is the
+genuine VRP harvest made concrete: **"IV is high *and* the stock isn't actually moving"** — you're
+paid rich implied vol on a name whose realized vol stays low — and it survives IVR-matching, which
+gap-risk never did. (Sector-historical-VRP, STEP 3, was non-monotone/noisy as predicted — drop it.)
+
+**This is the first positive, FR-SEY-5-actionable result of the whole New-Frontier thread.** The
+candidate: a short-premium **IV/RV (or IV−RV) favorability term** — prefer high IVR *conditioned on
+low trailing realized vol* — as a scoring weight or entry gate.
+
+**Before it ships (FR-SEY-5):** run it as a proper Brief-Replay A/B across **all** short-premium
+strategies (not just the CSP proxy), confirm the lift holds on the live scoring path, and ship
+**disabled by default** with this evidence — the calm-tail figure rests on n=226 in one ~12-month
+regime, so the magnitude needs confirmation even though the direction is clean and economically
+sound. Likely home: a `realizedVolGate` / `ivToRvRatio` config on `exec_config` + a scoring signal,
+mirroring the FR-SEY-1/2 disabled-by-default pattern.
+
 ### 10.7 Honest limits
 
 - **~12 months, overlapping 30-day windows** → ~12 quasi-independent obs/ticker, **one regime**
