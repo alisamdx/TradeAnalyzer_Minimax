@@ -4,7 +4,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { DailyBriefEntry, BriefPick, ScoringStrategy, StrategyLabValidateResult, StrategyLabGrade, StrategySetup, SetupLeg, PayoffLeg, BriefAccuracy, CriticVerdict, BriefPerformanceSummary, BriefHealthTrend } from '@shared/types.js';
 import { STRATEGY_RELEVANT_SLUGS, pickDisplayStructure } from '@shared/strategy-structures.js';
-import { convictionOf, rsiOf, passesFilter, definedRiskAlternative, type PassFilter } from '@shared/brief-ranking.js';
+import { convictionOf, rsiOf, passesFilter, definedRiskAlternative, level2DebitAlternative, type PassFilter } from '@shared/brief-ranking.js';
 
 const STRATEGY_LABELS: Record<ScoringStrategy, string> = {
   wheel:   '🎡  Wheel — CSP / Covered Call',
@@ -477,6 +477,53 @@ function DefinedRiskAltLine({ pick, strategy, compact }: { pick: BriefPick; stra
   );
 }
 
+// ── Level-2 (debit) vertical chip ─────────────────────────────────────────────
+// Bullish → long call spread; bearish → long put spread, narrowed to a small max-risk budget at
+// brief-generation time. Lets a Level-2 IBKR account place a small, defined-risk directional trade
+// (account-building toward Level 3) instead of the L3 credit spreads it can't trade. Shows
+// breakeven + move-to-profit (NOT a credit-spread PoP, which is the wrong semantics for a debit
+// spread). Informational only — does not change what the brief recommends (no FR-SEY-5 impact).
+function Level2DebitAltLine({ pick, strategy, compact }: { pick: BriefPick; strategy: ScoringStrategy; compact?: boolean }) {
+  const alt = level2DebitAlternative(pick, strategy);
+  if (!alt) return null;
+  const spreadName = alt.side === 'call' ? 'Long Call Spread' : 'Long Put Spread';
+  const moveTxt = alt.movePctToBreakeven != null
+    ? `${alt.movePctToBreakeven >= 0 ? '+' : ''}${alt.movePctToBreakeven.toFixed(1)}%`
+    : null;
+
+  const handlePayoff = () => {
+    const typeLabel = alt.side.charAt(0).toUpperCase() + alt.side.slice(1);
+    const legs: PayoffLeg[] = [
+      { id: 'l2-long',  side: 'buy',  type: alt.side, strike: alt.longStrike,  expiry: alt.expiration, premium: alt.longPremium,  quantity: 1, delta: null, theta: null, vega: null, iv: null, label: `Long ${typeLabel} $${alt.longStrike}` },
+      { id: 'l2-short', side: 'sell', type: alt.side, strike: alt.shortStrike, expiry: alt.expiration, premium: alt.shortPremium, quantity: 1, delta: null, theta: null, vega: null, iv: null, label: `Short ${typeLabel} $${alt.shortStrike}` },
+    ];
+    const detail: Record<string, unknown> = {
+      ticker: pick.ticker,
+      strategy: alt.side === 'call' ? 'long-call-vertical' : 'long-put-vertical',
+      expiry: alt.expiration,
+      legs,
+    };
+    if (pick.price != null) detail.spot = pick.price;
+    window.dispatchEvent(new CustomEvent('navigate-to-payoff', { detail }));
+  };
+
+  return (
+    <button
+      className={`level2-alt${compact ? ' level2-alt--compact' : ''}`}
+      onClick={handlePayoff}
+      title={`Level-2-tradeable ${spreadName.toLowerCase()} for IBKR account-building — max risk $${alt.maxRisk.toLocaleString()}, max profit $${alt.maxProfit.toLocaleString()}, breakeven $${alt.breakeven}${moveTxt ? ` (${moveTxt} move)` : ''}.${alt.exceededBudget ? ' NOTE: narrowest available spread still exceeds the ~$750 risk target — size down or skip.' : ''} Buying premium at high IV is not the optimal structure — this is a small, defined-risk directional trade. Click → Payoff Visualizer.`}
+    >
+      <span className="alt-tag">📈 L2-tradeable</span>
+      <span className="lab-grade-label">{spreadName}</span>
+      <span className="setup-strike">${alt.longStrike}/${alt.shortStrike}</span>
+      <span className="setup-expiry">{fmtExpShort(alt.expiration)}</span>
+      <span className="setup-premium setup-debit">${alt.debitPerShare.toFixed(2)} db</span>
+      <span className={`alt-risk${alt.exceededBudget ? ' alt-risk--over' : ''}`}>risk ${alt.maxRisk.toLocaleString()}{alt.exceededBudget ? '!' : ''}</span>
+      {moveTxt && <span className="alt-pop">BE {moveTxt}</span>}
+    </button>
+  );
+}
+
 function PickCard({
   pick,
   strategy,
@@ -547,6 +594,7 @@ function PickCard({
           <TopSignals signals={pick.signals} />
           <StrategyLabSummary strategyLabResult={pick.strategyLabResult ?? null} strategy={strategy} breakoutDirection={pick.breakoutDirection} />
           <DefinedRiskAltLine pick={pick} strategy={strategy} />
+          <Level2DebitAltLine pick={pick} strategy={strategy} />
           <PickNavRow pick={pick} strategy={strategy} />
           {pick.aiRationale
             ? <p className="pick-rationale">{pick.aiRationale}</p>
@@ -768,6 +816,7 @@ function BriefGrid({ rows }: { rows: GridRow[] }) {
                     </button>
                   : <span className="grid-muted">—</span>}
                 <DefinedRiskAltLine pick={pick} strategy={strategy} compact />
+                <Level2DebitAltLine pick={pick} strategy={strategy} compact />
               </td>
               <td>{row.expiry ? fmtExpShort(row.expiry) : <span className="grid-muted">—</span>}</td>
               <td>{row.strike != null ? `$${row.strike}` : <span className="grid-muted">—</span>}</td>

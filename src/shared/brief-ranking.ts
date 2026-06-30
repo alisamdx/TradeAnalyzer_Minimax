@@ -9,7 +9,7 @@
 // backtested profit forecast (brief-replay found composites weak-to-anti-predictive
 // cross-strategy; see Requirements/v2-execution/06-seykota-risk-extensions.md).
 
-import type { BriefPick, ScoringStrategy, StrategyLabValidateResult, CriticVerdict, StrategySetup, StrategyLabGrade } from './types.js';
+import type { BriefPick, ScoringStrategy, StrategyLabValidateResult, CriticVerdict, StrategySetup, StrategyLabGrade, Level2DebitVertical } from './types.js';
 import { pickDisplayStructure } from './strategy-structures.js';
 
 export const CRITIC_PENALTY: Record<CriticVerdict['verdict'], number> = { pass: 0, caution: 15, flag: 35 };
@@ -65,6 +65,23 @@ export function definedRiskAlternative(pick: BriefPick, strategy: ScoringStrateg
   const spvLoss = spv.setup.maxLoss != null ? Math.abs(spv.setup.maxLoss) : null;
   if (recLoss != null && spvLoss != null && spvLoss >= recLoss) return null; // not actually smaller-risk
   return { slug: spv.slug, name: spv.name, grade: spv.grade, setup: spv.setup, popEstimate: spv.setup.popEstimate, maxLoss: spv.setup.maxLoss };
+}
+
+/**
+ * Display-only: the Level-2-tradeable (debit) vertical to surface alongside a BULLISH or BEARISH
+ * pick — a long call spread (bullish) or long put spread (bearish), narrowed at brief-generation
+ * time to a small max-risk budget. Lets a Level-2 IBKR account place a small, defined-risk
+ * directional trade (e.g. to build options history toward Level 3) instead of the L3 credit
+ * spreads it can't yet trade. Purely informational — does NOT change what the brief recommends or
+ * the engine trades (no FR-SEY-5 impact). Returns null for non-directional strategies or when the
+ * chain couldn't support a debit vertical. see docs/formulas.md#level2-debit-vertical
+ */
+export function level2DebitAlternative(pick: BriefPick, strategy: ScoringStrategy): Level2DebitVertical | null {
+  if (strategy !== 'bullish' && strategy !== 'bearish') return null;
+  const result = pick.strategyLabResult ? (pick.strategyLabResult as StrategyLabValidateResult) : null;
+  const alts = result?.level2DebitAlts;
+  if (!alts) return null;
+  return (strategy === 'bullish' ? alts.call : alts.put) ?? null;
 }
 
 export type PassFilter = 'all' | 'pass-caution' | 'pass';

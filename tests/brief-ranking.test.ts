@@ -148,3 +148,48 @@ describe('passesFilter', () => {
     expect(passesFilter(noVerdict, 'pass')).toBe(false);
   });
 });
+
+// ── Level-2 (debit) vertical accessor ─────────────────────────────────────────
+import { level2DebitAlternative } from '../src/shared/brief-ranking.js';
+import type { Level2DebitVertical } from '../src/shared/types.js';
+
+function l2(side: 'call' | 'put'): Level2DebitVertical {
+  return {
+    side, longStrike: 100, shortStrike: side === 'call' ? 110 : 90,
+    longPremium: 8, shortPremium: 3, expiration: '2026-08-21', dte: 52,
+    debitPerShare: 5, maxRisk: 500, maxProfit: 500,
+    breakeven: side === 'call' ? 105 : 95,
+    movePctToBreakeven: side === 'call' ? 5 : -5,
+    underlyingPrice: 100, exceededBudget: false,
+  };
+}
+
+describe('level2DebitAlternative', () => {
+  const withAlts = (over: Record<string, unknown>) =>
+    pick({ strategyLabResult: { scores: [], level2DebitAlts: { call: l2('call'), put: l2('put') }, ...over } as unknown as BriefPick['strategyLabResult'] });
+
+  it('returns the call spread for bullish, put spread for bearish', () => {
+    const p = withAlts({});
+    expect(level2DebitAlternative(p, 'bullish')!.side).toBe('call');
+    expect(level2DebitAlternative(p, 'bearish')!.side).toBe('put');
+  });
+
+  it('returns null for non-directional strategies', () => {
+    const p = withAlts({});
+    for (const s of ['buy', 'income', 'wheel', 'inflection'] as ScoringStrategy[]) {
+      expect(level2DebitAlternative(p, s)).toBeNull();
+    }
+  });
+
+  it('returns null when the lab result has no level2DebitAlts (older briefs)', () => {
+    const p = pick({ strategyLabResult: { scores: [] } as unknown as BriefPick['strategyLabResult'] });
+    expect(level2DebitAlternative(p, 'bullish')).toBeNull();
+    expect(level2DebitAlternative(pick({}), 'bullish')).toBeNull();
+  });
+
+  it('returns null when the matching side is null', () => {
+    const p = withAlts({ level2DebitAlts: { call: null, put: l2('put') } });
+    expect(level2DebitAlternative(p, 'bullish')).toBeNull();
+    expect(level2DebitAlternative(p, 'bearish')!.side).toBe('put');
+  });
+});

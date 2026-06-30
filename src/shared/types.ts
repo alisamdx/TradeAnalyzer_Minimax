@@ -1597,9 +1597,36 @@ export interface StrategyScore {
   aiRationale:    string | null;
 }
 
+/**
+ * A Level-2-tradeable (debit) vertical surfaced in the Daily Brief for IBKR account-building.
+ * Long leg ATM, short leg pulled in from the live chain to the widest strike whose net debit
+ * stays within a small max-risk budget. Display-only — does NOT affect scoring or what the
+ * engine trades. `side: 'call'` = bullish (long call spread); `'put'` = bearish (long put
+ * spread). see docs/formulas.md#level2-debit-vertical
+ */
+export interface Level2DebitVertical {
+  side:           'call' | 'put';
+  longStrike:     number;
+  shortStrike:    number;
+  longPremium:    number;   // per-share mid paid for the long leg
+  shortPremium:   number;   // per-share mid received for the short leg
+  expiration:     string;   // ISO date
+  dte:            number;
+  debitPerShare:  number;   // net debit paid per share
+  maxRisk:        number;   // total $ at risk (= debitPerShare × 100)
+  maxProfit:      number;   // total $ (= (width − debit) × 100)
+  breakeven:      number;   // underlying price at breakeven
+  movePctToBreakeven: number | null; // % move from spot to breakeven (signed)
+  underlyingPrice: number;
+  exceededBudget: boolean;  // true when even the narrowest spread is above the risk target
+}
+
 export interface StrategyLabValidateResult {
   context: StrategyLabContext;
   scores:  StrategyScore[];    // sorted best → worst
+  /** Level-2 (debit) vertical alternatives for the Daily Brief account-building chip.
+   *  Display-only; built from the same chain. Optional — absent on older persisted briefs. */
+  level2DebitAlts?: { call: Level2DebitVertical | null; put: Level2DebitVertical | null };
 }
 
 /** Progress event emitted during backfill via iv-history:progress IPC channel. */

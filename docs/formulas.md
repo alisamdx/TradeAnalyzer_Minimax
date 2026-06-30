@@ -692,3 +692,30 @@ under-compensated by premium for jump risk — relevant to owning the stock or s
 P95 (not the max) keeps it robust to a single outlier and naturally mostly ex-earnings (the few
 earnings gaps/yr sit above P95). `atmIv` is the latest stored `iv_history.atm_iv` (a percentage),
 falling back to the live ATM IV; needs ≥60 bars and ≥10 downside-gap observations or returns null.
+
+## level2-debit-vertical (display-only) {#level2-debit-vertical}
+
+The IBKR-Level-2-tradeable (debit) vertical the Daily Brief surfaces alongside a bullish/bearish
+pick — a **long call spread** (bullish) or **long put spread** (bearish), narrowed at
+brief-generation time to a small max-risk budget so a Level-2 account can place a small,
+defined-risk directional trade (e.g. to build options history toward Level 3). Built in
+`src/main/services/level2-debit-vertical.ts` (`buildNarrowDebitVertical`) from the same live chain
+the lab already fetched. **Display-only** — no scoring/engine impact (no FR-SEY-5 gate).
+
+```
+long  = the same-side strike closest to spot (ATM)                       // priced at chain mid
+short = the widest OTM strike (above for calls, below for puts) whose     //  → maximizes profit
+        debit = mid(long) − mid(short) keeps  debit × 100 ≤ targetRisk    //     under the cap
+targetRisk  = $750 (DEFAULT_TARGET_MAX_RISK)
+debit       = mid(long) − mid(short)                       // per share (positive = you pay)
+maxRisk     = debit × 100                                  // total $ at risk
+maxProfit   = (|short − long| − debit) × 100
+breakeven   = call: long + debit ;  put: long − debit
+moveToBE%   = (breakeven − spot) / spot × 100              // signed: + needs up, − needs down
+```
+
+A leg with no usable bid/ask is priced by Black-Scholes from its chain IV (`bsPrice`). When even
+the narrowest spread exceeds `targetRisk`, the narrowest is surfaced with `exceededBudget=true`
+(so a small account sees — and can skip — the trade rather than getting no chip). The chip shows
+**breakeven + move-to-profit, NOT a PoP**: the lab's `popEstimate` is short-strike (credit-spread)
+semantics and would badly overstate a debit spread's true probability of profit.

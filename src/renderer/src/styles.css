@@ -3994,6 +3994,38 @@ input[type='checkbox'] {
 }
 .defined-risk-alt--compact .alt-tag { font-size: 10.5px; }
 
+/* Level-2 (debit) vertical chip — IBKR account-building alternative. Blue to distinguish from
+   the green credit-spread alt; you PAY a debit here rather than collect a credit. */
+.level2-alt {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 4px 10px;
+  border: 1px dashed rgba(88,166,255,0.4);
+  border-radius: 6px;
+  background: rgba(88,166,255,0.06);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+.level2-alt:hover { border-color: #58a6ff; background: rgba(88,166,255,0.12); }
+.level2-alt .alt-tag { color: #58a6ff; font-weight: 600; }
+.level2-alt .alt-pop { color: var(--text-muted); }
+.level2-alt .setup-debit { color: #e3a008; }
+.level2-alt .alt-risk { color: var(--text-muted); }
+.level2-alt .alt-risk--over { color: #e3a008; font-weight: 600; }
+.level2-alt--compact {
+  margin-top: 4px;
+  padding: 1px 6px;
+  gap: 4px;
+  font-size: 10.5px;
+  border-radius: 4px;
+}
+.level2-alt--compact .alt-tag { font-size: 10.5px; }
+
 /* Empty / loading states */
 .brief-empty-state {
   display: flex;

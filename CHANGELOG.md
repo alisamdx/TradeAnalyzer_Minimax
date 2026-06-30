@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.90] — 2026-06-30
+
+### Added
+- **Daily Brief surfaces a Level-2-tradeable (debit) vertical for bullish/bearish picks (display-only).** The brief's recommended/credit structures (bull-put, big lizard, iron condor) all require IBKR **options Level 3**. Both the Grouped card and the Ranked Grid now also show a `📈 L2-tradeable: Long Call Spread …` (bullish) / `Long Put Spread …` (bearish) chip — a **debit** vertical a **Level 2** account *can* place, so a small, defined-risk directional trade can be made (e.g. to build options history toward L3) instead of nothing. The vertical is narrowed at brief-generation time to a small max-risk budget (**$750** default): long leg ATM, short leg pulled in from the same live chain to the widest strike whose net debit stays within budget (`buildNarrowDebitVertical`, `src/main/services/level2-debit-vertical.ts`, `docs/formulas.md#level2-debit-vertical`), computed inside `StrategyLabService.validate()` and stored on `StrategyLabValidateResult.level2DebitAlts` (no extra E*Trade fetch, no brief-job stage). The chip shows debit / max-risk / **breakeven + move-to-profit — deliberately NOT a PoP**, because the lab's short-strike `popEstimate` is credit-spread semantics and would badly overstate a debit spread's true odds. A leg with no quote is priced via Black-Scholes from its chain IV; if even the narrowest spread exceeds the budget it's shown flagged (`exceededBudget`). Clicking opens the Payoff Visualizer pre-loaded with the legs. **Display-only / account-building context** — not the optimal structure at high IV (you're buying expensive premium), and it does NOT change what the brief recommends, the Conviction score, or what the engine trades (no FR-SEY-5 impact). Accessor `level2DebitAlternative` in `src/shared/brief-ranking.ts`. Regression tests: `tests/level2-debit-vertical.test.ts` (7), `tests/brief-ranking.test.ts` (+4, 18 total). **Needs one brief re-run to populate `level2DebitAlts` on stored picks** (older briefs degrade gracefully to no chip).
+
 ## [1.1.89] — 2026-06-29
 
 ### Added

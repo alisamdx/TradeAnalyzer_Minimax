@@ -24,7 +24,9 @@ import type {
   SetupLeg,
   StrategyLabGrade,
   StrategyLabComplexity,
+  Level2DebitVertical,
 } from '@shared/types.js';
+import { buildNarrowDebitVertical } from './level2-debit-vertical.js';
 
 // ─── PoP-weighted premium scoring (EXPERIMENTAL, DISABLED) ────────────────────
 // The current premiumScore saturates: any short-premium structure returning ≥1.5%/30d on
@@ -849,7 +851,15 @@ export class StrategyLabService {
       return b.totalScore - a.totalScore;
     });
 
-    return { context: ctx, scores };
+    // Level-2 (debit) vertical alternatives for the Daily Brief account-building chip — built
+    // from the same chain (no extra fetch). Defensive: any failure degrades to null (no chip).
+    const safeL2 = (side: 'call' | 'put'): Level2DebitVertical | null => {
+      try { return buildNarrowDebitVertical(chain.contracts, side, underlyingPx, expInfo.dte, expInfo.expiration); }
+      catch { return null; }
+    };
+    const level2DebitAlts = { call: safeL2('call'), put: safeL2('put') };
+
+    return { context: ctx, scores, level2DebitAlts };
   }
 
   /** Fetch setup for a single strategy. */
