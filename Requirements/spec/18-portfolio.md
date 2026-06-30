@@ -4,7 +4,7 @@ Tracks the user's real positions, syncs them from E*Trade, computes P&L and aggr
 
 ## 18.1 Position CRUD & P&L
 
-Position types: **CSP**, **CC**, **Stock**. Fields per §2.9. The view has Open / Closed tabs and P&L summary cards (positions, unrealized/realized, capital deployed, win rate, average return). Capital required, days held, return %, and annualized return are computed (SQL views + service):
+Position types: **CSP**, **CC**, **Stock**. Fields per §2.9. The view has Open / Closed tabs and P&L summary cards (positions, unrealized/realized, capital deployed, win rate, average return). The open-positions table shows both **Day's G/L** (single-session change, E*Trade `daysGain`/`daysGainPct`) and **Total G/L** (full-position unrealized gain since entry, in $ and %, from E*Trade `totalGain` [stored as `unrealized_pnl`] / `totalGainPct`, falling back to stored `unrealized_pnl`). Capital required, days held, return %, and annualized return are computed (SQL views + service):
 - Stock capital = `entry_price × quantity`; option collateral = `strike_price × quantity × 100`.
 - Realized P&L (option) = `(exit − entry) × qty × 100 + premium_received`.
 

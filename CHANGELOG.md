@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.89] — 2026-06-29
+
+### Added
+- **Total G/L column on the Portfolio open-positions table.** The open-positions grid showed only **Day's G/L** (the single-session change); it now also shows **Total G/L** — the full-position unrealized gain/loss since entry, in dollars and percent (e.g. `+$1.2K (+8.40%)`). Sourced from the E*Trade sync (`totalGain` $, stored as `unrealizedPnl`, + `totalGainPct` %), falling back to the stored `unrealizedPnl` when no E*Trade row is present. Green/red coloured to match Day's G/L. Display-only — no scoring/trade-logic impact (not FR-SEY-5-gated). `src/renderer/src/views/PortfolioView.tsx`.
+
 ## [1.1.88] — 2026-06-27
 
 ### Added

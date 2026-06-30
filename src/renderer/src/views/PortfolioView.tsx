@@ -602,6 +602,7 @@ export function PortfolioView() {
     ...(activeTab === 'closed' ? [{ key: 'exitPrice',      label: 'Exit',         sortable: true,  num: true  }] : []),
     ...(activeTab === 'open'   ? [{ key: 'marketValue',    label: 'Mkt Value',    sortable: false, num: true  }] : []),
     ...(activeTab === 'open'   ? [{ key: 'daysGain',       label: "Day's G/L",    sortable: false, num: true  }] : []),
+    ...(activeTab === 'open'   ? [{ key: 'totalGain',      label: 'Total G/L',    sortable: false, num: true  }] : []),
     ...(activeTab === 'open'   ? [{ key: 'greeks',         label: 'Greeks',       sortable: false, num: false }] : []),
     ...(activeTab === 'open'   ? [{ key: 'expiryDate',     label: 'Expiry',       sortable: true,  num: false }] : []),
     ...(activeTab === 'closed' ? [{ key: 'realizedPnl',    label: 'Realized P&L', sortable: true,  num: true  }] : []),
@@ -983,6 +984,21 @@ export function PortfolioView() {
                               ) : '—'}
                             </td>
                           )}
+
+                          {/* Total gain — full-position unrealized G/L (E*Trade totalGain $ + totalGainPct %) */}
+                          {activeTab === 'open' && (() => {
+                            const totalGain = et?.unrealizedPnl ?? pos.unrealizedPnl;
+                            return (
+                              <td className="num" style={{ fontSize: 11 }}>
+                                {totalGain != null ? (
+                                  <span style={{ color: totalGain >= 0 ? '#22c55e' : '#ef4444' }}>
+                                    {fmtLargeNumber(totalGain)}
+                                    {et?.totalGainPct != null && ` (${fmtPct(et.totalGainPct)})`}
+                                  </span>
+                                ) : '—'}
+                              </td>
+                            );
+                          })()}
 
                           {/* Greeks */}
                           {activeTab === 'open' && (
