@@ -65,9 +65,13 @@ export class DailyIvCaptureJob implements BatchJobHandler {
       };
     }
 
-    // 2. Validate E*Trade connectivity. On auth failure, attempt a token renewal
-    //    first (covers the "dormant after 2 h inactivity" case). If renewal also
-    //    fails, the token has rolled over midnight and needs manual re-auth.
+    // 2. Validate E*Trade connectivity — renew-and-retry ONCE on ANY failure.
+    //    A dormant token (inactive >2h) does not reliably surface as a clean 401:
+    //    observed 2026-06-18→07-01, the probe died with a terminated/hung stream
+    //    every evening slot (token idle since the ~10:40 morning run), the old
+    //    auth-message heuristic didn't match, renewal was never attempted, and the
+    //    orchestrator chain halted 8 of 10 trading days. Renewing an ACTIVE token
+    //    errors harmlessly (caught), so the unconditional renew-and-retry is safe.
     const isAuthError = (e: unknown): boolean => {
       const msg = (e instanceof Error ? e.message : String(e)).toLowerCase();
       return msg.includes('401') || msg.includes('token') || msg.includes('auth') || msg.includes('oauth');
@@ -75,32 +79,33 @@ export class DailyIvCaptureJob implements BatchJobHandler {
 
     try {
       await this.optionsProvider.getOptionsExpirations('SPY');
-    } catch (err) {
-      if (!isAuthError(err)) {
-        return {
-          status: 'failed',
-          errorMessage: `E*Trade connectivity check failed: ${err instanceof Error ? err.message : String(err)}`,
-          tickersAttempted: 0, tickersUpdated: 0, tickersSkipped: 0, tickersFailed: 0,
-        };
-      }
-
-      // Auth failure — try renewing the dormant token before giving up.
+    } catch (firstErr) {
       try {
         await this.optionsProvider.renewToken();
-        // Verify the renewal actually worked
+      } catch { /* expected error on a recently-used (active) token — the retry decides */ }
+
+      try {
         await this.optionsProvider.getOptionsExpirations('SPY');
-      } catch {
-        // Renewal failed too — token has expired past midnight, needs manual re-auth.
+      } catch (retryErr) {
+        // Renew + retry both failed. Auth-shaped ⇒ token rolled past midnight and
+        // needs a manual re-auth; anything else ⇒ genuine connectivity failure.
+        if (isAuthError(retryErr) || isAuthError(firstErr)) {
+          return {
+            status: 'failed',
+            errorMessage: 'E*Trade token expired. Open the app and go to Settings → E*Trade Connection to reconnect.',
+            tickersAttempted: 0, tickersUpdated: 0, tickersSkipped: 0, tickersFailed: 0,
+            notification: {
+              id: `etrade-expired-${Date.now()}`,
+              type: 'error',
+              message: 'E*Trade token expired — Daily IV update skipped.',
+              cta: { label: 'Reconnect', view: 'settings' },
+            },
+          };
+        }
         return {
           status: 'failed',
-          errorMessage: 'E*Trade token expired. Open the app and go to Settings → E*Trade Connection to reconnect.',
+          errorMessage: `E*Trade connectivity check failed (after token renew + retry): ${retryErr instanceof Error ? retryErr.message : String(retryErr)}`,
           tickersAttempted: 0, tickersUpdated: 0, tickersSkipped: 0, tickersFailed: 0,
-          notification: {
-            id: `etrade-expired-${Date.now()}`,
-            type: 'error',
-            message: 'E*Trade token expired — Daily IV update skipped.',
-            cta: { label: 'Reconnect', view: 'settings' },
-          },
         };
       }
     }

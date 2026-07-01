@@ -191,7 +191,14 @@ export class BatchOrchestratorJob implements BatchJobHandler {
     // Token is date-valid. Attempt renewal to pre-wake a dormant token (inactive >2h).
     // Active tokens will fail this call — that is expected and does NOT mean the token
     // is invalid. Individual jobs surface real 401s if the token somehow isn't working.
-    try { await renewAccessToken(creds); } catch { /* expected for recently-used tokens */ }
+    try {
+      await renewAccessToken(creds);
+    } catch (e) {
+      // Expected for recently-used (active) tokens — but log it: a silent failure here
+      // hid the dormant-token terminated-stream failures that halted the evening chain
+      // for two weeks (Jun 2026). Jobs downstream now renew-and-retry themselves.
+      console.warn('[orchestrator] token pre-wake renew failed (continuing):', e instanceof Error ? e.message : String(e));
+    }
     return 'valid';
   }
 

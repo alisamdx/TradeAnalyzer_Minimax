@@ -74,6 +74,7 @@ docs/formulas.md     ← every financial metric formula
 ### E*Trade integration
 - OAuth 1.0a flow implemented in `src/main/services/etrade-auth.ts`
 - Tokens expire at midnight ET. After 2h inactivity they go dormant — call `renewAccessToken()`. The nightly jobs **and** the on-demand `ETradeDataProvider.getOptionsChain`/`getOptionsExpirations` (via `withRenew`, v1.1.48) auto-renew-and-retry on a dormant-token 401; a token expired past midnight still needs a manual re-auth. A dormant token used to silently yield an empty chain on evening agent/lab runs.
+- **A dormant token does NOT reliably fail as a 401** — it can kill/hang the response stream (undici `terminated`). Never gate a renewal attempt on an auth-shaped error message; renew-and-retry on ANY E*Trade failure (renewing an active token errors harmlessly). The old auth-message heuristic in the daily-iv-update connectivity check halted the whole evening orchestrator chain 8 of 10 trading days (fixed v1.1.92).
 - E*Trade credentials stored encrypted in settings via `secure-settings.ts`
 - All E*Trade API calls go through `etradeGet()` which handles signing — never construct auth headers manually.
 

@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.92] — 2026-07-01
+
+### Fixed
+- **Evening batch chain no longer halts on a dormant E*Trade token (renew-and-retry on ANY probe failure).** The 17:00 orchestrator slot failed at Daily IV Update with `E*Trade connectivity check failed: terminated` on 8 of the last 10 trading days, forcing a manual re-run at ~18:30–22:00 ET (which also meant the brief measured option liquidity on extra-stale quotes). Root cause: a **dormant token (inactive >2h — idle since the ~10:40 morning run) doesn't reliably fail as a clean 401** — E*Trade kills/hangs the response stream (undici `terminated`), the connectivity check's auth-message heuristic (`401|token|auth|oauth`) didn't match, so `renewToken()` was **never attempted** and the job (and the whole orchestrator chain behind it) died — even though the token was renewable without any login all along (the manual evening re-runs succeeded because opening the app renewed it via `withRenew` paths). The check now **unconditionally renews and retries once on any probe failure** (renewing an active token errors harmlessly); only if the retry also fails does it classify: auth-shaped → "token expired, reconnect" CTA (true midnight expiry), else a real connectivity failure (message now says "after token renew + retry"). The orchestrator's pre-wake renewal (`_checkEtradeToken`) also logs failures instead of swallowing them silently. Manual re-auth is still required only for the true **midnight-ET hard expiry** — the away-at-work dormancy case is now fully automatic. Regression tests: `tests/daily-iv-capture-connectivity.test.ts` (3). `src/main/services/jobs/daily-iv-capture.ts`, `batch-orchestrator-job.ts`.
+
 ## [1.1.91] — 2026-07-01
 
 ### Added

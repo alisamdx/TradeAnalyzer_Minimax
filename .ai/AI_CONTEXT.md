@@ -54,7 +54,7 @@ The app no longer routes everything through Polygon. Current split:
 
 ### E*Trade auth quirks
 - OAuth 1.0a flow in `etrade-auth.ts`; all calls go through `etradeGet()` which signs requests — never build auth headers by hand.
-- Tokens expire at **midnight ET**; after 2h inactivity they go dormant → call `renewAccessToken()`. Batch jobs auto-renew and surface a "Reconnect" notification on hard expiry.
+- Tokens expire at **midnight ET**; after 2h inactivity they go dormant → call `renewAccessToken()`. Batch jobs auto-renew and surface a "Reconnect" notification on hard expiry. **A dormant token doesn't reliably 401 — it can kill/hang the stream (undici `terminated`)**, so the daily-iv-update connectivity probe renews-and-retries on ANY failure, not just auth-shaped errors (v1.1.92; the old heuristic halted the evening chain 8 of 10 trading days in late June 2026).
 - Credentials stored encrypted via `secure-settings.ts` (DPAPI on Windows).
 - **E*Trade IV is a decimal fraction** (0.3882 = 38.82%). Multiply by 100 when ingesting into anything that stores/displays IV as a percentage. `OptionContract.iv` stays a decimal fraction in memory — Black-Scholes uses it directly as sigma.
 
