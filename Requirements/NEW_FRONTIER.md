@@ -694,6 +694,54 @@ sound* and identifying the wheel-weight question for later.
 
 -----
 
+## 11. Spike — liquidity-aware structure selection for the Brief/Critic (added 2026-07-01)
+
+**Motivation.** The 2026-07-01 brief produced 23 picks / 1 critic pass; 15 non-passes carried
+`low_liquidity` flags on mega-cap names (MRVL, DELL, NVDA…). Hypothesis: `pickRelevantStructure`
+selects the highest-graded structure (big-lizard, put-butterfly), whose liquidity sits below the
+8/15 tradability bar, while a plainer strategy-relevant structure clears it — i.e. the passes are
+hiding behind structure *selection*, not structure *absence*.
+
+**Method.** `scripts/fr-liquidity-aware-structure-study.mjs` — replays selection over every stored
+brief pick (319 unique after de-dupe, ~2 months): V0 = current grade-first selection; V1 = same
+defined-risk/pin-bet tiers, then prefer structures with liquidityScore ≥ 8, no zero-bid leg,
+grade ≥ C. Emulates the critic's warning branch for both; settles both structures at expiry
+intrinsic where possible.
+
+**Result — hypothesis FALSIFIED (no ship).**
+- **Unresolvable warning pools**: income 47/47, inflection 18/18 (direction-locked by design),
+  bearish 29/30 — *no* strategy-relevant structure clears the bar on those picks. Selection
+  cannot convert them; the liquidity wall there is real (4-leg structures on these names, as
+  measured, are below the engine's own tradability bar).
+- **Convertible but costly**: bullish 12/35, buy 14/41 — mean grade cost **−1.59 ranks**,
+  typically A+ big-lizard (liq 6) → C call-zebra (liq 8-10). Presenting a materially worse-priced
+  marginal structure to earn a cleaner badge is a bad trade; not shipped.
+- **P&L delta**: no changed pick had settled by 2026-07-01 (27 pending) — no realized evidence.
+
+**Secondary finding — after-close measurement artifact (needs data).**
+`scripts/fr-liquidity-slot-comparison.mjs`: on paired same-day observations (same
+date+strategy+ticker+slug in both the 10:15 and after-close briefs), evening liquidityScore reads
+**−1.42** vs morning; bar clearance 68% (morning) vs 47% (evening); **all** paired deltas ≤ 0
+(4 pass→fail flips, 0 reverse). The bar is 8 — a −1.4 shift flips structures right at the margin,
+so evening-measured flags overstate illiquidity vs the intraday market where trades actually
+happen. **Sample: 19 observations from a single date**, because `ScoringService.storeBrief`
+deletes same-ET-day rows per strategy — the evening brief erases the morning brief's intraday
+measurements every day. Compounding: the 17:00 orchestrator slot failed its E*Trade connectivity
+check on ~8 of the last 10 trading days, so evening briefs actually ran 18:30–22:00 ET (manual
+re-runs) on even staler quotes.
+
+**Next actions.**
+1. Persist intraday liquidity measurements instead of discarding them (e.g. a
+   `structure_liquidity_log` side table written at Stage 4, or per-slot brief retention) —
+   pure instrumentation, no trade-logic change.
+2. After ~2–3 weeks of paired data, re-run the slot comparison. If the −1.4 artifact holds,
+   design the fix (critic/gate uses the same-day intraday measurement when available) and take
+   it through FR-SEY-5 (critic verdicts gate the engine's entries via `entry-policy.ts`).
+3. Separately fix the 17:00 connectivity failure — it both delays the brief and worsens the
+   measurement staleness.
+
+-----
+
 ## Appendix: Reading List Starter Pack
 
 **Books:**
