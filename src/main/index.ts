@@ -53,6 +53,7 @@ import { registerPretradeValidatorIpc } from './ipc/ipc-pretrade-validator.js';
 import { BatchService } from './services/batch-service.js';
 import { DailyIvCaptureJob } from './services/jobs/daily-iv-capture.js';
 import { MarketSyncJob } from './services/jobs/market-sync-job.js';
+import { ConstituentsRefreshJob } from './services/jobs/constituents-refresh-job.js';
 import { PriceGapFillJob } from './services/jobs/price-gap-fill-job.js';
 import { DailyScreenerJob } from './services/jobs/daily-screener-job.js';
 import { registerBatchIpc } from './ipc/ipc-batch.js';
@@ -387,6 +388,18 @@ app.whenReady().then(() => {
     constituentsService
   );
   batchService.registerJob('daily-iv-update', dailyIvJob);
+
+  // Constituents refresh — first sub-job in the orchestrator sequence (sequence 2,
+  // right after the orchestrator itself; migration 063 shifted the others by +1) so
+  // Market Sync and everything downstream see today's S&P 500 / Russell 1000 membership.
+  // Newly added index members get 1Y of Polygon price history bootstrapped immediately.
+  const constituentsRefreshJob = new ConstituentsRefreshJob(db, constituentsService, () => getApiKey(db));
+  batchService.registerJob('constituents-refresh', constituentsRefreshJob, {
+    sequenceOrder: 2,
+    dailyScheduleTime: '16:25',   // legacy display only — the orchestrator drives the schedule
+    dailyScheduleEnabled: false,
+    runOnStartup: false,
+  });
 
   // Market sync jobs — populate quote_cache + fundamentals_cache post-market.
   // Both jobs share the one-at-a-time mutex so they chain sequentially:

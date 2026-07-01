@@ -65,7 +65,7 @@ export interface ScreenPreset {
 export interface ConstituentsMeta {
   indexName: 'sp500' | 'russell1000' | 'etf';
   refreshedAt: string;
-  source: 'bundled' | 'wikipedia' | 'csv';
+  source: 'bundled' | 'wikipedia' | 'csv' | 'vanguard';
 }
 
 export interface ConstituentRow {

@@ -66,8 +66,14 @@ export function registerScreenerIpc(
     'screen:refresh-constituents',
     async (_e, index: 'sp500' | 'russell1000'): Promise<IpcResult<ConstituentsMeta>> => {
       try {
-        const result = await constituentsService.refreshFromWikipedia(index);
-        return ok(result);
+        // Same gated path as the constituents-refresh batch job: Vanguard holdings
+        // primary, Wikipedia fallback. CSV import remains the manual override.
+        const outcome = await constituentsService.refreshIndexAuto(index);
+        return ok({
+          indexName: index,
+          refreshedAt: new Date().toISOString(),
+          source: outcome.source
+        });
       } catch (err) {
         return fail(err);
       }

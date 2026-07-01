@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.91] — 2026-07-01
+
+### Added
+- **Automated S&P 500 + Russell 1000 constituent refresh (new batch job `constituents-refresh`).** Index membership was a manual step (Wikipedia "Refresh" button / CSV import); it now refreshes automatically as the **first sub-job in the orchestrator chain** (sequence 2, before Market Sync — migration `063` shifted the other jobs +1) so every downstream job sees today's membership. Source: **Vanguard fund holdings** — VOO (S&P 500) and VONE (Russell 1000) via Vanguard's free public paginated JSON API (validated live: 503 / 1,002 rows) — with the existing **Wikipedia scrape as fallback**. Both sources run **gated**: row-count floor (480 / 940) and a ≤25% membership-turnover guard vs the stored list, so a truncated or corrupt feed can never wipe a known-good list (the annual Russell reconstitution is ~8-12% turnover; the gate never fires on a legit rebalance). Sector and company name are **preserved for carried-over tickers** (Vanguard carries no sector field). The manual "Refresh" button now uses the same gated Vanguard-first path (`screen:refresh-constituents`); CSV import stays as the manual override. `ConstituentsService.refreshFromVanguard/refreshIndexAuto/applyRefresh` (+`ConstituentsRefreshOutcome` diff), `src/main/services/jobs/constituents-refresh-job.ts`, `ConstituentsMeta.source` gains `'vanguard'`.
+  - **New index members are backfilled automatically**: the job diffs membership and fetches **1 year of Polygon daily bars** for added tickers with no price history (a ticker moving between lists or already tracked keeps its bars — no duplicate fetch). Quotes/fundamentals follow minutes later via Market Sync in the same orchestrator run; technical signals compute the same evening. `iv_history` cannot be backfilled from Polygon — IV rank appears after 21 trading days of the daily IV capture (scoring already treats it as a missing signal until then), or run the manual IVolatility backfill for instant full history.
+  - **A source outage never halts the nightly chain**: refresh failures return `status: 'success'` with a "kept existing list" warning note (`tickersFailed` counts them) because a slightly stale constituent list is strictly better than skipping the brief — the orchestrator stops the whole chain on a failed sub-job.
+  - Regression tests: `tests/constituents-refresh.test.ts` (8 — pagination, diff, sector preservation, both gates, Wikipedia fallback, bootstrap-only-new, outage-is-success).
+
 ## [1.1.90] — 2026-06-30
 
 ### Added

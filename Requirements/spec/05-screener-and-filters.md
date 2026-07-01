@@ -10,7 +10,7 @@ Screens a chosen universe for fundamentally sound candidates ("stocks that can't
 
 ### 5.A.1 Universe selection
 - **FR-2.0a** Universe ∈ `sp500`, `russell1000`, `both` (deduplicated union), `etf`.
-- **FR-2.0b** Constituent lists are refreshable and cached 7 days; show last-refreshed timestamp. Sources in priority order: bundled CSV (manual "Refresh constituents"), optional respectful Wikipedia scrape (single fetch, cached 7 days), or user CSV import.
+- **FR-2.0b** Constituent lists auto-refresh daily (batch job `constituents-refresh`, §20.3 — v1.1.91) and remain manually refreshable; show last-refreshed timestamp. Source priority (automated job and the manual "Refresh" button share one gated path): **Vanguard fund holdings** (VOO → S&P 500, VONE → Russell 1000; free public paginated JSON, no key) → **Wikipedia scrape fallback**. Both are gated — row-count floor (480 / 940) and ≤25% turnover vs the stored list — so a broken feed never overwrites a good list; sector/company are preserved for carried-over tickers (Vanguard carries no sector). User CSV import remains the manual override; the bundled CSV seeds first-run only.
 - **FR-2.0c** `both` dedupes by ticker (S&P 500 ⊂ Russell 1000 mostly → union ≈ 1,000). ETF universe is a separate list.
 
 IPC: `getConstituents(index)`, `getMeta(index)`, `refreshConstituents(index)`, `importConstituents(filePath, index)`, `syncUniverse(universe)` (+ `syncCancel`, `onSyncProgress`).

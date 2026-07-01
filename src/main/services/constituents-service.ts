@@ -8,7 +8,49 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { DbHandle } from '../db/connection.js';
+import { withTransaction } from '../db/connection.js';
 import type { Universe, ConstituentRow, ConstituentsMeta } from '@shared/types.js';
+
+// Vanguard index-fund holdings — the automated constituent source (free public JSON,
+// no key). The fund's published holdings ARE the constituent list: VOO tracks the
+// S&P 500, VONE the Russell 1000. Paginated 500 rows/page.
+const VANGUARD_FUND_BY_INDEX: Record<'sp500' | 'russell1000', string> = {
+  sp500: 'VOO',
+  russell1000: 'VONE',
+};
+const VANGUARD_PAGE_SIZE = 500;
+const VANGUARD_MAX_PAGES = 10;
+
+// Sanity floors — a source returning fewer rows than this is broken or truncated and
+// must never overwrite a known-good list. (S&P 500 lists ~503 lines incl. dual share
+// classes; Russell 1000 ~1,000-1,015.)
+const MIN_ROWS_BY_INDEX: Record<'sp500' | 'russell1000', number> = {
+  sp500: 480,
+  russell1000: 940,
+};
+
+// Max fraction of the existing list allowed to change (adds+removes over old size) in
+// one automated refresh. The annual Russell reconstitution turns over ~8-12% of names;
+// anything above 25% is a corrupt feed, not a rebalance.
+const MAX_TURNOVER = 0.25;
+
+/** Result of an automated (gated) constituents refresh, including the membership diff. */
+export interface ConstituentsRefreshOutcome {
+  indexName: 'sp500' | 'russell1000';
+  source: 'vanguard' | 'wikipedia';
+  total: number;
+  added: string[];
+  removed: string[];
+}
+
+interface VanguardHoldingEntity {
+  ticker?: string | null;
+  longName?: string | null;
+}
+interface VanguardHoldingsResponse {
+  size?: number;
+  fund?: { entity?: VanguardHoldingEntity[] };
+}
 
 function thisDir(): string {
   return dirname(fileURLToPath(import.meta.url));
@@ -87,8 +129,122 @@ export class ConstituentsService {
     };
   }
 
-  /** Refresh from Wikipedia (respectful single fetch). */
+  /** Refresh from Wikipedia (respectful single fetch). Manual/UI path — no gates. */
   async refreshFromWikipedia(index: 'sp500' | 'russell1000'): Promise<ConstituentsMeta> {
+    const constituents = await this.fetchWikipediaConstituents(index);
+    this.applyRefresh(index, constituents, 'wikipedia', { enforceGates: false });
+    return {
+      indexName: index,
+      refreshedAt: new Date().toISOString(),
+      source: 'wikipedia'
+    };
+  }
+
+  /** Refresh from Vanguard fund holdings (VOO/VONE) with sanity gates. */
+  async refreshFromVanguard(index: 'sp500' | 'russell1000'): Promise<ConstituentsRefreshOutcome> {
+    const rows = await this.fetchVanguardHoldings(VANGUARD_FUND_BY_INDEX[index]);
+    return this.applyRefresh(index, rows, 'vanguard', { enforceGates: true });
+  }
+
+  /**
+   * Automated refresh: Vanguard holdings primary, Wikipedia fallback, both gated so a
+   * broken feed can never wipe or corrupt the stored list. Used by the batch job.
+   */
+  async refreshIndexAuto(index: 'sp500' | 'russell1000'): Promise<ConstituentsRefreshOutcome> {
+    let vanguardError: unknown;
+    try {
+      return await this.refreshFromVanguard(index);
+    } catch (err) {
+      vanguardError = err;
+    }
+    try {
+      const rows = await this.fetchWikipediaConstituents(index);
+      return this.applyRefresh(index, rows, 'wikipedia', { enforceGates: true });
+    } catch (wikiErr) {
+      const v = vanguardError instanceof Error ? vanguardError.message : String(vanguardError);
+      const w = wikiErr instanceof Error ? wikiErr.message : String(wikiErr);
+      throw new Error(`Both constituent sources failed for ${index} — Vanguard: ${v}; Wikipedia: ${w}`);
+    }
+  }
+
+  /** Current tickers stored for an index (uppercased). */
+  getCurrentTickers(index: 'sp500' | 'russell1000' | 'etf'): Set<string> {
+    const rows = this.db
+      .prepare(`SELECT ticker FROM constituents WHERE index_name = ?`)
+      .all(index) as Array<{ ticker: string }>;
+    return new Set(rows.map((r) => r.ticker.toUpperCase()));
+  }
+
+  /**
+   * Replace an index's constituent list atomically, preserving sector/company fields
+   * for carried-over tickers when the new source lacks them (Vanguard has no sector).
+   * With gates on: rejects truncated feeds (row-count floor) and implausible turnover.
+   */
+  private applyRefresh(
+    index: 'sp500' | 'russell1000',
+    rows: ConstituentRow[],
+    source: 'vanguard' | 'wikipedia',
+    opts: { enforceGates: boolean }
+  ): ConstituentsRefreshOutcome {
+    // Dedupe by ticker (dual listings can repeat in scraped tables).
+    const byTicker = new Map<string, ConstituentRow>();
+    for (const r of rows) {
+      const ticker = r.ticker.trim().toUpperCase();
+      if (ticker && !byTicker.has(ticker)) byTicker.set(ticker, { ...r, ticker });
+    }
+    const fresh = [...byTicker.values()];
+
+    if (opts.enforceGates && fresh.length < MIN_ROWS_BY_INDEX[index]) {
+      throw new Error(
+        `${source} returned only ${fresh.length} ${index} rows (floor ${MIN_ROWS_BY_INDEX[index]}) — refusing to overwrite the stored list`
+      );
+    }
+
+    type OldRow = { ticker: string; company_name: string | null; sector: string | null };
+    const oldRows = this.db
+      .prepare(`SELECT ticker, company_name, sector FROM constituents WHERE index_name = ?`)
+      .all(index) as OldRow[];
+    const oldByTicker = new Map(oldRows.map((r) => [r.ticker.toUpperCase(), r]));
+
+    const added = fresh.map((r) => r.ticker).filter((t) => !oldByTicker.has(t)).sort();
+    const removed = [...oldByTicker.keys()].filter((t) => !byTicker.has(t)).sort();
+
+    if (opts.enforceGates && oldByTicker.size > 0) {
+      const turnover = (added.length + removed.length) / oldByTicker.size;
+      if (turnover > MAX_TURNOVER) {
+        throw new Error(
+          `${source} ${index} refresh implies ${(turnover * 100).toFixed(0)}% turnover ` +
+          `(+${added.length}/−${removed.length} on ${oldByTicker.size}) — above the ${MAX_TURNOVER * 100}% guard, refusing to apply`
+        );
+      }
+    }
+
+    withTransaction(this.db, () => {
+      this.db.prepare(`DELETE FROM constituents WHERE index_name = ?`).run(index);
+      const insertStmt = this.db.prepare(
+        `INSERT OR REPLACE INTO constituents (ticker, index_name, company_name, sector, added_at)
+         VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`
+      );
+      for (const c of fresh) {
+        const old = oldByTicker.get(c.ticker);
+        insertStmt.run(
+          c.ticker,
+          index,
+          c.companyName ?? old?.company_name ?? null,
+          c.sector ?? old?.sector ?? null
+        );
+      }
+      this.db.prepare(
+        `INSERT OR REPLACE INTO constituents_meta (index_name, refreshed_at, source)
+         VALUES (?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?)`
+      ).run(index, source);
+    });
+
+    return { indexName: index, source, total: fresh.length, added, removed };
+  }
+
+  /** Fetch and parse the Wikipedia constituents table for an index. */
+  private async fetchWikipediaConstituents(index: 'sp500' | 'russell1000'): Promise<ConstituentRow[]> {
     const wikiUrl = index === 'sp500'
       ? 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
       : 'https://en.wikipedia.org/wiki/Russell_1000_Index';
@@ -98,32 +254,37 @@ export class ConstituentsService {
     });
     if (!response.ok) throw new Error(`Wikipedia fetch failed: ${response.status}`);
     const html = await response.text();
+    return this.parseWikipediaTable(html);
+  }
 
-    const constituents = this.parseWikipediaTable(html);
-    const source = 'wikipedia' as const;
-
-    // Upsert into DB.
-    const insertStmt = this.db.prepare(
-      `INSERT OR REPLACE INTO constituents (ticker, index_name, company_name, sector, added_at)
-       VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`
-    );
-    const touchMeta = this.db.prepare(
-      `INSERT OR REPLACE INTO constituents_meta (index_name, refreshed_at, source)
-       VALUES (?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?)`
-    );
-    const clearStmt = this.db.prepare(`DELETE FROM constituents WHERE index_name = ?`);
-
-    clearStmt.run(index);
-    for (const c of constituents) {
-      insertStmt.run(c.ticker, index, c.companyName, c.sector);
-    }
-    touchMeta.run(index, source);
-
-    return {
-      indexName: index,
-      refreshedAt: new Date().toISOString(),
-      source
+  /** Fetch a Vanguard fund's full stock holdings (paginated public JSON API). */
+  private async fetchVanguardHoldings(fund: string): Promise<ConstituentRow[]> {
+    const base = `https://investor.vanguard.com/investment-products/etfs/profile/api/${fund}/portfolio-holding/stock`;
+    const headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) TradeAnalyzer-desktop',
+      Accept: 'application/json'
     };
+
+    const rows: ConstituentRow[] = [];
+    let start = 1;
+    let size = Number.POSITIVE_INFINITY;
+
+    for (let page = 0; page < VANGUARD_MAX_PAGES && start <= size; page++) {
+      const res = await fetch(`${base}?start=${start}&count=${VANGUARD_PAGE_SIZE}`, { headers });
+      if (!res.ok) throw new Error(`Vanguard holdings fetch failed (${fund}): HTTP ${res.status}`);
+      const json = (await res.json()) as VanguardHoldingsResponse;
+      size = json.size ?? 0;
+      const entities = json.fund?.entity ?? [];
+      if (entities.length === 0) break;
+      for (const e of entities) {
+        const ticker = (e.ticker ?? '').trim().toUpperCase().replace(/[^A-Z0-9.-]/g, '');
+        if (!ticker) continue;
+        // Vanguard holdings carry no sector — applyRefresh preserves the stored one.
+        rows.push({ ticker, companyName: e.longName?.trim() || null, sector: null });
+      }
+      start += VANGUARD_PAGE_SIZE;
+    }
+    return rows;
   }
 
   /** Parse constituents from the bundled CSV (one-time setup). */
