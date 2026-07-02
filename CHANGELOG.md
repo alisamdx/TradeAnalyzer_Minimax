@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.102] — 2026-07-02
+
+### Changed
+- **Wheel (Vetted) thresholds tightened after a live run** (`WHEEL_VETTED_DEFAULTS`): the balanced defaults returned **121** names over S&P 500 + Russell 1000 — a good pool but still browse-heavy. Raised **suitability 70 → 75**, **open interest 100 → 250**, and the **annualized-yield floor 8% → 20%** (user-selected on a live Russell 1000 run where only ~16 names fell below 15% annualized). Spread cap unchanged (15%). Trims the marginal-liquidity / low-premium tail; the highest-yield (highest-IV) names at the top are unaffected. One-line default change; unit tests unchanged (still green). `src/main/services/filter-templates-service.ts`. Spec: `Requirements/spec/05-screener-and-filters.md`.
+
 ## [1.1.101] — 2026-07-02
 
 ### Added

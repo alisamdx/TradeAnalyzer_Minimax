@@ -42,7 +42,7 @@ export interface WheelVettedThresholds {
 // names, so a universe-wide IV floor would reject almost everything — the annualized-return
 // floor (computed from the live chain in Tier 2) is the premium gate instead.
 export const WHEEL_VETTED_DEFAULTS: WheelVettedThresholds = {
-  minSuitability: 70, minDte: 25, targetDelta: 0.30, minOi: 100, maxSpreadPct: 15, minAnnualizedReturn: 8,
+  minSuitability: 75, minDte: 25, targetDelta: 0.30, minOi: 250, maxSpreadPct: 15, minAnnualizedReturn: 20,
 };
 
 /** Nearest standard monthly expiry (3rd Friday) that is ≥ minDte calendar days out.
