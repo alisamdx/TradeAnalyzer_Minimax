@@ -34,7 +34,7 @@ import { OpportunityService } from './services/opportunity-service.js';
 import { registerAlertsIpc } from './ipc/ipc-alerts.js';
 import { registerOptionsIpc } from './ipc/ipc-options.js';
 import { registerTestApiIpc } from './ipc/ipc-test-api.js';
-import { registerETradeIpc } from './ipc/ipc-etrade.js';
+import { registerETradeIpc, probeETradeConnection } from './ipc/ipc-etrade.js';
 import { secureGet, migratePlaintextSecrets } from './services/secure-settings.js';
 import type { OptionsProvider } from './services/options-provider.js';
 import { ETradeDataProvider } from './services/etrade-data-provider.js';
@@ -89,6 +89,7 @@ import { registerExecutionIpc } from './ipc/ipc-execution.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 let _apiServer: ApiServer | null = null;
+let _etradeKeepAlive: NodeJS.Timeout | null = null;
 
 // Resolve migrations dir whether running from `out/main/index.js` (built)
 // or via electron-vite dev (source). Both layouts have /migrations at repo root.
@@ -368,6 +369,19 @@ app.whenReady().then(() => {
 
   // E*Trade auth / credential management IPC
   registerETradeIpc(db);
+
+  // E*Trade keep-alive. Tokens go dormant after ~2h idle; a day of Polygon-only work
+  // (screener/filters) lets the token lapse, so the after-close batch would hit a dormant
+  // token. Ping E*Trade every ~90 min (well inside the 2h window) to keep it warm — and,
+  // with renewal fixed (v1.1.99), auto-revive it if it did lapse. Only acts on a date-valid
+  // token; a midnight-expired one is left for manual re-auth (no spam). See CLAUDE.md.
+  _etradeKeepAlive = setInterval(() => {
+    void probeETradeConnection(db).then(r => {
+      if (r.status === 'renewed')      console.log('[etrade] keep-alive revived a dormant token');
+      else if (r.status === 'expired') console.warn('[etrade] keep-alive: token needs manual re-auth');
+      // ok / no_token / no_credentials / error → stay quiet
+    }).catch(() => { /* best-effort keep-alive */ });
+  }, 90 * 60 * 1000);
 
   // Strategy Lab — score / explore all 31 strategies for a single ticker
   registerStrategyLabIpc(db, dataProvider, optionsProvider);
@@ -717,5 +731,6 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  if (_etradeKeepAlive) { clearInterval(_etradeKeepAlive); _etradeKeepAlive = null; }
   _apiServer?.stop().catch(console.error);
 });

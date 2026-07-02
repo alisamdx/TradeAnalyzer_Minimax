@@ -64,6 +64,56 @@ export interface ETradeStatus {
   isAuthenticated:   boolean;   // access token present (may be expired)
 }
 
+export type ETradeProbeStatus =
+  | 'ok'             // token is live right now
+  | 'renewed'        // token was dormant and was successfully reactivated
+  | 'no_credentials' // no consumer key/secret
+  | 'no_token'       // credentials saved but never authenticated
+  | 'expired'        // crossed midnight ET, or renew+retry still rejected → manual re-auth
+  | 'error';         // non-auth failure (network / E*Trade down) — transient
+
+/**
+ * LIVE connection probe — unlike the date-based `check-connection`, this actually calls
+ * E*Trade (a lightweight SPY quote) so the result reflects whether the token *works right
+ * now*. On failure it renews once and retries (renewal works as of v1.1.99), so a dormant
+ * token is transparently revived → 'renewed'. Used by both the Settings "Test Connection"
+ * button and the keep-alive heartbeat.
+ *
+ * We renew on ANY first failure, not just auth-shaped ones: a dormant token doesn't reliably
+ * return a 401 — it can kill the response stream (undici `terminated`). See CLAUDE.md.
+ */
+export async function probeETradeConnection(db: Database): Promise<{ status: ETradeProbeStatus; detail?: string }> {
+  const creds = getCredentials(db);
+  if (!creds.consumerKey || !creds.consumerSecret) return { status: 'no_credentials' };
+  if (!creds.accessToken  || !creds.accessSecret)  return { status: 'no_token' };
+
+  // Crossed midnight ET → genuine expiry; renew cannot revive it, so don't waste a call.
+  const tokenDate = secureGet(db, 'etradeTokenDate');
+  if (tokenDate && tokenDate !== todayET()) return { status: 'expired' };
+
+  const { etradeGet } = await import('../services/etrade-auth.js');
+  const probe = () => etradeGet('/v1/market/quote/SPY', {}, getCredentials(db));
+
+  try {
+    await probe();
+    return { status: 'ok' };
+  } catch {
+    try { await renewAccessToken(getCredentials(db)); } catch { /* harmless on an active token */ }
+    try {
+      await probe();
+      return { status: 'renewed' };
+    } catch (retryErr) {
+      const msg = (retryErr instanceof Error ? retryErr.message : String(retryErr)).toLowerCase();
+      const authShaped = msg.includes('401') || msg.includes('token') || msg.includes('auth')
+        || msg.includes('oauth') || msg.includes('rejected');
+      return {
+        status: authShaped ? 'expired' : 'error',
+        detail: retryErr instanceof Error ? retryErr.message : String(retryErr),
+      };
+    }
+  }
+}
+
 // ─── Registration ─────────────────────────────────────────────────────────────
 
 export function registerETradeIpc(db: Database): void {
@@ -208,6 +258,14 @@ export function registerETradeIpc(db: Database): void {
       // Dates match — token is still valid for today.
       return ok({ status: 'ok' as const });
     } catch (err) { return fail(err); }
+  });
+
+  /**
+   * LIVE connection test — actually calls E*Trade and renews-and-retries if needed.
+   * Returns the true state ('ok' | 'renewed' | 'expired' | 'error' | 'no_token' | 'no_credentials').
+   */
+  ipcMain.handle('etrade:test-connection', async (_e: IpcMainInvokeEvent) => {
+    try { return ok(await probeETradeConnection(db)); } catch (err) { return fail(err); }
   });
 
   /** Clear access token (force re-auth). */

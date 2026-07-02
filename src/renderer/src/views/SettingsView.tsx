@@ -67,6 +67,17 @@ function ETradeConnectPanel({ warning, onConnected }: ETradeConnectPanelProps) {
         setConsumerSecret(res.consumerSecret ?? '');
         const check = await window.api.etrade.checkConnection();
         setConnStatus(check.status);
+        // A today-stamped token is date-valid but may still be dormant/rejected — verify it's
+        // actually live with a real probe (renews-and-retries transparently). "Connected" should
+        // mean the token works, not just that it was issued today.
+        if (check.status === 'ok') {
+          try {
+            const live = await window.api.etrade.testConnection();
+            if (live.status === 'renewed' || live.status === 'ok') setConnStatus('ok');
+            else if (live.status === 'expired') setConnStatus('expired');
+            // 'error' (transient network) → keep the optimistic 'ok'
+          } catch { /* ignore — leave the date-based status */ }
+        }
       } catch { /* ignore */ }
     })();
   }, []);
@@ -119,6 +130,30 @@ function ETradeConnectPanel({ warning, onConnected }: ETradeConnectPanelProps) {
       setConnStatus('ok');
       setStatusMsg('Token renewed.');
       setTimeout(() => setStatusMsg(null), 2500);
+    } catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); }
+  };
+
+  const testConnection = async () => {
+    setBusy(true); setError(null); setStatusMsg('Testing connection…');
+    try {
+      const res = await window.api.etrade.testConnection();
+      if (res.status === 'renewed') {
+        setConnStatus('ok');
+        setStatusMsg('Connected — token was dormant and was auto-revived.');
+      } else if (res.status === 'ok') {
+        setConnStatus('ok');
+        setStatusMsg('Connected — token is live.');
+      } else if (res.status === 'error') {
+        setConnStatus('error');
+        setStatusMsg(null);
+        setError(`Connection error (transient — try again): ${res.detail ?? 'E*Trade unreachable'}`);
+      } else {
+        // expired | no_token | no_credentials
+        setConnStatus(res.status);
+        setStatusMsg(null);
+      }
+      setTimeout(() => setStatusMsg(null), 3500);
     } catch (e) { setError((e as Error).message); }
     finally { setBusy(false); }
   };
@@ -218,9 +253,10 @@ function ETradeConnectPanel({ warning, onConnected }: ETradeConnectPanelProps) {
         </div>
       )}
 
-      {/* Renew / Disconnect (only when we have a token) */}
-      {(connStatus === 'ok' || connStatus === 'expired') && (
+      {/* Test / Renew / Disconnect (only when we have a token) */}
+      {(connStatus === 'ok' || connStatus === 'expired' || connStatus === 'error') && (
         <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+          <button style={btn('#0ea5e9')} disabled={busy} onClick={testConnection} title="Actually call E*Trade to verify the token works (auto-renews a dormant token)">Test Connection</button>
           <button style={btn('#6366f1')} disabled={busy} onClick={renewToken}>Renew Token</button>
           <button style={btn('#6b7280')} disabled={busy} onClick={disconnect}>Disconnect</button>
         </div>

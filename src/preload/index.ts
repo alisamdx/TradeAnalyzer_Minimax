@@ -724,6 +724,15 @@ function buildApi() {
     checkConnection: () => invoke<{
       status: 'ok' | 'no_credentials' | 'no_token' | 'expired';
     }>('etrade:check-connection'),
+    /**
+     * LIVE connection test — actually calls E*Trade and renews-and-retries if the token is
+     * dormant, so the result reflects whether the token works right now (not just its date).
+     * 'renewed' = was dormant, auto-revived; 'error' = transient network/E*Trade issue.
+     */
+    testConnection: () => invoke<{
+      status: 'ok' | 'renewed' | 'no_credentials' | 'no_token' | 'expired' | 'error';
+      detail?: string;
+    }>('etrade:test-connection'),
     getStatus: () => invoke<{
       status: { hasConsumerKey: boolean; hasConsumerSecret: boolean; hasAccessToken: boolean; isConfigured: boolean; isAuthenticated: boolean };
       consumerKey: string;

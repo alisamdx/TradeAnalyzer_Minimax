@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.100] — 2026-07-02
+
+### Added
+- **E*Trade keep-alive heartbeat + live connection test — stops the daily "token expired" pain.** Two changes, building on the v1.1.99 renew fix: (1) A **keep-alive heartbeat** pings E*Trade every ~90 minutes while the app runs (`probeETradeConnection` — a lightweight SPY quote with renew-and-retry). E*Trade tokens go dormant after ~2h idle; a day of Polygon-only work (screener/filters) used to let the token lapse so the after-close batch hit a dormant token. Pinging inside the 2h window keeps it warm, and now that renewal actually works, auto-revives it if it did lapse. Only acts on a date-valid token; a midnight-expired one is left for manual re-auth. Registered in `index.ts`, cleared on quit. (2) A **live connection test**: `etrade:test-connection` IPC / `window.api.etrade.testConnection()` actually calls E*Trade (vs. the date-only `check-connection`), so "Connected" reflects whether the token *works right now* — returns `ok` / `renewed` (was dormant, auto-revived) / `expired` (needs re-auth) / `error` (transient). Settings gains a **Test Connection** button, and on mount it now verifies a today-stamped token with a real probe instead of trusting the date stamp. Files: `src/main/ipc/ipc-etrade.ts`, `src/main/index.ts`, `src/preload/index.ts`, `src/renderer/src/views/SettingsView.tsx`. Spec: `Requirements/spec/03-data-providers.md`.
+
 ## [1.1.99] — 2026-07-02
 
 ### Fixed
