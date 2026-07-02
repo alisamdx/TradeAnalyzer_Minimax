@@ -50,15 +50,22 @@ export function FiltersView() {
   const [source, setSource] = useState<'universe' | 'watchlist'>('watchlist');
   const [universe, setUniverse] = useState<Universe>('sp500');
 
-  // Load watchlists on mount
-  useEffect(() => {
-    window.api.watchlists.list()
-      .then(lists => {
-        setWatchlists(lists);
-        if (lists.length > 0) setSelectedWatchlistId(lists[0]!.id);
-      })
-      .catch(() => {});
+  // Save-to-watchlist form state
+  const [showSaveForm, setShowSaveForm] = useState(false);
+  const [saveName, setSaveName] = useState('');
+  const [saveTargetId, setSaveTargetId] = useState<number | 'new'>('new');
+  const [saving, setSaving] = useState(false);
+
+  // Load watchlists (reused after saving so a new list appears in the dropdowns).
+  const loadWatchlists = useCallback(async () => {
+    try {
+      const lists = await window.api.watchlists.list();
+      setWatchlists(lists);
+      setSelectedWatchlistId(prev => prev ?? (lists.length > 0 ? lists[0]!.id : null));
+    } catch { /* ignore — watchlist source just stays empty */ }
   }, []);
+
+  useEffect(() => { loadWatchlists(); }, [loadWatchlists]);
 
   // Listen for filter progress events
   useEffect(() => {
@@ -112,6 +119,42 @@ export function FiltersView() {
       setFilterProgress(null);
     }
   }, [source, universe, selectedWatchlistId]);
+
+  // Save all current results to a new (or existing) watchlist.
+  const handleSaveToWatchlist = useCallback(async () => {
+    if (saving) return;
+    const tickers = results.map(r => r.ticker);
+    if (tickers.length === 0) return;
+    setSaving(true);
+    setError(null);
+    try {
+      let targetId: number;
+      let targetName: string;
+      if (saveTargetId === 'new') {
+        const name = saveName.trim();
+        if (!name) { setError('Enter a name for the new watchlist.'); return; }
+        const wl = await window.api.watchlists.create(name);
+        targetId = wl.id;
+        targetName = wl.name;
+      } else {
+        targetId = saveTargetId;
+        targetName = watchlists.find(w => w.id === saveTargetId)?.name ?? 'watchlist';
+      }
+      const res = await window.api.watchlists.items.addBulk(
+        targetId,
+        tickers.map(t => ({ ticker: t }))
+      );
+      const skippedNote = res.skipped.length > 0 ? `, ${res.skipped.length} already present` : '';
+      setStatusMsg(`Saved ${res.added.length} ticker${res.added.length !== 1 ? 's' : ''} to "${targetName}"${skippedNote}`);
+      setShowSaveForm(false);
+      setSaveName('');
+      await loadWatchlists();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }, [saving, results, saveTargetId, saveName, watchlists, loadWatchlists]);
 
   const activeTpl = activeTemplate ? FILTER_TEMPLATES.find(t => t.id === activeTemplate) : null;
 
@@ -343,7 +386,75 @@ export function FiltersView() {
                   Sorted by {sortConfig.key} {sortConfig.direction === 'asc' ? '↑' : '↓'}
                 </span>
               )}
+              <div style={{ flex: 1 }} />
+              <button
+                onClick={() => { setSaveTargetId('new'); setShowSaveForm(s => !s); }}
+                title="Save all these results as a watchlist to reuse elsewhere"
+                style={{
+                  fontSize: 12, padding: '5px 12px', borderRadius: 6, cursor: 'pointer',
+                  background: showSaveForm ? 'var(--surface)' : 'transparent',
+                  color: 'var(--text)', border: '1px solid var(--border)',
+                }}
+              >
+                ⭐ Save to Watchlist
+              </button>
             </div>
+
+            {/* Save-to-watchlist inline form */}
+            {showSaveForm && (
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+                padding: '10px 12px', marginBottom: 12,
+                background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6,
+              }}>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  Save {results.length} ticker{results.length !== 1 ? 's' : ''} to:
+                </span>
+                <select
+                  value={saveTargetId === 'new' ? 'new' : String(saveTargetId)}
+                  onChange={e => setSaveTargetId(e.target.value === 'new' ? 'new' : Number(e.target.value))}
+                  style={{ fontSize: 12, padding: '4px 8px' }}
+                  disabled={saving}
+                >
+                  <option value="new">➕ New watchlist…</option>
+                  {watchlists.map(wl => (
+                    <option key={wl.id} value={wl.id}>{wl.name} ({wl.itemCount})</option>
+                  ))}
+                </select>
+                {saveTargetId === 'new' && (
+                  <input
+                    autoFocus
+                    value={saveName}
+                    onChange={e => setSaveName(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') handleSaveToWatchlist(); }}
+                    placeholder="Watchlist name"
+                    style={{ fontSize: 12, padding: '4px 8px', width: 180 }}
+                    disabled={saving}
+                  />
+                )}
+                <button
+                  onClick={handleSaveToWatchlist}
+                  disabled={saving}
+                  style={{
+                    fontSize: 12, padding: '5px 14px', borderRadius: 6, border: 'none', fontWeight: 700,
+                    background: 'var(--accent)', color: '#000', cursor: saving ? 'wait' : 'pointer',
+                  }}
+                >
+                  {saving ? 'Saving…' : 'Save'}
+                </button>
+                <button
+                  onClick={() => { setShowSaveForm(false); setSaveName(''); }}
+                  disabled={saving}
+                  style={{
+                    fontSize: 12, padding: '5px 10px', borderRadius: 6, cursor: 'pointer',
+                    background: 'transparent', color: 'var(--text-muted)', border: '1px solid var(--border)',
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+
             <div className="results-table-wrap">
               <table className="results-table">
                 <thead>

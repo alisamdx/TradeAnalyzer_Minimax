@@ -89,4 +89,7 @@ IPC: `listTemplates()`, `runTemplate(templateId, source?, universe?, watchlistId
 | `assignment_risk` | Assignment Risk | options | Short-option delta > 0.70 | Delta, Strike, DTE |
 | `wheel_opportunity` | Wheel Opportunity | wheel | Wheel suitability ≥ 60 | Score, IV %, Target Strike |
 
-Each result row can drill into Analysis / Validate / Options for that ticker.
+Each result row can drill into Analysis / Validate / Options / Payoff / Strategy Lab for that ticker.
+
+### 5.B.3 Save results to a watchlist
+- **FR-5.B.3** The results header has a **⭐ Save to Watchlist** action that bulk-saves *all* current matches to a watchlist — either a **new** list (enter a name) or an **existing** one (pick from the dropdown). Duplicate tickers already in the target list are skipped and reported. Available for every template's results. Uses `watchlists.create` + `watchlists.items.addBulk`. Lets a filter run seed a reusable watchlist for use in other functions (analysis, LEAPS+CSP, other filters).

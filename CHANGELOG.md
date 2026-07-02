@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.97] — 2026-07-02
+
+### Added
+- **Save filter results to a watchlist (Filters → ⭐ Save to Watchlist).** The results header of every filter template now has a bulk **Save to Watchlist** action: run any scan (e.g. Wheel Opportunity over the Russell 1000) and save *all* matches at once to either a **new** watchlist (enter a name) or an **existing** one (pick from the dropdown). Duplicate tickers already in the target list are skipped and reported (`Saved N tickers to "…", M already present`); the new list appears immediately in the source dropdown so it's usable in other functions (analysis, LEAPS+CSP, other filters) without re-typing tickers. Addresses the friction of navigating from a filter run into per-ticker tools. Reuses existing `watchlists.create` + `watchlists.items.addBulk`; renderer-only change in `src/renderer/src/views/FiltersView.tsx`. Spec: `Requirements/spec/05-screener-and-filters.md §5.B.3`.
+
 ## [1.1.96] — 2026-07-02
 
 ### Added
