@@ -54,14 +54,6 @@ function legToContract(
   };
 }
 
-// E*Trade returns a 401 (surfaced by etradeGet as "E*Trade API error (401) …")
-// when the access token has gone dormant (inactive > 2 h). Same detection the
-// nightly jobs use. see CLAUDE.md (E*Trade dormancy)
-function isEtradeAuthError(e: unknown): boolean {
-  const msg = (e instanceof Error ? e.message : String(e)).toLowerCase();
-  return msg.includes('401') || msg.includes('token') || msg.includes('auth') || msg.includes('oauth');
-}
-
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
 export class ETradeDataProvider implements OptionsProvider {
@@ -79,21 +71,29 @@ export class ETradeDataProvider implements OptionsProvider {
   }
 
   /**
-   * Run an E*Trade call; on a dormant-token auth failure, renew the token once
-   * and retry. This makes the on-demand options path (API-server options route,
-   * TraderAgent scout, Strategy Lab) self-heal from token dormancy the same way
-   * the nightly batch jobs already do — without it, any options fetch made > 2 h
-   * after the last E*Trade activity returned an empty chain (silently swallowed
-   * by the route's per-expiration catch). A fully expired token (past midnight
-   * ET) makes the renew throw, which propagates — the caller can't fix that
-   * without a manual re-auth. see CLAUDE.md (E*Trade dormancy)
+   * Run an E*Trade call; on ANY failure, renew the token once and retry. This makes
+   * the on-demand options path (API-server options route, TraderAgent scout, Strategy
+   * Lab, and the v2 execution engine's entry-time re-pricing) self-heal from token
+   * dormancy — without it, any options fetch made > 2 h after the last E*Trade activity
+   * returned an empty chain (silently swallowed by the route's per-expiration catch).
+   *
+   * We renew on any error, not just auth-shaped ones: a dormant token (idle > 2 h) does
+   * NOT reliably surface as a 401 — it can kill/hang the response stream (undici
+   * `terminated`), which the old auth-message heuristic missed, so the renewal
+   * that would have fixed it never ran (observed live 2026-07-01; mirrors the
+   * daily-iv-update probe fix v1.1.92). Renewing an active token errors harmlessly
+   * (swallowed); a genuine non-auth error (bad symbol, network down) simply fails again
+   * on the retry, surfacing the real error. A fully expired token (past midnight ET)
+   * makes the retry throw an auth error — the caller must prompt a manual re-auth.
+   * see CLAUDE.md (E*Trade dormancy)
    */
   private async withRenew<T>(fn: (creds: OAuthCredentials) => Promise<T>): Promise<T> {
     try {
       return await fn(this.getCreds());
-    } catch (err) {
-      if (!isEtradeAuthError(err)) throw err;
-      await renewAccessToken(this.getCreds());
+    } catch {
+      try {
+        await renewAccessToken(this.getCreds());
+      } catch { /* active-token renew errors harmlessly; the retry below decides the outcome */ }
       return await fn(this.getCreds());
     }
   }

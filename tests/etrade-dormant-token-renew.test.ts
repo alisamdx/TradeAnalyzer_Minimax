@@ -1,10 +1,15 @@
 // Regression: the on-demand E*Trade options path must self-heal from token
-// dormancy. E*Trade access tokens go dormant after ~2 h of inactivity and the
-// API then returns 401. The nightly jobs renew-and-retry, but the on-demand
-// getOptionsChain / getOptionsExpirations path did not — so any options fetch
-// made > 2 h after the last E*Trade activity (e.g. an evening TraderAgent run)
-// returned an empty chain, which the API route silently swallowed. The provider
-// now renews the dormant token once and retries. see CHANGELOG v1.1.48.
+// dormancy. E*Trade access tokens go dormant after ~2 h of inactivity; the
+// nightly jobs renew-and-retry, but the on-demand getOptionsChain /
+// getOptionsExpirations path did not — so any options fetch made > 2 h after the
+// last E*Trade activity returned an empty chain the API route silently swallowed.
+// The provider renews once and retries (v1.1.48).
+//
+// v1.1.94: renew on ANY error, not just auth-shaped ones. A dormant token doesn't
+// reliably return a 401 — it can kill the response stream (undici 'terminated'),
+// which the old auth-message heuristic missed, so the renewal never ran (observed
+// live 2026-07-01). Renewing an active token is harmless; a genuine error just
+// fails again on the retry.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -58,21 +63,32 @@ describe('ETradeDataProvider dormant-token renew-and-retry', () => {
     expect(exps).toEqual(['2026-07-17']);
   });
 
-  it('does NOT renew on a non-auth error (propagates it)', async () => {
+  it('renews on a non-auth "terminated" error (dormant token kills the stream) then retries', async () => {
+    // The v1.1.94 fix: a dormant token surfaces as a stream-terminated TypeError, NOT a
+    // 401. This must still trigger renew-and-retry (the old heuristic did not).
     const provider = new ETradeDataProvider(() => creds as never);
-    getETradeOptionsChain.mockRejectedValueOnce(new Error('E*Trade API error (500) server blew up'));
+    getETradeOptionsChain
+      .mockRejectedValueOnce(new TypeError('terminated'))
+      .mockResolvedValueOnce(emptyChain);
 
-    await expect(provider.getOptionsChain('AAPL', '2026-07-17')).rejects.toThrow('500');
-    expect(renewAccessToken).not.toHaveBeenCalled();
-    expect(getETradeOptionsChain).toHaveBeenCalledTimes(1); // no retry
+    const chain = await provider.getOptionsChain('AAPL', '2026-07-17');
+
+    expect(renewAccessToken).toHaveBeenCalledTimes(1);
+    expect(getETradeOptionsChain).toHaveBeenCalledTimes(2);
+    expect(chain.ticker).toBe('AAPL');
   });
 
-  it('propagates a renew failure (token expired past midnight)', async () => {
+  it('surfaces the retry error when renew fails and the retry still fails (expired past midnight)', async () => {
+    // Renew failure is swallowed; the retry runs and its error propagates (the real
+    // failure the caller must act on — e.g. a Reconnect prompt on a true midnight expiry).
     const provider = new ETradeDataProvider(() => creds as never);
-    getETradeOptionsChain.mockRejectedValue(new Error('E*Trade API error (401) token dormant'));
+    getETradeOptionsChain
+      .mockRejectedValueOnce(new TypeError('terminated'))
+      .mockRejectedValueOnce(new Error('E*Trade API error (401) token expired'));
     renewAccessToken.mockRejectedValueOnce(new Error('E*Trade renew token failed (401)'));
 
-    await expect(provider.getOptionsChain('AAPL', '2026-07-17')).rejects.toThrow('renew token failed');
+    await expect(provider.getOptionsChain('AAPL', '2026-07-17')).rejects.toThrow(/401|expired/);
     expect(renewAccessToken).toHaveBeenCalledTimes(1);
+    expect(getETradeOptionsChain).toHaveBeenCalledTimes(2);
   });
 });

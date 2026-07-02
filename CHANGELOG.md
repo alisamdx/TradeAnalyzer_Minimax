@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.94] — 2026-07-01
+
+### Fixed
+- **On-demand E*Trade options path now self-heals from a dormant token (same terminated-stream blind spot as v1.1.92, second path).** `ETradeDataProvider.withRenew` only renewed the token on an **auth-shaped** error (`isEtradeAuthError`: `401|token|auth|oauth`). A dormant token (idle > 2 h) doesn't reliably return a 401 — it kills the response stream (undici `terminated`) — so the renewal never ran and every on-demand options fetch **silently returned an empty chain** (swallowed by the options route's per-expiration `catch`). This affects the **API server** (`/options/:ticker`), the **Strategy Lab**, the **TraderAgent scout**, and — most importantly — the **v2 execution engine's entry-time re-pricing**, where a dormant token would make a live combo re-price come back empty. Discovered live 2026-07-01 while running an ad-hoc MRVL chain query: every expiry (incl. SPY) returned `[]` though the app was up. `withRenew` now **renews and retries once on ANY error** (renewing an active token errors harmlessly and is swallowed; a genuine non-auth error just fails again on the retry, surfacing the real error). Removed the now-unused `isEtradeAuthError` helper. Regression tests: `tests/etrade-dormant-token-renew.test.ts` (updated to the any-error contract + a `terminated`-stream case). `src/main/services/etrade-data-provider.ts`.
+
 ## [1.1.93] — 2026-07-01
 
 ### Added
