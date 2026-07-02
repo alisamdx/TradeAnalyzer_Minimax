@@ -20,7 +20,11 @@ const AUTH_URL    = 'https://us.etrade.com/e/t/etws/authorize';
 
 const REQUEST_TOKEN_PATH = '/oauth/request_token';
 const ACCESS_TOKEN_PATH  = '/oauth/access_token';
-const RENEW_TOKEN_PATH   = '/v1/oauth/renew_access_token';
+// E*Trade OAuth endpoints live under /oauth/, NOT /v1/oauth/ (the /v1/ prefix is only for the
+// market/accounts APIs). This was '/v1/oauth/renew_access_token' — a wrong path that made EVERY
+// renew fail (404), so dormant tokens (idle > 2 h) were never revived and always surfaced as
+// "token expired" until a manual re-auth. Confirmed against E*Trade docs. See CLAUDE.md.
+const RENEW_TOKEN_PATH   = '/oauth/renew_access_token';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

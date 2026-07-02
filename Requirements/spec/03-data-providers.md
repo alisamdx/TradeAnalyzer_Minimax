@@ -88,7 +88,7 @@ E*Trade is the live options + portfolio source. Implemented in `etrade-auth.ts` 
 4. Tokens are stored encrypted.
 
 ### Token lifecycle (critical)
-- Tokens **expire at midnight ET**. After ~2h of inactivity they go **dormant** → call `renewAccessToken()` to reactivate.
+- Tokens **expire at midnight ET**. After ~2h of inactivity they go **dormant** (E*Trade returns `oauth_problem=token_rejected`) → call `renewAccessToken()` to reactivate. **The renew endpoint is `/oauth/renew_access_token` — NOT `/v1/oauth/...`** (the `/v1/` prefix is only for market/accounts APIs). It was wrong until v1.1.99, so renewal silently failed and dormant tokens never auto-revived; the mocked renew tests couldn't catch it (`tests/etrade-renew-endpoint.test.ts` now asserts the real URL).
 - A **date-based** `checkConnection()` returns `ok | no_credentials | no_token | expired` with **no API call** (compares token issue date to current ET date).
 - Batch jobs attempt `renewToken()` on auth failure; a hard (midnight) expiry surfaces a "Reconnect → Settings" notification.
 - **All requests go through `etradeGet(path, params, creds)`** which builds the OAuth 1.0a signature. Never construct auth headers by hand.

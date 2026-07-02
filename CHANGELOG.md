@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.99] — 2026-07-02
+
+### Fixed
+- **E*Trade token renewal has never worked — the renew endpoint path was wrong.** `RENEW_TOKEN_PATH` was `'/v1/oauth/renew_access_token'`, but E*Trade's OAuth endpoints live under `/oauth/` (the `/v1/` prefix is only for the market/accounts APIs) — the correct path is `'/oauth/renew_access_token'` (confirmed against E*Trade docs). So **every** `renewAccessToken()` call hit a bad URL and failed; since renew errors are swallowed throughout the renew-and-retry paths, a dormant token (idle > 2 h) was **never actually revived** and always surfaced as "token expired," forcing a manual re-auth. This is the true root cause behind the recurring evening-batch "E*Trade token expired" failures — the v1.1.92/94 fixes improved *detection* (renew-and-retry on any error) but couldn't help because the renewal itself was broken; the unit tests mock `renewAccessToken`, so a wrong URL was invisible. Diagnosed live 2026-07-02: a token reconnected at ~11 am (Daily Brief succeeded) returned `oauth_problem=token_rejected` on the 5 pm batch and an on-demand AAPL options fetch, because the afternoon ran only Polygon traffic → the E*Trade token went dormant → renew hit the wrong URL → never recovered. Regression test asserts the real fetch URL (`tests/etrade-renew-endpoint.test.ts`) — the existing dormancy tests mock renewal and couldn't catch it. `src/main/services/etrade-auth.ts`.
+
 ## [1.1.98] — 2026-07-02
 
 ### Added
