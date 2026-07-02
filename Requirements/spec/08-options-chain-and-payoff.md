@@ -74,7 +74,11 @@ multi-quarter thesis) and get a **good / caution / bad** verdict from determinis
 (reward-vs-risk for defined-risk spreads only — a CSP's structural max-loss is *not* false-flagged;
 undefined-risk; IV-regime fit — buying expensive vol → warn; selling cheap vol → warn for income/directional but **info** for ownership/happy-to-own (intent-gated, premium-secondary, v1.1.78); direction-vs-trend,
 intent-gated; earnings-before-expiry, intent-gated; cushion-vs-`atr_pct`; horizon match;
-ownership basis). When flagged, the Strategy Lab **suggests a better structure** for the same
+ownership basis; **liquidity — open interest + bid/ask spread** (v1.1.98): any option leg below
+`minOpenInterest` (100) or a widest bid/ask spread above `maxSpreadPct` (20% of mid) → **warn**
+(judged by the worst leg); legs built from the live chain carry OI/volume/bid/ask, manually-entered
+legs carry none → **info** "liquidity unknown". Open interest is also shown per leg in the legs list,
+and fed to the AI assessment so it weighs execution risk). When flagged, the Strategy Lab **suggests a better structure** for the same
 ticker (explicit per-intent slug allowlists — ownership→short put / put credit spread,
 income→short-premium, directional→bull/bear, hedge→long puts; pin-bet butterflies excluded;
 IV-regime aware; may advise not selling premium) — with an **Open in Lab →**

@@ -1313,6 +1313,15 @@ export interface PayoffLeg {
   vega: number | null;
   /** IV as percentage (e.g. 28.5). Null if unknown. */
   iv: number | null;
+  /** Open interest on the contract when the leg was built from the chain.
+   *  Undefined/null for manually-entered legs (liquidity then unknown). */
+  openInterest?: number | null;
+  /** Day volume on the contract when the leg was built from the chain. */
+  volume?: number | null;
+  /** Bid (per share) when the leg was built from the chain. */
+  bid?: number | null;
+  /** Ask (per share) when the leg was built from the chain. */
+  ask?: number | null;
   /** Human-readable label shown in the legs list. */
   label: string;
 }

@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.98] — 2026-07-02
+
+### Added
+- **Liquidity / open-interest check in the Payoff Pre-Trade Validator.** The validator now weighs **liquidity** as a deterministic check (#8): any option leg with **open interest below 100**, or a **widest bid/ask spread above 20% of mid**, triggers a **caution** (judged by the worst leg — one thin leg flags the whole structure). Legs built from the live chain now carry `openInterest`/`volume`/`bid`/`ask` (added to `PayoffLeg`); manually-entered legs carry none, so the check reports **liquidity unknown (info)** rather than a false pass. Open interest is also shown per leg in the legs list (Δ / IV / **OI**), and the same liquidity data is fed to the **AI "Assess Trade"** context + prompt so the assessment factors execution risk (with an explicit instruction not to cite liquidity figures it wasn't given). Motivation: a strike can look great on paper and be untradeable — thin OI / wide spreads mean poor fills and hard exits. New thresholds `PRETRADE_THRESHOLDS.minOpenInterest` / `maxSpreadPct`. Regression tests: `tests/pretrade-checks.test.ts` (+5). Files: `src/main/services/pretrade-checks.ts`, `src/main/services/payoff-service.ts`, `src/renderer/src/views/PayoffView.tsx`, `src/shared/types.ts`. Spec: `Requirements/spec/08-options-chain-and-payoff.md §8.B.7`.
+
 ## [1.1.97] — 2026-07-02
 
 ### Added

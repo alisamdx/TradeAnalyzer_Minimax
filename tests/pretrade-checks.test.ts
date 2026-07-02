@@ -156,6 +156,44 @@ describe('runPretradeChecks — horizon match', () => {
   });
 });
 
+describe('runPretradeChecks — liquidity (open interest + spread)', () => {
+  it('flags thin open interest on an option leg', () => {
+    const checks = runPretradeChecks(input({ legs: [leg({ openInterest: 20, bid: 1.9, ask: 2.1 })] }));
+    expect(byKey(checks, 'liquidity')?.status).toBe('warn');
+    expect(byKey(checks, 'liquidity')?.detail).toMatch(/open interest/i);
+  });
+
+  it('flags a wide bid/ask spread even when open interest is deep', () => {
+    // mid 2.0, spread 0.8 → 40% of mid (> 20%)
+    const checks = runPretradeChecks(input({ legs: [leg({ openInterest: 5000, bid: 1.6, ask: 2.4 })] }));
+    expect(byKey(checks, 'liquidity')?.status).toBe('warn');
+    expect(byKey(checks, 'liquidity')?.detail).toMatch(/spread/i);
+  });
+
+  it('passes a liquid leg (deep OI, tight spread)', () => {
+    const checks = runPretradeChecks(input({ legs: [leg({ openInterest: 5000, bid: 1.98, ask: 2.02 })] }));
+    expect(byKey(checks, 'liquidity')?.status).toBe('pass');
+  });
+
+  it('reports liquidity as unknown when no leg carries open interest (manual entry)', () => {
+    const checks = runPretradeChecks(input({ legs: [leg({ openInterest: undefined, bid: undefined, ask: undefined })] }));
+    expect(byKey(checks, 'liquidity')?.status).toBe('info');
+    expect(byKey(checks, 'liquidity')?.title).toMatch(/unknown/i);
+  });
+
+  it('is judged by the worst leg — one thin leg flags the whole structure', () => {
+    const legs = [
+      leg({ side: 'sell', strike: 95, openInterest: 4000, bid: 1.9, ask: 2.0 }),
+      leg({ side: 'buy',  strike: 90, openInterest: 15,   bid: 0.5, ask: 0.6 }),
+    ];
+    const checks = runPretradeChecks(input({
+      legs,
+      metrics: { maxProfit: 150, maxLoss: -350, unlimitedProfit: false, unlimitedLoss: false, breakevenPrices: [93.5], netPremium: 150, netDelta: 0.2, netTheta: 1, netVega: -1 },
+    }));
+    expect(byKey(checks, 'liquidity')?.status).toBe('warn');
+  });
+});
+
 describe('rollUpVerdict', () => {
   it('maps fail → bad, warn → caution, else good', () => {
     expect(rollUpVerdict([{ key: 'a', status: 'pass', title: '', detail: '' }])).toBe('good');

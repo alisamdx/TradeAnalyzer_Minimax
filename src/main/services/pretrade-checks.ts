@@ -23,6 +23,8 @@ export const PRETRADE_THRESHOLDS = {
   cushionAtrMult: 1.5, // short-strike cushion must exceed this × ATR%
   shortHorizonDte: 60, // a multi-quarter thesis in a shorter structure ⇒ mismatch
   neutralDelta: 0.15,  // |net delta| below this ⇒ treat as directionally neutral
+  minOpenInterest: 100, // any option leg below this OI ⇒ thin, hard to exit at a fair price
+  maxSpreadPct: 20,    // widest leg bid/ask beyond this % of mid ⇒ poor fills / slippage
 };
 
 export interface PretradeCheckMetrics {
@@ -208,6 +210,52 @@ export function runPretradeChecks(input: PretradeCheckInput): PretradeCheck[] {
         key: 'ownership_basis', status: 'info', title: 'Effective ownership basis',
         detail: `If assigned, your effective basis is ~$${basis.toFixed(2)} (strike $${sp.strike} − $${perShareCredit.toFixed(2)} credit). Confirm that's a price you genuinely want to own.`,
       });
+    }
+  }
+
+  // 8. Liquidity — open interest + bid/ask spread on the option legs.
+  //    Thin OI / wide spreads mean poor fills and a hard exit; the strike can look great on
+  //    paper and be untradeable. OI is populated when a leg is built from the live chain;
+  //    manually-entered legs carry none, so we surface that as "unknown", not a pass.
+  const opts = optionLegs(legs);
+  if (opts.length > 0) {
+    const withOi = opts.filter(l => l.openInterest != null);
+    if (withOi.length === 0) {
+      checks.push({
+        key: 'liquidity', status: 'info', title: 'Liquidity unknown',
+        detail: 'No open-interest data on these legs (entered manually) — check open interest, volume, and the bid/ask spread on the chain before trading. Thin options are hard to exit at a fair price.',
+      });
+    } else {
+      // Worst leg by open interest.
+      const minOiLeg = withOi.reduce((m, l) => ((l.openInterest ?? Infinity) < (m.openInterest ?? Infinity) ? l : m), withOi[0]!);
+      const minOi = minOiLeg.openInterest ?? 0;
+
+      // Widest bid/ask spread as % of mid, among legs that quote both sides.
+      const widest = opts.reduce<{ leg: PayoffLeg; pct: number } | null>((m, l) => {
+        if (l.bid == null || l.ask == null) return m;
+        const mid = (l.bid + l.ask) / 2;
+        if (mid <= 0) return m;
+        const pct = ((l.ask - l.bid) / mid) * 100;
+        return (m == null || pct > m.pct) ? { leg: l, pct } : m;
+      }, null);
+
+      const thinOi     = minOi < PRETRADE_THRESHOLDS.minOpenInterest;
+      const wideSpread = widest != null && widest.pct > PRETRADE_THRESHOLDS.maxSpreadPct;
+
+      if (thinOi || wideSpread) {
+        const bits: string[] = [];
+        if (thinOi) bits.push(`the ${minOiLeg.side} ${minOiLeg.type} at $${minOiLeg.strike} has only ${minOi.toLocaleString()} contracts of open interest (below ${PRETRADE_THRESHOLDS.minOpenInterest})`);
+        if (wideSpread) bits.push(`the widest bid/ask spread is ${widest!.pct.toFixed(0)}% of mid (the $${widest!.leg.strike} ${widest!.leg.type})`);
+        checks.push({
+          key: 'liquidity', status: 'warn', title: 'Thin liquidity',
+          detail: `Liquidity is a concern — ${bits.join('; ')}. Illiquid options are hard to enter or exit at a fair price and you bleed on slippage; confirm you can get filled near mid before trading.`,
+        });
+      } else {
+        checks.push({
+          key: 'liquidity', status: 'pass', title: 'Adequate liquidity',
+          detail: `Lowest leg open interest is ${minOi.toLocaleString()} contracts${widest != null ? `, widest spread ${widest.pct.toFixed(0)}% of mid` : ''} — tradable.`,
+        });
+      }
     }
   }
 

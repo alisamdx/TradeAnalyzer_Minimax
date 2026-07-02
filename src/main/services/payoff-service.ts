@@ -133,6 +133,7 @@ When assessing a strategy consider:
 - Risk/reward ratio relative to the stock's probable price behaviour
 - Probability of profit derived from delta when available
 - How time decay, volatility exposure, and directional risk interact for this exact setup
+- Liquidity and execution risk: open interest, volume, and bid/ask spread per leg — thin open interest or wide spreads mean poor fills and a hard exit, so factor them into the rating and key risks. Only cite liquidity figures actually provided in the leg data; if a leg lists no OI/volume/spread, treat its liquidity as unknown rather than assuming it.
 - Practical, actionable exit rules that a retail trader can actually execute
 
 You MUST call the submit_trade_assessment tool with your complete, structured analysis.`;
@@ -200,6 +201,11 @@ export class PayoffService {
       parts.push(`qty ${leg.quantity}`);
       if (leg.delta != null)  parts.push(`Δ ${leg.delta}`);
       if (leg.iv    != null)  parts.push(`IV ${leg.iv.toFixed(1)}%`);
+      if (leg.type !== 'stock') {
+        if (leg.openInterest != null) parts.push(`OI ${leg.openInterest}`);
+        if (leg.volume       != null) parts.push(`vol ${leg.volume}`);
+        if (leg.bid != null && leg.ask != null) parts.push(`bid/ask $${leg.bid.toFixed(2)}/$${leg.ask.toFixed(2)}`);
+      }
       return parts.join(', ');
     }).join('\n');
 

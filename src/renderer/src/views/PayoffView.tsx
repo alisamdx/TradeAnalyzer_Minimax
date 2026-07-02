@@ -1980,6 +1980,9 @@ function LegCard({
         {leg.iv != null && (
           <span title="IV">IV {(leg.iv * 100).toFixed(1)}%</span>
         )}
+        {leg.openInterest != null && (isCall || isPut) && (
+          <span title="Open interest (liquidity)">OI {leg.openInterest.toLocaleString()}</span>
+        )}
       </div>
     </div>
   );
@@ -2796,6 +2799,10 @@ export function PayoffView({ initialTicker, initialSpot, initialExpiry, initialS
       theta:    contract.theta,
       vega:     contract.vega,
       iv:       contract.iv,
+      openInterest: contract.openInterest,
+      volume:   contract.volume,
+      bid:      contract.bid,
+      ask:      contract.ask,
       label:    `${side === 'buy' ? 'Buy' : 'Sell'} ${type.charAt(0).toUpperCase() + type.slice(1)} $${contract.strike}`,
     }]);
     setStatus(`Added ${side} ${type} $${contract.strike} from chain`);
