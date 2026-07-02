@@ -789,10 +789,17 @@ open at 19 obs), is the largest identified lever on the low-pass-rate complaint.
    settle both to expiry (net credit − execution friction − DTE/theta economics). Blocked like
    the lizard-vs-spread study — the July structures don't settle until Jul 17–31 2026; re-run
    after. Only ship a monthly-preference (or widened band) if at-worst-neutral on net outcome.
-2. **Same-ticker live A/B** (needs app running): re-price MRVL's identical big-lizard at the
-   Aug 21 monthly to measure the true intraday liquidity delta for one clean case.
-3. If it survives: a liquidity-aware tie-break in `selectExpiration` (prefer the monthly when its
-   DTE is within an acceptable band), NOT a blind "always monthly."
+2. ~~Same-ticker live A/B~~ — **DONE 2026-07-02**: MRVL big-lizard legs priced live at all three
+   expiries in one request (zero time-of-day confound — same instant, settled OI). The Jul 31
+   weekly the lab chose vs the flanking monthlies: ATM put **OI 30** vs 4,888 (Jul 17) / 1,423
+   (Aug 21); ATM call **OI 68** vs 2,783 / 3,233; wing **OI 119 @ 19% spread** vs 783 @ 9% /
+   1,466 @ 5%. **The weekly is 40–160× thinner in OI and 2–4× wider in spread than either
+   neighbour** — structural, not a stale-quote artifact. Confirms the lever is real and large;
+   an ATM leg going OI 30→4,888 / spread 7%→3% clears the 8 bar. Caveat holds: neither monthly
+   is at 30 DTE (Jul 17 = 15, Aug 21 = 50), so the DTE/theta economics change — item 1 remains
+   the acceptance test.
+3. If it survives item 1: a liquidity-aware tie-break in `selectExpiration` (prefer the monthly
+   when its DTE is within an acceptable band), NOT a blind "always monthly."
 
 -----
 
