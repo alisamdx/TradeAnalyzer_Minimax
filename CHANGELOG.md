@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.96] — 2026-07-02
+
+### Added
+- **Roll / Closure Analyzer (Analysis → 🔄 Roll/Close).** The exit-side companion to the Payoff visualizer: where Payoff reviews a structure *before* entry, this analyzes an *existing or hypothetical* single short option (cash-secured put or covered call) for a **close vs hold vs roll** decision. Enter the position manually (ticker, put/call, strike, expiry, contracts, entry credit) or **load an open CSP/CC straight from the E*Trade-synced portfolio**. The screen shows the current close-now P&L (and % of max credit banked), moneyness/DTE, assignment probability (Δ), breakeven and capital at risk, plus a rule-based **hold/close/roll recommendation** — then ranks **credit-roll candidates** across the next several expiries and a strike band (roll down / same / up) by a **metric you pick**: (1) annualized return on capital, (2) largest net credit, (3) risk-adjusted yield (delta-penalized), or (4) capital efficiency (credit per $ committed). Switching the metric re-ranks instantly (no re-fetch). Credit-rolls only (net credit > 0, matching the wheel discipline); each candidate shows the new breakeven with the roll credit folded into the cumulative basis, and a liquidity flag on wide bid/ask. New `RollAnalyzerService` (pure, unit-tested metric math), `roll:analyze` IPC, `window.api.roll.analyze`, `Roll*` types, `RollAnalyzerView.tsx`. Marks are bid/ask midpoints — confirm real fills before trading. Regression tests: `tests/roll-analyzer.test.ts` (9). Formulas: `docs/formulas.md#roll-analyzer`.
+
 ## [1.1.95] — 2026-07-02
 
 ### Added

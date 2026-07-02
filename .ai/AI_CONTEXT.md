@@ -100,7 +100,7 @@ src/main/
 src/preload/index.ts        window.api.* bridge (34 namespaces)
 src/renderer/src/
   App.tsx                    Sidebar routing + layout + status bar + cross-view nav events
-  views/                     30 feature views (see §6) — incl. ConstituentsView (Misc, v1.1.95)
+  views/                     31 feature views (see §6) — incl. ConstituentsView (Misc, v1.1.95), RollAnalyzerView (Analysis, v1.1.96)
   global.d.ts                window.api type declaration (ONLY place it's declared)
   knowledge/                 Embedded tastylive strategy guide (images + JSON)
   styles.css

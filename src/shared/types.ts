@@ -1360,6 +1360,88 @@ export interface PayoffAssessment {
   };
 }
 
+// ─── Roll / Closure Analyzer ───────────────────────────────────────────────────
+// Exit-side companion to the Payoff visualizer: given an EXISTING (or hypothetical)
+// single short option (CSP or covered call), assess close vs hold vs roll, and rank
+// roll candidates across expiries/strikes by a user-selected efficiency metric.
+// Credit-rolls only (net credit > 0), matching the wheel discipline.
+
+export type RollOptionType = 'put' | 'call';
+
+/** The ranking metric the user selects on the screen; the system re-ranks by it. */
+export type RollMetric = 'annualizedRoc' | 'netCredit' | 'riskAdjusted' | 'capitalEfficiency';
+
+/** The short-option position to analyze. */
+export interface RollPositionInput {
+  ticker: string;
+  optionType: RollOptionType;   // put = cash-secured put; call = covered call
+  strike: number;
+  expiration: string;           // YYYY-MM-DD of the current short leg
+  contracts: number;            // number of contracts (> 0)
+  entryCredit: number;          // premium received per share when opened (e.g. 2.50)
+}
+
+/** Current-position assessment (close-now vs hold-to-expiry economics). */
+export interface RollCurrentState {
+  underlyingPrice: number | null;
+  markToClose: number | null;   // per-share mid to buy-to-close the short now
+  bid: number | null;
+  ask: number | null;
+  delta: number | null;         // short-leg delta
+  iv: number | null;
+  dte: number;
+  moneyness: 'ITM' | 'ATM' | 'OTM';
+  openCredit: number;           // $ received at open (entryCredit * 100 * contracts)
+  closeCost: number | null;     // $ to buy-to-close now
+  unrealizedPnl: number | null; // openCredit − closeCost
+  pctOfMaxProfit: number | null;// unrealizedPnl / openCredit (0..1; how much of the credit is banked)
+  capitalAtRisk: number;        // CSP: strike*100*contracts ; CC: underlying*100*contracts
+  breakeven: number;            // put: strike − entryCredit ; call: strike + entryCredit
+  assignmentProbability: number | null; // |delta| as 0..1
+  chainStale: boolean;          // true when the short leg couldn't be re-priced from a live chain
+}
+
+export type RollDirection = 'same' | 'out-down' | 'out-up';
+
+/** A single roll candidate (buy-to-close current + sell-to-open a later short). */
+export interface RollCandidate {
+  expiration: string;
+  dte: number;
+  addedDte: number;             // dte(new) − dte(current)
+  strike: number;
+  optionType: RollOptionType;
+  direction: RollDirection;
+  newBid: number;
+  newAsk: number;
+  newMid: number;
+  newDelta: number | null;
+  buyToCloseMid: number;        // per-share cost to close the current short
+  netCreditPerShare: number;    // sell-to-open new − buy-to-close current (> 0 = credit)
+  netCredit: number;            // netCreditPerShare * 100 * contracts
+  capitalAtRisk: number;        // new strike (put) or underlying (call) * 100 * contracts
+  annualizedRoc: number | null; // netCreditPerShare / capitalPerShare / addedDte * 365
+  capitalEfficiency: number;    // netCreditPerShare / capitalPerShare (credit per $ committed)
+  assignmentProbability: number | null; // |newDelta| 0..1
+  breakeven: number;
+  liquidityOk: boolean;         // both legs two-sided with a non-crazy spread
+  score: number;                // value of the selected metric (ranking key)
+}
+
+export interface RollRecommendation {
+  action: 'hold' | 'close' | 'roll';
+  reason: string;
+}
+
+export interface RollAnalysis {
+  input: RollPositionInput;
+  metric: RollMetric;
+  current: RollCurrentState;
+  candidates: RollCandidate[];  // ranked desc by the selected metric's score
+  recommendation: RollRecommendation;
+  notes: string[];
+  generatedAt: string;
+}
+
 // ─── Pre-Trade Validator (Payoff view) ─────────────────────────────────────────
 // Validates a hand-built Payoff structure against the user's intent before placing
 // it. Decision-support only — see Requirements/PRE_TRADE_VALIDATOR_SPEC.md.

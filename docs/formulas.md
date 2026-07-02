@@ -719,3 +719,24 @@ the narrowest spread exceeds `targetRisk`, the narrowest is surfaced with `excee
 (so a small account sees — and can skip — the trade rather than getting no chip). The chip shows
 **breakeven + move-to-profit, NOT a PoP**: the lab's `popEstimate` is short-strike (credit-spread)
 semantics and would badly overstate a debit spread's true probability of profit.
+
+## Roll analyzer
+
+`src/main/services/roll-analyzer-service.ts` — exit-side analysis for a single short option
+(cash-secured put or covered call). All marks are bid/ask midpoints; credit-rolls only.
+
+- **Close-now P&L** = `openCredit − closeCost`, where `openCredit = entryCredit × 100 × contracts`
+  and `closeCost = markToClose × 100 × contracts` (buy-to-close the current short at its mid).
+- **% of max profit** = `unrealizedPnl / openCredit` (how much of the credit is already banked).
+- **Breakeven (current)** = put: `strike − entryCredit`; call: `strike + entryCredit`.
+- **Assignment probability** ≈ `|delta|` of the short leg.
+- **Roll net credit / sh** = `sellToOpenMid(new) − buyToCloseMid(current)`; only candidates > 0 are kept.
+- **Capital / sh** = put: new `strike`; call: `underlyingPrice`. **Capital at risk** = `capital/sh × 100 × contracts`.
+- **Annualized ROC** = `(netCredit/sh ÷ capital/sh) ÷ addedDte × 365`, where `addedDte = dte(new) − dte(current)` (≥ 1).
+- **Capital efficiency** = `netCredit/sh ÷ capital/sh` (credit per $ committed; not annualized — favors rolling down).
+- **Risk-adjusted score** = `annualizedRoc × (1 − assignmentProbability)`.
+- **New breakeven** (after roll) folds the roll credit into the cumulative basis: cumulative credit
+  = `entryCredit + netCredit/sh`; breakeven = put: `newStrike − cumulative`; call: `newStrike + cumulative`.
+
+The four metrics are user-selectable on the screen; ranking is pure (`scoreByMetric`) so switching
+the metric re-ranks client-side without re-fetching chains.

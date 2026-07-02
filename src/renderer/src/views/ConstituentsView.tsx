@@ -2,7 +2,7 @@
 // the date each ticker was first added to its index. Surfaces what the daily
 // constituents-refresh job (v1.1.91) adds over time; rows added recently are badged NEW.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import type { ConstituentWithMeta, ConstituentsMeta } from '@shared/types';
 
 type IndexName = 'sp500' | 'russell1000';
@@ -80,11 +80,11 @@ export function ConstituentsView() {
   }
 
   const arrow = (key: SortKey) => (key === sortKey ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '');
-  const th: React.CSSProperties = {
+  const th: CSSProperties = {
     textAlign: 'left', padding: '8px 10px', borderBottom: '2px solid var(--border)',
     cursor: 'pointer', userSelect: 'none', position: 'sticky', top: 0, background: 'var(--bg-elev)',
   };
-  const td: React.CSSProperties = { padding: '6px 10px', borderBottom: '1px solid var(--border)' };
+  const td: CSSProperties = { padding: '6px 10px', borderBottom: '1px solid var(--border)' };
 
   return (
     <div style={{ padding: 16, maxWidth: 1000 }}>

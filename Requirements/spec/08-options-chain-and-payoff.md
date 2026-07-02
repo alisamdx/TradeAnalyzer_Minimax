@@ -87,3 +87,11 @@ to the execution engine. `window.api.pretradeValidator.validate/history`; pure c
 context cached 10 min + Refresh action); every validation persisted to `pretrade_validations`
 (migration 061). Design doc: `Requirements/PRE_TRADE_VALIDATOR_SPEC.md`. Acceptance:
 `tests/pretrade-checks.test.ts`.
+
+## Part C — Roll / Closure Analyzer (v1.1.96)
+
+Exit-side companion to Payoff. Service: `roll-analyzer-service.ts`. IPC: `window.api.roll.analyze`. View: `RollAnalyzerView.tsx` (Analysis → 🔄 Roll/Close). Scoped to a **single short option** — cash-secured put or covered call (the wheel book).
+
+Input is entered manually or **loaded from an open E*Trade-synced CSP/CC** (`portfolio.etrade.listPositions`). The analyzer prices the current short from the live chain and reports: close-now P&L + **% of max credit banked**, moneyness/DTE, assignment probability (|Δ|), breakeven, capital at risk. A **rule-based hold/close/roll recommendation** (no LLM) fires: close when ≥80% of the credit is banked; roll when ITM / |Δ|≥0.5 and a credit roll exists; else hold.
+
+**Roll candidates** are scanned across the next ~6 expirations and a strike band (0.80–1.15 × current strike → roll down / same / up), **credit-rolls only** (`sellToOpenMid(new) − buyToCloseMid(current) > 0`). Each shows net credit, annualized ROC, capital efficiency, assignment Δ, and the **new breakeven** with the roll credit folded into the cumulative basis. Ranked by a **user-selected metric** — annualized ROC / largest net credit / risk-adjusted yield (delta-penalized) / capital efficiency — switching re-ranks client-side (no re-fetch). Marks are bid/ask midpoints (per-leg liquidity flag on wide spreads); decision-support only, places no orders. Formulas: `docs/formulas.md#roll-analyzer`. Metric math is pure (`buildRollCandidates`/`scoreByMetric`/`recommendAction`); acceptance: `tests/roll-analyzer.test.ts`.

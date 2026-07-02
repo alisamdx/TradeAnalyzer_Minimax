@@ -44,6 +44,7 @@ import { BacktestEngine } from './services/backtest-engine.js';
 import { registerBacktestIpc } from './ipc/ipc-backtest.js';
 import { registerFiltersIpc } from './ipc/ipc-filters.js';
 import { registerPayoffIpc } from './ipc/ipc-payoff.js';
+import { registerRollIpc } from './ipc/ipc-roll.js';
 import { MarketDataProvider } from './services/marketdata-provider.js';
 import { IVolatilityProvider } from './services/ivolatility-provider.js';
 import { IvHistoryService } from './services/iv-history-service.js';
@@ -342,6 +343,7 @@ app.whenReady().then(() => {
 
   // Payoff Visualizer — saved strategy CRUD
   registerPayoffIpc(db);
+  registerRollIpc(optionsProvider);
 
   // v0.17.0 — IV History: IVolatility.com provides true as-of-date daily IVX snapshots.
   // MarketData.app is kept for Test API diagnostics only (not used for backfill).

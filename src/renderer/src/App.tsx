@@ -36,10 +36,11 @@ import { TradingDeskView } from './views/TradingDeskView.js';
 import { ExecutionSettingsView } from './views/ExecutionSettingsView.js';
 import { MiscView } from './views/MiscView.js';
 import { ConstituentsView } from './views/ConstituentsView.js';
+import { RollAnalyzerView } from './views/RollAnalyzerView.js';
 
 declare const __APP_VERSION__: string;
 
-type View = 'watchlists' | 'screener' | 'filters' | 'analysis' | 'validate' | 'portfolio' | 'opportunity' | 'settings' | 'alerts' | 'data' | 'optionsChain' | 'payoff' | 'agent' | 'backtest' | 'testApi' | 'ivHistory' | 'knowledge' | 'strategyLab' | 'batch' | 'dailyBrief' | 'tradeScoring' | 'retrospect' | 'conviction' | 'newsResearch' | 'earningsCalendar' | 'briefReplay' | 'tradingDesk' | 'executionSettings' | 'misc' | 'constituents';
+type View = 'watchlists' | 'screener' | 'filters' | 'analysis' | 'validate' | 'portfolio' | 'opportunity' | 'settings' | 'alerts' | 'data' | 'optionsChain' | 'payoff' | 'agent' | 'backtest' | 'testApi' | 'ivHistory' | 'knowledge' | 'strategyLab' | 'batch' | 'dailyBrief' | 'tradeScoring' | 'retrospect' | 'conviction' | 'newsResearch' | 'earningsCalendar' | 'briefReplay' | 'tradingDesk' | 'executionSettings' | 'misc' | 'constituents' | 'rollAnalyzer';
 
 type NavEntry = {
   id: number;
@@ -706,6 +707,7 @@ export function App() {
         />
       );
       case 'constituents': return <ConstituentsView />;
+      case 'rollAnalyzer': return <RollAnalyzerView />;
       case 'settings': return (
         <SettingsView
           etradeWarning={etradeWarning}
@@ -1003,6 +1005,12 @@ export function App() {
             onClick={() => navigateSidebar('payoff')}
           >
             📐 Payoff
+          </button>
+          <button
+            className={`nav-btn ${currentView === 'rollAnalyzer' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('rollAnalyzer')}
+          >
+            🔄 Roll/Close
           </button>
           <button
             className={`nav-btn ${currentView === 'validate' ? 'active' : ''}`}

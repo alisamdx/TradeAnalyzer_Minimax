@@ -69,6 +69,9 @@ import type {
   SavedPayoffStrategy,
   PayoffAssessInput,
   PayoffAssessment,
+  RollPositionInput,
+  RollMetric,
+  RollAnalysis,
   PretradeValidateInput,
   PretradeValidationResult,
   PretradeValidationRow,
@@ -1041,6 +1044,11 @@ function buildApi() {
       invoke<PretradeValidationRow[]>('pretradeValidator:history', limit),
   };
 
+  const roll = {
+    analyze: (input: RollPositionInput, metric: RollMetric) =>
+      invoke<RollAnalysis>('roll:analyze', input, metric),
+  };
+
   const ivHistory = {
     getCoverage:         (universe: 'sp500' | 'russell1000' | 'both' | 'etf') => invoke<IvHistoryCoverage>('iv-history:get-coverage', universe),
     getGaps:             (universe: 'sp500' | 'russell1000' | 'both' | 'etf') => invoke<IvHistoryGapSummary>('iv-history:get-gaps', universe),
@@ -1226,7 +1234,7 @@ function buildApi() {
   };
 
   return {
-    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, historical, portfolio, alerts, optionsChain, agent, backtest, leapsCsp, collaredLeaps, testApi, etrade, filters, payoff, pretradeValidator, ivHistory, opportunity, strategyLab, batch, scoring, paper, conviction, news, earnings, briefReplay, execution },
+    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, historical, portfolio, alerts, optionsChain, agent, backtest, leapsCsp, collaredLeaps, testApi, etrade, filters, payoff, roll, pretradeValidator, ivHistory, opportunity, strategyLab, batch, scoring, paper, conviction, news, earnings, briefReplay, execution },
     dialog: {
       prompt: (opts: { title: string; defaultValue?: string }) =>
         invoke<string | null>('dialog:prompt', opts),

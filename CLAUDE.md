@@ -127,8 +127,8 @@ Update only what the change touches — don't regenerate everything:
 | `src/main/services/secure-settings.ts` | Encrypted settings (E*Trade creds) |
 | `src/main/services/jobs/*.ts` | 12 batch job handlers |
 | `src/main/ipc/*.ts` | 27 IPC handler modules |
-| `src/renderer/src/App.tsx` | Layout + sidebar routing (9 sections, 29 views) + status bar |
-| `src/renderer/src/views/*.tsx` | 29 feature views |
+| `src/renderer/src/App.tsx` | Layout + sidebar routing (9 sections, 31 views) + status bar |
+| `src/renderer/src/views/*.tsx` | 31 feature views |
 | `src/renderer/src/global.d.ts` | `window.api` type declaration (only place) |
 | `src/shared/types.ts` | All cross-process types |
 | `src/preload/index.ts` | `window.api.*` bridge (34 namespaces) |
