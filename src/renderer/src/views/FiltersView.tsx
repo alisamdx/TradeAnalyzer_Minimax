@@ -16,7 +16,7 @@ const TEMPLATE_DEFAULT_SORT: Record<string, { key: string; dir: SortDirection }>
   iv_rank_high:        { key: 'ivRank',         dir: 'desc' },
   assignment_risk:     { key: 'delta',          dir: 'desc' },
   wheel_opportunity:   { key: 'suitabilityScore', dir: 'desc' },
-  wheel_vetted:        { key: 'annualizedReturn', dir: 'desc' },
+  wheel_vetted:        { key: 'riskAdjustedReturn', dir: 'desc' },
 };
 
 // ─── Category metadata ────────────────────────────────────────────────────────
@@ -559,7 +559,7 @@ function formatMetricValue(key: string, value: number | null | undefined): strin
   if (value === null || value === undefined) return '—';
   if (key === 'ivRank') return `${value}`;               // IV Rank is 0–100, not a %
   if (key === 'openInterest') return value.toLocaleString();
-  const percentKeys = ['currentIv', 'priceVsSma50', 'priceVsSma200', 'annualizedReturn'];
+  const percentKeys = ['currentIv', 'priceVsSma50', 'priceVsSma200', 'annualizedReturn', 'riskAdjustedReturn'];
   if (percentKeys.includes(key)) return `${value}%`;
   const dollarKeys = ['targetStrike', 'putStrike'];
   if (dollarKeys.includes(key)) return `$${value}`;

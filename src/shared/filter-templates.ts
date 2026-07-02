@@ -101,6 +101,6 @@ export const FILTER_TEMPLATES: FilterTemplate[] = [
     category: 'wheel',
     icon: '✅',
     dataNeeded: ['fundamentals', 'quote', 'options'],
-    metricColumns: { suitabilityScore: 'Score', currentIv: 'IV %', putStrike: 'Put Strike', openInterest: 'OI', annualizedReturn: 'Ann %' }
+    metricColumns: { suitabilityScore: 'Score', currentIv: 'IV %', putStrike: 'Put Strike', openInterest: 'OI', annualizedReturn: 'Ann %', riskAdjustedReturn: 'Risk-Adj %' }
   }
 ];

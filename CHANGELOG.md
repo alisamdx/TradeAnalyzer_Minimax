@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.103] — 2026-07-02
+
+### Added
+- **Wheel (Vetted): risk-adjusted sort + IV ceiling.** Sorting by raw annualized yield front-loads the highest-IV (highest-risk) names — a live run showed the top all carrying 90–130% IV. Two additions: (1) a **Risk-Adj %** column (`annualized × (1 − |delta|)`, discounting yield by assignment probability) that is now the **default sort**, so premium-per-unit-of-risk ranks rather than raw premium; and (2) an **IV ceiling** (`maxIvPct`, default **80%**) on the target put that excludes vol-bombs from the vetted list entirely. Because the screen targets a fixed ~0.30Δ put, the delta-discount is near-uniform (favors the further-OTM puts within the cluster) — the IV ceiling is the primary vol-risk control. Note: on a high-IV universe (e.g. the current semis) an 80% ceiling cuts hard by design; tune `WHEEL_VETTED_DEFAULTS.maxIvPct`. New pure helper `riskAdjustedYield`; IV gate folded into `assessWheelPut`. Regression tests +3 (`tests/wheel-vetted.test.ts`, 16 total). `src/main/services/filter-templates-service.ts`, `src/shared/filter-templates.ts`, `src/renderer/src/views/FiltersView.tsx`. Spec: `Requirements/spec/05-screener-and-filters.md`.
+
 ## [1.1.102] — 2026-07-02
 
 ### Changed

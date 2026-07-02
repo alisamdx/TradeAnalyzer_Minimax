@@ -6,6 +6,7 @@ import {
   thirdFridayOnOrAfter,
   pickWheelPut,
   annualizedCspYield,
+  riskAdjustedYield,
   assessWheelPut,
   WHEEL_VETTED_DEFAULTS,
 } from '../src/main/services/filter-templates-service.js';
@@ -66,12 +67,25 @@ describe('annualizedCspYield', () => {
   });
 });
 
+describe('riskAdjustedYield', () => {
+  it('discounts annualized yield by assignment probability (|delta|)', () => {
+    expect(riskAdjustedYield(100, -0.30)!).toBeCloseTo(70, 6);   // 100 × (1 − 0.30)
+    expect(riskAdjustedYield(50, 0.25)!).toBeCloseTo(37.5, 6);
+  });
+  it('falls back to a 0.30 assumption when delta is missing, and null on null yield', () => {
+    expect(riskAdjustedYield(100, null)!).toBeCloseTo(70, 6);
+    expect(riskAdjustedYield(null, -0.30)).toBeNull();
+  });
+});
+
 describe('assessWheelPut', () => {
   const t = WHEEL_VETTED_DEFAULTS;
-  it('passes a liquid, well-priced put', () => {
-    const a = assessWheelPut(put({ strike: 95, bid: 2.0, ask: 2.1, openInterest: 800 }), 30, t);
+  it('passes a liquid, well-priced, moderate-IV put', () => {
+    const a = assessWheelPut(put({ strike: 95, bid: 2.0, ask: 2.1, openInterest: 800, iv: 0.35, delta: -0.30 }), 30, t);
     expect(a.pass).toBe(true);
     expect(a.oi).toBe(800);
+    expect(a.ivPct!).toBeCloseTo(35, 6);
+    expect(a.riskAdjustedReturn!).toBeCloseTo(a.annualizedReturn! * 0.70, 4);
   });
   it('fails on thin open interest', () => {
     expect(assessWheelPut(put({ openInterest: 40 }), 30, t).pass).toBe(false);
@@ -83,5 +97,11 @@ describe('assessWheelPut', () => {
   it('fails when the annualized premium is below the floor', () => {
     // tiny credit on a high strike, long dated → low annualized yield
     expect(assessWheelPut(put({ strike: 500, bid: 0.5, ask: 0.55, openInterest: 800 }), 60, t).pass).toBe(false);
+  });
+  it('fails a vol-bomb above the IV ceiling even when premium and liquidity are great', () => {
+    // 130% IV, deep OI, rich premium → excluded by the IV ceiling (80%)
+    const a = assessWheelPut(put({ strike: 95, bid: 8, ask: 8.2, openInterest: 5000, iv: 1.30, delta: -0.30 }), 30, t);
+    expect(a.ivPct!).toBeCloseTo(130, 6);
+    expect(a.pass).toBe(false);
   });
 });

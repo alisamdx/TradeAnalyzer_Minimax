@@ -36,6 +36,7 @@ export interface WheelVettedThresholds {
   minOi: number;                // open-interest floor on the target put
   maxSpreadPct: number;         // max bid/ask spread as % of mid
   minAnnualizedReturn: number;  // "real premium" floor — annualized CSP yield %
+  maxIvPct: number;             // IV ceiling (%) on the target put — excludes vol-bombs
 }
 
 // Balanced defaults (user-selected). No IV gate at Tier 1: iv_history only covers tracked
@@ -43,6 +44,7 @@ export interface WheelVettedThresholds {
 // floor (computed from the live chain in Tier 2) is the premium gate instead.
 export const WHEEL_VETTED_DEFAULTS: WheelVettedThresholds = {
   minSuitability: 75, minDte: 25, targetDelta: 0.30, minOi: 250, maxSpreadPct: 15, minAnnualizedReturn: 20,
+  maxIvPct: 80,
 };
 
 /** Nearest standard monthly expiry (3rd Friday) that is ≥ minDte calendar days out.
@@ -82,24 +84,38 @@ export function annualizedCspYield(creditPerShare: number, strike: number, dte: 
   return (creditPerShare / strike) * (365 / dte) * 100;
 }
 
+/** Risk-adjusted CSP yield: annualized yield discounted by assignment probability (|delta|).
+ *  With a fixed ~0.30Δ target this is a mild, near-uniform discount — it favors the further-OTM
+ *  puts within the target cluster; the IV ceiling is the primary vol-risk control. */
+export function riskAdjustedYield(annualized: number | null, delta: number | null): number | null {
+  if (annualized == null) return null;
+  const assignProb = delta != null ? Math.min(1, Math.abs(delta)) : 0.30;
+  return annualized * (1 - assignProb);
+}
+
 export interface WheelPutAssessment {
   pass: boolean;
   oi: number;
   spreadPct: number;
   creditPerShare: number;
   annualizedReturn: number | null;
+  riskAdjustedReturn: number | null;
+  ivPct: number | null;
 }
 
-/** Apply the Tier-2 liquidity + premium gate to a chosen put. Pure. */
+/** Apply the Tier-2 liquidity + premium + vol gate to a chosen put. Pure. */
 export function assessWheelPut(put: OptionContract, dte: number, t: WheelVettedThresholds): WheelPutAssessment {
   const oi = put.openInterest ?? 0;
   const mid = (put.bid + put.ask) / 2;
   const spreadPct = mid > 0 ? ((put.ask - put.bid) / mid) * 100 : Infinity;
+  const ivPct = put.iv > 0 ? put.iv * 100 : null;
   const annualizedReturn = annualizedCspYield(mid, put.strike, dte);
+  const riskAdjustedReturn = riskAdjustedYield(annualizedReturn, put.delta);
   const pass = oi >= t.minOi
     && spreadPct <= t.maxSpreadPct
-    && annualizedReturn != null && annualizedReturn >= t.minAnnualizedReturn;
-  return { pass, oi, spreadPct, creditPerShare: mid, annualizedReturn };
+    && annualizedReturn != null && annualizedReturn >= t.minAnnualizedReturn
+    && (ivPct == null || ivPct <= t.maxIvPct);     // exclude vol-bombs (IV unknown ⇒ don't gate on it)
+  return { pass, oi, spreadPct, creditPerShare: mid, annualizedReturn, riskAdjustedReturn, ivPct };
 }
 
 // ─── Service ──────────────────────────────────────────────────────────────────
@@ -540,24 +556,23 @@ export class FilterTemplatesService {
     const a = assessWheelPut(put, dte, t);
     if (!a.pass) return null;
 
-    // IV of the chosen put (percentage) for display — not a gate.
-    const ivPct = put.iv > 0 ? +(put.iv * 100).toFixed(1) : null;
-
     return {
       ticker,
       watchlists,
       lastPrice: quote.last,
       metrics: {
         suitabilityScore,
-        ...(ivPct !== null ? { currentIv: ivPct } : {}),
+        ...(a.ivPct !== null ? { currentIv: +a.ivPct.toFixed(1) } : {}),
         putStrike: +put.strike.toFixed(2),
         openInterest: a.oi,
         annualizedReturn: a.annualizedReturn !== null ? +a.annualizedReturn.toFixed(1) : null,
+        riskAdjustedReturn: a.riskAdjustedReturn !== null ? +a.riskAdjustedReturn.toFixed(1) : null,
       },
       matchReason: `Vetted: score ${suitabilityScore}/100; ${expiry} (${dte}d) $${put.strike} put`
         + ` Δ${put.delta != null ? Math.abs(put.delta).toFixed(2) : '?'}, $${a.creditPerShare.toFixed(2)} credit`
-        + ` (${a.annualizedReturn != null ? a.annualizedReturn.toFixed(0) : '?'}% ann.),`
-        + ` OI ${a.oi.toLocaleString()}, spread ${a.spreadPct.toFixed(0)}%`,
+        + ` (${a.annualizedReturn != null ? a.annualizedReturn.toFixed(0) : '?'}% ann.,`
+        + ` ${a.riskAdjustedReturn != null ? a.riskAdjustedReturn.toFixed(0) : '?'}% risk-adj.),`
+        + ` IV ${a.ivPct != null ? a.ivPct.toFixed(0) : '?'}%, OI ${a.oi.toLocaleString()}, spread ${a.spreadPct.toFixed(0)}%`,
     };
   }
 
