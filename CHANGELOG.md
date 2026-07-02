@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.104] — 2026-07-02
+
+### Fixed
+- **Consistent row-action icons across screens.** The per-row quick-action buttons now use the same icons as the sidebar everywhere: **Analysis 📊 · Validate 🎯 · Options 📉 · Payoff 📐 · Strategy Lab 🔬**. Filters used ✔ for Validate and ⛓ for Options; the Daily Brief was worse — Payoff showed 📊 (the Analysis icon), Validate ✓, Options 📋, Analysis 🔍. Both now match the menu (and the already-correct Opportunity / My Stocks screens). `src/renderer/src/views/FiltersView.tsx`, `src/renderer/src/views/DailyBriefView.tsx`.
+
 ## [1.1.103] — 2026-07-02
 
 ### Added

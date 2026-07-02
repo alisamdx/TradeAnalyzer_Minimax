@@ -505,14 +505,14 @@ export function FiltersView() {
                             title="Validate"
                             onClick={() => runValidateForTicker(r.ticker)}
                           >
-                            ✔
+                            🎯
                           </button>
                           <button
                             className="action-btn"
                             title="Options chain"
                             onClick={() => runOptionsForTicker(r.ticker)}
                           >
-                            ⛓
+                            📉
                           </button>
                           <button
                             className="action-btn"

@@ -841,10 +841,10 @@ function BriefGrid({ rows }: { rows: GridRow[] }) {
               <td>{row.rsi != null ? row.rsi.toFixed(0) : <span className="grid-muted">—</span>}</td>
               <td>
                 <div className="grid-actions">
-                  <button className="grid-action-btn" onClick={nav.payoff}   title="Payoff">📊</button>
-                  <button className="grid-action-btn" onClick={nav.validate} title="Validate">✓</button>
-                  <button className="grid-action-btn" onClick={nav.options}  title="Options Chain">📋</button>
-                  <button className="grid-action-btn" onClick={nav.analysis} title="Analysis">🔍</button>
+                  <button className="grid-action-btn" onClick={nav.payoff}   title="Payoff">📐</button>
+                  <button className="grid-action-btn" onClick={nav.validate} title="Validate">🎯</button>
+                  <button className="grid-action-btn" onClick={nav.options}  title="Options Chain">📉</button>
+                  <button className="grid-action-btn" onClick={nav.analysis} title="Analysis">📊</button>
                   <button className="grid-action-btn" onClick={nav.etrade}   title="E*Trade">🏦</button>
                 </div>
               </td>
