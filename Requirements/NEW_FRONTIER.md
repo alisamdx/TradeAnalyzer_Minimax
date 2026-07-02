@@ -744,6 +744,58 @@ re-runs) on even staler quotes.
 
 -----
 
+## 12. Spike — expiry selection lands on thin weeklies (added 2026-07-01)
+
+**Motivation.** Drilling into a specific `low_liquidity` flag (MRVL 2026-07-01, big-lizard
+6/15) revealed the flagged legs sat on the **Jul 31 end-of-month WEEKLY** (OI 30–119) — not a
+liquidity failure of MRVL (a top-5 options name), but of the *contract the lab chose*.
+`selectExpiration` (`strategy-lab-service.ts`) picks the expiration in **[20,50] DTE closest to
+30 with NO liquidity awareness**. Standard **monthly** options (3rd Friday) carry far more open
+interest and tighter spreads than mid-month / EOM weeklies. When neither monthly lands near 30
+DTE (2026-07-01: Jul monthly = 16 DTE, Aug monthly = 51 DTE), the rule snaps to the 30-DTE
+weekly.
+
+**Method.** `scripts/fr-expiry-liquidity-study.mjs` — over 9,567 unique stored brief structures,
+classify each chosen near-expiration as monthly (3rd Friday) vs weekly and compare liquidity,
+with a within-slug control to remove structure-composition confounds.
+
+**Result — CONFIRMED (real, sizable, liquidity-blind selection).**
+- **54% of structures land on a WEEKLY**, 46% on a monthly.
+- Weekly-landed vs monthly-landed: mean **liquidityScore 5.97 vs 7.00**, **OI/leg 303 vs 984**
+  (~3×), **clears the 8/15 bar 25% vs 36%**.
+- **Within-slug control (same structure type): 27 of 29 slugs are more liquid on the monthly**,
+  by +0.8 to +1.7 liquidityScore on the directional/short structures that matter (long-call-vert
+  +1.56, big-lizard +1.16, short-put-vert +0.77, verticals/lizards all positive). The two
+  exceptions (put-zebra −0.28, put-calendar −0.63) are calendar/ratio types whose liquidity is
+  dominated by the far monthly leg. Confounded per-leg spread% (far-OTM wings) is NOT the basis
+  — liquidityScore and OI are.
+- On **62% of weekly-landed picks a monthly ALSO fell within [20,50] DTE** — an in-band monthly
+  the current rule could have chosen but skipped because the weekly was marginally closer to 30.
+
+**The +1.0–1.5 liquidity gap is exactly the size that flips marginal 6/15–7/15 flags over the 8
+bar** — i.e. this, not structure selection (§11 falsified) or measurement staleness (§11, still
+open at 19 obs), is the largest identified lever on the low-pass-rate complaint.
+
+**Honest caveats before any change.**
+- **The MRVL example itself is in the harder 38%** where NO monthly fell in [20,50] (16 vs 51
+  DTE). A "prefer the in-band monthly" rule fixes the 62%, not MRVL; fixing MRVL needs *widening*
+  the band (e.g. [14,55]) so 16/51 DTE becomes eligible — a bigger DTE swing.
+- **DTE cost is real**: snapping a weekly to the nearest monthly moves the chosen DTE a mean
+  **8.6 days** further from 30, changing credit/theta economics. Liquidity improvement is **not**
+  the FR-SEY-5 acceptance test — net realized outcome is.
+
+**Next actions (FR-SEY-5 — the lab feeds what the engine trades: wheel/income/inflection).**
+1. **Realized-P&L A/B**: re-select each historical pick's structure at the nearest monthly and
+   settle both to expiry (net credit − execution friction − DTE/theta economics). Blocked like
+   the lizard-vs-spread study — the July structures don't settle until Jul 17–31 2026; re-run
+   after. Only ship a monthly-preference (or widened band) if at-worst-neutral on net outcome.
+2. **Same-ticker live A/B** (needs app running): re-price MRVL's identical big-lizard at the
+   Aug 21 monthly to measure the true intraday liquidity delta for one clean case.
+3. If it survives: a liquidity-aware tie-break in `selectExpiration` (prefer the monthly when its
+   DTE is within an acceptable band), NOT a blind "always monthly."
+
+-----
+
 ## Appendix: Reading List Starter Pack
 
 **Books:**
