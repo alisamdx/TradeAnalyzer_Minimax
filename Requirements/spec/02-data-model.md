@@ -127,6 +127,8 @@ Views `v_open_positions`, `v_closed_positions`, `v_portfolio_summary` provide ca
 
 **`brief_learning_recommendations`** (032) — `id PK`, `strategy`, `gap_cause`, `occurrence_count`, `description`, `proposed_tweak`, `status` (`open|acknowledged`), `created_at`. Unique `(strategy, gap_cause)`. Generated when a gap cause recurs ≥3×.
 
+**`structure_liquidity_log`** (064, v1.1.93) — `id PK`, `captured_at` (UTC), `date_et`, `ticker`, `slug`, `liquidity_score`, `grade`, `no_bid_leg`. Appended by the brief job's Stage 4 for every constructible structure; index `(date_et, ticker, slug)`. Pure instrumentation for the intraday vs after-close liquidity artifact (NEW_FRONTIER §11) — nothing on the live path reads it; pruned at 120 days.
+
 ## 2.15 Paper trading / retrospect (migrations 025, 029, 030)
 
 **`paper_trades`** — `id PK`, `brief_id → daily_briefs (SET NULL)`, `brief_strategy`, `brief_score`, `brief_rank`, `ticker`, `brief_date`, `strategy_name`, `legs_json`, `entry_date`, `entry_price`, `entry_premium` (net credit + / debit −), `expiry_date`, `status` (`open|closed|expired`), `exit_date`, `exit_price`, `exit_notes`, `stock_return_pct`, `outcome` (`win|loss|breakeven`), `learning_json` (030 — AI learning note), `created_at`. Unique `(ticker, brief_strategy, brief_date)` (same-day re-runs update, not duplicate).

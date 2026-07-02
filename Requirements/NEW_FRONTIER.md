@@ -731,14 +731,16 @@ check on ~8 of the last 10 trading days, so evening briefs actually ran 18:30–
 re-runs) on even staler quotes.
 
 **Next actions.**
-1. Persist intraday liquidity measurements instead of discarding them (e.g. a
-   `structure_liquidity_log` side table written at Stage 4, or per-slot brief retention) —
-   pure instrumentation, no trade-logic change.
-2. After ~2–3 weeks of paired data, re-run the slot comparison. If the −1.4 artifact holds,
-   design the fix (critic/gate uses the same-day intraday measurement when available) and take
-   it through FR-SEY-5 (critic verdicts gate the engine's entries via `entry-policy.ts`).
-3. Separately fix the 17:00 connectivity failure — it both delays the brief and worsens the
-   measurement staleness.
+1. ~~Persist intraday liquidity measurements instead of discarding them~~ — **DONE v1.1.93**:
+   `structure_liquidity_log` (migration 064) is appended by Stage 4 for every constructible
+   structure; `fr-liquidity-slot-comparison.mjs` prefers it. Pairs accumulate from 2026-07-02.
+2. After ~2–3 weeks of paired data (~mid-July 2026), re-run
+   `node scripts/fr-liquidity-slot-comparison.mjs`. If the −1.4 artifact holds, design the fix
+   (critic/gate uses the same-day intraday measurement when available) and take it through
+   FR-SEY-5 (critic verdicts gate the engine's entries via `entry-policy.ts`).
+3. ~~Separately fix the 17:00 connectivity failure~~ — **DONE v1.1.92**: dormant tokens can fail
+   as a terminated stream (not a 401); the IV-job probe now renews-and-retries on any failure,
+   so the evening chain runs at its designed ~17:05 slot again.
 
 -----
 

@@ -29,31 +29,57 @@ function etParts(iso) {
   return { date: d.toISOString().slice(0, 10), hour: d.getUTCHours() };
 }
 
-const rows = db.prepare(`SELECT strategy, generated_at, picks FROM daily_briefs ORDER BY generated_at`).all();
-
-// key = date|strategy|ticker|slug → { morning: {liq, noBid}, evening: {...} }
+// key = date|…|ticker|slug → { morning: {liq, noBid}, evening: {...} }
 const pairs = new Map();
 let morningRuns = new Set(), eveningRuns = new Set();
 
-for (const row of rows) {
-  let picks; try { picks = JSON.parse(row.picks); } catch { continue; }
-  const { date, hour } = etParts(row.generated_at);
-  const slot = hour < 14 ? 'morning' : 'evening'; // 10:15 run lands ~10-13 ET; close run ≥ 16
-  (slot === 'morning' ? morningRuns : eveningRuns).add(`${date}`);
-  const slugs = STRATEGY_RELEVANT_SLUGS[row.strategy] ?? [];
+// Preferred source (v1.1.93+): the structure_liquidity_log instrumentation table —
+// persists EVERY Stage-4 measurement, so intraday/after-close pairs survive the
+// evening brief's same-day delete. Falls back to stored briefs when empty.
+const hasLog = (() => {
+  try { return db.prepare(`SELECT COUNT(*) n FROM structure_liquidity_log`).get().n > 0; }
+  catch { return false; }
+})();
 
-  for (const p of picks) {
-    const scores = p.strategyLabResult?.scores;
-    if (!Array.isArray(scores)) continue;
-    for (const s of scores) {
-      if (!slugs.includes(s.slug) || !s.setup || s.setup.unavailableReason) continue;
-      const key = `${date}|${row.strategy}|${p.ticker}|${s.slug}`;
-      const entry = pairs.get(key) ?? {};
-      entry[slot] = {
-        liq: s.liquidityScore ?? null,
-        noBid: (s.setup.legs ?? []).some((l) => (l.bid ?? 0) <= 0),
-      };
-      pairs.set(key, entry);
+if (hasLog) {
+  console.log('\nSource: structure_liquidity_log (instrumentation table)');
+  const logRows = db.prepare(
+    `SELECT captured_at, date_et, ticker, slug, liquidity_score, no_bid_leg FROM structure_liquidity_log`
+  ).all();
+  for (const r of logRows) {
+    if (r.liquidity_score == null) continue;
+    const { hour } = etParts(r.captured_at);
+    const slot = hour < 14 ? 'morning' : 'evening';
+    (slot === 'morning' ? morningRuns : eveningRuns).add(r.date_et);
+    const key = `${r.date_et}|${r.ticker}|${r.slug}`;
+    const entry = pairs.get(key) ?? {};
+    // Same slot re-measured (manual re-run) → keep the FIRST measurement of the slot.
+    if (!entry[slot]) entry[slot] = { liq: r.liquidity_score, noBid: r.no_bid_leg === 1 };
+    pairs.set(key, entry);
+  }
+} else {
+  console.log('\nSource: daily_briefs picks (fallback — instrumentation table empty)');
+  const rows = db.prepare(`SELECT strategy, generated_at, picks FROM daily_briefs ORDER BY generated_at`).all();
+  for (const row of rows) {
+    let picks; try { picks = JSON.parse(row.picks); } catch { continue; }
+    const { date, hour } = etParts(row.generated_at);
+    const slot = hour < 14 ? 'morning' : 'evening'; // 10:15 run lands ~10-13 ET; close run ≥ 16
+    (slot === 'morning' ? morningRuns : eveningRuns).add(`${date}`);
+    const slugs = STRATEGY_RELEVANT_SLUGS[row.strategy] ?? [];
+
+    for (const p of picks) {
+      const scores = p.strategyLabResult?.scores;
+      if (!Array.isArray(scores)) continue;
+      for (const s of scores) {
+        if (!slugs.includes(s.slug) || !s.setup || s.setup.unavailableReason) continue;
+        const key = `${date}|${row.strategy}|${p.ticker}|${s.slug}`;
+        const entry = pairs.get(key) ?? {};
+        entry[slot] = {
+          liq: s.liquidityScore ?? null,
+          noBid: (s.setup.legs ?? []).some((l) => (l.bid ?? 0) <= 0),
+        };
+        pairs.set(key, entry);
+      }
     }
   }
 }

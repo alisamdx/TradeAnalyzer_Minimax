@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.93] — 2026-07-01
+
+### Added
+- **Structure-liquidity instrumentation (`structure_liquidity_log`, migration 064).** The Stage-4 Strategy Lab run now persists every constructible structure's liquidity measurement (ticker, slug, liquidityScore, grade, zero-bid-leg flag, UTC timestamp + ET date) into a small side table. Motivation (NEW_FRONTIER §11): the after-close brief measures liquidity ~−1.4 pts below intraday — right at the 8/15 tradability bar — but the evidence was only 19 paired observations from one date, because the evening brief **deletes** the same-ET-day morning brief rows (`storeBrief`), destroying the intraday measurements daily. With the 10:15 slot healthy again (v1.1.92 token fix), pairs now accumulate at ~50 structures/day; after 2–3 weeks the artifact can be calibrated properly and, if confirmed, the critic/gate can be taught to use same-day intraday measurements (FR-SEY-5 pass at that point — verdicts gate engine entries). **Pure instrumentation** — nothing on the live path reads the table; logging failures are swallowed (never break the brief); rows pruned at 120 days. `scripts/fr-liquidity-slot-comparison.mjs` now prefers this table over stored briefs. `src/main/services/structure-liquidity-log.ts`; regression tests `tests/structure-liquidity-log.test.ts` (4).
+
 ## [1.1.92] — 2026-07-01
 
 ### Fixed

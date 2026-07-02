@@ -27,6 +27,7 @@ import type { OAuthCredentials } from '../etrade-auth.js';
 import { getETradeLastPrice } from '../etrade-options.js';
 import { withTransaction } from '../../db/connection.js';
 import { STRATEGY_RELEVANT_SLUGS, pickRelevantStructure, relevantSlugsForPick, formatStructureLegs } from '@shared/strategy-structures.js';
+import { extractLoggableScores, logStructureLiquidity, pruneStructureLiquidityLog } from '../structure-liquidity-log.js';
 
 // VIX sane range — reject anything outside this (a quote typo can return an unrelated
 // symbol). Historical VIX spans ~9 (2017) to ~82 (COVID); [5,150] is a safe guard.
@@ -365,6 +366,14 @@ export class DailyIntelligenceBriefJob implements BatchJobHandler {
       try {
         const result = await this.strategyLabService.validate(this.db, ticker, maxLossBudget);
         validationResults.set(ticker, result as unknown as object);
+        // Instrumentation (NEW_FRONTIER §11): persist this run's liquidity measurements so
+        // intraday vs after-close pairs accumulate (the evening brief deletes the morning
+        // brief rows, so brief storage alone can't provide pairs). Never breaks the brief.
+        try {
+          logStructureLiquidity(this.db, extractLoggableScores(ticker, result as unknown as object));
+        } catch (logErr) {
+          console.warn('[brief] structure-liquidity log failed:', logErr instanceof Error ? logErr.message : String(logErr));
+        }
       } catch (err) {
         stage4Failed++;
         validationResults.set(ticker, null);
@@ -384,6 +393,7 @@ export class DailyIntelligenceBriefJob implements BatchJobHandler {
     const stage4Ms = Date.now() - t4;
     runMeta['stages'] = { ...runMeta['stages'] as object, stage4: { attempted: stage4Attempted, failed: stage4Failed, etradeFailed, ms: stage4Ms } };
     emit(`Stage 4/6: Validated ${stage4Attempted - stage4Failed}/${stage4Attempted} picks`);
+    try { pruneStructureLiquidityLog(this.db); } catch { /* instrumentation only */ }
 
     // ── Stage 5: AI synthesis ────────────────────────────────────────────────
     emit('Stage 5/6: Running AI synthesis…');
