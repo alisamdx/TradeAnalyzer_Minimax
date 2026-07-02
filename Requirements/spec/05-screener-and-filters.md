@@ -13,7 +13,9 @@ Screens a chosen universe for fundamentally sound candidates ("stocks that can't
 - **FR-2.0b** Constituent lists auto-refresh daily (batch job `constituents-refresh`, §20.3 — v1.1.91) and remain manually refreshable; show last-refreshed timestamp. Source priority (automated job and the manual "Refresh" button share one gated path): **Vanguard fund holdings** (VOO → S&P 500, VONE → Russell 1000; free public paginated JSON, no key) → **Wikipedia scrape fallback**. Both are gated — row-count floor (480 / 940) and ≤25% turnover vs the stored list — so a broken feed never overwrites a good list; sector/company are preserved for carried-over tickers (Vanguard carries no sector). User CSV import remains the manual override; the bundled CSV seeds first-run only.
 - **FR-2.0c** `both` dedupes by ticker (S&P 500 ⊂ Russell 1000 mostly → union ≈ 1,000). ETF universe is a separate list.
 
-IPC: `getConstituents(index)`, `getMeta(index)`, `refreshConstituents(index)`, `importConstituents(filePath, index)`, `syncUniverse(universe)` (+ `syncCancel`, `onSyncProgress`).
+IPC: `getConstituents(index)`, `getMeta(index)`, `getConstituentsWithMeta(index)` (rows + `added_at`, for the viewer), `refreshConstituents(index)`, `importConstituents(filePath, index)`, `syncUniverse(universe)` (+ `syncCancel`, `onSyncProgress`).
+
+`constituents.added_at` is a **stable first-seen date**: `applyRefresh` preserves it for carried-over tickers and stamps only genuinely new members (v1.1.95) — so it reflects when a ticker joined the index, not the last refresh. Surfaced in the **Index Constituents viewer** (Misc → 📇, `ConstituentsView.tsx`): two tabs (S&P 500 / Russell 1000), sortable grid (Ticker · Company · Sector · Added, default newest-added first), filter box, and a NEW badge on members added within 7 days — so the daily refresh job's additions are visible.
 
 ### 5.A.2 Default filter set (17 filters)
 

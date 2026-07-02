@@ -9,7 +9,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { DbHandle } from '../db/connection.js';
 import { withTransaction } from '../db/connection.js';
-import type { Universe, ConstituentRow, ConstituentsMeta } from '@shared/types.js';
+import type { Universe, ConstituentRow, ConstituentsMeta, ConstituentWithMeta } from '@shared/types.js';
 
 // Vanguard index-fund holdings — the automated constituent source (free public JSON,
 // no key). The fund's published holdings ARE the constituent list: VOO tracks the
@@ -117,6 +117,27 @@ export class ConstituentsService {
     return this.loadBundled(index);
   }
 
+  /**
+   * Constituents for a single index WITH membership metadata (added_at), for the
+   * Constituents viewer. Ordered newest-added first so recent job additions surface at
+   * the top. DB-only (no bundled-CSV fallback — the viewer is about the live stored list).
+   */
+  getConstituentsWithMeta(index: 'sp500' | 'russell1000'): ConstituentWithMeta[] {
+    const rows = this.db
+      .prepare(
+        `SELECT ticker, company_name, sector, added_at FROM constituents
+         WHERE index_name = ? ORDER BY added_at DESC, ticker ASC`
+      )
+      .all(index) as Array<{ ticker: string; company_name: string | null; sector: string | null; added_at: string }>;
+    return rows.map((r) => ({
+      ticker: r.ticker,
+      companyName: r.company_name,
+      sector: r.sector,
+      addedAt: r.added_at,
+      indexName: index,
+    }));
+  }
+
   getMeta(index: 'sp500' | 'russell1000' | 'etf'): ConstituentsMeta | null {
     const row = this.db
       .prepare(`SELECT index_name, refreshed_at, source FROM constituents_meta WHERE index_name = ?`)
@@ -200,9 +221,9 @@ export class ConstituentsService {
       );
     }
 
-    type OldRow = { ticker: string; company_name: string | null; sector: string | null };
+    type OldRow = { ticker: string; company_name: string | null; sector: string | null; added_at: string };
     const oldRows = this.db
-      .prepare(`SELECT ticker, company_name, sector FROM constituents WHERE index_name = ?`)
+      .prepare(`SELECT ticker, company_name, sector, added_at FROM constituents WHERE index_name = ?`)
       .all(index) as OldRow[];
     const oldByTicker = new Map(oldRows.map((r) => [r.ticker.toUpperCase(), r]));
 
@@ -219,11 +240,16 @@ export class ConstituentsService {
       }
     }
 
+    // Preserve the ORIGINAL added_at for carried-over tickers — only genuinely new
+    // members get "now". Without this, the delete+reinsert would reset every ticker's
+    // added_at on each refresh, so the Constituents viewer's "date added" (and any
+    // "what's new" query) would show the whole index as added on the last refresh.
+    const nowIso = new Date().toISOString();
     withTransaction(this.db, () => {
       this.db.prepare(`DELETE FROM constituents WHERE index_name = ?`).run(index);
       const insertStmt = this.db.prepare(
         `INSERT OR REPLACE INTO constituents (ticker, index_name, company_name, sector, added_at)
-         VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`
+         VALUES (?, ?, ?, ?, ?)`
       );
       for (const c of fresh) {
         const old = oldByTicker.get(c.ticker);
@@ -231,7 +257,8 @@ export class ConstituentsService {
           c.ticker,
           index,
           c.companyName ?? old?.company_name ?? null,
-          c.sector ?? old?.sector ?? null
+          c.sector ?? old?.sector ?? null,
+          old?.added_at ?? nowIso
         );
       }
       this.db.prepare(

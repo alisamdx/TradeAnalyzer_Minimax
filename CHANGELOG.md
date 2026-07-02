@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.95] — 2026-07-02
+
+### Added
+- **Index Constituents viewer (Misc → 📇 Index Constituents).** A new screen listing the S&P 500 and Russell 1000 tickers the app tracks, in two tabs, with a sortable grid (Ticker · Company · Sector · **Added**) plus a ticker/company filter box. Sorting defaults to **date-added, newest first**, so members the daily constituents-refresh job (v1.1.91) adds surface at the top; rows added within the last 7 days carry a **NEW** badge, and a header count shows how many were added in the last week. Also shows the list's source and last-refresh date. `src/renderer/src/views/ConstituentsView.tsx`, new `ConstituentsService.getConstituentsWithMeta()` + `screen:get-constituents-with-meta` IPC + `window.api.screen.getConstituentsWithMeta` + `ConstituentWithMeta` type.
+
+### Fixed
+- **`added_at` no longer resets on every constituents refresh.** `ConstituentsService.applyRefresh` deletes and re-inserts the index each run; it was stamping **every** ticker with the current time, so "date added" would have shown the entire index as added on the last refresh (making the new viewer useless and any "what's new" query wrong). It now **preserves the original `added_at` for carried-over tickers** and stamps only genuinely new members — so the date reflects when a ticker actually joined the index. (Existing stored rows keep their current date as the baseline; accurate dates accrue from here forward.) Regression test added to `tests/constituents-refresh.test.ts` (9 total). `src/main/services/constituents-service.ts`.
+
 ## [1.1.94] — 2026-07-01
 
 ### Fixed

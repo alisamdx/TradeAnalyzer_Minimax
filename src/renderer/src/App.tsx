@@ -35,10 +35,11 @@ import BriefReplayView from './views/BriefReplayView.js';
 import { TradingDeskView } from './views/TradingDeskView.js';
 import { ExecutionSettingsView } from './views/ExecutionSettingsView.js';
 import { MiscView } from './views/MiscView.js';
+import { ConstituentsView } from './views/ConstituentsView.js';
 
 declare const __APP_VERSION__: string;
 
-type View = 'watchlists' | 'screener' | 'filters' | 'analysis' | 'validate' | 'portfolio' | 'opportunity' | 'settings' | 'alerts' | 'data' | 'optionsChain' | 'payoff' | 'agent' | 'backtest' | 'testApi' | 'ivHistory' | 'knowledge' | 'strategyLab' | 'batch' | 'dailyBrief' | 'tradeScoring' | 'retrospect' | 'conviction' | 'newsResearch' | 'earningsCalendar' | 'briefReplay' | 'tradingDesk' | 'executionSettings' | 'misc';
+type View = 'watchlists' | 'screener' | 'filters' | 'analysis' | 'validate' | 'portfolio' | 'opportunity' | 'settings' | 'alerts' | 'data' | 'optionsChain' | 'payoff' | 'agent' | 'backtest' | 'testApi' | 'ivHistory' | 'knowledge' | 'strategyLab' | 'batch' | 'dailyBrief' | 'tradeScoring' | 'retrospect' | 'conviction' | 'newsResearch' | 'earningsCalendar' | 'briefReplay' | 'tradingDesk' | 'executionSettings' | 'misc' | 'constituents';
 
 type NavEntry = {
   id: number;
@@ -704,6 +705,7 @@ export function App() {
           onNavigate={(v) => setNavStack(prev => [...prev, { id: navIdRef.current++, view: v }])}
         />
       );
+      case 'constituents': return <ConstituentsView />;
       case 'settings': return (
         <SettingsView
           etradeWarning={etradeWarning}
@@ -1064,7 +1066,7 @@ export function App() {
           {/* ── Misc ── */}
           <div className="nav-section-label">Misc</div>
           <button
-            className={`nav-btn ${['misc', 'alerts', 'backtest', 'testApi', 'data', 'ivHistory'].includes(currentView) ? 'active' : ''}`}
+            className={`nav-btn ${['misc', 'alerts', 'backtest', 'testApi', 'data', 'ivHistory', 'constituents'].includes(currentView) ? 'active' : ''}`}
             onClick={() => navigateSidebar('misc')}
           >
             🗂️ Misc

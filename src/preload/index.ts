@@ -12,6 +12,7 @@ import type {
   Universe,
   ConstituentsMeta,
   ConstituentRow,
+  ConstituentWithMeta,
   Quote as CachedQuote,
   AnalysisModeInfo,
   AnalysisRunResult,
@@ -186,6 +187,8 @@ function buildApi() {
       invoke<ConstituentRow[]>('screen:get-constituents', index),
     getMeta: (index: 'sp500' | 'russell1000' | 'etf') =>
       invoke<ConstituentsMeta | null>('screen:get-meta', index),
+    getConstituentsWithMeta: (index: 'sp500' | 'russell1000') =>
+      invoke<ConstituentWithMeta[]>('screen:get-constituents-with-meta', index),
     refreshConstituents: (index: 'sp500' | 'russell1000') =>
       invoke<ConstituentsMeta>('screen:refresh-constituents', index),
     importConstituents: (filePath: string, index: 'sp500' | 'russell1000' | 'etf') =>

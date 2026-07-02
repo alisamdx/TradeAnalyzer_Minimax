@@ -74,6 +74,13 @@ export interface ConstituentRow {
   sector: string | null;
 }
 
+/** A constituent row with its stored membership metadata (for the Constituents viewer). */
+export interface ConstituentWithMeta extends ConstituentRow {
+  /** UTC ISO timestamp the ticker was first added to this index (stable across refreshes). */
+  addedAt: string;
+  indexName: 'sp500' | 'russell1000';
+}
+
 export interface ScreenRunResult {
   id: number;
   presetId: number | null;

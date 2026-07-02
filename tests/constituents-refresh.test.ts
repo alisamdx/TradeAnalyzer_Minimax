@@ -111,6 +111,31 @@ describe('ConstituentsService — Vanguard refresh', () => {
     expect(svc.getConstituents('sp500').find((r) => r.ticker === 'T0')).toBeDefined();
   });
 
+  it('preserves added_at for carried-over tickers and stamps only new members', async () => {
+    // Seed a stored list with a known-old added_at on all rows.
+    const oldDate = '2020-01-01T00:00:00.000Z';
+    for (const h of makeHoldings(503)) {
+      db.prepare(
+        `INSERT INTO constituents (ticker, index_name, added_at) VALUES (?, 'sp500', ?)`
+      ).run(h.ticker, oldDate);
+    }
+
+    // Refresh with one member swapped out (T502 → NEW1) — a legit small change.
+    const next = [...makeHoldings(502), { ticker: 'NEW1', longName: 'Newcomer Inc' }];
+    stubVanguardFetch({ VOO: next });
+    const before = Date.now();
+    await svc.refreshIndexAuto('sp500');
+
+    const meta = svc.getConstituentsWithMeta('sp500');
+    const carried = meta.find((r) => r.ticker === 'T0');
+    const fresh = meta.find((r) => r.ticker === 'NEW1');
+
+    expect(carried?.addedAt).toBe(oldDate);           // original date preserved
+    expect(new Date(fresh!.addedAt).getTime()).toBeGreaterThanOrEqual(before); // new member stamped now
+    // Newest-added first ordering puts the fresh member ahead of the carried ones.
+    expect(meta[0]?.ticker).toBe('NEW1');
+  });
+
   it('falls back to Wikipedia when Vanguard is down', async () => {
     // Vanguard 500s; Wikipedia serves a wikitable with enough rows to clear the floor.
     const rows = makeHoldings(503)

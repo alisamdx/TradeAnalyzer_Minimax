@@ -62,6 +62,9 @@ export function registerScreenerIpc(
   ipcMain.handle('screen:get-meta', wrap((index: 'sp500' | 'russell1000' | 'etf') =>
     constituentsService.getMeta(index))
   );
+  ipcMain.handle('screen:get-constituents-with-meta', wrap((index: 'sp500' | 'russell1000') =>
+    constituentsService.getConstituentsWithMeta(index))
+  );
   ipcMain.handle(
     'screen:refresh-constituents',
     async (_e, index: 'sp500' | 'russell1000'): Promise<IpcResult<ConstituentsMeta>> => {
