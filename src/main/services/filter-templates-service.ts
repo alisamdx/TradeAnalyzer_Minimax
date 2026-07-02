@@ -6,7 +6,7 @@ import type { DbHandle } from '../db/connection.js';
 import type { DataProvider } from './data-provider.js';
 import type { OptionsProvider } from './options-provider.js';
 import type { IvHistoryService } from './iv-history-service.js';
-import type { Universe, Quote } from '@shared/types.js';
+import type { Universe, Quote, OptionContract } from '@shared/types.js';
 import { QuoteCache, FundamentalsCache } from './cache-service.js';
 import { computeRSI, computeSMA } from './analysis-service.js';
 import { calculateWheelSuitability } from './wheel-calculator.js';
@@ -25,6 +25,81 @@ export interface FilterProgress {
   current: number;
   total: number;
   ticker: string;
+}
+
+// ─── Wheel (Vetted) — pure helpers + thresholds (unit-tested) ──────────────────
+
+export interface WheelVettedThresholds {
+  minSuitability: number;       // fundamentals gate (Tier 1)
+  minDte: number;               // nearest monthly at least this many calendar days out
+  targetDelta: number;          // target short-put |delta| (e.g. 0.30)
+  minOi: number;                // open-interest floor on the target put
+  maxSpreadPct: number;         // max bid/ask spread as % of mid
+  minAnnualizedReturn: number;  // "real premium" floor — annualized CSP yield %
+}
+
+// Balanced defaults (user-selected). No IV gate at Tier 1: iv_history only covers tracked
+// names, so a universe-wide IV floor would reject almost everything — the annualized-return
+// floor (computed from the live chain in Tier 2) is the premium gate instead.
+export const WHEEL_VETTED_DEFAULTS: WheelVettedThresholds = {
+  minSuitability: 70, minDte: 25, targetDelta: 0.30, minOi: 100, maxSpreadPct: 15, minAnnualizedReturn: 8,
+};
+
+/** Nearest standard monthly expiry (3rd Friday) that is ≥ minDte calendar days out.
+ *  All UTC — never mix local weekday math with toISOString (see CLAUDE.md weekly-expiry quirk). */
+export function thirdFridayOnOrAfter(minDte: number, now: number = Date.now()): string {
+  const earliest = now + minDte * 86_400_000;
+  const d = new Date(earliest);
+  let year = d.getUTCFullYear();
+  let month = d.getUTCMonth();
+  for (;;) {
+    const firstDow = new Date(Date.UTC(year, month, 1)).getUTCDay(); // 0=Sun … 6=Sat
+    const toFirstFriday = (5 - firstDow + 7) % 7;
+    const thirdFriday = Date.UTC(year, month, 1 + toFirstFriday + 14);
+    if (thirdFriday >= earliest) return new Date(thirdFriday).toISOString().slice(0, 10);
+    if (++month > 11) { month = 0; year++; }
+  }
+}
+
+/** Pick the put whose |delta| is closest to targetDelta; fall back to the strike nearest
+ *  to `spot × (1 − targetDelta)` (~ the OTM strike) when deltas are missing. Requires a two-sided quote. */
+export function pickWheelPut(puts: OptionContract[], spot: number, targetDelta: number): OptionContract | null {
+  const quoted = puts.filter(p => p.side === 'put' && p.bid > 0 && p.ask > 0);
+  if (quoted.length === 0) return null;
+  const withDelta = quoted.filter(p => p.delta != null);
+  if (withDelta.length > 0) {
+    return withDelta.reduce((best, p) =>
+      Math.abs(Math.abs(p.delta!) - targetDelta) < Math.abs(Math.abs(best.delta!) - targetDelta) ? p : best);
+  }
+  const targetStrike = spot * (1 - targetDelta);
+  return quoted.reduce((best, p) => (Math.abs(p.strike - targetStrike) < Math.abs(best.strike - targetStrike) ? p : best));
+}
+
+/** Annualized cash-secured-put yield on strike-secured capital: (credit/strike) × (365/DTE).
+ *  see docs/formulas.md#annualized-options-return */
+export function annualizedCspYield(creditPerShare: number, strike: number, dte: number): number | null {
+  if (strike <= 0 || dte <= 0) return null;
+  return (creditPerShare / strike) * (365 / dte) * 100;
+}
+
+export interface WheelPutAssessment {
+  pass: boolean;
+  oi: number;
+  spreadPct: number;
+  creditPerShare: number;
+  annualizedReturn: number | null;
+}
+
+/** Apply the Tier-2 liquidity + premium gate to a chosen put. Pure. */
+export function assessWheelPut(put: OptionContract, dte: number, t: WheelVettedThresholds): WheelPutAssessment {
+  const oi = put.openInterest ?? 0;
+  const mid = (put.bid + put.ask) / 2;
+  const spreadPct = mid > 0 ? ((put.ask - put.bid) / mid) * 100 : Infinity;
+  const annualizedReturn = annualizedCspYield(mid, put.strike, dte);
+  const pass = oi >= t.minOi
+    && spreadPct <= t.maxSpreadPct
+    && annualizedReturn != null && annualizedReturn >= t.minAnnualizedReturn;
+  return { pass, oi, spreadPct, creditPerShare: mid, annualizedReturn };
 }
 
 // ─── Service ──────────────────────────────────────────────────────────────────
@@ -154,6 +229,8 @@ export class FilterTemplatesService {
         return this.evalAssignmentRisk(ticker, watchlists);
       case 'wheel_opportunity':
         return this.evalWheelOpportunity(ticker, watchlists, isEtf);
+      case 'wheel_vetted':
+        return this.evalWheelVetted(ticker, watchlists, isEtf);
       default:
         return null;
     }
@@ -418,6 +495,69 @@ export class FilterTemplatesService {
         targetStrike: quote.last !== null ? +(quote.last * 0.92).toFixed(2) : null
       },
       matchReason: `Wheel suitability score: ${suitabilityScore}/100`
+    };
+  }
+
+  /**
+   * Vetted wheel — a two-stage funnel (see WHEEL_VETTED_DEFAULTS):
+   *   Tier 1 (cheap, cached): fundamentals → wheel suitability ≥ threshold. Rejects here cost no
+   *          option-chain call, so only genuine foundation candidates reach Tier 2.
+   *   Tier 2 (one option-chain call per survivor): fetch the nearest MONTHLY expiry, target the
+   *          ~0.30Δ put, and require open interest ≥ 100, a tight bid/ask spread, and a real
+   *          annualized premium. This is the liquidity + monthly-expiry gate the loose
+   *          `wheel_opportunity` template lacks (which is why that one returns ~792 names).
+   */
+  private async evalWheelVetted(
+    ticker: string,
+    watchlists: string[],
+    isEtf = false,
+  ): Promise<FilterTemplateResult | null> {
+    // ETFs have no fundamentals to vet — the vetted wheel is for individual names.
+    if (isEtf || !this.optionsProvider) return null;
+
+    const t = WHEEL_VETTED_DEFAULTS;
+
+    // ── Tier 1: fundamentals gate (no option call) ──
+    const quote = await this.fetchQuote(ticker);
+    if (quote.last == null || quote.last <= 0) return null;
+    const ratios = await this.fetchFundamentals(ticker);
+    const suitabilityScore = calculateWheelSuitability(ratios, quote);
+    if (suitabilityScore < t.minSuitability) return null;
+
+    // ── Tier 2: monthly-expiry liquidity + premium gate (one chain fetch) ──
+    const expiry = thirdFridayOnOrAfter(t.minDte);
+    let chain;
+    try {
+      chain = await this.optionsProvider.getOptionsChain(ticker, expiry);
+    } catch {
+      return null; // no chain for this monthly (unoptionable / illiquid) → reject
+    }
+    const puts = chain.contracts.filter(c => c.side === 'put');
+    const put = pickWheelPut(puts, quote.last, t.targetDelta);
+    if (!put) return null;
+
+    const dte = this.dteDays(expiry);
+    const a = assessWheelPut(put, dte, t);
+    if (!a.pass) return null;
+
+    // IV of the chosen put (percentage) for display — not a gate.
+    const ivPct = put.iv > 0 ? +(put.iv * 100).toFixed(1) : null;
+
+    return {
+      ticker,
+      watchlists,
+      lastPrice: quote.last,
+      metrics: {
+        suitabilityScore,
+        ...(ivPct !== null ? { currentIv: ivPct } : {}),
+        putStrike: +put.strike.toFixed(2),
+        openInterest: a.oi,
+        annualizedReturn: a.annualizedReturn !== null ? +a.annualizedReturn.toFixed(1) : null,
+      },
+      matchReason: `Vetted: score ${suitabilityScore}/100; ${expiry} (${dte}d) $${put.strike} put`
+        + ` Δ${put.delta != null ? Math.abs(put.delta).toFixed(2) : '?'}, $${a.creditPerShare.toFixed(2)} credit`
+        + ` (${a.annualizedReturn != null ? a.annualizedReturn.toFixed(0) : '?'}% ann.),`
+        + ` OI ${a.oi.toLocaleString()}, spread ${a.spreadPct.toFixed(0)}%`,
     };
   }
 

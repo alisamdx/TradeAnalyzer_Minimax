@@ -93,5 +93,14 @@ export const FILTER_TEMPLATES: FilterTemplate[] = [
     icon: '🔄',
     dataNeeded: ['fundamentals', 'quote'],
     metricColumns: { suitabilityScore: 'Score', currentIv: 'IV %', targetStrike: 'Target Strike' }
+  },
+  {
+    id: 'wheel_vetted',
+    label: 'Wheel (Vetted)',
+    description: 'Two-stage: good foundation (score ≥ 70), then a monthly-expiry liquidity check on the ~0.30Δ put (open interest ≥ 100, tight spread, real premium). Deeper scan — fetches option chains for survivors.',
+    category: 'wheel',
+    icon: '✅',
+    dataNeeded: ['fundamentals', 'quote', 'options'],
+    metricColumns: { suitabilityScore: 'Score', currentIv: 'IV %', putStrike: 'Put Strike', openInterest: 'OI', annualizedReturn: 'Ann %' }
   }
 ];

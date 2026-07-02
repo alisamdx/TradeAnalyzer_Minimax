@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.101] — 2026-07-02
+
+### Added
+- **"Wheel (Vetted)" filter template — a liquidity-gated funnel that turns ~792 matches into a tradeable handful.** The existing `wheel_opportunity` template gates on fundamentals only (suitability ≥ 60), so over S&P 500 + Russell 1000 it returns ~792 names — essentially "every decent large/mid-cap." The new **Wheel (Vetted)** template (Filters → Wheel) runs a two-stage funnel: **Tier 1** applies the cheap fundamentals gate (suitability ≥ 70) to every name with no option call; **Tier 2** fetches **one monthly-expiry chain per survivor**, targets the ~0.30Δ put, and requires **open interest ≥ 100, bid/ask spread ≤ 15% of mid, and annualized CSP yield ≥ 8%** — the liquidity + monthly-expiry + real-premium checks the loose template lacks. Columns: Score, IV %, Put Strike, OI, Ann % (sorted by annualized yield); each row's match reason shows the exact put (expiry/DTE/Δ/credit/OI/spread), and the ⭐ Save to Watchlist + Payoff hand-off (pre-loads a CSP at the vetted strike) both work. Price-agnostic (last price is a sortable column). Deeper/slower scan since survivors hit the options API — a deliberate action, not a browse. Pure gate logic (`thirdFridayOnOrAfter`, `pickWheelPut`, `annualizedCspYield`, `assessWheelPut`) is unit-tested (`tests/wheel-vetted.test.ts`, +13); thresholds in `WHEEL_VETTED_DEFAULTS`. Files: `src/main/services/filter-templates-service.ts`, `src/shared/filter-templates.ts`, `src/renderer/src/views/FiltersView.tsx`. Formula: `docs/formulas.md#annualized-options-return`. Spec: `Requirements/spec/05-screener-and-filters.md`.
+
 ## [1.1.100] — 2026-07-02
 
 ### Added

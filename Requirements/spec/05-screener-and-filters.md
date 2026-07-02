@@ -88,6 +88,9 @@ IPC: `listTemplates()`, `runTemplate(templateId, source?, universe?, watchlistId
 | `price_alert` | Price Alert | technical | Near key SMA / golden-death cross | % vs SMA50, % vs SMA200 |
 | `assignment_risk` | Assignment Risk | options | Short-option delta > 0.70 | Delta, Strike, DTE |
 | `wheel_opportunity` | Wheel Opportunity | wheel | Wheel suitability ≥ 60 | Score, IV %, Target Strike |
+| `wheel_vetted` | Wheel (Vetted) | wheel | Two-stage: suitability ≥ 70 (Tier 1), then a monthly-expiry chain check on the ~0.30Δ put — open interest ≥ 100, spread ≤ 15% of mid, annualized yield ≥ 8% (Tier 2) | Score, IV %, Put Strike, OI, Ann % |
+
+**Wheel (Vetted)** exists because `wheel_opportunity` gates on fundamentals only (≈792 matches over S&P 500 + Russell 1000). The vetted funnel does the cheap fundamentals gate on every name first (no option call), then fetches **one monthly-expiry chain per survivor** and applies the liquidity + premium gate on the target ~0.30Δ put — turning the list into a tradeable handful. Deeper/slower scan (option calls for survivors), so it's a deliberate action, not a browse. Pure gate logic (`thirdFridayOnOrAfter`, `pickWheelPut`, `annualizedCspYield`, `assessWheelPut`) is unit-tested (`tests/wheel-vetted.test.ts`); thresholds live in `WHEEL_VETTED_DEFAULTS`.
 
 Each result row can drill into Analysis / Validate / Options / Payoff / Strategy Lab for that ticker.
 
