@@ -39,6 +39,9 @@ function fmt(v: number | null | undefined, prefix = '', suffix = ''): string {
 // between templates (and navigating away/back) shows each one's list without re-running.
 // The whole cache is scoped to one day and auto-expires. Re-run refreshes. Renderer-only.
 const RUNS_KEY = 'filters:runsByTemplate';
+// Bump whenever the cached result shape (columns / metrics) changes, so a cache written by an
+// older build is discarded (a stale shape would render new columns as blanks) instead of shown.
+const CACHE_VERSION = 2;
 
 function todayLocalStr(): string {
   const d = new Date();
@@ -60,18 +63,19 @@ interface CachedRun {
 }
 
 interface CachedRuns {
+  v: number;
   date: string;
   lastTemplateId?: string;              // most recently run — restored on mount
   runs: Record<string, CachedRun>;      // keyed by templateId
 }
 
-/** Read today's cache; null if missing or from a previous day (auto-expiry). */
+/** Read today's cache; null if missing, from a previous day, or a superseded shape. */
 function readRuns(): CachedRuns | null {
   try {
     const raw = localStorage.getItem(RUNS_KEY);
     if (!raw) return null;
     const c = JSON.parse(raw) as CachedRuns;
-    if (!c || typeof c !== 'object' || c.date !== todayLocalStr() || !c.runs) return null;
+    if (!c || typeof c !== 'object' || c.v !== CACHE_VERSION || c.date !== todayLocalStr() || !c.runs) return null;
     return c;
   } catch { return null; }
 }
@@ -174,7 +178,7 @@ export function FiltersView() {
         results: res,
         sortKey: def?.key ?? 'ticker', sortDir: def?.dir ?? 'asc',
       };
-      writeRuns({ date: todayLocalStr(), lastTemplateId: templateId, runs });
+      writeRuns({ v: CACHE_VERSION, date: todayLocalStr(), lastTemplateId: templateId, runs });
     } catch (e) {
       setError((e as Error).message);
     } finally {

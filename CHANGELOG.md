@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.110] — 2026-07-02
+
+### Fixed
+- **Filters day-cache is now version-stamped** so a cache written by an older build (different result shape) is discarded instead of rendering new columns as blanks. After v1.1.109 added Expiry/Credit/Spread columns, a cached run from an earlier build lacked those fields → the new columns showed blank until a Re-run. The cache now carries a `CACHE_VERSION`; on read, a mismatch drops the cache (you'll run fresh once). Bump the version whenever the cached metrics/columns change. `src/renderer/src/views/FiltersView.tsx`.
+
 ## [1.1.109] — 2026-07-02
 
 ### Changed
