@@ -14,22 +14,62 @@ import type { BatchJobHandler, BatchJobResult } from '../batch-service.js';
 import type { BatchProgressEvent } from '@shared/types.js';
 import { FILTER_TEMPLATES } from '@shared/filter-templates.js';
 import type { FilterTemplatesService } from '../filter-templates-service.js';
+import type { DbHandle } from '../../db/connection.js';
 
 const PREFILL_UNIVERSE = 'all' as const;
+const JOB_ID = 'filters-prefill';
+
+// Templates the batch precomputes by default. The heavy/unused ones (RSI Overbought,
+// IV Low, Assignment Risk, Wheel Opportunity) are omitted to save run time — override
+// via batch_jobs.config_json.enabledTemplates (an explicit template-id allowlist).
+export const DEFAULT_PREFILL_TEMPLATES = [
+  'rsi_oversold',
+  'iv_rank_high',
+  'price_alert',
+  'wheel_vetted',
+];
 
 export class FiltersPrefillJob implements BatchJobHandler {
   readonly name = 'Filters Prefill';
   readonly description =
-    'Precompute all filter templates over Universe = All (S&P + Russell + ETFs) so the Filters view opens pre-populated.';
+    'Precompute filter templates over Universe = All (S&P + Russell + ETFs) so the Filters view opens pre-populated. '
+    + 'Which templates run is configurable (config_json.enabledTemplates); defaults skip the ones not in regular use.';
 
-  constructor(private readonly service: FilterTemplatesService) {}
+  constructor(
+    private readonly service: FilterTemplatesService,
+    private readonly db: DbHandle,
+  ) {}
+
+  /** Template-id allowlist from config, falling back to DEFAULT_PREFILL_TEMPLATES. */
+  private enabledTemplateIds(): string[] {
+    try {
+      const row = this.db.prepare(`SELECT config_json FROM batch_jobs WHERE id = ?`).get(JOB_ID) as
+        { config_json: string | null } | undefined;
+      if (row?.config_json) {
+        const cfg = JSON.parse(row.config_json) as Record<string, unknown>;
+        const list = cfg['enabledTemplates'];
+        if (Array.isArray(list) && list.every(x => typeof x === 'string')) {
+          return list as string[];
+        }
+      }
+    } catch { /* fall through to defaults */ }
+    return DEFAULT_PREFILL_TEMPLATES;
+  }
 
   async run(
     onProgress: (evt: BatchProgressEvent) => void,
     signal: AbortSignal,
   ): Promise<BatchJobResult> {
-    const templates = FILTER_TEMPLATES;
+    const enabled = new Set(this.enabledTemplateIds());
+    const templates = FILTER_TEMPLATES.filter(t => enabled.has(t.id));
     const total = templates.length;
+    if (total === 0) {
+      return {
+        status: 'skipped',
+        notes: 'No filter templates enabled for prefill (config_json.enabledTemplates is empty).',
+        tickersAttempted: 0, tickersUpdated: 0, tickersSkipped: 0, tickersFailed: 0,
+      };
+    }
     let saved = 0;
     let failed = 0;
     let totalMatches = 0;

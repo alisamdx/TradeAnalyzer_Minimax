@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.115] — 2026-07-03
+
+### Changed
+- **Filters Prefill now precomputes only the filters in regular use** (saves batch time). The nightly job defaulted to all 8 templates; it now runs a configurable **allowlist**, defaulting to the four actually used — **RSI Oversold, IV High, Price Alert, Wheel (Vetted)** — and skips **RSI Overbought, IV Low, Assignment Risk, Wheel Opportunity**. Wheel (Vetted) and Assignment Risk each fetch live option chains per survivor, so dropping Assignment Risk in particular removes a large chunk of E*Trade calls. The allowlist lives in `batch_jobs.config_json.enabledTemplates` (`filters-prefill`), so it's editable without a rebuild; an empty list makes the job skip cleanly. Skipped filters simply aren't pre-populated — clicking one still runs it live on demand. `src/main/services/jobs/filters-prefill-job.ts`, `src/main/index.ts`. Tests extended (`tests/filters-prefill.test.ts`, 12).
+
 ## [1.1.114] — 2026-07-03
 
 ### Added

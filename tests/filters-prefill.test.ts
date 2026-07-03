@@ -12,7 +12,7 @@ import { runMigrations } from '../src/main/db/migrations.js';
 import { MIGRATIONS_DIR } from './helpers.js';
 import { ConstituentsService } from '../src/main/services/constituents-service.js';
 import { FilterTemplatesService } from '../src/main/services/filter-templates-service.js';
-import { FiltersPrefillJob } from '../src/main/services/jobs/filters-prefill-job.js';
+import { FiltersPrefillJob, DEFAULT_PREFILL_TEMPLATES } from '../src/main/services/jobs/filters-prefill-job.js';
 import { QuoteCache, FundamentalsCache } from '../src/main/services/cache-service.js';
 import { FILTER_TEMPLATES, FILTER_RESULTS_SHAPE_VERSION } from '../src/shared/filter-templates.js';
 import type { DataProvider, QuoteSnapshot } from '../src/main/services/data-provider.js';
@@ -143,20 +143,61 @@ describe('FiltersPrefillJob', () => {
     } as unknown as FilterTemplatesService;
   }
 
-  it('runs every template over Universe=All and stores each result set', async () => {
+  /** Minimal DbHandle stub — serves a batch_jobs.config_json row for the job's allowlist read.
+   *  `enabledTemplates: null` → no config row (job falls back to DEFAULT_PREFILL_TEMPLATES). */
+  function stubDb(enabledTemplates: string[] | null): import('../src/main/db/connection.js').DbHandle {
+    const config_json = enabledTemplates === null ? null : JSON.stringify({ enabledTemplates });
+    return {
+      prepare: () => ({ get: () => (config_json === null ? undefined : { config_json }) }),
+    } as unknown as import('../src/main/db/connection.js').DbHandle;
+  }
+
+  const ALL_IDS = FILTER_TEMPLATES.map(t => t.id);
+
+  it('runs the configured templates over Universe=All and stores each result set', async () => {
     const svc = stubService();
-    const job = new FiltersPrefillJob(svc);
+    const job = new FiltersPrefillJob(svc, stubDb(ALL_IDS)); // enable all for this assertion
     const result = await job.run(noProgress, new AbortController().signal);
 
     expect(result.status).toBe('success');
     expect(result.tickersUpdated).toBe(FILTER_TEMPLATES.length);
     const runCalls = (svc.runTemplate as ReturnType<typeof vi.fn>).mock.calls;
-    expect(runCalls.map(c => c[0]).sort()).toEqual(FILTER_TEMPLATES.map(t => t.id).sort());
+    expect(runCalls.map(c => c[0]).sort()).toEqual([...ALL_IDS].sort());
     for (const call of runCalls) {
       expect(call[1]).toBe('universe');
       expect(call[2]).toBe('all');
     }
     expect(svc.saveRun).toHaveBeenCalledTimes(FILTER_TEMPLATES.length);
+  });
+
+  it('runs only DEFAULT_PREFILL_TEMPLATES when no allowlist is configured', async () => {
+    const svc = stubService();
+    const job = new FiltersPrefillJob(svc, stubDb(null));
+    const result = await job.run(noProgress, new AbortController().signal);
+
+    expect(result.status).toBe('success');
+    const ran = (svc.runTemplate as ReturnType<typeof vi.fn>).mock.calls.map(c => c[0]).sort();
+    expect(ran).toEqual([...DEFAULT_PREFILL_TEMPLATES].sort());
+    // The unused heavy filters are never scanned.
+    expect(ran).not.toContain('rsi_overbought');
+    expect(ran).not.toContain('assignment_risk');
+  });
+
+  it('honors an explicit allowlist and skips everything else', async () => {
+    const svc = stubService();
+    const job = new FiltersPrefillJob(svc, stubDb(['wheel_vetted']));
+    await job.run(noProgress, new AbortController().signal);
+    const ran = (svc.runTemplate as ReturnType<typeof vi.fn>).mock.calls.map(c => c[0]);
+    expect(ran).toEqual(['wheel_vetted']);
+  });
+
+  it('skips cleanly when the allowlist is empty', async () => {
+    const svc = stubService();
+    const job = new FiltersPrefillJob(svc, stubDb([]));
+    const result = await job.run(noProgress, new AbortController().signal);
+    expect(result.status).toBe('skipped');
+    expect(svc.runTemplate).not.toHaveBeenCalled();
+    expect(svc.saveRun).not.toHaveBeenCalled();
   });
 
   it('continues past a failing template and reports it in the notes', async () => {
@@ -166,7 +207,7 @@ describe('FiltersPrefillJob', () => {
         return [];
       }),
     });
-    const job = new FiltersPrefillJob(svc);
+    const job = new FiltersPrefillJob(svc, stubDb(ALL_IDS));
     const result = await job.run(noProgress, new AbortController().signal);
 
     expect(result.status).toBe('success');
@@ -180,7 +221,7 @@ describe('FiltersPrefillJob', () => {
     const svc = stubService({
       runTemplate: vi.fn(async () => { throw new Error('all down'); }),
     });
-    const job = new FiltersPrefillJob(svc);
+    const job = new FiltersPrefillJob(svc, stubDb(ALL_IDS));
     const result = await job.run(noProgress, new AbortController().signal);
     expect(result.status).toBe('failed');
     expect(svc.saveRun).not.toHaveBeenCalled();
@@ -194,7 +235,7 @@ describe('FiltersPrefillJob', () => {
         return [{ ticker: 'PARTIAL', watchlists: [], lastPrice: 1, metrics: {}, matchReason: '' }];
       }),
     });
-    const job = new FiltersPrefillJob(svc);
+    const job = new FiltersPrefillJob(svc, stubDb(ALL_IDS));
     const result = await job.run(noProgress, ac.signal);
 
     expect(svc.saveRun).not.toHaveBeenCalled();          // partial results never stored
