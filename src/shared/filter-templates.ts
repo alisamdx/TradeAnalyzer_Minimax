@@ -22,8 +22,9 @@ export interface FilterTemplateResult {
   /** Watchlist name(s) this ticker belongs to. */
   watchlists: string[];
   lastPrice: number | null;
-  /** Template-specific metric values (e.g., rsi, ivRank). */
-  metrics: Record<string, number | null>;
+  /** Template-specific metric values (e.g., rsi, ivRank). String values (e.g. an expiry date)
+   *  are shown as-is and sort lexically. */
+  metrics: Record<string, number | string | null>;
   /** Human-readable reason why this ticker matched. */
   matchReason: string;
 }
@@ -101,6 +102,6 @@ export const FILTER_TEMPLATES: FilterTemplate[] = [
     category: 'wheel',
     icon: '✅',
     dataNeeded: ['fundamentals', 'quote', 'options'],
-    metricColumns: { suitabilityScore: 'Score', currentIv: 'IV %', putStrike: 'Put Strike', openInterest: 'OI', annualizedReturn: 'Ann %', riskAdjustedReturn: 'Risk-Adj %' }
+    metricColumns: { suitabilityScore: 'Score', currentIv: 'IV %', expiry: 'Expiry', putStrike: 'Put Strike', credit: 'Credit', annualizedReturn: 'Ann %', riskAdjustedReturn: 'Risk-Adj %', openInterest: 'OI', spread: 'Spread' }
   }
 ];

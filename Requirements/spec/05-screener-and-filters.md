@@ -90,7 +90,7 @@ IPC: `listTemplates()`, `runTemplate(templateId, source?, universe?, watchlistId
 | `price_alert` | Price Alert | technical | Near key SMA / golden-death cross | % vs SMA50, % vs SMA200 |
 | `assignment_risk` | Assignment Risk | options | Short-option delta > 0.70 | Delta, Strike, DTE |
 | `wheel_opportunity` | Wheel Opportunity | wheel | Wheel suitability ≥ 60 | Score, IV %, Target Strike |
-| `wheel_vetted` | Wheel (Vetted) | wheel | Two-stage: suitability ≥ 75 (Tier 1), then a monthly-expiry chain check on the ~0.30Δ put — open interest ≥ 250, spread ≤ 15% of mid, annualized yield ≥ 20%, **IV ≤ 80%** (Tier 2) | Score, IV %, Put Strike, OI, Ann %, **Risk-Adj %** |
+| `wheel_vetted` | Wheel (Vetted) | wheel | Two-stage: suitability ≥ 75 (Tier 1), then a monthly-expiry chain check on the ~0.30Δ put — open interest ≥ 250, spread ≤ 15% of mid, annualized yield ≥ 20%, **IV ≤ 80%** (Tier 2) | Score, IV %, Expiry, Put Strike, Credit, Ann %, Risk-Adj %, OI, Spread |
 
 **ETFs**: the fundamentals gate is skipped (ETFs have no P/E/ROE/D-E) — the curated ETF list is wheel-eligible by design, IV rank is shown as the proxy Score, and the Tier-2 options gate still applies but with a **lower annualized-yield floor** (`minAnnualizedReturnEtf`, default 8% vs 20% for individual names), because an ETF carries far less risk (no single-name blow-up) so less premium is acceptable. IV ceiling / OI / spread gates are unchanged.
 

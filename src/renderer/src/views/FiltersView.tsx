@@ -579,7 +579,6 @@ export function FiltersView() {
                   <tr>
                     <th className="sortable" onClick={() => requestSort('ticker')}>Ticker {getSortIndicator('ticker')}</th>
                     <th className="sortable num" onClick={() => requestSort('lastPrice')}>Last {getSortIndicator('lastPrice')}</th>
-                    <th>Source</th>
                     {metricKeys.map(key => (
                       <th key={key} className="sortable num" onClick={() => requestSort(key)}>
                         {activeTpl!.metricColumns[key]} {getSortIndicator(key)}
@@ -594,7 +593,6 @@ export function FiltersView() {
                     <tr key={r.ticker}>
                       <td><strong>{r.ticker}</strong></td>
                       <td className="num">{fmt(r.lastPrice, '$')}</td>
-                      <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{r.watchlists.join(', ')}</td>
                       {metricKeys.map(key => (
                         <td key={key} className="num">
                           {formatMetricValue(key, r.metrics[key])}
@@ -667,13 +665,14 @@ export function FiltersView() {
 
 // ─── Metric formatting ────────────────────────────────────────────────────────
 
-function formatMetricValue(key: string, value: number | null | undefined): string {
+function formatMetricValue(key: string, value: number | string | null | undefined): string {
   if (value === null || value === undefined) return '—';
+  if (typeof value === 'string') return value;           // e.g. expiry date — shown as-is
   if (key === 'ivRank') return `${value}`;               // IV Rank is 0–100, not a %
   if (key === 'openInterest') return value.toLocaleString();
-  const percentKeys = ['currentIv', 'priceVsSma50', 'priceVsSma200', 'annualizedReturn', 'riskAdjustedReturn'];
+  const percentKeys = ['currentIv', 'priceVsSma50', 'priceVsSma200', 'annualizedReturn', 'riskAdjustedReturn', 'spread'];
   if (percentKeys.includes(key)) return `${value}%`;
-  const dollarKeys = ['targetStrike', 'putStrike'];
+  const dollarKeys = ['targetStrike', 'putStrike', 'credit'];
   if (dollarKeys.includes(key)) return `$${value}`;
   if (key === 'suitabilityScore') return `${value}/100`;
   if (key === 'delta') return `${(value).toFixed(2)}`;

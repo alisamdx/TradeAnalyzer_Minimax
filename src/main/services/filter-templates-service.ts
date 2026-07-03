@@ -579,10 +579,13 @@ export class FilterTemplatesService {
       metrics: {
         suitabilityScore,
         ...(a.ivPct !== null ? { currentIv: +a.ivPct.toFixed(1) } : {}),
+        expiry,
         putStrike: +put.strike.toFixed(2),
-        openInterest: a.oi,
+        credit: +a.creditPerShare.toFixed(2),
         annualizedReturn: a.annualizedReturn !== null ? +a.annualizedReturn.toFixed(1) : null,
         riskAdjustedReturn: a.riskAdjustedReturn !== null ? +a.riskAdjustedReturn.toFixed(1) : null,
+        openInterest: a.oi,
+        spread: +a.spreadPct.toFixed(1),
       },
       matchReason: `Vetted${isEtf ? ' (ETF)' : ''}: ${isEtf ? `IV-rank ${suitabilityScore}` : `score ${suitabilityScore}/100`};`
         + ` ${expiry} (${dte}d) $${put.strike} put`

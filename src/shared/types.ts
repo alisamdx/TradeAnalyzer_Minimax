@@ -1040,7 +1040,8 @@ export interface FilterTemplateResult {
   ticker: string;
   watchlists: string[];
   lastPrice: number | null;
-  metrics: Record<string, number | null>;
+  // String values (e.g. an expiry date) are shown as-is and sort lexically.
+  metrics: Record<string, number | string | null>;
   matchReason: string;
 }
 

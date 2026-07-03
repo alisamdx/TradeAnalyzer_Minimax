@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.109] — 2026-07-02
+
+### Changed
+- **Wheel (Vetted): expiry / credit / spread promoted to columns; Source column dropped.** The match-reason string packed the key trade details; **Expiry**, **Credit** (per-share), and **Spread %** are now sortable columns alongside Score, IV %, Put Strike, Ann %, Risk-Adj %, and OI. The **Source** column (redundant on universe scans — every row just says "Universe") was removed from the Filters results table. To carry a date in a numeric metrics map, `FilterTemplateResult.metrics` was widened to `Record<string, number | string | null>` (string values render as-is and sort lexically — ISO dates sort chronologically). `src/shared/types.ts`, `src/shared/filter-templates.ts`, `src/main/services/filter-templates-service.ts`, `src/renderer/src/views/FiltersView.tsx`.
+
 ## [1.1.108] — 2026-07-02
 
 ### Changed
