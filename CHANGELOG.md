@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.112] — 2026-07-02
+
+### Added
+- **Wheel (Vetted) now excludes confirmed downtrends (falling-knife gate).** A gate-comparison against the Daily Brief's wheel model surfaced one missing check: the Brief penalizes selling CSPs on stocks in confirmed downtrends ("assignment at the top of a decline is the wheel's core risk"), but Wheel (Vetted) had no trend awareness. Now names in a **confirmed downtrend** — price < SMA50 < SMA200, i.e. `technical_signals.trend_label = 'Bearish'` (nightly-computed, free DB read) — are excluded before the chain fetch; **uptrend and sideways are both kept** (a flat stock is a fine wheel). Applies to stocks and ETFs; a name with no computed trend passes. The trend is shown in each row's match reason. Cache version bumped (4) so the gate applies on relaunch. Other Brief signals were reviewed and deemed covered or intentionally omitted (RSI/overbought guard — rejected on replay; realized vol — proxied by the IV ceiling). `src/main/services/filter-templates-service.ts`, `src/renderer/src/views/FiltersView.tsx`. Spec: `Requirements/spec/05-screener-and-filters.md`.
+
 ## [1.1.111] — 2026-07-02
 
 ### Added

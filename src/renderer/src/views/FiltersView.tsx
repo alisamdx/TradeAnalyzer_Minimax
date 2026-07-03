@@ -42,7 +42,7 @@ const RUNS_KEY = 'filters:runsByTemplate';
 // Bump whenever the cached result shape (columns / metrics) OR the filter logic changes
 // materially, so a cache written by an older build is discarded (avoids blank new columns, or
 // showing stale results that a new gate would now exclude) instead of being shown.
-const CACHE_VERSION = 3;
+const CACHE_VERSION = 4;
 
 function todayLocalStr(): string {
   const d = new Date();

@@ -567,6 +567,14 @@ export class FilterTemplatesService {
       if (nextEarnings && nextEarnings <= expiry) return null;
     }
 
+    // Downtrend gate (all names): never sell a CSP into a confirmed downtrend — assignment at
+    // the top of a decline is the wheel's core risk (falling knife), matching the Daily Brief's
+    // "not in downtrend" signal. Confirmed downtrend = price < SMA50 < SMA200
+    // (technical_signals.trend_label 'Bearish'); uptrend and sideways are both kept. Free DB
+    // read; a name with no computed trend can't be gated (passes).
+    const trend = this.loadTrendLabel(ticker);
+    if (trend && trend.toLowerCase() === 'bearish') return null;
+
     let chain;
     try {
       chain = await this.optionsProvider.getOptionsChain(ticker, expiry);
@@ -603,7 +611,8 @@ export class FilterTemplatesService {
         + ` Δ${put.delta != null ? Math.abs(put.delta).toFixed(2) : '?'}, $${a.creditPerShare.toFixed(2)} credit`
         + ` (${a.annualizedReturn != null ? a.annualizedReturn.toFixed(0) : '?'}% ann.,`
         + ` ${a.riskAdjustedReturn != null ? a.riskAdjustedReturn.toFixed(0) : '?'}% risk-adj.),`
-        + ` IV ${a.ivPct != null ? a.ivPct.toFixed(0) : '?'}%, OI ${a.oi.toLocaleString()}, spread ${a.spreadPct.toFixed(0)}%`,
+        + ` IV ${a.ivPct != null ? a.ivPct.toFixed(0) : '?'}%, OI ${a.oi.toLocaleString()}, spread ${a.spreadPct.toFixed(0)}%`
+        + (trend ? `, trend ${trend}` : ''),
     };
   }
 
@@ -705,6 +714,16 @@ export class FilterTemplatesService {
         `SELECT report_date FROM earnings_calendar WHERE ticker = ? AND report_date >= date('now') ORDER BY report_date LIMIT 1`,
       ).get(ticker.toUpperCase()) as { report_date: string } | undefined;
       return row?.report_date ?? null;
+    } catch { return null; }
+  }
+
+  /** Nightly trend label ('Bullish' | 'Sideways' | 'Bearish') from technical_signals, or null. */
+  private loadTrendLabel(ticker: string): string | null {
+    try {
+      const row = this.db.prepare(
+        `SELECT trend_label FROM technical_signals WHERE ticker = ?`,
+      ).get(ticker.toUpperCase()) as { trend_label: string | null } | undefined;
+      return row?.trend_label ?? null;
     } catch { return null; }
   }
 }
