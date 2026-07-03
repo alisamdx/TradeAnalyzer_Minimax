@@ -98,6 +98,13 @@ describe('assessWheelPut', () => {
     // tiny credit on a high strike, long dated → low annualized yield
     expect(assessWheelPut(put({ strike: 500, bid: 0.5, ask: 0.55, openInterest: 800 }), 60, t).pass).toBe(false);
   });
+  it('accepts a moderate-yield ETF put under the lower ETF floor that a stock would fail', () => {
+    // ~9% annualized: below the 20% stock floor, above the 8% ETF floor
+    const p = put({ strike: 100, bid: 1.5, ask: 1.55, openInterest: 5000, iv: 0.18, delta: -0.30 });
+    const etfGate = { ...WHEEL_VETTED_DEFAULTS, minAnnualizedReturn: WHEEL_VETTED_DEFAULTS.minAnnualizedReturnEtf };
+    expect(assessWheelPut(p, 60, WHEEL_VETTED_DEFAULTS).pass).toBe(false); // stock floor (20%)
+    expect(assessWheelPut(p, 60, etfGate).pass).toBe(true);                // ETF floor (8%)
+  });
   it('fails a vol-bomb above the IV ceiling even when premium and liquidity are great', () => {
     // 130% IV, deep OI, rich premium → excluded by the IV ceiling (80%)
     const a = assessWheelPut(put({ strike: 95, bid: 8, ask: 8.2, openInterest: 5000, iv: 1.30, delta: -0.30 }), 30, t);

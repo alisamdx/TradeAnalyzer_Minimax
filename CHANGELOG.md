@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.106] — 2026-07-02
+
+### Changed
+- **Wheel (Vetted): separate, lower annualized-yield floor for ETFs.** The ETF run returned only 3 names (SMH, SLV, USO) because the 20% yield floor — tuned for high-IV single stocks — excluded the low-IV broad-index/sector ETFs that are the *safest* wheel candidates. ETFs now use `minAnnualizedReturnEtf` (default **8%**) instead of the 20% stock floor, on the rationale that an ETF's much lower risk (no single-name blow-up) makes less premium acceptable and better risk-adjusted. OI / spread / IV-ceiling gates unchanged. Should surface SPY/QQQ/sector ETFs whose ~0.30Δ monthly puts pay ≥ 8% annualized. Regression test +1 (`tests/wheel-vetted.test.ts`, 17 total). `src/main/services/filter-templates-service.ts`. Spec: `Requirements/spec/05-screener-and-filters.md`.
+
 ## [1.1.105] — 2026-07-02
 
 ### Added

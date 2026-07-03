@@ -35,7 +35,8 @@ export interface WheelVettedThresholds {
   targetDelta: number;          // target short-put |delta| (e.g. 0.30)
   minOi: number;                // open-interest floor on the target put
   maxSpreadPct: number;         // max bid/ask spread as % of mid
-  minAnnualizedReturn: number;  // "real premium" floor — annualized CSP yield %
+  minAnnualizedReturn: number;  // "real premium" floor — annualized CSP yield % (individual names)
+  minAnnualizedReturnEtf: number; // lower premium floor for ETFs (much lower risk → accept less yield)
   maxIvPct: number;             // IV ceiling (%) on the target put — excludes vol-bombs
 }
 
@@ -43,8 +44,8 @@ export interface WheelVettedThresholds {
 // names, so a universe-wide IV floor would reject almost everything — the annualized-return
 // floor (computed from the live chain in Tier 2) is the premium gate instead.
 export const WHEEL_VETTED_DEFAULTS: WheelVettedThresholds = {
-  minSuitability: 75, minDte: 25, targetDelta: 0.30, minOi: 250, maxSpreadPct: 15, minAnnualizedReturn: 20,
-  maxIvPct: 80,
+  minSuitability: 75, minDte: 25, targetDelta: 0.30, minOi: 250, maxSpreadPct: 15,
+  minAnnualizedReturn: 20, minAnnualizedReturnEtf: 8, maxIvPct: 80,
 };
 
 /** Nearest standard monthly expiry (3rd Friday) that is ≥ minDte calendar days out.
@@ -566,7 +567,9 @@ export class FilterTemplatesService {
     if (!put) return null;
 
     const dte = this.dteDays(expiry);
-    const a = assessWheelPut(put, dte, t);
+    // ETFs carry far less risk (no single-name blow-up) → accept a lower premium floor.
+    const gate: WheelVettedThresholds = isEtf ? { ...t, minAnnualizedReturn: t.minAnnualizedReturnEtf } : t;
+    const a = assessWheelPut(put, dte, gate);
     if (!a.pass) return null;
 
     return {
