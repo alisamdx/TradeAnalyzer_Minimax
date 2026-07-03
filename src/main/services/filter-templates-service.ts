@@ -528,17 +528,30 @@ export class FilterTemplatesService {
     watchlists: string[],
     isEtf = false,
   ): Promise<FilterTemplateResult | null> {
-    // ETFs have no fundamentals to vet — the vetted wheel is for individual names.
-    if (isEtf || !this.optionsProvider) return null;
+    if (!this.optionsProvider) return null;
 
     const t = WHEEL_VETTED_DEFAULTS;
 
-    // ── Tier 1: fundamentals gate (no option call) ──
     const quote = await this.fetchQuote(ticker);
     if (quote.last == null || quote.last <= 0) return null;
-    const ratios = await this.fetchFundamentals(ticker);
-    const suitabilityScore = calculateWheelSuitability(ratios, quote);
-    if (suitabilityScore < t.minSuitability) return null;
+
+    // ── Tier 1: foundation (no option call) ──
+    // Individual names must clear the fundamentals bar. ETFs have no fundamentals (P/E, ROE, D/E)
+    // but the curated ETF list is wheel-eligible by design — liquid, optionable, and free of
+    // single-name blow-up risk — so we skip the suitability gate and use IV rank as a proxy score,
+    // mirroring the loose `wheel_opportunity` template. The Tier-2 options gate does the real work.
+    let suitabilityScore: number;
+    if (isEtf) {
+      let ivRank: number | null = null;
+      if (this.ivHistoryService) {
+        try { ivRank = this.ivHistoryService.getIvRank(ticker).ivRank; } catch { /* no iv_history */ }
+      }
+      suitabilityScore = ivRank !== null ? Math.round(ivRank) : 50;
+    } else {
+      const ratios = await this.fetchFundamentals(ticker);
+      suitabilityScore = calculateWheelSuitability(ratios, quote);
+      if (suitabilityScore < t.minSuitability) return null;
+    }
 
     // ── Tier 2: monthly-expiry liquidity + premium gate (one chain fetch) ──
     const expiry = thirdFridayOnOrAfter(t.minDte);
@@ -568,7 +581,8 @@ export class FilterTemplatesService {
         annualizedReturn: a.annualizedReturn !== null ? +a.annualizedReturn.toFixed(1) : null,
         riskAdjustedReturn: a.riskAdjustedReturn !== null ? +a.riskAdjustedReturn.toFixed(1) : null,
       },
-      matchReason: `Vetted: score ${suitabilityScore}/100; ${expiry} (${dte}d) $${put.strike} put`
+      matchReason: `Vetted${isEtf ? ' (ETF)' : ''}: ${isEtf ? `IV-rank ${suitabilityScore}` : `score ${suitabilityScore}/100`};`
+        + ` ${expiry} (${dte}d) $${put.strike} put`
         + ` Δ${put.delta != null ? Math.abs(put.delta).toFixed(2) : '?'}, $${a.creditPerShare.toFixed(2)} credit`
         + ` (${a.annualizedReturn != null ? a.annualizedReturn.toFixed(0) : '?'}% ann.,`
         + ` ${a.riskAdjustedReturn != null ? a.riskAdjustedReturn.toFixed(0) : '?'}% risk-adj.),`

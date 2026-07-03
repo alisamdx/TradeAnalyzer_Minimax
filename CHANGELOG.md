@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.105] — 2026-07-02
+
+### Added
+- **Wheel (Vetted) now supports the ETF universe.** Previously the vetted wheel returned nothing for ETFs (it skipped them because Tier 1 is a fundamentals gate and ETFs have no P/E/ROE/D-E). But ETFs are prime wheel candidates — deep liquidity, standard monthlies, no single-name blow-up risk. Now, for ETFs, the fundamentals gate is skipped (the curated ETF list is wheel-eligible by design) and **IV rank is used as the proxy Score**, while the full **Tier-2 options gate still applies** (monthly ~0.30Δ put, OI ≥ 250, spread ≤ 15%, annualized ≥ 20%, IV ≤ 80%) — mirroring how the loose `wheel_opportunity` template already handles ETFs. Match reason marks these `Vetted (ETF)`. Caveat: the 20% annualized-yield floor means low-IV broad-index ETFs (SPY/QQQ) may not clear the premium bar — higher-IV sector/leveraged ETFs will; the floor can be revisited for ETFs separately. `src/main/services/filter-templates-service.ts`. Spec: `Requirements/spec/05-screener-and-filters.md`.
+
 ## [1.1.104] — 2026-07-02
 
 ### Fixed
