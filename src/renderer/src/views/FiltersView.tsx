@@ -35,9 +35,10 @@ function fmt(v: number | null | undefined, prefix = '', suffix = ''): string {
   return `${prefix}${v.toLocaleString(undefined, { maximumFractionDigits: 2 })}${suffix}`;
 }
 
-// Per-day result cache: preserve the last run so the list survives navigation (and app
-// restart within the same day). Re-run refreshes it. Renderer-only (localStorage).
-const LAST_RUN_KEY = 'filters:lastRun';
+// Per-template, per-day result cache: each template remembers its last run, so switching
+// between templates (and navigating away/back) shows each one's list without re-running.
+// The whole cache is scoped to one day and auto-expires. Re-run refreshes. Renderer-only.
+const RUNS_KEY = 'filters:runsByTemplate';
 
 function todayLocalStr(): string {
   const d = new Date();
@@ -48,16 +49,35 @@ function fmtTime(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-interface CachedFilterRun {
-  date: string;
+interface CachedRun {
   ranAt: string;
-  templateId: string;
   source: 'universe' | 'watchlist';
   universe?: Universe;
   watchlistId?: number | null;
   results: FilterTemplateResult[];
   sortKey?: string;
   sortDir?: SortDirection;
+}
+
+interface CachedRuns {
+  date: string;
+  lastTemplateId?: string;              // most recently run — restored on mount
+  runs: Record<string, CachedRun>;      // keyed by templateId
+}
+
+/** Read today's cache; null if missing or from a previous day (auto-expiry). */
+function readRuns(): CachedRuns | null {
+  try {
+    const raw = localStorage.getItem(RUNS_KEY);
+    if (!raw) return null;
+    const c = JSON.parse(raw) as CachedRuns;
+    if (!c || typeof c !== 'object' || c.date !== todayLocalStr() || !c.runs) return null;
+    return c;
+  } catch { return null; }
+}
+
+function writeRuns(c: CachedRuns): void {
+  try { localStorage.setItem(RUNS_KEY, JSON.stringify(c)); } catch { /* full/unavailable — non-fatal */ }
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -94,27 +114,6 @@ export function FiltersView() {
   }, []);
 
   useEffect(() => { loadWatchlists(); }, [loadWatchlists]);
-
-  // Restore today's last run so results survive navigation (and app restart within the day).
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(LAST_RUN_KEY);
-      if (!raw) return;
-      const s = JSON.parse(raw) as CachedFilterRun;
-      if (s.date !== todayLocalStr()) return;                          // stale — a different day
-      if (!Array.isArray(s.results) || s.results.length === 0) return;
-      if (!FILTER_TEMPLATES.some(t => t.id === s.templateId)) return;  // template no longer exists
-      setActiveTemplate(s.templateId);
-      setSource(s.source);
-      if (s.universe) setUniverse(s.universe);
-      if (s.watchlistId != null) setSelectedWatchlistId(s.watchlistId);
-      setResults(s.results);
-      setLastRanAt(s.ranAt);
-      setRestored(true);
-      setSort(s.sortKey ?? 'ticker', s.sortDir ?? 'asc');
-    } catch { /* ignore corrupt/oversized cache */ }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // Listen for filter progress events
   useEffect(() => {
@@ -162,20 +161,20 @@ export function FiltersView() {
       const template = FILTER_TEMPLATES.find(t => t.id === templateId);
       setStatusMsg(`${template?.label ?? templateId}: ${res.length} match${res.length !== 1 ? 'es' : ''}`);
 
-      // Cache this run for the day so it survives navigation / restart.
+      // Cache this template's run for the day so it survives navigation / restart.
       const ranAt = new Date().toISOString();
       setLastRanAt(ranAt);
       setRestored(false);
-      try {
-        const cached: CachedFilterRun = {
-          date: todayLocalStr(), ranAt, templateId, source,
-          universe: source === 'universe' ? universe : undefined,
-          watchlistId: source === 'watchlist' ? selectedWatchlistId : undefined,
-          results: res,
-          sortKey: def?.key ?? 'ticker', sortDir: def?.dir ?? 'asc',
-        };
-        localStorage.setItem(LAST_RUN_KEY, JSON.stringify(cached));
-      } catch { /* localStorage unavailable/full — non-fatal */ }
+      const prev = readRuns();
+      const runs = prev ? { ...prev.runs } : {};
+      runs[templateId] = {
+        ranAt, source,
+        universe: source === 'universe' ? universe : undefined,
+        watchlistId: source === 'watchlist' ? selectedWatchlistId : undefined,
+        results: res,
+        sortKey: def?.key ?? 'ticker', sortDir: def?.dir ?? 'asc',
+      };
+      writeRuns({ date: todayLocalStr(), lastTemplateId: templateId, runs });
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -183,6 +182,35 @@ export function FiltersView() {
       setFilterProgress(null);
     }
   }, [source, universe, selectedWatchlistId]);
+
+  // Restore a cached run into the view (no API call).
+  const applyCachedRun = useCallback((templateId: string, run: CachedRun) => {
+    setActiveTemplate(templateId);
+    setSource(run.source);
+    if (run.universe) setUniverse(run.universe);
+    if (run.watchlistId != null) setSelectedWatchlistId(run.watchlistId);
+    setResults(run.results);
+    setLastRanAt(run.ranAt);
+    setRestored(true);
+    setSort(run.sortKey ?? 'ticker', run.sortDir ?? 'asc');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Clicking a template card: show its today-cache if present, else run it fresh.
+  const selectTemplate = useCallback((templateId: string) => {
+    const run = readRuns()?.runs[templateId];
+    if (run) applyCachedRun(templateId, run);
+    else runTemplate(templateId);
+  }, [applyCachedRun, runTemplate]);
+
+  // On mount, restore the most recently run template so results survive navigation / restart.
+  useEffect(() => {
+    const c = readRuns();
+    const id = c?.lastTemplateId;
+    const run = id ? c.runs[id] : undefined;
+    if (id && run && FILTER_TEMPLATES.some(t => t.id === id)) applyCachedRun(id, run);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Save all current results to a new (or existing) watchlist.
   const handleSaveToWatchlist = useCallback(async () => {
@@ -349,7 +377,7 @@ export function FiltersView() {
               {templates.map(t => (
                 <button
                   key={t.id}
-                  onClick={() => runTemplate(t.id)}
+                  onClick={() => selectTemplate(t.id)}
                   disabled={isRunning}
                   style={{
                     display: 'block',

@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.108] — 2026-07-02
+
+### Changed
+- **Filters now remember *each template's* last run separately (was single-last-run).** v1.1.107 cached only the most recent run, so switching templates lost the previous one. The cache is now keyed by template id: clicking a template card shows *its* today-cache instantly (no re-run) or runs fresh if it has none; on return to the view the most recently run template is restored. Each template can be run once and revisited all day; **↻ Re-run** refreshes the active one. Same per-day auto-expiry, renderer-only (`localStorage`). `src/renderer/src/views/FiltersView.tsx`. Spec: `Requirements/spec/05-screener-and-filters.md`.
+
 ## [1.1.107] — 2026-07-02
 
 ### Added
