@@ -77,6 +77,8 @@ One-click pre-built scans over a watchlist or universe. Service: `filter-templat
 
 IPC: `listTemplates()`, `runTemplate(templateId, source?, universe?, watchlistIds?)`, `onProgress`.
 
+**Result persistence (v1.1.107)**: the last run (template, source/universe, results, sort) is cached per day in `localStorage` and restored on return to the view (survives navigation and same-day app restart; auto-expires next day). The header shows the run time (`today's run HH:MM` restored vs `ran HH:MM` fresh) and a **↻ Re-run** button refreshes on demand — run once, view all day.
+
 ### 5.B.2 Built-in templates
 
 | ID | Label | Category | Condition | Columns |

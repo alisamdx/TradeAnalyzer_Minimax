@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.107] — 2026-07-02
+
+### Added
+- **Filters remember the last run for the day.** Filter results used to live only in component state, so navigating to another screen and back cleared them — you had to re-run every time. The last run (template, source/universe, results, sort) is now cached per day in `localStorage`, so it's restored when you return to Filters (and survives an app restart within the same day); the cache auto-expires the next day. The results header shows when it ran (`· today's run 10:42` when restored, `· ran 10:42` when fresh) and a **↻ Re-run** button refreshes it on demand. Run once, view all day, re-run when you want fresh data. Renderer-only. `src/renderer/src/views/FiltersView.tsx`. Spec: `Requirements/spec/05-screener-and-filters.md`.
+
 ## [1.1.106] — 2026-07-02
 
 ### Changed

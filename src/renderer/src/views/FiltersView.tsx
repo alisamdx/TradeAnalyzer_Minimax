@@ -35,6 +35,31 @@ function fmt(v: number | null | undefined, prefix = '', suffix = ''): string {
   return `${prefix}${v.toLocaleString(undefined, { maximumFractionDigits: 2 })}${suffix}`;
 }
 
+// Per-day result cache: preserve the last run so the list survives navigation (and app
+// restart within the same day). Re-run refreshes it. Renderer-only (localStorage).
+const LAST_RUN_KEY = 'filters:lastRun';
+
+function todayLocalStr(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function fmtTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+interface CachedFilterRun {
+  date: string;
+  ranAt: string;
+  templateId: string;
+  source: 'universe' | 'watchlist';
+  universe?: Universe;
+  watchlistId?: number | null;
+  results: FilterTemplateResult[];
+  sortKey?: string;
+  sortDir?: SortDirection;
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function FiltersView() {
@@ -46,6 +71,8 @@ export function FiltersView() {
   const [watchlists, setWatchlists] = useState<Watchlist[]>([]);
   const [selectedWatchlistId, setSelectedWatchlistId] = useState<number | null>(null);
   const [filterProgress, setFilterProgress] = useState<{ current: number; total: number; ticker: string } | null>(null);
+  const [lastRanAt, setLastRanAt] = useState<string | null>(null);
+  const [restored, setRestored] = useState(false); // showing today's cached run, not a fresh one
 
   // Source: universe vs watchlist — similar to LEAPS+CSP view
   const [source, setSource] = useState<'universe' | 'watchlist'>('watchlist');
@@ -67,6 +94,27 @@ export function FiltersView() {
   }, []);
 
   useEffect(() => { loadWatchlists(); }, [loadWatchlists]);
+
+  // Restore today's last run so results survive navigation (and app restart within the day).
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(LAST_RUN_KEY);
+      if (!raw) return;
+      const s = JSON.parse(raw) as CachedFilterRun;
+      if (s.date !== todayLocalStr()) return;                          // stale — a different day
+      if (!Array.isArray(s.results) || s.results.length === 0) return;
+      if (!FILTER_TEMPLATES.some(t => t.id === s.templateId)) return;  // template no longer exists
+      setActiveTemplate(s.templateId);
+      setSource(s.source);
+      if (s.universe) setUniverse(s.universe);
+      if (s.watchlistId != null) setSelectedWatchlistId(s.watchlistId);
+      setResults(s.results);
+      setLastRanAt(s.ranAt);
+      setRestored(true);
+      setSort(s.sortKey ?? 'ticker', s.sortDir ?? 'asc');
+    } catch { /* ignore corrupt/oversized cache */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Listen for filter progress events
   useEffect(() => {
@@ -113,6 +161,21 @@ export function FiltersView() {
       else setSort('ticker', 'asc');
       const template = FILTER_TEMPLATES.find(t => t.id === templateId);
       setStatusMsg(`${template?.label ?? templateId}: ${res.length} match${res.length !== 1 ? 'es' : ''}`);
+
+      // Cache this run for the day so it survives navigation / restart.
+      const ranAt = new Date().toISOString();
+      setLastRanAt(ranAt);
+      setRestored(false);
+      try {
+        const cached: CachedFilterRun = {
+          date: todayLocalStr(), ranAt, templateId, source,
+          universe: source === 'universe' ? universe : undefined,
+          watchlistId: source === 'watchlist' ? selectedWatchlistId : undefined,
+          results: res,
+          sortKey: def?.key ?? 'ticker', sortDir: def?.dir ?? 'asc',
+        };
+        localStorage.setItem(LAST_RUN_KEY, JSON.stringify(cached));
+      } catch { /* localStorage unavailable/full — non-fatal */ }
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -392,7 +455,28 @@ export function FiltersView() {
                   Sorted by {sortConfig.key} {sortConfig.direction === 'asc' ? '↑' : '↓'}
                 </span>
               )}
+              {lastRanAt && (
+                <span
+                  className="meta"
+                  style={{ marginLeft: 8, color: restored ? 'var(--text-muted)' : undefined }}
+                  title={restored ? "Today's earlier run, restored — click Re-run to refresh" : 'Just run'}
+                >
+                  · {restored ? "today's run" : 'ran'} {fmtTime(lastRanAt)}
+                </span>
+              )}
               <div style={{ flex: 1 }} />
+              <button
+                onClick={() => { if (activeTemplate) runTemplate(activeTemplate); }}
+                disabled={isRunning || !activeTemplate}
+                title="Re-run this filter with fresh data"
+                style={{
+                  fontSize: 12, padding: '5px 12px', borderRadius: 6, marginRight: 8,
+                  cursor: isRunning ? 'wait' : 'pointer',
+                  background: 'transparent', color: 'var(--text)', border: '1px solid var(--border)',
+                }}
+              >
+                ↻ Re-run
+              </button>
               <button
                 onClick={() => { setSaveTargetId('new'); setShowSaveForm(s => !s); }}
                 title="Save all these results as a watchlist to reuse elsewhere"
