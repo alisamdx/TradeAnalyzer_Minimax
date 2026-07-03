@@ -39,9 +39,10 @@ function fmt(v: number | null | undefined, prefix = '', suffix = ''): string {
 // between templates (and navigating away/back) shows each one's list without re-running.
 // The whole cache is scoped to one day and auto-expires. Re-run refreshes. Renderer-only.
 const RUNS_KEY = 'filters:runsByTemplate';
-// Bump whenever the cached result shape (columns / metrics) changes, so a cache written by an
-// older build is discarded (a stale shape would render new columns as blanks) instead of shown.
-const CACHE_VERSION = 2;
+// Bump whenever the cached result shape (columns / metrics) OR the filter logic changes
+// materially, so a cache written by an older build is discarded (avoids blank new columns, or
+// showing stale results that a new gate would now exclude) instead of being shown.
+const CACHE_VERSION = 3;
 
 function todayLocalStr(): string {
   const d = new Date();

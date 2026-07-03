@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.111] — 2026-07-02
+
+### Added
+- **Wheel (Vetted) now excludes names with earnings before the target expiry.** The vetted wheel ignored earnings — it targets the ~50-DTE monthly, so a name reporting inside that window (e.g. FCX earnings Jul 21 vs an Aug 21 expiry) would surface a CSP held straight through the earnings gap (the biggest event risk: gap + IV crush, and exactly the "don't sell premium with earnings before expiry" rule). Individual names whose next earnings (from the local `earnings_calendar`) falls on/before the target expiry are now filtered out before the chain fetch. ETFs are exempt (no earnings). Limitation: a universe name with no stored earnings date can't be gated — coverage is best for portfolio/watchlist/conviction tickers. The Filters day-cache version was bumped (3) so the gate takes effect on relaunch rather than showing a stale, pre-gate list. `src/main/services/filter-templates-service.ts`, `src/renderer/src/views/FiltersView.tsx`. Spec: `Requirements/spec/05-screener-and-filters.md`.
+
 ## [1.1.110] — 2026-07-02
 
 ### Fixed

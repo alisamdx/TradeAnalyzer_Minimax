@@ -556,6 +556,17 @@ export class FilterTemplatesService {
 
     // ── Tier 2: monthly-expiry liquidity + premium gate (one chain fetch) ──
     const expiry = thirdFridayOnOrAfter(t.minDte);
+
+    // Earnings gate (individual names only — ETFs don't report). A short put held through an
+    // earnings report inside the expiry window carries the single biggest event risk (gap +
+    // IV crush), so exclude names whose next earnings falls on/before the target expiry. Uses
+    // the local earnings_calendar (free); a universe name with no stored earnings date can't be
+    // gated here (see limitation — coverage is best for portfolio/watchlist/conviction tickers).
+    if (!isEtf) {
+      const nextEarnings = this.loadNextEarnings(ticker);
+      if (nextEarnings && nextEarnings <= expiry) return null;
+    }
+
     let chain;
     try {
       chain = await this.optionsProvider.getOptionsChain(ticker, expiry);
@@ -685,5 +696,15 @@ export class FilterTemplatesService {
     const exp = new Date(expiration);
     const now = new Date();
     return Math.ceil((exp.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+  }
+
+  /** Next earnings date (YYYY-MM-DD) on/after today from the local earnings_calendar, or null. */
+  private loadNextEarnings(ticker: string): string | null {
+    try {
+      const row = this.db.prepare(
+        `SELECT report_date FROM earnings_calendar WHERE ticker = ? AND report_date >= date('now') ORDER BY report_date LIMIT 1`,
+      ).get(ticker.toUpperCase()) as { report_date: string } | undefined;
+      return row?.report_date ?? null;
+    } catch { return null; }
   }
 }
