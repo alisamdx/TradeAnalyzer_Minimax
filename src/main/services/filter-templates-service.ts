@@ -45,7 +45,7 @@ export interface WheelVettedThresholds {
 // floor (computed from the live chain in Tier 2) is the premium gate instead.
 export const WHEEL_VETTED_DEFAULTS: WheelVettedThresholds = {
   minSuitability: 75, minDte: 25, targetDelta: 0.30, minOi: 250, maxSpreadPct: 15,
-  minAnnualizedReturn: 20, minAnnualizedReturnEtf: 8, maxIvPct: 80,
+  minAnnualizedReturn: 15, minAnnualizedReturnEtf: 8, maxIvPct: 80,
 };
 
 /** Nearest standard monthly expiry (3rd Friday) that is ≥ minDte calendar days out.

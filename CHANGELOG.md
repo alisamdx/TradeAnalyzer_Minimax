@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.113] — 2026-07-02
+
+### Changed
+- **Wheel (Vetted): stock annualized-yield floor 20% → 15%.** Reverts to the originally-recommended floor (20% was the user's pick during first calibration). Independent of the current earnings-season thinness: a 20% floor forces selection into only the highest-premium — hence highest-IV, riskiest — names, so 15% admits steadier moderate-premium wheels and *improves* the risk profile (less vol-bomb concentration). ETF floor unchanged (8%). Cache version bumped (5). `src/main/services/filter-templates-service.ts`.
+
 ## [1.1.112] — 2026-07-02
 
 ### Added
