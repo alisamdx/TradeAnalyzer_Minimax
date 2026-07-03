@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.1.114] — 2026-07-03
+
+### Added
+- **Filters: "All" universe option.** The universe dropdown now offers **All (S&P + Russell + ETFs)** — the deduplicated union of every list. In an All scan the ETF-vs-stock calibration (ETF-compressed IV thresholds, skipped fundamentals gate, lower vetted-wheel yield floor) is applied **per ticker** from ETF-list membership, so mixing stocks and ETFs in one scan doesn't mis-calibrate either side. ETF rows are labeled `ETF` in the source column context. `src/shared/types.ts`, `src/main/services/constituents-service.ts`, `src/main/services/filter-templates-service.ts`, `src/renderer/src/views/FiltersView.tsx`.
+- **Filters Prefill batch job — the Filters screen now opens pre-populated.** A new `filters-prefill` job runs at the very end of the after-close chain (after Market Sync / gap-fill / technical signals / earnings, so every cache it reads is fresh) and precomputes **all 8 filter templates over Universe = All**, storing the latest run per template in a new `filter_template_runs` table (migration 065, shape-versioned like the renderer day-cache — the shared constant is `FILTER_RESULTS_SHAPE_VERSION`). The Filters view loads these on mount: each template card shows a **match-count badge**, and clicking a card shows the freshest cached results instantly — today's manual run or the batch run, whichever is newer — with a muted `batch ran <date time>` stamp (shown indefinitely, so the evening run greets you next morning). **↻ Re-run** still fetches live. A failing template is recorded and the job continues; an aborted run never overwrites a stored run with partial results; the job is `afterCloseOnly` (skipped in the lean ~10:15 slot). Regression tests: `tests/filters-prefill.test.ts` (9 tests). `src/main/services/jobs/filters-prefill-job.ts`, `src/main/ipc/ipc-filters.ts`, `src/preload/index.ts`, `src/main/index.ts`.
+
 ## [1.1.113] — 2026-07-02
 
 ### Changed

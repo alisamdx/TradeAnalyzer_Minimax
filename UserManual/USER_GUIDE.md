@@ -123,7 +123,7 @@ Not sure which structure fits? Open **🔬 Strategy Lab**, enter a ticker, and t
 - **🔍 Screener** — full fundamental filter run over a universe; save results as a watchlist.
 - **📡 News & Research** — AI research dossier per ticker, ranked by impact score.
 - **🎯 Opportunity** — one-click ranked "best setups right now" by composite score.
-- **🎛️ Filters** — one-click pre-built scans (RSI, IV high/low, assignment risk, wheel).
+- **🎛️ Filters** — one-click pre-built scans (RSI, IV high/low, assignment risk, wheel). Universe choices include **All** (S&P + Russell + ETFs), and the nightly batch precomputes every filter over All — each filter card shows a match-count badge and opens instantly with the latest batch results (`batch ran …` stamp); ↻ Re-run fetches live.
 
 **Analysis**
 - **📐 Payoff** — multi-leg payoff modeling, risk matrix, AI assessment.

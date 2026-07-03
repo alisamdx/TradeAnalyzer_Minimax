@@ -29,6 +29,12 @@ export interface FilterTemplateResult {
   matchReason: string;
 }
 
+// Bump whenever the cached result shape (columns / metrics) OR the filter logic changes
+// materially, so cached runs written by an older build are discarded instead of shown
+// (avoids blank new columns, or stale results a new gate would now exclude).
+// Shared by the renderer's localStorage day-cache and the filter_template_runs DB rows.
+export const FILTER_RESULTS_SHAPE_VERSION = 5;
+
 // ─── Built-in template definitions ────────────────────────────────────────────
 
 export const FILTER_TEMPLATES: FilterTemplate[] = [

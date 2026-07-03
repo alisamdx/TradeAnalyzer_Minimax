@@ -32,6 +32,15 @@ export function registerFiltersIpc(
     return ok(service.listTemplates());
   });
 
+  // Batch-precomputed runs (filters-prefill job) — latest stored run per template.
+  ipcMain.handle('filters:get-saved-runs', () => {
+    try {
+      return ok(service.getSavedRuns());
+    } catch (err) {
+      return fail(err);
+    }
+  });
+
   ipcMain.handle('filters:run-template', async (
     _e: IpcMainInvokeEvent,
     templateId: string,

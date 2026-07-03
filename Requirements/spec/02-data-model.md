@@ -154,3 +154,7 @@ Views `v_open_positions`, `v_closed_positions`, `v_portfolio_summary` provide ca
 ## 2.19 Earnings (migration 034)
 
 **`earnings_calendar`** — `ticker PK`, `report_date` (YYYY-MM-DD), `report_time` (`bmo|amc|null`), `eps_estimate`, `source` (`etrade|polygon_est|manual`), `confirmed` (1=exact, 0=estimate), `cached_at` (drives 24h refresh gate). See §17 for the Saturday→Friday UTC correction.
+
+## 2.20 Filter prefill (migration 065)
+
+**`filter_template_runs`** — `template_id PK`, `ran_at`, `universe`, `result_count`, `results_json` (`FilterTemplateResult[]`), `shape_version`. Latest batch-precomputed run per filter template (no history — each `filters-prefill` run overwrites). Rows whose `shape_version` ≠ the build's `FILTER_RESULTS_SHAPE_VERSION` are ignored on read, so a stale result shape is never rendered (§5.B.1).

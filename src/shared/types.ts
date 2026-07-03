@@ -36,7 +36,8 @@ export type IpcResult<T> = { ok: true; value: T } | { ok: false; error: { code: 
 
 // ─── Screener (Phase 2) ────────────────────────────────────────────────────────
 
-export type Universe = 'sp500' | 'russell1000' | 'both' | 'etf';
+// 'all' = both + etf (deduplicated) — currently only offered by the Filters view.
+export type Universe = 'sp500' | 'russell1000' | 'both' | 'etf' | 'all';
 
 /** One enabled filter with its threshold(s). */
 export interface FilterDef {
@@ -1043,6 +1044,15 @@ export interface FilterTemplateResult {
   // String values (e.g. an expiry date) are shown as-is and sort lexically.
   metrics: Record<string, number | string | null>;
   matchReason: string;
+}
+
+/** A batch-precomputed filter run (filter_template_runs table) — latest run per template. */
+export interface FilterSavedRun {
+  templateId: string;
+  ranAt: string;
+  universe: Universe;
+  resultCount: number;
+  results: FilterTemplateResult[];
 }
 
 // ─── Collared LEAPS Strategy ──────────────────────────────────────────────────

@@ -89,11 +89,12 @@ export class ConstituentsService {
    * Priority: (1) SQLite cache if fresh, (2) bundled CSV, (3) empty list.
    */
   getConstituents(index: Universe): ConstituentRow[] {
-    if (index === 'both') {
+    if (index === 'both' || index === 'all') {
       const sp5 = this.getConstituents('sp500');
       const rus = this.getConstituents('russell1000');
+      const etf = index === 'all' ? this.getConstituents('etf') : [];
       const seen = new Set<string>();
-      return [...sp5, ...rus].filter((r) => {
+      return [...sp5, ...rus, ...etf].filter((r) => {
         if (seen.has(r.ticker)) return false;
         seen.add(r.ticker);
         return true;

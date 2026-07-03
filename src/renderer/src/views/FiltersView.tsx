@@ -2,8 +2,8 @@
 // User selects a template, picks a source (universe or watchlist), and sees matching results.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { FilterTemplateResult, Watchlist, Universe } from '@shared/types.js';
-import { FILTER_TEMPLATES } from '@shared/filter-templates.js';
+import type { FilterTemplateResult, FilterSavedRun, Watchlist, Universe } from '@shared/types.js';
+import { FILTER_TEMPLATES, FILTER_RESULTS_SHAPE_VERSION } from '@shared/filter-templates.js';
 import { useSortable, type SortDirection } from '../hooks/useSortable.js';
 
 // ─── Per-template default sort ────────────────────────────────────────────────
@@ -39,10 +39,8 @@ function fmt(v: number | null | undefined, prefix = '', suffix = ''): string {
 // between templates (and navigating away/back) shows each one's list without re-running.
 // The whole cache is scoped to one day and auto-expires. Re-run refreshes. Renderer-only.
 const RUNS_KEY = 'filters:runsByTemplate';
-// Bump whenever the cached result shape (columns / metrics) OR the filter logic changes
-// materially, so a cache written by an older build is discarded (avoids blank new columns, or
-// showing stale results that a new gate would now exclude) instead of being shown.
-const CACHE_VERSION = 5;
+// Shape version shared with the main-side filter_template_runs rows — see filter-templates.ts.
+const CACHE_VERSION = FILTER_RESULTS_SHAPE_VERSION;
 
 function todayLocalStr(): string {
   const d = new Date();
@@ -51,6 +49,15 @@ function todayLocalStr(): string {
 
 function fmtTime(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+/** Time for today's timestamps; date + time for older ones (batch runs are shown indefinitely). */
+function fmtWhen(iso: string): string {
+  const d = new Date(iso);
+  const isToday = d.toDateString() === new Date().toDateString();
+  return isToday
+    ? fmtTime(iso)
+    : d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
 interface CachedRun {
@@ -97,7 +104,11 @@ export function FiltersView() {
   const [selectedWatchlistId, setSelectedWatchlistId] = useState<number | null>(null);
   const [filterProgress, setFilterProgress] = useState<{ current: number; total: number; ticker: string } | null>(null);
   const [lastRanAt, setLastRanAt] = useState<string | null>(null);
-  const [restored, setRestored] = useState(false); // showing today's cached run, not a fresh one
+  // Where the displayed results came from: a fresh scan, today's restored manual run,
+  // or the nightly filters-prefill batch job.
+  const [origin, setOrigin] = useState<'live' | 'restored' | 'batch'>('live');
+  // Batch-precomputed runs (filters-prefill job), keyed by templateId.
+  const [batchRuns, setBatchRuns] = useState<Record<string, FilterSavedRun>>({});
 
   // Source: universe vs watchlist — similar to LEAPS+CSP view
   const [source, setSource] = useState<'universe' | 'watchlist'>('watchlist');
@@ -124,6 +135,16 @@ export function FiltersView() {
   useEffect(() => {
     const unsub = window.api.filters.onProgress(p => setFilterProgress(p));
     return () => { unsub(); };
+  }, []);
+
+  // Load the batch-precomputed runs once — clicking a template shows them instantly.
+  useEffect(() => {
+    (async () => {
+      try {
+        const runs = await window.api.filters.getSavedRuns();
+        setBatchRuns(Object.fromEntries(runs.map(r => [r.templateId, r])));
+      } catch { /* no batch data — templates just run live on click */ }
+    })();
   }, []);
 
   // Flatten results so metric sub-keys (rsi, ivRank, …) are top-level for useSortable.
@@ -169,7 +190,7 @@ export function FiltersView() {
       // Cache this template's run for the day so it survives navigation / restart.
       const ranAt = new Date().toISOString();
       setLastRanAt(ranAt);
-      setRestored(false);
+      setOrigin('live');
       const prev = readRuns();
       const runs = prev ? { ...prev.runs } : {};
       runs[templateId] = {
@@ -196,17 +217,33 @@ export function FiltersView() {
     if (run.watchlistId != null) setSelectedWatchlistId(run.watchlistId);
     setResults(run.results);
     setLastRanAt(run.ranAt);
-    setRestored(true);
+    setOrigin('restored');
     setSort(run.sortKey ?? 'ticker', run.sortDir ?? 'asc');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Clicking a template card: show its today-cache if present, else run it fresh.
+  // Show a batch-precomputed run (filters-prefill job) in the view (no API call).
+  const applyBatchRun = useCallback((templateId: string, run: FilterSavedRun) => {
+    setActiveTemplate(templateId);
+    setSource('universe');
+    setUniverse(run.universe);
+    setResults(run.results);
+    setLastRanAt(run.ranAt);
+    setOrigin('batch');
+    const def = TEMPLATE_DEFAULT_SORT[templateId];
+    setSort(def?.key ?? 'ticker', def?.dir ?? 'asc');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Clicking a template card: show the freshest cached data instantly — today's manual
+  // run or the batch prefill, whichever is newer — else run it fresh.
   const selectTemplate = useCallback((templateId: string) => {
-    const run = readRuns()?.runs[templateId];
-    if (run) applyCachedRun(templateId, run);
+    const manual = readRuns()?.runs[templateId];
+    const batch = batchRuns[templateId];
+    if (manual && (!batch || manual.ranAt >= batch.ranAt)) applyCachedRun(templateId, manual);
+    else if (batch) applyBatchRun(templateId, batch);
     else runTemplate(templateId);
-  }, [applyCachedRun, runTemplate]);
+  }, [batchRuns, applyCachedRun, applyBatchRun, runTemplate]);
 
   // On mount, restore the most recently run template so results survive navigation / restart.
   useEffect(() => {
@@ -354,6 +391,7 @@ export function FiltersView() {
               <option value="russell1000">Russell 1000</option>
               <option value="both">Both</option>
               <option value="etf">ETFs</option>
+              <option value="all">All (S&P + Russell + ETFs)</option>
             </select>
           ) : (
             <select
@@ -400,6 +438,18 @@ export function FiltersView() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <span style={{ fontSize: 16 }}>{t.icon}</span>
                     <strong>{t.label}</strong>
+                    {batchRuns[t.id] && (
+                      <span
+                        title={`${batchRuns[t.id]!.resultCount} matches precomputed by the nightly batch — click to view instantly`}
+                        style={{
+                          marginLeft: 'auto', fontSize: 10, fontWeight: 700, padding: '1px 6px',
+                          borderRadius: 8, background: 'var(--surface)', border: '1px solid var(--border)',
+                          color: 'var(--text-muted)',
+                        }}
+                      >
+                        {batchRuns[t.id]!.resultCount}
+                      </span>
+                    )}
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
                     {t.description}
@@ -479,6 +529,7 @@ export function FiltersView() {
                     universe === 'sp500'       ? 'S&P 500' :
                     universe === 'russell1000' ? 'Russell 1000' :
                     universe === 'etf'         ? 'ETFs' :
+                    universe === 'all'         ? 'S&P 500 + Russell 1000 + ETFs' :
                     'S&P 500 + Russell 1000'
                   }
                 </span>
@@ -491,10 +542,14 @@ export function FiltersView() {
               {lastRanAt && (
                 <span
                   className="meta"
-                  style={{ marginLeft: 8, color: restored ? 'var(--text-muted)' : undefined }}
-                  title={restored ? "Today's earlier run, restored — click Re-run to refresh" : 'Just run'}
+                  style={{ marginLeft: 8, color: origin !== 'live' ? 'var(--text-muted)' : undefined }}
+                  title={
+                    origin === 'batch'    ? 'Precomputed by the nightly Filters Prefill batch job — click Re-run for live data' :
+                    origin === 'restored' ? "Today's earlier run, restored — click Re-run to refresh" :
+                    'Just run'
+                  }
                 >
-                  · {restored ? "today's run" : 'ran'} {fmtTime(lastRanAt)}
+                  · {origin === 'batch' ? 'batch ran' : origin === 'restored' ? "today's run" : 'ran'} {fmtWhen(lastRanAt)}
                 </span>
               )}
               <div style={{ flex: 1 }} />
@@ -661,6 +716,11 @@ export function FiltersView() {
               No {source === 'universe' ? 'universe' : 'watchlist'} tickers currently meet the {activeTpl?.label ?? ''} criteria.
               Try a different template, source, or check that you have recent data.
             </p>
+            {origin === 'batch' && lastRanAt && (
+              <p style={{ fontSize: 12, margin: '8px 0 0', color: 'var(--text-muted)' }}>
+                Precomputed by the nightly batch, {fmtWhen(lastRanAt)}.
+              </p>
+            )}
           </div>
         )}
       </main>

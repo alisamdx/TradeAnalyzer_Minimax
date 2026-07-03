@@ -59,6 +59,7 @@ import type {
   CollaredLeapsProgressDetail,
   FilterTemplate,
   FilterTemplateResult,
+  FilterSavedRun,
   EtradeAccount,
   EtradeSyncResult,
   PositionEtrade,
@@ -1026,6 +1027,7 @@ function buildApi() {
     listTemplates: () => invoke<FilterTemplate[]>('filters:list-templates'),
     runTemplate: (templateId: string, source?: 'watchlist' | 'universe', universe?: Universe, watchlistIds?: number[]) =>
       invoke<FilterTemplateResult[]>('filters:run-template', templateId, source, universe, watchlistIds),
+    getSavedRuns: () => invoke<FilterSavedRun[]>('filters:get-saved-runs'),
     onProgress: (callback: (data: { current: number; total: number; ticker: string }) => void) => {
       const handler = (_: any, data: any) => callback(data);
       ipcRenderer.on('filters:progress', handler);

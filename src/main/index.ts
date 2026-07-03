@@ -66,6 +66,7 @@ import { DailyTechnicalSignalsJob } from './services/jobs/daily-technical-signal
 import { DailyOptionsSnapshotJob } from './services/jobs/daily-options-snapshot-job.js';
 import { DailyOptionsPremiumHistoryJob } from './services/jobs/daily-options-premium-history-job.js';
 import { DailyPaperSnapshotJob } from './services/jobs/daily-paper-snapshot-job.js';
+import { FiltersPrefillJob } from './services/jobs/filters-prefill-job.js';
 import { PaperTradingService } from './services/paper-trading-service.js';
 import { registerPaperTradingIpc } from './ipc/ipc-paper-trading.js';
 import { StrategyLabService } from './services/strategy-lab-service.js';
@@ -652,6 +653,18 @@ app.whenReady().then(() => {
     runOnStartup: false,
     afterCloseOnly: true,         // durable capture for future ROC → skip in the lean intraday slot (spec 08 §4)
     defaultConfig: { callDelayMs: 1100, maxTickers: 1500, captureWheel: true, captureIncome: true },
+  });
+
+  // Filters Prefill — precomputes every filter template over Universe = All so the
+  // Filters view opens pre-populated. Registered after options-premium-history →
+  // highest sequence_order (very last in the chain: it needs fresh caches, iv_history,
+  // technical_signals, and earnings — and its Wheel (Vetted) leg hits E*Trade chains).
+  const filtersPrefillJob = new FiltersPrefillJob(filterTemplatesService);
+  batchService.registerJob('filters-prefill', filtersPrefillJob, {
+    dailyScheduleTime: '17:30',   // legacy display only — the orchestrator drives the schedule
+    dailyScheduleEnabled: false,
+    runOnStartup: false,
+    afterCloseOnly: true,         // evening slot only — skip in the lean intraday slot (spec 08 §4)
   });
 
   // Batch Orchestrator — registered last so all sub-jobs are already in batch_jobs.

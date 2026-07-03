@@ -126,7 +126,7 @@ Update only what the change touches — don't regenerate everything:
 | `src/main/services/earnings-service.ts` | Earnings calendar (E*Trade), Saturday→Friday shift |
 | `src/main/services/batch-service.ts` | Daily job scheduler (`BatchJobHandler`, mutex, schedules) |
 | `src/main/services/secure-settings.ts` | Encrypted settings (E*Trade creds) |
-| `src/main/services/jobs/*.ts` | 12 batch job handlers |
+| `src/main/services/jobs/*.ts` | 13 batch job handlers |
 | `src/main/ipc/*.ts` | 27 IPC handler modules |
 | `src/renderer/src/App.tsx` | Layout + sidebar routing (9 sections, 31 views) + status bar |
 | `src/renderer/src/views/*.tsx` | 31 feature views |

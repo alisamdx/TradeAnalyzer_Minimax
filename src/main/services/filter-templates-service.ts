@@ -10,8 +10,8 @@ import type { Universe, Quote, OptionContract } from '@shared/types.js';
 import { QuoteCache, FundamentalsCache } from './cache-service.js';
 import { computeRSI, computeSMA } from './analysis-service.js';
 import { calculateWheelSuitability } from './wheel-calculator.js';
-import { FILTER_TEMPLATES } from '@shared/filter-templates.js';
-import type { FilterTemplate, FilterTemplateResult } from '@shared/types.js';
+import { FILTER_TEMPLATES, FILTER_RESULTS_SHAPE_VERSION } from '@shared/filter-templates.js';
+import type { FilterTemplate, FilterTemplateResult, FilterSavedRun } from '@shared/types.js';
 import type { ConstituentsService } from './constituents-service.js';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -19,6 +19,8 @@ import type { ConstituentsService } from './constituents-service.js';
 interface TickerSource {
   ticker: string;
   watchlists: string[];
+  /** ETF names get ETF-calibrated thresholds (lower IV bars, no fundamentals gate). */
+  isEtf: boolean;
 }
 
 export interface FilterProgress {
@@ -147,7 +149,8 @@ export class FilterTemplatesService {
     source: 'watchlist' | 'universe' = 'watchlist',
     universe?: Universe,
     watchlistIds?: number[],
-    onProgress?: (progress: FilterProgress) => void
+    onProgress?: (progress: FilterProgress) => void,
+    signal?: AbortSignal
   ): Promise<FilterTemplateResult[]> {
     const template = FILTER_TEMPLATES.find(t => t.id === templateId);
     if (!template) throw new Error(`Unknown filter template: ${templateId}`);
@@ -163,10 +166,10 @@ export class FilterTemplatesService {
 
     const results: FilterTemplateResult[] = [];
     const total = tickers.length;
-    const isEtf = universe === 'etf';
 
     for (let i = 0; i < total; i++) {
-      const { ticker, watchlists } = tickers[i]!;
+      if (signal?.aborted) break;
+      const { ticker, watchlists, isEtf } = tickers[i]!;
       onProgress?.({ current: i + 1, total, ticker });
       try {
         const result = await this.evaluateTemplate(template, ticker, watchlists, isEtf);
@@ -177,6 +180,45 @@ export class FilterTemplatesService {
     }
 
     return results;
+  }
+
+  // ─── Batch prefill persistence (filter_template_runs — latest run per template) ──
+
+  /** Overwrite the stored batch run for a template (one row per template, latest only). */
+  saveRun(templateId: string, universe: Universe, results: FilterTemplateResult[], ranAt = new Date().toISOString()): void {
+    this.db.prepare(`
+      INSERT INTO filter_template_runs (template_id, ran_at, universe, result_count, results_json, shape_version)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(template_id) DO UPDATE SET
+        ran_at        = excluded.ran_at,
+        universe      = excluded.universe,
+        result_count  = excluded.result_count,
+        results_json  = excluded.results_json,
+        shape_version = excluded.shape_version
+    `).run(templateId, ranAt, universe, results.length, JSON.stringify(results), FILTER_RESULTS_SHAPE_VERSION);
+  }
+
+  /** All stored batch runs whose shape matches the current build (stale shapes are ignored). */
+  getSavedRuns(): FilterSavedRun[] {
+    const rows = this.db.prepare(`
+      SELECT template_id, ran_at, universe, result_count, results_json
+      FROM filter_template_runs WHERE shape_version = ?
+    `).all(FILTER_RESULTS_SHAPE_VERSION) as Array<{
+      template_id: string; ran_at: string; universe: string; result_count: number; results_json: string;
+    }>;
+    const runs: FilterSavedRun[] = [];
+    for (const r of rows) {
+      try {
+        runs.push({
+          templateId: r.template_id,
+          ranAt: r.ran_at,
+          universe: r.universe as Universe,
+          resultCount: r.result_count,
+          results: JSON.parse(r.results_json) as FilterTemplateResult[],
+        });
+      } catch { /* unparseable row — skip */ }
+    }
+    return runs;
   }
 
   // ─── Private: gather tickers from watchlists ──────────────────────────────────
@@ -208,19 +250,34 @@ export class FilterTemplatesService {
       map.set(r.ticker, existing);
     }
 
-    return Array.from(map.entries()).map(([ticker, watchlists]) => ({ ticker, watchlists }));
+    // Watchlist scans keep stock calibration for every name (pre-existing behavior).
+    return Array.from(map.entries()).map(([ticker, watchlists]) => ({ ticker, watchlists, isEtf: false }));
   }
 
   // ─── Private: gather tickers from screener universe ──────────────────────────
 
   private getUniverseTickers(universe: Universe): TickerSource[] {
+    // For 'etf' and 'all', ETF membership drives per-ticker calibration (ETF thresholds,
+    // no fundamentals gate). 'all' mixes stocks and ETFs in one scan, so the flag must be
+    // per-ticker — a universe-wide flag would mis-calibrate one side or the other.
+    const etfTickers = (universe === 'etf' || universe === 'all')
+      ? new Set(this.constituentsService.getConstituents('etf').map(c => c.ticker))
+      : new Set<string>();
     const constituents = this.constituentsService.getConstituents(universe);
     const label =
       universe === 'sp500'       ? 'S&P 500' :
       universe === 'russell1000' ? 'Russell 1000' :
       universe === 'etf'         ? 'ETFs' :
+      universe === 'all'         ? 'All' :
       'Universe';
-    return constituents.map(c => ({ ticker: c.ticker, watchlists: [label] }));
+    return constituents.map(c => {
+      const isEtf = etfTickers.has(c.ticker);
+      return {
+        ticker: c.ticker,
+        watchlists: [universe === 'all' && isEtf ? 'ETF' : label],
+        isEtf,
+      };
+    });
   }
 
   // ─── Private: evaluate a single template for one ticker ──────────────────────
