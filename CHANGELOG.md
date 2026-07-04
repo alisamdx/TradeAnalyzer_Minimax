@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.117] — 2026-07-03
+
+### Fixed
+- **The critic's `checkScoreConcentration` "single-factor thesis" warning could never fire.** It compared `topContrib` (an absolute points value, bounded by that signal's own weight — max ~30 across every baseline strategy config) against a raw `50`, so the condition was structurally unreachable regardless of how concentrated a pick's score was. The check's own description already speaks in share terms ("X of Y composite points"); fixed to compare the actual **share of the composite** (`topContrib / compositeScore`) against the 50% threshold it was meant to enforce. Info-severity and non-gating (the live execution engine accepts both `pass` and `caution` critic verdicts), so this only adds an advisory note to the brief/critic output — it cannot newly reject a trade. `src/main/services/critic-service.ts`. Tests: `tests/critic-service.test.ts` (+4, first-ever coverage of this check).
+
 ## [1.1.116] — 2026-07-03
 
 ### Fixed

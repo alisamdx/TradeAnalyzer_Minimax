@@ -584,11 +584,21 @@ Use verdict: pass, caution, or flag. Use confidence: high, medium, or low.`;
       if (contrib > topContrib) { topContrib = contrib; topKey = key; }
     }
 
-    if (topContrib > 50) {
+    // Share of the total composite this one signal accounts for. The original comparison
+    // (`topContrib > 50`) treated an absolute points value as if it were a percentage — but
+    // topContrib is bounded by that signal's own weight (max ~30 across every baseline
+    // config), so it could never exceed 50 and this check has never fired since it was
+    // written. The description already describes a share ("X of Y composite points"); the
+    // fix compares the actual share against the 50% threshold it was meant to enforce.
+    // Fixed v1.1.117.
+    if (pick.compositeScore <= 0) return null;
+    const sharePct = (topContrib / pick.compositeScore) * 100;
+
+    if (sharePct > 50) {
       return {
         key: 'score_concentrated', severity: 'info',
         description: `Score driven primarily by one signal: ${topKey} contributes ${topContrib.toFixed(0)} of ` +
-          `${pick.compositeScore.toFixed(0)} composite points. Single-factor thesis — verify this signal before acting.`,
+          `${pick.compositeScore.toFixed(0)} composite points (${sharePct.toFixed(0)}%). Single-factor thesis — verify this signal before acting.`,
       };
     }
     return null;

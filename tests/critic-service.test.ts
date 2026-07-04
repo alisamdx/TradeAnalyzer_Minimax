@@ -305,6 +305,48 @@ describe('CriticService rule checks', () => {
     });
   });
 
+  // v1.1.117: the original comparison (`topContrib > 50`) treated an absolute points
+  // value — bounded by that signal's own weight (max ~30 across every baseline config) —
+  // as if it were a percentage, so it could never exceed 50 and this check has never fired.
+  // Fixed to compare the signal's actual SHARE of the composite against the 50% threshold.
+  describe('checkScoreConcentration — share-of-composite fix (v1.1.117)', () => {
+    function pickWithScore(compositeScore: number, signals: BriefPick['signals']): BriefPick {
+      return { ...makePick(null), compositeScore, signals };
+    }
+    const sig = (normalized: number, weight: number): BriefPick['signals'][string] =>
+      ({ raw: normalized, normalized, weight, missing: false });
+
+    it('fires when one signal accounts for > 50% of the composite', () => {
+      // contrib = 100 × 22 / 100 = 22; composite 30 → share 73%.
+      const pick = pickWithScore(30, { ivRank: sig(100, 22), other: sig(20, 8) });
+      const flags = runChecks(svc, pick, 'wheel');
+      const f = flags.find(x => x.key === 'score_concentrated');
+      expect(f).toBeDefined();
+      expect(f!.severity).toBe('info');
+      expect(f!.description).toContain('73%');
+    });
+
+    it('does not fire when contribution is spread evenly across signals', () => {
+      const pick = pickWithScore(60, {
+        a: sig(60, 20), b: sig(60, 20), c: sig(60, 20), d: sig(60, 20), e: sig(60, 20),
+      });
+      expect(runChecks(svc, pick, 'wheel').find(x => x.key === 'score_concentrated')).toBeUndefined();
+    });
+
+    it('regression: a case the old ">50 points" comparison could never reach (contrib=30, 100% share)', () => {
+      // Even the highest-weight baseline signal (30) tops out at contrib=30 when normalized=100
+      // — the old absolute-points check (`> 50`) could never fire for ANY baseline config.
+      const pick = pickWithScore(30, { breakoutDecisiveness: sig(100, 30) });
+      const flags = runChecks(svc, pick, 'inflection');
+      expect(flags.find(x => x.key === 'score_concentrated')).toBeDefined();
+    });
+
+    it('does not divide by zero when compositeScore is 0', () => {
+      const pick = pickWithScore(0, { ivRank: sig(0, 22) });
+      expect(runChecks(svc, pick, 'wheel').find(x => x.key === 'score_concentrated')).toBeUndefined();
+    });
+  });
+
   describe('checkCounterTrendStrike — bearish short-call cushion in uptrend', () => {
     // reverse-big-lizard = short straddle + protective long put → the rally-exposed
     // leg is the SHORT CALL. The rule must judge that leg, not just any sell leg.
