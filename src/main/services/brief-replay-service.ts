@@ -205,6 +205,11 @@ export class BriefReplayService {
     // Sector map: ticker → sector ETF
     const sectorMap = this.loadSectorMap(tickers);
 
+    // ETF membership — feeds TickerSignalData.isEtf so a future Brief Replay validation of
+    // ETF_AWARE_WHEEL_SCORING (scoring-service.ts) can measure it; a no-op while that flag
+    // stays false (current, unfixed behavior).
+    const etfSet = this.loadEtfSet(tickers);
+
     // Build per-date ETF returns cache (ticker → returns by date)
     // We compute these lazily inside the date loop
 
@@ -399,6 +404,7 @@ export class BriefReplayService {
           revenueGrowth5Y:     fund?.revenueGrowth5Y  ?? null,
           epsGrowth5Y:         fund?.epsGrowth5Y      ?? null,
           stockGrade:          null,
+          isEtf: etfSet.has(ticker),
           // Breakout/continuation (Inflection)
           breakoutState,
           breakoutDecisiveness,
@@ -938,6 +944,15 @@ export class BriefReplayService {
       ORDER BY ticker ASC
     `).all() as Row[];
     return rows.map(r => r.ticker).filter(t => !REF_TICKERS.has(t));
+  }
+
+  private loadEtfSet(tickers: string[]): Set<string> {
+    const ph = tickers.map(() => '?').join(',');
+    type Row = { ticker: string };
+    const rows = this.db.prepare(`
+      SELECT ticker FROM constituents WHERE index_name = 'etf' AND ticker IN (${ph})
+    `).all(...tickers) as Row[];
+    return new Set(rows.map(r => r.ticker));
   }
 
   private loadPriceCache(tickers: string[], from: string, to: string): Map<string, PriceRow[]> {

@@ -129,6 +129,39 @@ const BASELINE_WHEEL: ScoringSignal[] = [
 // RE-VALIDATE on Brief Replay first (tests/adx-replay-validation.test.ts, REPLAY_WITH_ADX).
 const USE_ADX_IN_SCORING = false;
 
+// ETF-aware wheel scoring — NOT YET ENABLED, pending Brief Replay validation.
+//
+// Wheel's fundamentalScore (weight 17) and leverageQuality (weight 4) — 21% of the
+// composite — are structurally inapplicable to ETFs (no P/E, ROE, debt in the traditional
+// sense for a fund wrapper). Under FR-SE-03 ("missing signal contributes 0"), a missing
+// signal's weight still counts in the composite's denominator, so these two signals are
+// ALWAYS null for an ETF and ALWAYS zero-contribute — every ETF's wheel composite is
+// deflated ~21% relative to a stock with full fundamentals coverage, for no reason related
+// to trade quality. Confirmed empirically (2026-07-03 production DB): 56 of 60 curated
+// ETFs have no fundamentals_cache row at all, and 0 of the last 5 daily wheel briefs
+// contained a single ETF pick. FiltersView's wheel templates already work around this with
+// an explicit isEtf branch (IV-rank-as-proxy score); the live brief's scoring engine has no
+// equivalent, so ETF wheel candidates — including in the user's personal wheel book — are
+// effectively invisible to the brief regardless of how well they'd otherwise wheel.
+//
+// When true: for an ETF ticker, 'fundamentalScore' and 'leverageQuality' are EXCLUDED from
+// both the numerator and denominator (not just zero-contributed) — the remaining signals
+// are renormalized to 100%, rather than synthesizing a proxy value. This changes wheel
+// composite scores and therefore Stage-4 pool selection / final picks for ETF tickers, so
+// per FR-SEY-5 it must show a Brief Replay improvement (or at least neutrality) on ETF
+// wheel outcomes before shipping enabled — the live wheel brief feeds the v2 execution
+// engine. Left false (current, unfixed behavior) until validated.
+//
+// SCORING_ETF_AWARE_WHEEL=1 overrides the flag on (mirrors brief-replay-service.ts's
+// REPLAY_WITH_ADX pattern) so a future validation run — or a test — can exercise the ON arm
+// without flipping the shipped default. Checked live (not cached at import), so it can be
+// set per-test-case.
+const ETF_AWARE_WHEEL_SCORING = false;
+export function etfAwareWheelScoringEnabled(): boolean {
+  return ETF_AWARE_WHEEL_SCORING || process.env['SCORING_ETF_AWARE_WHEEL'] === '1';
+}
+const ETF_NA_WHEEL_SIGNAL_KEYS = new Set(['fundamentalScore', 'leverageQuality']);
+
 // Weights sum = 100. All signals trimmed proportionally to fit 8 signals.
 const BASELINE_BULLISH: ScoringSignal[] = [
   {
@@ -446,6 +479,8 @@ export interface TickerSignalData {
   volumeSurge: number | null;            // today vol / 20d avg vol
   atrPct: number | null;                 // ATR14 / close × 100
   breakoutLevel: number | null;          // the broken 20d high/low
+  // ETF membership — see ETF_AWARE_WHEEL_SCORING below.
+  isEtf: boolean;
 }
 
 // ─── Service ─────────────────────────────────────────────────────────────────
@@ -570,6 +605,13 @@ export class ScoringService {
     let totalWeight = 0;
 
     for (const sig of enabledSignals) {
+      // ETF-aware wheel scoring (disabled — see ETF_AWARE_WHEEL_SCORING): a signal that is
+      // structurally not applicable to this ticker (not just missing data) is excluded from
+      // the denominator entirely, rather than zero-contributing under FR-SE-03.
+      if (data.isEtf && ETF_NA_WHEEL_SIGNAL_KEYS.has(sig.key) && etfAwareWheelScoringEnabled()) {
+        continue;
+      }
+
       const raw = this.extractSignalRaw(sig.key, data);
       const missing = raw === null;
       const normalized = raw !== null ? normalizeSignal(raw, sig) : 0;
@@ -908,6 +950,7 @@ export class ScoringService {
         revenueGrowth5Y: null, epsGrowth5Y: null, stockGrade: null,
         breakoutState: null, breakoutDecisiveness: null, volumeSurge: null,
         atrPct: null, breakoutLevel: null,
+        isEtf: false,
       }])
     );
 
@@ -919,11 +962,25 @@ export class ScoringService {
     this.loadSectorMomentum(tickers, result);
     this.loadTechnicalSignals(tickers, result);
     this.loadRecentVolatility(tickers, result);
+    this.loadEtfFlags(tickers, result);
     // Always override lastPrice with the freshest available quote so the Daily Brief
     // never shows a stale EOD price when a live intraday quote is in quote_cache.
     this.loadLivePrice(tickers, result);
 
     return result;
+  }
+
+  // ETF membership from the curated constituents list — drives ETF_AWARE_WHEEL_SCORING above.
+  private loadEtfFlags(tickers: string[], result: Map<string, TickerSignalData>): void {
+    const ph = tickers.map(() => '?').join(',');
+    type EtfRow = { ticker: string };
+    const rows = this.db.prepare(`
+      SELECT ticker FROM constituents WHERE index_name = 'etf' AND ticker IN (${ph})
+    `).all(...tickers) as EtfRow[];
+    for (const row of rows) {
+      const d = result.get(row.ticker);
+      if (d) d.isEtf = true;
+    }
   }
 
   private loadIvRanks(tickers: string[], result: Map<string, TickerSignalData>): void {

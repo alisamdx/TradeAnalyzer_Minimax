@@ -20,6 +20,7 @@ function emptySignal(ticker: string): TickerSignalData {
     buySignalScore: null, fcfToNetIncome: null, roic: null, netDebtToEbitda: null,
     revenueGrowth5Y: null, epsGrowth5Y: null, stockGrade: null,
     breakoutState: null, breakoutDecisiveness: null, volumeSurge: null, atrPct: null, breakoutLevel: null,
+    isEtf: false,
   };
 }
 
