@@ -29,12 +29,13 @@ const JOB_ID = 'filters-prefill';
 // Templates the batch precomputes by default. The heavy/unused ones (RSI Overbought,
 // IV Low, Assignment Risk, Wheel Opportunity) are omitted to save run time — override
 // via batch_jobs.config_json.enabledTemplates (an explicit template-id allowlist).
-// iv_rank_high_vetted (v1.1.120) applies Wheel (Vetted)'s downtrend/earnings/liquidity/
-// IV-ceiling gates to the IV-High signal — the summary email's IV High list is sourced
-// from it, not the loose iv_rank_high (which stays prefilled too, for browsing).
+// The loose iv_rank_high is intentionally NOT in this default set (v1.1.121, user
+// decision) — iv_rank_high_vetted (v1.1.120, applies Wheel (Vetted)'s downtrend/
+// earnings/liquidity/IV-ceiling gates) is the one the summary email sources from and
+// the one worth precomputing automatically; plain IV High still runs live on click
+// from the Filters view for browsing the full unscreened list.
 export const DEFAULT_PREFILL_TEMPLATES = [
   'rsi_oversold',
-  'iv_rank_high',
   'iv_rank_high_vetted',
   'price_alert',
   'wheel_vetted',

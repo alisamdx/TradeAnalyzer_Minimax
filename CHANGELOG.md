@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.121] — 2026-07-04
+
+### Changed
+- **Filters Prefill's default automatic run is now exactly 4 templates: RSI Oversold, IV High (Vetted), Price Alert, Wheel (Vetted).** Plain `IV High` is removed from the default allowlist — it still runs on-demand from the Filters view for browsing the full unscreened list, but it's no longer precomputed automatically now that the vetted version exists and is what the summary email sources from. `src/main/services/jobs/filters-prefill-job.ts`. Test added: `tests/filters-prefill.test.ts` locks in the exact 4-template default.
+- **Fixed a real gap this surfaced**: `batch_jobs.config_json` is seeded once via `INSERT OR IGNORE` and never re-seeded on an existing install, so changing `DEFAULT_PREFILL_TEMPLATES` in code has no effect on an install that already ran the job — including the v1.1.120 addition of `iv_rank_high_vetted` itself, which had never actually taken effect on this install (the live config still had the pre-v1.1.120 4-template list). Patched the live `filters-prefill` config row directly to the new default so IV High (Vetted) and the email actually run with real data on the next batch pass.
+
+Spec: `Requirements/spec/05-screener-and-filters.md`, `Requirements/spec/20-batch-jobs.md`, `.ai/AI_CONTEXT.md`.
+
 ## [1.1.120] — 2026-07-04
 
 ### Added

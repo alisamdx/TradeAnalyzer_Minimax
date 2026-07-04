@@ -178,9 +178,14 @@ describe('FiltersPrefillJob', () => {
     expect(result.status).toBe('success');
     const ran = (svc.runTemplate as ReturnType<typeof vi.fn>).mock.calls.map(c => c[0]).sort();
     expect(ran).toEqual([...DEFAULT_PREFILL_TEMPLATES].sort());
+    expect(ran).toEqual(['iv_rank_high_vetted', 'price_alert', 'rsi_oversold', 'wheel_vetted']);
     // The unused heavy filters are never scanned.
     expect(ran).not.toContain('rsi_overbought');
     expect(ran).not.toContain('assignment_risk');
+    // Plain IV High is deliberately excluded from the default automatic run (v1.1.121) —
+    // the vetted version is what the summary email sources from; plain IV High still
+    // runs live on click for browsing the full unscreened list.
+    expect(ran).not.toContain('iv_rank_high');
   });
 
   it('honors an explicit allowlist and skips everything else', async () => {
