@@ -11,10 +11,16 @@
 // errors is recorded and the loop continues — one bad scan must not starve the others.
 
 import type { BatchJobHandler, BatchJobResult } from '../batch-service.js';
-import type { BatchProgressEvent } from '@shared/types.js';
+import type { BatchProgressEvent, FilterTemplateResult } from '@shared/types.js';
 import { FILTER_TEMPLATES } from '@shared/filter-templates.js';
 import type { FilterTemplatesService } from '../filter-templates-service.js';
 import type { DbHandle } from '../../db/connection.js';
+import type { EmailService } from '../email-service.js';
+import { buildFiltersPrefillEmailHtml, topIvHigh, sortWheelVetted } from '../filters-prefill-report-builder.js';
+
+// Email caps the IV High list to the top-N by IV Rank — a universe=all scan can match
+// hundreds of tickers, and the point of the email is a short actionable list, not a dump.
+const IV_HIGH_EMAIL_TOP_N = 10;
 
 const PREFILL_UNIVERSE = 'all' as const;
 const JOB_ID = 'filters-prefill';
@@ -38,6 +44,7 @@ export class FiltersPrefillJob implements BatchJobHandler {
   constructor(
     private readonly service: FilterTemplatesService,
     private readonly db: DbHandle,
+    private readonly emailService: EmailService | null = null,
   ) {}
 
   /** Template-id allowlist from config, falling back to DEFAULT_PREFILL_TEMPLATES. */
@@ -74,6 +81,10 @@ export class FiltersPrefillJob implements BatchJobHandler {
     let failed = 0;
     let totalMatches = 0;
     const failures: string[] = [];
+    // Captured for the summary email below — null means the template didn't run this pass
+    // (not enabled, or the scan failed), distinct from an empty (but attempted) result set.
+    let ivHighResults: FilterTemplateResult[] | null = null;
+    let wheelVettedResults: FilterTemplateResult[] | null = null;
 
     const emit = (message: string, ticker = '', status: BatchProgressEvent['status'] = 'updated') => {
       onProgress({
@@ -104,12 +115,35 @@ export class FiltersPrefillJob implements BatchJobHandler {
         this.service.saveRun(tpl.id, PREFILL_UNIVERSE, results);
         saved++;
         totalMatches += results.length;
+        if (tpl.id === 'iv_rank_high') ivHighResults = results;
+        if (tpl.id === 'wheel_vetted') wheelVettedResults = results;
         emit(`${step} — ${results.length} match${results.length !== 1 ? 'es' : ''} stored`);
       } catch (err) {
         failed++;
         const msg = err instanceof Error ? err.message : String(err);
         failures.push(`${tpl.label}: ${msg}`);
         emit(`${step} — FAILED: ${msg}`, '', 'failed');
+      }
+    }
+
+    // Summary email — top-10 IV High (ranked, not the full ~hundreds-strong match list) +
+    // every Wheel (Vetted) pick (already a small, gated funnel). Only sent when at least one
+    // of the two templates actually ran this pass; email failure never fails the job.
+    if (this.emailService?.isConfigured() && (ivHighResults !== null || wheelVettedResults !== null)) {
+      try {
+        const todayEt = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+        const ivTop = topIvHigh(ivHighResults ?? [], IV_HIGH_EMAIL_TOP_N);
+        const wheelSorted = sortWheelVetted(wheelVettedResults ?? []);
+        const html = buildFiltersPrefillEmailHtml(
+          todayEt,
+          { top: ivTop, totalScanned: ivHighResults?.length ?? 0 },
+          wheelSorted,
+        );
+        const subject = `Filters Prefill — ${new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} — `
+          + `${ivTop.length} IV High · ${wheelSorted.length} Wheel (Vetted)`;
+        await this.emailService.send(subject, html);
+      } catch (emailErr) {
+        console.warn('[filters-prefill] email send failed:', emailErr instanceof Error ? emailErr.message : String(emailErr));
       }
     }
 

@@ -659,7 +659,7 @@ app.whenReady().then(() => {
   // Filters view opens pre-populated. Registered after options-premium-history →
   // highest sequence_order (very last in the chain: it needs fresh caches, iv_history,
   // technical_signals, and earnings — and its Wheel (Vetted) leg hits E*Trade chains).
-  const filtersPrefillJob = new FiltersPrefillJob(filterTemplatesService, db);
+  const filtersPrefillJob = new FiltersPrefillJob(filterTemplatesService, db, emailService);
   batchService.registerJob('filters-prefill', filtersPrefillJob, {
     dailyScheduleTime: '17:30',   // legacy display only — the orchestrator drives the schedule
     dailyScheduleEnabled: false,

@@ -242,4 +242,79 @@ describe('FiltersPrefillJob', () => {
     expect(result.tickersUpdated).toBe(0);
     expect((svc.runTemplate as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
   });
+
+  // ─── Summary email (v1.1.119) ────────────────────────────────────────────────
+
+  function ivHighResult(ticker: string, ivRank: number): FilterTemplateResult {
+    return { ticker, watchlists: ['All'], lastPrice: 100, metrics: { ivRank, currentIv: ivRank * 0.8 }, matchReason: `IV Rank ${ivRank}` };
+  }
+  function wheelResult(ticker: string, riskAdjustedReturn: number): FilterTemplateResult {
+    return {
+      ticker, watchlists: ['All'], lastPrice: 50,
+      metrics: { suitabilityScore: 80, expiry: '2026-08-21', putStrike: 45, credit: 1.2, annualizedReturn: 20, riskAdjustedReturn, openInterest: 500, spread: 5 },
+      matchReason: `Vetted: ${ticker}`,
+    };
+  }
+
+  function stubEmailService(configured = true) {
+    return {
+      isConfigured: vi.fn(() => configured),
+      send: vi.fn(async (_subject: string, _html: string) => undefined),
+    };
+  }
+
+  function serviceWithResults(ivHigh: FilterTemplateResult[], wheelVetted: FilterTemplateResult[]) {
+    return stubService({
+      runTemplate: vi.fn(async (templateId: string) => {
+        if (templateId === 'iv_rank_high') return ivHigh;
+        if (templateId === 'wheel_vetted') return wheelVetted;
+        return [];
+      }),
+    });
+  }
+
+  it('emails the top-10 IV High (by ivRank) and all Wheel (Vetted) picks', async () => {
+    const ivHigh = Array.from({ length: 15 }, (_, i) => ivHighResult(`T${i}`, 50 + i)); // ranks 50..64
+    const wheel = [wheelResult('AAA', 10), wheelResult('BBB', 25)];
+    const svc = serviceWithResults(ivHigh, wheel);
+    const email = stubEmailService();
+    const job = new FiltersPrefillJob(svc, stubDb(ALL_IDS), email as never);
+    await job.run(noProgress, new AbortController().signal);
+
+    expect(email.send).toHaveBeenCalledTimes(1);
+    const [subject, html] = email.send.mock.calls[0]!;
+    expect(subject).toContain('10 IV High');
+    expect(subject).toContain('2 Wheel (Vetted)');
+    // Highest ivRank (T14, rank 64) must be included; the lowest (T0, rank 50) must be
+    // excluded from the top-10 cut.
+    expect(html).toContain('>T14<');
+    expect(html).not.toContain('>T0<');
+    expect(html).toContain('AAA');
+    expect(html).toContain('BBB');
+  });
+
+  it('does not email when EmailService is not configured', async () => {
+    const svc = serviceWithResults([ivHighResult('AAA', 80)], []);
+    const email = stubEmailService(false);
+    const job = new FiltersPrefillJob(svc, stubDb(ALL_IDS), email as never);
+    await job.run(noProgress, new AbortController().signal);
+    expect(email.send).not.toHaveBeenCalled();
+  });
+
+  it('does not email when neither iv_rank_high nor wheel_vetted ran', async () => {
+    const svc = stubService(); // default runTemplate returns a generic result for any id
+    const email = stubEmailService();
+    const job = new FiltersPrefillJob(svc, stubDb(['price_alert']), email as never);
+    await job.run(noProgress, new AbortController().signal);
+    expect(email.send).not.toHaveBeenCalled();
+  });
+
+  it('a failed email send does not fail the job', async () => {
+    const svc = serviceWithResults([ivHighResult('AAA', 80)], []);
+    const email = { isConfigured: vi.fn(() => true), send: vi.fn(async () => { throw new Error('SMTP down'); }) };
+    const job = new FiltersPrefillJob(svc, stubDb(ALL_IDS), email as never);
+    const result = await job.run(noProgress, new AbortController().signal);
+    expect(result.status).toBe('success');
+    expect(email.send).toHaveBeenCalledTimes(1);
+  });
 });

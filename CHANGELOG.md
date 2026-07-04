@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.119] — 2026-07-03
+
+### Added
+- **Filters Prefill batch job now emails a summary, like the Daily Brief.** After the nightly `filters-prefill` run, if email is configured and at least one of IV High / Wheel (Vetted) ran this pass, an HTML email is sent with two lists: **top 10 IV High** picks (ranked by IV Rank descending — a universe=all scan can match hundreds of tickers, so the email is a short actionable list, not the full dump) and **every** Wheel (Vetted) pick (already a small, gated funnel, so not capped), sorted by risk-adjusted return descending to match the Filters view's own default sort. Each row is tagged **ETF** or **Stock**, links the ticker to its E*Trade quote page, and styling matches the Daily Brief email. Empty lists show a clear "no matches today" message rather than an empty table. Email failure never fails the job. New `src/main/services/filters-prefill-report-builder.ts` (`buildFiltersPrefillEmailHtml`, `topIvHigh`, `sortWheelVetted`). `src/main/services/jobs/filters-prefill-job.ts`, `src/main/index.ts` (wires the existing `EmailService`). Tests: `tests/filters-prefill-report-builder.test.ts` (new, 10), `tests/filters-prefill.test.ts` (+4).
+
 ## [1.1.118] — 2026-07-03
 
 ### Added
