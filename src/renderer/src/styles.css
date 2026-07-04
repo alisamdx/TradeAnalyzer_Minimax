@@ -3943,6 +3943,14 @@ input[type='checkbox'] {
   border-radius: 10px;
   font-weight: 700;
 }
+.grid-structure-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  max-width: 210px;
+  white-space: normal;
+}
 .grid-structure-link {
   background: none;
   border: none;
@@ -3991,6 +3999,8 @@ input[type='checkbox'] {
   gap: 4px;
   font-size: 10.5px;
   border-radius: 4px;
+  max-width: 100%;
+  white-space: normal;
 }
 .defined-risk-alt--compact .alt-tag { font-size: 10.5px; }
 
@@ -4023,6 +4033,8 @@ input[type='checkbox'] {
   gap: 4px;
   font-size: 10.5px;
   border-radius: 4px;
+  max-width: 100%;
+  white-space: normal;
 }
 .level2-alt--compact .alt-tag { font-size: 10.5px; }
 

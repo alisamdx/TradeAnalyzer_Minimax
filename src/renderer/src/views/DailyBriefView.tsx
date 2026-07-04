@@ -808,7 +808,7 @@ function BriefGrid({ rows }: { rows: GridRow[] }) {
               </td>
               <td className="grid-strategy">{strategy}</td>
               <td title="Strategy-specific — not comparable across strategies">{pick.compositeScore.toFixed(1)}</td>
-              <td>
+              <td className="grid-structure-cell">
                 {row.structure
                   ? <button className="grid-structure-link" onClick={nav.payoff}
                       title={nav.legs ? `Open Payoff Visualizer pre-loaded with ${row.structure.name} legs` : 'Open Payoff Visualizer'}>

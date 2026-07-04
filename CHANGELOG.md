@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.1.122] — 2026-07-04
+
+### Fixed
+- **Daily Brief Ranked Grid: "Best Structure" cell badges overflowed into the Expiry/Strike/Premium columns.** The Defined-Risk-Alt and L2-Tradeable badges are `<button>` elements built for the card view (where the container is a block-flow layout and each button naturally lands on its own line). In the Ranked Grid's `<td>` they had no wrapping container, so with the table's `white-space: nowrap` and no column width constraint, all three elements (structure link + two alt badges, each several inline spans wide) rendered side by side instead of stacked — ballooning the column and visually bleeding across the columns to its right. Fixed by wrapping the cell's contents in a new `.grid-structure-cell` flex-column container (`max-width: 210px`) and letting the compact alt-badge variants (`.defined-risk-alt--compact`, `.level2-alt--compact`) wrap within it (`max-width: 100%; white-space: normal`). `src/renderer/src/views/DailyBriefView.tsx`, `src/renderer/src/styles.css`. CSS/layout-only — no test changes; full suite re-run clean (909 passed, 1 skipped).
+
 ## [1.1.121] — 2026-07-04
 
 ### Changed
