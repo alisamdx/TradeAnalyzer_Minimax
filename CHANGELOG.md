@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.116] — 2026-07-03
+
+### Fixed
+- **Same-day earnings were invisible to the brief's earnings gate.** The Stage-3 −20 composite penalty and the AI Critic's `earnings_in_window`/`earningsKnown` checks compared `report_date` with a strict `>` against today's date, so a ticker reporting **today after the close (`amc`) or at an unknown time** silently read as "no earnings" — no penalty, no warning, hours before an earnings gap. New shared `isEarningsPending(reportDate, reportTime, todayET)` (`earnings-service.ts`) treats a same-day `amc`/unknown report as still pending (penalized/flagged like any other in-window date); only a same-day `bmo` report (already happened before the open) is excluded. `src/main/services/earnings-service.ts`, `src/main/services/jobs/daily-intelligence-brief-job.ts`, `src/main/services/critic-service.ts`. Tests: `tests/earnings-service.test.ts` (new, 5), `tests/critic-service.test.ts` (+3).
+- **The critic could run on a stale VIX with no age check.** `getMarketContext()` read `quote_cache`'s VIX row indefinitely — if `refreshVixQuote()` failed for a stretch (e.g. an E*Trade outage over a weekend), the critic kept using a days-old value that no longer described the market (a cached "calm" VIX silently surviving into an actual volatility spike, or vice versa). Now a VIX older than 24h (the refresh runs at the top of every brief, ~18h apart on a normal day) reads as `null` — the pre-existing fail-safe for "never fetched" — rather than stale-but-confident. `src/main/services/critic-service.ts`. Tests: `tests/critic-service.test.ts` (+3).
+- **Two of the critic's five trend-conflict checks were silently dead.** `checkTrendAlignment` read a `trendStrength` signal for **wheel** and **buy** picks, but neither strategy's scoring config has that key (it's bullish-only) — `pick.signals['trendStrength']` was always `undefined`, so a wheel pick in a confirmed downtrend or a buy pick lagging on both trend and relative strength never got the designed `trend_strategy_conflict` warning. Fixed to read each strategy's real signal (wheel → `notDowntrend`, buy → `trendAlignment`); bullish/bearish were unaffected and are unchanged. Income's `trendNeutral` branch remains a documented no-op (reads `trendStrengthAdx`, permanently null while ADX is excluded from scoring — a validated, intentional state; no substitute signal exists without re-validating ADX). `src/main/services/critic-service.ts`. Tests: `tests/critic-service.test.ts` (+6, new `checkTrendAlignment` coverage — previously untested).
+
+Spec: `Requirements/spec/14-daily-brief-and-critic.md`, `.ai/AI_CONTEXT.md §10`.
+
 ## [1.1.115] — 2026-07-03
 
 ### Changed

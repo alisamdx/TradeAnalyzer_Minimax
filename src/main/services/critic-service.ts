@@ -6,6 +6,13 @@ import type { Database } from 'better-sqlite3';
 import Anthropic from '@anthropic-ai/sdk';
 import type { BriefPick, CriticFlag, CriticVerdict, ScoringConfig } from '@shared/types.js';
 import { STRATEGY_RELEVANT_SLUGS, pickRelevantStructure, formatStructureLegs, MIN_TRADABLE_LIQUIDITY_SCORE } from '@shared/strategy-structures.js';
+import { isEarningsPending } from './earnings-service.js';
+
+// A VIX value older than this is treated as unknown (null), not stale-but-confident.
+// refreshVixQuote runs at the top of every brief (both daily slots, ~18h apart on a normal
+// day), so a value this old means the fetch has been failing (e.g. E*Trade auth) — the cached
+// number no longer describes today's market. Fail-safe: null skips the VIX rules entirely.
+const VIX_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 // Grade ordering for structure quality checks (A+=best, F=worst).
 // 'A+' must be present: lab grades include it, and a missing key ranks 0 (below F).
@@ -140,9 +147,11 @@ export class CriticService {
     // *stocks* snapshot cannot serve VIX (it is an index, I:VIX), so this is the only
     // source. see CLAUDE.md "Known quirks" / .ai/AI_CONTEXT.md §10.
     const vixRow = this.db.prepare(
-      `SELECT last FROM quote_cache WHERE ticker = 'VIX' LIMIT 1`
-    ).get() as QuoteRow | undefined;
-    const vix = vixRow?.last ?? null;
+      `SELECT last, fetched_at FROM quote_cache WHERE ticker = 'VIX' LIMIT 1`
+    ).get() as (QuoteRow & { fetched_at: string }) | undefined;
+    const vixFresh = vixRow !== undefined
+      && (Date.now() - new Date(vixRow.fetched_at).getTime()) <= VIX_MAX_AGE_MS;
+    const vix = vixFresh ? vixRow!.last : null;
 
     let spyAbove200ma: boolean | null = null;
     try {
@@ -396,11 +405,16 @@ Use verdict: pass, caution, or flag. Use confidence: high, medium, or low.`;
     const s = pick.signals;
 
     if (strategy === 'wheel') {
-      const trend = s['trendStrength'];
+      // Wheel's config has no 'trendStrength' key (that belongs to bullish) — this read
+      // was always missing and could never fire. Wheel's live trend signal is
+      // 'notDowntrend' (scoring-service computeTrendDirectionScore 'wheel' mode:
+      // bullish=100, sideways=75, confirmed-downtrend=10), so <35 isolates the real
+      // falling-knife case. Fixed v1.1.116.
+      const trend = s['notDowntrend'];
       if (trend && !trend.missing && trend.normalized < 35) {
         return {
           key: 'trend_strategy_conflict', severity: 'warning',
-          description: `Wheel on a stock with weak trend (trend score ${trend.normalized.toFixed(0)}/100). ` +
+          description: `Wheel on a stock in a confirmed downtrend (trend score ${trend.normalized.toFixed(0)}/100). ` +
             `Assignment risk is elevated — wheel works best on stocks trending sideways to up.`,
         };
       }
@@ -429,6 +443,13 @@ Use verdict: pass, caution, or flag. Use confidence: high, medium, or low.`;
     }
 
     if (strategy === 'income') {
+      // 'trendNeutral' reads trendStrengthAdx, which is permanently null while ADX is
+      // excluded from scoring (USE_ADX_IN_SCORING=false in scoring-service.ts — validated
+      // on full-year Brief Replay, not a bug to reverse here). No live substitute signal
+      // exists for "trending too hard for range-bound income" without reintroducing ADX
+      // (which would need its own replay validation per FR-SEY-5), so this check is
+      // currently a structural no-op — left in place, documented, rather than silently
+      // pretending it's live.
       const neutral = s['trendNeutral'];
       if (neutral && !neutral.missing && neutral.normalized < 30) {
         return {
@@ -440,7 +461,11 @@ Use verdict: pass, caution, or flag. Use confidence: high, medium, or low.`;
     }
 
     if (strategy === 'buy') {
-      const trend = s['trendStrength'];
+      // Buy's config has no 'trendStrength' key (that belongs to bullish) — this read was
+      // always missing and could never fire. Buy's live trend signal is 'trendAlignment'
+      // (scoring-service computeTrendDirectionScore 'directional' mode: bullish=100,
+      // sideways=25, bearish=0). Fixed v1.1.116.
+      const trend = s['trendAlignment'];
       const rs    = s['relativeStrength'];
       if (trend && rs && !trend.missing && !rs.missing &&
           trend.normalized < 40 && rs.normalized < 40) {
@@ -629,12 +654,15 @@ Use verdict: pass, caution, or flag. Use confidence: high, medium, or low.`;
     };
   }
 
+  // "Do we have any still-pending earnings data at all for this ticker" — including a
+  // same-day amc/unknown-time report that hasn't happened yet (see isEarningsPending).
   private hasFutureEarningsRow(ticker: string, today: string): boolean {
     try {
+      type ERow = { report_date: string; report_time: 'bmo' | 'amc' | null };
       const row = this.db.prepare(
-        `SELECT 1 FROM earnings_calendar WHERE ticker = ? AND report_date > ? LIMIT 1`
-      ).get(ticker, today);
-      return row !== undefined;
+        `SELECT report_date, report_time FROM earnings_calendar WHERE ticker = ? AND report_date >= ? LIMIT 1`
+      ).get(ticker, today) as ERow | undefined;
+      return row !== undefined && isEarningsPending(row.report_date, row.report_time, today);
     } catch {
       return false;
     }
@@ -646,13 +674,13 @@ Use verdict: pass, caution, or flag. Use confidence: high, medium, or low.`;
     today: string,
   ): { date: string; daysFromNow: number; confirmed: boolean } | null {
     try {
-      type ERow = { report_date: string; confirmed: number };
+      type ERow = { report_date: string; report_time: 'bmo' | 'amc' | null; confirmed: number };
       const row = this.db.prepare(`
-        SELECT report_date, confirmed FROM earnings_calendar
-        WHERE ticker = ? AND report_date > ? AND report_date <= ?
+        SELECT report_date, report_time, confirmed FROM earnings_calendar
+        WHERE ticker = ? AND report_date >= ? AND report_date <= ?
         ORDER BY report_date ASC LIMIT 1
       `).get(ticker, today, expiryDate) as ERow | undefined;
-      if (!row) return null;
+      if (!row || !isEarningsPending(row.report_date, row.report_time, today)) return null;
       const daysFromNow = Math.round(
         (new Date(row.report_date).getTime() - new Date(today).getTime()) / 86400000
       );

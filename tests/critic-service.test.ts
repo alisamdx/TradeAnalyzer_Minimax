@@ -79,7 +79,7 @@ describe('CriticService rule checks', () => {
 
   beforeEach(() => {
     db = new Database(':memory:');
-    db.exec(`CREATE TABLE earnings_calendar (ticker TEXT, report_date TEXT, confirmed INTEGER)`);
+    db.exec(`CREATE TABLE earnings_calendar (ticker TEXT, report_date TEXT, report_time TEXT, confirmed INTEGER)`);
     svc = new CriticService(db);
   });
 
@@ -99,14 +99,14 @@ describe('CriticService rule checks', () => {
     });
 
     it('stays silent when a future earnings date exists beyond expiry (known clear)', () => {
-      db.prepare(`INSERT INTO earnings_calendar VALUES ('TEST', '2099-06-01', 1)`).run();
+      db.prepare(`INSERT INTO earnings_calendar VALUES ('TEST', '2099-06-01', NULL, 1)`).run();
       const flags = runChecks(svc, liquidPick(), 'bullish');
       expect(flags.find(x => x.key === 'earnings_unknown')).toBeUndefined();
       expect(flags.find(x => x.key === 'earnings_in_window')).toBeUndefined();
     });
 
     it('flags earnings_in_window (warning) when the report falls before expiry', () => {
-      db.prepare(`INSERT INTO earnings_calendar VALUES ('TEST', '2098-12-01', 1)`).run();
+      db.prepare(`INSERT INTO earnings_calendar VALUES ('TEST', '2098-12-01', NULL, 1)`).run();
       const flags = runChecks(svc, liquidPick(), 'bullish');
       const f = flags.find(x => x.key === 'earnings_in_window');
       expect(f).toBeDefined();
@@ -118,6 +118,38 @@ describe('CriticService rule checks', () => {
       const flags = runChecks(svc, makePick(null), 'bullish');
       expect(flags.find(x => x.key === 'earnings_unknown')).toBeUndefined();
       expect(flags.find(x => x.key === 'earnings_in_window')).toBeUndefined();
+    });
+
+    // v1.1.116: a same-day report used to compare with a strict `>` on today's date, so an
+    // amc (after-close) or unknown-time report today read as "no earnings" — a stock could
+    // surface in the morning brief with no warning hours before it reports.
+    describe('same-day earnings (v1.1.116)', () => {
+      const todayET = new Date().toISOString().slice(0, 10);
+
+      it('flags earnings_in_window for a same-day amc report (has not happened yet)', () => {
+        db.prepare(`INSERT INTO earnings_calendar VALUES ('TEST', ?, 'amc', 1)`).run(todayET);
+        const flags = runChecks(svc, liquidPick(), 'bullish');
+        const f = flags.find(x => x.key === 'earnings_in_window');
+        expect(f).toBeDefined();
+        expect(f!.severity).toBe('warning');
+        expect(flags.find(x => x.key === 'earnings_unknown')).toBeUndefined();
+      });
+
+      it('flags earnings_in_window for a same-day report with unknown time (conservative)', () => {
+        db.prepare(`INSERT INTO earnings_calendar VALUES ('TEST', ?, NULL, 1)`).run(todayET);
+        const flags = runChecks(svc, liquidPick(), 'bullish');
+        expect(flags.find(x => x.key === 'earnings_in_window')).toBeDefined();
+      });
+
+      it('treats a same-day bmo report as already-happened, not an in-window risk', () => {
+        db.prepare(`INSERT INTO earnings_calendar VALUES ('TEST', ?, 'bmo', 1)`).run(todayET);
+        const flags = runChecks(svc, liquidPick(), 'bullish');
+        expect(flags.find(x => x.key === 'earnings_in_window')).toBeUndefined();
+        // With no pending row left (today's bmo has already occurred and the row hasn't
+        // been refreshed to the next date), the NEXT earnings is genuinely unverified —
+        // correctly falls back to earnings_unknown rather than a false all-clear.
+        expect(flags.find(x => x.key === 'earnings_unknown')).toBeDefined();
+      });
     });
   });
 
@@ -216,6 +248,60 @@ describe('CriticService rule checks', () => {
       ]);
       const flags = runChecks(svc, pick, 'bearish', { vix: 18, spyAbove200ma: false });
       expect(flags.find(f => f.key === 'elevated_market_risk')).toBeUndefined();
+    });
+  });
+
+  // v1.1.116: checkTrendAlignment read 'trendStrength' for wheel and buy, but neither
+  // strategy's scoring config has that key (it belongs to bullish) — pick.signals only ever
+  // contains the strategy's own configured keys, so the read was always `undefined` and the
+  // wheel/buy trend-conflict warning could never fire. Fixed to read the strategy's real
+  // trend signal (wheel: notDowntrend, buy: trendAlignment).
+  describe('checkTrendAlignment — wheel/buy key fix (v1.1.116)', () => {
+    function pickWithSignals(signals: BriefPick['signals']): BriefPick {
+      return { ...makePick(null), signals };
+    }
+    const sig = (normalized: number, weight = 8): BriefPick['signals'][string] =>
+      ({ raw: normalized, normalized, weight, missing: false });
+
+    it('fires for wheel when notDowntrend is low (confirmed downtrend)', () => {
+      const pick = pickWithSignals({ notDowntrend: sig(10) }); // scoring's downtrend raw value
+      const flags = runChecks(svc, pick, 'wheel');
+      const f = flags.find(x => x.key === 'trend_strategy_conflict');
+      expect(f).toBeDefined();
+      expect(f!.severity).toBe('warning');
+      expect(f!.description).toContain('confirmed downtrend');
+    });
+
+    it('does not fire for wheel when notDowntrend is healthy (sideways/uptrend)', () => {
+      const pick = pickWithSignals({ notDowntrend: sig(75) });
+      expect(runChecks(svc, pick, 'wheel').find(x => x.key === 'trend_strategy_conflict')).toBeUndefined();
+    });
+
+    it('a stale trendStrength signal alone no longer fires the wheel check (was silently dead before)', () => {
+      // Confirms the fix actually changed behavior: the old key never existed on wheel's
+      // config, so setting it here proves the check now looks at notDowntrend, not trendStrength.
+      const pick = pickWithSignals({ trendStrength: sig(5) });
+      expect(runChecks(svc, pick, 'wheel').find(x => x.key === 'trend_strategy_conflict')).toBeUndefined();
+    });
+
+    it('fires for buy when trendAlignment and relativeStrength are both weak', () => {
+      const pick = pickWithSignals({ trendAlignment: sig(25), relativeStrength: sig(20) });
+      const flags = runChecks(svc, pick, 'buy');
+      const f = flags.find(x => x.key === 'trend_strategy_conflict');
+      expect(f).toBeDefined();
+      expect(f!.description).toContain('lagging');
+    });
+
+    it('does not fire for buy when only one of trendAlignment/relativeStrength is weak', () => {
+      const pick = pickWithSignals({ trendAlignment: sig(80), relativeStrength: sig(20) });
+      expect(runChecks(svc, pick, 'buy').find(x => x.key === 'trend_strategy_conflict')).toBeUndefined();
+    });
+
+    it('bullish and bearish checks are unaffected (still read trendStrength/downtrendScore)', () => {
+      const bullishFlags = runChecks(svc, pickWithSignals({ trendStrength: sig(10) }), 'bullish');
+      expect(bullishFlags.find(x => x.key === 'trend_strategy_conflict')).toBeDefined();
+      const bearishFlags = runChecks(svc, pickWithSignals({ downtrendScore: sig(10) }), 'bearish');
+      expect(bearishFlags.find(x => x.key === 'trend_strategy_conflict')).toBeDefined();
     });
   });
 
@@ -422,7 +508,7 @@ describe('checkThinBreakeven — strike-aware', () => {
   let svc: CriticService;
   beforeEach(() => {
     const db = new Database(':memory:');
-    db.exec(`CREATE TABLE earnings_calendar (ticker TEXT, report_date TEXT, confirmed INTEGER)`);
+    db.exec(`CREATE TABLE earnings_calendar (ticker TEXT, report_date TEXT, report_time TEXT, confirmed INTEGER)`);
     svc = new CriticService(db);
   });
 
@@ -452,18 +538,42 @@ describe('checkThinBreakeven — strike-aware', () => {
 // F3: once VIX is populated in quote_cache, getMarketContext reads it and the
 // previously-dormant VIX rules fire.
 describe('getMarketContext + VIX rules (F3)', () => {
-  function makeSvc(vix: number | null) {
+  function makeSvc(vix: number | null, fetchedAt: string = new Date().toISOString()) {
     const db = new Database(':memory:');
-    db.exec(`CREATE TABLE earnings_calendar (ticker TEXT, report_date TEXT, confirmed INTEGER)`);
+    db.exec(`CREATE TABLE earnings_calendar (ticker TEXT, report_date TEXT, report_time TEXT, confirmed INTEGER)`);
     db.exec(`CREATE TABLE quote_cache (ticker TEXT PRIMARY KEY, last REAL, fetched_at TEXT)`);
     db.exec(`CREATE TABLE historical_prices (ticker TEXT, date TEXT, close REAL)`);
-    if (vix !== null) db.prepare(`INSERT INTO quote_cache (ticker, last, fetched_at) VALUES ('VIX', ?, '2026-06-15')`).run(vix);
+    if (vix !== null) db.prepare(`INSERT INTO quote_cache (ticker, last, fetched_at) VALUES ('VIX', ?, ?)`).run(vix, fetchedAt);
     return new CriticService(db);
   }
 
   it('reads a populated VIX from quote_cache (was always null before)', () => {
     expect(makeSvc(31.5).getMarketContext().vix).toBe(31.5);
     expect(makeSvc(null).getMarketContext().vix).toBeNull();
+  });
+
+  // v1.1.116: a VIX value from a failed-refresh window (e.g. E*Trade down over a weekend)
+  // used to be read with no age check — a stale complacency-regime VIX could sit in
+  // quote_cache for days while the real market was in a fear regime, or vice versa.
+  describe('VIX staleness (v1.1.116)', () => {
+    it('reads a VIX fetched a few hours ago (fresh)', () => {
+      const fetchedAt = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString(); // 6h old
+      expect(makeSvc(34, fetchedAt).getMarketContext().vix).toBe(34);
+    });
+
+    it('treats a VIX older than 24h as unknown (null), not stale-but-confident', () => {
+      const fetchedAt = new Date(Date.now() - 30 * 60 * 60 * 1000).toISOString(); // 30h old
+      expect(makeSvc(34, fetchedAt).getMarketContext().vix).toBeNull();
+    });
+
+    it('a stale VIX does not fire the VIX rules (fail-safe)', () => {
+      const fetchedAt = new Date(Date.now() - 72 * 60 * 60 * 1000).toISOString(); // 3 days old
+      const svc = makeSvc(34, fetchedAt); // would be > 30 (fear regime) if read
+      const pick = makePick([{ slug: 'short-naked-put', grade: 'A', liquidityScore: 8, setup: makeSetup(95) }], 100);
+      const market = svc.getMarketContext();
+      expect(market.vix).toBeNull();
+      expect(runChecks(svc, pick, 'wheel', market).find(x => x.key === 'elevated_market_risk')).toBeUndefined();
+    });
   });
 
   it('fires elevated_market_risk on wheel/income when VIX > 30', () => {

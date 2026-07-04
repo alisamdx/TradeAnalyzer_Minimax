@@ -25,6 +25,27 @@ export interface EarningsEntry {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+/**
+ * Whether an earnings event on `reportDate`/`reportTime` is still ahead of `todayET` — i.e.
+ * hasn't happened yet. A same-day 'bmo' (before market open) report has already occurred by
+ * the time any batch job runs; a same-day 'amc' (after close) or unknown-time report has NOT
+ * — it still carries same-day gap/IV-crush risk for anything traded off today's brief.
+ *
+ * Both the brief's earnings penalty (Stage 3) and the critic's earnings-in-window check used
+ * to compare with a strict `report_date > today`, which silently treated today's amc/unknown
+ * earnings as "no earnings" — a stock reporting after today's close could surface in the
+ * 10:15 morning brief with no penalty and no warning. Fixed v1.1.116.
+ */
+export function isEarningsPending(
+  reportDate: string,
+  reportTime: 'bmo' | 'amc' | null,
+  todayET: string,
+): boolean {
+  if (reportDate > todayET) return true;
+  if (reportDate < todayET) return false;
+  return reportTime !== 'bmo';
+}
+
 function toIso(raw: unknown): string | null {
   if (raw === null || raw === undefined || raw === '') return null;
 

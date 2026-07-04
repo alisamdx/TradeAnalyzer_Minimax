@@ -23,6 +23,7 @@ import { CriticService } from '../critic-service.js';
 import { WatchlistService } from '../watchlist-service.js';
 import { parseRationaleResponse } from '../brief-rationale-parser.js';
 import type { EarningsService } from '../earnings-service.js';
+import { isEarningsPending } from '../earnings-service.js';
 import type { OAuthCredentials } from '../etrade-auth.js';
 import { getETradeLastPrice } from '../etrade-options.js';
 import { withTransaction } from '../../db/connection.js';
@@ -869,21 +870,24 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
   }
 
   private loadEarningsPenalty(): Map<string, number> {
-    // Returns -20 for any ticker with earnings in the next 45 days.
-    // 45d matches the outer edge of the short-premium hold window (30–45 DTE structures).
-    // Applied to EARNINGS_PENALTY_STRATEGIES (income, wheel, bearish) in Stage 3.
+    // Returns -20 for any ticker with a still-pending earnings event in the next 45 days
+    // (including today, if it hasn't happened yet — see isEarningsPending). 45d matches the
+    // outer edge of the short-premium hold window (30–45 DTE structures). Applied to
+    // EARNINGS_PENALTY_STRATEGIES (income, wheel, bearish) in Stage 3.
     try {
       const todayET = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
       const [y, m, d] = todayET.split('-').map(Number);
       const horizonDate = new Date(Date.UTC(y!, m! - 1, d! + 45));
       const horizonStr = horizonDate.toISOString().slice(0, 10);
-      type ERow = { ticker: string };
+      type ERow = { ticker: string; report_date: string; report_time: 'bmo' | 'amc' | null };
       const rows = this.db.prepare(`
-        SELECT DISTINCT ticker FROM earnings_calendar
-        WHERE report_date > ? AND report_date <= ?
+        SELECT ticker, report_date, report_time FROM earnings_calendar
+        WHERE report_date >= ? AND report_date <= ?
       `).all(todayET, horizonStr) as ERow[];
       const penalty = new Map<string, number>();
-      for (const r of rows) penalty.set(r.ticker, -20);
+      for (const r of rows) {
+        if (isEarningsPending(r.report_date, r.report_time, todayET)) penalty.set(r.ticker, -20);
+      }
       return penalty;
     } catch {
       return new Map();
