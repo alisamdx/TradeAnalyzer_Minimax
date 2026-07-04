@@ -4,8 +4,9 @@
 //
 // Runs at the END of the evening chain (afterCloseOnly — skipped in the lean intraday
 // slot) so quote/fundamentals caches, iv_history, technical_signals, and the earnings
-// calendar are all fresh. Wheel (Vetted) and Assignment Risk fetch live E*Trade option
-// chains for their survivors, so this job is deliberately last — it is the slowest link.
+// calendar are all fresh. Wheel (Vetted), IV High (Vetted), and Assignment Risk fetch
+// live E*Trade option chains for their survivors, so this job is deliberately last —
+// it is the slowest link.
 //
 // Each template's stored run is overwritten wholesale (latest-only). A template that
 // errors is recorded and the loop continues — one bad scan must not starve the others.
@@ -28,9 +29,13 @@ const JOB_ID = 'filters-prefill';
 // Templates the batch precomputes by default. The heavy/unused ones (RSI Overbought,
 // IV Low, Assignment Risk, Wheel Opportunity) are omitted to save run time — override
 // via batch_jobs.config_json.enabledTemplates (an explicit template-id allowlist).
+// iv_rank_high_vetted (v1.1.120) applies Wheel (Vetted)'s downtrend/earnings/liquidity/
+// IV-ceiling gates to the IV-High signal — the summary email's IV High list is sourced
+// from it, not the loose iv_rank_high (which stays prefilled too, for browsing).
 export const DEFAULT_PREFILL_TEMPLATES = [
   'rsi_oversold',
   'iv_rank_high',
+  'iv_rank_high_vetted',
   'price_alert',
   'wheel_vetted',
 ];
@@ -83,7 +88,9 @@ export class FiltersPrefillJob implements BatchJobHandler {
     const failures: string[] = [];
     // Captured for the summary email below — null means the template didn't run this pass
     // (not enabled, or the scan failed), distinct from an empty (but attempted) result set.
-    let ivHighResults: FilterTemplateResult[] | null = null;
+    // The email's IV High list is sourced from the VETTED template (downtrend/earnings/
+    // liquidity/IV-ceiling gates applied), not the loose iv_rank_high.
+    let ivHighVettedResults: FilterTemplateResult[] | null = null;
     let wheelVettedResults: FilterTemplateResult[] | null = null;
 
     const emit = (message: string, ticker = '', status: BatchProgressEvent['status'] = 'updated') => {
@@ -115,7 +122,7 @@ export class FiltersPrefillJob implements BatchJobHandler {
         this.service.saveRun(tpl.id, PREFILL_UNIVERSE, results);
         saved++;
         totalMatches += results.length;
-        if (tpl.id === 'iv_rank_high') ivHighResults = results;
+        if (tpl.id === 'iv_rank_high_vetted') ivHighVettedResults = results;
         if (tpl.id === 'wheel_vetted') wheelVettedResults = results;
         emit(`${step} — ${results.length} match${results.length !== 1 ? 'es' : ''} stored`);
       } catch (err) {
@@ -126,17 +133,17 @@ export class FiltersPrefillJob implements BatchJobHandler {
       }
     }
 
-    // Summary email — top-10 IV High (ranked, not the full ~hundreds-strong match list) +
-    // every Wheel (Vetted) pick (already a small, gated funnel). Only sent when at least one
-    // of the two templates actually ran this pass; email failure never fails the job.
-    if (this.emailService?.isConfigured() && (ivHighResults !== null || wheelVettedResults !== null)) {
+    // Summary email — top-10 IV High (Vetted) (ranked, not the full match list) + every
+    // Wheel (Vetted) pick (already a small, gated funnel). Only sent when at least one of
+    // the two templates actually ran this pass; email failure never fails the job.
+    if (this.emailService?.isConfigured() && (ivHighVettedResults !== null || wheelVettedResults !== null)) {
       try {
         const todayEt = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-        const ivTop = topIvHigh(ivHighResults ?? [], IV_HIGH_EMAIL_TOP_N);
+        const ivTop = topIvHigh(ivHighVettedResults ?? [], IV_HIGH_EMAIL_TOP_N);
         const wheelSorted = sortWheelVetted(wheelVettedResults ?? []);
         const html = buildFiltersPrefillEmailHtml(
           todayEt,
-          { top: ivTop, totalScanned: ivHighResults?.length ?? 0 },
+          { top: ivTop, totalScanned: ivHighVettedResults?.length ?? 0 },
           wheelSorted,
         );
         const subject = `Filters Prefill — ${new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} — `

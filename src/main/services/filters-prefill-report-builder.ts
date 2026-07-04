@@ -1,6 +1,9 @@
 // FiltersPrefillReportBuilder — builds the email body for the Filters Prefill batch job.
-// Two curated lists: the top 10 IV High candidates (of potentially hundreds of matches —
-// ranked, not the full list) and every Wheel (Vetted) match (already a small, gated funnel).
+// Two curated lists: the top 10 IV High (Vetted) candidates (of potentially dozens of gate
+// survivors — ranked, not the full list) and every Wheel (Vetted) match (already a small,
+// gated funnel). Both sources have already passed Wheel (Vetted)'s downtrend / earnings /
+// liquidity / IV-ceiling safety gates (see filter-templates-service.ts IV_HIGH_VETTED_DEFAULTS)
+// — this email is not sourced from the loose, ungated `iv_rank_high` template.
 // Style mirrors brief-report-builder.ts's email so the two look like one family of report.
 
 import type { FilterTemplateResult } from '@shared/types.js';
@@ -53,6 +56,8 @@ function ivHighRows(results: FilterTemplateResult[]): string {
       <td style="padding:7px 8px;color:#555">${fmtPrice(r.lastPrice)}</td>
       <td style="padding:7px 8px;font-weight:700;color:#c0392b">${num(r.metrics['ivRank']) != null ? num(r.metrics['ivRank'])!.toFixed(0) : '—'}</td>
       <td style="padding:7px 8px;color:#555">${num(r.metrics['currentIv']) != null ? `${num(r.metrics['currentIv'])!.toFixed(1)}%` : '—'}</td>
+      <td style="padding:7px 8px;color:#888;font-size:12px">${num(r.metrics['openInterest']) != null ? num(r.metrics['openInterest'])!.toLocaleString() : '—'}</td>
+      <td style="padding:7px 8px;color:#888;font-size:12px">${num(r.metrics['spread']) != null ? `${num(r.metrics['spread'])}%` : '—'}</td>
       <td style="padding:7px 8px;color:#777;font-size:11px">${r.matchReason}</td>
     </tr>`).join('');
 }
@@ -107,11 +112,11 @@ export function buildFiltersPrefillEmailHtml(
   });
 
   const ivHighSection = section(
-    '📈 IV High',
-    `top ${ivHigh.top.length} of ${ivHigh.totalScanned} scanned`,
-    ['Ticker', 'Type', 'Last', 'IV Rank', 'IV %', 'Reason'],
+    '🛡️ IV High (Vetted)',
+    `top ${ivHigh.top.length} of ${ivHigh.totalScanned} gate survivors`,
+    ['Ticker', 'Type', 'Last', 'IV Rank', 'IV %', 'OI', 'Spread', 'Reason'],
     ivHighRows(ivHigh.top),
-    'No tickers cleared the IV High threshold today.',
+    'No tickers cleared the IV High (Vetted) gates today.',
   );
 
   const wheelSection = section(
@@ -133,7 +138,7 @@ export function buildFiltersPrefillEmailHtml(
     <div style="font-size:22px;font-weight:700;margin-bottom:4px">🎛️ Filters Prefill</div>
     <div style="color:#bdc3c7;font-size:14px">${dateStr}</div>
     <div style="margin-top:12px;display:flex;gap:24px;font-size:13px">
-      <span><strong style="color:#f39c12">${ivHigh.top.length}</strong> IV High (top-ranked)</span>
+      <span><strong style="color:#f39c12">${ivHigh.top.length}</strong> IV High (Vetted, top-ranked)</span>
       <span><strong style="color:#f39c12">${wheelVetted.length}</strong> Wheel (Vetted)</span>
     </div>
   </div>

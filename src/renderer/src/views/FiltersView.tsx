@@ -14,6 +14,7 @@ const TEMPLATE_DEFAULT_SORT: Record<string, { key: string; dir: SortDirection }>
   price_alert:         { key: 'priceVsSma50',   dir: 'asc'  },
   iv_rank_low:         { key: 'ivRank',         dir: 'asc'  },
   iv_rank_high:        { key: 'ivRank',         dir: 'desc' },
+  iv_rank_high_vetted: { key: 'ivRank',         dir: 'desc' },
   assignment_risk:     { key: 'delta',          dir: 'desc' },
   wheel_opportunity:   { key: 'suitabilityScore', dir: 'desc' },
   wheel_vetted:        { key: 'riskAdjustedReturn', dir: 'desc' },

@@ -57,7 +57,7 @@ describe('sortWheelVetted', () => {
 describe('buildFiltersPrefillEmailHtml', () => {
   it('shows an empty-state message for a list with zero matches', () => {
     const html = buildFiltersPrefillEmailHtml('2026-07-03', { top: [], totalScanned: 0 }, []);
-    expect(html).toContain('No tickers cleared the IV High threshold today.');
+    expect(html).toContain('No tickers cleared the IV High (Vetted) gates today.');
     expect(html).toContain('No tickers passed the Wheel (Vetted) funnel today.');
   });
 
@@ -68,7 +68,7 @@ describe('buildFiltersPrefillEmailHtml', () => {
       [wheelRow('AAPL', 18)],
     );
     expect(html).toContain('>SPY<');
-    expect(html).toContain('top 1 of 214 scanned');
+    expect(html).toContain('top 1 of 214 gate survivors');
     expect(html).toContain('>AAPL<');
   });
 

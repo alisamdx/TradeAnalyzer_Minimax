@@ -121,6 +121,33 @@ export function assessWheelPut(put: OptionContract, dte: number, t: WheelVettedT
   return { pass, oi, spreadPct, creditPerShare: mid, annualizedReturn, riskAdjustedReturn, ivPct };
 }
 
+// ─── IV High (Vetted) — same safety gates as Wheel (Vetted), applied to the IV-High signal ─────
+//
+// Wheel (Vetted) exists because the loose `wheel_opportunity`/`wheel_vetted` gap showed that a
+// pure signal scan surfaces genuinely bad candidates (falling knives, imminent-earnings IV traps,
+// illiquid names, vol-bombs). Plain "IV High" has the exact same gap: it's a bare IV-Rank
+// threshold with none of Wheel (Vetted)'s downtrend / earnings / liquidity / vol-ceiling gates —
+// acceptable for a browse-everything Filters view, not for a short list an email hands you as
+// "these 10 are worth a look." IV High (Vetted) reuses Wheel (Vetted)'s exact pure helpers
+// (thirdFridayOnOrAfter, pickWheelPut, assessWheelPut) with an ATM (0.50Δ) target instead of the
+// wheel's 0.30Δ — this isn't picking a specific CSP structure, it's a general "can you actually
+// trade this name's options" liquidity check — and no annualized-yield floor (0 = always passes),
+// since IV High isn't committed to a premium-selling structure the way Wheel is. No fundamentals/
+// suitability gate either (by design/user decision — IV High serves CSPs, covered calls, and
+// other premium strategies, not just wheel-style ownership).
+export const IV_HIGH_VETTED_DEFAULTS: WheelVettedThresholds = {
+  minSuitability: 0, minDte: 25, targetDelta: 0.50, minOi: 250, maxSpreadPct: 15,
+  minAnnualizedReturn: 0, minAnnualizedReturnEtf: 0, maxIvPct: 80,
+};
+
+// Only the top-N IV-Rank candidates (post cheap gates) get an expensive live chain fetch. Without
+// this, IV High (Vetted) — which has no fundamentals gate to narrow the field the way Wheel
+// (Vetted)'s suitability≥75 bar does — could need a chain fetch for every one of a few hundred
+// IV-Rank survivors, multiplying the batch job's E*Trade call volume many times over for no
+// benefit: the email only ever shows the top 10, so a generous buffer past the (Tier-2-rejected)
+// fraction is all that's needed.
+export const IV_HIGH_VETTED_CHAIN_FETCH_CAP = 40;
+
 // ─── Service ──────────────────────────────────────────────────────────────────
 
 export class FilterTemplatesService {
@@ -163,6 +190,13 @@ export class FilterTemplatesService {
     }
 
     if (tickers.length === 0) return [];
+
+    // IV High (Vetted) doesn't fit the per-ticker "evaluate independently" model below — it
+    // needs to rank ALL cheap-gate survivors before capping which ones get an expensive live
+    // chain fetch (see IV_HIGH_VETTED_CHAIN_FETCH_CAP). Two-phase, handled separately.
+    if (templateId === 'iv_rank_high_vetted') {
+      return this.runIvHighVetted(tickers, onProgress, signal);
+    }
 
     const results: FilterTemplateResult[] = [];
     const total = tickers.length;
@@ -305,6 +339,8 @@ export class FilterTemplatesService {
         return this.evalWheelOpportunity(ticker, watchlists, isEtf);
       case 'wheel_vetted':
         return this.evalWheelVetted(ticker, watchlists, isEtf);
+      // 'iv_rank_high_vetted' never reaches this per-ticker dispatch — runTemplate() routes it
+      // to the two-phase runIvHighVetted() before this loop starts (see runTemplate).
       default:
         return null;
     }
@@ -671,6 +707,148 @@ export class FilterTemplatesService {
         + ` IV ${a.ivPct != null ? a.ivPct.toFixed(0) : '?'}%, OI ${a.oi.toLocaleString()}, spread ${a.spreadPct.toFixed(0)}%`
         + (trend ? `, trend ${trend}` : ''),
     };
+  }
+
+  /**
+   * IV High (Vetted) — same safety gates as Wheel (Vetted) (see IV_HIGH_VETTED_DEFAULTS),
+   * applied to the plain IV-High signal instead of a wheel-suitability one.
+   *
+   * Two phases, mirroring Wheel (Vetted)'s cheap-then-expensive funnel:
+   *   Phase 1 (cheap, no option calls): the same IV-Rank threshold as plain `iv_rank_high`,
+   *     then the free downtrend + earnings-before-expiry gates. Every universe ticker passes
+   *     through this phase — it's all local DB reads.
+   *   Phase 2 (one option-chain call per survivor): rank Phase-1 survivors by IV Rank
+   *     descending and cap to IV_HIGH_VETTED_CHAIN_FETCH_CAP before spending an API call —
+   *     without Wheel (Vetted)'s fundamentals gate to narrow the field first, Phase 1 alone
+   *     can leave far more survivors than Wheel (Vetted) ever does, and the email only ever
+   *     needs the top 10 anyway. Fetch the nearest monthly chain, pick the ATM-ish (0.50Δ)
+   *     put, and apply the liquidity + IV-ceiling gate (no yield floor — see
+   *     IV_HIGH_VETTED_DEFAULTS).
+   */
+  private async runIvHighVetted(
+    tickers: TickerSource[],
+    onProgress?: (progress: FilterProgress) => void,
+    signal?: AbortSignal,
+  ): Promise<FilterTemplateResult[]> {
+    if (!this.optionsProvider) return [];
+    const t = IV_HIGH_VETTED_DEFAULTS;
+    const total = tickers.length;
+
+    interface Candidate {
+      source: TickerSource;
+      ivRank: number | null;
+      currentIv: number | null;
+      useIvRank: boolean;
+      quote: Quote;
+      trend: string | null;
+    }
+
+    // ── Phase 1: cheap IV-Rank + downtrend + earnings gates over the whole universe ──
+    const candidates: Candidate[] = [];
+    for (let i = 0; i < total; i++) {
+      if (signal?.aborted) return [];
+      const source = tickers[i]!;
+      onProgress?.({ current: i + 1, total, ticker: source.ticker });
+      try {
+        const quote = await this.fetchQuote(source.ticker);
+        if (quote.last == null || quote.last <= 0) continue;
+
+        let ivRank: number | null = null;
+        let currentIv: number | null = null;
+        if (this.ivHistoryService) {
+          try {
+            const ivh = this.ivHistoryService.getIvRank(source.ticker);
+            ivRank = ivh.ivRank;
+            currentIv = ivh.currentIv;
+          } catch { /* no iv_history data */ }
+        }
+        if (ivRank === null && currentIv === null) {
+          ivRank = quote.ivRank;
+          currentIv = quote.currentIv;
+        }
+
+        const useIvRank = ivRank !== null;
+        const compareValue = useIvRank ? ivRank! : currentIv;
+        if (compareValue === null) continue;
+        const threshold = useIvRank
+          ? (source.isEtf ? 30 : 70)
+          : (source.isEtf ? 20 : 35);
+        if (compareValue <= threshold) continue;
+
+        // Downtrend gate (all names) — identical to Wheel (Vetted): never suggest selling
+        // premium on a stock in a confirmed downtrend (falling knife).
+        const trend = this.loadTrendLabel(source.ticker);
+        if (trend && trend.toLowerCase() === 'bearish') continue;
+
+        // Earnings gate (individual names only) — identical window to Wheel (Vetted): the
+        // same monthly expiry Phase 2 will chain-fetch, so "no earnings before expiry" means
+        // the same thing here as it does there.
+        if (!source.isEtf) {
+          const expiry = thirdFridayOnOrAfter(t.minDte);
+          const nextEarnings = this.loadNextEarnings(source.ticker);
+          if (nextEarnings && nextEarnings <= expiry) continue;
+        }
+
+        candidates.push({ source, ivRank, currentIv, useIvRank, quote, trend });
+      } catch {
+        // Skip tickers where data fetch fails.
+      }
+    }
+
+    if (signal?.aborted) return [];
+
+    // ── Rank + cap before the expensive phase ──
+    candidates.sort((a, b) => {
+      const av = a.ivRank ?? a.currentIv ?? -Infinity;
+      const bv = b.ivRank ?? b.currentIv ?? -Infinity;
+      return bv - av;
+    });
+    const pool = candidates.slice(0, IV_HIGH_VETTED_CHAIN_FETCH_CAP);
+
+    // ── Phase 2: live monthly chain + ATM liquidity/IV-ceiling gate, survivors only ──
+    const results: FilterTemplateResult[] = [];
+    const phase2Total = total + pool.length;
+    for (let i = 0; i < pool.length; i++) {
+      if (signal?.aborted) break;
+      const c = pool[i]!;
+      onProgress?.({ current: total + i + 1, total: phase2Total, ticker: c.source.ticker });
+      try {
+        const expiry = thirdFridayOnOrAfter(t.minDte);
+        const chain = await this.optionsProvider.getOptionsChain(c.source.ticker, expiry);
+        const puts = chain.contracts.filter(p => p.side === 'put');
+        const put = pickWheelPut(puts, c.quote.last!, t.targetDelta);
+        if (!put) continue;
+
+        const dte = this.dteDays(expiry);
+        const a = assessWheelPut(put, dte, t);
+        if (!a.pass) continue;
+
+        const compareValue = c.useIvRank ? c.ivRank! : c.currentIv!;
+        const label = c.source.isEtf
+          ? 'elevated for ETF — good for selling premium (ETF-calibrated threshold)'
+          : 'high — elevated premium, good for selling';
+
+        results.push({
+          ticker: c.source.ticker,
+          watchlists: c.source.watchlists,
+          lastPrice: c.quote.last,
+          metrics: {
+            ...(c.ivRank !== null ? { ivRank: +c.ivRank.toFixed(1) } : {}),
+            ...(c.currentIv !== null ? { currentIv: +c.currentIv.toFixed(1) } : {}),
+            openInterest: a.oi,
+            spread: +a.spreadPct.toFixed(1),
+          },
+          matchReason: `Vetted: IV ${label} (${compareValue.toFixed(1)}${c.useIvRank ? '' : '%'});`
+            + ` liquid ${expiry} (${dte}d) ATM put OI ${a.oi.toLocaleString()}, spread ${a.spreadPct.toFixed(0)}%,`
+            + ` IV ${a.ivPct != null ? a.ivPct.toFixed(0) : '?'}%`
+            + (c.trend ? `, trend ${c.trend}` : ''),
+        });
+      } catch {
+        // No chain for this monthly (unoptionable / illiquid) — skip.
+      }
+    }
+
+    return results;
   }
 
   // ─── Data fetch helpers ──────────────────────────────────────────────────────

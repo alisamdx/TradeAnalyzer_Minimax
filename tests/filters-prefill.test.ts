@@ -263,17 +263,17 @@ describe('FiltersPrefillJob', () => {
     };
   }
 
-  function serviceWithResults(ivHigh: FilterTemplateResult[], wheelVetted: FilterTemplateResult[]) {
+  function serviceWithResults(ivHighVetted: FilterTemplateResult[], wheelVetted: FilterTemplateResult[]) {
     return stubService({
       runTemplate: vi.fn(async (templateId: string) => {
-        if (templateId === 'iv_rank_high') return ivHigh;
+        if (templateId === 'iv_rank_high_vetted') return ivHighVetted;
         if (templateId === 'wheel_vetted') return wheelVetted;
         return [];
       }),
     });
   }
 
-  it('emails the top-10 IV High (by ivRank) and all Wheel (Vetted) picks', async () => {
+  it('emails the top-10 IV High (Vetted) (by ivRank) and all Wheel (Vetted) picks', async () => {
     const ivHigh = Array.from({ length: 15 }, (_, i) => ivHighResult(`T${i}`, 50 + i)); // ranks 50..64
     const wheel = [wheelResult('AAA', 10), wheelResult('BBB', 25)];
     const svc = serviceWithResults(ivHigh, wheel);
@@ -301,7 +301,7 @@ describe('FiltersPrefillJob', () => {
     expect(email.send).not.toHaveBeenCalled();
   });
 
-  it('does not email when neither iv_rank_high nor wheel_vetted ran', async () => {
+  it('does not email when neither iv_rank_high_vetted nor wheel_vetted ran', async () => {
     const svc = stubService(); // default runTemplate returns a generic result for any id
     const email = stubEmailService();
     const job = new FiltersPrefillJob(svc, stubDb(['price_alert']), email as never);

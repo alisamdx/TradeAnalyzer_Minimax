@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.120] — 2026-07-04
+
+### Added
+- **New "IV High (Vetted)" filter template — applies Wheel (Vetted)'s full safety-gate stack to the IV High signal.** Plain `IV High` was a bare `IV Rank > 70` (`> 30` ETFs) threshold with none of Wheel (Vetted)'s protections — no downtrend check, no earnings check, no liquidity check, no vol-bomb ceiling. That was fine for browsing, but not for a curated list an email hands you as "these are worth a look." The new template (mirroring the existing Wheel Opportunity / Wheel (Vetted) pattern) reuses Wheel (Vetted)'s exact pure gate logic — `thirdFridayOnOrAfter`, `pickWheelPut`, `assessWheelPut` — targeting the **ATM (0.50Δ)** option instead of the wheel's 0.30Δ put (this isn't picking a CSP structure, it's a general "can you actually trade this name's options" check) and with **no annualized-yield floor** and **no fundamentals/suitability gate** (IV High serves CSPs, covered calls, and other premium strategies, not just wheel-style ownership). Two-phase funnel: Phase 1 (cheap) applies the same IV-Rank threshold, then free downtrend and earnings-before-expiry gates; survivors are ranked by IV Rank and capped to the top 40 (`IV_HIGH_VETTED_CHAIN_FETCH_CAP`) before Phase 2 spends a live options-chain call per candidate to check open interest ≥ 250, spread ≤ 15%, and exclude IV > 80% vol-bombs. Since this needs the full Phase-1 pool before ranking/capping, it's implemented as a dedicated two-phase runner (`runIvHighVetted`) rather than the generic per-ticker template dispatch every other filter uses. Plain "IV High" is unchanged and still available for browsing the full match list. `src/shared/filter-templates.ts`, `src/main/services/filter-templates-service.ts`, `src/renderer/src/views/FiltersView.tsx`. Tests: `tests/iv-high-vetted.test.ts` (new, 10) covering every gate end to end.
+- **Filters Prefill batch job + email now use IV High (Vetted).** The default prefill allowlist grows from 4 to 5 templates (adds IV High (Vetted)), and the summary email's IV High section (added in v1.1.119) is re-sourced from the vetted template — the top 10 shown are now "best of the names that already passed downtrend/earnings/liquidity/vol-bomb screening," not "best of everything, unscreened." The email table also gains OI and Spread columns to show the new liquidity data. `src/main/services/jobs/filters-prefill-job.ts`, `src/main/services/filters-prefill-report-builder.ts`. Tests updated: `tests/filters-prefill.test.ts`, `tests/filters-prefill-report-builder.test.ts`.
+
+Spec: `Requirements/spec/05-screener-and-filters.md`, `Requirements/spec/20-batch-jobs.md`, `.ai/AI_CONTEXT.md`.
+
 ## [1.1.119] — 2026-07-03
 
 ### Added

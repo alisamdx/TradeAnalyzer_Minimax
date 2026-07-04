@@ -75,6 +75,15 @@ export const FILTER_TEMPLATES: FilterTemplate[] = [
     metricColumns: { ivRank: 'IV Rank', currentIv: 'IV %' }
   },
   {
+    id: 'iv_rank_high_vetted',
+    label: 'IV High (Vetted)',
+    description: 'Two-stage, mirrors Wheel (Vetted): IV Rank above 70 (30 for ETFs), then excludes confirmed downtrends and near-term earnings, then a monthly-expiry liquidity check on the ATM option (open interest ≥ 250, spread ≤ 15%, IV ≤ 80% — no vol-bombs). Deeper scan — fetches option chains for survivors.',
+    category: 'volatility',
+    icon: '🛡️',
+    dataNeeded: ['quote', 'options'],
+    metricColumns: { ivRank: 'IV Rank', currentIv: 'IV %', openInterest: 'OI', spread: 'Spread' }
+  },
+  {
     id: 'price_alert',
     label: 'Price Alert',
     description: 'Stock near key SMA levels or SMA crossovers (golden/death cross)',
