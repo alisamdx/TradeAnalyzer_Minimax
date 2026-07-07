@@ -1,23 +1,32 @@
-// Filters Prefill batch job — precomputes every filter template over Universe = All
+// Filters Prefill batch job — precomputes filter templates over Universe = All
 // (S&P 500 + Russell 1000 + ETFs) and stores the results in filter_template_runs so
 // FiltersView shows populated lists instantly instead of requiring a manual scan.
 //
-// Runs at the END of the evening chain (afterCloseOnly — skipped in the lean intraday
-// slot) so quote/fundamentals caches, iv_history, technical_signals, and the earnings
-// calendar are all fresh. Wheel (Vetted), IV High (Vetted), and Assignment Risk fetch
-// live E*Trade option chains for their survivors, so this job is deliberately last —
-// it is the slowest link.
+// Runs TWICE a trading day (v1.1.123): the after-close slot (~16:30+ ET) runs the full
+// DEFAULT_PREFILL_TEMPLATES set for the canonical end-of-day view + email, and the lean
+// intraday slot (~10:15 ET) runs a lighter DEFAULT_LEAN_PREFILL_TEMPLATES set so the same-
+// day email/view can also surface opportunities intraday. The lean set is deliberately
+// restricted to iv_rank_high_vetted + wheel_vetted — both are live at scan time regardless
+// of time of day (option-chain liquidity is a live E*Trade call; the suitability score is
+// fundamentals-only; the downtrend gate reads whatever technical_signals last wrote, not a
+// same-day partial bar). rsi_oversold and price_alert are excluded from the lean run: they
+// read SMA/RSI off `historical_prices`, which DOES hold a partial same-day bar by 10:15 in
+// the lean slot (see CLAUDE.md's morning-partial-bar quirk) — same-slot noise isn't worth
+// it for signals nobody reads intraday anyway. Each run overwrites its template's stored
+// row wholesale (latest-only) — the after-close run still overwrites whatever the lean run
+// wrote earlier that day, so the canonical EOD view/email is never left showing morning data.
 //
-// Each template's stored run is overwritten wholesale (latest-only). A template that
-// errors is recorded and the loop continues — one bad scan must not starve the others.
+// A template that errors is recorded and the loop continues — one bad scan must not starve
+// the others.
 
-import type { BatchJobHandler, BatchJobResult } from '../batch-service.js';
+import type { BatchJobHandler, BatchJobResult, RunTrigger } from '../batch-service.js';
 import type { BatchProgressEvent, FilterTemplateResult } from '@shared/types.js';
 import { FILTER_TEMPLATES } from '@shared/filter-templates.js';
 import type { FilterTemplatesService } from '../filter-templates-service.js';
 import type { DbHandle } from '../../db/connection.js';
 import type { EmailService } from '../email-service.js';
 import { buildFiltersPrefillEmailHtml, topIvHigh, sortWheelVetted } from '../filters-prefill-report-builder.js';
+import { isLeanSlot } from './batch-orchestrator-job.js';
 
 // Email caps the IV High list to the top-N by IV Rank — a universe=all scan can match
 // hundreds of tickers, and the point of the email is a short actionable list, not a dump.
@@ -26,9 +35,9 @@ const IV_HIGH_EMAIL_TOP_N = 10;
 const PREFILL_UNIVERSE = 'all' as const;
 const JOB_ID = 'filters-prefill';
 
-// Templates the batch precomputes by default. The heavy/unused ones (RSI Overbought,
-// IV Low, Assignment Risk, Wheel Opportunity) are omitted to save run time — override
-// via batch_jobs.config_json.enabledTemplates (an explicit template-id allowlist).
+// Templates the after-close run precomputes by default. The heavy/unused ones (RSI
+// Overbought, IV Low, Assignment Risk, Wheel Opportunity) are omitted to save run time —
+// override via batch_jobs.config_json.enabledTemplates (an explicit template-id allowlist).
 // The loose iv_rank_high is intentionally NOT in this default set (v1.1.121, user
 // decision) — iv_rank_high_vetted (v1.1.120, applies Wheel (Vetted)'s downtrend/
 // earnings/liquidity/IV-ceiling gates) is the one the summary email sources from and
@@ -38,6 +47,14 @@ export const DEFAULT_PREFILL_TEMPLATES = [
   'rsi_oversold',
   'iv_rank_high_vetted',
   'price_alert',
+  'wheel_vetted',
+];
+
+// Templates the lean intraday run precomputes by default (v1.1.123). Override via
+// batch_jobs.config_json.leanEnabledTemplates. See the file-header comment for why
+// rsi_oversold/price_alert are excluded here.
+export const DEFAULT_LEAN_PREFILL_TEMPLATES = [
+  'iv_rank_high_vetted',
   'wheel_vetted',
 ];
 
@@ -53,33 +70,58 @@ export class FiltersPrefillJob implements BatchJobHandler {
     private readonly emailService: EmailService | null = null,
   ) {}
 
-  /** Template-id allowlist from config, falling back to DEFAULT_PREFILL_TEMPLATES. */
-  private enabledTemplateIds(): string[] {
+  /** Template-id allowlist from `batch_jobs.config_json[configKey]`, falling back to `fallback`. */
+  private templateIdsFor(configKey: 'enabledTemplates' | 'leanEnabledTemplates', fallback: string[]): string[] {
     try {
       const row = this.db.prepare(`SELECT config_json FROM batch_jobs WHERE id = ?`).get(JOB_ID) as
         { config_json: string | null } | undefined;
       if (row?.config_json) {
         const cfg = JSON.parse(row.config_json) as Record<string, unknown>;
-        const list = cfg['enabledTemplates'];
+        const list = cfg[configKey];
         if (Array.isArray(list) && list.every(x => typeof x === 'string')) {
           return list as string[];
         }
       }
     } catch { /* fall through to defaults */ }
-    return DEFAULT_PREFILL_TEMPLATES;
+    return fallback;
+  }
+
+  /** Whether `slotTime` is the lean intraday slot, per the orchestrator's own scheduleSlots/leanSlots
+   *  config. No orchestrator config (or no slotTime — manual/startup runs) → not lean → full set. */
+  private isLeanRun(slotTime: string | null): boolean {
+    try {
+      const row = this.db.prepare(`SELECT config_json FROM batch_jobs WHERE id = ?`).get('batch-orchestrator') as
+        { config_json: string | null } | undefined;
+      if (row?.config_json) {
+        const cfg = JSON.parse(row.config_json) as { scheduleSlots?: unknown; leanSlots?: unknown };
+        const scheduleSlots = Array.isArray(cfg.scheduleSlots)
+          ? cfg.scheduleSlots.filter((s): s is string => typeof s === 'string') : [];
+        const leanSlots = Array.isArray(cfg.leanSlots)
+          ? cfg.leanSlots.filter((s): s is string => typeof s === 'string') : undefined;
+        return isLeanSlot(slotTime, scheduleSlots, leanSlots);
+      }
+    } catch { /* fall through — treat as not-lean */ }
+    return false;
   }
 
   async run(
     onProgress: (evt: BatchProgressEvent) => void,
     signal: AbortSignal,
+    _force = false,
+    _trigger: RunTrigger = 'manual',
+    slotTime: string | null = null,
   ): Promise<BatchJobResult> {
-    const enabled = new Set(this.enabledTemplateIds());
+    const lean = this.isLeanRun(slotTime);
+    const enabled = new Set(lean
+      ? this.templateIdsFor('leanEnabledTemplates', DEFAULT_LEAN_PREFILL_TEMPLATES)
+      : this.templateIdsFor('enabledTemplates', DEFAULT_PREFILL_TEMPLATES));
     const templates = FILTER_TEMPLATES.filter(t => enabled.has(t.id));
     const total = templates.length;
     if (total === 0) {
+      const key = lean ? 'leanEnabledTemplates' : 'enabledTemplates';
       return {
         status: 'skipped',
-        notes: 'No filter templates enabled for prefill (config_json.enabledTemplates is empty).',
+        notes: `No filter templates enabled for ${lean ? 'lean intraday' : 'after-close'} prefill (config_json.${key} is empty).`,
         tickersAttempted: 0, tickersUpdated: 0, tickersSkipped: 0, tickersFailed: 0,
       };
     }
@@ -146,8 +188,9 @@ export class FiltersPrefillJob implements BatchJobHandler {
           todayEt,
           { top: ivTop, totalScanned: ivHighVettedResults?.length ?? 0 },
           wheelSorted,
+          lean ? 'Intraday Preview' : undefined,
         );
-        const subject = `Filters Prefill — ${new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} — `
+        const subject = `Filters Prefill${lean ? ' (Intraday)' : ''} — ${new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} — `
           + `${ivTop.length} IV High · ${wheelSorted.length} Wheel (Vetted)`;
         await this.emailService.send(subject, html);
       } catch (emailErr) {

@@ -66,7 +66,7 @@ import { DailyTechnicalSignalsJob } from './services/jobs/daily-technical-signal
 import { DailyOptionsSnapshotJob } from './services/jobs/daily-options-snapshot-job.js';
 import { DailyOptionsPremiumHistoryJob } from './services/jobs/daily-options-premium-history-job.js';
 import { DailyPaperSnapshotJob } from './services/jobs/daily-paper-snapshot-job.js';
-import { FiltersPrefillJob, DEFAULT_PREFILL_TEMPLATES } from './services/jobs/filters-prefill-job.js';
+import { FiltersPrefillJob, DEFAULT_PREFILL_TEMPLATES, DEFAULT_LEAN_PREFILL_TEMPLATES } from './services/jobs/filters-prefill-job.js';
 import { PaperTradingService } from './services/paper-trading-service.js';
 import { registerPaperTradingIpc } from './ipc/ipc-paper-trading.js';
 import { StrategyLabService } from './services/strategy-lab-service.js';
@@ -655,19 +655,25 @@ app.whenReady().then(() => {
     defaultConfig: { callDelayMs: 1100, maxTickers: 1500, captureWheel: true, captureIncome: true },
   });
 
-  // Filters Prefill — precomputes every filter template over Universe = All so the
-  // Filters view opens pre-populated. Registered after options-premium-history →
-  // highest sequence_order (very last in the chain: it needs fresh caches, iv_history,
-  // technical_signals, and earnings — and its Wheel (Vetted) leg hits E*Trade chains).
+  // Filters Prefill — precomputes filter templates over Universe = All so the Filters
+  // view opens pre-populated. Registered after options-premium-history → highest
+  // sequence_order (very last in each slot's chain). Runs in BOTH slots (v1.1.123, no
+  // longer afterCloseOnly): the after-close slot runs the full DEFAULT_PREFILL_TEMPLATES
+  // for the canonical EOD view/email (needs fresh caches, iv_history, technical_signals,
+  // earnings), and the lean 10:15 slot runs the lighter DEFAULT_LEAN_PREFILL_TEMPLATES
+  // (Wheel/IV High Vetted only — both live at scan time regardless of hour) so the same
+  // email/view also surfaces opportunities intraday. See filters-prefill-job.ts header.
   const filtersPrefillJob = new FiltersPrefillJob(filterTemplatesService, db, emailService);
   batchService.registerJob('filters-prefill', filtersPrefillJob, {
     dailyScheduleTime: '17:30',   // legacy display only — the orchestrator drives the schedule
     dailyScheduleEnabled: false,
     runOnStartup: false,
-    afterCloseOnly: true,         // evening slot only — skip in the lean intraday slot (spec 08 §4)
     // Only precompute the filters in regular use — skip RSI Overbought, IV Low,
-    // Assignment Risk, Wheel Opportunity to save batch time. Editable allowlist.
-    defaultConfig: { enabledTemplates: DEFAULT_PREFILL_TEMPLATES },
+    // Assignment Risk, Wheel Opportunity to save batch time. Editable allowlists.
+    defaultConfig: {
+      enabledTemplates: DEFAULT_PREFILL_TEMPLATES,
+      leanEnabledTemplates: DEFAULT_LEAN_PREFILL_TEMPLATES,
+    },
   });
 
   // Batch Orchestrator — registered last so all sub-jobs are already in batch_jobs.

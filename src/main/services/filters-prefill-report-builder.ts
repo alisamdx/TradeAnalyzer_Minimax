@@ -106,6 +106,7 @@ export function buildFiltersPrefillEmailHtml(
   dateIso: string,
   ivHigh: { top: FilterTemplateResult[]; totalScanned: number },
   wheelVetted: FilterTemplateResult[],
+  runLabel?: string,
 ): string {
   const dateStr = new Date(dateIso + 'T12:00:00Z').toLocaleDateString('en-US', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
@@ -135,7 +136,7 @@ export function buildFiltersPrefillEmailHtml(
 
   <!-- Header -->
   <div style="background:linear-gradient(135deg,#1a252f,#2c3e50);color:#fff;padding:24px 28px;border-radius:8px;margin-bottom:24px">
-    <div style="font-size:22px;font-weight:700;margin-bottom:4px">🎛️ Filters Prefill</div>
+    <div style="font-size:22px;font-weight:700;margin-bottom:4px">🎛️ Filters Prefill${runLabel ? ` <span style="font-size:13px;font-weight:600;color:#f39c12;background:rgba(243,156,18,0.15);padding:2px 8px;border-radius:10px;vertical-align:middle">${runLabel}</span>` : ''}</div>
     <div style="color:#bdc3c7;font-size:14px">${dateStr}</div>
     <div style="margin-top:12px;display:flex;gap:24px;font-size:13px">
       <span><strong style="color:#f39c12">${ivHigh.top.length}</strong> IV High (Vetted, top-ranked)</span>

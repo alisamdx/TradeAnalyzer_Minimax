@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.123] — 2026-07-07
+
+### Changed
+- **Filters Prefill now runs twice a trading day instead of after-close only.** Previously gated `afterCloseOnly` (skipped entirely in the ~10:15 ET lean intraday slot), it now also runs in the lean slot — with a lighter template set — so the summary email/view can surface opportunities same-day instead of only at the ~16:30+ after-close pass. The lean run precomputes `iv_rank_high_vetted` + `wheel_vetted` only (new `DEFAULT_LEAN_PREFILL_TEMPLATES`, override via `config_json.leanEnabledTemplates`); the after-close run is unchanged (`DEFAULT_PREFILL_TEMPLATES`, all 4). The two live-chain templates were deliberately chosen for the lean run because neither depends on a same-day-finalized bar: the liquidity/OI/spread check is a live E*Trade call regardless of time of day, the Wheel-suitability score is fundamentals-only (24h TTL cache, no price input), and the downtrend gate reads whatever `technical_signals.trend_label` the last completed job run wrote (not a same-day partial bar). `rsi_oversold`/`price_alert` stay after-close-only — both read SMA/RSI off `historical_prices`, which does hold a partial same-day bar by 10:15 in the lean slot. Each slot still overwrites its own template rows wholesale (latest-only), so the after-close run always overwrites whatever the lean run wrote earlier that day — the canonical EOD email/view is never left showing morning data. The lean-slot email is now labeled "(Intraday)" in the subject and carries an "Intraday Preview" badge in the body so it isn't mistaken for the EOD version. `src/main/services/jobs/filters-prefill-job.ts`, `src/main/services/filters-prefill-report-builder.ts`, `src/main/index.ts` (drops `afterCloseOnly: true`, adds `leanEnabledTemplates` default config). Tests: `tests/filters-prefill.test.ts` (+8: lean/after-close routing, explicit lean allowlist, manual-run fallback, intraday email tagging).
+
+Spec: `Requirements/spec/05-screener-and-filters.md`, `Requirements/spec/20-batch-jobs.md`, `.ai/AI_CONTEXT.md`.
+
 ## [1.1.122] — 2026-07-04
 
 ### Fixed

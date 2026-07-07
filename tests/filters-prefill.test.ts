@@ -12,7 +12,7 @@ import { runMigrations } from '../src/main/db/migrations.js';
 import { MIGRATIONS_DIR } from './helpers.js';
 import { ConstituentsService } from '../src/main/services/constituents-service.js';
 import { FilterTemplatesService } from '../src/main/services/filter-templates-service.js';
-import { FiltersPrefillJob, DEFAULT_PREFILL_TEMPLATES } from '../src/main/services/jobs/filters-prefill-job.js';
+import { FiltersPrefillJob, DEFAULT_PREFILL_TEMPLATES, DEFAULT_LEAN_PREFILL_TEMPLATES } from '../src/main/services/jobs/filters-prefill-job.js';
 import { QuoteCache, FundamentalsCache } from '../src/main/services/cache-service.js';
 import { FILTER_TEMPLATES, FILTER_RESULTS_SHAPE_VERSION } from '../src/shared/filter-templates.js';
 import type { DataProvider, QuoteSnapshot } from '../src/main/services/data-provider.js';
@@ -143,12 +143,28 @@ describe('FiltersPrefillJob', () => {
     } as unknown as FilterTemplatesService;
   }
 
-  /** Minimal DbHandle stub — serves a batch_jobs.config_json row for the job's allowlist read.
-   *  `enabledTemplates: null` → no config row (job falls back to DEFAULT_PREFILL_TEMPLATES). */
-  function stubDb(enabledTemplates: string[] | null): import('../src/main/db/connection.js').DbHandle {
-    const config_json = enabledTemplates === null ? null : JSON.stringify({ enabledTemplates });
+  /** Minimal DbHandle stub — routes by job id: 'filters-prefill' serves the allowlist(s), and
+   *  'batch-orchestrator' serves scheduleSlots/leanSlots (defaults to production's two-slot
+   *  ['10:15', '16:30'] so `slotTime` param tests exercise real lean/after-close routing).
+   *  `enabledTemplates: null` → no config row for that key (job falls back to defaults). */
+  function stubDb(
+    enabledTemplates: string[] | null,
+    opts: {
+      leanEnabledTemplates?: string[] | null;
+      orchestrator?: { scheduleSlots: string[]; leanSlots?: string[] } | null;
+    } = {},
+  ): import('../src/main/db/connection.js').DbHandle {
+    const jobConfig: Record<string, unknown> = {};
+    if (enabledTemplates !== null) jobConfig['enabledTemplates'] = enabledTemplates;
+    if (opts.leanEnabledTemplates != null) jobConfig['leanEnabledTemplates'] = opts.leanEnabledTemplates;
+    const hasJobConfig = enabledTemplates !== null || opts.leanEnabledTemplates != null;
+    const jobRow = hasJobConfig ? { config_json: JSON.stringify(jobConfig) } : undefined;
+
+    const orchestrator = opts.orchestrator === undefined ? { scheduleSlots: ['10:15', '16:30'] } : opts.orchestrator;
+    const orchestratorRow = orchestrator ? { config_json: JSON.stringify(orchestrator) } : undefined;
+
     return {
-      prepare: () => ({ get: () => (config_json === null ? undefined : { config_json }) }),
+      prepare: () => ({ get: (id: string) => (id === 'batch-orchestrator' ? orchestratorRow : jobRow) }),
     } as unknown as import('../src/main/db/connection.js').DbHandle;
   }
 
@@ -186,6 +202,53 @@ describe('FiltersPrefillJob', () => {
     // the vetted version is what the summary email sources from; plain IV High still
     // runs live on click for browsing the full unscreened list.
     expect(ran).not.toContain('iv_rank_high');
+  });
+
+  // ─── Dual-schedule: lean intraday slot (v1.1.123) ────────────────────────────
+
+  it('runs only DEFAULT_LEAN_PREFILL_TEMPLATES in the lean intraday slot', async () => {
+    const svc = stubService();
+    const job = new FiltersPrefillJob(svc, stubDb(null)); // orchestrator defaults to ['10:15','16:30']
+    const result = await job.run(noProgress, new AbortController().signal, false, 'schedule', '10:15');
+
+    expect(result.status).toBe('success');
+    const ran = (svc.runTemplate as ReturnType<typeof vi.fn>).mock.calls.map(c => c[0]).sort();
+    expect(ran).toEqual([...DEFAULT_LEAN_PREFILL_TEMPLATES].sort());
+    expect(ran).toEqual(['iv_rank_high_vetted', 'wheel_vetted']);
+    // rsi_oversold/price_alert read SMA/RSI off a same-day partial bar in the lean slot —
+    // deliberately excluded from the default lean set (see filters-prefill-job.ts header).
+    expect(ran).not.toContain('rsi_oversold');
+    expect(ran).not.toContain('price_alert');
+  });
+
+  it('runs the full DEFAULT_PREFILL_TEMPLATES in the after-close slot (last of two)', async () => {
+    const svc = stubService();
+    const job = new FiltersPrefillJob(svc, stubDb(null));
+    const result = await job.run(noProgress, new AbortController().signal, false, 'schedule', '16:30');
+
+    expect(result.status).toBe('success');
+    const ran = (svc.runTemplate as ReturnType<typeof vi.fn>).mock.calls.map(c => c[0]).sort();
+    expect(ran).toEqual([...DEFAULT_PREFILL_TEMPLATES].sort());
+  });
+
+  it('honors an explicit leanEnabledTemplates allowlist for the lean slot only', async () => {
+    const svc = stubService();
+    const job = new FiltersPrefillJob(svc, stubDb(['wheel_vetted', 'rsi_oversold'], { leanEnabledTemplates: ['wheel_vetted'] }));
+
+    await job.run(noProgress, new AbortController().signal, false, 'schedule', '10:15');
+    expect((svc.runTemplate as ReturnType<typeof vi.fn>).mock.calls.map(c => c[0])).toEqual(['wheel_vetted']);
+
+    vi.clearAllMocks();
+    await job.run(noProgress, new AbortController().signal, false, 'schedule', '16:30');
+    expect((svc.runTemplate as ReturnType<typeof vi.fn>).mock.calls.map(c => c[0]).sort()).toEqual(['rsi_oversold', 'wheel_vetted']);
+  });
+
+  it('treats a manual/startup run (no slotTime) as after-close — full template set', async () => {
+    const svc = stubService();
+    const job = new FiltersPrefillJob(svc, stubDb(null));
+    await job.run(noProgress, new AbortController().signal); // no slotTime
+    const ran = (svc.runTemplate as ReturnType<typeof vi.fn>).mock.calls.map(c => c[0]).sort();
+    expect(ran).toEqual([...DEFAULT_PREFILL_TEMPLATES].sort());
   });
 
   it('honors an explicit allowlist and skips everything else', async () => {
@@ -296,6 +359,29 @@ describe('FiltersPrefillJob', () => {
     expect(html).not.toContain('>T0<');
     expect(html).toContain('AAA');
     expect(html).toContain('BBB');
+  });
+
+  it('tags the subject and body "Intraday" when run in the lean slot', async () => {
+    const svc = serviceWithResults([ivHighResult('AAA', 80)], [wheelResult('BBB', 15)]);
+    const email = stubEmailService();
+    const job = new FiltersPrefillJob(svc, stubDb(null), email as never);
+    await job.run(noProgress, new AbortController().signal, false, 'schedule', '10:15');
+
+    expect(email.send).toHaveBeenCalledTimes(1);
+    const [subject, html] = email.send.mock.calls[0]!;
+    expect(subject).toContain('(Intraday)');
+    expect(html).toContain('Intraday Preview');
+  });
+
+  it('does not tag the subject/body when run in the after-close slot', async () => {
+    const svc = serviceWithResults([ivHighResult('AAA', 80)], [wheelResult('BBB', 15)]);
+    const email = stubEmailService();
+    const job = new FiltersPrefillJob(svc, stubDb(null), email as never);
+    await job.run(noProgress, new AbortController().signal, false, 'schedule', '16:30');
+
+    const [subject, html] = email.send.mock.calls[0]!;
+    expect(subject).not.toContain('(Intraday)');
+    expect(html).not.toContain('Intraday Preview');
   });
 
   it('does not email when EmailService is not configured', async () => {
