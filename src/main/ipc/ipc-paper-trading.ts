@@ -25,6 +25,7 @@ export function registerPaperTradingIpc(svc: PaperTradingService): void {
   ipcMain.handle('paper:list-open',          wrap(() => svc.getOpenPositions()));
   ipcMain.handle('paper:list-closed',        wrap((limit?: number) => svc.getClosedPositions(limit)));
   ipcMain.handle('paper:close',              wrap((id: number, notes?: string) => { svc.closePosition(id, notes); return true; }));
+  ipcMain.handle('paper:close-bulk',         wrap((ids: number[], notes?: string) => svc.closePositions(ids, notes)));
   ipcMain.handle('paper:delete',             wrap((id: number) => { svc.deleteTrade(id); return true; }));
   ipcMain.handle('paper:summary',            wrap(() => svc.getSummary()));
   ipcMain.handle('paper:strategy-breakdown', wrap(() => svc.getStrategyBreakdown()));

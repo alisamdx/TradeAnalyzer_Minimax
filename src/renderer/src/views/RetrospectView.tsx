@@ -1200,6 +1200,25 @@ export function RetrospectView() {
     }
   };
 
+  const handleCloseAll = async (filter: (p: PaperTradeWithPnl) => boolean, label: string) => {
+    const ids = openPositions.filter(filter).map(p => p.id);
+    if (ids.length === 0) return;
+    const confirmed = await window.dialog.confirm({
+      title: `Close All ${label}`,
+      message: `Close ${ids.length} open position${ids.length !== 1 ? 's' : ''} flagged as ${label}? Each closes at its most recent price, same as clicking "Close" individually.`,
+    });
+    if (!confirmed) return;
+    try {
+      const closed = await window.api.paper.closeBulk(ids, `Bulk close — ${label}`);
+      setStatusMsg(`Closed ${closed} position${closed !== 1 ? 's' : ''}.`);
+      setTimeout(() => setStatusMsg(null), 3000);
+      await loadOpen();
+      if (tab === 'history') await loadClosed();
+    } catch (err) {
+      setStatusMsg('Error: ' + (err instanceof Error ? err.message : String(err)));
+    }
+  };
+
   const handleDelete = async (id: number) => {
     try {
       await window.api.paper.delete(id);
@@ -1224,13 +1243,31 @@ export function RetrospectView() {
         <h2>Retrospect</h2>
         <span className="meta" style={{ marginLeft: 8 }}>Daily Brief performance tracker</span>
         {closeSignalCount > 0 && (
-          <span className="retro-alert-badge">
-            ⚠ {closeSignalCount} Close Signal{closeSignalCount !== 1 ? 's' : ''}
+          <span className="retro-alert-badge-group">
+            <span className="retro-alert-badge">
+              ⚠ {closeSignalCount} Close Signal{closeSignalCount !== 1 ? 's' : ''}
+            </span>
+            <button
+              className="retro-close-all-btn"
+              title="Close every open position flagged as a Close Signal, across all brief dates"
+              onClick={() => handleCloseAll(p => p.recommendation === 'close_signal', 'Close Signals')}
+            >
+              Close All
+            </button>
           </span>
         )}
         {takeProfitCount > 0 && (
-          <span className="retro-profit-badge">
-            ✓ {takeProfitCount} Take Profit{takeProfitCount !== 1 ? 's' : ''}
+          <span className="retro-alert-badge-group">
+            <span className="retro-profit-badge">
+              ✓ {takeProfitCount} Take Profit{takeProfitCount !== 1 ? 's' : ''}
+            </span>
+            <button
+              className="retro-close-all-btn"
+              title="Close every open position flagged as a Take Profit, across all brief dates"
+              onClick={() => handleCloseAll(p => p.insight.action === 'take_profit', 'Take Profits')}
+            >
+              Close All
+            </button>
           </span>
         )}
         <div style={{ flex: 1 }} />

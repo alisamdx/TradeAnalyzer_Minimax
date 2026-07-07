@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.124] — 2026-07-07
+
+### Added
+- **Retrospect "In Progress" tab: "Close All" for the Close Signal / Take Profit header badges.** Previously the ⚠/✓ counts spanned every open paper trade across all brief dates, but the tab only ever shows one brief date at a time, so clearing a flagged batch meant switching the date dropdown and closing rows one by one. Each badge now has an adjacent **Close All** button that bulk-closes every open position matching that flag (`recommendation==='close_signal'` or `insight.action==='take_profit'`) in one action, regardless of which brief date is selected, after a confirm dialog stating the count. New `PaperTradingService.closePositions(ids, notes)` (`src/main/services/paper-trading-service.ts`) runs the DB updates in one `withTransaction`, then fires the existing AI-learning-capture call sequentially per closed trade in the background (not in parallel, to avoid bursting the Anthropic API on a large batch). IPC `paper:close-bulk` (`src/main/ipc/ipc-paper-trading.ts`), preload `window.api.paper.closeBulk` (`src/preload/index.ts`). UI in `src/renderer/src/views/RetrospectView.tsx` + `.retro-close-all-btn`/`.retro-alert-badge-group` in `src/renderer/src/styles.css`. Each closed position still auto-fills its exit price from `historical_prices`, same as an individual Close click. Tests: `tests/paper-trading-close-bulk.test.ts`.
+
+Spec: `Requirements/spec/15-retrospect-paper-trading.md`.
+
 ## [1.1.123] — 2026-07-07
 
 ### Changed

@@ -523,8 +523,36 @@ export class PaperTradingService {
   // ── Close a position (auto-fills exit price from historical_prices) ────────
 
   closePosition(id: number, notes?: string): void {
+    const closed = this.closeOneRow(id, notes);
+    if (!closed) return;
+
+    // Fire-and-forget AI learning capture — completes async, updates DB when done
+    this.captureCloseLearning(id).catch(() => { /* silent */ });
+  }
+
+  // ── Close many positions at once (e.g. "Close All Close Signals") ──────────
+  // Runs the DB updates in one transaction, then captures AI learning for each
+  // closed trade sequentially (one Anthropic call at a time) in the background.
+  closePositions(ids: number[], notes?: string): number {
+    const closedIds: number[] = [];
+    withTransaction(this.db, () => {
+      for (const id of ids) {
+        if (this.closeOneRow(id, notes)) closedIds.push(id);
+      }
+    });
+
+    void (async () => {
+      for (const id of closedIds) {
+        await this.captureCloseLearning(id).catch(() => { /* silent */ });
+      }
+    })();
+
+    return closedIds.length;
+  }
+
+  private closeOneRow(id: number, notes?: string): boolean {
     const row = this.db.prepare('SELECT * FROM paper_trades WHERE id = ?').get(id) as DbRow | undefined;
-    if (!row || row.status !== 'open') return;
+    if (!row || row.status !== 'open') return false;
 
     const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
 
@@ -555,8 +583,7 @@ export class PaperTradingService {
       WHERE id = ?
     `).run(today, exitPrice, notes ?? null, stockReturnPct, structurePnl, outcome, id);
 
-    // Fire-and-forget AI learning capture — completes async, updates DB when done
-    this.captureCloseLearning(id).catch(() => { /* silent */ });
+    return true;
   }
 
   deleteTrade(id: number): void {

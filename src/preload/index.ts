@@ -1141,6 +1141,7 @@ function buildApi() {
     listOpen:          (): Promise<PaperTradeWithPnl[]>  => invoke('paper:list-open'),
     listClosed:        (limit?: number): Promise<PaperTrade[]> => invoke('paper:list-closed', limit),
     close:             (id: number, notes?: string): Promise<boolean> => invoke('paper:close', id, notes),
+    closeBulk:         (ids: number[], notes?: string): Promise<number> => invoke('paper:close-bulk', ids, notes),
     delete:            (id: number): Promise<boolean> => invoke('paper:delete', id),
     summary:           (): Promise<PaperTradeSummary> => invoke('paper:summary'),
     strategyBreakdown: (): Promise<StrategyBreakdown[]> => invoke('paper:strategy-breakdown'),

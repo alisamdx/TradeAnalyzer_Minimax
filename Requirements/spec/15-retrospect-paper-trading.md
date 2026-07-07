@@ -16,12 +16,12 @@ On view load, open trades past expiry are auto-expired from `historical_prices`.
 
 ## 15.4 Retrospect view (4 tabs)
 
-- **In Progress** — open positions grouped by brief date: stock return %, delta-based estimated P&L, a Positive/Negative/Neutral verdict, a Hold/Close-signal recommendation, expandable legs, Close/Delete actions. A Close signal is raised when estimated option P&L < −(2× entry premium) regardless of stock move (catches IV/theta losses).
+- **In Progress** — open positions grouped by brief date: stock return %, delta-based estimated P&L, a Positive/Negative/Neutral verdict, a Hold/Close-signal recommendation, expandable legs, Close/Delete actions. A Close signal is raised when estimated option P&L < −(2× entry premium) regardless of stock move (catches IV/theta losses). The header's "⚠ N Close Signals" / "✓ N Take Profits" badges (counted across *all* brief dates, not just the one shown) each carry a **Close All** button that bulk-closes every open position matching that flag in one confirm-gated action, instead of switching through each brief date and closing rows individually.
 - **Summary** — win rate and average return per strategy, best/worst trade, and the learning recommendations.
 - **History** — closed/expired trades.
 - **Settings** — per-strategy thresholds (configurable `RetroSettings`).
 
-IPC: `listOpen`, `listClosed(limit?)`, `close(id, notes?)`, `delete(id)`, `summary`, `strategyBreakdown`, `expireStale`, `getSettings`, `saveSettings`, `briefAccuracy(briefDates[])`, `snapshotAccuracy`, `getLearningRecommendations`, `acknowledgeRecommendation(id)`.
+IPC: `listOpen`, `listClosed(limit?)`, `close(id, notes?)`, `closeBulk(ids[], notes?)`, `delete(id)`, `summary`, `strategyBreakdown`, `expireStale`, `getSettings`, `saveSettings`, `briefAccuracy(briefDates[])`, `snapshotAccuracy`, `getLearningRecommendations`, `acknowledgeRecommendation(id)`.
 
 ## 15.5 Learning capture
 
