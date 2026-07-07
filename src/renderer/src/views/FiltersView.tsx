@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { FilterTemplateResult, FilterSavedRun, Watchlist, Universe } from '@shared/types.js';
 import { FILTER_TEMPLATES, FILTER_RESULTS_SHAPE_VERSION } from '@shared/filter-templates.js';
 import { useSortable, type SortDirection } from '../hooks/useSortable.js';
+import { InfoTip } from '../components/InfoTip.js';
 
 // ─── Per-template default sort ────────────────────────────────────────────────
 
@@ -439,6 +440,7 @@ export function FiltersView() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <span style={{ fontSize: 16 }}>{t.icon}</span>
                     <strong>{t.label}</strong>
+                    <InfoTip text={t.description} />
                     {batchRuns[t.id] && (
                       <span
                         title={`${batchRuns[t.id]!.resultCount} matches precomputed by the nightly batch — click to view instantly`}
@@ -451,9 +453,6 @@ export function FiltersView() {
                         {batchRuns[t.id]!.resultCount}
                       </span>
                     )}
-                  </div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
-                    {t.description}
                   </div>
                 </button>
               ))}

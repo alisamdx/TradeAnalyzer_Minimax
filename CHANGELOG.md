@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.125] — 2026-07-07
+
+### Changed
+- **Filters sidebar template descriptions are now a hover tooltip instead of always-visible body text.** The sidebar's growing template list had pushed past the viewport height, forcing a scrollbar just to see all the cards. Each card now shows icon/label/match-badge only; the explanation lives behind a small "?" icon (hover to read). Extracted the existing `InfoTip` portal-tooltip component out of `PayoffView.tsx` (it was private there) into a shared `src/renderer/src/components/InfoTip.tsx`, used by both `PayoffView.tsx` and `src/renderer/src/views/FiltersView.tsx`. No behavior change to `PayoffView`'s tooltips — pure extraction.
+
+Spec: `Requirements/spec/05-screener-and-filters.md`.
+
 ## [1.1.124] — 2026-07-07
 
 ### Added
