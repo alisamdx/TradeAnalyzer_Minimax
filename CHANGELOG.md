@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.1.127] — 2026-08-04
+
+### Fixed
+- **Wheel `optionLiquidityScore` no longer reports a fabricated `0` for tickers whose liquidity was never measured.** `analyzeWheel` initialised `liquidityScore = 0` and only raised it when `findSuitableChain` resolved a contract, so any ticker with **no** suitable CSP in the 30–45 DTE / 0.20–0.30 delta window was persisted to `analysis_snapshots` as a hard `0` — indistinguishable from a genuinely illiquid contract. On the 2026-08-03 full-universe snapshot that is **695 of 1,029 rows (68%)**. The same rows also carried a *"Low option liquidity."* explanation asserting a measurement that never ran. The scoring logic is extracted to a pure exported `wheelOptionLiquidityScore(contract | null)` in `src/main/services/analysis-service.ts` which returns `null` when there is no contract to score; `WheelResult.optionLiquidityScore` is now `number | null` (both the `analysis-service.ts` declaration and the dead duplicate in `src/shared/types.ts`), the wheel explanation only claims low liquidity when a chain was actually scored, and the Analysis view renders `—` instead of a false `0/10`. Tests: `tests/wheel-option-liquidity.test.ts` (8).
+- **Scope — this deliberately changes no score.** Under the scoring engine's FR-SE-03 arithmetic (`scoring-service.ts`) a missing signal contributes 0 to the numerator **and its full weight to the denominator**, which is exactly what a measured 0 does, so composites, rankings and pick selection are bit-identical. The fix corrects the `missing` flag, the stored snapshot, the explanation text and the UI. It is not FR-SEY-5-gated for that reason, and it was verified that `optionLiquidity` (wheel weight 9, income weight 13) is 5th by weight in both configs, so the critic's `checkCriticalSignalMissing` — which inspects only the top-2 weighted signals — is unaffected too.
+
+### Known issue recorded (not fixed here)
+- **Brief Replay is structurally blind to `optionLiquidity`.** `BriefReplayService` sets `optionLiquidityScore` (and `annualizedReturn`, `suitabilityScore`) to `null` for every ticker because replay has no options data. Combined with the arithmetic above, replay scores every ticker as if liquidity were zero while the live path scores it up to 9 (wheel) / 13 (income) points higher for the ~32% of tickers that do resolve a chain. Replay therefore **cannot A/B this signal**, and past wheel/income conclusions drawn from replay inherit a non-uniform deflation. `analysis_snapshots` retains 66 wheel snapshots (2026-05-14 → 2026-08-03, ~1,029 tickers each) with the real live values and is the better panel for validating anything touching it.
+
+Docs: `docs/formulas.md#liquidity-score`, `Requirements/spec/13-scoring-engine.md`, `.ai/AI_CONTEXT.md` §10.
+
 ## [1.1.126] — 2026-08-04
 
 ### Validation (no behavior change)

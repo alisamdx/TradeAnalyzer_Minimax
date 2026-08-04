@@ -583,7 +583,9 @@ Two scores measure tradability; both now weigh same-day **volume** alongside ope
 | Open interest | 4 | ≥500 → 4, ≥100 → 2.5, else 0.5 |
 | Same-day volume | 3 | ≥100 → 3, ≥10 → 1.5, else 0 |
 
-**Wheel `optionLiquidityScore` (0–10)** — on the recommended CSP contract: open interest ≥50 → +4, relative spread ≤5% → +4, volume ≥50 → +2.
+**Wheel `optionLiquidityScore` (0–10 | null)** — on the recommended CSP contract: open interest ≥50 → +4, relative spread ≤5% → +4, volume ≥50 → +2. Computed by the pure `wheelOptionLiquidityScore()` (`analysis-service.ts`).
+
+**`null` ≠ 0.** The score is `null` when there is **no contract to measure** — `findSuitableChain` resolved nothing in the 30–45 DTE / 0.20–0.30 delta window, or price history was insufficient. A `0` is the stronger claim "measured, and illiquid". The distinction is the common case, not an edge case: on a full-universe snapshot (2026-08-03) **695 of 1,029 rows resolved no chain**. Collapsing those to 0 also made the wheel explanation assert *"Low option liquidity."* about tickers whose liquidity was never looked at. Note that under the scoring engine's current FR-SE-03 arithmetic a missing signal and a measured 0 contribute identically to the composite (0 to the numerator, full weight to the denominator) — so this distinction is currently about **data honesty**, surfaced via the `missing` flag, stored snapshots and the Analysis view, not about score movement.
 
 Rationale: open interest is *standing* interest; volume is *today's* activity. A high-OI/zero-volume strike (stale interest) is no longer scored as fully liquid, and an actively traded low-OI strike is credited. The brief's hard liquidity gate (drop best relevant structure `< 5/15`) is unchanged.
 

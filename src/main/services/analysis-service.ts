@@ -78,7 +78,11 @@ export interface WheelResult {
   currentIv: number | null;     // Current ATM implied volatility (percentage)
   ivRank: number | null;
   daysToEarnings: number | null;
-  optionLiquidityScore: number; // 0–10
+  /** 0–10, or **null when liquidity could not be measured at all** (no suitable CSP chain /
+   *  insufficient history). Must NOT be collapsed to 0: the Trade Scoring Engine reads a real
+   *  0 as "measured and illiquid" (full weight-9 penalty) but null as *missing* (FR-SE-03
+   *  denominator deflation). see docs/formulas.md#liquidity-score */
+  optionLiquidityScore: number | null;
   suitabilityScore: number;     // 1–10, see docs/formulas.md#wheel-suitability-score
   explanation: string;
 }
@@ -359,6 +363,39 @@ export function annualizedReturn(
   if (dte <= 0 || strike <= 0) return null;
   const annual = premium / strike * (365 / dte) * 100;
   return annual;
+}
+
+/**
+ * Wheel CSP option liquidity, 0–10, on the recommended contract:
+ * open interest ≥50 → +4, relative spread ≤5% → +4, same-day volume ≥50 → +2.
+ *
+ * Returns **null when there is no contract to score** — i.e. `findSuitableChain` resolved
+ * nothing in the 30–45 DTE / 0.20–0.30 delta window, or price history was insufficient.
+ * That case must NOT collapse to 0: a 0 asserts "measured, and illiquid", which is a
+ * materially different claim from "never measured", and it propagates into the stored
+ * snapshot, the Trade Scoring Engine's `missing` flag, and the wheel explanation text.
+ * (~68% of a full-universe snapshot resolves no chain, so the distinction is the common
+ * case, not an edge case.)
+ *
+ * see docs/formulas.md#liquidity-score
+ */
+export function wheelOptionLiquidityScore(
+  contract: { bid: number; ask: number; openInterest: number | null; volume: number | null } | null
+): number | null {
+  if (!contract) return null;
+  const { bid, ask } = contract;
+  // A v3 snapshot uses day.close as the bid/ask proxy (no real quote), so the spread reads 0.
+  // Only penalize when there is a meaningful spread to penalize.
+  const spread = (bid > 0 && ask > 0 && ask > bid)
+    ? ((ask - bid) / ((ask + bid) / 2)) * 100
+    : 0;
+  // OI (standing interest) + spread (fill cost) + same-day volume (today's activity), so a
+  // high-OI/zero-volume strike isn't scored as fully liquid.
+  let score = 0;
+  if ((contract.openInterest ?? 0) >= 50) score += 4;
+  if (spread <= 5) score += 4;
+  if ((contract.volume ?? 0) >= 50) score += 2;
+  return Math.min(10, score);
 }
 
 // ─── Analysis service ────────────────────────────────────────────────────────
@@ -988,24 +1025,11 @@ export class AnalysisService {
 
     // Find suitable CSP 30–45 DTE, delta 0.20–0.30.
     const chain = await this.findSuitableChain(ticker, 30, 45, 0.20, 0.30);
-    let liquidityScore = 0;
-    if (chain) {
-      const bid = chain.contract.bid;
-      const ask = chain.contract.ask;
-      // v3 snapshot uses day.close as bid/ask proxy (no real bid/ask), so spread is 0.
-      // Only penalize if we have a meaningful spread (> 5%).
-      const spread = (bid > 0 && ask > 0 && ask > bid)
-        ? ((ask - bid) / ((ask + bid) / 2)) * 100
-        : 0;
-      // OI (standing interest) + spread (fill cost) + same-day volume (today's activity),
-      // so a high-OI/zero-volume strike isn't scored as fully liquid. see docs/formulas.md#liquidity-score
-      const oiPass = (chain.contract.openInterest ?? 0) >= 50;
-      const spreadPass = spread <= 5;
-      const volPass = (chain.contract.volume ?? 0) >= 50;
-      if (oiPass) liquidityScore += 4;
-      if (spreadPass) liquidityScore += 4;
-      if (volPass) liquidityScore += 2;
-    }
+    // null (not 0) when there is no contract to measure — see wheelOptionLiquidityScore.
+    const liquidity = wheelOptionLiquidityScore(chain?.contract ?? null);
+    // Local 0-floor for the suitability/explanation gates below, which are pass/fail on a
+    // measured score and must not credit an unmeasured ticker.
+    const liquidityScore = liquidity ?? 0;
 
     // Detect ETF: ROE and FCF are N/A (null) — award those points automatically.
     // ETFs hold diversified assets with no single-company earnings/debt risk.
@@ -1026,13 +1050,19 @@ export class AnalysisService {
     if (!ivPass) explanation += `IV rank ${ivRank} < 30. `;
     if (!stabilityPass) explanation += 'Price not in healthy range. ';
     if (!earningsPass) explanation += `Earnings in ${daysToEarnings} days. `;
-    if (liquidityScore < 5) explanation += 'Low option liquidity. ';
+    // Only claim "low liquidity" when a chain was actually found and scored — with no chain,
+    // liquidityScore is an unset 0, not a measurement.
+    if (chain && liquidityScore < 5) explanation += 'Low option liquidity. ';
+
+    // No contract resolved → say exactly that. This must come BEFORE the "all checks passed"
+    // default, or a ticker with no CSP but no other failed check reports success.
+    if (!chain || !price) {
+      explanation += 'No suitable CSP found (30–45 DTE, delta 0.20–0.30). ';
+      return this.emptyWheel(ticker, price, currentIv, ivRank, explanation.trim());
+    }
+
     if (isEtf && explanation === '') explanation = 'ETF — all checks passed (fundamentals N/A). ';
     if (explanation === '') explanation = 'All checks passed.';
-
-    if (!chain || !price) {
-      return this.emptyWheel(ticker, price, currentIv, ivRank, explanation || 'No suitable CSP found.');
-    }
 
     const { contract, dte } = chain;
     // CSP credit at a realistic short fill (below mid toward the bid). see docs/formulas.md#fill-model
@@ -1046,7 +1076,7 @@ export class AnalysisService {
       dte, delta: contract.delta,
       premium, annualizedReturn: annual,
       currentIv, ivRank, daysToEarnings,
-      optionLiquidityScore: Math.min(10, liquidityScore),
+      optionLiquidityScore: liquidity,
       suitabilityScore: score,
       explanation: explanation.trim()
     };
@@ -1058,7 +1088,10 @@ export class AnalysisService {
       recommendedStrike: null, expiration: null, dte: null,
       delta: null, premium: null, annualizedReturn: null,
       currentIv, ivRank, daysToEarnings: null,
-      optionLiquidityScore: 0, suitabilityScore: 1, explanation
+      // NOT 0 — nothing was measured here (no suitable chain / insufficient history). A 0
+      // would be read downstream as "measured and illiquid" and cost the full weight-9
+      // optionLiquidity penalty; null makes the signal *missing* instead (FR-SE-03).
+      optionLiquidityScore: null, suitabilityScore: 1, explanation
     };
   }
 

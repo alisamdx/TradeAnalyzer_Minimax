@@ -324,7 +324,11 @@ export interface WheelResult {
   annualizedReturn: number | null;
   ivRank: number | null;
   daysToEarnings: number | null;
-  optionLiquidityScore: number;
+  /** 0–10, or **null when liquidity could not be measured at all** (no suitable CSP chain /
+   *  insufficient history). Null must NOT be collapsed to 0 — the Trade Scoring Engine treats
+   *  a real 0 as "measured and illiquid" (full weight-9 penalty) but null as *missing*
+   *  (FR-SE-03 denominator deflation). see docs/formulas.md#liquidity-score */
+  optionLiquidityScore: number | null;
   suitabilityScore: number;
   explanation: string;
 }

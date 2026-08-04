@@ -35,7 +35,7 @@ function fmtNum(v: number | null, decimals = 2): string {
 
 type BuyRow = { mode: 'buy'; ticker: string; lastPrice: number | null; compositeScore: number; trend: string; rsi: number | null; entryZoneLow: number | null; stopLoss: number | null; targetPrice: number | null; riskReward: number | null; fundamentalsPass: boolean; explanation: string };
 type OptionsRow = { mode: 'options_income'; ticker: string; lastPrice: number | null; strategy: 'CSP' | 'CC'; strike: number | null; expiration: string | null; dte: number | null; delta: number | null; bid: number | null; ask: number | null; premium: number | null; annualizedReturn: number | null; ivRank: number | null; openInterest: number | null; breakeven: number | null; capitalRequired: number | null; explanation: string };
-type WheelRow = { mode: 'wheel'; ticker: string; lastPrice: number | null; recommendedStrike: number | null; expiration: string | null; dte: number | null; delta: number | null; premium: number | null; annualizedReturn: number | null; currentIv: number | null; ivRank: number | null; daysToEarnings: number | null; optionLiquidityScore: number; suitabilityScore: number; explanation: string };
+type WheelRow = { mode: 'wheel'; ticker: string; lastPrice: number | null; recommendedStrike: number | null; expiration: string | null; dte: number | null; delta: number | null; premium: number | null; annualizedReturn: number | null; currentIv: number | null; ivRank: number | null; daysToEarnings: number | null; optionLiquidityScore: number | null; suitabilityScore: number; explanation: string };
 type StrategyRow = { mode: 'bullish' | 'bearish'; ticker: string; lastPrice: number | null; trendStrength: number | null; suggestedStrategy: string; structure: string; maxProfit: number | null; maxLoss: number | null; breakeven: number | null; probabilityOfProfit: number | null; explanation: string };
 type LizardRow = { mode: 'jade_lizard' | 'big_lizard'; ticker: string; lastPrice: number | null; expiration: string | null; dte: number | null; putStrike: number | null; shortCallStrike: number | null; longCallStrike: number | null; netCredit: number | null; spreadWidth: number | null; hasNoUpsideRisk: boolean | null; maxProfit: number | null; maxLossDown: number | null; breakevenDown: number | null; ivRank: number | null; putPremium: number | null; shortCallPremium: number | null; longCallPremium: number | null; explanation: string };
 type DecodedResult = BuyRow | OptionsRow | WheelRow | StrategyRow | LizardRow;
@@ -438,7 +438,7 @@ export function AnalysisView({ initialTicker, clearInitialTicker }: AnalysisView
           </span>
         ) : '—';
         case 'Suitability': return `${result.suitabilityScore}/10`;
-        case 'Liquidity':   return `${result.optionLiquidityScore}/10`;
+        case 'Liquidity':   return result.optionLiquidityScore === null ? '—' : `${result.optionLiquidityScore}/10`;
       }
     } else if (result.mode === 'bullish' || result.mode === 'bearish') {
       switch (col) {
