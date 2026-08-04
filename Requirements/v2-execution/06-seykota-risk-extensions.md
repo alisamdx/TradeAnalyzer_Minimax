@@ -56,6 +56,15 @@ not shipped (it may ship **disabled**, as a configurable option, with the findin
 - Each of FR-SEY-1/2/3 below carries its validation evidence (or ships disabled with the
   null/negative result noted) before its `active`-by-default flip.
 
+**Rejected-on-data register** (changes that looked compelling and did *not* ship):
+SPY-regime gate · overbought guard · ADX in scoring · FR-SEY-3 per-name trend filter ·
+bear-call inflection recalibration · Step-3 debit-spread directional path · gap-risk entry
+filter · **monthly expiry preference in `selectExpiration`** (2026-08-04,
+`scripts/fr-expiry-realized-ab.mjs` — see `Requirements/NEW_FRONTIER.md §12`: the confirmed
+weekly-vs-monthly liquidity gap does not convert into realized edge, because the
+`liquidityScore ≥ 8` entry gate already screens the thin weeklies out and a monthly moved off
+~30 DTE is thinner than the weekly it replaces).
+
 ---
 
 ## FR-SEY-2 — Drawdown-scaled risk (equity-curve money management) — ✅ (v1.1.14, default OFF)

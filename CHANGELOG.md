@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.126] — 2026-08-04
+
+### Validation (no behavior change)
+- **Expiry-selection lever validated and REJECTED (FR-SEY-5).** `NEW_FRONTIER.md §12` had confirmed that `selectExpiration` (`src/main/services/strategy-lab-service.ts`) picks the [20,50]-DTE expiry closest to 30 with no liquidity awareness, landing on a thin **weekly** ~54% of the time, and flagged this as the largest identified lever on the low critic-pass-rate complaint — pending a realized-P&L A/B once July structures settled. That A/B has now run: **new `scripts/fr-expiry-realized-ab.mjs`**, and the lever **fails on every variant tested**. `selectExpiration` is left unchanged, deliberately; no config knob was added, because a lever with a known-negative expectation is worse than no lever.
+  - **Stage 1 (real stored quotes, no model)** reproduces the liquidity gap under a matched `ticker|slug` design with DTE held at 27–33 (871 matched cells / 31 tickers / 29 structure types): execution friction **19.6% of credit on monthlies vs 40.3% on weeklies**, OI/leg **1,569 vs 83**, `liquidityScore` **8.4 vs 4.7**, monthly cheaper on **30/31 tickers**.
+  - **But the saving is never actually paid.** Restricted to engine structures that clear the `liquidityScore ≥ 8` gate `EntryPolicy` enforces — the population the engine really trades — friction is **monthly 6.9% vs weekly 6.0%**. The entire 20-point aggregate gap sits inside structures the engine already rejects.
+  - **And the monthly's advantage is a 23–33 DTE phenomenon**, exactly where the current rule already selects it: gate-clear rate by bucket is monthly 14–22 DTE **23%** / 23–33 DTE **45%** / 34–44 DTE **20%** / 45–55 DTE **18%**, vs weekly 23–33 DTE **24%**. A monthly pulled away from ~30 DTE — the only case where the rule currently takes a weekly — is *thinner* than the weekly it would replace. The apparent "24% → 51%" deployment gain is an artifact of measuring monthlies only at their best tenor; DTE-weighted it is 28% → 30–31%.
+  - **Stage 2 (realized P&L)**: 83 weekly-carrying brief tickers × 213 entry dates = **17,679 paired (ticker, date) cells**, 2025-08-01 → 2026-06-05, short put vertical at 0.30Δ + budget wing (≤$500 max loss), 50% profit target / 200% stop / else expiry, both arms priced by the same Black-Scholes model off `iv_history` ATM IV and settled at real expiry intrinsic so the model bias cancels. Paired vs today's rule: `monthly[23,33]` Δgross −0.09 / Δnet −0.14 pts; `monthly[20,50]` +0.15 / −0.42; `monthly[14,55]` −0.41 / −0.85. DTE-weighted expected pts per candidate: **current 0.533** vs 0.462 / 0.384 / 0.282. The gross tenor effect is noise (flips −2.10 to +2.51 pts month to month) — the DTE shift is neither the win nor the loss; no variant beats doing nothing.
+  - **Methodology note worth keeping:** a naive *pooled* weekly-vs-monthly comparison **inverts** the friction result, because monthly-landed rows are dominated by names that carry no weeklies at all, observed at off-30 DTE. Matching on ticker+slug and holding DTE fixed is load-bearing, not cosmetic.
+
+Docs: `Requirements/NEW_FRONTIER.md §12` (full write-up), `Requirements/spec/09-strategy-lab-and-knowledge.md` (rule annotated as deliberately unchanged), `Requirements/v2-execution/06-seykota-risk-extensions.md` (added to the FR-SEY-5 rejected-on-data register), `.ai/AI_CONTEXT.md` §10 + §11.
+
 ## [1.1.125] — 2026-07-07
 
 ### Changed

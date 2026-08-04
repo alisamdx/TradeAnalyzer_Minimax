@@ -801,6 +801,59 @@ open at 19 obs), is the largest identified lever on the low-pass-rate complaint.
 3. If it survives item 1: a liquidity-aware tie-break in `selectExpiration` (prefer the monthly
    when its DTE is within an acceptable band), NOT a blind "always monthly."
 
+### UPDATE (2026-08-04) — realized-P&L A/B run: ❌ **REJECTED, NOT SHIPPED** (`scripts/fr-expiry-realized-ab.mjs`)
+
+Item 1 above is now done. The lever **fails FR-SEY-5 on every variant tested** — `selectExpiration`
+is deliberately left unchanged.
+
+**Stage 1 — friction on real stored quotes (matched design).** Pairing each `ticker|slug` against
+its *own* observations at the other expiry type, holding DTE at 27–33 (871 matched cells, 31
+tickers, 29 slugs), the §12 liquidity gap reproduces and is large: friction **19.6% of credit
+(monthly) vs 40.3% (weekly)**, OI/leg **1,569 vs 83**, liquidityScore **8.4 vs 4.7**, monthly
+cheaper on **30/31 tickers**. *(Methodological note: a naive pooled weekly-vs-monthly split
+**inverts** this result — monthly-landed rows are dominated by no-weekly names at off-30 DTE. The
+ticker+slug+DTE matching is load-bearing.)*
+
+**Two findings then kill the lever:**
+
+1. **The friction saving is never actually paid.** The engine's own tradability gate
+   (`liquidityScore ≥ 8`, enforced by `EntryPolicy`) already rejects the thin weeklies. Restricted
+   to engine structures that **clear the gate** — the population the engine really trades —
+   friction is **monthly 6.9% vs weekly 6.0% of premium**: statistically indistinguishable, and if
+   anything the weekly is marginally cheaper. The 20-point aggregate gap lives entirely inside
+   structures that never get traded.
+2. **The monthly's OI advantage is concentrated at 23–33 DTE — exactly where the current rule
+   already picks it.** Gate-clear rate by DTE bucket: monthly **14–22 DTE 23%** · **23–33 DTE 45%**
+   · **34–44 DTE 20%** · **45–55 DTE 18%**, vs weekly **23–33 DTE 24%**. So a monthly pulled *away*
+   from ~30 DTE (the only case where the rule currently chooses a weekly) lands on a contract
+   **thinner than the weekly it replaced**. The headline "24% → 51%" deployment gain is an artifact
+   of measuring monthlies only at their best tenor; DTE-weighted it is **28% → 30–31%**.
+
+**Stage 2 — realized P&L (12-month panel).** 83 weekly-carrying brief tickers × 213 entry dates =
+17,679 paired (ticker, date) cells, 2025-08-01 → 2026-06-05. Short put vertical, 0.30Δ short +
+budget wing (≤$500 max loss), 50% PT / 200% stop / else expiry; both arms priced by the same BS
+model off `iv_history` ATM IV and settled at real expiry intrinsic, so model bias cancels and the
+delta is pure tenor. Paired vs current:
+
+| policy | Δgross | Δnet | DTE-weighted gate-clear × net = expected pts/candidate |
+| --- | --- | --- | --- |
+| current (today) | — | — | 28% × 1.53% = **0.533** |
+| monthly[23,33] (narrow tie-break) | −0.09 | −0.14 | 31% × 1.39% = 0.462 |
+| monthly[20,50] (in-band tie-break) | +0.15 | −0.42 | 30% × 1.11% = 0.384 |
+| monthly[14,55] (widened band) | −0.41 | −0.85 | 30% × 0.68% = 0.282 |
+
+The gross (tenor) effect is **noise** — it flips sign month to month (−2.10 to +2.51 pts) — so the
+DTE shift is neither the win nor the loss. But no variant is *better*, and every variant is worse
+once friction and DTE-weighted deployment are applied. **The current rule wins on the combined
+metric.** `monthly[23,33]`, the best-case narrow variant that never drags tenor into the thin
+34–55 range, is the closest to neutral (−0.09 gross) and still does not beat doing nothing.
+
+**Resolution: no code change, no config knob.** Same discipline as the SPY-regime gate, the
+overbought guard, and FR-SEY-3 — a rule that cannot be shown to help on the data does not ship,
+and shipping it disabled would only add a lever with a known-negative expectation. §12's *liquidity*
+claim stands and remains correct; what fails is the inference that acting on it improves outcomes.
+The residual low-pass-rate complaint is therefore **not** addressable via expiry selection.
+
 -----
 
 ## Appendix: Reading List Starter Pack
