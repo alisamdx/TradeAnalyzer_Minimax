@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.130] — 2026-08-05
+
+### Added
+- **`scripts/fr-wheel-monthly-first-ab.mjs`** — market-hours validation harness for `WHEEL_MONTHLY_FIRST_EXPIRY` (v1.1.128, still default OFF). It implements **both** policies itself and prices them in the **same pass** through the app's API server, so the arms share one instant — an A-now/B-later comparison would be worthless given how strongly time of day moves option liquidity. No app restart, no env var, no DB writes; the app just has to be running. Guards for market-closed (majority `bid = 0`), for early-session runs (per-strike volume accrues through the day, understating the +2 component), and for the score staying near-constant.
+
+### Validation result — flag NOT enabled
+- **First live run, 2026-08-05 ~09:53 ET, 39 tickers** (highest IV rank with a resolved chain). The flag does what it was built to do: expiry changed on **34/39 (87%)**, monthly landing **13% → 100%**, median OI **8 → 416**, median spread **50.5% → 23.8%**, `optionLiquidityScore` zeros **79% → 10%**, median score **0 → 4**. `premiumYield` costs little on this sample (median annualized 32.8% → 31.6%, DTE 30 → 44). Estimated wheel composite delta from the two affected signals: **mean +1.92, median +1.79 pts, improved on 27/39**.
+- **But the signal still does not discriminate.** Tickers clearing the `≥5/10` suitability gate went **0% → 8%**: the OI component (+4) does all the work while `spread ≤5%` and `volume ≥50` almost never fire, so the score moves from *near-constant 0* to *near-constant 4*. A blue-chip run (AAPL/WMT/PG/DIS/JPM/KO/V/GOOGL) makes it starkest — OI **94 → 2,982**, spread **54.3% → 12.8%**, yet the median score stays **4 → 4**. **WMT with OI 13,824 and a 5.2% spread still scores 4/10, missing the ≤5% gate by 0.2pp.**
+- **Conclusion:** fixing *which contract* is measured was necessary but is not sufficient — the remaining defect is threshold calibration (`OI ≥50` / `spread ≤5%` / `volume ≥50`, `docs/formulas.md#liquidity-score`), where the binary 5% relative-spread gate is unreachable for a 25-delta put on essentially any name. The flag stays **off**: FR-SEY-5 asks for realized outcomes, and this harness measures the signal, not trades.
+
+Docs: `docs/formulas.md#liquidity-score`, `Requirements/spec/13-scoring-engine.md`, `.ai/AI_CONTEXT.md` §10.
+
 ## [1.1.129] — 2026-08-05
 
 ### Fixed
