@@ -15,6 +15,57 @@ import { computeADX, type Bar } from './analysis-service.js';
 import type { ReplayProgressEvent, ReplayPickRow, ReplaySummary, ReplayChartData, ReplayChartMonthlyRow, ScreenResultPayload, PremiumHistoryReadiness } from '@shared/types.js';
 import { withTransaction } from '../db/connection.js';
 
+// ─── Replay's options blind spot (FR-SEY-5 consumers: read this) ──────────────
+//
+// Replay has NO historical option chains — none were ever stored — so three fields on
+// TickerSignalData are unconditionally null for EVERY ticker on EVERY replay date:
+// `annualizedReturn`, `optionLiquidityScore`, `suitabilityScore`.
+//
+// Under the scoring engine's FR-SE-03 arithmetic a missing signal contributes 0 to the
+// numerator but its FULL WEIGHT to the denominator (scoring-service.ts `scoreTicker`), so the
+// signals below are a permanent zero at full weight in replay:
+//
+//   wheel   premiumYield (19) + optionLiquidity  (9) = 28/100 → composites use 72% of live weight
+//   income  premiumRiskRatio (22) + optionLiquidity (13) = 35/100 → 65% of live weight
+//   bullish / bearish / buy / inflection ............. 0 → faithful to live
+//
+// What this does and does not mean:
+//   • RANKING WITHIN A REPLAY RUN is unaffected — the missing signals are zero for every
+//     ticker, so they scale all composites by the same constant.
+//   • REPLAY AND LIVE ARE NOT ON THE SAME SCALE, and their wheel/income rankings genuinely
+//     differ: live populates these signals with per-ticker values that vary. Never carry an
+//     absolute composite threshold between the two for wheel/income (bearish's ≥70 gate is
+//     safe — bearish has no options-based signal).
+//   • Replay CANNOT A/B any of these signals. Turning one on or off shows a flat zero because
+//     it is already null for everyone. Use the `analysis_snapshots` panel instead (66 wheel
+//     snapshots, 2026-05-14 → 2026-08-03, ~1,029 tickers, real live values).
+//
+// see Requirements/spec/13-scoring-engine.md, docs/formulas.md#liquidity-score
+export const REPLAY_BLIND_SIGNAL_KEYS: ReadonlySet<string> = new Set([
+  'premiumYield',       // ← annualizedReturn
+  'premiumRiskRatio',   // ← annualizedReturn
+  'optionLiquidity',    // ← optionLiquidityScore
+]);
+
+/**
+ * How much of a strategy's scoring weight replay can actually populate.
+ * Pure — pass a config's signals (enabled ones are what count).
+ */
+export function replayWeightCoverage(
+  signals: readonly { key: string; weight: number; enabled: boolean }[]
+): { totalWeight: number; blindWeight: number; coveragePct: number; blindKeys: string[] } {
+  const enabled = signals.filter((s) => s.enabled);
+  const totalWeight = enabled.reduce((n, s) => n + s.weight, 0);
+  const blind = enabled.filter((s) => REPLAY_BLIND_SIGNAL_KEYS.has(s.key));
+  const blindWeight = blind.reduce((n, s) => n + s.weight, 0);
+  return {
+    totalWeight,
+    blindWeight,
+    coveragePct: totalWeight > 0 ? ((totalWeight - blindWeight) / totalWeight) * 100 : 100,
+    blindKeys: blind.map((s) => s.key),
+  };
+}
+
 // Liquidity proxy thresholds (Option A — no options chains)
 const MIN_AVG_VOLUME     = 1_000_000; // 20-day avg daily volume
 const MIN_PRICE          = 5;         // exclude sub-$5 stocks
@@ -385,7 +436,11 @@ export class BriefReplayService {
                                 ? { sma20, sma50, sma200 }
                                 : null,
           lastPrice,
-          annualizedReturn:    null, // options-based, not available
+          // Options-derived and permanently null in replay — no historical chains exist.
+          // These are NOT incidental gaps: they zero 28% of wheel's and 35% of income's
+          // scoring weight on every date. See REPLAY_BLIND_SIGNAL_KEYS at the top of this file
+          // before drawing any wheel/income conclusion from a replay run.
+          annualizedReturn:    null,
           optionLiquidityScore: null,
           suitabilityScore:    null,
           entryZoneLow,

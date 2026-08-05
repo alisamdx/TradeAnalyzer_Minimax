@@ -14,7 +14,13 @@ import type {
   AnalysisSnapshotRow,
   AnalysisMode,
   AnalysisAllModesPayload,
-  OptionsChain
+  OptionsChain,
+  BuyResult,
+  OptionsIncomeResult,
+  WheelResult,
+  StrategyResult,
+  LizardResult,
+  AnalysisResult
 } from '@shared/types.js';
 
 // ─── Shared types for analysis modes ─────────────────────────────────────────
@@ -27,108 +33,24 @@ export interface Bar {
 export type ProgressCallback = (current: number, total: number, ticker: string) => void;
 
 // ─── Mode result types ────────────────────────────────────────────────────────
-
-export interface BuyResult {
-  mode: 'buy';
-  ticker: string;
-  lastPrice: number | null;
-  compositeScore: number;       // 0–10
-  trend: 'bullish' | 'bearish' | 'sideways';
-  smaStack: { sma20: number | null; sma50: number | null; sma200: number | null };
-  rsi: number | null;
-  entryZoneLow: number | null;  // lower bound of entry zone
-  entryZoneHigh: number | null; // upper bound of entry zone
-  stopLoss: number | null;
-  targetPrice: number | null;
-  riskReward: number | null;    // reward / risk
-  fundamentalsPass: boolean;
-  explanation: string;
-}
-
-export interface OptionsIncomeResult {
-  mode: 'options_income';
-  ticker: string;
-  lastPrice: number | null;
-  strategy: 'CSP' | 'CC';
-  strike: number | null;
-  expiration: string | null;
-  dte: number | null;
-  delta: number | null;
-  bid: number | null;
-  ask: number | null;
-  premium: number | null;       // per-share credit received
-  annualizedReturn: number | null; // annualized return on capital (%)
-  ivRank: number | null;
-  openInterest: number | null;
-  breakeven: number | null;
-  capitalRequired: number | null; // 100 × strike
-  explanation: string;
-}
-
-export interface WheelResult {
-  mode: 'wheel';
-  ticker: string;
-  lastPrice: number | null;
-  recommendedStrike: number | null;
-  expiration: string | null;
-  dte: number | null;
-  delta: number | null;
-  premium: number | null;
-  annualizedReturn: number | null;
-  currentIv: number | null;     // Current ATM implied volatility (percentage)
-  ivRank: number | null;
-  daysToEarnings: number | null;
-  /** 0–10, or **null when liquidity could not be measured at all** (no suitable CSP chain /
-   *  insufficient history). Must NOT be collapsed to 0: the Trade Scoring Engine reads a real
-   *  0 as "measured and illiquid" (full weight-9 penalty) but null as *missing* (FR-SE-03
-   *  denominator deflation). see docs/formulas.md#liquidity-score */
-  optionLiquidityScore: number | null;
-  suitabilityScore: number;     // 1–10, see docs/formulas.md#wheel-suitability-score
-  explanation: string;
-}
-
-export interface StrategyResult {
-  mode: 'bullish' | 'bearish';
-  ticker: string;
-  lastPrice: number | null;
-  trendStrength: number | null; // ADX value
-  suggestedStrategy: 'long_call' | 'bull_call_spread' | 'short_put' | 'long_put' | 'bear_put_spread' | 'short_call';
-  structure: string;           // human-readable leg description
-  maxProfit: number | null;
-  maxLoss: number | null;
-  breakeven: number | null;
-  probabilityOfProfit: number | null; // estimated via delta
-  explanation: string;
-}
-
-export interface LizardResult {
-  mode: 'jade_lizard' | 'big_lizard';
-  ticker: string;
-  lastPrice: number | null;
-  expiration: string | null;
-  dte: number | null;
-  putStrike: number | null;
-  shortCallStrike: number | null;
-  longCallStrike: number | null;
-  netCredit: number | null;
-  spreadWidth: number | null;
-  hasNoUpsideRisk: boolean | null;
-  maxProfit: number | null;
-  maxLossDown: number | null;
-  breakevenDown: number | null;
-  ivRank: number | null;
-  putPremium: number | null;
-  shortCallPremium: number | null;
-  longCallPremium: number | null;
-  explanation: string;
-}
-
-export type AnalysisResult =
-  | BuyResult
-  | OptionsIncomeResult
-  | WheelResult
-  | StrategyResult
-  | LizardResult;
+//
+// These live in `src/shared/types.ts` (the documented home for cross-process types) and are
+// re-exported here so the long-standing `from './analysis-service.js'` imports keep working.
+//
+// They used to be declared in BOTH files. Nothing enforced that the copies matched, and they
+// silently drifted: the shared `WheelResult` was missing `currentIv`, which is the shape the
+// RENDERER sees (`AnalysisAllModesPayload` in shared/types.ts is built from the shared copies,
+// and analysis-service imports that payload type while returning its own local ones —
+// structurally compatible, so TypeScript never complained). That is why `AnalysisView` hand-rolls
+// its own row types instead of using these. One declaration now, so it cannot drift again.
+export type {
+  BuyResult,
+  OptionsIncomeResult,
+  WheelResult,
+  StrategyResult,
+  LizardResult,
+  AnalysisResult,
+};
 
 // ─── Indicator calculations (pure, unit-testable) ────────────────────────────
 

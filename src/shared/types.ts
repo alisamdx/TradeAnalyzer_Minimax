@@ -322,6 +322,9 @@ export interface WheelResult {
   delta: number | null;
   premium: number | null;
   annualizedReturn: number | null;
+  /** Current ATM implied volatility, as a percentage. Was missing from this (renderer-visible)
+   *  copy while present on the main-process one — the drift that motivated collapsing the two. */
+  currentIv: number | null;
   ivRank: number | null;
   daysToEarnings: number | null;
   /** 0–10, or **null when liquidity could not be measured at all** (no suitable CSP chain /

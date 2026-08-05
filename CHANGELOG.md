@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.1.129] — 2026-08-05
+
+### Fixed
+- **Analysis mode result types are no longer declared twice.** `BuyResult`, `OptionsIncomeResult`, `WheelResult`, `StrategyResult`, `LizardResult` and the `AnalysisResult` union existed in **both** `src/shared/types.ts` and `src/main/services/analysis-service.ts`, with nothing enforcing that the copies matched — and they had drifted: `currentIv` was present only on the main-process copy. The drift was invisible because `AnalysisAllModesPayload` (in `shared/types.ts`) is built from the **shared** copies while `analysis-service` returns its own structurally-compatible locals, so TypeScript accepted the assignment and the renderer simply never saw `currentIv` on a wheel row — which is why `AnalysisView` hand-rolls its own row types instead of using these. `analysis-service.ts` now imports and re-exports the shared declarations, so every existing `from './analysis-service.js'` import resolves unchanged; `currentIv` was added to the shared `WheelResult`. New fields go in `src/shared/types.ts` only.
+
+### Documented (no behavior change)
+- **Brief Replay's blindness to the options-derived signals is now quantified and codified.** Replay has no historical option chains, so `annualizedReturn`, `optionLiquidityScore` and `suitabilityScore` are null for **every** ticker on **every** replay date. Under the scoring engine's FR-SE-03 arithmetic — missing contributes 0 to the numerator but its full weight to the denominator — the signals they feed are a permanent zero at full weight: **wheel loses 28/100** (`premiumYield` 19 + `optionLiquidity` 9, composites built from 72% of live weight) and **income loses 35/100** (`premiumRiskRatio` 22 + `optionLiquidity` 13, 65%). Bullish, bearish, buy and inflection have no options-derived signal and are faithful to live.
+  - Ranking *within* a replay run is unaffected — the blind signals are zero for every ticker, so they scale all composites by the same constant.
+  - **Replay and live are not on the same scale**, and their wheel/income rankings genuinely differ, because live populates these signals with per-ticker values that vary. No absolute composite threshold may be carried between the two for wheel or income. Bearish's ≥70 gate is unaffected (bearish has no options-based signal).
+  - **Replay cannot A/B any of these signals** — toggling one shows a flat zero because it is already null for everyone. The `analysis_snapshots` panel (66 wheel snapshots, 2026-05-14 → 2026-08-03, ~1,029 tickers, real live values) is the instrument for that.
+  - Codified as exported `REPLAY_BLIND_SIGNAL_KEYS` and pure `replayWeightCoverage()` in `src/main/services/brief-replay-service.ts`, so a future weight change cannot silently widen the blind spot. Tests: `tests/replay-weight-coverage.test.ts` (7).
+
+Docs: `Requirements/spec/13-scoring-engine.md`, `.ai/AI_CONTEXT.md` §10.
+
 ## [1.1.128] — 2026-08-05
 
 ### Added (default OFF, FR-SEY-5-gated)
