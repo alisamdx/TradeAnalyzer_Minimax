@@ -379,6 +379,86 @@ export function annualizedReturn(
  *
  * see docs/formulas.md#liquidity-score
  */
+// ── Wheel expiry selection: monthly-first (NOT YET ENABLED, v1.1.128) ────────
+//
+// `findSuitableChain` walks expirations in ascending date order and returns the FIRST one
+// yielding a delta-band match — it never compares candidates. Since `getNearTermExpirations`
+// generates consecutive Fridays, the earliest qualifying expiry is structurally a WEEKLY, and
+// the [30,45] DTE window is narrower than the ~30-day monthly cycle, so a 3rd-Friday monthly is
+// often unreachable anyway (from 2026-08-03 the Sep-18 monthly sat at 46 DTE — clipped by one
+// day, while Sep 4 at 32 DTE won on date order).
+//
+// Weeklies carry 1–2 orders of magnitude less open interest at the same ~25 delta (2026-08-05,
+// Sep-4 weekly vs Sep-18 monthly: PG 7 vs 4,063 · V 15 vs 802 · DIS 56 vs 2,982 · JPM 65 vs 879
+// · WMT 109 vs 13,824 · AAPL 450 vs 7,668). So `optionLiquidityScore` ends up measuring a
+// contract nobody would wheel and charging the TICKER for it — 94% of a full-universe snapshot
+// scores 0/10, and the signal cannot separate WMT from a microcap.
+//
+// ENABLED: try 3rd-Friday monthlies first, and widen the window [30,45] → [28,52]. No extra
+// API calls — still one chain fetch in the common case, just a different try-order.
+//
+// The widening does NOT guarantee a monthly is always in range: consecutive 3rd Fridays are
+// 28–35 days apart, so a full guarantee needs a ~35-day-wide window (e.g. [28,63]), and a
+// 63-DTE CSP is well outside the wheel's premium-selling tenor. [28,52] (width 25) puts a
+// monthly in range on ~82% of days vs ~53% under [30,45]; on the remaining days the nearest
+// weekly is used exactly as today. Ordering does the rest of the work — even inside the OLD
+// window, first-by-date meant the monthly lost whenever a weekly was nearer.
+//
+// This is NOT the expiry lever rejected in v1.1.126. That tested preferring monthlies for the
+// structures the ENGINE TRADES (`selectExpiration`, closest-to-30 in [20,50],
+// strategy-lab-service.ts) and failed because the engine's liquidityScore>=8 gate already
+// screens thin weeklies out. This is a different code path and a different purpose:
+// characterising a ticker for SCORING, not choosing a trade.
+//
+// Left OFF until validated: it changes the recommended CSP itself, so `premiumYield` (wheel
+// weight 19) and Stage-4 pool selection move with it — FR-SEY-5. It also changes what
+// `options_premium_history` captures going forward, putting a discontinuity in that series.
+// A clean retrospective A/B is not possible (the analysis_snapshots panel holds the OLD
+// measurements and recomputing needs historical chains we don't have), so validation has to be
+// forward-looking. WHEEL_MONTHLY_FIRST=1 overrides it on for a validation run or a test;
+// checked live, not cached at import, so it can be set per test case.
+const WHEEL_MONTHLY_FIRST_EXPIRY = false;
+export function wheelMonthlyFirstEnabled(): boolean {
+  return WHEEL_MONTHLY_FIRST_EXPIRY || process.env['WHEEL_MONTHLY_FIRST'] === '1';
+}
+
+/** Wheel CSP DTE window; widened when monthly-first is on so a 3rd Friday is in range far more
+ *  often (~82% of days vs ~53%) — not always, see WHEEL_MONTHLY_FIRST_EXPIRY. */
+export function wheelDteWindow(monthlyFirst = wheelMonthlyFirstEnabled()): { minDTE: number; maxDTE: number } {
+  return monthlyFirst ? { minDTE: 28, maxDTE: 52 } : { minDTE: 30, maxDTE: 45 };
+}
+
+/**
+ * True when `iso` is a standard monthly expiration (the 3rd Friday of its month).
+ * All-UTC — see the weekly-expiration time-base quirk in CLAUDE.md: mixing local weekday math
+ * with `toISOString()` shifts every date to Saturday on evening runs.
+ */
+export function isMonthlyExpiration(iso: string): boolean {
+  const [y, m] = iso.split('-').map(Number);
+  if (!y || !m) return false;
+  const first = new Date(Date.UTC(y, m - 1, 1));
+  const firstFriday = 1 + ((5 - first.getUTCDay() + 7) % 7);
+  return new Date(Date.UTC(y, m - 1, firstFriday + 14)).toISOString().slice(0, 10) === iso;
+}
+
+/**
+ * Order the expirations `findSuitableChain` should try, best-first.
+ *
+ * Default (`monthlyFirst: false`) preserves today's behavior exactly: ascending by date, so the
+ * first qualifying expiry wins. With `monthlyFirst`, 3rd-Friday monthlies come first (ascending
+ * among themselves), then everything else ascending — so the liquid monthly is tried before the
+ * thin weekly that merely happens to be sooner.
+ *
+ * Input is not required to be sorted; DTE filtering is the caller's concern.
+ */
+export function wheelExpirationOrder(expirations: string[], monthlyFirst: boolean): string[] {
+  const sorted = [...expirations].sort();
+  if (!monthlyFirst) return sorted;
+  const monthlies = sorted.filter(isMonthlyExpiration);
+  const rest = sorted.filter((e) => !isMonthlyExpiration(e));
+  return [...monthlies, ...rest];
+}
+
 export function wheelOptionLiquidityScore(
   contract: { bid: number; ask: number; openInterest: number | null; volume: number | null } | null
 ): number | null {
@@ -1023,8 +1103,11 @@ export class AnalysisService {
     // IV rank check.
     const ivPass = ivRank === null || ivRank >= 30;
 
-    // Find suitable CSP 30–45 DTE, delta 0.20–0.30.
-    const chain = await this.findSuitableChain(ticker, 30, 45, 0.20, 0.30);
+    // Find suitable CSP in the wheel DTE window, delta 0.20–0.30. Window and try-order both
+    // depend on WHEEL_MONTHLY_FIRST_EXPIRY (default off → 30–45 DTE, first-by-date).
+    const monthlyFirst = wheelMonthlyFirstEnabled();
+    const { minDTE, maxDTE } = wheelDteWindow(monthlyFirst);
+    const chain = await this.findSuitableChain(ticker, minDTE, maxDTE, 0.20, 0.30, monthlyFirst);
     // null (not 0) when there is no contract to measure — see wheelOptionLiquidityScore.
     const liquidity = wheelOptionLiquidityScore(chain?.contract ?? null);
     // Local 0-floor for the suitability/explanation gates below, which are pass/fail on a
@@ -1403,19 +1486,22 @@ export class AnalysisService {
     minDTE: number,
     maxDTE: number,
     minDelta: number,
-    maxDelta: number
+    maxDelta: number,
+    // Try 3rd-Friday monthlies before nearer weeklies — see WHEEL_MONTHLY_FIRST_EXPIRY.
+    // Default false keeps every existing caller (incl. options-income) bit-identical.
+    preferMonthly = false
   ): Promise<{ contract: NonNullable<OptionsChain['contracts']>[number]; dte: number; expiration: string } | null> {
-    // Try nearest expirations (look out far enough for 30-45 DTE).
+    // Generate enough Fridays to cover maxDTE (the first is up to 6 days out, hence the +2).
+    const weeksNeeded = Math.ceil(maxDTE / 7) + 2;
     let expirations: string[];
     try {
-      expirations = await this.getNearTermExpirations(ticker, 7);
+      expirations = await this.getNearTermExpirations(ticker, weeksNeeded);
     } catch {
       return null;
     }
-    for (const exp of expirations) {
-      // Check DTE BEFORE making the API call — avoids fetching chains for
-      // expirations outside the target window (typically 5 of 7 generated
-      // Fridays are < 30 DTE and would be wasted calls).
+    for (const exp of wheelExpirationOrder(expirations, preferMonthly)) {
+      // Check DTE BEFORE making the API call — avoids fetching chains for expirations outside
+      // the target window (most generated Fridays are too near and would be wasted calls).
       const dte = dteDays(exp);
       if (!isDTEMatch(dte, minDTE, maxDTE)) continue;
 

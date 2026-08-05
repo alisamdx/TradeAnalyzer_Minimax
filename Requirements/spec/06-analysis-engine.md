@@ -29,7 +29,7 @@ Annualized return: `(premium / (strike × 100)) × (365 / DTE) × 100` (§23 `an
 
 ## 6.4 Mode 3 — Wheel Strategy
 
-Screens for wheel-suitable stocks: stable uptrend or sideways, IV rank ≥ 30, no earnings within the DTE window, option liquidity (OI ≥ 500, bid-ask ≤ 5% of mid), acceptable assignment risk (not at 52-week extremes). Recommends a CSP **30–45 DTE at delta 0.20–0.30**.
+Screens for wheel-suitable stocks: stable uptrend or sideways, IV rank ≥ 30, no earnings within the DTE window, option liquidity (OI ≥ 500, bid-ask ≤ 5% of mid), acceptable assignment risk (not at 52-week extremes). Recommends a CSP **30–45 DTE at delta 0.20–0.30**, taking the **first** expiration in that window that yields a delta-band match (ascending by date) — which is structurally a **weekly**, and means the liquidity it measures is a weekly's. `WHEEL_MONTHLY_FIRST_EXPIRY` (`analysis-service.ts`, **default off**, `WHEEL_MONTHLY_FIRST=1` to force on, v1.1.128) tries 3rd-Friday monthlies first and widens the window to 28–52 DTE; FR-SEY-5-gated because it changes the recommended contract and therefore `premiumYield`. See `23-formulas.md` / `docs/formulas.md#liquidity-score`.
 
 Output columns: ticker, recommended CSP strike, expiration, DTE, delta, premium, annualized return on capital, IV rank, days to earnings, option liquidity score, overall suitability score (1–10). The suitability formula is a transparent weighted score (§23 `wheel-suitability-score`).
 

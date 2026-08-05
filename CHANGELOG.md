@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.128] — 2026-08-05
+
+### Added (default OFF, FR-SEY-5-gated)
+- **`WHEEL_MONTHLY_FIRST_EXPIRY` — wheel CSP expiry selection tries 3rd-Friday monthlies first.** Root cause of the `optionLiquidity` signal reading 0/10 across ~94% of the universe, including mega-caps. `findSuitableChain` (`src/main/services/analysis-service.ts`) walks expirations in **ascending date order and returns the first delta-band match** — it never compares candidates — so the earliest qualifying expiry, structurally a **weekly**, always wins. The `[30,45]` DTE window compounds it: consecutive 3rd Fridays are 28–35 days apart, so a 16-day window puts a monthly in range only ~53% of days. From 2026-08-03 the Sep-18 monthly sat at **46 DTE — clipped by one day** — while Sep 4 at 32 DTE won on date order; every row in that 1,029-ticker snapshot landed on Sep 4.
+  - At the same ~25 delta the weekly carries **1–2 orders of magnitude less open interest** (2026-08-05, Sep-4 weekly vs Sep-18 monthly): PG **7 vs 4,063** · V 15 vs 802 · DIS 56 vs 2,982 · JPM 65 vs 879 · KO 84 vs 1,702 · WMT **109 vs 13,824** · GOOGL 259 vs 1,757 · AAPL 450 vs 7,668. So the score measures a contract nobody would wheel and charges the **ticker** for it — it cannot separate WMT from a microcap, and contributes its full weight (wheel 9, income 13) as a near-uniform penalty.
+  - **Enabled** (`WHEEL_MONTHLY_FIRST=1`): monthlies tried first, window widened `[30,45]` → `[28,52]`. **No extra API calls** — still one chain fetch in the common case, just a different try-order. The widening deliberately does *not* guarantee a monthly is in range (that needs ~35-day width, and a 63-DTE CSP is outside the wheel's premium-selling tenor); coverage goes ~53% → ~82% of days, with the existing weekly fallback on the rest.
+  - **Left off** because it changes the recommended CSP itself, so `premiumYield` (wheel weight 19) and Stage-4 pool selection move with it, and it puts a discontinuity in the `options_premium_history` series accumulating since v0.32.94. A clean retrospective A/B is **not possible** — `analysis_snapshots` holds the old measurements and recomputing needs historical chains that were never stored — so validation has to be forward-looking. Same ship-disabled precedent as `ETF_AWARE_WHEEL_SCORING`.
+  - **This is not the expiry lever rejected in v1.1.126.** That tested preferring monthlies in `selectExpiration` (Strategy Lab, closest-to-30 in `[20,50]`) for the structures the **engine trades**, and failed because the engine's `liquidityScore ≥ 8` gate already screens thin weeklies out. This is a different code path serving a different purpose: characterising a **ticker for scoring**, not choosing a trade.
+  - Pure exported helpers `isMonthlyExpiration()`, `wheelExpirationOrder()`, `wheelDteWindow()`, `wheelMonthlyFirstEnabled()`; `findSuitableChain` takes a `preferMonthly = false` parameter so the options-income caller is bit-identical. Tests: `tests/wheel-monthly-first-expiry.test.ts` (14), including that the default path is unchanged and that the UTC date math survives a ±14h timezone shift.
+
+Docs: `docs/formulas.md#liquidity-score`, `Requirements/spec/06-analysis-engine.md`, `Requirements/spec/13-scoring-engine.md`, `.ai/AI_CONTEXT.md` §10.
+
 ## [1.1.127] — 2026-08-04
 
 ### Fixed
