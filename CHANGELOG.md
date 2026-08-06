@@ -1,5 +1,30 @@
 # Changelog
 
+## [1.1.131] — 2026-08-06
+
+### Added (default OFF, FR-SEY-5-gated)
+- **`WHEEL_GRADED_LIQUIDITY` — continuous, cliff-free wheel liquidity scoring.** The follow-on to v1.1.130: fixing *which* contract gets measured did not fix how it is *scored*. `optionLiquidityScore`'s three binary gates collapse to a near-constant 0 or 4 because `spread ≤5%` and `volume ≥50` almost never fire — a 5% *relative* bid-ask on a 25-delta put is institutional-grade tight, and per-strike volume ≥50 is rare. Enabled, the score becomes:
+  ```
+  spread pts (max 4) = 4 × clamp01(1 − (spread% − 5) / 35)    // 5% → 4, 40% → 0; 0 when there is no bid
+  OI     pts (max 4) = 4 × clamp01(log10(max(OI, 1)) / 3.3)    // saturates ≈ 2,000 contracts
+  volume pts (max 2) = 2 × clamp01(log10(max(vol, 1)) / 2)     // saturates ≈ 100 contracts
+  ```
+- **Calibrated on real data, not copied.** New `scripts/fr-wheel-liquidity-calibration.mjs` compares candidate schemes over **1,278 real short-put quotes** (0.20–0.30 delta) mined from stored `daily_briefs` structures — all captured during market hours, so the calibration needs no live market and gives a far larger panel than polling chains. Ground truth is what the contract actually costs to trade under the app's own fill model (`options-fill.ts`): `0.5 × half-spread` as a share of the credit collected. Panel medians: OI 74, spread **16.9%**, volume 6, entry cost 4.4% of credit.
+
+  | scheme | distinct values | % scoring 0 | entropy | Spearman(score, cost%) |
+  | --- | --- | --- | --- | --- |
+  | legacy (binary gates) | 6 | 38% | 0.75 | −0.419 |
+  | Strategy-Lab tiers rescaled | 15 | 0% | 0.82 | −0.772 |
+  | retuned tiers | 18 | 11% | 0.89 | −0.751 |
+  | **continuous (adopted)** | **21** | **2%** | **0.97** | **−0.799** |
+
+  The legacy scheme scores KO — spread 13.9%, volume 39, real entry cost **3.6% of credit** — a flat **0.0/10**.
+- **Honest limit of that evidence:** `cost%` is derived from the spread, so any scheme that *grades* spread will beat one that *gates* it on this metric near-tautologically. It shows graded beats binary on the component it measures; it is not independent proof that the OI and volume weights are right, since those price exit optionality and depth that a single-contract entry-cost measure cannot see.
+- **Latent bug fixed in the graded branch:** a **no-bid** quote (`bid = 0`) falls into the degenerate-quote path and is handed *full* spread credit — scoring the worst possible liquidity as the best. Legacy behaviour is deliberately left unchanged (it is the shipped default) and pinned by a test. Unreachable via `findSuitableChain`, which filters `bid > 0`, but `wheelOptionLiquidityScore` is exported.
+- **Independent of `WHEEL_MONTHLY_FIRST_EXPIRY`** (v1.1.128) — that fixes which contract is measured, this fixes how it is scored; either helps alone and the two are complementary. Both stay off pending realized-outcome validation: the signal carries weight 9 (wheel) / 13 (income), so re-ranking follows, and neither calibration measures trades. Tests: `tests/wheel-graded-liquidity.test.ts` (13).
+
+Docs: `docs/formulas.md#liquidity-score`, `Requirements/spec/13-scoring-engine.md`, `.ai/AI_CONTEXT.md` §10.
+
 ## [1.1.130] — 2026-08-05
 
 ### Added

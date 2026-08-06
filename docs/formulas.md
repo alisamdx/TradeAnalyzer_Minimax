@@ -585,7 +585,26 @@ Two scores measure tradability; both now weigh same-day **volume** alongside ope
 
 **Wheel `optionLiquidityScore` (0–10 | null)** — on the recommended CSP contract: open interest ≥50 → +4, relative spread ≤5% → +4, volume ≥50 → +2. Computed by the pure `wheelOptionLiquidityScore()` (`analysis-service.ts`).
 
-> **These thresholds are miscalibrated and are the binding constraint on this signal** (measured live 2026-08-05, `scripts/fr-wheel-monthly-first-ab.mjs`). The **`spread ≤5%` gate is effectively unreachable**: a 5% *relative* bid-ask on a 25-delta put is institutional-grade tight, so it almost never fires — **WMT with open interest 13,824 and a 5.2% spread still scores 4/10**, missing by 0.2pp. `volume ≥50` on a *single strike* rarely fires either (and accrues through the session, so it reads lower in the morning). The result is that the OI component alone carries the score, which sits at a near-constant 0 or 4 rather than discriminating. Contrast the Strategy Lab `liquidityScore` above, which **grades** spread across 8 points instead of using a binary gate and rates the same contracts sanely. Recalibrating these three thresholds is open work, separable from `WHEEL_MONTHLY_FIRST_EXPIRY`; it is FR-SEY-5-gated because the signal carries weight 9 (wheel) / 13 (income).
+> **These binary thresholds are miscalibrated and are the binding constraint on this signal.** The **`spread ≤5%` gate is effectively unreachable**: a 5% *relative* bid-ask on a 25-delta put is institutional-grade tight, so it almost never fires — **WMT with open interest 13,824 and a 5.2% spread still scores 4/10**, missing by 0.2pp. `volume ≥50` on a *single strike* rarely fires either (and accrues through the session, so it reads lower in the morning). The OI component alone carries the score, which sits at a near-constant 0 or 4 rather than discriminating.
+
+**Graded alternative — `WHEEL_GRADED_LIQUIDITY` (`analysis-service.ts`, default off, `WHEEL_GRADED_LIQUIDITY=1` to force on, v1.1.131).** Continuous, no cliffs:
+
+```
+spread pts (max 4) = 4 × clamp01(1 − (spread% − 5) / 35)     // 5% → 4, 40% → 0; 0 when there is no bid
+OI     pts (max 4) = 4 × clamp01(log10(max(OI, 1)) / 3.3)     // saturates ≈ 2,000 contracts
+volume pts (max 2) = 2 × clamp01(log10(max(vol, 1)) / 2)      // saturates ≈ 100 contracts
+```
+
+Calibrated by `scripts/fr-wheel-liquidity-calibration.mjs` on **1,278 real short-put quotes** (0.20–0.30 delta) pulled from stored `daily_briefs` structures — all captured during market hours. Ground truth is what the contract actually costs to trade under the fill model above: `0.5 × half-spread` as a share of the credit collected. Panel medians: OI 74, spread **16.9%**, volume 6, entry cost 4.4% of credit.
+
+| scheme | distinct values | % scoring 0 | entropy | Spearman(score, cost%) |
+|---|---|---|---|---|
+| legacy (binary gates) | 6 | 38% | 0.75 | −0.419 |
+| **graded (continuous)** | **21** | 2% | **0.97** | **−0.799** |
+
+The legacy scheme scores KO — spread 13.9%, volume 39, real entry cost 3.6% of credit — a flat **0.0/10**. *Caveat: `cost%` is derived from the spread, so a scheme that grades spread will always correlate better than one that gates it. Read the Spearman column as "graded beats binary on the component it measures", not as proof the OI and volume weights are right — those price exit optionality and depth, which a single-contract entry-cost measure cannot see.* The graded branch also fixes a latent bug the legacy one keeps: a **no-bid** quote (`bid = 0`) falls into the degenerate-quote path and is handed *full* spread credit, when no bid is the worst liquidity there is (unreachable via `findSuitableChain`, which filters `bid > 0`).
+
+FR-SEY-5-gated and left off: the signal carries weight 9 (wheel) / 13 (income), so re-ranking follows. Independent of `WHEEL_MONTHLY_FIRST_EXPIRY` — that fixes *which* contract is measured, this fixes how it is *scored*.
 
 **Which contract is measured matters more than the formula.** `findSuitableChain` walks expirations in ascending date order and returns the **first** delta-band match, so the earliest qualifying expiry — structurally a **weekly** — always wins, and the `[30,45]` DTE window is narrower than the ~30-day monthly cycle so a 3rd Friday is frequently out of range entirely. At the same ~25 delta a weekly carries 1–2 orders of magnitude less open interest than the monthly (2026-08-05, Sep-4 weekly vs Sep-18 monthly: PG **7 vs 4,063**, V 15 vs 802, DIS 56 vs 2,982, WMT 109 vs 13,824, AAPL 450 vs 7,668). The score therefore measures a contract nobody would wheel and charges the **ticker** for it — 94% of a full-universe snapshot reads 0/10 and the signal cannot separate WMT from a microcap. `WHEEL_MONTHLY_FIRST_EXPIRY` (`analysis-service.ts`, **default off**, `WHEEL_MONTHLY_FIRST=1` to force on) tries 3rd Fridays first and widens the window to `[28,52]`; it is FR-SEY-5-gated because it changes the recommended CSP itself, and therefore `premiumYield` too. Note `[28,52]` does **not** guarantee a monthly is in range — consecutive 3rd Fridays are 28–35 days apart, so a guarantee needs a ~35-day-wide window and a 63-DTE CSP is outside the wheel's tenor; coverage goes ~53% → ~82% of days, weekly fallback on the rest.
 

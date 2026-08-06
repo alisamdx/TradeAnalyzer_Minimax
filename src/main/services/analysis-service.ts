@@ -287,9 +287,46 @@ export function annualizedReturn(
   return annual;
 }
 
+// ── Graded wheel liquidity scoring (NOT YET ENABLED, v1.1.131) ───────────────
+//
+// The legacy score is three BINARY gates (OI ≥50 → +4, spread ≤5% → +4, volume ≥50 → +2), and
+// two of them almost never fire. A 5% *relative* bid-ask on a 25-delta put is institutional-grade
+// tight — WMT with open interest 13,824 and a 5.2% spread misses it by 0.2pp — and per-strike
+// volume ≥50 is rare (and accrues through the session, so it reads lower in the morning). The OI
+// gate ends up carrying the whole score, which sits at a near-constant 0 or 4 and ranks nothing.
+//
+// Calibrated against 1,278 real short-put quotes in the 0.20–0.30 delta band, pulled from stored
+// `daily_briefs` structures (all captured during market hours) by
+// `scripts/fr-wheel-liquidity-calibration.mjs`. Ground truth = what the contract actually costs to
+// trade under the app's own fill model (`options-fill.ts`): 0.5 × half-spread as a share of the
+// credit collected. Panel medians: OI 74, spread 16.9%, volume 6, entry cost 4.4% of credit.
+//
+//   scheme       distinct values   % scoring 0   entropy   Spearman(score, cost%)
+//   legacy              6              38%         0.75          -0.419
+//   continuous         21               2%         0.97          -0.799   ← this one
+//
+// The legacy scheme scores KO — spread 13.9%, volume 39, real cost 3.6% of credit — a flat 0.0/10.
+//
+// Honest caveat: `cost%` is derived from the spread, so a scheme that grades spread will always
+// correlate better than one that gates it. Read the Spearman column as "graded beats binary on the
+// component it measures", not as independent proof that the OI and volume terms are weighted
+// right — those price exit optionality and depth, which a single-contract entry-cost measure
+// cannot see.
+//
+// Left OFF: the signal carries weight 9 (wheel) / 13 (income), so re-ranking follows and FR-SEY-5
+// wants realized outcomes, which this calibration does not provide. Independent of
+// WHEEL_MONTHLY_FIRST_EXPIRY — that fixes WHICH contract is measured, this fixes how it is SCORED;
+// either is useful alone, and the two were measured to be complementary.
+// WHEEL_GRADED_LIQUIDITY=1 overrides on. Checked live, not cached at import.
+const WHEEL_GRADED_LIQUIDITY = false;
+export function wheelGradedLiquidityEnabled(): boolean {
+  return WHEEL_GRADED_LIQUIDITY || process.env['WHEEL_GRADED_LIQUIDITY'] === '1';
+}
+
 /**
- * Wheel CSP option liquidity, 0–10, on the recommended contract:
- * open interest ≥50 → +4, relative spread ≤5% → +4, same-day volume ≥50 → +2.
+ * Wheel CSP option liquidity, 0–10, on the recommended contract.
+ * Legacy: open interest ≥50 → +4, relative spread ≤5% → +4, same-day volume ≥50 → +2.
+ * Graded (`WHEEL_GRADED_LIQUIDITY`): continuous, no cliffs — see above.
  *
  * Returns **null when there is no contract to score** — i.e. `findSuitableChain` resolved
  * nothing in the 30–45 DTE / 0.20–0.30 delta window, or price history was insufficient.
@@ -382,7 +419,8 @@ export function wheelExpirationOrder(expirations: string[], monthlyFirst: boolea
 }
 
 export function wheelOptionLiquidityScore(
-  contract: { bid: number; ask: number; openInterest: number | null; volume: number | null } | null
+  contract: { bid: number; ask: number; openInterest: number | null; volume: number | null } | null,
+  graded = wheelGradedLiquidityEnabled()
 ): number | null {
   if (!contract) return null;
   const { bid, ask } = contract;
@@ -391,12 +429,33 @@ export function wheelOptionLiquidityScore(
   const spread = (bid > 0 && ask > 0 && ask > bid)
     ? ((ask - bid) / ((ask + bid) / 2)) * 100
     : 0;
-  // OI (standing interest) + spread (fill cost) + same-day volume (today's activity), so a
-  // high-OI/zero-volume strike isn't scored as fully liquid.
+  const oi = contract.openInterest ?? 0;
+  const volume = contract.volume ?? 0;
+
+  if (graded) {
+    // Continuous, no cliffs. Calibrated on 1,278 real market-hours short-put quotes
+    // (scripts/fr-wheel-liquidity-calibration.mjs) — see WHEEL_GRADED_LIQUIDITY.
+    //   spread: full credit at <=5%, decaying to zero by 40% (panel median is 16.9%)
+    //   OI:     log-scaled, saturating around 2,000 contracts
+    //   volume: log-scaled, saturating around 100 contracts
+    const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
+    // NO BID is the worst possible liquidity, not the best. The shared `spread` expression above
+    // reports 0 for any degenerate quote, which would hand a no-bid contract full spread credit —
+    // fine for a LOCKED quote (bid === ask > 0, e.g. the v3 snapshot's day.close proxy: there
+    // genuinely is no spread to measure) but wrong when there is simply no bid at all.
+    // Unreachable via findSuitableChain, which filters `bid > 0`, but this is an exported helper.
+    const sPts = bid > 0 ? 4 * clamp01(1 - (spread - 5) / 35) : 0;
+    const oPts = 4 * clamp01(Math.log10(Math.max(oi, 1)) / 3.3);
+    const vPts = 2 * clamp01(Math.log10(Math.max(volume, 1)) / 2);
+    return Math.min(10, sPts + oPts + vPts);
+  }
+
+  // Legacy: three binary gates. Two of them almost never fire (see WHEEL_GRADED_LIQUIDITY),
+  // so this collapses to a near-constant 0 or 4.
   let score = 0;
-  if ((contract.openInterest ?? 0) >= 50) score += 4;
+  if (oi >= 50) score += 4;
   if (spread <= 5) score += 4;
-  if ((contract.volume ?? 0) >= 50) score += 2;
+  if (volume >= 50) score += 2;
   return Math.min(10, score);
 }
 
