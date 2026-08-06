@@ -307,6 +307,9 @@ export interface OptionsIncomeResult {
   annualizedReturn: number | null;
   ivRank: number | null;
   openInterest: number | null;
+  /** Same-day contract volume — the third input to the liquidity score. Added v1.1.132; it was
+   *  the one liquidity input no result type carried, so it is unrecoverable historically. */
+  volume: number | null;
   breakeven: number | null;
   capitalRequired: number | null;
   explanation: string;
@@ -327,6 +330,15 @@ export interface WheelResult {
   currentIv: number | null;
   ivRank: number | null;
   daysToEarnings: number | null;
+  /** Quote and interest on the recommended contract. These are the inputs
+   *  `optionLiquidityScore` is computed from; carrying them lets consumers (notably
+   *  `options_premium_history`) persist the evidence rather than just the verdict. Absent until
+   *  v1.1.132 — `analyzeWheel` computed them, scored them, then discarded them, so two months of
+   *  wheel history rows have NULL bid/ask/open_interest while income rows are complete. */
+  bid: number | null;
+  ask: number | null;
+  openInterest: number | null;
+  volume: number | null;
   /** 0–10, or **null when liquidity could not be measured at all** (no suitable CSP chain /
    *  insufficient history). Null must NOT be collapsed to 0 — the Trade Scoring Engine treats
    *  a real 0 as "measured and illiquid" (full weight-9 penalty) but null as *missing*

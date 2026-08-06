@@ -1,0 +1,14 @@
+-- 066: options_premium_history — capture same-day contract volume.
+--
+-- The table already stores bid/ask/open_interest, which are two of the three inputs to
+-- optionLiquidityScore (docs/formulas.md#liquidity-score). Volume was never captured by any
+-- result type, so the third component (+2) cannot be recomputed for any historical row — which
+-- blocks a retrospective A/B of the graded scoring scheme (WHEEL_GRADED_LIQUIDITY, v1.1.131).
+--
+-- Companion to the v1.1.132 fix that adds bid/ask/openInterest/volume to WheelResult: every
+-- wheel row written before then has NULL bid/ask/open_interest, because analyzeWheel computed
+-- those inputs, scored them, and discarded them. Income rows were always complete.
+--
+-- Nullable and backfill-free on purpose: history predating the fix genuinely does not have the
+-- value, and writing a 0 would repeat exactly the null-vs-zero conflation fixed in v1.1.127.
+ALTER TABLE options_premium_history ADD COLUMN volume INTEGER;

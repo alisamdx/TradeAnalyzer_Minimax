@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.132] — 2026-08-06
+
+### Fixed
+- **The wheel path was discarding the liquidity inputs it scores from, emptying three columns of a durable history table for two months.** `analyzeWheel` computes bid/ask/open-interest/volume on the recommended contract, folds them into `optionLiquidityScore`, and then threw them away — `WheelResult` carried no such fields, so `wheelResultToRow` had nothing to write and hardcoded `bid: null, ask: null, openInterest: null`. Every one of the **21,127 wheel rows** in `options_premium_history` (2026-06-15 → 2026-08-05) has NULL bid/ask/open_interest as a result, while all **22,302 income rows** are complete, because `OptionsIncomeResult` did carry them. `WheelResult` now carries `bid`, `ask`, `openInterest` and `volume`, and both mappers persist them.
+- **`volume` was captured by nothing at all.** It is the third input to the liquidity score (worth +2 of 10) and no result type carried it, so it could not be recomputed for any historical row of either strategy. Added to `OptionsIncomeResult` and `WheelResult`, plus **migration 066** (`options_premium_history.volume`, nullable).
+- **The gap is not backfillable** — the quotes were never stored anywhere — and it is exactly why a retrospective A/B of the liquidity scoring is possible on income rows (**5,797 settled, 969 tickers, 12 dates**, all with bid/ask/OI) but not on wheel rows. Nothing coerces the new columns to 0 when a quote is genuinely absent: a 0 asserts "measured and terrible", which is a different claim (same discipline as `optionLiquidityScore`, v1.1.127). Both properties are pinned by tests.
+
+### Context
+- This is the same failure mode as the two preceding fixes — the wheel path repeatedly computed liquidity information and kept only the verdict. **When a signal is added, persist its inputs: a stored verdict cannot be re-validated.**
+- Checked while assessing `getPremiumHistoryReadiness()`, which reports **5 of 40 matured days** (43,429 rows, 36 capture dates, 2026-06-15 → 2026-08-05). The 40th capture date lands ~2026-08-11 and must then age 45 days, so that banner will not flip until **~2026-09-25**. That threshold governs return-on-capital analysis, not liquidity validation — the settled sample needed for the latter already exists.
+
+Docs: `Requirements/spec/02-data-model.md` §2.13, `.ai/AI_CONTEXT.md` §8 + §10.
+
 ## [1.1.131] — 2026-08-06
 
 ### Added (default OFF, FR-SEY-5-gated)

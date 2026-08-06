@@ -56,6 +56,7 @@ export interface PremiumHistoryRow {
   iv: number | null;
   ivRank: number | null;
   openInterest: number | null;
+  volume: number | null;
   breakeven: number | null;
 }
 
@@ -71,9 +72,9 @@ export function wheelResultToRow(r: WheelResult, asOfDate: string): PremiumHisto
   return {
     asOfDate, ticker: r.ticker, strategy: 'wheel', structure,
     lastPrice: r.lastPrice, strike: r.recommendedStrike, expiration: r.expiration,
-    dte: r.dte, delta: r.delta, bid: null, ask: null, premium: r.premium,
+    dte: r.dte, delta: r.delta, bid: r.bid, ask: r.ask, premium: r.premium,
     annualizedReturn: r.annualizedReturn, iv: r.currentIv, ivRank: r.ivRank,
-    openInterest: null, breakeven: null,
+    openInterest: r.openInterest, volume: r.volume, breakeven: null,
   };
 }
 
@@ -84,7 +85,7 @@ export function incomeResultToRow(r: OptionsIncomeResult, asOfDate: string): Pre
     lastPrice: r.lastPrice, strike: r.strike, expiration: r.expiration,
     dte: r.dte, delta: r.delta, bid: r.bid, ask: r.ask, premium: r.premium,
     annualizedReturn: r.annualizedReturn, iv: null, ivRank: r.ivRank,
-    openInterest: r.openInterest, breakeven: r.breakeven,
+    openInterest: r.openInterest, volume: r.volume, breakeven: r.breakeven,
   };
 }
 
@@ -285,9 +286,9 @@ export class DailyOptionsPremiumHistoryJob implements BatchJobHandler {
     const stmt = this.db.prepare(`
       INSERT OR REPLACE INTO options_premium_history
         (as_of_date, ticker, strategy, structure, last_price, strike, expiration, dte,
-         delta, bid, ask, premium, annualized_return, iv, iv_rank, open_interest, breakeven)
+         delta, bid, ask, premium, annualized_return, iv, iv_rank, open_interest, volume, breakeven)
       VALUES (@asOfDate, @ticker, @strategy, @structure, @lastPrice, @strike, @expiration, @dte,
-              @delta, @bid, @ask, @premium, @annualizedReturn, @iv, @ivRank, @openInterest, @breakeven)
+              @delta, @bid, @ask, @premium, @annualizedReturn, @iv, @ivRank, @openInterest, @volume, @breakeven)
     `);
     withTransaction(this.db, () => {
       for (const r of rows) stmt.run(r);

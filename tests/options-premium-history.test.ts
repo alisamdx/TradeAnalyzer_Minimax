@@ -19,13 +19,14 @@ const wheel: WheelResult = {
   mode: 'wheel', ticker: 'AAPL', lastPrice: 200, recommendedStrike: 190,
   expiration: '2026-07-17', dte: 34, delta: -0.3, premium: 3.25,
   annualizedReturn: 18.4, currentIv: 28.5, ivRank: 42, daysToEarnings: 20,
+  bid: 3.1, ask: 3.4, openInterest: 850, volume: 120,
   optionLiquidityScore: 8, suitabilityScore: 7, explanation: '',
 };
 
 const income: OptionsIncomeResult = {
   mode: 'options_income', ticker: 'MSFT', lastPrice: 400, strategy: 'CSP',
   strike: 380, expiration: '2026-07-17', dte: 34, delta: -0.28, bid: 5.1, ask: 5.4,
-  premium: 5.25, annualizedReturn: 14.9, ivRank: 35, openInterest: 1200,
+  premium: 5.25, annualizedReturn: 14.9, ivRank: 35, openInterest: 1200, volume: 310,
   breakeven: 374.75, capitalRequired: 38000, explanation: '',
 };
 
@@ -35,7 +36,9 @@ describe('premium history mappers', () => {
     expect(r).toMatchObject({
       asOfDate: '2026-06-13', ticker: 'AAPL', strategy: 'wheel', structure: 'CSP',
       strike: 190, premium: 3.25, annualizedReturn: 18.4, iv: 28.5, ivRank: 42,
-      bid: null, ask: null, openInterest: null,
+      // v1.1.132: the wheel row now carries the liquidity inputs it is scored from.
+      // These were hardcoded null before, leaving two months of history unusable.
+      bid: 3.1, ask: 3.4, openInterest: 850, volume: 120,
     });
   });
 
@@ -58,9 +61,31 @@ describe('premium history mappers', () => {
     const r = incomeResultToRow(income, '2026-06-13');
     expect(r).toMatchObject({
       ticker: 'MSFT', strategy: 'income', structure: 'CSP', strike: 380,
-      bid: 5.1, ask: 5.4, premium: 5.25, openInterest: 1200, breakeven: 374.75,
+      bid: 5.1, ask: 5.4, premium: 5.25, openInterest: 1200, volume: 310, breakeven: 374.75,
       iv: null, // income result carries no ATM iv field
     });
+  });
+
+  // Regression (v1.1.132). wheelResultToRow hardcoded `bid: null, ask: null, openInterest: null`
+  // because WheelResult did not carry them — analyzeWheel computed the liquidity inputs, scored
+  // them, then discarded them. Result: every one of 21,127 stored wheel rows (2026-06-15 →
+  // 2026-08-05) had NULL bid/ask/open_interest while all 22,302 income rows were complete, which
+  // made a retrospective A/B of the liquidity scoring impossible on the wheel side.
+  it('persists the liquidity EVIDENCE on both strategies, not just the score', () => {
+    for (const row of [wheelResultToRow(wheel, '2026-06-13'), incomeResultToRow(income, '2026-06-13')]) {
+      for (const field of ['bid', 'ask', 'openInterest', 'volume'] as const) {
+        expect(row[field], `${row.strategy}.${field} must be carried through`).not.toBeNull();
+        expect(row[field]).toBeTypeOf('number');
+      }
+    }
+  });
+
+  it('still writes null — never 0 — when an input was genuinely unmeasured', () => {
+    // Same discipline as optionLiquidityScore (v1.1.127): a 0 asserts "measured and terrible",
+    // which is a different claim from "no quote". Nothing may coerce these.
+    const unmeasured: WheelResult = { ...wheel, bid: null, ask: null, openInterest: null, volume: null };
+    const r = wheelResultToRow(unmeasured, '2026-06-13');
+    expect([r.bid, r.ask, r.openInterest, r.volume]).toEqual([null, null, null, null]);
   });
 });
 
@@ -69,9 +94,9 @@ describe('options_premium_history migration', () => {
     db.prepare(`
       INSERT OR REPLACE INTO options_premium_history
         (as_of_date, ticker, strategy, structure, last_price, strike, expiration, dte,
-         delta, bid, ask, premium, annualized_return, iv, iv_rank, open_interest, breakeven)
+         delta, bid, ask, premium, annualized_return, iv, iv_rank, open_interest, volume, breakeven)
       VALUES (@asOfDate, @ticker, @strategy, @structure, @lastPrice, @strike, @expiration, @dte,
-              @delta, @bid, @ask, @premium, @annualizedReturn, @iv, @ivRank, @openInterest, @breakeven)
+              @delta, @bid, @ask, @premium, @annualizedReturn, @iv, @ivRank, @openInterest, @volume, @breakeven)
     `).run(row);
   }
 

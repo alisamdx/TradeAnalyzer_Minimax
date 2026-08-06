@@ -1010,7 +1010,7 @@ export class AnalysisService {
       dte, delta: contract.delta,
       bid: contract.bid, ask: contract.ask,
       premium, annualizedReturn: annualizedReturn_val,
-      ivRank, openInterest: contract.openInterest ?? null,
+      ivRank, openInterest: contract.openInterest ?? null, volume: contract.volume ?? null,
       breakeven, capitalRequired, explanation
     };
   }
@@ -1020,7 +1020,7 @@ export class AnalysisService {
       mode: 'options_income', ticker, lastPrice: price,
       strategy: 'CSP', strike: null, expiration: null, dte: null,
       delta: null, bid: null, ask: null, premium: null, annualizedReturn: null,
-      ivRank, openInterest: null, breakeven: null, capitalRequired: null, explanation
+      ivRank, openInterest: null, volume: null, breakeven: null, capitalRequired: null, explanation
     };
   }
 
@@ -1140,6 +1140,10 @@ export class AnalysisService {
       dte, delta: contract.delta,
       premium, annualizedReturn: annual,
       currentIv, ivRank, daysToEarnings,
+      // The liquidity inputs, not just the verdict — so options_premium_history can persist the
+      // evidence. Discarded before v1.1.132, which left two months of wheel rows NULL here.
+      bid: contract.bid, ask: contract.ask,
+      openInterest: contract.openInterest ?? null, volume: contract.volume ?? null,
       optionLiquidityScore: liquidity,
       suitabilityScore: score,
       explanation: explanation.trim()
@@ -1152,6 +1156,7 @@ export class AnalysisService {
       recommendedStrike: null, expiration: null, dte: null,
       delta: null, premium: null, annualizedReturn: null,
       currentIv, ivRank, daysToEarnings: null,
+      bid: null, ask: null, openInterest: null, volume: null,
       // NOT 0 — nothing was measured here (no suitable chain / insufficient history). A 0
       // would be read downstream as "measured and illiquid" and cost the full weight-9
       // optionLiquidity penalty; null makes the signal *missing* instead (FR-SE-03).
