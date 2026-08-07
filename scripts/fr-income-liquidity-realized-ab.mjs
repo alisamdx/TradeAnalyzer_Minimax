@@ -192,6 +192,45 @@ summarize('graded', arms.graded);
 const delta = mean(arms.graded.map((r) => r.retPct)) - mean(arms.legacy.map((r) => r.retPct));
 console.log(`  Δ mean return on capital: ${(delta >= 0 ? '+' : '') + f(delta)} pts per trade`);
 
+// ── C) weight sweep — what if optionLiquidity simply carried LESS weight? ───────
+//
+// v1.1.133 concluded liquidity is a gate, not a ranking signal. The direct test of that is to
+// vary its composite weight rather than its formula. Weight 0 == `enabled: false` in
+// ScoringService: the signal drops out of BOTH numerator and denominator, so the remaining
+// signals keep their relative proportions and renormalise to 100 (no manual reweighting).
+// Scored with the LEGACY liquidity formula throughout — that is the shipped path.
+console.log('\n═══ C. WEIGHT SWEEP — optionLiquidity weight vs realized outcome ═══');
+console.log(`(legacy formula; weight 0 = signal disabled entirely, others renormalise)`);
+console.log('weight   top-5/date: assigned   mean ret   total pts   picks changed vs w=13');
+const base13 = new Map();
+for (const w of [13, 9, 6, 3, 0]) {
+  const weights = { ...INCOME_WEIGHTS, optionLiquidity: w };
+  const total = Object.values(weights).reduce((a, b) => a + b, 0);
+  const comp = (r) => {
+    let sum = 0;
+    if (r.iv_rank != null) sum += normHigher(r.iv_rank, 100) * weights.ivRank;
+    if (r.annualized_return != null) sum += normHigher(r.annualized_return, 60) * weights.premiumRiskRatio;
+    if (r.realizedVol != null) sum += normLower(r.realizedVol, 60) * weights.recentVolatility;
+    sum += normHigher(r.liqLegacy, 10) * weights.optionLiquidity;
+    return sum / total;
+  };
+  const picked = [];
+  let changed = 0;
+  for (const day of dates) {
+    const onDay = rows.filter((r) => r.as_of_date === day);
+    const top = [...onDay].sort((a, b) => comp(b) - comp(a)).slice(0, PICKS);
+    picked.push(...top);
+    const key = top.map((r) => r.ticker).sort().join(',');
+    if (w === 13) base13.set(day, key);
+    else if (base13.get(day) !== key) changed++;
+  }
+  console.log(`${String(w).padStart(4)}     ` +
+    `${f((picked.filter((r) => r.assigned).length / picked.length) * 100, 1).padStart(11)}%  ` +
+    `${f(mean(picked.map((r) => r.retPct))).padStart(9)}%  ` +
+    `${f(picked.reduce((s, r) => s + r.retPct, 0), 1).padStart(9)}   ` +
+    `${w === 13 ? '(baseline)' : changed + '/' + dates.length + ' dates'}`);
+}
+
 // ── honesty block ───────────────────────────────────────────────────────────────
 console.log('\n═══ READ THIS BEFORE ACTING ═══');
 console.log(`• Sample: ${dates.length} entry dates inside a single ${dates[0]}→${dates[dates.length - 1]} window,`);

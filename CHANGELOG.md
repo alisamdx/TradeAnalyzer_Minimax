@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.1.135] — 2026-08-07
+
+### Validation — cutting `optionLiquidity`'s weight shows NO measurable benefit
+- **Weight sweep added to `scripts/fr-income-liquidity-realized-ab.mjs`** (section C): vary `optionLiquidity`'s composite weight rather than its formula — the direct test of v1.1.133's "liquidity is a gate, not a ranking signal" conclusion. Weight 0 is equivalent to `enabled: false` (the signal leaves numerator *and* denominator, so the rest renormalise to 100). Legacy formula throughout, since that is the shipped path. Top-5 per date over 16 dates, outcomes settled at intrinsic:
+
+  | weight | assigned | mean return on capital | picks changed vs w=13 |
+  | --- | --- | --- | --- |
+  | **13** (current) | 60.0% | **−2.92%** | (baseline) |
+  | 9 | 61.3% | −3.20% | 11/16 dates |
+  | 6 | 67.5% | −3.56% | 14/16 dates |
+  | 3 | 62.5% | −3.49% | 15/16 dates |
+  | **0** (disabled) | 57.5% | **−2.77%** | 16/16 dates |
+
+- **The sweep is non-monotone, so it is noise, not signal.** Disabling entirely is nominally best (+0.15 pts vs baseline) but the intermediate weights are *worse than both endpoints*, swinging 0.79 pts across the middle. On ~80 trades per arm from a single regime, a real effect would be monotone. **Cutting the weight cannot be shown to help.**
+- **Correction to v1.1.133.** That entry named "reduce or remove `optionLiquidity`'s composite weight" as the indicated follow-up. It was an inference from the signal being anti-predictive, and the direct test does not support it. The mechanism finding stands (liquidity tracks realized vol, and belongs as a gate); the prediction that acting on it would improve outcomes does not. At 13 of 100 the signal is dominated by ivRank 30 + premiumRiskRatio 22 + recentVolatility 20 = 72, so its weight barely moves the ranking either way — it changes *which* names are picked (11–16 of 16 dates) without changing *how they do*.
+
+### Applied as operator config — live DB only, baseline untouched
+- **`optionLiquidity` is now `enabled: false` on wheel and income in this install's `scoring_strategy_configs`**, at the operator's direction. Enabled weight sums drop to 91 (wheel) / 87 (income) and renormalise to 100. This is a **runtime config change, not a baseline change** — `BASELINE_WHEEL` / `BASELINE_INCOME` in `scoring-service.ts` are untouched, so fresh installs still ship the signal enabled. Same precedent as the 2026-06-23 entry-cap change.
+- **The rows now carry `version = 'custom_v1_no_option_liquidity'`, deliberately.** `seedBaselines()` auto-upgrades only rows versioned `baseline_v1`/`baseline_v2`, and its own comment states that customised configs should carry a different version string so they are left alone. Leaving them on `baseline_v3` would mean a future `baseline_v4` upgrade path silently reverts this — the same silent-config-divergence trap that bit the batch-job `config_json` allowlists twice (v1.1.121, v1.1.123). **Trade-off: these two strategies will no longer receive future baseline weight updates automatically.**
+- **Rollback:** ⚖ Trade Scoring → Reset to Baseline (per strategy). Pre-change state, for the record: wheel `ivRank:22 premiumYield:19 fundamentalScore:17 technicalNeutral:11 notDowntrend:8 recentVolatility:10 optionLiquidity:9 leverageQuality:4` · income `ivRank:30 premiumRiskRatio:22 recentVolatility:20 trendNeutral:15 optionLiquidity:13`, both `baseline_v3`.
+- **Liquidity is still enforced as a gate**, which is the whole point: the brief's `hasAdequateLiquidity` structure gate and the v2 engine's `liquidityScore ≥ 8` in `EntryPolicy` are unaffected. Only its role as a *ranking* input is removed.
+
+Docs: `Requirements/spec/13-scoring-engine.md`, `.ai/AI_CONTEXT.md` §10.
+
 ## [1.1.134] — 2026-08-07
 
 ### Validation (no behavior change) — Wheel (Vetted) thresholds reviewed, NO change
