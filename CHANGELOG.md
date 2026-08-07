@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.1.134] — 2026-08-07
+
+### Validation (no behavior change) — Wheel (Vetted) thresholds reviewed, NO change
+- **The deferred post-Q2 threshold review is done: nothing needs tuning.** The count recovered from **~4 (2026-07-02) to 73 (2026-08-07)** — 58 stocks + 15 ETFs — on unchanged thresholds, confirming the July thinness was a seasonal earnings artifact rather than a threshold problem.
+- **Gate margins on the clean read say leave it alone.** Among the 58 **stock** survivors: annualized ≥15% has **zero** within 10% of the bar (min 16.5%); OI ≥250 has **one** (median 1,682); IV ≤80% has three (median 36.8%). The gates actually doing work are suitability ≥75 (by design — it is the quality bar) and spread ≤15% (median 8.3%). Loosening the premium or liquidity floors would not add names; they are not what is binding.
+- **The 15 sub-threshold survivors are all ETFs**, on the documented ETF path (`minAnnualizedReturnEtf: 8`, suitability bypassed since ETFs carry no fundamentals). Verified rather than assumed — a suitability of 4 (IWM) or an 8.6% yield (SPY) looks like a leak until you check the ticker type.
+- **New finding — the swing is a QUARTERLY CYCLE, not a one-off, and it recurs worse in six weeks.** The earnings gate drops any name reporting on/before the target monthly expiry, and the target is the nearest 3rd Friday ≥25 DTE. Four times a year that window lands on an earnings season. Measured share of the S&P 500 + Russell 1000 excluded by the earnings gate alone:
+
+  | as-of | target expiry | excluded |
+  | --- | --- | --- |
+  | 2026-08-07 | 2026-09-18 | 16% |
+  | 2026-08-21 | 2026-09-18 | **7%** |
+  | 2026-09-18 | 2026-10-16 | **6%** |
+  | 2026-09-25 | 2026-11-20 | **80%** |
+  | 2026-10-16 | 2026-11-20 | 75% |
+  | 2026-11-06 | 2026-12-18 | 3% |
+
+  So 2026-07-02's ~4 and today's 73 are the same gates at opposite ends of one cycle, and the **next squeeze is due ~2026-09-25 → 2026-10-23** at roughly 80% excluded — more severe than July's. The list self-heals both times. Do not tune against either extreme: loosening during a trough balloons the list once earnings clear (the same "don't re-engineer on a regime-specific sample" lesson as the scoring-replay work).
+- **Correction recorded:** `earnings_calendar` stores only each ticker's **next** report date (nearest-wins, v1.1.75), so it cannot be used to reconstruct a past run's exclusion count — an initial attempt to compute what the 2026-07-02 run faced was invalid and discarded. Far-horizon projections in the table above are a floor for the same reason.
+
+Docs: `Requirements/spec/05-screener-and-filters.md`, `.ai/AI_CONTEXT.md` §10.
+
 ## [1.1.133] — 2026-08-07
 
 ### Validation (no behavior change) — `WHEEL_GRADED_LIQUIDITY` enabling REJECTED
