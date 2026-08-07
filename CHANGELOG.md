@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.1.133] — 2026-08-07
+
+### Validation (no behavior change) — `WHEEL_GRADED_LIQUIDITY` enabling REJECTED
+- **New `scripts/fr-income-liquidity-realized-ab.mjs`** — the realized-outcome A/B that v1.1.131 was waiting on, run on **income** rows because they are the only ones carrying the liquidity inputs (all 22,302 income rows have bid/ask/OI; all 21,127 wheel rows are NULL — see v1.1.132). The income composite is fully reconstructible point-in-time (`ivRank` 30 ← stored `iv_rank`, `premiumRiskRatio` 22 ← stored `annualized_return`, `recentVolatility` 20 ← 20-day realized vol from `historical_prices`, `trendNeutral` 15 ← permanently null as in live, `optionLiquidity` 13 ← recomputed from stored bid/ask/OI under both schemes). Outcomes settle at intrinsic: `premium − max(0, strike − close@expiry)`, as % of strike. **6,777 settled CSPs, 937 tickers, 16 dates.**
+- **Result: enabling the graded scheme makes realized outcomes WORSE, not better.** Top-5 per date by full composite: legacy 60.0% assigned / **−2.92%** mean return on capital; graded 71.3% assigned / **−4.80%**. **Δ −1.88 pts per trade**, holding at −1.33 at top-10. The flag stays **off**, and this is now a rejection rather than a pending item.
+- **The deeper finding — liquidity does not predict outcomes at all.** Spearman(score, realized return) is **−0.015 legacy / +0.032 graded**: no relationship either way. Worse, the graded score is mildly *anti*-predictive by quartile — bottom 25% returns **0.95%** at 14.8% assignment, top 25% returns **0.21%** at 26.6%. The confound is visible in the same table: top-quartile liquidity carries **55% realized vol against 43%** at the bottom, with IV rank flat (~50). Liquidity tracks attention, attention tracks names that move, and names that move breach short puts. Weighting liquidity *positively* in a short-premium ranking composite therefore tilts the book toward exactly the wrong names.
+- **What this does and does not overturn.** v1.1.131's calibration was correct on its own terms — the graded formula really is a far better predictor of *execution cost* (Spearman −0.42 → −0.799). Both things are true: it is a better cost model and a worse ranking signal, because **liquidity is an execution-cost property, not an outcome-prediction property.** It answers "can I trade this?", not "should I?". The v2 engine already uses it correctly, as a hard gate (`liquidityScore ≥ 8` in `EntryPolicy`); the category error is carrying it as 13% (income) / 9% (wheel) of a *ranking* composite. The graded formula and flag are kept, since a better-calibrated score makes a better gate.
+- **Follow-up recorded, not taken:** the indicated fix is to reduce or remove `optionLiquidity`'s composite weight, not to calibrate it further. That is itself FR-SEY-5-gated and needs its own study.
+- **`WHEEL_MONTHLY_FIRST_EXPIRY` is not affected by this finding.** It changes the contract actually recommended, so its benefit is a real fill-cost saving on the trade you would place — a separate mechanism from ranking, and one this study does not measure.
+
+### Caveats on the evidence (printed by the script, repeated here)
+- 16 entry dates inside a single 2026-06-15 → 2026-07-08 window — one market regime. The sibling FR-SEY studies used 1,000+ picks over ~1.1 years.
+- Income is a *proxy* for wheel: same signal and same `findSuitableChain`, but delta band 0.20–0.35 vs 0.20–0.30 and weight 13 vs 9.
+- The volume term (+2 of 10) is floored to 0 in **both** arms — no historical row has volume (migration 066 starts capturing it). Fair between arms, but it caps the graded scheme.
+- **The absolute section-B numbers are pessimistic and are not what the live brief produces**: the reconstruction ranks on composite alone, while the live income path also applies the Stage-3 earnings penalty (−20, which strips exactly the earnings runners that blow up a short put), the liquidity hard gate, and the critic. The **delta between arms** is unaffected — both omit the same things.
+
+Docs: `Requirements/spec/13-scoring-engine.md`, `docs/formulas.md#liquidity-score`, `.ai/AI_CONTEXT.md` §10, `Requirements/v2-execution/06-seykota-risk-extensions.md` (rejected-on-data register).
+
 ## [1.1.132] — 2026-08-06
 
 ### Fixed

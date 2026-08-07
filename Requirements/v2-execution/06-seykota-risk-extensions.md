@@ -59,7 +59,7 @@ not shipped (it may ship **disabled**, as a configurable option, with the findin
 **Rejected-on-data register** (changes that looked compelling and did *not* ship):
 SPY-regime gate · overbought guard · ADX in scoring · FR-SEY-3 per-name trend filter ·
 bear-call inflection recalibration · Step-3 debit-spread directional path · gap-risk entry
-filter · **monthly expiry preference in `selectExpiration`** (2026-08-04,
+filter · **graded option-liquidity scoring for composite ranking** (2026-08-07, `scripts/fr-income-liquidity-realized-ab.mjs` — better-calibrated liquidity scoring made realized income-CSP outcomes WORSE, Δ −1.88 pts/trade; liquidity has no predictive relation to outcome at all (|ρ| ≤ 0.03) and tracks realized vol, so it belongs as a gate not a ranking signal) · **monthly expiry preference in `selectExpiration`** (2026-08-04,
 `scripts/fr-expiry-realized-ab.mjs` — see `Requirements/NEW_FRONTIER.md §12`: the confirmed
 weekly-vs-monthly liquidity gap does not convert into realized edge, because the
 `liquidityScore ≥ 8` entry gate already screens the thin weeklies out and a monthly moved off
