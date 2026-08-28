@@ -23,6 +23,13 @@ export interface EarningsEntry {
   dte:         number | null;   // days from today to reportDate (computed at read time)
 }
 
+// How near a stored earnings date must be for `refreshTickers` to trust it without
+// re-confirming against E*Trade. Deliberately wider than the brief's 45-day penalty
+// window so that ANY date inside that window is trusted (the gate is already engaged
+// and re-checking cannot change the outcome), while every date claiming to be outside
+// it gets confirmed — that is the direction a wrong value disables the gate. v1.1.138
+const TRUST_STORED_WITHIN_DAYS = 60;
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /**
@@ -161,13 +168,22 @@ export class EarningsService {
     this.upsert(ticker.toUpperCase(), reportDate, reportTime, null, source, confirmed);
   }
 
-  // Refresh a batch of tickers via E*Trade only (no fallback).
+  // Refresh a batch of tickers via E*Trade — an INDEPENDENT second source used to
+  // confirm the Finnhub-derived calendar for a small, high-stakes ticker list.
   //
-  // Smart skip logic (unless force=true):
-  //   - Manual entries are never auto-overwritten.
-  //   - If a future report_date is already stored, skip — the date is still valid.
-  //   - If the stored date is in the past (earnings have occurred), fetch the next date.
-  //   - If no date stored at all, fetch.
+  // Skip logic (unless force=true):
+  //   - Manual entries are never overwritten (this holds even when force=true).
+  //   - A stored date NEAR enough to already engage the risk gates is trusted and
+  //     skipped. If the true date is even nearer, the -20 penalty fires either way;
+  //     if it is later, we over-penalise, which is the fail-safe direction.
+  //   - Everything else is fetched: no row, a past row, or — critically — a stored
+  //     date BEYOND the horizon. A far date is the one that silently says "no
+  //     earnings risk here", so it is exactly what must be confirmed rather than
+  //     trusted. Before v1.1.138 this skipped ANY stored future date, which made the
+  //     brief's earnings net inert: NVDA held a bogus 2026-11-17 (true 2026-08-26)
+  //     and was skipped as "still valid" on the day it reported.
+  //
+  // Verify exactly the rows claiming there is nothing to worry about.
   async refreshTickers(
     tickers: string[],
     etradeCreds: OAuthCredentials | null,
@@ -178,16 +194,28 @@ export class EarningsService {
 
     const todayStr = new Date().toISOString().slice(0, 10);
 
+    const trustedThroughStr = new Date(Date.now() + TRUST_STORED_WITHIN_DAYS * 86_400_000)
+      .toISOString().slice(0, 10);
+
     for (const ticker of tickers) {
       const t = ticker.toUpperCase();
       try {
+        const existing = this.getForTicker(t);
+        // Never overwrite a manual entry — this is unconditional, force included.
+        // (Before v1.1.138 `force` bypassed this check along with the rest of the
+        // skip block, contradicting the documented contract.)
+        if (existing?.source === 'manual') { skipped++; continue; }
+
         if (!force) {
-          const existing = this.getForTicker(t);
-          // Never overwrite a manual entry
-          if (existing?.source === 'manual') { skipped++; continue; }
-          // Skip if we already have a future date — still valid
-          if (existing?.reportDate && existing.reportDate > todayStr) { skipped++; continue; }
-          // If date is in the past (or missing), fall through to fetch the next date
+          // Trust a stored date that is already inside the risk horizon; verify
+          // anything that claims there is no near-term earnings event.
+          if (existing?.reportDate
+              && existing.reportDate > todayStr
+              && existing.reportDate <= trustedThroughStr) {
+            skipped++;
+            continue;
+          }
+          // No row, a past row, or a date beyond the horizon → fetch and confirm.
         }
 
         if (!etradeCreds?.accessToken) {

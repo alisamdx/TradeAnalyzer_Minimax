@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.1.138] — 2026-08-28
+
+### fix — the brief's earnings net was inert in both directions
+- **The Daily Brief's last-line-of-defense earnings check for its picks did nothing**, for two independent reasons, either one sufficient. (1) `refreshTickers` skipped **any** stored future date as "still valid" — but a date wrong in the FAR direction is exactly what silently disables the −20 penalty (NVDA held a bogus `2026-11-17` against a true `2026-08-26`, so the net skipped it as valid on the day it reported; the Aug-26 run recorded `{"updated":0,"skipped":53,"failed":3}` — 53 skips, zero verifications). (2) It ran **after** pick selection, so even a correct finding could not remove a pick.
+- **`refreshTickers` now verifies what claims to be safe.** Asymmetric skip rule mirroring the sweep's write policy: a stored date **inside** `TRUST_STORED_WITHIN_DAYS` (60) is trusted — the gate is already engaged, re-checking cannot change the outcome, and an error there is fail-safe. Everything else is confirmed against E*Trade: no row, a past row, or a date **beyond** the horizon, which is precisely the value claiming there is no earnings risk. 60 is deliberately wider than the 45-day penalty window, so every date inside that window is trusted and every date outside it is checked.
+- **Manual entries are now never overwritten, `force` included** — `force=true` previously skipped the whole guard block, manual check with it, contradicting the documented contract.
+- **The net moved ahead of pick selection.** A Stage-3 verification pass confirms the provisional top-`STAGE4_POOL_SIZE` candidates for income/wheel/bearish against E*Trade (an independent source from the Finnhub-derived calendar), then re-applies the penalty to anything newly revealed and re-sorts — before the Stage-4 pool is locked. Penalty application is now a closure tracking `(strategy, ticker)` pairs so the second pass cannot double-penalise. Recorded in `run_meta.earningsVerify`. Typically ~20 E*Trade calls, against a Stage 4 that already makes one chain call per candidate.
+- **Had this been in place**: NVDA's `2026-11-17` was 83 days out — beyond the 60-day trust horizon — so it would have been sent to E*Trade, come back `2026-08-26`, taken the −20 in the second pass, dropped 73.3 → 53.3 (below the other wheel picks at 63.6–64.3), and not appeared.
+- The old Stage-5b call stays for buy/bullish/inflection picks, where it was never a gate — it feeds the critic and the v2 entry gate complete calendar data. Its comment now says so instead of implying it protects anything.
+- **Validation (FR-SEY-5)**: no threshold or rule changed — the 45-day window, −20 magnitude and penalty-bearing strategy set are untouched; this restores the gate's *input data* on the path that selects picks. Per v1.1.137, a replay cannot validate this area (`earnings_calendar` keeps one row per ticker, overwritten in place). The gate becomes strictly **more** conservative — it can only add penalties the stored calendar missed, never remove one — the opposite direction from v1.1.137.
+- Regression: new `tests/earnings-refresh-tickers.test.ts` (6). Suite: 973 passed.
+
+Docs: `Requirements/spec/17-earnings-calendar.md`, `Requirements/spec/14-daily-brief-and-critic.md`, `.ai/AI_CONTEXT.md` §10.
+
 ## [1.1.137] — 2026-08-28
 
 ### fix — let a complete sweep absorb a small scheduled-date slip

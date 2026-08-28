@@ -282,20 +282,75 @@ export class DailyIntelligenceBriefJob implements BatchJobHandler {
     // all carry naked short legs — an earnings event within the hold window causes
     // outsized moves that blow through the strikes. High IVR driven by a known event
     // is a trap, not an opportunity.
-    const earningsPenalty = this.loadEarningsPenalty();
-    if (earningsPenalty.size > 0) {
+    // Tracks which (strategy, ticker) pairs already took the hit, so the
+    // post-verification second pass below can never double-penalise.
+    const alreadyPenalised = new Set<string>();
+    const applyEarningsPenalty = (label: string): number => {
+      const penalty = this.loadEarningsPenalty();
+      let total = 0;
+      if (penalty.size === 0) return 0;
       for (const strategy of EARNINGS_PENALTY_STRATEGIES) {
         const list = rankedByStrategy.get(strategy) ?? [];
         let penalised = 0;
         for (const s of list) {
-          if (earningsPenalty.has(s.ticker)) {
+          const key = `${strategy}:${s.ticker}`;
+          if (penalty.has(s.ticker) && !alreadyPenalised.has(key)) {
             s.compositeScore = Math.max(0, s.compositeScore - 20);
+            alreadyPenalised.add(key);
             penalised++;
           }
         }
         if (penalised > 0) {
           list.sort((a, b) => b.compositeScore - a.compositeScore);
-          console.log(`[brief stage3] ${strategy}: penalised ${penalised} tickers for earnings within 45d`);
+          total += penalised;
+          console.log(`[brief stage3${label}] ${strategy}: penalised ${penalised} tickers for earnings within 45d`);
+        }
+      }
+      return total;
+    };
+
+    applyEarningsPenalty('');
+
+    // ── Earnings verification net (v1.1.138) ─────────────────────────────────
+    // The penalty above is only as good as `earnings_calendar`. A stored date that
+    // is wrong in the FAR direction silently disables the gate — that is how NVDA
+    // (stored 2026-11-17, true 2026-08-26) ranked wheel #1 on the day it reported.
+    //
+    // So before the pool is locked, confirm the earnings dates of the provisional
+    // top candidates for the penalty-bearing strategies against E*Trade — an
+    // independent source from the Finnhub-derived calendar — then re-apply the
+    // penalty to anything newly revealed and re-sort.
+    //
+    // This used to run AFTER pick selection (Stage 5b), which meant it could never
+    // remove a pick no matter what it found; combined with refreshTickers skipping
+    // any stored future date, the net was inert in both directions.
+    // `refreshTickers` skips dates already inside the risk horizon, so this is
+    // typically ~20 calls, not the full pool.
+    if (this.earningsService) {
+      const provisionalPool = [...new Set(
+        EARNINGS_PENALTY_STRATEGIES.flatMap(strategy =>
+          (rankedByStrategy.get(strategy) ?? [])
+            .filter(s => s.compositeScore > 0)
+            .slice(0, STAGE4_POOL_SIZE)
+            .map(s => s.ticker)
+        )
+      )];
+      if (provisionalPool.length > 0) {
+        try {
+          const creds = this.getEtradeCreds?.() ?? null;
+          const res = await this.earningsService.refreshTickers(provisionalPool, creds);
+          const newlyPenalised = applyEarningsPenalty(' verify');
+          runMeta['earningsVerify'] = {
+            checked: provisionalPool.length,
+            updated: res.updated, skipped: res.skipped, failed: res.failed,
+            newlyPenalised,
+          };
+          if (newlyPenalised > 0) {
+            console.log(`[brief stage3 verify] E*Trade confirmation caught ${newlyPenalised} pick-level earnings the calendar had missed`);
+          }
+        } catch (err) {
+          // Non-fatal: the stored-calendar penalty above still stands.
+          runMeta['earningsVerify'] = { error: err instanceof Error ? err.message : String(err) };
         }
       }
     }
@@ -509,12 +564,16 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
       }
     }
 
-    // ── Earnings fallback for final picks ────────────────────────────────────
-    // ~11% of the universe has no future earnings row (Finnhub bulk-fill gaps),
-    // and the critic treats a ticker with no calendar data as unverified event
-    // risk. Fetch the missing dates from E*Trade for just the ~25 final pick
-    // tickers — refreshTickers smart-skips any ticker that already has a valid
-    // future date, so this is typically only a handful of calls.
+    // ── Earnings fill for the remaining final picks ──────────────────────────
+    // Secondary to the Stage-3 verification net above, which already confirmed the
+    // penalty-bearing strategies (income/wheel/bearish) BEFORE the pool was locked.
+    // This covers the rest — buy/bullish/inflection picks — where ~11% of the
+    // universe has no future earnings row (Finnhub bulk-fill gaps) and the critic
+    // treats missing calendar data as unverified event risk. It cannot change which
+    // picks were selected (they already are); it exists so the critic and the v2
+    // entry gate (`brief-entry-source` earningsBeforeExpiry) see complete data.
+    // refreshTickers skips dates already inside the risk horizon, so this is
+    // typically only a handful of calls.
     if (this.earningsService && finalPickTickers.length > 0) {
       try {
         const creds = this.getEtradeCreds?.() ?? null;
