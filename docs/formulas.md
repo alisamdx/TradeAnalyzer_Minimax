@@ -765,3 +765,39 @@ semantics and would badly overstate a debit spread's true probability of profit.
 
 The four metrics are user-selectable on the screen; ranking is pure (`scoreByMetric`) so switching
 the metric re-ranks client-side without re-fetching chains.
+
+## split-adjustment (data integrity) {#split-adjustment}
+
+`historical_prices` must hold a **self-consistent, split-adjusted** close series: every bar
+expressed in today's share terms. Polygon aggregates are fetched with `adjusted=true`, so
+each response is correct *as of that fetch* — but bars are stored incrementally and old
+ones are never revisited (price-gap-fill re-fetches only a ~3-day window). When a split
+occurs later, pre-split bars keep their old prices while new bars arrive post-split,
+leaving a permanent step in the middle of the series.
+
+**Detection** (`split-repair.ts`, v1.1.139) — for consecutive stored closes:
+
+```
+ratio = close[i] / close[i-1]
+flagged  ⇔  |ratio − 1| > SPLIT_THRESHOLD          (default 0.25)
+```
+
+A split shows as a ratio near a simple fraction: `0.5` = 2:1, `0.25` = 4:1, `2/3` = 3:2,
+`2.0` = 1:2 reverse, `3.0` = 1:3 reverse.
+
+**Repair** — re-fetch the ticker's whole stored range (bounded to 800 days) and
+`INSERT OR REPLACE`. Polygon returns the series adjusted to today, so one pass corrects
+every bar. The operation is **idempotent**: re-fetching a ticker that did not split
+rewrites identical bars, so a false positive costs one API call and changes nothing.
+
+**Classification** — a jump that survives the re-fetch is a genuine market move (earnings
+collapse, buyout) and is recorded in `price_split_repairs` as `confirmed_real` so it is
+never re-fetched again. Threshold choice is therefore asymmetric on purpose: a
+false positive is cheap (one call), a false negative silently corrupts every indicator
+spanning that date.
+
+**Why it matters** — unadjusted splits corrupt SMA/RSI/ADX, `volume_surge`, breakout
+detection, relative strength, the backtest engine, and Brief Replay, which FR-SEY-5 relies
+on to validate trade-logic changes. Measured 2026-08-28: CRWD −74% in one day (4:1),
+DD +203%, MRNA +177%, HON +95%, KLAC −89%, against SPY's largest genuine daily move of
+2.58% over the same quarter.

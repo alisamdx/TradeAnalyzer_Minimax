@@ -6,6 +6,7 @@
 
 import type { DbHandle } from '../../db/connection.js';
 import { HistoricalDataService, fetchAndStorePrices } from '../historical-service.js';
+import { detectAndRepairSplits } from '../split-repair.js';
 import type { TimeRange } from '../historical-service.js';
 import { PolygonDataProvider } from '../polygon-provider.js';
 import type { BatchJobHandler, BatchJobResult } from '../batch-service.js';
@@ -161,9 +162,34 @@ export class PriceGapFillJob implements BatchJobHandler {
       if (!signal.aborted && i + CONCURRENCY < jobs.length) await sleep(BATCH_DELAY);
     }
 
+    // ── Split-adjustment repair pass (v1.1.139) ────────────────────────────────
+    // The window re-fetch above keeps the LAST few days fresh but never revisits older
+    // bars, so a split leaves the stored series permanently inconsistent: pre-split
+    // prices before the event, post-split prices after. Polygon returns a fully adjusted
+    // series on every fetch, so re-fetching a flagged ticker's whole history repairs it.
+    // Runs after the gap fill so it scans the freshest data. Never fails the job — a
+    // stale-but-present price history is far better than a halted orchestrator chain.
+    let splitNote = '';
+    try {
+      const rep = await detectAndRepairSplits(this.db, this.historicalService, this.provider, {
+        signal,
+        onProgress: (ticker, note) => onProgress({
+          jobId: JOB_ID, runId: 0, ticker, status: 'updated',
+          attempted, updated, skipped, failed, total, message: `split repair: ${note}`,
+        }),
+      });
+      if (rep.flagged > 0) {
+        splitNote = ` Split scan: ${rep.repaired} repaired, ${rep.confirmedReal} confirmed real`
+                  + (rep.failed ? `, ${rep.failed} failed` : '') + '.';
+        for (const d of rep.details) console.log(`[price-gap-fill] ${d}`);
+      }
+    } catch (err) {
+      splitNote = ` Split scan errored: ${err instanceof Error ? err.message : String(err)}.`;
+    }
+
     return {
       status:           signal.aborted ? 'failed' : 'success',
-      notes:            `${updated} updated, ${skipped} skipped, ${failed} failed of ${attempted} attempted.`,
+      notes:            `${updated} updated, ${skipped} skipped, ${failed} failed of ${attempted} attempted.${splitNote}`,
       errorMessage:     signal.aborted ? 'Job was cancelled.' : undefined,
       tickersAttempted: attempted,
       tickersUpdated:   updated,

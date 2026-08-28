@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.1.139] — 2026-08-28
+
+### fix — `historical_prices` carried unadjusted stock splits
+- **Polygon is fetched with `adjusted=true`, so every response is correct *as of that fetch*. The corruption was incremental storage**: `price-gap-fill` re-fetches only a ~3-day window and never revisits older bars, so when a split happens later the pre-split bars keep their old prices while new bars arrive post-split — a permanent step in the middle of the series.
+- **Found while marking a quarter of brief picks to market**: CRWD fell **74% in one day** (2026-06-29, 4:1 split) and manufactured a fake $43k loss. Scanning 1,136 tickers over 400 days found **153 discontinuities across 126 tickers**, 35 at a simple split ratio — `DD +203% (1:3)`, `MRNA +177% (1:3)`, `HON +95% (1:2)`, `CRWD −74% (4:1)`, `IESC −53% (2:1)`, `MNST −52% (2:1)`. SPY's largest genuine daily move over the same quarter was **2.58%**.
+- **Not cosmetic**: any indicator spanning such a date is wrong — SMA/RSI/ADX, `volume_surge`, breakout detection, relative strength, the backtest engine, and **Brief Replay**, the tool FR-SEY-5 requires to validate every trade-logic change.
+- **New `split-repair.ts`**: `detectDiscontinuities` (pure) flags `|close/prev − 1| > 0.25`; `detectAndRepairSplits` re-fetches the flagged ticker's whole stored range (bounded 800d) through the existing `fetchAndStorePrices`, which `INSERT OR REPLACE`s a series adjusted to today — one pass fixes every bar. **Idempotent by construction**: re-fetching a ticker that did not split rewrites identical bars, so a false positive costs one API call and nothing else. The threshold is deliberately asymmetric — a false positive is cheap, a false negative silently corrupts every indicator spanning that date.
+- **Genuine moves are classified, not re-fetched forever**: a jump surviving the re-fetch (earnings collapse, buyout) is recorded `confirmed_real` in the new `price_split_repairs` table (migration 068) and skipped thereafter. 118 of the 153 flagged don't match a simple split ratio and settle out this way.
+- Detection reads only stored data — **no new provider API surface**, `DataProvider` stays the sole market-data seam.
+- **Wired as a second pass in `daily-price-gap-fill`** (which already owns `historical_prices` freshness), after the gap fill so it scans the freshest bars. Never fails the job — a stale-but-present history beats a halted chain. Outcome in the run notes: `Split scan: N repaired, M confirmed real`. Chain order makes it propagate for free: price-gap-fill (seq 6) runs before daily-technical-signals (seq 7), so signals recompute off repaired prices the same run. `maxRepairs` = 40/run bounds API usage; the current 126-ticker backlog clears in ~2 days across the two daily slots.
+- Regression: new `tests/split-repair.test.ts` (8) — split and reverse-split detected, ±17% volatility not flagged, zero-close guarded, repair records `repaired`, a surviving jump records `confirmed_real` and is **not** re-fetched next run, clean series makes no API call. Suite: 981 passed.
+- **The corrupt bars already in the DB are repaired by running the job** — the Polygon key is encrypted at rest (`enc:`, Electron `safeStorage`), so the repair can only run inside the app, not from a script.
+
+Docs: `docs/formulas.md#split-adjustment`, `Requirements/spec/02-data-model.md`, `Requirements/spec/20-batch-jobs.md`, `.ai/AI_CONTEXT.md` §10, `CLAUDE.md`.
+
 ## [1.1.138] — 2026-08-28
 
 ### fix — the brief's earnings net was inert in both directions

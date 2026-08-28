@@ -63,7 +63,9 @@ All persistence is a single local SQLite database (better-sqlite3), opened once 
 
 **`historical_financials`** — `id PK`, `ticker`, `filing_date`, `period_type` (`quarterly|annual`), `period_end_date`, and raw statement fields: `revenues`, `net_income`, `gross_profit`, `operating_income`, `earnings_per_share`, `shares_outstanding`, `total_assets`, `total_liabilities`, `shareholders_equity`, `long_term_debt`, `current_assets`, `current_liabilities`, `operating_cash_flow`, `free_cash_flow`, `ebitda`, `currency`, `source`, `fetched_at`. Unique `(ticker, period_end_date, period_type)`. View `v_latest_financials` = most recent quarterly per ticker.
 
-**`historical_prices`** — `id PK`, `ticker`, `date`, `open/high/low/close/volume`, `adjusted_close`, `source`, `fetched_at`. Unique `(ticker, date)`. View `v_latest_price`. This table is the backbone for indicators, scoring signals, paper-trade snapshots, and backtesting.
+**`historical_prices`** — `id PK`, `ticker`, `date`, `open/high/low/close/volume`, `adjusted_close`, `source`, `fetched_at`. Unique `(ticker, date)`. View `v_latest_price`. This table is the backbone for indicators, scoring signals, paper-trade snapshots, and backtesting. **Bars must be self-consistent and split-adjusted** — Polygon is fetched with `adjusted=true`, but bars are stored incrementally and old ones are never revisited, so a later split leaves a permanent step in the series (measured 2026-08-28: 153 discontinuities across 126 tickers; CRWD −74% in a day on a 4:1 split). `daily-price-gap-fill` runs a repair pass over this table — see `docs/formulas.md#split-adjustment`.
+
+**`price_split_repairs`** (migration 068) — `ticker`, `discontinuity_date` (composite PK), `ratio`, `status` (`repaired` | `confirmed_real`), `bars_rewritten`, `detected_at`, `resolved_at`. Audit trail for the split repair above; `confirmed_real` rows mark genuine market moves so the detector never re-fetches them again.
 
 ## 2.8 IV history (migrations 016, 017)
 
