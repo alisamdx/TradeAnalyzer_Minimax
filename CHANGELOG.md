@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.137] — 2026-08-28
+
+### fix — let a complete sweep absorb a small scheduled-date slip
+- **v1.1.136 forbade the sweep from ever pushing a stored earnings date further out.** Right for a ~90-day jump (a Finnhub coverage gap hiding the near date and returning the following quarter — the NVDA failure), wrong for an issuer refining a scheduled date by a day or two.
+- **Measured against ground truth right after the v1.1.136 run** (a narrow 45-day Finnhub window — 585 entries, far under the 1500 cap, so untruncatable), across the 69 constituents reporting within 45 days: **50 exact · 0 stored later than truth · 19 stored earlier · 0 missing.** Zero late rows confirms v1.1.136 worked. But the 19 early rows were 1–8 days stale (ACN, SAIL by 8) and every one had been written in **June or July** — the sweep kept seeing the corrected date, kept refusing it as a later move, and the row stayed frozen until Phase 2 eventually refetched it.
+- **A complete sweep may now move a date later by at most `MAX_LATER_SLIP_DAYS` (14).** Beyond that still refused; any later move from an *incomplete* sweep still refused; moving a date **nearer** stays unbounded (fail-safe, and what heals poisoned rows). 14d sits well above a typical one-or-two-day refinement and far below the ~90-day coverage-gap leap.
+- An early date was never a risk — it makes the −20 penalty engage sooner, never later — just imprecise, excluding a name from wheel/income for up to a week longer than warranted.
+- **Validation (FR-SEY-5)**: no threshold or rule changed — the 45-day window and −20 magnitude are untouched; this moves the gate's *input data* toward ground truth. A replay delta is **impossible** here, not just unhelpful: `earnings_calendar` stores only each ticker's NEXT date, overwritten in place, so no past calendar state can be reconstructed — both arms would re-read today's corrected dates. Noted honestly: this makes the gate marginally *less* conservative in one direction, which is the intended correction (names were being penalised on dates the issuer had already moved).
+- Regression: `tests/earnings-refresh-job.test.ts` +4 (small slip accepted; quarter jump refused; boundary+1 refused; nearer-move still unbounded). Suite: 967 passed.
+
+Docs: `Requirements/spec/17-earnings-calendar.md`, `.ai/AI_CONTEXT.md` §10, `CLAUDE.md`.
+
 ## [1.1.136] — 2026-08-28
 
 ### fix — near-term earnings dates were truncated away by Finnhub's bulk result cap

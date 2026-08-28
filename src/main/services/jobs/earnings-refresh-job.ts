@@ -38,6 +38,10 @@ const FINNHUB_BULK_CAP   = 1500;
 const BULK_HORIZON_DAYS  = 180;  // how far ahead the sweep looks
 const MAX_BULK_CALLS     = 160;  // runaway guard for the recursive subdivision
 const BULK_CALL_DELAY_MS = 1100; // 1 call/s — inside the 60/min free-tier limit
+// How far a COMPLETE sweep may push a stored future date LATER. Covers an issuer
+// refining a scheduled date by a day or two; well under the ~90-day jump that would
+// mean a coverage gap hid the near date and returned the following quarter. v1.1.137
+const MAX_LATER_SLIP_DAYS = 14;
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -153,16 +157,23 @@ export class EarningsRefreshJob implements BatchJobHandler {
         const existing = this.earningsService.getForTicker(symbol);
         if (existing?.source === 'manual') continue;   // never overwrite a manual entry
         if (existing?.reportDate === hit.date) continue;
-        // The sweep may only ever move a stored future date NEARER (or fill a row that
-        // is missing/stale). Never further out: Finnhub's bulk calendar has coverage
-        // gaps, and a gap that hides a near date while returning the following quarter
-        // would push the stored date out — which is precisely the failure this job
-        // exists to prevent. Moving a date nearer is always fail-safe (the penalty
-        // engages earlier), and it is also what heals rows poisoned by the old
-        // truncated-bulk behaviour, since poison always reads too FAR. A date that
-        // genuinely slips later is picked up by Phase 2 once the stored date goes stale.
-        if (existing?.reportDate && existing.reportDate > todayStr && hit.date >= existing.reportDate) {
-          continue;
+        // Moving a stored future date NEARER is always allowed — it is fail-safe (the
+        // -20 penalty engages earlier) and it is what heals rows poisoned by the old
+        // truncated-bulk behaviour, since poison always reads too FAR.
+        //
+        // Moving one LATER is allowed only when the sweep is COMPLETE and the slip is
+        // small (<= MAX_LATER_SLIP_DAYS). Issuers routinely refine a scheduled date by a
+        // day or two, and refusing those left rows stale-early for weeks (measured
+        // 2026-08-28: 19 of 69 names reporting within 45d were 1-8 days early, some
+        // written two months prior). But a LARGE later jump is the signature of a
+        // Finnhub coverage gap hiding the near date and returning the following quarter
+        // — roughly a 90-day leap — which is exactly the failure this job exists to
+        // prevent, so it is still refused. An incomplete sweep is never trusted to push
+        // a date out at all. Anything refused here is corrected by Phase 2 once the
+        // stored date goes stale.
+        if (existing?.reportDate && existing.reportDate > todayStr && hit.date > existing.reportDate) {
+          const slipDays = daysBetween(existing.reportDate, hit.date);
+          if (!sweepComplete || slipDays > MAX_LATER_SLIP_DAYS) continue;
         }
         const reportTime: 'bmo' | 'amc' | null =
           hit.hour === 'bmo' ? 'bmo' : hit.hour === 'amc' ? 'amc' : null;
