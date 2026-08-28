@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.1.136] — 2026-08-28
+
+### fix — near-term earnings dates were truncated away by Finnhub's bulk result cap
+- **The 2026-08-26 brief ranked NVDA the #1 wheel pick (73.3) and a top-5 income pick (42.4) on the day NVDA reported (2026-08-26 AMC)**, and wheel #2 (66.3) the day before. Both strategies carry the −20 earnings-within-45d penalty; with it, NVDA scores 53.3 / 22.4 and drops off both lists (other Aug-26 wheel picks: 63.6–64.3). NVDA's `earnings_calendar` row read **2026-11-17** — one full quarter late. Confirmed locally: +6.3% gap on 08-27 (209.66 → 227.98) on 294M shares vs ~100M, ATM IV 41.5% → 33.2%.
+- **Root cause: Finnhub's free-tier bulk calendar caps at 1500 entries and truncates from the FRONT.** Verified against the live API — the exact call the job made on 2026-08-25 (`from=2026-08-25&to=2026-11-23`) returned 1500 entries spanning **only 2026-11-09 … 11-23**. The near-term half of every requested window was silently dropped, so the bulk phase could only ever write far dates. The v1.1.75 nearest-wins guard was powerless: the near date was never in the payload.
+- **And the correction was suppressed by the fix's own side effect.** Phase 2's per-ticker lookup has the right answer (`NVDA → [2026-11-17, 2026-08-26]`, nearest kept) but the delta filter only selected tickers with **no row or a past date** — the freshly-poisoned row held a *future* date, so the ticker was skipped until the bogus date passed. The brief's own `refreshTickers` net shares the identical assumption (Aug-26 run: `{"updated":0,"skipped":53,"failed":3}`) and runs *after* Stage 3 scoring anyway.
+- **Adaptive sweep** (`sweepBulkWindow`) replaces the two fixed 90-day windows: a response *at* the cap is treated as evidence of truncation and the window is recursively halved until every slice fits under it. Peak season needs ~5-day slices (`2026-10-27…10-31` = 639 entries, but `…11-05` overflows), so a fixed chunk size would not have sufficed. The sweep is reduced to the nearest date per ticker in one pass, so slice order cannot matter.
+- **Bulk data may now only move a stored future date NEARER, never further out.** Finnhub's bulk has coverage gaps, and a gap hiding a near date while returning the following quarter would push the stored date out — reintroducing this bug. Nearer is fail-safe and is also what heals poisoned rows (poison always reads too FAR); a genuinely delayed report is caught by Phase 2 once the stored date goes stale.
+- **Phase 2 now re-verifies rows dated beyond the 180d sweep horizon** — the truncation signature, and beyond what the sweep can correct.
+- **`earnings-refresh` now runs BEFORE `daily-intelligence-brief`.** It was registered after it, so every brief scored its −20 penalty against a calendar refreshed at the *end* of the previous chain — one cycle stale even when correct. Migration 067 reorders existing installs; `after_close_only` stays 1 (the sweep is too many calls for the lean intraday slot, and a <24h calendar is fine for slow-moving dates).
+- **Backfill: every non-manual row beyond +120d was re-verified — 14 of 14 were poisoned**, each exactly one quarter late (AFRM, AIT, CACI, CAH, CPAY, EL, FN, IREN, JKHY, MSGS, RMD, SMCI, UI, VIAV). AFRM was an income pick in the 08-27 brief. None had reached the 45-day window yet, so no further brief was mis-scored — but all 14 would have crossed into it still reading a quarter late. Migration 067 deletes any remaining far-dated non-manual rows so the next run re-verifies them.
+- **Validation (FR-SEY-5)**: not a scoring-behavior change — no weight, policy parameter, or gate rule is altered. This restores the penalty's *input data* so an already-validated gate fires when it always should have.
+- Regression: `tests/earnings-refresh-job.test.ts` +2 (mocked cap with front-truncation; poisoned far-future row re-verified). Suite: 963 passed.
+
+Docs: `Requirements/spec/17-earnings-calendar.md`, `Requirements/spec/20-batch-jobs.md`, `.ai/AI_CONTEXT.md` §10, `CLAUDE.md` Known quirks.
+
 ## [1.1.135] — 2026-08-07
 
 ### Validation — cutting `optionLiquidity`'s weight shows NO measurable benefit

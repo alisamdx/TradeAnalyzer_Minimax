@@ -572,6 +572,21 @@ app.whenReady().then(() => {
     };
   };
 
+  // Earnings Refresh batch job — runs on startup (60s delay) + manually.
+  // Covers all tickers across open positions + watchlists + conviction list.
+  // Registered BEFORE the brief on purpose: the brief's -20 earnings penalty
+  // (income/wheel/bearish) reads earnings_calendar, so the calendar must be
+  // refreshed earlier in the chain or every brief scores against stale dates.
+  // Migration 067 applies the same ordering to existing installs.
+  const earningsRefreshJob = new EarningsRefreshJob(db, earningsService, getEtradeCreds);
+  batchService.registerJob('earnings-refresh', earningsRefreshJob, {
+    runOnStartup: true,
+    startupDelaySeconds: 60,          // after E*Trade tokens load from keychain
+    dailyScheduleTime: '16:00',       // default schedule time (schedule disabled by default)
+    afterCloseOnly: true,             // earnings dates are slow-moving → skip in the lean intraday slot (spec 08 §4)
+    defaultConfig: { callDelayMs: 500 }, // conservative default — avoids E*Trade 429s
+  });
+
   const briefJob = new DailyIntelligenceBriefJob(
     db, dataProvider, optionsProvider, emailService, paperTradingService,
     () => getMainWindow()?.webContents.send('watchlists:updated'),
@@ -628,18 +643,6 @@ app.whenReady().then(() => {
   // Earnings calendar (earningsService + getEtradeCreds constructed earlier,
   // before the brief job — see v0.32.82 earnings fallback)
   registerEarningsIpc(earningsService, getEtradeCreds);
-
-  // Earnings Refresh batch job — runs on startup (60s delay) + manually.
-  // Covers all tickers across open positions + watchlists + conviction list.
-  // 24h TTL is respected per ticker so most launches result in all skips.
-  const earningsRefreshJob = new EarningsRefreshJob(db, earningsService, getEtradeCreds);
-  batchService.registerJob('earnings-refresh', earningsRefreshJob, {
-    runOnStartup: true,
-    startupDelaySeconds: 60,          // after E*Trade tokens load from keychain
-    dailyScheduleTime: '16:00',       // default schedule time (schedule disabled by default)
-    afterCloseOnly: true,             // earnings dates are slow-moving → skip in the lean intraday slot (spec 08 §4)
-    defaultConfig: { callDelayMs: 500 }, // conservative default — avoids E*Trade 429s
-  });
 
   // Daily Options Premium History — captures durable, query-friendly option-premium
   // history (wheel CSP + income CSP/CC) for long-term ROC analysis. Registered last

@@ -2,15 +2,21 @@
 // S&P 500 + Russell 1000 universe (unique tickers from the constituents table).
 //
 // Two-phase approach:
-//   Phase 1 (Finnhub, optional): one bulk API call for a 90-day window → pre-fills
-//     earnings_calendar for every ticker in the response. Covers tickers that
-//     E*Trade's per-ticker API silently drops (e.g. ABNB, ADBE). Source='finnhub',
-//     confirmed=false. Key stored in secure settings as 'finnhubApiKey'.
-//   Phase 2 (E*Trade): delta loop — only tickers still missing a future date after
-//     Phase 1. E*Trade results overwrite Finnhub entries and mark confirmed=true.
+//   Phase 1 (Finnhub, optional): an ADAPTIVE bulk sweep over the next 180 days.
+//     Finnhub's free tier caps each bulk response at 1500 entries and truncates
+//     from the FRONT, so any full response is a truncated tail, not a whole window.
+//     sweepBulkWindow() recursively halves the range until every slice fits under
+//     the cap, then the nearest future date per ticker is written in one pass.
+//     Covers tickers that E*Trade's per-ticker API silently drops (e.g. ABNB, ADBE).
+//     Source='finnhub'. Key stored in secure settings as 'finnhubApiKey'.
+//   Phase 2 (Finnhub per-ticker): delta loop over tickers with no row, a stale row,
+//     or a row dated beyond the swept horizon (the signature of the old truncation
+//     bug, which the sweep cannot see far enough to correct).
 //
-// Manual entries are never overwritten. Delta filter applied before both phases.
-// v0.32.28
+// Manual entries are never overwritten. Delta filter applied before Phase 2.
+// v1.1.136 — fixed-window bulk replaced by the adaptive sweep after a truncated
+// window stored NVDA's 2026-08-26 report as 2026-11-17, hiding it from the -20
+// earnings penalty on the day it printed.
 
 import type { BatchJobHandler, BatchJobResult } from '../batch-service.js';
 import type { BatchProgressEvent } from '@shared/types.js';
@@ -24,8 +30,25 @@ const DEFAULT_CALL_DELAY_MS = 500; // conservative default — avoids E*Trade 42
 const MIN_CALL_DELAY_MS = 0;       // 0 = no artificial delay; E*Trade API ~250ms natural rate
 const MAX_CALL_DELAY_MS = 2000;
 
+// ── Finnhub bulk-sweep tuning ────────────────────────────────────────────────
+// Finnhub's free-tier bulk calendar caps each response at 1500 entries and
+// truncates from the FRONT — a from=today&to=+90d call during earnings season
+// comes back holding only the LAST two weeks of the range. See sweepBulk().
+const FINNHUB_BULK_CAP   = 1500;
+const BULK_HORIZON_DAYS  = 180;  // how far ahead the sweep looks
+const MAX_BULK_CALLS     = 160;  // runaway guard for the recursive subdivision
+const BULK_CALL_DELAY_MS = 1100; // 1 call/s — inside the 60/min free-tier limit
+
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function addDays(iso: string, days: number): string {
+  return new Date(Date.parse(`${iso}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
+}
+
+function daysBetween(from: string, to: string): number {
+  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
 }
 
 function readCallDelay(db: DbHandle): number {
@@ -45,10 +68,11 @@ function readCallDelay(db: DbHandle): number {
 export class EarningsRefreshJob implements BatchJobHandler {
   readonly name = 'Earnings Refresh';
   readonly description =
-    'Bulk-fetches upcoming earnings dates via Finnhub (two calls: today→+90d and +90d→+180d). ' +
-    'Covers tickers E*Trade API misses. Tickers without announced dates simply have nothing to ' +
-    'return yet — they appear automatically on the next run once companies publish them. ' +
-    'Manual entries are never overwritten.';
+    'Sweeps upcoming earnings dates via Finnhub over the next 180 days, subdividing the ' +
+    'window until every slice fits under the API result cap so near-term dates are never ' +
+    'truncated away. Covers tickers the E*Trade API misses. Tickers without announced dates ' +
+    'simply have nothing to return yet — they appear automatically on the next run once ' +
+    'companies publish them. Manual entries are never overwritten.';
 
   constructor(
     private readonly db: DbHandle,
@@ -81,60 +105,69 @@ export class EarningsRefreshJob implements BatchJobHandler {
       };
     }
 
-    // ── Phase 1: Finnhub bulk pre-fill (two 90-day windows = 180 days) ──────
-    // Free tier returns ~1500 entries per call. Two calls cover more of the
-    // universe than a single call and avoid result-cap cut-offs (e.g. ABNB).
-    // Delta query runs AFTER this so E*Trade only sees tickers Finnhub missed.
+    // ── Phase 1: Finnhub bulk sweep (adaptive subdivision over 0–180d) ──────
+    // Finnhub's free-tier bulk calendar caps a response at FINNHUB_BULK_CAP (1500)
+    // entries and truncates from the FRONT — it returns the TAIL of the requested
+    // range. A fixed from=today&to=+90d call therefore comes back holding only the
+    // last two weeks of that window during earnings season, silently dropping every
+    // near-term date. That is how NVDA's 2026-08-26 report was stored as 2026-11-17
+    // (one quarter late) and slipped past the -20 earnings penalty on the very day
+    // it printed — see CLAUDE.md Known quirks.
+    //
+    // sweepBulk() therefore treats a full response as evidence of truncation and
+    // recursively halves the window until every slice comes back under the cap, so
+    // the sweep is complete over the whole horizon regardless of season density.
     const finnhubKey = secureGet(this.db, 'finnhubApiKey');
     let finnhubFilled = 0;
     let finnhubErrors = 0;
     // Only store entries for tickers in our universe — bulk returns global companies
     const constituentSet = new Set(tickers);
+    let sweepComplete = false;
     if (finnhubKey) {
-      const windows = [
-        { from: 0,  to: 90  },   // today → +90d
-        { from: 90, to: 180 },   // +90d  → +180d
-      ];
-      for (const win of windows) {
-        if (signal.aborted) break;
-        try {
-          const fromDate = new Date(Date.now() + win.from * 86_400_000).toISOString().slice(0, 10);
-          const toDate   = new Date(Date.now() + win.to   * 86_400_000).toISOString().slice(0, 10);
-          const url = `https://finnhub.io/api/v1/calendar/earnings?from=${fromDate}&to=${toDate}&token=${finnhubKey}`;
-          const resp = await fetch(url);
-          if (resp.ok) {
-            const json = await resp.json() as { earningsCalendar?: FinnhubEntry[] };
-            for (const e of json.earningsCalendar ?? []) {
-              if (!e.symbol || !e.date) continue;
-              if (!constituentSet.has(e.symbol)) continue;   // skip non-constituents
-              if (e.date <= todayStr) continue;              // ignore past/today dates
-              const existing = this.earningsService.getForTicker(e.symbol);
-              if (existing?.source === 'manual') continue;
-              // Keep the NEAREST future earnings date. The two windows are fetched in
-              // order (0–90d, then 90–180d), and the upsert overwrites unconditionally,
-              // so without this guard a quarterly reporter that appears in BOTH windows
-              // would have its near date (window 1, e.g. an Aug report) overwritten by
-              // the FOLLOWING quarter (window 2, e.g. Nov) — silently hiding the next
-              // earnings from the earnings-before-expiry risk gate (critic +
-              // brief-entry-source), the single most important gate for a premium-selling
-              // book. Only overwrite when there is no stored future date, the stored date
-              // has already passed, or this candidate is strictly nearer.
-              if (existing?.reportDate && existing.reportDate > todayStr && e.date >= existing.reportDate) {
-                continue;
-              }
-              const reportTime: 'bmo' | 'amc' | null =
-                e.hour === 'bmo' ? 'bmo' : e.hour === 'amc' ? 'amc' : null;
-              this.earningsService.upsertFromProvider(e.symbol, e.date, reportTime, 'finnhub', true);
-              finnhubFilled++;
-            }
-          } else {
-            finnhubErrors++;
-          }
-        } catch {
-          finnhubErrors++;
+      const collected: FinnhubEntry[] = [];
+      const state = { calls: 0, errors: 0 };
+      sweepComplete = await sweepBulkWindow(
+        todayStr,
+        addDays(todayStr, BULK_HORIZON_DAYS),
+        finnhubKey,
+        collected,
+        state,
+        signal,
+      );
+      finnhubErrors = state.errors;
+
+      // Reduce the sweep to the NEAREST future date per ticker before writing.
+      // Doing this in one pass (rather than upserting as results stream in) makes
+      // the result independent of slice order — a quarterly reporter appearing in
+      // both an Aug and a Nov slice always resolves to Aug.
+      const nearest = new Map<string, { date: string; hour: string | null }>();
+      for (const e of collected) {
+        if (!e.symbol || !e.date) continue;
+        if (!constituentSet.has(e.symbol)) continue;   // skip non-constituents
+        if (e.date <= todayStr) continue;              // ignore past/today dates
+        const cur = nearest.get(e.symbol);
+        if (!cur || e.date < cur.date) nearest.set(e.symbol, { date: e.date, hour: e.hour });
+      }
+
+      for (const [symbol, hit] of nearest) {
+        const existing = this.earningsService.getForTicker(symbol);
+        if (existing?.source === 'manual') continue;   // never overwrite a manual entry
+        if (existing?.reportDate === hit.date) continue;
+        // The sweep may only ever move a stored future date NEARER (or fill a row that
+        // is missing/stale). Never further out: Finnhub's bulk calendar has coverage
+        // gaps, and a gap that hides a near date while returning the following quarter
+        // would push the stored date out — which is precisely the failure this job
+        // exists to prevent. Moving a date nearer is always fail-safe (the penalty
+        // engages earlier), and it is also what heals rows poisoned by the old
+        // truncated-bulk behaviour, since poison always reads too FAR. A date that
+        // genuinely slips later is picked up by Phase 2 once the stored date goes stale.
+        if (existing?.reportDate && existing.reportDate > todayStr && hit.date >= existing.reportDate) {
+          continue;
         }
-        // Small pause between Finnhub calls to be polite to the rate limiter
-        if (!signal.aborted) await sleep(1000);
+        const reportTime: 'bmo' | 'amc' | null =
+          hit.hour === 'bmo' ? 'bmo' : hit.hour === 'amc' ? 'amc' : null;
+        this.earningsService.upsertFromProvider(symbol, hit.date, reportTime, 'finnhub', true);
+        finnhubFilled++;
       }
     }
 
@@ -144,7 +177,8 @@ export class EarningsRefreshJob implements BatchJobHandler {
       attempted: 0, updated: finnhubFilled, skipped: 0, failed: finnhubErrors,
       total: tickers.length,
       message: finnhubKey
-        ? `Finnhub bulk: ${finnhubFilled} entries (0–180d). Now querying missing tickers individually…`
+        ? `Finnhub sweep (0–180d${sweepComplete ? '' : ', INCOMPLETE'}): ${finnhubFilled} dates written. ` +
+          'Now querying remaining tickers individually…'
         : 'Finnhub key not configured — add key in Settings → API & Data',
     });
 
@@ -160,9 +194,21 @@ export class EarningsRefreshJob implements BatchJobHandler {
     // The bulk call has a result cap (~1500 global entries). Tickers like AAPL
     // that have confirmed dates but weren't returned in the bulk are fetched here.
     // Rate-limited to 1 call/second (well within Finnhub free tier 60/min).
+    // Delta filter. Historically this trusted ANY stored future date and skipped the
+    // ticker — which meant a bogus far date written by the old truncated bulk call
+    // permanently suppressed the per-ticker lookup that would have corrected it
+    // (the per-ticker endpoint returns every quarter and picks the nearest, so it
+    // always had the right answer; it was simply never asked). A stored date beyond
+    // the swept horizon is exactly that failure's signature — the bulk sweep cannot
+    // see far enough to correct it, so re-verify it per ticker.
+    const horizonStr = addDays(todayStr, BULK_HORIZON_DAYS);
     const needsLookup = tickers.filter(t => {
       const e = this.earningsService.getForTicker(t);
-      return !e || (e.source !== 'manual' && e.reportDate <= todayStr);
+      if (!e) return true;
+      if (e.source === 'manual') return false;
+      if (e.reportDate <= todayStr) return true;      // stale — last report has passed
+      if (e.reportDate > horizonStr) return true;     // beyond the sweep's reach — unverifiable
+      return false;
     });
 
     let perTickerFilled = 0;
@@ -216,13 +262,70 @@ export class EarningsRefreshJob implements BatchJobHandler {
 
     return {
       status: signal.aborted ? 'failed' : 'success',
-      notes: `Bulk: ${finnhubFilled} entries · Per-ticker: ${perTickerFilled} found, ${needsLookup.length - perTickerFilled} not yet announced`,
+      notes: `Sweep${sweepComplete ? '' : ' (INCOMPLETE)'}: ${finnhubFilled} dates · ` +
+             `Per-ticker: ${perTickerFilled} found, ${needsLookup.length - perTickerFilled} not yet announced`,
       tickersAttempted: tickers.length,
       tickersUpdated: finnhubFilled + perTickerFilled,
       tickersSkipped: tickers.length - needsLookup.length,
       tickersFailed: finnhubErrors + perTickerFailed,
     };
   }
+}
+
+/**
+ * Recursively sweeps the Finnhub bulk earnings calendar over [from, to].
+ *
+ * Finnhub caps a bulk response at FINNHUB_BULK_CAP entries and truncates from the
+ * front, so a full response means "this window overflowed and you are only seeing
+ * its tail" — never "here is the whole window". We therefore treat a full response
+ * as a subdivision signal and halve the range until every slice fits under the cap.
+ *
+ * Collected entries are appended to `out`. Returns true only if EVERY slice was
+ * fetched successfully and came back under the cap — i.e. the sweep is complete and
+ * can be trusted as authoritative for the range.
+ */
+async function sweepBulkWindow(
+  from: string,
+  to: string,
+  apiKey: string,
+  out: FinnhubEntry[],
+  state: { calls: number; errors: number },
+  signal: AbortSignal,
+): Promise<boolean> {
+  if (signal.aborted) return false;
+  if (state.calls >= MAX_BULK_CALLS) return false;   // runaway guard
+
+  state.calls++;
+  let entries: FinnhubEntry[];
+  try {
+    const url = `https://finnhub.io/api/v1/calendar/earnings?from=${from}&to=${to}&token=${apiKey}`;
+    const resp = await fetch(url);
+    if (!resp.ok) { state.errors++; return false; }
+    const json = await resp.json() as { earningsCalendar?: FinnhubEntry[] };
+    entries = json.earningsCalendar ?? [];
+  } catch {
+    state.errors++;
+    return false;
+  }
+  if (!signal.aborted) await sleep(BULK_CALL_DELAY_MS);
+
+  if (entries.length < FINNHUB_BULK_CAP) {
+    out.push(...entries);
+    return true;
+  }
+
+  // Capped → the response is a truncated tail. Split and retry each half.
+  const span = daysBetween(from, to);
+  if (span < 1) {
+    // A single day that still overflows the cap: nothing left to subdivide. Keep
+    // what we have but report the sweep as incomplete so callers stay conservative.
+    out.push(...entries);
+    return false;
+  }
+  const mid = addDays(from, Math.floor(span / 2));
+  const left  = await sweepBulkWindow(from, mid, apiKey, out, state, signal);
+  const right = await sweepBulkWindow(addDays(mid, 1), to, apiKey, out, state, signal);
+  return left && right;
 }
 
 interface FinnhubEntry {

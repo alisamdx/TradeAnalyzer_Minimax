@@ -79,3 +79,93 @@ describe('EarningsRefreshJob — nearest-future-date wins across windows', () =>
     expect(svc.getForTicker('NVDA')?.reportDate).toBe(near);
   });
 });
+
+// ── Regression: Finnhub bulk result cap (v1.1.136) ──────────────────────────
+//
+// Finnhub's free-tier bulk calendar caps a response at 1500 entries and truncates
+// from the FRONT — a from=today&to=+90d call during earnings season returns only the
+// LAST couple of weeks of that range. The old job issued two fixed 90-day windows and
+// trusted whatever came back, so near-term dates were silently dropped and the ticker
+// was stored with the FOLLOWING quarter's date.
+//
+// Found live 2026-08-27: NVDA reported 2026-08-26 AMC, but earnings_calendar held
+// 2026-11-17 (written 2026-08-25 by a truncated bulk call). loadEarningsPenalty()
+// therefore saw no earnings within 45 days, the -20 income/wheel/bearish penalty never
+// applied, and NVDA ranked wheel #1 in the brief on the very day it printed.
+describe('EarningsRefreshJob — Finnhub bulk result cap', () => {
+  let db: DbHandle;
+  const noop = () => {};
+  const signal = new AbortController().signal;
+
+  beforeEach(() => {
+    db = openDatabase(':memory:');
+    runMigrations(db, MIGRATIONS_DIR);
+    db.prepare(`INSERT INTO constituents (ticker, index_name, company_name) VALUES ('NVDA','sp500','NVIDIA')`).run();
+  });
+
+  afterEach(() => {
+    db.close();
+    vi.restoreAllMocks();
+  });
+
+  it('subdivides a capped window instead of accepting its truncated tail', async () => {
+    const near = iso(10);   // the TRUE next earnings — lives in the truncated-away front
+    const far  = iso(150);  // the following quarter — survives in the returned tail
+
+    // Emulate Finnhub: any window wider than 100 days overflows the cap and comes
+    // back holding ONLY its tail. Narrower windows return the full range.
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      const u = new URL(url);
+      if (u.searchParams.get('symbol')) {
+        return { ok: true, json: async () => ({ earningsCalendar: [] }) } as Response;
+      }
+      const from = u.searchParams.get('from')!;
+      const to = u.searchParams.get('to')!;
+      const inWin = (d: string) => d >= from && d <= to;
+      const spanDays = Math.round((Date.parse(to) - Date.parse(from)) / 86_400_000);
+
+      const cal: Array<Record<string, unknown>> = [];
+      if (spanDays > 100) {
+        // Truncated: only the tail of the range survives, padded to the cap so the
+        // job can recognise the response as overflowing.
+        if (inWin(far)) cal.push({ symbol: 'NVDA', date: far, hour: 'amc' });
+        while (cal.length < 1500) cal.push({ symbol: 'FILLER', date: far, hour: 'amc' });
+      } else {
+        if (inWin(near)) cal.push({ symbol: 'NVDA', date: near, hour: 'amc' });
+        if (inWin(far)) cal.push({ symbol: 'NVDA', date: far, hour: 'amc' });
+      }
+      return { ok: true, json: async () => ({ earningsCalendar: cal }) } as Response;
+    }));
+
+    const svc = new EarningsService(db);
+    const job = new EarningsRefreshJob(db, svc, () => null);
+    await job.run(noop, signal, false);
+
+    // Without subdivision the single capped call yields only `far` and NVDA is stored
+    // one full quarter late — exactly the NVDA-on-earnings-day failure.
+    expect(svc.getForTicker('NVDA')?.reportDate).toBe(near);
+  }, 30_000);
+
+  it('re-verifies a stored date beyond the sweep horizon instead of trusting it', async () => {
+    const poisoned = iso(200);  // beyond the 180d sweep — the truncation bug's signature
+    const truth    = iso(12);   // what a per-ticker lookup returns
+    new EarningsService(db).upsertFromProvider('NVDA', poisoned, 'amc', 'finnhub', true);
+
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      const u = new URL(url);
+      // Bulk sweep sees nothing; only the per-ticker endpoint knows the near date.
+      const cal = u.searchParams.get('symbol')
+        ? [{ symbol: 'NVDA', date: truth, hour: 'amc' }, { symbol: 'NVDA', date: poisoned, hour: 'amc' }]
+        : [];
+      return { ok: true, json: async () => ({ earningsCalendar: cal }) } as Response;
+    }));
+
+    const svc = new EarningsService(db);
+    const job = new EarningsRefreshJob(db, svc, () => null);
+    await job.run(noop, signal, false);
+
+    // The old delta filter skipped any ticker holding a future date, so the bogus far
+    // date suppressed the very lookup that would have corrected it — permanently.
+    expect(svc.getForTicker('NVDA')?.reportDate).toBe(truth);
+  }, 30_000);
+});
