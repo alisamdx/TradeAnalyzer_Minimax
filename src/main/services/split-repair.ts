@@ -16,8 +16,9 @@
 // API surface), then repair by re-fetching the ticker's whole series, which Polygon
 // returns adjusted to today. The repair is idempotent: re-fetching a ticker that did NOT
 // split simply rewrites identical bars, so a false positive costs one API call and
-// changes nothing. A jump that survives a re-fetch is a real market move and is recorded
-// as such so it is never re-fetched again.
+// changes nothing. A jump that survives a re-fetch is treated as a real market move and
+// skipped for CONFIRMED_REAL_TTL_DAYS, then re-verified — providers backfill corporate
+// actions late, so that verdict must expire rather than stand forever.
 
 import type { DbHandle } from '../db/connection.js';
 import type { HistoricalDataService } from './historical-service.js';
@@ -27,8 +28,28 @@ import type { PolygonDataProvider } from './polygon-provider.js';
 /** Default |1-day move| beyond which a bar is treated as split-like and re-verified. */
 export const DEFAULT_SPLIT_THRESHOLD = 0.25;
 
+/**
+ * Tolerance for matching an observed ratio to a named split ratio. Wide on purpose —
+ * see nearestSplitRatio: a split day also carries that day's real price move.
+ */
+export const SPLIT_RATIO_TOLERANCE = 0.08;
+
 /** Never re-fetch further back than this — bounds the payload on very long histories. */
 const MAX_REPAIR_LOOKBACK_DAYS = 800;
+
+/**
+ * How long a `confirmed_real` classification is trusted before the discontinuity is
+ * re-verified against the provider.
+ *
+ * A one-shot classification is too strong: data providers backfill corporate actions
+ * late, so a split can be genuinely absent from the adjusted series on the day we check
+ * and present a week later. Without a TTL that row is excluded from detection forever and
+ * the corruption becomes permanent and invisible — the exact failure this module exists to
+ * prevent, just moved one level up. Observed 2026-09-01: MRNA stepped 62.96 → 174.38 and
+ * STAYED there (split-shaped, not a spike), yet survived a re-fetch and was written off as
+ * real. Re-verification costs one API call per stale entry per month. v1.1.140
+ */
+const CONFIRMED_REAL_TTL_DAYS = 30;
 
 export interface PriceBar {
   date: string;
@@ -73,12 +94,26 @@ export function detectDiscontinuities(
  * adjusted series always comes from the provider).
  */
 export function nearestSplitRatio(ratio: number): string | null {
+  // Only ratios that CANNOT be confused with an ordinary one-day move are labelled.
+  //
+  // 3:2 (−33%) was in this list until v1.1.140 and was the source of every false label:
+  // a third of the 2026-08-28 scan's `confirmed_real` entries came back tagged "~3:2"
+  // when they were ordinary crashes (SRPT, ALGN, ELF, SMCI all dropping 32–37% on bad
+  // news). A one-third single-day fall is routine; a halving is not. Every remaining
+  // candidate implies a move of ≥46%, which no liquid name makes on news often enough
+  // to matter.
+  //
+  // The ±8% tolerance stays wide ON PURPOSE and must not be tightened: a split day also
+  // carries that day's genuine price move, so the observed ratio is never exact. CRWD's
+  // real 4:1 printed at 0.2649 vs a theoretical 0.25 — 6% off, because the stock rose 6%
+  // that session. A 3% tolerance would have rejected a true split. The fix for false
+  // labels is a safer candidate SET, not a narrower band.
   const candidates: Array<[string, number]> = [
-    ['2:1', 0.5], ['3:1', 1 / 3], ['4:1', 0.25], ['3:2', 2 / 3], ['5:1', 0.2], ['10:1', 0.1],
+    ['2:1', 0.5], ['3:1', 1 / 3], ['4:1', 0.25], ['5:1', 0.2], ['10:1', 0.1],
     ['1:2', 2], ['1:3', 3], ['1:4', 4], ['1:5', 5], ['1:10', 10],
   ];
   for (const [label, target] of candidates) {
-    if (Math.abs(ratio / target - 1) <= 0.08) return label;
+    if (Math.abs(ratio / target - 1) <= SPLIT_RATIO_TOLERANCE) return label;
   }
   return null;
 }
@@ -95,8 +130,10 @@ export interface RepairSummary {
 /**
  * Scan every ticker in `historical_prices` and repair split-corrupted series.
  *
- * Discontinuities already recorded as `confirmed_real` are ignored, so a genuine −40%
- * earnings crash is re-fetched once and never again.
+ * A discontinuity recorded as `confirmed_real` is skipped while that verdict is inside
+ * CONFIRMED_REAL_TTL_DAYS, so a genuine −40% earnings crash costs one API call a month
+ * rather than one per run — while a split the provider had not yet published still gets
+ * picked up on a later pass.
  */
 export async function detectAndRepairSplits(
   db: DbHandle,
@@ -115,9 +152,17 @@ export async function detectAndRepairSplits(
   const maxRepairs = opts.maxRepairs ?? 40;
   const since = new Date(Date.now() - lookbackDays * 86_400_000).toISOString().slice(0, 10);
 
+  // Only trust a `confirmed_real` verdict while it is inside its TTL. Older ones fall back
+  // into detection so a late-published corporate action is eventually picked up. Both sides
+  // of the comparison use the same ISO format the table is written with, so the string
+  // compare is well-defined.
   const known = new Set(
-    (db.prepare(`SELECT ticker, discontinuity_date FROM price_split_repairs WHERE status = 'confirmed_real'`)
-      .all() as Array<{ ticker: string; discontinuity_date: string }>)
+    (db.prepare(`
+      SELECT ticker, discontinuity_date FROM price_split_repairs
+      WHERE status = 'confirmed_real'
+        AND resolved_at IS NOT NULL
+        AND resolved_at >= strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?)
+    `).all(`-${CONFIRMED_REAL_TTL_DAYS} days`) as Array<{ ticker: string; discontinuity_date: string }>)
       .map(r => `${r.ticker}|${r.discontinuity_date}`),
   );
 

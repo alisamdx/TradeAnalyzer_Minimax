@@ -66,6 +66,23 @@ describe('detectDiscontinuities', () => {
     expect(nearestSplitRatio(3.0)).toBe('1:3');
     expect(nearestSplitRatio(0.61)).toBeNull();   // not near any simple ratio
   });
+
+  // v1.1.140: 3:2 (-33%) was dropped from the candidate set. It sat right on top of the
+  // ordinary one-day crash range, and produced every false "~3:2" label in the 2026-08-28
+  // scan (SRPT, ALGN, ELF, SMCI all fell 32-37% on news, none of them split).
+  it('does NOT label a one-third fall as a split — that is ordinary crash territory', () => {
+    expect(nearestSplitRatio(2 / 3)).toBeNull();      // exact 3:2
+    expect(nearestSplitRatio(0.65)).toBeNull();       // -35%, e.g. SRPT
+    expect(nearestSplitRatio(0.68)).toBeNull();       // -32%
+  });
+
+  // The tolerance must stay wide: a split day also carries that day's real price move,
+  // so the observed ratio is never exact. CRWD's genuine 4:1 printed at 0.2649.
+  it('still matches a real split whose ratio is skewed by the day price move', () => {
+    expect(nearestSplitRatio(0.2649)).toBe('4:1');    // CRWD 2026-06-29, stock +6% that day
+    expect(nearestSplitRatio(1.9497)).toBe('1:2');    // HON 2026-06-23
+    expect(nearestSplitRatio(3.03)).toBe('1:3');      // DD 2026-06-22
+  });
 });
 
 describe('detectAndRepairSplits', () => {
@@ -121,6 +138,35 @@ describe('detectAndRepairSplits', () => {
     const second = await detectAndRepairSplits(db, {} as never, {} as never, { lookbackDays: 30 });
     expect(second.flagged).toBe(0);
     expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-verifies a confirmed_real verdict once its TTL has expired', async () => {
+    const put = insert(db);
+    put('MRNA', iso(-5), 63); put('MRNA', iso(-4), 174);      // split-shaped, provider not yet adjusted
+    const mod = await import('../src/main/services/historical-service.js');
+    const spy = vi.spyOn(mod, 'fetchAndStorePrices').mockResolvedValue(2);
+
+    // First pass: survives the re-fetch, so it is written off as a real move.
+    const first = await detectAndRepairSplits(db, {} as never, {} as never, { lookbackDays: 30 });
+    expect(first.confirmedReal).toBe(1);
+    expect(spy).toHaveBeenCalledTimes(1);
+
+    // Age the verdict past its TTL, as if a month of runs had passed. Without the TTL this
+    // row would be excluded from detection forever and the corruption made permanent.
+    db.prepare(`UPDATE price_split_repairs SET resolved_at = strftime('%Y-%m-%dT%H:%M:%fZ','now','-45 days')`).run();
+
+    // The provider has since published the split, so this time the re-fetch repairs it.
+    spy.mockImplementation(async () => {
+      const p = insert(db);
+      p('MRNA', iso(-5), 189); p('MRNA', iso(-4), 174);
+      return 2;
+    });
+    const second = await detectAndRepairSplits(db, {} as never, {} as never, { lookbackDays: 30 });
+    expect(second.flagged).toBe(1);
+    expect(second.repaired).toBe(1);
+    expect(spy).toHaveBeenCalledTimes(2);
+    const row = db.prepare(`SELECT status FROM price_split_repairs WHERE ticker='MRNA'`).get() as { status: string };
+    expect(row.status).toBe('repaired');
   });
 
   it('leaves a clean series completely alone', async () => {

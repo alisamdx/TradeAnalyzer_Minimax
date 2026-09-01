@@ -22,8 +22,16 @@ vi.mock('../src/main/services/etrade-auth.js', () => ({ etradeGet }));
 
 const { EarningsService } = await import('../src/main/services/earnings-service.js');
 
+// Weekday-snapped so these tests never straddle the service's documented Saturday->Friday
+// shift (E*Trade returns UTC, so a Saturday-UTC date is really a Friday-ET report; see
+// earnings-service.ts). Without the snap the suite fails on whichever days of the month
+// an offset happens to land on a weekend — it broke on 2026-09-01, when iso(18) was a
+// Saturday and the service correctly stored the Friday. Real earnings dates are weekdays,
+// so snapping also keeps the fixtures realistic.
 function iso(daysFromNow: number): string {
-  return new Date(Date.now() + daysFromNow * 86_400_000).toISOString().slice(0, 10);
+  const d = new Date(Date.now() + daysFromNow * 86_400_000);
+  while (d.getUTCDay() === 0 || d.getUTCDay() === 6) d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
 }
 
 const creds = { consumerKey: 'k', consumerSecret: 's', accessToken: 't', accessSecret: 'a' };

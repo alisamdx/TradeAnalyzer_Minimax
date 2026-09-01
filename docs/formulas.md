@@ -790,11 +790,21 @@ A split shows as a ratio near a simple fraction: `0.5` = 2:1, `0.25` = 4:1, `2/3
 every bar. The operation is **idempotent**: re-fetching a ticker that did not split
 rewrites identical bars, so a false positive costs one API call and changes nothing.
 
-**Classification** — a jump that survives the re-fetch is a genuine market move (earnings
-collapse, buyout) and is recorded in `price_split_repairs` as `confirmed_real` so it is
-never re-fetched again. Threshold choice is therefore asymmetric on purpose: a
-false positive is cheap (one call), a false negative silently corrupts every indicator
-spanning that date.
+**Classification** — a jump that survives the re-fetch is treated as a genuine market move
+(earnings collapse, buyout) and recorded in `price_split_repairs` as `confirmed_real`.
+That verdict **expires after `CONFIRMED_REAL_TTL_DAYS` (30)** and the discontinuity is then
+re-verified (v1.1.140): providers backfill corporate actions late, so a split absent from
+the adjusted series today can appear next week, and a permanent verdict would hide it
+forever. Threshold choice is asymmetric on purpose: a false positive is cheap (one call),
+a false negative silently corrupts every indicator spanning that date.
+
+**Split-ratio labelling** (`nearestSplitRatio`, descriptive only — never drives a repair):
+matched with `SPLIT_RATIO_TOLERANCE` = ±8%. The tolerance is wide **by necessity** — a split
+day also carries that day's real price move, so the observed ratio is never exact (CRWD's
+genuine 4:1 printed at 0.2649 vs 0.25, because the stock rose 6% that session). False labels
+are therefore controlled by the candidate *set*, not a narrower band: 3:2 (−33%) was removed
+in v1.1.140 because it overlaps ordinary one-day crashes, leaving only ratios implying a
+move ≥ 46%.
 
 **Why it matters** — unadjusted splits corrupt SMA/RSI/ADX, `volume_surge`, breakout
 detection, relative strength, the backtest engine, and Brief Replay, which FR-SEY-5 relies

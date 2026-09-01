@@ -65,7 +65,7 @@ All persistence is a single local SQLite database (better-sqlite3), opened once 
 
 **`historical_prices`** — `id PK`, `ticker`, `date`, `open/high/low/close/volume`, `adjusted_close`, `source`, `fetched_at`. Unique `(ticker, date)`. View `v_latest_price`. This table is the backbone for indicators, scoring signals, paper-trade snapshots, and backtesting. **Bars must be self-consistent and split-adjusted** — Polygon is fetched with `adjusted=true`, but bars are stored incrementally and old ones are never revisited, so a later split leaves a permanent step in the series (measured 2026-08-28: 153 discontinuities across 126 tickers; CRWD −74% in a day on a 4:1 split). `daily-price-gap-fill` runs a repair pass over this table — see `docs/formulas.md#split-adjustment`.
 
-**`price_split_repairs`** (migration 068) — `ticker`, `discontinuity_date` (composite PK), `ratio`, `status` (`repaired` | `confirmed_real`), `bars_rewritten`, `detected_at`, `resolved_at`. Audit trail for the split repair above; `confirmed_real` rows mark genuine market moves so the detector never re-fetches them again.
+**`price_split_repairs`** (migration 068) — `ticker`, `discontinuity_date` (composite PK), `ratio`, `status` (`repaired` | `confirmed_real`), `bars_rewritten`, `detected_at`, `resolved_at`. Audit trail for the split repair above. `confirmed_real` marks a jump that survived a provider re-fetch — **the verdict expires after 30 days** and the discontinuity is then re-verified (v1.1.140), because providers backfill corporate actions late and a permanent verdict would hide a late-published split forever.
 
 ## 2.8 IV history (migrations 016, 017)
 

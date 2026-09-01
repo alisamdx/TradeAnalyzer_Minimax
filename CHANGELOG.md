@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.1.140] — 2026-09-01
+
+### fix — a `confirmed_real` split verdict was permanent, and 3:2 produced false split labels
+Follow-up to v1.1.139, from verifying four days of batch output. **v1.1.139's mechanism works**: Aug 28 – Sep 1 ran clean (zero job failures, all slots), **8 tickers repaired** (CRWD, DD, HON×2, KLAC, MNST, MLI, IESC) — CRWD's worst single day fell from **−74% to −20%**, HON from **+95% to 7%** — and the backlog converged to zero flagged by Sep 1.
+- **A discontinuity surviving one re-fetch was excluded from detection FOREVER.** Too strong: providers backfill corporate actions late, so a split genuinely absent from the adjusted series today can appear next week, and that row would never be revisited — the failure this module exists to prevent, moved one level up and made invisible. Observed 2026-09-01, all `confirmed_real` and all still wrong: `BNY +1263%`, `SPCX +632%`, `MRNA +177%`, `KD −55%`, `CORT −50%`, `PRIM −50%`, `CAR −48%`, `FMC −47%`. MRNA is the clearest — it stepped 62.96 → 174.38 and **stayed** at 133–158 through Sep 1 (a split steps and stays; a bad print reverts), and `fetched_at` confirms the repair pass did re-fetch it.
+- **`CONFIRMED_REAL_TTL_DAYS = 30`**: the verdict is trusted for a month, then the discontinuity falls back into detection. Re-confirming refreshes the TTL, so a genuine crash costs one API call a month rather than one per run. **Migration 069** re-opens the verdicts too large to be real (`|move| ≥ 45%` — the 8 above) so they are re-checked next run instead of waiting out the TTL; deliberately scoped, the 137 verdicts in the −32%…−37% band are left alone.
+- **3:2 dropped from `nearestSplitRatio`.** At ±8% tolerance it labelled anything from −28% to −39% a split, which produced every false label in the Aug 28 scan (SRPT, ALGN, ELF, SMCI each fell 32–37% on news; none split). A one-third single-day fall is routine, a halving is not; every remaining candidate implies a move ≥ 46%.
+- **The ±8% tolerance stays and must NOT be tightened** — a split day also carries that day's real price move, so the observed ratio is never exact: CRWD's genuine 4:1 printed at **0.2649** vs a theoretical 0.25 (6% off, the stock rose 6% that session). A 3% tolerance would have rejected a true split. The fix for false labels is a safer candidate *set*, not a narrower band. Now an exported `SPLIT_RATIO_TOLERANCE` so the reasoning has somewhere to live. The label is descriptive only — it never drives a repair decision.
+- **Also fixed a date-fragile test**: `earnings-refresh-tickers.test.ts` computed fixtures as `now + N days` ignoring weekday. On 2026-09-01 `iso(18)` landed on Saturday, the service correctly applied its documented Saturday→Friday shift (E*Trade returns UTC, so a Saturday-UTC date is a Friday-ET report), and the assertion failed against an unshifted expectation. Production behaviour was correct; the helper now snaps to weekdays.
+- **Verification of the rest of the batch**: **earnings calendar 100/100 exact** — ground truth over 2026-09-01…10-16 (663 entries, under the 1500 cap so untruncated) against all 100 constituents reporting inside the 45-day window: **0 late, 0 early, 0 missing** (was 50 exact / 19 early on 2026-08-28; v1.1.137's bounded later-move cleared them). Far-dated poison rows **0**. All key tables current to 2026-09-01; 1123/1136 tickers have today's bar, the 13 stale ones looking like delistings/M&A.
+- Regression: `tests/split-repair.test.ts` 8 → 11 (a one-third fall is not labelled a split; a real split skewed by the day's move still matches; an expired verdict is re-verified and repaired). Suite: 984 passed.
+
+Docs: `docs/formulas.md#split-adjustment`, `Requirements/spec/02-data-model.md`, `.ai/AI_CONTEXT.md` §10, `CLAUDE.md`.
+
 ## [1.1.139] — 2026-08-28
 
 ### fix — `historical_prices` carried unadjusted stock splits
