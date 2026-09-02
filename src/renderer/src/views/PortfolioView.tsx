@@ -257,17 +257,21 @@ const fmt0 = (n: number): string => n.toLocaleString(undefined, { maximumFractio
 const fmt2 = (n: number): string => n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const pct  = (n: number | null): string => (n == null ? '—' : `${n.toFixed(2)}%`);
 
-function Stat({ label, value, sub, strong }: {
-  label: string; value: string; sub?: string; strong?: boolean;
+/**
+ * Matches the P&L summary cards at the top of this view.
+ *
+ * The first version used its own inline light-theme styling, which read as white boxes against
+ * the app's dark surface. Reusing `.summary-card` keeps one visual language and picks up theme
+ * changes for free rather than needing a second set of colours maintained by hand.
+ */
+function Stat({ label, value, sub, tone }: {
+  label: string; value: string; sub?: string; tone?: 'positive' | 'negative';
 }) {
   return (
-    <div style={{
-      border: '1px solid #e5e7eb', borderRadius: 6, padding: '8px 12px', minWidth: 170,
-      background: strong ? '#f0fdf4' : '#fff',
-    }}>
-      <div style={{ fontSize: 10, color: '#6b7280', textTransform: 'uppercase', letterSpacing: .3 }}>{label}</div>
-      <div style={{ fontSize: 20, fontWeight: 700, margin: '2px 0' }}>{value}</div>
-      {sub ? <div style={{ fontSize: 10, color: '#9ca3af' }}>{sub}</div> : null}
+    <div className="summary-card">
+      <span className="summary-label">{label}</span>
+      <span className={`summary-value${tone ? ` ${tone}` : ''}`}>{value}</span>
+      {sub ? <span className="summary-sub">{sub}</span> : null}
     </div>
   );
 }
@@ -1220,14 +1224,14 @@ export function PortfolioView() {
       ══════════════════════════════════════════════════════════════════════ */}
       {activeTab === 'performance' && (
         <div style={{ padding: 4 }}>
-          {capEffBusy && <div style={{ fontSize: 12, color: '#6b7280' }}>Computing…</div>}
+          {capEffBusy && <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Computing…</div>}
           {capEff && (
             <>
-              <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 14 }}>
+              <div className="pnl-summary-cards" style={{ borderBottom: 'none' }}>
                 <Stat label="Return on deployed capital"
                       value={pct(capEff.portfolio.returnOnDeployedPct)}
                       sub={`on avg $${fmt0(capEff.portfolio.avgDeployed)} actually at risk`}
-                      strong />
+                      tone={(capEff.portfolio.returnOnDeployedPct ?? 0) >= 0 ? 'positive' : 'negative'} />
                 <Stat label="Return on portfolio"
                       value={pct(capEff.portfolio.returnOnPortfolioPct)}
                       sub={capEff.portfolioValue ? `of ~$${fmt0(capEff.portfolioValue)} total` : 'portfolio value unknown'} />
@@ -1236,19 +1240,20 @@ export function PortfolioView() {
                       sub={`${capEff.portfolio.idleDays} of ${capEff.portfolio.tradingDays} days flat · peak $${fmt0(capEff.portfolio.peakDeployed)}`} />
                 <Stat label="Realized P&L"
                       value={`$${fmt2(capEff.portfolio.realizedPnl)}`}
+                      tone={capEff.portfolio.realizedPnl >= 0 ? 'positive' : 'negative'}
                       sub={capEff.portfolio.annualizedOnDeployedPct != null
                         ? `${pct(capEff.portfolio.annualizedOnDeployedPct)} annualized on deployed` : ''} />
               </div>
-              <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 10, maxWidth: 760, lineHeight: 1.5 }}>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', margin: '4px 16px 10px', maxWidth: 760, lineHeight: 1.5 }}>
                 Idle days are included in the average, so holding cash lowers deployed capital and
                 raises return-per-dollar-deployed — while <b>return on portfolio</b> beside it shows what
                 sitting flat cost. A covered call adds no capital of its own (the shares already secure
                 it), and an assignment hands capital from the put to the stock rather than counting both.
               </div>
-              <div style={{ fontSize: 12, fontWeight: 600, margin: '10px 0 6px' }}>
+              <div style={{ fontSize: 12, fontWeight: 600, margin: '10px 16px 6px' }}>
                 Per-trade: what the premium promised vs what the trade delivered
               </div>
-              <div style={{ overflowX: 'auto' }}>
+              <div style={{ overflowX: 'auto', padding: '0 16px' }}>
                 <table className="positions-table" style={{ fontSize: 11 }}>
                   <thead><tr>
                     <th>Ticker</th><th>Type</th><th style={{ textAlign: 'right' }}>Strike</th>
@@ -1264,14 +1269,14 @@ export function PortfolioView() {
                         <td style={{ textAlign: 'right' }}>{r.daysHeld}d</td>
                         <td style={{ textAlign: 'right' }}>{r.dteAtEntry ?? '—'}</td>
                         <td style={{ textAlign: 'right' }}>${fmt0(r.capital)}</td>
-                        <td style={{ textAlign: 'right', color: r.realizedPnl >= 0 ? '#059669' : '#dc2626' }}>
+                        <td className={r.realizedPnl >= 0 ? 'positive' : 'negative'} style={{ textAlign: 'right' }}>
                           {r.realizedPnl >= 0 ? '+' : ''}{fmt2(r.realizedPnl)}
                         </td>
-                        <td style={{ textAlign: 'right', color: '#6b7280' }}>
+                        <td style={{ textAlign: 'right', color: 'var(--text-muted)' }}>
                           {r.projectedAnnualPct == null ? '—' : `${r.projectedAnnualPct.toFixed(0)}%`}
                         </td>
-                        <td style={{ textAlign: 'right', fontWeight: 600,
-                                     color: (r.realizedAnnualPct ?? 0) >= 0 ? '#059669' : '#dc2626' }}>
+                        <td className={(r.realizedAnnualPct ?? 0) >= 0 ? 'positive' : 'negative'}
+                            style={{ textAlign: 'right', fontWeight: 600 }}>
                           {r.realizedAnnualPct == null ? '—' : `${r.realizedAnnualPct.toFixed(0)}%`}
                           {r.clamped ? '*' : ''}
                         </td>
@@ -1280,7 +1285,7 @@ export function PortfolioView() {
                   </tbody>
                 </table>
               </div>
-              <div style={{ fontSize: 11, color: '#6b7280', marginTop: 8, maxWidth: 760, lineHeight: 1.5 }}>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', margin: '8px 16px 0', maxWidth: 760, lineHeight: 1.5 }}>
                 <b>Proj %/yr</b> is the annualized return the premium implied if carried to expiry;
                 <b> Real %/yr</b> is what the actual holding period delivered. A close that beats its own
                 projection was efficient; one far below it gave up more time value than the move justified.
