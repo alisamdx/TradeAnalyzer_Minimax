@@ -141,9 +141,9 @@ Views `v_open_positions`, `v_closed_positions`, `v_portfolio_summary` provide ca
 
 ## 2.16 Conviction list (migration 026)
 
-**`conviction_stocks`** — `ticker PK`, `price_low` (comfortable entry), `price_mid` (experimental), `price_high` (never enter above), `note`, `in_play` (043 — on/off attention flag), `added_at`, `updated_at`. A single permanent list (not multi-list).
+**`conviction_stocks`** — `ticker PK`, `price_low` (comfortable entry), `price_mid` (experimental), `price_high` (never enter above), `note`, `in_play` (043 — on/off attention flag), `added_at`, `updated_at`. A single permanent list (not multi-list). **Three CHECK constraints (075) enforce strictly increasing bands** — `conviction_bands_low_lt_mid` / `_mid_lt_high` / `_low_lt_high`, each a no-op when either side is NULL, so partial bands stay legal (§19.5). Migration 075 rebuilt the table to add them: because `conviction_band_history` has an FK here with `ON DELETE CASCADE` and `PRAGMA foreign_keys=OFF` is a no-op inside the transaction migrations run in, the child table is copied aside and dropped **before** the parent is replaced, then recreated and refilled with its original ids. Pre-existing violating rows are snapshotted to history and normalised (values sorted into slots; a duplicate band dropped) rather than failing the migration — a failed migration means the app will not boot.
 
-**`conviction_band_history`** — `id PK`, `ticker → conviction_stocks (CASCADE)`, `price_low/mid/high`, `note`, `changed_at`. Audit trail on every band change.
+**`conviction_band_history`** — `id PK`, `ticker → conviction_stocks (CASCADE)`, `price_low/mid/high`, `note`, `changed_at`. Audit trail on every band change. **Deliberately carries no band-ordering CHECK** — it records what was actually stored, inverted rows included.
 
 ## 2.17 Agent learnings (migration 031)
 

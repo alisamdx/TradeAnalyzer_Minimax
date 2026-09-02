@@ -44,6 +44,8 @@ Enforcement lives in the **service**, not only in the edit modal, because the mo
 
 `recommend()` guarantees an orderable set — it already floored mid above low, and now also floors high above mid — so **Apply all** from the recommendation panel can never be rejected.
 
-**Not enforced by a DB CHECK constraint.** `conviction_band_history` is an audit trail of what was actually saved and must keep inverted historical rows verbatim; adding a CHECK to `conviction_stocks` needs a table rebuild that would fail at boot on any pre-existing violating row.
+**Also enforced by three DB CHECK constraints** (migration 075) — `conviction_bands_low_lt_mid`, `_mid_lt_high`, `_low_lt_high`, each a no-op when either side is NULL. The service stays the primary gate (it produces the readable, ticker-named error); the CHECKs are defence-in-depth against raw SQL, repair scripts and anything added later that bypasses the service. `conviction_band_history` deliberately carries **no** such constraint — it records what was actually stored, inverted rows included.
 
-Tests: `tests/conviction-band-order.test.ts`.
+Installing them required rebuilding `conviction_stocks`, which has two traps (§2.16): the history table's FK cascades on delete, so the parent cannot simply be dropped, and `PRAGMA foreign_keys=OFF` is a **no-op inside a transaction** — which is exactly where `migrations.ts` runs every migration. The child is therefore copied aside and dropped before the parent is replaced, then recreated and refilled with its original ids. Pre-existing violating rows are snapshotted into history and normalised (present values sorted into their slots; a duplicate band dropped) rather than failing the copy — a failed migration means the app does not boot.
+
+Tests: `tests/conviction-band-order.test.ts` (service), `tests/conviction-band-check.test.ts` (migration + CHECK).
