@@ -117,10 +117,10 @@ describe('closed-position import — transactions query slicing', () => {
       .filter(c => (c[1] as Record<string, string>)['startDate'] && !(c[1] as Record<string, string>)['sortOrder']);
     expect(dated.length).toBeLessThanOrEqual(1);   // only the week-window probe
     const msg = res.errors.join(' ');
+    // Since v1.1.150 a dead transactions endpoint is not fatal: it is reported, and the
+    // import falls back to executed orders. Both facts must be visible to the operator.
     expect(msg).toMatch(/did not respond to any request shape/);
-    expect(msg).toMatch(/json-suffix/);
-    expect(msg).toMatch(/sortOrder/);
-    expect(msg).toMatch(/server-side at E\*Trade or an account entitlement/);
+    expect(msg).toMatch(/falling back to executed orders/);
   });
 
   it('splits the year into narrow windows instead of one YTD span', async () => {

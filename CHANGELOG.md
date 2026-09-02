@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.150] — 2026-09-01
+
+### feat — fall back to executed ORDERS when the transactions endpoint is dead
+- **`/v1/accounts/{key}/transactions` never responds for this account.** Nine hypotheses tested against the API log and all falsified: range (8mo / 31d / 7d / none), path (with and without `.json`), params (`sortOrder=DESC`, `count=5`, `count=50`), transport (fresh nonce, fresh signature), and our signing — against **28 other calls on the same credentials all returning 200 in ~300 ms**.
+- **E*Trade exposes no dedicated closed-positions endpoint**; Transactions and Orders are the two documented ways to reconstruct one, and only Transactions was ever wired up. When Transactions fails the import now falls back to `/v1/accounts/{key}/orders` with `status=EXECUTED`, mapping executed orders into the existing `TxLeg` model so `matchClosedPositions` and `insertClosedPosition` work unchanged — including writing a real `exit_price`, which **no row in the database currently has**.
+- **Orders is arguably the better source regardless.** `orderAction` states intent outright (`SELL_OPEN` / `BUY_CLOSE` / `BUY_OPEN` / `SELL_CLOSE`), where the transactions path had to guess with "a sell must be an open" — a heuristic that mislabels both a long-option round trip and an assignment. And `averageExecutionPrice` is the realised fill rather than a mark, which is the entire point of this import.
+- The fallback is **reported, not silent** (`Transactions unavailable, falling back to executed orders: …`), and the first orders page logs a **structural summary — key names only, never values** — so a schema mismatch is readable instead of prompting another blind guess. Success bodies stay unlogged by design (they carry fills and balances).
+- **On the research that prompted this**: the Orders API lead was correct and useful. Other details in it were not, and are recorded so they are not repeated — the base URL was given as `https://etrade.com` (production is `https://api.etrade.com`, sandbox `https://apisb.etrade.com`), the path omitted the `/v1/` prefix, and one comment was garbled filler. Its "critical flags" (`MMDDYYYY`, `count` max 50, `marker` pagination, `.json`) were all already implemented and all already timed out.
+- Regression: new `tests/etrade-orders-fallback.test.ts` (4) — a timing-out transactions endpoint routes to orders and a **real fill lands in `exit_price`**; `orderAction` drives OPEN/CLOSE so `BUY_OPEN` → `SELL_CLOSE` reads correctly; numeric `marker` pagination is followed; the reason for the fallback is surfaced. Suite: 1009 passed.
+
 ## [1.1.149] — 2026-09-01
 
 ### feat — negotiate a working transactions request shape instead of guessing one per release

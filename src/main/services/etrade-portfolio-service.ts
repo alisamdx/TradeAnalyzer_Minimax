@@ -156,6 +156,21 @@ function num(v: number | undefined | null): number | null {
   return v != null && isFinite(v) ? v : null;
 }
 
+/**
+ * Coerce an untyped JSON field to a finite number.
+ *
+ * The Orders payload is walked as `Record<string, unknown>`, and E*Trade returns some numeric
+ * fields as strings, so `num()`'s typed signature does not fit there.
+ */
+function numOf(v: unknown): number | null {
+  if (typeof v === 'number') return isFinite(v) ? v : null;
+  if (typeof v === 'string' && v.trim() !== '') {
+    const n = Number(v);
+    return isFinite(n) ? n : null;
+  }
+  return null;
+}
+
 // ─── Internal closed-position record ─────────────────────────────────────────
 
 interface ClosedPosition {
@@ -549,7 +564,28 @@ export class EtradePortfolioService {
     for (const acct of toSync) {
       result.accountsScanned++;
       try {
-        const legs = await this.fetchTransactionLegs(acct.accountIdKey, start, end, creds);
+        // Transactions first, then EXECUTED orders as a fallback.
+        //
+        // `/transactions` is unresponsive for this account: nine hypotheses tested and all
+        // falsified (range 8mo/31d/7d/none, path with and without `.json`, sortOrder,
+        // count 5/50, fresh nonce, our signing) against 28 other calls on the same
+        // credentials all returning 200 in ~300 ms. E*Trade exposes no dedicated
+        // closed-positions endpoint, so Orders is the documented alternative source of fills.
+        //
+        // Orders is arguably the better source anyway: `orderAction` states OPEN vs CLOSE
+        // explicitly (no "a sell must be an open" guessing, which is what the transactions
+        // path had to do) and `averageExecutionPrice` is the realised fill — the whole point
+        // of this import.
+        let legs: TxLeg[];
+        try {
+          legs = await this.fetchTransactionLegs(acct.accountIdKey, start, end, creds);
+        } catch (txErr) {
+          const txMsg = txErr instanceof Error ? txErr.message : String(txErr);
+          result.errors.push(
+            `Transactions unavailable, falling back to executed orders: ${txMsg.slice(0, 160)}`,
+          );
+          legs = await this.fetchOrderLegs(acct.accountIdKey, start, end, creds);
+        }
         const closed = this.matchClosedPositions(legs);
         for (const pos of closed) {
           try {
@@ -763,6 +799,160 @@ export class EtradePortfolioService {
     }
 
     return { txId: tx.transactionId, date, action, secType, ticker, symbolKey, strikePrice, expirationDate, callPut, qty, price, commission };
+  }
+
+  // ─── Fetch executed ORDERS as an alternative source of fills ──────────
+
+  /**
+   * Build TxLegs from executed orders.
+   *
+   * E*Trade exposes no closed-positions endpoint; Transactions and Orders are the two ways to
+   * reconstruct one. Orders carries exactly what this import needs:
+   *   - `orderAction` states OPEN vs CLOSE outright, so no "a sell must be an open" heuristic
+   *   - `averageExecutionPrice` is the realised fill rather than a mark
+   */
+  private async fetchOrderLegs(
+    accountIdKey: string,
+    startDate: string,
+    endDate: string,
+    creds: OAuthCredentials
+  ): Promise<TxLeg[]> {
+    const legs: TxLeg[] = [];
+    const fmt = (iso: string) => {
+      const [y, m, d] = iso.split('-') as [string, string, string];
+      return `${m}${d}${y}`;
+    };
+
+    let marker: string | undefined;
+    let loggedShape = false;
+
+    do {
+      const params: Record<string, string> = {
+        status:   'EXECUTED',
+        fromDate: fmt(startDate),
+        toDate:   fmt(endDate),
+        count:    '100',
+      };
+      if (marker) params['marker'] = marker;
+
+      const raw = await etradeGet(
+        `/v1/accounts/${accountIdKey}/orders`,
+        params,
+        creds,
+        { timeoutMs: ETRADE_SLOW_TIMEOUT_MS },
+      ) as Record<string, unknown>;
+
+      const resp = raw['OrdersResponse'] as Record<string, unknown> | undefined;
+      if (!resp) break;
+
+      // Structural summary only \u2014 key NAMES, never values. Success bodies are deliberately
+      // never logged (they carry fills and balances), but if E*Trade's schema differs from the
+      // documented one this is what makes the mismatch diagnosable without another blind guess.
+      if (!loggedShape) {
+        loggedShape = true;
+        const first = Array.isArray(resp['Order']) ? (resp['Order'] as unknown[])[0] : undefined;
+        const detail = first && typeof first === 'object'
+          ? (first as Record<string, unknown>)['OrderDetail'] : undefined;
+        const det0 = Array.isArray(detail)
+          ? detail[0] as Record<string, unknown> | undefined : undefined;
+        const inst0 = det0 && Array.isArray(det0['Instrument'])
+          ? (det0['Instrument'] as unknown[])[0] as Record<string, unknown> | undefined : undefined;
+        const prod0 = inst0 && typeof inst0['Product'] === 'object' && inst0['Product']
+          ? inst0['Product'] as Record<string, unknown> : undefined;
+        console.log('[etrade] OrdersResponse shape: ' + JSON.stringify({
+          response:    Object.keys(resp),
+          orderCount:  Array.isArray(resp['Order']) ? (resp['Order'] as unknown[]).length : 0,
+          order:       first && typeof first === 'object' ? Object.keys(first) : null,
+          orderDetail: det0  ? Object.keys(det0)  : null,
+          instrument:  inst0 ? Object.keys(inst0) : null,
+          product:     prod0 ? Object.keys(prod0) : null,
+        }));
+      }
+
+      const orders = Array.isArray(resp['Order'])
+        ? resp['Order'] as Record<string, unknown>[] : [];
+      for (const order of orders) {
+        const orderId = String(order['orderId'] ?? '');
+        const details = Array.isArray(order['OrderDetail'])
+          ? order['OrderDetail'] as Record<string, unknown>[] : [];
+        for (const det of details) {
+          const when = det['executedTime'] ?? det['placedTime'];
+          const date = typeof when === 'number' ? epochToDate(when) : null;
+          const instruments = Array.isArray(det['Instrument'])
+            ? det['Instrument'] as Record<string, unknown>[] : [];
+          for (const inst of instruments) {
+            const leg = this.orderInstrumentToLeg(orderId, date, inst);
+            if (leg) legs.push(leg);
+          }
+        }
+      }
+
+      const rawMarker = resp['marker'];
+      marker = typeof rawMarker === 'string' ? rawMarker
+             : typeof rawMarker === 'number' ? String(rawMarker)
+             : undefined;
+    } while (marker);
+
+    return legs;
+  }
+
+  /** Map one executed order Instrument to a TxLeg, or null when it is not usable. */
+  private orderInstrumentToLeg(
+    orderId: string,
+    date: string | null,
+    inst: Record<string, unknown>
+  ): TxLeg | null {
+    if (!date) return null;
+    const product = inst['Product'] as Record<string, unknown> | undefined;
+    if (!product) return null;
+
+    const secType = product['securityType'] === 'OPTN' ? 'OPTN'
+                  : product['securityType'] === 'EQ'   ? 'EQ' : null;
+    if (!secType) return null;
+
+    // `orderAction` is explicit about intent \u2014 precisely what the transactions path had to
+    // guess at with "sold means opened, bought means closed".
+    const act = String(inst['orderAction'] ?? '').toUpperCase();
+    let action: TxLeg['action'];
+    if      (act.endsWith('_OPEN'))  action = 'open';
+    else if (act.endsWith('_CLOSE')) action = 'close';
+    else if (act === 'BUY'  || act === 'SELL_SHORT')   action = 'open';
+    else if (act === 'SELL' || act === 'BUY_TO_COVER') action = 'close';
+    else return null;
+
+    const filled = numOf(inst['filledQuantity']) ?? numOf(inst['quantity']) ?? 0;
+    const price  = numOf(inst['averageExecutionPrice']) ?? 0;
+    if (!(filled > 0)) return null;
+
+    const ticker = String(product['symbol'] ?? '').toUpperCase();
+    if (!ticker) return null;
+
+    let symbolKey = ticker;
+    let strikePrice: number | null = null;
+    let expirationDate: string | null = null;
+    let callPut: 'CALL' | 'PUT' | null = null;
+
+    if (secType === 'OPTN') {
+      strikePrice = numOf(product['strikePrice']);
+      const cp = String(product['callPut'] ?? '').toUpperCase();
+      callPut = cp === 'CALL' ? 'CALL' : cp === 'PUT' ? 'PUT' : null;
+      const y = numOf(product['expiryYear']);
+      const m = numOf(product['expiryMonth']);
+      const d = numOf(product['expiryDay']);
+      if (y && m && d) {
+        expirationDate = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      }
+      symbolKey = `${ticker}|${expirationDate ?? ''}|${strikePrice ?? ''}|${callPut ?? ''}`;
+    }
+
+    return {
+      txId: `${orderId}:${symbolKey}:${date}`,
+      date, action, secType, ticker, symbolKey,
+      strikePrice, expirationDate, callPut,
+      qty: Math.abs(filled),
+      price: Math.abs(price),
+      commission: numOf(inst['estimatedCommission']) ?? 0,
+    };
   }
 
   // ─── Match open legs to close/expiration legs ─────────────────────────────
