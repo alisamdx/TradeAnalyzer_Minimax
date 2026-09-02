@@ -365,3 +365,42 @@ starts 2024-05-31 for most tickers and `iv_history` is far shorter, so this is n
 
 **Disposition: do not build.** Re-open only if the price/IV panel ever reaches 3+ years AND a
 pre-registered feature is chosen before looking at outcomes.
+
+## Finding: Big Lizard vs Short Put Vertical — settled 2026-09-02 (v1.1.161)
+
+The FR-SEY-5 backtest deferred in v1.1.86 finally has a settled sample: **160 trades**, June and
+July 2026 entries, hold-to-expiry intrinsic settlement (no IV assumptions).
+
+| | Big Lizard | Short Put Vertical |
+|---|---|---|
+| total P&L | **+$97,561** | +$30,482 |
+| win rate | **74.4%** | 68.1% |
+| avg return-on-capital | 1.30% | **2.65%** |
+| worst single trade | −$7,690 | **−$4,985** |
+| capital consumed | $4,924,345 | **$422,153** |
+
+**Delta (spv − lizard) = +1.35pp → the `≥ 0` gate is MET.** The lizard earns 3.2× the dollars on
+11.7× the capital; per dollar deployed the spread is roughly twice as efficient with a smaller
+tail. Note the lizard's *higher* win rate — it wins more often and loses bigger, which is what a
+52.7% static PoP estimate failed to capture and why realized settlement was required.
+
+### Why `USE_POP_WEIGHTED_PREMIUM` stays OFF despite passing
+
+The gate answers "is the spread at worst neutral against the lizard?" — yes. But it does not
+answer the question enabling the flag actually poses. `short-put-vertical` is in
+`STRATEGY_RELEVANT_SLUGS.inflection`, **not `bullish`**, so in the bullish bucket the flag cannot
+substitute the spread. It can only *dock the lizard*, handing picks to `long-call-vertical`,
+`call-zebra`, `call-butterfly` or `poor-mans-covered-call` — none of which this backtest measured.
+Enabling would ship an unvalidated selection change under cover of a validated one.
+
+**To enable:** backtest the bullish bucket's post-dock alternatives, or move `short-put-vertical`
+into `bullish` (tested and rejected in v1.1.86 — changed 22.6% of picks by ~1pt).
+
+### Methodology warning
+
+The first run of this harness reported the lizard at **−$70,955** — the wrong sign. Four CRWD
+picks carried pre-split strikes (4:1 split; strike/spot 4.12×) settled against post-split closes,
+contributing **−$168,516** of fiction. `split-repair` fixes `historical_prices` but never the legs
+frozen in `daily_briefs.picks`, so repairing the series made the stored legs *more* inconsistent,
+not less. The harness now carries a scale guard and prints what it excludes. Any future replay
+reading stored legs needs the same guard.

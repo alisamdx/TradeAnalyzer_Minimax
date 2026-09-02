@@ -1,5 +1,48 @@
 # Changelog
 
+## [1.1.161] — 2026-09-02
+
+### FR-SEY-5: Big Lizard vs Short Put Vertical, settled — and a harness bug that inverted its sign
+- The backtest deferred since v1.1.86 finally has a settled sample. On **160 clean trades** (June + July 2026 entries, hold-to-expiry intrinsic): lizard **+$97,561** at **1.30%** avg return-on-capital vs spread **+$30,482** at **2.65%**. **Delta +1.35pp — the `spv − lizard ≥ 0` gate is MET.** The lizard earns 3.2× the dollars on 11.7× the capital; per dollar deployed the spread is ~2× as efficient with a smaller tail (−$4,985 vs −$7,690).
+- Note the lizard's **higher** win rate (74.4% vs 68.1%) — it wins more often and loses bigger. v1.1.86's static estimate put its PoP at 52.7%, a coin flip; realized settlement says 74.4%. Static PoP geometry was wrong in *direction* here, which is exactly why FR-SEY-5 demands realized dollars.
+- **`USE_POP_WEIGHTED_PREMIUM` stays disabled despite passing.** The gate answers "is the spread at worst neutral against the lizard?" — yes. It does not answer what enabling the flag *does*: `short-put-vertical` is in `STRATEGY_RELEVANT_SLUGS.inflection`, **not `bullish`**, so in the bullish bucket the flag cannot substitute the spread — only dock the lizard and redirect picks to `long-call-vertical`/`call-zebra`/`call-butterfly`/`poor-mans-covered-call`, none of which this backtest measured. Enabling would ship an unvalidated selection change under cover of a validated one.
+- **fix — the harness first reported the lizard at −$70,955, the wrong sign.** Four CRWD picks carried **pre-split** strikes (4:1 split; strike/spot **4.12×**) settled against **post-split** closes: **−$168,516** of fiction from 4 rows out of 164. `split-repair` (v1.1.139) rewrites `historical_prices` but never the legs frozen in `daily_briefs.picks` — and shouldn't, since rewriting them would falsify what was actually recommended. **Counterintuitive consequence: repairing the price series makes stored legs *more* inconsistent, not less.** The harness now carries a scale guard (Δ0.50 short put must be struck within 35% of the pick-date close) and **prints** excluded rows rather than settling them as losses. Its query also didn't select `generated_at`, which the guard needs. Recorded in CLAUDE.md — any future replay reading stored legs needs the same guard.
+
+## [1.1.160] — 2026-09-02
+
+### fix — `portfolio-sync` was seeded with its own schedule and would have run twice a day
+- Caught by the operator immediately after v1.1.159. `registerJob` defaults `dailyScheduleEnabled` to **true** and the registration didn't override it. Only `batch-orchestrator` is meant to carry a schedule; every other job is driven by the chain in `sequence_order`. Left as-is the job would have run **twice daily** — once on its own 17:45 timer, once inside the after-close chain.
+- Not merely wasteful: a second unattended run writes to the **real position record**, and `position_audit` would have shown two sets of writes per day with no obvious cause — the audit log added one release earlier would have been recording a phantom.
+- **Migration 074** corrects any install that already seeded it enabled. `INSERT OR IGNORE` never re-seeds an existing row, so fixing the code alone does nothing for a machine that already ran v1.1.159 — the same frozen-column trap as `config_json` (v1.1.121), `after_close_only` (v1.1.123) and `sequence_order` (migration 067). Four defects now from one root cause.
+- **Impact: none — it never ran.** `batch_runs` had 0 rows for the job and `position_audit` was empty; the schedule was disabled before the first 17:45 fired.
+
+## [1.1.159] — 2026-09-02
+
+### feat — nightly portfolio sync, with an audit trail because it writes to money
+- New `portfolio-sync` batch job runs last in the after-close chain: refreshes open positions from E*Trade, then imports closed positions with real broker fills. The Portfolio and Performance views are current every morning without anyone pressing a button.
+- **Never returns `failed`.** The orchestrator is stop-on-failure and E*Trade's transactions endpoint is demonstrably flaky, so a broker hiccup must not stop the daily brief. Errors surface as a `success` result carrying a warning note.
+- **Open positions sync BEFORE the closed import, and the order matters.** When a position vanishes from the broker, `syncPortfolio` writes an estimate marked "realized P&L estimated from last mark" — systematically wrong in both directions (TSLA $350 CSP: estimate −$3,735.53, actual **+$499.48**). Importing immediately afterwards supersedes the estimate with the real fill in the same run, so the wrong figure never reaches the Performance tab.
+- This is the first batch job to write to the user's real financial record rather than market data, so **every write is audited** (`position_audit`, migration 073): old and new realized P&L, old and new exit price, the source (`orders` vs `transactions`), and why. Auditing can never break the write it records.
+
+## [1.1.158] — 2026-09-02
+
+### fix — Performance tab styling now matches the rest of the Portfolio view
+- The new panel used its own inline light-theme styling, which rendered as white boxes against the app's surface. Operator: *"they are more easy on eyes compared to new boxes with white background."*
+- `Stat` now reuses the existing `.summary-card` markup that the Total Positions / Unrealized P&L cards already use, and the panel's hardcoded hex colours were replaced with theme variables — one visual language, and theme changes are picked up for free instead of needing a second palette maintained by hand.
+
+## [1.1.157] — 2026-09-02
+
+### feat — capital-efficiency metrics: return on the capital actually at risk
+- Measuring a wheel against total portfolio value understates it whenever capital is deliberately held back. This book realised **3.73%** of a ~$79k account but **11.56%** of the ~$26k actually deployed — against SPY's 13.15%. Both figures are shown so a *sizing* decision is never read as a *strategy* result.
+- New `capital-efficiency.ts`: `capitalAtRisk` (a covered call adds none — the shares already secure it), `effectiveEnd` (an assignment hands capital from the put to the stock via a `strike − premium` cost-basis match rather than counting both), `dailyDeployed`, `portfolioEfficiency` (idle days **included**, so holding cash lowers deployed capital and raises return-per-dollar while return-on-portfolio shows what sitting flat cost), and `positionRoc` (projected vs realized annualized).
+- New **Performance** tab surfaces portfolio-level efficiency plus a per-trade table: what the premium promised at entry vs what the holding period delivered. 15 unit tests.
+
+## [1.1.156] — 2026-09-01
+
+### fix — drop the mislabelled short twin left by the pre-v1.1.155 import
+- The v1.1.155 sign fix corrected how long options are recorded, but rows written by the **earlier** broken import were still present as `CSP`/`CC` twins of positions that were actually long. Migration 072 removes them; migration 071 dedupes rows the import had inserted more than once.
+- Closed-position count drops to **28**, and the book reconciles to E*Trade: realized **$2,458.18** against their **$2,457.50** (the $0.68 difference is the assigned TSLA $350 put, absent from E*Trade's G&L because an assignment defers premium into the stock's cost basis), unrealized **$673.45** against their **$673.44**.
+
 ## [1.1.155] — 2026-09-01
 
 ### fix — LONG options were priced as short premium, inverting their sign
