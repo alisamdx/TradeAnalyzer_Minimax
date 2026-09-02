@@ -595,6 +595,35 @@ export class EtradePortfolioService {
     // Slicing is kept for a different and still-valid reason: it bounds each response and
     // its pagination, so one oversized window cannot swallow the whole import, and a failure
     // localises to a month instead of the year. It is not the stall fix.
+    // ── Preflight: does this endpoint respond AT ALL? ────────────────────────
+    // One minimal request with NO date range (E*Trade defaults to a recent window).
+    //
+    // Diagnosed 2026-09-02: `/transactions` returned `oauth_problem=nonce_used` after ~120.5 s
+    // on BOTH a fresh-nonce retry and the original — a fresh nonce cannot have been used
+    // before, so that error is a generic mask over a server-side timeout, not an OAuth fault.
+    // Range width made no difference (8 months and 31 days stalled alike), while every other
+    // E*Trade call on the same credentials and account key answered in ~300 ms.
+    //
+    // This probe distinguishes "the endpoint is down for this account" from "our date
+    // parameters are the trigger", and it earns its place in production regardless: without
+    // it a broken endpoint costs 9 slices x 120 s = ~18 minutes of silent grinding before the
+    // import gives up.
+    try {
+      await etradeGet(
+        `/v1/accounts/${accountIdKey}/transactions`,
+        { count: '50' },
+        creds,
+        { timeoutMs: 45_000 },
+      );
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        'E*Trade transactions endpoint did not respond to a minimal no-date request. '
+        + 'Every other E*Trade call is working, so this is almost certainly server-side at '
+        + `E*Trade rather than a date-range or signing problem. Detail: ${detail}`,
+      );
+    }
+
     const slices: Array<{ from: string; to: string }> = [];
     {
       const endMs = Date.parse(`${endDate}T00:00:00Z`);

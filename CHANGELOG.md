@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.148] — 2026-09-01
+
+### feat — preflight the transactions endpoint: diagnostic, and 18 minutes faster to fail
+- **v1.1.147's re-sign retry fired and still failed**: `01:25:21 401 120525ms nonce_used → retrying with a fresh signature` then `01:27:21 401 120565ms nonce_used`. **A fresh nonce cannot have been used before**, which kills the transport-retransmission theory as well as the earlier range-width one. Both attempts took ~120.5 s — essentially identical and suspiciously round — reading as a server-side timeout that E*Trade reports as `oauth_problem=nonce_used`. The OAuth message is a mask, not the cause.
+- Everything else on the same credentials, account key and signing code works: `accounts/list` 308 ms, `accounts/{key}/portfolio` 371 ms, 26 market calls ~300 ms, all 200. Only `transactions` hangs, identically for 31 days and for 8 months.
+- **Preflight probe** before the sliced loop: one minimal request with **no date range** (E*Trade defaults to a recent window), 45 s budget. It answers the open question — *is this endpoint alive for this account at all, independent of our date parameters?* — and earns its place regardless: without it a dead endpoint costs **9 slices × 120 s ≈ 18 minutes** of silent grinding before the import gives up. Now it fails in under a minute with a message naming the likely owner of the problem.
+- **Reading the result**: probe returns 200 quickly → the endpoint is fine and our *date parameters* are the trigger. Probe times out → the endpoint is down for this account, no client-side change will help, and closed positions should be settled from expiry prices instead.
+- Regression: `etrade-transactions-slicing.test.ts` +2 (6) — first call carries `{count}` only with no `startDate` on a 45 s budget; an unresponsive endpoint produces exactly **one** call plus the descriptive error rather than nine timeouts. Suite: 1004 passed.
+- **Three theories now tested and falsified against the logs** — range width (v1.1.146), transport replay (v1.1.147), and date parameters (this probe). Each was disproved by evidence rather than argument, which only became possible when E*Trade calls gained visibility in v1.1.144; before that this failure was silent for months.
+
 ## [1.1.147] — 2026-09-01
 
 ### fix — the transactions endpoint is slow per call; v1.1.146's premise was wrong

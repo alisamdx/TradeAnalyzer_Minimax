@@ -52,11 +52,45 @@ describe('closed-position import — transactions query slicing', () => {
   });
   afterEach(() => { db.close(); vi.restoreAllMocks(); });
 
+  it('preflights with a no-date request before grinding through slices', async () => {
+    const svc = new EtradePortfolioService();
+    await svc.syncClosedPositions(db, creds);
+
+    const tx = etradeGet.mock.calls.filter(c => String(c[0]).includes('/transactions'));
+    // The probe answers "is this endpoint alive for this account, independent of our date
+    // range" — the question left open after a fresh-nonce retry still returned nonce_used.
+    expect(tx[0]![1]).toEqual({ count: '50' });
+    expect(tx[0]![1]).not.toHaveProperty('startDate');
+    expect(tx[0]![3]).toMatchObject({ timeoutMs: 45_000 });
+  });
+
+  it('aborts fast with a clear message when the endpoint is unresponsive', async () => {
+    etradeGet.mockImplementation(async (path: string) => {
+      if (path.includes('/accounts/list')) {
+        return { AccountListResponse: { Accounts: { Account: [
+          { accountId: '1', accountIdKey: 'KEY1', accountName: 'X', accountType: 'I', institutionType: 'B' },
+        ] } } };
+      }
+      throw new Error('The operation was aborted due to timeout');
+    });
+
+    const svc = new EtradePortfolioService();
+    const res = await svc.syncClosedPositions(db, creds);
+
+    // Without the preflight this cost 9 slices x 120 s of silent grinding. One probe now.
+    const tx = etradeGet.mock.calls.filter(c => String(c[0]).includes('/transactions'));
+    expect(tx).toHaveLength(1);
+    expect(res.errors.join(' ')).toMatch(/did not respond to a minimal no-date request/);
+    expect(res.errors.join(' ')).toMatch(/server-side at E\*Trade/);
+  });
+
   it('splits the year into narrow windows instead of one YTD span', async () => {
     const svc = new EtradePortfolioService();
     await svc.syncClosedPositions(db, creds);
 
-    const txCalls = etradeGet.mock.calls.filter(c => String(c[0]).includes('/transactions'));
+    const txCalls = etradeGet.mock.calls
+      .filter(c => String(c[0]).includes('/transactions'))
+      .filter(c => (c[1] as Record<string, string>)['startDate']);   // drop the preflight probe
     expect(txCalls.length).toBeGreaterThan(1);         // the whole point — not one big query
 
     for (const call of txCalls) {
@@ -78,6 +112,7 @@ describe('closed-position import — transactions query slicing', () => {
     const wins = etradeGet.mock.calls
       .filter(c => String(c[0]).includes('/transactions'))
       .map(c => (c[1] as Record<string, string>))
+      .filter(p => p['startDate'])                                   // drop the preflight probe
       .map(p => ({ from: p['startDate']!, to: p['endDate']! }))
       .map(w => ({
         from: `${w.from.slice(4)}-${w.from.slice(0, 2)}-${w.from.slice(2, 4)}`,
@@ -101,18 +136,22 @@ describe('closed-position import — transactions query slicing', () => {
     // Measured 2026-09-02: a YTD query took 120,250 ms and a 31-day slice still exceeded 30 s.
     // Narrowing the range does NOT speed this endpoint up, so it needs its own budget or the
     // default (tuned to the ~300 ms every other E*Trade call takes) guarantees failure.
-    const tx = etradeGet.mock.calls.find(c => String(c[0]).includes('/transactions'));
+    const tx = etradeGet.mock.calls.find(
+      c => String(c[0]).includes('/transactions') && (c[1] as Record<string, string>)['startDate'],
+    );
     expect(tx?.[3]).toMatchObject({ timeoutMs: 180_000 });
   });
 
   it('follows pagination when E*Trade returns the marker as a number, not a string', async () => {
     let served = 0;
-    etradeGet.mockImplementation(async (path: string) => {
+    etradeGet.mockImplementation(async (path: string, params: Record<string, string>) => {
       if (path.includes('/accounts/list')) {
         return { AccountListResponse: { Accounts: { Account: [
           { accountId: '1', accountIdKey: 'KEY1', accountName: 'X', accountType: 'I', institutionType: 'B' },
         ] } } };
       }
+      // The preflight probe carries no dates and must not consume a paged response.
+      if (!params['startDate']) return { TransactionListResponse: {} };
       served++;
       // A numeric marker used to fail the `typeof === 'string'` check and silently stop
       // paging after the first page, losing every transaction beyond it.
