@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.151] — 2026-09-01
+
+### fix — `sortOrder` is required by the transactions endpoint, and real fills now supersede estimates
+- **`sortOrder=DESC` was the missing parameter all along.** On 2026-09-02 the v1.1.149 negotiation found it: `{sortOrder:DESC, count:50}` returned **200 in 447 ms** on an endpoint that had never answered across nine prior hypotheses (range 8mo/31d/7d/none, path ±`.json`, count 5/50, fresh nonce, our signing). It is now tried first and defaulted onto every sliced request, so a slice no longer depends on which variant happened to win. The endpoint is still flaky — one slice failed twice and the run fell through to the orders fallback — but v1.1.147's nonce retry also recovered a slice that had failed once, exactly as designed.
+- **Imported fills now SUPERSEDE the estimated rows instead of sitting beside them.** The position sync writes an estimate when a row vanishes from the broker (`exit_price` NULL, "realized P&L estimated from last mark"), and those are systematically wrong in two ways: an **ASSIGNED CSP reads as a large loss when it was a conversion into stock** (TSLA 350: estimate **−$3,735.53**, actual **+$499.48**), and a position closed by expiry is booked at its last mark rather than zero (TSLA 360 CC: estimate **−$463.02**, actual **+$347.47**). Those two rows alone were a **$4,235 swing**.
+- The supersede key is deliberately tight — ticker + type + strike + expiry + entry_date + quantity, `IS` rather than `=` so NULL strike/expiry compare correctly. Matching on ticker+type alone collapsed an **open 100-share assignment lot** into a **closed 60-share lot from four months earlier**; both are kept distinct now. An estimate with no matching fill is left untouched rather than dropped or zeroed.
+- **Measured result on the real book**: the app displayed **−$2,902**; actual fills give **+$4,494.14** over 2026-04-09 → 08-28 (realized wheel +$3,220.70 across 24 CSP/CC, 16 winners; realized stock +$599.99; open marked +$673.45). A **$7,396 error**, none of it from trading — all of it from the estimated marks. The import also surfaced **9 positions that were never in the database at all** (April/May OXY, PFE, NEM, TSLA), so the book runs 5 months rather than the 84 days previously visible.
+- Regression: new `tests/etrade-supersede-estimates.test.ts` (4) — an estimate is overwritten in place rather than duplicated; an open assignment lot is not collapsed into an unrelated closed lot; a second import is idempotent; an estimate with no matching fill survives. Suite: 1013 passed.
+
 ## [1.1.150] — 2026-09-01
 
 ### feat — fall back to executed ORDERS when the transactions endpoint is dead

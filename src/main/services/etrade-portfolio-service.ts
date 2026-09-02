@@ -644,10 +644,13 @@ export class EtradePortfolioService {
     const variants: Array<{ label: string; suffix: string; params: Record<string, string> }> = [
       // E*Trade honours a format suffix on many endpoints; `Accept: application/json` alone
       // may not be enough here (its error envelopes come back as XML even so).
+      // sortOrder FIRST: proven necessary on 2026-09-02. `{sortOrder:DESC, count:50}` returned
+      // 200 in 447 ms on an endpoint that had never answered without it, across nine earlier
+      // hypotheses. It is now also a default on every sliced request below.
+      { label: 'sortOrder',          suffix: '',      params: { sortOrder: 'DESC', count: '50' } },
       { label: 'json-suffix',        suffix: '.json', params: { count: '50' } },
       // `sortOrder` is documented for this endpoint and may be required for `count` to bound
       // the result set — an unbounded scan would explain a fixed ~120 s server timeout.
-      { label: 'sortOrder',          suffix: '',      params: { sortOrder: 'DESC', count: '50' } },
       { label: 'json+sortOrder',     suffix: '.json', params: { sortOrder: 'DESC', count: '50' } },
       // A tiny page: if the endpoint is merely slow per row, 5 rows should return.
       { label: 'tiny-count',         suffix: '',      params: { count: '5' } },
@@ -705,7 +708,11 @@ export class EtradePortfolioService {
     let marker: string | undefined;
     do {
       const params: Record<string, string> = {
-        // Carry any extra params the working variant needed (e.g. sortOrder).
+        // `sortOrder` is REQUIRED by this endpoint (proven 2026-09-02: it answered in 447 ms
+        // with it, and never without it across nine other hypotheses). Defaulted here so a
+        // slice does not depend on which negotiation variant happened to win.
+        sortOrder: 'DESC',
+        // Carry any other params the working variant needed.
         ...Object.fromEntries(
           Object.entries(working.params).filter(([k]) => k !== 'startDate' && k !== 'endDate'),
         ),
@@ -1023,7 +1030,49 @@ export class EtradePortfolioService {
   // ─── Insert one closed position (with dedup check) ────────────────────────
 
   private insertClosedPosition(db: Database, pos: ClosedPosition): boolean {
-    // Dedup: skip if a closed position with same ticker + type + entry_date + exit_date exists
+    // A closed position can already exist in one of two forms:
+    //
+    //   1. An ESTIMATE written by the position sync when the row vanished from the broker
+    //      ("realized P&L estimated from last mark", exit_price NULL). Those are systematically
+    //      wrong: an ASSIGNED CSP reads as a large loss when it was really a conversion into
+    //      stock (TSLA 350 showed -$3,735.53; the real fill is +$499.48), and a position closed
+    //      by expiry is booked at its last mark rather than zero (TSLA 360 CC showed -$463.02;
+    //      the real fill is +$347.47). A real fill must SUPERSEDE those, not sit beside them.
+    //
+    //   2. A previously imported real fill, which should simply be skipped.
+    //
+    // The supersede key is deliberately tight — ticker + type + strike + expiry + entry_date +
+    // quantity. Matching on ticker+type alone collapsed an open 100-share assignment lot into a
+    // closed 60-share lot from four months earlier. `IS` rather than `=` so NULL strike/expiry
+    // (equities) compare correctly.
+    const stale = db.prepare(`
+      SELECT id FROM positions
+      WHERE ticker = ? AND position_type = ?
+        AND strike_price IS ? AND expiration_date IS ?
+        AND entry_date = ? AND quantity = ?
+        AND status = 'closed' AND exit_price IS NULL
+      LIMIT 1
+    `).get(
+      pos.ticker, pos.positionType, pos.strikePrice, pos.expirationDate,
+      pos.entryDate, pos.quantity,
+    ) as { id: number } | undefined;
+
+    if (stale) {
+      db.prepare(`
+        UPDATE positions
+           SET exit_price = ?, exit_date = ?, exit_notes = ?, realized_pnl = ?,
+               entry_price = ?, premium_received = ?, updated_at = ?
+         WHERE id = ?
+      `).run(
+        pos.exitPrice, pos.exitDate,
+        'Superseded by actual E*Trade fill (was estimated from last mark)',
+        pos.realizedPnl, pos.entryPrice, pos.premiumReceived,
+        new Date().toISOString(), stale.id,
+      );
+      return true;
+    }
+
+    // Already imported with a real fill — nothing to do.
     const existing = db.prepare(`
       SELECT id FROM positions
       WHERE ticker = ? AND position_type = ? AND entry_date = ? AND exit_date = ? AND status = 'closed'
