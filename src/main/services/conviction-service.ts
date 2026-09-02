@@ -89,6 +89,38 @@ function computeZone(
   return 'watch';
 }
 
+// ─── Band ordering invariant ────────────────────────────────────────
+// Bands must be strictly increasing: low < mid < high. Any band may be null
+// (a partial band is legitimate) — nulls are skipped, present pairs are compared.
+//
+// This is enforced HERE, not only in the edit modal, because the modal is not the
+// only writer: the AI review "Apply" path merges LLM-recommended values field-by-field
+// into whatever is already stored, so a recommended low can land above an untouched
+// mid. That produced inverted bands that sat unnoticed for three weeks, silently
+// feeding wrong buy-zone alerts and the daily-brief conviction callout.
+
+export function validateBandOrder(
+  ticker: string,
+  priceLow: number | null | undefined,
+  priceMid: number | null | undefined,
+  priceHigh: number | null | undefined,
+): void {
+  const low = priceLow ?? null;
+  const mid = priceMid ?? null;
+  const high = priceHigh ?? null;
+  const at = (v: number): string => `$${v}`;
+
+  if (low !== null && mid !== null && low >= mid) {
+    throw new Error(`${ticker}: Low entry (${at(low)}) must be less than Mid price (${at(mid)})`);
+  }
+  if (mid !== null && high !== null && mid >= high) {
+    throw new Error(`${ticker}: Mid price (${at(mid)}) must be less than High / Never Enter (${at(high)})`);
+  }
+  if (low !== null && high !== null && low >= high) {
+    throw new Error(`${ticker}: Low entry (${at(low)}) must be less than High / Never Enter (${at(high)})`);
+  }
+}
+
 // ─── IV Rank computation ──────────────────────────────────────────────────────
 
 function computeIvRank(ivRows: number[]): number | null {
@@ -181,6 +213,7 @@ export class ConvictionService {
 
   add(input: ConvictionInput): ConvictionStock {
     const ticker = input.ticker.trim().toUpperCase();
+    validateBandOrder(ticker, input.priceLow, input.priceMid, input.priceHigh);
     this.db.prepare(`
       INSERT INTO conviction_stocks (ticker, price_low, price_mid, price_high, note)
       VALUES (?, ?, ?, ?, ?)
@@ -193,6 +226,7 @@ export class ConvictionService {
 
   update(ticker: string, input: Omit<ConvictionInput, 'ticker'>): ConvictionStock {
     const t = ticker.trim().toUpperCase();
+    validateBandOrder(t, input.priceLow, input.priceMid, input.priceHigh);
     const existing = this.get(t);
 
     withTransaction(this.db, () => {
@@ -347,10 +381,18 @@ export class ConvictionService {
     // ── Compute High ─────────────────────────────────────────────────────────
     const ivRankVal = ivRank ?? 50;
     const premiumPct = ivRankVal < 30 ? 0.20 : ivRankVal < 60 ? 0.25 : 0.30;
-    const priceHigh = round(currentPrice * (1 + premiumPct), 1.0);
-    const priceHighBasis =
+    let priceHigh = round(currentPrice * (1 + premiumPct), 1.0);
+    let priceHighBasis =
       `Current $${currentPrice.toFixed(2)} +${Math.round(premiumPct * 100)}%` +
       (ivRank !== null ? ` (IVR ${Math.round(ivRank)})` : ' (no IV data)');
+
+    // Ensure high > mid. A low anchored above the current price (an entry zone
+    // from a stale snapshot) can push mid past the current-price-derived high,
+    // and the whole set would then be rejected by validateBandOrder on Apply.
+    if (priceHigh <= priceMid) {
+      priceHigh = Math.ceil(priceMid * 1.10); // ceil, not round — must land strictly above mid
+      priceHighBasis = 'Mid +10% (current price below mid reference)';
+    }
 
     return {
       priceLow,

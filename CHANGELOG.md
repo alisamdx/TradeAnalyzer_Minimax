@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.165] — 2026-09-02
+
+### fix — conviction bands can no longer be saved inverted (FR-CONV-1)
+
+- **The edit modal validated `low < mid < high`; the service did not — and the modal was not the only writer.** The AI review **Apply** path merges LLM-recommended bands *field-by-field* into whatever is stored (`recommendedLow ?? stock.priceLow`, …), so a recommendation returning only a new low can land it above an untouched mid. Three rows (MSFT 433/409, NOW 123/108, PLTR 152/133) sat inverted for **three weeks**, silently feeding wrong Buy-zone alerts and the brief's ⚡ Conviction Alerts callout. An inverted band never throws — it just computes the wrong zone.
+- **Enforcement moved to the choke point.** `validateBandOrder()` in `conviction-service.ts` runs inside `add()` and `update()`, so every writer — IPC, the AI-apply loop, anything added later — passes through it. Present pairs must be strictly increasing; nulls are skipped (a partial band is legitimate); equal values are rejected. Messages name the ticker and both offending numbers.
+- **A rejected update writes nothing at all.** Validation runs *before* `withTransaction`, so a refused edit leaves the stored bands intact and appends no `conviction_band_history` snapshot — the audit trail records saves, not attempts.
+- **The AI-apply loop no longer aborts on the first refusal.** Each row applies independently; refused tickers are listed by name in the error banner and stay selected so they can be fixed by hand, while the rest of the batch lands. Previously the first throw escaped an uncaught `try/finally` and left the batch half-applied with no message.
+- **`recommend()` now floors high above mid** (it already floored mid above low), so **Apply all** from the recommendation panel can never produce a set the service rejects — reachable when a stale snapshot's entry zone sits above the current price.
+- **Deliberately not a DB CHECK constraint.** `conviction_band_history` must keep inverted historical rows verbatim (it records what was actually saved), and adding a CHECK to `conviction_stocks` needs a table rebuild that would fail at boot on any pre-existing violating row. Verified against the live DB: 13 rows, **0 violations** — the earlier data fix holds, and nothing in the list becomes un-editable.
+- 11 regression tests (`tests/conviction-band-order.test.ts`), one of which reproduces the AI-apply merge shape directly. Suite: 1088 passed.
+
 ## [1.1.164] — 2026-09-02
 
 ### feat — Roll the Dice gates on capital, plus a defined exception for better setups

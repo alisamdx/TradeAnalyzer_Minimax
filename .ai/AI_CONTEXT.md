@@ -287,6 +287,8 @@ Authoritative DDL is in `migrations/`. Tables are created lazily (`CREATE TABLE 
 
 ---
 
+- **A validated form is not a validated field — find every writer.** The My Stocks conviction bands must satisfy `low < mid < high`, and the edit modal always checked it. But the **AI review "Apply"** path is a second writer: it merges LLM-recommended bands *field-by-field* into the stored ones (`recommendedLow ?? stock.priceLow`, …), so a recommendation that returns only a new low can push it above an untouched mid. Three rows (MSFT 433/409, NOW 123/108, PLTR 152/133) sat inverted for **three weeks** — an inverted band never throws, it just computes the wrong zone, so it silently fed wrong Buy-zone alerts and the brief's conviction callout. Fixed v1.1.165 by moving enforcement into `validateBandOrder()` in the **service** (`add`/`update`), the choke point every writer passes through; validation runs *before* the transaction so a rejected edit writes no `conviction_band_history` row. **Corollary: a per-field merge of model output into stored state can violate an invariant neither the model nor the store ever saw whole.**
+
 ## 11. Open decisions
 
 - **Brief Replay (point-in-time brief backtest)**: spec'd in `Requirements/BRIEF_REPLAY_SPEC.md` (2026-06-11). Replays the brief for past dates using bars/iv_history `<= asOf` and EDGAR facts filtered by `filed <= asOf` (true point-in-time fundamentals — no history table needed); same ScoringService/configs; structures skipped or synthesized (no historical E*Trade chains); outcomes from forward bars into new `replay_briefs`/`replay_outcomes` tables. Open questions in spec §8 (iv_history depth, stage-4 option, output surface).

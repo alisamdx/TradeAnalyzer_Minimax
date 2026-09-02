@@ -439,22 +439,41 @@ export function ConvictionView() {
     const toApply = aiReview.filter(r => aiSelected.has(r.ticker));
     if (toApply.length === 0) return;
     setAiApplying(true);
+    setAiError(null);
+    // Recommended bands are merged field-by-field into the stored ones, so a partial
+    // recommendation can invert the set (a new low above an untouched mid). The service
+    // rejects that; apply the rest and report which tickers were refused rather than
+    // aborting the whole batch on the first bad one.
+    const rejected: string[] = [];
+    const applied = new Set<string>();
     try {
       for (const r of toApply) {
         const stock = stocks.find(s => s.ticker === r.ticker);
-        if (r.action === 'remove') {
-          await window.api.conviction.remove(r.ticker);
-        } else {
-          await window.api.conviction.update(r.ticker, {
-            priceLow: r.recommendedLow ?? stock?.priceLow ?? null,
-            priceMid: r.recommendedMid ?? stock?.priceMid ?? null,
-            priceHigh: r.recommendedHigh ?? stock?.priceHigh ?? null,
-            note: stock?.note ?? null,
-          });
+        try {
+          if (r.action === 'remove') {
+            await window.api.conviction.remove(r.ticker);
+          } else {
+            await window.api.conviction.update(r.ticker, {
+              priceLow: r.recommendedLow ?? stock?.priceLow ?? null,
+              priceMid: r.recommendedMid ?? stock?.priceMid ?? null,
+              priceHigh: r.recommendedHigh ?? stock?.priceHigh ?? null,
+              note: stock?.note ?? null,
+            });
+          }
+          applied.add(r.ticker);
+        } catch (e) {
+          rejected.push((e as Error).message);
         }
       }
-      setAiReview(null);
-      setAiSelected(new Set());
+      if (rejected.length > 0) {
+        // Keep the review open with only the refused rows still selected so they
+        // can be edited by hand.
+        setAiSelected(new Set(toApply.filter(r => !applied.has(r.ticker)).map(r => r.ticker)));
+        setAiError(`Not applied — bands must be low < mid < high: ${rejected.join('; ')}`);
+      } else {
+        setAiReview(null);
+        setAiSelected(new Set());
+      }
       load();
     } finally {
       setAiApplying(false);

@@ -9,6 +9,8 @@ A single list (not multi-list). Each stock has three price bands:
 - **price_mid** — experimental zone.
 - **price_high** — never enter above this.
 
+Bands are **strictly increasing**: `price_low < price_mid < price_high` (§19.5). Any band may be null — a partial band is legitimate — but two bands that are both present must be ordered.
+
 Plus a `note` and an **`in_play`** on/off flag (a transient "pay attention / may act on this" marker — e.g. flag it today to watch tomorrow). Every band/note change appends an audit row to `conviction_band_history`; toggling `in_play` does **not** (it's not a band change).
 
 ## 19.2 Zones & recommendation engine
@@ -31,3 +33,17 @@ The current quote maps a stock into a zone relative to its bands:
 ## 19.4 Sync & API
 
 `syncDefaultWatchlist()` imports tickers from the Default watchlist into the conviction list (returns `{ added, skipped }`). IPC: `list`, `add(input)`, `update(ticker, input)`, `remove(ticker)`, `setInPlay(ticker, on)`, `history(ticker)`, `recommend(ticker)`, `syncDefaultWatchlist()`, `emailConfigured()`, `sendEmail()`.
+
+## 19.5 Band ordering invariant (FR-CONV-1)
+
+**`validateBandOrder()` in `conviction-service.ts` is the single enforcement point**, called by `add()` and `update()` before any write. Present pairs must be strictly increasing (`low < mid < high`); nulls are skipped; equal values are rejected (a zero-width zone has no meaning). A rejected `update()` throws before the transaction opens, so no `conviction_band_history` snapshot is written for an edit that never landed.
+
+Enforcement lives in the **service**, not only in the edit modal, because the modal is not the only writer. The **AI review "Apply"** path merges LLM-recommended bands field-by-field into the stored ones (`recommendedLow ?? stock.priceLow`, …), so a partial recommendation can invert a set the model never looked at as a whole. That is how `price_low > price_mid` reached three rows (MSFT 433/409, NOW 123/108, PLTR 152/133) and survived three weeks — inverted bands don't throw, they just compute the wrong zone, feeding wrong Buy-zone alerts and the §14 brief conviction callout.
+
+`ConvictionView` keeps its own pre-submit check for immediate feedback, and the AI-apply loop now applies each row independently: refused tickers are reported by name, stay selected for manual editing, and do not abort the rest of the batch.
+
+`recommend()` guarantees an orderable set — it already floored mid above low, and now also floors high above mid — so **Apply all** from the recommendation panel can never be rejected.
+
+**Not enforced by a DB CHECK constraint.** `conviction_band_history` is an audit trail of what was actually saved and must keep inverted historical rows verbatim; adding a CHECK to `conviction_stocks` needs a table rebuild that would fail at boot on any pre-existing violating row.
+
+Tests: `tests/conviction-band-order.test.ts`.
