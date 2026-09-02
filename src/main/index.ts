@@ -699,7 +699,13 @@ app.whenReady().then(() => {
   // that just closed is superseded by its real fill in the same run.
   const portfolioSyncJob = new PortfolioSyncJob(db, getEtradeCreds);
   batchService.registerJob('portfolio-sync', portfolioSyncJob, {
-    dailyScheduleTime: '17:45',       // after the chain's other work (schedule disabled by default)
+    dailyScheduleTime: '17:45',       // nominal slot only; the chain is what actually runs it
+    // MUST be false. `registerJob` defaults dailyScheduleEnabled to TRUE, and ONLY
+    // `batch-orchestrator` is meant to carry its own schedule — every other job is driven by
+    // the chain in sequence_order. Omitting this seeded the job enabled, which would have run
+    // it TWICE a day: once at 17:45 on its own timer and once inside the chain. Migration 074
+    // corrects any install that already seeded it enabled.
+    dailyScheduleEnabled: false,
     startupDelaySeconds: 0,
     runOnStartup: false,              // orchestrator-driven, like every other sub-job
     afterCloseOnly: true,             // end-of-day record keeping; skip the lean intraday slot
