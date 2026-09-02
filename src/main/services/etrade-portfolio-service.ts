@@ -22,7 +22,7 @@
  */
 
 import type { Database } from 'better-sqlite3';
-import { etradeGet, ETRADE_SLOW_TIMEOUT_MS, type OAuthCredentials } from './etrade-auth.js';
+import { etradeGet, renewAccessToken, ETRADE_SLOW_TIMEOUT_MS, type OAuthCredentials } from './etrade-auth.js';
 import type { EtradeAccount, EtradeSyncResult } from '@shared/types.js';
 import { toPositionSignedGreeks } from '@shared/position-greeks.js';
 
@@ -195,7 +195,7 @@ export class EtradePortfolioService {
   // ─── Account list ─────────────────────────────────────────────────────────
 
   async listAccounts(creds: OAuthCredentials): Promise<EtradeAccount[]> {
-    const raw = await etradeGet('/v1/accounts/list', {}, creds);
+    const raw = await this.withRenew(creds, () => etradeGet('/v1/accounts/list', {}, creds));
 
     // Shape: { AccountListResponse: { Accounts: { Account: [...] } } }
     const accountList = (raw as Record<string, unknown>)['AccountListResponse'];
@@ -332,11 +332,11 @@ export class EtradePortfolioService {
     accountIdKey: string,
     creds: OAuthCredentials
   ): Promise<EtradePositionRaw[]> {
-    const raw = await etradeGet(
+    const raw = await this.withRenew(creds, () => etradeGet(
       `/v1/accounts/${accountIdKey}/portfolio`,
       { totalsRequired: 'true', lotsRequired: 'false', view: 'COMPLETE' },
       creds
-    );
+    ));
 
     // Shape: { PortfolioResponse: { AccountPortfolio: [{ Position: [...] }] } }
     const resp = (raw as Record<string, unknown>)['PortfolioResponse'];
@@ -735,7 +735,9 @@ export class EtradePortfolioService {
       };
       if (marker) params['marker'] = marker;
 
-      const raw = await etradeGet(
+      // The negotiation probes above are deliberately NOT wrapped: they are meant to fail
+      // fast, and renewing five times over would double an already-slow diagnostic.
+      const raw = await this.withRenew(creds, () => etradeGet(
         `/v1/accounts/${accountIdKey}/transactions${working.suffix}`,
         params,
         creds,
@@ -743,7 +745,7 @@ export class EtradePortfolioService {
         // budget is tuned to the ~300 ms every other E*Trade call takes and would guarantee
         // failure here. see ETRADE_SLOW_TIMEOUT_MS.
         { timeoutMs: ETRADE_SLOW_TIMEOUT_MS },
-      ) as Record<string, unknown>;
+      )) as Record<string, unknown>;
 
       const resp = raw['TransactionListResponse'] as Record<string, unknown> | undefined;
       if (!resp) break;
@@ -832,6 +834,34 @@ export class EtradePortfolioService {
    *   - `orderAction` states OPEN vs CLOSE outright, so no "a sell must be an open" heuristic
    *   - `averageExecutionPrice` is the realised fill rather than a mark
    */
+  /**
+   * Renew-and-retry wrapper for E*Trade calls.
+   *
+   * Every other E*Trade consumer has had this since v1.1.94; this service was the last one
+   * without it, so a dormant token failed the whole portfolio sync outright instead of
+   * recovering. Tokens go dormant after 2 h of inactivity, and this service is driven by
+   * manual button clicks — precisely the usage pattern that idles past the window.
+   *
+   * Retries on ANY error, deliberately. A dormant token does NOT reliably surface as a 401:
+   * it can kill or hang the response stream instead (undici `terminated`). Gating renewal on
+   * an auth-shaped message is the exact bug that halted the evening orchestrator chain 8 of 10
+   * trading days before v1.1.92 and silently emptied option chains before v1.1.94. Renewing an
+   * already-active token errors harmlessly, so the retry decides the outcome either way.
+   *
+   * E*Trade's renew REACTIVATES the existing access token rather than issuing a new one (which
+   * is why `renewAccessToken` returns void), so the same `creds` object stays valid.
+   */
+  private async withRenew<T>(creds: OAuthCredentials, fn: () => Promise<T>): Promise<T> {
+    try {
+      return await fn();
+    } catch {
+      try {
+        await renewAccessToken(creds);
+      } catch { /* renewing an active token errors harmlessly; the retry decides */ }
+      return await fn();
+    }
+  }
+
   private async fetchOrderLegs(
     accountIdKey: string,
     startDate: string,
@@ -856,12 +886,12 @@ export class EtradePortfolioService {
       };
       if (marker) params['marker'] = marker;
 
-      const raw = await etradeGet(
+      const raw = await this.withRenew(creds, () => etradeGet(
         `/v1/accounts/${accountIdKey}/orders`,
         params,
         creds,
         { timeoutMs: ETRADE_SLOW_TIMEOUT_MS },
-      ) as Record<string, unknown>;
+      )) as Record<string, unknown>;
 
       const resp = raw['OrdersResponse'] as Record<string, unknown> | undefined;
       if (!resp) break;

@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.154] — 2026-09-01
+
+### fix — `etrade-portfolio-service` was the last E*Trade consumer without renew-and-retry
+- Every other E*Trade consumer has had `withRenew` since v1.1.94. This service called `etradeGet` **bare on all four of its paths** (`accounts/list`, `portfolio`, `transactions`, `orders`), so a dormant token failed the whole portfolio sync outright instead of recovering. Tokens go dormant after **2 h of inactivity**, and this service is driven by **manual button clicks** — precisely the usage pattern that idles past the window.
+- **Retries on ANY error, deliberately.** A dormant token does NOT reliably surface as a 401: it can kill or hang the response stream instead (undici `terminated`). Gating renewal on an auth-shaped message is the exact bug that halted the evening orchestrator chain **8 of 10 trading days** before v1.1.92 and silently emptied option chains before v1.1.94. Renewing an already-active token errors harmlessly, so the retry decides the outcome either way.
+- E*Trade's renew **reactivates the existing access token** rather than issuing a new one (which is why `renewAccessToken` returns void), so the same `creds` object stays valid across the retry.
+- **The negotiation probes are deliberately NOT wrapped** — they exist to fail fast, and renewing five times over would double an already-slow diagnostic.
+- Regression: new `tests/etrade-portfolio-renew.test.ts` (4) — a `terminated` stream (not a 401) triggers renew-and-retry; a renewal that itself throws does not abort the call; exactly one retry so a genuinely dead token still fails; and the orders path renews too, not just account listing. Suite: 1017 passed.
+
 ## [1.1.152] — 2026-09-01
 
 ### fix — executed ORDERS becomes the primary source; transactions returns 200 but yields nothing
