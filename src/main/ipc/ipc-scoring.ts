@@ -11,7 +11,7 @@ import { buildEmailHtml, buildPdf } from '../services/brief-report-builder.js';
 import { STRATEGIES } from '../services/scoring-service.js';
 import type { DbHandle } from '../db/connection.js';
 import {
-  computeRollTheDice, DEFAULT_MAX_PRICE, type DiceResult,
+  computeRollTheDice, DEFAULT_MAX_CAPITAL, type DiceResult,
 } from '../services/roll-the-dice.js';
 import { buildDiceEmailHtml, diceEmailSubject } from '../services/dice-email-builder.js';
 
@@ -44,19 +44,19 @@ export function registerScoringIpc(
   // exactly that failure (a stale stored date put NVDA at wheel #1 on its earnings day).
   ipcMain.handle(
     'scoring:roll-the-dice',
-    wrap((maxPrice?: number): DiceResult => computeRollTheDice(db, maxPrice ?? DEFAULT_MAX_PRICE))
+    wrap((maxCapital?: number): DiceResult => computeRollTheDice(db, maxCapital ?? DEFAULT_MAX_CAPITAL))
   );
 
   // Send today's dice as an email on demand. Same builder the batch chain uses, so the manual
   // send and the automatic one are byte-identical.
   ipcMain.handle(
     'scoring:email-roll-the-dice',
-    async (_e: IpcMainInvokeEvent, maxPrice?: number): Promise<IpcResult<{ sent: boolean; message: string }>> => {
+    async (_e: IpcMainInvokeEvent, maxCapital?: number): Promise<IpcResult<{ sent: boolean; message: string }>> => {
       try {
         if (!emailService.isConfigured()) {
           return ok({ sent: false, message: 'SMTP is not configured — set it up in Settings → Email.' });
         }
-        const result = computeRollTheDice(db, maxPrice ?? DEFAULT_MAX_PRICE);
+        const result = computeRollTheDice(db, maxCapital ?? DEFAULT_MAX_CAPITAL);
         const dateStr = new Date().toLocaleDateString('en-US',
           { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'America/New_York' });
         await emailService.send(diceEmailSubject(result), buildDiceEmailHtml(result, dateStr));

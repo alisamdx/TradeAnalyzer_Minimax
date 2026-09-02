@@ -25,9 +25,33 @@ import type { DbHandle } from '../db/connection.js';
  *  the shares — it cannot be the one thing you do with cash, so this feature is CSP-only. */
 const WHEEL_ENTRY_SLUG = 'short-naked-put';
 
-/** Default ceiling on share price, per the operator's sizing rule: a $300 stock is a $30,000
- *  cash-secured commitment, and above that a single assignment dominates the book. */
-export const DEFAULT_MAX_PRICE = 300;
+/**
+ * Ceiling on the CAPITAL a position commits, not on the share price.
+ *
+ * Share price was the original gate and it is a lossy proxy: the CSP strike sits below spot, so
+ * what you actually tie up is `strike x 100`. A $306 stock struck at $285 commits $28,500 while a
+ * $299 stock struck at $295 commits $29,500 — the cheaper-looking stock costs more. Measured over
+ * 62 stored briefs, switching the gate moved the hit rate 23 -> 25 days and admitted three AAPL
+ * setups whose strike was at or under $300 despite spot being over it.
+ */
+export const DEFAULT_MAX_CAPITAL = 30_000;
+
+/**
+ * The exception ceiling — how far a genuinely better setup may exceed the normal limit.
+ *
+ * An exception mechanism is how a disciplined filter turns into a rationalisation engine, so the
+ * stretch tier demands MORE evidence rather than less, on every axis (see `qualifiesForStretch`).
+ */
+export const DEFAULT_STRETCH_CAPITAL = 50_000;
+
+/** Composite score a stretch pick must beat. Base-eligible picks over 62 briefs ran 58.9–76.0,
+ *  median 65.9, p90 73.3 — so 70 is the real "better than a normal day" line. An earlier draft
+ *  used 75, which sat above almost the entire observed range and fired on nothing. */
+const STRETCH_MIN_SCORE = 70;
+
+/** Liquidity bar for a stretch pick (base is MIN_TRADABLE_LIQUIDITY_SCORE = 8). Median eligible
+ *  liquidity is 11; a larger position needs a better exit, not an equal one. */
+const STRETCH_MIN_LIQUIDITY = 11;
 
 /** A brief older than this is surfaced with a staleness warning rather than silently trusted.
  *  Not a hard gate — a Saturday review of Friday's brief is legitimate — but a blind action on
@@ -51,6 +75,13 @@ export interface DiceScoreLike {
   grade: string;
   liquidityScore: number;
   setup: DiceSetupLike | null;
+}
+
+/** The operator's pre-committed price bands for a ticker (`conviction_stocks`). */
+export interface ConvictionBands {
+  priceLow: number | null;   // "I'd comfortably buy here"
+  priceMid: number | null;   // experimental
+  priceHigh: number | null;  // "never enter above this"
 }
 
 export interface DicePickInput {
@@ -88,6 +119,9 @@ export interface DiceResult {
     grade: string;
     criticRationale: string | null;
     aiRationale: string | null;
+    /** `stretch` = deliberately over the normal capital limit; see `stretchReason`. */
+    tier: 'base' | 'stretch';
+    stretchReason: string | null;
   } | null;
   noPickReason: string | null;
   briefDate: string | null;
@@ -96,6 +130,55 @@ export interface DiceResult {
   considered: number;
   rejections: Array<{ ticker: string; reason: string }>;
   runnerUp: { ticker: string; compositeScore: number } | null;
+}
+
+/**
+ * May this pick exceed the normal capital limit?
+ *
+ * "Genuinely good opportunity" is the phrase that precedes most bad trades, so the exception is
+ * defined by evidence the operator committed to BEFORE seeing the setup, plus quality bars
+ * calibrated to what the data actually produces:
+ *
+ *  1. On the conviction list at all — a name already thought about calmly, not one that merely
+ *     looks good tonight. A ticker allowlist was rejected as the alternative: favourite names are
+ *     exactly where overconfidence lives.
+ *  2. Strike at or below `price_high`, the operator's own "never enter above this". The strike is
+ *     the price actually paid on assignment, so this asks: have I already ruled this price out?
+ *     `price_high` rather than `price_low` deliberately — 3 of 13 stored rows have low > mid, so
+ *     only the never-above line is semantically reliable.
+ *  3. Composite >= 70 and liquidity >= 11, both above the observed medians.
+ *  4. A hard ceiling regardless. An exception without a bound is not an exception.
+ *
+ * Critic CONFIDENCE is deliberately NOT a criterion: it reads 'high' on 40 of 41 eligible picks,
+ * so requiring it would add the appearance of rigour and none of the substance.
+ */
+function qualifiesForStretch(
+  p: DicePickInput,
+  s: DiceScoreLike,
+  capital: number,
+  bands: ConvictionBands | undefined,
+  stretchCapital: number,
+): { ok: boolean; why: string } {
+  if (capital > stretchCapital) {
+    return { ok: false, why: `past the $${stretchCapital.toLocaleString()} exception ceiling too` };
+  }
+  if (!bands) return { ok: false, why: 'not on your conviction list' };
+  const strike = s.setup?.legs.find(l => l.side === 'put' && l.action.toLowerCase().startsWith('sell'))?.strike;
+  if (bands.priceHigh == null) return { ok: false, why: 'no "never above" band set for it' };
+  if (strike == null || strike > bands.priceHigh) {
+    return { ok: false, why: `strike $${strike} is above your $${bands.priceHigh} never-above line` };
+  }
+  if (p.compositeScore < STRETCH_MIN_SCORE) {
+    return { ok: false, why: `score ${p.compositeScore.toFixed(1)} under the ${STRETCH_MIN_SCORE} exception bar` };
+  }
+  if (s.liquidityScore < STRETCH_MIN_LIQUIDITY) {
+    return { ok: false, why: `liquidity ${s.liquidityScore.toFixed(0)}/15 under the ${STRETCH_MIN_LIQUIDITY} exception bar` };
+  }
+  return {
+    ok: true,
+    why: `on your conviction list, strike $${strike} within your $${bands.priceHigh} never-above line, `
+       + `score ${p.compositeScore.toFixed(1)} and liquidity ${s.liquidityScore.toFixed(0)}/15`,
+  };
 }
 
 /** Whole days between two ISO dates (date part only). */
@@ -114,15 +197,19 @@ function daysBetween(fromIso: string, toIso: string): number {
  *                  NULL and the table is keyed by ticker, so a ticker is either present WITH a
  *                  date or absent entirely — there is no "present, nothing scheduled" state.
  *                  Absent means UNKNOWN, which fails closed; see the gate below.
+ * @param conviction ticker -> the operator's own pre-committed price bands, which is what makes
+ *                   the stretch tier a rule rather than a mood
  * @param todayEt   ISO date in ET
  * @param briefDate ISO date the brief was generated
  */
 export function rollTheDice(
   picks: readonly DicePickInput[],
   earnings: ReadonlyMap<string, string>,
+  conviction: ReadonlyMap<string, ConvictionBands>,
   todayEt: string,
   briefDate: string | null,
-  maxPrice: number = DEFAULT_MAX_PRICE,
+  maxCapital: number = DEFAULT_MAX_CAPITAL,
+  stretchCapital: number = DEFAULT_STRETCH_CAPITAL,
 ): DiceResult {
   const rejections: Array<{ ticker: string; reason: string }> = [];
   const briefAgeDays = briefDate ? daysBetween(briefDate, todayEt) : null;
@@ -145,7 +232,11 @@ export function rollTheDice(
     return { ...base, pick: null, noPickReason: 'No wheel picks in the latest brief.' };
   }
 
-  interface Candidate { p: DicePickInput; s: DiceScoreLike; setup: DiceSetupLike; shortPut: { strike: number; mid: number; qty?: number } }
+  interface Candidate {
+    p: DicePickInput; s: DiceScoreLike; setup: DiceSetupLike;
+    shortPut: { strike: number; mid: number; qty?: number };
+    capital: number; tier: 'base' | 'stretch'; stretchReason: string | null;
+  }
   const eligible: Candidate[] = [];
 
   for (const p of picks) {
@@ -161,9 +252,8 @@ export function rollTheDice(
     //    exactly the day nothing adversarial had reviewed the pick.
     if (cv.degraded === true) { rejections.push({ ticker: p.ticker, reason: 'critic degraded (un-vetted)' }); continue; }
 
-    // 3. Share price ceiling — the operator's sizing rule.
+    // 3. A price is needed for the cost-basis maths even though the gate is on capital.
     if (p.price == null) { rejections.push({ ticker: p.ticker, reason: 'no price' }); continue; }
-    if (p.price > maxPrice) { rejections.push({ ticker: p.ticker, reason: `$${p.price.toFixed(0)} over $${maxPrice} limit` }); continue; }
 
     // 4. A constructible cash-secured put.
     const s = (p.strategyLabResult?.scores ?? []).find(x => x.slug === WHEEL_ENTRY_SLUG);
@@ -176,6 +266,22 @@ export function rollTheDice(
     // 5. Liquidity — you must be able to get out. Same bar the critic and v2 engine use.
     if (s.liquidityScore < MIN_TRADABLE_LIQUIDITY_SCORE) {
       rejections.push({ ticker: p.ticker, reason: `illiquid (${s.liquidityScore.toFixed(0)}/15)` }); continue;
+    }
+
+    // 5b. CAPITAL — the real sizing constraint. Over the base limit a pick is not simply
+    //     rejected: it may still qualify as an EXCEPTION, but only by clearing a strictly
+    //     higher bar on every axis. Anything past the stretch ceiling is out regardless.
+    const capital = shortPut.strike * 100 * (shortPut.qty ?? 1);
+    let tier: 'base' | 'stretch' = 'base';
+    let stretchReason: string | null = null;
+    if (capital > maxCapital) {
+      const st = qualifiesForStretch(p, s, capital, conviction.get(p.ticker), stretchCapital);
+      if (!st.ok) {
+        rejections.push({ ticker: p.ticker, reason: `$${capital.toLocaleString()} over $${maxCapital.toLocaleString()} — ${st.why}` });
+        continue;
+      }
+      tier = 'stretch';
+      stretchReason = st.why;
     }
 
     // 6. EARNINGS — a hard exclusion, not the brief's −20 penalty. A short put through an
@@ -201,7 +307,7 @@ export function rollTheDice(
       rejections.push({ ticker: p.ticker, reason: 'no net credit' }); continue;
     }
 
-    eligible.push({ p, s, setup: s.setup, shortPut });
+    eligible.push({ p, s, setup: s.setup, shortPut, capital, tier, stretchReason });
   }
 
   if (eligible.length === 0) {
@@ -226,10 +332,9 @@ export function rollTheDice(
     : null;
 
   const strike = w.shortPut.strike;
-  const qty = w.shortPut.qty ?? 1;
   const premiumPerShare = w.shortPut.mid;
   const creditTotal = w.setup.netCredit!;
-  const capitalRequired = strike * 100 * qty;
+  const capitalRequired = w.capital;
   const effectiveCostBasis = strike - premiumPerShare;
 
   return {
@@ -254,6 +359,8 @@ export function rollTheDice(
       grade: w.s.grade,
       criticRationale: w.p.criticVerdict?.rationale ?? null,
       aiRationale: w.p.aiRationale,
+      tier: w.tier,
+      stretchReason: w.stretchReason,
     },
   };
 }
@@ -268,7 +375,11 @@ export function rollTheDice(
  * brief outlives a calendar correction — a stale stored date is exactly how the brief once put
  * NVDA at wheel #1 on the day it reported.
  */
-export function computeRollTheDice(db: DbHandle, maxPrice: number = DEFAULT_MAX_PRICE): DiceResult {
+export function computeRollTheDice(
+  db: DbHandle,
+  maxCapital: number = DEFAULT_MAX_CAPITAL,
+  stretchCapital: number = DEFAULT_STRETCH_CAPITAL,
+): DiceResult {
   const brief = db.prepare(
     `SELECT generated_at, picks FROM daily_briefs WHERE strategy = 'wheel'
       ORDER BY generated_at DESC LIMIT 1`,
@@ -289,5 +400,17 @@ export function computeRollTheDice(db: DbHandle, maxPrice: number = DEFAULT_MAX_
     for (const r of rows) earnings.set(r.ticker, r.report_date);
   }
 
-  return rollTheDice(picks, earnings, todayEt, brief ? brief.generated_at.slice(0, 10) : null, maxPrice);
+  // The operator's own pre-committed bands — what makes the stretch tier a rule, not a mood.
+  const conviction = new Map<string, ConvictionBands>();
+  for (const r of db.prepare(
+    'SELECT ticker, price_low, price_mid, price_high FROM conviction_stocks',
+  ).all() as Array<{ ticker: string; price_low: number | null; price_mid: number | null; price_high: number | null }>) {
+    conviction.set(r.ticker, { priceLow: r.price_low, priceMid: r.price_mid, priceHigh: r.price_high });
+  }
+
+  return rollTheDice(
+    picks, earnings, conviction, todayEt,
+    brief ? brief.generated_at.slice(0, 10) : null,
+    maxCapital, stretchCapital,
+  );
 }

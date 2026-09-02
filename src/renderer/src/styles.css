@@ -3451,6 +3451,17 @@ input[type='checkbox'] {
   background: color-mix(in srgb, var(--warning) 8%, transparent);
 }
 
+.dice-stretch {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text);
+  border: 1px solid var(--warning);
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+}
+
 .dice-headline { font-size: 15px; font-weight: 600; color: var(--text); margin-bottom: 10px; }
 
 .dice-stats { display: flex; flex-wrap: wrap; gap: 10px; }

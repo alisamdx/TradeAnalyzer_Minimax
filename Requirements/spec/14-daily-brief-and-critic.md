@@ -117,3 +117,20 @@ the replay simply cannot see it.
   Failure is caught and logged and can never fail the batch.
 - The in-app **✉ Email it** button, `scoring:email-roll-the-dice`, and the nightly send MUST all
   resolve the pick through `computeRollTheDice(db)`, so they cannot disagree.
+
+**FR-BRIEF-DICE-8 (v1.1.164)** — The sizing gate is on CAPITAL COMMITTED (`strike × 100 × qty`),
+not share price, with a defined exception tier.
+
+- Base ceiling $30,000 (configurable). Share price remains required only for the cost-basis maths.
+- A pick above the base ceiling MUST NOT be admitted merely for scoring well. It qualifies only
+  by clearing a strictly higher bar on every axis: on the conviction list, strike at or below that
+  ticker's `price_high` ("never enter above this"), composite ≥ 70, liquidity ≥ 11/15, and capital
+  ≤ $50,000. All of these are commitments made *before* the setup appeared.
+- `criticVerdict.confidence` MUST NOT be used as a criterion — measured `high` on 40 of 41
+  eligible picks, it discriminates nothing and would only simulate rigour.
+- `price_high` is used rather than `price_low`/`price_mid` because stored conviction rows are not
+  reliably ordered (3 of 13 have `low > mid`); only the never-above line is unambiguous.
+- A stretch pick MUST be announced before the order itself in every surface, carrying the amount
+  and the reason, so it cannot read as an ordinary recommendation.
+- Thresholds are calibrated to the observed distribution (composite 58.9–76.0 median 65.9;
+  liquidity median 11), not chosen by intuition — a draft using ≥ 75 fired on nothing.

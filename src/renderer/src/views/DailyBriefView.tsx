@@ -1127,6 +1127,13 @@ export function DailyBriefView({ onGoToStrategyLab }: DailyBriefViewProps) {
 
           {dice.pick ? (
             <>
+              {dice.pick.tier === 'stretch' && (
+                <div className="dice-stretch">
+                  <b>Above your normal size — ${dice.pick.capitalRequired.toLocaleString()}.</b>{' '}
+                  An exception, taken because it is {dice.pick.stretchReason}. Worth a look before
+                  you place it rather than a reflex.
+                </div>
+              )}
               <div className="dice-headline">
                 Sell the <b>{dice.pick.ticker}</b> ${dice.pick.strike} put,{' '}
                 {dice.pick.expiration} ({dice.pick.dte}d)
@@ -1140,7 +1147,7 @@ export function DailyBriefView({ onGoToStrategyLab }: DailyBriefViewProps) {
                 <div className="dice-stat">
                   <span className="dice-k">Capital</span>
                   <span className="dice-v">${dice.pick.capitalRequired.toLocaleString()}</span>
-                  <span className="dice-n">cash-secured</span>
+                  <span className="dice-n">{dice.pick.tier === 'stretch' ? 'cash-secured · over normal limit' : 'cash-secured'}</span>
                 </div>
                 <div className="dice-stat">
                   <span className="dice-k">Cost basis if assigned</span>

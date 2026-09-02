@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.1.164] — 2026-09-02
+
+### feat — Roll the Dice gates on capital, plus a defined exception for better setups
+- **The gate is now capital committed (`strike × 100`), not share price**, at a **$30,000** ceiling. Share price was a lossy proxy: the strike sits below spot, so a $306 stock struck at $285 commits **$28,500** while a $299 stock struck at $295 commits **$29,500** — the cheaper-looking one costs more. Over 62 stored wheel briefs the switch moved the hit rate **23 → 25 days (37% → 40%)**, admitting three AAPL setups whose strike was under $300 while spot was over it.
+- **A defined exception tier** — capital up to **$50,000**, but only by clearing a strictly higher bar on *every* axis, all of it committed before the setup appeared: on the conviction list, strike ≤ that ticker's `price_high` ("never enter above this"), composite ≥ 70, liquidity ≥ 11/15. Fires **twice** in 62 briefs (AMD, June), lifting the rate to **26/62 (42%)**. An exception mechanism is how a disciplined filter becomes a rationalisation engine, so it demands more evidence, not less — and a ticker allowlist was rejected as the alternative, since favourite names are exactly where overconfidence lives.
+- **Two calibration findings changed the design.** `criticVerdict.confidence` reads `high` on **40 of 41** eligible picks, so it is deliberately NOT a criterion — requiring it would add the appearance of rigour and none of the substance. And a first draft used composite ≥ 75, which sits above the observed maximum of 76.0 and fired on nothing; checked against the distribution (58.9–76.0, median 65.9) and corrected to 70.
+- **Conviction-list data note:** 3 of 13 rows have `price_low > price_mid` (MSFT 433/409, NOW 123/108, PLTR 152/133), inverting the intended ordering. The gate uses `price_high` only — the one band unambiguous regardless.
+- A stretch pick is announced **before** the order in both email and panel, with amount and reason, so it never arrives looking like an ordinary trade.
+- **Correction:** I previously reported SNOW as failing only the $300 price limit, "out by $5.84", and used it to motivate this change. Wrong — the diagnostic checked price before liquidity and short-circuited; SNOW fails on **liquidity 7/15** and was never eligible. The capital-gate reasoning stands on its own merits and on the three AAPL setups it genuinely admits, but that example did not support it.
+- 18 gate tests (each proving a REJECT) + 11 email tests. Suite: 1077 passed.
+
 ## [1.1.163] — 2026-09-02
 
 ### feat — 🎲 Roll the Dice by email: one opportunity, built as a card not a report

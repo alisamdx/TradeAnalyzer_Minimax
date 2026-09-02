@@ -14,6 +14,8 @@ const WITH_PICK: DiceResult = {
     annualizedReturn: 30.1, popEstimate: 74, liquidityScore: 11, grade: 'A',
     criticRationale: 'Defensive staple, IV rank elevated without an event driving it.',
     aiRationale: 'quality name',
+    tier: 'base',
+    stretchReason: null,
   },
   noPickReason: null,
   briefDate: '2026-09-02',
@@ -111,6 +113,24 @@ describe('buildDiceEmailHtml', () => {
     );
     expect(h).not.toContain('<script>');
     expect(h).toContain('&lt;script&gt;');
+  });
+
+  // An over-limit pick must never arrive looking like an ordinary night's trade.
+  it('announces a stretch pick before the order, with the amount and the reason', () => {
+    const h = buildDiceEmailHtml({
+      ...WITH_PICK,
+      pick: { ...WITH_PICK.pick!, tier: 'stretch', capitalRequired: 47_000,
+              stretchReason: 'on your conviction list, strike $470 within your $554 never-above line' },
+    }, 'Tue, Sep 2');
+    expect(h).toContain('ABOVE YOUR NORMAL SIZE');
+    expect(h).toContain('$47,000');
+    expect(h).toContain('never-above line');
+    // and it comes BEFORE the order, not as a footnote after it
+    expect(h.indexOf('ABOVE YOUR NORMAL SIZE')).toBeLessThan(h.indexOf('The order'));
+  });
+
+  it('shows no stretch banner on an ordinary pick', () => {
+    expect(buildDiceEmailHtml(WITH_PICK, 'Tue, Sep 2')).not.toContain('ABOVE YOUR NORMAL SIZE');
   });
 
   it('is a single-column card sized for a phone', () => {

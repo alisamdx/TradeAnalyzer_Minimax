@@ -79,7 +79,7 @@ already done that. This only removes:
 |---|---|
 | Critic verdict is **pass** | A *caution* is something to read, and the point is not reading |
 | Critic actually **ran** | A "pass" from the rule-based fallback is un-vetted, not an all-clear |
-| Share price **≤ $300** | A $300 stock is a $30,000 cash-secured commitment |
+| Capital **≤ $30,000** | What you actually tie up (`strike × 100`), not the share price — the strike sits below spot, so a dearer stock struck low can cost less than a cheap one struck high |
 | A real CSP exists on the chain | — |
 | Liquidity **≥ 8/15** | You have to be able to get out |
 | **No earnings before expiry** | And an unknown or stale earnings date also fails |
@@ -92,6 +92,15 @@ days the bar matters. Expand *"N rejected — why"* to see what it threw out and
 The card shows the strike and expiry, the credit, the cash required, your **cost basis if
 assigned** and how far below the current price that is, the annualized return and probability of
 profit, and the critic's own note.
+
+**The exception, for when something is genuinely worth more capital.** A pick may go up to
+**$50,000** — but only by clearing a higher bar on *every* count at once: it is on your **My
+Stocks** conviction list, its strike is at or below the *never enter above* price **you** set for
+it, its score is ≥ 70 (a normal good pick is ~66), and liquidity is ≥ 11/15. Every one of those is
+something you decided *before* seeing the setup, which is the whole idea — an exception you can
+argue yourself into is not an exception. On the last three months of briefs it would have fired
+**twice**. When it does, the card and the email say so *above* the order, with the amount and the
+reason, so it can never slip past as an ordinary night.
 
 **It emails itself.** After the evening batch you get a one-card email — the subject alone carries
 the trade (`🎲 NVDA — sell the $205 put, Fri Sep 25 · $744 credit`), so you can read it from a

@@ -1114,7 +1114,7 @@ function buildApi() {
     resendBriefEmail: () =>
       invoke<{ sent: boolean; message: string }>('scoring:resend-brief-email'),
     /** Roll the Dice: one wheel entry from the latest brief, or an explicit nothing. */
-    rollTheDice: (maxPrice?: number) => invoke<{
+    rollTheDice: (maxCapital?: number) => invoke<{
       pick: {
         ticker: string; price: number; compositeScore: number; briefRank: number;
         strike: number; expiration: string; dte: number;
@@ -1123,6 +1123,7 @@ function buildApi() {
         annualizedReturn: number | null; popEstimate: number | null;
         liquidityScore: number; grade: string;
         criticRationale: string | null; aiRationale: string | null;
+        tier: 'base' | 'stretch'; stretchReason: string | null;
       } | null;
       noPickReason: string | null;
       briefDate: string | null;
@@ -1131,10 +1132,10 @@ function buildApi() {
       considered: number;
       rejections: Array<{ ticker: string; reason: string }>;
       runnerUp: { ticker: string; compositeScore: number } | null;
-    }>('scoring:roll-the-dice', maxPrice),
+    }>('scoring:roll-the-dice', maxCapital),
     /** Send today's Roll the Dice as an email (same builder the nightly chain uses). */
-    emailRollTheDice: (maxPrice?: number) =>
-      invoke<{ sent: boolean; message: string }>('scoring:email-roll-the-dice', maxPrice),
+    emailRollTheDice: (maxCapital?: number) =>
+      invoke<{ sent: boolean; message: string }>('scoring:email-roll-the-dice', maxCapital),
     signalCorrelations: (strategy: ScoringStrategy) =>
       invoke<SignalWeightSuggestion[]>('scoring:signal-correlations', strategy),
     briefHealthTrend: () =>

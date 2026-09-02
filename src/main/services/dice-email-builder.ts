@@ -69,6 +69,19 @@ function statRow(label: string, value: string, note?: string): string {
 }
 
 export function buildDiceEmailHtml(r: DiceResult, dateStr: string): string {
+  // A stretch pick deliberately exceeds the normal capital limit. That must never arrive
+  // looking like an ordinary night's trade, so it is announced before the order itself.
+  const stretch = r.pick && r.pick.tier === 'stretch'
+    ? `<tr><td style="padding:14px 18px 0;">
+         <div style="border:1px solid ${WARN};background:#fff8e6;border-radius:8px;padding:10px 12px;">
+           <div style="font-size:13px;font-weight:700;color:${WARN};">ABOVE YOUR NORMAL SIZE — ${money(r.pick.capitalRequired)}</div>
+           <div style="font-size:12px;color:${TEXT};line-height:1.6;margin-top:4px;">
+             This one is an exception, taken because it is ${esc(r.pick.stretchReason ?? '')}.
+             Worth a look before you place it rather than a reflex.
+           </div>
+         </div></td></tr>`
+    : '';
+
   const head = `
     <tr><td style="padding:16px 18px 4px;">
       <div style="font-size:18px;font-weight:700;color:${TEXT};">\u{1F3B2} Roll the Dice</div>
@@ -184,7 +197,7 @@ export function buildDiceEmailHtml(r: DiceResult, dateStr: string): string {
       <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="560"
              style="width:100%;max-width:560px;background:${CARD};border:1px solid ${BORDER};border-radius:10px;
                     font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:${TEXT};">
-        ${head}${stale}${body}${rejects}${foot}
+        ${head}${stale}${stretch}${body}${rejects}${foot}
       </table>
     </td></tr>
   </table>

@@ -849,7 +849,9 @@ picks the brief has already scored and ranked. This layer only removes.
 eligible(pick) =
       criticVerdict.verdict == 'pass'          # caution and flag both fail
   AND criticVerdict.degraded != true           # un-vetted is not an all-clear
-  AND price != null AND price <= maxPrice      # default $300
+  AND price != null                            # needed for the cost-basis maths
+  AND capital <= maxCapital                    # capital = strike x 100 x qty; default $30,000
+      OR qualifiesForStretch(...)              # the defined exception, below
   AND exists CSP (slug 'short-naked-put', setup constructible)
   AND liquidityScore >= MIN_TRADABLE_LIQUIDITY_SCORE   # = 8
   AND earnings_calendar HAS the ticker         # absent = unknown = fail closed
@@ -867,6 +869,26 @@ capitalRequired     = strike × 100 × qty                  # cash-secured
 effectiveCostBasis  = strike − premiumPerShare
 discountToSpotPct   = (price − effectiveCostBasis) / price × 100
 ```
+
+### The exception tier (v1.1.164)
+
+```
+qualifiesForStretch =
+      capital <= stretchCapital                # default $50,000; an unbounded exception is none
+  AND ticker IS ON the conviction list
+  AND strike <= conviction.price_high          # the operator's own "never enter above this"
+  AND compositeScore >= 70
+  AND liquidityScore >= 11
+```
+
+Capital, not share price, because the strike sits below spot: a $306 stock struck at $285 commits
+$28,500 while a $299 stock struck at $295 commits $29,500. Over 62 stored briefs the switch moved
+the hit rate 23 -> 25 days; the exception adds one more, firing twice (AMD, June 2026).
+
+Every stretch requirement is evidence committed **before** the setup appeared. `price_high` is
+used rather than `price_low` because 3 of 13 stored conviction rows have `low > mid`, so only the
+never-above line is semantically reliable. `criticVerdict.confidence` is deliberately NOT a
+criterion — it reads `high` on 40 of 41 eligible picks, so it discriminates nothing.
 
 **Why the earnings gate is an exclusion, not the brief's −20 penalty.** A penalty on a high
 scorer still leaves it on top; the session that produced this feature opened with the brief
