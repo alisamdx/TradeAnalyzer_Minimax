@@ -145,3 +145,84 @@ describe('closed-position import — executed-orders fallback', () => {
     expect(res.errors.join(' ')).toMatch(/Executed orders returned no legs; trying transactions/);
   });
 });
+
+// ── Long vs short direction (v1.1.155) ──────────────────────────────────────
+//
+// Every option was priced as short premium, which inverts the sign on a LONG position and
+// mislabels it. Caught 2026-09-01 by reconciling against E*Trade's own Gains & Losses export:
+// the TSLA Jul-17 $375 put was BOUGHT at 19.63 and SOLD at 15.98 for a real loss of −$364.06,
+// and the import had recorded it as a "CSP" worth **+$361.97**. A $726 error on one row, in the
+// direction that flatters the book — which is why it took the broker's own statement to find.
+describe('long vs short option direction', () => {
+  let db: DbHandle;
+  beforeEach(() => {
+    db = openDatabase(':memory:');
+    runMigrations(db, MIGRATIONS_DIR);
+    etradeGet.mockReset();
+  });
+  afterEach(() => { db.close(); vi.restoreAllMocks(); });
+
+  const put = (id: number, action: string, price: number, epochMs: number) => ({
+    orderId: id, OrderDetail: [{ executedTime: epochMs, Instrument: [{
+      orderAction: action, filledQuantity: 1, averageExecutionPrice: price,
+      Product: { symbol: 'TSLA', securityType: 'OPTN', callPut: 'PUT',
+                 expiryYear: 2026, expiryMonth: 7, expiryDay: 17, strikePrice: 375 },
+    }] }],
+  });
+
+  const run = async (orders: unknown[]) => {
+    etradeGet.mockImplementation(async (path: string) => {
+      if (path.includes('/accounts/list')) return ACCOUNTS;
+      if (path.includes('/transactions')) throw new Error('timeout');
+      if (path.includes('/orders')) return { OrdersResponse: { Order: orders } };
+      return {};
+    });
+    await new EtradePortfolioService().syncClosedPositions(db, creds);
+    return db.prepare(`SELECT position_type, realized_pnl, premium_received FROM positions WHERE status='closed'`)
+      .get() as { position_type: string; realized_pnl: number; premium_received: number | null };
+  };
+
+  it('a LONG put bought high and sold low is a LOSS, labelled Long Put', async () => {
+    const row = await run([
+      put(1, 'BUY_OPEN',   19.63, Date.UTC(2026, 5, 10)),
+      put(2, 'SELL_CLOSE', 15.98, Date.UTC(2026, 5, 25)),
+    ]);
+    expect(row.position_type).toBe('Long Put');       // not "CSP"
+    expect(row.realized_pnl).toBeCloseTo(-365, 0);    // E*Trade reports -364.06
+    expect(row.realized_pnl).toBeLessThan(0);         // the sign is the whole point
+    expect(row.premium_received).toBeNull();          // a long option pays a debit
+  });
+
+  it('a SHORT put sold high and bought back low is still a GAIN, labelled CSP', async () => {
+    const row = await run([
+      put(3, 'SELL_OPEN', 19.63, Date.UTC(2026, 5, 10)),
+      put(4, 'BUY_CLOSE', 15.98, Date.UTC(2026, 5, 25)),
+    ]);
+    expect(row.position_type).toBe('CSP');
+    expect(row.realized_pnl).toBeCloseTo(365, 0);
+    expect(row.premium_received).toBeCloseTo(19.63, 2);
+  });
+
+  it('a LONG call sold higher than bought is a GAIN, labelled Long Call', async () => {
+    etradeGet.mockImplementation(async (path: string) => {
+      if (path.includes('/accounts/list')) return ACCOUNTS;
+      if (path.includes('/transactions')) throw new Error('timeout');
+      if (path.includes('/orders')) return { OrdersResponse: { Order: [
+        { orderId: 5, OrderDetail: [{ executedTime: Date.UTC(2026, 5, 9), Instrument: [{
+          orderAction: 'BUY_OPEN', filledQuantity: 1, averageExecutionPrice: 3.06,
+          Product: { symbol: 'NFLX', securityType: 'OPTN', callPut: 'CALL',
+                     expiryYear: 2026, expiryMonth: 7, expiryDay: 17, strikePrice: 85 } }] }] },
+        { orderId: 6, OrderDetail: [{ executedTime: Date.UTC(2026, 5, 17), Instrument: [{
+          orderAction: 'SELL_CLOSE', filledQuantity: 1, averageExecutionPrice: 1.68,
+          Product: { symbol: 'NFLX', securityType: 'OPTN', callPut: 'CALL',
+                     expiryYear: 2026, expiryMonth: 7, expiryDay: 17, strikePrice: 85 } }] }] },
+      ] } };
+      return {};
+    });
+    await new EtradePortfolioService().syncClosedPositions(db, creds);
+    const row = db.prepare(`SELECT position_type, realized_pnl FROM positions WHERE ticker='NFLX'`)
+      .get() as { position_type: string; realized_pnl: number };
+    expect(row.position_type).toBe('Long Call');
+    expect(row.realized_pnl).toBeCloseTo(-138, 0);    // E*Trade reports -137.03
+  });
+});

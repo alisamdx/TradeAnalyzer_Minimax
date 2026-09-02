@@ -80,6 +80,15 @@ interface TxLeg {
   txId: string;
   date: string;              // YYYY-MM-DD
   action: 'open' | 'close' | 'expired' | 'assigned';
+  /**
+   * Whether the OPENING side was a sell (short premium) or a buy (long).
+   *
+   * Without this every option was priced as short premium, which inverts the sign on a long
+   * position: the TSLA Jul-17 $375 put was bought at 19.63 and sold at 15.98 for a REAL LOSS of
+   * \u2212$364.06, and it was recorded as +$361.97. A $726 error on one row, and it also mislabelled
+   * the position as a CSP. Only meaningful on an `open` leg.
+   */
+  openedShort: boolean;
   secType: 'OPTN' | 'EQ';
   ticker: string;
   symbolKey: string;         // OCC for options, ticker for EQ
@@ -175,7 +184,8 @@ function numOf(v: unknown): number | null {
 
 interface ClosedPosition {
   ticker: string;
-  positionType: 'CSP' | 'CC' | 'Stock';
+  /** 'Long Call'/'Long Put' match the labels the position sync already writes. */
+  positionType: 'CSP' | 'CC' | 'Stock' | 'Long Call' | 'Long Put';
   quantity: number;
   entryPrice: number;
   entryDate: string;
@@ -821,7 +831,9 @@ export class EtradePortfolioService {
       symbolKey = prod.symbol.toUpperCase();
     }
 
-    return { txId: tx.transactionId, date, action, secType, ticker, symbolKey, strikePrice, expirationDate, callPut, qty, price, commission };
+    // This path infers `open` only from a SELL, so an opening leg is short by construction.
+    // It cannot represent a long option at all — another reason orders is the primary source.
+    return { txId: tx.transactionId, date, action, openedShort: action === 'open', secType, ticker, symbolKey, strikePrice, expirationDate, callPut, qty, price, commission };
   }
 
   // ─── Fetch executed ORDERS as an alternative source of fills ──────────
@@ -971,6 +983,10 @@ export class EtradePortfolioService {
     else if (act === 'SELL' || act === 'BUY_TO_COVER') action = 'close';
     else return null;
 
+    // Direction of the OPENING side. SELL_OPEN is short premium (the wheel's CSP/CC);
+    // BUY_OPEN is a long option, where profit runs the other way.
+    const openedShort = act.startsWith('SELL');
+
     const filled = numOf(inst['filledQuantity']) ?? numOf(inst['quantity']) ?? 0;
     const price  = numOf(inst['averageExecutionPrice']) ?? 0;
     if (!(filled > 0)) return null;
@@ -998,7 +1014,7 @@ export class EtradePortfolioService {
 
     return {
       txId: `${orderId}:${symbolKey}:${date}`,
-      date, action, secType, ticker, symbolKey,
+      date, action, openedShort, secType, ticker, symbolKey,
       strikePrice, expirationDate, callPut,
       qty: Math.abs(filled),
       price: Math.abs(price),
@@ -1035,21 +1051,27 @@ export class EtradePortfolioService {
         if (!close) continue;
 
         const secType = open.secType;
-        let positionType: 'CSP' | 'CC' | 'Stock';
-
+        let positionType: ClosedPosition['positionType'];
         if (secType === 'OPTN') {
-          positionType = open.callPut === 'PUT' ? 'CSP' : 'CC';
+          // Long options are NOT wheel positions and must not be labelled CSP/CC — the naming
+          // matches the rows the position sync already writes ('Long Call' / 'Long Put').
+          positionType = open.openedShort
+            ? (open.callPut === 'PUT' ? 'CSP' : 'CC')
+            : (open.callPut === 'PUT' ? 'Long Put' : 'Long Call');
         } else {
           positionType = 'Stock';
         }
 
         const multiplier  = secType === 'OPTN' ? open.qty * 100 : open.qty;
         const closePrice  = close.action === 'expired' ? 0 : close.price;
-        // For short options: profit = (open_price - close_price) × multiplier
-        // For long stock:    profit = (close_price - open_price) × multiplier
-        const realizedPnl = secType === 'OPTN'
-          ? (open.price - closePrice) * multiplier - open.commission - close.commission
-          : (closePrice - open.price) * multiplier - open.commission - close.commission;
+        // Direction decides the sign. Short premium profits when the close is CHEAPER than the
+        // open; a long position profits when it is DEARER. Treating every option as short
+        // inverted the sign on long trades (TSLA $375 put: real −$364.06, recorded +$361.97).
+        const shortSide = secType === 'OPTN' ? open.openedShort : false;
+        const gross = shortSide
+          ? (open.price - closePrice) * multiplier
+          : (closePrice - open.price) * multiplier;
+        const realizedPnl = gross - open.commission - close.commission;
 
         result.push({
           ticker:          open.ticker,
@@ -1062,7 +1084,8 @@ export class EtradePortfolioService {
           exitNotes:       close.action === 'expired' ? 'Expired worthless' : close.action === 'assigned' ? 'Assigned' : null,
           strikePrice:     open.strikePrice,
           expirationDate:  open.expirationDate,
-          premiumReceived: secType === 'OPTN' ? open.price : null,
+          // Only a SHORT option collects premium; a long one pays a debit.
+          premiumReceived: secType === 'OPTN' && open.openedShort ? open.price : null,
           realizedPnl,
         });
       }

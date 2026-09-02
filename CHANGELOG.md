@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.155] — 2026-09-01
+
+### fix — LONG options were priced as short premium, inverting their sign
+- **Found by reconciling against E*Trade's own Gains & Losses export.** The app's realized total read **$3,309.67** against E*Trade's **$2,457.50**, and the operator's instinct — *"probably you are not seeing losses"* — was right.
+- `matchClosedPositions` computed `(open.price − close.price)` for **every** option, which is only correct for short premium, and labelled every put `CSP` / every call `CC` regardless of direction. The TSLA Jul-17 $375 put was **bought** at 19.63 and **sold** at 15.98 — a real loss of **−$364.06** — and was recorded as a `CSP` worth **+$361.97**. **A $726 error on one row, in the direction that flatters the book.**
+- `TxLeg` now carries `openedShort`, set from the order's `orderAction` (`SELL_OPEN` → short, `BUY_OPEN` → long). P&L follows direction, positions are labelled `Long Put` / `Long Call` matching what the position sync already writes, and `premium_received` is null for a long option (it pays a debit, it does not collect premium). The transactions path can only ever infer `open` from a SELL, so it is short by construction — one more reason orders is primary.
+- **Reconciled line by line against the export**: 22 of 24 rows now agree to the cent. The two differences are understood — the **assigned** TSLA $350 put (**+$499.48** here, absent from E*Trade's G&L because an assignment defers the premium into the stock's cost basis rather than realising it), and two rows that were still last-mark estimates before this import.
+- Regression: `etrade-orders-fallback.test.ts` +3 (7 total) — a long put bought high and sold low is a **loss** labelled `Long Put` with null premium; a short put sold high and bought back low is still a **gain** labelled `CSP`; a long call reproduces E*Trade's −$137.03. Suite: 1020 passed.
+
 ## [1.1.154] — 2026-09-01
 
 ### fix — `etrade-portfolio-service` was the last E*Trade consumer without renew-and-retry
