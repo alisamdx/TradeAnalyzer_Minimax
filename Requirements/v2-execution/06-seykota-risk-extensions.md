@@ -314,3 +314,54 @@ the tail. Feb–Jul 2026 was a semiconductor/memory melt-up (INTC 41→133, MU 3
 all verified as genuine sustained rallies, max single-day 19–26%, not data artifacts). So a long hold
 is a **positive-skew bet on a trending regime**, which pays there and bleeds otherwise. Any future
 work here should target *regime detection*, not a fixed hold length.
+
+
+### Follow-up: regime detection — explored, NOT viable on current data (2026-09-01)
+
+The hold-period rejection above closed with "any future work here should target *regime
+detection*, not a fixed hold length." That was explored immediately. **It does not work on the
+data available, and the reason is structural rather than a tuning problem.**
+
+**The question is NOT the one already rejected.** The v0.32.90 SPY-regime gate asked *should I
+enter in this regime*. This asks: does an entry-time regime feature predict **whether a 21-day
+hold beats a 5-day hold**? Four features, all computable at entry with no lookahead, regressed
+against the per-date mean of `alpha(21d) − alpha(5d)` over the same 125-date replay:
+
+| feature | r | naive t |
+| --- | --- | --- |
+| `ret20` — SPY trailing 20d return | **0.582** | 7.94 |
+| `distSma50` — SPY vs 50d SMA | 0.323 | 3.79 |
+| `sma20v50` | −0.061 | −0.68 |
+| `vol20` — SPY 20d realized vol | −0.119 | −1.33 |
+
+**Those t-statistics are meaningless.** 125 dates with overlapping 21-day forward windows, and
+adjacent dates share near-identical regime features — the effective independent sample is ~6
+(125/21), not 125. This is the same inflation that made the one-month read look decisive.
+
+**The counterexample is visible before any statistics:**
+
+| month | SPY `ret20` | `distSma50` | mean(21d − 5d) |
+| --- | --- | --- | --- |
+| 2026-04 | +4.93% | **+2.56%** | **+6.60%** |
+| 2026-06 | +0.41% | **+2.75%** | **−6.98%** |
+
+April and June carry essentially the same `distSma50` and produce opposite outcomes. Any rule
+keyed on distance-from-SMA50 must classify them identically and be wrong on one.
+
+**Leave-one-month-out** (fit the sign on five months, predict the held-out one): `ret20` 4/6,
+`distSma50` 3/6. `distSma50` is a coin flip. `ret20`'s 4/6 is not evidence — 3 is chance and 4
+arises ~34% of the time from coin flips. Both of `ret20`'s misses are Feb and Mar, in the same
+direction. The existing binary gate is flat too: SPY>SMA50 → +1.17%, SPY<SMA50 → +0.65%.
+
+**Why this is structural.** Whether a 21-day hold beats a 5-day one depends on whether the market
+*trends over the following 21 days*. An entry-time feature can only help if trend persists, so
+what is really being measured is "does SPY momentum persist a month out" — and `ret20` is a
+momentum proxy in the same family as the feature that already inverted on full-year data in
+v0.32.90. Over Feb–Jul 2026 it persisted in Apr/May and did not in Jun/Jul. **Six observations of
+a phenomenon that changes on a monthly cadence cannot support a rule**, at any effort level.
+
+**What it would take.** ~3+ years of replay for 36+ monthly observations. `historical_prices`
+starts 2024-05-31 for most tickers and `iv_history` is far shorter, so this is not testable today.
+
+**Disposition: do not build.** Re-open only if the price/IV panel ever reaches 3+ years AND a
+pre-registered feature is chosen before looking at outcomes.

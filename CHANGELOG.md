@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.143] — 2026-09-01
+
+### Validation — regime detection explored, NOT viable on current data
+No code change. Follow-up to v1.1.142, which closed by pointing at regime detection as the next lever; it was explored immediately and does not work.
+- **Different question from the rejected v0.32.90 gate** (which asked *should I enter in this regime*): does an entry-time regime feature predict **whether a 21d hold beats a 5d hold**? Four no-lookahead features against the same 125-date replay. Naive results looked strong — `ret20` r=0.582 t=7.94, `distSma50` r=0.323 t=3.79 — but **the t-stats are meaningless**: 125 dates with overlapping 21-day forward windows and near-identical adjacent features means an effective sample of **~6**, not 125.
+- **Counterexample visible without statistics**: April `distSma50` +2.56% → outcome **+6.60%**; June `distSma50` +2.75% → outcome **−6.98%**. Near-identical regime, opposite result — any SMA-distance rule must call them the same and be wrong on one.
+- **Leave-one-month-out**: `ret20` 4/6, `distSma50` 3/6 (coin flip). 4/6 is not evidence — 3 is chance, 4 occurs ~34% of the time at random — and both `ret20` misses are Feb/Mar in the same direction. The existing binary gate is flat: SPY>SMA50 → +1.17% vs SPY<SMA50 → +0.65%.
+- **Structural, not a tuning problem.** Whether 21d beats 5d depends on the market trending over the *following* 21 days, so an entry-time feature only helps if trend persists — `ret20` is a momentum proxy in the same family as the feature that already inverted on full-year data in v0.32.90. Six observations of a monthly-cadence phenomenon cannot support a rule at any effort level.
+- **Would need ~3+ years of replay** (36+ monthly observations); `historical_prices` starts 2024-05-31 for most tickers and `iv_history` is shorter. **Disposition: do not build.** Re-open only if the panel reaches 3+ years AND the feature is pre-registered before outcomes are inspected.
+
+Docs: `Requirements/v2-execution/06-seykota-risk-extensions.md`, `.ai/AI_CONTEXT.md` §10.
+
 ## [1.1.142] — 2026-09-01
 
 ### Validation — hold-period (`hold_days`) sweep REJECTED: the effect is regime, not edge
