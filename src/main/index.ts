@@ -77,6 +77,7 @@ import { registerNewsIpc } from './ipc/ipc-news.js';
 import { EarningsService } from './services/earnings-service.js';
 import { registerEarningsIpc } from './ipc/ipc-earnings.js';
 import { EarningsRefreshJob } from './services/jobs/earnings-refresh-job.js';
+import { PortfolioSyncJob } from './services/jobs/portfolio-sync-job.js';
 import { BatchOrchestratorJob } from './services/jobs/batch-orchestrator-job.js';
 import { BetaService } from './services/beta-service.js';
 import { BriefReplayService } from './services/brief-replay-service.js';
@@ -690,6 +691,20 @@ app.whenReady().then(() => {
     emailOnStart: true,
     jobs: batchService.getJobs().map(j => ({ id: j.id, enabled: true })),
   };
+  // Portfolio Sync — refreshes the real position book from E*Trade so the Portfolio and
+  // Performance views are current every morning without a manual sync. Registered LAST:
+  // nothing consumes portfolio data, and it must not sit in front of anything that does.
+  // Never returns `failed` (the orchestrator is stop-on-failure and E*Trade is flaky), and
+  // syncs open positions BEFORE importing closed ones so an estimate written for a position
+  // that just closed is superseded by its real fill in the same run.
+  const portfolioSyncJob = new PortfolioSyncJob(db, getEtradeCreds);
+  batchService.registerJob('portfolio-sync', portfolioSyncJob, {
+    dailyScheduleTime: '17:45',       // after the chain's other work (schedule disabled by default)
+    startupDelaySeconds: 0,
+    runOnStartup: false,              // orchestrator-driven, like every other sub-job
+    afterCloseOnly: true,             // end-of-day record keeping; skip the lean intraday slot
+  });
+
   batchService.registerJob('batch-orchestrator', orchestratorJob, {
     sequenceOrder: 1,
     runOnStartup: false,

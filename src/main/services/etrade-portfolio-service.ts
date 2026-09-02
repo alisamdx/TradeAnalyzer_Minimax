@@ -599,13 +599,16 @@ export class EtradePortfolioService {
         // Transactions is kept as a fallback only because it is the documented alternative and
         // may cover activity orders misses (dividends, fees, corporate actions).
         let legs: TxLeg[];
+        let legSource: 'orders' | 'transactions' = 'orders';
         try {
           legs = await this.fetchOrderLegs(acct.accountIdKey, start, end, creds);
           if (legs.length === 0) {
+            legSource = 'transactions';
             result.errors.push('Executed orders returned no legs; trying transactions.');
             legs = await this.fetchTransactionLegs(acct.accountIdKey, start, end, creds);
           }
         } catch (ordErr) {
+          legSource = 'transactions';
           const msg = ordErr instanceof Error ? ordErr.message : String(ordErr);
           result.errors.push(`Executed orders unavailable, falling back to transactions: ${msg.slice(0, 160)}`);
           legs = await this.fetchTransactionLegs(acct.accountIdKey, start, end, creds);
@@ -613,7 +616,7 @@ export class EtradePortfolioService {
         const closed = this.matchClosedPositions(legs);
         for (const pos of closed) {
           try {
-            const inserted = this.insertClosedPosition(db, pos);
+            const inserted = this.insertClosedPosition(db, pos, legSource);
             if (inserted) result.positionsUpserted++;
             else          result.positionsSkipped++;
           } catch (err) {
@@ -1096,7 +1099,11 @@ export class EtradePortfolioService {
 
   // ─── Insert one closed position (with dedup check) ────────────────────────
 
-  private insertClosedPosition(db: Database, pos: ClosedPosition): boolean {
+  private insertClosedPosition(
+    db: Database,
+    pos: ClosedPosition,
+    source: 'orders' | 'transactions' = 'orders',
+  ): boolean {
     // A closed position can already exist in one of two forms:
     //
     //   1. An ESTIMATE written by the position sync when the row vanished from the broker
@@ -1125,6 +1132,12 @@ export class EtradePortfolioService {
     ) as { id: number } | undefined;
 
     if (stale) {
+      // Capture the values being overwritten BEFORE the update — this is the one place an
+      // automated job replaces a stored money figure, so the prior value has to survive.
+      const before = db.prepare(
+        'SELECT realized_pnl, exit_price FROM positions WHERE id = ?',
+      ).get(stale.id) as { realized_pnl: number | null; exit_price: number | null } | undefined;
+
       db.prepare(`
         UPDATE positions
            SET exit_price = ?, exit_date = ?, exit_notes = ?, realized_pnl = ?,
@@ -1136,6 +1149,12 @@ export class EtradePortfolioService {
         pos.realizedPnl, pos.entryPrice, pos.premiumReceived,
         new Date().toISOString(), stale.id,
       );
+
+      this.recordAudit(db, 'superseded', stale.id, pos, source, {
+        oldRealizedPnl: before?.realized_pnl ?? null,
+        oldExitPrice: before?.exit_price ?? null,
+        note: 'estimate from last mark replaced by broker fill',
+      });
       return true;
     }
 
@@ -1148,7 +1167,7 @@ export class EtradePortfolioService {
     if (existing) return false;
 
     const now = new Date().toISOString();
-    db.prepare(`
+    const info = db.prepare(`
       INSERT INTO positions (
         ticker, position_type, quantity, entry_price, entry_date,
         exit_price, exit_date, exit_notes,
@@ -1168,7 +1187,43 @@ export class EtradePortfolioService {
       now, now
     );
 
+    this.recordAudit(db, 'imported', Number(info.lastInsertRowid), pos, source, {
+      oldRealizedPnl: null, oldExitPrice: null,
+      note: 'new closed position from broker fills',
+    });
     return true;
+  }
+
+  /**
+   * One row per automated write to the position record.
+   *
+   * The nightly sync is the only batch job that mutates real financial data, and its supersede
+   * path overwrites a stored P&L. Auditing is cheap; reconstructing where a wrong number came
+   * from after the fact is not — the whole E*Trade investigation only became tractable once the
+   * calls were logged. Never allowed to break the write it is recording.
+   */
+  private recordAudit(
+    db: Database,
+    action: 'imported' | 'superseded',
+    positionId: number,
+    pos: ClosedPosition,
+    source: 'orders' | 'transactions',
+    prior: { oldRealizedPnl: number | null; oldExitPrice: number | null; note: string },
+  ): void {
+    try {
+      db.prepare(`
+        INSERT INTO position_audit
+          (occurred_at, action, position_id, ticker, position_type, strike_price,
+           expiration_date, entry_date, old_realized_pnl, new_realized_pnl,
+           old_exit_price, new_exit_price, source, note)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      `).run(
+        new Date().toISOString(), action, positionId, pos.ticker, pos.positionType,
+        pos.strikePrice, pos.expirationDate, pos.entryDate,
+        prior.oldRealizedPnl, pos.realizedPnl,
+        prior.oldExitPrice, pos.exitPrice, source, prior.note,
+      );
+    } catch { /* auditing must never break the write it records */ }
   }
 
   // ─── Sync status query ────────────────────────────────────────────────────
