@@ -19,6 +19,7 @@
 // see docs/formulas.md#roll-the-dice
 
 import { MIN_TRADABLE_LIQUIDITY_SCORE } from '@shared/strategy-structures.js';
+import type { DbHandle } from '../db/connection.js';
 
 /** The wheel's opening leg. `covered-call` is the OTHER wheel slug but requires already owning
  *  the shares — it cannot be the one thing you do with cash, so this feature is CSP-only. */
@@ -255,4 +256,38 @@ export function rollTheDice(
       aiRationale: w.p.aiRationale,
     },
   };
+}
+
+/**
+ * Compute the dice from the database — the single path used by BOTH the IPC (the in-app button)
+ * and the brief job's email, so the two can never disagree about what today's pick is. The brief
+ * email already learned this lesson: it builds from the persisted picks rather than an in-memory
+ * pre-gate list, specifically so email and UI show identical data.
+ *
+ * The earnings map is read LIVE rather than trusted from the pick's stored signals, because a
+ * brief outlives a calendar correction — a stale stored date is exactly how the brief once put
+ * NVDA at wheel #1 on the day it reported.
+ */
+export function computeRollTheDice(db: DbHandle, maxPrice: number = DEFAULT_MAX_PRICE): DiceResult {
+  const brief = db.prepare(
+    `SELECT generated_at, picks FROM daily_briefs WHERE strategy = 'wheel'
+      ORDER BY generated_at DESC LIMIT 1`,
+  ).get() as { generated_at: string; picks: string } | undefined;
+
+  const picks: DicePickInput[] = brief ? (JSON.parse(brief.picks) as DicePickInput[]) : [];
+  const todayEt = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+
+  // A ticker with no row is left OUT of the map entirely. `report_date` is NOT NULL and the table
+  // is keyed by ticker, so presence always means "we have a date" -- absence means we do not
+  // know, and `rollTheDice` fails closed on that.
+  const earnings = new Map<string, string>();
+  if (picks.length > 0) {
+    const marks = picks.map(() => '?').join(',');
+    const rows = db.prepare(
+      `SELECT ticker, report_date FROM earnings_calendar WHERE ticker IN (${marks})`,
+    ).all(...picks.map(p => p.ticker)) as Array<{ ticker: string; report_date: string }>;
+    for (const r of rows) earnings.set(r.ticker, r.report_date);
+  }
+
+  return rollTheDice(picks, earnings, todayEt, brief ? brief.generated_at.slice(0, 10) : null, maxPrice);
 }

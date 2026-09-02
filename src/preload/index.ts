@@ -1132,6 +1132,9 @@ function buildApi() {
       rejections: Array<{ ticker: string; reason: string }>;
       runnerUp: { ticker: string; compositeScore: number } | null;
     }>('scoring:roll-the-dice', maxPrice),
+    /** Send today's Roll the Dice as an email (same builder the nightly chain uses). */
+    emailRollTheDice: (maxPrice?: number) =>
+      invoke<{ sent: boolean; message: string }>('scoring:email-roll-the-dice', maxPrice),
     signalCorrelations: (strategy: ScoringStrategy) =>
       invoke<SignalWeightSuggestion[]>('scoring:signal-correlations', strategy),
     briefHealthTrend: () =>

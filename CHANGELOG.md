@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.163] — 2026-09-02
+
+### feat — 🎲 Roll the Dice by email: one opportunity, built as a card not a report
+- A grid is the wrong shape for a single trade — there is nothing to compare it against — so the dice email is laid out as a card. **The subject carries the whole trade** (`🎲 NVDA — sell the $205 put, Fri Sep 25 · $744 credit`), because that is the part most likely to be read on a phone without opening anything.
+- **Leads with the order, not the analysis**: *Sell 1 NVDA $205 put*, then expiry and days. Then the three numbers — you collect / cash required / **if assigned, you own it at $X (Y% below spot)**. That last line gets equal weight because it is the question a wheel entry actually turns on.
+- **The downside in plain language with real numbers**, not a disclaimer: *"If NVDA is below $205 on Fri Sep 25 you buy 100 shares at $205, costing $20,500. Your break-even is $197.56 — below that you are down roughly $100 for every dollar further it falls."* "Passed every gate" is spelled out, and rejections are listed, so the bar is visible rather than claimed.
+- **A no-pick day still sends.** Silence cannot be told apart from a failed job or broken SMTP, and the point is that the operator can stop checking. The empty card says ~2 days in 3 is normal so it does not read as a malfunction. No PDF attachment — one trade does not need one.
+- **Sent from inside the brief job**, right after the brief's own email, rather than as its own batch step: it is a pure filter over the brief that job just persisted, so inline guarantees the ordering and avoids adding a `sequence_order` row — the column `registerJob` seeds only on fresh installs, source of four defects already (v1.1.121, v1.1.123, migration 067, v1.1.160). Failure is caught and logged; it can never fail the batch.
+- Also an **✉ Email it** button on the dice panel and `scoring:email-roll-the-dice`. All three routes go through the new `computeRollTheDice(db)` so email, panel and IPC cannot disagree about today's pick.
+- Email HTML is table-based with fully inline styles and explicit light colours on every cell (Outlook ignores flex/grid, Gmail strips `<style>`, and client dark-mode is how "invisible text" happens); `max-width:560px` for phones.
+- **Note:** rendering the preview from real data selected **NVDA from the 2026-08-26 brief — its earnings day**, which is v1.1.162's documented blind spot appearing immediately: with no calendar history the earnings gate cannot fire retrospectively. Live, that pick is rejected.
+- 11 unit tests incl. HTML escaping of model-authored critic text. Suite: 1069 passed.
+
 ## [1.1.162] — 2026-09-02
 
 ### feat — 🎲 Roll the Dice: one wheel entry from the brief, or an explicit nothing

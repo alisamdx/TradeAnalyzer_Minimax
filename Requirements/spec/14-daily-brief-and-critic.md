@@ -101,3 +101,19 @@ the brief date. The replay accordingly shows zero earnings rejections *and still
 2026-08-26 — its actual earnings day*. That is the failure this feature exists to prevent, and
 it is invisible to the only test available. The gate is correct by construction on live data;
 the replay simply cannot see it.
+
+**FR-BRIEF-DICE-7 (v1.1.163)** — The dice is delivered by email as a single card, not a grid.
+
+- The subject MUST carry the trade itself (ticker, strike, expiry, credit) so it is actionable
+  from a notification without opening the message.
+- The body MUST lead with the order to place, then credit / capital / **cost basis if assigned
+  and its discount to spot**, then the downside stated in plain language with real numbers.
+- The gates passed MUST be spelled out, and rejections listed.
+- A no-pick day MUST still send. Silence cannot be distinguished from a failed job or a broken
+  SMTP config, which defeats the purpose of not having to check.
+- Sent from within `DailyIntelligenceBriefJob` after its own email — not a separate batch job.
+  It is a pure filter over the brief just persisted, so inline ordering is guaranteed and no
+  `sequence_order` row is added (that column is seeded only on fresh installs; see §20.5).
+  Failure is caught and logged and can never fail the batch.
+- The in-app **✉ Email it** button, `scoring:email-roll-the-dice`, and the nightly send MUST all
+  resolve the pick through `computeRollTheDice(db)`, so they cannot disagree.

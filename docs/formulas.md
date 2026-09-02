@@ -878,4 +878,10 @@ with one row each and no history, so a `report_date` in the past means the row w
 refreshed after that report — the NEXT date is unknown. Measured 2026-09-02: 57 of 1,069 rows
 were stale this way. "There is a date stored" is not "the stored date is right."
 
-see `src/main/services/roll-the-dice.ts`
+**Email delivery (v1.1.163).** The same result is rendered as a single card by
+`dice-email-builder.ts` and sent from inside the brief job after its own email. All routes
+(nightly send, in-app button, IPC) resolve through `computeRollTheDice(db)` so they cannot
+disagree about the day's pick. A no-pick day still sends — silence is indistinguishable from a
+failed job.
+
+see `src/main/services/roll-the-dice.ts`, `src/main/services/dice-email-builder.ts`

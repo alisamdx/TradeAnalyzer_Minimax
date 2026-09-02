@@ -11,9 +11,9 @@ import { buildEmailHtml, buildPdf } from '../services/brief-report-builder.js';
 import { STRATEGIES } from '../services/scoring-service.js';
 import type { DbHandle } from '../db/connection.js';
 import {
-  rollTheDice, DEFAULT_MAX_PRICE,
-  type DicePickInput, type DiceResult,
+  computeRollTheDice, DEFAULT_MAX_PRICE, type DiceResult,
 } from '../services/roll-the-dice.js';
+import { buildDiceEmailHtml, diceEmailSubject } from '../services/dice-email-builder.js';
 
 function ok<T>(value: T): IpcResult<T> {
   return { ok: true, value };
@@ -44,32 +44,27 @@ export function registerScoringIpc(
   // exactly that failure (a stale stored date put NVDA at wheel #1 on its earnings day).
   ipcMain.handle(
     'scoring:roll-the-dice',
-    wrap((maxPrice?: number): DiceResult => {
-      const rows = scoringService.getLatestBrief('wheel');
-      const brief = rows[0] ?? null;
-      const picks: DicePickInput[] = brief ? (JSON.parse(brief.picks) as DicePickInput[]) : [];
+    wrap((maxPrice?: number): DiceResult => computeRollTheDice(db, maxPrice ?? DEFAULT_MAX_PRICE))
+  );
 
-      // ET date — the brief and the earnings calendar are both keyed to it.
-      const todayEt = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-
-      // A ticker with no row is left OUT of the map entirely. `report_date` is NOT NULL and the
-      // table is keyed by ticker, so presence always means "we have a date" -- absence means we
-      // do not know, and the caller fails closed on that.
-      const earnings = new Map<string, string>();
-      if (picks.length > 0) {
-        const marks = picks.map(() => '?').join(',');
-        const rowsE = db.prepare(
-          `SELECT ticker, report_date FROM earnings_calendar WHERE ticker IN (${marks})`,
-        ).all(...picks.map(p => p.ticker)) as Array<{ ticker: string; report_date: string }>;
-        for (const r of rowsE) earnings.set(r.ticker, r.report_date);
+  // Send today's dice as an email on demand. Same builder the batch chain uses, so the manual
+  // send and the automatic one are byte-identical.
+  ipcMain.handle(
+    'scoring:email-roll-the-dice',
+    async (_e: IpcMainInvokeEvent, maxPrice?: number): Promise<IpcResult<{ sent: boolean; message: string }>> => {
+      try {
+        if (!emailService.isConfigured()) {
+          return ok({ sent: false, message: 'SMTP is not configured — set it up in Settings → Email.' });
+        }
+        const result = computeRollTheDice(db, maxPrice ?? DEFAULT_MAX_PRICE);
+        const dateStr = new Date().toLocaleDateString('en-US',
+          { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'America/New_York' });
+        await emailService.send(diceEmailSubject(result), buildDiceEmailHtml(result, dateStr));
+        return ok({ sent: true, message: result.pick ? `Emailed: ${result.pick.ticker}` : 'Emailed: no dice today' });
+      } catch (err) {
+        return fail(err);
       }
-
-      return rollTheDice(
-        picks, earnings, todayEt,
-        brief ? brief.generated_at.slice(0, 10) : null,
-        maxPrice ?? DEFAULT_MAX_PRICE,
-      );
-    })
+    }
   );
 
   // Get config for a strategy (or all strategies)

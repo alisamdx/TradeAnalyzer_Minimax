@@ -3425,6 +3425,19 @@ input[type='checkbox'] {
 .dice-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
 .dice-title { font-size: 13px; font-weight: 700; color: var(--text); }
 .dice-sub { font-size: 11px; color: var(--text-muted); }
+.dice-mail-btn {
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.dice-mail-btn:hover:not(:disabled) { color: var(--text); border-color: var(--accent); }
+.dice-mail-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.dice-mail-msg { font-size: 11px; color: var(--success); }
+
 .dice-close {
   background: none; border: none; cursor: pointer;
   color: var(--text-muted); font-size: 18px; line-height: 1; padding: 0 4px;

@@ -876,6 +876,8 @@ export function DailyBriefView({ onGoToStrategyLab }: DailyBriefViewProps) {
 
   const [dice, setDice]                   = useState<DiceResult | null>(null);
   const [diceBusy, setDiceBusy]           = useState(false);
+  const [diceMailMsg, setDiceMailMsg]     = useState<string | null>(null);
+  const [diceMailing, setDiceMailing]     = useState(false);
 
   const [perfSummary, setPerfSummary]     = useState<BriefPerformanceSummary | null>(null);
   const [healthTrend, setHealthTrend]     = useState<BriefHealthTrend[]>([]);
@@ -1006,6 +1008,20 @@ export function DailyBriefView({ onGoToStrategyLab }: DailyBriefViewProps) {
     }
   };
 
+  const handleEmailDice = async () => {
+    setDiceMailing(true);
+    setDiceMailMsg(null);
+    try {
+      const r = await window.api.scoring.emailRollTheDice();
+      setDiceMailMsg(r.message);
+    } catch (err) {
+      setDiceMailMsg(err instanceof Error ? err.message : 'Email failed');
+    } finally {
+      setDiceMailing(false);
+      setTimeout(() => setDiceMailMsg(null), 6000);
+    }
+  };
+
   const goToStrategyLab = (ticker: string) => {
     onGoToStrategyLab?.(ticker);
   };
@@ -1095,6 +1111,15 @@ export function DailyBriefView({ onGoToStrategyLab }: DailyBriefViewProps) {
               {dice.briefDate ? ` · brief ${dice.briefDate}` : ''}
             </span>
             <div style={{ flex: 1 }} />
+            {diceMailMsg && <span className="dice-mail-msg">{diceMailMsg}</span>}
+            <button
+              className="dice-mail-btn"
+              onClick={handleEmailDice}
+              disabled={diceMailing}
+              title="Email this single opportunity — the same card the nightly chain sends"
+            >
+              {diceMailing ? 'Sending…' : '✉ Email it'}
+            </button>
             <button className="dice-close" onClick={() => setDice(null)} title="Dismiss">×</button>
           </div>
 

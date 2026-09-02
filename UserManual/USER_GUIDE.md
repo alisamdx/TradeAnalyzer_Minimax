@@ -93,6 +93,13 @@ The card shows the strike and expiry, the credit, the cash required, your **cost
 assigned** and how far below the current price that is, the annualized return and probability of
 profit, and the critic's own note.
 
+**It emails itself.** After the evening batch you get a one-card email — the subject alone carries
+the trade (`🎲 NVDA — sell the $205 put, Fri Sep 25 · $744 credit`), so you can read it from a
+phone notification. Inside: the order to place, what you collect, the cash required, and what you
+would own it at if assigned. **You get one on no-pick days too**, saying so in a line — otherwise
+silence would be indistinguishable from a batch that failed. The **✉ Email it** button on the
+card sends the same thing on demand.
+
 > **The name is the disclaimer.** These gates remove known, checkable problems — a flagged
 > setup, an earnings print, an illiquid chain, a position too big for the account. They cannot
 > make a trade safe. It is still a short put, you can still be assigned, and the stock can still

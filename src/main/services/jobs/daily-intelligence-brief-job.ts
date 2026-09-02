@@ -18,6 +18,8 @@ import { isTradingDay } from '../iv-history-service.js';
 import { SCORING_REFERENCE_TICKERS } from './price-gap-fill-job.js';
 import type { EmailService } from '../email-service.js';
 import { buildEmailHtml, buildPdf } from '../brief-report-builder.js';
+import { computeRollTheDice } from '../roll-the-dice.js';
+import { buildDiceEmailHtml, diceEmailSubject } from '../dice-email-builder.js';
 import type { PaperTradingService } from '../paper-trading-service.js';
 import { CriticService } from '../critic-service.js';
 import { WatchlistService } from '../watchlist-service.js';
@@ -785,6 +787,28 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
       } catch (emailErr) {
         // Email failure must not fail the job — brief is already persisted
         console.warn('[brief] email send failed:', emailErr instanceof Error ? emailErr.message : String(emailErr));
+      }
+
+      // ── Roll the Dice: the same brief, reduced to one actionable wheel entry ──────
+      //
+      // Sent from HERE rather than as its own batch job on purpose. It is a pure filter over
+      // the brief this job just persisted, so running it inline guarantees the ordering that
+      // matters and avoids a new `sequence_order` row — a column `registerJob` seeds only on
+      // fresh installs, which has caused four separate defects (v1.1.121, v1.1.123,
+      // migration 067, v1.1.160).
+      //
+      // Reads back from the DB rather than reusing `persistedPicks` so the email, the in-app
+      // panel and the IPC all resolve today's pick through one code path.
+      //
+      // A no-pick day still sends: silence cannot be told apart from a failed job.
+      try {
+        const dice = computeRollTheDice(this.db);
+        const diceDate = new Date().toLocaleDateString('en-US',
+          { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'America/New_York' });
+        await this.emailService.send(diceEmailSubject(dice), buildDiceEmailHtml(dice, diceDate));
+        console.log(`[brief] dice email sent (${dice.pick ? dice.pick.ticker : 'no pick'})`);
+      } catch (diceErr) {
+        console.warn('[brief] dice email failed:', diceErr instanceof Error ? diceErr.message : String(diceErr));
       }
     }
 
