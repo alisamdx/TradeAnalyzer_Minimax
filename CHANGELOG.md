@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.149] — 2026-09-01
+
+### feat — negotiate a working transactions request shape instead of guessing one per release
+- **Four hypotheses now falsified against the API log**: range width (31-day slice stalled like 8 months, v1.1.146), transport replay (a FRESH nonce got the same `oauth_problem=nonce_used`, v1.1.147), date parameters (`{count}` only, no dates, still hung and aborted at 45,016 ms, v1.1.148), and our signing (28 other calls on the same key and code, all 200 in ~300 ms). `/v1/accounts/{key}/transactions` hangs ~120 s for this account and reports it as `oauth_problem=nonce_used` — the OAuth message is a mask over a server-side timeout.
+- **Guessing one variant per release costs a package-and-click cycle each time.** This tries the remaining plausible request SHAPES in one pass, 20 s each, and uses whichever answers: `.json` suffix (E*Trade honours a format suffix on many endpoints; its error envelopes come back as XML even with `Accept: application/json`), `sortOrder=DESC` (documented, and may be required for `count` to bound the result set — an unbounded scan would explain a fixed ~120 s timeout), both together, `count=5`, and a 7-day window.
+- The winning shape is reused for every sliced request, carrying any extra params it needed (`sortOrder` persists; `startDate`/`endDate` are replaced per slice). Every attempt is logged, so total failure stays fully diagnostic and the error names each shape tried. Worst case ~100 s to establish the endpoint is dead, vs ~18 minutes before v1.1.148.
+- **Reading it**: a variant answers → real fills. None answer → the endpoint is unusable from any client, pointing at E*Trade server-side or an account entitlement, and the next step is E*Trade support or a CSV import of their transaction history rather than more code guessing.
+- Regression: `tests/etrade-transactions-slicing.test.ts` +3/−2 (7) — a `.json`-only winner propagates the suffix to every slice; a `sortOrder`-only winner keeps it while dates are still replaced per slice; nothing-answers issues no sliced requests and names each shape tried. Suite: 1005 passed.
+
 ## [1.1.148] — 2026-09-01
 
 ### feat — preflight the transactions endpoint: diagnostic, and 18 minutes faster to fail

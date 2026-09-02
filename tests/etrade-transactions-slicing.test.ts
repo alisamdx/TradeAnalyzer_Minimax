@@ -52,19 +52,53 @@ describe('closed-position import — transactions query slicing', () => {
   });
   afterEach(() => { db.close(); vi.restoreAllMocks(); });
 
-  it('preflights with a no-date request before grinding through slices', async () => {
+  it('negotiates a working request shape, then uses it for every slice', async () => {
+    // Only the `.json` suffix answers; the bare path hangs. The sliced fetch must then carry
+    // that suffix, not fall back to the shape that is known not to work.
+    etradeGet.mockImplementation(async (path: string) => {
+      if (path.includes('/accounts/list')) {
+        return { AccountListResponse: { Accounts: { Account: [
+          { accountId: '1', accountIdKey: 'KEY1', accountName: 'X', accountType: 'I', institutionType: 'B' },
+        ] } } };
+      }
+      if (!path.endsWith('.json')) throw new Error('The operation was aborted due to timeout');
+      return { TransactionListResponse: {} };
+    });
+
     const svc = new EtradePortfolioService();
     await svc.syncClosedPositions(db, creds);
 
-    const tx = etradeGet.mock.calls.filter(c => String(c[0]).includes('/transactions'));
-    // The probe answers "is this endpoint alive for this account, independent of our date
-    // range" — the question left open after a fresh-nonce retry still returned nonce_used.
-    expect(tx[0]![1]).toEqual({ count: '50' });
-    expect(tx[0]![1]).not.toHaveProperty('startDate');
-    expect(tx[0]![3]).toMatchObject({ timeoutMs: 45_000 });
+    const dated = etradeGet.mock.calls
+      .filter(c => String(c[0]).includes('/transactions'))
+      .filter(c => (c[1] as Record<string, string>)['startDate']);
+    expect(dated.length).toBeGreaterThan(1);
+    for (const c of dated) expect(String(c[0])).toMatch(/transactions\.json$/);
   });
 
-  it('aborts fast with a clear message when the endpoint is unresponsive', async () => {
+  it('carries extra params from the winning variant into the sliced requests', async () => {
+    // sortOrder is what made it work, so every slice must keep it — while startDate/endDate
+    // are replaced per slice rather than inherited from the probe.
+    etradeGet.mockImplementation(async (path: string, params: Record<string, string>) => {
+      if (path.includes('/accounts/list')) {
+        return { AccountListResponse: { Accounts: { Account: [
+          { accountId: '1', accountIdKey: 'KEY1', accountName: 'X', accountType: 'I', institutionType: 'B' },
+        ] } } };
+      }
+      if (params['sortOrder'] !== 'DESC') throw new Error('The operation was aborted due to timeout');
+      return { TransactionListResponse: {} };
+    });
+
+    const svc = new EtradePortfolioService();
+    await svc.syncClosedPositions(db, creds);
+
+    const dated = etradeGet.mock.calls
+      .filter(c => String(c[0]).includes('/transactions'))
+      .filter(c => (c[1] as Record<string, string>)['startDate']);
+    expect(dated.length).toBeGreaterThan(1);
+    for (const c of dated) expect((c[1] as Record<string, string>)['sortOrder']).toBe('DESC');
+  });
+
+  it('reports every shape it tried when the endpoint answers none of them', async () => {
     etradeGet.mockImplementation(async (path: string) => {
       if (path.includes('/accounts/list')) {
         return { AccountListResponse: { Accounts: { Account: [
@@ -77,11 +111,16 @@ describe('closed-position import — transactions query slicing', () => {
     const svc = new EtradePortfolioService();
     const res = await svc.syncClosedPositions(db, creds);
 
-    // Without the preflight this cost 9 slices x 120 s of silent grinding. One probe now.
-    const tx = etradeGet.mock.calls.filter(c => String(c[0]).includes('/transactions'));
-    expect(tx).toHaveLength(1);
-    expect(res.errors.join(' ')).toMatch(/did not respond to a minimal no-date request/);
-    expect(res.errors.join(' ')).toMatch(/server-side at E\*Trade/);
+    // No sliced requests at all — the negotiation aborts before them.
+    const dated = etradeGet.mock.calls
+      .filter(c => String(c[0]).includes('/transactions'))
+      .filter(c => (c[1] as Record<string, string>)['startDate'] && !(c[1] as Record<string, string>)['sortOrder']);
+    expect(dated.length).toBeLessThanOrEqual(1);   // only the week-window probe
+    const msg = res.errors.join(' ');
+    expect(msg).toMatch(/did not respond to any request shape/);
+    expect(msg).toMatch(/json-suffix/);
+    expect(msg).toMatch(/sortOrder/);
+    expect(msg).toMatch(/server-side at E\*Trade or an account entitlement/);
   });
 
   it('splits the year into narrow windows instead of one YTD span', async () => {

@@ -595,32 +595,58 @@ export class EtradePortfolioService {
     // Slicing is kept for a different and still-valid reason: it bounds each response and
     // its pagination, so one oversized window cannot swallow the whole import, and a failure
     // localises to a month instead of the year. It is not the stall fix.
-    // ── Preflight: does this endpoint respond AT ALL? ────────────────────────
-    // One minimal request with NO date range (E*Trade defaults to a recent window).
+    // ── Capability negotiation for a hostile endpoint ────────────────────────
+    // `/transactions` hangs for this account and reports it as `oauth_problem=nonce_used`
+    // after ~120 s. Four hypotheses were tested one per release and all falsified against the
+    // API log: range width (31 days stalls like 8 months), transport replay (a FRESH nonce got
+    // the same error), date parameters (a no-param request still hung 45 s), and our signing
+    // (28 other calls on the same key/code all returned 200 in ~300 ms).
     //
-    // Diagnosed 2026-09-02: `/transactions` returned `oauth_problem=nonce_used` after ~120.5 s
-    // on BOTH a fresh-nonce retry and the original — a fresh nonce cannot have been used
-    // before, so that error is a generic mask over a server-side timeout, not an OAuth fault.
-    // Range width made no difference (8 months and 31 days stalled alike), while every other
-    // E*Trade call on the same credentials and account key answered in ~300 ms.
-    //
-    // This probe distinguishes "the endpoint is down for this account" from "our date
-    // parameters are the trigger", and it earns its place in production regardless: without
-    // it a broken endpoint costs 9 slices x 120 s = ~18 minutes of silent grinding before the
-    // import gives up.
-    try {
-      await etradeGet(
-        `/v1/accounts/${accountIdKey}/transactions`,
-        { count: '50' },
-        creds,
-        { timeoutMs: 45_000 },
-      );
-    } catch (err) {
-      const detail = err instanceof Error ? err.message : String(err);
+    // So rather than guess a fifth variant per release, try the remaining plausible request
+    // SHAPES in one pass with a short budget each, and use whichever answers. Every attempt is
+    // visible in logs/api, so a total failure is still fully diagnostic.
+    const variants: Array<{ label: string; suffix: string; params: Record<string, string> }> = [
+      // E*Trade honours a format suffix on many endpoints; `Accept: application/json` alone
+      // may not be enough here (its error envelopes come back as XML even so).
+      { label: 'json-suffix',        suffix: '.json', params: { count: '50' } },
+      // `sortOrder` is documented for this endpoint and may be required for `count` to bound
+      // the result set — an unbounded scan would explain a fixed ~120 s server timeout.
+      { label: 'sortOrder',          suffix: '',      params: { sortOrder: 'DESC', count: '50' } },
+      { label: 'json+sortOrder',     suffix: '.json', params: { sortOrder: 'DESC', count: '50' } },
+      // A tiny page: if the endpoint is merely slow per row, 5 rows should return.
+      { label: 'tiny-count',         suffix: '',      params: { count: '5' } },
+      // A 7-day window — narrower than any range tried so far.
+      { label: 'week-window',        suffix: '',      params: {
+          startDate: fmt(new Date(Date.now() - 7 * 86_400_000).toISOString().slice(0, 10)),
+          endDate:   fmt(new Date().toISOString().slice(0, 10)),
+          count: '50',
+        } },
+    ];
+
+    let working: { suffix: string; params: Record<string, string> } | null = null;
+    const tried: string[] = [];
+    for (const v of variants) {
+      try {
+        await etradeGet(
+          `/v1/accounts/${accountIdKey}/transactions${v.suffix}`,
+          v.params,
+          creds,
+          { timeoutMs: 20_000 },
+        );
+        working = { suffix: v.suffix, params: v.params };
+        console.log(`[etrade] transactions endpoint responded to variant "${v.label}"`);
+        break;
+      } catch (err) {
+        tried.push(`${v.label}: ${err instanceof Error ? err.message.slice(0, 80) : String(err)}`);
+      }
+    }
+
+    if (!working) {
       throw new Error(
-        'E*Trade transactions endpoint did not respond to a minimal no-date request. '
-        + 'Every other E*Trade call is working, so this is almost certainly server-side at '
-        + `E*Trade rather than a date-range or signing problem. Detail: ${detail}`,
+        'E*Trade transactions endpoint did not respond to any request shape. Tried '
+        + `${variants.length} variants (${variants.map(v => v.label).join(', ')}); every other `
+        + 'E*Trade call on the same credentials works, so this is server-side at E*Trade or an '
+        + `account entitlement, not a client bug. Attempts: ${tried.join(' | ')}`,
       );
     }
 
@@ -643,14 +669,17 @@ export class EtradePortfolioService {
     let marker: string | undefined;
     do {
       const params: Record<string, string> = {
+        // Carry any extra params the working variant needed (e.g. sortOrder).
+        ...Object.fromEntries(
+          Object.entries(working.params).filter(([k]) => k !== 'startDate' && k !== 'endDate'),
+        ),
         startDate: fmt(slice.from),
         endDate:   fmt(slice.to),
-        count:     '50',
       };
       if (marker) params['marker'] = marker;
 
       const raw = await etradeGet(
-        `/v1/accounts/${accountIdKey}/transactions`,
+        `/v1/accounts/${accountIdKey}/transactions${working.suffix}`,
         params,
         creds,
         // Measured 120,250 ms for a YTD query; 31 days still exceeded 30 s. The default
