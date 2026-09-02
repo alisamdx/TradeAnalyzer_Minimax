@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.1.142] — 2026-09-01
+
+### Validation — hold-period (`hold_days`) sweep REJECTED: the effect is regime, not edge
+No code change. Recording a null finding so it is not re-litigated.
+- **The hypothesis** came out of the 2026-08-28 hand-run P&L study: brief picks looked positive over ~5 days and negative over ~27, in two seemingly independent tests. Brief Replay stores `ret_5d` / `ret_10d` / `ret_21d` per pick, so the sweep needed no new machinery.
+- **A one-month preliminary read (June 2026) looked decisive and was wrong.** It showed monotone decay (median alpha +2.27 → +2.28 → +4.19 for income, −1.04 → −13.52 for buy) and I reported it as a clear strategy-dependent result. On six months both strategies **reverse**: income decays (−0.08 → −0.28 → −1.30) and buy improves (+0.79 → +0.91 → **+2.38**). June was also computed on pre-repair prices. Single-month over-fit, the same trap as the SPY-regime gate and the overbought guard.
+- **Six-month replay** (2026-02-02…2026-07-31, 125 trading days, **3,189 picks**, run on split/ticker-reuse-repaired data): paired per-pick test of `alpha(5d) − alpha(21d)` gives **−1.01%, t = −3.18** — significant, and with the **wrong sign**: holding 21 days beat holding 5.
+- **But the sign flips by month, and every month is individually "significant":** Feb −2.15 (t−4.44) · Mar −0.55 (t−0.96) · Apr −6.66 (t−5.57) · May −5.10 (t−5.18) · Jun **+6.99 (t+13.00)** · Jul +1.16 (t+2.81). **5d beat 21d in 2 of 6 months.** June is the single most extreme pro-short-hold month in the sample — which is exactly the month the preliminary read used.
+- **Per-strategy is equally unstable**: wheel +1.52 (t 3.50) and inflection +1.99 (t 2.37) favour short holds; bullish −3.11 (t −3.51) and buy −5.59 (t −6.32) favour long; income is flat (t 0.93).
+- **Verdict: `hold_days` stays at 5, unchanged.** Under FR-SEY-5 a lever must be at-worst-neutral on the historical sample; this one is sign-unstable across every slice, so any value fitted to it is fitted to whichever month was sampled. Same disposition as the SPY-regime gate, the overbought guard and FR-SEY-3.
+- **What did survive — a structural observation, not a lever.** Mean alpha *rises* with horizon (+0.69 → +1.05 → +1.70) while median *falls* (+0.32 → +0.01 → −1.01). The typical pick decays; a few large winners carry the tail. Feb–Jul 2026 was a semi/memory melt-up (INTC 41→133, MU 322→1214, SNDK 573→2335, all verified as genuine sustained rallies, not data artifacts), so **long holds are a positive-skew bet that pays in a trending regime and bleeds otherwise.** That also explains why the August hand-run study — a single quarter — read the opposite way.
+
+Docs: `Requirements/v2-execution/06-seykota-risk-extensions.md`, `.ai/AI_CONTEXT.md` §10.
+
 ## [1.1.141] — 2026-09-01
 
 ### fix — a reassigned ticker splices two companies into one price series

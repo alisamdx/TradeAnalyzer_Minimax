@@ -268,3 +268,49 @@ FR-SEY-1 ✅ (v1.1.15, default OFF) · FR-SEY-3 ❌ (validated 2026-06-14, **not
 naive filter redundant, down side works as-is, gating it is harmful). The set is **complete**:
 two configurable risk controls shipped (off by default) and one rule correctly rejected on the
 data.
+
+
+## Hold-period sweep — validated and REJECTED (2026-09-01, v1.1.142)
+
+**Question.** `exec_config.hold_days` is a global planned-exit at 5 days. A hand-run P&L study
+(2026-08-28) suggested brief picks are positive over ~5 days and negative over ~27, which would make
+the hold period the dominant lever — the stop fired 16 times for −$52k and the profit target 73 times
+for +$40k, while 85 positions bled out on defensive-DTE for −$95k.
+
+**Method.** Brief Replay already stores `ret_5d` / `ret_10d` / `ret_21d` per pick, so the sweep needed
+no new machinery. Range **2026-02-02 → 2026-07-31** (125 trading days, 750 replay briefs, **3,189
+picks**), run *after* the v1.1.139–141 split and ticker-reuse repairs so the price series is clean.
+Returns are direction-adjusted (`direction` column) and SPY-relative, and the test is **paired** — the
+same pick measured at both horizons — so cross-sectional dispersion cancels.
+
+**Result.** `alpha(5d) − alpha(21d)` = **−1.01%, t = −3.18**. Statistically significant, and the sign is
+the opposite of the hypothesis: over the full window, holding 21 days beat holding 5.
+
+| month | diff | t | winner |
+| --- | --- | --- | --- |
+| 2026-02 | −2.15% | −4.44 | 21d |
+| 2026-03 | −0.55% | −0.96 | 21d |
+| 2026-04 | −6.66% | −5.57 | 21d |
+| 2026-05 | −5.10% | −5.18 | 21d |
+| 2026-06 | **+6.99%** | **+13.00** | 5d |
+| 2026-07 | +1.16% | +2.81 | 5d |
+
+**The sign flips and every month is individually "significant."** 5d wins 2 of 6. Per-strategy is just
+as split: wheel +1.52 (t 3.50) and inflection +1.99 (t 2.37) favour short holds, bullish −3.11
+(t −3.51) and buy −5.59 (t −6.32) favour long, income flat (t 0.93).
+
+**Verdict: REJECTED. `hold_days` stays 5.** FR-SEY-5 requires at-worst-neutral on the historical
+sample; a sign-unstable effect means any fitted value is fitted to the month you happened to sample.
+
+**Process lesson, recorded deliberately.** A one-month preliminary read (June 2026, on pre-repair
+prices) showed clean monotone decay and the *opposite* per-strategy story — income improving with time,
+buy collapsing. Six months reverses both. June is the single most pro-short-hold month in the sample.
+**One month cannot establish a duration or regime effect**, however monotone it looks; this is the same
+trap as the SPY-regime gate and the overbought guard.
+
+**What survives — structural, not a lever.** Mean alpha *rises* with horizon (+0.69 → +1.05 → +1.70)
+while median *falls* (+0.32 → +0.01 → −1.01): the typical pick decays while a few large winners carry
+the tail. Feb–Jul 2026 was a semiconductor/memory melt-up (INTC 41→133, MU 322→1214, SNDK 573→2335 —
+all verified as genuine sustained rallies, max single-day 19–26%, not data artifacts). So a long hold
+is a **positive-skew bet on a trending regime**, which pays there and bleeds otherwise. Any future
+work here should target *regime detection*, not a fixed hold length.
