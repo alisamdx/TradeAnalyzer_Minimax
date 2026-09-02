@@ -17,6 +17,7 @@ import { runMigrations } from '../src/main/db/migrations.js';
 import { MIGRATIONS_DIR } from './helpers.js';
 import {
   detectDiscontinuities, nearestSplitRatio, detectAndRepairSplits, DEFAULT_SPLIT_THRESHOLD,
+  volumeRegimeRatio, isTickerReuse,
 } from '../src/main/services/split-repair.js';
 
 describe('detectDiscontinuities', () => {
@@ -178,5 +179,68 @@ describe('detectAndRepairSplits', () => {
     const res = await detectAndRepairSplits(db, {} as never, {} as never, { lookbackDays: 30 });
     expect(res.flagged).toBe(0);
     expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+// ── Ticker reuse (v1.1.141) ─────────────────────────────────────────────────
+//
+// A symbol can be reassigned to a completely different company (rename, reverse merger,
+// de-SPAC, delisting + reuse). The stored series then splices two unrelated entities and
+// NO re-fetch can repair it — the provider keys by ticker too and returns the same spliced
+// data. Found 2026-09-01 after both cases had been written off as `confirmed_real`:
+//   BNY  "Bank of New York Mellon Corp."  median vol   46,254 ->  3,519,645  (76x)
+//   SPCX "Space Exploration Technologies" median vol    1,531 -> 82,047,547  (53,592x)
+// against six genuine moves in the same batch whose volume regime moved only 0.4x-5.0x.
+describe('ticker reuse', () => {
+  it('separates a permanent volume-regime shift from a news spike', () => {
+    // BNY: regime moves up ~76x and stays.
+    expect(volumeRegimeRatio(new Array(20).fill(46_254), new Array(20).fill(3_519_645)))
+      .toBeCloseTo(76.1, 0);
+    // MRNA: the largest genuine move in the calibration set — 5x, well under the bar.
+    expect(isTickerReuse(volumeRegimeRatio(new Array(20).fill(5_163_266), new Array(20).fill(25_820_564)))).toBe(false);
+    expect(isTickerReuse(76.1)).toBe(true);
+    expect(isTickerReuse(1 / 76.1)).toBe(true);   // reuse can cut volume too
+    expect(isTickerReuse(5.0)).toBe(false);
+    expect(isTickerReuse(null)).toBe(false);      // too little data to judge
+  });
+
+  it('declines to judge when either side is too thin', () => {
+    expect(volumeRegimeRatio([1, 2, 3], new Array(20).fill(1000))).toBeNull();
+    expect(volumeRegimeRatio(new Array(20).fill(1000), [1, 2])).toBeNull();
+    expect(volumeRegimeRatio(new Array(20).fill(0), new Array(20).fill(1000))).toBeNull();
+  });
+
+  it('truncates the previous company out of prices AND iv_history, without an API call', async () => {
+    const db2 = openDatabase(':memory:');
+    runMigrations(db2, MIGRATIONS_DIR);
+    const put = (ticker: string, date: string, close: number, volume: number) =>
+      db2.prepare(`INSERT OR REPLACE INTO historical_prices (ticker,date,open,high,low,close,volume,source,fetched_at)
+                   VALUES (?,?,?,?,?,?,?, 'test', '2026-01-01T00:00:00Z')`)
+        .run(ticker, date, close, close, close, close, volume);
+    const putIv = (ticker: string, date: string) =>
+      db2.prepare(`INSERT OR REPLACE INTO iv_history (ticker,date,atm_iv,underlying_px,source,created_at)
+                   VALUES (?,?,?,?, 'test', '2026-01-01T00:00:00Z')`).run(ticker, date, 30, 10);
+
+    // 25 bars of the OLD company (penny stock, tiny volume), then the NEW one.
+    const day = (i: number) => new Date(Date.UTC(2026, 0, 1) + i * 86_400_000).toISOString().slice(0, 10);
+    for (let i = 0; i < 25; i++) { put('BNY', day(i), 10, 46_254); putIv('BNY', day(i)); }
+    for (let i = 25; i < 50; i++) { put('BNY', day(i), 140, 3_519_645); putIv('BNY', day(i)); }
+
+    const mod = await import('../src/main/services/historical-service.js');
+    const spy = vi.spyOn(mod, 'fetchAndStorePrices').mockResolvedValue(0);
+
+    const res = await detectAndRepairSplits(db2, {} as never, {} as never, { lookbackDays: 400 });
+
+    expect(res.tickerReuse).toBe(1);
+    expect(spy).not.toHaveBeenCalled();   // settled before any re-fetch — none can help
+    const rows = db2.prepare(`SELECT status, volume_ratio FROM price_split_repairs WHERE ticker='BNY'`)
+      .get() as { status: string; volume_ratio: number };
+    expect(rows.status).toBe('ticker_reuse');
+    expect(rows.volume_ratio).toBeGreaterThan(15);
+    // Only the current entity survives, in BOTH tables.
+    expect((db2.prepare(`SELECT COUNT(*) n FROM historical_prices WHERE ticker='BNY'`).get() as { n: number }).n).toBe(25);
+    expect((db2.prepare(`SELECT COUNT(*) n FROM iv_history WHERE ticker='BNY'`).get() as { n: number }).n).toBe(25);
+    expect((db2.prepare(`SELECT MIN(close) c FROM historical_prices WHERE ticker='BNY'`).get() as { c: number }).c).toBe(140);
+    db2.close();
   });
 });

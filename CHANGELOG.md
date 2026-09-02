@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.1.141] — 2026-09-01
+
+### fix — a reassigned ticker splices two companies into one price series
+Third and last bug class in the `historical_prices` integrity thread, after unadjusted splits (v1.1.139) and permanent misclassification (v1.1.140).
+- **A symbol can be reassigned to a completely different company** (rename, reverse merger, de-SPAC, delisting then reuse). The stored series splices two unrelated entities and **no re-fetch can repair it** — the provider keys by ticker too and returns the same spliced data, so v1.1.139/140 could only ever mark these `confirmed_real`. Which is what happened: the re-opened verdicts came back `0 repaired, 8 confirmed real`.
+- **Volume settles it.** A split rescales share count and settles; a news event spikes then decays; only a *different company* shifts the volume regime permanently. Median volume over 20 bars either side (3-bar buffer to exclude the event-day spike): `BNY "Bank of New York Mellon Corp." 46,254 -> 3,519,645 = 76x` and `SPCX "Space Exploration Technologies" 1,531 -> 82,047,547 = 53,592x`, against six genuine moves at **0.4x-5.0x** (MRNA 5.0, PRIM 2.7, FMC 2.6, CORT 2.0, KD 2.0, CAR 0.4). The 15x threshold sits three times above the largest genuine case.
+- **This corrected an earlier wrong call**: MRNA was suspected of being an unadjusted 1:3 reverse split because it stepped 62.96 -> 174.38 and stayed. 46x volume and a 35.7% intraday range say otherwise — a split day has a *normal* intraday range because all four OHLC values are already in the new scale. "Steps and stays" does not imply a split; a permanent repricing on news does the same.
+- **`volumeRegimeRatio`** (pure, returns `null` when either side is too thin to judge) + **`isTickerReuse`** (extreme in either direction — reuse can cut volume as well as raise it). **Checked BEFORE any re-fetch**: it saves a pointless API call and is the only one of the three verdicts that isn't a question about price adjustment at all.
+- **Truncation, not flagging.** The previous company's bars are deleted from `historical_prices` **and `iv_history`** — every consumer reads those tables directly, so indicators, scoring, backtests and Brief Replay all become correct with no change to any of them. `iv_history` matters as much as prices: it feeds IV rank over a 252-day window and BNY held **246 of 316 rows** on the wrong company.
+- Recorded as `status='ticker_reuse'` with the `volume_ratio` evidence; migration 070 rebuilds the table for the extended CHECK + new column (SQLite can't ALTER a CHECK) and re-opens BNY/SPCX so the next run classifies them properly. Run note: `Split scan: N repaired, M confirmed real, K ticker-reuse truncated`.
+- Regression: `tests/split-repair.test.ts` 11 -> 14 — the metric separates 76x from 5.0x, declines on thin/zero-volume data, and an end-to-end case truncates the old entity out of both tables **with no API call**. Suite: 987 passed.
+
+Docs: `docs/formulas.md#ticker-reuse`, `Requirements/spec/02-data-model.md`, `.ai/AI_CONTEXT.md` §10, `CLAUDE.md`.
+
 ## [1.1.140] — 2026-09-01
 
 ### fix — a `confirmed_real` split verdict was permanent, and 3:2 produced false split labels

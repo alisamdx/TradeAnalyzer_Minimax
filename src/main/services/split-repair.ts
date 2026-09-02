@@ -51,9 +51,61 @@ const MAX_REPAIR_LOOKBACK_DAYS = 800;
  */
 const CONFIRMED_REAL_TTL_DAYS = 30;
 
+/**
+ * Sustained volume-regime shift beyond which a price discontinuity is read as the symbol
+ * having been reassigned to a DIFFERENT COMPANY rather than as a split or a news move.
+ *
+ * Calibrated 2026-09-01 on the eight discontinuities that survived a re-fetch. Median
+ * volume over 20 bars either side (skipping a 3-bar buffer so the event-day spike is
+ * excluded):
+ *   ticker reuse : BNY 76x  ·  SPCX 53,592x
+ *   genuine move : MRNA 5.0x · PRIM 2.7x · FMC 2.6x · CORT 2.0x · KD 2.0x · CAR 0.4x
+ * 15x sits three times above the largest genuine case, so the separation is not marginal.
+ */
+const TICKER_REUSE_VOLUME_RATIO = 15;
+
+/** Bars either side used to measure the regime, and the buffer skipped around the event. */
+const REGIME_WINDOW_BARS = 20;
+const REGIME_BUFFER_BARS = 3;
+
 export interface PriceBar {
   date: string;
   close: number;
+  volume?: number;
+}
+
+/**
+ * Median volume AFTER a discontinuity divided by median volume BEFORE it — the signature
+ * that separates a reassigned ticker from a violent but genuine move.
+ *
+ * A split rescales share count, so volume moves inversely and settles; a news event spikes
+ * volume then decays back toward its old level. Only a different company trading under the
+ * same symbol shifts the volume REGIME permanently. Medians over a window (rather than the
+ * event day itself) are what make that distinction — the event-day spike is excluded by the
+ * caller's buffer.
+ *
+ * Returns null when either side is too thin to judge, so the caller can decline to act.
+ */
+export function volumeRegimeRatio(
+  beforeVolumes: readonly number[],
+  afterVolumes: readonly number[],
+  minSamples = 5,
+): number | null {
+  const median = (xs: readonly number[]): number => {
+    const s = [...xs].filter(v => Number.isFinite(v) && v >= 0).sort((a, b) => a - b);
+    return s.length === 0 ? 0 : s[Math.floor(s.length / 2)]!;
+  };
+  if (beforeVolumes.length < minSamples || afterVolumes.length < minSamples) return null;
+  const vb = median(beforeVolumes);
+  const va = median(afterVolumes);
+  if (!(vb > 0) || !(va > 0)) return null;
+  return va / vb;
+}
+
+/** Whether a volume-regime ratio is extreme enough to mean "different company". */
+export function isTickerReuse(volRatio: number | null): boolean {
+  if (volRatio === null) return false;
+  return volRatio >= TICKER_REUSE_VOLUME_RATIO || volRatio <= 1 / TICKER_REUSE_VOLUME_RATIO;
 }
 
 export interface Discontinuity {
@@ -123,6 +175,7 @@ export interface RepairSummary {
   flagged: number;
   repaired: number;
   confirmedReal: number;
+  tickerReuse: number;
   failed: number;
   details: string[];
 }
@@ -171,22 +224,35 @@ export async function detectAndRepairSplits(
   ).all(since) as Array<{ ticker: string }>).map(r => r.ticker);
 
   const barsStmt = db.prepare(
-    `SELECT date, close FROM historical_prices WHERE ticker = ? AND date >= ? ORDER BY date ASC`,
+    `SELECT date, close, volume FROM historical_prices WHERE ticker = ? AND date >= ? ORDER BY date ASC`,
   );
+  // Regime windows are measured over the FULL stored series, not the scan lookback, so a
+  // splice near the lookback edge still has bars on both sides to compare.
+  const beforeVolStmt = db.prepare(
+    `SELECT volume FROM historical_prices WHERE ticker = ? AND date < ? ORDER BY date DESC LIMIT ?`,
+  );
+  const afterVolStmt = db.prepare(
+    `SELECT volume FROM historical_prices WHERE ticker = ? AND date > ? ORDER BY date ASC LIMIT ?`,
+  );
+  const offsetDate = (d: string, bars: number, dir: 1 | -1): string =>
+    new Date(Date.parse(`${d}T00:00:00Z`) + dir * bars * 86_400_000).toISOString().slice(0, 10);
+  const truncPricesStmt = db.prepare(`DELETE FROM historical_prices WHERE ticker = ? AND date < ?`);
+  const truncIvStmt = db.prepare(`DELETE FROM iv_history WHERE ticker = ? AND date < ?`);
   const earliestStmt = db.prepare(`SELECT MIN(date) AS d FROM historical_prices WHERE ticker = ?`);
   const recordStmt = db.prepare(`
-    INSERT INTO price_split_repairs (ticker, discontinuity_date, ratio, status, bars_rewritten, detected_at, resolved_at)
-    VALUES (?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'), strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+    INSERT INTO price_split_repairs
+      (ticker, discontinuity_date, ratio, volume_ratio, status, bars_rewritten, detected_at, resolved_at)
+    VALUES (?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'), strftime('%Y-%m-%dT%H:%M:%fZ','now'))
     ON CONFLICT(ticker, discontinuity_date) DO UPDATE SET
-      status = excluded.status, ratio = excluded.ratio,
+      status = excluded.status, ratio = excluded.ratio, volume_ratio = excluded.volume_ratio,
       bars_rewritten = excluded.bars_rewritten, resolved_at = excluded.resolved_at
   `);
 
-  const summary: RepairSummary = { scanned: 0, flagged: 0, repaired: 0, confirmedReal: 0, failed: 0, details: [] };
+  const summary: RepairSummary = { scanned: 0, flagged: 0, repaired: 0, confirmedReal: 0, tickerReuse: 0, failed: 0, details: [] };
 
   for (const ticker of tickers) {
     if (opts.signal?.aborted) break;
-    if (summary.repaired + summary.confirmedReal >= maxRepairs) break;
+    if (summary.repaired + summary.confirmedReal + summary.tickerReuse >= maxRepairs) break;
     summary.scanned++;
 
     const bars = barsStmt.all(ticker, since) as PriceBar[];
@@ -194,6 +260,42 @@ export async function detectAndRepairSplits(
       .filter(h => !known.has(`${h.ticker}|${h.date}`));
     if (hits.length === 0) continue;
     summary.flagged++;
+
+    // ── Ticker reuse, checked BEFORE any re-fetch ──────────────────────────────
+    // A symbol reassigned to a different company (rename, reverse merger, de-SPAC,
+    // delisting + reuse) splices two unrelated entities into one series, and NO re-fetch
+    // can fix it — the provider keys by ticker too and returns the same spliced data. So
+    // this is settled first: it saves a pointless API call and is the only one of the
+    // three verdicts that is not a question about price adjustment at all.
+    //
+    // The tell is a permanent shift in the VOLUME regime. A split rescales share count and
+    // settles; a news event spikes volume then decays. Only a different company changes the
+    // regime for good (BNY 76x, SPCX 53,592x vs 0.4-5.0x across six genuine moves).
+    const reuseHit = hits.find(h => {
+      const vb = (beforeVolStmt.all(ticker, offsetDate(h.date, REGIME_BUFFER_BARS, -1), REGIME_WINDOW_BARS) as Array<{ volume: number }>).map(r => r.volume);
+      const va = (afterVolStmt.all(ticker, offsetDate(h.date, REGIME_BUFFER_BARS, 1), REGIME_WINDOW_BARS) as Array<{ volume: number }>).map(r => r.volume);
+      return isTickerReuse(volumeRegimeRatio(vb, va));
+    });
+    if (reuseHit) {
+      const vb = (beforeVolStmt.all(ticker, offsetDate(reuseHit.date, REGIME_BUFFER_BARS, -1), REGIME_WINDOW_BARS) as Array<{ volume: number }>).map(r => r.volume);
+      const va = (afterVolStmt.all(ticker, offsetDate(reuseHit.date, REGIME_BUFFER_BARS, 1), REGIME_WINDOW_BARS) as Array<{ volume: number }>).map(r => r.volume);
+      const volRatio = volumeRegimeRatio(vb, va)!;
+      // Truncate to the current entity. Deleting is the right action rather than flagging:
+      // every consumer reads these tables directly, so removing the previous company's bars
+      // makes indicators, scoring, backtests and replay correct without touching any of
+      // them. iv_history is truncated too — it is keyed the same way and feeds IV rank over
+      // a 252-day window (BNY held 246 of 316 rows on the wrong company).
+      const priceRows = truncPricesStmt.run(ticker, reuseHit.date).changes;
+      const ivRows = truncIvStmt.run(ticker, reuseHit.date).changes;
+      recordStmt.run(ticker, reuseHit.date, reuseHit.ratio, volRatio, 'ticker_reuse', priceRows);
+      summary.tickerReuse++;
+      const line = `${ticker} ${reuseHit.date} ${((reuseHit.ratio - 1) * 100).toFixed(0)}% `
+        + `vol regime ${volRatio >= 1 ? volRatio.toFixed(0) + 'x' : '1/' + (1 / volRatio).toFixed(0) + 'x'}`
+        + ` → ticker_reuse, truncated ${priceRows} price + ${ivRows} iv rows before it`;
+      summary.details.push(line);
+      opts.onProgress?.(ticker, line);
+      continue;
+    }
 
     // Re-fetch the whole stored series (bounded). Polygon returns it adjusted to today,
     // so a genuine split is corrected across every bar in one pass.
@@ -209,7 +311,7 @@ export async function detectAndRepairSplits(
       for (const h of hits) {
         const stillThere = afterKeys.has(h.date);
         const status = stillThere ? 'confirmed_real' : 'repaired';
-        recordStmt.run(ticker, h.date, h.ratio, status, rewritten);
+        recordStmt.run(ticker, h.date, h.ratio, null, status, rewritten);
         const split = nearestSplitRatio(h.ratio);
         const line = `${ticker} ${h.date} ${((h.ratio - 1) * 100).toFixed(0)}%`
           + (split ? ` (~${split})` : '')

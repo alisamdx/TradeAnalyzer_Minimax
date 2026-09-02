@@ -180,6 +180,7 @@ export class PriceGapFillJob implements BatchJobHandler {
       });
       if (rep.flagged > 0) {
         splitNote = ` Split scan: ${rep.repaired} repaired, ${rep.confirmedReal} confirmed real`
+                  + (rep.tickerReuse ? `, ${rep.tickerReuse} ticker-reuse truncated` : '')
                   + (rep.failed ? `, ${rep.failed} failed` : '') + '.';
         for (const d of rep.details) console.log(`[price-gap-fill] ${d}`);
       }

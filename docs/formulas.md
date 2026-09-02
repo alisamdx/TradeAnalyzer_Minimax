@@ -811,3 +811,31 @@ detection, relative strength, the backtest engine, and Brief Replay, which FR-SE
 on to validate trade-logic changes. Measured 2026-08-28: CRWD −74% in one day (4:1),
 DD +203%, MRNA +177%, HON +95%, KLAC −89%, against SPY's largest genuine daily move of
 2.58% over the same quarter.
+
+## ticker-reuse detection (data integrity) {#ticker-reuse}
+
+A symbol reassigned to a different company (rename, reverse merger, de-SPAC, delisting then
+reuse) splices two unrelated entities into one series. Unlike an unadjusted split this is
+**not repairable by re-fetching** — the provider keys by ticker too.
+
+The discriminator is the **volume regime**, not price. Over `REGIME_WINDOW_BARS` (20) either
+side of the discontinuity, skipping `REGIME_BUFFER_BARS` (3) so the event-day spike is
+excluded:
+
+```
+volumeRegimeRatio = median(volume after) / median(volume before)
+ticker reuse  <=>  ratio >= 15  or  ratio <= 1/15
+```
+
+Rationale: a split rescales share count and settles; a news event spikes volume then decays
+back toward its old level; only a different company shifts the regime permanently.
+Calibrated 2026-09-01 — reuse: BNY 76x, SPCX 53,592x; genuine moves: MRNA 5.0x, PRIM 2.7x,
+FMC 2.6x, CORT 2.0x, KD 2.0x, CAR 0.4x.
+
+**Intraday range is a second, independent check**: a split day's OHLC are all already in the
+new scale, so its range is normal (~2-5%). MRNA's 35.7% range on its +177% day is what
+confirms a real repricing rather than an unadjusted reverse split.
+
+**The action is truncation** — bars before the splice are deleted from `historical_prices`
+and `iv_history`, so every consumer sees only the current entity without any consumer-side
+change. `iv_history` is included because IV rank reads a 252-day window.
