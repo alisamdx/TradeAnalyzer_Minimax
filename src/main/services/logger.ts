@@ -64,6 +64,14 @@ export interface ApiLogEntry {
   responseSizeBytes: number | null;
   retryCount: number;
   jobRunId: string | null;
+  /** Failure reason when the call errored (non-2xx, network fault, or non-JSON body). */
+  errorMessage?: string | null;
+  /**
+   * Short preview of the response body, written ONLY for failed calls. Success bodies are
+   * never logged — they carry positions, balances and quotes, and this file is plaintext
+   * on disk with 30-day retention. Provider error bodies are what diagnosis actually needs.
+   */
+  responseBodyPreview?: string | null;
 }
 
 let _apiStream: ReturnType<typeof createWriteStream> | null = null;

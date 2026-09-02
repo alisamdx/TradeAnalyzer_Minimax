@@ -12,6 +12,8 @@
  */
 
 import { createHmac } from 'node:crypto';
+import { logApiCall, scrubObject } from './logger.js';
+import type { ApiLogEntry } from './logger.js';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -197,6 +199,29 @@ export async function renewAccessToken(creds: OAuthCredentials): Promise<void> {
  * Make an authenticated GET request to the E*Trade API.
  * Returns parsed JSON. Handles the JSON wrapper E*Trade uses.
  */
+/**
+ * Mask the account identifier out of a logged endpoint path.
+ *
+ * `/v1/accounts/{accountIdKey}/transactions` carries a real brokerage account key. The API
+ * log is plaintext on disk, so the key is replaced while the SHAPE of the call is kept —
+ * which is all diagnosis needs.
+ */
+function maskEndpoint(path: string): string {
+  return path.replace(/\/accounts\/[^/]+/i, '/accounts/{acct}');
+}
+
+/**
+ * Fail-safe wrapper around `logApiCall`.
+ *
+ * Instrumentation must never break the thing it instruments. The logger touches the
+ * filesystem and reads Electron's userData path, so a disk error or an unready app would
+ * otherwise turn every E*Trade request into a hard failure — trading the blind spot this
+ * logging exists to fix for something strictly worse.
+ */
+function safeLog(entry: ApiLogEntry): void {
+  try { logApiCall(entry); } catch { /* logging must never break an API call */ }
+}
+
 export async function etradeGet(
   path: string,
   queryParams: Record<string, string>,
@@ -212,15 +237,77 @@ export async function etradeGet(
     {}, queryParams
   );
 
-  const res = await fetch(fullUrl, {
-    headers: { Authorization: authHeader, Accept: 'application/json' }
-  });
+  // Instrumented v1.1.144. E*Trade was the only provider writing nothing to logs/api — the
+  // Polygon path has been logged since the logger existed — so any E*Trade failure was
+  // invisible after the fact. That blocked diagnosing why Sync Closed Positions imports
+  // nothing: there was no record of whether the request was even made.
+  //
+  // Only the caller's query params are logged (scrubbed), never the OAuth Authorization
+  // header, and the account key is masked out of the path.
+  const startedAt = Date.now();
+  const logBase = {
+    timestamp: new Date().toISOString(),
+    provider: 'etrade',
+    endpoint: maskEndpoint(path),
+    method: 'GET',
+    requestParams: scrubObject(queryParams),
+    retryCount: 0,
+    jobRunId: null,
+  };
+
+  let res: Response;
+  try {
+    res = await fetch(fullUrl, {
+      headers: { Authorization: authHeader, Accept: 'application/json' }
+    });
+  } catch (err) {
+    // Network-level fault. A dormant E*Trade token can terminate the stream rather than
+    // returning 401 (see CLAUDE.md), and that used to leave no trace at all.
+    safeLog({
+      ...logBase,
+      responseStatus: null,
+      responseLatencyMs: Date.now() - startedAt,
+      responseSizeBytes: null,
+      errorMessage: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
+  }
+
   const body = await res.text();
-  if (!res.ok) throw new Error(`E*Trade API error (${res.status}) at ${path}: ${body.slice(0, 300)}`);
+  const latencyMs = Date.now() - startedAt;
+
+  if (!res.ok) {
+    // Body preview ONLY on failure — E*Trade's error envelope is exactly what diagnosis
+    // needs, and success bodies (positions, balances, quotes) are never written to disk.
+    safeLog({
+      ...logBase,
+      responseStatus: res.status,
+      responseLatencyMs: latencyMs,
+      responseSizeBytes: body.length,
+      errorMessage: `HTTP ${res.status}`,
+      responseBodyPreview: body.slice(0, 300),
+    });
+    throw new Error(`E*Trade API error (${res.status}) at ${path}: ${body.slice(0, 300)}`);
+  }
 
   try {
-    return JSON.parse(body) as Record<string, unknown>;
+    const parsed = JSON.parse(body) as Record<string, unknown>;
+    safeLog({
+      ...logBase,
+      responseStatus: res.status,
+      responseLatencyMs: latencyMs,
+      responseSizeBytes: body.length,
+    });
+    return parsed;
   } catch {
+    safeLog({
+      ...logBase,
+      responseStatus: res.status,
+      responseLatencyMs: latencyMs,
+      responseSizeBytes: body.length,
+      errorMessage: 'non-JSON response',
+      responseBodyPreview: body.slice(0, 300),
+    });
     throw new Error(`E*Trade returned non-JSON at ${path}: ${body.slice(0, 200)}`);
   }
 }

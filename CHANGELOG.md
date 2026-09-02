@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.144] — 2026-09-01
+
+### feat — log E*Trade API calls; the provider was completely dark
+- **`logs/api/` has instrumented Polygon since the logger existed; E*Trade wrote nothing.** Measured 2026-09-01: **17,200 Polygon entries, zero E*Trade**, and `logs/errors/` empty. Every E*Trade failure was invisible after the fact.
+- **This blocked a real diagnosis.** `insertClosedPosition` always writes an `exit_price` and **no row in the DB has one**, so **Sync Closed Positions has never inserted a record** — the failure is upstream at the fetch or the transaction match, and with no log there was no way to tell which, or even whether the request was made. That sync is what replaces estimated marks with real fills: without it the wheel book's realized P&L is inference, and the stored figures are out by **$4,954** against a hand reconstruction (a −$3,736 assignment booked as a loss when it was a conversion into stock; a covered call booked at −$463 when it expired worthless with TSLA at 348.75 vs a 360 strike).
+- **`etradeGet` — the single choke point for E*Trade calls — now logs every outcome** with `provider: 'etrade'`: success (status/latency/size); non-2xx (plus `errorMessage` and a 300-char `responseBodyPreview` carrying E*Trade's own error envelope); and **network fault** (`responseStatus: null` + thrown message) — a dormant token can terminate the stream instead of returning 401 (CLAUDE.md), which previously left no trace at all.
+- **Three deliberate safety properties.** (1) **Success bodies are never written to disk** — they carry positions, balances and quotes, and the log is plaintext with 30-day retention; only *failure* bodies are previewed. (2) **The account key is masked** — `/v1/accounts/{accountIdKey}/transactions` logs as `/v1/accounts/{acct}/transactions`, preserving the call's shape but not the brokerage identifier. (3) **Logging can never break an API call** — all four sites go through a `safeLog` wrapper that swallows logger exceptions, because the logger touches the filesystem and Electron's userData path and a disk error would otherwise turn every E*Trade request into a hard failure, trading the blind spot for something strictly worse.
+- Only the caller's query params are logged (scrubbed via the existing `scrubObject`); the OAuth Authorization header is never included. `ApiLogEntry` gains optional `errorMessage` / `responseBodyPreview`; the Polygon path is untouched.
+- Regression: new `tests/etrade-api-logging.test.ts` (6) — success logged without the body, account key masked, provider error envelope captured on a 400, network fault recorded with a null status, real params preserved while credentials and the OAuth header never appear, and **a throwing logger does not break the call**. The leak assertion uses distinctive canary credentials: short values like `'at'` collide with ordinary JSON keys (`"responseStatus"` contains "at"). Suite: 993 passed.
+- **What this unblocks**: the next Sync Closed Positions run will either show the E*Trade transactions call in `logs/api/api_<date>.jsonl` or show it was never made. The three candidate fixes (missing `withRenew` on the portfolio path, a rejected request, or the open/close transaction matcher) are mutually exclusive — the log decides which one to make.
+
+Docs: `.ai/AI_CONTEXT.md` §10, `CLAUDE.md`.
+
 ## [1.1.143] — 2026-09-01
 
 ### Validation — regime detection explored, NOT viable on current data
