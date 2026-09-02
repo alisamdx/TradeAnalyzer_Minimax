@@ -54,6 +54,19 @@ function pct(s: string): string {
   return encodeURIComponent(s).replace(/[!'()*]/g, c => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
 }
 
+/**
+ * Hard timeout for an E*Trade request.
+ *
+ * Without one, a stalled connection hangs until Node's default and gets RETRANSMITTED by
+ * undici — replaying the already-signed Authorization header, so E*Trade sees the same
+ * oauth_nonce twice and answers `oauth_problem=nonce_used`. Observed 2026-09-02: the
+ * closed-position import's transactions call stalled 120,250 ms and came back 401 nonce_used
+ * on a single app-level request. Every other E*Trade call in that session finished under
+ * 500 ms, so this is generous by two orders of magnitude — it exists to fail fast and
+ * legibly, not to bound normal latency.
+ */
+const ETRADE_TIMEOUT_MS = 30_000;
+
 function nonce(): string {
   return Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
 }
@@ -262,7 +275,11 @@ export async function etradeGet(
   let res: Response;
   try {
     res = await fetch(fullUrl, {
-      headers: { Authorization: authHeader, Accept: 'application/json' }
+      headers: { Authorization: authHeader, Accept: 'application/json' },
+      // A retransmission would replay this exact signed header (same nonce) and earn a
+      // nonce_used 401, so abort rather than let a stalled socket linger. A retry has to
+      // re-enter etradeGet, which re-signs with a fresh nonce.
+      signal: AbortSignal.timeout(ETRADE_TIMEOUT_MS),
     });
   } catch (err) {
     // Network-level fault. A dormant E*Trade token can terminate the stream rather than

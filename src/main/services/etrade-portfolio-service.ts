@@ -577,7 +577,6 @@ export class EtradePortfolioService {
     creds: OAuthCredentials
   ): Promise<TxLeg[]> {
     const legs: TxLeg[] = [];
-    let marker: string | undefined;
 
     // E*Trade requires MMDDYYYY (no separators), e.g. "07112018"
     const fmt = (iso: string) => {
@@ -585,10 +584,36 @@ export class EtradePortfolioService {
       return `${m}${d}${y}`;
     };
 
+    // Query in ~1-month slices rather than one YTD span.
+    //
+    // A single 2026-01-01 -> 2026-09-02 request stalled for 120,250 ms and came back
+    // `oauth_problem=nonce_used` (2026-09-02): the socket hung long enough for undici to
+    // retransmit the already-signed request, so E*Trade saw the same oauth_nonce twice.
+    // Every other E*Trade call that session finished under 500 ms. Narrow windows keep each
+    // response small enough to return promptly, which removes the stall that triggers the
+    // replay. `etradeGet` also carries a hard timeout now, so a slice that does hang fails
+    // fast and legibly instead of silently replaying.
+    const slices: Array<{ from: string; to: string }> = [];
+    {
+      const endMs = Date.parse(`${endDate}T00:00:00Z`);
+      let cur = Date.parse(`${startDate}T00:00:00Z`);
+      while (cur <= endMs) {
+        const next = Math.min(cur + 30 * 86_400_000, endMs);
+        slices.push({
+          from: new Date(cur).toISOString().slice(0, 10),
+          to:   new Date(next).toISOString().slice(0, 10),
+        });
+        if (next >= endMs) break;
+        cur = next + 86_400_000;
+      }
+    }
+
+    for (const slice of slices) {
+    let marker: string | undefined;
     do {
       const params: Record<string, string> = {
-        startDate: fmt(startDate),
-        endDate:   fmt(endDate),
+        startDate: fmt(slice.from),
+        endDate:   fmt(slice.to),
         count:     '50',
       };
       if (marker) params['marker'] = marker;
@@ -610,8 +635,14 @@ export class EtradePortfolioService {
         }
       }
 
-      marker = typeof resp['marker'] === 'string' ? resp['marker'] : undefined;
+      // E*Trade returns the paging marker as a string or a number depending on endpoint;
+      // coercing both keeps pagination working instead of silently stopping after page 1.
+      const rawMarker = resp['marker'];
+      marker = typeof rawMarker === 'string' ? rawMarker
+             : typeof rawMarker === 'number' ? String(rawMarker)
+             : undefined;
     } while (marker);
+    }
 
     return legs;
   }
