@@ -1113,6 +1113,25 @@ function buildApi() {
       invoke<DailyBriefEntry[]>('scoring:get-brief-history', limit),
     resendBriefEmail: () =>
       invoke<{ sent: boolean; message: string }>('scoring:resend-brief-email'),
+    /** Roll the Dice: one wheel entry from the latest brief, or an explicit nothing. */
+    rollTheDice: (maxPrice?: number) => invoke<{
+      pick: {
+        ticker: string; price: number; compositeScore: number; briefRank: number;
+        strike: number; expiration: string; dte: number;
+        premiumPerShare: number; creditTotal: number; capitalRequired: number;
+        effectiveCostBasis: number; discountToSpotPct: number;
+        annualizedReturn: number | null; popEstimate: number | null;
+        liquidityScore: number; grade: string;
+        criticRationale: string | null; aiRationale: string | null;
+      } | null;
+      noPickReason: string | null;
+      briefDate: string | null;
+      briefAgeDays: number | null;
+      staleWarning: string | null;
+      considered: number;
+      rejections: Array<{ ticker: string; reason: string }>;
+      runnerUp: { ticker: string; compositeScore: number } | null;
+    }>('scoring:roll-the-dice', maxPrice),
     signalCorrelations: (strategy: ScoringStrategy) =>
       invoke<SignalWeightSuggestion[]>('scoring:signal-correlations', strategy),
     briefHealthTrend: () =>

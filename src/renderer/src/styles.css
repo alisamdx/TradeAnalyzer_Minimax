@@ -3392,6 +3392,75 @@ input[type='checkbox'] {
   cursor: pointer;
 }
 .brief-history-btn:hover { border-color: var(--accent); color: var(--accent); }
+/* ── Roll the Dice ────────────────────────────────────────────────────────────
+   One wheel entry from the latest brief, or an explicit nothing. Styled entirely from
+   theme variables: the Performance tab shipped with its own hardcoded light palette in
+   v1.1.157 and read as white boxes on the app's surface (fixed v1.1.158) -- no second
+   palette maintained by hand. */
+.brief-dice-btn {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 14px;
+  border-radius: 5px;
+  border: 1px solid var(--warning);
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+  color: var(--warning);
+  cursor: pointer;
+}
+.brief-dice-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--warning) 22%, transparent);
+}
+.brief-dice-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.dice-panel {
+  margin: 10px 0 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--warning);
+  border-radius: 8px;
+  background: var(--bg-elev);
+}
+/* A no-pick day is a real answer, not an error -- muted, not alarming. */
+.dice-panel.dice-empty { border-color: var(--border); }
+
+.dice-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.dice-title { font-size: 13px; font-weight: 700; color: var(--text); }
+.dice-sub { font-size: 11px; color: var(--text-muted); }
+.dice-close {
+  background: none; border: none; cursor: pointer;
+  color: var(--text-muted); font-size: 18px; line-height: 1; padding: 0 4px;
+}
+.dice-close:hover { color: var(--text); }
+
+.dice-stale {
+  font-size: 11px; color: var(--warning);
+  border: 1px solid var(--warning); border-radius: 5px;
+  padding: 5px 8px; margin-bottom: 8px;
+  background: color-mix(in srgb, var(--warning) 8%, transparent);
+}
+
+.dice-headline { font-size: 15px; font-weight: 600; color: var(--text); margin-bottom: 10px; }
+
+.dice-stats { display: flex; flex-wrap: wrap; gap: 10px; }
+.dice-stat {
+  display: flex; flex-direction: column; gap: 1px;
+  min-width: 150px; padding: 7px 10px;
+  border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg);
+}
+.dice-k { font-size: 10px; text-transform: uppercase; letter-spacing: .3px; color: var(--text-muted); }
+.dice-v { font-size: 17px; font-weight: 700; color: var(--text); }
+.dice-n { font-size: 10px; color: var(--text-muted); }
+
+.dice-rationale { font-size: 11px; color: var(--text-muted); margin-top: 10px; line-height: 1.5; max-width: 820px; }
+.dice-runner { font-size: 11px; color: var(--text-muted); margin-top: 6px; }
+.dice-none { font-size: 13px; color: var(--text); line-height: 1.5; }
+
+/* The rejections are the point: they make the bar visible rather than merely claimed. */
+.dice-rejects { margin-top: 10px; font-size: 11px; color: var(--text-muted); }
+.dice-rejects summary { cursor: pointer; }
+.dice-rejects ul { margin: 6px 0 0 16px; padding: 0; }
+.dice-rejects li { margin: 2px 0; }
+
 .brief-run-btn {
   font-size: 12px;
   font-weight: 600;

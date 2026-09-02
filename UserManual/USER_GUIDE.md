@@ -66,6 +66,38 @@ If the brief didn't run, you can trigger it manually from **🔄 Batch Jobs** �
 3. From there, open **📉 Options** to see the live chain. Find the strike/delta you want.
 4. Click the **B** (buy) or **S** (sell) button on that contract → it sends the leg straight to **📐 Payoff**.
 
+### 4.1a 🎲 Roll the Dice — one wheel trade, no reading
+
+On the **Daily Brief**, next to *Run Now*, is **🎲 Roll the Dice**. It reduces the whole
+brief to a single cash-secured put you can place without reading anything else — or it tells you
+there isn't one today.
+
+A pick has to clear every one of these. There is no scoring or weighing here; the brief has
+already done that. This only removes:
+
+| Gate | Why |
+|---|---|
+| Critic verdict is **pass** | A *caution* is something to read, and the point is not reading |
+| Critic actually **ran** | A "pass" from the rule-based fallback is un-vetted, not an all-clear |
+| Share price **≤ $300** | A $300 stock is a $30,000 cash-secured commitment |
+| A real CSP exists on the chain | — |
+| Liquidity **≥ 8/15** | You have to be able to get out |
+| **No earnings before expiry** | And an unknown or stale earnings date also fails |
+| Positive net credit | A zero credit is a broken chain, not a trade |
+
+**"No dice today" is a normal answer.** On the stored history it produced a pick on about
+**1 day in 3**. A version that always found something would have to lower its bar on exactly the
+days the bar matters. Expand *"N rejected — why"* to see what it threw out and on which gate.
+
+The card shows the strike and expiry, the credit, the cash required, your **cost basis if
+assigned** and how far below the current price that is, the annualized return and probability of
+profit, and the critic's own note.
+
+> **The name is the disclaimer.** These gates remove known, checkable problems — a flagged
+> setup, an earnings print, an illiquid chain, a position too big for the account. They cannot
+> make a trade safe. It is still a short put, you can still be assigned, and the stock can still
+> fall well below your cost basis. Nothing here is investment advice.
+
 ### 4.2 Model a structure in Payoff
 
 The **📐 Payoff** screen is where you confirm the trade before placing it:
@@ -110,7 +142,7 @@ Not sure which structure fits? Open **🔬 Strategy Lab**, enter a ticker, and t
 - **🔄 Batch Jobs** — the background job scheduler (see §8).
 
 **Intelligence**
-- **📋 Daily Brief** — today's top scored picks per strategy, with AI rationale + critic.
+- **📋 Daily Brief** — today's top scored picks per strategy, with AI rationale + critic. Includes **🎲 Roll the Dice** (§4.1a): one wheel entry that clears every gate, or an explicit nothing.
 - **🪞 Retrospect** — paper-trade tracking of past picks; win rates and learnings.
 - **📅 Earnings** — earnings calendar (month/list) across the universe.
 - **🤖 Agent** — view/run the external autonomous TraderAgent.

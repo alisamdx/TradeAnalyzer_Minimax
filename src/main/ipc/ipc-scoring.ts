@@ -9,6 +9,11 @@ import type { IpcResult, BriefPick, ScoringStrategy as ScoringStrategyAlias } fr
 import type { EmailService } from '../services/email-service.js';
 import { buildEmailHtml, buildPdf } from '../services/brief-report-builder.js';
 import { STRATEGIES } from '../services/scoring-service.js';
+import type { DbHandle } from '../db/connection.js';
+import {
+  rollTheDice, DEFAULT_MAX_PRICE,
+  type DicePickInput, type DiceResult,
+} from '../services/roll-the-dice.js';
 
 function ok<T>(value: T): IpcResult<T> {
   return { ok: true, value };
@@ -26,7 +31,47 @@ function wrap<Args extends unknown[], R>(fn: (...args: Args) => R) {
   };
 }
 
-export function registerScoringIpc(scoringService: ScoringService, emailService: EmailService): void {
+export function registerScoringIpc(
+  scoringService: ScoringService,
+  emailService: EmailService,
+  db: DbHandle,
+): void {
+  // Roll the Dice — ONE wheel entry from the latest brief, or an explicit nothing.
+  //
+  // Pure filter over the stored brief: no scoring change, no provider call, nothing written.
+  // The earnings map is read LIVE from `earnings_calendar` rather than trusted from the pick's
+  // stored signals, because a brief can outlive a calendar correction — this session opened with
+  // exactly that failure (a stale stored date put NVDA at wheel #1 on its earnings day).
+  ipcMain.handle(
+    'scoring:roll-the-dice',
+    wrap((maxPrice?: number): DiceResult => {
+      const rows = scoringService.getLatestBrief('wheel');
+      const brief = rows[0] ?? null;
+      const picks: DicePickInput[] = brief ? (JSON.parse(brief.picks) as DicePickInput[]) : [];
+
+      // ET date — the brief and the earnings calendar are both keyed to it.
+      const todayEt = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+
+      // A ticker with no row is left OUT of the map entirely. `report_date` is NOT NULL and the
+      // table is keyed by ticker, so presence always means "we have a date" -- absence means we
+      // do not know, and the caller fails closed on that.
+      const earnings = new Map<string, string>();
+      if (picks.length > 0) {
+        const marks = picks.map(() => '?').join(',');
+        const rowsE = db.prepare(
+          `SELECT ticker, report_date FROM earnings_calendar WHERE ticker IN (${marks})`,
+        ).all(...picks.map(p => p.ticker)) as Array<{ ticker: string; report_date: string }>;
+        for (const r of rowsE) earnings.set(r.ticker, r.report_date);
+      }
+
+      return rollTheDice(
+        picks, earnings, todayEt,
+        brief ? brief.generated_at.slice(0, 10) : null,
+        maxPrice ?? DEFAULT_MAX_PRICE,
+      );
+    })
+  );
+
   // Get config for a strategy (or all strategies)
   ipcMain.handle(
     'scoring:get-config',

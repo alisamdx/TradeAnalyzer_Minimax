@@ -860,6 +860,9 @@ interface DailyBriefViewProps {
   onGoToStrategyLab?: (ticker: string) => void;
 }
 
+/** Shape returned by `scoring:roll-the-dice` (see src/main/services/roll-the-dice.ts). */
+type DiceResult = Awaited<ReturnType<typeof window.api.scoring.rollTheDice>>;
+
 export function DailyBriefView({ onGoToStrategyLab }: DailyBriefViewProps) {
   const [briefs, setBriefs] = useState<DailyBriefEntry[]>([]);
   const [history, setHistory] = useState<DailyBriefEntry[]>([]);
@@ -870,6 +873,9 @@ export function DailyBriefView({ onGoToStrategyLab }: DailyBriefViewProps) {
   const [showHistory, setShowHistory] = useState(false);
   const [selectedHistoryId, setSelectedHistoryId] = useState<number | null>(null);
   const [accuracyMap, setAccuracyMap] = useState<Map<string, BriefAccuracy>>(new Map());
+
+  const [dice, setDice]                   = useState<DiceResult | null>(null);
+  const [diceBusy, setDiceBusy]           = useState(false);
 
   const [perfSummary, setPerfSummary]     = useState<BriefPerformanceSummary | null>(null);
   const [healthTrend, setHealthTrend]     = useState<BriefHealthTrend[]>([]);
@@ -987,6 +993,19 @@ export function DailyBriefView({ onGoToStrategyLab }: DailyBriefViewProps) {
     });
   };
 
+  // Roll the Dice — one wheel entry from the latest brief, or an explicit nothing.
+  const handleRollDice = async () => {
+    setDiceBusy(true);
+    try {
+      setDice(await window.api.scoring.rollTheDice());
+    } catch (err) {
+      console.error('[dice] error:', err);
+      setDice(null);
+    } finally {
+      setDiceBusy(false);
+    }
+  };
+
   const goToStrategyLab = (ticker: string) => {
     onGoToStrategyLab?.(ticker);
   };
@@ -1050,6 +1069,14 @@ export function DailyBriefView({ onGoToStrategyLab }: DailyBriefViewProps) {
           <span className="brief-resend-msg">{resendMsg}</span>
         )}
         <button
+          className="brief-dice-btn"
+          onClick={handleRollDice}
+          disabled={diceBusy || running}
+          title="One wheel entry from the latest brief: critic pass (no flag, no caution), share price within the limit, liquid, and no earnings before expiry. Returns nothing when nothing clears."
+        >
+          {diceBusy ? 'Rolling…' : '🎲 Roll the Dice'}
+        </button>
+        <button
           className="brief-run-btn"
           onClick={handleRunNow}
           disabled={running}
@@ -1057,6 +1084,80 @@ export function DailyBriefView({ onGoToStrategyLab }: DailyBriefViewProps) {
           {running ? 'Running…' : 'Run Now'}
         </button>
       </div>
+
+      {/* Roll the Dice — a single actionable wheel entry, or an explicit nothing. */}
+      {dice && (
+        <div className={`dice-panel${dice.pick ? '' : ' dice-empty'}`}>
+          <div className="dice-head">
+            <span className="dice-title">🎲 Roll the Dice</span>
+            <span className="dice-sub">
+              wheel entry · {dice.considered} pick{dice.considered === 1 ? '' : 's'} considered
+              {dice.briefDate ? ` · brief ${dice.briefDate}` : ''}
+            </span>
+            <div style={{ flex: 1 }} />
+            <button className="dice-close" onClick={() => setDice(null)} title="Dismiss">×</button>
+          </div>
+
+          {dice.staleWarning && <div className="dice-stale">⚠ {dice.staleWarning}</div>}
+
+          {dice.pick ? (
+            <>
+              <div className="dice-headline">
+                Sell the <b>{dice.pick.ticker}</b> ${dice.pick.strike} put,{' '}
+                {dice.pick.expiration} ({dice.pick.dte}d)
+              </div>
+              <div className="dice-stats">
+                <div className="dice-stat">
+                  <span className="dice-k">Credit</span>
+                  <span className="dice-v">${dice.pick.creditTotal.toFixed(0)}</span>
+                  <span className="dice-n">${dice.pick.premiumPerShare.toFixed(2)}/sh</span>
+                </div>
+                <div className="dice-stat">
+                  <span className="dice-k">Capital</span>
+                  <span className="dice-v">${dice.pick.capitalRequired.toLocaleString()}</span>
+                  <span className="dice-n">cash-secured</span>
+                </div>
+                <div className="dice-stat">
+                  <span className="dice-k">Cost basis if assigned</span>
+                  <span className="dice-v">${dice.pick.effectiveCostBasis.toFixed(2)}</span>
+                  <span className="dice-n">{dice.pick.discountToSpotPct.toFixed(1)}% below ${dice.pick.price.toFixed(2)}</span>
+                </div>
+                <div className="dice-stat">
+                  <span className="dice-k">Annualized</span>
+                  <span className="dice-v">{dice.pick.annualizedReturn?.toFixed(0) ?? '—'}%</span>
+                  <span className="dice-n">PoP {dice.pick.popEstimate?.toFixed(0) ?? '—'}%</span>
+                </div>
+                <div className="dice-stat">
+                  <span className="dice-k">Quality</span>
+                  <span className="dice-v">{dice.pick.grade}</span>
+                  <span className="dice-n">score {dice.pick.compositeScore.toFixed(1)} · liq {dice.pick.liquidityScore.toFixed(0)}/15</span>
+                </div>
+              </div>
+              {dice.pick.criticRationale && (
+                <div className="dice-rationale"><b>Critic:</b> {dice.pick.criticRationale}</div>
+              )}
+              {dice.runnerUp && (
+                <div className="dice-runner">
+                  Runner-up: {dice.runnerUp.ticker} ({dice.runnerUp.compositeScore.toFixed(1)})
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="dice-none">{dice.noPickReason}</div>
+          )}
+
+          {dice.rejections.length > 0 && (
+            <details className="dice-rejects">
+              <summary>{dice.rejections.length} rejected — why</summary>
+              <ul>
+                {dice.rejections.map((r, i) => (
+                  <li key={i}><b>{r.ticker}</b> — {r.reason}</li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </div>
+      )}
 
       {/* B-01: Prior-brief performance banner */}
       {perfSummary && perfSummary.strategies.length > 0 && (

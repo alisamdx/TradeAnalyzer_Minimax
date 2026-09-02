@@ -61,3 +61,43 @@ After the job, `email-service.ts` sends an HTML email (trade-ready tables: ticke
 
 - Pattern recommendations: when a gap cause recurs ≥3× for a strategy, a recommendation is written (§15) and surfaced.
 - Signal-weight suggestions come from paper-trade outcome correlations (§13.5).
+
+## Roll the Dice (v1.1.162)
+
+A button on the Daily Brief that reduces the brief to **one** wheel entry the operator can act on
+without reading it — or to an explicit nothing. Pure filter over the stored brief: no scoring
+change, no provider call, nothing written.
+
+**FR-BRIEF-DICE-1** — Returns at most one pick, the highest `compositeScore` among those passing
+every gate in `docs/formulas.md#roll-the-dice`.
+
+**FR-BRIEF-DICE-2** — MUST be able to return nothing. A feature that always produces a pick would
+have to lower its bar on a bad day, which is when the bar matters. "No dice today" is a
+first-class result carrying the count considered and the most common rejection reason.
+
+**FR-BRIEF-DICE-3** — Every rejection is reported with its ticker and reason, so the bar is
+visible rather than claimed.
+
+**FR-BRIEF-DICE-4** — A `degraded` critic verdict is rejected. `verdict: 'pass'` with
+`degraded: true` means the LLM critic never ran and the verdict is the rule-based fallback; the
+v2 entry gate already treats this fail-closed and so does this. Without it, an Anthropic outage
+would widen the funnel on exactly the day nothing adversarial reviewed the pick.
+
+**FR-BRIEF-DICE-5** — Earnings are a hard exclusion, and both an *absent* and a *past* stored
+date fail closed. See the formula note.
+
+**FR-BRIEF-DICE-6** — A brief older than one day is surfaced with a staleness warning; the pick
+is shown, not suppressed (a Saturday review of Friday's brief is legitimate).
+
+### Validation
+
+Retrospective over 62 stored wheel briefs (2026-06-04 … 2026-09-01), 248 picks:
+a pick on **23 of 62 days (37%)**. Rejections: critic verdict 172, price ceiling 27,
+liquidity 24, 25 passed.
+
+**The earnings gate cannot be validated retrospectively.** `earnings_calendar` holds one row per
+ticker with no history, so a replay sees today's next-report date, not the one that was live on
+the brief date. The replay accordingly shows zero earnings rejections *and still selects NVDA on
+2026-08-26 — its actual earnings day*. That is the failure this feature exists to prevent, and
+it is invisible to the only test available. The gate is correct by construction on live data;
+the replay simply cannot see it.

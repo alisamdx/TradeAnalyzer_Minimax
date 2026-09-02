@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.162] — 2026-09-02
+
+### feat — 🎲 Roll the Dice: one wheel entry from the brief, or an explicit nothing
+- A Daily Brief button that reduces the whole brief to a single cash-secured put the operator can place without reading anything else. Hard gates, not weights — the brief has already scored and ranked; this layer only removes: critic verdict **pass**, critic **not degraded**, price **≤ $300** (configurable), a constructible `short-naked-put`, liquidity **≥ 8/15**, **no earnings before expiry**, positive net credit. Winner is the highest `compositeScore` among survivors.
+- **It must be able to return nothing.** A "close your eyes and do it" feature that always produces a pick would have to lower its bar on a bad day — which is exactly when the bar matters. *"No dice today"* is a first-class result carrying the count considered and the most common rejection, and every rejection is listed with ticker and gate so the bar is visible rather than claimed.
+- The card shows strike, expiry, credit, capital required, **cost basis if assigned** and its discount to spot, annualized return, PoP, grade, liquidity, the critic's note, and the runner-up. Styled from theme variables — the v1.1.157 → v1.1.158 lesson, no second palette maintained by hand.
+- **Two gates exist because of bugs found earlier in this same session.** Earnings is an *exclusion*, not the brief's −20 penalty: a penalty on a high scorer still leaves it on top, which is how the brief ranked NVDA wheel #1 days before it reported. And an **unknown or PAST** stored earnings date fails closed — `earnings_calendar` is keyed by ticker with no history, so a past `report_date` means the row was never refreshed and the *next* date is unknown (**57 of 1,069 rows** were stale this way). My first implementation read a past date as "clear", repeating the session's opening mistake: *"there is a date stored" is not "the stored date is right."*
+- **Validated retrospectively over 62 stored wheel briefs** (2026-06-04 … 09-01, 248 picks): a pick on **23 of 62 days (37%)**; rejections were critic verdict 172, price 27, liquidity 24, with 25 passing. **The earnings gate cannot be validated this way, and the replay shows exactly why it is needed** — with no calendar history the replay sees today's next-report date, records zero earnings rejections, and still selects **NVDA on 2026-08-26, its actual earnings day**. The gate is correct by construction on live data; the replay cannot see it.
+- Pure filter over the stored brief: no scoring change, no provider call, nothing written — so FR-SEY-5 does not gate it, though the hit rate is recorded since the gate set is a selection policy. 14 unit tests, each proving a gate **rejects**. Suite: 1058 passed. Docs: `docs/formulas.md#roll-the-dice`, spec §14 (FR-BRIEF-DICE-1..6), `USER_GUIDE.md` §4.1a + PDF.
+
 ## [1.1.161] — 2026-09-02
 
 ### FR-SEY-5: Big Lizard vs Short Put Vertical, settled — and a harness bug that inverted its sign

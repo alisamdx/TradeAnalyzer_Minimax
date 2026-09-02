@@ -839,3 +839,43 @@ confirms a real repricing rather than an unadjusted reverse split.
 **The action is truncation** — bars before the splice are deleted from `historical_prices`
 and `iv_history`, so every consumer sees only the current entity without any consumer-side
 change. `iv_history` is included because IV rank reads a 252-day window.
+
+## roll-the-dice (selection filter) {#roll-the-dice}
+
+One wheel entry from the latest brief, or nothing. Not a score — a chain of HARD gates over
+picks the brief has already scored and ranked. This layer only removes.
+
+```
+eligible(pick) =
+      criticVerdict.verdict == 'pass'          # caution and flag both fail
+  AND criticVerdict.degraded != true           # un-vetted is not an all-clear
+  AND price != null AND price <= maxPrice      # default $300
+  AND exists CSP (slug 'short-naked-put', setup constructible)
+  AND liquidityScore >= MIN_TRADABLE_LIQUIDITY_SCORE   # = 8
+  AND earnings_calendar HAS the ticker         # absent = unknown = fail closed
+  AND earningsDate >= today                    # a PAST stored date is stale, not "clear"
+  AND earningsDate  > expiration               # no report inside the hold window
+  AND netCredit > 0
+
+winner = argmax(compositeScore) over eligible, else NOTHING
+```
+
+Derived on the winner:
+
+```
+capitalRequired     = strike × 100 × qty                  # cash-secured
+effectiveCostBasis  = strike − premiumPerShare
+discountToSpotPct   = (price − effectiveCostBasis) / price × 100
+```
+
+**Why the earnings gate is an exclusion, not the brief's −20 penalty.** A penalty on a high
+scorer still leaves it on top; the session that produced this feature opened with the brief
+ranking NVDA wheel #1 on the day it reported. For a pick meant to be acted on unread, an
+earnings event inside the hold window disqualifies outright.
+
+**Why an unknown or past earnings date fails closed.** `earnings_calendar` is keyed by ticker
+with one row each and no history, so a `report_date` in the past means the row was never
+refreshed after that report — the NEXT date is unknown. Measured 2026-09-02: 57 of 1,069 rows
+were stale this way. "There is a date stored" is not "the stored date is right."
+
+see `src/main/services/roll-the-dice.ts`
