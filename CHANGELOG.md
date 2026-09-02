@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.147] — 2026-09-01
+
+### fix — the transactions endpoint is slow per call; v1.1.146's premise was wrong
+- **v1.1.146 assumed the 120 s stall came from the 8-month query span and sliced the range to fix it. The next run disproved that**: a **31-day** slice aborted at 30,003 ms. Narrowing the range does not speed this endpoint up — and v1.1.146's own 30 s timeout then *guaranteed* failure on an endpoint already observed taking 120 s, making the symptom deterministic.
+- **What is actually true**: the endpoint is slow per call regardless of range (120,250 ms YTD, >30 s for 31 days), while every other E*Trade call in the same sessions finished in ~300 ms — which is what the default timeout was tuned to.
+- **`ETRADE_SLOW_TIMEOUT_MS` (180 s), applied per call.** `etradeGet` takes an optional `timeoutMs`; the transactions call passes the slow budget, everything else keeps the 30 s default.
+- **Single re-sign retry on `oauth_problem=nonce_used`.** The nonce is baked into the Authorization header at signing time, so a transport retransmission replays it and E*Trade rejects the duplicate; the app sends each request once (verified in the API log), so re-signing is the only recovery. Exactly one retry so a genuinely repeated nonce cannot loop, and scoped to `nonce_used` only — a `token_rejected` 401 is a dead token that re-signing would not fix.
+- **Slicing kept, rationale corrected in the code**: it bounds each response and its pagination so one oversized window cannot swallow the import and a failure localises to a month — it is not the stall fix.
+- Regression: `etrade-api-logging.test.ts` +4 (11) — one retry with a *different* Authorization header, no loop on repeated nonce_used, no retry on token_rejected, per-call timeout reaches `AbortSignal.timeout`; `etrade-transactions-slicing.test.ts` +1 (4) — transactions gets the slow budget. Suite: 1002 passed.
+
 ## [1.1.145] — 2026-09-01
 
 ### fix — E*Trade log masked `/v1/accounts/list` as if it were an account key

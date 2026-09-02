@@ -67,6 +67,16 @@ function pct(s: string): string {
  */
 const ETRADE_TIMEOUT_MS = 30_000;
 
+/**
+ * The transactions endpoint is genuinely slow and needs its own budget.
+ *
+ * Measured 2026-09-02: a YTD query took **120,250 ms** before responding, and a 31-day slice
+ * still exceeded 30 s. Narrowing the range does NOT speed it up — that hypothesis was tested
+ * and falsified — so the endpoint is simply slow per call, and a timeout tuned to the ~300 ms
+ * norm of every other E*Trade call guarantees failure here.
+ */
+export const ETRADE_SLOW_TIMEOUT_MS = 180_000;
+
 function nonce(): string {
   return Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
 }
@@ -242,8 +252,10 @@ function safeLog(entry: ApiLogEntry): void {
 export async function etradeGet(
   path: string,
   queryParams: Record<string, string>,
-  creds: OAuthCredentials
+  creds: OAuthCredentials,
+  opts: { timeoutMs?: number; _isNonceRetry?: boolean } = {}
 ): Promise<Record<string, unknown>> {
+  const timeoutMs = opts.timeoutMs ?? ETRADE_TIMEOUT_MS;
   const qs = new URLSearchParams(queryParams).toString();
   const fullUrl = `${BASE_URL}${path}${qs ? `?${qs}` : ''}`;
 
@@ -279,7 +291,7 @@ export async function etradeGet(
       // A retransmission would replay this exact signed header (same nonce) and earn a
       // nonce_used 401, so abort rather than let a stalled socket linger. A retry has to
       // re-enter etradeGet, which re-signs with a fresh nonce.
-      signal: AbortSignal.timeout(ETRADE_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (err) {
     // Network-level fault. A dormant E*Trade token can terminate the stream rather than
@@ -298,6 +310,24 @@ export async function etradeGet(
   const latencyMs = Date.now() - startedAt;
 
   if (!res.ok) {
+    // `oauth_problem=nonce_used` means E*Trade saw this exact nonce already — the signed
+    // request reached it twice. The app sends each call once (verified in the API log), so
+    // the duplicate is a transport-level retransmission of the already-signed header, which
+    // is most likely on a slow request. Retrying re-enters this function and re-signs with a
+    // fresh nonce and timestamp; guarded to a single attempt so a genuinely repeated nonce
+    // cannot loop.
+    if (res.status === 401 && /nonce_used/i.test(body) && !opts._isNonceRetry) {
+      safeLog({
+        ...logBase,
+        responseStatus: res.status,
+        responseLatencyMs: latencyMs,
+        responseSizeBytes: body.length,
+        errorMessage: 'HTTP 401 nonce_used — retrying once with a fresh signature',
+        responseBodyPreview: body.slice(0, 300),
+      });
+      return etradeGet(path, queryParams, creds, { ...opts, _isNonceRetry: true });
+    }
+
     // Body preview ONLY on failure — E*Trade's error envelope is exactly what diagnosis
     // needs, and success bodies (positions, balances, quotes) are never written to disk.
     safeLog({

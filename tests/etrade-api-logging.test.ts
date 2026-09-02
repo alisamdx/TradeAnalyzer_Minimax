@@ -116,3 +116,64 @@ describe('etradeGet — API logging', () => {
     await expect(etradeGet('/v1/market/quote/SPY', {}, creds)).resolves.toEqual({ ok: 1 });
   });
 });
+
+// ── nonce_used retry (v1.1.147) ─────────────────────────────────────────────
+//
+// Measured 2026-09-02: a transactions request took 120,250 ms and came back
+// `oauth_problem=nonce_used` on a SINGLE app-level call. The app sends each request once
+// (verified in the API log), so the duplicate nonce is a transport-level retransmission of
+// the already-signed header — most likely on a slow request. Re-signing is the only recovery,
+// since the nonce is baked into the Authorization header at build time.
+describe('etradeGet — nonce_used recovery', () => {
+  beforeEach(() => { logApiCall.mockReset(); logApiCall.mockImplementation(() => {}); });
+  afterEach(() => vi.restoreAllMocks());
+
+  it('retries once with a fresh signature when E*Trade reports nonce_used', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: false, status: 401,
+        text: async () => '<Error><message>oauth_problem=nonce_used</message></Error>',
+      })
+      .mockResolvedValueOnce({ ok: true, status: 200, text: async () => '{"ok":1}' });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(etradeGet('/v1/accounts/K/transactions', {}, creds)).resolves.toEqual({ ok: 1 });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // The retry must carry a DIFFERENT Authorization header — same nonce would fail again.
+    const first  = fetchMock.mock.calls[0]![1].headers.Authorization;
+    const second = fetchMock.mock.calls[1]![1].headers.Authorization;
+    expect(second).not.toBe(first);
+  });
+
+  it('does not loop when the retry also reports nonce_used', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false, status: 401,
+      text: async () => '<Error><message>oauth_problem=nonce_used</message></Error>',
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(etradeGet('/v1/accounts/K/transactions', {}, creds)).rejects.toThrow(/401/);
+    expect(fetchMock).toHaveBeenCalledTimes(2);   // one attempt + exactly one retry
+  });
+
+  it('does not retry a 401 that is not a nonce problem', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false, status: 401,
+      text: async () => '<Error><message>oauth_problem=token_rejected</message></Error>',
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(etradeGet('/v1/market/quote/SPY', {}, creds)).rejects.toThrow(/401/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);   // a dead token is not fixed by re-signing
+  });
+
+  it('honours a per-call timeout override for slow endpoints', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, text: async () => '{}' })));
+    const spy = vi.spyOn(AbortSignal, 'timeout');
+
+    await etradeGet('/v1/accounts/K/transactions', {}, creds, { timeoutMs: 180_000 });
+
+    expect(spy).toHaveBeenCalledWith(180_000);
+  });
+});

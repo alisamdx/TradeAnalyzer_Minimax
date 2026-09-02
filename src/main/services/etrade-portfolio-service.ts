@@ -22,7 +22,7 @@
  */
 
 import type { Database } from 'better-sqlite3';
-import { etradeGet, type OAuthCredentials } from './etrade-auth.js';
+import { etradeGet, ETRADE_SLOW_TIMEOUT_MS, type OAuthCredentials } from './etrade-auth.js';
 import type { EtradeAccount, EtradeSyncResult } from '@shared/types.js';
 import { toPositionSignedGreeks } from '@shared/position-greeks.js';
 
@@ -586,13 +586,15 @@ export class EtradePortfolioService {
 
     // Query in ~1-month slices rather than one YTD span.
     //
-    // A single 2026-01-01 -> 2026-09-02 request stalled for 120,250 ms and came back
-    // `oauth_problem=nonce_used` (2026-09-02): the socket hung long enough for undici to
-    // retransmit the already-signed request, so E*Trade saw the same oauth_nonce twice.
-    // Every other E*Trade call that session finished under 500 ms. Narrow windows keep each
-    // response small enough to return promptly, which removes the stall that triggers the
-    // replay. `etradeGet` also carries a hard timeout now, so a slice that does hang fails
-    // fast and legibly instead of silently replaying.
+    // NOTE ON WHY: the original rationale (v1.1.146) was that a narrow window would return
+    // promptly and so avoid the stall. **That was tested and is false** — a 31-day slice
+    // still exceeded 30 s (2026-09-02, `startDate=01012026&endDate=01312026` aborted at
+    // 30,003 ms). This endpoint is slow per call regardless of range, so it is given its own
+    // ETRADE_SLOW_TIMEOUT_MS budget instead.
+    //
+    // Slicing is kept for a different and still-valid reason: it bounds each response and
+    // its pagination, so one oversized window cannot swallow the whole import, and a failure
+    // localises to a month instead of the year. It is not the stall fix.
     const slices: Array<{ from: string; to: string }> = [];
     {
       const endMs = Date.parse(`${endDate}T00:00:00Z`);
@@ -621,7 +623,11 @@ export class EtradePortfolioService {
       const raw = await etradeGet(
         `/v1/accounts/${accountIdKey}/transactions`,
         params,
-        creds
+        creds,
+        // Measured 120,250 ms for a YTD query; 31 days still exceeded 30 s. The default
+        // budget is tuned to the ~300 ms every other E*Trade call takes and would guarantee
+        // failure here. see ETRADE_SLOW_TIMEOUT_MS.
+        { timeoutMs: ETRADE_SLOW_TIMEOUT_MS },
       ) as Record<string, unknown>;
 
       const resp = raw['TransactionListResponse'] as Record<string, unknown> | undefined;

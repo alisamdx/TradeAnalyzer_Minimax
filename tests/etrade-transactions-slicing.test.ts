@@ -21,7 +21,14 @@ import { runMigrations } from '../src/main/db/migrations.js';
 import { MIGRATIONS_DIR } from './helpers.js';
 
 const etradeGet = vi.hoisted(() => vi.fn());
-vi.mock('../src/main/services/etrade-auth.js', () => ({ etradeGet, buildAuthHeader: () => 'OAuth x' }));
+// The factory must export everything the service imports: a missing named export throws
+// inside fetchTransactionLegs, and syncClosedPositions' per-account try/catch swallows it,
+// so the test would see zero calls rather than an error.
+vi.mock('../src/main/services/etrade-auth.js', () => ({
+  etradeGet,
+  buildAuthHeader: () => 'OAuth x',
+  ETRADE_SLOW_TIMEOUT_MS: 180_000,
+}));
 
 const { EtradePortfolioService } = await import('../src/main/services/etrade-portfolio-service.js');
 
@@ -85,6 +92,17 @@ describe('closed-position import — transactions query slicing', () => {
       expect(thisStart - prevEnd).toBe(86_400_000);
     }
     expect(wins[wins.length - 1]!.to).toBe(new Date().toISOString().slice(0, 10));
+  });
+
+  it('gives the transactions endpoint its slow-timeout budget', async () => {
+    const svc = new EtradePortfolioService();
+    await svc.syncClosedPositions(db, creds);
+
+    // Measured 2026-09-02: a YTD query took 120,250 ms and a 31-day slice still exceeded 30 s.
+    // Narrowing the range does NOT speed this endpoint up, so it needs its own budget or the
+    // default (tuned to the ~300 ms every other E*Trade call takes) guarantees failure.
+    const tx = etradeGet.mock.calls.find(c => String(c[0]).includes('/transactions'));
+    expect(tx?.[3]).toMatchObject({ timeoutMs: 180_000 });
   });
 
   it('follows pagination when E*Trade returns the marker as a number, not a string', async () => {
