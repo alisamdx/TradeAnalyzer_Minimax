@@ -11,6 +11,10 @@ import { PositionAnalysisService } from '../services/position-analysis-service.j
 import { AiAdvisorService } from '../services/ai-advisor-service.js';
 import type { AnalysisService } from '../services/analysis-service.js';
 import type { OptionsProvider } from '../services/options-provider.js';
+import {
+  portfolioEfficiency, positionRoc,
+  type PositionLike, type PortfolioEfficiency, type PositionRoc,
+} from '../services/capital-efficiency.js';
 import { secureGet, secureSet } from '../services/secure-settings.js';
 import { toPositionSignedGreeks } from '@shared/position-greeks.js';
 import type { IpcResult, EtradeAccount, EtradeSyncResult, PositionAnalysis, PositionEtrade, AdvisorSession, AdvisorProgressEvent } from '@shared/types.js';
@@ -138,6 +142,56 @@ export function registerPortfolioIpc(db: Database, analysisService?: AnalysisSer
   // Fetches delta/theta/vega for open CSP/CC positions from the options chain
   // and persists them to the positions table so the portfolio Greeks bar reflects
   // manually entered positions (not just E*Trade-synced ones).
+
+  // Capital efficiency: return on the capital actually at risk, not on the whole account.
+  //
+  // Measuring a wheel against total portfolio value understates it whenever capital is held
+  // back on purpose \u2014 this book realised 3.73% of a ~$79k account but 11.56% of the ~$26k
+  // actually deployed. Both are returned so a sizing decision is never read as a strategy
+  // result. Pure derivation from `positions`: no sync, no provider call.
+  ipcMain.handle('portfolio:capitalEfficiency', async (
+    _e: IpcMainInvokeEvent,
+  ): Promise<IpcResult<{ portfolio: PortfolioEfficiency; positions: PositionRoc[]; portfolioValue: number | null }>> => {
+    try {
+      const rows = db.prepare('SELECT * FROM positions').all() as PositionLike[];
+      if (rows.length === 0) {
+        return ok({
+          portfolio: portfolioEfficiency([], [], null),
+          positions: [],
+          portfolioValue: null,
+        });
+      }
+
+      // Trading-day calendar from SPY, spanning the book's own life.
+      const first = rows.map(r => r.entry_date.slice(0, 10)).sort()[0]!;
+      const dates = (db.prepare(
+        `SELECT DISTINCT date FROM historical_prices
+          WHERE ticker = 'SPY' AND date >= ? ORDER BY date ASC`,
+      ).all(first) as Array<{ date: string }>).map(r => r.date);
+
+      // Account value is inferred from any synced row carrying both a market value and its
+      // share of the portfolio; the median guards against one stale row skewing it.
+      type PctRow = { market_value: number | null; pct_of_portfolio: number | null };
+      const implied = (db.prepare(
+        `SELECT market_value, pct_of_portfolio FROM positions
+          WHERE market_value IS NOT NULL AND pct_of_portfolio IS NOT NULL
+            AND pct_of_portfolio <> 0`,
+      ).all() as PctRow[])
+        .map(r => Math.abs((r.market_value as number) / ((r.pct_of_portfolio as number) / 100)))
+        .filter(v => Number.isFinite(v) && v > 0)
+        .sort((a, b) => a - b);
+      const portfolioValue = implied.length ? implied[Math.floor(implied.length / 2)]! : null;
+
+      return ok({
+        portfolio: portfolioEfficiency(rows, dates, portfolioValue),
+        positions: rows.map(positionRoc).filter((r): r is PositionRoc => r !== null)
+          .sort((a, b) => (b.realizedAnnualPct ?? 0) - (a.realizedAnnualPct ?? 0)),
+        portfolioValue,
+      });
+    } catch (err) {
+      return fail(err);
+    }
+  });
 
   ipcMain.handle('portfolio:fetchGreeks', async (_e: IpcMainInvokeEvent): Promise<IpcResult<{ updated: number; failed: number; errors: string[] }>> => {
     if (!optionsProvider) {

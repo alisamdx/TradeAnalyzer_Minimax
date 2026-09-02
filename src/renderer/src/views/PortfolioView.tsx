@@ -238,12 +238,48 @@ function TradeAlertsBanner({
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
+interface CapEff {
+  portfolio: {
+    tradingDays: number; idleDays: number; avgDeployed: number; peakDeployed: number;
+    utilizationPct: number | null; realizedPnl: number;
+    returnOnPortfolioPct: number | null; returnOnDeployedPct: number | null;
+    annualizedOnDeployedPct: number | null;
+  };
+  positions: Array<{
+    ticker: string; positionType: string; strike: number | null;
+    daysHeld: number; dteAtEntry: number | null; capital: number; realizedPnl: number;
+    projectedAnnualPct: number | null; realizedAnnualPct: number | null; clamped: boolean;
+  }>;
+  portfolioValue: number | null;
+}
+
+const fmt0 = (n: number): string => n.toLocaleString(undefined, { maximumFractionDigits: 0 });
+const fmt2 = (n: number): string => n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const pct  = (n: number | null): string => (n == null ? '—' : `${n.toFixed(2)}%`);
+
+function Stat({ label, value, sub, strong }: {
+  label: string; value: string; sub?: string; strong?: boolean;
+}) {
+  return (
+    <div style={{
+      border: '1px solid #e5e7eb', borderRadius: 6, padding: '8px 12px', minWidth: 170,
+      background: strong ? '#f0fdf4' : '#fff',
+    }}>
+      <div style={{ fontSize: 10, color: '#6b7280', textTransform: 'uppercase', letterSpacing: .3 }}>{label}</div>
+      <div style={{ fontSize: 20, fontWeight: 700, margin: '2px 0' }}>{value}</div>
+      {sub ? <div style={{ fontSize: 10, color: '#9ca3af' }}>{sub}</div> : null}
+    </div>
+  );
+}
+
 export function PortfolioView() {
   const [positions, setPositions]         = useState<Position[]>([]);
   const [etPositions, setEtPositions]     = useState<PositionEtrade[]>([]);
   const [analyses, setAnalyses]           = useState<Map<number, PositionAnalysis>>(new Map());
   const [summary, setSummary]             = useState<PnLSummary | null>(null);
-  const [activeTab, setActiveTab]         = useState<'open' | 'closed' | 'advisor'>('open');
+  const [activeTab, setActiveTab]         = useState<'open' | 'closed' | 'advisor' | 'performance'>('open');
+  const [capEff, setCapEff]               = useState<CapEff | null>(null);
+  const [capEffBusy, setCapEffBusy]       = useState(false);
   const [error, setError]                 = useState<string | null>(null);
   const [statusMsg, setStatusMsg]         = useState<string | null>(null);
   const [showAddForm, setShowAddForm]     = useState(false);
@@ -504,6 +540,18 @@ export function PortfolioView() {
     } catch (e) { setError(`Sync closed failed: ${(e as Error).message}`); }
     finally { setSyncClosedBusy(false); }
   };
+
+  // ─── Capital efficiency ───────────────────────────────────────────────────────
+  // Return on the capital actually at risk, not on the whole account. Measuring a wheel
+  // against total portfolio value understates it whenever capital is deliberately held back.
+  useEffect(() => {
+    if (activeTab !== 'performance' || capEff || capEffBusy) return;
+    setCapEffBusy(true);
+    window.api.portfolio.capitalEfficiency()
+      .then(r => setCapEff(r as unknown as CapEff))
+      .catch(() => { /* panel simply stays empty */ })
+      .finally(() => setCapEffBusy(false));
+  }, [activeTab, capEff, capEffBusy]);
 
   // ─── Fetch live Greeks ────────────────────────────────────────────────────────
 
@@ -817,6 +865,9 @@ export function PortfolioView() {
         <button className={`tab-btn ${activeTab === 'closed' ? 'active' : ''}`} onClick={() => setActiveTab('closed')}>
           Closed Positions ({summary?.closedPositions || 0})
         </button>
+        <button className={`tab-btn ${activeTab === 'performance' ? 'active' : ''}`} onClick={() => setActiveTab('performance')}>
+          📈 Performance
+        </button>
         <button className={`tab-btn ${activeTab === 'advisor' ? 'active' : ''}`} onClick={() => setActiveTab('advisor')}>
           🤖 AI Advisor
         </button>
@@ -825,7 +876,7 @@ export function PortfolioView() {
       {/* ══════════════════════════════════════════════════════════════════════
           POSITIONS TABLE (open / closed)
       ══════════════════════════════════════════════════════════════════════ */}
-      {activeTab !== 'advisor' && (
+      {activeTab !== 'advisor' && activeTab !== 'performance' && (
         <>
           {/* Analyze All button for open tab */}
           {activeTab === 'closed' && (
@@ -1167,6 +1218,80 @@ export function PortfolioView() {
       {/* ══════════════════════════════════════════════════════════════════════
           AI ADVISOR TAB
       ══════════════════════════════════════════════════════════════════════ */}
+      {activeTab === 'performance' && (
+        <div style={{ padding: 4 }}>
+          {capEffBusy && <div style={{ fontSize: 12, color: '#6b7280' }}>Computing…</div>}
+          {capEff && (
+            <>
+              <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 14 }}>
+                <Stat label="Return on deployed capital"
+                      value={pct(capEff.portfolio.returnOnDeployedPct)}
+                      sub={`on avg $${fmt0(capEff.portfolio.avgDeployed)} actually at risk`}
+                      strong />
+                <Stat label="Return on portfolio"
+                      value={pct(capEff.portfolio.returnOnPortfolioPct)}
+                      sub={capEff.portfolioValue ? `of ~$${fmt0(capEff.portfolioValue)} total` : 'portfolio value unknown'} />
+                <Stat label="Utilization"
+                      value={pct(capEff.portfolio.utilizationPct)}
+                      sub={`${capEff.portfolio.idleDays} of ${capEff.portfolio.tradingDays} days flat · peak $${fmt0(capEff.portfolio.peakDeployed)}`} />
+                <Stat label="Realized P&L"
+                      value={`$${fmt2(capEff.portfolio.realizedPnl)}`}
+                      sub={capEff.portfolio.annualizedOnDeployedPct != null
+                        ? `${pct(capEff.portfolio.annualizedOnDeployedPct)} annualized on deployed` : ''} />
+              </div>
+              <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 10, maxWidth: 760, lineHeight: 1.5 }}>
+                Idle days are included in the average, so holding cash lowers deployed capital and
+                raises return-per-dollar-deployed — while <b>return on portfolio</b> beside it shows what
+                sitting flat cost. A covered call adds no capital of its own (the shares already secure
+                it), and an assignment hands capital from the put to the stock rather than counting both.
+              </div>
+              <div style={{ fontSize: 12, fontWeight: 600, margin: '10px 0 6px' }}>
+                Per-trade: what the premium promised vs what the trade delivered
+              </div>
+              <div style={{ overflowX: 'auto' }}>
+                <table className="positions-table" style={{ fontSize: 11 }}>
+                  <thead><tr>
+                    <th>Ticker</th><th>Type</th><th style={{ textAlign: 'right' }}>Strike</th>
+                    <th style={{ textAlign: 'right' }}>Held</th><th style={{ textAlign: 'right' }}>DTE</th>
+                    <th style={{ textAlign: 'right' }}>Capital</th><th style={{ textAlign: 'right' }}>P&L</th>
+                    <th style={{ textAlign: 'right' }}>Proj %/yr</th><th style={{ textAlign: 'right' }}>Real %/yr</th>
+                  </tr></thead>
+                  <tbody>
+                    {capEff.positions.map((r, i) => (
+                      <tr key={i}>
+                        <td>{r.ticker}</td><td>{r.positionType}</td>
+                        <td style={{ textAlign: 'right' }}>{r.strike ?? '—'}</td>
+                        <td style={{ textAlign: 'right' }}>{r.daysHeld}d</td>
+                        <td style={{ textAlign: 'right' }}>{r.dteAtEntry ?? '—'}</td>
+                        <td style={{ textAlign: 'right' }}>${fmt0(r.capital)}</td>
+                        <td style={{ textAlign: 'right', color: r.realizedPnl >= 0 ? '#059669' : '#dc2626' }}>
+                          {r.realizedPnl >= 0 ? '+' : ''}{fmt2(r.realizedPnl)}
+                        </td>
+                        <td style={{ textAlign: 'right', color: '#6b7280' }}>
+                          {r.projectedAnnualPct == null ? '—' : `${r.projectedAnnualPct.toFixed(0)}%`}
+                        </td>
+                        <td style={{ textAlign: 'right', fontWeight: 600,
+                                     color: (r.realizedAnnualPct ?? 0) >= 0 ? '#059669' : '#dc2626' }}>
+                          {r.realizedAnnualPct == null ? '—' : `${r.realizedAnnualPct.toFixed(0)}%`}
+                          {r.clamped ? '*' : ''}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{ fontSize: 11, color: '#6b7280', marginTop: 8, maxWidth: 760, lineHeight: 1.5 }}>
+                <b>Proj %/yr</b> is the annualized return the premium implied if carried to expiry;
+                <b> Real %/yr</b> is what the actual holding period delivered. A close that beats its own
+                projection was efficient; one far below it gave up more time value than the move justified.
+                <span> Long options show no projection — they pay a debit rather than collecting premium.</span>
+                <span> * annualization clamped at ±{999}% on very short holds; dollar P&L is always exact.</span>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
       {activeTab === 'advisor' && (
         <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px 0' }}>
 

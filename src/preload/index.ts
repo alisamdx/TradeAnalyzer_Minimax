@@ -675,6 +675,11 @@ function buildApi() {
     }[]; error?: string }>('portfolio:listByTicker', ticker),
 
     fetchGreeks: () => invoke<{ updated: number; failed: number; errors: string[] }>('portfolio:fetchGreeks'),
+    capitalEfficiency: () => invoke<{
+      portfolio: Record<string, number | null>;
+      positions: Array<Record<string, string | number | boolean | null>>;
+      portfolioValue: number | null;
+    }>('portfolio:capitalEfficiency'),
 
     // ── Phase 1: E*Trade Sync ─────────────────────────────────────────────────
     etrade: {
