@@ -576,15 +576,29 @@ export class EtradePortfolioService {
         // explicitly (no "a sell must be an open" guessing, which is what the transactions
         // path had to do) and `averageExecutionPrice` is the realised fill — the whole point
         // of this import.
+        // ORDERS FIRST, transactions as the fallback.
+        //
+        // Reversed on 2026-09-02 after measuring both against the same account. Executed
+        // orders produced 25 correct closed positions with real fills. Transactions, on the
+        // run where every one of its 9 slices finally returned 200, produced **zero** usable
+        // positions: `classifyTransaction` has to infer intent from "sold means opened,
+        // bought means closed" and then pairs opens to closes BY INDEX, which yields nothing
+        // here. Orders needs no inference at all — `orderAction` states OPEN vs CLOSE and
+        // `averageExecutionPrice` is the realised fill.
+        //
+        // Transactions is kept as a fallback only because it is the documented alternative and
+        // may cover activity orders misses (dividends, fees, corporate actions).
         let legs: TxLeg[];
         try {
-          legs = await this.fetchTransactionLegs(acct.accountIdKey, start, end, creds);
-        } catch (txErr) {
-          const txMsg = txErr instanceof Error ? txErr.message : String(txErr);
-          result.errors.push(
-            `Transactions unavailable, falling back to executed orders: ${txMsg.slice(0, 160)}`,
-          );
           legs = await this.fetchOrderLegs(acct.accountIdKey, start, end, creds);
+          if (legs.length === 0) {
+            result.errors.push('Executed orders returned no legs; trying transactions.');
+            legs = await this.fetchTransactionLegs(acct.accountIdKey, start, end, creds);
+          }
+        } catch (ordErr) {
+          const msg = ordErr instanceof Error ? ordErr.message : String(ordErr);
+          result.errors.push(`Executed orders unavailable, falling back to transactions: ${msg.slice(0, 160)}`);
+          legs = await this.fetchTransactionLegs(acct.accountIdKey, start, end, creds);
         }
         const closed = this.matchClosedPositions(legs);
         for (const pos of closed) {

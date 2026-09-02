@@ -59,7 +59,7 @@ describe('closed-position import — executed-orders fallback', () => {
   });
   afterEach(() => { db.close(); vi.restoreAllMocks(); });
 
-  it('falls back to executed orders when transactions is unresponsive, with REAL fills', async () => {
+  it('uses executed orders as the PRIMARY source, with REAL fills', async () => {
     etradeGet.mockImplementation(async (path: string, params: Record<string, string>) => {
       if (path.includes('/accounts/list')) return ACCOUNTS;
       if (path.includes('/transactions')) throw new Error('The operation was aborted due to timeout');
@@ -133,7 +133,7 @@ describe('closed-position import — executed-orders fallback', () => {
     expect(orderCalls.some(c => (c[1] as Record<string, string>)['marker'] === '999')).toBe(true);
   });
 
-  it('surfaces why the fallback engaged rather than hiding it', async () => {
+  it('surfaces when it has to fall back to transactions rather than hiding it', async () => {
     etradeGet.mockImplementation(async (path: string) => {
       if (path.includes('/accounts/list')) return ACCOUNTS;
       if (path.includes('/transactions')) throw new Error('The operation was aborted due to timeout');
@@ -142,6 +142,6 @@ describe('closed-position import — executed-orders fallback', () => {
 
     const svc = new EtradePortfolioService();
     const res = await svc.syncClosedPositions(db, creds);
-    expect(res.errors.join(' ')).toMatch(/Transactions unavailable, falling back to executed orders/);
+    expect(res.errors.join(' ')).toMatch(/Executed orders returned no legs; trying transactions/);
   });
 });

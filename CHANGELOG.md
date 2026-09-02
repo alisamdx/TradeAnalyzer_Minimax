@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.152] — 2026-09-01
+
+### fix — executed ORDERS becomes the primary source; transactions returns 200 but yields nothing
+- **Transactions finally worked end to end** on 2026-09-02: with `.json` + `sortOrder=DESC`, all **9 slices returned 200** (one recovered via v1.1.147's nonce retry, latencies 306 ms–91 s). **And it produced zero usable closed positions.**
+- **The endpoint was never the only problem — the parser is.** `classifyTransaction` has to infer intent from *"sold means opened, bought means closed"* and then pairs opens to closes **by index**, which yields nothing on this account and would mislabel a long-option round trip or an assignment even when it does match. Orders needs no inference: `orderAction` states OPEN vs CLOSE outright and `averageExecutionPrice` is the realised fill.
+- **Measured head to head on the same account**: executed orders → **25 correct closed positions with real fills**; transactions (all slices 200) → **0**. So the order is reversed — orders is primary, transactions is the fallback, kept only because it is the documented alternative and may cover activity orders misses (dividends, fees, corporate actions).
+- This also explains why v1.1.151's supersede logic did not fire on its first run: transactions won the race, produced no positions, and `insertClosedPosition` was never called. With orders primary the 13 estimated rows are superseded on the next import.
+- Both fallback directions are reported rather than silent (`Executed orders returned no legs; trying transactions` / `Executed orders unavailable, falling back to transactions: …`).
+- Regression: `etrade-orders-fallback.test.ts` and `etrade-transactions-slicing.test.ts` updated for the reversed precedence. Suite: 1013 passed.
+
 ## [1.1.151] — 2026-09-01
 
 ### fix — `sortOrder` is required by the transactions endpoint, and real fills now supersede estimates

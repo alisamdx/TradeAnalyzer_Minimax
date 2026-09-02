@@ -47,6 +47,9 @@ describe('closed-position import — transactions query slicing', () => {
           { accountId: '123', accountIdKey: 'KEY1', accountName: 'X', accountType: 'INDIVIDUAL', institutionType: 'BROKERAGE' },
         ] } } };
       }
+      // Orders is primary since v1.1.152; empty here so these suites still exercise the
+      // transactions path they were written for.
+      if (path.includes('/orders')) return { OrdersResponse: {} };
       return { TransactionListResponse: {} };   // no transactions, no marker
     });
   });
@@ -119,8 +122,10 @@ describe('closed-position import — transactions query slicing', () => {
     const msg = res.errors.join(' ');
     // Since v1.1.150 a dead transactions endpoint is not fatal: it is reported, and the
     // import falls back to executed orders. Both facts must be visible to the operator.
+    // Orders is primary since v1.1.152, so the operator sees both facts: orders yielded
+    // nothing, and the transactions fallback then found no working request shape.
     expect(msg).toMatch(/did not respond to any request shape/);
-    expect(msg).toMatch(/falling back to executed orders/);
+    expect(msg).toMatch(/Executed orders (returned no legs|unavailable)/);
   });
 
   it('splits the year into narrow windows instead of one YTD span', async () => {
