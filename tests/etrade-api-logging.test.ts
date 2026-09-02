@@ -59,6 +59,16 @@ describe('etradeGet — API logging', () => {
     expect(JSON.stringify(e)).not.toContain('SECRET_ACCT_KEY_123');
   });
 
+  it('keeps /accounts/list readable — it is an endpoint, not an identifier', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, text: async () => '{}' })));
+
+    await etradeGet('/v1/accounts/list', {}, creds);
+
+    // Masking this made the account-list call indistinguishable from an account-scoped one,
+    // which is exactly the distinction needed to tell which sync path ran.
+    expect(logApiCall.mock.calls[0]![0].endpoint).toBe('/v1/accounts/list');
+  });
+
   it('records the provider error body on a failed call — the thing diagnosis needs', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({
       ok: false, status: 400,

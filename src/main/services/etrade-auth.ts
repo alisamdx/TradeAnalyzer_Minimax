@@ -207,7 +207,11 @@ export async function renewAccessToken(creds: OAuthCredentials): Promise<void> {
  * which is all diagnosis needs.
  */
 function maskEndpoint(path: string): string {
-  return path.replace(/\/accounts\/[^/]+/i, '/accounts/{acct}');
+  // `list` is a literal endpoint (`/v1/accounts/list`), not an identifier. Masking it made
+  // the account-list call indistinguishable from an account-scoped one in the log, which is
+  // precisely the distinction needed to tell which sync path ran.
+  return path.replace(/\/accounts\/([^/]+)/i, (m, seg: string) =>
+    seg.toLowerCase() === 'list' ? m : '/accounts/{acct}');
 }
 
 /**

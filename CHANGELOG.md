@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.145] — 2026-09-01
+
+### fix — E*Trade log masked `/v1/accounts/list` as if it were an account key
+- v1.1.144's `maskEndpoint` replaced any segment after `/accounts/` with `{acct}`, so the account-LIST call logged identically to an account-scoped one. **`list` is a literal endpoint, not an identifier**, and that distinction is exactly what tells you which sync path ran — the first real use of the new logging needed it and had to infer it from call pairing instead.
+- Now preserved verbatim; every genuine account key is still masked. Regression: `tests/etrade-api-logging.test.ts` +1 (7 total). Suite: 994 passed.
+- **First diagnosis from the new logging (v1.1.144)**: 28 E*Trade entries captured, all 200 — and **no `/transactions` call in any log file, ever**. The closed-position import had never been triggered: the control is `↓ Import Closed (YTD)` and renders **only on the Portfolio view's Closed tab**. There is no button named "Sync Closed Positions" — that phrase is the `exit_notes` text the sync writes. The observed calls (`/v1/accounts/list` + `/v1/accounts/{acct}/portfolio`) are the regular position sync.
+
 ## [1.1.144] — 2026-09-01
 
 ### feat — log E*Trade API calls; the provider was completely dark
