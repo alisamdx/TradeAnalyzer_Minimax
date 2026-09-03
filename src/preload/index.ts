@@ -721,14 +721,16 @@ function buildApi() {
 
   const etrade = {
     /**
-     * Startup freshness check — date-based, no API call.
-     * 'ok'             — token issued today (ET), still valid
-     * 'expired'        — token crossed a midnight ET boundary, re-auth required
+     * Startup connection check. Free when the token was already verified today; otherwise
+     * it costs one live probe rather than guessing from the calendar.
+     * 'ok'             — token verified working (or already verified today)
+     * 'expired'        — E*Trade rejected the token after a renew-and-retry, re-auth required
+     * 'unknown'        — could not reach E*Trade; token state unverified, do not block on it
      * 'no_token'       — credentials saved but never authenticated
      * 'no_credentials' — no consumer key/secret saved
      */
     checkConnection: () => invoke<{
-      status: 'ok' | 'no_credentials' | 'no_token' | 'expired';
+      status: 'ok' | 'no_credentials' | 'no_token' | 'expired' | 'unknown';
     }>('etrade:check-connection'),
     /**
      * LIVE connection test — actually calls E*Trade and renews-and-retries if the token is

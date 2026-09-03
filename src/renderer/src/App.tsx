@@ -123,10 +123,13 @@ export function App() {
 
         const result = await window.api.etrade.checkConnection();
         if (result.status === 'ok') return; // all good, normal startup
+        // Couldn't reach E*Trade — that says nothing about the token, so don't drag the user
+        // to Settings over a network blip. Anything genuinely broken will surface in use.
+        if (result.status === 'unknown') return;
 
         let warning: string;
         if (result.status === 'expired') {
-          warning = 'E*Trade token expired (tokens reset at midnight ET). Please reconnect.';
+          warning = 'E*Trade rejected the saved token (tokens reset at midnight ET). Please reconnect.';
         } else if (result.status === 'no_token') {
           warning = 'E*Trade is selected as the options provider but you have not connected yet. Click "Connect" below to authenticate.';
         } else {

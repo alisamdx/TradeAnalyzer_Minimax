@@ -66,7 +66,9 @@ function ETradeConnectPanel({ warning, onConnected }: ETradeConnectPanelProps) {
         setConsumerKey(res.consumerKey ?? '');
         setConsumerSecret(res.consumerSecret ?? '');
         const check = await window.api.etrade.checkConnection();
-        setConnStatus(check.status);
+        // 'unknown' = E*Trade was unreachable. Show it as a connection error rather than a
+        // blank status, so the reconnect controls (gated on ok/expired/error) stay reachable.
+        setConnStatus(check.status === 'unknown' ? 'error' : check.status);
         // A today-stamped token is date-valid but may still be dormant/rejected — verify it's
         // actually live with a real probe (renews-and-retries transparently). "Connected" should
         // mean the token works, not just that it was issued today.

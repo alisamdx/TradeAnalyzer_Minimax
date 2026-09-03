@@ -8,8 +8,9 @@
  *   etradeAccessSecret   — live access token secret
  *   etradeRequestToken   — temp during OAuth flow
  *   etradeRequestSecret  — temp during OAuth flow
- *   etradeTokenDate      — YYYY-MM-DD (ET) when the access token was issued;
- *                          used for startup freshness check without an API call
+ *   etradeTokenDate      — YYYY-MM-DD (ET) the token was last KNOWN GOOD (issued, or
+ *                          verified by a live probe). A stale value means "unverified
+ *                          today", NOT "expired" — only E*Trade can say that.
  */
 
 import { ipcMain, shell, type IpcMainInvokeEvent } from 'electron';
@@ -39,9 +40,11 @@ function fail(err: unknown): { ok: false; error: { code: string; message: string
 
 /**
  * Returns today's date in Eastern Time as YYYY-MM-DD.
- * E*Trade access tokens expire at midnight ET every day, so comparing the
- * stored issue date with today's ET date is sufficient to detect expiry
- * without making an extra API round-trip on startup.
+ *
+ * E*Trade documents that access tokens expire at midnight ET, and this stamp is how we
+ * skip a redundant probe once the token is known good for the day. It is NOT sufficient
+ * to detect expiry: tokens have been observed serving traffic long past midnight ET
+ * (2026-09-02), so a stale stamp only means "not verified yet today".
  */
 function todayET(): string {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
@@ -73,9 +76,9 @@ export type ETradeProbeStatus =
   | 'error';         // non-auth failure (network / E*Trade down) — transient
 
 /**
- * LIVE connection probe — unlike the date-based `check-connection`, this actually calls
- * E*Trade (a lightweight SPY quote) so the result reflects whether the token *works right
- * now*. On failure it renews once and retries (renewal works as of v1.1.99), so a dormant
+ * LIVE connection probe — actually calls E*Trade (a lightweight SPY quote) so the result
+ * reflects whether the token *works right now* rather than what the calendar implies.
+ * A successful probe re-stamps `etradeTokenDate`, so the next startup is free. On failure it renews once and retries (renewal works as of v1.1.99), so a dormant
  * token is transparently revived → 'renewed'. Used by both the Settings "Test Connection"
  * button and the keep-alive heartbeat.
  *
@@ -87,20 +90,27 @@ export async function probeETradeConnection(db: Database): Promise<{ status: ETr
   if (!creds.consumerKey || !creds.consumerSecret) return { status: 'no_credentials' };
   if (!creds.accessToken  || !creds.accessSecret)  return { status: 'no_token' };
 
-  // Crossed midnight ET → genuine expiry; renew cannot revive it, so don't waste a call.
-  const tokenDate = secureGet(db, 'etradeTokenDate');
-  if (tokenDate && tokenDate !== todayET()) return { status: 'expired' };
-
   const { etradeGet } = await import('../services/etrade-auth.js');
   const probe = () => etradeGet('/v1/market/quote/SPY', {}, getCredentials(db));
 
+  // A stale date stamp used to short-circuit to 'expired' here on the theory that a token
+  // past midnight ET is certainly dead and probing it would waste a call. That premise is
+  // false: measured 2026-09-02, a token stamped 2026-09-01 served 13,098 successful calls
+  // straight through the midnight boundary — including at 00:40 ET — while every check said
+  // 'expired'. Only E*Trade can declare a token dead, so we always ask.
+  const markAlive = (): void => {
+    if (secureGet(db, 'etradeTokenDate') !== todayET()) secureSet(db, 'etradeTokenDate', todayET());
+  };
+
   try {
     await probe();
+    markAlive();
     return { status: 'ok' };
   } catch {
     try { await renewAccessToken(getCredentials(db)); } catch { /* harmless on an active token */ }
     try {
       await probe();
+      markAlive();
       return { status: 'renewed' };
     } catch (retryErr) {
       const msg = (retryErr instanceof Error ? retryErr.message : String(retryErr)).toLowerCase();
@@ -111,6 +121,43 @@ export async function probeETradeConnection(db: Database): Promise<{ status: ETr
         detail: retryErr instanceof Error ? retryErr.message : String(retryErr),
       };
     }
+  }
+}
+
+export type ETradeCheckStatus =
+  | 'ok'             // token verified working today (or already verified today)
+  | 'no_credentials'
+  | 'no_token'
+  | 'expired'        // E*Trade actually rejected it after a renew-and-retry → manual re-auth
+  | 'unknown';       // transient network / E*Trade failure — say nothing, never block startup
+
+/**
+ * Startup connection check.
+ *
+ * Fast path unchanged: if the token was already verified good today, return 'ok' with no
+ * API call. Otherwise ASK E*Trade (one SPY quote, renew-and-retry inside
+ * `probeETradeConnection`) instead of inferring death from the calendar.
+ *
+ * This used to return 'expired' on the date stamp alone, which sent the user to an
+ * interactive re-auth for a token that was working perfectly — see the comment in
+ * `probeETradeConnection`. A transient failure maps to 'unknown', never 'expired': being
+ * unable to reach E*Trade is not evidence the token is bad.
+ */
+export async function checkETradeConnection(db: Database): Promise<{ status: ETradeCheckStatus }> {
+  const creds = getCredentials(db);
+  if (!creds.consumerKey || !creds.consumerSecret) return { status: 'no_credentials' };
+  if (!creds.accessToken  || !creds.accessSecret)  return { status: 'no_token' };
+
+  if (secureGet(db, 'etradeTokenDate') === todayET()) return { status: 'ok' };
+
+  const probe = await probeETradeConnection(db);
+  switch (probe.status) {
+    case 'ok':
+    case 'renewed':        return { status: 'ok' };   // works now; the probe re-stamped the date
+    case 'expired':        return { status: 'expired' };
+    case 'no_token':       return { status: 'no_token' };
+    case 'no_credentials': return { status: 'no_credentials' };
+    default:               return { status: 'unknown' };
   }
 }
 
@@ -210,54 +257,15 @@ export function registerETradeIpc(db: Database): void {
   });
 
   /**
-   * Lightweight startup connection check — no API call required.
+   * Startup connection check — see `checkETradeConnection` above.
    *
-   * E*Trade tokens expire at midnight Eastern Time on the day they are issued.
-   * We stamp the issue date (ET) into 'etradeTokenDate' when the verifier
-   * succeeds, then compare it with today's ET date here.  If they match the
-   * token is still valid; if they differ (or the stamp is missing) the token
-   * has crossed a midnight boundary and needs re-auth.
+   * Cheap when the token was already verified today (no API call). Otherwise it costs one
+   * SPY quote rather than sending the user to an interactive re-auth on a calendar guess.
    *
-   * We intentionally avoid calling renewAccessToken() on startup because:
-   *   - renewAccessToken is meant for DORMANT tokens (inactive > 2 h).
-   *   - Calling it on an ACTIVE token (just obtained) causes E*Trade to return
-   *     an error, which would produce a false-positive "expired" result.
-   *
-   * Returns { status: 'ok' | 'no_credentials' | 'no_token' | 'expired' }
+   * Returns { status: 'ok' | 'no_credentials' | 'no_token' | 'expired' | 'unknown' }
    */
-  ipcMain.handle('etrade:check-connection', (_e: IpcMainInvokeEvent) => {
-    try {
-      const consumerKey    = secureGet(db, 'etradeConsumerKey');
-      const consumerSecret = secureGet(db, 'etradeConsumerSecret');
-      const accessToken    = secureGet(db, 'etradeAccessToken');
-      const accessSecret   = secureGet(db, 'etradeAccessSecret');
-
-      if (!consumerKey || !consumerSecret) {
-        return ok({ status: 'no_credentials' as const });
-      }
-      if (!accessToken || !accessSecret) {
-        return ok({ status: 'no_token' as const });
-      }
-
-      // Compare the stored issue date with today's ET date.
-      const tokenDate = secureGet(db, 'etradeTokenDate');
-      const today     = todayET();
-
-      if (!tokenDate) {
-        // No date stamp — token pre-dates this check (existing session).
-        // Assume valid and stamp today so subsequent restarts work correctly.
-        secureSet(db, 'etradeTokenDate', today);
-        return ok({ status: 'ok' as const });
-      }
-
-      if (tokenDate !== today) {
-        // Token was issued on a different calendar day — it expired at midnight ET.
-        return ok({ status: 'expired' as const });
-      }
-
-      // Dates match — token is still valid for today.
-      return ok({ status: 'ok' as const });
-    } catch (err) { return fail(err); }
+  ipcMain.handle('etrade:check-connection', async (_e: IpcMainInvokeEvent) => {
+    try { return ok(await checkETradeConnection(db)); } catch (err) { return fail(err); }
   });
 
   /**
