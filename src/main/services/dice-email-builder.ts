@@ -16,6 +16,7 @@
 // No PDF attachment: one trade does not need one.
 
 import type { DicePick, DiceResult } from './roll-the-dice.js';
+import { ownAtStrikeNote } from './own-at-strike.js';
 
 const BG = '#f6f8fa';
 const CARD = '#ffffff';
@@ -69,6 +70,9 @@ export function diceEmailSubject(r: DiceResult): string {
  */
 function convictionNote(p: DicePick): string {
   const c = p.fit.conviction;
+  // The band is nearly always satisfied by construction (0 breaches in 39 eligible picks), so a
+  // bare "inside your never-above line" would read as an all-clear it did not earn. When it does
+  // pass, say so briefly and let `ownAtStrikeNote` carry the actual judgement.
   if (c === null) {
     return `Not on your conviction list — you have not pre-committed to owning ${p.ticker} at any `
          + `price, so "would I be happy owning it at $${p.strike}?" is a live question here.`;
@@ -192,7 +196,10 @@ export function buildDiceEmailHtml(r: DiceResult, dateStr: string): string {
       </td></tr>
 
       <tr><td style="padding:12px 18px 0;">
-        <div style="font-size:12px;color:${TEXT};line-height:1.6;">${esc(convictionNote(p))}</div>
+        <div style="font-size:12px;color:${TEXT};line-height:1.6;font-weight:600;">
+          ${esc(ownAtStrikeNote(p.ticker, p.fit.ownership))}
+        </div>
+        <div style="font-size:11px;color:${MUTED};line-height:1.6;margin-top:4px;">${esc(convictionNote(p))}</div>
       </td></tr>
 
       <tr><td style="padding:14px 18px 0;font-size:11px;color:${MUTED};line-height:1.6;">
@@ -216,7 +223,7 @@ export function buildDiceEmailHtml(r: DiceResult, dateStr: string): string {
              grade ${esc(r.withinBudget.grade)}
            </div>
            <div style="font-size:11px;color:${MUTED};line-height:1.6;margin-top:5px;">
-             ${esc(convictionNote(r.withinBudget))}
+             ${esc(ownAtStrikeNote(r.withinBudget.ticker, r.withinBudget.fit.ownership))}
            </div>
          </div></td></tr>`
     : '';

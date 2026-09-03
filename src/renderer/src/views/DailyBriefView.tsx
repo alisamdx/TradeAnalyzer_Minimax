@@ -870,6 +870,28 @@ type DicePick = NonNullable<DiceResult['pick']>;
  * implied by silence. Mirrors `convictionNote` in dice-email-builder.ts so the panel and the
  * email never disagree about what the bands say.
  */
+/**
+ * Where the cost basis sits against the stock's own 200-day average and 52-week range.
+ * Mirrors `ownAtStrikeNote` in src/main/services/own-at-strike.ts — the panel and the email must
+ * never disagree. This is the sentence that actually answers "would I own it here?"; the
+ * conviction line below it is nearly always satisfied by construction and is kept only as
+ * secondary context. see docs/formulas.md#own-at-strike
+ */
+function ownAtStrikeNote(ticker: string, r: DicePick['fit']['ownership']): string {
+  if (!r) return `Not enough price history for ${ticker} to judge the cost basis against its own range.`;
+  const basis = `$${r.costBasis.toFixed(2)}`;
+  const pct = Math.abs(r.basisVsSma200Pct).toFixed(1);
+  const n = Math.round(r.rangePctile);
+  const abs = Math.abs(n) % 100;
+  const suffix = abs >= 11 && abs <= 13 ? 'th' : (['th', 'st', 'nd', 'rd'][abs % 10] ?? 'th');
+  const where = `the ${n}${suffix} percentile of its 52-week range`;
+  if (r.atOrBelowSma200) {
+    return `If assigned you own ${ticker} at ${basis} — ${pct}% BELOW its 200-day average, at ${where}.`;
+  }
+  return `If assigned you own ${ticker} at ${basis} — ${pct}% ABOVE its 200-day average, at ${where}. `
+       + `That is an extended price, not a discount.`;
+}
+
 function convictionNote(p: DicePick): string {
   const c = p.fit.conviction;
   if (c === null) {
@@ -1188,6 +1210,9 @@ export function DailyBriefView({ onGoToStrategyLab }: DailyBriefViewProps) {
                   <span className="dice-n">score {dice.pick.compositeScore.toFixed(1)} · liq {dice.pick.liquidityScore.toFixed(0)}/15</span>
                 </div>
               </div>
+              <div className={`dice-ownership${dice.pick.fit.ownership?.atOrBelowSma200 === false ? ' dice-ownership-warn' : ''}`}>
+                {ownAtStrikeNote(dice.pick.ticker, dice.pick.fit.ownership)}
+              </div>
               <div className="dice-conviction">{convictionNote(dice.pick)}</div>
               {dice.pick.criticRationale && (
                 <div className="dice-rationale"><b>Critic:</b> {dice.pick.criticRationale}</div>
@@ -1205,7 +1230,9 @@ export function DailyBriefView({ onGoToStrategyLab }: DailyBriefViewProps) {
                     own it at ${dice.withinBudget.effectiveCostBasis.toFixed(2)} ·
                     score {dice.withinBudget.compositeScore.toFixed(1)} · grade {dice.withinBudget.grade}
                   </div>
-                  <div className="dice-alt-n">{convictionNote(dice.withinBudget)}</div>
+                  <div className="dice-alt-n">
+                    {ownAtStrikeNote(dice.withinBudget.ticker, dice.withinBudget.fit.ownership)}
+                  </div>
                 </div>
               )}
               {dice.runnerUp && (

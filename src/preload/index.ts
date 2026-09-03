@@ -1114,6 +1114,11 @@ type DicePickShape = {
     withinCapital: boolean;
     maxCapital: number;
     conviction: { priceHigh: number | null; strikeWithinBand: boolean | null } | null;
+    /** Cost basis vs the ticker's own SMA200 / 52-week range. Null when history is too short. */
+    ownership: {
+      costBasis: number; sma200: number; basisVsSma200Pct: number;
+      atOrBelowSma200: boolean; rangePctile: number; hi52: number; lo52: number;
+    } | null;
   };
 };
 

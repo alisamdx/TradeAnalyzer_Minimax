@@ -35,6 +35,7 @@
 
 import { MIN_TRADABLE_LIQUIDITY_SCORE } from '@shared/strategy-structures.js';
 import type { DbHandle } from '../db/connection.js';
+import { readOwnAtStrike, type OwnAtStrikeRead, type PriceWindow } from './own-at-strike.js';
 
 /** The wheel's opening leg. `covered-call` is the OTHER wheel slug but requires already owning
  *  the shares — it cannot be the one thing you do with cash, so this feature is CSP-only. */
@@ -113,8 +114,17 @@ export interface DiceFit {
   maxCapital: number;
   /** `null` = the ticker is not on the conviction list at all, so nothing was pre-committed about
    *  owning it. Otherwise the never-above band and whether the strike respects it;
-   *  `strikeWithinBand` is null when the ticker is listed but has no `price_high` set. */
+   *  `strikeWithinBand` is null when the ticker is listed but has no `price_high` set.
+   *
+   *  MEASURED LIMITATION (v1.1.169): this band is nearly always satisfied by construction — it is
+   *  anchored to spot when written (~1.13x) while a CSP strikes at ~0.93x, so it fired on 0 of 39
+   *  eligible picks. Read `ownership` for the question it was supposed to answer. */
   conviction: { priceHigh: number | null; strikeWithinBand: boolean | null } | null;
+  /** Where the effective cost basis sits against the ticker's OWN 200-day average and 52-week
+   *  range — the curation-free replacement for the conviction band's own-at-strike question.
+   *  `null` when the ticker lacks 200 sessions of history. Reported, never a filter.
+   *  see docs/formulas.md#own-at-strike */
+  ownership: OwnAtStrikeRead | null;
 }
 
 export interface DicePick {
@@ -198,6 +208,8 @@ function daysBetween(fromIso: string, toIso: string): number {
  *                  Absent means UNKNOWN, which fails closed; see the gate below.
  * @param conviction ticker -> the operator's own pre-committed price bands. Reported on the
  *                   pick, never used to exclude one (v1.1.168).
+ * @param priceWindows ticker -> point-in-time SMA200 / 52-week range, for the own-at-strike read
+ *                   that replaces the (measurably non-binding) conviction band. Also report-only.
  * @param todayEt   ISO date in ET
  * @param briefDate ISO date the brief was generated
  */
@@ -205,6 +217,7 @@ export function rollTheDice(
   picks: readonly DicePickInput[],
   earnings: ReadonlyMap<string, string>,
   conviction: ReadonlyMap<string, ConvictionBands>,
+  priceWindows: ReadonlyMap<string, PriceWindow>,
   todayEt: string,
   briefDate: string | null,
   maxCapital: number = DEFAULT_MAX_CAPITAL,
@@ -278,6 +291,8 @@ export function rollTheDice(
       withinCapital: capital <= maxCapital,
       maxCapital,
       conviction: assessConviction(shortPut.strike, conviction.get(p.ticker)),
+      // Cost basis, not strike: the premium is kept on assignment, so it is what you actually pay.
+      ownership: readOwnAtStrike(shortPut.strike - shortPut.mid, priceWindows.get(p.ticker)),
     };
 
     // 6. EARNINGS — a hard exclusion, not the brief's −20 penalty. A short put through an
@@ -403,6 +418,24 @@ export function computeRollTheDice(
     for (const r of rows) earnings.set(r.ticker, r.report_date);
   }
 
+  // Point-in-time price anchors for the own-at-strike read (v1.1.169). Computed per ticker from
+  // bars on or before TODAY -- this is the live path, so "point-in-time" and "latest" coincide;
+  // the replay in `scripts/own-at-strike-study.mjs` is what enforces the as-of discipline.
+  const priceWindows = new Map<string, PriceWindow>();
+  for (const t of new Set(picks.map(p => p.ticker))) {
+    const bars = db.prepare(
+      `SELECT close, high, low FROM historical_prices WHERE ticker = ? AND date <= ?
+        ORDER BY date DESC LIMIT 260`,
+    ).all(t, todayEt) as Array<{ close: number; high: number; low: number }>;
+    if (bars.length < 200) continue;                 // no long-run anchor -> reported as unknown
+    const sma200 = bars.slice(0, 200).reduce((a, b) => a + b.close, 0) / 200;
+    priceWindows.set(t, {
+      sma200,
+      hi52: Math.max(...bars.map(b => b.high)),
+      lo52: Math.min(...bars.map(b => b.low)),
+    });
+  }
+
   // The operator's own pre-committed bands. Reported on the pick as of v1.1.168, not a gate.
   const conviction = new Map<string, ConvictionBands>();
   for (const r of db.prepare(
@@ -412,7 +445,7 @@ export function computeRollTheDice(
   }
 
   return rollTheDice(
-    picks, earnings, conviction, todayEt,
+    picks, earnings, conviction, priceWindows, todayEt,
     brief ? brief.generated_at.slice(0, 10) : null,
     maxCapital,
   );

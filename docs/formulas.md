@@ -933,3 +933,65 @@ disagree about the day's pick. A no-pick day still sends — silence is indistin
 failed job.
 
 see `src/main/services/roll-the-dice.ts`, `src/main/services/dice-email-builder.ts`
+
+## own-at-strike (cost-basis read) {#own-at-strike}
+
+"Would I be happy owning this at the strike?" — answered from the stock's own price history
+instead of a hand-maintained list. Reported on `pick.fit.ownership`; **never a gate.**
+
+```
+costBasis         = strike − premiumPerShare        # what assignment actually costs
+basisVsSma200Pct  = (costBasis / sma200 − 1) × 100  # negative = below the long-run average
+atOrBelowSma200   = costBasis <= sma200
+rangePctile       = (costBasis − lo52) / (hi52 − lo52) × 100    # 0 = 52w low, 100 = 52w high
+```
+
+`sma200`, `hi52` and `lo52` come from `historical_prices` filtered to `date <= briefDate` — fully
+point-in-time, available for **100% of stored wheel picks**, and impossible to leave stale.
+`rangePctile` is deliberately **not clamped**: a basis outside the 52-week range is real
+information. A ticker with fewer than 200 sessions yields `null`, reported as "not enough
+history" — never as a pass, the same fail-closed reasoning the earnings gate uses.
+
+### Why the conviction band needed replacing
+
+The never-above band was supposed to answer this question and **arithmetically could not**. It is
+anchored to spot on the day it was written — across all 13 stored rows, `price_high / spot` at
+write time had median **1.126** — while an OTM cash-secured put strikes at median **0.930** of
+spot. So `strike / price_high ≈ 0.83` by construction, and the test cannot fire until spot has
+risen ~21% above where the band was last written. Measured over 62 briefs: **0 of 39** picks on a
+listed ticker breached the line, and the closest came within 10%. It was decorative *before*
+v1.1.168 demoted it — not a protection that demotion removed.
+
+### What the replacement is worth (`scripts/own-at-strike-study.mjs`)
+
+Outcome = the underlying's return **from the cost basis** at expiry + 30 days, **excess of SPY**
+over the identical window, for every pick rather than only the ~27% actually assigned.
+
+| | accept (`strike ≤ SMA200`) | reject | separation |
+|---|---|---|---|
+| raw return | +14.20% | +0.61% | 13.6 pts |
+| SPY, same windows | +3.95% | +3.89% | — (regime is not the explanation) |
+| excess of SPY | +10.24% | −3.29% | 13.5 pts |
+| **per independent episode** | **+12.10%** (n=12) | **−5.32%** (n=35) | **17.4 pts** |
+
+Episodes collapse repeated picks of the same ticker+expiry into one observation — NVDA appeared 7
+times and AVGO 6 times across 8 consecutive days, which is one move counted 13 times. Separation
+*grew* under de-duplication, survived leave-one-out (14.3 pts with the +46% INTU outlier removed)
+and survived dropping NVDA and AVGO entirely (19.1 pts, n=8). 11 of 12 accept episodes were
+positive.
+
+### Why it is an annotation and not a gate
+
+The accept arm is **12 episodes spanning three expiries in one ~4-week window**. Only picks whose
+expiry + 30d has already passed are measurable, which truncates the sample to June–early July
+2026. Several levers in this project looked exactly this good on a single regime and were
+rejected on wider data (the SPY-regime gate, the overbought guard, the expiry-selection lever;
+see `Requirements/v2-execution/06-seykota-risk-extensions.md`). Under FR-SEY-5 a rule this thinly
+evidenced does not ship on the live path, so it informs the operator and the operator decides.
+Re-run the study once ≥3 months of briefs have matured past expiry+30d.
+
+**Fundamentals are deliberately excluded.** `fundamentals_cache` holds one row per ticker with no
+history, so any P/E- or grade-based signal would be scored against *today's* values in a replay —
+the same trap that makes the earnings gate unreplayable. Only price anchors are honestly testable.
+
+see `src/main/services/own-at-strike.ts`, `scripts/own-at-strike-study.mjs`

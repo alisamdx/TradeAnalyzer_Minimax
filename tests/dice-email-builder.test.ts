@@ -14,7 +14,12 @@ const WITH_PICK: DiceResult = {
     annualizedReturn: 30.1, popEstimate: 74, liquidityScore: 11, grade: 'A',
     criticRationale: 'Defensive staple, IV rank elevated without an event driving it.',
     aiRationale: 'quality name',
-    fit: { withinCapital: true, maxCapital: 30_000, conviction: { priceHigh: 58, strikeWithinBand: true } },
+    fit: {
+      withinCapital: true, maxCapital: 30_000,
+      conviction: { priceHigh: 58, strikeWithinBand: true },
+      ownership: { costBasis: 49.05, sma200: 51.0, basisVsSma200Pct: -3.82,
+                   atOrBelowSma200: true, rangePctile: 41.2, hi52: 58.0, lo52: 42.0 },
+    },
   },
   withinBudget: null,
   noPickReason: null,
@@ -179,6 +184,34 @@ describe('buildDiceEmailHtml', () => {
               conviction: { priceHigh: null, strikeWithinBand: null } } },
     }, 'Tue, Sep 2');
     expect(noBand).toContain('band is set for MKC');   // quotes arrive HTML-escaped
+  });
+
+  // The own-at-strike read replaces a conviction check that fired on 0 of 39 picks, so it must
+  // LEAD and the band must not read as an all-clear beside it.
+  it('leads the ownership question with the cost-basis read, band as secondary context', () => {
+    const h = buildDiceEmailHtml(WITH_PICK, 'Tue, Sep 2');
+    expect(h).toContain('If assigned you own MKC at $49.05');
+    expect(h).toContain('3.8% BELOW its 200-day average');
+    expect(h).toContain('41st percentile');
+    expect(h.indexOf('If assigned you own MKC')).toBeLessThan(h.indexOf('conviction list'));
+  });
+
+  it('warns in words when the cost basis is above the long-run average', () => {
+    const h = buildDiceEmailHtml({
+      ...WITH_PICK,
+      pick: { ...WITH_PICK.pick!, fit: { ...WITH_PICK.pick!.fit,
+        ownership: { costBasis: 49.05, sma200: 44.0, basisVsSma200Pct: 11.48,
+                     atOrBelowSma200: false, rangePctile: 88.0, hi52: 52.0, lo52: 40.0 } } },
+    }, 'Tue, Sep 2');
+    expect(h).toContain('ABOVE its 200-day average');
+    expect(h).toContain('extended price, not a discount');
+  });
+
+  it('says so plainly when there is not enough history, rather than implying a pass', () => {
+    const h = buildDiceEmailHtml(
+      { ...WITH_PICK, pick: { ...WITH_PICK.pick!, fit: { ...WITH_PICK.pick!.fit, ownership: null } } },
+      'Tue, Sep 2');
+    expect(h).toContain('Not enough price history for MKC');
   });
 
   // Regression: the gate list must not restate size or conviction as bars the trade cleared.

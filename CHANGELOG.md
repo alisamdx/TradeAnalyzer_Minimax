@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.169] — 2026-09-03
+
+### feat — own-at-strike is answered from the stock's own history, not from a curated list
+
+- **v1.1.168 shipped with a recorded cost — "nothing now enforces own-at-strike" — and measuring the band to replace it showed that cost was overstated.** The conviction never-above line is anchored to spot on the day it was written: across all 13 stored rows `price_high / spot` at write time has median **1.126**, while an OTM cash-secured put strikes at median **0.930** of spot. So `strike / price_high ≈ 0.83` by construction and the test cannot fire until spot has risen ~21% above where the band was last written. Over 62 briefs, **0 of 39** picks on a listed ticker breached it; the closest was still 10% under. It was decorative *before* the demotion. (It also drifts: SPY's and VOO's lines now sit at the 195th percentile of their own 52-week range — above every price those funds have traded at.)
+- **`own-at-strike.ts` replaces it with a read of the stock's own history.** Where the effective cost basis (`strike − premium`, what assignment actually costs) sits against the ticker's point-in-time 200-day average and 52-week range. Available for **100% of stored wheel picks**, needs no curation, cannot go stale. Fewer than 200 sessions reads as "not enough history", never as a pass; the range percentile is deliberately unclamped because a basis outside the 52-week range is real information.
+- **It leads the ownership sentence in both the email and the panel**, with the conviction band demoted to secondary context so it cannot read as an all-clear it did not earn. A basis *above* the long-run average is warned in words and colour, not merely stated.
+- **Measured worth** (`scripts/own-at-strike-study.mjs`; outcome = return from the cost basis at expiry+30d, **excess of SPY** over the identical window, for every pick not just the ~27% assigned): raw +14.20% vs +0.61%; SPY was +3.95% vs +3.89% in the two arms, so regime is not the explanation; excess-of-SPY +10.24% vs −3.29%. **Per independent episode — collapsing NVDA×7 and AVGO×6 across 8 consecutive days into one observation each — +12.10% (n=12) vs −5.32% (n=35), a 17.4-point separation.** It grew under de-duplication, survived leave-one-out (14.3 pts without the +46% INTU outlier) and survived dropping NVDA and AVGO entirely (19.1 pts, n=8). 11 of 12 accept episodes positive.
+- **It annotates and does NOT gate, per FR-SEY-5.** The accept arm is 12 episodes across three expiries in a single ~4-week window — only picks whose expiry+30d has passed are measurable, truncating everything after early July 2026. This project has rejected several levers that looked exactly this good on one regime (SPY-regime gate, overbought guard, expiry selection). Re-run once ≥3 months of briefs have matured.
+- **Fundamentals deliberately excluded** despite `fundamentals_cache` carrying P/E, EPS, value/growth scores and grades: one row per ticker with no history means a replay scores against *today's* values — the same trap that makes the earnings gate unreplayable. Only price anchors are honestly testable.
+- 14 new tests (`tests/own-at-strike.test.ts`) plus dice/email regressions, weighted toward the two failures that made the old check useless: that it CAN come out negative, and that "don't know" never renders as a pass. Suite: 1144 passed.
+
 ## [1.1.168] — 2026-09-03
 
 ### feat — Roll the Dice picks on the trade's merit; your size and conviction list only annotate

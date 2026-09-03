@@ -161,6 +161,22 @@ in v1.1.168; it existed solely to let good trades escape the capital gate, and t
   wheel entry, check you can fund it". The conviction sentence is the only place that question is
   still asked, and a badge is not a band.
 
+**FR-BRIEF-DICE-10 (v1.1.169)** — Own-at-strike is answered from the stock's own price history,
+not from a curated list.
+
+- The result MUST carry `fit.ownership`: the effective cost basis (`strike − premium`) against the
+  ticker's point-in-time 200-day average and 52-week range. See `docs/formulas.md#own-at-strike`.
+- It MUST be reported, MUST NOT gate. The evidence is a 17.4-point per-episode separation that
+  survived regime-adjustment, episode de-duplication and leave-one-out — but rests on 12 accept
+  episodes inside a single ~4-week window, which under FR-SEY-5 is not enough to change which
+  trades are taken.
+- Missing history (< 200 sessions) MUST read as "not enough history", never as a pass.
+- The read MUST lead the ownership question in every surface, with the conviction band demoted to
+  secondary context: the band is satisfied by construction on essentially every pick (0 breaches
+  in 39 measured) and would otherwise read as an all-clear it did not earn.
+- Fundamentals MUST NOT be used for this. `fundamentals_cache` keeps one row per ticker with no
+  history, so any fundamental signal is unreplayable and cannot satisfy FR-SEY-5.
+
 #### Validation of the demotion (FR-SEY-5)
 
 `scripts/dice-fit-demotion-study.mjs` replays all 62 stored wheel briefs under both rule sets with

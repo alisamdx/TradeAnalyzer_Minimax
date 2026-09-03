@@ -7,6 +7,7 @@ import {
   rollTheDice, DEFAULT_MAX_CAPITAL,
   type DicePickInput, type ConvictionBands,
 } from '../src/main/services/roll-the-dice.js';
+import type { PriceWindow } from '../src/main/services/own-at-strike.js';
 
 const TODAY = '2026-09-02';
 const EXPIRY = '2026-09-25';
@@ -49,6 +50,14 @@ function clear(...tickers: string[]): Map<string, string> {
 /** No conviction list at all — since v1.1.168 that annotates the pick, it never blocks one. */
 const NO_CONV = new Map<string, ConvictionBands>();
 
+/** No price history — the own-at-strike read reports "not enough history", and still never
+ *  blocks. Most tests use this because the read is annotation-only; `hist()` covers the read. */
+const NO_HIST = new Map<string, PriceWindow>();
+
+function hist(ticker: string, w: PriceWindow): Map<string, PriceWindow> {
+  return new Map([[ticker, w]]);
+}
+
 function bands(ticker: string, priceHigh: number | null): Map<string, ConvictionBands> {
   return new Map([[ticker, { priceLow: null, priceMid: null, priceHigh }]]);
 }
@@ -59,7 +68,7 @@ describe('rollTheDice', () => {
       [pick({ ticker: 'AAA', compositeScore: 71 }),
        pick({ ticker: 'BBB', compositeScore: 88 }),
        pick({ ticker: 'CCC', compositeScore: 79 })],
-      clear('AAA', 'BBB', 'CCC'), NO_CONV, TODAY, TODAY,
+      clear('AAA', 'BBB', 'CCC'), NO_CONV, NO_HIST, TODAY, TODAY,
     );
     expect(r.pick?.ticker).toBe('BBB');
     expect(r.runnerUp?.ticker).toBe('CCC');
@@ -71,7 +80,7 @@ describe('rollTheDice', () => {
     const r = rollTheDice(
       [pick({ ticker: 'CAU', criticVerdict: { verdict: 'caution', rationale: 'x', degraded: false } }),
        pick({ ticker: 'FLG', criticVerdict: { verdict: 'flag', rationale: 'y', degraded: false } })],
-      clear('CAU', 'FLG'), NO_CONV, TODAY, TODAY,
+      clear('CAU', 'FLG'), NO_CONV, NO_HIST, TODAY, TODAY,
     );
     expect(r.pick).toBeNull();
     expect(r.rejections.map(x => x.reason)).toEqual(['critic caution', 'critic flag']);
@@ -82,7 +91,7 @@ describe('rollTheDice', () => {
   it('rejects a DEGRADED pass — un-vetted is not an all-clear', () => {
     const r = rollTheDice(
       [pick({ ticker: 'DEG', criticVerdict: { verdict: 'pass', rationale: 'rule-based', degraded: true } })],
-      clear('DEG'), NO_CONV, TODAY, TODAY,
+      clear('DEG'), NO_CONV, NO_HIST, TODAY, TODAY,
     );
     expect(r.pick).toBeNull();
     expect(r.rejections[0]?.reason).toContain('degraded');
@@ -95,12 +104,12 @@ describe('rollTheDice', () => {
   // filter's. These tests exist to prove the gate STAYS gone.
   it('measures capital committed, not share price', () => {
     // $310 stock, $290 strike -> $29,000, under the $30,000 line.
-    const dear = rollTheDice([pick({ ticker: 'DEAR', price: 310 }, 290)], clear('DEAR'), NO_CONV, TODAY, TODAY);
+    const dear = rollTheDice([pick({ ticker: 'DEAR', price: 310 }, 290)], clear('DEAR'), NO_CONV, NO_HIST, TODAY, TODAY);
     expect(dear.pick?.capitalRequired).toBe(29_000);
     expect(dear.pick?.fit.withinCapital).toBe(true);
 
     // $299 stock, $295 strike -> $29,500. The cheaper-looking stock costs MORE.
-    const cheap = rollTheDice([pick({ ticker: 'CHP', price: 299 }, 295)], clear('CHP'), NO_CONV, TODAY, TODAY);
+    const cheap = rollTheDice([pick({ ticker: 'CHP', price: 299 }, 295)], clear('CHP'), NO_CONV, NO_HIST, TODAY, TODAY);
     expect(cheap.pick?.capitalRequired).toBe(29_500);
   });
 
@@ -108,7 +117,7 @@ describe('rollTheDice', () => {
   // being absent from a conviction list the operator no longer maintains — its score was never
   // even evaluated. Capital and conviction must now annotate, never remove.
   it('SELECTS an over-budget pick rather than rejecting it, and flags the size', () => {
-    const r = rollTheDice([pick({ ticker: 'MPC', price: 400 }, 370)], clear('MPC'), NO_CONV, TODAY, TODAY);
+    const r = rollTheDice([pick({ ticker: 'MPC', price: 400 }, 370)], clear('MPC'), NO_CONV, NO_HIST, TODAY, TODAY);
     expect(r.pick?.ticker).toBe('MPC');
     expect(r.pick?.capitalRequired).toBe(37_000);
     expect(r.pick?.fit.withinCapital).toBe(false);
@@ -118,7 +127,7 @@ describe('rollTheDice', () => {
   });
 
   it('never rejects for absence from the conviction list, however large the position', () => {
-    const r = rollTheDice([pick({ ticker: 'BIG', price: 900 }, 880)], clear('BIG'), NO_CONV, TODAY, TODAY);
+    const r = rollTheDice([pick({ ticker: 'BIG', price: 900 }, 880)], clear('BIG'), NO_CONV, NO_HIST, TODAY, TODAY);
     expect(r.pick?.ticker).toBe('BIG');            // $88,000 — no ceiling exists any more
     expect(r.pick?.fit.conviction).toBeNull();
     expect(r.rejections).toHaveLength(0);
@@ -132,7 +141,7 @@ describe('rollTheDice', () => {
       [pick({ ticker: 'BIG', price: 400, compositeScore: 88 }, 370),   // $37,000
        pick({ ticker: 'MID', price: 200, compositeScore: 71 }, 190),   // $19,000
        pick({ ticker: 'LOW', price: 150, compositeScore: 64 }, 140)],  // $14,000
-      clear('BIG', 'MID', 'LOW'), NO_CONV, TODAY, TODAY,
+      clear('BIG', 'MID', 'LOW'), NO_CONV, NO_HIST, TODAY, TODAY,
     );
     expect(r.pick?.ticker).toBe('BIG');
     // Highest-scoring FITTING candidate, not merely the cheapest one.
@@ -144,7 +153,7 @@ describe('rollTheDice', () => {
   it('offers no alternative when the pick already fits, or when nothing else does', () => {
     const fits = rollTheDice(
       [pick({ ticker: 'AAA', compositeScore: 80 }), pick({ ticker: 'BBB', compositeScore: 70 })],
-      clear('AAA', 'BBB'), NO_CONV, TODAY, TODAY,
+      clear('AAA', 'BBB'), NO_CONV, NO_HIST, TODAY, TODAY,
     );
     expect(fits.pick?.ticker).toBe('AAA');
     expect(fits.withinBudget).toBeNull();
@@ -152,7 +161,7 @@ describe('rollTheDice', () => {
     const noneFit = rollTheDice(
       [pick({ ticker: 'BIG', price: 400, compositeScore: 88 }, 370),
        pick({ ticker: 'ALSO', price: 400, compositeScore: 75 }, 350)],
-      clear('BIG', 'ALSO'), NO_CONV, TODAY, TODAY,
+      clear('BIG', 'ALSO'), NO_CONV, NO_HIST, TODAY, TODAY,
     );
     expect(noneFit.pick?.ticker).toBe('BIG');
     expect(noneFit.withinBudget).toBeNull();
@@ -161,30 +170,72 @@ describe('rollTheDice', () => {
   it('honours a caller-supplied capital line for the split, still without excluding', () => {
     const picks = [pick({ ticker: 'BIG', price: 400, compositeScore: 88 }, 370),
                    pick({ ticker: 'MID', price: 200, compositeScore: 71 }, 190)];
-    const r = rollTheDice(picks, clear('BIG', 'MID'), NO_CONV, TODAY, TODAY, 40_000);
+    const r = rollTheDice(picks, clear('BIG', 'MID'), NO_CONV, NO_HIST, TODAY, TODAY, 40_000);
     expect(r.pick?.ticker).toBe('BIG');
     expect(r.pick?.fit.withinCapital).toBe(true);   // $37,000 is under a $40,000 line
     expect(r.withinBudget).toBeNull();
+  });
+
+  // ── Own-at-strike: the read that REPLACES a check which could not fail ─────
+  // The conviction band fired on 0 of 39 eligible picks because it is anchored to spot at write
+  // time (~1.13x) while a CSP strikes at ~0.93x. This read is computed from the ticker's own
+  // history and can come out negative — but it is still an annotation, never a gate.
+  it('reports the cost basis against the stock own-history anchors, and never gates on it', () => {
+    // strike 140, premium 3.50 -> basis 136.50, against a 150 average = 9% BELOW.
+    const below = rollTheDice([pick({ ticker: 'MTH' })], clear('MTH'), NO_CONV,
+      hist('MTH', { sma200: 150, hi52: 180, lo52: 120 }), TODAY, TODAY);
+    expect(below.pick?.fit.ownership?.atOrBelowSma200).toBe(true);
+    expect(below.pick?.fit.ownership?.costBasis).toBeCloseTo(136.5);
+    expect(below.pick?.fit.ownership?.basisVsSma200Pct).toBeCloseTo(-9.0, 1);
+
+    // Same pick, an average of 120 -> basis is 13.75% ABOVE. Still selected.
+    const above = rollTheDice([pick({ ticker: 'MTH' })], clear('MTH'), NO_CONV,
+      hist('MTH', { sma200: 120, hi52: 180, lo52: 100 }), TODAY, TODAY);
+    expect(above.pick?.ticker).toBe('MTH');            // not excluded
+    expect(above.rejections).toHaveLength(0);
+    expect(above.pick?.fit.ownership?.atOrBelowSma200).toBe(false);
+  });
+
+  it('reports missing history as unknown rather than omitting the field', () => {
+    const r = rollTheDice([pick({ ticker: 'NEW' })], clear('NEW'), NO_CONV, NO_HIST, TODAY, TODAY);
+    expect(r.pick?.ticker).toBe('NEW');
+    expect(r.pick?.fit.ownership).toBeNull();
+  });
+
+  it('reads the within-budget alternative against its OWN history, not that of the pick', () => {
+    const windows = new Map([
+      ['BIG', { sma200: 500, hi52: 600, lo52: 300 }],
+      ['MID', { sma200: 150, hi52: 220, lo52: 100 }],
+    ]);
+    const r = rollTheDice(
+      [pick({ ticker: 'BIG', price: 400, compositeScore: 88 }, 370),
+       pick({ ticker: 'MID', price: 200, compositeScore: 71 }, 190)],
+      clear('BIG', 'MID'), NO_CONV, windows, TODAY, TODAY,
+    );
+    expect(r.pick?.fit.ownership?.sma200).toBe(500);
+    expect(r.withinBudget?.ticker).toBe('MID');
+    expect(r.withinBudget?.fit.ownership?.sma200).toBe(150);
+    expect(r.withinBudget?.fit.ownership?.atOrBelowSma200).toBe(false);  // basis 186.5 > 150
   });
 
   // ── Conviction: reported in four distinct states, gating in none ───────────
   it('reports conviction state without ever acting on it', () => {
     const p = (t: string) => [pick({ ticker: t, price: 500, compositeScore: 73.8 }, 470)];
 
-    const absent = rollTheDice(p('AMD'), clear('AMD'), NO_CONV, TODAY, TODAY);
+    const absent = rollTheDice(p('AMD'), clear('AMD'), NO_CONV, NO_HIST, TODAY, TODAY);
     expect(absent.pick?.ticker).toBe('AMD');
     expect(absent.pick?.fit.conviction).toBeNull();
 
-    const inside = rollTheDice(p('AMD'), clear('AMD'), bands('AMD', 554), TODAY, TODAY);
+    const inside = rollTheDice(p('AMD'), clear('AMD'), bands('AMD', 554), NO_HIST, TODAY, TODAY);
     expect(inside.pick?.fit.conviction).toEqual({ priceHigh: 554, strikeWithinBand: true });
 
     // The strike breaches the operator's own never-above line. Still picked — still LOUD.
-    const breach = rollTheDice(p('AMD'), clear('AMD'), bands('AMD', 400), TODAY, TODAY);
+    const breach = rollTheDice(p('AMD'), clear('AMD'), bands('AMD', 400), NO_HIST, TODAY, TODAY);
     expect(breach.pick?.ticker).toBe('AMD');
     expect(breach.pick?.fit.conviction).toEqual({ priceHigh: 400, strikeWithinBand: false });
 
     // Listed but no band set — there is nothing to check against, which is not a pass.
-    const noBand = rollTheDice(p('AMD'), clear('AMD'), bands('AMD', null), TODAY, TODAY);
+    const noBand = rollTheDice(p('AMD'), clear('AMD'), bands('AMD', null), NO_HIST, TODAY, TODAY);
     expect(noBand.pick?.fit.conviction).toEqual({ priceHigh: null, strikeWithinBand: null });
   });
 
@@ -193,13 +244,13 @@ describe('rollTheDice', () => {
   // pick meant to be taken unread the earnings gate has to be an exclusion.
   it('rejects earnings landing on or before expiry, and allows earnings after it', () => {
     const p = [pick({ ticker: 'ERN' })];
-    expect(rollTheDice(p, new Map([['ERN', '2026-09-15']]), NO_CONV, TODAY, TODAY).pick).toBeNull();
-    expect(rollTheDice(p, new Map([['ERN', EXPIRY]]), NO_CONV, TODAY, TODAY).pick).toBeNull();
-    expect(rollTheDice(p, new Map([['ERN', '2026-10-20']]), NO_CONV, TODAY, TODAY).pick?.ticker).toBe('ERN');
+    expect(rollTheDice(p, new Map([['ERN', '2026-09-15']]), NO_CONV, NO_HIST, TODAY, TODAY).pick).toBeNull();
+    expect(rollTheDice(p, new Map([['ERN', EXPIRY]]), NO_CONV, NO_HIST, TODAY, TODAY).pick).toBeNull();
+    expect(rollTheDice(p, new Map([['ERN', '2026-10-20']]), NO_CONV, NO_HIST, TODAY, TODAY).pick?.ticker).toBe('ERN');
   });
 
   it('rejects an UNKNOWN earnings date — absent from the calendar is not "clear"', () => {
-    const r = rollTheDice([pick({ ticker: 'UNK' })], new Map(), NO_CONV, TODAY, TODAY);
+    const r = rollTheDice([pick({ ticker: 'UNK' })], new Map(), NO_CONV, NO_HIST, TODAY, TODAY);
     expect(r.pick).toBeNull();
     expect(r.rejections[0]?.reason).toContain('unknown');
   });
@@ -207,7 +258,7 @@ describe('rollTheDice', () => {
   // 57 of 1,069 calendar rows were stale like this when measured. A past date means the row
   // was never refreshed after that report, so the NEXT date is unknown -- fail closed.
   it('rejects a STALE past earnings date rather than reading it as clear', () => {
-    const r = rollTheDice([pick({ ticker: 'OLD' })], new Map([['OLD', '2026-08-01']]), NO_CONV, TODAY, TODAY);
+    const r = rollTheDice([pick({ ticker: 'OLD' })], new Map([['OLD', '2026-08-01']]), NO_CONV, NO_HIST, TODAY, TODAY);
     expect(r.pick).toBeNull();
     expect(r.rejections[0]?.reason).toContain('stale');
   });
@@ -215,7 +266,7 @@ describe('rollTheDice', () => {
   it('rejects an illiquid chain at the same bar the critic and v2 engine use', () => {
     const p = pick({ ticker: 'ILQ' });
     p.strategyLabResult!.scores![0]!.liquidityScore = 5;
-    const r = rollTheDice([p], clear('ILQ'), NO_CONV, TODAY, TODAY);
+    const r = rollTheDice([p], clear('ILQ'), NO_CONV, NO_HIST, TODAY, TODAY);
     expect(r.pick).toBeNull();
     expect(r.rejections[0]?.reason).toContain('illiquid');
   });
@@ -223,15 +274,15 @@ describe('rollTheDice', () => {
   it('rejects an unavailable or missing CSP, and a non-positive credit', () => {
     const noSetup = pick({ ticker: 'NOS' });
     noSetup.strategyLabResult!.scores![0]!.setup!.unavailableReason = 'no chain';
-    expect(rollTheDice([noSetup], clear('NOS'), NO_CONV, TODAY, TODAY).pick).toBeNull();
+    expect(rollTheDice([noSetup], clear('NOS'), NO_CONV, NO_HIST, TODAY, TODAY).pick).toBeNull();
 
     const wrongSlug = pick({ ticker: 'WSL' });
     wrongSlug.strategyLabResult!.scores![0]!.slug = 'covered-call';
-    expect(rollTheDice([wrongSlug], clear('WSL'), NO_CONV, TODAY, TODAY).pick).toBeNull();
+    expect(rollTheDice([wrongSlug], clear('WSL'), NO_CONV, NO_HIST, TODAY, TODAY).pick).toBeNull();
 
     const noCredit = pick({ ticker: 'NCR' });
     noCredit.strategyLabResult!.scores![0]!.setup!.netCredit = 0;
-    expect(rollTheDice([noCredit], clear('NCR'), NO_CONV, TODAY, TODAY).pick).toBeNull();
+    expect(rollTheDice([noCredit], clear('NCR'), NO_CONV, NO_HIST, TODAY, TODAY).pick).toBeNull();
   });
 
   it('explains a no-pick day with the most common rejection reason', () => {
@@ -240,7 +291,7 @@ describe('rollTheDice', () => {
        pick({ ticker: 'B', criticVerdict: { verdict: 'caution', rationale: null } }),
        // C is a flag, not an oversized position — size stopped rejecting anything in v1.1.168.
        pick({ ticker: 'C', criticVerdict: { verdict: 'flag', rationale: null } })],
-      clear('A', 'B', 'C'), NO_CONV, TODAY, TODAY,
+      clear('A', 'B', 'C'), NO_CONV, NO_HIST, TODAY, TODAY,
     );
     expect(r.pick).toBeNull();
     expect(r.considered).toBe(3);
@@ -249,14 +300,14 @@ describe('rollTheDice', () => {
   });
 
   it('handles an empty wheel bucket without pretending it filtered anything', () => {
-    const r = rollTheDice([], new Map(), NO_CONV, TODAY, TODAY);
+    const r = rollTheDice([], new Map(), NO_CONV, NO_HIST, TODAY, TODAY);
     expect(r.pick).toBeNull();
     expect(r.considered).toBe(0);
     expect(r.noPickReason).toBe('No wheel picks in the latest brief.');
   });
 
   it('computes capital, cost basis and discount from the short put', () => {
-    const r = rollTheDice([pick({ ticker: 'MTH', price: 150 })], clear('MTH'), NO_CONV, TODAY, TODAY);
+    const r = rollTheDice([pick({ ticker: 'MTH', price: 150 })], clear('MTH'), NO_CONV, NO_HIST, TODAY, TODAY);
     expect(r.pick?.strike).toBe(140);
     expect(r.pick?.capitalRequired).toBe(14_000);          // 140 × 100
     expect(r.pick?.effectiveCostBasis).toBeCloseTo(136.5); // 140 − 3.50
@@ -265,10 +316,10 @@ describe('rollTheDice', () => {
   });
 
   it('warns when the brief is stale but still returns the pick', () => {
-    const fresh = rollTheDice([pick({ ticker: 'F' })], clear('F'), NO_CONV, TODAY, TODAY);
+    const fresh = rollTheDice([pick({ ticker: 'F' })], clear('F'), NO_CONV, NO_HIST, TODAY, TODAY);
     expect(fresh.staleWarning).toBeNull();
 
-    const old = rollTheDice([pick({ ticker: 'S' })], clear('S'), NO_CONV, TODAY, '2026-08-26');
+    const old = rollTheDice([pick({ ticker: 'S' })], clear('S'), NO_CONV, NO_HIST, TODAY, '2026-08-26');
     expect(old.briefAgeDays).toBe(7);
     expect(old.staleWarning).toContain('7 days old');
     expect(old.pick?.ticker).toBe('S');   // surfaced, not suppressed
