@@ -92,6 +92,7 @@ Update only what the change touches — don't regenerate everything:
 | Any behavior/feature | `CHANGELOG.md` + `changelogs/v{version}_{date}.md`, and the matching `Requirements/spec/NN-*.md` section |
 | Schema (a migration) | `Requirements/spec/02-data-model.md` + `.ai/AI_CONTEXT.md §8` |
 | A financial formula | `docs/formulas.md` + `Requirements/spec/23-formulas.md` |
+| A wheel scoring weight, gate, delta/DTE target or pipeline cutoff | `docs/wheel-parameters.md` (the parameter inventory + its provenance and test queue) |
 | Services/views/IPC/providers | `.ai/AI_CONTEXT.md` (state map) + the relevant `spec/` section |
 | A non-obvious gotcha | `CLAUDE.md` Known quirks + `.ai/AI_CONTEXT.md §10` |
 | Install/run/config | `README.md` |
