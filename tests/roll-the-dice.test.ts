@@ -4,7 +4,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  rollTheDice, DEFAULT_MAX_CAPITAL, DEFAULT_STRETCH_CAPITAL,
+  rollTheDice, DEFAULT_MAX_CAPITAL,
   type DicePickInput, type ConvictionBands,
 } from '../src/main/services/roll-the-dice.js';
 
@@ -46,7 +46,7 @@ function clear(...tickers: string[]): Map<string, string> {
   return new Map(tickers.map(t => [t, '2026-12-31']));
 }
 
-/** No conviction list — the stretch tier is unavailable. */
+/** No conviction list at all — since v1.1.168 that annotates the pick, it never blocks one. */
 const NO_CONV = new Map<string, ConvictionBands>();
 
 function bands(ticker: string, priceHigh: number | null): Map<string, ConvictionBands> {
@@ -63,7 +63,8 @@ describe('rollTheDice', () => {
     );
     expect(r.pick?.ticker).toBe('BBB');
     expect(r.runnerUp?.ticker).toBe('CCC');
-    expect(r.pick?.tier).toBe('base');
+    expect(r.pick?.fit.withinCapital).toBe(true);
+    expect(r.withinBudget).toBeNull();   // the pick already fits; nothing to add
   });
 
   it('rejects a critic caution AND a flag — only an outright pass qualifies', () => {
@@ -87,79 +88,104 @@ describe('rollTheDice', () => {
     expect(r.rejections[0]?.reason).toContain('degraded');
   });
 
-  // ── Capital, not share price ───────────────────────────────────────────────
-  // Share price is a lossy proxy: a dear stock struck low can commit less than a cheap one
-  // struck near the money. The gate is on what is actually tied up.
-  it('gates on capital committed, not on share price', () => {
-    // $310 stock, $290 strike -> $29,000. Passes, though the old price gate would have refused.
+  // ── Capital: reported, never a gate (v1.1.168) ────────────────────────────
+  // Share price was the original gate and it is a lossy proxy: a dear stock struck low commits
+  // less than a cheap one struck near the money. Capital replaced it — and then stopped
+  // excluding anything at all, because what the operator can fund is their call, not the
+  // filter's. These tests exist to prove the gate STAYS gone.
+  it('measures capital committed, not share price', () => {
+    // $310 stock, $290 strike -> $29,000, under the $30,000 line.
     const dear = rollTheDice([pick({ ticker: 'DEAR', price: 310 }, 290)], clear('DEAR'), NO_CONV, TODAY, TODAY);
-    expect(dear.pick?.ticker).toBe('DEAR');
     expect(dear.pick?.capitalRequired).toBe(29_000);
+    expect(dear.pick?.fit.withinCapital).toBe(true);
 
-    // $299 stock, $295 strike -> $29,500. Also passes, and costs MORE than the dear one.
+    // $299 stock, $295 strike -> $29,500. The cheaper-looking stock costs MORE.
     const cheap = rollTheDice([pick({ ticker: 'CHP', price: 299 }, 295)], clear('CHP'), NO_CONV, TODAY, TODAY);
     expect(cheap.pick?.capitalRequired).toBe(29_500);
   });
 
-  it('rejects a position over the capital limit when no exception applies', () => {
-    const r = rollTheDice([pick({ ticker: 'BIG', price: 400 }, 380)], clear('BIG'), NO_CONV, TODAY, TODAY);
-    expect(r.pick).toBeNull();
-    expect(r.rejections[0]?.reason).toContain('$38,000 over $30,000');
-    expect(r.rejections[0]?.reason).toContain('not on your conviction list');
+  // The regression this release exists for. On 2026-09-03 MPC was refused at $37,000 purely for
+  // being absent from a conviction list the operator no longer maintains — its score was never
+  // even evaluated. Capital and conviction must now annotate, never remove.
+  it('SELECTS an over-budget pick rather than rejecting it, and flags the size', () => {
+    const r = rollTheDice([pick({ ticker: 'MPC', price: 400 }, 370)], clear('MPC'), NO_CONV, TODAY, TODAY);
+    expect(r.pick?.ticker).toBe('MPC');
+    expect(r.pick?.capitalRequired).toBe(37_000);
+    expect(r.pick?.fit.withinCapital).toBe(false);
+    expect(r.pick?.fit.maxCapital).toBe(30_000);
+    expect(r.rejections).toHaveLength(0);          // nothing was removed for size
+    expect(r.withinBudget).toBeNull();             // and nothing smaller was available
   });
 
-  // ── The exception tier ─────────────────────────────────────────────────────
-  it('allows an exception only when every higher bar is cleared', () => {
-    const p = [pick({ ticker: 'AMD', price: 500, compositeScore: 73.8 }, 470)];
-    const r = rollTheDice(p, clear('AMD'), bands('AMD', 554), TODAY, TODAY);
-    expect(r.pick?.ticker).toBe('AMD');
-    expect(r.pick?.tier).toBe('stretch');
-    expect(r.pick?.capitalRequired).toBe(47_000);
-    expect(r.pick?.stretchReason).toContain('never-above');
+  it('never rejects for absence from the conviction list, however large the position', () => {
+    const r = rollTheDice([pick({ ticker: 'BIG', price: 900 }, 880)], clear('BIG'), NO_CONV, TODAY, TODAY);
+    expect(r.pick?.ticker).toBe('BIG');            // $88,000 — no ceiling exists any more
+    expect(r.pick?.fit.conviction).toBeNull();
+    expect(r.rejections).toHaveLength(0);
   });
 
-  it('refuses the exception when the strike breaches the never-above band', () => {
+  // ── The within-budget alternative ──────────────────────────────────────────
+  // Demoting the capital gate must not cost the operator an actionable day: when the merit pick
+  // is unfundable they still get the best one that fits, and choose between them.
+  it('names the best within-budget candidate when the merit pick is over the line', () => {
     const r = rollTheDice(
-      [pick({ ticker: 'AMD', price: 500, compositeScore: 73.8 }, 470)],
-      clear('AMD'), bands('AMD', 400), TODAY, TODAY,
+      [pick({ ticker: 'BIG', price: 400, compositeScore: 88 }, 370),   // $37,000
+       pick({ ticker: 'MID', price: 200, compositeScore: 71 }, 190),   // $19,000
+       pick({ ticker: 'LOW', price: 150, compositeScore: 64 }, 140)],  // $14,000
+      clear('BIG', 'MID', 'LOW'), NO_CONV, TODAY, TODAY,
     );
-    expect(r.pick).toBeNull();
-    expect(r.rejections[0]?.reason).toContain('above your $400 never-above line');
+    expect(r.pick?.ticker).toBe('BIG');
+    // Highest-scoring FITTING candidate, not merely the cheapest one.
+    expect(r.withinBudget?.ticker).toBe('MID');
+    expect(r.withinBudget?.capitalRequired).toBe(19_000);
+    expect(r.withinBudget?.fit.withinCapital).toBe(true);
   });
 
-  // Calibrated against 62 stored briefs: eligible composites ran 58.9-76.0, median 65.9. An
-  // ordinary-quality setup must not buy its way past the size limit.
-  it('refuses the exception on an ordinary score or thin liquidity', () => {
-    const lowScore = rollTheDice(
-      [pick({ ticker: 'AMD', price: 500, compositeScore: 66 }, 470)],
-      clear('AMD'), bands('AMD', 554), TODAY, TODAY,
+  it('offers no alternative when the pick already fits, or when nothing else does', () => {
+    const fits = rollTheDice(
+      [pick({ ticker: 'AAA', compositeScore: 80 }), pick({ ticker: 'BBB', compositeScore: 70 })],
+      clear('AAA', 'BBB'), NO_CONV, TODAY, TODAY,
     );
-    expect(lowScore.pick).toBeNull();
-    expect(lowScore.rejections[0]?.reason).toContain('under the 70 exception bar');
+    expect(fits.pick?.ticker).toBe('AAA');
+    expect(fits.withinBudget).toBeNull();
 
-    const thin = pick({ ticker: 'AMD', price: 500, compositeScore: 73.8 }, 470);
-    thin.strategyLabResult!.scores![0]!.liquidityScore = 9;   // clears base 8, misses stretch 11
-    const r = rollTheDice([thin], clear('AMD'), bands('AMD', 554), TODAY, TODAY);
-    expect(r.pick).toBeNull();
-    expect(r.rejections[0]?.reason).toContain('under the 11 exception bar');
+    const noneFit = rollTheDice(
+      [pick({ ticker: 'BIG', price: 400, compositeScore: 88 }, 370),
+       pick({ ticker: 'ALSO', price: 400, compositeScore: 75 }, 350)],
+      clear('BIG', 'ALSO'), NO_CONV, TODAY, TODAY,
+    );
+    expect(noneFit.pick?.ticker).toBe('BIG');
+    expect(noneFit.withinBudget).toBeNull();
   });
 
-  it('caps the exception — an unbounded exception is not an exception', () => {
-    const r = rollTheDice(
-      [pick({ ticker: 'SPY', price: 700, compositeScore: 90 }, 600)],   // $60,000
-      clear('SPY'), bands('SPY', 900), TODAY, TODAY,
-    );
-    expect(r.pick).toBeNull();
-    expect(r.rejections[0]?.reason).toContain('exception ceiling');
+  it('honours a caller-supplied capital line for the split, still without excluding', () => {
+    const picks = [pick({ ticker: 'BIG', price: 400, compositeScore: 88 }, 370),
+                   pick({ ticker: 'MID', price: 200, compositeScore: 71 }, 190)];
+    const r = rollTheDice(picks, clear('BIG', 'MID'), NO_CONV, TODAY, TODAY, 40_000);
+    expect(r.pick?.ticker).toBe('BIG');
+    expect(r.pick?.fit.withinCapital).toBe(true);   // $37,000 is under a $40,000 line
+    expect(r.withinBudget).toBeNull();
   });
 
-  it('refuses the exception for a conviction name with no never-above band set', () => {
-    const r = rollTheDice(
-      [pick({ ticker: 'VOO', price: 500, compositeScore: 90 }, 400)],
-      clear('VOO'), bands('VOO', null), TODAY, TODAY,
-    );
-    expect(r.pick).toBeNull();
-    expect(r.rejections[0]?.reason).toContain('no "never above" band');
+  // ── Conviction: reported in four distinct states, gating in none ───────────
+  it('reports conviction state without ever acting on it', () => {
+    const p = (t: string) => [pick({ ticker: t, price: 500, compositeScore: 73.8 }, 470)];
+
+    const absent = rollTheDice(p('AMD'), clear('AMD'), NO_CONV, TODAY, TODAY);
+    expect(absent.pick?.ticker).toBe('AMD');
+    expect(absent.pick?.fit.conviction).toBeNull();
+
+    const inside = rollTheDice(p('AMD'), clear('AMD'), bands('AMD', 554), TODAY, TODAY);
+    expect(inside.pick?.fit.conviction).toEqual({ priceHigh: 554, strikeWithinBand: true });
+
+    // The strike breaches the operator's own never-above line. Still picked — still LOUD.
+    const breach = rollTheDice(p('AMD'), clear('AMD'), bands('AMD', 400), TODAY, TODAY);
+    expect(breach.pick?.ticker).toBe('AMD');
+    expect(breach.pick?.fit.conviction).toEqual({ priceHigh: 400, strikeWithinBand: false });
+
+    // Listed but no band set — there is nothing to check against, which is not a pass.
+    const noBand = rollTheDice(p('AMD'), clear('AMD'), bands('AMD', null), TODAY, TODAY);
+    expect(noBand.pick?.fit.conviction).toEqual({ priceHigh: null, strikeWithinBand: null });
   });
 
   // ── Earnings ───────────────────────────────────────────────────────────────
@@ -212,7 +238,8 @@ describe('rollTheDice', () => {
     const r = rollTheDice(
       [pick({ ticker: 'A', criticVerdict: { verdict: 'caution', rationale: null } }),
        pick({ ticker: 'B', criticVerdict: { verdict: 'caution', rationale: null } }),
-       pick({ ticker: 'C', price: 900 }, 880)],
+       // C is a flag, not an oversized position — size stopped rejecting anything in v1.1.168.
+       pick({ ticker: 'C', criticVerdict: { verdict: 'flag', rationale: null } })],
       clear('A', 'B', 'C'), NO_CONV, TODAY, TODAY,
     );
     expect(r.pick).toBeNull();
@@ -247,8 +274,7 @@ describe('rollTheDice', () => {
     expect(old.pick?.ticker).toBe('S');   // surfaced, not suppressed
   });
 
-  it('defaults the limits to $30k normal and $50k exception', () => {
+  it('defaults the budget line to $30k — a reporting split, not a ceiling', () => {
     expect(DEFAULT_MAX_CAPITAL).toBe(30_000);
-    expect(DEFAULT_STRETCH_CAPITAL).toBe(50_000);
   });
 });

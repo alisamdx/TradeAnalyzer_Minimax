@@ -15,7 +15,7 @@
 //
 // No PDF attachment: one trade does not need one.
 
-import type { DiceResult } from './roll-the-dice.js';
+import type { DicePick, DiceResult } from './roll-the-dice.js';
 
 const BG = '#f6f8fa';
 const CARD = '#ffffff';
@@ -58,6 +58,31 @@ export function diceEmailSubject(r: DiceResult): string {
   return `\u{1F3B2} ${p.ticker} — sell the $${p.strike} put, ${prettyDate(p.expiration)} · ${money(p.creditTotal)} credit`;
 }
 
+/**
+ * The own-at-strike sentence.
+ *
+ * Conviction membership stopped gating the pick in v1.1.168, so this is the only place that
+ * question now gets asked — and it has to ask it out loud rather than imply it by silence. The
+ * four states are genuinely different and only one of them is an all-clear; in particular "not on
+ * the list" is not a warning about the trade, it is a statement that nothing was pre-committed
+ * and the judgement is live.
+ */
+function convictionNote(p: DicePick): string {
+  const c = p.fit.conviction;
+  if (c === null) {
+    return `Not on your conviction list — you have not pre-committed to owning ${p.ticker} at any `
+         + `price, so "would I be happy owning it at $${p.strike}?" is a live question here.`;
+  }
+  if (c.priceHigh == null || c.strikeWithinBand == null) {
+    return `On your conviction list, but no "never above" band is set for ${p.ticker} — nothing to check the $${p.strike} strike against.`;
+  }
+  if (c.strikeWithinBand) {
+    return `On your conviction list, and the $${p.strike} strike is inside your $${c.priceHigh} never-above line.`;
+  }
+  return `⚠ On your conviction list, but the $${p.strike} strike is ABOVE your $${c.priceHigh} `
+       + `never-above line — on assignment you would be buying at a price you already ruled out.`;
+}
+
 function statRow(label: string, value: string, note?: string): string {
   return `
     <tr>
@@ -69,15 +94,16 @@ function statRow(label: string, value: string, note?: string): string {
 }
 
 export function buildDiceEmailHtml(r: DiceResult, dateStr: string): string {
-  // A stretch pick deliberately exceeds the normal capital limit. That must never arrive
-  // looking like an ordinary night's trade, so it is announced before the order itself.
-  const stretch = r.pick && r.pick.tier === 'stretch'
+  // A pick above the operator's normal size is NOT an exception being granted — capital stopped
+  // being a gate in v1.1.168 — so this states the number and hands the decision over rather than
+  // justifying itself. It still leads, because it is the fact most likely to change the answer.
+  const overBudget = r.pick && !r.pick.fit.withinCapital
     ? `<tr><td style="padding:14px 18px 0;">
          <div style="border:1px solid ${WARN};background:#fff8e6;border-radius:8px;padding:10px 12px;">
-           <div style="font-size:13px;font-weight:700;color:${WARN};">ABOVE YOUR NORMAL SIZE — ${money(r.pick.capitalRequired)}</div>
+           <div style="font-size:13px;font-weight:700;color:${WARN};">TIES UP ${money(r.pick.capitalRequired)} — ABOVE YOUR USUAL ${money(r.pick.fit.maxCapital)}</div>
            <div style="font-size:12px;color:${TEXT};line-height:1.6;margin-top:4px;">
-             This one is an exception, taken because it is ${esc(r.pick.stretchReason ?? '')}.
-             Worth a look before you place it rather than a reflex.
+             Not a rejection — this is simply the best setup today, and whether you fund it is your
+             call.${r.withinBudget ? ' The best one that fits your usual size is at the bottom.' : ''}
            </div>
          </div></td></tr>`
     : '';
@@ -106,17 +132,20 @@ export function buildDiceEmailHtml(r: DiceResult, dateStr: string): string {
       <tr><td style="padding:4px 18px 18px;">
         <div style="font-size:15px;color:${TEXT};line-height:1.55;">${esc(r.noPickReason ?? 'Nothing qualified today.')}</div>
         <div style="font-size:12px;color:${MUTED};line-height:1.6;margin-top:12px;">
-          This is a normal outcome — roughly two days in three. Every gate is a hard filter, so
-          "nothing today" means nothing cleared, not that the system failed.
+          This is a normal outcome. Every remaining gate is a hard filter on the trade itself, so
+          "nothing today" means nothing cleared — not that the system failed. Your position size
+          and conviction list no longer remove anything, so a blank day is never about those.
         </div>
       </td></tr>`;
   } else {
     const p = r.pick;
+    // Capital and conviction are absent from this list ON PURPOSE — they are reported elsewhere
+    // as fit, and listing them here would restate them as bars the trade had to clear.
     const gates = [
       'critic passed (and actually ran)',
-      `price ${money2(p.price)} within limit`,
       `liquidity ${p.liquidityScore.toFixed(0)}/15`,
       'no earnings before expiry',
+      'real net credit',
     ].join(' · ');
 
     body = `
@@ -162,11 +191,35 @@ export function buildDiceEmailHtml(r: DiceResult, dateStr: string): string {
         </div>
       </td></tr>
 
+      <tr><td style="padding:12px 18px 0;">
+        <div style="font-size:12px;color:${TEXT};line-height:1.6;">${esc(convictionNote(p))}</div>
+      </td></tr>
+
       <tr><td style="padding:14px 18px 0;font-size:11px;color:${MUTED};line-height:1.6;">
         <b>Passed every gate:</b> ${esc(gates)}.
         ${r.runnerUp ? `Runner-up was ${esc(r.runnerUp.ticker)} (${r.runnerUp.compositeScore.toFixed(1)}).` : ''}
       </td></tr>`;
   }
+
+  // The best candidate that FITS, shown only when the merit pick does not. This is the other
+  // half of demoting the capital gate: the operator always leaves with something they can fund.
+  const alt = r.withinBudget
+    ? `<tr><td style="padding:16px 18px 0;">
+         <div style="border:1px solid ${BORDER};border-radius:8px;padding:10px 12px;background:${BG};">
+           <div style="font-size:11px;color:${MUTED};text-transform:uppercase;letter-spacing:.4px;">Within your usual size</div>
+           <div style="font-size:15px;font-weight:700;color:${TEXT};margin:4px 0 2px;">
+             Sell 1 ${esc(r.withinBudget.ticker)} $${r.withinBudget.strike} put, ${esc(prettyDate(r.withinBudget.expiration))}
+           </div>
+           <div style="font-size:12px;color:${MUTED};line-height:1.6;">
+             ${money(r.withinBudget.capitalRequired)} cash · ${money(r.withinBudget.creditTotal)} credit ·
+             own it at ${money2(r.withinBudget.effectiveCostBasis)} · score ${r.withinBudget.compositeScore.toFixed(1)} ·
+             grade ${esc(r.withinBudget.grade)}
+           </div>
+           <div style="font-size:11px;color:${MUTED};line-height:1.6;margin-top:5px;">
+             ${esc(convictionNote(r.withinBudget))}
+           </div>
+         </div></td></tr>`
+    : '';
 
   // The rejections make the bar visible rather than merely claimed — the same reasoning as the
   // in-app panel. Kept last and small: it is evidence, not the message.
@@ -181,9 +234,10 @@ export function buildDiceEmailHtml(r: DiceResult, dateStr: string): string {
   const foot = `
     <tr><td style="padding:16px 18px 18px;">
       <div style="border-top:1px solid ${BORDER};padding-top:12px;font-size:11px;color:${MUTED};line-height:1.6;">
-        These gates remove <i>checkable</i> problems — a flagged setup, an earnings print, a thin
-        chain, a position too large. They cannot make a short put safe: you can be assigned, and
-        the stock can fall well below your cost basis. Not investment advice.
+        These gates remove <i>checkable</i> problems with the <i>trade</i> — a flagged setup, an
+        earnings print, a thin chain, a broken credit. Size and conviction are reported, not
+        filtered: those are your calls. Nothing here can make a short put safe — you can be
+        assigned, and the stock can fall well below your cost basis. Not investment advice.
         <br><br>
         <span style="color:${ACCENT};">TradeAnalyzer</span> · generated from the
         ${r.briefDate ? esc(r.briefDate) : 'latest'} brief.
@@ -197,7 +251,7 @@ export function buildDiceEmailHtml(r: DiceResult, dateStr: string): string {
       <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="560"
              style="width:100%;max-width:560px;background:${CARD};border:1px solid ${BORDER};border-radius:10px;
                     font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:${TEXT};">
-        ${head}${stale}${stretch}${body}${rejects}${foot}
+        ${head}${stale}${overBudget}${body}${alt}${rejects}${foot}
       </table>
     </td></tr>
   </table>

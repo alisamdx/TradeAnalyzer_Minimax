@@ -1100,6 +1100,23 @@ function buildApi() {
       invoke<string>('strategyLab:aiRationale', score, ctx),
   };
 
+/** Mirrors `DicePick` in src/main/services/roll-the-dice.ts. `fit` is REPORTED, never a filter:
+ *  capital and conviction stopped gating the pick in v1.1.168. */
+type DicePickShape = {
+  ticker: string; price: number; compositeScore: number; briefRank: number;
+  strike: number; expiration: string; dte: number;
+  premiumPerShare: number; creditTotal: number; capitalRequired: number;
+  effectiveCostBasis: number; discountToSpotPct: number;
+  annualizedReturn: number | null; popEstimate: number | null;
+  liquidityScore: number; grade: string;
+  criticRationale: string | null; aiRationale: string | null;
+  fit: {
+    withinCapital: boolean;
+    maxCapital: number;
+    conviction: { priceHigh: number | null; strikeWithinBand: boolean | null } | null;
+  };
+};
+
   const scoring = {
     getConfig: (strategy?: ScoringStrategy) =>
       strategy
@@ -1117,16 +1134,9 @@ function buildApi() {
       invoke<{ sent: boolean; message: string }>('scoring:resend-brief-email'),
     /** Roll the Dice: one wheel entry from the latest brief, or an explicit nothing. */
     rollTheDice: (maxCapital?: number) => invoke<{
-      pick: {
-        ticker: string; price: number; compositeScore: number; briefRank: number;
-        strike: number; expiration: string; dte: number;
-        premiumPerShare: number; creditTotal: number; capitalRequired: number;
-        effectiveCostBasis: number; discountToSpotPct: number;
-        annualizedReturn: number | null; popEstimate: number | null;
-        liquidityScore: number; grade: string;
-        criticRationale: string | null; aiRationale: string | null;
-        tier: 'base' | 'stretch'; stretchReason: string | null;
-      } | null;
+      pick: DicePickShape | null;
+      /** Best candidate that fits `maxCapital`, only when `pick` itself does not. */
+      withinBudget: DicePickShape | null;
       noPickReason: string | null;
       briefDate: string | null;
       briefAgeDays: number | null;

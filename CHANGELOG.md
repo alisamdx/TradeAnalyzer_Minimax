@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.168] — 2026-09-03
+
+### feat — Roll the Dice picks on the trade's merit; your size and conviction list only annotate
+
+- **Today's no-dice day rejected two picks for being about the operator, not about the trade.** MPC ($37,000) and AAPL ($32,000) both cleared every quality gate — critic `pass` and non-degraded, a constructible CSP, liquidity ≥ 8 — and died on the capital ceiling. MPC died on the *first* exception check, "not on your conviction list", so **its composite was never evaluated at all**; that list holds 13 names and the operator no longer actively maintains it.
+- **The gates now judge the trade, never the operator.** Trade-quality gates (critic verdict, constructible and liquid CSP, earnings clear of expiry, real net credit) stay hard. Operator-fit facts — capital committed and conviction-list membership — are computed, reported on `pick.fit`, and **exclude nothing**. An operator's stated size and a stale watchlist are not evidence about a trade, and a filter that deletes a setup before they see it does not inform their funding decision, it replaces it.
+- **The exception tier is deleted**, not loosened: `qualifiesForStretch`, `STRETCH_MIN_SCORE` (70), `STRETCH_MIN_LIQUIDITY` (11) and `DEFAULT_STRETCH_CAPITAL` ($50k) all go. It existed for exactly one purpose — letting good trades escape the capital gate — and that gate is gone.
+- **`maxCapital` survives as a reporting split, not a ceiling.** When the merit pick exceeds it, the result also carries **`withinBudget`**: the highest-scoring eligible candidate that does fit. Demoting the gate therefore never leaves a day with nothing fundable — the operator sees the best trade *and* an affordable one, and chooses between them.
+- **Surfaces state the fit rather than justifying it.** An over-budget pick leads with "TIES UP $37,000 — ABOVE YOUR USUAL $30,000" and says it is *not* a rejection. Conviction is stated in four distinguishable states — not listed / listed with no band / strike inside the band / **strike ABOVE the band** (loud: on assignment you would be buying at a price you already ruled out). The gate list no longer claims the price was checked against a limit.
+- **Validated per FR-SEY-5** (`scripts/dice-fit-demotion-study.mjs`, 62 stored wheel briefs, both arms sharing identical quality gates): pick-days **26 → 34 (41.9% → 54.8%)**, median winner composite unchanged at **65.9** — removing a non-merit filter can only raise the winner's merit, so a drop would have meant a bug. Of the 34 pick-days, 12 exceed $30,000 and only 3 of those have a within-budget alternative to offer; 17 are not on the conviction list; 0 breach a never-above band.
+- **Costs accepted knowingly:** the promise shifts from "close your eyes and do it" to "here is the best wheel entry, check you can fund it", and **nothing now enforces the operator's own own-at-strike rule** — the conviction sentence is the only place that question is still asked, and a badge is not a band. The critic verdict still rejects by far the most and is untouched.
+- Tests rewritten to prove the gate **stays** gone rather than that a happy path passes. Suite: 1129 passed.
+
 ## [1.1.167] — 2026-09-02
 
 ### fix — the E*Trade OAuth calls are instrumented like every other request

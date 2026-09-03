@@ -862,6 +862,29 @@ interface DailyBriefViewProps {
 
 /** Shape returned by `scoring:roll-the-dice` (see src/main/services/roll-the-dice.ts). */
 type DiceResult = Awaited<ReturnType<typeof window.api.scoring.rollTheDice>>;
+type DicePick = NonNullable<DiceResult['pick']>;
+
+/**
+ * The own-at-strike sentence. Conviction membership stopped gating the pick in v1.1.168, so this
+ * is the only place the question still gets asked — it has to be asked out loud rather than
+ * implied by silence. Mirrors `convictionNote` in dice-email-builder.ts so the panel and the
+ * email never disagree about what the bands say.
+ */
+function convictionNote(p: DicePick): string {
+  const c = p.fit.conviction;
+  if (c === null) {
+    return `Not on your conviction list — you have not pre-committed to owning ${p.ticker} at any `
+         + `price, so "would I be happy owning it at $${p.strike}?" is a live question here.`;
+  }
+  if (c.priceHigh == null || c.strikeWithinBand == null) {
+    return `On your conviction list, but no "never above" band is set for ${p.ticker} — nothing to check the $${p.strike} strike against.`;
+  }
+  if (c.strikeWithinBand) {
+    return `On your conviction list, and the $${p.strike} strike is inside your $${c.priceHigh} never-above line.`;
+  }
+  return `⚠ On your conviction list, but the $${p.strike} strike is ABOVE your $${c.priceHigh} `
+       + `never-above line — on assignment you would be buying at a price you already ruled out.`;
+}
 
 export function DailyBriefView({ onGoToStrategyLab }: DailyBriefViewProps) {
   const [briefs, setBriefs] = useState<DailyBriefEntry[]>([]);
@@ -1127,11 +1150,11 @@ export function DailyBriefView({ onGoToStrategyLab }: DailyBriefViewProps) {
 
           {dice.pick ? (
             <>
-              {dice.pick.tier === 'stretch' && (
+              {!dice.pick.fit.withinCapital && (
                 <div className="dice-stretch">
-                  <b>Above your normal size — ${dice.pick.capitalRequired.toLocaleString()}.</b>{' '}
-                  An exception, taken because it is {dice.pick.stretchReason}. Worth a look before
-                  you place it rather than a reflex.
+                  <b>Ties up ${dice.pick.capitalRequired.toLocaleString()} — above your usual ${dice.pick.fit.maxCapital.toLocaleString()}.</b>{' '}
+                  Not a rejection: this is the best setup today and whether you fund it is your call.
+                  {dice.withinBudget && ' The best one that fits your usual size is below.'}
                 </div>
               )}
               <div className="dice-headline">
@@ -1147,7 +1170,7 @@ export function DailyBriefView({ onGoToStrategyLab }: DailyBriefViewProps) {
                 <div className="dice-stat">
                   <span className="dice-k">Capital</span>
                   <span className="dice-v">${dice.pick.capitalRequired.toLocaleString()}</span>
-                  <span className="dice-n">{dice.pick.tier === 'stretch' ? 'cash-secured · over normal limit' : 'cash-secured'}</span>
+                  <span className="dice-n">{dice.pick.fit.withinCapital ? 'cash-secured' : `cash-secured · over your $${dice.pick.fit.maxCapital.toLocaleString()}`}</span>
                 </div>
                 <div className="dice-stat">
                   <span className="dice-k">Cost basis if assigned</span>
@@ -1165,8 +1188,25 @@ export function DailyBriefView({ onGoToStrategyLab }: DailyBriefViewProps) {
                   <span className="dice-n">score {dice.pick.compositeScore.toFixed(1)} · liq {dice.pick.liquidityScore.toFixed(0)}/15</span>
                 </div>
               </div>
+              <div className="dice-conviction">{convictionNote(dice.pick)}</div>
               {dice.pick.criticRationale && (
                 <div className="dice-rationale"><b>Critic:</b> {dice.pick.criticRationale}</div>
+              )}
+              {dice.withinBudget && (
+                <div className="dice-alt">
+                  <div className="dice-alt-k">Within your usual size</div>
+                  <div className="dice-alt-headline">
+                    Sell the <b>{dice.withinBudget.ticker}</b> ${dice.withinBudget.strike} put,{' '}
+                    {dice.withinBudget.expiration} ({dice.withinBudget.dte}d)
+                  </div>
+                  <div className="dice-alt-n">
+                    ${dice.withinBudget.capitalRequired.toLocaleString()} cash ·
+                    ${dice.withinBudget.creditTotal.toFixed(0)} credit ·
+                    own it at ${dice.withinBudget.effectiveCostBasis.toFixed(2)} ·
+                    score {dice.withinBudget.compositeScore.toFixed(1)} · grade {dice.withinBudget.grade}
+                  </div>
+                  <div className="dice-alt-n">{convictionNote(dice.withinBudget)}</div>
+                </div>
               )}
               {dice.runnerUp && (
                 <div className="dice-runner">

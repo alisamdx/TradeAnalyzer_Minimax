@@ -845,13 +845,17 @@ change. `iv_history` is included because IV rank reads a 252-day window.
 One wheel entry from the latest brief, or nothing. Not a score — a chain of HARD gates over
 picks the brief has already scored and ranked. This layer only removes.
 
+**The gates judge the TRADE, never the OPERATOR (v1.1.168).** Two different kinds of "no" were
+originally mixed here: trade-quality gates (facts about the setup) and operator-fit gates (facts
+about the operator — the capital ceiling and conviction-list membership). The second kind was
+deleting candidates exactly as if they were quality failures. Fit is now computed, reported, and
+excludes nothing.
+
 ```
-eligible(pick) =
+eligible(pick) =                               # trade quality ONLY
       criticVerdict.verdict == 'pass'          # caution and flag both fail
   AND criticVerdict.degraded != true           # un-vetted is not an all-clear
   AND price != null                            # needed for the cost-basis maths
-  AND capital <= maxCapital                    # capital = strike x 100 x qty; default $30,000
-      OR qualifiesForStretch(...)              # the defined exception, below
   AND exists CSP (slug 'short-naked-put', setup constructible)
   AND liquidityScore >= MIN_TRADABLE_LIQUIDITY_SCORE   # = 8
   AND earnings_calendar HAS the ticker         # absent = unknown = fail closed
@@ -859,7 +863,9 @@ eligible(pick) =
   AND earningsDate  > expiration               # no report inside the hold window
   AND netCredit > 0
 
-winner = argmax(compositeScore) over eligible, else NOTHING
+pick         = argmax(compositeScore) over eligible, else NOTHING
+withinBudget = argmax(compositeScore) over {eligible : capital <= maxCapital}
+               ONLY when pick itself exceeds maxCapital; else null
 ```
 
 Derived on the winner:
@@ -870,25 +876,45 @@ effectiveCostBasis  = strike − premiumPerShare
 discountToSpotPct   = (price − effectiveCostBasis) / price × 100
 ```
 
-### The exception tier (v1.1.164)
+### Fit — reported, never a filter (v1.1.168)
 
 ```
-qualifiesForStretch =
-      capital <= stretchCapital                # default $50,000; an unbounded exception is none
-  AND ticker IS ON the conviction list
-  AND strike <= conviction.price_high          # the operator's own "never enter above this"
-  AND compositeScore >= 70
-  AND liquidityScore >= 11
+fit.withinCapital          = capital <= maxCapital        # capital = strike x 100 x qty
+fit.maxCapital             = maxCapital                   # default $30,000
+fit.conviction             = null  if ticker not on the conviction list
+                             else { priceHigh, strikeWithinBand: strike <= priceHigh }
 ```
 
-Capital, not share price, because the strike sits below spot: a $306 stock struck at $285 commits
-$28,500 while a $299 stock struck at $295 commits $29,500. Over 62 stored briefs the switch moved
-the hit rate 23 -> 25 days; the exception adds one more, firing twice (AMD, June 2026).
+Capital is measured, not share price, because the strike sits below spot: a $306 stock struck at
+$285 commits $28,500 while a $299 stock struck at $295 commits $29,500 — the cheaper-looking stock
+costs more. But the number is now a **budget line, not a ceiling**. It splits the report rather
+than trimming the field: when the merit pick is over it, `withinBudget` names the best candidate
+that fits, so demoting the gate never leaves a day with nothing fundable in it.
 
-Every stretch requirement is evidence committed **before** the setup appeared. `price_high` is
-used rather than `price_low` because 3 of 13 stored conviction rows have `low > mid`, so only the
-never-above line is semantically reliable. `criticVerdict.confidence` is deliberately NOT a
-criterion — it reads `high` on 40 of 41 eligible picks, so it discriminates nothing.
+**Why fit stopped gating.** The v1.1.164 exception tier (`qualifiesForStretch` — conviction list
+AND `strike <= price_high` AND composite >= 70 AND liquidity >= 11, capped at $50,000) existed for
+exactly one purpose: letting good trades escape the capital gate. With the capital gate gone it
+had nothing to do, and it went with it. The trigger was 2026-09-03, when MPC was refused at
+$37,000 purely for being absent from a conviction list the operator no longer actively maintains —
+its score was never evaluated at all. Absence from a stale list is evidence about the LIST, not
+about the trade, and what the operator can fund is a decision they make on the day. A filter that
+deletes a setup before they see it does not inform that decision, it replaces it.
+
+**Measured cost of the demotion** (`scripts/dice-fit-demotion-study.mjs`, 62 stored wheel briefs,
+both arms sharing identical quality gates): pick-days 26 → 34 (41.9% → 54.8%), median composite of
+the winner unchanged at 65.9 — removing a non-merit filter cannot lower the winner's merit, and a
+drop would have meant a bug. Of the 34 new pick-days, 12 need more than $30,000 and only 3 of those
+have a within-budget alternative to offer; 17 are not on the conviction list; 0 breach a
+never-above band. The replay's earnings gate is not independently valid (see below) but is applied
+identically to both arms, so the delta holds.
+
+**What is lost, deliberately.** Nothing now enforces the operator's own own-at-strike rule. The
+conviction band is still computed and stated in four distinct states — not listed / listed with no
+band / strike inside the band / strike ABOVE the band — and the last is surfaced loudly, but a
+badge is not a gate. `price_high` is used rather than `price_low` because only the never-above line
+is semantically reliable (3 of 13 stored rows sat inverted for three weeks before migration 075).
+`criticVerdict.confidence` remains deliberately unused — it reads `high` on 40 of 41 eligible
+picks, so it discriminates nothing.
 
 **Why the earnings gate is an exclusion, not the brief's −20 penalty.** A penalty on a high
 scorer still leaves it on top; the session that produced this feature opened with the brief

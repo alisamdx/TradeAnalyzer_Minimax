@@ -3475,6 +3475,21 @@ input[type='checkbox'] {
 .dice-v { font-size: 17px; font-weight: 700; color: var(--text); }
 .dice-n { font-size: 10px; color: var(--text-muted); }
 
+/* The own-at-strike sentence. Deliberately in body colour, not muted: conviction stopped being
+   a gate in v1.1.168, so this line is the only place the question is asked at all. */
+.dice-conviction { font-size: 12px; color: var(--text); margin-top: 10px; line-height: 1.55; max-width: 820px; }
+
+/* The best candidate that FITS the operator's usual size, shown only when the merit pick does
+   not. Quieter than the pick itself — it is the fallback, not the recommendation. */
+.dice-alt {
+  margin-top: 12px; padding: 9px 11px;
+  border: 1px solid var(--border); border-radius: 6px; background: var(--bg);
+  max-width: 820px;
+}
+.dice-alt-k { font-size: 10px; text-transform: uppercase; letter-spacing: .3px; color: var(--text-muted); }
+.dice-alt-headline { font-size: 13px; font-weight: 600; color: var(--text); margin: 3px 0 4px; }
+.dice-alt-n { font-size: 11px; color: var(--text-muted); line-height: 1.55; }
+
 .dice-rationale { font-size: 11px; color: var(--text-muted); margin-top: 10px; line-height: 1.5; max-width: 820px; }
 .dice-runner { font-size: 11px; color: var(--text-muted); margin-top: 6px; }
 .dice-none { font-size: 13px; color: var(--text); line-height: 1.5; }

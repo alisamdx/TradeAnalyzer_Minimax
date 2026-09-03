@@ -14,9 +14,9 @@ const WITH_PICK: DiceResult = {
     annualizedReturn: 30.1, popEstimate: 74, liquidityScore: 11, grade: 'A',
     criticRationale: 'Defensive staple, IV rank elevated without an event driving it.',
     aiRationale: 'quality name',
-    tier: 'base',
-    stretchReason: null,
+    fit: { withinCapital: true, maxCapital: 30_000, conviction: { priceHigh: 58, strikeWithinBand: true } },
   },
+  withinBudget: null,
   noPickReason: null,
   briefDate: '2026-09-02',
   briefAgeDays: 0,
@@ -28,6 +28,7 @@ const WITH_PICK: DiceResult = {
 
 const NO_PICK: DiceResult = {
   pick: null,
+  withinBudget: null,
   noPickReason: 'No dice today — 4 wheel picks considered, none cleared every gate (most common: critic caution, 3).',
   briefDate: '2026-09-02',
   briefAgeDays: 0,
@@ -90,7 +91,9 @@ describe('buildDiceEmailHtml', () => {
   it('renders a no-pick day as a normal outcome, not an error', () => {
     const h = buildDiceEmailHtml(NO_PICK, 'Tue, Sep 2');
     expect(h).toContain('No dice today');
-    expect(h).toContain('two days in three');
+    // The reassurance must name what a blank day is NOT about: size and conviction stopped
+    // removing anything in v1.1.168, so a silent day can only mean the trades themselves failed.
+    expect(h).toContain('no longer remove anything');
     expect(h).not.toContain('The order');
   });
 
@@ -115,22 +118,74 @@ describe('buildDiceEmailHtml', () => {
     expect(h).toContain('&lt;script&gt;');
   });
 
-  // An over-limit pick must never arrive looking like an ordinary night's trade.
-  it('announces a stretch pick before the order, with the amount and the reason', () => {
+  // An over-budget pick is not an exception being granted — capital stopped gating in v1.1.168 —
+  // so the banner states the number and hands the decision over rather than justifying itself.
+  it('leads with the size when the pick is over the usual line, without calling it a rejection', () => {
     const h = buildDiceEmailHtml({
       ...WITH_PICK,
-      pick: { ...WITH_PICK.pick!, tier: 'stretch', capitalRequired: 47_000,
-              stretchReason: 'on your conviction list, strike $470 within your $554 never-above line' },
+      pick: { ...WITH_PICK.pick!, capitalRequired: 47_000,
+              fit: { ...WITH_PICK.pick!.fit, withinCapital: false } },
     }, 'Tue, Sep 2');
-    expect(h).toContain('ABOVE YOUR NORMAL SIZE');
-    expect(h).toContain('$47,000');
-    expect(h).toContain('never-above line');
+    expect(h).toContain('TIES UP $47,000');
+    expect(h).toContain('ABOVE YOUR USUAL $30,000');
+    expect(h).toContain('Not a rejection');
     // and it comes BEFORE the order, not as a footnote after it
-    expect(h.indexOf('ABOVE YOUR NORMAL SIZE')).toBeLessThan(h.indexOf('The order'));
+    expect(h.indexOf('TIES UP')).toBeLessThan(h.indexOf('The order'));
   });
 
-  it('shows no stretch banner on an ordinary pick', () => {
-    expect(buildDiceEmailHtml(WITH_PICK, 'Tue, Sep 2')).not.toContain('ABOVE YOUR NORMAL SIZE');
+  it('shows no size banner on a pick that fits', () => {
+    expect(buildDiceEmailHtml(WITH_PICK, 'Tue, Sep 2')).not.toContain('TIES UP');
+  });
+
+  // The other half of demoting the capital gate: an unfundable pick must never leave the day
+  // with nothing actionable in it.
+  it('offers the within-budget alternative after the order when the pick is over the line', () => {
+    const h = buildDiceEmailHtml({
+      ...WITH_PICK,
+      pick: { ...WITH_PICK.pick!, capitalRequired: 47_000,
+              fit: { ...WITH_PICK.pick!.fit, withinCapital: false } },
+      withinBudget: { ...WITH_PICK.pick!, ticker: 'JNJ', strike: 150, capitalRequired: 15_000 },
+    }, 'Tue, Sep 2');
+    expect(h).toContain('Within your usual size');
+    expect(h).toContain('Sell 1 JNJ $150 put');
+    expect(h).toContain('$15,000 cash');
+    expect(h).toContain('The best one that fits your usual size is at the bottom.');
+    expect(h.indexOf('Within your usual size')).toBeGreaterThan(h.indexOf('The order'));
+  });
+
+  // Conviction membership stopped gating the pick, so the email is now the ONLY place the
+  // own-at-strike question gets asked. All four states must be distinguishable.
+  it('states the conviction position in words, including when the ticker is not listed', () => {
+    const off = buildDiceEmailHtml(
+      { ...WITH_PICK, pick: { ...WITH_PICK.pick!, fit: { ...WITH_PICK.pick!.fit, conviction: null } } },
+      'Tue, Sep 2');
+    expect(off).toContain('Not on your conviction list');
+    expect(off).toContain('live question');
+
+    const inside = buildDiceEmailHtml(WITH_PICK, 'Tue, Sep 2');
+    expect(inside).toContain('inside your $58 never-above line');
+
+    const breach = buildDiceEmailHtml({
+      ...WITH_PICK,
+      pick: { ...WITH_PICK.pick!, fit: { ...WITH_PICK.pick!.fit,
+              conviction: { priceHigh: 45, strikeWithinBand: false } } },
+    }, 'Tue, Sep 2');
+    expect(breach).toContain('ABOVE your $45');
+    expect(breach).toContain('a price you already ruled out');
+
+    const noBand = buildDiceEmailHtml({
+      ...WITH_PICK,
+      pick: { ...WITH_PICK.pick!, fit: { ...WITH_PICK.pick!.fit,
+              conviction: { priceHigh: null, strikeWithinBand: null } } },
+    }, 'Tue, Sep 2');
+    expect(noBand).toContain('band is set for MKC');   // quotes arrive HTML-escaped
+  });
+
+  // Regression: the gate list must not restate size or conviction as bars the trade cleared.
+  it('does not claim the price was checked against a limit', () => {
+    const h = buildDiceEmailHtml(WITH_PICK, 'Tue, Sep 2');
+    expect(h).toContain('Passed every gate:');
+    expect(h).not.toContain('within limit');
   });
 
   it('is a single-column card sized for a phone', () => {

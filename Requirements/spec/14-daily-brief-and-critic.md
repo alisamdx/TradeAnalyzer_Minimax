@@ -69,7 +69,8 @@ without reading it — or to an explicit nothing. Pure filter over the stored br
 change, no provider call, nothing written.
 
 **FR-BRIEF-DICE-1** — Returns at most one pick, the highest `compositeScore` among those passing
-every gate in `docs/formulas.md#roll-the-dice`.
+every **trade-quality** gate in `docs/formulas.md#roll-the-dice`. Since v1.1.168 no gate may
+consider the operator's situation — see FR-BRIEF-DICE-8.
 
 **FR-BRIEF-DICE-2** — MUST be able to return nothing. A feature that always produces a pick would
 have to lower its bar on a bad day, which is when the bar matters. "No dice today" is a
@@ -91,9 +92,13 @@ is shown, not suppressed (a Saturday review of Friday's brief is legitimate).
 
 ### Validation
 
-Retrospective over 62 stored wheel briefs (2026-06-04 … 2026-09-01), 248 picks:
-a pick on **23 of 62 days (37%)**. Rejections: critic verdict 172, price ceiling 27,
-liquidity 24, 25 passed.
+Retrospective over 62 stored wheel briefs (2026-06-04 … 2026-09-01), 248 picks: a pick on
+**23 of 62 days (37%)** at the original share-price ceiling; 26 of 62 (42%) once the gate moved to
+capital committed (v1.1.164); **34 of 62 (55%)** once operator fit stopped gating at all
+(v1.1.168 — see FR-BRIEF-DICE-9). Rejections under the original rules: critic verdict 172,
+price ceiling 27, liquidity 24, 25 passed. The critic verdict has always rejected by far the most,
+and still does — it is the only remaining lever on the hit rate, and loosening it would defeat
+the premise.
 
 **The earnings gate cannot be validated retrospectively.** `earnings_calendar` holds one row per
 ticker with no history, so a replay sees today's next-report date, not the one that was live on
@@ -118,19 +123,58 @@ the replay simply cannot see it.
 - The in-app **✉ Email it** button, `scoring:email-roll-the-dice`, and the nightly send MUST all
   resolve the pick through `computeRollTheDice(db)`, so they cannot disagree.
 
-**FR-BRIEF-DICE-8 (v1.1.164)** — The sizing gate is on CAPITAL COMMITTED (`strike × 100 × qty`),
-not share price, with a defined exception tier.
+**FR-BRIEF-DICE-8 (v1.1.164, superseded by FR-BRIEF-DICE-9)** — Sizing is measured as CAPITAL
+COMMITTED (`strike × 100 × qty`), not share price. Share price remains required only for the
+cost-basis maths. The exception tier this requirement originally defined (conviction list AND
+`strike ≤ price_high` AND composite ≥ 70 AND liquidity ≥ 11 AND capital ≤ $50,000) is **removed**
+in v1.1.168; it existed solely to let good trades escape the capital gate, and that gate is gone.
 
-- Base ceiling $30,000 (configurable). Share price remains required only for the cost-basis maths.
-- A pick above the base ceiling MUST NOT be admitted merely for scoring well. It qualifies only
-  by clearing a strictly higher bar on every axis: on the conviction list, strike at or below that
-  ticker's `price_high` ("never enter above this"), composite ≥ 70, liquidity ≥ 11/15, and capital
-  ≤ $50,000. All of these are commitments made *before* the setup appeared.
+**FR-BRIEF-DICE-9 (v1.1.168)** — The gates MUST judge the trade, never the operator.
+
+- Gates are of exactly two kinds and only the first may exclude:
+  - **Trade quality** — facts about the setup: critic `pass` and non-`degraded`, a constructible
+    and liquid CSP, no earnings inside the hold window, a real net credit. These stay HARD.
+  - **Operator fit** — facts about the operator: capital committed vs their normal size, and
+    conviction-list membership. These MUST be computed and reported, and MUST NOT remove a
+    candidate from consideration.
+- Rationale: an operator's stated size and their conviction list are not evidence about a trade.
+  Both were found miscalibrated in live use — on 2026-09-03 MPC was refused at $37,000 purely for
+  being absent from a list the operator no longer actively maintains, its composite never
+  evaluated. A filter that deletes a setup before the operator sees it does not inform their
+  funding decision, it replaces it.
+- `maxCapital` ($30,000 default, configurable) becomes a **reporting split**, not a ceiling. When
+  the merit pick exceeds it the result MUST also carry `withinBudget`: the highest-scoring
+  eligible candidate that does fit, so demoting the gate never leaves a day with nothing fundable.
+  `withinBudget` MUST be null when the pick already fits or when nothing eligible fits.
+- Every surface MUST state the size before the order when the pick is over the line, carrying the
+  amount and the operator's own limit — and MUST NOT frame it as an exception granted or a
+  rejection avoided. It is a fact handed over for a decision.
+- Conviction MUST be reported in four distinguishable states: not listed / listed with no
+  never-above band / strike inside the band / strike ABOVE the band. The last MUST be surfaced
+  loudly. `price_high` is used rather than `price_low`/`price_mid` because stored rows are not
+  reliably ordered (3 of 13 sat inverted before migration 075); only the never-above line is
+  unambiguous.
 - `criticVerdict.confidence` MUST NOT be used as a criterion — measured `high` on 40 of 41
   eligible picks, it discriminates nothing and would only simulate rigour.
-- `price_high` is used rather than `price_low`/`price_mid` because stored conviction rows are not
-  reliably ordered (3 of 13 have `low > mid`); only the never-above line is unambiguous.
-- A stretch pick MUST be announced before the order itself in every surface, carrying the amount
-  and the reason, so it cannot read as an ordinary recommendation.
-- Thresholds are calibrated to the observed distribution (composite 58.9–76.0 median 65.9;
-  liquidity median 11), not chosen by intuition — a draft using ≥ 75 fired on nothing.
+- **Accepted trade-off, recorded deliberately:** nothing now enforces the operator's own
+  own-at-strike rule, and the feature's promise shifts from "act unread" to "here is the best
+  wheel entry, check you can fund it". The conviction sentence is the only place that question is
+  still asked, and a badge is not a band.
+
+#### Validation of the demotion (FR-SEY-5)
+
+`scripts/dice-fit-demotion-study.mjs` replays all 62 stored wheel briefs under both rule sets with
+identical trade-quality gates, so the delta is attributable solely to the demotion:
+
+| | fit gated (old) | fit reported (new) |
+|---|---|---|
+| days with a pick | 26 (41.9%) | **34 (54.8%)** |
+| median composite of the winner | 65.9 | 65.9 |
+
+The median is the sanity check: removing a non-merit filter can only raise the winner's merit,
+never lower it, so a drop would have meant a bug. Of the 34 pick-days, 12 exceed $30,000 and only
+3 of those have a within-budget alternative to offer — on the other 9 the operator sees one
+unfundable pick and nothing else, which is still strictly more than the old rules gave them.
+17 picks are not on the conviction list; 0 breach a never-above band. The replay's earnings gate
+remains invalid retrospectively (see FR-BRIEF-DICE-5 note) but is applied identically to both
+arms, so it cancels out of the comparison.
