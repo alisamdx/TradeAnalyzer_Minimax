@@ -154,10 +154,15 @@ export async function getRequestToken(
     { oauth_callback: 'oob' }
   );
 
-  const res = await fetch(url, {
-    headers: { Authorization: authHeader, Accept: 'application/x-www-form-urlencoded' }
+  // requestParams is deliberately empty: the only inputs here are OAuth protocol values,
+  // and `oauth_verifier` (in getAccessToken) is a live short-lived credential. The endpoint
+  // path and outcome are what diagnosis needs.
+  const { res, body, latencyMs, logBase } = await sendETradeRequest({
+    path: REQUEST_TOKEN_PATH, fullUrl: url, authHeader,
+    accept: 'application/x-www-form-urlencoded',
+    timeoutMs: ETRADE_TIMEOUT_MS, requestParams: {},
   });
-  const body = await res.text();
+  logAuthOutcome(logBase, res, body, latencyMs);
   if (!res.ok) throw new Error(`E*Trade request token failed (${res.status}): ${body.slice(0, 300)}`);
 
   const params = Object.fromEntries(new URLSearchParams(body));
@@ -186,10 +191,12 @@ export async function getAccessToken(
     { oauth_verifier: verifier }
   );
 
-  const res = await fetch(url, {
-    headers: { Authorization: authHeader, Accept: 'application/x-www-form-urlencoded' }
+  const { res, body, latencyMs, logBase } = await sendETradeRequest({
+    path: ACCESS_TOKEN_PATH, fullUrl: url, authHeader,
+    accept: 'application/x-www-form-urlencoded',
+    timeoutMs: ETRADE_TIMEOUT_MS, requestParams: {},
   });
-  const body = await res.text();
+  logAuthOutcome(logBase, res, body, latencyMs);
   if (!res.ok) throw new Error(`E*Trade access token failed (${res.status}): ${body.slice(0, 300)}`);
 
   const params = Object.fromEntries(new URLSearchParams(body));
@@ -211,11 +218,13 @@ export async function renewAccessToken(creds: OAuthCredentials): Promise<void> {
     creds.accessToken, creds.accessSecret
   );
 
-  const res = await fetch(url, { headers: { Authorization: authHeader } });
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`E*Trade renew token failed (${res.status}): ${body.slice(0, 200)}`);
-  }
+  const { res, body, latencyMs, logBase } = await sendETradeRequest({
+    path: RENEW_TOKEN_PATH, fullUrl: url, authHeader,
+    accept: 'application/x-www-form-urlencoded',
+    timeoutMs: ETRADE_TIMEOUT_MS, requestParams: {},
+  });
+  logAuthOutcome(logBase, res, body, latencyMs);
+  if (!res.ok) throw new Error(`E*Trade renew token failed (${res.status}): ${body.slice(0, 200)}`);
 }
 
 /**
@@ -249,6 +258,86 @@ function safeLog(entry: ApiLogEntry): void {
   try { logApiCall(entry); } catch { /* logging must never break an API call */ }
 }
 
+/**
+ * The single instrumented transport every E*Trade request goes through.
+ *
+ * Extracted from `etradeGet` so the OAuth calls share it. They used to call `fetch`
+ * directly and were therefore the one part of the integration v1.1.144's logging never
+ * covered: an API log holding 13,098 E*Trade rows contained ZERO auth entries. A renew that
+ * silently failed left no trace at all, which is what reduced the 2026-09-02 stale-token
+ * diagnosis to inference — the log could prove the token worked, but never whether a renew
+ * or re-auth had happened.
+ *
+ * Returns the raw body and the log skeleton; each caller decides what success and failure
+ * mean and logs the outcome itself, because an OAuth response is form-encoded while a
+ * market response is JSON. Network-level faults are logged here, since they look the same
+ * either way (and a dormant token can terminate the stream rather than return 401).
+ */
+async function sendETradeRequest(opts: {
+  path: string;
+  fullUrl: string;
+  authHeader: string;
+  accept: string;
+  timeoutMs: number;
+  requestParams: Record<string, string>;
+}): Promise<{ res: Response; body: string; latencyMs: number; logBase: ApiLogEntry }> {
+  const startedAt = Date.now();
+  const logBase = {
+    timestamp: new Date().toISOString(),
+    provider: 'etrade',
+    endpoint: maskEndpoint(opts.path),
+    method: 'GET',
+    requestParams: scrubObject(opts.requestParams),
+    retryCount: 0,
+    jobRunId: null,
+  } as ApiLogEntry;
+
+  let res: Response;
+  try {
+    res = await fetch(opts.fullUrl, {
+      headers: { Authorization: opts.authHeader, Accept: opts.accept },
+      // A retransmission would replay this exact signed header (same nonce) and earn a
+      // nonce_used 401, so abort rather than let a stalled socket linger. A retry has to
+      // re-sign with a fresh nonce.
+      signal: AbortSignal.timeout(opts.timeoutMs),
+    });
+  } catch (err) {
+    safeLog({
+      ...logBase,
+      responseStatus: null,
+      responseLatencyMs: Date.now() - startedAt,
+      responseSizeBytes: null,
+      errorMessage: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
+  }
+
+  return { res, body: await res.text(), latencyMs: Date.now() - startedAt, logBase };
+}
+
+/**
+ * Log the outcome of an OAuth call.
+ *
+ * A FAILURE body is E*Trade's `oauth_problem=...` envelope — exactly what diagnosis needs.
+ * A SUCCESS body carries `oauth_token` and `oauth_token_secret` in clear text, so it is
+ * never written: the log is a plaintext file with 30-day retention, and a leaked token
+ * secret is a live brokerage credential.
+ */
+function logAuthOutcome(
+  logBase: ApiLogEntry,
+  res: Response,
+  body: string,
+  latencyMs: number,
+): void {
+  safeLog({
+    ...logBase,
+    responseStatus: res.status,
+    responseLatencyMs: latencyMs,
+    responseSizeBytes: body.length,
+    ...(res.ok ? {} : { errorMessage: `HTTP ${res.status}`, responseBodyPreview: body.slice(0, 300) }),
+  });
+}
+
 export async function etradeGet(
   path: string,
   queryParams: Record<string, string>,
@@ -273,41 +362,10 @@ export async function etradeGet(
   //
   // Only the caller's query params are logged (scrubbed), never the OAuth Authorization
   // header, and the account key is masked out of the path.
-  const startedAt = Date.now();
-  const logBase = {
-    timestamp: new Date().toISOString(),
-    provider: 'etrade',
-    endpoint: maskEndpoint(path),
-    method: 'GET',
-    requestParams: scrubObject(queryParams),
-    retryCount: 0,
-    jobRunId: null,
-  };
-
-  let res: Response;
-  try {
-    res = await fetch(fullUrl, {
-      headers: { Authorization: authHeader, Accept: 'application/json' },
-      // A retransmission would replay this exact signed header (same nonce) and earn a
-      // nonce_used 401, so abort rather than let a stalled socket linger. A retry has to
-      // re-enter etradeGet, which re-signs with a fresh nonce.
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-  } catch (err) {
-    // Network-level fault. A dormant E*Trade token can terminate the stream rather than
-    // returning 401 (see CLAUDE.md), and that used to leave no trace at all.
-    safeLog({
-      ...logBase,
-      responseStatus: null,
-      responseLatencyMs: Date.now() - startedAt,
-      responseSizeBytes: null,
-      errorMessage: err instanceof Error ? err.message : String(err),
-    });
-    throw err;
-  }
-
-  const body = await res.text();
-  const latencyMs = Date.now() - startedAt;
+  const { res, body, latencyMs, logBase } = await sendETradeRequest({
+    path, fullUrl, authHeader, accept: 'application/json',
+    timeoutMs, requestParams: queryParams,
+  });
 
   if (!res.ok) {
     // `oauth_problem=nonce_used` means E*Trade saw this exact nonce already — the signed

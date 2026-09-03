@@ -95,6 +95,7 @@ E*Trade is the live options + portfolio source. Implemented in `etrade-auth.ts` 
 - **Keep-alive heartbeat** (v1.1.100): the app pings E*Trade every ~90 min (inside the 2h dormancy window) via `probeETradeConnection`, so the token never goes dormant during a session (and auto-revives if it did). Only acts on a date-valid token.
 - Batch jobs attempt `renewToken()` on auth failure; a hard (midnight) expiry surfaces a "Reconnect → Settings" notification.
 - **All requests go through `etradeGet(path, params, creds)`** which builds the OAuth 1.0a signature. Never construct auth headers by hand.
+- **One instrumented transport.** `etradeGet` and the three OAuth calls (`getRequestToken`, `getAccessToken`, `renewAccessToken`) share `sendETradeRequest` — fetch, 30 s hard timeout, and network-fault logging — so every E*Trade call reaches `logs/api/` (v1.1.167; the OAuth calls used to bypass it entirely, leaving 13,098 logged rows with zero auth entries). Failure bodies are logged; **auth success bodies never are**, since they carry `oauth_token`/`oauth_token_secret` in clear text.
 
 ### E*Trade endpoints
 - Quote: `GET /v1/market/quote/{symbol}?detailFlag=ALL` — full field set. With `requireEarningsDate=true`, the `All.nextEarningDate` field is populated (`MM/DD/YYYY`); without it, that field is `""`.

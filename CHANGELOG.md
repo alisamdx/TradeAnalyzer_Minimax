@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.167] — 2026-09-02
+
+### fix — the E*Trade OAuth calls are instrumented like every other request
+
+- **The auth calls were the one blind spot left in the v1.1.144 logging.** `getRequestToken`, `getAccessToken` and `renewAccessToken` called `fetch` directly rather than going through the instrumented path, so the 2026-09-02 API log held **13,098 E*Trade rows and zero auth entries**. A renew that silently failed left no trace at all — the log could prove a token *worked*, but never whether a renew or re-auth had happened. That is exactly what reduced yesterday's stale-token diagnosis (v1.1.166) to inference.
+- **One transport now, not two.** The fetch + timeout + network-fault logging is extracted from `etradeGet` into `sendETradeRequest`, and all four call sites share it. `etradeGet` keeps its own nonce-retry and JSON handling; the OAuth calls keep their form-encoded parsing. Each caller logs its own outcome, because success means different things to a market call and a token exchange.
+- **The asymmetry that matters: failures are logged, successes are not.** An auth *failure* body is E*Trade's `oauth_problem=…` envelope — precisely what diagnosis needs, so it is written. An auth *success* body carries `oauth_token` and `oauth_token_secret` in clear text and is **never** written: the API log is a plaintext file with 30-day retention, and a leaked token secret is a live brokerage credential. `oauth_verifier` is not logged either, nor the signed `Authorization` header.
+- **The OAuth calls inherit the 30 s hard timeout.** They previously had none, so a stalled socket could be retransmitted by undici — replaying the already-signed header and earning `oauth_problem=nonce_used`. This is a behaviour change on the live auth path, and it applies most to `renewAccessToken`, the call most likely to meet a dormant token that kills the stream rather than returning 401.
+- 13 regression tests (`tests/etrade-auth-logging.test.ts`), including leak canaries asserting that a freshly minted token is returned to the caller but never reaches the log, and that a throwing logger can neither break a renew nor swallow its error. Suite: 1126 passed.
+
 ## [1.1.166] — 2026-09-02
 
 ### fix — a stale token date no longer condemns a working E*Trade token
