@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.171] — 2026-09-03
+
+### docs — T1: the short put's 0.30 delta target is validated. No change.
+
+- **The least-audited number in the wheel path now has evidence.** `strategy-lab-service.ts` builds every `short-naked-put` at a hardcoded `deltaTarget: 0.30` — one constant for every ticker in every IV regime, borrowed from tastytrade convention and never tested here.
+- **The method the inventory proposed was impossible.** It said to re-derive the CSP at other deltas "from the stored chains" — there are none. `options_cache` is a live cache holding **0 rows**, and `daily_briefs.picks` records only the contract chosen. Synthesising strikes through Black-Scholes on stored IV would ignore the volatility smile, understating OTM put premium and biasing against the low-delta arm under test. Not done.
+- **What exists is better.** `options_premium_history` records one **real** CSP per ticker per day per strategy with its real `delta`, `premium` and `strike`, settled against the real close at expiry. Wheel's band spans 0.20–0.30 and income's reaches 0.35, so the stored history is an observational experiment over the range that matters. **16,902 settled wheel CSPs · 1,005 tickers · 31 dates.**
+- **Matched pairs are the real test.** Wheel and income sometimes select different strikes on the **same ticker, same day, same expiry** — ticker, regime, IV and DTE constant by construction, only delta differing. 1,151 pairs → **937 independent episodes**: low delta 0.23 → **+0.48%** return on capital, high delta 0.28 → **+1.14%**. Higher delta won **78.3%** of decided episodes (562/718). Decomposition: +0.54pp extra premium against +2.4pp extra assignment — the premium more than covers it. **Dose–response is monotone** (+0.22 / +0.41 / +2.26 pts as the delta gap widens), which is what separates a real effect from noise.
+- **Monotone above 0.30 too**, using income's band: 0.20–0.24 +1.11%, 0.24–0.29 +1.23%, 0.29–0.33 +1.33%, 0.33–0.36 **+1.48%** — and the top two bins carry *lower* IV rank (47–48 vs 57–59), so the confound runs against the finding rather than producing it.
+- **Not raised anyway, and this is the substantive part.** Sections A–C measure the premium seller's outcome; a wheel is not purely a premium business. v1.1.169 found the cost basis landing at or below the 200-day average separated outcomes by 17.4pp, and delta moves the two **in opposite directions**: ~0.21 → ~0.29 buys ~0.17pp of return on collateral and costs ~7pp of picks landing at or below that line (70.0% → 62.9%). Those are different quantities over different windows and are **not nettable** — combining them would manufacture a precision neither has. With section C's top bin at 542 rows from one regime and own-at-strike itself resting on 12 episodes, FR-SEY-5 does not justify moving a live parameter.
+- **Verdict: keep 0.30.** Nothing supports lowering it; raising it is not supported strongly enough. It sits at the top of the wheel band, where the premium evidence is strongest and the cost-basis cost has not yet compounded.
+- Caveats carried in the script and changelog: real quotes span 0.20–0.35 only (nothing about 0.10 or 0.45); one regime, 31 dates in 6.5 weeks; section B's pairs are a non-random subset (they exist only where the two code paths disagreed); held to expiry at intrinsic with no management, roll or post-assignment covered call — all three cushion assignment, so the true cost of higher delta is *smaller* than measured, which biases toward raising it and is another reason not to act on one regime.
+
 ## [1.1.170] — 2026-09-03
 
 ### docs — `optionLiquidity` re-tested on 2.7x the sample; the disable is now data-backed, not judgement

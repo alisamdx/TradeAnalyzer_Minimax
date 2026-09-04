@@ -83,13 +83,13 @@ Enabled weight sums to **91**. I verified this does *not* silently deflate score
 
 | parameter | value | provenance | note |
 |---|---|---|---|
-| `deltaTarget` (short put) | **0.30** | **convention** | One constant, every ticker, every IV regime. Sets assignment probability, premium, and therefore cost basis. **The least-audited number in the entire path.** |
+| `deltaTarget` (short put) | **0.30** | **validated** (v1.1.171) | One constant, every ticker, every IV regime. Tested on 16,902 settled CSPs + 937 matched-pair episodes — **passes where it stands**; nothing supports lowering it. See **T1**. |
 | `selectExpiration` window | DTE **20–50**, target **30** | **convention** | |
 | expiry fallback | nearest ≥ **14** DTE | **invented** | |
 | strike fallback when no greeks | `otmFraction = 1 − delta × 1.5` | **invented** | A rough linearisation used when the chain has no deltas. |
 | `MIN_TRADABLE_LIQUIDITY_SCORE` | **8** / 15 | **invented** | Different from Layer 1's bar of 5. See **F3**. |
 
-Partly tested: a weekly→monthly expiry A/B ran 2026-08-04 and **failed** FR-SEY-5, so expiry selection has *some* evidence behind it. Delta has none.
+Expiry selection has some evidence: a weekly→monthly A/B ran 2026-08-04 and **failed** FR-SEY-5. Delta was tested in v1.1.171 and **passes**. The remaining unvalidated items on this layer are the two fallbacks — the ≥14 DTE expiry fallback and the no-greeks strike linearisation — both of which fire only when the primary path cannot.
 
 ---
 
@@ -135,13 +135,42 @@ Partly tested: a weekly→monthly expiry A/B ran 2026-08-04 and **failed** FR-SE
 
 All four are testable on the stored-brief replay under FR-SEY-5. Ordered by expected impact.
 
-### T1 — `deltaTarget = 0.30` on the short put
+### ~~T1 — `deltaTarget = 0.30` on the short put~~ — CLOSED 2026-09-03, keep 0.30
 
-*The highest-value test here.* Delta sets assignment probability, premium, and cost basis simultaneously — and the cost basis is exactly what `own-at-strike-study.mjs` already knows how to score.
+Run and settled in **v1.1.171** (`scripts/fr-wheel-delta-study.mjs`).
 
-- **Method**: re-derive the CSP at 0.20 / 0.25 / 0.30 / 0.35 from the stored chains, then compare outcomes from the resulting cost basis, excess of SPY, collapsed to independent episodes.
-- **Passes if**: an alternative delta is at worst neutral on both return-from-basis *and* assignment frequency.
-- **Risk to watch**: lower delta means less premium for the same capital; the comparison must be per dollar committed, not per contract.
+**The method proposed above was impossible.** There are no stored chains — `options_cache` is a
+live cache holding 0 rows. Synthesising alternative strikes through Black-Scholes would ignore the
+volatility smile, understating OTM premium and biasing against the low-delta arm under test. What
+exists instead is better: `options_premium_history` records one **real** CSP per ticker per day per
+strategy with its real delta, premium and strike, settled against the real close at expiry — an
+observational experiment over 0.20–0.35.
+
+**16,902 settled wheel CSPs, 1,005 tickers, 31 dates.** Higher delta returns more, consistently:
+
+| | low delta (0.23) | high delta (0.28) |
+|---|---|---|
+| premium / strike | 1.93% | 2.47% |
+| assigned | 15.2% | 17.6% |
+| **mean return on capital** | **+0.48%** | **+1.14%** |
+
+That row is from **937 matched-pair episodes** — the same ticker, same day, same expiry, where
+wheel and income happened to pick different strikes, so ticker, regime, IV and DTE are constant by
+construction. Higher delta won **78.3%** of decided episodes, and the dose–response is monotone
+(+0.22 → +0.41 → +2.26 pts as the delta gap widens). Income data extends it: monotone to **0.35**
+(+1.48% return), with *lower* IV rank in the top bins, so the confound runs against the finding.
+
+**The "risk to watch" was the wrong risk.** The comparison was already per dollar committed —
+return on capital normalises by strike. The real risk was the opposite one: the extra premium
+comfortably covers the extra assignment.
+
+**Why not raise it, then?** Section D of the study prices the tension with the own-at-strike finding
+(v1.1.169). Delta moves premium return and cost-basis quality in opposite directions: moving ~0.21 →
+~0.29 buys ~0.17pp of return on collateral and costs ~7pp of picks landing at or below the 200-day
+average (70.0% → 62.9%). Those are different quantities over different windows and are **not
+nettable**. With section C's top bin at 542 rows from one regime, and own-at-strike itself resting
+on 12 episodes, FR-SEY-5 does not justify moving a live parameter. **0.30 sits where the premium
+evidence is strongest and the cost-basis cost has not yet compounded.**
 
 ### T2 — A minimum composite gate for wheel
 
