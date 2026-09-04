@@ -276,8 +276,16 @@ function Stat({ label, value, sub, tone }: {
   );
 }
 
+/** Shape returned by `portfolio:capital-utilisation` (see capital-utilisation.ts). */
+type CapitalUtilisation = Awaited<ReturnType<typeof window.api.portfolio.capitalUtilisation>>;
+
+/** Whole dollars — cents are noise at this scale and make the strip harder to scan. */
+const fmtUsd = (n: number | null): string =>
+  n === null ? '—' : `$${Math.round(n).toLocaleString('en-US')}`;
+
 export function PortfolioView() {
   const [positions, setPositions]         = useState<Position[]>([]);
+  const [capital, setCapital]             = useState<CapitalUtilisation | null>(null);
   const [etPositions, setEtPositions]     = useState<PositionEtrade[]>([]);
   const [analyses, setAnalyses]           = useState<Map<number, PositionAnalysis>>(new Map());
   const [summary, setSummary]             = useState<PnLSummary | null>(null);
@@ -361,6 +369,16 @@ export function PortfolioView() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // Capital utilisation — available cash vs the committed book. Reloads with the position list
+  // so it never shows a stale picture next to fresh positions.
+  useEffect(() => {
+    let cancelled = false;
+    window.api.portfolio.capitalUtilisation()
+      .then(r => { if (!cancelled) setCapital(r); })
+      .catch(() => { if (!cancelled) setCapital(null); });
+    return () => { cancelled = true; };
+  }, [positions.length, lastSyncedAt]);
 
   // Load earnings for open options positions (non-blocking)
   useEffect(() => {
@@ -681,6 +699,64 @@ export function PortfolioView() {
       {statusMsg && !error && (
         <div className="status-toast" onClick={() => setStatusMsg(null)}>
           {statusMsg} <span style={{ float: 'right', cursor: 'pointer' }}>✕</span>
+        </div>
+      )}
+
+      {/* ── Capital utilisation ──
+          available and committed are COMPLEMENTARY: E*Trade already withholds CSP collateral
+          from cashAvailableForInvestment, so idle IS available — never available − committed. */}
+      {capital && (capital.available !== null || capital.committed.total > 0) && (
+        <div className="capital-strip">
+          <div className="capital-bar" title={`Committed ${fmtUsd(capital.committed.total)} of ${fmtUsd(capital.total)}`}>
+            <div
+              className="capital-bar-fill"
+              style={{ width: `${Math.min(100, Math.max(0, capital.utilisationPct ?? 0))}%` }}
+            />
+          </div>
+          <div className="capital-stats">
+            <div className="capital-stat">
+              <span className="capital-k">Working</span>
+              <span className="capital-v">{fmtUsd(capital.committed.total)}</span>
+              <span className="capital-n">
+                {capital.committed.csp > 0 && `CSP ${fmtUsd(capital.committed.csp)}`}
+                {capital.committed.csp > 0 && capital.committed.stock > 0 && ' · '}
+                {capital.committed.stock > 0 && `stock ${fmtUsd(capital.committed.stock)}`}
+                {capital.committed.total === 0 && 'nothing open'}
+              </span>
+            </div>
+            <div className="capital-stat">
+              <span className="capital-k">Idle</span>
+              <span className="capital-v">
+                {capital.available === null ? '—' : fmtUsd(capital.available)}
+              </span>
+              <span className="capital-n">
+                {capital.available === null
+                  ? 'no balance synced yet'
+                  : capital.idleStreakDays && capital.idleStreakDays > 1
+                    ? `${capital.idleStreakDays} days without deploying`
+                    : 'cash available'}
+              </span>
+            </div>
+            <div className="capital-stat">
+              <span className="capital-k">Utilisation</span>
+              <span className="capital-v">
+                {capital.utilisationPct === null ? '—' : `${capital.utilisationPct.toFixed(0)}%`}
+              </span>
+              <span className="capital-n">
+                {capital.total === null ? 'needs a balance' : `of ${fmtUsd(capital.total)} total`}
+              </span>
+            </div>
+          </div>
+          {capital.balanceAgeDays !== null && capital.balanceAgeDays > 1 && (
+            <div className="capital-stale">
+              ⚠ Balance is {capital.balanceAgeDays} days old ({capital.balanceAsOf}) — sync to refresh.
+            </div>
+          )}
+          {capital.committed.unclassified.length > 0 && (
+            <div className="capital-stale">
+              Not counted as committed: {capital.committed.unclassified.join(', ')} — unrecognised position type.
+            </div>
+          )}
         </div>
       )}
 

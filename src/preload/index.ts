@@ -489,6 +489,17 @@ function buildApi() {
   };
 
   const portfolio = {
+    /** How much capital is working vs idle. E*Trade available cash (which already excludes
+     *  CSP collateral) plus the open discretionary book — complementary, never overlapping. */
+    capitalUtilisation: () => invoke<{
+      available: number | null;
+      committed: { csp: number; stock: number; longOptions: number; total: number; unclassified: string[] };
+      total: number | null;
+      utilisationPct: number | null;
+      balanceAsOf: string | null;
+      balanceAgeDays: number | null;
+      idleStreakDays: number | null;
+    }>('portfolio:capital-utilisation'),
     add: (input: {
       ticker: string;
       positionType: 'CSP' | 'CC' | 'Stock' | 'Long Put' | 'Long Call';

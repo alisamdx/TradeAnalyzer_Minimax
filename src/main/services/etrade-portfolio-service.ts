@@ -198,6 +198,20 @@ interface ClosedPosition {
   realizedPnl: number;
 }
 
+/** Cash figures for one account. All nullable — a missing field is not a zero balance. */
+export interface EtradeBalance {
+  accountIdKey: string;
+  accountId: string | null;
+  /** Deployable right now. E*Trade already withholds cash-secured put collateral from this,
+   *  so it is complementary to committed capital, never overlapping it. */
+  cashAvailable: number | null;
+  cashBalance: number | null;
+  netCash: number | null;
+  settledCash: number | null;
+  totalAccountValue: number | null;
+  marginBuyingPower: number | null;
+}
+
 // ─── Service ──────────────────────────────────────────────────────────────────
 
 export class EtradePortfolioService {
@@ -226,6 +240,92 @@ export class EtradePortfolioService {
       accountType:     a.accountType    ?? '',
       institutionType: a.institutionType ?? '',
     }));
+  }
+
+  // ─── Account balance ──────────────────────────────────────────────────────
+
+  /**
+   * Cash balance for one account.
+   *
+   * The app held NO cash figure anywhere before this (searched 2026-09-03: the only "cash"
+   * columns in the schema are a company's operating cash flow and a LEAPS screener input), so
+   * "how much of my money is idle" was unanswerable.
+   *
+   * `instType=BROKERAGE` and `realTimeNAV=true` are both required by E*Trade — without the
+   * former the call is rejected, and without the latter the values are previous-close rather
+   * than live, which for a "what can I deploy right now" figure is the wrong number.
+   *
+   * Every field is nulled rather than zeroed when absent: a missing balance and a zero balance
+   * are very different facts, and a wheel operator reading 0 available would act on it.
+   */
+  async fetchBalance(accountIdKey: string, creds: OAuthCredentials): Promise<EtradeBalance> {
+    const raw = await this.withRenew(creds, () => etradeGet(
+      `/v1/accounts/${accountIdKey}/balance`,
+      { instType: 'BROKERAGE', realTimeNAV: 'true' },
+      creds
+    ));
+
+    // Shape: { BalanceResponse: { accountId, Computed: { ..., RealTimeValues: { ... } } } }
+    const resp = (raw as Record<string, unknown>)['BalanceResponse'];
+    if (!resp || typeof resp !== 'object') {
+      throw new Error(`Unexpected balance response shape for ${accountIdKey}`);
+    }
+    const r = resp as Record<string, unknown>;
+    const computed = (r['Computed'] ?? {}) as Record<string, unknown>;
+    const realTime = (computed['RealTimeValues'] ?? {}) as Record<string, unknown>;
+    const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+
+    return {
+      accountIdKey,
+      accountId:         typeof r['accountId'] === 'string' ? r['accountId'] : null,
+      cashAvailable:     num(computed['cashAvailableForInvestment']),
+      cashBalance:       num(computed['cashBalance']),
+      netCash:           num(computed['netCash']),
+      settledCash:       num(computed['settledCashForInvestment']),
+      totalAccountValue: num(realTime['totalAccountValue']),
+      marginBuyingPower: num(computed['marginBuyingPower']),
+    };
+  }
+
+  /**
+   * Fetch and store one snapshot per account for today (ET).
+   *
+   * Replaces on re-run: the portfolio sync can fire several times a day and the latest view is
+   * the one that counts, exactly as every other job treats a same-day re-run.
+   * Never throws — a balance is reporting, and must not be able to fail a portfolio sync.
+   */
+  async syncBalances(db: Database, creds: OAuthCredentials): Promise<number> {
+    try {
+      const accounts = await this.listAccounts(creds);
+      const todayEt = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+      const fetchedAt = new Date().toISOString();
+      const stmt = db.prepare(`
+        INSERT OR REPLACE INTO account_balances
+          (as_of_date, fetched_at, account_id_key, account_id, cash_available, cash_balance,
+           net_cash, settled_cash, total_account_value, margin_buying_power)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      let saved = 0;
+      for (const acct of accounts) {
+        if (!acct.accountIdKey) continue;
+        try {
+          const b = await this.fetchBalance(acct.accountIdKey, creds);
+          stmt.run(todayEt, fetchedAt, b.accountIdKey, b.accountId ?? acct.accountId,
+            b.cashAvailable, b.cashBalance, b.netCash, b.settledCash,
+            b.totalAccountValue, b.marginBuyingPower);
+          saved++;
+        } catch (err) {
+          // One account failing must not lose the others.
+          console.warn(`[etrade balance] ${acct.accountIdKey} failed:`,
+            err instanceof Error ? err.message : String(err));
+        }
+      }
+      return saved;
+    } catch (err) {
+      console.warn('[etrade balance] sync failed:',
+        err instanceof Error ? err.message : String(err));
+      return 0;
+    }
   }
 
   // ─── Portfolio sync ───────────────────────────────────────────────────────

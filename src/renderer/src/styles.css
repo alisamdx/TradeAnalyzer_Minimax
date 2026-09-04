@@ -5670,3 +5670,28 @@ input[type='checkbox'] {
   color: var(--text-muted);
   font-size: 12px;
 }
+
+/* ── Capital utilisation strip (Portfolio) ────────────────────────────────────
+   "Working" and "Idle" are complementary, not a subtraction: E*Trade already withholds CSP
+   collateral from available cash, so idle IS available. The bar shows committed / total. */
+.capital-strip {
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 12px 14px; margin-bottom: 12px;
+  border: 1px solid var(--border); border-radius: 6px; background: var(--bg);
+}
+.capital-bar {
+  height: 6px; border-radius: 3px; overflow: hidden;
+  background: color-mix(in srgb, var(--text-muted) 22%, transparent);
+}
+.capital-bar-fill { height: 100%; background: var(--accent, #3b82f6); transition: width .25s ease; }
+@media (prefers-reduced-motion: reduce) { .capital-bar-fill { transition: none; } }
+.capital-stats { display: flex; flex-wrap: wrap; gap: 10px; }
+.capital-stat {
+  display: flex; flex-direction: column; gap: 1px;
+  min-width: 150px; padding: 6px 10px;
+  border: 1px solid var(--border); border-radius: 6px; background: var(--panel, var(--bg));
+}
+.capital-k { font-size: 10px; text-transform: uppercase; letter-spacing: .3px; color: var(--text-muted); }
+.capital-v { font-size: 17px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+.capital-n { font-size: 10px; color: var(--text-muted); }
+.capital-stale { font-size: 11px; color: var(--warning); line-height: 1.5; }

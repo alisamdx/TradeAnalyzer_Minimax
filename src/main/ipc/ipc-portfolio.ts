@@ -17,6 +17,7 @@ import {
 } from '../services/capital-efficiency.js';
 import { secureGet, secureSet } from '../services/secure-settings.js';
 import { toPositionSignedGreeks } from '@shared/position-greeks.js';
+import { getCapitalUtilisation } from '../services/capital-utilisation.js';
 import type { IpcResult, EtradeAccount, EtradeSyncResult, PositionAnalysis, PositionEtrade, AdvisorSession, AdvisorProgressEvent } from '@shared/types.js';
 
 export interface PositionDto {
@@ -85,6 +86,13 @@ export function registerPortfolioIpc(db: Database, analysisService?: AnalysisSer
   const aiAdvisor        = new AiAdvisorService();
 
   // ─── CRUD Operations ────────────────────────────────────────────────────────
+
+  // Capital utilisation — how much is working, how much is idle. Read-only over the latest
+  // balance snapshot plus the open book; see capital-utilisation.ts for why available and
+  // committed are complementary rather than overlapping.
+  ipcMain.handle('portfolio:capital-utilisation', wrap(() =>
+    getCapitalUtilisation(db, new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' }))
+  ));
 
   ipcMain.handle('portfolio:add', wrap((input: PositionInput) => {
     const position = service.addPosition(input);

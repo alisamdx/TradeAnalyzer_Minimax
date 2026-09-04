@@ -186,3 +186,24 @@ split repair corrects them rather than leaving a frozen wrong value. Retention i
 (vs the briefs' 90) — the rows cost ~20 MB per trading year against `daily_briefs`' ~229 MB.
 The column set deliberately exceeds what the top-5-cut question needs: **capture is
 one-directional**, and three prior studies were blocked by capture rather than analysis.
+
+### `account_balances` (migration 078, v1.1.179)
+
+One E\*Trade cash snapshot per account per day. Before this the schema held **no** cash,
+buying-power or net-liquidation figure anywhere, so capital utilisation was unanswerable.
+
+| column | note |
+|---|---|
+| `as_of_date`, `account_id_key` | unique together; a same-day re-sync REPLACES |
+| `cash_available` | `cashAvailableForInvestment` — deployable now. **E\*Trade already withholds CSP collateral from this**, so it is complementary to committed capital, never overlapping |
+| `cash_balance`, `net_cash`, `settled_cash`, `total_account_value`, `margin_buying_power` | the rest of E\*Trade's Computed block |
+
+All nullable: a missing field is **not** a zero balance. Snapshots rather than one mutable row
+because "how long has cash been idle" needs a series. Committed capital is **not** stored here —
+it is computed from `positions` at read time, so a later position correction flows through instead
+of being frozen into a snapshot.
+
+**Utilisation arithmetic** (`capital-utilisation.ts`): `total = available + committed`,
+`utilisation = committed / total`. Deriving idle as `available − committed` double-counts CSP
+collateral. A covered call contributes **zero** committed capital — the shares behind it are
+already counted and its market value is a negative liability.

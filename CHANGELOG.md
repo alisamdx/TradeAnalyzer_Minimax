@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.179] — 2026-09-03
+
+### feat — capital utilisation: the app can finally answer "how much of my money is idle?"
+
+- **The question could not be answered at all before this.** Searched 2026-09-03: **no table in the schema held a cash, buying-power or net-liquidation figure**. The only columns with "cash" in the name are a company's operating cash flow (`historical_financials`) and a screener input (`leaps_csp_opportunities.total_cash_to_deploy`).
+- **Scope as chosen:** available cash = **E\*Trade only**; committed capital = **the discretionary wheel book only**, not the v2 execution broker whose sizing rules are separate; and the Roll the Dice **$30,000 budget line is unchanged** — a stated position size that drifts upward after a good month stops being a decision.
+- **The arithmetic trap this is built around.** E\*Trade **already withholds** cash-secured put collateral from `cashAvailableForInvestment`, so available and committed are **complementary, not overlapping**: `total = available + committed`, `utilisation = committed / total`. Deriving idle as `available − committed` would subtract the same collateral twice and report a working book as far emptier than it is — **available *is* the idle figure**.
+- **A second double-count sits alongside it:** a covered call commits no capital of its own (the shares are already counted as stock) and its market value is *negative* — on the live book, −$2,852.50 against 100 TSLA shares. `CC` contributes exactly **zero**. Both traps are pinned by tests, because each would produce a plausible-looking number rather than an obvious error.
+- **Built:** `fetchBalance`/`syncBalances` on `EtradePortfolioService` through `etradeGet` (never a hand-rolled signature; `instType=BROKERAGE` and `realTimeNAV=true` are both required — without the first the call is rejected, without the second the values are previous-close); **migration 078 `account_balances`**, one snapshot per account per day because *"how long has it been idle"* needs a series and that is the half actually asked about; `capital-utilisation.ts` (CSP at collateral, stock at market with cost as fallback, long options at debit, CC at zero, unrecognised types **surfaced** rather than silently zeroed); a strip on the Portfolio view with working / idle / utilisation %, a staleness warning past one day, and an idle streak that ends the moment cash goes to work.
+- Every field is **null rather than 0** when absent — a missing balance and a zero balance are very different facts, and a wheel operator reading "$0 available" would act on it.
+- **Out of scope and staying there:** which instrument to park idle cash in is personalised investment advice. The app reports utilisation and does not rank destinations. Worth knowing while reading it: E\*Trade sweeps uninvested cash by default, so "idle" is not necessarily earning nothing.
+- Migration 078, 13 new tests, sync-job stub updated. Suite: 1172 passed.
+
 ## [1.1.178] — 2026-09-03
 
 ### docs — T6: the price-derived signals add nothing, and `notDowntrend` is anti-predictive

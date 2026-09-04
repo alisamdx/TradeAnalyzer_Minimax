@@ -19,8 +19,15 @@ import { MIGRATIONS_DIR } from './helpers.js';
 
 const syncPortfolio = vi.hoisted(() => vi.fn());
 const syncClosedPositions = vi.hoisted(() => vi.fn());
+// Balance snapshotting (v1.1.179) is instrumentation: it resolves to a count and never throws,
+// so the stub returns 1 and the job's own behaviour is unchanged by it.
+const syncBalances = vi.hoisted(() => vi.fn());
 vi.mock('../src/main/services/etrade-portfolio-service.js', () => ({
-  EtradePortfolioService: class { syncPortfolio = syncPortfolio; syncClosedPositions = syncClosedPositions; },
+  EtradePortfolioService: class {
+    syncPortfolio = syncPortfolio;
+    syncClosedPositions = syncClosedPositions;
+    syncBalances = syncBalances;
+  },
 }));
 
 const { PortfolioSyncJob } = await import('../src/main/services/jobs/portfolio-sync-job.js');
@@ -40,6 +47,7 @@ describe('PortfolioSyncJob', () => {
     runMigrations(db, MIGRATIONS_DIR);
     syncPortfolio.mockReset().mockResolvedValue(okResult(2, 5));
     syncClosedPositions.mockReset().mockResolvedValue(okResult(1, 24));
+    syncBalances.mockReset().mockResolvedValue(1);
   });
   afterEach(() => { db.close(); vi.restoreAllMocks(); });
 
