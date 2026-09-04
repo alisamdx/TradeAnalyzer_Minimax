@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.180] — 2026-09-03
+
+### fix — the balance snapshot ran on only one of two sync paths
+
+- **v1.1.179 shipped capital utilisation, and a manual sync produced nothing.** The Portfolio strip still read "no balance synced yet" and the API log for that day contained **zero `/balance` calls**.
+- **Two sync paths, one instrumented.** The scheduled `PortfolioSyncJob` called `syncBalances` itself, but the **Sync button** goes through `portfolio:etrade:sync` straight to `syncPortfolio`, which knew nothing about balances. The snapshot would have appeared on the next scheduled run — the kind of "works, just not when you look" that wastes an evening.
+- **Fixed by moving the snapshot INSIDE `syncPortfolio`**, the one function both paths call, rather than patching the second call site and leaving the same trap for a third. `syncBalances` now takes the account list as an argument instead of re-fetching it, so this costs one `/balance` call per account and **no extra `/accounts/list` round trip**. The job's separate step is removed.
+- **Pinned by a test of the property, not the path:** a balance row must appear *as a consequence of syncing the portfolio*. Also covered — the required query params are sent (`instType=BROKERAGE`, `realTimeNAV=true`; E\*Trade rejects the call without the first and returns previous-close values without the second); a failing balance call does **not** become a sync error, since the position book is the real payload; a missing field stores **null, not 0**; a same-day re-sync replaces rather than duplicates; and exactly one `/accounts/list` call is made.
+- 6 new tests (`tests/etrade-balance-sync.test.ts`). Suite: 1178 passed.
+
 ## [1.1.179] — 2026-09-03
 
 ### feat — capital utilisation: the app can finally answer "how much of my money is idle?"

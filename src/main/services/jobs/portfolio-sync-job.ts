@@ -79,14 +79,9 @@ export class PortfolioSyncJob implements BatchJobHandler {
       warnings.push(`position sync failed: ${err instanceof Error ? err.message : String(err)}`);
     }
 
-    // ── 1b. Cash balance snapshot ────────────────────────────────────────────
-    // The app held no cash figure at all before v1.1.179, so "how much of my capital is idle"
-    // was unanswerable. One snapshot per account per day; syncBalances never throws, so a
-    // reporting nicety can never fail the sync that maintains the actual position book.
-    emit('Snapshotting account balance…');
-    const balancesSaved = await this.portfolio.syncBalances(this.db, creds);
-    if (balancesSaved > 0) notes.push(`Balances: ${balancesSaved} account(s)`);
-    else warnings.push('balance snapshot returned nothing');
+    // The cash balance snapshot happens INSIDE syncPortfolio (v1.1.180), so it covers this job
+    // and the manual Sync button alike. It used to be a separate step here, which meant a manual
+    // sync snapshotted nothing at all.
 
     if (signal.aborted) {
       return {

@@ -288,15 +288,28 @@ export class EtradePortfolioService {
   }
 
   /**
-   * Fetch and store one snapshot per account for today (ET).
-   *
-   * Replaces on re-run: the portfolio sync can fire several times a day and the latest view is
-   * the one that counts, exactly as every other job treats a same-day re-run.
-   * Never throws — a balance is reporting, and must not be able to fail a portfolio sync.
-   */
-  async syncBalances(db: Database, creds: OAuthCredentials): Promise<number> {
+    * Fetch and store one snapshot per account for today (ET).
+    *
+    * Called from INSIDE `syncPortfolio`, deliberately. v1.1.179 first hooked it into the batch
+    * job only, and the manual Sync button — which goes through `portfolio:etrade:sync` straight
+    * to `syncPortfolio` — never snapshotted anything: the operator synced and the strip still
+    * read "no balance synced yet", with zero `/balance` calls in the API log. Two sync paths,
+    * one instrumented. Living inside the function BOTH paths call is what stops that recurring.
+    *
+    * `accounts` is passed in rather than re-listed so the snapshot costs one call per account
+    * and not an extra `/accounts/list` round trip.
+    *
+    * Replaces on re-run: a sync can fire several times a day and the latest view is the one that
+    * counts, exactly as every other job treats a same-day re-run.
+    * Never throws — a balance is reporting, and must not be able to fail a portfolio sync.
+    */
+  async syncBalances(
+    db: Database,
+    creds: OAuthCredentials,
+    knownAccounts?: readonly EtradeAccount[],
+  ): Promise<number> {
     try {
-      const accounts = await this.listAccounts(creds);
+      const accounts = knownAccounts ?? await this.listAccounts(creds);
       const todayEt = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
       const fetchedAt = new Date().toISOString();
       const stmt = db.prepare(`
@@ -390,6 +403,12 @@ export class EtradePortfolioService {
         );
       }
     }
+
+    // ── 3. Cash balance snapshot ─────────────────────────────────────────────
+    // Inside syncPortfolio so EVERY caller gets it — the scheduled job and the manual Sync
+    // button alike. Hooking only the job (v1.1.179) meant a manual sync snapshotted nothing.
+    // Never throws, and its failure is not a sync error: the position book is the real payload.
+    await this.syncBalances(db, creds, toSync);
 
     return result;
   }
