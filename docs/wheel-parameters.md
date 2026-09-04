@@ -73,7 +73,7 @@ Enabled weight sums to **91**. I verified this does *not* silently deflate score
 | `USE_ADX_IN_SCORING` | **false** | **validated** — full-year replay A/B showed enabling it is net negative across bullish/bearish/income. Correctly off. |
 | `ETF_AWARE_WHEEL_SCORING` | **true** (v1.1.172) | **validated** — replay A/B, see **F6** / **T4**. `SCORING_ETF_AWARE_WHEEL=0` rolls it back. |
 
-**Minimum composite gate:** `MIN_COMPOSITE_BY_STRATEGY` gates **bearish at 70** (validated on a full-year replay) and **nothing else**. Wheel is ungated. See **F7**.
+**Minimum composite gate:** `MIN_COMPOSITE_BY_STRATEGY` gates **bearish at 70** (validated on a full-year replay) and **nothing else**. Wheel is ungated — and v1.1.173 showed it should stay that way. See **F7** and **F8**.
 
 ---
 
@@ -127,7 +127,9 @@ Expiry selection has some evidence: a weekly→monthly A/B ran 2026-08-04 and **
 
 **F6 — ETFs ran ~23% light on the wheel composite. FIXED v1.1.172.** `fundamentalScore` (17) + `leverageQuality` (4) are structurally inapplicable to a fund wrapper, were always null, and so contributed 0 while still occupying **21 of 91** enabled weight — capping every ETF at 76.9% of an otherwise-identical stock. Measured: 56 of 60 curated ETFs have no `fundamentals_cache` row, while all 60 have `iv_history` and `historical_prices`. `ETF_AWARE_WHEEL_SCORING` now excludes both from numerator *and* denominator (×1.30 uplift, ETFs only). See **T4** for the A/B. Rollback: `SCORING_ETF_AWARE_WHEEL=0`.
 
-**F7 — Wheel has no quality floor.** Bearish earned a 70 gate from a full-year replay. Wheel is ungated, so on a weak day the dice pick can be a low composite that simply happened to be least-bad. Nothing has ever tested whether that is harmful.
+**F7 — Wheel has no quality floor, and testing showed it must not get one. CLOSED v1.1.173.** Bearish earned its 70 gate from a full-year replay. Wheel was ungated by omission; it is now ungated on evidence. Every candidate threshold made the surviving book monotonically worse (at 70: kept return −3.89% vs +0.56% ungated) while emptying 14 of 35 brief dates. See **T2**.
+
+**F8 — The wheel composite is ANTI-PREDICTIVE at the top, and this is the most important open question in the path.** Across 101 settled episodes, mean return on capital by composite band: 58–63 **+1.91%**, 63–68 +1.84%, 68–73 **−1.08%**, 73+ **−4.99%**. Assignment climbs from 16.3% to 61.5% across those bands. It is not outlier-driven — medians agree (≥68: **+0.27%**, <68: **+2.44%**). The mechanism is visible in the worst names (MRVL ×3, RKLB ×2, COHR ×2, ON — high-IV semis and space): `ivRank` (22) + `premiumYield` (19) are **41 of 91 weight** and both reward premium richness, which is *compensation for risk*, not edge. **This is the second wheel signal to turn out to be a risk proxy rather than a quality measure** — see F3 on liquidity. Deliberately NOT acted on: n=13 per top band, one regime, and the precedent for buy/bullish anti-predictiveness was to record and not re-engineer on a sample this size.
 
 ---
 
@@ -172,11 +174,35 @@ nettable**. With section C's top bin at 542 rows from one regime, and own-at-str
 on 12 episodes, FR-SEY-5 does not justify moving a live parameter. **0.30 sits where the premium
 evidence is strongest and the cost-basis cost has not yet compounded.**
 
-### T2 — A minimum composite gate for wheel
+### ~~T2 — A minimum composite gate for wheel~~ — CLOSED 2026-09-03, REJECTED
 
-- **Method**: exactly how bearish's 70 was derived — bucket wheel picks by composite, measure forward outcomes per bucket, look for a threshold below which edge disappears.
-- **Passes if**: a clean threshold exists with enough picks above it to keep the hit rate usable.
-- **Risk to watch**: wheel composites cluster tightly (58.9–76.0, median 65.9), so a gate could cut most days for little gain.
+Run and settled in **v1.1.173** (`scripts/fr-wheel-composite-floor-study.mjs`).
+
+**Replay could not be used.** It is blind to `premiumYield` (19 of wheel's 91), which shifts the
+composite scale — the service says never to carry an absolute wheel threshold between replay and
+live, and a gate is exactly that. So this ran on **live brief picks** with real settled CSP
+outcomes: 180 picks → **101 independent episodes**, scale guard excluding 0 rows.
+
+**Every threshold made the book worse, monotonically:**
+
+| gate | kept | kept return | Δ vs ungated | days emptied |
+|---|---|---|---|---|
+| none | 101 | **+0.56%** | — | 0/35 |
+| 62 | 57 | −0.35% | −0.91 | 7/35 |
+| 65 | 38 | −1.13% | −1.69 | 8/35 |
+| 68 | 26 | −3.03% | −3.59 | 13/35 |
+| 70 | 19 | −3.89% | −4.45 | 14/35 |
+
+**The "risk to watch" was right about the cost and wrong about the direction.** A gate does cut
+most days — 14 of 35 emptied at 70 — but the deeper problem is that it keeps the *wrong* picks.
+See **F8**: the composite is anti-predictive at the top, so a floor systematically retains the
+high-IV names that blow up short puts.
+
+**Follow-up, flagged not built.** Roll the Dice breaks ties by **highest composite**. If a high
+wheel composite is anti-predictive, that tiebreak may select the worst of the eligible set. The
+dice pool is ≤5 and sits behind the critic, liquidity and earnings gates so it does not follow
+automatically — but it is the single most decision-relevant open question left, and deserves its
+own study once more picks settle.
 
 ### ~~T3 — `optionLiquidity` back on in scoring~~ — CLOSED 2026-09-03, keep it off
 

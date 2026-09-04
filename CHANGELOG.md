@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.173] — 2026-09-03
+
+### docs — T2: a wheel composite floor is REJECTED; the composite is anti-predictive at the top
+
+- **No behaviour change.** Wheel stays ungated — now on evidence rather than omission.
+- **Replay could not answer this.** It is blind to `premiumYield` (19 of wheel's 91 weight), which shifts and compresses the composite scale; `brief-replay-service.ts` says never to carry an absolute wheel threshold between replay and live, and a gate is exactly that. (Bearish's 70 was safely replay-derived because bearish has no options-derived signal.) So this ran on **live brief picks** with real settled CSPs: 180 picks → **101 independent episodes**, mandatory split scale-guard excluding **0** rows.
+- **Every candidate threshold made the surviving book monotonically worse** while emptying days: ungated **+0.56%** mean return on capital; gate 62 → −0.35% (7/35 days emptied); 65 → −1.13% (8/35); 68 → −3.03% (13/35); 70 → **−3.89%** (14/35).
+- **Because the composite is anti-predictive at the top.** Mean return by band: 58–63 **+1.91%**, 63–68 +1.84%, 68–73 **−1.08%**, 73+ **−4.99%** — with assignment climbing 16.3% → 61.5%. **Not outlier-driven**: it survives trimming 3 per tail (−1.84% vs +2.32%) and the medians agree (≥68 **+0.27%** vs <68 **+2.44%**).
+- **The mechanism is legible in the worst names** — MRVL ×3 (−22.2%, −16.4%, −16.4%), RKLB ×2 (−24.5%, −14.2%), COHR ×2, ON: high-IV semiconductor and space names. `ivRank` (22) + `premiumYield` (19) are **41 of 91 weight** and both reward premium richness, which is *compensation for risk*, not evidence of edge. Selecting harder on the composite selects for higher implied vol, more assignment, worse realised returns.
+- **Second time a wheel signal has proved a risk proxy rather than a quality measure** — the first was liquidity in v1.1.170, where the graded score's top quartile carried 50% realized vol against 39% at the bottom. Recorded in CLAUDE.md as a standing caution: before adding a quality floor to a premium-selling strategy, check the *sign* of the relationship — the intuition carried over from directional strategies is inverted here.
+- **Deliberately not acted on.** The tempting inference (invert or cap the composite for wheel) is not taken: n=13 per top band, one regime, held to expiry with no roll or post-assignment covered call — all of which cushion exactly the assigned cases concentrated in the high-IV bands. Precedent is explicit: buy/bullish anti-predictiveness was found on a similar sample and recorded rather than engineered on.
+- **Top open question, flagged not built:** Roll the Dice breaks ties by **highest composite**, which — if this holds — may be selecting the worst of its eligible set. The dice pool is ≤5 and sits behind the critic, liquidity and earnings gates, so it does not follow automatically, but it is the most decision-relevant question left in the wheel path.
+
 ## [1.1.172] — 2026-09-03
 
 ### feat — ETF-aware wheel scoring ENABLED, after resolving a validation gate that could never be met
