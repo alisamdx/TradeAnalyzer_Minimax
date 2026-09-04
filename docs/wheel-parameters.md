@@ -135,7 +135,7 @@ Expiry selection has some evidence: a weekly→monthly A/B ran 2026-08-04 and **
 
 *The original explanation — that `ivRank` (22) + `premiumYield` (19), 41 of 91 weight, reward premium richness which is compensation for risk — was inference from weights and the worst tickers, and **v1.1.176 refuted it**.* Tested directly on 23,722 settled rows across the whole universe, ranking on premium richness **helps**: top annualized return beats no-selection by **+1.03 mean / +2.67 median**, and the *lowest*-annualized-return rule is the worst of every rule tried (−1.21 / −0.61). See **T5**.
 
-**So the suspicion moves to the other 50 of 91 weight**: `fundamentalScore` (17), `technicalNeutral` (11), `recentVolatility` (10), `notDowntrend` (8), `leverageQuality` (4). Awkwardly, 21 of those (fundamentalScore + leverageQuality) draw on `fundamentals_cache`, which has no history and is permanently unvalidatable; the other 29 are price-derived and testable. Still deliberately NOT acted on — n=13 per top band, one regime.
+**The suspicion moved to the other 50 of 91 weight**, and **T6 has now tested the 29 that can be**: `technicalNeutral` (11) is flat, `recentVolatility` (10) is weak and mildly inverted, and **`notDowntrend` (8) is anti-predictive** — its bullish band assigns 31.9% against the bearish band's 20.5% and returns −1.01% mean. Weighted together as the composite does, the three add +0.14 mean / −0.18 median over no selection at all; inverting them is the only rule that beats it on both. **That leaves `fundamentalScore` (17) + `leverageQuality` (4) as the only untested weight — and both draw on `fundamentals_cache`, which has no history and can never be replayed.** So F8's residual is now split between a measured small anti-predictive term and 21 points of permanently unverifiable weight. Still deliberately NOT acted on — n=13 per top band, one regime.
 
 ---
 
@@ -294,6 +294,41 @@ well as means because the worst single outcome in the sample is −87.5%.
 **Also corrected here:** an earlier draft claimed this study could apply the earnings gate, since
 `analysis_snapshots` carries a `daysToEarnings` field. It is **null on 100% of rows** — the column
 exists and is never populated. A fourth place where the earnings gate cannot be evaluated.
+
+### T6 — the composite's price-derived signals — CLOSED 2026-09-03, they add nothing
+
+`scripts/fr-wheel-price-signals-study.mjs`. After T5 cleared premium richness, the remaining
+suspicion fell on the other 50 of 91 weight — of which 29 are testable (`technicalNeutral` 11,
+`recentVolatility` 10, `notDowntrend` 8; the other 21 draw on `fundamentals_cache` and never can
+be). Each replicated exactly from `scoring-service.ts`, computed point-in-time, applied as a
+selection rule to the whole universe. **4,816 settled rows, 40 dates.**
+
+| rule | Δ mean | Δ median |
+|---|---|---|
+| top technicalNeutral | +0.12 | +1.50 |
+| top recentVolatility | +0.15 | −0.09 |
+| **top notDowntrend** | **−1.31** | +0.81 |
+| all three weighted as the composite does | +0.14 | −0.18 |
+| **INVERTED — worst of all three** | **+0.43** | **+0.95** |
+
+**`notDowntrend` is anti-predictive**, and the banded view shows it cleanly — bearish band 20.5%
+assigned, sideways 24.6%, **bullish 31.9%**, with the top band returning −1.01% mean. That
+assignment gradient is monotone and is the robust part, assignment being immune to the return
+tails. `technicalNeutral` is flat at every level (no signal either way); `recentVolatility` is
+weak and mildly inverted — its high-vol end returned a better median (+1.92%) than its low-vol end
+(+0.72%), the opposite of what a `lower_better` weight assumes.
+
+**This is the ADX finding again.** `USE_ADX_IN_SCORING` was set false in v1.1.33 on a full-year
+replay because *strong-trend names mean-revert over ~21 days*. `notDowntrend` measures nearly the
+same thing via the SMA stack and reproduces it on different data — a trend-following term inside a
+short-premium composite, found anti-predictive twice, independently.
+
+**Not acted on**: 8 of 91 weight, small effect, one regime, observational rather than an A/B — and
+a faithful weight sweep is impossible today (the wheel composite needs `fundamentals_cache`, and
+income carries no `notDowntrend` term). **What changes that is the v1.1.175/177 capture**:
+`brief_candidates.signals_json` stores per-signal `{raw, normalized, weight, missing}` for every
+candidate, so after a quarter the composite can be recomputed with one term removed and compared
+on real outcomes. First concrete payoff of that instrumentation.
 
 ## Not testable, and why
 

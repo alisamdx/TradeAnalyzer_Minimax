@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.178] — 2026-09-03
+
+### docs — T6: the price-derived signals add nothing, and `notDowntrend` is anti-predictive
+
+- **No behaviour change.** After v1.1.176 cleared premium richness of causing F8, the remaining suspicion fell on the other 50 of 91 weight. 29 of those are testable — `technicalNeutral` (11), `recentVolatility` (10), `notDowntrend` (8) — while `fundamentalScore` (17) + `leverageQuality` (4) draw on `fundamentals_cache`, which has no history and never can be. Each signal is replicated exactly from `scoring-service.ts`, computed point-in-time, and applied as a selection rule to the whole wheel universe. **4,816 settled liquidity-gated rows across 40 dates.**
+- **As a group they add nothing.** Weighted exactly as the composite does, the three move the needle **+0.14 mean / −0.18 median** against no selection at all. **Inverting them is the only rule better on both (+0.43 / +0.95).**
+- **`notDowntrend` is anti-predictive, and the banded view is unambiguous**: bearish band **20.5%** assigned, sideways 24.6%, **bullish 31.9%**, with the top band returning **−1.01%** mean. The assignment gradient is monotone and is the robust part — assignment counts are immune to the return tails that make means fragile here. Selecting for "not in a downtrend" produced more assignment and worse returns.
+- `technicalNeutral` is **flat** at every level (means −0.27 / −0.58 / −0.10, assignment ~25% throughout) — no signal in either direction. `recentVolatility` is weak and mildly **inverted**: its high-vol end returned a better median (+1.92%) than its low-vol end (+0.72%), the opposite of what a `lower_better` weighting assumes.
+- **This is the ADX finding again.** `USE_ADX_IN_SCORING` was set false in v1.1.33 on a full-year Brief Replay A/B, with the recorded reason that strong-trend names mean-revert over the next ~21 days. `notDowntrend` measures nearly the same thing through the SMA stack and reproduces the result on different data — a trend-following term inside a short-premium composite, now found anti-predictive twice, independently.
+- **Not acted on**: 8 of 91 weight, a small effect, one regime, and observational rather than an A/B. A faithful weight sweep is impossible today — the wheel composite needs `fundamentals_cache` (no history) and income, the usual proxy, carries no `notDowntrend` term.
+- **The v1.1.175/177 capture is what unblocks it.** `brief_candidates.signals_json` stores each candidate's per-signal `{raw, normalized, weight, missing}`, so after a quarter the composite can be recomputed with any one term removed and compared on real outcomes — the exact A/B that cannot be run today. First concrete payoff of that instrumentation.
+- **F8's residual is now narrow**: one small measured anti-predictive term, plus `fundamentalScore` (17) + `leverageQuality` (4) — 21 points of permanently unverifiable weight.
+
 ## [1.1.177] — 2026-09-03
 
 ### feat — Stage-4 candidates capture the earnings date, closing the one gate no study could test
