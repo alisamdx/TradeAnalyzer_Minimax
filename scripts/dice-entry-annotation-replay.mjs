@@ -245,6 +245,15 @@ for (const r of dicePicks.slice(-12).reverse()) {
     + `${r.cell.padEnd(22)}  ${out}`);
 }
 
+// One real example per cell, so wording drafts use genuine numbers rather than invented ones.
+console.log(`
+═══ 5. ONE REAL EXAMPLE PER CELL (for wording) ═══`);
+for (const c of CELLS) {
+  const ex = allBriefPicks.filter(r => r.cell === c).slice(-1)[0];
+  if (ex) console.log(`  ${c.padEnd(22)} ${ex.date} ${ex.ticker.padEnd(6)} K=${ex.strike} `
+    + `basis ${f(ex.basis)}  SMA200 ${f(ex.s200)} (${ex.basisVsSma200Pct > 0 ? '+' : ''}${f(ex.basisVsSma200Pct, 1)}%)  20d low ${f(ex.swing)}`);
+}
+
 console.log(`\nReading this`);
 console.log(`• An annotation changes nothing about which trades are taken, so this is not an`);
 console.log(`  FR-SEY-5 gate test — it asks whether the sentence would be TRUE and USEFUL.`);
