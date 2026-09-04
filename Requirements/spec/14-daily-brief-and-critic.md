@@ -185,10 +185,15 @@ not from a curated list.
 - Both are given because they answer different questions: the quote page is "what is it doing
   right now", the chain is "what is this strike actually bid". Neither substitutes for the other
   at the moment an order is entered.
-- The two URLs are built by `src/main/services/etrade-links.ts` and MUST NOT be re-typed at call
-  sites — the symbol casing differs per page (quote uppercase, `quotesandresearch` lowercase) and
-  the options URL's `&` must be escaped inside an HTML attribute. The brief and filters-prefill
-  reports build their existing chain links through the same helper.
+- Both MUST resolve **without a logged-in session**, because an emailed link is clicked cold. That
+  rules out the logged-in quote page `/etx/mkt/quotes?symbol=X#/snapshot`, whose login redirect
+  double-encodes the query and lands on "We couldn't find the symbol 'NULL'" (v1.1.184). The
+  public `/e/t/invest/quotesandresearch` page is used for both: no `content` param is the Snapshot
+  tab, `content=3` the option chain.
+- The URLs are built by `src/main/services/etrade-links.ts` and MUST NOT be re-typed at call sites
+  — the options URL's `&` must be escaped inside an HTML attribute, and the logged-in-URL trap
+  above is not visible from a call site pasting a string. The brief and filters-prefill reports
+  build their existing chain links through the same helper.
 
 #### Validation of the demotion (FR-SEY-5)
 

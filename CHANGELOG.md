@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.184] — 2026-09-04
+
+### fix — the emailed quote link resolved to "We couldn't find the symbol 'NULL'"
+
+- v1.1.183's quote link used `https://us.etrade.com/etx/mkt/quotes?symbol=X#/snapshot` — the URL a signed-in session shows in its address bar. The ticker interpolated fine; the URL was wrong.
+- **That page needs a session, and its login redirect double-encodes the destination**: `TARGET=...%2Fetx%2Fmkt%2Fquotes%253Fsymbol%253DMKC`. `%253F` decodes to a literal `?` in the path rather than a query separator, so no symbol is parsed and the page renders "We couldn't find the symbol 'NULL'". The `#/snapshot` fragment survives untouched, which makes the link look intact. An emailed link is opened cold from a phone as often as not — the failing case is the normal one.
+- **Fixed by using E*Trade's public quotes page for both links**, where `content` picks the tab: `?sym=mkc` is Snapshot, `?content=3&sym=mkc` the option chain. Both resolve with no session; verified cold on MKC and TSLA. The chain link is unchanged — it was always on the public page, which is why it worked.
+- **CLAUDE.md quirk added**: a URL copied from a logged-in address bar is a session artefact, not a shareable link. Test every outbound link from a cold session.
+
 ## [1.1.183] — 2026-09-04
 
 ### feat — the Roll the Dice email links straight into E*Trade
