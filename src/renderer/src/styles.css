@@ -5695,3 +5695,6 @@ input[type='checkbox'] {
 .capital-v { font-size: 17px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
 .capital-n { font-size: 10px; color: var(--text-muted); }
 .capital-stale { font-size: 11px; color: var(--warning); line-height: 1.5; }
+/* Neutral, not a warning: the gap between cash+positions and net liq is normal whenever a short
+   option is open — it is explanation, not a problem to fix. */
+.capital-note { font-size: 11px; color: var(--text-muted); line-height: 1.5; }

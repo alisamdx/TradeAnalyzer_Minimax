@@ -36,10 +36,12 @@ const addPosition = (d: DbHandle, p: Record<string, unknown>) => d.prepare(`
 // entry_price is NOT NULL in the schema, so the fixture defaults it to 0; tests that exercise
 // the cost-basis fallback pass a real value.
 
-const addBalance = (d: DbHandle, asOf: string, avail: number | null, key = 'K1') => d.prepare(`
-  INSERT OR REPLACE INTO account_balances
-    (as_of_date, fetched_at, account_id_key, cash_available) VALUES (?, ?, ?, ?)
-`).run(asOf, `${asOf}T20:00:00Z`, key, avail);
+const addBalance = (d: DbHandle, asOf: string, avail: number | null, key = 'K1', netLiq: number | null = null) =>
+  d.prepare(`
+    INSERT OR REPLACE INTO account_balances
+      (as_of_date, fetched_at, account_id_key, cash_available, total_account_value)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(asOf, `${asOf}T20:00:00Z`, key, avail, netLiq);
 
 describe('computeCommitted', () => {
   it('values a CSP at its collateral — strike x 100 x contracts, not the premium', () => {
@@ -92,7 +94,37 @@ describe('getCapitalUtilisation', () => {
     expect(u.committed.total).toBeCloseTo(37_636.5);
     // total is the SUM. If this were available − committed it would be negative here.
     expect(u.total).toBeCloseTo(57_636.5);
+    expect(u.totalSource).toBe('derived');   // no broker net liq stored in this fixture
     expect(u.utilisationPct).toBeCloseTo(65.3, 1);
+    d.close();
+  });
+
+  // Verified against the live account 2026-09-03: available + committed came to $82,541 while
+  // E*Trade reported $79,688 — the $2,853 gap is the covered call's liability, which reduces net
+  // liquidation without freeing cash or releasing the shares. Quoting the derived sum as "total"
+  // would disagree with the operator's own E*Trade screen by the size of the option they wrote.
+  it('prefers the broker net liq over the derived sum, and surfaces the gap', () => {
+    const d = db();
+    addPosition(d, { ticker: 'TSLA', position_type: 'Stock', quantity: 100, market_value: 37_636.5 });
+    addPosition(d, { ticker: 'TSLA', position_type: 'CC', quantity: 1, strike_price: 350, market_value: -2852.5 });
+    addBalance(d, '2026-09-03', 44_904.35, 'K1', 79_688.35);
+    const u = getCapitalUtilisation(d, '2026-09-03');
+    expect(u.committed.total).toBeCloseTo(37_636.5);       // CC still contributes nothing
+    expect(u.total).toBeCloseTo(79_688.35);                 // the broker's figure, not 82,540.85
+    expect(u.totalSource).toBe('broker');
+    expect(u.unreconciled).toBeCloseTo(2_852.5, 0);         // exactly the short call liability
+    expect(u.utilisationPct).toBeCloseTo(47.2, 1);
+    d.close();
+  });
+
+  it('falls back to the derived sum when the broker sends no net liq', () => {
+    const d = db();
+    addPosition(d, { ticker: 'A', position_type: 'CSP', quantity: 1, strike_price: 100 });
+    addBalance(d, '2026-09-03', 5_000);
+    const u = getCapitalUtilisation(d, '2026-09-03');
+    expect(u.total).toBe(15_000);
+    expect(u.totalSource).toBe('derived');
+    expect(u.unreconciled).toBeNull();   // nothing to reconcile against
     d.close();
   });
 

@@ -495,6 +495,8 @@ function buildApi() {
       available: number | null;
       committed: { csp: number; stock: number; longOptions: number; total: number; unclassified: string[] };
       total: number | null;
+      totalSource: 'broker' | 'derived' | null;
+      unreconciled: number | null;
       utilisationPct: number | null;
       balanceAsOf: string | null;
       balanceAgeDays: number | null;

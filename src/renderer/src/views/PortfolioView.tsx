@@ -743,10 +743,19 @@ export function PortfolioView() {
                 {capital.utilisationPct === null ? '—' : `${capital.utilisationPct.toFixed(0)}%`}
               </span>
               <span className="capital-n">
-                {capital.total === null ? 'needs a balance' : `of ${fmtUsd(capital.total)} total`}
+                {capital.total === null
+                  ? 'needs a balance'
+                  : `of ${fmtUsd(capital.total)} ${capital.totalSource === 'broker' ? 'net liq' : 'total'}`}
               </span>
             </div>
           </div>
+          {capital.unreconciled !== null && Math.abs(capital.unreconciled) >= 1 && (
+            <div className="capital-note">
+              Cash + positions comes to {fmtUsd((capital.available ?? 0) + capital.committed.total)},
+              {' '}{fmtUsd(Math.abs(capital.unreconciled))} above net liq — short option
+              obligations, which reduce account value without freeing cash.
+            </div>
+          )}
           {capital.balanceAgeDays !== null && capital.balanceAgeDays > 1 && (
             <div className="capital-stale">
               ⚠ Balance is {capital.balanceAgeDays} days old ({capital.balanceAsOf}) — sync to refresh.

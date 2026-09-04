@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.1.181] — 2026-09-03
+
+### fix — total capital uses E*Trade's net liquidation, not a derived sum
+
+- **Found by verifying the first live numbers rather than trusting that they rendered.** The derived total (available + committed) came to **$82,541** while E*Trade's own `totalAccountValue` reported **$79,688** — a **$2,853** gap that is almost exactly the covered call's liability.
+- **`available + committed` ignores short-option obligations.** A written call reduces net liquidation without freeing cash or releasing the shares behind it, so the derived sum overstates the account by the cost of buying that call back. Quoting it as "total" would have disagreed with the operator's own E*Trade screen by the size of the option they wrote.
+- **`total` now prefers the broker's `totalAccountValue`**, falling back to the derived sum only when the response omits it. `totalSource` records which, and `unreconciled` carries the gap so the three headline figures visibly reconcile instead of silently disagreeing. The strip explains it in plain words, in neutral styling — it is normal whenever a short option is open, not a problem to fix. Utilisation on the live book now reads **47%** of $79,688 rather than 46% of $82,541.
+- **The double-count guard held**: committed reads **$37,637** with the covered call contributing zero; a wrong implementation would have shown $34,784.
+- **Noticed, not acted on:** the account reports `marginBuyingPower` of **$194,684** — it is a margin account, so available cash is not the binding constraint on how many puts could be sold. Utilisation stays computed against cash and net liq since the operator's practice is cash-secured, but the figure is captured in `account_balances` if that ever needs revisiting.
+- 2 new tests pinning the live figures. Suite: 1180 passed.
+
 ## [1.1.180] — 2026-09-03
 
 ### fix — the balance snapshot ran on only one of two sync paths

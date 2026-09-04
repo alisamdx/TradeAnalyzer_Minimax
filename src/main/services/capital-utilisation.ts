@@ -92,8 +92,17 @@ export interface CapitalUtilisation {
   /** Cash deployable right now, straight from E*Trade. Null when no balance has been fetched. */
   available: number | null;
   committed: CommittedBreakdown;
-  /** available + committed. Null when there is no balance to add. */
+  /** Total account value. Prefers E*Trade's own net liquidation figure — see `totalSource`. */
   total: number | null;
+  /** Where `total` came from. 'broker' is E*Trade's `totalAccountValue`, which is authoritative
+   *  and nets short-option liabilities; 'derived' is available + committed, used only when the
+   *  broker figure is missing. */
+  totalSource: 'broker' | 'derived' | null;
+  /** (available + committed) − total. Non-zero because a short option is an obligation that
+   *  reduces net liquidation without reducing either cash or the capital tied up in shares —
+   *  on a covered call it is the cost to buy the call back. Surfaced rather than hidden, so the
+   *  three headline numbers visibly reconcile instead of silently disagreeing with E*Trade. */
+  unreconciled: number | null;
   /** committed / total, as a percentage. Null when total is unknown or zero. */
   utilisationPct: number | null;
   /** As-of date of the balance snapshot, and how stale it is in days. */
@@ -114,7 +123,8 @@ export function getCapitalUtilisation(db: DbHandle, todayEt: string): CapitalUti
   const empty: CapitalUtilisation = {
     available: null,
     committed: { csp: 0, stock: 0, longOptions: 0, total: 0, unclassified: [] },
-    total: null, utilisationPct: null, balanceAsOf: null, balanceAgeDays: null,
+    total: null, totalSource: null, unreconciled: null,
+    utilisationPct: null, balanceAsOf: null, balanceAgeDays: null,
     idleStreakDays: null,
   };
   try {
@@ -137,11 +147,21 @@ export function getCapitalUtilisation(db: DbHandle, todayEt: string): CapitalUti
     if (!latest?.d) return { ...empty, committed };
 
     const bal = db.prepare(`
-      SELECT SUM(cash_available) avail FROM account_balances WHERE as_of_date = ?
-    `).get(latest.d) as { avail: number | null };
+      SELECT SUM(cash_available) avail, SUM(total_account_value) netLiq
+      FROM account_balances WHERE as_of_date = ?
+    `).get(latest.d) as { avail: number | null; netLiq: number | null };
     const available = bal?.avail ?? null;
 
-    const total = available == null ? null : available + committed.total;
+    // Prefer the broker's own net liquidation. Verified against the live account 2026-09-03:
+    // available + committed came to $82,541 while E*Trade reported $79,688 — a $2,853 gap that
+    // is almost exactly the covered call's liability. The derived sum ignores short-option
+    // obligations, so quoting it as "total" would disagree with the operator's own E*Trade
+    // screen by the size of the option they wrote.
+    const derived = available == null ? null : available + committed.total;
+    const total = bal?.netLiq ?? derived;
+    const totalSource: 'broker' | 'derived' | null =
+      bal?.netLiq != null ? 'broker' : (derived != null ? 'derived' : null);
+    const unreconciled = (derived != null && bal?.netLiq != null) ? derived - bal.netLiq : null;
     const ageDays = Math.round(
       (Date.parse(`${todayEt}T00:00:00Z`) - Date.parse(`${latest.d}T00:00:00Z`)) / 86_400_000);
 
@@ -165,6 +185,8 @@ export function getCapitalUtilisation(db: DbHandle, todayEt: string): CapitalUti
       available,
       committed,
       total,
+      totalSource,
+      unreconciled,
       utilisationPct: total && total > 0 ? (committed.total / total) * 100 : null,
       balanceAsOf: latest.d,
       balanceAgeDays: ageDays,
