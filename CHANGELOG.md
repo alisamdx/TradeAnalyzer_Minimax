@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.188] - 2026-09-04
+
+### feat — the ownership read carries two axes in one sentence, and a caution comes OUT
+
+- The dice's own-at-strike line now merges the long-run read (cost basis vs SMA200, plus its 52-week percentile) with a **support** read: the **strike** against `swingLow20`, the lowest low of the last 20 sessions. One sentence, with the connective carrying the relationship — **and** when the two agree, **but** when they conflict.
+- **The behaviour change is a REMOVAL, not an addition.** *"That is an extended price, not a discount"* used to fire on every basis above SMA200 — **166 of 250 stored brief picks (66%)** — which includes the support-only cell that measured **+3.46% mean / +5.49% median, the best of the four**. It now fires only when **both** axes agree (**52%**), reworded as *"An extended price with no recent floor under it."* Nothing new fires at 50%; an existing line fires less, and stops being wrong about the cell most worth taking.
+- The in-app panel's warning colour used the same over-firing condition and now follows the sentence exactly (`ownershipWarns` in `DailyBriefView`).
+- **An unknown support axis (fewer than 20 bars) falls back to the exact previous sentence, clause included.** An axis that could not be measured must never be the reason a caution disappears — the same fail-closed reasoning as an absent earnings row.
+- **The asymmetry is deliberate:** the long-run half tests the **cost basis**, the support half tests the **STRIKE**. That is what T8 and its replay measured, so the code matches the study rather than being tidied into symmetry.
+- **`own-at-strike.ts` moved to `src/shared/`.** The panel carried a hand-copied duplicate of the sentence and the preload a hand-mirrored copy of the type — the same trap as the strategy slug map (v1.1.23/25), where four copies drifted until the card, email and critic disagreed about one pick. One definition now, imported by main, preload and renderer. `readOwnAtStrike` takes `(strike, costBasis, window)`.
+- **Still an annotation. Nothing gates on it** — evidence is one regime (T8: 4,917 settled rows / 45 dates; replay: 250 brief picks, 186 settled).
+- Tests: the four cells pinned by real numbers from scored picks (VKTX / GLW / SNOW / MPC), the withdrawal of the clause from the support-only cell, the unknown-axis fallback, and that support reads the strike rather than the basis.
+
 ## [1.1.187] - 2026-09-04
 
 ### docs — T8 follow-up: the own-at-strike x support annotation, replayed on the dice's own picks

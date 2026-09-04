@@ -129,6 +129,7 @@ import type {
   ExecApproveResult,
   ExecStartResult,
 } from '@shared/types.js';
+import type { OwnAtStrikeRead } from '@shared/own-at-strike.js';
 export type {
   ScreenPreset, ScreenCriteria, ScreenRunResult, ScreenResultRow, Universe,
   ConstituentsMeta, ConstituentRow, CachedQuote, AnalysisModeInfo, AnalysisRunResult,
@@ -1127,11 +1128,10 @@ type DicePickShape = {
     withinCapital: boolean;
     maxCapital: number;
     conviction: { priceHigh: number | null; strikeWithinBand: boolean | null } | null;
-    /** Cost basis vs the ticker's own SMA200 / 52-week range. Null when history is too short. */
-    ownership: {
-      costBasis: number; sma200: number; basisVsSma200Pct: number;
-      atOrBelowSma200: boolean; rangePctile: number; hi52: number; lo52: number;
-    } | null;
+    /** Cost basis vs the ticker's own SMA200 / 52-week range, plus the strike vs its 20-day low.
+     *  Null when history is too short. Imported rather than re-declared: this shape was hand-
+     *  mirrored here until v1.1.188 and would have silently omitted the support axis. */
+    ownership: OwnAtStrikeRead | null;
   };
 };
 

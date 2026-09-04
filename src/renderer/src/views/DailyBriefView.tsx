@@ -5,6 +5,20 @@ import { useState, useEffect, useCallback } from 'react';
 import type { DailyBriefEntry, BriefPick, ScoringStrategy, StrategyLabValidateResult, StrategyLabGrade, StrategySetup, SetupLeg, PayoffLeg, BriefAccuracy, CriticVerdict, BriefPerformanceSummary, BriefHealthTrend } from '@shared/types.js';
 import { STRATEGY_RELEVANT_SLUGS, pickDisplayStructure } from '@shared/strategy-structures.js';
 import { convictionOf, rsiOf, passesFilter, definedRiskAlternative, level2DebitAlternative, type PassFilter } from '@shared/brief-ranking.js';
+// ONE definition, shared with the dice email. The panel kept a hand-copied duplicate of this
+// sentence until v1.1.188; the strategy slug map already taught this lesson the expensive way.
+import { ownAtStrikeNote, type OwnAtStrikeRead } from '@shared/own-at-strike.js';
+
+/**
+ * Colour the read as a warning only when BOTH axes agree it is an extended entry — the same
+ * condition under which `ownAtStrikeNote` appends "An extended price with no recent floor under
+ * it." Before v1.1.188 this fired on every basis above SMA200, which included the support-only
+ * cell that measured +3.46% mean / +5.49% median, the best of the four. An UNKNOWN support axis
+ * still warns: an axis we could not measure must not be the reason a caution disappears.
+ */
+function ownershipWarns(r: OwnAtStrikeRead | null | undefined): boolean {
+  return r != null && r.atOrBelowSma200 === false && r.strikeBelowSwing !== true;
+}
 
 const STRATEGY_LABELS: Record<ScoringStrategy, string> = {
   wheel:   '🎡  Wheel — CSP / Covered Call',
@@ -870,27 +884,6 @@ type DicePick = NonNullable<DiceResult['pick']>;
  * implied by silence. Mirrors `convictionNote` in dice-email-builder.ts so the panel and the
  * email never disagree about what the bands say.
  */
-/**
- * Where the cost basis sits against the stock's own 200-day average and 52-week range.
- * Mirrors `ownAtStrikeNote` in src/main/services/own-at-strike.ts — the panel and the email must
- * never disagree. This is the sentence that actually answers "would I own it here?"; the
- * conviction line below it is nearly always satisfied by construction and is kept only as
- * secondary context. see docs/formulas.md#own-at-strike
- */
-function ownAtStrikeNote(ticker: string, r: DicePick['fit']['ownership']): string {
-  if (!r) return `Not enough price history for ${ticker} to judge the cost basis against its own range.`;
-  const basis = `$${r.costBasis.toFixed(2)}`;
-  const pct = Math.abs(r.basisVsSma200Pct).toFixed(1);
-  const n = Math.round(r.rangePctile);
-  const abs = Math.abs(n) % 100;
-  const suffix = abs >= 11 && abs <= 13 ? 'th' : (['th', 'st', 'nd', 'rd'][abs % 10] ?? 'th');
-  const where = `the ${n}${suffix} percentile of its 52-week range`;
-  if (r.atOrBelowSma200) {
-    return `If assigned you own ${ticker} at ${basis} — ${pct}% BELOW its 200-day average, at ${where}.`;
-  }
-  return `If assigned you own ${ticker} at ${basis} — ${pct}% ABOVE its 200-day average, at ${where}. `
-       + `That is an extended price, not a discount.`;
-}
 
 function convictionNote(p: DicePick): string {
   const c = p.fit.conviction;
@@ -1210,7 +1203,7 @@ export function DailyBriefView({ onGoToStrategyLab }: DailyBriefViewProps) {
                   <span className="dice-n">score {dice.pick.compositeScore.toFixed(1)} · liq {dice.pick.liquidityScore.toFixed(0)}/15</span>
                 </div>
               </div>
-              <div className={`dice-ownership${dice.pick.fit.ownership?.atOrBelowSma200 === false ? ' dice-ownership-warn' : ''}`}>
+              <div className={`dice-ownership${ownershipWarns(dice.pick.fit.ownership) ? ' dice-ownership-warn' : ''}`}>
                 {ownAtStrikeNote(dice.pick.ticker, dice.pick.fit.ownership)}
               </div>
               <div className="dice-conviction">{convictionNote(dice.pick)}</div>

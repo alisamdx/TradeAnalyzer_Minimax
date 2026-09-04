@@ -7,7 +7,7 @@ import {
   rollTheDice, DEFAULT_MAX_CAPITAL,
   type DicePickInput, type ConvictionBands,
 } from '../src/main/services/roll-the-dice.js';
-import type { PriceWindow } from '../src/main/services/own-at-strike.js';
+import type { PriceWindow } from '../src/shared/own-at-strike.js';
 
 const TODAY = '2026-09-02';
 const EXPIRY = '2026-09-25';
@@ -183,14 +183,14 @@ describe('rollTheDice', () => {
   it('reports the cost basis against the stock own-history anchors, and never gates on it', () => {
     // strike 140, premium 3.50 -> basis 136.50, against a 150 average = 9% BELOW.
     const below = rollTheDice([pick({ ticker: 'MTH' })], clear('MTH'), NO_CONV,
-      hist('MTH', { sma200: 150, hi52: 180, lo52: 120 }), TODAY, TODAY);
+      hist('MTH', { sma200: 150, hi52: 180, lo52: 120, swingLow20: null }), TODAY, TODAY);
     expect(below.pick?.fit.ownership?.atOrBelowSma200).toBe(true);
     expect(below.pick?.fit.ownership?.costBasis).toBeCloseTo(136.5);
     expect(below.pick?.fit.ownership?.basisVsSma200Pct).toBeCloseTo(-9.0, 1);
 
     // Same pick, an average of 120 -> basis is 13.75% ABOVE. Still selected.
     const above = rollTheDice([pick({ ticker: 'MTH' })], clear('MTH'), NO_CONV,
-      hist('MTH', { sma200: 120, hi52: 180, lo52: 100 }), TODAY, TODAY);
+      hist('MTH', { sma200: 120, hi52: 180, lo52: 100, swingLow20: null }), TODAY, TODAY);
     expect(above.pick?.ticker).toBe('MTH');            // not excluded
     expect(above.rejections).toHaveLength(0);
     expect(above.pick?.fit.ownership?.atOrBelowSma200).toBe(false);
@@ -204,8 +204,8 @@ describe('rollTheDice', () => {
 
   it('reads the within-budget alternative against its OWN history, not that of the pick', () => {
     const windows = new Map([
-      ['BIG', { sma200: 500, hi52: 600, lo52: 300 }],
-      ['MID', { sma200: 150, hi52: 220, lo52: 100 }],
+      ['BIG', { sma200: 500, hi52: 600, lo52: 300, swingLow20: null }],
+      ['MID', { sma200: 150, hi52: 220, lo52: 100, swingLow20: null }],
     ]);
     const r = rollTheDice(
       [pick({ ticker: 'BIG', price: 400, compositeScore: 88 }, 370),

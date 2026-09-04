@@ -171,6 +171,32 @@ not from a curated list.
   episodes inside a single ~4-week window, which under FR-SEY-5 is not enough to change which
   trades are taken.
 - Missing history (< 200 sessions) MUST read as "not enough history", never as a pass.
+
+**FR-BRIEF-DICE-12 (v1.1.188)** — The ownership read carries TWO axes, and the second one made the
+first quieter.
+
+- `fit.ownership` MUST also carry the **strike** against `swingLow20`, the lowest low of the last
+  20 sessions. Note the asymmetry, which is deliberate: the long-run axis tests the **cost basis**,
+  the support axis tests the **STRIKE**. Both were measured that way and the code MUST match the
+  study, not be tidied into symmetry.
+- The two are reported in ONE sentence whose connective states the relationship — **and** when they
+  agree, **but** when they conflict — rather than as two stacked lines.
+- **"An extended price…" MUST fire only when BOTH axes agree.** Before this it fired on every basis
+  above SMA200: 166 of 250 stored brief picks (66%), which includes the support-only cell that
+  measured **+3.46% mean / +5.49% median, the best of the four**. It now fires on 52%. The change
+  is therefore a WITHDRAWAL of an existing caution from the picks the data says were fine, not a
+  new warning — a line firing on two thirds of picks was already near-wallpaper. The in-app panel's
+  warning styling MUST use the same condition as the sentence.
+- **An unknown support axis (fewer than 20 bars) MUST fall back to the exact previous sentence,
+  clause included.** An axis that could not be measured must never be the reason a caution
+  disappears — same fail-closed reasoning as the absent earnings row.
+- Evidence: `scripts/fr-wheel-entry-quality-study.mjs` (4,917 settled rows / 45 dates) and
+  `scripts/dice-entry-annotation-replay.mjs` (250 brief picks, 186 settled; cell shares 18/16/14/52%
+  — so it fires on half the picks, unlike the conviction band's 0 of 39). Both axes survive
+  controlling for raw distance. **Still an annotation: it MUST NOT gate.**
+- The sentence is defined ONCE, in `src/shared/own-at-strike.ts`, and imported by the email, the
+  panel and the preload type. It MUST NOT be re-declared per surface — the panel carried a
+  hand-copied duplicate until v1.1.188, the same trap as the strategy slug map (v1.1.23/25).
 - The read MUST lead the ownership question in every surface, with the conviction band demoted to
   secondary context: the band is satisfied by construction on essentially every pick (0 breaches
   in 39 measured) and would otherwise read as an all-clear it did not earn.

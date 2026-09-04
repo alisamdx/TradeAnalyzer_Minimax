@@ -946,7 +946,16 @@ costBasis         = strike − premiumPerShare        # what assignment actually
 basisVsSma200Pct  = (costBasis / sma200 − 1) × 100  # negative = below the long-run average
 atOrBelowSma200   = costBasis <= sma200
 rangePctile       = (costBasis − lo52) / (hi52 − lo52) × 100    # 0 = 52w low, 100 = 52w high
+
+# support axis (v1.1.188) — note it tests the STRIKE, not the basis
+swingLow20        = min(low) over the last 20 sessions           # null when < 20 bars
+strikeBelowSwing  = strike < swingLow20                          # null when swingLow20 is null
 ```
+
+**The asymmetry is deliberate and must not be "tidied".** The long-run half tests the **cost
+basis**; the support half tests the **strike**. That is exactly what was measured — the T8 study
+and its replay both split on `basis ≤ SMA200` and `strike < 20-day low` — so the code matches the
+study rather than the other way round.
 
 `sma200`, `hi52` and `lo52` come from `historical_prices` filtered to `date <= briefDate` — fully
 point-in-time, available for **100% of stored wheel picks**, and impossible to leave stale.
@@ -981,6 +990,40 @@ times and AVGO 6 times across 8 consecutive days, which is one move counted 13 t
 *grew* under de-duplication, survived leave-one-out (14.3 pts with the +46% INTU outlier removed)
 and survived dropping NVDA and AVGO entirely (19.1 pts, n=8). 11 of 12 accept episodes were
 positive.
+
+### The support axis, and why adding it REMOVED a warning (v1.1.188)
+
+`scripts/fr-wheel-entry-quality-study.mjs` (T8) tested the Validate view's entry machinery on 4,917
+settled liquidity-gated rows across 45 dates. Two measures separate and are **complementary**;
+`scripts/dice-entry-annotation-replay.mjs` then re-ran them on the dice's own population — 250
+stored brief picks, 186 settled:
+
+| cell | share of brief picks | mean | median | assigned |
+|---|---|---|---|---|
+| both | 18% | +2.17% | 2.51% | **8%** |
+| long-run only | 16% | +2.97% | 2.71% | **4%** |
+| **support only** | 14% | **+3.46%** | **5.49%** | 26% |
+| neither | **52%** | **−2.10%** | 2.15% | **44%** |
+
+Both survive the obvious confound: below-swing strikes sit **2.6× further OTM** (8.46% vs 3.28%),
+but held inside ATR-cushion quartiles the split persists in all four, largest in the *thinnest*
+cushion (+1.48% at 19.5% assigned vs −4.55% at 60.8%).
+
+**The wording change is a withdrawal, not an addition.** *"That is an extended price, not a
+discount"* used to fire on every basis above SMA200 — **166 of 250 picks (66%)**, which includes
+the support-only cell that outperformed all three others. It now fires only when **both** axes
+agree (52%), reworded as *"An extended price with no recent floor under it."* The in-app panel's
+warning colour follows the same condition (`ownershipWarns`). Nothing new fires at 50%; an
+existing line fires less, and stops being wrong about the best cell.
+
+The connective carries the relationship: **and** when the axes agree, **but** when they conflict.
+An **unknown** support axis (fewer than 20 bars) falls back to the exact pre-v1.1.188 sentence,
+clause included — an axis that could not be measured must never be the reason a caution disappears.
+
+The entry *zone* itself was tested and adds nothing: `entryZoneLow = min(swingLow, SMA50)`, so its
+split (858 episodes) is the swing-low split (869) renamed, and "IN ENTRY ZONE" is the mediocre
+middle. Both of its bounds are **recency anchors**, which is the construction that made the
+conviction band undetectable — see above.
 
 ### Why it is an annotation and not a gate
 

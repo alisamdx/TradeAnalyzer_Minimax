@@ -18,7 +18,8 @@ const WITH_PICK: DiceResult = {
       withinCapital: true, maxCapital: 30_000,
       conviction: { priceHigh: 58, strikeWithinBand: true },
       ownership: { costBasis: 49.05, sma200: 51.0, basisVsSma200Pct: -3.82,
-                   atOrBelowSma200: true, rangePctile: 41.2, hi52: 58.0, lo52: 42.0 },
+                   atOrBelowSma200: true, rangePctile: 41.2, hi52: 58.0, lo52: 42.0,
+                   strike: 50, swingLow20: 51.2, strikeBelowSwing: true },
     },
   },
   withinBudget: null,
@@ -204,10 +205,12 @@ describe('buildDiceEmailHtml', () => {
       ...WITH_PICK,
       pick: { ...WITH_PICK.pick!, fit: { ...WITH_PICK.pick!.fit,
         ownership: { costBasis: 49.05, sma200: 44.0, basisVsSma200Pct: 11.48,
-                     atOrBelowSma200: false, rangePctile: 88.0, hi52: 52.0, lo52: 40.0 } } },
+                     atOrBelowSma200: false, rangePctile: 88.0, hi52: 52.0, lo52: 40.0,
+                     // Cell D: both axes unfavourable, so the "extended price" clause stands.
+                     strike: 50, swingLow20: 48.0, strikeBelowSwing: false } } },
     }, 'Tue, Sep 2');
     expect(h).toContain('ABOVE its 200-day average');
-    expect(h).toContain('extended price, not a discount');
+    expect(h).toContain('An extended price with no recent floor under it.');
   });
 
   it('says so plainly when there is not enough history, rather than implying a pass', () => {

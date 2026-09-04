@@ -35,7 +35,7 @@
 
 import { MIN_TRADABLE_LIQUIDITY_SCORE } from '@shared/strategy-structures.js';
 import type { DbHandle } from '../db/connection.js';
-import { readOwnAtStrike, type OwnAtStrikeRead, type PriceWindow } from './own-at-strike.js';
+import { readOwnAtStrike, type OwnAtStrikeRead, type PriceWindow } from '@shared/own-at-strike.js';
 
 /** The wheel's opening leg. `covered-call` is the OTHER wheel slug but requires already owning
  *  the shares — it cannot be the one thing you do with cash, so this feature is CSP-only. */
@@ -292,7 +292,7 @@ export function rollTheDice(
       maxCapital,
       conviction: assessConviction(shortPut.strike, conviction.get(p.ticker)),
       // Cost basis, not strike: the premium is kept on assignment, so it is what you actually pay.
-      ownership: readOwnAtStrike(shortPut.strike - shortPut.mid, priceWindows.get(p.ticker)),
+      ownership: readOwnAtStrike(shortPut.strike, shortPut.strike - shortPut.mid, priceWindows.get(p.ticker)),
     };
 
     // 6. EARNINGS — a hard exclusion, not the brief's −20 penalty. A short put through an
@@ -433,6 +433,10 @@ export function computeRollTheDice(
       sma200,
       hi52: Math.max(...bars.map(b => b.high)),
       lo52: Math.min(...bars.map(b => b.low)),
+      // The support anchor (v1.1.188). `bars` is DESC, so the first 20 rows are the most recent 20
+      // sessions. Null rather than a shorter window when there are fewer — a "20-day low" computed
+      // from 6 bars is a different statistic wearing the same name.
+      swingLow20: bars.length >= 20 ? Math.min(...bars.slice(0, 20).map(b => b.low)) : null,
     });
   }
 

@@ -16,7 +16,7 @@
 // No PDF attachment: one trade does not need one.
 
 import type { DicePick, DiceResult } from './roll-the-dice.js';
-import { ownAtStrikeNote } from './own-at-strike.js';
+import { ownAtStrikeNote } from '@shared/own-at-strike.js';
 import { etradeQuoteUrl, etradeOptionsUrl } from './etrade-links.js';
 
 const BG = '#f6f8fa';
