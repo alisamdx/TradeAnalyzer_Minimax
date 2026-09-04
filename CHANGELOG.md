@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.1.174] — 2026-09-03
+
+### docs — the dice composite tiebreak is nearly vacuous; the F8 concern does not land there
+
+- **No behaviour change.** v1.1.173 flagged "Roll the Dice breaks ties by highest composite, which may select the worst of its eligible set" as the most decision-relevant open question. The answer is structural, not statistical.
+- **The tiebreak almost never has anything to break.** Eligible-set sizes across 62 stored brief days: **0 → 28 days, 1 → 27, 2 → 6, 3 → 1**. Of the 34 days that produced a pick, **27 (79%) had exactly one eligible candidate**. Only 7 days offered a real choice; only 4 are fully settled. The gates ahead of the sort — critic `pass` and non-degraded, liquidity ≥ 8, earnings clear of expiry, real credit — do essentially all the selecting.
+- **The four settled choice-days are an anecdote, not evidence**, and are labelled as such: chosen **+2.02%** vs alternatives **+2.10%**, chosen winning 2 of 4. One day (2026-07-14) looks like F8 in miniature — WWD at composite 74.6 assigned and lost −6.66% while MKC at 61.6 returned +2.15% — but a single day is a story.
+- **The real exposure is upstream and currently untestable.** The brief keeps only `PICKS_PER_STRATEGY = 5` by composite out of a `STAGE4_POOL_SIZE = 15` pool, and the dice can only see those 5. That cut is where an anti-predictive composite would do its damage, and `daily_briefs` cannot test it because it persists only the survivors. `analysis_snapshots` holds the full universe (65 dates, ~1,223 wheel rows each, 79,477 total, each with a real `recommendedStrike`/`premium`/`delta`/`ivRank`/`optionLiquidityScore`) but carries **no `compositeScore`**, and 21 of the composite's 91 weight comes from `fundamentals_cache` which has no history — so a selection study on the reconstructable signals is possible, a faithful composite replay is not.
+- **Proposed, not built:** persist composite + eventual outcome for all 15 Stage-4 candidates rather than just the top 5. Small and additive, and the only way the top-5 cut becomes directly measurable instead of inferred.
+- Recorded in CLAUDE.md as a standing lesson: **before studying whether a selection rule picks well, count how often it has anything to pick between** — one eligible-set-size histogram retired this study before it was written. And its corollary: when a ranking's quality is in question, the losers are the data you need, and pipelines habitually discard exactly those.
+
 ## [1.1.173] — 2026-09-03
 
 ### docs — T2: a wheel composite floor is REJECTED; the composite is anti-predictive at the top

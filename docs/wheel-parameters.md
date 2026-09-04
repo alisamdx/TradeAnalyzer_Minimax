@@ -198,11 +198,18 @@ most days — 14 of 35 emptied at 70 — but the deeper problem is that it keeps
 See **F8**: the composite is anti-predictive at the top, so a floor systematically retains the
 high-IV names that blow up short puts.
 
-**Follow-up, flagged not built.** Roll the Dice breaks ties by **highest composite**. If a high
-wheel composite is anti-predictive, that tiebreak may select the worst of the eligible set. The
-dice pool is ≤5 and sits behind the critic, liquidity and earnings gates so it does not follow
-automatically — but it is the single most decision-relevant open question left, and deserves its
-own study once more picks settle.
+**Follow-up — RESOLVED v1.1.174: the tiebreak is nearly vacuous.** It fires on **7 of 62** brief
+days, and on **27 of 34 pick-days (79%) there is exactly one eligible candidate** — nothing to
+choose between. The gates ahead of the sort do essentially all the work. So F8's implication does
+not land at the dice's selection step. `scripts/fr-dice-tiebreak-study.mjs`.
+
+**Where it does land: the brief's top-5 cut.** `PICKS_PER_STRATEGY = 5` of a `STAGE4_POOL_SIZE = 15`
+pool, ranked by composite — and the dice only ever sees those 5. That is not testable from
+`daily_briefs`, which stores only survivors. `analysis_snapshots` holds the full universe (65
+dates, ~1,223 rows each) with real strikes and premiums, but no `compositeScore`, and 21 of the
+composite's 91 weight comes from `fundamentals_cache` which has no history — so a selection study
+on reconstructable signals is possible, a faithful composite replay is not. **The cheap fix:
+persist composite + outcome for all 15 Stage-4 candidates, not just the 5 that survive.**
 
 ### ~~T3 — `optionLiquidity` back on in scoring~~ — CLOSED 2026-09-03, keep it off
 
