@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.189] - 2026-09-04
+
+### fix - the critic's context was filtered-favourable by construction
+
+- **Two defects, both pointing the same way:** the adversarial reviewer was handed a filtered view of the pick it was meant to attack.
+- **(1) The signal list selected for good news.** `topSignals` sorted descending on `weight x normalized` and took 4 - a sort on CONTRIBUTION, so a signal scoring badly has a small product and is pushed out by the arithmetic. Measured over **948 stored picks**: the worst-scoring signal reached the critic on **8.3%**, a reading below 35/100 on **2.8%** (18 of 653), and **59 of 250 wheel picks (24%) were passed clean with no warning flag while carrying a sub-35 reading the reviewer never saw**. On the DINO pick that surfaced this, `technicalNeutral` at 30.6/100 - the app's own "this is extended" read - ranked 7th of 7 by contribution and never arrived, while `notDowntrend` at 100 did.
+- **(2) The one measured ownership read was computed after the verdict.** `own-at-strike` runs in `roll-the-dice.ts`, downstream of the critic, so the reviewer had never seen it in any form. On **82 critic-PASSED wheel picks, 57 (70%)** had a cost basis above the ticker's own 200-day average and 37 were more than 10% above - DELL **+97.9%**, AMD **+79.2%**.
+- **Fixed:** `selectCriticSignals()` (exported, pure, tested) appends the pick's **weakest** reading when the contribution sort excluded it, marked `isWeakestReading` so the model can distinguish "the worst thing measured about this pick" from "one of the things that drove the score". `readOwnership()` puts the two-axis own-at-strike read in the context for **wheel** picks, never throwing, with `null` read as unknown rather than satisfactory.
+- **Still a sample, deliberately.** Three of the signals full disclosure would surface for wheel - `technicalNeutral`, `recentVolatility`, `notDowntrend` - were measured flat, mildly inverted and anti-predictive (T6, v1.1.178), so handing over every reading would invite confident cautions built on signals already shown not to predict. One guaranteed sight of the worst reading is the smallest change that removes the bias.
+- **The prompt says nothing new about TREND.** That is T7, still open; `docs/wheel-parameters.md` records why a tweak there is not justified on current evidence.
+- **Not validated on outcomes, and the reason is structural rather than effort.** The verdict is a hard gate, so this changes which trades are taken (FR-SEY-5) - but the intersection of "verdict flipped" with "expiry has settled" across one regime is a handful of trades, and a return figure from that would have no power behind it. `scripts/critic-context-ab.mjs` measures the **blast radius** instead: how many verdicts move and in which direction, two API calls per pick, `--limit` defaulting small so an accidental run is cheap. **Not yet run.**
+- **`CRITIC_CONTEXT_V2=0` reverts both changes on a live run, no rebuild.**
+
 ## [1.1.188] - 2026-09-04
 
 ### feat — the ownership read carries two axes in one sentence, and a caution comes OUT

@@ -6,6 +6,7 @@ import type { Database } from 'better-sqlite3';
 import Anthropic from '@anthropic-ai/sdk';
 import type { BriefPick, CriticFlag, CriticVerdict, ScoringConfig } from '@shared/types.js';
 import { STRATEGY_RELEVANT_SLUGS, pickRelevantStructure, formatStructureLegs, MIN_TRADABLE_LIQUIDITY_SCORE } from '@shared/strategy-structures.js';
+import { readOwnAtStrike, type PriceWindow } from '@shared/own-at-strike.js';
 import { isEarningsPending } from './earnings-service.js';
 
 // A VIX value older than this is treated as unknown (null), not stale-but-confident.
@@ -133,6 +134,85 @@ export function extractVolatilityContext(
   };
 }
 
+/**
+ * v1.1.189 — what the adversarial reviewer is allowed to see.
+ *
+ * Two defects, measured on 948 stored picks, both in the same direction: the reviewer was shown a
+ * filtered-favourable view of the pick it was meant to attack.
+ *
+ * 1. THE SIGNAL LIST SELECTED FOR GOOD NEWS. `topSignals` sorted by `weight × normalized` and took
+ *    4 — a descending sort on CONTRIBUTION, so a signal scoring badly is pushed out by the
+ *    arithmetic. Measured: the worst-scoring signal reached the critic on **8.3%** of picks, and a
+ *    reading below 35/100 reached it on **2.8%** (18 of 653). On the DINO pick that raised this,
+ *    `technicalNeutral` at 30.6/100 — the app's own "this is extended" read — never arrived, while
+ *    `notDowntrend` at 100 did. 24% of wheel picks were passed clean, with no warning flag, while
+ *    carrying a sub-35 reading the reviewer never saw.
+ * 2. THE ONE MEASURED OWNERSHIP READ WAS COMPUTED AFTER IT. `own-at-strike` runs in
+ *    `roll-the-dice.ts`, downstream of the verdict, so the critic has never seen it in any form.
+ *    On 82 critic-PASSED wheel picks, 57 (70%) had a cost basis above the ticker's own 200-day
+ *    average and 37 were more than 10% above — DELL at +97.9%, AMD at +79.2%. The reviewer was not
+ *    given the chance to have an opinion about that.
+ *
+ * WHAT THIS DOES NOT DO. It does not re-weight anything, and it deliberately says NOTHING new
+ * about TREND — that is T7, still open, and `docs/wheel-parameters.md` records why a prompt tweak
+ * there is not justified on current evidence.
+ *
+ * WHY IT IS NOT VALIDATED ON OUTCOMES, stated plainly rather than glossed: the critic verdict is a
+ * hard gate, so this changes which trades are taken, which is FR-SEY-5 territory. But the only
+ * available test re-runs the LLM over stored picks and diffs verdicts, and the number of flips is
+ * far too small to attach outcomes to. So what CAN be measured is the blast radius, and
+ * `scripts/critic-context-ab.mjs` measures exactly that. The flag exists so the whole change is one
+ * environment variable away from being reverted on a live run.
+ */
+const CRITIC_CONTEXT_V2 = true;
+function criticContextV2(): boolean {
+  return process.env['CRITIC_CONTEXT_V2'] === '0' ? false : CRITIC_CONTEXT_V2;
+}
+
+export interface CriticSignalEntry {
+  key: string; raw: number | null; normalized: number; weight: number;
+  /** Present only on the pick's worst reading — see `selectCriticSignals`. */
+  isWeakestReading?: true;
+}
+
+/**
+ * Which signals the reviewer is shown.
+ *
+ * The 4 biggest CONTRIBUTORS, as it has always been — plus, since v1.1.189, the pick's WEAKEST
+ * reading when it did not already make that cut. The original sort is descending on
+ * `weight × normalized`, which is a sort on GOOD NEWS: a signal scoring badly has a small product
+ * and is pushed out by the arithmetic, so an adversarial reviewer was handed the bull case by
+ * construction. Measured over 948 stored picks — the worst-scoring signal reached the critic on
+ * 8.3% of them, a reading below 35/100 on 2.8% (18 of 653).
+ *
+ * The weakest entry is MARKED rather than silently appended: "the worst thing measured about this
+ * pick" and "one of the things that drove the score" are different claims, and the prompt leans on
+ * the distinction.
+ *
+ * Deliberately still a SAMPLE and not the whole signal set. Three of the signals this would
+ * otherwise surface for wheel — `technicalNeutral`, `recentVolatility`, `notDowntrend` — were
+ * measured flat, mildly inverted and anti-predictive respectively (T6, v1.1.178), so handing the
+ * model every reading would invite confident cautions built on signals this project has already
+ * shown do not predict. One guaranteed sight of the worst reading is the smallest change that
+ * removes the bias.
+ */
+export function selectCriticSignals(signals: BriefPick['signals']): CriticSignalEntry[] {
+  const scored = Object.entries(signals).filter(([, v]) => !v.missing && v.raw !== null);
+  const byContribution = [...scored]
+    .sort((a, b) => b[1].weight * b[1].normalized - a[1].weight * a[1].normalized)
+    .slice(0, 4);
+  const weakest = [...scored].sort((a, b) => a[1].normalized - b[1].normalized)[0];
+  const shown = new Set(byContribution.map(([k]) => k));
+  const selected = criticContextV2() && weakest && !shown.has(weakest[0])
+    ? [...byContribution, weakest]
+    : byContribution;
+  return selected.map(([key, v]) => ({
+    key, raw: v.raw, normalized: v.normalized, weight: v.weight,
+    ...(criticContextV2() && weakest && key === weakest[0] ? { isWeakestReading: true as const } : {}),
+  }));
+}
+
+
 export class CriticService {
   constructor(private readonly db: Database) {}
 
@@ -221,11 +301,16 @@ export class CriticService {
       // to fail OPEN). 4 retries with the SDK's exponential backoff rides out brief overloads.
       const client = new Anthropic({ apiKey, maxRetries: 4 });
 
-      const topSignals = Object.entries(pick.signals)
-        .filter(([, v]) => !v.missing && v.raw !== null)
-        .sort((a, b) => b[1].weight * b[1].normalized - a[1].weight * a[1].normalized)
-        .slice(0, 4)
-        .map(([key, v]) => ({ key, raw: v.raw, normalized: v.normalized, weight: v.weight }));
+      const topSignals = selectCriticSignals(pick.signals);
+
+      // The own-at-strike read (v1.1.169/188), which until now was computed in `roll-the-dice.ts`
+      // AFTER this verdict and so had never reached the reviewer in any form. Wheel only: the
+      // measurement behind it (T8) is a short-put study and says nothing about the other
+      // strategies. Never throws — a missing price window degrades to `null`, which the prompt
+      // instructs the model to treat as unknown rather than as clear.
+      const ownership = criticContextV2() && strategy === 'wheel'
+        ? this.readOwnership(pick, strategy)
+        : null;
 
       // Extract the chosen relevant structure for context via the shared selector —
       // the same structure every rule check refers to. Structures with
@@ -346,6 +431,7 @@ export class CriticService {
         earningsInWindow,  // null = no earnings before expiry; otherwise { date, daysFromNow, confirmed }
         earningsKnown,     // false = calendar has no future earnings data for this ticker at all
         volatility,        // { impliedVolPct, ivRank, realizedVolPct?, expectedMove1SigmaPct?, expectedMove1SigmaUsd? } — or null
+        ...(ownership ? { ownership } : {}),   // wheel only; absent means it could not be measured
         topSignals,
         structure,
         advocateRationale: pick.aiRationale,
@@ -365,6 +451,8 @@ FLAG SEVERITIES: 'warning' flags indicate material risk. 'info' flags are adviso
 MARKET DATA: All values in \`marketData\` are live as of \`date\` from real-time feeds — treat them as ground truth. Do not use training knowledge to contradict provided prices; stocks change dramatically over years of training lag. \`price52wReturnPct\` shows the 1-year return so you can calibrate price level without recalling historical absolutes.
 STRUCTURE: \`structure.legs\` is the COMPLETE trade — judge the whole structure from it, not from any single leg. Multi-leg structures (zebra = 2:1 long/short same side, butterfly = 1-2-1, condor) are defined by all their legs; do not treat one leg in isolation (e.g. a put zebra's short leg sitting at/above spot is normal financing, not a broken ITM strike). \`dte\` is pre-computed calendar days to expiry. \`shortStrike\` / \`strikeOtmPct\` refer to the primary SHORT leg: \`strikeOtmPct\` = (shortStrike − current price) / price × 100: positive means ABOVE spot (OTM for short calls, ITM for short puts); negative means BELOW spot (OTM for short puts, ITM for short calls). Judge moneyness by the leg's side. \`breakevenDistancePct\` (income only) is the distance to the structure's nearest breakeven — compare it to the expected 1-sigma move. If \`structure.presentation\` says stock purchase, evaluate the pick as a plain stock buy — the option structure shown is optional; do not penalize the stock thesis for the structure's grade. \`structure.maxProfit\` / \`structure.maxLoss\` are the PRECOMPUTED dollar payoff bounds (per contract, already ×100) and \`structure.breakevens\` the expiry breakeven prices — cite these provided numbers for any reward/risk or max-loss statement; do NOT compute or estimate them. A **null** \`maxLoss\` means TRULY UNBOUNDED loss — this only happens with a naked short CALL (e.g. short strangle/straddle, reverse lizard) and is a material risk worth flagging. A **finite** \`maxLoss\` means the loss is DEFINED/BOUNDED: never call it "unlimited", "uncapped", or "nearly unlimited" — a short PUT's worst case is bounded (underlying → 0) and is given in \`maxLoss\`; state that figure instead. Likewise a null \`maxProfit\` means unbounded profit (net-long calls).
 VOLATILITY: \`volatility.impliedVolPct\` is the underlying's current annualized at-the-money implied volatility as a percentage (e.g. 104.7 = 104.7%). \`volatility.expectedMove1SigmaPct\` and \`volatility.expectedMove1SigmaUsd\` are the PRECOMPUTED expected 1-sigma move of the underlying over the hold (= impliedVolPct × sqrt(dte/365)), in percent and in dollars. When you discuss the expected or 1-sigma move, cite THESE provided numbers verbatim — do NOT compute, derive, or estimate the move yourself (your manual arithmetic has been unreliable and overstated it). If they are absent (e.g. impliedVolPct is null), do not attempt any expected-move reasoning. \`volatility.ivRank\` (0–100) is where IV sits in its 1-year range. \`volatility.realizedVolPct\`, when present, is the stock's RECENT REALIZED volatility — a momentum signal, NOT implied vol; the advocate may cite it as "recent volatility". It is normal and expected for realized vol to differ from impliedVolPct — do NOT treat that gap as a discrepancy, error, or red flag. CRITICAL: do NOT state any implied- or realized-volatility number that is not in \`volatility\`; never recall or estimate one from training knowledge. If \`volatility\` is null, do not cite any volatility number; say it could not be measured.
+SIGNALS: \`topSignals\` lists the pick's biggest scoring contributors PLUS, when it is not already among them, the pick's WEAKEST reading, marked \`isWeakestReading\`. \`normalized\` is 0-100 and always oriented so HIGHER IS BETTER for this strategy, whatever the raw units. A low \`normalized\` therefore means the app's own scoring judged that dimension poorly, and the marked entry is the worst thing measured about this pick — a fact worth weighing, not automatically a reason to caution. The list is a SAMPLE of the signals, never the whole set, so the absence of a concern from it is not evidence there is none.
+OWNERSHIP (wheel only, may be absent): \`ownership\` answers "is the assignment price a price worth owning?", measured against the stock's OWN history rather than any list. \`costBasisIfAssigned\` = strike minus premium, the price actually paid on assignment. \`basisVsSma200Pct\` is that basis against the ticker's 200-day average — POSITIVE means assignment happens ABOVE the long-run average, which is an extended entry rather than a discount however good the premium looks. \`basisRangePctile52w\` places it in the 52-week range (0 = the low, 100 = the high). \`strikeBelow20dLow\` says whether the STRIKE sits under the lowest low of the last 20 sessions — true means the stock has not traded at your strike in a month; false means it already has. These are the only measured price-level facts you have; cite the provided numbers and do not compute your own. When \`ownership\` is ABSENT it could not be measured — treat it as unknown, never as satisfactory.
 MARKET CONTEXT: \`vixLevel\` and \`spyTrend\` describe today's macro environment.
 EARNINGS: \`earningsInWindow\` is non-null if there is a known earnings event before expiry — this is the single biggest event risk for any options position. If \`earningsKnown\` is false the calendar has NO future earnings data for this ticker, so treat earnings risk as unverified rather than absent — for options positions, note that the report date must be checked manually.
 
@@ -396,6 +484,60 @@ Use verdict: pass, caution, or flag. Use confidence: high, medium, or low.`;
       // `degraded: true` marks it as un-vetted so consumers DON'T treat this as an adversarial
       // all-clear: the v2 entry gate rejects it (fail-closed) and the UI flags it.
       return { verdict: baseVerdict, confidence: 'low', flags, rationale: null, generatedAt, degraded: true };
+    }
+  }
+
+  /**
+   * The own-at-strike read for a wheel pick, computed here so the reviewer can see it.
+   *
+   * Duplicates nothing: it calls the same `readOwnAtStrike` the dice uses, on the same anchors,
+   * from the same table. What differs is only WHEN — the dice computes it after the verdict, this
+   * computes it before, so the two can never disagree about a pick.
+   *
+   * Returns null on any shortfall (no CSP structure, a short leg without a usable mid, fewer than
+   * 200 sessions of history) and NEVER throws — this is context for a reviewer, and a failure to
+   * assemble it must not take the whole verdict down with it. Null reads as unknown in the prompt.
+   */
+  readOwnership(pick: BriefPick, strategy: string): object | null {
+    try {
+      const best = this.selectRelevantStructure(pick, strategy);
+      const setup = best?.setup as { legs?: Array<Record<string, unknown>> } | undefined;
+      const leg = setup?.legs?.find(l =>
+        String(l['side']).toLowerCase() === 'put' &&
+        String(l['action']).toLowerCase().startsWith('sell'));
+      const strike = typeof leg?.['strike'] === 'number' ? leg['strike'] : null;
+      const mid = typeof leg?.['mid'] === 'number' ? leg['mid'] : null;
+      if (strike === null || mid === null) return null;
+
+      const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+      const bars = this.db.prepare(
+        `SELECT close, high, low FROM historical_prices WHERE ticker = ? AND date <= ?
+          ORDER BY date DESC LIMIT 260`,
+      ).all(pick.ticker, today) as Array<{ close: number; high: number; low: number }>;
+      if (bars.length < 200) return null;
+
+      const w: PriceWindow = {
+        sma200: bars.slice(0, 200).reduce((a, b) => a + b.close, 0) / 200,
+        hi52: Math.max(...bars.map(b => b.high)),
+        lo52: Math.min(...bars.map(b => b.low)),
+        swingLow20: bars.length >= 20 ? Math.min(...bars.slice(0, 20).map(b => b.low)) : null,
+      };
+      const r = readOwnAtStrike(strike, strike - mid, w);
+      if (!r) return null;
+      // Rounded, and named for what they MEAN rather than for the fields they came from — the
+      // model reasons about the labels, not about the storage.
+      return {
+        costBasisIfAssigned: +r.costBasis.toFixed(2),
+        sma200: +r.sma200.toFixed(2),
+        basisVsSma200Pct: +r.basisVsSma200Pct.toFixed(1),
+        basisAtOrBelowSma200: r.atOrBelowSma200,
+        basisRangePctile52w: +r.rangePctile.toFixed(0),
+        strike: r.strike,
+        low20d: r.swingLow20 === null ? null : +r.swingLow20.toFixed(2),
+        strikeBelow20dLow: r.strikeBelowSwing,
+      };
+    } catch {
+      return null;   // context, not a gate — never take the verdict down over it
     }
   }
 

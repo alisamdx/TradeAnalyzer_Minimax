@@ -7,6 +7,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import Database from 'better-sqlite3';
 import {
   CriticService,
+  selectCriticSignals,
   breakevenDistancePct,
   extractVolatilityContext,
   expectedOneSigmaMove,
@@ -694,5 +695,141 @@ describe('expectedOneSigmaMove', () => {
     expect(expectedOneSigmaMove(NaN, 31, 507.29)).toEqual({ pct: null, usd: null });
     expect(expectedOneSigmaMove(70, null, 507.29)).toEqual({ pct: null, usd: null });
     expect(expectedOneSigmaMove(70, 0, 507.29)).toEqual({ pct: null, usd: null });
+  });
+});
+
+// ─── What the reviewer is allowed to see (v1.1.189) ─────────────────────────
+//
+// Both defects pinned here pointed the same way: the adversarial reviewer was handed a filtered-
+// favourable view of the pick it was meant to attack. Measured over 948 stored picks — the
+// worst-scoring signal reached it on 8.3%, a sub-35 reading on 2.8% (18 of 653).
+
+/** DINO, 2026-09-03 — the live pick that surfaced this. Real weights and normalized values. */
+const DINO_SIGNALS = {
+  ivRank:           { raw: 82.2, normalized: 82.2, weight: 22, missing: false },
+  premiumYield:     { raw: 27.0, normalized: 45.0, weight: 19, missing: false },
+  fundamentalScore: { raw: 86,   normalized: 86.0, weight: 17, missing: false },
+  technicalNeutral: { raw: 73.9, normalized: 30.6, weight: 11, missing: false },
+  notDowntrend:     { raw: 100,  normalized: 100,  weight: 8,  missing: false },
+  recentVolatility: { raw: 35.4, normalized: 41.1, weight: 10, missing: false },
+  leverageQuality:  { raw: 0.15, normalized: 97.0, weight: 4,  missing: false },
+} as unknown as BriefPick['signals'];
+
+describe('selectCriticSignals — the reviewer must see the worst reading', () => {
+  it('shows the top contributors, as before', () => {
+    const keys = selectCriticSignals(DINO_SIGNALS).map(s => s.key);
+    // contribution = weight x normalized: 1809, 1462, 855, 800
+    expect(keys.slice(0, 4)).toEqual(['ivRank', 'fundamentalScore', 'premiumYield', 'notDowntrend']);
+  });
+
+  // THE REGRESSION. technicalNeutral at 30.6/100 is the app's own "this is extended" read, and its
+  // contribution (11 x 30.6 = 337) put it 7th of 7 — so the sort on good news excluded exactly the
+  // signal a reviewer needed. The critic passed DINO clean with no warning flag.
+  it('appends the weakest reading that the contribution sort excluded', () => {
+    const sel = selectCriticSignals(DINO_SIGNALS);
+    expect(sel).toHaveLength(5);
+    const weakest = sel.find(s => s.key === 'technicalNeutral');
+    expect(weakest).toBeDefined();
+    expect(weakest!.normalized).toBeCloseTo(30.6, 5);
+    expect(weakest!.isWeakestReading).toBe(true);
+  });
+
+  it('marks only the weakest, and marks nothing else', () => {
+    const marked = selectCriticSignals(DINO_SIGNALS).filter(s => s.isWeakestReading);
+    expect(marked).toHaveLength(1);
+    expect(marked[0]!.key).toBe('technicalNeutral');
+  });
+
+  it('does not duplicate when the weakest already made the cut', () => {
+    const sig = {
+      a: { raw: 1, normalized: 90, weight: 30, missing: false },
+      b: { raw: 1, normalized: 80, weight: 20, missing: false },
+      c: { raw: 1, normalized: 70, weight: 10, missing: false },
+      d: { raw: 1, normalized: 60, weight: 5,  missing: false },
+    } as unknown as BriefPick['signals'];
+    const sel = selectCriticSignals(sig);
+    expect(sel).toHaveLength(4);
+    expect(sel.filter(s => s.isWeakestReading)).toHaveLength(1);
+    expect(sel.find(s => s.isWeakestReading)!.key).toBe('d');
+  });
+
+  it('ignores missing and null-raw signals — an absent reading is not a weak one', () => {
+    const sig = {
+      a: { raw: 1, normalized: 90, weight: 30, missing: false },
+      gone: { raw: null, normalized: 0, weight: 25, missing: true },
+    } as unknown as BriefPick['signals'];
+    expect(selectCriticSignals(sig).map(s => s.key)).toEqual(['a']);
+  });
+
+  it('is empty for a pick with no scored signals rather than throwing', () => {
+    expect(selectCriticSignals({} as BriefPick['signals'])).toEqual([]);
+  });
+});
+
+describe('readOwnership — the measured ownership read finally reaches the critic', () => {
+  let db2: InstanceType<typeof Database>;
+  let svc2: CriticService;
+
+  /** 260 sessions, flat at `base` except the last 20 which sit at `recent`. */
+  function seed(ticker: string, base: number, recent: number) {
+    db2.exec(`CREATE TABLE IF NOT EXISTS historical_prices (
+      ticker TEXT, date TEXT, open REAL, high REAL, low REAL, close REAL, volume INTEGER)`);
+    const ins = db2.prepare(
+      'INSERT INTO historical_prices (ticker, date, open, high, low, close, volume) VALUES (?,?,?,?,?,?,0)');
+    for (let i = 0; i < 260; i++) {
+      const px = i < 240 ? base : recent;               // oldest first; last 20 are `recent`
+      const d = new Date(Date.UTC(2025, 0, 1) + i * 86_400_000).toISOString().slice(0, 10);
+      ins.run(ticker, d, px, px, px, px);
+    }
+  }
+  const wheelPick = (strike: number, mid: number): BriefPick => ({
+    ticker: 'OWN', compositeScore: 70, signals: {},
+    strategyLabResult: { context: { underlyingPx: 100 }, scores: [{
+      slug: 'short-naked-put', grade: 'A', liquidityScore: 10,
+      setup: { expiration: '2099-01-15', netCredit: 100, unavailableReason: null,
+               legs: [{ strike, action: 'sell', side: 'put', mid }] },
+    }] },
+    aiRationale: null, rank: 1, validated: true, price: 100,
+  } as unknown as BriefPick);
+
+  beforeEach(() => {
+    db2 = new Database(':memory:');
+    svc2 = new CriticService(db2);
+  });
+
+  it('reports both axes, with the basis measured against the ticker own SMA200', () => {
+    seed('OWN', 100, 100);
+    const r = svc2.readOwnership(wheelPick(95, 2), 'wheel') as Record<string, unknown>;
+    expect(r).not.toBeNull();
+    expect(r['costBasisIfAssigned']).toBeCloseTo(93, 5);      // 95 − 2
+    expect(r['basisAtOrBelowSma200']).toBe(true);
+    expect(r['strikeBelow20dLow']).toBe(true);                // strike 95 is under the flat 100 low
+    expect(r['low20d']).toBeCloseTo(100, 5);
+  });
+
+  // The case the whole T8 study turned on: extended on the year, below anything it has traded at
+  // this month. Before v1.1.189 the reviewer saw neither half.
+  it('separates an extended basis from a strike under recent support', () => {
+    seed('OWN', 60, 120);                                     // long-run 60ish, last 20 at 120
+    const r = svc2.readOwnership(wheelPick(110, 4), 'wheel') as Record<string, unknown>;
+    expect(r['basisAtOrBelowSma200']).toBe(false);            // basis 106 is above the SMA200
+    expect(r['strikeBelow20dLow']).toBe(true);                // strike 110 is below the 120 low
+  });
+
+  it('returns null — never a pass — when there is too little history', () => {
+    db2.exec(`CREATE TABLE historical_prices (
+      ticker TEXT, date TEXT, open REAL, high REAL, low REAL, close REAL, volume INTEGER)`);
+    expect(svc2.readOwnership(wheelPick(95, 2), 'wheel')).toBeNull();
+  });
+
+  it('returns null when the pick has no cash-secured put to measure', () => {
+    seed('OWN', 100, 100);
+    const noCsp = { ...wheelPick(95, 2), strategyLabResult: null } as BriefPick;
+    expect(svc2.readOwnership(noCsp, 'wheel')).toBeNull();
+  });
+
+  // Context assembly must never be able to take a verdict down with it.
+  it('swallows a broken table rather than throwing', () => {
+    expect(() => svc2.readOwnership(wheelPick(95, 2), 'wheel')).not.toThrow();
   });
 });
