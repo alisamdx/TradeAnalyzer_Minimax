@@ -71,7 +71,7 @@ Enabled weight sums to **91**. I verified this does *not* silently deflate score
 | flag | state | provenance |
 |---|---|---|
 | `USE_ADX_IN_SCORING` | **false** | **validated** — full-year replay A/B showed enabling it is net negative across bullish/bearish/income. Correctly off. |
-| `ETF_AWARE_WHEEL_SCORING` | **false** | **unvalidated** — and being off causes a live distortion. See **F6**. |
+| `ETF_AWARE_WHEEL_SCORING` | **true** (v1.1.172) | **validated** — replay A/B, see **F6** / **T4**. `SCORING_ETF_AWARE_WHEEL=0` rolls it back. |
 
 **Minimum composite gate:** `MIN_COMPOSITE_BY_STRATEGY` gates **bearish at 70** (validated on a full-year replay) and **nothing else**. Wheel is ungated. See **F7**.
 
@@ -125,7 +125,7 @@ Expiry selection has some evidence: a weekly→monthly A/B ran 2026-08-04 and **
 
 **F5 — `STAGE_4_CAP`'s comment is stale.** Says "≤ 75 unique tickers"; the arithmetic gives **90** now that there are 6 strategies. Cosmetic, but it is the number someone would reason from about E\*Trade call budget.
 
-**F6 — ETFs run ~23% light on the wheel composite, live.** With `ETF_AWARE_WHEEL_SCORING` off, `fundamentalScore` (17) + `leverageQuality` (4) are structurally inapplicable to a fund wrapper, always null, and therefore contribute 0 while still occupying **21 of 91** enabled weight. SPY and VOO are on the conviction list, so this is not hypothetical. The fix exists in code and is disabled pending validation.
+**F6 — ETFs ran ~23% light on the wheel composite. FIXED v1.1.172.** `fundamentalScore` (17) + `leverageQuality` (4) are structurally inapplicable to a fund wrapper, were always null, and so contributed 0 while still occupying **21 of 91** enabled weight — capping every ETF at 76.9% of an otherwise-identical stock. Measured: 56 of 60 curated ETFs have no `fundamentals_cache` row, while all 60 have `iv_history` and `historical_prices`. `ETF_AWARE_WHEEL_SCORING` now excludes both from numerator *and* denominator (×1.30 uplift, ETFs only). See **T4** for the A/B. Rollback: `SCORING_ETF_AWARE_WHEEL=0`.
 
 **F7 — Wheel has no quality floor.** Bearish earned a 70 gate from a full-year replay. Wheel is ungated, so on a weak day the dice pick can be a low composite that simply happened to be least-bad. Nothing has ever tested whether that is harmful.
 
@@ -201,11 +201,38 @@ liquidity is a floor, not a gradient.
 2026-08-06; 10,792 wheel rows now carry them but **0 have settled**. Re-run around **2026-10-01**
 to test wheel on its own population instead of income as a proxy.
 
-### T4 — ETF composite deflation
+### ~~T4 — ETF composite deflation~~ — CLOSED 2026-09-03, fix SHIPPED
 
-- **Method**: flip `ETF_AWARE_WHEEL_SCORING` on in a replay and measure how ETF picks re-rank and how those picks then perform.
-- **Passes if**: ETFs rise in rank *and* their outcomes justify the rise.
-- **Note**: this one is a **correctness** question as much as a performance one — the current behaviour penalises a ticker for a reason unrelated to trade quality. It may deserve fixing even if performance is flat.
+Run and settled in **v1.1.172**.
+
+**The validation gate was unsatisfiable, and that was the finding.** The code required "a Brief
+Replay improvement (or at least neutrality) on ETF wheel outcomes" before enabling — but **0** ETF
+picks existed across 62 briefs, **0** appearances across 88 wheel analysis snapshots covering 1,077
+tickers, and **0** rows in `options_premium_history`. None could ever be generated while the flag
+was off, because the deflation is what kept ETFs out of the Stage-4 pool where options data is
+fetched. *The distortion suppressed the evidence needed to remove it.*
+
+Resolved inside Brief Replay, where the ON arm **can** produce ETF picks
+(`scripts/replay-arm.mjs`; 45 dates, 2026-06-02 → 2026-08-05, 225 wheel picks per arm, outcomes
+100% matured):
+
+| | OFF | ON |
+|---|---|---|
+| ETF picks | **0** | **6 (2.7%)** — QQQ ×2, IYR ×2, XRT, KBE |
+| stayed above strike | 77.8% | 77.8% |
+
+Six swaps, each an ETF displacing one stock **on a higher composite every time**. The swapped
+picks tied exactly on the CSP-relevant metric — **6/6 stayed above strike on both sides**. The
+added ETFs returned less on the 21-day underlying (+0.22% vs +3.49%), but a short put is capped at
+the premium and never earns a runaway stock's upside, so that column is not the P&L.
+
+**What it does not establish:** all 12 swapped picks stayed above their strike, so the metric never
+discriminated — a tie because nothing failed, not because ETFs were shown to handle stress. Six
+swaps, one regime. Replay also still under-ranks ETFs (blind to `premiumYield`, leaving them
+51/70 populated vs stocks' 72/91), so **2.7% is a floor on the live effect, not a ceiling**.
+
+**Note that proved right:** this was a correctness question as much as a performance one. The
+neutral result is what let a category error be fixed rather than left in place forever.
 
 ---
 

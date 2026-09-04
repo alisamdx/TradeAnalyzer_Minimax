@@ -1,4 +1,4 @@
-// Regression tests for ETF-aware wheel scoring (v1.1.118 — NOT YET ENABLED, see
+// Regression tests for ETF-aware wheel scoring (v1.1.118, ENABLED v1.1.172 — see
 // ETF_AWARE_WHEEL_SCORING in scoring-service.ts).
 //
 // Wheel's fundamentalScore (weight 17) and leverageQuality (weight 4) are structurally
@@ -10,14 +10,15 @@
 // production DB (2026-07-03): 56/60 curated ETFs have no fundamentals_cache row, and 0 of
 // the last 5 daily wheel briefs contained a single ETF pick.
 //
-// The fix (gated behind SCORING_ETF_AWARE_WHEEL=1 / ETF_AWARE_WHEEL_SCORING, both false by
-// default) excludes those two signals from BOTH the numerator and denominator for an ETF
-// ticker, renormalizing the remaining signals to 100% — rather than zero-contributing them.
-// This changes wheel composite scores (and therefore which picks reach Stage 4 / the final
-// brief) for ETF tickers, so per this project's FR-SEY-5 rule it must show a Brief Replay
-// improvement before shipping enabled. These tests lock in: (1) the current, unfixed
-// deflation as a regression baseline, (2) the exact renormalized value the fix produces when
-// enabled, and (3) that non-ETF scoring is byte-for-byte unaffected either way.
+// The fix excludes those two signals from BOTH the numerator and denominator for an ETF
+// ticker, renormalizing the remaining signals — rather than zero-contributing them. It
+// shipped ENABLED in v1.1.172 after a Brief Replay A/B (45 dates, 225 wheel picks per arm)
+// admitted 6 ETF picks that tied their displaced stocks 6/6 on stayed-above-strike.
+//
+// `SCORING_ETF_AWARE_WHEEL` now overrides in BOTH directions ('1' on, '0' off), so these
+// tests lock in: (1) the shipped-ON default, (2) that the pre-fix deflation is still exactly
+// reproducible via the '0' rollback path, (3) the exact renormalized value, and (4) that
+// non-ETF scoring is byte-for-byte unaffected either way.
 
 import { describe, it, expect, afterEach } from 'vitest';
 import { ScoringService, etfAwareWheelScoringEnabled, type TickerSignalData } from '../src/main/services/scoring-service.js';
@@ -48,11 +49,16 @@ function svc(): { s: ScoringService; db: DbHandle } {
 describe('etfAwareWheelScoringEnabled', () => {
   afterEach(() => { delete process.env['SCORING_ETF_AWARE_WHEEL']; });
 
-  it('is disabled by default (shipped-off contract)', () => {
+  it('is ENABLED by default (shipped-on contract since v1.1.172)', () => {
+    expect(etfAwareWheelScoringEnabled()).toBe(true);
+  });
+
+  it('can be forced OFF via SCORING_ETF_AWARE_WHEEL=0 — the documented rollback', () => {
+    process.env['SCORING_ETF_AWARE_WHEEL'] = '0';
     expect(etfAwareWheelScoringEnabled()).toBe(false);
   });
 
-  it('can be overridden on via SCORING_ETF_AWARE_WHEEL=1 (for validation runs / tests)', () => {
+  it('still accepts an explicit =1 (harmless now, but the replay A/B arm used it)', () => {
     process.env['SCORING_ETF_AWARE_WHEEL'] = '1';
     expect(etfAwareWheelScoringEnabled()).toBe(true);
   });
@@ -61,7 +67,10 @@ describe('etfAwareWheelScoringEnabled', () => {
 describe('Wheel scoring — ETF fundamentalScore/leverageQuality handling', () => {
   afterEach(() => { delete process.env['SCORING_ETF_AWARE_WHEEL']; });
 
-  it('(current, unfixed) deflates an ETF composite by zero-contributing the N/A signals', () => {
+  // The pre-v1.1.172 behaviour, kept reachable through the rollback path so what was fixed
+  // stays visible: 58.3 vs 73.8 is a 21% deflation for a reason unrelated to trade quality.
+  it('(rollback path) reproduces the old deflation exactly when forced off', () => {
+    process.env['SCORING_ETF_AWARE_WHEEL'] = '0';
     const { s, db } = svc();
     const data = new Map([['SPY', baseSignal('SPY', true)]]);
     const [scored] = s.scoreFromSignalData(data, 'wheel');
@@ -73,8 +82,7 @@ describe('Wheel scoring — ETF fundamentalScore/leverageQuality handling', () =
     db.close();
   });
 
-  it('(fix enabled) renormalizes the composite once fundamentalScore/leverageQuality are excluded', () => {
-    process.env['SCORING_ETF_AWARE_WHEEL'] = '1';
+  it('(shipped default) renormalizes the composite with fundamentalScore/leverageQuality excluded', () => {
     const { s, db } = svc();
     const data = new Map([['SPY', baseSignal('SPY', true)]]);
     const [scored] = s.scoreFromSignalData(data, 'wheel');
@@ -90,9 +98,9 @@ describe('Wheel scoring — ETF fundamentalScore/leverageQuality handling', () =
     const stock: TickerSignalData = { ...baseSignal('AAPL', false), fundamentalScore: 70, netDebtToEbitda: 1 };
     const data = new Map([['AAPL', stock]]);
 
-    const [off] = s.scoreFromSignalData(data, 'wheel');
-    process.env['SCORING_ETF_AWARE_WHEEL'] = '1';
-    const [on] = s.scoreFromSignalData(new Map([['AAPL', stock]]), 'wheel');
+    const [on] = s.scoreFromSignalData(data, 'wheel');
+    process.env['SCORING_ETF_AWARE_WHEEL'] = '0';
+    const [off] = s.scoreFromSignalData(new Map([['AAPL', stock]]), 'wheel');
 
     // weightedSum = 5830 + 70*17 + 80*4 = 5830 + 1190 + 320 = 7340; totalWeight = 100 always.
     expect(off!.compositeScore).toBe(73.4);
@@ -102,7 +110,6 @@ describe('Wheel scoring — ETF fundamentalScore/leverageQuality handling', () =
   });
 
   it('does not affect other strategies (e.g. income, which has no fundamentalScore signal)', () => {
-    process.env['SCORING_ETF_AWARE_WHEEL'] = '1';
     const { s, db } = svc();
     const data = new Map([['SPY', baseSignal('SPY', true)]]);
     // Should not throw and should score normally — income's signal set doesn't include the

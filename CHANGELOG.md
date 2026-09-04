@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.172] — 2026-09-03
+
+### feat — ETF-aware wheel scoring ENABLED, after resolving a validation gate that could never be met
+
+- **ETFs stopped being scored as though they had *failed* two signals they cannot possess.** Wheel's `fundamentalScore` (17) and `leverageQuality` (4) are structurally inapplicable to a fund wrapper; measured, **56 of 60 curated ETFs have no `fundamentals_cache` row** while all 60 have `iv_history` and `historical_prices`. Under FR-SE-03 those weights stayed in the denominator, capping every ETF's wheel composite at **70/91 = 76.9%** of an otherwise-identical stock. `ETF_AWARE_WHEEL_SCORING` now excludes both from numerator *and* denominator — a **×1.30** uplift, ETFs only.
+- **The gate the fix waited on was unsatisfiable by construction, and that was the finding.** The code required "a Brief Replay improvement (or at least neutrality) on ETF wheel outcomes" — but there were **0** ETF picks across 62 stored briefs, **0** appearances in 88 wheel analysis snapshots covering 1,077 tickers, and **0** rows in `options_premium_history`. None could be generated while the flag was off, because the deflation is precisely what kept ETFs out of the Stage-4 pool where options data is fetched. *The distortion suppressed the evidence that would justify removing it.*
+- **Resolved inside Brief Replay**, where the ON arm can produce ETF picks. New `scripts/replay-arm.mjs` captures and compares arms (replay runs only inside Electron and overwrites its tables each run). Both arms: 45 dates, 2026-06-02 → 2026-08-05, 225 wheel picks each, outcomes 100% matured. ON admits **6 ETF picks (2.7%)** — QQQ ×2, IYR ×2, XRT, KBE — each displacing exactly one stock and **on a higher composite in every case**.
+- **Neutral on the metric that matters:** the swapped picks tied **6/6 vs 6/6 on stayed-above-strike**. The added ETFs returned less on the 21-day underlying (+0.22% vs +3.49%), but a short put is capped at the premium and never earns a runaway stock's upside — that column credits PAYX's +15.44% with money the CSP would not have made. Overall arm figures barely moved: stayed-above-strike 77.8% both, mean composite 67.5 both.
+- **What this does not establish, stated plainly:** all 12 swapped picks stayed above their strike, so the metric never discriminated — it is a tie because *nothing failed in either arm*, not because ETFs were shown to handle stress. Six swaps, one regime. Replay also has no historical chains (outcomes are stock-return proxies) and runs blind to `premiumYield` for every ticker, leaving ETFs 51/70 populated against stocks' 72/91 even with the fix on — so **2.7% is a floor on the live effect, not a ceiling**.
+- **Rollback: `SCORING_ETF_AWARE_WHEEL=0`.** The override now works in both directions, checked live; the `'0'` path also keeps the pre-fix deflation exactly reproducible as a regression baseline (58.3 vs 73.8 on the test fixture).
+- New `scripts/fr-etf-wheel-deflation-study.mjs` quantifies the distortion and the bootstrap problem. Suite: 1145 passed.
+
 ## [1.1.171] — 2026-09-03
 
 ### docs — T1: the short put's 0.30 delta target is validated. No change.

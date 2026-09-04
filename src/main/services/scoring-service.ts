@@ -129,7 +129,7 @@ const BASELINE_WHEEL: ScoringSignal[] = [
 // RE-VALIDATE on Brief Replay first (tests/adx-replay-validation.test.ts, REPLAY_WITH_ADX).
 const USE_ADX_IN_SCORING = false;
 
-// ETF-aware wheel scoring — NOT YET ENABLED, pending Brief Replay validation.
+// ETF-aware wheel scoring — ENABLED v1.1.172, after the Brief Replay A/B below.
 //
 // Wheel's fundamentalScore (weight 17) and leverageQuality (weight 4) — 21% of the
 // composite — are structurally inapplicable to ETFs (no P/E, ROE, debt in the traditional
@@ -146,18 +146,38 @@ const USE_ADX_IN_SCORING = false;
 //
 // When true: for an ETF ticker, 'fundamentalScore' and 'leverageQuality' are EXCLUDED from
 // both the numerator and denominator (not just zero-contributed) — the remaining signals
-// are renormalized to 100%, rather than synthesizing a proxy value. This changes wheel
-// composite scores and therefore Stage-4 pool selection / final picks for ETF tickers, so
-// per FR-SEY-5 it must show a Brief Replay improvement (or at least neutrality) on ETF
-// wheel outcomes before shipping enabled — the live wheel brief feeds the v2 execution
-// engine. Left false (current, unfixed behavior) until validated.
+// are renormalized, rather than synthesizing a proxy value.
 //
-// SCORING_ETF_AWARE_WHEEL=1 overrides the flag on (mirrors brief-replay-service.ts's
-// REPLAY_WITH_ADX pattern) so a future validation run — or a test — can exercise the ON arm
-// without flipping the shipped default. Checked live (not cached at import), so it can be
-// set per-test-case.
-const ETF_AWARE_WHEEL_SCORING = false;
+// VALIDATED AND ENABLED (v1.1.172). The gate this was waiting on — "a Brief Replay
+// improvement, or at least neutrality, on ETF wheel outcomes" — turned out to be
+// UNSATISFIABLE while the flag was off, and that is the whole story: with the deflation in
+// place no ETF ever reached the Stage-4 pool, so no ETF wheel outcome could be generated to
+// judge it by. 0 ETF picks across 62 stored briefs, 0 appearances in 88 wheel analysis
+// snapshots covering 1,077 tickers, 0 rows in options_premium_history. The distortion
+// suppressed exactly the evidence needed to remove it.
+//
+// Resolved by running the A/B inside Brief Replay, where the ON arm CAN produce ETF picks
+// (scripts/replay-arm.mjs, 45 dates 2026-06-02 → 2026-08-05, 225 wheel picks per arm):
+//   - the fix admitted 6 ETF picks (2.7%): QQQ x2, IYR x2, XRT, KBE
+//   - each displaced exactly one stock, and in every case on a HIGHER composite
+//   - stayed-above-strike: 6/6 added vs 6/6 dropped — an exact tie on the metric that maps
+//     to whether the cash-secured put actually paid
+//   - 21-day underlying return was lower for the added ETFs (+0.22% vs +3.49%), but a short
+//     put does not capture upside — it is capped at the premium — so that metric flatters a
+//     stock that ran away with money the CSP would never have earned
+// Neutrality met, so the pre-registered condition fires. See docs/wheel-parameters.md (T4).
+//
+// KNOWN LIMIT of that test: all 12 swapped picks stayed above their strike, so the metric
+// did not discriminate — it is a tie because nothing failed in either arm, not because ETFs
+// were shown to handle stress well. One regime, 6 swaps.
+//
+// SCORING_ETF_AWARE_WHEEL overrides the shipped default in BOTH directions, checked live
+// (not cached at import) so it can be set per-test-case: '1' forces on, '0' forces off. The
+// '0' path is the rollback if ETF picks misbehave in live use, and it is what lets the
+// pre-fix deflation still be reproduced as a regression baseline.
+const ETF_AWARE_WHEEL_SCORING = true;
 export function etfAwareWheelScoringEnabled(): boolean {
+  if (process.env['SCORING_ETF_AWARE_WHEEL'] === '0') return false;
   return ETF_AWARE_WHEEL_SCORING || process.env['SCORING_ETF_AWARE_WHEEL'] === '1';
 }
 const ETF_NA_WHEEL_SIGNAL_KEYS = new Set(['fundamentalScore', 'leverageQuality']);
