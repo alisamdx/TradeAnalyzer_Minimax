@@ -7,6 +7,7 @@
 // Style mirrors brief-report-builder.ts's email so the two look like one family of report.
 
 import type { FilterTemplateResult } from '@shared/types.js';
+import { etradeOptionsHref } from './etrade-links.js';
 
 function fmtPrice(n: number | null | undefined): string {
   return n == null ? '—' : `$${n.toFixed(2)}`;
@@ -51,7 +52,7 @@ export function sortWheelVetted(results: FilterTemplateResult[]): FilterTemplate
 function ivHighRows(results: FilterTemplateResult[]): string {
   return results.map(r => `
     <tr style="border-bottom:1px solid #e8e8e8">
-      <td style="padding:7px 8px;font-weight:700;font-size:14px"><a href="https://us.etrade.com/e/t/invest/quotesandresearch?content=3&amp;sym=${r.ticker.toLowerCase()}" style="color:#1a1a1a;text-decoration:underline" target="_blank">${r.ticker}</a></td>
+      <td style="padding:7px 8px;font-weight:700;font-size:14px"><a href="${etradeOptionsHref(r.ticker)}" style="color:#1a1a1a;text-decoration:underline" target="_blank">${r.ticker}</a></td>
       <td style="padding:7px 8px;color:#888;font-size:12px">${typeOf(r)}</td>
       <td style="padding:7px 8px;color:#555">${fmtPrice(r.lastPrice)}</td>
       <td style="padding:7px 8px;font-weight:700;color:#c0392b">${num(r.metrics['ivRank']) != null ? num(r.metrics['ivRank'])!.toFixed(0) : '—'}</td>
@@ -65,7 +66,7 @@ function ivHighRows(results: FilterTemplateResult[]): string {
 function wheelVettedRows(results: FilterTemplateResult[]): string {
   return results.map(r => `
     <tr style="border-bottom:1px solid #e8e8e8">
-      <td style="padding:7px 8px;font-weight:700;font-size:14px"><a href="https://us.etrade.com/e/t/invest/quotesandresearch?content=3&amp;sym=${r.ticker.toLowerCase()}" style="color:#1a1a1a;text-decoration:underline" target="_blank">${r.ticker}</a></td>
+      <td style="padding:7px 8px;font-weight:700;font-size:14px"><a href="${etradeOptionsHref(r.ticker)}" style="color:#1a1a1a;text-decoration:underline" target="_blank">${r.ticker}</a></td>
       <td style="padding:7px 8px;color:#888;font-size:12px">${typeOf(r)}</td>
       <td style="padding:7px 8px;color:#555">${fmtPrice(r.lastPrice)}</td>
       <td style="padding:7px 8px;color:#555;font-size:12px">${num(r.metrics['suitabilityScore']) != null ? `${num(r.metrics['suitabilityScore'])}/100` : '—'}</td>

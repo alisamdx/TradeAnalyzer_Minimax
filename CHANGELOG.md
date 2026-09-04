@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.183] — 2026-09-04
+
+### feat — the Roll the Dice email links straight into E*Trade
+
+- The email states an order to place; acting on it meant retyping the ticker into a browser. The ticker in the order headline now links to the **snapshot quote** page, and a row beneath it carries **quote** and **option chain** explicitly. The `withinBudget` alternative card carries the same pair.
+- **Both, not one.** The quote page answers "what is it doing right now"; the chain answers "what is this strike actually bid". Neither substitutes for the other at the moment an order is entered.
+- **`src/main/services/etrade-links.ts` now owns both URLs.** The two pages disagree about symbol casing (`symbol=MKC` upper for the quote page, `sym=mkc` lower for quotes-and-research) and the options URL's bare `&` must be escaped inside an HTML attribute — both invisible at a call site copy-pasting a string. `brief-report-builder.ts` and `filters-prefill-report-builder.ts` (3 inline copies between them) now build through the helper; emitted URLs are byte-identical, no behaviour change there.
+- Plain `<a>` text links rather than buttons — a bare anchor is the one construct every mail client renders identically, and this is read on a phone.
+
 ## [1.1.182] — 2026-09-03
 
 ### docs — logged: does the critic's treatment of trend survive contact with the data?

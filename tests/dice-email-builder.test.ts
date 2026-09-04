@@ -63,7 +63,10 @@ describe('diceEmailSubject', () => {
 describe('buildDiceEmailHtml', () => {
   it('leads with the order to place', () => {
     const h = buildDiceEmailHtml(WITH_PICK, 'Tue, Sep 2');
-    expect(h).toContain('Sell 1 MKC $50 put');
+    // The ticker inside the headline is an E*Trade quote link, so the sentence is split by markup
+    // — assert its parts and the anchor rather than the flat string.
+    expect(h).toContain('Sell 1 <a href="https://us.etrade.com/etx/mkt/quotes?symbol=MKC#/snapshot"');
+    expect(h).toContain('>MKC</a> $50 put');
     expect(h).toContain('The order');
   });
 
@@ -219,6 +222,25 @@ describe('buildDiceEmailHtml', () => {
     const h = buildDiceEmailHtml(WITH_PICK, 'Tue, Sep 2');
     expect(h).toContain('Passed every gate:');
     expect(h).not.toContain('within limit');
+  });
+
+  // Both E*Trade pages, because they answer different questions: the quote page is "what is it
+  // doing now", the chain is "what is this strike actually bid". The casing differs per page and
+  // the `&` in the options URL must be escaped for the href to survive an HTML parser.
+  it('links the pick to both E*Trade pages', () => {
+    const h = buildDiceEmailHtml(WITH_PICK, 'Tue, Sep 2');
+    expect(h).toContain('https://us.etrade.com/etx/mkt/quotes?symbol=MKC#/snapshot');
+    expect(h).toContain('https://us.etrade.com/e/t/invest/quotesandresearch?content=3&amp;sym=mkc');
+    expect(h).not.toContain('content=3&sym=');   // a bare & in an href is invalid HTML
+  });
+
+  it('links the within-your-size alternative too', () => {
+    const h = buildDiceEmailHtml({
+      ...WITH_PICK,
+      withinBudget: { ...WITH_PICK.pick!, ticker: 'JNJ', strike: 145, capitalRequired: 14_500 },
+    }, 'Tue, Sep 2');
+    expect(h).toContain('https://us.etrade.com/etx/mkt/quotes?symbol=JNJ#/snapshot');
+    expect(h).toContain('sym=jnj');
   });
 
   it('is a single-column card sized for a phone', () => {

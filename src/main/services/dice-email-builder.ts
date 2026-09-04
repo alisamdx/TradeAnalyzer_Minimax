@@ -17,6 +17,7 @@
 
 import type { DicePick, DiceResult } from './roll-the-dice.js';
 import { ownAtStrikeNote } from './own-at-strike.js';
+import { etradeQuoteUrl, etradeOptionsUrl } from './etrade-links.js';
 
 const BG = '#f6f8fa';
 const CARD = '#ffffff';
@@ -97,6 +98,24 @@ function statRow(label: string, value: string, note?: string): string {
     </tr>`;
 }
 
+/**
+ * The two E*Trade pages this trade is placed from.
+ *
+ * The email states an order; these are where it gets checked and entered. Both are given because
+ * they answer different questions — the quote page is "what is it doing right now", the chain is
+ * "what is this strike actually bid". Rendered as text links rather than buttons: a bare <a> is
+ * the one thing every mail client renders the same way, and this is read on a phone.
+ */
+function etradeLinks(ticker: string, size: 'lg' | 'sm' = 'lg'): string {
+  const fs = size === 'lg' ? 13 : 11;
+  const link = (href: string, label: string): string =>
+    `<a href="${esc(href)}" target="_blank" style="color:${ACCENT};text-decoration:underline;">${esc(label)}</a>`;
+  return `
+      <div style="font-size:${fs}px;color:${MUTED};line-height:1.6;">
+        E*Trade: ${link(etradeQuoteUrl(ticker), 'quote')} &middot; ${link(etradeOptionsUrl(ticker), 'option chain')}
+      </div>`;
+}
+
 export function buildDiceEmailHtml(r: DiceResult, dateStr: string): string {
   // A pick above the operator's normal size is NOT an exception being granted — capital stopped
   // being a gate in v1.1.168 — so this states the number and hands the decision over rather than
@@ -156,11 +175,13 @@ export function buildDiceEmailHtml(r: DiceResult, dateStr: string): string {
       <tr><td style="padding:4px 18px 0;">
         <div style="font-size:12px;color:${MUTED};text-transform:uppercase;letter-spacing:.4px;">The order</div>
         <div style="font-size:22px;font-weight:700;color:${TEXT};line-height:1.3;margin:4px 0 2px;">
-          Sell 1 ${esc(p.ticker)} $${p.strike} put
+          Sell 1 <a href="${esc(etradeQuoteUrl(p.ticker))}" target="_blank" style="color:${TEXT};text-decoration:underline;">${esc(p.ticker)}</a> $${p.strike} put
         </div>
-        <div style="font-size:14px;color:${MUTED};margin-bottom:14px;">
+        <div style="font-size:14px;color:${MUTED};margin-bottom:6px;">
           expires ${esc(prettyDate(p.expiration))} · ${p.dte} days · ${esc(p.ticker)} at ${money2(p.price)}
         </div>
+        ${etradeLinks(p.ticker)}
+        <div style="height:14px;line-height:14px;">&nbsp;</div>
       </td></tr>
 
       <tr><td style="padding:0 18px;">
@@ -225,6 +246,7 @@ export function buildDiceEmailHtml(r: DiceResult, dateStr: string): string {
            <div style="font-size:11px;color:${MUTED};line-height:1.6;margin-top:5px;">
              ${esc(ownAtStrikeNote(r.withinBudget.ticker, r.withinBudget.fit.ownership))}
            </div>
+           <div style="margin-top:5px;">${etradeLinks(r.withinBudget.ticker, 'sm')}</div>
          </div></td></tr>`
     : '';
 
