@@ -174,9 +174,14 @@ unmeasurable; when a ranking's quality is in question the losers are the data re
 | `as_of_date`, `generated_at`, `strategy`, `ticker` | unique on (date, strategy, ticker); a same-day re-run REPLACES, matching the twice-daily batch |
 | `composite_score`, `rank` | rank within strategy, 1 = best |
 | `disposition` | CHECK-constrained: `picked` / `capped_out` / `failed_liquidity` / `not_validated` |
-| `structure_slug`, `strike`, `premium`, `expiration`, `dte`, `liquidity_score` | the structure `pickRelevantStructure` would trade, so a candidate is comparable to a stored pick |
+| `signals_json` | per-signal `{raw, normalized, weight, missing}`, same shape `daily_briefs` keeps for picks — turns "the composite selected badly" into "**this signal** did" |
+| `structure_slug`, `grade`, `strike`, `premium`, `expiration`, `dte`, `liquidity_score` | the structure `pickRelevantStructure` would trade, so a candidate is comparable to a stored pick |
 | `spot` | underlying at pick time — required by the split scale guard, and unrecoverable after a repair |
+| `delta`, `leg_iv`, `bid`, `ask`, `open_interest` | short-leg economics. `delta` because v1.1.171 showed it drives outcomes; bid/ask/OI because their absence on wheel rows forced the v1.1.170 liquidity A/B onto income as a proxy |
+| `net_credit`, `max_loss`, `annualized_return`, `pop_estimate`, `atm_iv` | trade economics as the lab computed them |
 
 **Outcomes are not stored**: they are settled later against `historical_prices`, so a subsequent
 split repair corrects them rather than leaving a frozen wrong value. Retention is **730 days**
-(vs the briefs' 90) — the rows cost ~3.4 MB per trading year against `daily_briefs`' ~229 MB.
+(vs the briefs' 90) — the rows cost ~20 MB per trading year against `daily_briefs`' ~229 MB.
+The column set deliberately exceeds what the top-5-cut question needs: **capture is
+one-directional**, and three prior studies were blocked by capture rather than analysis.

@@ -102,10 +102,16 @@ function hasAdequateLiquidity(
 // Shape of a Strategy Lab score, narrowed to just what candidate capture needs. Declared
 // locally and cast from `object | null`, the same way getBestLiquidityScore does — the lab result
 // crosses this boundary untyped.
-type CandLeg   = { action: string; side?: 'call' | 'put' | null; strike: number; mid: number };
+type CandLeg   = {
+  action: string; side?: 'call' | 'put' | null; strike: number; mid: number;
+  delta?: number | null; iv?: number | null; bid?: number | null; ask?: number | null;
+  openInterest?: number | null;
+};
 type CandSetup = {
   unavailableReason?: string | null; maxLoss?: number | null;
   expiration?: string; dte?: number; legs?: CandLeg[];
+  netCredit?: number | null; annualizedReturn?: number | null; popEstimate?: number | null;
+  currentAtmIv?: number | null;
 };
 type CandScore = { slug: string; grade: string; liquidityScore: number; setup: CandSetup | null };
 
@@ -668,13 +674,27 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
           compositeScore: scored.compositeScore,
           rank: i + 1,
           disposition,
+          // The scored signals, same shape daily_briefs keeps for picks — this is what lets a
+          // later study attribute a bad cut to a specific signal rather than infer it.
+          signalsJson: scored.signals ? JSON.stringify(scored.signals) : null,
           structureSlug: struct?.slug ?? null,
+          grade: struct?.grade ?? null,
           strike: shortLeg?.strike ?? null,
           premium: shortLeg?.mid ?? null,
           expiration: setup?.expiration ?? null,
           dte: setup?.dte ?? null,
           liquidityScore: getBestLiquidityScore(lab, strategy, dir),
           spot: signalData.get(scored.ticker)?.lastPrice ?? null,
+          delta: shortLeg?.delta ?? null,
+          legIv: shortLeg?.iv ?? null,
+          bid: shortLeg?.bid ?? null,
+          ask: shortLeg?.ask ?? null,
+          openInterest: shortLeg?.openInterest ?? null,
+          netCredit: setup?.netCredit ?? null,
+          maxLoss: setup?.maxLoss ?? null,
+          annualizedReturn: setup?.annualizedReturn ?? null,
+          popEstimate: setup?.popEstimate ?? null,
+          atmIv: setup?.currentAtmIv ?? null,
         });
       }
 
@@ -780,7 +800,7 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
 
     // The candidate pool outlives the briefs on purpose: `daily_briefs` averages 147.7 KB/row
     // (it carries the full lab result per pick) and is pruned at 90 days, which is why every
-    // study on this data reports "one regime". These rows cost ~3.4 MB per trading year, so
+    // study on this data reports "one regime". These rows cost ~20 MB per trading year, so
     // they are kept for two years and the evidence survives the window the briefs cannot.
     const savedCandidates = saveBriefCandidates(this.db, candidateRows);
     pruneBriefCandidates(this.db);

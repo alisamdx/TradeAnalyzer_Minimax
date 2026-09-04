@@ -5,10 +5,17 @@
 // data you need, and this pipeline threw them away. That matters now because the wheel composite
 // was found anti-predictive at the top (v1.1.173) and this cut is where that would bite.
 //
-// Deliberately slim. `daily_briefs` averages 147.7 KB per row because it stores the full
-// strategyLabResult per pick, which is why it is pruned at 90 days and why every study in this
-// project reports "one regime". These rows carry only what a settlement study needs, so they can
-// outlive that window at roughly 1/70th the storage.
+// Slim relative to a brief, deliberately broad within that. `daily_briefs` averages 147.7 KB per
+// row because it stores the full strategyLabResult per pick, which is why it is pruned at 90 days
+// and why every study in this project reports "one regime". These rows cost ~20 MB per trading
+// year against the briefs' ~229 MB, so they outlive that window cheaply.
+//
+// The column set goes beyond what the top-5-cut question strictly needs, because CAPTURE IS
+// ONE-DIRECTIONAL — what is not written today cannot be recovered. Three studies here were
+// blocked by capture rather than analysis: the liquidity A/B ran on income because wheel rows had
+// no bid/ask/open_interest until v1.1.132, the ETF gate was unsatisfiable because no ETF outcome
+// had ever been generated, and this cut discarded its losers. `signals_json` in particular
+// answers the follow-up every study ended on — WHICH signal — instead of leaving it inferred.
 //
 // Outcomes are NOT stored: they are derived later by settling strike/premium against
 // `historical_prices`, so a subsequent split repair corrects them instead of leaving a frozen
@@ -29,13 +36,29 @@ export interface BriefCandidateRow {
   compositeScore: number;
   rank: number;
   disposition: CandidateDisposition;
+  /** Per-signal {raw, normalized, weight, missing}, same shape daily_briefs keeps for picks. */
+  signalsJson: string | null;
   structureSlug: string | null;
+  grade: string | null;
   strike: number | null;
   premium: number | null;
   expiration: string | null;
   dte: number | null;
   liquidityScore: number | null;
   spot: number | null;
+  // Short-leg option economics — delta because v1.1.171 showed it drives outcomes; bid/ask/OI
+  // because their absence on wheel rows is what forced the v1.1.170 liquidity A/B onto income.
+  delta: number | null;
+  legIv: number | null;
+  bid: number | null;
+  ask: number | null;
+  openInterest: number | null;
+  // Trade economics as the lab computed them.
+  netCredit: number | null;
+  maxLoss: number | null;
+  annualizedReturn: number | null;
+  popEstimate: number | null;
+  atmIv: number | null;
 }
 
 /**
@@ -54,14 +77,18 @@ export function saveBriefCandidates(db: DbHandle, rows: readonly BriefCandidateR
     const stmt = db.prepare(`
       INSERT OR REPLACE INTO brief_candidates
         (as_of_date, generated_at, strategy, ticker, composite_score, rank, disposition,
-         structure_slug, strike, premium, expiration, dte, liquidity_score, spot)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         signals_json, structure_slug, grade, strike, premium, expiration, dte, liquidity_score,
+         spot, delta, leg_iv, bid, ask, open_interest,
+         net_credit, max_loss, annualized_return, pop_estimate, atm_iv)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const run = db.transaction((batch: readonly BriefCandidateRow[]) => {
       for (const r of batch) {
         stmt.run(
           r.asOfDate, r.generatedAt, r.strategy, r.ticker, r.compositeScore, r.rank, r.disposition,
-          r.structureSlug, r.strike, r.premium, r.expiration, r.dte, r.liquidityScore, r.spot,
+          r.signalsJson, r.structureSlug, r.grade, r.strike, r.premium, r.expiration, r.dte,
+          r.liquidityScore, r.spot, r.delta, r.legIv, r.bid, r.ask, r.openInterest,
+          r.netCredit, r.maxLoss, r.annualizedReturn, r.popEstimate, r.atmIv,
         );
       }
     });
@@ -78,8 +105,8 @@ export function saveBriefCandidates(db: DbHandle, rows: readonly BriefCandidateR
  * Prune candidate rows older than `retentionDays`.
  *
  * Default 730 days rather than the briefs' 90: the whole point is a sample that spans more than
- * one regime, and at ~3.4 MB per trading year two years costs single-digit megabytes. Pruning
- * exists only so the table cannot grow without bound.
+ * one regime, and at ~20 MB per trading year two years costs ~40 MB against a database already
+ * past 500 MB. Pruning exists only so the table cannot grow without bound.
  */
 export function pruneBriefCandidates(db: DbHandle, retentionDays = 730): number {
   try {

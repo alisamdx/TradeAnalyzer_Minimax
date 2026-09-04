@@ -12,9 +12,17 @@
 -- daily_briefs holds 52.8 MB across 366 rows — 147.7 KB per row, because each row carries the
 -- full strategyLabResult for every pick — which is ~9% of the 567 MB database and would grow
 -- ~229 MB per trading year unpruned. That is why `pruneStaleBriefs(90)` hard-deletes them, and in
--- turn why every study in this project reports "one regime". This table keeps only what a study
--- needs: ~90 rows/day at ~150 bytes, about 3.4 MB per trading year, roughly 1/70th the cost. So
--- the briefs can keep their 90-day window for the UI while the evidence outlives it.
+-- turn why every study in this project reports "one regime". These rows cost ~20 MB per trading
+-- year, so the briefs can keep their 90-day window for the UI while the evidence outlives it.
+--
+-- WHY IT CAPTURES MORE THAN THE CUT ITSELF NEEDS. Three separate studies in this project have
+-- been blocked not by analysis but by CAPTURE: the liquidity A/B had to run on income because
+-- wheel rows lacked bid/ask/open_interest until v1.1.132 (and wheel is still untestable until
+-- those settle); the ETF-deflation gate was unsatisfiable because no ETF outcome had ever been
+-- generated; and this cut, whose losers were thrown away. Every study also ended on the same
+-- follow-up — WHICH SIGNAL caused it — which `signals_json` answers directly instead of leaving
+-- it to be inferred from weights. Capture is one-directional: what is not written today cannot be
+-- recovered, so the marginal columns are taken now while they are free.
 --
 -- Outcomes are deliberately NOT stored. They are derived later by settling `strike`/`premium`
 -- against `historical_prices` at `expiration`, exactly as the study scripts already do — storing
@@ -42,15 +50,38 @@ CREATE TABLE IF NOT EXISTS brief_candidates (
   disposition     TEXT    NOT NULL CHECK (disposition IN
                     ('picked', 'capped_out', 'failed_liquidity', 'not_validated')),
 
+  -- Per-signal {raw, normalized, weight, missing} as scored, same shape daily_briefs keeps for
+  -- picks. ~689 bytes. This is what turns "the composite selected badly" into "THIS SIGNAL
+  -- selected badly" — the question every prior study ended on and had to infer.
+  signals_json    TEXT,
+
   -- The structure the lab actually built for this strategy, when there was one. Null for
   -- not_validated rows and for candidates with no relevant constructible structure.
   structure_slug  TEXT,
+  grade           TEXT,
   strike          REAL,
   premium         REAL,                       -- per share, the short leg's mid
   expiration      TEXT,
   dte             INTEGER,
   liquidity_score REAL,
   spot            REAL,                       -- underlying at pick time; needed by the scale guard
+
+  -- Option economics of the short leg. `delta` because v1.1.171 showed it drives outcomes
+  -- materially (+0.65pp per matched-pair episode), so a selection study must control for it.
+  -- bid/ask/open_interest because their absence on wheel rows is precisely what forced the
+  -- v1.1.170 liquidity A/B onto income as a proxy — not repeating that.
+  delta           REAL,
+  leg_iv          REAL,
+  bid             REAL,
+  ask             REAL,
+  open_interest   INTEGER,
+
+  -- Trade economics as the lab computed them, for free at capture time.
+  net_credit      REAL,
+  max_loss        REAL,
+  annualized_return REAL,
+  pop_estimate    REAL,
+  atm_iv          REAL,
 
   created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
 );

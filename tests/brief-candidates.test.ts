@@ -26,8 +26,11 @@ function row(over: Partial<BriefCandidateRow> & { ticker: string }): BriefCandid
   return {
     asOfDate: '2026-09-03', generatedAt: '2026-09-03T20:30:00.000Z',
     strategy: 'wheel', compositeScore: 65, rank: 1, disposition: 'picked',
-    structureSlug: 'short-naked-put', strike: 140, premium: 3.5,
+    signalsJson: '{"ivRank":{"raw":82.2,"normalized":82.2,"weight":22,"missing":false}}',
+    structureSlug: 'short-naked-put', grade: 'A', strike: 140, premium: 3.5,
     expiration: '2026-10-16', dte: 43, liquidityScore: 11, spot: 150,
+    delta: -0.3, legIv: 34.8, bid: 3.4, ask: 3.6, openInterest: 1804,
+    netCredit: 350, maxLoss: -13650, annualizedReturn: 39.7, popEstimate: 72, atmIv: 31.2,
     ...over,
   };
 }
@@ -103,6 +106,55 @@ describe('saveBriefCandidates', () => {
     const d = db();
     expect(saveBriefCandidates(d, [])).toBe(0);
     expect(count(d)).toBe(0);
+    d.close();
+  });
+
+  // Capture is one-directional — what is not written today cannot be recovered. Three studies in
+  // this project were blocked by capture rather than analysis, so the columns that unblock the
+  // known follow-ups are asserted explicitly.
+  it('captures the signals behind the composite, not just the composite', () => {
+    const d = db();
+    saveBriefCandidates(d, [row({ ticker: 'AAA' })]);
+    const r = d.prepare('SELECT signals_json FROM brief_candidates').get() as { signals_json: string };
+    const sig = JSON.parse(r.signals_json);
+    // Without this, "the composite selected badly" can never become "THIS signal selected badly".
+    expect(sig.ivRank.raw).toBeCloseTo(82.2);
+    expect(sig.ivRank.weight).toBe(22);
+    d.close();
+  });
+
+  it('captures the short-leg option economics that earlier studies lacked', () => {
+    const d = db();
+    saveBriefCandidates(d, [row({ ticker: 'AAA' })]);
+    const r = d.prepare(
+      'SELECT delta, bid, ask, open_interest, pop_estimate, annualized_return FROM brief_candidates').get() as
+      Record<string, number>;
+    // delta: v1.1.171 showed it drives outcomes, so a selection study must control for it.
+    expect(r['delta']).toBeCloseTo(-0.3);
+    // bid/ask/OI: their absence on wheel rows is what forced the v1.1.170 liquidity A/B onto income.
+    expect(r['bid']).toBeCloseTo(3.4);
+    expect(r['ask']).toBeCloseTo(3.6);
+    expect(r['open_interest']).toBe(1804);
+    expect(r['pop_estimate']).toBe(72);
+    expect(r['annualized_return']).toBeCloseTo(39.7);
+    d.close();
+  });
+
+  it('accepts a candidate with no constructible structure — nulls, not a dropped row', () => {
+    const d = db();
+    saveBriefCandidates(d, [row({
+      ticker: 'NOS', disposition: 'not_validated', signalsJson: null, structureSlug: null,
+      grade: null, strike: null, premium: null, expiration: null, dte: null, liquidityScore: null,
+      delta: null, legIv: null, bid: null, ask: null, openInterest: null,
+      netCredit: null, maxLoss: null, annualizedReturn: null, popEstimate: null, atmIv: null,
+    })]);
+    expect(count(d)).toBe(1);
+    const r = d.prepare('SELECT composite_score, disposition, strike FROM brief_candidates').get() as
+      { composite_score: number; disposition: string; strike: number | null };
+    // The composite and rank still matter for a selection study even with no tradeable structure.
+    expect(r.composite_score).toBe(65);
+    expect(r.disposition).toBe('not_validated');
+    expect(r.strike).toBeNull();
     d.close();
   });
 
