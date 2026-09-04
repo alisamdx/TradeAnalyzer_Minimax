@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.182] — 2026-09-03
+
+### docs — logged: does the critic's treatment of trend survive contact with the data?
+
+- **No behaviour change.** Raised by a live pick, where the Roll the Dice panel showed both readings of the same fact disagreeing in the open: the critic's *"confirmed uptrend… supports the short put thesis"* directly above the v1.1.169 read's *"46.6% ABOVE its 200-day average… an extended price, not a discount"*. Both describe DINO having run +132% off its 52-week low.
+- **The assumption lives in two places, and they are different problems.** `critic-service.ts` `checkTrendAlignment` (~line 404) fires only on a *confirmed downtrend* and states its rationale in code — *"wheel works best on stocks trending sideways to up"* — which is the opposite ordering to what **T6 measured** (bearish band **20.5%** assigned, sideways 24.6%, bullish **31.9%**, bullish also worst on mean return at −1.01%). Separately, the LLM **system prompt says nothing about trend for wheel at all**, so "confirmed uptrend supports the thesis" is the model's own inference — an intuition from directional strategies, where it is correct, imported into short premium, where the evidence disputes it.
+- **Corroborated** by v1.1.33, which set `USE_ADX_IN_SCORING` false on a full-year replay because strong-trend names mean-revert over the next ~21 days. Two independent findings now point the same way.
+- **Logged rather than fixed, deliberately.** Assignment rate is not tail severity — a confirmed downtrend assigning *less often* does not mean a falling knife is safer when it does assign, so the warning may be defensible even if its stated reason is wrong. T6 also tested trend as a *selection* signal, not as a warning. One regime, 8 of 91 weight.
+- **Becomes answerable in about a quarter:** `brief_candidates.signals_json` (v1.1.175) stores `notDowntrend` per candidate and `daily_briefs.picks` stores the critic verdict, making verdict × trend band × settled outcome a direct three-way test — including whether `pass` on a bullish name underperforms `pass` on a sideways one.
+
 ## [1.1.181] — 2026-09-03
 
 ### fix — total capital uses E*Trade's net liquidation, not a derived sum

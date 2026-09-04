@@ -330,6 +330,49 @@ income carries no `notDowntrend` term). **What changes that is the v1.1.175/177 
 candidate, so after a quarter the composite can be recomputed with one term removed and compared
 on real outcomes. First concrete payoff of that instrumentation.
 
+### T7 — does the critic's treatment of TREND survive contact with the data? — OPEN
+
+Raised 2026-09-03 by a live pick. The Roll the Dice panel showed both readings of the same fact
+side by side, disagreeing:
+
+> **Critic:** "IV rank at 82 with a **confirmed uptrend** and strong fundamentals **supports** the
+> short put thesis"
+> **Own-at-strike:** "46.6% **ABOVE** its 200-day average… an **extended price, not a discount**"
+
+Both describe DINO having run +132% off its 52-week low. Only one of them is supported here.
+
+**Where the assumption lives — two places, and they are different problems.**
+
+1. `critic-service.ts` `checkTrendAlignment` (~line 404) fires only on a *confirmed downtrend*
+   (`notDowntrend.normalized < 35`) and states the rationale in code: *"wheel works best on stocks
+   trending sideways to up."* That is an assertion, and **T6 measured the opposite ordering** —
+   bearish band **20.5%** assigned, sideways 24.6%, bullish **31.9%**, with the bullish band also
+   worst on mean return (−1.01%).
+2. The LLM **system prompt says nothing about trend for wheel at all**. So "confirmed uptrend
+   supports the short put thesis" is the model's own inference, neither requested nor corrected —
+   an intuition imported from directional strategies, where it is right, into short premium, where
+   the evidence disputes it.
+
+**Corroboration:** `USE_ADX_IN_SCORING` was set false in v1.1.33 on a full-year Brief Replay A/B,
+recorded reason *strong-trend names mean-revert over the next ~21 days*. Two independent findings
+now point the same way.
+
+**What is NOT established, and why this is logged rather than fixed:**
+
+- **Assignment rate is not tail severity.** T6 measured how often each band assigned and its mean
+  return. A confirmed downtrend assigning *less often* does not mean a falling knife is safer when
+  it does assign — the warning may be defensible even if its stated reason is wrong.
+- T6 tested trend **as a selection signal**, not as a warning. Different question.
+- One regime, and `notDowntrend` is 8 of 91 weight.
+
+**How it becomes answerable:** `brief_candidates.signals_json` (v1.1.175) now stores
+`notDowntrend` raw/normalized per candidate, and `daily_briefs.picks` stores the critic verdict.
+After a quarter, verdict × trend band × settled outcome is a direct three-way test — including
+whether `pass` on a bullish name underperforms `pass` on a sideways one.
+
+**Do not tweak the prompt on the current evidence.** Same discipline that stopped `notDowntrend`
+being acted on at 8 of 91 weight.
+
 ## Not testable, and why
 
 Recording these so they are not re-litigated:
