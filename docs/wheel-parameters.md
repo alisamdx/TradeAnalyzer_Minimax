@@ -137,6 +137,26 @@ Expiry selection has some evidence: a weekly→monthly A/B ran 2026-08-04 and **
 
 **The suspicion moved to the other 50 of 91 weight**, and **T6 has now tested the 29 that can be**: `technicalNeutral` (11) is flat, `recentVolatility` (10) is weak and mildly inverted, and **`notDowntrend` (8) is anti-predictive** — its bullish band assigns 31.9% against the bearish band's 20.5% and returns −1.01% mean. Weighted together as the composite does, the three add +0.14 mean / −0.18 median over no selection at all; inverting them is the only rule that beats it on both. **That leaves `fundamentalScore` (17) + `leverageQuality` (4) as the only untested weight — and both draw on `fundamentals_cache`, which has no history and can never be replayed.** So F8's residual is now split between a measured small anti-predictive term and 21 points of permanently unverifiable weight. Still deliberately NOT acted on — n=13 per top band, one regime.
 
+**F9 — "Is the strike a price I'd want to own?" is the strongest thing measured on this path — but the Validate view's ENTRY ZONE is not how to ask it. CLOSED 2026-09-04, see T8.** 4,917 settled liquidity-gated rows across 45 dates, collapsed to 1,585 episodes. Two measures separate outcomes, they are **complementary**, and both survive controlling for raw distance:
+
+| split | eps | mean | median | assigned | SPY |
+|---|---|---|---|---|---|
+| universe (no selection) | 1585 | −0.29% | 1.13% | 25.3% | 1.5% |
+| basis ≤ SMA200 / basis > SMA200 | 1099 / 671 | **+0.55% / −2.19%** | 1.28 / 0.69 | **17.0% / 42.1%** | 1.5 / 1.3 |
+| strike below 20-bar swing low / not | 869 / 1111 | **+1.22% / −1.66%** | 1.38 / 0.91 | **13.2% / 35.7%** | 1.5 / 1.3 |
+
+**The entry zone adds nothing.** Its split (858 episodes, +1.23%) is within noise of the swing-low split (869, +1.22%) because `entryZoneLow = min(swingLow, SMA50)` and the swing low is nearly always the min — it is the swing low renamed. The zone's own verdict state, *"IN ENTRY ZONE"*, is the mediocre middle: **+0.50%, 20.6% assigned**, between below (+1.23%) and above (−1.62%). Its bounds are the 20-bar low and SMA50, **both recency anchors**, so it re-anchors as price rises and can never say "too expensive" — the same construction that made the conviction band fire on 0 of 39 picks. Live example (2026-09-04, AMD): zone $440.50–$499.18 against an SMA200 of $340.97, reading "IN ENTRY ZONE" at 39% above the 200-day.
+
+**Both survive the confound.** Below-swing strikes sit 2.6× further OTM (8.46% vs 3.28%), so the swing-low result looked like the distance effect renamed. Held inside ATR-cushion quartiles it persists in **all four**, largest where it matters most — in the thinnest-cushion quartile, below-swing returns **+1.48% at 19.5% assignment** against **−4.55% at 60.8%**. Own-at-strike survives the same treatment in all four bands. Crossed against each other (1b) neither collapses: best cell basis ≤ SMA200 **and** below swing = +1.26% / 11.3% assigned (699 eps); worst = −3.06% / 48.4% (562 eps).
+
+**Own-at-strike is now replicated at ~100× its original sample.** v1.1.169 rested on 12 accept episodes in one ~4-week window, which is why it annotates rather than gates. Here it is the **best selection rule tested** — top 5/date by lowest basis-vs-SMA200: **+2.44% mean / +2.83% median / +2.97% trimmed / 11.6% assigned** against a −0.29% / 1.13% / 0.46% / 25.3% universe. Different base (whole scanned universe, not brief survivors), same direction, 1,770 episodes.
+
+**Correction recorded:** the prediction going in was that ATR-normalised cushion would beat raw % OTM. **It does not, on returns** — widest raw-OTM quartile +1.10% / 1.92% median beats widest ATR quartile +0.49% / 0.99%, and as a top-5 selection rule ATR (−0.46% mean) is *worse than no selection*. ATR wins only on **assignment monotonicity** (51.7 → 17.4 → 16.8 → 11.3% across quartiles; raw % OTM is non-monotone at 50.3 → 14.6 → 15.8 → 18.9%). So ATR is the better risk gauge and raw distance captures more premium; neither dominates. Another mechanism read off a formula that the data declined to confirm.
+
+**Harness check passed:** RSI(14) reproduces its published v1.1.178 null — 0.19% / −0.34% / −0.74% across oversold / target / extended bands, a 0.9-point spread against 4.3 points for the 2×2 above.
+
+*Still one regime (45 dates, settled through 2026-09-04), and measured on the scanned universe rather than the brief's picks. Promoting either measure to a gate needs a brief-replay delta under FR-SEY-5. `scripts/fr-wheel-entry-quality-study.mjs`.*
+
 ---
 
 ## Test queue
@@ -372,6 +392,31 @@ whether `pass` on a bullish name underperforms `pass` on a sideways one.
 
 **Do not tweak the prompt on the current evidence.** Same discipline that stopped `notDowntrend`
 being acted on at 8 of 91 weight.
+
+### ~~T8 — can the Validate view's entry machinery judge a CSP strike?~~ — CLOSED 2026-09-04
+
+Asked by the operator: *"I can't wheel something I'm not comfortable owning, and to own it the
+strike needs to be a reasonable price."* The Validate view already computes an entry zone, a swing
+low, an ATR stop and an RSI read, and the wheel path consults none of them.
+
+**Answer: the principle is right and now quantified; the entry zone is the wrong instrument.**
+Full result in **F9**. Three of the panel's four technical ingredients were already settled before
+this ran — RSI *is* `technicalNeutral` (flat, T6), the SMA50/200 stack *is* `notDowntrend`
+(anti-predictive, T6), and distance-to-SMA200 *is* own-at-strike — so only the swing low, the ATR
+cushion and the zone itself were open. Of those, the swing low is real and additive, the ATR
+cushion is a risk gauge rather than a return signal, and the zone is the swing low renamed.
+
+**Follow-up worth running, not yet run:** the swing low and own-at-strike as a 2×2 *annotation* on
+the dice (not a gate), replayed against stored briefs for an FR-SEY-5 delta. The worst cell —
+basis above SMA200 **and** strike above the swing low — is 562 of 1,585 episodes at −3.06% mean
+and 48.4% assignment, which is a large enough share to matter and a specific enough condition to
+state in one sentence to the operator.
+
+**Also unresolved and deliberately out of scope here:** the Validate view's *fundamental* half
+(P/E, ROE, D/E, the AVOID verdict, analyst rating) disagrees with the wheel critic on live picks —
+AMD read AVOID / analysts SELL on 2026-06-12 and 06-18 while being a critic-**passed** wheel pick
+at +76.5% and +79.2% cost basis vs its own SMA200. That half **cannot be tested**:
+`fundamentals_cache` holds one row per ticker with no history. See "Not testable, and why".
 
 ## Not testable, and why
 

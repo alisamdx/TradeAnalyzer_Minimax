@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.186] - 2026-09-04
+
+### docs — T8: can the Validate view's entry machinery judge a CSP strike?
+
+- **No behaviour change.** New study `scripts/fr-wheel-entry-quality-study.mjs`, answering the operator's question: *"I can't wheel something I'm not comfortable owning, and to own it the strike needs to be a reasonable price."* **4,917 settled liquidity-gated rows across 45 dates**, collapsed to **1,585 episodes** (one ticker+expiry = one observation), split scale guard applied and counted, SPY printed beside every band as a regime tell rather than subtracted (a CSP's payoff is capped at the premium, so an excess-of-index figure would be meaningless).
+- **The principle holds, strongly, and two measures carry it — complementary, not redundant.** `basis <= SMA200`: **+0.55% vs −2.19%** mean, assignment **17.0% vs 42.1%**. `strike below the 20-bar swing low`: **+1.22% vs −1.66%**, assignment **13.2% vs 35.7%**. Crossed 2x2, neither collapses: best cell +1.26% / 11.3% assigned (699 eps), worst −3.06% / 48.4% (562 eps).
+- **Both survive the confound that would have killed them.** Below-swing strikes sit 2.6x further OTM (8.46% vs 3.28%), so the result looked like raw distance renamed. Held inside ATR-cushion quartiles it persists in **all four**, and is largest in the thinnest-cushion quartile: **+1.48% at 19.5% assignment vs −4.55% at 60.8%**.
+- **The entry zone itself adds nothing.** Its split (858 episodes) is within noise of the swing-low split (869) because `entryZoneLow = min(swingLow, SMA50)` and the swing low is nearly always the min — it is the swing low renamed. "IN ENTRY ZONE" is the mediocre middle (+0.50%, 20.6% assigned). Both bounds are **recency anchors**, so the zone re-anchors as price rises and can never say "too expensive" — the construction that made the conviction band fire on 0 of 39 picks. Live: AMD on 2026-09-04 reads "IN ENTRY ZONE" with a zone of $440.50–$499.18 against an SMA200 of $340.97.
+- **Own-at-strike is now replicated at ~100x its original sample.** v1.1.169 rested on 12 accept episodes inside one ~4-week window, which is why it annotates and does not gate. It is now the **best selection rule tested** — top 5/date by lowest basis-vs-SMA200 returns **+2.44% mean / +2.83% median / 11.6% assigned** against a −0.29% / 1.13% / 25.3% universe — on a different base (whole scanned universe, not brief survivors).
+- **Correction recorded:** the prediction going in was that ATR-normalised cushion would beat raw % OTM. **It does not on returns** (widest raw-OTM quartile +1.10% vs widest ATR +0.49%; as a selection rule ATR is *worse* than no selection at −0.46%). ATR wins only on assignment monotonicity. A mechanism read off a formula, declined by the data — the same shape as the v1.1.176 correction.
+- **Harness check passed:** RSI(14) reproduces its published v1.1.178 null (0.9-point spread across bands vs 4.3 for the 2x2), so the panel measures what the earlier study measured.
+- **Nothing gated.** One regime, and measured on the scanned universe rather than the brief's picks; a gate needs a brief-replay delta under FR-SEY-5. Follow-up queued in `docs/wheel-parameters.md` T8: the 2x2 as a dice *annotation*, replayed.
+
 ## [1.1.185] - 2026-09-04
 
 ### feat - keep both of the day's batch runs in the candidate pool
