@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.185] - 2026-09-04
+
+### feat - keep both of the day's batch runs in the candidate pool
+
+- **No behaviour change to any recommendation** - this changes only what is recorded.
+- **What prompted it:** DINO was yesterday's dice pick and today's `illiquid (6/15)` rejection, on a series that scored **9/15** the evening before. `OI 112->2.5, vol 27->1.5, spread 7.2%->5 = 9` against `OI 77->0.5, vol 0->0, spread 9.2%->5 = 5.5->6`. **The spread - 8 of the 15 points, and the only component that sets fill cost - did not move a point.** The -3 was two step-function counters crossing boundaries, on a strike the delta walk had also changed (spot 106.15->104.59).
+- **Same-day volume is a cumulative counter**: ~1 hour of tape at the 10:15 ET slot, a full session at 17:00. Monotonic within a day, so the morning run scores systematically lower on up to 3 of 15 points on an identical contract.
+- **Why nobody could see it:** the brief runs on schedule at both slots and the dice emails **both**, but only the after-close run survived - `saveBrief` deletes the same-ET-day rows and `brief_candidates` was keyed without a slot. **248 of 250 stored wheel picks are evening readings**, so the morning pick the operator acts on came from data destroyed hours later. "The after-close slot overwrites the morning" is right for a data refresh and wrong for instrumentation about a job that is acted on at both slots.
+- **Why it bites:** `MIN_TRADABLE_LIQUIDITY_SCORE = 8` sits in the densest part of the distribution - across 250 picks the mode is **exactly 7**, **93 (37%) would flip to passing on the volume component alone**, and **78 (31%) have a tradable <=15% spread yet are rejected as illiquid**. The component shipped in v0.32.97 against the brief's **5**/15 gate expecting to "rescue or penalize at the margin"; the dice inherited 8/15 from the v2 engine.
+- **Migration 079** adds `slot` (`intraday`/`after_close`, part of the unique index - a phase, not a clock time, so a same-phase re-run still replaces) and `volume` (nullable on purpose: the score reads `leg.volume ?? 0`, so "not reported" must stay distinguishable from "did not trade"). `resolveSlot()` prefers the scheduler's `slotTime`, falling back to the ET clock at a 14:00 boundary. Storage ~20 -> ~40 MB per trading year.
+- **`scripts/slot-liquidity-drift-study.mjs`** pairs the phases and reports score/volume/OI/spread deltas and gate crossings; forward-only, first pairs from the next full trading day.
+- **Deliberately unchanged:** `daily_briefs` (every replay script assumes one row per day), the gate and thresholds, and the `?? 0` null-volume conflation - all three change which trades are taken, which is FR-SEY-5 territory and needs the replay this release makes possible.
+
 ## [1.1.184] — 2026-09-04
 
 ### fix — the emailed quote link resolved to "We couldn't find the symbol 'NULL'"

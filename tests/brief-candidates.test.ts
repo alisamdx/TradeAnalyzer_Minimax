@@ -9,7 +9,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  saveBriefCandidates, pruneBriefCandidates,
+  saveBriefCandidates, pruneBriefCandidates, resolveSlot,
   type BriefCandidateRow,
 } from '../src/main/services/brief-candidates.js';
 import { openDatabase, type DbHandle } from '../src/main/db/connection.js';
@@ -24,12 +24,12 @@ function db(): DbHandle {
 
 function row(over: Partial<BriefCandidateRow> & { ticker: string }): BriefCandidateRow {
   return {
-    asOfDate: '2026-09-03', generatedAt: '2026-09-03T20:30:00.000Z',
+    asOfDate: '2026-09-03', generatedAt: '2026-09-03T20:30:00.000Z', slot: 'after_close',
     strategy: 'wheel', compositeScore: 65, rank: 1, disposition: 'picked',
     signalsJson: '{"ivRank":{"raw":82.2,"normalized":82.2,"weight":22,"missing":false}}',
     structureSlug: 'short-naked-put', grade: 'A', strike: 140, premium: 3.5,
     expiration: '2026-10-16', dte: 43, liquidityScore: 11, spot: 150,
-    delta: -0.3, legIv: 34.8, bid: 3.4, ask: 3.6, openInterest: 1804,
+    delta: -0.3, legIv: 34.8, bid: 3.4, ask: 3.6, openInterest: 1804, volume: 27,
     netCredit: 350, maxLoss: -13650, annualizedReturn: 39.7, popEstimate: 72, atmIv: 31.2,
     earningsDate: '2026-11-05', daysToEarnings: 63,
     ...over,
@@ -60,9 +60,9 @@ describe('saveBriefCandidates', () => {
     d.close();
   });
 
-  // The batch runs twice a trading day and the evening slot must overwrite the morning's partial
-  // view — the same rule every other job follows. see CLAUDE.md
-  it('REPLACES on a same-day re-run instead of duplicating', () => {
+  // A re-run of the SAME phase replaces, so repeated manual runs cannot accumulate. The two
+  // scheduled phases are kept apart — see the slot tests below.
+  it('REPLACES on a same-day, same-slot re-run instead of duplicating', () => {
     const d = db();
     saveBriefCandidates(d, [row({ ticker: 'AAA', compositeScore: 60, disposition: 'capped_out' })]);
     saveBriefCandidates(d, [row({ ticker: 'AAA', compositeScore: 71, disposition: 'picked' })]);
@@ -82,6 +82,36 @@ describe('saveBriefCandidates', () => {
       row({ ticker: 'AAA', strategy: 'wheel', asOfDate: '2026-09-02' }),
     ]);
     expect(count(d)).toBe(3);
+    d.close();
+  });
+
+  // v1.1.185. The batch runs the brief TWICE a trading day and the dice emails both, so the pick
+  // read at 10:35 ET used to be produced from data destroyed at 17:00 ET. Observed 2026-09-04:
+  // DINO scored liquidity 9/15 in the evening and 6/15 the next morning on a spread that had not
+  // moved a point — the gap was two step-function counters, one of which (same-day volume) is
+  // monotonic within the session. Keeping both phases is what makes that measurable at all.
+  it("keeps BOTH of a day's batch phases for the same ticker", () => {
+    const d = db();
+    saveBriefCandidates(d, [row({ ticker: 'AAA', slot: 'intraday',    liquidityScore: 6, volume: 0 })]);
+    saveBriefCandidates(d, [row({ ticker: 'AAA', slot: 'after_close', liquidityScore: 9, volume: 27 })]);
+    expect(count(d)).toBe(2);
+    const rows = d.prepare(
+      'SELECT slot, liquidity_score, volume FROM brief_candidates ORDER BY slot').all() as
+      Array<{ slot: string; liquidity_score: number; volume: number }>;
+    expect(rows).toEqual([
+      { slot: 'after_close', liquidity_score: 9, volume: 27 },
+      { slot: 'intraday',    liquidity_score: 6, volume: 0 },
+    ]);
+    d.close();
+  });
+
+  // The score reads `leg.volume ?? 0`, so a null scores identically to a genuine zero. A study
+  // has to be able to tell "did not trade" from "not reported" — 23 of 250 stored legs are null.
+  it('stores an unreported volume as NULL, not as zero', () => {
+    const d = db();
+    saveBriefCandidates(d, [row({ ticker: 'AAA', volume: null })]);
+    const r = d.prepare('SELECT volume FROM brief_candidates').get() as { volume: number | null };
+    expect(r.volume).toBeNull();
     d.close();
   });
 
@@ -227,5 +257,28 @@ describe('pruneBriefCandidates', () => {
     expect(pruneBriefCandidates(d, 90)).toBe(1);
     expect(count(d)).toBe(1);
     d.close();
+  });
+});
+
+// The phase label decides which rows overwrite which, so getting it from the scheduler rather
+// than guessing from the clock matters — a manual run is the only case that has to guess.
+describe('resolveSlot', () => {
+  it('trusts the scheduler slot when there is one', () => {
+    expect(resolveSlot('10:15')).toBe('intraday');
+    expect(resolveSlot('17:00')).toBe('after_close');
+  });
+
+  it('falls back to the ET clock for a manual, startup or API run', () => {
+    // 14:35Z = 10:35 ET (EDT) — the 2026-09-04 morning run that started this.
+    expect(resolveSlot(null, new Date('2026-09-04T14:35:00Z'))).toBe('intraday');
+    // 21:36Z = 17:36 ET — the after-close run of the day before.
+    expect(resolveSlot(null, new Date('2026-09-03T21:36:00Z'))).toBe('after_close');
+  });
+
+  // A morning batch that runs long must not be relabelled as the after-close run, or it would
+  // overwrite the evening row it is supposed to be compared against.
+  it('keeps a late-running morning batch on the intraday side of the boundary', () => {
+    expect(resolveSlot(null, new Date('2026-09-04T17:45:00Z'))).toBe('intraday');   // 13:45 ET
+    expect(resolveSlot(null, new Date('2026-09-04T18:05:00Z'))).toBe('after_close'); // 14:05 ET
   });
 });

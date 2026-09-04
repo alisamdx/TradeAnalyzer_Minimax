@@ -31,9 +31,37 @@ import type { DbHandle } from '../db/connection.js';
 
 export type CandidateDisposition = 'picked' | 'capped_out' | 'failed_liquidity' | 'not_validated';
 
+/**
+ * Which of the day's two batch phases produced a row.
+ *
+ * A PHASE, not a clock time, deliberately: re-running the same phase REPLACES rather than
+ * accumulating, so a date/strategy/ticker has at most two rows — exactly the pairing a
+ * morning-vs-evening comparison needs, with no unbounded growth from repeated manual runs.
+ */
+export type BriefCandidateSlot = 'intraday' | 'after_close';
+
+/**
+ * Resolve the phase for a run.
+ *
+ * Prefers the scheduler's own `slotTime` (`batch_runs.slot_time`, e.g. '10:15' / '17:00'), which
+ * is the authoritative answer for a scheduled run. A manual, startup or API run has no slot, so it
+ * falls back to the ET wall clock. The 14:00 ET boundary sits between the two scheduled slots and
+ * comfortably clear of both, so a late-running morning batch is still labelled 'intraday'.
+ */
+export function resolveSlot(slotTime?: string | null, now: Date = new Date()): BriefCandidateSlot {
+  const hhmm = slotTime?.match(/^(\d{1,2}):/);
+  const hour = hhmm
+    ? Number(hhmm[1])
+    : Number(now.toLocaleString('en-US', { timeZone: 'America/New_York', hour12: false, hour: '2-digit' }));
+  return Number.isFinite(hour) && hour < 14 ? 'intraday' : 'after_close';
+}
+
 export interface BriefCandidateRow {
   asOfDate: string;
   generatedAt: string;
+  /** Which of the day's two batch phases wrote this row: 'intraday' (~10:15 ET) or 'after_close'
+   *  (~17:00 ET). Part of the unique key, so both survive — see migration 079. */
+  slot: BriefCandidateSlot;
   strategy: string;
   ticker: string;
   compositeScore: number;
@@ -56,6 +84,9 @@ export interface BriefCandidateRow {
   bid: number | null;
   ask: number | null;
   openInterest: number | null;
+  /** Same-day contract volume. Nullable on purpose: the liquidity score reads a null as 0 points,
+   *  so a study must be able to tell "did not trade" from "not reported". */
+  volume: number | null;
   // Trade economics as the lab computed them.
   netCredit: number | null;
   maxLoss: number | null;
@@ -73,9 +104,13 @@ export interface BriefCandidateRow {
 /**
  * Replace this run's candidate rows.
  *
- * INSERT OR REPLACE on (as_of_date, strategy, ticker): the batch runs twice a trading day and the
- * after-close slot must overwrite what the morning wrote, exactly like every other job.
- * see CLAUDE.md "the batch runs twice a trading day"
+ * INSERT OR REPLACE on (as_of_date, strategy, ticker, SLOT). The batch runs twice a trading day
+ * and every other job's after-close pass overwrites the morning's partial view — but this table is
+ * instrumentation, and the two runs disagreeing is the thing worth measuring. The dice emails
+ * both, so the morning pick was being produced from data destroyed hours later; the liquidity
+ * score in particular reads same-day VOLUME, a counter that is monotonic within the session.
+ * Keyed by phase, so a re-run of the same phase still replaces: at most two rows per day.
+ * see migration 079, CLAUDE.md "the batch runs twice a trading day"
  *
  * Never throws — this is instrumentation, and a study convenience must not be able to fail the
  * brief that produces the actual recommendations.
@@ -85,19 +120,19 @@ export function saveBriefCandidates(db: DbHandle, rows: readonly BriefCandidateR
   try {
     const stmt = db.prepare(`
       INSERT OR REPLACE INTO brief_candidates
-        (as_of_date, generated_at, strategy, ticker, composite_score, rank, disposition,
+        (as_of_date, generated_at, slot, strategy, ticker, composite_score, rank, disposition,
          signals_json, structure_slug, grade, strike, premium, expiration, dte, liquidity_score,
-         spot, delta, leg_iv, bid, ask, open_interest,
+         spot, delta, leg_iv, bid, ask, open_interest, volume,
          net_credit, max_loss, annualized_return, pop_estimate, atm_iv,
          earnings_date, days_to_earnings)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const run = db.transaction((batch: readonly BriefCandidateRow[]) => {
       for (const r of batch) {
         stmt.run(
-          r.asOfDate, r.generatedAt, r.strategy, r.ticker, r.compositeScore, r.rank, r.disposition,
+          r.asOfDate, r.generatedAt, r.slot, r.strategy, r.ticker, r.compositeScore, r.rank, r.disposition,
           r.signalsJson, r.structureSlug, r.grade, r.strike, r.premium, r.expiration, r.dte,
-          r.liquidityScore, r.spot, r.delta, r.legIv, r.bid, r.ask, r.openInterest,
+          r.liquidityScore, r.spot, r.delta, r.legIv, r.bid, r.ask, r.openInterest, r.volume,
           r.netCredit, r.maxLoss, r.annualizedReturn, r.popEstimate, r.atmIv,
           r.earningsDate, r.daysToEarnings,
         );

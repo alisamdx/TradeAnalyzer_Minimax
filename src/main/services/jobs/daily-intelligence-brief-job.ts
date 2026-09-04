@@ -6,7 +6,7 @@
 
 import type { Database } from 'better-sqlite3';
 import Anthropic from '@anthropic-ai/sdk';
-import type { BatchJobHandler, BatchJobResult } from '../batch-service.js';
+import type { BatchJobHandler, BatchJobResult, RunTrigger } from '../batch-service.js';
 import type { BatchProgressEvent, BriefPick, CriticFlag, ScoringStrategy } from '@shared/types.js';
 import type { ScoredTicker } from '../scoring-service.js';
 import { ScoringService, STRATEGIES, minCompositeForStrategy } from '../scoring-service.js';
@@ -31,7 +31,7 @@ import { getETradeLastPrice } from '../etrade-options.js';
 import { withTransaction } from '../../db/connection.js';
 import { STRATEGY_RELEVANT_SLUGS, pickRelevantStructure, relevantSlugsForPick, formatStructureLegs } from '@shared/strategy-structures.js';
 import { extractLoggableScores, logStructureLiquidity, pruneStructureLiquidityLog } from '../structure-liquidity-log.js';
-import { saveBriefCandidates, pruneBriefCandidates, type BriefCandidateRow, type CandidateDisposition } from '../brief-candidates.js';
+import { saveBriefCandidates, pruneBriefCandidates, resolveSlot, type BriefCandidateRow, type CandidateDisposition } from '../brief-candidates.js';
 
 // VIX sane range — reject anything outside this (a quote typo can return an unrelated
 // symbol). Historical VIX spans ~9 (2017) to ~82 (COVID); [5,150] is a safe guard.
@@ -105,7 +105,7 @@ function hasAdequateLiquidity(
 type CandLeg   = {
   action: string; side?: 'call' | 'put' | null; strike: number; mid: number;
   delta?: number | null; iv?: number | null; bid?: number | null; ask?: number | null;
-  openInterest?: number | null;
+  openInterest?: number | null; volume?: number | null;
 };
 type CandSetup = {
   unavailableReason?: string | null; maxLoss?: number | null;
@@ -213,6 +213,8 @@ export class DailyIntelligenceBriefJob implements BatchJobHandler {
     onProgress: (evt: BatchProgressEvent) => void,
     signal: AbortSignal,
     force = false,
+    _trigger?: RunTrigger,
+    slotTime?: string | null,
   ): Promise<BatchJobResult> {
     const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
 
@@ -617,6 +619,10 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
     const candidateRows: BriefCandidateRow[] = [];
     const candidateRunAt = new Date().toISOString();
     const candidateDate = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+    // Which of the day's two batch phases this is. Both are kept (migration 079) because the two
+    // runs disagreeing is the thing worth measuring — the dice emails both, and the liquidity
+    // score reads same-day volume, which is monotonic within the session.
+    const candidateSlot = resolveSlot(slotTime);
     // Next report date per ticker AS KNOWN NOW. This is the only way the earnings gate ever
     // becomes testable: `earnings_calendar` keeps one row per ticker with no history, so a
     // replay sees today's date rather than the one that was live on the pick date. A stored
@@ -684,6 +690,7 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
         candidateRows.push({
           asOfDate: candidateDate,
           generatedAt: candidateRunAt,
+          slot: candidateSlot,
           strategy,
           ticker: scored.ticker,
           compositeScore: scored.compositeScore,
@@ -705,6 +712,7 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
           bid: shortLeg?.bid ?? null,
           ask: shortLeg?.ask ?? null,
           openInterest: shortLeg?.openInterest ?? null,
+          volume: shortLeg?.volume ?? null,
           netCredit: setup?.netCredit ?? null,
           maxLoss: setup?.maxLoss ?? null,
           annualizedReturn: setup?.annualizedReturn ?? null,
