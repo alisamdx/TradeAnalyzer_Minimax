@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.176] — 2026-09-03
+
+### docs — F8's mechanism is refuted: premium richness is not what makes the composite anti-predictive
+
+- **No behaviour change.** v1.1.173 measured the wheel composite anti-predictive at the top of its picks (+1.91% mean return on capital in the 58–63 band against **−4.99%** at 73+) and then *attributed* it to `ivRank` (22) + `premiumYield` (19) — 41 of 91 weight — reasoning that premium richness is compensation for risk rather than edge. **That attribution was inference from weights and the worst tickers, not measurement.** This tests it.
+- **`analysis_snapshots` allows the real test**: it holds the whole wheel universe per date — every ticker's actual recommended CSP with strike, premium, delta, IV rank and liquidity — not just the five that reached a brief. So selection rules can be applied to the same universe on the same dates and compared against **no selection at all**. 23,722 settled rows across 40 dates, episode-collapsed, scale-guarded.
+- **Premium richness HELPS**, judged on medians as well as means (the worst single outcome in the sample is −87.5%, so a mean can be set by two names): top annualized return **+1.03 mean / +2.67 median** versus no selection; top ivRank + annRet +0.25/+1.60; top ivRank +0.16/+0.91. And the **lowest**-annualized-return rule is the worst of every rule tried, at −1.21/−0.61. The relationship runs the opposite way from the one F8 asserted.
+- **So the finding stands and the explanation does not.** The composite *is* anti-predictive at the top of the picks — that was measured on 101 episodes and is untouched. It is simply not `ivRank` + `premiumYield`. **Suspicion moves to the other 50 of 91 weight**: `fundamentalScore` (17), `technicalNeutral` (11), `recentVolatility` (10), `notDowntrend` (8), `leverageQuality` (4). Awkwardly 21 of those draw on `fundamentals_cache`, which has no history and is permanently unvalidatable; the other 29 are price-derived and testable, and that is the next study.
+- **The liquidity finding replicates on independent data at 3.5× the sample.** The liquid subset (≥5/10) trails the illiquid one on all three measures — mean **−0.58% vs +0.73%**, median +1.07% vs +1.53%, trimmed +0.31% vs +1.29%. v1.1.170 reached the same conclusion on 6,777 income rows; this reproduces it on 23,722 wheel rows from a different source. Keeping `optionLiquidity` disabled in scoring is now supported twice over.
+- **Correction recorded.** An earlier draft of the script claimed this was "the only study in this project that can apply the earnings gate honestly", because `analysis_snapshots` rows carry a `daysToEarnings` field. **It is NULL on 100% of 23,722 rows** — the column exists and is never populated, so the gate is untestable here too. Follow-up worth taking: `brief_candidates` (v1.1.175) does not capture days-to-earnings either, and one additive column would make the earnings gate testable for the first time, from that point forward.
+- **CLAUDE.md corrected.** The "signals that pay most are risk premia" quirk claimed both liquidity *and* the composite. Only the liquidity half survives; the composite half is now recorded as a refuted inference, with the transferable lesson kept — a plausible mechanism read off a weight table is a hypothesis, and this project's data can usually test it directly, so test it before it becomes the reason for a decision.
+- The wheel composite floor stays rejected regardless: that was measured (every threshold made the book monotonically worse while emptying up to 14 of 35 days), not inferred from the mechanism.
+
 ## [1.1.175] — 2026-09-03
 
 ### feat — the brief stops discarding the losers: every Stage-4 candidate is persisted

@@ -117,9 +117,11 @@ Expiry selection has some evidence: a weekly→monthly A/B ran 2026-08-04 and **
 
 **F2 — `PICKS_PER_STRATEGY = 5` is why over-budget days rarely have an alternative.** The dice never sees more than 5 wheel picks. This directly explains the v1.1.168 measurement that only **3 of 12** over-budget pick-days had a within-budget alternative — there simply weren't enough candidates. Raising this is the lever for that problem, not lowering any bar.
 
-**F3 — Liquidity is deliberately a gate and not a ranking signal. CLOSED.** Graded at Layer 2 (**disabled**), gated at **5/15** at Layer 1, gated again at **8/15** at Layer 4. An 8/15 chain and a 15/15 chain rank identically, and that is the intended design, not an oversight.
+**F3 — Liquidity is deliberately a gate and not a ranking signal. CLOSED, and REPLICATED.** Graded at Layer 2 (**disabled**), gated at **5/15** at Layer 1, gated again at **8/15** at Layer 4. An 8/15 chain and a 15/15 chain rank identically, and that is the intended design, not an oversight.
 
 *An earlier version of this document claimed the reason for the 2026-08-07 disable was unrecorded. That was wrong* — it is documented across v1.1.131/132/133/135, and **re-tested on 2.7× the sample in v1.1.170**: 18,219 settled CSPs over 31 dates, where the weight sweep is now **monotone** (13 → −0.47%, 9 → −0.27%, 6 → −0.20%, 3 → −0.08%, **0 → +0.54%** mean return on capital). Disabling is the best arm and every reduction improves it. The mechanism: liquidity is a **noisy proxy for IV rank** (top legacy quartile ivRank 63 vs 53 at the bottom), which the composite already weights at 30 — so extra weight dilutes the signals that actually carry the edge. Liquidity is an execution-cost property, not an outcome-prediction property. **No action.**
+
+*Independently replicated in v1.1.176 on a different dataset and 3.5× the sample*: across 23,722 settled `analysis_snapshots` rows the liquid subset (≥5/10) underperforms the illiquid one on **all three** measures — mean −0.58% vs +0.73%, median +1.07% vs +1.53%, trimmed +0.31% vs +1.29%. Two independent datasets now agree.
 
 **F4 — The two liquidity gates fail in opposite directions.** Layer 1 passes a pick whose lab result is missing ("can't gate what we didn't measure"); Layer 4 rejects one. Defensible individually, but a pick can clear the brief on absent data and then die at the dice — which reads as a dice rejection when it is really a data gap.
 
@@ -129,7 +131,11 @@ Expiry selection has some evidence: a weekly→monthly A/B ran 2026-08-04 and **
 
 **F7 — Wheel has no quality floor, and testing showed it must not get one. CLOSED v1.1.173.** Bearish earned its 70 gate from a full-year replay. Wheel was ungated by omission; it is now ungated on evidence. Every candidate threshold made the surviving book monotonically worse (at 70: kept return −3.89% vs +0.56% ungated) while emptying 14 of 35 brief dates. See **T2**.
 
-**F8 — The wheel composite is ANTI-PREDICTIVE at the top, and this is the most important open question in the path.** Across 101 settled episodes, mean return on capital by composite band: 58–63 **+1.91%**, 63–68 +1.84%, 68–73 **−1.08%**, 73+ **−4.99%**. Assignment climbs from 16.3% to 61.5% across those bands. It is not outlier-driven — medians agree (≥68: **+0.27%**, <68: **+2.44%**). The mechanism is visible in the worst names (MRVL ×3, RKLB ×2, COHR ×2, ON — high-IV semis and space): `ivRank` (22) + `premiumYield` (19) are **41 of 91 weight** and both reward premium richness, which is *compensation for risk*, not edge. **This is the second wheel signal to turn out to be a risk proxy rather than a quality measure** — see F3 on liquidity. Deliberately NOT acted on: n=13 per top band, one regime, and the precedent for buy/bullish anti-predictiveness was to record and not re-engineer on a sample this size.
+**F8 — The wheel composite is ANTI-PREDICTIVE at the top. Finding stands; the MECHANISM was wrong.** Across 101 settled episodes, mean return on capital by composite band: 58–63 **+1.91%**, 63–68 +1.84%, 68–73 **−1.08%**, 73+ **−4.99%**, with assignment climbing 16.3% → 61.5%. Not outlier-driven — medians agree (≥68 **+0.27%**, <68 **+2.44%**). That much is measured and unchanged.
+
+*The original explanation — that `ivRank` (22) + `premiumYield` (19), 41 of 91 weight, reward premium richness which is compensation for risk — was inference from weights and the worst tickers, and **v1.1.176 refuted it**.* Tested directly on 23,722 settled rows across the whole universe, ranking on premium richness **helps**: top annualized return beats no-selection by **+1.03 mean / +2.67 median**, and the *lowest*-annualized-return rule is the worst of every rule tried (−1.21 / −0.61). See **T5**.
+
+**So the suspicion moves to the other 50 of 91 weight**: `fundamentalScore` (17), `technicalNeutral` (11), `recentVolatility` (10), `notDowntrend` (8), `leverageQuality` (4). Awkwardly, 21 of those (fundamentalScore + leverageQuality) draw on `fundamentals_cache`, which has no history and is permanently unvalidatable; the other 29 are price-derived and testable. Still deliberately NOT acted on — n=13 per top band, one regime.
 
 ---
 
@@ -268,6 +274,26 @@ swaps, one regime. Replay also still under-ranks ETFs (blind to `premiumYield`, 
 neutral result is what let a category error be fixed rather than left in place forever.
 
 ---
+
+### T5 — does premium-richness selection hurt? — CLOSED 2026-09-03, NO
+
+Added after T2 raised F8. `scripts/fr-wheel-selection-study.mjs` applies selection rules to the
+**whole wheel universe** from `analysis_snapshots` (23,722 settled rows, 40 dates) and compares
+each against no selection at all — the test F8's mechanism claim needed and never had.
+
+| rule | Δ mean | Δ median |
+|---|---|---|
+| **top annualized return** | **+1.03** | **+2.67** |
+| top ivRank + annRet | +0.25 | +1.60 |
+| top ivRank | +0.16 | +0.91 |
+| **lowest annualized return** | **−1.21** | **−0.61** |
+
+Premium richness **helps**. F8's finding survives; its explanation does not. Judged on medians as
+well as means because the worst single outcome in the sample is −87.5%.
+
+**Also corrected here:** an earlier draft claimed this study could apply the earnings gate, since
+`analysis_snapshots` carries a `daysToEarnings` field. It is **null on 100% of rows** — the column
+exists and is never populated. A fourth place where the earnings gate cannot be evaluated.
 
 ## Not testable, and why
 
