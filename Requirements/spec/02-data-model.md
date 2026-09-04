@@ -179,6 +179,7 @@ unmeasurable; when a ranking's quality is in question the losers are the data re
 | `spot` | underlying at pick time — required by the split scale guard, and unrecoverable after a repair |
 | `delta`, `leg_iv`, `bid`, `ask`, `open_interest` | short-leg economics. `delta` because v1.1.171 showed it drives outcomes; bid/ask/OI because their absence on wheel rows forced the v1.1.170 liquidity A/B onto income as a proxy |
 | `net_credit`, `max_loss`, `annualized_return`, `pop_estimate`, `atm_iv` | trade economics as the lab computed them |
+| `earnings_date`, `days_to_earnings` (migration 077) | next report date **as known on the pick date**, and the gap in days — pairs with `dte` to answer whether the report lands inside the hold. **NULL means unknown *or stale*, which `roll-the-dice.ts` treats as reject, never as clear.** This is the only route by which the earnings gate ever becomes testable: `earnings_calendar` has one row per ticker with no history, and `analysis_snapshots.daysToEarnings` is null on 100% of rows |
 
 **Outcomes are not stored**: they are settled later against `historical_prices`, so a subsequent
 split repair corrects them rather than leaving a frozen wrong value. Retention is **730 days**

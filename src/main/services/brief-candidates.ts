@@ -15,7 +15,10 @@
 // blocked by capture rather than analysis: the liquidity A/B ran on income because wheel rows had
 // no bid/ask/open_interest until v1.1.132, the ETF gate was unsatisfiable because no ETF outcome
 // had ever been generated, and this cut discarded its losers. `signals_json` in particular
-// answers the follow-up every study ended on — WHICH signal — instead of leaving it inferred.
+// answers the follow-up every study ended on — WHICH signal — instead of leaving it inferred, and
+// `earnings_date` makes the earnings gate testable for the first time: it is the one rule here
+// that no study has ever been able to evaluate, because `earnings_calendar` has no history and
+// `analysis_snapshots.daysToEarnings` is null on every row.
 //
 // Outcomes are NOT stored: they are derived later by settling strike/premium against
 // `historical_prices`, so a subsequent split repair corrects them instead of leaving a frozen
@@ -59,6 +62,12 @@ export interface BriefCandidateRow {
   annualizedReturn: number | null;
   popEstimate: number | null;
   atmIv: number | null;
+  /** Next report date as KNOWN ON THE PICK DATE, and the gap in days. Null means unknown or
+   *  stale — the same fail-closed state `roll-the-dice.ts` treats as "reject", never as "clear".
+   *  This is the only way the earnings gate ever becomes testable: `earnings_calendar` keeps one
+   *  row per ticker with no history, so a replay sees today's date rather than that day's. */
+  earningsDate: string | null;
+  daysToEarnings: number | null;
 }
 
 /**
@@ -79,8 +88,9 @@ export function saveBriefCandidates(db: DbHandle, rows: readonly BriefCandidateR
         (as_of_date, generated_at, strategy, ticker, composite_score, rank, disposition,
          signals_json, structure_slug, grade, strike, premium, expiration, dte, liquidity_score,
          spot, delta, leg_iv, bid, ask, open_interest,
-         net_credit, max_loss, annualized_return, pop_estimate, atm_iv)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         net_credit, max_loss, annualized_return, pop_estimate, atm_iv,
+         earnings_date, days_to_earnings)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const run = db.transaction((batch: readonly BriefCandidateRow[]) => {
       for (const r of batch) {
@@ -89,6 +99,7 @@ export function saveBriefCandidates(db: DbHandle, rows: readonly BriefCandidateR
           r.signalsJson, r.structureSlug, r.grade, r.strike, r.premium, r.expiration, r.dte,
           r.liquidityScore, r.spot, r.delta, r.legIv, r.bid, r.ask, r.openInterest,
           r.netCredit, r.maxLoss, r.annualizedReturn, r.popEstimate, r.atmIv,
+          r.earningsDate, r.daysToEarnings,
         );
       }
     });

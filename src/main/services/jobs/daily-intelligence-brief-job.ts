@@ -617,6 +617,21 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
     const candidateRows: BriefCandidateRow[] = [];
     const candidateRunAt = new Date().toISOString();
     const candidateDate = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+    // Next report date per ticker AS KNOWN NOW. This is the only way the earnings gate ever
+    // becomes testable: `earnings_calendar` keeps one row per ticker with no history, so a
+    // replay sees today's date rather than the one that was live on the pick date. A stored
+    // date already in the past means the row was never refreshed after that report, so the NEXT
+    // date is unknown — left null, matching how roll-the-dice.ts fails closed on it.
+    const earningsByTicker = new Map<string, string>();
+    try {
+      for (const r of this.db.prepare(
+        'SELECT ticker, report_date FROM earnings_calendar WHERE report_date >= ?',
+      ).all(candidateDate) as Array<{ ticker: string; report_date: string }>) {
+        earningsByTicker.set(r.ticker, r.report_date);
+      }
+    } catch { /* instrumentation only — never fail the brief over it */ }
+    const daysUntil = (iso: string): number => Math.round(
+      (Date.parse(`${iso}T00:00:00Z`) - Date.parse(`${candidateDate}T00:00:00Z`)) / 86_400_000);
 
     for (const strategy of STRATEGIES) {
       const top = topPerStrategy.get(strategy) ?? [];
@@ -695,6 +710,9 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
           annualizedReturn: setup?.annualizedReturn ?? null,
           popEstimate: setup?.popEstimate ?? null,
           atmIv: setup?.currentAtmIv ?? null,
+          earningsDate: earningsByTicker.get(scored.ticker) ?? null,
+          daysToEarnings: earningsByTicker.has(scored.ticker)
+            ? daysUntil(earningsByTicker.get(scored.ticker)!) : null,
         });
       }
 

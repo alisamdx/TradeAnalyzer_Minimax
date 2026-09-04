@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.1.177] — 2026-09-03
+
+### feat — Stage-4 candidates capture the earnings date, closing the one gate no study could test
+
+- **The earnings gate is the only rule in the wheel path that has never been testable**, in any study, for one reason: `earnings_calendar` keeps one row per ticker with **no history**, so a replay always sees today's next-report date rather than the date live on the pick date. The consequence is on record — a retrospective run still selects **NVDA on 2026-08-26**, its actual earnings day, the exact failure the gate exists to prevent.
+- **v1.1.176 briefly looked like a way out**, since `analysis_snapshots` rows carry a `daysToEarnings` field. It is **NULL on 100% of 23,722 settled rows** — the column exists and is never populated. That made four separate places where the gate could not be evaluated.
+- **Migration 077 adds `earnings_date` and `days_to_earnings`** to `brief_candidates`. Both, deliberately: the date is ground truth and auditable, the day count is what a study filters on and pairs with the existing `dte` to answer the gate's real question — does the report land inside the hold window? ~14 bytes. Additive `ALTER TABLE` on a table holding 0 rows, so nothing to backfill.
+- **NULL is not "clear".** It means unknown *or stale* as of the pick date — either no calendar row, or a stored date already in the past, which per the dice's own rule means the *next* date is unknown. `roll-the-dice.ts` fails closed on exactly that, and a study reading NULL as "no earnings, therefore fine" would reproduce the precise blindness this column removes. Pinned by a test.
+- The job loads future-dated report dates once per run and stamps each candidate, wrapped in try/catch like the rest of the capture, so it can never fail the brief. 2 new tests (14 total). Suite: 1159 passed.
+- **Nothing retroactive** — capture starts at the next brief run. After a quarter there will be, for the first time, a sample where the earnings gate can be checked against what was actually known, rather than assumed correct because no test could reach it.
+
 ## [1.1.176] — 2026-09-03
 
 ### docs — F8's mechanism is refuted: premium richness is not what makes the composite anti-predictive

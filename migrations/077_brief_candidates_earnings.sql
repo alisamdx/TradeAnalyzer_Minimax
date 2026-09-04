@@ -1,0 +1,32 @@
+-- 077: Capture the earnings date on every Stage-4 candidate.
+--
+-- WHY. The earnings gate is the one rule in the wheel path that has NEVER been testable, in any
+-- study, for one reason: `earnings_calendar` keeps a single row per ticker with no history, so a
+-- replay always sees TODAY's next-report date rather than the date that was known on the pick
+-- date. Measured consequences of that blindness are already on record — a retrospective run still
+-- selects NVDA on 2026-08-26, its actual earnings day, which is precisely the failure the gate
+-- exists to prevent.
+--
+-- v1.1.176 briefly looked like a way out: `analysis_snapshots` rows carry a `daysToEarnings`
+-- FIELD. It is NULL on 100% of 23,722 settled rows — the column exists and is never populated.
+-- That made four separate places where the gate could not be evaluated.
+--
+-- Capturing it here is the only fix, and it works in one direction only: from the next brief run
+-- forward. Nothing retroactive. Two additive columns on a table that currently holds 0 rows.
+--
+-- WHY BOTH COLUMNS. `earnings_date` is the ground truth and makes the stored value auditable;
+-- `days_to_earnings` is the convenience a study actually filters on, and pairs directly with the
+-- existing `dte` column to answer the gate's real question — does the report land inside the hold
+-- window? Storing both costs ~14 bytes and removes a recomputation that would otherwise have to
+-- re-derive the as-of date.
+--
+-- NULL SEMANTICS MATTER HERE. NULL means "unknown or stale as of the pick date" — either the
+-- ticker had no calendar row, or the stored date had already passed, which per the dice's own
+-- rule means the NEXT date is unknown. That is exactly how `roll-the-dice.ts` treats it: fail
+-- closed. A study must read NULL as "the gate would have rejected this", never as "clear".
+--
+-- see migrations/076_brief_candidates.sql, src/main/services/roll-the-dice.ts,
+--     docs/wheel-parameters.md
+
+ALTER TABLE brief_candidates ADD COLUMN earnings_date TEXT;
+ALTER TABLE brief_candidates ADD COLUMN days_to_earnings INTEGER;

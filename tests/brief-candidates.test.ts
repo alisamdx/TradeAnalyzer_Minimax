@@ -31,6 +31,7 @@ function row(over: Partial<BriefCandidateRow> & { ticker: string }): BriefCandid
     expiration: '2026-10-16', dte: 43, liquidityScore: 11, spot: 150,
     delta: -0.3, legIv: 34.8, bid: 3.4, ask: 3.6, openInterest: 1804,
     netCredit: 350, maxLoss: -13650, annualizedReturn: 39.7, popEstimate: 72, atmIv: 31.2,
+    earningsDate: '2026-11-05', daysToEarnings: 63,
     ...over,
   };
 }
@@ -147,6 +148,7 @@ describe('saveBriefCandidates', () => {
       grade: null, strike: null, premium: null, expiration: null, dte: null, liquidityScore: null,
       delta: null, legIv: null, bid: null, ask: null, openInterest: null,
       netCredit: null, maxLoss: null, annualizedReturn: null, popEstimate: null, atmIv: null,
+      earningsDate: null, daysToEarnings: null,
     })]);
     expect(count(d)).toBe(1);
     const r = d.prepare('SELECT composite_score, disposition, strike FROM brief_candidates').get() as
@@ -155,6 +157,39 @@ describe('saveBriefCandidates', () => {
     expect(r.composite_score).toBe(65);
     expect(r.disposition).toBe('not_validated');
     expect(r.strike).toBeNull();
+    d.close();
+  });
+
+  // The earnings gate is the ONE rule in the wheel path no study has ever been able to evaluate:
+  // earnings_calendar keeps one row per ticker with no history, so a replay sees today's date
+  // rather than the one live on the pick date, and analysis_snapshots.daysToEarnings is null on
+  // every row. Capturing it here is the only fix, and it works forward only.
+  it('captures the earnings date as known on the pick date', () => {
+    const d = db();
+    saveBriefCandidates(d, [row({ ticker: 'AAA', earningsDate: '2026-11-05', daysToEarnings: 63, dte: 43 })]);
+    const r = d.prepare('SELECT earnings_date, days_to_earnings, dte FROM brief_candidates').get() as
+      { earnings_date: string; days_to_earnings: number; dte: number };
+    expect(r.earnings_date).toBe('2026-11-05');
+    expect(r.days_to_earnings).toBe(63);
+    // The gate's actual question: does the report land inside the hold window?
+    expect(r.days_to_earnings > r.dte).toBe(true);
+  });
+
+  // NULL is not "clear" — it is unknown-or-stale, which roll-the-dice.ts rejects. A study that
+  // read it as clear would reproduce exactly the blindness this column exists to remove.
+  it('records unknown or stale earnings as NULL, distinct from a known-clear date', () => {
+    const d = db();
+    saveBriefCandidates(d, [
+      row({ ticker: 'KNOWN', earningsDate: '2026-11-05', daysToEarnings: 63 }),
+      row({ ticker: 'UNKNOWN', earningsDate: null, daysToEarnings: null }),
+    ]);
+    const rows = d.prepare(
+      'SELECT ticker, earnings_date FROM brief_candidates ORDER BY ticker').all() as
+      Array<{ ticker: string; earnings_date: string | null }>;
+    expect(rows).toEqual([
+      { ticker: 'KNOWN', earnings_date: '2026-11-05' },
+      { ticker: 'UNKNOWN', earnings_date: null },
+    ]);
     d.close();
   });
 
