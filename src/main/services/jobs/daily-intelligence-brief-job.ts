@@ -31,6 +31,7 @@ import { getETradeLastPrice } from '../etrade-options.js';
 import { withTransaction } from '../../db/connection.js';
 import { STRATEGY_RELEVANT_SLUGS, pickRelevantStructure, relevantSlugsForPick, formatStructureLegs } from '@shared/strategy-structures.js';
 import { extractLoggableScores, logStructureLiquidity, pruneStructureLiquidityLog } from '../structure-liquidity-log.js';
+import { saveBriefCandidates, pruneBriefCandidates, type BriefCandidateRow, type CandidateDisposition } from '../brief-candidates.js';
 
 // VIX sane range — reject anything outside this (a quote typo can return an unrelated
 // symbol). Historical VIX spans ~9 (2017) to ~82 (COVID); [5,150] is a safe guard.
@@ -97,6 +98,16 @@ function hasAdequateLiquidity(
   if (best === null) return false; // lab ran but no valid structure found for this strategy
   return best >= MIN_LIQUIDITY_SCORE;
 }
+
+// Shape of a Strategy Lab score, narrowed to just what candidate capture needs. Declared
+// locally and cast from `object | null`, the same way getBestLiquidityScore does — the lab result
+// crosses this boundary untyped.
+type CandLeg   = { action: string; side?: 'call' | 'put' | null; strike: number; mid: number };
+type CandSetup = {
+  unavailableReason?: string | null; maxLoss?: number | null;
+  expiration?: string; dte?: number; legs?: CandLeg[];
+};
+type CandScore = { slug: string; grade: string; liquidityScore: number; setup: CandSetup | null };
 
 // Map a ticker's breakout signal to the inflection trade direction. 1 → up (bull-put),
 // −1 → down (bear-call), else undefined (non-breakout / non-inflection).
@@ -593,6 +604,14 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
     const assembledPicks = new Map<ScoringStrategy, BriefPick[]>();
     const strategyConfigs = new Map(STRATEGIES.map(s => [s, this.scoringService.getConfig(s)]));
 
+    // Every Stage-4 candidate, survivors AND losers, for later selection studies. The brief keeps
+    // only the top PICKS_PER_STRATEGY, so without this the cut from 15 to 5 is unmeasurable —
+    // and that cut is where an anti-predictive composite would do its damage (v1.1.173 F8).
+    // Instrumentation only: it never gates, and saveBriefCandidates never throws.
+    const candidateRows: BriefCandidateRow[] = [];
+    const candidateRunAt = new Date().toISOString();
+    const candidateDate = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+
     for (const strategy of STRATEGIES) {
       const top = topPerStrategy.get(strategy) ?? [];
       const passedGate = top.filter(scored =>
@@ -618,6 +637,46 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
       if (failedGate.length > 0) logLine += ` | liq-failed: ${failedGate.map(fmt).join(', ')}`;
       if (cappedOut.length  > 0) logLine += ` | outranked: ${cappedOut.map(fmt).join(', ')}`;
       console.log(logLine);
+
+      // Record the pool before narrowing to `picks`. Disposition is derived from the same three
+      // sets the funnel log above already computes, so the table and the log can never disagree.
+      const pickedSet = new Set(liquidFiltered.map(x => x.ticker));
+      const failedSet = new Set(failedGate.map(x => x.ticker));
+      for (let i = 0; i < top.length; i++) {
+        const scored = top[i]!;
+        const lab = validationResults.get(scored.ticker) ?? null;
+        const dir = breakoutDirectionOf(signalData.get(scored.ticker));
+        const disposition: CandidateDisposition =
+          pickedSet.has(scored.ticker) ? 'picked'
+          : failedSet.has(scored.ticker) ? (lab ? 'failed_liquidity' : 'not_validated')
+          : 'capped_out';
+        // The structure this strategy would actually trade — the same choice the report, critic
+        // and renderer make, so a stored candidate is comparable to a stored pick.
+        const struct = pickRelevantStructure<CandScore>(
+          (lab as { scores?: CandScore[] } | null)?.scores, strategy, dir,
+        );
+        const setup = struct?.setup ?? null;
+        // For a short-premium structure the meaningful price is the SHORT leg's mid; for anything
+        // else fall back to the first leg, so the row is still settleable.
+        const shortLeg = setup?.legs?.find(l => String(l.action).toLowerCase().startsWith('sell'))
+          ?? setup?.legs?.[0] ?? null;
+        candidateRows.push({
+          asOfDate: candidateDate,
+          generatedAt: candidateRunAt,
+          strategy,
+          ticker: scored.ticker,
+          compositeScore: scored.compositeScore,
+          rank: i + 1,
+          disposition,
+          structureSlug: struct?.slug ?? null,
+          strike: shortLeg?.strike ?? null,
+          premium: shortLeg?.mid ?? null,
+          expiration: setup?.expiration ?? null,
+          dte: setup?.dte ?? null,
+          liquidityScore: getBestLiquidityScore(lab, strategy, dir),
+          spot: signalData.get(scored.ticker)?.lastPrice ?? null,
+        });
+      }
 
       const picks: BriefPick[] = liquidFiltered.map((scored, idx) => ({
         ticker: scored.ticker,
@@ -718,6 +777,15 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
     const validUntil = nextTradingDayOpen(new Date().toISOString());
 
     this.scoringService.pruneStaleBriefs(RETENTION_DAYS);
+
+    // The candidate pool outlives the briefs on purpose: `daily_briefs` averages 147.7 KB/row
+    // (it carries the full lab result per pick) and is pruned at 90 days, which is why every
+    // study on this data reports "one regime". These rows cost ~3.4 MB per trading year, so
+    // they are kept for two years and the evidence survives the window the briefs cannot.
+    const savedCandidates = saveBriefCandidates(this.db, candidateRows);
+    pruneBriefCandidates(this.db);
+    runMeta['candidatesRecorded'] = savedCandidates;
+    console.log(`[brief] recorded ${savedCandidates} Stage-4 candidates (survivors + losers)`);
 
     // One-time cleanup: purge open paper trades from stale earlier runs on any date.
     // autoCapture below clears today's stale picks per-strategy before inserting;

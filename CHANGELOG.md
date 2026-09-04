@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.175] — 2026-09-03
+
+### feat — the brief stops discarding the losers: every Stage-4 candidate is persisted
+
+- **When a ranking's quality is in question, the losers are the data you need — and this pipeline threw them away.** The brief keeps only the top `PICKS_PER_STRATEGY` (5) of a `STAGE4_POOL_SIZE` (15) pool, so the 15→5 cut has never been measurable. It matters now: v1.1.173 found the wheel composite **anti-predictive at the top** (+1.91% mean return on capital in the 58–63 band vs **−4.99%** at 73+) and v1.1.174 showed the dice tiebreak is nearly vacuous, leaving this cut as the remaining exposure — testable only from the moment capture begins, never retroactively.
+- **A slim new table rather than longer brief retention, and the numbers are why.** `daily_briefs` holds **52.8 MB across 366 rows — 147.7 KB each** (every row carries the full `strategyLabResult` per pick), about **9% of the 567 MB database**, growing **~229 MB per trading year** unpruned. That is why `pruneStaleBriefs(90)` hard-deletes them — and in turn **why every study in this project reports "one regime"**. `brief_candidates` stores only what a settlement study needs: ~90 rows/day at ~150 bytes, **~3.4 MB per trading year, roughly 1/70th the cost**, kept **730 days**. The briefs keep their 90-day window for the UI; the evidence outlives it.
+- **What is captured:** one row per candidate per strategy per date with `disposition` — `picked` / `capped_out` / `failed_liquidity` / `not_validated` — plus composite, rank, and the structure the strategy would actually trade (slug, strike, premium, expiration, DTE, liquidity), selected through the same `pickRelevantStructure` the report, critic and renderer use so a candidate is directly comparable to a pick. Disposition is derived from the same three sets the existing funnel log computes, so table and log cannot disagree.
+- **Outcomes are deliberately NOT stored.** They are settled later against `historical_prices`, so a subsequent split repair *corrects* them rather than leaving a frozen wrong number — the failure mode already on record, where four CRWD rows manufactured −$168,516 of fiction. **`spot` IS stored**, because the split scale guard needs the underlying as of the pick date and that is the one input a repair makes unrecoverable.
+- **Fail-safe by construction:** `saveBriefCandidates` returns 0 on any error rather than throwing, so instrumentation can never break the brief that produces the recommendations. Covered by a test that drops the table mid-run.
+- Migration 076, `src/main/services/brief-candidates.ts`, 9 new tests. Suite: 1154 passed.
+- **Nothing is retroactive** — the first rows appear on the next brief run. Roughly a month for a first look at the top-5 cut; roughly a quarter to ask it across more than one regime.
+
 ## [1.1.174] — 2026-09-03
 
 ### docs — the dice composite tiebreak is nearly vacuous; the F8 concern does not land there

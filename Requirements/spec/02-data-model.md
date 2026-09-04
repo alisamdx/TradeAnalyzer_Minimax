@@ -162,3 +162,21 @@ Views `v_open_positions`, `v_closed_positions`, `v_portfolio_summary` provide ca
 ## 2.20 Filter prefill (migration 065)
 
 **`filter_template_runs`** — `template_id PK`, `ran_at`, `universe`, `result_count`, `results_json` (`FilterTemplateResult[]`), `shape_version`. Latest batch-precomputed run per filter template (no history — each `filters-prefill` run overwrites). Rows whose `shape_version` ≠ the build's `FILTER_RESULTS_SHAPE_VERSION` are ignored on read, so a stale result shape is never rendered (§5.B.1).
+
+### `brief_candidates` (migration 076, v1.1.175)
+
+Every Stage-4 candidate per strategy per date — **including the ones that did not survive the cut
+to `PICKS_PER_STRATEGY`**. `daily_briefs` stores only the survivors, so the 15→5 cut was
+unmeasurable; when a ranking's quality is in question the losers are the data required.
+
+| column | note |
+|---|---|
+| `as_of_date`, `generated_at`, `strategy`, `ticker` | unique on (date, strategy, ticker); a same-day re-run REPLACES, matching the twice-daily batch |
+| `composite_score`, `rank` | rank within strategy, 1 = best |
+| `disposition` | CHECK-constrained: `picked` / `capped_out` / `failed_liquidity` / `not_validated` |
+| `structure_slug`, `strike`, `premium`, `expiration`, `dte`, `liquidity_score` | the structure `pickRelevantStructure` would trade, so a candidate is comparable to a stored pick |
+| `spot` | underlying at pick time — required by the split scale guard, and unrecoverable after a repair |
+
+**Outcomes are not stored**: they are settled later against `historical_prices`, so a subsequent
+split repair corrects them rather than leaving a frozen wrong value. Retention is **730 days**
+(vs the briefs' 90) — the rows cost ~3.4 MB per trading year against `daily_briefs`' ~229 MB.
