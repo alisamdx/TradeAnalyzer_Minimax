@@ -157,16 +157,51 @@ export function extractVolatilityContext(
  * about TREND — that is T7, still open, and `docs/wheel-parameters.md` records why a prompt tweak
  * there is not justified on current evidence.
  *
- * WHY IT IS NOT VALIDATED ON OUTCOMES, stated plainly rather than glossed: the critic verdict is a
- * hard gate, so this changes which trades are taken, which is FR-SEY-5 territory. But the only
- * available test re-runs the LLM over stored picks and diffs verdicts, and the number of flips is
- * far too small to attach outcomes to. So what CAN be measured is the blast radius, and
- * `scripts/critic-context-ab.mjs` measures exactly that. The flag exists so the whole change is one
- * environment variable away from being reverted on a live run.
+ * MEASURED, AND BOTH HALVES DEFAULT **OFF**. The verdict is a hard gate, so this changes which
+ * trades are taken (FR-SEY-5). An outcome replay is not constructible — "verdict flipped" ∩ "expiry
+ * settled" over one regime is a handful of trades — so `tests/critic-context-ab.test.ts` measures
+ * the blast radius instead. On 20 wheel picks, 2026-09-04:
+ *
+ *     before   pass 8   caution 10   flag 2
+ *     after    pass 0   caution 19   flag 1        <- 40% stricter, and NO PASSES SURVIVE
+ *
+ * **The dice rejects anything that is not `pass`, so this would have taken it to zero picks.**
+ *
+ * THE CAUSE IS THE OWNERSHIP HALF, and every one of the 8 flipped rationales says so in its own
+ * words — each cites the cost basis against SMA200, none cites a weak signal. The model treats ANY
+ * basis above the 200-day as a caution, including **AAPL at 4.5% above**. That is precisely the
+ * error v1.1.188 removed from the operator-facing sentence: a basis above SMA200 is the NORMAL
+ * case (70% of 82 critic-passed wheel picks) and the support-only cell — above SMA200 but with the
+ * strike under the 20-day low — was the BEST performing of the four (+3.46% mean / +5.49% median).
+ * Handing a reviewer a 70%-prevalence property with no base rate turns it into a blanket veto.
+ *
+ * **The general lesson, which outlives this flag: giving a model a measured fact is not the same as
+ * giving it the fact's base rate, and without the base rate a common property reads as an alarm.**
+ * The same shape as the conviction band (a threshold that could never fire) inverted — a threshold
+ * that always fires.
+ *
+ * The signals half is UNMEASURED ALONE. It is defaulted off too, not because it was shown harmful
+ * but because the only measurement available bundled it with a half that was, and FR-SEY-5 does not
+ * accept "probably fine". Isolate it with CRITIC_CONTEXT_SIGNALS=1 and re-run the A/B.
  */
-const CRITIC_CONTEXT_V2 = true;
-function criticContextV2(): boolean {
-  return process.env['CRITIC_CONTEXT_V2'] === '0' ? false : CRITIC_CONTEXT_V2;
+/**
+ * MEASURED AND DEFAULTED OFF — see the A/B result below. Split into two flags because the two
+ * halves turned out to behave completely differently and must be testable apart.
+ */
+const CRITIC_CONTEXT_SIGNALS = false;
+const CRITIC_CONTEXT_OWNERSHIP = false;
+
+/** Show the reviewer the pick's WEAKEST reading, not only its best contributors. */
+function criticSignalsV2(): boolean {
+  return process.env['CRITIC_CONTEXT_SIGNALS'] === '1' ? true
+       : process.env['CRITIC_CONTEXT_SIGNALS'] === '0' ? false
+       : CRITIC_CONTEXT_SIGNALS;
+}
+/** Put the own-at-strike read in the reviewer's context (wheel only). */
+function criticOwnershipV2(): boolean {
+  return process.env['CRITIC_CONTEXT_OWNERSHIP'] === '1' ? true
+       : process.env['CRITIC_CONTEXT_OWNERSHIP'] === '0' ? false
+       : CRITIC_CONTEXT_OWNERSHIP;
 }
 
 export interface CriticSignalEntry {
@@ -203,12 +238,12 @@ export function selectCriticSignals(signals: BriefPick['signals']): CriticSignal
     .slice(0, 4);
   const weakest = [...scored].sort((a, b) => a[1].normalized - b[1].normalized)[0];
   const shown = new Set(byContribution.map(([k]) => k));
-  const selected = criticContextV2() && weakest && !shown.has(weakest[0])
+  const selected = criticSignalsV2() && weakest && !shown.has(weakest[0])
     ? [...byContribution, weakest]
     : byContribution;
   return selected.map(([key, v]) => ({
     key, raw: v.raw, normalized: v.normalized, weight: v.weight,
-    ...(criticContextV2() && weakest && key === weakest[0] ? { isWeakestReading: true as const } : {}),
+    ...(criticSignalsV2() && weakest && key === weakest[0] ? { isWeakestReading: true as const } : {}),
   }));
 }
 
@@ -308,7 +343,7 @@ export class CriticService {
       // measurement behind it (T8) is a short-put study and says nothing about the other
       // strategies. Never throws — a missing price window degrades to `null`, which the prompt
       // instructs the model to treat as unknown rather than as clear.
-      const ownership = criticContextV2() && strategy === 'wheel'
+      const ownership = criticOwnershipV2() && strategy === 'wheel'
         ? this.readOwnership(pick, strategy)
         : null;
 

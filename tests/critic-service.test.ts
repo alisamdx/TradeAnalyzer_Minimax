@@ -3,7 +3,7 @@
 // mirror, counter-trend ITM strike rule, buy stock-first presentation,
 // A+ grade ranking, and the earnings-penalty strategy list.
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import Database from 'better-sqlite3';
 import {
   CriticService,
@@ -716,6 +716,13 @@ const DINO_SIGNALS = {
 } as unknown as BriefPick['signals'];
 
 describe('selectCriticSignals — the reviewer must see the worst reading', () => {
+  // The behaviour is behind CRITIC_CONTEXT_SIGNALS, which defaults OFF: the only A/B available
+  // bundled it with the ownership half, which measured 40% stricter and left ZERO passes, and
+  // FR-SEY-5 does not accept "the other half was probably fine". These tests exercise the feature
+  // explicitly; the default-off path is pinned separately below.
+  beforeEach(() => { process.env['CRITIC_CONTEXT_SIGNALS'] = '1'; });
+  afterEach(() => { delete process.env['CRITIC_CONTEXT_SIGNALS']; });
+
   it('shows the top contributors, as before', () => {
     const keys = selectCriticSignals(DINO_SIGNALS).map(s => s.key);
     // contribution = weight x normalized: 1809, 1462, 855, 800
@@ -763,6 +770,16 @@ describe('selectCriticSignals — the reviewer must see the worst reading', () =
 
   it('is empty for a pick with no scored signals rather than throwing', () => {
     expect(selectCriticSignals({} as BriefPick['signals'])).toEqual([]);
+  });
+
+  // Default OFF until the signals half is measured on its own. A regression that silently turned
+  // it back on would change a hard gate without evidence.
+  it('is inert with the flag off — 4 entries, nothing marked', () => {
+    process.env['CRITIC_CONTEXT_SIGNALS'] = '0';
+    const sel = selectCriticSignals(DINO_SIGNALS);
+    expect(sel).toHaveLength(4);
+    expect(sel.some(x => x.isWeakestReading)).toBe(false);
+    expect(sel.map(x => x.key)).not.toContain('technicalNeutral');
   });
 });
 

@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.1.190] - 2026-09-04
+
+### fix - the critic context change is DEFAULTED OFF: measured, it would have emptied the dice
+
+- **v1.1.189 shipped enabled. The A/B says that was wrong, so both halves now default off.** `tests/critic-context-ab.test.ts`, 20 wheel picks, both arms the same code path on the same picks and the same rule flags:
+
+  | | pass | caution | flag |
+  |---|---|---|---|
+  | before | **8** | 10 | 2 |
+  | after | **0** | 19 | 1 |
+
+  **40% stricter, and not one `pass` survives.** The dice rejects anything that is not `pass`, so this would have produced **zero picks**.
+- **The cause is the ownership half, and the flipped rationales say so themselves:** all 8 cite the cost basis against SMA200, none cites a weak signal, and the model cautioned on **AAPL at 4.5% above** its 200-day average.
+- **The fact was true; its BASE RATE was missing.** A basis above SMA200 is the *normal* case — 70% of 82 critic-passed wheel picks — and the above-SMA200-but-below-the-20-day-low cell is the **best performing of the four** (+3.46% mean / +5.49% median). v1.1.188 had just removed precisely this error from the operator-facing sentence; handing the raw fact to a model reintroduced it. **This is the conviction band inverted** — that threshold could never fire, this one always fires, and neither is visible without measuring the distribution of the tested quantity.
+- **Flags split** into `CRITIC_CONTEXT_SIGNALS` and `CRITIC_CONTEXT_OWNERSHIP` (both default false), because the halves behave differently and must be testable apart. The **signals half is unmeasured alone** — off not because it was shown harmful, but because the only A/B available bundled it with a half that was, and FR-SEY-5 does not accept "probably fine".
+- **The A/B harness moved from `scripts/*.mjs` to `tests/`.** A plain node script cannot resolve the `@shared/*` path aliases the service imports, so it could not exercise the real prompt at all — it would have tested a reimplementation of the thing under test. It is skipped unless `RUN_CRITIC_AB=1` and reads the key from `settings.anthropicApiKey`.
+- **Lesson recorded in CLAUDE.md:** giving a model a measured fact is not the same as giving it the fact's base rate; without the base rate, a common property reads as an alarm. Always A/B a context change to an LLM gate before shipping it.
+
 ## [1.1.189] - 2026-09-04
 
 ### fix - the critic's context was filtered-favourable by construction
