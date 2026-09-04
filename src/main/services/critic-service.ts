@@ -180,9 +180,31 @@ export function extractVolatilityContext(
  * The same shape as the conviction band (a threshold that could never fire) inverted — a threshold
  * that always fires.
  *
- * The signals half is UNMEASURED ALONE. It is defaulted off too, not because it was shown harmful
- * but because the only measurement available bundled it with a half that was, and FR-SEY-5 does not
- * accept "probably fine". Isolate it with CRITIC_CONTEXT_SIGNALS=1 and re-run the A/B.
+ * THE SIGNALS HALF WAS THEN ISOLATED AND FAILS THE SAME WAY (20 wheel picks, AB_ARM=signals):
+ *
+ *     before   pass 6   caution 13   flag 1
+ *     after    pass 3   caution 16   flag 1        <- 20% stricter, HALF the passes gone
+ *
+ * All four stricter flips cite `premiumYield` as the weakest reading (normalized 20.7-34.3). And
+ * the reason is the same missing base rate, made worse by a normalization artefact:
+ *
+ *     how often each signal IS the weakest reading, 250 wheel picks
+ *       recentVolatility  60%   (median normalized 9.6/100)
+ *       premiumYield      18%   (median 52.9)
+ *       optionLiquidity   11%   (median 50.0)
+ *
+ * **`recentVolatility` is the weakest reading on 60% of picks because its normalization pins it
+ * there** — `lower_better` against a normMax of 60, so ordinary realized vol of 30-50% maps to
+ * single digits. "The weakest reading" is therefore a property of the NORMALIZATION CURVES, not of
+ * the pick, and marking it invites the model to report a near-constant as if it were a finding.
+ * (T6 also measured `recentVolatility` mildly INVERTED, so it is not even pointing the right way.)
+ *
+ * BOTH HALVES THEREFORE DEFAULT OFF, each on its own measurement rather than by association.
+ *
+ * The underlying defect is real and unfixed: the reviewer IS shown a filtered-favourable view.
+ * Re-opening either half means supplying the BASE RATE with the fact — the prevalence and the
+ * outcome table — so the model can tell an unusual reading from a universal one. Then re-run
+ * `tests/critic-context-ab.test.ts` per half (`AB_ARM=signals` / `ownership`).
  */
 /**
  * MEASURED AND DEFAULTED OFF — see the A/B result below. Split into two flags because the two

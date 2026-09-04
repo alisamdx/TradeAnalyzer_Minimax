@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.1.191] - 2026-09-04
+
+### docs - the signals half of the critic change fails too, and for the same reason
+
+- **Isolated and measured** (`AB_ARM=signals`, 20 wheel picks): **pass 6 -> 3**, 20% stricter, 5% looser. Half the dice-eligible picks gone. Both halves of v1.1.189 now stay off on their own evidence rather than by association.
+- **Every stricter flip cites `premiumYield` as "the weakest reading"** (normalized 20.7-34.3) - the same missing base rate that sank the ownership half, in a different costume.
+- **Plus a normalization artefact that makes the whole idea unsound as built.** Across 250 wheel picks, `recentVolatility` is the weakest reading on **60%** of them, because its `lower_better` normalization against a normMax of 60 maps ordinary realized vol of 30-50% into single digits - **median normalized 9.6/100**. So "the pick's weakest reading" is a property of the **normalization curves**, not of the pick, and marking it invites the model to report a near-constant as a finding. T6 separately measured that signal mildly inverted, so it does not even point the right way.
+- **New finding F10 in `docs/wheel-parameters.md`, about the composite rather than the critic:** at weight 10-11 with a median normalized of 9.6, `recentVolatility` removes ~9-10 composite points from essentially every wheel pick, nearly uniformly. That is a constant, not a signal. **Deliberately not acted on** - re-scaling it changes every wheel composite and which picks the brief keeps, which is FR-SEY-5. Recorded because it silently defeated a different change and will defeat the next one that assumes "weakest signal" means something about the pick.
+- **Transferable check, now in CLAUDE.md:** before using "the worst signal" as if it were information, count how often each signal IS the worst. If one dominates, you are reading the normalization curves, not the picks.
+- **Harness fix:** the A/B still drove the retired `CRITIC_CONTEXT_V2` variable after v1.1.190 split it. Left alone it would have set nothing, compared two identical arms, reported zero flips and looked like a clean bill of health - a broken thermometer reporting no fever. It now takes `AB_ARM=signals|ownership|both`, prints the flags each arm sets, and asserts the enabled set is non-empty before spending a single call.
+
 ## [1.1.190] - 2026-09-04
 
 ### fix - the critic context change is DEFAULTED OFF: measured, it would have emptied the dice

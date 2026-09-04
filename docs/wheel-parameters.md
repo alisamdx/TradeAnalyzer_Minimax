@@ -157,6 +157,25 @@ Expiry selection has some evidence: a weekly→monthly A/B ran 2026-08-04 and **
 
 *Still one regime (45 dates, settled through 2026-09-04), and measured on the scanned universe rather than the brief's picks. Promoting either measure to a gate needs a brief-replay delta under FR-SEY-5. `scripts/fr-wheel-entry-quality-study.mjs`.*
 
+**F10 — `recentVolatility` is a near-constant deduction, not a discriminating signal. Found 2026-09-04 as a side-effect of the critic A/B; NOT acted on.** Across 250 stored wheel picks its **median normalized value is 9.6/100** (min 0, max 75.3), and it is the pick's **weakest reading on 60% of picks** — the next-most-common is `premiumYield` at 18%. The cause is its normalization: `lower_better` against a normMax of 60, so ordinary realized vol of 30–50% maps into single digits.
+
+| signal | median normalized | is the weakest reading on |
+|---|---|---|
+| `recentVolatility` | **9.6** | **60%** of picks |
+| `optionLiquidity` | 50.0 | 11% |
+| `premiumYield` | 52.9 | 18% |
+| `ivRank` | 73.7 | 3% |
+| `fundamentalScore` | 85.0 | 1% |
+| `leverageQuality` | 91.2 | 4% |
+| `technicalNeutral` | 100.0 | 1% |
+| `notDowntrend` | 100.0 | 2% |
+
+Under FR-SE-03 arithmetic a signal contributes `normalized × weight` to the numerator and its full weight to the denominator, so at weight 10–11 and a median of 9.6 this term **removes roughly 9–10 composite points from essentially every wheel pick, nearly uniformly**. That is a constant, not a signal — it shifts the whole distribution down without separating anything within it. T6 separately measured it **mildly inverted** (high-vol median +1.92% vs low-vol +0.72%, opposite to its `lower_better` direction).
+
+**Deliberately not acted on.** Re-scaling normMax or flipping the direction changes every wheel composite and therefore which picks the brief keeps — FR-SEY-5, needing a replay. Recorded because it silently defeated a different change (the critic's "weakest reading" slot, v1.1.189/191, where a near-constant masqueraded as a per-pick finding) and will defeat the next one that assumes "weakest signal" means something about the pick.
+
+**The transferable check: before using "the worst signal" as if it were information, count how often each signal IS the worst.** If one dominates, you are reading the normalization curves, not the picks.
+
 ---
 
 ## Test queue

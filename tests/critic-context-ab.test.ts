@@ -3,8 +3,9 @@
 // SKIPPED unless RUN_CRITIC_AB=1, because it makes REAL Anthropic calls (two per pick) against the
 // live database. `npm test` skips it.
 //
-//   RUN_CRITIC_AB=1 npx vitest run tests/critic-context-ab.test.ts
-//   RUN_CRITIC_AB=1 AB_LIMIT=20 npx vitest run tests/critic-context-ab.test.ts
+//   RUN_CRITIC_AB=1 AB_ARM=signals   npx vitest run tests/critic-context-ab.test.ts
+//   RUN_CRITIC_AB=1 AB_ARM=ownership npx vitest run tests/critic-context-ab.test.ts
+//   RUN_CRITIC_AB=1 AB_ARM=both AB_LIMIT=20 npx vitest run tests/critic-context-ab.test.ts
 //
 // WHY IT LIVES IN tests/ RATHER THAN scripts/. It has to import `CriticService` to exercise the
 // REAL prompt and context assembly — reimplementing them in a standalone script would test a copy,
@@ -26,7 +27,14 @@
 // verdicts is a different proposition from one that flips 40%, whatever the outcome data says.
 //
 // Both arms are the SAME code path on the SAME picks and the SAME rule flags, differing only in
-// CRITIC_CONTEXT_V2 — so nothing but the context can explain a difference.
+// the flags named by AB_ARM — so nothing but the context can explain a difference.
+//
+// THE ARMS ARE ASSERTED, NOT ASSUMED. When the single CRITIC_CONTEXT_V2 flag was split in
+// v1.1.190 this harness kept setting the old, now-dead variable — which would have set NOTHING,
+// compared two identical arms, reported zero flips and looked like a clean bill of health. A
+// harness whose control variable has gone stale reports "no effect" for the same reason a broken
+// thermometer reports "no fever", so the flag names are printed and the enabled set is asserted
+// non-empty before any call is made.
 
 import { describe, it, expect } from 'vitest';
 import Database from 'better-sqlite3';
@@ -36,6 +44,14 @@ import { CriticService } from '../src/main/services/critic-service.js';
 import type { BriefPick, ScoringConfig, ScoringSignal } from '../src/shared/types.js';
 
 const RUN = process.env['RUN_CRITIC_AB'] === '1';
+/** Which half of v1.1.189 the "after" arm turns on. */
+const ARM = (process.env['AB_ARM'] ?? 'both') as 'signals' | 'ownership' | 'both';
+const ARM_FLAGS: Record<string, string[]> = {
+  signals:   ['CRITIC_CONTEXT_SIGNALS'],
+  ownership: ['CRITIC_CONTEXT_OWNERSHIP'],
+  both:      ['CRITIC_CONTEXT_SIGNALS', 'CRITIC_CONTEXT_OWNERSHIP'],
+};
+const ALL_FLAGS = ['CRITIC_CONTEXT_SIGNALS', 'CRITIC_CONTEXT_OWNERSHIP'];
 const LIMIT = Number(process.env['AB_LIMIT'] ?? 20);
 const STRATEGY = process.env['AB_STRATEGY'] ?? 'wheel';
 const DB_PATH = process.env['AB_DB']
@@ -72,9 +88,20 @@ describe('critic context A/B (v1.1.189)', () => {
       if (sample.length >= LIMIT) break;
     }
 
+    const enabled = ARM_FLAGS[ARM]!;
+    // Fail loudly rather than silently comparing two identical arms — see the header note.
+    expect(enabled, `AB_ARM must be one of ${Object.keys(ARM_FLAGS).join(' | ')}`).toBeDefined();
+    expect(enabled!.length).toBeGreaterThan(0);
+
     const market = svc.getMarketContext();
     console.log(`\ncritic context A/B — ${STRATEGY} — ${sample.length} picks, ${sample.length * 2} API calls`);
-    console.log(`arms differ ONLY in CRITIC_CONTEXT_V2; rule flags are computed once and shared\n`);
+    console.log(`arm "${ARM}": the AFTER arm sets ${enabled.join(', ')}=1; everything else off in both arms`);
+    console.log(`rule flags are computed once per pick and shared by both arms
+`);
+
+    const setArm = (on: boolean) => {
+      for (const f of ALL_FLAGS) process.env[f] = on && enabled.includes(f) ? '1' : '0';
+    };
 
     /** Reconstruct the strategy config from the pick's own signals, so `checkCriticalSignalMissing`
      *  sees real weights. Shared by both arms, so it cannot bias the delta either way. */
@@ -100,9 +127,9 @@ describe('critic context A/B (v1.1.189)', () => {
         // v1.1.189, so recomputing it per arm would only add noise.
         const flags = svc.runRuleChecks(p, STRATEGY, configFor(p), new Map(), market);
 
-        process.env['CRITIC_CONTEXT_V2'] = '0';
+        setArm(false);
         const before = await svc.synthesizeVerdict(p, STRATEGY, flags, apiKey, market);
-        process.env['CRITIC_CONTEXT_V2'] = '1';
+        setArm(true);
         const after = await svc.synthesizeVerdict(p, STRATEGY, flags, apiKey, market);
 
         rows.push({
@@ -116,7 +143,7 @@ describe('critic context A/B (v1.1.189)', () => {
         process.stdout.write('x');
       }
     }
-    delete process.env['CRITIC_CONTEXT_V2'];
+    for (const f of ALL_FLAGS) delete process.env[f];
     console.log('\n');
 
     const errored = rows.filter(r => r.error);
@@ -157,7 +184,7 @@ describe('critic context A/B (v1.1.189)', () => {
     console.log(`  before attributing any single flip to the context change.`);
     console.log(`• STRICTER is the operational number: the critic already passes only ~17% of picks`);
     console.log(`  and is the dice's largest rejector, so a big stricter count shrinks the hit rate.`);
-    console.log(`• Roll back with CRITIC_CONTEXT_V2=0 — no rebuild needed.\n`);
+    console.log(`• Both halves default OFF. Enable one with ${enabled.join('=1 ')}=1 — no rebuild.`);
 
     db.close();
     expect(rows.length).toBe(sample.length);
