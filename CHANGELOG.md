@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.187] - 2026-09-04
+
+### docs — T8 follow-up: the own-at-strike x support annotation, replayed on the dice's own picks
+
+- **No behaviour change.** `scripts/dice-entry-annotation-replay.mjs` replays the 2x2 against stored wheel briefs with the dice's trade-quality gates mirrored from `roll-the-dice.ts`, because "it separates on the scanned universe" is not the same claim as "it separates on the picks the dice actually produces".
+- **It fires.** Cell D (basis above SMA200 **and** strike above the 20-day low) is **50% of the 34 dice picks and 52% of the 250 brief picks** — the opposite of the conviction band, which fired on 0 of 39 and was therefore indistinguishable from a rule nothing violated.
+- **The dice's gates do not already handle it.** D holds the same ~52% share before and after critic-pass + liquidity + earnings + credit, so those gates select on entirely different axes.
+- **It is right, on 186 settled brief picks:** A both +2.17% (8% assigned), B own-at-strike only +2.97% (4%), C support only **+3.46% / +5.49% median** (26%), D NEITHER **−2.10%** (**44%**). Same shape as the universe study's −3.06% / 48.4% for D.
+- **The new information is the SUPPORT axis, not own-at-strike — which the email already states.** Among the 166 brief picks whose basis sits above SMA200, the swing low splits them **+3.46% vs −2.10%**. C is the *best* of the four cells while today's single sentence lumps it in with the worst.
+- **Live:** 10 of the last 12 dice picks are cell D — including DINO on 2026-09-03 (basis 95.85 vs SMA200 65.38, 20-day low 80.50), the pick that prompted the enquiry, and seven AAPL picks. All still open, so the recent cluster is unscored.
+- **Caution recorded before anything ships:** a sentence that fires half the time becomes wallpaper. D's *median* is +2.15% and a settled AAPL D pick returned +1.48% — the cell is worse on average and on assignment, not a prediction of loss. It should read as a two-state read like own-at-strike, never as an alarm.
+
 ## [1.1.186] - 2026-09-04
 
 ### docs — T8: can the Validate view's entry machinery judge a CSP strike?

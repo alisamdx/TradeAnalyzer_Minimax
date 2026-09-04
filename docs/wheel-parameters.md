@@ -393,7 +393,7 @@ whether `pass` on a bullish name underperforms `pass` on a sideways one.
 **Do not tweak the prompt on the current evidence.** Same discipline that stopped `notDowntrend`
 being acted on at 8 of 91 weight.
 
-### ~~T8 — can the Validate view's entry machinery judge a CSP strike?~~ — CLOSED 2026-09-04
+### ~~T8 — can the Validate view's entry machinery judge a CSP strike?~~ — CLOSED 2026-09-04, follow-up replayed same day
 
 Asked by the operator: *"I can't wheel something I'm not comfortable owning, and to own it the
 strike needs to be a reasonable price."* The Validate view already computes an entry zone, a swing
@@ -406,11 +406,41 @@ this ran — RSI *is* `technicalNeutral` (flat, T6), the SMA50/200 stack *is* `n
 cushion and the zone itself were open. Of those, the swing low is real and additive, the ATR
 cushion is a risk gauge rather than a return signal, and the zone is the swing low renamed.
 
-**Follow-up worth running, not yet run:** the swing low and own-at-strike as a 2×2 *annotation* on
-the dice (not a gate), replayed against stored briefs for an FR-SEY-5 delta. The worst cell —
-basis above SMA200 **and** strike above the swing low — is 562 of 1,585 episodes at −3.06% mean
-and 48.4% assignment, which is a large enough share to matter and a specific enough condition to
-state in one sentence to the operator.
+**Follow-up RUN 2026-09-04** (`scripts/dice-entry-annotation-replay.mjs`): the 2×2 replayed on the
+dice's own population, gates mirrored from `roll-the-dice.ts`. **It fires, it is right, and the
+addition is not the axis we already have.**
+
+| cell | dice picks | brief picks | settled | mean | median | assigned |
+|---|---|---|---|---|---|---|
+| A both | 6 (18%) | 45 (18%) | 38 | +2.17% | 2.51% | **8%** |
+| B own-at-strike only | 5 (15%) | 39 (16%) | 24 | +2.97% | 2.71% | **4%** |
+| C support only | 6 (18%) | 35 (14%) | 31 | **+3.46%** | **5.49%** | 26% |
+| D NEITHER | **17 (50%)** | **131 (52%)** | 93 | **−2.10%** | 2.15% | **44%** |
+
+*(dice/brief columns are counts; returns and assignment are from the 186 settled brief picks —
+the 34 dice picks give only 22 settled, too few to carry a result on their own, though they point
+the same way at −2.63% / 29% for D against +2.0…+2.5% / 0…33% for A-C.)*
+
+**It is not vacuous** — D fires on **50% of dice picks and 52% of brief picks**, the opposite of
+the conviction band's 0 of 39. **The dice's gates do not already handle it**: D is the same ~52%
+share before and after them, so critic-pass + liquidity + earnings + credit select on other axes
+entirely.
+
+**The value is in the SUPPORT axis, not in own-at-strike, which the email already states.** Among
+the 166 brief picks whose basis sits ABOVE SMA200 — the group the existing sentence warns about —
+the swing low splits them **+3.46% (C, 31 settled) against −2.10% (D, 93 settled)**. So C is the
+*best* cell of the four while the current annotation lumps it in with the worst. The addition is a
+second sentence about support, not a restatement of the first.
+
+**Live check:** 10 of the last 12 dice picks are cell D, including DINO on 2026-09-03 (basis 95.85
+vs SMA200 65.38, 20-day low 80.50) — the pick that prompted the whole enquiry — and seven separate
+AAPL picks (basis ~300–310 vs SMA200 ~283, strike above a 300.57 20-day low). Those are all still
+open, so the recent D cluster is unscored.
+
+**Caution before it ships as a warning:** a sentence that fires half the time becomes wallpaper.
+Own-at-strike is phrased as a two-state read rather than an alarm for exactly this reason, and the
+support line should be too — D's *median* is +2.15% and one of the settled AAPL D picks returned
++1.48%. The cell is worse on average and on assignment, not a prediction of loss.
 
 **Also unresolved and deliberately out of scope here:** the Validate view's *fundamental* half
 (P/E, ROE, D/E, the AVOID verdict, analyst rating) disagrees with the wheel critic on live picks —
