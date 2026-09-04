@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.170] — 2026-09-03
+
+### docs — `optionLiquidity` re-tested on 2.7x the sample; the disable is now data-backed, not judgement
+
+- **No behaviour change.** The signal was already disabled on wheel and income and stays disabled — what changes is the reasoning under it.
+- **Why re-run:** the operator asked to turn it back on, not remembering why it was off. v1.1.135 was explicit that the disable had been applied **"on judgment, not on data"** — its weight sweep came back *non-monotone* (the middle worse than both endpoints) on ~80 trades per arm from a single three-week window, which is the correct reading of noise, and it left the question unsettled. Two more months of trades have since matured.
+- **Sample grew 2.7×**: 6,777 → **18,219 settled CSPs**, 937 → **1,039 tickers**, 16 → **31 entry dates** (2026-06-15 → 2026-07-29). `scripts/fr-income-liquidity-realized-ab.mjs` needed no change — it selects everything settled up to `MAX(historical_prices.date)`, so it extends itself.
+- **The sweep is now MONOTONE** — weight 13 → −0.47%, 9 → −0.27%, 6 → −0.20%, 3 → −0.08%, **0 (disabled) → +0.54%** mean return on capital. Every reduction improves the outcome and disabling flips the arm from losing to profitable, a 156-point swing across 155 trades. **This is the exact test v1.1.135 named** — "a real effect would be monotone" — and the 16-date run failed it.
+- **Mechanism corrected.** v1.1.133 attributed the adverse relation to liquidity tracking realized volatility; on the wider sample that holds only for the *graded* scheme (top quartile 50% realized vol vs 39%). The **legacy** scheme — the shipped one — looks mildly *positive* in isolation (bottom quartile +0.82% → top +1.52%), and the resolution is the ivRank column: **liquidity is a noisy proxy for IV rank** (53 → 63 across those bands), which the composite already weights at **30**. Spending 13 more points on a weak echo of a signal already weighted at more than twice that does not add information, it dilutes the signals that carry the edge. v1.1.133's headline is untouched and better supported: liquidity is an execution-cost property, not an outcome-prediction property.
+- **Wheel still cannot be tested directly, but is about to become testable.** v1.1.132 (2026-08-06) began persisting wheel's liquidity inputs: of 31,129 wheel CSP rows, **10,792 now carry bid/ask/open_interest and 0 have settled**, because they were entered from 2026-08-06 and expire in September. Income remains the proxy. **Re-run around 2026-10-01** for the first wheel-native result.
+- **Correction to `docs/wheel-parameters.md`** (published earlier the same day): it claimed the reason for the 2026-08-07 disable "is not recorded anywhere and needs the operator's memory". That was wrong — it is documented across v1.1.131/132/133/135. Finding **F3** is rewritten (gate-not-ranking is a deliberate, studied design, not an inconsistency) and **T3 is closed**.
+- Still one regime: 31 entry dates in a 6.5-week window, ~155 trades per arm in section B. The monotone sweep across five arms is much harder to get by chance than a single pairwise comparison, which is why it is reported as settling the question — but it is not a multi-regime result.
+
 ## [1.1.169] — 2026-09-03
 
 ### feat — own-at-strike is answered from the stock's own history, not from a curated list

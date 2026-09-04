@@ -61,7 +61,7 @@ Live config is **`custom_v1_no_option_liquidity`**, saved **2026-08-07** — it 
 | `technicalNeutral` | **11** | target range | RSI **40–60** | **convention** |
 | `recentVolatility` | **10** | lower better | normMax 60 | **invented** |
 | `notDowntrend` | **8** | higher better | normMax 100 | reasoned |
-| `optionLiquidity` | ~~9~~ | — | — | **DISABLED 2026-08-07** — see **F3** |
+| `optionLiquidity` | ~~9~~ | — | — | **validated** — DISABLED 2026-08-07, re-confirmed v1.1.170. See **F3** |
 | `leverageQuality` | **4** | lower better | normMax 5 (ND/EBITDA) | **convention** |
 
 Enabled weight sums to **91**. I verified this does *not* silently deflate scores: `totalWeight` accumulates only enabled signals, so the composite renormalises correctly.
@@ -117,7 +117,9 @@ Partly tested: a weekly→monthly expiry A/B ran 2026-08-04 and **failed** FR-SE
 
 **F2 — `PICKS_PER_STRATEGY = 5` is why over-budget days rarely have an alternative.** The dice never sees more than 5 wheel picks. This directly explains the v1.1.168 measurement that only **3 of 12** over-budget pick-days had a within-budget alternative — there simply weren't enough candidates. Raising this is the lever for that problem, not lowering any bar.
 
-**F3 — Liquidity is applied three different ways, at two different bars.** Graded at Layer 2 (**now disabled**), gated at **5/15** at Layer 1, gated again at **8/15** at Layer 4. Since the signal was switched off on 2026-08-07, liquidity is purely pass/fail — an 8/15 chain and a 15/15 chain rank identically. *The reason for that change is not recorded anywhere and needs the operator's memory.*
+**F3 — Liquidity is deliberately a gate and not a ranking signal. CLOSED.** Graded at Layer 2 (**disabled**), gated at **5/15** at Layer 1, gated again at **8/15** at Layer 4. An 8/15 chain and a 15/15 chain rank identically, and that is the intended design, not an oversight.
+
+*An earlier version of this document claimed the reason for the 2026-08-07 disable was unrecorded. That was wrong* — it is documented across v1.1.131/132/133/135, and **re-tested on 2.7× the sample in v1.1.170**: 18,219 settled CSPs over 31 dates, where the weight sweep is now **monotone** (13 → −0.47%, 9 → −0.27%, 6 → −0.20%, 3 → −0.08%, **0 → +0.54%** mean return on capital). Disabling is the best arm and every reduction improves it. The mechanism: liquidity is a **noisy proxy for IV rank** (top legacy quartile ivRank 63 vs 53 at the bottom), which the composite already weights at 30 — so extra weight dilutes the signals that actually carry the edge. Liquidity is an execution-cost property, not an outcome-prediction property. **No action.**
 
 **F4 — The two liquidity gates fail in opposite directions.** Layer 1 passes a pick whose lab result is missing ("can't gate what we didn't measure"); Layer 4 rejects one. Defensible individually, but a pick can clear the brief on absent data and then die at the dice — which reads as a dice rejection when it is really a data gap.
 
@@ -147,11 +149,28 @@ All four are testable on the stored-brief replay under FR-SEY-5. Ordered by expe
 - **Passes if**: a clean threshold exists with enough picks above it to keep the hit rate usable.
 - **Risk to watch**: wheel composites cluster tightly (58.9–76.0, median 65.9), so a gate could cut most days for little gain.
 
-### T3 — `optionLiquidity` back on in scoring
+### ~~T3 — `optionLiquidity` back on in scoring~~ — CLOSED 2026-09-03, keep it off
 
-- **Blocked on one question**: why was it disabled on 2026-08-07? If that was a deliberate finding, this test is already answered.
-- **Method**: A/B the composite with the signal on vs off, measuring outcomes among picks that *already* clear the hard gate — the question is whether grading adds anything beyond pass/fail.
-- **Risk to watch**: liquidity may be a floor rather than a gradient, in which case a hard gate is the correct design and re-enabling adds noise.
+Run and settled in **v1.1.170**. The replay harness cannot test this signal at all (no historical
+option chains, so `optionLiquidityScore` is null for every ticker on every replay date — see
+`REPLAY_BLIND_SIGNAL_KEYS`); the real harness is
+`scripts/fr-income-liquidity-realized-ab.mjs`, which settles CSPs at intrinsic against
+`options_premium_history`.
+
+On **18,219 settled CSPs over 31 dates** — 2.7× the sample that produced the original judgement —
+the weight sweep is **monotone**, which is the exact test v1.1.135 named for distinguishing signal
+from noise:
+
+| weight | 13 | 9 | 6 | 3 | **0** |
+|---|---|---|---|---|---|
+| mean return on capital | −0.47% | −0.27% | −0.20% | −0.08% | **+0.54%** |
+
+Disabling flips the arm from losing to profitable. **The "risk to watch" was the right call**:
+liquidity is a floor, not a gradient.
+
+**Still open on wheel specifically.** v1.1.132 began persisting wheel's liquidity inputs on
+2026-08-06; 10,792 wheel rows now carry them but **0 have settled**. Re-run around **2026-10-01**
+to test wheel on its own population instead of income as a proxy.
 
 ### T4 — ETF composite deflation
 
