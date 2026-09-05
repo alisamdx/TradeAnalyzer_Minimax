@@ -47,7 +47,13 @@ Started: 2026-09-04.
 
 ### Q2 — Option chain depth  `OPEN`
 **Question.** Per ticker per day: all expirations and strikes, or a bounded window?
-**Recommendation.** Expirations out to 90 DTE, strikes within 25% of spot, full contract detail as E*Trade returns it (bid, ask, last, volume, open interest, IV, Greeks).
+**Recommendation (original).** Expirations out to 90 DTE, strikes within 25% of spot, full contract detail as E*Trade returns it (bid, ask, last, volume, open interest, IV, Greeks).
+**Recommendation (revised 2026-09-04).** Checked `etrade-options.ts`: the provider fetches **one expiration per call with no strike limit**, so E*Trade returns the whole ladder and any strike filter is ours — a strike band saves storage, **not API calls**. Storage is the cheap resource (~2–3× rows, ~25 GB/yr for a 300-ticker subset). Uncaptured chain data is **unrecoverable** on current subscriptions (no historical option quotes source). Therefore:
+1. **Capture every strike** E*Trade returns; no moneyness filter.
+2. **Bound expirations** (the call-cost lever): e.g. all expirations ≤ 90 DTE plus the two nearest monthlies beyond, to keep LEAPS-shaped history cheaply.
+3. **Sticky capture**: any contract ever recommended, held in the book, or flagged for a study stays in the capture set until expiry regardless of DTE/moneyness — closes the "mark disappears on the blow-up day" gap.
+4. **Store the capture rule with every snapshot** so an absent contract reads as "outside that day's window", never "unknown".
+**Look-back impact of a bounded band (why revised):** replaying own picks and settling at expiry are unaffected; marking a position after a >25% adverse move, tail/skew studies, LEAPS/collar history, and not-yet-asked questions are all lost. Same survivorship shape as the brief storing only winners.
 **Answer.** _pending_
 
 ### Q3 — Capture timing  `OPEN`
