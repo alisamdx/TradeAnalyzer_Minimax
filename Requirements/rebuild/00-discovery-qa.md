@@ -128,10 +128,11 @@ Started: 2026-09-04.
 - Both Electron apps carry the better-sqlite3 ABI swap scripts; `core` itself never links a native module directly.
 - Path aliases (`@shared/*`) were the reason plain-node harnesses could not import the real services (CLAUDE.md quirk) — `core` uses **package imports only**, no path aliases.
 
-### Q12 — Stack for the new exe  `OPEN`
+### Q12 — Stack for the new exe  `CLOSED`
 **Question.** Electron + React + SQLite + Vitest again, or is anything on the table?
 **Recommendation.** Same stack; separate SQLite file for the new DB from day one.
-**Answer.** _pending_
+**Answer (2026-09-05).** Agree with the recommendation.
+**User question — can useful data (settings, ETF list, ...) be copied from the old DB to the new one?** Technically trivial (same SQLite engine; `ATTACH DATABASE` or a script). The real question is *what* may cross under D4 — proposed as a category policy in Q19.
 
 ### Q13 — Personal book  `OPEN`
 **Question.** Are real E*Trade positions, fills and cash balances part of stage 1 (so P&L history is captured correctly from the start), or a later stage?
@@ -180,6 +181,16 @@ _(numbered Q15+, appended as they arise)_
 **Recommendation.** Adopt all seven.
 **Answer (2026-09-05).** Agree, adopt all seven.
 
+### Q19 — What may be copied from the old database  `OPEN`  (raised by Q12)
+**Question.** Confirm this category policy for a one-time, explicit **"Import from legacy"** action in the new exe (logged: source table, row count, date; every imported row stamped `origin = 'legacy_import'`; import runs while the old app is closed, or via a write-capable attach — WAL quirk):
+1. **User-authored configuration — COPY.** Non-secret settings, watchlists, conviction stocks + bands, ETF list, universe/constituents list, scoring-strategy configs, screen presets, payoff strategies. This is your intent, not provider data. Each row is **validated against the new data dictionary on import** and rejected rows are listed (the old conviction table held inverted bands for three weeks — the import must catch that, not carry it).
+2. **Secrets — DO NOT COPY.** E*Trade keys/tokens are DPAPI-encrypted and, under Q4, the old app keeps making the calls in stage 1. When the new exe later takes over, credentials are re-entered, not migrated.
+3. **Provider-sourced market data — DO NOT COPY** (bars, quotes, chains, IV, earnings, fundamentals, corporate actions). D4/Q7: refetch from source under the new rules.
+4. **Your book (positions, fills, balances) — DO NOT COPY; RE-SYNC** from E*Trade executed orders into the new schema. The old rows include "estimated from last mark" P&L that real fills proved wrong in both directions; the source of truth is the broker, and it is still available.
+5. **Old app's stored decisions (62+ briefs, picks, dice picks, replays) — COPY INTO `legacy_*` ONLY**, marked `pre_collector = 1` (survivors-only, incomplete). Segregated per Q6, it is the only record of those decisions and costs nothing to keep.
+**Recommendation.** Adopt the five categories.
+**Answer.** _pending_
+
 ---
 
 ## Session log
@@ -201,3 +212,4 @@ _(numbered Q15+, appended as they arise)_
 | 2026-09-05 | Q18 CLOSED (all seven adopted). |
 | 2026-09-05 | Q10 CLOSED (current subscriptions ongoing; one-time historical subscriptions allowed under the Q17 pattern). |
 | 2026-09-05 | Q11 CLOSED (same repo; old app stays at root; packages/core + packages/next). |
+| 2026-09-05 | Q12 CLOSED (same stack, separate DB file); Q19 raised (legacy copy policy by category). |
