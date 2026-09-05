@@ -160,7 +160,7 @@ _(numbered Q15+, appended as they arise)_
 **Answer (2026-09-05).** Agree; the user will subscribe to one source for a one-time load.
 **Spec requirements that follow.** (1) Source choice deferred to the spec (IVolatility vs MarketData.app — pick on documented method, depth and per-ticker coverage of the Q15 chain set; one source only). (2) The pull is a **one-shot job with archived raw responses**, stored in its own `ext_iv_history_*` series carrying source, method description and as-of date. (3) A **recorded stitch date**; rank/percentile computations read external rows only for dates before it and own-computed rows after, and the UI labels any rank that used external rows. (4) The subscription can lapse after the pull — the archived raw makes the load reproducible without it. (5) Overlap check: run the own-computed method against the external series over any overlapping days and store the disagreement statistic as part of the quality report before the bootstrap is accepted.
 
-### Q18 — Exception alerting and resolution workflow  `OPEN`  (raised by Q9)
+### Q18 — Exception alerting and resolution workflow  `CLOSED`  (raised by Q9)
 **Question.** Confirm this design for turning quality-gate findings into fixes:
 1. **Every finding is a first-class record** (`exceptions` table): id, run id, domain/table, ticker or key, check name, severity, detail, first seen, last seen, state. States: `open` → `acknowledged` → `resolved` (with how) or `accepted` (a known, explained condition — e.g. a genuine 40% move — with an expiry date so it is re-examined, per the 30-day TTL lesson in CLAUDE.md).
 2. **Severity decides the day's fate.** `blocking` → that domain's day is marked unusable for downstream use until resolved or accepted; `warning` → usable, flagged; `info` → recorded only.
@@ -170,7 +170,7 @@ _(numbered Q15+, appended as they arise)_
 6. **Auto-remediation only where the fix is deterministic and additive**: e.g. a discontinuity triggers an automatic whole-range re-fetch and re-check; a missing ticker triggers one retry. The exception records what was attempted. **Never** auto-delete or auto-overwrite; anything ambiguous (ticker reuse vs real move) stays for the operator.
 7. **Escalation for repeat offenders**: the same check failing for the same key on N consecutive runs is promoted one severity level and called out separately in the email.
 **Recommendation.** Adopt all seven.
-**Answer.** _pending_
+**Answer (2026-09-05).** Agree, adopt all seven.
 
 ---
 
@@ -190,3 +190,4 @@ _(numbered Q15+, appended as they arise)_
 | 2026-09-05 | Q17 CLOSED (one-time external IV bootstrap, user will subscribe); Q7 CLOSED. |
 | 2026-09-05 | Q8 CLOSED (mathematical-form storage; data dictionary with null meanings). |
 | 2026-09-05 | Q9 CLOSED (per-run quality report); Q18 raised (exception alerting + resolution workflow). |
+| 2026-09-05 | Q18 CLOSED (all seven adopted). |
