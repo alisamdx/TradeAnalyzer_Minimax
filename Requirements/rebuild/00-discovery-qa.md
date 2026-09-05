@@ -193,10 +193,11 @@ _(numbered Q15+, appended as they arise)_
 **Recommendation.** Adopt the five categories.
 **Answer (2026-09-05).** Agree, adopt the five categories.
 
-### Q20 — Protection of the raw archive for account data  `OPEN`  (raised by Q13)
+### Q20 — Protection of the raw archive for account data  `CLOSED`  (raised by Q13)
 **Question.** The raw-response archive (sizing notes) stores every provider response verbatim. For E*Trade **account** endpoints (positions, balances, orders, transactions) that means your holdings and cash in clear text on disk — exactly what the API log deliberately never stores. Options: (a) encrypt the account-domain archive files at rest with the same OS keychain (DPAPI) mechanism as the credentials; (b) archive account responses with account key masked and balances/quantities intact (still sensitive); (c) do not archive account responses at all — store only the parsed rows in the DB (which is itself unencrypted).
 **Recommendation.** (a). The archive is the provenance layer and account data needs provenance as much as market data (the estimated-P&L saga proves it); encrypting one directory is cheap. The SQLite file stays unencrypted (as today) — the threat model is "a file copied off the machine", and the archive is the only place where *complete* raw statements would sit.
-**Answer.** _pending_
+**Answer (2026-09-05).** Agree, option (a).
+**Spec note.** Encryption key from Electron `safeStorage` (DPAPI on Windows), same as `secure-settings.ts`; encrypted files carry a header naming the mechanism so a decrypt failure is diagnosable; the inspector decrypts on read in-process and never writes a decrypted copy to disk; a backup of the archive is only readable on the same Windows user account — document this as a known limitation of DPAPI (restoring on a new machine requires re-pulling from E*Trade, which is why the pull is idempotent).
 
 ---
 
@@ -222,3 +223,4 @@ _(numbered Q15+, appended as they arise)_
 | 2026-09-05 | Q12 CLOSED (same stack, separate DB file); Q19 raised (legacy copy policy by category). |
 | 2026-09-05 | Q19 CLOSED (five-category legacy import policy). |
 | 2026-09-05 | Q13 CLOSED (raw broker records daily from day one; P&L derivation deferred); Q20 raised (encrypting the account-data raw archive). |
+| 2026-09-05 | Q20 CLOSED (account-domain archive encrypted at rest via safeStorage/DPAPI). |
