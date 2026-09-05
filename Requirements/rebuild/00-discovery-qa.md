@@ -90,7 +90,7 @@ Started: 2026-09-04.
 2. **Segregation.** This is external reference information, kept in **separate tables** (own prefix, e.g. `legacy_*`, each row stamped with the source app version and run id), never mixed with or joined into the new app's own raw/derived tables by default. It exists so the new data can grade the old app's decisions, nothing more.
 **Consequence for D1.** The old app does not currently expose its losers or its full decision trace, so capturing "complete" data needs a **small data-capture change in the old brief job** (hand the full candidate set + trace to the collector). This is inside D1's "data-capture fixes" exception; it must not change what the old app decides or emails.
 
-### Q7 — Historical backfill  `ANSWERED`
+### Q7 — Historical backfill  `CLOSED`
 **Question.** SMA200 / 52-week range need ~250 days of bars on day one. Accept a one-time whole-range fetch of adjusted bars from Polygon, discontinuity-validated on arrival, as clean? Same for a one-time IV-history backfill?
 **Recommendation.** Yes for bars (a single full fetch does not have the incremental-split bug). No for IV history unless the source is trustworthy.
 **User questions (2026-09-04).** (a) Bars: Polygon API or import from the old app's table? (b) IV history: source or old app's table? (c) Note: some one-time-fetch subscriptions from the old app's start may have lapsed; the user is willing to re-subscribe if that is what accuracy and completeness need.
@@ -99,6 +99,7 @@ Started: 2026-09-04.
 - **Bars: Polygon API, never the old table.** One whole-range fetch per ticker today returns a series adjusted consistently as of today; the raw responses are archived (provenance the old table never had); discontinuity + volume-regime checks run on arrival and flag ticker-reuse cases before they are accepted. Cost ≈ 1,600 calls once, well inside the Stocks Starter plan (which carries multi-year history). Depth: fetch the full depth the plan allows (5 years) — it is one call either way and long history is what studies want.
 - **IV history: neither the old table nor a stitched backfill by default.** Three methods spliced at two dates is precisely the "second thoughts" situation D6 forbids. Default plan: the new layer computes its own 30-day constant-maturity ATM IV from every day's chain snapshot with one documented method from day one; IV rank/percentile are **explicitly unavailable** (a declared gap, shown as such) until 252 trading days have accumulated.
 - **Optional bootstrap (Q17):** if a year without IV rank is unacceptable, re-subscribe to **one** source (IVolatility was the bulk of the old backfill) for a one-time pull, stored as a **separate, source-labelled external series** with its method documented and the stitch date recorded, used only to bootstrap rank until own history overtakes it. Never merged into the own-computed series.
+**Closed (2026-09-05)** with Q17: bars from Polygon API (full plan depth); IV own-computed from day one plus a one-time segregated external bootstrap.
 
 ### Q8 — Unit and type conventions  `OPEN`
 **Question.** Proposed rule: storage holds the mathematical form (IV as decimal fraction 0.3882, yields as fractions, money as decimal USD per share, dates as ISO strings in one declared timezone); formatting only in the UI; every column has a data-dictionary entry stating unit, nullability and what null means. Agree, or prefer percentages in storage?
@@ -151,10 +152,11 @@ _(numbered Q15+, appended as they arise)_
 **Recommendation.** Add all four. Combined cost: a few dozen calls per day and negligible storage.
 **Answer (2026-09-04).** Agree, add all four.
 
-### Q17 — IV-history bootstrap subscription  `OPEN`  (raised by Q7)
+### Q17 — IV-history bootstrap subscription  `CLOSED`  (raised by Q7)
 **Question.** Is a year without IV rank/percentile (until 252 days of own chain snapshots exist) acceptable, or should one external IV-history source be re-subscribed for a one-time bootstrap? If bootstrap: which source (IVolatility supplied the old backfill; MarketData.app is the alternative), stored as a segregated, source-labelled series with a recorded stitch date, never merged with the own-computed series.
 **Recommendation.** Bootstrap from one source only if the wheel scoring is expected to be rebuilt on the new data within the first year (it uses IV rank). Otherwise accept the declared gap — a clean own-computed year is worth more than a spliced one.
-**Answer.** _pending_
+**Answer (2026-09-05).** Agree; the user will subscribe to one source for a one-time load.
+**Spec requirements that follow.** (1) Source choice deferred to the spec (IVolatility vs MarketData.app — pick on documented method, depth and per-ticker coverage of the Q15 chain set; one source only). (2) The pull is a **one-shot job with archived raw responses**, stored in its own `ext_iv_history_*` series carrying source, method description and as-of date. (3) A **recorded stitch date**; rank/percentile computations read external rows only for dates before it and own-computed rows after, and the UI labels any rank that used external rows. (4) The subscription can lapse after the pull — the archived raw makes the load reproducible without it. (5) Overlap check: run the own-computed method against the external series over any overlapping days and store the disagreement statistic as part of the quality report before the bootstrap is accepted.
 
 ---
 
@@ -171,3 +173,4 @@ _(numbered Q15+, appended as they arise)_
 | 2026-09-04 | Q16 CLOSED (all four added); Q5 CLOSED with the final 12-domain list. |
 | 2026-09-04 | Q6 CLOSED: record old app's decisions, complete (incl. losers + trace), in segregated `legacy_*` tables. |
 | 2026-09-04 | Q7 ANSWERED with findings (old iv_history is three spliced sources; ~450 universe tickers have no bars); Q17 raised (IV bootstrap subscription). |
+| 2026-09-05 | Q17 CLOSED (one-time external IV bootstrap, user will subscribe); Q7 CLOSED. |
