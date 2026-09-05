@@ -39,10 +39,11 @@ Started: 2026-09-04.
 
 ## Questions
 
-### Q1 — Universe  `OPEN`
+### Q1 — Universe  `ANSWERED`
 **Question.** Which tickers does the collector capture every day? Full S&P 500 + Russell 1000 + ETFs (as today), or a curated wheel-candidate list of a few hundred? ~10x difference in API load, especially for option chains.
 **Recommendation.** Full equity universe for bars/fundamentals; curated subset for option chains; both lists versioned so membership changes are recorded.
-**Answer.** _pending_
+**Answer (2026-09-04).** Full S&P 500 + Russell 1000 + ETFs, like today. (Today's `constituents` table holds **1,587** tickers.)
+**Notes.** Universe membership must be **versioned** in the new DB (a ticker's entry/exit date recorded, never overwritten) so history is reproducible. Whether the *option-chain* capture also covers the full universe is not stated — see Q15.
 
 ### Q2 — Option chain depth  `OPEN`
 **Question.** Per ticker per day: all expirations and strikes, or a bounded window?
@@ -109,9 +110,15 @@ Started: 2026-09-04.
 ## Follow-up questions raised by answers
 _(numbered Q15+, appended as they arise)_
 
+### Q15 — Option-chain coverage within the universe  `OPEN`  (raised by Q1)
+**Question.** Q1 sets the universe at ~1,587 tickers. Does the daily **option-chain** capture cover all of them, or a subset? Cost reference (from sizing notes): E*Trade serves one expiration per call, so full-universe chains at 90 DTE ≈ **15,000 calls/day** vs ≈ 2,400 for a ~300-ticker subset. At the current app's observed pace that is a multi-hour nightly fetch, which also raises the odds of a mid-run token dormancy.
+**Recommendation.** Chains for a defined subset: every ticker that is optionable **and** passes a cheap liquidity screen computed from the bars/quotes already captured (e.g. price ≥ $10, average dollar volume above a threshold), re-evaluated daily and versioned like the universe itself. That keeps coverage rule-based (no hand-curated list) while bounding the fetch. If you want full-universe chains regardless, Q2 (depth) must shrink to compensate.
+**Answer.** _pending_
+
 ---
 
 ## Session log
 | Date | What happened |
 |---|---|
 | 2026-09-04 | Opening conversation; D1–D7 decided; Q1–Q14 posed. |
+| 2026-09-04 | Sizing notes added. Q1 answered (full universe); Q15 raised (chain coverage). |
