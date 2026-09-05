@@ -65,10 +65,16 @@ Started: 2026-09-04.
 - What a morning slot legitimately adds is **fresh prices for a shortlist**: re-quote only the brief's candidates (tens of tickers, a few expirations) at ~10:15 ET and store that as a **separate, slot-labelled snapshot** — never overwriting the after-close data. Cost is a few hundred calls, not a second full-universe capture.
 - Schema requirement that falls out: every snapshot row carries `slot` (or capture timestamp + rule id) from day one, so a targeted morning re-quote is a config addition, not a migration.
 
-### Q4 — Who owns the E*Trade token  `OPEN`
+### Q4 — Who owns the E*Trade token  `CLOSED`
 **Question.** (a) collector runs as a new batch job inside the existing app's process, writing to the new DB (one token holder, one rate limiter); (b) separate process, old app's E*Trade features switched off; (c) second E*Trade consumer key for the new app.
 **Recommendation.** (a) for stage 1 — zero token fights, no double API spend; moves to the new exe when it becomes the daily driver. Note D5: the new exe's UI reads the new DB regardless of who writes it.
-**Answer.** _pending_
+**Answer (2026-09-04).** Agree: option (a).
+**Consequences recorded.**
+- D1 gets one explicit exception: the existing app gains **a new batch job (the collector)** plus a second SQLite connection to the **new database file**. Nothing else in the old app changes.
+- The collector must be written as an **importable package** (ties to Q11), not as code embedded in the old app's services, so moving it into the new exe later is a re-wire, not a rewrite. The old app only hosts it.
+- The collector runs on the old app's **rate limiter and E*Trade transport** (`etradeGet` / `sendETradeRequest`) — inheriting the logging, timeout and renew-and-retry behaviour already hardened there.
+- Scheduling: the collector is a **separate schedule** (own time, ~17:00 ET or later per the "final daily bar" quirk), not appended to the existing after-close chain, so a multi-hour chain fetch cannot delay the old app's brief or be halted by an upstream job failure. Both share the batch mutex, so they serialize.
+- The new exe's UI opens the new DB **write-capable** (WAL quirk) and, in stage 1, only reads it.
 
 ### Q5 — Domains in scope for stage 1  `OPEN`
 **Question.** Proposed raw layer: daily bars, end-of-day quotes, option chains, corporate actions (splits, dividends), earnings dates, fundamentals, VIX + a few macro series, E*Trade positions/balances/executed orders. Out of scope: news, insider transactions, AI outputs. Add or remove anything?
@@ -136,3 +142,4 @@ _(numbered Q15+, appended as they arise)_
 | 2026-09-04 | Q2 CLOSED on the revised recommendation. |
 | 2026-09-04 | Q15 CLOSED (rule-based chain subset, sticky at ticker level); Q1 moves to CLOSED since its only follow-up is resolved. |
 | 2026-09-04 | Q3 CLOSED (one after-close capture); morning-brief consequence recorded under Q3. |
+| 2026-09-04 | Q4 CLOSED (collector hosted in the old app as a batch job, packaged for later move). |
