@@ -1,0 +1,176 @@
+# 06 — Repository, packaging and cut-over
+
+> **Status:** draft v1, 2026-09-05. Implements Q11 (same repo, old app untouched at root, `packages/core` + `packages/next`), Q12 (same stack, separate SQLite file), Q4 (collector hosted in the old app first) and the D1 promise. Facts about the existing repo below were read from `package.json` (v1.1.191), `tsconfig.*.json` and `scripts/` on 2026-09-05.
+> **Acceptance criteria owned here:** the *test placement* for AC-7, AC-11, AC-15 and the purity guard that keeps `core` Electron-free.
+
+---
+
+## 1. Layout
+
+```
+TradeAnalyzer_Minimax/                 ← the EXISTING app stays here, unmoved
+  package.json                         ← gains "workspaces": ["packages/*"]; nothing else structural
+  src/ migrations/ tests/ scripts/ …   ← untouched except §5
+  NewApp/                              ← these documents
+  packages/
+    core/                              ← @tradeanalyzer/core — shared, Electron-free
+      package.json  tsconfig.json  vitest.config.ts
+      src/
+        dictionary/                    ← the data dictionary as code (02 §0.5) + DDL generator
+        collector/                     ← phases, capture rules, sticky sets, archive writer, host interface (04)
+        ingest/                        ← one module per raw table (04 §2.3)
+        qa/                            ← check registry, gate, exception lifecycle, email rendering (03)
+        providers/                     ← request builders + parsers: polygon, etrade (incl. OAuth signing), edgar, finnhub, treasury
+        units/                         ← converters named by the dictionary (P7)
+        calendar/                      ← trading-day rules
+        legacy/                        ← hand-off payload schema + validators (04 §8), import validators (Q19)
+      test/
+    next/                              ← @tradeanalyzer/next — the new exe
+      package.json  electron.vite.config.ts  tsconfig.node.json  tsconfig.web.json
+      src/main/  src/preload/  src/renderer/
+      resources/
+```
+
+Rules:
+
+- **The existing app is not relocated.** Moving 76k lines under `packages/legacy/` would touch every import and build script for no benefit (Q11). Its `package.json` becomes the workspace root; its scripts keep working unchanged.
+- **`core` is Electron-free and native-free.** It imports nothing from `electron`, uses no `app.getPath`, no `safeStorage`, no `fetch` of its own, and links no native module. Everything environmental enters through `CollectorHost` (04 §1) or function parameters. A purity test (§7) fails the build if `core` ever imports `electron` or uses a path alias.
+- **No path aliases in `core` or `next`.** The existing `@shared/*` alias is the reason plain-node harnesses could never import the real services (CLAUDE.md). `core` is imported as `@tradeanalyzer/core` by package name; `next` uses relative imports internally.
+
+---
+
+## 2. `packages/core`
+
+| field | value |
+|---|---|
+| name | `@tradeanalyzer/core` |
+| version | independent semver, starts `0.1.0`; **this is `meta_run.collector_version`** |
+| type | `module`; compiled with `tsc` to `dist/` (ESM, `.d.ts`), `exports` map per sub-path (`./dictionary`, `./collector`, `./qa`, …) |
+| dependencies | none at runtime beyond `zlib` (Node built-in) for the archive; OAuth signing uses `node:crypto` |
+| peerDependencies | `better-sqlite3` (same major as root — a **type-only** dependency: `core` receives an open `Database` from the host and uses a narrow `SqliteLike` interface, so it never loads the binary itself) |
+| devDependencies | `vitest`, `typescript`, `better-sqlite3` (for tests only; built for Node by the root `pretest`) |
+
+The **dictionary version** is a separate integer exported from `dictionary/index.ts`, bumped on any change to any entry; it is `meta_run.dictionary_version` and `meta_dictionary.dictionary_version`.
+
+What moves from the existing app into `core`, and when: **only what the collector needs, at the moment it needs it** (Q11). Expected first movers: E*Trade OAuth 1.0a signing and request building (from `etrade-auth.ts`, minus the Electron-bound credential store and the `logs/api` writer, which become host-injected `fetch` and `logSink`); the chain/expiration/quote/portfolio/orders parsers (`etrade-options.ts`, `etrade-portfolio-service.ts` parsing halves); the Polygon aggregates/snapshot/reference parsers; the `sweepBulkWindow` earnings subdivision; the SEC EDGAR fact parser; the Saturday→Friday earnings shift; the split-discontinuity and volume-regime detectors. Each move is: copy into `core` with injected environment → tests green in `core` → the existing app imports it from `core` and deletes its copy in the same commit. Never two live copies.
+
+---
+
+## 3. `packages/next` — the new exe
+
+| field | value |
+|---|---|
+| name | `@tradeanalyzer/next`; `productName` **TradeAnalyzer Data**; `appId` `com.tradeanalyzer.next` |
+| version | starts `0.1.0`, independent of the existing app's `1.1.x` |
+| stack | Electron **^32.2.2** (pinned to the same minor as root so one `rebuild-better-sqlite3` ABI applies), electron-vite ^2.3, React 18, TypeScript ^5.6, better-sqlite3 ^12.10 (same as root), lightweight-charts 4.1 (bars view), Vitest ^2.1 |
+| userData | `%APPDATA%/trade-analyzer-next/` — **distinct from the existing app's `trade-analyzer/`** so settings, logs and window state never collide |
+| data root | configurable; default `%APPDATA%/trade-analyzer-next/data/gen-NNN/`; may point at another drive (the archive grows ~4–5 GB/yr) |
+| scripts | mirror root: `predev`/`dev`, `prebuild`/`build`, `prepackage`/`package`, `typecheck:node`/`typecheck:web`, `pretest`/`test` — same ABI-swap pattern via the root `scripts/rebuild-better-sqlite3.mjs` |
+
+Structure mirrors the existing app (`src/main`, `src/preload`, `src/renderer`) so a future session's instincts transfer, but the main process is thin: generation open/close, the `window.api` surface of 05 §9, the worker thread for heavy queries, the job runner that calls `core`'s one-shot jobs through a `NextCollectorHost` (initially without provider transports — stage 1 hosting is in the old app), the `tradeanalyzer-next://` deep-link handler, and `safeStorage` for the archive decrypt.
+
+**No `migrations/` directory.** Schema comes from the dictionary's DDL generator (02 §0.5). Evolution rule: within a generation, changes are **additive only** (new tables, new nullable columns, new indexes) and applied as a generated forward-only DDL diff at open, recorded in `meta_dictionary`; anything else (type change, rename, unit change) is by definition a **replay into a new generation** (04 §7.5), never an in-place migration. This is P1 applied to the schema itself.
+
+### 3.1 The shared data-root pointer
+
+In stage 1 the collector (in the old app) writes the generation and the new exe reads it, so both must agree where it is. One small JSON file, `%APPDATA%/tradeanalyzer-shared/data-root.json` → `{ "dataRoot": "...", "currentGeneration": 1 }`, written by whichever app creates a generation, read by both at startup. It is the only file the two apps share, and it contains no secrets.
+
+---
+
+## 4. Workspace mechanics
+
+- Root `package.json`: add `"workspaces": ["packages/*"]`. npm hoists shared dependencies; **`electron` and `better-sqlite3` are pinned to identical versions in root and `next`** so exactly one copy exists and the existing ABI-swap script keeps working (a second copy would be rebuilt for the wrong runtime silently — the exact failure CLAUDE.md warns about).
+- `scripts/rebuild-better-sqlite3.mjs` is unchanged; both apps' `pre*` hooks call it. `scripts/check-not-running.mjs` is extended to refuse `package` of either app while **either** exe is running (the new exe also holds the generation DB open).
+- Root-level aggregate scripts (added, additive): `typecheck:all`, `test:all`, `lint:all` → `npm run <x> --workspaces --if-present` plus the root's own. The existing `npm test` / `npm run typecheck` keep their current meaning (root app only) so nothing about the existing workflow changes.
+- ESLint 9 + Prettier 3 configs move to a root `eslint.config.mjs` that both packages extend; the existing rules are not tightened for the old app.
+- `package.json` files are edited with the Edit tool or Node, never PowerShell `Set-Content` (BOM quirk).
+
+---
+
+## 5. Changes to the existing app — the complete list (D1)
+
+This is the whole set of edits the existing app receives for stage 1. Anything beyond it needs a new decision in `00-discovery-qa.md`.
+
+| # | Change | Where |
+|---|---|---|
+| 1 | `"workspaces"` entry; aggregate scripts; shared eslint config | `package.json`, `eslint.config.mjs` |
+| 2 | Dependency on `@tradeanalyzer/core` | `package.json` |
+| 3 | `ElectronCollectorHost` adapter implementing `CollectorHost` over the app's existing `etradeGet`, Polygon transport (through the rate limiter), `safeStorage`, nodemailer, batch progress | `src/main/collector-host/` (new directory) |
+| 4 | Three batch handlers registered in `index.ts`: `data-collector` (17:05, after-close only), `collector-watchdog` (19:30), `collector-oneshot` (manual) | `src/main/index.ts`, `src/main/services/jobs/collector-*.ts` |
+| 5 | One call in the brief job: build `LegacyBriefHandoff` and `host.legacyHandoff(payload)`, fire-and-forget (04 §8) | the brief job + a `legacy-handoff-builder.ts` |
+| 6 | Code that moves to `core` is replaced by an import from `core` (§2), one module at a time | wherever the module lived |
+| 7 | Version bump + changelog entry per the existing conventions for each of the above | `CHANGELOG.md`, `changelogs/`, `.ai/AI_CONTEXT.md` |
+
+Explicitly **not** changed: any view, any IPC handler the UI uses, any scoring/analysis/brief logic, any existing table, any existing job's schedule or output, the E*Trade credential store.
+
+---
+
+## 6. Versioning and release
+
+| artefact | version | released how |
+|---|---|---|
+| existing app | `1.1.x` patch bumps as today | `npm run package` at root, as today |
+| `@tradeanalyzer/core` | semver; `collector_version` | not released separately; consumed in-repo |
+| dictionary | integer; `dictionary_version` | bumped on any entry change; DDL diff generated |
+| new exe | `0.x.y` until pilot exit, then `1.0.0` | `npm run package -w packages/next` → `dist/win-unpacked/TradeAnalyzer Data.exe` (`--dir`, no installer, matching current practice; Windows Developer Mode quirk applies) |
+
+Both exes can be installed and running at once; they share only the data root pointer and the generation directory (one writer, one reader in stage 1).
+
+**Backup**: a generation directory is self-contained (`data.sqlite` + `archive/` + `MANIFEST.json`). Copy it when no run is active (the inspector's Overview says so), or use SQLite's online backup for the DB plus a plain copy of the archive (append-only files are safe to copy live). Account archive files stay unreadable off the machine (DPAPI, Q20); recovery is re-pull.
+
+---
+
+## 7. Tests: what lives where
+
+| test | location | asserts |
+|---|---|---|
+| **Core purity** | `packages/core/test/purity.test.ts` | no `electron` import, no path alias, no native module load anywhere under `core/src` |
+| **Dictionary conformance** (AC-3) | `core/test/dictionary/*.test.ts` | every entry complete; nullable ⇒ null meaning present; status columns declared; DDL generates and round-trips |
+| **Unit conversion** (AC-7) | generated per converted field in `core/test/units/` | conversion from the provider representation; **grep test** that no `*100`/`/100`/`* 0.01` appears outside `core/src/units/` and `next/src/renderer` formatters |
+| **Single writer** (AC-11) | `core/test/writers.test.ts` | for each raw table exactly one module contains an `INSERT` targeting it; `next/src` contains none |
+| **Ingestion determinism** (AC-4) | `core/test/ingest/*.test.ts` | golden archived responses (fixtures, secrets scrubbed) → byte-identical rows on repeated runs |
+| **Gate & lifecycle** | `core/test/qa/*.test.ts` | each QC check fires on a constructed fixture and not on a clean one (the P10 proof, at unit level); lifecycle transitions; no auto-resolve without remediation |
+| **Leak canaries** (AC-15) | `core/test/etrade/logging.test.ts` (moved with the transport) + `next/test/archive-encryption.test.ts` | tokens/secrets/auth-success bodies never reach any sink; account archive lines carry the header and do not decrypt without the host |
+| **Host adapter** | `tests/collector-host.test.ts` (existing app) | `ElectronCollectorHost` satisfies the interface; renew-and-retry preserved; masked key in `endpoint` |
+| **Hand-off** | `tests/legacy-handoff.test.ts` (existing app) | payload includes every scored candidate; IV converted once; `volumeReported` reflects field presence; never throws into the brief |
+| **Inspector genericity** (AC-13) | `next/test/inspector.test.ts` | a throwaway dictionary entry + table appears with sort/filter/null glyphs, no code change |
+| **Fake timers** | everywhere | `flushTimersUntil()` per the existing convention |
+
+Root `npm run test:all` runs all three suites; the existing `npm test` is unchanged.
+
+---
+
+## 8. Development workflow
+
+- Day to day: the existing app runs **packaged** (it is the daily driver and hosts the collector); the new exe runs under `npm run dev -w packages/next` against the same generation. Both hold the DB open; WAL allows it; only the collector writes raw tables.
+- Never run `npm run dev` for the old app while its packaged instance is collecting — two hosts would both try to run the 17:05 job (the batch mutex is per process). `check-not-running.mjs` guards `package`, not `dev`; the rule is documented here and in the new exe's Overview banner ("collector host: TradeAnalyzer 1.1.x packaged, last run …").
+- Every material change to either app or to `core` follows the existing conventions: Conventional Commit, changelog, `.ai/AI_CONTEXT.md` for the old app; for the new app, `NewApp/CHANGELOG.md` and the affected `NewApp/requirements/NN-*.md` section (this set becomes the new app's living spec, patched per section, never regenerated wholesale).
+
+---
+
+## 9. Stage-1 build order and definition of done
+
+The paper work ends when the operator says so; this is the order the build then follows, each step leaving both apps working.
+
+| step | deliverable | gate to next |
+|---|---|---|
+| B1 | Workspaces; empty `core` and `next` packages; purity test; both exes build and package | `typecheck:all`, `test:all` green; existing app unchanged in behaviour |
+| B2 | Dictionary as code for all 02 tables; DDL generator; `meta_dictionary`; new exe opens `gen-001` and the **Data** and **Dictionary** views render every (empty) table | AC-3, AC-13 |
+| B3 | `CollectorHost` interface; `ElectronCollectorHost`; archive writer; `meta_run`/`meta_response`; phases 0–1 (`universe_seed`) | AC-1, AC-2 on real rows |
+| B4 | Phases 2–4 (bars, quotes, actions) + their QC checks + the gate skeleton + email + watchdog | first green/red email received |
+| B5 | `backfill_bars`; review queue cleared (04 §11) | QC-205 exceptions all resolved/accepted |
+| B6 | Phases 5–7 (account, subset, chains) + checks incl. QC-412/413; Chains and Account views | chain parse-count equality (AC-5) on a full run |
+| B7 | Phase 8 domains; `bootstrap_iv` (source chosen); phase 9 derivation; IV view | overlap check recorded |
+| B8 | Legacy hand-off in the old brief job; `legacy_import`; Legacy view | a full brief run appears in `legacy_*` with losers |
+| B9 | Exceptions workbench; Runs; Jobs incl. `replay` (scratch) and `reset` | AC-4 (replay byte-identical), AC-14 |
+| B10 | **Pilot**: 20 clean trading days; zero-fire review; per-domain inspection | `meta_generation.status = production` |
+
+**Stage 1 is done** when AC-1 through AC-15 hold on the production generation and the operator has promoted it. Stage 2 (derived layers, studies, then screening) starts only then, in a new document set under `NewApp/requirements/stage-2/`.
+
+---
+
+## 10. Open items
+
+- Whether `core`'s SQLite abstraction should be the narrow `SqliteLike` interface (proposed) or a direct `better-sqlite3` dependency; the interface keeps `core` testable under `node:sqlite` later if the ABI dance ever becomes intolerable.
+- Whether the new exe should bundle a read-only copy of the existing app's `docs/formulas.md` for the derivation's method notes (leaning yes; it is the formula authority).
+- Exact `productName` — "TradeAnalyzer Data" is a placeholder for the operator to confirm.
