@@ -82,10 +82,13 @@ Started: 2026-09-04.
 **User question — is this everything an app that picks the best trading opportunities will need?** Audit against what the current engine actually consumes found **four small gaps**, all cheap, proposed as Q16. Everything else the current scoring/analysis uses is *derivable* from the listed raw domains (SMA/RSI/ADX/realized vol/beta/relative strength from bars; IV rank from daily chain snapshots once a year has accumulated; own-at-strike from bars + book; earnings proximity from the calendar; sector momentum from sector ETFs, which are inside the universe).
 **Framing note.** Stage-1 scope is the **input** side. Picking good trades also needs the **decision record** — what was considered, what was picked, why, and what happened — which is what Q6 (old app's picks) starts and what stage 2 makes central. Outcomes are derivable from point-in-time inputs, so nothing is lost by deferring them, *provided the inputs are stored point-in-time*.
 
-### Q6 — Recording the old app's decisions  `OPEN`
+### Q6 — Recording the old app's decisions  `CLOSED`
 **Question.** Should the collector store what the old app recommended each day (brief picks, dice pick, exact legs) as observations in the new DB, so the new data can later grade them?
 **Recommendation.** Yes.
-**Answer.** _pending_
+**Answer (2026-09-04).** Agree, with two refinements:
+1. **Store the complete data needed for analysis**, unlike the current app, which persists only survivors. Concretely, per brief run: the **full candidate set** (every ticker considered, with every gate's pass/fail and reject reason — the losers), the **signal values and composite inputs** per candidate as computed at decision time, the **exact legs as priced** (strike, expiry, bid/ask/mid, IV, Greeks, OI, volume), the **dice eligibility and selection trace**, the **critic input and verdict**, the run's `slot`, and the pick that was actually emailed.
+2. **Segregation.** This is external reference information, kept in **separate tables** (own prefix, e.g. `legacy_*`, each row stamped with the source app version and run id), never mixed with or joined into the new app's own raw/derived tables by default. It exists so the new data can grade the old app's decisions, nothing more.
+**Consequence for D1.** The old app does not currently expose its losers or its full decision trace, so capturing "complete" data needs a **small data-capture change in the old brief job** (hand the full candidate set + trace to the collector). This is inside D1's "data-capture fixes" exception; it must not change what the old app decides or emails.
 
 ### Q7 — Historical backfill  `OPEN`
 **Question.** SMA200 / 52-week range need ~250 days of bars on day one. Accept a one-time whole-range fetch of adjusted bars from Polygon, discontinuity-validated on arrival, as clean? Same for a one-time IV-history backfill?
@@ -156,3 +159,4 @@ _(numbered Q15+, appended as they arise)_
 | 2026-09-04 | Q4 CLOSED (collector hosted in the old app as a batch job, packaged for later move). |
 | 2026-09-04 | Q5 ANSWERED (scope agreed); completeness audit raised Q16 (reference data, trading calendar, macro calendar, risk-free rate). |
 | 2026-09-04 | Q16 CLOSED (all four added); Q5 CLOSED with the final 12-domain list. |
+| 2026-09-04 | Q6 CLOSED: record old app's decisions, complete (incl. losers + trace), in segregated `legacy_*` tables. |
