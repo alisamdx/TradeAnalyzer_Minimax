@@ -56,10 +56,14 @@ Started: 2026-09-04.
 **Look-back impact of a bounded band (why revised):** replaying own picks and settling at expiry are unaffected; marking a position after a >25% adverse move, tail/skew studies, LEAPS/collar history, and not-yet-asked questions are all lost. Same survivorship shape as the brief storing only winners.
 **Answer (2026-09-04).** Agree with the revised recommendation (all strikes; bounded expirations; sticky capture; capture rule stored per snapshot). The exact expiration bound (≤ 90 DTE + two nearest monthlies beyond) is the working default and may be tuned once Q15 fixes the ticker count.
 
-### Q3 — Capture timing  `OPEN`
+### Q3 — Capture timing  `CLOSED`
 **Question.** One after-close snapshot (~17:00 ET) or also a mid-session snapshot (today's ~10:15 slot)? Every snapshot is stored separately, never overwritten; two slots double option-chain cost.
 **Recommendation.** One after-close capture in stage 1, designed so adding a slot is a config change.
-**Answer.** _pending_
+**Answer (2026-09-04).** Agree: one after-close capture.
+**User question — does this affect the morning brief?** Not in stage 1: the old app is untouched (D1) and keeps its two slots; the new layer has no brief yet (D3). For the *future* rebuilt brief the design consequence is recorded here so it is not lost:
+- The brief's analysis (screens, scoring, own-at-strike, earnings proximity) is an **end-of-day computation** over the after-close snapshot. Running it on partial intraday data is what made the old morning slot incomparable to the evening one (same-day volume counters, partial daily bar — CLAUDE.md quirks, v1.1.185). Anchoring to the after-close snapshot removes that inconsistency.
+- What a morning slot legitimately adds is **fresh prices for a shortlist**: re-quote only the brief's candidates (tens of tickers, a few expirations) at ~10:15 ET and store that as a **separate, slot-labelled snapshot** — never overwriting the after-close data. Cost is a few hundred calls, not a second full-universe capture.
+- Schema requirement that falls out: every snapshot row carries `slot` (or capture timestamp + rule id) from day one, so a targeted morning re-quote is a config addition, not a migration.
 
 ### Q4 — Who owns the E*Trade token  `OPEN`
 **Question.** (a) collector runs as a new batch job inside the existing app's process, writing to the new DB (one token holder, one rate limiter); (b) separate process, old app's E*Trade features switched off; (c) second E*Trade consumer key for the new app.
@@ -131,3 +135,4 @@ _(numbered Q15+, appended as they arise)_
 | 2026-09-04 | Sizing notes added. Q1 answered (full universe); Q15 raised (chain coverage). |
 | 2026-09-04 | Q2 CLOSED on the revised recommendation. |
 | 2026-09-04 | Q15 CLOSED (rule-based chain subset, sticky at ticker level); Q1 moves to CLOSED since its only follow-up is resolved. |
+| 2026-09-04 | Q3 CLOSED (one after-close capture); morning-brief consequence recorded under Q3. |
