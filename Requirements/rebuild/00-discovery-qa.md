@@ -181,7 +181,7 @@ _(numbered Q15+, appended as they arise)_
 **Recommendation.** Adopt all seven.
 **Answer (2026-09-05).** Agree, adopt all seven.
 
-### Q19 — What may be copied from the old database  `OPEN`  (raised by Q12)
+### Q19 — What may be copied from the old database  `CLOSED`  (raised by Q12)
 **Question.** Confirm this category policy for a one-time, explicit **"Import from legacy"** action in the new exe (logged: source table, row count, date; every imported row stamped `origin = 'legacy_import'`; import runs while the old app is closed, or via a write-capable attach — WAL quirk):
 1. **User-authored configuration — COPY.** Non-secret settings, watchlists, conviction stocks + bands, ETF list, universe/constituents list, scoring-strategy configs, screen presets, payoff strategies. This is your intent, not provider data. Each row is **validated against the new data dictionary on import** and rejected rows are listed (the old conviction table held inverted bands for three weeks — the import must catch that, not carry it).
 2. **Secrets — DO NOT COPY.** E*Trade keys/tokens are DPAPI-encrypted and, under Q4, the old app keeps making the calls in stage 1. When the new exe later takes over, credentials are re-entered, not migrated.
@@ -189,7 +189,7 @@ _(numbered Q15+, appended as they arise)_
 4. **Your book (positions, fills, balances) — DO NOT COPY; RE-SYNC** from E*Trade executed orders into the new schema. The old rows include "estimated from last mark" P&L that real fills proved wrong in both directions; the source of truth is the broker, and it is still available.
 5. **Old app's stored decisions (62+ briefs, picks, dice picks, replays) — COPY INTO `legacy_*` ONLY**, marked `pre_collector = 1` (survivors-only, incomplete). Segregated per Q6, it is the only record of those decisions and costs nothing to keep.
 **Recommendation.** Adopt the five categories.
-**Answer.** _pending_
+**Answer (2026-09-05).** Agree, adopt the five categories.
 
 ---
 
@@ -213,3 +213,4 @@ _(numbered Q15+, appended as they arise)_
 | 2026-09-05 | Q10 CLOSED (current subscriptions ongoing; one-time historical subscriptions allowed under the Q17 pattern). |
 | 2026-09-05 | Q11 CLOSED (same repo; old app stays at root; packages/core + packages/next). |
 | 2026-09-05 | Q12 CLOSED (same stack, separate DB file); Q19 raised (legacy copy policy by category). |
+| 2026-09-05 | Q19 CLOSED (five-category legacy import policy). |
