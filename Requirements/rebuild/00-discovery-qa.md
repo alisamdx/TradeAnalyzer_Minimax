@@ -101,9 +101,10 @@ Started: 2026-09-04.
 - **Optional bootstrap (Q17):** if a year without IV rank is unacceptable, re-subscribe to **one** source (IVolatility was the bulk of the old backfill) for a one-time pull, stored as a **separate, source-labelled external series** with its method documented and the stitch date recorded, used only to bootstrap rank until own history overtakes it. Never merged into the own-computed series.
 **Closed (2026-09-05)** with Q17: bars from Polygon API (full plan depth); IV own-computed from day one plus a one-time segregated external bootstrap.
 
-### Q8 — Unit and type conventions  `OPEN`
+### Q8 — Unit and type conventions  `CLOSED`
 **Question.** Proposed rule: storage holds the mathematical form (IV as decimal fraction 0.3882, yields as fractions, money as decimal USD per share, dates as ISO strings in one declared timezone); formatting only in the UI; every column has a data-dictionary entry stating unit, nullability and what null means. Agree, or prefer percentages in storage?
-**Answer.** _pending_
+**Answer (2026-09-05).** Agree with the recommendation.
+**Conventions locked for the spec.** IV, yields, returns, rates, deltas → decimal fractions. Money → decimal USD **per share** (contract multiplier applied only in derived/UI layers). Quantities → integers (shares, contracts, open interest, volume). Dates → `YYYY-MM-DD` trading-day in **America/New_York**; timestamps → ISO-8601 with explicit offset (`2026-09-05T17:02:11-04:00`), never naive. Booleans → 0/1 integers. Every column has a data-dictionary row: type, unit, allowed-null (yes/no), **null meaning** (e.g. "provider omitted field", "outside capture window", "not applicable") — where more than one meaning is possible, a companion status column, not a bare null. Provider values are converted **once, at ingestion**, with the raw value preserved in the archived response; no conversion ever happens downstream.
 
 ### Q9 — Definition of a quality gate  `OPEN`
 **Question.** Proposed per-run quality report stored alongside the data: row count vs expected, null count per field vs declared allowed nulls, range-check failures, cross-source disagreements (Polygon close vs E*Trade last), discontinuity checks. A failing day is marked unusable, not deleted. Matches your bar? Anything else to check?
@@ -174,3 +175,4 @@ _(numbered Q15+, appended as they arise)_
 | 2026-09-04 | Q6 CLOSED: record old app's decisions, complete (incl. losers + trace), in segregated `legacy_*` tables. |
 | 2026-09-04 | Q7 ANSWERED with findings (old iv_history is three spliced sources; ~450 universe tickers have no bars); Q17 raised (IV bootstrap subscription). |
 | 2026-09-05 | Q17 CLOSED (one-time external IV bootstrap, user will subscribe); Q7 CLOSED. |
+| 2026-09-05 | Q8 CLOSED (mathematical-form storage; data dictionary with null meanings). |
