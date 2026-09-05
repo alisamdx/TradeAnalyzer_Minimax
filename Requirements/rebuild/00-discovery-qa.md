@@ -45,7 +45,7 @@ Started: 2026-09-04.
 **Answer (2026-09-04).** Full S&P 500 + Russell 1000 + ETFs, like today. (Today's `constituents` table holds **1,587** tickers.)
 **Notes.** Universe membership must be **versioned** in the new DB (a ticker's entry/exit date recorded, never overwritten) so history is reproducible. Whether the *option-chain* capture also covers the full universe is not stated — see Q15.
 
-### Q2 — Option chain depth  `OPEN`
+### Q2 — Option chain depth  `CLOSED`
 **Question.** Per ticker per day: all expirations and strikes, or a bounded window?
 **Recommendation (original).** Expirations out to 90 DTE, strikes within 25% of spot, full contract detail as E*Trade returns it (bid, ask, last, volume, open interest, IV, Greeks).
 **Recommendation (revised 2026-09-04).** Checked `etrade-options.ts`: the provider fetches **one expiration per call with no strike limit**, so E*Trade returns the whole ladder and any strike filter is ours — a strike band saves storage, **not API calls**. Storage is the cheap resource (~2–3× rows, ~25 GB/yr for a 300-ticker subset). Uncaptured chain data is **unrecoverable** on current subscriptions (no historical option quotes source). Therefore:
@@ -54,7 +54,7 @@ Started: 2026-09-04.
 3. **Sticky capture**: any contract ever recommended, held in the book, or flagged for a study stays in the capture set until expiry regardless of DTE/moneyness — closes the "mark disappears on the blow-up day" gap.
 4. **Store the capture rule with every snapshot** so an absent contract reads as "outside that day's window", never "unknown".
 **Look-back impact of a bounded band (why revised):** replaying own picks and settling at expiry are unaffected; marking a position after a >25% adverse move, tail/skew studies, LEAPS/collar history, and not-yet-asked questions are all lost. Same survivorship shape as the brief storing only winners.
-**Answer.** _pending_
+**Answer (2026-09-04).** Agree with the revised recommendation (all strikes; bounded expirations; sticky capture; capture rule stored per snapshot). The exact expiration bound (≤ 90 DTE + two nearest monthlies beyond) is the working default and may be tuned once Q15 fixes the ticker count.
 
 ### Q3 — Capture timing  `OPEN`
 **Question.** One after-close snapshot (~17:00 ET) or also a mid-session snapshot (today's ~10:15 slot)? Every snapshot is stored separately, never overwritten; two slots double option-chain cost.
@@ -128,3 +128,4 @@ _(numbered Q15+, appended as they arise)_
 |---|---|
 | 2026-09-04 | Opening conversation; D1–D7 decided; Q1–Q14 posed. |
 | 2026-09-04 | Sizing notes added. Q1 answered (full universe); Q15 raised (chain coverage). |
+| 2026-09-04 | Q2 CLOSED on the revised recommendation. |
