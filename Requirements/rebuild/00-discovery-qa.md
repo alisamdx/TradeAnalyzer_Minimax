@@ -39,7 +39,7 @@ Started: 2026-09-04.
 
 ## Questions
 
-### Q1 — Universe  `ANSWERED`
+### Q1 — Universe  `CLOSED`
 **Question.** Which tickers does the collector capture every day? Full S&P 500 + Russell 1000 + ETFs (as today), or a curated wheel-candidate list of a few hundred? ~10x difference in API load, especially for option chains.
 **Recommendation.** Full equity universe for bars/fundamentals; curated subset for option chains; both lists versioned so membership changes are recorded.
 **Answer (2026-09-04).** Full S&P 500 + Russell 1000 + ETFs, like today. (Today's `constituents` table holds **1,587** tickers.)
@@ -116,10 +116,11 @@ Started: 2026-09-04.
 ## Follow-up questions raised by answers
 _(numbered Q15+, appended as they arise)_
 
-### Q15 — Option-chain coverage within the universe  `OPEN`  (raised by Q1)
+### Q15 — Option-chain coverage within the universe  `CLOSED`  (raised by Q1)
 **Question.** Q1 sets the universe at ~1,587 tickers. Does the daily **option-chain** capture cover all of them, or a subset? Cost reference (from sizing notes): E*Trade serves one expiration per call, so full-universe chains at 90 DTE ≈ **15,000 calls/day** vs ≈ 2,400 for a ~300-ticker subset. At the current app's observed pace that is a multi-hour nightly fetch, which also raises the odds of a mid-run token dormancy.
 **Recommendation.** Chains for a defined subset: every ticker that is optionable **and** passes a cheap liquidity screen computed from the bars/quotes already captured (e.g. price ≥ $10, average dollar volume above a threshold), re-evaluated daily and versioned like the universe itself. That keeps coverage rule-based (no hand-curated list) while bounding the fetch. If you want full-universe chains regardless, Q2 (depth) must shrink to compensate.
-**Answer.** _pending_
+**Addendum (2026-09-04).** A rule-based subset has the same "uncapturable past" property as a strike band: a ticker failing the screen today has no chain history when it becomes a candidate next month. So the screen must be generous and the **sticky rule applies at the ticker level**: once a ticker has been captured it stays in the chain set (not dropped for dipping below threshold); removal only on delisting / loss of optionability / explicit operator action, and every add/remove is recorded with its date and reason.
+**Answer (2026-09-04).** Agree with the recommendation; apply the sticky rule at the ticker level. Concrete screen thresholds (price floor, dollar-volume floor) to be set in the spec with a measured count of how many tickers they admit.
 
 ---
 
@@ -129,3 +130,4 @@ _(numbered Q15+, appended as they arise)_
 | 2026-09-04 | Opening conversation; D1–D7 decided; Q1–Q14 posed. |
 | 2026-09-04 | Sizing notes added. Q1 answered (full universe); Q15 raised (chain coverage). |
 | 2026-09-04 | Q2 CLOSED on the revised recommendation. |
+| 2026-09-04 | Q15 CLOSED (rule-based chain subset, sticky at ticker level); Q1 moves to CLOSED since its only follow-up is resolved. |
