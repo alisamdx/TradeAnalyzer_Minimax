@@ -231,3 +231,4 @@ _(numbered Q15+, appended as they arise)_
 | 2026-09-05 | Q13 CLOSED (raw broker records daily from day one; P&L derivation deferred); Q20 raised (encrypting the account-data raw archive). |
 | 2026-09-05 | Q20 CLOSED (account-domain archive encrypted at rest via safeStorage/DPAPI). |
 | 2026-09-05 | Q14 CLOSED (early pilot collection; data generations + reset + raw replay; 20-day exit criterion). **All Q1–Q20 CLOSED.** |
+| 2026-09-05 | Documents moved to `NewApp/`. **Document 01 (purpose and principles) drafted** — P1–P15, AC-1–AC-15, glossary, traceability. |
