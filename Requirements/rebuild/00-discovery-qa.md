@@ -140,10 +140,16 @@ Started: 2026-09-04.
 **Answer (2026-09-05).** Agree with the recommendation.
 **Capture notes for the spec.** Positions are a **daily snapshot** (never overwritten; a position that disappears is detected by comparing snapshots, not by deletion). Executed orders are **append-only keyed by broker order id** (idempotent re-pull; the first pull reaches back as far as E*Trade's window allows and that reach is recorded). Balances one row per day. All via the old app's `etradeGet` path under Q4; the account key is masked in logs as today; success bodies are archived to the raw store (which, unlike the API log, is not plaintext-with-retention — the raw archive for account data must be protected the same way as credentials, see Q20).
 
-### Q14 — Timeline pressure  `OPEN`
+### Q14 — Timeline pressure  `CLOSED`
 **Question.** Collector capturing raw data within ~2 weeks so history accumulates while design continues, or complete design document as the gate before any collection?
 **Recommendation.** Design the raw layer + quality gate first, start capturing early; derived layers and UI depth designed while it runs.
-**Answer.** _pending_
+**Answer (2026-09-05).** Agree. **The early collection is a pilot / provisional run**: if data issues are found, it must be possible to reset to a clean slate and start over.
+**Design consequences recorded.**
+- **Data generations.** The new DB file and its raw archive live under a generation directory (`gen-001/`, `gen-002/`, ...). A **reset is a first-class, deliberate operation** in the new UI: it closes the current generation and opens the next one. The old generation is **kept, never deleted** (renamed aside, read-only) so it can be compared against or mined for what went wrong.
+- **Re-derive before reset.** Two different failures, two different remedies: if the *raw capture* was wrong (wrong parameters, missed expirations, misread field), reset. If only the *parsing/schema/derivation* was wrong, do **not** reset — **replay the raw archive into a fresh DB** with the fixed code. That replay path is a required, tested feature of the collector, not an emergency script; it is the reason the archive exists.
+- **Config survives a reset.** The legacy import (Q19) and any configuration made in the new exe are re-runnable/exportable, so a reset costs data-days only, never setup.
+- **Pilot exit criterion.** The pilot generation becomes the production generation when it has run **20 consecutive trading days with zero unresolved blocking exceptions** and the operator has visually inspected every domain at least once (D5). Until then everything is provisional and no downstream stage consumes it.
+- Until the pilot exits, the expiration bound (Q2) and chain-subset thresholds (Q15) are tunable without a reset — a change of capture rule is recorded per snapshot, so it widens coverage forward rather than invalidating what was captured.
 
 ---
 
@@ -224,3 +230,4 @@ _(numbered Q15+, appended as they arise)_
 | 2026-09-05 | Q19 CLOSED (five-category legacy import policy). |
 | 2026-09-05 | Q13 CLOSED (raw broker records daily from day one; P&L derivation deferred); Q20 raised (encrypting the account-data raw archive). |
 | 2026-09-05 | Q20 CLOSED (account-domain archive encrypted at rest via safeStorage/DPAPI). |
+| 2026-09-05 | Q14 CLOSED (early pilot collection; data generations + reset + raw replay; 20-day exit criterion). **All Q1–Q20 CLOSED.** |
