@@ -240,3 +240,4 @@ _(numbered Q15+, appended as they arise)_
 | 2026-09-05 | **Document 02 (raw domains + data dictionary) drafted** — conventions, meta/ref/raw/ext/derived/legacy tables, expected-count model, verify list. Q21 raised (short interest, analyst view, insider transactions). |
 | 2026-09-05 | Q21 CLOSED (all three added → 15 raw domains). |
 | 2026-09-05 | **Document 03 (quality gate + exceptions) drafted** — 60+ checks (QC-001…954), severity/usability model, exception lifecycle, 7 permitted remediations, status email + watchdog, pilot-exit procedure. |
+| 2026-09-05 | **Document 04 (collector) drafted** — CollectorHost seam, 10-phase daily run (~4,600 calls, ~35 min from 17:05 ET), per-response archive+ingest contract, capture rules v1, sticky sets, one-shot jobs (seed/backfill/bootstrap/import/replay/reset), legacy hand-off payload, failure semantics, QC-412/413 from the measured log (34 % chain 400s, 1,383 renews/day), pre-pilot checklist. |
