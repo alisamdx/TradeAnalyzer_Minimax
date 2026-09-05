@@ -205,10 +205,10 @@ _(numbered Q15+, appended as they arise)_
 **Answer (2026-09-05).** Agree, option (a).
 **Spec note.** Encryption key from Electron `safeStorage` (DPAPI on Windows), same as `secure-settings.ts`; encrypted files carry a header naming the mechanism so a decrypt failure is diagnosable; the inspector decrypts on read in-process and never writes a decrypted copy to disk; a backup of the archive is only readable on the same Windows user account — document this as a known limitation of DPAPI (restoring on a new machine requires re-pulling from E*Trade, which is why the pull is idempotent).
 
-### Q21 — Sentiment-side data domains  `OPEN`  (raised while writing 02)
+### Q21 — Sentiment-side data domains  `CLOSED`  (raised while writing 02)
 **Question.** The operator asked whether the twelve domains hold every data point needed to judge "is this stock worth owning at this price" (financials, technicals, valuation, trend, sentiment). Audit (02 §12): financials, trailing valuation, technicals, volatility regime, options-implied sentiment and ownership/quality are all covered or derivable. **Three gaps**, all structured and provenance-clean: (1) **short interest** (FINRA twice-monthly via Polygon or Finnhub); (2) **analyst view** — recommendation trend and, if the plan allows, EPS/revenue consensus estimates (Finnhub), which is the only route to *forward* valuation (forward P/E, PEG); (3) **insider transactions** (SEC Form 4), excluded by Q5 as "news" but actually structured EDGAR data the existing app already parses. **News sentiment stays out** — unstructured and model-dependent, it cannot meet D6.
 **Recommendation.** Add all three as raw domains (tables drafted in 02 §12); a few calls per day each. If Finnhub estimates turn out to be premium-only, forward valuation is recorded as a declared gap rather than approximated.
-**Answer.** _pending_
+**Answer (2026-09-05).** Agree, add all three. Stage-1 raw domains are now **fifteen**; 02 §12 promoted from "proposed" to in-scope.
 
 ---
 
@@ -238,3 +238,5 @@ _(numbered Q15+, appended as they arise)_
 | 2026-09-05 | Q14 CLOSED (early pilot collection; data generations + reset + raw replay; 20-day exit criterion). **All Q1–Q20 CLOSED.** |
 | 2026-09-05 | Documents moved to `NewApp/`. **Document 01 (purpose and principles) drafted** — P1–P15, AC-1–AC-15, glossary, traceability. |
 | 2026-09-05 | **Document 02 (raw domains + data dictionary) drafted** — conventions, meta/ref/raw/ext/derived/legacy tables, expected-count model, verify list. Q21 raised (short interest, analyst view, insider transactions). |
+| 2026-09-05 | Q21 CLOSED (all three added → 15 raw domains). |
+| 2026-09-05 | **Document 03 (quality gate + exceptions) drafted** — 60+ checks (QC-001…954), severity/usability model, exception lifecycle, 7 permitted remediations, status email + watchdog, pilot-exit procedure. |

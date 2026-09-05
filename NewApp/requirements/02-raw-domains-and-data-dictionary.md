@@ -1,7 +1,7 @@
 # 02 — Raw domains and data dictionary
 
 > **Status:** draft v1, 2026-09-05. Derived from `00-discovery-qa.md` (Q1–Q20) and governed by `01-purpose-and-principles.md` (P1–P15). Provider field names in the "source" columns are the ones the existing app's parsers already read (`etrade-options.ts`, `etrade-portfolio-service.ts`, `polygon-provider.ts`, `earnings-refresh`); fields marked **verify** have not been observed in a live response yet and must be confirmed during 04 before the dictionary entry is frozen.
-> **Pending additions:** §12 lists three candidate domains raised as Q21 (sentiment-side data). They are drafted here so the decision can be made against concrete tables; nothing in §12 is in scope until Q21 closes.
+> **Q21 closed 2026-09-05:** the three sentiment-side domains in §12 (short interest, analyst view, insider transactions) are **in scope**. Stage 1 has fifteen raw domains.
 
 ---
 
@@ -510,7 +510,7 @@ Stage-1 consumer: none. Stage-2 consumer: Greek/IV reproduction (P4) uses the 3M
 
 ---
 
-## 12. Proposed additions pending Q21 (sentiment-side data)
+## 12. Domains 13–15: short interest, analyst view, insider transactions (Q21)
 
 The operator asked whether the domains suffice to judge "is this stock worth owning at this price". Audit result:
 
@@ -527,13 +527,13 @@ The operator asked whether the domains suffice to judge "is this stock worth own
 | **Insider transactions** (Form 4) | — | **excluded by Q5**, but it is structured EDGAR data, not "news" |
 | News sentiment | — | deliberately out: unstructured, model-dependent, cannot meet D6 |
 
-Candidate tables, drafted only:
+Tables (full dictionary entries to be completed alongside the verify list in 04):
 
 - `raw_short_interest` — `ticker, settlement_date, short_interest INTEGER, avg_daily_volume INTEGER, days_to_cover REAL, source` (FINRA publishes twice monthly; Polygon and Finnhub both expose it; **verify** plan coverage).
 - `raw_analyst_recommendation` — `ticker, period_month, strong_buy, buy, hold, sell, strong_sell INTEGER, source='finnhub'` (Finnhub `/stock/recommendation`, free tier) and `raw_analyst_estimate` — `ticker, fiscal_period, eps_estimate_avg/high/low, revenue_estimate_avg, num_analysts, source` (Finnhub estimates: **verify** free-tier availability; if premium, PEG/forward-P/E stays a declared gap).
 - `raw_insider_transaction` — `cik, ticker, filer_name, filer_role, transaction_date, transaction_code, shares INTEGER, price REAL, shares_owned_after INTEGER, accession_no` (EDGAR Form 4; the existing `news-data-fetcher.ts` already parses these).
 
-**Q21 recommendation (recorded in 00):** add all three; each is a few calls per day, structured, provenance-clean. Keep news sentiment out.
+**Q21 decision:** all three added. Each is a few calls per day, structured, provenance-clean. News sentiment stays out.
 
 ---
 
