@@ -106,9 +106,10 @@ Started: 2026-09-04.
 **Answer (2026-09-05).** Agree with the recommendation.
 **Conventions locked for the spec.** IV, yields, returns, rates, deltas → decimal fractions. Money → decimal USD **per share** (contract multiplier applied only in derived/UI layers). Quantities → integers (shares, contracts, open interest, volume). Dates → `YYYY-MM-DD` trading-day in **America/New_York**; timestamps → ISO-8601 with explicit offset (`2026-09-05T17:02:11-04:00`), never naive. Booleans → 0/1 integers. Every column has a data-dictionary row: type, unit, allowed-null (yes/no), **null meaning** (e.g. "provider omitted field", "outside capture window", "not applicable") — where more than one meaning is possible, a companion status column, not a bare null. Provider values are converted **once, at ingestion**, with the raw value preserved in the archived response; no conversion ever happens downstream.
 
-### Q9 — Definition of a quality gate  `OPEN`
+### Q9 — Definition of a quality gate  `CLOSED`
 **Question.** Proposed per-run quality report stored alongside the data: row count vs expected, null count per field vs declared allowed nulls, range-check failures, cross-source disagreements (Polygon close vs E*Trade last), discontinuity checks. A failing day is marked unusable, not deleted. Matches your bar? Anything else to check?
-**Answer.** _pending_
+**Answer (2026-09-05).** Agreed.
+**User question — how are issues alerted and resolved as soon as possible? Exception report by email?** Yes, and alerting is only half of it; the resolution workflow is proposed as Q18.
 
 ### Q10 — Providers and budget  `OPEN`
 **Question.** Keep Polygon Stocks Starter, E*Trade, SEC EDGAR, Finnhub as-is? Would you pay for a dedicated corporate-actions or options-history source if it removed a class of doubt, or strictly forward-only on current subscriptions?
@@ -159,6 +160,18 @@ _(numbered Q15+, appended as they arise)_
 **Answer (2026-09-05).** Agree; the user will subscribe to one source for a one-time load.
 **Spec requirements that follow.** (1) Source choice deferred to the spec (IVolatility vs MarketData.app — pick on documented method, depth and per-ticker coverage of the Q15 chain set; one source only). (2) The pull is a **one-shot job with archived raw responses**, stored in its own `ext_iv_history_*` series carrying source, method description and as-of date. (3) A **recorded stitch date**; rank/percentile computations read external rows only for dates before it and own-computed rows after, and the UI labels any rank that used external rows. (4) The subscription can lapse after the pull — the archived raw makes the load reproducible without it. (5) Overlap check: run the own-computed method against the external series over any overlapping days and store the disagreement statistic as part of the quality report before the bootstrap is accepted.
 
+### Q18 — Exception alerting and resolution workflow  `OPEN`  (raised by Q9)
+**Question.** Confirm this design for turning quality-gate findings into fixes:
+1. **Every finding is a first-class record** (`exceptions` table): id, run id, domain/table, ticker or key, check name, severity, detail, first seen, last seen, state. States: `open` → `acknowledged` → `resolved` (with how) or `accepted` (a known, explained condition — e.g. a genuine 40% move — with an expiry date so it is re-examined, per the 30-day TTL lesson in CLAUDE.md).
+2. **Severity decides the day's fate.** `blocking` → that domain's day is marked unusable for downstream use until resolved or accepted; `warning` → usable, flagged; `info` → recorded only.
+3. **An exception never ages out silently.** It appears in every report until its state changes. Resolved exceptions are kept (audit), never deleted.
+4. **Daily email after every collector run — including green days.** A one-screen status: per-domain row counts vs expected, new/open/resolved exception counts, blocking items first with a one-line cause each. Silence must never be the signal — a dead scheduler and a clean day look identical without a green email (the old app's evening chain was halted 8 of 10 days before anyone noticed). Reuse the old app's nodemailer path.
+5. **Exceptions view in the new UI** (D5): filter by state/severity/domain, acknowledge/resolve/accept with a note, drill to the offending rows in the inspector. This is where resolution happens; email is the nudge.
+6. **Auto-remediation only where the fix is deterministic and additive**: e.g. a discontinuity triggers an automatic whole-range re-fetch and re-check; a missing ticker triggers one retry. The exception records what was attempted. **Never** auto-delete or auto-overwrite; anything ambiguous (ticker reuse vs real move) stays for the operator.
+7. **Escalation for repeat offenders**: the same check failing for the same key on N consecutive runs is promoted one severity level and called out separately in the email.
+**Recommendation.** Adopt all seven.
+**Answer.** _pending_
+
 ---
 
 ## Session log
@@ -176,3 +189,4 @@ _(numbered Q15+, appended as they arise)_
 | 2026-09-04 | Q7 ANSWERED with findings (old iv_history is three spliced sources; ~450 universe tickers have no bars); Q17 raised (IV bootstrap subscription). |
 | 2026-09-05 | Q17 CLOSED (one-time external IV bootstrap, user will subscribe); Q7 CLOSED. |
 | 2026-09-05 | Q8 CLOSED (mathematical-form storage; data dictionary with null meanings). |
+| 2026-09-05 | Q9 CLOSED (per-run quality report); Q18 raised (exception alerting + resolution workflow). |
