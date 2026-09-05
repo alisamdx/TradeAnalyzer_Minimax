@@ -6,6 +6,8 @@
 
 ## Project
 
+> **Rebuild in progress (2026-09):** a new, data-first application is being designed under `NewApp/` (start at `NewApp/README.md`). That folder is separate from everything below, which describes the **existing** app. The existing app stays untouched and running; the new one is paper-only until its requirements are done.
+
 TradeAnalyzer is an Electron + React + TypeScript desktop app for a retail options/swing trader. Watchlists, screener, five-mode analysis engine (buy/options/wheel/bullish/bearish), configurable scoring engine, daily AI intelligence brief, validation dashboards, multi-leg payoff modeling, portfolio tracking synced from E*Trade, LEAPS+CSP and collared-LEAPS screeners, earnings calendar, News & Research, backtesting. The app is feature-complete against the v1 spec; the gate to v1.0.0 is real-world usage validation.
 
 ## Stack

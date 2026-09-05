@@ -3,7 +3,7 @@
 > **Working document.** This tracks the requirements-discovery conversation for the ground-up rebuild.
 > Status per question: `OPEN` (no answer yet), `ANSWERED` (answer recorded, may need follow-up), `CLOSED` (agreed, feeds the spec).
 > Answers arrive one at a time across sessions. **Always append, never rewrite an answer** — if the user revises one, add a dated revision line under it.
-> Next document after this one: `01-purpose-and-principles.md` (written only once enough questions are CLOSED).
+> Next document after this one: `NewApp/requirements/01-purpose-and-principles.md` (written only once enough questions are CLOSED).
 
 Started: 2026-09-04.
 
