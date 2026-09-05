@@ -111,9 +111,11 @@ Started: 2026-09-04.
 **Answer (2026-09-05).** Agreed.
 **User question — how are issues alerted and resolved as soon as possible? Exception report by email?** Yes, and alerting is only half of it; the resolution workflow is proposed as Q18.
 
-### Q10 — Providers and budget  `OPEN`
+### Q10 — Providers and budget  `CLOSED`
 **Question.** Keep Polygon Stocks Starter, E*Trade, SEC EDGAR, Finnhub as-is? Would you pay for a dedicated corporate-actions or options-history source if it removed a class of doubt, or strictly forward-only on current subscriptions?
-**Answer.** _pending_
+**Recommendation.** Keep current subscriptions. Corporate actions: use Polygon's splits + dividends endpoints (on the current plan) first; add a paid source only if the quality gate shows Polygon missing actions.
+**Answer (2026-09-05).** Agree, keep current subscriptions. **Ongoing** providers: Polygon, E*Trade, Finnhub (+ SEC EDGAR, free). **One-time subscriptions are acceptable whenever historical accuracy/completeness needs them** (as with the IV history last time).
+**Policy recorded — one-time historical loads.** The Q17 pattern is the standard for *any* one-time load: one source per domain; raw responses archived so the load is reproducible after the subscription lapses; stored as a **segregated, source-labelled external series** with method documented; recorded stitch date; overlap check against own-captured data stored in the quality report before acceptance; never merged into own-captured tables. Candidates for later stages (not stage 1): **historical option chains** (would let stage-2 backtests reach before own capture began), **historical earnings dates** (past-report studies), **historical constituents** (survivorship-free universe history).
 
 ### Q11 — Repository layout  `OPEN`
 **Question.** New repo, or a new package inside this repo so shared code is imported rather than copied?
@@ -191,3 +193,4 @@ _(numbered Q15+, appended as they arise)_
 | 2026-09-05 | Q8 CLOSED (mathematical-form storage; data dictionary with null meanings). |
 | 2026-09-05 | Q9 CLOSED (per-run quality report); Q18 raised (exception alerting + resolution workflow). |
 | 2026-09-05 | Q18 CLOSED (all seven adopted). |
+| 2026-09-05 | Q10 CLOSED (current subscriptions ongoing; one-time historical subscriptions allowed under the Q17 pattern). |
