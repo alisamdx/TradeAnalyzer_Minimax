@@ -76,9 +76,9 @@ Started: 2026-09-04.
 - Scheduling: the collector is a **separate schedule** (own time, ~17:00 ET or later per the "final daily bar" quirk), not appended to the existing after-close chain, so a multi-hour chain fetch cannot delay the old app's brief or be halted by an upstream job failure. Both share the batch mutex, so they serialize.
 - The new exe's UI opens the new DB **write-capable** (WAL quirk) and, in stage 1, only reads it.
 
-### Q5 — Domains in scope for stage 1  `ANSWERED`
+### Q5 — Domains in scope for stage 1  `CLOSED`
 **Question.** Proposed raw layer: daily bars, end-of-day quotes, option chains, corporate actions (splits, dividends), earnings dates, fundamentals, VIX + a few macro series, E*Trade positions/balances/executed orders. Out of scope: news, insider transactions, AI outputs. Add or remove anything?
-**Answer (2026-09-04).** Agree with the proposed scope.
+**Answer (2026-09-04).** Agree with the proposed scope. **Final stage-1 raw domains (with Q16):** daily bars, end-of-day quotes, option chains, corporate actions (splits, dividends), earnings dates, fundamentals, VIX + macro series, E*Trade positions/balances/executed orders, ticker reference data, trading calendar, macro event calendar, risk-free rate. Out: news, insider transactions, AI outputs.
 **User question — is this everything an app that picks the best trading opportunities will need?** Audit against what the current engine actually consumes found **four small gaps**, all cheap, proposed as Q16. Everything else the current scoring/analysis uses is *derivable* from the listed raw domains (SMA/RSI/ADX/realized vol/beta/relative strength from bars; IV rank from daily chain snapshots once a year has accumulated; own-at-strike from bars + book; earnings proximity from the calendar; sector momentum from sector ETFs, which are inside the universe).
 **Framing note.** Stage-1 scope is the **input** side. Picking good trades also needs the **decision record** — what was considered, what was picked, why, and what happened — which is what Q6 (old app's picks) starts and what stage 2 makes central. Outcomes are derivable from point-in-time inputs, so nothing is lost by deferring them, *provided the inputs are stored point-in-time*.
 
@@ -134,14 +134,14 @@ _(numbered Q15+, appended as they arise)_
 **Addendum (2026-09-04).** A rule-based subset has the same "uncapturable past" property as a strike band: a ticker failing the screen today has no chain history when it becomes a candidate next month. So the screen must be generous and the **sticky rule applies at the ticker level**: once a ticker has been captured it stays in the chain set (not dropped for dipping below threshold); removal only on delisting / loss of optionability / explicit operator action, and every add/remove is recorded with its date and reason.
 **Answer (2026-09-04).** Agree with the recommendation; apply the sticky rule at the ticker level. Concrete screen thresholds (price floor, dollar-volume floor) to be set in the spec with a measured count of how many tickers they admit.
 
-### Q16 — Four additions to the stage-1 raw layer  `OPEN`  (raised by Q5)
+### Q16 — Four additions to the stage-1 raw layer  `CLOSED`  (raised by Q5)
 **Question.** Confirm adding these to the Q5 scope:
 1. **Ticker reference data** — sector, industry, market cap, shares outstanding, primary exchange, optionable flag, security type (stock/ETF), name. The current engine's `sectorMomentum` / `sectorWeakness` signals and the risk governor's sector cap depend on the sector tag; sizing needs market cap. Source: Polygon ticker details (already used). Versioned like the universe (sector reclassifications happen).
 2. **Trading calendar** — market holidays, early closes, standard monthly expiration Fridays. Needed for DTE, "is today a trading day", and validating that a captured expiration is real. Tiny table; source: exchange calendar (static + yearly refresh).
 3. **Macro event calendar** — FOMC, CPI, PPI, jobs report dates. The old app seeds these by hand in a migration (`macro_events`, 033); the new layer should store them with a source and an as-of date so a rescheduled event is a new row, not an edit.
 4. **Risk-free rate series** — 13-week T-bill or similar daily yield. E*Trade supplies Greeks, but any *reproduction* of Greeks/IV from stored prices (which the "never in doubt" principle implies we must be able to do) needs the rate used. One number per day.
 **Recommendation.** Add all four. Combined cost: a few dozen calls per day and negligible storage.
-**Answer.** _pending_
+**Answer (2026-09-04).** Agree, add all four.
 
 ---
 
@@ -155,3 +155,4 @@ _(numbered Q15+, appended as they arise)_
 | 2026-09-04 | Q3 CLOSED (one after-close capture); morning-brief consequence recorded under Q3. |
 | 2026-09-04 | Q4 CLOSED (collector hosted in the old app as a batch job, packaged for later move). |
 | 2026-09-04 | Q5 ANSWERED (scope agreed); completeness audit raised Q16 (reference data, trading calendar, macro calendar, risk-free rate). |
+| 2026-09-04 | Q16 CLOSED (all four added); Q5 CLOSED with the final 12-domain list. |
