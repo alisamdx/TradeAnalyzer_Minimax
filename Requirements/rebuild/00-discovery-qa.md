@@ -27,6 +27,14 @@ Started: 2026-09-04.
 - **Two apps, one E*Trade session** is a real conflict: one access token per consumer key; a re-auth in one app kills the other's token; both draw on one Polygon rate budget. Q4 resolves who makes the calls.
 - If the old app collects and the new exe only reads the new SQLite file, the reader must open it **write-capable** (a readonly connection on Windows silently misses recent WAL writes — see CLAUDE.md quirks).
 
+## Sizing notes (2026-09-04)
+
+- Current production DB: **600 MB after 4 months**, ~1.6M rows in the six large tables (`historical_prices` 622k, `screen_results` 397k, `iv_history` 333k, `structure_liquidity_log` 137k, `options_premium_history` 72k, `paper_trade_snapshots` 47k) → ~370 bytes/row, i.e. heavy JSON blobs. Do not repeat that pattern for queried data.
+- SQLite limits: 281 TB theoretical; 10–50 GB routine on a desktop; a few hundred GB workable with indexing + date partitioning. **Storage is not the stage-1 constraint.**
+- Real constraints: one writer at a time (WAL → many readers OK); better-sqlite3 is synchronous on Electron's main thread → heavy aggregates in a worker or on indexes; backups/integrity checks scale with file size.
+- Projected chain volume/year: 300 tickers × 90 DTE × ±25% strikes ≈ 48M rows ≈ 10 GB; 1,500 tickers same depth ≈ 240M rows ≈ 50 GB; full chains ≈ 150 GB+. Everything else combined < 1 GB/yr. **E*Trade fetch time (one call per expiration: ~2,400 vs ~15,000 calls/day) binds before storage does** → drives Q1/Q2.
+- Recommendations: (1) SQLite stays the system of record; **archive every raw provider response compressed on disk** (gzipped JSON-lines per source per day) as the provenance layer — replayable if a schema mistake is found later, ~1/10 the DB size. (2) If year-scale analytics over chains gets slow, add **DuckDB** as a read-only analytics engine over the same data — a later addition, not a stack change.
+
 ---
 
 ## Questions
