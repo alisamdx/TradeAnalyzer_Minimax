@@ -134,9 +134,11 @@ Started: 2026-09-04.
 **Answer (2026-09-05).** Agree with the recommendation.
 **User question — can useful data (settings, ETF list, ...) be copied from the old DB to the new one?** Technically trivial (same SQLite engine; `ATTACH DATABASE` or a script). The real question is *what* may cross under D4 — proposed as a category policy in Q19.
 
-### Q13 — Personal book  `OPEN`
+### Q13 — Personal book  `CLOSED`
 **Question.** Are real E*Trade positions, fills and cash balances part of stage 1 (so P&L history is captured correctly from the start), or a later stage?
-**Answer.** _pending_
+**Recommendation.** Capture the **raw broker records daily from day one** — positions snapshot, account balances, executed orders (the fills), and the `/transactions` fallback for dividends/fees/corporate actions — because they cannot be recovered later if E*Trade's order-history window closes. **Defer the derived layer** (pairing opens to closes, lot construction, realised/unrealised P&L, assignment-as-conversion) to stage 2, built on months of clean fills.
+**Answer (2026-09-05).** Agree with the recommendation.
+**Capture notes for the spec.** Positions are a **daily snapshot** (never overwritten; a position that disappears is detected by comparing snapshots, not by deletion). Executed orders are **append-only keyed by broker order id** (idempotent re-pull; the first pull reaches back as far as E*Trade's window allows and that reach is recorded). Balances one row per day. All via the old app's `etradeGet` path under Q4; the account key is masked in logs as today; success bodies are archived to the raw store (which, unlike the API log, is not plaintext-with-retention — the raw archive for account data must be protected the same way as credentials, see Q20).
 
 ### Q14 — Timeline pressure  `OPEN`
 **Question.** Collector capturing raw data within ~2 weeks so history accumulates while design continues, or complete design document as the gate before any collection?
@@ -191,6 +193,11 @@ _(numbered Q15+, appended as they arise)_
 **Recommendation.** Adopt the five categories.
 **Answer (2026-09-05).** Agree, adopt the five categories.
 
+### Q20 — Protection of the raw archive for account data  `OPEN`  (raised by Q13)
+**Question.** The raw-response archive (sizing notes) stores every provider response verbatim. For E*Trade **account** endpoints (positions, balances, orders, transactions) that means your holdings and cash in clear text on disk — exactly what the API log deliberately never stores. Options: (a) encrypt the account-domain archive files at rest with the same OS keychain (DPAPI) mechanism as the credentials; (b) archive account responses with account key masked and balances/quantities intact (still sensitive); (c) do not archive account responses at all — store only the parsed rows in the DB (which is itself unencrypted).
+**Recommendation.** (a). The archive is the provenance layer and account data needs provenance as much as market data (the estimated-P&L saga proves it); encrypting one directory is cheap. The SQLite file stays unencrypted (as today) — the threat model is "a file copied off the machine", and the archive is the only place where *complete* raw statements would sit.
+**Answer.** _pending_
+
 ---
 
 ## Session log
@@ -214,3 +221,4 @@ _(numbered Q15+, appended as they arise)_
 | 2026-09-05 | Q11 CLOSED (same repo; old app stays at root; packages/core + packages/next). |
 | 2026-09-05 | Q12 CLOSED (same stack, separate DB file); Q19 raised (legacy copy policy by category). |
 | 2026-09-05 | Q19 CLOSED (five-category legacy import policy). |
+| 2026-09-05 | Q13 CLOSED (raw broker records daily from day one; P&L derivation deferred); Q20 raised (encrypting the account-data raw archive). |
