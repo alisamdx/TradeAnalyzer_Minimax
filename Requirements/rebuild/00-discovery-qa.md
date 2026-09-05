@@ -117,10 +117,16 @@ Started: 2026-09-04.
 **Answer (2026-09-05).** Agree, keep current subscriptions. **Ongoing** providers: Polygon, E*Trade, Finnhub (+ SEC EDGAR, free). **One-time subscriptions are acceptable whenever historical accuracy/completeness needs them** (as with the IV history last time).
 **Policy recorded — one-time historical loads.** The Q17 pattern is the standard for *any* one-time load: one source per domain; raw responses archived so the load is reproducible after the subscription lapses; stored as a **segregated, source-labelled external series** with method documented; recorded stitch date; overlap check against own-captured data stored in the quality report before acceptance; never merged into own-captured tables. Candidates for later stages (not stage 1): **historical option chains** (would let stage-2 backtests reach before own capture began), **historical earnings dates** (past-report studies), **historical constituents** (survivorship-free universe history).
 
-### Q11 — Repository layout  `OPEN`
+### Q11 — Repository layout  `CLOSED`
 **Question.** New repo, or a new package inside this repo so shared code is imported rather than copied?
 **Recommendation.** Same repo, `packages/` workspace: `core` (shared), current app, new app. Copying code means fixing the same E*Trade bug twice.
-**Answer.** _pending_
+**Answer (2026-09-05).** Agree with the recommendation.
+**Layout constraints recorded (to protect D1).**
+- **The old app is NOT moved.** It stays at the repo root exactly as it is; the root `package.json` gains a `workspaces` entry pointing at `packages/*`. Relocating 76k lines under `packages/legacy/` would touch every import path and build script for zero benefit.
+- `packages/core` — shared, **Electron-free, dependency-light** TypeScript (E*Trade transport + OAuth, rate limiter, formulas, unit conventions/data dictionary types, the collector). Must run under plain Node so Vitest and scripts can import it without the Electron ABI. Code moves from the old app into `core` **only when the collector needs it**, and the old app then imports it from `core` — one implementation, two hosts.
+- `packages/next` (working name) — the new exe: its own electron-vite build, its own SQLite file, its own migrations, own `package.json` version line.
+- Both Electron apps carry the better-sqlite3 ABI swap scripts; `core` itself never links a native module directly.
+- Path aliases (`@shared/*`) were the reason plain-node harnesses could not import the real services (CLAUDE.md quirk) — `core` uses **package imports only**, no path aliases.
 
 ### Q12 — Stack for the new exe  `OPEN`
 **Question.** Electron + React + SQLite + Vitest again, or is anything on the table?
@@ -194,3 +200,4 @@ _(numbered Q15+, appended as they arise)_
 | 2026-09-05 | Q9 CLOSED (per-run quality report); Q18 raised (exception alerting + resolution workflow). |
 | 2026-09-05 | Q18 CLOSED (all seven adopted). |
 | 2026-09-05 | Q10 CLOSED (current subscriptions ongoing; one-time historical subscriptions allowed under the Q17 pattern). |
+| 2026-09-05 | Q11 CLOSED (same repo; old app stays at root; packages/core + packages/next). |
