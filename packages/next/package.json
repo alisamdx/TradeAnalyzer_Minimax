@@ -38,6 +38,10 @@
     },
     "win": {
       "forceCodeSigning": false
-    }
+    },
+    "electronVersion": "32.3.3"
+  },
+  "devDependencies": {
+    "electron": "^32.2.2"
   }
 }

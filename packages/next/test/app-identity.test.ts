@@ -42,6 +42,29 @@ describe('app identity', () => {
     expect(main).not.toMatch(/'trade-analyzer'/);
   });
 
+  it('pins Electron to the same range as the root, and to the version actually installed', () => {
+    // 06 §4: one `electron` copy for the whole workspace, so the existing
+    // ABI-swap script still governs both apps. Two things can break that and
+    // neither is loud: a different RANGE here (npm would install a second copy,
+    // rebuilt for the wrong runtime silently — the failure CLAUDE.md warns
+    // about), or an `electronVersion` in the build config that has drifted from
+    // what is installed (electron-builder would package a runtime the native
+    // modules were not built against).
+    const rootPkg = JSON.parse(read('../../../package.json')) as {
+      devDependencies: Record<string, string>;
+    };
+    const nextPkg = JSON.parse(read('../package.json')) as {
+      devDependencies: Record<string, string>;
+      build: { electronVersion: string };
+    };
+    const installed = (
+      JSON.parse(read('../../../node_modules/electron/package.json')) as { version: string }
+    ).version;
+
+    expect(nextPkg.devDependencies['electron']).toBe(rootPkg.devDependencies['electron']);
+    expect(nextPkg.build.electronVersion).toBe(installed);
+  });
+
   it('keeps the renderer context-isolated with node integration off', () => {
     const main = read('../src/main/index.ts');
     expect(main).toMatch(/contextIsolation:\s*true/);

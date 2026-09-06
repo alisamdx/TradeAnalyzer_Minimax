@@ -11,8 +11,11 @@ exit (06 §6).
 
 ## B1 — workspaces, empty packages, purity guard (2026-09-06)
 
-`core@0.1.0`, `next@0.1.0`. First build step. Both apps build; the existing app
-is unchanged in behaviour.
+`core@0.1.0`, `next@0.1.0`. First build step. `typecheck:all` green, `core` 22
+tests and `next` 7 tests green, both packages lint clean, and
+`release/win-unpacked/TradeAnalyzer 2.exe` packages (186 MB, `--dir`, no
+installer). The existing app is unchanged in behaviour and its `out/` is
+untouched.
 
 **Added**
 
@@ -55,6 +58,20 @@ is unchanged in behaviour.
 - **`COLLECTOR_VERSION` is asserted equal to `package.json`'s `version`.** It is
   written to `meta_run.collector_version`, so drift between the two would
   mislabel every run of a generation — silently, and only visibly much later.
+
+- **Packaging needed a pin 06 had not anticipated.** With `electron` hoisted to
+  the workspace root, electron-builder cannot compute a version from
+  `packages/next` and refuses outright: *Cannot compute electron version from
+  installed node modules*. Fixed by declaring `electron` in `next` at the
+  **identical range string** as root (so npm still keeps one copy) **and**
+  setting `build.electronVersion` explicitly. Those are two values that can now
+  drift apart, and neither drifts loudly — a mismatched range installs a second
+  Electron rebuilt for the wrong runtime silently, and a stale `electronVersion`
+  packages a runtime the native modules were not built against. So the identity
+  test asserts both, comparing `electronVersion` against the version actually
+  **installed** rather than against another declaration: the installed copy is
+  what `rebuild-better-sqlite3.mjs` targets. Verified to fail when the value is
+  moved off by a version.
 
 **Deviations from 06 as written, recorded rather than silently taken**
 
