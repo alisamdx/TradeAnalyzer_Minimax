@@ -407,7 +407,7 @@ Every observation of an earnings date is a row (P1); "the current best date" is 
 |---|---|---|---|
 | `ticker` | TEXT | no | `symbol` |
 | `report_date` | TEXT | no | Finnhub `date`; E*Trade earnings date |
-| `report_time` | TEXT | yes: omitted | Finnhub `hour` (`bmo`/`amc`/`dmh`) |
+| `report_time` | TEXT | yes: omitted | Finnhub `hour`. **Measured 2026-09-06 over 520 universe reports: `bmo` 132, `amc` 144, and `''` (empty string, not absent) on 244 — 47 %.** `dmh` was never observed. The converter must map `''` -> null with `report_time_status = 'omitted'`; treating empty string as a value would put a fourth member in the enum and silently defeat any `report_time IS NULL` filter |
 | `fiscal_year`, `fiscal_quarter` | INTEGER | yes: omitted | `year`, `quarter` |
 | `eps_estimate`, `eps_actual` | REAL | yes + status | `epsEstimate`, `epsActual` USD |
 | `revenue_estimate`, `revenue_actual` | REAL | yes + status | `revenueEstimate`, `revenueActual` USD |
@@ -590,20 +590,21 @@ The operator asked whether the domains suffice to judge "is this stock worth own
 | Facet | Covered by | Gap |
 |---|---|---|
 | Company financials | `raw_edgar_fact` (all statements, quarterly, multi-year) | none |
-| Valuation (P/E, EV/EBITDA, P/FCF, P/S, yield, own-history percentiles) | derivable: facts + bars + `shares_outstanding` + `market_cap` + dividends | **forward** valuation (forward P/E, PEG) needs consensus estimates — not captured |
+| Valuation (P/E, EV/EBITDA, P/FCF, P/S, yield, own-history percentiles) | derivable: facts + bars + `shares_outstanding` + `market_cap` + dividends | **forward** valuation (forward P/E, PEG) — **partially closed 2026-09-06**: the free earnings calendar carries next-report `epsEstimate`/`revenueEstimate` for 99 % of the universe (§12), so one-quarter-ahead forward P/E is derivable. A full multi-year estimate curve still is not |
 | Technical / trend | derivable from `raw_daily_bar` | none |
 | Volatility regime | `raw_option_contract_snapshot` (IV, skew), bars (realized vol), `ext_iv_history` bootstrap | none after bootstrap |
 | Options-implied sentiment (put/call OI and volume ratios, skew) | derivable from chain snapshots | none |
 | Ownership / quality (dividend history, payout ratio, buybacks via share count trend) | dividends, facts, `raw_ticker_reference` history | none |
-| **Short interest** | — | **not captured** |
-| **Analyst view** (recommendation trend, target, EPS estimates and surprises) | `eps_estimate/actual` on earnings rows only | **not captured** beyond the earnings row |
+| **Short interest** | — | **captured, source unresolved** — Finnhub's endpoint is premium (403, 2026-09-06); falls to Polygon or FINRA |
+| **Analyst view** (recommendation trend, target, EPS estimates and surprises) | `eps_estimate/actual` on earnings rows only | recommendation trend and forward EPS/revenue estimates **captured** (free, measured 2026-09-06); price target and estimate dispersion are premium and stay **not captured** |
 | **Insider transactions** (Form 4) | — | **excluded by Q5**, but it is structured EDGAR data, not "news" |
 | News sentiment | — | deliberately out: unstructured, model-dependent, cannot meet D6 |
 
 Tables (full dictionary entries to be completed alongside the verify list in 04):
 
-- `raw_short_interest` — `ticker, settlement_date, short_interest INTEGER, avg_daily_volume INTEGER, days_to_cover REAL, source` (FINRA publishes twice monthly; Polygon and Finnhub both expose it; **verify** plan coverage).
-- `raw_analyst_recommendation` — `ticker, period_month, strong_buy, buy, hold, sell, strong_sell INTEGER, source='finnhub'` (Finnhub `/stock/recommendation`, free tier) and `raw_analyst_estimate` — `ticker, fiscal_period, eps_estimate_avg/high/low, revenue_estimate_avg, num_analysts, source` (Finnhub estimates: **verify** free-tier availability; if premium, PEG/forward-P/E stays a declared gap).
+- `raw_short_interest` — `ticker, settlement_date, short_interest INTEGER, avg_daily_volume INTEGER, days_to_cover REAL, source` (FINRA publishes twice monthly). **Measured 2026-09-06: Finnhub `/stock/short-interest` is 403 on our free tier** — this domain therefore rests on Polygon's `/stocks/vX/short-interest` (plan coverage still **verify**) or a direct FINRA file. It is the one §12 domain with no confirmed free source.
+- `raw_analyst_recommendation` — `ticker, period_month, strong_buy, buy, hold, sell, strong_sell INTEGER, source='finnhub'`. **Confirmed free 2026-09-06**: `/stock/recommendation` returns 200 with exactly the drafted fields (`symbol, period, strongBuy, buy, hold, sell, strongSell`), four monthly periods per call.
+- `raw_analyst_estimate` — **resolved 2026-09-06, and not where the draft looked.** The dedicated endpoints are **premium**: `/stock/eps-estimate`, `/stock/revenue-estimate` and `/stock/price-target` all return **403**. But `/calendar/earnings` — already being called for `raw_earnings_event` — carries `epsEstimate` and `revenueEstimate` **per scheduled report**, on the free tier, for future dates. Coverage on *our* universe is near-total: over the next 60 days, **520 scheduled reports, 517 with an EPS estimate (99.4 %) and 515 with a revenue estimate (99.0 %)**. (The all-market figure is only ~45 % — the gap is micro-caps, so measuring this on the raw calendar rather than on the universe would have understated it by half.) So the table becomes `ticker, fiscal_period, eps_estimate_avg, revenue_estimate_avg, source='finnhub'` sourced from the calendar row, and **it costs no extra call**. What stays unavailable is estimate *dispersion* — `high`/`low`/`num_analysts` are premium-only and are dropped from the table; PEG and forward P/E are recoverable **one report ahead**, not as a full estimate curve.
 - `raw_insider_transaction` — `cik, ticker, filer_name, filer_role, transaction_date, transaction_code, shares INTEGER, price REAL, shares_owned_after INTEGER, accession_no` (EDGAR Form 4; the existing `news-data-fetcher.ts` already parses these). Captured by **one daily full-index sweep**, not per ticker: EDGAR publishes `full-index/<year>/QTR<n>/form.idx` listing every filing of the day, so a single call yields every Form 4 filed and the universe filter is applied locally. Per-ticker polling would be ~300 calls a day to learn that almost nothing was filed.
 
 **Q21 decision:** all three added. Each is a few calls per day, structured, provenance-clean. News sentiment stays out.
@@ -672,7 +673,7 @@ Populated by the hand-off contract in 04 (forward, from the day the collector st
 1. E*Trade `OptionGreeks.theta` time unit; `timeStamp` epoch unit.
 2. E*Trade index symbol for VIX and the `All.*` field names beyond `lastTrade`.
 3. E*Trade `Position.positionId`; transactions `brokerage.*` paths.
-4. Polygon `weighted_shares_outstanding` availability on the current plan.
-5. Finnhub free-tier availability of estimates and short interest; Polygon short-interest plan coverage (Q21).
+4. Polygon `weighted_shares_outstanding` availability on the current plan. **The fallback is already proven** (04 §11, 2026-09-06): `share_class_shares_outstanding` comes back for >= 95.8 % of the universe on this plan, so `shares_outstanding` will populate regardless of how the primary resolves — what one live call still settles is which value `shares_source` records.
+5. ~~Finnhub free-tier availability of estimates and short interest~~ — **settled 2026-09-06** (04 §11): recommendations, insider transactions and calendar-borne estimates are free; dedicated estimate/target endpoints and short interest are 403. **Polygon short-interest plan coverage remains open** (Q21) and is now the only unresolved source in §12.
 6. Treasury daily par yield feed format and the exact fetch URL.
 7. Measured admitted count for the working chain-subset thresholds (Q15).
