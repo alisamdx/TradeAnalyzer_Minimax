@@ -1,5 +1,6 @@
 import { app, BrowserWindow, shell } from 'electron';
 import { join } from 'node:path';
+import { existsSync } from 'node:fs';
 import { COLLECTOR_VERSION, DICTIONARY_VERSION } from '@tradeanalyzer/core';
 
 /**
@@ -16,13 +17,31 @@ import { COLLECTOR_VERSION, DICTIONARY_VERSION } from '@tradeanalyzer/core';
 // installed and running at the same time all through stage 1.
 app.setPath('userData', join(app.getPath('appData'), 'trade-analyzer-next'));
 
+/**
+ * The window icon, for development only.
+ *
+ * A packaged Windows build takes its taskbar and title-bar icon from the
+ * executable's own resource, which electron-builder writes from
+ * `build/icon.ico` — so setting it here would be redundant there, and the path
+ * would not resolve anyway once `out/` is inside `app.asar`. In `dev` there is
+ * no executable resource, so without this the window wears the default Electron
+ * icon and looks like a different app than the one that gets packaged.
+ */
+function devWindowIcon(): string | undefined {
+  if (app.isPackaged) return undefined;
+  const png = join(import.meta.dirname, '../../build/icon.png');
+  return existsSync(png) ? png : undefined;
+}
+
 function createWindow(): void {
+  const icon = devWindowIcon();
   const window = new BrowserWindow({
     width: 1400,
     height: 900,
     show: false,
     autoHideMenuBar: true,
     title: 'TradeAnalyzer 2',
+    ...(icon ? { icon } : {}),
     webPreferences: {
       preload: join(import.meta.dirname, '../preload/index.mjs'),
       sandbox: false,

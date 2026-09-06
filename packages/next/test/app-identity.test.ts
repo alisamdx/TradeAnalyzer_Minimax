@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 /**
@@ -69,6 +69,41 @@ describe('app identity', () => {
     const main = read('../src/main/index.ts');
     expect(main).toMatch(/contextIsolation:\s*true/);
     expect(main).toMatch(/nodeIntegration:\s*false/);
+  });
+
+  it('ships a multi-size icon that electron-builder will actually find', () => {
+    // Windows picks a different frame out of the .ico for the taskbar (16/24),
+    // the alt-tab switcher (32/48) and the desktop (256). An .ico holding one
+    // large frame is legal, builds without a murmur, and looks blurred at every
+    // size that matters — so the frame list is asserted rather than assumed.
+    const nextPkg = JSON.parse(read('../package.json')) as { build: { win: { icon: string } } };
+    expect(nextPkg.build.win.icon).toBe('build/icon.ico');
+
+    const icoPath = fileURLToPath(new URL('../build/icon.ico', import.meta.url));
+    expect(existsSync(icoPath)).toBe(true);
+
+    const raw = readFileSync(icoPath);
+    expect(raw.readUInt16LE(0)).toBe(0); // reserved
+    expect(raw.readUInt16LE(2)).toBe(1); // type 1 = icon
+    const count = raw.readUInt16LE(4);
+
+    const frames: number[] = [];
+    const offsets = new Set<number>();
+    for (let i = 0; i < count; i++) {
+      const entry = 6 + i * 16;
+      frames.push(raw[entry] === 0 ? 256 : raw[entry]!); // 0 encodes 256
+      offsets.add(raw.readUInt32LE(entry + 12));
+    }
+    expect(frames).toEqual([16, 24, 32, 48, 64, 128, 256]);
+    // Distinct payload offsets: each size is its own drawing, not one image
+    // resampled seven times, which is what the generator exists to guarantee.
+    expect(offsets.size).toBe(count);
+  });
+
+  it('sets the window icon in dev only — packaged Windows uses the exe resource', () => {
+    const main = read('../src/main/index.ts');
+    expect(main).toMatch(/if \(app\.isPackaged\) return undefined;/);
+    expect(main).toContain("'../../build/icon.png'");
   });
 
   it('declares the window.api shape in exactly one place', () => {

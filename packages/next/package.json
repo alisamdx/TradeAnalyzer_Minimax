@@ -37,6 +37,7 @@
       "output": "release"
     },
     "win": {
+      "icon": "build/icon.ico",
       "forceCodeSigning": false
     },
     "electronVersion": "32.3.3"

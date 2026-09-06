@@ -9,6 +9,39 @@ exit (06 §6).
 
 ---
 
+## Icon — TradeAnalyzer 2 (2026-09-06)
+
+`next@0.1.0`. Operator choice from four candidates rendered at real icon sizes.
+
+**Added** — `packages/next/build/icon.ico` (7 frames: 16, 24, 32, 48, 64, 128,
+256), `icon.png` for dev, and `make-icon.py` that generates both. Wired via
+`build.win.icon`; electron-builder no longer logs *default Electron icon is
+used*, and the 32px frame extracted back out of the packaged exe is the mark.
+
+**The mark** is a candlestick whose body is punched through with binary digits —
+market data made of bits — in amber on near-black. Amber because the existing
+app wears the default Electron icon, and the two must never be confused in a
+taskbar.
+
+**Each size is drawn, not scaled.** Three digits at 128 and above, two at 48–64,
+none below — and the body and wick thicken as the icon shrinks, because the
+proportions that read as a candlestick at 256px read as a plain stick at 16px.
+Downsampling one 256px drawing to 16px turns the digits into grey noise, which
+was visibly the failure of two of the four candidates and the reason the other
+two were redrawn rather than merely rescaled.
+
+**Asserted, not assumed.** An `.ico` holding a single large frame is legal,
+builds silently and looks blurred at every size Windows actually uses — the
+taskbar takes 16/24, alt-tab 32/48, the desktop 256. So `app-identity.test.ts`
+parses the ICO directory and checks both the exact frame list **and** that all
+seven payload offsets are distinct, which is what proves each size is its own
+drawing rather than one image resampled seven times.
+
+**The generator is committed alongside its output.** A binary asset with no
+source is a dead end the first time anything about it needs to change.
+
+---
+
 ## B1 — workspaces, empty packages, purity guard (2026-09-06)
 
 `core@0.1.0`, `next@0.1.0`. First build step. `typecheck:all` green, `core` 22
