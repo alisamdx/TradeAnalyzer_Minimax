@@ -57,12 +57,12 @@ One run per trading day, slot `after_close`. Phases execute in order; each phase
 |---|---|---|---|---|
 | 0 | **Preflight** | 2 | — | `meta_run` (status `running`) |
 | 1 | **Universe & reference** | ~10 list fetches + reference for changed/heartbeat tickers (~60/day) | 0 | `ref_universe_membership`, `raw_ticker_reference`, `ref_sic_sector` |
-| 2 | **Daily bars** | 1 per active ticker (~1,580) | 1 | `raw_daily_bar` |
+| 2 | **Daily bars** | 1 per active ticker (~1,089) | 1 | `raw_daily_bar` |
 | 3 | **EOD snapshot** | 1 | 1 | `raw_eod_quote` |
 | 4 | **Corporate actions** | 2 window sweeps + per-discontinuity | 2 | `raw_split`, `raw_dividend` |
 | 5 | **Account** | 4 (portfolio, balance, orders, transactions) | 0 | `raw_account_*`, `raw_executed_order*` |
 | 6 | **Chain subset & sticky sets** | 0 (computed) | 2, 5 | `ref_chain_subset_membership`, `ref_sticky_contract` |
-| 7 | **Expirations & chains** | 1 per subset ticker + 1 per in-window expiration (~300 + ~2,400) | 6 | `raw_option_expiration`, `raw_option_contract_snapshot` |
+| 7 | **Expirations & chains** | 1 per subset ticker + 1 per in-window expiration (~500 + ~4,000–6,500) | 6 | `raw_option_expiration`, `raw_option_contract_snapshot` |
 | 8 | **Event & macro domains** | earnings sweep slices (~10), EDGAR (changed filers, ~20), VIX (1), yields (1), macro calendar (monthly), short interest / recommendations (~300, cadence-gated), insider **1** (daily full-index sweep) | 1 | `raw_earnings_event`, `raw_edgar_*`, `raw_index_quote`, `raw_treasury_yield`, `raw_macro_event`, `raw_short_interest`, `raw_analyst_*`, `raw_insider_transaction` |
 | 9 | **Derivation** | 0 | 7 | `derived_iv30_daily` |
 | 10 | **Gate & email** | 0 | all | `qa_*`, `meta_run` (status, `gate_verdict`) |
@@ -101,15 +101,17 @@ Measured pace from the existing app (2026-09-04) and the resulting stage-1 budge
 
 | Phase | Calls | Provider | Pace used for planning | Elapsed |
 |---|---|---|---|---|
-| 2 bars | ~1,580 | Polygon | 600/min (⅓ of observed peak, leaves room for the old app) | ~3 min |
+| 2 bars | ~1,089 | Polygon | 600/min (⅓ of observed peak, leaves room for the old app) | ~2 min |
 | 3, 4, 8 misc | ~350 | mixed | — | ~5 min |
 | 5 account | 4 | E*Trade | — | < 1 min |
-| 7 expirations | ~300 | E*Trade | 120/min | ~3 min |
-| 7 chains | ~2,400 (300 tickers × ~8 in-window expirations) | E*Trade | 120/min | ~20 min |
+| 7 expirations | ~500 | E*Trade | 120/min | ~4 min |
+| 7 chains | **~4,000–6,500** (500 tickers × 8–13 in-window expirations) | E*Trade | 120/min | ~33–54 min |
 | 9, 10 | 0 | — | — | ~2 min |
-| **Total** | **~4,600** | | | **~35 min**, start 17:05 → done ≈ 17:40 ET |
+| **Total** | **~6,000–8,500** | | | **~46–68 min**, start 17:05 → done ≈ 17:50–18:15 ET |
 
-Hard deadline: phase 10 must complete by **19:15 ET**; the 19:30 watchdog reports otherwise. If the chain subset grows to the full universe (Q15 allows widening), chains alone become ~13,000 calls ≈ 1.8 h at the same pace, still inside the deadline, but the subset rule is the lever to pull first.
+The chain call count carries a real range because the **expirations-per-ticker figure is still unmeasured** (§11). The old app's ~7.3 chain calls per symbol is not evidence: it was requesting a guessed list of 8 Fridays, not each ticker's actual expirations (§10). A liquid name at this cut plausibly lists ~8 weeklies inside 90 DTE plus ~3 monthlies plus the 2 extra, so **13 is the honest upper end** and 8 the optimistic one. This is the single largest uncertainty in the run budget and it is one `optionexpiredate` sweep away from being known.
+
+Hard deadline: phase 10 must complete by **19:15 ET**; the 19:30 watchdog reports otherwise. At the measured subset (~500) the run finishes ≈ 18:15 ET at worst, leaving ~1 h of headroom. Because membership is **sticky and therefore only grows**, that headroom is consumed over time and is worth watching: at the full universe (~1,089, which the drafted `$20M` threshold would have selected on day one) chains alone are ~8,700–14,000 calls ≈ 1.2–1.9 h, ending 18:30–19:10 ET — inside the deadline but with no margin for a retry storm. The subset rule is the lever to pull first.
 
 Bars fetched at 17:05 are treated as final per the settlement quirk; `is_final` is set from `respondedAt ≥ 17:00 ET`, and any non-final bar is re-fetched at the end of phase 7 (R3).
 
@@ -124,14 +126,14 @@ Bars fetched at 17:05 are treated as final per the settlement quirk; `is_final` 
 | `universe` | `{ lists: ["sp500", "russell1000", "etf_list"], etfListSource: "config" }` |
 | `bars` | `{ scope: "universe_active", adjusted: true, depthDays: 1 }` (backfill job uses `depthYears: 5`) |
 | `quotes` | `{ scope: "universe_active", source: "polygon_full_snapshot" }` |
-| `chain_subset` | `{ minClose: 10, minAvgDollarVolume20d: 20_000_000, sticky: "ticker" }` † |
+| `chain_subset` | `{ minClose: 10, minAvgDollarVolume20d: 233_000_000, sticky: "ticker" }` ‡ |
 | `chain` | `{ maxDte: 90, extraMonthlies: 2, allStrikes: true, sticky: "contract" }` |
 | `account` | `{ ordersLookbackDays: 30, transactionsFallback: true }` |
 | `earnings` | `{ horizonDays: 120, initialSliceDays: 14, subdivideAtCap: true }` |
 | `edgar` | `{ scope: "universe_cs_with_cik", refetchOnNewFiling: true, sweepDays: 7 }` |
 | `sentiment` | `{ shortInterestEveryDays: 7, recommendationsEveryDays: 7, insiderDailyIndexSweep: true }` |
 
-† working thresholds; the measured admitted count is recorded in §11 before the pilot starts.
+‡ **measured 2026-09-05, not drafted** — see §11. The originally drafted `$20M` admitted **1,104 of 1,136 tickers (97.2 %)**: it sat at the **1st percentile** of 20-day dollar volume (median $190M) and could not select. `$233M` cuts just above the median and admits ~500. Changing any value creates a new `meta_capture_rule` row.
 
 Changing any value creates a **new `meta_capture_rule` row**; runs from then on reference it; the change is an `info` exception so it appears in that day's email.
 
@@ -191,7 +193,7 @@ gen-001/
   MANIFEST.json                    ← generation_no, opened_at, dictionary_version, file list + sha256 (rewritten at end of each run)
 ```
 
-Retention: **forever** (the archive is the provenance layer, P2). Estimated size: chains dominate at ~10–15 MB/day compressed for the ~300-ticker subset (~4 GB/yr); everything else < 1 GB/yr. Encrypted files carry a 16-byte header `TADATA-ENC-v1` + mechanism id so a decrypt failure is diagnosable (Q20).
+Retention: **forever** (the archive is the provenance layer, P2). Estimated size: chains dominate at ~17–25 MB/day compressed for the measured ~500-ticker subset (**~6 GB/yr**); everything else < 1 GB/yr. Sticky growth raises this over time; at the full universe it is ~13 GB/yr. Encrypted files carry a 16-byte header `TADATA-ENC-v1` + mechanism id so a decrypt failure is diagnosable (Q20).
 
 ---
 
@@ -263,9 +265,20 @@ Every `candidates[]` entry the brief scored is included — **the losers too** (
 
 ## 10. Additions to 03 arising from the measured log
 
-- **QC-412 chain 4xx rate** (`warning`; `blocking` if > 5 % †): a 4xx on an `optionchains` call for an expiration that `optionexpiredate` listed in the same run. The archived 400 bodies will say why.
+- **QC-412 chain 4xx rate** (`warning` on any; `blocking` if > 0.5 % † of the run's chain calls): a 4xx on an `optionchains` call for an expiration that `optionexpiredate` listed in the same run. The archived 400 bodies will say why.
 
-  **This one is a prerequisite, not a threshold to tune later.** The measured rate in the existing app is **34 %** — nearly seven times the blocking boundary — so on the numbers as they stand the chain domain is `unusable` from run 1 and the clean-day streak (03 §8) can never begin. Two outcomes are possible and they need opposite responses: either the 400s are *legitimate* (E*Trade lists an expiration on `optionexpiredate` that `optionchains` will not serve — in which case the boundary is wrong and the real fix is to stop requesting those expirations), or they are *ours* (a malformed request, the UTC weekday bug's cousin), in which case the boundary is right and the collector must not inherit the bug. **Diagnosing which comes before the pilot**, and it is cheap: the existing app now logs E*Trade calls with a 300-character response-body preview (`logs/api/api_<date>.jsonl`, `"provider":"etrade"`, v1.1.144), so the answer is already on disk. Added to §11.
+  **DIAGNOSED 2026-09-05 — the 34 % is *ours*, and this design does not inherit it.** Read from the existing app's `logs/api/api_2026-09-0{2,3,4}.jsonl`:
+
+  | finding | evidence |
+  |---|---|
+  | Effectively all of it is one error | **97 %** of the 400s are E*Trade code **10031 "There are no options for the given month"** (2,618 of 2,702 on 09-04). The remainder: 60 × code 10032 "no options for this symbol", 24 × 10033 "invalid symbol" |
+  | It is concentrated on **one requested date** | **2,654 of 2,702** 400s are for `2026-10-09` — the *second* Friday of October, a **weekly**. The third Friday `2026-10-16` (a monthly) succeeded 3,523 times and failed only 48 |
+  | It is deterministic, not transient | the failing `(symbol, date)` set is **identical on 09-03 and 09-04**: the same 688 pairs both days |
+  | The 48 monthly failures are real non-optionables | 12 symbols never got a single 200 all day — `DDS`, `NVR`, `SEB`, `LEN.B`, `LBRDA/K`, `AVB`, `EQR`, `EA`, `UI`, `WBS`, `WTM` |
+
+  **Mechanism**: the existing app requests a **globally guessed list of Fridays** for every ticker rather than each ticker's own expirations — the `nextFridays` shape CLAUDE.md already flags. Roughly 60 % of optionable names have no listed expiration on a non-monthly Friday five weeks out, so they 400, every ticker, every day, forever.
+
+  **Consequence for this design: none, by construction.** §4.3 selects expirations from that ticker's own `raw_option_expiration` rows, written from its own `optionexpiredate` response in the same run. A 400 then means E*Trade **contradicted itself inside one run**, which is genuinely anomalous — so the working threshold is not 5 %: **any occurrence is a `warning`, and > 0.5 % of chain calls in a run is `blocking`**. The 34 % was never a baseline to inherit; it is the signature of the bug this phase avoids. It also validates the §3 budget: the ~2,400 chain calls planned are the ~5,200 the old app actually completed, minus the ~2,700 it wasted.
 - **QC-413 renew storm** (`warning`): more than 20 `renew_access_token` calls in one run (yesterday: 1,383/day). Renewing on every failure is correct; a storm means a non-auth failure is being misread as dormancy.
 
 ---
@@ -276,18 +289,21 @@ Two kinds of item: **provider facts** the dictionary cannot be frozen without, a
 
 | item | how | result |
 |---|---|---|
-| Chain-subset admitted count at the working thresholds | run the §4.2 rule against the existing app's `historical_prices` (read-only; measurement only) | _pending_ |
-| Expected chain calls/day at that count | Σ in-window expirations from the existing `optionexpiredate` responses | _pending_ |
-| E*Trade `theta` unit, `timeStamp` unit, VIX symbol, `positionId`, transactions paths (02 §16) | one manual run of each call, bodies inspected | _pending_ |
+| Chain-subset admitted count at the working thresholds | ran the §4.2 rule against the existing app's `historical_prices`, as-of 2026-09-04, 1,136 tickers with 20 full days | **DONE 2026-09-05.** Drafted `$10 / $20M` admitted **1,104 (97.2 %)** — decorative; `$20M` is the **1st percentile** of 20-day dollar volume (p10 $50M, **p50 $190M**, p90 $1,026M). Threshold curve: 300→$396M, 400→$307M, 500→**$233M**, 700→$136M, 900→$78M. **Rule changed to `$233M`** (~500 tickers), operator decision 2026-09-05 |
+| Universe size | `SELECT COUNT(DISTINCT ticker) FROM constituents` | **DONE 2026-09-05: 1,089**, not 1,587. The discovery figure was a *row* count (503 sp500 + 1,024 russell1000 + 60 etf = 1,587 rows), and the lists overlap almost entirely. All 1,089 have price history |
+| QC-201 bar-completeness baseline | daily distinct-ticker count over the last 25 trading days | **DONE 2026-09-05.** Steady state **1,083 of 1,089 — a persistent 0.55 % miss**, the same six tickers daily, not transient. The 1 % blocking line is ~2× the floor, i.e. about **five tickers of headroom**. Non-zero baseline recorded so a future session does not read 0.55 % as a fault |
+| QC-302 close disagreement | existing bars vs quotes, same day | **NOT MEASURABLE HERE.** `quote_cache` holds one row per ticker with only `fetched_at` — no as-of date, no history to compare. Needs the collector's own `raw_eod_quote`; the † value stands until the pilot |
+| Expected chain calls/day at that count | one `optionexpiredate` sweep over the ~500 admitted tickers, counting expirations inside the §4.3 window | _pending_ — **the largest remaining uncertainty in the run budget** (§3). Cannot be recovered from the existing logs: E*Trade success bodies are never logged (P15) |
+| E*Trade `theta` unit, `timeStamp` unit, VIX symbol, `positionId`, transactions paths (02 §16) | one manual run of each call, bodies inspected | _pending_ — **blocked 2026-09-05: the E*Trade token is dead** (`renew_access_token` returning 401; a manual re-auth is required). Groups with QC-410 and QC-407 below, all of which need one live chain call |
 | Polygon `weighted_shares_outstanding` on the current plan | one ticker-details call | _pending_ |
 | Finnhub free-tier: estimates, short interest | one call each | _pending_ |
 | Treasury par-yield fetch URL and format | one fetch | _pending_ |
 | IV bootstrap source chosen | compare IVolatility vs MarketData.app on method note, depth, subset coverage, price — **a spend decision, not a measurement**; not needed until B7 | _pending_ |
-| **Diagnose the 34 % chain 4xx rate** (§10, QC-412) | read the archived 400 bodies in the existing app's `logs/api/api_*.jsonl` where `provider=etrade` and the endpoint is `optionchains`; classify legitimate-vs-ours | _pending_ |
-| QC-410 Greek reproduction: delta tolerance, and with it the `theta` time unit, `timeStamp` epoch unit and IV scale | one live chain call reproduced through Black-Scholes; settles three verify-list items at once | _pending_ |
+| **Diagnose the 34 % chain 4xx rate** (§10, QC-412) | read the archived 400 bodies in the existing app's `logs/api/api_*.jsonl` | **DONE 2026-09-05 — ours.** 97 % are code 10031 on a globally-guessed weekly date the ticker does not list; deterministic across days. Per-ticker expirations (§4.3) eliminate the class; QC-412 threshold tightened 5 % → 0.5 %. Full write-up in §10 |
+| QC-410 Greek reproduction: delta tolerance, and with it the `theta` time unit, `timeStamp` epoch unit and IV scale | one live chain call reproduced through Black-Scholes; settles three verify-list items at once | _pending_ — blocked on the same re-auth |
 | QC-201 / QC-301 completeness (1 %) | coverage rate over the existing app's stored bar and quote history | _pending_ |
 | QC-302 close disagreement (0.5 % per ticker, 2 % of tickers) | existing bars vs quotes, same day, across the universe | _pending_ |
-| QC-407 underlying disagreement (1 %) | E*Trade `nearPrice` vs Polygon last on one live chain call | _pending_ |
+| QC-407 underlying disagreement (1 %) | E*Trade `nearPrice` vs Polygon last on one live chain call | _pending_ — blocked on the same re-auth |
 | QC-702 shares-outstanding drift (25 %) | EDGAR facts vs Polygon reference for the CS universe | _pending_ |
 | QC-101 universe drift (5 %) | index membership change history | _pending_ |
 | `backfill_bars` review queue cleared | all QC-205 exceptions resolved/accepted | _pending_ |

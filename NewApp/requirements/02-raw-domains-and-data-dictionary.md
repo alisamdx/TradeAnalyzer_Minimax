@@ -225,7 +225,7 @@ Which tickers are in the universe and why, as validity ranges. Never overwritten
 | `change_reason` | TEXT | no | `initial` \| `index_add` \| `index_drop` \| `ticker_change` \| `delisted` \| `manual` |
 | `predecessor_ticker` | TEXT | yes: "no rename involved" | ticker-change lineage |
 
-Expected count: |current members| ≈ 1,587 at start.
+Expected count: |current members| ≈ **1,089** at start — measured 2026-09-05 as the *union* of sp500 (503), russell1000 (1,024) and etf (60). The three lists overlap heavily: their sum is 1,587, which is the number discovery recorded and every section inherited until it was measured.
 
 #### `raw_ticker_reference`
 Point-in-time reference facts; a row is appended when any field differs from the latest stored row for the ticker (or at least every 30 days as a heartbeat), so "as known on day X" is well defined.

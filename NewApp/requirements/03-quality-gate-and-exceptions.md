@@ -326,9 +326,9 @@ REPEAT OFFENDERS (1)
 WARNINGS (3)  QC-302 ×2, QC-805 ×1
 
 DOMAINS                    expected   stored   status
-  bars                        1,581    1,581   usable
-  quotes                      1,581    1,579   usable_with_warnings
-  chains (312 tickers)        2,406 calls  2,406   usable
+  bars                        1,086    1,086   usable
+  quotes                      1,086    1,084   usable_with_warnings
+  chains (503 tickers)        4,118 calls  4,118   usable
   earnings                    event    +41     unusable (QC-601 until resolved)
   account                      1 bal / 14 pos / 3 orders   usable
   …
