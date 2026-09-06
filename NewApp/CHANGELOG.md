@@ -14,8 +14,10 @@ exit (06 §6).
 `core@0.1.0`, `next@0.1.0`. First build step. `typecheck:all` green, `core` 22
 tests and `next` 7 tests green, both packages lint clean, and
 `release/win-unpacked/TradeAnalyzer 2.exe` packages (186 MB, `--dir`, no
-installer). The existing app is unchanged in behaviour and its `out/` is
-untouched.
+installer) and launches — window titled *TradeAnalyzer 2*, `userData` created at
+`%APPDATA%/trade-analyzer-next/` with the existing app's `trade-analyzer/`
+untouched. The existing app packages too (v1.1.193) and is unchanged in
+behaviour. **B1's gate is met.**
 
 **Added**
 
