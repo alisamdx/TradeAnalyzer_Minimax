@@ -93,13 +93,43 @@ export function indexDdl(table: TableEntry): readonly string[] {
  */
 export function appendOnlyTriggerDdl(table: TableEntry): readonly string[] {
   if (!table.appendOnly) return [];
-  return [
-    `CREATE TRIGGER IF NOT EXISTS ${quote(`trg_${table.table}_no_update`)}\n` +
-      `BEFORE UPDATE ON ${quote(table.table)}\n` +
-      `BEGIN SELECT RAISE(ABORT, '${table.table} is append-only: supersede with a new row (P1), never UPDATE'); END;`,
+
+  const noDelete =
     `CREATE TRIGGER IF NOT EXISTS ${quote(`trg_${table.table}_no_delete`)}\n` +
-      `BEFORE DELETE ON ${quote(table.table)}\n` +
-      `BEGIN SELECT RAISE(ABORT, '${table.table} is append-only: rows are removed only by a generation reset, never DELETE'); END;`
+    `BEFORE DELETE ON ${quote(table.table)}\n` +
+    `BEGIN SELECT RAISE(ABORT, '${table.table} is append-only: rows are removed only by a generation reset, never DELETE'); END;`;
+
+  if (!table.validRangeColumn) {
+    return [
+      `CREATE TRIGGER IF NOT EXISTS ${quote(`trg_${table.table}_no_update`)}\n` +
+        `BEFORE UPDATE ON ${quote(table.table)}\n` +
+        `BEGIN SELECT RAISE(ABORT, '${table.table} is append-only: supersede with a new row (P1), never UPDATE'); END;`,
+      noDelete
+    ];
+  }
+
+  // A validity-range table (02 §0.2) closes exactly one column, exactly once.
+  // Everything else about the row stays frozen, so "this membership ended" and
+  // "what this membership said" remain two different acts — which is the whole
+  // reason the range exists rather than an overwrite. Turning the guard off for
+  // these tables would have been the easy fix and the wrong one.
+  const range = quote(table.validRangeColumn);
+  const editable = new Set([table.validRangeColumn, 'change_reason', 'removal_reason']);
+  const frozen = table.columns
+    .filter((c) => !editable.has(c.column))
+    .map((c) => `OLD.${quote(c.column)} IS NOT NEW.${quote(c.column)}`)
+    .join('\n     OR ');
+
+  return [
+    `CREATE TRIGGER IF NOT EXISTS ${quote(`trg_${table.table}_close_once`)}\n` +
+      `BEFORE UPDATE ON ${quote(table.table)}\n` +
+      `WHEN OLD.${range} IS NOT NULL\n` +
+      `BEGIN SELECT RAISE(ABORT, '${table.table}.${table.validRangeColumn} is already closed: a range is closed once and never reopened'); END;`,
+    `CREATE TRIGGER IF NOT EXISTS ${quote(`trg_${table.table}_no_edit`)}\n` +
+      `BEFORE UPDATE ON ${quote(table.table)}\n` +
+      `WHEN ${frozen}\n` +
+      `BEGIN SELECT RAISE(ABORT, '${table.table} is append-only apart from closing ${table.validRangeColumn}: supersede with a new row (P1), never edit a stored fact'); END;`,
+    noDelete
   ];
 }
 

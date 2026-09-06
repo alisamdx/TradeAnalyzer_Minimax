@@ -30,7 +30,7 @@ export const DICTIONARY: readonly TableEntry[] = [
  * nullable columns, new indexes); anything else is a replay into a new
  * generation, never an in-place migration.
  */
-export const DICTIONARY_VERSION = 1;
+export const DICTIONARY_VERSION = 2;
 
 /** Layer render order for the inspector's tree (02 §0.4). */
 export const LAYER_ORDER: readonly Layer[] = ['meta', 'ref', 'raw', 'ext', 'derived', 'legacy', 'qa'];

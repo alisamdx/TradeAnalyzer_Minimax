@@ -198,6 +198,18 @@ export interface TableEntry {
    */
   readonly appendOnly: boolean;
   /**
+   * Names the column a **validity-range** table closes — 02 §0.2: "Where a
+   * domain needs an explicit validity range (membership tables) it uses
+   * `valid_from` / `valid_to` instead" of supersession.
+   *
+   * Such a table is still append-only for its facts: the generated trigger
+   * permits an UPDATE **only** when it sets this column from NULL and changes
+   * nothing else. That is narrower than turning the guard off, and it is the
+   * distinction that matters — a departure closing a membership row is not the
+   * same act as editing what that membership said.
+   */
+  readonly validRangeColumn?: string;
+  /**
    * `false` for tables the dictionary marks "not rule-driven" (reference,
    * calendar) — their `capture_rule_id` is nullable. 02 §0.2.
    */

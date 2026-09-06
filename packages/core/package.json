@@ -18,6 +18,10 @@
     "./dictionary": {
       "types": "./dist/dictionary/index.d.ts",
       "import": "./dist/dictionary/index.js"
+    },
+    "./collector": {
+      "types": "./dist/collector/index.d.ts",
+      "import": "./dist/collector/index.js"
     }
   },
   "files": [

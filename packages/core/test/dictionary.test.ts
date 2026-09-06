@@ -309,6 +309,36 @@ describe('dictionary — the constraints do their job', () => {
     }
   });
 
+  it('lets a validity-range table close its range, but nothing else', () => {
+    // 02 §0.2: membership tables use `valid_from`/`valid_to` INSTEAD of
+    // supersession, so a departure closing `valid_to` is legitimate. Turning the
+    // append-only guard off for them would have been the easy fix and the wrong
+    // one — "this membership ended" and "what this membership said" have to stay
+    // two different acts, or the range buys nothing over an overwrite.
+    const raw = new Database(':memory:');
+    try {
+      applyDictionary(raw as unknown as SqliteLike);
+      raw.exec("INSERT INTO meta_run (run_id, run_kind, slot, trading_date, started_at, status, host_app, host_version, collector_version, dictionary_version) VALUES (1,'daily','after_close','2026-09-06','t','running','t','0','0.1.0',1)");
+      raw.exec("INSERT INTO meta_capture_rule (capture_rule_id, domain, version, definition_json, description, valid_from) VALUES (1,'universe',1,'{}','t','t')");
+      raw.exec("INSERT INTO meta_response (source_response_id, run_id, provider, endpoint, params_json, requested_at, archive_file, archive_offset, dedup_hash, encrypted, at_provider_cap, parse_status) VALUES (1,1,'polygon','/x','{}','t','a',0,'h',0,0,'ok')");
+      raw.exec("INSERT INTO ref_universe_membership (run_id, as_of_date, observed_at, capture_rule_id, source_response_id, ticker, list_source, valid_from, valid_to, change_reason) VALUES (1,'2026-09-06','t',1,1,'AAPL','sp500','2026-09-06',NULL,'initial')");
+
+      // Closing the range: permitted.
+      expect(() =>
+        raw.exec("UPDATE ref_universe_membership SET valid_to = '2026-09-07', change_reason = 'index_drop'")
+      ).not.toThrow();
+
+      // Editing the fact itself: refused.
+      expect(() => raw.exec("UPDATE ref_universe_membership SET ticker = 'MSFT'")).toThrow(/append-only/);
+      // Reopening a closed range: refused.
+      expect(() => raw.exec('UPDATE ref_universe_membership SET valid_to = NULL')).toThrow(/already closed/);
+      // Deleting: refused, like any fact table.
+      expect(() => raw.exec('DELETE FROM ref_universe_membership')).toThrow(/append-only/);
+    } finally {
+      raw.close();
+    }
+  });
+
   it('refuses a value that is not in an enum column\'s declared set', () => {
     const raw = new Database(':memory:');
     try {

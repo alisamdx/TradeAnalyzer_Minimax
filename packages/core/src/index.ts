@@ -7,13 +7,7 @@
  * Nothing is created empty to look complete.
  */
 
-/**
- * Written to `meta_run.collector_version` on every run (06 §2, §6). Kept in step
- * with this package's `version` field, which a test asserts — drift between the
- * two would mislabel every run of a generation, silently, and only visibly much
- * later.
- */
-export const COLLECTOR_VERSION = '0.1.0';
+export { COLLECTOR_VERSION } from './version.js';
 
 export type { SqliteLike, SqliteStatementLike } from './db/sqlite-like.js';
 
@@ -52,3 +46,5 @@ export type { GeneratedDdl } from './dictionary/ddl.js';
 
 export { applyDictionary, materialiseDictionary } from './dictionary/apply.js';
 export type { ApplyResult } from './dictionary/apply.js';
+
+export * from './collector/index.js';

@@ -24,6 +24,9 @@ export const referenceTables: readonly TableEntry[] = [
       'and every section inherited until it was measured.',
     naturalKey: ['ticker', 'list_source', 'valid_from'],
     appendOnly: true,
+    // Closes `valid_to` on a departure (02 §0.2). Still append-only for the
+    // fact itself: the trigger permits only that one transition.
+    validRangeColumn: 'valid_to',
     ruleDriven: true,
     standardColumns: true,
     columns: [
@@ -87,6 +90,8 @@ export const referenceTables: readonly TableEntry[] = [
       'even after the mapping changes.',
     naturalKey: ['sic_code', 'mapping_version'],
     appendOnly: true,
+    // Closes `valid_to` when a re-classification supersedes it (02 §0.2).
+    validRangeColumn: 'valid_to',
     ruleDriven: false,
     standardColumns: false,
     columns: [
@@ -111,6 +116,9 @@ export const referenceTables: readonly TableEntry[] = [
       '`fell_below_threshold` value at all.',
     naturalKey: ['ticker', 'valid_from'],
     appendOnly: true,
+    // Closes `valid_to` on a departure (02 §0.2). Still append-only for the
+    // fact itself: the trigger permits only that one transition.
+    validRangeColumn: 'valid_to',
     ruleDriven: true,
     standardColumns: true,
     columns: [
@@ -138,6 +146,9 @@ export const referenceTables: readonly TableEntry[] = [
       'if its underlying leaves the subset.',
     naturalKey: ['osi_symbol', 'valid_from'],
     appendOnly: true,
+    // Closes `valid_to` on a departure (02 §0.2). Still append-only for the
+    // fact itself: the trigger permits only that one transition.
+    validRangeColumn: 'valid_to',
     ruleDriven: false,
     standardColumns: true,
     columns: [
