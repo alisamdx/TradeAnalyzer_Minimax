@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.193] - 2026-09-06
+
+### fix - the transactions range walk emitted a wasted one-day query on twelve dates a year
+
+- **`syncClosedPositions` walks Jan 1 to today in 30-day windows with a 31-day stride**, so when the range length is an exact multiple of 31 the walk lands on `cur === endMs` and emits a final window covering **a single day on its own** - one extra round trip to `/transactions`, an endpoint already documented as intermittently unresponsive for ~120 s answering `nonce_used`.
+- **It is a calendar trigger, not an odd input.** From a Jan 1 start it lands on about twelve dates a year - in 2026: Feb 1, Mar 4, Apr 4, May 5, Jun 5, Jul 6, Aug 6, Sep 6, Oct 7, Nov 7, Dec 8, then Jan 8 of 2027. Found on one of them: 2026-09-06 is day 248 = 8 x 31.
+- **Why it survived is the transferable half.** `tests/etrade-transactions-slicing.test.ts` asserted exactly the right thing (`span > 0` on every window) but drove the real `syncClosedPositions`, which builds its range from **today** - so a run only ever exercised one calendar configuration. The suite could see the fault on ~12 days a year and was green on the other ~353, and on those twelve it went red for reasons unrelated to whatever had just changed. That is how a test teaches people to ignore it.
+- **Fix:** `buildDateSlices(startDate, endDate, maxSpanDays = 30)` is now an **exported function** rather than an inline block - that extraction is most of the fix, because inline it was only ever reachable through the clock. A degenerate tail is **folded into its predecessor** (30 days becomes 31, still inside the stall-free width) rather than dropped, which would leave a one-day hole. A genuine one-day range is still one window. An inverted or unparseable range returns `[]`.
+- **Regression test** `tests/etrade-date-slices.test.ts` sweeps **every start-date offset in a full year** and asserts no multi-window result contains a zero-width window - plus contiguity, no gaps, no window over 31 days, the folded-tail case, the one-day range, the inverted range and a narrower `maxSpanDays`. Milliseconds, and it never consults the clock.
+
 ## [1.1.192] - 2026-09-06
 
 ### chore - npm workspaces for the rebuild (NewApp build step B1)

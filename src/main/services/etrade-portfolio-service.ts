@@ -214,6 +214,67 @@ export interface EtradeBalance {
 
 // ─── Service ──────────────────────────────────────────────────────────────────
 
+/** One inclusive `[from, to]` window of a sliced date range. */
+export interface DateSlice {
+  from: string;
+  to: string;
+}
+
+/**
+ * Splits `[startDate, endDate]` (both `YYYY-MM-DD`, inclusive) into contiguous
+ * windows no wider than `maxSpanDays`, with no gaps and no overlap.
+ *
+ * The transactions endpoint stalls on wide windows — a full YTD span aborts, and
+ * even a single month once exceeded 30 s (2026-09-02) — so the range is walked
+ * rather than asked for whole.
+ *
+ * **The degenerate tail.** The stride is `maxSpanDays + 1`, so whenever the range
+ * length is an exact multiple of that, the walk lands with `cur === endMs` and
+ * would emit a final window covering one day on its own. That day still has to be
+ * covered, so it is folded into its predecessor (which grows by one day and stays
+ * inside the width that keeps a request from stalling) rather than dropped, which
+ * would leave a one-day hole. One fewer round trip to an endpoint that is
+ * intermittently unresponsive for ~120 s (CLAUDE.md).
+ *
+ * This is a **calendar** trigger, not an exotic input: from a Jan 1 start it lands
+ * on about twelve dates a year — in 2026, Feb 1, Mar 4, Apr 4, May 5, Jun 5,
+ * Jul 6, Aug 6, Sep 6, Oct 7, Nov 7, Dec 8, then Jan 8 of 2027. That is why this
+ * is a standalone exported function: as an inline loop it could only ever be
+ * exercised on whatever configuration "today" happened to be, so the fault was
+ * reachable by the test suite on roughly twelve days a year and invisible on the
+ * other ~353.
+ *
+ * A one-day window is legitimate and is kept when the whole range is one day —
+ * that is a real interval, not a degenerate tail.
+ */
+export function buildDateSlices(startDate: string, endDate: string, maxSpanDays = 30): DateSlice[] {
+  const DAY = 86_400_000;
+  const endMs = Date.parse(`${endDate}T00:00:00Z`);
+  const startMs = Date.parse(`${startDate}T00:00:00Z`);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) return [];
+
+  const slices: DateSlice[] = [];
+  let cur = startMs;
+  while (cur <= endMs) {
+    const next = Math.min(cur + maxSpanDays * DAY, endMs);
+    slices.push({
+      from: new Date(cur).toISOString().slice(0, 10),
+      to:   new Date(next).toISOString().slice(0, 10),
+    });
+    if (next >= endMs) break;
+    cur = next + DAY;
+  }
+
+  const last = slices[slices.length - 1];
+  const prev = slices[slices.length - 2];
+  if (last && prev && last.from === last.to) {
+    prev.to = last.to;
+    slices.pop();
+  }
+
+  return slices;
+}
+
 export class EtradePortfolioService {
 
   // ─── Account list ─────────────────────────────────────────────────────────
@@ -835,20 +896,7 @@ export class EtradePortfolioService {
       );
     }
 
-    const slices: Array<{ from: string; to: string }> = [];
-    {
-      const endMs = Date.parse(`${endDate}T00:00:00Z`);
-      let cur = Date.parse(`${startDate}T00:00:00Z`);
-      while (cur <= endMs) {
-        const next = Math.min(cur + 30 * 86_400_000, endMs);
-        slices.push({
-          from: new Date(cur).toISOString().slice(0, 10),
-          to:   new Date(next).toISOString().slice(0, 10),
-        });
-        if (next >= endMs) break;
-        cur = next + 86_400_000;
-      }
-    }
+    const slices = buildDateSlices(startDate, endDate);
 
     for (const slice of slices) {
     let marker: string | undefined;

@@ -15,6 +15,7 @@ IPC: `add`, `list(status?)`, `get(id)`, `update(id, …)`, `close(id, {exitPrice
 `etrade-portfolio-service.ts`:
 - **Open positions** — `sync(accountIdKey?)` pulls live positions with market value, gains, Greeks (delta/gamma/theta/vega), IV (stored as %), beta, and `pct_of_portfolio`. Matched to existing rows by `etrade_position_id` (unique).
 - **Closed positions** — `syncClosed()` fetches YTD transaction history (`/v1/accounts/{id}/transactions`, paginated/marker-based), classifies each transaction as open/close/expired/assigned by OCC-symbol parsing, pairs open+close legs FIFO per symbol, and inserts matched closed positions with a dedup guard. Surfaced as "↓ Import Closed (YTD)".
+  - The YTD range is **never requested whole** — that endpoint stalls on wide windows. `buildDateSlices(start, end, maxSpanDays = 30)` (exported from `etrade-portfolio-service.ts`) splits it into contiguous windows of at most 30 days, with no gaps and no overlap. Because the stride is 31 days, a range length that is an exact multiple of 31 would leave a **one-day tail**; that tail is **folded into its predecessor** (which becomes 31 days wide) rather than emitted as its own request or dropped — dropping it would leave a hole in the coverage. A one-day window is still emitted when the entire range is one day. Exported, rather than inline, so the arithmetic can be tested against dates other than today (v1.1.193).
 
 IPC: `etrade.listAccounts`, `etrade.sync(accountIdKey?)`, `etrade.syncClosed(accountIdKey?)`, `etrade.lastSync`, `etrade.listPositions`.
 
