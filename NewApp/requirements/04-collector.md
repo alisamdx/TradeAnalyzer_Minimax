@@ -297,7 +297,7 @@ Two kinds of item: **provider facts** the dictionary cannot be frozen without, a
 | E*Trade `theta` unit, `timeStamp` unit, VIX symbol, `positionId`, transactions paths (02 §16) | one manual run of each call, bodies inspected | _pending_ — **blocked 2026-09-05: the E*Trade token is dead** (`renew_access_token` returning 401; a manual re-auth is required). Groups with QC-410 and QC-407 below, all of which need one live chain call |
 | Polygon `weighted_shares_outstanding` on the current plan | one ticker-details call | _pending_ |
 | Finnhub free-tier: estimates, short interest | one call each | _pending_ |
-| Treasury par-yield fetch URL and format | one fetch | _pending_ |
+| Treasury par-yield fetch URL and format | one fetch | **DONE 2026-09-05.** URL and CSV format verified, no key. **14 tenors**, not the 9 drafted (adds 1.5M, 4M, 3Y, 7Y, 20Y) — 02 §11 and QC-902 corrected. One fetch returns the **whole year**, so the daily pull is idempotent and doubles as the backfill. Published as percent, `/100` at ingestion. 3M on 2026-09-04 = 3.91 % |
 | IV bootstrap source chosen | compare IVolatility vs MarketData.app on method note, depth, subset coverage, price — **a spend decision, not a measurement**; not needed until B7 | _pending_ |
 | **Diagnose the 34 % chain 4xx rate** (§10, QC-412) | read the archived 400 bodies in the existing app's `logs/api/api_*.jsonl` | **DONE 2026-09-05 — ours.** 97 % are code 10031 on a globally-guessed weekly date the ticker does not list; deterministic across days. Per-ticker expirations (§4.3) eliminate the class; QC-412 threshold tightened 5 % → 0.5 %. Full write-up in §10 |
 | QC-410 Greek reproduction: delta tolerance, and with it the `theta` time unit, `timeStamp` epoch unit and IV scale | one live chain call reproduced through Black-Scholes; settles three verify-list items at once | _pending_ — blocked on the same re-auth |
@@ -305,7 +305,7 @@ Two kinds of item: **provider facts** the dictionary cannot be frozen without, a
 | QC-302 close disagreement (0.5 % per ticker, 2 % of tickers) | existing bars vs quotes, same day, across the universe | _pending_ |
 | QC-407 underlying disagreement (1 %) | E*Trade `nearPrice` vs Polygon last on one live chain call | _pending_ — blocked on the same re-auth |
 | QC-702 shares-outstanding drift (25 %) | EDGAR facts vs Polygon reference for the CS universe | _pending_ |
-| QC-101 universe drift (5 %) | index membership change history | _pending_ |
+| QC-101 universe drift (5 %) | index membership change history | **PARTIAL 2026-09-05.** The old schema tracks additions only (`constituents.added_at`; no removal history), so this is a lower bound: **60 additions on 2026-07-22 = 5.5 %**, plus 25 on 07-27 — the Russell reconstitution. The 5 % line therefore *will* fire annually by design, which is now noted on the check. A true drift distribution needs the new `ref_universe_membership`, so the † stands |
 | `backfill_bars` review queue cleared | all QC-205 exceptions resolved/accepted | _pending_ |
 
 ---

@@ -566,12 +566,16 @@ Sources: FOMC schedule (federalreserve.gov, yearly), BLS release schedules (CPI,
 | `description`, `source_url` | TEXT | |
 
 ### `raw_treasury_yield`
-Source: U.S. Treasury daily par yield curve (one fetch returns all tenors for the day). FRED `DGS3MO` as fallback (free key).
+Source: U.S. Treasury daily par yield curve. **Verified 2026-09-05**, no key required:
+
+`https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/<YEAR>/all?type=daily_treasury_yield_curve&field_tdr_date_value=<YEAR>&page&_format=csv`
+
+CSV, newest first, `Date` as `MM/DD/YYYY`. **One fetch returns every trading day of the year**, not just today — so the daily pull is naturally idempotent and a backfill is the same call. Values are published as **percent** (`3.91`), converted to fraction at ingestion (`/100`, per §0.1). FRED `DGS3MO` stays the fallback (free key).
 
 | column | type | notes |
 |---|---|---|
 | `curve_date` | TEXT | |
-| `tenor` | TEXT | `1M` \| `2M` \| `3M` \| `6M` \| `1Y` \| `2Y` \| `5Y` \| `10Y` \| `30Y` |
+| `tenor` | TEXT | **14 tenors as published** (measured 2026-09-05, not the 9 first drafted): `1M` \| `1.5M` \| `2M` \| `3M` \| `4M` \| `6M` \| `1Y` \| `2Y` \| `3Y` \| `5Y` \| `7Y` \| `10Y` \| `20Y` \| `30Y` |
 | `yield` | REAL | **fraction** (`0.0525`), converted from the published percent at ingestion |
 | `source` | TEXT | `treasury` \| `fred` |
 

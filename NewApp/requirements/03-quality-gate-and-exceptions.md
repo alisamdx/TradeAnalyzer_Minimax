@@ -77,7 +77,7 @@ A ‡ value still gets its distribution recorded like any other (§4) — measur
 
 | id | sev | fires when | remediation |
 |---|---|---|---|
-| QC-101 universe drift | warning → blocking if > 5 % † | current membership changed by more than N tickers since yesterday without an `index_add/drop` reason | none (operator confirms rebalance) |
+| QC-101 universe drift | warning → blocking if > 5 % † | current membership changed by more than N tickers since yesterday without an `index_add/drop` reason | none (operator confirms rebalance) — **note: this is expected to fire annually.** The existing app's `constituents.added_at` shows a 60-ticker addition on 2026-07-22 (**5.5 % of 1,089**) and 25 more on 07-27, i.e. the Russell reconstitution period. Removals are not tracked in the old schema, so true drift then is likely higher still. A pilot run spanning late June–July will meet this legitimately; the operator confirms and it resolves |
 | QC-102 reference staleness | warning | a current member has no `raw_ticker_reference` row within 45 days | R2 re-fetch ticker |
 | QC-103 sector mapping gap | warning | a CS ticker has `sic_code` but `sector` null (mapping table incomplete) | none |
 | QC-104 optionability contradiction | warning | `optionable = 1` yet the expirations call returned none for 3 runs, or the reverse | none |
@@ -153,7 +153,7 @@ A ‡ value still gets its distribution recorded like any other (§4) — measur
 | id | sev | fires when | remediation |
 |---|---|---|---|
 | QC-901 VIX range | blocking | `last` outside [5, 150] ‡ or missing | R1 retry |
-| QC-902 yield curve | warning | fewer than 9 tenors, or any yield outside [−0.01, 0.25] | R1 retry / fallback source |
+| QC-902 yield curve | warning | fewer than **14** tenors ‡ (the published set, measured 2026-09-05), or any yield outside [−0.01, 0.25] | R1 retry / fallback source |
 | QC-903 macro calendar gap | warning | no FOMC event in the next 90 days, or no CPI in the next 45 | none |
 | QC-904 short interest freshness | warning | newest `settlement_date` older than 21 days | R1 retry |
 | QC-905 recommendation freshness | warning | no recommendation row for a CS subset ticker within 45 days | R2 re-fetch |
