@@ -38,9 +38,9 @@ interface CollectorHost {
 
 - One new `BatchJobHandler`, **`data-collector`**, registered in `index.ts` with `dailyScheduleTime: '17:05'`, `afterCloseOnly: true`, `runOnStartup: false`. It constructs an `ElectronCollectorHost` that wraps the app's existing `etradeGet`, Polygon provider transport (through the rate limiter), `safeStorage`, nodemailer and the batch progress channel, then calls `runDaily(host)`.
 - One more handler, **`collector-watchdog`**, at `19:30`, per 03 §7.3.
-- A third, manual-only handler, **`collector-oneshot`**, exposes the one-shot jobs (§7) through the existing Batch Jobs view (run-now with a parameter).
+- A third handler, **`collector-oneshot`**, on a **2-minute interval**, claims at most one `queued` row from `meta_job_request` (02 §1) and executes that one-shot job (§7). The operator never launches these from the old app: **the new exe's Jobs view is the only UI** (05 §7), and it queues by inserting a row. The old app executes because it holds the provider transports and the E*Trade token (Q4); nothing else about the arrangement is load-bearing, which is why cut-over is later just "the new exe stops queueing and runs them itself".
 - The existing brief job gains one call: `host.legacyHandoff(payload)` (§8). Nothing else in the existing app changes (D1).
-- The collector's SQLite connection is **separate** from the app's own database connection; the two files never attach to each other except during the one-time legacy import (§7.4), which attaches the old file read-write (WAL quirk) while the old app is closed.
+- The collector's SQLite connection is **separate** from the app's own database connection; the two files never attach to each other except during the one-time legacy import (§7.4), which attaches the old file **write-capable but read-only in intent** — write-capable purely because a readonly connection cannot attach the live WAL index on Windows and would silently read stale data (CLAUDE.md). The import reads the old database and writes only into the generation.
 - The batch mutex serialises the collector with the app's own jobs. `17:05` places it after the app's after-close chain has started; if that chain is still running, the collector waits its turn. The 19:30 watchdog catches the case where the wait swallowed the day.
 
 ### 1.2 Hosting in the new exe (later)
@@ -85,13 +85,13 @@ Every provider call follows one path, in this order, and there is no other path 
 3. **Index + ingest in one transaction**: insert `meta_response` (with `sha256`, `archive_file`, `archive_offset`, `at_provider_cap`, `parse_status`), run the table's single ingestion module, insert the rows, commit.
 4. On ingestion failure: the transaction still commits the `meta_response` row with `parse_status = failed` and zero data rows. The body is in the archive; QC-001 will fire; replay after a fix recovers the rows without refetching (P4).
 
-Idempotence: the response id is derived from `sha256(provider + endpoint + params + body)`; re-ingesting an identical response is a no-op. An orphan archive line (crash between 2 and 3) is tolerated and reconciled by QC-953.
+Idempotence: `meta_response.dedup_hash = sha256(provider + endpoint + params_json + body)` carries a unique index (02 §1); re-ingesting an identical response is a no-op. This protects crash recovery and replay only — **re-running a day is not idempotent and is not meant to be**: the fresh call returns a different body, so it appends a new version with a later `observed_at` (P1, §5). An orphan archive line (crash between 2 and 3) is tolerated and reconciled by QC-953.
 
 Non-2xx responses are archived and indexed like any other (they are evidence). A 4xx on a chain expiration that E*Trade itself listed is a finding (QC-412, §10).
 
 ### 2.3 Ingestion modules (P11, AC-11)
 
-One module per raw table, `ingest/<table>.ts`, exporting a **pure** function `(response: MetaResponse, body: unknown, ctx: IngestContext) => Row[]`. `ctx` carries `run_id`, `as_of_date`, `capture_rule_id`, `observed_at`, the dictionary converters and the calendar; it carries **no database handle**, so a module cannot read or write anything else. Determinism is what makes replay byte-identical (AC-4). The dictionary generates a test per module asserting every produced column is declared and every declared converter is the only conversion applied (AC-7).
+One module per raw table, `ingest/<table>.ts`, exporting a **pure** function `(response: MetaResponse, body: unknown, ctx: IngestContext) => Row[]`. `ctx` carries `run_id`, `as_of_date`, `capture_rule_id`, `observed_at`, the dictionary converters and the calendar; it carries **no database handle**, so a module cannot read or write anything else. Determinism is what makes replay reproducible (AC-4, §7.5); at this level it is literally byte-identical, since a fixture in gives fixed rows out. The dictionary generates a test per module asserting every produced column is declared and every declared converter is the only conversion applied (AC-7).
 
 ---
 
@@ -124,7 +124,7 @@ Bars fetched at 17:05 are treated as final per the settlement quirk; `is_final` 
 | `universe` | `{ lists: ["sp500", "russell1000", "etf_list"], etfListSource: "config" }` |
 | `bars` | `{ scope: "universe_active", adjusted: true, depthDays: 1 }` (backfill job uses `depthYears: 5`) |
 | `quotes` | `{ scope: "universe_active", source: "polygon_full_snapshot" }` |
-| `chain_subset` | `{ minClose: 10, minAvgDollarVolume20d: 20_000_000, requireOptionable: true, sticky: "ticker" }` † |
+| `chain_subset` | `{ minClose: 10, minAvgDollarVolume20d: 20_000_000, sticky: "ticker" }` † |
 | `chain` | `{ maxDte: 90, extraMonthlies: 2, allStrikes: true, sticky: "contract" }` |
 | `account` | `{ ordersLookbackDays: 30, transactionsFallback: true }` |
 | `earnings` | `{ horizonDays: 120, initialSliceDays: 14, subdivideAtCap: true }` |
@@ -137,7 +137,9 @@ Changing any value creates a **new `meta_capture_rule` row**; runs from then on 
 
 ### 4.2 Chain subset evaluation (phase 6)
 
-For every active universe ticker: `close` = latest bar; `advol20` = mean over the last 20 trading days of `close × volume`. **Admit** if `close ≥ minClose ∧ advol20 ≥ minAvgDollarVolume20d ∧ optionable ≠ 0` (optionable unknown counts as admit; the expirations call settles it). Admission inserts a `ref_chain_subset_membership` row with `membership_reason = rule_pass` and `rule_inputs_json = { close, advol20 }`.
+For every active universe ticker: `close` = latest bar; `advol20` = mean over the last 20 trading days of `close × volume`. **Admit** if `close ≥ minClose ∧ advol20 ≥ minAvgDollarVolume20d`. Admission inserts a `ref_chain_subset_membership` row with `membership_reason = rule_pass` and `rule_inputs_json = { close, advol20 }`.
+
+**Optionability is deliberately not a condition here** (decided 2026-09-05). `raw_ticker_reference.optionable` is derived from the E*Trade expirations call, which is made only for tickers *already* in the subset — so it is null for every candidate, and a condition written as `optionable ≠ 0` would admit every one of them while reading like a gate. That is the exact shape of the conviction-band failure this project exists to prevent (P10). The rule therefore tests price and dollar volume only, and optionability is settled one step later by the expirations call: a member returning no expirations on three consecutive runs is removed by the QC-104 path below. A ticker that was never optionable costs one wasted expirations call per run until then, which is the honest price of not pretending to test something we cannot test at admission time.
 
 **Never remove for falling below threshold** (Q15). Removal only: delisting (universe `valid_to` set), `optionable = 0` on three consecutive runs (QC-104 first), or operator action. Additional admits regardless of rule: any ticker with a current account position (`held_in_book`), any ticker in a legacy brief's candidate set today (`recommended_by_legacy`), any operator flag (`study_flag`).
 
@@ -191,7 +193,7 @@ Retention: **forever** (the archive is the provenance layer, P2). Estimated size
 
 ## 7. One-shot jobs (`run_kind ≠ daily`)
 
-All run through `collector-oneshot`, each idempotent, each producing a gate report and email like a daily run.
+Queued from the new exe's Jobs view into `meta_job_request`, claimed and executed by the old app's `collector-oneshot` handler (§1.1). Each is idempotent, each produces a gate report and email like a daily run, and each writes its own report back to `meta_job_request.result_json` so the queueing app can display it without a second channel.
 
 ### 7.1 `universe_seed`
 Fetches the three lists, writes initial `ref_universe_membership` (`change_reason = initial`) and `raw_ticker_reference` for every member. Must run before the first daily run.
@@ -203,13 +205,15 @@ For every universe member: one `aggs` call for `[today − 5 y, today]` (`limit=
 Source chosen in §11 (one only). Pulls the source's 30-day constant-maturity ATM IV for the **chain subset at bootstrap time** (not the whole universe — that is what IV rank will be computed for), one year back, into `ext_iv_history`. Sets `stitch_date = first daily run's trading_date` on `meta_generation`. Runs the **overlap check**: for every subset ticker on every day both series exist (own `derived_iv30_daily` vs `ext_iv_history`), stores the paired difference distribution in the job's quality report; median absolute difference > 0.02 (2 vol points) † is a blocking exception on the bootstrap — the operator either accepts with a note or the series is not used. Raw responses archived so the subscription may lapse (Q10).
 
 ### 7.4 `legacy_import` (Q19)
-Attaches the old database read-write while the old app is closed (the job refuses to start if the old app's process is running — checked via its API port). Category 1 (user-authored config) is copied through the dictionary validators; every rejected row is listed in `legacy_import_log.rejection_report_json`. Category 5 (stored decisions) is copied into `legacy_*` with `pre_collector = 1`. Categories 2–4 are **not** touched; the job has no code path for them. Re-runnable: a second run into the same generation writes nothing already present (natural keys), so a reset (P14) costs one re-run.
+Attaches the old database while the old app is running — it must be, since the old app is what executes this job. The attach is **write-capable but read-only in intent** (the WAL quirk above); the job reads the old tables and writes only into the generation. It takes the batch mutex, so no other job of the old app is mid-write while it reads. Category 1 (user-authored config) is copied through the dictionary validators; every rejected row is listed in `legacy_import_log.rejection_report_json`. Category 5 (stored decisions) is copied into `legacy_*` with `pre_collector = 1`. Categories 2–4 are **not** touched; the job has no code path for them. Re-runnable: a second run into the same generation writes nothing already present (natural keys), so a reset (P14) costs one re-run.
 
 ### 7.5 `replay` (P4, P14, AC-4)
 Input: a source generation's archive directory and a target (a scratch file for QC-951, or a new generation for a real replay after a code fix). Iterates `meta_response` **from the archive files, not from the source DB** (`MANIFEST.json` + per-file line order), re-creates `meta_run`/`meta_response` rows, runs current ingestion modules, then derivations, then the gate. Output: either a diff report (rows added/removed/changed per table vs the source DB) or an opened generation. A replay never touches the source generation.
 
+**The comparison basis (AC-4, QC-951).** Equality is over the **fact columns** a table's dictionary entries declare, with three exclusions: `row_id` (a surrogate that restarts at 1 in a fresh database), `run_id` (the replay creates its own runs), and `meta_` timestamps such as `started_at`/`finished_at`/`claimed_at` (wall-clock, not facts). Everything else must match exactly, `observed_at` included — it comes from the archived response, so a difference there is a real ingestion change. Rows are matched on the dictionary's natural key, not on insertion order, so a single-day scratch replay is comparable even though its sequences cannot align with the source. **What this trades away**: a projection cannot catch a nondeterministic *ordering* of otherwise-identical rows. That is covered instead by the ingestion-determinism tests (06 §7), which assert byte-identical output from a fixed fixture — the place where ordering is cheap to pin.
+
 ### 7.6 `reset` (P14, AC-14)
-Operator-initiated from the inspector, note required. Closes the current generation (`status = closed`, `closed_at`, `reset_reason`), renames nothing (the directory stays `gen-NNN`, read-only flag set), creates `gen-(N+1)` with `predecessor_no`, and immediately runs `universe_seed` + `legacy_import` into it. `backfill_bars` and `bootstrap_iv` are offered but not automatic (the operator may want to re-inspect the backfill review queue).
+Operator-initiated from the inspector, note required. Closes the current generation (`status = closed`, `closed_at`, `reset_reason`), renames nothing (the directory stays `gen-NNN`, read-only flag set), creates `gen-(N+1)` with `predecessor_no`, **rewrites the shared data-root pointer** (`currentGeneration`, 06 §3.1) so both apps follow, and immediately runs `universe_seed` + `legacy_import` into it. Because the executing host is the old app while the requesting host is the new exe, the new exe re-reads the pointer when the request reaches `complete` and reopens on the new generation; it does not need a restart. `backfill_bars` and `bootstrap_iv` are offered but not automatic (the operator may want to re-inspect the backfill review queue).
 
 ---
 

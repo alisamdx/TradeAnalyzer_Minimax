@@ -105,8 +105,8 @@ Each check: id, severity, condition that fires it, and the remediation it is all
 | QC-407 underlying disagreement | warning | \|`underlying_price` − `raw_eod_quote.last`\| / last > 1 % † | none |
 | QC-408 zero-volume default | blocking | any `volume = 0` with `volume_status = ok` **and** `open_interest = 0` **and** bid = ask = 0 — the fingerprint of a defaulted field, not a quiet contract | none (bug) |
 | QC-409 sticky-set honoured | blocking | a `ref_sticky_contract` with `valid_to ≥ today` has no snapshot row this run | R1 retry |
-| QC-410 Greek reproduction | warning | Black-Scholes delta from (`underlying_price`, `strike`, DTE, `iv`, 3M yield) differs from `delta` by > 0.05 on > 5 % of ATM contracts † (checks E*Trade's Greeks are on the scale we think; P4) | none |
-| QC-411 weekend expiration | blocking | an `expiration_date` that is not a trading day and not the day after a holiday-shifted Friday (the Saturday bug) | none |
+| QC-410 Greek reproduction | warning | Black-Scholes delta from (`underlying_price`, `strike`, DTE, `iv`, 3M yield from `raw_treasury_yield`) differs from `delta` by > 0.05 on > 5 % of ATM contracts † (checks E*Trade's Greeks are on the scale we think; P4). **This is the stage-1 consumer of `raw_treasury_yield`** (02 §11); if the yield row is missing for the date the check is skipped, not failed — a missing rate is QC-902's finding, not this one | none |
+| QC-411 weekend expiration | blocking | an `expiration_date` that is not a trading day and is not a holiday-shifted expiration (when the third Friday is a holiday, expiration moves to the **preceding Thursday** — 02 §2 `is_monthly_expiration`). Catches the UTC/local weekday bug, whose signature is a Saturday date | none |
 
 ### 3.6 Corporate actions, earnings, fundamentals
 
@@ -147,7 +147,7 @@ Each check: id, severity, condition that fires it, and the remediation it is all
 
 | id | sev | cadence | fires when |
 |---|---|---|---|
-| QC-951 replay equivalence | blocking | weekly, on a sampled trading day | replaying that day's archive into a scratch DB yields raw/derived rows that differ from stored (AC-4) |
+| QC-951 replay equivalence | blocking | weekly, on a sampled trading day | replaying that day's archive into a scratch DB yields raw/derived rows that differ from stored **over the fact columns** — the comparison excludes `row_id`, `run_id` and `meta_` timestamps, which necessarily differ in a fresh database and are not facts (AC-4, 04 §7.5) |
 | QC-952 fire-count review | info | at pilot exit and monthly | lists every check with `fired_total = 0` for operator review (P10) |
 | QC-953 archive/DB drift | blocking | weekly | a `meta_response` row's archive line is missing, or an archive line has no `meta_response` row |
 | QC-954 exception aging | warning | daily | an `open` exception older than 5 runs with no acknowledgement |

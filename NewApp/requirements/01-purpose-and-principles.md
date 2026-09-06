@@ -1,6 +1,6 @@
 # 01 — Purpose and principles
 
-> **Status:** draft v1, 2026-09-05. Derived from `00-discovery-qa.md` (decisions D1–D7, questions Q1–Q20, all closed). Every principle below cites the discovery item it comes from and, where one exists, the failure in the existing app that motivates it.
+> **Status:** draft v1, 2026-09-05. Derived from `00-discovery-qa.md` (decisions D1–D7, questions Q1–Q21, all closed). Every principle below cites the discovery item it comes from and, where one exists, the failure in the existing app that motivates it.
 > **Audience:** the operator and any AI session building the new application. This is the document every later spec section must be consistent with. If a later section conflicts with this one, this one wins until it is revised here.
 > **Document map:** 01 purpose and principles (this) → 02 raw domains and data dictionary → 03 quality gate and exceptions → 04 collector → 05 inspector UI → 06 repository and packaging.
 
@@ -38,7 +38,7 @@ The operator has not yet placed a real trade on the existing app's recommendatio
 
 ### 2.1 Stage 1 — in scope
 
-- The **twelve raw domains** (Q5, Q16): daily bars; end-of-day quotes; option chains; corporate actions (splits, dividends); earnings dates; fundamentals; VIX and macro series; the operator's E*Trade positions, balances and executed orders; ticker reference data; trading calendar; macro event calendar; risk-free rate.
+- The **fifteen raw domains** (Q5, Q16, Q21): daily bars; end-of-day quotes; option chains; corporate actions (splits, dividends); earnings dates; fundamentals; VIX and macro series; the operator's E*Trade positions, balances and executed orders; ticker reference data; trading calendar; macro event calendar; risk-free rate; **short interest; analyst view (recommendations, estimates); insider transactions** (the last three added by Q21, 02 §12).
 - The **universe**: S&P 500 + Russell 1000 + ETFs, ~1,587 tickers, membership versioned (Q1). Option chains for a **rule-based liquidity subset** of the universe, sticky at the ticker level (Q15); **every strike** E*Trade returns, expirations to 90 DTE plus the two nearest monthlies beyond, sticky at the contract level (Q2).
 - **One after-close capture** per trading day, designed so additional slots are configuration (Q3).
 - A **raw-response archive** for every provider call, the provenance layer (sizing notes; Q20 for account data).
@@ -154,7 +154,7 @@ Testable statements. Later sections refine them; stage 1 is complete when all ho
 | AC-1 | For any non-null value in any raw table, the inspector can open the archived provider response it was parsed from. | P2 |
 | AC-2 | No raw table has ever had a row updated or deleted (verified by a trigger or an audit count) except through a generation reset. | P1 |
 | AC-3 | Every column in the database has a data-dictionary entry; every nullable column has a stated null meaning; the inspector shows both. | P3, P13 |
-| AC-4 | Replaying a generation's raw archive into an empty database with the same code yields byte-identical raw and derived tables. | P4, P14 |
+| AC-4 | Replaying a generation's raw archive with the same code reproduces every raw and derived table exactly, compared over **dictionary-declared fact columns** — excluding surrogate keys (`row_id`), `run_id` and `meta_` timestamps, which are bookkeeping and restart at 1 in a fresh database. | P4, P14 |
 | AC-5 | For the option chain, the number of contracts stored per (ticker, expiration, day) equals the number returned by the provider for that call. | P5 |
 | AC-6 | Every snapshot row's `capture_rule_id` resolves to a stored rule whose definition explains why that row is present. | P6 |
 | AC-7 | For every field with a unit, an ingestion test asserts the conversion from the provider's representation; no `*100` / `/100` appears outside ingestion. | P7 |
@@ -171,7 +171,7 @@ Testable statements. Later sections refine them; stage 1 is complete when all ho
 
 ## 5. Glossary
 
-- **Raw domain.** One of the twelve categories of provider-sourced data captured as received (after unit conversion only).
+- **Raw domain.** One of the fifteen categories of provider-sourced data captured as received (after unit conversion only).
 - **Raw table.** A table holding raw-domain rows; append-only; one writer.
 - **Derived table.** A table computed from raw tables by versioned code; disposable; rebuilt by replay.
 - **Snapshot.** The set of rows captured for one domain in one run under one capture rule.

@@ -36,7 +36,7 @@ Sidebar, top to bottom. Each entry names the tables it reads.
 | **Archive** | provenance browser: any response by id, date, provider, endpoint (§3.4) | `meta_response` + archive files |
 | **Legacy** | the segregated record of the existing app's decisions, read-only, visibly separate (§4.7) | `legacy_*` |
 | **Dictionary** | every table and column with type, unit, nullability, null meaning, source; the pilot-exit checklist (§6) | `meta_dictionary`, `qa_check_registry` |
-| **Jobs** | one-shot jobs: seed, backfill, bootstrap, import, replay, reset (§7) | `meta_run` |
+| **Jobs** | one-shot jobs: seed, backfill, bootstrap, import, replay, reset (§7) | `meta_job_request`, `meta_run` |
 | **Settings** | generation paths, email recipients, capture-rule editor (creates versions), thresholds (creates registry versions) | `meta_capture_rule`, `qa_check_registry`, settings |
 
 Cross-navigation is by **entity link**: any ticker, `osi_symbol`, `run_id`, `source_response_id`, `exception_id` or `check_id` rendered anywhere is a link to its home view with context preserved.
@@ -125,17 +125,21 @@ The Dictionary view lists every table and column as the dictionary declares them
 
 ## 7. Jobs
 
-One card per one-shot job (04 §7) with its last run, duration, verdict and a **Run** button. Confirmations scale with consequence:
+One card per one-shot job (04 §7) with its last run, duration, verdict and a **Run** button.
+
+**This view queues; it does not execute.** In stage 1 the old app holds the provider transports and the E*Trade token (Q4), so pressing Run inserts a `meta_job_request` row and the old app's `collector-oneshot` handler claims it within ~2 minutes (04 §1.1). The card therefore has a state the operator can see and must be able to read honestly: `queued (waiting for the collector host, last seen 14s ago)` → `running` → the verdict. A request that stays `queued` for more than 10 minutes is shown as **stalled**, with the plain explanation that the collector host is not running — this is the failure mode a queue introduces, and hiding it behind a spinner would make it look like a slow job (P9 applied to the UI). Cancel is available while `queued`; once `claimed`, cancellation goes through the run's own abort signal.
+
+Confirmations scale with consequence:
 
 | Job | Confirmation |
 |---|---|
 | `universe_seed`, `backfill_bars`, `bootstrap_iv` | single confirm with call estimate and provider |
-| `legacy_import` | confirm; refuses with an explanation if the existing app is running |
+| `legacy_import` | confirm; the call-out states that it reads the old app's database live and writes nothing to it |
 | `replay` (to scratch) | confirm; result opens the **diff viewer**: per table rows added / removed / changed, drill to rows |
 | `replay` (to new generation) | typed confirmation of the source generation number |
 | `reset` | typed confirmation `RESET gen-NNN` + mandatory reason; shows what will be kept (everything) and what a reset costs (data-days since `opened_at`) |
 
-Job progress streams to the card (phase, done/total, current key) and to the Runs view.
+Job progress reaches the card by polling `meta_run.phase_progress_json` on the request's `run_id` (the two apps share only the database — 05 §8 live-updates rule), and appears in the Runs view like any other run. A `reset` that completes causes the new exe to re-read the shared data-root pointer and reopen on the new generation without a restart (04 §7.6).
 
 ---
 
@@ -169,7 +173,7 @@ Job progress streams to the card (phase, done/total, current key) and to the Run
 | `universe` | `memberships(range)`, `subset(range)`, `ticker(ticker)` |
 | `iv` | `series(ticker)`, `bootstrapReport()` |
 | `legacy` | `runs(range)`, `run(legacyRunId)` |
-| `jobs` | `list()`, `run(kind, params)`, `progress(runId)`, `replayDiff(runId)`, `reset(reason, confirmation)`, `promoteToProduction(checklist)` |
+| `jobs` | `list()`, `queue(kind, params)`, `requests(filter)`, `cancelRequest(id)`, `progress(runId)`, `replayDiff(runId)`, `reset(reason, confirmation)`, `promoteToProduction(checklist)` — `queue` writes a `meta_job_request` row and returns its id; nothing here executes a job in stage 1 |
 | `settings` | `get()`, `set(patch)`, `captureRules()`, `newCaptureRuleVersion(domain, definition, description)`, `checkRegistry()`, `newThresholds(checkId, thresholds, note)` |
 
 Every write method records the operator as actor in the relevant audit table (`qa_exception_event`, `meta_capture_rule`, `qa_check_registry`, `meta_generation`). No method deletes.

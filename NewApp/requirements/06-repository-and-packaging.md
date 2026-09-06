@@ -96,7 +96,7 @@ This is the whole set of edits the existing app receives for stage 1. Anything b
 | 1 | `"workspaces"` entry; aggregate scripts; shared eslint config | `package.json`, `eslint.config.mjs` |
 | 2 | Dependency on `@tradeanalyzer/core` | `package.json` |
 | 3 | `ElectronCollectorHost` adapter implementing `CollectorHost` over the app's existing `etradeGet`, Polygon transport (through the rate limiter), `safeStorage`, nodemailer, batch progress | `src/main/collector-host/` (new directory) |
-| 4 | Three batch handlers registered in `index.ts`: `data-collector` (17:05, after-close only), `collector-watchdog` (19:30), `collector-oneshot` (manual) | `src/main/index.ts`, `src/main/services/jobs/collector-*.ts` |
+| 4 | Three batch handlers registered in `index.ts`: `data-collector` (17:05, after-close only), `collector-watchdog` (19:30), `collector-oneshot` (2-minute interval; claims one `meta_job_request` row queued by the new exe — 04 §1.1) | `src/main/index.ts`, `src/main/services/jobs/collector-*.ts` |
 | 5 | One call in the brief job: build `LegacyBriefHandoff` and `host.legacyHandoff(payload)`, fire-and-forget (04 §8) | the brief job + a `legacy-handoff-builder.ts` |
 | 6 | Code that moves to `core` is replaced by an import from `core` (§2), one module at a time | wherever the module lived |
 | 7 | Version bump + changelog entry per the existing conventions for each of the above | `CHANGELOG.md`, `changelogs/`, `.ai/AI_CONTEXT.md` |
@@ -162,7 +162,7 @@ The paper work ends when the operator says so; this is the order the build then 
 | B6 | Phases 5–7 (account, subset, chains) + checks incl. QC-412/413; Chains and Account views | chain parse-count equality (AC-5) on a full run |
 | B7 | Phase 8 domains; `bootstrap_iv` (source chosen); phase 9 derivation; IV view | overlap check recorded |
 | B8 | Legacy hand-off in the old brief job; `legacy_import`; Legacy view | a full brief run appears in `legacy_*` with losers |
-| B9 | Exceptions workbench; Runs; Jobs incl. `replay` (scratch) and `reset` | AC-4 (replay byte-identical), AC-14 |
+| B9 | Exceptions workbench; Runs; Jobs (queue via `meta_job_request`) incl. `replay` (scratch) and `reset` | AC-4 (replay equal over fact columns, 04 §7.5), AC-14 |
 | B10 | **Pilot**: 20 clean trading days; zero-fire review; per-domain inspection | `meta_generation.status = production` |
 
 **Stage 1 is done** when AC-1 through AC-15 hold on the production generation and the operator has promoted it. Stage 2 (derived layers, studies, then screening) starts only then, in a new document set under `NewApp/requirements/stage-2/`.

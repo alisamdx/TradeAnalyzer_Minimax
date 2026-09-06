@@ -130,11 +130,35 @@ One row per provider call. The body lives in the archive file; this row says whe
 | `archive_file` | TEXT | relative path, e.g. `archive/etrade/2026-09-05/optionchains.jsonl.gz` |
 | `archive_offset` | INTEGER | line number within the file |
 | `sha256` | TEXT | of the uncompressed body |
+| `dedup_hash` | TEXT | `sha256(provider + endpoint + params_json + body)` — the idempotence key of 04 §2.2. Unique index. It makes **re-ingesting an identical response** a no-op (crash recovery, replay); it does **not** make re-running a day idempotent, because a fresh call returns a different body and correctly appends a new version (P1) |
 | `encrypted` | INTEGER | `1` for account-domain files (Q20) |
 | `at_provider_cap` | INTEGER | `1` when the response size equals a known provider cap (P8; Finnhub 1500) |
 | `parse_status` | TEXT | `ok` \| `partial` \| `failed` — a failed parse still keeps the archive row |
 
 Archive layout: `gen-NNN/archive/<provider>/<YYYY-MM-DD>/<endpoint-slug>.jsonl.gz`, one JSON line per response `{ id, requestedAt, params, status, body }`. Account-domain files are `.jsonl.enc` (safeStorage/DPAPI, header names the mechanism).
+
+### `meta_job_request` — the one-shot job queue (04 §1.1)
+
+In stage 1 the operator drives one-shot jobs from the new exe but the **old app executes them**, because it holds the provider transports and the E*Trade token (Q4). The new exe writes a request row here; the old app's `collector-oneshot` handler claims and runs it. The table is the entire interface between the two apps — there is no IPC, no socket and no shared process.
+
+| column | type | notes |
+|---|---|---|
+| `request_id` | INTEGER PK | |
+| `requested_at`, `requested_by` | TEXT | ISO ET; `requested_by` is the app + version that queued it |
+| `run_kind` | TEXT | `universe_seed` \| `backfill_bars` \| `bootstrap_iv` \| `legacy_import` \| `replay` \| `reset` |
+| `params_json` | TEXT | e.g. `{ "sourceGeneration": 1, "target": "scratch" }` |
+| `state` | TEXT | `queued` \| `claimed` \| `running` \| `complete` \| `failed` \| `cancelled` |
+| `claimed_at`, `claimed_by_host` | TEXT | which exe took it, and when |
+| `run_id` | INTEGER FK → `meta_run` | set when execution starts; null while queued |
+| `finished_at` | TEXT | |
+| `result_json` | TEXT | the job's own report — the replay diff, the import rejection summary, the bootstrap overlap distribution |
+| `error` | TEXT | null unless `state = failed` |
+
+**Claiming is a single conditional UPDATE** (`SET state='claimed' … WHERE request_id=? AND state='queued'`); a claim that changes zero rows means someone else took it. One request is claimed per tick, so two hosts can never run the same job, and the existing batch mutex keeps it serialised against the old app's other jobs.
+
+This table is the one exception to "raw tables are append-only": it is a `meta_` control table, not a fact, and its state column is *meant* to move. Its history is preserved in the `meta_run` row each execution creates, which is append-only as usual.
+
+---
 
 ### `meta_dictionary`
 Generated from the dictionary module at startup; read-only for the inspector. Columns mirror the dictionary entry fields in §0.5 plus `dictionary_version`.
@@ -506,7 +530,7 @@ Source: U.S. Treasury daily par yield curve (one fetch returns all tenors for th
 | `yield` | REAL | **fraction** (`0.0525`), converted from the published percent at ingestion |
 | `source` | TEXT | `treasury` \| `fred` |
 
-Stage-1 consumer: none. Stage-2 consumer: Greek/IV reproduction (P4) uses the 3M tenor by default; the choice is recorded with the derivation version.
+Stage-1 consumer: **QC-410** (03 §3.5), the Greek-reproduction check, which uses the 3M tenor to verify E*Trade's Greeks are on the scale the dictionary claims (P4). Stage-2 consumers reuse the same tenor by default; the choice is recorded with the derivation version.
 
 ---
 
