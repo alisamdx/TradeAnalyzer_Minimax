@@ -1,6 +1,6 @@
 {
   "name": "trade-analyzer",
-  "version": "1.1.191",
+  "version": "1.1.192",
   "private": true,
   "description": "Stock screening and analysis desktop app for a single retail trader.",
   "main": "out/main/index.js",
@@ -8,6 +8,9 @@
   "engines": {
     "node": ">=22.5"
   },
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "rebuild:electron": "node scripts/rebuild-better-sqlite3.mjs electron",
     "rebuild:node": "node scripts/rebuild-better-sqlite3.mjs node",
@@ -25,7 +28,10 @@
     "format": "prettier --write .",
     "pretest": "npm run rebuild:node",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "typecheck:all": "npm run typecheck && npm run typecheck --workspaces --if-present",
+    "test:all": "npm test && npm test --workspaces --if-present",
+    "lint:all": "npm run lint && npm run lint --workspaces --if-present"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.100.1",

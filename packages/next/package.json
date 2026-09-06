@@ -1,0 +1,43 @@
+{
+  "name": "@tradeanalyzer/next",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TradeAnalyzer 2 — the data-first inspector exe for the rebuild.",
+  "main": "out/main/index.js",
+  "type": "module",
+  "engines": {
+    "node": ">=22.5"
+  },
+  "scripts": {
+    "predev": "npm run rebuild:electron --prefix ../.. && npm run build --prefix ../core",
+    "dev": "cmd /c \"set ELECTRON_RUN_AS_NODE=&& electron-vite dev\"",
+    "prebuild": "node ../../scripts/check-not-running.mjs && npm run rebuild:electron --prefix ../.. && npm run build --prefix ../core",
+    "build": "electron-vite build && electron-builder",
+    "prepackage": "node ../../scripts/check-not-running.mjs && npm run rebuild:electron --prefix ../.. && npm run build --prefix ../core",
+    "package": "cmd /c \"set CSC_IDENTITY_AUTO_DISCOVERY=false&& electron-vite build && electron-builder --dir\"",
+    "preview": "electron-vite preview",
+    "typecheck:node": "npm run build --prefix ../core && tsc --noEmit -p tsconfig.node.json",
+    "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
+    "typecheck": "npm run typecheck:node && npm run typecheck:web",
+    "lint": "eslint .",
+    "pretest": "npm run rebuild:node --prefix ../..",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@tradeanalyzer/core": "0.1.0"
+  },
+  "build": {
+    "appId": "com.tradeanalyzer.next",
+    "productName": "TradeAnalyzer 2",
+    "files": [
+      "out/**"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "forceCodeSigning": false
+    }
+  }
+}

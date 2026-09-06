@@ -86,6 +86,8 @@ IPC responses use a uniform `IpcResult<T>` = `{ ok: true, value } | { ok: false,
 
 ## 5. Repository map
 
+**The repo is an npm workspace as of v1.1.192.** The existing app stays at the root, unmoved; `packages/core` (`@tradeanalyzer/core`, Electron-free shared code) and `packages/next` (`@tradeanalyzer/next`, productName **TradeAnalyzer 2**) hold the ground-up rebuild, specified in `NewApp/requirements/` and changelogged in `NewApp/CHANGELOG.md`. They are a separate product on a separate `0.x` version line; the only edits the existing app receives for stage 1 are the seven listed in `NewApp/requirements/06 §5`. Root `npm test` / `typecheck` / `lint` still mean **this app only** — `test:all` / `typecheck:all` / `lint:all` add the packages. Exactly one `electron` and one `better-sqlite3` exist at the root, so `rebuild-better-sqlite3.mjs` still governs the ABI for everything.
+
 ```
 src/main/
   index.ts                  App lifecycle, window, provider wiring, IPC + batch job registration

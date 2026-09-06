@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.1.192] - 2026-09-06
+
+### chore - npm workspaces for the rebuild (NewApp build step B1)
+
+- **The existing app becomes the workspace root** for the ground-up rebuild (`NewApp/requirements/06` §4, §5). Change #1 of the seven this app receives for stage 1, and deliberately the smallest: no view, no IPC handler, no service, no job, no table and no schedule is touched.
+- `package.json` gains `"workspaces": ["packages/*"]` and three **additive** aggregate scripts - `typecheck:all`, `test:all`, `lint:all`. **The existing `npm test` / `npm run typecheck` / `npm run lint` keep their current meaning - this app only.**
+- `scripts/check-not-running.mjs` now refuses a build while **either** exe is running, and names which one. Both are checked from either build because in stage 1 they share a generation directory: this app hosts the collector (writer), the new exe holds the same DB open (reader).
+- `eslint.config.js` ignores `packages/*/{out,dist,release}` - flat-config ignores are relative to the config file, so a root `eslint .` would otherwise lint the new packages' build output. **No rule changed.**
+- **Hoisting verified**: exactly one `electron` and one `better-sqlite3` at the root, packages symlinked, no nested `node_modules`. `rebuild-better-sqlite3.mjs` is untouched and still swaps that single copy - a second copy would be rebuilt for the wrong runtime silently, the exact failure CLAUDE.md warns about.
+- **Pre-existing failure, not caused by this change:** `tests/etrade-transactions-slicing.test.ts` fails on a calendar trigger. `syncClosedPositions` walks Jan 1 to today in 31-day strides, so when the elapsed day count is an exact multiple of 31 the walk emits a final zero-width slice (`from == to`) and the test's `span > 0` assertion fails. 2026-09-06 is day 248 = 8 x 31. It fires on about twelve dates a year (2026: Feb 1, Mar 4, Apr 4, May 5, Jun 5, Jul 6, Aug 6, Sep 6, Oct 7, Nov 7, Dec 8) and passes on the rest. Left unfixed here because the existing app's stage-1 edit list is frozen (06 §5); raised for a decision.
+
 ## [1.1.191] - 2026-09-04
 
 ### docs - the signals half of the critic change fails too, and for the same reason

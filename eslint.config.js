@@ -9,7 +9,19 @@ import globals from 'globals';
 export default [
   js.configs.recommended,
   {
-    ignores: ['out/**', 'dist/**', 'release/**', 'node_modules/**', 'coverage/**', '.claude/**']
+    // Build output, including the workspace packages' (06 §4). Flat-config
+    // ignores are relative to this file, so the packages need their own entries.
+    ignores: [
+      'out/**',
+      'dist/**',
+      'release/**',
+      'node_modules/**',
+      'coverage/**',
+      '.claude/**',
+      'packages/*/out/**',
+      'packages/*/dist/**',
+      'packages/*/release/**'
+    ]
   },
   {
     files: ['**/*.{ts,tsx}'],

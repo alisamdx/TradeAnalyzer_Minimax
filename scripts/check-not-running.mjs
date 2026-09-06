@@ -1,29 +1,42 @@
 // check-not-running.mjs
-// Runs as part of prepackage / prebuild.
-// Exits 1 with a clear message if TradeAnalyzer.exe is currently running
-// so the package step fails loudly instead of silently building a stale bundle.
+// Runs as part of prebuild / prepackage, for BOTH apps.
+//
+// Exits 1 with a clear message if either exe is currently running, so the
+// package step fails loudly instead of silently building a stale bundle.
+// Both are checked from either app's build because in stage 1 they share a
+// generation directory: the existing app hosts the collector (writer) and the
+// new exe holds the same DB open (reader). 06 §4.
 
 import { execSync } from 'child_process';
 
-const EXE_NAME = 'TradeAnalyzer';
+// Process names as Windows reports them — the exe basename without `.exe`.
+const APPS = [
+  { proc: 'TradeAnalyzer', label: 'TradeAnalyzer (existing app)' },
+  { proc: 'TradeAnalyzer 2', label: 'TradeAnalyzer 2 (new exe)' }
+];
 
-let running = false;
-
-try {
-  // Use PowerShell explicitly — reliable from any parent shell (cmd, Git Bash, PS).
-  const out = execSync(
-    `powershell.exe -NoProfile -NonInteractive -Command "Get-Process -Name '${EXE_NAME}' -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Name"`,
-    { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
-  ).trim();
-  running = out.toLowerCase() === EXE_NAME.toLowerCase();
-} catch {
-  // PowerShell unavailable or Get-Process failed — don't block the build
+function isRunning(proc) {
+  try {
+    // PowerShell explicitly — reliable from any parent shell (cmd, Git Bash, PS).
+    // -Name matches without the .exe suffix and is not a wildcard here, so
+    // 'TradeAnalyzer' does not match 'TradeAnalyzer 2'.
+    const out = execSync(
+      `powershell.exe -NoProfile -NonInteractive -Command "Get-Process -Name '${proc}' -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Name"`,
+      { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
+    ).trim();
+    return out.toLowerCase() === proc.toLowerCase();
+  } catch {
+    // PowerShell unavailable or Get-Process failed — don't block the build.
+    return false;
+  }
 }
 
-if (running) {
+const running = APPS.filter((a) => isRunning(a.proc));
+
+if (running.length > 0) {
   console.error('');
-  console.error(`  ❌  ${EXE_NAME}.exe is currently running.`);
-  console.error(`      Stop the app first, then re-run:  npm run package`);
+  for (const a of running) console.error(`  ❌  ${a.label} is currently running.`);
+  console.error(`      Stop it first, then re-run the build.`);
   console.error('');
   process.exit(1);
 }

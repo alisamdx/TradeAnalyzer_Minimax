@@ -1,0 +1,57 @@
+import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+/**
+ * The two exes must stay strangers on disk — 06 §3.
+ *
+ * Both are installed and running at the same time all through stage 1, so a
+ * shared `userData` directory would put this app's settings, logs and window
+ * state on top of the daily driver's. The default userData name is derived from
+ * `productName`, which is "TradeAnalyzer 2" — close enough to the existing
+ * "TradeAnalyzer" that a later rename could silently collide. So the separation
+ * is asserted here rather than left to a default.
+ */
+
+const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8');
+
+describe('app identity', () => {
+  const pkg = JSON.parse(read('../package.json')) as {
+    version: string;
+    build: { appId: string; productName: string };
+  };
+
+  it('uses an appId distinct from the existing app', () => {
+    expect(pkg.build.appId).toBe('com.tradeanalyzer.next');
+    expect(pkg.build.appId).not.toBe('com.tradeanalyzer.app');
+  });
+
+  it('ships as "TradeAnalyzer 2"', () => {
+    expect(pkg.build.productName).toBe('TradeAnalyzer 2');
+  });
+
+  it('stays on the 0.x line until pilot exit (06 §6)', () => {
+    expect(pkg.version).toMatch(/^0\./);
+  });
+
+  it('overrides userData to trade-analyzer-next, not the productName default', () => {
+    const main = read('../src/main/index.ts');
+    expect(main).toMatch(/app\.setPath\(\s*'userData'/);
+    expect(main).toContain("'trade-analyzer-next'");
+    // The existing app's directory must never appear in this package.
+    expect(main).not.toMatch(/'trade-analyzer'/);
+  });
+
+  it('keeps the renderer context-isolated with node integration off', () => {
+    const main = read('../src/main/index.ts');
+    expect(main).toMatch(/contextIsolation:\s*true/);
+    expect(main).toMatch(/nodeIntegration:\s*false/);
+  });
+
+  it('declares the window.api shape in exactly one place', () => {
+    // TS2717 in the existing app came from per-file redeclaration (CLAUDE.md).
+    const preload = read('../src/preload/index.ts');
+    expect(preload).toMatch(/import type \{ NextApi \}/);
+    expect(read('../src/preload/api.ts')).toMatch(/export interface NextApi/);
+  });
+});

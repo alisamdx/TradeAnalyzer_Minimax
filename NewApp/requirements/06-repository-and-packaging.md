@@ -34,6 +34,7 @@ TradeAnalyzer_Minimax/                 ← the EXISTING app stays here, unmoved
 Rules:
 
 - **The existing app is not relocated.** Moving 76k lines under `packages/legacy/` would touch every import and build script for no benefit (Q11). Its `package.json` becomes the workspace root; its scripts keep working unchanged.
+- **`core` is bundled into `next`'s main process, not externalized** (built B1): `externalizeDepsPlugin` is given `exclude: ['@tradeanalyzer/core']`, so the packaged exe resolves no workspace symlink at runtime — the built bundle imports only `electron` and `node:path`. `next`'s `predev`/`prebuild`/`prepackage`/`typecheck:node` build `core` first, so nothing is ever compiled against a stale `dist/`.
 - **`core` is Electron-free and native-free.** It imports nothing from `electron`, uses no `app.getPath`, no `safeStorage`, no `fetch` of its own, and links no native module. Everything environmental enters through `CollectorHost` (04 §1) or function parameters. A purity test (§7) fails the build if `core` ever imports `electron` or uses a path alias.
 - **No path aliases in `core` or `next`.** The existing `@shared/*` alias is the reason plain-node harnesses could never import the real services (CLAUDE.md). `core` is imported as `@tradeanalyzer/core` by package name; `next` uses relative imports internally.
 
@@ -45,7 +46,7 @@ Rules:
 |---|---|
 | name | `@tradeanalyzer/core` |
 | version | independent semver, starts `0.1.0`; **this is `meta_run.collector_version`** |
-| type | `module`; compiled with `tsc` to `dist/` (ESM, `.d.ts`), `exports` map per sub-path (`./dictionary`, `./collector`, `./qa`, …) |
+| type | `module`; compiled with `tsc` to `dist/` (ESM, `.d.ts`), `exports` map per sub-path (`./dictionary`, `./collector`, `./qa`, …). **At B1 the map is `.` and `./db` only** — a sub-path is added when its directory lands, rather than declaring entry points to files that do not exist |
 | dependencies | none at runtime beyond `zlib` (Node built-in) for the archive; OAuth signing uses `node:crypto` |
 | peerDependencies | `better-sqlite3` (same major as root — a **type-only** dependency: `core` receives an open `Database` from the host and uses a narrow `SqliteLike` interface, so it never loads the binary itself) |
 | devDependencies | `vitest`, `typescript`, `better-sqlite3` (for tests only; built for Node by the root `pretest`) |
@@ -82,7 +83,7 @@ In stage 1 the collector (in the old app) writes the generation and the new exe 
 - Root `package.json`: add `"workspaces": ["packages/*"]`. npm hoists shared dependencies; **`electron` and `better-sqlite3` are pinned to identical versions in root and `next`** so exactly one copy exists and the existing ABI-swap script keeps working (a second copy would be rebuilt for the wrong runtime silently — the exact failure CLAUDE.md warns about).
 - `scripts/rebuild-better-sqlite3.mjs` is unchanged; both apps' `pre*` hooks call it. `scripts/check-not-running.mjs` is extended to refuse `package` of either app while **either** exe is running (the new exe also holds the generation DB open).
 - Root-level aggregate scripts (added, additive): `typecheck:all`, `test:all`, `lint:all` → `npm run <x> --workspaces --if-present` plus the root's own. The existing `npm test` / `npm run typecheck` keep their current meaning (root app only) so nothing about the existing workflow changes.
-- ESLint 9 + Prettier 3 configs move to a root `eslint.config.mjs` that both packages extend; the existing rules are not tightened for the old app.
+- ESLint 9 + Prettier 3 stay in the root **`eslint.config.js`** (not `.mjs` as first drafted — the root `package.json` already declares `"type": "module"`, so that file is ESM today and renaming it would touch the existing app for no behavioural gain, **built B1**). Both packages extend it from their own `eslint.config.js`, adding only their build-output ignores and `no-undef: 'off'` for TypeScript sources — TypeScript resolves identifiers itself, and leaving the rule on reports every ambient type (`NodeJS`, `JSX`) as undefined. The root ignore list carries `packages/*/{out,dist,release}` explicitly, because flat-config ignores are relative to the config file. The existing rules are not tightened for the old app.
 - `package.json` files are edited with the Edit tool or Node, never PowerShell `Set-Content` (BOM quirk).
 
 ---
@@ -124,7 +125,7 @@ Both exes can be installed and running at once; they share only the data root po
 
 | test | location | asserts |
 |---|---|---|
-| **Core purity** | `packages/core/test/purity.test.ts` | no `electron` import, no path alias, no native module load, and no **value-level** `better-sqlite3` import (type-only permitted) anywhere under `core/src` |
+| **Core purity** | `packages/core/test/purity.test.ts` | no `electron` import, no path alias, no native module load, no Electron-shaped global (`app.getPath`, `safeStorage`, `ipcMain`/`ipcRenderer`, `BrowserWindow`), no `fetch` of its own, and no **value-level** `better-sqlite3` import (type-only permitted) anywhere under `core/src`. **Built B1 with negative controls**: every rule carries `fires` and `clean` fixtures, both asserted, plus an assertion that the source tree is non-empty. A source scan whose regexes match nothing passes exactly as greenly as one with nothing to find — the failure mode this project already shipped once in the own-at-strike gate (CLAUDE.md). The tree scan was verified to fail against a deliberately violating file before it was removed |
 | **Dictionary conformance** (AC-3) | `core/test/dictionary/*.test.ts` | every entry complete; nullable ⇒ null meaning present; status columns declared; DDL generates and round-trips |
 | **Unit conversion** (AC-7) | generated per converted field in `core/test/units/` | conversion from the provider representation; **grep test** that no `*100`/`/100`/`* 0.01` appears outside `core/src/units/` and `next/src/renderer` formatters |
 | **Single writer** (AC-11) | `core/test/writers.test.ts` | for each raw table exactly one module contains an `INSERT` targeting it; `next/src` contains none |
@@ -155,7 +156,7 @@ The paper work ends when the operator says so; this is the order the build then 
 
 | step | deliverable | gate to next |
 |---|---|---|
-| B1 | Workspaces; empty `core` and `next` packages; purity test; both exes build and package | `typecheck:all`, `test:all` green; existing app unchanged in behaviour |
+| B1 ✅ | Workspaces; empty `core` and `next` packages; purity test; both exes build and package | `typecheck:all`, `test:all` green; existing app unchanged in behaviour — **built 2026-09-06**, see `NewApp/CHANGELOG.md` |
 | B2 | Dictionary as code for all 02 tables; DDL generator; `meta_dictionary`; new exe opens `gen-001` and the **Data** and **Dictionary** views render every (empty) table | AC-3, AC-13 |
 | B3 | `CollectorHost` interface; `ElectronCollectorHost`; archive writer; `meta_run`/`meta_response`; `meta_job_request` + the `collector-oneshot` claim loop; phases 0–1 (`universe_seed`) | AC-1, AC-2 on real rows |
 | B4 | Phases 2–4 (bars, quotes, actions) + their QC checks + the gate skeleton + email + watchdog | first green/red email received |
