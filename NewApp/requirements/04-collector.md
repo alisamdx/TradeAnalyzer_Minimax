@@ -263,12 +263,16 @@ Every `candidates[]` entry the brief scored is included — **the losers too** (
 
 ## 10. Additions to 03 arising from the measured log
 
-- **QC-412 chain 4xx rate** (`warning`; `blocking` if > 5 % †): a 4xx on an `optionchains` call for an expiration that `optionexpiredate` listed in the same run. Yesterday's 34 % rate in the existing app is unexplained and must not be inherited silently; the archived 400 bodies will say why.
+- **QC-412 chain 4xx rate** (`warning`; `blocking` if > 5 % †): a 4xx on an `optionchains` call for an expiration that `optionexpiredate` listed in the same run. The archived 400 bodies will say why.
+
+  **This one is a prerequisite, not a threshold to tune later.** The measured rate in the existing app is **34 %** — nearly seven times the blocking boundary — so on the numbers as they stand the chain domain is `unusable` from run 1 and the clean-day streak (03 §8) can never begin. Two outcomes are possible and they need opposite responses: either the 400s are *legitimate* (E*Trade lists an expiration on `optionexpiredate` that `optionchains` will not serve — in which case the boundary is wrong and the real fix is to stop requesting those expirations), or they are *ours* (a malformed request, the UTC weekday bug's cousin), in which case the boundary is right and the collector must not inherit the bug. **Diagnosing which comes before the pilot**, and it is cheap: the existing app now logs E*Trade calls with a 300-character response-body preview (`logs/api/api_<date>.jsonl`, `"provider":"etrade"`, v1.1.144), so the answer is already on disk. Added to §11.
 - **QC-413 renew storm** (`warning`): more than 20 `renew_access_token` calls in one run (yesterday: 1,383/day). Renewing on every failure is correct; a storm means a non-auth failure is being misread as dormancy.
 
 ---
 
 ## 11. Pre-pilot checklist (must be recorded here before the first daily run)
+
+Two kinds of item: **provider facts** the dictionary cannot be frozen without, and **threshold measurements** that turn a † into a real value before the pilot rather than after it (03 §10.2). Only the IV source is a decision rather than a measurement, and only the `backfill_bars` queue depends on a build step.
 
 | item | how | result |
 |---|---|---|
@@ -278,7 +282,14 @@ Every `candidates[]` entry the brief scored is included — **the losers too** (
 | Polygon `weighted_shares_outstanding` on the current plan | one ticker-details call | _pending_ |
 | Finnhub free-tier: estimates, short interest | one call each | _pending_ |
 | Treasury par-yield fetch URL and format | one fetch | _pending_ |
-| IV bootstrap source chosen | compare IVolatility vs MarketData.app on method note, depth, subset coverage, price | _pending_ |
+| IV bootstrap source chosen | compare IVolatility vs MarketData.app on method note, depth, subset coverage, price — **a spend decision, not a measurement**; not needed until B7 | _pending_ |
+| **Diagnose the 34 % chain 4xx rate** (§10, QC-412) | read the archived 400 bodies in the existing app's `logs/api/api_*.jsonl` where `provider=etrade` and the endpoint is `optionchains`; classify legitimate-vs-ours | _pending_ |
+| QC-410 Greek reproduction: delta tolerance, and with it the `theta` time unit, `timeStamp` epoch unit and IV scale | one live chain call reproduced through Black-Scholes; settles three verify-list items at once | _pending_ |
+| QC-201 / QC-301 completeness (1 %) | coverage rate over the existing app's stored bar and quote history | _pending_ |
+| QC-302 close disagreement (0.5 % per ticker, 2 % of tickers) | existing bars vs quotes, same day, across the universe | _pending_ |
+| QC-407 underlying disagreement (1 %) | E*Trade `nearPrice` vs Polygon last on one live chain call | _pending_ |
+| QC-702 shares-outstanding drift (25 %) | EDGAR facts vs Polygon reference for the CS universe | _pending_ |
+| QC-101 universe drift (5 %) | index membership change history | _pending_ |
 | `backfill_bars` review queue cleared | all QC-205 exceptions resolved/accepted | _pending_ |
 
 ---

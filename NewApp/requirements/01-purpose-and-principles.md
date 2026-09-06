@@ -116,7 +116,7 @@ Each principle has a statement, the reason it exists, and what it requires or fo
 ### P10 — A check is unverified until it has been shown able to fire
 **Statement.** Before any threshold, gate or validation rule is relied upon, the distribution of the tested quantity relative to the threshold is measured on real data and recorded. A rule whose ratio never approaches its boundary is decorative and is marked as such.
 **Why.** The conviction "never enter above" band was anchored to spot on the day it was written and so sat at ~0.83 of every strike by construction; it rejected 0 of 39 picks and nobody could tell (D7).
-**Requires.** For every quality check in 03: a recorded measurement of how often it fires on the pilot data, reviewed at pilot exit; checks that never fired are flagged for review, not assumed correct. Applies with full force to any later stage's trading gates.
+**Requires.** For every quality check in 03: the **distribution of the quantity it tests, recorded on every evaluation whether or not it fired**, reviewed against the threshold at pilot exit (03 §4 `distribution_json`, QC-955). A fire count alone is not enough and never was — zero fires looks identical whether the boundary sits in an empty gap or a mile beyond every real value, which is exactly how the conviction band went unnoticed. Checks that never fired are flagged for review, not assumed correct. Applies with full force to any later stage's trading gates.
 
 ### P11 — One choke point per capability
 **Statement.** Every capability that must apply to all callers lives in the one function all callers pass through: one provider transport per provider, one writer per table, one validator per invariant, one ingestion converter per field.
@@ -160,7 +160,7 @@ Testable statements. Later sections refine them; stage 1 is complete when all ho
 | AC-7 | For every field with a unit, an ingestion test asserts the conversion from the provider's representation; no `*100` / `/100` appears outside ingestion. | P7 |
 | AC-8 | Every collector run produces a stored quality report; a day with an open blocking exception reads as unusable through the same API downstream readers use. | P8 |
 | AC-9 | A status email is sent after every run, including runs with zero findings; an open exception appears in every subsequent email until its state changes. | P9 |
-| AC-10 | Every quality check has a recorded fire-count over the pilot; checks with zero fires are listed for review at pilot exit. | P10 |
+| AC-10 | Every quality check has a recorded fire-count over the pilot, and every check testing a magnitude has that magnitude's distribution recorded against its threshold on every evaluation; checks with zero fires, and thresholds no observation ever approached, are both listed for review at pilot exit. | P10 |
 | AC-11 | Each raw table has exactly one writer module; a test fails if any other module references the table in a write statement. | P11 |
 | AC-12 | Every automatic remediation is recorded on the exception it addressed; no code path deletes or overwrites data in response to a finding. | P12 |
 | AC-13 | Every table appears in the inspector with no table-specific UI code. | P13 |

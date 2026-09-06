@@ -23,7 +23,7 @@ Then it sends the **status email** (§7), whether or not anything was found.
 - **A check may only read.** Checks never write to `raw_`/`ref_` tables. Remediation is a separate, enumerated step (§6).
 - **A finding is a fact about the data, not about the run.** If the same condition is still true tomorrow, it is the *same* exception (same fingerprint), not a new one. This is what lets an exception persist across runs and be escalated (§5.4).
 - **A failing check never deletes.** The worst a check can do is mark a domain-day unusable (P8, P12).
-- **Every check records how often it fired**, evaluated-count and fired-count per run, so a check that has never fired over the pilot is identifiable at exit (P10, AC-10).
+- **Every check records the distribution of what it measured, not merely whether it fired.** Evaluated-count and fired-count identify a check that never fires (P10, AC-10), but they cannot tell you whether its threshold is in the right place: a check that fires zero times looks identical whether the boundary sits in an empty gap or a mile past every real value. So each check that compares a magnitude also stores that magnitude's distribution over every evaluation (`qa_check_result.distribution_json`), and the keys carrying the largest values, fired or not. **This is P10 taken literally** — "the distribution of the tested quantity relative to the threshold is measured on real data and recorded" — and it is what makes §8's threshold-setting possible. Recording only fires would reproduce the conviction-band failure at the level of the gate itself: a boundary nobody can see the distance to.
 
 ---
 
@@ -45,7 +45,19 @@ Severity is a property of the **check**, with two adjustments: escalation (§5.4
 
 ## 3. Check catalogue
 
-Each check: id, severity, condition that fires it, and the remediation it is allowed to request (from the §6 list) or `none`. Thresholds marked † are working values to be measured on the pilot (P10) and are stored on the check registry row, not hard-coded.
+Each check: id, severity, condition that fires it, and the remediation it is allowed to request (from the §6 list) or `none`. All thresholds are stored on the check registry row, never hard-coded. Two marks distinguish where a value came from:
+
+- **†** — a **working value**, not yet measured. Set from the pilot's recorded distributions (§8, QC-955).
+- **‡** — **already measured**, on the existing application's data. These are not guesses and re-opening them needs new evidence, not a fresh opinion:
+
+| threshold | measured on | separation observed |
+|---|---|---|
+| QC-204 · 40 % daily move | 153 discontinuities across 126 tickers (2026-08-28) | unadjusted splits at −74 % (CRWD 4:1), +203 % (DD), +177 % (MRNA) against SPY's largest genuine daily move of 2.58 % — 40 % sits in a wide empty gap |
+| QC-205 · 15× volume regime | the same episode set | ticker reuse at 76× (BNY) and 53,592× (SPCX) against genuine violent moves at ≤ 5× (MRNA 5.0×) — two orders of magnitude apart |
+| QC-601 · 14-day later-slip | the NVDA earnings-date incident (v1.1.136) | a provider coverage gap moved the date ~90 days; an issuer refining its own date moves it by a few. 14 days separates them with room on both sides |
+| QC-901 · VIX ∈ [5, 150] | the existing brief job's sane-range guard | VIX has never closed outside this band; the check exists because the E*Trade index symbol is unverified, so a wrong symbol returns a wrong-magnitude number |
+
+A ‡ value still gets its distribution recorded like any other (§4) — measured once is not measured forever, and the pilot's own data either confirms it or is the new evidence.
 
 ### 3.1 Cross-cutting checks (run on every table the run wrote)
 
@@ -79,8 +91,8 @@ Each check: id, severity, condition that fires it, and the remediation it is all
 | QC-201 bar completeness | blocking if missing > 1 % †, else warning | count of tickers with a bar for `trading_date` < expected (current active members) | R2 re-fetch missing tickers |
 | QC-202 OHLC order | blocking | `low ≤ min(open, close)`, `max(open, close) ≤ high` violated, or any price ≤ 0 | none (mark `invalid`) |
 | QC-203 non-final bar | warning | a bar fetched before the settlement window (`is_final = 0`) was **not** re-fetched by run end | R3 re-fetch final |
-| QC-204 discontinuity | blocking | \|close/prev_close − 1\| > 40 % † with no `raw_split`/`raw_dividend` (special) on the boundary | R5 whole-range re-fetch + re-check; if still present → stays open for operator (ticker reuse vs genuine move, per the volume test below) |
-| QC-205 volume regime shift | blocking | 20-day median volume after a discontinuity ≥ 15× † or ≤ 1/15 the 20-day median before it (ticker-reuse signature) | none — operator decides (truncate-before-splice is an operator action, §6) |
+| QC-204 discontinuity | blocking | \|close/prev_close − 1\| > 40 % ‡ with no `raw_split`/`raw_dividend` (special) on the boundary | R5 whole-range re-fetch + re-check; if still present → stays open for operator (ticker reuse vs genuine move, per the volume test below) |
+| QC-205 volume regime shift | blocking | 20-day median volume after a discontinuity ≥ 15× ‡ or ≤ 1/15 the 20-day median before it (ticker-reuse signature) | none — operator decides (truncate-before-splice is an operator action, §6) |
 | QC-206 series consistency after re-fetch | blocking | a re-fetched series disagrees with the stored series by > 0.5 % † on any date **without** an intervening corporate action (the adjustment basis changed) | none — new rows are already appended (P1); the exception documents the basis change |
 | QC-207 gap in trading days | warning | a ticker active on both sides has no bar for a trading day in between | R2 re-fetch range |
 | QC-208 zero-volume trading day | warning | `volume = 0` on a trading day for an active ticker | none |
@@ -118,7 +130,7 @@ Each check: id, severity, condition that fires it, and the remediation it is all
 |---|---|---|---|
 | QC-501 unexplained discontinuity | blocking | (alias of QC-204 seen from this domain) a bar discontinuity with no action within ±1 trading day | R6 per-ticker action re-fetch |
 | QC-502 action without effect | info | a `raw_split` whose ratio is not visible in the bar series on `execution_date` (already adjusted; expected) | none |
-| QC-601 earnings date slips later | blocking | for a ticker, the newest observed `report_date` is > 14 days † later than the previous observation from the same source | R4 subdivide sweep around the earlier date; stays open until the earlier date is confirmed absent from a non-capped response |
+| QC-601 earnings date slips later | blocking | for a ticker, the newest observed `report_date` is > 14 days ‡ later than the previous observation from the same source | R4 subdivide sweep around the earlier date; stays open until the earlier date is confirmed absent from a non-capped response |
 | QC-602 earnings source disagreement | warning | Finnhub vs E*Trade `report_date` differ by > 1 day for the same fiscal quarter | none |
 | QC-603 earnings freshness | warning | a CS ticker has no future `report_date` observed within the last 7 runs | R2 re-fetch ticker |
 | QC-604 earnings weekend date | warning | `report_date` on a non-trading day (the UTC-Saturday artefact) — stored as observed, flagged | none |
@@ -140,7 +152,7 @@ Each check: id, severity, condition that fires it, and the remediation it is all
 
 | id | sev | fires when | remediation |
 |---|---|---|---|
-| QC-901 VIX range | blocking | `last` outside [5, 150] or missing | R1 retry |
+| QC-901 VIX range | blocking | `last` outside [5, 150] ‡ or missing | R1 retry |
 | QC-902 yield curve | warning | fewer than 9 tenors, or any yield outside [−0.01, 0.25] | R1 retry / fallback source |
 | QC-903 macro calendar gap | warning | no FOMC event in the next 90 days, or no CPI in the next 45 | none |
 | QC-904 short interest freshness | warning | newest `settlement_date` older than 21 days | R1 retry |
@@ -153,6 +165,7 @@ Each check: id, severity, condition that fires it, and the remediation it is all
 |---|---|---|---|
 | QC-951 replay equivalence | blocking | weekly, on a sampled trading day | replaying that day's archive into a scratch DB yields raw/derived rows that differ from stored **over the fact columns** — the comparison excludes `row_id`, `run_id` and `meta_` timestamps, which necessarily differ in a fresh database and are not facts (AC-4, 04 §7.5) |
 | QC-952 fire-count review | info | at pilot exit and monthly | lists every check with `fired_total = 0` for operator review (P10) |
+| QC-955 threshold distance | info | at pilot exit and monthly | for every check declaring a `tested_quantity`, reports the pooled distribution against its threshold and flags two shapes: a threshold **no observation ever approached** (p99 below half the boundary — decorative, the DINO shape) and one **the bulk of observations sit against** (p50 within ±25 % — firing on ordinary data, the liquidity-score shape) |
 | QC-953 archive/DB drift | blocking | weekly | a `meta_response` row's archive line is missing, or an archive line has no `meta_response` row |
 | QC-954 exception aging | warning | daily | an `open` exception older than 5 runs with no acknowledgement |
 
@@ -167,6 +180,8 @@ Generated from code at startup; the fire statistics are updated by the gate.
 |---|---|
 | `check_id` | `QC-nnn` |
 | `domain`, `default_severity`, `description`, `reads_tables_json` | |
+| `tested_quantity` | the name of the magnitude this check compares against its threshold, e.g. `abs_close_change_pct`, `volume_regime_ratio`, `missing_ticker_fraction`. **Null means the check tests a predicate, not a magnitude** (QC-001…005 are true/false: a row either has provenance or it does not) — the one declared null meaning, per P3 |
+| `tested_unit` | the unit of that quantity, from the same vocabulary as the dictionary (`fraction`, `ratio`, `days`, `count`) |
 | `thresholds_json` | the † values in force; changing one is a new registry version row |
 | `registry_version`, `valid_from`, `valid_to` | |
 | `evaluated_total`, `fired_total`, `first_fired_at`, `last_fired_at` | P10 instrumentation |
@@ -191,6 +206,8 @@ One per (run, check) — the row behind `checks_json`, queryable.
 | `run_id`, `check_id`, `registry_version` | |
 | `evaluated_count`, `fired_count`, `duration_ms` | |
 | `sample_keys_json` | up to 20 offending keys for the inspector |
+| `distribution_json` | **the whole point of P10** — summary statistics of `tested_quantity` over *every* evaluation this run, fired or not: `{ n, min, p50, p90, p99, max, threshold, nearBoundary }`, where `nearBoundary` counts evaluations within ±25 % of the threshold. Null iff the registry declares `tested_quantity` null |
+| `extreme_keys_json` | up to 20 keys with the **largest** tested values, whether or not any fired — the rows nearest the boundary are the evidence a threshold review needs, and they are exactly the ones a fired-only record discards |
 
 ### `qa_exception`
 One per distinct finding, persistent across runs.
@@ -338,7 +355,7 @@ A dead scheduler produces no run and therefore no gate and no email. A separate,
 The gate computes and the email shows a **clean-day streak**: consecutive trading days on which every domain-day is `usable` or `usable_with_warnings` with **zero open or acknowledged blocking exceptions** at end of run. An exception in `expired_review` does not break the streak (§5.2) but does block promotion at step 4. When the streak reaches 20 †:
 
 1. QC-952 produces the **zero-fire list** — every check with `fired_total = 0`. The operator reviews each: keep (plausibly rare), fix (the condition can never be true as written), or drop. Decisions recorded on the registry row.
-2. The **fired distribution** per check is stored (how often, which tickers) so thresholds marked † are set from data, not defaults.
+2. The **distribution review**: for every check declaring a `tested_quantity`, the pooled distribution over the pilot's runs is presented against the threshold in force — percentiles, max, the near-boundary count, and the extreme keys. Each † value is then either confirmed, moved, or recorded as *unmeasurable on this sample* (the honest verdict for a check whose event simply did not occur; QC-205 ticker reuse is expected to be one). A threshold is never left at its draft value silently: the outcome is written to the registry row with the distribution that justified it.
 3. The operator confirms every domain has been visually inspected (D5) — a checkbox per domain in the inspector, recorded with a timestamp.
 4. **Nothing is in `expired_review`** — every expired acceptance has been ruled on (§5.2). Then `meta_generation.status` → `production`, `pilot_exit_at` set. Downstream stages may now read.
 
@@ -352,7 +369,7 @@ A reset (P14) restarts the streak at 0 in the new generation.
 |---|---|
 | AC-8 | `qa_quality_report` per run; `qa_domain_day_status` as the sole usability API; QC-001…009 cannot be disabled |
 | AC-9 | §7.1 email on every run incl. green; open-exception totals in every email; QC-954 aging; §5.1 no auto-resolve without remediation |
-| AC-10 | `qa_check_registry.fired_total`; QC-952 zero-fire list at pilot exit |
+| AC-10 | `qa_check_registry.fired_total`; `qa_check_result.distribution_json` + `extreme_keys_json` on every evaluation; QC-952 zero-fire list and QC-955 threshold-distance report at pilot exit |
 | AC-12 | §6 enumerated list; `remediations_json` on every exception; no check or remediation has a delete/update path |
 
 ## 10. Open items
@@ -364,4 +381,5 @@ A reset (P14) restarts the streak at 0 in the new generation.
 
 ### 10.2 Still open, by design
 
-- Every threshold marked † — set from the distribution observed over the first 20 pilot runs (§8), not guessed beforehand. Each carries its draft value until then; the severity declared in §3 applies from the first run, so a draft threshold on a `blocking` check can halt a pilot run. That is intended during the pilot — the generation is not `production` — but it is the reason pilot exit requires 20 *clean* days rather than 20 days.
+- Every threshold marked **†** — set from the distribution observed over the first 20 pilot runs (§8, QC-955), not guessed beforehand. Each carries its draft value until then; the severity declared in §3 applies from the first run, so a draft threshold on a `blocking` check can halt a pilot run. That is intended during the pilot — the generation is not `production` — but it is the reason pilot exit requires 20 *clean* days rather than 20 days. Values marked **‡** are already measured (§3) and are not part of this list.
+- **Seven † values are measurable before the pilot, against the existing application's data**, and are not waiting on anything: the chain-subset admitted count, QC-201/QC-301 completeness, QC-302 close disagreement, QC-407 underlying disagreement, QC-410 Greek reproduction, QC-702 shares-outstanding drift, QC-101 universe drift. They are listed in 04 §11 with the rest of the pre-pilot work.
