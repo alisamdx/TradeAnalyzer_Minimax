@@ -131,6 +131,7 @@ Both exes can be installed and running at once; they share only the data root po
 | **Ingestion determinism** (AC-4) | `core/test/ingest/*.test.ts` | golden archived responses (fixtures, secrets scrubbed) → byte-identical rows on repeated runs |
 | **Gate & lifecycle** | `core/test/qa/*.test.ts` | each QC check fires on a constructed fixture and not on a clean one (the P10 proof, at unit level); lifecycle transitions; no auto-resolve without remediation |
 | **Leak canaries** (AC-15) | `core/test/etrade/logging.test.ts` (moved with the transport) + `next/test/archive-encryption.test.ts` | tokens/secrets/auth-success bodies never reach any sink; account archive lines carry the header and do not decrypt without the host |
+| **Job-queue claim** | `core/test/jobs/claim.test.ts` | the conditional UPDATE claims exactly once under concurrent attempts; a claim that changes zero rows yields the job to the other host; a `queued` row older than the stall threshold is reported, not silently retried |
 | **Host adapter** | `tests/collector-host.test.ts` (existing app) | `ElectronCollectorHost` satisfies the interface; renew-and-retry preserved; masked key in `endpoint` |
 | **Hand-off** | `tests/legacy-handoff.test.ts` (existing app) | payload includes every scored candidate; IV converted once; `volumeReported` reflects field presence; never throws into the brief |
 | **Inspector genericity** (AC-13) | `next/test/inspector.test.ts` | a throwaway dictionary entry + table appears with sort/filter/null glyphs, no code change |
@@ -156,14 +157,16 @@ The paper work ends when the operator says so; this is the order the build then 
 |---|---|---|
 | B1 | Workspaces; empty `core` and `next` packages; purity test; both exes build and package | `typecheck:all`, `test:all` green; existing app unchanged in behaviour |
 | B2 | Dictionary as code for all 02 tables; DDL generator; `meta_dictionary`; new exe opens `gen-001` and the **Data** and **Dictionary** views render every (empty) table | AC-3, AC-13 |
-| B3 | `CollectorHost` interface; `ElectronCollectorHost`; archive writer; `meta_run`/`meta_response`; phases 0–1 (`universe_seed`) | AC-1, AC-2 on real rows |
+| B3 | `CollectorHost` interface; `ElectronCollectorHost`; archive writer; `meta_run`/`meta_response`; `meta_job_request` + the `collector-oneshot` claim loop; phases 0–1 (`universe_seed`) | AC-1, AC-2 on real rows |
 | B4 | Phases 2–4 (bars, quotes, actions) + their QC checks + the gate skeleton + email + watchdog | first green/red email received |
 | B5 | `backfill_bars`; review queue cleared (04 §11) | QC-205 exceptions all resolved/accepted |
 | B6 | Phases 5–7 (account, subset, chains) + checks incl. QC-412/413; Chains and Account views | chain parse-count equality (AC-5) on a full run |
 | B7 | Phase 8 domains; `bootstrap_iv` (source chosen); phase 9 derivation; IV view | overlap check recorded |
 | B8 | Legacy hand-off in the old brief job; `legacy_import`; Legacy view | a full brief run appears in `legacy_*` with losers |
-| B9 | Exceptions workbench; Runs; Jobs (queue via `meta_job_request`) incl. `replay` (scratch) and `reset` | AC-4 (replay equal over fact columns, 04 §7.5), AC-14 |
+| B9 | Exceptions workbench; Runs; the **Jobs view** over `meta_job_request` (05 §7) incl. `replay` (scratch) and `reset` | AC-4 (replay equal over fact columns, 04 §7.5), AC-14 |
 | B10 | **Pilot**: 20 clean trading days; zero-fire review; per-domain inspection | `meta_generation.status = production` |
+
+**Launching one-shot jobs before B9.** The queue table and its claim loop land at B3, but the Jobs *UI* that writes to it is B9 — so from B3 to B8 a one-shot is started by inserting a `meta_job_request` row directly (`scripts/queue-job.mjs` in `packages/core`, dev-only). This is deliberate: it means `universe_seed` (B3) and `backfill_bars` (B5) exercise the exact same claim-and-execute path the UI will use later, rather than a temporary direct-call path that would then be deleted untested.
 
 **Stage 1 is done** when AC-1 through AC-15 hold on the production generation and the operator has promoted it. Stage 2 (derived layers, studies, then screening) starts only then, in a new document set under `NewApp/requirements/stage-2/`.
 

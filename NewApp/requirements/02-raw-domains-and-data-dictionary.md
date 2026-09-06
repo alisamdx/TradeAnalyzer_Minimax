@@ -1,6 +1,6 @@
 # 02 — Raw domains and data dictionary
 
-> **Status:** draft v1, 2026-09-05. Derived from `00-discovery-qa.md` (Q1–Q20) and governed by `01-purpose-and-principles.md` (P1–P15). Provider field names in the "source" columns are the ones the existing app's parsers already read (`etrade-options.ts`, `etrade-portfolio-service.ts`, `polygon-provider.ts`, `earnings-refresh`); fields marked **verify** have not been observed in a live response yet and must be confirmed during 04 before the dictionary entry is frozen.
+> **Status:** draft v1, 2026-09-05. Derived from `00-discovery-qa.md` (Q1–Q21) and governed by `01-purpose-and-principles.md` (P1–P15). Provider field names in the "source" columns are the ones the existing app's parsers already read (`etrade-options.ts`, `etrade-portfolio-service.ts`, `polygon-provider.ts`, `earnings-refresh`); fields marked **verify** have not been observed in a live response yet and must be confirmed during 04 before the dictionary entry is frozen.
 > **Q21 closed 2026-09-05:** the three sentiment-side domains in §12 (short interest, analyst view, insider transactions) are **in scope**. Stage 1 has fifteen raw domains.
 
 ---
