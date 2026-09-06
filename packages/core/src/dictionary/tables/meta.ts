@@ -1,0 +1,252 @@
+import { col, nullable, type TableEntry } from '../types.js';
+import { defineTable } from '../standard-columns.js';
+
+/**
+ * Infrastructure tables — 02 §1.
+ *
+ * These describe the collection itself rather than the market: which generation
+ * this is, which run wrote what, which rule was in force, and where each
+ * provider response is archived. They carry no standard columns, because they
+ * *are* the thing the standard columns point at.
+ */
+
+const RUN_KINDS = [
+  'daily',
+  'backfill_bars',
+  'bootstrap_iv',
+  'legacy_import',
+  'replay',
+  'manual'
+] as const;
+
+export const PROVIDERS = [
+  'polygon',
+  'etrade',
+  'edgar',
+  'finnhub',
+  'treasury',
+  'fred',
+  'ivolatility',
+  'marketdata',
+  'finra'
+] as const;
+
+export const metaTables: readonly TableEntry[] = [
+  defineTable({
+    table: 'meta_generation',
+    layer: 'meta',
+    domain: 'generation',
+    description:
+      'One row per generation (P14). Every generation file describes itself; the newest also ' +
+      'records its predecessor, so a chain of resets is readable from any link in it.',
+    naturalKey: ['generation_no'],
+    appendOnly: false,
+    ruleDriven: false,
+    standardColumns: false,
+    columns: [
+      col.int('generation_no', 'Generation number; `1` is the pilot.', { primaryKey: true, sourceProvider: 'collector' }),
+      col.ts('opened_at', 'When this generation was created.', { sourceProvider: 'collector' }),
+      nullable(col.ts('closed_at', 'When this generation stopped being written to.'), 'still the current generation'),
+      col.enumOf('status', ['pilot', 'production', 'closed'], 'Where this generation stands. Only a `production` generation is trusted for analysis.', { sourceProvider: 'collector' }),
+      { column: 'db_path', type: 'TEXT', unit: 'path', nullable: false, description: 'Path to this generation\'s SQLite file.', sourceProvider: 'collector' },
+      { column: 'archive_path', type: 'TEXT', unit: 'path', nullable: false, description: 'Path to this generation\'s response archive.', sourceProvider: 'collector' },
+      nullable(col.int('predecessor_no', 'The generation this one replaced.'), 'generation 1 — there was no predecessor'),
+      nullable(col.text('reset_reason', 'Why the predecessor was closed.'), 'not a reset — this generation was opened fresh'),
+      nullable(col.ts('pilot_exit_at', 'When the 20-clean-day criterion was met and the operator promoted this generation.'), 'still in pilot, or never promoted'),
+      nullable(col.date('iv_stitch_date', 'Readers use `ext_iv_history` before this date and `derived_iv30_daily` from it onward (Q17).'), 'no external IV history has been loaded yet')
+    ],
+    indexes: []
+  }),
+
+  defineTable({
+    table: 'meta_run',
+    layer: 'meta',
+    domain: 'generation',
+    description: 'One row per collector run — one slot on one day, or one one-shot job.',
+    naturalKey: ['run_id'],
+    appendOnly: false,
+    ruleDriven: false,
+    standardColumns: false,
+    columns: [
+      col.int('run_id', 'Run identifier, referenced by every row the run wrote.', { primaryKey: true, sourceProvider: 'collector' }),
+      col.enumOf('run_kind', RUN_KINDS, 'What kind of run this was.', { sourceProvider: 'collector' }),
+      col.enumOf('slot', ['after_close', 'morning'], 'Which daily slot. Stage 1 has only `after_close`; `morning` is declared now so a second slot never needs a schema change.', { sourceProvider: 'collector' }),
+      col.date('trading_date', 'The `as_of_date` this run captures.', { sourceProvider: 'collector' }),
+      col.ts('started_at', 'When the run began.', { sourceProvider: 'collector' }),
+      nullable(col.ts('finished_at', 'When the run ended.'), 'still running, or the host died mid-run'),
+      col.enumOf('status', ['running', 'complete', 'failed', 'cancelled'], 'How the run ended.', { sourceProvider: 'collector' }),
+      col.text('host_app', 'Which application hosted the collector (Q4) — in stage 1, the existing app.', { sourceProvider: 'collector' }),
+      col.text('host_version', 'The host application\'s version.', { sourceProvider: 'collector' }),
+      col.ident('collector_version', '`@tradeanalyzer/core`\'s version. Replay equivalence (AC-4) is only meaningful between runs that agree here.', { sourceProvider: 'collector' }),
+      col.int('dictionary_version', 'The dictionary version in force. A change means the schema moved.', { sourceProvider: 'collector' }),
+      nullable(
+        col.enumOf(
+          'gate_verdict',
+          ['green', 'amber', 'red'],
+          'The gate verdict **at the moment the run finished**, never updated afterwards. It is a ' +
+            'historical fact about the run, not a live usability flag — usability is ' +
+            '`qa_domain_day_status` and only that (03 §4). A stored `usable` column would go stale the ' +
+            'first time an exception was resolved the next day.',
+          { sourceProvider: 'collector' }
+        ),
+        'the run has not finished, so the gate has not been evaluated'
+      ),
+      nullable(col.date('reach_from', 'How far back an order/transaction pull reached on its first run.'), 'not an account-history run')
+    ],
+    indexes: [
+      { columns: ['trading_date', 'slot'] },
+      { columns: ['run_kind', 'started_at'] }
+    ]
+  }),
+
+  defineTable({
+    table: 'meta_capture_rule',
+    layer: 'meta',
+    domain: 'generation',
+    description:
+      'Versioned capture definitions (P6). A change creates a new row; runs reference the row in ' +
+      'force at the time, so a past row still answers "what were we asking for when this was captured".',
+    naturalKey: ['domain', 'version'],
+    appendOnly: false,
+    ruleDriven: false,
+    standardColumns: false,
+    columns: [
+      col.int('capture_rule_id', 'Rule identifier.', { primaryKey: true, sourceProvider: 'collector' }),
+      col.text('domain', 'Which capture domain the rule governs — `chain`, `bars`, `quotes`, and so on.', { sourceProvider: 'collector' }),
+      col.int('version', 'Version within the domain, starting at 1.', { sourceProvider: 'collector' }),
+      col.json('definition_json', 'The rule itself, machine-readable, e.g. `{ "maxDte": 90, "extraMonthlies": 2, "allStrikes": true }`.', { sourceProvider: 'collector' }),
+      col.text('description', 'The rule in a sentence, for the operator.', { sourceProvider: 'operator' }),
+      col.ts('valid_from', 'When this version took effect.', { sourceProvider: 'collector' }),
+      nullable(col.ts('valid_to', 'When this version was superseded.'), 'this is the version currently in force')
+    ],
+    indexes: [{ columns: ['domain', 'version'], unique: true }]
+  }),
+
+  defineTable({
+    table: 'meta_response',
+    layer: 'meta',
+    domain: 'archive',
+    description:
+      'The raw archive index (P2) — one row per provider call. The body lives in the archive file; ' +
+      'this row says where. Every raw row points back here, which is what makes AC-1 possible.',
+    naturalKey: ['source_response_id'],
+    appendOnly: false,
+    ruleDriven: false,
+    standardColumns: false,
+    columns: [
+      col.int('source_response_id', 'Response identifier.', { primaryKey: true, sourceProvider: 'collector' }),
+      col.int('run_id', 'The run that made the call.', { references: { table: 'meta_run', column: 'run_id' }, sourceProvider: 'collector' }),
+      col.enumOf('provider', PROVIDERS, 'Which provider was called.', { sourceProvider: 'collector' }),
+      col.text('endpoint', 'The path called, **with the account key masked** (P15).', { sourceProvider: 'collector' }),
+      col.json('params_json', 'Query parameters, secrets removed.', { sourceProvider: 'collector' }),
+      col.ts('requested_at', 'When the request went out.', { sourceProvider: 'collector' }),
+      nullable(col.ts('responded_at', 'When the response came back.'), 'no response — the request faulted or timed out'),
+      nullable(col.int('http_status', 'The HTTP status returned.'), 'network fault: no status was ever received (a dormant E*Trade token can terminate the stream rather than answer 401)'),
+      { column: 'byte_length', type: 'INTEGER', unit: 'bytes', nullable: true, nullMeaning: 'no body was received', description: 'Uncompressed body size.', sourceProvider: 'collector' },
+      { column: 'archive_file', type: 'TEXT', unit: 'path', nullable: false, description: 'Archive file holding the body, relative to the generation directory, e.g. `archive/etrade/2026-09-05/optionchains.jsonl.gz`.', sourceProvider: 'collector' },
+      col.int('archive_offset', 'Line number of this response within the archive file.', { sourceProvider: 'collector' }),
+      { column: 'sha256', type: 'TEXT', unit: 'sha256', nullable: true, nullMeaning: 'no body was received', description: 'Digest of the uncompressed body; the archive integrity check compares against it.', sourceProvider: 'collector' },
+      {
+        column: 'dedup_hash', type: 'TEXT', unit: 'sha256', nullable: false, unique: true,
+        description:
+          'sha256(provider + endpoint + params_json + body) — the idempotence key of 04 §2.2. It makes ' +
+          're-ingesting an *identical* response a no-op (crash recovery, replay). It does **not** make ' +
+          're-running a day idempotent: a fresh call returns a different body and correctly appends a new ' +
+          'version (P1).',
+        sourceProvider: 'collector'
+      },
+      col.flag('encrypted', '`1` for account-domain files, which are written through safeStorage/DPAPI (Q20, P15).', { sourceProvider: 'collector' }),
+      {
+        column: 'at_provider_cap', type: 'INTEGER', unit: 'flag', nullable: false,
+        description:
+          '`1` when the response size equals a known provider cap (P8). Finnhub\'s bulk earnings ' +
+          'calendar caps at 1,500 and truncates from the FRONT, so a payload *at* the cap is evidence of ' +
+          'truncation and triggers subdivision — trusting one put an earnings date a quarter late in the ' +
+          'existing app.',
+        sourceProvider: 'collector'
+      },
+      col.enumOf('parse_status', ['ok', 'partial', 'failed'], 'How ingestion went. A failed parse still keeps the archive row — that is the point of archiving first.', { sourceProvider: 'collector' }),
+      nullable(col.int('parsed_row_count', 'How many rows ingestion produced from this response. AC-5 compares this to what is stored.'), 'not parsed yet, or the parse failed before counting')
+    ],
+    indexes: [
+      { columns: ['run_id'] },
+      { columns: ['provider', 'requested_at'] },
+      { columns: ['archive_file'] },
+      { columns: ['dedup_hash'], unique: true }
+    ]
+  }),
+
+  defineTable({
+    table: 'meta_job_request',
+    layer: 'meta',
+    domain: 'jobs',
+    description:
+      'The one-shot job queue (04 §1.1). In stage 1 the operator drives jobs from the new exe but the ' +
+      'old app executes them, because it holds the provider transports and the E*Trade token (Q4). ' +
+      'This table is the entire interface between the two applications — no IPC, no socket, no shared ' +
+      'process. It is the one exception to append-only: it is a control table, not a fact, and its ' +
+      'state is *meant* to move. Its history survives in the `meta_run` row each execution creates.',
+    naturalKey: ['request_id'],
+    appendOnly: false,
+    ruleDriven: false,
+    standardColumns: false,
+    columns: [
+      col.int('request_id', 'Request identifier.', { primaryKey: true, sourceProvider: 'collector' }),
+      col.ts('requested_at', 'When the request was queued.', { sourceProvider: 'collector' }),
+      col.text('requested_by', 'The application and version that queued it.', { sourceProvider: 'collector' }),
+      col.enumOf('run_kind', ['universe_seed', 'backfill_bars', 'bootstrap_iv', 'legacy_import', 'replay', 'reset'], 'Which one-shot job to run.', { sourceProvider: 'operator' }),
+      col.json('params_json', 'The job\'s parameters, e.g. `{ "sourceGeneration": 1, "target": "scratch" }`.', { sourceProvider: 'operator' }),
+      col.enumOf('state', ['queued', 'claimed', 'running', 'complete', 'failed', 'cancelled'], 'Where the request stands. Claiming is a single conditional UPDATE, so two hosts can never run one job.', { sourceProvider: 'collector' }),
+      nullable(col.ts('claimed_at', 'When a host claimed it.'), 'not claimed yet — still queued, or cancelled before a host saw it'),
+      nullable(col.text('claimed_by_host', 'Which host took it.'), 'not claimed yet'),
+      nullable(col.int('run_id', 'The run created when execution started.', { references: { table: 'meta_run', column: 'run_id' } }), 'execution has not started'),
+      nullable(col.ts('finished_at', 'When execution ended.'), 'not finished'),
+      nullable(col.json('result_json', 'The job\'s own report — the replay diff, the import rejection summary, the bootstrap overlap distribution.'), 'not finished, or the job produces no report'),
+      nullable(col.text('error', 'Why the job failed.'), 'the job did not fail')
+    ],
+    indexes: [{ columns: ['state', 'requested_at'] }]
+  }),
+
+  defineTable({
+    table: 'meta_dictionary',
+    layer: 'meta',
+    domain: 'generation',
+    description:
+      'The dictionary itself, materialised into the generation at startup so the inspector reads ' +
+      'columns the same way it reads data, and so a generation opened years later still explains its ' +
+      'own columns without the code that wrote them.',
+    naturalKey: ['dictionary_version', 'table_name', 'column_name'],
+    appendOnly: false,
+    ruleDriven: false,
+    standardColumns: false,
+    columns: [
+      col.int('dictionary_version', 'The dictionary version these rows describe.', { sourceProvider: 'collector' }),
+      col.text('table_name', 'The table.', { sourceProvider: 'collector' }),
+      col.text('column_name', 'The column.', { sourceProvider: 'collector' }),
+      col.int('ordinal', 'Column order within the table, so the inspector renders them as declared.', { sourceProvider: 'collector' }),
+      col.enumOf('layer', ['meta', 'ref', 'raw', 'ext', 'derived', 'legacy', 'qa'], 'The table\'s prefix layer; the inspector groups by it.', { sourceProvider: 'collector' }),
+      col.text('domain', 'The table\'s domain within its layer.', { sourceProvider: 'collector' }),
+      col.text('table_description', 'What the table holds.', { sourceProvider: 'collector' }),
+      col.enumOf('sql_type', ['INTEGER', 'REAL', 'TEXT'], 'The storage class.', { sourceProvider: 'collector' }),
+      col.text('unit', 'The unit the value is stored in — the inspector\'s unit badge.', { sourceProvider: 'collector' }),
+      col.flag('nullable', 'Whether the column admits null.', { sourceProvider: 'collector' }),
+      nullable(col.text('null_meaning', 'What a null means here. AC-3 requires this whenever `nullable` is 1.'), 'the column is not nullable'),
+      nullable(col.text('status_column', 'The companion status column, when null has more than one meaning.'), 'null has a single meaning, stated in `null_meaning`'),
+      nullable(col.json('enum_values', 'The fixed set, when the unit is `enum`. Rendered as filter chips.'), 'not an enumerated column'),
+      nullable(col.text('unit_column', 'Which column names the unit of this value, when the unit varies per row.'), 'the unit is fixed and stated in `unit`'),
+      nullable(col.text('converter', 'The named converter that produced this value from the provider representation.'), 'stored exactly as the provider sent it — no conversion'),
+      nullable(col.text('source_provider', 'Where the value comes from.'), 'written by the collector about itself'),
+      nullable(col.text('source_field', 'The provider\'s own field path, verbatim.'), 'no single provider field maps to this column'),
+      col.text('description', 'What the column means.', { sourceProvider: 'collector' }),
+      col.flag('is_primary_key', 'Whether the column is the table\'s primary key.', { sourceProvider: 'collector' }),
+      nullable(col.text('references_table', 'The table this column references.'), 'not a foreign key'),
+      col.json('natural_key', 'The table\'s natural key, repeated on every column row so a single query answers version mode.', { sourceProvider: 'collector' }),
+      col.flag('append_only', 'Whether the table refuses UPDATE and DELETE (AC-2).', { sourceProvider: 'collector' }),
+      nullable(col.text('verify_note', 'The 02 §16 verify-list note, when this field has not yet been observed in a live response.'), 'the field has been observed in a live response')
+    ],
+    indexes: [
+      { columns: ['dictionary_version', 'table_name', 'column_name'], unique: true },
+      { columns: ['table_name'] }
+    ]
+  })
+];

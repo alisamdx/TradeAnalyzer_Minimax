@@ -40,12 +40,29 @@ function stripComments(src: string): string {
   return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
 }
 
+/** Blanks the contents of string literals, keeping the quotes so syntax survives. */
+function stripStringContents(src: string): string {
+  // The scan is line-by-line, so a literal never spans a newline here.
+  return src
+    .replace(/'(?:[^'\\]|\\.)*'/g, "''")
+    .replace(/"(?:[^"\\]|\\.)*"/g, '""')
+    .replace(/`(?:[^`\\]|\\.)*`/g, '``');
+}
+
 interface Rule {
   name: string;
   why: string;
   pattern: RegExp;
   /** `import type` / `export type` erase at compile time and load nothing. */
   allowTypeOnly?: boolean;
+  /**
+   * Strip string literals before matching. Set on rules about **code reaching a
+   * global**, which prose cannot do: the dictionary's own column descriptions
+   * name `safeStorage` when explaining that account archives are encrypted, and
+   * flagging that would train everyone to work around the guard instead of
+   * heeding it. Rules that match a module path keep their strings.
+   */
+  ignoreStrings?: boolean;
   /** Must be flagged. */
   fires: string[];
   /** Must not be flagged. */
@@ -91,8 +108,18 @@ const RULES: Rule[] = [
     name: 'reaches no Electron-only or app-shaped globals',
     why: 'paths, secrets and IPC are the host’s, injected through CollectorHost (04 §1)',
     pattern: /\bapp\.getPath\(|\bsafeStorage\b|\bipcMain\b|\bipcRenderer\b|\bBrowserWindow\b/,
+    // This rule is about code *reaching* a global, which prose cannot do. The
+    // dictionary's own column descriptions name `safeStorage` when explaining
+    // that account archives are encrypted, and failing on that would train
+    // everyone to work around the guard rather than heed it.
+    ignoreStrings: true,
     fires: [`const dir = app.getPath('userData');`, `safeStorage.encryptString(v);`, `ipcMain.handle('x', f);`],
-    clean: [`const dir = host.dataRoot();`, `const p = paths.getPath;`]
+    clean: [
+      `const dir = host.dataRoot();`,
+      `const p = paths.getPath;`,
+      `description: 'written through safeStorage/DPAPI (Q20, P15)'`,
+      "col.flag('encrypted', '`1` for files written through safeStorage', { sourceProvider: 'collector' })"
+    ]
   },
   {
     name: 'makes no network call of its own',
@@ -104,7 +131,8 @@ const RULES: Rule[] = [
 ];
 
 function matches(rule: Rule, line: string): boolean {
-  const t = line.trim();
+  const raw = line.trim();
+  const t = rule.ignoreStrings ? stripStringContents(raw) : raw;
   if (!rule.pattern.test(t)) return false;
   if (rule.allowTypeOnly && /^\s*(import|export)\s+type\s/.test(t)) return false;
   return true;
