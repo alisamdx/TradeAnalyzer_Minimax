@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.1.196] - 2026-09-06
+
+### feat - this app now hosts the rebuild's collector (NewApp B3)
+
+- **Changes #3 and #4 of the seven** the existing app receives for stage 1 (`NewApp/requirements/06 §5`). No view, IPC handler, service, scoring rule, existing job or existing table is touched, and the collector writes **only** into the new generation.
+- **Three handlers, registered LAST**: `data-collector` (17:05, after-close only), `collector-watchdog` (19:30), `collector-oneshot` (claims one queued job per 2-minute tick from the new app). Registration order is what seeds `sequence_order` before it freezes in the DB, so a job inserted in the middle would renumber nothing here and everything on a fresh install — a test asserts they come after every existing job.
+- **`ElectronCollectorHost`** hands `@tradeanalyzer/core` this app's hardened transports, `safeStorage` and the progress channel. It owns no collection logic; nothing about the arrangement is load-bearing beyond the E*Trade token, which is why cut-over later is just "the new exe runs them itself".
+- **`etradeGetRaw()`** — same signing, same instrumented transport, same single nonce retry as `etradeGet`, differing only in returning the **response bytes as received** (the archive hashes those bytes for provenance) and returning a non-2xx rather than throwing (a failed call is evidence, and is archived).
+- **Renew-and-retry on ANY E*Trade failure**, never on an auth-shaped message — a dormant token can kill the stream rather than answer 401, and that heuristic already bit two paths here. A test asserts the retry decision contains no message sniffing.
+- **Write-capable generation handle**, never readonly: on Windows a readonly connection cannot attach the live WAL index and would read a stale generation while reporting it as current.
+- **Account data is refused rather than written unencrypted** if `safeStorage` is unavailable. The archive is permanent; a file written in the clear today stays that way with no way to tell later which files those were.
+- **The shared pointer is never invented** — if it is missing the new exe has not been run, and creating a path would make a second empty generation look like the real one having lost its data. **The watchdog reports rather than re-running**, because a silent re-run turns "did not run" into "ran late".
+- **New quirk in `CLAUDE.md`**, having cost time three separate times today: a source-scanning test must strip comments (and, for identifier rules, string contents) or it fires on its own documentation — teaching people to delete the comment or work around the guard.
+
 ## [1.1.195] - 2026-09-06
 
 ### chore - the build guard follows the new exe's rename

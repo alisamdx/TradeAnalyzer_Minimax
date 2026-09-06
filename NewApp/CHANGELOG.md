@@ -9,6 +9,86 @@ exit (06 §6).
 
 ---
 
+## B3 — the collector host, the archive and the first real rows (2026-09-06)
+
+`core@0.1.0`, existing app v1.1.196. Gate: **AC-1 and AC-2 on real rows**, both
+asserted end to end against a real database and a real archive on disk rather
+than against mocks. 95 tests in `core`, 15 new in the existing app, 1,226 in the
+root suite.
+
+**The seam.** `CollectorHost` is the only way anything environmental reaches the
+collector, which is a library with no Electron, no scheduler and no network
+client of its own. That is not decoration: this app's transports carry years of
+hardening — rate limiting, renew-and-retry, masked-key logging — and
+reimplementing any of it in `core` would mean maintaining two copies of lessons
+that were expensive to learn once.
+
+**The per-response contract has one path and no alternative** (04 §2.2), and the
+ordering is the design:
+- **Archive before parsing.** A crash in between leaves an orphan line, which
+  QC-953 reconciles. Index-first would leave a row pointing at bytes that do not
+  exist, and a dangling pointer is worse than an unreferenced fact.
+- **Index and ingest in one transaction.** Either half alone breaks AC-1 in a way
+  no check could distinguish from a genuinely empty response.
+- **An ingestion failure still commits the index row**, `parse_status = failed`,
+  zero data rows. Rolling back would discard the evidence needed to fix the
+  parser; the body is on disk, so a replay recovers the rows without refetching.
+- **Non-2xx responses and network faults are archived and indexed like any
+  other.** They are evidence about the day.
+
+**Archive records are length-prefixed, not newline-delimited.** Compressed and
+encrypted bytes contain 0x0A freely, so splitting on newlines would corrupt
+records at random — only the unlucky ones, never reproducibly the same ones.
+There is a test whose fixture is asserted to actually contain newline bytes.
+
+**The claim loop is a single conditional UPDATE.** Read-then-write leaves a
+window where two hosts both see `queued` and both run the job, and the jobs this
+queue carries include `reset`, which destroys a generation. The loser yields
+rather than retrying. A request stuck at `queued` is **reported, not retried**:
+it means the collector host is not running, which is the failure a queue
+introduces (P9), and a silent retry would hide it better than a spinner would.
+
+**The dictionary needed a distinction it did not have, and the tests found it.**
+02 §0.2 says membership tables use `valid_from`/`valid_to` *instead of*
+supersession — so closing `valid_to` is legitimate, and the append-only trigger
+was correctly refusing it. Turning the guard off for those four tables would have
+been the one-line fix and the wrong one. Instead `validRangeColumn` generates a
+**narrower** pair of triggers: one refusing any UPDATE that touches a column
+other than the range and its reason, one refusing to reopen a closed range, plus
+the same DELETE refusal as every fact table. "This membership ended" and "what
+this membership said" stay two different acts, or the range buys nothing over an
+overwrite. Dictionary version 1 → 2.
+
+**Refusals that are the feature.** `universe_seed` refuses to reconcile when it
+fetched none of its lists — an empty incoming set would close every member, a
+total wipe caused by a network blip. `encryptForArchive` refuses when
+`safeStorage` is unavailable rather than writing account data in the clear; the
+archive is permanent, so a file written unencrypted stays that way with no way to
+tell later which files those were. The shared pointer is never invented: if it is
+missing the new exe has not been run, and creating a path would make a second
+empty generation indistinguishable from the real one having lost its data.
+
+**Preflight stops on almost nothing** — only a non-trading day or a closed
+generation. A failing E*Trade probe does not abort: the phases that need it fail
+individually and the gate says which, which is a more useful answer than a run
+that refused to start. An unknown calendar date proceeds, because refusing would
+turn an unseeded reference table into silent data loss.
+
+**Proven end to end, not just in tests.** `packages/core/scripts/queue-job.mjs`
+(dev-only, 06 §9) found the generation through the shared pointer the new exe
+wrote, queued a `universe_seed` request into `gen-001`, and the row was read back
+and cancelled. That is the exact claim-and-execute path the Jobs UI will use at
+B9 — exercised now by use rather than by a temporary direct call that would then
+be deleted untested.
+
+**Not done at B3, by design.** The daily run is phase 0 only: preflight and the
+run record. Phases 1–10 arrive from B4. `collector-oneshot` implements
+`universe_seed` and explicitly **fails** any other kind rather than leaving it
+`claimed` — a request that vanishes into `claimed` and never moves looks
+identical to a crashed host.
+
+---
+
 ## Executable renamed — `TradeAnalyzer2.exe` (2026-09-06)
 
 Operator decision. The exe filename loses its space; **the display name keeps

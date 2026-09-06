@@ -1,0 +1,183 @@
+import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+/**
+ * The `ElectronCollectorHost` adapter — NewApp 06 §7, 04 §1.1.
+ *
+ * These are source assertions rather than a live harness. The adapter's whole
+ * job is to hand `core` the existing app's hardened transports, and the
+ * properties worth pinning are exactly the ones that were expensive to learn and
+ * are invisible at runtime until the day they bite: renew-and-retry on ANY
+ * failure, a write-capable database handle, and account data never written in
+ * the clear. A mock-based test would restate the code; these restate the
+ * lessons.
+ */
+
+/**
+ * Strips comments before scanning.
+ *
+ * Third time today this has been needed — `core`'s purity guard, `next`'s AC-13
+ * scan, and now this. A source assertion that reads comments fires on its own
+ * documentation, and the rule it teaches is "stop explaining the rule".
+ */
+function stripComments(src: string): string {
+  return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+}
+
+const SRC = join(process.cwd(), 'src', 'main');
+const host = stripComments(readFileSync(join(SRC, 'collector-host', 'electron-collector-host.ts'), 'utf8'));
+const oneshot = stripComments(readFileSync(join(SRC, 'services', 'jobs', 'collector-oneshot.ts'), 'utf8'));
+const daily = stripComments(readFileSync(join(SRC, 'services', 'jobs', 'collector-daily.ts'), 'utf8'));
+const index = stripComments(readFileSync(join(SRC, 'index.ts'), 'utf8'));
+const etradeAuth = stripComments(readFileSync(join(SRC, 'services', 'etrade-auth.ts'), 'utf8'));
+
+describe('ElectronCollectorHost', () => {
+  it('renews and retries on ANY E*Trade failure, never on an auth-shaped message', () => {
+    // A dormant token does not reliably fail as a 401 — it can kill or hang the
+    // response stream. That exact heuristic bit two separate paths in the
+    // existing app, one of them halting the evening orchestrator on 8 of 10
+    // trading days. Renewing an active token errors harmlessly, so the retry is
+    // gated on "not 2xx" and nothing else.
+    const retryBlock = host.slice(host.indexOf('async etradeGet('), host.indexOf('async httpGet('));
+    expect(retryBlock).toContain('renewAccessToken');
+    expect(retryBlock).toMatch(/status >= 200 && .*status < 300/);
+    // No message sniffing anywhere in the decision.
+    expect(retryBlock).not.toMatch(/token_expired|token_rejected|oauth_problem|\/401\//);
+  });
+
+  it('opens the generation write-capable, never readonly', () => {
+    // On Windows a readonly connection cannot attach the live WAL index and
+    // silently reads only up to the last checkpoint. The new exe holds this same
+    // file open, so a readonly handle here would read a stale generation and
+    // report it as current (CLAUDE.md).
+    expect(host).toContain('new Database(dbPath)');
+    expect(host).not.toMatch(/readonly:\s*true/);
+    expect(host).toContain("journal_mode = WAL");
+  });
+
+  it('refuses to write account data unencrypted rather than falling back', () => {
+    // The archive is permanent (04 §6), so a file written in the clear today
+    // stays that way forever and there is no way to tell later which files
+    // those were.
+    const enc = host.slice(host.indexOf('encryptForArchive('), host.indexOf('decryptFromArchive('));
+    expect(enc).toContain('isEncryptionAvailable');
+    expect(enc).toMatch(/throw new Error/);
+  });
+
+  it('never invents the shared pointer', () => {
+    // If it is missing, the new exe has not been run. Inventing a path would
+    // create a second, empty generation indistinguishable from the real one
+    // having lost its data.
+    const reader = host.slice(host.indexOf('export function readSharedPointer'), host.indexOf('export function generationPaths'));
+    expect(reader).not.toMatch(/writeFileSync|mkdirSync/);
+    expect(reader).toContain('return undefined');
+  });
+
+  it('builds ET timestamps from parts, not from toISOString', () => {
+    // toISOString gives UTC, which silently shifts every evening timestamp onto
+    // the following day — the exact class of bug that starved the agent of
+    // option contracts for ten days in the existing app.
+    const nowEt = host.slice(host.indexOf('nowET(): string'), host.indexOf('async sendEmail('));
+    expect(nowEt).toContain('America/New_York');
+    expect(nowEt).not.toContain('toISOString');
+  });
+});
+
+describe('etradeGetRaw — the collector transport', () => {
+  it('returns a non-2xx rather than throwing, because a failed call is evidence', () => {
+    const raw = etradeAuth.slice(
+      etradeAuth.indexOf('export async function etradeGetRaw'),
+      etradeAuth.indexOf('export async function etradeGet(')
+    );
+    expect(raw).toContain('return { status: res.status, body');
+    expect(raw).toMatch(/status: null[\s\S]*error:/); // a network fault has no status
+  });
+
+  it('keeps the logging asymmetry: failure bodies logged, success bodies never', () => {
+    const raw = etradeAuth.slice(
+      etradeAuth.indexOf('export async function etradeGetRaw'),
+      etradeAuth.indexOf('export async function etradeGet(')
+    );
+    // The preview appears exactly once, inside the "not ok" branch of the
+    // success log — never on the unconditional path.
+    expect(raw).toContain('res.ok ? {} : {');
+    const previews = raw.match(/responseBodyPreview/g) ?? [];
+    expect(previews.length).toBe(2); // the nonce-retry log and the not-ok branch
+    expect(raw.slice(raw.indexOf('res.ok ? {}'))).toContain('responseBodyPreview');
+  });
+
+  it('keeps the single nonce retry', () => {
+    const raw = etradeAuth.slice(
+      etradeAuth.indexOf('export async function etradeGetRaw'),
+      etradeAuth.indexOf('export async function etradeGet(')
+    );
+    expect(raw).toContain('_isNonceRetry');
+  });
+});
+
+describe('collector batch handlers', () => {
+  it('claims exactly one job per tick', () => {
+    // A loop draining the backlog would hold the batch mutex for as long as the
+    // backlog took, and these jobs include backfill_bars at ~1,600 calls.
+    expect(oneshot).toContain('claimNextJob');
+    expect(oneshot).not.toMatch(/while\s*\(/);
+  });
+
+  it('fails an unimplemented job kind rather than leaving it claimed', () => {
+    // A request that vanishes into `claimed` and never moves looks identical to
+    // a crashed host.
+    expect(oneshot).toContain('IMPLEMENTED');
+    expect(oneshot).toMatch(/state: 'failed'[\s\S]*not implemented yet/);
+  });
+
+  it('treats a missing generation pointer as skipped, not failed', () => {
+    for (const source of [oneshot, daily]) {
+      expect(source).toContain('No generation pointer yet');
+    }
+  });
+
+  it('has a watchdog that reports rather than re-running', () => {
+    // A watchdog that quietly re-ran the job would turn "the collector did not
+    // run" into "the collector ran late", and the second is much harder to
+    // notice going wrong repeatedly.
+    const watchdog = daily.slice(daily.indexOf('createCollectorWatchdogJob'));
+    expect(watchdog).toContain("status: 'failed'");
+    expect(watchdog).not.toContain('runDaily');
+  });
+});
+
+describe('registration in the existing app', () => {
+  it('registers the three collector jobs LAST, so no existing sequence_order moves', () => {
+    // sequence_order is seeded from registration order and then frozen in the DB
+    // (CLAUDE.md), so reordering only affects fresh installs — and a job added
+    // in the middle would silently renumber nothing on this install while
+    // renumbering everything on a new one.
+    const collectorAt = index.indexOf("registerJob(\n    'data-collector'");
+    const orchestratorAt = index.indexOf("registerJob('batch-orchestrator'");
+    expect(collectorAt).toBeGreaterThan(0);
+    expect(collectorAt).toBeLessThan(orchestratorAt);
+
+    const existingJobs = [
+      'daily-iv-update', 'constituents-refresh', 'daily-market-sync-stocks', 'daily-screener',
+      'earnings-refresh', 'daily-intelligence-brief', 'portfolio-sync'
+    ];
+    for (const job of existingJobs) {
+      expect(index.indexOf(`registerJob('${job}'`)).toBeLessThan(collectorAt);
+    }
+  });
+
+  it('schedules the daily collector after this app\'s own after-close chain', () => {
+    const block = index.slice(index.indexOf("'data-collector'"), index.indexOf("'collector-watchdog'"));
+    expect(block).toContain("dailyScheduleTime: '17:05'");
+    expect(block).toContain('afterCloseOnly: true');
+  });
+
+  it('drives the one-shot claim loop on an interval, not on the daily schedule', () => {
+    // The new exe queues a job and expects it picked up in minutes, not at the
+    // next after-close slot.
+    const block = index.slice(index.indexOf("registerJob('collector-oneshot'"));
+    expect(block).toContain('dailyScheduleEnabled: false');
+    expect(block).toMatch(/setInterval\([\s\S]*2 \* 60 \* 1000\)/);
+  });
+});

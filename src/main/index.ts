@@ -3,6 +3,10 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { readFileSync, existsSync } from 'node:fs';
 import { ApiServer } from './api-server.js';
+import { ElectronCollectorHost, readSharedPointer } from './collector-host/electron-collector-host.js';
+import { createCollectorDailyJob, createCollectorWatchdogJob } from './services/jobs/collector-daily.js';
+import { createCollectorOneShotJob } from './services/jobs/collector-oneshot.js';
+import { NEW_APP_UNIVERSE_SOURCES } from './collector-host/universe-sources.js';
 import { openDatabase } from './db/connection.js';
 import { runMigrations, currentSchemaVersion } from './db/migrations.js';
 import { WatchlistService } from './services/watchlist-service.js';
@@ -710,6 +714,75 @@ app.whenReady().then(() => {
     runOnStartup: false,              // orchestrator-driven, like every other sub-job
     afterCloseOnly: true,             // end-of-day record keeping; skip the lean intraday slot
   });
+
+  // ── NewApp collector (stage 1 hosting, NewApp 04 §1.1) ──────────────────────
+  //
+  // Three handlers that write ONLY into the new generation, never into this
+  // application's own database. They are change #4 of the seven the existing app
+  // receives for stage 1 (06 §5); nothing else here is touched.
+  //
+  // Registered LAST on purpose. `sequence_order` is seeded from registration
+  // order and then frozen in the DB (CLAUDE.md), so a job that must not displace
+  // any existing one has to be added at the end.
+  const makeCollectorHost = (opts: { signal: AbortSignal; onProgress: (phase: string, done: number, total: number, note?: string) => void }) => {
+    const pointer = readSharedPointer();
+    if (!pointer) throw new Error('No generation pointer — the new application has not been run.');
+    return new ElectronCollectorHost(pointer, {
+      signal: opts.signal,
+      onProgress: opts.onProgress,
+      getPolygonApiKey: () => getApiKey(db),
+      getEtradeCredentials: () => getEtradeCreds(),
+      sendEmail: async (msg) => { await emailService.send(msg.subject, msg.html); },
+    });
+  };
+  const todayET = (): string =>
+    new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' })
+      .format(new Date());
+
+  batchService.registerJob(
+    'data-collector',
+    createCollectorDailyJob({ makeHost: makeCollectorHost, todayET }),
+    {
+      // 17:05 puts it after this app's after-close chain has started; the batch
+      // mutex makes it wait if that chain is still running, and the 19:30
+      // watchdog catches the case where the wait swallowed the day.
+      dailyScheduleTime: '17:05',
+      dailyScheduleEnabled: true,
+      runOnStartup: false,
+      afterCloseOnly: true,
+    },
+  );
+
+  batchService.registerJob(
+    'collector-watchdog',
+    createCollectorWatchdogJob({ makeHost: makeCollectorHost, todayET }),
+    {
+      dailyScheduleTime: '19:30',
+      dailyScheduleEnabled: true,
+      runOnStartup: false,
+      afterCloseOnly: true,
+    },
+  );
+
+  const collectorOneShotJob = createCollectorOneShotJob({
+    makeHost: makeCollectorHost,
+    todayET,
+    universeSources: NEW_APP_UNIVERSE_SOURCES,
+  });
+  batchService.registerJob('collector-oneshot', collectorOneShotJob, {
+    // Driven by its own 2-minute interval below rather than by the daily
+    // schedule: the new exe queues a job and expects it picked up in minutes,
+    // not at the next after-close slot.
+    dailyScheduleEnabled: false,
+    runOnStartup: false,
+  });
+
+  // The 2-minute claim loop (04 §1.1). `runJob` takes the batch mutex, so this
+  // serialises against every other job rather than racing them.
+  setInterval(() => {
+    if (!readSharedPointer()) return;   // nothing to claim into yet
+    void batchService.runJob('collector-oneshot', 'schedule').catch(() => undefined);
+  }, 2 * 60 * 1000);
 
   batchService.registerJob('batch-orchestrator', orchestratorJob, {
     sequenceOrder: 1,

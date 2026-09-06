@@ -1,0 +1,154 @@
+import type { BatchJobHandler, BatchJobResult } from '../batch-service.js';
+import type { BatchProgressEvent } from '@shared/types.js';
+import {
+  claimNextJob,
+  finishJob,
+  markJobRunning,
+  runUniverseSeed,
+  stalledRequests,
+  type OneShotKind
+} from '@tradeanalyzer/core';
+import {
+  ElectronCollectorHost,
+  readSharedPointer,
+  type ElectronCollectorHostOptions
+} from '../../collector-host/electron-collector-host.js';
+
+/**
+ * `collector-oneshot` — NewApp 04 §1.1, 06 §5 change #4.
+ *
+ * Claims at most one queued `meta_job_request` row per tick and executes it.
+ * The operator never launches these from this app: the **new exe's Jobs view is
+ * the only UI**, and it queues by inserting a row (05 §7). This app executes
+ * because it holds the provider transports and the E*Trade token (Q4).
+ *
+ * One request per tick, deliberately. A loop draining the whole backlog would
+ * hold the batch mutex for as long as the backlog took, and these jobs include
+ * `backfill_bars` at ~1,600 calls.
+ */
+
+export type HostFactory = (
+  opts: Pick<ElectronCollectorHostOptions, 'signal' | 'onProgress'>
+) => ElectronCollectorHost;
+
+export interface OneShotDeps {
+  readonly makeHost: HostFactory;
+  /** Supplies the universe lists for `universe_seed`, which are host-side config. */
+  readonly universeSources: Parameters<typeof runUniverseSeed>[1]['sources'];
+  readonly todayET: () => string;
+}
+
+const IMPLEMENTED: ReadonlySet<OneShotKind> = new Set<OneShotKind>(['universe_seed']);
+
+export function createCollectorOneShotJob(deps: OneShotDeps): BatchJobHandler {
+  return {
+    name: 'Collector one-shot jobs',
+    description:
+      'Claims one queued job from the new application and runs it. The queue table is the ' +
+      'entire interface between the two apps — no IPC, no socket, no shared process.',
+
+    async run(
+      onProgress: (evt: BatchProgressEvent) => void,
+      signal: AbortSignal
+    ): Promise<BatchJobResult> {
+      const empty: BatchJobResult = {
+        status: 'skipped',
+        tickersAttempted: 0, tickersUpdated: 0, tickersSkipped: 0, tickersFailed: 0
+      };
+
+      const pointer = readSharedPointer();
+      if (!pointer) {
+        // Not an error. The new exe has not been run yet, so there is no
+        // generation to collect into — and inventing one here would create a
+        // second, empty generation indistinguishable from the real one having
+        // lost its data.
+        return { ...empty, notes: 'No generation pointer yet — the new application has not been run.' };
+      }
+
+      const host = deps.makeHost({
+        signal,
+        onProgress: (phase, done, total, note) =>
+          onProgress({
+            jobId: 'collector-oneshot',
+            runId: 0,
+            ticker: note ?? phase,
+            status: 'updated',
+            attempted: done,
+            updated: done,
+            skipped: 0,
+            failed: 0,
+            total,
+            message: `${phase}${note ? `: ${note}` : ''}`
+          })
+      });
+
+      try {
+        const db = host.openGenerationDb();
+
+        // A request stuck at `queued` means THIS handler is not running — which
+        // it plainly is, so report anything old as a finding rather than
+        // swallowing it. Hiding a stalled queue behind a spinner is the failure
+        // mode a queue introduces (P9).
+        const stalled = stalledRequests(db, host.nowET());
+
+        const request = claimNextJob(db, host);
+        if (!request) {
+          return {
+            ...empty,
+            notes: stalled.length > 0
+              ? `No claimable job. ${stalled.length} request(s) have been queued over 10 minutes.`
+              : 'No queued jobs.'
+          };
+        }
+
+        if (!IMPLEMENTED.has(request.runKind)) {
+          // Explicitly failed, never left claimed. A request that vanishes into
+          // `claimed` and never moves looks identical to a crashed host.
+          finishJob(db, host, request.requestId, {
+            state: 'failed',
+            error:
+              `\`${request.runKind}\` is queued but not implemented yet. ` +
+              `Implemented so far: ${[...IMPLEMENTED].join(', ')}.`
+          });
+          return {
+            ...empty,
+            status: 'failed',
+            tickersFailed: 1,
+            errorMessage: `Job kind ${request.runKind} is not implemented yet.`
+          };
+        }
+
+        try {
+          const report = await runUniverseSeed(host, {
+            tradingDate: deps.todayET(),
+            sources: deps.universeSources
+          });
+          markJobRunning(db, request.requestId, report.runId);
+          finishJob(db, host, request.requestId, {
+            state: 'complete',
+            result: report as unknown as Record<string, unknown>
+          });
+          return {
+            status: 'success',
+            notes:
+              `universe_seed: ${report.distinctTickers} tickers, ` +
+              `${report.membershipsOpened} memberships opened, ` +
+              `${report.referenceFetched} reference rows.`,
+            tickersAttempted: report.distinctTickers,
+            tickersUpdated: report.referenceFetched,
+            tickersSkipped: 0,
+            tickersFailed: report.referenceFailed
+          };
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          finishJob(db, host, request.requestId, { state: 'failed', error: message });
+          return {
+            ...empty, status: 'failed', tickersFailed: 1, errorMessage: message
+          };
+        }
+      } finally {
+        host.close();
+      }
+    }
+  };
+}

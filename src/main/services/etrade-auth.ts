@@ -338,6 +338,77 @@ function logAuthOutcome(
   });
 }
 
+/**
+ * Raw variant for the collector (NewApp 04 §1.1, §2.2).
+ *
+ * Same signing, same instrumented transport, same nonce retry as `etradeGet` —
+ * it differs only in what it returns and what it does with a failure. The
+ * collector needs the **response bytes as received**, because those bytes are
+ * what the archive stores and what `meta_response.sha256` is taken over, and it
+ * needs a non-2xx returned rather than thrown, because a failed call is evidence
+ * about the day and is archived like any other response (P2).
+ *
+ * The logging asymmetry is unchanged and load-bearing: a failure body is logged
+ * because that is exactly what diagnosis needs, a success body never is.
+ */
+export async function etradeGetRaw(
+  path: string,
+  queryParams: Record<string, string>,
+  creds: OAuthCredentials,
+  opts: { timeoutMs?: number; _isNonceRetry?: boolean } = {}
+): Promise<{ status: number | null; body: string; requestedAt: string; respondedAt: string | null; error?: string }> {
+  const timeoutMs = opts.timeoutMs ?? ETRADE_TIMEOUT_MS;
+  const qs = new URLSearchParams(queryParams).toString();
+  const fullUrl = `${BASE_URL}${path}${qs ? `?${qs}` : ''}`;
+  const requestedAt = new Date().toISOString();
+
+  const authHeader = buildAuthHeader(
+    'GET', `${BASE_URL}${path}`,
+    creds.consumerKey, creds.consumerSecret,
+    creds.accessToken, creds.accessSecret,
+    {}, queryParams,
+  );
+
+  try {
+    const { res, body, latencyMs, logBase } = await sendETradeRequest({
+      path, fullUrl, authHeader, accept: 'application/json',
+      timeoutMs, requestParams: queryParams,
+    });
+
+    if (!res.ok && res.status === 401 && /nonce_used/i.test(body) && !opts._isNonceRetry) {
+      safeLog({
+        ...logBase,
+        responseStatus: res.status,
+        responseLatencyMs: latencyMs,
+        responseSizeBytes: body.length,
+        errorMessage: 'HTTP 401 nonce_used — retrying once with a fresh signature',
+        responseBodyPreview: body.slice(0, 300),
+      });
+      return etradeGetRaw(path, queryParams, creds, { ...opts, _isNonceRetry: true });
+    }
+
+    safeLog({
+      ...logBase,
+      responseStatus: res.status,
+      responseLatencyMs: latencyMs,
+      responseSizeBytes: body.length,
+      ...(res.ok ? {} : { errorMessage: `HTTP ${res.status}`, responseBodyPreview: body.slice(0, 300) }),
+    });
+
+    return { status: res.status, body, requestedAt, respondedAt: new Date().toISOString() };
+  } catch (err) {
+    // A dormant token can terminate the stream rather than answer 401, so a
+    // network fault has no status at all — which the archive records as such.
+    return {
+      status: null,
+      body: '',
+      requestedAt,
+      respondedAt: null,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
 export async function etradeGet(
   path: string,
   queryParams: Record<string, string>,
