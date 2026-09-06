@@ -186,8 +186,26 @@ Every write method records the operator as actor in the relevant audit table (`q
 | AC-14 | §7 reset with typed confirmation; previous generation opens read-only (§8) |
 | P9 / AC-9 | §5: state changes only with actor + note; no bulk resolve; refusal to resolve while still firing |
 
-## 11. Open items for 06 and for the build
+## 11. Deep links, and what stays open
 
-- Which lightweight grid component for the chain table (virtualised, ~300 rows × 20 columns per expiration is small; the contract-history and inspector views are the large ones).
-- Whether the inspector should support saved "questions" (a named filter + version mode + columns) as a precursor to stage-2 studies. Leaning yes, cheap, deferred to the build.
-- Deep-link scheme registration on Windows for `tradeanalyzer-next://`.
+### 11.1 Deep-link grammar (closed 2026-09-05)
+
+Scheme `tradeanalyzer-next://`, registered by the new exe with `app.setAsDefaultProtocolClient`. The grammar is fixed now so the status email (03 §7.2) can be written against it before the handler exists; **registration mechanics land at B9** with the exceptions workbench.
+
+| link | opens |
+|---|---|
+| `tradeanalyzer-next://exceptions?run=<run_id>` | Exceptions workbench, filtered to that run (the email's link) |
+| `tradeanalyzer-next://exceptions/<exception_id>` | one exception, its events and its evidence |
+| `tradeanalyzer-next://runs/<run_id>` | that run's phases, responses and quality report |
+| `tradeanalyzer-next://table/<table_name>?as_of=<date>` | the inspector on that table at that date |
+
+Rules: the handler **navigates only** — a deep link may never run a job, resolve an exception or mutate anything, because a link that acts is a link an email can be made to act with. An unknown or malformed link opens Overview with a toast rather than failing silently. Windows delivers the URL as `argv` to a *second* instance, so the single-instance lock plus the `second-instance` handler is the real implementation, not `open-url` (that is macOS); in dev the scheme must be registered against the electron binary with the project path as an argument, which is why this waits for B9 rather than being wired at B2.
+
+### 11.2 Closed
+
+- **Chain-table grid**: no grid library. ~300 rows × 20 columns is a plain `<table>`; windowing is added only where a measurement shows it is needed (the contract-history and inspector views are the candidates, not the chain). Decided at B2 so a dependency is never taken on a guess.
+- **Saved "questions"** (a named filter + version mode + column set): **yes**, as leaned — cheap, and it is the honest precursor to stage-2 studies. Built at B9 alongside the workbench; stored in the generation DB as a `meta_` table so a saved question travels with the data it was asked of.
+
+### 11.3 Still open, by design
+
+- Nothing in this document. Remaining open items across the set are the † thresholds (03 §10) and the 04 §11 pre-pilot measurements.

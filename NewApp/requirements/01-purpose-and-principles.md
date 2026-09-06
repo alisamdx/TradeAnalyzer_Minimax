@@ -210,10 +210,16 @@ Testable statements. Later sections refine them; stage 1 is complete when all ho
 | P14 | Q14 |
 | P15 | Q19, Q20 |
 
-## 7. Open items carried to later sections
+## 7. Items carried to later sections — all resolved
 
-- Concrete liquidity-screen thresholds for the chain subset, with the measured count of tickers they admit (Q15 → 02/04).
-- Choice of the one external IV-history source (Q17 → 04).
-- Expected-count model per domain for the quality gate (Q9 → 03).
-- The exact list of permitted automatic remediations (P12 → 03).
-- The existing brief job's data-capture hand-off contract (Q6 → 04).
+Every item this document carried forward was closed by the section that owned it (2026-09-05):
+
+| carried item | closed in |
+|---|---|
+| Concrete liquidity-screen thresholds for the chain subset, with the admitted count (Q15) | 04 §4.1 (`chain_subset` capture rule) and §4.2 (the admission rule). The **count** those thresholds admit is a measurement, still pending in 04 §11. |
+| Choice of the one external IV-history source (Q17) | 04 §7.3 defines the `bootstrap_iv` job and its overlap check; **which** source is a pending item in 04 §11. |
+| Expected-count model per domain for the quality gate (Q9) | 02 §15 (the model) → 03 §3 (the checks that read it). |
+| The exact list of permitted automatic remediations (P12) | 03 §6 — seven codes R1–R7, plus the operator-only actions that are deliberately not among them. |
+| The existing brief job's data-capture hand-off contract (Q6) | 04 §8 (`LegacyBriefHandoff`) → 02 §14 (`legacy_` tables). |
+
+Two of these leave a **measurement** behind rather than a decision — the admitted subset count and the IV source. Both are in the pre-pilot checklist (04 §11) and neither blocks any build step before B7.

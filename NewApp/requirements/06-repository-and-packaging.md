@@ -60,7 +60,7 @@ What moves from the existing app into `core`, and when: **only what the collecto
 
 | field | value |
 |---|---|
-| name | `@tradeanalyzer/next`; `productName` **TradeAnalyzer Data**; `appId` `com.tradeanalyzer.next` |
+| name | `@tradeanalyzer/next`; `productName` **TradeAnalyzer 2** (decided 2026-09-05); `appId` `com.tradeanalyzer.next` |
 | version | starts `0.1.0`, independent of the existing app's `1.1.x` |
 | stack | Electron **^32.2.2** (pinned to the same minor as root so one `rebuild-better-sqlite3` ABI applies), electron-vite ^2.3, React 18, TypeScript ^5.6, better-sqlite3 ^12.10 (same as root), lightweight-charts 4.1 (bars view), Vitest ^2.1 |
 | userData | `%APPDATA%/trade-analyzer-next/` — **distinct from the existing app's `trade-analyzer/`** so settings, logs and window state never collide |
@@ -112,7 +112,7 @@ Explicitly **not** changed: any view, any IPC handler the UI uses, any scoring/a
 | existing app | `1.1.x` patch bumps as today | `npm run package` at root, as today |
 | `@tradeanalyzer/core` | semver; `collector_version` | not released separately; consumed in-repo |
 | dictionary | integer; `dictionary_version` | bumped on any entry change; DDL diff generated |
-| new exe | `0.x.y` until pilot exit, then `1.0.0` | `npm run package -w packages/next` → `dist/win-unpacked/TradeAnalyzer Data.exe` (`--dir`, no installer, matching current practice; Windows Developer Mode quirk applies) |
+| new exe | `0.x.y` until pilot exit, then `1.0.0` | `npm run package -w packages/next` → `dist/win-unpacked/TradeAnalyzer 2.exe` (`--dir`, no installer, matching current practice; Windows Developer Mode quirk applies) |
 
 Both exes can be installed and running at once; they share only the data root pointer and the generation directory (one writer, one reader in stage 1).
 
@@ -124,7 +124,7 @@ Both exes can be installed and running at once; they share only the data root po
 
 | test | location | asserts |
 |---|---|---|
-| **Core purity** | `packages/core/test/purity.test.ts` | no `electron` import, no path alias, no native module load anywhere under `core/src` |
+| **Core purity** | `packages/core/test/purity.test.ts` | no `electron` import, no path alias, no native module load, and no **value-level** `better-sqlite3` import (type-only permitted) anywhere under `core/src` |
 | **Dictionary conformance** (AC-3) | `core/test/dictionary/*.test.ts` | every entry complete; nullable ⇒ null meaning present; status columns declared; DDL generates and round-trips |
 | **Unit conversion** (AC-7) | generated per converted field in `core/test/units/` | conversion from the provider representation; **grep test** that no `*100`/`/100`/`* 0.01` appears outside `core/src/units/` and `next/src/renderer` formatters |
 | **Single writer** (AC-11) | `core/test/writers.test.ts` | for each raw table exactly one module contains an `INSERT` targeting it; `next/src` contains none |
@@ -169,8 +169,39 @@ The paper work ends when the operator says so; this is the order the build then 
 
 ---
 
-## 10. Open items
+## 10. Decisions closed 2026-09-05, and what stays open
 
-- Whether `core`'s SQLite abstraction should be the narrow `SqliteLike` interface (proposed) or a direct `better-sqlite3` dependency; the interface keeps `core` testable under `node:sqlite` later if the ABI dance ever becomes intolerable.
-- Whether the new exe should bundle a read-only copy of the existing app's `docs/formulas.md` for the derivation's method notes (leaning yes; it is the formula authority).
-- Exact `productName` — "TradeAnalyzer Data" is a placeholder for the operator to confirm.
+### 10.1 Closed
+
+| item | decision | consequence |
+|---|---|---|
+| `core`'s SQLite abstraction | **Narrow `SqliteLike` interface.** `core` defines it (§2.1); `better-sqlite3` stays a type-only peer dependency and `core` never loads the binary. | The purity test (§7) additionally fails on any **value-level** import of `better-sqlite3` under `core/src`. Type-only imports are permitted. |
+| Bundling `docs/formulas.md` in the new exe | **No.** Stage 1 has exactly one derived table and 02 §13 writes its method out inline; the rest of that file documents the existing app's scoring engine, which is out of scope. | A derived field's method note lives in its dictionary entry, which is the only authority the new app has. Revisit when stage 2 adds derived layers — a bundled copy that drifts is worse than none. |
+| `productName` | **TradeAnalyzer 2.** | Start-menu and taskbar name; `appId`, package name (`@tradeanalyzer/next`), userData directory (`trade-analyzer-next`) and the deep-link scheme are unchanged — they are stable identifiers, and renaming any of them later costs a re-registration or a data-root move for no user-visible gain. |
+
+### 10.2 Still open, by design
+
+- Every threshold marked † — settled after the first 20 pilot runs (03 §10), not before.
+- The 04 §11 pre-pilot checklist: eight measurements that need real provider calls, including the IV bootstrap source (Q17).
+
+---
+
+## 11. `SqliteLike` — the interface `core` compiles against
+
+Declared in `core/src/db/sqlite-like.ts`; the host passes an instance in. Covers exactly what the collector and gate use, no more:
+
+```ts
+export interface SqliteStatementLike {
+  run(...params: unknown[]): { changes: number; lastInsertRowid: number | bigint };
+  get(...params: unknown[]): unknown;
+  all(...params: unknown[]): unknown[];
+}
+export interface SqliteLike {
+  prepare(sql: string): SqliteStatementLike;
+  exec(sql: string): void;
+  pragma(source: string, options?: { simple?: boolean }): unknown;
+  transaction<T extends (...args: never[]) => unknown>(fn: T): T;
+}
+```
+
+**The rule that keeps this from rotting**: it is not permitted to grow to accommodate a convenience. `.pluck()`, `.raw()`, `.iterate()`, user-defined functions and the online-backup API are deliberately absent — a driver-specific feature is the signal that the work belongs in the host, not in `core`. If a large scan ever genuinely needs streaming, the host passes a callback, it does not widen the interface. Widening it until it re-exports `better-sqlite3` would restore exactly the coupling this avoids: `core`'s own test run would then need the Node-ABI binary, and the ABI-flip quirk (CLAUDE.md) would bite a third package.

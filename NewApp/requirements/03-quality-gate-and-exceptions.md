@@ -343,8 +343,13 @@ A reset (P14) restarts the streak at 0 in the new generation.
 | AC-10 | `qa_check_registry.fired_total`; QC-952 zero-fire list at pilot exit |
 | AC-12 | §6 enumerated list; `remediations_json` on every exception; no check or remediation has a delete/update path |
 
-## 10. Open items for 04/05
+## 10. Open items
 
-- Exact threshold values marked † after the first 20 pilot runs.
-- Deep-link scheme from the email into the new exe's exceptions view.
-- Whether the watchdog also verifies that the *existing* app's own brief ran (out of scope for stage 1 unless trivial).
+### 10.1 Closed 2026-09-05
+
+- **Deep link from the email into the exceptions view** — grammar fixed in 05 §11.1; the email's link is `tradeanalyzer-next://exceptions?run=<run_id>`. Navigation only: a deep link never resolves an exception or runs a job.
+- **Whether the watchdog also verifies that the *existing* app's brief ran** — **no.** The watchdog is "the email that reports no email" for the collector (P9) and nothing else. Making it alarm on a second, independent system means a red watchdog no longer has one meaning, and the new app would own an alarm for behaviour it does not control. The existing app already emails its own brief; that mail's absence is the operator's signal, and `legacy_brief_run` records the fact for later study either way.
+
+### 10.2 Still open, by design
+
+- Every threshold marked † — set from the distribution observed over the first 20 pilot runs (§8), not guessed beforehand. Each carries its draft value until then; the severity declared in §3 applies from the first run, so a draft threshold on a `blocking` check can halt a pilot run. That is intended during the pilot — the generation is not `production` — but it is the reason pilot exit requires 20 *clean* days rather than 20 days.
