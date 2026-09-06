@@ -35,7 +35,9 @@ Then it sends the **status email** (§7), whether or not anything was found.
 | `warning` | `usable_with_warnings`; flagged in the inspector | second section | cross-source drift inside tolerance bands, a fallback source used, late filer |
 | `info` | no effect | count only | a sticky contract expired and left the set, a capture-rule version changed |
 
-`qa_domain_day_status.status ∈ { usable, usable_with_warnings, unusable, not_run }`. `not_run` is set for every (domain, trading day) the calendar expected but no run covered, and is itself surfaced by the watchdog (§7.3). `meta_run.usable` is `1` only when **every** domain-day the run wrote is not `unusable`.
+`qa_domain_day_status.status ∈ { usable, usable_with_warnings, unusable, not_run }`. `not_run` is set for every (domain, trading day) the calendar expected but no run covered, and is itself surfaced by the watchdog (§7.3).
+
+**There is no stored per-run usability flag.** `meta_run.gate_verdict` records what the gate concluded *when the run finished* and is never rewritten — it is history. Usability is a live property of the data, recomputed on every exception state change, and lives in `qa_domain_day_status` alone. A duplicated `meta_run.usable` would be correct for exactly one day and then drift silently every time an exception was resolved, which is the same denormalisation trap that let a stale earnings date suppress its own corrections.
 
 Severity is a property of the **check**, with two adjustments: escalation (§5.4) can raise it one level; a check definition may declare a **threshold that promotes** it (e.g. a cross-source drift is `warning` per ticker but `blocking` when it affects > 2 % of tickers on the day).
 
@@ -103,10 +105,12 @@ Each check: id, severity, condition that fires it, and the remediation it is all
 | QC-405 IV range | warning | `iv` outside (0, 5] stored as `invalid`; blocking if > 10 % of contracts in a run | none |
 | QC-406 ladder integrity | warning | strikes for an (expiration, right) not strictly increasing, or a strike appears once as call and not as put | none |
 | QC-407 underlying disagreement | warning | \|`underlying_price` − `raw_eod_quote.last`\| / last > 1 % † | none |
-| QC-408 zero-volume default | blocking | any `volume = 0` with `volume_status = ok` **and** `open_interest = 0` **and** bid = ask = 0 — the fingerprint of a defaulted field, not a quiet contract | none (bug) |
+| QC-408 zero-volume default | warning | any `volume = 0` with `volume_status = ok` **and** `open_interest = 0` **and** bid = ask = 0. This *may* be a defaulted field, but a genuinely untraded far-OTM strike on a fresh expiration has the same shape, so it cannot be blocking — see the note below | none |
 | QC-409 sticky-set honoured | blocking | a `ref_sticky_contract` with `valid_to ≥ today` has no snapshot row this run | R1 retry |
 | QC-410 Greek reproduction | warning | Black-Scholes delta from (`underlying_price`, `strike`, DTE, `iv`, 3M yield from `raw_treasury_yield`) differs from `delta` by > 0.05 on > 5 % of ATM contracts † (checks E*Trade's Greeks are on the scale we think; P4). **This is the stage-1 consumer of `raw_treasury_yield`** (02 §11); if the yield row is missing for the date the check is skipped, not failed — a missing rate is QC-902's finding, not this one | none |
 | QC-411 weekend expiration | blocking | an `expiration_date` that is not a trading day and is not a holiday-shifted expiration (when the third Friday is a holiday, expiration moves to the **preceding Thursday** — 02 §2 `is_monthly_expiration`). Catches the UTC/local weekday bug, whose signature is a Saturday date | none |
+
+**On QC-408.** The condition it looks for — a `0` written where the provider sent nothing — is a *code* fault that P11's single-writer rule and the ingestion tests are supposed to make impossible; the real defence is `core/test/ingest/option-contract.test.ts` asserting that an absent `volume` produces `null` + `omitted`, never `0`. As a runtime check on production data it cannot distinguish that bug from a legitimately dead contract, so it is a `warning` that says "look at this", not a gate that blocks a chain domain-day on the shape of an illiquid strike. It is kept because a sudden *jump* in its fire count is a good smoke signal that an ingestion change went wrong (P10 instrumentation makes that visible), which a unit test alone would not give.
 
 ### 3.6 Corporate actions, earnings, fundamentals
 
@@ -198,7 +202,7 @@ One per distinct finding, persistent across runs.
 | `check_id`, `domain`, `key` | key = ticker / osi_symbol / order_id / date as appropriate |
 | `severity` | current, after escalation |
 | `base_severity` | the check's default at creation |
-| `state` | `open` \| `acknowledged` \| `resolved` \| `accepted` |
+| `state` | `open` \| `acknowledged` \| `resolved` \| `accepted` \| `expired_review` |
 | `detail` | one line, human |
 | `evidence_json` | offending values, expected vs actual |
 | `first_seen_run_id`, `last_seen_run_id`, `consecutive_runs` | |
@@ -231,7 +235,9 @@ Recomputed whenever an exception changes state. **This is the only table a downs
             ▼                                                   │
  (gate) → open ──ack──▶ acknowledged ──▶ resolved ──────────────┘
             │                 │
-            └──── accept ─────┴──▶ accepted ──expiry──▶ open (re-examined)
+            └──── accept ─────┴──▶ accepted ──expiry──▶ expired_review
+                                       ▲                    │
+                                       └── re-accept ───────┴──▶ open (operator opens it)
 ```
 
 | Transition | Actor | Rule |
@@ -240,7 +246,8 @@ Recomputed whenever an exception changes state. **This is the only table a downs
 | `open` → `acknowledged` | operator | note optional; stops QC-954 aging |
 | `open`/`acknowledged` → `resolved` | operator, **or** gate | gate may resolve only when the *same fingerprint* evaluates clean **and** a remediation in `remediations_json` succeeded — never merely because it stopped firing (P9) |
 | `open`/`acknowledged` → `accepted` | operator only | note **required**, `accepted_until` required (default +30 d); domain-day becomes usable |
-| `accepted` → `open` | gate | on `accepted_until` passing while the fingerprint still fires |
+| `accepted` → `expired_review` | gate | on `accepted_until` passing while the fingerprint still fires |
+| `expired_review` → `accepted` / `open` / `resolved` | operator only | re-accept with a fresh expiry, or open it for real work |
 | `resolved` → `open` | gate | fingerprint fires again; `consecutive_runs` resets; email calls it out as a *recurrence* |
 
 An exception whose fingerprint stops firing without a remediation stays `open` and is listed as "no longer observed, unresolved" — because "it went away" is exactly how the earnings-date bug hid.
@@ -248,6 +255,8 @@ An exception whose fingerprint stops firing without a remediation stays `open` a
 ### 5.2 Effect on usability
 
 Recompute `qa_domain_day_status` for every date in `affects_trading_dates_json` on any state change. `unusable` iff any blocking exception on that domain-day is `open` or `acknowledged`.
+
+**`expired_review` does not make a domain-day unusable, and does not break the clean-day streak** (decided 2026-09-05). An acceptance expiring is a prompt to re-examine a *known* fact, not the discovery of a new one — the data has not changed. Letting expiry flip a day back to unusable would mean an acceptance taken on pilot day 1 resets the streak around day 21, every time, so the 20-day criterion would be defeated by its own escape valve. Instead an `expired_review` exception gets its own section in every status email until the operator rules on it, and **pilot exit (§8) additionally requires that nothing is sitting in `expired_review`** — so it cannot be ignored, it just cannot silently undo three weeks of clean running. The 30-day default keeps doing its real job: forcing periodic re-examination of everything accepted.
 
 ### 5.3 Fingerprint keys by domain
 
@@ -307,7 +316,10 @@ DOMAINS                    expected   stored   status
   account                      1 bal / 14 pos / 3 orders   usable
   …
 
-OPEN EXCEPTIONS  12 open · 4 acknowledged · 2 accepted (expiring: QC-205 MRNA in 6d) · 3 resolved today
+EXPIRED ACCEPTANCES (1)               ← needs a ruling; blocks promotion, not the day
+  QC-205 bars  MRNA  accepted 2026-08-06 "genuine repricing, not reuse" · expired 2d · still firing
+
+OPEN EXCEPTIONS  12 open · 4 acknowledged · 2 accepted (expiring: QC-205 MRNA in 6d) · 1 expired_review · 3 resolved today
 Zero-fire checks this pilot: 9 of 63   (list at pilot exit)
 
 → Exceptions view: tradeanalyzer-next://exceptions?run=412
@@ -323,12 +335,12 @@ A dead scheduler produces no run and therefore no gate and no email. A separate,
 
 ## 8. Pilot exit (P14, P10)
 
-The gate computes and the email shows a **clean-day streak**: consecutive trading days on which every domain-day is `usable` or `usable_with_warnings` with **zero open or acknowledged blocking exceptions** at end of run. When the streak reaches 20 †:
+The gate computes and the email shows a **clean-day streak**: consecutive trading days on which every domain-day is `usable` or `usable_with_warnings` with **zero open or acknowledged blocking exceptions** at end of run. An exception in `expired_review` does not break the streak (§5.2) but does block promotion at step 4. When the streak reaches 20 †:
 
 1. QC-952 produces the **zero-fire list** — every check with `fired_total = 0`. The operator reviews each: keep (plausibly rare), fix (the condition can never be true as written), or drop. Decisions recorded on the registry row.
 2. The **fired distribution** per check is stored (how often, which tickers) so thresholds marked † are set from data, not defaults.
 3. The operator confirms every domain has been visually inspected (D5) — a checkbox per domain in the inspector, recorded with a timestamp.
-4. `meta_generation.status` → `production`, `pilot_exit_at` set. Downstream stages may now read.
+4. **Nothing is in `expired_review`** — every expired acceptance has been ruled on (§5.2). Then `meta_generation.status` → `production`, `pilot_exit_at` set. Downstream stages may now read.
 
 A reset (P14) restarts the streak at 0 in the new generation.
 

@@ -68,7 +68,52 @@ Prefixes are load-bearing; the inspector groups by them.
 
 ### 0.5 The data dictionary is code
 
-The dictionary is a checked-in TypeScript module in `packages/core` (`dictionary/*.ts`): one entry per column with `table, column, type, unit, nullable, nullMeaning, statusColumn?, converter?, sourceProvider, sourceField, description`. From it are generated: the DDL, the `meta_dictionary` table the inspector reads, the ingestion converters' type signatures, and the AC-3/AC-7 tests. **A column that is not in the dictionary cannot exist** — DDL generation is the only way a table is created (AC-3, AC-13).
+The dictionary is a checked-in TypeScript module in `packages/core` (`dictionary/*.ts`): one entry per column with `table, column, type, unit, nullable, nullMeaning, statusColumn?, converter?, sourceProvider, sourceField, description`, plus one entry **per table** carrying `naturalKey` (the columns that identify a fact across versions — used by version mode and by the replay comparison, 04 §7.5) and `indexes` (§0.6). From it are generated: the DDL, the `meta_dictionary` table the inspector reads, the ingestion converters' type signatures, and the AC-3/AC-7 tests. **A column that is not in the dictionary cannot exist** — DDL generation is the only way a table is created (AC-3, AC-13).
+
+### 0.6 Declared indexes
+
+The inspector refuses any filter or sort that would scan unbounded (05 §8), so **every column the operator can reasonably filter on must be indexed, and the index must be declared in the dictionary** — the DDL generator emits exactly these and nothing else. Declaring them here rather than per table keeps the set visible as one list, which is how you notice the one you forgot.
+
+| table | indexes (beyond the PK) |
+|---|---|
+| `meta_response` | `(run_id)`, `(provider, requested_at)`, `(archive_file)`, unique `(dedup_hash)` |
+| `meta_run` | `(trading_date, slot)`, `(run_kind, started_at)` |
+| `meta_job_request` | `(state, requested_at)` |
+| `ref_universe_membership` | `(ticker, valid_from)`, `(valid_to)` — partial `WHERE valid_to IS NULL` for "current members" |
+| `ref_chain_subset_membership` | `(ticker, valid_from)`, partial `(valid_to) WHERE valid_to IS NULL` |
+| `ref_sticky_contract` | `(osi_symbol)`, partial `(valid_to) WHERE valid_to IS NULL` |
+| `ref_trading_day` | PK on `date` suffices |
+| `raw_ticker_reference` | `(ticker, observed_at)` |
+| `raw_daily_bar` | `(ticker, trade_date)`, `(trade_date)`, `(ticker, observed_at)` |
+| `raw_eod_quote` | `(ticker, as_of_date)`, `(as_of_date)` |
+| `raw_option_expiration` | `(ticker, as_of_date)`, `(ticker, expiration_date)` |
+| `raw_option_contract_snapshot` | `(as_of_date)`, `(ticker, as_of_date)`, `(osi_symbol, as_of_date)`, `(ticker, expiration_date, as_of_date)` |
+| `raw_split`, `raw_dividend` | `(ticker, execution_date)` / `(ticker, ex_dividend_date)` |
+| `raw_earnings_event` | `(ticker, report_date)`, `(report_date)`, `(ticker, observed_at)` |
+| `raw_index_quote` | `(symbol, as_of_date)` |
+| `raw_edgar_filing` | `(cik, filed_date)`, unique `(accession_no)` |
+| `raw_edgar_fact` | `(cik, concept, period_end)`, `(accession_no)` |
+| `raw_account_position_snapshot` | `(as_of_date)`, `(symbol, as_of_date)` |
+| `raw_account_balance_snapshot` | `(as_of_date)` |
+| `raw_executed_order` | unique `(order_id)`, `(executed_time)` |
+| `raw_executed_order_leg` | `(order_row_id)`, `(osi_symbol)`, `(symbol)` |
+| `raw_account_transaction` | unique `(transaction_id)`, `(transaction_date)` |
+| `raw_macro_event` | `(event_date)`, `(event_key, observed_at)` |
+| `raw_treasury_yield` | `(curve_date, tenor)` |
+| `raw_short_interest` | `(ticker, settlement_date)` |
+| `raw_analyst_recommendation`, `raw_analyst_estimate` | `(ticker, period_month)` / `(ticker, fiscal_period)` |
+| `raw_insider_transaction` | `(ticker, transaction_date)`, `(cik, transaction_date)`, `(accession_no)` |
+| `ext_iv_history`, `derived_iv30_daily` | `(ticker, date)` / `(ticker, as_of_date)` |
+| `legacy_brief_run` | `(trading_date, slot)` |
+| `legacy_brief_candidate` | `(legacy_run_id)`, `(ticker, mode)` |
+| `legacy_brief_candidate_gate/_signal/_leg` | `(candidate_row_id)` |
+| `qa_exception` | unique `(fingerprint)`, `(state, severity)`, `(check_id)`, `(domain, last_seen_run_id)` |
+| `qa_check_result` | `(run_id, check_id)` |
+| `qa_domain_day_status` | `(domain, trading_date)` |
+
+Every raw and snapshot table additionally carries `(run_id)` and `(source_response_id)`, because "show me every row this run wrote" and "show me every row from this response" (AC-1) are the two navigations the inspector offers on every table.
+
+**Cost.** Indexes roughly double the write volume on `raw_option_contract_snapshot`, the one table where it matters (~700k rows/day at the planned subset). That is accepted: the archive is the provenance layer and the database is the *query* layer, and a query layer that cannot be filtered has failed at its one job (P13). If write time becomes the binding constraint on the 19:15 deadline, the lever is the chain subset (04 §3), not the indexes.
 
 ---
 
@@ -100,7 +145,7 @@ One row per collector run (a run = one slot on one day, or a one-shot job).
 | `status` | TEXT | `running` \| `complete` \| `failed` \| `cancelled` |
 | `host_app`, `host_version` | TEXT | which exe hosted the collector (Q4) and its version |
 | `collector_version`, `dictionary_version` | TEXT | for replay equivalence (AC-4) |
-| `usable` | INTEGER | set by the quality gate; `0` while any blocking exception is open (P8) |
+| `gate_verdict` | TEXT | `green` \| `amber` \| `red` — **the verdict at the moment the run finished**, never updated afterwards. It is a historical fact about the run, not a live usability flag. Usability is `qa_domain_day_status` and only that (03 §4); a stored `usable` column would go stale the first time an exception was resolved the next day |
 
 ### `meta_capture_rule`
 Versioned definitions (P6). A change creates a new row; runs reference the row in force.
@@ -309,7 +354,7 @@ Source: E*Trade `/v1/market/optionchains?symbol&expiryYear&expiryMonth&expiryDay
 | `provider_timestamp` | TEXT | yes: omitted | `timeStamp` (**verify** epoch unit) |
 | `sticky_reason` | TEXT | yes: "captured by the rule, not sticky" | `held_in_book` \| `recommended_by_legacy` \| `study_flag` |
 
-Indexes: `(as_of_date)`, `(ticker, as_of_date)`, `(osi_symbol, as_of_date)`, `(ticker, expiration_date, as_of_date)`. Expected count per run: Σ over subset tickers of contracts returned — checked against `meta_response` parse counts (AC-5), not against a model. Checks: bid ≤ ask; iv range; strike ladder monotone; `underlying_price` within 1 % of `raw_eod_quote.last`.
+Indexes: per §0.6. Expected count per run: Σ over subset tickers of contracts returned — checked against `meta_response` parse counts (AC-5), not against a model. Checks: bid ≤ ask; iv range; strike ladder monotone; `underlying_price` within 1 % of `raw_eod_quote.last`.
 
 ### `ref_sticky_contract`
 Contracts pinned into capture regardless of rule (Q2.3).
@@ -555,7 +600,7 @@ Tables (full dictionary entries to be completed alongside the verify list in 04)
 
 - `raw_short_interest` — `ticker, settlement_date, short_interest INTEGER, avg_daily_volume INTEGER, days_to_cover REAL, source` (FINRA publishes twice monthly; Polygon and Finnhub both expose it; **verify** plan coverage).
 - `raw_analyst_recommendation` — `ticker, period_month, strong_buy, buy, hold, sell, strong_sell INTEGER, source='finnhub'` (Finnhub `/stock/recommendation`, free tier) and `raw_analyst_estimate` — `ticker, fiscal_period, eps_estimate_avg/high/low, revenue_estimate_avg, num_analysts, source` (Finnhub estimates: **verify** free-tier availability; if premium, PEG/forward-P/E stays a declared gap).
-- `raw_insider_transaction` — `cik, ticker, filer_name, filer_role, transaction_date, transaction_code, shares INTEGER, price REAL, shares_owned_after INTEGER, accession_no` (EDGAR Form 4; the existing `news-data-fetcher.ts` already parses these).
+- `raw_insider_transaction` — `cik, ticker, filer_name, filer_role, transaction_date, transaction_code, shares INTEGER, price REAL, shares_owned_after INTEGER, accession_no` (EDGAR Form 4; the existing `news-data-fetcher.ts` already parses these). Captured by **one daily full-index sweep**, not per ticker: EDGAR publishes `full-index/<year>/QTR<n>/form.idx` listing every filing of the day, so a single call yields every Form 4 filed and the universe filter is applied locally. Per-ticker polling would be ~300 calls a day to learn that almost nothing was filed.
 
 **Q21 decision:** all three added. Each is a few calls per day, structured, provenance-clean. News sentiment stays out.
 

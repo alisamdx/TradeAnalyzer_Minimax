@@ -63,9 +63,9 @@ One run per trading day, slot `after_close`. Phases execute in order; each phase
 | 5 | **Account** | 4 (portfolio, balance, orders, transactions) | 0 | `raw_account_*`, `raw_executed_order*` |
 | 6 | **Chain subset & sticky sets** | 0 (computed) | 2, 5 | `ref_chain_subset_membership`, `ref_sticky_contract` |
 | 7 | **Expirations & chains** | 1 per subset ticker + 1 per in-window expiration (~300 + ~2,400) | 6 | `raw_option_expiration`, `raw_option_contract_snapshot` |
-| 8 | **Event & macro domains** | earnings sweep slices (~10), EDGAR (changed filers, ~20), VIX (1), yields (1), macro calendar (monthly), short interest / recommendations / insider (~300, cadence-gated) | 1 | `raw_earnings_event`, `raw_edgar_*`, `raw_index_quote`, `raw_treasury_yield`, `raw_macro_event`, `raw_short_interest`, `raw_analyst_*`, `raw_insider_transaction` |
+| 8 | **Event & macro domains** | earnings sweep slices (~10), EDGAR (changed filers, ~20), VIX (1), yields (1), macro calendar (monthly), short interest / recommendations (~300, cadence-gated), insider **1** (daily full-index sweep) | 1 | `raw_earnings_event`, `raw_edgar_*`, `raw_index_quote`, `raw_treasury_yield`, `raw_macro_event`, `raw_short_interest`, `raw_analyst_*`, `raw_insider_transaction` |
 | 9 | **Derivation** | 0 | 7 | `derived_iv30_daily` |
-| 10 | **Gate & email** | 0 | all | `qa_*`, `meta_run` (status, `usable`) |
+| 10 | **Gate & email** | 0 | all | `qa_*`, `meta_run` (status, `gate_verdict`) |
 
 Ordering rationale: bars before the subset rule (it reads dollar volume); account before chains so today's held contracts are sticky *today*; the long chain phase after every cheap phase so a chain-phase failure never costs the cheap domains; derivation after chains; the gate last and always.
 
@@ -129,7 +129,7 @@ Bars fetched at 17:05 are treated as final per the settlement quirk; `is_final` 
 | `account` | `{ ordersLookbackDays: 30, transactionsFallback: true }` |
 | `earnings` | `{ horizonDays: 120, initialSliceDays: 14, subdivideAtCap: true }` |
 | `edgar` | `{ scope: "universe_cs_with_cik", refetchOnNewFiling: true, sweepDays: 7 }` |
-| `sentiment` | `{ shortInterestEveryDays: 7, recommendationsEveryDays: 7, insiderEveryDays: 1 }` |
+| `sentiment` | `{ shortInterestEveryDays: 7, recommendationsEveryDays: 7, insiderDailyIndexSweep: true }` |
 
 † working thresholds; the measured admitted count is recorded in §11 before the pilot starts.
 
@@ -151,11 +151,15 @@ From `raw_option_expiration` for the ticker: select every expiration with `0 < D
 
 `ref_sticky_contract` rows are (re)derived every run from three sources, and closed (`valid_to`) only at expiration:
 
-| source | reason | origin_ref |
-|---|---|---|
-| `raw_account_position_snapshot` today, `security_type = OPTN` | `held_in_book` | the position row |
-| `legacy_brief_leg` for today's hand-off | `recommended_by_legacy` | the leg row |
-| operator flag in the inspector | `study_flag` / `manual` | user id + note |
+| source | reason | origin_ref | written by |
+|---|---|---|---|
+| `raw_account_position_snapshot` today, `security_type = OPTN` | `held_in_book` | the position row | phase 6 |
+| `legacy_brief_leg` for a hand-off | `recommended_by_legacy` | the leg row | **`legacyHandoff()` itself** (§8) |
+| operator flag in the inspector | `study_flag` / `manual` | user id + note | the inspector |
+
+**Why the hand-off writes its own sticky rows.** The collector runs at 17:05; the old app's after-close brief runs inside its own chain, whose order is frozen in `sequence_order` (CLAUDE.md). If the brief lands *after* the collector, a phase 6 that derived stickiness from "today's hand-off" would not see it, and the recommended legs would first be captured on the following day — at the following day's prices, which is precisely what P5 exists to prevent. So `legacyHandoff()` inserts the `ref_sticky_contract` rows as the payload lands, and stickiness begins the moment a contract is recommended, in either job order. Phase 6 still re-derives from hand-offs as a **backstop** (idempotent: an existing `(osi_symbol, reason)` row with an open `valid_to` is left alone), which covers a hand-off that arrived while no generation was open.
+
+Note the ordering limit this does *not* fix: a contract recommended by the evening brief is sticky from that moment, but its *first* chain snapshot is still tomorrow's run — the collector has already passed phase 7. Capturing the leg as priced at decision time is the hand-off payload's job (`legacy_brief_leg`, §8), not the chain snapshot's.
 
 ---
 
@@ -219,7 +223,7 @@ Operator-initiated from the inspector, note required. Closes the current generat
 
 ## 8. Legacy hand-off contract (Q6)
 
-The existing brief job builds this payload from data it already holds in memory at the end of a brief run and calls `collectorHost.legacyHandoff(payload)`. The call is **fire-and-forget**: it never throws into the brief, never blocks it for more than one second (writes are queued to the collector DB), and its own failure is a collector exception, not a brief failure. It must not change what the brief decides or emails (D1).
+The existing brief job builds this payload from data it already holds in memory at the end of a brief run and calls `collectorHost.legacyHandoff(payload)`. The handler writes the `legacy_*` rows **and** the `ref_sticky_contract` rows for every leg (§4.4) in one transaction, so a recommended contract is sticky regardless of whether the brief ran before or after the collector. The call is **fire-and-forget**: it never throws into the brief, never blocks it for more than one second (writes are queued to the collector DB), and its own failure is a collector exception, not a brief failure. It must not change what the brief decides or emails (D1).
 
 ```ts
 interface LegacyBriefHandoff {
