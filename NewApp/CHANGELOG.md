@@ -9,6 +9,91 @@ exit (06 §6).
 
 ---
 
+## B2 — the dictionary, the DDL generator, and the inspector (2026-09-06)
+
+`core@0.1.0`, `next@0.1.0`. **45 tables, 684 columns, 75 indexes, 74 append-only
+triggers.** `typecheck:all` green; 54 tests in `core`, 17 in `next`; the packaged
+exe opens `gen-001`, applies the schema and renders every table. Gate: AC-3 and
+AC-13, both asserted rather than demonstrated.
+
+**The dictionary is code, and it is the only way a table exists.** There is no
+migrations directory: the DDL generator reads `DICTIONARY` and nothing else, so
+AC-3 and AC-13 hold by construction rather than by discipline. Within a
+generation the schema may grow only by new tables, new nullable columns and new
+indexes; `applyDictionary` **refuses** a NOT NULL addition rather than attempting
+it, because anything else silently reinterprets rows already written and is by
+definition a replay into a new generation (04 §7.5).
+
+**Three things the drafting turned up that 02 did not have.**
+
+1. `withStatus` returns the value column **and** its status column from one call,
+   so a status column cannot be forgotten — the pattern is one call, not two
+   entries kept in step by hand. 69 values are guarded that way, and the DDL
+   emits a CHECK that the value is null *exactly when* its status is not `ok`.
+   Without it the pair drifts into a null value with `ok` status (a silent gap)
+   or a present value with `omitted` (a lie), and neither would ever raise.
+2. Two units the spec had not distinguished, both found by the conformance test
+   rather than by reading. `ratio` for a dimensionless value not bounded to 0..1
+   — a 1-for-4 split, which must never render as a percentage. And
+   `provider_defined` for a value whose unit varies per **row** and is named by a
+   sibling column: `raw_edgar_fact` legitimately holds USD, shares, USD/shares
+   and pure numbers in one column, and declaring one unit for all of them would
+   be a lie the inspector then renders as a badge. A `provider_defined` column
+   without a `unitColumn` is refused — a per-row unit recorded nowhere is a
+   number nobody can interpret later.
+3. `meta_dictionary` gained `unit_column` to carry (2) into the database.
+
+**What is asserted, and why that is more than a screenshot.** AC-3 is checked
+twice over: once against the dictionary, and once read back out of
+`meta_dictionary`, because asserting the dictionary against itself proves only
+internal consistency. The DDL round-trips through real SQLite and `PRAGMA
+table_info` is compared to the declaration for every table — column set, order,
+type and nullability. The append-only triggers, the enum CHECKs, the flag CHECKs
+and the status-coherence CHECK are each shown to actually reject.
+
+AC-13 is a **structural** test, not a picture. A screenshot shows that a table
+renders; it cannot show that the *next* table will, which is the actual claim. So
+`next/test/inspector.test.ts` asserts that **no table name and no domain column
+name appears anywhere in the renderer**. The moment someone writes
+`if (table === 'raw_option_contract_snapshot')` to fix one view, the claim is
+false — and it would stay invisible for a long time, because the special case
+would work. There is also a live proof in `core`: a throwaway dictionary entry
+produces a real table and appears in the grouping with no code change anywhere.
+
+**Added to `next`**: generation open with the shared data-root pointer (06 §3.1);
+the typed IPC surface for `generation`, `dictionary` and `inspect`; the Overview,
+the schema-driven **Data** view and the **Dictionary** view. Every column header,
+unit badge, alignment, enum chip and null glyph comes from the dictionary.
+
+**A null cell is never blank.** It carries a glyph and the reason on hover — the
+four statuses look identical as an empty cell and call for four different
+responses. That is AC-3 made visible, and it is why the Dictionary view puts
+"what a null means" on screen without scrolling.
+
+**Fixed while building, each worth its own note.**
+
+- A CSS **grid blowout**: `.content` had no `min-width: 0`, so a wide table
+  pushed the grid track past the window instead of scrolling inside it. Every
+  level containing a scrollable table now sets it.
+- The renderer showed `**bold**` and backticks literally. The descriptions are
+  the same strings that go into `meta_dictionary` and are written to be read, so
+  a tiny inline-markdown renderer was better than either leaving the markers on
+  screen or stripping the emphasis out of the source.
+- Long text values wrapped, turning a 100-row page into a wall. Cells are now one
+  line with the full value on hover; the row-detail drawer (05 §3.2) is B9.
+- The window opens **maximized**, matching the existing app (operator request).
+  `maximize()` rather than `fullscreen: true` — fullscreen hides the title bar
+  and taskbar, which is wrong for a tool meant to sit beside the other app.
+
+**A guard fired on its own documentation, twice.** `core`'s purity rule matched
+the word `safeStorage` inside a column *description*, and `next`'s AC-13 scan
+matched `meta_dictionary` and `OFFSET` inside its own doc comment. Both now strip
+comments and string contents before matching, with fixtures both ways. Left
+alone, this trains people to work around the guard or to stop writing the
+comments that explain it.
+
+---
+
 ## Icon — TradeAnalyzer 2 (2026-09-06)
 
 `next@0.1.0`. Operator choice from four candidates rendered at real icon sizes.

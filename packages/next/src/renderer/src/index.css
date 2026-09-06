@@ -1,40 +1,203 @@
 :root {
   color-scheme: dark;
-  --bg: #14161a;
+  --bg: #101318;
+  --bg-panel: #161a21;
+  --bg-raised: #1c212a;
+  --line: #262c37;
   --fg: #e6e8eb;
-  --muted: #9aa3ad;
+  --muted: #8b95a3;
+  --accent: #f5b042;
+  --accent-dim: #8a6524;
+  --green: #3ddc97;
+  --red: #ff6b6b;
+  --blue: #56c8ff;
 }
 
-* {
-  box-sizing: border-box;
-}
+* { box-sizing: border-box; }
 
 body {
   margin: 0;
   background: var(--bg);
   color: var(--fg);
-  font: 14px/1.55 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font: 13px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif;
 }
 
-.shell {
-  padding: 48px;
-  max-width: 720px;
+code, .mono { font-family: Consolas, 'SF Mono', Menlo, monospace; font-size: 12px; }
+
+/* ── shell ─────────────────────────────────────────────────────────────── */
+
+.app { display: grid; grid-template-columns: 210px minmax(0, 1fr); height: 100vh; }
+
+.sidebar {
+  background: var(--bg-panel);
+  border-right: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  padding: 14px 0;
 }
 
-h1 {
-  margin: 0 0 4px;
-  font-size: 22px;
-  font-weight: 600;
-}
+.brand { padding: 0 16px 16px; }
+.brand-name { display: block; font-weight: 600; font-size: 14px; }
+.brand-sub { display: block; color: var(--accent); font-size: 11px; margin-top: 2px; }
 
-.lede {
-  margin: 0 0 24px;
+.nav-item {
+  appearance: none;
+  background: none;
+  border: 0;
+  border-left: 2px solid transparent;
   color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  padding: 7px 16px;
+  text-align: left;
+}
+.nav-item:hover { color: var(--fg); }
+.nav-item.is-active { color: var(--fg); border-left-color: var(--accent); background: var(--bg-raised); }
+
+.sidebar-foot { margin-top: auto; padding: 12px 16px 0; color: var(--muted); font-size: 11px; }
+
+.content {
+  overflow: auto;
+  padding: 26px 30px;
+  /* A grid item's default `min-width: auto` sizes it to its CONTENT, so a wide
+     table pushes the track wider than the window instead of scrolling inside
+     it — the whole layout blows out and the sidebar gets squeezed. Every level
+     that contains a scrollable table needs this. */
+  min-width: 0;
 }
 
-.note {
-  margin: 0;
-  padding: 12px 14px;
-  border-left: 2px solid #2b3038;
-  color: var(--muted);
+h1 { font-size: 20px; margin: 0 0 4px; font-weight: 600; }
+h2 { font-size: 15px; margin: 0; font-weight: 600; }
+.lede { color: var(--muted); margin: 0 0 22px; }
+.muted { color: var(--muted); }
+
+/* ── overview ──────────────────────────────────────────────────────────── */
+
+.facts { display: grid; gap: 1px; background: var(--line); border: 1px solid var(--line); margin: 0 0 24px; }
+.facts > div { display: grid; grid-template-columns: 130px 1fr; background: var(--bg-panel); padding: 8px 12px; }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; }
+.facts .path { font-family: Consolas, monospace; font-size: 11px; word-break: break-all; }
+
+.panel { border: 1px solid var(--line); background: var(--bg-panel); padding: 16px 18px; }
+.panel h2 { margin-bottom: 6px; }
+.unverified { list-style: none; margin: 14px 0 0; padding: 0; display: grid; gap: 10px; }
+.unverified li { display: grid; grid-template-columns: 300px 1fr; gap: 14px; align-items: start; }
+.unverified code { color: var(--accent); }
+.unverified span { color: var(--muted); }
+
+.banner { padding: 12px 16px; border-left: 3px solid var(--line); background: var(--bg-panel); }
+.banner-error { border-left-color: var(--red); }
+.banner p { margin: 6px 0 0; color: var(--muted); }
+
+/* ── split: tree + pane ────────────────────────────────────────────────── */
+
+.split { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 22px; align-items: start; }
+
+.tree {
+  border: 1px solid var(--line);
+  background: var(--bg-panel);
+  max-height: calc(100vh - 90px);
+  overflow: auto;
+  padding: 8px 0;
 }
+.tree-layer { margin-bottom: 6px; }
+.tree-layer-label {
+  color: var(--accent);
+  font-size: 10px;
+  letter-spacing: 0.09em;
+  padding: 6px 12px 2px;
+  text-transform: uppercase;
+}
+.tree-domain { margin-bottom: 2px; }
+.tree-domain-label { color: var(--muted); font-size: 10px; padding: 4px 12px 2px 20px; }
+.tree-table {
+  appearance: none; background: none; border: 0; color: var(--fg); cursor: pointer;
+  display: flex; font: inherit; justify-content: space-between; gap: 8px;
+  padding: 3px 12px 3px 28px; text-align: left; width: 100%;
+}
+.tree-table:hover { background: var(--bg-raised); }
+.tree-table.is-active { background: var(--bg-raised); color: var(--accent); }
+.tree-table-name { font-family: Consolas, monospace; font-size: 11px; }
+.tree-table-count { color: var(--muted); font-size: 11px; }
+.tree-table-count.is-empty { opacity: 0.4; }
+
+.pane { min-width: 0; }
+.pane-head { align-items: baseline; display: flex; gap: 12px; margin-bottom: 6px; }
+.pane-head .count { color: var(--muted); font-size: 12px; }
+.table-desc { margin: 0 0 8px; max-width: 80ch; }
+.empty-note { border-left: 2px solid var(--accent-dim); color: var(--muted); margin: 14px 0; padding: 6px 12px; }
+
+/* ── grid ──────────────────────────────────────────────────────────────── */
+
+.table-scroll { border: 1px solid var(--line); margin-top: 14px; max-height: calc(100vh - 220px); overflow: auto; }
+
+.grid { border-collapse: collapse; font-size: 12px; width: 100%; }
+.grid th {
+  background: var(--bg-raised); border-bottom: 1px solid var(--line); cursor: pointer;
+  padding: 7px 10px; position: sticky; text-align: left; top: 0; vertical-align: top; white-space: nowrap;
+}
+.grid td {
+  border-bottom: 1px solid var(--line);
+  padding: 5px 10px;
+  /* One line per row. A long text value wrapping turns a 100-row page into a
+     wall and hides the shape of the data, which is the one thing a table view is
+     for. The full value is the cell's title, and the row-detail drawer (05 §3.2)
+     shows it properly from B9. */
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.grid tr:hover td { background: var(--bg-panel); }
+.grid .num { text-align: right; font-variant-numeric: tabular-nums; }
+
+.col-name { display: block; font-family: Consolas, monospace; }
+.unit { color: var(--muted); display: block; font-size: 10px; font-weight: 400; margin-top: 1px; }
+.sort { color: var(--accent); font-size: 9px; margin-left: 4px; }
+
+.pk, .fk, .verify {
+  border-radius: 2px; font-size: 9px; margin-left: 5px; padding: 1px 4px; text-transform: uppercase;
+}
+.pk { background: var(--accent-dim); color: #1a1206; }
+.fk { background: #244a5e; color: var(--blue); }
+.verify { background: #4a2626; color: var(--red); }
+.all-null { color: var(--red); display: block; font-size: 9px; margin-top: 2px; }
+
+.empty-row td { color: var(--muted); padding: 18px; text-align: center; }
+
+/* Null cells are never blank — 05 §3.1, AC-3. */
+.null { text-align: center; }
+.null-mark { font-size: 13px; }
+.null-omitted .null-mark { color: #5d6875; }
+.null-outside .null-mark { color: #4b5a6b; }
+.null-invalid .null-mark { color: var(--red); }
+.null-na .null-mark { color: #48505c; }
+.null-declared .null-mark { color: #4a525e; }
+
+.chip { background: var(--bg-raised); border: 1px solid var(--line); border-radius: 9px; font-size: 10px; padding: 1px 7px; }
+.status { font-size: 11px; }
+.status-ok { color: var(--green); }
+.status-omitted, .status-outside_window, .status-not_applicable { color: var(--muted); }
+.status-invalid { color: var(--red); }
+.flag-on { color: var(--green); }
+.flag-off { color: var(--muted); }
+.json { color: var(--muted); font-family: Consolas, monospace; }
+
+/* ── dictionary table ──────────────────────────────────────────────────── */
+
+.dict td {
+  vertical-align: top;
+  word-break: break-word;
+  /* The Dictionary view is the one place long prose SHOULD wrap: its whole job
+     is to be read, not scanned. It opts out of the grid's one-line rule. */
+  white-space: normal;
+  max-width: none;
+  overflow: visible;
+}
+.dict { table-layout: fixed; }
+.dict .col-desc { color: var(--muted); font-size: 11px; margin-top: 3px; }
+.dict .null-meaning { color: var(--fg); font-size: 11px; }
+.dict .source-field { color: var(--muted); font-size: 10px; margin-top: 2px; }
+.dict .enum-chips { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 5px; }
+.dict tr.is-unverified { background: rgba(120, 40, 40, 0.09); }

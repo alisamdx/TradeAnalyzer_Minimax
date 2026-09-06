@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.1.194] - 2026-09-06
+
+### chore - the ABI-swap script says why it failed
+
+- **`scripts/rebuild-better-sqlite3.mjs` now catches a file-lock failure and prints what to do**, instead of a bare `EBUSY` and a stack trace. Windows locks a loaded `.node` file, so any running app makes the swap fail; `pretest` runs this script and `check-not-running.mjs` guards `package` but not `test`, so a running exe turned `npm test` into an unexplained crash a hundred lines from the cause. Found while building NewApp B2 with the new exe open. The message now names both executables and `npm run dev`; a non-lock failure still throws as before. No behaviour of the existing app changed.
+
 ## [1.1.193] - 2026-09-06
 
 ### fix - the transactions range walk emitted a wasted one-day query on twelve dates a year

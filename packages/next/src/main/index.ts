@@ -2,6 +2,8 @@ import { app, BrowserWindow, shell } from 'electron';
 import { join } from 'node:path';
 import { existsSync } from 'node:fs';
 import { COLLECTOR_VERSION, DICTIONARY_VERSION } from '@tradeanalyzer/core';
+import { closeGeneration, openGeneration } from './generation.js';
+import { registerIpc } from './ipc.js';
 
 /**
  * TradeAnalyzer 2 — main process.
@@ -39,6 +41,7 @@ function createWindow(): void {
     width: 1400,
     height: 900,
     show: false,
+    fullscreen: false,
     autoHideMenuBar: true,
     title: 'TradeAnalyzer 2',
     ...(icon ? { icon } : {}),
@@ -50,7 +53,14 @@ function createWindow(): void {
     }
   });
 
-  window.on('ready-to-show', () => window.show());
+  window.on('ready-to-show', () => {
+    // Maximized on open, matching the existing app. `maximize()` rather than
+    // `fullscreen: true`: fullscreen hides the title bar and the taskbar, which
+    // is wrong for a tool meant to sit alongside the other app all day. The
+    // 1400x900 above is only the restore-down size.
+    window.maximize();
+    window.show();
+  });
 
   // External links open in the real browser, never in an app window.
   window.webContents.setWindowOpenHandler(({ url }) => {
@@ -67,6 +77,16 @@ app.whenReady().then(() => {
   console.log(
     `[next] TradeAnalyzer 2 v${app.getVersion()} — core ${COLLECTOR_VERSION}, dictionary ${DICTIONARY_VERSION}`
   );
+
+  // The generation is opened before the window, so a failure here is a startup
+  // error the operator sees rather than an empty UI that looks like no data.
+  const generation = openGeneration();
+  console.log(
+    `[next] generation ${generation.generationNo} (${generation.status})` +
+      `${generation.createdNow ? ' — created' : ''} at ${generation.dbPath}`
+  );
+
+  registerIpc();
   createWindow();
 
   app.on('activate', () => {
@@ -76,4 +96,8 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
+});
+
+app.on('will-quit', () => {
+  closeGeneration();
 });

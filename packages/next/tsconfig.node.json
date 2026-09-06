@@ -13,12 +13,15 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "skipLibCheck": true,
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
   "include": [
     "src/main/**/*.ts",
     "src/preload/**/*.ts",
     "test/**/*.ts",
-    "electron.vite.config.ts"
+    "electron.vite.config.ts",
+    "src/shared/**/*.ts"
   ]
 }

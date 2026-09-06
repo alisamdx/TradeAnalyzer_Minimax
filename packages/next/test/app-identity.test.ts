@@ -108,8 +108,14 @@ describe('app identity', () => {
 
   it('declares the window.api shape in exactly one place', () => {
     // TS2717 in the existing app came from per-file redeclaration (CLAUDE.md).
+    // `NextApi` is declared in src/shared/types.ts and imported by both the
+    // preload that implements it and the renderer's global.d.ts that installs
+    // it on `window` — one declaration, two consumers.
     const preload = read('../src/preload/index.ts');
-    expect(preload).toMatch(/import type \{ NextApi \}/);
-    expect(read('../src/preload/api.ts')).toMatch(/export interface NextApi/);
+    expect(preload).toMatch(/import type \{[^}]*NextApi/);
+    expect(read('../src/shared/types.ts')).toMatch(/export interface NextApi/);
+    expect(read('../src/renderer/src/global.d.ts')).toMatch(/api: NextApi/);
+    // And nowhere else declares it.
+    expect(read('../src/renderer/src/global.d.ts')).not.toMatch(/interface NextApi/);
   });
 });

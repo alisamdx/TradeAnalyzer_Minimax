@@ -157,7 +157,7 @@ The paper work ends when the operator says so; this is the order the build then 
 | step | deliverable | gate to next |
 |---|---|---|
 | B1 ✅ | Workspaces; empty `core` and `next` packages; purity test; both exes build and package | `typecheck:all`, `test:all` green; existing app unchanged in behaviour — **built 2026-09-06**, see `NewApp/CHANGELOG.md` |
-| B2 | Dictionary as code for all 02 tables; DDL generator; `meta_dictionary`; new exe opens `gen-001` and the **Data** and **Dictionary** views render every (empty) table | AC-3, AC-13 |
+| B2 ✅ | Dictionary as code for all 02 tables; DDL generator; `meta_dictionary`; new exe opens `gen-001` and the **Data** and **Dictionary** views render every (empty) table | AC-3, AC-13 — **built 2026-09-06**: 45 tables, 684 columns, 75 indexes, 74 append-only triggers. AC-13 is asserted structurally (no table or domain-column name anywhere in the renderer) rather than shown in a screenshot, because a screenshot proves this table renders and not that the next one will |
 | B3 | `CollectorHost` interface; `ElectronCollectorHost`; archive writer; `meta_run`/`meta_response`; `meta_job_request` + the `collector-oneshot` claim loop; phases 0–1 (`universe_seed`) | AC-1, AC-2 on real rows |
 | B4 | Phases 2–4 (bars, quotes, actions) + their QC checks + the gate skeleton + email + watchdog | first green/red email received |
 | B5 | `backfill_bars`; review queue cleared (04 §11) | QC-205 exceptions all resolved/accepted |

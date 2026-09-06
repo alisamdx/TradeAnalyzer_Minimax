@@ -22,6 +22,8 @@ These implement P1, P3, P6, P7. They are stated once here and not repeated per t
 | Flag | `INTEGER` | `0` / `1` | |
 | Enumeration | `TEXT` | lower-case, fixed set stated in the dictionary | `right = 'call' \| 'put'` |
 | Identifier from a provider | `TEXT` | verbatim | `osi_symbol`, `order_id`, `cik` |
+| **Ratio, not bounded to 0..1** | `REAL` | dimensionless | a split of `1` to `4`. **Added at B2**, distinct from `fraction` because rendering it as a percentage is nonsense, and REAL because providers send fractional split ratios |
+| **Unit varies per row** | `REAL` | named by a sibling column | `raw_edgar_fact.value`, whose unit is in `raw_edgar_fact.unit` — one column legitimately holds USD, shares, USD/shares and pure numbers. **Added at B2**; the dictionary entry must name the unit column (`unitColumn`), and one that does not is refused, because a per-row unit recorded nowhere is a number nobody can interpret later |
 
 The contract multiplier (100) is **never** applied in a raw table. Provider values are converted once, at ingestion, by the converter named in the dictionary entry (P7). Two dictionary-driven tests exist per converted field: one asserting the conversion, one asserting no other module performs it (AC-7).
 
@@ -40,7 +42,7 @@ Raw tables have **no `UPDATE` or `DELETE` path**; a trigger raises on both (AC-2
 
 ### 0.3 The status-column pattern (P3)
 
-A value column that could be null for more than one reason gets a companion `<col>_status TEXT` and the value column's null meaning becomes "see status". Standard status values:
+A value column that could be null for more than one reason gets a companion `<col>_status TEXT` and the value column's null meaning becomes "see status". **Built at B2 as a single call** (`withStatus`) that returns *both* columns, so a status column cannot be forgotten — the pattern is one call, not two entries kept in step by hand — and the generated DDL carries a CHECK that the value is null **exactly when** its status is not `ok`. Without that constraint the pair drifts into a null value with `ok` status (a silent gap) or a present value with `omitted` (a lie), and neither would ever raise. Standard status values:
 
 | Status | Meaning |
 |---|---|
