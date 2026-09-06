@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.195] - 2026-09-06
+
+### chore - the build guard follows the new exe's rename
+
+- **`scripts/check-not-running.mjs` watches for `TradeAnalyzer2`**, not `TradeAnalyzer 2`. The new application's executable was renamed to drop the space (its *display* name stays "TradeAnalyzer 2"); the guard matches the **process** name, which follows the executable filename rather than `productName`, so it had to move with it. Left stale it would have silently stopped seeing the new app and let a build run over a locked file — a failure that looks like a corrupt bundle rather than a running process.
+- **The two are now pinned by a test**: `packages/next/test/app-identity.test.ts` reads `executableName` out of that package's `package.json` and asserts this guard watches for exactly it. Verified live — the guard refuses while the renamed exe runs and clears when it closes.
+- No behaviour of the existing app changed.
+
 ## [1.1.194] - 2026-09-06
 
 ### chore - the ABI-swap script says why it failed

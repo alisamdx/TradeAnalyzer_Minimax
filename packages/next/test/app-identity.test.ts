@@ -18,7 +18,7 @@ const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.met
 describe('app identity', () => {
   const pkg = JSON.parse(read('../package.json')) as {
     version: string;
-    build: { appId: string; productName: string };
+    build: { appId: string; productName: string; executableName: string };
   };
 
   it('uses an appId distinct from the existing app', () => {
@@ -26,8 +26,26 @@ describe('app identity', () => {
     expect(pkg.build.appId).not.toBe('com.tradeanalyzer.app');
   });
 
-  it('ships as "TradeAnalyzer 2"', () => {
+  it('displays as "TradeAnalyzer 2" but ships an executable with no space in it', () => {
+    // Two different names on purpose. `productName` is what a person reads — the
+    // window title, the installer, the Programs list. `executableName` is what a
+    // script types, and a space there has to be quoted by every shortcut,
+    // command line and `Get-Process -Name` that ever touches it; the one that
+    // forgets fails in a way that looks like the file is missing.
     expect(pkg.build.productName).toBe('TradeAnalyzer 2');
+    expect(pkg.build.executableName).toBe('TradeAnalyzer2');
+    expect(pkg.build.executableName).not.toMatch(/\s/);
+  });
+
+  it('is the name the build guard actually watches for', () => {
+    // check-not-running.mjs matches the PROCESS name, which follows the exe
+    // filename rather than productName. If the two drift, the guard silently
+    // stops seeing the new app and lets a build run over a locked file.
+    const guard = readFileSync(
+      fileURLToPath(new URL('../../../scripts/check-not-running.mjs', import.meta.url)),
+      'utf8'
+    );
+    expect(guard).toContain(`proc: '${pkg.build.executableName}'`);
   });
 
   it('stays on the 0.x line until pilot exit (06 §6)', () => {

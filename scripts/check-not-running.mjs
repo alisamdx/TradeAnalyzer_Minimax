@@ -10,9 +10,15 @@
 import { execSync } from 'child_process';
 
 // Process names as Windows reports them — the exe basename without `.exe`.
+//
+// These follow `executableName`, NOT `productName`. The new app displays as
+// "TradeAnalyzer 2" but ships as `TradeAnalyzer2.exe`, deliberately: a space in
+// an executable name has to be quoted in every script, shortcut and command line
+// that ever touches it, and the one that forgets fails in a way that looks like
+// the file is missing.
 const APPS = [
   { proc: 'TradeAnalyzer', label: 'TradeAnalyzer (existing app)' },
-  { proc: 'TradeAnalyzer 2', label: 'TradeAnalyzer 2 (new exe)' }
+  { proc: 'TradeAnalyzer2', label: 'TradeAnalyzer 2 (new exe)' }
 ];
 
 function isRunning(proc) {

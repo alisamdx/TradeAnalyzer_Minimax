@@ -9,6 +9,27 @@ exit (06 §6).
 
 ---
 
+## Executable renamed — `TradeAnalyzer2.exe` (2026-09-06)
+
+Operator decision. The exe filename loses its space; **the display name keeps
+it**. `productName` stays "TradeAnalyzer 2" — window title, installer and
+Programs list are unchanged — and electron-builder's `executableName` splits the
+filename off from it.
+
+A space in an executable name has to be quoted by every shortcut, script,
+command line and `Get-Process -Name` that ever touches it, and the one that
+forgets fails in a way that looks like the file is missing rather than like a
+quoting mistake.
+
+`check-not-running.mjs` matches the **process** name, which follows
+`executableName` and not `productName`. If those two drift the guard silently
+stops seeing the new app and lets a build run over a locked file — so a test now
+reads the executable name out of `package.json` and asserts the guard watches for
+exactly it. Verified live: the guard refuses while the renamed exe runs and
+clears when it closes.
+
+---
+
 ## B2 — the dictionary, the DDL generator, and the inspector (2026-09-06)
 
 `core@0.1.0`, `next@0.1.0`. **45 tables, 684 columns, 75 indexes, 74 append-only
