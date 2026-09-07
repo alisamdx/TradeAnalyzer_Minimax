@@ -4,6 +4,7 @@ import { referenceTables } from './tables/reference.js';
 import { marketTables } from './tables/market.js';
 import { fundamentalsAccountTables } from './tables/fundamentals-account.js';
 import { derivedLegacyTables } from './tables/derived-legacy.js';
+import { qaTables } from './tables/qa.js';
 
 export * from './types.js';
 export { defineTable, standardColumns } from './standard-columns.js';
@@ -20,7 +21,8 @@ export const DICTIONARY: readonly TableEntry[] = [
   ...referenceTables,
   ...marketTables,
   ...fundamentalsAccountTables,
-  ...derivedLegacyTables
+  ...derivedLegacyTables,
+  ...qaTables
 ];
 
 /**
@@ -30,7 +32,7 @@ export const DICTIONARY: readonly TableEntry[] = [
  * nullable columns, new indexes); anything else is a replay into a new
  * generation, never an in-place migration.
  */
-export const DICTIONARY_VERSION = 2;
+export const DICTIONARY_VERSION = 3;
 
 /** Layer render order for the inspector's tree (02 §0.4). */
 export const LAYER_ORDER: readonly Layer[] = ['meta', 'ref', 'raw', 'ext', 'derived', 'legacy', 'qa'];

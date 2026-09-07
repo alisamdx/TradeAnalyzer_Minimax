@@ -48,6 +48,7 @@ Severity is a property of the **check**, with two adjustments: escalation (§5.4
 Each check: id, severity, condition that fires it, and the remediation it is allowed to request (from the §6 list) or `none`. All thresholds are stored on the check registry row, never hard-coded. Two marks distinguish where a value came from:
 
 - **†** — a **working value**, not yet measured. Set from the pilot's recorded distributions (§8, QC-955).
+- **Built at B4, a third basis the draft did not have: `structural`.** Four checks measure a magnitude against a threshold of **zero by definition** — "any crossed quote at all is a finding", "any non-final bar at run end is a finding". That is not a number anyone chose, so marking it † would park it in the pilot's threshold-review queue forever, and marking it ‡ would claim evidence that does not exist. The check registry now records `measured | working | structural | not_applicable`, and a magnitude check that fails to say which is a build failure.
 - **‡** — **already measured**, on the existing application's data. These are not guesses and re-opening them needs new evidence, not a fresh opinion:
 
 | threshold | measured on | separation observed |
@@ -174,7 +175,7 @@ A ‡ value still gets its distribution recorded like any other (§4) — measur
 ## 4. Tables
 
 ### `qa_check_registry`
-Generated from code at startup; the fire statistics are updated by the gate.
+Generated from code at startup; the fire statistics are updated by the gate. **Built at B4**: the table is append-only with a validity range, and `mutableColumns` names the four counters (`evaluated_total`, `fired_total`, `first_fired_at`, `last_fired_at`) that may accumulate. The check's *definition* stays frozen — a threshold change opens a new version, so a past `qa_check_result` can still be read against the boundary actually in force — while its *instrumentation* moves. Everything not named still refuses an edit.
 
 | column | notes |
 |---|---|

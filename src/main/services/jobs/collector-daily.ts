@@ -1,14 +1,16 @@
 import type { BatchJobHandler, BatchJobResult } from '../batch-service.js';
 import type { BatchProgressEvent } from '@shared/types.js';
-import { beginRun, finishRun, runPreflight } from '@tradeanalyzer/core';
+import { runDaily, markNotRun, syncRegistry, ALL_CHECKS, buildNoRunEmail } from '@tradeanalyzer/core';
 import { readSharedPointer } from '../../collector-host/electron-collector-host.js';
 import type { HostFactory } from './collector-oneshot.js';
 
 /**
  * `data-collector` — the daily run (NewApp 04 §2, 06 §5 change #4).
  *
- * At B3 this is **phase 0 only**: preflight, and a `meta_run` row that records
- * what the day looked like. Phases 1 through 10 land at B4 onward.
+ * At B4 this runs phases 0 through 4 — preflight, bars, the end-of-day
+ * snapshot and corporate actions — then the gate, then the status email.
+ * Phases 5 through 9 (account, chain subset, chains, event domains, derivation)
+ * arrive at B6 and B7.
  *
  * Registered at 17:05, after-close only. That places it after this app's own
  * after-close chain has started; if that chain is still running the batch mutex
@@ -54,25 +56,31 @@ export function createCollectorDailyJob(deps: {
       });
 
       try {
-        const db = host.openGenerationDb();
         const tradingDate = deps.todayET();
-        const run = beginRun(db, host, { kind: 'daily', tradingDate, slot: 'after_close' });
+        const report = await runDaily(host, { tradingDate });
 
-        const preflight = await runPreflight(host, db, run);
-        if (!preflight.proceed) {
-          finishRun(db, host, run, 'complete');
-          return { ...base, notes: `Preflight stopped the run: ${preflight.detail}` };
+        if (report.verdict === 'skipped') {
+          return { ...base, notes: `Preflight stopped the run: ${report.skippedReason ?? ''}` };
         }
 
-        finishRun(db, host, run, 'complete');
+        const stored = Object.values(report.domains).reduce((n, d) => n + d.stored, 0);
+        const expected = Object.values(report.domains).reduce((n, d) => n + d.expected, 0);
+
         return {
           ...base,
-          status: 'success',
+          // A red verdict is a successful RUN that found problems, not a failed
+          // job — the gate did exactly its work. A failed job here would mean
+          // the collector could not complete, and conflating the two would make
+          // the batch history unable to answer either question.
+          status: report.phaseErrors.length > 0 ? 'failed' : 'success',
           notes:
-            `Preflight passed for ${tradingDate} on generation ${preflight.generationNo} ` +
-            `(${preflight.generationStatus}); E*Trade ${preflight.etrade}` +
-            `${preflight.etradeDetail ? ` — ${preflight.etradeDetail}` : ''}. ` +
-            'Phases 1-10 arrive at B4.'
+            `${report.verdict.toUpperCase()} — ${report.blocking} blocking, ${report.warnings} warning(s); ` +
+            `email ${report.emailSent ? 'sent' : `NOT sent (${report.emailError ?? 'unknown'})`}` +
+            (report.phaseErrors.length > 0 ? `; phase errors: ${report.phaseErrors.join(' | ')}` : ''),
+          tickersAttempted: expected,
+          tickersUpdated: stored,
+          tickersFailed: report.phaseErrors.length,
+          ...(report.phaseErrors.length > 0 ? { errorMessage: report.phaseErrors.join(' | ') } : {})
         };
       } catch (err) {
         return {
@@ -141,12 +149,31 @@ export function createCollectorWatchdogJob(deps: {
         // turn "the collector did not run" into "the collector ran late", and
         // the second is much harder to notice going wrong repeatedly.
         const detail = runs.length === 0
-          ? 'no daily run exists for today'
-          : `runs exist but none completed (${runs.map((r) => r.status).join(', ')})`;
+          ? 'No daily run exists for today.'
+          : `Runs exist but none completed (${runs.map((r) => r.status).join(', ')}).`;
+
+        // The registry must exist before `not_run` can be written per domain —
+        // on a day the collector never ran, nothing else would have created it.
+        syncRegistry(db, host, ALL_CHECKS);
+        const domains = markNotRun(db, host, today);
+
+        // The email that reports the absence of an email. A dead scheduler
+        // produces no run, therefore no gate, therefore no status email — so
+        // silence is the failure this sends.
+        let emailSent = false;
+        let emailError: string | undefined;
+        try {
+          await host.sendEmail(buildNoRunEmail(today, detail));
+          emailSent = true;
+        } catch (err) {
+          emailError = err instanceof Error ? err.message : String(err);
+        }
+
         return {
           ...base,
           status: 'failed',
           tickersFailed: 1,
+          notes: `${domains} domain(s) marked not_run; NO RUN email ${emailSent ? 'sent' : `failed (${emailError ?? '?'})`}.`,
           errorMessage: `Collector watchdog: ${detail} for ${today}.`
         };
       } finally {

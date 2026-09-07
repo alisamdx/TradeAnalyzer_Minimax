@@ -48,3 +48,4 @@ export { applyDictionary, materialiseDictionary } from './dictionary/apply.js';
 export type { ApplyResult } from './dictionary/apply.js';
 
 export * from './collector/index.js';
+export * from './qa/index.js';

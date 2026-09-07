@@ -145,6 +145,26 @@ describe('collector batch handlers', () => {
     expect(watchdog).toContain("status: 'failed'");
     expect(watchdog).not.toContain('runDaily');
   });
+
+  it('has a watchdog that writes not_run and sends the no-run email', () => {
+    // A dead scheduler produces no run, therefore no gate, therefore no status
+    // email. Silence is the failure it reports, and `not_run` is what makes the
+    // gap a declared fact rather than an absence of rows.
+    const watchdog = daily.slice(daily.indexOf('createCollectorWatchdogJob'));
+    expect(watchdog).toContain('markNotRun');
+    expect(watchdog).toContain('buildNoRunEmail');
+    // The registry has to exist first — on a day nothing ran, nothing else
+    // would have created it, and markNotRun writes one row per registered domain.
+    expect(watchdog.indexOf('syncRegistry')).toBeLessThan(watchdog.indexOf('markNotRun'));
+  });
+
+  it('reports a red gate verdict as a successful run, not a failed job', () => {
+    // The gate finding problems is the gate working. A failed job means the
+    // collector could not complete, and conflating the two makes the batch
+    // history unable to answer either question.
+    const dailyJob = daily.slice(0, daily.indexOf('createCollectorWatchdogJob'));
+    expect(dailyJob).toContain("status: report.phaseErrors.length > 0 ? 'failed' : 'success'");
+  });
 });
 
 describe('registration in the existing app', () => {

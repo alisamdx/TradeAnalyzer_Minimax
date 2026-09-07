@@ -114,7 +114,12 @@ export function appendOnlyTriggerDdl(table: TableEntry): readonly string[] {
   // reason the range exists rather than an overwrite. Turning the guard off for
   // these tables would have been the easy fix and the wrong one.
   const range = quote(table.validRangeColumn);
-  const editable = new Set([table.validRangeColumn, 'change_reason', 'removal_reason']);
+  const editable = new Set<string>([
+    table.validRangeColumn,
+    'change_reason',
+    'removal_reason',
+    ...(table.mutableColumns ?? [])
+  ]);
   const frozen = table.columns
     .filter((c) => !editable.has(c.column))
     .map((c) => `OLD.${quote(c.column)} IS NOT NEW.${quote(c.column)}`)

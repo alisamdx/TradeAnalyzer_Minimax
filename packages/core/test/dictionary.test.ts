@@ -439,8 +439,9 @@ describe('inspector grouping (AC-13 support)', () => {
     expect([...flat].sort()).toEqual([...tableNames()].sort());
   });
 
-  it('orders layers meta, ref, raw, ext, derived, legacy', () => {
-    expect(groupedForInspector().map((g) => g.layer)).toEqual(['meta', 'ref', 'raw', 'ext', 'derived', 'legacy']);
+  it('orders layers meta, ref, raw, ext, derived, legacy, qa', () => {
+    expect(groupedForInspector().map((g) => g.layer))
+      .toEqual(['meta', 'ref', 'raw', 'ext', 'derived', 'legacy', 'qa']);
   });
 
   it('accepts a table the code has never heard of — this is AC-13', () => {

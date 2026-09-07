@@ -84,7 +84,14 @@ describe('AC-13 — the inspector is schema-driven', () => {
     const generic = new Set([
       'status', 'unit', 'description', 'source', 'value', 'date', 'ticker', 'symbol', 'form',
       'name', 'version', 'error', 'domain', 'concept', 'frame', 'active', 'right', 'last', 'open',
-      'high', 'low', 'volume', 'price', 'amount', 'quantity', 'strike', 'bid', 'ask', 'weight'
+      'high', 'low', 'volume', 'price', 'amount', 'quantity', 'strike', 'bid', 'ask', 'weight',
+      // Added when the qa_ layer landed. `key` is React's own prop — every list
+      // in the renderer uses it — and `at`, `note`, `detail`, `actor`, `state`
+      // and `severity` are ordinary English. Matching them says nothing about
+      // whether the renderer is schema-driven. The distinctive qa_ names
+      // (`fingerprint`, `distribution_json`, `consecutive_runs`) stay in scope,
+      // so a genuinely table-specific reference would still be caught.
+      'key', 'at', 'note', 'detail', 'actor', 'state', 'severity'
     ]);
     const columnNames = new Set(
       DICTIONARY.filter((t) => t.layer !== 'meta')

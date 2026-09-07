@@ -210,6 +210,17 @@ export interface TableEntry {
    */
   readonly validRangeColumn?: string;
   /**
+   * Columns a validity-range table may update besides the range itself.
+   *
+   * For `qa_check_registry` these are the fire counters: the check's
+   * **definition** is immutable — changing a threshold opens a new version — but
+   * its **instrumentation** accumulates, and `evaluated_total` is the number
+   * that tells a check nothing violates from a check that cannot fire. Naming
+   * them explicitly keeps the guard meaningful: everything not listed is still
+   * frozen.
+   */
+  readonly mutableColumns?: readonly string[];
+  /**
    * `false` for tables the dictionary marks "not rule-driven" (reference,
    * calendar) — their `capture_rule_id` is nullable. 02 §0.2.
    */

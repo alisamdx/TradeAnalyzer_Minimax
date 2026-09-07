@@ -47,3 +47,11 @@ export { runUniverseSeed } from './universe-seed.js';
 export type { UniverseSeedReport, UniverseListSource } from './universe-seed.js';
 
 export { ingestTickerReference, zeroPadCik, pickShares } from '../ingest/raw-ticker-reference.js';
+
+export { runDaily } from './daily.js';
+export type { DailyRunReport } from './daily.js';
+export { runBarsPhase, runQuotesPhase, runActionsPhase, BARS_RULE, QUOTES_RULE, ACTIONS_RULE } from './phases/market.js';
+export type { PhaseCounts } from './phases/market.js';
+export {
+  makeBarIngest, ingestSnapshot, ingestSplits, ingestDividends, toIntegerStrict, msEpochToEtDate, nsEpochToEt
+} from '../ingest/market.js';

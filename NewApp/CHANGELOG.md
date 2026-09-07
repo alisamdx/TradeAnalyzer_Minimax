@@ -9,6 +9,86 @@ exit (06 §6).
 
 ---
 
+## B4 — the quality gate, phases 2-4, and the first email (2026-09-06)
+
+`core@0.1.0`, existing app v1.1.197, dictionary version 2 → 3. Gate: **the first
+green/red email**. 118 tests in `core`, 18 in `next`, 1,228 in the root suite.
+
+**The check API is the P10 mechanism, and that is the whole design of this
+step.** A magnitude check does not decide whether it fired and report a boolean;
+it returns *every value it measured*, and the framework computes the
+distribution, the near-boundary count and the extreme keys from that. A check
+therefore **cannot** record fires without also recording the distribution they
+came from.
+
+That matters because the existing app shipped a conviction gate whose tested
+quantity could never approach its threshold — 0 of 39 eligible picks rejected
+over 62 briefs, and nobody noticed, because a gate that never fires is
+indistinguishable from a gate nothing violates. `qa_check_result
+.distribution_json` is what makes them distinguishable. A real run of QC-204
+produces:
+
+```
+n=1086  p50=1.4%  p90=2.7%  p99=3.0%  max=75%  threshold=40%  nearBoundary=0
+```
+
+which says in one line that the 40 % boundary sits in a genuine empty gap — the
+claim the "measured" basis makes, now checkable on every run rather than taken
+on trust. `extreme_keys_json` keeps the twenty largest values **whether or not
+they fired**, because the rows nearest the boundary are the evidence a threshold
+review needs and exactly the ones a fired-only record throws away.
+
+**Four threshold bases, not two.** `measured` (from real data, evidence named
+and asserted non-empty by a test), `working` (a placeholder for the pilot to
+set), `not_applicable` (a predicate check — a row either has provenance or it
+does not), and **`structural`**, added when the validation caught four checks
+claiming `not_applicable` while measuring a magnitude. Their thresholds are zero
+*by definition* — "any crossed quote at all is a finding" is not a number anyone
+chose — and calling that `working` would have parked them in the pilot's
+threshold-review queue forever.
+
+**Exceptions are facts about the data, not about the run.** Same fingerprint
+tomorrow is the same exception: it ages, escalates after three consecutive runs,
+and reopens rather than duplicating on recurrence. An exception that **stops
+firing without a remediation stays open** and is listed as "no longer observed,
+unresolved" — because "it went away" is exactly how the earnings-date bug hid
+for a quarter. The gate resolves only when a remediation succeeded *and* the
+fingerprint evaluates clean.
+
+**A check that throws is a finding, not a pass.** Swallowing it would make a
+broken check indistinguishable from a clean one — the failure the gate exists to
+prevent, one level up.
+
+**Usability is derived and never stored on the run.** `qa_domain_day_status` is
+recomputed from the exceptions that are actually open; `meta_run.gate_verdict`
+records what the gate concluded when the run finished and is never rewritten. A
+test asserts both: resolving an exception flips the day to `usable` while the
+run still reads `red`. A stored `usable` column would be correct for one day and
+drift thereafter — the same denormalisation trap that let a stale earnings date
+suppress its own corrections.
+
+**The email goes out after every run, including green ones** (03 §7). An email
+only on failure makes silence ambiguous, and the failure this system most needs
+to catch is a collector that stopped running. The watchdog sends the other half:
+the email that reports the absence of an email, and writes `not_run` so a dead
+scheduler shows as a declared gap rather than as an absence of rows.
+
+**The registry needed a distinction the dictionary did not have.**
+`qa_check_registry` is append-only, but 03 §4 says the gate *updates* its fire
+statistics — so `mutableColumns` now names the counters a validity-range table
+may accumulate. The check's **definition** stays frozen (a threshold change is a
+new version, so a past result can still be read against the boundary actually in
+force); its **instrumentation** moves. Everything not named still refuses an
+edit.
+
+**Added**: six `qa_` tables; the check registry with 15 checks across
+cross-cutting, bars, quotes and corporate actions; the gate; the email; phases
+2-4 with their ingestion modules. Checks for domains that do not exist yet are
+deliberately **not** registered — one evaluating zero things every run would sit
+in the zero-fire list looking exactly like a check that is silently broken.
+
+---
+
 ## B3 — the collector host, the archive and the first real rows (2026-09-06)
 
 `core@0.1.0`, existing app v1.1.196. Gate: **AC-1 and AC-2 on real rows**, both

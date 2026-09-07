@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.197] - 2026-09-06
+
+### feat - the collector's daily run and quality gate (NewApp B4)
+
+- **The hosted collector now runs phases 0-4** (preflight, bars, end-of-day snapshot, corporate actions), evaluates the quality gate and sends the status email; the watchdog writes `not_run` per domain and sends the NO RUN email. Still change #4 of the seven in `NewApp/requirements/06 §5` - no view, IPC handler, service, scoring rule, existing job or existing table is touched, and the collector writes only into the new generation.
+- **A red gate verdict is reported as a `success`, not a failed job.** The gate finding problems is the gate working; a failed job means the collector could not complete. Conflating the two would leave the batch history unable to answer either question. A test pins it.
+- Everything else is in `@tradeanalyzer/core` - see `NewApp/CHANGELOG.md`.
+
 ## [1.1.196] - 2026-09-06
 
 ### feat - this app now hosts the rebuild's collector (NewApp B3)

@@ -22,6 +22,10 @@
     "./collector": {
       "types": "./dist/collector/index.d.ts",
       "import": "./dist/collector/index.js"
+    },
+    "./qa": {
+      "types": "./dist/qa/index.d.ts",
+      "import": "./dist/qa/index.js"
     }
   },
   "files": [
