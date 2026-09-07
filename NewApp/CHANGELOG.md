@@ -21,27 +21,27 @@ about a one-shot backfill, so on the changelog alone MarketData.app still looks
 viable for the bootstrap.
 
 **The disqualifying fact lives in a source comment, not in any changelog.**
- records that MarketData.app returns null IV — *"common
+`marketdata-provider.ts` records that MarketData.app returns null IV — *"common
 for historical chains"* — and falls back to solving Black-Scholes from the
-bid/ask midpoint, tracking which it used in . Its Mon Sep  7 13:09:45 EDT 2026
+bid/ask midpoint, tracking which it used in `ivSource: 'api' | 'bs'`. Its `date`
 parameter is an **expiration filter, not an as-of date**, so a historical
-snapshot needs a two-call bracket per day.  reads
-, which returns pre-computed constant-maturity ATM IV as true
+snapshot needs a two-call bracket per day. `ivolatility-provider.ts` reads
+`/equities/eod/ivx`, which returns pre-computed constant-maturity ATM IV as true
 as-of-date snapshots, and is annotated "the primary source for IV history
 backfill". The stored rows agree: IVolatility **262k** over a year,
 MarketData.app **1k** over two days.
 
-** had the two backwards** — MarketData.app listed as
+**`.ai/AI_CONTEXT.md` had the two backwards** — MarketData.app listed as
 "IV-history backfill" and IVolatility as "Alternative IV-history source" —
 which is the opposite of what both the code and the data say. Corrected. A state
 snapshot that inverts a settled decision is worse than no snapshot: it is exactly
 the document a later session would trust.
 
-**Two consequences for B7b.**  arrives as a **decimal fraction**, which is
+**Two consequences for B7b.** `iv30` arrives as a **decimal fraction**, which is
 what 02 §0.1 stores, so there is **no ×100** — the existing app multiplies
 because it stores percentages, and carrying that habit across would inflate every
 bootstrap row a hundredfold. And IVX is **IVolatility's own** constant-maturity
-computation while  is ours, so the overlap window compares
+computation while `derived_iv30_daily` is ours, so the overlap window compares
 two different *methods*, not just two vendors — which makes QC-908's 2-vol-point
 threshold a quantity to **measure over the first 20 paired days**, not to trust.
 
