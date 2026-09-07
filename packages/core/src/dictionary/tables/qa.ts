@@ -75,6 +75,10 @@ export const qaTables: readonly TableEntry[] = [
     description: 'One row per run: the gate\'s verdict, the per-domain table the email shows, and whether the email got out.',
     naturalKey: ['run_id'],
     appendOnly: true,
+    // The report's content is a fact about the run and is frozen. Whether the
+    // email got out is learned a moment later, and is not knowable when the row
+    // is written — so those three columns, and only those, may be filled in.
+    mutableColumns: ['email_sent_at', 'email_status', 'email_error'],
     ruleDriven: false,
     standardColumns: false,
     columns: [

@@ -9,6 +9,70 @@ exit (06 §6).
 
 ---
 
+## B5 — backfill_bars and the review queue (2026-09-06)
+
+`core@0.1.0`, existing app v1.1.198. Gate: **every QC-205 finding resolved or
+accepted**. 137 tests in `core`, 19 in the existing app.
+
+**Five years in one pass per ticker, so the whole series shares an adjustment
+basis.** That is the point of doing it as a job rather than letting history
+accumulate: the existing app built its bars incrementally and re-fetched only a
+three-day tail, so a split occurring later left pre-split bars sitting beside
+post-split ones — 153 permanent steps across 126 tickers. Freshness of the tail
+never implies consistency of the history.
+
+**Splits are fetched before the bars.** A discontinuity found during the sweep
+then has something to be explained *by*. Fetching them afterwards would open
+exceptions the very next statement could close, and an exception raised and
+immediately resolved still costs the operator a reading.
+
+**The ticker-reuse ruling destroys nothing.** 03 §6 calls it "truncate before
+splice", and 03 §303 already specifies the honest form: close the membership
+range at the boundary and open a new one with a `predecessor_ticker` lineage —
+the bars stay. A reader intersecting bars with membership then sees one entity
+at a time. Demonstrated end to end: 50 bars before the ruling, 50 after, and the
+two entities separate cleanly at 25 bars each. Deleting the earlier company's
+history to fix an *interpretation* problem would be the wrong trade, and no
+re-fetch could achieve the separation anyway — the provider keys by ticker too.
+
+**A usability improvement found by making the mistake.** Running the flow by
+hand, the splice date was given one day late, and the consequence was silent:
+one bar of the new company stayed in the old entity's range and nothing
+complained. The date was never in doubt — QC-204 keys its finding `TICKER
+YYYY-MM-DD` at the exact boundary — so `recordTickerReuse` now takes the splice
+date from that finding when none is given, and refuses when it has neither.
+
+**Operator actions built four steps before their UI.** The Exceptions workbench
+is B9, but B5's gate needs rulings now, so `acknowledge` / `resolve` / `accept` /
+`expireAcceptances` / `recordTickerReuse` exist in `core` with tests, and
+`packages/core/scripts/exception.mjs` drives them until the workbench arrives.
+The workbench then wires buttons to behaviour already proven rather than being
+the first place any of it runs.
+
+Three refusals worth naming:
+
+- **`resolve` is refused while the check is still firing** (unless the kind is
+  `false_positive`, which is a claim about the *check* rather than the data).
+  Resolving would mark the domain-day usable on the strength of an opinion, and
+  the next run would reopen it — so the only lasting effect would be a
+  misleading clean day in between. `accept` is the honest tool there, and it
+  carries an expiry.
+- **Every acceptance gets an expiry**, defaulting to 30 days. An acceptance
+  without one is a decision nobody revisits.
+- **Expiry moves an acceptance to `expired_review` without making the day
+  unusable** (03 §5.2). The data has not changed; letting expiry flip the day
+  back would mean an acceptance taken on pilot day 1 resets the streak around day
+  21, every time, defeating the 20-day criterion with its own escape valve.
+
+**A third table gained `mutableColumns`.** `qa_quality_report` is append-only,
+but whether the email got out is learned a moment after the row is written. The
+DDL generator now handles a named mutable set on any append-only table, not only
+on validity-range ones: the row's *content* stays frozen while a column that
+records something learned afterwards may be filled in. The alternative — making
+the table mutable — would also have permitted rewriting the verdict.
+
+---
+
 ## B4 — the quality gate, phases 2-4, and the first email (2026-09-06)
 
 `core@0.1.0`, existing app v1.1.197, dictionary version 2 → 3. Gate: **the first

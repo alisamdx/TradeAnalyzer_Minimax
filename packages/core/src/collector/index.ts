@@ -55,3 +55,5 @@ export type { PhaseCounts } from './phases/market.js';
 export {
   makeBarIngest, ingestSnapshot, ingestSplits, ingestDividends, toIntegerStrict, msEpochToEtDate, nsEpochToEt
 } from '../ingest/market.js';
+export { runBackfillBars, backfillQueueClear, BACKFILL_RULE } from './backfill.js';
+export type { BackfillReport } from './backfill.js';

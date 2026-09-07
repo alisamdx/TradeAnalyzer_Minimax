@@ -99,7 +99,8 @@ export function appendOnlyTriggerDdl(table: TableEntry): readonly string[] {
     `BEFORE DELETE ON ${quote(table.table)}\n` +
     `BEGIN SELECT RAISE(ABORT, '${table.table} is append-only: rows are removed only by a generation reset, never DELETE'); END;`;
 
-  if (!table.validRangeColumn) {
+  // The strict case: nothing about the row may change, ever.
+  if (!table.validRangeColumn && (table.mutableColumns ?? []).length === 0) {
     return [
       `CREATE TRIGGER IF NOT EXISTS ${quote(`trg_${table.table}_no_update`)}\n` +
         `BEFORE UPDATE ON ${quote(table.table)}\n` +
@@ -108,16 +109,19 @@ export function appendOnlyTriggerDdl(table: TableEntry): readonly string[] {
     ];
   }
 
-  // A validity-range table (02 §0.2) closes exactly one column, exactly once.
-  // Everything else about the row stays frozen, so "this membership ended" and
-  // "what this membership said" remain two different acts — which is the whole
-  // reason the range exists rather than an overwrite. Turning the guard off for
-  // these tables would have been the easy fix and the wrong one.
-  const range = quote(table.validRangeColumn);
+  // The narrower case, and the distinction that keeps it honest: a named set of
+  // columns may change and **everything else stays frozen**. Two kinds qualify.
+  //
+  // A validity range (02 §0.2) closes `valid_to` on a departure, so "this
+  // membership ended" and "what this membership said" stay two different acts.
+  //
+  // A row whose *content* is a fact but which later learns something about
+  // itself — a check's fire counters, a report's email delivery outcome. The
+  // fact was true when written; the outcome is simply not known yet. Turning the
+  // guard off for these would have been the easy fix and the wrong one, because
+  // it would also permit rewriting the fact.
   const editable = new Set<string>([
-    table.validRangeColumn,
-    'change_reason',
-    'removal_reason',
+    ...(table.validRangeColumn ? [table.validRangeColumn, 'change_reason', 'removal_reason'] : []),
     ...(table.mutableColumns ?? [])
   ]);
   const frozen = table.columns
@@ -125,17 +129,25 @@ export function appendOnlyTriggerDdl(table: TableEntry): readonly string[] {
     .map((c) => `OLD.${quote(c.column)} IS NOT NEW.${quote(c.column)}`)
     .join('\n     OR ');
 
-  return [
-    `CREATE TRIGGER IF NOT EXISTS ${quote(`trg_${table.table}_close_once`)}\n` +
-      `BEFORE UPDATE ON ${quote(table.table)}\n` +
-      `WHEN OLD.${range} IS NOT NULL\n` +
-      `BEGIN SELECT RAISE(ABORT, '${table.table}.${table.validRangeColumn} is already closed: a range is closed once and never reopened'); END;`,
+  const editableList = [...editable].join(', ');
+  const triggers = [
     `CREATE TRIGGER IF NOT EXISTS ${quote(`trg_${table.table}_no_edit`)}\n` +
       `BEFORE UPDATE ON ${quote(table.table)}\n` +
       `WHEN ${frozen}\n` +
-      `BEGIN SELECT RAISE(ABORT, '${table.table} is append-only apart from closing ${table.validRangeColumn}: supersede with a new row (P1), never edit a stored fact'); END;`,
+      `BEGIN SELECT RAISE(ABORT, '${table.table} permits changing only ${editableList}: supersede with a new row (P1), never edit a stored fact'); END;`,
     noDelete
   ];
+
+  if (table.validRangeColumn) {
+    triggers.unshift(
+      `CREATE TRIGGER IF NOT EXISTS ${quote(`trg_${table.table}_close_once`)}\n` +
+        `BEFORE UPDATE ON ${quote(table.table)}\n` +
+        `WHEN OLD.${quote(table.validRangeColumn)} IS NOT NULL\n` +
+        `BEGIN SELECT RAISE(ABORT, '${table.table}.${table.validRangeColumn} is already closed: a range is closed once and never reopened'); END;`
+    );
+  }
+
+  return triggers;
 }
 
 export interface GeneratedDdl {

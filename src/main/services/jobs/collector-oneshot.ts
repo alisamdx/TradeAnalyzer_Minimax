@@ -4,8 +4,10 @@ import {
   claimNextJob,
   finishJob,
   markJobRunning,
+  runBackfillBars,
   runUniverseSeed,
   stalledRequests,
+  expireAcceptances,
   type OneShotKind
 } from '@tradeanalyzer/core';
 import {
@@ -38,7 +40,7 @@ export interface OneShotDeps {
   readonly todayET: () => string;
 }
 
-const IMPLEMENTED: ReadonlySet<OneShotKind> = new Set<OneShotKind>(['universe_seed']);
+const IMPLEMENTED: ReadonlySet<OneShotKind> = new Set<OneShotKind>(['universe_seed', 'backfill_bars']);
 
 export function createCollectorOneShotJob(deps: OneShotDeps): BatchJobHandler {
   return {
@@ -119,8 +121,37 @@ export function createCollectorOneShotJob(deps: OneShotDeps): BatchJobHandler {
         }
 
         try {
+          const tradingDate = deps.todayET();
+
+          // An acceptance that has run out becomes `expired_review` before any
+          // job reports, so the email and the review queue reflect what is
+          // actually outstanding rather than what was outstanding yesterday.
+          expireAcceptances(db, host, tradingDate);
+
+          if (request.runKind === 'backfill_bars') {
+            const report = await runBackfillBars(host, { tradingDate });
+            markJobRunning(db, request.requestId, report.runId);
+            finishJob(db, host, request.requestId, {
+              state: 'complete',
+              result: report as unknown as Record<string, unknown>
+            });
+            return {
+              // A red verdict is the gate working, not the job failing. The
+              // review queue it opens is the deliverable, not an error.
+              status: 'success',
+              notes:
+                `backfill_bars: ${report.barsStored} bars for ${report.tickersStored}/${report.tickersAttempted} ` +
+                `tickers, ${report.splitsStored} splits; ${report.verdict.toUpperCase()}, ` +
+                `${report.reviewQueue.length} finding(s) awaiting a ruling.`,
+              tickersAttempted: report.tickersAttempted,
+              tickersUpdated: report.tickersStored,
+              tickersSkipped: 0,
+              tickersFailed: report.tickersFailed
+            };
+          }
+
           const report = await runUniverseSeed(host, {
-            tradingDate: deps.todayET(),
+            tradingDate,
             sources: deps.universeSources
           });
           markJobRunning(db, request.requestId, report.runId);

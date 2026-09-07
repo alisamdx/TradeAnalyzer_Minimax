@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.198] - 2026-09-06
+
+### feat - `backfill_bars` and the exception review queue (NewApp B5)
+
+- **`collector-oneshot` implements `backfill_bars`** alongside `universe_seed`, and expires stale acceptances before any job reports — otherwise the email and the review queue describe what was outstanding yesterday rather than now.
+- **A red verdict from the backfill is a `success`.** The review queue it opens *is* the deliverable: the operator has to rule on ticker-reuse candidates before the pilot's first clean day counts (04 §7.2). A failed job would say the collector broke.
+- Everything else is in `@tradeanalyzer/core` - see `NewApp/CHANGELOG.md`.
+
 ## [1.1.197] - 2026-09-06
 
 ### feat - the collector's daily run and quality gate (NewApp B4)

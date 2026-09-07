@@ -329,11 +329,30 @@ describe('dictionary — the constraints do their job', () => {
       ).not.toThrow();
 
       // Editing the fact itself: refused.
-      expect(() => raw.exec("UPDATE ref_universe_membership SET ticker = 'MSFT'")).toThrow(/append-only/);
+      expect(() => raw.exec("UPDATE ref_universe_membership SET ticker = 'MSFT'"))
+        .toThrow(/permits changing only/);
       // Reopening a closed range: refused.
       expect(() => raw.exec('UPDATE ref_universe_membership SET valid_to = NULL')).toThrow(/already closed/);
       // Deleting: refused, like any fact table.
       expect(() => raw.exec('DELETE FROM ref_universe_membership')).toThrow(/append-only/);
+    } finally {
+      raw.close();
+    }
+  });
+
+  it('lets a report record its email outcome, but not rewrite the report', () => {
+    // The same distinction as the registry's counters: the row's CONTENT is a
+    // fact about the run and is frozen; whether the email got out is simply not
+    // knowable at the moment the row is written.
+    const raw = new Database(':memory:');
+    try {
+      applyDictionary(raw as unknown as SqliteLike);
+      raw.exec("INSERT INTO meta_run (run_id, run_kind, slot, trading_date, started_at, status, host_app, host_version, collector_version, dictionary_version) VALUES (1,'daily','after_close','2026-09-06','t','running','t','0','0.1.0',1)");
+      raw.exec("INSERT INTO qa_quality_report (run_id, generated_at, overall, domains_json, checks_json, email_status) VALUES (1,'t','green','{}','{}','pending')");
+
+      expect(() => raw.exec("UPDATE qa_quality_report SET email_status='sent', email_sent_at='t2'")).not.toThrow();
+      expect(() => raw.exec("UPDATE qa_quality_report SET overall='red'")).toThrow(/permits changing only/);
+      expect(() => raw.exec('DELETE FROM qa_quality_report')).toThrow(/append-only/);
     } finally {
       raw.close();
     }

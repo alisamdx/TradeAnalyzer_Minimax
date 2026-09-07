@@ -131,6 +131,28 @@ describe('collector batch handlers', () => {
     expect(oneshot).toMatch(/state: 'failed'[\s\S]*not implemented yet/);
   });
 
+  it('implements backfill_bars and reports its red verdict as a success', () => {
+    // The review queue a backfill opens IS the deliverable (04 §7.2) — the
+    // operator has to rule on ticker-reuse candidates before the pilot's first
+    // clean day counts. A failed job would say the collector broke.
+    expect(oneshot).toContain("'backfill_bars'");
+    const branch = oneshot.slice(oneshot.indexOf("request.runKind === 'backfill_bars'"));
+    expect(branch).toContain("status: 'success'");
+    expect(branch).toContain('reviewQueue.length');
+  });
+
+  it('expires stale acceptances before any job reports', () => {
+    // Otherwise the email and the review queue describe what was outstanding
+    // yesterday rather than what is outstanding now.
+    //
+    // Compared inside the function body, not across the file: the import list
+    // mentions both names first, so a whole-file index comparison would pass or
+    // fail on import order and say nothing about execution order.
+    const body = oneshot.slice(oneshot.indexOf('const tradingDate = deps.todayET();'));
+    expect(body.indexOf('expireAcceptances')).toBeGreaterThan(-1);
+    expect(body.indexOf('expireAcceptances')).toBeLessThan(body.indexOf('runBackfillBars'));
+  });
+
   it('treats a missing generation pointer as skipped, not failed', () => {
     for (const source of [oneshot, daily]) {
       expect(source).toContain('No generation pointer yet');
