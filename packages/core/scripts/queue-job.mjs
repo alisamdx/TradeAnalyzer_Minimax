@@ -113,7 +113,41 @@ if (!existsSync(dbPath)) {
 
 // Write-capable, never readonly: on Windows a readonly connection cannot attach
 // the live WAL index and would read a stale generation (CLAUDE.md).
+// Sidecar state BEFORE opening, because opening creates them.
+const hadWal = existsSync(`${dbPath}-wal`);
+const hadShm = existsSync(`${dbPath}-shm`);
+
 const db = new DatabaseSync(dbPath);
+
+// A raw `no such table: meta_job_request` is a true statement and a useless
+// one — it has three quite different causes and names none of them. Checked up
+// front so the message can.
+const hasQueue = db
+  .prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'meta_job_request'")
+  .get().n > 0;
+if (!hasQueue) {
+  db.close();
+  console.error(`This connection sees no schema in ${dbPath}.`);
+  if (hadShm) {
+    console.error(
+      '\nA `-shm` file was present, so **TradeAnalyzer 2 has the database open**. Close it —\n' +
+        'it checkpoints the schema into data.sqlite on exit — and run this again.'
+    );
+  } else if (hadWal) {
+    console.error(
+      '\nA `-wal` file was present with no `-shm`, so the schema is in an unreplayed write-ahead\n' +
+        'log. Open TradeAnalyzer 2 once and close it again to checkpoint it.'
+    );
+  } else {
+    console.error(
+      '\nNo WAL sidecars either, so the file really is an empty shell. Delete the generation\n' +
+        'directory and launch TradeAnalyzer 2 first — it owns generation creation:\n' +
+        `  Remove-Item -Recurse -Force "${join(dataRoot, `gen-${String(currentGeneration).padStart(3, '0')}`)}"`
+    );
+  }
+  console.error('\n`node packages/core/scripts/diagnose-generation.mjs` reports which of these it is.');
+  process.exit(4);
+}
 
 const insert = db.prepare(
   `INSERT INTO meta_job_request (requested_at, requested_by, run_kind, params_json, state)
