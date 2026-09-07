@@ -34,6 +34,10 @@ export {
 export type { JobRequest, OneShotKind } from './jobs.js';
 
 export { runPreflight, isTradingDay } from './phases/preflight.js';
+export {
+  ensureTradingCalendar, buildTradingCalendar, nyseHolidays, nyseEarlyCloses
+} from './trading-calendar.js';
+export type { TradingDayRow, HolidayRule, CalendarSeedResult } from './trading-calendar.js';
 export type { PreflightOutcome } from './phases/preflight.js';
 
 export {

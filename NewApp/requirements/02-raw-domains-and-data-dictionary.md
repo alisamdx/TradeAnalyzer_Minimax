@@ -278,6 +278,15 @@ Working thresholds for the spec (to be measured before freezing, Q15): `close �
 
 #### `ref_trading_day`
 
+**Seeded from exchange rules, and seeded by preflight (built 2026-09-07).** `source = 'nyse_rules'` was always the intent; the generator implements it — weekday, the ten scheduled NYSE closures with their observance rules, 13:00 early closes, and the monthly expiration as the third Friday **or the preceding session when that Friday is a holiday**. A hardcoded date list works until the year it runs out, and it runs out *silently*.
+
+**Why preflight rather than a one-shot.** Preflight and the watchdog both treat an unknown date as a trading day, which is the right default — a needless run costs calls while a skipped one costs a day that cannot be recovered — but it is dangerous in exactly one direction: an unseeded calendar makes **every weekend and holiday look like a session**. The collector would write weekend-dated snapshots of Friday's data and the watchdog would email "no daily run" every Saturday and Sunday until nobody read it. A calendar that exists only if somebody remembered to seed it is one that will be missing on the day it matters, so it seeds itself, idempotently, before it is read.
+
+**Rules cannot produce every closure, and the row says which kind it is.** 2025-01-09 (National Day of Mourning, Jimmy Carter) is a decision nobody can derive; those are listed explicitly and carry `source = 'manual'`, which the rule generator never overwrites. `polygon_marketstatus` remains the intended yearly refresh for the ones not yet announced.
+
+**Validated against an independent list.** The generator is tested against the existing app's separately maintained 2023–2027 holiday table, in **both directions** — nothing missing, nothing extra. Two sources built from different information agreeing on fifty dates is far better evidence than either alone, and the one disagreement (2025-01-09) is exactly the unscheduled-closure case, which is why it is asserted rather than papered over.
+
+
 | column | type | notes |
 |---|---|---|
 | `date` | TEXT PK | every calendar day, years −5 … +2 |

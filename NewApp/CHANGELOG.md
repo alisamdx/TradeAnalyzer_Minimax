@@ -9,6 +9,50 @@ exit (06 §6).
 
 ---
 
+## The trading calendar seeds itself (2026-09-07)
+
+`ref_trading_day` was in the dictionary from B2, is read by preflight, the
+watchdog and several checks — and **nothing had ever written it.** Found while
+getting the collector ready for its first real daily run.
+
+**An empty calendar does not stop anything, which is the whole problem.**
+Preflight and the watchdog both treat an unknown date as a trading day, and that
+default is right: a needless run costs calls, a skipped one costs a day that
+cannot be recovered. But it fails open in one direction only — with no calendar,
+**every weekend and holiday looks like a session.** The collector would have run
+today (Labor Day), written holiday-dated snapshots of Friday's data, and the
+watchdog would have emailed "no daily run exists for today" every Saturday and
+Sunday. A watchdog that cries on a schedule is one nobody reads.
+
+**Generated from rules, not from a pasted list.** `source = 'nyse_rules'` was
+always the intent. A hardcoded table of dates works until the year it runs out,
+and it runs out silently — the existing app's covers 2023–2027, so a 2028 run
+would read every weekday as a session and expect bars on Christmas. The
+generator does the ten scheduled closures with their observance rules, 13:00
+early closes, and the monthly expiration as the third Friday **or the preceding
+session when that Friday is a holiday**.
+
+**Validated against an independent source, in both directions.** The rules are
+tested against the existing app's separately maintained 2023–2027 list: nothing
+missing, nothing extra. Fifty dates agreed by two sources built from different
+information is much better evidence than either alone — and the single
+disagreement is the finding. 2025-01-09 (National Day of Mourning, Jimmy Carter)
+is an unscheduled closure no rule can generate, so it is listed explicitly with
+`source = 'manual'`, which the generator never overwrites.
+
+**Three rules that are quietly easy to get wrong**, each with its own test: the
+NYSE does **not** observe New Year's Day when it falls on a Saturday (unlike
+every other fixed-date holiday, so December 31 stays a session); Good Friday has
+no fixed date and no n-th-weekday rule, so it needs the Easter computation; and
+Juneteenth begins in 2022. `263` tests in `core`.
+
+**A test fixture I had to correct, which is worth recording.** The
+expiration-walks-back case first asserted April 2015 — but 2015-04-03 was Good
+Friday and only the *first* Friday of the month, so the test was wrong and the
+code was right. The case needed a month where the two genuinely collide:
+2019-04-19 was both Good Friday and the third Friday, and the expiration moved
+to Thursday the 18th.
+
 ## The IV bootstrap source: IVolatility (2026-09-07)
 
 Spec only. Q17's last open item closed, and the reason is worth recording

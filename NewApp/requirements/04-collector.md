@@ -73,6 +73,7 @@ Ordering rationale: bars before the subset rule (it reads dollar volume); accoun
 
 ### 2.1 Preflight (phase 0)
 
+0. **The trading calendar seeds itself** (`ensureTradingCalendar`, built 2026-09-07) — five years back, two forward, generated from NYSE rules and upserted, before it is read. It lives here rather than in a one-shot precisely because step 1 fails open: an unseeded calendar does not stop the run, it makes every weekend and holiday look like a session. See 02 §2.
 1. `ref_trading_day` says today is a trading day, else the run records `skipped_non_trading_day` and exits (no email; the watchdog also knows the calendar).
 2. The current generation is `pilot` or `production` (not `closed`).
 3. E*Trade probe: one `/v1/market/quote/SPY` through the host's renew-and-retry transport. Failure does **not** abort the run — phases 5 and 7 will fail individually and the gate will say so. Polygon key presence is checked the same way.

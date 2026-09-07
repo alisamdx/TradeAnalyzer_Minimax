@@ -2,6 +2,7 @@ import type { SqliteLike } from '../../db/sqlite-like.js';
 import type { CollectorHost } from '../host.js';
 import { captureResponse } from '../capture.js';
 import type { RunHandle } from '../run.js';
+import { ensureTradingCalendar } from '../trading-calendar.js';
 
 /**
  * Phase 0 — preflight (04 §2.1).
@@ -38,11 +39,24 @@ export async function runPreflight(
 ): Promise<PreflightOutcome> {
   host.progress('preflight', 0, 3);
 
+  // 0. The calendar seeds itself, before it is read.
+  //
+  //    It lives here rather than in a one-shot because the fail-open rule below
+  //    is load-bearing and dangerous in exactly one direction: an unseeded
+  //    calendar does not stop the run, it makes every Saturday and every
+  //    holiday look like a trading day. The collector would then write
+  //    weekend-dated snapshots of Friday's data, and the watchdog would email
+  //    "no daily run" every weekend until nobody read it. A calendar that
+  //    exists only if somebody remembered to seed it is one that will be
+  //    missing on the day it matters.
+  ensureTradingCalendar(db, host, run.tradingDate);
+
   // 1. Trading day. An unknown date is treated as a trading day rather than a
   //    holiday: refusing to collect because the calendar has not been seeded
   //    would turn a missing reference table into silent data loss, and a
   //    needless run costs calls while a skipped one costs a day that cannot be
-  //    recovered.
+  //    recovered. With the seed above this is now a fallback for dates outside
+  //    the generated range rather than the normal path.
   const trading = isTradingDay(db, run.tradingDate);
   if (trading === false) {
     return {
