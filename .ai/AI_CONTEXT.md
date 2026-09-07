@@ -193,6 +193,8 @@ Authoritative DDL is in `migrations/`. Tables are created lazily (`CREATE TABLE 
 
 ---
 
+- **A boot that cannot decrypt its stored secrets used to run credential-less and silently (fixed v1.1.200).** `secure-settings.decrypt()` returned `''` on a `safeStorage` failure, so an unlucky start blanked Polygon, E*Trade and Anthropic keys at once and every call 401d — looking exactly like a revoked key. `undecryptableKeys()` now records the failures and startup reports them in a dialog and `logs/errors/`. The tell in `logs/api/`: a healthy call logs `"apiKey": "[REDACTED]"` in `requestParams`, a credential-less one logs `requestParams: {}`.
+
 ## 10. Known quirks & gotchas
 
 - **As of v1.1.198 `collector-oneshot` also runs `backfill_bars`.** Its red verdict is a `success` batch result — the review queue it opens is the deliverable. Exception rulings are driven from `packages/core/scripts/exception.mjs` until the workbench lands at B9; `reuse` closes a membership range and deletes nothing.

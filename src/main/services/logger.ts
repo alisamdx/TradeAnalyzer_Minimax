@@ -9,7 +9,14 @@ import { join } from 'node:path';
 import { app } from 'electron';
 
 export type ApiLogLevel = 'INFO' | 'WARNING' | 'ERROR' | 'FATAL';
-export type ErrorLevel = 'WARNING' | 'ERROR' | 'FATAL';
+/**
+ * `INFO` exists so the log can record that something DID happen.
+ *
+ * A file that only holds problems cannot answer "did the collector start?" —
+ * absence there means both "fine" and "never ran", which is the ambiguity that
+ * made a missing claim loop look like a stopped one for an afternoon.
+ */
+export type ErrorLevel = 'INFO' | 'WARNING' | 'ERROR' | 'FATAL';
 
 const API_RETENTION_DAYS = 30;
 const ERROR_RETENTION_DAYS = 90;

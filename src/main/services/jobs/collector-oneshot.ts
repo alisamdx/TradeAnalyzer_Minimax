@@ -1,5 +1,6 @@
 import type { BatchJobHandler, BatchJobResult } from '../batch-service.js';
 import type { BatchProgressEvent } from '@shared/types.js';
+import { logError } from '../logger.js';
 import {
   claimNextJob,
   finishJob,
@@ -87,6 +88,42 @@ export function createCollectorOneShotJob(deps: OneShotDeps): BatchJobHandler {
       try {
         const db = host.openGenerationDb();
 
+        // What this tick actually sees, written to the error log at INFO.
+        //
+        // Added 2026-09-07 after a queued row sat unclaimed through a dozen
+        // ticks while the handler reported "No queued jobs." — with no way to
+        // tell whether it was looking at the wrong database, reading a stale
+        // snapshot, or genuinely seeing an empty table. Those want completely
+        // different fixes, and the note alone could not distinguish them.
+        let seen: { total: number; queued: number; maxId: number | null } = {
+          total: 0, queued: 0, maxId: null
+        };
+        try {
+          const row = db
+            .prepare(
+              `SELECT COUNT(*) AS total,
+                      SUM(CASE WHEN state = 'queued' THEN 1 ELSE 0 END) AS queued,
+                      MAX(request_id) AS maxId
+                 FROM meta_job_request`
+            )
+            .get() as { total: number; queued: number | null; maxId: number | null };
+          seen = { total: row.total, queued: row.queued ?? 0, maxId: row.maxId };
+        } catch { /* diagnostics must never break the job */ }
+
+        logError({
+          timestamp: new Date().toISOString(),
+          appVersion: '0.1.2',
+          errorClass: 'CollectorOneShotTick',
+          message:
+            `dataRoot=${pointer.dataRoot} gen=${pointer.currentGeneration} ` +
+            `requests total=${seen.total} queued=${seen.queued} maxId=${seen.maxId}`,
+          stack: null,
+          operation: 'collector-oneshot:tick',
+          ticker: null,
+          correlationId: null,
+          level: 'INFO'
+        });
+
         // A request stuck at `queued` means THIS handler is not running — which
         // it plainly is, so report anything old as a finding rather than
         // swallowing it. Hiding a stalled queue behind a spinner is the failure
@@ -99,7 +136,8 @@ export function createCollectorOneShotJob(deps: OneShotDeps): BatchJobHandler {
             ...empty,
             notes: stalled.length > 0
               ? `No claimable job. ${stalled.length} request(s) have been queued over 10 minutes.`
-              : 'No queued jobs.'
+              : `No queued jobs (saw ${seen.total} request row(s), ${seen.queued} queued, ` +
+                `max id ${seen.maxId ?? 'none'}, gen-${pointer.currentGeneration}).`
           };
         }
 

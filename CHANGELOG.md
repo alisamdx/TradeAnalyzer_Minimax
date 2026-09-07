@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.1.200] - 2026-09-07
+
+### fix - a boot that cannot read its credentials now says so
+
+- **`secure-settings.decrypt()` swallowed a `safeStorage` failure and returned `''`**, so a start where the OS credential store was not ready came up with **every** secret silently blank - Polygon, E*Trade, Anthropic - and the app ran credential-less, failing every provider call as unauthorised. It looks exactly like a revoked key or a provider outage.
+- **Measured 2026-09-07: 32 keyless Polygon 401s in one afternoon**, against 38 successes from healthy starts of the same binary with the same stored key. The API log tells them apart only in hindsight - a good call logs `"apiKey": "[REDACTED]"` in `requestParams`, a failing one logs `requestParams: {}`. The operator already knew the workaround (close the app, start it again) without knowing the cause.
+- **An absent setting and an unreadable one are different facts**, and collapsing them destroyed the only evidence that would have named this in minutes. `undecryptableKeys()` now records them; startup reports them in a dialog and in `logs/errors/`. The read still returns `''`, so no call site changes behaviour.
+- Regression test `tests/secure-settings-undecryptable.test.ts` - 7 cases, including the two that must **not** record: a genuinely unset key, and a legacy plain-text value.
+
+### fix - startup failures are no longer silent
+
+- `app.whenReady().then(...)` had **no `.catch()`**, the same shape fixed in the new exe earlier today. A throw anywhere in startup became an unhandled-rejection warning on a stderr nobody reads, and everything registered after it simply did not exist - no error, and a window that looked fine. It now logs and shows a dialog.
+- The NewApp collector block is additionally wrapped in its own try/catch, because it is registered **last** by design (`sequence_order` is frozen from registration order), which makes it the first casualty of any earlier throw - and its absence is indistinguishable from it never having been written.
+
+### chore - the collector claim loop reports what it sees
+
+- A queued `meta_job_request` row sat unclaimed through a dozen two-minute ticks while the handler reported `No queued jobs.`, with no way to tell whether it was reading the wrong database, holding a stale snapshot, or genuinely seeing an empty table. Those want three different fixes and the note distinguished none of them.
+- Every tick now writes an `INFO` line to `logs/errors/` with the resolved `dataRoot`, generation number and the total/queued/max-id of `meta_job_request`; the `batch_runs` note carries the same counts, so the batch history alone is diagnostic.
+- The interval body is wrapped: `readSharedPointer()` **throws** on a malformed pointer, and an uncaught throw there produced no `batch_runs` row at all - a loop that looks stopped rather than failing, every two minutes, silently.
+- `ErrorLevel` gains `INFO`, so the log can record that something **did** happen. A file that only holds problems cannot answer "did the collector start?" - absence there means both "fine" and "never ran".
+
 ## [1.1.199] - 2026-09-07
 
 ### feat - the account, the chain subset and the chains (NewApp B6)

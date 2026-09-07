@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell, powerSaveBlocker, Notification } from 'electron';
+import { app, BrowserWindow, shell, powerSaveBlocker, Notification, dialog } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { readFileSync, existsSync } from 'node:fs';
@@ -17,7 +17,7 @@ import { ScreenerService } from './services/screener-service.js';
 import { PolygonDataProvider } from './services/polygon-provider.js';
 import { QuoteCache, FundamentalsCache, initCacheTables } from './services/cache-service.js';
 import { registerScreenerIpc } from './ipc/ipc-screener.js';
-import { pruneOldLogsOnStartup } from './services/logger.js';
+import { pruneOldLogsOnStartup, logError, logErrorFromException } from './services/logger.js';
 import { TokenBucketRateLimiter } from './services/rate-limiter.js';
 import { JobQueue } from './services/job-queue.js';
 import { AnalysisService } from './services/analysis-service.js';
@@ -25,6 +25,7 @@ import { ValidateAllService } from './services/validate-all-service.js';
 import { registerAnalysisIpc } from './ipc/ipc-analysis.js';
 import { registerValidateIpc } from './ipc/ipc-validate.js';
 import { registerSettingsIpc, registerDiagnosticsIpc } from './ipc/ipc-settings.js';
+import { undecryptableKeys } from './services/secure-settings.js';
 import { registerCacheIpc } from './ipc/ipc-cache.js';
 
 import { registerHistoricalIpc } from './ipc/ipc-historical.js';
@@ -261,6 +262,27 @@ app.whenReady().then(() => {
 
   // Encrypt any plain-text secrets left from before safeStorage was introduced.
   migratePlaintextSecrets(db);
+
+  // A boot that could not decrypt its stored secrets must SAY SO. Otherwise the
+  // app runs with every credential blank and produces a day of 401s that look
+  // like a provider outage (observed 2026-09-07).
+  {
+    const stuck = undecryptableKeys();
+    if (stuck.length > 0) {
+      const message =
+        `${stuck.length} stored credential(s) could not be decrypted this start: ${stuck.join(', ')}. ` +
+        'They are present but unreadable, which is NOT the same as unset — the app would otherwise ' +
+        'run with them blank and every provider call would fail as unauthorised. Close the app ' +
+        'completely and start it again.';
+      logError({
+        timestamp: new Date().toISOString(), appVersion: app.getVersion(),
+        errorClass: 'SecureSettingsUnavailable', message, stack: null,
+        operation: 'boot:secure-settings', ticker: null, correlationId: null, level: 'ERROR'
+      });
+      console.error(`[boot] ${message}`);
+      dialog.showErrorBox('TradeAnalyzer — credentials could not be read', message);
+    }
+  }
 
   // Scheduled auto-backup (EP-11): if enabled in Settings and the interval has elapsed, write a
   // zip to userData/backups/auto. Fire-and-forget so it never blocks startup.
@@ -739,6 +761,11 @@ app.whenReady().then(() => {
     new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' })
       .format(new Date());
 
+  // Everything from here to the claim loop is wrapped, because it is registered
+  // LAST and a throw inside it would otherwise be indistinguishable from the
+  // block never having run — which is exactly the ambiguity that cost an
+  // afternoon on 2026-09-07.
+  try {
   batchService.registerJob(
     'data-collector',
     createCollectorDailyJob({ makeHost: makeCollectorHost, todayET }),
@@ -779,10 +806,38 @@ app.whenReady().then(() => {
 
   // The 2-minute claim loop (04 §1.1). `runJob` takes the batch mutex, so this
   // serialises against every other job rather than racing them.
+  //
+  // The body is guarded: `readSharedPointer()` THROWS on a malformed pointer,
+  // and an uncaught throw here produces no batch_runs row at all — a loop that
+  // looks stopped rather than failing, every two minutes, silently.
   setInterval(() => {
-    if (!readSharedPointer()) return;   // nothing to claim into yet
-    void batchService.runJob('collector-oneshot', 'schedule').catch(() => undefined);
+    try {
+      if (!readSharedPointer()) return;   // nothing to claim into yet
+      void batchService.runJob('collector-oneshot', 'schedule').catch((err) => {
+        logErrorFromException(err, 'collector-oneshot:runJob', null, 'ERROR');
+      });
+    } catch (err) {
+      logErrorFromException(err, 'collector-oneshot:tick', null, 'ERROR');
+    }
   }, 2 * 60 * 1000);
+
+  logError({
+    timestamp: new Date().toISOString(),
+    appVersion: app.getVersion(),
+    errorClass: 'Boot',
+    message: 'collector jobs registered and 2-minute claim loop started',
+    stack: null,
+    operation: 'boot:collector',
+    ticker: null,
+    correlationId: null,
+    level: 'INFO'
+  });
+  } catch (err) {
+    // Reported, never swallowed. Without this the collector simply is not
+    // there, and every symptom points somewhere else.
+    logErrorFromException(err, 'boot:collector-registration', null, 'ERROR');
+    console.error('[boot] collector registration failed:', err);
+  }
 
   batchService.registerJob('batch-orchestrator', orchestratorJob, {
     sequenceOrder: 1,
@@ -843,6 +898,20 @@ app.whenReady().then(() => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+}).catch((err) => {
+  // Without this a throw anywhere in startup became an unhandled rejection
+  // warning on a stderr nobody reads, and everything registered after the
+  // throw simply did not exist — with no error and a window that looked fine.
+  logErrorFromException(err, 'boot:whenReady', null, 'ERROR');
+  console.error('[boot] startup failed:', err);
+  try {
+    dialog.showErrorBox(
+      'TradeAnalyzer — startup did not complete',
+      `${err instanceof Error ? err.message : String(err)}\n\n` +
+        'Part of the application did not start. Close it completely and start it again; ' +
+        'if it recurs, the details are in logs/errors.'
+    );
+  } catch { /* a dialog can fail this early; the log above is the record */ }
 });
 
 app.on('window-all-closed', () => {

@@ -51,15 +51,49 @@ function encrypt(plaintext: string): string {
   return ENC_PREFIX + buf.toString('base64');
 }
 
-function decrypt(stored: string): string {
+/**
+ * Keys whose stored value is present but could not be decrypted this boot.
+ *
+ * **This exists because returning `''` on a decryption failure is indefensible.**
+ * An absent setting and an undecryptable one are different facts, and collapsing
+ * them means a boot where the OS credential store is not ready yet comes up with
+ * every secret silently blank: Polygon, E*Trade and Anthropic all read as "not
+ * configured", every call 401s, and it looks exactly like a provider outage or
+ * an expired subscription. Observed 2026-09-07 — 32 keyless Polygon 401s in one
+ * afternoon, indistinguishable in the log from a revoked key except that the
+ * successful calls carry an `apiKey` param and the failures carry none.
+ *
+ * The read still returns `''` so no caller changes behaviour, but the failure is
+ * now recorded and reported at boot instead of vanishing into a `catch`.
+ */
+const _undecryptable = new Set<string>();
+
+export function undecryptableKeys(): readonly string[] {
+  return [...(_undecryptable as Set<string>)].sort();
+}
+
+/** Cleared after the operator has been told, so a later boot reports afresh. */
+export function clearUndecryptableKeys(): void {
+  _undecryptable.clear();
+}
+
+function decrypt(stored: string, key: string): string {
   if (!stored) return '';
   if (!stored.startsWith(ENC_PREFIX)) return stored; // legacy plain-text — return as-is
-  if (!isAvailable()) return stored; // can't decrypt without keychain
+  if (!isAvailable()) {
+    // Not a corrupt value: the credential store itself is unavailable. Recorded
+    // as such, because the remedy (restart, or a different OS session) is not
+    // the same as re-entering the key.
+    _undecryptable.add(key);
+    return '';
+  }
   try {
     const buf = Buffer.from(stored.slice(ENC_PREFIX.length), 'base64');
     return safeStorage.decryptString(buf);
   } catch {
-    // Decryption failed (e.g. different OS user, corrupted value) — return empty
+    // A stored ciphertext that will not decrypt. The value is NOT absent — it is
+    // unreadable, and the caller must be able to tell the difference.
+    _undecryptable.add(key);
     return '';
   }
 }
@@ -73,7 +107,7 @@ function decrypt(stored: string): string {
 export function secureGet(db: Database, key: string): string {
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;
   if (!row?.value) return '';
-  return SENSITIVE_KEYS.has(key) ? decrypt(row.value) : row.value;
+  return SENSITIVE_KEYS.has(key) ? decrypt(row.value, key) : row.value;
 }
 
 /**
