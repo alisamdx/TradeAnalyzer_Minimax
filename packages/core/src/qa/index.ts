@@ -10,7 +10,11 @@ export {
 export type { GateResult, Verdict } from './gate.js';
 export { buildStatusEmail, buildNoRunEmail } from './email.js';
 export type { EmailModel } from './email.js';
-export { ALL_CHECKS, CROSS_CUTTING_CHECKS, BAR_CHECKS, QUOTE_AND_ACTION_CHECKS } from './registry.js';
+export {
+  ALL_CHECKS, CROSS_CUTTING_CHECKS, BAR_CHECKS, QUOTE_AND_ACTION_CHECKS,
+  CHAIN_CHECKS, ACCOUNT_CHECKS
+} from './registry.js';
+export { bsDelta, normCdf } from './black-scholes.js';
 export {
   acknowledge, resolve, accept, expireAcceptances, recordTickerReuse, reviewQueue,
   OperatorActionRefused, DEFAULT_ACCEPTANCE_DAYS

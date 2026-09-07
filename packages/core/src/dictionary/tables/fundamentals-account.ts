@@ -143,8 +143,12 @@ export const fundamentalsAccountTables: readonly TableEntry[] = [
       'Executed orders — **the primary source of fills**. `orderAction` states open versus close ' +
       'outright and `averageExecutionPrice` is the realised fill, which is why this replaced the ' +
       'transactions parser that inferred intent from "sold means opened" and paired legs by index. ' +
-      'Append-only and keyed by `order_id`, so a re-pull that returns a stored order writes nothing.',
-    naturalKey: ['order_id'],
+      'A re-pull that returns an order already stored **unchanged** writes nothing; one that returns ' +
+      'it with different leg data appends a new observation, which is what QC-803 reads. `order_id` ' +
+      'is deliberately **not unique**: an executed order is immutable, so a second version of one is ' +
+      'a finding, and a unique index would turn that finding into an insert failure indistinguishable ' +
+      'from a parse fault.',
+    naturalKey: ['order_id', 'observed_at'],
     appendOnly: true,
     ruleDriven: true,
     standardColumns: true,
@@ -157,10 +161,11 @@ export const fundamentalsAccountTables: readonly TableEntry[] = [
       nullable(col.text('order_term', 'Order term.', { sourceProvider: 'etrade', sourceField: 'orderTerm' }), 'omitted by the provider'),
       nullable(col.text('price_type', 'Price type.', { sourceProvider: 'etrade', sourceField: 'priceType' }), 'omitted by the provider'),
       nullable(col.perShare('limit_price', 'Limit price.', { sourceProvider: 'etrade', sourceField: 'limitPrice' }), 'not applicable — this was not a limit order'),
-      col.text('status', 'Order status; this table stores `EXECUTED` only.', { sourceProvider: 'etrade', sourceField: 'status' })
+      col.text('status', 'Order status; this table stores `EXECUTED` only.', { sourceProvider: 'etrade', sourceField: 'status' }),
+      { column: 'order_fingerprint', type: 'TEXT', unit: 'sha256', nullable: false, description: 'Digest over the executed time, status and every leg tuple. An unchanged re-pull is recognised by this and writes nothing; a changed one appends a second observation, and QC-803 is exactly "two observations of one order id with different fingerprints".', sourceProvider: 'derived_at_ingestion' }
     ],
     indexes: [
-      { columns: ['order_id'], unique: true },
+      { columns: ['order_id'] },
       { columns: ['executed_time'] }
     ]
   }),

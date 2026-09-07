@@ -3,6 +3,8 @@ import { CollectorCancelled } from './host.js';
 import { beginRun, finishRun, type RunHandle } from './run.js';
 import { runPreflight } from './phases/preflight.js';
 import { runBarsPhase, runQuotesPhase, runActionsPhase } from './phases/market.js';
+import { runAccountPhase } from './phases/account.js';
+import { runChainSubsetPhase, runChainsPhase } from './phases/chains.js';
 import { ALL_CHECKS } from '../qa/registry.js';
 import { runGate, type Verdict } from '../qa/gate.js';
 import { buildStatusEmail } from '../qa/email.js';
@@ -11,9 +13,14 @@ import { COLLECTOR_VERSION } from '../version.js';
 /**
  * The daily run — 04 §2.
  *
- * At B4 this is phases 0 through 4 plus the gate and the email. Phases 5 through
- * 9 (account, chain subset, chains, event domains, derivation) arrive at B6 and
- * B7.
+ * At B6 this is phases 0 through 7 plus the gate and the email. Phases 8 and 9
+ * (the event domains and stage-2 derivation) arrive at B7.
+ *
+ * Phase order is not arbitrary. Bars precede the chain subset because the subset
+ * rule reads their dollar volume; the account precedes the subset and the chains
+ * because a held option is a sticky contract and a sticky contract changes what
+ * the chain phase asks for; and the cheap phases all precede the long chain
+ * phase so that a chain failure never costs them.
  *
  * **The gate runs last and always.** Even when a phase throws, even when the run
  * is cancelled: a partial day is `unusable` by the gate's own reckoning, which
@@ -84,6 +91,22 @@ export async function runDaily(
       domains['corporate_actions'] = {
         expected: 0, stored: c.splits.stored + c.dividends.stored
       };
+    });
+    await attempt('account', async () => {
+      const c = await runAccountPhase(host, db, run);
+      domains['account'] = {
+        expected: 0,
+        stored: c.positions + c.balanceRows + c.ordersStored + c.transactionsStored
+      };
+    });
+    await attempt('chain_subset', () => {
+      const c = runChainSubsetPhase(db, host, run);
+      domains['chain_subset'] = { expected: c.evaluated, stored: c.admitted + c.alreadyMembers };
+      return Promise.resolve();
+    });
+    await attempt('chains', async () => {
+      const c = await runChainsPhase(host, db, run);
+      domains['chains'] = { expected: c.chainCalls, stored: c.contractsStored };
     });
   } catch {
     // Cancellation only. The current response was already archived and ingested

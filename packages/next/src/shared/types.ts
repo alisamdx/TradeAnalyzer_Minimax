@@ -78,7 +78,123 @@ export interface QueryRequestDto {
   readonly sortDescending?: boolean;
 }
 
-/** The surface exposed on `window.api`. 05 §9 specifies the full set; this is B2's. */
+
+/**
+ * The domain views (05 §4.2, §4.4) — Chains and Account.
+ *
+ * These are shaped **in the main process**, into columns the renderer draws
+ * without knowing what any of them mean. That is not indirection for its own
+ * sake: AC-13's claim is that no table-specific code exists in the UI, and a
+ * chain grid that hard-coded `open_interest` and `delta` would quietly retire
+ * that claim while still working. Column labels, units and null meanings come
+ * from the dictionary, so a column added there appears here for the same reason
+ * it appears in the generic table view.
+ */
+
+export interface ViewColumn {
+  readonly key: string;
+  readonly label: string;
+  readonly unit: string;
+  readonly nullMeaning: string | null;
+  /** Groups render as a labelled band — "provider estimates" is one (02 §10). */
+  readonly group: string | null;
+}
+
+export interface ViewCell {
+  readonly value: unknown;
+  /** The `<col>_status` value when the column has one, else null. */
+  readonly status: string | null;
+}
+
+export interface ChainLegDto {
+  readonly osiSymbol: string;
+  /** The pin reason when this contract is in the sticky set, else null. */
+  readonly stickyReason: string | null;
+  readonly cells: readonly ViewCell[];
+}
+
+export interface ChainRowDto {
+  readonly strike: number;
+  readonly atm: boolean;
+  readonly call: ChainLegDto | null;
+  readonly put: ChainLegDto | null;
+}
+
+export interface ChainGridDto {
+  readonly ticker: string;
+  readonly asOfDate: string;
+  readonly expirationDate: string;
+  readonly underlyingPrice: number | null;
+  readonly columns: readonly ViewColumn[];
+  readonly rows: readonly ChainRowDto[];
+}
+
+export interface ExpirationOptionDto {
+  readonly expirationDate: string;
+  readonly expiryType: string;
+  readonly windowReason: string;
+  readonly inCaptureWindow: boolean;
+  readonly contractCount: number;
+}
+
+export interface ContractHistoryRowDto {
+  readonly asOfDate: string;
+  readonly captured: boolean;
+  /** Why a date has no row, when it has none. */
+  readonly gapReason: string | null;
+  readonly cells: readonly ViewCell[];
+}
+
+export interface ContractHistoryDto {
+  readonly osiSymbol: string;
+  readonly columns: readonly ViewColumn[];
+  readonly rows: readonly ContractHistoryRowDto[];
+}
+
+export interface PositionRowDto {
+  readonly key: string;
+  readonly cells: readonly ViewCell[];
+  /** How the position changed since the previous snapshot. */
+  readonly change: 'unchanged' | 'appeared' | 'disappeared' | 'quantity_changed';
+  readonly previousQuantity: number | null;
+  /** Executed-order legs that explain the change; empty is a QC-802 marker. */
+  readonly explainedBy: readonly string[];
+}
+
+export interface PositionsDto {
+  readonly asOfDate: string;
+  readonly previousAsOfDate: string | null;
+  readonly columns: readonly ViewColumn[];
+  readonly rows: readonly PositionRowDto[];
+}
+
+export interface OrderLegDto {
+  readonly cells: readonly ViewCell[];
+}
+
+export interface OrderDto {
+  readonly orderId: string;
+  readonly cells: readonly ViewCell[];
+  readonly legs: readonly OrderLegDto[];
+}
+
+export interface OrdersDto {
+  readonly columns: readonly ViewColumn[];
+  readonly legColumns: readonly ViewColumn[];
+  readonly orders: readonly OrderDto[];
+}
+
+export interface BalancePointDto {
+  readonly asOfDate: string;
+  readonly cells: readonly ViewCell[];
+}
+
+export interface BalancesDto {
+  readonly columns: readonly ViewColumn[];
+  readonly points: readonly BalancePointDto[];
+}
+
+/** The surface exposed on `window.api`. 05 §9 specifies the full set; this is B6's. */
 export interface NextApi {
   readonly appVersion: string | null;
   readonly platform: string;
@@ -94,5 +210,18 @@ export interface NextApi {
   };
   readonly inspect: {
     query(req: QueryRequestDto): Promise<IpcResult<QueryPage>>;
+  };
+  readonly chains: {
+    dates(): Promise<IpcResult<readonly string[]>>;
+    tickers(asOfDate: string): Promise<IpcResult<readonly string[]>>;
+    expirations(ticker: string, asOfDate: string): Promise<IpcResult<readonly ExpirationOptionDto[]>>;
+    grid(ticker: string, asOfDate: string, expirationDate: string): Promise<IpcResult<ChainGridDto>>;
+    contractHistory(osiSymbol: string): Promise<IpcResult<ContractHistoryDto>>;
+  };
+  readonly account: {
+    snapshotDates(): Promise<IpcResult<readonly string[]>>;
+    positions(asOfDate: string): Promise<IpcResult<PositionsDto>>;
+    orders(limit?: number): Promise<IpcResult<OrdersDto>>;
+    balances(): Promise<IpcResult<BalancesDto>>;
   };
 }

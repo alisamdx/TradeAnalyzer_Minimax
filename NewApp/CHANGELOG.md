@@ -9,6 +9,71 @@ exit (06 §6).
 
 ---
 
+## B6 — the account, the chain subset, and the chains (2026-09-07)
+
+Dictionary 4 → 5. Phases 5, 6 and 7 now run inside the daily collection, with
+the thirteen chain checks and the six account checks registered alongside them,
+and the inspector grew the two views that read what they write. `184` tests in
+`core`, `21` in `next`.
+
+**What runs.** Phase 5 discovers the account keys rather than taking them from
+configuration (`/v1/accounts/list`, every account not `CLOSED`), captures
+positions, balance, executed orders and the transactions fallback, and derives
+the `held_in_book` sticky contracts from the positions it just wrote — which is
+why it runs *before* the chain phases rather than after them. Phase 6 evaluates
+the subset rule and admits; it never removes. Phase 7 asks each ticker for its
+own expirations and then makes one chain call per selected expiration, storing
+every strike returned.
+
+**Every converter here exists because a live response disagreed with a field
+name.** `inTheMoney` is the string `"y"`/`"n"` and `Boolean("n")` is `true`;
+`timeStamp` is epoch seconds while an order's `executedTime` is milliseconds; a
+genuine `0` volume arrives on 60 of 171 live SPY calls, so absence is a
+**presence** test and never a truthiness one; `lastPrice` is `0` for a contract
+that has not traded, which is stored as null rather than as a trade at zero.
+Each of those is one test.
+
+**`order_id` is deliberately not unique.** The draft made it unique and said a
+re-pull of a stored order writes nothing. That is the right *behaviour*, but the
+unique index was the wrong mechanism: QC-803 exists to catch an executed order
+arriving a second time with different leg data, and a unique index turns that
+finding into an insert failure indistinguishable from a parse fault — the
+evidence lands in QC-001 with no way to see what differed. So the table is keyed
+`(order_id, observed_at)` like every other supersession in this schema, an
+`order_fingerprint` column makes an unchanged re-pull a genuine no-op at the
+ingestion module, and a changed one appends a second observation that QC-803 can
+read. Making this one table the exception would have been the odd case.
+
+**The subset window reads days, not rows.** `advol20` takes the latest
+observation *per trade date*. Bars are append-only, so a re-fetch leaves two rows
+for one day, and "the last 20 rows" would silently be ten days of two readings
+each — with a superseded value averaged into the admission decision. Found by a
+test that asserted the ticker it had just pushed below the floor was in fact
+below it, and was not: the assertion existed only because the first version of
+the test had passed for the wrong reason.
+
+**A second promotion rule.** A warning became blocking only on *how many*
+evaluations fired, which cannot express QC-405 and QC-412 — both aggregate to a
+single evaluation whose value already *is* the rate, so the fired fraction is
+always 1 and carries no information. `promoteToBlockingAtValue` promotes on the
+measured value instead. Both read "warning on any, blocking above N", and
+neither rule can be written in terms of the other.
+
+**The domain views stay inside AC-13.** Chains and Account need layouts the
+generic table cannot give, and hard-coding `open_interest` and `delta` in the
+renderer would have quietly retired AC-13's claim while everything still worked.
+So the column list is chosen in the main process and every label, unit and null
+meaning is read from the dictionary; the renderer receives columns it cannot
+name. The structural scan still passes over the whole renderer.
+
+**The AC-13 scan now strips JSX text.** It reported a `close` link in a panel
+header as a reference to the bar close column — the fourth time in this project
+a source scan has fired on its own prose, and the lesson a developer takes from
+that one is "reword the button". Text nodes with no braces or tags are stripped,
+and the stripper has fixtures both ways so it cannot over-reach into vacuity.
+
+---
+
 ## The E*Trade verify list, closed (2026-09-07)
 
 Dictionary 3 → 4. The operator re-authorised, and **one live SPY chain call, one

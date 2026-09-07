@@ -84,6 +84,17 @@ export interface CheckDefinition {
    * enough of them (03 §2).
    */
   readonly promoteToBlockingAtFiredFraction?: number;
+  /**
+   * Promotes when a fired evaluation's own **value** exceeds this.
+   *
+   * Distinct from the fired-fraction rule, and needed because some checks
+   * aggregate to a single evaluation whose value already *is* the rate — the
+   * invalid-IV fraction, the chain error rate. For those, "how many evaluations
+   * fired" is always one and carries no information, so the fraction rule can
+   * only ever promote everything or nothing. Both rules may be set; either one
+   * promoting is enough.
+   */
+  readonly promoteToBlockingAtValue?: number;
   run(ctx: CheckContext): readonly Evaluation[];
 }
 

@@ -36,7 +36,13 @@ function stripProse(src: string): string {
     .replace(/(^|[^:])\/\/.*$/gm, '$1')
     .replace(/'(?:[^'\\]|\\.)*'/g, "''")
     .replace(/"(?:[^"\\]|\\.)*"/g, '""')
-    .replace(/`(?:[^`\\]|\\.)*`/g, '``');
+    .replace(/`(?:[^`\\]|\\.)*`/g, '``')
+    // JSX text nodes are page copy, not code. A "close" link in a panel
+    // header is English; without this the scan reports it as a reference to
+    // the bar close column, and the lesson a developer takes from that is
+    // "reword the button". Only text with no braces or tags is removed, so
+    // an expression like {row.strike} stays in scope.
+    .replace(/>[^<>{}]*</g, '><');
 }
 
 function sourceFiles(dir: string): string[] {
@@ -91,7 +97,12 @@ describe('AC-13 — the inspector is schema-driven', () => {
       // whether the renderer is schema-driven. The distinctive qa_ names
       // (`fingerprint`, `distribution_json`, `consecutive_runs`) stay in scope,
       // so a genuinely table-specific reference would still be caught.
-      'key', 'at', 'note', 'detail', 'actor', 'state', 'severity'
+      'key', 'at', 'note', 'detail', 'actor', 'state', 'severity',
+      // Added when the domain views landed. `currency` is the ISO code in an
+      // `Intl` options object and also a dividend column; `close` is the bar
+      // close and also the English verb. Both match as bare words without
+      // saying anything about whether the renderer is schema-driven.
+      'currency', 'close'
     ]);
     const columnNames = new Set(
       DICTIONARY.filter((t) => t.layer !== 'meta')
@@ -126,6 +137,26 @@ describe('AC-13 — the inspector is schema-driven', () => {
     // the declared meaning.
     expect(cells.raw).toMatch(/title=\{title\}/);
     expect(cells.raw).toContain('column.nullMeaning');
+  });
+});
+
+describe('the scan itself — fixtures both ways, so the stripping cannot go vacuous', () => {
+  // The stripper has over-reached three times in this project, each time turning
+  // a true positive into a lesson to stop writing the comment. So every rule it
+  // applies gets a pair: something it MUST still see, and something it must not.
+  it('still sees a column named in JSX code, inside the same element as prose', () => {
+    const src = '<td>Open interest {row.open_interest}</td>';
+    expect(stripProse(src)).toContain('open_interest');
+  });
+
+  it('does not see a column name that is only page copy', () => {
+    const src = '<button>close</button>';
+    expect(stripProse(src)).not.toContain('close');
+  });
+
+  it('still sees a table named in code, and not one named in a comment', () => {
+    expect(stripProse('const t = raw_daily_bar;')).toContain('raw_daily_bar');
+    expect(stripProse('// reads raw_daily_bar')).not.toContain('raw_daily_bar');
   });
 });
 

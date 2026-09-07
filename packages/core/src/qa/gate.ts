@@ -221,11 +221,16 @@ export function runGate(
     // A per-item warning becomes blocking when it affects enough of the
     // population — a drift on one ticker is noise, on 2 % of them the feed moved.
     const firedFraction = evaluations.length > 0 ? fired.length / evaluations.length : 0;
-    const promoted =
+    const promotedByFraction =
       def.promoteToBlockingAtFiredFraction !== undefined &&
       firedFraction > def.promoteToBlockingAtFiredFraction;
 
     for (const e of fired) {
+      const promotedByValue =
+        def.promoteToBlockingAtValue !== undefined &&
+        e.value !== undefined &&
+        e.value > def.promoteToBlockingAtValue;
+      const promoted = promotedByFraction || promotedByValue;
       raised.push({ def, evaluation: e, severity: promoted ? 'blocking' : def.severity });
       firedFingerprints.add(fingerprint(def.id, def.domain, e.key));
     }

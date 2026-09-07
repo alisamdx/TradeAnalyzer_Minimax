@@ -3,7 +3,7 @@ import type { NextApi, QueryRequestDto } from '../shared/types.js';
 
 /**
  * The context-isolated bridge. 05 §9 specifies the full `window.api` surface;
- * this is what B2 needs.
+ * this is what B6 needs.
  *
  * The renderer gets named methods, never a general `invoke(channel, ...)`.
  * A generic passthrough would make the renderer able to reach any handler the
@@ -24,6 +24,21 @@ const api: NextApi = {
   },
   inspect: {
     query: (req: QueryRequestDto) => ipcRenderer.invoke('inspect:query', req)
+  },
+  chains: {
+    dates: () => ipcRenderer.invoke('chains:dates'),
+    tickers: (asOfDate: string) => ipcRenderer.invoke('chains:tickers', asOfDate),
+    expirations: (ticker: string, asOfDate: string) =>
+      ipcRenderer.invoke('chains:expirations', ticker, asOfDate),
+    grid: (ticker: string, asOfDate: string, expirationDate: string) =>
+      ipcRenderer.invoke('chains:grid', ticker, asOfDate, expirationDate),
+    contractHistory: (osiSymbol: string) => ipcRenderer.invoke('chains:contract-history', osiSymbol)
+  },
+  account: {
+    snapshotDates: () => ipcRenderer.invoke('account:snapshot-dates'),
+    positions: (asOfDate: string) => ipcRenderer.invoke('account:positions', asOfDate),
+    orders: (limit?: number) => ipcRenderer.invoke('account:orders', limit),
+    balances: () => ipcRenderer.invoke('account:balances')
   }
 };
 

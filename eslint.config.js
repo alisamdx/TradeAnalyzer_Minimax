@@ -18,9 +18,12 @@ export default [
       'node_modules/**',
       'coverage/**',
       '.claude/**',
-      'packages/*/out/**',
-      'packages/*/dist/**',
-      'packages/*/release/**'
+      // The workspace packages lint themselves, with their own configs — one
+      // for a Node library, one for an Electron app with JSX. Linting them from
+      // here as well reported their `console` and `JSX` as undefined variables
+      // and made `eslint .` a hundred lines of noise, which is the one thing a
+      // lint run must never be. `npm test` at the root runs each package's own.
+      'packages/**'
     ]
   },
   {

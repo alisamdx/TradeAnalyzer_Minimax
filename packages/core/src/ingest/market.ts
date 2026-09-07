@@ -1,4 +1,4 @@
-import type { IngestContext } from '../collector/capture.js';
+import type { IngestContext, IngestedRowSpec } from '../collector/capture.js';
 
 /**
  * Ingestion for bars, quotes and corporate actions — 04 §2.3.
@@ -7,10 +7,8 @@ import type { IngestContext } from '../collector/capture.js';
  * reproducible at the byte level (AC-4): a fixture in gives fixed rows out.
  */
 
-export interface IngestedRow {
-  readonly table: string;
-  readonly values: Readonly<Record<string, unknown>>;
-}
+/** One row an ingestion module produces, optionally with rows that depend on it. */
+export type IngestedRow = IngestedRowSpec;
 
 /** `ok` when present, `omitted` when the provider left it out (02 §0.3). */
 function statusFor(v: unknown): 'ok' | 'omitted' {

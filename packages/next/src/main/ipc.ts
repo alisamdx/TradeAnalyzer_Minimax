@@ -2,6 +2,8 @@ import { ipcMain } from 'electron';
 import { unverifiedColumns } from '@tradeanalyzer/core';
 import { currentGeneration, openGeneration } from './generation.js';
 import { columns, query, stats, tables, tree, type QueryRequest } from './inspect.js';
+import { chainDates, chainExpirations, chainGrid, chainTickers, contractHistory } from './chains.js';
+import { balances, orders, positions, snapshotDates } from './account.js';
 import type { IpcResult, QueryRequestDto } from '../shared/types.js';
 
 /**
@@ -39,4 +41,17 @@ export function registerIpc(): void {
   handle('dictionary:unverified', () => unverifiedColumns());
 
   handle('inspect:query', (req: QueryRequestDto) => query(req as QueryRequest));
+
+  handle('chains:dates', () => chainDates());
+  handle('chains:tickers', (asOfDate: string) => chainTickers(asOfDate));
+  handle('chains:expirations', (ticker: string, asOfDate: string) => chainExpirations(ticker, asOfDate));
+  handle('chains:grid', (ticker: string, asOfDate: string, expiration: string) =>
+    chainGrid(ticker, asOfDate, expiration)
+  );
+  handle('chains:contract-history', (osiSymbol: string) => contractHistory(osiSymbol));
+
+  handle('account:snapshot-dates', () => snapshotDates());
+  handle('account:positions', (asOfDate: string) => positions(asOfDate));
+  handle('account:orders', (limit?: number) => orders(limit));
+  handle('account:balances', () => balances());
 }

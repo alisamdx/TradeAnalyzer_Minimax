@@ -16,7 +16,9 @@ export {
 export type { ArchiveLine, ArchiveLocation } from './archive.js';
 
 export { captureResponse } from './capture.js';
-export type { CaptureArgs, CaptureResult, IngestContext, IngestModule } from './capture.js';
+export type {
+  CaptureArgs, CaptureResult, IngestContext, IngestModule, IngestedRowSpec, IngestedChildRows
+} from './capture.js';
 
 export { beginRun, finishRun, captureRuleId } from './run.js';
 export type { RunHandle, RunKind } from './run.js';
@@ -55,5 +57,22 @@ export type { PhaseCounts } from './phases/market.js';
 export {
   makeBarIngest, ingestSnapshot, ingestSplits, ingestDividends, toIntegerStrict, msEpochToEtDate, nsEpochToEt
 } from '../ingest/market.js';
+export {
+  runAccountPhase, deriveHeldStickyContracts, maskAccountKey, accountKeysFrom, ACCOUNT_RULE
+} from './phases/account.js';
+export type { AccountPhaseResult } from './phases/account.js';
+export {
+  runChainSubsetPhase, runChainsPhase, selectExpirations, subsetCandidates,
+  closeExpiredStickyContracts, CHAIN_SUBSET_RULE, CHAIN_RULE
+} from './phases/chains.js';
+export type { SubsetPhaseResult, ChainPhaseResult } from './phases/chains.js';
+export {
+  makeExpirationIngest, makeChainIngest, etradeYesNoToFlag, secondsEpochToEt, etradeExpiryToDate
+} from '../ingest/options.js';
+export type { ExpirationSelection } from '../ingest/options.js';
+export {
+  makePositionIngest, makeBalanceIngest, makeOrderIngest, makeTransactionIngest,
+  orderFingerprint, hashAccountKey, msEpochToEt
+} from '../ingest/account.js';
 export { runBackfillBars, backfillQueueClear, BACKFILL_RULE } from './backfill.js';
 export type { BackfillReport } from './backfill.js';

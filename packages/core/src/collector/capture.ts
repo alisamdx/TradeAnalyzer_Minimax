@@ -26,10 +26,28 @@ export interface IngestContext {
  * what makes replay reproducible at the byte level (AC-4) — a fixture in gives
  * fixed rows out, forever.
  */
-export type IngestModule = (
-  body: string,
-  ctx: IngestContext
-) => readonly { readonly table: string; readonly values: Readonly<Record<string, unknown>> }[];
+export interface IngestedChildRows {
+  readonly table: string;
+  /** The child column that receives the parent's `row_id`. */
+  readonly parentColumn: string;
+  readonly rows: readonly Readonly<Record<string, unknown>>[];
+}
+
+export interface IngestedRowSpec {
+  readonly table: string;
+  readonly values: Readonly<Record<string, unknown>>;
+  /**
+   * Rows that cannot exist before their parent does.
+   *
+   * An order's legs are the case this exists for: `order_row_id` is not knowable
+   * until the order row is inserted, and an ingestion module gets no database
+   * handle by design (P11). Declaring the relationship instead of resolving it
+   * keeps the module pure and keeps the insert inside the same transaction.
+   */
+  readonly children?: readonly IngestedChildRows[];
+}
+
+export type IngestModule = (body: string, ctx: IngestContext) => readonly IngestedRowSpec[];
 
 export interface CaptureArgs {
   readonly host: CollectorHost;
@@ -81,13 +99,14 @@ function insertRow(
   db: SqliteLike,
   table: string,
   values: Readonly<Record<string, unknown>>
-): void {
+): number {
   const columns = Object.keys(values);
   const placeholders = columns.map(() => '?').join(', ');
   const quoted = columns.map((c) => `"${c}"`).join(', ');
-  db.prepare(`INSERT INTO "${table}" (${quoted}) VALUES (${placeholders})`).run(
+  const info = db.prepare(`INSERT INTO "${table}" (${quoted}) VALUES (${placeholders})`).run(
     ...columns.map((c) => values[c] as unknown)
   );
+  return Number(info.lastInsertRowid);
 }
 
 /**
@@ -169,6 +188,12 @@ export function captureResponse(args: CaptureArgs): CaptureResult {
 
   let sourceResponseId = 0;
   let rowsWritten = 0;
+  // Counts children too, so AC-5's "stored equals parsed" holds for every table
+  // a response writes rather than only the top-level one.
+  const parsedRowCount = rows.reduce(
+    (n, r) => n + 1 + (r.children ?? []).reduce((m, c) => m + c.rows.length, 0),
+    0
+  );
 
   const write = db.transaction(() => {
     const info = db
@@ -195,13 +220,26 @@ export function captureResponse(args: CaptureArgs): CaptureResult {
         args.slug.startsWith('account-') ? 1 : 0,
         args.atProviderCap ? 1 : 0,
         parseStatus,
-        rows.length
+        parsedRowCount
       );
     sourceResponseId = Number(info.lastInsertRowid);
 
     for (const row of rows) {
-      insertRow(db, row.table, { ...row.values, source_response_id: sourceResponseId });
+      const parentId = insertRow(db, row.table, {
+        ...row.values,
+        source_response_id: sourceResponseId
+      });
       rowsWritten++;
+      for (const child of row.children ?? []) {
+        for (const values of child.rows) {
+          insertRow(db, child.table, {
+            ...values,
+            [child.parentColumn]: parentId,
+            source_response_id: sourceResponseId
+          });
+          rowsWritten++;
+        }
+      }
     }
   });
 

@@ -2,22 +2,26 @@ import { useEffect, useState } from 'react';
 import type { GenerationInfoDto, TreeGroup } from '../../shared/types.js';
 import { DataView } from './views/DataView.js';
 import { DictionaryView } from './views/DictionaryView.js';
+import { ChainsView } from './views/ChainsView.js';
+import { AccountView } from './views/AccountView.js';
 import { RichText } from './views/RichText.js';
 
 /**
- * B2 shell: Overview, Data and Dictionary.
+ * The shell: Overview, Data, Chains, Account and Dictionary.
  *
- * The remaining sections of 05 §2 — Exceptions, Runs, Bars, Chains, Earnings,
- * Account, Universe, IV, Archive, Legacy, Jobs, Settings — arrive with the build
- * steps that fill their tables. None is stubbed here: an empty section in a
- * sidebar reads as a broken feature, not as a future one.
+ * The remaining sections of 05 §2 — Exceptions, Runs, Bars, Earnings, Universe,
+ * IV, Archive, Legacy, Jobs, Settings — arrive with the build steps that fill
+ * their tables. None is stubbed here: an empty section in a sidebar reads as a
+ * broken feature, not as a future one.
  */
 
-type Section = 'overview' | 'data' | 'dictionary';
+type Section = 'overview' | 'data' | 'chains' | 'account' | 'dictionary';
 
 const SECTIONS: readonly { id: Section; label: string; hint: string }[] = [
   { id: 'overview', label: 'Overview', hint: 'Generation and schema at a glance' },
   { id: 'data', label: 'Data', hint: 'Every table, rendered from the dictionary' },
+  { id: 'chains', label: 'Chains', hint: 'Option chains by ticker, date and expiration' },
+  { id: 'account', label: 'Account', hint: 'Positions, executed orders and balances' },
   { id: 'dictionary', label: 'Dictionary', hint: 'Every column, and what a null in it means' }
 ];
 
@@ -76,6 +80,8 @@ export function App() {
         )}
         {!error && section === 'overview' && <Overview generation={generation} tableCount={tableCount} />}
         {!error && section === 'data' && <DataView tree={tree} />}
+        {!error && section === 'chains' && <ChainsView />}
+        {!error && section === 'account' && <AccountView />}
         {!error && section === 'dictionary' && <DictionaryView tree={tree} />}
       </main>
     </div>
@@ -101,7 +107,8 @@ function Overview({
     <>
       <h1>Overview</h1>
       <p className="lede">
-        Stage 1, build step B2. The schema exists and is empty; the collector arrives at B3.
+        Stage 1, build step B6. The collector runs phases 0 through 7 — universe, bars, quotes,
+        corporate actions, the account, the chain subset and the chains themselves.
       </p>
 
       <dl className="facts">

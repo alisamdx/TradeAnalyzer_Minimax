@@ -99,7 +99,7 @@ The inspector refuses any filter or sort that would scan unbounded (05 §8), so 
 | `raw_edgar_fact` | `(cik, concept, period_end)`, `(accession_no)` |
 | `raw_account_position_snapshot` | `(as_of_date)`, `(symbol, as_of_date)` |
 | `raw_account_balance_snapshot` | `(as_of_date)` |
-| `raw_executed_order` | unique `(order_id)`, `(executed_time)` |
+| `raw_executed_order` | `(order_id)`, `(executed_time)` — **not** unique on `order_id`, see §10.3 |
 | `raw_executed_order_leg` | `(order_row_id)`, `(osi_symbol)`, `(symbol)` |
 | `raw_account_transaction` | unique `(transaction_id)`, `(transaction_date)` |
 | `raw_macro_event` | `(event_date)`, `(event_key, observed_at)` |
@@ -513,7 +513,9 @@ Source: `/v1/accounts/{key}/balance?instType=BROKERAGE&realTimeNAV=true`. One ro
 | `account_type` | TEXT | yes: omitted | `accountType` |
 
 ### `raw_executed_order` and `raw_executed_order_leg`
-Source: `/v1/accounts/{key}/orders?status=EXECUTED&fromDate&toDate` (the primary source of fills, per CLAUDE.md). Append-only keyed by `order_id`; a re-pull that returns an already-stored order writes nothing (idempotent). The first pull reaches back as far as the endpoint allows; `reach_from` is recorded on the run.
+Source: `/v1/accounts/{key}/orders?status=EXECUTED&fromDate&toDate` (the primary source of fills, per CLAUDE.md). Append-only, keyed by `(order_id, observed_at)`. A re-pull that returns an already-stored order **unchanged** writes nothing; one that returns it with different leg data **appends a second observation**, and that pair is exactly what QC-803 reads. The first pull reaches back as far as the endpoint allows; `reach_from` is recorded on the run.
+
+**Why `order_id` is deliberately not unique** (settled at B6). An executed order is immutable, so a second version of one is a *finding*, not an error — and a unique index would turn that finding into an insert failure indistinguishable from a parse fault, landing it in QC-001 with no way to see what actually differed. The idempotence that matters is achieved a level up: the phase reads the stored `order_fingerprint` per order and the ingestion module skips an order whose fingerprint matches, so the normal daily re-pull of a 30-day window writes nothing at all. Every other supersession in this schema works the same way (a restated EDGAR fact, a rescheduled macro event, a re-fetched bar); making this one table the exception would have been the odd case, not the safe one.
 
 `raw_executed_order`:
 
@@ -527,6 +529,7 @@ Source: `/v1/accounts/{key}/orders?status=EXECUTED&fromDate&toDate` (the primary
 | `price_type` | TEXT | yes: omitted | `priceType` |
 | `limit_price` | REAL | yes: not_applicable | `limitPrice` |
 | `status` | TEXT | no | `status` (`EXECUTED`) |
+| `order_fingerprint` | TEXT | no | digest over executed time, status and every leg tuple — what makes an unchanged re-pull a no-op and a changed one visible |
 
 `raw_executed_order_leg` (one per `Instrument`):
 

@@ -103,7 +103,7 @@ Measured pace from the existing app (2026-09-04) and the resulting stage-1 budge
 |---|---|---|---|---|
 | 2 bars | ~1,089 | Polygon | 600/min (⅓ of observed peak, leaves room for the old app) | ~2 min |
 | 3, 4, 8 misc | ~350 | mixed | — | ~5 min |
-| 5 account | 4 | E*Trade | — | < 1 min |
+| 5 account | 5 (list, portfolio, balance, orders, transactions) | E*Trade | — | < 1 min |
 | 7 expirations | ~500 | E*Trade | 120/min | ~4 min |
 | 7 chains | **~4,000–6,500** (500 tickers × 8–13 in-window expirations) | E*Trade | 120/min | ~33–54 min |
 | 9, 10 | 0 | — | — | ~2 min |
@@ -139,13 +139,23 @@ Bars fetched at 17:05 are treated as final per the settlement quirk; `is_final` 
 
 Changing any value creates a **new `meta_capture_rule` row**; runs from then on reference it; the change is an `info` exception so it appears in that day's email.
 
+### 4.1a The account (phase 5)
+
+The account keys are **discovered, not configured**: `/v1/accounts/list` is called first and every account whose `accountStatus` is not `CLOSED` is collected. Capturing only the first would silently drop a second book, and a configured key would drift the day an account is opened or closed.
+
+That list response is archived (encrypted, like every account line) and **never ingested** — it is the one place the raw `accountIdKey` appears, and there is no raw table that should hold it. Everywhere else the key is masked to `{accountKey}` before the endpoint reaches `meta_response`, and the rows carry only `account_key_hash` (P15).
+
+Phase 5 also derives the `held_in_book` sticky contracts (§4.4) from the positions it just wrote, which is why it runs before phases 6 and 7 rather than after them.
+
 ### 4.2 Chain subset evaluation (phase 6)
 
-For every active universe ticker: `close` = latest bar; `advol20` = mean over the last 20 trading days of `close × volume`. **Admit** if `close ≥ minClose ∧ advol20 ≥ minAvgDollarVolume20d`. Admission inserts a `ref_chain_subset_membership` row with `membership_reason = rule_pass` and `rule_inputs_json = { close, advol20 }`.
+For every active universe ticker: `close` = latest bar; `advol20` = mean over the last 20 trading days of `close × volume`, taking the **latest observation per trade date** rather than the latest 20 rows — bars are append-only, so a re-fetch leaves two rows for one day, and reading rows would make the window ten days of two readings each and blend a superseded value into the admission decision (found at B6 by a test that asserted the ticker it had just pushed below the floor was in fact below it). **Admit** if `close ≥ minClose ∧ advol20 ≥ minAvgDollarVolume20d`. Admission inserts a `ref_chain_subset_membership` row with `membership_reason = rule_pass` and `rule_inputs_json = { close, advol20 }`.
 
 **Optionability is deliberately not a condition here** (decided 2026-09-05). `raw_ticker_reference.optionable` is derived from the E*Trade expirations call, which is made only for tickers *already* in the subset — so it is null for every candidate, and a condition written as `optionable ≠ 0` would admit every one of them while reading like a gate. That is the exact shape of the conviction-band failure this project exists to prevent (P10). The rule therefore tests price and dollar volume only, and optionability is settled one step later by the expirations call: a member returning no expirations on three consecutive runs is removed by the QC-104 path below. A ticker that was never optionable costs one wasted expirations call per run until then, which is the honest price of not pretending to test something we cannot test at admission time.
 
 **Never remove for falling below threshold** (Q15). Removal only: delisting (universe `valid_to` set), `optionable = 0` on three consecutive runs (QC-104 first), or operator action. Additional admits regardless of rule: any ticker with a current account position (`held_in_book`), any ticker in a legacy brief's candidate set today (`recommended_by_legacy`), any operator flag (`study_flag`).
+
+A ticker with **no stored bar at all** is not admitted and not recorded: nothing was measured, so nothing is claimed. It is a QC-201 finding on the bars side, not a subset decision.
 
 ### 4.3 Expiration window (phase 7)
 

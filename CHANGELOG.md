@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.199] - 2026-09-07
+
+### feat - the account, the chain subset and the chains (NewApp B6)
+
+- **The hosted collector now runs phases 0-7.** Phases 5 (account), 6 (chain subset) and 7 (expirations and chains) land inside `@tradeanalyzer/core`'s `runDaily`, which this app's `data-collector` handler already calls - so no handler, view, IPC module, service or existing table changes here. Still change #4 of the seven in `NewApp/requirements/06 §5`.
+- Thirteen chain checks and six account checks are registered with them; `@tradeanalyzer/core` is at 184 tests, `@tradeanalyzer/next` at 21.
+
+### chore - the root lint run stops reporting the workspace packages
+
+- `eslint .` reached into `packages/**` with this app's config and reported every `console` in the packages' dev CLIs and every `JSX` in the new app's renderer as an undefined variable - 29 findings on files that lint cleanly under their own configs. The root config now ignores `packages/**`; each package still lints itself. **This does not make the root run clean**: 186 pre-existing findings remain in this app's own `src/` and one-off `scripts/`, untouched here and not caused by the packages.
+- Everything else is in `@tradeanalyzer/core` and `@tradeanalyzer/next` - see `NewApp/CHANGELOG.md`.
+
 ## [1.1.198] - 2026-09-06
 
 ### feat - `backfill_bars` and the exception review queue (NewApp B5)
