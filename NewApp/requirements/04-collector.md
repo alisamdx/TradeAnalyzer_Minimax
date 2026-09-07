@@ -219,6 +219,8 @@ Queued from the new exe's Jobs view into `meta_job_request`, claimed and execute
 ### 7.1 `universe_seed`
 Fetches the three lists, writes initial `ref_universe_membership` (`change_reason = initial`) and `raw_ticker_reference` for every member. Must run before the first daily run.
 
+**The lists come from the host application's own `constituents` table** (503 sp500, 1,024 russell1000, 60 etf — **1,089 distinct across 1,587 rows**), not from a provider query. Corrected 2026-09-07 after the first live run: the sources had been Polygon queries for `market=stocks&type=CS` and `type=ETF` with `limit=1000`, which have **no index filter and no paging**, and produced **2,000 tickers in alphabetical order A–DBND with MSFT, NVDA, TSLA and SPY absent** — every call HTTP 200, the job reporting success. Polygon has no index-membership endpoint on this plan, so no query could have been right; the lists were never remote. `UniverseListSource` therefore supplies its **own response** (a remote source calls the host's transport, a local one serialises what the host holds) and both go through the same capture contract, so membership rows still point at archived bytes under the new `host_app` provider.
+
 ### 7.2 `backfill_bars` (Q7)
 For every universe member: one `aggs` call for `[today − 5 y, today]` (`limit=50000` covers it). Each series runs QC-202/204/205 **on arrival**; discontinuities without a same-date `raw_split` (fetched in the same job) open exceptions immediately. The job ends with an email whose blocking list is the operator's review queue — **ticker-reuse candidates (QC-205) must be resolved before the pilot's first daily run is counted toward the 20-day streak**. ~1,600 calls, ~5 min. Rows carry `fetch_kind = backfill`, `adjusted_as_of = today`.
 

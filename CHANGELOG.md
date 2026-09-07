@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.201] - 2026-09-07
+
+### fix - the NewApp collector's universe came from the wrong place
+
+- The first live `universe_seed` succeeded mechanically - 2,096 Polygon calls, every one a 200 - and captured **the wrong 2,000 tickers**. `NEW_APP_UNIVERSE_SOURCES` asked Polygon for `market=stocks&type=CS` and `type=ETF` with `limit=1000` under the list names `sp500` and `etf_list`: **no index filter** (Polygon has no index-membership endpoint on this plan, so the names were aspirational) and **no paging** (`limit=1000` returns one page; `next_url` pages the rest). Result: 2,000 tickers alphabetically A-DBND, with MSFT, NVDA, TSLA, SPY, GOOGL, META, JPM, XOM and WMT all absent.
+- **The correct lists were never remote.** They are in this application's own `constituents` table - 503 sp500, 1,024 russell1000, 60 etf, **1,089 distinct across 1,587 rows**, exactly the figure NewApp 04 §4.1 records - maintained by the existing `constituents-refresh` job. `newAppUniverseSources(db)` reads them and serialises each list as its own archived response under the new `host_app` provider, so membership rows still point at real bytes and `@tradeanalyzer/core` stays ignorant of this app's schema.
+- A single empty list is refused rather than returned: membership reconciliation would read it as "every member of this list has left".
+- Recovery needs no reset - `reconcileMembership` closes members absent from an incoming list, so a corrected seed closes the wrong memberships and opens the right ones.
+
 ## [1.1.200] - 2026-09-07
 
 ### fix - a boot that cannot read its credentials now says so

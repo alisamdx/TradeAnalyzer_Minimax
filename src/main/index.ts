@@ -6,7 +6,7 @@ import { ApiServer } from './api-server.js';
 import { ElectronCollectorHost, readSharedPointer } from './collector-host/electron-collector-host.js';
 import { createCollectorDailyJob, createCollectorWatchdogJob } from './services/jobs/collector-daily.js';
 import { createCollectorOneShotJob } from './services/jobs/collector-oneshot.js';
-import { NEW_APP_UNIVERSE_SOURCES } from './collector-host/universe-sources.js';
+import { newAppUniverseSources } from './collector-host/universe-sources.js';
 import { openDatabase } from './db/connection.js';
 import { runMigrations, currentSchemaVersion } from './db/migrations.js';
 import { WatchlistService } from './services/watchlist-service.js';
@@ -794,7 +794,7 @@ app.whenReady().then(() => {
   const collectorOneShotJob = createCollectorOneShotJob({
     makeHost: makeCollectorHost,
     todayET,
-    universeSources: NEW_APP_UNIVERSE_SOURCES,
+    universeSources: newAppUniverseSources(db),
   });
   batchService.registerJob('collector-oneshot', collectorOneShotJob, {
     // Driven by its own 2-minute interval below rather than by the daily

@@ -1,4 +1,4 @@
-import type { CollectorHost } from './host.js';
+import type { CollectorHost, ProviderName, ProviderResponse } from './host.js';
 import { captureResponse } from './capture.js';
 import { beginRun, finishRun } from './run.js';
 import { runUniversePhase, type UniverseMember } from './phases/universe.js';
@@ -13,11 +13,44 @@ import { runUniversePhase, type UniverseMember } from './phases/universe.js';
  * than by a temporary direct call that would then be deleted untested.
  */
 
+/**
+ * One of the lists that define the universe.
+ *
+ * **A source supplies its own response rather than naming a Polygon path**, and
+ * that is a deliberate correction made 2026-09-07. The first version called
+ * `host.polygonGet(endpoint, params)`, which quietly constrained the universe to
+ * whatever a Polygon query could express — and Polygon has no index-membership
+ * endpoint on this plan. What shipped was `market=stocks&type=CS`, i.e. *every*
+ * US common stock, with `limit=1000` and no paging: **2,000 tickers in
+ * alphabetical order, ending at DBND, with MSFT, NVDA, SPY and TSLA absent.**
+ * The same capped-response trap already recorded for Finnhub, in a second place.
+ *
+ * The correct lists were never remote. The host application maintains them —
+ * 503 S&P 500, 1,024 Russell 1000, 60 ETFs, **1,089 distinct**, exactly the
+ * figure 04 §4.1 records — and "which endpoint answers for each list" was always
+ * meant to be host-side configuration.
+ *
+ * **Provenance is unchanged.** The returned response is archived and digested
+ * like any other (P2, AC-1): the archive records *what we were given*, and "the
+ * host's constituent lists as of this date" is a legitimate answer to that. It
+ * also keeps `core` ignorant of the other application's schema, which is the
+ * whole point of the seam.
+ */
 export interface UniverseListSource {
   readonly listSource: UniverseMember['listSource'];
-  /** Where the list came from, for the archive. */
+  /** Where the list came from, recorded on the archive row. */
   readonly endpoint: string;
   readonly params: Readonly<Record<string, string>>;
+  /** Which provider the archive row is attributed to. */
+  readonly provider: ProviderName;
+  /**
+   * Produces the list response.
+   *
+   * A remote source calls the host's transport; a local one serialises what the
+   * host already holds. Either way the result goes through the same capture
+   * contract, so a membership row always points at real archived bytes.
+   */
+  readonly fetch: () => Promise<ProviderResponse>;
   /** Parses the response body into ticker symbols. */
   readonly parse: (body: string) => readonly string[];
 }
@@ -52,7 +85,7 @@ export async function runUniverseSeed(
 
     for (const [i, source] of args.sources.entries()) {
       host.progress('universe:lists', i, args.sources.length, source.listSource);
-      const response = await host.polygonGet(source.endpoint, source.params);
+      const response = await source.fetch();
 
       // The list responses go through the same contract as everything else, with
       // no ingestion module: their rows are written by the membership
@@ -63,7 +96,7 @@ export async function runUniverseSeed(
         db,
         runId: run.runId,
         asOfDate: args.tradingDate,
-        provider: 'polygon',
+        provider: source.provider,
         endpoint: source.endpoint,
         slug: `universe-${source.listSource}`,
         params: source.params,

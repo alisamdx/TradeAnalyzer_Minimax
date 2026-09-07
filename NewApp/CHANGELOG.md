@@ -9,6 +9,69 @@ exit (06 §6).
 
 ---
 
+## The universe came from the wrong place (2026-09-07)
+
+The first live `universe_seed` succeeded — 2,096 Polygon calls, every one a 200,
+membership reconciled, archive written. **It captured the wrong 2,000 tickers.**
+
+`NEW_APP_UNIVERSE_SOURCES` asked Polygon for `market=stocks&type=CS` and
+`type=ETF` with `limit=1000`, under the list names `sp500` and `etf_list`. Two
+faults, compounding:
+
+1. **No index filter.** Polygon has no index-membership endpoint on this plan,
+   so the query returned *every* US common stock. The list names were
+   aspirational and nothing contradicted them.
+2. **No paging.** `limit=1000` returns one page; Polygon pages with `next_url`,
+   and the parser read a single `results[]`.
+
+Result: **2,000 tickers, alphabetical, A through DBND** — `AAAA`, `AACI` and
+every microcap in between — with **MSFT, NVDA, TSLA, SPY, GOOGL, META, JPM, XOM
+and WMT all absent.** Every call returned 200 and the job reported success. It is
+the Finnhub cap trap again: *a response at the cap is not a complete answer*, and
+here nothing looked at the cap at all.
+
+**The correct lists were never remote.** The host application maintains them in
+its own `constituents` table — 503 S&P 500, 1,024 Russell 1000, 60 ETFs, **1,089
+distinct across 1,587 rows**, exactly the figure 04 §4.1 records. "Which source
+answers for each list" was always meant to be host-side configuration; the
+mistake was assuming host-side meant *remote*.
+
+**`UniverseListSource` now supplies its own response** instead of naming a
+Polygon path. A remote source calls the host's transport; a local one serialises
+what the host already holds. Both go through the same capture contract, so a
+membership row still points at real archived bytes — the archive records *what we
+were given*, and the host's curated list as of that moment is a legitimate answer
+to that. `core` stays ignorant of the other application's schema, which is the
+point of the seam. New provider value `host_app`, because attributing the list to
+a data vendor would be a lie in the one column that says where a row came from.
+
+**Recovery needs no reset**: `reconcileMembership` closes members absent from an
+incoming list, so a corrected seed closes the 2,000 wrong memberships and opens
+the right ones. The stray `raw_ticker_reference` rows stay, which is what
+append-only means — they are true observations of tickers that were briefly in
+the universe.
+
+### And a third gap in the schema guard, from the same change
+
+Adding `host_app` to an enum changes **no column name**, so the migration guard
+saw nothing — `enumOf` bakes its values into a CHECK at CREATE TABLE time, and
+the first insert using the new value would have failed on a constraint inside
+someone else's transaction, long after the change.
+
+`applyDictionary` now compares the whole stored DDL against the generated one.
+Because that comparison is textual it is only ever allowed to **rebuild an empty
+table**, never to refuse a populated one — a normalisation false positive then
+costs one harmless recreate instead of bricking the app. Drift on a populated
+table is **reported** (`driftBlocked`), not thrown: those rows are still valid
+under the constraint they were written with, and refusing to open the generation
+would be the worse failure.
+
+The normalisation was wrong on its first run — the generator terminates its
+statement and `sqlite_master.sql` does not, so all 50 tables read as drifted.
+Caught by the idempotence test, which is exactly what that test is for.
+
+`268` tests in `core`.
+
 ## The trading calendar seeds itself (2026-09-07)
 
 `ref_trading_day` was in the dictionary from B2, is read by preflight, the

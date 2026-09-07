@@ -15,6 +15,14 @@ export interface ApplyResult {
   readonly tablesCreated: readonly string[];
   /** Empty tables whose shape changed and were recreated from the dictionary. */
   readonly tablesRebuilt: readonly string[];
+  /**
+   * Populated tables whose constraints have drifted from the dictionary — an
+   * enum that gained a value, say. They keep the constraint they were created
+   * with; adopting it needs a replay into a new generation (04 §7.5). Reported
+   * rather than thrown, because the stored rows are still valid under the old
+   * constraint and refusing to open would be the worse failure.
+   */
+  readonly driftBlocked: readonly string[];
   readonly columnsAdded: readonly { table: string; column: string }[];
   readonly indexesCreated: number;
   readonly triggersCreated: number;
@@ -29,6 +37,37 @@ function existingTables(db: SqliteLike): Set<string> {
 function existingColumns(db: SqliteLike, table: string): Set<string> {
   const rows = db.prepare(`PRAGMA table_info("${table.replace(/"/g, '""')}")`).all() as { name: string }[];
   return new Set(rows.map((r) => r.name));
+}
+
+/**
+ * The `CREATE TABLE` SQLite is holding for this table, or undefined.
+ *
+ * Needed because a dictionary change can alter a table without adding or
+ * removing a single column: `enumOf` bakes its values into a CHECK constraint at
+ * create time, so **adding a value to an enum is invisible to a column-name
+ * comparison** and then fails at the first insert that uses it — long after the
+ * change, inside someone else's transaction. Type changes and altered checks
+ * have the same shape.
+ */
+function storedTableSql(db: SqliteLike, table: string): string | undefined {
+  const row = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?")
+    .get(table) as { sql: string | null } | undefined;
+  return row?.sql ?? undefined;
+}
+
+/** Whitespace and `IF NOT EXISTS` differ between generated and stored DDL without meaning anything. */
+function normaliseDdl(sql: string): string {
+  return sql
+    .replace(/CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS/i, 'CREATE TABLE')
+    .replace(/\s+/g, ' ')
+    .replace(/\s*([(),])\s*/g, '$1')
+    // The generator terminates its statement; `sqlite_master.sql` does not.
+    // Missing this reported all 50 tables as drifted on an unchanged
+    // dictionary — which is why the comparison is only ever allowed to rebuild
+    // an EMPTY table, and never to refuse a populated one.
+    .replace(/;+$/, '')
+    .trim();
 }
 
 function rowCount(db: SqliteLike, table: string): number {
@@ -80,6 +119,7 @@ export function applyDictionary(
   for (const statement of ddl.tables) db.exec(statement);
 
   const tablesRebuilt: string[] = [];
+  const driftBlocked: string[] = [];
 
   // Columns the dictionary has gained — and, just as importantly, ones it has
   // lost — since this generation was created.
@@ -90,10 +130,21 @@ export function applyDictionary(
 
     const added = table.columns.filter((c) => !present.has(c.column));
     const removed = [...present].filter((c) => !declared.has(c));
-    const needsRebuild =
+
+    // Column-shape changes are detected exactly; they are the reliable signals
+    // and the only ones allowed to REFUSE a populated table.
+    const shapeChanged =
       removed.length > 0 || added.some((c) => !c.nullable && c.primaryKey !== true);
 
-    if (needsRebuild) {
+    // Constraint drift is detected by comparing the whole DDL, but only ever
+    // used to rebuild an EMPTY table. A normalisation false positive then costs
+    // one harmless recreate; letting it refuse a populated table could brick the
+    // application over a stray space.
+    const stored = storedTableSql(db, table.table);
+    const ddlDrifted =
+      stored !== undefined && normaliseDdl(stored) !== normaliseDdl(tableDdl(table));
+
+    if (shapeChanged) {
       const rows = rowCount(db, table.table);
       if (rows > 0) {
         const why = [
@@ -118,13 +169,38 @@ export function applyDictionary(
       continue;
     }
 
-    for (const column of added) {
-      const nullMeaning = column.nullMeaning ?? '';
-      db.exec(
-        `ALTER TABLE "${table.table}" ADD COLUMN "${column.column}" ${column.type};` +
-          (nullMeaning ? ` -- null means: ${nullMeaning.replace(/\n/g, ' ')}` : '')
-      );
-      columnsAdded.push({ table: table.table, column: column.column });
+    if (added.length > 0) {
+      // Plain growth: added here rather than by rebuilding, because ALTER is the
+      // documented minimal path and it keeps `columnsAdded` meaningful. The
+      // stored DDL converges on the generated one as a result, so any drift
+      // still outstanding is caught on the next apply.
+      for (const column of added) {
+        const nullMeaning = column.nullMeaning ?? '';
+        db.exec(
+          `ALTER TABLE "${table.table}" ADD COLUMN "${column.column}" ${column.type};` +
+            (nullMeaning ? ` -- null means: ${nullMeaning.replace(/\n/g, ' ')}` : '')
+        );
+        columnsAdded.push({ table: table.table, column: column.column });
+      }
+      continue;
+    }
+
+    if (ddlDrifted) {
+      // Nothing was added or removed, yet the table differs from its
+      // definition — an enum that gained a value, or a changed CHECK. Invisible
+      // to a column comparison, and it surfaces as a constraint failure inside
+      // someone else's transaction long afterwards.
+      if (rowCount(db, table.table) > 0) {
+        // Reported, not thrown. The stored rows are still valid under the
+        // constraint they were written with, and refusing to open the
+        // generation would be a far worse failure than a constraint one
+        // version behind. Adopting it is a replay into a new generation.
+        driftBlocked.push(table.table);
+        continue;
+      }
+      db.exec(`DROP TABLE "${table.table}";`);
+      db.exec(tableDdl(table));
+      tablesRebuilt.push(table.table);
     }
   }
 
@@ -136,6 +212,7 @@ export function applyDictionary(
   return {
     tablesCreated: dictionary.map((t) => t.table).filter((n) => !before.has(n)),
     tablesRebuilt,
+    driftBlocked,
     columnsAdded,
     indexesCreated: ddl.indexes.length,
     triggersCreated: ddl.triggers.length,

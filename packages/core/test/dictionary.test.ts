@@ -644,6 +644,69 @@ describe('dictionary — how a generation may evolve', () => {
     }
   });
 
+  it('notices an enum that gained a value, which no column comparison can see', () => {
+    // `enumOf` bakes its values into a CHECK at CREATE TABLE time. Adding a
+    // member changes no column name, so the original guard saw nothing, did
+    // nothing, and the first insert using the new value failed on a constraint
+    // inside someone else's transaction. Found 2026-09-07 while adding a
+    // `host_app` provider.
+    const raw = open(DICTIONARY);
+    try {
+      const meta = DICTIONARY.find((t) => t.table === 'meta_response')!;
+      const widened = DICTIONARY.map((t) =>
+        t.table !== 'meta_response'
+          ? t
+          : {
+              ...t,
+              columns: t.columns.map((c) =>
+                c.column === 'provider' && c.enumValues
+                  ? { ...c, enumValues: [...c.enumValues, 'a_brand_new_vendor'] }
+                  : c
+              )
+            }
+      );
+      expect(meta).toBeTruthy();
+      const result = applyDictionary(raw as unknown as SqliteLike, widened);
+      // Empty table, so it is adopted by rebuilding.
+      expect(result.tablesRebuilt).toContain('meta_response');
+      expect(raw.prepare("SELECT sql FROM sqlite_master WHERE name='meta_response'").get())
+        .toMatchObject({ sql: expect.stringContaining('a_brand_new_vendor') });
+    } finally {
+      raw.close();
+    }
+  });
+
+  it('reports, rather than throws, when a populated table has drifted', () => {
+    // The rows are still valid under the constraint they were written with, and
+    // refusing to open the generation would be a far worse failure than a
+    // constraint one version behind. Adopting it is a replay (04 §7.5).
+    const raw = open(DICTIONARY);
+    try {
+      raw.exec("INSERT INTO meta_run (run_id, run_kind, slot, trading_date, started_at, status, host_app, host_version, collector_version, dictionary_version) VALUES (1,'daily','after_close','2026-09-07','t','running','test','0','0.1.0',1)");
+      raw.exec("INSERT INTO meta_response (source_response_id, run_id, provider, endpoint, params_json, requested_at, archive_file, archive_offset, dedup_hash, encrypted, at_provider_cap, parse_status) VALUES (1,1,'etrade','/x','{}','t','a',0,'h',0,0,'ok')");
+
+      const widened = DICTIONARY.map((t) =>
+        t.table !== 'meta_response'
+          ? t
+          : {
+              ...t,
+              columns: t.columns.map((c) =>
+                c.column === 'provider' && c.enumValues
+                  ? { ...c, enumValues: [...c.enumValues, 'a_brand_new_vendor'] }
+                  : c
+              )
+            }
+      );
+      const result = applyDictionary(raw as unknown as SqliteLike, widened);
+      expect(result.driftBlocked).toContain('meta_response');
+      expect(result.tablesRebuilt).not.toContain('meta_response');
+      // And the row survives, which is the point of not throwing.
+      expect(raw.prepare('SELECT COUNT(*) AS n FROM meta_response').get()).toEqual({ n: 1 });
+    } finally {
+      raw.close();
+    }
+  });
+
   it('is idempotent: re-applying an unchanged dictionary rebuilds nothing', () => {
     const raw = open(DICTIONARY);
     try {

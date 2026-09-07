@@ -646,9 +646,9 @@ describe('universe_seed', () => {
     const report = await runUniverseSeed(host, {
       tradingDate: '2026-09-06',
       sources: [
-        { listSource: 'sp500', endpoint: '/lists/sp500', params: {}, parse: (b) => JSON.parse(b).tickers },
-        { listSource: 'russell1000', endpoint: '/lists/russell1000', params: {}, parse: (b) => JSON.parse(b).tickers },
-        { listSource: 'etf_list', endpoint: '/lists/etf', params: {}, parse: (b) => JSON.parse(b).tickers }
+        { listSource: 'sp500', endpoint: '/lists/sp500', params: {}, provider: 'polygon', fetch: () => host.polygonGet('/lists/sp500', {}), parse: (b) => JSON.parse(b).tickers },
+        { listSource: 'russell1000', endpoint: '/lists/russell1000', params: {}, provider: 'polygon', fetch: () => host.polygonGet('/lists/russell1000', {}), parse: (b) => JSON.parse(b).tickers },
+        { listSource: 'etf_list', endpoint: '/lists/etf', params: {}, provider: 'polygon', fetch: () => host.polygonGet('/lists/etf', {}), parse: (b) => JSON.parse(b).tickers }
       ]
     });
 
@@ -660,6 +660,49 @@ describe('universe_seed', () => {
       .toEqual({ status: 'complete' });
   });
 
+  it('accepts a list the HOST supplies, and archives it like any other', async () => {
+    // The correction of 2026-09-07. The sources used to be Polygon queries,
+    // which constrained the universe to what a Polygon query can express — and
+    // Polygon has no index membership on this plan, so what shipped was every
+    // US common stock, alphabetically truncated at 1,000, with MSFT and SPY
+    // absent. The real lists were never remote; the host already holds them.
+    const host = makeHost({
+      polygonGet: async (path: string) =>
+        response(JSON.stringify({ results: { ticker: path.split('/').pop(), name: 'X', type: 'CS', active: true } }))
+    });
+
+    const body = JSON.stringify({ tickers: ['MSFT', 'SPY'] });
+    const report = await runUniverseSeed(host, {
+      tradingDate: '2026-09-06',
+      sources: [
+        {
+          listSource: 'sp500',
+          endpoint: 'host:constituents/sp500',
+          params: { source: 'constituents' },
+          provider: 'host_app',
+          // No network call at all — the host serialises what it already has.
+          fetch: async () => ({
+            status: 200, body, requestedAt: '2026-09-06T17:00:00-04:00',
+            respondedAt: '2026-09-06T17:00:00-04:00'
+          }),
+          parse: (b: string) => JSON.parse(b).tickers as string[]
+        }
+      ]
+    });
+
+    expect(report.listsFetched).toBe(1);
+    expect(report.distinctTickers).toBe(2);
+
+    // Provenance is the point: the membership rows still point at real archived
+    // bytes, attributed to the host rather than to a vendor that never saw them.
+    const resp = raw
+      .prepare("SELECT provider, endpoint, byte_length FROM meta_response WHERE provider = 'host_app'")
+      .get() as { provider: string; endpoint: string; byte_length: number };
+    expect(resp.provider).toBe('host_app');
+    expect(resp.endpoint).toBe('host:constituents/sp500');
+    expect(resp.byte_length).toBe(body.length);
+  });
+
   it('refuses to reconcile when it got none of its lists', async () => {
     // An empty incoming set would close every existing member — a total wipe
     // caused by a network blip. Refusing is the only safe answer.
@@ -667,7 +710,7 @@ describe('universe_seed', () => {
     await expect(
       runUniverseSeed(host, {
         tradingDate: '2026-09-06',
-        sources: [{ listSource: 'sp500', endpoint: '/lists/sp500', params: {}, parse: () => [] }]
+        sources: [{ listSource: 'sp500', endpoint: '/lists/sp500', params: {}, provider: 'polygon', fetch: () => host.polygonGet('/lists/sp500', {}), parse: () => [] }]
       })
     ).rejects.toThrow(/Refusing to reconcile membership against an empty set/);
     expect(raw.prepare('SELECT COUNT(*) AS n FROM ref_universe_membership').get()).toEqual({ n: 0 });

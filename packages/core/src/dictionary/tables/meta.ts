@@ -28,7 +28,12 @@ export const PROVIDERS = [
   'fred',
   'ivolatility',
   'marketdata',
-  'finra'
+  'finra',
+  // Not a vendor: the host application itself, for lists it already maintains.
+  // The universe's index membership is the case — it is host-side configuration
+  // (04 §4.1), and attributing it to a data vendor would be a lie in the one
+  // column that says where a row came from.
+  'host_app'
 ] as const;
 
 export const metaTables: readonly TableEntry[] = [

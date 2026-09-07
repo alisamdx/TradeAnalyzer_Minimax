@@ -43,7 +43,9 @@ export type ProviderName =
   | 'fred'
   | 'ivolatility'
   | 'marketdata'
-  | 'finra';
+  | 'finra'
+  /** The host application itself, for lists it already holds (04 §4.1). */
+  | 'host_app';
 
 export interface CollectorHost {
   // ── storage ──────────────────────────────────────────────────────────────
