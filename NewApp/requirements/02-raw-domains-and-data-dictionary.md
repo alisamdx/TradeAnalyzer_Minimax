@@ -674,10 +674,22 @@ Populated by the hand-off contract in 04 (forward, from the day the collector st
 
 ## 16. Verify list (must be closed in 04 before the dictionary is frozen)
 
-1. E*Trade `OptionGreeks.theta` time unit; `timeStamp` epoch unit.
-2. E*Trade index symbol for VIX and the `All.*` field names beyond `lastTrade`.
-3. E*Trade `Position.positionId`; transactions `brokerage.*` paths.
+1. ~~E*Trade `OptionGreeks.theta` time unit; `timeStamp` epoch unit.~~ **CLOSED 2026-09-07**, one live SPY chain call. `theta` is **per day**: E*Trade -0.18651 against a Black-Scholes -0.2285 per day and -83.39 per year — three orders of magnitude between the candidates, so this was never going to be a close call once asked. `timeStamp` is **epoch seconds**: 1788552898 reads as 2026-09-04T20:14:58Z as seconds and as January 1970 as milliseconds. IV confirmed a **decimal fraction** (0.11554).
+2. ~~E*Trade index symbol for VIX and the `All.*` field names beyond `lastTrade`.~~ **CLOSED 2026-09-07.** The symbol is plain **`VIX`** (HTTP 200, 14.53, inside the [5,150] band); `VIX.X` is rejected as invalid. **All five drafted `All.*` names exist** — `lastTrade`, `open`, `high`, `low`, `previousClose` — plus `totalVolume`, `bid` and `ask`.
+3. ~~E*Trade `Position.positionId`; transactions `brokerage.*` paths.~~ **CLOSED 2026-09-07.** `positionId` is present and **numeric**. `brokerage.quantity` and `brokerage.price` are present on every sampled transaction; `brokerage.product` comes back as an **empty object** on cash transactions (`Transfer`) and populated on instrument ones (`Sold Short`, `Bought To Cover`) — so the drafted null meaning turned out to be the observed behaviour rather than an assumption.
 4. Polygon `weighted_shares_outstanding` availability on the current plan. **The fallback is already proven** (04 §11, 2026-09-06): `share_class_shares_outstanding` comes back for >= 95.8 % of the universe on this plan, so `shares_outstanding` will populate regardless of how the primary resolves — what one live call still settles is which value `shares_source` records.
 5. ~~Finnhub free-tier availability of estimates and short interest~~ — **settled 2026-09-06** (04 §11): recommendations, insider transactions and calendar-borne estimates are free; dedicated estimate/target endpoints and short interest are 403. **Polygon short-interest plan coverage remains open** (Q21) and is now the only unresolved source in §12.
 6. Treasury daily par yield feed format and the exact fetch URL.
 7. Measured admitted count for the working chain-subset thresholds (Q15).
+
+**Two findings from the same session that were not on this list, and are the reason it exists:**
+
+- **`inTheMoney` is the string `"y"` / `"n"`, not a boolean.** The dictionary declares `in_the_money` a flag, so a plain cast was the
+  obvious implementation — and it would have been wrong in the worst available way, because `Boolean("n")` is `true` and **every
+  contract would have read as in-the-money**. Nothing would have thrown, no check would have fired, and a moneyness filter would have
+  quietly selected the whole chain. Now converted explicitly by `etradeYesNoToFlag`.
+- **`expiryType` has a fourth value, `MONTHEND`**, alongside `WEEKLY`, `MONTHLY` and `QUARTERLY`. Harmless precisely because the column
+  is stored verbatim rather than mapped into an enum of our own — which is the general argument for storing provider vocabularies raw,
+  made concrete on the first live call.
+- **`volume` really does come back as `0`** (60 of 171 SPY calls), distinct from absent. So the D7 rule is a **presence** test, never a
+  truthiness one: "did not trade" and "not reported" are different facts and only one of them is data.

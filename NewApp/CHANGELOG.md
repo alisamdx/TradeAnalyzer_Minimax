@@ -9,6 +9,48 @@ exit (06 §6).
 
 ---
 
+## The E*Trade verify list, closed (2026-09-07)
+
+Dictionary 3 → 4. The operator re-authorised, and **one live SPY chain call, one
+quote and one portfolio call settled every open E*Trade question in 02 §16** —
+the list that had been blocking four pre-pilot items and showing as twelve
+unverified columns on the Overview screen.
+
+**Settled as drafted.** `theta` is per day (E*Trade -0.18651 against a
+Black-Scholes -0.2285/day and -83.39/year — three orders of magnitude between
+the candidates). `timeStamp` is epoch seconds. IV is a decimal fraction. The VIX
+symbol is plain `VIX`, and all five drafted `All.*` names exist. `positionId` is
+present and numeric. `brokerage.quantity` and `brokerage.price` are present, and
+`brokerage.product` is an empty object on cash transactions — so the drafted
+null meaning turned out to describe the observed behaviour rather than assume it.
+
+**Two findings that were not on the list, which is the point of asking.**
+
+`inTheMoney` is the **string** `"y"` / `"n"`, not a boolean. The dictionary
+declares `in_the_money` a flag, so a cast was the obvious implementation — and
+`Boolean("n")` is `true`, so **every contract would have read as in-the-money**.
+Nothing throws, no check fires, and a moneyness filter silently selects the whole
+chain. Now converted explicitly. `expiryType` has a fourth value, `MONTHEND`,
+which is harmless *only because* the column is stored verbatim rather than mapped
+into an enum of our own — the general argument for raw provider vocabularies,
+made concrete on the first live call.
+
+**QC-410's tolerance is 0.05, and the reasoning matters more than the number.**
+E*Trade's delta sits 0.018–0.029 below a European Black-Scholes across twelve
+strikes, monotonically in moneyness. Adding SPY's ~1.15 % dividend yield halves
+the gap but does not close it, and the residual's shape says *model* rather than
+error: SPY options are American and E*Trade does not publish its pricer. So the
+tolerance sits far above a model difference and far below anything a unit or
+scale fault could produce, since those are off by 100× or sign-flipped.
+**QC-410 verifies that the Greeks are on the scale the dictionary claims — not
+that they match our model.** Reproducing a vendor's American pricer to three
+decimals is a different and much harder goal, and not what P4 asks for.
+
+One verify marker remains, and it is a sourcing question rather than a field
+shape: short interest still has no confirmed free provider.
+
+---
+
 ## B5 — backfill_bars and the review queue (2026-09-06)
 
 `core@0.1.0`, existing app v1.1.198. Gate: **every QC-205 finding resolved or

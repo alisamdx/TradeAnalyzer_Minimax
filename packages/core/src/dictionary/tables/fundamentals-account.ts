@@ -106,7 +106,7 @@ export const fundamentalsAccountTables: readonly TableEntry[] = [
       ...withStatus(col.usd('days_gain', 'The provider\'s own day gain. **A provider estimate**, stored as such and never used as realised P&L.', { sourceProvider: 'etrade', sourceField: 'daysGain' })),
       ...withStatus(col.usd('total_gain', 'The provider\'s own total gain. **A provider estimate**, stored as such and never used as realised P&L — estimates of exactly this kind were wrong in both directions on five of the existing app\'s positions.', { sourceProvider: 'etrade', sourceField: 'totalGain' })),
       nullable(col.date('date_acquired', 'When the lot was acquired.', { sourceProvider: 'etrade', sourceField: 'dateAcquired' }), 'omitted by the provider'),
-      nullable(col.ident('provider_position_id', 'E*Trade\'s own position id.', { sourceProvider: 'etrade', sourceField: 'positionId', verify: 'Field presence and stability unconfirmed (02 §16.3); settled by one live portfolio call.' }), 'omitted by the provider')
+      nullable(col.ident('provider_position_id', 'E*Trade own position id. **Confirmed present, numeric**, measured 2026-09-07 on a live portfolio call.', { sourceProvider: 'etrade', sourceField: 'positionId', converter: 'numberToIdentifier' }), 'omitted by the provider'),
     ],
     indexes: [
       { columns: ['as_of_date'] },
@@ -216,10 +216,10 @@ export const fundamentalsAccountTables: readonly TableEntry[] = [
       col.date('transaction_date', 'When it happened.', { sourceProvider: 'etrade', sourceField: 'transactionDate' }),
       col.text('transaction_type', 'E*Trade\'s type verbatim.', { sourceProvider: 'etrade', sourceField: 'transactionType' }),
       nullable(col.text('description', 'The provider\'s description line.', { sourceProvider: 'etrade', sourceField: 'description' }), 'omitted by the provider'),
-      nullable(col.ident('symbol', 'The instrument involved.', { sourceProvider: 'etrade', sourceField: 'brokerage.product.symbol', verify: 'Response path unconfirmed (02 §16.3).' }), 'not applicable — the transaction has no instrument (interest, a fee)'),
+      nullable(col.ident('symbol', 'The instrument involved. Path confirmed 2026-09-07: populated on instrument transactions (`Sold Short`, `Bought To Cover`), and `brokerage.product` comes back as an **empty object** on cash transactions such as `Transfer` — so the declared null meaning is the observed behaviour, not an assumption.', { sourceProvider: 'etrade', sourceField: 'brokerage.product.symbol' }), 'not applicable — the transaction has no instrument (a transfer, interest, a fee)'),
       col.usd('amount', 'Cash amount, signed.', { sourceProvider: 'etrade', sourceField: 'amount' }),
-      nullable(col.int('quantity', 'Quantity involved.', { sourceProvider: 'etrade', sourceField: 'brokerage.quantity', verify: 'Response path unconfirmed (02 §16.3).' }), 'not applicable — the transaction has no quantity'),
-      nullable(col.perShare('price', 'Price involved.', { sourceProvider: 'etrade', sourceField: 'brokerage.price', verify: 'Response path unconfirmed (02 §16.3).' }), 'not applicable — the transaction has no price')
+      nullable(col.int('quantity', 'Quantity involved. Path confirmed live 2026-09-07, present on every sampled transaction.', { sourceProvider: 'etrade', sourceField: 'brokerage.quantity' }), 'not applicable — the transaction has no quantity'),
+      nullable(col.perShare('price', 'Price involved. Path confirmed live 2026-09-07, present on every sampled transaction.', { sourceProvider: 'etrade', sourceField: 'brokerage.price' }), 'not applicable — the transaction has no price')
     ],
     indexes: [
       { columns: ['transaction_id'], unique: true },

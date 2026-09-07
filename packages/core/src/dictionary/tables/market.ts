@@ -104,7 +104,7 @@ export const marketTables: readonly TableEntry[] = [
     columns: [
       col.ident('ticker', 'The underlying ticker.', { sourceProvider: 'etrade' }),
       col.date('expiration_date', 'The expiration.', { sourceProvider: 'etrade', sourceField: 'year/month/day', converter: 'etradeExpiryToDate' }),
-      col.text('expiry_type', 'E*Trade\'s `expiryType` verbatim — `WEEKLY`, `MONTHLY`, `QUARTERLY`, and so on.', { sourceProvider: 'etrade', sourceField: 'expiryType' }),
+      col.text('expiry_type', 'E*Trade expiryType verbatim. Observed 2026-09-07 across SPY 34 expirations: `WEEKLY`, `MONTHLY`, `QUARTERLY` and **`MONTHEND`** — a fourth value the draft did not list, which is exactly why this is stored verbatim rather than mapped to an enum of our own.', { sourceProvider: 'etrade', sourceField: 'expiryType' }),
       col.flag('in_capture_window', '`1` if the run\'s rule selected this expiration for a chain call.', { sourceProvider: 'derived_at_ingestion' }),
       col.enumOf('window_reason', ['within_max_dte', 'extra_monthly', 'sticky_contract', 'outside'], 'Why the expiration was or was not captured. The expirations we *declined* are recorded too — a pipeline that keeps only what it captured cannot answer why something is missing.', { sourceProvider: 'derived_at_ingestion' })
     ],
@@ -155,15 +155,15 @@ export const marketTables: readonly TableEntry[] = [
         [
           col.fraction('delta', 'Delta as sent.', { sourceProvider: 'etrade', sourceField: 'OptionGreeks.delta' }),
           col.fraction('gamma', 'Gamma as sent.', { sourceProvider: 'etrade', sourceField: 'OptionGreeks.gamma' }),
-          col.fraction('theta', 'Theta as sent.', { sourceProvider: 'etrade', sourceField: 'OptionGreeks.theta', verify: 'Time unit unconfirmed — per day is assumed. Settled by the QC-410 Black-Scholes reproduction on one live chain call (04 §11); P4 requires we can reproduce it.' }),
+          col.fraction('theta', 'Theta **per day**, as E*Trade sends it. Measured 2026-09-07 on a live SPY chain: E*Trade -0.18651 against a Black-Scholes -0.2285 per day and -83.39 per year. Three orders of magnitude separate the candidates, so the unit is not in doubt.', { sourceProvider: 'etrade', sourceField: 'OptionGreeks.theta' }),
           col.fraction('vega', 'Vega as sent.', { sourceProvider: 'etrade', sourceField: 'OptionGreeks.vega' }),
           col.fraction('rho', 'Rho as sent.', { sourceProvider: 'etrade', sourceField: 'OptionGreeks.rho' })
         ],
         'greeks_status'
       ),
-      nullable(col.flag('in_the_money', 'Provider\'s moneyness flag.', { sourceProvider: 'etrade', sourceField: 'inTheMoney' }), 'omitted by the provider'),
+      nullable(col.flag('in_the_money', 'Provider moneyness flag. **E*Trade sends the STRING `y` or `n`, not a boolean** (measured 2026-09-07), so the converter maps them explicitly. A plain cast would be silently wrong in the worst possible way: `Boolean("n")` is `true`, so every contract would read as in-the-money.', { sourceProvider: 'etrade', sourceField: 'inTheMoney', converter: 'etradeYesNoToFlag' }), 'omitted by the provider'),
       col.perShare('underlying_price', 'The underlying price at the time of the call, cross-checked against `raw_eod_quote.last` within 1 %.', { sourceProvider: 'etrade', sourceField: 'OptionChainResponse.nearPrice' }),
-      nullable(col.ts('provider_timestamp', 'E*Trade\'s own timestamp for the quote.', { sourceProvider: 'etrade', sourceField: 'timeStamp', verify: 'Epoch unit unconfirmed (seconds vs milliseconds). Settled by the same live chain call as `theta` (04 §11).' }), 'omitted by the provider'),
+      nullable(col.ts('provider_timestamp', 'E*Trade own timestamp for the quote. **Epoch seconds**, measured 2026-09-07: 1788552898 reads as 2026-09-04T20:14:58Z (the prior session close) as seconds, and as 1970 as milliseconds.', { sourceProvider: 'etrade', sourceField: 'timeStamp', converter: 'secondsEpochToEtTimestamp' }), 'omitted by the provider'),
       nullable(col.enumOf('sticky_reason', ['held_in_book', 'recommended_by_legacy', 'study_flag'], 'Why this contract was captured despite the rule.'), 'captured by the rule, not sticky')
     ],
     indexes: [
@@ -267,14 +267,14 @@ export const marketTables: readonly TableEntry[] = [
     ruleDriven: true,
     standardColumns: true,
     columns: [
-      col.ident('symbol', 'The index symbol.', { sourceProvider: 'etrade', verify: 'The E*Trade symbol for VIX is unconfirmed (CLAUDE.md flags it). The ingestion range check 5 <= last <= 150 stands regardless, so a wrong symbol yields `invalid` rather than a plausible wrong number.' }),
+      col.ident('symbol', 'The index symbol. **`VIX` confirmed 2026-09-07** — HTTP 200 returning 14.53, inside the sane band; `VIX.X` is rejected as invalid. The range check stays: it turns a future symbol change into an `invalid` rather than a plausible wrong number.', { sourceProvider: 'etrade' }),
       ...withSharedStatus(
         [
           col.perShare('last', 'Last level.', { sourceProvider: 'etrade', sourceField: 'All.lastTrade' }),
-          col.perShare('open', 'Session open.', { sourceProvider: 'etrade', sourceField: 'All.open', verify: 'Field name beyond `lastTrade` unconfirmed (02 §16.2).' }),
-          col.perShare('high', 'Session high.', { sourceProvider: 'etrade', sourceField: 'All.high', verify: 'Field name beyond `lastTrade` unconfirmed (02 §16.2).' }),
-          col.perShare('low', 'Session low.', { sourceProvider: 'etrade', sourceField: 'All.low', verify: 'Field name beyond `lastTrade` unconfirmed (02 §16.2).' }),
-          col.perShare('prev_close', 'Previous close.', { sourceProvider: 'etrade', sourceField: 'All.previousClose', verify: 'Field name beyond `lastTrade` unconfirmed (02 §16.2).' })
+          col.perShare('open', 'Session open. Field name confirmed live 2026-09-07.', { sourceProvider: 'etrade', sourceField: 'All.open' }),
+          col.perShare('high', 'Session high. Field name confirmed live 2026-09-07.', { sourceProvider: 'etrade', sourceField: 'All.high' }),
+          col.perShare('low', 'Session low. Field name confirmed live 2026-09-07.', { sourceProvider: 'etrade', sourceField: 'All.low' }),
+          col.perShare('prev_close', 'Previous close. Field name confirmed live 2026-09-07.', { sourceProvider: 'etrade', sourceField: 'All.previousClose' }),
         ],
         'quote_status'
       ),

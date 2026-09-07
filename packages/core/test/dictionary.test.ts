@@ -439,15 +439,34 @@ describe('meta_dictionary — the generation explains itself', () => {
 
   it('surfaces the columns still awaiting a live response rather than burying them', () => {
     const unverified = unverifiedColumns();
-    // These are real and expected at this stage — the 02 §16 verify list, which
-    // 04 §11 closes with one live E*Trade call. The test pins that they are
-    // *declared as unverified* rather than quietly presented as settled.
-    expect(unverified.length).toBeGreaterThan(0);
     const names = unverified.map((u) => `${u.table}.${u.column}`);
-    expect(names).toContain('raw_option_contract_snapshot.theta');
-    expect(names).toContain('raw_option_contract_snapshot.provider_timestamp');
-    expect(names).toContain('raw_account_position_snapshot.provider_position_id');
+
+    // The 02 §16 E*Trade verify list was closed on 2026-09-07 by one live chain
+    // call, one quote and one portfolio call. These were on it and are not any
+    // more; asserting their ABSENCE is what stops a future edit quietly
+    // re-introducing an assumption as if it had been measured.
+    expect(names).not.toContain('raw_option_contract_snapshot.theta');
+    expect(names).not.toContain('raw_option_contract_snapshot.provider_timestamp');
+    expect(names).not.toContain('raw_index_quote.symbol');
+    expect(names).not.toContain('raw_account_position_snapshot.provider_position_id');
+    expect(names).not.toContain('raw_account_transaction.symbol');
+
+    // One remains, and it is a genuinely open sourcing question rather than an
+    // unverified field shape: short interest has no confirmed free provider.
+    expect(names).toEqual(['raw_short_interest.short_interest']);
     for (const u of unverified) expect(u.note.length).toBeGreaterThan(20);
+  });
+
+  it('converts every field whose provider representation is not what it looks like', () => {
+    // Each of these was measured on 2026-09-07 and each would be silently wrong
+    // without an explicit converter.
+    const byName = new Map(allColumns().map((c) => [`${c.table.table}.${c.column.column}`, c.column]));
+    // "y"/"n" strings, where Boolean("n") === true would make everything ITM.
+    expect(byName.get('raw_option_contract_snapshot.in_the_money')?.converter).toBe('etradeYesNoToFlag');
+    // Epoch SECONDS, where treating them as milliseconds lands in 1970.
+    expect(byName.get('raw_option_contract_snapshot.provider_timestamp')?.converter).toBe('secondsEpochToEtTimestamp');
+    // Published percent, stored as a fraction.
+    expect(byName.get('raw_treasury_yield.yield')?.converter).toBe('percentToFraction');
   });
 });
 
