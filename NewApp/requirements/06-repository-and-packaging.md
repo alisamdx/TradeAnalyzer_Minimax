@@ -187,7 +187,7 @@ The paper work ends when the operator says so; this is the order the build then 
 ### 10.2 Still open, by design
 
 - Every threshold marked † — settled after the first 20 pilot runs (03 §10), not before.
-- The 04 §11 pre-pilot checklist: eight measurements that need real provider calls, including the IV bootstrap source (Q17).
+- The 04 §11 pre-pilot checklist: eight measurements that need real provider calls. **The IV bootstrap source is no longer among them — IVolatility, decided 2026-09-07** (04 §11); what remains open there is whether the subscription can be held live through `stitch_date + 20 trading days`, which is a purchase term rather than a measurement.
 
 ---
 

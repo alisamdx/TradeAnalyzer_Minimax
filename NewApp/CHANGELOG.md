@@ -9,6 +9,44 @@ exit (06 §6).
 
 ---
 
+## The IV bootstrap source: IVolatility (2026-09-07)
+
+Spec only. Q17's last open item closed, and the reason is worth recording
+because **the changelog alone would have given the wrong one.**
+
+v0.23.7 reverted MarketData.app with "hit rate limits in practice" — but that
+revert was of the **daily capture** job, which is a different role from a
+one-time historical pull. Rate limits on an unattended nightly job say nothing
+about a one-shot backfill, so on the changelog alone MarketData.app still looks
+viable for the bootstrap.
+
+**The disqualifying fact lives in a source comment, not in any changelog.**
+ records that MarketData.app returns null IV — *"common
+for historical chains"* — and falls back to solving Black-Scholes from the
+bid/ask midpoint, tracking which it used in . Its Mon Sep  7 13:09:45 EDT 2026
+parameter is an **expiration filter, not an as-of date**, so a historical
+snapshot needs a two-call bracket per day.  reads
+, which returns pre-computed constant-maturity ATM IV as true
+as-of-date snapshots, and is annotated "the primary source for IV history
+backfill". The stored rows agree: IVolatility **262k** over a year,
+MarketData.app **1k** over two days.
+
+** had the two backwards** — MarketData.app listed as
+"IV-history backfill" and IVolatility as "Alternative IV-history source" —
+which is the opposite of what both the code and the data say. Corrected. A state
+snapshot that inverts a settled decision is worse than no snapshot: it is exactly
+the document a later session would trust.
+
+**Two consequences for B7b.**  arrives as a **decimal fraction**, which is
+what 02 §0.1 stores, so there is **no ×100** — the existing app multiplies
+because it stores percentages, and carrying that habit across would inflate every
+bootstrap row a hundredfold. And IVX is **IVolatility's own** constant-maturity
+computation while  is ours, so the overlap window compares
+two different *methods*, not just two vendors — which makes QC-908's 2-vol-point
+threshold a quantity to **measure over the first 20 paired days**, not to trust.
+
+---
+
 ## The new exe could not start, and survived not starting (2026-09-07)
 
 B7a's `raw_index_quote` status split added a NOT NULL column, which
