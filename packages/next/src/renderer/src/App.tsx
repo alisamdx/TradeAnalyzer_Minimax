@@ -4,24 +4,26 @@ import { DataView } from './views/DataView.js';
 import { DictionaryView } from './views/DictionaryView.js';
 import { ChainsView } from './views/ChainsView.js';
 import { AccountView } from './views/AccountView.js';
+import { EarningsView } from './views/EarningsView.js';
 import { RichText } from './views/RichText.js';
 
 /**
- * The shell: Overview, Data, Chains, Account and Dictionary.
+ * The shell: Overview, Data, Chains, Account, Earnings and Dictionary.
  *
- * The remaining sections of 05 §2 — Exceptions, Runs, Bars, Earnings, Universe,
- * IV, Archive, Legacy, Jobs, Settings — arrive with the build steps that fill
- * their tables. None is stubbed here: an empty section in a sidebar reads as a
- * broken feature, not as a future one.
+ * The remaining sections of 05 §2 — Exceptions, Runs, Bars, Universe, IV,
+ * Archive, Legacy, Jobs, Settings — arrive with the build steps that fill their
+ * tables. None is stubbed here: an empty section in a sidebar reads as a broken
+ * feature, not as a future one.
  */
 
-type Section = 'overview' | 'data' | 'chains' | 'account' | 'dictionary';
+type Section = 'overview' | 'data' | 'chains' | 'account' | 'earnings' | 'dictionary';
 
 const SECTIONS: readonly { id: Section; label: string; hint: string }[] = [
   { id: 'overview', label: 'Overview', hint: 'Generation and schema at a glance' },
   { id: 'data', label: 'Data', hint: 'Every table, rendered from the dictionary' },
   { id: 'chains', label: 'Chains', hint: 'Option chains by ticker, date and expiration' },
   { id: 'account', label: 'Account', hint: 'Positions, executed orders and balances' },
+  { id: 'earnings', label: 'Earnings', hint: 'Report dates, and every observation of them' },
   { id: 'dictionary', label: 'Dictionary', hint: 'Every column, and what a null in it means' }
 ];
 
@@ -82,6 +84,7 @@ export function App() {
         {!error && section === 'data' && <DataView tree={tree} />}
         {!error && section === 'chains' && <ChainsView />}
         {!error && section === 'account' && <AccountView />}
+        {!error && section === 'earnings' && <EarningsView />}
         {!error && section === 'dictionary' && <DictionaryView tree={tree} />}
       </main>
     </div>

@@ -5,6 +5,7 @@ import { runPreflight } from './phases/preflight.js';
 import { runBarsPhase, runQuotesPhase, runActionsPhase } from './phases/market.js';
 import { runAccountPhase } from './phases/account.js';
 import { runChainSubsetPhase, runChainsPhase } from './phases/chains.js';
+import { runEventsPhase } from './phases/events.js';
 import { ALL_CHECKS } from '../qa/registry.js';
 import { runGate, type Verdict } from '../qa/gate.js';
 import { buildStatusEmail } from '../qa/email.js';
@@ -13,8 +14,8 @@ import { COLLECTOR_VERSION } from '../version.js';
 /**
  * The daily run — 04 §2.
  *
- * At B6 this is phases 0 through 7 plus the gate and the email. Phases 8 and 9
- * (the event domains and stage-2 derivation) arrive at B7.
+ * At B7a this is phases 0 through 8 plus the gate and the email. Phase 9 (the
+ * IV derivation) arrives with the bootstrap in B7b.
  *
  * Phase order is not arbitrary. Bars precede the chain subset because the subset
  * rule reads their dollar volume; the account precedes the subset and the chains
@@ -107,6 +108,19 @@ export async function runDaily(
     await attempt('chains', async () => {
       const c = await runChainsPhase(host, db, run);
       domains['chains'] = { expected: c.chainCalls, stored: c.contractsStored };
+    });
+    await attempt('events', async () => {
+      // Phase 8's sub-phases already isolate their own failures, so a single
+      // dead domain arrives here as a count of zero rather than as a throw.
+      // What reaches this handler is a failure of the phase itself.
+      const c = await runEventsPhase(host, db, run, {
+        onError: (name, err) => {
+          phaseErrors.push(`events/${name}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      });
+      for (const [name, sub] of Object.entries(c)) {
+        domains[`events_${name}`] = { expected: sub.calls, stored: sub.stored };
+      }
     });
   } catch {
     // Cancellation only. The current response was already archived and ingested

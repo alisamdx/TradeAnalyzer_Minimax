@@ -268,15 +268,23 @@ export const marketTables: readonly TableEntry[] = [
     standardColumns: true,
     columns: [
       col.ident('symbol', 'The index symbol. **`VIX` confirmed 2026-09-07** — HTTP 200 returning 14.53, inside the sane band; `VIX.X` is rejected as invalid. The range check stays: it turns a future symbol change into an `invalid` rather than a plausible wrong number.', { sourceProvider: 'etrade' }),
+      // `last` carries its OWN status, and the other four share one. They were
+      // drafted under a single shared status, which the CHECK constraint then
+      // reads as all-or-nothing: a response missing only `open` would have to
+      // null `last` as well, and QC-901 treats an absent last as a blocking
+      // finding. So one missing context field would have taken out the market
+      // regime read entirely. `last` is what QC-901, the critic and the
+      // dashboard all consume; open/high/low/prev_close are context, and
+      // losing them together is a real fact worth one status column.
+      ...withStatus(col.perShare('last', 'Last level. The value every consumer reads, which is why it does not share a status with the session context below — a missing `open` must not be able to blank it.', { sourceProvider: 'etrade', sourceField: 'All.lastTrade' })),
       ...withSharedStatus(
         [
-          col.perShare('last', 'Last level.', { sourceProvider: 'etrade', sourceField: 'All.lastTrade' }),
           col.perShare('open', 'Session open. Field name confirmed live 2026-09-07.', { sourceProvider: 'etrade', sourceField: 'All.open' }),
           col.perShare('high', 'Session high. Field name confirmed live 2026-09-07.', { sourceProvider: 'etrade', sourceField: 'All.high' }),
           col.perShare('low', 'Session low. Field name confirmed live 2026-09-07.', { sourceProvider: 'etrade', sourceField: 'All.low' }),
           col.perShare('prev_close', 'Previous close. Field name confirmed live 2026-09-07.', { sourceProvider: 'etrade', sourceField: 'All.previousClose' }),
         ],
-        'quote_status'
+        'session_status'
       ),
       nullable(col.ts('provider_timestamp', 'E*Trade\'s own timestamp.', { sourceProvider: 'etrade' }), 'omitted by the provider')
     ],

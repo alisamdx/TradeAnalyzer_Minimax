@@ -381,14 +381,18 @@ describe('dictionary — the constraints do their job', () => {
       raw.exec("INSERT INTO meta_response (source_response_id, run_id, provider, endpoint, params_json, requested_at, archive_file, archive_offset, dedup_hash, encrypted, at_provider_cap, parse_status) VALUES (1,1,'etrade','/x','{}','t','a',0,'h',0,0,'ok')");
       raw.exec("INSERT INTO meta_capture_rule (capture_rule_id, domain, version, definition_json, description, valid_from) VALUES (1,'index',1,'{}','test rule','t')");
 
-      const base = "INSERT INTO raw_index_quote (run_id, as_of_date, observed_at, capture_rule_id, source_response_id, symbol, last, open, high, low, prev_close, quote_status)";
+      const base = "INSERT INTO raw_index_quote (run_id, as_of_date, observed_at, capture_rule_id, source_response_id, symbol, last, last_status, open, high, low, prev_close, session_status)";
       // present value, but status says omitted
-      expect(() => raw.exec(`${base} VALUES (1,'2026-09-06','t',1,1,'VIX',18.2,17.9,18.5,17.8,18.0,'omitted')`)).toThrow(/CHECK constraint/i);
+      expect(() => raw.exec(`${base} VALUES (1,'2026-09-06','t',1,1,'VIX',18.2,'omitted',17.9,18.5,17.8,18.0,'ok')`)).toThrow(/CHECK constraint/i);
       // null value, but status says ok
-      expect(() => raw.exec(`${base} VALUES (1,'2026-09-06','t',1,1,'VIX',NULL,NULL,NULL,NULL,NULL,'ok')`)).toThrow(/CHECK constraint/i);
+      expect(() => raw.exec(`${base} VALUES (1,'2026-09-06','t',1,1,'VIX',NULL,'ok',NULL,NULL,NULL,NULL,'omitted')`)).toThrow(/CHECK constraint/i);
       // coherent both ways
-      expect(() => raw.exec(`${base} VALUES (1,'2026-09-06','t',1,1,'VIX',18.2,17.9,18.5,17.8,18.0,'ok')`)).not.toThrow();
-      expect(() => raw.exec(`${base} VALUES (1,'2026-09-06','t',1,1,'VIX',NULL,NULL,NULL,NULL,NULL,'omitted')`)).not.toThrow();
+      expect(() => raw.exec(`${base} VALUES (1,'2026-09-06','t',1,1,'VIX',18.2,'ok',17.9,18.5,17.8,18.0,'ok')`)).not.toThrow();
+      expect(() => raw.exec(`${base} VALUES (1,'2026-09-06','t',1,1,'VIX',NULL,'omitted',NULL,NULL,NULL,NULL,'omitted')`)).not.toThrow();
+      // `last` and the session group are independently statused, which is the
+      // point of splitting them: a present last with an absent session is a
+      // legitimate row, and under the drafted shared status it was not.
+      expect(() => raw.exec(`${base} VALUES (1,'2026-09-06','t',1,1,'VIX',18.2,'ok',NULL,NULL,NULL,NULL,'omitted')`)).not.toThrow();
     } finally {
       raw.close();
     }

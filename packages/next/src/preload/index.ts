@@ -39,6 +39,12 @@ const api: NextApi = {
     positions: (asOfDate: string) => ipcRenderer.invoke('account:positions', asOfDate),
     orders: (limit?: number) => ipcRenderer.invoke('account:orders', limit),
     balances: () => ipcRenderer.invoke('account:balances')
+  },
+  earnings: {
+    months: () => ipcRenderer.invoke('earnings:months'),
+    month: (month: string) => ipcRenderer.invoke('earnings:month', month),
+    trail: (ticker: string) => ipcRenderer.invoke('earnings:trail', ticker),
+    anomalies: () => ipcRenderer.invoke('earnings:anomalies')
   }
 };
 

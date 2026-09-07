@@ -194,7 +194,46 @@ export interface BalancesDto {
   readonly points: readonly BalancePointDto[];
 }
 
-/** The surface exposed on `window.api`. 05 §9 specifies the full set; this is B6's. */
+/**
+ * The Earnings view (05 §4.3).
+ *
+ * The trail — every observation, not the resolved date — is the point. A view
+ * showing only "the current best date" would render the truncation failure that
+ * put an earnings date a quarter late as a perfectly ordinary row.
+ */
+export interface EarningsCalendarDto {
+  readonly ticker: string;
+  readonly reportTime: string | null;
+  readonly reportTimeStatus: string;
+  readonly source: string;
+}
+
+export interface EarningsMonthDto {
+  readonly month: string;
+  readonly days: readonly { readonly date: string; readonly tickers: readonly EarningsCalendarDto[] }[];
+}
+
+export interface EarningsObservationDto {
+  readonly cells: readonly ViewCell[];
+  /** Days moved against the previous observation from the SAME source; null on the first. */
+  readonly slipDays: number | null;
+  /** A later slip past the QC-601 limit. A nearer move is a correction and is not flagged. */
+  readonly slipSuspect: boolean;
+}
+
+export interface EarningsTrailDto {
+  readonly ticker: string;
+  readonly columns: readonly ViewColumn[];
+  readonly observations: readonly EarningsObservationDto[];
+}
+
+export interface EarningsAnomalyDto {
+  readonly ticker: string;
+  readonly kind: 'moved_later' | 'sources_disagree';
+  readonly detail: string;
+}
+
+/** The surface exposed on `window.api`. 05 §9 specifies the full set; this is B7a's. */
 export interface NextApi {
   readonly appVersion: string | null;
   readonly platform: string;
@@ -223,5 +262,11 @@ export interface NextApi {
     positions(asOfDate: string): Promise<IpcResult<PositionsDto>>;
     orders(limit?: number): Promise<IpcResult<OrdersDto>>;
     balances(): Promise<IpcResult<BalancesDto>>;
+  };
+  readonly earnings: {
+    months(): Promise<IpcResult<readonly string[]>>;
+    month(month: string): Promise<IpcResult<EarningsMonthDto>>;
+    trail(ticker: string): Promise<IpcResult<EarningsTrailDto>>;
+    anomalies(): Promise<IpcResult<readonly EarningsAnomalyDto[]>>;
   };
 }

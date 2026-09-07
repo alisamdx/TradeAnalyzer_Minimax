@@ -4,6 +4,8 @@ import { BAR_CHECKS } from './checks/bars.js';
 import { QUOTE_AND_ACTION_CHECKS } from './checks/quotes-actions.js';
 import { CHAIN_CHECKS } from './checks/chains.js';
 import { ACCOUNT_CHECKS } from './checks/account.js';
+import { EARNINGS_FUNDAMENTALS_CHECKS } from './checks/earnings-fundamentals.js';
+import { MACRO_CHECKS } from './checks/macro.js';
 
 /**
  * Every registered check — 03 §3.
@@ -13,15 +15,21 @@ import { ACCOUNT_CHECKS } from './checks/account.js';
  * writes yet would evaluate zero things every run and sit in the zero-fire list
  * looking exactly like a check that is silently broken.
  *
- * B4 brought cross-cutting, bars, quotes and corporate actions; B6 adds chains
- * and account with phases 5 through 7.
+ * B4 brought cross-cutting, bars, quotes and corporate actions; B6 added chains
+ * and account with phases 5 through 7; B7 adds earnings, fundamentals and the
+ * macro/sentiment domains with phase 8.
  */
 export const ALL_CHECKS: readonly CheckDefinition[] = [
   ...CROSS_CUTTING_CHECKS,
   ...BAR_CHECKS,
   ...QUOTE_AND_ACTION_CHECKS,
   ...CHAIN_CHECKS,
-  ...ACCOUNT_CHECKS
+  ...ACCOUNT_CHECKS,
+  ...EARNINGS_FUNDAMENTALS_CHECKS,
+  ...MACRO_CHECKS
 ];
 
-export { CROSS_CUTTING_CHECKS, BAR_CHECKS, QUOTE_AND_ACTION_CHECKS, CHAIN_CHECKS, ACCOUNT_CHECKS };
+export {
+  CROSS_CUTTING_CHECKS, BAR_CHECKS, QUOTE_AND_ACTION_CHECKS, CHAIN_CHECKS, ACCOUNT_CHECKS,
+  EARNINGS_FUNDAMENTALS_CHECKS, MACRO_CHECKS
+};

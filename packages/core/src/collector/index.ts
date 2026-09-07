@@ -74,5 +74,27 @@ export {
   makePositionIngest, makeBalanceIngest, makeOrderIngest, makeTransactionIngest,
   orderFingerprint, hashAccountKey, msEpochToEt
 } from '../ingest/account.js';
+export {
+  runEventsPhase, runEarningsSweep, runIndexQuotes, runTreasuryYields, runMacroCalendar,
+  runEdgarFilings, runEdgarFacts, runShortInterest, runRecommendations, runInsiderSweep,
+  EVENTS_RULE
+} from './phases/events.js';
+export type { EventsPhaseResult, SubPhaseCount } from './phases/events.js';
+export {
+  makeEarningsIngest, makeIndexQuoteIngest, ingestTreasuryYields, makeRecommendationIngest,
+  ingestShortInterest, earningsResponseAtCap, finnhubHourToReportTime, parseCsvLine,
+  mmddyyyyToDate, FINNHUB_BULK_CAP
+} from '../ingest/events.js';
+export {
+  parseFomcCalendar, parseBlsSchedule, ingestFomcCalendar, makeBlsScheduleIngest,
+  BLS_RELEASES, FOMC_CALENDAR_URL, blsScheduleUrl
+} from '../ingest/macro-calendar.js';
+export type { ParsedMacroEvent } from '../ingest/macro-calendar.js';
+export {
+  makeSubmissionsIngest, makeCompanyFactsIngest, makeForm4Ingest, parseDailyFormIndex,
+  dailyFormIndexUrl, submissionsAtCap, EDGAR_RECENT_CAP
+} from '../ingest/edgar.js';
+export type { IndexedFiling } from '../ingest/edgar.js';
+
 export { runBackfillBars, backfillQueueClear, BACKFILL_RULE } from './backfill.js';
 export type { BackfillReport } from './backfill.js';

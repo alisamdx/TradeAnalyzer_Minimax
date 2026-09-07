@@ -9,6 +9,82 @@ exit (06 §6).
 
 ---
 
+## B7a — the event and macro domains (2026-09-07)
+
+Phase 8 runs inside the daily collection: earnings, EDGAR filings and XBRL
+facts, index quotes, the treasury curve, the macro calendar, short interest,
+analyst recommendations and Form 4 insider transactions — nine sub-phases across
+five transports, with twelve checks registered alongside them (QC-601–604,
+QC-701–702, QC-901–906) and the Earnings view reading what they write. `241`
+tests in `core`, `21` in `next`.
+
+**B7 was split.** `bootstrap_iv` waits on a spend decision — which IV source to
+buy — and nothing else in the step does, so the eight domains that were ready
+shipped rather than waiting behind a purchase. B7b carries the bootstrap, phase
+9's derivation, QC-907/908 and the IV view.
+
+**Every parser here was written after reading a live response, and that is where
+all four findings came from.** Reading first cost four fetches; each of the four
+would otherwise have been a silent wrong answer rather than a crash.
+
+- **The FOMC page has three traps and every one of them is silent.** A meeting
+  straddling a month boundary names *both* months (`Apr/May 30-1`) and the
+  decision day belongs to the **second** — reading the first gives 2024-04-01, a
+  real date wrong by a month. Not every entry is a range: 2025 carries
+  `August 22 (notation vote)`, which a regex demanding `d-d` drops without a
+  word. And the year panels are **not in chronological order** (2026 first, down
+  to 2021, then 2027), so a flat sweep attaches every meeting to whichever year
+  parsed last.
+- **The Treasury CSV spells one tenor differently from the other thirteen.**
+  `1.5 Month` where the rest abbreviate (`1 Mo`, `3 Mo`, `1 Yr`). The parser maps
+  by **name**, so a renamed header drops one column and QC-902 reports 13 of 14
+  tenors; a positional parser survives the rename and silently shifts an entire
+  curve one column. Column *order* is not part of a CSV's contract unless the
+  publisher says it is.
+- **EDGAR's `filings.recent` is capped at 1,000**, with the rest in a
+  `filings.files` overflow — the same truncation shape as Finnhub's 1,500-row
+  calendar, flagged the same way even though this one truncates from the *older*
+  end and is therefore harmless here. Harmless-in-the-current-usage is not a
+  reason to leave a cap undetected; the Finnhub one was harmless too until a
+  window grew.
+- **A Form 4 wraps every value in a `<value>` element** that may sit beside a
+  `<footnoteId/>`, so reading the field's text concatenates both — and a gift's
+  absent price is an *empty* element rather than a missing one, stored null and
+  never zero, which would read as a free purchase.
+
+**One design correction, found by the schema rather than by a response.**
+`raw_index_quote` gave `last, open, high, low, prev_close` a single shared
+status, which the generated CHECK constraint reads as strictly all-or-nothing.
+A response missing only `open` would then have had to null `last` as well — and
+QC-901 treats an absent `last` as **blocking**, so one missing context field
+would have taken out the market-regime read entirely. `last` now carries its own
+status and the four session fields share theirs. **A shared status column is an
+assertion that those fields arrive together; it has to be earned per group, not
+applied to whatever a table happens to hold.**
+
+**Derivative transactions are deliberately not captured.** A Form 4 carries them
+alongside the share trades, and `raw_insider_transaction` has no column that
+would tell them apart — so storing both would put an option grant's notional
+share count in the same `shares` column as an open-market purchase and corrupt
+every insider-buying signal computed from it, undetectably. Admitting them needs
+a column first, which is a decision rather than an ingestion detail. Same reason
+`transaction_code` stays verbatim: an `F` (shares withheld for tax) is not a
+sale, and a two-way buy/sell mapping manufactures insider selling out of payroll.
+
+**The earnings sweep subdivides on the cap rather than trusting it**, which is
+the one piece of this step with a body count behind it: the existing app trusted
+a response sitting exactly at Finnhub's 1,500-row limit, stored NVDA's August
+report as November, and ranked NVDA wheel #1 on the day it printed. QC-601
+enforces the asymmetry that follows — a date may move **nearer** without bound,
+but **later** only by 14 days, because a large later slip is the truncation
+signature and not an issuer refining its plans.
+
+**The cadence gate reads `meta_response`, not the domain tables.** "When did we
+last write a recommendation row" cannot separate a call that was never made from
+one that was made and returned nothing, and those two want opposite responses.
+
+---
+
 ## The IV bootstrap must buy an overlap (2026-09-07)
 
 Spec only — no code. `04 §7.3`, `03 §3.8a` (QC-907, QC-908), `02 §13`, `05 §4.6`,

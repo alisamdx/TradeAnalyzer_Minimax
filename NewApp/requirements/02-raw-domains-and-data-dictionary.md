@@ -431,8 +431,11 @@ Source: E*Trade `/v1/market/quote/{symbol}` (Polygon's stock snapshot cannot ser
 | column | type | null | source |
 |---|---|---|---|
 | `symbol` | TEXT | no | |
-| `last`, `open`, `high`, `low`, `prev_close` | REAL | yes + status | `All.lastTrade`, `All.open`, `All.high`, `All.low`, `All.previousClose` (**verify** names beyond `lastTrade`) |
-| `provider_timestamp` | TEXT | yes: omitted | |
+| `last` | REAL | yes + **its own** `last_status` | `All.lastTrade` |
+| `open`, `high`, `low`, `prev_close` | REAL | yes + **shared** `session_status` | `All.open`, `All.high`, `All.low`, `All.previousClose` — all five names confirmed live 2026-09-07 |
+| `provider_timestamp` | TEXT | yes: omitted | `dateTimeUTC`, epoch **seconds** |
+
+**`last` does not share a status with the session fields, and that is a correction made at B7a.** They were drafted under one shared status, which the generated CHECK constraint then reads as strictly all-or-nothing: a response missing only `open` would have to null `last` too. QC-901 treats an absent `last` as **blocking**, so a single missing context field would have taken out the market-regime read — and the alternative, writing the row anyway, throws inside the capture transaction and surfaces as a generic parse failure rather than as the missing field it is. `last` is what QC-901, the critic and the dashboard all consume; open/high/low/prev_close are context, and losing them together is one honest fact worth one status column. **General shape: a shared status column is an assertion that those fields arrive together, and it has to be earned per group rather than applied to whatever a table happens to hold.**
 
 ---
 
@@ -442,6 +445,10 @@ Stored in the honest raw form SEC publishes — **facts**, not statements. State
 
 ### `raw_edgar_filing`
 Source: EDGAR `submissions/CIK##########.json`.
+
+**`filings.recent` is capped at 1,000 entries**, with the remainder in a `filings.files` overflow list — measured 2026-09-07 on CIK 0000320193, exactly 1,000 in every parallel array. It is the same truncation shape as Finnhub's 1,500-row calendar and it is flagged the same way (`at_provider_cap`), even though this one truncates from the *older* end and so happens to be harmless for a phase that only wants new filings. **"Harmless in the current usage" is not a reason to leave a cap undetected** — the Finnhub one was harmless too, until a window grew.
+
+The payload is **parallel arrays**, not an array of objects, so zipping by index is the only way to read it and a short companion array is a silent misalignment rather than an error. The row count therefore comes from `accessionNumber`, the natural key, which cannot be blank; a filing whose companion fields are missing is stored with nulls and never shifted into alignment. An empty `reportDate` maps to **null**, because an empty date string sorts before every real date and would quietly win any `MIN()`.
 
 | column | type | notes |
 |---|---|---|
@@ -565,6 +572,13 @@ Source: `/v1/accounts/{key}/transactions.json?sortOrder=DESC&...` — kept only 
 ### `raw_macro_event`
 Sources: FOMC schedule (federalreserve.gov, yearly), BLS release schedules (CPI, PPI, employment). Fetched monthly; a rescheduled event is a new row with the same `event_key` and later `observed_at`.
 
+**Both are HTML pages, and both were read live 2026-09-07 before a parser was written.** They are the only phase-8 sources that are not data feeds, so what they actually contain is recorded here rather than left to a scraper's assumptions:
+
+- **FOMC** — `https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm`. Meetings carry `fomc-meeting__month` and `fomc-meeting__date` classes inside per-year panels. Three properties that a plausible parser gets wrong **silently**: (1) a meeting straddling a month boundary names **both** months (`Apr/May 30-1`, `Jan/Feb 31-1`, `Oct/Nov 31-1`) and the decision day belongs to the **second** — reading the first yields 2024-04-01 for `Apr/May 30-1`, a real date wrong by a month; (2) not every entry is a range, since 2025 carries `August 22 (notation vote)`, which a regex demanding `d-d` drops without a word; (3) the **panels are not in chronological order** — 2026 first, descending to 2021, then 2027 appended — so a flat sweep attaches every meeting to whichever year parsed last. The event is dated on the range's **last** day, which is when the statement lands. The page publishes **no time**, so `event_time` is null rather than the 14:00 ET everyone knows: a value we believe is not a value the source published.
+- **BLS** — `https://www.bls.gov/schedule/news_release/<release>.htm`, one page per release (`cpi`, `ppi`, `empsit`; 13 usable rows each, running through Dec 2026). The table is `Reference Month | Release Date | Release Time`, with dates as `Dec. 18, 2025` — the abbreviation's period is optional, `Nov 04, 2026` also occurs. The page **serialises its own navigation into a `<tr>`**, so rows are selected by a *positive* shape test (exactly three cells, middle one date-shaped) and never by skipping the first row, which would break the day that markup changes. `event_key` uses the **reference** month (`CPI-2026-08`), so a rescheduled release is a new observation of the same event rather than a new event.
+
+GDP and PCE are BEA, not BLS, and are **not** captured in stage 1: QC-903 reads only FOMC and CPI, and a source with no consumer is a source with no way to notice it has broken.
+
 | column | type | notes |
 |---|---|---|
 | `event_key` | TEXT | e.g. `FOMC-2026-09`, `CPI-2026-08` — stable across reschedules |
@@ -578,6 +592,14 @@ Source: U.S. Treasury daily par yield curve. **Verified 2026-09-05**, no key req
 `https://home.treasury.gov/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/<YEAR>/all?type=daily_treasury_yield_curve&field_tdr_date_value=<YEAR>&page&_format=csv`
 
 CSV, newest first, `Date` as `MM/DD/YYYY`. **One fetch returns every trading day of the year**, not just today — so the daily pull is naturally idempotent and a backfill is the same call. Values are published as **percent** (`3.91`), converted to fraction at ingestion (`/100`, per §0.1). FRED `DGS3MO` stays the fallback (free key).
+
+**The header line, read live 2026-09-07**, mapped by **name** and never by position:
+
+```
+Date,"1 Mo","1.5 Month","2 Mo","3 Mo","4 Mo","6 Mo","1 Yr","2 Yr","3 Yr","5 Yr","7 Yr","10 Yr","20 Yr","30 Yr"
+```
+
+Note `1.5 Month` spells the word out where every other tenor abbreviates. That one inconsistency is the standing argument against positional reading: a positional parser survives a renamed or reordered header and **silently shifts an entire curve one column**, while a name-mapped one drops the column it cannot recognise and QC-902 reports fewer than 14 tenors. The rule generalises — a CSV's column *order* is not part of its contract unless the publisher says it is, and this one does not.
 
 | column | type | notes |
 |---|---|---|
@@ -612,7 +634,7 @@ Tables (full dictionary entries to be completed alongside the verify list in 04)
 - `raw_short_interest` — `ticker, settlement_date, short_interest INTEGER, avg_daily_volume INTEGER, days_to_cover REAL, source` (FINRA publishes twice monthly). **Measured 2026-09-06: Finnhub `/stock/short-interest` is 403 on our free tier** — this domain therefore rests on Polygon's `/stocks/vX/short-interest` (plan coverage still **verify**) or a direct FINRA file. It is the one §12 domain with no confirmed free source.
 - `raw_analyst_recommendation` — `ticker, period_month, strong_buy, buy, hold, sell, strong_sell INTEGER, source='finnhub'`. **Confirmed free 2026-09-06**: `/stock/recommendation` returns 200 with exactly the drafted fields (`symbol, period, strongBuy, buy, hold, sell, strongSell`), four monthly periods per call.
 - `raw_analyst_estimate` — **resolved 2026-09-06, and not where the draft looked.** The dedicated endpoints are **premium**: `/stock/eps-estimate`, `/stock/revenue-estimate` and `/stock/price-target` all return **403**. But `/calendar/earnings` — already being called for `raw_earnings_event` — carries `epsEstimate` and `revenueEstimate` **per scheduled report**, on the free tier, for future dates. Coverage on *our* universe is near-total: over the next 60 days, **520 scheduled reports, 517 with an EPS estimate (99.4 %) and 515 with a revenue estimate (99.0 %)**. (The all-market figure is only ~45 % — the gap is micro-caps, so measuring this on the raw calendar rather than on the universe would have understated it by half.) So the table becomes `ticker, fiscal_period, eps_estimate_avg, revenue_estimate_avg, source='finnhub'` sourced from the calendar row, and **it costs no extra call**. What stays unavailable is estimate *dispersion* — `high`/`low`/`num_analysts` are premium-only and are dropped from the table; PEG and forward P/E are recoverable **one report ahead**, not as a full estimate curve.
-- `raw_insider_transaction` — `cik, ticker, filer_name, filer_role, transaction_date, transaction_code, shares INTEGER, price REAL, shares_owned_after INTEGER, accession_no` (EDGAR Form 4; the existing `news-data-fetcher.ts` already parses these). Captured by **one daily full-index sweep**, not per ticker: EDGAR publishes `full-index/<year>/QTR<n>/form.idx` listing every filing of the day, so a single call yields every Form 4 filed and the universe filter is applied locally. Per-ticker polling would be ~300 calls a day to learn that almost nothing was filed.
+- `raw_insider_transaction` — `cik, ticker, filer_name, filer_role, transaction_date, transaction_code, shares INTEGER, price REAL, shares_owned_after INTEGER, accession_no` (EDGAR Form 4; the existing `news-data-fetcher.ts` already parses these). **Non-derivative transactions only, decided at B7a.** A Form 4 also carries `derivativeTransaction` blocks — option grants and exercises — and this table has no column that would tell them apart, so storing both would put an option grant's notional share count in the same `shares` column as an open-market purchase and corrupt every insider-buying signal computed from it, undetectably. Admitting them needs a column first, which is a dictionary change and therefore a decision rather than an ingestion detail. `transaction_code` is stored **verbatim** for the same reason: an `F` (shares withheld for tax) is not a sale, and a two-way buy/sell mapping manufactures insider selling out of payroll. Every field is wrapped in a `<value>` element that may sit beside a `<footnoteId/>`, and a genuinely absent price (awards, gifts) arrives as an **empty** element rather than a missing one — so a price is read from inside the wrapper and stored null, never zero, which would read as a free purchase. Captured by **one daily full-index sweep**, not per ticker: EDGAR publishes `full-index/<year>/QTR<n>/form.idx` listing every filing of the day, so a single call yields every Form 4 filed and the universe filter is applied locally. Per-ticker polling would be ~300 calls a day to learn that almost nothing was filed.
 
 **Q21 decision:** all three added. Each is a few calls per day, structured, provenance-clean. News sentiment stays out.
 
