@@ -141,6 +141,23 @@ if (tables.length === 0) {
   process.exit(1);
 }
 
+// Integrity before counts. Without this a corrupt file reports plausible
+// numbers for the first few tables and then throws mid-loop, which reads as "the
+// script broke" rather than "the database is damaged" — and the numbers already
+// printed look like findings.
+const integrity = db.prepare('PRAGMA integrity_check').get();
+const integrityResult = Object.values(integrity)[0];
+if (integrityResult !== 'ok') {
+  console.log(`\nintegrity_check   : ${String(integrityResult).slice(0, 400)}`);
+  console.log('\n** THIS DATABASE IS CORRUPT. ** Row counts above, if any, are not evidence.');
+  console.log('Nothing here is recoverable in place. Close both applications, delete the');
+  console.log('generation directory, and let TradeAnalyzer 2 recreate it:');
+  console.log(`  Remove-Item -Recurse -Force "${genDir}"`);
+  db.close();
+  process.exit(2);
+}
+console.log('integrity_check   : ok');
+
 const interesting = [
   'meta_generation', 'meta_run', 'meta_job_request', 'meta_response',
   'ref_trading_day', 'ref_universe_membership', 'raw_ticker_reference', 'raw_daily_bar'
