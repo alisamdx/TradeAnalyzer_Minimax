@@ -217,7 +217,7 @@ Every item this document carried forward was closed by the section that owned it
 | carried item | closed in |
 |---|---|
 | Concrete liquidity-screen thresholds for the chain subset, with the admitted count (Q15) | 04 §4.1 (`chain_subset` capture rule) and §4.2 (the admission rule). The **count** those thresholds admit is a measurement, still pending in 04 §11. |
-| Choice of the one external IV-history source (Q17) | 04 §7.3 defines the `bootstrap_iv` job and its overlap check; **which** source is a pending item in 04 §11. |
+| Choice of the one external IV-history source (Q17) | 04 §7.3 defines the `bootstrap_iv` job, the 20-day overlap the purchase must cover, and the load/accept split; 03 §3.8a makes the paired-day count a thresholded quantity (QC-907) so a zero-overlap load cannot read as clean. **Which** source is a pending item in 04 §11. |
 | Expected-count model per domain for the quality gate (Q9) | 02 §15 (the model) → 03 §3 (the checks that read it). |
 | The exact list of permitted automatic remediations (P12) | 03 §6 — seven codes R1–R7, plus the operator-only actions that are deliberately not among them. |
 | The existing brief job's data-capture hand-off contract (Q6) | 04 §8 (`LegacyBriefHandoff`) → 02 §14 (`legacy_` tables). |

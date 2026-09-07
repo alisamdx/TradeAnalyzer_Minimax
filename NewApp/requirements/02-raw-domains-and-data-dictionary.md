@@ -628,7 +628,10 @@ Tables (full dictionary entries to be completed alongside the verify list in 04)
 | `source` | one value for the whole table (chosen in 04) |
 | `method_note` | the source's published method, verbatim |
 | `load_run_id` | the one-shot run |
-| `stitch_date` | stored on `meta_generation` as well; readers use ext rows only before it |
+| `stitch_date` | stored on `meta_generation` as well; readers use ext rows only before it. **Null until the series is accepted** — an unaccepted series has no stitch date because nothing reads it |
+| `accepted` | `0` on load, `1` only after the overlap check has run on at least `MIN_OVERLAP_DAYS` paired days and the operator has ruled (04 §7.3). **Nothing reads a row with `accepted = 0`**: a bought series that has not yet earned a comparison is exactly as usable as no series at all, and rank reports its declared gap either way |
+
+**Loading is not accepting.** The two are separate columns because they are separate facts, and conflating them is how a series with no overlap at all would come to be read as if it had been checked. The purchase itself must cover `stitch_date + MIN_OVERLAP_DAYS` for acceptance to be reachable — see 04 §7.3, where the requirement and its measured justification live.
 
 ### `derived_iv30_daily` (Q7)
 The one derived table in stage 1, so IV rank has a clean own-computed history from day one.

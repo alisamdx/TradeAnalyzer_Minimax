@@ -163,6 +163,17 @@ A ‡ value still gets its distribution recorded like any other (§4) — measur
 | QC-905 recommendation freshness | warning | no recommendation row for a CS subset ticker within 45 days | R2 re-fetch |
 | QC-906 insider parse | warning | a Form 4 filing indexed but no transaction rows parsed | none |
 
+### 3.8a Derived IV and the external bootstrap (Q17)
+
+Registered only once a `bootstrap_iv` load exists — an unbought bootstrap has no series to check, and a check registered against it would evaluate nothing every run and sit in the zero-fire list looking exactly like one that is silently broken.
+
+| id | sev | fires when | remediation |
+|---|---|---|---|
+| QC-907 bootstrap overlap sufficiency | blocking on the bootstrap (never on the daily domains) | an `ext_iv_history` series has `accepted = 0` and `paired_days < 20` ‡ — i.e. the two series have not yet been compared on enough common days for the comparison to mean anything. **Zero paired days is the maximum firing of this check, not a pass**: the tested quantity is the count of paired days itself, reported on every evaluation whether it fired or not, so "we never had an overlap" and "the overlap was clean" can never look alike | none — the series stays unread until the days accumulate, or the operator accepts with a note |
+| QC-908 bootstrap disagreement | blocking on the bootstrap | median absolute difference between `derived_iv30_daily` and `ext_iv_history` over the paired days > 0.02 (2 vol points) † | none — accept with a note, or the series is not used |
+
+**Why QC-907 exists as a check rather than as a precondition.** The overlap check was first drafted as "for every day both series exist, store the paired difference" — which on zero such days evaluates nothing, stores nothing, and reads as a clean result. The existing app's own `iv_history` is spliced across two sources with **zero overlapping ticker-days** (measured 2026-09-07), so this is not a hypothetical shape: it is what actually happened the last time this was done, and nothing in the stored data can now say whether that splice distorted IV rank or not. Making the day count a *thresholded quantity in its own right* is the difference between a check that cannot fire and one that fires hardest precisely when there is nothing to compare.
+
 ### 3.9 Periodic checks (not every run)
 
 | id | sev | cadence | fires when |

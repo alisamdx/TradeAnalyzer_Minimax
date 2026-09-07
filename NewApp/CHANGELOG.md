@@ -9,6 +9,49 @@ exit (06 §6).
 
 ---
 
+## The IV bootstrap must buy an overlap (2026-09-07)
+
+Spec only — no code. `04 §7.3`, `03 §3.8a` (QC-907, QC-908), `02 §13`, `05 §4.6`,
+`06 §9`'s B7 gate, and the Q17 answer in `00`.
+
+**Measured on the existing app's `iv_history`, which is what prompted this.**
+333,497 rows, 1,126 tickers, 2025-05-29 → 2026-09-04, 0.46 % internal gaps —
+well populated, not the empty table CLAUDE.md's note implied. But it is spliced
+from IVolatility (to 2026-05-29) to E*Trade-computed values (from 2026-06-01)
+with **zero overlapping ticker-days**, and that is the whole problem: on equal
+67-day windows the E*Trade era carries 1.30× the IV range and 1.24× the
+day-to-day noise, which would matter a great deal to IV rank — but the windows
+are different calendar quarters, so source character and market regime cannot be
+separated, and no further analysis of the stored data ever will separate them.
+
+**The seam's level step is not evidence of anything**, which is worth recording
+because it was my first reading: +2.9 % across the join, against +1.0 %, +3.4 %
+and +5.2 % on comparable weekends *inside* the IVolatility era. A step with no
+baseline beside it is not a finding.
+
+**So the requirement is on the purchase, not only on the check.** The pull must
+cover `stitch_date + 20 trading days`. A source that sells history only up to
+the purchase date cannot be accepted whatever it costs, because the comparison
+it forecloses cannot be recovered later — this is the one requirement here that
+is impossible to add retroactively, and the old table is the proof.
+
+**Loading and accepting are now separate.** Rows land `accepted = 0` and
+**nothing reads them**; rank reports its declared gap exactly as if no bootstrap
+had been bought. Acceptance needs 20 paired days and an operator ruling on the
+disagreement statistic, and only then does `stitch_date` get set.
+
+**A zero-overlap check now FAILS.** As drafted it read "for every day both
+series exist, store the paired difference" — which on zero such days evaluates
+nothing and is indistinguishable from a clean result. The paired-day count is
+now a thresholded quantity in its own right (QC-907), reported on every
+evaluation whether it fired or not, so *no overlap* and *clean overlap* can
+never look alike. Same shape as the conviction band that could never fire and
+the liquidity gate that always did; the fourth instance in this project, and the
+first one caught in a spec rather than in production. B7's gate now requires
+QC-907 to be **shown firing on a zero-overlap fixture**.
+
+---
+
 ## B6 — the account, the chain subset, and the chains (2026-09-07)
 
 Dictionary 4 → 5. Phases 5, 6 and 7 now run inside the daily collection, with

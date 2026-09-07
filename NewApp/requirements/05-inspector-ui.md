@@ -98,6 +98,8 @@ Timeline of `ref_universe_membership` (adds/drops by list source, ticker changes
 ### 4.6 IV
 Per ticker: `derived_iv30_daily` and `ext_iv_history` on one chart, the stitch date as a vertical line, the overlap window shaded, and the paired-difference distribution from the bootstrap's quality report. `status` values (`insufficient_expirations`, `no_atm_quotes`) shown as gaps with glyphs, never interpolated.
 
+**An absent overlap must be as visible as a present one.** A shaded band that is simply not drawn looks identical to a clean join, which is the whole failure this view exists to prevent — so when a series has `accepted = 0` the chart states the paired-day count against the 20 it needs, labels the external series *unaccepted — not used for rank*, and draws no stitch line, because there is not one yet. Any rank or percentile computed with external rows carries that label wherever it is shown (04 §7.3).
+
 ### 4.7 Legacy
 Visibly framed as *the existing app's record*: brief runs by date and slot; per run the **full candidate list** with survived/rejected, each gate's pass/fail and tested value vs threshold, signals, priced legs, dice trace, critic verdict. `pre_collector = 1` rows carry an "incomplete (pre-collector import)" banner. Read-only; no joins to `raw_` tables are offered in stage 1 (segregation, Q6).
 
