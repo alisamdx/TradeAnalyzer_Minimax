@@ -60,6 +60,22 @@ if (existsSync(dbPath)) {
   const st = statSync(dbPath);
   console.log(`  size            : ${st.size} bytes`);
   console.log(`  modified        : ${st.mtime.toISOString()}`);
+
+  // Reporting only the main file is misleading, and it misled once already. In
+  // WAL mode a freshly created database keeps its schema in `-wal` until a
+  // checkpoint, so `data.sqlite` can sit at a single 4,096-byte header page
+  // while the whole schema exists. A present `-shm` means some process has the
+  // database OPEN right now, which is usually the thing you actually wanted to
+  // know.
+  for (const suffix of ['-wal', '-shm']) {
+    const side = `${dbPath}${suffix}`;
+    console.log(
+      `  ${suffix.padEnd(16)}: ${existsSync(side) ? `${statSync(side).size} bytes` : 'absent'}`
+    );
+  }
+  if (existsSync(`${dbPath}-shm`)) {
+    console.log('  (a -shm file means the database is open in another process right now)');
+  }
 }
 
 // Every generation directory under the data root, because the whole point is to
@@ -82,7 +98,14 @@ const tables = db
 console.log(`\ntables            : ${tables.length}`);
 
 if (tables.length === 0) {
-  console.log('\nThe file exists but has NO SCHEMA. Something created it without applying the');
+  console.log('\nThis connection sees NO SCHEMA.');
+  if (existsSync(`${dbPath}-wal`) || existsSync(`${dbPath}-shm`)) {
+    console.log('There are WAL sidecars, so the schema may well exist and simply not be readable');
+    console.log('from here. Close TradeAnalyzer 2 — it checkpoints on exit — and run this again');
+    console.log('BEFORE concluding the database is empty.');
+    process.exit(1);
+  }
+  console.log('No sidecars either, so something created the file without applying the');
   console.log('dictionary — most likely a process that opened the path before TradeAnalyzer 2 did.');
   console.log('Delete the generation directory and launch TradeAnalyzer 2 first:');
   console.log(`  Remove-Item -Recurse -Force "${genDir}"`);
