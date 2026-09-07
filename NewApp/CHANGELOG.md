@@ -9,6 +9,53 @@ exit (06 §6).
 
 ---
 
+## OPEN BUG: the generation corrupts during universe_seed (2026-09-07)
+
+**Not resolved. Recorded so the next session starts with the evidence rather
+than rediscovering it.**
+
+`PRAGMA integrity_check` on gen-001 after `universe_seed`:
+
+```
+*** in database main ***
+Tree 5 page 469: btreeInitPage() returns error code 11
+Tree 5 page 466: ... (and descending, many pages of one btree)
+```
+
+**Reproduced twice, on a freshly created generation, with only TradeAnalyzer and
+TradeAnalyzer 2 touching the file** — so it is not the inspection damage that
+accounted for the earlier failures of the evening.
+
+What is known, and what makes it worth chasing rather than retrying:
+
+- **The corrupt file is 2,318,336 bytes both times.** Identical size on two
+  independent runs is deterministic behaviour, not random I/O damage.
+- It gets far enough to write **1,587 `ref_universe_membership` rows** — 503 +
+  1,024 + 60, the correct lists — and **1,001 `meta_response` rows**, so it
+  fails around the thousandth archived response.
+- Damage is confined to **one btree** (`Tree 5`), pages descending from ~469.
+- `meta_generation` reads 0 afterwards, although the Overview rendered from it
+  minutes earlier, so the damage reaches an early table.
+
+Hypotheses in the order worth testing, none confirmed:
+
+1. **`applyDictionary` runs on every `openGenerationDb()`**, which the one-shot
+   claim loop calls **every two minutes** — a `DELETE` plus ~2,200 inserts into
+   `meta_dictionary` on a fresh connection each time. If a tick overlaps a
+   long-running job there are two writers on one file.
+2. The rebuild paths added the same day (`DROP TABLE` + recreate) run with
+   `foreign_keys = ON`; CLAUDE.md already records that `PRAGMA foreign_keys=OFF`
+   is a no-op inside a transaction, so a rebuild's FK behaviour is not
+   necessarily what the SQLite manual's procedure assumes.
+3. The archive writer and the database transaction are not ordered the way the
+   per-response contract claims under some failure.
+
+**Do not run a pilot day against a generation until this is understood.** A
+corrupt store that reports plausible row counts until something touches the
+wrong page is the worst possible foundation for a twenty-day clean streak.
+
+The corrupt artefact is preserved alongside the generation for post-mortem.
+
 ## The universe came from the wrong place (2026-09-07)
 
 The first live `universe_seed` succeeded — 2,096 Polygon calls, every one a 200,
