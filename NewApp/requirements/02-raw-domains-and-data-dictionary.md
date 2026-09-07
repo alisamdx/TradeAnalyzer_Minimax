@@ -74,6 +74,15 @@ Prefixes are load-bearing; the inspector groups by them.
 
 The dictionary is a checked-in TypeScript module in `packages/core` (`dictionary/*.ts`): one entry per column with `table, column, type, unit, nullable, nullMeaning, statusColumn?, converter?, sourceProvider, sourceField, description`, plus one entry **per table** carrying `naturalKey` (the columns that identify a fact across versions — used by version mode and by the replay comparison, 04 §7.5) and `indexes` (§0.6). From it are generated: the DDL, the `meta_dictionary` table the inspector reads, the ingestion converters' type signatures, and the AC-3/AC-7 tests. **A column that is not in the dictionary cannot exist** — DDL generation is the only way a table is created (AC-3, AC-13).
 
+### 0.5a How a generation's schema may change
+
+Within a generation the dictionary may grow by **nullable columns, new tables and new indexes**. A type change, a rename or a unit change would silently reinterpret rows already written, so it is a replay into a new generation (04 §7.5) and `applyDictionary` refuses it.
+
+**Two corrections made 2026-09-07, after the rule as first implemented made the new exe unable to start.**
+
+1. **The rule protects written rows, so an *empty* table is a different case.** Nothing can be reinterpreted that was never recorded, so a reshape of a table holding **zero rows** is applied by rebuilding it from the dictionary (`ApplyResult.tablesRebuilt`), with its indexes and append-only triggers recreated. A table holding even one row keeps the strict refusal, and the error names the row count so the operator can see which it is. B7a's `raw_index_quote` status split was refused against a generation containing **no collected facts at all** — correct by the letter of the rule and pointless in substance.
+2. **The check only ever looked one way.** It compared columns the dictionary had *gained* and never ones it had **lost**, so a dropped column stayed in the table — still NOT NULL, still carrying its CHECK — leaving a table that accepts **no inserts at all**. That surfaces much later as a constraint error inside an ingestion transaction, where it reads as a parser fault rather than as schema drift. **A reshape is an add and a remove; catching one of them is not catching the reshape.**
+
 ### 0.6 Declared indexes
 
 The inspector refuses any filter or sort that would scan unbounded (05 §8), so **every column the operator can reasonably filter on must be indexed, and the index must be declared in the dictionary** — the DDL generator emits exactly these and nothing else. Declaring them here rather than per table keeps the set visible as one list, which is how you notice the one you forgot.

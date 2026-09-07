@@ -15,6 +15,7 @@ import { applyDictionary } from '../src/dictionary/apply.js';
 import type { SqliteLike } from '../src/db/sqlite-like.js';
 import { defineTable } from '../src/dictionary/standard-columns.js';
 import { col } from '../src/dictionary/types.js';
+import type { TableEntry } from '../src/dictionary/types.js';
 
 /**
  * Dictionary conformance — AC-3.
@@ -521,6 +522,134 @@ describe('inspector grouping (AC-13 support)', () => {
       const dictRow = raw.prepare("SELECT unit, null_meaning FROM meta_dictionary WHERE table_name='raw_throwaway_probe' AND column_name='probe_value'").get() as { unit: string; null_meaning: string | null };
       expect(dictRow.unit).toBe('fraction');
       expect(dictRow.null_meaning).toBeNull();
+    } finally {
+      raw.close();
+    }
+  });
+});
+
+/**
+ * How a generation's schema is allowed to change — the contract that bricked the
+ * new exe at B7a when only half of it was enforced.
+ *
+ * The rule exists to protect **written rows**: within a generation the
+ * dictionary may grow by nullable columns, new tables and new indexes, and
+ * anything else is a replay into a new generation. Two things were wrong with
+ * the first implementation, and the second was the dangerous one.
+ */
+describe('dictionary — how a generation may evolve', () => {
+  const base = DICTIONARY.find((t) => t.table === 'raw_index_quote')!;
+
+  function open(dict: readonly TableEntry[]): Database.Database {
+    const raw = new Database(':memory:');
+    applyDictionary(raw as unknown as SqliteLike, dict);
+    return raw;
+  }
+
+  function withColumns(entry: TableEntry, columns: TableEntry['columns']): readonly TableEntry[] {
+    return DICTIONARY.map((t) => (t.table === entry.table ? { ...t, columns } : t));
+  }
+
+  it('adds a nullable column in place, as it always did', () => {
+    const raw = open(DICTIONARY);
+    try {
+      const grown = withColumns(base, [
+        ...base.columns,
+        { column: 'probe_note', type: 'TEXT', unit: 'text', nullable: true, nullMeaning: 'nothing to note', description: 'A probe column added after the generation was created.', sourceProvider: 'collector' }
+      ]);
+      const result = applyDictionary(raw as unknown as SqliteLike, grown);
+      expect(result.columnsAdded).toContainEqual({ table: 'raw_index_quote', column: 'probe_note' });
+      expect(result.tablesRebuilt).toEqual([]);
+    } finally {
+      raw.close();
+    }
+  });
+
+  it('rebuilds an EMPTY table whose shape changed, rather than refusing', () => {
+    // The B7a case exactly: splitting a shared status adds a NOT NULL column and
+    // drops the old one. A table with no rows carries no facts, so there is
+    // nothing that a rebuild could reinterpret — and refusing here made the exe
+    // unable to open a generation that contained no data at all.
+    const raw = open(DICTIONARY);
+    try {
+      const reshaped = withColumns(base, [
+        ...base.columns,
+        { column: 'probe_required', type: 'TEXT', unit: 'text', nullable: false, description: 'A NOT NULL probe column.', sourceProvider: 'collector' }
+      ]);
+      const result = applyDictionary(raw as unknown as SqliteLike, reshaped);
+      expect(result.tablesRebuilt).toContain('raw_index_quote');
+      const info = raw.prepare("PRAGMA table_info('raw_index_quote')").all() as { name: string }[];
+      expect(info.map((r) => r.name)).toContain('probe_required');
+    } finally {
+      raw.close();
+    }
+  });
+
+  it('REFUSES the same reshape once the table holds a row', () => {
+    const raw = open(DICTIONARY);
+    try {
+      raw.exec("INSERT INTO meta_run (run_id, run_kind, slot, trading_date, started_at, status, host_app, host_version, collector_version, dictionary_version) VALUES (1,'daily','after_close','2026-09-07','t','running','test','0','0.1.0',1)");
+      raw.exec("INSERT INTO meta_response (source_response_id, run_id, provider, endpoint, params_json, requested_at, archive_file, archive_offset, dedup_hash, encrypted, at_provider_cap, parse_status) VALUES (1,1,'etrade','/x','{}','t','a',0,'h',0,0,'ok')");
+      raw.exec("INSERT INTO meta_capture_rule (capture_rule_id, domain, version, definition_json, description, valid_from) VALUES (1,'index',1,'{}','r','t')");
+      raw.exec("INSERT INTO raw_index_quote (run_id, as_of_date, observed_at, capture_rule_id, source_response_id, symbol, last, last_status, open, high, low, prev_close, session_status) VALUES (1,'2026-09-07','t',1,1,'VIX',14.53,'ok',NULL,NULL,NULL,NULL,'omitted')");
+
+      const reshaped = withColumns(base, [
+        ...base.columns,
+        { column: 'probe_required', type: 'TEXT', unit: 'text', nullable: false, description: 'A NOT NULL probe column.', sourceProvider: 'collector' }
+      ]);
+      expect(() => applyDictionary(raw as unknown as SqliteLike, reshaped)).toThrow(/holds 1 row/i);
+    } finally {
+      raw.close();
+    }
+  });
+
+  it('notices a column the dictionary has LOST, not only ones it has gained', () => {
+    // The silent half. The guard only ever compared in one direction, so a
+    // dropped column stayed in the table — still NOT NULL, still carrying its
+    // CHECK — and the generation would accept no inserts at all. That surfaces
+    // much later as a constraint error inside an ingestion transaction, which
+    // reads as a parser fault rather than as the schema drift it is.
+    const raw = open(DICTIONARY);
+    try {
+      const shrunk = withColumns(base, base.columns.filter((c) => c.column !== 'provider_timestamp'));
+      const result = applyDictionary(raw as unknown as SqliteLike, shrunk);
+      expect(result.tablesRebuilt).toContain('raw_index_quote');
+      const info = raw.prepare("PRAGMA table_info('raw_index_quote')").all() as { name: string }[];
+      expect(info.map((r) => r.name)).not.toContain('provider_timestamp');
+    } finally {
+      raw.close();
+    }
+  });
+
+  it('leaves a rebuilt table insertable, with its triggers and indexes back', () => {
+    // A rebuild drops the table, so its append-only triggers and indexes go with
+    // it. If they are not recreated the table silently loses AC-2 — which would
+    // be a far worse outcome than the error the rebuild was avoiding.
+    const raw = open(DICTIONARY);
+    try {
+      const reshaped = withColumns(base, [
+        ...base.columns,
+        { column: 'probe_required', type: 'TEXT', unit: 'text', nullable: false, description: 'A NOT NULL probe column.', sourceProvider: 'collector' }
+      ]);
+      applyDictionary(raw as unknown as SqliteLike, reshaped);
+
+      raw.exec("INSERT INTO meta_run (run_id, run_kind, slot, trading_date, started_at, status, host_app, host_version, collector_version, dictionary_version) VALUES (1,'daily','after_close','2026-09-07','t','running','test','0','0.1.0',1)");
+      raw.exec("INSERT INTO meta_response (source_response_id, run_id, provider, endpoint, params_json, requested_at, archive_file, archive_offset, dedup_hash, encrypted, at_provider_cap, parse_status) VALUES (1,1,'etrade','/x','{}','t','a',0,'h',0,0,'ok')");
+      raw.exec("INSERT INTO meta_capture_rule (capture_rule_id, domain, version, definition_json, description, valid_from) VALUES (1,'index',1,'{}','r','t')");
+      raw.exec("INSERT INTO raw_index_quote (run_id, as_of_date, observed_at, capture_rule_id, source_response_id, symbol, last, last_status, open, high, low, prev_close, session_status, probe_required) VALUES (1,'2026-09-07','t',1,1,'VIX',14.53,'ok',NULL,NULL,NULL,NULL,'omitted','x')");
+
+      expect(() => raw.exec("DELETE FROM raw_index_quote")).toThrow(/append-only/i);
+    } finally {
+      raw.close();
+    }
+  });
+
+  it('is idempotent: re-applying an unchanged dictionary rebuilds nothing', () => {
+    const raw = open(DICTIONARY);
+    try {
+      const again = applyDictionary(raw as unknown as SqliteLike, DICTIONARY);
+      expect(again.tablesRebuilt).toEqual([]);
+      expect(again.columnsAdded).toEqual([]);
     } finally {
       raw.close();
     }

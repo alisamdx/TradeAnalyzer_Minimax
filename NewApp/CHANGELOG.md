@@ -9,6 +9,55 @@ exit (06 §6).
 
 ---
 
+## The new exe could not start, and survived not starting (2026-09-07)
+
+B7a's `raw_index_quote` status split added a NOT NULL column, which
+`applyDictionary` refused — correctly by the letter of its rule. The exe then
+**failed invisibly**, which is the part worth keeping.
+
+**What the operator saw: nothing.** No window, no error, no exit — and three
+`TradeAnalyzer2` processes sitting in Task Manager looking exactly like an app
+somebody forgot to close. It was found only because the build guard kept
+refusing to package, and the first reading of it was wrong: three processes with
+no window title looked like orphaned children of a closed app, and they were a
+launch that had never opened one. **A live instance reports an empty
+`MainWindowTitle` too, so that signal proves nothing; the real tell is the
+process count — a healthy instance has four (main, gpu, renderer, utility) and
+the broken one had three, because the renderer is spawned by the window that was
+never created.**
+
+**Two independent bugs, and the second is the transferable one.**
+
+1. `openGeneration()` throwing inside `app.whenReady().then(...)` with no
+   `.catch()` became an *unhandled rejection warning* on a stderr nobody reads.
+2. Because `createWindow()` never ran, **no window ever existed** — and
+   `window-all-closed` only fires once a window has been created and closed. So
+   `app.quit()` was never called and the process lived forever. **The absence of
+   a window is precisely what disabled the mechanism that would have shut it
+   down.** Startup failures now show a dialog and `app.exit(1)`, and
+   `unhandledRejection`/`uncaughtException` route to the same place.
+
+**The schema rule had a matching gap, in both directions.** It protects *written
+rows*, so an **empty** table is a different case: nothing can be reinterpreted
+that was never recorded. A reshape of an empty table is now applied by
+rebuilding it from the dictionary; a table holding even one row keeps the strict
+refusal, and the error now names the row count. gen-001 held **zero** collected
+facts — 1,442 `meta_dictionary` rows and two bookkeeping rows — so the change
+that was refused could not have destroyed anything.
+
+**And the guard only ever looked one way.** It compared columns the dictionary
+had *gained* and never ones it had **lost**, so a dropped column stayed in the
+table — still NOT NULL, still carrying its CHECK — leaving a table that accepts
+no inserts at all. That would have surfaced much later as a constraint error
+inside an ingestion transaction, reading as a parser fault rather than as schema
+drift. **A reshape has two halves and only one was being checked.**
+
+Verified end to end against the real gen-001: the table was rebuilt with its
+append-only triggers and index intact, the window opened, and closing it left
+**zero** processes behind. `247` tests in `core`.
+
+---
+
 ## B7a — the event and macro domains (2026-09-07)
 
 Phase 8 runs inside the daily collection: earnings, EDGAR filings and XBRL

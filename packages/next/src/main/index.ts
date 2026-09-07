@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell } from 'electron';
+import { app, BrowserWindow, dialog, shell } from 'electron';
 import { join } from 'node:path';
 import { existsSync } from 'node:fs';
 import { COLLECTOR_VERSION, DICTIONARY_VERSION } from '@tradeanalyzer/core';
@@ -73,6 +73,43 @@ function createWindow(): void {
   else void window.loadFile(join(import.meta.dirname, '../renderer/index.html'));
 }
 
+/**
+ * A startup failure must be **seen** and must **exit**.
+ *
+ * This is the half the first version got wrong, and the way it was wrong is
+ * worth keeping written down. `openGeneration()` runs before the window, and the
+ * comment below has always claimed that a failure there is "a startup error the
+ * operator sees". It was not: the throw landed in an unhandled promise
+ * rejection, which Electron reports as a **warning** on a stderr nobody reads.
+ *
+ * Then the second half. Because `createWindow()` never ran, **no window ever
+ * existed** — and `window-all-closed` only fires once a window has been created
+ * and closed. So `app.quit()` was never called and the process stayed alive
+ * forever: three Electron processes, no window, no error, no exit. Invisible
+ * except in Task Manager, where it looks exactly like an app somebody forgot to
+ * close — and it blocks the build guard, which is how it was finally noticed.
+ *
+ * **The general shape: a startup path that neither shows nor exits produces a
+ * headless survivor, and the absence of a window is precisely what disables the
+ * mechanism that would have shut it down.** An error dialog is not decoration
+ * here; it is the only thing standing between a failed launch and a process that
+ * outlives its own purpose.
+ */
+function reportFatalStartup(err: unknown): void {
+  const message = err instanceof Error ? err.message : String(err);
+  console.error(`[next] fatal startup error: ${message}`);
+  try {
+    dialog.showErrorBox('TradeAnalyzer 2 could not start', message);
+  } catch {
+    // A dialog can fail if the failure happened before Electron was ready
+    // enough to show one. Exiting still has to happen, so this is swallowed
+    // deliberately — never at the cost of the exit below.
+  }
+  // `exit`, not `quit`: `quit` is cooperative and runs the normal shutdown, and
+  // there is no window here for it to close. This path must terminate.
+  app.exit(1);
+}
+
 app.whenReady().then(() => {
   console.log(
     `[next] TradeAnalyzer 2 v${app.getVersion()} — core ${COLLECTOR_VERSION}, dictionary ${DICTIONARY_VERSION}`
@@ -92,7 +129,12 @@ app.whenReady().then(() => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
-});
+}).catch(reportFatalStartup);
+
+// A rejection anywhere else in the main process gets the same treatment, for the
+// same reason: the danger is not the error, it is surviving it silently.
+process.on('unhandledRejection', reportFatalStartup);
+process.on('uncaughtException', reportFatalStartup);
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
