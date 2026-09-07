@@ -15,6 +15,14 @@
  *
  * Uses `node:sqlite`, so it works whichever ABI `better-sqlite3` currently
  * carries (CLAUDE.md).
+ *
+ * **Run it from an ordinary shell, never a redirected one.** Opening a WAL
+ * database from a process whose `%APPDATA%` is redirected is not a read: on
+ * close SQLite checkpoints the WAL into whatever `data.sqlite` *that* process
+ * can see — the private copy — and then removes the shared WAL. The original is
+ * left as a bare header page with no schema, and the data now lives in a copy
+ * nobody else will ever open. That happened on 2026-09-07 and it cost a
+ * generation. The redirect check above is not a nicety; it is the guard.
  */
 import { existsSync, readFileSync, statSync, readdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -43,6 +51,9 @@ try {
 }
 console.log(`redirected        : ${redirect ?? 'no (this shell writes where it says it does)'}`);
 
+/** Whether WAL sidecars existed BEFORE this script opened anything. */
+let sidecarsBefore = false;
+
 const pointerPath = join(appData, 'tradeanalyzer-shared', 'data-root.json');
 console.log(`pointer path      : ${pointerPath}`);
 if (!existsSync(pointerPath)) {
@@ -69,6 +80,7 @@ if (existsSync(dbPath)) {
   // know.
   for (const suffix of ['-wal', '-shm']) {
     const side = `${dbPath}${suffix}`;
+    if (existsSync(side)) sidecarsBefore = true;
     console.log(
       `  ${suffix.padEnd(16)}: ${existsSync(side) ? `${statSync(side).size} bytes` : 'absent'}`
     );
@@ -90,6 +102,19 @@ if (!existsSync(dbPath)) {
   process.exit(1);
 }
 
+// Refusing rather than warning, because opening it is the harm. A WAL database
+// opened from a redirected process is checkpointed on close into the copy THAT
+// process can see, and the shared WAL is then removed — leaving the original a
+// bare header page and the data in a copy nobody will open again. This is not a
+// hypothetical: it cost a generation on 2026-09-07, and it happened while
+// running this very script to find out why the generation looked empty.
+if (redirect) {
+  console.log('\nRefusing to open the database: this shell is redirected, and opening a WAL');
+  console.log(`database from here MOVES it — the checkpoint lands in ${redirect}`);
+  console.log('and the shared WAL is deleted. Run this from an ordinary terminal instead.');
+  process.exit(3);
+}
+
 const db = new DatabaseSync(dbPath);
 const tables = db
   .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
@@ -99,7 +124,11 @@ console.log(`\ntables            : ${tables.length}`);
 
 if (tables.length === 0) {
   console.log('\nThis connection sees NO SCHEMA.');
-  if (existsSync(`${dbPath}-wal`) || existsSync(`${dbPath}-shm`)) {
+  // `sidecarsBefore`, not a fresh existsSync: opening the database above CREATES
+  // `-wal` and `-shm`, so checking now always says they are present and the
+  // advice is always "close the reader and try again" — which is wrong, and was
+  // wrong the first time it mattered.
+  if (sidecarsBefore) {
     console.log('There are WAL sidecars, so the schema may well exist and simply not be readable');
     console.log('from here. Close TradeAnalyzer 2 — it checkpoints on exit — and run this again');
     console.log('BEFORE concluding the database is empty.');
