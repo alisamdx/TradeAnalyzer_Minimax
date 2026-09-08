@@ -98,6 +98,18 @@ Two things worth carrying forward. **A default that creates is not a neutral def
 
 Recovery needs no reset: such a generation is structurally correct and empty, and the new exe writes the missing `meta_generation` row on its next open.
 
+### 3.4 How a script may touch a generation
+
+**The dev scripts open a generation with `better-sqlite3` — the applications' own SQLite — and only when no application has it open.** Both rules were paid for on 2026-09-07, when `meta_response` was corrupted twice while `queue-job.mjs` and `diagnose-generation.mjs` were run against a generation the collector was writing.
+
+The scripts originally used `node:sqlite`, chosen so they would work whichever ABI the native module currently carried. That was reasoning about the wrong risk. **`node:sqlite` bundles SQLite 3.51.3 and `better-sqlite3` bundles 3.53.1, and the wal-index (`-shm`) format is not guaranteed compatible across versions** — two libraries coordinating through one wal-index is a corruption mechanism, and it also showed as lost writes: an insert that reported success and left no row, twice returning "request 1".
+
+- **Concurrency**: a `-shm` file exists exactly while some process holds the database, so its presence is the refusal. Recovering a stale one is the application's job, never a script's — starting the new exe replays and checkpoints it.
+- **Library**: one SQLite per generation, always. The ABI swap (`npm run rebuild:node`) is the price; the scripts name it and **refuse rather than fall back**, because a fallback reintroduces the mixing at the moment nobody is watching.
+- **Durability**: a script checkpoints `TRUNCATE` before closing and reports a `busy` or short checkpoint, for the same reason §3.3's applications do.
+
+**A diagnostic that damages what it inspects is worse than no diagnostic** — and this one did, for a whole evening, while being the tool used to decide whether the damage was happening.
+
 ---
 
 ## 4. Workspace mechanics

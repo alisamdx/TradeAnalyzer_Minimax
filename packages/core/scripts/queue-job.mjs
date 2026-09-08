@@ -25,15 +25,20 @@
  *     The script refuses to run when it detects the redirect.
  *  2. A different Windows user, which has its own `%APPDATA%` entirely.
  *
- * Uses **`node:sqlite`**, not `better-sqlite3`, on purpose: this repo swaps the
- * native module's ABI between Node and Electron builds (CLAUDE.md), so a script
- * depending on it only runs in whichever half of the cycle you are currently in.
- * A built-in has no ABI to be wrong.
+ * Uses **`better-sqlite3`** — the same library both applications use — and only
+ * when no application has the generation open. It used to use `node:sqlite`,
+ * chosen because a built-in "has no ABI to be wrong", and that was reasoning
+ * about the wrong risk: `node:sqlite` bundles SQLite 3.51.3 while
+ * `better-sqlite3` bundles 3.53.1, and the wal-index format is not guaranteed
+ * compatible across versions. Running this against a live generation corrupted
+ * `meta_response` twice on 2026-09-07 and silently lost an insert twice more.
+ * The ABI dance is the price, and it is cheap by comparison — see
+ * `lib/generation-access.mjs`.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { DatabaseSync } from 'node:sqlite';
+import { checkpointAndClose, openGenerationExclusively } from './lib/generation-access.mjs';
 
 // The redirect probe lives in `core` and nowhere else. It used to be a copy in
 // this script and a second copy in `diagnose-generation.mjs`, while the two
@@ -102,55 +107,47 @@ if (!existsSync(dbPath)) {
   process.exit(1);
 }
 
-// Write-capable, never readonly: on Windows a readonly connection cannot attach
-// the live WAL index and would read a stale generation (CLAUDE.md).
-// Sidecar state BEFORE opening, because opening creates them.
-const hadWal = existsSync(`${dbPath}-wal`);
-const hadShm = existsSync(`${dbPath}-shm`);
-
-const db = new DatabaseSync(dbPath);
+// Opens with the SAME SQLite the applications use, and only when no application
+// has the file open. Both rules exist because `meta_response` was corrupted
+// twice on 2026-09-07 with a script and an app on one WAL database at once, and
+// because `node:sqlite` (SQLite 3.51.3) and `better-sqlite3` (3.53.1) do not
+// share a wal-index format by guarantee. See `lib/generation-access.mjs`.
+const db = openGenerationExclusively(dbPath);
 
 // A raw `no such table: meta_job_request` is a true statement and a useless
 // one — it has three quite different causes and names none of them. Checked up
 // front so the message can.
-const hasQueue = db
-  .prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'meta_job_request'")
-  .get().n > 0;
+const hasQueue =
+  db
+    .prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'meta_job_request'")
+    .get().n > 0;
 if (!hasQueue) {
   db.close();
-  console.error(`This connection sees no schema in ${dbPath}.`);
-  if (hadShm) {
-    console.error(
-      '\nA `-shm` file was present, so **TradeAnalyzer 2 has the database open**. Close it —\n' +
-        'it checkpoints the schema into data.sqlite on exit — and run this again.'
-    );
-  } else if (hadWal) {
-    console.error(
-      '\nA `-wal` file was present with no `-shm`, so the schema is in an unreplayed write-ahead\n' +
-        'log. Open TradeAnalyzer 2 once and close it again to checkpoint it.'
-    );
-  } else {
-    console.error(
-      '\nNo WAL sidecars either, so the file really is an empty shell. Delete the generation\n' +
-        'directory and launch TradeAnalyzer 2 first — it owns generation creation:\n' +
-        `  Remove-Item -Recurse -Force "${join(dataRoot, `gen-${String(currentGeneration).padStart(3, '0')}`)}"`
-    );
-  }
-  console.error('\n`node packages/core/scripts/diagnose-generation.mjs` reports which of these it is.');
+  console.error(
+    [
+      `This connection sees no schema in ${dbPath}.`,
+      '',
+      'No application had it open (this script refuses otherwise), so the file really is an',
+      'empty shell — something created the path before TradeAnalyzer 2 did. Generation',
+      'creation belongs to the new exe: delete the directory and launch it first.',
+      `  Remove-Item -Recurse -Force "${join(dataRoot, `gen-${String(currentGeneration).padStart(3, '0')}`)}"`
+    ].join('\n')
+  );
   process.exit(4);
 }
 
-const insert = db.prepare(
-  `INSERT INTO meta_job_request (requested_at, requested_by, run_kind, params_json, state)
-   VALUES (?, ?, ?, ?, 'queued')`
-);
-const info = insert.run(new Date().toISOString(), 'queue-job.mjs (dev)', kind, paramsArg);
+const info = db
+  .prepare(
+    `INSERT INTO meta_job_request (requested_at, requested_by, run_kind, params_json, state)
+     VALUES (?, ?, ?, ?, 'queued')`
+  )
+  .run(new Date().toISOString(), 'queue-job.mjs (dev)', kind, paramsArg);
 
 // Read back through a fresh statement, so the printed confirmation is what the
-// file holds rather than what we believe we wrote.
-const queued = db
-  .prepare("SELECT COUNT(*) AS n FROM meta_job_request WHERE state = 'queued'")
-  .get();
+// file holds rather than what we believe we wrote. That distinction stopped
+// being academic on 2026-09-07, when this script twice reported "request 1"
+// because the previous insert had never reached the file.
+const queued = db.prepare("SELECT COUNT(*) AS n FROM meta_job_request WHERE state = 'queued'").get();
 
 console.log(
   `Queued ${kind} as request ${info.lastInsertRowid} in ` +
@@ -158,4 +155,6 @@ console.log(
     `${queued.n} request(s) now queued. The existing app's collector-oneshot handler claims one\n` +
     'every ~2 minutes; it must be running. Watch logs/errors/ for a `collector-oneshot:tick` line.'
 );
-db.close();
+
+// Durable before this process exits, and loud if it is not.
+checkpointAndClose(db);

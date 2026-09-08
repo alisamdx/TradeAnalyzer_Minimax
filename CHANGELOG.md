@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.204] - 2026-09-07
+
+### fix - the dev scripts were corrupting the generation they inspected
+
+- **This supersedes the root cause given at v1.1.202.** The MSIX redirect was real and the guard was worth shipping, but it was **not** what corrupted `meta_response` - the second corruption happened *after* that guard shipped, on a verified-clean shell, with both apps on the fixed builds.
+- `queue-job.mjs` and `diagnose-generation.mjs` used **`node:sqlite`** (SQLite **3.51.3**) while both applications use **`better-sqlite3`** (**3.53.1**). The wal-index (`-shm`) format carries no cross-version compatibility guarantee, so running a script against a generation the collector was writing put two SQLite libraries on one wal-index. It surfaced as corruption in the table being written, and as **silently lost writes** - `queue-job` reported `request 1` on two successive runs because the first insert never reached the file.
+- `node:sqlite` was chosen on the grounds that "a built-in has no ABI to be wrong". True, and reasoning about the wrong risk.
+- **The identification that settled it: `sqlite_master.rootpage` on a freshly built schema.** The two events reported `Tree 5` and `Tree 7`, which read as different objects and are the same table - adding `meta_open_handle` shifted every later root page by two. **A tree number is only meaningful against the schema version that produced it**, and reading them as different tables kept the earlier diagnosis pointing the wrong way.
+- `packages/core/scripts/lib/generation-access.mjs` is now the only way a script opens a generation: refuses while a `-shm` exists, opens with `better-sqlite3` only (naming `npm run rebuild:node`, **never falling back**), and checkpoints `TRUNCATE` before closing. The require and the `new Database(...)` sit in one `try`, because the binding loads lazily and the construction is what throws on an ABI mismatch.
+- Tests in `packages/core/test/generation-access.test.ts` (4, in a child process since both refusals are `process.exit`), asserting **both** directions - a guard that refuses everything is an outage that looks identical in a suite testing only the refusal.
+- **A diagnostic that damages what it inspects is worse than no diagnostic**, and this one was the instrument being used to decide whether the damage was happening.
+
 ## [1.1.203] - 2026-09-07
 
 ### fix - the collector could create a generation, and did

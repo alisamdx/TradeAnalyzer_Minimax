@@ -13,8 +13,15 @@
  * on disk, and what the schema holds — plus any *other* generation directory it
  * can find, because two of them is the failure that started all of this.
  *
- * Uses `node:sqlite`, so it works whichever ABI `better-sqlite3` currently
- * carries (CLAUDE.md).
+ * Uses **`better-sqlite3`** — the same SQLite both applications use — and refuses
+ * while either has the generation open. It used to use `node:sqlite` so it would
+ * work whichever ABI the native module currently carried; that convenience is
+ * what made it dangerous. `node:sqlite` bundles SQLite 3.51.3 and
+ * `better-sqlite3` bundles 3.53.1, the wal-index format is not guaranteed
+ * compatible across versions, and running this tool against a live generation
+ * was part of corrupting `meta_response` twice on 2026-09-07. **A diagnostic
+ * that damages what it inspects is worse than no diagnostic.** After
+ * `npm run package` it needs `npm run rebuild:node`, and it says so.
  *
  * **Run it from an ordinary shell, never a redirected one.** Opening a WAL
  * database from a process whose `%APPDATA%` is redirected is not a read: on
@@ -27,12 +34,11 @@
 import { existsSync, readFileSync, statSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { DatabaseSync } from 'node:sqlite';
+import { checkpointAndClose, openGenerationExclusively } from './lib/generation-access.mjs';
 
 // One implementation of the probe, shared with `queue-job.mjs` and — the part
 // that actually matters — with both applications, which call it before they open
-// a generation. It is plain JavaScript with no native binding, so it carries no
-// ABI (which is why `node:sqlite` is still used for the database below).
+// a generation.
 let detectRedirect;
 try {
   ({ detectRedirect } = await import('../dist/db/appdata-redirect.js'));
@@ -119,7 +125,11 @@ if (redirect) {
   process.exit(3);
 }
 
-const db = new DatabaseSync(dbPath);
+// Same SQLite the applications use, and only when none of them has it open.
+// This tool was itself part of the corruption on 2026-09-07: run against a live
+// generation it put a second SQLite library on the same wal-index. A diagnostic
+// that damages what it inspects is worse than no diagnostic.
+const db = openGenerationExclusively(dbPath);
 const tables = db
   .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
   .all()
@@ -133,9 +143,9 @@ if (tables.length === 0) {
   // advice is always "close the reader and try again" — which is wrong, and was
   // wrong the first time it mattered.
   if (sidecarsBefore) {
-    console.log('There are WAL sidecars, so the schema may well exist and simply not be readable');
-    console.log('from here. Close TradeAnalyzer 2 — it checkpoints on exit — and run this again');
-    console.log('BEFORE concluding the database is empty.');
+    console.log('A `-wal` was present with no `-shm`, so the schema is in an unreplayed write-ahead');
+    console.log('log left by an unclean exit. Start TradeAnalyzer 2 once and close it — that replays');
+    console.log('and checkpoints it — BEFORE concluding the database is empty.');
     process.exit(1);
   }
   console.log('No sidecars either, so something created the file without applying the');
@@ -157,7 +167,7 @@ if (integrityResult !== 'ok') {
   console.log('Nothing here is recoverable in place. Close both applications, delete the');
   console.log('generation directory, and let TradeAnalyzer 2 recreate it:');
   console.log(`  Remove-Item -Recurse -Force "${genDir}"`);
-  db.close();
+  checkpointAndClose(db);
   process.exit(2);
 }
 console.log('integrity_check   : ok');
@@ -224,4 +234,4 @@ if (tables.includes('ref_universe_membership')) {
   }
 }
 
-db.close();
+checkpointAndClose(db);
