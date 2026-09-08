@@ -49,7 +49,12 @@ export default [
     }
   },
   {
-    files: ['scripts/**/*.mjs'],
+    // `.cjs` as well as `.mjs`: an Electron main process launched by a script
+    // must be CommonJS, because Electron 32 does not run a `.mjs` entry point —
+    // it produces no output, no error and no exit (see CLAUDE.md). Leaving the
+    // extension out of this glob reported every `require`, `process` and
+    // `console` in such a file as undefined.
+    files: ['scripts/**/*.{mjs,cjs}'],
     languageOptions: {
       globals: { ...globals.node }
     }

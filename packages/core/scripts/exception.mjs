@@ -20,24 +20,24 @@
  * re-fetch could ever separate them anyway, because the provider keys by ticker
  * too.
  */
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { homedir } from 'node:os';
-import { createRequire } from 'node:module';
+import {
+  checkpointAndClose,
+  openGenerationExclusively,
+  resolveGenerationPointer
+} from './lib/generation-access.mjs';
 
-const require = createRequire(import.meta.url);
 const core = await import('../dist/index.js');
 
-const pointerPath = join(homedir(), 'AppData', 'Roaming', 'tradeanalyzer-shared', 'data-root.json');
-if (!existsSync(pointerPath)) {
-  console.error(`No generation pointer at ${pointerPath}. Run TradeAnalyzer 2 once.`);
-  process.exit(1);
-}
-const { dataRoot, currentGeneration } = JSON.parse(readFileSync(pointerPath, 'utf8'));
-const dbPath = join(dataRoot, `gen-${String(currentGeneration).padStart(3, '0')}`, 'data.sqlite');
-
-const Database = require('better-sqlite3');
-const db = new Database(dbPath);
+// Until 2026-09-08 this script resolved the pointer itself — from `homedir()`,
+// a third spelling of a path the other two scripts each spelled differently —
+// and then called `new Database(dbPath)` directly. So it opened the live
+// generation from any shell including a containerised one, while both
+// applications had it open, creating the file if it was missing, and ran
+// `applyDictionary` against it. Four refusals the other scripts had, and it had
+// none of them; they now live in `openGenerationExclusively` so a fourth script
+// cannot miss them either.
+const { dbPath } = await resolveGenerationPointer();
+const db = await openGenerationExclusively(dbPath, 'exception.mjs');
 
 // Apply the dictionary, exactly as both applications do on open. It is additive
 // and idempotent, and without it this script cannot work on a generation created
@@ -131,5 +131,9 @@ try {
   console.error(err instanceof Error ? err.message : String(err));
   process.exit(1);
 } finally {
-  db.close();
+  // Not `db.close()`. A close is not a checkpoint: measured 2026-09-07, a
+  // 918,792-byte WAL was discarded on close with `data.sqlite` byte-for-byte
+  // unchanged — the whole write silently lost. `checkpointAndClose` says so when
+  // it does not fully apply.
+  checkpointAndClose(db);
 }

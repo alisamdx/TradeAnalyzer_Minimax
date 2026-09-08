@@ -35,28 +35,17 @@
  * The ABI dance is the price, and it is cheap by comparison — see
  * `lib/generation-access.mjs`.
  */
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { homedir } from 'node:os';
-import { checkpointAndClose, openGenerationExclusively } from './lib/generation-access.mjs';
+import {
+  checkpointAndClose,
+  openGenerationExclusively,
+  resolveGenerationPointer
+} from './lib/generation-access.mjs';
 
-// The redirect probe lives in `core` and nowhere else. It used to be a copy in
-// this script and a second copy in `diagnose-generation.mjs`, while the two
-// applications — the ones that can actually destroy a generation by opening it
-// from a redirected process — had none at all. Importing the built module keeps
-// one implementation; it is plain JavaScript with no native binding, so it has
-// no ABI to be wrong about (which is why `node:sqlite` is still used below).
-let detectRedirect;
-try {
-  ({ detectRedirect } = await import('../dist/db/appdata-redirect.js'));
-} catch {
-  console.error(
-    'packages/core is not built, so the redirect guard cannot be loaded — and running without it\n' +
-      'is exactly how a generation gets corrupted. Build it first:\n' +
-      '  npm run build --prefix packages/core'
-  );
-  process.exit(2);
-}
+// The redirect probe lives in `core` and nowhere else, and the *refusal* now
+// lives in `openGenerationExclusively` rather than here. This script used to
+// carry its own copy, `diagnose-generation.mjs` carried a second, and the two
+// applications — the ones that can actually destroy a generation — had none.
+// A copy in each caller is how `exception.mjs` came to have no guard at all.
 
 const KINDS = ['universe_seed', 'backfill_bars', 'bootstrap_iv', 'legacy_import', 'replay', 'reset'];
 
@@ -75,44 +64,21 @@ try {
   process.exit(2);
 }
 
-const appData = process.env.APPDATA ?? join(homedir(), 'AppData', 'Roaming');
+const { dbPath, generationDir, currentGeneration } = await resolveGenerationPointer();
 
-const redirect = detectRedirect(appData);
-if (redirect.redirectedTo) {
-  console.error(
-    [
-      'Refusing to queue: this shell is containerised, so writes to %APPDATA% are redirected',
-      `into ${redirect.redirectedTo} and the collector will never see them.`,
-      '',
-      'The write would succeed and read back perfectly — that is what makes it dangerous.',
-      'Run this from an ordinary terminal in the same Windows session as the app.'
-    ].join('\n')
-  );
-  process.exit(3);
-}
-
-const pointerPath = join(appData, 'tradeanalyzer-shared', 'data-root.json');
-if (!existsSync(pointerPath)) {
-  console.error(
-    `No generation pointer at ${pointerPath}.\n` +
-      'Run TradeAnalyzer 2 once — it creates the generation and writes the pointer both apps read.'
-  );
-  process.exit(1);
-}
-
-const { dataRoot, currentGeneration } = JSON.parse(readFileSync(pointerPath, 'utf8'));
-const dbPath = join(dataRoot, `gen-${String(currentGeneration).padStart(3, '0')}`, 'data.sqlite');
-if (!existsSync(dbPath)) {
-  console.error(`Generation database missing: ${dbPath}`);
-  process.exit(1);
-}
-
-// Opens with the SAME SQLite the applications use, and only when no application
-// has the file open. Both rules exist because `meta_response` was corrupted
-// twice on 2026-09-07 with a script and an app on one WAL database at once, and
-// because `node:sqlite` (SQLite 3.51.3) and `better-sqlite3` (3.53.1) do not
-// share a wal-index format by guarantee. See `lib/generation-access.mjs`.
-const db = openGenerationExclusively(dbPath);
+// Opens with the SAME SQLite the applications use, from a shell whose %APPDATA%
+// is not redirected, only when no application has the file open, and never
+// creating it. All four rules were paid for on 2026-09-07: a redirected process
+// moved a generation into a container copy; a script and an app on one WAL
+// database corrupted `meta_response` twice; `node:sqlite` (SQLite 3.51.3) and
+// `better-sqlite3` (3.53.1) do not share a wal-index format by guarantee; and
+// `new Database(path)` creates, which manufactured a generation with no
+// `meta_generation` row. See `lib/generation-access.mjs`.
+//
+// The redirect refusal matters most to *this* script: a row queued into a
+// container copy commits, reads back perfectly, and is never seen by the
+// collector — which is how most of an afternoon went on 2026-09-07.
+const db = await openGenerationExclusively(dbPath, 'queue-job.mjs');
 
 // A raw `no such table: meta_job_request` is a true statement and a useless
 // one — it has three quite different causes and names none of them. Checked up
@@ -130,7 +96,7 @@ if (!hasQueue) {
       'No application had it open (this script refuses otherwise), so the file really is an',
       'empty shell — something created the path before TradeAnalyzer 2 did. Generation',
       'creation belongs to the new exe: delete the directory and launch it first.',
-      `  Remove-Item -Recurse -Force "${join(dataRoot, `gen-${String(currentGeneration).padStart(3, '0')}`)}"`
+      `  Remove-Item -Recurse -Force "${generationDir}"`
     ].join('\n')
   );
   process.exit(4);

@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.1.205] - 2026-09-08
+
+### fix - a third dev script opened the generation with none of the guards
+
+- `@tradeanalyzer/core` 0.3.2. `packages/core/scripts/` holds three scripts that open a generation, and the four refusals were spread across the **callers** rather than the function they share: the redirect check was a copy in `queue-job.mjs` and a second copy in `diagnose-generation.mjs`, the `-shm` in-use check was in the helper, and the refusal to create a missing file was in `queue-job.mjs` alone.
+- **`exception.mjs` had none of them.** Written later for B5's ticker-reuse rulings, it resolved the pointer itself - from `homedir()`, a third spelling of a path the other two each spelled differently - called `new Database(dbPath)` on the live generation, ran `applyDictionary` against it, and closed with `db.close()`. So it would open the generation from a containerised shell, while both apps had it open, creating the file if it were missing, and could discard its own writes on exit. All four failures have each already cost this project a day, and each was already prevented **somewhere else in the same directory**.
+- **The shape, for the fourth time: a capability that must apply to every caller belongs in the function they all call.** The v1.1.204 write-up says exactly this, *about these scripts*, naming the applications as the gap - so the scripts it was describing were themselves an instance of it. A copy in each caller is not a safeguard; it is a list of the callers somebody remembered, and the next script is written after the list.
+- Now: `resolveGenerationPointer()` probes the pointer's directory and refuses to invent it; `openGenerationExclusively(dbPath, who)` probes the generation's directory, refuses while a `-shm` exists, refuses to create, and opens with the applications' own SQLite. Both delegate to `core`'s `assertNotRedirected` so the operator reads the same words the apps print. **Directories are the argument, never `%APPDATA%` globally** - the redirect is per file, `dataRoot` is configurable and the pointer is not.
+- **The invariant is asserted rather than remembered**: a scan in `packages/core/test/generation-access.test.ts` fails any script under `scripts/` that resolves the shared pointer without the helper, or that constructs a `Database` itself. It keys on the pointer (not on `new Database`) so the replay arms stay legal, strips comments and **keeps strings** (the module path and the pointer filename are string literals), and ships three fixtures - one that must fire, one that must not, and one of pure prose that must not fire either.
+- `293` tests in `core`, `1,239` in the existing app.
+
+### chore - the Electron arm of the seed replay, and the tenth suspect falls
+
+- `packages/core/scripts/replay-seed-in-electron.cjs` runs the `universe_seed` replay inside a real Electron main process against the Electron-ABI binary. Both arms now share `scripts/lib/seed-replay.mjs`, so the **runtime is the only difference** - two copies would drift and a divergence would be indistinguishable from the finding.
+- **Clean.** Electron 32.3.3 main, node 20.18.1, ABI 128, byte-identical counts and WAL size to the Node control; clean again with real `safeStorage` for the archive. That eliminates the last suspect on the open corruption bug's list (`NewApp/CHANGELOG.md`).
+- **Electron 32 will not run a `.mjs` entry point and says nothing** - no output, no error, no exit, a headless main process that has to be killed. The byte-identical `.cjs` runs normally. A silent hang is indistinguishable from the bug the harness exists to investigate.
+- The replay now prints the WAL's size **before** the checkpoint (4,157,112 bytes clean). `checkpoint {busy:0, log:0, checkpointed:0}` was once read as "the WAL was empty" and carried into a wrong diagnosis; it is what a successful `TRUNCATE` looks like.
+
+### docs - the tooling shell is the redirected one
+
+- Verified this session: **Claude Code's shell in the desktop app is MSIX-containerised.** `detectRedirect(process.env.APPDATA)` reports `%APPDATA%` served from `AppData\Local\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming`, and full Electron profiles for **both** applications sit under it - `trade-analyzer-next` with its own `data\gen-001\data.sqlite` and two archive files from the 2026-09-07 seed. A directory listing through `%APPDATA%` from such a session is a *merge* of two views, and "the shell was verified clean" needs the probe rather than an impression.
+
 ## [1.1.204] - 2026-09-07
 
 ### fix - the dev scripts were corrupting the generation they inspected

@@ -9,6 +9,72 @@ exit (06 §6).
 
 ---
 
+## Every script's generation open goes through one door (2026-09-08)
+
+`core` 0.3.2. Found while building the Electron arm of the seed replay, by
+asking a question that had not been asked: *which code can open a generation?*
+
+**Three scripts, four refusals, and they were spread across the callers.** The
+redirect check was copied into `queue-job.mjs` and `diagnose-generation.mjs`; the
+`-shm` in-use check lived in `openGenerationExclusively`; the refusal to create a
+missing file lived in `queue-job.mjs` alone. **`exception.mjs` had none of the
+four.** It resolved the pointer from `homedir()` — a third spelling of a path the
+other two each spelled differently — opened the live generation with
+`new Database(dbPath)`, ran `applyDictionary` against it, and closed with
+`db.close()` rather than a checkpoint.
+
+So it would open the generation from a containerised shell, while both
+applications were running, creating the file if it were missing, and could lose
+its writes on the way out. Every one of those failures has cost this project a
+day already, and each was already prevented somewhere else in the same directory.
+
+**The recurring shape, written down for the fourth time: a capability that must
+apply to every caller belongs in the function they all call.** The changelog
+entry for the redirect guard says exactly this about the applications, and the
+scripts it was describing were themselves an instance of it. A copy in each
+caller is not a safeguard — it is a list of the callers somebody remembered, and
+`exception.mjs` was written after the list.
+
+**Now**: `resolveGenerationPointer()` probes the pointer's directory and refuses
+to invent it; `openGenerationExclusively(dbPath, who)` probes the generation's
+directory, refuses while a `-shm` exists, refuses to create, and opens with the
+applications' own SQLite. Both delegate to `core`'s `assertNotRedirected`, so the
+operator sees the same words the applications print rather than a second copy
+that drifts. Directories are the argument rather than `%APPDATA%`, because the
+redirect is per file and `dataRoot` is configurable while the pointer is not.
+
+**And the invariant is asserted rather than remembered.** A new scan in
+`generation-access.test.ts` fails any script under `scripts/` that resolves the
+shared pointer without importing the helper, or that constructs a `Database`
+itself. It strips comments and keeps strings — the module path and the pointer
+filename *are* string literals — and it ships with three fixtures: one that must
+fire, one that must not, and one of pure prose about the trap that must not fire
+either. Four source scans in this project have now fired on their own
+documentation.
+
+`293` tests in `core`.
+
+### The Electron arm, and one gotcha that cost an hour
+
+`replay-seed-in-electron.cjs` runs the seed replay inside a real Electron main
+process against the Electron-ABI binary. Both arms share
+`scripts/lib/seed-replay.mjs`, so the runtime is the only difference.
+
+**Electron 32 does not run a `.mjs` entry point, and does not say so.** Passed
+one on the command line it produces no output, no error and no exit — a headless
+main process that has to be killed. The identical file as `.cjs` runs and prints
+normally. That silent hang is indistinguishable from the corruption bug being
+investigated, which is a rich source of wasted evenings; the harness is CommonJS
+on purpose and the header says why.
+
+The replay also now prints the WAL's size **before** the checkpoint (4,157,112
+bytes on a clean run). The previous entry recorded
+`checkpoint {busy:0, log:0, checkpointed:0}` being read as "the WAL was empty"
+and carried into a wrong diagnosis. A number that had to be inferred is now
+printed.
+
+---
+
 ## STILL OPEN: `meta_response` corrupts during universe_seed (2026-09-07)
 
 **Read this before re-running anything.** An earlier version of this entry
@@ -34,13 +100,49 @@ nothing. The two harnesses below exist so the question can be asked in minutes.
 | The collector code path | `replay-seed-locally.mjs`: real `runUniverseSeed`, real schema, real capture contract, 1,089 responses, offline — **clean** |
 | The 2-minute tick's `meta_dictionary` churn | 60 open/apply/close cycles on a seeded database — **clean** |
 | A mismatched native binary | `node_modules` differs from the packaged copies, which are byte-identical to each other; the ABI swap is correct |
+| **The Electron main process and ABI** | `replay-seed-in-electron.cjs`: the identical replay inside Electron 32.3.3 main (node 20.18.1, **ABI 128**), with `better-sqlite3` built for Electron — **clean**, twice, byte-identical counts to the Node arm. Again with real `safeStorage` for the archive (`REPLAY_SAFE_STORAGE=1`) — **clean** |
 
-### What remains, and the next test
+The two arms now share one body (`scripts/lib/seed-replay.mjs`) and differ only
+in the runtime, because a divergence between two copies would be
+indistinguishable from the finding.
 
-**The Electron main process itself** — the only variable not yet isolated. The
-next step is to run `replay-seed-locally.mjs`'s logic *inside* Electron. A
-reproduction there has a **0.6-second** cycle instead of a five-minute live run,
-which is the difference between bisecting and guessing.
+### A new suspect, and it is not a runtime (2026-09-08)
+
+**`exception.mjs` opened the live generation with no guards at all.** It resolved
+the shared pointer itself, called `new Database(dbPath)` directly, ran
+`applyDictionary` against it — the DELETE and re-INSERT of ~760
+`meta_dictionary` rows, i.e. exactly the page churn that frees pages for
+`meta_response` to reuse — and closed without a checkpoint. No redirect check, no
+`-shm` in-use check, no refusal to create the file.
+
+It was written for **B5's ticker-reuse rulings**, which is what was being
+operated on the evenings in question, and it is the third script in a directory
+where the other two had the guards. It is invisible in `meta_open_handle`,
+because it never wrote a row there either.
+
+**This is a hypothesis, and it is recorded as one.** Nothing establishes that it
+was run during a corrupting window; the shell history is gone and the script left
+no trace by design. What it does establish is that the "shell verified clean"
+claim covered the wrong thing: **the tooling shell in use is itself
+containerised** — `detectRedirect` reports `%APPDATA%` served from
+`AppData\Local\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming`, and both
+applications have full Electron profiles under that path, `trade-analyzer-next`
+including a private `data\gen-001\data.sqlite` and two archive files from the
+2026-09-07 seed. A redirected process opening the generation is the one mechanism
+that is *known* to corrupt it, and one existed in the toolbox the whole time.
+
+The defect is fixed on its own terms regardless of whether it caused the three
+events — see the entry below.
+
+### What remains
+
+If the corruption recurs with `exception.mjs` guarded, the untested differences
+between the clean replay and a live run are: **real latency between writes** (the
+replay's `delayMs` argument covers this — `stress-sqlite.mjs` already paced 1,100
+writes over 285 s and came back clean, but not with the real schema), and **the
+full application around the collector** — the batch service, the API server, the
+renderer, the other jobs. Neither is the collector code path or the runtime; both
+of those are now cleared.
 
 ### Two claims that were presented as evidence and were not
 

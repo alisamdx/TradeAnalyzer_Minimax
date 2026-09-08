@@ -129,7 +129,12 @@ if (redirect) {
 // This tool was itself part of the corruption on 2026-09-07: run against a live
 // generation it put a second SQLite library on the same wal-index. A diagnostic
 // that damages what it inspects is worse than no diagnostic.
-const db = openGenerationExclusively(dbPath);
+//
+// The refusals are now all inside `openGenerationExclusively` — redirect, in
+// use, and never create. The redirect check above stays because a diagnostic
+// should *report* what it found before it declines to continue, and the exit
+// there simply happens first.
+const db = await openGenerationExclusively(dbPath, 'diagnose-generation.mjs');
 const tables = db
   .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
   .all()
