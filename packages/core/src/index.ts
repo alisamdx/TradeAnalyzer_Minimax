@@ -11,6 +11,11 @@ export { COLLECTOR_VERSION } from './version.js';
 
 export type { SqliteLike, SqliteStatementLike } from './db/sqlite-like.js';
 
+export { assertNotRedirected, detectRedirect, shadowSuffixes } from './db/appdata-redirect.js';
+export type { RedirectFinding } from './db/appdata-redirect.js';
+export { recordOpenHandle } from './db/open-handle.js';
+export type { OpenHandleFacts } from './db/open-handle.js';
+
 export {
   DICTIONARY,
   DICTIONARY_VERSION,

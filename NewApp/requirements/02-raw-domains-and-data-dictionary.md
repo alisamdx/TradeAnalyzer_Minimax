@@ -147,6 +147,21 @@ One row per generation (P14). Lives in every generation's own file describing it
 | `reset_reason` | TEXT | why the predecessor was closed |
 | `pilot_exit_at` | TEXT | when the 20-clean-day criterion was met |
 
+### `meta_open_handle` — which application opened this file
+
+One row per application, **replaced on each open**. Not a fact about the market and read by nothing downstream: it exists so that *"are the two applications actually looking at the same file?"* is an answerable question.
+
+| column | type | notes |
+|---|---|---|
+| `app_name` | TEXT PK | `TradeAnalyzer` (collector host) \| `TradeAnalyzer 2` (inspector) |
+| `app_version` | TEXT | so a stale row names the build that wrote it |
+| `opened_at` | TEXT | ET timestamp |
+| `process_id` | INTEGER | |
+| `db_path` | TEXT | the path **that application** resolved |
+| `dictionary_version` | INTEGER | what that build was compiled against |
+
+Both exes write here on open. A reader that finds only one row, or two rows disagreeing about `db_path`, is looking at a **split file set** — the shape that destroyed gen-001 on 2026-09-07, when a containerised launch put one application on a private copy of `data.sqlite` while the write-ahead log stayed shared. That question was answered by inference several times that day and wrongly every time, because a redirected process reads every path back exactly as it wrote it. `assertNotRedirected` (06 §3.1) prevents the split that is understood; this table makes any other one visible. Replaced rather than appended because the question is who has it open *now* — the history that matters is already in `meta_run`.
+
 ### `meta_run`
 One row per collector run (a run = one slot on one day, or a one-shot job).
 

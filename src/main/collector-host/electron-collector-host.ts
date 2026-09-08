@@ -1,9 +1,9 @@
 import { app, safeStorage } from 'electron';
 import Database from 'better-sqlite3';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { CollectorHost, ProviderResponse, SqliteLike } from '@tradeanalyzer/core';
-import { applyDictionary } from '@tradeanalyzer/core';
+import { applyDictionary, assertNotRedirected, recordOpenHandle, DICTIONARY_VERSION } from '@tradeanalyzer/core';
 import { etradeGetRaw, renewAccessToken, type OAuthCredentials } from '../services/etrade-auth.js';
 import { logApiCall } from '../services/logger.js';
 
@@ -80,6 +80,16 @@ export class ElectronCollectorHost implements CollectorHost {
   openGenerationDb(): SqliteLike {
     if (this.db) return this.db as unknown as SqliteLike;
     const { dbPath, archiveRoot } = generationPaths(this.pointer);
+
+    // Refuse before SQLite is involved. If this process were launched from a
+    // containerised shell its `%APPDATA%` is redirected, and it would then write
+    // a private copy of `data.sqlite` while sharing the real write-ahead log
+    // with the new exe — two writers, one lock, two files. That is what
+    // corrupted gen-001 twice on 2026-09-07, deterministically, in the middle of
+    // `universe_seed`. The pointer's directory is checked as well as the
+    // generation's, because `dataRoot` is configurable and the pointer is not.
+    assertNotRedirected([dirname(SHARED_POINTER()), dirname(dbPath)], 'TradeAnalyzer');
+
     mkdirSync(archiveRoot, { recursive: true });
 
     // Write-capable, never readonly. On Windows a readonly connection cannot
@@ -90,6 +100,19 @@ export class ElectronCollectorHost implements CollectorHost {
     db.pragma('journal_mode = WAL');
     db.pragma('foreign_keys = ON');
     applyDictionary(db as unknown as SqliteLike);
+
+    // The other half of the answer to "are both applications looking at the same
+    // file". The new exe writes its own row on open; a reader that finds only
+    // one of the two is looking at a split file set.
+    recordOpenHandle(db as unknown as SqliteLike, {
+      appName: this.hostApp.name,
+      appVersion: this.hostApp.version,
+      dbPath,
+      dictionaryVersion: DICTIONARY_VERSION,
+      openedAt: this.nowET(),
+      processId: process.pid
+    });
+
     this.db = db;
     return db as unknown as SqliteLike;
   }

@@ -30,10 +30,28 @@
  * depending on it only runs in whichever half of the cycle you are currently in.
  * A built-in has no ABI to be wrong.
  */
-import { existsSync, readFileSync, writeFileSync, rmSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
+
+// The redirect probe lives in `core` and nowhere else. It used to be a copy in
+// this script and a second copy in `diagnose-generation.mjs`, while the two
+// applications — the ones that can actually destroy a generation by opening it
+// from a redirected process — had none at all. Importing the built module keeps
+// one implementation; it is plain JavaScript with no native binding, so it has
+// no ABI to be wrong about (which is why `node:sqlite` is still used below).
+let detectRedirect;
+try {
+  ({ detectRedirect } = await import('../dist/db/appdata-redirect.js'));
+} catch {
+  console.error(
+    'packages/core is not built, so the redirect guard cannot be loaded — and running without it\n' +
+      'is exactly how a generation gets corrupted. Build it first:\n' +
+      '  npm run build --prefix packages/core'
+  );
+  process.exit(2);
+}
 
 const KINDS = ['universe_seed', 'backfill_bars', 'bootstrap_iv', 'legacy_import', 'replay', 'reset'];
 
@@ -54,43 +72,16 @@ try {
 
 const appData = process.env.APPDATA ?? join(homedir(), 'AppData', 'Roaming');
 
-/**
- * Detects the redirect by **measuring it**, not by pattern-matching a path.
- *
- * The first version of this guard looked for `AppData\\Local\\Packages` in
- * `process.execPath`, `cwd()` and `import.meta.url` — and did not fire, because
- * none of those is rewritten. `%APPDATA%` itself still reads as the real path
- * too. The redirect is genuinely invisible from the inside, so the only honest
- * test is to write a file and go looking for where it actually landed.
- */
-function appDataIsRedirected(appDataDir) {
-  const marker = `.queue-job-write-probe-${process.pid}-${Date.now()}`;
-  const probe = join(appDataDir, marker);
-  try {
-    writeFileSync(probe, 'probe', 'utf8');
-  } catch {
-    return null; // cannot write at all; the real errors below will say why
-  }
-  try {
-    const packages = join(homedir(), 'AppData', 'Local', 'Packages');
-    if (!existsSync(packages)) return null;
-    for (const pkg of readdirSync(packages)) {
-      const shadow = join(packages, pkg, 'LocalCache', 'Roaming', marker);
-      if (existsSync(shadow)) return join(packages, pkg, 'LocalCache', 'Roaming');
-    }
-    return null;
-  } finally {
-    try { rmSync(probe, { force: true }); } catch { /* best effort */ }
-  }
-}
-
-const redirectedTo = appDataIsRedirected(appData);
-if (redirectedTo) {
+const redirect = detectRedirect(appData);
+if (redirect.redirectedTo) {
   console.error(
-    'Refusing to queue: this shell is containerised, so writes to %APPDATA% are redirected\n' +
-      `into ${redirectedTo} and the collector will never see them.\n\n` +
-      'The write would succeed and read back perfectly — that is what makes it dangerous.\n' +
+    [
+      'Refusing to queue: this shell is containerised, so writes to %APPDATA% are redirected',
+      `into ${redirect.redirectedTo} and the collector will never see them.`,
+      '',
+      'The write would succeed and read back perfectly — that is what makes it dangerous.',
       'Run this from an ordinary terminal in the same Windows session as the app.'
+    ].join('\n')
   );
   process.exit(3);
 }

@@ -24,32 +24,36 @@
  * nobody else will ever open. That happened on 2026-09-07 and it cost a
  * generation. The redirect check above is not a nicety; it is the guard.
  */
-import { existsSync, readFileSync, statSync, readdirSync, writeFileSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, statSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
+
+// One implementation of the probe, shared with `queue-job.mjs` and — the part
+// that actually matters — with both applications, which call it before they open
+// a generation. It is plain JavaScript with no native binding, so it carries no
+// ABI (which is why `node:sqlite` is still used for the database below).
+let detectRedirect;
+try {
+  ({ detectRedirect } = await import('../dist/db/appdata-redirect.js'));
+} catch {
+  console.error(
+    'packages/core is not built, so the redirect guard cannot be loaded — and opening a\n' +
+      'generation without it is how one gets destroyed. Build it first:\n' +
+      '  npm run build --prefix packages/core'
+  );
+  process.exit(2);
+}
 
 const appData = process.env.APPDATA ?? join(homedir(), 'AppData', 'Roaming');
 console.log(`APPDATA           : ${appData}`);
 
 // The redirect is invisible from the inside, so it is measured, not guessed.
-const marker = `.diagnose-probe-${process.pid}`;
-let redirect = null;
-try {
-  writeFileSync(join(appData, marker), 'probe', 'utf8');
-  const packages = join(homedir(), 'AppData', 'Local', 'Packages');
-  if (existsSync(packages)) {
-    for (const pkg of readdirSync(packages)) {
-      if (existsSync(join(packages, pkg, 'LocalCache', 'Roaming', marker))) {
-        redirect = join(packages, pkg, 'LocalCache', 'Roaming');
-        break;
-      }
-    }
-  }
-} catch { /* reported below as "could not test" */ } finally {
-  try { rmSync(join(appData, marker), { force: true }); } catch { /* best effort */ }
-}
-console.log(`redirected        : ${redirect ?? 'no (this shell writes where it says it does)'}`);
+const finding = detectRedirect(appData);
+const redirect = finding.redirectedTo;
+console.log(
+  `redirected        : ${redirect ?? `no (this shell writes where it says it does)${finding.undetermined ? ` — ${finding.undetermined}` : ''}`}`
+);
 
 /** Whether WAL sidecars existed BEFORE this script opened anything. */
 let sidecarsBefore = false;
@@ -167,6 +171,26 @@ for (const t of interesting) {
   if (!tables.includes(t)) { console.log(`  ${t.padEnd(26)} TABLE MISSING`); continue; }
   const n = db.prepare(`SELECT COUNT(*) AS n FROM "${t}"`).get().n;
   console.log(`  ${t.padEnd(26)} ${n}`);
+}
+
+// Which applications have opened THIS file, in their own words. The question
+// that cost most of 2026-09-07 was "are the two apps looking at the same
+// database", and it was answered by inference every time, wrongly. Both exes now
+// write a row here on open, so it is answered by reading.
+if (tables.includes('meta_open_handle')) {
+  const handles = db
+    .prepare('SELECT app_name, app_version, opened_at, process_id, db_path FROM meta_open_handle ORDER BY app_name')
+    .all();
+  console.log('\nopened by:');
+  if (handles.length === 0) console.log('  (nothing has opened this generation since the handle table existed)');
+  for (const h of handles) {
+    console.log(`  ${h.app_name} v${h.app_version}  pid ${h.process_id}  ${h.opened_at}`);
+    if (h.db_path !== dbPath) console.log(`    ** resolved a DIFFERENT path: ${h.db_path} **`);
+  }
+  if (handles.length === 1) {
+    console.log('  Only one application has opened this file. If both have been run since this');
+    console.log('  version was installed, they are not sharing a generation — check for a redirect.');
+  }
 }
 
 if (tables.includes('meta_job_request')) {

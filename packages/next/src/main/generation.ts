@@ -2,7 +2,13 @@ import { app } from 'electron';
 import Database from 'better-sqlite3';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { applyDictionary, DICTIONARY_VERSION, type SqliteLike } from '@tradeanalyzer/core';
+import {
+  applyDictionary,
+  assertNotRedirected,
+  DICTIONARY_VERSION,
+  recordOpenHandle,
+  type SqliteLike
+} from '@tradeanalyzer/core';
 
 /**
  * Opening a generation — 06 §3, §3.1.
@@ -94,6 +100,14 @@ export function openGeneration(): GenerationInfo {
   const archivePath = join(dir, 'archive');
   const createdNow = !existsSync(dbPath);
 
+  // Before anything is created and long before SQLite is involved: a
+  // containerised launch would open a private copy of `data.sqlite` while
+  // sharing the real write-ahead log with the other application, which is not a
+  // stale read but a corrupted generation (see `assertNotRedirected`). Both the
+  // pointer's directory and the generation's are checked, because `dataRoot` is
+  // configurable and may sit outside AppData while the pointer never does.
+  assertNotRedirected([dirname(pointerPath()), dir], 'TradeAnalyzer 2');
+
   mkdirSync(archivePath, { recursive: true });
 
   const db = new Database(dbPath);
@@ -112,6 +126,18 @@ export function openGeneration(): GenerationInfo {
   const row = db
     .prepare('SELECT generation_no, opened_at, status FROM meta_generation WHERE generation_no = ?')
     .get(pointer.currentGeneration) as { generation_no: number; opened_at: string; status: GenerationInfo['status'] };
+
+  // Says, inside the generation itself, which application saw which file. The
+  // guard above prevents the split we understand; this is what makes any other
+  // one visible instead of silent.
+  recordOpenHandle(db as unknown as SqliteLike, {
+    appName: 'TradeAnalyzer 2',
+    appVersion: app.getVersion(),
+    dbPath,
+    dictionaryVersion: DICTIONARY_VERSION,
+    openedAt,
+    processId: process.pid
+  });
 
   writePointer(pointer);
 

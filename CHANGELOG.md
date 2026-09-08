@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.202] - 2026-09-07
+
+### fix - the NewApp generation corrupted because an app was launched from a container
+
+- The open bug recorded at v1.1.201 is resolved, and **none of the three hypotheses filed with it was right** - `applyDictionary` running every tick, the rebuild paths' FK behaviour and the archive/transaction ordering were all innocent.
+- **Both applications had been launched from a containerised (MSIX) shell**, which redirects `%APPDATA%` into that package's `LocalCache\Roaming` with copy-on-write and announces nothing. A full Electron profile for each app sits under `AppData\Local\Packages\<pkg>\LocalCache\Roaming\`, the existing app's `Preferences` written **2026-09-07 17:16**, inside the corruption window. Listing the generation directory through `%APPDATA%` shows `gen-001` **and** `gen-001-corrupt-20260907`; listing the container path shows `gen-001` only - a redirected listing merges both views, so there are two `data.sqlite` files behind one logical path.
+- **The redirect is per file, and that is what corrupts.** `data.sqlite` had been copy-on-written into the container while `-wal` and `-shm` still fell through to the real ones, so the two processes coordinated through **one lock and one write-ahead log while writing two different base files**.
+- Every symptom follows. **`Tree 5` is `meta_response`** - confirmed by building a fresh generation from the dictionary and reading `sqlite_master.rootpage` - which is the table `universe_seed` writes hardest, and which retires the note that "the damage reaches an early table". The identical 2,318,336 bytes on two runs is a deterministic *interleaving*, not a deterministic code path.
+- **`assertNotRedirected` now runs in both exes** before any SQLite handle exists - `ElectronCollectorHost.openGenerationDb()` here, `openGeneration()` in the new exe - checking the shared pointer's directory as well as the generation's. It measures the redirect by writing a marker and looking for it, because `%APPDATA%`, `process.execPath`, `cwd()` and `import.meta.url` all read as the real thing from inside a container. An inconclusive probe reports `undetermined`, never `redirected`.
+- The guard had existed **only** in `queue-job.mjs` and `diagnose-generation.mjs` - the two places that could not destroy anything - while the applications that could had none. Both scripts now import the one implementation.
+- **`meta_open_handle`** (dictionary version 6) records which application opened the generation and the `db_path` it resolved, so "are the two apps looking at the same file" is answered by reading rather than inferring. `diagnose-generation.mjs` prints it and flags a disagreeing path or a lone row.
+- Tests: `packages/core/test/appdata-redirect.test.ts` (12) and `test/open-handle.test.ts` (4). The redirect suite builds a real fake container - a junction whose `LocalCache\Roaming` *is* the probed directory - so the guard is asserted to **fire**, not only to stay quiet.
+
 ## [1.1.201] - 2026-09-07
 
 ### fix - the NewApp collector's universe came from the wrong place

@@ -76,6 +76,18 @@ Structure mirrors the existing app (`src/main`, `src/preload`, `src/renderer`) s
 
 In stage 1 the collector (in the old app) writes the generation and the new exe reads it, so both must agree where it is. One small JSON file, `%APPDATA%/tradeanalyzer-shared/data-root.json` → `{ "dataRoot": "...", "currentGeneration": 1 }`, written by whichever app creates a generation, read by both at startup. It is the only file the two apps share, and it contains no secrets.
 
+### 3.2 Neither app may open a generation from a redirected process
+
+**Both exes call `assertNotRedirected` (in `core`) before the first `new Database(...)` on a generation, and refuse to continue if it fires.** A containerised (MSIX/packaged) Windows process has `%APPDATA%` silently redirected into its package's `LocalCache\Roaming` with copy-on-write, and the redirect is **per file** — so `data.sqlite` becomes a private copy while `-wal` and `-shm` still fall through to the real ones, leaving two processes coordinating through one lock and one write-ahead log while writing two different base files. That is not a stale read; it is a manufactured btree, and it destroyed gen-001 twice on 2026-09-07 in the middle of `universe_seed`.
+
+Three things this design gets right, each because getting it wrong has already cost something:
+
+- **It measures, never infers.** `%APPDATA%`, `process.execPath`, `cwd()` and `import.meta.url` all read as the real thing from inside a container; the first version of the guard pattern-matched them and did not fire. The only honest test is to write a marker and go looking for where it landed.
+- **Both directories are checked** — the pointer's and the generation's — because `dataRoot` is configurable and may sit outside AppData while the pointer never does.
+- **An inconclusive probe is `undetermined`, never `redirected`.** A cheap local check standing in for an authority must be able to say "don't know"; saying "no" here would refuse to open the only database there is.
+
+`queue-job.mjs` and `diagnose-generation.mjs` import the same implementation. They had the only copies of it while the two applications — the ones that can actually destroy a generation — had none, which is the recurring shape: **a capability that must apply to every caller belongs in the function they all call**. The complementary detection, for a split this guard does not anticipate, is `meta_open_handle` (02 §1).
+
 ---
 
 ## 4. Workspace mechanics

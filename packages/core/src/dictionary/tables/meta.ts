@@ -64,6 +64,34 @@ export const metaTables: readonly TableEntry[] = [
   }),
 
   defineTable({
+    table: 'meta_open_handle',
+    layer: 'meta',
+    domain: 'generation',
+    description:
+      'One row per application that has opened this generation, replaced on each open. Not a fact ' +
+      'about the market and not needed by anything downstream — it exists so that "are the two ' +
+      'applications actually looking at the same file" is an ANSWERABLE question. Both exes write ' +
+      'here on open, so a reader that sees only one of them is seeing a split file set, which is ' +
+      'the shape that destroyed gen-001 on 2026-09-07: a containerised launch redirected one app ' +
+      'onto a private copy of data.sqlite while the write-ahead log stayed shared. Every path ' +
+      'reads back perfectly from inside such a process, so inference cannot settle it — the only ' +
+      'honest test is to make both processes report what they see (CLAUDE.md).',
+    naturalKey: ['app_name'],
+    appendOnly: false,
+    ruleDriven: false,
+    standardColumns: false,
+    columns: [
+      col.text('app_name', 'Which application opened it — `TradeAnalyzer` (the collector host) or `TradeAnalyzer 2` (the inspector).', { primaryKey: true, sourceProvider: 'collector' }),
+      col.text('app_version', 'That application\'s version, so a stale row names the build that wrote it.', { sourceProvider: 'collector' }),
+      col.ts('opened_at', 'When that application last opened this generation.', { sourceProvider: 'collector' }),
+      col.int('process_id', 'The operating-system process that opened it.', { sourceProvider: 'collector' }),
+      { column: 'db_path', type: 'TEXT', unit: 'path', nullable: false, description: 'The path that application resolved for this database. Two different values here mean two different files, whatever the pointer says.', sourceProvider: 'collector' },
+      col.int('dictionary_version', 'The dictionary version that application was built against.', { sourceProvider: 'collector' })
+    ],
+    indexes: []
+  }),
+
+  defineTable({
     table: 'meta_run',
     layer: 'meta',
     domain: 'generation',

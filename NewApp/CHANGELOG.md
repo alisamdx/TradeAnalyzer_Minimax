@@ -9,52 +9,109 @@ exit (06 §6).
 
 ---
 
-## OPEN BUG: the generation corrupts during universe_seed (2026-09-07)
+## RESOLVED: the generation corrupted because one app was launched from a container (2026-09-07)
 
-**Not resolved. Recorded so the next session starts with the evidence rather
-than rediscovering it.**
+**Root cause found, guard shipped, none of the three recorded hypotheses was
+right.** `applyDictionary` running every tick, the FK behaviour of the rebuild
+paths and the archive/transaction ordering were all innocent.
 
-`PRAGMA integrity_check` on gen-001 after `universe_seed`:
+**What it actually was.** Both applications had been launched at some point from
+a **containerised (MSIX) shell**, which silently redirects `%APPDATA%` into that
+package's `LocalCache\Roaming` with **copy-on-write**. The evidence is
+unambiguous and was sitting on disk the whole time:
+
+- A full Electron profile for **each** app exists under
+  `AppData\Local\Packages\<pkg>\LocalCache\Roaming\` —
+  `trade-analyzer-next\` (blob_storage, Cache, GPUCache, Preferences,
+  `data\gen-001\data.sqlite` at 1,941,504 bytes) and `trade-analyzer\`
+  (Preferences and blob_storage written **2026-09-07 17:16**, inside the
+  corruption window). Those are the applications running redirected, not stray
+  file copies.
+- Enumerating the generation directory through `%APPDATA%` lists **`gen-001` and
+  `gen-001-corrupt-20260907`**; enumerating the container path lists **`gen-001`
+  only**. A redirected directory listing is a *merge* of the two views, so this
+  proves there are two `data.sqlite` files behind one logical path, and that a
+  redirected process is served the container's copy.
+
+**Why that corrupts rather than merely diverging.** The redirect is per file. By
+the time the seed ran, `data.sqlite` had been copy-on-written into the container
+while `-wal` and `-shm` still fell through to the real ones. So the two processes
+coordinated through **one lock and one write-ahead log while writing two
+different base files**: WAL frames written against one base were read and
+checkpointed against the other. That is not a stale read, it is a manufactured
+btree.
+
+Every recorded symptom follows from it, including the ones that made it look
+like an application bug:
+
+- **`Tree 5` is `meta_response`** — confirmed by building a fresh generation from
+  the dictionary and reading `sqlite_master.rootpage`. It is the table
+  `universe_seed` writes hardest, so it is where mismatched frames land first.
+  It also disposes of the note that "the damage reaches an early table"; the
+  damaged table *is* the busy one.
+- **Identical 2,318,336 bytes on two independent runs** — deterministic because
+  the interleaving is deterministic, not because a code path is.
+- **1,587 membership rows and ~1,001 `meta_response` rows first** — the seed's
+  three list responses plus about a thousand of 1,089 per-ticker reference calls.
+
+### The fix
+
+**`assertNotRedirected`** (`packages/core/src/db/appdata-redirect.ts`) measures
+the redirect by writing a marker and going to look for it — the only honest test,
+since `%APPDATA%`, `process.execPath`, `cwd()` and `import.meta.url` all read as
+the real thing from inside a container. **Both exes call it on the one path that
+opens a generation, before any SQLite handle exists**: `openGeneration()` in the
+new exe, `ElectronCollectorHost.openGenerationDb()` in the collector host. Each
+checks the pointer's directory *and* the generation's, because `dataRoot` is
+configurable and the pointer is not.
+
+The guard existed only in `queue-job.mjs` and `diagnose-generation.mjs` — the two
+places that could not destroy anything — while the applications that could had
+none. Both scripts now import the same implementation. **That is the recurring
+shape: a capability that must apply to every caller belongs in the function they
+all call.**
+
+Three details the guard gets right on purpose:
+
+- It answers **without writing** for a path outside AppData, since no container
+  redirects one.
+- It probes the nearest existing ancestor, so a first run whose generation
+  directory does not exist yet is still answered.
+- An inconclusive probe is **`undetermined`, never `redirected`**. A cheap local
+  check standing in for an authority must be able to say "don't know" — saying
+  "no" here would refuse to open the only database there is.
+
+**`meta_open_handle`** (dictionary version 6) is the second half. The guard
+prevents the split that is now understood; the table makes any other one
+*visible*. Both applications write a row on open — name, version, pid, resolved
+`db_path` — so "are the two apps looking at the same file" is answered by reading
+rather than by inference. `diagnose-generation.mjs` prints it and flags a
+disagreeing path or a lone row. On 2026-09-07 that question was answered by
+inference repeatedly and wrongly every time, because **a redirected process reads
+every path back exactly as it wrote it**.
+
+Tests: `packages/core/test/appdata-redirect.test.ts` (12) and
+`test/open-handle.test.ts` (4). The redirect test builds a **real fake container**
+— a junction whose `LocalCache\Roaming` *is* the probed directory — so the guard
+is asserted to fire, not only to stay quiet. A guard that can only be tested for
+silence is the own-at-strike band again: structurally incapable of firing and
+indistinguishable from one nothing violates.
+
+### Operator action before the next seed
+
+The corrupt artefact and the container's shadow copies are both still on disk and
+neither is deleted automatically. From an **ordinary** terminal (not one embedded
+in a packaged app):
 
 ```
-*** in database main ***
-Tree 5 page 469: btreeInitPage() returns error code 11
-Tree 5 page 466: ... (and descending, many pages of one btree)
+node packages/core/scripts/diagnose-generation.mjs
 ```
 
-**Reproduced twice, on a freshly created generation, with only TradeAnalyzer and
-TradeAnalyzer 2 touching the file** — so it is not the inspection damage that
-accounted for the earlier failures of the evening.
-
-What is known, and what makes it worth chasing rather than retrying:
-
-- **The corrupt file is 2,318,336 bytes both times.** Identical size on two
-  independent runs is deterministic behaviour, not random I/O damage.
-- It gets far enough to write **1,587 `ref_universe_membership` rows** — 503 +
-  1,024 + 60, the correct lists — and **1,001 `meta_response` rows**, so it
-  fails around the thousandth archived response.
-- Damage is confined to **one btree** (`Tree 5`), pages descending from ~469.
-- `meta_generation` reads 0 afterwards, although the Overview rendered from it
-  minutes earlier, so the damage reaches an early table.
-
-Hypotheses in the order worth testing, none confirmed:
-
-1. **`applyDictionary` runs on every `openGenerationDb()`**, which the one-shot
-   claim loop calls **every two minutes** — a `DELETE` plus ~2,200 inserts into
-   `meta_dictionary` on a fresh connection each time. If a tick overlaps a
-   long-running job there are two writers on one file.
-2. The rebuild paths added the same day (`DROP TABLE` + recreate) run with
-   `foreign_keys = ON`; CLAUDE.md already records that `PRAGMA foreign_keys=OFF`
-   is a no-op inside a transaction, so a rebuild's FK behaviour is not
-   necessarily what the SQLite manual's procedure assumes.
-3. The archive writer and the database transaction are not ordered the way the
-   per-response contract claims under some failure.
-
-**Do not run a pilot day against a generation until this is understood.** A
-corrupt store that reports plausible row counts until something touches the
-wrong page is the worst possible foundation for a twenty-day clean streak.
-
-The corrupt artefact is preserved alongside the generation for post-mortem.
+It will now open the real file, report integrity, and list who has opened it.
+The shadow profiles under
+`%LOCALAPPDATA%\Packages\<pkg>\LocalCache\Roaming\trade-analyzer*` can be removed
+once the real generation is confirmed healthy — they are copies, and nothing
+should ever read them again.
 
 ## The universe came from the wrong place (2026-09-07)
 
