@@ -49,7 +49,7 @@ const delayMs = Number(process.argv[4] ?? 0);
 
 if (!dir) {
   console.error('Usage: node packages/core/scripts/stress-sqlite.mjs <directory> [rows] [delayMs]');
-  console.error('  e.g. ... "%APPDATA%\trade-analyzer-next\data\gen-001" 1100 250');
+  console.error('  e.g. ... "$env:APPDATA\\trade-analyzer-next\\data\\gen-001" 1100 250');
   process.exit(2);
 }
 
