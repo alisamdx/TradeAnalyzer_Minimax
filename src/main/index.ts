@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { readFileSync, existsSync } from 'node:fs';
 import { ApiServer } from './api-server.js';
-import { ElectronCollectorHost, readSharedPointer } from './collector-host/electron-collector-host.js';
+import { ElectronCollectorHost, generationExists, readSharedPointer } from './collector-host/electron-collector-host.js';
 import { createCollectorDailyJob, createCollectorWatchdogJob } from './services/jobs/collector-daily.js';
 import { createCollectorOneShotJob } from './services/jobs/collector-oneshot.js';
 import { newAppUniverseSources } from './collector-host/universe-sources.js';
@@ -812,7 +812,11 @@ app.whenReady().then(() => {
   // looks stopped rather than failing, every two minutes, silently.
   setInterval(() => {
     try {
-      if (!readSharedPointer()) return;   // nothing to claim into yet
+      const claimPointer = readSharedPointer();
+      // Nothing to claim into yet: no pointer means the new exe has never run,
+      // and no generation means it has not created this one. Neither is
+      // repaired here — generation creation belongs to the new exe (06 §3).
+      if (!claimPointer || !generationExists(claimPointer)) return;
       void batchService.runJob('collector-oneshot', 'schedule').catch((err) => {
         logErrorFromException(err, 'collector-oneshot:runJob', null, 'ERROR');
       });

@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.1.203] - 2026-09-07
+
+### fix - the collector could create a generation, and did
+
+- Found while verifying v1.1.202 on the live machine, which is the only place it could have been found. After the corrupt `gen-001` was deleted, the collector's 2-minute claim tick **recreated it** - 52 tables, `integrity_check: ok`, every row count zero, and `meta_open_handle` naming only `TradeAnalyzer`. It looks healthy from every angle except the one that says whose it is.
+- **Generation creation belongs to the new exe alone** (NewApp 06 §3); this app writes *into* a generation and has no business making one. `readSharedPointer` already refuses to invent a pointer for that reason, but the guard **stopped one level short** - `new Database(path)` creates the file when it is missing, so the pointer was protected and the database was not.
+- The tell is **`meta_generation` = 0**, since only the new exe writes that row. Worth noting against the v1.1.201 corruption report, which filed `meta_generation` reading 0 as evidence of the corruption: it is *also* the signature of a generation the wrong application created, and once two causes share a symptom neither can be read from it alone.
+- `openGenerationDb()` now throws **before** the `mkdirSync` that would create the directory and before the open that would create the file. `generationExists(pointer)` is exported and all four callers check it first - `collector-oneshot`, both `collector-daily` handlers and the claim loop in `index.ts` - so the operator sees `skipped` with a reason rather than a stack trace every two minutes. The choke point makes it safe; the call sites make it legible.
+- Recovery needs no reset: such a generation is structurally correct and empty, and the new exe writes the missing `meta_generation` row on open.
+- Regression tests in `tests/collector-host.test.ts` - one pins the refusal's position ahead of both `mkdirSync` and `new Database`, the other that every one of the four callers checks.
+
 ## [1.1.202] - 2026-09-07
 
 ### fix - the NewApp generation corrupted because an app was launched from a container

@@ -74,6 +74,37 @@ describe('ElectronCollectorHost', () => {
     expect(reader).toContain('return undefined');
   });
 
+  it('never creates a generation either — the pointer guard stopped one level short', () => {
+    // `readSharedPointer` refuses to invent a pointer, but `new Database(path)`
+    // CREATES the file when it is missing, so the 2-minute claim tick would
+    // quietly manufacture a generation of its own. Observed 2026-09-07: minutes
+    // after the corrupt gen-001 was deleted, the collector rebuilt it — 52
+    // tables, `integrity_check: ok`, and **zero rows in `meta_generation`**,
+    // because only the new exe writes that. It looks healthy from every angle
+    // except the one that says whose it is.
+    const opener = host.slice(host.indexOf('openGenerationDb()'), host.indexOf('close(): void'));
+    // The refusal must come BEFORE both the directory creation and the open.
+    const refusal = opener.indexOf('existsSync(dbPath)');
+    expect(refusal).toBeGreaterThan(-1);
+    expect(refusal).toBeLessThan(opener.indexOf('mkdirSync'));
+    expect(refusal).toBeLessThan(opener.indexOf('new Database(dbPath)'));
+    expect(opener).toContain('belongs to TradeAnalyzer 2');
+  });
+
+  it('lets every caller report a missing generation rather than failing on it', () => {
+    // The choke point throws so creation is impossible; the callers check first
+    // so the operator sees `skipped` with a reason instead of a stack trace
+    // every two minutes. Patching one call site and leaving the others is the
+    // trap this project keeps hitting, so all four are asserted.
+    expect(host).toContain('export function generationExists');
+    for (const source of [oneshot, daily, index]) {
+      expect(source).toContain('generationExists');
+    }
+    for (const source of [oneshot, daily]) {
+      expect(source).toContain('TradeAnalyzer 2 has not created one');
+    }
+  });
+
   it('builds ET timestamps from parts, not from toISOString', () => {
     // toISOString gives UTC, which silently shifts every evening timestamp onto
     // the following day — the exact class of bug that starved the agent of

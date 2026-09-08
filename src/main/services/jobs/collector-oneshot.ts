@@ -13,6 +13,7 @@ import {
 } from '@tradeanalyzer/core';
 import {
   ElectronCollectorHost,
+  generationExists,
   readSharedPointer,
   type ElectronCollectorHostOptions
 } from '../../collector-host/electron-collector-host.js';
@@ -66,6 +67,18 @@ export function createCollectorOneShotJob(deps: OneShotDeps): BatchJobHandler {
         // second, empty generation indistinguishable from the real one having
         // lost its data.
         return { ...empty, notes: 'No generation pointer yet — the new application has not been run.' };
+      }
+      if (!generationExists(pointer)) {
+        // The pointer exists but the generation does not, which happens after a
+        // reset. Reported, never repaired: `new Database(path)` would create the
+        // file, and the 2-minute tick would then manufacture a generation with
+        // no `meta_generation` row — healthy-looking from every angle except
+        // whose it is. Observed 2026-09-07, immediately after the corrupt
+        // gen-001 was deleted.
+        return {
+          ...empty,
+          notes: 'No generation yet — TradeAnalyzer 2 has not created one. Run it once.'
+        };
       }
 
       const host = deps.makeHost({

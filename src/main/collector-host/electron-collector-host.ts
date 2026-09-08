@@ -53,6 +53,28 @@ export function generationPaths(pointer: DataRootPointer): { dbPath: string; arc
   return { dbPath: join(dir, 'data.sqlite'), archiveRoot: join(dir, 'archive') };
 }
 
+/**
+ * Whether the generation the pointer names actually exists.
+ *
+ * **Generation creation belongs to the new exe alone** (06 §3). This app is a
+ * collector host: it writes *into* a generation, and has no business making one.
+ * `readSharedPointer` already refuses to invent a pointer for exactly that
+ * reason — but the guard stopped one level short, because `new Database(path)`
+ * creates the file when it is missing, so the 2-minute claim tick would quietly
+ * manufacture a generation of its own.
+ *
+ * Observed 2026-09-07: after the corrupt gen-001 was deleted, the collector's
+ * next tick recreated it — 52 tables, `integrity_check: ok`, and **zero rows in
+ * `meta_generation`**, because only the new exe writes that. It looks like a
+ * healthy generation from every angle except the one that says whose it is.
+ * (Worth noting against the original bug report, which read `meta_generation = 0`
+ * as evidence of the corruption. It is *also* the signature of a generation the
+ * wrong application created.)
+ */
+export function generationExists(pointer: DataRootPointer): boolean {
+  return existsSync(generationPaths(pointer).dbPath);
+}
+
 export interface ElectronCollectorHostOptions {
   readonly signal: AbortSignal;
   readonly onProgress: (phase: string, done: number, total: number, note?: string) => void;
@@ -89,6 +111,19 @@ export class ElectronCollectorHost implements CollectorHost {
     // `universe_seed`. The pointer's directory is checked as well as the
     // generation's, because `dataRoot` is configurable and the pointer is not.
     assertNotRedirected([dirname(SHARED_POINTER()), dirname(dbPath)], 'TradeAnalyzer');
+
+    // Refuse before `mkdirSync`, which would otherwise create the generation
+    // directory, and before `new Database`, which would create the file. The
+    // callers check `generationExists()` and report `skipped`; this is the
+    // choke point that makes it impossible rather than merely unlikely.
+    if (!existsSync(dbPath)) {
+      throw new Error(
+        `No generation at ${dbPath}. Generation creation belongs to TradeAnalyzer 2 (NewApp 06 §3) — ` +
+          'this application only collects into one. Creating it here would produce a generation with ' +
+          'no `meta_generation` row that looks healthy from every angle except whose it is. ' +
+          'Run TradeAnalyzer 2 once.'
+      );
+    }
 
     mkdirSync(archiveRoot, { recursive: true });
 

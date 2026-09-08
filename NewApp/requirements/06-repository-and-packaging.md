@@ -88,6 +88,16 @@ Three things this design gets right, each because getting it wrong has already c
 
 `queue-job.mjs` and `diagnose-generation.mjs` import the same implementation. They had the only copies of it while the two applications — the ones that can actually destroy a generation — had none, which is the recurring shape: **a capability that must apply to every caller belongs in the function they all call**. The complementary detection, for a split this guard does not anticipate, is `meta_open_handle` (02 §1).
 
+### 3.3 Only the new exe creates a generation
+
+**The collector host refuses to open a generation whose `data.sqlite` does not exist**, before the `mkdirSync` that would create the directory and before the open that would create the file. Its callers check `generationExists()` first and report `skipped` with a reason, so the refusal is safe at the choke point and legible at the call sites.
+
+This is the same rule the shared pointer already followed, applied one level down — and the level it was missing at is the one that mattered, because `new Database(path)` creates a missing file by default. Observed 2026-09-07: minutes after the corrupt gen-001 was deleted, the collector's 2-minute claim tick rebuilt it — 52 tables, `integrity_check: ok`, every row count zero. **The tell is `meta_generation` = 0**, since only the new exe writes that row.
+
+Two things worth carrying forward. **A default that creates is not a neutral default**: when creation is one component's job, every other component needs an explicit refusal at the exact call that could do it by accident. And `meta_generation = 0` now has *two* causes — a generation the wrong app created, and a generation whose early pages are damaged (it was filed as evidence of the latter on the corruption report) — so it identifies neither on its own.
+
+Recovery needs no reset: such a generation is structurally correct and empty, and the new exe writes the missing `meta_generation` row on its next open.
+
 ---
 
 ## 4. Workspace mechanics

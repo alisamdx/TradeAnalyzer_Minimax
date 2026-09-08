@@ -1,7 +1,7 @@
 import type { BatchJobHandler, BatchJobResult } from '../batch-service.js';
 import type { BatchProgressEvent } from '@shared/types.js';
 import { runDaily, markNotRun, syncRegistry, ALL_CHECKS, buildNoRunEmail } from '@tradeanalyzer/core';
-import { readSharedPointer } from '../../collector-host/electron-collector-host.js';
+import { generationExists, readSharedPointer } from '../../collector-host/electron-collector-host.js';
 import type { HostFactory } from './collector-oneshot.js';
 
 /**
@@ -43,6 +43,11 @@ export function createCollectorDailyJob(deps: {
       const pointer = readSharedPointer();
       if (!pointer) {
         return { ...base, notes: 'No generation pointer yet — the new application has not been run.' };
+      }
+      if (!generationExists(pointer)) {
+        // Not an error, and above all not something to fix by creating one:
+        // generation creation belongs to the new exe (06 §3).
+        return { ...base, notes: 'No generation yet — TradeAnalyzer 2 has not created one.' };
       }
 
       const host = deps.makeHost({
@@ -124,6 +129,9 @@ export function createCollectorWatchdogJob(deps: {
 
       const pointer = readSharedPointer();
       if (!pointer) return { ...base, notes: 'No generation pointer yet.' };
+      if (!generationExists(pointer)) {
+        return { ...base, notes: 'No generation yet — TradeAnalyzer 2 has not created one.' };
+      }
 
       const host = deps.makeHost({ signal, onProgress: () => undefined });
       try {
