@@ -141,6 +141,16 @@ export function openGeneration(): GenerationInfo {
 
   writePointer(pointer);
 
+  // Durable NOW, not at some future close. The other application reads this file
+  // on a 2-minute tick, so "the generation exists and here is who opened it" has
+  // to be a fact on disk the moment it is true — not something held in a WAL that
+  // a shutdown might discard. The read-back is deliberate: it reports what the
+  // file holds rather than what we believe we wrote, which is the distinction
+  // that cost most of 2026-09-07.
+  checkpoint(db, 'startup');
+  const persisted = db.prepare('SELECT COUNT(*) AS n FROM meta_generation').get() as { n: number };
+  console.log(`[next] meta_generation rows after checkpoint: ${persisted.n}`);
+
   const info: GenerationInfo = {
     generationNo: row.generation_no,
     status: row.status,
@@ -165,7 +175,51 @@ export function currentGeneration(): GenerationInfo {
   return handle.info;
 }
 
+/**
+ * Makes this connection's writes durable in `data.sqlite`, and says what
+ * happened.
+ *
+ * **Never leave the hand-off to close-time semantics.** Two applications share
+ * this file, and "SQLite checkpoints when the last connection closes" turned out
+ * not to be something that could be relied on here: measured 2026-09-07, TA2
+ * wrote a 918,792-byte WAL, a second process read the committed rows out of it,
+ * and on close the WAL was **deleted with `data.sqlite` byte-for-byte unchanged**
+ * — 1,212,416 bytes, same mtime, across every cycle. The whole startup write was
+ * silently discarded, which read as "the collector lost my generation".
+ *
+ * `wal_checkpoint(TRUNCATE)` returns `{ busy, log, checkpointed }`: `busy = 1`
+ * means it could not finish, and `log > checkpointed` means frames were left
+ * behind. Both are logged, because a checkpoint that quietly does nothing is the
+ * failure being fixed and it must never be silent again.
+ */
+function checkpoint(db: Database.Database, when: string): void {
+  try {
+    const result = db.pragma('wal_checkpoint(TRUNCATE)') as {
+      busy: number;
+      log: number;
+      checkpointed: number;
+    }[];
+    const row = result[0];
+    console.log(`[next] checkpoint (${when}): ${JSON.stringify(row ?? result)}`);
+    if (row && (row.busy !== 0 || row.log !== row.checkpointed)) {
+      console.error(
+        `[next] checkpoint (${when}) did NOT fully apply: busy=${row.busy}, ` +
+          `log=${row.log}, checkpointed=${row.checkpointed}. Writes may not be durable.`
+      );
+    }
+  } catch (err) {
+    console.error(`[next] checkpoint (${when}) failed: ${(err as Error).message}`);
+  }
+}
+
 export function closeGeneration(): void {
-  handle?.db.close();
+  if (!handle) {
+    console.log('[next] closeGeneration: nothing open');
+    return;
+  }
+  console.log('[next] closeGeneration: checkpointing and closing');
+  checkpoint(handle.db, 'close');
+  handle.db.close();
   handle = undefined;
+  console.log('[next] closeGeneration: closed');
 }
