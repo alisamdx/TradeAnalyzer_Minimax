@@ -9,10 +9,55 @@ exit (06 §6).
 
 ---
 
-## RESOLVED: the generation corrupted because one app was launched from a container (2026-09-07)
+## STILL OPEN: `meta_response` corrupts during universe_seed (2026-09-07)
 
-**Root cause found, guard shipped, none of the three recorded hypotheses was
-right.** `applyDictionary` running every tick, the FK behaviour of the rebuild
+**Read this before re-running anything.** An earlier version of this entry
+declared the MSIX redirect to be the cause. **That was wrong** — the corruption
+recurred twice more after the redirect was guarded, on a shell verified clean,
+with both applications on fixed builds. The redirect was a real bug and the
+guard is worth having; it was not this.
+
+**Do not re-seed a generation to "see if it happens again".** It has happened
+three times, it costs an evening each time, and a fourth identical run adds
+nothing. The two harnesses below exist so the question can be asked in minutes.
+
+### Ruled out, each by test rather than by argument
+
+| Suspect | How it was eliminated |
+|---|---|
+| MSIX `%APPDATA%` redirect | Guarded in both exes (v1.1.202); corruption recurred |
+| `node:sqlite` (3.51.3) vs `better-sqlite3` (3.53.1) on one wal-index | Scripts moved to one library (v1.1.204); recurred |
+| The environment — path, filesystem, antivirus | `stress-sqlite.mjs`: 1,100 paced transactions into the generation's own directory over 285 s, **clean** |
+| `applyDictionary` drift rebuilding tables | Idempotent — zero rebuilds on re-apply |
+| A second collector job overlapping | `BatchService.runJob` returns immediately while anything runs |
+| Two processes on one WAL file | TradeAnalyzer 2 was **closed** for every corrupting run |
+| The collector code path | `replay-seed-locally.mjs`: real `runUniverseSeed`, real schema, real capture contract, 1,089 responses, offline — **clean** |
+| The 2-minute tick's `meta_dictionary` churn | 60 open/apply/close cycles on a seeded database — **clean** |
+| A mismatched native binary | `node_modules` differs from the packaged copies, which are byte-identical to each other; the ABI swap is correct |
+
+### What remains, and the next test
+
+**The Electron main process itself** — the only variable not yet isolated. The
+next step is to run `replay-seed-locally.mjs`'s logic *inside* Electron. A
+reproduction there has a **0.6-second** cycle instead of a five-minute live run,
+which is the difference between bisecting and guessing.
+
+### Two claims that were presented as evidence and were not
+
+- **"Identical file sizes prove this is not I/O damage."** Three events, three
+  sizes: 2,318,336 / 2,355,200 / 2,363,392. The first two matched and I carried
+  the inference forward without rechecking it when the third arrived.
+- **`checkpoint {busy:0, log:0, checkpointed:0}` means the WAL was empty.** A
+  healthy control run reports exactly that with a WAL that peaked at 4,120,032
+  bytes. It is what a successful `TRUNCATE` looks like.
+
+Both were load-bearing in a wrong diagnosis. **A corroborating detail should be
+re-checked when new data arrives, not promoted to a premise.**
+
+### What the redirect investigation did produce (all still valid)
+
+**None of the three hypotheses recorded with the original bug was
+right, either.** `applyDictionary` running every tick, the FK behaviour of the rebuild
 paths and the archive/transaction ordering were all innocent.
 
 **What it actually was.** Both applications had been launched at some point from
@@ -97,21 +142,18 @@ is asserted to fire, not only to stay quiet. A guard that can only be tested for
 silence is the own-at-strike band again: structurally incapable of firing and
 indistinguishable from one nothing violates.
 
-### Operator action before the next seed
+### Where the generation stands
 
-The corrupt artefact and the container's shadow copies are both still on disk and
-neither is deleted automatically. From an **ordinary** terminal (not one embedded
-in a packaged app):
+`gen-001` is corrupt and should not be re-seeded until the Electron test above
+has been run. Both harnesses live in `packages/core/scripts/`:
 
 ```
-node packages/core/scripts/diagnose-generation.mjs
+node packages/core/scripts/stress-sqlite.mjs "<dir>" 1100 250
+node packages/core/scripts/replay-seed-locally.mjs "<dir>" 1089
 ```
 
-It will now open the real file, report integrity, and list who has opened it.
-The shadow profiles under
-`%LOCALAPPDATA%\Packages\<pkg>\LocalCache\Roaming\trade-analyzer*` can be removed
-once the real generation is confirmed healthy — they are copies, and nothing
-should ever read them again.
+Both need `npm run rebuild:node` first if the repo was last used to package, and
+both say so rather than failing cryptically. Neither touches a real generation.
 
 ## The universe came from the wrong place (2026-09-07)
 
