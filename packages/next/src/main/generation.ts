@@ -6,6 +6,7 @@ import {
   applyDictionary,
   assertNotRedirected,
   DICTIONARY_VERSION,
+  etTimestamp,
   recordOpenHandle,
   type SqliteLike
 } from '@tradeanalyzer/core';
@@ -116,7 +117,12 @@ export function openGeneration(): GenerationInfo {
 
   applyDictionary(db as unknown as SqliteLike);
 
-  const openedAt = new Date().toISOString();
+  // ET, never `toISOString()`. Every timestamp in a generation carries the
+  // America/New_York offset (02 §0.1), and UTC is indistinguishable from it at a
+  // glance while being a day out every evening. This line WAS `toISOString()`,
+  // and it put `2026-09-07 23:02 ET` into the forensic record of a corruption as
+  // `2026-09-08T03:02:53Z`, next to a collector row that was correctly in ET.
+  const openedAt = etTimestamp();
   db.prepare(
     `INSERT INTO meta_generation (generation_no, opened_at, status, db_path, archive_path)
      VALUES (?, ?, 'pilot', ?, ?)

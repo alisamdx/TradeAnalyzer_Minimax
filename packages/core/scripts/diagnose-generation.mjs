@@ -427,12 +427,23 @@ if (schemaError !== null || integrityResult !== 'ok') {
   // Both separators: the path may arrive with either, and dropping the
   // backslash would leave a Windows path unsplit and name the whole thing.
   const genName = genDir.replace(/[\\/]+$/, '').split(/[\\/]/).pop();
-  console.log('\nRecovery — rename, never delete: this file is the only record of how it broke,');
-  console.log('and the generation itself is cheap to rebuild by re-running the jobs. Close both');
-  console.log('applications, then:');
-  console.log(`  Rename-Item "${genDir}" "${genName}-corrupt-${stamp}"`);
-  console.log('  # then launch TradeAnalyzer 2 once — it recreates the generation and the pointer');
-  console.log('The archive directory is append-only and separate; it is unaffected either way.');
+  const alreadyRetired = /-corrupt-\d{8}$/.test(genName ?? '');
+  // A generation that has already been retired needs no advice — it is evidence
+  // sitting where it belongs. Suggesting a rename here produced
+  // `gen-001-corrupt-20260907-corrupt-20260909`, which is the tell that the
+  // recovery text was written for one case and printed in every case.
+  if (alreadyRetired) {
+    console.log('\nThis generation is already retired (its name carries a `-corrupt-` stamp), so');
+    console.log('there is nothing to do: it is being kept deliberately as the record of a failure.');
+    console.log('Corruption here is expected — it is why the directory was set aside.');
+  } else {
+    console.log('\nRecovery — rename, never delete: this file is the only record of how it broke,');
+    console.log('and the generation itself is cheap to rebuild by re-running the jobs. Close both');
+    console.log('applications, then:');
+    console.log(`  Rename-Item "${genDir}" "${genName}-corrupt-${stamp}"`);
+    console.log('  # then launch TradeAnalyzer 2 once — it recreates the generation and the pointer');
+    console.log('The archive directory is append-only and separate; it is unaffected either way.');
+  }
   checkpointAndClose(db);
   process.exit(2);
 }

@@ -9,6 +9,77 @@ exit (06 §6).
 
 ---
 
+## The corruption has a signature, and it points at universe_seed (2026-09-09)
+
+`core` 0.3.3, dictionary version 7. **Both corrupt generations were read for the
+first time**, and they agree.
+
+| | `gen-001-corrupt-20260907` | `gen-001` |
+|---|---|---|
+| dictionary | v5 (51 tables) | v6 (52 tables) |
+| damaged | `meta_response` (Tree 5) + `raw_ticker_reference` (Tree 12) | `meta_response` (Tree 7) + `raw_ticker_reference` (Tree 14) |
+| damaged pages | 453-469 | 418-432 |
+| file | 2,342,912 bytes (572 pages) | 413,073,408 bytes (100,848 pages) |
+| contents | 1 run, 1,092 responses, **0 bars** | 71 runs, 78,645 responses, **227,352 bars** |
+
+**The same two tables both times, and only those two** — Tree 5/12 and Tree 7/14
+are the same pair renumbered by the dictionary bump, which is exactly the trap
+recorded on 2026-09-07 and this time it resolves rather than misleads, because
+the tool now looks the numbers up.
+
+**The damage does not track write volume.** `raw_daily_bar` holds 227,352 rows in
+the large file and is undamaged; `raw_ticker_reference` holds 1,083 and is
+wrecked. Those two tables are precisely what `universe_seed`'s per-ticker loop
+writes together in one transaction.
+
+**And it sits where the first seed wrote.** 418-432 of 100,848 pages is inside
+the first ~570 — the region that file's first seed allocated. The small file
+contains exactly one seed and is damaged at 453-469: the same region.
+
+### What follows, and what does not
+
+*Inference, recorded as one:* the damage is inflicted during a `universe_seed`
+and nothing afterwards extends it. Today's corruption most likely dates from
+gen-001's own first seed on 09-06/07 rather than from anything in the last two
+days — the 71 runs since have been writing into an already-broken file, which is
+why QC-001 had been failing for **69 consecutive runs**. Those are consequences,
+not 69 fresh events. If that holds, the count of corruption *events* is the count
+of seeds, not the count of times someone noticed.
+
+**It does not explain the clean replay.** The offline harness writes this exact
+pattern — same schema, same transaction shape, same two tables, 1,089 responses
+at the real 250 ms pace — in both Node and Electron, and comes back `ok` every
+time. Whatever the live seed does differently is still the open question.
+
+### `meta_open_handle` could not answer the question it exists for
+
+Keyed on `app_name` alone, so the upsert held only each application's **latest**
+open. An earlier redirected open is overwritten by the next healthy one.
+
+Measured: the corrupt generation reported both applications on the same
+`db_path` — true of their last opens, evidence of nothing, and read at first as
+"no split". Now keyed on `(app_name, db_path)`, so a path an application ever
+resolved is permanent and a second row is a standing accusation.
+
+**Before trusting a negative from a table, check whether the table's own key
+could have destroyed the positive.**
+
+### The new exe stamped `openedAt` in UTC
+
+The two rows being compared were in two time bases:
+
+```
+TradeAnalyzer 2  2026-09-08T03:02:53.252Z     <- actually 2026-09-07 23:02 ET
+TradeAnalyzer    2026-09-08T23:54:19-04:00
+```
+
+`tests/collector-host.test.ts` has pinned the collector host against exactly this
+since it was written. The new exe had the bug anyway, because **the rule lived in
+a test attached to one implementation rather than in a function both applications
+call**. `etTimestamp()` is now in `core` and both call it.
+
+---
+
 ## Every script's generation open goes through one door (2026-09-08)
 
 `core` 0.3.2. Found while building the Electron arm of the seed replay, by

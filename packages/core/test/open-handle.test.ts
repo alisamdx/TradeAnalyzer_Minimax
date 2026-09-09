@@ -42,9 +42,8 @@ describe('meta_open_handle', () => {
     close();
   });
 
-  it('replaces its own row on a re-open rather than accumulating', () => {
-    // The question is who has this open now, not who ever did — and the history
-    // that matters already survives in `meta_run`.
+  it('replaces its own row when the SAME path is re-opened', () => {
+    // Re-opening the same file is not new information, so it updates in place.
     const { db, close } = open();
     recordOpenHandle(db, HOST);
     recordOpenHandle(db, { ...HOST, processId: 5678, openedAt: '2026-09-07T21:00:00-04:00' });
@@ -52,6 +51,32 @@ describe('meta_open_handle', () => {
     const rows = db.prepare('SELECT process_id FROM meta_open_handle').all() as { process_id: number }[];
     expect(rows).toHaveLength(1);
     expect(rows[0]?.process_id).toBe(5678);
+    close();
+  });
+
+  it('keeps a SECOND row when the same app resolves a DIFFERENT path', () => {
+    // The whole point, and it did not work until 2026-09-09. Keyed on `app_name`
+    // alone, the upsert held only each application's latest open — so a
+    // redirected open was overwritten by the next healthy one and the split
+    // became unaskable.
+    //
+    // Measured on the real corrupt generation: both applications reported the
+    // same `db_path`, which was true of their last opens and evidence of
+    // nothing. A path this app once resolved must survive the next open.
+    const { db, close } = open();
+    recordOpenHandle(db, HOST);
+    recordOpenHandle(db, {
+      ...HOST,
+      dbPath: 'C:\\Users\\x\\AppData\\Local\\Packages\\Some.App\\LocalCache\\Roaming\\gen-001\\data.sqlite',
+      processId: 9999,
+      openedAt: '2026-09-07T22:00:00-04:00'
+    });
+
+    const rows = db
+      .prepare('SELECT db_path FROM meta_open_handle WHERE app_name = ? ORDER BY db_path')
+      .all(HOST.appName) as { db_path: string }[];
+    expect(rows).toHaveLength(2);
+    expect(new Set(rows.map((r) => r.db_path)).size).toBe(2);
     close();
   });
 

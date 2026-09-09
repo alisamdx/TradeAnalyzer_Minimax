@@ -9,6 +9,8 @@
 
 export { COLLECTOR_VERSION } from './version.js';
 
+export { etTimestamp, etDate } from './time.js';
+
 export type { SqliteLike, SqliteStatementLike } from './db/sqlite-like.js';
 
 export { assertNotRedirected, detectRedirect, shadowSuffixes } from './db/appdata-redirect.js';

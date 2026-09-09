@@ -109,12 +109,19 @@ describe('ElectronCollectorHost', () => {
     }
   });
 
-  it('builds ET timestamps from parts, not from toISOString', () => {
+  it('gets its ET timestamp from core, not from its own copy', () => {
     // toISOString gives UTC, which silently shifts every evening timestamp onto
-    // the following day — the exact class of bug that starved the agent of
-    // option contracts for ten days in the existing app.
+    // the following day — the class of bug that starved the agent of option
+    // contracts for ten days.
+    //
+    // This used to assert an inline `America/New_York` build here, and it
+    // passed while the NEW exe wrote `openedAt` with `toISOString()` into the
+    // same forensic table, a day out. **A rule pinned against one
+    // implementation does not constrain the second one.** Both now call
+    // `etTimestamp` in `core`, and `packages/core/test/time.test.ts` is where
+    // the behaviour itself is tested.
     const nowEt = host.slice(host.indexOf('nowET(): string'), host.indexOf('async sendEmail('));
-    expect(nowEt).toContain('America/New_York');
+    expect(nowEt).toContain('etTimestamp()');
     expect(nowEt).not.toContain('toISOString');
   });
 });

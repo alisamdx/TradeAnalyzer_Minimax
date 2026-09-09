@@ -1,5 +1,32 @@
 # Changelog
 
+## [1.1.208] - 2026-09-09
+
+`@tradeanalyzer/core` 0.3.3, dictionary version **7**.
+
+### docs - the corruption has a signature, read from two generations at once
+
+- Both corrupt generations were examined for the first time and they **agree**: damaged in `meta_response` AND `raw_ticker_reference`, and only those two, both times (Tree 5/12 under dictionary v5, Tree 7/14 under v6 - the same two tables, renumbered by the schema bump).
+- **It does not track write volume.** `raw_daily_bar` holds 227,352 rows in the 413 MB file and is undamaged; `raw_ticker_reference` holds 1,083 and is wrecked. Those two tables are exactly what `universe_seed`'s per-ticker loop writes together in one transaction.
+- The damaged pages are **418-432 of 100,848** in the large file - inside the first ~570 pages, the region its first seed allocated. The 2.3 MB file holds exactly one seed and is damaged at 453-469, the same region.
+- **Inference, recorded as one**: the damage is inflicted during a `universe_seed` and nothing afterwards extends it, so today's corruption most likely dates from that generation's own first seed rather than from anything since. The 69 consecutive QC failures are consequences, not 69 events. It does **not** explain why the offline replay writes this exact pattern, at the real pace, in both Node and Electron, and stays clean.
+
+### fix - `meta_open_handle` could not answer the question it exists for
+
+- Keyed on `app_name` alone, so the upsert held only each application's **latest** open - an earlier redirected open is overwritten by the next healthy one and the split becomes unaskable. Measured on the real corrupt generation: both apps reported the same `db_path`, which was true of their last opens and evidence of nothing, and was read at first as "no split".
+- Now keyed on **`(app_name, db_path)`**, so a path an application ever resolved survives every later open and a second row is permanent evidence of a split file set. Implemented as a UNIQUE INDEX, not a composite PRIMARY KEY - the DDL generator emits `PRIMARY KEY` inline per column, so marking two produces `table "meta_open_handle" has more than one primary key`.
+- Dictionary **v6 -> v7**. Populated tables are reported as drift rather than rebuilt, by design; a fresh generation gets it outright.
+
+### fix - the new exe stamped `openedAt` in UTC
+
+- `packages/next` used `new Date().toISOString()` while the collector host built ET from parts. In the corruption's own forensic record the two sat side by side: `TradeAnalyzer 2 2026-09-08T03:02:53.252Z` (really **2026-09-07 23:02 ET**) beside `TradeAnalyzer 2026-09-08T23:54:19-04:00`. One of the two rows being compared was a day out.
+- **`tests/collector-host.test.ts` has pinned the host against exactly this since it was written, and the new exe had the bug anyway** - the rule lived in a test attached to one implementation instead of in a function both applications call. `etTimestamp()` now lives in `core` and both call it; `packages/core/test/time.test.ts` covers the evening rollover, both DST offsets, the round trip, the ICU hour-`24` case, and that no `Z` is ever emitted.
+
+### fix - the diagnostic advised renaming an already-retired generation
+
+- Pointed at `gen-001-corrupt-20260907` it suggested renaming to `gen-001-corrupt-20260907-corrupt-20260909`. The recovery text was written for one case and printed in every case. A retired generation is now told it is evidence and needs nothing done - corruption there is expected, which is why it was set aside.
+- `300` tests in `core`, `1,247` in the existing app.
+
 ## [1.1.207] - 2026-09-09
 
 ### fix - the generation diagnostic was describing the wrong file

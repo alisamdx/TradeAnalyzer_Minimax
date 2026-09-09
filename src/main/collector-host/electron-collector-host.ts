@@ -3,7 +3,7 @@ import Database from 'better-sqlite3';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { CollectorHost, ProviderResponse, SqliteLike } from '@tradeanalyzer/core';
-import { applyDictionary, assertNotRedirected, recordOpenHandle, DICTIONARY_VERSION } from '@tradeanalyzer/core';
+import { applyDictionary, assertNotRedirected, etTimestamp, recordOpenHandle, DICTIONARY_VERSION } from '@tradeanalyzer/core';
 import { etradeGetRaw, renewAccessToken, type OAuthCredentials } from '../services/etrade-auth.js';
 import { logApiCall } from '../services/logger.js';
 
@@ -290,26 +290,13 @@ export class ElectronCollectorHost implements CollectorHost {
   }
 
   nowET(): string {
-    // ISO-8601 with the America/New_York offset, per 02 §0.1. Built from parts
-    // rather than from toISOString(), which would give UTC and silently shift
-    // every evening timestamp onto the following day.
-    const now = new Date();
-    const parts = new Intl.DateTimeFormat('en-CA', {
-      timeZone: 'America/New_York',
-      year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', second: '2-digit',
-      hour12: false
-    }).formatToParts(now);
-    const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '00';
-    const utcMs = Date.UTC(
-      Number(get('year')), Number(get('month')) - 1, Number(get('day')),
-      Number(get('hour')) % 24, Number(get('minute')), Number(get('second'))
-    );
-    const offsetMinutes = Math.round((utcMs - now.getTime()) / 60_000);
-    const sign = offsetMinutes >= 0 ? '+' : '-';
-    const abs = Math.abs(offsetMinutes);
-    const offset = `${sign}${String(Math.floor(abs / 60)).padStart(2, '0')}:${String(abs % 60).padStart(2, '0')}`;
-    return `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}:${get('second')}${offset}`;
+    // Delegates to `core`'s `etTimestamp`. This used to be an inline
+    // `Intl.DateTimeFormat` build, correct and pinned by a test — and the new exe
+    // then wrote `openedAt` with `toISOString()` and put a UTC stamp into the
+    // same forensic table, a day out. **The rule was living in a test attached to
+    // one implementation instead of in a function both applications call**, which
+    // is the shape this project keeps paying for. One implementation now.
+    return etTimestamp();
   }
 
   async sendEmail(msg: { subject: string; text: string; html: string }): Promise<void> {

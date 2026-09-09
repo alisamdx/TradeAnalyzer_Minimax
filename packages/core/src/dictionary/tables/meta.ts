@@ -68,27 +68,37 @@ export const metaTables: readonly TableEntry[] = [
     layer: 'meta',
     domain: 'generation',
     description:
-      'One row per application that has opened this generation, replaced on each open. Not a fact ' +
+      'One row per application AND resolved path, replaced on each re-open of that same pair. Not a fact ' +
       'about the market and not needed by anything downstream — it exists so that "are the two ' +
       'applications actually looking at the same file" is an ANSWERABLE question. Both exes write ' +
       'here on open, so a reader that sees only one of them is seeing a split file set, which is ' +
       'the shape that destroyed gen-001 on 2026-09-07: a containerised launch redirected one app ' +
       'onto a private copy of data.sqlite while the write-ahead log stayed shared. Every path ' +
       'reads back perfectly from inside such a process, so inference cannot settle it — the only ' +
-      'honest test is to make both processes report what they see (CLAUDE.md).',
-    naturalKey: ['app_name'],
+      'honest test is to make both processes report what they see (CLAUDE.md). Keyed on ' +
+      '(app_name, db_path), NOT on app_name alone: with one row per application the upsert ' +
+      'only ever holds the LATEST open, so an earlier redirected open is overwritten by the ' +
+      'next healthy one and the split becomes unaskable. Measured 2026-09-09 — a corrupt ' +
+      'generation reported both apps on the same path, which was true of their last opens ' +
+      'and said nothing about the ones that mattered. A second row here is permanent ' +
+      'evidence that an application once resolved a different file.',
+    naturalKey: ['app_name', 'db_path'],
     appendOnly: false,
     ruleDriven: false,
     standardColumns: false,
     columns: [
-      col.text('app_name', 'Which application opened it — `TradeAnalyzer` (the collector host) or `TradeAnalyzer 2` (the inspector).', { primaryKey: true, sourceProvider: 'collector' }),
+      col.text('app_name', 'Which application opened it — `TradeAnalyzer` (the collector host) or `TradeAnalyzer 2` (the inspector).', { sourceProvider: 'collector' }),
       col.text('app_version', 'That application\'s version, so a stale row names the build that wrote it.', { sourceProvider: 'collector' }),
       col.ts('opened_at', 'When that application last opened this generation.', { sourceProvider: 'collector' }),
       col.int('process_id', 'The operating-system process that opened it.', { sourceProvider: 'collector' }),
-      { column: 'db_path', type: 'TEXT', unit: 'path', nullable: false, description: 'The path that application resolved for this database. Two different values here mean two different files, whatever the pointer says.', sourceProvider: 'collector' },
+      { column: 'db_path', type: 'TEXT', unit: 'path', nullable: false, description: 'The path that application resolved for this database. Two different values here mean two different files, whatever the pointer says — and because it is part of the key, a second path is recorded rather than overwriting the first.', sourceProvider: 'collector' },
       col.int('dictionary_version', 'The dictionary version that application was built against.', { sourceProvider: 'collector' })
     ],
-    indexes: []
+    // A UNIQUE INDEX rather than a composite PRIMARY KEY: the generator emits
+    // `PRIMARY KEY` inline on the column, so marking two columns produces
+    // `table "meta_open_handle" has more than one primary key`. The index gives
+    // the same identity and the same `ON CONFLICT (app_name, db_path)` target.
+    indexes: [{ columns: ['app_name', 'db_path'], unique: true }]
   }),
 
   defineTable({
