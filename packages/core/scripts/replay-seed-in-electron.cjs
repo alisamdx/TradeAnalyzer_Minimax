@@ -145,6 +145,8 @@ app
       tickerCount,
       delayMs,
       ticks: Number(process.env.REPLAY_TICKS || 60),
+      failEvery: Number(process.env.REPLAY_FAIL_EVERY || 0),
+      viaQueue: process.env.REPLAY_QUEUE === '1',
       encryptForArchive: useSafeStorage
         ? (b) => safeStorage.encryptString(b.toString('base64'))
         : undefined,

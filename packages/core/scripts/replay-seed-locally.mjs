@@ -45,7 +45,9 @@ const { ok } = await runSeedReplay({
   baseDir: process.argv[2] ?? tmpdir(),
   tickerCount: Number(process.argv[3] ?? 1089),
   delayMs: Number(process.argv[4] ?? 0),
-  ticks: Number(process.env.REPLAY_TICKS ?? 60)
+  ticks: Number(process.env.REPLAY_TICKS ?? 60),
+  failEvery: Number(process.env.REPLAY_FAIL_EVERY ?? 0),
+  viaQueue: process.env.REPLAY_QUEUE === '1'
 });
 
 process.exit(ok ? 0 : 1);

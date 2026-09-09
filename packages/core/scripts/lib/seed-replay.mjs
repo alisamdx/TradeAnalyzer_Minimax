@@ -47,11 +47,21 @@ export function loadBetterSqlite3(runtime) {
   }
 }
 
-/** A Polygon ticker-reference body, shaped like the real one the ingester parses. */
-function referenceBody(ticker, index) {
+/**
+ * A Polygon ticker-reference body, shaped like the real one the ingester parses.
+ *
+ * `padBytes` makes the body a realistic and *varying* size. Until 2026-09-09
+ * every canned response was byte-identical, so every `meta_response` row was the
+ * same length and the btree grew in a way no real run ever does — a page-boundary
+ * effect could not have been reproduced. Real bodies vary; so do these.
+ */
+function referenceBody(ticker, index, padBytes = 0) {
   return JSON.stringify({
     results: {
       ticker,
+      // Deterministic per index, so a reproduction is repeatable rather than
+      // needing the same random seed to chase again.
+      description: padBytes > 0 ? 'x'.repeat(padBytes) : undefined,
       name: `${ticker} Holdings Inc`,
       primary_exchange: 'XNAS',
       type: 'CS',
@@ -125,6 +135,8 @@ export async function runSeedReplay({
   delayMs = 0,
   ticks = 60,
   label = 'node',
+  failEvery = 0,
+  viaQueue = false,
   encryptForArchive,
   decryptFromArchive
 }) {
@@ -141,6 +153,8 @@ export async function runSeedReplay({
   console.log(`runtime   : ${runtimeLine(Database)}`);
   console.log(`directory : ${dir}`);
   console.log(`tickers   : ${tickerCount}${delayMs ? ` (${delayMs}ms apart)` : ''}`);
+  console.log(`bodies    : varying 0-8KB${failEvery > 0 ? `, every ${failEvery}th response FAILS` : ''}`);
+  if (viaQueue) console.log(`job path  : through meta_job_request (claim -> run -> finish)`);
 
   const db = new Database(dbPath);
   db.pragma('journal_mode = WAL');
@@ -162,10 +176,29 @@ export async function runSeedReplay({
     polygonGet: async (path) => {
       if (delayMs > 0) await sleep(delayMs);
       const ticker = path.split('/').pop();
+      const i = indexOf.get(ticker) ?? 0;
+      const requestedAt = new Date().toISOString();
+
+      // The failure path, which no arm exercised until 2026-09-09. The live seed
+      // that corrupted had **6 failed tickers**; this replay had none, so the
+      // rows a failure writes — a `meta_response` with no status and no
+      // `raw_ticker_reference` beside it — were never produced at all.
+      //
+      // Both shapes, alternating, because they are different code paths: a
+      // provider error with a body, and a transport fault with no status (which
+      // is what a killed response stream looks like).
+      if (failEvery > 0 && i > 0 && i % failEvery === 0) {
+        return i % (failEvery * 2) === 0
+          ? { status: 500, body: '{"status":"ERROR","message":"internal"}', requestedAt, respondedAt: new Date().toISOString() }
+          : { status: null, body: '', requestedAt, respondedAt: null, error: 'terminated' };
+      }
+
       return {
         status: 200,
-        body: referenceBody(ticker, indexOf.get(ticker) ?? 0),
-        requestedAt: new Date().toISOString(),
+        // Varies between ~0 and ~8 KB. A constant body meant every row was the
+        // same length and the btree never packed the way a real one does.
+        body: referenceBody(ticker, i, (i * 137) % 8192),
+        requestedAt,
         respondedAt: new Date().toISOString()
       };
     },
@@ -207,7 +240,29 @@ export async function runSeedReplay({
   }));
 
   const started = Date.now();
+
+  // Optionally through the REAL one-shot wrapper. `collector-oneshot` does not
+  // call `runUniverseSeed` bare: it claims a `meta_job_request` row, marks it
+  // running, and writes the whole report back as JSON when it finishes — and
+  // those writes land at the very END of the sequence, which is exactly where
+  // every corrupt file's damaged pages sit. The replay skipped all of it.
+  let request;
+  if (viaQueue) {
+    db.prepare(
+      `INSERT INTO meta_job_request (requested_at, requested_by, run_kind, params_json, state)
+       VALUES (?, ?, 'universe_seed', '{}', 'queued')`
+    ).run(host.nowET(), `seed-replay-${label}`);
+    request = core.claimNextJob(db, host);
+    if (!request) throw new Error('the replay queued a request and could not claim it back');
+  }
+
   const report = await core.runUniverseSeed(host, { tradingDate: '2026-09-07', sources });
+
+  if (viaQueue && request) {
+    core.markJobRunning(db, request.requestId, report.runId);
+    core.finishJob(db, host, request.requestId, { state: 'complete', result: report });
+  }
+
   const elapsed = ((Date.now() - started) / 1000).toFixed(1);
 
   console.log(`\nseed      : ${JSON.stringify(report)}`);
@@ -242,7 +297,9 @@ export async function runSeedReplay({
   const counts = ['meta_response', 'ref_universe_membership', 'raw_ticker_reference'].map(
     (t) => `${t}=${cold.prepare(`SELECT COUNT(*) AS n FROM "${t}"`).get().n}`
   );
+  const pages = Object.values(cold.pragma('page_count')[0] ?? {})[0];
   console.log(`cold read : ${counts.join(' ')}`);
+  console.log(`cold size : ${statSync(dbPath).size} bytes, ${pages} pages`);
   console.log(`cold integ: ${seedVerdict.slice(0, 300)}`);
   cold.close();
 
