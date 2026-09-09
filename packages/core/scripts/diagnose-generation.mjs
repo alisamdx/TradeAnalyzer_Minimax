@@ -368,7 +368,7 @@ function reportForensics(degraded) {
     console.log('\nopened by:');
     say('meta_open_handle', () => {
       const handles = db
-        .prepare('SELECT app_name, app_version, opened_at, process_id, db_path FROM meta_open_handle ORDER BY opened_at')
+        .prepare('SELECT app_name, app_version, opened_at, process_id, db_path, dictionary_version FROM meta_open_handle ORDER BY opened_at')
         .all();
       if (handles.length === 0) {
         console.log('  (nothing has opened this generation since the handle table existed)');
@@ -376,7 +376,9 @@ function reportForensics(degraded) {
       }
       const paths = new Set(handles.map((h) => h.db_path));
       for (const h of handles) {
-        console.log(`  ${h.app_name} v${h.app_version}  pid ${h.process_id}  ${h.opened_at}`);
+        console.log(
+          `  ${h.app_name} v${h.app_version}  dict v${h.dictionary_version}  pid ${h.process_id}  ${h.opened_at}`
+        );
         if (h.db_path !== dbPath) console.log(`    ** resolved a DIFFERENT path: ${h.db_path} **`);
       }
       if (paths.size > 1) {
