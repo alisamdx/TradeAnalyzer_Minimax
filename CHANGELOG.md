@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.210] - 2026-09-09
+
+`@tradeanalyzer/core` 0.3.4, dictionary version **8** (unchanged).
+
+### fix - a checkpoint that worked and a checkpoint that never ran looked identical
+
+- v1.1.209 gave `ElectronCollectorHost.close()` an explicit `wal_checkpoint(TRUNCATE)` but logged a WARNING **only when it did not fully apply**. Silence then means either "it applied cleanly" or "`close()` was never reached" - opposite readings of the very seed this investigation is waiting on. A clean generation with no checkpoint line would be no evidence at all about the checkpoint.
+- Every close now writes a line: `INFO` when it fully applied, `WARNING` when it did not, and a separate `WARNING` when it threw (a third outcome that silence collapsed into the other two). Each carries **`walBytes`** - the WAL size that preceded the checkpoint, `-1` when there is no `-wal` to stat, because a fully applied checkpoint over an empty WAL is not the same evidence as one over four megabytes.
+- Look in `logs/errors/errors_<date>.jsonl` for `"errorClass":"CollectorCheckpoint"`.
+- `packages/next` has logged every checkpoint unconditionally since it was written; this is the host catching up. **A rule pinned in one implementation does not constrain the second one** - the fourth instance of that shape here.
+- Regression test in `tests/collector-host.test.ts`; spec 06 §3.5 now states the rule for every writer of a generation. `1,248` tests.
+
 ## [1.1.209] - 2026-09-09
 
 `@tradeanalyzer/core` 0.3.4, dictionary version **8**.

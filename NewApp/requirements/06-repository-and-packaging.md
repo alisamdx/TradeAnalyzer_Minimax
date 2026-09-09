@@ -112,9 +112,17 @@ The scripts originally used `node:sqlite`, chosen so they would work whichever A
 - **Library**: one SQLite per generation, always. The ABI swap (`npm run rebuild:node`) is the price; the scripts name it and **refuse rather than fall back**, because a fallback reintroduces the mixing at the moment nobody is watching.
 - **Redirect**: `assertNotRedirected` — `core`'s implementation, the same call both applications make — before the pointer is read and again before the database is opened. The *directories* are the argument, never `%APPDATA%` globally, because the redirect is per file and `dataRoot` is configurable while the pointer is not. `resolveGenerationPointer` probes the pointer's directory and `openGenerationExclusively` the generation's, so between them both are covered.
 - **Creation**: never. `new Database(path)` creates the file, and a generation made by anything but the new exe has no `meta_generation` row — healthy from every angle except whose it is.
-- **Durability**: a script checkpoints `TRUNCATE` before closing and reports a `busy` or short checkpoint, for the same reason §3.3's applications do.
+- **Durability**: a script checkpoints `TRUNCATE` before closing and reports a `busy` or short checkpoint, for the same reason §3.5's applications do.
 
 **A diagnostic that damages what it inspects is worse than no diagnostic** — and this one did, for a whole evening, while being the tool used to decide whether the damage was happening.
+
+### 3.5 Every checkpoint is reported, including the ones that worked
+
+**Any writer of a generation — both applications and every script — checkpoints `TRUNCATE` before closing, and records the result unconditionally**: the WAL size that preceded it, and `busy` / `log` / `checkpointed`. A fully applied checkpoint is logged at `INFO`; a short or busy one at `WARNING`; a checkpoint that threw is a third outcome and gets its own line.
+
+Never leave the hand-off to close-time semantics. Measured 2026-09-07: the new exe wrote a **918,792-byte WAL**, a second process read the committed rows out of it, and on close the WAL was deleted with `data.sqlite` byte-for-byte unchanged. The whole startup write was discarded, and it read as "the collector lost my generation".
+
+**Warning-only reporting reproduces that same ambiguity one level up.** The collector host was fixed to checkpoint in v1.1.209 but logged only when the checkpoint did *not* apply, so silence meant either "it applied cleanly" or "`close()` was never reached" — and those are opposite readings of the very next seed. A clean generation with no checkpoint line is not evidence that checkpointing fixed anything. **An instrument added to remove an ambiguity must not be readable only by its own absence.**
 
 ---
 

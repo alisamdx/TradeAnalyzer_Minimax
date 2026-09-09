@@ -9,6 +9,36 @@ exit (06 §6).
 
 ---
 
+## The checkpoint has to say when it worked, too (2026-09-09)
+
+Existing app v1.1.210. `core` 0.3.4, dictionary v8 — no schema change.
+
+The collector host got its explicit `wal_checkpoint(TRUNCATE)` yesterday and
+logged a `WARNING` **only when the checkpoint fell short**. That is the same
+ambiguity the checkpoint was added to remove, moved up one level: no line in the
+log is equally consistent with *the checkpoint applied cleanly* and with
+*`close()` was never reached*.
+
+Which matters right now more than it would at any other time. **The next
+`universe_seed` is the test of the checkpoint hypothesis**, and under
+warning-only reporting a clean generation would have arrived with no way to tell
+whether the fix had done anything or had simply not run.
+
+Every close now writes a line — `INFO` applied, `WARNING` short or busy,
+`WARNING` threw — carrying `walBytes`, the WAL size that preceded it. A fully
+applied checkpoint over an empty WAL is not the same evidence as one over four
+megabytes, and `-1` (no `-wal` to stat) is reported as itself rather than as
+zero.
+
+`packages/next` has done this since it was written. **A rule pinned in one
+implementation does not constrain the second one** — fourth time, and the third
+of those was in this same investigation.
+
+Spec 06 gains §3.5, which states the rule for *every* writer of a generation
+rather than for the two that happen to have been fixed.
+
+---
+
 ## The corruption has a signature, and it points at universe_seed (2026-09-09)
 
 `core` 0.3.3, dictionary version 7. **Both corrupt generations were read for the

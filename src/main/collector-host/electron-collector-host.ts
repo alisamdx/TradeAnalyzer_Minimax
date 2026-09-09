@@ -1,6 +1,6 @@
 import { app, safeStorage } from 'electron';
 import Database from 'better-sqlite3';
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { CollectorHost, ProviderResponse, SqliteLike } from '@tradeanalyzer/core';
 import { applyDictionary, assertNotRedirected, etTimestamp, recordCloseHandle, recordOpenHandle, DICTIONARY_VERSION } from '@tradeanalyzer/core';
@@ -175,22 +175,50 @@ export class ElectronCollectorHost implements CollectorHost {
     // worked — measured once at 918,792 bytes of WAL discarded with the base
     // file byte-for-byte unchanged. The new exe was fixed for this; the
     // collector host still trusted close.
+    //
+    // The result is logged **every time, including success**, and with the WAL
+    // size that preceded it. Warning-only was the same trap one level up: no
+    // warning is equally consistent with "the checkpoint applied cleanly" and
+    // with "`close()` was never reached", and those are opposite readings of a
+    // seed that comes back clean. `packages/next` has logged every checkpoint
+    // unconditionally since it was written; this is the host catching up.
+    const walBytes = (() => {
+      try {
+        return statSync(`${generationPaths(this.pointer).dbPath}-wal`).size;
+      } catch {
+        return -1; // no `-wal` to read — reported as such rather than as zero
+      }
+    })();
     try {
       const [row] = this.db.pragma('wal_checkpoint(TRUNCATE)') as { busy: number; log: number; checkpointed: number }[];
-      if (row && (row.busy !== 0 || row.log !== row.checkpointed)) {
-        logError({
-          timestamp: new Date().toISOString(),
-          appVersion: this.hostApp.version,
-          errorClass: 'CollectorCheckpoint',
-          message: `checkpoint did not fully apply — busy=${row.busy} log=${row.log} checkpointed=${row.checkpointed}`,
-          stack: null,
-          operation: 'collector-host:close',
-          ticker: null,
-          correlationId: null,
-          level: 'WARNING'
-        });
-      }
-    } catch {
+      const applied = row !== undefined && row.busy === 0 && row.log === row.checkpointed;
+      logError({
+        timestamp: etTimestamp(),
+        appVersion: this.hostApp.version,
+        errorClass: 'CollectorCheckpoint',
+        message:
+          `checkpoint ${applied ? 'applied' : 'did NOT fully apply'} — ` +
+          `walBytes=${walBytes} busy=${row?.busy} log=${row?.log} checkpointed=${row?.checkpointed}`,
+        stack: null,
+        operation: 'collector-host:close',
+        ticker: null,
+        correlationId: null,
+        level: applied ? 'INFO' : 'WARNING'
+      });
+    } catch (err) {
+      // Still says something. A checkpoint that threw is a third outcome, and
+      // silence would collapse it into the other two.
+      logError({
+        timestamp: etTimestamp(),
+        appVersion: this.hostApp.version,
+        errorClass: 'CollectorCheckpoint',
+        message: `checkpoint threw — walBytes=${walBytes}: ${(err as Error).message}`,
+        stack: null,
+        operation: 'collector-host:close',
+        ticker: null,
+        correlationId: null,
+        level: 'WARNING'
+      });
       /* fall through to close, which will checkpoint or not on its own */
     }
 

@@ -124,6 +124,25 @@ describe('ElectronCollectorHost', () => {
     expect(nowEt).toContain('etTimestamp()');
     expect(nowEt).not.toContain('toISOString');
   });
+
+  it('reports the close-time checkpoint on success as well as on failure', () => {
+    // v1.1.209 added the explicit `wal_checkpoint(TRUNCATE)` and logged it only
+    // when it did NOT fully apply — which reproduces, one level up, the exact
+    // ambiguity the checkpoint was added to remove. Silence then means either
+    // "the checkpoint applied cleanly" or "`close()` was never reached", and a
+    // seed that comes back clean reads as a fix confirmed under the first and
+    // as no evidence at all under the second.
+    const closeBlock = host.slice(host.indexOf('close(): void'), host.indexOf('archiveRoot(): string'));
+    expect(closeBlock).toContain('wal_checkpoint(TRUNCATE)');
+    // Logged every time, with the level carrying the verdict.
+    expect(closeBlock).toMatch(/level:\s*applied\s*\?\s*'INFO'\s*:\s*'WARNING'/);
+    // The WAL size that preceded it, or the log line says nothing about scale:
+    // a fully applied checkpoint over an empty WAL is not the same evidence.
+    expect(closeBlock).toContain('walBytes');
+    // A throw is a third outcome and must not collapse into the other two.
+    expect(closeBlock).toMatch(/catch\s*\(err\)/);
+    expect(closeBlock).toContain('checkpoint threw');
+  });
 });
 
 describe('etradeGetRaw — the collector transport', () => {
