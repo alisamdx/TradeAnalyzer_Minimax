@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.206] - 2026-09-09
+
+### fix - the collector jobs are manual-only, and `enabled` now means something
+
+- **The emails stop.** `gen-001` is malformed, so `finishJob` cannot write a terminal state for a claimed `meta_job_request`; the row stays `queued`, the **2-minute claim loop** re-claims it, the run fails identically, and the quality gate emails RED - every two minutes, run #70 and climbing. Nothing bounded it: no attempt cap, no backoff, no "this already failed" check. **A retry loop over work that cannot record its own outcome does not converge**, and it announces that once per iteration to the operator's inbox. The loop is removed; a queued job is now picked up by running `collector-oneshot` from the Batch view. The claim *path* is unchanged - the trigger was wrong, not the handler.
+- **`batch_jobs.enabled` was ignored by the only trigger that matters.** `runStartupJobs` filtered `enabled && run_on_startup` and the daily tick filtered `enabled && daily_schedule_enabled`, but the **orchestrator chain** - which runs jobs twice a trading day - did not look at the column at all. So switching a job off in the Batch view did not stop it, and there was no single control that did. `getSubJobs` now filters on it. **This applies to every job**: any row already sitting at `enabled = 0` will now stop running in the chain, which is what the column has always claimed to mean.
+- A job **absent** from the orchestrator's `config_json.jobs` still defaults to *enabled* - pinned in a test rather than changed. It is why three newly registered collector jobs joined the after-close chain with nobody opting them in.
+- **`enabled = 0` means "does not run on its own", never "cannot be run."** `runJob` has never consulted the column, so the Batch view's Run button still works on all three - which is the operator's actual request, and is asserted so a later tidy-up cannot turn "off" into "unavailable".
+- Both halves were needed: `registerJob` seeds with `INSERT OR IGNORE`, so the new `enabled: false` in `index.ts` only applies to a **fresh install**. **Migration 080** switches the three live rows (`enabled`, `daily_schedule_enabled`, `run_on_startup` all 0) - the same frozen-column trap as `sequence_order`, `config_json` and `after_close_only` (v1.1.121, v1.1.123, migration 067).
+- The watchdog is off deliberately: it exists to email when no daily run happened, so with the daily run off it would send a `NO RUN` alarm every night for a run nobody scheduled.
+- Tests: `tests/collector-jobs-manual-only.test.ts` (7, both arms throughout, migration executed **from the file** rather than from a copy of its SQL) and the claim-loop assertions in `tests/collector-host.test.ts` rewritten to pin its absence - keyed on `runJob('collector-oneshot'` rather than on `setInterval`, because boot has a legitimate one (the ~90-minute E*Trade keep-alive) and banning the mechanism instead of the effect would fire on it. `1,247` tests pass.
+
 ## [1.1.205] - 2026-09-08
 
 ### fix - a third dev script opened the generation with none of the guards

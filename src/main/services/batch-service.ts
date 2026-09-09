@@ -132,6 +132,15 @@ export class BatchService {
       sequenceOrder?: number;
       dailyScheduleTime?: string;
       dailyScheduleEnabled?: boolean;
+      /**
+       * Seeds `batch_jobs.enabled` on a FRESH install only. Defaults to true.
+       *
+       * `false` means "registered, runnable by hand, never triggered on its
+       * own" — which is what a job wants while the thing it writes into is
+       * still being stabilised. An existing install keeps whatever the row
+       * already says (`INSERT OR IGNORE`), so changing this needs a migration.
+       */
+      enabled?: boolean;
       runOnStartup?: boolean;
       startupDelaySeconds?: number;
       afterCloseOnly?: boolean;
@@ -140,6 +149,7 @@ export class BatchService {
   ): void {
     this.handlers.set(id, handler);
 
+    const enabled             = (options?.enabled ?? true) ? 1 : 0;
     const scheduleTime        = options?.dailyScheduleTime    ?? '16:00';
     const scheduleEnabled     = (options?.dailyScheduleEnabled ?? true) ? 1 : 0;
     const runOnStartup        = options?.runOnStartup         ?? true ? 1 : 0;
@@ -157,8 +167,8 @@ export class BatchService {
       INSERT OR IGNORE INTO batch_jobs
         (id, name, description, enabled, run_on_startup, startup_delay_seconds,
          daily_schedule_enabled, daily_schedule_time, sequence_order, after_close_only, config_json)
-      VALUES (?, ?, ?, 1, ?, ?, ?, ?, ${seqOrderExpr}, ?, ?)
-    `).run(id, handler.name, handler.description, runOnStartup, startupDelaySecs, scheduleEnabled, scheduleTime, afterCloseOnly, configJson);
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ${seqOrderExpr}, ?, ?)
+    `).run(id, handler.name, handler.description, enabled, runOnStartup, startupDelaySecs, scheduleEnabled, scheduleTime, afterCloseOnly, configJson);
 
     // Backfill config_json if it is still NULL (handles upgrades).
     if (configJson !== null) {
@@ -448,10 +458,22 @@ export class BatchService {
    * Returns all non-orchestrator jobs in sequence_order, filtered to those
    * enabled in the orchestrator config. Jobs not present in configJobs default
    * to enabled (handles new jobs added after config was last saved).
+   *
+   * **`batch_jobs.enabled` is honoured here too, and was not until v1.1.206.**
+   * Every other trigger already respected it — `runStartupJobs` filters
+   * `enabled && run_on_startup`, the daily tick filters
+   * `enabled && daily_schedule_enabled` — but the orchestrator chain is what
+   * actually runs jobs twice a trading day, so a job switched off in the UI kept
+   * running and there was no single control that stopped it. The two defaults
+   * compounded: a job absent from `config_json.jobs` defaults to *enabled*, so a
+   * newly registered job joins the chain without anyone opting it in.
+   *
+   * Manual runs are deliberately unaffected — `runJob` never consulted this
+   * column — so "off" means "does not run on its own", not "cannot be run".
    */
   getSubJobs(configJobs: OrchestratorJobEntry[]): BatchJob[] {
     const all = this._getJobRows()
-      .filter(j => j.id !== 'batch-orchestrator')
+      .filter(j => j.id !== 'batch-orchestrator' && j.enabled)
       .sort((a, b) => a.sequence_order - b.sequence_order)
       .map(j => this._mapJobRow(j));
 

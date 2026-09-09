@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { readFileSync, existsSync } from 'node:fs';
 import { ApiServer } from './api-server.js';
-import { ElectronCollectorHost, generationExists, readSharedPointer } from './collector-host/electron-collector-host.js';
+import { ElectronCollectorHost, readSharedPointer } from './collector-host/electron-collector-host.js';
 import { createCollectorDailyJob, createCollectorWatchdogJob } from './services/jobs/collector-daily.js';
 import { createCollectorOneShotJob } from './services/jobs/collector-oneshot.js';
 import { newAppUniverseSources } from './collector-host/universe-sources.js';
@@ -766,15 +766,32 @@ app.whenReady().then(() => {
   // block never having run — which is exactly the ambiguity that cost an
   // afternoon on 2026-09-07.
   try {
+  // ── All three are registered DISABLED (v1.1.206) ────────────────────────────
+  //
+  // `enabled: false` means registered and runnable by hand from the Batch view,
+  // never triggered on its own — no daily schedule, no orchestrator chain, no
+  // startup run. That is the right setting while the generation they write into
+  // is still being stabilised, and it was not the setting they shipped with.
+  //
+  // What that cost: gen-001 is currently malformed, so `finishJob` cannot write
+  // a terminal state for a claimed request. The row stays `queued`, the
+  // 2-minute claim loop re-claims it, the run fails again, and the gate emails
+  // again — 70 runs and an inbox full of RED before anyone could act on the
+  // first one. **An automatic retry with no terminal state is an unbounded
+  // retry**, and the operator's mailbox is where it surfaces.
+  //
+  // Turning them back on is one edit per job in the Batch view.
   batchService.registerJob(
     'data-collector',
     createCollectorDailyJob({ makeHost: makeCollectorHost, todayET }),
     {
-      // 17:05 puts it after this app's after-close chain has started; the batch
-      // mutex makes it wait if that chain is still running, and the 19:30
-      // watchdog catches the case where the wait swallowed the day.
+      // 17:05 would put it after this app's after-close chain has started; the
+      // batch mutex makes it wait if that chain is still running, and the 19:30
+      // watchdog catches the case where the wait swallowed the day. Kept as the
+      // seeded time so re-enabling is a single toggle rather than a decision.
       dailyScheduleTime: '17:05',
-      dailyScheduleEnabled: true,
+      dailyScheduleEnabled: false,
+      enabled: false,
       runOnStartup: false,
       afterCloseOnly: true,
     },
@@ -784,8 +801,12 @@ app.whenReady().then(() => {
     'collector-watchdog',
     createCollectorWatchdogJob({ makeHost: makeCollectorHost, todayET }),
     {
+      // The watchdog exists to email when no daily run happened. With the daily
+      // run off by design, leaving the watchdog on would email that every single
+      // night — a NO RUN alarm for a run nobody scheduled.
       dailyScheduleTime: '19:30',
-      dailyScheduleEnabled: true,
+      dailyScheduleEnabled: false,
+      enabled: false,
       runOnStartup: false,
       afterCloseOnly: true,
     },
@@ -797,39 +818,35 @@ app.whenReady().then(() => {
     universeSources: newAppUniverseSources(db),
   });
   batchService.registerJob('collector-oneshot', collectorOneShotJob, {
-    // Driven by its own 2-minute interval below rather than by the daily
-    // schedule: the new exe queues a job and expects it picked up in minutes,
-    // not at the next after-close slot.
     dailyScheduleEnabled: false,
+    enabled: false,
     runOnStartup: false,
   });
 
-  // The 2-minute claim loop (04 §1.1). `runJob` takes the batch mutex, so this
-  // serialises against every other job rather than racing them.
+  // ── The 2-minute claim loop is GONE (v1.1.206) ──────────────────────────────
   //
-  // The body is guarded: `readSharedPointer()` THROWS on a malformed pointer,
-  // and an uncaught throw here produces no batch_runs row at all — a loop that
-  // looks stopped rather than failing, every two minutes, silently.
-  setInterval(() => {
-    try {
-      const claimPointer = readSharedPointer();
-      // Nothing to claim into yet: no pointer means the new exe has never run,
-      // and no generation means it has not created this one. Neither is
-      // repaired here — generation creation belongs to the new exe (06 §3).
-      if (!claimPointer || !generationExists(claimPointer)) return;
-      void batchService.runJob('collector-oneshot', 'schedule').catch((err) => {
-        logErrorFromException(err, 'collector-oneshot:runJob', null, 'ERROR');
-      });
-    } catch (err) {
-      logErrorFromException(err, 'collector-oneshot:tick', null, 'ERROR');
-    }
-  }, 2 * 60 * 1000);
+  // It was the emitter. A claimed request whose `finishJob` write fails — which
+  // is every request while the generation is malformed — stays `queued`, so the
+  // loop re-claimed the same row every two minutes, ran it, failed, and emailed
+  // a RED gate report each time. Nothing bounded it: not a retry count, not a
+  // backoff, not a "this already failed" check. **A retry loop over work that
+  // cannot record its own outcome does not converge**, and it announces that
+  // fact once per iteration to the operator's inbox.
+  //
+  // A queued job is now picked up by running `collector-oneshot` from the Batch
+  // view, which is what the new exe's Jobs UI will do directly once it owns the
+  // queue (05 §7). The claim path itself is unchanged and still exercised — it
+  // is the *trigger* that was wrong, not the handler.
+  //
+  // Before restoring any automatic loop here it needs two things it never had:
+  // a terminal state that cannot fail to be written, and a cap on attempts per
+  // request.
 
   logError({
     timestamp: new Date().toISOString(),
     appVersion: app.getVersion(),
     errorClass: 'Boot',
-    message: 'collector jobs registered and 2-minute claim loop started',
+    message: 'collector jobs registered (disabled — manual runs only, no claim loop)',
     stack: null,
     operation: 'boot:collector',
     ticker: null,

@@ -93,14 +93,18 @@ describe('ElectronCollectorHost', () => {
 
   it('lets every caller report a missing generation rather than failing on it', () => {
     // The choke point throws so creation is impossible; the callers check first
-    // so the operator sees `skipped` with a reason instead of a stack trace
-    // every two minutes. Patching one call site and leaving the others is the
-    // trap this project keeps hitting, so all four are asserted.
+    // so the operator sees `skipped` with a reason instead of a stack trace.
+    // Patching one call site and leaving the others is the trap this project
+    // keeps hitting, so every caller is asserted.
+    //
+    // There were four. `index.ts`'s 2-minute claim loop was the fourth and was
+    // removed in v1.1.206 — it re-claimed a request whose terminal state could
+    // not be written and emailed a RED gate report every two minutes. A caller
+    // that no longer exists is the one way this list is allowed to shrink.
     expect(host).toContain('export function generationExists');
-    for (const source of [oneshot, daily, index]) {
-      expect(source).toContain('generationExists');
-    }
+    expect(index).not.toContain("runJob('collector-oneshot'");
     for (const source of [oneshot, daily]) {
+      expect(source).toContain('generationExists');
       expect(source).toContain('TradeAnalyzer 2 has not created one');
     }
   });
@@ -246,11 +250,47 @@ describe('registration in the existing app', () => {
     expect(block).toContain('afterCloseOnly: true');
   });
 
-  it('drives the one-shot claim loop on an interval, not on the daily schedule', () => {
-    // The new exe queues a job and expects it picked up in minutes, not at the
-    // next after-close slot.
-    const block = index.slice(index.indexOf("registerJob('collector-oneshot'"));
-    expect(block).toContain('dailyScheduleEnabled: false');
-    expect(block).toMatch(/setInterval\([\s\S]*2 \* 60 \* 1000\)/);
+  it('registers all three collector jobs DISABLED — manual runs only', () => {
+    // v1.1.206. Every automatic trigger is off: no daily schedule, no startup
+    // run, and `enabled: false` keeps them out of the orchestrator chain, which
+    // is the one that actually runs jobs twice a trading day.
+    //
+    // They stay registered on purpose. `runJob` never consulted `enabled`, so
+    // the Batch view can still run them by hand — "off" means "does not run on
+    // its own", not "cannot be run".
+    const block = index.slice(
+      index.indexOf("registerJob(\n    'data-collector'"),
+      index.indexOf("registerJob('batch-orchestrator'")
+    );
+    expect(block.length).toBeGreaterThan(0);
+    for (const id of ["'data-collector'", "'collector-watchdog'", "'collector-oneshot'"]) {
+      expect(block, id).toContain(id);
+    }
+    expect(block.match(/enabled: false/g) ?? []).toHaveLength(3);
+    expect(block.match(/dailyScheduleEnabled: false/g) ?? []).toHaveLength(3);
+    expect(block.match(/runOnStartup: false/g) ?? []).toHaveLength(3);
+  });
+
+  it('has no automatic claim loop at all', () => {
+    // The emitter. A claimed request whose `finishJob` write fails stays
+    // `queued`, so the loop re-claimed it every two minutes, ran it, failed and
+    // emailed — 70 runs and an inbox full of RED before the first could be
+    // acted on. A retry over work that cannot record its own outcome does not
+    // converge, and nothing bounded it.
+    //
+    // Asserted on the whole file, not on a block: a loop reintroduced anywhere
+    // in boot has the same effect wherever it is written.
+    //
+    // Keyed on the collector run rather than on `setInterval`, because boot has
+    // a legitimate one — the ~90-minute E*Trade keep-alive that stops the token
+    // going dormant. A guard that banned the mechanism instead of the effect
+    // would fire on that and teach the wrong lesson.
+    expect(index).not.toContain("runJob('collector-oneshot'");
+    expect(index).not.toContain('claim loop started');
+    const keepAliveOnly = index.match(/setInterval/g) ?? [];
+    expect(keepAliveOnly).toHaveLength(1);
+    expect(index.slice(index.indexOf('setInterval') - 200, index.indexOf('setInterval'))).toContain(
+      '_etradeKeepAlive'
+    );
   });
 });
