@@ -32,7 +32,7 @@
  * generation. The redirect check above is not a nicety; it is the guard.
  */
 import { existsSync, readFileSync, statSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { checkpointAndClose, openGenerationExclusively } from './lib/generation-access.mjs';
 
@@ -54,9 +54,52 @@ try {
 const appData = process.env.APPDATA ?? join(homedir(), 'AppData', 'Roaming');
 console.log(`APPDATA           : ${appData}`);
 
-// The redirect is invisible from the inside, so it is measured, not guessed.
-const finding = detectRedirect(appData);
+
+
+/**
+ * An explicit generation to inspect, instead of the one the pointer names.
+ *
+ *   node packages/core/scripts/diagnose-generation.mjs "<dir-or-data.sqlite>"
+ *
+ * Added 2026-09-09 for the obvious gap: a **retired** generation — the whole
+ * point of renaming a corrupt one aside rather than deleting it — was
+ * unreachable by the only tool that can read it, because the path came solely
+ * from the pointer. Every guard still applies; this changes which file is
+ * examined, never whether it may be.
+ */
+const argPath = process.argv[2];
+
+let pointer;
+let genDir;
+
+if (argPath) {
+  genDir = argPath.toLowerCase().endsWith('.sqlite') ? dirname(argPath) : argPath;
+  pointer = { dataRoot: dirname(genDir), currentGeneration: null, explicit: true };
+  console.log(`pointer path      : (not used — explicit path given)`);
+  console.log(`explicit target   : ${genDir}`);
+} else {
+  const pointerPath = join(appData, 'tradeanalyzer-shared', 'data-root.json');
+  console.log(`pointer path      : ${pointerPath}`);
+  if (!existsSync(pointerPath)) {
+    console.log('pointer           : MISSING — run TradeAnalyzer 2 once to create the generation.');
+    process.exit(1);
+  }
+  pointer = JSON.parse(readFileSync(pointerPath, 'utf8'));
+  console.log(`pointer contents  : ${JSON.stringify(pointer)}`);
+  genDir = join(pointer.dataRoot, `gen-${String(pointer.currentGeneration).padStart(3, '0')}`);
+}
+
+// The redirect is invisible from the inside, so it is measured, not guessed —
+// and measured against **the directory this run will actually read**, not
+// against `%APPDATA%` globally. The redirect is per file: an explicit target
+// under `C:\temp` is not redirected by anything, and refusing to look at it
+// because some *other* directory is would make a retired generation
+// un-examinable from the one shell that has it. Same correction as
+// `lib/generation-access.mjs` — probe what you resolved.
+const probeDir = argPath ? genDir : appData;
+const finding = detectRedirect(probeDir);
 const redirect = finding.redirectedTo;
+console.log(`probing           : ${probeDir}`);
 console.log(
   `redirected        : ${redirect ?? `no (this shell writes where it says it does)${finding.undetermined ? ` — ${finding.undetermined}` : ''}`}`
 );
@@ -135,16 +178,6 @@ if (redirect) {
 /** Whether WAL sidecars existed BEFORE this script opened anything. */
 let sidecarsBefore = false;
 
-const pointerPath = join(appData, 'tradeanalyzer-shared', 'data-root.json');
-console.log(`pointer path      : ${pointerPath}`);
-if (!existsSync(pointerPath)) {
-  console.log('pointer           : MISSING — run TradeAnalyzer 2 once to create the generation.');
-  process.exit(1);
-}
-const pointer = JSON.parse(readFileSync(pointerPath, 'utf8'));
-console.log(`pointer contents  : ${JSON.stringify(pointer)}`);
-
-const genDir = join(pointer.dataRoot, `gen-${String(pointer.currentGeneration).padStart(3, '0')}`);
 const dbPath = join(genDir, 'data.sqlite');
 console.log(`derived db path   : ${dbPath}`);
 console.log(`  exists          : ${existsSync(dbPath)}`);
@@ -200,13 +233,40 @@ if (!existsSync(dbPath)) {
 // should *report* what it found before it declines to continue, and the exit
 // there simply happens first.
 const db = await openGenerationExclusively(dbPath, 'diagnose-generation.mjs');
-const tables = db
-  .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
-  .all()
-  .map((r) => r.name);
-console.log(`\ntables            : ${tables.length}`);
 
-if (tables.length === 0) {
+// Even the table list can throw. `sqlite_master` is a btree like any other, and
+// on a badly damaged file `SELECT ... FROM sqlite_master` raises SQLITE_CORRUPT
+// before a single line of the report exists — which comes out as a raw
+// `wrappers.js` stack and reads as *the script broke*, not *the database is
+// damaged*. This file's own header warns about exactly that failure and the
+// query sat outside the guard anyway. Reproduced 2026-09-09 on a deliberately
+// corrupted copy.
+//
+// So: nothing here is unguarded, and the order is integrity FIRST. A verdict is
+// the one thing worth having even when everything else is unreadable.
+let tables = [];
+let schemaError = null;
+try {
+  tables = db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
+    .all()
+    .map((r) => r.name);
+  console.log(`\ntables            : ${tables.length}`);
+} catch (err) {
+  schemaError = err?.message ?? String(err);
+  console.log(`\ntables            : UNREADABLE — ${schemaError}`);
+  console.log('  The schema itself will not read. That is severe damage, not a missing table.');
+}
+
+// `schemaError === null` matters as much as the count. An UNREADABLE schema and
+// an EMPTY one are different facts with opposite remedies, and the catch above
+// makes them look identical — the same shape as `decrypt()` returning `''` for
+// "could not decrypt", which turned unreadable credentials into unset ones and
+// cost an afternoon. Here the empty branch ends in **`Remove-Item -Recurse
+// -Force`**, so collapsing the two would advise deleting a damaged database that
+// is the only record of how it broke. A corrupt file falls through to the
+// integrity report instead, which renames rather than deletes.
+if (schemaError === null && tables.length === 0) {
   console.log('\nThis connection sees NO SCHEMA.');
   // `sidecarsBefore`, not a fresh existsSync: opening the database above CREATES
   // `-wal` and `-shm`, so checking now always says they are present and the
@@ -229,49 +289,156 @@ if (tables.length === 0) {
 // numbers for the first few tables and then throws mid-loop, which reads as "the
 // script broke" rather than "the database is damaged" — and the numbers already
 // printed look like findings.
-const integrity = db.prepare('PRAGMA integrity_check').get();
-const integrityResult = Object.values(integrity)[0];
-if (integrityResult !== 'ok') {
+/**
+ * Turns `Tree 7 page 432` into the name of the object whose root page that is.
+ *
+ * A tree number on its own is unreadable, and worse than unreadable: it looks
+ * like an object id and is not one. On 2026-09-07 two events reported `Tree 5`
+ * and `Tree 7`, which read as two different tables and were **the same table** —
+ * adding `meta_open_handle` to the dictionary shifted every later root page by
+ * two. That misreading kept the diagnosis pointing the wrong way for an evening.
+ *
+ * **A tree number is only meaningful against the schema version that produced
+ * it**, so it is resolved here, against this file, rather than remembered.
+ */
+function nameTrees(text) {
+  const trees = [...new Set([...String(text).matchAll(/Tree (\d+)/g)].map((m) => Number(m[1])))];
+  if (trees.length === 0) return [];
+  const lookup = db.prepare('SELECT name, type, tbl_name FROM sqlite_master WHERE rootpage = ?');
+  return trees.map((t) => {
+    try {
+      const row = lookup.get(t);
+      if (!row) return `  Tree ${t}: no object has that root page (the schema itself may be damaged)`;
+      const owner = row.type === 'index' ? ` on ${row.tbl_name}` : '';
+      return `  Tree ${t}: ${row.type} ${row.name}${owner}`;
+    } catch (err) {
+      return `  Tree ${t}: could not resolve — ${err?.message ?? String(err)}`;
+    }
+  });
+}
+
+/**
+ * The forensic reads, each guarded on its own.
+ *
+ * Called on a healthy file AND on a corrupt one. The first version of this
+ * script exited on corruption *before* reaching `meta_open_handle` — so the one
+ * table that answers "which applications opened this, and did they resolve the
+ * same path" was skipped in precisely the case it exists for. Damage in one
+ * btree says nothing about whether another is readable, and a small metadata
+ * table usually is.
+ *
+ * Every read is wrapped, because on a corrupt file any of them can throw and one
+ * throw must not take the rest of the report with it.
+ */
+function reportForensics(degraded) {
+  const say = (label, fn) => {
+    try {
+      fn();
+    } catch (err) {
+      console.log(`  ${label}: UNREADABLE — ${err?.message ?? String(err)}`);
+    }
+  };
+
+  if (degraded) {
+    console.log('\nBest-effort reads from the damaged file (a throw below is itself a finding):');
+  }
+
+  console.log('\nrow counts:');
+  for (const t of [
+    'meta_generation', 'meta_run', 'meta_job_request', 'meta_response',
+    'ref_trading_day', 'ref_universe_membership', 'raw_ticker_reference', 'raw_daily_bar'
+  ]) {
+    // "missing" is a claim about the schema, and it can only be made when the
+    // schema was readable. Otherwise the honest word is "unknown".
+    if (!tables.includes(t)) {
+      console.log(`  ${t.padEnd(26)} ${schemaError === null ? 'TABLE MISSING' : 'unknown (schema unreadable)'}`);
+      continue;
+    }
+    say(t.padEnd(26), () => {
+      const n = db.prepare(`SELECT COUNT(*) AS n FROM "${t}"`).get().n;
+      console.log(`  ${t.padEnd(26)} ${n}`);
+    });
+  }
+
+  // Which applications have opened THIS file, in their own words. The question
+  // that cost most of 2026-09-07 was "are the two apps looking at the same
+  // database", and it was answered by inference every time, wrongly. Both exes
+  // write a row here on open, so it is answered by reading.
+  if (tables.includes('meta_open_handle')) {
+    console.log('\nopened by:');
+    say('meta_open_handle', () => {
+      const handles = db
+        .prepare('SELECT app_name, app_version, opened_at, process_id, db_path FROM meta_open_handle ORDER BY opened_at')
+        .all();
+      if (handles.length === 0) {
+        console.log('  (nothing has opened this generation since the handle table existed)');
+        return;
+      }
+      const paths = new Set(handles.map((h) => h.db_path));
+      for (const h of handles) {
+        console.log(`  ${h.app_name} v${h.app_version}  pid ${h.process_id}  ${h.opened_at}`);
+        if (h.db_path !== dbPath) console.log(`    ** resolved a DIFFERENT path: ${h.db_path} **`);
+      }
+      if (paths.size > 1) {
+        console.log('');
+        console.log('  ** More than one db_path appears above. That is a SPLIT FILE SET: two');
+        console.log('     processes coordinating through one lock and write-ahead log while');
+        console.log('     writing different base files. It is the one mechanism known to');
+        console.log('     corrupt this database. **');
+      }
+      if (new Set(handles.map((h) => h.app_name)).size === 1) {
+        console.log('  Only one application has opened this file. If both have been run since');
+        console.log('  this version was installed, they are not sharing a generation.');
+      }
+    });
+  }
+}
+
+// Guarded like everything else: `integrity_check` walks every btree, so on a
+// file damaged badly enough it raises rather than returning a verdict. "The
+// check itself could not run" IS the verdict in that case, and it has to be
+// printed rather than thrown.
+let integrityResult;
+try {
+  integrityResult = Object.values(db.prepare('PRAGMA integrity_check').get())[0];
+} catch (err) {
+  integrityResult = `integrity_check could not run: ${err?.message ?? String(err)}`;
+}
+if (schemaError !== null || integrityResult !== 'ok') {
   console.log(`\nintegrity_check   : ${String(integrityResult).slice(0, 400)}`);
-  console.log('\n** THIS DATABASE IS CORRUPT. ** Row counts above, if any, are not evidence.');
-  console.log('Nothing here is recoverable in place. Close both applications, delete the');
-  console.log('generation directory, and let TradeAnalyzer 2 recreate it:');
-  console.log(`  Remove-Item -Recurse -Force "${genDir}"`);
+
+  const named = nameTrees(integrityResult);
+  if (named.length > 0) {
+    console.log('\ndamaged objects   :');
+    for (const line of named) console.log(line);
+  }
+
+  console.log('\n** THIS DATABASE IS CORRUPT. ** Row counts below are best-effort, not evidence.');
+
+  reportForensics(true);
+
+  // **Rename, do not delete.** A corrupt generation is the only physical record
+  // of how it got that way, and this script previously said `Remove-Item
+  // -Recurse -Force`. That is the same shape as the evening this tool reported a
+  // healthy database as empty and nearly had it deleted on the strength of it —
+  // and a generation is cheap to rebuild (the jobs re-run) while the evidence is
+  // not reproducible at all.
+  const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  // Both separators: the path may arrive with either, and dropping the
+  // backslash would leave a Windows path unsplit and name the whole thing.
+  const genName = genDir.replace(/[\\/]+$/, '').split(/[\\/]/).pop();
+  console.log('\nRecovery — rename, never delete: this file is the only record of how it broke,');
+  console.log('and the generation itself is cheap to rebuild by re-running the jobs. Close both');
+  console.log('applications, then:');
+  console.log(`  Rename-Item "${genDir}" "${genName}-corrupt-${stamp}"`);
+  console.log('  # then launch TradeAnalyzer 2 once — it recreates the generation and the pointer');
+  console.log('The archive directory is append-only and separate; it is unaffected either way.');
   checkpointAndClose(db);
   process.exit(2);
 }
 console.log('integrity_check   : ok');
 
-const interesting = [
-  'meta_generation', 'meta_run', 'meta_job_request', 'meta_response',
-  'ref_trading_day', 'ref_universe_membership', 'raw_ticker_reference', 'raw_daily_bar'
-];
-console.log('\nrow counts:');
-for (const t of interesting) {
-  if (!tables.includes(t)) { console.log(`  ${t.padEnd(26)} TABLE MISSING`); continue; }
-  const n = db.prepare(`SELECT COUNT(*) AS n FROM "${t}"`).get().n;
-  console.log(`  ${t.padEnd(26)} ${n}`);
-}
-
-// Which applications have opened THIS file, in their own words. The question
-// that cost most of 2026-09-07 was "are the two apps looking at the same
-// database", and it was answered by inference every time, wrongly. Both exes now
-// write a row here on open, so it is answered by reading.
-if (tables.includes('meta_open_handle')) {
-  const handles = db
-    .prepare('SELECT app_name, app_version, opened_at, process_id, db_path FROM meta_open_handle ORDER BY app_name')
-    .all();
-  console.log('\nopened by:');
-  if (handles.length === 0) console.log('  (nothing has opened this generation since the handle table existed)');
-  for (const h of handles) {
-    console.log(`  ${h.app_name} v${h.app_version}  pid ${h.process_id}  ${h.opened_at}`);
-    if (h.db_path !== dbPath) console.log(`    ** resolved a DIFFERENT path: ${h.db_path} **`);
-  }
-  if (handles.length === 1) {
-    console.log('  Only one application has opened this file. If both have been run since this');
-    console.log('  version was installed, they are not sharing a generation — check for a redirect.');
-  }
-}
+reportForensics(false);
 
 if (tables.includes('meta_job_request')) {
   const rows = db
