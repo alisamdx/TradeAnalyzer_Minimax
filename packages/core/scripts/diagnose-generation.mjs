@@ -61,6 +61,77 @@ console.log(
   `redirected        : ${redirect ?? `no (this shell writes where it says it does)${finding.undetermined ? ` — ${finding.undetermined}` : ''}`}`
 );
 
+// ── Stop HERE when redirected, before reporting a single fact about the
+// generation (v1.1.207) ──────────────────────────────────────────────────────
+//
+// This script used to refuse further down, just before opening the database,
+// and print the pointer, the derived path, the file size, the sidecars and the
+// generation list on the way. Every one of those is read through `%APPDATA%`,
+// and under a redirect `%APPDATA%` is served from the container — so once the
+// container holds a copy-on-written shadow of a file, those lines describe the
+// SHADOW and say nothing whatever about the real generation.
+//
+// Measured 2026-09-09: this script reported `data.sqlite` at 1,789,952 bytes
+// modified 2026-09-07 23:05 with no sidecars, and the container's own copy is
+// byte-for-byte that same size and timestamp — while the collector had run
+// against the real file the following evening. **The report was a confident,
+// authoritative description of the wrong file.**
+//
+// Not printing them is the fix. A diagnostic that cannot see its subject must
+// say so and stop; the one thing it must never do is describe something else in
+// the same format and leave the reader to notice.
+if (redirect) {
+  console.log(
+    [
+      '',
+      'REFUSING — and not reporting anything about the generation either.',
+      '',
+      `This shell is containerised: everything it reads under ${appData} is served from`,
+      `  ${redirect}`,
+      'so the pointer, the database size, the sidecars and the generation list would all be',
+      'facts about the container\'s private copy, not about the real generation. Printing them',
+      'would be worse than printing nothing — they look authoritative and they are answers to',
+      'a different question.',
+      '',
+      'Opening it would be worse still. SQLite would keep its lock and write-ahead log on the',
+      'real files while writing a private base file, and the checkpoint on close would move the',
+      'schema into the copy — leaving the original a bare header page reporting zero tables.',
+      '',
+      'Run this from an ordinary terminal (Win+X -> Terminal), in the same Windows session as',
+      'the applications:',
+      '',
+      '  npm run rebuild:node',
+      '  node packages/core/scripts/diagnose-generation.mjs',
+      '',
+      '(`rebuild:node` is safe to leave in place — the packaged apps carry their own binary,',
+      'and `npm run package` flips it back on its own.)',
+      ''
+    ].join('\n')
+  );
+
+  // What CAN honestly be said from here: what the container itself holds. It is
+  // evidence in its own right — a shadow copy exists exactly because some
+  // redirected process WROTE to that path, and its timestamps say when.
+  const shadow = join(redirect, 'trade-analyzer-next', 'data');
+  if (existsSync(shadow)) {
+    console.log(`The container's OWN copy (this is not the generation):`);
+    for (const gen of readdirSync(shadow)) {
+      const f = join(shadow, gen, 'data.sqlite');
+      if (!existsSync(f)) continue;
+      const st = statSync(f);
+      console.log(
+        `  ${gen}/data.sqlite  ${st.size} bytes  created ${st.birthtime.toISOString()}  modified ${st.mtime.toISOString()}`
+      );
+    }
+    console.log(
+      '  A copy appears the moment a redirected process first writes to that path, so the\n' +
+        '  creation time is when redirected writing STARTED and the modified time is when it\n' +
+        '  last happened.'
+    );
+  }
+  process.exit(3);
+}
+
 /** Whether WAL sidecars existed BEFORE this script opened anything. */
 let sidecarsBefore = false;
 
@@ -112,18 +183,12 @@ if (!existsSync(dbPath)) {
   process.exit(1);
 }
 
-// Refusing rather than warning, because opening it is the harm. A WAL database
-// opened from a redirected process is checkpointed on close into the copy THAT
-// process can see, and the shared WAL is then removed — leaving the original a
-// bare header page and the data in a copy nobody will open again. This is not a
-// hypothetical: it cost a generation on 2026-09-07, and it happened while
-// running this very script to find out why the generation looked empty.
-if (redirect) {
-  console.log('\nRefusing to open the database: this shell is redirected, and opening a WAL');
-  console.log(`database from here MOVES it — the checkpoint lands in ${redirect}`);
-  console.log('and the shared WAL is deleted. Run this from an ordinary terminal instead.');
-  process.exit(3);
-}
+// The redirect refusal used to live HERE, and that was the bug: everything
+// between the probe and this point reported on files read through a redirected
+// `%APPDATA%`, i.e. on the container's shadow copy. It now refuses at the probe,
+// before a single line about the generation is printed. Left as a note rather
+// than deleted, because "we refuse before opening" sounded sufficient and was
+// not — the reading was already wrong long before the open.
 
 // Same SQLite the applications use, and only when none of them has it open.
 // This tool was itself part of the corruption on 2026-09-07: run against a live

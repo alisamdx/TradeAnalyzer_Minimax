@@ -91,7 +91,7 @@ nothing. The two harnesses below exist so the question can be asked in minutes.
 
 | Suspect | How it was eliminated |
 |---|---|
-| MSIX `%APPDATA%` redirect | Guarded in both exes (v1.1.202); corruption recurred |
+| ~~MSIX `%APPDATA%` redirect~~ | **BACK ON THE LIST (2026-09-09).** It was eliminated on the grounds that the corruption recurred "on a shell verified clean". The shell was not clean — see below |
 | `node:sqlite` (3.51.3) vs `better-sqlite3` (3.53.1) on one wal-index | Scripts moved to one library (v1.1.204); recurred |
 | The environment — path, filesystem, antivirus | `stress-sqlite.mjs`: 1,100 paced transactions into the generation's own directory over 285 s, **clean** |
 | `applyDictionary` drift rebuilding tables | Idempotent — zero rebuilds on re-apply |
@@ -100,11 +100,88 @@ nothing. The two harnesses below exist so the question can be asked in minutes.
 | The collector code path | `replay-seed-locally.mjs`: real `runUniverseSeed`, real schema, real capture contract, 1,089 responses, offline — **clean** |
 | The 2-minute tick's `meta_dictionary` churn | 60 open/apply/close cycles on a seeded database — **clean** |
 | A mismatched native binary | `node_modules` differs from the packaged copies, which are byte-identical to each other; the ABI swap is correct |
+| **Real latency between writes** | The Electron arm again at 250 ms per response — **285.5 s**, the real seed's duration, with the real schema — **clean**. `stress-sqlite.mjs` had paced 1,100 writes over 285 s without the schema; this adds it |
 | **The Electron main process and ABI** | `replay-seed-in-electron.cjs`: the identical replay inside Electron 32.3.3 main (node 20.18.1, **ABI 128**), with `better-sqlite3` built for Electron — **clean**, twice, byte-identical counts to the Node arm. Again with real `safeStorage` for the archive (`REPLAY_SAFE_STORAGE=1`) — **clean** |
 
 The two arms now share one body (`scripts/lib/seed-replay.mjs`) and differ only
 in the runtime, because a divergence between two copies would be
 indistinguishable from the finding.
+
+### The redirect was never actually excluded (2026-09-09)
+
+**A copy-on-write shadow of the generation exists in the tooling container, and
+its timestamps are the evidence.**
+
+```
+%LOCALAPPDATA%\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming
+  	rade-analyzer-next\data\gen-001\data.sqlite
+     1,789,952 bytes   created 2026-09-06 17:47 ET   modified 2026-09-07 23:05 ET
+```
+
+Windows creates that copy **at the moment a redirected process first writes to
+the path**. So the creation time is when redirected writing to `gen-001` started
+and the modified time is when it last happened — a ~30-hour window that spans
+every corruption event and **continues after the redirect guard shipped in both
+applications**.
+
+That removes the entire basis for eliminating the redirect. The elimination
+rested on one sentence — *"the corruption recurred twice more after the redirect
+was guarded, on a shell verified clean"* — and the shell was not clean. It is the
+Claude Code session's own shell, it is MSIX-containerised, and it was never
+probed; `assertNotRedirected` reports it redirected on the first call.
+
+**What this does NOT establish.** Which process wrote the copy is unknown, and
+nothing here shows the writing caused the corruption. The candidates are
+`exception.mjs` (no guard of any kind until 2026-09-08), the earlier unguarded
+versions of `queue-job.mjs` / `diagnose-generation.mjs`, and either application
+launched from inside the container — both have full Electron profiles there. The
+honest statement is that a known corruption mechanism was demonstrably active
+throughout the window, not that it is the cause. **This is exactly the promotion
+of a corroborating detail to a premise that this file already warns about, so it
+is being written down as evidence and not as a verdict.**
+
+**The two clean replay arms still stand** — the collector code path and the
+Electron runtime are genuinely cleared, because those tests do not depend on the
+shell.
+
+### The paced arm did not pace, it stalled (2026-09-09)
+
+The replay's inter-write delay used `Atomics.wait`, chosen deliberately on the
+grounds that a synchronous block keeps the test honest and an `await` would
+"hand the loop back and change the shape of what is being tested". Wrong twice:
+
+- **Fidelity.** The live collector waits on a real HTTP response, which is
+  asynchronous. Yielding the loop between writes is the faithful model; blocking
+  it is the artificial one.
+- **Function.** Parking the *Electron main thread* in `Atomics.wait` stops libuv
+  running its callbacks, so the seed's own async continuations never resume. The
+  paced arm used **1.9 seconds of CPU in 17 minutes** and produced no output at
+  all.
+
+The comment guarded against the opposite failure — an arm that "ran at full speed
+while reporting a pace" — and the real one was worse and in the other direction.
+Now `await new Promise(r => setTimeout(r, ms))`, which is both faithful and
+functional.
+
+### The diagnostic was describing the wrong file (2026-09-09)
+
+`diagnose-generation.mjs` probed for the redirect, printed it, and then printed
+the pointer contents, the derived database path, its size, its modification time,
+its sidecars and the list of generations — **all read through the redirected
+`%APPDATA%`, and therefore all facts about the container's shadow copy.** It
+refused only later, just before opening.
+
+Measured: it reported `data.sqlite` at 1,789,952 bytes modified 2026-09-07 23:05
+with no `-wal` and no `-shm`, while the collector had been running against the
+real file the following evening. Every number was real and every one answered a
+different question.
+
+It now refuses **at the probe**, before a single line about the generation, and
+prints the container's own copy under a heading saying that is what it is.
+*"We refuse before opening"* sounded sufficient and was not — the reading was
+already wrong long before the open. **A diagnostic that cannot see its subject
+must say so and stop; what it must never do is describe something else in the
+same format and leave the reader to notice.**
 
 ### A new suspect, and it is not a runtime (2026-09-08)
 
@@ -136,13 +213,25 @@ events — see the entry below.
 
 ### What remains
 
-If the corruption recurs with `exception.mjs` guarded, the untested differences
-between the clean replay and a live run are: **real latency between writes** (the
-replay's `delayMs` argument covers this — `stress-sqlite.mjs` already paced 1,100
-writes over 285 s and came back clean, but not with the real schema), and **the
-full application around the collector** — the batch service, the API server, the
-renderer, the other jobs. Neither is the collector code path or the runtime; both
-of those are now cleared.
+Everything reproducible offline is now clean: the collector code path, the
+Electron runtime and ABI, real `safeStorage`, the real schema at the real pace
+(285 s), and the environment. Two differences from a live corrupting run are
+left, and they are of very unequal weight:
+
+1. **A redirected process writing the same file.** Established above as having
+   happened throughout the window, and it is the *only* mechanism anyone has
+   shown can corrupt this database. Every path that could do it is now guarded —
+   both applications (v1.1.202), all three dev scripts (v1.1.205), the
+   diagnostic's reporting (v1.1.207).
+2. **The full application around the collector** — the batch service, the API
+   server, the renderer, the other jobs. Untested, and no mechanism proposed.
+
+**The next step is therefore not another elimination.** It is to read what the
+real `gen-001` says, from a shell that can see it: `PRAGMA integrity_check`, and
+`meta_open_handle`, which records every application that opened the generation
+and the `db_path` each one resolved. Two different `db_path` values in that table
+would show the split directly rather than by inference — that is what the table
+was added for, and it has never been read.
 
 ### Two claims that were presented as evidence and were not
 

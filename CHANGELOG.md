@@ -1,5 +1,30 @@
 # Changelog
 
+## [1.1.207] - 2026-09-09
+
+### fix - the generation diagnostic was describing the wrong file
+
+- `diagnose-generation.mjs` probed for the `%APPDATA%` redirect, printed it, and then printed the pointer contents, the derived database path, its size, its modification time, its sidecars and the list of generations - **every one of those read through the redirected `%APPDATA%`, and therefore every one a fact about the container's shadow copy.** It refused only later, just before opening.
+- Measured 2026-09-09: it reported `data.sqlite` at 1,789,952 bytes modified 2026-09-07 23:05 with no `-wal` and no `-shm`. The container's own copy is byte-for-byte that size and timestamp, while the collector had run against the real file the following evening. Every number was true and every one answered a different question.
+- It now refuses **at the probe**, before a single line about the generation, and names the two commands that produce a real answer. It then prints the container's own copy under a heading saying that is what it is - honest, and evidence in its own right.
+- **"We refuse before opening" sounded sufficient and was not**: the reading was already wrong long before the open. A diagnostic that cannot see its subject must say so and stop; what it must never do is describe something else in the same format and leave the reader to notice. Second time this tool has handed out a confident wrong answer, and the first is already recorded in CLAUDE.md.
+
+### fix - the ABI-swap lock guard could never fire
+
+- `rebuild-better-sqlite3.mjs` has carried a friendly EBUSY message since a running app first broke `npm test`, and it has **never been reachable**: it matched the errno against `err.message`, but the call uses `stdio: 'inherit'`, so `prebuild-install`'s output goes to the console and `err.message` is only ever `Command failed: npx prebuild-install --runtime node --force`. The word EBUSY was on the screen and never in the string being tested. Found by hitting exactly the case it was written for - a background replay harness held the binary loaded and `pretest` produced a raw `execSync` stack.
+- It now asks the **file** (`openSync(binary, 'r+')` - Windows maps a loaded `.node` as an executable image and refuses write access), and asks *before* `prebuild-install` downloads anything. The message names the culprit that actually bit: a harness left running in the background, not only the apps or `npm run dev`. **A guard whose input cannot contain what it looks for is not a guard.**
+
+### fix - the seed replay's paced arm did not pace, it stalled
+
+- The inter-write delay used `Atomics.wait` on the grounds that a synchronous block keeps the test honest. Wrong twice: the live collector waits on a real HTTP response, so **yielding the loop is the faithful model**; and parking the *Electron main thread* in `Atomics.wait` stops libuv running its callbacks, so the seed's async continuations never resume - **1.9 seconds of CPU in 17 minutes and no output at all.** The comment guarded against "runs at full speed while reporting a pace"; the real failure was worse and in the other direction.
+- With `await new Promise(r => setTimeout(r, ms))` the arm runs: **1,089 responses at 250 ms = 285.5 s, integrity ok**, identical counts and WAL size to the unpaced run. That closes the last removable difference between the replay and a live seed - the collector path, the Electron runtime, real `safeStorage`, the real pace and the environment are now all clean.
+
+### docs - the redirect is back on the corruption suspect list
+
+- **A copy-on-write shadow of `gen-001/data.sqlite` exists in the tooling container** - 1,789,952 bytes, created 2026-09-06 17:47 ET, modified 2026-09-07 23:05 ET. Windows creates that copy at the moment a redirected process first *writes* to the path, so those timestamps bound a ~30-hour window of redirected writing that spans every corruption event and continues **after** the redirect guard shipped in both applications.
+- That removes the basis for eliminating the redirect, which rested entirely on "the corruption recurred on a shell verified clean". The shell was never probed and is not clean.
+- **It does not establish a cause.** Which process wrote the copy is unknown - `exception.mjs` (unguarded until 2026-09-08), the earlier unguarded scripts, or either application launched from inside the container, both of which have full Electron profiles there. Recorded as evidence, not as a verdict; promoting a corroborating detail to a premise is how the last two diagnoses went wrong. Full write-up in `NewApp/CHANGELOG.md`.
+
 ## [1.1.206] - 2026-09-09
 
 ### fix - the collector jobs are manual-only, and `enabled` now means something

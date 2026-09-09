@@ -2,7 +2,7 @@
  * The `universe_seed` replay itself, shared by both runners.
  *
  * There are two arms — `replay-seed-locally.mjs` (plain Node) and
- * `replay-seed-in-electron.mjs` (Electron main process) — and they exist to
+ * `replay-seed-in-electron.cjs` (Electron main process) — and they exist to
  * answer one question: **does the corruption need the Electron runtime?** That
  * question is only answerable if the two arms run the *same* replay, so the
  * replay lives here and each runner supplies nothing but a `Database` and a
@@ -75,24 +75,27 @@ function referenceBody(ticker, index) {
 }
 
 /**
- * Blocks the calling thread for `ms`.
+ * Waits `ms` between provider responses, yielding the event loop.
  *
- * Deliberately synchronous: the delay exists to stretch the run over minutes so
- * a slow external agent (a scanner, a sync client) has a window to interfere,
- * and an `await` would hand the loop back and change the shape of what is being
- * tested. `Atomics.wait` is unavailable on some main threads, so a spin is kept
- * as the fallback rather than silently skipping the delay — an arm that ran at
- * full speed while reporting a pace would be worthless.
+ * **This was `Atomics.wait` and that was wrong twice over.** The reasoning was
+ * that a synchronous block keeps the shape of the test honest, because an
+ * `await` "hands the loop back and changes what is being tested". Both halves
+ * fail:
+ *
+ *  - *Fidelity.* The live collector waits on a real HTTP response, which is
+ *    asynchronous. Handing the loop back is what actually happens between
+ *    writes, so yielding is the faithful model and blocking is the artificial
+ *    one.
+ *  - *Function.* Measured 2026-09-09: parking the **Electron main thread** in
+ *    `Atomics.wait` stops libuv running its callbacks, so the seed's own async
+ *    continuations — the archive write among them — never resume. The paced arm
+ *    used 1.9 seconds of CPU in 17 minutes and produced no output at all. It did
+ *    not pace; it stalled. The guarded-against failure was "runs at full speed
+ *    while reporting a pace"; the real one was worse and in the other
+ *    direction.
  */
 function sleep(ms) {
-  try {
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-  } catch {
-    const until = Date.now() + ms;
-    while (Date.now() < until) {
-      /* spin */
-    }
-  }
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /** What each arm reports about itself, so two runs can be compared as evidence. */
@@ -157,7 +160,7 @@ export async function runSeedReplay({
     encryptForArchive: encryptForArchive ?? ((b) => Buffer.from(b.map((x) => x ^ 0x5a))),
     decryptFromArchive: decryptFromArchive ?? ((b) => Buffer.from(b.map((x) => x ^ 0x5a))),
     polygonGet: async (path) => {
-      if (delayMs > 0) sleep(delayMs);
+      if (delayMs > 0) await sleep(delayMs);
       const ticker = path.split('/').pop();
       return {
         status: 200,

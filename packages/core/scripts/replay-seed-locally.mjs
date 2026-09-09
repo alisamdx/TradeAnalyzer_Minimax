@@ -28,7 +28,7 @@
  * writer, real ingestion. No Electron, no network, one process.
  *
  * It came back CLEAN, which is what makes the Electron arm worth running:
- * `replay-seed-in-electron.mjs` executes this same replay inside an Electron
+ * `replay-seed-in-electron.cjs` executes this same replay inside an Electron
  * main process, and the two differ in the runtime and nothing else. Keep them
  * that way — the shared body lives in `lib/seed-replay.mjs` for that reason.
  *
