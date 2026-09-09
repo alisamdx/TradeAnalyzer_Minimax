@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import Database from 'better-sqlite3';
 import { applyDictionary } from '../src/dictionary/apply.js';
-import { recordOpenHandle } from '../src/db/open-handle.js';
+import { recordCloseHandle, recordOpenHandle } from '../src/db/open-handle.js';
 import type { SqliteLike } from '../src/db/sqlite-like.js';
 
 /**
@@ -77,6 +77,54 @@ describe('meta_open_handle', () => {
       .all(HOST.appName) as { db_path: string }[];
     expect(rows).toHaveLength(2);
     expect(new Set(rows.map((r) => r.db_path)).size).toBe(2);
+    close();
+  });
+
+  it('stamps a close, so overlap is readable instead of remembered', () => {
+    // Two open timestamps are consistent with any amount of overlap or none.
+    // Without a close, "were both applications holding this file at once" —
+    // the question the table exists for — is unanswerable, and on 2026-09-09 it
+    // had to be taken on recollection at the exact point where concurrency was
+    // the live hypothesis in a corruption investigation.
+    const { db, close } = open();
+    recordOpenHandle(db, HOST);
+    recordCloseHandle(db, {
+      appName: HOST.appName,
+      dbPath: HOST.dbPath,
+      closedAt: '2026-09-07T20:30:00-04:00'
+    });
+
+    const row = db.prepare('SELECT closed_at FROM meta_open_handle').get() as { closed_at: string };
+    expect(row.closed_at).toBe('2026-09-07T20:30:00-04:00');
+    close();
+  });
+
+  it('clears a stale close when the same pair is opened again', () => {
+    // Otherwise a re-open inherits the previous run's close and the row claims an
+    // interval that ended before it began — which would read as "not currently
+    // open" for a process that is.
+    const { db, close } = open();
+    recordOpenHandle(db, HOST);
+    recordCloseHandle(db, { appName: HOST.appName, dbPath: HOST.dbPath, closedAt: '2026-09-07T20:30:00-04:00' });
+    recordOpenHandle(db, { ...HOST, openedAt: '2026-09-07T21:00:00-04:00', processId: 999 });
+
+    const row = db.prepare('SELECT closed_at, process_id FROM meta_open_handle').get() as {
+      closed_at: string | null;
+      process_id: number;
+    };
+    expect(row.closed_at).toBeNull();
+    expect(row.process_id).toBe(999);
+    close();
+  });
+
+  it('never throws when there is no row to close', () => {
+    // A close is a best-effort annotation on the way out. Throwing here would
+    // turn "could not record the close" into "the application could not shut
+    // down", which is a strictly worse failure.
+    const { db, close } = open();
+    expect(() =>
+      recordCloseHandle(db, { appName: 'Nobody', dbPath: 'nowhere', closedAt: 'x' })
+    ).not.toThrow();
     close();
   });
 

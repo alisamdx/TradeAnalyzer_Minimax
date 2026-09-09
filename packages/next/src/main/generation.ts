@@ -7,6 +7,7 @@ import {
   assertNotRedirected,
   DICTIONARY_VERSION,
   etTimestamp,
+  recordCloseHandle,
   recordOpenHandle,
   type SqliteLike
 } from '@tradeanalyzer/core';
@@ -225,6 +226,15 @@ export function closeGeneration(): void {
   }
   console.log('[next] closeGeneration: checkpointing and closing');
   checkpoint(handle.db, 'close');
+  // Stamped before the close, for the same reason the collector host does it:
+  // two open timestamps are consistent with any amount of overlap, so without a
+  // close the table cannot say whether both applications held the file at once.
+  recordCloseHandle(handle.db as unknown as SqliteLike, {
+    appName: 'TradeAnalyzer 2',
+    dbPath: handle.info.dbPath ?? '',
+    closedAt: etTimestamp()
+  });
+
   handle.db.close();
   handle = undefined;
   console.log('[next] closeGeneration: closed');

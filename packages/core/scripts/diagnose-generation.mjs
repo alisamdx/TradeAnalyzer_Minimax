@@ -368,7 +368,7 @@ function reportForensics(degraded) {
     console.log('\nopened by:');
     say('meta_open_handle', () => {
       const handles = db
-        .prepare('SELECT app_name, app_version, opened_at, process_id, db_path, dictionary_version FROM meta_open_handle ORDER BY opened_at')
+        .prepare('SELECT app_name, app_version, opened_at, closed_at, process_id, db_path, dictionary_version FROM meta_open_handle ORDER BY opened_at')
         .all();
       if (handles.length === 0) {
         console.log('  (nothing has opened this generation since the handle table existed)');
@@ -377,7 +377,8 @@ function reportForensics(degraded) {
       const paths = new Set(handles.map((h) => h.db_path));
       for (const h of handles) {
         console.log(
-          `  ${h.app_name} v${h.app_version}  dict v${h.dictionary_version}  pid ${h.process_id}  ${h.opened_at}`
+          `  ${h.app_name} v${h.app_version}  dict v${h.dictionary_version}  pid ${h.process_id}` +
+            `  open ${h.opened_at}  closed ${h.closed_at ?? 'NOT RECORDED'}`
         );
         if (h.db_path !== dbPath) console.log(`    ** resolved a DIFFERENT path: ${h.db_path} **`);
       }
@@ -388,6 +389,35 @@ function reportForensics(degraded) {
         console.log('     writing different base files. It is the one mechanism known to');
         console.log('     corrupt this database. **');
       }
+      // The overlap question, answered by reading rather than by asking. Two
+      // open timestamps are consistent with any amount of overlap or none, which
+      // is why `closed_at` exists — on 2026-09-09 "was the other app running"
+      // had to be taken on recollection at the exact point where concurrency was
+      // the live hypothesis.
+      const spans = handles
+        .filter((h) => h.closed_at)
+        .map((h) => ({ name: h.app_name, from: Date.parse(h.opened_at), to: Date.parse(h.closed_at) }))
+        .filter((sp) => Number.isFinite(sp.from) && Number.isFinite(sp.to));
+      for (let i = 0; i < spans.length; i++) {
+        for (let j = i + 1; j < spans.length; j++) {
+          const a = spans[i];
+          const b = spans[j];
+          if (a.name !== b.name && a.from < b.to && b.from < a.to) {
+            console.log('');
+            console.log(`  ** ${a.name} and ${b.name} held this file AT THE SAME TIME. **`);
+            console.log('     Two writers on one write-ahead log. Read from the recorded intervals,');
+            console.log('     not inferred from the open timestamps.');
+          }
+        }
+      }
+      const unclosed = handles.filter((h) => !h.closed_at).map((h) => h.app_name);
+      if (unclosed.length > 0) {
+        console.log('');
+        console.log(`  No close recorded for: ${unclosed.join(', ')}. Either it still holds the`);
+        console.log('  file, or it died without closing, or it predates the close stamp (dict v8).');
+        console.log('  Overlap CANNOT be ruled out from these rows — that is not the same as ruling it in.');
+      }
+
       if (new Set(handles.map((h) => h.app_name)).size === 1) {
         console.log('  Only one application has opened this file. If both have been run since');
         console.log('  this version was installed, they are not sharing a generation.');

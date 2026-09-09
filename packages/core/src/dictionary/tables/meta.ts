@@ -90,6 +90,19 @@ export const metaTables: readonly TableEntry[] = [
       col.text('app_name', 'Which application opened it — `TradeAnalyzer` (the collector host) or `TradeAnalyzer 2` (the inspector).', { sourceProvider: 'collector' }),
       col.text('app_version', 'That application\'s version, so a stale row names the build that wrote it.', { sourceProvider: 'collector' }),
       col.ts('opened_at', 'When that application last opened this generation.', { sourceProvider: 'collector' }),
+      nullable(
+        col.ts(
+          'closed_at',
+          'When that application closed it again. NULL means it either still holds the file or died ' +
+            'without closing, and the difference matters. An open interval here that overlaps another ' +
+            'row is TWO APPLICATIONS WRITING AT ONCE — which is the question this table was added to ' +
+            'answer and could not, because it recorded opens only. Two open timestamps are consistent ' +
+            'with any amount of overlap or none, so on 2026-09-09 a corruption investigation had to ' +
+            'take "the other application was closed" on recollection, at the exact point where ' +
+            'concurrency was the live hypothesis.'
+        ),
+        'still open, or the process died without closing'
+      ),
       col.int('process_id', 'The operating-system process that opened it.', { sourceProvider: 'collector' }),
       { column: 'db_path', type: 'TEXT', unit: 'path', nullable: false, description: 'The path that application resolved for this database. Two different values here mean two different files, whatever the pointer says — and because it is part of the key, a second path is recorded rather than overwriting the first.', sourceProvider: 'collector' },
       col.int('dictionary_version', 'The dictionary version that application was built against.', { sourceProvider: 'collector' })

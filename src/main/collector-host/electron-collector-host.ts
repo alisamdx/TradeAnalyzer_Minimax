@@ -3,9 +3,9 @@ import Database from 'better-sqlite3';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { CollectorHost, ProviderResponse, SqliteLike } from '@tradeanalyzer/core';
-import { applyDictionary, assertNotRedirected, etTimestamp, recordOpenHandle, DICTIONARY_VERSION } from '@tradeanalyzer/core';
+import { applyDictionary, assertNotRedirected, etTimestamp, recordCloseHandle, recordOpenHandle, DICTIONARY_VERSION } from '@tradeanalyzer/core';
 import { etradeGetRaw, renewAccessToken, type OAuthCredentials } from '../services/etrade-auth.js';
-import { logApiCall } from '../services/logger.js';
+import { logApiCall, logError } from '../services/logger.js';
 
 /**
  * `ElectronCollectorHost` — NewApp 04 §1.1, 06 §5 change #3.
@@ -153,7 +153,48 @@ export class ElectronCollectorHost implements CollectorHost {
   }
 
   close(): void {
-    this.db?.close();
+    if (!this.db) return;
+
+    // Stamp the close BEFORE closing, so "were both applications holding this
+    // file at once" is answerable by reading the table rather than by asking
+    // somebody what they had running. On 2026-09-09 that question was the live
+    // hypothesis in a corruption investigation and the table could not answer it.
+    try {
+      recordCloseHandle(this.db as unknown as SqliteLike, {
+        appName: this.hostApp.name,
+        dbPath: generationPaths(this.pointer).dbPath,
+        closedAt: this.nowET()
+      });
+    } catch {
+      /* an annotation must never be the reason a job cannot finish */
+    }
+
+    // Explicitly, not left to close-time semantics. A `db.close()` with a
+    // multi-megabyte WAL relies on SQLite checkpointing on the way out, and a
+    // checkpoint that silently does nothing is indistinguishable from one that
+    // worked — measured once at 918,792 bytes of WAL discarded with the base
+    // file byte-for-byte unchanged. The new exe was fixed for this; the
+    // collector host still trusted close.
+    try {
+      const [row] = this.db.pragma('wal_checkpoint(TRUNCATE)') as { busy: number; log: number; checkpointed: number }[];
+      if (row && (row.busy !== 0 || row.log !== row.checkpointed)) {
+        logError({
+          timestamp: new Date().toISOString(),
+          appVersion: this.hostApp.version,
+          errorClass: 'CollectorCheckpoint',
+          message: `checkpoint did not fully apply — busy=${row.busy} log=${row.log} checkpointed=${row.checkpointed}`,
+          stack: null,
+          operation: 'collector-host:close',
+          ticker: null,
+          correlationId: null,
+          level: 'WARNING'
+        });
+      }
+    } catch {
+      /* fall through to close, which will checkpoint or not on its own */
+    }
+
+    this.db.close();
     this.db = undefined;
   }
 

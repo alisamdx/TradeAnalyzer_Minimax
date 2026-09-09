@@ -1,5 +1,30 @@
 # Changelog
 
+## [1.1.209] - 2026-09-09
+
+`@tradeanalyzer/core` 0.3.4, dictionary version **8**.
+
+### docs - the collector path is exonerated
+
+- A screening arm closed every remaining difference between the replay and the live seed at once: Electron, in the generation's own directory, at the live pace, through the real job-queue wrapper, with varying bodies and injected failures. It matched the live run on runtime, directory, **1,083 references / 6 failures** and file shape (588 pages vs 570) - and came back `integrity_check: ok`.
+- Three things had never been exercised: **failure responses** (the corrupting seed had 6, every replay had 0, so the row shape a failure writes had never been produced), **body size** (every canned response was byte-identical, so the btree packed in a way no real run does), and **the job wrapper** (`collector-oneshot` claims a `meta_job_request` row and writes the report back as JSON on completion - writes that land at the very END of the sequence, which is exactly where all three corrupt files have their damage). Plus the untested cell of the earlier 2x2: Electron *in that directory*.
+- **Everything reproducible outside the app is now clean.** What remains is the real application around the collector.
+
+### fix - `meta_open_handle` recorded opens and not closes
+
+- The table exists so "are two applications holding this file at once" is answerable by **reading**, and it could not answer it: two open timestamps are consistent with any amount of overlap or none. So at the exact point where concurrency was the live hypothesis, the question had to be put to the operator and taken on recollection.
+- Dictionary **v7 -> v8** adds a nullable `closed_at` (additive growth, so it applies inside an existing generation). Both applications stamp it before closing; `recordOpenHandle` clears a stale value on re-open; `recordCloseHandle` never throws, because turning "could not record the close" into "the application could not shut down" would be strictly worse.
+- `diagnose-generation.mjs` prints each interval and **states an overlap outright** when two applications' recorded intervals intersect. Where a close is missing it says overlap *cannot be ruled out* - which is not the same as ruling it in.
+
+### fix - the collector host never checkpointed
+
+- `close()` was `this.db?.close()`, leaving a multi-megabyte WAL to close-time behaviour. The new exe was fixed for this after a measured **918,792-byte WAL was discarded with the base file byte-for-byte unchanged**; the collector host, which writes far more, still trusted close. It now checkpoints `TRUNCATE` explicitly and logs a WARNING when the checkpoint does not fully apply.
+
+### Known defect, deliberately not fixed here
+
+- `ElectronCollectorHost.polygonGet` calls `fetch` directly and **bypasses the rate limiter**, contrary to spec 06 §5 and CLAUDE.md's standing rule. Left alone on purpose: routing it through the limiter changes the collector's write pace, and that pace is an experimental variable in an open corruption investigation. Deferred, not forgotten.
+- `303` tests in `core`, `1,247` in the existing app.
+
 ## [1.1.208] - 2026-09-09
 
 `@tradeanalyzer/core` 0.3.3, dictionary version **7**.

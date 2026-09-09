@@ -39,7 +39,8 @@ export function recordOpenHandle(db: SqliteLike, facts: OpenHandleFacts): void {
        app_version = excluded.app_version,
        opened_at = excluded.opened_at,
        process_id = excluded.process_id,
-       dictionary_version = excluded.dictionary_version`
+       dictionary_version = excluded.dictionary_version,
+       closed_at = NULL`
   ).run(
     facts.appName,
     facts.appVersion,
@@ -48,4 +49,35 @@ export function recordOpenHandle(db: SqliteLike, facts: OpenHandleFacts): void {
     facts.dbPath,
     facts.dictionaryVersion
   );
+}
+
+/**
+ * Records that this application let the generation go.
+ *
+ * The other half of `recordOpenHandle`, and the table was incomplete without it.
+ * Opens alone cannot answer **"did two applications hold this file at the same
+ * time"** — the question the table exists for — because two open timestamps are
+ * consistent with any amount of overlap or none. On 2026-09-09 that gap meant a
+ * corruption investigation had to take "the other app was closed" on
+ * recollection, at the exact point where concurrency was the live hypothesis.
+ *
+ * With a close stamped, an interval that overlaps another row's is two writers,
+ * read rather than remembered. A NULL `closed_at` beside a later open elsewhere
+ * is itself informative: that process died without closing.
+ *
+ * Deliberately does NOT fail if the row is absent — a close is a best-effort
+ * annotation on the way out, and throwing here would turn "we could not record
+ * the close" into "the application could not shut down".
+ */
+export function recordCloseHandle(
+  db: SqliteLike,
+  facts: { readonly appName: string; readonly dbPath: string; readonly closedAt: string }
+): void {
+  try {
+    db.prepare(
+      'UPDATE meta_open_handle SET closed_at = ? WHERE app_name = ? AND db_path = ?'
+    ).run(facts.closedAt, facts.appName, facts.dbPath);
+  } catch {
+    /* a close annotation must never be the reason a shutdown fails */
+  }
 }
