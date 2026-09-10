@@ -3,7 +3,8 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { readFileSync, existsSync } from 'node:fs';
 import { ApiServer } from './api-server.js';
-import { ElectronCollectorHost, readSharedPointer } from './collector-host/electron-collector-host.js';
+import { ElectronCollectorHost, readSharedPointer, generationExists } from './collector-host/electron-collector-host.js';
+import { writeLegacyHandoff, type LegacyBriefHandoff } from '@tradeanalyzer/core';
 import { createCollectorDailyJob, createCollectorWatchdogJob } from './services/jobs/collector-daily.js';
 import { createCollectorOneShotJob } from './services/jobs/collector-oneshot.js';
 import { newAppUniverseSources } from './collector-host/universe-sources.js';
@@ -630,10 +631,43 @@ app.whenReady().then(() => {
     defaultConfig: { callDelayMs: 500 }, // conservative default — avoids E*Trade 429s
   });
 
+  /**
+   * The NewApp legacy hand-off (04 §8) — the brief's one line of contact with
+   * the collector.
+   *
+   * **Everything here is defensive on purpose (D1).** It resolves the pointer
+   * itself and returns silently when there is no generation, so an install
+   * that has never run TradeAnalyzer 2 behaves exactly as before. `makeCollectorHost`
+   * is declared further down; this closure only calls it at brief time, long
+   * after startup has finished.
+   *
+   * The host is closed in a `finally`, because this path opens the generation
+   * outside any collector run and a handle left open would be a second writer
+   * nobody is tracking.
+   */
+  const legacyHandoff = (payload: Omit<LegacyBriefHandoff, 'legacyAppVersion'>): void => {
+    const pointer = readSharedPointer();
+    if (!pointer || !generationExists(pointer)) return;
+
+    const host = makeCollectorHost({
+      signal: new AbortController().signal,
+      onProgress: () => undefined,
+    });
+    try {
+      const result = writeLegacyHandoff(host, { ...payload, legacyAppVersion: app.getVersion() });
+      console.log(
+        `[brief] legacy hand-off: ${result.candidates} candidates, ` +
+          `${result.rowsWritten} rows, ${result.stickyPinned} contracts pinned`
+      );
+    } finally {
+      host.close();
+    }
+  };
+
   const briefJob = new DailyIntelligenceBriefJob(
     db, dataProvider, optionsProvider, emailService, paperTradingService,
     () => getMainWindow()?.webContents.send('watchlists:updated'),
-    earningsService, getEtradeCreds,
+    earningsService, getEtradeCreds, legacyHandoff,
   );
   batchService.registerJob('daily-intelligence-brief', briefJob, {
     dailyScheduleTime: '16:30',  // post-market, chains after price-gap-fill

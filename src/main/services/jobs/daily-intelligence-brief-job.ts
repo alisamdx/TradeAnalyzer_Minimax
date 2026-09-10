@@ -32,6 +32,7 @@ import { withTransaction } from '../../db/connection.js';
 import { STRATEGY_RELEVANT_SLUGS, pickRelevantStructure, relevantSlugsForPick, formatStructureLegs } from '@shared/strategy-structures.js';
 import { extractLoggableScores, logStructureLiquidity, pruneStructureLiquidityLog } from '../structure-liquidity-log.js';
 import { saveBriefCandidates, pruneBriefCandidates, resolveSlot, type BriefCandidateRow, type CandidateDisposition } from '../brief-candidates.js';
+import { osiSymbol, type LegacyBriefHandoff } from '@tradeanalyzer/core';
 
 // VIX sane range — reject anything outside this (a quote typo can return an unrelated
 // symbol). Historical VIX spans ~9 (2017) to ~82 (COVID); [5,150] is a safe guard.
@@ -203,6 +204,19 @@ export class DailyIntelligenceBriefJob implements BatchJobHandler {
     private readonly onWatchlistUpdated: (() => void) | null = null,
     private readonly earningsService: EarningsService | null = null,
     private readonly getEtradeCreds: (() => OAuthCredentials | null) | null = null,
+    /**
+     * The NewApp legacy hand-off (04 §8) — **fire-and-forget, and optional**.
+     *
+     * Null in every test and on any install where the new generation does not
+     * exist, which is the point: D1 says the collector must not change what the
+     * brief decides or emails, and the strongest form of that promise is a
+     * dependency the brief runs identically without.
+     *
+     * The call site below swallows everything it can throw. A collector problem
+     * is a collector exception, never a brief failure.
+     */
+    private readonly legacyHandoff:
+      ((payload: Omit<LegacyBriefHandoff, 'legacyAppVersion'>) => void) | null = null,
   ) {
     this.scoringService = new ScoringService(db);
     this.strategyLabService = new StrategyLabService(dataProvider, optionsProvider);
@@ -617,6 +631,12 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
     // and that cut is where an anti-predictive composite would do its damage (v1.1.173 F8).
     // Instrumentation only: it never gates, and saveBriefCandidates never throws.
     const candidateRows: BriefCandidateRow[] = [];
+    // The NewApp hand-off's candidate list, built alongside the rows above from
+    // the same in-scope data (04 §8). Kept separate rather than derived from
+    // `candidateRows` later, because a `SetupLeg` carries the contract's `side`
+    // and that row shape does not — reconstructing the right afterwards would
+    // mean inferring it from a structure slug.
+    const handoffCandidates: LegacyBriefHandoff['candidates'][number][] = [];
     const candidateRunAt = new Date().toISOString();
     const candidateDate = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
     // Which of the day's two batch phases this is. Both are kept (migration 079) because the two
@@ -721,6 +741,74 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
           earningsDate: earningsByTicker.get(scored.ticker) ?? null,
           daysToEarnings: earningsByTicker.has(scored.ticker)
             ? daysUntil(earningsByTicker.get(scored.ticker)!) : null,
+        });
+
+        // ── NewApp legacy hand-off (04 §8) ───────────────────────────────────
+        //
+        // Built here rather than reconstructed later, because this is the only
+        // place the real `SetupLeg` is in scope — it carries `side`, so the
+        // contract's right is READ, never inferred from a structure slug.
+        //
+        // Every candidate goes in, losers included. That is the entire point of
+        // the contract: `daily_briefs` keeps only survivors, so the cut from 15
+        // to 5 is unmeasurable, and the rejected candidates are the control
+        // group any study of the ranking needs.
+        handoffCandidates.push({
+          ticker: scored.ticker,
+          mode: strategy as LegacyBriefHandoff['candidates'][number]['mode'],
+          consideredRank: i + 1,
+          survived: disposition === 'picked',
+          compositeScore: scored.compositeScore,
+          finalDisposition: disposition,
+          // The one gate whose tested value and threshold are both known here.
+          // Recorded for passes as well as failures — a gate's distribution is
+          // what says whether it can ever fire, and only the fires are useless.
+          gates: getBestLiquidityScore(lab, strategy, dir) === null ? [] : [{
+            name: 'liquidity',
+            passed: disposition !== 'failed_liquidity',
+            testedValue: getBestLiquidityScore(lab, strategy, dir),
+            threshold: MIN_LIQUIDITY_SCORE,
+            reason: disposition === 'failed_liquidity' ? 'below the brief liquidity gate' : null,
+          }],
+          signals: Object.entries(scored.signals ?? {}).map(([key, s]) => ({
+            key,
+            rawValue: Number.isFinite(s?.raw as number) ? (s?.raw as number) : null,
+            normalized: Number.isFinite(s?.normalized as number) ? (s?.normalized as number) : null,
+            weight: (s?.weight as number) ?? 0,
+            enabled: s?.missing !== true,
+          })),
+          // A leg is emitted only when its side and the setup's expiration are
+          // both known. Both are needed to build the OSI symbol, and a
+          // constructed symbol that is wrong does not throw — it pins a
+          // contract tomorrow's chain phase never matches, so the sticky set
+          // looks populated and captures nothing. Skipping is the honest
+          // failure; guessing the right from a structure slug is not.
+          legs: (setup?.legs ?? []).flatMap(l => {
+            const expiration = setup?.expiration;
+            if (!l.side || !expiration) return [];
+            return [{
+              osiSymbol: osiSymbol({
+                ticker: scored.ticker, expiration, side: l.side, strike: l.strike,
+              }),
+              right: l.side,
+              strike: l.strike,
+              expiration,
+              bid: l.bid ?? null,
+              ask: l.ask ?? null,
+              mid: l.mid ?? null,
+              // **A fraction, and no conversion here.** The lab already holds
+              // fractions; a `* 100` anywhere on this path would inflate every
+              // stored leg a hundredfold (02 §0.1).
+              iv: l.iv ?? null,
+              delta: l.delta ?? null,
+              openInterest: l.openInterest ?? null,
+              volume: l.volume ?? null,
+              // The field's PRESENCE, not its truthiness. `?? 0` is what turned
+              // "not reported" into "did not trade" on 23 of 250 stored legs.
+              volumeReported: l.volume !== null && l.volume !== undefined,
+              liquidityScore: getBestLiquidityScore(lab, strategy, dir),
+            }];
+          }),
         });
       }
 
@@ -832,6 +920,38 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
     pruneBriefCandidates(this.db);
     runMeta['candidatesRecorded'] = savedCandidates;
     console.log(`[brief] recorded ${savedCandidates} Stage-4 candidates (survivors + losers)`);
+
+    // ── NewApp legacy hand-off (04 §8) ───────────────────────────────────────
+    //
+    // **Fire-and-forget, and D1 is the reason.** The collector must not change
+    // what the brief decides or emails, so this runs after every decision is
+    // made and persisted, and its failure mode is a log line. There is no
+    // `await`, no branch on its result, and nothing downstream reads it.
+    //
+    // It is also the last thing that touches `handoffCandidates`, so a throw
+    // here cannot leave the brief's own state half-written.
+    if (this.legacyHandoff && handoffCandidates.length > 0) {
+      try {
+        // `legacyAppVersion` is supplied by the wiring, not here: it comes
+        // from `app.getVersion()`, and importing Electron into a batch job to
+        // fetch one string would make the job untestable under plain Node for
+        // no gain.
+        this.legacyHandoff({
+          briefId: null,
+          tradingDate: candidateDate,
+          // The collector's vocabulary, not this app's. `intraday` here is
+          // `morning` there, and the slot is part of the run key precisely so
+          // the two daily runs stay distinguishable (migration 079).
+          slot: candidateSlot === 'intraday' ? 'morning' : 'after_close',
+          emailedAt: null,
+          candidates: handoffCandidates,
+        });
+      } catch (err) {
+        // A collector problem is a collector exception, never a brief failure.
+        console.warn('[brief] legacy hand-off failed (brief unaffected):',
+          err instanceof Error ? err.message : String(err));
+      }
+    }
 
     // One-time cleanup: purge open paper trades from stale earlier runs on any date.
     // autoCapture below clears today's stale picks per-strategy before inserting;

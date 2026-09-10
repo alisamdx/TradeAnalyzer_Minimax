@@ -390,6 +390,48 @@ describe('registration in the existing app', () => {
     expect(executable).not.toContain('collector-oneshot');
   });
 
+  it('calls the legacy hand-off fire-and-forget, so it cannot affect the brief (D1)', () => {
+    // The collector must not change what the brief decides or emails. The
+    // strongest form of that promise is a dependency the brief runs
+    // identically without — it is optional and defaults to null, so every
+    // existing test and any install without a generation behaves as before.
+    const brief = stripComments(
+      readFileSync(join(SRC, 'services', 'jobs', 'daily-intelligence-brief-job.ts'), 'utf8')
+    );
+    expect(brief).toMatch(/legacyHandoff:[\s\S]{0,200}\|\s*null\s*=\s*null/);
+
+    // The end marker must be CODE. `stripComments` has already run, so
+    // slicing to a comment slices to -1 and the "no await" assertion then
+    // examines the rest of the file — which is full of them, and would have
+    // made this check fire for the wrong reason.
+    const call = brief.slice(
+      brief.indexOf('if (this.legacyHandoff'),
+      brief.indexOf('if (this.paperTradingService)')
+    );
+    expect(call.length).toBeGreaterThan(0);
+    // Wrapped, and never awaited: a collector problem is a collector
+    // exception, and an await would let a slow generation write stall a brief.
+    expect(call).toContain('try {');
+    expect(call).toContain('catch');
+    expect(call).not.toContain('await');
+    // Nothing downstream may branch on its result.
+    expect(call).not.toMatch(/(const|let)\s+\w+\s*=\s*this\.legacyHandoff/);
+  });
+
+  it('builds the hand-off leg from a real side, never inferring the contract right', () => {
+    const brief = stripComments(
+      readFileSync(join(SRC, 'services', 'jobs', 'daily-intelligence-brief-job.ts'), 'utf8')
+    );
+    // A constructed OSI symbol that is wrong does not throw — it pins a
+    // contract tomorrow's chain phase never matches, so the sticky set looks
+    // populated and captures nothing. The leg is skipped when the side or the
+    // expiration is missing rather than guessed from a structure slug.
+    expect(brief).toContain('if (!l.side || !expiration) return [];');
+    expect(brief).toContain('right: l.side');
+    // And the volume crosses as a presence test, not `?? 0`.
+    expect(brief).toContain('volumeReported: l.volume !== null && l.volume !== undefined');
+  });
+
   it('has no automatic claim loop at all', () => {
     // The emitter. A claimed request whose `finishJob` write fails stays
     // `queued`, so the loop re-claimed it every two minutes, ran it, failed and

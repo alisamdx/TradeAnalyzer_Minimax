@@ -126,3 +126,4 @@ export { makeLegacyBriefIngest, stickyRowsFor, legacyRunId } from '../ingest/leg
 export type {
   LegacyBriefHandoff, LegacyHandoffCandidate, LegacyHandoffLeg
 } from '../ingest/legacy-brief.js';
+export { osiSymbol } from '../ingest/osi.js';

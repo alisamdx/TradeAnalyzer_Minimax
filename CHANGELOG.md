@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.217] - 2026-09-09
+
+`@tradeanalyzer/core` 0.3.7.
+
+### The brief hands its whole candidate set to the collector (NewApp 04 §8)
+
+- At the end of a run the brief calls `writeLegacyHandoff` with **every candidate it scored**, the rejected ones included, each with the gate that stopped it and how far off it was. `daily_briefs` keeps only survivors, so the cut from 15 to 5 has never been measurable.
+- **D1 shapes the design**: the dependency is optional and defaults to null (so every existing test and any install without a generation behaves exactly as before), it runs after every decision is persisted, it is wrapped in try/catch, it is never awaited, and nothing downstream reads its result. All four are pinned by a test — "we were careful" is not a guarantee.
+- The wiring resolves the shared pointer itself, returns silently with no generation, and closes the host in a `finally`: this path opens the generation outside any collector run, and a handle left open would be a second writer nobody tracks.
+- **The leg's `right` is read, never inferred.** The payload is built inside the loop that already extracts the short leg, the only place a real `SetupLeg` with `side` is in scope. A leg whose side or expiration is missing is **skipped**, not filled in — the OSI symbol is constructed (`osiSymbol` in `core`, 7 tests against the format a live E*Trade chain returned), and a wrong one does not throw: it pins a contract the chain phase never matches, so the sticky set looks populated and captures nothing.
+- `volume` crosses as a presence test, not `?? 0` — the distinction that cost 23 of 250 stored legs a false liquidity rejection.
+- `1,256` tests here, `368` in `core`.
+
 ## [1.1.216] - 2026-09-09
 
 Migration **082**. No `core` change.
