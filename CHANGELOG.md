@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.215] - 2026-09-09
+
+`@tradeanalyzer/core` 0.3.6, dictionary **v10**.
+
+### Hosts the rest of NewApp B7b except the IV view
+
+- **`collector-oneshot` executes `bootstrap_iv`** — the third implemented one-shot. It cannot run until an IVolatility subscription exists (a spend decision, not a build one), but job, parser and wiring are complete and fixture-tested, so the pull is a Run Now when that is taken.
+- The operator line reports **`outOfBand`**, the count of values outside the fraction band `(0, 5)`, beside the row count: if the two are equal the **unit** is wrong rather than the data, and the line says so in words. The existing app's own IVolatility parser guesses the unit by magnitude (`n > 2 ? n / 100 : n`), which silently corrupts 200%+ IV — ordinary for a biotech binary or a squeezed meme name. That heuristic is deliberately not carried across.
+- Dictionary **v9 -> v10**: `accepted` / `accepted_at` / `accepted_note` on `ext_iv_history` as `mutableColumns` — the IV value stays frozen, only the acceptance decision may be recorded later. Applies in place via the empty-table rebuild; no reset.
+- The gate runs `checksFor(db)` rather than static `ALL_CHECKS`, so QC-907/908 register only once a series exists to compare against — a check that cannot fire would otherwise sit in the zero-fire review looking like one that is broken.
+- `1,253` tests here, `351` in `core`.
+
 ## [1.1.214] - 2026-09-09
 
 `@tradeanalyzer/core` 0.3.5, dictionary **v9**.
