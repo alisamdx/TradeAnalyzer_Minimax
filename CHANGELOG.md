@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.213] - 2026-09-09
+
+`@tradeanalyzer/core` 0.3.5, dictionary version **8** (unchanged).
+
+### fix - every `acquire()` spent TWO tokens, so the limiter ran at half its setting
+
+- `processNextInQueue()` shifted the queue's **head** to wake the next waiter - but the callback that just succeeded is still at the head, so it shifted **itself**, re-ran via `setImmediate`, and took a second token. Measured: a burst of **10** granted exactly **5**.
+- **True for as long as the class has existed.** Every Polygon path - screener, analysis, validate-all, briefing, LEAPS, news - ran at half its configured rate, and Settings displayed a number the app never used. A configured 100 was really 50; the new 500 default would have been 250.
+- Fixed: the succeeding callback splices *itself* out before waking anyone, and `processNextInQueue` **peeks** rather than shifts. Peeking matters - a waiter that still cannot get tokens re-arms on a timer, and a shifted one would be re-armed while out of the queue, losing its FIFO place and becoming invisible to `drain()`.
+- **Why twelve existing tests missed it**: every assertion was "did it resolve" with slack in the budget, never "how many tokens did that cost"; and the re-entry **does not happen under fake timers at all**, since `setImmediate` is faked and the deferred callback never fires. My first regression test passed *before* the fix for that exact reason - worthless, because it could not distinguish the two behaviours it existed to distinguish. The real one uses real timers, yields after each acquire, and **counts grants** so a failure reports `expected 5 to be 10` rather than hanging.
+- **Net effect with v1.1.212**: effective Polygon rate goes from **50 rpm** (100 configured, halved, and the stored setting never applied at startup) to **500**. Still ~1/4 of the ~1,900 rpm measured unthrottled without a 429, so the headroom argument for 500 holds - it was made against the real peak, not the halved figure.
+- `1,253` tests.
+
 ## [1.1.212] - 2026-09-09
 
 `@tradeanalyzer/core` 0.3.5, dictionary version **8** (unchanged). Migration **081**.

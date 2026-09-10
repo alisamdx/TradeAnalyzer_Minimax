@@ -68,6 +68,16 @@ export class TokenBucketRateLimiter {
         this.refill();
         if (this.tokens >= count) {
           this.tokens -= count;
+          // **Leave the queue before waking anyone.** This callback is still at
+          // the head, and `processNextInQueue` used to `shift()` — so it removed
+          // *itself*, re-ran through `setImmediate`, and took a SECOND token.
+          // Every acquire spent two: the effective rate was half the configured
+          // one, for as long as this class has existed. Measured 2026-09-09 —
+          // a burst of 10 granted exactly 5 — and invisible until then because
+          // every test asked "did it resolve", never "how many tokens did that
+          // cost", and the deferred re-entry does not even run under fake timers.
+          const index = this.resolveQueue.indexOf(tryAcquire);
+          if (index !== -1) this.resolveQueue.splice(index, 1);
           resolve();
           this.processNextInQueue();
         } else {
@@ -83,12 +93,18 @@ export class TokenBucketRateLimiter {
     });
   }
 
+  /**
+   * Wakes the next waiter, which **stays in the queue until it succeeds**.
+   *
+   * Peeked, not shifted. A waiter that cannot get its tokens yet re-arms itself
+   * on a timer, and a shifted one would be re-armed while no longer in the
+   * queue — so its position in the FIFO would be lost and `drain()` could not
+   * see it. Removal is the succeeding callback's own job, in `acquire`.
+   */
   private processNextInQueue(): void {
-    if (this.resolveQueue.length > 0) {
-      const next = this.resolveQueue.shift()!;
-      // Defer to allow other microtasks to run (prevents starvation).
-      setImmediate(next);
-    }
+    const next = this.resolveQueue[0];
+    // Defer to allow other microtasks to run (prevents starvation).
+    if (next) setImmediate(next);
   }
 
   /** Drain the queue (called on app shutdown). */

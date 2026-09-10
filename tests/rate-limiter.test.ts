@@ -97,6 +97,54 @@ describe('TokenBucketRateLimiter', () => {
     expect(resolved).toBe(true);
   });
 
+  it('spends exactly one token per sequential acquire(1)', async () => {
+    // **The one thing none of the tests above could see.** Every other
+    // assertion here is "did it resolve", with slack in the budget — so an
+    // acquire that spends two tokens passes all of them, and the effective rate
+    // is silently half the configured one.
+    //
+    // This matters as of v1.1.212: the NewApp collector now shares this bucket
+    // and issues ~1,000 sequential acquires per seed, budgeting its nightly run
+    // against a pace (NewApp 04 §3). A rate that is quietly 250 when it says 500
+    // is a budget that does not hold.
+    //
+    // Burst of exactly 10, no time advanced, so refill contributes nothing:
+    // ten acquires must fit and the eleventh must block.
+    const rl = new TokenBucketRateLimiter({ requestsPerMinute: 10, burstSize: 10 });
+    for (let i = 0; i < 10; i += 1) {
+      await rl.acquire(1);
+    }
+
+    let eleventh = false;
+    rl.acquire(1).then(() => { eleventh = true; });
+    await Promise.resolve();
+    expect(eleventh).toBe(false);
+  });
+
+  it('spends exactly one token per acquire once the deferred drain has run', async () => {
+    // The test above cannot see this on its own: `processNextInQueue` defers
+    // through `setImmediate`, and under fake timers that callback never fires,
+    // so the re-entry path is simply not executed. Real timers, and a yield
+    // after each acquire so the deferred callback actually runs.
+    vi.useRealTimers();
+    const rl = new TokenBucketRateLimiter({ requestsPerMinute: 1, burstSize: 10 });
+
+    // Counted rather than awaited outright, so a failure reports HOW MANY of
+    // the ten tokens were actually usable instead of just hanging.
+    let granted = 0;
+    for (let i = 0; i < 10; i += 1) {
+      const got = await Promise.race([
+        rl.acquire(1).then(() => true),
+        new Promise<boolean>((r) => setTimeout(() => r(false), 300))
+      ]);
+      if (!got) break;
+      granted += 1;
+      await new Promise((r) => setImmediate(r));
+    }
+
+    expect(granted).toBe(10);
+  }, 20000);
+
   it('acquire(n) consumes n tokens', async () => {
     const rl = new TokenBucketRateLimiter({ requestsPerMinute: 600 }); // 10/s, burst=600
     await rl.acquire(100); // spend 100, 500 left
