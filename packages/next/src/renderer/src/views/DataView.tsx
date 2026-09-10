@@ -12,14 +12,27 @@ import { UnitBadge, NullCell, formatValue } from './cells.js';
  * here; if this component ever needs a branch on a table name, the inspector has
  * stopped being schema-driven and AC-13 no longer holds.
  */
-export function DataView({ tree }: { tree: readonly TreeGroup[] }) {
-  const [selected, setSelected] = useState<string | null>(null);
+export function DataView({
+  tree,
+  initialTable = null
+}: {
+  tree: readonly TreeGroup[];
+  /** Set by a `tradeanalyzer-next://table/<name>` link; the name was checked against the dictionary in main. */
+  initialTable?: string | null;
+}) {
+  const [selected, setSelected] = useState<string | null>(initialTable);
   const [columns, setColumns] = useState<readonly ColumnMeta[]>([]);
   const [stats, setStats] = useState<TableStats | null>(null);
   const [page, setPage] = useState<QueryPage | null>(null);
   const [sortColumn, setSortColumn] = useState<string | null>(null);
   const [sortDescending, setSortDescending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!initialTable) return;
+    setSortColumn(null);
+    setSelected(initialTable);
+  }, [initialTable]);
 
   useEffect(() => {
     if (!selected) return;

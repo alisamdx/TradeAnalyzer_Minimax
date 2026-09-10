@@ -1,5 +1,5 @@
 import type { SqliteLike } from '../db/sqlite-like.js';
-import type { CollectorHost } from '../collector/host.js';
+import type { OperatorHost } from '../collector/host.js';
 import { recomputeDomainDayStatus } from './gate.js';
 
 /**
@@ -19,6 +19,20 @@ export type ResolutionKind = 'data_corrected' | 'provider_fixed' | 'rule_changed
 
 /** Default life of an acceptance. An acceptance without an expiry is a decision nobody revisits. */
 export const DEFAULT_ACCEPTANCE_DAYS = 30;
+
+/**
+ * The longest an acceptance may run (05 §5). The workbench offers +30 by default
+ * and refuses anything past this, and so does the function, because a limit
+ * enforced only by the form is enforced only for the callers who use the form —
+ * the lesson of the conviction bands that the AI-review path wrote around.
+ */
+export const MAX_ACCEPTANCE_DAYS = 180;
+
+/** `yyyy-mm-dd` plus whole calendar days, entirely in UTC so no local clock can shift it. */
+function addCalendarDays(date: string, days: number): string {
+  const [y, m, d] = date.split('-').map(Number) as [number, number, number];
+  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
+}
 
 export class OperatorActionRefused extends Error {
   constructor(message: string) {
@@ -58,7 +72,7 @@ function event(
 /** Stops the ageing clock without claiming anything was fixed. A note is optional. */
 export function acknowledge(
   db: SqliteLike,
-  host: CollectorHost,
+  host: OperatorHost,
   exceptionId: number,
   note?: string
 ): void {
@@ -72,6 +86,39 @@ export function acknowledge(
 }
 
 /**
+ * Acknowledges a filtered set — the only bulk action there is (05 §5).
+ *
+ * Acknowledging claims nothing, so doing it to forty findings at once is
+ * honest. Resolving or accepting is a claim about ONE finding, and a bulk
+ * version would make it a claim about a filter instead; that is how "we looked
+ * at these" becomes "we looked at a list of these". So neither exists, and a
+ * test asserts they do not.
+ *
+ * One refusal does not stop the rest, and every refusal is returned with its
+ * reason rather than counted: a count says something was skipped, the list
+ * says what and why.
+ */
+export function bulkAcknowledge(
+  db: SqliteLike,
+  host: OperatorHost,
+  exceptionIds: readonly number[],
+  note?: string
+): { readonly acknowledged: readonly number[]; readonly skipped: readonly { readonly exceptionId: number; readonly why: string }[] } {
+  const acknowledged: number[] = [];
+  const skipped: { exceptionId: number; why: string }[] = [];
+  for (const id of exceptionIds) {
+    try {
+      acknowledge(db, host, id, note);
+      acknowledged.push(id);
+    } catch (err) {
+      if (!(err instanceof OperatorActionRefused)) throw err;
+      skipped.push({ exceptionId: id, why: err.message });
+    }
+  }
+  return { acknowledged, skipped };
+}
+
+/**
  * Marks the finding dealt with.
  *
  * **Refused while the check is still firing.** Resolving something the data
@@ -82,7 +129,7 @@ export function acknowledge(
  */
 export function resolve(
   db: SqliteLike,
-  host: CollectorHost,
+  host: OperatorHost,
   exceptionId: number,
   kind: ResolutionKind,
   note: string,
@@ -120,7 +167,7 @@ export function resolve(
  */
 export function accept(
   db: SqliteLike,
-  host: CollectorHost,
+  host: OperatorHost,
   exceptionId: number,
   note: string,
   until?: string
@@ -130,9 +177,30 @@ export function accept(
   if (e.state === 'accepted') throw new OperatorActionRefused(`${exceptionId} is already accepted.`);
 
   const now = host.nowET();
-  const expiry =
-    until ??
-    new Date(Date.parse(now) + DEFAULT_ACCEPTANCE_DAYS * 86_400_000).toISOString().slice(0, 10);
+  // The ET calendar date, read off the ET stamp itself. This used to add 30
+  // days to `Date.parse(now)` and serialise with `toISOString()` — UTC — so an
+  // acceptance taken after 20:00 ET expired a day later than one taken at
+  // lunch, for no reason anyone chose. All the arithmetic below is in one time
+  // base (UTC calendar dates), which is the rule the Friday-expiry bug taught.
+  const today = now.slice(0, 10);
+  const expiry = until ?? addCalendarDays(today, DEFAULT_ACCEPTANCE_DAYS);
+  const latest = addCalendarDays(today, MAX_ACCEPTANCE_DAYS);
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(expiry)) {
+    throw new OperatorActionRefused(`An acceptance expiry must be a date (yyyy-mm-dd); got "${expiry}".`);
+  }
+  if (expiry <= today) {
+    // An expiry of today or earlier is an acceptance that is already over — it
+    // would move straight to `expired_review` on the next run, and the only
+    // lasting effect would be one domain-day marked usable in between.
+    throw new OperatorActionRefused(`An acceptance must run past today (${today}); ${expiry} does not.`);
+  }
+  if (expiry > latest) {
+    throw new OperatorActionRefused(
+      `An acceptance may run at most ${MAX_ACCEPTANCE_DAYS} days (to ${latest}); ${expiry} is later. ` +
+        'Longer than that is not a decision to tolerate a finding, it is a decision to stop looking at it.'
+    );
+  }
 
   db.prepare(
     `UPDATE qa_exception SET state = 'accepted', accepted_at = ?, accepted_note = ?, accepted_until = ?
@@ -154,7 +222,7 @@ export function accept(
  * by its own escape valve. It blocks promotion instead, and gets its own section
  * in every email until the operator rules.
  */
-export function expireAcceptances(db: SqliteLike, host: CollectorHost, today: string): number {
+export function expireAcceptances(db: SqliteLike, host: OperatorHost, today: string): number {
   const due = db
     .prepare(
       `SELECT exception_id, severity, still_firing FROM qa_exception
@@ -188,7 +256,7 @@ export function expireAcceptances(db: SqliteLike, host: CollectorHost, today: st
  */
 export function recordTickerReuse(
   db: SqliteLike,
-  host: CollectorHost,
+  host: OperatorHost,
   args: {
     readonly exceptionId: number;
     readonly ticker: string;
@@ -292,7 +360,7 @@ function inferSpliceDate(db: SqliteLike, ticker: string): string | undefined {
   return date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : undefined;
 }
 
-function recomputeAffected(db: SqliteLike, host: CollectorHost, exceptionId: number): void {
+function recomputeAffected(db: SqliteLike, host: OperatorHost, exceptionId: number): void {
   const row = db
     .prepare('SELECT affects_trading_dates_json FROM qa_exception WHERE exception_id = ?')
     .get(exceptionId) as { affects_trading_dates_json: string } | undefined;

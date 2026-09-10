@@ -79,6 +79,17 @@ export interface CollectorHost {
   readonly hostApp: { readonly name: string; readonly version: string };
 }
 
+/**
+ * The part of a host an OPERATOR action needs: a clock and an identity.
+ *
+ * The exception actions, the job queue and a reset are driven from the new
+ * exe's workbench (05 §5, §7), which holds no provider transport, no archive
+ * encryption and no batch progress channel — and should not have to fake them
+ * to acknowledge an exception. A full `CollectorHost` still satisfies this, so
+ * the collector's own callers are unchanged.
+ */
+export type OperatorHost = Pick<CollectorHost, 'nowET' | 'hostApp'>;
+
 /** Thrown when the host's abort signal fires. Distinguished so a cancelled run is recorded as `cancelled`, not `failed`. */
 export class CollectorCancelled extends Error {
   constructor(phase: string) {

@@ -320,3 +320,84 @@ tr.is-gap td.gap-reason { color: var(--muted); font-style: italic; }
 /* A rejected candidate is dimmed, never hidden — it is the comparison. */
 tr.is-rejected td { color: var(--muted); }
 tr.is-selected td { background: var(--bg-raised); }
+
+/* ── operator surface: Exceptions, Runs, Jobs (B9a) ───────────────────────── */
+
+h3 { font-size: 13px; font-weight: 600; margin: 16px 0 6px; }
+.grid tr.clickable { cursor: pointer; }
+.table-scroll.short { max-height: 42vh; }
+
+.filters { align-items: center; display: flex; flex-wrap: wrap; gap: 14px; margin: 8px 0 12px; }
+.filters label { align-items: center; color: var(--muted); display: flex; font-size: 11px; gap: 6px; }
+.filters select, .bulk input,
+.action input, .action select, .action textarea,
+.reset-form input, .reset-form textarea {
+  background: var(--bg-raised); border: 1px solid var(--line); border-radius: 3px;
+  color: var(--fg); font: inherit; font-size: 12px; padding: 4px 6px;
+}
+.action textarea, .reset-form textarea { resize: vertical; }
+
+.counts { color: var(--muted); display: flex; flex-wrap: wrap; font-size: 12px; gap: 18px; margin-bottom: 8px; }
+.counts strong { color: var(--fg); }
+.counts .bad strong, .counts .bad { color: var(--red); }
+.bad { color: var(--red); }
+
+.bulk { align-items: center; background: var(--bg-panel); border: 1px solid var(--line); display: flex; gap: 10px; margin-bottom: 10px; padding: 8px 10px; }
+.bulk .hint { color: var(--muted); font-size: 11px; }
+
+.sev-blocking { color: var(--red); }
+.sev-warning { color: var(--accent); }
+.sev-info { color: var(--muted); }
+.escalated { color: var(--red); font-size: 10px; margin-left: 4px; }
+.not-seen { color: var(--muted); font-style: italic; }
+
+.notice { background: var(--bg-panel); border-left: 3px solid var(--line); margin: 10px 0; padding: 8px 12px; }
+.notice-ok { border-left-color: var(--green); }
+.notice-refused { border-left-color: var(--red); }
+.notice-info { border-left-color: var(--blue); }
+.notice-close { margin-left: 12px; }
+
+.detail { margin-top: 18px; }
+.detail h2 { margin-bottom: 8px; }
+.detail pre, .job-result {
+  background: var(--bg-raised); border: 1px solid var(--line); font-family: Consolas, monospace;
+  font-size: 11px; margin: 0; max-height: 260px; overflow: auto; padding: 8px 10px; white-space: pre;
+}
+.day-list { display: flex; flex-wrap: wrap; gap: 6px 18px; list-style: none; margin: 0; padding: 0; }
+
+.actions { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); margin: 14px 0; }
+.action { background: var(--bg-raised); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; }
+.action h3 { margin: 0; }
+.action-danger { border-color: #6b2a2a; }
+.hint { color: var(--muted); font-size: 11px; margin: 0; }
+.confirm-row { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; }
+
+.btn {
+  align-self: flex-start; background: var(--bg-raised); border: 1px solid var(--line); border-radius: 3px;
+  color: var(--fg); cursor: pointer; font: inherit; font-size: 12px; padding: 4px 12px;
+}
+.btn:hover:not(:disabled) { border-color: var(--accent-dim); }
+.btn:disabled { cursor: default; opacity: 0.45; }
+.btn-danger { border-color: #6b2a2a; color: var(--red); }
+
+.job-cards { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); margin: 14px 0 24px; }
+.job-card { background: var(--bg-panel); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; }
+.job-card.is-unavailable { opacity: 0.6; }
+.job-card h3 { margin: 0; }
+.job-card p { margin: 0; }
+
+.state-tag { font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase; }
+.state-queued { color: var(--accent); }
+.state-claimed, .state-running { color: var(--blue); }
+.state-complete { color: var(--green); }
+.state-failed { color: var(--red); }
+.state-cancelled { color: var(--muted); }
+.stalled { color: var(--red); }
+.verdict-green { color: var(--green); }
+.verdict-amber { color: var(--accent); }
+.verdict-red { color: var(--red); }
+
+.reset { background: rgba(120, 40, 40, 0.07); border: 1px solid #6b2a2a; margin-top: 28px; padding: 14px 16px; }
+.reset ul { margin: 4px 0 8px; padding-left: 18px; }
+.reset-form { display: grid; gap: 8px; margin-top: 10px; max-width: 580px; }
+.blocker { color: var(--red); }

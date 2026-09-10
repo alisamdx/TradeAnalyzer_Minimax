@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { SqliteLike } from '../db/sqlite-like.js';
-import type { CollectorHost } from '../collector/host.js';
+import type { CollectorHost, OperatorHost } from '../collector/host.js';
 import {
   primaryThreshold,
   summarise,
@@ -420,7 +420,7 @@ function reconcileStoppedFiring(
  */
 export function recomputeDomainDayStatus(
   db: SqliteLike,
-  host: CollectorHost,
+  host: OperatorHost,
   runId: number | null,
   tradingDate: string
 ): void {

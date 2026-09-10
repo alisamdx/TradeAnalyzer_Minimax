@@ -3,6 +3,8 @@
  * TS2717 quirk came from redeclaring the bridge per file (CLAUDE.md).
  */
 
+import type { DeepLinkRoute, QueueableKind } from './deeplink.js';
+
 export type Layer = 'meta' | 'ref' | 'raw' | 'ext' | 'derived' | 'legacy' | 'qa';
 
 /** Every IPC method returns this. A failure is data, never a thrown string. */
@@ -17,6 +19,9 @@ export interface GenerationInfoDto {
   readonly dataRoot: string;
   readonly dictionaryVersion: number;
   readonly createdNow: boolean;
+  /** The generation a reset replaced; null for a first generation. */
+  readonly predecessorNo: number | null;
+  readonly resetReason: string | null;
 }
 
 export interface TableMeta {
@@ -325,12 +330,267 @@ export interface LegacySummaryDto {
   readonly imported: LegacyCountsDto;
 }
 
-/** The surface exposed on `window.api`. 05 §9 specifies the full set; this is B7a's. */
+/**
+ * The operator surface — B9a (05 §5, §7).
+ *
+ * Same rule as every other view: the field names are the UI's vocabulary, not
+ * the columns'. `runsInARow` rather than `consecutive_runs`, `stillSeen` rather
+ * than `still_firing`, `resolvedHow` rather than `resolution_kind` — each of
+ * those column names is inside AC-13's scan, and a rename costs nothing while an
+ * exemption costs the rule its meaning.
+ */
+export type ExceptionStateFilterDto =
+  | 'active' | 'all' | 'open' | 'acknowledged' | 'expired_review' | 'accepted' | 'resolved';
+
+export interface ExceptionFilterDto {
+  readonly state?: ExceptionStateFilterDto;
+  readonly severity?: string | null;
+  readonly checkId?: string | null;
+  readonly domain?: string | null;
+  /** The status email's link: exceptions the run saw. */
+  readonly runId?: number | null;
+}
+
+export interface ExceptionRowDto {
+  readonly id: number;
+  readonly checkId: string;
+  readonly domain: string;
+  readonly key: string;
+  readonly severity: string;
+  /** Current severity differs from where it started — it recurred its way up. */
+  readonly escalated: boolean;
+  readonly state: string;
+  readonly detail: string;
+  readonly firstSeenRun: number;
+  readonly lastSeenRun: number;
+  readonly firstSeenAt: string | null;
+  readonly lastSeenAt: string | null;
+  readonly runsInARow: number;
+  /** Fired on the most recent run. False while still open is "no longer observed, unresolved". */
+  readonly stillSeen: boolean;
+  readonly daysAffected: number;
+  readonly acceptedUntil: string | null;
+}
+
+export interface ExceptionListDto {
+  readonly rows: readonly ExceptionRowDto[];
+  /** The list stops at 2,000 rows; true means there are more than shown. */
+  readonly truncated: boolean;
+  readonly checks: readonly string[];
+  readonly domains: readonly string[];
+  readonly counts: {
+    readonly open: number;
+    readonly acknowledged: number;
+    readonly expiredReview: number;
+    readonly blockingActive: number;
+  };
+}
+
+export interface ExceptionEventDto {
+  readonly at: string;
+  readonly actor: string;
+  readonly fromState: string | null;
+  readonly toState: string;
+  readonly note: string | null;
+}
+
+export interface ExceptionDetailDto {
+  readonly row: ExceptionRowDto;
+  /** Pretty-printed JSON, expected against actual. */
+  readonly evidence: string;
+  readonly remediations: string;
+  readonly events: readonly ExceptionEventDto[];
+  /** Each domain-day this finding touches, with its usability right now. */
+  readonly affected: readonly { readonly date: string; readonly usability: string | null }[];
+  readonly check: {
+    readonly description: string;
+    readonly thresholds: string;
+    readonly evaluatedTotal: number;
+    readonly firedTotal: number;
+    readonly lastFiredAt: string | null;
+  } | null;
+  readonly resolvedAt: string | null;
+  readonly resolvedHow: string | null;
+  readonly resolvedNote: string | null;
+  readonly acceptedAt: string | null;
+  readonly acceptedNote: string | null;
+  /** Present when the finding is a discontinuity a ticker-reuse ruling can answer (03 §6). */
+  readonly reuseCandidate: { readonly ticker: string; readonly spliceDate: string | null } | null;
+}
+
+export type ResolutionHowDto = 'data_corrected' | 'provider_fixed' | 'rule_changed' | 'false_positive';
+
+export interface BulkAckResultDto {
+  readonly acknowledged: readonly number[];
+  readonly skipped: readonly { readonly exceptionId: number; readonly why: string }[];
+}
+
+export interface ZeroFireDto {
+  readonly checkId: string;
+  readonly domain: string;
+  readonly severity: string;
+  readonly description: string;
+  readonly evaluatedTotal: number;
+}
+
+export interface RunRowDto {
+  readonly runId: number;
+  readonly kind: string;
+  readonly date: string;
+  readonly startedAt: string;
+  readonly finishedAt: string | null;
+  readonly outcome: string;
+  /**
+   * The gate's call when the run FINISHED. Never updated — usability now is per
+   * domain-day. Named `gate`, not `verdict`: that is a dictionary column, and
+   * AC-13 caught it in three views at once.
+   */
+  readonly gate: string | null;
+  readonly host: string;
+  readonly collector: string;
+  readonly responses: number;
+  readonly failedParses: number;
+  readonly bytes: number;
+}
+
+export interface RunCallGroupDto {
+  readonly provider: string;
+  /** The archive slug — what was asked for. */
+  readonly call: string;
+  readonly count: number;
+  readonly failedParses: number;
+  /** No 2xx: a non-2xx status or no response at all. */
+  readonly notOk: number;
+  /** Responses the size of a known provider cap — evidence of truncation (P8). */
+  readonly atCap: number;
+  readonly bytes: number;
+}
+
+export interface RunDomainDto {
+  readonly name: string;
+  readonly expected: number | null;
+  readonly stored: number | null;
+  readonly usability: string | null;
+}
+
+export interface RunCheckDto {
+  readonly checkId: string;
+  readonly evaluated: number;
+  readonly fired: number;
+  readonly durationMs: number;
+  /** One line: n, p50, p99, max, threshold, near-boundary count. Null for a predicate check. */
+  readonly distribution: string | null;
+}
+
+export interface RunDetailDto {
+  readonly run: RunRowDto;
+  readonly calls: readonly RunCallGroupDto[];
+  readonly report: {
+    readonly gate: string;
+    readonly emailStatus: string;
+    readonly emailError: string | null;
+    readonly emailSentAt: string | null;
+    readonly domains: readonly RunDomainDto[];
+  } | null;
+  readonly checks: readonly RunCheckDto[];
+  readonly exceptionsRaised: number;
+  readonly exceptionsSeen: number;
+  /** The Jobs request that started this run, when it was a one-shot. */
+  readonly requestId: number | null;
+}
+
+export interface JobRequestDto {
+  readonly id: number;
+  readonly kind: string;
+  readonly queuedAt: string;
+  readonly queuedBy: string;
+  readonly state: string;
+  readonly claimedAt: string | null;
+  readonly claimedBy: string | null;
+  readonly finishedAt: string | null;
+  readonly runId: number | null;
+  /** Minutes spent queued so far; null once a host has it. */
+  readonly waitingMinutes: number | null;
+  readonly stalled: boolean;
+  readonly error: string | null;
+  /** The job's own report, pretty-printed. */
+  readonly result: string | null;
+  readonly gate: string | null;
+  readonly runOutcome: string | null;
+}
+
+export interface JobCardDto {
+  readonly kind: string;
+  readonly title: string;
+  readonly what: string;
+  /** Which provider, and roughly how many calls — the single confirm of 05 §7. */
+  readonly cost: string;
+  readonly queueable: boolean;
+  /** Why the job cannot be queued yet, when it cannot. */
+  readonly notYet: string | null;
+  readonly last: JobRequestDto | null;
+}
+
+export interface JobsDto {
+  readonly cards: readonly JobCardDto[];
+  readonly requests: readonly JobRequestDto[];
+  readonly stallMinutes: number;
+}
+
+export interface ResetPreviewDto {
+  readonly generationNo: number;
+  readonly status: string;
+  readonly openedAt: string;
+  readonly dataDays: number;
+  readonly blockers: readonly string[];
+  readonly presumedDead: readonly string[];
+  readonly queuedToWithdraw: number;
+  /** The exact text the operator must type. */
+  readonly confirmation: string;
+  readonly successorDir: string;
+}
+
+export interface ResetResultDto {
+  readonly predecessorNo: number;
+  readonly successorNo: number;
+  readonly withdrawn: number;
+  readonly queued: readonly { readonly kind: string; readonly requestId: number }[];
+}
+
+/** The surface exposed on `window.api`. 05 §9 specifies the full set; this is B9a's. */
 export interface NextApi {
   readonly appVersion: string | null;
   readonly platform: string;
   readonly generation: {
     current(): Promise<IpcResult<GenerationInfoDto>>;
+  };
+  readonly exceptions: {
+    list(filter: ExceptionFilterDto): Promise<IpcResult<ExceptionListDto>>;
+    detail(id: number): Promise<IpcResult<ExceptionDetailDto>>;
+    acknowledge(id: number, note: string | null): Promise<IpcResult<void>>;
+    bulkAcknowledge(ids: readonly number[], note: string | null): Promise<IpcResult<BulkAckResultDto>>;
+    resolve(id: number, how: ResolutionHowDto, note: string): Promise<IpcResult<void>>;
+    /** Returns the expiry actually recorded. */
+    accept(id: number, note: string, until: string | null): Promise<IpcResult<string>>;
+    recordReuse(id: number, ticker: string, spliceDate: string | null, note: string): Promise<IpcResult<string>>;
+    zeroFire(): Promise<IpcResult<readonly ZeroFireDto[]>>;
+  };
+  readonly runs: {
+    list(): Promise<IpcResult<readonly RunRowDto[]>>;
+    detail(runId: number): Promise<IpcResult<RunDetailDto>>;
+  };
+  /** Queues and reset. Nothing here executes a provider job — the old app does (Q4). */
+  readonly jobs: {
+    overview(): Promise<IpcResult<JobsDto>>;
+    queue(kind: QueueableKind): Promise<IpcResult<number>>;
+    cancel(requestId: number): Promise<IpcResult<boolean>>;
+    resetPreview(): Promise<IpcResult<ResetPreviewDto>>;
+    reset(reason: string, confirmation: string): Promise<IpcResult<ResetResultDto>>;
+  };
+  /** Navigation only — a link can never act (05 §11.1). */
+  readonly deepLinks: {
+    initial(): Promise<IpcResult<DeepLinkRoute | null>>;
+    onNavigate(listener: (route: DeepLinkRoute) => void): () => void;
   };
   readonly dictionary: {
     tables(): Promise<IpcResult<readonly TableMeta[]>>;

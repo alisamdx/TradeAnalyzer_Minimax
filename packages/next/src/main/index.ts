@@ -4,13 +4,15 @@ import { existsSync } from 'node:fs';
 import { COLLECTOR_VERSION, DICTIONARY_VERSION } from '@tradeanalyzer/core';
 import { closeGeneration, openGeneration } from './generation.js';
 import { registerIpc } from './ipc.js';
+import { attachWindow, captureStartupLink, handleSecondInstance } from './deeplinks.js';
+import { DEEP_LINK_SCHEME } from '../shared/deeplink.js';
 
 /**
  * TradeAnalyzer 2 — main process.
  *
- * At B1 this is the shell only: a window, a preload bridge and the userData
- * separation. Generation open/close, the worker thread, the job runner and the
- * deep-link handler arrive with B2 onward (06 §3).
+ * The shell: a window, a preload bridge, the userData separation, the
+ * generation open, and — from B9a — the single-instance lock that carries
+ * `tradeanalyzer-next://` links (05 §11.1).
  */
 
 // 06 §3: userData is `trade-analyzer-next`, deliberately NOT the productName
@@ -52,6 +54,7 @@ function createWindow(): void {
       nodeIntegration: false
     }
   });
+  attachWindow(window);
 
   window.on('ready-to-show', () => {
     // Maximized on open, matching the existing app. `maximize()` rather than
@@ -110,36 +113,64 @@ function reportFatalStartup(err: unknown): void {
   app.exit(1);
 }
 
-app.whenReady().then(() => {
-  console.log(
-    `[next] TradeAnalyzer 2 v${app.getVersion()} — core ${COLLECTOR_VERSION}, dictionary ${DICTIONARY_VERSION}`
-  );
+/**
+ * One instance, because on Windows that is how a link arrives (05 §11.1).
+ *
+ * A clicked `tradeanalyzer-next://` link starts a SECOND copy of the exe with
+ * the URL in its arguments. The lock makes that copy exit immediately and
+ * hands its arguments to this one through `second-instance`, which navigates
+ * the window that is already open. Without the lock every click would open
+ * another full application on the same generation.
+ *
+ * `exit(0)` rather than `quit()` for the loser, for the reason in
+ * `reportFatalStartup`: it has no window, so nothing cooperative would ever
+ * finish shutting it down.
+ */
+const isPrimary = app.requestSingleInstanceLock();
+if (!isPrimary) {
+  app.exit(0);
+} else {
+  app.on('second-instance', (_event, argv) => handleSecondInstance(argv));
+  captureStartupLink(process.argv);
 
-  // The generation is opened before the window, so a failure here is a startup
-  // error the operator sees rather than an empty UI that looks like no data.
-  const generation = openGeneration();
-  console.log(
-    `[next] generation ${generation.generationNo} (${generation.status})` +
-      `${generation.createdNow ? ' — created' : ''} at ${generation.dbPath}`
-  );
+  // Registered from the PACKAGED exe only. In dev the registration would have to
+  // point at `electron.exe` plus this project's path — and it would overwrite
+  // the packaged exe's own registration in the user's registry, so every link
+  // in the status email would start opening a dev server instead of the
+  // installed app. Dev can still be driven by passing a link as an argument.
+  if (app.isPackaged) app.setAsDefaultProtocolClient(DEEP_LINK_SCHEME);
 
-  registerIpc();
-  createWindow();
+  app.whenReady().then(() => {
+    console.log(
+      `[next] TradeAnalyzer 2 v${app.getVersion()} — core ${COLLECTOR_VERSION}, dictionary ${DICTIONARY_VERSION}`
+    );
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    // The generation is opened before the window, so a failure here is a startup
+    // error the operator sees rather than an empty UI that looks like no data.
+    const generation = openGeneration();
+    console.log(
+      `[next] generation ${generation.generationNo} (${generation.status})` +
+        `${generation.createdNow ? ' — created' : ''} at ${generation.dbPath}`
+    );
+
+    registerIpc();
+    createWindow();
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
+  }).catch(reportFatalStartup);
+
+  // A rejection anywhere else in the main process gets the same treatment, for the
+  // same reason: the danger is not the error, it is surviving it silently.
+  process.on('unhandledRejection', reportFatalStartup);
+  process.on('uncaughtException', reportFatalStartup);
+
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') app.quit();
   });
-}).catch(reportFatalStartup);
 
-// A rejection anywhere else in the main process gets the same treatment, for the
-// same reason: the danger is not the error, it is surviving it silently.
-process.on('unhandledRejection', reportFatalStartup);
-process.on('uncaughtException', reportFatalStartup);
-
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
-});
-
-app.on('will-quit', () => {
-  closeGeneration();
-});
+  app.on('will-quit', () => {
+    closeGeneration();
+  });
+}

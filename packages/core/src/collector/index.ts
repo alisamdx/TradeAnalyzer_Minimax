@@ -2,7 +2,7 @@
  * The collector — 04. A library with no Electron, no scheduler and no network
  * client of its own; everything environmental arrives through `CollectorHost`.
  */
-export type { CollectorHost, ProviderResponse, ProviderName } from './host.js';
+export type { CollectorHost, OperatorHost, ProviderResponse, ProviderName } from './host.js';
 export { CollectorCancelled, throwIfCancelled } from './host.js';
 
 export {
@@ -28,10 +28,18 @@ export {
   claimNextJob,
   markJobRunning,
   finishJob,
+  cancelJob,
   stalledRequests,
   STALL_THRESHOLD_MINUTES
 } from './jobs.js';
 export type { JobRequest, OneShotKind } from './jobs.js';
+
+// Reset (B9a, 04 §7.6). Executed by the new exe, which owns generation creation.
+export {
+  performReset, resetPreview, validateResetRequest, resetConfirmationText,
+  RESET_FOLLOW_UPS, IN_FLIGHT_HOURS
+} from './reset.js';
+export type { ResetArgs, ResetPreview, ResetReport } from './reset.js';
 
 export { runPreflight, isTradingDay } from './phases/preflight.js';
 export {

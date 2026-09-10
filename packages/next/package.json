@@ -1,6 +1,6 @@
 {
   "name": "@tradeanalyzer/next",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "private": true,
   "description": "TradeAnalyzer 2 — the data-first inspector exe for the rebuild.",
   "main": "out/main/index.js",

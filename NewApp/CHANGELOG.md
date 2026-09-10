@@ -9,6 +9,112 @@ exit (06 §6).
 
 ---
 
+## B9a — the operator surface, and three drafted claims that did not survive the build (2026-09-10)
+
+`core` 0.3.9, `next` 0.2.0. The existing app is unchanged. **B9 is split**: B9a
+(this) is the Exceptions workbench, the Runs view, the Jobs view, reset and the
+deep links — gate AC-14, met. B9b is replay (AC-4), which turned out to need a
+change to capture before it can be built at all.
+
+### Replay could not have worked as 04 §7.5 describes it
+
+The section iterates "`MANIFEST.json` + per-file line order". **Nothing writes a
+MANIFEST** — the index is `meta_response` and nothing else.
+
+The larger gap: an archive line holds a response's bytes and params, but **not
+the arguments its ingest module was built with**. The expiration parser needs the
+rule's selection, the chain parser the sticky set, the order and transaction
+parsers the fingerprints and ids already stored — which is database state — the
+earnings parser its ticker filter, and the account parsers the raw account key,
+which the archive deliberately holds only masked. Replaying today's archive
+would mean reconstructing all of that, and **a reconstructed replay that reports
+"equal" is a check that cannot fail on the case it exists for** — the conviction
+band again, one level up. Decided: B9b records the arguments at capture
+(`meta_response.ingest_args_json`, nullable, additive) and replays only responses
+that carry them; older ones are reported as not replayable, never guessed. The
+account key needs its own answer and is recorded as open.
+
+### Reset executes in the new exe, not the old app
+
+04 §7.6 had the old app execute reset. It was the older of two rules that
+disagree: since 2026-09-07 **generation creation belongs to the new exe alone**,
+and `ElectronCollectorHost` refuses to create a database because the one time it
+did, it manufactured a generation with no `meta_generation` row. Reset also calls
+no provider, which was Q4's only reason to route jobs through the old app.
+
+`performReset` in `core` owns the order and the refusals; the app supplies two
+callbacks (open the successor, move the pointer). **The pointer is the commit
+point**: the successor is complete — schema, predecessor, reason, the two
+follow-up jobs queued — before anything points at it, and the old generation is
+closed only after. A crash before the pointer moves changes nothing either app
+can see; a crash after it leaves the old one reading `pilot` while nothing writes
+to it. Closing first would have left the reverse — a `closed` generation still
+being written. Tested both ways, plus the successor-without-a-row case.
+
+A run marked `running` blocks a reset **only within six hours** of starting. A
+host that dies mid-run leaves its row `running` forever, and the operator cannot
+edit `meta_run`, so a literal reading would let one crash veto every reset after
+it. Older rows are listed as presumed dead — visible, not a veto.
+
+### The Jobs view says what the spec's spinner would have hidden
+
+05 §7 assumes the old app claims a queued request within ~2 minutes. That loop
+was removed in v1.1.206, so **nothing claims a request on its own**; it waits for
+the operator to run *Collector one-shot jobs* in the old app's Batch view. The
+view says so in a banner, on the confirmation and on every waiting row. A second
+request for a kind that already has one pending is refused (a double click would
+otherwise queue two backfills), and cancel is the same conditional UPDATE as the
+claim, so the two cannot both win.
+
+### The workbench
+
+Every button is one call to the `core` function `scripts/exception.mjs` has used
+since B5, so the refusals — resolving while still firing, a missing note — are
+`core`'s and the workbench shows them as the answer. Two fixes in `core` came out
+of wiring it:
+
+- **The 180-day ceiling on an acceptance was specified for the form only** (05
+  §5). A limit enforced by the form is enforced only for callers who use the
+  form — the conviction bands' AI-review path is the precedent — so it is in
+  `accept()` now, along with a refusal of any expiry that is today or earlier.
+- **An acceptance taken in the evening ran a day longer.** The default expiry
+  added 30 days to the instant and serialised it with `toISOString()`, so after
+  20:00 ET it landed on the next UTC date. Regression test at 21:30 ET.
+
+Bulk acknowledge exists; bulk resolve and bulk accept deliberately do not, and a
+test asserts their absence. The zero-fire list is read-only until B10, where the
+keep/fix/drop ruling belongs.
+
+The operator actions now take an `OperatorHost` — a clock and a name — rather
+than a full `CollectorHost`, so the workbench does not fake provider transports
+to acknowledge an exception.
+
+### Deep links
+
+The status email's `tradeanalyzer-next://exceptions?run=…` link has been
+unhandled since B4. It now works: single-instance lock, `second-instance`
+delivery, a pending route for a link that launched the app. The scheme is
+registered **from the packaged exe only** — registering from dev would overwrite
+the packaged registration and send every emailed link to a dev server. The
+route type has no way to express an action, and a test pins the grammar to the
+link `core` actually writes.
+
+### AC-13, once more
+
+`verdict` is a dictionary column, and the new DTOs used it in three views. It is
+now `gate` (the run's green/amber/red) and `usability` (a domain-day). Six
+renames across the build, zero exemptions.
+
+### Deferred, and to where
+
+Pin-for-study (05 §4.2), saved questions (05 §11.2) and closed generations in a
+read-only second window (05 §8) move to B9b. AC-14's "previous generation
+readable" is asserted by reopening the closed file with a fresh connection.
+
+`397` tests in `core` (+16), `47` in `next` (+18).
+
+---
+
 ## B8 COMPLETE — the import, and a re-run guarantee that was not there (2026-09-09)
 
 `core` 0.3.8, `next` 0.1.4, existing app v1.1.218. **The gate is met**: a full

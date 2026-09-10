@@ -16,8 +16,8 @@ export {
 } from './registry.js';
 export { bsDelta, normCdf } from './black-scholes.js';
 export {
-  acknowledge, resolve, accept, expireAcceptances, recordTickerReuse, reviewQueue,
-  OperatorActionRefused, DEFAULT_ACCEPTANCE_DAYS
+  acknowledge, bulkAcknowledge, resolve, accept, expireAcceptances, recordTickerReuse, reviewQueue,
+  OperatorActionRefused, DEFAULT_ACCEPTANCE_DAYS, MAX_ACCEPTANCE_DAYS
 } from './operator.js';
 export type { ResolutionKind } from './operator.js';
 

@@ -9,10 +9,12 @@
  *   node packages/core/scripts/exception.mjs resolve <id> <kind> <note>
  *   node packages/core/scripts/exception.mjs reuse <id> <ticker> [spliceDate] <note>
  *
- * DEV ONLY, and temporary. The Exceptions workbench (05 §5) is B9; B5's gate
- * needs the operator to rule on ticker-reuse candidates now. It calls the same
- * `core` functions the workbench will, so the UI later wires buttons to
- * behaviour that is already proven rather than being the first place it runs.
+ * DEV ONLY. Since B9a the Exceptions workbench in TradeAnalyzer 2 (05 §5) is
+ * the operator's tool for this; the script stays for scripted use. Both call
+ * the same `core` functions, so they can never disagree about what is
+ * permitted — the refusals live in `core`, not in either caller. Note that this
+ * script refuses to run while any application has the generation open (see
+ * `lib/generation-access.mjs`), which the workbench does not need to.
  *
  * `reuse` deletes nothing. It closes the membership range at the splice and
  * opens a new one, so a reader intersecting bars with membership sees one

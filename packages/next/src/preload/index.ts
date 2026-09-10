@@ -1,9 +1,10 @@
-import { contextBridge, ipcRenderer } from 'electron';
-import type { NextApi, QueryRequestDto } from '../shared/types.js';
+import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
+import type { DeepLinkRoute } from '../shared/deeplink.js';
+import type { ExceptionFilterDto, NextApi, QueryRequestDto, ResolutionHowDto } from '../shared/types.js';
 
 /**
  * The context-isolated bridge. 05 §9 specifies the full `window.api` surface;
- * this is what B6 needs.
+ * this is what B9a needs.
  *
  * The renderer gets named methods, never a general `invoke(channel, ...)`.
  * A generic passthrough would make the renderer able to reach any handler the
@@ -54,6 +55,44 @@ const api: NextApi = {
     summary: () => ipcRenderer.invoke('legacy:summary'),
     runs: () => ipcRenderer.invoke('legacy:runs'),
     candidates: (runId: string) => ipcRenderer.invoke('legacy:candidates', runId)
+  },
+  exceptions: {
+    list: (filter: ExceptionFilterDto) => ipcRenderer.invoke('exceptions:list', filter),
+    detail: (id: number) => ipcRenderer.invoke('exceptions:detail', id),
+    acknowledge: (id: number, note: string | null) => ipcRenderer.invoke('exceptions:acknowledge', id, note),
+    bulkAcknowledge: (ids: readonly number[], note: string | null) =>
+      ipcRenderer.invoke('exceptions:bulk-acknowledge', ids, note),
+    resolve: (id: number, how: ResolutionHowDto, note: string) =>
+      ipcRenderer.invoke('exceptions:resolve', id, how, note),
+    accept: (id: number, note: string, until: string | null) =>
+      ipcRenderer.invoke('exceptions:accept', id, note, until),
+    recordReuse: (id: number, ticker: string, spliceDate: string | null, note: string) =>
+      ipcRenderer.invoke('exceptions:record-reuse', id, ticker, spliceDate, note),
+    zeroFire: () => ipcRenderer.invoke('exceptions:zero-fire')
+  },
+  runs: {
+    list: () => ipcRenderer.invoke('runs:list'),
+    detail: (runId: number) => ipcRenderer.invoke('runs:detail', runId)
+  },
+  jobs: {
+    overview: () => ipcRenderer.invoke('jobs:overview'),
+    queue: (kind) => ipcRenderer.invoke('jobs:queue', kind),
+    cancel: (requestId: number) => ipcRenderer.invoke('jobs:cancel', requestId),
+    resetPreview: () => ipcRenderer.invoke('jobs:reset-preview'),
+    reset: (reason: string, confirmation: string) => ipcRenderer.invoke('jobs:reset', reason, confirmation)
+  },
+  deepLinks: {
+    initial: () => ipcRenderer.invoke('deeplink:initial'),
+    // A subscription, and the only push channel in the bridge. It carries a
+    // place to go and nothing else — the route type has no way to express an
+    // action (05 §11.1).
+    onNavigate: (listener: (route: DeepLinkRoute) => void) => {
+      const forward = (_event: IpcRendererEvent, route: DeepLinkRoute): void => listener(route);
+      ipcRenderer.on('deeplink:navigate', forward);
+      return () => {
+        ipcRenderer.removeListener('deeplink:navigate', forward);
+      };
+    }
   }
 };
 

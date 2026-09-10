@@ -52,7 +52,10 @@ import { etTimestamp } from '../dist/time.js';
 // applications — the ones that can actually destroy a generation — had none.
 // A copy in each caller is how `exception.mjs` came to have no guard at all.
 
-const KINDS = ['universe_seed', 'backfill_bars', 'bootstrap_iv', 'legacy_import', 'replay', 'reset'];
+// Not `reset`: since B9a TradeAnalyzer 2 performs it itself (04 §7.6), because
+// generation creation belongs to that application alone. A reset queued here
+// would sit until the old app claimed it and failed it as unimplemented.
+const KINDS = ['universe_seed', 'backfill_bars', 'bootstrap_iv', 'legacy_import', 'replay'];
 
 const kind = process.argv[2];
 const paramsArg = process.argv[3] ?? '{}';

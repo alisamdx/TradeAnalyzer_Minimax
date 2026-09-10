@@ -1,5 +1,5 @@
 import type { SqliteLike } from '../db/sqlite-like.js';
-import type { CollectorHost } from './host.js';
+import type { CollectorHost, OperatorHost } from './host.js';
 
 /**
  * The one-shot job queue — 04 §1.1, §7, and 02 §1's `meta_job_request`.
@@ -30,7 +30,7 @@ export interface JobRequest {
 /** Queues a request. The only way the new exe starts a job (05 §7). */
 export function queueJob(
   db: SqliteLike,
-  host: CollectorHost,
+  host: OperatorHost,
   kind: OneShotKind,
   params: Readonly<Record<string, unknown>> = {}
 ): number {
@@ -124,6 +124,25 @@ export function finishJob(
     outcome.state === 'failed' ? outcome.error : null,
     requestId
   );
+}
+
+/**
+ * Withdraws a request no host has claimed yet — 05 §7.
+ *
+ * Conditional on `state = 'queued'`, the same shape as the claim, so a cancel
+ * and a claim that race can never both win: one of the two UPDATEs changes a
+ * row and the other changes none. Returns whether this one won. A request that
+ * was already claimed is not cancelled here — it is running, and stopping it is
+ * the executing host's abort signal, not a row edit made behind its back.
+ */
+export function cancelJob(db: SqliteLike, host: OperatorHost, requestId: number): boolean {
+  const info = db
+    .prepare(
+      `UPDATE meta_job_request SET state = 'cancelled', finished_at = ?
+        WHERE request_id = ? AND state = 'queued'`
+    )
+    .run(host.nowET(), requestId);
+  return info.changes === 1;
 }
 
 /** Minutes a request may sit `queued` before the Jobs view calls it stalled (05 §7). */

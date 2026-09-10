@@ -165,8 +165,9 @@ describe('QC-907 — zero overlap is the MAXIMUM firing, not a pass', () => {
     ]);
 
     const dist = summarise(evals.flatMap((e) => (e.value === undefined ? [] : [e.value])), MIN_OVERLAP_DAYS);
-    expect(dist.n).toBe(2);
-    expect(dist.min).toBe(0);
+    // `summarise` returns null on no evaluations; `toMatchObject` fails loudly on
+    // a null where a property read would only have failed the typecheck.
+    expect(dist).toMatchObject({ n: 2, min: 0 });
   });
 
   it('is driven by the ticker list, not by the join', () => {

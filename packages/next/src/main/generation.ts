@@ -7,10 +7,13 @@ import {
   assertNotRedirected,
   DICTIONARY_VERSION,
   etTimestamp,
+  performReset,
   recordCloseHandle,
   recordOpenHandle,
+  type ResetReport,
   type SqliteLike
 } from '@tradeanalyzer/core';
+import { operatorHost } from './operator.js';
 
 /**
  * Opening a generation — 06 §3, §3.1.
@@ -29,6 +32,9 @@ export interface GenerationInfo {
   readonly dataRoot: string;
   readonly dictionaryVersion: number;
   readonly createdNow: boolean;
+  /** The generation a reset replaced, or null for a first generation. */
+  readonly predecessorNo: number | null;
+  readonly resetReason: string | null;
 }
 
 /**
@@ -86,18 +92,20 @@ export function generationDir(dataRoot: string, generationNo: number): string {
 let handle: { db: Database.Database; info: GenerationInfo } | undefined;
 
 /**
- * Opens the current generation, creating `gen-001` on first run.
+ * Creates or opens one generation's database, schema applied and self-described.
  *
- * The dictionary is applied on every open, not only on creation. It is additive
- * and idempotent, so re-applying costs nothing — and it means a generation can
- * never be running against a schema older than the code reading it, which is the
- * failure that would otherwise surface as a mysterious missing column.
+ * **The only place this application makes a SQLite handle on a generation**,
+ * shared by the startup open and by a reset's successor — so both go through
+ * the same redirect guard, the same pragmas and the same `meta_generation`
+ * row. A reset that opened its new generation by some second route would be
+ * the one path that forgot the guard, which is the shape of every
+ * dev-script incident in this project.
  */
-export function openGeneration(): GenerationInfo {
-  if (handle) return handle.info;
-
-  const pointer = readPointer() ?? { dataRoot: defaultDataRoot(), currentGeneration: 1 };
-  const dir = generationDir(pointer.dataRoot, pointer.currentGeneration);
+function openGenerationDb(
+  dataRoot: string,
+  generationNo: number
+): { db: Database.Database; dbPath: string; archivePath: string; createdNow: boolean } {
+  const dir = generationDir(dataRoot, generationNo);
   const dbPath = join(dir, 'data.sqlite');
   const archivePath = join(dir, 'archive');
   const createdNow = !existsSync(dbPath);
@@ -123,16 +131,41 @@ export function openGeneration(): GenerationInfo {
   // glance while being a day out every evening. This line WAS `toISOString()`,
   // and it put `2026-09-07 23:02 ET` into the forensic record of a corruption as
   // `2026-09-08T03:02:53Z`, next to a collector row that was correctly in ET.
-  const openedAt = etTimestamp();
   db.prepare(
     `INSERT INTO meta_generation (generation_no, opened_at, status, db_path, archive_path)
      VALUES (?, ?, 'pilot', ?, ?)
      ON CONFLICT(generation_no) DO NOTHING`
-  ).run(pointer.currentGeneration, openedAt, dbPath, archivePath);
+  ).run(generationNo, etTimestamp(), dbPath, archivePath);
+
+  return { db, dbPath, archivePath, createdNow };
+}
+
+/**
+ * Opens the current generation, creating `gen-001` on first run.
+ *
+ * The dictionary is applied on every open, not only on creation. It is additive
+ * and idempotent, so re-applying costs nothing — and it means a generation can
+ * never be running against a schema older than the code reading it, which is the
+ * failure that would otherwise surface as a mysterious missing column.
+ */
+export function openGeneration(): GenerationInfo {
+  if (handle) return handle.info;
+
+  const pointer = readPointer() ?? { dataRoot: defaultDataRoot(), currentGeneration: 1 };
+  const { db, dbPath, archivePath, createdNow } = openGenerationDb(pointer.dataRoot, pointer.currentGeneration);
 
   const row = db
-    .prepare('SELECT generation_no, opened_at, status FROM meta_generation WHERE generation_no = ?')
-    .get(pointer.currentGeneration) as { generation_no: number; opened_at: string; status: GenerationInfo['status'] };
+    .prepare(
+      `SELECT generation_no, opened_at, status, predecessor_no, reset_reason
+         FROM meta_generation WHERE generation_no = ?`
+    )
+    .get(pointer.currentGeneration) as {
+    generation_no: number;
+    opened_at: string;
+    status: GenerationInfo['status'];
+    predecessor_no: number | null;
+    reset_reason: string | null;
+  };
 
   // Says, inside the generation itself, which application saw which file. The
   // guard above prevents the split we understand; this is what makes any other
@@ -142,7 +175,7 @@ export function openGeneration(): GenerationInfo {
     appVersion: app.getVersion(),
     dbPath,
     dictionaryVersion: DICTIONARY_VERSION,
-    openedAt,
+    openedAt: etTimestamp(),
     processId: process.pid
   });
 
@@ -166,7 +199,9 @@ export function openGeneration(): GenerationInfo {
     archivePath,
     dataRoot: pointer.dataRoot,
     dictionaryVersion: DICTIONARY_VERSION,
-    createdNow
+    createdNow,
+    predecessorNo: row.predecessor_no,
+    resetReason: row.reset_reason
   };
   handle = { db, info };
   return info;
@@ -180,6 +215,69 @@ export function currentDb(): Database.Database {
 export function currentGeneration(): GenerationInfo {
   if (!handle) throw new Error('No generation is open.');
   return handle.info;
+}
+
+/**
+ * Resets the current generation — 04 §7.6, AC-14 — and reopens on the new one.
+ *
+ * `core`'s `performReset` owns the order and the refusals; this supplies the
+ * two file-shaped steps. **The successor must not already exist**: a leftover
+ * `gen-(N+1)` from an earlier reset that died before moving the pointer holds
+ * whatever that attempt wrote, and "resetting" into it would start the new
+ * generation with data nobody chose. The refusal names the path so the
+ * operator can look at it and decide.
+ *
+ * Executed here rather than queued to the old app: generation creation belongs
+ * to this application alone, and a reset calls no provider (see `core`'s
+ * `reset.ts` for the whole argument).
+ */
+export function resetCurrentGeneration(reason: string, confirmation: string): ResetReport {
+  if (!handle) throw new Error('No generation is open.');
+  const { db, info } = handle;
+
+  // A holder rather than a `let`: the assignment happens inside a callback,
+  // which control-flow analysis cannot see, so a plain variable would read as
+  // never assigned in the `finally`.
+  const successor: { db?: Database.Database } = {};
+
+  let report: ResetReport;
+  try {
+    report = performReset({
+      db: db as unknown as SqliteLike,
+      host: operatorHost(),
+      generationNo: info.generationNo,
+      reason,
+      confirmation,
+      openSuccessor: (no) => {
+        const target = join(generationDir(info.dataRoot, no), 'data.sqlite');
+        if (existsSync(target)) {
+          throw new Error(
+            `gen-${String(no).padStart(3, '0')} already exists at ${target}. A reset opens a generation ` +
+              'that holds nothing, and this one holds whatever an earlier attempt wrote — so it was not ' +
+              'touched. Look at it, then move it aside if it is not wanted.'
+          );
+        }
+        successor.db = openGenerationDb(info.dataRoot, no).db;
+        return successor.db as unknown as SqliteLike;
+      },
+      commitPointer: (no) => {
+        // The successor's rows are on disk before anything points at it.
+        if (successor.db) checkpoint(successor.db, 'reset successor');
+        writePointer({ dataRoot: info.dataRoot, currentGeneration: no });
+      }
+    });
+  } finally {
+    if (successor.db?.open) {
+      checkpoint(successor.db, 'reset successor close');
+      successor.db.close();
+    }
+  }
+
+  // Hand over: close the predecessor (stamping the close), then open through the
+  // pointer, which now names the successor. No restart (04 §7.6).
+  closeGeneration();
+  openGeneration();
+  return report;
 }
 
 /**
