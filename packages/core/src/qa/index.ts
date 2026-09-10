@@ -22,9 +22,9 @@ export {
 export type { ResolutionKind } from './operator.js';
 
 // B7b's bootstrap checks and their thresholds. `checksFor` is what callers
-// should use over `ALL_CHECKS`: the difference between them is exactly the set
-// of checks that would otherwise be vacuous.
-export { ALL_CHECKS, checksFor } from './registry.js';
+// should use over `ALL_CHECKS` (already exported above): the difference between
+// the two is exactly the set of checks that would otherwise be vacuous.
+export { checksFor } from './registry.js';
 export {
   ivBootstrapChecks, QC907_BOOTSTRAP_OVERLAP, QC908_BOOTSTRAP_DISAGREEMENT,
   MIN_OVERLAP_DAYS, MAX_MEDIAN_ABS_DIFF
