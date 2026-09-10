@@ -59,6 +59,57 @@ asked. **The eliminations that rest on recollection are the ones still standing.
 Downgraded from *reproduces every time* to *does not reproduce under a protocol
 where both applications are verified closed*. Not closed.
 
+### And then concurrency was eliminated by test (20:35)
+
+A third seed, run deliberately with **TA2 open and actively reading the Data
+view** throughout:
+
+```
+TradeAnalyzer 2  20:34:34 ──────────────────────────── 20:37:55
+TradeAnalyzer          20:35:05 ─── seed ─── 20:35:40
+```
+
+Fully nested, stated outright by the diagnostic from the recorded intervals —
+*two writers on one write-ahead log* — and `integrity_check: ok`, with the same
+1,092 / 1,083 / 1,587 / 6 and the same 2,347,008 bytes as the first clean run.
+
+**So the last suspect standing on recollection is now eliminated on
+measurement.** It was the live candidate at 20:20 and it is gone by 20:40, which
+is the whole argument for spending 35 seconds on an experiment instead of an
+evening on an inference.
+
+The checkpoint line under concurrency was identical — `walBytes=4157112 busy=0
+log=0 checkpointed=0` — so `wal_autocheckpoint` behaves the same with a second
+process on the file. (The `busy=1` predicted beforehand never had a chance to
+appear: with zero pending frames there is nothing to contend over, so that
+prediction was untestable as posed rather than wrong.)
+
+It also validated the v1.1.211 verdict fix in the field: the same line now reads
+**"had nothing to do — the WAL held no pending frames"** where one version
+earlier it said `applied`.
+
+### Where that leaves it: three clean seeds, no named cause
+
+Everything in the difference set between the 01:08 corrupt seed and the three
+clean ones is now either excluded or implausible as a btree-damage mechanism —
+the checkpoint (measured no-op), concurrency (measured clean), and otherwise a
+single-row `recordCloseHandle` write plus a nullable column added to
+`meta_open_handle`. **Nothing left in that set explains corrupting
+`meta_response`.**
+
+Which leaves intermittency genuinely on the table. Five corrupt then three clean
+is unlikely to be chance (~2% on a naive exact test) but the runs are not
+independent draws from one unchanged process — the operator's procedure changed
+too, and the baseline diagnostic that now precedes every seed did not exist
+before.
+
+**The operational consequence, and it is the useful one:** QC-001 catches this
+condition on every run. What failed last time was not detection — it was that 69
+consecutive reds went into an inbox nobody could act on, because the retry loop
+was generating them. With the collector jobs manual-only, a red gate is now seen.
+So the bug stays open, watched by a check that works, rather than blocking the
+build indefinitely.
+
 ---
 
 ## The checkpoint has to say when it worked, too (2026-09-09)
