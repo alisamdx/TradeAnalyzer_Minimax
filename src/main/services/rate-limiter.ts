@@ -1,6 +1,9 @@
 // Token-bucket rate limiter for the producer/consumer pipeline.
 // Implements §4.4.2: conservative client-side rate limiting.
-// Default: 100 req/min. User-configurable 10–500 req/min.
+// Default: 500 req/min (100 before v1.1.212). User-configurable 10–500 req/min.
+// The ceiling is enforced in the constructor and in `setRate`, so a spec that
+// plans a higher pace is planning something this class will silently clamp —
+// NewApp 04 §3 drafted 600/min and had to be corrected to 500 for exactly that.
 // see SPEC: §4.4.2
 
 export interface RateLimiterConfig {

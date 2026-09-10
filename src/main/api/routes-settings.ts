@@ -14,7 +14,7 @@ export function registerSettingsRoutes(app: FastifyInstance, svc: ApiServerServi
     try {
       const db = svc.db;
 
-      const rateLimitRpm = parseInt(getSettingValue(db, 'rateLimitRpm') ?? '100', 10);
+      const rateLimitRpm = parseInt(getSettingValue(db, 'rateLimitRpm') ?? '500', 10);
       const quoteCacheTtlSec = parseInt(getSettingValue(db, 'quoteCacheTtlSec') ?? String(TTL_SECONDS.QUOTE), 10);
       const fundamentalsCacheTtlSec = parseInt(getSettingValue(db, 'fundamentalsCacheTtlSec') ?? String(TTL_SECONDS.FUNDAMENTALS), 10);
       const optionsCacheTtlSec = parseInt(getSettingValue(db, 'optionsCacheTtlSec') ?? String(TTL_SECONDS.OPTIONS), 10);

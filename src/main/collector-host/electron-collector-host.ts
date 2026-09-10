@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import type { CollectorHost, ProviderResponse, SqliteLike } from '@tradeanalyzer/core';
 import { applyDictionary, assertNotRedirected, etTimestamp, recordCloseHandle, recordOpenHandle, DICTIONARY_VERSION } from '@tradeanalyzer/core';
 import { etradeGetRaw, renewAccessToken, type OAuthCredentials } from '../services/etrade-auth.js';
+import type { TokenBucketRateLimiter } from '../services/rate-limiter.js';
 import { logApiCall, logError } from '../services/logger.js';
 
 /**
@@ -78,6 +79,21 @@ export function generationExists(pointer: DataRootPointer): boolean {
 export interface ElectronCollectorHostOptions {
   readonly signal: AbortSignal;
   readonly onProgress: (phase: string, done: number, total: number, note?: string) => void;
+  /**
+   * **The application's single Polygon limiter — the instance, not a copy.**
+   *
+   * Polygon rate-limits per API key, and the collector shares this app's key, so
+   * two buckets would be two independent budgets spending one allowance. That is
+   * why Q4 chose to host the collector here in the first place: one token holder,
+   * one limiter (NewApp 01 §63, 04 §1.1).
+   *
+   * `polygonGet` bypassed it entirely from v1.1.196 to v1.1.211 — a direct
+   * `fetch`, against spec 06 §5 change #3 and CLAUDE.md's standing rule. It went
+   * unfixed on purpose while the generation corruption was open, because the
+   * limiter changes the collector's write pace and pace was an experimental
+   * variable.
+   */
+  readonly rateLimiter: TokenBucketRateLimiter;
   readonly getPolygonApiKey: () => string;
   readonly getEtradeCredentials: () => OAuthCredentials | null;
   readonly sendEmail: (msg: { subject: string; text: string; html: string }) => Promise<void>;
@@ -273,6 +289,13 @@ export class ElectronCollectorHost implements CollectorHost {
     for (const [k, v] of Object.entries(params)) {
       if (v !== undefined && v !== null) url.searchParams.set(k, String(v));
     }
+
+    // Acquired BEFORE the clock starts, deliberately: `responseLatencyMs` must
+    // measure Polygon, not how long we queued for a token. A wait folded into
+    // the latency figure would make the provider look slow exactly when the
+    // limiter is working hardest, and `logs/api/` is the first thing read when a
+    // provider path misbehaves.
+    await this.opts.rateLimiter.acquire(1);
 
     const requestedAt = new Date().toISOString();
     const started = Date.now();

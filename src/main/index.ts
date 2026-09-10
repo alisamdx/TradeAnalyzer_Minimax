@@ -343,7 +343,23 @@ app.whenReady().then(() => {
   registerScreenerIpc(screenerService, constituentsService, watchlistService, quoteCache, new FundamentalsCache(db), dataProvider, db, optionsProvider);
 
   // Phase 3 — rate limiter + job queue + analysis + validate-all.
-  const rateLimiter = new TokenBucketRateLimiter({ requestsPerMinute: 100 });
+  // **Seeded from the stored setting, not from the default.** `setRate` was only
+  // ever called from the settings *save* handler, so a configured rate lasted
+  // until the next restart and then silently reverted to 100 — the app ran at a
+  // rate the Settings screen did not show. Harmless while every caller was
+  // interactive; not harmless now that the NewApp collector shares this bucket
+  // (v1.1.212) and plans its run against a pace.
+  const storedRpm = (() => {
+    const row = db.prepare('SELECT value FROM settings WHERE key = ?').get('rateLimitRpm') as
+      | { value: string }
+      | undefined;
+    const parsed = row ? Number.parseInt(row.value, 10) : Number.NaN;
+    // A missing or unparseable row is the default, never a throw: the limiter is
+    // on the path of every provider call and must not be what stops the app
+    // booting.
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 500;
+  })();
+  const rateLimiter = new TokenBucketRateLimiter({ requestsPerMinute: storedRpm });
   const jobQueue = new JobQueue(db);
   const analysisService = new AnalysisService(db, dataProvider, rateLimiter, jobQueue, optionsProvider);
   const validateAllService = new ValidateAllService(db, dataProvider, rateLimiter, jobQueue, optionsProvider);
@@ -752,6 +768,7 @@ app.whenReady().then(() => {
     return new ElectronCollectorHost(pointer, {
       signal: opts.signal,
       onProgress: opts.onProgress,
+      rateLimiter,
       getPolygonApiKey: () => getApiKey(db),
       getEtradeCredentials: () => getEtradeCreds(),
       sendEmail: async (msg) => { await emailService.send(msg.subject, msg.html); },

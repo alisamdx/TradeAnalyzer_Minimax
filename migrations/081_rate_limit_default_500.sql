@@ -1,0 +1,22 @@
+-- 081 — the Polygon rate limit default moves 100 -> 500 (v1.1.212).
+--
+-- Why a migration and not just a new default: `settings` stores what was last
+-- saved, and a stored value wins over any default. So an install that has ever
+-- opened the Settings screen carries `rateLimitRpm = '100'` and would keep
+-- running at 100 no matter what the default says.
+--
+-- Why it is safe to rewrite: **100 was the old default**, so a stored 100 is
+-- indistinguishable from "never chosen" and carries no evidence of intent. Every
+-- other value — 50, 250, or anything typed — is left exactly as it is, because
+-- those could only have got there by somebody picking them.
+--
+-- Why it matters now: the NewApp collector shares this single bucket as of
+-- v1.1.212 (it bypassed the limiter entirely before that) and budgets its
+-- nightly run against a pace (NewApp 04 §3). At 100 rpm the Polygon phases take
+-- ~14 minutes instead of ~3, which fits the 19:15 ET deadline but spends the
+-- headroom that section is relying on.
+--
+-- To run at 100 deliberately, set it in Settings after this migration; the value
+-- now survives a restart, which it did not before (nothing applied the stored
+-- setting at startup — `setRate` was only ever called from the save handler).
+UPDATE settings SET value = '500' WHERE key = 'rateLimitRpm' AND value = '100';

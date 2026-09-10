@@ -154,3 +154,5 @@ Properties: every persisted ticker is marked complete, so a stopped run **resume
 | Constituents | 7 days (manual refresh) | `constituents` + `constituents_meta` |
 
 All TTLs, the rate limit, and batch size are configurable in Settings.
+
+**The Polygon rate limit is one token bucket for the whole process**, shared by every caller including the NewApp collector hosted here (Q4: one token holder, one limiter). It defaults to **500 rpm** and is clamped to 10–500. Two things about it were wrong until v1.1.212 and both are worth keeping in view: the collector's `polygonGet` bypassed it entirely with a bare `fetch`, and **nothing applied the stored setting at startup** — `setRate` was called only from the settings save handler, so every boot ran at the default whatever Settings displayed. The limiter is now seeded from the stored value, and migration 081 moves a stored `100` (the old default, so no evidence of intent) to 500 while leaving deliberately chosen values alone.

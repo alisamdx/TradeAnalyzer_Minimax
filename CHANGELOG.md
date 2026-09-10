@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.1.212] - 2026-09-09
+
+`@tradeanalyzer/core` 0.3.5, dictionary version **8** (unchanged). Migration **081**.
+
+### fix - `polygonGet` bypassed the rate limiter
+
+- `ElectronCollectorHost.polygonGet` made every Polygon call with a bare `fetch`, against spec 06 §5 change #3 and CLAUDE.md's standing rule. Deferred deliberately since v1.1.196 because the limiter changes the collector's write pace and pace was an experimental variable in the corruption investigation; three clean seeds later it is safe to move.
+- It now takes a token from **the application's own limiter instance** - the instance, not a copy. Polygon rate-limits per API key and the collector shares this app's key, so two buckets would be two budgets spending one allowance; avoiding that is *why* Q4 hosted the collector in this process. `acquire(1)` runs **before** the latency clock, so a queue wait is never reported as Polygon being slow.
+
+### fix - the stored rate limit never survived a restart
+
+- `rateLimiter.setRate()` was called from exactly one place, the settings *save* handler, and **nothing read `rateLimitRpm` at startup**. A configured rate applied until the next restart and then silently reverted to the default - the app ran at a rate its own Settings screen did not show, with no symptom. Harmless while every caller was a person clicking; not harmless once a nightly collection budgets itself against a pace.
+- The limiter is now constructed from the stored value, falling back when the row is missing or unparseable - never throwing, since it sits on the path of every provider call.
+
+### change - default Polygon rate 100 -> 500 rpm
+
+- `universe_seed` ~1,092 calls: ~11 min at 100, ~2.2 min at 500. Daily Polygon phases ~1,440 calls: ~14 min vs ~3 min. Both fit the 19:15 ET deadline; only one leaves the headroom NewApp 04 §3 relies on. 500 is the limiter's maximum and ~1/4 of the ~1,900 rpm the collector was measured sustaining unthrottled without a 429.
+- **Migration 081** moves a stored `rateLimitRpm` of `100` to `500`, safe *because 100 was the old default* so a stored 100 carries no evidence of intent; 50, 250 and any typed value are left alone. Settings gains a 500 preset.
+- **NewApp 04 §3's planned "600/min" was never expressible** - the limiter clamps to 500 in both the constructor and `setRate`, so it would have been silently reduced and the budget was planning against a rate the code cannot produce. Its "observed peak" was also measured on the *unthrottled* collector. §3 now says 500 and records why.
+- `1,251` tests.
+
 ## [1.1.211] - 2026-09-09
 
 `@tradeanalyzer/core` 0.3.5, dictionary version **8** (unchanged).

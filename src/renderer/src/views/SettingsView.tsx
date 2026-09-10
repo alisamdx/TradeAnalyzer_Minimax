@@ -11,10 +11,16 @@ interface DiagnosticCheck {
   message: string;
 }
 
+// 500 is the limiter's own maximum and the default as of v1.1.212. The NewApp
+// collector shares this bucket and plans its run against a pace (04 §3), so a
+// rate chosen for ad-hoc clicking now decides whether the nightly collection
+// fits its window. 500 is still ~1/4 of the ~1,900 rpm the collector was
+// measured sustaining without a single 429.
 const RATE_LIMIT_PRESETS = [
   { label: 'Conservative', rpm: 50, hint: '5 req/6s — safest for large batches' },
-  { label: 'Default', rpm: 100, hint: 'Default — leaves headroom for ad-hoc clicks' },
-  { label: 'Aggressive', rpm: 250, hint: '250 req/min — only if Polygons limits are confirmed raised' }
+  { label: 'Balanced', rpm: 100, hint: '100 req/min — the pre-v1.1.212 default' },
+  { label: 'Aggressive', rpm: 250, hint: '250 req/min — only if Polygons limits are confirmed raised' },
+  { label: 'Default', rpm: 500, hint: 'Default — the pace the NewApp collector budgets against (04 §3)' }
 ] as const;
 
 function CheckRow({ label, check }: { label: string; check: DiagnosticCheck }) {

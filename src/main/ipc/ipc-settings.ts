@@ -55,7 +55,7 @@ export interface AppSettings {
 
 const DEFAULT_SETTINGS: AppSettings = {
   polygonApiKey: '',
-  rateLimitRpm: 100,
+  rateLimitRpm: 500,
   quoteCacheTtlSec: TTL_SECONDS.QUOTE,
   fundamentalsCacheTtlSec: TTL_SECONDS.FUNDAMENTALS,
   optionsCacheTtlSec: TTL_SECONDS.OPTIONS,

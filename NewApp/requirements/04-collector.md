@@ -104,13 +104,17 @@ Measured pace from the existing app (2026-09-04) and the resulting stage-1 budge
 
 | Phase | Calls | Provider | Pace used for planning | Elapsed |
 |---|---|---|---|---|
-| 2 bars | ~1,089 | Polygon | 600/min (⅓ of observed peak, leaves room for the old app) | ~2 min |
+| 2 bars | ~1,089 | Polygon | **500/min** (the limiter's maximum — see below) | ~2.2 min |
 | 3, 4, 8 misc | ~350 | mixed | — | ~5 min |
 | 5 account | 5 (list, portfolio, balance, orders, transactions) | E*Trade | — | < 1 min |
 | 7 expirations | ~500 | E*Trade | 120/min | ~4 min |
 | 7 chains | **~4,000–6,500** (500 tickers × 8–13 in-window expirations) | E*Trade | 120/min | ~33–54 min |
 | 9, 10 | 0 | — | — | ~2 min |
 | **Total** | **~6,000–8,500** | | | **~46–68 min**, start 17:05 → done ≈ 17:50–18:15 ET |
+
+**The Polygon pace was drafted at 600/min and is 500** — another drafted number meeting a measured constraint. `TokenBucketRateLimiter` clamps to 500 in both its constructor and `setRate`, so 600 was never expressible: it would have been silently reduced, and the budget above would have been planning against a rate the code cannot produce. Two further facts settled the number rather than the draft's "⅓ of observed peak" reasoning. First, **the collector was not going through the limiter at all** until v1.1.212 — `polygonGet` called `fetch` directly, against 06 §5 change #3 — so every elapsed figure measured before then (a `universe_seed` at ~1,900 rpm, 1,092 calls in 34 s) describes an unthrottled run and is not a pace this budget may assume. Second, **nothing applied the stored rate at startup**: `setRate` was only ever called from the settings save handler, so the app booted at 100 rpm whatever Settings displayed. Both are fixed in v1.1.212; the limiter is now seeded from the setting, the default is 500, and migration 081 moves a stored `100` (the old default, so no evidence of intent) to 500 while leaving every deliberately chosen value alone.
+
+At 500/min the Polygon phases total ~3 min against ~14 min at 100 — the deadline holds either way, but the headroom this section relies on does not.
 
 The chain call count carries a real range because the **expirations-per-ticker figure is still unmeasured** (§11). The old app's ~7.3 chain calls per symbol is not evidence: it was requesting a guessed list of 8 Fridays, not each ticker's actual expirations (§10). A liquid name at this cut plausibly lists ~8 weeklies inside 90 DTE plus ~3 monthlies plus the 2 extra, so **13 is the honest upper end** and 8 the optimistic one. This is the single largest uncertainty in the run budget and it is one `optionexpiredate` sweep away from being known.
 

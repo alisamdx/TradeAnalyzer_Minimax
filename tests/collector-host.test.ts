@@ -125,6 +125,23 @@ describe('ElectronCollectorHost', () => {
     expect(nowEt).not.toContain('toISOString');
   });
 
+  it('puts every Polygon call through the shared rate limiter, never a bare fetch', () => {
+    // Polygon rate-limits per API key and the collector shares this app's key,
+    // so two buckets would be two budgets spending one allowance. Hosting the
+    // collector here was chosen precisely to avoid that (Q4: one token holder,
+    // one limiter) — and `polygonGet` then called `fetch` directly from v1.1.196
+    // to v1.1.211, which is the arrangement's whole premise unmet.
+    const polygon = host.slice(host.indexOf('async polygonGet('), host.indexOf('async etradeGet('));
+    expect(polygon).toContain('rateLimiter.acquire(1)');
+    // Acquired before the latency clock starts, or a long queue wait is reported
+    // as Polygon being slow — in the log that gets read first when a provider
+    // path misbehaves.
+    expect(polygon.indexOf('rateLimiter.acquire(1)')).toBeLessThan(polygon.indexOf('const started ='));
+    // The limiter is the app's instance, handed in — not one this file builds,
+    // which would be a second bucket wearing the right name.
+    expect(host).not.toMatch(/new TokenBucketRateLimiter/);
+  });
+
   it('reports the close-time checkpoint on success as well as on failure', () => {
     // v1.1.209 added the explicit `wal_checkpoint(TRUNCATE)` and logged it only
     // when it did NOT fully apply — which reproduces, one level up, the exact
@@ -256,6 +273,31 @@ describe('collector batch handlers', () => {
     // history unable to answer either question.
     const dailyJob = daily.slice(0, daily.indexOf('createCollectorWatchdogJob'));
     expect(dailyJob).toContain("status: report.phaseErrors.length > 0 ? 'failed' : 'success'");
+  });
+});
+
+describe('the shared Polygon limiter', () => {
+  it('is handed to the collector host, so both share one bucket', () => {
+    const factory = index.slice(index.indexOf('const makeCollectorHost'), index.indexOf('const todayET'));
+    expect(factory).toMatch(/rateLimiter,/);
+  });
+
+  it('is seeded from the stored setting, not from the hardcoded default', () => {
+    // `setRate` was only ever called from the settings SAVE handler, so a
+    // configured rate lasted until the next restart and then silently reverted
+    // to the default — the app ran at a rate its own Settings screen did not
+    // show. Harmless while every caller was a person clicking; not harmless once
+    // the collector shares the bucket and budgets a nightly run against a pace.
+    const construction = index.slice(
+      index.indexOf('const storedRpm'),
+      index.indexOf('const jobQueue')
+    );
+    expect(construction).toContain("'rateLimitRpm'");
+    expect(construction).toContain('requestsPerMinute: storedRpm');
+    // An unreadable or absent setting falls back rather than throwing: the
+    // limiter sits on the path of every provider call and must never be the
+    // reason the app fails to boot.
+    expect(construction).toMatch(/Number\.isFinite/);
   });
 });
 
