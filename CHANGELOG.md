@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.214] - 2026-09-09
+
+`@tradeanalyzer/core` 0.3.5, dictionary **v9**.
+
+### Hosts NewApp phase 9 — the IV30 derivation
+
+- `runDaily` gains a `derive` phase after `events`: no provider call, reads what the chain phase stored, writes `derived_iv30_daily` one row per ticker **including the ones it could not compute** (storing only successes would make "could not price" indistinguishable from "never looked"). A day with no chain is a no-op, not an error.
+- **Shipped ahead of the rest of B7b on purpose**: the 20-day overlap clock for accepting a purchased IV bootstrap starts when phase 9 first runs in production, and our series is at zero. Waiting would have started it ~4 weeks later for no gain.
+- Dictionary **v8 -> v9**: `source_response_id` and `capture_rule_id` are nullable on the `derived` layer. A derived row is a function of many stored rows, not a parse of one response — as declared at B2 the table could not have been written at all. AC-1 untouched (scoped to raw), pinned by a test. Applies in place via the B7a empty-table rebuild; no reset.
+- `COLLECTOR_VERSION` caught up to `0.3.5` — left behind when the package was bumped in v1.1.212, and it lands in `meta_run.collector_version`, so runs were labelling themselves with the wrong collector. Found by the purity test that pins the two together.
+- `1,253` tests here, `324` in `core`.
+
 ## [1.1.213] - 2026-09-09
 
 `@tradeanalyzer/core` 0.3.5, dictionary version **8** (unchanged).
