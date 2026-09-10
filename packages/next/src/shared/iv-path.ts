@@ -1,8 +1,14 @@
 /**
  * The IV chart's geometry, kept as pure functions so it can be tested.
  *
- * Extracted from the view for one reason: **the rule that a gap must not be
- * bridged is the only thing on this screen that can be silently wrong.** A
+ * In `shared/` rather than beside the view, for two reasons. It is pure
+ * geometry with no DOM, so it belongs to neither process; and the renderer and
+ * the test sit in different TypeScript projects, so a test importing it from
+ * `renderer/` failed `typecheck:node` while passing under Vitest — a boundary
+ * that only shows up in one of the two checks.
+ *
+ * Extracted from the view for a better reason still: **the rule that a gap must
+ * not be bridged is the only thing on this screen that can be silently wrong.** A
  * chart that interpolates across a missing day looks completely normal — it is
  * a smooth line — and asserts a value nobody measured. Inside a component that
  * claim is only checkable by looking at it; out here it is checkable by a test.

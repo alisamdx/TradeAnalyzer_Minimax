@@ -309,3 +309,14 @@ tr.is-gap td.gap-reason { color: var(--muted); font-style: italic; }
 .gaps { list-style: none; padding: 0; margin: 14px 0 0; color: var(--muted); font-size: 11px; }
 .gaps code { color: var(--red); font-family: Consolas, monospace; }
 .empty { color: var(--muted); }
+
+/* ── Legacy view (B8) ─────────────────────────────────────────────────────── */
+
+.hint-inline { display: block; color: var(--muted); font-size: 10px; margin-top: 2px; }
+.warn-tag { color: var(--accent); font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
+.muted { color: var(--muted); }
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+.num.bad { color: var(--red); }
+/* A rejected candidate is dimmed, never hidden — it is the comparison. */
+tr.is-rejected td { color: var(--muted); }
+tr.is-selected td { background: var(--bg-raised); }

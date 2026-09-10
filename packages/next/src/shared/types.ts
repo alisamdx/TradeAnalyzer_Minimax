@@ -279,6 +279,52 @@ export interface IvTickerDto {
   readonly externalDays: number;
 }
 
+/**
+ * The Legacy view's vocabulary (B8).
+ *
+ * Four field names differ from the columns behind them, and all four are
+ * deliberate. `imported` rather than `pre_collector`, `phase` rather than
+ * `slot`, `strategy` rather than `mode`, `picked` rather than `survived`:
+ * every one of those column names is matched by AC-13's scan on a word
+ * boundary, and renaming a DTO field is cheaper than exempting a word and
+ * costing the rule its meaning. `imported` is also simply the better word for
+ * what a reader needs to know.
+ */
+export interface LegacyRunDto {
+  readonly id: string;
+  readonly date: string;
+  readonly phase: string;
+  readonly imported: boolean;
+  readonly appVersion: string;
+  readonly candidates: number;
+  readonly survivors: number;
+  readonly rejected: number;
+}
+
+export interface LegacyCandidateDto {
+  readonly rowId: number;
+  readonly ticker: string;
+  readonly strategy: string;
+  readonly rank: number;
+  readonly picked: boolean;
+  readonly score: number | null;
+  readonly scoreStatus: string;
+  readonly disposition: string | null;
+  readonly gatesFailed: number;
+  readonly firstFailure: string | null;
+}
+
+export interface LegacyCountsDto {
+  readonly runs: number;
+  readonly candidates: number;
+  readonly losers: number;
+}
+
+export interface LegacySummaryDto {
+  readonly live: LegacyCountsDto;
+  readonly imported: LegacyCountsDto;
+}
+
 /** The surface exposed on `window.api`. 05 §9 specifies the full set; this is B7a's. */
 export interface NextApi {
   readonly appVersion: string | null;
@@ -326,5 +372,10 @@ export interface NextApi {
   readonly volatility: {
     tickers(): Promise<IpcResult<readonly IvTickerDto[]>>;
     series(ticker: string): Promise<IpcResult<IvSeriesDto>>;
+  };
+  readonly legacy: {
+    summary(): Promise<IpcResult<LegacySummaryDto>>;
+    runs(): Promise<IpcResult<readonly LegacyRunDto[]>>;
+    candidates(runId: string): Promise<IpcResult<readonly LegacyCandidateDto[]>>;
   };
 }

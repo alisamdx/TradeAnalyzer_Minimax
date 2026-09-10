@@ -9,6 +9,72 @@ exit (06 §6).
 
 ---
 
+## B8 COMPLETE — the import, and a re-run guarantee that was not there (2026-09-09)
+
+`core` 0.3.8, `next` 0.1.4, existing app v1.1.218. **The gate is met**: a full
+brief run appears in `legacy_*` with its losers, live and on import.
+
+### `legacy_import` — two of Q19's five categories, and no path for the rest
+
+Categories 2, 3 and 4 have **no code path at all** — not a flag, not a disabled
+branch. A category that cannot be copied by accident beats one guarded by a
+boolean somebody flips.
+
+Category 1 goes through validators, and the one Q19 names is the one that
+matters: **an inverted conviction band is rejected, not carried**. That
+condition never throws — it just computes the wrong zone — and it fed wrong
+Buy-zone alerts for three weeks in the old app. Every rejected row is **listed
+with its reason**, not counted: a count says the import dropped something, the
+list says what and why.
+
+### Two drafted claims in 04 §7.4 turned out to be wrong
+
+**It does not ATTACH.** The section describes attaching the old database
+"write-capable but read-only in intent" to work around the Windows WAL problem.
+But the job runs *inside* the old app, which already holds that handle — so it
+is passed in, and the problem the workaround existed for does not arise.
+
+**"Re-runnable: a second run writes nothing already present (natural keys)" was
+false.** `naturalKey` in the dictionary is **metadata only** — the DDL generator
+emits no unique index from it — so the `INSERT OR IGNORE` written against that
+promise had nothing to conflict on and dedupped nothing. It would have read as
+protection while providing none.
+
+The two halves want different behaviour and both are now explicit:
+
+- **Configuration is versioned per import** — `import_run_id` is in its natural
+  key, so each import is an event, and that answers something a deduplicated
+  table could not: what the config looked like at each import.
+- **Decisions are deduplicated** by an explicit natural-key check. Their key
+  carries no import id, so without it a second import would have duplicated the
+  entire brief history.
+
+`import_run_id` is also an **INTEGER foreign key to `meta_run`**, not a
+composite string. Assuming otherwise cost a round of foreign-key failures.
+
+### The Legacy view keeps two samples apart
+
+Rows handed over live carry every candidate; rows imported backwards are
+survivors-only. The split is the **first thing on the screen**, because pooling
+a biased sample with an unbiased one is the failure `pre_collector` exists to
+prevent. A run's **rejected** count leads the table, and a zero there on an
+imported run reads *"not recorded"* rather than *"it rejected nothing"* — those
+are opposite facts.
+
+AC-13 caught three more real collisions — `slot`, `mode`, `survived`, all
+dictionary columns — and none was exempted: the DTO fields are `phase`,
+`strategy`, `picked`. That is five renames across two views today and zero
+exemptions, which is the only way the rule keeps meaning anything.
+
+One boundary worth recording: the IV chart's geometry moved to `shared/`
+because the renderer and the tests are **different TypeScript projects**, so a
+test importing from `renderer/` passed under Vitest and failed `typecheck:node`
+— a split that only shows up in one of the two checks.
+
+`381` tests in `core`, `29` in `next`, `1,256` in the existing app.
+
+---
+
 ## B8, part 1 — the legacy hand-off, and the losers are the point (2026-09-09)
 
 `core` 0.3.6. **B8's gate is met in `core`**: a full brief run appears in

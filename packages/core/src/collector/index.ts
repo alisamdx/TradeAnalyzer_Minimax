@@ -127,3 +127,7 @@ export type {
   LegacyBriefHandoff, LegacyHandoffCandidate, LegacyHandoffLeg
 } from '../ingest/legacy-brief.js';
 export { osiSymbol } from '../ingest/osi.js';
+
+// The one-time backward import (B8, 04 §7.4, Q19 categories 1 and 5).
+export { runLegacyImport, validateBandOrder, CONFIG_SOURCES, LEGACY_IMPORT_RULE } from './legacy-import.js';
+export type { LegacyImportReport, ImportedTable, ConfigKind } from './legacy-import.js';

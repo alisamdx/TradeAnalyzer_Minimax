@@ -7,6 +7,7 @@ import {
   markJobRunning,
   runBackfillBars,
   runBootstrapIv,
+  runLegacyImport,
   runUniverseSeed,
   stalledRequests,
   expireAcceptances,
@@ -43,7 +44,7 @@ export interface OneShotDeps {
   readonly todayET: () => string;
 }
 
-const IMPLEMENTED: ReadonlySet<OneShotKind> = new Set<OneShotKind>(['universe_seed', 'backfill_bars', 'bootstrap_iv']);
+const IMPLEMENTED: ReadonlySet<OneShotKind> = new Set<OneShotKind>(['universe_seed', 'backfill_bars', 'bootstrap_iv', 'legacy_import']);
 
 export function createCollectorOneShotJob(deps: OneShotDeps): BatchJobHandler {
   return {
@@ -179,6 +180,30 @@ export function createCollectorOneShotJob(deps: OneShotDeps): BatchJobHandler {
           // job reports, so the email and the review queue reflect what is
           // actually outstanding rather than what was outstanding yesterday.
           expireAcceptances(db, host, tradingDate);
+
+          if (request.runKind === 'legacy_import') {
+            // The old app's own connection is handed straight in — this job
+            // runs inside that app, so there is nothing to attach (04 §7.4).
+            const report = runLegacyImport(host, { legacyDb: db as never, tradingDate });
+            markJobRunning(db, request.requestId, report.runId);
+            finishJob(db, host, request.requestId, {
+              state: 'complete',
+              result: report as unknown as Record<string, unknown>
+            });
+            return {
+              status: 'success',
+              notes:
+                `legacy_import: ${report.configRows} config rows, ${report.decisionRows} decisions` +
+                // Rejections are the deliverable, not an error: an inverted
+                // conviction band caught here is one that never reaches the
+                // new generation.
+                (report.rejected > 0 ? `; ${report.rejected} row(s) REJECTED — see the import log` : ''),
+              tickersAttempted: report.tables.length,
+              tickersUpdated: report.configRows + report.decisionRows,
+              tickersSkipped: 0,
+              tickersFailed: report.rejected
+            };
+          }
 
           if (request.runKind === 'bootstrap_iv') {
             const report = await runBootstrapIv(host, { tradingDate });

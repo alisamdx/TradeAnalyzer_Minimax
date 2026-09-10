@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.1.218] - 2026-09-09
+
+`@tradeanalyzer/core` 0.3.8, `@tradeanalyzer/next` 0.1.4. **NewApp B8 complete.**
+
+### `collector-oneshot` executes `legacy_import`
+
+- The fourth implemented one-shot. Copies Q19 categories 1 (config) and 5 (decisions, marked `pre_collector = 1`); categories 2, 3 and 4 have **no code path** — a category that cannot be copied by accident beats one guarded by a flag.
+- **No ATTACH**: the job runs inside the app that already holds a write-capable handle to the old file, so it is passed in and the Windows WAL problem the attach note worked around does not arise.
+- **An inverted conviction band is rejected, not carried** — the case Q19 names by hand. It never throws, it just computes the wrong zone, and it fed wrong Buy-zone alerts for three weeks. Every rejected row is listed with its reason, not counted.
+- **04 §7.4's re-run guarantee was never there**: `naturalKey` is metadata only and generates no unique index, so `INSERT OR IGNORE` had nothing to conflict on and would have read as protection while providing none. Config is now versioned per import (its key includes `import_run_id`, so each import is an event) and decisions are deduplicated by an explicit check — without it a second import would duplicate the whole brief history. `import_run_id` is an INTEGER FK to `meta_run`, not a composite string.
+- What was read is **archived** as a `host_app` response per source table, so an imported row traces back to a verbatim copy of what the importer saw — including the rows it rejected.
+
+### The Legacy view
+
+- Rows handed over live carry every candidate; rows imported backwards are survivors-only, and **the split is the first thing on the screen**. A zero in the rejected column on an imported run reads "not recorded" rather than "it rejected nothing" — opposite facts.
+- AC-13 caught three more real collisions (`slot`, `mode`, `survived`) and none was exempted; the DTO fields are `phase`, `strategy`, `picked`. Five renames across two views today, zero exemptions.
+- `1,256` tests here, `381` in `core`, `29` in `next`.
+
 ## [1.1.217] - 2026-09-09
 
 `@tradeanalyzer/core` 0.3.7.

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildScale, pathSegments, type PathPoint } from '../src/renderer/src/views/iv-path.js';
+import { buildScale, pathSegments, type PathPoint } from '../src/shared/iv-path.js';
 
 /**
  * The IV chart's geometry — 05 §4.6.

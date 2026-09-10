@@ -49,6 +49,11 @@ const api: NextApi = {
   volatility: {
     tickers: () => ipcRenderer.invoke('iv:tickers'),
     series: (ticker: string) => ipcRenderer.invoke('iv:series', ticker)
+  },
+  legacy: {
+    summary: () => ipcRenderer.invoke('legacy:summary'),
+    runs: () => ipcRenderer.invoke('legacy:runs'),
+    candidates: (runId: string) => ipcRenderer.invoke('legacy:candidates', runId)
   }
 };
 

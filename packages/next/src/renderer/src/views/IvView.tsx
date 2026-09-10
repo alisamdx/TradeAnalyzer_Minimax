@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { IvSeriesDto, IvTickerDto, IvPointDto } from '../../../shared/types.js';
-import { buildScale, pathSegments, type Scale } from './iv-path.js';
+import { buildScale, pathSegments, type Scale } from '../../../shared/iv-path.js';
 
 /**
  * The IV view — 05 §4.6.

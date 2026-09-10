@@ -6,6 +6,7 @@ import { chainDates, chainExpirations, chainGrid, chainTickers, contractHistory 
 import { balances, orders, positions, snapshotDates } from './account.js';
 import { earningsAnomalies, earningsMonth, earningsMonths, earningsTrail } from './earnings.js';
 import { ivSeries, ivTickers } from './iv.js';
+import { legacyCandidates, legacyRuns, legacySummary } from './legacy.js';
 import type { IpcResult, QueryRequestDto } from '../shared/types.js';
 
 /**
@@ -63,4 +64,7 @@ export function registerIpc(): void {
   handle('earnings:anomalies', () => earningsAnomalies());
   handle('iv:tickers', () => ivTickers());
   handle('iv:series', (ticker: string) => ivSeries(ticker));
+  handle('legacy:summary', () => legacySummary());
+  handle('legacy:runs', () => legacyRuns());
+  handle('legacy:candidates', (runId: string) => legacyCandidates(runId));
 }
