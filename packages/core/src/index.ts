@@ -56,3 +56,13 @@ export type { ApplyResult } from './dictionary/apply.js';
 
 export * from './collector/index.js';
 export * from './qa/index.js';
+
+// Phase 9's derivation (B7b). Exported as a pure function in its own right, not
+// only through the phase that stores it, so a study or a replay can recompute a
+// stored row and compare rather than trust it (P4).
+export {
+  deriveIv30,
+  IV30_DERIVATION_VERSION,
+  TARGET_DTE as IV30_TARGET_DTE
+} from './derive/iv30.js';
+export type { Iv30Input, Iv30Row, Iv30ContractRow } from './derive/iv30.js';

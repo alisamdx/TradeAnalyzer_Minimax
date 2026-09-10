@@ -718,3 +718,33 @@ describe('dictionary — how a generation may evolve', () => {
     }
   });
 });
+
+describe('the derived layer carries provenance it can actually supply', () => {
+  it('makes `source_response_id` nullable on a derived table and NOT NULL everywhere else', () => {
+    // 02 §0.2 defines the standard columns for every *raw and snapshot* table,
+    // and `source_response_id` as "the archived response the row was parsed
+    // from". A derived row is a function of many stored rows — iv30 reads a
+    // whole chain across two expirations — so there is no single response to
+    // name, and naming one contributor would be a false provenance claim.
+    //
+    // B2 declared `derived_iv30_daily` with `standardColumns: true` anyway, so
+    // the column was NOT NULL with an FK and nothing legitimate to put in it.
+    // Phase 9 could not have written a single row. Found at B7b by trying.
+    const derived = DICTIONARY.filter((t) => t.layer === 'derived');
+    expect(derived.length).toBeGreaterThan(0);
+    for (const table of derived) {
+      const col = table.columns.find((c) => c.column === 'source_response_id');
+      expect(col, `${table.table} should still carry the column`).toBeDefined();
+      expect(col!.nullable, `${table.table}.source_response_id`).toBe(true);
+      // Nullable, but not silently so: a reader must be told what the null means.
+      expect(col!.nullMeaning).toBeTruthy();
+    }
+
+    // And the relaxation is scoped to `derived` — AC-1 rests on this column
+    // being present and non-null on every raw row.
+    for (const table of DICTIONARY.filter((t) => t.layer === 'raw' && t.standardColumns)) {
+      const col = table.columns.find((c) => c.column === 'source_response_id');
+      expect(col!.nullable, `${table.table}.source_response_id`).toBe(false);
+    }
+  });
+});

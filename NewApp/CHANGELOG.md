@@ -9,6 +9,65 @@ exit (06 §6).
 
 ---
 
+## B7b, part 1 — the IV30 derivation, and a table that could not be written (2026-09-09)
+
+`core` 0.3.5, dictionary **v9**.
+
+Phase 9's arithmetic, as a pure function: `deriveIv30` in `packages/core/src/derive/iv30.ts`,
+14 tests. No database, no clock, no provider — the same inputs give the same row
+forever, which is what lets a replay recompute a stored value and compare it
+rather than trust it (P4).
+
+**Total variance is interpolated in time, not the volatilities.** `iv² · t` is
+additive in time and the vols are not; the two agree exactly on a flat term
+structure and diverge as soon as it slopes, which is why the test that pins the
+method uses 0.20 at 16 days and 0.40 at 51 — variance interpolation gives
+0.3487, naive vol interpolation 0.28, so it cannot pass by accident.
+
+**The gaps are the interesting half.** Every refusal is a declared status rather
+than a number:
+
+| situation | status |
+|---|---|
+| every expiration on one side of 30 days | `insufficient_expirations` — never extrapolate |
+| chain present, nothing prices at the money | `no_atm_quotes` |
+| spot outside the quoted strike range | `no_atm_quotes` — clamping would substitute a deep-ITM vol and report it `ok` |
+| only one leg quoting at a strike | `no_atm_quotes` |
+
+That last one is a deliberate reading of an under-specified line. 02 §13 says
+"mid-IV of call and put" without saying what to do with a one-sided quote, and
+falling back to the single leg would make `iv30` *sometimes* a mid and
+*sometimes* not, with nothing in the row to say which — a quantity whose
+definition varies invisibly between rows is the shape this project keeps being
+bitten by. The subset is chosen for liquidity, so both legs at ATM is the
+ordinary case; if measurement says otherwise that is a `derivation_version` bump,
+which is what the column is for.
+
+An expiration also has to be *priceable* before it can be a bracketing endpoint.
+Choosing the nearest expiration to 30 days and only then discovering it has no
+ATM quotes would turn a quote-quality problem into a silent interpolation over
+the wrong interval.
+
+### The table B2 declared could not be written
+
+`derived_iv30_daily` carries `standardColumns: true`, so `source_response_id` was
+**NOT NULL with a foreign key** — and a derived row is a function of many stored
+rows, not a parse of one response. There was nothing legitimate to put in it, and
+naming one contributing response would have been a false provenance claim.
+Phase 9 could not have inserted a single row.
+
+02 §0.2 says these are the columns on every *raw and snapshot* table, so the
+declaration was always outside what the spec asked for; nothing had tried to
+write the table, so nothing had noticed. On the `derived` layer the column is now
+nullable with an explicit `nullMeaning`, and a test pins that the relaxation does
+**not** reach the raw layer — AC-1 rests on it being non-null there.
+
+Dictionary v8 → v9. The table is empty in every generation, so the empty-table
+rebuild added at B7a applies it in place — the first time that rule has been
+load-bearing rather than defensive.
+
+---
+
 ## Two clean seeds, and the fix everyone expected did nothing (2026-09-09)
 
 `core` 0.3.5, existing app v1.1.211, dictionary v8.
