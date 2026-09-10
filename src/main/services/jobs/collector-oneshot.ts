@@ -6,6 +6,7 @@ import {
   finishJob,
   markJobRunning,
   runBackfillBars,
+  runBootstrapIv,
   runUniverseSeed,
   stalledRequests,
   expireAcceptances,
@@ -42,7 +43,7 @@ export interface OneShotDeps {
   readonly todayET: () => string;
 }
 
-const IMPLEMENTED: ReadonlySet<OneShotKind> = new Set<OneShotKind>(['universe_seed', 'backfill_bars']);
+const IMPLEMENTED: ReadonlySet<OneShotKind> = new Set<OneShotKind>(['universe_seed', 'backfill_bars', 'bootstrap_iv']);
 
 export function createCollectorOneShotJob(deps: OneShotDeps): BatchJobHandler {
   return {
@@ -178,6 +179,31 @@ export function createCollectorOneShotJob(deps: OneShotDeps): BatchJobHandler {
           // job reports, so the email and the review queue reflect what is
           // actually outstanding rather than what was outstanding yesterday.
           expireAcceptances(db, host, tradingDate);
+
+          if (request.runKind === 'bootstrap_iv') {
+            const report = await runBootstrapIv(host, { tradingDate });
+            markJobRunning(db, request.requestId, report.runId);
+            finishJob(db, host, request.requestId, {
+              state: 'complete',
+              result: report as unknown as Record<string, unknown>
+            });
+            return {
+              status: 'success',
+              notes:
+                `bootstrap_iv: ${report.rowsStored} rows for ${report.tickersStored}/${report.tickersAttempted} ` +
+                `tickers, ${report.from}..${report.to}` +
+                // Surfaced in the operator's own line, not buried in the report
+                // JSON. If this equals the row count the unit is wrong, not the
+                // data — and those want opposite responses.
+                (report.outOfBand > 0
+                  ? `; ${report.outOfBand} value(s) OUTSIDE the fraction band — check the unit before accepting`
+                  : ''),
+              tickersAttempted: report.tickersAttempted,
+              tickersUpdated: report.tickersStored,
+              tickersSkipped: 0,
+              tickersFailed: report.tickersFailed
+            };
+          }
 
           if (request.runKind === 'backfill_bars') {
             const report = await runBackfillBars(host, { tradingDate });

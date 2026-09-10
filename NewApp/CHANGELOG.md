@@ -9,6 +9,62 @@ exit (06 §6).
 
 ---
 
+## B7b, part 4 — the bootstrap loader, and a unit that is corroborated rather than measured (2026-09-09)
+
+`core` 0.3.5, existing app v1.1.214. `bootstrap_iv` is complete, fixture-tested
+and wired into `collector-oneshot`; it cannot **run** until the subscription is
+bought, which is a spend decision, not a build one.
+
+**Every other phase-8 parser in this project was written after reading a live
+response. This one could not be**, and the honest thing was to say so in the
+spec rather than let the assertion "iv30 arrives as a decimal fraction" stand
+unqualified. What actually supports it:
+
+- `iv-history-service.ts:484` stores `row.iv30 * 100` into a percentage column,
+  so the existing app treats the value as a fraction
+- ~262k rows loaded that way over a year produced IV ranks nobody called absurd
+- but the parser feeding it says in its own comment *"We don't know the exact
+  field names until we test the API"*, tries **nine** candidate keys per field,
+  and normalises strings with **`n > 2 ? n / 100 : n`**
+
+So the fraction reading rests partly on a magnitude guess.
+
+### The heuristic is not carried across, and the reason generalises
+
+**A magnitude-based unit guess is untestable and fails silently in the one case
+that matters.** 200%+ implied vol is ordinary for a biotech binary or a squeezed
+meme name, so `n > 2 → n / 100` corrupts precisely the highest-vol tickers — the
+ones a premium seller cares most about — and leaves a plausible number behind.
+
+The loader **stores the value exactly as sent** and the job reports `outOfBand`,
+the count outside the fraction band `(0, 5)`, beside the row count. Nothing is
+rescaled and nothing is dropped: dropping would make a systematic unit error
+look like sparse coverage, correcting it would make the error invisible. If
+IVolatility sends percentages, the entire first load falls outside the band at
+once and the operator's own summary line says `N value(s) OUTSIDE the fraction
+band — check the unit before accepting`. **`outOfBand == rowsStored` means the
+unit is wrong, not the data**, and those want opposite responses.
+
+Fourteen tests, and what they pin is not "IVolatility sends X" — it is "whatever
+it sends, this code does not silently rescale it".
+
+### Other decisions worth keeping
+
+`accepted = 0` is written **explicitly** on every row rather than defaulted, at
+the one place that could blur *loading is not accepting*. The method note
+travels on every row, because two vendors' "30-day ATM IV" are not the same
+number and the difference is only recoverable if the method is stored beside
+the data — and IVX is not our construction either, which is the whole reason
+QC-908's threshold is a quantity to measure rather than trust.
+
+A row with no date is skipped rather than given a guessed one: it could never be
+paired, and a fabricated date would put a fabricated pairing into the single
+comparison this step exists for.
+
+`351` tests in `core`.
+
+---
+
 ## B7b, part 3 — the overlap check, and a check that fires hardest on nothing (2026-09-09)
 
 `core` 0.3.5, dictionary **v10**.

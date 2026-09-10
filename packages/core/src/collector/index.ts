@@ -108,3 +108,12 @@ export type { BackfillReport } from './backfill.js';
 // derived rows as well as raw ones.
 export { runDerivePhase } from './phases/derive.js';
 export type { DerivePhaseCounts } from './phases/derive.js';
+
+// The IV bootstrap one-shot (B7b). Runnable only with an IVolatility
+// subscription; the parser and the job are complete and fixture-tested so the
+// pull is a button-press when that spend decision is taken.
+export { runBootstrapIv, bootstrapTickers, BOOTSTRAP_IV_RULE, IVX_ENDPOINT } from './bootstrap-iv.js';
+export type { BootstrapIvReport } from './bootstrap-iv.js';
+export {
+  makeIvBootstrapIngest, pickIv30, extractRows, outOfBandCount, IVX_METHOD_NOTE
+} from '../ingest/iv-bootstrap.js';
