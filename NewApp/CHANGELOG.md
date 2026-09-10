@@ -9,6 +9,68 @@ exit (06 §6).
 
 ---
 
+## B7b, part 3 — the overlap check, and a check that fires hardest on nothing (2026-09-09)
+
+`core` 0.3.5, dictionary **v10**.
+
+**QC-907 shown firing on a zero-overlap fixture — that is the step's gate, and
+it is the first test in `iv-bootstrap.test.ts`.** The fixture is the exact shape
+of the existing app's splice: both series long, both present, sharing no date at
+all. The check reports `paired_days = 0` and fires. Drafted the obvious way —
+"for every day both series exist, store the paired difference" — it would have
+evaluated nothing, stored nothing, and read as clean.
+
+Two structural decisions carry that:
+
+- **The check is driven by the ticker list, not by the join.** A ticker with no
+  common day produces no join row, so iterating the join skips precisely the
+  case the check exists for. Pinned by its own test.
+- **`paired_days` is reported on every evaluation, fired or not** (P10), so the
+  framework derives a distribution and "never had an overlap" cannot look like
+  "overlap was clean".
+
+A day our own derivation could not compute does **not** count as a paired day,
+even though both tables have a row for it. Counting those would inflate the very
+quantity the check protects.
+
+QC-908 evaluates only series that have cleared QC-907 — a disagreement measured
+over three days is not a disagreement. It uses the **median**, computed in JS
+because SQLite has none, and a mean is not a substitute: the overlap compares
+two different *methods*, so a few days where one priced badly must not decide it.
+A test stores three bad days among twenty-one and asserts the verdict does not
+move.
+
+### Registration is conditional on data, not on a shipped phase
+
+`ALL_CHECKS` does not contain these two. `checksFor(db)` adds them only once an
+`ext_iv_history` row exists, because a check registered against an unbought
+bootstrap evaluates nothing every run and lands in QC-952's zero-fire review
+looking exactly like one that is silently broken — which is how that review
+stops being read.
+
+### `accepted` is a mutable column, and that is the narrow exception
+
+Dictionary **v9 → v10** adds `accepted`, `accepted_at`, `accepted_note` to
+`ext_iv_history` with `mutableColumns`. The append-only guard's own note
+describes this case exactly: a row whose content is a fact but which later
+learns something *about itself*. The IV value stays frozen — a test asserts the
+trigger still refuses to rewrite it — while the acceptance decision may be
+recorded. **Loading is not accepting**, and the flag is written `0` explicitly by
+the loader rather than defaulted, so the distinction is visible at the one place
+that could blur it.
+
+### Fixtures kept being wrong, and the schema kept being right
+
+Four times in this step: `body_bytes` for `byte_length`, `quote_status` for
+`price_status`, a missing `meta_run.host_app`, and an `UPDATE` on the
+append-only `derived_iv30_daily`. Every one was a hand-written fixture taking a
+liberty the production path could not take either. The run row is now created
+through `beginRun` rather than by hand.
+
+`337` tests in `core`.
+
+---
+
 ## B7b, part 1 — the IV30 derivation, and a table that could not be written (2026-09-09)
 
 `core` 0.3.5, dictionary **v9**.

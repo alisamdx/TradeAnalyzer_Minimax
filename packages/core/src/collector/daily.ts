@@ -7,7 +7,7 @@ import { runAccountPhase } from './phases/account.js';
 import { runChainSubsetPhase, runChainsPhase } from './phases/chains.js';
 import { runEventsPhase } from './phases/events.js';
 import { runDerivePhase } from './phases/derive.js';
-import { ALL_CHECKS } from '../qa/registry.js';
+import { checksFor } from '../qa/registry.js';
 import { runGate, type Verdict } from '../qa/gate.js';
 import { buildStatusEmail } from '../qa/email.js';
 import { COLLECTOR_VERSION } from '../version.js';
@@ -139,8 +139,11 @@ export async function runDaily(
   }
 
   // The gate runs on whatever exists, including after a cancellation.
+  // `checksFor` rather than `ALL_CHECKS`: the bootstrap's overlap checks are
+  // registered only once a load exists to compare against (03 §3.8a), and the
+  // set is therefore a property of the generation rather than of the build.
   const gate = runGate(db, host, {
-    runId: run.runId, tradingDate: args.tradingDate, checks: ALL_CHECKS, domainsExpected: domains
+    runId: run.runId, tradingDate: args.tradingDate, checks: checksFor(db), domainsExpected: domains
   });
 
   const finishedAt = host.nowET();

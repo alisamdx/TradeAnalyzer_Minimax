@@ -34,8 +34,34 @@ export const derivedLegacyTables: readonly TableEntry[] = [
       col.fraction('iv30', 'The source\'s 30-day constant-maturity at-the-money IV, as a fraction.'),
       col.text('source', 'Which vendor supplied the series. One value for the whole table — a mixed-provenance history would make the stitch meaningless.'),
       col.text('method_note', 'The source\'s published method, **verbatim**. Two vendors\' "30-day ATM IV" are not the same number, and the difference is only recoverable if the method travels with the data.'),
-      col.int('load_run_id', 'The one-shot run that loaded this row.', { references: { table: 'meta_run', column: 'run_id' } })
+      col.int('load_run_id', 'The one-shot run that loaded this row.', { references: { table: 'meta_run', column: 'run_id' } }),
+      col.flag(
+        'accepted',
+        '`0` until the overlap has been checked and the operator has accepted the series (04 §7.3). ' +
+          '**Loading is not accepting**: nothing reads an unaccepted row, and rank computes from ' +
+          '`derived_iv30_daily` alone reporting its declared gap, exactly as if no bootstrap had been ' +
+          'bought. Written `0` explicitly by the loader rather than defaulted, so the distinction is ' +
+          'visible at the one place that could blur it.',
+        { sourceProvider: 'collector' }
+      ),
+      nullable(
+        col.ts('accepted_at', 'When the series was accepted.'),
+        'not accepted — the overlap is not yet sufficient, or the operator has not ruled'
+      ),
+      nullable(
+        col.text(
+          'accepted_note',
+          'Why it was accepted. **Required on acceptance**, because acceptance over a disagreement ' +
+            'QC-908 flagged is a judgement, and a judgement with no recorded reason is indistinguishable ' +
+            'from nobody having looked.'
+        ),
+        'not accepted'
+      )
     ],
+    // The narrow exception the append-only guard exists to allow: the IV value
+    // is a fact and stays frozen; whether we have decided to *read* it is
+    // learned later. Everything else about the row still refuses an edit.
+    mutableColumns: ['accepted', 'accepted_at', 'accepted_note'],
     indexes: [{ columns: ['ticker', 'date'] }]
   }),
 
