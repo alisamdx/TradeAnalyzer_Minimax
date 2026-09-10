@@ -117,3 +117,12 @@ export type { BootstrapIvReport } from './bootstrap-iv.js';
 export {
   makeIvBootstrapIngest, pickIv30, extractRows, outOfBandCount, IVX_METHOD_NOTE
 } from '../ingest/iv-bootstrap.js';
+
+// The legacy hand-off (B8, 04 §8). The existing app's brief job calls
+// `writeLegacyHandoff` with what it already holds in memory at the end of a run.
+export { writeLegacyHandoff, LEGACY_HANDOFF_RULE } from './legacy-handoff.js';
+export type { LegacyHandoffResult } from './legacy-handoff.js';
+export { makeLegacyBriefIngest, stickyRowsFor, legacyRunId } from '../ingest/legacy-brief.js';
+export type {
+  LegacyBriefHandoff, LegacyHandoffCandidate, LegacyHandoffLeg
+} from '../ingest/legacy-brief.js';

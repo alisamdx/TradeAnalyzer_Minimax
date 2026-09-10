@@ -9,6 +9,62 @@ exit (06 §6).
 
 ---
 
+## B8, part 1 — the legacy hand-off, and the losers are the point (2026-09-09)
+
+`core` 0.3.6. **B8's gate is met in `core`**: a full brief run appears in
+`legacy_*` with its rejected candidates, their gates, their tested values and
+the threshold each one missed. Ten tests.
+
+The existing app's `daily_briefs` stores only survivors, which is why it can
+never answer whether its own ranking was any good — the rejected candidates are
+the control group. `writeLegacyHandoff` takes what the brief already holds in
+memory and records **every candidate it scored**, plus the gate that stopped
+each one and how far off it was.
+
+### The payload is archived as a `host_app` response
+
+`legacy_*` rows carry `source_response_id` NOT NULL, and a hand-off is not a
+provider response — the same shape as the `derived_iv30_daily` problem found
+earlier in the day, but with the **opposite** resolution: here there genuinely
+is something to archive. The `host_app` provider value already existed for
+exactly this ("not a vendor: the host application itself"), so the payload is
+captured like any other response. That buys three things at once — AC-1
+provenance for the legacy layer, replay (AC-4) for the hand-off, and the
+original payload surviving intact if the parse is later found wrong.
+
+### Three border crossings that went wrong before, now pinned by tests
+
+- **`volume`**: an unreported volume stores as `omitted`, never `0`.
+  `leg.volume ?? 0` turned "not reported" into "did not trade" on 23 of 250
+  stored legs and a liquidity gate rejected them for it. A genuine zero still
+  stores as zero — both halves are tested, because one without the other is
+  how the distinction quietly dies.
+- **`iv`**: stored as a fraction. The old app holds percentages; the builder
+  converts once, at the border, and a test asserts `0.38` rather than `38` —
+  the same hundredfold error the IV bootstrap is guarded against.
+- **The slot is part of the run key.** The old app stored one row per day and
+  deleted the other, so 248 of 250 stored picks were evening readings while the
+  morning pick — the one actually read — came from data destroyed hours later.
+
+### Sticky pins share the transaction, and the dedup lives in the writer
+
+Every recommended contract is pinned `recommended_by_legacy` in the same
+transaction as the facts, so a leg is sticky whether the brief ran before or
+after that day's collection. **The loser's legs are pinned too** — the brief
+considered them, so tomorrow should still be able to price them.
+
+The "already pinned" check is in the writer rather than the ingest module, and
+the split is the point: the `legacy_*` facts must replay byte-identically from
+a fixture, so that module stays pure and handle-free (P11), while a sticky pin
+is *current state* — re-pinning an open one would leave two open ranges for one
+contract, the exact ambiguity a validity range exists to prevent.
+
+**Still to build in B8**: the call site in the existing app's brief job
+(fire-and-forget, must not change what the brief decides or emails), the
+`legacy_import` one-shot for the backward import, and the Legacy view.
+
+---
+
 ## B7b COMPLETE — the IV view, and a gap that must stay a gap (2026-09-09)
 
 `next` 0.1.3. **The step's gate is met**: QC-907 fires on a zero-overlap fixture,
