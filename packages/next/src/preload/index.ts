@@ -45,6 +45,10 @@ const api: NextApi = {
     month: (month: string) => ipcRenderer.invoke('earnings:month', month),
     trail: (ticker: string) => ipcRenderer.invoke('earnings:trail', ticker),
     anomalies: () => ipcRenderer.invoke('earnings:anomalies')
+  },
+  volatility: {
+    tickers: () => ipcRenderer.invoke('iv:tickers'),
+    series: (ticker: string) => ipcRenderer.invoke('iv:series', ticker)
   }
 };
 

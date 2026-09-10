@@ -5,6 +5,7 @@ import { columns, query, stats, tables, tree, type QueryRequest } from './inspec
 import { chainDates, chainExpirations, chainGrid, chainTickers, contractHistory } from './chains.js';
 import { balances, orders, positions, snapshotDates } from './account.js';
 import { earningsAnomalies, earningsMonth, earningsMonths, earningsTrail } from './earnings.js';
+import { ivSeries, ivTickers } from './iv.js';
 import type { IpcResult, QueryRequestDto } from '../shared/types.js';
 
 /**
@@ -60,4 +61,6 @@ export function registerIpc(): void {
   handle('earnings:month', (month: string) => earningsMonth(month));
   handle('earnings:trail', (ticker: string) => earningsTrail(ticker));
   handle('earnings:anomalies', () => earningsAnomalies());
+  handle('iv:tickers', () => ivTickers());
+  handle('iv:series', (ticker: string) => ivSeries(ticker));
 }

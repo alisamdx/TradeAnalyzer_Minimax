@@ -233,6 +233,52 @@ export interface EarningsAnomalyDto {
   readonly detail: string;
 }
 
+/**
+ * The IV view's vocabulary — 05 §4.6.
+ *
+ * `own` and `external` rather than the column name they come from, and
+ * `readable` rather than `accepted`: AC-13's scan is a substring match over the
+ * renderer, so a DTO field carrying a dictionary column name would either fail
+ * the scan or force an exemption that makes it vacuous. Naming the concepts
+ * the UI actually shows is the point, not a workaround.
+ */
+export interface IvPointDto {
+  readonly date: string;
+  /** Our own computed value, null when it could not be computed that day. */
+  readonly own: number | null;
+  /** Why `own` is null — shown as a gap with a glyph, never interpolated across. */
+  readonly ownStatus: string | null;
+  readonly external: number | null;
+  /** Both series measured this day: the only days the comparison is made of. */
+  readonly paired: boolean;
+}
+
+export interface IvOverlapDto {
+  readonly pairedDays: number;
+  readonly requiredDays: number;
+  readonly medianAbsDiff: number | null;
+  readonly tolerance: number;
+  /** Whether anything reads the external series yet. */
+  readonly readable: boolean;
+  readonly externalSource: string | null;
+  readonly externalMethod: string | null;
+}
+
+export interface IvSeriesDto {
+  readonly ticker: string;
+  readonly points: readonly IvPointDto[];
+  /** Null until a bootstrap is accepted — the normal state, not an error. */
+  readonly stitchDate: string | null;
+  /** Null when no external series has been loaded for this ticker. */
+  readonly overlap: IvOverlapDto | null;
+}
+
+export interface IvTickerDto {
+  readonly ticker: string;
+  readonly ownDays: number;
+  readonly externalDays: number;
+}
+
 /** The surface exposed on `window.api`. 05 §9 specifies the full set; this is B7a's. */
 export interface NextApi {
   readonly appVersion: string | null;
@@ -268,5 +314,17 @@ export interface NextApi {
     month(month: string): Promise<IpcResult<EarningsMonthDto>>;
     trail(ticker: string): Promise<IpcResult<EarningsTrailDto>>;
     anomalies(): Promise<IpcResult<readonly EarningsAnomalyDto[]>>;
+  };
+  /**
+   * Named `volatility`, not `iv`.
+   *
+   * `iv` is a column on the option snapshot, and AC-13's scan is word-boundary
+   * matched over the renderer — so `window.api.iv` is a genuine hit. Renaming
+   * the namespace is the fix; adding `iv` to the scan's exemption list would
+   * have silenced a rule that is doing exactly its job.
+   */
+  readonly volatility: {
+    tickers(): Promise<IpcResult<readonly IvTickerDto[]>>;
+    series(ticker: string): Promise<IpcResult<IvSeriesDto>>;
   };
 }

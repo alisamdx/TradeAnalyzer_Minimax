@@ -279,3 +279,33 @@ tr.change-quantity_changed .change { color: var(--accent); }
 tr.is-gap td.gap-reason { color: var(--muted); font-style: italic; }
 
 .link { background: none; border: none; color: var(--accent); cursor: pointer; font-size: 11px; padding: 0; }
+
+/* ── IV view (05 §4.6) ────────────────────────────────────────────────────── */
+
+.picker { display: inline-flex; align-items: center; gap: 8px; margin: 0 0 16px; color: var(--muted); }
+.picker select { background: var(--bg-raised); color: var(--fg); border: 1px solid var(--line); padding: 4px 8px; }
+
+.panel { background: var(--bg-panel); border: 1px solid var(--line); padding: 12px 14px; margin: 0 0 18px; }
+.panel .facts { border: 0; background: none; grid-template-columns: 220px 1fr; }
+.panel .facts dt { color: var(--muted); padding: 3px 0; }
+.panel .facts dd { padding: 3px 0; }
+.panel .facts dd.ok { color: var(--green); }
+/* The one reading that must not be quiet: too few paired days, or too much
+   disagreement, both mean the external series cannot be accepted yet. */
+.panel .facts dd.bad { color: var(--red); }
+.panel .method { color: var(--muted); font-size: 11px; margin: 10px 0 0; line-height: 1.5; }
+
+.iv-chart { width: 100%; height: auto; background: var(--bg-panel); border: 1px solid var(--line); }
+.iv-own { stroke: var(--accent); stroke-width: 1.6; }
+.iv-external { stroke: var(--blue); stroke-width: 1.6; stroke-dasharray: 4 3; }
+/* The days the acceptance decision is actually made of. */
+.iv-overlap { fill: var(--accent-dim); opacity: 0.18; }
+.iv-stitch { stroke: var(--green); stroke-width: 1.5; stroke-dasharray: 3 3; }
+/* A day our own series could not be computed. Marked, never bridged — the line
+   above breaks here rather than asserting a value nobody measured. */
+.iv-gap { fill: var(--red); }
+.iv-axis { fill: var(--muted); font-size: 10px; }
+
+.gaps { list-style: none; padding: 0; margin: 14px 0 0; color: var(--muted); font-size: 11px; }
+.gaps code { color: var(--red); font-family: Consolas, monospace; }
+.empty { color: var(--muted); }

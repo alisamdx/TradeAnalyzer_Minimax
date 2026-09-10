@@ -9,6 +9,51 @@ exit (06 §6).
 
 ---
 
+## B7b COMPLETE — the IV view, and a gap that must stay a gap (2026-09-09)
+
+`next` 0.1.3. **The step's gate is met**: QC-907 fires on a zero-overlap fixture,
+and the overlap check records its paired-day count on every evaluation.
+
+The view shows both series on one chart, the stitch date as a vertical line, the
+overlap window shaded, and the paired count and median difference as numbers
+rather than as an impression. Zero paired days is rendered as a **failure in
+words** — *"the two series have never measured the same day"* — not as an empty
+count, because that is the state the existing app was in for a year without
+anyone being able to see it.
+
+### The one thing on this screen that can be silently wrong
+
+**A chart that bridges a gap looks perfect.** The line is smooth, the page reads
+normally, and it asserts a value on days our own series explicitly declared it
+could not compute. Those statuses exist so a gap is a stated fact; drawing
+across them throws that away at the very last step, after every other layer got
+it right.
+
+So the geometry is a **pure module** (`iv-path.ts`) rather than a detail inside
+the component, and eight tests pin it: the line breaks at a gap, an isolated
+value emits nothing because a point is not a line, gaps at either end produce no
+stray segment, and a flat series still renders instead of dividing by a zero
+span (which would come out blank — reading as missing data rather than as a
+constant, and those are opposite facts). Inside the component none of that was
+checkable except by looking.
+
+### AC-13 caught two real collisions, and neither got an exemption
+
+The renderer may name no table or domain column, asserted structurally. It
+found:
+
+- **`window.api.iv`** — `iv` is a column on the option snapshot, matched on a
+  word boundary. The namespace is now `volatility`.
+- a local variable **`reason`** — also a column.
+
+Both were renamed. Adding either to the scan's exemption list would have been
+one line and would have cost the rule some of its meaning; a local variable is
+the cheapest thing in the codebase to rename.
+
+`29` tests in `next`.
+
+---
+
 ## B7b, part 4 — the bootstrap loader, and a unit that is corroborated rather than measured (2026-09-09)
 
 `core` 0.3.5, existing app v1.1.214. `bootstrap_iv` is complete, fixture-tested

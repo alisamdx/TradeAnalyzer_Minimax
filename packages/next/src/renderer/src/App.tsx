@@ -5,10 +5,11 @@ import { DictionaryView } from './views/DictionaryView.js';
 import { ChainsView } from './views/ChainsView.js';
 import { AccountView } from './views/AccountView.js';
 import { EarningsView } from './views/EarningsView.js';
+import { IvView } from './views/IvView.js';
 import { RichText } from './views/RichText.js';
 
 /**
- * The shell: Overview, Data, Chains, Account, Earnings and Dictionary.
+ * The shell: Overview, Data, Chains, Account, Earnings, IV and Dictionary.
  *
  * The remaining sections of 05 §2 — Exceptions, Runs, Bars, Universe, IV,
  * Archive, Legacy, Jobs, Settings — arrive with the build steps that fill their
@@ -16,7 +17,7 @@ import { RichText } from './views/RichText.js';
  * feature, not as a future one.
  */
 
-type Section = 'overview' | 'data' | 'chains' | 'account' | 'earnings' | 'dictionary';
+type Section = 'overview' | 'data' | 'chains' | 'account' | 'earnings' | 'iv' | 'dictionary';
 
 const SECTIONS: readonly { id: Section; label: string; hint: string }[] = [
   { id: 'overview', label: 'Overview', hint: 'Generation and schema at a glance' },
@@ -24,6 +25,7 @@ const SECTIONS: readonly { id: Section; label: string; hint: string }[] = [
   { id: 'chains', label: 'Chains', hint: 'Option chains by ticker, date and expiration' },
   { id: 'account', label: 'Account', hint: 'Positions, executed orders and balances' },
   { id: 'earnings', label: 'Earnings', hint: 'Report dates, and every observation of them' },
+  { id: 'iv', label: 'IV', hint: 'Our own IV30 against the external history, and the overlap between them' },
   { id: 'dictionary', label: 'Dictionary', hint: 'Every column, and what a null in it means' }
 ];
 
@@ -85,6 +87,7 @@ export function App() {
         {!error && section === 'chains' && <ChainsView />}
         {!error && section === 'account' && <AccountView />}
         {!error && section === 'earnings' && <EarningsView />}
+        {!error && section === 'iv' && <IvView />}
         {!error && section === 'dictionary' && <DictionaryView tree={tree} />}
       </main>
     </div>
