@@ -104,7 +104,7 @@ Measured pace from the existing app (2026-09-04) and the resulting stage-1 budge
 
 | Phase | Calls | Provider | Pace used for planning | Elapsed |
 |---|---|---|---|---|
-| 2 bars | ~1,089 | Polygon | **500/min** (the limiter's maximum — see below) | ~2.2 min |
+| 2 bars | ~1,089 | Polygon | **500/min** (the limiter's maximum — see below) | ~1.2–2.2 min † |
 | 3, 4, 8 misc | ~350 | mixed | — | ~5 min |
 | 5 account | 5 (list, portfolio, balance, orders, transactions) | E*Trade | — | < 1 min |
 | 7 expirations | ~500 | E*Trade | 120/min | ~4 min |
@@ -114,7 +114,9 @@ Measured pace from the existing app (2026-09-04) and the resulting stage-1 budge
 
 **The Polygon pace was drafted at 600/min and is 500** — another drafted number meeting a measured constraint. `TokenBucketRateLimiter` clamps to 500 in both its constructor and `setRate`, so 600 was never expressible: it would have been silently reduced, and the budget above would have been planning against a rate the code cannot produce. Two further facts settled the number rather than the draft's "⅓ of observed peak" reasoning. First, **the collector was not going through the limiter at all** until v1.1.212 — `polygonGet` called `fetch` directly, against 06 §5 change #3 — so every elapsed figure measured before then (a `universe_seed` at ~1,900 rpm, 1,092 calls in 34 s) describes an unthrottled run and is not a pace this budget may assume. Second, **nothing applied the stored rate at startup**: `setRate` was only ever called from the settings save handler, so the app booted at 100 rpm whatever Settings displayed. Both are fixed in v1.1.212; the limiter is now seeded from the setting, the default is 500, and migration 081 moves a stored `100` (the old default, so no evidence of intent) to 500 while leaving every deliberately chosen value alone.
 
-At 500/min the Polygon phases total ~3 min against ~14 min at 100 — the deadline holds either way, but the headroom this section relies on does not.
+† **The bucket's burst is a one-time credit and the elapsed figures are meaningless without it.** `burstSize` defaults to `requestsPerMinute`, so the limiter starts with **500 tokens in hand**: the first 500 calls of a run are granted instantly and only the remainder is paced. A phase of *n* Polygon calls therefore takes `max(0, n − tokensInHand) ÷ 8.33/s`, which is why the bars row carries a range — 1.2 min from a full bucket, 2.2 min if an earlier phase has already drained it.
+
+**Measured 2026-09-09, and it is the arithmetic that validates the limiter rather than the other way round.** A `universe_seed` of 1,092 Polygon calls: 500 from the burst, 592 paced ⇒ 71.0 s predicted, **70 s observed** (host handle held 20:58:29–20:59:40), zero 429s. The same run discriminates the alternatives — unthrottled would be ~34 s, and the double-token-spend fixed in v1.1.213 would be ~3.4 min. The whole daily Polygon load (~1,440 calls) is ~1.9 min on the same basis, against ~14 min at 100/min: the deadline holds either way, but the headroom this section relies on does not.
 
 The chain call count carries a real range because the **expirations-per-ticker figure is still unmeasured** (§11). The old app's ~7.3 chain calls per symbol is not evidence: it was requesting a guessed list of 8 Fridays, not each ticker's actual expirations (§10). A liquid name at this cut plausibly lists ~8 weeklies inside 90 DTE plus ~3 monthlies plus the 2 extra, so **13 is the honest upper end** and 8 the optimistic one. This is the single largest uncertainty in the run budget and it is one `optionexpiredate` sweep away from being known.
 
