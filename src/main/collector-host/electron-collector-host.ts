@@ -191,19 +191,37 @@ export class ElectronCollectorHost implements CollectorHost {
     })();
     try {
       const [row] = this.db.pragma('wal_checkpoint(TRUNCATE)') as { busy: number; log: number; checkpointed: number }[];
-      const applied = row !== undefined && row.busy === 0 && row.log === row.checkpointed;
+      // Three outcomes, not two. `log === checkpointed` is also true of `0 === 0`,
+      // so "flushed four megabytes" and "there was nothing to flush" both read as
+      // applied — which is the very ambiguity this line exists to remove, one
+      // level further down, and it went unnoticed until the numbers were read
+      // beside `walBytes`.
+      //
+      // Measured on the two clean seeds of 2026-09-09: `walBytes≈4.15MB` with
+      // `log=0 checkpointed=0`, twice. `wal_autocheckpoint` (every 1000 pages by
+      // default) had already flushed everything long before `close()`, so the
+      // explicit checkpoint moved no frames on either run. That is what struck
+      // the missing checkpoint off as the cause of the corruption — and without
+      // the distinction below it would have gone into the record as the fix.
+      const verdict =
+        row === undefined ? 'returned nothing'
+        : row.busy !== 0 ? 'was BUSY and did not finish'
+        : row.log !== row.checkpointed ? 'did NOT fully apply'
+        : row.log === 0 ? 'had nothing to do — the WAL held no pending frames'
+        : 'applied';
+      const healthy = verdict === 'applied' || verdict.startsWith('had nothing');
       logError({
         timestamp: etTimestamp(),
         appVersion: this.hostApp.version,
         errorClass: 'CollectorCheckpoint',
         message:
-          `checkpoint ${applied ? 'applied' : 'did NOT fully apply'} — ` +
+          `checkpoint ${verdict} — ` +
           `walBytes=${walBytes} busy=${row?.busy} log=${row?.log} checkpointed=${row?.checkpointed}`,
         stack: null,
         operation: 'collector-host:close',
         ticker: null,
         correlationId: null,
-        level: applied ? 'INFO' : 'WARNING'
+        level: healthy ? 'INFO' : 'WARNING'
       });
     } catch (err) {
       // Still says something. A checkpoint that threw is a third outcome, and

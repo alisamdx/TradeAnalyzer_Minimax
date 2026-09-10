@@ -135,7 +135,16 @@ describe('ElectronCollectorHost', () => {
     const closeBlock = host.slice(host.indexOf('close(): void'), host.indexOf('archiveRoot(): string'));
     expect(closeBlock).toContain('wal_checkpoint(TRUNCATE)');
     // Logged every time, with the level carrying the verdict.
-    expect(closeBlock).toMatch(/level:\s*applied\s*\?\s*'INFO'\s*:\s*'WARNING'/);
+    expect(closeBlock).toMatch(/level:\s*healthy\s*\?\s*'INFO'\s*:\s*'WARNING'/);
+    // An empty WAL is its own outcome, never folded into "applied". `log ===
+    // checkpointed` is true of `0 === 0`, so without this the two clean seeds of
+    // 2026-09-09 — 4.15 MB of WAL file, zero pending frames, twice — would have
+    // read as a checkpoint that did the work, and the missing checkpoint would
+    // have gone into the record as the fix for the corruption.
+    expect(closeBlock).toMatch(/row\.log === 0/);
+    expect(closeBlock).toContain('nothing to do');
+    // Busy is distinct from short, too: one is contention, the other is loss.
+    expect(closeBlock).toMatch(/row\.busy !== 0/);
     // The WAL size that preceded it, or the log line says nothing about scale:
     // a fully applied checkpoint over an empty WAL is not the same evidence.
     expect(closeBlock).toContain('walBytes');

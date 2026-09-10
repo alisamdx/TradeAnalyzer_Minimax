@@ -122,6 +122,8 @@ The scripts originally used `node:sqlite`, chosen so they would work whichever A
 
 Never leave the hand-off to close-time semantics. Measured 2026-09-07: the new exe wrote a **918,792-byte WAL**, a second process read the committed rows out of it, and on close the WAL was deleted with `data.sqlite` byte-for-byte unchanged. The whole startup write was discarded, and it read as "the collector lost my generation".
 
+**An empty WAL is its own outcome and must never be folded into "applied."** `log === checkpointed` is also true of `0 === 0`, so a checkpoint that flushed four megabytes and one that found nothing to flush report identically. Measured on both clean seeds of 2026-09-09: `walBytes ≈ 4.15 MB` with `log = 0, checkpointed = 0` — `wal_autocheckpoint` had already done the work. That distinction is what struck the missing checkpoint off as the cause of the generation corruption; without it, a durability fix that provably moved no frames would have been recorded as the cure. The verdict is five-way: returned nothing, busy, short, nothing to do, applied.
+
 **Warning-only reporting reproduces that same ambiguity one level up.** The collector host was fixed to checkpoint in v1.1.209 but logged only when the checkpoint did *not* apply, so silence meant either "it applied cleanly" or "`close()` was never reached" — and those are opposite readings of the very next seed. A clean generation with no checkpoint line is not evidence that checkpointing fixed anything. **An instrument added to remove an ambiguity must not be readable only by its own absence.**
 
 ---

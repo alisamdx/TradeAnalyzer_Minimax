@@ -9,6 +9,58 @@ exit (06 §6).
 
 ---
 
+## Two clean seeds, and the fix everyone expected did nothing (2026-09-09)
+
+`core` 0.3.5, existing app v1.1.211, dictionary v8.
+
+**After five consecutive corruptions, two `universe_seed` runs in a row came back
+`integrity_check: ok`** — 19:51 and 20:09, on fresh generations, doing the
+identical work every corrupt run did (1,092 responses, 1,083 references, 1,587
+memberships, the same 6 failures). Not clean because it did less.
+
+Three things this run had that no previous one did:
+
+- **A baseline.** 52 tables, `ok`, every count zero, `meta_generation = 1` before
+  the seed touched it. "Was it clean beforehand" had been unanswerable each
+  previous round, which made every result an inference.
+- **Disjointness as a reading.** `closed_at` shipped yesterday, and its first use
+  showed TA2 holding the file 19:40:24–19:40:28 and the host 19:51:04–19:51:38.
+  On 2026-09-09 that same question was put to the operator and answered from
+  memory.
+- **An instrument on the suspect itself**, which is what makes the next paragraph
+  possible.
+
+### The checkpoint is struck off, by measurement
+
+```
+checkpoint applied — walBytes=4157112 busy=0 log=0 checkpointed=0
+checkpoint applied — walBytes=4148872 busy=0 log=0 checkpointed=0
+```
+
+A **4.15 MB WAL file with zero pending frames**, both times. `wal_autocheckpoint`
+flushes every 1000 pages by default and had already done the work long before
+`close()`. The explicit checkpoint added in v1.1.209 moved no frames on either
+run, so it is not what stopped the corruption — it is a correct durability fix
+for a case that did not arise here.
+
+**One version earlier both runs would have logged nothing at all, and this would
+have entered the record as the fix.** The instrument was added the same afternoon
+for exactly this reason, and it repaid itself on its first use.
+
+### What is actually left
+
+The 01:08 corrupt seed and the 19:51/20:09 clean ones differ in the build,
+dictionary v7→v8, the new `recordCloseHandle` write, the (excluded) checkpoint —
+and **the care taken over concurrency**. That last one is live: "concurrent
+access" sits in the eliminated table on recollection alone, and at dictionary v7
+`meta_open_handle` could not have recorded a close even if the question had been
+asked. **The eliminations that rest on recollection are the ones still standing.**
+
+Downgraded from *reproduces every time* to *does not reproduce under a protocol
+where both applications are verified closed*. Not closed.
+
+---
+
 ## The checkpoint has to say when it worked, too (2026-09-09)
 
 Existing app v1.1.210. `core` 0.3.4, dictionary v8 — no schema change.

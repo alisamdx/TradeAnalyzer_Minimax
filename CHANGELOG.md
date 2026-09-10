@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.1.211] - 2026-09-09
+
+`@tradeanalyzer/core` 0.3.5, dictionary version **8** (unchanged).
+
+### The seed ran clean twice - and the expected fix is measurably not the reason
+
+- Two consecutive `universe_seed` runs on fresh generations came back `integrity_check: ok`, after **five** consecutive corruptions. Same work both times - 1,092 responses / 1,083 references / 1,587 memberships / 6 failures, identical to every corrupt run - so it is not clean because it did less.
+- **The baseline that had been missing every previous round**: before the first seed, 52 tables, `integrity_check: ok`, all row counts zero, `meta_generation = 1` (TA2 created it, not the collector recreating one). "Was it clean before the seed" is answerable for the first time.
+- **`closed_at` earned itself on its first outing**: TA2 held the file 19:40:24-19:40:28 and TradeAnalyzer 19:51:04-19:51:38 - disjoint, by reading rather than by asking what the operator remembered having open.
+- **The checkpoint is struck off.** Both clean runs logged `walBytes≈4.15MB busy=0 log=0 checkpointed=0` - a multi-megabyte WAL *file* with **zero pending frames**, because `wal_autocheckpoint` had already flushed everything long before `close()`. The explicit checkpoint moved no frames on either run, so it cannot be what stopped the corruption. It stays as a correct durability fix for the case where a WAL does hold frames at close. **One version earlier both runs would have printed nothing, and this would have shipped as the presumed fix.**
+- **Still open, downgraded.** Candidates now: the build, dictionary v7->v8, the new `recordCloseHandle` write, and **concurrency** - which sits in the eliminated-suspect table on recollection alone, and could not have been recorded at dictionary v7 even if asked. Two clean runs move this from *reproduces every time* to *does not reproduce under a protocol where both applications are verified closed*.
+
+### fix - three instruments, each wrong in the way it was being trusted
+
+- **`applied` folded an empty WAL into a successful checkpoint** - `log === checkpointed` is also true of `0 === 0`, so "flushed four megabytes" and "there was nothing to flush" read alike. The verdict is now five-way: returned nothing / busy / short / **nothing to do** / applied. The ambiguity removed at one level had been reintroduced at the next.
+- **`diagnose-generation.mjs` suggested a rename that already existed** - the stamp is a date, so a second corruption in one day collides and the operator gets `Cannot create a file when that file already exists` from the tool whose job is to stop them guessing. It now picks a free name with a time suffix, and `alreadyRetired` was widened to match the longer names it generates.
+- **That stamp came from `toISOString()`** - any diagnosis after 20:00 ET would have filed a generation under **tomorrow's** date, permanently, in the directory name that *is* the evidence. Now `etDate()`. `queue-job.mjs` had the same bug writing `meta_job_request.requested_at` in UTC into a column the applications stamp in ET.
+- **`queue-job.mjs` told the operator to wait for a loop removed in v1.1.206** ("claims one every ~2 minutes; it must be running"). It now says nothing will pick the job up, and gives the Batch-view steps. **A script's closing instructions are documentation and go stale like the rest of it.**
+- `1,248` tests in the existing app, `303` in `core`.
+
 ## [1.1.210] - 2026-09-09
 
 `@tradeanalyzer/core` 0.3.4, dictionary version **8** (unchanged).

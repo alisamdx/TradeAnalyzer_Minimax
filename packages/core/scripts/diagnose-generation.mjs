@@ -40,8 +40,15 @@ import { checkpointAndClose, openGenerationExclusively } from './lib/generation-
 // that actually matters — with both applications, which call it before they open
 // a generation.
 let detectRedirect;
+let etDate;
 try {
   ({ detectRedirect } = await import('../dist/db/appdata-redirect.js'));
+  // The retirement stamp names a directory that is kept permanently as evidence,
+  // and it was built from `toISOString()` — so any diagnosis run after 20:00 ET
+  // would have filed the generation under **tomorrow's** date. Exactly the trap
+  // that put two time bases into `meta_open_handle` while it was being read as
+  // the forensic record of this same bug.
+  ({ etDate } = await import('../dist/time.js'));
 } catch {
   console.error(
     'packages/core is not built, so the redirect guard cannot be loaded — and opening a\n' +
@@ -449,17 +456,39 @@ if (schemaError !== null || integrityResult !== 'ok') {
 
   reportForensics(true);
 
+  // **Never suggest a name that is already taken.** The stamp is a date, so the
+  // second corruption in one day collides with the first, and the operator gets
+  // `Cannot create a file when that file already exists` from a tool whose whole
+  // job is to stop them guessing. Observed 2026-09-09, on the fifth corrupt
+  // generation, at the start of the run that finally came back clean.
+  //
+  // The time suffix is not decoration either: it is the only thing that says
+  // *which* seed produced the file once there are two from one day.
+  const retiredNameFor = (dir, name, dateStamp) => {
+    const parent = dirname(dir.replace(/[\\/]+$/, ''));
+    const base = `${name}-corrupt-${dateStamp}`;
+    if (!existsSync(join(parent, base))) return base;
+    const now = new Date();
+    const hhmm =
+      String(now.getHours()).padStart(2, '0') + String(now.getMinutes()).padStart(2, '0');
+    let candidate = `${base}-${hhmm}`;
+    for (let n = 2; existsSync(join(parent, candidate)); n += 1) {
+      candidate = `${base}-${hhmm}-${n}`;
+    }
+    return candidate;
+  };
+
   // **Rename, do not delete.** A corrupt generation is the only physical record
   // of how it got that way, and this script previously said `Remove-Item
   // -Recurse -Force`. That is the same shape as the evening this tool reported a
   // healthy database as empty and nearly had it deleted on the strength of it —
   // and a generation is cheap to rebuild (the jobs re-run) while the evidence is
   // not reproducible at all.
-  const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const stamp = etDate().replace(/-/g, '');
   // Both separators: the path may arrive with either, and dropping the
   // backslash would leave a Windows path unsplit and name the whole thing.
   const genName = genDir.replace(/[\\/]+$/, '').split(/[\\/]/).pop();
-  const alreadyRetired = /-corrupt-\d{8}$/.test(genName ?? '');
+  const alreadyRetired = /-corrupt-\d{8}(-\d{4})?(-\d+)?$/.test(genName ?? '');
   // A generation that has already been retired needs no advice — it is evidence
   // sitting where it belongs. Suggesting a rename here produced
   // `gen-001-corrupt-20260907-corrupt-20260909`, which is the tell that the
@@ -472,7 +501,7 @@ if (schemaError !== null || integrityResult !== 'ok') {
     console.log('\nRecovery — rename, never delete: this file is the only record of how it broke,');
     console.log('and the generation itself is cheap to rebuild by re-running the jobs. Close both');
     console.log('applications, then:');
-    console.log(`  Rename-Item "${genDir}" "${genName}-corrupt-${stamp}"`);
+    console.log(`  Rename-Item "${genDir}" "${retiredNameFor(genDir, genName, stamp)}"`);
     console.log('  # then launch TradeAnalyzer 2 once — it recreates the generation and the pointer');
     console.log('The archive directory is append-only and separate; it is unaffected either way.');
   }

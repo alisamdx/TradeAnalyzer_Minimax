@@ -40,6 +40,11 @@ import {
   openGenerationExclusively,
   resolveGenerationPointer
 } from './lib/generation-access.mjs';
+// `requested_at` sits in the same table the applications stamp, and this script
+// used `toISOString()` — UTC. That is precisely how `meta_open_handle` came to
+// hold two rows a day apart in two time bases, in the forensic record of the
+// corruption, on 2026-09-08. One builder, in `core`, for every writer.
+import { etTimestamp } from '../dist/time.js';
 
 // The redirect probe lives in `core` and nowhere else, and the *refusal* now
 // lives in `openGenerationExclusively` rather than here. This script used to
@@ -107,7 +112,7 @@ const info = db
     `INSERT INTO meta_job_request (requested_at, requested_by, run_kind, params_json, state)
      VALUES (?, ?, ?, ?, 'queued')`
   )
-  .run(new Date().toISOString(), 'queue-job.mjs (dev)', kind, paramsArg);
+  .run(etTimestamp(), 'queue-job.mjs (dev)', kind, paramsArg);
 
 // Read back through a fresh statement, so the printed confirmation is what the
 // file holds rather than what we believe we wrote. That distinction stopped
@@ -115,11 +120,18 @@ const info = db
 // because the previous insert had never reached the file.
 const queued = db.prepare("SELECT COUNT(*) AS n FROM meta_job_request WHERE state = 'queued'").get();
 
+// This used to say the handler "claims one every ~2 minutes; it must be
+// running". That loop was removed in v1.1.206 — it re-claimed a request whose
+// terminal state could not be written and sent ~70 identical RED gate emails —
+// so the advice had been telling the operator to wait for something that no
+// longer exists. **A script's closing instructions are documentation, and they
+// go stale exactly like the rest of it.**
 console.log(
   `Queued ${kind} as request ${info.lastInsertRowid} in ` +
     `gen-${String(currentGeneration).padStart(3, '0')} (${dbPath}).\n` +
-    `${queued.n} request(s) now queued. The existing app's collector-oneshot handler claims one\n` +
-    'every ~2 minutes; it must be running. Watch logs/errors/ for a `collector-oneshot:tick` line.'
+    `${queued.n} request(s) now queued. NOTHING WILL PICK IT UP ON ITS OWN.\n` +
+    'Run it by hand: launch TradeAnalyzer, then Batch view -> "Collector one-shot jobs" -> Run Now.\n' +
+    '(The job shows as *(disabled)*, which means only that it never runs unattended.)'
 );
 
 // Durable before this process exits, and loud if it is not.
