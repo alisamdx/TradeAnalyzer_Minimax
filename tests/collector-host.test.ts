@@ -22,7 +22,19 @@ import { join } from 'node:path';
  * documentation, and the rule it teaches is "stop explaining the rule".
  */
 function stripComments(src: string): string {
-  return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+  return (
+    src
+      // **Newlines normalised first.** Several assertions below slice on a
+      // literal `"registerJob(\n    'data-collector'"`, which is line-ending
+      // dependent — and with `core.autocrlf` on, a fresh clone checks these
+      // files out as CRLF, so the pattern silently matches nothing and the
+      // scan passes over an empty string. A source guard that goes vacuous on
+      // somebody else's machine is worse than no guard, because it reports
+      // green either way.
+      .replace(/\r\n/g, '\n')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/(^|[^:])\/\/.*$/gm, '$1')
+  );
 }
 
 const SRC = join(process.cwd(), 'src', 'main');
@@ -327,14 +339,21 @@ describe('registration in the existing app', () => {
     expect(block).toContain('afterCloseOnly: true');
   });
 
-  it('registers all three collector jobs DISABLED — manual runs only', () => {
-    // v1.1.206. Every automatic trigger is off: no daily schedule, no startup
-    // run, and `enabled: false` keeps them out of the orchestrator chain, which
-    // is the one that actually runs jobs twice a trading day.
+  it('schedules the two daily collector jobs and leaves the one-shot manual', () => {
+    // v1.1.206 switched all three off after 70 RED gate emails in a day;
+    // v1.1.216 puts the two SCHEDULED ones back. Both causes are gone — the
+    // 2-minute claim loop that emitted them was deleted in the same version,
+    // and the generation has since survived four consecutive clean seeds.
     //
-    // They stay registered on purpose. `runJob` never consulted `enabled`, so
-    // the Batch view can still run them by hand — "off" means "does not run on
-    // its own", not "cannot be run".
+    // What made it necessary rather than merely safe: the pilot's 20-clean-day
+    // exit and the IV bootstrap's 20-paired-day overlap advance only on days
+    // the collector actually runs, and 20 *consecutive* days is precisely what
+    // intermittent attention cannot produce.
+    //
+    // `collector-oneshot` stays off. It carried the retry loop, and a one-shot
+    // is operator-initiated by nature. `runJob` never consulted `enabled`, so
+    // its Run button works regardless — "off" means "does not start on its
+    // own", not "cannot be run".
     const block = index.slice(
       index.indexOf("registerJob(\n    'data-collector'"),
       index.indexOf("registerJob('batch-orchestrator'")
@@ -343,9 +362,32 @@ describe('registration in the existing app', () => {
     for (const id of ["'data-collector'", "'collector-watchdog'", "'collector-oneshot'"]) {
       expect(block, id).toContain(id);
     }
-    expect(block.match(/enabled: false/g) ?? []).toHaveLength(3);
-    expect(block.match(/dailyScheduleEnabled: false/g) ?? []).toHaveLength(3);
+    // Counts, so flipping any single job breaks this rather than one of them
+    // silently drifting to match the others.
+    expect(block.match(/enabled: true/g) ?? []).toHaveLength(2);
+    expect(block.match(/enabled: false/g) ?? []).toHaveLength(1);
+    expect(block.match(/dailyScheduleEnabled: true/g) ?? []).toHaveLength(2);
+    // Nothing runs at startup either way — the orchestrator drives the chain.
     expect(block.match(/runOnStartup: false/g) ?? []).toHaveLength(3);
+  });
+
+  it('moves the LIVE rows with a migration, because registration only seeds a fresh install', () => {
+    // `registerJob` uses INSERT OR IGNORE, so the options above never reach an
+    // existing `batch_jobs` row — the same frozen-column trap as
+    // `sequence_order`, `config_json` and `after_close_only`, and the reason
+    // migration 080 was needed to switch them off in the first place.
+    const sql = readFileSync(
+      join(process.cwd(), 'migrations', '082_collector_jobs_back_on_schedule.sql'),
+      'utf8'
+    );
+    expect(sql).toMatch(/enabled\s*=\s*1/);
+    expect(sql).toContain("'data-collector'");
+    expect(sql).toContain("'collector-watchdog'");
+    // The one-shot must not be switched on by the live migration either. That
+    // file names it in a comment explaining the omission, so the assertion is
+    // on executable SQL rather than on the whole text.
+    const executable = sql.replace(/^\s*--.*$/gm, '');
+    expect(executable).not.toContain('collector-oneshot');
   });
 
   it('has no automatic claim loop at all', () => {

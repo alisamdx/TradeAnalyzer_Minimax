@@ -783,21 +783,30 @@ app.whenReady().then(() => {
   // block never having run — which is exactly the ambiguity that cost an
   // afternoon on 2026-09-07.
   try {
-  // ── All three are registered DISABLED (v1.1.206) ────────────────────────────
+  // ── The two SCHEDULED jobs are back on; the one-shot stays manual (v1.1.216) ─
   //
-  // `enabled: false` means registered and runnable by hand from the Batch view,
-  // never triggered on its own — no daily schedule, no orchestrator chain, no
-  // startup run. That is the right setting while the generation they write into
-  // is still being stabilised, and it was not the setting they shipped with.
+  // They were switched off wholesale in v1.1.206 after the collector emailed a
+  // RED gate report 70 times in a day. Both reasons for that are now gone: the
+  // 2-minute claim loop — the actual emitter — was deleted in the same version,
+  // and the generation has survived four consecutive clean seeds.
   //
-  // What that cost: gen-001 is currently malformed, so `finishJob` cannot write
-  // a terminal state for a claimed request. The row stays `queued`, the
-  // 2-minute claim loop re-claims it, the run fails again, and the gate emails
-  // again — 70 runs and an inbox full of RED before anyone could act on the
-  // first one. **An automatic retry with no terminal state is an unbounded
-  // retry**, and the operator's mailbox is where it surfaces.
+  // **What made re-enabling necessary rather than merely safe**: the pilot's
+  // 20-clean-day exit criterion and the IV bootstrap's 20-paired-day overlap
+  // both advance only on days the collector actually runs. Left manual, the
+  // pilot progresses when somebody remembers, which is not a pilot.
   //
-  // Turning them back on is one edit per job in the Batch view.
+  // `collector-oneshot` stays `enabled: false` deliberately. It is the one that
+  // carried the retry loop, and a one-shot is operator-initiated by nature — it
+  // has nothing to do on a schedule. Its Run button is unaffected either way;
+  // `BatchService.runJob` has never consulted this column.
+  //
+  // The seeded options here only reach a FRESH install (`INSERT OR IGNORE`), so
+  // migration 082 moves the live rows. Same frozen-column trap as
+  // `sequence_order`, `config_json` and `after_close_only` before it.
+  //
+  // A red gate now emails once a day, which is the interface working. The
+  // failure being avoided was never "an email" — it was 70 of them arriving
+  // faster than one could be acted on.
   batchService.registerJob(
     'data-collector',
     createCollectorDailyJob({ makeHost: makeCollectorHost, todayET }),
@@ -807,8 +816,8 @@ app.whenReady().then(() => {
       // watchdog catches the case where the wait swallowed the day. Kept as the
       // seeded time so re-enabling is a single toggle rather than a decision.
       dailyScheduleTime: '17:05',
-      dailyScheduleEnabled: false,
-      enabled: false,
+      dailyScheduleEnabled: true,
+      enabled: true,
       runOnStartup: false,
       afterCloseOnly: true,
     },
@@ -818,12 +827,13 @@ app.whenReady().then(() => {
     'collector-watchdog',
     createCollectorWatchdogJob({ makeHost: makeCollectorHost, todayET }),
     {
-      // The watchdog exists to email when no daily run happened. With the daily
-      // run off by design, leaving the watchdog on would email that every single
-      // night — a NO RUN alarm for a run nobody scheduled.
+      // The watchdog emails when no daily run happened, so it is only coherent
+      // while the daily run is scheduled — with the run off, it would alarm
+      // every night about a run nobody asked for. The two are switched together
+      // and migration 081/082 keeps the live rows in step.
       dailyScheduleTime: '19:30',
-      dailyScheduleEnabled: false,
-      enabled: false,
+      dailyScheduleEnabled: true,
+      enabled: true,
       runOnStartup: false,
       afterCloseOnly: true,
     },

@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.1.216] - 2026-09-09
+
+Migration **082**. No `core` change.
+
+### The two scheduled collector jobs go back on; the one-shot stays manual
+
+- `data-collector` (17:05) and `collector-watchdog` (19:30) are enabled again. All three were switched off in v1.1.206 after 70 RED gate emails in a day; both causes are gone — the 2-minute claim loop that emitted them was deleted in that same version, and the generation has since survived **four consecutive clean seeds**.
+- **Necessary rather than merely safe**: the pilot's 20-clean-day exit criterion and the IV bootstrap's 20-paired-day overlap advance only on days the collector actually runs, and twenty *consecutive* days is precisely what intermittent attention cannot produce. Keeping the freeze would have quietly meant the pilot could never finish.
+- `collector-oneshot` stays off — it carried the retry loop, and a one-shot has nothing to do on a schedule. Its Run button is unaffected; `runJob` has never consulted `enabled`.
+- The two scheduled jobs move **together**: the watchdog emails when no daily run happened, so with the run off it alarms nightly about a run nobody scheduled, and with it on it is what notices a swallowed day.
+- **Migration 082** moves the live rows, because `registerJob` uses `INSERT OR IGNORE` and only seeds a fresh install. A test reads that SQL and asserts the one-shot is not in it, checking executable statements rather than the whole file (the migration names it in a comment explaining the omission).
+- A red gate now emails once a day, which is the interface working. The failure being avoided was never "an email" — it was seventy arriving faster than one could be acted on.
+
+### fix - a source-scanning test that went vacuous on line endings
+
+- `tests/collector-host.test.ts` slices `index.ts` on a literal `"registerJob(\n    'data-collector'"`. With `core.autocrlf` on, a fresh clone checks that file out as **CRLF**, the pattern matches nothing, and every assertion in the block runs against an empty string and passes. Newlines are now normalised in `stripComments` before any pattern touches the source. Found because an edit rewrote the file as CRLF and the test went red — the lucky version; the unlucky one is a clean checkout elsewhere reporting green over a guard examining nothing.
+- `1,254` tests.
+
 ## [1.1.215] - 2026-09-09
 
 `@tradeanalyzer/core` 0.3.6, dictionary **v10**.
