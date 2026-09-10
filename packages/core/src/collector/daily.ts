@@ -6,6 +6,7 @@ import { runBarsPhase, runQuotesPhase, runActionsPhase } from './phases/market.j
 import { runAccountPhase } from './phases/account.js';
 import { runChainSubsetPhase, runChainsPhase } from './phases/chains.js';
 import { runEventsPhase } from './phases/events.js';
+import { runDerivePhase } from './phases/derive.js';
 import { ALL_CHECKS } from '../qa/registry.js';
 import { runGate, type Verdict } from '../qa/gate.js';
 import { buildStatusEmail } from '../qa/email.js';
@@ -14,8 +15,9 @@ import { COLLECTOR_VERSION } from '../version.js';
 /**
  * The daily run — 04 §2.
  *
- * At B7a this is phases 0 through 8 plus the gate and the email. Phase 9 (the
- * IV derivation) arrives with the bootstrap in B7b.
+ * At B7b this is phases 0 through 9 plus the gate and the email — phase 9, the
+ * IV derivation, landed here; the `bootstrap_iv` load beside it is a one-shot,
+ * not part of the daily chain.
  *
  * Phase order is not arbitrary. Bars precede the chain subset because the subset
  * rule reads their dollar volume; the account precedes the subset and the chains
@@ -121,6 +123,15 @@ export async function runDaily(
       for (const [name, sub] of Object.entries(c)) {
         domains[`events_${name}`] = { expected: sub.calls, stored: sub.stored };
       }
+    });
+    await attempt('derive', () => {
+      // Phase 9 — the only phase that calls no provider, so it runs last and
+      // reads what phase 7 just stored. It is deliberately inside the same
+      // `attempt` wrapper as the rest: a derivation that throws must cost the
+      // gate nothing that phase 7's own counts have not already reported.
+      const c = runDerivePhase(db, host, run);
+      domains['derive_iv30'] = { expected: c.tickers, stored: c.ok };
+      return Promise.resolve();
     });
   } catch {
     // Cancellation only. The current response was already archived and ingested

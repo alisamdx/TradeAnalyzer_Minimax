@@ -66,6 +66,29 @@ Dictionary v8 → v9. The table is empty in every generation, so the empty-table
 rebuild added at B7a applies it in place — the first time that rule has been
 load-bearing rather than defensive.
 
+### Phase 9 is wired, and runs last
+
+`runDerivePhase` reads what phase 7 stored and writes a row per ticker —
+**including the tickers it could not compute**, because storing only the
+successes would make "we could not price this" indistinguishable from "we never
+looked". It is the only phase that calls no provider, so it runs last, and a day
+with no chain is a no-op rather than an error: phase 7's own counts already
+report an absent chain, and failing here would report one problem twice.
+
+It resolves supersession the way every reader of an append-only table must —
+latest `observed_at` per `osi_symbol` — rather than reading whatever rows come
+back. A derivation that averaged two observations of one contract would produce
+a number that depends on how often the collector happened to run that day.
+
+Six tests against a real generation rather than a mock, which is the point: the
+column phase 9 could not fill was NOT NULL with a foreign key, and a mock would
+have accepted it cheerfully. Two of the six failures while writing them were the
+schema being right and the fixture being wrong — `price_status` is not
+`quote_status`, and the P3 status CHECK refused an `invalid` status carrying a
+usable-looking number.
+
+`324` tests in `core`.
+
 ---
 
 ## Two clean seeds, and the fix everyone expected did nothing (2026-09-09)

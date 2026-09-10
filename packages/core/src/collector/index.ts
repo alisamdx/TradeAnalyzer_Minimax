@@ -102,3 +102,9 @@ export type { IndexedFiling } from '../ingest/edgar.js';
 
 export { runBackfillBars, backfillQueueClear, BACKFILL_RULE } from './backfill.js';
 export type { BackfillReport } from './backfill.js';
+
+// Phase 9 (B7b). Exported alongside `runDaily` because a replay runs the
+// derivation over a rebuilt raw layer, and QC-951's equivalence check compares
+// derived rows as well as raw ones.
+export { runDerivePhase } from './phases/derive.js';
+export type { DerivePhaseCounts } from './phases/derive.js';
