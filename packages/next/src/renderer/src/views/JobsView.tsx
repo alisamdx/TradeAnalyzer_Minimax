@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { JobCardDto, JobRequestDto, JobsDto, ResetPreviewDto, ResetResultDto } from '../../../shared/types.js';
+import type {
+  JobCardDto, JobRequestDto, JobsDto, ReplayReportDto, ReplayTableDto, ResetPreviewDto, ResetResultDto
+} from '../../../shared/types.js';
 import type { QueueableKind } from '../../../shared/deeplink.js';
 import { When } from './when.js';
 
 /**
- * The Jobs view — 05 §7, B9a.
+ * The Jobs view — 05 §7, B9a/B9b.
  *
  * **It queues; it does not execute.** A Run here writes one request row. The
  * old app executes it, because it holds the provider transports and the E*Trade
@@ -27,6 +29,7 @@ export function JobsView({ onGenerationChanged }: { onGenerationChanged: () => v
   const [notice, setNotice] = useState<{ tone: 'ok' | 'refused'; text: string } | null>(null);
   const [arming, setArming] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<number | null>(null);
+  const [replayRun, setReplayRun] = useState('');
 
   const load = useCallback(async () => {
     const r = await window.api.jobs.overview();
@@ -46,12 +49,19 @@ export function JobsView({ onGenerationChanged }: { onGenerationChanged: () => v
 
   const queue = async (kind: string): Promise<void> => {
     setArming(null);
-    const r = await window.api.jobs.queue(kind as QueueableKind);
+    let params: { runId?: number } | undefined;
+    if (kind === 'replay' && replayRun.trim() !== '') {
+      const n = Number(replayRun.trim());
+      // Sent as given; the main process checks it names a completed daily run.
+      params = { runId: n };
+    }
+    const r = await window.api.jobs.queue(kind as QueueableKind, params);
     setNotice(
       r.ok
         ? { tone: 'ok', text: `Queued as request ${r.data}. Now run "Collector one-shot jobs" in TradeAnalyzer's Batch view — nothing picks it up on its own.` }
         : { tone: 'refused', text: r.error }
     );
+    if (r.ok) setReplayRun('');
     await load();
   };
 
@@ -92,6 +102,16 @@ export function JobsView({ onGenerationChanged }: { onGenerationChanged: () => v
                 onArm={() => setArming(c.kind)}
                 onDisarm={() => setArming(null)}
                 onQueue={() => void queue(c.kind)}
+                extra={
+                  c.kind === 'replay' ? (
+                    <input
+                      className="run-input"
+                      placeholder="run id (blank = latest daily run)"
+                      value={replayRun}
+                      onChange={(e) => setReplayRun(e.target.value.replace(/[^0-9]/g, ''))}
+                    />
+                  ) : null
+                }
               />
             ))}
           </div>
@@ -130,13 +150,14 @@ export function JobsView({ onGenerationChanged }: { onGenerationChanged: () => v
 }
 
 function Card({
-  card, armed, onArm, onDisarm, onQueue
+  card, armed, onArm, onDisarm, onQueue, extra
 }: {
   card: JobCardDto;
   armed: boolean;
   onArm: () => void;
   onDisarm: () => void;
   onQueue: () => void;
+  extra: JSX.Element | null;
 }): JSX.Element {
   const pending = card.last !== null && LIVE_STATES.has(card.last.state);
   return (
@@ -148,7 +169,8 @@ function Card({
         <p>
           Last: request {card.last.id} ·{' '}
           <span className={`state-tag state-${card.last.state}`}>{card.last.state}</span>
-          {card.last.gate && <> · <span className={`verdict-${card.last.gate}`}>{card.last.gate}</span></>}
+          {card.last.replay && <> · <OutcomeTag outcome={card.last.replay.outcome} /></>}
+          {!card.last.replay && card.last.gate && <> · <span className={`verdict-${card.last.gate}`}>{card.last.gate}</span></>}
           {' · '}<When iso={card.last.finishedAt ?? card.last.queuedAt} />
         </p>
       ) : (
@@ -165,7 +187,10 @@ function Card({
           <button className="btn" onClick={onDisarm}>Cancel</button>
         </div>
       ) : (
-        <button className="btn" onClick={onArm}>Run…</button>
+        <div className="confirm-row">
+          {extra}
+          <button className="btn" onClick={onArm}>Run…</button>
+        </div>
       )}
     </div>
   );
@@ -199,7 +224,11 @@ function RequestRows({
         <td>{q.claimedAt ? <><When iso={q.claimedAt} /> <span className="muted">{q.claimedBy}</span></> : <span className="muted">—</span>}</td>
         <td><When iso={q.finishedAt} /></td>
         <td className="num">{q.runId ?? <span className="muted">—</span>}</td>
-        <td className={q.gate ? `verdict-${q.gate}` : 'muted'}>{q.gate ?? '—'}</td>
+        <td>
+          {q.replay
+            ? <OutcomeTag outcome={q.replay.outcome} />
+            : <span className={q.gate ? `verdict-${q.gate}` : 'muted'}>{q.gate ?? '—'}</span>}
+        </td>
         <td>
           {q.state === 'queued' && <button className="link" onClick={onCancel}>withdraw</button>}
           {(q.result || q.error) && <button className="link" onClick={onToggle}>{expanded ? 'hide' : 'report'}</button>}
@@ -209,11 +238,126 @@ function RequestRows({
         <tr className="legs-row">
           <td colSpan={10}>
             {q.error && <p className="bad">{q.error}</p>}
-            {q.result && <pre className="job-result">{q.result}</pre>}
+            {q.replay ? <ReplayDiff report={q.replay} /> : q.result && <pre className="job-result">{q.result}</pre>}
           </td>
         </tr>
       )}
     </>
+  );
+}
+
+const OUTCOME_LABEL: Readonly<Record<ReplayReportDto['outcome'], string>> = {
+  equal: 'equal',
+  equal_on_replayed: 'equal where replayed',
+  different: 'different',
+  nothing_replayable: 'nothing replayable'
+};
+
+function OutcomeTag({ outcome }: { outcome: ReplayReportDto['outcome'] }): JSX.Element {
+  const tone = outcome === 'equal' ? 'green' : outcome === 'different' ? 'red' : 'amber';
+  return <span className={`verdict-${tone}`}>{OUTCOME_LABEL[outcome]}</span>;
+}
+
+/**
+ * The diff viewer (05 §7). Coverage first, because an "equal" over half the
+ * responses and an "equal" over all of them are different findings — and
+ * "nothing replayable" is shown as its own outcome, never as a pass.
+ */
+function ReplayDiff({ report: r }: { report: ReplayReportDto }): JSX.Element {
+  const gaps = r.beforeRecipes + r.unreadable + r.digestMismatch + r.badRecipe;
+  return (
+    <div className="replay">
+      <p>
+        <OutcomeTag outcome={r.outcome} /> — run {r.sourceRuns.join(', ')} ({r.tradingDates.join(', ')}):{' '}
+        <strong>{r.replayed}</strong> of {r.considered} responses replayed
+        {r.noIngest > 0 && <span className="muted">; {r.noIngest} archived for provenance only, with no parser to re-run</span>}.
+      </p>
+      {gaps > 0 && (
+        <ul className="replay-gaps">
+          {r.beforeRecipes > 0 && <li>{r.beforeRecipes} captured before recipes were recorded — cannot be replayed without guessing how they were parsed</li>}
+          {r.unreadable > 0 && <li className="bad">{r.unreadable} whose archive line could not be read</li>}
+          {r.digestMismatch > 0 && <li className="bad">{r.digestMismatch} whose archived body no longer matches its recorded digest</li>}
+          {r.badRecipe > 0 && <li className="bad">{r.badRecipe} whose recorded recipe the current code cannot build</li>}
+        </ul>
+      )}
+      {r.derivedNote && <p className="muted">{r.derivedNote}</p>}
+      {r.problems.length > 0 && <pre className="job-result">{r.problems.join('\n')}</pre>}
+      {r.scratchPath && <p>Scratch database kept as evidence: <span className="path mono">{r.scratchPath}</span></p>}
+
+      {r.tables.length > 0 && (
+        <table className="grid">
+          <thead>
+            <tr>
+              <th>Table</th>
+              <th className="num">Stored</th><th className="num">Replayed</th><th className="num">Matched</th>
+              <th className="num" title="The replay produced it; the generation does not hold it">Added</th>
+              <th className="num" title="The generation holds it; the replay did not produce it">Removed</th>
+              <th className="num" title="Of those, the same fact with a different value">Changed</th>
+            </tr>
+          </thead>
+          <tbody>
+            {r.tables.map((t) => <TableRow key={t.table} t={t} />)}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+function TableRow({ t }: { t: ReplayTableDto }): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const differs = t.added > 0 || t.removed > 0;
+  return (
+    <>
+      <tr className={differs ? 'clickable' : ''} onClick={() => differs && setOpen(!open)}>
+        <td className="mono">{t.table}</td>
+        <td className="num">{t.sourceRows}</td>
+        <td className="num">{t.replayRows}</td>
+        <td className="num">{t.matched}</td>
+        <td className={t.added > 0 ? 'num bad' : 'num'}>{t.added}</td>
+        <td className={t.removed > 0 ? 'num bad' : 'num'}>{t.removed}</td>
+        <td className={t.changed > 0 ? 'num bad' : 'num'}>{t.changed}</td>
+      </tr>
+      {open && (
+        <tr className="legs-row">
+          <td colSpan={7}>
+            <Samples label="Removed (stored, not reproduced)" rows={t.removedSamples} columns={t.columns} />
+            <Samples label="Added (reproduced, not stored)" rows={t.addedSamples} columns={t.columns} />
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+/** Sample rows, drawn from whatever columns they carry — the renderer names none (AC-13). */
+function Samples({
+  label, rows, columns
+}: {
+  label: string;
+  rows: readonly Readonly<Record<string, unknown>>[];
+  columns: readonly string[];
+}): JSX.Element | null {
+  if (rows.length === 0) return null;
+  return (
+    <div className="samples">
+      <h3>{label}</h3>
+      <div className="table-scroll short">
+        <table className="data-table nested">
+          <thead><tr>{columns.map((c) => <th key={c}>{c}</th>)}</tr></thead>
+          <tbody>
+            {rows.map((row, i) => (
+              <tr key={i}>
+                {columns.map((c) => {
+                  const v = row[c];
+                  return <td key={c}>{v === null || v === undefined ? <span className="muted">null</span> : String(v)}</td>;
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 

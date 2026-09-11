@@ -455,3 +455,50 @@ describe('registration in the existing app', () => {
     );
   });
 });
+
+describe('replay in the collector host (NewApp B9b)', () => {
+  const scratch = host.slice(host.indexOf('openScratchDb(name: string)'), host.indexOf('archiveRoot(): string'));
+
+  it('opens a replay scratch database that can never become a generation', () => {
+    // Generation creation belongs to TradeAnalyzer 2 (the rule that made this
+    // host refuse to create a database at all). A scratch file lives under the
+    // generation's `replay/` directory, gets no `meta_generation` row and is
+    // named by no pointer — so it cannot be mistaken for one.
+    expect(scratch.length).toBeGreaterThan(0);
+    expect(scratch).toContain("'replay'");
+    expect(scratch).not.toContain('meta_generation');
+    expect(scratch).not.toMatch(/writePointer|data-root\.json/);
+    expect(scratch).toContain('assertNotRedirected');
+  });
+
+  it('refuses a scratch name that already exists, before opening anything', () => {
+    // A file already holding rows would be compared as if the replay wrote them.
+    const refusal = scratch.indexOf('existsSync(path)');
+    expect(refusal).toBeGreaterThan(-1);
+    expect(refusal).toBeLessThan(scratch.indexOf('new Database(path)'));
+  });
+
+  it('deletes what discard() is asked to delete, and nothing outside replay/', () => {
+    const discard = scratch.slice(scratch.indexOf('discard:'));
+    expect(discard).toContain('rmSync(path');
+    expect(discard).not.toMatch(/rmSync\((dbPath|dir)\b/);
+  });
+
+  it('runs replay here and still refuses reset, which TradeAnalyzer 2 performs itself', () => {
+    const implemented = oneshot.slice(oneshot.indexOf('const IMPLEMENTED'), oneshot.indexOf('export function createCollectorOneShotJob'));
+    expect(implemented).toContain("'replay'");
+    expect(implemented).not.toContain("'reset'");
+  });
+
+  it('reports a replay that found a difference as a successful job', () => {
+    // Same rule as a red gate: the diff is the deliverable, and a failed job
+    // would say the replay could not run.
+    const branch = oneshot.slice(
+      oneshot.indexOf("request.runKind === 'replay'"),
+      oneshot.indexOf("request.runKind === 'legacy_import'")
+    );
+    expect(branch).toContain('runReplayJob');
+    expect(branch).toContain("status: 'success'");
+    expect(branch).toContain('finishJob');
+  });
+});

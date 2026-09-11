@@ -1,8 +1,8 @@
 import { app, safeStorage } from 'electron';
 import Database from 'better-sqlite3';
-import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import type { CollectorHost, ProviderResponse, SqliteLike } from '@tradeanalyzer/core';
+import type { CollectorHost, ProviderResponse, ScratchDb, SqliteLike } from '@tradeanalyzer/core';
 import { applyDictionary, assertNotRedirected, etTimestamp, recordCloseHandle, recordOpenHandle, DICTIONARY_VERSION } from '@tradeanalyzer/core';
 import { etradeGetRaw, renewAccessToken, type OAuthCredentials } from '../services/etrade-auth.js';
 import type { TokenBucketRateLimiter } from '../services/rate-limiter.js';
@@ -258,6 +258,55 @@ export class ElectronCollectorHost implements CollectorHost {
 
     this.db.close();
     this.db = undefined;
+  }
+
+  /**
+   * A replay's scratch database — NewApp 04 §7.5, B9b.
+   *
+   * **Never a generation.** It lives under the generation's `replay/`
+   * directory, no pointer names it, and it gets no `meta_generation` row — so
+   * nothing can mistake it for one, and the rule that generation creation
+   * belongs to TradeAnalyzer 2 is untouched. It exists here because a replay
+   * must decrypt account-domain archive lines, and only this app's safeStorage
+   * key can.
+   *
+   * Refuses a name that already exists: a file already holding rows would be
+   * compared as if the replay had written them. `journal_mode = DELETE`, not
+   * WAL — one process, one writer, and a WAL would only leave two more files
+   * behind for `discard()` to clean up.
+   */
+  openScratchDb(name: string): ScratchDb {
+    if (!/^[A-Za-z0-9_.-]+$/.test(name)) {
+      throw new Error(`Refusing scratch database name "${name}": letters, digits, dot, dash and underscore only.`);
+    }
+    const dir = join(dirname(generationPaths(this.pointer).dbPath), 'replay');
+    // Same refusal as the generation itself: under a redirected %APPDATA% this
+    // would write a private copy nobody else could see.
+    assertNotRedirected([dir], 'TradeAnalyzer');
+    const path = join(dir, `${name}.sqlite`);
+    if (existsSync(path)) {
+      throw new Error(`A scratch database already exists at ${path}; refusing to replay into one that holds rows.`);
+    }
+    mkdirSync(dir, { recursive: true });
+
+    const db = new Database(path);
+    db.pragma('journal_mode = DELETE');
+    db.pragma('foreign_keys = ON');
+    applyDictionary(db as unknown as SqliteLike);
+
+    const close = (): void => {
+      if (db.open) db.close();
+    };
+    return {
+      db: db as unknown as SqliteLike,
+      path,
+      close,
+      discard: () => {
+        close();
+        rmSync(path, { force: true });
+        rmSync(`${path}-journal`, { force: true });
+      }
+    };
   }
 
   archiveRoot(): string {

@@ -100,12 +100,13 @@ export function findDeepLink(argv: readonly string[]): string | undefined {
 /**
  * The one-shot kinds the Jobs view may queue.
  *
- * Not `replay` — it waits on the ingest arguments B9b records at capture — and
- * not `reset`, which the new exe executes itself (04 §7.6) and so never queues.
+ * Not `reset`, which the new exe executes itself (04 §7.6) and so never queues.
+ * `replay` joined at B9b, once captures started recording the recipe each
+ * response was parsed with — before that, a replay would have had to guess.
  * The main process refuses anything else, so a renderer bug cannot put a kind
  * on the queue that no host will run or that the wrong host would.
  */
-export const QUEUEABLE_KINDS = ['universe_seed', 'backfill_bars', 'bootstrap_iv', 'legacy_import'] as const;
+export const QUEUEABLE_KINDS = ['universe_seed', 'backfill_bars', 'bootstrap_iv', 'legacy_import', 'replay'] as const;
 export type QueueableKind = (typeof QUEUEABLE_KINDS)[number];
 
 export function isQueueableKind(kind: string): kind is QueueableKind {

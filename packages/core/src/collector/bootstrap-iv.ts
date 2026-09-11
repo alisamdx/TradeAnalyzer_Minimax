@@ -2,8 +2,9 @@ import type { SqliteLike } from '../db/sqlite-like.js';
 import type { CollectorHost } from './host.js';
 import { throwIfCancelled } from './host.js';
 import { captureResponse } from './capture.js';
+import { recipes } from '../ingest/recipes.js';
 import { beginRun, finishRun, captureRuleId, type RunHandle } from './run.js';
-import { makeIvBootstrapIngest, outOfBandCount, IVX_METHOD_NOTE } from '../ingest/iv-bootstrap.js';
+import { outOfBandCount, IVX_METHOD_NOTE } from '../ingest/iv-bootstrap.js';
 
 /**
  * `bootstrap_iv` — the one-time external IV history load (04 §7.3, Q17).
@@ -126,7 +127,7 @@ export async function runBootstrapIv(
         params: { symbol: ticker, from, to },
         response,
         captureRuleId: ruleId,
-        ingest: makeIvBootstrapIngest({ ticker, source, methodNote: IVX_METHOD_NOTE })
+        recipe: recipes.ivBootstrap({ ticker, source, methodNote: IVX_METHOD_NOTE })
       });
 
       if (result.parseStatus === 'ok' && result.rowsWritten > 0) {

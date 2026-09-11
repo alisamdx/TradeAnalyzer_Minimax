@@ -93,10 +93,13 @@ describe('finding the link a second instance was started with', () => {
 });
 
 describe('what the Jobs view may queue', () => {
-  it('never queues reset (executed here) or replay (B9b)', () => {
+  it('never queues reset, which this app performs itself', () => {
     expect(QUEUEABLE_KINDS).not.toContain('reset');
-    expect(QUEUEABLE_KINDS).not.toContain('replay');
     expect(isQueueableKind('reset')).toBe(false);
     expect(isQueueableKind('backfill_bars')).toBe(true);
+  });
+
+  it('queues replay from B9b, once captures record how each response was parsed', () => {
+    expect(isQueueableKind('replay')).toBe(true);
   });
 });

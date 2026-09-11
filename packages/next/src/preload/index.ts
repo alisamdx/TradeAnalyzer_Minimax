@@ -76,7 +76,7 @@ const api: NextApi = {
   },
   jobs: {
     overview: () => ipcRenderer.invoke('jobs:overview'),
-    queue: (kind) => ipcRenderer.invoke('jobs:queue', kind),
+    queue: (kind, params) => ipcRenderer.invoke('jobs:queue', kind, params ?? null),
     cancel: (requestId: number) => ipcRenderer.invoke('jobs:cancel', requestId),
     resetPreview: () => ipcRenderer.invoke('jobs:reset-preview'),
     reset: (reason: string, confirmation: string) => ipcRenderer.invoke('jobs:reset', reason, confirmation)

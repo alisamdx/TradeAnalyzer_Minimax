@@ -104,7 +104,7 @@ export function registerIpc(): void {
   handle('runs:detail', (runId: number) => runDetail(runId));
 
   handle('jobs:overview', () => jobsOverview());
-  handle('jobs:queue', (kind: string) => queueOneShot(kind));
+  handle('jobs:queue', (kind: string, params: unknown) => queueOneShot(kind, params));
   handle('jobs:cancel', (requestId: number) => cancelRequest(requestId));
   handle('jobs:reset-preview', () => previewReset());
   handle('jobs:reset', (reason: string, confirmation: string) => resetCurrentGeneration(reason, confirmation));

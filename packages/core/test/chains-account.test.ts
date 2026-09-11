@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { recipes } from '../src/ingest/recipes.js';
 import Database from 'better-sqlite3';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -470,7 +471,7 @@ describe('executed orders — the fills that supersede every estimate', () => {
       host: makeHost(), db: db(), runId: run.runId, asOfDate: DATE, provider: 'etrade',
       endpoint: '/v1/accounts/{accountKey}/orders', slug: 'account-orders', params: {},
       response: response(ordersBody(3.4)), captureRuleId: rule,
-      ingest: makeOrderIngest({ accountKey: KEY })
+      recipe: recipes.orders({ accountKey: KEY })
     });
     expect(result.parseStatus).toBe('ok');
     // Order plus leg: `parsed_row_count` counts children so AC-5 holds for every

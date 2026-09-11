@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.1.219] - 2026-09-10
+
+`@tradeanalyzer/core` 0.4.0 (dictionary v11), `@tradeanalyzer/next` 0.2.1. **NewApp B9b.**
+
+### Every collector capture now records how it was parsed
+
+- `core` 0.4.0 changes what the daily collector writes: each response gets a **recipe** — which parser, built with which arguments — in the new `meta_ingest_recipe` table, plus the capture rule it ran under on `meta_response`. Content-addressed, so the Form 4 CIK map and the earnings universe list are stored once, not per response. The account key is never recorded; the parsers only ever hashed it, so the recipe carries that digest.
+- The generation upgrades itself on open (two nullable columns and a new table — plain growth, asserted by a test on a populated v10 table).
+
+### `collector-oneshot` executes `replay`
+
+- The fifth implemented one-shot. Re-runs today's parsers over one daily run's archived responses into a scratch database under `gen-NNN/replay/` and compares the result with what is stored. It runs **here** because account archive lines are encrypted with this app's safeStorage key.
+- `ElectronCollectorHost.openScratchDb` creates that file. It can never become a generation: no `meta_generation` row, no pointer, refuses a name that exists, same redirect guard. The file is deleted when the replay is equal and kept as evidence when it is not.
+- A `different` verdict is a `success` batch result — the diff is the deliverable, the same rule as a red gate. `reset` is still refused here; TradeAnalyzer 2 performs it.
+- Runs captured before this version have no recipes and report **nothing replayable**, never equal.
+- `1,261` tests here, `420` in `core`, `48` in `next`.
+
 ## [1.1.218] - 2026-09-09
 
 `@tradeanalyzer/core` 0.3.8, `@tradeanalyzer/next` 0.1.4. **NewApp B8 complete.**

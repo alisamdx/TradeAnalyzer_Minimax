@@ -241,11 +241,14 @@ export function runLegacyImport(
           status: 200, body: JSON.stringify(rows),
           requestedAt: observedAt, respondedAt: observedAt
         },
-        captureRuleId: ruleId,
-        // Archiving only. The rows are written below, where the validator's
-        // verdict is also available to the rejection report — an ingest module
-        // returns rows and cannot also report what it refused.
-        ingest: () => []
+        captureRuleId: ruleId
+        // Archiving only, so no recipe. The rows are written below, where the
+        // validator's verdict is also available to the rejection report — an
+        // ingest module returns rows and cannot also report what it refused.
+        // This used to pass `ingest: () => []`, which from B9b would have been
+        // a recipe for "a parser that writes nothing", and a replay would then
+        // have reported every imported row as missing. No recipe says what is
+        // true: these rows are not the output of a parse.
       }).sourceResponseId;
 
     const ctx = {

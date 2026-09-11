@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { recipes } from '../src/ingest/recipes.js';
 import Database from 'better-sqlite3';
 import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -209,7 +210,7 @@ describe('AC-1 — every stored value can be traced to the response it came from
       host, db: raw as unknown as SqliteLike, runId: run.runId, asOfDate: '2026-09-06',
       provider: 'polygon', endpoint: '/v3/reference/tickers/AAPL', slug: 'reference-tickers',
       params: { ticker: 'AAPL' }, response: response(body), captureRuleId: ruleId(),
-      ingest: ingestTickerReference
+      recipe: recipes.tickerReference()
     });
     expect(result.parseError).toBeUndefined();
     expect(result.parseStatus).toBe('ok');
@@ -242,7 +243,7 @@ describe('AC-1 — every stored value can be traced to the response it came from
         provider: 'polygon', endpoint: `/v3/reference/tickers/${ticker}`, slug: 'reference-tickers',
         params: { ticker },
         response: response(JSON.stringify({ results: { ticker, name: ticker, type: 'CS', active: true } })),
-        captureRuleId: ruleId(), ingest: ingestTickerReference
+        captureRuleId: ruleId(), recipe: recipes.tickerReference()
       });
     }
     const rows = raw
@@ -267,7 +268,7 @@ describe('AC-1 — every stored value can be traced to the response it came from
       host, db: raw as unknown as SqliteLike, runId: run.runId, asOfDate: '2026-09-06',
       provider: 'polygon', endpoint: '/v3/reference/tickers/BAD', slug: 'reference-tickers',
       params: { ticker: 'BAD' }, response: response('this is not json'), captureRuleId: null,
-      ingest: ingestTickerReference
+      recipe: recipes.tickerReference()
     });
     expect(result.parseStatus).toBe('failed');
     expect(result.rowsWritten).toBe(0);
@@ -287,7 +288,7 @@ describe('AC-1 — every stored value can be traced to the response it came from
       provider: 'etrade', endpoint: '/v1/market/optionchains', slug: 'optionchains',
       params: { symbol: 'AAPL' },
       response: response('<Error><message>code 10031</message></Error>', 400),
-      captureRuleId: ruleId(), ingest: ingestTickerReference
+      captureRuleId: ruleId(), recipe: recipes.tickerReference()
     });
     expect(result.parseStatus).toBe('failed');
     const meta = raw.prepare('SELECT http_status, parse_status FROM meta_response').get();
@@ -318,7 +319,7 @@ describe('AC-2 — raw rows are never updated or deleted', () => {
       provider: 'polygon', endpoint: '/v3/reference/tickers/AAPL', slug: 'reference-tickers',
       params: { ticker: 'AAPL' },
       response: response(JSON.stringify({ results: { ticker: 'AAPL', name: 'Apple', type: 'CS', active: true } })),
-      captureRuleId: ruleId(), ingest: ingestTickerReference
+      captureRuleId: ruleId(), recipe: recipes.tickerReference()
     });
     expect(() => raw.exec("UPDATE raw_ticker_reference SET name = 'Tampered'")).toThrow(/append-only/);
     expect(() => raw.exec('DELETE FROM raw_ticker_reference')).toThrow(/append-only/);
@@ -338,7 +339,7 @@ describe('AC-2 — raw rows are never updated or deleted', () => {
           requestedAt: observedAt,
           respondedAt: observedAt
         },
-        captureRuleId: ruleId(), ingest: ingestTickerReference
+        captureRuleId: ruleId(), recipe: recipes.tickerReference()
       });
 
     capture(3.0e12, '2026-09-06T17:05:00-04:00');
@@ -361,7 +362,7 @@ describe('idempotence — for crash recovery and replay, and nothing more', () =
       host, db, runId: run.runId, asOfDate: '2026-09-06', provider: 'polygon' as const,
       endpoint: '/v3/reference/tickers/AAPL', slug: 'reference-tickers', params: { ticker: 'AAPL' },
       response: response(JSON.stringify({ results: { ticker: 'AAPL', name: 'Apple', type: 'CS', active: true } })),
-      captureRuleId: ruleId(), ingest: ingestTickerReference
+      captureRuleId: ruleId(), recipe: recipes.tickerReference()
     };
     const first = captureResponse(args);
     const second = captureResponse(args);
@@ -380,7 +381,7 @@ describe('idempotence — for crash recovery and replay, and nothing more', () =
     const base = {
       host, db, runId: run.runId, asOfDate: '2026-09-06', provider: 'polygon' as const,
       endpoint: '/v3/reference/tickers/AAPL', slug: 'reference-tickers', params: { ticker: 'AAPL' },
-      captureRuleId: ruleId(), ingest: ingestTickerReference
+      captureRuleId: ruleId(), recipe: recipes.tickerReference()
     };
     captureResponse({ ...base, response: response(JSON.stringify({ results: { ticker: 'AAPL', name: 'Apple', type: 'CS', active: true, market_cap: 1 } })) });
     const second = captureResponse({ ...base, response: response(JSON.stringify({ results: { ticker: 'AAPL', name: 'Apple', type: 'CS', active: true, market_cap: 2 } })) });
@@ -621,7 +622,7 @@ describe('universe membership — validity ranges, never an overwrite', () => {
         body: JSON.stringify({ results: { ticker: 'AAPL', name: 'Apple', type: 'CS', active: true } }),
         requestedAt: '2026-09-06T17:00:00-04:00', respondedAt: '2026-09-06T17:00:00-04:00'
       },
-      captureRuleId: ruleId(), ingest: ingestTickerReference
+      captureRuleId: ruleId(), recipe: recipes.tickerReference()
     });
     expect(referenceDue(db, '2026-09-20', ['AAPL', 'MSFT'])).toEqual(['MSFT']);
     expect(referenceDue(db, '2026-10-20', ['AAPL', 'MSFT'])).toEqual(['AAPL', 'MSFT']);

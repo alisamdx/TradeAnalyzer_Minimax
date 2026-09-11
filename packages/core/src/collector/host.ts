@@ -70,6 +70,15 @@ export interface CollectorHost {
   /** EDGAR, Treasury, Finnhub, FOMC/BLS. */
   httpGet(url: string, headers?: Record<string, string>): Promise<ProviderResponse>;
 
+  /**
+   * A fresh, empty database for a replay to write into (04 §7.5), inside the
+   * current generation's directory. Optional: only a host that runs replays
+   * needs it, and a host without it makes `runReplayJob` refuse with a reason.
+   * Must REFUSE a name that already exists — a scratch file that already holds
+   * rows would be compared as if the replay had written them.
+   */
+  openScratchDb?(name: string): ScratchDb;
+
   // ── environment ──────────────────────────────────────────────────────────
   /** ISO-8601 with offset, America/New_York. */
   nowET(): string;
@@ -89,6 +98,16 @@ export interface CollectorHost {
  * the collector's own callers are unchanged.
  */
 export type OperatorHost = Pick<CollectorHost, 'nowET' | 'hostApp'>;
+
+/** A replay's scratch database (04 §7.5). */
+export interface ScratchDb {
+  readonly db: SqliteLike;
+  /** Absolute path, reported so a kept scratch file can be found and inspected. */
+  readonly path: string;
+  close(): void;
+  /** Closes and deletes the file — used when the replay came out equal and there is nothing to keep. */
+  discard(): void;
+}
 
 /** Thrown when the host's abort signal fires. Distinguished so a cancelled run is recorded as `cancelled`, not `failed`. */
 export class CollectorCancelled extends Error {

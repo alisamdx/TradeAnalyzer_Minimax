@@ -8,10 +8,12 @@ import {
 import { currentDb, currentGeneration, generationDir } from './generation.js';
 import { operatorHost } from './operator.js';
 import { isQueueableKind, QUEUEABLE_KINDS } from '../shared/deeplink.js';
-import type { JobCardDto, JobRequestDto, JobsDto, ResetPreviewDto } from '../shared/types.js';
+import type {
+  JobCardDto, JobRequestDto, JobsDto, ReplayReportDto, ReplayTableDto, ResetPreviewDto
+} from '../shared/types.js';
 
 /**
- * The Jobs view's main-process half — 05 §7, B9a.
+ * The Jobs view's main-process half — 05 §7, B9a/B9b.
  *
  * **This view queues; it does not execute.** The old app holds the provider
  * transports and the E*Trade token (Q4), so a Run here inserts a
@@ -64,18 +66,15 @@ const CARDS: readonly Omit<JobCardDto, 'last'>[] = [
   },
   {
     kind: 'replay',
-    title: 'Replay the archive',
-    what: 'Re-ingests archived responses with the current code and compares the result over the dictionary\'s fact columns (AC-4).',
-    cost: 'No provider calls.',
-    queueable: false,
-    // Not decorative: the archive holds each response's bytes but not the
-    // arguments its parser was built with (the rule's expiration selection,
-    // the sticky set, the ids already stored, the account key), so a replay
-    // today would have to guess them — and a guessed replay reporting "equal"
-    // is a check that cannot fail on the case it exists for.
-    notYet:
-      'B9b. The archive keeps every response\'s bytes but not the arguments each parser was built with, ' +
-      'so a replay today would have to guess them. They will be recorded at capture first.'
+    title: 'Replay a day',
+    what:
+      'Re-runs today\'s parsers over one daily run\'s archived responses into a scratch file and compares the ' +
+      'result with what is stored, column by column (AC-4). Blank run id = the latest completed daily run.',
+    cost:
+      'No provider calls. Runs in TradeAnalyzer, the only app that can decrypt the account archive. Only runs ' +
+      'captured from core 0.4.0 on carry the recipes a replay needs — older ones report "nothing replayable".',
+    queueable: true,
+    notYet: null
   }
 ];
 
@@ -102,6 +101,61 @@ const SELECT_REQUESTS = `
     FROM meta_job_request q
     LEFT JOIN meta_run r ON r.run_id = q.run_id`;
 
+const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+const OUTCOMES = new Set(['equal', 'equal_on_replayed', 'different', 'nothing_replayable']);
+
+/**
+ * A replay's report, read defensively. It was written by the OTHER application
+ * — possibly a different build — so every field is checked rather than cast,
+ * and anything unrecognised leaves the diff viewer empty rather than wrong.
+ */
+function replayOf(kind: string, resultJson: string | null): ReplayReportDto | null {
+  if (kind !== 'replay' || resultJson === null) return null;
+  let r: Record<string, unknown>;
+  try {
+    r = JSON.parse(resultJson) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  const verdict = r['verdict'];
+  if (typeof verdict !== 'string' || !OUTCOMES.has(verdict)) return null;
+  const c = (r['coverage'] && typeof r['coverage'] === 'object' ? r['coverage'] : {}) as Record<string, unknown>;
+  const tables = (Array.isArray(r['tables']) ? r['tables'] : []) as Record<string, unknown>[];
+  const rowsOf = (v: unknown): Readonly<Record<string, unknown>>[] =>
+    Array.isArray(v) ? v.filter((x): x is Record<string, unknown> => x !== null && typeof x === 'object') : [];
+
+  return {
+    outcome: verdict as ReplayReportDto['outcome'],
+    sourceRuns: (Array.isArray(r['sourceRunIds']) ? r['sourceRunIds'] : []).filter((x): x is number => typeof x === 'number'),
+    tradingDates: (Array.isArray(r['tradingDates']) ? r['tradingDates'] : []).filter((x): x is string => typeof x === 'string'),
+    considered: num(c['considered']),
+    replayed: num(c['replayed']),
+    noIngest: num(c['noIngest']),
+    beforeRecipes: num(c['beforeRecipes']),
+    unreadable: num(c['unreadable']),
+    digestMismatch: num(c['digestMismatch']),
+    badRecipe: num(c['badRecipe']),
+    problems: (Array.isArray(r['problems']) ? r['problems'] : []).filter((x): x is string => typeof x === 'string'),
+    derivedCompared: r['derivedCompared'] === true,
+    derivedNote: typeof r['derivedNote'] === 'string' ? r['derivedNote'] : null,
+    scratchPath: typeof r['scratchPath'] === 'string' ? r['scratchPath'] : null,
+    tables: tables.map(
+      (t): ReplayTableDto => ({
+        table: typeof t['table'] === 'string' ? t['table'] : '?',
+        columns: (Array.isArray(t['columns']) ? t['columns'] : []).filter((x): x is string => typeof x === 'string'),
+        sourceRows: num(t['sourceRows']),
+        replayRows: num(t['replayRows']),
+        matched: num(t['matched']),
+        added: num(t['added']),
+        removed: num(t['removed']),
+        changed: num(t['changed']),
+        addedSamples: rowsOf(t['addedSamples']),
+        removedSamples: rowsOf(t['removedSamples'])
+      })
+    )
+  };
+}
+
 function toRequest(r: RequestRow, nowMs: number): JobRequestDto {
   const waitingMinutes =
     r.state === 'queued' ? Math.max(0, Math.floor((nowMs - Date.parse(r.requested_at)) / 60_000)) : null;
@@ -127,6 +181,7 @@ function toRequest(r: RequestRow, nowMs: number): JobRequestDto {
     stalled: waitingMinutes !== null && waitingMinutes >= STALL_THRESHOLD_MINUTES,
     error: r.error,
     result,
+    replay: replayOf(r.run_kind, r.result_json),
     gate: r.gate_verdict,
     runOutcome: r.run_status
   };
@@ -150,18 +205,46 @@ export function jobsOverview(): JobsDto {
 }
 
 /**
+ * The params a kind accepts, checked here rather than trusted from the
+ * renderer. Only `replay` takes any: an optional run id, which must name a
+ * completed daily run in this generation — a typo would otherwise sit in the
+ * queue until TradeAnalyzer claimed it and failed it minutes later.
+ */
+function paramsFor(kind: string, params: unknown): Readonly<Record<string, unknown>> {
+  const given = (params && typeof params === 'object' ? params : {}) as Record<string, unknown>;
+  if (kind !== 'replay') {
+    if (Object.keys(given).length > 0) throw new Error(`${kind} takes no parameters.`);
+    return {};
+  }
+  const runId = given['runId'];
+  if (runId === undefined || runId === null) return {};
+  if (typeof runId !== 'number' || !Number.isInteger(runId) || runId <= 0) {
+    throw new Error(`A replay's run id must be a positive whole number; got ${String(runId)}.`);
+  }
+  const run = currentDb()
+    .prepare('SELECT run_kind, status FROM meta_run WHERE run_id = ?')
+    .get(runId) as { run_kind: string; status: string } | undefined;
+  if (!run) throw new Error(`There is no run ${runId} in this generation.`);
+  if (run.run_kind !== 'daily' || run.status !== 'complete') {
+    throw new Error(`Run ${runId} is a ${run.status} ${run.run_kind} run; only a completed daily run can be replayed.`);
+  }
+  return { runId };
+}
+
+/**
  * Queues one job. Refuses a kind that is not on the allow-list, and refuses a
  * second request for a kind that already has one waiting or running — a double
  * click would otherwise queue two backfills, and the operator would run the
  * batch job twice without knowing why the first press "did nothing".
  */
-export function queueOneShot(kind: string): number {
+export function queueOneShot(kind: string, params?: unknown): number {
   if (!isQueueableKind(kind)) {
     throw new Error(
       `"${kind}" cannot be queued from here. Queueable: ${QUEUEABLE_KINDS.join(', ')}. ` +
-        'Reset is performed by this app directly; replay arrives with B9b.'
+        'Reset is performed by this app directly.'
     );
   }
+  const clean = paramsFor(kind, params);
   const db = currentDb();
   const pending = db
     .prepare(
@@ -173,7 +256,7 @@ export function queueOneShot(kind: string): number {
   if (pending) {
     throw new Error(`${kind} is already ${pending.state} as request ${pending.request_id}.`);
   }
-  return queueJob(db as never, operatorHost(), kind);
+  return queueJob(db as never, operatorHost(), kind, clean);
 }
 
 export function cancelRequest(requestId: number): boolean {

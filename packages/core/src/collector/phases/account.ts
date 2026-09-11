@@ -2,13 +2,8 @@ import type { SqliteLike } from '../../db/sqlite-like.js';
 import type { CollectorHost } from '../host.js';
 import { throwIfCancelled } from '../host.js';
 import { captureResponse } from '../capture.js';
+import { recipes } from '../../ingest/recipes.js';
 import { captureRuleId, type RunHandle } from '../run.js';
-import {
-  makePositionIngest,
-  makeBalanceIngest,
-  makeOrderIngest,
-  makeTransactionIngest
-} from '../../ingest/account.js';
 
 /**
  * Phase 5 — the operator's account (04 §2, §4.4).
@@ -218,7 +213,7 @@ async function collectOneAccount(
     slug: 'account-portfolio',
     params: { count: '250' },
     response: portfolio,
-    ingest: makePositionIngest(key)
+    recipe: recipes.positions(key)
   });
 
   // ── balance ──────────────────────────────────────────────────────────────
@@ -237,7 +232,7 @@ async function collectOneAccount(
     slug: 'account-balance',
     params: balanceParams,
     response: balance,
-    ingest: makeBalanceIngest(key)
+    recipe: recipes.balance(key)
   });
 
   // ── executed orders ──────────────────────────────────────────────────────
@@ -260,7 +255,7 @@ async function collectOneAccount(
     slug: 'account-orders',
     params: ordersParams,
     response: orders,
-    ingest: makeOrderIngest({ accountKey: key, knownOrders: knownOrderFingerprints(db) })
+    recipe: recipes.orders({ accountKey: key, knownOrders: knownOrderFingerprints(db) })
   });
 
   // ── transactions (fallback only) ─────────────────────────────────────────
@@ -277,7 +272,7 @@ async function collectOneAccount(
     slug: 'account-transactions',
     params: txParams,
     response: tx,
-    ingest: makeTransactionIngest({ accountKey: key, knownIds: knownTransactionIds(db) })
+    recipe: recipes.transactions({ accountKey: key, knownIds: knownTransactionIds(db) })
   });
 
   return {

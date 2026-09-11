@@ -222,7 +222,36 @@ export const metaTables: readonly TableEntry[] = [
         sourceProvider: 'collector'
       },
       col.enumOf('parse_status', ['ok', 'partial', 'failed'], 'How ingestion went. A failed parse still keeps the archive row — that is the point of archiving first.', { sourceProvider: 'collector' }),
-      nullable(col.int('parsed_row_count', 'How many rows ingestion produced from this response. AC-5 compares this to what is stored.'), 'not parsed yet, or the parse failed before counting')
+      nullable(col.int('parsed_row_count', 'How many rows ingestion produced from this response. AC-5 compares this to what is stored.'), 'not parsed yet, or the parse failed before counting'),
+      // LAST, and deliberately without a `references` clause. `applyDictionary`
+      // adds a column to a populated table with a bare `ALTER TABLE … ADD
+      // COLUMN <type>`, so a declared foreign key would leave the stored DDL
+      // permanently different from the generated one and this table reported as
+      // drifted on every open. The link is still enforced where it matters: the
+      // id is only ever written by `ensureRecipe`, in the same transaction.
+      nullable(
+        col.int(
+          'ingest_recipe_id',
+          'The recipe in `meta_ingest_recipe` that turned this response into rows — which parser, built ' +
+            'with which arguments. It is what makes a replay a re-run of the SAME parse rather than a ' +
+            'reconstruction of it (04 §7.5, AC-4).'
+        ),
+        'no ingestion module ran on this response — a routing document, a list the universe ' +
+          'reconciliation reads whole, or an archive-only import — or it was captured before recipes were ' +
+          'recorded, which its run\'s `dictionary_version` below 11 says. Replay counts the two separately'
+      ),
+      // Also last, also without `references`, for the same reason as above.
+      nullable(
+        col.int(
+          'capture_rule_id',
+          'The capture rule version in force when the call was made (P6). Until B9b it was recorded only on ' +
+            'the rows a response produced, so a response that produced none — an empty list, a failed parse — ' +
+            'could not say which rule asked for it, and a replay could not rebuild the rows it did produce ' +
+            'without guessing.'
+        ),
+        'the call was not rule-driven (reference and calendar data is captured unconditionally), or it was ' +
+          'captured before this column existed — its run\'s `dictionary_version` below 11 says which'
+      )
     ],
     indexes: [
       { columns: ['run_id'] },
@@ -230,6 +259,36 @@ export const metaTables: readonly TableEntry[] = [
       { columns: ['archive_file'] },
       { columns: ['dedup_hash'], unique: true }
     ]
+  }),
+
+  defineTable({
+    table: 'meta_ingest_recipe',
+    layer: 'meta',
+    domain: 'archive',
+    description:
+      'How a response was turned into rows: which ingestion module, built with which arguments (B9b, 04 ' +
+      '§7.5). The archive keeps every response\'s bytes, but until this table it did not keep the arguments ' +
+      'its parser was built with — the rule\'s expiration selection, the sticky set, the order fingerprints ' +
+      'already stored — so a replay would have had to reconstruct them, and a reconstructed replay that ' +
+      'reports "equal" cannot fail on the case it exists for. Content-addressed: one row per distinct recipe, ' +
+      'so an unchanged CIK map or universe list is stored once rather than once per response. The account ' +
+      'key never appears here, only its digest (P15).',
+    naturalKey: ['recipe_sha256'],
+    appendOnly: true,
+    ruleDriven: false,
+    standardColumns: false,
+    columns: [
+      col.int('recipe_id', 'Recipe identifier, referenced by `meta_response.ingest_recipe_id`.', { primaryKey: true, sourceProvider: 'collector' }),
+      {
+        column: 'recipe_sha256', type: 'TEXT', unit: 'sha256', nullable: false, unique: true,
+        description: 'sha256 of the module name and the canonical (key-sorted) JSON of its arguments — the recipe\'s identity.',
+        sourceProvider: 'collector'
+      },
+      col.ident('module', 'The ingestion module, by its name in `core`\'s recipe registry — `etrade_chain`, `polygon_bars`, `edgar_form4`.', { sourceProvider: 'collector' }),
+      col.json('args_json', 'The arguments the module was built with, as canonical JSON. Maps and sets are stored as sorted arrays.', { sourceProvider: 'collector' }),
+      col.ts('first_seen_at', 'When a capture first used this recipe.', { sourceProvider: 'collector' })
+    ],
+    indexes: [{ columns: ['recipe_sha256'], unique: true }]
   }),
 
   defineTable({

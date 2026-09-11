@@ -2,30 +2,11 @@ import type { SqliteLike } from '../../db/sqlite-like.js';
 import type { CollectorHost } from '../host.js';
 import { throwIfCancelled } from '../host.js';
 import { captureResponse } from '../capture.js';
+import { recipes } from '../../ingest/recipes.js';
 import { captureRuleId, type RunHandle } from '../run.js';
-import {
-  makeEarningsIngest,
-  makeIndexQuoteIngest,
-  ingestTreasuryYields,
-  makeRecommendationIngest,
-  ingestShortInterest,
-  earningsResponseAtCap
-} from '../../ingest/events.js';
-import {
-  ingestFomcCalendar,
-  makeBlsScheduleIngest,
-  BLS_RELEASES,
-  FOMC_CALENDAR_URL,
-  blsScheduleUrl
-} from '../../ingest/macro-calendar.js';
-import {
-  makeSubmissionsIngest,
-  makeCompanyFactsIngest,
-  makeForm4Ingest,
-  parseDailyFormIndex,
-  dailyFormIndexUrl,
-  submissionsAtCap
-} from '../../ingest/edgar.js';
+import { earningsResponseAtCap } from '../../ingest/events.js';
+import { BLS_RELEASES, FOMC_CALENDAR_URL, blsScheduleUrl } from '../../ingest/macro-calendar.js';
+import { parseDailyFormIndex, dailyFormIndexUrl, submissionsAtCap } from '../../ingest/edgar.js';
 
 /**
  * Phase 8 — the event and macro domains (04 §2).
@@ -225,7 +206,7 @@ export async function runEarningsSweep(
       endpoint: path, slug: 'calendar-earnings',
       params: { from: slice.from, to: slice.to }, response, captureRuleId: ruleId,
       atProviderCap: atCap,
-      ingest: makeEarningsIngest({ sweepFrom: slice.from, sweepTo: slice.to, universe })
+      recipe: recipes.earnings({ sweepFrom: slice.from, sweepTo: slice.to, universe })
     });
 
     if (result.parseStatus === 'ok') stored += result.rowsWritten;
@@ -276,7 +257,7 @@ export async function runIndexQuotes(
     const result = captureResponse({
       host, db, runId: run.runId, asOfDate: run.tradingDate, provider: 'etrade',
       endpoint: path, slug: 'index-quote', params: { symbol }, response, captureRuleId: ruleId,
-      ingest: makeIndexQuoteIngest({ symbol })
+      recipe: recipes.indexQuote({ symbol })
     });
 
     if (result.parseStatus === 'ok') stored += result.rowsWritten;
@@ -311,7 +292,7 @@ export async function runTreasuryYields(
     host, db, runId: run.runId, asOfDate: run.tradingDate, provider: 'treasury',
     endpoint: '/daily-treasury-rates.csv', slug: 'treasury-yields',
     params: { year }, response, captureRuleId: ruleId,
-    ingest: ingestTreasuryYields
+    recipe: recipes.treasury()
   });
 
   return { stored: result.rowsWritten, calls: 1, failed: result.parseStatus === 'ok' ? 0 : 1 };
@@ -345,7 +326,7 @@ export async function runMacroCalendar(
   const fomcResult = captureResponse({
     host, db, runId: run.runId, asOfDate: run.tradingDate, provider: 'fred',
     endpoint: FOMC_CALENDAR_URL, slug: 'fomc-calendar', params: {}, response: fomc,
-    captureRuleId: ruleId, ingest: ingestFomcCalendar
+    captureRuleId: ruleId, recipe: recipes.fomc()
   });
   if (fomcResult.parseStatus === 'ok') stored += fomcResult.rowsWritten;
   else failed++;
@@ -361,7 +342,7 @@ export async function runMacroCalendar(
     const result = captureResponse({
       host, db, runId: run.runId, asOfDate: run.tradingDate, provider: 'fred',
       endpoint: url, slug: `bls-${release.slug}`, params: { release: release.slug },
-      response, captureRuleId: ruleId, ingest: makeBlsScheduleIngest(release)
+      response, captureRuleId: ruleId, recipe: recipes.bls(release)
     });
 
     if (result.parseStatus === 'ok') stored += result.rowsWritten;
@@ -411,7 +392,7 @@ export async function runEdgarFilings(
       endpoint: `/submissions/CIK{cik}.json`, slug: 'edgar-submissions',
       params: { cik, ticker }, response, captureRuleId: ruleId,
       atProviderCap: response.body ? submissionsAtCap(response.body) : false,
-      ingest: makeSubmissionsIngest({ cik, ticker, since, forms: REPORT_FORMS })
+      recipe: recipes.submissions({ cik, ticker, since, forms: REPORT_FORMS })
     });
 
     if (result.parseStatus === 'ok') stored += result.rowsWritten;
@@ -466,7 +447,7 @@ export async function runEdgarFacts(
       host, db, runId: run.runId, asOfDate: run.tradingDate, provider: 'edgar',
       endpoint: '/api/xbrl/companyfacts/CIK{cik}.json', slug: 'edgar-companyfacts',
       params: { cik }, response, captureRuleId: ruleId,
-      ingest: makeCompanyFactsIngest({ cik, since })
+      recipe: recipes.companyFacts({ cik, since })
     });
 
     if (result.parseStatus === 'ok') stored += result.rowsWritten;
@@ -509,7 +490,7 @@ export async function runShortInterest(
     host, db, runId: run.runId, asOfDate: run.tradingDate, provider: 'polygon',
     endpoint: path, slug: 'short-interest',
     params: { since: addDays(run.tradingDate, -45) }, response, captureRuleId: ruleId,
-    ingest: ingestShortInterest
+    recipe: recipes.shortInterest()
   });
 
   if (result.parseStatus === 'ok') stored += result.rowsWritten;
@@ -548,7 +529,7 @@ export async function runRecommendations(
     const result = captureResponse({
       host, db, runId: run.runId, asOfDate: run.tradingDate, provider: 'finnhub',
       endpoint: path, slug: 'recommendation', params: { symbol: ticker },
-      response, captureRuleId: ruleId, ingest: makeRecommendationIngest({ ticker })
+      response, captureRuleId: ruleId, recipe: recipes.recommendations({ ticker })
     });
 
     if (result.parseStatus === 'ok') stored += result.rowsWritten;
@@ -615,7 +596,7 @@ export async function runInsiderSweep(
       endpoint: '/Archives/edgar/data/{cik}/{accession}.txt', slug: 'edgar-form4',
       params: { cik: filing.cik, accession: filing.accessionNo },
       response, captureRuleId: ruleId,
-      ingest: makeForm4Ingest({ accessionNo: filing.accessionNo, tickerByCik: byCik })
+      recipe: recipes.form4({ accessionNo: filing.accessionNo, tickerByCik: byCik })
     });
 
     if (result.parseStatus === 'ok') stored += result.rowsWritten;

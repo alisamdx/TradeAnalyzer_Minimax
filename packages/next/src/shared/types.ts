@@ -499,6 +499,43 @@ export interface RunDetailDto {
   readonly requestId: number | null;
 }
 
+/**
+ * A replay's result, as the Jobs view's diff viewer draws it (04 §7.5, B9b).
+ *
+ * Samples are rows keyed by column name — data, not code, so the renderer
+ * prints whatever columns they carry without naming any (AC-13).
+ */
+export interface ReplayTableDto {
+  readonly table: string;
+  readonly columns: readonly string[];
+  readonly sourceRows: number;
+  readonly replayRows: number;
+  readonly matched: number;
+  readonly added: number;
+  readonly removed: number;
+  readonly changed: number;
+  readonly addedSamples: readonly Readonly<Record<string, unknown>>[];
+  readonly removedSamples: readonly Readonly<Record<string, unknown>>[];
+}
+
+export interface ReplayReportDto {
+  readonly outcome: 'equal' | 'equal_on_replayed' | 'different' | 'nothing_replayable';
+  readonly sourceRuns: readonly number[];
+  readonly tradingDates: readonly string[];
+  readonly considered: number;
+  readonly replayed: number;
+  readonly noIngest: number;
+  readonly beforeRecipes: number;
+  readonly unreadable: number;
+  readonly digestMismatch: number;
+  readonly badRecipe: number;
+  readonly problems: readonly string[];
+  readonly derivedCompared: boolean;
+  readonly derivedNote: string | null;
+  readonly scratchPath: string | null;
+  readonly tables: readonly ReplayTableDto[];
+}
+
 export interface JobRequestDto {
   readonly id: number;
   readonly kind: string;
@@ -515,6 +552,8 @@ export interface JobRequestDto {
   readonly error: string | null;
   /** The job's own report, pretty-printed. */
   readonly result: string | null;
+  /** Parsed out of the result when the request was a replay, for the diff viewer. */
+  readonly replay: ReplayReportDto | null;
   readonly gate: string | null;
   readonly runOutcome: string | null;
 }
@@ -582,7 +621,8 @@ export interface NextApi {
   /** Queues and reset. Nothing here executes a provider job — the old app does (Q4). */
   readonly jobs: {
     overview(): Promise<IpcResult<JobsDto>>;
-    queue(kind: QueueableKind): Promise<IpcResult<number>>;
+    /** `params` only for `replay`: `{ runId }`, or omitted for the latest completed daily run. */
+    queue(kind: QueueableKind, params?: { readonly runId?: number }): Promise<IpcResult<number>>;
     cancel(requestId: number): Promise<IpcResult<boolean>>;
     resetPreview(): Promise<IpcResult<ResetPreviewDto>>;
     reset(reason: string, confirmation: string): Promise<IpcResult<ResetResultDto>>;

@@ -9,6 +9,85 @@ exit (06 §6).
 
 ---
 
+## B9b — replay, and the recipe that makes it a re-run rather than a reconstruction (2026-09-10)
+
+`core` 0.4.0, `next` 0.2.1, dictionary **v11**, existing app v1.1.219. **AC-4 is met**:
+a real captured day — bars, two chain expirations, an encrypted account
+response, the IV derivation — replays through the real one-shot job into a
+scratch file and comes back equal, table by table.
+
+### Recipes, recorded at capture
+
+B9a found the archive held every response's bytes but not the arguments its
+parser was built with. They are recorded now, as **recipes**: which module,
+built with which arguments. Three design points, each forced by something the
+code actually does:
+
+- **What is recorded is what ran.** `captureResponse` no longer takes a parser
+  function. It takes a recipe and builds the parser from it through
+  `buildIngest`, so there is no path where a caller runs one thing and
+  describes another. ~25 call sites moved, mechanically, by a script.
+- **Content-addressed.** The Form 4 parser carries the whole ~1,089-entry CIK
+  map and every earnings slice the universe list. One row per distinct recipe
+  in `meta_ingest_recipe`, pointed at from `meta_response`, stores an
+  unchanged map once instead of hundreds of times a day.
+- **The account key never lands anywhere.** The open question from B9a
+  answered itself on reading the parsers: all four only ever *hashed* the key.
+  The recipe carries the digest the rows already store.
+
+`meta_response` also gains **`capture_rule_id`**. It had only ever been on the
+rows a response produced, so a response that produced none could not say which
+rule asked for it — and a replay could not rebuild the rows it did produce
+without guessing. Both columns are last and carry no `REFERENCES` clause:
+`applyDictionary` adds columns with a bare `ALTER`, and a declared FK would have
+left `meta_response` reported as drifted on every open. A test builds a
+populated v10 table and asserts the upgrade is plain growth.
+
+### Replay
+
+Runs in the **old app**, because account archive lines are encrypted with its
+safeStorage key. Reads the index and the bytes, verifies each digest, and runs
+the same `indexAndIngest` capture uses — split out of `captureResponse` for
+exactly this, so "replay reproduces ingestion" is a claim about the function and
+not about a copy of it.
+
+**The comparison basis** is per replayed response, over every column except the
+primary key and the reference columns. `observed_at` is compared on raw rows
+(it comes from the archive) and **excluded on derived rows** — I first planned
+to make the derivation's `observed_at` deterministic, and a test pinned the
+reason not to: re-deriving a day must append a *later* version, or a derivation
+fix could not supersede the old row. There it is the derivation's clock.
+
+**Coverage is reported and zero is not a pass.** `nothing_replayable` is its own
+verdict and `equal_on_replayed` says "equal, but something could not be
+replayed" — the zero-overlap trap again, designed out rather than remembered.
+Rows written by non-parser code (universe reconciliation, legacy import, sticky
+pins) fall outside the comparison because their responses carry no recipe; the
+legacy import's `ingest: () => []` was removed so it would not claim to be a
+parse that writes nothing.
+
+**Every run captured before v11 — gen-001's entire history — is
+`nothing_replayable`.** That is the honest answer, not a gap: the first
+replayable run is the first daily run after the old app picks up `core` 0.4.0.
+
+### The diff viewer
+
+The replay card is queueable (run id optional, validated before the row is
+written). Its report renders coverage first, then per table stored / replayed /
+matched / added / removed / changed, with sample rows drawn from whatever
+columns they carry — the renderer names none, so AC-13 holds.
+
+### Deferred to B9c
+
+Replay **into a new generation** (a create-fill-switch handshake across the two
+apps: the new exe owns creation, the old app holds the decryption key), pin-for-
+study, saved questions, and closed generations in a read-only window. None is
+needed for AC-4. QC-951, the weekly sampled replay, belongs to B10.
+
+`420` tests in `core` (+23), `48` in `next`, `1,261` in the existing app.
+
+---
+
 ## B9a — the operator surface, and three drafted claims that did not survive the build (2026-09-10)
 
 `core` 0.3.9, `next` 0.2.0. The existing app is unchanged. **B9 is split**: B9a

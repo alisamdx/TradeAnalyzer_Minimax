@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import type { SqliteLike } from '../db/sqlite-like.js';
 import type { CollectorHost, ProviderName, ProviderResponse } from './host.js';
-import { archiveResponse } from './archive.js';
+import { archiveResponse, type ArchiveLocation } from './archive.js';
+import { buildIngest, canonicalJson, recipeDigest, type IngestRecipe } from '../ingest/recipes.js';
 
 /**
  * The per-response contract — 04 §2.2.
@@ -10,6 +11,10 @@ import { archiveResponse } from './archive.js';
  * path** (P11). Call, archive, then index-and-ingest in one transaction. A
  * second way to get data into a raw table would be a second way for provenance
  * to be missing, and it would be the one nobody remembers to check.
+ *
+ * From B9b the parser arrives as a **recipe** (see `ingest/recipes.ts`), not as
+ * a function: the recipe is recorded in `meta_ingest_recipe` and the parser is
+ * built FROM it, so what a replay re-runs is by construction what ran.
  */
 
 export interface IngestContext {
@@ -62,7 +67,13 @@ export interface CaptureArgs {
   readonly params: Readonly<Record<string, string>>;
   readonly response: ProviderResponse;
   readonly captureRuleId: number | null;
-  readonly ingest?: IngestModule;
+  /**
+   * Which parser turns this response into rows, and with what arguments.
+   * Omitted for responses that are archived for provenance only — a routing
+   * document, a list the universe reconciliation reads whole, an archive-only
+   * import. Those are recorded with no recipe, and a replay says so.
+   */
+  readonly recipe?: IngestRecipe;
   /**
    * True when the response size equals a known provider cap (P8). Finnhub's
    * bulk calendar truncates from the FRONT at 1,500, so a payload *at* the cap
@@ -110,6 +121,181 @@ function insertRow(
 }
 
 /**
+ * Records a recipe and returns its id — one row per distinct recipe, ever.
+ *
+ * **Content-addressed, not per response.** The Form 4 parser carries the whole
+ * CIK-to-ticker map and the earnings sweep the universe list; stored per
+ * response those would be the same kilobytes hundreds of times a day. Keyed on
+ * the digest, a map that did not change since yesterday costs nothing today.
+ */
+export function ensureRecipe(db: SqliteLike, recipe: IngestRecipe, now: string): number {
+  const digest = recipeDigest(recipe);
+  db.prepare(
+    `INSERT OR IGNORE INTO meta_ingest_recipe (recipe_sha256, module, args_json, first_seen_at)
+     VALUES (?,?,?,?)`
+  ).run(digest, recipe.module, canonicalJson(recipe.args), now);
+  const row = db
+    .prepare('SELECT recipe_id FROM meta_ingest_recipe WHERE recipe_sha256 = ?')
+    .get(digest) as { recipe_id: number } | undefined;
+  if (!row) throw new Error(`recipe ${digest} could not be recorded`);
+  return row.recipe_id;
+}
+
+/** Everything the index-and-ingest step needs, once the bytes are archived. */
+export interface IndexArgs {
+  readonly db: SqliteLike;
+  /** The clock, for the recipe's `first_seen_at` only — never for a fact. */
+  readonly now: string;
+  readonly runId: number;
+  readonly asOfDate: string;
+  readonly provider: ProviderName;
+  readonly endpoint: string;
+  readonly paramsJson: string;
+  readonly response: ProviderResponse;
+  readonly location: ArchiveLocation;
+  readonly dedupHash: string;
+  readonly encrypted: boolean;
+  readonly atProviderCap: boolean;
+  readonly captureRuleId: number | null;
+  readonly recipe?: IngestRecipe;
+}
+
+/**
+ * Index one archived response and ingest it — the second half of the contract.
+ *
+ * Separate from `captureResponse` so that **replay runs exactly this code**:
+ * it reads bytes out of the archive rather than from a provider, and must not
+ * archive them a second time, but everything from the parse onward has to be
+ * the same function or "replay reproduces ingestion" is a claim about a copy.
+ *
+ * 3. **An ingestion failure still commits the index row**, with
+ *    `parse_status = 'failed'` and zero data rows. The body is in the archive,
+ *    QC-001 fires, and a replay after the fix recovers the rows without
+ *    refetching (P4). Rolling back would throw away the evidence needed to fix
+ *    the parser.
+ */
+export function indexAndIngest(args: IndexArgs): CaptureResult {
+  const { db, response, location } = args;
+
+  let parseStatus: CaptureResult['parseStatus'] = 'ok';
+  let parseError: string | undefined;
+  let rows: ReturnType<IngestModule> = [];
+
+  // Recorded before the transaction, and on its own: the fallback path below
+  // must still be able to name the recipe after the main write rolled back, and
+  // an orphaned recipe row is harmless — it is content-addressed and append-only.
+  const recipeId = args.recipe ? ensureRecipe(db, args.recipe, args.now) : null;
+
+  // Parsing happens OUTSIDE the transaction so a throw cannot leave it open, and
+  // so the index row can record the failure rather than vanish with it.
+  if (args.recipe && response.status !== null && response.status >= 200 && response.status < 300) {
+    try {
+      rows = buildIngest(args.recipe)(response.body, {
+        runId: args.runId,
+        asOfDate: args.asOfDate,
+        observedAt: response.respondedAt ?? response.requestedAt,
+        captureRuleId: args.captureRuleId,
+        sourceResponseId: -1 // replaced below, once the row exists
+      });
+    } catch (err) {
+      parseStatus = 'failed';
+      parseError = err instanceof Error ? err.message : String(err);
+      rows = [];
+    }
+  } else if (response.status === null || response.status < 200 || response.status >= 300) {
+    // A non-2xx is archived and indexed like any other response — it is
+    // evidence. It is simply not parsed.
+    parseStatus = 'failed';
+    parseError = response.error ?? `HTTP ${String(response.status)}`;
+  }
+
+  let sourceResponseId = 0;
+  let rowsWritten = 0;
+  // Counts children too, so AC-5's "stored equals parsed" holds for every table
+  // a response writes rather than only the top-level one.
+  const parsedRowCount = rows.reduce(
+    (n, r) => n + 1 + (r.children ?? []).reduce((m, c) => m + c.rows.length, 0),
+    0
+  );
+
+  const indexRow = (status: CaptureResult['parseStatus'], count: number): number =>
+    Number(
+      db
+        .prepare(
+          `INSERT INTO meta_response (
+             run_id, provider, endpoint, params_json, requested_at, responded_at, http_status,
+             byte_length, archive_file, archive_offset, sha256, dedup_hash, encrypted,
+             at_provider_cap, parse_status, parsed_row_count, ingest_recipe_id, capture_rule_id
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+        )
+        .run(
+          args.runId,
+          args.provider,
+          args.endpoint,
+          args.paramsJson,
+          response.requestedAt,
+          response.respondedAt,
+          response.status,
+          location.byteLength,
+          location.archiveFile,
+          location.archiveOffset,
+          location.sha256,
+          args.dedupHash,
+          args.encrypted ? 1 : 0,
+          args.atProviderCap ? 1 : 0,
+          status,
+          count,
+          recipeId,
+          args.captureRuleId
+        ).lastInsertRowid
+    );
+
+  const write = db.transaction(() => {
+    sourceResponseId = indexRow(parseStatus, parsedRowCount);
+
+    for (const row of rows) {
+      const parentId = insertRow(db, row.table, {
+        ...row.values,
+        source_response_id: sourceResponseId
+      });
+      rowsWritten++;
+      for (const child of row.children ?? []) {
+        for (const values of child.rows) {
+          insertRow(db, child.table, {
+            ...values,
+            [child.parentColumn]: parentId,
+            source_response_id: sourceResponseId
+          });
+          rowsWritten++;
+        }
+      }
+    }
+  });
+
+  try {
+    write();
+  } catch (err) {
+    // The rows were bad even though the parse succeeded — a constraint the
+    // dictionary declares and the module violated. Record the index row alone so
+    // the body stays reachable, then report.
+    parseStatus = 'failed';
+    parseError = err instanceof Error ? err.message : String(err);
+    rowsWritten = 0;
+    sourceResponseId = indexRow('failed', 0);
+  }
+
+  return {
+    sourceResponseId,
+    parseStatus,
+    rowsWritten,
+    archiveFile: location.archiveFile,
+    archiveOffset: location.archiveOffset,
+    deduplicated: false,
+    ...(parseError ? { parseError } : {})
+  };
+}
+
+/**
  * Archive, index and ingest one response.
  *
  * The ordering that matters, and why:
@@ -121,11 +307,7 @@ function insertRow(
  * 2. **Index and ingest in ONE transaction.** A `meta_response` row without its
  *    rows, or rows without their `meta_response`, would each break AC-1 in a way
  *    no check could distinguish from a genuine empty response.
- * 3. **An ingestion failure still commits the index row**, with
- *    `parse_status = 'failed'` and zero data rows. The body is in the archive,
- *    QC-001 fires, and a replay after the fix recovers the rows without
- *    refetching (P4). Rolling back would throw away the evidence needed to fix
- *    the parser.
+ * 3. See `indexAndIngest`.
  */
 export function captureResponse(args: CaptureArgs): CaptureResult {
   const { host, db, response } = args;
@@ -159,123 +341,20 @@ export function captureResponse(args: CaptureArgs): CaptureResult {
     response
   });
 
-  let parseStatus: CaptureResult['parseStatus'] = 'ok';
-  let parseError: string | undefined;
-  let rows: ReturnType<IngestModule> = [];
-
-  // Parsing happens OUTSIDE the transaction so a throw cannot leave it open, and
-  // so the index row can record the failure rather than vanish with it.
-  if (args.ingest && response.status !== null && response.status >= 200 && response.status < 300) {
-    try {
-      rows = args.ingest(response.body, {
-        runId: args.runId,
-        asOfDate: args.asOfDate,
-        observedAt: response.respondedAt ?? response.requestedAt,
-        captureRuleId: args.captureRuleId,
-        sourceResponseId: -1 // replaced below, once the row exists
-      });
-    } catch (err) {
-      parseStatus = 'failed';
-      parseError = err instanceof Error ? err.message : String(err);
-      rows = [];
-    }
-  } else if (response.status === null || response.status < 200 || response.status >= 300) {
-    // A non-2xx is archived and indexed like any other response — it is
-    // evidence. It is simply not parsed.
-    parseStatus = 'failed';
-    parseError = response.error ?? `HTTP ${String(response.status)}`;
-  }
-
-  let sourceResponseId = 0;
-  let rowsWritten = 0;
-  // Counts children too, so AC-5's "stored equals parsed" holds for every table
-  // a response writes rather than only the top-level one.
-  const parsedRowCount = rows.reduce(
-    (n, r) => n + 1 + (r.children ?? []).reduce((m, c) => m + c.rows.length, 0),
-    0
-  );
-
-  const write = db.transaction(() => {
-    const info = db
-      .prepare(
-        `INSERT INTO meta_response (
-           run_id, provider, endpoint, params_json, requested_at, responded_at, http_status,
-           byte_length, archive_file, archive_offset, sha256, dedup_hash, encrypted,
-           at_provider_cap, parse_status, parsed_row_count
-         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
-      )
-      .run(
-        args.runId,
-        args.provider,
-        args.endpoint,
-        paramsJson,
-        response.requestedAt,
-        response.respondedAt,
-        response.status,
-        location.byteLength,
-        location.archiveFile,
-        location.archiveOffset,
-        location.sha256,
-        hash,
-        args.slug.startsWith('account-') ? 1 : 0,
-        args.atProviderCap ? 1 : 0,
-        parseStatus,
-        parsedRowCount
-      );
-    sourceResponseId = Number(info.lastInsertRowid);
-
-    for (const row of rows) {
-      const parentId = insertRow(db, row.table, {
-        ...row.values,
-        source_response_id: sourceResponseId
-      });
-      rowsWritten++;
-      for (const child of row.children ?? []) {
-        for (const values of child.rows) {
-          insertRow(db, child.table, {
-            ...values,
-            [child.parentColumn]: parentId,
-            source_response_id: sourceResponseId
-          });
-          rowsWritten++;
-        }
-      }
-    }
+  return indexAndIngest({
+    db,
+    now: host.nowET(),
+    runId: args.runId,
+    asOfDate: args.asOfDate,
+    provider: args.provider,
+    endpoint: args.endpoint,
+    paramsJson,
+    response,
+    location,
+    dedupHash: hash,
+    encrypted: args.slug.startsWith('account-'),
+    atProviderCap: args.atProviderCap ?? false,
+    captureRuleId: args.captureRuleId,
+    ...(args.recipe ? { recipe: args.recipe } : {})
   });
-
-  try {
-    write();
-  } catch (err) {
-    // The rows were bad even though the parse succeeded — a constraint the
-    // dictionary declares and the module violated. Record the index row alone so
-    // the body stays reachable, then report.
-    parseStatus = 'failed';
-    parseError = err instanceof Error ? err.message : String(err);
-    rowsWritten = 0;
-    const info = db
-      .prepare(
-        `INSERT INTO meta_response (
-           run_id, provider, endpoint, params_json, requested_at, responded_at, http_status,
-           byte_length, archive_file, archive_offset, sha256, dedup_hash, encrypted,
-           at_provider_cap, parse_status, parsed_row_count
-         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
-      )
-      .run(
-        args.runId, args.provider, args.endpoint, paramsJson, response.requestedAt,
-        response.respondedAt, response.status, location.byteLength, location.archiveFile,
-        location.archiveOffset, location.sha256, hash,
-        args.slug.startsWith('account-') ? 1 : 0, args.atProviderCap ? 1 : 0, 'failed', 0
-      );
-    sourceResponseId = Number(info.lastInsertRowid);
-  }
-
-  return {
-    sourceResponseId,
-    parseStatus,
-    rowsWritten,
-    archiveFile: location.archiveFile,
-    archiveOffset: location.archiveOffset,
-    deduplicated: false,
-    ...(parseError ? { parseError } : {})
-  };
 }

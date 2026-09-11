@@ -15,10 +15,20 @@ export {
 } from './archive.js';
 export type { ArchiveLine, ArchiveLocation } from './archive.js';
 
-export { captureResponse } from './capture.js';
+export { captureResponse, indexAndIngest, ensureRecipe } from './capture.js';
 export type {
-  CaptureArgs, CaptureResult, IngestContext, IngestModule, IngestedRowSpec, IngestedChildRows
+  CaptureArgs, CaptureResult, IndexArgs, IngestContext, IngestModule, IngestedRowSpec, IngestedChildRows
 } from './capture.js';
+export type { ScratchDb } from './host.js';
+
+// Ingest recipes and replay (B9b, 04 §7.5, AC-4).
+export {
+  recipes, buildIngest, recipeDigest, canonicalJson, parseStoredRecipe, isIngestModuleName,
+  INGEST_MODULES, RecipeError
+} from '../ingest/recipes.js';
+export type { IngestRecipe, IngestModuleName, RecipeArgs, Json } from '../ingest/recipes.js';
+export { runReplay, runReplayJob, factColumns, RECIPES_FROM_DICTIONARY } from './replay.js';
+export type { ReplayReport, ReplayJobReport, ReplayCoverage, ReplayVerdict, TableDiff } from './replay.js';
 
 export { beginRun, finishRun, captureRuleId } from './run.js';
 export type { RunHandle, RunKind } from './run.js';

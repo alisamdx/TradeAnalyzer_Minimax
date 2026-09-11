@@ -8,6 +8,7 @@ import {
   runBackfillBars,
   runBootstrapIv,
   runLegacyImport,
+  runReplayJob,
   runUniverseSeed,
   stalledRequests,
   expireAcceptances,
@@ -44,7 +45,16 @@ export interface OneShotDeps {
   readonly todayET: () => string;
 }
 
-const IMPLEMENTED: ReadonlySet<OneShotKind> = new Set<OneShotKind>(['universe_seed', 'backfill_bars', 'bootstrap_iv', 'legacy_import']);
+// `reset` is deliberately absent: TradeAnalyzer 2 performs it itself (NewApp 04
+// §7.6), because generation creation belongs to that application alone. A reset
+// request reaching this handler is failed explicitly, like any unknown kind.
+//
+// `replay` runs HERE rather than in the new exe for one reason: account-domain
+// archive lines are encrypted with this app's safeStorage key, and only this
+// app can read them back (B9b).
+const IMPLEMENTED: ReadonlySet<OneShotKind> = new Set<OneShotKind>([
+  'universe_seed', 'backfill_bars', 'bootstrap_iv', 'legacy_import', 'replay'
+]);
 
 export function createCollectorOneShotJob(deps: OneShotDeps): BatchJobHandler {
   return {
@@ -180,6 +190,37 @@ export function createCollectorOneShotJob(deps: OneShotDeps): BatchJobHandler {
           // job reports, so the email and the review queue reflect what is
           // actually outstanding rather than what was outstanding yesterday.
           expireAcceptances(db, host, tradingDate);
+
+          if (request.runKind === 'replay') {
+            // Which run to replay; the latest completed daily run when omitted.
+            // Read defensively — the params are whatever the queueing app wrote.
+            const requested = request.params['runId'];
+            const runId = typeof requested === 'number' && Number.isInteger(requested) && requested > 0
+              ? requested
+              : undefined;
+            const report = runReplayJob(host, { tradingDate, ...(runId !== undefined ? { runId } : {}) });
+            markJobRunning(db, request.requestId, report.jobRunId);
+            finishJob(db, host, request.requestId, {
+              state: 'complete',
+              result: report as unknown as Record<string, unknown>
+            });
+            const c = report.coverage;
+            return {
+              // A `different` verdict is the replay working, not the job
+              // failing — the same rule as a red gate. The diff is the
+              // deliverable, and it is in the report the new exe reads.
+              status: 'success',
+              notes:
+                `replay of run ${report.sourceRunIds.join(', ')}: ${report.verdict.toUpperCase()} — ` +
+                `${c.replayed}/${c.considered} responses replayed` +
+                (c.beforeRecipes > 0 ? `, ${c.beforeRecipes} captured before recipes were recorded` : '') +
+                (report.scratchPath ? `; scratch database kept at ${report.scratchPath}` : ''),
+              tickersAttempted: c.considered,
+              tickersUpdated: c.replayed,
+              tickersSkipped: c.noIngest + c.beforeRecipes,
+              tickersFailed: c.unreadable + c.digestMismatch + c.badRecipe
+            };
+          }
 
           if (request.runKind === 'legacy_import') {
             // The old app's own connection is handed straight in — this job

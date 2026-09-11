@@ -2,8 +2,8 @@ import type { SqliteLike } from '../db/sqlite-like.js';
 import type { CollectorHost } from './host.js';
 import { throwIfCancelled } from './host.js';
 import { captureResponse } from './capture.js';
+import { recipes } from '../ingest/recipes.js';
 import { beginRun, finishRun, captureRuleId, type RunHandle } from './run.js';
-import { makeBarIngest, ingestSplits } from '../ingest/market.js';
 import { QC202_OHLC_ORDER, QC204_DISCONTINUITY, QC205_VOLUME_REGIME } from '../qa/checks/bars.js';
 import { runGate } from '../qa/gate.js';
 import { reviewQueue } from '../qa/operator.js';
@@ -89,7 +89,7 @@ export async function runBackfillBars(
       host, db, runId: run.runId, asOfDate: args.tradingDate, provider: 'polygon',
       endpoint: '/v3/reference/splits', slug: 'reference-splits-backfill',
       params: { from, to: args.tradingDate }, response: splitResponse, captureRuleId: ruleId,
-      ingest: ingestSplits
+      recipe: recipes.splits()
     });
 
     let stored = 0;
@@ -107,7 +107,7 @@ export async function runBackfillBars(
         host, db, runId: run.runId, asOfDate: args.tradingDate, provider: 'polygon',
         endpoint: path, slug: 'aggs-day-backfill', params: { ticker, from, to: args.tradingDate },
         response, captureRuleId: ruleId,
-        ingest: makeBarIngest({ ticker, fetchKind: 'backfill', adjustedAsOf: args.tradingDate })
+        recipe: recipes.bars({ ticker, fetchKind: 'backfill', adjustedAsOf: args.tradingDate })
       });
 
       if (result.parseStatus === 'ok' && result.rowsWritten > 0) {

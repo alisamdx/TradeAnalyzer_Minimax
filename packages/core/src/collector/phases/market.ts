@@ -2,13 +2,8 @@ import type { SqliteLike } from '../../db/sqlite-like.js';
 import type { CollectorHost } from '../host.js';
 import { throwIfCancelled } from '../host.js';
 import { captureResponse } from '../capture.js';
+import { recipes } from '../../ingest/recipes.js';
 import { captureRuleId, type RunHandle } from '../run.js';
-import {
-  makeBarIngest,
-  ingestSnapshot,
-  ingestSplits,
-  ingestDividends
-} from '../../ingest/market.js';
 
 /**
  * Phases 2, 3 and 4 — daily bars, the end-of-day snapshot, corporate actions
@@ -75,7 +70,7 @@ export async function runBarsPhase(
       host, db, runId: run.runId, asOfDate: run.tradingDate, provider: 'polygon',
       endpoint: path, slug: 'aggs-day', params: { ticker, from, to: run.tradingDate },
       response, captureRuleId: ruleId,
-      ingest: makeBarIngest({
+      recipe: recipes.bars({
         ticker,
         fetchKind: 'daily',
         adjustedAsOf: run.tradingDate,
@@ -113,7 +108,7 @@ export async function runQuotesPhase(
   const result = captureResponse({
     host, db, runId: run.runId, asOfDate: run.tradingDate, provider: 'polygon',
     endpoint: path, slug: 'snapshot-all', params: {}, response, captureRuleId: ruleId,
-    ingest: ingestSnapshot
+    recipe: recipes.snapshot()
   });
 
   return {
@@ -151,7 +146,7 @@ export async function runActionsPhase(
     host, db, runId: run.runId, asOfDate: run.tradingDate, provider: 'polygon',
     endpoint: '/v3/reference/splits', slug: 'reference-splits',
     params: { from, to: run.tradingDate }, response: splitResponse, captureRuleId: ruleId,
-    ingest: ingestSplits
+    recipe: recipes.splits()
   });
 
   host.progress('actions', 1, 2, 'dividends');
@@ -162,7 +157,7 @@ export async function runActionsPhase(
     host, db, runId: run.runId, asOfDate: run.tradingDate, provider: 'polygon',
     endpoint: '/v3/reference/dividends', slug: 'reference-dividends',
     params: { from, to: run.tradingDate }, response: divResponse, captureRuleId: ruleId,
-    ingest: ingestDividends
+    recipe: recipes.dividends()
   });
 
   return {

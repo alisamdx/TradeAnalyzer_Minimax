@@ -211,8 +211,27 @@ One row per provider call. The body lives in the archive file; this row says whe
 | `encrypted` | INTEGER | `1` for account-domain files (Q20) |
 | `at_provider_cap` | INTEGER | `1` when the response size equals a known provider cap (P8; Finnhub 1500) |
 | `parse_status` | TEXT | `ok` \| `partial` \| `failed` — a failed parse still keeps the archive row |
+| `parsed_row_count` | INTEGER | rows ingestion produced, children included (AC-5) |
+| `ingest_recipe_id` | INTEGER, nullable | **dictionary v11 (B9b).** The `meta_ingest_recipe` row that turned this response into rows. Null = no parser ran (routing document, a list read whole, an archive-only import) **or** captured before v11 — the run's `dictionary_version` says which. Deliberately no `REFERENCES` clause: `applyDictionary` adds columns with a bare `ALTER TABLE … ADD COLUMN`, so a declared FK would leave the table reported as drifted on every open |
+| `capture_rule_id` | INTEGER, nullable | **dictionary v11.** The capture rule in force for the call. Until v11 it lived only on the rows a response produced, so a response that produced none could not say which rule asked for it — and a replay could not rebuild the rows it did produce without guessing |
 
-Archive layout: `gen-NNN/archive/<provider>/<YYYY-MM-DD>/<endpoint-slug>.jsonl.gz`, one JSON line per response `{ id, requestedAt, params, status, body }`. Account-domain files are `.jsonl.enc` (safeStorage/DPAPI, header names the mechanism).
+Archive layout: `gen-NNN/archive/<provider>/<YYYY-MM-DD>/<endpoint-slug>.jsonl.gz`, one JSON line per response `{ id, requestedAt, params, status, body }`. Account-domain files are `.jsonl.enc` (safeStorage/DPAPI, header names the mechanism). The `<YYYY-MM-DD>` directory is the capture's `as_of_date`, which is how a replay recovers it.
+
+### `meta_ingest_recipe` — how a response was parsed (B9b, 04 §7.5)
+
+The archive kept every response's bytes but, until dictionary v11, not the arguments its parser was built with — the rule's expiration selection, the sticky set, the order fingerprints and transaction ids already stored, the earnings universe filter, the CIK map. Several of those are database state at the moment of capture, so a replay would have had to reconstruct them, and **a reconstructed replay that reports "equal" cannot fail on the case it exists for.**
+
+| column | type | notes |
+|---|---|---|
+| `recipe_id` | INTEGER PK | referenced by `meta_response.ingest_recipe_id` |
+| `recipe_sha256` | TEXT, unique | sha256 of the module name + the canonical (key-sorted) JSON of its arguments |
+| `module` | TEXT | the parser's name in `core`'s recipe registry — `etrade_chain`, `polygon_bars`, `edgar_form4`, … |
+| `args_json` | TEXT | the arguments, canonical JSON; maps and sets as sorted arrays |
+| `first_seen_at` | TEXT | when a capture first used it |
+
+**Content-addressed, not per response.** The Form 4 parser carries the whole CIK-to-ticker map (~1,089 entries) and each earnings slice the universe list; stored per response those would be the same kilobytes hundreds of times a day. **The account key never appears** — the account parsers only ever hashed it, so the recipe carries the digest the rows already store (P15). Append-only.
+
+**What is recorded is what ran.** `captureResponse` takes a recipe and builds the parser from it through `buildIngest`; there is no path in which a caller hands over a function and separately describes it.
 
 ### `meta_job_request` — the one-shot job queue (04 §1.1)
 

@@ -1,9 +1,9 @@
 import type { SqliteLike } from '../db/sqlite-like.js';
 import type { CollectorHost } from './host.js';
 import { captureResponse } from './capture.js';
+import { recipes } from '../ingest/recipes.js';
 import { beginRun, finishRun, captureRuleId } from './run.js';
 import {
-  makeLegacyBriefIngest,
   stickyRowsFor,
   legacyRunId,
   type LegacyBriefHandoff
@@ -83,7 +83,7 @@ export function writeLegacyHandoff(
           respondedAt: observedAt
         },
         captureRuleId: ruleId,
-        ingest: makeLegacyBriefIngest()
+        recipe: recipes.legacyBrief()
       });
 
       stickyPinned = pinSticky(db, payload, {

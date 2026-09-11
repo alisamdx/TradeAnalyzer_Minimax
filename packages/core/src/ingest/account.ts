@@ -71,8 +71,20 @@ interface EtradePosition {
   Product?: EtradeProduct; Quick?: { lastTrade?: number };
 }
 
-export function makePositionIngest(accountKey: string) {
-  const hash = hashAccountKey(accountKey);
+/**
+ * Who an account parser is for: the raw key, or — from a stored recipe — only
+ * its digest. The parsers never needed more than the digest, which is why a
+ * recipe can be replayed without the key ever being written anywhere (P15).
+ */
+export type AccountKeyed = { readonly accountKey: string } | { readonly accountKeyHash: string };
+
+function digestOf(account: string | AccountKeyed): string {
+  if (typeof account === 'string') return hashAccountKey(account);
+  return 'accountKeyHash' in account ? account.accountKeyHash : hashAccountKey(account.accountKey);
+}
+
+export function makePositionIngest(account: string | AccountKeyed) {
+  const hash = digestOf(account);
   return (body: string, ctx: IngestContext): readonly IngestedRow[] => {
     const parsed = JSON.parse(body) as {
       PortfolioResponse?: { AccountPortfolio?: { Position?: EtradePosition[] }[] };
@@ -118,8 +130,8 @@ export function makePositionIngest(accountKey: string) {
   };
 }
 
-export function makeBalanceIngest(accountKey: string) {
-  const hash = hashAccountKey(accountKey);
+export function makeBalanceIngest(account: string | AccountKeyed) {
+  const hash = digestOf(account);
   return (body: string, ctx: IngestContext): readonly IngestedRow[] => {
     const parsed = JSON.parse(body) as {
       BalanceResponse?: {
@@ -200,8 +212,7 @@ export function orderFingerprint(order: {
     .slice(0, 32);
 }
 
-export function makeOrderIngest(opts: {
-  readonly accountKey: string;
+export function makeOrderIngest(opts: AccountKeyed & {
   /**
    * `order_id` to fingerprint for orders already stored. An unchanged order is
    * skipped, so the normal daily re-pull of a 30-day window writes nothing; a
@@ -210,7 +221,7 @@ export function makeOrderIngest(opts: {
    */
   readonly knownOrders?: ReadonlyMap<string, string>;
 }) {
-  const hash = hashAccountKey(opts.accountKey);
+  const hash = digestOf(opts);
   return (body: string, ctx: IngestContext): readonly IngestedRow[] => {
     const parsed = JSON.parse(body) as { OrdersResponse?: { Order?: EtradeOrder[] } };
     const orders = parsed.OrdersResponse?.Order ?? [];
@@ -285,12 +296,11 @@ interface EtradeTransaction {
  * behind an `oauth_problem=nonce_used` mask that is a server-side timeout rather
  * than an OAuth fault, so a failure here is a warning and never blocking.
  */
-export function makeTransactionIngest(opts: {
-  readonly accountKey: string;
+export function makeTransactionIngest(opts: AccountKeyed & {
   /** Ids already stored. A transaction is immutable, so a known one is skipped outright. */
   readonly knownIds?: ReadonlySet<string>;
 }) {
-  const hash = hashAccountKey(opts.accountKey);
+  const hash = digestOf(opts);
   return (body: string, ctx: IngestContext): readonly IngestedRow[] => {
     const parsed = JSON.parse(body) as { TransactionListResponse?: { Transaction?: EtradeTransaction[] } };
     return (parsed.TransactionListResponse?.Transaction ?? [])

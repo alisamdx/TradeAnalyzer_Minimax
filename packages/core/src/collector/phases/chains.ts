@@ -2,8 +2,9 @@ import type { SqliteLike } from '../../db/sqlite-like.js';
 import type { CollectorHost } from '../host.js';
 import { throwIfCancelled } from '../host.js';
 import { captureResponse } from '../capture.js';
+import { recipes } from '../../ingest/recipes.js';
 import { captureRuleId, type RunHandle } from '../run.js';
-import { makeExpirationIngest, makeChainIngest, type ExpirationSelection } from '../../ingest/options.js';
+import { type ExpirationSelection } from '../../ingest/options.js';
 
 /**
  * Phases 6 and 7 — the chain subset and the chains themselves (04 §4.2, §4.3).
@@ -384,7 +385,7 @@ export async function runChainsPhase(
       host, db, runId: run.runId, asOfDate: run.tradingDate, provider: 'etrade',
       endpoint: expPath, slug: 'optionexpiredate', params: expParams,
       response: expResponse, captureRuleId: ruleId,
-      ingest: makeExpirationIngest({ ticker, selection })
+      recipe: recipes.expirations({ ticker, selection })
     });
     if (expResult.parseStatus !== 'ok') expirationFailures++;
 
@@ -415,7 +416,7 @@ export async function runChainsPhase(
         host, db, runId: run.runId, asOfDate: run.tradingDate, provider: 'etrade',
         endpoint: chainPath, slug: 'optionchains', params: chainParams,
         response: chainResponse, captureRuleId: ruleId,
-        ingest: makeChainIngest({ ticker, expirationDate: expiration, stickyReasons })
+        recipe: recipes.chain({ ticker, expirationDate: expiration, stickyReasons })
       });
 
       if (result.parseStatus === 'ok') contractsStored += result.rowsWritten;
