@@ -9,6 +9,15 @@ exit (06 §6).
 
 ---
 
+## `next` 0.4.1 — rebuilt on `core` 0.6.1 (2026-09-11)
+
+No change in `next` itself. The version moves because the build bundles a
+different `core`: two binaries stamped 0.4.0 carrying 0.6.0 and 0.6.1 would be
+indistinguishable from the outside, and "which build am I running" is exactly
+the question a version stamp exists to answer. The inspector does not run the
+gate — the checks fixed in 0.6.1 execute in the collector host — so this is a
+provenance bump, not a behaviour change.
+
 ## B10b, day 0 — the collector's Finnhub calls carried no key (2026-09-11)
 
 Existing app **v1.1.223**; `core` unchanged. Every Finnhub call on gen-001's
