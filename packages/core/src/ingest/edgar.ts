@@ -10,11 +10,12 @@ import type { IngestContext, IngestedRowSpec } from '../collector/capture.js';
  *
  * - **`filings.recent` is capped at 1,000 entries**, with the remainder in a
  *   `filings.files` overflow list. It is the same truncation shape as Finnhub's
- *   1,500-row calendar and it is reported the same way (`atProviderCap`), even
- *   though it truncates from the *older* end and so happens to be harmless for
- *   what this phase wants. "Harmless in the current usage" is not a reason to
- *   leave a cap undetected — the Finnhub one was harmless too, until a window
- *   grew.
+ *   1,500-row calendar. It truncates from the *older* end, so it is reported
+ *   (`atProviderCap`) only when the truncation reaches into the window being
+ *   stored — measured, per response, from the oldest filing date kept. "Harmless
+ *   in the current usage" is not a reason to leave a cap undetected (the Finnhub
+ *   one was harmless too, until a window grew), which is why the test is against
+ *   the window rather than switched off.
  * - **`fy` and `fp` on a fact belong to the FILING, not to the fact.** Apple's
  *   Q3-2018 revenue carries `fp: "FY"` because it was reported on a 10-K. They
  *   are stored verbatim, and anything wanting the fact's own period must read
@@ -41,10 +42,28 @@ interface EdgarRecentFilings {
 
 export const EDGAR_RECENT_CAP = 1000;
 
-export function submissionsAtCap(body: string): boolean {
+/**
+ * Whether a submissions response is truncated **for the window being stored**.
+ *
+ * EDGAR drops the OLDEST filings past the cap, so a full `recent` list loses
+ * nothing on or after `since` as long as its oldest filing is older than
+ * `since`. Only then is the cap harmless; when the oldest kept filing is inside
+ * the window, filings the phase wanted may have been cut, and that is reported.
+ * Without `since` every full list is reported, as before. Flagging every full
+ * list made QC-008 (blocking) fire on 16 of 20 filers on gen-001's first day —
+ * every large filer, every day — so no pilot day could come out clean.
+ */
+export function submissionsAtCap(body: string, since?: string): boolean {
   try {
     const parsed = JSON.parse(body) as { filings?: { recent?: EdgarRecentFilings } };
-    return (parsed.filings?.recent?.accessionNumber?.length ?? 0) >= EDGAR_RECENT_CAP;
+    const recent = parsed.filings?.recent;
+    if ((recent?.accessionNumber?.length ?? 0) < EDGAR_RECENT_CAP) return false;
+    if (since === undefined) return true;
+    const dates = (recent?.filingDate ?? []).filter((d) => typeof d === 'string' && d !== '');
+    // No dates to reason from is not evidence of completeness.
+    if (dates.length === 0) return true;
+    const oldest = dates.reduce((a, b) => (a < b ? a : b));
+    return oldest >= since;
   } catch {
     return false;
   }

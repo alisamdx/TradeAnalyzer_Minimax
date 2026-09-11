@@ -391,7 +391,7 @@ export async function runEdgarFilings(
       host, db, runId: run.runId, asOfDate: run.tradingDate, provider: 'edgar',
       endpoint: `/submissions/CIK{cik}.json`, slug: 'edgar-submissions',
       params: { cik, ticker }, response, captureRuleId: ruleId,
-      atProviderCap: response.body ? submissionsAtCap(response.body) : false,
+      atProviderCap: response.body ? submissionsAtCap(response.body, since) : false,
       recipe: recipes.submissions({ cik, ticker, since, forms: REPORT_FORMS })
     });
 

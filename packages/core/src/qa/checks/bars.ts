@@ -307,7 +307,18 @@ export const QC207_TRADING_DAY_GAP: CheckDefinition = {
         ).map((r) => r.trade_date)
       );
       if (have.size === 0) continue;
-      const missing = [...window].filter((d) => !have.has(d));
+      // Only days BETWEEN the ticker's first and last bar in the window are
+      // holes. The first version counted every window day without a bar, so a
+      // series that simply began inside the window — every ticker on a new
+      // generation, a new listing — read as a gap on each day before it began:
+      // 1,083 findings of 17 missing days on gen-001's first full run.
+      const inWindow = [...have].filter((d) => window.has(d)).sort();
+      const first = inWindow[0];
+      const last = inWindow[inWindow.length - 1];
+      const missing =
+        first === undefined || last === undefined
+          ? []
+          : [...window].filter((d) => d > first && d < last && !have.has(d)).sort();
       out.push({
         key: ticker,
         value: missing.length,

@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.222] - 2026-09-11
+
+`@tradeanalyzer/core` 0.6.1. **Four collector checks that fired on every run, fixed** — so the pilot's clean-day streak can start.
+
+gen-001's first full run (2026-09-10) was red on three blocking checks, and each was the check's fault rather than the data's. Every one would have fired on every run, so no day could ever have come out clean.
+
+- **QC-001 (provenance) read derived tables.** A `derived_` row has a null `source_response_id` by definition — it is computed from many stored rows, not parsed from one response — so the one IV30 row the derive phase writes a day was flagged as an orphan. QC-001 now reads only the parsed layers (`raw`, `ext`, `legacy`).
+- **QC-008 (provider cap) flagged every EDGAR filer with 1,000+ filings.** EDGAR's `filings.recent` caps at 1,000 and drops the *oldest*, while the filings phase stores only filings since its lookback date. A full list is now flagged only when its oldest kept filing is inside that window — i.e. when the truncation could actually have cut something stored. It fired on 16 of 20 filers.
+- **QC-409 (pins honoured) could never pass for a pin outside the chain subset.** Phase 7 walked subset members only, so a pinned contract whose ticker was not a member was never fetched — 141 of them on 9/10, with the subset down to one ticker while gen-001 has too few bars for its 20-day rule. Pinned tickers are now always fetched: a non-member at its pinned expirations only, with the other expirations recorded as declined.
+- **QC-207 (bar gap, warning) counted days before a series began.** It treated every day in its 20-day window without a bar as a hole, so all 1,083 tickers on a three-day-old generation read as 17 missing days. It now counts only days between a ticker's first and last bar in the window, as its description always said.
+- Tests: `1,263` here, `470` in `core`.
+
 ## [1.1.221] - 2026-09-11
 
 `@tradeanalyzer/core` 0.6.0 (dictionary v13), `@tradeanalyzer/next` 0.4.0. **NewApp B10a — pilot-exit machinery.**

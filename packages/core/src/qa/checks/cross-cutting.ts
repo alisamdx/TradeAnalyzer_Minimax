@@ -11,6 +11,16 @@ import type { CheckDefinition, Evaluation } from '../check.js';
 
 const RAW_LAYERS = "('raw', 'ext', 'derived', 'legacy')";
 
+/**
+ * The layers whose rows are PARSED from a response. `derived` is not one of
+ * them: a derived row is a function of many stored rows, and the dictionary
+ * makes its `source_response_id` nullable and always null for exactly that
+ * reason (standard-columns.ts). Including it made QC-001 fire on every day the
+ * derive phase wrote a row — the one IV30 row a day on gen-001 — so the check
+ * contradicted the dictionary it reads and no pilot day could come out clean.
+ */
+const PARSED_LAYERS = "('raw', 'ext', 'legacy')";
+
 export const QC001_PROVENANCE: CheckDefinition = {
   id: 'QC-001',
   domain: 'cross_cutting',
@@ -29,7 +39,7 @@ export const QC001_PROVENANCE: CheckDefinition = {
       ctx.db
         .prepare(
           `SELECT DISTINCT table_name FROM meta_dictionary
-            WHERE layer IN ${RAW_LAYERS} AND column_name = 'source_response_id'`
+            WHERE layer IN ${PARSED_LAYERS} AND column_name = 'source_response_id'`
         )
         .all() as { table_name: string }[]
     ).map((r) => r.table_name);

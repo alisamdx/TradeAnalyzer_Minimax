@@ -65,14 +65,14 @@ A ‡ value still gets its distribution recorded like any other (§4) — measur
 
 | id | sev | fires when | remediation |
 |---|---|---|---|
-| QC-001 provenance | blocking | any raw row has null `source_response_id`, or its `meta_response` row is missing / `parse_status = failed` | none |
+| QC-001 provenance | blocking | any raw row has null `source_response_id`, or its `meta_response` row is missing / `parse_status = failed`. **Parsed layers only** (`raw`, `ext`, `legacy`): a `derived_` row's `source_response_id` is null by definition (02 §0.2), and reading it fired QC-001 on every day the derive phase wrote (fixed core 0.6.1) | none |
 | QC-002 archive integrity | blocking | sampled archive lines (≥ 50 per run + every account-domain line) fail `sha256` match or fail to decompress/decrypt | none |
 | QC-003 dictionary conformance | blocking | a column exists in the DB that is not in `meta_dictionary`, or vice versa; a column's declared type/enum set is violated | none |
 | QC-004 null discipline | blocking | a non-nullable column is null; a nullable column is null with a status column that is not one of the standard values; a value column is non-null while its status ≠ `ok` | none |
 | QC-005 mutation guard | blocking | the raw-table `UPDATE`/`DELETE` triggers logged any attempt this run (AC-2) | none |
 | QC-006 run completeness | blocking | the run did not reach every domain its capture rules scheduled (e.g. crashed after bars, before chains) | R1 retry the missing domains |
 | QC-007 capture-rule reference | blocking | a snapshot row references a `capture_rule_id` not in force on `as_of_date` (P6) | none |
-| QC-008 provider cap | blocking | any `meta_response.at_provider_cap = 1` that was **not** followed by a subdivided sweep covering the same window | R4 subdivide |
+| QC-008 provider cap | blocking | any `meta_response.at_provider_cap = 1` that was **not** followed by a subdivided sweep covering the same window. The flag means *truncated for the window being stored*: EDGAR submissions drop the OLDEST filings, so a full `recent` list is flagged only when its oldest kept filing is on or after the phase's `since` (core 0.6.1 — flagging every full list fired on 16 of 20 filers daily) | R4 subdivide |
 | QC-009 duplicate natural key within a run | warning | the same natural key stored twice in one run (idempotence bug) | none |
 
 ### 3.2 Universe, reference, calendar
@@ -120,7 +120,7 @@ A ‡ value still gets its distribution recorded like any other (§4) — measur
 | QC-406 ladder integrity | warning | strikes for an (expiration, right) not strictly increasing, or a strike appears once as call and not as put | none |
 | QC-407 underlying disagreement | warning | \|`underlying_price` − `raw_eod_quote.last`\| / last > 1 % † | none |
 | QC-408 zero-volume default | warning | any `volume = 0` with `volume_status = ok` **and** `open_interest = 0` **and** bid = ask = 0. This *may* be a defaulted field, but a genuinely untraded far-OTM strike on a fresh expiration has the same shape, so it cannot be blocking — see the note below | none |
-| QC-409 sticky-set honoured | blocking | a `ref_sticky_contract` with `valid_to ≥ today` has no snapshot row this run | R1 retry |
+| QC-409 sticky-set honoured | blocking | a `ref_sticky_contract` with `valid_to ≥ today` has no snapshot row this run. Phase 7 therefore fetches every pinned ticker, member or not — a non-member at its pinned expirations only, the rest recorded `outside` (core 0.6.1; it walked members alone, so a pin outside the subset could never be honoured) | R1 retry |
 | QC-410 Greek reproduction | warning | Black-Scholes delta from (`underlying_price`, `strike`, DTE, `iv`, 3M yield from `raw_treasury_yield`) differs from `delta` by > 0.05 on > 5 % of ATM contracts † (checks E*Trade's Greeks are on the scale we think; P4). **This is the stage-1 consumer of `raw_treasury_yield`** (02 §11); if the yield row is missing for the date the check is skipped, not failed — a missing rate is QC-902's finding, not this one | none |
 | QC-411 weekend expiration | blocking | an `expiration_date` that is not a trading day and is not a holiday-shifted expiration (when the third Friday is a holiday, expiration moves to the **preceding Thursday** — 02 §2 `is_monthly_expiration`). Catches the UTC/local weekday bug, whose signature is a Saturday date | none |
 

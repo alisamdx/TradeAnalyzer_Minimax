@@ -9,6 +9,43 @@ exit (06 §6).
 
 ---
 
+## B10b, day 0 — four checks that could never pass (2026-09-11)
+
+`core` 0.6.1; existing app **v1.1.222**. The first read of the streak after B10a
+said **0 of 20**, and the reason was not the data. gen-001's first full daily
+run (2026-09-10) was red on three blocking checks, each of which would have
+fired on every run for as long as the pilot lasted:
+
+- **QC-001** read `derived_iv30_daily`. A derived row is a function of many
+  stored rows, so the dictionary makes its `source_response_id` null by
+  definition — and the check called that an orphan. The check contradicted the
+  dictionary it reads. It now reads only the parsed layers.
+- **QC-008** flagged every EDGAR filer with 1,000+ filings (16 of 20). The cap
+  was deliberately reported "even though harmless" — but reported as *blocking
+  with no possible remediation*, which is not a report, it is a permanent red.
+  The flag now means what QC-008 needs it to mean: truncated *for the window
+  being stored*, measured from the oldest filing the response kept.
+- **QC-409** could not pass for any pin outside the chain subset, because
+  phase 7 only walked members — while the reason pins exist is that a contract
+  must keep being priced after its ticker leaves the subset. 141 pins, with the
+  subset at one ticker (the 20-day dollar-volume rule has three bars to work
+  with). Pinned tickers are now always fetched, a non-member at its pinned
+  expirations only, and the expirations not fetched are stored as `outside` so
+  QC-402 does not read them as captured-and-empty.
+- **QC-207** (warning) counted every day of its window without a bar, so a
+  three-day-old series read as 17 missing days on all 1,083 tickers; its own
+  description already said "on both sides".
+
+**The transferable shape:** a check's first real run is itself a test of the
+check. Four of the nine that fired did so for a reason visible from the check's
+source alone, and none of them was catchable earlier because every fixture had
+been built to exercise the case the check was *for*. When a check fires on
+100 % of its population on day one, read the check before the data.
+
+Still open and not addressed here (warnings): Finnhub non-2xx on every call,
+Polygon short interest non-2xx (the pending source decision), and a chain
+subset that stays near-empty until 20 bars exist.
+
 ## B10a — pilot-exit machinery (2026-09-11)
 
 `core` 0.6.0, `next` 0.4.0, dictionary **v13**. The existing app moves to

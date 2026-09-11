@@ -530,6 +530,30 @@ describe('EDGAR submissions', () => {
     expect(submissionsAtCap(big)).toBe(true);
     expect(submissionsAtCap(body)).toBe(false);
   });
+
+  it('reports the cap only when the truncation reaches into the stored window', () => {
+    // EDGAR drops the OLDEST filings. A full list whose oldest kept filing
+    // predates `since` lost nothing the phase stores — on gen-001's first day
+    // flagging those anyway fired a blocking QC-008 on 16 of 20 filers.
+    const full = (oldest: string) =>
+      JSON.stringify({
+        filings: {
+          recent: {
+            accessionNumber: Array.from({ length: 1000 }, (_, i) => `a-${i}`),
+            filingDate: Array.from({ length: 1000 }, (_, i) => (i === 999 ? oldest : '2026-09-01'))
+          }
+        }
+      });
+    expect(submissionsAtCap(full('2024-01-02'), '2025-09-10')).toBe(false);
+    expect(submissionsAtCap(full('2025-12-01'), '2025-09-10')).toBe(true);
+    // The boundary day itself may have been cut part-way through.
+    expect(submissionsAtCap(full('2025-09-10'), '2025-09-10')).toBe(true);
+    // No dates to reason from is not evidence of completeness.
+    const dateless = JSON.stringify({
+      filings: { recent: { accessionNumber: Array.from({ length: 1000 }, (_, i) => `a-${i}`) } }
+    });
+    expect(submissionsAtCap(dateless, '2025-09-10')).toBe(true);
+  });
 });
 
 describe('EDGAR company facts', () => {

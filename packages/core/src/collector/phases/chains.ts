@@ -326,13 +326,23 @@ export async function runChainsPhase(
   const stickyClosed = closeExpiredStickyContracts(db, run.tradingDate);
   const sticky = stickyByTicker(db, run.tradingDate);
 
-  const tickers =
+  const members =
     opts.tickers ??
     (
       db
         .prepare('SELECT ticker FROM ref_chain_subset_membership WHERE valid_to IS NULL ORDER BY ticker')
         .all() as { ticker: string }[]
     ).map((r) => r.ticker);
+  const memberSet = new Set(members);
+
+  // A pin outlives its ticker's membership — that is what a pin is for — so a
+  // pinned contract whose ticker is NOT in the subset is still fetched, but only
+  // at the pinned expirations. The first version walked members alone, so every
+  // pin outside the subset produced no row and QC-409 fired on it every day:
+  // 141 of them on gen-001's first full run, where the subset held one ticker.
+  // An explicit ticker list (a one-shot) means exactly that list.
+  const pinOnly = opts.tickers ? [] : [...sticky.keys()].filter((t) => !memberSet.has(t)).sort();
+  const tickers = [...members, ...pinOnly];
 
   let expirationCalls = 0;
   let expirationFailures = 0;
@@ -380,6 +390,14 @@ export async function runChainsPhase(
       ...(opts.maxDte !== undefined ? { maxDte: opts.maxDte } : {}),
       ...(opts.extraMonthlies !== undefined ? { extraMonthlies: opts.extraMonthlies } : {})
     });
+    // A pin-only ticker is outside the rule, so everything but its pinned
+    // expirations is recorded as declined — the stored window must say what was
+    // actually fetched.
+    if (!memberSet.has(ticker)) {
+      for (const [date, reason] of selection) {
+        if (reason !== 'sticky_contract') selection.set(date, 'outside');
+      }
+    }
 
     const expResult = captureResponse({
       host, db, runId: run.runId, asOfDate: run.tradingDate, provider: 'etrade',

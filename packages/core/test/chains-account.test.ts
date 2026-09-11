@@ -854,6 +854,71 @@ describe('phase 7 — chains, and AC-5 on every response', () => {
     expect(declined.window_reason).toBe('outside');
   });
 
+  it('fetches a pin whose ticker is outside the subset, at the pinned expiration only (QC-409)', async () => {
+    // gen-001's first full run: the subset held one ticker, 141 pins sat on
+    // tickers outside it, none was fetched, and QC-409 blocked every day.
+    const run0 = newRun();
+    raw
+      .prepare(
+        "INSERT INTO meta_response (run_id, provider, endpoint, params_json, requested_at, http_status, byte_length, archive_file, archive_offset, sha256, dedup_hash, encrypted, at_provider_cap, parse_status, parsed_row_count) " +
+          "VALUES (?, 'etrade', '/x', '{}', '2026-09-07T17:00:00-04:00', 200, 1, 'f', 0, 'h', 'pin-only', 1, 0, 'ok', 0)"
+      )
+      .run(run0.runId);
+    const src = (raw.prepare('SELECT MAX(source_response_id) AS id FROM meta_response').get() as { id: number }).id;
+    raw
+      .prepare(
+        `INSERT INTO ref_sticky_contract (run_id, as_of_date, observed_at, source_response_id,
+           osi_symbol, ticker, expiration_date, reason, valid_from)
+         VALUES (?, ?, '2026-09-07T17:00:00-04:00', ?, 'SPY   260918P0000770', 'SPY', '2026-09-18', 'recommended_by_legacy', ?)`
+      )
+      .run(run0.runId, DATE, src, DATE);
+
+    const chainDates: string[] = [];
+    const inner = chainHost();
+    const host = makeHost({
+      etradeGet: async (path, params) => {
+        if (path === '/v1/market/optionchains') chainDates.push(`${params['expiryMonth']}-${params['expiryDay']}`);
+        return inner.etradeGet(path, params);
+      }
+    });
+    const run = beginRun(db(), host, { kind: 'daily', tradingDate: DATE });
+    const result = await runChainsPhase(host, db(), run);
+
+    expect(result.tickers).toBe(1);
+    expect(chainDates).toEqual(['9-18']);
+    // What was not fetched is recorded as declined, not as in the window.
+    const dec = raw
+      .prepare("SELECT window_reason FROM raw_option_expiration WHERE expiration_date = '2026-12-18'")
+      .get() as { window_reason: string };
+    expect(dec.window_reason).toBe('outside');
+
+    runGate(db(), makeHost(), { runId: run.runId, tradingDate: DATE, checks: [...CHAIN_CHECKS], domainsExpected: {} });
+    const pinFinding = raw.prepare("SELECT 1 FROM qa_exception WHERE check_id = 'QC-409'").get();
+    expect(pinFinding).toBeUndefined();
+  });
+
+  it('an explicit ticker list means exactly that list — pins do not widen a one-shot', async () => {
+    const run0 = newRun();
+    raw
+      .prepare(
+        "INSERT INTO meta_response (run_id, provider, endpoint, params_json, requested_at, http_status, byte_length, archive_file, archive_offset, sha256, dedup_hash, encrypted, at_provider_cap, parse_status, parsed_row_count) " +
+          "VALUES (?, 'etrade', '/x', '{}', '2026-09-07T17:00:00-04:00', 200, 1, 'f', 0, 'h', 'pin-explicit', 1, 0, 'ok', 0)"
+      )
+      .run(run0.runId);
+    const src = (raw.prepare('SELECT MAX(source_response_id) AS id FROM meta_response').get() as { id: number }).id;
+    raw
+      .prepare(
+        `INSERT INTO ref_sticky_contract (run_id, as_of_date, observed_at, source_response_id,
+           osi_symbol, ticker, expiration_date, reason, valid_from)
+         VALUES (?, ?, '2026-09-07T17:00:00-04:00', ?, 'QQQ   260918P00500000', 'QQQ', '2026-09-18', 'held_in_book', ?)`
+      )
+      .run(run0.runId, DATE, src, DATE);
+    const host = chainHost();
+    const run = beginRun(db(), host, { kind: 'daily', tradingDate: DATE });
+    const result = await runChainsPhase(host, db(), run, { tickers: ['SPY'] });
+    expect(result.tickers).toBe(1);
+  });
+
   it('closes a pin whose contract has expired, and never earlier', () => {
     const run = newRun();
     raw
