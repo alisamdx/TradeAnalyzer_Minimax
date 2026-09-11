@@ -506,6 +506,82 @@ export interface ZeroFireDto {
   readonly evaluatedTotal: number;
 }
 
+// ── pilot exit (03 §8, 05 §6, B10a) ─────────────────────────────────────────
+// UI vocabulary: `choice` and `list`, never the column names they are stored in.
+
+export type PilotListDto = 'neverFired' | 'threshold';
+
+export interface PilotRulingDto {
+  readonly choice: string;
+  readonly note: string;
+  readonly proposed: number | null;
+  readonly at: string;
+  readonly by: string;
+}
+
+export interface PilotConditionDto {
+  readonly key: 'status' | 'streak' | 'zero_fire' | 'thresholds' | 'inspections' | 'expired_review' | 'verify_notes' | 'replay';
+  readonly met: boolean;
+  readonly detail: string;
+}
+
+export interface PilotStatusDto {
+  readonly generationNo: number | null;
+  readonly generationStatus: string | null;
+  readonly promotedAt: string | null;
+  readonly lastEvaluatedDate: string | null;
+  readonly streak: number;
+  readonly streakTarget: number;
+  readonly conditions: readonly PilotConditionDto[];
+  readonly canPromote: boolean;
+  readonly inspections: readonly { readonly domain: string; readonly lastAt: string | null; readonly note: string | null }[];
+  readonly replay: {
+    readonly sessionsSincePassing: number | null;
+    readonly lastPassingAt: string | null;
+    readonly differentDates: readonly string[];
+  };
+  /** The exact text the operator must type to promote. */
+  readonly confirmation: string;
+}
+
+export interface PilotNeverFiredDto {
+  readonly checkId: string;
+  readonly version: number;
+  readonly domain: string;
+  readonly severity: string;
+  readonly description: string;
+  readonly evaluatedTotal: number;
+  readonly ruling: PilotRulingDto | null;
+}
+
+export interface PilotBoundsDto {
+  readonly lo: number;
+  readonly hi: number;
+}
+
+export interface PilotThresholdDto {
+  readonly checkId: string;
+  readonly version: number;
+  readonly domain: string;
+  readonly quantity: string;
+  readonly unit: string | null;
+  readonly limit: number | null;
+  readonly basis: string;
+  readonly needsRuling: boolean;
+  readonly runs: number;
+  readonly n: number;
+  readonly min: number | null;
+  readonly max: number | null;
+  readonly p50: PilotBoundsDto | null;
+  readonly p90: PilotBoundsDto | null;
+  readonly p99: PilotBoundsDto | null;
+  readonly nearBoundary: number;
+  readonly decorative: 'yes' | 'no' | 'maybe' | null;
+  readonly bulkAgainst: 'yes' | 'no' | 'maybe' | null;
+  readonly extremes: readonly { readonly key: string; readonly value: number; readonly runId: number }[];
+  readonly ruling: PilotRulingDto | null;
+}
+
 export interface RunRowDto {
   readonly runId: number;
   readonly kind: string;
@@ -709,6 +785,15 @@ export interface NextApi {
     cancel(requestId: number): Promise<IpcResult<boolean>>;
     resetPreview(): Promise<IpcResult<ResetPreviewDto>>;
     reset(reason: string, confirmation: string): Promise<IpcResult<ResetResultDto>>;
+  };
+  /** Pilot exit (03 §8, 05 §6, B10a). Every rule is enforced in `core`; the view only asks. */
+  readonly pilot: {
+    status(): Promise<IpcResult<PilotStatusDto>>;
+    neverFired(): Promise<IpcResult<readonly PilotNeverFiredDto[]>>;
+    thresholds(): Promise<IpcResult<readonly PilotThresholdDto[]>>;
+    rule(list: PilotListDto, checkId: string, choice: string, note: string, proposed: number | null): Promise<IpcResult<number>>;
+    inspect(domain: string, note: string | null): Promise<IpcResult<number>>;
+    promote(confirmation: string): Promise<IpcResult<PilotStatusDto>>;
   };
   /** Navigation only — a link can never act (05 §11.1). */
   readonly deepLinks: {

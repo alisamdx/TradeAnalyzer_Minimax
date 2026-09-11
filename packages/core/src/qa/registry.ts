@@ -7,6 +7,7 @@ import { ACCOUNT_CHECKS } from './checks/account.js';
 import { EARNINGS_FUNDAMENTALS_CHECKS } from './checks/earnings-fundamentals.js';
 import { MACRO_CHECKS } from './checks/macro.js';
 import { ivBootstrapChecks } from './checks/iv-bootstrap.js';
+import { REPLAY_CHECKS } from './checks/replay.js';
 import type { SqliteLike } from '../db/sqlite-like.js';
 
 /**
@@ -19,7 +20,8 @@ import type { SqliteLike } from '../db/sqlite-like.js';
  *
  * B4 brought cross-cutting, bars, quotes and corporate actions; B6 added chains
  * and account with phases 5 through 7; B7a added earnings, fundamentals and the
- * macro/sentiment domains with phase 8.
+ * macro/sentiment domains with phase 8. B10a added the replay pair (QC-951,
+ * QC-956) — replay itself shipped at B9b, so they read a table that is written.
  *
  * **B7b's two bootstrap checks are NOT in this list**, because they are the one
  * pair whose registration is conditional on data rather than on a shipped phase
@@ -34,7 +36,8 @@ export const ALL_CHECKS: readonly CheckDefinition[] = [
   ...CHAIN_CHECKS,
   ...ACCOUNT_CHECKS,
   ...EARNINGS_FUNDAMENTALS_CHECKS,
-  ...MACRO_CHECKS
+  ...MACRO_CHECKS,
+  ...REPLAY_CHECKS
 ];
 
 /**
@@ -51,7 +54,7 @@ export function checksFor(db: SqliteLike): readonly CheckDefinition[] {
 
 export {
   CROSS_CUTTING_CHECKS, BAR_CHECKS, QUOTE_AND_ACTION_CHECKS, CHAIN_CHECKS, ACCOUNT_CHECKS,
-  EARNINGS_FUNDAMENTALS_CHECKS, MACRO_CHECKS
+  EARNINGS_FUNDAMENTALS_CHECKS, MACRO_CHECKS, REPLAY_CHECKS
 };
 export {
   ivBootstrapChecks, QC907_BOOTSTRAP_OVERLAP, QC908_BOOTSTRAP_DISAGREEMENT,

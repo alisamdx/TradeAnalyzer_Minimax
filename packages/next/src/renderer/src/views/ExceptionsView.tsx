@@ -541,8 +541,8 @@ function ZeroFire(): JSX.Element {
     <>
       <p className="muted">
         A check that never fires is either watching a clean system or incapable of firing, and only
-        its distribution can say which. The keep / fix / drop ruling on each is part of the pilot-exit
-        review (B10); this is the list it will be made from.
+        its distribution can say which. The keep / fix / drop ruling on each is made in Pilot exit,
+        beside the threshold review.
       </p>
       {rows.length === 0 ? (
         <p className="empty">Every registered check has fired at least once.</p>

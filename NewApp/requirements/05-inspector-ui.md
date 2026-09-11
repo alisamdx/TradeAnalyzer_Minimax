@@ -125,6 +125,8 @@ The place where 03 §5 happens.
 
 The Dictionary view lists every table and column as the dictionary declares them, with live row counts and null-rate per column over the last 20 runs (so a column that is *always* null is obvious — D7). It also hosts the **pilot-exit checklist** (P14): per domain a "visually inspected" checkbox with timestamp and note, the clean-day streak, the zero-fire review status, and the **Promote to production** action, enabled only when all three conditions hold.
 
+**As built (B10a): the checklist is its own section, _Pilot exit_**, not part of the Dictionary view — it carries the two reviews as well as the checklist, which is a job of its own. It shows every condition of 03 §8.1 with its detail line, a record-inspection action per gate domain (appends; the history is kept), the never-fired list with a keep / fix / drop ruling per check, and the threshold review — pooled bounds for p50 and p99, max with its extreme keys, the near-boundary count, the two QC-955 shapes — with confirm / move / unmeasurable on each working threshold. Promote needs the typed confirmation and is offered only when every condition holds; `core` refuses regardless. Overview shows the streak and how many conditions are met. In a read-only window every action is hidden and the write channels refuse.
+
 ---
 
 ## 7. Jobs

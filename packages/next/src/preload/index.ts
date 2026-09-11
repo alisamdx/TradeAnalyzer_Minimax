@@ -94,6 +94,15 @@ const api: NextApi = {
     resetPreview: () => ipcRenderer.invoke('jobs:reset-preview'),
     reset: (reason: string, confirmation: string) => ipcRenderer.invoke('jobs:reset', reason, confirmation)
   },
+  pilot: {
+    status: () => ipcRenderer.invoke('pilot:status'),
+    neverFired: () => ipcRenderer.invoke('pilot:never-fired'),
+    thresholds: () => ipcRenderer.invoke('pilot:thresholds'),
+    rule: (list, checkId: string, choice: string, note: string, proposed: number | null) =>
+      ipcRenderer.invoke('pilot:rule', list, checkId, choice, note, proposed),
+    inspect: (domain: string, note: string | null) => ipcRenderer.invoke('pilot:inspect', domain, note),
+    promote: (confirmation: string) => ipcRenderer.invoke('pilot:promote', confirmation)
+  },
   deepLinks: {
     initial: () => ipcRenderer.invoke('deeplink:initial'),
     // A subscription, and the only push channel in the bridge. It carries a

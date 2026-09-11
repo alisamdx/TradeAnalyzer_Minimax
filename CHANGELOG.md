@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.1.221] - 2026-09-11
+
+`@tradeanalyzer/core` 0.6.0 (dictionary v13), `@tradeanalyzer/next` 0.4.0. **NewApp B10a — pilot-exit machinery.**
+
+### The collector's gate, as bundled here
+
+- **The clean-day streak no longer counts across a day nothing recorded.** It walked the dates that had domain-day rows, so a trading day on which this app never ran (no 17:05 collector run and no 19:30 watchdog) vanished from the walk and the streak carried on. It now walks the exchange calendar; the streak in the status email is fixed with it.
+- **QC-951 replay equivalence** now runs: every run it reads the replays the operator ran (`meta_job_request.result_json`) and fires, blocking, when a day's latest replay came back `different`.
+- **QC-956 replay overdue** (new, warning): more than 7 trading sessions without a passing replay.
+- The generation upgrades itself on open: two new append-only tables (`qa_check_ruling`, `meta_domain_inspection`) and one nullable column on `meta_generation` — plain growth, asserted by a test on a populated v12 file.
+
+### TradeAnalyzer 2
+
+- New **Pilot exit** view: the checklist, per-domain inspections, keep / fix / drop on never-fired checks, confirm / move / unmeasurable on working thresholds (pooled distributions shown as exact bounds), and Promote to production behind a typed confirmation. Every rule is enforced in `core`.
+- Known blocker: `short_interest` still carries a verify note, which the dictionary has always made a promotion condition.
+- `1,263` tests here, `463` in `core`, `56` in `next`.
+
 ## [1.1.220] - 2026-09-11
 
 ### `GET /api/v1/analysis/snapshots/latest` — and the monthly-first harness stops opening the database

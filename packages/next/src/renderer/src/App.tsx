@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { GenerationInfoDto, GenerationListItemDto, TreeGroup } from '../../shared/types.js';
+import type { GenerationInfoDto, GenerationListItemDto, PilotStatusDto, TreeGroup } from '../../shared/types.js';
 import type { DeepLinkRoute } from '../../shared/deeplink.js';
 import { DataView } from './views/DataView.js';
 import { DictionaryView } from './views/DictionaryView.js';
@@ -11,6 +11,7 @@ import { LegacyView } from './views/LegacyView.js';
 import { ExceptionsView, type ExceptionsFocus } from './views/ExceptionsView.js';
 import { RunsView, type RunsFocus } from './views/RunsView.js';
 import { JobsView } from './views/JobsView.js';
+import { PilotView } from './views/PilotView.js';
 import { RichText } from './views/RichText.js';
 import { When } from './views/when.js';
 
@@ -30,7 +31,7 @@ import { When } from './views/when.js';
 
 type Section =
   | 'overview' | 'exceptions' | 'runs' | 'data' | 'chains' | 'account' | 'earnings' | 'iv'
-  | 'legacy' | 'dictionary' | 'jobs';
+  | 'legacy' | 'dictionary' | 'pilot' | 'jobs';
 
 const SECTIONS: readonly { id: Section; label: string; hint: string }[] = [
   { id: 'overview', label: 'Overview', hint: 'Generation and schema at a glance' },
@@ -43,6 +44,7 @@ const SECTIONS: readonly { id: Section; label: string; hint: string }[] = [
   { id: 'iv', label: 'IV', hint: 'Our own IV30 against the external history, and the overlap between them' },
   { id: 'legacy', label: 'Legacy', hint: 'What the existing app decided, and what it turned down' },
   { id: 'dictionary', label: 'Dictionary', hint: 'Every column, and what a null in it means' },
+  { id: 'pilot', label: 'Pilot exit', hint: 'The clean-day streak, the rulings, and promotion to production' },
   { id: 'jobs', label: 'Jobs', hint: 'Queue one-shot jobs, and reset the generation' }
 ];
 
@@ -163,6 +165,7 @@ export function App() {
         {!error && section === 'iv' && <IvView />}
         {!error && section === 'legacy' && <LegacyView />}
         {!error && section === 'dictionary' && <DictionaryView tree={tree} />}
+        {!error && section === 'pilot' && <PilotView readOnly={readOnly} />}
         {!error && section === 'jobs' && !readOnly && <JobsView onGenerationChanged={() => void loadGeneration()} />}
       </main>
     </div>
@@ -177,9 +180,11 @@ function Overview({
   tableCount: number;
 }) {
   const [unverified, setUnverified] = useState<readonly { table: string; column: string; note: string }[]>([]);
+  const [pilot, setPilot] = useState<PilotStatusDto | null>(null);
 
   useEffect(() => {
     void window.api.dictionary.unverified().then((r) => { if (r.ok) setUnverified(r.data); });
+    void window.api.pilot.status().then((r) => { if (r.ok) setPilot(r.data); });
   }, []);
 
   if (!generation) return <p className="muted">Opening the generation…</p>;
@@ -188,13 +193,23 @@ function Overview({
     <>
       <h1>Overview</h1>
       <p className="lede">
-        Stage 1, build step B9c. The collector runs every phase; findings are ruled on in
-        Exceptions, runs are read in Runs, questions are asked and saved in Data, and one-shot jobs
-        are queued from Jobs.
+        Stage 1, build step B10 — the pilot. The collector runs every phase; findings are ruled on in
+        Exceptions, runs are read in Runs, questions are asked and saved in Data, one-shot jobs are
+        queued from Jobs, and the pilot is reviewed and promoted in Pilot exit.
       </p>
 
       <dl className="facts">
         <div><dt>Generation</dt><dd>gen-{pad(generation.generationNo)} — {generation.status}</dd></div>
+        {pilot && generation.status === 'pilot' && (
+          <div>
+            <dt>Pilot streak</dt>
+            <dd>
+              {pilot.streak} of {pilot.streakTarget} clean trading days
+              {pilot.lastEvaluatedDate ? ` (through ${pilot.lastEvaluatedDate})` : ' — nothing evaluated yet'}
+              {' · '}{pilot.conditions.filter((c) => c.met).length} of {pilot.conditions.length} exit conditions met
+            </dd>
+          </div>
+        )}
         {generation.predecessorNo !== null && (
           <div>
             <dt>Replaced</dt>

@@ -183,6 +183,9 @@ Registered only once a `bootstrap_iv` load exists — an unbought bootstrap has 
 | QC-955 threshold distance | info | at pilot exit and monthly | for every check declaring a `tested_quantity`, reports the pooled distribution against its threshold and flags two shapes: a threshold **no observation ever approached** (p99 below half the boundary — decorative, the DINO shape) and one **the bulk of observations sit against** (p50 within ±25 % — firing on ordinary data, the liquidity-score shape) |
 | QC-953 archive/DB drift | blocking | weekly | a `meta_response` row's archive line is missing, or an archive line has no `meta_response` row |
 | QC-954 exception aging | warning | daily | an `open` exception older than 5 runs with no acknowledgement |
+| QC-956 replay overdue | warning | every run | more than 7 † trading sessions since the last replay that came back `equal` or `equal_on_replayed` (counted from the first daily run until one has) — added at B10a |
+
+**As built (B10a): the gate does not run a replay, it reads the ones the operator ran.** Replay is a one-shot job queued from the Jobs view and executed by hand in the host app (nothing claims a request on its own since v1.1.206), so QC-951 evaluates every run over `meta_job_request.result_json`: for each replayed trading day, the **latest** replay's verdict — `different` fires, blocking, and makes that day unusable. Latest rather than every, so a day re-replayed `equal` after a fix stops firing and can be resolved; with no replay at all it evaluates nothing, since that is QC-956's finding. QC-956 is the reminder that makes a skipped week visible: a warning, so it never breaks the streak, but promotion also requires it clear (§8).
 
 ---
 
@@ -375,6 +378,13 @@ The gate computes and the email shows a **clean-day streak**: consecutive tradin
 4. **Nothing is in `expired_review`** — every expired acceptance has been ruled on (§5.2). Then `meta_generation.status` → `production`, `pilot_exit_at` set. Downstream stages may now read.
 
 A reset (P14) restarts the streak at 0 in the new generation.
+
+### 8.1 As built (B10a, dictionary v13)
+
+- **The streak walks the exchange calendar**, not the dates that have status rows. The first `cleanDayStreak` iterated `DISTINCT trading_date`, so a session on which the host app never ran — no 17:05 run *and* no 19:30 watchdog, the one day nothing can write `not_run` — was absent from the walk and the streak counted straight across it. A trading day with no rows now breaks the streak.
+- **Rulings are their own append-only table, `qa_check_ruling`**, not columns on the registry row as step 1 says: that row's definition is frozen (a threshold change is a new version), so it cannot take a ruling. Each ruling is keyed to the `registry_version` it judged, carries a required note and the evidence shown when it was made; the latest per check, version and review is the one in force. A ruling covers one version — a check fixed or moved in code comes back as a new version to rule on again. `move` records the proposed value; applying it is a code change.
+- **Pooled quantiles are reported as bounds.** Each run stores a summary, not every value, and a pooled quantile cannot be recovered from per-run quantiles — but the pooled distribution is a mixture, so its q-quantile lies between the smallest and largest per-run q-quantile. The two QC-955 shapes are answered `yes` only when the whole bound satisfies the rule, `no` when none of it does, `maybe` otherwise. Only runs under the version in force are pooled. Only `working` (†) thresholds need a ruling; `measured` and `structural` ones are shown.
+- **Promotion conditions, all enforced in `core`** (`promoteToProduction` recomputes them and refuses, naming each unmet one): generation in `pilot`; streak ≥ 20; every never-fired check ruled; every working threshold ruled; every gate domain inspected (`meta_domain_inspection`); nothing in `expired_review`; **no column carrying a verify note** (02 §16 — the dictionary already said so; `raw_short_interest.short_interest` is the one left); and **replay current** — a replay passed within 7 sessions and no day's latest replay differs. Typed confirmation `promote gen-NNN`. The checklist as it stood is stored in `meta_generation.pilot_exit_evidence_json`.
 
 ---
 

@@ -58,9 +58,41 @@ export const metaTables: readonly TableEntry[] = [
       nullable(col.int('predecessor_no', 'The generation this one replaced.'), 'generation 1 — there was no predecessor'),
       nullable(col.text('reset_reason', 'Why the predecessor was closed.'), 'not a reset — this generation was opened fresh'),
       nullable(col.ts('pilot_exit_at', 'When the 20-clean-day criterion was met and the operator promoted this generation.'), 'still in pilot, or never promoted'),
-      nullable(col.date('iv_stitch_date', 'Readers use `ext_iv_history` before this date and `derived_iv30_daily` from it onward (Q17).'), 'no external IV history has been loaded yet')
+      nullable(col.date('iv_stitch_date', 'Readers use `ext_iv_history` before this date and `derived_iv30_daily` from it onward (Q17).'), 'no external IV history has been loaded yet'),
+      // Last, because a nullable column added to a populated table is appended.
+      nullable(
+        col.json(
+          'pilot_exit_evidence_json',
+          'The whole pilot-exit checklist as it stood at the moment of promotion (03 §8, B10a): the streak, ' +
+            'every zero-fire and threshold ruling, every domain inspection, the replay record. A status flag ' +
+            'says the generation was promoted; this says on what evidence, and it cannot drift afterwards.'
+        ),
+        'not promoted'
+      )
     ],
     indexes: []
+  }),
+
+  defineTable({
+    table: 'meta_domain_inspection',
+    layer: 'meta',
+    domain: 'generation',
+    description:
+      'The operator\'s record that a domain has been looked at by a person (D5, 03 §8 step 3). One row per ' +
+      'inspection, never edited: inspecting a domain again appends, so the history of who looked when stays ' +
+      'readable. Promotion needs at least one row for every domain the gate reports on.',
+    naturalKey: ['domain', 'inspected_at'],
+    appendOnly: true,
+    ruleDriven: false,
+    standardColumns: false,
+    columns: [
+      col.int('inspection_id', 'Inspection identifier.', { primaryKey: true, sourceProvider: 'operator' }),
+      col.text('domain', 'The gate domain inspected — the same vocabulary as `qa_domain_day_status.domain`.', { sourceProvider: 'operator' }),
+      col.ts('inspected_at', 'When the operator recorded it.', { sourceProvider: 'operator' }),
+      col.text('inspected_by', 'The application and version the operator recorded it from.', { sourceProvider: 'operator' }),
+      nullable(col.text('note', 'What was looked at and what it showed, in the operator\'s words.'), 'no note was given')
+    ],
+    indexes: [{ columns: ['domain'] }]
   }),
 
   defineTable({

@@ -31,10 +31,11 @@ import { listRuns, runDetail } from './runs.js';
 import { cancelRequest, jobsOverview, previewReset, queueOneShot } from './jobs.js';
 import { questionsFor, retireSavedQuestion, saveQuestionAs } from './questions.js';
 import { pin, pinsFor, unpin } from './study.js';
+import { inspect, neverFired, pilotStatus, promote, rule, thresholds } from './pilot.js';
 import { takePendingLink } from './deeplinks.js';
 import { openWindow } from './window-factory.js';
 import type {
-  ExceptionFilterDto, IpcResult, QueryRequestDto, QuestionDefinitionDto
+  ExceptionFilterDto, IpcResult, PilotListDto, QueryRequestDto, QuestionDefinitionDto
 } from '../shared/types.js';
 
 /**
@@ -184,6 +185,16 @@ export function registerIpc(): void {
   handleWrite('jobs:cancel', (requestId: number) => cancelRequest(requestId));
   handle('jobs:reset-preview', () => previewReset());
   handleWrite('jobs:reset', (reason: string, confirmation: string) => resetCurrentGeneration(reason, confirmation));
+
+  // ── pilot exit (03 §8, 05 §6) ────────────────────────────────────────────
+  handle('pilot:status', () => pilotStatus());
+  handle('pilot:never-fired', () => neverFired());
+  handle('pilot:thresholds', () => thresholds());
+  handleWrite('pilot:rule', (list: PilotListDto, checkId: string, choice: string, note: string, proposed: number | null) =>
+    rule(list, checkId, choice, note, proposed)
+  );
+  handleWrite('pilot:inspect', (domain: string, note: string | null) => inspect(domain, note));
+  handleWrite('pilot:promote', (confirmation: string) => promote(confirmation));
 
   handle('deeplink:initial', () => takePendingLink());
 }

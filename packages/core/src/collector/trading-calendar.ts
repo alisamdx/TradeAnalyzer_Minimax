@@ -217,6 +217,29 @@ export function buildTradingCalendar(from: string, to: string): readonly Trading
   return rows;
 }
 
+/**
+ * Trading days in `[from, to]`, ascending.
+ *
+ * Reads `ref_trading_day` and falls back to the rule generator for any date the
+ * table does not hold — so a reader never mistakes an unseeded calendar for a
+ * range with no sessions in it, which would turn "count the sessions since X"
+ * into zero and "walk back day by day" into a walk over nothing. Where the table
+ * does hold a date it wins, because an operator's `manual` row outranks a rule.
+ */
+export function tradingDaysInRange(db: SqliteLike, from: string, to: string): readonly string[] {
+  if (from > to) return [];
+  const stored = new Map(
+    (
+      db
+        .prepare('SELECT date, is_trading_day FROM ref_trading_day WHERE date BETWEEN ? AND ?')
+        .all(from, to) as { date: string; is_trading_day: number }[]
+    ).map((r) => [r.date, r.is_trading_day === 1] as const)
+  );
+  return buildTradingCalendar(from, to)
+    .filter((r) => stored.get(r.date) ?? r.isTradingDay)
+    .map((r) => r.date);
+}
+
 export interface CalendarSeedResult {
   readonly from: string;
   readonly to: string;

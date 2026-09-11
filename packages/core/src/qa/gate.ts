@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { SqliteLike } from '../db/sqlite-like.js';
 import type { CollectorHost, OperatorHost } from '../collector/host.js';
+import { tradingDaysInRange } from '../collector/trading-calendar.js';
 import {
   primaryThreshold,
   summarise,
@@ -511,26 +512,31 @@ function recordEvent(
  * of a new one. Letting it reset the streak would mean an acceptance taken on
  * pilot day 1 wipes the count around day 21, every time, so the 20-day criterion
  * would be defeated by its own escape valve. It blocks promotion instead.
+ *
+ * **It walks the exchange calendar, not the dates that happen to have rows**
+ * (fixed B10a). The first version iterated `DISTINCT trading_date` from
+ * `qa_domain_day_status`, so a trading day with NO rows at all — the host app
+ * not running at 17:05 *and* at 19:30, which is exactly the day the watchdog
+ * cannot write `not_run` — was simply absent from the walk, and the streak
+ * counted straight across it. A missing day read as a clean one. Now a session
+ * the calendar expected and nothing recorded breaks the streak like `not_run`
+ * does. The walk stops at the first day anything was recorded: the pilot cannot
+ * have been clean before it began.
  */
 export function cleanDayStreak(db: SqliteLike, upToDate: string): number {
-  const days = (
-    db
-      .prepare(
-        `SELECT DISTINCT trading_date FROM qa_domain_day_status
-          WHERE trading_date <= ? ORDER BY trading_date DESC`
-      )
-      .all(upToDate) as { trading_date: string }[]
-  ).map((r) => r.trading_date);
+  const first = (db.prepare('SELECT MIN(trading_date) AS d FROM qa_domain_day_status').get() as { d: string | null }).d;
+  if (first === null || first > upToDate) return 0;
+
+  const dayStatus = db.prepare(
+    `SELECT COUNT(*) AS n,
+            COALESCE(SUM(CASE WHEN status IN ('unusable', 'not_run') THEN 1 ELSE 0 END), 0) AS bad
+       FROM qa_domain_day_status WHERE trading_date = ?`
+  );
 
   let streak = 0;
-  for (const day of days) {
-    const bad = db
-      .prepare(
-        `SELECT COUNT(*) AS n FROM qa_domain_day_status
-          WHERE trading_date = ? AND status IN ('unusable', 'not_run')`
-      )
-      .get(day) as { n: number };
-    if (bad.n > 0) break;
+  for (const day of [...tradingDaysInRange(db, first, upToDate)].reverse()) {
+    const s = dayStatus.get(day) as { n: number; bad: number };
+    if (s.n === 0 || s.bad > 0) break;
     streak++;
   }
   return streak;

@@ -429,4 +429,20 @@ h3 { font-size: 13px; font-weight: 600; margin: 16px 0 6px; }
 .reset { background: rgba(120, 40, 40, 0.07); border: 1px solid #6b2a2a; margin-top: 28px; padding: 14px 16px; }
 .reset ul { margin: 4px 0 8px; padding-left: 18px; }
 .reset-form { display: grid; gap: 8px; margin-top: 10px; max-width: 580px; }
+
+/* ── Pilot exit (B10a) ────────────────────────────────────────────────────── */
+
+.checklist { display: grid; gap: 6px; list-style: none; margin: 8px 0 4px; padding: 0; }
+.checklist li { align-items: baseline; display: grid; gap: 10px; grid-template-columns: 16px 300px 1fr; }
+.checklist .mark { font-weight: 600; }
+.checklist .is-met .mark { color: var(--green); }
+.checklist .is-unmet .mark { color: var(--red); }
+.ruling { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+.rule-form { align-items: center; display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.rule-form input, .rule-form select {
+  background: var(--bg-raised); border: 1px solid var(--line); border-radius: 3px;
+  color: var(--fg); font: inherit; font-size: 12px; padding: 3px 6px;
+}
+.rule-form input.short { width: 110px; }
+td.wrap { white-space: normal; max-width: 420px; }
 .blocker { color: var(--red); }

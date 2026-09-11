@@ -9,6 +9,74 @@ exit (06 §6).
 
 ---
 
+## B10a — pilot-exit machinery (2026-09-11)
+
+`core` 0.6.0, `next` 0.4.0, dictionary **v13**. The existing app moves to
+**v1.1.221** with it, because the gate runs there: the two new checks and the
+streak fix only exist once the collector host bundles this `core`.
+
+B10 was split the same way B9 was: **B10a** is everything the pilot ends with,
+built now so it is proven before it is needed; **B10b** is the pilot itself —
+twenty clean trading days, a replay a week, and the reviews done by a person.
+
+### The clean-day streak counted across a day nothing recorded
+
+`cleanDayStreak` walked `DISTINCT trading_date` from `qa_domain_day_status`. A
+session on which the host app never ran — no 17:05 run, and so no 19:30
+watchdog either, the one day nothing can write `not_run` — had no rows, so it
+was not in the walk, and the streak counted straight across it. The status
+email's streak had the same blind spot. It now walks `ref_trading_day` (falling
+back to the rule generator for any date the table lacks) and a trading day with
+no rows breaks the streak. A test pins both halves: a gap breaks it; a weekend
+and Labor Day do not.
+
+### Rulings, inspections, promotion
+
+- **`qa_check_ruling`** (append-only): keep / fix / drop for a check that never
+  fired, confirm / move / unmeasurable for a working threshold. 03 §8 put these
+  on the registry row, but that row's definition is frozen, so a ruling is its
+  own row keyed to the version it judged, with a required note and the evidence
+  shown at the time. Refused when it does not fit: a zero-fire ruling on a check
+  that has fired, a threshold ruling on one that is not `working`, a `move`
+  without a value.
+- **Pooled distributions are bounds, not estimates.** Runs store summaries, so a
+  pooled p99 cannot be computed — but it must lie between the smallest and
+  largest per-run p99, and that is exact. The two QC-955 shapes (decorative,
+  bulk-against) therefore answer `yes`, `no` or `maybe`, and an approximation is
+  never presented as a finding.
+- **`meta_domain_inspection`** (append-only): one row per look, per gate domain.
+- **`promoteToProduction`** recomputes the checklist and refuses, naming every
+  unmet condition, behind a typed `promote gen-NNN`. The checklist is stored on
+  `meta_generation.pilot_exit_evidence_json`, so the promotion carries its
+  evidence.
+
+### Replay, as the gate can actually see it
+
+QC-951 was drafted as "the gate replays a sampled day weekly"; the gate cannot
+run one (replay is a manual one-shot in the host app). So it reads the replays
+the operator ran: the **latest** verdict per replayed day, `different` blocking.
+Latest, so a re-replay after a fix stops it firing and the exception can be
+resolved. **QC-956** (new, warning) fires after 7 sessions with no passing
+replay, and promotion requires it clear.
+
+### One promotion blocker is already known
+
+The dictionary has always said a generation cannot be promoted while any column
+carries a verify note, and one does: `raw_short_interest.short_interest` — no
+confirmed free source (02 §12). The checklist shows it; it needs a decision
+(confirm Polygon's coverage, use FINRA, or drop the domain) before day 20.
+
+### The view
+
+A new **Pilot exit** section (05 §6 as built): the checklist, the inspections,
+the never-fired list and the threshold review, each with its rulings; Overview
+shows the streak. An IPC test now pins that every write-verb channel is
+registered through `handleWrite`, so a read-only window refuses it.
+
+`463` tests in `core`, `56` in `next`.
+
+---
+
 ## B9c — filters and saved questions, study pins, and closed generations read-only (2026-09-10)
 
 `core` 0.5.0, `next` 0.3.0, dictionary **v12**. The existing app is unchanged

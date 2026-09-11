@@ -148,6 +148,7 @@ One row per generation (P14). Lives in every generation's own file describing it
 | `predecessor_no` | INTEGER | null for gen 1 |
 | `reset_reason` | TEXT | why the predecessor was closed |
 | `pilot_exit_at` | TEXT | when the 20-clean-day criterion was met |
+| `pilot_exit_evidence_json` | TEXT, nullable | the whole pilot-exit checklist at the moment of promotion — streak, rulings, inspections, replay record (03 §8, dictionary v13). The status says it was promoted; this says on what evidence |
 
 ### `meta_open_handle` — which application opened this file
 
@@ -248,6 +249,17 @@ The archive kept every response's bytes but, until dictionary v11, not the argum
 Append-only. Stored in the generation so a question travels with the data it was asked of.
 
 **Study pins** (`ref_sticky_contract.reason = 'study_flag'`, 05 §4.2) keep the standard columns' provenance: the operator's request is archived as a `host_app` response (`operator/study-pin`) under a `manual` run, and the row's `source_response_id` and `origin_ref` point at it. Ending a pin closes `valid_to` and archives the reason the same way.
+
+### `meta_domain_inspection` — a person looked at a domain (D5, 03 §8, dictionary v13)
+
+| column | type | notes |
+|---|---|---|
+| `inspection_id` | INTEGER PK | |
+| `domain` | TEXT | a gate domain — the vocabulary of `qa_domain_day_status.domain` |
+| `inspected_at`, `inspected_by` | TEXT | when, and from which application and version |
+| `note` | TEXT, nullable | what was looked at |
+
+Append-only: inspecting again adds a row. Promotion needs at least one row per gate domain. The pilot-exit rulings on checks live in `qa_check_ruling` (03 §8).
 
 ### `meta_job_request` — the one-shot job queue (04 §1.1)
 

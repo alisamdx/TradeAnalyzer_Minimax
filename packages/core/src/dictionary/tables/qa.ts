@@ -69,6 +69,46 @@ export const qaTables: readonly TableEntry[] = [
   }),
 
   defineTable({
+    table: 'qa_check_ruling',
+    layer: 'qa',
+    domain: 'registry',
+    description:
+      'The operator\'s pilot-exit rulings on checks (03 §8, B10a): keep / fix / drop for a check that never ' +
+      'fired (QC-952), confirm / move / unmeasurable for a working threshold against its pooled distribution ' +
+      '(QC-955). 03 §8 says "recorded on the registry row", but that row\'s definition is frozen, so a ruling ' +
+      'is its own append-only row keyed to the version it judged. The latest ruling per check, version and ' +
+      'review is the one in force; earlier ones stay readable. A threshold that is MOVED is not moved here — ' +
+      'that is a code change, which opens a new registry version and so needs a ruling of its own.',
+    naturalKey: ['check_id', 'registry_version', 'review', 'ruled_at'],
+    appendOnly: true,
+    ruleDriven: false,
+    standardColumns: false,
+    columns: [
+      col.int('ruling_id', 'Ruling identifier.', { primaryKey: true, sourceProvider: 'operator' }),
+      col.ident('check_id', 'The check ruled on.', { sourceProvider: 'operator' }),
+      col.int('registry_version', 'The registry version ruled on. A later version is a different definition and is not covered.', { sourceProvider: 'operator' }),
+      col.enumOf('review', ['zero_fire', 'threshold'], 'Which pilot-exit review this answers.', { sourceProvider: 'operator' }),
+      col.enumOf(
+        'decision',
+        ['keep', 'fix', 'drop', 'confirm', 'move', 'unmeasurable'],
+        'keep / fix / drop answer `zero_fire`; confirm / move / unmeasurable answer `threshold`. The pairing is ' +
+          'enforced by the function that writes the row.',
+        { sourceProvider: 'operator' }
+      ),
+      col.text('note', 'Why, in the operator\'s words. Required — a ruling without a reason cannot be revisited.', { sourceProvider: 'operator' }),
+      nullable(
+        col.providerDefined('proposed_threshold', 'proposed_unit', 'The value a `move` proposes, in the check\'s own tested unit. Applied by a code change, not by this row.'),
+        'not a `move` ruling'
+      ),
+      nullable(col.text('proposed_unit', 'The unit of `proposed_threshold` — the check\'s `tested_unit`, copied at ruling.'), 'not a `move` ruling'),
+      col.json('evidence_json', 'What the operator was shown when ruling: the fire counts, or the pooled distribution bounds against the threshold. A ruling is only as good as the evidence it was made on, so that is stored with it.', { sourceProvider: 'operator' }),
+      col.ts('ruled_at', 'When the ruling was recorded.', { sourceProvider: 'operator' }),
+      col.text('ruled_by', 'The application and version the ruling was recorded from.', { sourceProvider: 'operator' })
+    ],
+    indexes: [{ columns: ['check_id', 'registry_version', 'review'] }]
+  }),
+
+  defineTable({
     table: 'qa_quality_report',
     layer: 'qa',
     domain: 'report',

@@ -21,6 +21,21 @@ export {
 } from './operator.js';
 export type { ResolutionKind } from './operator.js';
 
+// B10a — the replay checks and pilot exit (03 §8).
+export {
+  REPLAY_CHECKS, QC951_REPLAY_EQUIVALENCE, QC956_REPLAY_OVERDUE, REPLAY_MAX_AGE_TRADING_DAYS,
+  completedReplays, latestReplayPerDate, sessionsSincePassingReplay
+} from './checks/replay.js';
+export type { CompletedReplay } from './checks/replay.js';
+export {
+  PILOT_CLEAN_DAYS, zeroFireReview, thresholdReview, recordCheckRuling, recordDomainInspection,
+  gateDomains, pilotExitStatus, promoteToProduction, promoteConfirmationText
+} from './pilot-exit.js';
+export type {
+  RulingReview, RulingDecision, ZeroFireDecision, ThresholdDecision, Ruling, ZeroFireItem, ThresholdItem,
+  Bounds, ShapeVerdict, Condition, ConditionKey, PilotExitStatus, PilotExitOptions
+} from './pilot-exit.js';
+
 // B7b's bootstrap checks and their thresholds. `checksFor` is what callers
 // should use over `ALL_CHECKS` (already exported above): the difference between
 // the two is exactly the set of checks that would otherwise be vacuous.
