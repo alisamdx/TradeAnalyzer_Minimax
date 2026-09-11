@@ -6,8 +6,14 @@ import type {
   ISeriesPrimitive,
   ISeriesPrimitivePaneRenderer,
   ISeriesPrimitivePaneView,
+  SeriesAttachedParameter,
   Time,
 } from 'lightweight-charts';
+// lightweight-charts' own typings import these from `fancy-canvas` (typings.d.ts
+// line 3) — `ISeriesPrimitivePaneRenderer.draw` is declared as taking a
+// `CanvasRenderingTarget2D`. Importing them here is what the library expects
+// rather than a reach into a transitive dependency.
+import type { BitmapCoordinatesRenderingScope, CanvasRenderingTarget2D } from 'fancy-canvas';
 
 export interface BarDataWithVolume {
   time: Time;
@@ -42,12 +48,12 @@ class VolumeProfileRenderer implements ISeriesPrimitivePaneRenderer {
     this._maxWidth = maxWidth;
   }
 
-  draw(target: any): void {
-    target.useBitmapCoordinateSpace((scope: any) => {
-      const ctx = scope.context as CanvasRenderingContext2D;
-      const rx = scope.horizontalPixelRatio as number;
-      const ry = scope.verticalPixelRatio as number;
-      const canvasW = scope.bitmapSize.width as number;
+  draw(target: CanvasRenderingTarget2D): void {
+    target.useBitmapCoordinateSpace((scope: BitmapCoordinatesRenderingScope) => {
+      const ctx = scope.context;
+      const rx = scope.horizontalPixelRatio;
+      const ry = scope.verticalPixelRatio;
+      const canvasW = scope.bitmapSize.width;
 
       for (const bar of this._bars) {
         if (bar.volumePct <= 0) continue;
@@ -76,7 +82,7 @@ class VolumeProfilePaneView implements ISeriesPrimitivePaneView {
 }
 
 export class VolumeProfile implements ISeriesPrimitive<Time> {
-  private _source: any = null;
+  private _source: SeriesAttachedParameter<Time> | null = null;
   private _data: BarDataWithVolume[];
   private _options: typeof defaults;
 
@@ -85,7 +91,7 @@ export class VolumeProfile implements ISeriesPrimitive<Time> {
     this._options = { ...defaults, ...options };
   }
 
-  attached(source: any): void {
+  attached(source: SeriesAttachedParameter<Time>): void {
     this._source = source;
   }
 

@@ -2,9 +2,15 @@
 
 ## Unreleased
 
-### Lint backlog: 77 errors → 25
+### Lint backlog: 77 errors → 0
 
-All remaining errors are `@typescript-eslint/no-explicit-any` (11 `backtest-engine.ts`, 10 `preload/index.ts`, 4 `VolumeProfile.ts`), deliberately deferred to their own pass — in a backtest engine an `any` usually hides a real question about a value's shape, and guessing a type to quiet a linter encodes an assumption as if it had been checked.
+`npm run lint` passes for the first time (56 warnings remain — unused vars and exhaustive-deps). It had been failing unconditionally, which is how a genuine hook-order bug sat inside it unnoticed; a suite that always fails reports nothing.
+
+#### The `any` pass — 25 removed, none by guessing
+
+- **`preload/index.ts` (10).** All five IPC subscription wrappers were `(_: any, data: any) => callback(data)`. The event is `Electron.IpcRendererEvent` (already used elsewhere in the file), and the payload is now `Parameters<typeof callback>[0]` — bound to whatever the callback declares, so handler and callback cannot drift apart. In a bridge whose whole job is shuttling payloads between processes, that drift is the actual risk.
+- **`backtest-engine.ts` (11).** Every `any` was a SQLite row. Four row interfaces now mirror `migrations/009` (plus `044`, which added the nullable spot columns) column-for-column, and the enumerated columns carry the unions their CHECK constraints already enforce. The snake_case→camelCase mappers are exactly where a renamed column or a dropped join alias yields `undefined` instead of an error — including the joined run query, where both tables have `created_at` and the config's is aliased `cfg_created_at`. Typecheck passing is evidence the declared shapes match what the queries return.
+- **`VolumeProfile.ts` (4).** Chart-primitive plumbing, now typed from the libraries' own exports: `CanvasRenderingTarget2D` and `BitmapCoordinatesRenderingScope` from `fancy-canvas` (which is how lightweight-charts' own typings declare `draw`), and `SeriesAttachedParameter<Time>` for `attached`/`_source`. A library upgrade that changes these signatures now fails the build instead of passing silently through `any`.
 
 Two of the fixes were defects rather than noise:
 

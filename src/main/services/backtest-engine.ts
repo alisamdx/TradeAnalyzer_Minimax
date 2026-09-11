@@ -1,10 +1,106 @@
 import type Database from 'better-sqlite3';
-import type { BacktestConfig, BacktestTrade, BacktestProgressEvent } from '@shared/types.js';
+import type { BacktestConfig, BacktestStrategy, BacktestTrade, BacktestProgressEvent } from '@shared/types.js';
 import { computeMetrics, type EquityPoint } from './backtest-metrics.js';
 
 type DbHandle = Database.Database;
 
 interface PriceBar { date: string; open: number; high: number; low: number; close: number; volume: number }
+
+// ─── Stored row shapes ────────────────────────────────────────────────────────
+//
+// These mirror `migrations/009_backtest.sql` (plus 044, which added the two spot
+// columns) column-for-column, and the mappers below convert snake_case storage
+// into the camelCase domain types. That conversion is exactly where a renamed
+// column or a dropped join alias produces `undefined` rather than an error, so
+// the rows are declared rather than read through `any`.
+//
+// The enumerated columns are typed as the unions their CHECK constraints already
+// enforce on write. If a value ever falls outside one, the right outcome is a
+// compile error demanding a decision — not a string flowing quietly into a
+// domain object that promises a union.
+
+interface BacktestConfigRow {
+  id: number;
+  name: string;
+  strategy: BacktestStrategy;
+  ticker: string;
+  start_date: string;
+  end_date: string;
+  starting_capital: number;
+  dte_target: number;
+  delta_target: number;
+  profit_target_pct: number;
+  stop_loss_pct: number;
+  created_at: string;
+}
+
+/**
+ * `backtest_runs` joined to its config: `SELECT r.*, c.name, c.strategy, …,
+ * c.created_at AS cfg_created_at`. The alias matters — both tables have
+ * `created_at`, and the run's own value is the one `r.*` supplies.
+ */
+interface BacktestRunJoinedRow {
+  id: number;
+  config_id: number;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  started_at: string | null;
+  completed_at: string | null;
+  error_msg: string | null;
+  total_days: number | null;
+  simulated_days: number;
+  created_at: string;
+  // Joined from `backtest_configs`.
+  name: string;
+  strategy: BacktestStrategy;
+  ticker: string;
+  start_date: string;
+  end_date: string;
+  starting_capital: number;
+  dte_target: number;
+  delta_target: number;
+  profit_target_pct: number;
+  stop_loss_pct: number;
+  cfg_created_at: string;
+}
+
+interface BacktestTradeRow {
+  id: number;
+  run_id: number;
+  ticker: string;
+  strategy: BacktestStrategy;
+  side: 'put' | 'call';
+  entry_date: string;
+  expiration: string;
+  strike: number;
+  entry_premium: number;
+  exit_date: string | null;
+  exit_premium: number | null;
+  exit_reason: 'profit_target' | 'stop_loss' | 'expiration' | 'assigned' | null;
+  pnl: number | null;
+  stock_shares: number;
+  stock_cost_basis: number | null;
+  capital_required: number;
+  // Added by migration 044, so both are nullable for rows written before it.
+  entry_spot: number | null;
+  exit_spot: number | null;
+}
+
+interface BacktestMetricsRow {
+  run_id: number;
+  net_pnl: number;
+  total_return_pct: number;
+  annualized_return_pct: number;
+  max_drawdown_pct: number;
+  sharpe_ratio: number;
+  win_rate: number;
+  total_trades: number;
+  winning_trades: number;
+  losing_trades: number;
+  avg_trade_pnl: number;
+  avg_days_held: number;
+  equity_curve_json: string;
+  computed_at: string;
+}
 
 // ─── Black-Scholes Math ───────────────────────────────────────────────────────
 
@@ -111,7 +207,7 @@ export class BacktestEngine {
   }
 
   listConfigs(): BacktestConfig[] {
-    return (this.db.prepare('SELECT * FROM backtest_configs ORDER BY created_at DESC').all() as any[])
+    return (this.db.prepare('SELECT * FROM backtest_configs ORDER BY created_at DESC').all() as BacktestConfigRow[])
       .map(r => this.rowToConfig(r));
   }
 
@@ -127,14 +223,14 @@ export class BacktestEngine {
                  c.stop_loss_pct, c.created_at as cfg_created_at
           FROM backtest_runs r JOIN backtest_configs c ON c.id = r.config_id
           WHERE r.config_id = ? ORDER BY r.created_at DESC
-        `).all(configId) as any[]
+        `).all(configId) as BacktestRunJoinedRow[]
       : this.db.prepare(`
           SELECT r.*, c.name, c.strategy, c.ticker, c.start_date, c.end_date,
                  c.starting_capital, c.dte_target, c.delta_target, c.profit_target_pct,
                  c.stop_loss_pct, c.created_at as cfg_created_at
           FROM backtest_runs r JOIN backtest_configs c ON c.id = r.config_id
           ORDER BY r.created_at DESC LIMIT 50
-        `).all() as any[];
+        `).all() as BacktestRunJoinedRow[];
     return rows.map(r => this.rowToRun(r));
   }
 
@@ -145,12 +241,12 @@ export class BacktestEngine {
              c.stop_loss_pct, c.created_at as cfg_created_at
       FROM backtest_runs r JOIN backtest_configs c ON c.id = r.config_id
       WHERE r.id = ?
-    `).get(runId) as any;
+    `).get(runId) as BacktestRunJoinedRow | undefined;
     return r ? this.rowToRun(r) : null;
   }
 
   getMetrics(runId: number): import('@shared/types.js').BacktestMetrics | null {
-    const r = this.db.prepare('SELECT * FROM backtest_metrics WHERE run_id = ?').get(runId) as any;
+    const r = this.db.prepare('SELECT * FROM backtest_metrics WHERE run_id = ?').get(runId) as BacktestMetricsRow | undefined;
     if (!r) return null;
     return {
       runId: r.run_id,
@@ -165,13 +261,13 @@ export class BacktestEngine {
       losingTrades: r.losing_trades,
       avgTradePnl: r.avg_trade_pnl,
       avgDaysHeld: r.avg_days_held,
-      equityCurve: JSON.parse(r.equity_curve_json),
+      equityCurve: JSON.parse(r.equity_curve_json) as Array<{ date: string; equity: number }>,
       computedAt: r.computed_at
     };
   }
 
   getTrades(runId: number): BacktestTrade[] {
-    return (this.db.prepare('SELECT * FROM backtest_trades WHERE run_id = ? ORDER BY entry_date').all(runId) as any[])
+    return (this.db.prepare('SELECT * FROM backtest_trades WHERE run_id = ? ORDER BY entry_date').all(runId) as BacktestTradeRow[])
       .map(r => this.rowToTrade(r));
   }
 
@@ -186,7 +282,7 @@ export class BacktestEngine {
     this.resetCancel();
 
     // Load config
-    const cfgRow = this.db.prepare('SELECT * FROM backtest_configs WHERE id = ?').get(configId) as any;
+    const cfgRow = this.db.prepare('SELECT * FROM backtest_configs WHERE id = ?').get(configId) as BacktestConfigRow | undefined;
     if (!cfgRow) throw new Error(`Backtest config ${configId} not found`);
     const cfg = this.rowToConfig(cfgRow);
 
@@ -688,7 +784,7 @@ export class BacktestEngine {
   }
 
   private getTrade(id: number): BacktestTrade | null {
-    const r = this.db.prepare('SELECT * FROM backtest_trades WHERE id = ?').get(id) as any;
+    const r = this.db.prepare('SELECT * FROM backtest_trades WHERE id = ?').get(id) as BacktestTradeRow | undefined;
     return r ? this.rowToTrade(r) : null;
   }
 
@@ -706,7 +802,7 @@ export class BacktestEngine {
     );
   }
 
-  private rowToConfig(r: any): BacktestConfig {
+  private rowToConfig(r: BacktestConfigRow): BacktestConfig {
     return {
       id: r.id,
       name: r.name,
@@ -723,7 +819,7 @@ export class BacktestEngine {
     };
   }
 
-  private rowToRun(r: any): import('@shared/types.js').BacktestRun {
+  private rowToRun(r: BacktestRunJoinedRow): import('@shared/types.js').BacktestRun {
     return {
       id: r.id,
       configId: r.config_id,
@@ -751,7 +847,7 @@ export class BacktestEngine {
     };
   }
 
-  private rowToTrade(r: any): BacktestTrade {
+  private rowToTrade(r: BacktestTradeRow): BacktestTrade {
     return {
       id: r.id,
       runId: r.run_id,

@@ -204,7 +204,7 @@ function buildApi() {
       invoke<{ scanned: number }>('screen:sync-universe', universe),
     syncCancel: () => invoke<boolean>('screen:sync-cancel'),
     onSyncProgress: (callback: (data: { scanned: number; total: number; ticker?: string }) => void) => {
-      const handler = (_: any, data: any) => callback(data);
+      const handler = (_e: Electron.IpcRendererEvent, data: Parameters<typeof callback>[0]) => callback(data);
       ipcRenderer.on('screen:sync-progress', handler);
       return () => ipcRenderer.removeListener('screen:sync-progress', handler);
     },
@@ -215,7 +215,7 @@ function buildApi() {
       invoke<Watchlist>('screen:save-as-watchlist', runId, resultIds, name),
     cancel: () => invoke<boolean>('screen:cancel'),
     onProgress: (callback: (data: { scanned: number; total: number; ticker?: string }) => void) => {
-      const handler = (_: any, data: any) => callback(data);
+      const handler = (_e: Electron.IpcRendererEvent, data: Parameters<typeof callback>[0]) => callback(data);
       ipcRenderer.on('screen:progress', handler);
       return () => ipcRenderer.removeListener('screen:progress', handler);
     }
@@ -274,7 +274,7 @@ function buildApi() {
       avgPriceTarget: number | null; upsidePct: number | null;
       analystBadge: 'BUY' | 'HOLD' | 'SELL' | null;
     }) => void) => {
-      const handler = (_: any, data: any) => callback(data);
+      const handler = (_e: Electron.IpcRendererEvent, data: Parameters<typeof callback>[0]) => callback(data);
       ipcRenderer.on('validate:ticker-signal', handler);
       return () => ipcRenderer.removeListener('validate:ticker-signal', handler);
     }
@@ -1036,7 +1036,7 @@ function buildApi() {
       metrics: (runId: number) => invoke<BacktestMetrics | null>('backtest:run:metrics', runId),
       trades: (runId: number) => invoke<BacktestTrade[]>('backtest:run:trades', runId),
       onProgress: (callback: (evt: BacktestProgressEvent) => void) => {
-        const handler = (_: any, evt: any) => callback(evt);
+        const handler = (_e: Electron.IpcRendererEvent, evt: Parameters<typeof callback>[0]) => callback(evt);
         ipcRenderer.on('backtest:progress', handler);
         return () => ipcRenderer.removeListener('backtest:progress', handler);
       }
@@ -1052,7 +1052,7 @@ function buildApi() {
       invoke<FilterTemplateResult[]>('filters:run-template', templateId, source, universe, watchlistIds),
     getSavedRuns: () => invoke<FilterSavedRun[]>('filters:get-saved-runs'),
     onProgress: (callback: (data: { current: number; total: number; ticker: string }) => void) => {
-      const handler = (_: any, data: any) => callback(data);
+      const handler = (_e: Electron.IpcRendererEvent, data: Parameters<typeof callback>[0]) => callback(data);
       ipcRenderer.on('filters:progress', handler);
       return () => ipcRenderer.removeListener('filters:progress', handler);
     }
