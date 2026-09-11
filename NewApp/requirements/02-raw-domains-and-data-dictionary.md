@@ -233,6 +233,22 @@ The archive kept every response's bytes but, until dictionary v11, not the argum
 
 **What is recorded is what ran.** `captureResponse` takes a recipe and builds the parser from it through `buildIngest`; there is no path in which a caller hands over a function and separately describes it.
 
+### `meta_saved_question` — a question asked of one table (05 §11.2, dictionary v12)
+
+| column | type | notes |
+|---|---|---|
+| `question_id` | INTEGER PK | |
+| `name` | TEXT | unique among questions still in use |
+| `table_name` | TEXT | the table it is asked of |
+| `definition_json` | TEXT | filters, sort, version mode, as-of date, visible columns — validated at save by the rules the Data view runs (`core`'s `inspector/filters.ts`) |
+| `note` | TEXT, nullable | what it is for |
+| `created_at`, `created_by` | TEXT | |
+| `retired_at` | TEXT, nullable | the only edit the table permits; saving under a name in use retires the old row, so what a name meant last week stays readable |
+
+Append-only. Stored in the generation so a question travels with the data it was asked of.
+
+**Study pins** (`ref_sticky_contract.reason = 'study_flag'`, 05 §4.2) keep the standard columns' provenance: the operator's request is archived as a `host_app` response (`operator/study-pin`) under a `manual` run, and the row's `source_response_id` and `origin_ref` point at it. Ending a pin closes `valid_to` and archives the reason the same way.
+
 ### `meta_job_request` — the one-shot job queue (04 §1.1)
 
 In stage 1 the operator drives one-shot jobs from the new exe but the **old app executes them**, because it holds the provider transports and the E*Trade token (Q4). The new exe writes a request row here; the old app's `collector-oneshot` handler claims and runs it. The table is the entire interface between the two apps — there is no IPC, no socket and no shared process.

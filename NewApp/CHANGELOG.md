@@ -9,6 +9,83 @@ exit (06 §6).
 
 ---
 
+## B9c — filters and saved questions, study pins, and closed generations read-only (2026-09-10)
+
+`core` 0.5.0, `next` 0.3.0, dictionary **v12**. The existing app is unchanged
+(it keeps `core` 0.4.0, and a v12 generation holds nothing it cannot read).
+
+### Replay into a new generation — deferred, and why
+
+On reading what it needs, it turned out much larger than its one-line entry.
+Only **parser output** is replayable; a generation also holds everything
+*computed* along the way — universe membership reconciliation, the chain subset
+per day, the sticky set, every run's gate and exceptions, the legacy imports —
+and a new generation built from a replay would need all of it re-executed in
+historical order. And gen-001 predates recipes, so a replay of it today would
+produce an almost empty generation. Scratch replay already carries AC-4 and
+reset already carries "start clean", so it waits until a generation captured
+entirely under recipes needs a parser fix carried forward (04 §7.5).
+
+### Filters, and saved questions on top of them
+
+The Data view only sorted. It now filters by column, with the operators each
+column's type allows — **decided in `core`**, so the form offers only what the
+query will run, and a saved question is validated by the same code that runs
+it. Plus the latest version of each fact (as of a date), keyset paging that
+survives NULLs in the sort column, a column chooser, and a capped "matching"
+count.
+
+- **05 §8's index rule, as built.** Drafted as "every filter maps to an index",
+  it is now: on a table above 200,000 rows, a filtered or latest-version query
+  needs **at least one** filter an index can start from, and the refusal names
+  those columns. Below that, anything goes — a small scan is cheaper than the
+  refusal. A `contains` on an indexed column does not count, because it cannot
+  use the index. The row estimate is `MAX(row_id)`, O(log n), where `COUNT(*)`
+  would have scanned the very table the rule protects.
+- **Latest version** puts filters on the natural-key columns *inside* the
+  window (exact, and index-usable) and the rest outside, so a value filter tests
+  the latest value instead of picking "the latest version that happened to
+  match".
+- **Saved questions** live in the generation (`meta_saved_question`,
+  append-only with `retired_at` as its only edit). Saving under a name in use
+  retires the old definition, so what a name meant last week stays readable.
+
+### Pin for study — provenance recorded, not waived
+
+`ref_sticky_contract` carries the standard columns, so every row names a run
+and a response, and a manual pin has neither. Making them nullable for this one
+reason would have been a constraint change a populated generation cannot take,
+and would have written "no provenance" into a table where every other row has
+it. So the **operator's request is archived** as a `host_app` response under an
+operator run, and the pin points at it — the legacy import's resolution again
+(the rows it read ARE the source). The note is required and lives in the
+archived request. It is TA2's only write to the archive, to a file the collector
+host never appends to. No recipe, so a replay counts it as having no parser,
+which is true.
+
+### Closed generations open read-only, in their own window
+
+Overview lists every generation on disk, each read from its own
+`meta_generation` row; a closed one opens in a window with its own frame colour,
+title and banner. Every IPC call runs in **its window's generation**, so the same
+main-process code answers for whichever file that window shows. Write channels
+refuse there, with SQLite's own read-only refusal behind them. The file keeps
+the schema it was built with — a read-only connection cannot run
+`applyDictionary`, and the file is evidence of what it was — so a table added
+since reads as absent rather than failing.
+
+`readonly: true` is safe here in a way it is not for the live generation: the
+CLAUDE.md warning is that a readonly connection cannot attach a *live*
+write-ahead log on Windows, and a generation nobody writes has none.
+
+AC-13 caught one more: the pin DTO's `reason` is a dictionary column
+(`ref_sticky_contract.reason`), so the field is `pinnedFor`. Seven renames
+across the build, zero exemptions.
+
+`442` tests in `core` (+22), `54` in `next` (+6).
+
+---
+
 ## B9b — replay, and the recipe that makes it a re-run rather than a reconstruction (2026-09-10)
 
 `core` 0.4.0, `next` 0.2.1, dictionary **v11**, existing app v1.1.219. **AC-4 is met**:

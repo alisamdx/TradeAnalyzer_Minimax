@@ -57,6 +57,22 @@ export type { ApplyResult } from './dictionary/apply.js';
 export * from './collector/index.js';
 export * from './qa/index.js';
 
+// The inspector's filter model and saved questions (B9c, 05 §3.2, §11.2). In
+// `core` so a saved question is validated by the same rules that run it.
+export {
+  FILTER_OPS, SMALL_TABLE_ROWS, FilterRefused, columnKind, opsFor, indexedColumns, validateFilter,
+  filterSql, versionPartition, assertAnchored, validateDefinition
+} from './inspector/filters.js';
+export type {
+  FilterOp, FilterValue, InspectorFilter, VersionMode, ColumnKind, QuestionDefinition
+} from './inspector/filters.js';
+export { saveQuestion, retireQuestion, listQuestions } from './inspector/saved-questions.js';
+export type { SavedQuestion } from './inspector/saved-questions.js';
+
+// Study pins (B9c, 05 §4.2): the operator's way into the sticky set.
+export { pinForStudy, unpinStudy, openPins } from './collector/study-pin.js';
+export type { StudyPin, ArchivingOperatorHost } from './collector/study-pin.js';
+
 // Phase 9's derivation (B7b). Exported as a pure function in its own right, not
 // only through the phase that stores it, so a study or a replay can recompute a
 // stored row and compare rather than trust it (P4).

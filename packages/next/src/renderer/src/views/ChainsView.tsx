@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type {
   ChainGridDto,
   ContractHistoryDto,
-  ExpirationOptionDto
+  ExpirationOptionDto,
+  PinDto
 } from '../../../shared/types.js';
 import { renderCell } from './ViewCells.js';
 
@@ -22,7 +23,14 @@ const REASON_LABEL: Readonly<Record<string, string>> = {
   outside: 'declined'
 };
 
-export function ChainsView() {
+const PIN_LABEL: Readonly<Record<string, string>> = {
+  held_in_book: 'held in the book',
+  recommended_by_legacy: 'recommended by the existing app',
+  study_flag: 'pinned for study',
+  manual: 'pinned manually'
+};
+
+export function ChainsView({ readOnly = false }: { readOnly?: boolean }) {
   const [dates, setDates] = useState<readonly string[]>([]);
   const [date, setDate] = useState<string | null>(null);
   const [tickers, setTickers] = useState<readonly string[]>([]);
@@ -123,7 +131,8 @@ export function ChainsView() {
         <>
           <p className="muted">
             Underlying {grid.underlyingPrice ?? '—'} as the chain call reported it — the same number
-            QC-407 compares against the Polygon snapshot.
+            QC-407 compares against the Polygon snapshot. Click a contract for its history, and to pin it
+            for study.
           </p>
           <div className="grid-scroll">
             <table className="chain-grid">
@@ -192,6 +201,7 @@ export function ChainsView() {
             <span className="mono">{history.osiSymbol}</span>
             <button className="link" onClick={() => setHistory(null)}>close</button>
           </h2>
+          <PinPanel osiSymbol={history.osiSymbol} readOnly={readOnly} />
           <p className="muted">
             Every date the contract was captured. A gap is labelled with its cause — the rule
             declined that expiration, or the ticker was not in the subset — because those are
@@ -220,5 +230,70 @@ export function ChainsView() {
         </section>
       )}
     </>
+  );
+}
+
+/**
+ * Pin for study — 05 §4.2 (B9c). A pinned contract is captured every day to its
+ * expiry, even if its underlying leaves the chain subset. The note is required
+ * and is archived with the request, so a pin always says what it was for.
+ */
+function PinPanel({ osiSymbol, readOnly }: { osiSymbol: string; readOnly: boolean }) {
+  const [pins, setPins] = useState<readonly PinDto[]>([]);
+  const [note, setNote] = useState('');
+  const [message, setMessage] = useState<{ tone: 'ok' | 'refused'; text: string } | null>(null);
+
+  const load = useCallback(async () => {
+    const r = await window.api.chains.pins(osiSymbol);
+    if (r.ok) setPins(r.data);
+  }, [osiSymbol]);
+
+  useEffect(() => {
+    setNote('');
+    setMessage(null);
+    void load();
+  }, [load]);
+
+  const study = pins.find((p) => p.pinnedFor === 'study_flag');
+
+  const act = async (): Promise<void> => {
+    const r = study ? await window.api.chains.unpin(osiSymbol, note) : await window.api.chains.pin(osiSymbol, note);
+    setMessage(
+      r.ok
+        ? { tone: 'ok', text: study ? 'Study pin ended today.' : 'Pinned for study — captured daily from the next run until expiry.' }
+        : { tone: 'refused', text: r.error }
+    );
+    if (r.ok) setNote('');
+    await load();
+  };
+
+  return (
+    <div className="pin-panel">
+      {pins.length === 0 ? (
+        <p className="muted">Not pinned: captured only while the rule selects its expiration and its ticker is in the subset.</p>
+      ) : (
+        <ul className="pins">
+          {pins.map((p) => (
+            <li key={`${p.pinnedFor}-${p.since}`}>
+              <span className="pin">★</span> {PIN_LABEL[p.pinnedFor] ?? p.pinnedFor} since {p.since}
+            </li>
+          ))}
+        </ul>
+      )}
+      {!readOnly && (
+        <div className="confirm-row">
+          <input
+            className="pin-note"
+            placeholder={study ? 'why the study is over (required)' : 'what the study is (required)'}
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+          />
+          <button className={study ? 'btn' : 'btn'} disabled={!note.trim()} onClick={() => void act()}>
+            {study ? 'End study pin' : 'Pin for study'}
+          </button>
+        </div>
+      )}
+      {message && <div className={`notice notice-${message.tone}`}>{message.text}</div>}
+    </div>
   );
 }

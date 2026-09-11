@@ -1,6 +1,22 @@
-import { DICTIONARY, getTable, groupedForInspector, type ColumnEntry } from '@tradeanalyzer/core';
-import { currentDb } from './generation.js';
-import type { ColumnMeta, TableMeta, TableStats, QueryPage, TreeGroup } from '../shared/types.js';
+import {
+  DICTIONARY,
+  FilterRefused,
+  assertAnchored,
+  filterSql,
+  getTable,
+  groupedForInspector,
+  indexedColumns,
+  opsFor,
+  validateFilter,
+  versionPartition,
+  type ColumnEntry,
+  type InspectorFilter,
+  type VersionMode
+} from '@tradeanalyzer/core';
+import { currentDb, currentGeneration } from './generation.js';
+import type {
+  ColumnMeta, FilterDto, QueryCursorDto, QueryPage, TableMeta, TableStats, TreeGroup
+} from '../shared/types.js';
 
 /**
  * The schema-driven inspector's main-process half — 05 §3.
@@ -8,9 +24,13 @@ import type { ColumnMeta, TableMeta, TableStats, QueryPage, TreeGroup } from '..
  * Everything the renderer needs to draw a table comes from the dictionary. There
  * is **no per-table code anywhere**, which is AC-13: adding a table to the
  * dictionary is the whole of adding it to the inspector.
+ *
+ * From B9c it filters, pages and shows the latest version of each fact. The
+ * filter rules live in `core` (`inspector/filters.ts`), so a saved question is
+ * held to exactly the rules that run it here.
  */
 
-function toColumnMeta(c: ColumnEntry): ColumnMeta {
+function toColumnMeta(c: ColumnEntry, indexed: ReadonlySet<string>): ColumnMeta {
   return {
     column: c.column,
     type: c.type,
@@ -26,7 +46,9 @@ function toColumnMeta(c: ColumnEntry): ColumnMeta {
     description: c.description,
     primaryKey: c.primaryKey === true,
     referencesTable: c.references?.table ?? null,
-    verify: c.verify ?? null
+    verify: c.verify ?? null,
+    filterOps: [...opsFor(c)],
+    indexed: indexed.has(c.column)
   };
 }
 
@@ -52,7 +74,25 @@ export function tree(): readonly TreeGroup[] {
 export function columns(table: string): readonly ColumnMeta[] {
   const entry = getTable(table);
   if (!entry) throw new Error(`Unknown table: ${table}`);
-  return entry.columns.map(toColumnMeta);
+  const indexed = indexedColumns(entry);
+  return entry.columns.map((c) => toColumnMeta(c, indexed));
+}
+
+/**
+ * Whether the open generation has this table at all. A closed generation opened
+ * read-only (B9c) was built by an older dictionary and cannot be upgraded — a
+ * read-only connection cannot run `applyDictionary` — so a table added since
+ * simply is not there, and that is a fact to show rather than an error to throw.
+ */
+function tableExists(table: string): boolean {
+  return (
+    currentDb().prepare("SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = ?").get(table) !== undefined
+  );
+}
+
+function presentColumns(table: string): ReadonlySet<string> {
+  const rows = currentDb().prepare(`PRAGMA table_info("${table.replace(/"/g, '""')}")`).all() as { name: string }[];
+  return new Set(rows.map((r) => r.name));
 }
 
 /**
@@ -65,19 +105,24 @@ export function columns(table: string): readonly ColumnMeta[] {
 export function stats(table: string): TableStats {
   const entry = getTable(table);
   if (!entry) throw new Error(`Unknown table: ${table}`);
+  const latestAvailable = versionPartition(entry) !== null;
+  if (!tableExists(table)) {
+    return { table, rowCount: 0, newestAsOf: null, nullRates: {}, absent: true, latestAvailable };
+  }
   const db = currentDb();
+  const present = presentColumns(table);
 
   const { n } = db.prepare(`SELECT COUNT(*) AS n FROM "${table}"`).get() as { n: number };
 
   let newestAsOf: string | null = null;
-  if (entry.columns.some((c) => c.column === 'as_of_date')) {
+  if (present.has('as_of_date')) {
     const row = db.prepare(`SELECT MAX(as_of_date) AS d FROM "${table}"`).get() as { d: string | null };
     newestAsOf = row.d;
   }
 
   const nullRates: Record<string, number | null> = {};
+  const nullableCols = entry.columns.filter((c) => c.nullable && present.has(c.column));
   if (n > 0) {
-    const nullableCols = entry.columns.filter((c) => c.nullable);
     if (nullableCols.length > 0) {
       const selects = nullableCols
         .map((c) => `SUM(CASE WHEN "${c.column}" IS NULL THEN 1 ELSE 0 END) AS "${c.column}"`)
@@ -86,31 +131,52 @@ export function stats(table: string): TableStats {
       for (const c of nullableCols) nullRates[c.column] = (row[c.column] ?? 0) / n;
     }
   } else {
-    for (const c of entry.columns.filter((x) => x.nullable)) nullRates[c.column] = null;
+    for (const c of nullableCols) nullRates[c.column] = null;
   }
 
-  return { table, rowCount: n, newestAsOf, nullRates };
+  return { table, rowCount: n, newestAsOf, nullRates, absent: false, latestAvailable };
 }
 
 export interface QueryRequest {
   readonly table: string;
   readonly limit?: number;
-  readonly cursor?: number | null;
+  readonly cursor?: QueryCursorDto | null;
   readonly sortColumn?: string | null;
   readonly sortDescending?: boolean;
+  readonly filters?: readonly FilterDto[];
+  readonly versionMode?: VersionMode;
+  readonly asOf?: string | null;
 }
+
+/** How far a "matching rows" count goes before it stops and says "more than". */
+const MATCH_CAP = 100_000;
+
+const quote = (identifier: string): string => `"${identifier.replace(/"/g, '""')}"`;
 
 /**
  * A page of rows.
  *
- * **Keyset pagination on `rowid`, never OFFSET.** The chain snapshot table grows
- * to millions of rows, and OFFSET makes page N cost N pages of scanning — the
- * kind of thing that is imperceptible on an empty table at B2 and unusable at
- * B6, by which time the call site is everywhere.
+ * **Keyset pagination, never OFFSET.** The chain snapshot table grows to
+ * millions of rows, and OFFSET makes page N cost N pages of scanning. With a
+ * sort the cursor is `(sort value, key)`, and NULLs are ordered last and paged
+ * as their own tail — a plain tuple comparison against NULL is NULL, which
+ * would silently end the walk at the first null.
+ *
+ * **Latest version** (P1): one row per natural key, the latest `observed_at`
+ * (as of a date, when given). Filters on the natural-key columns go INSIDE the
+ * window, where they are exact — every version of a fact shares them — and let
+ * an index be used; filters on anything else go outside, so they test the
+ * latest value rather than picking "the latest version that happened to match".
  */
 export function query(req: QueryRequest): QueryPage {
   const entry = getTable(req.table);
   if (!entry) throw new Error(`Unknown table: ${req.table}`);
+  if (!tableExists(req.table)) {
+    throw new Error(
+      `gen-${String(currentGeneration().generationNo).padStart(3, '0')} has no ${req.table} — ` +
+        'it was created by an older dictionary, before this table existed.'
+    );
+  }
   const db = currentDb();
 
   const limit = Math.min(Math.max(req.limit ?? 100, 1), 1000);
@@ -120,21 +186,104 @@ export function query(req: QueryRequest): QueryPage {
   const sortColumn =
     req.sortColumn && entry.columns.some((c) => c.column === req.sortColumn) ? req.sortColumn : null;
 
-  const key = entry.columns.some((c) => c.column === 'row_id') ? 'row_id' : 'rowid';
-  const where = req.cursor != null ? `WHERE "${key}" > ?` : '';
-  const order = sortColumn
-    ? `ORDER BY "${sortColumn}" ${req.sortDescending ? 'DESC' : 'ASC'}, "${key}" ASC`
-    : `ORDER BY "${key}" ASC`;
+  const filters: InspectorFilter[] = (req.filters ?? []).map((f) => validateFilter(entry, f as InspectorFilter));
+  const partition = req.versionMode === 'latest' ? versionPartition(entry) : null;
+  if (req.versionMode === 'latest' && !partition) {
+    throw new FilterRefused(`${entry.table} has no versions to choose between.`);
+  }
+  const mode: VersionMode = partition ? 'latest' : 'all';
+  const asOf = req.asOf ?? null;
+  if (asOf !== null && !/^\d{4}-\d{2}-\d{2}$/.test(asOf)) throw new FilterRefused(`"As of" needs a date as yyyy-mm-dd; got "${asOf}".`);
 
-  const sql = `SELECT "${key}" AS __key, * FROM "${req.table}" ${where} ${order} LIMIT ${limit + 1}`;
-  const rows = (req.cursor != null ? db.prepare(sql).all(req.cursor) : db.prepare(sql).all()) as Record<
-    string,
-    unknown
-  >[];
+  const key = entry.columns.some((c) => c.column === 'row_id') ? 'row_id' : 'rowid';
+  const keyExpr = key === 'rowid' ? 't.rowid' : `t.${quote(key)}`;
+  // MAX(key) is an O(log n) upper bound on the row count — good enough to
+  // decide whether a query must be anchored, where COUNT(*) would scan it all.
+  const approxRows =
+    (db.prepare(`SELECT MAX(${key === 'rowid' ? 'rowid' : quote(key)}) AS n FROM ${quote(entry.table)}`).get() as { n: number | null }).n ?? 0;
+
+  const inner = partition ? filters.filter((f) => partition.includes(f.column)) : filters;
+  const outer = partition ? filters.filter((f) => !partition.includes(f.column)) : [];
+  assertAnchored(entry, inner, mode, approxRows);
+
+  let source: string;
+  const sourceParams: unknown[] = [];
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+
+  if (partition) {
+    const innerSql = filterSql(inner, 't');
+    const where = [...innerSql.conditions];
+    sourceParams.push(...innerSql.params);
+    if (asOf !== null) {
+      where.push('substr(t."observed_at", 1, 10) <= ?');
+      sourceParams.push(asOf);
+    }
+    source =
+      `SELECT t.*, ${keyExpr} AS __key, ROW_NUMBER() OVER (` +
+      `PARTITION BY ${partition.map((c) => `t.${quote(c)}`).join(', ')} ` +
+      `ORDER BY t."observed_at" DESC, ${keyExpr} DESC) AS __rn ` +
+      `FROM ${quote(entry.table)} t${where.length > 0 ? ` WHERE ${where.join(' AND ')}` : ''}`;
+    conditions.push('q.__rn = 1');
+    const outerSql = filterSql(outer, 'q');
+    conditions.push(...outerSql.conditions);
+    params.push(...outerSql.params);
+  } else {
+    // A plain projection, which SQLite flattens — so filters on the outer query
+    // still reach the table's indexes.
+    source = `SELECT ${keyExpr} AS __key, t.* FROM ${quote(entry.table)} t`;
+    const sql = filterSql(filters, 'q');
+    conditions.push(...sql.conditions);
+    params.push(...sql.params);
+  }
+
+  const cursorConditions: string[] = [];
+  const cursorParams: unknown[] = [];
+  const cursor = req.cursor ?? null;
+  const sortExpr = sortColumn ? `q.${quote(sortColumn)}` : null;
+  if (cursor) {
+    if (!sortExpr) {
+      cursorConditions.push('q.__key > ?');
+      cursorParams.push(cursor.key);
+    } else if (cursor.sort === null || cursor.sort === undefined) {
+      cursorConditions.push(`(${sortExpr} IS NULL AND q.__key > ?)`);
+      cursorParams.push(cursor.key);
+    } else {
+      const cmp = req.sortDescending ? '<' : '>';
+      cursorConditions.push(
+        `((${sortExpr} IS NOT NULL AND (${sortExpr} ${cmp} ? OR (${sortExpr} = ? AND q.__key > ?))) OR ${sortExpr} IS NULL)`
+      );
+      cursorParams.push(cursor.sort, cursor.sort, cursor.key);
+    }
+  }
+
+  const order = sortExpr
+    ? `ORDER BY (${sortExpr} IS NULL), ${sortExpr} ${req.sortDescending ? 'DESC' : 'ASC'}, q.__key ASC`
+    : 'ORDER BY q.__key ASC';
+  const where = (extra: readonly string[]): string => {
+    const all = [...conditions, ...extra];
+    return all.length > 0 ? `WHERE ${all.join(' AND ')}` : '';
+  };
+
+  const sql = `SELECT * FROM (${source}) q ${where(cursorConditions)} ${order} LIMIT ${limit + 1}`;
+  const rows = db.prepare(sql).all(...sourceParams, ...params, ...cursorParams) as Record<string, unknown>[];
 
   const hasMore = rows.length > limit;
   const page = rows.slice(0, limit);
-  const nextCursor = hasMore ? (page[page.length - 1]?.['__key'] as number) : null;
+  const last = page[page.length - 1];
+  const nextCursor: QueryCursorDto | null =
+    hasMore && last ? { sort: sortColumn ? (last[sortColumn] ?? null) : null, key: last['__key'] as number } : null;
+
+  // How many rows match, counted only when something narrows the table and
+  // capped so a count can never be the slow part of a page.
+  let matching: QueryPage['matching'] = null;
+  if (!cursor && (filters.length > 0 || mode === 'latest')) {
+    const counted = (
+      db.prepare(`SELECT COUNT(*) AS n FROM (SELECT 1 FROM (${source}) q ${where([])} LIMIT ${MATCH_CAP + 1})`)
+        .get(...sourceParams, ...params) as { n: number }
+    ).n;
+    matching = { n: Math.min(counted, MATCH_CAP), capped: counted > MATCH_CAP };
+  }
 
   return {
     table: req.table,
@@ -145,6 +294,8 @@ export function query(req: QueryRequest): QueryPage {
       return out;
     }),
     nextCursor,
-    hasMore
+    hasMore,
+    matching,
+    versionMode: mode
   };
 }

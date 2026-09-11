@@ -292,6 +292,34 @@ export const metaTables: readonly TableEntry[] = [
   }),
 
   defineTable({
+    table: 'meta_saved_question',
+    layer: 'meta',
+    domain: 'inspector',
+    description:
+      'Saved questions (05 §11.2, B9c): a named filter, sort, version mode and column set over one table, ' +
+      'stored in the generation so a question travels with the data it was asked of. Validated with the ' +
+      'same rules the Data view runs, so a stored question can always be asked. Nothing is deleted: saving ' +
+      'under a name in use retires the old row and writes a new one, so what a name meant last week stays ' +
+      'readable.',
+    naturalKey: ['name', 'created_at'],
+    appendOnly: true,
+    validRangeColumn: 'retired_at',
+    ruleDriven: false,
+    standardColumns: false,
+    columns: [
+      col.int('question_id', 'Question identifier.', { primaryKey: true, sourceProvider: 'operator' }),
+      col.text('name', 'The name the operator gave it. Unique among questions still in use.', { sourceProvider: 'operator' }),
+      col.ident('table_name', 'The table it is asked of.', { sourceProvider: 'operator' }),
+      col.json('definition_json', 'Filters, sort, version mode, as-of date and visible columns, as validated at save.', { sourceProvider: 'operator' }),
+      nullable(col.text('note', 'What the question is for, in the operator\'s words.'), 'no note was given'),
+      col.ts('created_at', 'When this definition was saved.', { sourceProvider: 'operator' }),
+      col.text('created_by', 'The application and version that saved it.', { sourceProvider: 'operator' }),
+      nullable(col.ts('retired_at', 'When it stopped being in use — replaced under the same name, or retired.'), 'still in use')
+    ],
+    indexes: [{ columns: ['name'] }, { columns: ['table_name'] }]
+  }),
+
+  defineTable({
     table: 'meta_job_request',
     layer: 'meta',
     domain: 'jobs',

@@ -22,6 +22,64 @@ export interface GenerationInfoDto {
   /** The generation a reset replaced; null for a first generation. */
   readonly predecessorNo: number | null;
   readonly resetReason: string | null;
+  /** This window shows a closed generation, opened read-only (05 §8). Nothing here can change it. */
+  readonly readOnly: boolean;
+}
+
+/** One generation found on disk — 05 §8, AC-14. */
+export interface GenerationListItemDto {
+  readonly generationNo: number;
+  readonly dir: string;
+  readonly current: boolean;
+  readonly dbPresent: boolean;
+  readonly walPresent: boolean;
+  readonly status: string | null;
+  readonly openedAt: string | null;
+  readonly closedAt: string | null;
+  readonly predecessorNo: number | null;
+  readonly resetReason: string | null;
+  readonly problem: string | null;
+}
+
+/** The inspector's filters (05 §3.2, B9c). The rules are `core`'s; this is only their shape. */
+export type FilterOpDto = 'eq' | 'ne' | 'lt' | 'lte' | 'gt' | 'gte' | 'contains' | 'in' | 'is_null' | 'not_null';
+
+export interface FilterDto {
+  readonly column: string;
+  readonly op: FilterOpDto;
+  readonly value?: string | number | readonly (string | number)[] | null;
+}
+
+export interface QueryCursorDto {
+  /** The sort column's value on the last row returned; null when unsorted or in the null tail. */
+  readonly sort: unknown;
+  readonly key: number;
+}
+
+export interface QuestionDefinitionDto {
+  readonly filters: readonly FilterDto[];
+  readonly sortColumn: string | null;
+  readonly sortDescending: boolean;
+  readonly versionMode: 'all' | 'latest';
+  readonly asOf: string | null;
+  readonly columns: readonly string[] | null;
+}
+
+export interface SavedQuestionDto {
+  readonly id: number;
+  readonly name: string;
+  readonly table: string;
+  readonly definition: QuestionDefinitionDto;
+  readonly note: string | null;
+  readonly createdAt: string;
+}
+
+/** An open pin on a contract (05 §4.2). */
+export interface PinDto {
+  /** Why the contract is pinned. Not `reason` — that is a dictionary column, and AC-13 caught it. */
+  readonly pinnedFor: string;
+  readonly since: string;
+  readonly origin: string | null;
 }
 
 export interface TableMeta {
@@ -52,6 +110,10 @@ export interface ColumnMeta {
   readonly referencesTable: string | null;
   /** The 02 §16 verify note, when the field has not been seen in a live response. */
   readonly verify: string | null;
+  /** The filter operators this column accepts — from `core`, so the form offers only what the query will run. */
+  readonly filterOps: readonly FilterOpDto[];
+  /** An index can start from this column, so a filter on it anchors a query on a large table (05 §8). */
+  readonly indexed: boolean;
 }
 
 export interface TableStats {
@@ -60,6 +122,10 @@ export interface TableStats {
   readonly newestAsOf: string | null;
   /** Per nullable column: the fraction of rows that are null, or null on an empty table. */
   readonly nullRates: Readonly<Record<string, number | null>>;
+  /** The table does not exist in this generation — it was built by an older dictionary (a read-only window, B9c). */
+  readonly absent: boolean;
+  /** The table has versions of one fact to choose between, so "latest" is offered (P1). */
+  readonly latestAvailable: boolean;
 }
 
 export interface TreeGroup {
@@ -71,16 +137,23 @@ export interface QueryPage {
   readonly table: string;
   readonly columns: readonly string[];
   readonly rows: readonly Readonly<Record<string, unknown>>[];
-  readonly nextCursor: number | null;
+  readonly nextCursor: QueryCursorDto | null;
   readonly hasMore: boolean;
+  /** Rows matching the filters, counted up to a cap; null when nothing narrows the table. */
+  readonly matching: { readonly n: number; readonly capped: boolean } | null;
+  /** What was actually applied — `all` when the table has no versions to choose between. */
+  readonly versionMode: 'all' | 'latest';
 }
 
 export interface QueryRequestDto {
   readonly table: string;
   readonly limit?: number;
-  readonly cursor?: number | null;
+  readonly cursor?: QueryCursorDto | null;
   readonly sortColumn?: string | null;
   readonly sortDescending?: boolean;
+  readonly filters?: readonly FilterDto[];
+  readonly versionMode?: 'all' | 'latest';
+  readonly asOf?: string | null;
 }
 
 
@@ -602,6 +675,16 @@ export interface NextApi {
   readonly platform: string;
   readonly generation: {
     current(): Promise<IpcResult<GenerationInfoDto>>;
+    /** Every generation on disk (05 §8, AC-14). */
+    list(): Promise<IpcResult<readonly GenerationListItemDto[]>>;
+    /** Opens a closed generation read-only, in its own window. */
+    openReadOnly(generationNo: number): Promise<IpcResult<GenerationInfoDto>>;
+  };
+  /** Saved questions (05 §11.2, B9c). */
+  readonly questions: {
+    list(table: string | null): Promise<IpcResult<readonly SavedQuestionDto[]>>;
+    save(name: string, table: string, definition: QuestionDefinitionDto, note: string | null): Promise<IpcResult<SavedQuestionDto>>;
+    retire(id: number): Promise<IpcResult<void>>;
   };
   readonly exceptions: {
     list(filter: ExceptionFilterDto): Promise<IpcResult<ExceptionListDto>>;
@@ -648,6 +731,11 @@ export interface NextApi {
     expirations(ticker: string, asOfDate: string): Promise<IpcResult<readonly ExpirationOptionDto[]>>;
     grid(ticker: string, asOfDate: string, expirationDate: string): Promise<IpcResult<ChainGridDto>>;
     contractHistory(osiSymbol: string): Promise<IpcResult<ContractHistoryDto>>;
+    /** Open pins on a contract, whatever the reason (05 §4.2). */
+    pins(osiSymbol: string): Promise<IpcResult<readonly PinDto[]>>;
+    /** Pins for study, with a required note archived as the pin's provenance. */
+    pin(osiSymbol: string, note: string): Promise<IpcResult<PinDto>>;
+    unpin(osiSymbol: string, note: string): Promise<IpcResult<void>>;
   };
   readonly account: {
     snapshotDates(): Promise<IpcResult<readonly string[]>>;

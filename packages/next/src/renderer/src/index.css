@@ -397,6 +397,35 @@ h3 { font-size: 13px; font-weight: 600; margin: 16px 0 6px; }
 .verdict-amber { color: var(--accent); }
 .verdict-red { color: var(--red); }
 
+/* ── B9c: filters, saved questions, pins, read-only generations ───────────── */
+
+.question-bar, .filter-bar, .query-row { align-items: center; display: flex; flex-wrap: wrap; gap: 10px; margin: 8px 0; }
+.question-bar label, .query-row label { align-items: center; color: var(--muted); display: flex; font-size: 11px; gap: 6px; }
+.question-bar select, .question-bar input, .filter-bar select, .filter-bar input, .query-row select, .query-row input,
+.pin-note, .run-input {
+  background: var(--bg-raised); border: 1px solid var(--line); border-radius: 3px;
+  color: var(--fg); font: inherit; font-size: 12px; padding: 3px 6px;
+}
+.save-as { display: inline-flex; gap: 6px; margin-left: auto; }
+.filter-bar { align-items: flex-start; flex-direction: column; gap: 6px; }
+.filter { align-items: center; display: flex; gap: 6px; }
+.filter-actions { align-items: center; display: flex; gap: 10px; }
+.column-chooser summary { color: var(--muted); cursor: pointer; font-size: 11px; }
+.column-list {
+  background: var(--bg-panel); border: 1px solid var(--line); display: grid; gap: 2px 14px;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); margin-top: 6px; max-height: 220px; overflow: auto; padding: 8px;
+}
+.column-list label { align-items: center; display: flex; font-family: Consolas, monospace; font-size: 11px; gap: 5px; }
+.load-more { margin-top: 10px; }
+.pin-panel { margin: 6px 0 12px; }
+.pins { list-style: none; margin: 0 0 6px; padding: 0; }
+.pin-note { min-width: 320px; }
+.run-input { width: 190px; }
+
+.app.is-readonly .sidebar { border-right: 3px solid #8a2e2e; }
+.app.is-readonly .brand-sub { color: var(--red); }
+.readonly-banner { background: rgba(138, 46, 46, 0.18); border-left: 3px solid #8a2e2e; margin: 0 0 16px; padding: 8px 12px; }
+
 .reset { background: rgba(120, 40, 40, 0.07); border: 1px solid #6b2a2a; margin-top: 28px; padding: 14px 16px; }
 .reset ul { margin: 4px 0 8px; padding-left: 18px; }
 .reset-form { display: grid; gap: 8px; margin-top: 10px; max-width: 580px; }

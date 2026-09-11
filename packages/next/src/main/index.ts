@@ -2,17 +2,19 @@ import { app, BrowserWindow, dialog, shell } from 'electron';
 import { join } from 'node:path';
 import { existsSync } from 'node:fs';
 import { COLLECTOR_VERSION, DICTIONARY_VERSION } from '@tradeanalyzer/core';
-import { closeGeneration, openGeneration } from './generation.js';
+import { closeGeneration, closeReadOnlyWindows, openGeneration } from './generation.js';
 import { registerIpc } from './ipc.js';
 import { attachWindow, captureStartupLink, handleSecondInstance } from './deeplinks.js';
+import { setWindowFactory, type WindowOptions } from './window-factory.js';
 import { DEEP_LINK_SCHEME } from '../shared/deeplink.js';
 
 /**
  * TradeAnalyzer 2 — main process.
  *
  * The shell: a window, a preload bridge, the userData separation, the
- * generation open, and — from B9a — the single-instance lock that carries
- * `tradeanalyzer-next://` links (05 §11.1).
+ * generation open, the single-instance lock that carries
+ * `tradeanalyzer-next://` links (05 §11.1), and — from B9c — read-only windows
+ * onto closed generations (05 §8).
  */
 
 // 06 §3: userData is `trade-analyzer-next`, deliberately NOT the productName
@@ -37,15 +39,28 @@ function devWindowIcon(): string | undefined {
   return existsSync(png) ? png : undefined;
 }
 
-function createWindow(): void {
+/**
+ * One window, with the same isolation whatever it shows.
+ *
+ * A read-only window onto a closed generation (05 §8) is the same renderer over
+ * the same bridge — the main process answers it from that generation's file —
+ * with a title and a frame colour that say what it is, so the two can never be
+ * mistaken for each other on the taskbar. It is not given deep links: those
+ * navigate the window the operator works in.
+ */
+function createWindow(opts: WindowOptions = {}): BrowserWindow {
   const icon = devWindowIcon();
+  const readOnly = opts.readOnlyGeneration !== undefined;
   const window = new BrowserWindow({
     width: 1400,
     height: 900,
     show: false,
     fullscreen: false,
     autoHideMenuBar: true,
-    title: 'TradeAnalyzer 2',
+    title: readOnly
+      ? `TradeAnalyzer 2 — gen-${String(opts.readOnlyGeneration).padStart(3, '0')} (read-only)`
+      : 'TradeAnalyzer 2',
+    ...(readOnly ? { backgroundColor: '#1d1212' } : {}),
     ...(icon ? { icon } : {}),
     webPreferences: {
       preload: join(import.meta.dirname, '../preload/index.mjs'),
@@ -54,7 +69,7 @@ function createWindow(): void {
       nodeIntegration: false
     }
   });
-  attachWindow(window);
+  if (!readOnly) attachWindow(window);
 
   window.on('ready-to-show', () => {
     // Maximized on open, matching the existing app. `maximize()` rather than
@@ -74,6 +89,7 @@ function createWindow(): void {
   const devServerUrl = process.env['ELECTRON_RENDERER_URL'];
   if (devServerUrl) void window.loadURL(devServerUrl);
   else void window.loadFile(join(import.meta.dirname, '../renderer/index.html'));
+  return window;
 }
 
 /**
@@ -153,6 +169,7 @@ if (!isPrimary) {
         `${generation.createdNow ? ' — created' : ''} at ${generation.dbPath}`
     );
 
+    setWindowFactory(createWindow);
     registerIpc();
     createWindow();
 
@@ -171,6 +188,7 @@ if (!isPrimary) {
   });
 
   app.on('will-quit', () => {
+    closeReadOnlyWindows();
     closeGeneration();
   });
 }

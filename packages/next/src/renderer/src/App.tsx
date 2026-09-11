@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { GenerationInfoDto, TreeGroup } from '../../shared/types.js';
+import type { GenerationInfoDto, GenerationListItemDto, TreeGroup } from '../../shared/types.js';
 import type { DeepLinkRoute } from '../../shared/deeplink.js';
 import { DataView } from './views/DataView.js';
 import { DictionaryView } from './views/DictionaryView.js';
@@ -12,6 +12,7 @@ import { ExceptionsView, type ExceptionsFocus } from './views/ExceptionsView.js'
 import { RunsView, type RunsFocus } from './views/RunsView.js';
 import { JobsView } from './views/JobsView.js';
 import { RichText } from './views/RichText.js';
+import { When } from './views/when.js';
 
 /**
  * The shell, in 05 §2's order as far as it is built.
@@ -19,6 +20,12 @@ import { RichText } from './views/RichText.js';
  * The remaining sections — Bars, Universe, Archive, Settings — arrive with the
  * build steps that fill them. None is stubbed here: an empty section in a
  * sidebar reads as a broken feature, not as a future one.
+ *
+ * The same shell runs a **read-only window onto a closed generation** (05 §8,
+ * B9c): the main process answers it from that generation's file, and it says
+ * so in its frame, its banner and its title. Jobs is absent there — nothing a
+ * job does belongs to a closed generation — and every write the other views
+ * offer is hidden, with the main process refusing them regardless.
  */
 
 type Section =
@@ -38,6 +45,8 @@ const SECTIONS: readonly { id: Section; label: string; hint: string }[] = [
   { id: 'dictionary', label: 'Dictionary', hint: 'Every column, and what a null in it means' },
   { id: 'jobs', label: 'Jobs', hint: 'Queue one-shot jobs, and reset the generation' }
 ];
+
+const pad = (n: number): string => String(n).padStart(3, '0');
 
 export function App() {
   const [section, setSection] = useState<Section>('overview');
@@ -88,20 +97,22 @@ export function App() {
     return window.api.deepLinks.onNavigate(navigate);
   }, [navigate]);
 
+  const readOnly = generation?.readOnly === true;
+  const sections = readOnly ? SECTIONS.filter((s) => s.id !== 'jobs') : SECTIONS;
   const tableCount = tree.reduce((n, g) => n + g.domains.reduce((m, d) => m + d.tables.length, 0), 0);
 
   return (
-    <div className="app">
+    <div className={`app${readOnly ? ' is-readonly' : ''}`}>
       <nav className="sidebar">
         <div className="brand">
           <span className="brand-name">TradeAnalyzer 2</span>
           <span className="brand-sub">
             {generation
-              ? `gen-${String(generation.generationNo).padStart(3, '0')} · ${generation.status}`
+              ? `gen-${pad(generation.generationNo)} · ${generation.status}${readOnly ? ' · read-only' : ''}`
               : 'opening…'}
           </span>
         </div>
-        {SECTIONS.map((s) => (
+        {sections.map((s) => (
           <button
             key={s.id}
             className={`nav-item${section === s.id ? ' is-active' : ''}`}
@@ -118,6 +129,13 @@ export function App() {
       </nav>
 
       <main className="content">
+        {readOnly && generation && (
+          <div className="readonly-banner">
+            <strong>gen-{pad(generation.generationNo)} — {generation.status}, opened read-only.</strong>{' '}
+            Nothing in this window can change it. It keeps the schema it was built with
+            (dictionary v{generation.dictionaryVersion}), so a table added since reads as absent.
+          </div>
+        )}
         {error && (
           <div className="banner banner-error">
             <strong>Could not open the generation.</strong>
@@ -131,21 +149,21 @@ export function App() {
           </div>
         )}
         {!error && section === 'overview' && <Overview generation={generation} tableCount={tableCount} />}
-        {!error && section === 'exceptions' && <ExceptionsView focus={exceptionsFocus} />}
+        {!error && section === 'exceptions' && <ExceptionsView focus={exceptionsFocus} readOnly={readOnly} />}
         {!error && section === 'runs' && (
           <RunsView
             focus={runsFocus}
             onOpenExceptions={(runId) => navigate({ section: 'exceptions', runId })}
           />
         )}
-        {!error && section === 'data' && <DataView tree={tree} initialTable={dataTable} />}
-        {!error && section === 'chains' && <ChainsView />}
+        {!error && section === 'data' && <DataView tree={tree} initialTable={dataTable} readOnly={readOnly} />}
+        {!error && section === 'chains' && <ChainsView readOnly={readOnly} />}
         {!error && section === 'account' && <AccountView />}
         {!error && section === 'earnings' && <EarningsView />}
         {!error && section === 'iv' && <IvView />}
         {!error && section === 'legacy' && <LegacyView />}
         {!error && section === 'dictionary' && <DictionaryView tree={tree} />}
-        {!error && section === 'jobs' && <JobsView onGenerationChanged={() => void loadGeneration()} />}
+        {!error && section === 'jobs' && !readOnly && <JobsView onGenerationChanged={() => void loadGeneration()} />}
       </main>
     </div>
   );
@@ -170,17 +188,18 @@ function Overview({
     <>
       <h1>Overview</h1>
       <p className="lede">
-        Stage 1, build step B9a. The collector runs every phase; findings are ruled on in
-        Exceptions, runs are read in Runs, and one-shot jobs are queued from Jobs.
+        Stage 1, build step B9c. The collector runs every phase; findings are ruled on in
+        Exceptions, runs are read in Runs, questions are asked and saved in Data, and one-shot jobs
+        are queued from Jobs.
       </p>
 
       <dl className="facts">
-        <div><dt>Generation</dt><dd>gen-{String(generation.generationNo).padStart(3, '0')} — {generation.status}</dd></div>
+        <div><dt>Generation</dt><dd>gen-{pad(generation.generationNo)} — {generation.status}</dd></div>
         {generation.predecessorNo !== null && (
           <div>
             <dt>Replaced</dt>
             <dd>
-              gen-{String(generation.predecessorNo).padStart(3, '0')} (closed, still on disk)
+              gen-{pad(generation.predecessorNo)} (closed, still on disk)
               {generation.resetReason ? ` — ${generation.resetReason}` : ''}
             </dd>
           </div>
@@ -190,6 +209,8 @@ function Overview({
         <div><dt>Database</dt><dd className="path">{generation.dbPath}</dd></div>
         <div><dt>Archive</dt><dd className="path">{generation.archivePath}</dd></div>
       </dl>
+
+      {!generation.readOnly && <Generations />}
 
       {unverified.length > 0 && (
         <section className="panel">
@@ -211,5 +232,59 @@ function Overview({
         </section>
       )}
     </>
+  );
+}
+
+/**
+ * Every generation on disk (05 §8, AC-14). A reset leaves the previous
+ * generation intact; this is where it can be found and opened, read-only, in a
+ * window that cannot change it.
+ */
+function Generations() {
+  const [list, setList] = useState<readonly GenerationListItemDto[] | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    void window.api.generation.list().then((r) => {
+      if (r.ok) setList(r.data); else setMessage(r.error);
+    });
+  }, []);
+
+  if (message) return <div className="notice notice-refused">{message}</div>;
+  if (!list || list.length <= 1) return null;
+
+  const open = async (no: number): Promise<void> => {
+    const r = await window.api.generation.openReadOnly(no);
+    setMessage(r.ok ? null : r.error);
+  };
+
+  return (
+    <section className="panel">
+      <h2>Generations</h2>
+      <table className="grid">
+        <thead>
+          <tr><th>Generation</th><th>Status</th><th>Opened</th><th>Closed</th><th>Why it was replaced</th><th /></tr>
+        </thead>
+        <tbody>
+          {list.map((g) => (
+            <tr key={g.generationNo}>
+              <td className="mono">gen-{pad(g.generationNo)}{g.current ? ' (this one)' : ''}</td>
+              <td>{g.status ?? <span className="muted">{g.dbPresent ? 'unreadable' : 'no database'}</span>}</td>
+              <td><When iso={g.openedAt} /></td>
+              <td><When iso={g.closedAt} /></td>
+              <td title={g.problem ?? g.resetReason ?? ''}>
+                {g.problem ? <span className="bad">{g.problem}</span> : (g.resetReason ?? <span className="muted">—</span>)}
+                {g.walPresent && !g.current && <span className="muted"> · has a write-ahead log (not closed cleanly)</span>}
+              </td>
+              <td>
+                {!g.current && g.dbPresent && !g.problem && (
+                  <button className="link" onClick={() => void open(g.generationNo)}>open read-only</button>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
   );
 }

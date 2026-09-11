@@ -1,10 +1,12 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import type { DeepLinkRoute } from '../shared/deeplink.js';
-import type { ExceptionFilterDto, NextApi, QueryRequestDto, ResolutionHowDto } from '../shared/types.js';
+import type {
+  ExceptionFilterDto, NextApi, QueryRequestDto, QuestionDefinitionDto, ResolutionHowDto
+} from '../shared/types.js';
 
 /**
  * The context-isolated bridge. 05 §9 specifies the full `window.api` surface;
- * this is what B9a needs.
+ * this is what B9c needs.
  *
  * The renderer gets named methods, never a general `invoke(channel, ...)`.
  * A generic passthrough would make the renderer able to reach any handler the
@@ -14,7 +16,9 @@ const api: NextApi = {
   appVersion: process.env['npm_package_version'] ?? null,
   platform: process.platform,
   generation: {
-    current: () => ipcRenderer.invoke('generation:current')
+    current: () => ipcRenderer.invoke('generation:current'),
+    list: () => ipcRenderer.invoke('generation:list'),
+    openReadOnly: (generationNo: number) => ipcRenderer.invoke('generation:open-readonly', generationNo)
   },
   dictionary: {
     tables: () => ipcRenderer.invoke('dictionary:tables'),
@@ -26,6 +30,12 @@ const api: NextApi = {
   inspect: {
     query: (req: QueryRequestDto) => ipcRenderer.invoke('inspect:query', req)
   },
+  questions: {
+    list: (table: string | null) => ipcRenderer.invoke('questions:list', table),
+    save: (name: string, table: string, definition: QuestionDefinitionDto, note: string | null) =>
+      ipcRenderer.invoke('questions:save', name, table, definition, note),
+    retire: (id: number) => ipcRenderer.invoke('questions:retire', id)
+  },
   chains: {
     dates: () => ipcRenderer.invoke('chains:dates'),
     tickers: (asOfDate: string) => ipcRenderer.invoke('chains:tickers', asOfDate),
@@ -33,7 +43,10 @@ const api: NextApi = {
       ipcRenderer.invoke('chains:expirations', ticker, asOfDate),
     grid: (ticker: string, asOfDate: string, expirationDate: string) =>
       ipcRenderer.invoke('chains:grid', ticker, asOfDate, expirationDate),
-    contractHistory: (osiSymbol: string) => ipcRenderer.invoke('chains:contract-history', osiSymbol)
+    contractHistory: (osiSymbol: string) => ipcRenderer.invoke('chains:contract-history', osiSymbol),
+    pins: (osiSymbol: string) => ipcRenderer.invoke('chains:pins', osiSymbol),
+    pin: (osiSymbol: string, note: string) => ipcRenderer.invoke('chains:pin', osiSymbol, note),
+    unpin: (osiSymbol: string, note: string) => ipcRenderer.invoke('chains:unpin', osiSymbol, note)
   },
   account: {
     snapshotDates: () => ipcRenderer.invoke('account:snapshot-dates'),

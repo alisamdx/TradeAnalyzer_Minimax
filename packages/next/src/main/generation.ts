@@ -14,6 +14,7 @@ import {
   type SqliteLike
 } from '@tradeanalyzer/core';
 import { operatorHost } from './operator.js';
+import { scanGenerations, type ScannedGeneration } from './generation-scan.js';
 
 /**
  * Opening a generation — 06 §3, §3.1.
@@ -21,6 +22,11 @@ import { operatorHost } from './operator.js';
  * A generation is a self-contained directory: `data.sqlite` plus `archive/`.
  * Backing one up is copying a folder, and resetting one is replacing it — which
  * is the property the whole generation idea exists for (P14, AC-14).
+ *
+ * From B9c a closed generation can also be opened **read-only in its own
+ * window** (05 §8). Every IPC call runs in the context of the window that made
+ * it (`runInWindowContext`), so the same main-process code answers for whichever
+ * generation that window shows — without a second copy of any query.
  */
 
 export interface GenerationInfo {
@@ -35,6 +41,8 @@ export interface GenerationInfo {
   /** The generation a reset replaced, or null for a first generation. */
   readonly predecessorNo: number | null;
   readonly resetReason: string | null;
+  /** A closed generation shown read-only in its own window. */
+  readonly readOnly: boolean;
 }
 
 /**
@@ -89,16 +97,26 @@ export function generationDir(dataRoot: string, generationNo: number): string {
   return join(dataRoot, `gen-${String(generationNo).padStart(3, '0')}`);
 }
 
-let handle: { db: Database.Database; info: GenerationInfo } | undefined;
+interface OpenGeneration {
+  readonly db: Database.Database;
+  readonly info: GenerationInfo;
+}
+
+let handle: OpenGeneration | undefined;
+
+/** Read-only generations, by the id of the window showing them. */
+const readOnlyWindows = new Map<number, OpenGeneration>();
+/** The context of the IPC call in progress, when it came from a read-only window. */
+let active: OpenGeneration | undefined;
 
 /**
  * Creates or opens one generation's database, schema applied and self-described.
  *
- * **The only place this application makes a SQLite handle on a generation**,
- * shared by the startup open and by a reset's successor — so both go through
- * the same redirect guard, the same pragmas and the same `meta_generation`
- * row. A reset that opened its new generation by some second route would be
- * the one path that forgot the guard, which is the shape of every
+ * **The only place this application makes a writable SQLite handle on a
+ * generation**, shared by the startup open and by a reset's successor — so both
+ * go through the same redirect guard, the same pragmas and the same
+ * `meta_generation` row. A reset that opened its new generation by some second
+ * route would be the one path that forgot the guard, which is the shape of every
  * dev-script incident in this project.
  */
 function openGenerationDb(
@@ -201,20 +219,137 @@ export function openGeneration(): GenerationInfo {
     dictionaryVersion: DICTIONARY_VERSION,
     createdNow,
     predecessorNo: row.predecessor_no,
-    resetReason: row.reset_reason
+    resetReason: row.reset_reason,
+    readOnly: false
   };
   handle = { db, info };
   return info;
 }
 
+/** The generation this IPC call is about: its window's read-only one, or the current. */
 export function currentDb(): Database.Database {
+  if (active) return active.db;
   if (!handle) throw new Error('No generation is open.');
   return handle.db;
 }
 
 export function currentGeneration(): GenerationInfo {
+  if (active) return active.info;
   if (!handle) throw new Error('No generation is open.');
   return handle.info;
+}
+
+/**
+ * Runs `fn` against the generation the calling window shows.
+ *
+ * Every main-process function this wraps is synchronous — better-sqlite3 is —
+ * so the context is set and cleared around one uninterrupted call and cannot
+ * leak into another window's request. A handler that went async would break
+ * that, which is why the IPC wrapper is the only caller.
+ */
+export function runInWindowContext<T>(webContentsId: number, fn: () => T): T {
+  const ctx = readOnlyWindows.get(webContentsId);
+  if (!ctx) return fn();
+  const previous = active;
+  active = ctx;
+  try {
+    return fn();
+  } finally {
+    active = previous;
+  }
+}
+
+export function isReadOnlyContext(): boolean {
+  return active !== undefined;
+}
+
+/**
+ * Opens a generation other than the current one, **read-only** (05 §8, AC-14).
+ *
+ * `readonly: true` is safe here in a way it is not for the live generation: the
+ * CLAUDE.md warning is that a readonly connection cannot attach a LIVE write-
+ * ahead log on Windows and silently reads stale data — and a generation nobody
+ * writes has no live log. It is also the strongest guarantee available: SQLite
+ * itself refuses every write, whatever the main process tries.
+ *
+ * Its schema is left exactly as it is. `applyDictionary` cannot run on a
+ * read-only connection, and the file is evidence of what it was; views meet a
+ * missing table or column as a stated absence, not an upgrade.
+ */
+export function openReadOnlyGeneration(generationNo: number): OpenGeneration {
+  if (!handle) throw new Error('No generation is open.');
+  if (generationNo === handle.info.generationNo) {
+    throw new Error(`gen-${String(generationNo).padStart(3, '0')} is the current generation — it is already open here.`);
+  }
+  const dir = generationDir(handle.info.dataRoot, generationNo);
+  const dbPath = join(dir, 'data.sqlite');
+  if (!existsSync(dbPath)) throw new Error(`There is no generation database at ${dbPath}.`);
+  assertNotRedirected([dir], 'TradeAnalyzer 2');
+
+  const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+  const row = db
+    .prepare(
+      `SELECT generation_no, opened_at, status, predecessor_no, reset_reason
+         FROM meta_generation WHERE generation_no = ?`
+    )
+    .get(generationNo) as
+    | { generation_no: number; opened_at: string; status: GenerationInfo['status']; predecessor_no: number | null; reset_reason: string | null }
+    | undefined;
+  if (!row) {
+    db.close();
+    throw new Error(`${dbPath} has no meta_generation row for gen-${String(generationNo).padStart(3, '0')}, so it does not say what it is.`);
+  }
+  const version = db.prepare('SELECT MAX(dictionary_version) AS v FROM meta_dictionary').get() as { v: number | null };
+
+  return {
+    db,
+    info: {
+      generationNo: row.generation_no,
+      status: row.status,
+      openedAt: row.opened_at,
+      dbPath,
+      archivePath: join(dir, 'archive'),
+      dataRoot: handle.info.dataRoot,
+      dictionaryVersion: version.v ?? 0,
+      createdNow: false,
+      predecessorNo: row.predecessor_no,
+      resetReason: row.reset_reason,
+      readOnly: true
+    }
+  };
+}
+
+export function attachReadOnlyWindow(webContentsId: number, ctx: OpenGeneration): void {
+  readOnlyWindows.set(webContentsId, ctx);
+}
+
+export function detachReadOnlyWindow(webContentsId: number): void {
+  const ctx = readOnlyWindows.get(webContentsId);
+  if (!ctx) return;
+  readOnlyWindows.delete(webContentsId);
+  if (ctx.db.open) ctx.db.close();
+}
+
+export function closeReadOnlyWindows(): void {
+  for (const id of [...readOnlyWindows.keys()]) detachReadOnlyWindow(id);
+}
+
+/** Every generation on disk, the current one described from its own open handle. */
+export function listGenerations(): readonly (ScannedGeneration & { readonly current: boolean })[] {
+  if (!handle) throw new Error('No generation is open.');
+  const current = handle.info;
+  return scanGenerations(current.dataRoot, new Set([current.generationNo])).map((g) =>
+    g.generationNo === current.generationNo
+      ? {
+          ...g,
+          current: true,
+          status: current.status,
+          openedAt: current.openedAt,
+          predecessorNo: current.predecessorNo,
+          resetReason: current.resetReason
+        }
+      : { ...g, current: false }
+  );
 }
 
 /**

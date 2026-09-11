@@ -118,7 +118,9 @@ function countRecords(raw: Buffer, _encrypted: boolean): number {
  * dangling pointer is worse than an unreferenced fact.
  */
 export function archiveResponse(
-  host: CollectorHost,
+  // Only what it uses, so an operator write in the new exe can archive its own
+  // request without faking a collector host (B9c study pins).
+  host: Pick<CollectorHost, 'archiveRoot' | 'encryptForArchive'>,
   args: {
     readonly provider: ProviderName;
     readonly asOfDate: string;

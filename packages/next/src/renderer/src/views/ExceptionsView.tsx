@@ -52,7 +52,7 @@ const HOW: readonly { value: ResolutionHowDto; label: string }[] = [
   { value: 'false_positive', label: 'False positive — the check is wrong here' }
 ];
 
-export function ExceptionsView({ focus }: { focus: ExceptionsFocus }): JSX.Element {
+export function ExceptionsView({ focus, readOnly = false }: { focus: ExceptionsFocus; readOnly?: boolean }): JSX.Element {
   const [tab, setTab] = useState<'list' | 'zero'>('list');
   const [filter, setFilter] = useState<ExceptionFilterDto>({ state: 'active' });
   const [list, setList] = useState<ExceptionListDto | null>(null);
@@ -209,7 +209,7 @@ export function ExceptionsView({ focus }: { focus: ExceptionsFocus }): JSX.Eleme
             )}
           </div>
 
-          {checked.size > 0 && (
+          {checked.size > 0 && !readOnly && (
             <div className="bulk">
               <span>{checked.size} selected</span>
               <input placeholder="note (optional)" value={bulkNote} onChange={(e) => setBulkNote(e.target.value)} />
@@ -262,7 +262,7 @@ export function ExceptionsView({ focus }: { focus: ExceptionsFocus }): JSX.Eleme
           )}
           {list.truncated && <p className="muted">Showing the first 2,000. Narrow the filter to see the rest.</p>}
 
-          {detail && <Detail detail={detail} onReport={report} />}
+          {detail && <Detail detail={detail} onReport={report} readOnly={readOnly} />}
         </>
       )}
     </section>
@@ -308,10 +308,11 @@ function Row({
 }
 
 function Detail({
-  detail, onReport
+  detail, onReport, readOnly
 }: {
   detail: ExceptionDetailDto;
   onReport: (outcome: { ok: boolean; text: string }) => Promise<void>;
+  readOnly: boolean;
 }): JSX.Element {
   const r = detail.row;
   return (
@@ -349,7 +350,7 @@ function Detail({
         </ul>
       )}
 
-      <Actions detail={detail} onReport={onReport} />
+      {!readOnly && <Actions detail={detail} onReport={onReport} />}
 
       {detail.check && (
         <>
