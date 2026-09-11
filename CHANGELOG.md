@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## [1.1.229] - 2026-09-11
 
 ### `npm test` now runs lint first — in all three packages
 
