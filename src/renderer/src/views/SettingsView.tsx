@@ -287,6 +287,7 @@ export function SettingsView({ etradeWarning, onEtradeWarningDismiss }: Settings
   const [ivolatilityKeyVisible, setIvolatilityKeyVisible] = useState(false);
   const [finnhubKey, setFinnhubKey] = useState('');
   const [finnhubKeyVisible, setFinnhubKeyVisible] = useState(false);
+  const [edgarContact, setEdgarContact] = useState('');
   const [diagnostics, setDiagnostics] = useState<DiagnosticsResult | null>(null);
   const [diagRunning, setDiagRunning] = useState(false);
   const [diagError, setDiagError] = useState<string | null>(null);
@@ -325,6 +326,13 @@ export function SettingsView({ etradeWarning, onEtradeWarningDismiss }: Settings
       .catch(() => setFinnhubKey(''));
   }, []);
 
+  // Load the EDGAR contact address.
+  useEffect(() => {
+    window.api.settings.getEdgarContact()
+      .then(setEdgarContact)
+      .catch(() => setEdgarContact(''));
+  }, []);
+
 
   const saveSettings = useCallback(async (partial: Partial<AppSettings>) => {
     if (!settings) return;
@@ -344,13 +352,19 @@ export function SettingsView({ etradeWarning, onEtradeWarningDismiss }: Settings
         window.api.settings.setApiKey(apiKey),
         window.api.settings.setIvolatilityKey(ivolatilityKey),
         window.api.settings.setFinnhubKey(finnhubKey),
+        window.api.settings.setEdgarContact(edgarContact),
       ]);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch {
       // silently fail
     }
-  }, [apiKey, ivolatilityKey]);
+    // `finnhubKey` was missing here before v1.1.227 and that was a real bug, not
+    // a lint nit: this callback closed over the values of the first render, and
+    // the loaders populate the fields asynchronously *after* mount — so editing
+    // the Finnhub key and pressing Save could write back the value loaded at
+    // mount. The new contact field would have inherited the same defect.
+  }, [apiKey, ivolatilityKey, finnhubKey, edgarContact]);
 
   const runDiagnostics = useCallback(async () => {
     setDiagRunning(true);
@@ -627,6 +641,20 @@ export function SettingsView({ etradeWarning, onEtradeWarningDismiss }: Settings
                 </button>
               </div>
               <p className="hint">Used for earnings calendar (bulk date-range fetch, covers tickers E*Trade API misses). Free key at <a href="https://finnhub.io/register" target="_blank" rel="noreferrer" style={{ color: '#89b4fa' }}>finnhub.io/register</a>.</p>
+            </div>
+
+            <div className="settings-row">
+              <label>SEC EDGAR Contact</label>
+              <div className="api-key-row">
+                <input
+                  type="text"
+                  value={edgarContact}
+                  onChange={e => setEdgarContact(e.target.value)}
+                  placeholder="you+edgar@example.com"
+                  style={{ width: 300 }}
+                />
+              </div>
+              <p className="hint">Sent in the User-Agent on every SEC EDGAR request (filings, company facts, insider Form 4s). The SEC asks automated clients to declare a contact address; their enforcement is on rate, not identity, so leaving this empty sends a name-only agent rather than failing. Not a secret, and deliberately not stored in the repository.</p>
             </div>
 
             <div className="settings-row">

@@ -7,6 +7,7 @@ import { applyDictionary, assertNotRedirected, etTimestamp, recordCloseHandle, r
 import { etradeGetRaw, renewAccessToken, type OAuthCredentials } from '../services/etrade-auth.js';
 import type { TokenBucketRateLimiter } from '../services/rate-limiter.js';
 import { logApiCall, logError } from '../services/logger.js';
+import { edgarUserAgent } from '../services/edgar-identity.js';
 
 /**
  * `ElectronCollectorHost` — NewApp 04 §1.1, 06 §5 change #3.
@@ -474,8 +475,12 @@ export class ElectronCollectorHost implements CollectorHost {
     try {
       const res = await fetch(url, {
         headers: {
-          // EDGAR requires a descriptive User-Agent and rejects requests without one.
-          'User-Agent': `TradeAnalyzer/${app.getVersion()} (collector)`,
+          // The SEC asks automated clients to declare a user agent carrying a
+          // contact address (it is a request, not an enforced gate — their
+          // enforcement is on RATE: 10/s). `edgar-identity` builds it from the
+          // operator's setting, and is shared with this app's own EDGAR
+          // provider so both callers say the same thing.
+          'User-Agent': provider === 'edgar' ? edgarUserAgent() : `TradeAnalyzer/${app.getVersion()} (collector)`,
           ...headers,
           ...auth
         }

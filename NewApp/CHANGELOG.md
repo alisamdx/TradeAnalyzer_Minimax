@@ -9,6 +9,30 @@ exit (06 §6).
 
 ---
 
+## B10b — the EDGAR contact address, decided (2026-09-11)
+
+Existing app **v1.1.227**; `core` unchanged. The collector's EDGAR calls
+(filings, company facts, the daily index and Form 4s) now carry a declared
+contact address, built by the host from an operator setting.
+
+`core` continues to send **no** user agent — 04 §11's rule, and the reason it
+exists is visible in this change: the library does not know who is running it,
+and an address compiled into a shared library is an address in a repository's
+history forever. The host supplies it, and the same module supplies it to the
+existing app's own EDGAR provider, which had been sending `trader@local` — an
+address nobody can be reached at, which looks like compliance and delivers none.
+
+**What the SEC actually asks**, checked rather than assumed: declare a user
+agent with a contact; enforcement is on **rate** (10/s, brief limiting, resume
+after 10 minutes below the threshold), plus a clause against unclassified bots.
+Our EDGAR volume is roughly 30 calls a day. So the contact is a courtesy and
+protection against being classified as an anonymous crawler — not a gate, and
+nothing was ever blocked. The `edgar-form-index` failure on the 2026-09-10 run
+was the day's index not having posted yet; that URL serves correctly.
+
+Unset degrades to a name-only agent rather than emitting `TradeAnalyzer/x.y.z ()`,
+which would read as a bug at the receiving end.
+
 ## B10b — short interest was never actually tested (2026-09-11)
 
 `core` 0.6.2, existing app **v1.1.226**. The domain recorded as *"the one §12

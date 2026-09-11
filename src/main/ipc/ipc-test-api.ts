@@ -7,12 +7,12 @@ import type { DbHandle } from '../db/connection.js';
 import { secureGet, secureSet } from '../services/secure-settings.js';
 import { computeAtmIv } from '../services/iv-history-service.js';
 import {
-  EDGAR_HEADERS,
   resolveEdgarCik,
   pickEdgarLatest,
   EDGAR_FIELD_SPECS,
   type EdgarEntry,
 } from '../services/sec-edgar-provider.js';
+import { edgarHeaders } from '../services/edgar-identity.js';
 
 function ok<T>(value: T): { ok: true; value: T } { return { ok: true, value }; }
 function fail(err: unknown): { ok: false; error: { code: string; message: string } } {
@@ -578,7 +578,7 @@ export function registerTestApiIpc(
       const { cikPadded, title } = await resolveEdgarCik(ticker.toUpperCase().trim());
       const resp = await fetch(
         `https://data.sec.gov/api/xbrl/companyfacts/CIK${cikPadded}.json`,
-        { headers: EDGAR_HEADERS }
+        { headers: edgarHeaders() }
       );
       if (!resp.ok) throw new Error(`SEC companyfacts HTTP ${resp.status}: ${await resp.text().then(t => t.slice(0, 200))}`);
 

@@ -10,6 +10,7 @@ import type { TokenBucketRateLimiter } from '../services/rate-limiter.js';
 import type { QuoteCache, FundamentalsCache } from '../services/cache-service.js';
 import { TTL_SECONDS } from '../services/cache-service.js';
 import { secureGet, secureSet, encryptionAvailable } from '../services/secure-settings.js';
+import { EDGAR_CONTACT_KEY } from '../services/edgar-identity.js';
 import { createBackupZip, restoreDbFromFile, defaultBackupSources } from '../services/backup-service.js';
 
 function ok<T>(value: T) { return { ok: true as const, value }; }
@@ -188,6 +189,27 @@ export function registerSettingsIpc(
   ipcMain.handle('settings:set-finnhub-key', (_e, key: string) => {
     try { secureSet(db, 'finnhubApiKey', key.trim()); return ok(true); }
     catch (err) { return fail(err); }
+  });
+
+  // The EDGAR contact address. A plain setting, not a secret: the SEC asks for
+  // it precisely so it can be read off the request, and `secureGet` can fail
+  // closed and blank every key at once (v1.1.200) — a courtesy header is not
+  // worth that failure mode.
+  ipcMain.handle('settings:get-edgar-contact', () => {
+    try {
+      const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(EDGAR_CONTACT_KEY) as
+        | { value: string }
+        | undefined;
+      return ok<string>(row?.value ?? '');
+    } catch (err) { return fail(err); }
+  });
+
+  ipcMain.handle('settings:set-edgar-contact', (_e, contact: string) => {
+    try {
+      db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
+        .run(EDGAR_CONTACT_KEY, contact.trim());
+      return ok(true);
+    } catch (err) { return fail(err); }
   });
 
   ipcMain.handle('settings:encryption-status', () => {

@@ -42,6 +42,7 @@ import { registerOptionsIpc } from './ipc/ipc-options.js';
 import { registerTestApiIpc } from './ipc/ipc-test-api.js';
 import { registerETradeIpc, probeETradeConnection } from './ipc/ipc-etrade.js';
 import { secureGet, migratePlaintextSecrets } from './services/secure-settings.js';
+import { setEdgarContactSource } from './services/edgar-identity.js';
 import type { OptionsProvider } from './services/options-provider.js';
 import { ETradeDataProvider } from './services/etrade-data-provider.js';
 import { AgentDbService } from './services/agent-db-service.js';
@@ -260,6 +261,12 @@ app.whenReady().then(() => {
     console.log(`[migrations] applied ${ran.length} (head=${currentSchemaVersion(db)})`);
   }
   repairWatchlistItems(db);
+
+  // Before any provider exists: both EDGAR callers — this app's fundamentals
+  // provider and the NewApp collector host — read the operator's contact address
+  // through this one module, and a call made before it is installed would go out
+  // with a name-only agent (v1.1.227).
+  setEdgarContactSource(db, app.getVersion());
 
   // Encrypt any plain-text secrets left from before safeStorage was introduced.
   migratePlaintextSecrets(db);

@@ -1,12 +1,15 @@
 // SEC EDGAR XBRL fundamentals provider.
 // Replaces the plan-restricted Polygon /vX/reference/financials endpoint.
-// Free, no API key required. SEC rate limit: 10 req/s. User-Agent header required.
+// Free, no API key required. SEC rate limit: 10 req/s; the SEC asks that the
+// User-Agent declare a contact address — built by `edgar-identity.ts`, the one
+// module both EDGAR callers use (v1.1.227). This file used to hard-code
+// `trader@local`, an address nobody could be reached at.
 // see docs/formulas.md for formula context
 
 import type { PolygonFinancials } from './fundamentals-computer.js';
+import { edgarHeaders } from './edgar-identity.js';
 
 const EDGAR_BASE = 'https://data.sec.gov';
-export const EDGAR_HEADERS = { 'User-Agent': 'TradeAnalyzer/1.0 trader@local' };
 
 // ─── CIK resolution ───────────────────────────────────────────────────────────
 // company_tickers.json is ~500 KB. Fetched once per process and cached in memory.
@@ -15,7 +18,7 @@ let _cikCache: Map<string, { cikPadded: string; title: string }> | null = null;
 
 export async function resolveEdgarCik(ticker: string): Promise<{ cikPadded: string; title: string }> {
   if (!_cikCache) {
-    const r = await fetch('https://www.sec.gov/files/company_tickers.json', { headers: EDGAR_HEADERS });
+    const r = await fetch('https://www.sec.gov/files/company_tickers.json', { headers: edgarHeaders() });
     if (!r.ok) throw new Error(`SEC company_tickers.json HTTP ${r.status}`);
     const raw = await r.json() as Record<string, { cik_str: number | string; ticker: string; title: string }>;
     _cikCache = new Map();
@@ -353,7 +356,7 @@ export async function getEdgarFundamentals(ticker: string): Promise<PolygonFinan
 
   const r = await fetch(
     `${EDGAR_BASE}/api/xbrl/companyfacts/CIK${cikPadded}.json`,
-    { headers: EDGAR_HEADERS },
+    { headers: edgarHeaders() },
   );
   if (!r.ok) throw new Error(`EDGAR companyfacts HTTP ${r.status} for ${ticker}`);
 

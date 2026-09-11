@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.227] - 2026-09-11
+
+### One EDGAR identity, configured rather than compiled in
+
+- The SEC asks automated clients to declare a contact address in the `User-Agent`. This app has **two** independent EDGAR callers and they disagreed: `sec-edgar-provider.ts` (fundamentals, ticker→CIK map) sent `TradeAnalyzer/1.0 trader@local` — an address nobody can be reached at — while the NewApp collector (filings, company facts, insider Form 4s) sent no contact at all. Both now build the header in `services/edgar-identity.ts`, the one module every EDGAR caller uses.
+- **The address is a setting, not source.** New Settings field, *SEC EDGAR Contact*, stored in the `settings` table under `edgarContact`. This repository has a GitHub remote, and an address committed here would be in its history permanently — which no later edit removes. It is a plain setting rather than an encrypted one on purpose: a courtesy header must never be the thing a failed decryption takes down (v1.1.200).
+- **Unset degrades, never fails**: the agent falls back to `TradeAnalyzer/<version>` with no parentheses, because `TradeAnalyzer/1.1.227 ()` reads as a bug at the receiving end and says less than saying nothing. Blank and whitespace-only settings count as unset.
+- Corrected a comment that claimed EDGAR "rejects requests without" a user agent. It does not: the SEC's stated enforcement is on **rate** (10 requests/second, brief limiting, resume after 10 minutes below the threshold). The contact is a request and a safeguard against ever being classified as an unclassified bot.
+- Tests: `tests/edgar-identity.test.ts` — setting round-trip, the no-empty-parentheses fallback, both callers proven to route through the one module, and a scan that fails any email-shaped literal committed in a user-agent anywhere under `src/`.
+
 ## [1.1.226] - 2026-09-11
 
 ### Short interest: the source was never actually tested — the path had a placeholder in it

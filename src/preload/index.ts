@@ -295,6 +295,8 @@ function buildApi() {
     setIvolatilityKey: (key: string) => invoke<boolean>('settings:set-ivolatility-key', key),
     getFinnhubKey: () => invoke<string>('settings:get-finnhub-key'),
     setFinnhubKey: (key: string) => invoke<boolean>('settings:set-finnhub-key', key),
+    getEdgarContact: () => invoke<string>('settings:get-edgar-contact'),
+    setEdgarContact: (contact: string) => invoke<boolean>('settings:set-edgar-contact', contact),
     openLogsDir: () => invoke<boolean>('settings:open-logs-dir'),
     backup: () => invoke<{ backupPath: string; message: string } | null>('settings:backup-everything'),
     restore: () => invoke<{ restored: boolean; message: string } | null>('settings:restore-backup'),
