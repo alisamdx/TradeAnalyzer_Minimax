@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Lint: `no-undef` off for TypeScript, and one unused catch binding
+
+- `no-undef` reported `NodeJS.Timeout` as an undefined variable in `index.ts`, `ipc-agent.ts` and `batch-service.ts`. The rule cannot see **type space**, and `globals.node` cannot help because it supplies runtime globals (`process`, `console`), not the ambient `NodeJS` namespace. Disabled for `.ts`/`.tsx` — typescript-eslint's own guidance, and the same reasoning already applied to `no-unused-vars` two lines above it: `tsc` refuses an undefined identifier and checks both spaces. Left on, it was three permanent errors each inviting a worse fix — rewriting a correct type annotation to dodge a linter that should not have been reading it.
+- `getApiKey`'s `catch (err)` bound a variable it never used; now an optional catch binding, which says the error is genuinely irrelevant rather than looking like something meant to be logged.
+- No version bump and no repackage: both changes are runtime-identical, and v1.1.227 is the build going into Monday's run.
+- **Noted, not fixed:** `npm run lint` reports ~185 problems repo-wide (~129 errors) that long predate this — `no-explicit-any`, `no-useless-escape`, `react/no-unescaped-entities`, and real `'React' is not defined` hits in a renderer file. A backlog to schedule deliberately, not to fold into a two-line cleanup.
+
 ## [1.1.227] - 2026-09-11
 
 ### One EDGAR identity, configured rather than compiled in

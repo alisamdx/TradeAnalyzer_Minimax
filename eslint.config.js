@@ -45,7 +45,18 @@ export default [
       ...reactHooks.configs.recommended.rules,
       'react/react-in-jsx-scope': 'off',
       '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
-      'no-unused-vars': 'off'
+      'no-unused-vars': 'off',
+      // Same reasoning as `no-unused-vars` above: the core rule is replaced by
+      // the type-aware toolchain. `no-undef` cannot see TYPE space, so it reads
+      // every type-only global as an undefined variable — `NodeJS.Timeout` in
+      // `index.ts`, `ipc-agent.ts` and `batch-service.ts`. `globals.node` cannot
+      // fix that, because it supplies runtime globals (`process`, `console`),
+      // not the ambient `NodeJS` namespace. Disabling it for TypeScript is
+      // typescript-eslint's own guidance: `tsc` already refuses an undefined
+      // identifier and it checks both spaces. Left on, it was three permanent
+      // errors each inviting a worse fix — rewriting a correct type annotation
+      // to dodge a linter that should not have been reading it.
+      'no-undef': 'off'
     }
   },
   {

@@ -149,8 +149,10 @@ function getApiKey(db: ReturnType<typeof openDatabase>): string {
   try {
     const val = secureGet(db, 'polygonApiKey');
     if (val) return val;
-  } catch (err) {
-    // Table might not exist yet
+  } catch {
+    // Table might not exist yet — the binding was unused, and an optional catch
+    // binding says "the error is genuinely irrelevant here" rather than leaving
+    // a variable that reads like something was meant to be logged.
   }
 
   if (process.env['POLYGON_API_KEY']) {
