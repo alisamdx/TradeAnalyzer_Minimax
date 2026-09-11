@@ -80,7 +80,7 @@ IPC responses use a uniform `IpcResult<T>` = `{ ok: true, value } | { ok: false,
 - `BatchService` (`batch-service.ts`) is the daily job scheduler. Jobs implement `BatchJobHandler` (`run(onProgress, signal, force?)`), are registered in `index.ts`, run one-at-a-time under a mutex (so same-time jobs chain), support `runOnStartup` / `startupDelaySeconds` / `dailyScheduleTime` / per-job `defaultConfig`, and stream progress to the Batch Jobs view.
 
 ### Local API server
-`ApiServer` (`api-server.ts`) runs Fastify on `127.0.0.1:7432` with token auth (`~/.tradeanalyzer/agent.token`). Route modules in `src/main/api/`. Used by the external TraderAgent to read briefs, run Strategy Lab, and call the Critic.
+`ApiServer` (`api-server.ts`) runs Fastify on `127.0.0.1:7432` with token auth (`~/.tradeanalyzer/agent.token`). Route modules in `src/main/api/`. Used by the external TraderAgent to read briefs, run Strategy Lab, and call the Critic. `GET /analysis/snapshots/latest?mode=wheel` returns the newest snapshot of a mode including global (`watchlist_id NULL`) batch rows — scripts use it instead of opening the SQLite file (`fr-wheel-monthly-first-ab.mjs`).
 
 ---
 

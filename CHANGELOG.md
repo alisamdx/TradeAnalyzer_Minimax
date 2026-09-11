@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.220] - 2026-09-11
+
+### `GET /api/v1/analysis/snapshots/latest` — and the monthly-first harness stops opening the database
+
+- New route: newest `analysis_snapshots` row for a mode across **all** watchlists, including the global (`watchlist_id NULL`) rows the batch jobs write. `GET /analysis/snapshots?watchlistId=N` filters `watchlist_id = ?`, which never matches NULL, so the live wheel panel was unreachable through the API.
+- `scripts/fr-wheel-monthly-first-ab.mjs` takes its ticker sample from that route. It used to `new Database()` the production file via `homedir()/AppData/Roaming` — from an MSIX-redirected shell (Claude Code's own) that is the WAL-moving open in CLAUDE.md's known quirks. It now never touches SQLite; without the route (an older app) it refuses and says to pass `--tickers`.
+- The harness now warns up front when the **calendar phase** makes the run vacuous: when the next monthly sits at 30–36 DTE, the shipped first-by-date rule already picks it and both arms agree. Measured today (Oct 16 at 35 DTE): **9 of 10 tickers identical**. Differing days for this cycle are Sep 17–18 and Sep 29 – Oct 14.
+- It also prints the composite delta under the **live** wheel config (optionLiquidity disabled since v1.1.135, weights /91), beside the code-baseline estimate.
+- Regression test: `tests/analysis-latest-snapshot.test.ts`.
+
 ## [1.1.219] - 2026-09-10
 
 `@tradeanalyzer/core` 0.4.0 (dictionary v11), `@tradeanalyzer/next` 0.2.1. **NewApp B9b.**

@@ -22,9 +22,16 @@
 // • This is a REPLICA of findSuitableChain + wheelOptionLiquidityScore (same pattern as the other
 //   fr-*-study scripts). Keep it in sync if those change — the constants are pinned below.
 //
+// • Never opens the SQLite file. The ticker sample comes from GET /analysis/snapshots/latest
+//   (v1.1.220). It used to `new Database()` the production file via homedir()/AppData/Roaming,
+//   which from an MSIX-redirected shell (Claude Code's own) is the WAL-moving open CLAUDE.md
+//   warns about — see the "Opening a WAL database from a redirected shell MOVES it" quirk.
+// • CALENDAR PHASE: the arms only differ when the next 3rd-Friday monthly is NOT the first
+//   Friday at >=30 DTE. When it sits at 30–36 DTE both policies pick it and the run is vacuous
+//   (2026-09-11: 9/10 identical). The script prints this up front — check before spending a run.
+//
 // Usage:
 //   node scripts/fr-wheel-monthly-first-ab.mjs [--limit 40] [--tickers AAPL,WMT,PG] [--out file.json]
-import Database from 'better-sqlite3';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
@@ -149,14 +156,21 @@ async function runPolicy(ticker, order, cache) {
 }
 
 // ── ticker sample: names that resolved a chain in the latest wheel snapshot ─────
-function sampleTickers() {
+async function sampleTickers() {
   if (ONLY.length) return ONLY;
-  const db = new Database(join(homedir(), 'AppData', 'Roaming', 'trade-analyzer', 'trade-analyzer.sqlite'));
-  const row = db.prepare(`SELECT payload_json FROM analysis_snapshots WHERE mode='wheel' ORDER BY run_at DESC LIMIT 1`).get();
-  db.close();
-  if (!row) return [];
-  const arr = JSON.parse(row.payload_json);
-  const list = Array.isArray(arr) ? arr : (arr.results ?? arr.rows ?? []);
+  const res = await fetch(`${API}/analysis/snapshots/latest?mode=wheel`, { headers: { 'X-Agent-Token': TOKEN } });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    if (res.status === 404 && body?.code === 'NOT_FOUND') return [];   // route exists, no wheel snapshot yet
+    // A pre-v1.1.220 app routes "latest" into /snapshots/:id and answers 400 "Invalid snapshot id".
+    console.error(`snapshot fetch failed: HTTP ${res.status} ${body?.error ?? ''}`);
+    console.error('If the running app predates v1.1.220 it has no /analysis/snapshots/latest route —');
+    console.error('install the current build, or pass --tickers explicitly.');
+    process.exit(1);
+  }
+  const snap = (await res.json())?.data;
+  console.log(`sample: wheel snapshot #${snap?.id} run_at ${snap?.runAt}`);
+  const list = Array.isArray(snap?.results) ? snap.results : [];
   // Only names that already resolve a chain — for the rest both arms would be null and the
   // comparison is vacuous. Highest IV rank first: those are the real wheel brief candidates.
   return list
@@ -173,15 +187,30 @@ const f = (x, d = 1) => (x == null || Number.isNaN(x) ? '—' : x.toFixed(d));
 const norm = (raw, normMax) => Math.max(0, Math.min(100, (raw / normMax) * 100));
 
 // ── main ────────────────────────────────────────────────────────────────────────
-const tickers = sampleTickers();
-if (!tickers.length) {
-  console.error('No tickers to test — is there a wheel analysis_snapshots row? Or pass --tickers.');
-  process.exit(1);
-}
-
 const health = await fetch(`${API}/health`, { headers: { 'X-Agent-Token': TOKEN } }).catch(() => null);
 if (!health || !health.ok) {
   console.error('API server not reachable on 127.0.0.1:7432 — the app must be RUNNING for this script.');
+  process.exit(1);
+}
+
+// Calendar-phase check: is the next monthly already the shipped rule's first pick?
+{
+  const now = new Date();
+  let y = now.getUTCFullYear(), m = now.getUTCMonth();
+  let next = thirdFriday(y, m);
+  if (dteDays(next) < MONTHLY_WINDOW.minDTE) { m += 1; if (m > 11) { m = 0; y += 1; } next = thirdFriday(y, m); }
+  const d = dteDays(next);
+  if (d >= CURRENT_WINDOW.minDTE && d <= CURRENT_WINDOW.minDTE + 6) {
+    console.log(`\n!! CALENDAR PHASE: the next monthly (${next}) is ${d} DTE — the shipped rule's first`);
+    console.log('!! Friday at >=30 DTE IS the monthly, so both arms will pick the same expiry for nearly');
+    console.log('!! every ticker. This run cannot discriminate. Differing days are when the monthly sits');
+    console.log('!! at 28–29 or 37–52 DTE.\n');
+  }
+}
+
+const tickers = await sampleTickers();
+if (!tickers.length) {
+  console.error('No tickers to test — no wheel snapshot in the app yet. Pass --tickers.');
   process.exit(1);
 }
 
@@ -274,6 +303,11 @@ const deltas = both.map((r) => {
 });
 console.log(`\nEstimated wheel COMPOSITE delta (optionLiquidity w${W_LIQ} + premiumYield w${W_PREMYIELD} only; all other signals unchanged):`);
 console.log(`  mean ${(mean(deltas) >= 0 ? '+' : '') + f(mean(deltas), 2)} pts   median ${(med(deltas) >= 0 ? '+' : '') + f(med(deltas), 2)} pts   improved on ${deltas.filter((d) => d > 0).length}/${deltas.length}`);
+// Since v1.1.135 the LIVE scoring_strategy_configs row has optionLiquidity disabled for wheel
+// (weights sum to 91), so live only the premiumYield term moves — renormalised to /91.
+const liveDeltas = both.map((r) =>
+  (norm(r.mon.annualizedReturn ?? 0, NORMMAX_PREMYIELD) - norm(r.cur.annualizedReturn ?? 0, NORMMAX_PREMYIELD)) * W_PREMYIELD / 91);
+console.log(`  live config (optionLiquidity disabled, v1.1.135): mean ${(mean(liveDeltas) >= 0 ? '+' : '') + f(mean(liveDeltas), 2)} pts   median ${(med(liveDeltas) >= 0 ? '+' : '') + f(med(liveDeltas), 2)} pts`);
 console.log('\nNOTE: this measures the SIGNAL, not trade outcomes. It answers "does the flag make');
 console.log('optionLiquidity discriminate again", which is the defect. Whether the resulting');
 console.log('re-ranking picks better trades needs forward realized P&L — FR-SEY-5 is not');

@@ -720,6 +720,32 @@ export class AnalysisService {
     }));
   }
 
+  /**
+   * Latest snapshot of a mode across ALL watchlists, including the global (watchlist_id NULL)
+   * ones the batch jobs write — which `listSnapshots` can never return, since `= NULL` matches
+   * nothing. Lets scripts read the live wheel panel through the API instead of the SQLite file.
+   */
+  getLatestSnapshotByMode(
+    mode: AnalysisMode | 'all'
+  ): (Omit<AnalysisSnapshotRow, 'watchlistId'> & { watchlistId: number | null }) | null {
+    const r = this.db.prepare(
+      `SELECT id, watchlist_id, mode, run_at, result_count, payload_json
+         FROM analysis_snapshots WHERE mode = ? ORDER BY run_at DESC, id DESC LIMIT 1`
+    ).get(mode) as {
+      id: number; watchlist_id: number | null; mode: string;
+      run_at: string; result_count: number; payload_json: string;
+    } | undefined;
+    if (!r) return null;
+    return {
+      id: r.id,
+      watchlistId: r.watchlist_id,
+      mode: r.mode as AnalysisMode | 'all',
+      runAt: r.run_at,
+      resultCount: r.result_count,
+      payloadJson: r.payload_json
+    };
+  }
+
   deleteSnapshot(id: number): void {
     this.db.prepare('DELETE FROM analysis_snapshots WHERE id = ?').run(id);
   }

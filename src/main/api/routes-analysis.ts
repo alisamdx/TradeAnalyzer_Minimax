@@ -78,6 +78,32 @@ export function registerAnalysisRoutes(app: FastifyInstance, svc: ApiServerServi
     }
   });
 
+  // GET /analysis/snapshots/latest?mode=wheel — newest snapshot of a mode across ALL watchlists,
+  // including the global (watchlist_id NULL) rows batch jobs write. Declared before /:id; Fastify
+  // matches static segments first either way.
+  app.get<{ Querystring: { mode?: string } }>('/analysis/snapshots/latest', async (req, reply) => {
+    const mode = req.query.mode;
+    if (!mode || !(mode === 'all' || VALID_MODES.includes(mode as AnalysisMode))) {
+      return apiError(reply, `mode must be one of: all, ${VALID_MODES.join(', ')}`, 'VALIDATION_ERROR');
+    }
+    try {
+      const snap = as.getLatestSnapshotByMode(mode as AnalysisMode | 'all');
+      if (!snap) return apiError(reply, `No ${mode} snapshot`, 'NOT_FOUND', 404);
+      const payload = JSON.parse(snap.payloadJson) as { results: unknown[] };
+      return apiOk(reply, {
+        id: snap.id,
+        mode: snap.mode,
+        watchlistId: snap.watchlistId,
+        runAt: snap.runAt,
+        resultCount: snap.resultCount,
+        results: payload.results
+      });
+    } catch (err) {
+      const { message, code } = fromServiceError(err);
+      return apiError(reply, message, code, 500);
+    }
+  });
+
   // GET /analysis/snapshots/:id
   app.get<{ Params: { id: string } }>('/analysis/snapshots/:id', async (req, reply) => {
     const id = parseInt(req.params.id, 10);
