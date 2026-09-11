@@ -95,6 +95,13 @@ export interface ElectronCollectorHostOptions {
    */
   readonly rateLimiter: TokenBucketRateLimiter;
   readonly getPolygonApiKey: () => string;
+  /**
+   * The same `finnhubApiKey` the existing app's earnings job uses. Until
+   * v1.1.223 the collector had no such option: its Finnhub calls went out
+   * through `httpGet` with no key at all, and every one came back non-2xx —
+   * earnings stored 0 and recommendations 0 on gen-001's first full run.
+   */
+  readonly getFinnhubApiKey: () => string;
   readonly getEtradeCredentials: () => OAuthCredentials | null;
   readonly sendEmail: (msg: { subject: string; text: string; html: string }) => Promise<void>;
 }
@@ -425,26 +432,50 @@ export class ElectronCollectorHost implements CollectorHost {
     return etradeGetRaw(path, params, this.opts.getEtradeCredentials() ?? creds);
   }
 
+  /**
+   * EDGAR, Treasury, Finnhub, FOMC/BLS.
+   *
+   * Authentication is the host's job, never `core`'s: `core` builds the URL and
+   * this adds the credential for the provider that needs one. Finnhub's key goes
+   * in the `X-Finnhub-Token` header rather than `token=` in the query, so it can
+   * never land in a URL, a log line or an archived request.
+   */
   async httpGet(url: string, headers: Record<string, string> = {}): Promise<ProviderResponse> {
     const requestedAt = new Date().toISOString();
+    const parsed = new URL(url);
+    const provider = providerForHost(parsed.hostname);
+    const requestParams: Record<string, unknown> = Object.fromEntries(parsed.searchParams);
+
+    const auth: Record<string, string> = {};
+    if (provider === 'finnhub') {
+      const key = this.opts.getFinnhubApiKey();
+      if (!key) {
+        // Refused rather than sent: an unauthenticated call only produces a
+        // provider error body that has to be decoded back into this sentence.
+        const error = 'Finnhub API key is not configured.';
+        logHttp({ requestedAt, provider, endpoint: parsed.pathname, requestParams, status: null, latencyMs: null, body: null, error });
+        return { status: null, body: '', requestedAt, respondedAt: null, error };
+      }
+      auth['X-Finnhub-Token'] = key;
+    }
+
+    const started = Date.now();
     try {
       const res = await fetch(url, {
         headers: {
           // EDGAR requires a descriptive User-Agent and rejects requests without one.
           'User-Agent': `TradeAnalyzer/${app.getVersion()} (collector)`,
-          ...headers
+          ...headers,
+          ...auth
         }
       });
       const body = await res.text();
+      logHttp({ requestedAt, provider, endpoint: parsed.pathname, requestParams, status: res.status, latencyMs: Date.now() - started, body, error: null });
       return { status: res.status, body, requestedAt, respondedAt: new Date().toISOString() };
     } catch (err) {
-      return {
-        status: null,
-        body: '',
-        requestedAt,
-        respondedAt: null,
-        error: err instanceof Error ? err.message : String(err)
-      };
+      const error = err instanceof Error ? err.message : String(err);
+      logHttp({ requestedAt, provider, endpoint: parsed.pathname, requestParams, status: null, latencyMs: Date.now() - started, body: null, error });
+      return { status: null, body: '', requestedAt, respondedAt: null, error };
     }
   }
 
@@ -464,5 +495,46 @@ export class ElectronCollectorHost implements CollectorHost {
 
   progress(phase: string, done: number, total: number, note?: string): void {
     this.opts.onProgress(phase, done, total, note);
+  }
+}
+
+/** The provider name `logs/api/` records for a generic call, from its host. */
+function providerForHost(hostname: string): string {
+  if (hostname.endsWith('finnhub.io')) return 'finnhub';
+  if (hostname.endsWith('sec.gov')) return 'edgar';
+  if (hostname.endsWith('treasury.gov')) return 'treasury';
+  if (hostname.endsWith('federalreserve.gov') || hostname.endsWith('bls.gov')) return 'fred';
+  return hostname;
+}
+
+/**
+ * `logs/api/` for the generic transport. `httpGet` logged nothing until
+ * v1.1.223, so a Finnhub key that never reached the collector left no trace —
+ * the same dark-provider shape E*Trade had before v1.1.144. Success bodies are
+ * never logged (plaintext file, 30-day retention); a failure's first 300
+ * characters are, because a provider's error body is what diagnosis needs.
+ */
+function logHttp(e: {
+  requestedAt: string; provider: string; endpoint: string; requestParams: Record<string, unknown>;
+  status: number | null; latencyMs: number | null; body: string | null; error: string | null;
+}): void {
+  const failed = e.status === null || e.status < 200 || e.status >= 300;
+  try {
+    logApiCall({
+      timestamp: e.requestedAt,
+      provider: e.provider,
+      endpoint: e.endpoint,
+      method: 'GET',
+      requestParams: e.requestParams,
+      responseStatus: e.status,
+      responseLatencyMs: e.latencyMs,
+      responseSizeBytes: e.body === null ? null : e.body.length,
+      retryCount: 0,
+      jobRunId: null,
+      ...(e.error !== null ? { errorMessage: e.error } : {}),
+      ...(failed && e.body ? { responseBodyPreview: e.body.slice(0, 300) } : {})
+    });
+  } catch {
+    /* a logger failure must never be the reason a provider call fails */
   }
 }

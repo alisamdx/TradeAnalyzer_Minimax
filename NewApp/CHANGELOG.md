@@ -9,6 +9,26 @@ exit (06 §6).
 
 ---
 
+## B10b, day 0 — the collector's Finnhub calls carried no key (2026-09-11)
+
+Existing app **v1.1.223**; `core` unchanged. Every Finnhub call on gen-001's
+first full run came back non-2xx, so earnings and recommendations stored
+nothing. `core` builds the URLs without a key — correctly, since credentials
+are the host's job — and the host's generic `httpGet` added none, because the
+host was never given a Finnhub key: its options had `getPolygonApiKey` and no
+equivalent. The host now receives it and sends it as the `X-Finnhub-Token`
+header (never a query parameter, so it cannot reach a URL, a log or the
+archive), and refuses the call outright when none is configured.
+
+The reason it survived to the pilot is the reason worth keeping: `httpGet` was
+the one transport that wrote nothing to `logs/api/`, so the failure had no
+witness but the archive. It logs now. **A transport that is not instrumented is
+a provider that fails silently, however well the others are covered** — the
+existing app learned that for E*Trade twice.
+
+Open: `httpGet` has no rate limiter, and the weekly recommendations sweep will
+hit Finnhub's per-minute limit once the chain subset fills.
+
 ## B10b, day 0 — four checks that could never pass (2026-09-11)
 
 `core` 0.6.1; existing app **v1.1.222**. The first read of the streak after B10a

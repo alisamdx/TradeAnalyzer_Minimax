@@ -22,6 +22,10 @@ interface CollectorHost {
   polygonGet(path: string, params: Record<string,string>): Promise<ProviderResponse>;
   etradeGet(path: string, params: Record<string,string>): Promise<ProviderResponse>;  // renew-and-retry on ANY failure inside
   httpGet(url: string, headers?: Record<string,string>): Promise<ProviderResponse>;   // EDGAR, Treasury, Finnhub, FOMC/BLS
+  // As built (v1.1.223): the HOST authenticates — core's URLs never carry a key. Finnhub's key
+  // goes in the X-Finnhub-Token header (never the query string); no key configured → refused,
+  // not sent. Every call is logged to logs/api/ (error-body preview on failure only). No rate
+  // limiter yet — Finnhub's per-minute cap will matter once the chain subset fills.
 
   // environment
   nowET(): string;                              // ISO with offset

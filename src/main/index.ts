@@ -804,6 +804,7 @@ app.whenReady().then(() => {
       onProgress: opts.onProgress,
       rateLimiter,
       getPolygonApiKey: () => getApiKey(db),
+      getFinnhubApiKey: () => { try { return secureGet(db, 'finnhubApiKey'); } catch { return ''; } },
       getEtradeCredentials: () => getEtradeCreds(),
       sendEmail: async (msg) => { await emailService.send(msg.subject, msg.html); },
     });

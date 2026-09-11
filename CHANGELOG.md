@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.223] - 2026-09-11
+
+### The collector's Finnhub calls now carry the API key
+
+- **Every Finnhub call the collector made was unauthenticated.** The earnings sweep and recommendations phase build Finnhub URLs in `core` (correctly — keys never enter `core`), and they go out through the host's generic `httpGet`, which adds no credential. The host was never given the Finnhub key at all; only `getPolygonApiKey` existed. On gen-001's first full run all 4 Finnhub calls came back non-2xx and earnings and recommendations stored 0. The existing app's own earnings job was unaffected — it appends the key itself.
+- The host now receives `finnhubApiKey` (the same secure setting the earnings job reads) and sends it as the `X-Finnhub-Token` **header**, so the key never appears in a URL, a log line or an archived request. With no key configured the call is refused with "Finnhub API key is not configured." instead of sent.
+- **The generic transport now logs to `logs/api/`** (EDGAR, Treasury, Finnhub, FOMC/BLS). It logged nothing before, which is why the failure left no trace; failures carry a 300-character preview of the provider's error body, successes never log a body.
+- Tests: `1,267` (source assertions in `tests/collector-host.test.ts`).
+
 ## [1.1.222] - 2026-09-11
 
 `@tradeanalyzer/core` 0.6.1. **Four collector checks that fired on every run, fixed** — so the pilot's clean-day streak can start.

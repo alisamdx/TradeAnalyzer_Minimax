@@ -44,6 +44,42 @@ const daily = stripComments(readFileSync(join(SRC, 'services', 'jobs', 'collecto
 const index = stripComments(readFileSync(join(SRC, 'index.ts'), 'utf8'));
 const etradeAuth = stripComments(readFileSync(join(SRC, 'services', 'etrade-auth.ts'), 'utf8'));
 
+describe('ElectronCollectorHost — Finnhub and the generic transport (v1.1.223)', () => {
+  // gen-001's first full run (2026-09-10): every Finnhub call non-2xx, earnings
+  // and recommendations stored 0. The collector built Finnhub URLs with no key
+  // and the host had no Finnhub key to add — and `httpGet` logged nothing, so
+  // `logs/api/` held no trace of it.
+  const coreEvents = stripComments(
+    readFileSync(join(process.cwd(), 'packages', 'core', 'src', 'collector', 'phases', 'events.ts'), 'utf8')
+  );
+  const httpBlock = host.slice(host.indexOf('async httpGet('), host.indexOf('nowET(): string'));
+
+  it('the app hands the collector its Finnhub key', () => {
+    const wiring = index.slice(index.indexOf('new ElectronCollectorHost('));
+    expect(wiring).toMatch(/getFinnhubApiKey:.*secureGet\(db, 'finnhubApiKey'\)/);
+  });
+
+  it('adds the key as a header, so it is never in a URL, a log line or core', () => {
+    expect(httpBlock).toContain("'X-Finnhub-Token'");
+    expect(httpBlock).toContain('getFinnhubApiKey()');
+    expect(httpBlock).not.toMatch(/token=/);
+    // `core` never sees a key: the phase builds the URL, the host authenticates it.
+    expect(coreEvents).not.toMatch(/token=|finnhubApiKey|X-Finnhub-Token/);
+  });
+
+  it('refuses a Finnhub call with no key rather than sending an unauthenticated one', () => {
+    expect(httpBlock).toMatch(/Finnhub API key is not configured/);
+  });
+
+  it('logs every generic call to logs/api, with an error-body preview on failure', () => {
+    expect(httpBlock).toContain('logHttp(');
+    const logger = host.slice(host.indexOf('function logHttp('));
+    expect(logger).toContain('logApiCall(');
+    // A logger failure must never be the reason a provider call fails.
+    expect(logger).toMatch(/try\s*\{[\s\S]*logApiCall[\s\S]*\}\s*catch/);
+  });
+});
+
 describe('ElectronCollectorHost', () => {
   it('renews and retries on ANY E*Trade failure, never on an auth-shaped message', () => {
     // A dormant token does not reliably fail as a 401 — it can kill or hang the
