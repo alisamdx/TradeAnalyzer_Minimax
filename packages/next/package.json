@@ -25,7 +25,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@tradeanalyzer/core": "0.1.0",
+    "@tradeanalyzer/core": "*",
     "better-sqlite3": "^12.10.0"
   },
   "build": {

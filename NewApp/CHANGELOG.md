@@ -18,6 +18,19 @@ the question a version stamp exists to answer. The inspector does not run the
 gate — the checks fixed in 0.6.1 execute in the collector host — so this is a
 provenance bump, not a behaviour change.
 
+**Also fixed here (no rebuild needed):** `packages/next` required
+`@tradeanalyzer/core` at `"0.1.0"` while core was 0.6.1. npm links a workspace
+package by name, so every build was correct and the stale range sat there for
+six minor versions — but `npm ls` exited non-zero with
+`invalid: "0.1.0" from packages/next`, and core is private and unpublished, so
+any resolution that took the range literally would look for a registry package
+that does not exist. The range is now `*` (always satisfied by whatever the
+workspace links; a pin would recreate the trap on the next core bump), and
+`package-lock.json` — which still recorded both packages at 0.1.0, the version a
+`npm ci` machine would be told it has — is refreshed.
+`packages/next/test/workspace-versions.test.ts` pins both. The packaged 0.4.1
+exe is unaffected: the bundle comes from the workspace link either way.
+
 ## B10b, day 0 — the collector's Finnhub calls carried no key (2026-09-11)
 
 Existing app **v1.1.223**; `core` unchanged. Every Finnhub call on gen-001's
