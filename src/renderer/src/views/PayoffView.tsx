@@ -508,6 +508,26 @@ function RiskMatrixTable({
   // Set of leg strikes for row highlighting
   const legStrikeSet = useMemo(() => new Set(legStrikes.map(k => k.toFixed(2))), [legStrikes]);
 
+  // Leg breakdown for the selected cell.
+  //
+  // **Above the early return, and it has to be.** This used to sit below the
+  // `strikes.length === 0 || legs.length === 0` guard, so the component called
+  // 11 hooks on an empty render and 12 once legs existed. React matches hook
+  // state POSITIONALLY, so the transition from empty to populated — the normal
+  // path through this screen, since the empty state is what you see before
+  // adding a leg — shifts every hook after the boundary. That is either
+  // "rendered more hooks than during the previous render" or, worse, a hook
+  // silently reading another hook's slot. Its own body already returns null
+  // when there is nothing selected, so calling it unconditionally costs a
+  // comparison and changes no behaviour.
+  const legScenarios = useMemo(() => {
+    if (!selectedCell) return null;
+    const S = strikes[selectedCell.ri];
+    const d = colDates[selectedCell.ci];
+    if (S === undefined || d === undefined) return null;
+    return { S, d, scenarios: computeLegScenarios(legs, S, d) };
+  }, [selectedCell, strikes, colDates, legs]);
+
   if (strikes.length === 0 || legs.length === 0) {
     return <div style={{ color: '#64748b', padding: 24, textAlign: 'center' }}>Add legs and a spot price to generate the risk matrix.</div>;
   }
@@ -518,15 +538,6 @@ function RiskMatrixTable({
     borderBottom: '1px solid #1e293b', background: '#0a0f1a',
     position: 'sticky', top: 0, zIndex: 2,
   };
-
-  // Leg breakdown for selected cell
-  const legScenarios = useMemo(() => {
-    if (!selectedCell) return null;
-    const S = strikes[selectedCell.ri];
-    const d = colDates[selectedCell.ci];
-    if (S === undefined || d === undefined) return null;
-    return { S, d, scenarios: computeLegScenarios(legs, S, d) };
-  }, [selectedCell, strikes, colDates, legs]);
 
   const handleCellClick = (ri: number, ci: number) => {
     setSelectedCell(prev => (prev?.ri === ri && prev?.ci === ci) ? null : { ri, ci });

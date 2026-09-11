@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Risk matrix called a hook after an early return (bug)
+
+`RiskMatrixTable` in `PayoffView.tsx` ran eleven hooks when it had no legs and twelve once legs existed: `legScenarios` (`useMemo`) sat **below** the `strikes.length === 0 || legs.length === 0` early return. React matches hook state positionally, so the empty→populated transition — the normal path through that screen, since the empty state is what you see before adding a leg — shifts every hook after the boundary, giving either "rendered more hooks than during the previous render" or a hook silently reading another hook's slot. Moved above the return; its body already returns null when nothing is selected, so calling it unconditionally changes no behaviour. Found by `react-hooks/rules-of-hooks`, which was invisible while `npm run lint` had 129 errors.
+
 ### Lint: `no-undef` off for TypeScript, and one unused catch binding
 
 - `no-undef` reported `NodeJS.Timeout` as an undefined variable in `index.ts`, `ipc-agent.ts` and `batch-service.ts`. The rule cannot see **type space**, and `globals.node` cannot help because it supplies runtime globals (`process`, `console`), not the ambient `NodeJS` namespace. Disabled for `.ts`/`.tsx` — typescript-eslint's own guidance, and the same reasoning already applied to `no-unused-vars` two lines above it: `tsc` refuses an undefined identifier and checks both spaces. Left on, it was three permanent errors each inviting a worse fix — rewriting a correct type annotation to dodge a linter that should not have been reading it.
