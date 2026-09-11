@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### `npm test` now runs lint first
+
+`pretest` is `npm run lint && npm run rebuild:node`. Lint leads so a failure costs seconds instead of waiting through the native rebuild; the better-sqlite3 ABI swap still runs on every path that reaches the tests. Warnings stay non-blocking (`eslint` exits 0 on them), so the remaining 56 do not stop a test run — making them fatal today would just recreate the always-red suite this session existed to fix. `test:watch` has no pre-hook and is unaffected, deliberately: linting on every watch re-run would be intolerable.
+
+This is the half that makes the cleanup stick. A green lint nobody runs drifts back to noise, and the cost of that was measured tonight — `react-hooks/rules-of-hooks` had been correctly reporting a real bug inside a run of 129 errors, where nobody could see it.
+
 ### Lint backlog: 77 errors → 0
 
 `npm run lint` passes for the first time (56 warnings remain — unused vars and exhaustive-deps). It had been failing unconditionally, which is how a genuine hook-order bug sat inside it unnoticed; a suite that always fails reports nothing.
