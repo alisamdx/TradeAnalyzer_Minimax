@@ -9,6 +9,38 @@ exit (06 §6).
 
 ---
 
+## B10b — short interest was never actually tested (2026-09-11)
+
+`core` 0.6.2, existing app **v1.1.226**. The domain recorded as *"the one §12
+domain with no confirmed free source"* had been asked for at
+`/stocks/vX/short-interest` — the documentation's placeholder, unreplaced.
+Polygon answers that with an 18-byte `404 page not found`, and the failure was
+read as a plan gap. It then propagated: into 02 §12 as settled fact (**naming
+the wrong path in the same sentence**), into the dictionary as a verify note,
+and into the pilot checklist as the last blocker on promotion. The endpoint is
+`/stocks/v1/short-interest`, documented as included in every Polygon Stocks
+plan, with fields matching `raw_short_interest` exactly — parser, dictionary and
+capture rule all unchanged.
+
+**The shape worth keeping: a wrong URL and an unentitled URL return the same
+status.** A 404 is evidence about a *path* before it is evidence about a *plan*,
+and the cheap check — read the path — was never done, because a plausible
+explanation was already available (Finnhub's genuine 403 the same week). Every
+downstream signal agreed with the wrong conclusion: a non-2xx in `meta_response`,
+a `failed` phase, QC-904 reporting `9999` days since settlement. None of them
+could distinguish the two causes, and the spec recorded the conclusion rather
+than the observation.
+
+**The verify note stays** until a live 200 returns rows. A document is not a
+response, and mistaking one for the other is precisely the error being
+corrected. `packages/core/test/provider-paths.test.ts` now fails any collector
+path carrying an unreplaced `vX` / `vN` / `v{…}`, with a fixture proving the scan
+is not vacuous.
+
+## `next` 0.4.2 — rebuilt on `core` 0.6.2 (2026-09-11)
+
+Same provenance-only bump as 0.4.1 below, for `core` 0.6.2.
+
 ## `next` 0.4.1 — rebuilt on `core` 0.6.1 (2026-09-11)
 
 No change in `next` itself. The version moves because the build bundles a

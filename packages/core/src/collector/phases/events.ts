@@ -472,7 +472,12 @@ export async function runShortInterest(
   const tickers = subsetMembers(db);
   if (tickers.length === 0) return skipped('chain subset is empty');
 
-  const path = '/stocks/vX/short-interest';
+  // `/stocks/v1/...`, not `vX`. The placeholder shipped unreplaced and Polygon
+  // answers it with an 18-byte "404 page not found" — which was then read as
+  // "short interest is not on our plan" and written into the spec as the one
+  // §12 domain with no confirmed free source. Polygon documents this endpoint as
+  // included in every Stocks plan, with fields matching this table exactly.
+  const path = '/stocks/v1/short-interest';
   let stored = 0;
   let calls = 0;
   let failed = 0;

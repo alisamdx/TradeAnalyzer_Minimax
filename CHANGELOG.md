@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.226] - 2026-09-11
+
+### Short interest: the source was never actually tested — the path had a placeholder in it
+
+`@tradeanalyzer/core` 0.6.2.
+
+- The collector asked Polygon for `/stocks/**vX**/short-interest`. That path does not exist, so Polygon returned an 18-byte `404 page not found` — and the failure was recorded as evidence that **short interest is not available on our plan**. From there it became "the one §12 domain with no confirmed free source" in the spec, a verify note in the dictionary, and the last blocker on pilot promotion. Polygon documents the endpoint as `/stocks/v1/short-interest`, **included in every Stocks plan** (Basic through Business), refreshed every two weeks, returning `ticker`, `settlement_date`, `short_interest`, `avg_daily_volume` and `days_to_cover` — which is exactly what `raw_short_interest` declares and what `ingestShortInterest` already parses. Only the path changes.
+- **The verify note stays until a live 200 with rows proves it.** Documentation is not evidence, and that mistake is what put the note there in the first place. Monday's run answers it; the dictionary is unchanged at v13.
+- New scan (`packages/core/test/provider-paths.test.ts`): no collector provider path may contain an unreplaced `vX` / `vN` / `v{…}` placeholder, with a fixture proving the scan can fire. **A wrong URL and an unentitled URL return the same status**, so a 404 says nothing about a plan until the path is known to be right.
+
 ## [1.1.225] - 2026-09-11
 
 ### A scheduled job waiting for the batch mutex no longer warns every 5 minutes
