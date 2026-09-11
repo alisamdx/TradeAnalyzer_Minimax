@@ -268,6 +268,23 @@ export class BatchService {
     slotTime?: string,
   ): Promise<void> {
     if (this.runningJobId !== null) {
+      // A SCHEDULED trigger finding the mutex held is normal and self-correcting:
+      // `checkSchedule` retries every 5 minutes, and the job is usually also a
+      // member of the chain currently holding the lock (`getSubJobs` returns every
+      // enabled job), so it runs either way. Notifying per tick turned a routine
+      // wait into ~30 identical warnings across one evening — on 2026-09-10 the
+      // 17:05 collector waited behind the orchestrator until 19:33. An alarm that
+      // repeats while nothing is wrong is the shape that got 70 gate emails
+      // ignored; it belongs in the log, not in front of the operator.
+      //
+      // Manual and startup triggers still notify: there somebody is waiting for
+      // the job, and silence would be the bug.
+      if (trigger === 'schedule') {
+        console.log(
+          `[batch] "${jobId}" deferred — "${this.runningJobId}" holds the mutex; retrying on the next tick`
+        );
+        return;
+      }
       this.onNotification({
         id: `batch-busy-${Date.now()}`,
         type: 'warning',

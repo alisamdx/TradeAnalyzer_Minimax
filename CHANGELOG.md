@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.225] - 2026-09-11
+
+### A scheduled job waiting for the batch mutex no longer warns every 5 minutes
+
+- `checkSchedule` runs every 5 minutes, so a job that is due while the orchestrator chain holds the one-job-at-a-time mutex was refused — and **notified** — on every tick. The 17:05 `data-collector` waiting behind the after-close chain produced ~30 identical "batch-orchestrator is already running" warnings on 2026-09-10 before it started at 19:33.
+- Nothing was wrong in any of them: the refusal is self-correcting (the next tick retries), and `data-collector` is *also* a member of the chain holding the lock — `getSubJobs` returns every enabled job — so it runs there regardless. A scheduled trigger now logs the deferral instead.
+- **Manual and startup triggers still notify.** There a person is waiting on the job and silence would be the bug.
+- Unchanged: the refusal still writes no `batch_runs` row, and both collector triggers stay in place (the standalone 17:05 covers a day the chain never runs; the 19:30 watchdog catches a swallowed day).
+
 ## [1.1.224] - 2026-09-11
 
 ### One Finnhub limiter, shared by both consumers
