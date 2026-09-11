@@ -361,6 +361,12 @@ app.whenReady().then(() => {
     return Number.isFinite(parsed) && parsed > 0 ? parsed : 500;
   })();
   const rateLimiter = new TokenBucketRateLimiter({ requestsPerMinute: storedRpm });
+  // Finnhub's free tier allows ~60 calls/minute **per key**, and this app has two
+  // consumers of the one key: `EarningsRefreshJob` and the NewApp collector's
+  // earnings sweep and weekly recommendations. One instance, shared, or they are
+  // two budgets spending one allowance. 55 leaves margin; the small burst keeps a
+  // sweep from firing a minute's worth of calls in a second.
+  const finnhubLimiter = new TokenBucketRateLimiter({ requestsPerMinute: 55, burstSize: 5 });
   const jobQueue = new JobQueue(db);
   const analysisService = new AnalysisService(db, dataProvider, rateLimiter, jobQueue, optionsProvider);
   const validateAllService = new ValidateAllService(db, dataProvider, rateLimiter, jobQueue, optionsProvider);
@@ -622,7 +628,7 @@ app.whenReady().then(() => {
   // (income/wheel/bearish) reads earnings_calendar, so the calendar must be
   // refreshed earlier in the chain or every brief scores against stale dates.
   // Migration 067 applies the same ordering to existing installs.
-  const earningsRefreshJob = new EarningsRefreshJob(db, earningsService, getEtradeCreds);
+  const earningsRefreshJob = new EarningsRefreshJob(db, earningsService, getEtradeCreds, finnhubLimiter);
   batchService.registerJob('earnings-refresh', earningsRefreshJob, {
     runOnStartup: true,
     startupDelaySeconds: 60,          // after E*Trade tokens load from keychain
@@ -805,6 +811,7 @@ app.whenReady().then(() => {
       rateLimiter,
       getPolygonApiKey: () => getApiKey(db),
       getFinnhubApiKey: () => { try { return secureGet(db, 'finnhubApiKey'); } catch { return ''; } },
+      finnhubLimiter,
       getEtradeCredentials: () => getEtradeCreds(),
       sendEmail: async (msg) => { await emailService.send(msg.subject, msg.html); },
     });

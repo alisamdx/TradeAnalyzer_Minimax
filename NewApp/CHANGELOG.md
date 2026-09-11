@@ -26,8 +26,12 @@ witness but the archive. It logs now. **A transport that is not instrumented is
 a provider that fails silently, however well the others are covered** — the
 existing app learned that for E*Trade twice.
 
-Open: `httpGet` has no rate limiter, and the weekly recommendations sweep will
-hit Finnhub's per-minute limit once the chain subset fills.
+**Paced as of v1.1.224**: Finnhub calls go through ONE limiter (55/min, burst 5)
+shared with the host app's `EarningsRefreshJob`, because Finnhub limits per key
+and two buckets would be two budgets spending one allowance — the same reason
+the collector shares this app's Polygon limiter. It matters from early October,
+when the chain subset fills and the weekly recommendations sweep becomes a few
+hundred calls instead of one.
 
 ## B10b, day 0 — four checks that could never pass (2026-09-11)
 

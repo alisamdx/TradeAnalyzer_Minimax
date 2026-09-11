@@ -102,6 +102,14 @@ export interface ElectronCollectorHostOptions {
    * earnings stored 0 and recommendations 0 on gen-001's first full run.
    */
   readonly getFinnhubApiKey: () => string;
+  /**
+   * **The application's single Finnhub limiter — the instance, not a copy**, for
+   * the same reason as Polygon's: Finnhub rate-limits per key (~60/min free) and
+   * this app has two consumers of that one key, this collector and
+   * `EarningsRefreshJob`. Two buckets would be two budgets spending one
+   * allowance, which is only invisible while one of them is idle.
+   */
+  readonly finnhubLimiter: TokenBucketRateLimiter;
   readonly getEtradeCredentials: () => OAuthCredentials | null;
   readonly sendEmail: (msg: { subject: string; text: string; html: string }) => Promise<void>;
 }
@@ -457,6 +465,9 @@ export class ElectronCollectorHost implements CollectorHost {
         return { status: null, body: '', requestedAt, respondedAt: null, error };
       }
       auth['X-Finnhub-Token'] = key;
+      // Acquired BEFORE the clock starts, as in `polygonGet`: `responseLatencyMs`
+      // must measure Finnhub, not how long we queued for a token.
+      await this.opts.finnhubLimiter.acquire(1);
     }
 
     const started = Date.now();

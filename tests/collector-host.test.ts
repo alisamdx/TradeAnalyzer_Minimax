@@ -71,6 +71,18 @@ describe('ElectronCollectorHost — Finnhub and the generic transport (v1.1.223)
     expect(httpBlock).toMatch(/Finnhub API key is not configured/);
   });
 
+  it('paces Finnhub through the application\'s ONE limiter, shared with the earnings job', () => {
+    // Finnhub limits per KEY (~60/min free), and this app has two consumers of
+    // the one key. Two buckets would be two budgets spending one allowance —
+    // the same reasoning that put the collector inside this app for Polygon.
+    expect(httpBlock).toMatch(/await this\.opts\.finnhubLimiter\.acquire\(/);
+    const created = index.match(/new TokenBucketRateLimiter\(\{ requestsPerMinute: 55/g) ?? [];
+    expect(created).toHaveLength(1);
+    const wiring = index.slice(index.indexOf('new ElectronCollectorHost('));
+    expect(wiring).toContain('finnhubLimiter,');
+    expect(index).toMatch(/new EarningsRefreshJob\([^)]*finnhubLimiter\)/);
+  });
+
   it('logs every generic call to logs/api, with an error-body preview on failure', () => {
     expect(httpBlock).toContain('logHttp(');
     const logger = host.slice(host.indexOf('function logHttp('));

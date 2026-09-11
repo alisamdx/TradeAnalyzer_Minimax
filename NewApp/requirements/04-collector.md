@@ -24,8 +24,9 @@ interface CollectorHost {
   httpGet(url: string, headers?: Record<string,string>): Promise<ProviderResponse>;   // EDGAR, Treasury, Finnhub, FOMC/BLS
   // As built (v1.1.223): the HOST authenticates — core's URLs never carry a key. Finnhub's key
   // goes in the X-Finnhub-Token header (never the query string); no key configured → refused,
-  // not sent. Every call is logged to logs/api/ (error-body preview on failure only). No rate
-  // limiter yet — Finnhub's per-minute cap will matter once the chain subset fills.
+  // not sent. Every call is logged to logs/api/ (error-body preview on failure only). Finnhub is
+  // paced by the host app's ONE shared Finnhub limiter (55/min) — per KEY, so the existing app's
+  // EarningsRefreshJob and this collector spend one allowance, as with Polygon (v1.1.224).
 
   // environment
   nowET(): string;                              // ISO with offset

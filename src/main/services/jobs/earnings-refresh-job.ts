@@ -24,6 +24,7 @@ import type { EarningsService } from '../earnings-service.js';
 import type { OAuthCredentials } from '../etrade-auth.js';
 import type { DbHandle } from '../../db/connection.js';
 import { secureGet } from '../secure-settings.js';
+import type { TokenBucketRateLimiter } from '../rate-limiter.js';
 
 const JOB_ID = 'earnings-refresh';
 const DEFAULT_CALL_DELAY_MS = 500; // conservative default — avoids E*Trade 429s
@@ -82,6 +83,14 @@ export class EarningsRefreshJob implements BatchJobHandler {
     private readonly db: DbHandle,
     private readonly earningsService: EarningsService,
     private readonly getCreds: () => OAuthCredentials | null,
+    /**
+     * The application's shared Finnhub limiter — the same instance the NewApp
+     * collector uses, because Finnhub limits per KEY and this job is only one of
+     * its two consumers (v1.1.224). Optional so a test can construct the job
+     * without one; without it the fixed `BULK_CALL_DELAY_MS` sleep paces the
+     * sweep as it always did.
+     */
+    private readonly finnhubLimiter?: TokenBucketRateLimiter,
   ) {}
 
   async run(
@@ -137,6 +146,7 @@ export class EarningsRefreshJob implements BatchJobHandler {
         collected,
         state,
         signal,
+        this.finnhubLimiter,
       );
       finnhubErrors = state.errors;
 
@@ -234,6 +244,7 @@ export class EarningsRefreshJob implements BatchJobHandler {
         const fromDate = new Date().toISOString().slice(0, 10);
         const toDate   = new Date(Date.now() + 365 * 86_400_000).toISOString().slice(0, 10);
         const url = `https://finnhub.io/api/v1/calendar/earnings?symbol=${ticker}&from=${fromDate}&to=${toDate}&token=${finnhubKey}`;
+        await this.finnhubLimiter?.acquire(1);
         const resp = await fetch(url);
         if (resp.ok) {
           const json = await resp.json() as { earningsCalendar?: FinnhubEntry[] };
@@ -302,6 +313,7 @@ async function sweepBulkWindow(
   out: FinnhubEntry[],
   state: { calls: number; errors: number },
   signal: AbortSignal,
+  limiter?: TokenBucketRateLimiter,
 ): Promise<boolean> {
   if (signal.aborted) return false;
   if (state.calls >= MAX_BULK_CALLS) return false;   // runaway guard
@@ -310,6 +322,7 @@ async function sweepBulkWindow(
   let entries: FinnhubEntry[];
   try {
     const url = `https://finnhub.io/api/v1/calendar/earnings?from=${from}&to=${to}&token=${apiKey}`;
+    await limiter?.acquire(1);
     const resp = await fetch(url);
     if (!resp.ok) { state.errors++; return false; }
     const json = await resp.json() as { earningsCalendar?: FinnhubEntry[] };
@@ -318,7 +331,9 @@ async function sweepBulkWindow(
     state.errors++;
     return false;
   }
-  if (!signal.aborted) await sleep(BULK_CALL_DELAY_MS);
+  // The limiter is the budget when there is one; the fixed sleep is what paced
+  // this sweep before there was, and pacing twice would just make it slower.
+  if (!signal.aborted && !limiter) await sleep(BULK_CALL_DELAY_MS);
 
   if (entries.length < FINNHUB_BULK_CAP) {
     out.push(...entries);
@@ -334,8 +349,8 @@ async function sweepBulkWindow(
     return false;
   }
   const mid = addDays(from, Math.floor(span / 2));
-  const left  = await sweepBulkWindow(from, mid, apiKey, out, state, signal);
-  const right = await sweepBulkWindow(addDays(mid, 1), to, apiKey, out, state, signal);
+  const left  = await sweepBulkWindow(from, mid, apiKey, out, state, signal, limiter);
+  const right = await sweepBulkWindow(addDays(mid, 1), to, apiKey, out, state, signal, limiter);
   return left && right;
 }
 

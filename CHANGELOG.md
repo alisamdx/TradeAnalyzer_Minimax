@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.224] - 2026-09-11
+
+### One Finnhub limiter, shared by both consumers
+
+- Finnhub rate-limits **per key** (~60 calls/min on the free tier), and this app has two consumers of the one key: `EarningsRefreshJob` and the NewApp collector (earnings sweep, weekly recommendations). They now share a single `TokenBucketRateLimiter` (55/min, burst 5) — the same instance, for the same reason the collector shares this app's Polygon limiter. Two buckets would be two budgets spending one allowance, and that stays invisible until both run at once.
+- `httpGet` acquires before the request and before the latency clock starts, so `responseLatencyMs` measures Finnhub rather than time spent queued.
+- The bulk sweep's fixed 1,100 ms sleep now applies only when no limiter is supplied (a test constructing the job directly). Pacing twice would just make the sweep slower.
+- Only Finnhub calls are paced; EDGAR, Treasury and FOMC/BLS are unchanged.
+
 ## [1.1.223] - 2026-09-11
 
 ### The collector's Finnhub calls now carry the API key
