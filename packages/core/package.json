@@ -40,7 +40,7 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "pretest": "npm run rebuild:node --prefix ../.."
+    "pretest": "npm run lint && npm run rebuild:node --prefix ../.."
   },
   "peerDependencies": {
     "better-sqlite3": "^12.10.0"

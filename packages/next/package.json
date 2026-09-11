@@ -20,7 +20,7 @@
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json",
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "lint": "eslint .",
-    "pretest": "npm run rebuild:node --prefix ../..",
+    "pretest": "npm run lint && npm run rebuild:node --prefix ../..",
     "test": "vitest run",
     "test:watch": "vitest"
   },

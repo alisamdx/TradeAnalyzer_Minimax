@@ -2,9 +2,11 @@
 
 ## Unreleased
 
-### `npm test` now runs lint first
+### `npm test` now runs lint first — in all three packages
 
-`pretest` is `npm run lint && npm run rebuild:node`. Lint leads so a failure costs seconds instead of waiting through the native rebuild; the better-sqlite3 ABI swap still runs on every path that reaches the tests. Warnings stay non-blocking (`eslint` exits 0 on them), so the remaining 56 do not stop a test run — making them fatal today would just recreate the always-red suite this session existed to fix. `test:watch` has no pre-hook and is unaffected, deliberately: linting on every watch re-run would be intolerable.
+`pretest` is `npm run lint && npm run rebuild:node` in the root, `@tradeanalyzer/core` and `@tradeanalyzer/next` (the workspaces delegate the rebuild to the root as they always did). Lint leads so a failure costs seconds instead of waiting through the native rebuild; the better-sqlite3 ABI swap still runs on every path that reaches the tests.
+
+Both workspace suites were checked clean **before** being gated — `core` exits 0 with two pre-existing warnings, `next` exits 0 with none — because wiring a gate onto an unverified suite is how you hand someone a red build in the morning. Warnings stay non-blocking (`eslint` exits 0 on them), so the remaining 56 do not stop a test run — making them fatal today would just recreate the always-red suite this session existed to fix. `test:watch` has no pre-hook and is unaffected, deliberately: linting on every watch re-run would be intolerable.
 
 This is the half that makes the cleanup stick. A green lint nobody runs drifts back to noise, and the cost of that was measured tonight — `react-hooks/rules-of-hooks` had been correctly reporting a real bug inside a run of 129 errors, where nobody could see it.
 
