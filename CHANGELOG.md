@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## [1.1.228] - 2026-09-11
 
 ### Risk matrix called a hook after an early return (bug)
 
