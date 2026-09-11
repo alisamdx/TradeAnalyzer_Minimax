@@ -168,7 +168,7 @@ export class AlertsService {
       input.daysBeforeExpiration ?? null,
       input.deltaThreshold ?? null,
       input.deltaDirection ?? null,
-      input.hasOwnProperty('playSound') ? (input.playSound ? 1 : 0) : null,
+      Object.prototype.hasOwnProperty.call(input, 'playSound') ? (input.playSound ? 1 : 0) : null,
       id
     );
 

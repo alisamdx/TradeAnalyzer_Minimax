@@ -639,7 +639,7 @@ export function BatchView() {
           background: '#2a1a00', border: '1px solid #e67e22', borderRadius: 8,
           padding: '10px 16px', marginBottom: 20, color: '#e67e22', fontSize: 13,
         }}>
-          Batch jobs are disabled for this session. Startup and scheduled jobs will not run until re-enabled. Manual "Run Now" still works.
+          Batch jobs are disabled for this session. Startup and scheduled jobs will not run until re-enabled. Manual &quot;Run Now&quot; still works.
         </div>
       )}
 

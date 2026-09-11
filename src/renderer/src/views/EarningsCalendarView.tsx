@@ -256,7 +256,7 @@ function ListView({ entries, filter, onFilterChange, onTickerClick, onDelete, on
       {sortedDates.length === 0 ? (
         <div className="empty-state">
           <p>No upcoming earnings found.</p>
-          <p className="meta">Click "⟳ Refresh" to fetch earnings dates for all portfolio, watchlist, and conviction tickers.</p>
+          <p className="meta">Click &quot;⟳ Refresh&quot; to fetch earnings dates for all portfolio, watchlist, and conviction tickers.</p>
           <button onClick={onRefresh} disabled={refreshing}>
             {refreshing ? 'Refreshing…' : 'Refresh Now'}
           </button>

@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Lint backlog: 77 errors → 25
+
+All remaining errors are `@typescript-eslint/no-explicit-any` (11 `backtest-engine.ts`, 10 `preload/index.ts`, 4 `VolumeProfile.ts`), deliberately deferred to their own pass — in a backtest engine an `any` usually hides a real question about a value's shape, and guessing a type to quiet a linter encodes an assumption as if it had been checked.
+
+Two of the fixes were defects rather than noise:
+
+- **`leaps-csp-service.ts` had `void dte;` after a `return`** — added to silence an unused-parameter complaint, placed where it could never execute. The parameter is now `_dte`, matching the `_currentPrice` convention two lines below it.
+- **`fr-expiry-liquidity-study.mjs` had an abandoned scaffold**: a `bySlug` object and a loop whose body was a comment. Removed; the re-walk below it already does the work.
+
+The rest: four discarded ternaries (`s.has(x) ? s.delete(x) : s.add(x)` as a statement) made explicit `if/else`; `hasOwnProperty` called through `Object.prototype`; six `\-` escapes dropped from character classes where `-` was already literal (including the ticker guard on four API routes — the match is unchanged); 14 quotes and apostrophes in display copy escaped as entities; 13 deliberate `catch {}` blocks in one-off scripts given a stated reason; dead consts deleted.
+
+**Three sample-accounting counters were written but never read** (`skip`, `usable`, and a redundant `both`). Two now print — a study that cannot price N of its candidates is reporting on a subset, and saying so is what makes the subset visible — and the third was a duplicate of a figure already reported after de-duplication, so it went.
+
 ## [1.1.228] - 2026-09-11
 
 ### Risk matrix called a hook after an early return (bug)

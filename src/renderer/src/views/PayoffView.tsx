@@ -3374,7 +3374,7 @@ export function PayoffView({ initialTicker, initialSpot, initialExpiry, initialS
                       </div>
                       {validation.suggestion.sameAsCurrent && (
                         <div style={{ fontSize: 10, color: '#94a3b8', marginBottom: 3, fontStyle: 'italic' }}>
-                          The lab has no higher-graded structure than the one you're evaluating — shown for context.
+                          The lab has no higher-graded structure than the one you&apos;re evaluating — shown for context.
                         </div>
                       )}
                       <div style={{ fontSize: 11, color: '#cbd5e1' }}>{validation.suggestion.name} (grade {validation.suggestion.grade})</div>
@@ -3640,7 +3640,7 @@ export function PayoffView({ initialTicker, initialSpot, initialExpiry, initialS
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, color: '#475569', fontSize: 12, padding: 16, textAlign: 'center' }}>
               <span>No contracts returned for this expiry.</span>
               <span style={{ fontSize: 11, color: '#334155' }}>
-                Try a different expiry, or click "Show all strikes" to remove the ATM filter.
+                Try a different expiry, or click &quot;Show all strikes&quot; to remove the ATM filter.
               </span>
             </div>
           ) : (

@@ -10,7 +10,7 @@ if (!SYMBOL || !EXPIRY || !SSTRIKE || !LSTRIKE) { console.error('usage: SYMBOL E
 const shortStrike = Number(SSTRIKE), longStrike = Number(LSTRIKE);
 const ib = new IBApi({ host: '127.0.0.1', port: PORT, clientId: 0 });
 const log = (...a) => console.log(...a);
-const finish = (c) => { try { ib.disconnect(); } catch {} process.exit(c); };
+const finish = (c) => { try { ib.disconnect(); } catch { /* already down; the exit code is the result */ } process.exit(c); };
 const watchdog = setTimeout(() => { console.error('✗ overall timeout — check TWS, may have left an order/position'); finish(1); }, 60000);
 watchdog.unref?.();
 const benign = new Set([2104, 2106, 2107, 2108, 2158, 2119, 2100, 1102, 399, 2109]);
@@ -95,7 +95,7 @@ function awaitFill(id, next) {
 
 function cleanupAndExit() {
   log('  attempting global cancel of any working orders…');
-  try { ib.reqGlobalCancel(); } catch {}
+  try { ib.reqGlobalCancel(); } catch { /* best effort: nothing may be working to cancel */ }
   setTimeout(()=>{ checkFlat(()=>finish(1)); }, 2000);
 }
 function checkFlat(done) {

@@ -5,7 +5,7 @@ const db = new Database('C:/Users/shaky/AppData/Roaming/trade-analyzer/trade-ana
 const latestGen = db.prepare('SELECT MAX(generated_at) g FROM daily_briefs').get().g;
 const rows = db.prepare(`SELECT strategy, picks FROM daily_briefs WHERE date(generated_at) = date(?)`).all(latestGen);
 const byStrat = {};
-for (const r of rows) { try { byStrat[r.strategy] = JSON.parse(r.picks); } catch {} }
+for (const r of rows) { try { byStrat[r.strategy] = JSON.parse(r.picks); } catch { /* a strategy with unparseable picks is simply absent from the dump */ } }
 
 function summarize(p, strat) {
   const lab = p.strategyLabResult ?? {};

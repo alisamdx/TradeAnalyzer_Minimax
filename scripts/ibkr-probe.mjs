@@ -7,7 +7,7 @@ const PORT = Number(process.argv[2] ?? 7497); // 7497 = TWS paper
 const ib = new IBApi({ host: '127.0.0.1', port: PORT, clientId: 0 });
 
 let connected = false;
-const done = (code) => { try { ib.disconnect(); } catch {} process.exit(code); };
+const done = (code) => { try { ib.disconnect(); } catch { /* already down; the exit code is the result */ } process.exit(code); };
 const overall = setTimeout(() => { console.error('✗ probe did not complete within 15s'); done(1); }, 15000);
 overall.unref?.();
 

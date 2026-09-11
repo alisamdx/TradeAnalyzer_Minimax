@@ -8,7 +8,7 @@ export function registerValidationRoutes(app: FastifyInstance, svc: ApiServerSer
     '/validate/:ticker',
     async (req, reply) => {
       const ticker = req.params.ticker.toUpperCase();
-      if (!/^[A-Z][A-Z0-9.\-]{0,9}$/.test(ticker)) {
+      if (!/^[A-Z][A-Z0-9.-]{0,9}$/.test(ticker)) {
         return apiError(reply, 'Invalid ticker symbol', 'VALIDATION_ERROR');
       }
 

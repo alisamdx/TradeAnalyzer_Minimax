@@ -307,7 +307,7 @@ export function PortfolioView() {
   const [analyzingAll, setAnalyzingAll]   = useState(false);
   const [expanded, setExpanded]           = useState<Set<number>>(new Set());
   const toggleExpand = (id: number) =>
-    setExpanded(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
+    setExpanded(prev => { const s = new Set(prev); if (s.has(id)) s.delete(id); else s.add(id); return s; });
 
   // Advisor state
   const [advisorBusy, setAdvisorBusy]           = useState(false);
@@ -1578,7 +1578,7 @@ export function PortfolioView() {
 
           {!displaySession && (
             <div style={{ color: '#6b7280', textAlign: 'center', padding: 40 }}>
-              No advisor sessions yet. Click "Run AI Portfolio Advisor" above.
+              No advisor sessions yet. Click &quot;Run AI Portfolio Advisor&quot; above.
             </div>
           )}
         </div>

@@ -63,7 +63,9 @@ const settle = (legs, px) => legs.reduce((pnl, l) => {
 const rows = db.prepare(`SELECT picks, generated_at FROM daily_briefs WHERE strategy='bullish' ORDER BY generated_at`).all();
 const seen = new Set();
 const agg = { liz: [], spv: [] };
-let both = 0, pending = 0, settled = 0;
+// No `both` counter: line ~113 already reports the same quantity as `seen.size`,
+// post-de-duplication. Two near-identical totals in one report is worse than one.
+let pending = 0, settled = 0;
 const contaminated = [];
 
 for (const row of rows) {
@@ -74,7 +76,6 @@ for (const row of rows) {
     const liz = scores.find((s) => s.slug === 'big-lizard');
     const spv = scores.find((s) => s.slug === 'short-put-vertical');
     if (!avail(liz) || !avail(spv)) continue;
-    both++;
     const exp = liz.setup.expiration;
     const key = `${p.ticker}|${exp}|${liz.setup.legs[0]?.strike}`; // de-dupe re-runs of same pick
     if (seen.has(key)) continue;

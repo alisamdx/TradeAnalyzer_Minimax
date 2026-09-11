@@ -843,7 +843,11 @@ export class LeapsCspService {
 
   private scoreLeapsLeg(
     contract: OptionContract,
-    dte: number,
+    // Unused: the DTE band is enforced upstream by the expiry filter, so it is
+    // not scored again here. Underscore-prefixed per the convention already used
+    // by `_currentPrice` below — this used to be a `void dte;` statement placed
+    // AFTER the return, where it could never run.
+    _dte: number,
     extrinsicPct: number,
     ivData: IvData,
     f: FundamentalsRow | undefined,
@@ -923,7 +927,6 @@ export class LeapsCspService {
     }));
 
     return { score, breakdown };
-    void dte;
   }
 
   // ── Caution flags ───────────────────────────────────────────────────────────

@@ -57,7 +57,11 @@ function agg(label,rs){if(!rs.length){console.log(`${label.padEnd(26)} n=0`);ret
 const picks=db.prepare(`SELECT ro.ticker t, rb.as_of_date asOf, ro.composite_score comp FROM replay_outcomes ro JOIN replay_briefs rb ON rb.id=ro.replay_brief_id WHERE rb.strategy='income'`).all();
 const rs=[],base=[];let skip=0;
 for(const p of picks){const r=simCondor(p.t,p.asOf);if(r){r.comp=p.comp;rs.push(r);}else skip++;const b=simCondor(p.t,addDays(p.asOf,-180));if(b)base.push(b);}
-console.log(`\nFR-SEY-5: income as a budget-sized iron condor (budget=$${BUDGET}/wing, 0.16Δ shorts, 30 DTE, 50% PT / 2x stop)\n`);
+// The skipped count is part of the result, not bookkeeping: a study that cannot
+// price N of its candidates is reporting on a subset, and saying so is what
+// makes the subset visible.
+console.log(`\nFR-SEY-5: income as a budget-sized iron condor (budget=$${BUDGET}/wing, 0.16Δ shorts, 30 DTE, 50% PT / 2x stop)`);
+console.log(`Candidates: ${picks.length}; simulated ${rs.length}, unpriceable ${skip}\n`);
 agg('income — ALL picks',rs);
 agg('income — composite >=50 (ships)',rs.filter(r=>r.comp>=50));
 agg('income — composite <50 (gated out)',rs.filter(r=>r.comp<50));

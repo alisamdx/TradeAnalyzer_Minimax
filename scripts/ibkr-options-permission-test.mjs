@@ -15,7 +15,7 @@ let nextId = -1;
 let testOrderId = null;
 let verdict = null;
 
-const finish = (code) => { try { ib.disconnect(); } catch {} process.exit(code); };
+const finish = (code) => { try { ib.disconnect(); } catch { /* already down; the exit code is the result */ } process.exit(code); };
 const watchdog = setTimeout(() => { console.error('✗ timed out (20s) with no verdict'); finish(1); }, 20000);
 watchdog.unref?.();
 
@@ -154,7 +154,7 @@ function qualifyNext() {
 
 function report() {
   clearTimeout(watchdog);
-  if (testOrderId != null) { try { ib.cancelOrder(testOrderId, ''); } catch {} }
+  if (testOrderId != null) { try { ib.cancelOrder(testOrderId, ''); } catch { /* best effort: the order may already be cancelled or rejected */ } }
   log('\n──────── VERDICT ────────');
   if (verdict === 'HAS_PERMISSION') {
     log('✅ Paper account HAS options permission — the order was accepted (now cancelled).');

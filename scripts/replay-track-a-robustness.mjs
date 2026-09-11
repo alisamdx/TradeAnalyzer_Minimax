@@ -8,7 +8,6 @@ const db = new Database('C:/Users/shaky/AppData/Roaming/trade-analyzer/trade-ana
 // ── helpers ───────────────────────────────────────────────────────────────────
 const avg = (a) => a.length ? a.reduce((s,v)=>s+v,0)/a.length : null;
 const med = (a) => { if(!a.length) return null; const s=[...a].sort((x,y)=>x-y); const m=Math.floor(s.length/2); return s.length%2?s[m]:(s[m-1]+s[m])/2; };
-const std = (a) => { if(a.length<2) return null; const m=avg(a); return Math.sqrt(a.reduce((s,v)=>s+(v-m)**2,0)/(a.length-1)); };
 const pctile = (a,p) => { if(!a.length) return null; const s=[...a].sort((x,y)=>x-y); const i=(s.length-1)*p; const lo=Math.floor(i),hi=Math.ceil(i); return s[lo]+(s[hi]-s[lo])*(i-lo); };
 const fmt = (v) => v===null ? '   — ' : (v>=0?'+':'')+v.toFixed(1);
 const fmtp= (v) => v===null ? '  — ' : (v*100).toFixed(0)+'%';

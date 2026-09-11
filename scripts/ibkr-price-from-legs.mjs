@@ -8,7 +8,7 @@ const PORT = Number(process.argv[2] ?? 7497);
 const SYMBOL = 'AAPL';
 const ib = new IBApi({ host: '127.0.0.1', port: PORT, clientId: 0 });
 const log = (...a) => console.log(...a);
-const finish = (c) => { try { ib.disconnect(); } catch {} process.exit(c); };
+const finish = (c) => { try { ib.disconnect(); } catch { /* already down; the exit code is the result */ } process.exit(c); };
 setTimeout(() => { console.error('✗ timeout'); finish(1); }, 35000).unref?.();
 const benign = new Set([2104, 2106, 2107, 2108, 2158, 2119, 2100, 1102]);
 const ymd = (s) => new Date(`${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}T00:00:00Z`);

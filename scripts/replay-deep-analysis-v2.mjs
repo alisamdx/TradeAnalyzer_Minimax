@@ -1,11 +1,9 @@
 import Database from 'better-sqlite3';
 const db = new Database('C:/Users/shaky/AppData/Roaming/trade-analyzer/trade-analyzer.sqlite');
 
-const pct = (n, total) => total > 0 ? (n / total * 100).toFixed(1) + '%' : '—';
 const avg = (arr) => arr.length ? arr.reduce((s,v) => s+v, 0) / arr.length : null;
 const med = (arr) => { if (!arr.length) return null; const s = [...arr].sort((a,b)=>a-b); const m = Math.floor(s.length/2); return s.length%2 ? s[m] : (s[m-1]+s[m])/2; };
 const fmt = (v) => v === null ? '  —  ' : (v >= 0 ? '+' : '') + v.toFixed(1) + '%';
-const fmtN = (v) => v === null ? '—' : v.toFixed(1) + '%';
 const W = 70;
 const line  = () => console.log('='.repeat(W));
 const dline = () => console.log('-'.repeat(W));
@@ -47,7 +45,7 @@ for (const rb of db.prepare('SELECT as_of_date, strategy, picks FROM replay_brie
       const cv = typeof p.criticVerdict === 'object' && p.criticVerdict !== null ? p.criticVerdict : {};
       criticMap.set(rb.as_of_date + '|' + rb.strategy + '|' + p.ticker, cv.verdict ?? null);
     }
-  } catch {}
+  } catch { /* a brief with unparseable picks contributes no critic verdicts */ }
 }
 
 const strategies = ['buy', 'bullish', 'income', 'wheel', 'bearish'];
@@ -405,7 +403,7 @@ for (const rb of db.prepare('SELECT strategy, picks FROM replay_briefs').all()) 
         if (v?.missing) sigMissing[k] = (sigMissing[k] ?? 0) + 1;
       }
     }
-  } catch {}
+  } catch { /* a brief with unparseable picks contributes no signal counts */ }
 }
 // Top missing per strategy
 for (const s of strategies) {

@@ -157,6 +157,9 @@ for (const [date, payload] of perDate) {
   }
   if (kept.length) byDate.set(date, kept);
 }
+// Reported rather than discarded: how many ticker-days survived the signal
+// filters is the denominator every figure below is computed against.
+console.log(`Usable ticker-days: ${usable}`);
 
 const all = [...byDate.values()].flat();
 console.log(`\nT6 — do the composite's PRICE-DERIVED signals help or hurt as ranking inputs?`);

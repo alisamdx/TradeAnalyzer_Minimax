@@ -366,7 +366,7 @@ function SummaryTab({
               <div className="retro-section-title retro-section-title-sm">Brief Accuracy Trend</div>
               <p className="retro-snapshot-desc retro-snapshot-desc-sm">
                 Each row is one brief. A brief only appears once its picks have at least one trading-day close in the price history —
-                so the most recent brief is often absent until the next day's prices load.
+                so the most recent brief is often absent until the next day&apos;s prices load.
                 Use this to see whether accuracy is improving as you tune signal weights.
               </p>
               <table className="retro-table retro-snapshot-table">
@@ -439,7 +439,7 @@ function InProgressTab({
     : briefDates[0] ?? null;
 
   const toggleExpand = (id: number) =>
-    setExpanded(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
+    setExpanded(prev => { const s = new Set(prev); if (s.has(id)) s.delete(id); else s.add(id); return s; });
 
   if (loading) return <div className="empty">Loading…</div>;
   if (positions.length === 0) return (
@@ -637,7 +637,7 @@ function LearningCell({ learning }: { learning: TradeLearning | null }) {
 function HistoryTab({ trades, loading }: { trades: PaperTrade[]; loading: boolean }) {
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const toggleExpand = (id: number) =>
-    setExpanded(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
+    setExpanded(prev => { const s = new Set(prev); if (s.has(id)) s.delete(id); else s.add(id); return s; });
 
   if (loading) return <div className="empty">Loading…</div>;
   if (trades.length === 0) return (

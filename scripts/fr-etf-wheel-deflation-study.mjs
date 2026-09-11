@@ -16,7 +16,6 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 
 const db = new Database(join(homedir(), 'AppData', 'Roaming', 'trade-analyzer', 'trade-analyzer.sqlite'));
-const maxPx = db.prepare('SELECT MAX(date) d FROM historical_prices').get().d;
 const etfs = db.prepare(`SELECT ticker FROM constituents WHERE index_name='etf'`).all().map(r => r.ticker);
 const etfSet = new Set(etfs);
 const ph = etfs.map(() => '?').join(',');

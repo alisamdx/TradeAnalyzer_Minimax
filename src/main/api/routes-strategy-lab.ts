@@ -30,7 +30,7 @@ export function registerStrategyLabRoutes(app: FastifyInstance, svc: ApiServerSe
     '/strategy-lab/:ticker',
     async (req, reply) => {
       const ticker = req.params.ticker.toUpperCase();
-      if (!/^[A-Z][A-Z0-9.\-]{0,9}$/.test(ticker)) {
+      if (!/^[A-Z][A-Z0-9.-]{0,9}$/.test(ticker)) {
         return apiError(reply, 'Invalid ticker symbol', 'VALIDATION_ERROR');
       }
       const excludeStock = req.query.excludeStock === 'true' || req.query.excludeStock === '1';

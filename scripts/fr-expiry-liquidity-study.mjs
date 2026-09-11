@@ -145,11 +145,8 @@ console.log(`  mean |Δ-from-30| penalty of snapping to nearest monthly: ${f(shi
 // an artifact of monthlies hosting more far-OTM-wing structure types.
 console.log('\nWithin-slug control (same structure type, monthly vs weekly mean liquidityScore):');
 console.log('slug                         n-mo  liq-mo   n-wk  liq-wk   Δ(mo−wk)');
-const bySlug = {};
-for (const [name, arr] of [['monthly', buckets.monthly], ['weekly', buckets.weekly]]) {
-  // rebuild with slug — re-walk is cheaper than threading slug through entries above
-}
-// Re-walk quickly for slug-level detail.
+// Re-walk quickly for slug-level detail: cheaper than threading the slug through
+// the entries above. (An empty scaffold loop stood here and did nothing.)
 const slugAgg = {};
 {
   const seen2 = new Set();

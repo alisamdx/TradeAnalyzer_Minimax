@@ -9,8 +9,6 @@ const byStrat = {};
 for (const r of rows) { try { byStrat[r.strategy] = JSON.parse(r.picks); } catch { byStrat[r.strategy] = []; } }
 console.log(`Brief: ${latestGen.slice(0,19)} UTC\n`);
 
-const BULLISH_CATS = new Set(['bullish']);
-const BEARISH_CATS = new Set(['bearish']);
 // Map a structure category/slug to a directional sign for the consistency check.
 function structDir(s) {
   const c = (s.category ?? '').toLowerCase();

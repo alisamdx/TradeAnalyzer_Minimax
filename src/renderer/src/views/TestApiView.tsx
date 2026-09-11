@@ -472,7 +472,7 @@ function extractIvKeys(rawJson: string): Array<{ path: string; value: unknown }>
     if (obj === null || obj === undefined) return;
     if (typeof obj === 'object' && !Array.isArray(obj)) {
       for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
-        const lower = k.toLowerCase().replace(/[_\-]/g, '');
+        const lower = k.toLowerCase().replace(/[_-]/g, '');
         if (ivTerms.some(t => lower.includes(t))) {
           results.push({ path: path ? `${path}.${k}` : k, value: v });
         }
@@ -504,7 +504,7 @@ function extractEarningsKeys(rawJson: string): Array<{ path: string; value: unkn
     if (obj === null || obj === undefined) return;
     if (typeof obj === 'object' && !Array.isArray(obj)) {
       for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
-        const lower = k.toLowerCase().replace(/[_\-]/g, '');
+        const lower = k.toLowerCase().replace(/[_-]/g, '');
         if (earningsTerms.some(t => lower.includes(t))) {
           results.push({ path: path ? `${path}.${k}` : k, value: v });
         }
@@ -1382,7 +1382,7 @@ function EdgarTab() {
               Financial Field Coverage
             </div>
             <div style={{ fontSize: 11, color: '#6c7086', marginBottom: 8 }}>
-              These are the 11 concepts <code>computeRatios()</code> needs. Green = found. "Annual" = latest 10-K value; "Qtr" = latest 10-Q value.
+              These are the 11 concepts <code>computeRatios()</code> needs. Green = found. &quot;Annual&quot; = latest 10-K value; &quot;Qtr&quot; = latest 10-Q value.
             </div>
             <div style={{ overflowX: 'auto', border: '1px solid #313244', borderRadius: 4 }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>

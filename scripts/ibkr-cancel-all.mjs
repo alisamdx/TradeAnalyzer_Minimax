@@ -5,7 +5,7 @@ import { IBApi, EventName } from '@stoqey/ib';
 const PORT = Number(process.argv[2] ?? 7497);
 const ib = new IBApi({ host: '127.0.0.1', port: PORT, clientId: 0 });
 const log = (...a) => console.log(...a);
-const finish = (c) => { try { ib.disconnect(); } catch {} process.exit(c); };
+const finish = (c) => { try { ib.disconnect(); } catch { /* already down; the exit code is the result */ } process.exit(c); };
 setTimeout(() => finish(0), 9000).unref?.();
 
 let before = 0;
