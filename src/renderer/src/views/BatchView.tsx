@@ -5,6 +5,7 @@
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import type { BatchJob, BatchRun, BatchProgressEvent, OrchestratorJobConfig } from '@shared/types.js';
+import { notePreview, runNotesText } from '@shared/batch-notes.js';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -358,31 +359,8 @@ function OrchestratorEditModal({ job, allJobs, onSave, onClose }: OrchestratorEd
 }
 
 // ─── Run notes / error ────────────────────────────────────────────────────────
-
-/**
- * How much of a run's note the history cell shows before the modal is needed.
- *
- * The text was never lost — `batch_runs.notes` is an unbounded TEXT column and
- * the whole row reaches the renderer — but the cell truncated at 60 characters
- * and offered the rest only through a `title` tooltip. **A native tooltip cannot
- * be selected, scrolled or copied**, so a long note was effectively unreadable:
- * the collector one-shots put a whole gate summary there (bars, tickers, split
- * pages, verdict, finding count), which is exactly the text worth keeping.
- */
-const PREVIEW_CHARS = 60;
-
-export function notePreview(run: Pick<BatchRun, 'notes' | 'errorMessage'>): string {
-  const text = run.errorMessage ?? run.notes ?? '';
-  return text.length > PREVIEW_CHARS ? `${text.slice(0, PREVIEW_CHARS)}…` : text;
-}
-
-/** What Copy puts on the clipboard: both fields, labelled, when a run has both. */
-export function runNotesText(run: Pick<BatchRun, 'notes' | 'errorMessage'>): string {
-  const parts: string[] = [];
-  if (run.errorMessage) parts.push(`Error: ${run.errorMessage}`);
-  if (run.notes) parts.push(run.notes);
-  return parts.join('\n\n');
-}
+// `notePreview` / `runNotesText` live in `src/shared/batch-notes.ts` so a node-side test can
+// import them without JSX.
 
 function noteBoxStyle(color: string): CSSProperties {
   return {

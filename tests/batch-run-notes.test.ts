@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { notePreview, runNotesText } from '../src/renderer/src/views/BatchView.js';
+import { notePreview, runNotesText } from '../src/shared/batch-notes.js';
 
 /**
  * The Batch view's run-history note was readable only as far as character 60.

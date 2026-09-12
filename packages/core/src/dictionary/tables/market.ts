@@ -28,7 +28,7 @@ export const marketTables: readonly TableEntry[] = [
       col.perShare('high', 'Session high.', { sourceProvider: 'polygon', sourceField: 'h' }),
       col.perShare('low', 'Session low.', { sourceProvider: 'polygon', sourceField: 'l' }),
       col.perShare('close', 'Session close.', { sourceProvider: 'polygon', sourceField: 'c' }),
-      col.int('volume', 'Shares traded. Polygon returns a float; the converter asserts integrality and marks the row `invalid` rather than rounding, because a fractional share volume means the field is not what we think it is.', { sourceProvider: 'polygon', sourceField: 'v', converter: 'floatToIntegerStrict' }),
+      nullable(col.shares('volume', 'Shares traded, exactly as Polygon sends it — **fractional, routinely**, because the count includes fractional-share trades. Dictionary v14 declared this an INTEGER whose converter "asserted integrality": the parser then wrote `0` for every fractional bar with nothing marking it, which made QC-205 evaluate nothing and the chain subset admit nobody (dollar volume = close × 0). Null when absent, **never 0** (D7).', { sourceProvider: 'polygon', sourceField: 'v' }), 'omitted by the provider'),
       nullable(col.perShare('vwap', 'Volume-weighted average price.', { sourceProvider: 'polygon', sourceField: 'vw' }), 'omitted by the provider'),
       nullable(col.int('transactions', 'Number of trades.', { sourceProvider: 'polygon', sourceField: 'n' }), 'omitted by the provider'),
       col.date('adjusted_as_of', 'The date the fetch was made. The whole series is split- and dividend-adjusted *as of this date* — which is the fact that makes a later split visible as a discontinuity instead of invisible as a silent rescale.', { sourceProvider: 'collector' }),
@@ -72,7 +72,7 @@ export const marketTables: readonly TableEntry[] = [
           col.perShare('day_high', 'Session high.', { sourceProvider: 'polygon', sourceField: 'day.h' }),
           col.perShare('day_low', 'Session low.', { sourceProvider: 'polygon', sourceField: 'day.l' }),
           col.perShare('day_close', 'Session close, cross-checked against `raw_daily_bar.close`.', { sourceProvider: 'polygon', sourceField: 'day.c' }),
-          col.int('day_volume', 'Session volume.', { sourceProvider: 'polygon', sourceField: 'day.v' }),
+          col.shares('day_volume', 'Session volume. Fractional, like the bar volume it cross-checks.', { sourceProvider: 'polygon', sourceField: 'day.v' }),
           col.perShare('day_vwap', 'Session VWAP.', { sourceProvider: 'polygon', sourceField: 'day.vw' })
         ],
         'day_status'

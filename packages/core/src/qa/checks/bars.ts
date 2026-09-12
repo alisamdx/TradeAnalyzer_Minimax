@@ -206,15 +206,76 @@ export const QC204_DISCONTINUITY: CheckDefinition = {
   }
 };
 
+/** Sessions of volume on each side of a discontinuity — 03 §3.3's "20-day median". */
+export const REGIME_WINDOW = 20;
+
+function median(xs: readonly number[]): number {
+  const s = [...xs].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 === 1 ? s[mid]! : (s[mid - 1]! + s[mid]!) / 2;
+}
+
+interface VolumeBar {
+  readonly ticker: string;
+  readonly trade_date: string;
+  readonly close: number;
+  readonly volume: number | null;
+}
+
+/** One ticker's series, oldest first: an evaluation per discontinuity with a full window each side. */
+export function volumeRegimeAroundSteps(
+  series: readonly VolumeBar[],
+  stepAt: number,
+  minRatio: number
+): Evaluation[] {
+  const out: Evaluation[] = [];
+  const volumes = (bars: readonly VolumeBar[]): number[] =>
+    bars.map((b) => b.volume).filter((v): v is number => v !== null);
+
+  for (let i = 1; i < series.length; i++) {
+    const prev = series[i - 1]!;
+    const cur = series[i]!;
+    if (prev.close <= 0 || Math.abs(cur.close / prev.close - 1) <= stepAt) continue;
+
+    const before = volumes(series.slice(Math.max(0, i - REGIME_WINDOW), i));
+    const after = volumes(series.slice(i, i + REGIME_WINDOW));
+    // Not measured YET rather than measured on a short window. The check reads
+    // the whole series every run, so a step younger than 20 sessions is
+    // evaluated on the run that completes its window — never estimated early.
+    if (before.length < REGIME_WINDOW || after.length < REGIME_WINDOW) continue;
+
+    const b = median(before);
+    const a = median(after);
+    // A zero median has no ratio to report, and inventing one (Infinity, a cap)
+    // would put a made-up number into the distribution the threshold is judged on.
+    if (b <= 0 || a <= 0) continue;
+
+    const ratio = Math.max(a / b, b / a);
+    out.push({
+      key: `${cur.ticker} ${cur.trade_date}`,
+      value: ratio,
+      fired: ratio >= minRatio,
+      detail:
+        `median volume ${ratio.toFixed(1)}x across the ${cur.trade_date} step ` +
+        `(${Math.round(b)} before, ${Math.round(a)} after) — the ticker-reuse signature`,
+      evidence: { ticker: cur.ticker, stepDate: cur.trade_date, medianBefore: b, medianAfter: a, ratio },
+      affects: [cur.trade_date]
+    });
+  }
+  return out;
+}
+
 export const QC205_VOLUME_REGIME: CheckDefinition = {
   id: 'QC-205',
   domain: 'bars',
   severity: 'blocking',
   description:
-    'Volume regime around a discontinuity. This is the check that tells the three causes apart, and ' +
-    'it discriminates on VOLUME rather than price: ticker reuse shifts the volume regime permanently ' +
-    'by 15x or more, while a genuine violent move stays within 5x. No re-fetch can ever fix reuse — ' +
-    'the provider keys by ticker too — so the operator must truncate before the splice.',
+    'Volume regime around a discontinuity: the 20-session median volume after a close that moved more ' +
+    'than QC-204\'s threshold, against the 20-session median before it. This is the check that tells ' +
+    'the three causes apart, and it discriminates on VOLUME rather than price: ticker reuse shifts the ' +
+    'volume regime permanently by 15x or more, while a genuine violent move stays within 5x. No ' +
+    're-fetch can ever fix reuse — the provider keys by ticker too — so the operator must truncate ' +
+    'before the splice.',
   readsTables: ['raw_daily_bar'],
   testedQuantity: 'volume_regime_ratio',
   testedUnit: 'ratio',
@@ -224,40 +285,32 @@ export const QC205_VOLUME_REGIME: CheckDefinition = {
     'The same 2026-08-28 episode set. Ticker reuse at 76x (BNY) and 53,592x (SPCX) against genuine ' +
     'violent moves at 5.0x or less (MRNA). Two orders of magnitude apart.',
   run(ctx) {
-    const tickers = (
-      ctx.db
-        .prepare('SELECT DISTINCT ticker FROM raw_daily_bar WHERE run_id = ?')
-        .all(ctx.runId) as { ticker: string }[]
-    ).map((r) => r.ticker);
-
-    const out: Evaluation[] = [];
-    for (const ticker of tickers) {
-      const vols = (
-        ctx.db
-          .prepare(
-            `SELECT volume FROM raw_daily_bar WHERE ticker = ?
-              ORDER BY trade_date DESC LIMIT 40`
+    // The latest observation per (ticker, trade_date), by MAX(row_id) — the chain
+    // subset's supersession rule. The first version compared the last 20 ROWS
+    // with the 20 before them, which was wrong twice over: stacked backfills
+    // made 40 rows about thirteen days, and it only ever looked at the tail, so
+    // a reuse two years back — the case this check exists for — was invisible.
+    // It never found out, because zero volumes made it evaluate nothing at all.
+    const rows = ctx.db
+      .prepare(
+        `SELECT ticker, trade_date, close, volume FROM raw_daily_bar
+          WHERE row_id IN (
+            SELECT MAX(row_id) FROM raw_daily_bar
+             WHERE ticker IN (SELECT DISTINCT ticker FROM raw_daily_bar WHERE run_id = ?)
+             GROUP BY ticker, trade_date
           )
-          .all(ticker) as { volume: number }[]
-      ).map((r) => r.volume);
-      if (vols.length < 40) continue;
+          ORDER BY ticker, trade_date`
+      )
+      .all(ctx.runId) as VolumeBar[];
 
-      const median = (xs: readonly number[]) => {
-        const s = [...xs].sort((a, b) => a - b);
-        return s[Math.floor(s.length / 2)] as number;
-      };
-      const recent = median(vols.slice(0, 20));
-      const older = median(vols.slice(20));
-      if (older <= 0 || recent <= 0) continue;
-
-      const ratio = Math.max(recent / older, older / recent);
-      out.push({
-        key: ticker,
-        value: ratio,
-        fired: ratio >= this.thresholds['minRegimeRatio']!,
-        detail: `20-day median volume shifted ${ratio.toFixed(1)}x (${older} to ${recent}) — the ticker-reuse signature`,
-        evidence: { ticker, recentMedian: recent, olderMedian: older, ratio }
-      });
+    const stepAt = QC204_DISCONTINUITY.thresholds['maxAbsChange']!;
+    const minRatio = this.thresholds['minRegimeRatio']!;
+    const out: Evaluation[] = [];
+    let start = 0;
+    for (let i = 1; i <= rows.length; i++) {
+      if (i < rows.length && rows[i]!.ticker === rows[start]!.ticker) continue;
+      out.push(...volumeRegimeAroundSteps(rows.slice(start, i), stepAt, minRatio));
+      start = i;
     }
     return out;
   }

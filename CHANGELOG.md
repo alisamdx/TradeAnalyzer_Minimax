@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.1.236] - 2026-09-12
+
+### Bar volume was stored as zero, and the check that reads it had never run
+
+`@tradeanalyzer/core` 0.6.6 (dictionary v15), TradeAnalyzer 2 0.4.5. **The collector's generation needs a reset to pick this up.**
+
+Three numbers read off TradeAnalyzer 2 before Monday: QC-205 **Evaluated 0** on all three backfills; QC-204 fired **152 → 151** although the split list grew 1,000 → 6,700; and an AAPL bar with `volume 0` beside `transactions 1,225,501`.
+
+- **Polygon's daily volume is fractional** (fractional-share trades). The bar parser asserted integrality, computed `invalid`, discarded it, and wrote `0`. Now stored as sent, REAL in a new `share_quantity` unit, null when absent — never 0.
+- **That zero emptied the chain subset.** Its rule is 20-day mean `close × volume`; every ticker measured $0/day.
+- **QC-205 was wrong even with good data**: it compared the last 40 rows per ticker — ~13 days once backfills stack, and blind to any reuse before the tail. It now compares 20 sessions of volume either side of each QC-204-sized step, on the latest observation of each day.
+- **One-shot jobs are dated to the last session** (`sessionOnOrBefore`); run 9 had recorded Saturday 2026-09-12.
+- The backfill note's count is labelled **generation-wide** (512 on a run whose QC-204 fired 151).
+- TradeAnalyzer 2's Data view **no longer draws an empty "no rows" grid under a refused query** — a refused `volume = 0` filter had read as a clean answer.
+- **Two type errors had shipped behind green test runs** (Vitest transpiles per file and never typechecks): `tests/batch-run-notes.test.ts` imported `BatchView.tsx` into the no-JSX node project — the helpers now live in `src/shared/batch-notes.ts` — and TradeAnalyzer 2's `PilotConditionDto` lacked core's ninth condition, `backfill_queue`, so the Pilot view had no label for it.
+
+Regression tests: `packages/core/test/bar-volume.test.ts` (fractional ingest through the real schema, QC-205 around deep and young steps and across three stacked backfills, session dating) and a fractional-volume admission in `chains-account.test.ts`.
+
 ## [1.1.235] - 2026-09-12
 
 ### The batch note was readable to character 60 and no further

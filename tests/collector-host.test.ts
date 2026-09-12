@@ -322,7 +322,11 @@ describe('collector batch handlers', () => {
     // Compared inside the function body, not across the file: the import list
     // mentions both names first, so a whole-file index comparison would pass or
     // fail on import order and say nothing about execution order.
-    const body = oneshot.slice(oneshot.indexOf('const tradingDate = deps.todayET();'));
+    const anchor = 'const tradingDate = sessionOnOrBefore(deps.todayET());';
+    // Non-vacuity: a missing anchor makes indexOf -1 and slice(-1) the last
+    // character, and every comparison below would then fail for the wrong reason.
+    expect(oneshot.indexOf(anchor)).toBeGreaterThan(-1);
+    const body = oneshot.slice(oneshot.indexOf(anchor));
     expect(body.indexOf('expireAcceptances')).toBeGreaterThan(-1);
     expect(body.indexOf('expireAcceptances')).toBeLessThan(body.indexOf('runBackfillBars'));
   });

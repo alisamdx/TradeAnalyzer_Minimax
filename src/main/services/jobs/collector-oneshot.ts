@@ -12,6 +12,7 @@ import {
   runUniverseSeed,
   stalledRequests,
   expireAcceptances,
+  sessionOnOrBefore,
   type OneShotKind
 } from '@tradeanalyzer/core';
 import {
@@ -184,7 +185,9 @@ export function createCollectorOneShotJob(deps: OneShotDeps): BatchJobHandler {
         }
 
         try {
-          const tradingDate = deps.todayET();
+          // The session the run belongs to, not the calendar date: run on a
+          // weekend or after midnight, the calendar date is a day with no session.
+          const tradingDate = sessionOnOrBefore(deps.todayET());
 
           // An acceptance that has run out becomes `expired_review` before any
           // job reports, so the email and the review queue reflect what is
@@ -291,7 +294,10 @@ export function createCollectorOneShotJob(deps: OneShotDeps): BatchJobHandler {
                 // ruling on artifacts.
                 (report.splitsTruncated ? ' — SPLIT LIST TRUNCATED, do not rule on QC-204 findings' : '') +
                 `; ${report.verdict.toUpperCase()}, ` +
-                `${report.reviewQueue.length} finding(s) awaiting a ruling.`,
+                // Generation-wide, and said so: this is every open blocking
+                // finding, not the count this run raised (2026-09-12 read 512
+                // on a run whose QC-204 fired 151).
+                `${report.reviewQueue.length} blocking finding(s) awaiting a ruling across the generation.`,
               tickersAttempted: report.tickersAttempted,
               tickersUpdated: report.tickersStored,
               tickersSkipped: 0,

@@ -25,6 +25,7 @@ const CONDITION_LABEL: Readonly<Record<PilotConditionDto['key'], string>> = {
   'inspections': 'Every domain inspected by a person',
   'expired_review': 'No expired acceptance awaiting a ruling',
   'verify_notes': 'Every column observed in a live response',
+  'backfill_queue': 'Backfill review queue clear (QC-204 / QC-205)',
   'replay': 'A replay passed recently, and none differs'
 };
 

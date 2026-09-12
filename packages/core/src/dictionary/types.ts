@@ -28,6 +28,14 @@ export type Unit =
   | 'usd_per_share'
   /** A count of things: shares, contracts, volume, open interest, rows. */
   | 'count'
+  /**
+   * A quantity of shares that can be fractional. Polygon's daily volume counts
+   * fractional-share trades, so it is routinely non-integer — and the first bar
+   * parser asserted integrality, "failed", and wrote `0` for every such bar.
+   * REAL, never rounded, never asserted whole. Not called `shares`: that is a
+   * column name (Form 4), and AC-13 reads a unit key in the renderer as one.
+   */
+  | 'share_quantity'
   /** `YYYY-MM-DD` in America/New_York. */
   | 'date_et'
   /** ISO-8601 with offset, e.g. `2026-09-05T17:02:11-04:00`. */
@@ -70,6 +78,7 @@ export const UNIT_STORAGE: Readonly<Record<Unit, SqlType>> = {
   usd: 'REAL',
   usd_per_share: 'REAL',
   count: 'INTEGER',
+  share_quantity: 'REAL',
   date_et: 'TEXT',
   timestamp_et: 'TEXT',
   flag: 'INTEGER',
@@ -255,6 +264,9 @@ export const col = {
   }),
   int: (column: string, description: string, rest: Partial<ColumnEntry> = {}): ColumnEntry => ({
     column, type: 'INTEGER', unit: 'count', nullable: false, description, ...rest
+  }),
+  shares: (column: string, description: string, rest: Partial<ColumnEntry> = {}): ColumnEntry => ({
+    column, type: 'REAL', unit: 'share_quantity', nullable: false, description, ...rest
   }),
   flag: (column: string, description: string, rest: Partial<ColumnEntry> = {}): ColumnEntry => ({
     column, type: 'INTEGER', unit: 'flag', nullable: false, description, ...rest

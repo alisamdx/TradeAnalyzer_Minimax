@@ -227,19 +227,25 @@ export function DataView({
                 {notice && <div className="notice notice-ok">{notice}<button className="link notice-close" onClick={() => setNotice(null)}>dismiss</button></div>}
                 {error && <div className="notice notice-refused">{error}</div>}
 
-                <Grid
-                  columns={shown}
-                  rows={rows}
-                  stats={stats}
-                  sortColumn={asked.sortColumn}
-                  sortDescending={asked.sortDescending}
-                  onSort={(c) =>
-                    c === asked.sortColumn
-                      ? ask({ sortDescending: !asked.sortDescending })
-                      : ask({ sortColumn: c, sortDescending: false })
-                  }
-                />
-                {page?.hasMore && (
+                {/* No grid under a refusal. A refused query ran nothing, and an
+                    empty grid beneath it read "no rows" — which is what a query
+                    that ran and matched nothing says. Operator read `volume = 0`
+                    on raw_daily_bar as zero rows on 2026-09-12; it was refused. */}
+                {!error && (
+                  <Grid
+                    columns={shown}
+                    rows={rows}
+                    stats={stats}
+                    sortColumn={asked.sortColumn}
+                    sortDescending={asked.sortDescending}
+                    onSort={(c) =>
+                      c === asked.sortColumn
+                        ? ask({ sortDescending: !asked.sortDescending })
+                        : ask({ sortColumn: c, sortDescending: false })
+                    }
+                  />
+                )}
+                {!error && page?.hasMore && (
                   <button className="btn load-more" onClick={() => void loadMore()}>
                     Load 100 more ({rows.length.toLocaleString()} shown)
                   </button>

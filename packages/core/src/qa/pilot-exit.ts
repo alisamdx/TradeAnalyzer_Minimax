@@ -436,11 +436,11 @@ export function pilotExitStatus(
   // two companies, and every indicator across the boundary inherits it silently;
   // promoting on that certifies a generation known to be wrong.
   //
-  // Note what it does and does not cover: `reviewQueue` selects `blocking` rows
-  // only, and QC-204/205 are warnings that promote by value, so this catches a
-  // discontinuity severe enough to have been promoted — not every one. Wired as
-  // written rather than widened, because changing what it measures is a separate
-  // decision from making it load-bearing.
+  // What it covers: `reviewQueue` selects `blocking` rows, and QC-204 and QC-205
+  // are both declared `blocking` in `checks/bars.ts`, so every open finding from
+  // either is outstanding here. (This comment said they were warnings that
+  // promote by value — corrected 2026-09-12 against the definitions. QC-205
+  // had also never evaluated a single step until then: see `volumeOrNull`.)
   const backfill = backfillQueueClear(db);
 
   const differentDates = [...latestReplayPerDate(db)]

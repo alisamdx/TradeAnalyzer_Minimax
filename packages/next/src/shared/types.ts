@@ -520,7 +520,13 @@ export interface PilotRulingDto {
 }
 
 export interface PilotConditionDto {
-  readonly key: 'status' | 'streak' | 'zero_fire' | 'thresholds' | 'inspections' | 'expired_review' | 'verify_notes' | 'replay';
+  /**
+   * Mirrors `core`'s `ConditionKey`. `backfill_queue` was added in core 0.6.4 and
+   * missed here, so `next` stopped typechecking and the Pilot view had no label
+   * for the ninth condition. `pilot.ts` assigns core's array to this type, which
+   * is the check that caught it.
+   */
+  readonly key: 'status' | 'streak' | 'zero_fire' | 'thresholds' | 'inspections' | 'expired_review' | 'verify_notes' | 'backfill_queue' | 'replay';
   readonly met: boolean;
   readonly detail: string;
 }

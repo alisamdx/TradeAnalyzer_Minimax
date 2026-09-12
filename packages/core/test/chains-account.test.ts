@@ -696,6 +696,20 @@ describe('phase 6 — the chain subset admits, and never removes', () => {
     expect(members).toEqual(['SPY']);
   });
 
+  it('admits on a fractional volume — dollar volume is not close × 0', () => {
+    // gen-001 stored every fractional Polygon volume as 0, so this rule measured
+    // $0/day for everything and the subset sat near-empty for two days. The cause
+    // was read at the time as "not enough bars yet".
+    seedBars('FRAC', 500, 1_000_000.5);
+    const measured = subsetCandidates(db(), DATE).find((c) => c.ticker === 'FRAC');
+    expect(measured!.advol20).toBe(500 * 1_000_000.5);
+    runChainSubsetPhase(db(), makeHost(), newRun());
+    const members = (
+      raw.prepare('SELECT ticker FROM ref_chain_subset_membership WHERE valid_to IS NULL').all() as { ticker: string }[]
+    ).map((r) => r.ticker);
+    expect(members).toContain('FRAC');
+  });
+
   it('records the measured inputs the decision was made on', () => {
     seedBars('SPY', 770, 1_000_000);
     runChainSubsetPhase(db(), makeHost(), newRun());

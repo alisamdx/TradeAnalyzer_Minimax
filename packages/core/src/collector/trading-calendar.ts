@@ -241,6 +241,22 @@ export function previousTradingDay(db: SqliteLike, date: string): string | null 
   return days.length > 0 ? (days[days.length - 1] as string) : null;
 }
 
+/**
+ * The session a job started on `date` belongs to: `date` when it is a session,
+ * otherwise the last one before it.
+ *
+ * For the one-shot jobs, which the operator runs whenever they like. They used
+ * the ET calendar date, so a backfill started at 01:35 on Saturday 2026-09-12
+ * recorded trading date 2026-09-12 — a day with no session — and every finding
+ * it raised defaulted to affecting that day. Rules only, no database: the job
+ * needs its date before it has opened the generation that holds
+ * `ref_trading_day`, and the unscheduled closures are part of the rules.
+ */
+export function sessionOnOrBefore(date: string): string {
+  const sessions = buildTradingCalendar(addDays(date, -14), date).filter((r) => r.isTradingDay);
+  return sessions.length > 0 ? sessions[sessions.length - 1]!.date : date;
+}
+
 export function tradingDaysInRange(db: SqliteLike, from: string, to: string): readonly string[] {
   if (from > to) return [];
   const stored = new Map(

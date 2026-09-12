@@ -16,7 +16,8 @@ These implement P1, P3, P6, P7. They are stated once here and not repeated per t
 | Ratio, rate, yield, return, IV, Greek | `REAL` | decimal fraction | `0.3882` (not 38.82), `0.0525`, delta `-0.23` |
 | Money per share / per unit | `REAL` | USD, per share (never per contract) | `187.25`, option bid `2.15` |
 | Money, account level | `REAL` | USD | `cash_available` |
-| Quantity | `INTEGER` | count | shares, contracts, volume, open interest |
+| Quantity | `INTEGER` | count | contracts, open interest, trade sizes |
+| Share quantity that can be fractional | `REAL` | `share_quantity` | equity volume (Polygon counts fractional-share trades) — never rounded, never asserted whole |
 | Trading day | `TEXT` | `YYYY-MM-DD`, America/New_York | `2026-09-05` |
 | Timestamp | `TEXT` | ISO-8601 **with offset** | `2026-09-05T17:02:11-04:00` |
 | Flag | `INTEGER` | `0` / `1` | |
@@ -377,7 +378,7 @@ Source: Polygon `/v2/aggs/ticker/{t}/range/1/day/{from}/{to}?adjusted=true`. One
 | `ticker` | TEXT | no | |
 | `trade_date` | TEXT | no | from `t` (ms epoch → ET date) |
 | `open`, `high`, `low`, `close` | REAL | no | `o h l c` USD/share |
-| `volume` | INTEGER | no | `v` (Polygon returns float; converted with an integrality check → `invalid` if fractional) |
+| `volume` | REAL (shares) | yes: omitted | `v` exactly as sent — **fractional, routinely**. Revised 2026-09-12 (dictionary v15): this row said INTEGER "with an integrality check → `invalid` if fractional", and the parser built to it wrote `0` for every fractional bar with no status to mark it, so QC-205 evaluated nothing and the chain subset measured $0 dollar volume for every ticker. Absent → null, never 0 (D7) |
 | `vwap` | REAL | yes: omitted | `vw` |
 | `transactions` | INTEGER | yes: omitted | `n` |
 | `adjusted_as_of` | TEXT | no | the date the fetch was made; the whole series is adjusted on this basis |
@@ -398,7 +399,7 @@ Source: Polygon full-market snapshot `/v2/snapshot/locale/us/markets/stocks/tick
 | `ticker` | TEXT | no | `ticker` |
 | `last`, `last_size` | REAL, INTEGER | yes + status | `lastTrade.p`, `lastTrade.s` |
 | `bid`, `bid_size`, `ask`, `ask_size` | REAL, INTEGER | yes + status | `lastQuote.p/s`, `lastQuote.P/S` — after hours these can be stale; `quote_time` says when |
-| `day_open`, `day_high`, `day_low`, `day_close`, `day_volume`, `day_vwap` | REAL/INTEGER | yes + status | `day.*` |
+| `day_open`, `day_high`, `day_low`, `day_close`, `day_volume`, `day_vwap` | REAL (`day_volume` in shares, fractional) | yes + status | `day.*` |
 | `prev_close` | REAL | yes + status | `prevDay.c` |
 | `quote_time`, `trade_time` | TEXT | yes: omitted | `lastQuote.t`, `lastTrade.t` |
 | `snapshot_updated` | TEXT | no | `updated` |

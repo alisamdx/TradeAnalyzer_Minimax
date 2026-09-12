@@ -16,14 +16,19 @@ function statusFor(v: unknown): 'ok' | 'omitted' {
 }
 
 /**
- * Polygon returns volume as a float. A fractional share volume means the field
- * is not what we think it is, so the row is marked `invalid` rather than
- * rounded — rounding would turn a provider change into a plausible number.
+ * Polygon's daily `v`, exactly as sent, or null when there is no usable number.
+ *
+ * **It is fractional, routinely** — the count includes fractional-share trades.
+ * The first version asserted integrality, treated a fraction as a provider
+ * surprise, computed `invalid`, discarded it and wrote `volume.value ?? 0`. So
+ * every fractional bar stored a plausible, wrong **zero** with nothing marking
+ * it: gen-001's AAPL read `volume 0` beside `transactions 1,225,501`. That
+ * zero then made QC-205 evaluate nothing on every run (it skips a zero median)
+ * and made the chain subset's dollar volume `close × 0`, so it admitted nobody.
+ * The old app's `leg.volume ?? 0`, re-made one layer down.
  */
-export function toIntegerStrict(v: unknown): { value: number | null; invalid: boolean } {
-  if (typeof v !== 'number' || !Number.isFinite(v)) return { value: null, invalid: false };
-  if (!Number.isInteger(v)) return { value: null, invalid: true };
-  return { value: v, invalid: false };
+export function volumeOrNull(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null;
 }
 
 /** ms epoch to a New York trading date. */
@@ -54,7 +59,6 @@ export function makeBarIngest(opts: {
     for (const b of bars) {
       if (typeof b.t !== 'number' || typeof b.c !== 'number') continue;
       const tradeDate = msEpochToEtDate(b.t);
-      const volume = toIntegerStrict(b.v);
 
       rows.push({
         table: 'raw_daily_bar',
@@ -69,8 +73,9 @@ export function makeBarIngest(opts: {
           high: b.h ?? b.c,
           low: b.l ?? b.c,
           close: b.c,
-          // A fractional volume is a provider surprise, not a number to round.
-          volume: volume.value ?? 0,
+          // Null, never 0, when absent: "not reported" and "did not trade" are
+          // different facts, and only one of them is a reason to refuse admission.
+          volume: volumeOrNull(b.v),
           vwap: typeof b.vw === 'number' ? b.vw : null,
           transactions: typeof b.n === 'number' ? b.n : null,
           // The whole series is adjusted as of THIS fetch. That is the fact that

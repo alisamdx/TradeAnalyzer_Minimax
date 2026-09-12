@@ -17,6 +17,7 @@ const UNIT_LABEL: Readonly<Record<string, string>> = {
   usd: 'USD',
   usd_per_share: 'USD/sh',
   count: 'count',
+  share_quantity: 'shares',
   date_et: 'ET date',
   timestamp_et: 'ET time',
   flag: '0/1',

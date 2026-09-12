@@ -54,7 +54,7 @@ export type { ResetArgs, ResetPreview, ResetReport } from './reset.js';
 export { runPreflight, isTradingDay } from './phases/preflight.js';
 export {
   ensureTradingCalendar, buildTradingCalendar, nyseHolidays, nyseEarlyCloses,
-  tradingDaysInRange, previousTradingDay
+  tradingDaysInRange, previousTradingDay, sessionOnOrBefore
 } from './trading-calendar.js';
 export { ensureMacroSeries, DEFAULT_MACRO_SERIES } from './macro-series.js';
 export type { MacroSeriesSeed, MacroSeedResult } from './macro-series.js';
@@ -80,7 +80,7 @@ export type { DailyRunReport } from './daily.js';
 export { runBarsPhase, runQuotesPhase, runActionsPhase, BARS_RULE, QUOTES_RULE, ACTIONS_RULE } from './phases/market.js';
 export type { PhaseCounts } from './phases/market.js';
 export {
-  makeBarIngest, ingestSnapshot, ingestSplits, ingestDividends, toIntegerStrict, msEpochToEtDate, nsEpochToEt
+  makeBarIngest, ingestSnapshot, ingestSplits, ingestDividends, volumeOrNull, msEpochToEtDate, nsEpochToEt
 } from '../ingest/market.js';
 export {
   runAccountPhase, deriveHeldStickyContracts, maskAccountKey, accountKeysFrom, ACCOUNT_RULE

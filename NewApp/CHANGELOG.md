@@ -9,6 +9,57 @@ exit (06 §6).
 
 ---
 
+## B10b — bar volume was zero, and the check that reads it had never run (2026-09-12)
+
+`core` **0.6.6**, `next` **0.4.5**, dictionary **v15**; existing app **v1.1.236**.
+**Needs a reset** — gen-001 keeps its zeros and its INTEGER column.
+
+Found by reading three numbers off the Runs view before Monday: QC-205 reported
+**Evaluated 0** on all three backfills, QC-204 fired **152 → 151** although the
+split list grew from 1,000 to 6,700, and a pasted AAPL bar read `volume 0` beside
+`transactions 1,225,501`.
+
+- **Volume.** Polygon's daily `v` is fractional — it counts fractional-share
+  trades. Dictionary v14 declared it INTEGER with a converter that "asserted
+  integrality"; the parser computed `invalid` and then wrote `volume.value ?? 0`.
+  So most bars stored a plausible zero with nothing marking it. Now REAL, in a new
+  `share_quantity` unit (not `shares` — that is a Form 4 column, and AC-13 caught
+  the unit key as one), nullable (absent → null, never 0), stored as sent;
+  `raw_eod_quote.day_volume` likewise.
+- **The chain subset admitted nobody because of it.** `advol20` is the mean of
+  `close × volume`; with volume 0 every ticker measured $0/day. This had been put
+  down to too few bars and the empty brief hand-off — both real, neither the main
+  cause.
+- **QC-205 measured the wrong thing even with good data.** It compared the last 20
+  rows of a ticker with the 20 before — stacked backfills made that ~13 days, and a
+  reuse anywhere but the tail could not be seen. Rewritten to 03 §3.3's
+  definition: 20 sessions of volume either side of each step larger than QC-204's
+  threshold, latest observation per day by `MAX(row_id)`, every measured step
+  recorded (fired or not), a step with a short window not yet measured. Keys are now
+  `TICKER DATE`, which the workbench's reuse candidate already parses.
+- **Why splits barely moved QC-204.** A single-pass adjusted backfill has no split
+  steps to explain. The 151 are genuine moves, reuse or bad bars (max ratio
+  487,399), which is exactly the population QC-205 exists to sort — and could not.
+- **One-shot jobs are dated to their session.** Run 9 started 01:35 Saturday and
+  recorded trading date 2026-09-12. `sessionOnOrBefore()` (rules only, no
+  database) now dates it 2026-09-11.
+- **A refused Data-view query no longer draws "no rows".** The operator's
+  `volume = 0` filter was refused for lacking an indexed column, and the empty grid
+  beneath the refusal read as a clean answer.
+- The backfill note's finding count is labelled generation-wide (it read 512 on a
+  run whose QC-204 fired 151); a pilot-exit comment claiming QC-204/205 are warnings
+  is corrected against their `blocking` definitions.
+- **`next` did not typecheck.** `PilotConditionDto.key` lacked `backfill_queue`,
+  the ninth pilot-exit condition added in core 0.6.4, so the Pilot view also had no
+  label for it. Vitest transpiles per file, so the test run stayed green.
+
+Not changed, noted for the pilot: the host stamps `requestedAt`/`respondedAt` —
+and therefore `observed_at` on raw rows — with `toISOString()` (UTC), not
+`etTimestamp()`. Consistent within a table, so supersession by `observed_at`
+still orders correctly; QC-205 uses `row_id` regardless.
+
+---
+
 ## B10b — the EDGAR contact address, decided (2026-09-11)
 
 Existing app **v1.1.227**; `core` unchanged. The collector's EDGAR calls
