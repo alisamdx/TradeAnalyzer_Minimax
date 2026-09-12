@@ -12,7 +12,7 @@ import {
   EDGAR_FIELD_SPECS,
   type EdgarEntry,
 } from '../services/sec-edgar-provider.js';
-import { edgarHeaders } from '../services/edgar-identity.js';
+import { edgarFetch } from '../services/edgar-identity.js';
 
 function ok<T>(value: T): { ok: true; value: T } { return { ok: true, value }; }
 function fail(err: unknown): { ok: false; error: { code: string; message: string } } {
@@ -576,10 +576,7 @@ export function registerTestApiIpc(
   ipcMain.handle('test-api:edgar-fundamentals', async (_e: IpcMainInvokeEvent, ticker: string) => {
     try {
       const { cikPadded, title } = await resolveEdgarCik(ticker.toUpperCase().trim());
-      const resp = await fetch(
-        `https://data.sec.gov/api/xbrl/companyfacts/CIK${cikPadded}.json`,
-        { headers: edgarHeaders() }
-      );
+      const resp = await edgarFetch(`https://data.sec.gov/api/xbrl/companyfacts/CIK${cikPadded}.json`);
       if (!resp.ok) throw new Error(`SEC companyfacts HTTP ${resp.status}: ${await resp.text().then(t => t.slice(0, 200))}`);
 
       const data = await resp.json() as {

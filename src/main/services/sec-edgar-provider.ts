@@ -7,7 +7,7 @@
 // see docs/formulas.md for formula context
 
 import type { PolygonFinancials } from './fundamentals-computer.js';
-import { edgarHeaders } from './edgar-identity.js';
+import { edgarFetch } from './edgar-identity.js';
 
 const EDGAR_BASE = 'https://data.sec.gov';
 
@@ -18,7 +18,7 @@ let _cikCache: Map<string, { cikPadded: string; title: string }> | null = null;
 
 export async function resolveEdgarCik(ticker: string): Promise<{ cikPadded: string; title: string }> {
   if (!_cikCache) {
-    const r = await fetch('https://www.sec.gov/files/company_tickers.json', { headers: edgarHeaders() });
+    const r = await edgarFetch('https://www.sec.gov/files/company_tickers.json');
     if (!r.ok) throw new Error(`SEC company_tickers.json HTTP ${r.status}`);
     const raw = await r.json() as Record<string, { cik_str: number | string; ticker: string; title: string }>;
     _cikCache = new Map();
@@ -354,10 +354,7 @@ const EMPTY_FILING: FilingEntry = { date: '', start_date: '', end_date: '', fina
 export async function getEdgarFundamentals(ticker: string): Promise<PolygonFinancials> {
   const { cikPadded, title } = await resolveEdgarCik(ticker);
 
-  const r = await fetch(
-    `${EDGAR_BASE}/api/xbrl/companyfacts/CIK${cikPadded}.json`,
-    { headers: edgarHeaders() },
-  );
+  const r = await edgarFetch(`${EDGAR_BASE}/api/xbrl/companyfacts/CIK${cikPadded}.json`);
   if (!r.ok) throw new Error(`EDGAR companyfacts HTTP ${r.status} for ${ticker}`);
 
   const data = await r.json() as { facts?: { 'us-gaap'?: GaapFacts } };

@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.1.230] - 2026-09-11
+
+### Every EDGAR call is now logged, and the contact is readable over the API
+
+Setting the EDGAR contact exposed a gap: **three of the four EDGAR callers were never instrumented.** `sec-edgar-provider.ts` (twice) and the Test API screen built headers with `edgarHeaders()` and then called `fetch` directly, so only the NewApp collector's `httpGet` reached `logs/api/`. A live EDGAR call made specifically to confirm the configured contact therefore left no trace to read — the same shape as the E*Trade integration before v1.1.144, found the same way: by needing the log and finding it empty.
+
+- **`edgarFetch(url)`** in `edgar-identity.ts` applies the identity *and* records the call, as one operation — a caller that remembers the header and forgets the log is invisible in the one place anybody looks. All three raw `fetch` sites now use it. The log line carries the `User-Agent`, which makes the configured contact observable without opening the database.
+- Failure bodies are logged (first 300 characters); success bodies never are.
+- **`GET /settings` now returns `edgarContact`.** It is a courtesy address the SEC reads off every request, not a secret, and having it on a localhost token-authed read-only route is what makes "did that setting save" answerable — from a redirected shell, opening the database to check is precisely what must never be done.
+- `tests/edgar-identity.test.ts` pins that every `sec.gov` fetch goes through `edgarFetch`; the scan was checked against the real files (3 matching lines) rather than assumed non-vacuous.
+
 ## [1.1.229] - 2026-09-11
 
 ### `npm test` now runs lint first — in all three packages

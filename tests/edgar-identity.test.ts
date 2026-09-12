@@ -79,6 +79,28 @@ describe('no contact address is committed to this repository', () => {
     expect(offenders).toEqual([]);
   });
 
+  it('every EDGAR caller goes through edgarFetch, so every call is logged', () => {
+    // Three callers built headers and then called `fetch` directly, so none of
+    // them reached `logs/api/` — the E*Trade-before-v1.1.144 shape. It cost a
+    // real diagnosis: a live EDGAR call made to confirm the configured contact
+    // left no trace. Applying the identity and recording the call are one
+    // operation now, and this asserts nobody re-separates them.
+    const files = [
+      join(SRC, 'main', 'services', 'sec-edgar-provider.ts'),
+      join(SRC, 'main', 'ipc', 'ipc-test-api.ts')
+    ];
+    for (const file of files) {
+      const code = readFileSync(file, 'utf8')
+        .replace(/\r\n/g, '\n')
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/(^|[^:])\/\/.*$/gm, '$1');
+      const sec = code.split('\n').filter((l) => /fetch\(/.test(l) && /sec\.gov|EDGAR_BASE/.test(l));
+      for (const line of sec) {
+        expect(line).toContain('edgarFetch(');
+      }
+    }
+  });
+
   it('both EDGAR callers build their agent from the one module', () => {
     // Comments stripped first. The unstripped version of this assertion failed
     // on the doc comment in `sec-edgar-provider.ts` that explains the file used
@@ -93,7 +115,12 @@ describe('no contact address is committed to this repository', () => {
 
     const provider = code(['main', 'services', 'sec-edgar-provider.ts']);
     const host = code(['main', 'collector-host', 'electron-collector-host.ts']);
-    expect(provider).toContain('edgarHeaders()');
+    // The provider reaches the identity through `edgarFetch`, which applies the
+    // headers and logs the call as one operation. It no longer names
+    // `edgarHeaders` itself — that export remains for a caller that genuinely
+    // only needs headers, and the collector host is one (its `httpGet` already
+    // logs, so it composes the agent directly).
+    expect(provider).toContain('edgarFetch(');
     expect(provider).not.toContain('trader@local');
     expect(host).toContain('edgarUserAgent()');
   });

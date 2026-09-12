@@ -20,6 +20,7 @@
 // permanently — which no later edit removes.
 
 import type { DbHandle } from '../db/connection.js';
+import { logApiCall } from './logger.js';
 
 /** The settings key holding the operator's EDGAR contact address. */
 export const EDGAR_CONTACT_KEY = 'edgarContact';
@@ -71,7 +72,69 @@ export function edgarUserAgent(): string {
     : `TradeAnalyzer/${_appVersion} (${contact})`;
 }
 
-/** Headers for a direct `fetch` to sec.gov. */
+/** Headers for a direct `fetch` to sec.gov. Prefer `edgarFetch`, which also logs. */
 export function edgarHeaders(): Record<string, string> {
   return { 'User-Agent': edgarUserAgent() };
+}
+
+/**
+ * The one way to call sec.gov: applies the identity AND records the call.
+ *
+ * Three callers used to build headers with `edgarHeaders()` and then `fetch`
+ * directly — this app's fundamentals provider (twice) and the Test API screen —
+ * so none of them appeared in `logs/api/`. Only the NewApp collector's
+ * `httpGet` logged. That is the same shape as the E*Trade integration before
+ * v1.1.144, and it cost exactly what it cost there: on 2026-09-11 a live EDGAR
+ * call was made specifically to confirm the configured contact address, and it
+ * left no trace to read.
+ *
+ * Applying the header and recording the call are now one operation, because a
+ * caller that remembers the first and forgets the second is invisible in the
+ * one place anybody looks.
+ */
+export async function edgarFetch(url: string): Promise<Response> {
+  const requestedAt = new Date().toISOString();
+  const started = Date.now();
+  const endpoint = (() => {
+    try { return new URL(url).pathname; } catch { return url; }
+  })();
+
+  const record = (status: number | null, bytes: number | null, error?: string, preview?: string): void => {
+    try {
+      logApiCall({
+        timestamp: requestedAt,
+        provider: 'edgar',
+        endpoint,
+        method: 'GET',
+        // The User-Agent is the point of this log line: it is the only place the
+        // configured contact is observable without opening the database.
+        requestParams: { userAgent: edgarUserAgent() },
+        responseStatus: status,
+        responseLatencyMs: Date.now() - started,
+        responseSizeBytes: bytes,
+        retryCount: 0,
+        jobRunId: null,
+        ...(error !== undefined ? { errorMessage: error } : {}),
+        ...(preview !== undefined ? { responseBodyPreview: preview } : {})
+      });
+    } catch {
+      /* a logger failure must never be the reason a provider call fails */
+    }
+  };
+
+  try {
+    const res = await fetch(url, { headers: edgarHeaders() });
+    if (res.ok) {
+      record(res.status, Number(res.headers.get('content-length')) || null);
+      return res;
+    }
+    // A failure body is what diagnosis needs; a success body is never logged.
+    const clone = res.clone();
+    const body = await clone.text().catch(() => '');
+    record(res.status, body.length || null, `HTTP ${res.status}`, body.slice(0, 300));
+    return res;
+  } catch (err) {
+    record(null, null, err instanceof Error ? err.message : String(err));
+    throw err;
+  }
 }

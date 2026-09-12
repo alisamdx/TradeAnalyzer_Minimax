@@ -22,6 +22,11 @@ export function registerSettingsRoutes(app: FastifyInstance, svc: ApiServerServi
       const defaultScreenerIndex = getSettingValue(db, 'defaultScreenerIndex') ?? 'both';
       const theme = getSettingValue(db, 'theme') ?? 'dark';
       const soundAlertsEnabled = (getSettingValue(db, 'soundAlertsEnabled') ?? 'true') !== 'false';
+      // Included deliberately: it is a courtesy contact the SEC reads off every
+      // request, not a secret, and having it here is what makes "did that
+      // setting actually save" answerable without opening the database — which
+      // from a redirected shell is exactly what must never be done.
+      const edgarContact = getSettingValue(db, 'edgarContact') ?? null;
 
       return apiOk(reply, {
         rateLimitRpm,
@@ -31,7 +36,8 @@ export function registerSettingsRoutes(app: FastifyInstance, svc: ApiServerServi
         logRetentionDays,
         defaultScreenerIndex,
         theme,
-        soundAlertsEnabled
+        soundAlertsEnabled,
+        edgarContact
         // polygonApiKey intentionally omitted
       });
     } catch (err) {
