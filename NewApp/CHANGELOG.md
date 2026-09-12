@@ -9,6 +9,19 @@ exit (06 §6).
 
 ---
 
+## `next` 0.4.6 — the build says what it is (2026-09-12)
+
+The sidebar footer now reads `v0.4.6 · core 0.6.6` above the table count and
+dictionary version, injected at build as `__APP_VERSION__` / `__CORE_VERSION__`
+from the two `package.json` files — the same mechanism as the existing app's
+status bar. Asked for while confirming a fresh install before a reset: the
+dictionary version was the only on-screen evidence of which build was running,
+and it identifies core, not this exe. Core is shown too because a TA2 binary
+bundling a stale core was indistinguishable from outside (the reason for the
+0.4.3 provenance bump). Existing app unchanged at v1.1.236.
+
+---
+
 ## B10b — bar volume was zero, and the check that reads it had never run (2026-09-12)
 
 `core` **0.6.6**, `next` **0.4.5**, dictionary **v15**; existing app **v1.1.236**.

@@ -125,6 +125,9 @@ export function App() {
           </button>
         ))}
         <div className="sidebar-foot">
+          <div title="This build of TradeAnalyzer 2, and the core it bundles">
+            {`v${__APP_VERSION__} · core ${__CORE_VERSION__}`}
+          </div>
           {tableCount > 0 ? `${tableCount} tables` : ''}
           {generation ? ` · dictionary v${generation.dictionaryVersion}` : ''}
         </div>

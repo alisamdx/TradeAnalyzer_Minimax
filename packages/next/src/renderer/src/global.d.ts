@@ -8,6 +8,10 @@ declare global {
   interface Window {
     api: NextApi;
   }
+  /** This exe's `package.json` version, injected at build (`electron.vite.config.ts`). */
+  const __APP_VERSION__: string;
+  /** The bundled `@tradeanalyzer/core` version, injected at build. */
+  const __CORE_VERSION__: string;
 }
 
 export {};
