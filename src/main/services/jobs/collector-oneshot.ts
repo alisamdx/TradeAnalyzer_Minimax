@@ -284,7 +284,13 @@ export function createCollectorOneShotJob(deps: OneShotDeps): BatchJobHandler {
               status: 'success',
               notes:
                 `backfill_bars: ${report.barsStored} bars for ${report.tickersStored}/${report.tickersAttempted} ` +
-                `tickers, ${report.splitsStored} splits; ${report.verdict.toUpperCase()}, ` +
+                `tickers, ${report.splitsStored} splits over ${report.splitPages} page(s)` +
+                // Said plainly, because a truncated split list makes every QC-204
+                // discontinuity in this run unreliable: a split we never fetched
+                // cannot explain the step it caused, and the operator would be
+                // ruling on artifacts.
+                (report.splitsTruncated ? ' — SPLIT LIST TRUNCATED, do not rule on QC-204 findings' : '') +
+                `; ${report.verdict.toUpperCase()}, ` +
                 `${report.reviewQueue.length} finding(s) awaiting a ruling.`,
               tickersAttempted: report.tickersAttempted,
               tickersUpdated: report.tickersStored,

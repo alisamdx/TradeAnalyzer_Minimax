@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.1.234] - 2026-09-11
+
+### Exactly 1,000 splits is not a number of splits
+
+`@tradeanalyzer/core` 0.6.5.
+
+The first real `backfill_bars` reported **1,293,548 bars for 1,089/1,089 tickers, 1,000 splits, RED, 512 findings**. The bars are fine. The splits are the `limit` parameter read back.
+
+- **A `limit` is a page size, not a total.** All four Polygon *list* sweeps — the backfill's five-year splits, the daily run's splits and dividends, and the whole-market short-interest sweep — asked for a limit, read the first page, and discarded `next_url`. The number a truncated list returns is the number you asked for, which is the entire tell.
+- **The detector built for this could not fire.** `captureResponse` was passed no `atProviderCap`, so **QC-008 — blocking, and written after Finnhub's 1,500-row calendar put an earnings date a quarter late — saw nothing.** A cap detector only works on the call sites that tell it a cap was hit, so the paging and the flag had to ship together.
+- **The consequence is not a short list, it is 512 bad findings.** QC-204 marks a price discontinuity `explained` only when a matching `raw_split`/`raw_dividend` row sits inside the gap. Every split past the cap turns a real corporate action into an unexplained step. **An unknown share of that review queue is artifacts, and none of it should be ruled on until the sweep is re-run** — ruling on it is exactly the wasted work the queue exists to prevent.
+
+**Fixed:** `collector/paged.ts` follows the cursor at all four sites, capturing **each page separately** — `meta_response` keeps exactly what Polygon sent, the archive stays byte-faithful, and replay is untouched because `ingestSplits`/`ingestDividends` read only `results` and needed no change. Only a `next_url`'s path and query are used and a foreign host is refused (a response body is data, never a destination); an `apiKey` echoed back in a cursor is stripped before it can reach `params_json`. Stopping early — page budget spent, cursor not advancing, cursor off-provider — now **sets** `at_provider_cap` rather than passing in silence. `BackfillReport` gains `splitPages`/`splitsTruncated`, and the batch note reads `N splits over M page(s)`, because `splitsStored` alone cannot distinguish a complete list from a truncated one.
+
+Short interest keeps its `limit: '50000'` and gains paging anyway. It is the largest list this collector asks for — every ticker FINRA publishes, across ~3 settlement dates — and 50,000 very probably does not bind. It was also very probably true that EDGAR's 1,000 and Finnhub's 1,500 did not bind, right up until they did. That path has never returned a live 200, so the first response that clears the short-interest verify note must not be one trusted unchecked.
+
+### The rule, not the four instances
+
+`polygon-paging.test.ts` fails any file under `src/collector` that calls `polygonGet` with a `limit` and does not use the sweep. It carries `fires` **and** `clean` fixtures rather than a count — a threshold is a number you can quietly tune until the suite goes green, which is the failure mode of every source scan in this repository. Comments are stripped first, for the same reason as always.
+
 ## [1.1.233] - 2026-09-11
 
 ### Three more things that had never worked once, and a precondition that wasn't wired

@@ -88,7 +88,7 @@ Ordering rationale: bars before the subset rule (it reads dollar volume); accoun
 
 Every provider call follows one path, in this order, and there is no other path (P11):
 
-1. **Call** through the host transport.
+1. **Call** through the host transport. A **list** endpoint is swept to the end of its cursor (`sweepPolygonPages`): a `limit` is a page size, not a total, so `next_url` is followed until absent and **each page is captured separately** through steps 2–3 — `meta_response` holds exactly what the provider sent and a replay re-ingests each page through the same recipe. Only the path and query of a `next_url` are used (the origin is discarded; a response body is data, never a destination). Stopping early — page budget spent, cursor not advancing, cursor pointing off-provider — sets `at_provider_cap` on the last page instead of passing in silence.
 2. **Archive**: append one JSON line `{ id, requestedAt, respondedAt, status, params, body }` to `gen-NNN/archive/<provider>/<YYYY-MM-DD>/<endpoint-slug>.jsonl.gz` (account domain: `.jsonl.enc`, encrypted line by line after compression). Flush.
 3. **Index + ingest in one transaction**: insert `meta_response` (with `sha256`, `archive_file`, `archive_offset`, `at_provider_cap`, `parse_status`), run the table's single ingestion module, insert the rows, commit.
 4. On ingestion failure: the transaction still commits the `meta_response` row with `parse_status = failed` and zero data rows. The body is in the archive; QC-001 will fire; replay after a fix recovers the rows without refetching (P4).

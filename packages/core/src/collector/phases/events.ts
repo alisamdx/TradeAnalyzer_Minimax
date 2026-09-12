@@ -8,6 +8,7 @@ import { earningsResponseAtCap } from '../../ingest/events.js';
 import { BLS_RELEASES, FOMC_CALENDAR_URL, blsScheduleUrl } from '../../ingest/macro-calendar.js';
 import { parseDailyFormIndex, dailyFormIndexUrl, submissionsAtCap } from '../../ingest/edgar.js';
 import { previousTradingDay } from '../trading-calendar.js';
+import { sweepPolygonPages } from '../paged.js';
 
 /**
  * Phase 8 — the event and macro domains (04 §2).
@@ -485,22 +486,35 @@ export async function runShortInterest(
 
   // Requested by settlement date rather than per ticker: FINRA publishes the
   // whole market twice a month, so one windowed sweep answers for everyone.
+  //
+  // Paged, and the page size deliberately left at the endpoint's own scale. This
+  // is a WHOLE-MARKET sweep — every ticker FINRA publishes, across the ~3
+  // settlement dates in a 45-day window — so it is the largest list this collector
+  // asks for, and the one where a cap would be least visible. 50,000 very probably
+  // does not bind; it was also very probably true that EDGAR's 1,000-filing cap
+  // and Finnhub's 1,500-row calendar did not bind, right up until they did. A cap
+  // that is harmless today is still a cap, and this path has never yet returned a
+  // live 200 — so the first response that clears the short-interest verify note
+  // must not be one we trusted without checking.
+  const since = addDays(run.tradingDate, -45);
   host.progress('short-interest', 0, 1, 'sweep');
-  const response = await host.polygonGet(path, {
-    'settlement_date.gte': addDays(run.tradingDate, -45),
-    limit: '50000'
+  await sweepPolygonPages(host, {
+    path,
+    params: { 'settlement_date.gte': since, limit: '50000' },
+    onPage: (page) => {
+      calls++;
+      const result = captureResponse({
+        host, db, runId: run.runId, asOfDate: run.tradingDate, provider: 'polygon',
+        endpoint: path, slug: 'short-interest',
+        params: { since, page: String(page.index + 1) },
+        response: page.response, captureRuleId: ruleId,
+        atProviderCap: page.atProviderCap,
+        recipe: recipes.shortInterest()
+      });
+      if (result.parseStatus === 'ok') stored += result.rowsWritten;
+      else failed++;
+    }
   });
-  calls++;
-
-  const result = captureResponse({
-    host, db, runId: run.runId, asOfDate: run.tradingDate, provider: 'polygon',
-    endpoint: path, slug: 'short-interest',
-    params: { since: addDays(run.tradingDate, -45) }, response, captureRuleId: ruleId,
-    recipe: recipes.shortInterest()
-  });
-
-  if (result.parseStatus === 'ok') stored += result.rowsWritten;
-  else failed++;
 
   return { stored, calls, failed };
 }

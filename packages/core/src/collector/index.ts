@@ -124,6 +124,12 @@ export type { IndexedFiling } from '../ingest/edgar.js';
 export { runBackfillBars, backfillQueueClear, BACKFILL_RULE } from './backfill.js';
 export type { BackfillReport } from './backfill.js';
 
+// Paging for Polygon list endpoints (a `limit` is a page size, not a total).
+export {
+  sweepPolygonPages, nextPolygonPage, POLYGON_LIST_PAGE_SIZE, POLYGON_MAX_PAGES
+} from './paged.js';
+export type { PolygonPage, PagedSweep, NextPage } from './paged.js';
+
 // Phase 9 (B7b). Exported alongside `runDaily` because a replay runs the
 // derivation over a rebuilt raw layer, and QC-951's equivalence check compares
 // derived rows as well as raw ones.

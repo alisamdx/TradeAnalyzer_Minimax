@@ -4,6 +4,7 @@ import { throwIfCancelled } from '../host.js';
 import { captureResponse } from '../capture.js';
 import { recipes } from '../../ingest/recipes.js';
 import { captureRuleId, type RunHandle } from '../run.js';
+import { sweepPolygonPages, POLYGON_LIST_PAGE_SIZE } from '../paged.js';
 
 /**
  * Phases 2, 3 and 4 — daily bars, the end-of-day snapshot, corporate actions
@@ -138,30 +139,61 @@ export async function runActionsPhase(
     .toISOString()
     .slice(0, 10);
 
+  // Both sweeps page. A seven-day window is nowhere near 1,000 rows today, which
+  // is exactly why it would have gone unnoticed here — the backfill's five-year
+  // window is what made the truncation visible, and this window only has to grow
+  // (or a busy ex-dividend week only has to arrive) for the same silent loss to
+  // land in the daily run. A cap that is harmless today is still a cap.
   host.progress('actions', 0, 2, 'splits');
-  const splitResponse = await host.polygonGet('/v3/reference/splits', {
-    'execution_date.gte': from, 'execution_date.lte': run.tradingDate, limit: '1000'
-  });
-  const splits = captureResponse({
-    host, db, runId: run.runId, asOfDate: run.tradingDate, provider: 'polygon',
-    endpoint: '/v3/reference/splits', slug: 'reference-splits',
-    params: { from, to: run.tradingDate }, response: splitResponse, captureRuleId: ruleId,
-    recipe: recipes.splits()
+  let splitRows = 0;
+  let splitFailed = 0;
+  await sweepPolygonPages(host, {
+    path: '/v3/reference/splits',
+    params: {
+      'execution_date.gte': from,
+      'execution_date.lte': run.tradingDate,
+      limit: String(POLYGON_LIST_PAGE_SIZE)
+    },
+    onPage: (page) => {
+      const captured = captureResponse({
+        host, db, runId: run.runId, asOfDate: run.tradingDate, provider: 'polygon',
+        endpoint: '/v3/reference/splits', slug: 'reference-splits',
+        params: { from, to: run.tradingDate, page: String(page.index + 1) },
+        response: page.response, captureRuleId: ruleId,
+        atProviderCap: page.atProviderCap,
+        recipe: recipes.splits()
+      });
+      splitRows += captured.rowsWritten;
+      if (captured.parseStatus !== 'ok') splitFailed++;
+    }
   });
 
   host.progress('actions', 1, 2, 'dividends');
-  const divResponse = await host.polygonGet('/v3/reference/dividends', {
-    'ex_dividend_date.gte': from, 'ex_dividend_date.lte': run.tradingDate, limit: '1000'
-  });
-  const dividends = captureResponse({
-    host, db, runId: run.runId, asOfDate: run.tradingDate, provider: 'polygon',
-    endpoint: '/v3/reference/dividends', slug: 'reference-dividends',
-    params: { from, to: run.tradingDate }, response: divResponse, captureRuleId: ruleId,
-    recipe: recipes.dividends()
+  let divRows = 0;
+  let divFailed = 0;
+  await sweepPolygonPages(host, {
+    path: '/v3/reference/dividends',
+    params: {
+      'ex_dividend_date.gte': from,
+      'ex_dividend_date.lte': run.tradingDate,
+      limit: String(POLYGON_LIST_PAGE_SIZE)
+    },
+    onPage: (page) => {
+      const captured = captureResponse({
+        host, db, runId: run.runId, asOfDate: run.tradingDate, provider: 'polygon',
+        endpoint: '/v3/reference/dividends', slug: 'reference-dividends',
+        params: { from, to: run.tradingDate, page: String(page.index + 1) },
+        response: page.response, captureRuleId: ruleId,
+        atProviderCap: page.atProviderCap,
+        recipe: recipes.dividends()
+      });
+      divRows += captured.rowsWritten;
+      if (captured.parseStatus !== 'ok') divFailed++;
+    }
   });
 
   return {
-    splits: { expected: 0, stored: splits.rowsWritten, failed: splits.parseStatus === 'ok' ? 0 : 1 },
-    dividends: { expected: 0, stored: dividends.rowsWritten, failed: dividends.parseStatus === 'ok' ? 0 : 1 }
+    splits: { expected: 0, stored: splitRows, failed: splitFailed },
+    dividends: { expected: 0, stored: divRows, failed: divFailed }
   };
 }

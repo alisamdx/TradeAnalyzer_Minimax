@@ -4,6 +4,7 @@ import { throwIfCancelled } from './host.js';
 import { captureResponse } from './capture.js';
 import { recipes } from '../ingest/recipes.js';
 import { beginRun, finishRun, captureRuleId, type RunHandle } from './run.js';
+import { sweepPolygonPages, POLYGON_LIST_PAGE_SIZE } from './paged.js';
 import { QC202_OHLC_ORDER, QC204_DISCONTINUITY, QC205_VOLUME_REGIME } from '../qa/checks/bars.js';
 import { runGate } from '../qa/gate.js';
 import { reviewQueue } from '../qa/operator.js';
@@ -38,6 +39,14 @@ export interface BackfillReport {
   readonly tickersFailed: number;
   readonly barsStored: number;
   readonly splitsStored: number;
+  /**
+   * How many pages the split sweep took. Reported because `splitsStored` alone
+   * cannot distinguish a complete list from a truncated one — the first backfill
+   * returned exactly 1,000, which was the `limit` parameter rather than a count.
+   */
+  readonly splitPages: number;
+  /** The split list was left incomplete. Every QC-204 ruling in this run is then suspect. */
+  readonly splitsTruncated: boolean;
   readonly reviewQueue: readonly { readonly exceptionId: number; readonly checkId: string; readonly key: string; readonly detail: string }[];
   readonly verdict: 'green' | 'amber' | 'red';
   readonly emailSent: boolean;
@@ -82,14 +91,26 @@ export async function runBackfillBars(
     // next statement could have closed, and an exception raised and immediately
     // resolved still costs the operator a reading.
     host.progress('backfill:splits', 0, 1, 'five-year split sweep');
-    const splitResponse = await host.polygonGet('/v3/reference/splits', {
-      'execution_date.gte': from, 'execution_date.lte': args.tradingDate, limit: '1000'
-    });
-    const splits = captureResponse({
-      host, db, runId: run.runId, asOfDate: args.tradingDate, provider: 'polygon',
-      endpoint: '/v3/reference/splits', slug: 'reference-splits-backfill',
-      params: { from, to: args.tradingDate }, response: splitResponse, captureRuleId: ruleId,
-      recipe: recipes.splits()
+    let splitsStored = 0;
+    const splitSweep = await sweepPolygonPages(host, {
+      path: '/v3/reference/splits',
+      params: {
+        'execution_date.gte': from,
+        'execution_date.lte': args.tradingDate,
+        limit: String(POLYGON_LIST_PAGE_SIZE)
+      },
+      onPage: (page) => {
+        host.progress('backfill:splits', page.index, page.index + 1, `split page ${page.index + 1}`);
+        const captured = captureResponse({
+          host, db, runId: run.runId, asOfDate: args.tradingDate, provider: 'polygon',
+          endpoint: '/v3/reference/splits', slug: 'reference-splits-backfill',
+          params: { from, to: args.tradingDate, page: String(page.index + 1) },
+          response: page.response, captureRuleId: ruleId,
+          atProviderCap: page.atProviderCap,
+          recipe: recipes.splits()
+        });
+        splitsStored += captured.rowsWritten;
+      }
     });
 
     let stored = 0;
@@ -164,7 +185,9 @@ export async function runBackfillBars(
       tickersStored: stored,
       tickersFailed: failed,
       barsStored: bars,
-      splitsStored: splits.rowsWritten,
+      splitsStored,
+      splitPages: splitSweep.pages,
+      splitsTruncated: splitSweep.truncated,
       reviewQueue: queue.map((q) => ({ exceptionId: q.exceptionId, checkId: q.checkId, key: q.key, detail: q.detail })),
       verdict: gate.verdict,
       emailSent,
