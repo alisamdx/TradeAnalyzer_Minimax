@@ -9,6 +9,27 @@ exit (06 §6).
 
 ---
 
+## B10b — the legacy import had never imported a row (2026-09-12)
+
+`core` **0.6.7**, `next` **0.4.7** (rebuilt on it); existing app **v1.1.237**.
+
+Its first run on gen-002 reported `0 config rows, 0 decisions` in 0 s, as a
+success. The host passed the **new generation** as `legacyDb` (`db as never`),
+so every source table read as "not present in the legacy database" — which the
+importer deliberately treats as a normal outcome. Behind it, the `etf_list`
+source queried `constituents.universe`, a column that never existed
+(`index_name`), and would have thrown the moment the first bug was fixed.
+
+Core's legacy-import test could not catch the second: its fake legacy tables
+were written from the importer's own assumptions, and it had no `constituents`
+table at all — so the ETF source was exercised in no test. The regression now
+lives in the existing app's suite, which can build the legacy database from the
+real `migrations/`. **General rule, third time this week (the brief-mode enum,
+the bar volume, now this): a fixture derived from the code under test agrees
+with the code by construction.**
+
+---
+
 ## `next` 0.4.6 — the build says what it is (2026-09-12)
 
 The sidebar footer now reads `v0.4.6 · core 0.6.6` above the table count and

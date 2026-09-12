@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.1.237] - 2026-09-12
+
+### The legacy import had never imported a row
+
+`@tradeanalyzer/core` 0.6.7, TradeAnalyzer 2 0.4.7 (rebuilt on it).
+
+Its first run on gen-002 reported `legacy_import: 0 config rows, 0 decisions` in 0 seconds — as a success.
+
+- **It was handed the wrong database.** `collector-oneshot` called `runLegacyImport(host, { legacyDb: db as never, … })`, and `db` was `host.openGenerationDb()` — the NEW generation. Every source table (`watchlists`, `conviction_stocks`, `brief_candidates`, …) was looked up there, recorded as "not present in the legacy database", and skipped. **The `as never` is what let the compiler accept it** — the same shape as the cast that hid the brief hand-off's enum mismatch in v1.1.232. The job now takes this app's database as an explicit `legacyDb` dependency, wired in `index.ts`.
+- **Behind it, a query that could never have run.** The ETF-list source read `constituents WHERE universe = 'etf'`; the column is `index_name` (migration 002). Fixing the first bug alone would have thrown "no such column" inside the import transaction. Core's test missed it because its fake legacy tables were written from the importer's own assumptions — and had no `constituents` table at all.
+
+Regression: `tests/legacy-import-real-schema.test.ts` builds the legacy database from **this app's real `migrations/`**, inserts rows in the brief's real vocabularies (all six strategies, `intraday`/`after_close`), runs the importer, and asserts no source reads as absent and every row the source query selects is read; plus source scans that the one-shot branch passes `deps.legacyDb` with no cast and that registration wires the app database. Core's fixture gains `constituents`.
+
+**Operator:** the empty import on gen-002 is harmless (configuration is versioned per import; decisions are de-duplicated). Re-queue `legacy_import` from TradeAnalyzer 2 → Jobs after installing.
+
 ## [1.1.236] - 2026-09-12
 
 ### Bar volume was stored as zero, and the check that reads it had never run

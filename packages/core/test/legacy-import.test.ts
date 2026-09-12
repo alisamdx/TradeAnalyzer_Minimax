@@ -63,6 +63,7 @@ beforeEach(() => {
     CREATE TABLE conviction_stocks (
       ticker TEXT PRIMARY KEY, price_low REAL, price_mid REAL, price_high REAL);
     CREATE TABLE screen_presets (id INTEGER PRIMARY KEY, name TEXT);
+    CREATE TABLE constituents (ticker TEXT, index_name TEXT);
     CREATE TABLE brief_candidates (
       as_of_date TEXT, slot TEXT, strategy TEXT, ticker TEXT,
       composite_score REAL, rank INTEGER, disposition TEXT);
@@ -73,6 +74,8 @@ beforeEach(() => {
       ('MSFT', 433, 409, 500),
       ('NOWT', 123, 108, 200);
     INSERT INTO screen_presets (name) VALUES ('High IV');
+    -- The ETF list, as the old app stores it: index_name, not a 'universe' column.
+    INSERT INTO constituents VALUES ('SPY', 'etf'), ('AAPL', 'sp500');
     INSERT INTO brief_candidates VALUES
       ('2026-09-01', 'intraday',    'wheel', 'WIN',  71.5, 1, 'picked'),
       ('2026-09-01', 'intraday',    'wheel', 'LOSE', 44.0, 2, 'failed_liquidity'),
@@ -124,6 +127,7 @@ describe('category 1 — user-authored configuration', () => {
 
     expect(kinds).toEqual([
       { config_kind: 'conviction_stock', n: 1 },
+      { config_kind: 'etf_list', n: 1 },
       { config_kind: 'screen_preset', n: 1 },
       { config_kind: 'watchlist', n: 2 }
     ]);

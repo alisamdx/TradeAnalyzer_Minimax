@@ -912,6 +912,8 @@ app.whenReady().then(() => {
     makeHost: makeCollectorHost,
     todayET,
     universeSources: newAppUniverseSources(db),
+    // This app's own database: what `legacy_import` reads. Not the generation.
+    legacyDb: db as unknown as import('@tradeanalyzer/core').SqliteLike,
   });
   batchService.registerJob('collector-oneshot', collectorOneShotJob, {
     dailyScheduleEnabled: false,

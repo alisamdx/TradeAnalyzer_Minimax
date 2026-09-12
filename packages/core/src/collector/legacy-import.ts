@@ -166,7 +166,12 @@ export const CONFIG_SOURCES: readonly ConfigSource[] = [
   {
     kind: 'etf_list',
     table: 'constituents',
-    query: "SELECT * FROM constituents WHERE universe = 'etf'",
+    // `index_name`, the column the old app actually has (migration 002; the ETF
+    // list is `index_name = 'etf'`, as `universe-sources.ts` reads it). This
+    // said `universe = 'etf'` — a column that has never existed — and it was
+    // never caught because the importer was handed the new generation instead
+    // of the old database until v1.1.237, so no query ever reached a real table.
+    query: "SELECT * FROM constituents WHERE index_name = 'etf'",
     keyOf: (r) => String(r['ticker'] ?? ''),
     validate: requireKey('ticker')
   },

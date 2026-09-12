@@ -44,6 +44,19 @@ export interface OneShotDeps {
   /** Supplies the universe lists for `universe_seed`, which are host-side config. */
   readonly universeSources: Parameters<typeof runUniverseSeed>[1]['sources'];
   readonly todayET: () => string;
+  /**
+   * THIS app's own database — the source `legacy_import` reads from.
+   *
+   * A dependency, not the handle the tick already holds. That handle is
+   * `host.openGenerationDb()`, and until v1.1.237 it was passed here as
+   * `legacyDb: db as never`: the importer looked for `watchlists`,
+   * `conviction_stocks`, `brief_candidates` … in the NEW generation, found none
+   * of them, recorded each as "not present in the legacy database", and
+   * reported `0 config rows, 0 decisions` as a success. It had never imported a
+   * row. The `as never` is what let the compiler accept a generation where the
+   * legacy database belonged.
+   */
+  readonly legacyDb: import('@tradeanalyzer/core').SqliteLike;
 }
 
 // `reset` is deliberately absent: TradeAnalyzer 2 performs it itself (NewApp 04
@@ -228,7 +241,8 @@ export function createCollectorOneShotJob(deps: OneShotDeps): BatchJobHandler {
           if (request.runKind === 'legacy_import') {
             // The old app's own connection is handed straight in — this job
             // runs inside that app, so there is nothing to attach (04 §7.4).
-            const report = runLegacyImport(host, { legacyDb: db as never, tradingDate });
+            // `deps.legacyDb`, never `db`: `db` is the generation being written.
+            const report = runLegacyImport(host, { legacyDb: deps.legacyDb, tradingDate });
             markJobRunning(db, request.requestId, report.runId);
             finishJob(db, host, request.requestId, {
               state: 'complete',
