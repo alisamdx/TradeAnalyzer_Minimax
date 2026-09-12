@@ -36,8 +36,12 @@ const ACTIVE_STATES = ['open', 'acknowledged', 'expired_review'] as const;
 const ALL_STATES = ['open', 'acknowledged', 'expired_review', 'accepted', 'resolved'] as const;
 const RESOLUTION_KINDS: readonly ResolutionKind[] = ['data_corrected', 'provider_fixed', 'rule_changed', 'false_positive'];
 
-/** QC-204 is the step itself, QC-205 the volume-regime shift; either can be the evidence for a reuse ruling (03 §6). */
-const REUSE_CHECKS = new Set(['QC-204', 'QC-205']);
+/**
+ * QC-204 is the step itself, QC-205 the volume-regime shift, QC-209 a dormant
+ * symbol resuming as an active one; any of them can be the evidence for a reuse
+ * ruling (03 §6).
+ */
+const REUSE_CHECKS = new Set(['QC-204', 'QC-205', 'QC-209']);
 
 interface ExceptionRow {
   exception_id: number;

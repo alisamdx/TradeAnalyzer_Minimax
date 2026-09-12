@@ -94,10 +94,11 @@ A ‡ value still gets its distribution recorded like any other (§4) — measur
 | QC-202 OHLC order | blocking | `low ≤ min(open, close)`, `max(open, close) ≤ high` violated, or any price ≤ 0 | none (mark `invalid`) |
 | QC-203 non-final bar | warning | a bar fetched before the settlement window (`is_final = 0`) was **not** re-fetched by run end | R3 re-fetch final |
 | QC-204 discontinuity | blocking | \|close/prev_close − 1\| > 40 % ‡ with no `raw_split`/`raw_dividend` (special) on the boundary | R5 whole-range re-fetch + re-check; if still present → stays open for operator (ticker reuse vs genuine move, per the volume test below) |
-| QC-205 volume regime shift | blocking | 20-day median volume after a discontinuity ≥ 15× ‡ or ≤ 1/15 the 20-day median before it (ticker-reuse signature) | none — operator decides (truncate-before-splice is an operator action, §6) |
+| QC-205 volume regime shift | blocking | 20-day median volume after a discontinuity ≥ 15× ‡ or ≤ 1/15 the 20-day median before it (ticker-reuse signature). *Revised 2026-09-12:* "20-day" means 20 **exchange sessions**, not 20 stored bars, and a window is measured only when it holds ≥ 15 bars — on a sparse series a bar-count window crossed the SOLS splice | none — operator decides (truncate-before-splice is an operator action, §6) |
 | QC-206 series consistency after re-fetch | blocking | a re-fetched series disagrees with the stored series by > 0.5 % † on any date **without** an intervening corporate action (the adjustment basis changed) | none — new rows are already appended (P1); the exception documents the basis change |
 | QC-207 gap in trading days | warning | a ticker active on both sides has no bar for a trading day in between | R2 re-fetch range |
 | QC-208 zero-volume trading day | warning | `volume = 0` on a trading day for an active ticker | none |
+| QC-209 dormant series resumes | blocking | a discontinuity (QC-204's threshold) preceded by ≥ 20 † exchange sessions with no bar, **and** followed by bars on ≥ 15 of the next 20 sessions — a dormant symbol resuming as an active one. Added 2026-09-12: the dormant-shell form of ticker reuse (SOLS, a $0.0001 shell until Solstice Advanced Materials listed on 2025-10-30), which QC-205 cannot measure because there is no 20-session volume window before the step. The second condition keeps the shell's own sparse sub-penny steps from firing | none — operator decides, as QC-205 |
 
 ### 3.4 End-of-day quotes
 

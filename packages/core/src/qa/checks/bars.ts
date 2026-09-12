@@ -1,4 +1,5 @@
-import type { CheckDefinition, Evaluation } from '../check.js';
+import type { CheckContext, CheckDefinition, Evaluation } from '../check.js';
+import { tradingDaysInRange } from '../../collector/trading-calendar.js';
 
 /**
  * Daily bar checks — 03 §3.3.
@@ -206,8 +207,23 @@ export const QC204_DISCONTINUITY: CheckDefinition = {
   }
 };
 
-/** Sessions of volume on each side of a discontinuity — 03 §3.3's "20-day median". */
+/** Exchange sessions of volume on each side of a discontinuity — 03 §3.3's "20-day median". */
 export const REGIME_WINDOW = 20;
+
+/**
+ * Bars a 20-session window must actually hold to count as measured, or — for
+ * QC-209 — to count as "trading again".
+ *
+ * **Windows are counted in exchange SESSIONS, not in stored bars.** The first
+ * rewrite took "the 20 bars either side", and on 2026-09-12 SOLS showed why that
+ * is wrong: a $0.0001 shell printing once every few weeks has 20 bars spanning
+ * two years, so its "next 20 bars" reached across the 2025-10-30 splice into
+ * Solstice Advanced Materials. Three shell-internal steps from 2024 and early
+ * 2025 all reported the same post-splice median (4,222,115). A window measured
+ * in sessions cannot cross into another entity's history; one measured in bars
+ * can cross any distance the series happens to be empty for.
+ */
+export const MIN_WINDOW_BARS = 15;
 
 function median(xs: readonly number[]): number {
   const s = [...xs].sort((a, b) => a - b);
@@ -215,34 +231,67 @@ function median(xs: readonly number[]): number {
   return s.length % 2 === 1 ? s[mid]! : (s[mid - 1]! + s[mid]!) / 2;
 }
 
-interface VolumeBar {
+export interface VolumeBar {
   readonly ticker: string;
   readonly trade_date: string;
   readonly close: number;
   readonly volume: number | null;
 }
 
-/** One ticker's series, oldest first: an evaluation per discontinuity with a full window each side. */
+/** Each bar's position on the exchange calendar; undefined for a date that is not a session. */
+function sessionsOf(series: readonly VolumeBar[], sessionIndex: ReadonlyMap<string, number>): (number | undefined)[] {
+  return series.map((b) => sessionIndex.get(b.trade_date));
+}
+
+/** Indices of the bars whose session lies in `[from, to]`, scanning outward from `start`. */
+function barsInSessions(
+  sessions: readonly (number | undefined)[],
+  start: number,
+  from: number,
+  to: number,
+  direction: -1 | 1
+): number[] {
+  const out: number[] = [];
+  for (let j = start; j >= 0 && j < sessions.length; j += direction) {
+    const s = sessions[j];
+    if (s === undefined) continue;
+    if (direction === -1 ? s < from : s > to) break;
+    if (s >= from && s <= to) out.push(j);
+  }
+  return out;
+}
+
+function isStep(prev: VolumeBar, cur: VolumeBar, stepAt: number): boolean {
+  return prev.close > 0 && Math.abs(cur.close / prev.close - 1) > stepAt;
+}
+
+/**
+ * QC-205 over one ticker's series, oldest first: an evaluation per discontinuity
+ * whose two 20-session windows each hold at least `MIN_WINDOW_BARS` volumes.
+ */
 export function volumeRegimeAroundSteps(
   series: readonly VolumeBar[],
+  sessionIndex: ReadonlyMap<string, number>,
   stepAt: number,
   minRatio: number
 ): Evaluation[] {
   const out: Evaluation[] = [];
-  const volumes = (bars: readonly VolumeBar[]): number[] =>
-    bars.map((b) => b.volume).filter((v): v is number => v !== null);
+  const sessions = sessionsOf(series, sessionIndex);
+  const volumes = (idx: readonly number[]): number[] =>
+    idx.map((j) => series[j]!.volume).filter((v): v is number => v !== null);
 
   for (let i = 1; i < series.length; i++) {
     const prev = series[i - 1]!;
     const cur = series[i]!;
-    if (prev.close <= 0 || Math.abs(cur.close / prev.close - 1) <= stepAt) continue;
+    const at = sessions[i];
+    if (at === undefined || !isStep(prev, cur, stepAt)) continue;
 
-    const before = volumes(series.slice(Math.max(0, i - REGIME_WINDOW), i));
-    const after = volumes(series.slice(i, i + REGIME_WINDOW));
-    // Not measured YET rather than measured on a short window. The check reads
-    // the whole series every run, so a step younger than 20 sessions is
-    // evaluated on the run that completes its window — never estimated early.
-    if (before.length < REGIME_WINDOW || after.length < REGIME_WINDOW) continue;
+    const before = volumes(barsInSessions(sessions, i - 1, at - REGIME_WINDOW, at - 1, -1));
+    const after = volumes(barsInSessions(sessions, i, at, at + REGIME_WINDOW - 1, 1));
+    // Not measured rather than measured thinly. A step younger than 20 sessions
+    // is measured on the run that completes its window; a step in a sparse
+    // series is never measured here — that shape is QC-209's.
+    if (before.length < MIN_WINDOW_BARS || after.length < MIN_WINDOW_BARS) continue;
 
     const b = median(before);
     const a = median(after);
@@ -257,12 +306,97 @@ export function volumeRegimeAroundSteps(
       fired: ratio >= minRatio,
       detail:
         `median volume ${ratio.toFixed(1)}x across the ${cur.trade_date} step ` +
-        `(${Math.round(b)} before, ${Math.round(a)} after) — the ticker-reuse signature`,
-      evidence: { ticker: cur.ticker, stepDate: cur.trade_date, medianBefore: b, medianAfter: a, ratio },
+        `(${Math.round(b)} before over ${before.length} sessions, ${Math.round(a)} after over ${after.length}) ` +
+        '— the ticker-reuse signature',
+      evidence: {
+        ticker: cur.ticker, stepDate: cur.trade_date, medianBefore: b, medianAfter: a, ratio,
+        barsBefore: before.length, barsAfter: after.length
+      },
       affects: [cur.trade_date]
     });
   }
   return out;
+}
+
+/**
+ * QC-209 over one ticker's series: for every discontinuity, the sessions that
+ * passed with no bar before it. Fires when that gap is long AND the symbol then
+ * trades on most of the next 20 sessions — a dormant symbol resuming as an
+ * active one. The second condition is what keeps a shell's own sparse,
+ * sub-penny steps from firing: they follow long gaps too, but nothing dense
+ * follows them.
+ */
+export function dormancyBeforeSteps(
+  series: readonly VolumeBar[],
+  sessionIndex: ReadonlyMap<string, number>,
+  stepAt: number,
+  minGap: number
+): Evaluation[] {
+  const out: Evaluation[] = [];
+  const sessions = sessionsOf(series, sessionIndex);
+
+  for (let i = 1; i < series.length; i++) {
+    const prev = series[i - 1]!;
+    const cur = series[i]!;
+    const at = sessions[i];
+    const was = sessions[i - 1];
+    if (at === undefined || was === undefined || !isStep(prev, cur, stepAt)) continue;
+
+    const gap = at - was - 1;
+    const tradedAfter = barsInSessions(sessions, i, at, at + REGIME_WINDOW - 1, 1).length;
+    const fired = gap >= minGap && tradedAfter >= MIN_WINDOW_BARS;
+    out.push({
+      key: `${cur.ticker} ${cur.trade_date}`,
+      value: gap,
+      fired,
+      detail: fired
+        ? `${gap} sessions with no bar before the ${cur.trade_date} step (last bar ${prev.trade_date}, close ` +
+          `${prev.close} → ${cur.close}), then ${tradedAfter} of the next ${REGIME_WINDOW} sessions traded ` +
+          '— a dormant symbol resuming as an active one'
+        : undefined,
+      evidence: {
+        ticker: cur.ticker, stepDate: cur.trade_date, lastBarBefore: prev.trade_date,
+        gapSessions: gap, tradedOfNext20: tradedAfter, closeBefore: prev.close, closeAfter: cur.close
+      },
+      affects: [cur.trade_date]
+    });
+  }
+  return out;
+}
+
+/**
+ * The latest observation per (ticker, trade_date) for the tickers this run
+ * wrote, grouped by ticker, with the exchange calendar indexed over the span.
+ * Latest by MAX(row_id) — the chain subset's supersession rule.
+ */
+function latestSeries(ctx: CheckContext): { readonly byTicker: VolumeBar[][]; readonly sessionIndex: Map<string, number> } {
+  const rows = ctx.db
+    .prepare(
+      `SELECT ticker, trade_date, close, volume FROM raw_daily_bar
+        WHERE row_id IN (
+          SELECT MAX(row_id) FROM raw_daily_bar
+           WHERE ticker IN (SELECT DISTINCT ticker FROM raw_daily_bar WHERE run_id = ?)
+           GROUP BY ticker, trade_date
+        )
+        ORDER BY ticker, trade_date`
+    )
+    .all(ctx.runId) as VolumeBar[];
+
+  const byTicker: VolumeBar[][] = [];
+  let from: string | undefined;
+  let to: string | undefined;
+  for (const r of rows) {
+    const last = byTicker[byTicker.length - 1];
+    if (last && last[0]!.ticker === r.ticker) last.push(r);
+    else byTicker.push([r]);
+    if (from === undefined || r.trade_date < from) from = r.trade_date;
+    if (to === undefined || r.trade_date > to) to = r.trade_date;
+  }
+  const sessionIndex = new Map<string, number>();
+  if (from !== undefined && to !== undefined) {
+    tradingDaysInRange(ctx.db, from, to).forEach((d, i) => sessionIndex.set(d, i));
+  }
+  return { byTicker, sessionIndex };
 }
 
 export const QC205_VOLUME_REGIME: CheckDefinition = {
@@ -270,13 +404,14 @@ export const QC205_VOLUME_REGIME: CheckDefinition = {
   domain: 'bars',
   severity: 'blocking',
   description:
-    'Volume regime around a discontinuity: the 20-session median volume after a close that moved more ' +
-    'than QC-204\'s threshold, against the 20-session median before it. This is the check that tells ' +
-    'the three causes apart, and it discriminates on VOLUME rather than price: ticker reuse shifts the ' +
-    'volume regime permanently by 15x or more, while a genuine violent move stays within 5x. No ' +
-    're-fetch can ever fix reuse — the provider keys by ticker too — so the operator must truncate ' +
-    'before the splice.',
-  readsTables: ['raw_daily_bar'],
+    'Volume regime around a discontinuity: the median volume over the 20 exchange sessions after a ' +
+    'close that moved more than QC-204\'s threshold, against the 20 sessions before it, measured only ' +
+    'when each window holds at least 15 bars. This is the check that tells the three causes apart, ' +
+    'and it discriminates on VOLUME rather than price: ticker reuse shifts the volume regime ' +
+    'permanently by 15x or more, while a genuine violent move stays within 5x. No re-fetch can ever ' +
+    'fix reuse — the provider keys by ticker too — so the operator must truncate before the splice. ' +
+    'A dormant symbol has no window to measure; QC-209 covers that form.',
+  readsTables: ['raw_daily_bar', 'ref_trading_day'],
   testedQuantity: 'volume_regime_ratio',
   testedUnit: 'ratio',
   thresholds: { minRegimeRatio: 15 },
@@ -285,34 +420,40 @@ export const QC205_VOLUME_REGIME: CheckDefinition = {
     'The same 2026-08-28 episode set. Ticker reuse at 76x (BNY) and 53,592x (SPCX) against genuine ' +
     'violent moves at 5.0x or less (MRNA). Two orders of magnitude apart.',
   run(ctx) {
-    // The latest observation per (ticker, trade_date), by MAX(row_id) — the chain
-    // subset's supersession rule. The first version compared the last 20 ROWS
-    // with the 20 before them, which was wrong twice over: stacked backfills
-    // made 40 rows about thirteen days, and it only ever looked at the tail, so
-    // a reuse two years back — the case this check exists for — was invisible.
-    // It never found out, because zero volumes made it evaluate nothing at all.
-    const rows = ctx.db
-      .prepare(
-        `SELECT ticker, trade_date, close, volume FROM raw_daily_bar
-          WHERE row_id IN (
-            SELECT MAX(row_id) FROM raw_daily_bar
-             WHERE ticker IN (SELECT DISTINCT ticker FROM raw_daily_bar WHERE run_id = ?)
-             GROUP BY ticker, trade_date
-          )
-          ORDER BY ticker, trade_date`
-      )
-      .all(ctx.runId) as VolumeBar[];
-
+    // The first version compared the last 20 ROWS with the 20 before them —
+    // stacked backfills made that ~13 days, and it only looked at the tail. It
+    // never found out, because zero volumes made it evaluate nothing at all.
+    const { byTicker, sessionIndex } = latestSeries(ctx);
     const stepAt = QC204_DISCONTINUITY.thresholds['maxAbsChange']!;
     const minRatio = this.thresholds['minRegimeRatio']!;
-    const out: Evaluation[] = [];
-    let start = 0;
-    for (let i = 1; i <= rows.length; i++) {
-      if (i < rows.length && rows[i]!.ticker === rows[start]!.ticker) continue;
-      out.push(...volumeRegimeAroundSteps(rows.slice(start, i), stepAt, minRatio));
-      start = i;
-    }
-    return out;
+    return byTicker.flatMap((series) => volumeRegimeAroundSteps(series, sessionIndex, stepAt, minRatio));
+  }
+};
+
+export const QC209_DORMANT_SERIES_RESUMES: CheckDefinition = {
+  id: 'QC-209',
+  domain: 'bars',
+  severity: 'blocking',
+  description:
+    'A discontinuity preceded by 20 or more exchange sessions with no bar, after which the symbol trades ' +
+    'on at least 15 of the next 20 sessions: a dormant symbol resuming as an active one. The form of ' +
+    'ticker reuse QC-205 cannot measure, because a symbol that printed a few times a year has no ' +
+    '20-session volume window before the step. Found 2026-09-12 on SOLS: a $0.0001 shell trading once ' +
+    'every few weeks until 2025-10-30, then Solstice Advanced Materials at $48.74 with ~100,000 trades a ' +
+    'day — the step that was also QC-204\'s maximum (487,399x).',
+  readsTables: ['raw_daily_bar', 'ref_trading_day'],
+  testedQuantity: 'sessions_without_bar_before_step',
+  testedUnit: 'sessions',
+  thresholds: { minGapSessions: 20 },
+  // 20 sessions (about a month) matches QC-205's window and sits far above the
+  // one-to-three-session gaps of a halt or a data hole, but it has not been set
+  // from a distribution yet: the pilot's review queue is where that happens.
+  thresholdBasis: 'working',
+  run(ctx) {
+    const { byTicker, sessionIndex } = latestSeries(ctx);
+    const stepAt = QC204_DISCONTINUITY.thresholds['maxAbsChange']!;
+    const minGap = this.thresholds['minGapSessions']!;
+    return byTicker.flatMap((series) => dormancyBeforeSteps(series, sessionIndex, stepAt, minGap));
   }
 };
 
@@ -390,5 +531,6 @@ export const BAR_CHECKS: readonly CheckDefinition[] = [
   QC203_NON_FINAL_BAR,
   QC204_DISCONTINUITY,
   QC205_VOLUME_REGIME,
-  QC207_TRADING_DAY_GAP
+  QC207_TRADING_DAY_GAP,
+  QC209_DORMANT_SERIES_RESUMES
 ];

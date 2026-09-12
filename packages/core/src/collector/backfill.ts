@@ -5,7 +5,7 @@ import { captureResponse } from './capture.js';
 import { recipes } from '../ingest/recipes.js';
 import { beginRun, finishRun, captureRuleId, type RunHandle } from './run.js';
 import { sweepPolygonPages, POLYGON_LIST_PAGE_SIZE } from './paged.js';
-import { QC202_OHLC_ORDER, QC204_DISCONTINUITY, QC205_VOLUME_REGIME } from '../qa/checks/bars.js';
+import { QC202_OHLC_ORDER, QC204_DISCONTINUITY, QC205_VOLUME_REGIME, QC209_DORMANT_SERIES_RESUMES } from '../qa/checks/bars.js';
 import { runGate } from '../qa/gate.js';
 import { reviewQueue } from '../qa/operator.js';
 import { buildStatusEmail } from '../qa/email.js';
@@ -145,7 +145,7 @@ export async function runBackfillBars(
     const gate = runGate(db, host, {
       runId: run.runId,
       tradingDate: args.tradingDate,
-      checks: [QC202_OHLC_ORDER, QC204_DISCONTINUITY, QC205_VOLUME_REGIME],
+      checks: [QC202_OHLC_ORDER, QC204_DISCONTINUITY, QC205_VOLUME_REGIME, QC209_DORMANT_SERIES_RESUMES],
       domainsExpected: { bars: { expected: tickers.length, stored } }
     });
 
@@ -213,7 +213,8 @@ export function backfillQueueClear(db: SqliteLike): {
   readonly outstanding: readonly { readonly exceptionId: number; readonly checkId: string; readonly key: string }[];
 } {
   const outstanding = reviewQueue(db)
-    .filter((q) => q.checkId === 'QC-204' || q.checkId === 'QC-205')
+    // QC-209 is ticker reuse in its dormant-shell form, so it gates exactly like QC-205.
+    .filter((q) => q.checkId === 'QC-204' || q.checkId === 'QC-205' || q.checkId === 'QC-209')
     .map((q) => ({ exceptionId: q.exceptionId, checkId: q.checkId, key: q.key }));
   return { clear: outstanding.length === 0, outstanding };
 }

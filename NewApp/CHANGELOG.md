@@ -9,6 +9,26 @@ exit (06 §6).
 
 ---
 
+## B10b — QC-205 counts sessions; QC-209 for dormant shells (2026-09-12)
+
+`core` **0.6.8**, `next` **0.4.8**; existing app **v1.1.238**. Checks only — no
+reset.
+
+Four of gen-002's 22 QC-205 findings were SOLS, three a year apart with the same
+post-step median. SOLS was a $0.0001 shell printing every few weeks until
+Solstice Advanced Materials listed on 2025-10-30 — also QC-204's 487,399x
+maximum. QC-205's windows were 20 stored bars, which on a sparse series span
+years and cross a splice. Now 20 exchange sessions, ≥ 15 bars each side.
+
+That made the real splice unmeasurable (empty before-window), so **QC-209**
+records every step's bar-less gap and fires on ≥ 20 sessions followed by trading
+on ≥ 15 of the next 20 — a dormant symbol resuming as an active one. The density
+condition is what keeps the shell's own sub-penny steps quiet. It gates pilot
+exit with QC-204/205. **A window defined by "the next N rows" is only a time
+window on a series with no holes — measure it on the calendar.**
+
+---
+
 ## B10b — the legacy import had never imported a row (2026-09-12)
 
 `core` **0.6.7**, `next` **0.4.7** (rebuilt on it); existing app **v1.1.237**.

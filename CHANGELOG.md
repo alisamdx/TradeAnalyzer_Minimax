@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.1.238] - 2026-09-12
+
+### QC-205 counts sessions, and a new check catches the dormant-shell form of ticker reuse
+
+`@tradeanalyzer/core` 0.6.8, TradeAnalyzer 2 0.4.8. No reset needed — checks only; the next daily run re-evaluates every series.
+
+Reading gen-002's 22 QC-205 findings, SOLS had four — three of them months apart, all reporting the **same** post-step median volume (4,222,115). Its bars showed why: until 2025-10-30 SOLS was a $0.0001 shell printing once every few weeks, then Solstice Advanced Materials at $48.74 with ~100,000 trades a day. That one splice is also QC-204's maximum (48.74 / 0.0001 = 487,400×).
+
+- **QC-205's windows were 20 stored bars**, so on a sparse series the "next 20 bars" reached two years ahead, across the splice, into another company. Windows are now **20 exchange sessions** either side, measured only when each holds at least 15 bars.
+- **That alone would have hidden the real SOLS splice** — its before-window is empty. **QC-209 (new, blocking)** records, for every QC-204-sized step, the sessions that passed with no bar before it, and fires when that gap is ≥ 20 **and** the symbol then trades on ≥ 15 of the next 20 sessions. The second condition keeps the shell's own sub-penny steps from firing. QC-206 was already specified (series consistency after re-fetch), so this is the next free bars id.
+- QC-209 gates pilot exit with QC-204/205 (`backfillQueueClear`), runs in the backfill gate, and is a reuse candidate in TradeAnalyzer 2's workbench.
+
+Tests: `bar-volume.test.ts` now lays every series on real sessions and adds a SOLS-shaped series: QC-205 measures none of it, QC-209 fires exactly once on the splice, and the shell's internal steps are recorded unfired.
+
 ## [1.1.237] - 2026-09-12
 
 ### The legacy import had never imported a row

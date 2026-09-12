@@ -8,12 +8,15 @@ import type { SqliteLike } from '../src/db/sqlite-like.js';
 import type { CollectorHost, ProviderResponse } from '../src/collector/host.js';
 import { beginRun, captureRuleId } from '../src/collector/run.js';
 import { runBackfillBars } from '../src/collector/backfill.js';
-import { QC205_VOLUME_REGIME, volumeRegimeAroundSteps, REGIME_WINDOW } from '../src/qa/checks/bars.js';
+import {
+  QC205_VOLUME_REGIME, QC209_DORMANT_SERIES_RESUMES, volumeRegimeAroundSteps, dormancyBeforeSteps,
+  REGIME_WINDOW, MIN_WINDOW_BARS, type VolumeBar
+} from '../src/qa/checks/bars.js';
 import { makeBarIngest, volumeOrNull } from '../src/ingest/market.js';
-import { sessionOnOrBefore } from '../src/collector/trading-calendar.js';
+import { buildTradingCalendar, sessionOnOrBefore } from '../src/collector/trading-calendar.js';
 
 /**
- * Bar volume, end to end — the 2026-09-12 finding.
+ * Bar volume, end to end — the 2026-09-12 findings.
  *
  * gen-001's AAPL bar read `volume 0` beside `transactions 1,225,501`. Polygon's
  * daily `v` is fractional (it counts fractional-share trades); the parser
@@ -21,14 +24,19 @@ import { sessionOnOrBefore } from '../src/collector/trading-calendar.js';
  * and so evaluated nothing on three backfills, and the chain subset computed
  * dollar volume as `close × 0` and admitted nobody. Every fixture before this
  * one used a whole-number volume, which is why no test saw any of it.
+ *
+ * On gen-002 the rewritten QC-205 then showed a second fault: windows counted in
+ * stored BARS let a sparse series reach across a splice (SOLS). Windows are now
+ * exchange sessions, and QC-209 covers the dormant-shell form QC-205 cannot
+ * measure. Every series here is laid on real sessions for that reason — a
+ * calendar-day series would put bars on weekends that no window can count.
  */
 
 let dir: string;
 let raw: Database.Database;
 let db: SqliteLike;
 
-const DAY = 86_400_000;
-const START = Date.parse('2026-01-05T17:00:00Z');
+const SESSIONS = buildTradingCalendar('2023-01-03', '2026-09-11').filter((r) => r.isTradingDay).map((r) => r.date);
 
 function makeHost(polygonGet: CollectorHost['polygonGet']): CollectorHost {
   return {
@@ -65,35 +73,49 @@ function seedUniverse(tickers: readonly string[]): void {
   }
 }
 
-interface Leg { readonly count: number; readonly close: number; readonly volume: number }
+/** A run of bars: `count` of them, one every `every` sessions. */
+interface Leg { readonly count: number; readonly close: number; readonly volume: number; readonly every?: number }
 
-/** A Polygon aggs body built from consecutive legs, every volume fractional. */
-function aggs(legs: readonly Leg[]): string {
-  const results: unknown[] = [];
-  let i = 0;
+/** Session dates for consecutive legs, starting at session `start`. */
+function legDates(legs: readonly Leg[], start = 0): { date: string; leg: Leg }[] {
+  const out: { date: string; leg: Leg }[] = [];
+  let s = start;
   for (const leg of legs) {
-    for (let k = 0; k < leg.count; k++, i++) {
-      results.push({ t: START + i * DAY, o: leg.close, h: leg.close, l: leg.close, c: leg.close, v: leg.volume, n: 100 });
-    }
-  }
-  return JSON.stringify({ results });
-}
-
-/** The same legs as the pure function reads them. */
-function series(legs: readonly Leg[]): { ticker: string; trade_date: string; close: number; volume: number | null }[] {
-  const out: { ticker: string; trade_date: string; close: number; volume: number | null }[] = [];
-  let i = 0;
-  for (const leg of legs) {
-    for (let k = 0; k < leg.count; k++, i++) {
-      out.push({ ticker: 'X', trade_date: new Date(START + i * DAY).toISOString().slice(0, 10), close: leg.close, volume: leg.volume });
+    for (let k = 0; k < leg.count; k++) {
+      out.push({ date: SESSIONS[s]!, leg });
+      s += leg.every ?? 1;
     }
   }
   return out;
 }
 
+/** A Polygon aggs body, every bar at 13:00 ET on a real session. */
+function aggs(legs: readonly Leg[]): string {
+  return JSON.stringify({
+    results: legDates(legs).map(({ date, leg }) => ({
+      t: Date.parse(`${date}T17:00:00Z`), o: leg.close, h: leg.close, l: leg.close, c: leg.close, v: leg.volume, n: 100
+    }))
+  });
+}
+
+/** The same legs as the pure functions read them. */
+function series(legs: readonly Leg[]): VolumeBar[] {
+  return legDates(legs).map(({ date, leg }) => ({ ticker: 'X', trade_date: date, close: leg.close, volume: leg.volume }));
+}
+
+const SESSION_INDEX: ReadonlyMap<string, number> = new Map(SESSIONS.map((d, i) => [d, i]));
+
 const REUSE: readonly Leg[] = [
   { count: 30, close: 2, volume: 1_000.5 },
   { count: 30, close: 90, volume: 5_000_000.25 }
+];
+
+/** SOLS, measured 2026-09-12: a sub-penny shell printing every few weeks, then an active listing. */
+const DORMANT_SHELL: readonly Leg[] = [
+  { count: 3, close: 0.0001, volume: 5_000, every: 30 },
+  { count: 3, close: 0.000001, volume: 4_500, every: 30 },
+  { count: 2, close: 0.0001, volume: 32_887, every: 30 },
+  { count: 40, close: 48.74, volume: 4_222_115 }
 ];
 
 beforeEach(() => {
@@ -112,14 +134,15 @@ afterEach(() => {
 describe('the bar parser keeps volume as Polygon sends it', () => {
   const ctx = { runId: 1, observedAt: 't', captureRuleId: 1 } as unknown as Parameters<ReturnType<typeof makeBarIngest>>[1];
   const ingest = makeBarIngest({ ticker: 'AAPL', fetchKind: 'backfill', adjustedAsOf: '2026-09-11' });
+  const t = Date.parse('2026-09-10T17:00:00Z');
 
   it('stores a fractional volume exactly, not as 0', () => {
-    const rows = ingest(JSON.stringify({ results: [{ t: START, c: 326.57, v: 54_321_987.35, n: 1_225_501 }] }), ctx);
+    const rows = ingest(JSON.stringify({ results: [{ t, c: 326.57, v: 54_321_987.35, n: 1_225_501 }] }), ctx);
     expect(rows[0]!.values['volume']).toBe(54_321_987.35);
   });
 
   it('stores an absent volume as null, never 0', () => {
-    const rows = ingest(JSON.stringify({ results: [{ t: START, c: 326.57 }] }), ctx);
+    const rows = ingest(JSON.stringify({ results: [{ t, c: 326.57 }] }), ctx);
     expect(rows[0]!.values['volume']).toBeNull();
   });
 
@@ -143,9 +166,9 @@ describe('the bar parser keeps volume as Polygon sends it', () => {
   });
 });
 
-describe('QC-205 measures volume AROUND each discontinuity', () => {
+describe('QC-205 measures volume AROUND each discontinuity, in sessions', () => {
   it('fires on the reuse signature with fractional volumes', () => {
-    const out = volumeRegimeAroundSteps(series(REUSE), 0.4, 15);
+    const out = volumeRegimeAroundSteps(series(REUSE), SESSION_INDEX, 0.4, 15);
     expect(out).toHaveLength(1);
     expect(out[0]!.fired).toBe(true);
     expect(out[0]!.value).toBeCloseTo(5_000_000.25 / 1_000.5, 6);
@@ -154,25 +177,33 @@ describe('QC-205 measures volume AROUND each discontinuity', () => {
   it('measures a genuine move without firing, so the distribution holds it', () => {
     const out = volumeRegimeAroundSteps(
       series([{ count: 30, close: 100, volume: 1_000_000.5 }, { count: 30, close: 50, volume: 3_000_001.5 }]),
-      0.4, 15
+      SESSION_INDEX, 0.4, 15
     );
     expect(out).toHaveLength(1);
     expect(out[0]!.fired).toBe(false);
     expect(out[0]!.value).toBeCloseTo(3, 5);
   });
 
-  it('does not estimate a step younger than a full window', () => {
-    const young = series([{ count: 30, close: 100, volume: 1_000.5 }, { count: REGIME_WINDOW - 1, close: 50, volume: 9_000_000.5 }]);
-    expect(volumeRegimeAroundSteps(young, 0.4, 15)).toEqual([]);
+  it('does not measure a step whose window holds fewer than the minimum bars', () => {
+    const young = series([{ count: 30, close: 100, volume: 1_000.5 }, { count: MIN_WINDOW_BARS - 1, close: 50, volume: 9_000_000.5 }]);
+    expect(volumeRegimeAroundSteps(young, SESSION_INDEX, 0.4, 15)).toEqual([]);
   });
 
   it('finds a step deep in the history, not only at the tail', () => {
     // The first version compared the last 20 rows with the 20 before them, so a
     // reuse two years back was invisible by construction.
     const deep = series([...REUSE, { count: 400, close: 90, volume: 5_000_000.25 }]);
-    const out = volumeRegimeAroundSteps(deep, 0.4, 15);
+    const out = volumeRegimeAroundSteps(deep, SESSION_INDEX, 0.4, 15);
     expect(out.map((e) => e.fired)).toEqual([true]);
     expect(out[0]!.affects).toEqual([deep[30]!.trade_date]);
+  });
+
+  it('never lends a sparse series a window from across a splice (SOLS)', () => {
+    // Counted in bars, the shell's steps "saw" the listing's volume months later
+    // and three of them reported the same post-splice median. Counted in
+    // sessions, none of the shell's windows holds enough bars to be measured —
+    // and neither does the splice's own before-window, which is QC-209's case.
+    expect(volumeRegimeAroundSteps(series(DORMANT_SHELL), SESSION_INDEX, 0.4, 15)).toEqual([]);
   });
 
   it('evaluates after a real backfill — Evaluated 0 is what gen-001 read on all three runs', async () => {
@@ -205,6 +236,42 @@ describe('QC-205 measures volume AROUND each discontinuity', () => {
     // One step, measured once, on the newest observation of every day.
     expect(out).toHaveLength(1);
     expect(out[0]!.value).toBeCloseTo(2_000_000.5 / 1_000.5, 6);
+  });
+});
+
+describe('QC-209 — a dormant symbol resuming as an active one', () => {
+  it('fires on the splice where a sparse shell becomes a traded listing (SOLS)', () => {
+    const out = dormancyBeforeSteps(series(DORMANT_SHELL), SESSION_INDEX, 0.4, 20);
+    const fired = out.filter((e) => e.fired);
+    expect(fired).toHaveLength(1);
+    expect(fired[0]!.evidence!['closeAfter']).toBe(48.74);
+    expect(fired[0]!.value).toBe(29);
+  });
+
+  it('records the shell\'s own sub-penny steps without firing — nothing dense follows them', () => {
+    const out = dormancyBeforeSteps(series(DORMANT_SHELL), SESSION_INDEX, 0.4, 20);
+    const inside = out.filter((e) => !e.fired);
+    // Every step is in the distribution, fired or not.
+    expect(inside.length).toBeGreaterThan(0);
+    expect(inside.every((e) => (e.value ?? 0) >= 20)).toBe(true);
+  });
+
+  it('does not fire on a genuine move in a densely traded series', () => {
+    const out = dormancyBeforeSteps(series(REUSE), SESSION_INDEX, 0.4, 20);
+    expect(out).toHaveLength(1);
+    expect(out[0]!.value).toBe(0);
+    expect(out[0]!.fired).toBe(false);
+  });
+
+  it('fires through the real backfill gate and joins the review queue', async () => {
+    seedUniverse(['SOLS']);
+    const host = makeHost(async (path): Promise<ProviderResponse> => ({
+      status: 200, body: path.includes('/splits') ? '{"results":[]}' : aggs(DORMANT_SHELL), requestedAt: 't', respondedAt: 't'
+    }));
+    const report = await runBackfillBars(host, { tradingDate: '2026-09-11' });
+    expect(report.reviewQueue.filter((q) => q.checkId === 'QC-209')).toHaveLength(1);
+    expect(report.reviewQueue.filter((q) => q.checkId === 'QC-205')).toHaveLength(0);
+    expect(QC209_DORMANT_SERIES_RESUMES.thresholds['minGapSessions']).toBe(REGIME_WINDOW);
   });
 });
 
