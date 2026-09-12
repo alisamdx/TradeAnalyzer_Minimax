@@ -675,10 +675,21 @@ app.whenReady().then(() => {
     });
     try {
       const result = writeLegacyHandoff(host, { ...payload, legacyAppVersion: app.getVersion() });
-      console.log(
+      const line =
         `[brief] legacy hand-off: ${result.candidates} candidates, ` +
-          `${result.rowsWritten} rows, ${result.stickyPinned} contracts pinned`
-      );
+        `${result.rowsWritten} rows, ${result.stickyPinned} contracts pinned`;
+      if (result.parseStatus !== 'ok') {
+        // A hand-off that parsed nothing used to print this same line with
+        // `0 rows` and nothing else — which is how it failed identically three
+        // times over two days without anyone noticing. `parse_error` on the
+        // `meta_response` row now carries the reason; this says to go and read it.
+        console.warn(
+          `${line} — PARSE ${result.parseStatus.toUpperCase()}: no candidate rows were written. ` +
+            'See `meta_response.parse_error` for the generation run just created.'
+        );
+      } else {
+        console.log(line);
+      }
     } finally {
       host.close();
     }

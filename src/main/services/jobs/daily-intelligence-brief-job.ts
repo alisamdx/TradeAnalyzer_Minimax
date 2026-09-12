@@ -755,7 +755,12 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
         // group any study of the ranking needs.
         handoffCandidates.push({
           ticker: scored.ticker,
-          mode: strategy as LegacyBriefHandoff['candidates'][number]['mode'],
+          // No cast. `LegacyHandoffCandidate.mode` is the same six-value list as
+          // `STRATEGIES`, so this assigns directly — and if the two ever diverge
+          // again the compiler says so here. A cast sat in this spot and is the
+          // reason a vocabulary mismatch shipped: it silenced the one check that
+          // would have caught `income` having no home in the dictionary enum.
+          mode: strategy,
           consideredRank: i + 1,
           survived: disposition === 'picked',
           compositeScore: scored.compositeScore,

@@ -13,7 +13,30 @@ import { defineTable } from '../standard-columns.js';
  * `daily_briefs` could not be made to answer.
  */
 
-const LEGACY_MODES = ['wheel', 'buy', 'options', 'bullish', 'bearish'] as const;
+/**
+ * The existing app's **scoring strategies** — the vocabulary its brief actually
+ * labels a candidate with (`scoring-service.ts` `STRATEGIES`).
+ *
+ * Drafted at B8 as `['wheel', 'buy', 'options', 'bullish', 'bearish']`, copied
+ * from CLAUDE.md's prose description of the *analysis* engine rather than from
+ * either source type — and it matched neither. The analysis engine's value is
+ * `options_income`, the brief's is `income`, and `'options'` was an orphan
+ * nothing has ever written or could write.
+ *
+ * The cost of that: **every hand-off failed from the day the contract shipped.**
+ * The brief scores all six strategies each run, so every payload carried
+ * `income` candidates, every insert violated this CHECK inside the write
+ * transaction, and `indexAndIngest` recorded `parse_status = 'failed'` with zero
+ * rows — three for three across two core versions, silently, because a manual
+ * run is not gate-evaluated and the parse error was computed and discarded.
+ * `legacy_brief_candidate` held 0 rows the whole time.
+ *
+ * Defined from the source list, not from prose, and `LegacyHandoffCandidate.mode`
+ * mirrors it so the compiler checks the two against each other — the previous
+ * shape was reachable only through an `as` cast at the hand-off site, which is
+ * precisely what stopped the compiler from reporting this.
+ */
+const LEGACY_MODES = ['wheel', 'bullish', 'bearish', 'income', 'buy', 'inflection'] as const;
 
 export const derivedLegacyTables: readonly TableEntry[] = [
   defineTable({

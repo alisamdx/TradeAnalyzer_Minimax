@@ -255,6 +255,18 @@ export const metaTables: readonly TableEntry[] = [
       },
       col.enumOf('parse_status', ['ok', 'partial', 'failed'], 'How ingestion went. A failed parse still keeps the archive row — that is the point of archiving first.', { sourceProvider: 'collector' }),
       nullable(col.int('parsed_row_count', 'How many rows ingestion produced from this response. AC-5 compares this to what is stored.'), 'not parsed yet, or the parse failed before counting'),
+      nullable(
+        col.text(
+          'parse_error',
+          'Why ingestion failed, when it did — the parser\'s own message, or the HTTP status for a ' +
+            'non-2xx. Until v14 this was computed and **thrown away**: `parse_status` said *that* a ' +
+            'parse failed and nothing said *why*. The legacy brief hand-off then failed identically ' +
+            'three times over two days, writing zero rows each time, and recovering the reason took ' +
+            'an hour of reading source instead of one query. A failure that cannot explain itself is ' +
+            'a failure somebody has to re-derive.'
+        ),
+        'the parse succeeded, or the response was never parsed'
+      ),
       // LAST, and deliberately without a `references` clause. `applyDictionary`
       // adds a column to a populated table with a bare `ALTER TABLE … ADD
       // COLUMN <type>`, so a declared foreign key would leave the stored DDL

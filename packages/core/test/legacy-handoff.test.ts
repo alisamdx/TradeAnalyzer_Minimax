@@ -90,8 +90,13 @@ function handoff(over: Partial<LegacyBriefHandoff> = {}): LegacyBriefHandoff {
         critic: { verdict: 'pass', rationale: 'fine', contextJson: '{}', model: 'claude-opus-5' }
       },
       {
+        // **Deliberately `income`.** Every fixture in this file used `wheel`
+        // until v14, which sits inside the four values the dictionary enum and
+        // the brief's `STRATEGIES` happened to share — so no test could reach
+        // the mismatch that made every real hand-off fail. A fixture drawn from
+        // the overlap of two vocabularies cannot test that they agree.
         ticker: 'LOSE',
-        mode: 'wheel',
+        mode: 'income',
         consideredRank: 2,
         survived: false,
         compositeScore: 44.0,

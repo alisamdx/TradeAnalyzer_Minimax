@@ -87,6 +87,48 @@ workspace links; a pin would recreate the trap on the next core bump), and
 `packages/next/test/workspace-versions.test.ts` pins both. The packaged 0.4.1
 exe is unaffected: the bundle comes from the workspace link either way.
 
+## B10b — every brief hand-off had failed since the contract shipped (2026-09-11)
+
+`core` 0.6.3, dictionary **v14**, existing app **v1.1.232**.
+
+Three hand-offs exist — 9/10 evening, 9/11 morning, 9/11 evening — and every one
+wrote **zero rows**. `legacy_brief_candidate`: 0 rows, since B8.
+
+**One vocabulary, two spellings.** `legacy_brief_candidate.mode` holds the
+existing app's *scoring strategy*. The dictionary declared
+`['wheel', 'buy', 'options', 'bullish', 'bearish']` — taken from CLAUDE.md's
+prose about the **analysis** engine, and matching neither real list: the analysis
+engine's value is `options_income`, the brief's is `income`, and `'options'` was
+an orphan nothing could ever write. The brief scores all six strategies every
+run, so every payload carried `income`, every insert violated the CHECK inside
+the write transaction, and the capture recorded `parse_status = 'failed'` with
+zero rows. Deterministic from the first hand-off.
+
+**Four things had to line up for it to stay invisible**, and each is now closed:
+
+1. A hand-off runs as a **manual** run, and manual runs are not gate-evaluated →
+   **QC-010** (warning) checks that a hand-off which arrived was ingested.
+2. The parse error was computed and **discarded** → **`meta_response.parse_error`**.
+3. The caller logged `0 rows` as though it were a result → it **warns** now.
+4. The pins still landed — `pinSticky` reads `c.legs` and never touches `mode` —
+   so 141 pinned contracts sat beside an empty table, which reads like success.
+
+**Why no test caught it:** every fixture used `mode: 'wheel'`, inside the four
+values the two lists happened to share. **A fixture drawn from the overlap of two
+vocabularies cannot test that they agree.** And an `as` cast at the hand-off site
+silenced the compiler. Both are gone; the new test reads `STRATEGIES` from the
+existing app's own source rather than restating it, because a restatement would
+agree with a copy.
+
+**The knock-on, previously misattributed:** `recommended_by_legacy` admissions
+read `legacy_brief_candidate`, so that whole admission path was dead. The chain
+subset sitting at one ticker was blamed entirely on the 20-bar dollar-volume
+rule; that was half of it.
+
+**Cost to fix: none.** The table is empty, so the enum change is a clean rebuild
+on next open — no new generation, and the pilot clock is untouched. The three
+archived payloads replay back in after Monday's run.
+
 ## B10b, day 0 — the collector's Finnhub calls carried no key (2026-09-11)
 
 Existing app **v1.1.223**; `core` unchanged. Every Finnhub call on gen-001's

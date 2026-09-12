@@ -42,7 +42,12 @@ export interface LegacyHandoffLeg {
 
 export interface LegacyHandoffCandidate {
   readonly ticker: string;
-  readonly mode: 'wheel' | 'buy' | 'options' | 'bullish' | 'bearish';
+  /**
+   * The existing app's scoring strategy, verbatim. Must stay identical to
+   * `LEGACY_MODES` in the dictionary — the two are the same vocabulary, and the
+   * hand-off failed from day one because they were not.
+   */
+  readonly mode: 'wheel' | 'bullish' | 'bearish' | 'income' | 'buy' | 'inflection';
   readonly consideredRank: number;
   readonly survived: boolean;
   readonly compositeScore: number | null;

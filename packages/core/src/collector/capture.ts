@@ -225,8 +225,9 @@ export function indexAndIngest(args: IndexArgs): CaptureResult {
           `INSERT INTO meta_response (
              run_id, provider, endpoint, params_json, requested_at, responded_at, http_status,
              byte_length, archive_file, archive_offset, sha256, dedup_hash, encrypted,
-             at_provider_cap, parse_status, parsed_row_count, ingest_recipe_id, capture_rule_id
-           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+             at_provider_cap, parse_status, parsed_row_count, ingest_recipe_id, capture_rule_id,
+             parse_error
+           ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
         )
         .run(
           args.runId,
@@ -246,7 +247,10 @@ export function indexAndIngest(args: IndexArgs): CaptureResult {
           status,
           count,
           recipeId,
-          args.captureRuleId
+          args.captureRuleId,
+          // Recorded, not just returned. `parseError` reaches the caller on the
+          // result object, and every caller so far has dropped it.
+          parseError ?? null
         ).lastInsertRowid
     );
 

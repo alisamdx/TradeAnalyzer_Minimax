@@ -64,7 +64,7 @@ function dailyRun(date: string): number {
   const id = nextRun++;
   raw.prepare(
     `INSERT INTO meta_run (run_id, run_kind, slot, trading_date, started_at, status, host_app, host_version, collector_version, dictionary_version)
-     VALUES (?, 'daily', 'after_close', ?, ?, 'complete', 'test', '0', '0', 13)`
+     VALUES (?, 'daily', 'after_close', ?, ?, 'complete', 'test', '0', '0', 14)`
   ).run(id, date, `${date}T17:05:00-04:00`);
   return id;
 }
@@ -206,7 +206,7 @@ describe('the pilot-exit reviews', () => {
   });
 });
 
-describe('dictionary v13 on a generation that already holds rows', () => {
+describe('the v13 growth step on a generation that already holds rows', () => {
   it('is plain growth: two new tables and one nullable column, and no drift afterwards', () => {
     // gen-001 meets this change populated, with its meta_generation row written.
     const older: TableEntry[] = DICTIONARY

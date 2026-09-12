@@ -191,9 +191,64 @@ export const QC009_DUPLICATE_NATURAL_KEY: CheckDefinition = {
   }
 };
 
+export const QC010_LEGACY_HANDOFF_PARSED: CheckDefinition = {
+  id: 'QC-010',
+  domain: 'cross_cutting',
+  severity: 'warning',
+  description:
+    'A legacy brief hand-off that arrived was ingested. The hand-off is the existing app\'s only ' +
+    'contact with the collector and it feeds chain-subset admission — a `recommended_by_legacy` ' +
+    'member is admitted by reading `legacy_brief_candidate`. It failed on every attempt from the ' +
+    'day the contract shipped (a vocabulary mismatch on `mode`), wrote zero rows each time, and ' +
+    'nothing said so: the hand-off runs as a MANUAL run, and a manual run is not gate-evaluated. ' +
+    '**Warning, not blocking**: a day the brief did not run is not a collector fault, and the ' +
+    'check is silent when no hand-off was attempted — "none arrived" and "one arrived broken" are ' +
+    'different facts and must not look alike.',
+  readsTables: ['meta_response'],
+  testedQuantity: null,
+  testedUnit: null,
+  thresholds: {},
+  thresholdBasis: 'not_applicable',
+  run(ctx) {
+    // Every hand-off for this trading date, not only this run's: the hand-off
+    // lands in its own manual run, so scoping to `run_id` would evaluate nothing
+    // on the daily run that actually reaches the gate.
+    const handoffs = ctx.db
+      .prepare(
+        `SELECT r.source_response_id, r.parse_status, r.parsed_row_count, r.parse_error
+           FROM meta_response r JOIN meta_run n ON n.run_id = r.run_id
+          WHERE r.endpoint = 'legacy/brief-handoff' AND n.trading_date = ?`
+      )
+      .all(ctx.tradingDate) as {
+      source_response_id: number;
+      parse_status: string;
+      parsed_row_count: number | null;
+      parse_error: string | null;
+    }[];
+
+    if (handoffs.length === 0) return [];
+
+    return handoffs.map((h) => ({
+      key: String(h.source_response_id),
+      fired: h.parse_status !== 'ok',
+      detail:
+        h.parse_status === 'ok'
+          ? undefined
+          : `the brief hand-off did not ingest (${h.parse_status}): ${h.parse_error ?? 'no reason recorded'}`,
+      evidence: {
+        sourceResponseId: h.source_response_id,
+        parseStatus: h.parse_status,
+        parsedRowCount: h.parsed_row_count,
+        parseError: h.parse_error
+      }
+    }));
+  }
+};
+
 export const CROSS_CUTTING_CHECKS: readonly CheckDefinition[] = [
   QC001_PROVENANCE,
   QC004_NULL_DISCIPLINE,
   QC008_PROVIDER_CAP,
-  QC009_DUPLICATE_NATURAL_KEY
+  QC009_DUPLICATE_NATURAL_KEY,
+  QC010_LEGACY_HANDOFF_PARSED
 ];

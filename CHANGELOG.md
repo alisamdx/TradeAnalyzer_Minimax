@@ -1,5 +1,30 @@
 # Changelog
 
+## [1.1.232] - 2026-09-11
+
+### Every brief hand-off has failed since the contract shipped
+
+`@tradeanalyzer/core` 0.6.3, dictionary **v14**.
+
+The hand-off is the brief's only contact with the collector. It has run three times — 9/10 evening, 9/11 morning, 9/11 evening — and **every one wrote zero rows**. `legacy_brief_candidate` holds 0 rows.
+
+- **Cause: two spellings of one vocabulary.** `legacy_brief_candidate.mode` stores the brief's scoring strategy, but the dictionary enum was `['wheel', 'buy', 'options', 'bullish', 'bearish']` — taken from CLAUDE.md's prose about the *analysis* engine, and matching neither source. The analysis engine's value is `options_income`; the brief's is `income`; `'options'` was an orphan nothing could write. The brief scores all six strategies every run, so every payload carried `income`, every insert violated the CHECK inside the write transaction, and the capture recorded `parse_status = 'failed'` with zero rows.
+- **Why nobody saw it.** A hand-off runs as a *manual* run and manual runs are not gate-evaluated; the parse error was computed and then discarded; and the caller logged `0 rows` to a console nobody reads. Three identical silent failures.
+- **Why the tests passed.** Every fixture used `mode: 'wheel'` — inside the four values the two lists happened to share. **A fixture drawn from the overlap of two vocabularies cannot test that they agree.** And an `as` cast at the hand-off site silenced the compiler that would otherwise have caught it outright.
+- **The knock-on.** `recommended_by_legacy` admissions read `legacy_brief_candidate`, so the chain subset lost that entire admission path — which is the second half of why it sits at one ticker. The 20-bar dollar-volume rule was only the first half.
+
+**Fixed:** the enum is defined from the brief's `STRATEGIES` (`wheel, bullish, bearish, income, buy, inflection`), `LegacyHandoffCandidate.mode` mirrors it, and the cast is gone so the compiler checks the two against each other. `legacy_brief_candidate` is empty, so the change applies as a clean rebuild on next open — **no new generation, and the pilot clock is untouched.**
+
+### Three observability fixes, each of which would have caught it alone
+
+- **`meta_response.parse_error`** (new, nullable) — the reason was computed and thrown away, so `parse_status` said *that* a parse failed and nothing said *why*. Recovering it took an hour of reading source instead of one query.
+- **The hand-off caller warns** when `parseStatus !== 'ok'` and names where to look, instead of printing `0 rows` as though it were a result.
+- **QC-010 (new, warning)** — a hand-off that arrived was ingested. Deliberately not blocking: a day the brief did not run is not a collector fault, and the check is silent when none arrived, so "none" and "one arrived broken" cannot look alike.
+
+### Tests
+
+`legacy-mode-vocabulary.test.ts` (new): the enum equals the brief's `STRATEGIES`, read from *its* source rather than restated; no enum value exists that the brief cannot produce; and the v14 rebuild applies on an empty table without cascading its four foreign-key children away — the risk `PRAGMA foreign_keys = OFF` being a no-op inside a transaction creates. The hand-off fixture now uses `income`.
+
 ## [1.1.231] - 2026-09-11
 
 ### The IV bootstrap would have run unauthenticated and unpaced
