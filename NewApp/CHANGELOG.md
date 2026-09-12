@@ -61,6 +61,13 @@ corrected. `packages/core/test/provider-paths.test.ts` now fails any collector
 path carrying an unreplaced `vX` / `vN` / `v{…}`, with a fixture proving the scan
 is not vacuous.
 
+## `next` 0.4.3 — rebuilt on `core` 0.6.3, dictionary v14 (2026-09-11)
+
+Provenance bump, as below. This one carries a **dictionary change**: whichever
+application opens the generation first applies v14 — `legacy_brief_candidate`
+rebuilt with the corrected `mode` enum (it is empty, so a clean rebuild) and
+`meta_response.parse_error` added as a nullable column.
+
 ## `next` 0.4.2 — rebuilt on `core` 0.6.2 (2026-09-11)
 
 Same provenance-only bump as 0.4.1 below, for `core` 0.6.2.
