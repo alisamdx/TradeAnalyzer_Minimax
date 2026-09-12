@@ -3,7 +3,7 @@
 // Bottom panel: run history for selected job.
 // v0.33.0 — Orchestrator: dedicated config modal, trigger/slotTime in history, excluded from sequence.
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import type { BatchJob, BatchRun, BatchProgressEvent, OrchestratorJobConfig } from '@shared/types.js';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -357,6 +357,113 @@ function OrchestratorEditModal({ job, allJobs, onSave, onClose }: OrchestratorEd
   );
 }
 
+// ─── Run notes / error ────────────────────────────────────────────────────────
+
+/**
+ * How much of a run's note the history cell shows before the modal is needed.
+ *
+ * The text was never lost — `batch_runs.notes` is an unbounded TEXT column and
+ * the whole row reaches the renderer — but the cell truncated at 60 characters
+ * and offered the rest only through a `title` tooltip. **A native tooltip cannot
+ * be selected, scrolled or copied**, so a long note was effectively unreadable:
+ * the collector one-shots put a whole gate summary there (bars, tickers, split
+ * pages, verdict, finding count), which is exactly the text worth keeping.
+ */
+const PREVIEW_CHARS = 60;
+
+export function notePreview(run: Pick<BatchRun, 'notes' | 'errorMessage'>): string {
+  const text = run.errorMessage ?? run.notes ?? '';
+  return text.length > PREVIEW_CHARS ? `${text.slice(0, PREVIEW_CHARS)}…` : text;
+}
+
+/** What Copy puts on the clipboard: both fields, labelled, when a run has both. */
+export function runNotesText(run: Pick<BatchRun, 'notes' | 'errorMessage'>): string {
+  const parts: string[] = [];
+  if (run.errorMessage) parts.push(`Error: ${run.errorMessage}`);
+  if (run.notes) parts.push(run.notes);
+  return parts.join('\n\n');
+}
+
+function noteBoxStyle(color: string): CSSProperties {
+  return {
+    margin: 0,
+    padding: 12,
+    background: '#131b2e',
+    border: '1px solid #2d3748',
+    borderRadius: 6,
+    color,
+    fontSize: 12,
+    lineHeight: 1.5,
+    // Wrap rather than clip, and stay selectable — the two properties whose
+    // absence is the whole bug.
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
+    userSelect: 'text',
+    maxHeight: 320,
+    overflowY: 'auto',
+  };
+}
+
+function RunNotesModal({ run, onClose }: { run: BatchRun; onClose: () => void }) {
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const copy = () => {
+    void navigator.clipboard.writeText(runNotesText(run)).then(() => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    });
+  };
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 10000,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: '#1e2535', border: '1px solid #2d3748', borderRadius: 10,
+          padding: 24, minWidth: 480, maxWidth: 760,
+        }}
+      >
+        <h3 style={{ margin: '0 0 4px', color: '#ecf0f1' }}>Run details</h3>
+        <div style={{ color: '#95a5a6', fontSize: 12, marginBottom: 16 }}>
+          {formatTime(run.startedAt)} · {run.status} · {formatDuration(run.startedAt, run.completedAt)}
+        </div>
+
+        {run.errorMessage && (
+          <>
+            <div style={{ color: '#e74c3c', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Error</div>
+            <pre style={noteBoxStyle('#e74c3c')}>{run.errorMessage}</pre>
+          </>
+        )}
+        {run.notes && (
+          <>
+            <div style={{ color: '#89b4fa', fontSize: 12, fontWeight: 600, margin: run.errorMessage ? '12px 0 6px' : '0 0 6px' }}>
+              Notes
+            </div>
+            <pre style={noteBoxStyle('#ecf0f1')}>{run.notes}</pre>
+          </>
+        )}
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+          <button className="batch-btn" onClick={copy}>{copied ? '✓ Copied' : '⧉ Copy'}</button>
+          <button className="batch-btn" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main view ────────────────────────────────────────────────────────────────
 
 const MAX_LIVE_EVENTS = 300;
@@ -366,6 +473,7 @@ export function BatchView() {
   const [runs, setRuns] = useState<BatchRun[]>([]);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [editJob, setEditJob] = useState<BatchJob | null>(null);
+  const [noteRun, setNoteRun] = useState<BatchRun | null>(null);
   const [loading, setLoading] = useState(true);
   const [runningJobId, setRunningJobId] = useState<string | null>(null);
   const [liveEvents, setLiveEvents] = useState<BatchProgressEvent[]>([]);
@@ -812,13 +920,17 @@ export function BatchView() {
                     <td style={{ color: '#95a5a6', textAlign: 'center' }}>{run.tickersSkipped || '—'}</td>
                     <td style={{ color: run.tickersFailed > 0 ? '#e74c3c' : '#95a5a6', textAlign: 'center' }}>{run.tickersFailed || '—'}</td>
                     <td style={{ color: '#95a5a6', fontSize: 12, maxWidth: 300, overflow: 'hidden' }}>
-                      {run.errorMessage ? (
-                        <span title={run.errorMessage} style={{ color: '#e74c3c', cursor: 'help' }}>
-                          {run.errorMessage.slice(0, 60)}{run.errorMessage.length > 60 ? '…' : ''}
-                        </span>
-                      ) : run.notes ? (
-                        <span title={run.notes}>
-                          {run.notes.slice(0, 60)}{run.notes.length > 60 ? '…' : ''}
+                      {(run.errorMessage ?? run.notes) ? (
+                        <span
+                          onClick={() => setNoteRun(run)}
+                          title="Click for the full text"
+                          style={{
+                            color: run.errorMessage ? '#e74c3c' : '#95a5a6',
+                            cursor: 'pointer',
+                            textDecoration: 'underline dotted',
+                          }}
+                        >
+                          {notePreview(run)}
                         </span>
                       ) : '—'}
                     </td>
@@ -921,6 +1033,9 @@ export function BatchView() {
           </div>
         );
       })()}
+
+      {/* ── Run notes / error modal ── */}
+      {noteRun && <RunNotesModal run={noteRun} onClose={() => setNoteRun(null)} />}
 
       {/* ── Edit modal ── */}
       {editJob && (

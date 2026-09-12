@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.1.235] - 2026-09-12
+
+### The batch note was readable to character 60 and no further
+
+Reported from use, immediately after v1.1.234 made that note the thing you actually need to read.
+
+- **Nothing was ever lost.** `batch_runs.notes` is an unbounded `TEXT` column (migration 020), the service writes `result.notes` whole, and `BatchRun.notes` reaches the renderer intact. The Batch view's history cell rendered `notes.slice(0, 60)` and put the remainder in a `title` attribute — and **a native tooltip cannot be selected, scrolled or copied.** So the text was present in the process and unreachable by the operator.
+- **It cut away precisely the part worth reading.** The collector one-shots write a whole gate summary into that note, and every operative number — the verdict and the finding count — sits past character 60. `backfill_bars: 1293548 bars for 1089/1089 tickers, 1000 splits over 1 page(s); …` is where the preview ends.
+
+**Fixed:** the Notes / Error cell is now a click target (dotted underline, pointer cursor) opening a modal with the full text — wrapped, scrollable, selectable — plus a **Copy** button that puts the note on the clipboard, both fields labelled when a run has an error and a note. Escape and a click outside close it, and it reuses this file's existing modal and `navigator.clipboard` conventions rather than introducing new ones.
+
+Deliberately a modal, not an inline row expander: the run-history pane is a fixed 160px scroll region chosen so the layout cannot shift, and expanding in place would fight a constraint someone set on purpose.
+
+`tests/batch-run-notes.test.ts` pins the split — `notePreview` truncates, `runNotesText` is lossless — using the real 2026-09-11 backfill note as its fixture, with an explicit length assertion so the truncation tests cannot pass on a short string for the wrong reason.
+
 ## [1.1.234] - 2026-09-11
 
 ### Exactly 1,000 splits is not a number of splits
