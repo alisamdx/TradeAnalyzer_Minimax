@@ -9,6 +9,21 @@ exit (06 §6).
 
 ---
 
+## B10b — short-interest source decided (2026-09-12)
+
+Docs only; no build. **Polygon first, FINRA as the fallback** (operator
+decision), recorded in 02 §12 and as a revision under Q21. Polygon's
+`/stocks/v1/short-interest` is documented in every Stocks plan with this
+table's fields exactly; FINRA is the same data behind a login with one rolling
+year online. Dropping the domain was rejected — the existing app has never had
+short interest at all. The "no confirmed free source" note began with a
+placeholder path's 404 (fixed v1.1.226), and the corrected call has most likely
+never run, because the step skips on an empty chain subset (empty until
+v1.1.236). **The verify marker comes off only after the first live 200** —
+expected on Monday's daily run; the subset skip goes in the same change.
+
+---
+
 ## B10b — QC-205 counts sessions; QC-209 for dormant shells (2026-09-12)
 
 `core` **0.6.8**, `next` **0.4.8**; existing app **v1.1.238**. Checks only — no
