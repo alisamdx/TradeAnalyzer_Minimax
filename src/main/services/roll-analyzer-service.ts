@@ -15,6 +15,7 @@ import type { OptionsProvider, OptionContract } from './options-provider.js';
 import type {
   RollPositionInput, RollMetric, RollAnalysis, RollCandidate,
   RollCurrentState, RollRecommendation, RollDirection,
+  Rollability, RollabilityHorizon, RollabilityVerdict,
 } from '@shared/types.js';
 
 // Scan parameters — kept deliberately modest so a run stays within a handful of
@@ -125,6 +126,127 @@ export function buildRollCandidates(
   return out.slice(0, MAX_CANDIDATES);
 }
 
+// ─── Rollability (Bec's check — docs/Bec/STRATEGY-SUMMARY.md §6b, §9.1) ──────────
+//
+// "Look at the cost to buy back the in-the-money option, then look forward one week, two
+// weeks, a month: how many strikes can that same credit buy you? That tells you how far into
+// the future you would have to go to get back above your break-even. If the answer is a year,
+// the trade is a trap." Pure chain arithmetic; it ranks and gates nothing.
+// see docs/formulas.md#rollability
+
+/** Roll horizons, in calendar days ADDED beyond the current expiry. */
+export const ROLLABILITY_HORIZON_DAYS = [7, 14, 30, 60, 90, 180, 365] as const;
+/** Verdict bands in weeks. Working values from Bec's "a year is a trap" — not validated. */
+export const ROLLABILITY_EASY_WEEKS = 4;
+export const ROLLABILITY_WORKABLE_WEEKS = 13;
+/** Scanning at least this far without reaching the target is a trap, not "unknown". */
+const ROLLABILITY_TRAP_SCAN_DAYS = 180;
+
+/**
+ * The listed expirations nearest to each horizon, later than the current one. Deduplicated, so
+ * a sparse listing (few far-dated expiries) costs fewer chain calls, never duplicate ones.
+ */
+export function pickRollabilityExpirations(expirations: readonly string[], currentDte: number, now = Date.now()): string[] {
+  const later = expirations
+    .map((e) => ({ e, added: dteDays(e, now) - currentDte }))
+    .filter((x) => x.added > 2);
+  const picked = new Set<string>();
+  for (const h of ROLLABILITY_HORIZON_DAYS) {
+    let best: { e: string; added: number } | undefined;
+    for (const x of later) {
+      if (!best || Math.abs(x.added - h) < Math.abs(best.added - h)) best = x;
+    }
+    if (best) picked.add(best.e);
+  }
+  return [...picked].sort();
+}
+
+/**
+ * How far out a credit roll has to go before the strike reaches safety.
+ *
+ * Target: a covered call's stock cost basis when given (called away without a loss), else the
+ * underlying price (back out of the money); a short put's underlying price (strike at or below
+ * spot — a lower assignment price, Bec's second roll guarantee). For each later expiry, the best
+ * strike is the most-improved one (lower for a put, higher for a call) whose sell-to-open mid
+ * still exceeds the buy-to-close mark, i.e. a net credit.
+ */
+export function computeRollability(
+  input: RollPositionInput,
+  currentMark: number,
+  currentDte: number,
+  underlyingPrice: number | null,
+  chains: { expiration: string; contracts: OptionContract[] }[],
+  now = Date.now(),
+): Rollability {
+  const isPut = input.optionType === 'put';
+  const target = !isPut && input.costBasis != null && input.costBasis > 0
+    ? input.costBasis
+    : underlyingPrice;
+  const targetKind: Rollability['targetKind'] = target == null
+    ? null
+    : !isPut && input.costBasis != null && input.costBasis > 0 ? 'cost_basis' : 'underlying';
+  const improvementOf = (strike: number): number => (isPut ? input.strike - strike : strike - input.strike);
+  const reaches = (strike: number): boolean => target != null && (isPut ? strike <= target : strike >= target);
+  const atTarget = target != null && reaches(input.strike);
+
+  const horizons: RollabilityHorizon[] = [];
+  for (const chain of [...chains].sort((a, b) => a.expiration.localeCompare(b.expiration))) {
+    const dte = dteDays(chain.expiration, now);
+    if (dte <= currentDte) continue;
+    const side = chain.contracts.filter((c) => c.side === input.optionType);
+    let best: OptionContract | undefined;
+    for (const c of side) {
+      if (!(c.bid > 0) || !(c.ask > 0)) continue;
+      if (improvementOf(c.strike) < 0) continue; // a worse strike is not a repair
+      if (mid(c.bid, c.ask) - currentMark <= 0) continue; // credit rolls only
+      if (!best || improvementOf(c.strike) > improvementOf(best.strike)) best = c;
+    }
+    const improvement = best ? improvementOf(best.strike) : null;
+    const gained = improvement == null
+      ? 0
+      : new Set(side.map((c) => c.strike).filter((s) => improvementOf(s) > 0 && improvementOf(s) <= improvement)).size;
+    horizons.push({
+      expiration: chain.expiration,
+      dte,
+      addedDte: dte - currentDte,
+      bestStrike: best?.strike ?? null,
+      strikesGained: gained,
+      improvement,
+      netCreditPerShare: best ? mid(best.bid, best.ask) - currentMark : null,
+      reachesTarget: best != null && reaches(best.strike),
+    });
+  }
+
+  const first = horizons.find((h) => h.reachesTarget);
+  const weeksToTarget = atTarget ? 0 : first ? Math.round((first.addedDte / 7) * 10) / 10 : null;
+  const scanned = horizons.reduce((m, h) => Math.max(m, h.addedDte), 0);
+
+  let verdict: RollabilityVerdict;
+  let summary: string;
+  if (target == null) {
+    verdict = 'unknown';
+    summary = 'No target: the underlying price is unavailable' + (isPut ? '.' : ' and no cost basis was given.');
+  } else if (atTarget) {
+    verdict = 'at_target';
+    summary = isPut
+      ? `The $${input.strike} strike is already at or below the underlying ($${target.toFixed(2)}) — nothing to repair.`
+      : `The $${input.strike} strike is already at or above the ${targetKind === 'cost_basis' ? 'cost basis' : 'underlying'} ($${target.toFixed(2)}).`;
+  } else if (weeksToTarget != null && first) {
+    verdict = weeksToTarget <= ROLLABILITY_EASY_WEEKS ? 'easy' : weeksToTarget <= ROLLABILITY_WORKABLE_WEEKS ? 'workable' : 'trap';
+    summary = `A credit roll reaches the $${target.toFixed(2)} ${targetKind === 'cost_basis' ? 'cost basis' : 'target'} at $${first.bestStrike} on ${first.expiration} — ${weeksToTarget} weeks out.`;
+  } else if (scanned >= ROLLABILITY_TRAP_SCAN_DAYS) {
+    verdict = 'trap';
+    summary = `No credit roll reaches the $${target.toFixed(2)} ${targetKind === 'cost_basis' ? 'cost basis' : 'target'} within ${scanned} days — a trap by Bec's rule.`;
+  } else {
+    verdict = 'unknown';
+    summary = horizons.length === 0
+      ? 'No later expiries could be priced.'
+      : `Not reachable within the ${scanned} days that are listed — cannot see far enough to call it.`;
+  }
+
+  return { target, targetKind, atTarget, horizons, weeksToTarget, verdict, summary };
+}
+
 /** Rule-based close/hold/roll recommendation (transparent, no LLM). */
 export function recommendAction(
   current: RollCurrentState,
@@ -213,6 +335,7 @@ export class RollAnalyzerService {
 
     // 2. Roll candidates across later expiries.
     let candidates: RollCandidate[] = [];
+    let rollability: Rollability | null = null;
     if (markToClose != null) {
       let expirations: string[] = [];
       try {
@@ -224,19 +347,25 @@ export class RollAnalyzerService {
         .filter((e) => dteDays(e, now) > currentDte + 2) // must genuinely extend duration
         .sort()
         .slice(0, MAX_ROLL_EXPIRIES);
+      // Rollability looks up to a year out; those far chains feed ONLY the rollability read,
+      // so the candidate table and its rankings are exactly what they were.
+      const rollabilityExp = pickRollabilityExpirations(expirations, currentDte, now);
 
-      const chains: { expiration: string; contracts: OptionContract[] }[] = [];
-      for (const exp of futureExp) {
+      const byExpiration = new Map<string, OptionContract[]>();
+      for (const exp of [...new Set([...futureExp, ...rollabilityExp])].sort()) {
         try {
           const ch = await this.provider.getOptionsChain(input.ticker, exp);
-          chains.push({ expiration: exp, contracts: ch.contracts });
+          byExpiration.set(exp, ch.contracts);
         } catch (e) {
           notes.push(`Skipped ${exp}: ${e instanceof Error ? e.message : String(e)}`);
         }
       }
+      const chainsFor = (exps: readonly string[]) =>
+        exps.filter((e) => byExpiration.has(e)).map((e) => ({ expiration: e, contracts: byExpiration.get(e)! }));
 
-      candidates = buildRollCandidates(input, markToClose, currentDte, underlyingPrice, chains, metric, now);
+      candidates = buildRollCandidates(input, markToClose, currentDte, underlyingPrice, chainsFor(futureExp), metric, now);
       if (candidates.length === 0) notes.push('No net-credit roll found in the scanned expiries/strikes — a debit would be required to roll.');
+      rollability = computeRollability(input, markToClose, currentDte, underlyingPrice, chainsFor(rollabilityExp), now);
     }
 
     return {
@@ -244,6 +373,7 @@ export class RollAnalyzerService {
       metric,
       current,
       candidates,
+      rollability,
       recommendation: recommendAction(current, candidates),
       notes,
       generatedAt: new Date().toISOString(),

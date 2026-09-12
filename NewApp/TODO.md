@@ -94,7 +94,8 @@ project notes. Anything that changes which trades are taken or how they size/exi
     **2026-09-30 12:30 ET** (a day the two policies actually differ; the app must be running).
     Then decide on realized outcomes, not the signal alone.
 26. **Bec's strategy — Tier 1, additive, gates nothing** (`docs/Bec/STRATEGY-SUMMARY.md`):
-    (a) rollability score — how far one week's credit moves a strike and weeks back to break-even;
+    ~~(a) rollability score — how far one week's credit moves a strike and weeks back to break-even~~
+    **done 2026-09-12, v1.1.240** (🧗 Rollability panel on the Roll Analyzer);
     (b) stochastic RSI as a displayed indicator; (c) cumulative premium vs cost basis per position.
 27. **Scheduled task `option-liquidity-weight-sweep-rerun` (2026-09-28) — cancel or rewrite.**
     Superseded: the same sweep was re-run 2026-09-03 on 18,219 settled CSPs (v1.1.170) and closed.

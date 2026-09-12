@@ -768,6 +768,31 @@ semantics and would badly overstate a debit spread's true probability of profit.
 The four metrics are user-selectable on the screen; ranking is pure (`scoreByMetric`) so switching
 the metric re-ranks client-side without re-fetching chains.
 
+### rollability {#rollability}
+
+Bec's check (`docs/Bec/STRATEGY-SUMMARY.md` §6b, §9.1): given what it costs to buy back the short,
+how far out does a credit roll have to go before the strike reaches safety? `computeRollability`
+in `roll-analyzer-service.ts`. Reporting only — it ranks and gates nothing.
+
+- **Target** — covered call: the stock **cost basis** when given (called away without a loss), else
+  the underlying price; short put: the **underlying price** (strike at or below spot).
+- **At target** — put: `strike ≤ target`; call: `strike ≥ target`.
+- **Horizons** — the listed expiry nearest each of **+7, +14, +30, +60, +90, +180, +365 days** beyond
+  the current expiry (deduplicated).
+- **Best strike per horizon** — the most-improved strike (put: lowest; call: highest) of the same
+  type with a two-sided quote and `mid(bid, ask) − buyToCloseMid > 0` (a net credit). A worse
+  strike never counts as a repair. **Strikes gained** = listed strikes of that type strictly
+  improved up to and including the best one.
+- **Weeks to target** = `addedDte ÷ 7` (1 d.p.) at the first horizon whose best strike reaches the
+  target; `0` when already at target; `null` when none does.
+- **Verdict** — `easy` ≤ 4 weeks, `workable` ≤ 13 weeks, `trap` beyond that **or** not reached
+  while horizons out to ≥ 180 added days were priced; `unknown` when there is no target or the
+  listing does not extend that far. Bands are working values from "if the answer is a year, the
+  trade is a trap" — not validated.
+
+Far-dated chains fetched for this feed only rollability; the candidate table still ranks the next
+6 expiries, unchanged.
+
 ## split-adjustment (data integrity) {#split-adjustment}
 
 `historical_prices` must hold a **self-consistent, split-adjusted** close series: every bar

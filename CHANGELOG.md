@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.240] - 2026-09-12
+
+### Rollability — how far out must a credit roll go to get back to safety?
+
+Bec's check (`docs/Bec/STRATEGY-SUMMARY.md` §6b, §9.1), the first Tier-1 item from her strategy summary: *look at the cost to buy back the short, then look forward one week, two weeks, a month — how many strikes can that same credit buy? If the answer is a year, the trade is a trap.* The Roll Analyzer already priced the current short and ranked credit rolls over the next ~6 expiries; it could not answer this, because it never looked far enough out and never summarised the candidates into a distance.
+
+- **New 🧗 Rollability panel** on the Roll / Closure Analyzer. For the listed expiry nearest +7 / +14 / +30 / +60 / +90 / +180 / +365 days beyond the current one: the most-improved strike (put: lowest, call: highest) still rollable for a **net credit**, strikes gained, net credit, and whether it reaches the **target** — a covered call's **stock cost basis** (new optional input, prefilled from the matching E\*Trade stock position), else the underlying; a short put's underlying.
+- **Headline: weeks to target** and a verdict — `easy` ≤ 4 weeks, `workable` ≤ 13, `trap` beyond that or not reached within ≥ 180 days priced, `unknown` without a target or far enough listings. Working bands, not validated.
+- **Reporting only — it ranks and gates nothing**, so no FR-SEY-5 exposure. The far-dated chains feed only this panel; the candidate table still ranks exactly the next 6 expiries, unchanged. Up to ~7 extra rate-limited E\*Trade chain calls per analysis.
+
+Pure `computeRollability` / `pickRollabilityExpirations` in `roll-analyzer-service.ts`; formula `docs/formulas.md#rollability`; spec 08 Part C. Tests in `tests/roll-analyzer.test.ts`: weeks-to-basis walk across horizons, trap within a year, a worse strike or a debit never counted as a repair, put rolled down, put already at target, no target → unknown, and horizon selection.
+
 ## [1.1.239] - 2026-09-12
 
 ### The collector's E*Trade calls were never paced

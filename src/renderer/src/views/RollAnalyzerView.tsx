@@ -4,8 +4,16 @@
 
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import type {
-  RollPositionInput, RollMetric, RollAnalysis, RollCandidate, PositionEtrade,
+  RollPositionInput, RollMetric, RollAnalysis, RollCandidate, PositionEtrade, RollabilityVerdict,
 } from '@shared/types';
+
+const VERDICT: Record<RollabilityVerdict, { label: string; color: string; hint: string }> = {
+  at_target: { label: 'At target', color: '#4caf50', hint: 'The strike is already where it needs to be.' },
+  easy:      { label: 'Easy repair', color: '#4caf50', hint: 'A credit roll reaches the target within 4 weeks.' },
+  workable:  { label: 'Workable', color: '#e0a800', hint: 'Reachable, but it takes 1–3 months of rolling.' },
+  trap:      { label: 'Trap', color: 'var(--danger, #d33)', hint: 'Beyond a quarter, or not within the year scanned — Bec: "if the answer is a year, the trade is a trap".' },
+  unknown:   { label: 'Unknown', color: 'var(--text-muted)', hint: 'No target, or the listed expiries do not reach far enough to judge.' },
+};
 
 const METRICS: { key: RollMetric; label: string; hint: string }[] = [
   { key: 'annualizedRoc',     label: 'Annualized return on capital', hint: 'Net credit ÷ capital ÷ days, annualized. Best yield per day per dollar.' },
@@ -41,9 +49,12 @@ export function RollAnalyzerView() {
   const [expiration, setExpiration] = useState('');
   const [contracts, setContracts] = useState('1');
   const [entryCredit, setEntryCredit] = useState('');
+  const [costBasis, setCostBasis] = useState('');
   const [metric, setMetric] = useState<RollMetric>('annualizedRoc');
 
   const [positions, setPositions] = useState<PositionEtrade[]>([]);
+  // Every open row, stock included — a covered call's cost basis lives on its stock position.
+  const [allPositions, setAllPositions] = useState<PositionEtrade[]>([]);
   const [result, setResult] = useState<RollAnalysis | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -51,9 +62,12 @@ export function RollAnalyzerView() {
   // Load open short-option positions for the "Load position" dropdown.
   useEffect(() => {
     window.api.portfolio.etrade.listPositions()
-      .then((rows) => setPositions(
-        (rows ?? []).filter((p) => (p.positionType === 'CSP' || p.positionType === 'CC') && p.status === 'open' && p.strikePrice != null && p.expirationDate != null),
-      ))
+      .then((rows) => {
+        setAllPositions((rows ?? []).filter((p) => p.status === 'open'));
+        setPositions(
+          (rows ?? []).filter((p) => (p.positionType === 'CSP' || p.positionType === 'CC') && p.status === 'open' && p.strikePrice != null && p.expirationDate != null),
+        );
+      })
       .catch(() => { /* portfolio optional — manual entry still works */ });
   }, []);
 
@@ -66,6 +80,12 @@ export function RollAnalyzerView() {
     setExpiration((p.expirationDate ?? '').slice(0, 10));
     setContracts(String(Math.max(1, Math.abs(p.quantity) || 1)));
     setEntryCredit(p.premiumReceived != null ? String(p.premiumReceived) : '');
+    // A covered call's rollability target is the stock's cost per share, when the book has it.
+    const stock = p.positionType === 'CC'
+      ? allPositions.find((s) => s.positionType === 'Stock' && s.ticker === p.ticker)
+      : undefined;
+    const basis = stock ? (stock.costPerShare ?? stock.entryPrice) : null;
+    setCostBasis(basis != null && basis > 0 ? String(basis) : '');
     setResult(null);
     setError(null);
   }
@@ -83,6 +103,7 @@ export function RollAnalyzerView() {
       expiration,
       contracts: Number(contracts),
       entryCredit: Number(entryCredit),
+      ...(optionType === 'call' && Number(costBasis) > 0 ? { costBasis: Number(costBasis) } : {}),
     };
     try {
       const res = await window.api.roll.analyze(input, metric);
@@ -145,6 +166,12 @@ export function RollAnalyzerView() {
           <div><label style={label}>Expiry (YYYY-MM-DD)</label><input style={field} value={expiration} onChange={(e) => setExpiration(e.target.value)} placeholder="2026-07-31" /></div>
           <div><label style={label}>Contracts</label><input style={field} value={contracts} onChange={(e) => setContracts(e.target.value)} inputMode="numeric" /></div>
           <div><label style={label}>Entry credit / sh</label><input style={field} value={entryCredit} onChange={(e) => setEntryCredit(e.target.value)} placeholder="3.20" inputMode="decimal" /></div>
+          {optionType === 'call' && (
+            <div title="The stock's cost per share. Rollability measures how far out a credit roll must go to reach it; blank uses the underlying price.">
+              <label style={label}>Stock cost basis / sh</label>
+              <input style={field} value={costBasis} onChange={(e) => setCostBasis(e.target.value)} placeholder="optional" inputMode="decimal" />
+            </div>
+          )}
         </div>
 
         <div style={{ marginTop: 14 }}>
@@ -221,6 +248,57 @@ export function RollAnalyzerView() {
               {result.notes.map((n, i) => <li key={i}>{n}</li>)}
             </ul>
           )}
+
+          {/* Rollability — Bec's "how far out to get back to safety" (docs/formulas.md#rollability) */}
+          {result.rollability && (() => {
+            const r = result.rollability;
+            const v = VERDICT[r.verdict];
+            return (
+              <div style={{ background: 'var(--bg-elev)', border: '1px solid var(--border)', borderRadius: 8, padding: 14, marginBottom: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
+                  <strong>🧗 Rollability</strong>
+                  <span title={v.hint} style={{ padding: '2px 10px', borderRadius: 12, fontSize: 12, fontWeight: 600, color: '#fff', background: v.color }}>
+                    {v.label}
+                  </span>
+                  <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>
+                    Target {money2(r.target)}{r.targetKind === 'cost_basis' ? ' (cost basis)' : r.targetKind === 'underlying' ? ' (underlying)' : ''}
+                    {' · '}Weeks to target: <strong>{r.weeksToTarget ?? '—'}</strong>
+                  </span>
+                </div>
+                <div style={{ fontSize: 13, marginBottom: 8 }}>{r.summary}</div>
+                {r.horizons.length > 0 && (
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                    <thead>
+                      <tr>
+                        <th style={{ ...th, textAlign: 'left', position: 'static' }}>Expiry</th>
+                        <th style={{ ...th, position: 'static' }}>Added days</th>
+                        <th style={{ ...th, position: 'static' }} title="Most-improved strike still rollable for a net credit">Best credit strike</th>
+                        <th style={{ ...th, position: 'static' }}>Strikes gained</th>
+                        <th style={{ ...th, position: 'static' }}>Net credit / sh</th>
+                        <th style={{ ...th, position: 'static' }}>Reaches target</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {r.horizons.map((h) => (
+                        <tr key={h.expiration} style={{ background: h.reachesTarget ? 'color-mix(in srgb, #4caf50 12%, transparent)' : undefined }}>
+                          <td style={{ ...td, textAlign: 'left' }}>{h.expiration}</td>
+                          <td style={td}>+{h.addedDte} <span style={{ color: 'var(--text-muted)' }}>({(h.addedDte / 7).toFixed(1)} wk)</span></td>
+                          <td style={td}>{h.bestStrike == null ? <span style={{ color: 'var(--text-muted)' }}>no credit roll</span> : `$${h.bestStrike}`}</td>
+                          <td style={td}>{h.bestStrike == null ? '—' : h.strikesGained}</td>
+                          <td style={td}>{money2(h.netCreditPerShare)}</td>
+                          <td style={td}>{h.reachesTarget ? '✓' : '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+                <p style={{ color: 'var(--text-muted)', fontSize: 12, margin: '8px 0 0' }}>
+                  {'Reporting only — ranks and gates nothing. Verdict bands (≤4 wk easy, ≤13 wk workable) are working values from ' +
+                    'Bec’s “if the answer is a year, the trade is a trap”, not validated. Marks are midpoints.'}
+                </p>
+              </div>
+            );
+          })()}
 
           {/* Roll candidates */}
           <h3 style={{ marginBottom: 8 }}>Roll candidates ({rankedCandidates.length}) — ranked by {METRICS.find((m) => m.key === metric)?.label}</h3>

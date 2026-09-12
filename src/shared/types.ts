@@ -1418,6 +1418,8 @@ export interface RollPositionInput {
   expiration: string;           // YYYY-MM-DD of the current short leg
   contracts: number;            // number of contracts (> 0)
   entryCredit: number;          // premium received per share when opened (e.g. 2.50)
+  /** Covered call only: the stock's cost per share — the rollability target. Optional. */
+  costBasis?: number;
 }
 
 /** Current-position assessment (close-now vs hold-to-expiry economics). */
@@ -1471,11 +1473,39 @@ export interface RollRecommendation {
   reason: string;
 }
 
+/** Rollability verdict — see docs/formulas.md#rollability. Working bands, not validated. */
+export type RollabilityVerdict = 'at_target' | 'easy' | 'workable' | 'trap' | 'unknown';
+
+/** One roll horizon: the best credit-roll strike available at one later expiry. */
+export interface RollabilityHorizon {
+  expiration: string;
+  dte: number;
+  addedDte: number;                   // dte(expiry) − dte(current)
+  bestStrike: number | null;          // most-improved strike (put: lowest, call: highest) rollable for a net credit
+  strikesGained: number;              // listed strikes improved, up to and including bestStrike
+  improvement: number | null;         // $ the strike moves in the favourable direction
+  netCreditPerShare: number | null;   // at bestStrike
+  reachesTarget: boolean;
+}
+
+/** Bec's rollability check: how far out a credit roll must go before the strike reaches safety. */
+export interface Rollability {
+  target: number | null;              // CC: cost basis if given, else underlying; CSP: underlying
+  targetKind: 'cost_basis' | 'underlying' | null;
+  atTarget: boolean;
+  horizons: RollabilityHorizon[];     // ascending by expiry
+  weeksToTarget: number | null;       // 0 when already at target; null when not reached
+  verdict: RollabilityVerdict;
+  summary: string;
+}
+
 export interface RollAnalysis {
   input: RollPositionInput;
   metric: RollMetric;
   current: RollCurrentState;
   candidates: RollCandidate[];  // ranked desc by the selected metric's score
+  /** Null when the current short could not be priced (no mark to buy back). */
+  rollability: Rollability | null;
   recommendation: RollRecommendation;
   notes: string[];
   generatedAt: string;

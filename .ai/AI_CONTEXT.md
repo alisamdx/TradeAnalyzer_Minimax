@@ -197,6 +197,8 @@ Authoritative DDL is in `migrations/`. Tables are created lazily (`CREATE TABLE 
 
 ## 10. Known quirks & gotchas
 
+- **Roll Analyzer rollability (v1.1.240) fetches up to ~7 extra far-dated E\*Trade chains per analysis** (expiries nearest +7…+365 days). Those chains feed ONLY `computeRollability`; `buildRollCandidates` still gets the first 6 expiries, so candidate rankings are unchanged. Reporting only — verdict bands (≤4 / ≤13 weeks) are unvalidated working values.
+
 - **The NewApp collector's E\*Trade calls are paced as of v1.1.239** by one application `etradeLimiter` (120/min, burst 2) acquired in `ElectronCollectorHost.etradeGet` before each market call and the post-renew retry. Before that nothing paced them; it surfaced only once real bar volume let the chain subset admit ~500 tickers. The existing app's own E\*Trade paths do NOT share this bucket (`daily-iv-capture` paces by sleeping 1,100 ms per ticker) — they run in the batch chain, which the collector waits behind.
 - **Pending work lives in `NewApp/TODO.md`** — a numbered list; numbers are never reused.
 
