@@ -83,9 +83,45 @@ audit. State at creation: existing app **v1.1.239**, `core` **0.6.8**, TradeAnal
 23. **FINRA as a cross-source check for short interest** (optional, after #8).
 24. **Stage 2** — derived layer and the new app taking over daily use — after promotion.
 
-## E. Existing app (TradeAnalyzer) backlog carried in notes
+## E. Existing app (TradeAnalyzer) backlog
 
-25. **Validate `WHEEL_MONTHLY_FIRST`** — shipped default-off (v1.1.128); needs a market-hours
-    side-by-side run before enabling. Cannot be validated retrospectively.
-26. **Bec's strategy — Tier-1 additive work**, starting with a rollability score
-    (`docs/Bec/STRATEGY-SUMMARY.md`).
+Inventoried 2026-09-12 from `.ai/AI_CONTEXT.md` §11 (Open decisions), the scheduled tasks and
+project notes. Anything that changes which trades are taken or how they size/exit is
+**FR-SEY-5-gated**: replay/backtest evidence first, or ship default-off.
+
+25. **Validate `WHEEL_MONTHLY_FIRST_EXPIRY`** — default-off since v1.1.128; signal-level A/B done,
+    realized validation not. **Scheduled:** task `wheel-monthly-first-ab-sep30` runs the harness
+    **2026-09-30 12:30 ET** (a day the two policies actually differ; the app must be running).
+    Then decide on realized outcomes, not the signal alone.
+26. **Bec's strategy — Tier 1, additive, gates nothing** (`docs/Bec/STRATEGY-SUMMARY.md`):
+    (a) rollability score — how far one week's credit moves a strike and weeks back to break-even;
+    (b) stochastic RSI as a displayed indicator; (c) cumulative premium vs cost basis per position.
+27. **Scheduled task `option-liquidity-weight-sweep-rerun` (2026-09-28) — cancel or rewrite.**
+    Superseded: the same sweep was re-run 2026-09-03 on 18,219 settled CSPs (v1.1.170) and closed.
+    **And unsafe as written:** its prompt opens the production SQLite directly from a Claude session,
+    which is MSIX-redirected (CLAUDE.md quirk — reads a shadow copy, can move WAL state). Needs an
+    operator decision before 9/28.
+28. **Morning-vs-evening liquidity score** — the two §11 entries on this are one question. Capture
+    of both slots exists since v1.1.185 (2026-09-04); run `scripts/slot-liquidity-drift-study.mjs`
+    now that ~6 trading days pair up. **Do not touch `MIN_TRADABLE_LIQUIDITY_SCORE = 8` without a
+    replay** (37% of stored wheel picks flip to passing on the volume component alone).
+29. **Real income/wheel return-on-capital view** — waits on `options_premium_history` maturity
+    (`getPremiumHistoryReadiness()`: 40 dates older than 45 days), expected to flip ≈ 2026-09-25.
+    Check readiness, then build the true ROC analysis replacing the stayed-above-strike proxy.
+30. **Book Greeks monitor, Tier 1** (read-only, ~1 day; `Requirements/v2-execution/09-book-greeks-monitor.md`):
+    beta-weighted net delta / theta / vega over the open book, headline `deltaPctOfNetLiq`.
+    Mandatory 4-row sign test (CSP / CC / long call / long put). Tier 2 guardrail is FR-SEY-5-gated.
+31. **Critic's treatment of trend for short premium** — OPEN since 2026-09-03, **do not act yet**.
+    Becomes testable ~a quarter after capture (≈ early Dec): critic verdict × `notDowntrend` band ×
+    settled outcome from `brief_candidates` + `daily_briefs`.
+32. **v2 execution — Tradier** (blocked on the operator): account + Level-3 spreads + tokens →
+    move tokens to secure settings + UI, calibrate every `// VERIFY` endpoint in the sandbox, wire
+    chain discovery for the spread-permission probe, 1-contract live canary. **Status of the Tradier
+    application unknown — ask.**
+33. **v2 multi-strategy book — small remaining ops:** Execution Settings UI for
+    `min_composite_by_strategy` (migration-set today); decide the `max_combo_spread_pct` liquidity
+    gate (~0.20 suggested, cannot be backtested).
+34. **Requirements/ and UserManual/ expansion** — queued docs work (items #2 and #3 of the docs task).
+35. **Tidy `.ai/AI_CONTEXT.md` §11** — e.g. "ETF-aware wheel scoring … needs validation before
+    enabling (v1.1.118)" is stale (validated and shipped enabled in v1.1.172); the B1 slot-bias
+    entry duplicates #28.
