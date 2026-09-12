@@ -460,7 +460,9 @@ export class IvHistoryService {
     let processed = 0, skipped = 0, failed = 0;
     const startMs = Date.now();
 
-    // Throttle: IVolatility allows 1 req/sec sustained (burst 5), 20k req/month.
+    // Throttle: IVolatility allows 1 req/sec sustained (burst 5), 20k req/month
+    // on Builder (100k Quant, unlimited Lab) — confirmed 2026-09-11 against their
+    // published Data Cloud page, having sat here uncited since it was written.
     // 1,100ms between calls = ~55/min — stays safely under the 1/sec limit.
     // On 429, back off 15 s before retrying once.
     const CALL_DELAY_MS = 1_100;
