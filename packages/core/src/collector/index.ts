@@ -53,8 +53,11 @@ export type { ResetArgs, ResetPreview, ResetReport } from './reset.js';
 
 export { runPreflight, isTradingDay } from './phases/preflight.js';
 export {
-  ensureTradingCalendar, buildTradingCalendar, nyseHolidays, nyseEarlyCloses
+  ensureTradingCalendar, buildTradingCalendar, nyseHolidays, nyseEarlyCloses,
+  tradingDaysInRange, previousTradingDay
 } from './trading-calendar.js';
+export { ensureMacroSeries, DEFAULT_MACRO_SERIES } from './macro-series.js';
+export type { MacroSeriesSeed, MacroSeedResult } from './macro-series.js';
 export type { TradingDayRow, HolidayRule, CalendarSeedResult } from './trading-calendar.js';
 export type { PreflightOutcome } from './phases/preflight.js';
 

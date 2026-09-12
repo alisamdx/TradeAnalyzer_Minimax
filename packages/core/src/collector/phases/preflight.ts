@@ -3,6 +3,7 @@ import type { CollectorHost } from '../host.js';
 import { captureResponse } from '../capture.js';
 import type { RunHandle } from '../run.js';
 import { ensureTradingCalendar } from '../trading-calendar.js';
+import { ensureMacroSeries } from '../macro-series.js';
 
 /**
  * Phase 0 — preflight (04 §2.1).
@@ -50,6 +51,15 @@ export async function runPreflight(
   //    exists only if somebody remembered to seed it is one that will be
   //    missing on the day it matters.
   ensureTradingCalendar(db, host, run.tradingDate);
+
+  // 0b. The macro series, for the same reason and with the same failure behind
+  //     it. `ref_macro_series` had no seeder at all — the only INSERT in the
+  //     repository was a test fixture — so `runIndexQuotes` read an empty list,
+  //     skipped every run, and `raw_index_quote` held 0 rows across three daily
+  //     runs. QC-901 is BLOCKING and maps over the enabled series, so on an
+  //     empty table it evaluated nothing: a blocking check that could not fire,
+  //     guarding a VIX that was never fetched.
+  ensureMacroSeries(db, host);
 
   // 1. Trading day. An unknown date is treated as a trading day rather than a
   //    holiday: refusing to collect because the calendar has not been seeded

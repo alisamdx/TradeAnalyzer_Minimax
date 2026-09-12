@@ -5,6 +5,7 @@ import { primaryThreshold } from './check.js';
 import { cleanDayStreak } from './gate.js';
 import { OperatorActionRefused } from './operator.js';
 import { unverifiedColumns } from '../dictionary/index.js';
+import { backfillQueueClear } from '../collector/backfill.js';
 import {
   REPLAY_MAX_AGE_TRADING_DAYS,
   latestReplayPerDate,
@@ -357,7 +358,8 @@ export function recordDomainInspection(
 // ── the checklist ────────────────────────────────────────────────────────────
 
 export type ConditionKey =
-  | 'status' | 'streak' | 'zero_fire' | 'thresholds' | 'inspections' | 'expired_review' | 'verify_notes' | 'replay';
+  | 'status' | 'streak' | 'zero_fire' | 'thresholds' | 'inspections' | 'expired_review' | 'verify_notes'
+  | 'backfill_queue' | 'replay';
 
 export interface Condition {
   readonly key: ConditionKey;
@@ -427,6 +429,20 @@ export function pilotExitStatus(
   ).n;
   const verifyNotes = options.verifyNotes ?? unverifiedColumns().length;
 
+  // `backfillQueueClear` has documented itself as "a precondition on the pilot's
+  // clean-day streak (04 §7.2)" since B5 and was **referenced by nothing** — the
+  // precondition existed in a comment and in no code path. An unruled
+  // ticker-reuse candidate means the bar history for that symbol still splices
+  // two companies, and every indicator across the boundary inherits it silently;
+  // promoting on that certifies a generation known to be wrong.
+  //
+  // Note what it does and does not cover: `reviewQueue` selects `blocking` rows
+  // only, and QC-204/205 are warnings that promote by value, so this catches a
+  // discontinuity severe enough to have been promoted — not every one. Wired as
+  // written rather than widened, because changing what it measures is a separate
+  // decision from making it load-bearing.
+  const backfill = backfillQueueClear(db);
+
   const differentDates = [...latestReplayPerDate(db)]
     .filter(([, r]) => r.verdict === 'different')
     .map(([d]) => d)
@@ -470,6 +486,14 @@ export function pilotExitStatus(
       key: 'verify_notes',
       met: verifyNotes === 0,
       detail: verifyNotes === 0 ? 'every column has been observed in a live response' : `${verifyNotes} column(s) still carry a verify note`
+    },
+    {
+      key: 'backfill_queue',
+      met: backfill.clear,
+      detail: backfill.clear
+        ? 'no unruled bar-history finding'
+        : `${backfill.outstanding.length} unruled bar-history finding(s): ` +
+          backfill.outstanding.map((o) => `${o.checkId} ${o.key}`).join(', ')
     },
     {
       key: 'replay',

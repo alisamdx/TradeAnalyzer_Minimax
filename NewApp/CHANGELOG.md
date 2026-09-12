@@ -61,6 +61,13 @@ corrected. `packages/core/test/provider-paths.test.ts` now fails any collector
 path carrying an unreplaced `vX` / `vN` / `v{…}`, with a fixture proving the scan
 is not vacuous.
 
+## `next` 0.4.4 — rebuilt on `core` 0.6.4 (2026-09-11)
+
+Provenance bump. No dictionary change this time — v14 stands; the inspector picks
+up the seeded `ref_macro_series`, the insider index fallback and the ninth
+pilot-exit condition (`backfill_queue`), which the Pilot exit view renders from
+`pilotExitStatus` without needing to know about it.
+
 ## `next` 0.4.3 — rebuilt on `core` 0.6.3, dictionary v14 (2026-09-11)
 
 Provenance bump, as below. This one carries a **dictionary change**: whichever
@@ -93,6 +100,47 @@ workspace links; a pin would recreate the trap on the next core bump), and
 `npm ci` machine would be told it has — is refreshed.
 `packages/next/test/workspace-versions.test.ts` pins both. The packaged 0.4.1
 exe is unaffected: the bundle comes from the workspace link either way.
+
+## B10b — three more paths that had never worked once (2026-09-11)
+
+`core` 0.6.4, existing app **v1.1.233**. Found by asking, before Monday rather
+than after it: *which phases have never produced a row, and would we notice?*
+Run 6's own domain table named the suspects — `events_indexQuotes`
+**expected 0, stored 0**, `events_insider` 0.
+
+**`ref_macro_series` had no seeder.** The only `INSERT` in the repository was a
+test fixture, so `runIndexQuotes` skipped every run since B7a and
+`raw_index_quote` held **0 rows**. The sharper half: **QC-901 is blocking** and
+maps over the enabled series, so on an empty table it evaluated nothing — a
+blocking check that could not fire, guarding a VIX never fetched. Seeded in
+preflight beside `ensureTradingCalendar`, for the identical reason that one is.
+
+**The insider sweep asked for a file that does not exist yet.** It fetches
+EDGAR's daily form index *for the trading date*; EDGAR publishes it late that
+evening, and the collector runs hours earlier. Both the 9/10 and 9/11 runs got
+404 on a URL that serves correctly later the same night, so a same-day fetch was
+structurally incapable of storing a Form 4 — and `events_insider` at 0 looks
+exactly like a day nobody filed one. Now falls back to the previous trading
+day's index and records **which date it actually used**.
+
+**`backfillQueueClear` claimed to be "a precondition on the pilot's clean-day
+streak" and was referenced by nothing.** A generation could have been promoted
+with an unruled ticker-reuse candidate outstanding — the precise outcome its own
+comment forbids. Now the ninth pilot-exit condition, with its real (narrower)
+scope stated rather than quietly widened.
+
+**The rule behind all three**, now enforced by
+`preconditions-are-wired.test.ts`: an exported function whose docstring calls
+itself a *precondition on* something must be referenced outside its own file.
+Four times in one evening prose asserted a mechanism that did not exist —
+`void dte;` after a return, a comment claiming the host signed a request it never
+signed, a blocking check reading a table nobody wrote, and this one. Prose is
+what gets read when somebody asks "is this handled?"
+
+**Still to run, and not automatable from an agent shell** (queueing writes a
+`meta_job_request` row into the generation): `backfill_bars` has never run, which
+is why bars sit at ~3 per ticker and the chain subset admits nobody; and no
+`replay` has ever been queued, though QC-956 starts warning around 9/21.
 
 ## B10b — every brief hand-off had failed since the contract shipped (2026-09-11)
 

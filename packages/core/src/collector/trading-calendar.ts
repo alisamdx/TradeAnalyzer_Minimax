@@ -226,6 +226,21 @@ export function buildTradingCalendar(from: string, to: string): readonly Trading
  * into zero and "walk back day by day" into a walk over nothing. Where the table
  * does hold a date it wins, because an operator's `manual` row outranks a rule.
  */
+/**
+ * The last session strictly before `date`, or null if none is in range.
+ *
+ * Looks back a fortnight, which covers any weekend plus the longest run of
+ * consecutive market holidays. Written for the EDGAR insider sweep: the daily
+ * form index for a date is published late that evening, after the collector
+ * runs, so "today's index" is routinely a 404 and yesterday's is the honest
+ * fallback.
+ */
+export function previousTradingDay(db: SqliteLike, date: string): string | null {
+  const from = addDays(date, -14);
+  const days = tradingDaysInRange(db, from, date).filter((d) => d < date);
+  return days.length > 0 ? (days[days.length - 1] as string) : null;
+}
+
 export function tradingDaysInRange(db: SqliteLike, from: string, to: string): readonly string[] {
   if (from > to) return [];
   const stored = new Map(

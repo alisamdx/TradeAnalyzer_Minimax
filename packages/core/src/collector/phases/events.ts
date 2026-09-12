@@ -7,6 +7,7 @@ import { captureRuleId, type RunHandle } from '../run.js';
 import { earningsResponseAtCap } from '../../ingest/events.js';
 import { BLS_RELEASES, FOMC_CALENDAR_URL, blsScheduleUrl } from '../../ingest/macro-calendar.js';
 import { parseDailyFormIndex, dailyFormIndexUrl, submissionsAtCap } from '../../ingest/edgar.js';
+import { previousTradingDay } from '../trading-calendar.js';
 
 /**
  * Phase 8 — the event and macro domains (04 §2).
@@ -563,16 +564,37 @@ export async function runInsiderSweep(
   const ruleId = captureRuleId(db, host, 'insider', { source: 'edgar_full_index' }, 'Daily Form 4 sweep from the EDGAR full index.');
   const { byCik } = cikMap(db);
 
-  const indexUrl = dailyFormIndexUrl(run.tradingDate);
+  // **The day's index is published after the collector runs.** EDGAR posts
+  // `form.YYYYMMDD.idx` late in the evening, and the 17:05 slot (in practice
+  // 18:05-19:33, behind the after-close chain) asks for it hours early: the
+  // 2026-09-10 and 2026-09-11 runs both got 404 on a URL that serves correctly
+  // later the same night. Asking only for today's index made this phase
+  // structurally incapable of ever storing a row — `events_insider` sat at 0 and
+  // looked exactly like a day nobody filed a Form 4.
+  //
+  // So: today's index when it exists, otherwise the previous trading day's. A
+  // one-day-late insider sweep is the honest maximum for an evening run, and the
+  // date actually used is recorded in `params` rather than assumed to be
+  // `run.tradingDate` — which is the difference between a late row and a wrong one.
+  let indexDate = run.tradingDate;
   host.progress('insider', 0, 1, 'full index');
-  const indexResponse = await host.httpGet(indexUrl, EDGAR_HEADERS);
+  let indexResponse = await host.httpGet(dailyFormIndexUrl(indexDate), EDGAR_HEADERS);
+
+  if (indexResponse.status === 404) {
+    const previous = previousTradingDay(db, run.tradingDate);
+    if (previous !== null) {
+      indexDate = previous;
+      host.progress('insider', 0, 1, `full index (${indexDate}, today's not yet published)`);
+      indexResponse = await host.httpGet(dailyFormIndexUrl(indexDate), EDGAR_HEADERS);
+    }
+  }
 
   // The index itself writes no domain rows — it is a routing document, archived
   // for provenance so the set of filings we chose from is recoverable.
   const indexResult = captureResponse({
     host, db, runId: run.runId, asOfDate: run.tradingDate, provider: 'edgar',
     endpoint: '/Archives/edgar/daily-index/form.idx', slug: 'edgar-form-index',
-    params: { date: run.tradingDate }, response: indexResponse, captureRuleId: ruleId
+    params: { date: indexDate }, response: indexResponse, captureRuleId: ruleId
   });
 
   if (indexResult.parseStatus !== 'ok' || !indexResponse.body) {

@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.1.233] - 2026-09-11
+
+### Three more things that had never worked once, and a precondition that wasn't wired
+
+`@tradeanalyzer/core` 0.6.4. Found by asking the question the evening kept answering: *which phases have never produced a row, and would we notice?*
+
+- **`ref_macro_series` had no seeder.** The only `INSERT` in the repository was a test fixture, so `runIndexQuotes` read an empty list, skipped every run, and `raw_index_quote` held **0 rows** across three daily runs — reported as `expected 0, stored 0`, which is what a phase asking for nothing looks like. Worse: **QC-901 is blocking and maps over the enabled series**, so on an empty table it evaluated nothing — a blocking check that could not fire, guarding a VIX that was never fetched. Seeded in preflight beside `ensureTradingCalendar`, idempotently, for the identical reason that one is.
+- **The insider sweep could never have stored a row on an evening run.** It asks EDGAR for the daily form index *of the trading date*, and EDGAR publishes that file late that night: the 9/10 and 9/11 runs both got 404 on a URL that serves correctly hours later. It now falls back to the previous trading day's index, and records **which date it actually used** rather than assuming `tradingDate` — the difference between a late row and a wrong one.
+- **`backfillQueueClear` documented itself as "a precondition on the pilot's clean-day streak" and was referenced by nothing.** A generation could have been promoted with an unruled ticker-reuse candidate outstanding — exactly what its own comment said must never happen. Now a ninth pilot-exit condition. Its scope is narrower than the prose implies (`reviewQueue` selects blocking rows, and QC-204/205 are warnings that promote by value), and that is stated rather than quietly widened.
+
+### The general rule, now enforced
+
+`preconditions-are-wired.test.ts`: any exported function whose own docstring calls it a *precondition on* or *gate on* something must be referenced outside its own file. Prose is what gets read when someone asks "is this handled?", and four times tonight prose asserted a mechanism that did not exist — `void dte;` after a return, a comment claiming the host signed a request it never signed, a blocking check reading a table nobody wrote, and this. The scan carries its own non-vacuity guard, because a guard that stops matching passes for free.
+
 ## [1.1.232] - 2026-09-11
 
 ### Every brief hand-off has failed since the contract shipped
