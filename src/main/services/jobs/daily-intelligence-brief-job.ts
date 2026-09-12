@@ -18,8 +18,8 @@ import { isTradingDay } from '../iv-history-service.js';
 import { SCORING_REFERENCE_TICKERS } from './price-gap-fill-job.js';
 import type { EmailService } from '../email-service.js';
 import { buildEmailHtml, buildPdf } from '../brief-report-builder.js';
-import { computeRollTheDice } from '../roll-the-dice.js';
-import { buildDiceEmailHtml, diceEmailSubject } from '../dice-email-builder.js';
+import { sendDiceEmail } from '../brief-emails.js';
+import { logEmailOutcome } from '../email-log.js';
 import type { PaperTradingService } from '../paper-trading-service.js';
 import { CriticService } from '../critic-service.js';
 import { WatchlistService } from '../watchlist-service.js';
@@ -1005,7 +1005,13 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
     this.upsertBriefWatchlist(persistedPicks, today);
 
     // ── Email delivery ────────────────────────────────────────────────────────
-    if (this.emailService?.isConfigured() && totalPicks > 0) {
+    //
+    // Every outcome is recorded in logs/errors (v1.1.241). Until then both emails reported only
+    // to the console, which a packaged app does not keep: on 2026-09-11 the after-close brief
+    // emailed its 17 picks at ~17:35, the dice email seconds later never arrived, and nothing
+    // anywhere said why.
+    if (this.emailService?.isConfigured()) {
+      if (totalPicks > 0) {
       try {
         emit('Sending email…');
         // Use the same persisted picks (post-liquidity-gate) — not topPerStrategy (pre-gate)
@@ -1022,10 +1028,17 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
           content: pdfBuffer,
           contentType: 'application/pdf',
         }]);
-        console.log('[brief] email sent successfully');
+        logEmailOutcome({ level: 'INFO', operation: 'brief-email:sent', message: `[brief] brief email sent: ${subject}` });
       } catch (emailErr) {
         // Email failure must not fail the job — brief is already persisted
-        console.warn('[brief] email send failed:', emailErr instanceof Error ? emailErr.message : String(emailErr));
+        logEmailOutcome({
+          level: 'ERROR', operation: 'brief-email:send',
+          message: `[brief] brief email NOT sent: ${emailErr instanceof Error ? emailErr.message : String(emailErr)}`,
+          error: emailErr,
+        });
+      }
+      } else {
+        logEmailOutcome({ level: 'INFO', operation: 'brief-email:skipped', message: '[brief] brief email not sent: the brief has 0 picks' });
       }
 
       // ── Roll the Dice: the same brief, reduced to one actionable wheel entry ──────
@@ -1039,16 +1052,11 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
       // Reads back from the DB rather than reusing `persistedPicks` so the email, the in-app
       // panel and the IPC all resolve today's pick through one code path.
       //
-      // A no-pick day still sends: silence cannot be told apart from a failed job.
-      try {
-        const dice = computeRollTheDice(this.db);
-        const diceDate = new Date().toLocaleDateString('en-US',
-          { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'America/New_York' });
-        await this.emailService.send(diceEmailSubject(dice), buildDiceEmailHtml(dice, diceDate));
-        console.log(`[brief] dice email sent (${dice.pick ? dice.pick.ticker : 'no pick'})`);
-      } catch (diceErr) {
-        console.warn('[brief] dice email failed:', diceErr instanceof Error ? diceErr.message : String(diceErr));
-      }
+      // A no-pick day still sends: silence cannot be told apart from a failed job. And a no-pick
+      // BRIEF still sends it too — this used to sit inside `totalPicks > 0`, contradicting the
+      // sentence above. `sendDiceEmail` never throws; it logs which step failed and retries a
+      // failed send once.
+      await sendDiceEmail({ email: this.emailService, db: this.db, log: logEmailOutcome, source: 'brief' });
     }
 
     return {

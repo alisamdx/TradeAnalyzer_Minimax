@@ -13,7 +13,8 @@ import type { DbHandle } from '../db/connection.js';
 import {
   computeRollTheDice, DEFAULT_MAX_CAPITAL, type DiceResult,
 } from '../services/roll-the-dice.js';
-import { buildDiceEmailHtml, diceEmailSubject } from '../services/dice-email-builder.js';
+import { sendDiceEmail } from '../services/brief-emails.js';
+import { logEmailOutcome } from '../services/email-log.js';
 
 function ok<T>(value: T): IpcResult<T> {
   return { ok: true, value };
@@ -47,8 +48,8 @@ export function registerScoringIpc(
     wrap((maxCapital?: number): DiceResult => computeRollTheDice(db, maxCapital ?? DEFAULT_MAX_CAPITAL))
   );
 
-  // Send today's dice as an email on demand. Same builder the batch chain uses, so the manual
-  // send and the automatic one are byte-identical.
+  // Send today's dice as an email on demand. The same `sendDiceEmail` the batch chain uses, so the
+  // manual send and the automatic one are built, retried and logged identically.
   ipcMain.handle(
     'scoring:email-roll-the-dice',
     async (_e: IpcMainInvokeEvent, maxCapital?: number): Promise<IpcResult<{ sent: boolean; message: string }>> => {
@@ -56,11 +57,16 @@ export function registerScoringIpc(
         if (!emailService.isConfigured()) {
           return ok({ sent: false, message: 'SMTP is not configured — set it up in Settings → Email.' });
         }
-        const result = computeRollTheDice(db, maxCapital ?? DEFAULT_MAX_CAPITAL);
-        const dateStr = new Date().toLocaleDateString('en-US',
-          { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'America/New_York' });
-        await emailService.send(diceEmailSubject(result), buildDiceEmailHtml(result, dateStr));
-        return ok({ sent: true, message: result.pick ? `Emailed: ${result.pick.ticker}` : 'Emailed: no dice today' });
+        const out = await sendDiceEmail({
+          email: emailService, db, log: logEmailOutcome, source: 'manual',
+          maxCapital: maxCapital ?? DEFAULT_MAX_CAPITAL,
+          // A person is waiting on the button, so the retry pause is short.
+          retryDelayMs: 2_000,
+        });
+        if (out.status === 'failed') {
+          return fail(new Error(`Dice email not sent (${out.step} failed): ${out.error ?? 'unknown error'}`));
+        }
+        return ok({ sent: true, message: out.result?.pick ? `Emailed: ${out.result.pick.ticker}` : 'Emailed: no dice today' });
       } catch (err) {
         return fail(err);
       }

@@ -27,9 +27,15 @@ const MUTED = '#57606a';
 const ACCENT = '#0969da';
 const WARN = '#9a6700';
 
-function esc(s: string): string {
-  return s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
+// Every formatter below tolerates a missing value (v1.1.241). The picks are JSON read back from
+// `daily_briefs`, so a field the types call required can still be absent on an older or partial
+// row — and one `undefined.toFixed()` used to cost the whole email, silently.
+function esc(s: unknown): string {
+  return String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
 }
+
+const isNum = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
+const fixed = (n: unknown, digits: number): string => (isNum(n) ? n.toFixed(digits) : '—');
 
 /** "Fri Sep 25" — short, unambiguous, no year noise for a near-dated expiry. */
 function prettyDate(iso: string): string {
@@ -42,8 +48,8 @@ function prettyDate(iso: string): string {
   return wd + ' ' + md;
 }
 
-const money = (n: number): string => `$${n.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
-const money2 = (n: number): string => `$${n.toFixed(2)}`;
+const money = (n: unknown): string => (isNum(n) ? `$${n.toLocaleString('en-US', { maximumFractionDigits: 0 })}` : '—');
+const money2 = (n: unknown): string => (isNum(n) ? `$${n.toFixed(2)}` : '—');
 
 /**
  * Subject line carries the entire trade.
@@ -166,7 +172,7 @@ export function buildDiceEmailHtml(r: DiceResult, dateStr: string): string {
     // as fit, and listing them here would restate them as bars the trade had to clear.
     const gates = [
       'critic passed (and actually ran)',
-      `liquidity ${p.liquidityScore.toFixed(0)}/15`,
+      `liquidity ${fixed(p.liquidityScore, 0)}/15`,
       'no earnings before expiry',
       'real net credit',
     ].join(' · ');
@@ -190,15 +196,15 @@ export function buildDiceEmailHtml(r: DiceResult, dateStr: string): string {
           ${statRow('You collect', money(p.creditTotal), `${money2(p.premiumPerShare)} per share`)}
           ${statRow('Cash required', money(p.capitalRequired), 'cash-secured')}
           ${statRow('If assigned, you own it at', money2(p.effectiveCostBasis),
-                    `${p.discountToSpotPct.toFixed(1)}% below today's ${money2(p.price)}`)}
+                    `${fixed(p.discountToSpotPct, 1)}% below today's ${money2(p.price)}`)}
         </table>
       </td></tr>
 
       <tr><td style="padding:12px 18px 0;font-size:12px;color:${MUTED};line-height:1.6;">
-        Annualized <b style="color:${TEXT};">${p.annualizedReturn?.toFixed(0) ?? '—'}%</b> ·
-        Probability of profit <b style="color:${TEXT};">${p.popEstimate?.toFixed(0) ?? '—'}%</b> ·
-        Grade <b style="color:${TEXT};">${esc(p.grade)}</b> ·
-        Brief score <b style="color:${TEXT};">${p.compositeScore.toFixed(1)}</b>
+        Annualized <b style="color:${TEXT};">${fixed(p.annualizedReturn, 0)}%</b> ·
+        Probability of profit <b style="color:${TEXT};">${fixed(p.popEstimate, 0)}%</b> ·
+        Grade <b style="color:${TEXT};">${esc(p.grade ?? '—')}</b> ·
+        Brief score <b style="color:${TEXT};">${fixed(p.compositeScore, 1)}</b>
       </td></tr>
 
       ${p.criticRationale ? `
@@ -225,7 +231,7 @@ export function buildDiceEmailHtml(r: DiceResult, dateStr: string): string {
 
       <tr><td style="padding:14px 18px 0;font-size:11px;color:${MUTED};line-height:1.6;">
         <b>Passed every gate:</b> ${esc(gates)}.
-        ${r.runnerUp ? `Runner-up was ${esc(r.runnerUp.ticker)} (${r.runnerUp.compositeScore.toFixed(1)}).` : ''}
+        ${r.runnerUp ? `Runner-up was ${esc(r.runnerUp.ticker)} (${fixed(r.runnerUp.compositeScore, 1)}).` : ''}
       </td></tr>`;
   }
 
@@ -240,8 +246,8 @@ export function buildDiceEmailHtml(r: DiceResult, dateStr: string): string {
            </div>
            <div style="font-size:12px;color:${MUTED};line-height:1.6;">
              ${money(r.withinBudget.capitalRequired)} cash · ${money(r.withinBudget.creditTotal)} credit ·
-             own it at ${money2(r.withinBudget.effectiveCostBasis)} · score ${r.withinBudget.compositeScore.toFixed(1)} ·
-             grade ${esc(r.withinBudget.grade)}
+             own it at ${money2(r.withinBudget.effectiveCostBasis)} · score ${fixed(r.withinBudget.compositeScore, 1)} ·
+             grade ${esc(r.withinBudget.grade ?? '—')}
            </div>
            <div style="font-size:11px;color:${MUTED};line-height:1.6;margin-top:5px;">
              ${esc(ownAtStrikeNote(r.withinBudget.ticker, r.withinBudget.fit.ownership))}

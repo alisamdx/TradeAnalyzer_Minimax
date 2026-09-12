@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.1.241] - 2026-09-12
+
+### A missing Roll the Dice email left no trace — now every email outcome is logged
+
+Reported from use: the Friday 2026-09-11 after-close run sent no dice email. Reconstructed from the batch history, the inbox and the API log: the brief ran 17:31, generated **17 picks** and **emailed them**; the dice email, sent seconds later from the same block, **never arrived** — and the morning dice email ("No dice today — nothing cleared (1 considered)") had arrived normally. The in-app 🎲 Roll the Dice panel reproduces that same result on the same brief without error, so the failure was almost certainly the send. **Its reason is unrecoverable**: both emails reported only through `console.log` / `console.warn`, which the packaged app does not keep, and `logs/errors` held nothing.
+
+- **Every brief and dice email outcome is written to `logs/errors`** — `INFO` when sent, `ERROR` with the provider's message and stack when not, each naming its step: `brief-email:sent|send|skipped`, `dice-email:compute|build|send-retry|send|sent`. The next missing email names its own cause.
+- **A failed dice send is retried once** after 20 s (2 s from the in-app button).
+- **The run time is in the dice subject** (`… · 17:35 ET`), so a day's two runs are two emails rather than two identical subjects.
+- **A zero-pick brief now sends the dice email.** The block sat inside `isConfigured() && totalPicks > 0`, directly contradicting its own comment "a no-pick day still sends". Friday did not hit this (17 picks), but it was a real gap.
+- **The dice email builder tolerates missing fields.** Picks are JSON read back from `daily_briefs`; an absent `grade`, `liquidityScore` or `compositeScore` was an unguarded `.replace()` / `.toFixed()` that threw and cost the whole email. They now render "—".
+
+New `src/main/services/brief-emails.ts` (`sendDiceEmail`, Electron-free) used by both the brief job and the in-app "✉ Email it" handler; `src/main/services/email-log.ts` adapts outcomes to `logs/errors`. Tests: `tests/brief-emails.test.ts` — zero-pick send with the ET clock in the subject, retry then success, exhausted retries logged not thrown, compute failure named, builder with missing fields, and source scans that the job no longer gates the dice email on picks or reports email outcomes only to the console.
+
 ## [1.1.240] - 2026-09-12
 
 ### Rollability — how far out must a credit roll go to get back to safety?
