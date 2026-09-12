@@ -127,6 +127,8 @@ The chain call count carries a real range because the **expirations-per-ticker f
 
 Hard deadline: phase 10 must complete by **19:15 ET**; the 19:30 watchdog reports otherwise. At the measured subset (~500) the run finishes ≈ 18:15 ET at worst, leaving ~1 h of headroom. Because membership is **sticky and therefore only grows**, that headroom is consumed over time and is worth watching: at the full universe (~1,089, which the drafted `$20M` threshold would have selected on day one) chains alone are ~8,700–14,000 calls ≈ 1.2–1.9 h, ending 18:30–19:10 ET — inside the deadline but with no margin for a retry storm. The subset rule is the lever to pull first.
 
+*Revised 2026-09-12 (existing app v1.1.239):* **the 120/min E\*Trade pace in the table above was a plan no code enforced.** The collector's `etradeGet` had no limiter; it went unnoticed because the chain subset held about one ticker until bar volume stopped being stored as 0 (v1.1.236). Unpaced, ~6,000 sequential calls run at roughly 200/min — about twice the only E\*Trade pace the existing app has sustained (`daily-iv-capture`, 1,100 ms per ticker's two calls). The host now takes an application `etradeLimiter` (120/min, burst 2) and acquires before every market call, including the retry after a renew. The chain phase's measured call count and duration on the first full runs replace the ranges above.
+
 Bars fetched at 17:05 are treated as final per the settlement quirk; `is_final` is set from `respondedAt ≥ 17:00 ET`, and any non-final bar is re-fetched at the end of phase 7 (R3).
 
 ---

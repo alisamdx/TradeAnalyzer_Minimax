@@ -229,6 +229,24 @@ describe('ElectronCollectorHost', () => {
     expect(host).not.toMatch(/new TokenBucketRateLimiter/);
   });
 
+  it('paces every E*Trade market call, the post-renew retry included', () => {
+    // Unpaced until v1.1.239: harmless while the chain subset held ~1 ticker,
+    // ~6,000 back-to-back calls a night once real volume admitted ~500.
+    const etrade = host.slice(host.indexOf('async etradeGet('), host.indexOf('async httpGet('));
+    // Non-vacuity: a missing anchor would make the slice empty and the counts 0.
+    expect(etrade).toContain('etradeGetRaw(');
+    const calls = etrade.match(/etradeGetRaw\(/g) ?? [];
+    const paced = etrade.match(/await this\.opts\.etradeLimiter\.acquire\(1\)/g) ?? [];
+    expect(calls.length).toBe(2);
+    expect(paced.length).toBe(calls.length);
+    // Each acquire precedes the call it paces.
+    expect(etrade.indexOf('etradeLimiter.acquire')).toBeLessThan(etrade.indexOf('etradeGetRaw('));
+    // One bucket, built once in index.ts and handed in.
+    expect(index.match(/const etradeLimiter = new TokenBucketRateLimiter\(/g) ?? []).toHaveLength(1);
+    const factory = index.slice(index.indexOf('const makeCollectorHost'), index.indexOf('const todayET'));
+    expect(factory).toContain('etradeLimiter,');
+  });
+
   it('reports the close-time checkpoint on success as well as on failure', () => {
     // v1.1.209 added the explicit `wal_checkpoint(TRUNCATE)` and logged it only
     // when it did NOT fully apply — which reproduces, one level up, the exact

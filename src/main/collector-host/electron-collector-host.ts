@@ -125,6 +125,20 @@ export interface ElectronCollectorHostOptions {
    * measured precedent this mirrors; `runBootstrapIv` itself has no delay at all.
    */
   readonly ivolatilityLimiter: TokenBucketRateLimiter;
+  /**
+   * Pacing for the collector's E*Trade market calls — the chain phase above all.
+   *
+   * **Until v1.1.239 there was none.** `etradeGet` went straight to
+   * `etradeGetRaw`, while 04 §3's run budget planned the chain phase at 120
+   * calls/min. That never mattered while the chain subset held about one ticker;
+   * with real bar volume (v1.1.236) it admits ~500, i.e. ~500 expiration calls
+   * plus ~4,000–6,500 chain calls back to back — roughly 200/min at E*Trade's
+   * ~300 ms latency, about twice the only E*Trade pace this app has run for
+   * months (`daily-iv-capture.ts`: 1,100 ms after each ticker's two calls). E*Trade
+   * documents per-module, per-second limits and drops the excess, and a dropped
+   * chain call is never retried — it is a hole in the day.
+   */
+  readonly etradeLimiter: TokenBucketRateLimiter;
   readonly getEtradeCredentials: () => OAuthCredentials | null;
   readonly sendEmail: (msg: { subject: string; text: string; html: string }) => Promise<void>;
 }
@@ -441,6 +455,10 @@ export class ElectronCollectorHost implements CollectorHost {
       };
     }
 
+    // Paced before each market call, the retry included — it is a second call
+    // against the same per-second allowance. The OAuth renew between them is a
+    // different module and only happens after a failure, so it is not queued.
+    await this.opts.etradeLimiter.acquire(1);
     const first = await etradeGetRaw(path, params, creds);
     const ok = first.status !== null && first.status >= 200 && first.status < 300;
     if (ok) return first;
@@ -452,6 +470,7 @@ export class ElectronCollectorHost implements CollectorHost {
       // real outcome, and an expired-past-midnight token needs a manual
       // re-auth that no amount of retrying can substitute for.
     }
+    await this.opts.etradeLimiter.acquire(1);
     return etradeGetRaw(path, params, this.opts.getEtradeCredentials() ?? creds);
   }
 

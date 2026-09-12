@@ -381,6 +381,12 @@ app.whenReady().then(() => {
   // each without incident — a larger run than the bootstrap plans. Burst 2,
   // because the point is a sustained trickle, not a head start.
   const ivolatilityLimiter = new TokenBucketRateLimiter({ requestsPerMinute: 55, burstSize: 2 });
+  // E*Trade market calls from the NewApp collector (the chain phase: ~500
+  // expirations + ~4,000–6,500 chains a night). 120/min is the pace NewApp 04 §3
+  // budgeted and is close to the only E*Trade pace this app has run for months
+  // (daily-iv-capture: 1,100 ms after each ticker's two calls ≈ 110/min). Burst 2:
+  // a sustained trickle, never a second of back-to-back calls.
+  const etradeLimiter = new TokenBucketRateLimiter({ requestsPerMinute: 120, burstSize: 2 });
   const jobQueue = new JobQueue(db);
   const analysisService = new AnalysisService(db, dataProvider, rateLimiter, jobQueue, optionsProvider);
   const validateAllService = new ValidateAllService(db, dataProvider, rateLimiter, jobQueue, optionsProvider);
@@ -839,6 +845,7 @@ app.whenReady().then(() => {
       finnhubLimiter,
       getIvolatilityApiKey: () => { try { return secureGet(db, 'ivolatilityApiKey'); } catch { return ''; } },
       ivolatilityLimiter,
+      etradeLimiter,
       getEtradeCredentials: () => getEtradeCreds(),
       sendEmail: async (msg) => { await emailService.send(msg.subject, msg.html); },
     });

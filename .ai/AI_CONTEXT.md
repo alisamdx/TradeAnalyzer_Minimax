@@ -197,6 +197,9 @@ Authoritative DDL is in `migrations/`. Tables are created lazily (`CREATE TABLE 
 
 ## 10. Known quirks & gotchas
 
+- **The NewApp collector's E\*Trade calls are paced as of v1.1.239** by one application `etradeLimiter` (120/min, burst 2) acquired in `ElectronCollectorHost.etradeGet` before each market call and the post-renew retry. Before that nothing paced them; it surfaced only once real bar volume let the chain subset admit ~500 tickers. The existing app's own E\*Trade paths do NOT share this bucket (`daily-iv-capture` paces by sleeping 1,100 ms per ticker) — they run in the batch chain, which the collector waits behind.
+- **Pending work lives in `NewApp/TODO.md`** — a numbered list; numbers are never reused.
+
 - **QC-205 windows are exchange SESSIONS (v1.1.238, core 0.6.8), and QC-209 is new.** 20 stored bars on a sparse series spanned years and crossed the SOLS splice (a $0.0001 shell until 2025-10-30). QC-205 now measures 20 sessions each side with ≥ 15 bars; QC-209 (blocking) fires on a step after ≥ 20 bar-less sessions followed by bars on ≥ 15 of the next 20. Both read `latestSeries` (MAX(row_id) per day) and gate pilot exit via `backfillQueueClear`.
 
 - **`legacy_import` reads THIS app's database via `OneShotDeps.legacyDb` (v1.1.237).** Until then `collector-oneshot` passed the generation (`db as never`), so the import logged every source as "not present" and reported `0 config rows, 0 decisions` as success; the `etf_list` source also queried a non-existent `constituents.universe` (now `index_name`). `tests/legacy-import-real-schema.test.ts` runs the importer against a DB built from the real `migrations/`.

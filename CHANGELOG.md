@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.239] - 2026-09-12
+
+### The collector's E*Trade calls were never paced
+
+Existing app only; `core` and TradeAnalyzer 2 unchanged.
+
+NewApp 04 §3 budgets the chain phase at **120 E\*Trade calls/min**. No code enforced it: `ElectronCollectorHost.etradeGet` called `etradeGetRaw` directly, while Polygon, Finnhub and IVolatility each go through a limiter. It never mattered while the chain subset held about one ticker — and the subset was near-empty because bar volume was stored as 0. With v1.1.236 it admits ~500 tickers: ~500 expiration calls plus ~4,000–6,500 chain calls, back to back, roughly 200/min. That is about twice the only E\*Trade pace this app has sustained for months (`daily-iv-capture`: 1,100 ms after each ticker's two calls), E\*Trade drops requests over its per-second limits, the host answers any failure with a renew-and-retry (doubling load under throttling), and a failed chain call is never retried.
+
+**Fixed:** one application `etradeLimiter` (120/min, burst 2), created in `index.ts`, handed to the collector host, and acquired before every E\*Trade market call — the post-renew retry included. The renew itself is a different E\*Trade module and only follows a failure, so it is not queued. At 120/min the chain phase is ~46–54 min.
+
+Test: `tests/collector-host.test.ts` asserts every `etradeGetRaw(` in `etradeGet` is preceded by an acquire (2 of 2), that the limiter is built once, and that the factory passes it in.
+
 ## [1.1.238] - 2026-09-12
 
 ### QC-205 counts sessions, and a new check catches the dormant-shell form of ticker reuse
