@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.1.231] - 2026-09-11
+
+### The IV bootstrap would have run unauthenticated and unpaced
+
+`bootstrap_iv` has never run — it waits on a subscription — and reviewing it before that spend found two faults, one of which its own comment denied.
+
+- **No API key.** `core` builds the IVX URL without one and its comment said "the host signs and logs it". The host had `getPolygonApiKey` and `getFinnhubApiKey` and **no IVolatility branch at all**, so the first run would have fired ~500 unauthenticated requests. Same defect as Finnhub's in v1.1.223, in a job nobody had exercised. The key now goes on as `?apiKey=` — a query parameter because IVolatility **rejects** `Authorization: Bearer` (proven by the existing app's own provider) — and an unset key refuses the call instead of sending it bare.
+- **Because the credential travels in the URL, the log had to change too.** `logHttp` built its params from `URL.searchParams`, which would have copied the key verbatim into `logs/api/` — a plaintext file with 30-day retention. `loggableParams()` now redacts `apiKey`/`token`/`key`/`secret`, the same discipline `polygonGet` already followed by rebuilding params instead of reading them off the URL.
+- **No pacing.** The loop issued its calls back to back. It now holds each behind a dedicated 55/min limiter (burst 2) — matching the 1,100 ms spacing under which **this app's own IVolatility backfill already pulled S&P 500 + Russell 1000 + ETFs, a year each, without incident.** That run is larger than the bootstrap plans, which is why the earlier "contact support before running" advice was dropped: the protection that actually worked was the throttle, not the notification.
+- A test pins all of it, including that each provider has exactly **one** named limiter. The previous assertion counted every `requestsPerMinute: 55` in `index.ts` and demanded one — too blunt the moment a second provider legitimately needed the same rate.
+
+### Ticker scope for the bootstrap: the chain subset, not the full universe
+
+Recorded because it is decided by code, not preference. `QC907_BOOTSTRAP_OVERLAP` evaluates **every** ticker holding an unaccepted external series and needs 20 paired days **per ticker**; a paired day requires an `ok` row in `derived_iv30_daily`, which exists only for tickers whose chains we capture — subset members and pins. Buying the full Russell list would therefore create ~600 series that can never pair, never be accepted, and fire a blocking finding forever. The old app could pull everything because it stored IV for everything and had no pairing gate; this design requires the two series to be comparable before either is trusted, precisely because the old one spliced two IV sources with **zero** overlapping ticker-days.
+
 ## [1.1.230] - 2026-09-11
 
 ### Every EDGAR call is now logged, and the contact is readable over the API

@@ -111,6 +111,20 @@ export interface ElectronCollectorHostOptions {
    * allowance, which is only invisible while one of them is idle.
    */
   readonly finnhubLimiter: TokenBucketRateLimiter;
+  /**
+   * The `ivolatilityApiKey` from Settings. `bootstrap_iv` builds its URL in
+   * `core` without a key and its comment claimed this host already signed it —
+   * it did not, so the job would have fired ~500 unauthenticated requests the
+   * first time it ran. Same defect as Finnhub's, in a job that has never run.
+   */
+  readonly getIvolatilityApiKey: () => string;
+  /**
+   * Pacing for the IV bootstrap. The existing app's own IVolatility backfill —
+   * S&P 500 + Russell 1000 + ETFs, a year each, larger than this one — completed
+   * cleanly at 1,100 ms between calls (`iv-history-service.ts`). That is the
+   * measured precedent this mirrors; `runBootstrapIv` itself has no delay at all.
+   */
+  readonly ivolatilityLimiter: TokenBucketRateLimiter;
   readonly getEtradeCredentials: () => OAuthCredentials | null;
   readonly sendEmail: (msg: { subject: string; text: string; html: string }) => Promise<void>;
 }
@@ -453,16 +467,16 @@ export class ElectronCollectorHost implements CollectorHost {
     const requestedAt = new Date().toISOString();
     const parsed = new URL(url);
     const provider = providerForHost(parsed.hostname);
-    const requestParams: Record<string, unknown> = Object.fromEntries(parsed.searchParams);
 
     const auth: Record<string, string> = {};
+    let target = url;
     if (provider === 'finnhub') {
       const key = this.opts.getFinnhubApiKey();
       if (!key) {
         // Refused rather than sent: an unauthenticated call only produces a
         // provider error body that has to be decoded back into this sentence.
         const error = 'Finnhub API key is not configured.';
-        logHttp({ requestedAt, provider, endpoint: parsed.pathname, requestParams, status: null, latencyMs: null, body: null, error });
+        logHttp({ requestedAt, provider, endpoint: parsed.pathname, requestParams: loggableParams(parsed), status: null, latencyMs: null, body: null, error });
         return { status: null, body: '', requestedAt, respondedAt: null, error };
       }
       auth['X-Finnhub-Token'] = key;
@@ -471,9 +485,27 @@ export class ElectronCollectorHost implements CollectorHost {
       await this.opts.finnhubLimiter.acquire(1);
     }
 
+    if (provider === 'ivolatility') {
+      const key = this.opts.getIvolatilityApiKey();
+      if (!key) {
+        const error = 'IVolatility API key is not configured.';
+        logHttp({ requestedAt, provider, endpoint: parsed.pathname, requestParams: loggableParams(parsed), status: null, latencyMs: null, body: null, error });
+        return { status: null, body: '', requestedAt, respondedAt: null, error };
+      }
+      // A query parameter, not a header: IVolatility **rejects**
+      // `Authorization: Bearer` (see `ivolatility-provider.ts`). The key is
+      // therefore in the URL, which is exactly why `loggableParams` strips it
+      // before anything is written — `polygonGet` has the same shape.
+      const signed = new URL(url);
+      signed.searchParams.set('apiKey', key);
+      target = signed.toString();
+      await this.opts.ivolatilityLimiter.acquire(1);
+    }
+
+    const requestParams = loggableParams(parsed);
     const started = Date.now();
     try {
-      const res = await fetch(url, {
+      const res = await fetch(target, {
         headers: {
           // The SEC asks automated clients to declare a user agent carrying a
           // contact address (it is a request, not an enforced gate — their
@@ -514,9 +546,25 @@ export class ElectronCollectorHost implements CollectorHost {
   }
 }
 
+/**
+ * The query as `logs/api/` may record it — **never the credential.**
+ *
+ * `logs/api/` is a plaintext file with 30-day retention. A key that travels in
+ * the query string would otherwise be copied verbatim into every log line, which
+ * is the one way a credential escapes the OS keychain by accident.
+ */
+function loggableParams(parsed: URL): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of parsed.searchParams) {
+    out[k] = /^(apikey|token|key|secret)$/i.test(k) ? '[REDACTED]' : v;
+  }
+  return out;
+}
+
 /** The provider name `logs/api/` records for a generic call, from its host. */
 function providerForHost(hostname: string): string {
   if (hostname.endsWith('finnhub.io')) return 'finnhub';
+  if (hostname.endsWith('ivolatility.com')) return 'ivolatility';
   if (hostname.endsWith('sec.gov')) return 'edgar';
   if (hostname.endsWith('treasury.gov')) return 'treasury';
   if (hostname.endsWith('federalreserve.gov') || hostname.endsWith('bls.gov')) return 'fred';

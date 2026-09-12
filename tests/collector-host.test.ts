@@ -71,13 +71,40 @@ describe('ElectronCollectorHost — Finnhub and the generic transport (v1.1.223)
     expect(httpBlock).toMatch(/Finnhub API key is not configured/);
   });
 
+  it('signs and paces IVolatility, and never logs the key', () => {
+    // `bootstrap_iv` builds its URL in `core` with no key, and its comment said
+    // the host signed it. The host had no IVolatility branch at all, so the
+    // first run of that job — ~500 calls — would have gone out unauthenticated
+    // and unpaced. The existing app's larger backfill succeeded at 1,100 ms
+    // spacing, which is the precedent the limiter mirrors.
+    expect(httpBlock).toContain('getIvolatilityApiKey()');
+    expect(httpBlock).toMatch(/await this\.opts\.ivolatilityLimiter\.acquire\(/);
+    expect(httpBlock).toMatch(/IVolatility API key is not configured/);
+    // A query parameter, because IVolatility rejects a Bearer header — which is
+    // precisely why the log line must be scrubbed rather than read off the URL.
+    expect(httpBlock).toContain("searchParams.set('apiKey'");
+    expect(httpBlock).toContain('loggableParams(parsed)');
+    const scrub = host.slice(host.indexOf('function loggableParams('));
+    expect(scrub).toContain('[REDACTED]');
+    const wiring = index.slice(index.indexOf('new ElectronCollectorHost('));
+    expect(wiring).toMatch(/getIvolatilityApiKey:.*secureGet\(db, 'ivolatilityApiKey'\)/);
+    expect(wiring).toContain('ivolatilityLimiter,');
+  });
+
   it('paces Finnhub through the application\'s ONE limiter, shared with the earnings job', () => {
     // Finnhub limits per KEY (~60/min free), and this app has two consumers of
     // the one key. Two buckets would be two budgets spending one allowance —
     // the same reasoning that put the collector inside this app for Polygon.
     expect(httpBlock).toMatch(/await this\.opts\.finnhubLimiter\.acquire\(/);
-    const created = index.match(/new TokenBucketRateLimiter\(\{ requestsPerMinute: 55/g) ?? [];
-    expect(created).toHaveLength(1);
+    // Counted per NAMED limiter, not per 55/min bucket. The first version of
+    // this assertion counted every `requestsPerMinute: 55` in the file and
+    // required exactly one — which broke the moment IVolatility legitimately
+    // got its own 55/min limiter. The property worth pinning is that each
+    // provider has ONE bucket, not that only one provider is paced at 55.
+    const finnhubCreated = index.match(/const finnhubLimiter = new TokenBucketRateLimiter\(/g) ?? [];
+    expect(finnhubCreated).toHaveLength(1);
+    const ivolCreated = index.match(/const ivolatilityLimiter = new TokenBucketRateLimiter\(/g) ?? [];
+    expect(ivolCreated).toHaveLength(1);
     const wiring = index.slice(index.indexOf('new ElectronCollectorHost('));
     expect(wiring).toContain('finnhubLimiter,');
     expect(index).toMatch(/new EarningsRefreshJob\([^)]*finnhubLimiter\)/);

@@ -110,9 +110,17 @@ export async function runBootstrapIv(
       throwIfCancelled(host, 'bootstrap_iv');
       host.progress('bootstrap_iv', i, tickers.length, ticker);
 
-      // The API key is the host's business, not `core`'s — the same division as
-      // every other transport here. `httpGet` signs and logs it; this module
-      // never sees it and so can never log it.
+      // The API key and the pacing are both the host's business, not `core`'s —
+      // the same division as every other transport here. `httpGet` appends the
+      // key (IVolatility rejects a Bearer header, so it must be a query
+      // parameter), strips it from the log line, and holds each call behind the
+      // IVolatility limiter. This module never sees the key and so can never
+      // log it.
+      //
+      // Until v1.1.231 that was only half true: the host had no IVolatility
+      // branch at all, so this comment described an intention rather than the
+      // code, and the first real run would have sent ~500 unauthenticated
+      // requests as fast as the loop could issue them.
       const url = `${IVOLATILITY_BASE}${IVX_ENDPOINT}?symbol=${encodeURIComponent(ticker)}&from=${from}&to=${to}`;
       const response = await host.httpGet(url);
 

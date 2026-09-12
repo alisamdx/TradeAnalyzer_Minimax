@@ -376,6 +376,11 @@ app.whenReady().then(() => {
   // two budgets spending one allowance. 55 leaves margin; the small burst keeps a
   // sweep from firing a minute's worth of calls in a second.
   const finnhubLimiter = new TokenBucketRateLimiter({ requestsPerMinute: 55, burstSize: 5 });
+  // IVolatility, for the NewApp IV bootstrap. 55/min ≈ the 1,100 ms spacing under
+  // which this app's own backfill pulled S&P 500 + Russell 1000 + ETFs a year
+  // each without incident — a larger run than the bootstrap plans. Burst 2,
+  // because the point is a sustained trickle, not a head start.
+  const ivolatilityLimiter = new TokenBucketRateLimiter({ requestsPerMinute: 55, burstSize: 2 });
   const jobQueue = new JobQueue(db);
   const analysisService = new AnalysisService(db, dataProvider, rateLimiter, jobQueue, optionsProvider);
   const validateAllService = new ValidateAllService(db, dataProvider, rateLimiter, jobQueue, optionsProvider);
@@ -821,6 +826,8 @@ app.whenReady().then(() => {
       getPolygonApiKey: () => getApiKey(db),
       getFinnhubApiKey: () => { try { return secureGet(db, 'finnhubApiKey'); } catch { return ''; } },
       finnhubLimiter,
+      getIvolatilityApiKey: () => { try { return secureGet(db, 'ivolatilityApiKey'); } catch { return ''; } },
+      ivolatilityLimiter,
       getEtradeCredentials: () => getEtradeCreds(),
       sendEmail: async (msg) => { await emailService.send(msg.subject, msg.html); },
     });
