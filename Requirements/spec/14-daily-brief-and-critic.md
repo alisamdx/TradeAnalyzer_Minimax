@@ -101,6 +101,23 @@ validated wheel/income/bullish candidates at 14–45 DTE, and daily re-quotes of
 the prior 21 days until expiry. Data collection only; a failure is logged (`spread-capture:run`) and
 never fails the brief. Acceptance: `tests/spread-chain-capture.test.ts`.
 
+## Bull put spread mode (v1.1.244) — shadow
+
+Design `NewApp/requirements/08-bull-put-spread-mode.md`; formulas `docs/formulas.md#bull-put-spread-mode`.
+Runs immediately after spread chain capture, from that run's captured chains (no E\*Trade calls).
+
+- **Pool:** the latest run's `brief_candidates` for `wheel` with disposition `picked`/`capped_out`.
+- **Construction:** expiry 21–35 DTE nearest 30, strictly before the next report; short put two-sided,
+  |Δ| 0.25–0.35 nearest 0.30; long put two-sided, strike nearest `short − 5% × spot`, width 5–7.5% of spot.
+- **Costs:** legs fill by `options-fill.ts`; excluded if round-trip cost > 25% of mid credit or net credit ≤ $0.05.
+- **Gates (reason stored):** critic `flag`; earnings unknown / stale / on or before every in-window expiry;
+  no chain, expiry, underlying price, short or long; cost; one contract's max loss > `bullPutSpreadMaxLossPerPosition`.
+- **Size and rank:** contracts = floor(budget ÷ max loss per contract); rank by net credit ÷ max loss
+  (unvalidated), top 5; the rest recorded as "ranked below the top 5".
+- **Switch:** `bullPutSpreadMode` = `shadow` (default: store only) | `off`. The `on` panel and email are built
+  when 08 §4's enable gate passes. Stored in `spread_mode_picks` (§2); logged `spread-mode:run`; never fails the brief.
+- Acceptance: `tests/spread-mode.test.ts`.
+
 ## Roll the Dice (v1.1.162)
 
 A button on the Daily Brief that reduces the brief to **one** wheel entry the operator can act on

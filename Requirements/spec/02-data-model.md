@@ -203,6 +203,25 @@ a spread's bought wing could otherwise only be modelled (at ATM IV, ignoring ske
 
 Retention 730 days, ~50 MB per trading year.
 
+### `spread_mode_picks` (migration 084, v1.1.244)
+
+The bull put spread mode's output (§14), stored in shadow so forward outcomes accumulate from day one.
+Written by `computeSpreadMode` after every brief run; read by nothing that decides a trade.
+
+| column | note |
+|---|---|
+| `as_of_date`, `slot`, `ticker` | unique; a slot re-run deletes and rewrites that slot, the other slot is kept |
+| `generated_at`, `mode` | `mode` CHECK `shadow` \| `on` |
+| `outcome`, `rank`, `reason` | `pick` with `rank` 1–5, or `rejected` with the gate's `reason` |
+| `expiration`, `dte`, `spot` | `spot` from the captured chain (split scale guard) |
+| `short_*`, `long_*` | strike, bid, ask, delta, open interest of each leg |
+| `width`, `mid_credit`, `net_credit`, `max_loss`, `return_on_risk`, `cost_share` | per share; `net_credit` after `options-fill.ts` fills; `docs/formulas.md#bull-put-spread-mode` |
+| `contracts`, `total_max_loss` | sized by `bullPutSpreadMaxLossPerPosition` |
+| `earnings_date`, `critic_verdict` | as known at the run |
+
+Outcomes are not stored — they are settled later against `spread_chain_capture` track rows or
+`historical_prices`. Retention 730 days.
+
 **Outcomes are not stored**: they are settled later against `historical_prices`, so a subsequent
 split repair corrects them rather than leaving a frozen wrong value. Retention is **730 days**
 (vs the briefs' 90) — the rows cost ~20 MB per trading year against `daily_briefs`' ~229 MB.

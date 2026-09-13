@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.1.244] - 2026-09-13
+
+### Bull put spread mode — built, running in shadow
+
+The second strategy after wheel (TODO #44), to the design approved 2026-09-13 (`NewApp/requirements/08-bull-put-spread-mode.md`). **Shadow only:** after every brief run it computes the picks and stores them, with no panel and no email. It is switched on only when the design's §4 checks pass on captured quotes. It never reaches the trading engine.
+
+- **Pool:** the latest brief run's wheel candidates that cleared validation (`picked` / `capped_out`).
+- **The trade:** built from the chains captured earlier in the same run, so no extra E\*Trade calls. Expiry 21–35 DTE nearest 30 and before earnings; short put nearest 0.30Δ within 0.25–0.35; long put nearest 5% of spot below it, within 5–7.5%; both legs two-sided.
+- **Costs:** each leg fills by the app's fill model (halfway from mid to the far side). A trade is skipped when opening and closing would cost more than 25% of the mid credit, or the net credit is $0.05 or less.
+- **Gates, each with its reason:** critic flag; earnings unknown, stale or before expiry; no chain, expiry, short or long leg; cost; one contract over the per-position max loss.
+- **Size and rank:** contracts = max loss per position ÷ the spread's max loss; ranked by net credit ÷ max loss (unvalidated), top 5; exit guidance is a 50% profit target with no stop and no time stop.
+- **Settings** (defaults approved 2026-09-13): `bullPutSpreadMode` `shadow` | `off`, `bullPutSpreadMaxLossPerPosition` $1,000, `bullPutSpreadMaxOpenPositions` 10.
+- **New table `spread_mode_picks`** (migration 084): every pick with both legs' quotes, fills, credit, max loss, cost share and contracts, plus every rejection with its reason; both slots kept; two-year retention. Logged as `spread-mode:run`.
+
+Tests: `tests/spread-mode.test.ts`.
+
 ## [1.1.243] - 2026-09-12
 
 ### Spread chain capture — recording both legs for the bull put spread study

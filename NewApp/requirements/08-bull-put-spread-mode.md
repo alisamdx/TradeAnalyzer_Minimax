@@ -1,6 +1,6 @@
 # 08 — Bull put spread mode: the second strategy after wheel
 
-Status: **design, v1 — 2026-09-13, awaiting operator approval.** An existing-app brief mode, built
+Status: **design v1 approved 2026-09-13; built in shadow, v1.1.244.** An existing-app brief mode, built
 **switched off** and enabled only once captured real quotes confirm the study (§4). TODO #44; the
 evidence is TODO #43 and `scripts/fr-bull-put-spread-study.mjs`.
 
@@ -15,6 +15,7 @@ evidence is TODO #43 and `scripts/fr-bull-put-spread-study.mjs`.
 | S3 | 2026-09-12 | **Risk as fixed dollars, or a percent of the trade.** Implemented as a fixed max-loss budget per position (§3.5). |
 | S4 | 2026-09-12 | **Delivered as a new brief mode alongside wheel.** |
 | S5 | 2026-09-13 | **Write the design now; build it switched off; enable after a re-run on captured quotes (§4).** |
+| S6 | 2026-09-13 | **Design approved; every §6 question at its recommended default** — $1,000 max loss and 10 positions until real numbers are set, wheel pool only, ship `shadow`, 50% target, engine stop as a separate item (TODO #45). |
 
 ---
 
@@ -112,6 +113,9 @@ leg; earnings date; critic verdict; the "unvalidated — model-priced evidence" 
 
 ### 3.9 Switch, surfaces, storage
 
+- *Revision 2026-09-13 (v1.1.244): the build implements `off` and `shadow` only. The `on` panel and email
+  are built when §4 passes — before that they would have nothing validated to show. A stored `on` reads as
+  the default.*
 - Setting **`bullPutSpreadMode`**: `off` | `shadow` | `on`.
   - `off` — nothing runs.
   - `shadow` — computed after each brief run and **stored**, with no panel and no email. Forward

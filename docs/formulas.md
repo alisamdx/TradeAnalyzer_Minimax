@@ -813,6 +813,23 @@ Operator profile: short put **0.35 ≤ |delta| ≤ 0.45**, **14 ≤ DTE ≤ 30**
   `[rollStrike, chosenStrike)`. A proxy: at a real roll the put is in the money and costs more to buy back.
 - **Own-at-strike** — the existing read with cost basis `strike − mid` (`docs/formulas.md#own-at-strike`).
 
+## Bull put spread mode {#bull-put-spread-mode}
+
+`src/main/services/spread-mode.ts` — shadow (NewApp `08-bull-put-spread-mode.md`). Per share unless noted.
+
+- **Expiry** — among captured expiries with **21 ≤ DTE ≤ 35** and `expiration < next report date`: minimise
+  `|DTE − 30|`, earlier on a tie.
+- **Short leg** — two-sided (`bid > 0`, `ask ≥ bid`), **0.25 ≤ |Δ| ≤ 0.35**, minimise `||Δ| − 0.30|`.
+- **Long leg** — two-sided, `strike < short strike`, **0.05 ≤ (short − long) ÷ spot ≤ 0.075**, minimise
+  `|long − (short − 0.05 × spot)|`.
+- **Fills** — `docs/formulas.md#fill-model`: short = `fillPrice(bid, ask, 'sell')`, long = `fillPrice(bid, ask, 'buy')`.
+- **Mid credit** = `short mid − long mid`; **net credit** = `short fill − long fill`.
+- **Round-trip cost share** = `2 × [(short mid − short fill) + (long fill − long mid)] ÷ mid credit`. Excluded if `> 0.25`.
+- **Width** = `short − long`; **max loss** = `width − net credit`; **return on risk** = `net credit ÷ max loss`;
+  **breakeven** = `short − net credit`; **take-profit debit** = `0.5 × net credit`.
+- **Contracts** = `floor(maxLossPerPosition ÷ (max loss × 100))`; excluded if `< 1`. **Total max loss** = `contracts × max loss × 100`.
+- **Ranking** — return on risk descending, ties by ticker; keep 5. Unvalidated.
+
 ## split-adjustment (data integrity) {#split-adjustment}
 
 `historical_prices` must hold a **self-consistent, split-adjusted** close series: every bar

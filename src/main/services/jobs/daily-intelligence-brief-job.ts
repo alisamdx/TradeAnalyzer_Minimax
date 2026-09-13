@@ -20,6 +20,7 @@ import type { EmailService } from '../email-service.js';
 import { buildEmailHtml, buildPdf } from '../brief-report-builder.js';
 import { sendDiceEmail, sendShortlistEmail } from '../brief-emails.js';
 import { captureSpreadChains } from '../spread-chain-capture.js';
+import { computeSpreadMode } from '../spread-mode.js';
 import { logEmailOutcome } from '../email-log.js';
 import type { PaperTradingService } from '../paper-trading-service.js';
 import { CriticService } from '../critic-service.js';
@@ -1082,6 +1083,18 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
         message: cap.failures.length > 0
           ? `${summary}; first: ${cap.failures[0]!.ticker} ${cap.failures[0]!.step} — ${cap.failures[0]!.message}`
           : summary,
+      });
+
+      // ── Bull put spread mode (TODO #44, NewApp 08) — SHADOW: computed + stored, no panel, no email ──
+      // Reads the chains captured just above, so it costs no E*Trade calls; never throws.
+      const spreadMode = computeSpreadMode({ db: this.db, slot: candidateSlot });
+      logEmailOutcome({
+        level: spreadMode.error ? 'ERROR' : 'INFO',
+        operation: 'spread-mode:run',
+        message: spreadMode.error
+          ? `[brief] spread mode failed (brief unaffected): ${spreadMode.error}`
+          : `[brief] spread mode ${spreadMode.mode}: ${spreadMode.picks.length} picks from ${spreadMode.considered} wheel candidates, `
+            + `${spreadMode.rejections.length} rejected, ${spreadMode.rowsWritten} rows stored`,
       });
     }
 
