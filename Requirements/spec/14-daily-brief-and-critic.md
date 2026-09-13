@@ -93,6 +93,14 @@ Interim, advisory answer to "the best wheel trades today" — design `NewApp/req
 - **Surfaces:** `🎯 Wheel Shortlist` button + panel on the Daily Brief (`scoring:wheel-shortlist`), `✉ Email it` (`scoring:email-wheel-shortlist`), and an email after every brief run through `sendShortlistEmail` — the same logged compute/build/send path as the dice email (`brief-emails.ts`), outcome in `logs/errors` as `shortlist-email:*`.
 - **Not validated on this profile** and never an engine input. Acceptance: `tests/wheel-shortlist.test.ts`.
 
+## Spread chain capture (v1.1.243)
+
+The last step of every brief run, independent of email: `captureSpreadChains` records the put-side
+chains a bull put spread would use into `spread_chain_capture` (§2) — entry chains for the run's
+validated wheel/income/bullish candidates at 14–45 DTE, and daily re-quotes of any series entered in
+the prior 21 days until expiry. Data collection only; a failure is logged (`spread-capture:run`) and
+never fails the brief. Acceptance: `tests/spread-chain-capture.test.ts`.
+
 ## Roll the Dice (v1.1.162)
 
 A button on the Daily Brief that reduces the brief to **one** wheel entry the operator can act on

@@ -188,6 +188,21 @@ the measurement: the dice emails both runs, so the pick read at ~10:35 ET was pr
 destroyed at ~17:00 ET. `scripts/slot-liquidity-drift-study.mjs` pairs the phases. Cost doubles to
 ~40 MB per trading year.
 
+### `spread_chain_capture` (migration 083, v1.1.243)
+
+Both legs' put quotes for the bull put spread study. Every other table holds the short leg only, so
+a spread's bought wing could otherwise only be modelled (at ATM IV, ignoring skew). Written by
+`captureSpreadChains` after every brief run; read by nothing that decides a trade.
+
+| column | note |
+|---|---|
+| `as_of_date`, `slot`, `ticker`, `expiration` | unique; both batch slots kept, a re-run of a slot REPLACES |
+| `captured_at`, `dte`, `underlying_price` | `underlying_price` as the chain reported it (split scale guard) |
+| `reason` | `entry` — ticker in the run's validated `wheel`/`income`/`bullish` pool, expiry 14–45 DTE; `track` — an entry from the prior 21 days, unexpired, re-quoted daily even if the name left the pools |
+| `contract_count`, `puts_json` | `[[strike, bid, ask, delta, iv_pct, open_interest, volume], …]` ascending by strike. Kept: \|Δ\| 0.03–0.50, or strike 65–100% of spot when delta is missing; `track` rows also every strike in the entry's range. IV in percent; nulls kept distinct from 0 |
+
+Retention 730 days, ~50 MB per trading year.
+
 **Outcomes are not stored**: they are settled later against `historical_prices`, so a subsequent
 split repair corrects them rather than leaving a frozen wrong value. Retention is **730 days**
 (vs the briefs' 90) — the rows cost ~20 MB per trading year against `daily_briefs`' ~229 MB.

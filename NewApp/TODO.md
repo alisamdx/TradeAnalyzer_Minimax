@@ -142,6 +142,20 @@ capital cap; after both briefs; TA2 view + email.
 41. **TA2 Opportunity view + email + self-grading scorecard** (07 §7), once ~40 entry dates have settled
     (≈ mid-November).
 
+## G. Bull put spread — second strategy after wheel
+
+Decisions 2026-09-12: bull put **credit** spread (premium, not direction); 5–15 day hold; risk as
+fixed dollars or % of the trade; a new brief mode alongside wheel. Draft criteria: 21–35 DTE,
+short 0.20–0.30Δ, credit ≥ 30% of width, IVR ≥ ~30; exit 50% profit / 15 days / 2× credit loss.
+
+42. ~~**Capture both legs' quotes**~~ **built 2026-09-12, v1.1.243** — `spread_chain_capture`, after
+    every brief: entry chains (wheel/income/bullish pools, 14–45 DTE) + 21-day tracked series.
+43. **Study**: put spread vs naked CSP on stored wheel picks, return per dollar of capital, exit grid
+    (50/75%/expiry × 21-DTE/N-day), split scale guard; skew-penalty sensitivity until #42 has weeks
+    of real chains.
+44. **`bull_put_spread` brief mode**, default off: gates + transparent ranking (credit/width, distance
+    below SMA50), not the wheel composite. Enabled only on captured-data evidence (FR-SEY-5).
+
 ---
 
 35. **Tidy `.ai/AI_CONTEXT.md` §11** — e.g. "ETF-aware wheel scoring … needs validation before

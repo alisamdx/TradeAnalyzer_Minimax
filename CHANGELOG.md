@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.243] - 2026-09-12
+
+### Spread chain capture — recording both legs for the bull put spread study
+
+The operator's second strategy (2026-09-12) is a **bull put credit spread**, held 5–15 days, for premium rather than direction, eventually as a brief mode next to wheel (TODO #42–44). It cannot be studied honestly on what is stored: every table holds only the **short** leg's quote, so a replay would price the bought wing with Black-Scholes at ATM IV — and put skew makes that wing dearer than the model, overstating exactly the credit being measured. This release only **starts recording**; nothing reads the data to make a decision.
+
+- **New table `spread_chain_capture`** (migration 083): after every brief run, one row per ticker+expiry holding the put side as compact JSON — strike, bid, ask, delta, IV %, open interest, volume (null kept distinct from 0).
+- **Entry rows:** tickers in the run's validated wheel, income and bullish pools (`picked`/`capped_out`), every expiry at 14–45 DTE, puts at |Δ| 0.03–0.50 (strike 65–100% of spot when delta is missing).
+- **Track rows:** any ticker+expiry entered in the last 21 days is re-quoted until expiry — even after the name leaves every pool — across its whole entry strike range, so a spread opened then can be marked daily on real quotes for the 50%-profit and loss-stop exits.
+- **Both batch slots kept**; a re-run of a slot replaces. Two-year retention, ~50 MB per trading year. Runs whether or not email is configured, never fails the brief, and logs its row/failure counts to `logs/errors` as `spread-capture:run`. Adds roughly 100–150 E\*Trade calls per brief run.
+
+Tests: `tests/spread-chain-capture.test.ts`.
+
 ## [1.1.242] - 2026-09-12
 
 ### 🎯 Wheel Shortlist — the five best puts at your profile, after every brief

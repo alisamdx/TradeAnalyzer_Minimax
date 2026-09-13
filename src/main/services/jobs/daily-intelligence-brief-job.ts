@@ -19,6 +19,7 @@ import { SCORING_REFERENCE_TICKERS } from './price-gap-fill-job.js';
 import type { EmailService } from '../email-service.js';
 import { buildEmailHtml, buildPdf } from '../brief-report-builder.js';
 import { sendDiceEmail, sendShortlistEmail } from '../brief-emails.js';
+import { captureSpreadChains } from '../spread-chain-capture.js';
 import { logEmailOutcome } from '../email-log.js';
 import type { PaperTradingService } from '../paper-trading-service.js';
 import { CriticService } from '../critic-service.js';
@@ -1065,6 +1066,22 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
       emit('Building Wheel Shortlist…');
       await sendShortlistEmail({
         email: this.emailService, db: this.db, provider: this.optionsProvider, log: logEmailOutcome, source: 'brief',
+      });
+    }
+
+    // ── Bull put spread chain capture (TODO #42) — data collection only, both legs ─────────────
+    // Outside the email block on purpose: capture must not depend on email being configured. Reads
+    // this run's candidate pools, so it runs after they are persisted; never throws.
+    if (!signal.aborted) {
+      emit('Capturing spread chains…');
+      const cap = await captureSpreadChains({ db: this.db, provider: this.optionsProvider, slot: candidateSlot });
+      const summary = `[brief] spread chains: ${cap.rowsWritten} rows (${cap.entryTickers} entry tickers, ${cap.trackedSeries} tracked series, ${cap.failures.length} failures)`;
+      logEmailOutcome({
+        level: cap.failures.length > 0 && cap.rowsWritten === 0 ? 'ERROR' : 'INFO',
+        operation: 'spread-capture:run',
+        message: cap.failures.length > 0
+          ? `${summary}; first: ${cap.failures[0]!.ticker} ${cap.failures[0]!.step} — ${cap.failures[0]!.message}`
+          : summary,
       });
     }
 
