@@ -150,9 +150,12 @@ short 0.20–0.30Δ, credit ≥ 30% of width, IVR ≥ ~30; exit 50% profit / 15 
 
 42. ~~**Capture both legs' quotes**~~ **built 2026-09-12, v1.1.243** — `spread_chain_capture`, after
     every brief: entry chains (wheel/income/bullish pools, 14–45 DTE) + 21-day tracked series.
-43. **Study**: put spread vs naked CSP on stored wheel picks, return per dollar of capital, exit grid
-    (50/75%/expiry × 21-DTE/N-day), split scale guard; skew-penalty sensitivity until #42 has weeks
-    of real chains.
+43. **Study** — *harness written 2026-09-12, awaiting a run from a normal terminal*:
+    `scripts/fr-bull-put-spread-study.mjs` (self-test 10/10). Extends v1.1.54's
+    `fr-wheel-spread-study.mjs` (wheel as put spread already validated: 79.8% win / 8.2% ret on max
+    loss vs baseline 74.3% / 3.7%; wheel is an eligible v2-engine strategy) with what it lacked: paired
+    naked-CSP comparison, capital efficiency per capital-day, time stop + exit grid, skew sensitivity,
+    DTE × delta grid, IVR / SMA50 / credit-vs-width splits, episode collapse, discontinuity guard.
 44. **`bull_put_spread` brief mode**, default off: gates + transparent ranking (credit/width, distance
     below SMA50), not the wheel composite. Enabled only on captured-data evidence (FR-SEY-5).
 
