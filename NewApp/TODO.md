@@ -223,8 +223,13 @@ short 0.20–0.30Δ, credit ≥ 30% of width, IVR ≥ ~30; exit 50% profit / 15 
     ~0.30Δ, wing 5–7.5% of spot, round-trip cost ≤ 25% of mid credit, 50–75% profit target, no loss
     or time stop, size by fixed max loss with a position cap, no SMA50 or IV-rank gate. Model-priced,
     one replay — confirm on captured chains before enabling (FR-SEY-5).
-44. **`bull_put_spread` brief mode**, default off: gates + transparent ranking (credit/width, distance
-    below SMA50), not the wheel composite. Enabled only on captured-data evidence (FR-SEY-5).
+44. **`bull_put_spread` brief mode** — *design v1 written 2026-09-13, awaiting operator approval*:
+    `NewApp/requirements/08-bull-put-spread-mode.md`. Wheel pool; built from the same run's
+    `spread_chain_capture` rows (no extra E*Trade calls); 21–35 DTE, 0.30Δ short, 5–7.5% wing; fills
+    via `options-fill.ts`; round-trip cost ≤ 25% of credit; 50% target, no stop/time stop; sized by
+    max loss; ranked by credit ÷ max loss (unvalidated); `off|shadow|on` switch, ships `shadow`;
+    `spread_mode_picks` table. Enable per §4 (captured-cost re-run + 30 settled shadow picks).
+    **Open: Q1 account size / max loss / max positions.**
 
 ---
 
