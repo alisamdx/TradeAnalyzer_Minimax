@@ -188,6 +188,12 @@ short 0.20–0.30Δ, credit ≥ 30% of width, IVR ≥ ~30; exit 50% profit / 15 
     row is negative. **Friction favours bigger credits:** 0.20Δ rows go to ~0 at $0.05 while 0.30Δ
     holds (21d Δ0.3 +2.55%). Untested lever: a wider wing (fixed $ slippage over a larger credit).
     Deciding input now = the real fill cost per leg, which nothing has measured for spreads.
+    **Script v3 (2026-09-13, self-test 20/20):** wing × delta grid (5/7.5/10% × 0.25/0.30/0.35); the
+    >35% step is classified (split = split ratio + normal step-day dollar volume; reuse = 15× dollar-
+    volume regime shift) and genuine moves like SNPS −36% are now KEPT; `--slip-model quoted` prices each
+    ticker at 0.5 × its median quoted half-spread (options_premium_history + spread_chain_capture);
+    §7 fixed-pot portfolio sim (spread by `--risk` max loss, CSP by `--csp-alloc`, one position per
+    ticker, capital reserved to exit) — the capital-efficiency answer. Re-run once ~2 weeks of chains exist.
 44. **`bull_put_spread` brief mode**, default off: gates + transparent ranking (credit/width, distance
     below SMA50), not the wheel composite. Enabled only on captured-data evidence (FR-SEY-5).
 
