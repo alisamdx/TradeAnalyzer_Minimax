@@ -58,6 +58,7 @@ const SELFTEST = argv.includes('--selftest');
 const STRATEGY = argOf('--strategy', 'wheel');
 const SLIP = Number(argOf('--slip', '0'));                 // $/share per leg per fill (flat, and the quoted fallback)
 const SLIP_MODEL = argOf('--slip-model', 'flat');          // 'flat' | 'quoted'
+const QUOTE_SLOT = argOf('--quote-slot', 'intraday');      // 'intraday' | 'any' (any = allow after-close quotes)
 const CAPITAL = Number(argOf('--capital', '25000'));
 const RISK = Number(argOf('--risk', '500'));               // max loss per spread position, $
 const CSP_ALLOC = Number(argOf('--csp-alloc', '0.25'));    // cash per CSP position, fraction of the pot
@@ -149,24 +150,31 @@ function simulate(entry, cfg) {
   if (longK <= 0) return null;
 
   const pS0 = putAt(S0, shortK, T0, sig0, cfg.skew), pL0 = putAt(S0, longK, T0, sig0, cfg.skew);
-  const credit = pS0 - pL0 - 2 * slip, premium = pS0 - slip;
+  const creditMid = pS0 - pL0;
+  const credit = creditMid - 2 * slip, premium = pS0 - slip;
   if (credit < 0.05 || premium < 0.05) return null;
+  // Round-trip friction (open + close, both legs) as a share of the mid credit — the liquidity gate.
+  const costShare = creditMid > 0 ? (4 * slip) / creditMid : Infinity;
+  if (cfg.maxCostShare != null && costShare > cfg.maxCostShare) return null;
   const expiry = addDays(entry.date, cfg.dte);
 
+  // Exits are DECIDED on the mid mark — what a broker's P&L shows (fill vs mid) — and REALISED with the
+  // closing slippage. v3's first run decided on a mark that already included the exit cost, so a trade whose
+  // slippage was large against its credit stopped out on day one.
   const sides = {
     spread: {
-      open: credit, cap: (width - credit) * 100,
-      close: (S, T, atm) => putAt(S, shortK, T, atm, cfg.skew) - putAt(S, longK, T, atm, cfg.skew) + 2 * slip,
+      open: credit, cap: (width - credit) * 100, closeSlip: 2 * slip,
+      mid: (S, T, atm) => putAt(S, shortK, T, atm, cfg.skew) - putAt(S, longK, T, atm, cfg.skew),
       intrinsic: S => Math.max(0, shortK - S) - Math.max(0, longK - S),
     },
     csp: {
-      open: premium, cap: (shortK - premium) * 100,
-      close: (S, T, atm) => putAt(S, shortK, T, atm, cfg.skew) + slip,
+      open: premium, cap: (shortK - premium) * 100, closeSlip: slip,
+      mid: (S, T, atm) => putAt(S, shortK, T, atm, cfg.skew),
       intrinsic: S => Math.max(0, shortK - S),
     },
   };
 
-  const out = { creditPctWidth: credit / width, shortK, longK, width };
+  const out = { creditPctWidth: credit / width, costShare, shortK, longK, width };
   for (const [name, side] of Object.entries(sides)) {
     let res = null;
     for (let i = ei + 1; i < bars.length; i++) {
@@ -178,12 +186,12 @@ function simulate(entry, cfg) {
       }
       const held = daysBetween(entry.date, bar.date);
       const atm = entry.ivAsOf(bar.date) ?? sig0;
-      const pnl = side.open - side.close(bar.close, daysBetween(bar.date, expiry) / 365, atm);
+      const shown = side.open - side.mid(bar.close, daysBetween(bar.date, expiry) / 365, atm);
       let exit = null;
-      if (cfg.pt != null && pnl >= side.open * cfg.pt) exit = 'target';
-      else if (cfg.sl != null && pnl <= -side.open * cfg.sl) exit = 'stop';
+      if (cfg.pt != null && shown >= side.open * cfg.pt) exit = 'target';
+      else if (cfg.sl != null && shown <= -side.open * cfg.sl) exit = 'stop';
       else if (cfg.ts != null && held >= cfg.ts) exit = 'time';
-      if (exit) { res = { pnl: pnl * 100, cap: side.cap, days: held, exit }; break; }
+      if (exit) { res = { pnl: (shown - side.closeSlip) * 100, cap: side.cap, days: held, exit }; break; }
     }
     if (!res) return null;
     out[name] = res;
@@ -244,6 +252,10 @@ function simulatePortfolio(rows, side, o) {
   const span = daysBetween(dates[0], lastExit);
   res.annPct = equity > 0 && span > 0 ? ((equity / o.capital) ** (365 / span) - 1) * 100 : null;
   res.util = dayCount ? (deployedDays / dayCount / o.capital) * 100 : 0;
+  // Total return on the capital actually tied up on an average day — separates "the structure earns
+  // little" from "the sizing left the pot idle".
+  const avgDeployed = dayCount ? deployedDays / dayCount : 0;
+  res.onDeployedPct = avgDeployed > 0 ? ((equity - o.capital) / avgDeployed) * 100 : null;
   return res;
 }
 
@@ -294,7 +306,8 @@ function line(label, rows) {
   if (!s) return `| ${label} | 0 | | | | | | | | | | | |`;
   return `| ${label} | ${s.n} | ${f(s.win)} | ${f(s.mean, 2)} | ${f(s.median, 2)} | **${f(s.perDay, 3)}** | ${f(s.days)} | ${exitMix(s)} | ${f(c.win)} | ${f(c.mean, 2)} | ${f(c.median, 2)} | **${f(c.perDay, 3)}** | ${f(c.days)} |`;
 }
-const cfgLabel = c => `${c.dte}d Δ${c.delta} w${f((c.wing ?? 0.05) * 100, 1)}% skew${c.skew} pt${c.pt ?? '–'} sl${c.sl ?? '–'} ts${c.ts ?? '–'}`;
+const cfgLabel = c => `${c.dte}d Δ${c.delta} w${f((c.wing ?? 0.05) * 100, 1)}% skew${c.skew} pt${c.pt ?? '–'} sl${c.sl ?? '–'} ts${c.ts ?? '–'}`
+  + (c.maxCostShare != null ? ` cost≤${f(c.maxCostShare * 100, 0)}%` : '');
 
 // ── self-test (no database) ───────────────────────────────────────────────────────────────────
 function syntheticEntry(pathFn, iv = 0.35) {
@@ -351,6 +364,14 @@ function selftest() {
   check('per-entry slippage lowers the spread credit by two legs', slipped && flat
     && Math.abs((flat.spread.pnl - slipped.spread.pnl) - 0.05 * 2 * 100) < 1e-6);
 
+  const timed0 = simulate(syntheticEntry(() => 100), { ...base, ts: 10 });
+  const timedSlip = simulate({ ...syntheticEntry(() => 100), slip: 0.05 }, { ...base, ts: 10 });
+  check('an early close pays slippage on entry AND exit (4 leg-fills)', timed0 && timedSlip && timedSlip.spread.exit === 'time'
+    && Math.abs((timed0.spread.pnl - timedSlip.spread.pnl) - 0.05 * 4 * 100) < 1e-6);
+  check('the liquidity gate skips an entry whose round-trip cost exceeds the share of credit',
+    simulate({ ...syntheticEntry(() => 100), slip: 0.3 }, { ...base, maxCostShare: 0.25 }) === null
+    && simulate(syntheticEntry(() => 100), { ...base, maxCostShare: 0.25 }) !== null);
+
   check('2:1 split with flat dollar volume → split', classifyStep(stepBars(0.5, 2, 2), 25) === 'split');
   check('−36% earnings crash on 8× volume → genuine move (kept)', classifyStep(stepBars(0.64, 8, 2), 25) === 'move');
   check('−50% (a 2:1 split ratio) on a 5× dollar-volume spike → genuine move', classifyStep(stepBars(0.5, 10, 2), 25) === 'move');
@@ -376,33 +397,60 @@ function selftest() {
 }
 
 // ── loading ───────────────────────────────────────────────────────────────────────────────────
-/** Per-ticker slippage = SLIP_FRACTION × median quoted half-spread, from every stored quote. */
+/**
+ * Per-ticker slippage = SLIP_FRACTION × median quoted half-spread.
+ *
+ * INTRADAY QUOTES ONLY by default. `options_premium_history` is written by an afterCloseOnly job, and
+ * option markets quoted after the close are far wider than in session (the artefact
+ * `structure_liquidity_log` was built to measure). v3's first quoted run priced every trade from those
+ * evening quotes and read a median of $0.275/leg, p90 $0.95 — a cost no in-session limit order pays.
+ * `--quote-slot any` falls back to after-close quotes where a ticker has no intraday ones.
+ */
 function loadQuotedSlip(db) {
-  const halves = new Map();
-  const push = (t, bid, ask) => {
-    if (!(bid > 0) || !(ask >= bid)) return;
-    if (!halves.has(t)) halves.set(t, []);
-    halves.get(t).push((ask - bid) / 2);
+  const halves = { intraday: new Map(), afterClose: new Map() };
+  const push = (bucket, t, bid, ask) => {
+    if (!(bid > 0) || !(ask >= bid)) return false;
+    const m = halves[bucket];
+    if (!m.has(t)) m.set(t, []);
+    m.get(t).push((ask - bid) / 2);
+    return true;
   };
-  const sources = { premiumHistory: 0, spreadChains: 0 };
+  const sources = {
+    briefCandidatesIntraday: 0, briefCandidatesAfterClose: 0,
+    spreadChainsIntraday: 0, spreadChainsAfterClose: 0, premiumHistoryAfterClose: 0,
+  };
   try {
-    for (const r of db.prepare('SELECT ticker, bid, ask FROM options_premium_history WHERE bid > 0 AND ask > 0').all()) {
-      push(r.ticker, r.bid, r.ask); sources.premiumHistory++;
+    for (const r of db.prepare('SELECT ticker, bid, ask, slot FROM brief_candidates WHERE bid > 0 AND ask > 0').all()) {
+      const bucket = r.slot === 'intraday' ? 'intraday' : 'afterClose';
+      if (push(bucket, r.ticker, r.bid, r.ask)) sources[bucket === 'intraday' ? 'briefCandidatesIntraday' : 'briefCandidatesAfterClose']++;
     }
-  } catch { sources.premiumHistory = 'unavailable'; }
+  } catch { sources.briefCandidatesIntraday = 'unavailable'; }
   try {
-    for (const r of db.prepare('SELECT ticker, puts_json FROM spread_chain_capture').all()) {
+    for (const r of db.prepare('SELECT ticker, slot, puts_json FROM spread_chain_capture').all()) {
       let puts = [];
       try { puts = JSON.parse(r.puts_json); } catch { continue; }
+      const bucket = r.slot === 'intraday' ? 'intraday' : 'afterClose';
       for (const p of puts) {
         if (p[3] == null || Math.abs(p[3]) < 0.1 || Math.abs(p[3]) > 0.4) continue;
-        push(r.ticker, p[1], p[2]); sources.spreadChains++;
+        if (push(bucket, r.ticker, p[1], p[2])) sources[bucket === 'intraday' ? 'spreadChainsIntraday' : 'spreadChainsAfterClose']++;
       }
     }
-  } catch { sources.spreadChains = 'unavailable (table not created yet)'; }
-  const perTicker = new Map();
-  for (const [t, a] of halves) if (a.length >= 3) perTicker.set(t, SLIP_FRACTION * median(a));
-  return { perTicker, sources };
+  } catch { sources.spreadChainsIntraday = 'unavailable (table not created yet)'; }
+  try {
+    for (const r of db.prepare('SELECT ticker, bid, ask FROM options_premium_history WHERE bid > 0 AND ask > 0').all()) {
+      if (push('afterClose', r.ticker, r.bid, r.ask)) sources.premiumHistoryAfterClose++;
+    }
+  } catch { sources.premiumHistoryAfterClose = 'unavailable'; }
+
+  const perTicker = new Map(), fromSlot = { intraday: 0, afterClose: 0 };
+  const tickers = new Set([...halves.intraday.keys(), ...halves.afterClose.keys()]);
+  for (const t of tickers) {
+    const intra = halves.intraday.get(t) ?? [];
+    if (intra.length >= 3) { perTicker.set(t, SLIP_FRACTION * median(intra)); fromSlot.intraday++; continue; }
+    const late = halves.afterClose.get(t) ?? [];
+    if (QUOTE_SLOT === 'any' && late.length >= 3) { perTicker.set(t, SLIP_FRACTION * median(late)); fromSlot.afterClose++; }
+  }
+  return { perTicker, sources, fromSlot };
 }
 
 function loadEntries(db, quoted) {
@@ -536,7 +584,10 @@ async function main() {
   const { pooled, episodes, counts, excluded, movesKept, maxPx } = loadEntries(db, quoted);
   db.close();
 
-  const slipText = quoted ? `slip: quoted per ticker (${SLIP_FRACTION} × median half-spread), fallback $${SLIP}/leg` : `slip $${SLIP}/leg`;
+  if (QUOTE_SLOT !== 'intraday' && QUOTE_SLOT !== 'any') { console.error('--quote-slot must be intraday or any'); process.exit(1); }
+  const slipText = quoted
+    ? `slip: quoted per ticker (${SLIP_FRACTION} × median half-spread, ${QUOTE_SLOT} quotes), fallback $${SLIP}/leg`
+    : `slip $${SLIP}/leg`;
   console.log(`# Bull put spread vs CSP — ${STRATEGY} replay entries (prices to ${maxPx}, ${slipText})\n`);
   console.log(`Replay picks ${counts.picks} → unsettled ${counts.unsettled}, no bars ${counts.noBars}, `
     + `excluded as split ${counts.split} / ticker reuse ${counts.reuse}, usable ${pooled.length} → **${episodes.length} episodes** `
@@ -548,9 +599,14 @@ async function main() {
   if (quoted) {
     const slips = [...quoted.perTicker.values()].sort((a, b) => a - b);
     const at = q => f(slips[Math.min(slips.length - 1, Math.floor(slips.length * q))], 3);
-    console.log(`\nQuoted slippage: ${quoted.perTicker.size} tickers with ≥3 quotes (options_premium_history rows ${quoted.sources.premiumHistory}, `
-      + `spread_chain_capture legs ${quoted.sources.spreadChains}). Per leg: p10 $${at(0.1)} · median $${at(0.5)} · p90 $${at(0.9)}. `
+    const src = Object.entries(quoted.sources).map(([k, v]) => `${k} ${v}`).join(', ');
+    console.log(`\nQuoted slippage (${QUOTE_SLOT === 'any' ? 'intraday preferred, after-close allowed' : 'intraday quotes only'}): `
+      + `${quoted.perTicker.size} tickers with ≥3 quotes — ${quoted.fromSlot.intraday} from intraday, ${quoted.fromSlot.afterClose} from after-close. `
+      + `Rows read: ${src}. Per leg: p10 $${at(0.1)} · median $${at(0.5)} · p90 $${at(0.9)}. `
       + `Entries priced from quotes: ${counts.quotedSlip} of ${pooled.length}; the rest use the $${SLIP} fallback.`);
+    if (quoted.fromSlot.afterClose > 0) {
+      console.log('WARNING: after-close option quotes are much wider than in-session ones — costs priced from them are an upper bound.');
+    }
   }
   console.log('\nret% = P&L ÷ capital (spread: max loss; CSP: strike − premium). %/day = mean ret% ÷ mean days held. '
     + 'exits (spread): T=profit target S=loss stop H=time stop E=expiry, % of trades. Per contract, per trade — §7 is the capital answer.\n');
@@ -569,6 +625,9 @@ async function main() {
     const q = [...baseEp.map(r => r.creditPctWidth)].sort((a, b) => a - b);
     const at = p => f(q[Math.min(q.length - 1, Math.floor(q.length * p))] * 100, 0);
     console.log(`Credit as % of width (5%-of-spot wing): p10 ${at(0.1)} · p25 ${at(0.25)} · median ${at(0.5)} · p75 ${at(0.75)} · p90 ${at(0.9)}.`);
+    const cs = [...baseEp.map(r => r.costShare)].sort((a, b) => a - b);
+    const atc = p => f(cs[Math.min(cs.length - 1, Math.floor(cs.length * p))] * 100, 0);
+    console.log(`Round-trip cost (4 leg-fills) as % of mid credit: p10 ${atc(0.1)} · p25 ${atc(0.25)} · median ${atc(0.5)} · p75 ${atc(0.75)} · p90 ${atc(0.9)}.`);
   }
   const ranks = episodes.map(e => e.ivRank).filter(x => x != null);
   const buckets = { '<30': 0, '30–50': 0, '50–80': 0, '≥80': 0 };
@@ -604,11 +663,21 @@ async function main() {
     console.log(line(cfgLabel(cfg), runAll(episodes, cfg)));
   }
 
+  console.log('\n## 4c. Same grid, liquid entries only — round-trip cost (open + close, both legs) ≤ 25% of the mid credit\n');
+  console.log(HEAD); console.log(SEP);
+  for (const delta of [0.25, 0.3, 0.35]) for (const wing of [0.05, 0.075, 0.10]) {
+    const cfg = { ...LEAN, delta, wing, maxCostShare: 0.25 };
+    console.log(line(cfgLabel(cfg), runAll(episodes, cfg)));
+  }
+
   console.log('\n## 5. Candidate gates, draft profile (episodes) — observational splits, not A/Bs\n');
   console.log(HEAD); console.log(SEP);
   const by = (label, pred) => console.log(line(label, baseEp.filter(pred)));
   by('credit ≥ 20% of width', r => r.creditPctWidth >= 0.20);
   by('credit < 20% of width', r => r.creditPctWidth < 0.20);
+  by('round-trip cost ≤ 25% of credit', r => r.costShare <= 0.25);
+  by('round-trip cost 25–50% of credit', r => r.costShare > 0.25 && r.costShare <= 0.5);
+  by('round-trip cost > 50% of credit', r => r.costShare > 0.5);
   by('IV rank ≥ 30', r => r.e.ivRank != null && r.e.ivRank >= 30);
   by('IV rank < 30', r => r.e.ivRank != null && r.e.ivRank < 30);
   by('IV rank unknown', r => r.e.ivRank == null);
@@ -630,8 +699,9 @@ async function main() {
   console.log(`Spread sized to ≤ $${RISK} max loss per position; CSP to ≤ ${f(CSP_ALLOC * 100, 0)}% of the pot in cash per position. `
     + 'P&L realised at exit; drawdown on realised equity. Skipped: size = one contract exceeds the per-position budget, '
     + 'capital = no free cash, dup = ticker already open, full = position cap.\n');
-  console.log('| config | SPREAD final | return % | ann. % | max DD | trades | util % | skipped size/cap/dup/full | CSP final | return % | ann. % | max DD | trades | util % | skipped size/cap/dup/full |');
-  console.log('|---|--:|--:|--:|--:|--:|--:|---|--:|--:|--:|--:|--:|--:|---|');
+  console.log('on deployed % = total P&L ÷ average capital in use. Gated rows (cost≤) filter BOTH columns to the same liquid entries.\n');
+  console.log('| config | SPREAD final | return % | ann. % | on deployed % | max DD | trades | util % | skipped size/cap/dup/full | CSP final | return % | ann. % | on deployed % | max DD | trades | util % | skipped size/cap/dup/full |');
+  console.log('|---|--:|--:|--:|--:|--:|--:|--:|---|--:|--:|--:|--:|--:|--:|--:|---|');
   const portfolioConfigs = [
     BASE,
     LEAN,
@@ -640,16 +710,18 @@ async function main() {
     { ...LEAN, delta: 0.3, pt: 0.75 },
     { ...LEAN, dte: 21, delta: 0.3 },
     { ...BASE, delta: 0.3, pt: null, sl: null, ts: null },
+    { ...LEAN, delta: 0.3, maxCostShare: 0.25 },
+    { ...LEAN, delta: 0.3, wing: 0.10, maxCostShare: 0.25 },
   ];
   for (const cfg of portfolioConfigs) {
     const rows = runAll(pooled, cfg);
     const s = simulatePortfolio(rows, 'spread', opts), c = simulatePortfolio(rows, 'csp', opts);
     const sk = x => `${x.skipped.size}/${x.skipped.capital}/${x.skipped.dup}/${x.skipped.full}`;
-    console.log(`| ${cfgLabel(cfg)} | ${money(s.final)} | **${f(s.retPct)}** | ${f(s.annPct)} | ${money(s.maxDd)} (${f(s.maxDdPct)}%) | ${s.taken} | ${f(s.util, 0)} | ${sk(s)} `
-      + `| ${money(c.final)} | **${f(c.retPct)}** | ${f(c.annPct)} | ${money(c.maxDd)} (${f(c.maxDdPct)}%) | ${c.taken} | ${f(c.util, 0)} | ${sk(c)} |`);
+    console.log(`| ${cfgLabel(cfg)} | ${money(s.final)} | **${f(s.retPct)}** | ${f(s.annPct)} | ${f(s.onDeployedPct)} | ${money(s.maxDd)} (${f(s.maxDdPct)}%) | ${s.taken} | ${f(s.util, 0)} | ${sk(s)} `
+      + `| ${money(c.final)} | **${f(c.retPct)}** | ${f(c.annPct)} | ${f(c.onDeployedPct)} | ${money(c.maxDd)} (${f(c.maxDdPct)}%) | ${c.taken} | ${f(c.util, 0)} | ${sk(c)} |`);
   }
 
-  console.log(`\n55 configurations were compared in §2–4b and ${portfolioConfigs.length} in §7; expect the best to look better than it is. `
+  console.log(`\n64 configurations were compared in §2–4c and ${portfolioConfigs.length} in §7; expect the best to look better than it is. `
     + 'Prefer a setting that is good across neighbours over the single top row.');
 }
 

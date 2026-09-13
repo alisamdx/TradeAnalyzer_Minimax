@@ -194,6 +194,19 @@ short 0.20–0.30Δ, credit ≥ 30% of width, IVR ≥ ~30; exit 50% profit / 15 
     ticker at 0.5 × its median quoted half-spread (options_premium_history + spread_chain_capture);
     §7 fixed-pot portfolio sim (spread by `--risk` max loss, CSP by `--csp-alloc`, one position per
     ticker, capital reserved to exit) — the capital-efficiency answer. Re-run once ~2 weeks of chains exist.
+    **v3 quoted run 2026-09-13 — mostly a lesson about the inputs:** priced from `options_premium_history`
+    quotes (median **$0.275/leg, p90 $0.95**), the draft spread went to **−14.4%/trade, 30% win, 45%
+    stop-outs**; CSP +0.2%. Portfolio ($25k, $500 risk, ≤10 open): spread best **+8.2%** (Δ0.30, 10% wing)
+    at **6% utilisation**, CSP **+14–20%** (ann. 11–16%) at 44–70% utilisation, drawdown ~1.5%. Three
+    input faults found, fixed in the script: (1) that table is written by an **afterCloseOnly** job, so
+    every quote was an evening quote — quoted slippage now uses intraday `brief_candidates` /
+    `spread_chain_capture` only (`--quote-slot any` to allow evening); (2) exits were decided on a mark
+    that already included the exit cost, stopping out high-cost trades on day one — now decided on mid,
+    realised with slippage; (3) $500 risk × 10 positions capped deployment at ~12% and skipped ~900 of
+    1,363 picks for size — new "on deployed %" column separates structure from sizing. Also added the
+    round-trip-cost ≤ 25%-of-credit liquidity gate (§4c, §5, §7). Classifier kept CGNX/ORCL/SNPS as
+    genuine moves (0 split/reuse exclusions). Wider wings helped under cost (10% wing ≈ break-even per
+    trade). **Re-run with intraday quotes; intraday coverage grows daily from the 2026-09-14 brief.**
 44. **`bull_put_spread` brief mode**, default off: gates + transparent ranking (credit/width, distance
     below SMA50), not the wheel composite. Enabled only on captured-data evidence (FR-SEY-5).
 
