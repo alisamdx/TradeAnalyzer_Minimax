@@ -531,7 +531,7 @@ app.whenReady().then(() => {
   const emailService = new EmailService(
     () => { try { return secureGet(db, 'agentProjectPath') ?? ''; } catch { return ''; } }
   );
-  registerScoringIpc(scoringService, emailService, db);
+  registerScoringIpc(scoringService, emailService, db, optionsProvider);
   registerConvictionIpc(new ConvictionService(db), emailService);
 
   // v0.32.89 — Brief Replay (point-in-time scoring back-test)

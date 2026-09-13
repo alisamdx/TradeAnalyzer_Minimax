@@ -197,6 +197,8 @@ Authoritative DDL is in `migrations/`. Tables are created lazily (`CREATE TABLE 
 
 ## 10. Known quirks & gotchas
 
+- **🎯 Wheel Shortlist (v1.1.242, NewApp 07 §3)** — advisory top 5 puts at the operator's profile (0.35–0.45Δ, 14–30 DTE) from the latest brief run's wheel + income `picked`/`capped_out` candidates, priced live via the options provider after every brief (`sendShortlistEmail`) and on demand (`scoring:wheel-shortlist`). Ranked by premium ROC; composite rank deliberately unused. Adds ~100 E\*Trade calls per brief run. Not an engine input; unvalidated on this profile (evidence was 0.20–0.35Δ / 30–45 DTE). `loadPriceWindows` is now shared with Roll the Dice; `brief-emails.ts` `deliver()` backs both emails.
+
 - **Brief and Roll-the-Dice email outcomes are logged to `logs/errors` as of v1.1.241** (`operation` `brief-email:*` / `dice-email:*`, INFO when sent, ERROR with the SMTP message when not). Before that they went only to the console, which a packaged app does not keep — the 2026-09-11 after-close dice email vanished with no recoverable reason. The dice email now sends on a zero-pick brief, retries a failed send once, and carries `· HH:MM ET` in its subject. One sender (`sendDiceEmail` in `brief-emails.ts`) serves the brief job and the in-app "✉ Email it".
 
 - **Roll Analyzer rollability (v1.1.240) fetches up to ~7 extra far-dated E\*Trade chains per analysis** (expiries nearest +7…+365 days). Those chains feed ONLY `computeRollability`; `buildRollCandidates` still gets the first 6 expiries, so candidate rankings are unchanged. Reporting only — verdict bands (≤4 / ≤13 weeks) are unvalidated working values.

@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.1.242] - 2026-09-12
+
+### 🎯 Wheel Shortlist — the five best puts at your profile, after every brief
+
+The first deliverable of the opportunity engine (NewApp `07-opportunity-engine.md`, TODO #37). Operator decisions 2026-09-12: premium return on capital while avoiding assignment; **0.35–0.45Δ at 14–30 DTE**; roll when in the money with ≤ 7 days left to the next 14–30 DTE expiry at the same or a lower strike for a net credit, else close; **top 5**, **no capital cap**, **after both brief runs**.
+
+- **Pool:** the latest brief run's wheel + income candidates that cleared the lab liquidity gate — *not* the composite's top 5, whose top end measured anti-predictive.
+- **Contract:** priced live from E\*Trade — the put in the delta band at 14–30 DTE, before the next earnings report, with the highest premium return on capital (`mid ÷ strike × 365 ÷ DTE`), which is also the ranking: the one ranking the existing app measured as positive.
+- **Exclusions, each with its reason:** critic flag; earnings unknown, stale or before every in-window expiry; no two-sided put in the band.
+- **Shown:** return on capital, credit and bid, cash required (never filtered), delta as rough ITM odds, spread, open interest, earnings, critic verdict, own-at-strike, and **roll room** — your roll rule evaluated at today's prices (how far down a credit roll one week or so later could go).
+- **Surfaces:** a 🎯 button and panel on the Daily Brief, ✉ Email it, and an email after every brief run through the same logged, retried path as the dice email (`shortlist-email:*` in `logs/errors`). A zero-result run still sends, saying why.
+- **Advisory and labelled as not yet validated on this profile** — the ranking evidence was measured at 0.20–0.35Δ / 30–45 DTE. Never an engine input.
+
+Also: `loadPriceWindows` extracted from Roll the Dice so both features compute the own-at-strike read one way; `brief-emails.ts` generalized into one compute/build/send/retry/log delivery used by both emails. Formula `docs/formulas.md#wheel-shortlist`; spec 14; user guide §4.1b. Tests: `tests/wheel-shortlist.test.ts` — contract selection (band, window, two-sided, best ROC), roll room and roll expiry, the full computation over a seeded brief with every exclusion reason and no E\*Trade call spent on flagged or stale names, the email, a zero-result send, and the brief-job wiring.
+
 ## [1.1.241] - 2026-09-12
 
 ### A missing Roll the Dice email left no trace — now every email outcome is logged

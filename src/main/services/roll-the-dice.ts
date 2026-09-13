@@ -385,6 +385,37 @@ export function rollTheDice(
 }
 
 /**
+ * Point-in-time price anchors for the own-at-strike read (v1.1.169), per ticker, from bars on or
+ * before `todayEt`. Shared by Roll the Dice and the Wheel Shortlist so the two can never compute the
+ * same sentence two ways. A ticker with fewer than 200 sessions is left out (reported as unknown).
+ */
+export function loadPriceWindows(
+  db: DbHandle,
+  tickers: readonly string[],
+  todayEt: string,
+): Map<string, PriceWindow> {
+  const priceWindows = new Map<string, PriceWindow>();
+  for (const t of new Set(tickers)) {
+    const bars = db.prepare(
+      `SELECT close, high, low FROM historical_prices WHERE ticker = ? AND date <= ?
+        ORDER BY date DESC LIMIT 260`,
+    ).all(t, todayEt) as Array<{ close: number; high: number; low: number }>;
+    if (bars.length < 200) continue;                 // no long-run anchor -> reported as unknown
+    const sma200 = bars.slice(0, 200).reduce((a, b) => a + b.close, 0) / 200;
+    priceWindows.set(t, {
+      sma200,
+      hi52: Math.max(...bars.map(b => b.high)),
+      lo52: Math.min(...bars.map(b => b.low)),
+      // The support anchor (v1.1.188). `bars` is DESC, so the first 20 rows are the most recent 20
+      // sessions. Null rather than a shorter window when there are fewer — a "20-day low" computed
+      // from 6 bars is a different statistic wearing the same name.
+      swingLow20: bars.length >= 20 ? Math.min(...bars.slice(0, 20).map(b => b.low)) : null,
+    });
+  }
+  return priceWindows;
+}
+
+/**
  * Compute the dice from the database — the single path used by BOTH the IPC (the in-app button)
  * and the brief job's email, so the two can never disagree about what today's pick is. The brief
  * email already learned this lesson: it builds from the persisted picks rather than an in-memory
@@ -418,27 +449,7 @@ export function computeRollTheDice(
     for (const r of rows) earnings.set(r.ticker, r.report_date);
   }
 
-  // Point-in-time price anchors for the own-at-strike read (v1.1.169). Computed per ticker from
-  // bars on or before TODAY -- this is the live path, so "point-in-time" and "latest" coincide;
-  // the replay in `scripts/own-at-strike-study.mjs` is what enforces the as-of discipline.
-  const priceWindows = new Map<string, PriceWindow>();
-  for (const t of new Set(picks.map(p => p.ticker))) {
-    const bars = db.prepare(
-      `SELECT close, high, low FROM historical_prices WHERE ticker = ? AND date <= ?
-        ORDER BY date DESC LIMIT 260`,
-    ).all(t, todayEt) as Array<{ close: number; high: number; low: number }>;
-    if (bars.length < 200) continue;                 // no long-run anchor -> reported as unknown
-    const sma200 = bars.slice(0, 200).reduce((a, b) => a + b.close, 0) / 200;
-    priceWindows.set(t, {
-      sma200,
-      hi52: Math.max(...bars.map(b => b.high)),
-      lo52: Math.min(...bars.map(b => b.low)),
-      // The support anchor (v1.1.188). `bars` is DESC, so the first 20 rows are the most recent 20
-      // sessions. Null rather than a shorter window when there are fewer — a "20-day low" computed
-      // from 6 bars is a different statistic wearing the same name.
-      swingLow20: bars.length >= 20 ? Math.min(...bars.slice(0, 20).map(b => b.low)) : null,
-    });
-  }
+  const priceWindows = loadPriceWindows(db, picks.map(p => p.ticker), todayEt);
 
   // The operator's own pre-committed bands. Reported on the pick as of v1.1.168, not a gate.
   const conviction = new Map<string, ConvictionBands>();

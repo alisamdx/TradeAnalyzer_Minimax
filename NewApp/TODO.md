@@ -130,7 +130,8 @@ Decisions 2026-09-12: premium ROC avoiding assignment; 0.35–0.45Δ at 14–30 
 capital cap; after both briefs; TA2 view + email.
 
 36. ~~**Write the design**~~ **done 2026-09-12** — `07-opportunity-engine.md` v1.
-37. **Interim Wheel Shortlist in the existing app** (07 §3): pool from wheel+income Stage-4 candidates,
+37. ~~**Interim Wheel Shortlist in the existing app**~~ **built 2026-09-12, v1.1.242** — 🎯 button + panel on
+    the Daily Brief, email after both brief runs. First live run: Monday 2026-09-14 ~10:15. (07 §3): pool from wheel+income Stage-4 candidates,
     live 0.35–0.45Δ / 14–30 DTE contract, gates (earnings, critic flag), rank by premium ROC, roll-room
     and own-at-strike annotations; logged email after both briefs + Daily Brief panel. Advisory only.
 38. **Sanity backtest**: `backtestReplayPicks` wheel at 0.40Δ / 21 DTE vs 0.30Δ / 30 DTE (theoretical

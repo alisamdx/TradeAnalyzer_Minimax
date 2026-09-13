@@ -82,6 +82,17 @@ After the job, `email-service.ts` sends an HTML email (trade-ready tables: ticke
 - Pattern recommendations: when a gap cause recurs ≥3× for a strategy, a recommendation is written (§15) and surfaced.
 - Signal-weight suggestions come from paper-trade outcome correlations (§13.5).
 
+## Wheel Shortlist (v1.1.242)
+
+Interim, advisory answer to "the best wheel trades today" — design `NewApp/requirements/07-opportunity-engine.md` §3; formulas `docs/formulas.md#wheel-shortlist`. **Operator profile (2026-09-12):** short put at **0.35–0.45Δ**, **14–30 DTE**; objective premium return on capital while avoiding assignment; top 5; no capital cap; after both brief runs.
+
+- **Pool:** the latest run's `brief_candidates` for `wheel` + `income` with disposition `picked`/`capped_out`, deduped. The composite rank is ignored (top end anti-predictive, v1.1.173).
+- **Exclusions:** critic `flag`; earnings unknown, stale, or on/before every in-window expiry (fail closed, as Roll the Dice); no two-sided put in the delta band. Each exclusion is reported with its reason.
+- **Contract & ranking:** live E\*Trade chains for expiries before the next report; the put with the highest `mid ÷ strike × 365 ÷ DTE`; top 5 by that value.
+- **Annotations:** assignment probability ≈ |Δ|, credit and bid, cash required, spread %, OI, earnings date, critic verdict, own-at-strike, and **roll room** — the operator's roll rule (ITM with ≤ 7 days left → next 14–30 DTE expiry, same/lower strike, net credit; else close) evaluated at today's prices.
+- **Surfaces:** `🎯 Wheel Shortlist` button + panel on the Daily Brief (`scoring:wheel-shortlist`), `✉ Email it` (`scoring:email-wheel-shortlist`), and an email after every brief run through `sendShortlistEmail` — the same logged compute/build/send path as the dice email (`brief-emails.ts`), outcome in `logs/errors` as `shortlist-email:*`.
+- **Not validated on this profile** and never an engine input. Acceptance: `tests/wheel-shortlist.test.ts`.
+
 ## Roll the Dice (v1.1.162)
 
 A button on the Daily Brief that reduces the brief to **one** wheel entry the operator can act on

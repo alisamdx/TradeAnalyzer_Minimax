@@ -18,7 +18,7 @@ import { isTradingDay } from '../iv-history-service.js';
 import { SCORING_REFERENCE_TICKERS } from './price-gap-fill-job.js';
 import type { EmailService } from '../email-service.js';
 import { buildEmailHtml, buildPdf } from '../brief-report-builder.js';
-import { sendDiceEmail } from '../brief-emails.js';
+import { sendDiceEmail, sendShortlistEmail } from '../brief-emails.js';
 import { logEmailOutcome } from '../email-log.js';
 import type { PaperTradingService } from '../paper-trading-service.js';
 import { CriticService } from '../critic-service.js';
@@ -1057,6 +1057,15 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
       // sentence above. `sendDiceEmail` never throws; it logs which step failed and retries a
       // failed send once.
       await sendDiceEmail({ email: this.emailService, db: this.db, log: logEmailOutcome, source: 'brief' });
+
+      // ── Wheel Shortlist (NewApp 07 §3) — advisory, after every brief run (D5) ─────────────────
+      // Top 5 puts at 0.35–0.45Δ / 14–30 DTE from this run's wheel + income candidate pools, priced
+      // live. Runs after the brief is persisted so it reads exactly what this run recorded, and it
+      // never throws: a failure is logged with its step and the brief's result is unaffected.
+      emit('Building Wheel Shortlist…');
+      await sendShortlistEmail({
+        email: this.emailService, db: this.db, provider: this.optionsProvider, log: logEmailOutcome, source: 'brief',
+      });
     }
 
     return {

@@ -3451,6 +3451,20 @@ input[type='checkbox'] {
   background: color-mix(in srgb, var(--warning) 8%, transparent);
 }
 
+/* Wheel Shortlist (NewApp 07 §3) — reuses the dice panel; only the table is its own. */
+.shortlist-caveat {
+  font-size: 11px; color: var(--warning); margin-bottom: 8px; line-height: 1.5;
+}
+.shortlist-table-wrap { overflow-x: auto; }
+.shortlist-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.shortlist-table th {
+  text-align: left; font-weight: 600; color: var(--text-muted);
+  border-bottom: 1px solid var(--border); padding: 4px 6px; white-space: nowrap;
+}
+.shortlist-table td { padding: 5px 6px; border-bottom: 1px solid var(--border); color: var(--text); white-space: nowrap; }
+.shortlist-table .num { text-align: right; }
+.shortlist-muted { color: var(--text-muted); font-size: 11px; }
+
 .dice-stretch {
   font-size: 12px;
   line-height: 1.6;

@@ -13,8 +13,11 @@ import type { DbHandle } from '../db/connection.js';
 import {
   computeRollTheDice, DEFAULT_MAX_CAPITAL, type DiceResult,
 } from '../services/roll-the-dice.js';
-import { sendDiceEmail } from '../services/brief-emails.js';
+import { sendDiceEmail, sendShortlistEmail } from '../services/brief-emails.js';
 import { logEmailOutcome } from '../services/email-log.js';
+import { computeWheelShortlist } from '../services/wheel-shortlist.js';
+import type { OptionsProvider } from '../services/options-provider.js';
+import type { ShortlistResult } from '@shared/wheel-shortlist.js';
 
 function ok<T>(value: T): IpcResult<T> {
   return { ok: true, value };
@@ -36,7 +39,39 @@ export function registerScoringIpc(
   scoringService: ScoringService,
   emailService: EmailService,
   db: DbHandle,
+  optionsProvider: OptionsProvider,
 ): void {
+  // Wheel Shortlist (NewApp 07 §3) — top 5 puts at 0.35–0.45Δ / 14–30 DTE from the latest brief
+  // run's wheel + income pools, priced live through E*Trade. Advisory; writes nothing.
+  ipcMain.handle(
+    'scoring:wheel-shortlist',
+    async (): Promise<IpcResult<ShortlistResult>> => {
+      try { return ok(await computeWheelShortlist({ db, provider: optionsProvider })); }
+      catch (err) { return fail(err); }
+    },
+  );
+
+  ipcMain.handle(
+    'scoring:email-wheel-shortlist',
+    async (): Promise<IpcResult<{ sent: boolean; message: string }>> => {
+      try {
+        if (!emailService.isConfigured()) {
+          return ok({ sent: false, message: 'SMTP is not configured — set it up in Settings → Email.' });
+        }
+        const out = await sendShortlistEmail({
+          email: emailService, db, provider: optionsProvider, log: logEmailOutcome, source: 'manual', retryDelayMs: 2_000,
+        });
+        if (out.status === 'failed') {
+          return fail(new Error(`Shortlist email not sent (${out.step} failed): ${out.error ?? 'unknown error'}`));
+        }
+        const n = out.result?.entries.length ?? 0;
+        return ok({ sent: true, message: n > 0 ? `Emailed: ${n} idea${n === 1 ? '' : 's'}` : 'Emailed: nothing qualified' });
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
   // Roll the Dice — ONE wheel entry from the latest brief, or an explicit nothing.
   //
   // Pure filter over the stored brief: no scoring change, no provider call, nothing written.

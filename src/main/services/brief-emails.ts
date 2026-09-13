@@ -1,4 +1,5 @@
-// Roll the Dice email delivery — one path for the brief job and the in-app "Email it" button.
+// Brief-run email delivery — one logged path for Roll the Dice and the Wheel Shortlist, used by both
+// the brief job and the in-app "Email it" buttons.
 //
 // WHY THIS IS ITS OWN MODULE (v1.1.241). On 2026-09-11 the after-close brief ran at 17:31,
 // generated 17 picks, and emailed them; seconds later the dice email did not arrive, and nothing
@@ -8,13 +9,17 @@
 // promised ("a no-pick day still sends").
 //
 // So: every outcome goes through an injected logger (the caller points it at logs/errors), the
-// three things that can fail — computing the dice, building the email, sending it — are separate
+// three things that can fail — computing the content, building the email, sending it — are separate
 // steps that name themselves when they fail, and a failed send is retried once. Pure of Electron
 // on purpose, so it is tested directly.
 
 import type { EmailAttachment } from './email-service.js';
 import { computeRollTheDice, DEFAULT_MAX_CAPITAL, type DiceResult } from './roll-the-dice.js';
 import { buildDiceEmailHtml, diceEmailSubject } from './dice-email-builder.js';
+import { computeWheelShortlist } from './wheel-shortlist.js';
+import { buildShortlistEmailHtml, shortlistEmailSubject } from './shortlist-email-builder.js';
+import type { OptionsProvider } from './options-provider.js';
+import type { ShortlistResult } from '@shared/wheel-shortlist.js';
 
 export interface EmailSender {
   send(subject: string, html: string, attachments?: EmailAttachment[]): Promise<void>;
@@ -22,7 +27,7 @@ export interface EmailSender {
 
 export interface EmailOutcomeLog {
   readonly level: 'INFO' | 'ERROR';
-  /** e.g. `dice-email:sent`, `dice-email:send`, `brief-email:skipped`. */
+  /** e.g. `dice-email:sent`, `shortlist-email:send`, `brief-email:skipped`. */
   readonly operation: string;
   readonly message: string;
   readonly error?: unknown;
@@ -30,17 +35,22 @@ export interface EmailOutcomeLog {
 
 export type EmailLog = (entry: EmailOutcomeLog) => void;
 
-export type DiceEmailStep = 'compute' | 'build' | 'send';
+export type EmailStep = 'compute' | 'build' | 'send';
+/** @deprecated kept for the dice call sites; same as `EmailStep`. */
+export type DiceEmailStep = EmailStep;
 
-export interface DiceEmailOutcome {
+export interface EmailOutcome<T> {
   readonly status: 'sent' | 'failed';
   /** The step that failed; absent on success. */
-  readonly step?: DiceEmailStep;
+  readonly step?: EmailStep;
   readonly subject?: string;
   readonly attempts: number;
-  readonly result?: DiceResult;
+  readonly result?: T;
   readonly error?: string;
 }
+
+export type DiceEmailOutcome = EmailOutcome<DiceResult>;
+export type ShortlistEmailOutcome = EmailOutcome<ShortlistResult>;
 
 /** Total send attempts: the first plus one retry. */
 export const DICE_SEND_ATTEMPTS = 2;
@@ -54,37 +64,42 @@ export function etClock(now: Date): string {
   return now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/New_York' });
 }
 
-export async function sendDiceEmail(opts: {
+interface DeliveryOptions {
   readonly email: EmailSender;
-  readonly db: Parameters<typeof computeRollTheDice>[0];
   readonly log: EmailLog;
   /** Who asked — recorded in every log line (`brief`, `manual`). */
   readonly source: string;
-  readonly maxCapital?: number;
   readonly now?: Date;
   readonly retryDelayMs?: number;
   readonly sleep?: (ms: number) => Promise<void>;
-}): Promise<DiceEmailOutcome> {
+}
+
+async function deliver<T>(opts: DeliveryOptions & {
+  /** Operation prefix, e.g. `dice-email`. */
+  readonly name: string;
+  /** Human label for log messages, e.g. `dice email`. */
+  readonly label: string;
+  readonly compute: () => T | Promise<T>;
+  readonly build: (result: T, now: Date) => { subject: string; html: string };
+}): Promise<EmailOutcome<T>> {
   const now = opts.now ?? new Date();
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const tag = `[${opts.source}]`;
 
-  let result: DiceResult;
+  let result: T;
   try {
-    result = computeRollTheDice(opts.db, opts.maxCapital ?? DEFAULT_MAX_CAPITAL);
+    result = await opts.compute();
   } catch (err) {
-    opts.log({ level: 'ERROR', operation: 'dice-email:compute', message: `${tag} dice email not sent — computing the dice failed: ${message(err)}`, error: err });
+    opts.log({ level: 'ERROR', operation: `${opts.name}:compute`, message: `${tag} ${opts.label} not sent — computing it failed: ${message(err)}`, error: err });
     return { status: 'failed', step: 'compute', attempts: 0, error: message(err) };
   }
 
   let subject: string;
   let html: string;
   try {
-    const dateStr = now.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'America/New_York' });
-    subject = `${diceEmailSubject(result)} · ${etClock(now)} ET`;
-    html = buildDiceEmailHtml(result, dateStr);
+    ({ subject, html } = opts.build(result, now));
   } catch (err) {
-    opts.log({ level: 'ERROR', operation: 'dice-email:build', message: `${tag} dice email not sent — building it failed: ${message(err)}`, error: err });
+    opts.log({ level: 'ERROR', operation: `${opts.name}:build`, message: `${tag} ${opts.label} not sent — building it failed: ${message(err)}`, error: err });
     return { status: 'failed', step: 'build', attempts: 0, result, error: message(err) };
   }
 
@@ -92,20 +107,50 @@ export async function sendDiceEmail(opts: {
   for (let attempt = 1; attempt <= DICE_SEND_ATTEMPTS; attempt++) {
     try {
       await opts.email.send(subject, html);
-      opts.log({ level: 'INFO', operation: 'dice-email:sent', message: `${tag} dice email sent (attempt ${attempt}): ${subject}` });
+      opts.log({ level: 'INFO', operation: `${opts.name}:sent`, message: `${tag} ${opts.label} sent (attempt ${attempt}): ${subject}` });
       return { status: 'sent', subject, attempts: attempt, result };
     } catch (err) {
       lastErr = err;
       if (attempt < DICE_SEND_ATTEMPTS) {
-        opts.log({ level: 'ERROR', operation: 'dice-email:send-retry', message: `${tag} dice email send attempt ${attempt} failed, retrying: ${message(err)}`, error: err });
+        opts.log({ level: 'ERROR', operation: `${opts.name}:send-retry`, message: `${tag} ${opts.label} send attempt ${attempt} failed, retrying: ${message(err)}`, error: err });
         await sleep(opts.retryDelayMs ?? DICE_RETRY_DELAY_MS);
       }
     }
   }
   opts.log({
-    level: 'ERROR', operation: 'dice-email:send',
-    message: `${tag} dice email NOT sent after ${DICE_SEND_ATTEMPTS} attempts: ${message(lastErr)} — subject was "${subject}"`,
+    level: 'ERROR', operation: `${opts.name}:send`,
+    message: `${tag} ${opts.label} NOT sent after ${DICE_SEND_ATTEMPTS} attempts: ${message(lastErr)} — subject was "${subject}"`,
     error: lastErr,
   });
   return { status: 'failed', step: 'send', subject, attempts: DICE_SEND_ATTEMPTS, result, error: message(lastErr) };
+}
+
+const etDateLabel = (now: Date): string =>
+  now.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'America/New_York' });
+
+export function sendDiceEmail(opts: DeliveryOptions & {
+  readonly db: Parameters<typeof computeRollTheDice>[0];
+  readonly maxCapital?: number;
+}): Promise<DiceEmailOutcome> {
+  return deliver({
+    ...opts,
+    name: 'dice-email',
+    label: 'dice email',
+    compute: () => computeRollTheDice(opts.db, opts.maxCapital ?? DEFAULT_MAX_CAPITAL),
+    build: (r, now) => ({ subject: `${diceEmailSubject(r)} · ${etClock(now)} ET`, html: buildDiceEmailHtml(r, etDateLabel(now)) }),
+  });
+}
+
+/** The Wheel Shortlist (NewApp 07 §3), priced live, through the same logged path. */
+export function sendShortlistEmail(opts: DeliveryOptions & {
+  readonly db: Parameters<typeof computeWheelShortlist>[0]['db'];
+  readonly provider: Pick<OptionsProvider, 'getOptionsExpirations' | 'getOptionsChain'>;
+}): Promise<ShortlistEmailOutcome> {
+  return deliver({
+    ...opts,
+    name: 'shortlist-email',
+    label: 'wheel shortlist email',
+    compute: () => computeWheelShortlist({ db: opts.db, provider: opts.provider, ...(opts.now ? { now: opts.now } : {}) }),
+    build: (r, now) => ({ subject: `${shortlistEmailSubject(r)} · ${etClock(now)} ET`, html: buildShortlistEmailHtml(r, etDateLabel(now)) }),
+  });
 }

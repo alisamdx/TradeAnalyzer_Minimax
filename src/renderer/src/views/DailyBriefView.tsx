@@ -8,6 +8,16 @@ import { convictionOf, rsiOf, passesFilter, definedRiskAlternative, level2DebitA
 // ONE definition, shared with the dice email. The panel kept a hand-copied duplicate of this
 // sentence until v1.1.188; the strategy slug map already taught this lesson the expensive way.
 import { ownAtStrikeNote, type OwnAtStrikeRead } from '@shared/own-at-strike.js';
+import { SHORTLIST_PROFILE, type ShortlistEntry, type ShortlistResult } from '@shared/wheel-shortlist.js';
+
+/** The D3 roll-room line for the Wheel Shortlist panel. Mirrors the email's wording. */
+function shortlistRollRoom(e: ShortlistEntry): string {
+  const r = e.rollRoom;
+  if (!r) return 'roll expiry not priced';
+  if (r.strike == null) return `no credit roll at today's prices (${r.expiration})`;
+  if (!r.dollarsLower) return `same strike only (${r.expiration})`;
+  return `down to $${r.strike} · $${r.dollarsLower.toFixed(2)} lower, ${r.strikesLower} strike${r.strikesLower === 1 ? '' : 's'} (${r.expiration})`;
+}
 
 /**
  * Colour the read as a warning only when BOTH axes agree it is an extended entry — the same
@@ -915,6 +925,11 @@ export function DailyBriefView({ onGoToStrategyLab }: DailyBriefViewProps) {
   const [dice, setDice]                   = useState<DiceResult | null>(null);
   const [diceBusy, setDiceBusy]           = useState(false);
   const [diceMailMsg, setDiceMailMsg]     = useState<string | null>(null);
+  const [shortlist, setShortlist]         = useState<ShortlistResult | null>(null);
+  const [shortlistBusy, setShortlistBusy] = useState(false);
+  const [shortlistErr, setShortlistErr]   = useState<string | null>(null);
+  const [shortlistMailing, setShortlistMailing] = useState(false);
+  const [shortlistMailMsg, setShortlistMailMsg] = useState<string | null>(null);
   const [diceMailing, setDiceMailing]     = useState(false);
 
   const [perfSummary, setPerfSummary]     = useState<BriefPerformanceSummary | null>(null);
@@ -1060,6 +1075,34 @@ export function DailyBriefView({ onGoToStrategyLab }: DailyBriefViewProps) {
     }
   };
 
+  // Wheel Shortlist (NewApp 07 §3) — prices ~100 E*Trade chains, so it runs only on request.
+  const handleShortlist = async () => {
+    setShortlistBusy(true);
+    setShortlistErr(null);
+    try {
+      setShortlist(await window.api.scoring.wheelShortlist());
+    } catch (err) {
+      setShortlist(null);
+      setShortlistErr(err instanceof Error ? err.message : 'Shortlist failed');
+    } finally {
+      setShortlistBusy(false);
+    }
+  };
+
+  const handleEmailShortlist = async () => {
+    setShortlistMailing(true);
+    setShortlistMailMsg(null);
+    try {
+      const r = await window.api.scoring.emailWheelShortlist();
+      setShortlistMailMsg(r.message);
+    } catch (err) {
+      setShortlistMailMsg(err instanceof Error ? err.message : 'Email failed');
+    } finally {
+      setShortlistMailing(false);
+      setTimeout(() => setShortlistMailMsg(null), 8000);
+    }
+  };
+
   const goToStrategyLab = (ticker: string) => {
     onGoToStrategyLab?.(ticker);
   };
@@ -1129,6 +1172,14 @@ export function DailyBriefView({ onGoToStrategyLab }: DailyBriefViewProps) {
           title="One wheel entry from the latest brief: critic pass (no flag, no caution), share price within the limit, liquid, and no earnings before expiry. Returns nothing when nothing clears."
         >
           {diceBusy ? 'Rolling…' : '🎲 Roll the Dice'}
+        </button>
+        <button
+          className="brief-dice-btn"
+          onClick={handleShortlist}
+          disabled={shortlistBusy || running}
+          title={`Top ${SHORTLIST_PROFILE.topN} puts at ${SHORTLIST_PROFILE.deltaMin}–${SHORTLIST_PROFILE.deltaMax}Δ, ${SHORTLIST_PROFILE.dteMin}–${SHORTLIST_PROFILE.dteMax} DTE from the latest brief's wheel and income candidates, priced live and ranked by return on capital. Advisory — not yet validated on this profile.`}
+        >
+          {shortlistBusy ? 'Pricing…' : '🎯 Wheel Shortlist'}
         </button>
         <button
           className="brief-run-btn"
@@ -1243,6 +1294,80 @@ export function DailyBriefView({ onGoToStrategyLab }: DailyBriefViewProps) {
               <summary>{dice.rejections.length} rejected — why</summary>
               <ul>
                 {dice.rejections.map((r, i) => (
+                  <li key={i}><b>{r.ticker}</b> — {r.reason}</li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </div>
+      )}
+
+      {shortlistErr && <div className="dice-stale">⚠ Wheel Shortlist failed: {shortlistErr}</div>}
+
+      {/* Wheel Shortlist (NewApp 07 §3) — top 5 at the operator's profile, advisory. */}
+      {shortlist && (
+        <div className={`dice-panel${shortlist.entries.length ? '' : ' dice-empty'}`}>
+          <div className="dice-head">
+            <span className="dice-title">🎯 Wheel Shortlist</span>
+            <span className="dice-sub">
+              {SHORTLIST_PROFILE.deltaMin}–{SHORTLIST_PROFILE.deltaMax}Δ · {SHORTLIST_PROFILE.dteMin}–{SHORTLIST_PROFILE.dteMax} DTE ·
+              {' '}{shortlist.considered} candidate{shortlist.considered === 1 ? '' : 's'} considered · ranked by return on capital
+            </span>
+            <div style={{ flex: 1 }} />
+            {shortlistMailMsg && <span className="dice-mail-msg">{shortlistMailMsg}</span>}
+            <button className="dice-mail-btn" onClick={handleEmailShortlist} disabled={shortlistMailing}
+              title="Email this shortlist — the same email the brief runs send">
+              {shortlistMailing ? 'Sending…' : '✉ Email it'}
+            </button>
+            <button className="dice-close" onClick={() => setShortlist(null)} title="Dismiss">×</button>
+          </div>
+
+          <div className="shortlist-caveat">
+            Advisory and not yet validated on this profile — the ranking was measured on 0.20–0.35Δ / 30–45 DTE puts.
+            Capital is shown, never filtered. Roll room uses today&apos;s prices.
+          </div>
+
+          {shortlist.entries.length === 0 ? (
+            <div className="dice-none">{shortlist.noResultReason}</div>
+          ) : (
+            <div className="shortlist-table-wrap">
+              <table className="shortlist-table">
+                <thead>
+                  <tr>
+                    <th>#</th><th>Put</th><th className="num">ROC/yr</th><th className="num">Credit</th>
+                    <th className="num">Cash</th><th className="num">Δ</th><th className="num">Spread</th>
+                    <th>Roll room</th><th>Earnings</th><th>Critic</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {shortlist.entries.map((e, i) => (
+                    <tr key={e.ticker} title={ownAtStrikeNote(e.ticker, e.ownership)}>
+                      <td>{i + 1}</td>
+                      <td>
+                        <b>{e.ticker}</b> ${e.contract.strike} · {e.contract.expiration} ({e.contract.dte}d)
+                        {e.spot != null && <span className="shortlist-muted"> · at ${e.spot.toFixed(2)}</span>}
+                      </td>
+                      <td className="num"><b>{e.contract.premiumRocAnnualPct.toFixed(1)}%</b></td>
+                      <td className="num">${e.creditPerContract.toFixed(0)}<span className="shortlist-muted"> · bid ${e.contract.bid.toFixed(2)}</span></td>
+                      <td className="num">${e.capitalRequired.toLocaleString()}</td>
+                      <td className="num">{e.contract.delta.toFixed(2)}</td>
+                      <td className="num">{e.contract.spreadPct.toFixed(1)}%</td>
+                      <td className="shortlist-muted">{shortlistRollRoom(e)}</td>
+                      <td>{e.earningsDate}</td>
+                      <td>{e.criticVerdict ?? '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="shortlist-muted" style={{ marginTop: 6 }}>Hover a row for the own-at-strike read.</div>
+            </div>
+          )}
+
+          {shortlist.rejections.length > 0 && (
+            <details className="dice-rejects">
+              <summary>{shortlist.rejections.length} excluded — why</summary>
+              <ul>
+                {shortlist.rejections.map((r, i) => (
                   <li key={i}><b>{r.ticker}</b> — {r.reason}</li>
                 ))}
               </ul>

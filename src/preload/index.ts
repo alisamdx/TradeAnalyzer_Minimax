@@ -130,6 +130,7 @@ import type {
   ExecStartResult,
 } from '@shared/types.js';
 import type { OwnAtStrikeRead } from '@shared/own-at-strike.js';
+import type { ShortlistResult } from '@shared/wheel-shortlist.js';
 export type {
   ScreenPreset, ScreenCriteria, ScreenRunResult, ScreenResultRow, Universe,
   ConstituentsMeta, ConstituentRow, CachedQuote, AnalysisModeInfo, AnalysisRunResult,
@@ -1168,6 +1169,11 @@ type DicePickShape = {
     /** Send today's Roll the Dice as an email (same builder the nightly chain uses). */
     emailRollTheDice: (maxCapital?: number) =>
       invoke<{ sent: boolean; message: string }>('scoring:email-roll-the-dice', maxCapital),
+    /** Wheel Shortlist (NewApp 07 §3): top 5 puts at 0.35–0.45Δ / 14–30 DTE, priced live. Advisory. */
+    wheelShortlist: () => invoke<ShortlistResult>('scoring:wheel-shortlist'),
+    /** Send the Wheel Shortlist email now (same logged path the brief run uses). */
+    emailWheelShortlist: () =>
+      invoke<{ sent: boolean; message: string }>('scoring:email-wheel-shortlist'),
     signalCorrelations: (strategy: ScoringStrategy) =>
       invoke<SignalWeightSuggestion[]>('scoring:signal-correlations', strategy),
     briefHealthTrend: () =>

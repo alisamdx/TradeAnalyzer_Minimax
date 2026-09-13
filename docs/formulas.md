@@ -793,6 +793,26 @@ in `roll-analyzer-service.ts`. Reporting only — it ranks and gates nothing.
 Far-dated chains fetched for this feed only rollability; the candidate table still ranks the next
 6 expiries, unchanged.
 
+## Wheel shortlist {#wheel-shortlist}
+
+`src/main/services/wheel-shortlist.ts` — interim, advisory (NewApp `07-opportunity-engine.md` §3).
+Operator profile: short put **0.35 ≤ |delta| ≤ 0.45**, **14 ≤ DTE ≤ 30**, top 5, no capital cap.
+
+- **Pool** — the latest brief run's `brief_candidates` for `wheel` and `income` with disposition
+  `picked` or `capped_out`, deduped by ticker. The composite rank is not used.
+- **Exclusions** — critic verdict `flag` (where a verdict exists); earnings date unknown, stale
+  (`report_date < today`), or on/before every in-window expiry; no qualifying two-sided put.
+- **Contract** — among expiries before the next report: the put with the highest
+  **premium ROC (annualized) = `mid ÷ strike × 365 ÷ DTE × 100`**, `mid = (bid + ask) ÷ 2`.
+- **Ranking** — premium ROC descending; keep 5.
+- **Assignment probability** ≈ `|delta| × 100`. **Credit** = `mid × 100`; **cash required** = `strike × 100`.
+- **Spread %** = `(ask − bid) ÷ mid × 100`.
+- **Roll room** (D3 at today's prices) — roll expiry = the nearest listed expiry **7–30 days after**
+  the chosen one; roll strike = the **lowest** put strike ≤ the chosen strike with `mid ≥ chosen mid`
+  (a net credit). `dollarsLower = chosenStrike − rollStrike`; `strikesLower` = listed put strikes in
+  `[rollStrike, chosenStrike)`. A proxy: at a real roll the put is in the money and costs more to buy back.
+- **Own-at-strike** — the existing read with cost basis `strike − mid` (`docs/formulas.md#own-at-strike`).
+
 ## split-adjustment (data integrity) {#split-adjustment}
 
 `historical_prices` must hold a **self-consistent, split-adjusted** close series: every bar

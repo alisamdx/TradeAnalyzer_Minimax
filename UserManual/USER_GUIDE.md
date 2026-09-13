@@ -114,6 +114,37 @@ card sends the same thing on demand.
 > make a trade safe. It is still a short put, you can still be assigned, and the stock can still
 > fall well below your cost basis. Nothing here is investment advice.
 
+### 4.1b 🎯 Wheel Shortlist — the five best puts at your profile
+
+Also on the **Daily Brief**: **🎯 Wheel Shortlist**. Where Roll the Dice gives one trade, this gives
+the **top 5 cash-secured puts** at your chosen profile — **0.35–0.45 delta, 14–30 days to expiry** —
+ranked by **return on capital**, and priced live from E\*Trade when you press it.
+
+**Where the names come from.** The latest brief run's wheel and income candidates that cleared the
+liquidity check. The brief's composite score is *not* used to rank them: its top end has measured as
+a worse predictor than its middle. Each candidate is excluded if the critic flagged it, if its
+earnings date is unknown or stale, if it reports before every 14–30 day expiry, or if no put at
+0.35–0.45 delta has a real two-sided quote. Expand *"N excluded — why"* to see which.
+
+**Each row shows** the put and expiry, the return on capital per year, the credit per contract (and
+the bid), the **cash required** (never filtered — sizing is your call), delta (roughly the odds of
+finishing in the money), the bid/ask spread, the next earnings date, the critic's verdict if it
+reviewed the name, and **roll room**. Hover a row for the own-at-strike read.
+
+**Roll room is your roll rule, checked today.** Your rule: *if the put is in the money with 7 or
+fewer days left, roll out to the next 14–30 day expiry at the same or a lower strike for a net
+credit; if no credit roll exists, close it.* Roll room looks at the expiry a week or so later and
+reports how far down you could roll for a credit **at today's prices**. At a real roll the put will
+be in the money and cost more to buy back, so treat it as a comparison between names, not a promise.
+
+**It emails itself after both brief runs** (`🎯 Wheel Shortlist — 5 ideas · top: … · 10:28 ET`),
+including on days when nothing qualified. **✉ Email it** sends it on demand.
+
+> **Advisory, and not yet validated on this profile.** The ranking by return on capital was measured
+> on 0.20–0.35 delta puts at 30–45 days; your profile is outside that. TradeAnalyzer 2 is collecting
+> the daily option chains needed to measure this exact profile — including your roll rule — and the
+> first real answers arrive around late October.
+
 ### 4.2 Model a structure in Payoff
 
 The **📐 Payoff** screen is where you confirm the trade before placing it:
