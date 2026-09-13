@@ -207,6 +207,22 @@ short 0.20–0.30Δ, credit ≥ 30% of width, IVR ≥ ~30; exit 50% profit / 15 
     round-trip-cost ≤ 25%-of-credit liquidity gate (§4c, §5, §7). Classifier kept CGNX/ORCL/SNPS as
     genuine moves (0 split/reuse exclusions). Wider wings helped under cost (10% wing ≈ break-even per
     trade). **Re-run with intraday quotes; intraday coverage grows daily from the 2026-09-14 brief.**
+    **v4 runs 2026-09-13 (fixed exits; $25k pot, $1,000 max loss/spread, ≤10 open; flat $0.03 and
+    quoted-intraday with $0.03 fallback):** intraday quotes cover only **32 tickers / 55 of 1,475
+    entries**, and they are expensive (median **$0.50/leg**, p10 $0.125) — those 24 draft trades lost
+    −11.5% each, so $0.03 is optimistic for many names. **Portfolio, flat $0.03:** Δ0.30 / 5% wing /
+    50% target / no stop / no time stop **+75.1% (56% ann.)**, drawdown 9.0%, util 26%, vs CSP **+25.8%
+    (20% ann.)**, drawdown 1.4%, util 48%; 75% target +79.9%; hold to expiry +62.6%; 21 DTE +61.3%;
+    the draft (2× stop, 15-day time stop) only **+29.9%** — the stop and time stop halve the result.
+    **Same with quoted costs:** +51.8% ungated, but **+60.8% with the ≤25%-of-credit cost gate vs
+    +61.7% flat — the gate makes the result insensitive to the cost model**, the most useful single
+    finding. Neighbouring settings (Δ0.25–0.35, 50–75% target, no stop) all +48–80% vs CSP +18–26%.
+    Spread return/drawdown ≈ 8 vs CSP ≈ 18: ~3× the return for ~6× the realised drawdown. Holding
+    averages ~14–18 days, not 5–15. Still negative in 2025-Q3 per trade; below-SMA50 better again;
+    skew 6 cuts per-trade return by a third. **Candidate criteria for #44:** 30 DTE (21 ok), short
+    ~0.30Δ, wing 5–7.5% of spot, round-trip cost ≤ 25% of mid credit, 50–75% profit target, no loss
+    or time stop, size by fixed max loss with a position cap, no SMA50 or IV-rank gate. Model-priced,
+    one replay — confirm on captured chains before enabling (FR-SEY-5).
 44. **`bull_put_spread` brief mode**, default off: gates + transparent ranking (credit/width, distance
     below SMA50), not the wheel composite. Enabled only on captured-data evidence (FR-SEY-5).
 
