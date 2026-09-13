@@ -165,7 +165,20 @@ short 0.20–0.30Δ, credit ≥ 30% of width, IVR ≥ ~30; exit 50% profit / 15 
     of width (the draft gate would reject ~96%); IV rank ≥30 on **all 77** (iv_history splice artefact —
     untestable); the dollar-weighted cap-eff metric swung on single names (Q2 391 vs Q3 19 %/yr at equal
     mean returns) — replaced by equal-weighted ret%/day, plus `--out` for UTF-8 output.
-    **Next: re-run Brief Replay over a long range, then re-run the study.**
+    **Second run 2026-09-13 — the real sample:** replay 2025-06-01…2026-08-10 → 1,495 picks, **471
+    episodes, six quarters** (BS-priced, skew 3, no slippage). Draft profile (30d Δ0.25, 50% target,
+    2× stop, 15-day time stop): spread 79.4% win / +6.26% mean on max loss / ~10 days vs CSP 84.9% /
+    +0.72% / ~9 days; spread p5 −42% vs CSP −3.1%. Held on both return-per-day measures: **the 50%
+    profit target is the dominant lever** (monotonic across every stop/time cell; no target is worst);
+    **1× loss stop hurts, 2× ≈ none** (defined risk already caps loss — size by max loss instead);
+    time stop 10/15/none ≈ flat per day; **21 DTE beats 30/35 at every delta** (stops 8% vs 5%);
+    spread positive in **all six quarters** (weakest 2025-Q3 +2.0%, 2026-Q1 +2.7%); skew 0→6 cuts
+    mean 7.5→5.2% without flipping. Credit/width at 0.25Δ/5% wing: p10 16 · median 20 · p90 24 — the
+    30% draft gate is unreachable. **Close BELOW SMA50 did better** (+9.4% vs +5.7%, n=67) — consistent
+    with notDowntrend being anti-predictive; do NOT add a trend-intact gate. IV rank still the splice
+    artefact (232/281 ≥80, 190 unknown). **Open:** slippage (two legs × two fills vs a ~20%-of-width
+    credit) unmeasured — run `--slip`; the >35% step guard excluded genuine moves (ORCL +36%, SNPS −36%
+    on 2025-09-10, CGNX) rather than splits, which drops real tail losses — tighten it; portfolio sim.
 44. **`bull_put_spread` brief mode**, default off: gates + transparent ranking (credit/width, distance
     below SMA50), not the wheel composite. Enabled only on captured-data evidence (FR-SEY-5).
 
