@@ -41,7 +41,7 @@
 //   node scripts/fr-bull-put-spread-study.mjs            [--strategy wheel] [--slip 0.03]
 //   node scripts/fr-bull-put-spread-study.mjs --selftest (no database; checks the simulator)
 
-import { existsSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const argv = process.argv.slice(2);
@@ -169,6 +169,11 @@ function stats(rows, side) {
     p5: rets[Math.floor(n * 0.05)],
     worst: Math.min(...r.map(x => x.pnl)),
     avgPnl: sumPnl / n,
+    // Equal-weighted return per day held. Preferred over capEff, which is DOLLAR-weighted and was
+    // shown on the first run (2026-09-12) to swing on one or two high-priced names: Q2 391 vs Q3 19
+    // %/yr at near-identical mean returns (9.9% vs 9.3%), and −500 %/yr on a 3-trade split with a
+    // positive mean.
+    perDay: r.reduce((s, x) => s + ((x.pnl / x.cap) * 100) / Math.max(1, x.days), 0) / n,
     days: r.reduce((s, x) => s + x.days, 0) / n,
     capEff: (sumPnl / sumCapDays) * 365 * 100,
     exits: r.reduce((acc, x) => { acc[x.exit] = (acc[x.exit] ?? 0) + 1; return acc; }, {}),
@@ -187,12 +192,12 @@ function runAll(entries, cfg) {
   return rows;
 }
 
-const HEAD = '| config | n | SPREAD win% | mean ret% | median | cap-eff %/yr | days | exits | CSP win% | mean ret% | median | cap-eff %/yr | days |';
-const SEP = '|---|--:|--:|--:|--:|--:|--:|---|--:|--:|--:|--:|--:|';
+const HEAD = '| config | n | SPREAD win% | mean ret% | median | ret%/day | days | exits | $-wt %/yr | CSP win% | mean ret% | median | ret%/day | days | $-wt %/yr |';
+const SEP = '|---|--:|--:|--:|--:|--:|--:|---|--:|--:|--:|--:|--:|--:|--:|';
 function line(label, rows) {
   const s = stats(rows, 'spread'), c = stats(rows, 'csp');
-  if (!s) return `| ${label} | 0 | | | | | | | | | | | |`;
-  return `| ${label} | ${s.n} | ${f(s.win)} | ${f(s.mean, 2)} | ${f(s.median, 2)} | **${f(s.capEff)}** | ${f(s.days)} | ${exitMix(s)} | ${f(c.win)} | ${f(c.mean, 2)} | ${f(c.median, 2)} | **${f(c.capEff)}** | ${f(c.days)} |`;
+  if (!s) return `| ${label} | 0 | | | | | | | | | | | | | |`;
+  return `| ${label} | ${s.n} | ${f(s.win)} | ${f(s.mean, 2)} | ${f(s.median, 2)} | **${f(s.perDay, 2)}** | ${f(s.days)} | ${exitMix(s)} | ${f(s.capEff)} | ${f(c.win)} | ${f(c.mean, 2)} | ${f(c.median, 2)} | **${f(c.perDay, 2)}** | ${f(c.days)} | ${f(c.capEff)} |`;
 }
 const cfgLabel = c => `${c.dte}d Δ${c.delta} skew${c.skew} pt${c.pt ?? '–'} sl${c.sl ?? '–'} ts${c.ts ?? '–'}`;
 
@@ -314,6 +319,16 @@ function loadEntries(db) {
 async function main() {
   if (SELFTEST) return selftest();
 
+  // --out writes UTF-8 directly. A PowerShell 5.1 `>` redirect writes UTF-16, which is what the
+  // first run produced.
+  const OUT = argOf('--out', null);
+  const captured = [];
+  if (OUT) {
+    const log = console.log.bind(console);
+    console.log = (...a) => { captured.push(a.join(' ')); log(...a); };
+    process.on('exit', () => { try { writeFileSync(OUT, `${captured.join('\n')}\n`, 'utf8'); } catch { /* best effort */ } });
+  }
+
   const dir = join(process.env.APPDATA ?? '', 'trade-analyzer');
   const dbPath = join(dir, 'trade-analyzer.sqlite');
   let guard;
@@ -355,7 +370,8 @@ async function main() {
   const dates = episodes.map(e => e.date).sort();
   if (dates.length) console.log(`Entry dates ${dates[0]} … ${dates[dates.length - 1]}.`);
   if (discontinuities.length) console.log(`\nExcluded for a >35% daily step: ${discontinuities.slice(0, 20).join('; ')}${discontinuities.length > 20 ? ` … +${discontinuities.length - 20}` : ''}`);
-  console.log('\nret% = P&L ÷ capital (spread: max loss; CSP: strike − premium). cap-eff = Σ P&L ÷ Σ(capital × days) × 365. '
+  console.log('\nret% = P&L ÷ capital (spread: max loss; CSP: strike − premium). ret%/day = mean over trades of ret% ÷ days held '
+    + '(equal-weighted — the comparison to read). $-wt %/yr = Σ P&L ÷ Σ(capital × days) × 365 (dollar-weighted; one expensive name can swing it). '
     + 'exits (spread): T=profit target S=loss stop H=time stop (days held) E=expiry, % of trades.\n');
 
   const BASE = { dte: 30, delta: 0.25, skew: 3, pt: 0.5, sl: 2, ts: 15 };
@@ -369,6 +385,21 @@ async function main() {
   if (sb) {
     console.log(`\nTails (episodes): spread p5 ${f(sb.p5, 1)}% / worst $${f(sb.worst, 0)} per contract; `
       + `CSP p5 ${f(cb.p5, 1)}% / worst $${f(cb.worst, 0)}. Avg P&L per contract: spread $${f(sb.avgPnl, 0)}, CSP $${f(cb.avgPnl, 0)}.`);
+    const q = [...baseEp.map(r => r.creditPctWidth)].sort((a, b) => a - b);
+    const at = p => f(q[Math.min(q.length - 1, Math.floor(q.length * p))] * 100, 0);
+    console.log(`Credit as % of width (5%-of-spot wing): p10 ${at(0.1)} · p25 ${at(0.25)} · median ${at(0.5)} · p75 ${at(0.75)} · p90 ${at(0.9)} `
+      + `— a "credit ≥ X% of width" gate should be set against this distribution, not guessed.`);
+  }
+  // IV rank sanity: iv_history splices IVolatility (to 2026-05-29) and E*Trade (from 2026-06-01) with no
+  // overlap and ~1.3x the range after the join (CLAUDE.md), so a rank against a window spanning the
+  // splice is not a measurement. Say so when the ranks bunch.
+  const ranks = episodes.map(e => e.ivRank).filter(x => x != null);
+  const buckets = { '<30': 0, '30–50': 0, '50–80': 0, '≥80': 0 };
+  for (const r of ranks) buckets[r < 30 ? '<30' : r < 50 ? '30–50' : r < 80 ? '50–80' : '≥80']++;
+  console.log(`IV rank at entry (episodes with a rank, ${ranks.length}): ${Object.entries(buckets).map(([k, v]) => `${k} ${v}`).join(' · ')}`);
+  if (ranks.length && Math.max(...Object.values(buckets)) / ranks.length >= 0.9) {
+    console.log('WARNING: ≥90% of entries fall in one IV-rank bucket — likely the iv_history source splice, not the market. '
+      + 'The IV-rank split in §5 is not interpretable on this sample.');
   }
 
   console.log('\n## 2. Exit grid (30d Δ0.25 skew3)\n');

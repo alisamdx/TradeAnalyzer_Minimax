@@ -156,6 +156,16 @@ short 0.20–0.30Δ, credit ≥ 30% of width, IVR ≥ ~30; exit 50% profit / 15 
     loss vs baseline 74.3% / 3.7%; wheel is an eligible v2-engine strategy) with what it lacked: paired
     naked-CSP comparison, capital efficiency per capital-day, time stop + exit grid, skew sensitivity,
     DTE × delta grid, IVR / SMA50 / credit-vs-width splits, episode collapse, discontinuity guard.
+    **First run 2026-09-12 — INCONCLUSIVE, sample too small:** replay held only 225 wheel picks
+    (entries 2026-06-02…08-04, **77 episodes, one up-trending regime**) because `runRange` wipes the
+    replay before every run. Directional reads that held across neighbouring rows: spread beats CSP on
+    return per capital-day in every row; 50% target + 10–15 day time stop beats hold-to-expiry per day
+    (~1.0–1.2 %/day vs 0.27); 21 DTE beat 30/35 at all three deltas; skew 0→6 cuts spread mean return
+    12.5→8.5% without flipping it. Found: at 0.25Δ / 5%-of-spot wing only **3 of 77** credits reach 30%
+    of width (the draft gate would reject ~96%); IV rank ≥30 on **all 77** (iv_history splice artefact —
+    untestable); the dollar-weighted cap-eff metric swung on single names (Q2 391 vs Q3 19 %/yr at equal
+    mean returns) — replaced by equal-weighted ret%/day, plus `--out` for UTF-8 output.
+    **Next: re-run Brief Replay over a long range, then re-run the study.**
 44. **`bull_put_spread` brief mode**, default off: gates + transparent ranking (credit/width, distance
     below SMA50), not the wheel composite. Enabled only on captured-data evidence (FR-SEY-5).
 
