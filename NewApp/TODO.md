@@ -179,6 +179,15 @@ short 0.20–0.30Δ, credit ≥ 30% of width, IVR ≥ ~30; exit 50% profit / 15 
     artefact (232/281 ≥80, 190 unknown). **Open:** slippage (two legs × two fills vs a ~20%-of-width
     credit) unmeasured — run `--slip`; the >35% step guard excluded genuine moves (ORCL +36%, SNPS −36%
     on 2025-09-10, CGNX) rather than splits, which drops real tail losses — tighten it; portfolio sim.
+    **Slippage runs 2026-09-13 ($/share per leg per fill):** draft-profile spread mean return **+6.26% →
+    +3.26% ($0.03) → +1.54% ($0.05)**; win 79 → 73 → 71%; negative quarters 0 → 1 → 2 (2025-Q3 −4.6%,
+    2026-Q1 −0.4% at $0.05). CSP barely moves (+0.72 → +0.63%, positive every quarter). Spread still
+    ~2× CSP per capital-day at $0.05 (was ~9×) with p5 −44% vs −3%. **Friction reverses the exit
+    finding:** at $0.05 the 5–15 day draft (0.14 %/day by ratio of means) loses to fewer paid closes —
+    50% target with no stop/time stop 0.26, 75% target no stop 0.28, hold to expiry 0.25; every 1× stop
+    row is negative. **Friction favours bigger credits:** 0.20Δ rows go to ~0 at $0.05 while 0.30Δ
+    holds (21d Δ0.3 +2.55%). Untested lever: a wider wing (fixed $ slippage over a larger credit).
+    Deciding input now = the real fill cost per leg, which nothing has measured for spreads.
 44. **`bull_put_spread` brief mode**, default off: gates + transparent ranking (credit/width, distance
     below SMA50), not the wheel composite. Enabled only on captured-data evidence (FR-SEY-5).
 
