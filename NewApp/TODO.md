@@ -123,6 +123,26 @@ project notes. Anything that changes which trades are taken or how they size/exi
     `min_composite_by_strategy` (migration-set today); decide the `max_combo_spread_pct` liquidity
     gate (~0.20 suggested, cannot be backtested).
 34. **Requirements/ and UserManual/ expansion** — queued docs work (items #2 and #3 of the docs task).
+## F. Opportunity engine — the purpose of the rebuild (`NewApp/requirements/07-opportunity-engine.md`)
+
+Decisions 2026-09-12: premium ROC avoiding assignment; 0.35–0.45Δ at 14–30 DTE; roll when ITM with
+≤ 7 days left to the next 14–30 DTE expiry at same/lower strike for a credit, else close; top 5, no
+capital cap; after both briefs; TA2 view + email.
+
+36. ~~**Write the design**~~ **done 2026-09-12** — `07-opportunity-engine.md` v1.
+37. **Interim Wheel Shortlist in the existing app** (07 §3): pool from wheel+income Stage-4 candidates,
+    live 0.35–0.45Δ / 14–30 DTE contract, gates (earnings, critic flag), rank by premium ROC, roll-room
+    and own-at-strike annotations; logged email after both briefs + Daily Brief panel. Advisory only.
+38. **Sanity backtest**: `backtestReplayPicks` wheel at 0.40Δ / 21 DTE vs 0.30Δ / 30 DTE (theoretical
+    pricing, no rolls) — a rough read, not proof.
+39. **Answer 07 §8 open questions** (roll choice, roll-day timing, entry price convention, pool width).
+40. **TA2 answer key** (07 §4): derived table of every D2 contract with the D3 roll simulated on stored
+    quotes; first labels ≈ early October.
+41. **TA2 Opportunity view + email + self-grading scorecard** (07 §7), once ~40 entry dates have settled
+    (≈ mid-November).
+
+---
+
 35. **Tidy `.ai/AI_CONTEXT.md` §11** — e.g. "ETF-aware wheel scoring … needs validation before
     enabling (v1.1.118)" is stale (validated and shipped enabled in v1.1.172); the B1 slot-bias
     entry duplicates #28.
