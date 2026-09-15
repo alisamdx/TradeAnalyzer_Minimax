@@ -352,12 +352,30 @@ export interface DayReportDeps {
   readCollectorDay: (date: string) => CollectorDay | { unavailable: string };
 }
 
+/**
+ * When "this job should have run by now" becomes a fair question for a date: the watchdog's
+ * 19:30 ET slot plus margin. Before it, today's missing jobs are simply not due yet — asked
+ * at 01:10 ET on 2026-09-15, the first version flagged all three as missing.
+ */
+const DAY_COMPLETE_ET = '20:00';
+
+const ET_CLOCK = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+
+/** Whether every scheduled job for `date` should have run by `nowIso`. */
+export function dayIsComplete(date: string, nowIso: string): boolean {
+  const today = etDate(nowIso);
+  if (date < today) return true;
+  if (date > today) return false;
+  return ET_CLOCK.format(new Date(nowIso)) >= DAY_COMPLETE_ET;
+}
+
 /** What a person should look at first. Plain sentences, most serious first. */
-export function buildAttention(r: Omit<DayReport, 'attention' | 'generatedAt'>): string[] {
+export function buildAttention(r: Omit<DayReport, 'attention' | 'generatedAt'>, nowIso: string = new Date().toISOString()): string[] {
   const out: string[] = [];
   const collector = 'unavailable' in r.collector ? null : r.collector;
   const weekday = new Date(`${r.date}T12:00:00Z`).getUTCDay() % 6 !== 0;
   const tradingDay = collector?.tradingDay ?? weekday;
+  const complete = dayIsComplete(r.date, nowIso);
 
   for (const run of r.batchRuns) {
     if (run.status === 'failed') out.push(`Batch job ${run.jobId} FAILED at ${run.startedAt}: ${run.errorMessage ?? run.notes ?? 'no message'}`);
@@ -365,7 +383,7 @@ export function buildAttention(r: Omit<DayReport, 'attention' | 'generatedAt'>):
     if (run.status === 'running') out.push(`Batch job ${run.jobId} is still marked running (started ${run.startedAt}).`);
   }
 
-  if (tradingDay) {
+  if (tradingDay && complete) {
     const ran = new Set(r.batchRuns.map((b) => b.jobId));
     for (const job of ['daily-intelligence-brief', 'data-collector', 'collector-watchdog']) {
       if (!ran.has(job)) out.push(`Expected job ${job} has no run on this trading day.`);
@@ -375,9 +393,12 @@ export function buildAttention(r: Omit<DayReport, 'attention' | 'generatedAt'>):
   if (!collector) {
     out.push(`TradeAnalyzer 2 generation not read: ${(r.collector as { unavailable: string }).unavailable}`);
   } else {
-    const daily = collector.reports.filter((q) => q.runKind === 'daily');
-    if (tradingDay && collector.runs.length > 0 && daily.length === 0) out.push('Collector ran but wrote no daily gate report.');
-    if (tradingDay && collector.runs.length === 0) out.push('No collector run is recorded for this date.');
+    // Only the DAILY run owes a gate report. A manual one-shot (universe_seed,
+    // legacy_import, the brief hand-off) writes a run row and no report, by design.
+    const dailyRuns = collector.runs.filter((run) => (run as { run_kind?: unknown }).run_kind === 'daily');
+    const dailyReports = collector.reports.filter((q) => q.runKind === 'daily');
+    if (dailyRuns.length > 0 && dailyReports.length === 0) out.push('The daily collector run wrote no gate report.');
+    if (tradingDay && complete && dailyRuns.length === 0) out.push('No daily collector run is recorded for this trading day.');
     for (const q of collector.reports) {
       if (q.overall !== 'green') out.push(`Gate verdict ${q.overall.toUpperCase()} (run ${q.runId}, ${q.runKind ?? '?'}).`);
       if (q.emailStatus !== 'sent') out.push(`Gate email for run ${q.runId} was NOT sent — status ${q.emailStatus}${q.emailError ? `: ${q.emailError}` : ''}.`);
@@ -419,5 +440,6 @@ export async function buildDayReport(deps: DayReportDeps, date: string): Promise
   }
 
   const base = { date, batchRuns: readBatchRunsForDate(deps.batchDb, date), errorsLog, apiLog, collector };
-  return { ...base, generatedAt: new Date().toISOString(), attention: buildAttention(base) };
+  const generatedAt = new Date().toISOString();
+  return { ...base, generatedAt, attention: buildAttention(base, generatedAt) };
 }

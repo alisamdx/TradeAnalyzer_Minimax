@@ -985,7 +985,14 @@ app.whenReady().then(() => {
     timestamp: new Date().toISOString(),
     appVersion: app.getVersion(),
     errorClass: 'Boot',
-    message: 'collector jobs registered (disabled — manual runs only, no claim loop)',
+    // Read from the live batch_jobs rows, not written by hand: the hand-written line said
+    // "disabled — manual runs only" for months after migration 082 put data-collector and
+    // collector-watchdog back on their schedules (v1.1.247).
+    message: `collector jobs registered (no claim loop): ${batchService
+      .getJobs()
+      .filter((j) => j.id === 'data-collector' || j.id === 'collector-watchdog' || j.id === 'collector-oneshot')
+      .map((j) => `${j.id} ${!j.enabled ? 'manual only' : j.dailyScheduleEnabled ? `scheduled ${j.dailyScheduleTime}` : 'enabled, no daily schedule'}`)
+      .join(', ')}`,
     stack: null,
     operation: 'boot:collector',
     ticker: null,

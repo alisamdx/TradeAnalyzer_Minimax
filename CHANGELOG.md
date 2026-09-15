@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.247] - 2026-09-15
+
+### Day report: no false alarms before a day is over
+
+The first day report for 2026-09-15, taken at 01:10 ET, flagged four problems that were not problems.
+
+- **"Expected job … has no run" only fires once the day's jobs are due**: the date is in the past, or it is today and 20:00 ET or later (after the 19:30 watchdog). Before that it flagged the brief, the collector and the watchdog as missing at 1 a.m.
+- **The gate-report check counts daily collector runs only.** A manual one-shot (`universe_seed`, `legacy_import`, the brief hand-off) writes a run row but no gate report, by design; the report no longer calls that "Collector ran but wrote no daily gate report". Once the day is over, a trading day with no daily run is flagged as "No daily collector run is recorded".
+- **The boot log line is read from the live job rows.** It said "collector jobs registered (disabled — manual runs only)" long after migration 082 put `data-collector` (17:05) and `collector-watchdog` (19:30) back on schedule. It now lists each collector job's actual state.
+
+Tests: `tests/day-diagnostics.test.ts`.
+
 ## [1.1.246] - 2026-09-15
 
 ### Constituents refresh repaired, a "warning" batch status, universe seed reports closures

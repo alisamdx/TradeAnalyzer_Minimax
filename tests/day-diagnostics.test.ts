@@ -10,6 +10,7 @@ import { MIGRATIONS_DIR } from './helpers.js';
 import { BatchService } from '../src/main/services/batch-service.js';
 import {
   buildAttention,
+  dayIsComplete,
   etDate,
   readBatchRunsForDate,
   readCollectorDay,
@@ -160,8 +161,10 @@ describe('buildAttention', () => {
   const emptyLog = { file: 'f', present: true, counts: {}, entries: [], unparseable: 0 };
   const emptyApi = { file: 'f', present: true, lines: 0, unparseable: 0, byProvider: {}, byHourEt: {}, failureGroups: 0, failures: [] };
   const collector = (over: Partial<CollectorDay> = {}): CollectorDay => ({
-    tradingDay: true, runs: [{ run_id: 1 }], reports: [], domainStatus: [], responses: [], responseFailures: [], exceptions: [], errors: {}, ...over,
+    tradingDay: true, runs: [{ run_id: 1, run_kind: 'daily' }], reports: [], domainStatus: [], responses: [], responseFailures: [], exceptions: [], errors: {}, ...over,
   });
+  /** Monday evening's report, read the next day — every scheduled job was due. */
+  const LATER = '2026-09-15T05:00:00.000Z';
   const run = (jobId: string, status = 'success') => ({
     runId: 1, jobId, jobName: null, startedAt: '2026-09-14T22:00:00Z', completedAt: null, durationSec: null, status, trigger: 'schedule', slotTime: null, notes: null, errorMessage: 'boom',
   });
@@ -174,7 +177,7 @@ describe('buildAttention', () => {
       collector: collector({
         reports: [{ reportId: 7, runId: 1, runKind: 'daily', overall: 'red', generatedAt: '', emailStatus: 'failed', emailError: 'SMTP 552', emailSentAt: null, domains: {} }],
       }),
-    });
+    }, LATER);
     expect(a).toContain('Gate verdict RED (run 1, daily).');
     expect(a).toContain('Gate email for run 1 was NOT sent — status failed: SMTP 552.');
   });
@@ -184,17 +187,47 @@ describe('buildAttention', () => {
       date: '2026-09-14',
       batchRuns: [run('daily-intelligence-brief', 'failed')],
       errorsLog: emptyLog, apiLog: emptyApi, collector: collector(),
-    });
+    }, LATER);
     expect(a.some((x) => x.startsWith('Batch job daily-intelligence-brief FAILED'))).toBe(true);
     expect(a).toContain('Expected job data-collector has no run on this trading day.');
-    expect(a).toContain('Collector ran but wrote no daily gate report.');
+    expect(a).toContain('The daily collector run wrote no gate report.');
+  });
+
+  it('does not call today\'s jobs missing before they are due — the 01:10 ET case', () => {
+    // 2026-09-15 01:10 ET: only a manual universe_seed has run. Nothing is missing yet,
+    // and a manual run owes no gate report.
+    const early = '2026-09-15T05:10:00.000Z';
+    const a = buildAttention({
+      date: '2026-09-15',
+      batchRuns: [run('collector-oneshot'), run('constituents-refresh')],
+      errorsLog: emptyLog, apiLog: emptyApi,
+      collector: collector({ runs: [{ run_id: 9, run_kind: 'manual' }] }),
+    }, early);
+    expect(a).toEqual([]);
+  });
+
+  it('flags a missing daily run once the day is over, even when a manual run exists', () => {
+    const a = buildAttention({
+      date: '2026-09-15',
+      batchRuns: [run('daily-intelligence-brief'), run('data-collector'), run('collector-watchdog')],
+      errorsLog: emptyLog, apiLog: emptyApi,
+      collector: collector({ runs: [{ run_id: 9, run_kind: 'manual' }] }),
+    }, '2026-09-16T00:30:00.000Z'); // 20:30 ET
+    expect(a).toEqual(['No daily collector run is recorded for this trading day.']);
+  });
+
+  it('decides "the day is over" in ET, at 20:00', () => {
+    expect(dayIsComplete('2026-09-15', '2026-09-15T23:59:00.000Z')).toBe(false); // 19:59 ET
+    expect(dayIsComplete('2026-09-15', '2026-09-16T00:00:00.000Z')).toBe(true);  // 20:00 ET
+    expect(dayIsComplete('2026-09-14', '2026-09-15T05:10:00.000Z')).toBe(true);
+    expect(dayIsComplete('2026-09-16', '2026-09-15T05:10:00.000Z')).toBe(false);
   });
 
   it('does not expect the daily jobs on a non-trading day', () => {
     const a = buildAttention({
       date: '2026-09-13', batchRuns: [], errorsLog: emptyLog, apiLog: emptyApi,
       collector: collector({ tradingDay: false, runs: [] }),
-    });
+    }, LATER);
     expect(a).toEqual([]);
   });
 });
