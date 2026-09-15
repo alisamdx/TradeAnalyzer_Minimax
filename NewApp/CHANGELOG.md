@@ -9,6 +9,20 @@ exit (06 §6).
 
 ---
 
+## B10b — short interest verified (2026-09-15)
+
+`core` **0.6.9**; existing app **v1.1.245**. The 2026-09-14 daily run stored
+**67,386** `raw_short_interest` rows from Polygon, newest settlement date
+2026-09-14 — the first live 200. The `verify` note is off
+`raw_short_interest.short_interest`, which leaves **no verify notes in the
+dictionary** and clears that pilot-exit condition. `runShortInterest` no longer
+skips on an empty chain subset (the sweep is whole-market). No DDL change, so
+the dictionary stays v15. Same release: the existing app removes six delisted
+tickers from `constituents` (AVB, EA, EQR, LBRDA, LBRDK, WBS); gen-002's
+membership closes on the next `universe_seed`.
+
+---
+
 ## B10b — short-interest source decided (2026-09-12)
 
 Docs only; no build. **Polygon first, FINRA as the fallback** (operator

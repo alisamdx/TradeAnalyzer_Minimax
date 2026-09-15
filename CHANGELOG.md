@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.1.245] - 2026-09-15
+
+### Day diagnostics, delisted tickers removed, short interest verified
+
+**Why.** Monday 2026-09-14's gate email (`[TA-Data] … after_close`) never arrived. Answering even *what had happened* meant going through a 30,000-line API log, the generation archive's file list and the errors log, plus asking the operator. Whether the email was sent is recorded only in the generation database (`qa_quality_report.email_status`) and in the batch run's note, and neither can be read outside the app. **This release does not name the cause.** It makes the cause readable: after installing, run `node scripts/day-report.mjs --date 2026-09-14`.
+
+- **Every batch run is logged.** Each finished run, for every job, every trigger and orchestrator sub-jobs too, is written to `logs/errors` as `batch-run:<job>` (INFO, or ERROR when it failed) with its counts, note and error. Before this, `batch_runs` kept 30 days and could only be read in the Batch view.
+- **Every collector email is logged**: gate status, NO RUN and backfill, as `collector-email:sent` or `collector-email:failed` with the SMTP message.
+- **`GET /api/v1/diagnostics/day?date=YYYY-MM-DD`** returns one ET day in one call:
+  - the batch runs
+  - the errors log
+  - the API log summarised: calls per provider and per ET hour, failures grouped by the provider's own message with the symbols involved
+  - the TradeAnalyzer 2 generation: runs, gate reports with email status and error, domain status, response parse outcomes, exceptions
+  - a "needs attention" list
+
+  It refuses to open the generation while a collector job is running.
+- **`scripts/day-report.mjs`** turns that into one Markdown page, `~/.tradeanalyzer/day-reports/day-<date>.md` (add `--json` for the raw data).
+- **Six delisted tickers removed from the constituent lists**, via migration 085: EA (taken private 2026-08-04), AVB and EQR (merged into VMRK 2026-08-17), LBRDA and LBRDK (merged into Charter 2026-08-20), WBS (acquired by Santander 2026-08-20). On 2026-09-14 they drew Polygon 404s and E\*Trade "invalid symbol" errors in both runs. A new `constituents_excluded` table is honoured by every constituents writer: refresh, CSV import and bundled bootstrap. Without it the refresh would put them back, because it replaces an index from a feed that still lists them. In TradeAnalyzer 2 they leave the universe on the next `universe_seed`.
+- **Short interest verified** (NewApp TODO #8, `core` 0.6.9). Monday's run stored 67,386 rows from Polygon, newest settlement 2026-09-14. The `verify` note is removed from `raw_short_interest.short_interest`, which was the last pilot-exit verify-note blocker. The sweep no longer skips when the chain subset is empty, since it is whole-market. Stale "unverified" comments are fixed.
+
+Tests: `tests/batch-run-log.test.ts`, `tests/day-diagnostics.test.ts`, `tests/constituents-refresh.test.ts`, `packages/core/test/events.test.ts`, `dictionary.test.ts`, `pilot-exit.test.ts`.
+
 ## [1.1.244] - 2026-09-13
 
 ### Bull put spread mode — built, running in shadow

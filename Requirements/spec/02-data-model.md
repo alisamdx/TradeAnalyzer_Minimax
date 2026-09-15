@@ -35,6 +35,8 @@ All persistence is a single local SQLite database (better-sqlite3), opened once 
 
 **`constituents_meta`** — `index_name PK`, `refreshed_at`, `source` (`bundled|wikipedia|csv`). Drives the 7-day refresh display.
 
+**`constituents_excluded`** (migration 085, v1.1.245) — `ticker PK`, `reason`, `excluded_at`. Delisted tickers that no constituents writer may store. Seeded with AVB, EA, EQR, LBRDA, LBRDK and WBS; the migration also deletes them from `constituents`.
+
 **`screen_presets`** — `id PK`, `name`, `universe`, `criteria_json` (a `ScreenCriteria`), `is_default`, `created_at`. (018 sets the default preset's universe to `both`.)
 
 **`screen_runs`** — `id PK`, `preset_id`, `preset_name` (denormalized), `criteria_json`, `universe`, `result_count`, `run_at`, `watchlist_id` (added in 010 — links a run to a watchlist source).

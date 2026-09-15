@@ -58,7 +58,9 @@ import { IvHistoryService } from './services/iv-history-service.js';
 import { registerIvHistoryIpc } from './ipc/ipc-iv-history.js';
 import { registerStrategyLabIpc } from './ipc/ipc-strategy-lab.js';
 import { registerPretradeValidatorIpc } from './ipc/ipc-pretrade-validator.js';
-import { BatchService } from './services/batch-service.js';
+import { BatchService, formatBatchRunLog } from './services/batch-service.js';
+import { logEmailOutcome } from './services/email-log.js';
+import { readCollectorDay } from './services/day-diagnostics.js';
 import { DailyIvCaptureJob } from './services/jobs/daily-iv-capture.js';
 import { MarketSyncJob } from './services/jobs/market-sync-job.js';
 import { ConstituentsRefreshJob } from './services/jobs/constituents-refresh-job.js';
@@ -466,7 +468,23 @@ app.whenReady().then(() => {
   const batchService = new BatchService(
     db,
     (notification) => getMainWindow()?.webContents.send('app:notification', notification),
-    (evt) => getMainWindow()?.webContents.send('batch:progress', evt)
+    (evt) => getMainWindow()?.webContents.send('batch:progress', evt),
+    // Every finished run, into logs/errors (v1.1.245) — batch_runs keeps 30 days and
+    // is readable only inside the app; this makes any day answerable from a file.
+    (entry) => {
+      const line = formatBatchRunLog(entry);
+      logError({
+        timestamp: new Date().toISOString(),
+        appVersion: app.getVersion(),
+        errorClass: 'BatchRun',
+        message: line.message,
+        stack: null,
+        operation: line.operation,
+        ticker: null,
+        correlationId: String(entry.runId),
+        level: line.level,
+      });
+    }
   );
   const dailyIvJob = new DailyIvCaptureJob(
     db,
@@ -847,7 +865,23 @@ app.whenReady().then(() => {
       ivolatilityLimiter,
       etradeLimiter,
       getEtradeCredentials: () => getEtradeCreds(),
-      sendEmail: async (msg) => { await emailService.send(msg.subject, msg.html); },
+      // Every collector email (gate status, NO RUN, backfill) logs its outcome
+      // (v1.1.245). The 2026-09-14 gate email never arrived and nothing outside
+      // the generation database recorded whether it had been sent.
+      sendEmail: async (msg) => {
+        try {
+          await emailService.send(msg.subject, msg.html);
+          logEmailOutcome({ level: 'INFO', operation: 'collector-email:sent', message: `[collector] email sent: ${msg.subject}` });
+        } catch (err) {
+          logEmailOutcome({
+            level: 'ERROR',
+            operation: 'collector-email:failed',
+            message: `[collector] email NOT sent: ${msg.subject} — ${err instanceof Error ? err.message : String(err)}`,
+            error: err,
+          });
+          throw err;
+        }
+      },
     });
   };
   const todayET = (): string =>
@@ -1001,7 +1035,29 @@ app.whenReady().then(() => {
     criticService: new CriticService(db),
     scoringService,
     batchService,
-    appVersion: app.getVersion()
+    appVersion: app.getVersion(),
+    diagnostics: {
+      logsDir: join(app.getPath('userData'), 'logs'),
+      readCollectorDay: (date) => {
+        const pointer = readSharedPointer();
+        if (!pointer || !generationExists(pointer)) {
+          return { unavailable: 'No TradeAnalyzer 2 generation exists yet.' };
+        }
+        // Not while a collector job holds the generation: a diagnostic must never be a
+        // second writer mid-run. The orchestrator chain is not refused — the brief's
+        // legacy hand-off already opens the generation during it the same way.
+        const running = batchService.getRunningJobId();
+        if (running === 'data-collector' || running === 'collector-oneshot' || running === 'collector-watchdog') {
+          return { unavailable: `${running} is running — ask again when it finishes.` };
+        }
+        const host = makeCollectorHost({ signal: new AbortController().signal, onProgress: () => undefined });
+        try {
+          return readCollectorDay(host.openGenerationDb(), date);
+        } finally {
+          host.close();
+        }
+      },
+    },
   });
   _apiServer.start(apiPort).catch((err) => {
     console.error('[api-server] failed to start:', err);

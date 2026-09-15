@@ -30,7 +30,7 @@ import {
   dailyFormIndexUrl,
   submissionsAtCap
 } from '../src/ingest/edgar.js';
-import { runEarningsSweep, runTreasuryYields } from '../src/collector/phases/events.js';
+import { runEarningsSweep, runShortInterest, runTreasuryYields } from '../src/collector/phases/events.js';
 import { runGate } from '../src/qa/gate.js';
 import { EARNINGS_FUNDAMENTALS_CHECKS, MACRO_CHECKS } from '../src/qa/registry.js';
 
@@ -287,6 +287,34 @@ describe('the treasury par yield curve', () => {
       .all() as { curve_date: string }[];
     expect(dates.map((d) => d.curve_date)).toEqual(['2026-09-03', '2026-09-04']);
     expect(result.stored).toBe(28);
+  });
+});
+
+// ── short interest ─────────────────────────────────────────────────────────
+
+describe('short interest', () => {
+  it('sweeps the whole market even when the chain subset is empty', async () => {
+    // A whole-market sweep names no tickers, so an empty subset (a fresh
+    // generation before 20 bars exist) used to skip it for no reason.
+    expect((raw.prepare('SELECT COUNT(*) AS n FROM ref_chain_subset_membership').get() as { n: number }).n).toBe(0);
+
+    const paths: string[] = [];
+    const body = JSON.stringify({
+      status: 'OK',
+      results: [
+        { ticker: 'AAPL', settlement_date: '2026-08-29', short_interest: 101_000_000, avg_daily_volume: 50_000_000, days_to_cover: 2.02 },
+        { ticker: 'MSFT', settlement_date: '2026-08-29', short_interest: 45_000_000 }
+      ]
+    });
+    const result = await runShortInterest(
+      makeHost({ polygonGet: async (path) => { paths.push(path); return response(body); } }),
+      db(),
+      newRun()
+    );
+
+    expect(paths).toEqual(['/stocks/v1/short-interest']);
+    expect(result.stored).toBe(2);
+    expect((raw.prepare('SELECT COUNT(*) AS n FROM raw_short_interest').get() as { n: number }).n).toBe(2);
   });
 });
 

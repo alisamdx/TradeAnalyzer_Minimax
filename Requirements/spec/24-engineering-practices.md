@@ -16,7 +16,7 @@ These practices keep the codebase debuggable, regression-safe, and resumable acr
 
 ## 24.3 Logging
 
-- Structured JSON logs of every outbound provider call (`logs/api/`, E*Trade OAuth calls included since v1.1.167 — an auth *failure* body is logged, an auth *success* body never is, because it carries a live token secret): ISO-8601 timestamp (ms), provider, endpoint, method, params (**API key redacted**), status, latency ms, response size, retry count, `job_run_id` if part of a batch. Plus screen/analysis run logs and an errors log (`logs/errors/`).
+- Structured JSON logs of every outbound provider call (`logs/api/`, E*Trade OAuth calls included since v1.1.167 — an auth *failure* body is logged, an auth *success* body never is, because it carries a live token secret): ISO-8601 timestamp (ms), provider, endpoint, method, params (**API key redacted**), status, latency ms, response size, retry count, `job_run_id` if part of a batch. Plus screen/analysis run logs and an errors log (`logs/errors/`), which since v1.1.245 also records every finished batch run (`batch-run:<job>`) and every collector email (`collector-email:*`). `GET /api/v1/diagnostics/day` and `scripts/day-report.mjs` summarise all of it for one ET day (§20.1a).
 - The log directory path is shown in Settings. Secrets are never logged.
 
 ## 24.4 Testing & regression

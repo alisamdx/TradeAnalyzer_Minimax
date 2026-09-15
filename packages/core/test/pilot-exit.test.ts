@@ -267,9 +267,10 @@ describe('inspections and promotion', () => {
     recordCheckRuling(db, host, CHECKS, { checkId: 'QC-201', review: 'threshold', decision: 'unmeasurable', note: 'event did not occur' });
     recordDomainInspection(db, host, { domain: 'bars' });
 
-    // The real dictionary still carries a verify note (short_interest), so the
-    // default refuses on that alone — which is the point of the condition.
-    expect(pilotExitStatus(db, CHECKS).conditions.filter((c) => !c.met).map((c) => c.key)).toEqual(['verify_notes']);
+    // The verify-note condition still refuses on its own when a note exists —
+    // the real dictionary has none left since short interest was verified.
+    expect(pilotExitStatus(db, CHECKS, { verifyNotes: 1 }).conditions.filter((c) => !c.met).map((c) => c.key)).toEqual(['verify_notes']);
+    expect(pilotExitStatus(db, CHECKS).conditions.filter((c) => !c.met)).toEqual([]);
 
     const OK = { confirmation: 'promote gen-001' };
     const after = promoteToProduction(db, host, CHECKS, OK, { verifyNotes: 0 });

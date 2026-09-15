@@ -456,9 +456,10 @@ describe('meta_dictionary — the generation explains itself', () => {
     expect(names).not.toContain('raw_account_position_snapshot.provider_position_id');
     expect(names).not.toContain('raw_account_transaction.symbol');
 
-    // One remains, and it is a genuinely open sourcing question rather than an
-    // unverified field shape: short interest has no confirmed free provider.
-    expect(names).toEqual(['raw_short_interest.short_interest']);
+    // The last one, short interest, was cleared by the 2026-09-14 daily run
+    // (67,386 rows from Polygon). Asserted absent for the same reason as above.
+    expect(names).not.toContain('raw_short_interest.short_interest');
+    expect(names).toEqual([]);
     for (const u of unverified) expect(u.note.length).toBeGreaterThan(20);
   });
 

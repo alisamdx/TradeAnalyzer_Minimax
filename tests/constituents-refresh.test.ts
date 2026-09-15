@@ -136,6 +136,30 @@ describe('ConstituentsService — Vanguard refresh', () => {
     expect(meta[0]?.ticker).toBe('NEW1');
   });
 
+  it('keeps excluded (delisted) tickers out even when the feed still lists them', async () => {
+    // Migration 085 seeds the six tickers delisted in August 2026.
+    expect([...svc.getExcludedTickers()].sort()).toEqual(['AVB', 'EA', 'EQR', 'LBRDA', 'LBRDK', 'WBS']);
+
+    for (const h of makeHoldings(503)) {
+      db.prepare(`INSERT INTO constituents (ticker, index_name) VALUES (?,'sp500')`).run(h.ticker);
+    }
+    // The feed swaps T502 for EA — a dead name a stale source keeps listing.
+    const next = [...makeHoldings(502), { ticker: 'EA', longName: 'Electronic Arts' }];
+    stubVanguardFetch({ VOO: next });
+    const outcome = await svc.refreshIndexAuto('sp500');
+
+    expect(outcome.added).toEqual([]);
+    expect(outcome.removed).toEqual(['T502']);
+    expect(svc.getConstituents('sp500').find((r) => r.ticker === 'EA')).toBeUndefined();
+  });
+
+  it('migration 085 removed excluded tickers already stored', () => {
+    const rows = db
+      .prepare(`SELECT COUNT(*) AS n FROM constituents WHERE ticker IN ('AVB','EA','EQR','LBRDA','LBRDK','WBS')`)
+      .get() as { n: number };
+    expect(rows.n).toBe(0);
+  });
+
   it('falls back to Wikipedia when Vanguard is down', async () => {
     // Vanguard 500s; Wikipedia serves a wikitable with enough rows to clear the floor.
     const rows = makeHoldings(503)

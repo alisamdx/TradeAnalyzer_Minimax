@@ -13,6 +13,20 @@ A background scheduler runs the daily data-maintenance and intelligence jobs tha
 
 IPC: `listJobs`, `listRuns(jobId)`, `runNow(jobId)`, `runNowSync(jobId)`, `cancel(jobId)`, `updateJob(jobId, patch)`, `reorderJobs(jobIds[])`, `setEnabled`, `getEnabled`, `onProgress`, `onNotification`.
 
+**Run log (v1.1.245).** Every finished run is also written to `logs/errors` as `batch-run:<jobId>`: INFO, or ERROR when failed, with status, duration, trigger, slot, counts, note and error. That covers every trigger, orchestrator sub-jobs run through `runJobDirect`, and cancelled runs. `batch_runs` keeps 30 days and can only be read inside the app; the log keeps 90 days as a plain file. A failing logger never breaks a run.
+
+## 20.1a Day diagnostics (v1.1.245)
+
+`GET /api/v1/diagnostics/day?date=YYYY-MM-DD` (default: today ET) answers "what happened on this day" in one call. Service: `day-diagnostics.ts`. It returns:
+
+- `batchRuns`: runs whose start falls on the ET date
+- `errorsLog`: every entry of `errors_<date>.jsonl`
+- `apiLog`: `api_<date>.jsonl` summarised as calls per provider (2xx / HTTP error / no response), calls per provider per ET hour, and failure groups keyed by provider, status, path and the provider's own message, with the symbols involved
+- `collector`: the TradeAnalyzer 2 generation's `meta_run` rows, `qa_quality_report` (verdict, parsed domains, **email status and error**), latest `qa_domain_day_status` per domain, `meta_response` counts and failures, and `qa_exception` counts, each section failing independently
+- `attention`: failed or still-running jobs; expected jobs (`daily-intelligence-brief`, `data-collector`, `collector-watchdog`) missing on a trading day; a non-green gate verdict; an unsent gate email; ERROR log lines; calls with no HTTP response; 401 and 403 responses
+
+The generation is opened through the collector host (write-capable, redirect-guarded) and never while a collector job holds the batch mutex. `scripts/day-report.mjs --date <d> [--json]` renders it to `~/.tradeanalyzer/day-reports/day-<d>.md`. Collector emails (gate status, NO RUN, backfill) log `collector-email:sent` or `collector-email:failed`.
+
 ## 20.2 Live activity panel
 
 While a job runs, `BatchView` streams a per-ticker log between the job table and run history: spinner header, live counters (✓ updated / — skipped / ✗ failed), animated progress bar, and a scrollable monospace ticker log (max ~300 events, auto-scroll, auto-clears 3s after completion). Run History is capped (≈10 rows, internal scroll, sticky header).

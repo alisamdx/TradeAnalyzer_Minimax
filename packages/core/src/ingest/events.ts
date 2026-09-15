@@ -350,9 +350,10 @@ interface PolygonShortInterest {
 }
 
 /**
- * Short interest — **the one §12 domain with no confirmed free source**.
- * Finnhub's endpoint is premium (403, measured 2026-09-06), so this reads
- * Polygon's, whose plan coverage is itself unverified.
+ * Short interest, from Polygon's `/stocks/v1/short-interest`. Finnhub's endpoint
+ * is premium (403, measured 2026-09-06); Polygon's is on the plan — verified live
+ * on 2026-09-14 (67,386 rows, newest settlement 2026-09-14). FINRA's own file
+ * stays the fallback if that ever changes.
  *
  * `days_to_cover` is stored only when the source publishes it and is
  * deliberately never computed here: a derived value belongs in stage 2 where

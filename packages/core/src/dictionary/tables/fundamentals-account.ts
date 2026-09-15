@@ -284,9 +284,9 @@ export const fundamentalsAccountTables: readonly TableEntry[] = [
     layer: 'raw',
     domain: 'sentiment',
     description:
-      'Short interest, published twice monthly by FINRA. **The one §12 domain with no confirmed free ' +
-      'source**: Finnhub\'s endpoint is premium (403, measured 2026-09-06), so this rests on Polygon\'s ' +
-      'short-interest endpoint (plan coverage still unverified) or a direct FINRA file.',
+      'Short interest, published twice monthly by FINRA, read from Polygon\'s short-interest endpoint ' +
+      '(verified live 2026-09-14: 67,386 rows). Finnhub\'s endpoint is premium (403, measured ' +
+      '2026-09-06); a direct FINRA file is the fallback.',
     naturalKey: ['ticker', 'settlement_date', 'source'],
     appendOnly: true,
     ruleDriven: true,
@@ -294,7 +294,7 @@ export const fundamentalsAccountTables: readonly TableEntry[] = [
     columns: [
       col.ident('ticker', 'The ticker symbol.'),
       col.date('settlement_date', 'The settlement date the figure is as of.'),
-      col.int('short_interest', 'Shares held short.', { verify: 'No confirmed free source yet (02 §12) — Polygon plan coverage unverified.' }),
+      col.int('short_interest', 'Shares held short.'),
       nullable(col.int('avg_daily_volume', 'Average daily volume used for days-to-cover.'), 'the source did not publish it'),
       { column: 'days_to_cover', type: 'REAL', unit: 'ratio', nullable: true, nullMeaning: 'the source did not publish it, and it is deliberately not computed here — a derived value belongs in stage 2, where its derivation carries a version', description: 'Days to cover exactly as the source publishes it: short interest over average daily volume.' },
       col.enumOf('source', ['polygon', 'finra', 'finnhub'], 'Which feed supplied the figure.', { sourceProvider: 'collector' })

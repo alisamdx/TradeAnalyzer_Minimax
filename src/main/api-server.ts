@@ -30,6 +30,8 @@ import { registerETradeRoutes } from './api/routes-etrade.js';
 import { registerStrategyLabRoutes } from './api/routes-strategy-lab.js';
 import { registerCriticRoutes } from './api/routes-critic.js';
 import { registerOrchestratorRoutes } from './api/routes-orchestrator.js';
+import { registerDiagnosticsRoutes } from './api/routes-diagnostics.js';
+import type { CollectorDay } from './services/day-diagnostics.js';
 import { secureGet, secureSet } from './services/secure-settings.js';
 
 const DATA_DIR = join(homedir(), '.tradeanalyzer');
@@ -97,6 +99,11 @@ export interface ApiServerServices {
   scoringService: ScoringService;
   batchService: BatchService;
   appVersion: string;
+  /** Day diagnostics (v1.1.245): where the logs live, and a reader for the TA2 generation. */
+  diagnostics?: {
+    logsDir: string;
+    readCollectorDay: (date: string) => CollectorDay | { unavailable: string };
+  };
 }
 
 export class ApiServer {
@@ -141,6 +148,7 @@ export class ApiServer {
       registerStrategyLabRoutes(app, svc);
       registerCriticRoutes(app, svc);
       registerOrchestratorRoutes(app, svc);
+      registerDiagnosticsRoutes(app, svc);
     }, { prefix: '/api/v1' });
   }
 

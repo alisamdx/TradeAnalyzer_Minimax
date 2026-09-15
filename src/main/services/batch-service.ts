@@ -22,6 +22,49 @@ export interface BatchJobResult {
 
 export type RunTrigger = 'startup' | 'schedule' | 'manual';
 
+/**
+ * One finished batch run, handed to the run logger (v1.1.245).
+ *
+ * `batch_runs` keeps 30 days and can only be read inside the app. The run logger
+ * writes the same outcome to `logs/errors` (90 days, a plain file), so "did the
+ * job run, and what did it say" is answerable for any day without the database.
+ */
+export interface BatchRunLogEntry {
+  runId: number;
+  jobId: string;
+  trigger: RunTrigger;
+  slotTime: string | null;
+  startedAt: string;
+  completedAt: string;
+  /** True when the orchestrator ran it as part of its chain. */
+  viaOrchestrator: boolean;
+  status: 'success' | 'failed' | 'skipped' | 'cancelled';
+  result: BatchJobResult | null;
+}
+
+export function formatBatchRunLog(e: BatchRunLogEntry): {
+  level: 'INFO' | 'ERROR';
+  operation: string;
+  message: string;
+} {
+  const seconds = Math.max(0, Math.round((Date.parse(e.completedAt) - Date.parse(e.startedAt)) / 1000));
+  const r = e.result;
+  const parts = [
+    `[batch] ${e.jobId} ${e.status} in ${seconds}s`,
+    `(run #${e.runId}, trigger=${e.trigger}${e.slotTime ? `, slot=${e.slotTime}` : ''}${e.viaOrchestrator ? ', via orchestrator' : ''})`,
+  ];
+  if (r) {
+    parts.push(`attempted=${r.tickersAttempted} updated=${r.tickersUpdated} skipped=${r.tickersSkipped} failed=${r.tickersFailed}`);
+    if (r.notes) parts.push(`notes: ${r.notes}`);
+    if (r.errorMessage) parts.push(`error: ${r.errorMessage}`);
+  }
+  return {
+    level: e.status === 'failed' ? 'ERROR' : 'INFO',
+    operation: `batch-run:${e.jobId}`,
+    message: parts.join(' · '),
+  };
+}
+
 export interface BatchJobHandler {
   name: string;
   description: string;
@@ -99,7 +142,8 @@ export class BatchService {
   constructor(
     private readonly db: DbHandle,
     private readonly onNotification: (n: AppNotification) => void,
-    private readonly onProgress: (evt: BatchProgressEvent) => void
+    private readonly onProgress: (evt: BatchProgressEvent) => void,
+    private readonly onRunLog?: (entry: BatchRunLogEntry) => void
   ) {
     // Clean up any jobs left in 'running' state from a previous crashed/killed session.
     const now = new Date().toISOString();
@@ -341,10 +385,14 @@ export class BatchService {
       this.runningJobId = null;
     }
 
-    if (ac.signal.aborted) return;
+    if (ac.signal.aborted) {
+      this._logRun({ runId, jobId, trigger, slotTime: slotTime ?? null, startedAt, completedAt: new Date().toISOString(), viaOrchestrator: false, status: 'cancelled', result });
+      return;
+    }
 
     const completedAt = new Date().toISOString();
     this._writeRunResult(runId, jobId, completedAt, result);
+    this._logRun({ runId, jobId, trigger, slotTime: slotTime ?? null, startedAt, completedAt, viaOrchestrator: false, status: result.status, result });
 
     const jobRow = this._getJobRow(jobId);
     const jobName = jobRow?.name ?? jobId;
@@ -441,9 +489,14 @@ export class BatchService {
       };
     }
 
+    const completedAt = new Date().toISOString();
     if (!signal.aborted) {
-      this._writeRunResult(runId, jobId, new Date().toISOString(), result);
+      this._writeRunResult(runId, jobId, completedAt, result);
     }
+    this._logRun({
+      runId, jobId, trigger, slotTime, startedAt, completedAt, viaOrchestrator: true,
+      status: signal.aborted ? 'cancelled' : result.status, result,
+    });
 
     return result;
   }
@@ -569,6 +622,16 @@ export class BatchService {
   }
 
   // ── Internal helpers ──────────────────────────────────────────────────────
+
+  /** A logger failure must never be the reason a batch run cannot finish. */
+  private _logRun(entry: BatchRunLogEntry): void {
+    if (!this.onRunLog) return;
+    try {
+      this.onRunLog(entry);
+    } catch {
+      /* ignore */
+    }
+  }
 
   private _writeRunResult(runId: number, jobId: string, completedAt: string, result: BatchJobResult): void {
     this.db.prepare(`

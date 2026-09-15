@@ -25,19 +25,20 @@ audit. State at creation: existing app **v1.1.239**, `core` **0.6.8**, TradeAnal
 5. **Measure the chain phase**: call count, failures, duration (Runs → domains). First
    measurement of 04 §11's pending "expected chain calls/day"; confirms the 120/min E\*Trade
    pace (v1.1.239) holds with no throttling failures and finishes well before 19:15.
-6. **Short interest came back?** `raw_short_interest` row count and newest
-   `settlement_date`. Rows → do #8. Refusal → do #9.
+6. ~~**Short interest came back?** `raw_short_interest` row count and newest
+   `settlement_date`. Rows → do #8. Refusal → do #9.~~ **Done 2026-09-14:** 67,386 rows,
+   newest settlement 2026-09-14.
 7. **19:30 watchdog stays quiet** (no NO-RUN email).
 
 ## B. Short code follow-ups
 
-8. **Short interest verified** (after #6 returns rows): remove `verify` from
+8. ~~**Short interest verified** (after #6 returns rows): remove `verify` from
    `raw_short_interest.short_interest` (clears that pilot-exit blocker); remove the pointless
    `skipped('chain subset is empty')` in `runShortInterest` (the sweep is whole-market); fix
    the stale "plan coverage unverified" comments in `ingest/events.ts` and the dictionary.
-   Package.
-9. **Short interest refused** (after #6): read the actual response. A plan refusal → build the
-   FINRA fallback (decided 2026-09-12, 02 §12).
+   Package.~~ **Done v1.1.245 (core 0.6.9).**
+9. ~~**Short interest refused** (after #6): read the actual response. A plan refusal → build the
+   FINRA fallback (decided 2026-09-12, 02 §12).~~ Not needed — Polygon returned rows.
 10. **Host timestamps in ET**: `ElectronCollectorHost` stamps `requestedAt`/`respondedAt` —
     and therefore raw `observed_at` — with `toISOString()` (UTC). Switch to `etTimestamp()`.
     Consistent within a table today, so nothing orders wrongly; best done early in the pilot.

@@ -189,6 +189,18 @@ export class ConstituentsService {
     }
   }
 
+  /**
+   * Tickers that must never be written into `constituents` — delisted names a source
+   * feed may keep listing for weeks (migration 085). Every writer below consults it,
+   * because `applyRefresh` replaces a whole index and would otherwise restore them.
+   */
+  getExcludedTickers(): Set<string> {
+    const rows = this.db
+      .prepare(`SELECT ticker FROM constituents_excluded`)
+      .all() as Array<{ ticker: string }>;
+    return new Set(rows.map((r) => r.ticker.toUpperCase()));
+  }
+
   /** Current tickers stored for an index (uppercased). */
   getCurrentTickers(index: 'sp500' | 'russell1000' | 'etf'): Set<string> {
     const rows = this.db
@@ -208,11 +220,13 @@ export class ConstituentsService {
     source: 'vanguard' | 'wikipedia',
     opts: { enforceGates: boolean }
   ): ConstituentsRefreshOutcome {
-    // Dedupe by ticker (dual listings can repeat in scraped tables).
+    // Dedupe by ticker (dual listings can repeat in scraped tables), and drop
+    // excluded (delisted) tickers the feed still lists.
+    const excluded = this.getExcludedTickers();
     const byTicker = new Map<string, ConstituentRow>();
     for (const r of rows) {
       const ticker = r.ticker.trim().toUpperCase();
-      if (ticker && !byTicker.has(ticker)) byTicker.set(ticker, { ...r, ticker });
+      if (ticker && !excluded.has(ticker) && !byTicker.has(ticker)) byTicker.set(ticker, { ...r, ticker });
     }
     const fresh = [...byTicker.values()];
 
@@ -327,11 +341,13 @@ export class ConstituentsService {
   bootstrapFromBundled(index: 'sp500' | 'russell1000' | 'etf'): void {
     const rows = this.loadBundled(index);
     if (rows.length === 0) return;
+    const excluded = this.getExcludedTickers();
     const insertStmt = this.db.prepare(
       `INSERT OR IGNORE INTO constituents (ticker, index_name, company_name, sector, added_at)
        VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`
     );
     for (const r of rows) {
+      if (excluded.has(r.ticker.toUpperCase())) continue;
       insertStmt.run(r.ticker, index, r.companyName, r.sector);
     }
     this.db
@@ -346,12 +362,14 @@ export class ConstituentsService {
   importFromCsv(filePath: string, index: 'sp500' | 'russell1000' | 'etf'): number {
     const text = readFileSync(filePath, 'utf8');
     const rows = parseConstituentsCsv(text);
+    const excluded = this.getExcludedTickers();
     const insertStmt = this.db.prepare(
       `INSERT OR REPLACE INTO constituents (ticker, index_name, company_name, sector, added_at)
        VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`
     );
     let count = 0;
     for (const r of rows) {
+      if (excluded.has(r.ticker.toUpperCase())) continue;
       insertStmt.run(r.ticker, index, r.companyName, r.sector);
       count++;
     }

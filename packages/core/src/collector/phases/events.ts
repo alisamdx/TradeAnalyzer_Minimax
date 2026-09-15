@@ -459,7 +459,15 @@ export async function runEdgarFacts(
   return { stored, calls, failed };
 }
 
-/** Short interest — weekly, and the one domain with no confirmed free source. */
+/**
+ * Short interest — weekly, one whole-market sweep from Polygon.
+ *
+ * Verified live on 2026-09-14: the first daily run after the endpoint fix stored
+ * 67,386 rows with a newest settlement date of 2026-09-14. There is no
+ * chain-subset skip here: the sweep asks for every ticker FINRA publishes, so
+ * an empty subset (a fresh generation before 20 bars exist) is no reason to
+ * leave the domain empty.
+ */
 export async function runShortInterest(
   host: CollectorHost,
   db: SqliteLike,
@@ -470,9 +478,7 @@ export async function runShortInterest(
     return skipped(`not due — cadence is ${EVENTS_RULE.shortInterestCadenceDays} days`);
   }
 
-  const ruleId = captureRuleId(db, host, 'short_interest', { cadenceDays: EVENTS_RULE.shortInterestCadenceDays }, 'Short interest for the chain subset, weekly.');
-  const tickers = subsetMembers(db);
-  if (tickers.length === 0) return skipped('chain subset is empty');
+  const ruleId = captureRuleId(db, host, 'short_interest', { cadenceDays: EVENTS_RULE.shortInterestCadenceDays }, 'Short interest, whole-market sweep, weekly.');
 
   // `/stocks/v1/...`, not `vX`. The placeholder shipped unreplaced and Polygon
   // answers it with an 18-byte "404 page not found" — which was then read as
@@ -493,9 +499,7 @@ export async function runShortInterest(
   // asks for, and the one where a cap would be least visible. 50,000 very probably
   // does not bind; it was also very probably true that EDGAR's 1,000-filing cap
   // and Finnhub's 1,500-row calendar did not bind, right up until they did. A cap
-  // that is harmless today is still a cap, and this path has never yet returned a
-  // live 200 — so the first response that clears the short-interest verify note
-  // must not be one we trusted without checking.
+  // that is harmless today is still a cap, so the paging and the cap flag stay.
   const since = addDays(run.tradingDate, -45);
   host.progress('short-interest', 0, 1, 'sweep');
   await sweepPolygonPages(host, {
