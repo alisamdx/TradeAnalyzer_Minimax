@@ -43,6 +43,7 @@ function StatusBadge({ status, small }: { status: string | null; small?: boolean
 
   const colors: Record<string, { bg: string; text: string }> = {
     success:  { bg: '#1a3a1a', text: '#2ecc71' },
+    warning:  { bg: '#3a3010', text: '#f1c40f' },
     failed:   { bg: '#3a1a1a', text: '#e74c3c' },
     skipped:  { bg: '#2a2a2a', text: '#95a5a6' },
     running:  { bg: '#1a2a3a', text: '#3498db' },

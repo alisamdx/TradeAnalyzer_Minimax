@@ -41,6 +41,8 @@ export interface ConstituentsRefreshOutcome {
   total: number;
   added: string[];
   removed: string[];
+  /** The source's own as-of date, when it states one (Vanguard publishes month-end holdings). */
+  asOf?: string | null;
 }
 
 interface VanguardHoldingEntity {
@@ -49,6 +51,7 @@ interface VanguardHoldingEntity {
 }
 interface VanguardHoldingsResponse {
   size?: number;
+  asOfDate?: string;
   fund?: { entity?: VanguardHoldingEntity[] };
 }
 
@@ -164,8 +167,8 @@ export class ConstituentsService {
 
   /** Refresh from Vanguard fund holdings (VOO/VONE) with sanity gates. */
   async refreshFromVanguard(index: 'sp500' | 'russell1000'): Promise<ConstituentsRefreshOutcome> {
-    const rows = await this.fetchVanguardHoldings(VANGUARD_FUND_BY_INDEX[index]);
-    return this.applyRefresh(index, rows, 'vanguard', { enforceGates: true });
+    const { rows, asOf } = await this.fetchVanguardHoldings(VANGUARD_FUND_BY_INDEX[index]);
+    return { ...this.applyRefresh(index, rows, 'vanguard', { enforceGates: true }), asOf };
   }
 
   /**
@@ -299,22 +302,42 @@ export class ConstituentsService {
     return this.parseWikipediaTable(html);
   }
 
-  /** Fetch a Vanguard fund's full stock holdings (paginated public JSON API). */
-  private async fetchVanguardHoldings(fund: string): Promise<ConstituentRow[]> {
-    const base = `https://investor.vanguard.com/investment-products/etfs/profile/api/${fund}/portfolio-holding/stock`;
+  /**
+   * Fetch a Vanguard fund's full stock holdings (paginated public JSON API).
+   *
+   * The API moved in early September 2026 from `/investment-products/etfs/profile/api/…`
+   * to `/vmf/api/…`. The old path kept answering HTTP 200 — with the site's HTML page — so
+   * every refresh from ~2026-09-08 failed on `Unexpected token '<'` while the job reported
+   * success. A non-JSON body is now named as such.
+   *
+   * The holdings are MONTH-END (`asOfDate`, e.g. 2026-07-31 in mid-September), so a
+   * delisting can take six weeks to leave this list — see `constituents_excluded`.
+   */
+  private async fetchVanguardHoldings(fund: string): Promise<{ rows: ConstituentRow[]; asOf: string | null }> {
+    const base = `https://investor.vanguard.com/vmf/api/${fund}/portfolio-holding/stock`;
     const headers = {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) TradeAnalyzer-desktop',
       Accept: 'application/json'
     };
 
     const rows: ConstituentRow[] = [];
+    let asOf: string | null = null;
     let start = 1;
     let size = Number.POSITIVE_INFINITY;
 
     for (let page = 0; page < VANGUARD_MAX_PAGES && start <= size; page++) {
       const res = await fetch(`${base}?start=${start}&count=${VANGUARD_PAGE_SIZE}`, { headers });
       if (!res.ok) throw new Error(`Vanguard holdings fetch failed (${fund}): HTTP ${res.status}`);
-      const json = (await res.json()) as VanguardHoldingsResponse;
+      let json: VanguardHoldingsResponse;
+      try {
+        json = (await res.json()) as VanguardHoldingsResponse;
+      } catch (err) {
+        throw new Error(
+          `Vanguard holdings (${fund}) did not return JSON — the API has probably moved ` +
+          `(${err instanceof Error ? err.message : String(err)})`
+        );
+      }
+      asOf ??= typeof json.asOfDate === 'string' ? json.asOfDate.slice(0, 10) : null;
       size = json.size ?? 0;
       const entities = json.fund?.entity ?? [];
       if (entities.length === 0) break;
@@ -326,7 +349,7 @@ export class ConstituentsService {
       }
       start += VANGUARD_PAGE_SIZE;
     }
-    return rows;
+    return { rows, asOf };
   }
 
   /** Parse constituents from the bundled CSV (one-time setup). */
@@ -389,7 +412,9 @@ export class ConstituentsService {
     // S&P 500: Column 1 = Ticker, Column 2 = Company name
     // Russell 1000: Column 1 = Company name, Column 2 = Ticker
     const tableRegex = /<table[^>]*class="wikitable[^"]*"[^>]*>[\s\S]*?<\/table>/gi;
-    const rowRegex = /<tr>[\s\S]*?<\/tr>/gi;
+    // Rows carry attributes since Wikipedia moved to Parsoid HTML (`<tr id="mwLQ">`); a bare
+    // `<tr>` pattern matched none of the 504 rows, so the fallback parsed 0 from ~2026-09-08.
+    const rowRegex = /<tr(?:\s[^>]*)?>[\s\S]*?<\/tr>/gi;
     const cellRegex = /<t[hd][^>]*>([\s\S]*?)<\/t[hd]>/gi;
 
     const allTables = [...html.matchAll(tableRegex)];

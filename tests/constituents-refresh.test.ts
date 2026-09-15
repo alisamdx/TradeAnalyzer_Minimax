@@ -177,6 +177,48 @@ describe('ConstituentsService — Vanguard refresh', () => {
     expect(outcome.total).toBeGreaterThanOrEqual(480);
   });
 
+  it('parses Parsoid-style Wikipedia rows that carry attributes (<tr id="…">)', async () => {
+    // The live page since ~2026-09-08: every row has an id, and a bare `<tr>` pattern found none.
+    const rows = makeHoldings(503)
+      .map((h, i) => `<tr id="mwR${i}">\n<td id="c${i}a"><a rel="mw:ExtLink nofollow" href="https://www.nyse.com/quote/XNYS:${h.ticker}" class="external text">${h.ticker}</a></td>\n<td id="c${i}b"><a href="x" title="${h.longName}">${h.longName}</a></td>\n<td id="c${i}c">Industrials</td></tr>`)
+      .join('\n');
+    const html = `<table class="wikitable sortable mw-collapsible sticky-header" id="constituents">\n<tbody id="mwIA"><tr id="mwIQ">\n<th id="h1">Symbol</th>\n<th id="h2">Security</th><th id="h3">GICS Sector</th></tr>\n${rows}</tbody></table>`;
+
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('vanguard.com')) return { ok: false, status: 500 } as Response;
+      return { ok: true, text: async () => html } as Response;
+    }));
+
+    const outcome = await svc.refreshIndexAuto('sp500');
+    expect(outcome.source).toBe('wikipedia');
+    expect(outcome.total).toBe(503);
+    expect(svc.getConstituents('sp500').find((r) => r.ticker === 'T0')?.sector).toBe('Industrials');
+  });
+
+  it('calls Vanguard at its moved /vmf/api/ path, and names an HTML answer instead of a JSON parse error', async () => {
+    const urls: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      urls.push(url);
+      if (url.includes('vanguard.com')) {
+        return { ok: true, status: 200, json: async () => { throw new SyntaxError(`Unexpected token '<', "<!doctype "... is not valid JSON`); } } as unknown as Response;
+      }
+      return { ok: false, status: 503 } as Response;
+    }));
+
+    await expect(svc.refreshFromVanguard('sp500')).rejects.toThrow(/did not return JSON — the API has probably moved/);
+    expect(urls[0]).toContain('https://investor.vanguard.com/vmf/api/VOO/portfolio-holding/stock');
+  });
+
+  it("carries Vanguard's month-end as-of date into the outcome", async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      const start = parseInt(new URL(url).searchParams.get('start') ?? '1', 10);
+      const all = makeHoldings(1002, 'R');
+      return { ok: true, json: async () => ({ size: all.length, asOfDate: '2026-07-31T00:00:00-04:00', fund: { entity: all.slice(start - 1, start - 1 + 500) } }) } as Response;
+    }));
+    const outcome = await svc.refreshIndexAuto('russell1000');
+    expect(outcome.asOf).toBe('2026-07-31');
+  });
+
   it('throws only when BOTH sources fail', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 503 }) as Response));
     await expect(svc.refreshIndexAuto('sp500')).rejects.toThrow(/Both constituent sources failed/);
@@ -231,7 +273,7 @@ describe('ConstituentsRefreshJob', () => {
     expect(result.notes).toContain('OLDCO');
   });
 
-  it('returns success (not failed) when a source outage hits both indices — stale list is usable', async () => {
+  it('returns warning (not failed, not success) when a source outage hits both indices — stale list is usable', async () => {
     const svc = stubService({
       sp500:       new Error('Vanguard down'),
       russell1000: new Error('Vanguard down'),
@@ -241,8 +283,8 @@ describe('ConstituentsRefreshJob', () => {
     const result = await job.run(noop, signal);
 
     // The orchestrator halts the nightly chain on a failed sub-job; a stale constituent
-    // list must never do that.
-    expect(result.status).toBe('success');
+    // list must never do that. Nor may it read as green — it did not refresh anything.
+    expect(result.status).toBe('warning');
     expect(result.tickersFailed).toBe(2);
     expect(result.notes).toContain('kept existing list');
     expect(fetchAndStorePricesMock).not.toHaveBeenCalled();

@@ -13,6 +13,14 @@ A background scheduler runs the daily data-maintenance and intelligence jobs tha
 
 IPC: `listJobs`, `listRuns(jobId)`, `runNow(jobId)`, `runNowSync(jobId)`, `cancel(jobId)`, `updateJob(jobId, patch)`, `reorderJobs(jobIds[])`, `setEnabled`, `getEnabled`, `onProgress`, `onNotification`.
 
+**Statuses.** A run ends as `success`, `warning`, `failed`, `skipped` or `cancelled`.
+
+- **`warning`** (v1.1.246): the job completed and the chain continues, but the job did not do what it exists to do. Example: every constituent source failed, so the stored list was kept.
+  - The orchestrator continues past it like a success, and its note counts it ("N succeeded (k with warnings)").
+  - It shows as a yellow badge and raises a warning notification.
+  - It sets `last_success_date`, but is not treated as a recent success by the orchestrator's resume skip.
+- **`failed`** halts the orchestrator chain.
+
 **Run log (v1.1.245).** Every finished run is also written to `logs/errors` as `batch-run:<jobId>`: INFO, or ERROR when failed, with status, duration, trigger, slot, counts, note and error. That covers every trigger, orchestrator sub-jobs run through `runJobDirect`, and cancelled runs. `batch_runs` keeps 30 days and can only be read inside the app; the log keeps 90 days as a plain file. A failing logger never breaks a run.
 
 ## 20.1a Day diagnostics (v1.1.245)
@@ -36,7 +44,7 @@ While a job runs, `BatchView` streams a per-ticker log between the job table and
 | Job id | Handler | Schedule (ET) | Startup | Purpose |
 | --- | --- | --- | --- | --- |
 | `daily-iv-update` | `DailyIvCaptureJob` | — | yes (~30s) | Capture today's ATM IV per ticker into `iv_history` (§11). Connectivity probe **renews-and-retries once on ANY failure** (a dormant token can die as a terminated/hung stream, not a clean 401 — v1.1.92); surfaces a Reconnect CTA only on true midnight hard expiry. |
-| `constituents-refresh` | `ConstituentsRefreshJob` | 16:25 (orchestrator seq 2 — first sub-job) | — | Auto-refresh S&P 500 + Russell 1000 membership from **Vanguard fund holdings** (VOO/VONE public JSON, Wikipedia fallback), both **gated** (row-count floor 480/940; ≤25% turnover) so a broken feed can never wipe a good list; sector/company preserved for carried-over tickers. Diffs membership and **bootstraps 1Y Polygon daily bars for added tickers** with no history (quotes/fundamentals follow via Market Sync the same run; `iv_history` accumulates from daily capture — IV rank appears after 21 trading days — or manual IVolatility backfill). A source outage returns `success` + warning note (stale list is usable; a `failed` sub-job would halt the orchestrator chain). Migration 063 shifted other jobs' `sequence_order` +1. |
+| `constituents-refresh` | `ConstituentsRefreshJob` | 16:25 (orchestrator seq 2 — first sub-job) | — | Auto-refresh S&P 500 + Russell 1000 membership from **Vanguard fund holdings** (VOO/VONE public JSON, Wikipedia fallback), both **gated** (row-count floor 480/940; ≤25% turnover) so a broken feed can never wipe a good list; sector/company preserved for carried-over tickers. Diffs membership and **bootstraps 1Y Polygon daily bars for added tickers** with no history (quotes/fundamentals follow via Market Sync the same run; `iv_history` accumulates from daily capture — IV rank appears after 21 trading days — or manual IVolatility backfill). A source outage for any index returns **`warning`** (v1.1.246; `success` before): the stale list is usable and the chain continues, but the run is not shown green. Vanguard's endpoint is `investor.vanguard.com/vmf/api/{VOO|VONE}/portfolio-holding/stock` (moved ~2026-09; the old path answers HTTP 200 with HTML). It publishes **month-end** holdings, and the note shows the as-of date. The Wikipedia fallback covers S&P 500 only — the Russell 1000 page has no constituents table any more. Migration 063 shifted other jobs' `sequence_order` +1. |
 | `daily-market-sync-stocks` | `MarketSyncJob('both')` | 16:30 | +60s | `syncUniverse('both')` → refresh `quote_cache` + `fundamentals_cache` for S&P 500 + Russell 1000. |
 | `daily-market-sync-etfs` | `MarketSyncJob('etf')` | 16:30 | +90s | Same for the ETF universe (chains after stocks via the mutex). |
 | `daily-screener` | `DailyScreenerJob` | 16:30 | +110s | Two passes (stocks strict, ETFs soft) → `screen_runs` rows for the Screener UI. |

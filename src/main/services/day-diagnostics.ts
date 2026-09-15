@@ -361,6 +361,7 @@ export function buildAttention(r: Omit<DayReport, 'attention' | 'generatedAt'>):
 
   for (const run of r.batchRuns) {
     if (run.status === 'failed') out.push(`Batch job ${run.jobId} FAILED at ${run.startedAt}: ${run.errorMessage ?? run.notes ?? 'no message'}`);
+    if (run.status === 'warning') out.push(`Batch job ${run.jobId} finished with a WARNING at ${run.startedAt}: ${run.notes ?? 'no note'}`);
     if (run.status === 'running') out.push(`Batch job ${run.jobId} is still marked running (started ${run.startedAt}).`);
   }
 

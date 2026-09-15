@@ -1812,7 +1812,7 @@ export interface BatchJob {
   dailyScheduleEnabled: boolean;
   dailyScheduleTime: string;   // 'HH:MM' ET
   lastRunAt: string | null;
-  lastRunStatus: 'running' | 'success' | 'failed' | 'skipped' | null;
+  lastRunStatus: 'running' | 'success' | 'warning' | 'failed' | 'skipped' | null;
   lastSuccessDate: string | null;
   sequenceOrder: number;
   /** Runs only in the after-close (full) batch slot — skipped by the lean intraday slot because it
@@ -1827,7 +1827,7 @@ export interface BatchRun {
   jobId: string;
   startedAt: string;
   completedAt: string | null;
-  status: 'running' | 'success' | 'failed' | 'skipped' | 'cancelled';
+  status: 'running' | 'success' | 'warning' | 'failed' | 'skipped' | 'cancelled';
   tickersAttempted: number;
   tickersUpdated: number;
   tickersSkipped: number;

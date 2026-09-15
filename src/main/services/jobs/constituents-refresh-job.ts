@@ -64,6 +64,7 @@ export class ConstituentsRefreshJob implements BatchJobHandler {
         for (const t of outcome.added) allAdded.add(t);
         noteParts.push(
           `${index}: ${outcome.total} via ${outcome.source}` +
+          (outcome.asOf ? ` (holdings as of ${outcome.asOf})` : '') +
           (outcome.added.length || outcome.removed.length
             ? ` (+${outcome.added.length}${outcome.added.length ? ` [${outcome.added.join(', ')}]` : ''}` +
               ` / −${outcome.removed.length}${outcome.removed.length ? ` [${outcome.removed.join(', ')}]` : ''})`
@@ -140,10 +141,12 @@ export class ConstituentsRefreshJob implements BatchJobHandler {
       };
     }
 
-    // Both sources down for both indices → the stored lists are untouched and still
-    // usable; surface as success-with-warning so the orchestrator chain continues.
+    // A refresh that failed for any index leaves that stored list untouched and still
+    // usable, so the chain must continue — but it is NOT a success. Reported as 'warning'
+    // (v1.1.246): from ~2026-09-08 both sources failed every run for a week while the
+    // Batch view showed green.
     return {
-      status: 'success',
+      status: refreshFailures > 0 ? 'warning' : 'success',
       notes: noteParts.join(' · '),
       tickersAttempted: attempted,
       tickersUpdated:   updated,

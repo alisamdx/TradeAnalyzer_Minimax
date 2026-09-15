@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.246] - 2026-09-15
+
+### Constituents refresh repaired, a "warning" batch status, universe seed reports closures
+
+**Why.** The first `day-report` run showed `constituents-refresh` had failed on both sources in every run since about 2026-09-08 while showing green `success`. The universe seed that removed the six delisted tickers also read as though it had done nothing, because its note never counted closed memberships.
+
+- **Vanguard holdings API moved** from `/investment-products/etfs/profile/api/…`, which now returns the site's HTML page with HTTP 200, to `/vmf/api/…`. The response shape is unchanged. A non-JSON body now fails as *"did not return JSON — the API has probably moved"* rather than a bare `Unexpected token '<'`. Vanguard publishes **month-end** holdings (as of 2026-07-31 in mid-September), which is how names delisted in August stayed listed. The refresh note now shows that date.
+- **Wikipedia fallback parser fixed.** Rows are now `<tr id="…">` (Parsoid HTML), and the parser matched only a bare `<tr>`, so all 504 S&P 500 rows were skipped. The S&P page is current: EA and WBS are gone, VMRK is in. **The Russell 1000 Wikipedia page no longer has a constituents table**, so Russell 1000 has no working fallback; if Vanguard fails, the stored list is kept.
+- **New batch status `warning`:** the job finished and the chain continues, but it did not do its job. The constituents refresh returns it when any index could not be refreshed. It shows as a yellow badge in the Batch view, raises a warning notification, logs at WARNING, appears in the day report's attention list, and the orchestrator counts it ("16 succeeded (1 with warnings)"). Before this, such runs were indistinguishable from real successes.
+- **The `universe_seed` note now counts memberships closed**, and names any list that failed. Previously: "1083 tickers, 0 memberships opened, 0 reference rows".
+
+Tests: `tests/constituents-refresh.test.ts`, `tests/batch-run-log.test.ts`, `tests/batch-orchestrator-warning.test.ts`.
+
 ## [1.1.245] - 2026-09-15
 
 ### Day diagnostics, delisted tickers removed, short interest verified

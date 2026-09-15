@@ -331,9 +331,14 @@ export function createCollectorOneShotJob(deps: OneShotDeps): BatchJobHandler {
           return {
             status: 'success',
             notes:
+              // `closed` is the half that answers "did a removed ticker leave" — it was
+              // missing, so a seed that closed six memberships read as one that did nothing.
               `universe_seed: ${report.distinctTickers} tickers, ` +
               `${report.membershipsOpened} memberships opened, ` +
-              `${report.referenceFetched} reference rows.`,
+              `${report.membershipsClosed} closed, ` +
+              `${report.referenceFetched} reference rows` +
+              (report.listsFailed.length > 0 ? `; lists FAILED: ${report.listsFailed.join('; ')}` : '') +
+              '.',
             tickersAttempted: report.distinctTickers,
             tickersUpdated: report.referenceFetched,
             tickersSkipped: 0,

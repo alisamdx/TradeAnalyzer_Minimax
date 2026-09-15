@@ -9,7 +9,12 @@ import type { BatchJob, BatchRun, AppNotification, BatchProgressEvent, Orchestra
 // ─── Job handler interface ────────────────────────────────────────────────────
 
 export interface BatchJobResult {
-  status: 'success' | 'failed' | 'skipped';
+  /**
+   * `warning` (v1.1.246): the job finished and the chain continues, but it did not do
+   * what it exists to do (e.g. both constituent sources failed and the stored list was
+   * kept). Before it existed such runs reported `success` and showed green.
+   */
+  status: 'success' | 'warning' | 'failed' | 'skipped';
   notes?: string;
   errorMessage?: string;
   tickersAttempted: number;
@@ -38,12 +43,12 @@ export interface BatchRunLogEntry {
   completedAt: string;
   /** True when the orchestrator ran it as part of its chain. */
   viaOrchestrator: boolean;
-  status: 'success' | 'failed' | 'skipped' | 'cancelled';
+  status: 'success' | 'warning' | 'failed' | 'skipped' | 'cancelled';
   result: BatchJobResult | null;
 }
 
 export function formatBatchRunLog(e: BatchRunLogEntry): {
-  level: 'INFO' | 'ERROR';
+  level: 'INFO' | 'WARNING' | 'ERROR';
   operation: string;
   message: string;
 } {
@@ -59,7 +64,7 @@ export function formatBatchRunLog(e: BatchRunLogEntry): {
     if (r.errorMessage) parts.push(`error: ${r.errorMessage}`);
   }
   return {
-    level: e.status === 'failed' ? 'ERROR' : 'INFO',
+    level: e.status === 'failed' ? 'ERROR' : e.status === 'warning' ? 'WARNING' : 'INFO',
     operation: `batch-run:${e.jobId}`,
     message: parts.join(' · '),
   };
@@ -405,6 +410,13 @@ export class BatchService {
         message: `${jobName}: ${result.tickersUpdated} updated, ${result.tickersSkipped} skipped.`,
         cta: { label: 'View Batch', view: 'batch' },
       });
+    } else if (result.status === 'warning') {
+      this.onNotification({
+        id: `batch-warn-${runId}`,
+        type: 'warning',
+        message: `${jobName} finished with a warning: ${result.notes ?? 'see run history'}`,
+        cta: { label: 'View Batch', view: 'batch' },
+      });
     } else if (result.status === 'failed') {
       this.onNotification({
         id: `batch-fail-${runId}`,
@@ -654,7 +666,8 @@ export class BatchService {
     );
 
     const today = this.todayET();
-    const lastSuccessDate = (result.status === 'success' || result.status === 'skipped') ? today : null;
+    // A warning run still ran today; "last success" dates the last completed run, not a green one.
+    const lastSuccessDate = (result.status === 'success' || result.status === 'warning' || result.status === 'skipped') ? today : null;
     this.db.prepare(`
       UPDATE batch_jobs
       SET last_run_at = ?, last_run_status = ?, last_success_date = COALESCE(?, last_success_date)
@@ -682,7 +695,7 @@ export class BatchService {
       dailyScheduleEnabled: row.daily_schedule_enabled === 1,
       dailyScheduleTime: row.daily_schedule_time,
       lastRunAt: row.last_run_at,
-      lastRunStatus: (status === 'running' || status === 'success' || status === 'failed' || status === 'skipped') ? status : null,
+      lastRunStatus: (status === 'running' || status === 'success' || status === 'warning' || status === 'failed' || status === 'skipped') ? status : null,
       lastSuccessDate: row.last_success_date,
       sequenceOrder: row.sequence_order,
       afterCloseOnly: row.after_close_only === 1,
@@ -700,7 +713,7 @@ export class BatchService {
       jobId: row.job_id,
       startedAt: row.started_at,
       completedAt: row.completed_at,
-      status: (['running', 'success', 'failed', 'skipped', 'cancelled'] as const).includes(status)
+      status: (['running', 'success', 'warning', 'failed', 'skipped', 'cancelled'] as const).includes(status)
         ? status
         : 'failed',
       tickersAttempted: row.tickers_attempted,

@@ -74,6 +74,17 @@ describe('the batch run log', () => {
     expect(formatBatchRunLog(entries[0]!).message).toContain('via orchestrator');
   });
 
+  it('keeps a warning run as warning — stored, logged at WARNING, and not shown as success', async () => {
+    const { batch, entries } = setup();
+    batch.registerJob('refresh', { name: 'refresh', description: 'd', run: async () => result({ status: 'warning', notes: 'both sources failed — kept existing list' }) });
+
+    await batch.runJob('refresh', 'schedule', false, '17:00');
+
+    expect(batch.getLastRun('refresh')?.status).toBe('warning');
+    expect(batch.getJobs().find((j) => j.id === 'refresh')?.lastRunStatus).toBe('warning');
+    expect(formatBatchRunLog(entries[0]!).level).toBe('WARNING');
+  });
+
   it('never lets a throwing logger break the run', async () => {
     const db = openDatabase(':memory:');
     runMigrations(db, MIGRATIONS_DIR);

@@ -112,6 +112,7 @@ export class BatchOrchestratorJob implements BatchJobHandler {
     // ── 6. Job loop ─────────────────────────────────────────────────────────
     let succeeded = 0;
     let skipped   = 0;
+    let warnings  = 0;
 
     for (let i = 0; i < enabledJobs.length; i++) {
       if (signal.aborted) break;
@@ -132,8 +133,11 @@ export class BatchOrchestratorJob implements BatchJobHandler {
 
       const result = await this.batchService.runJobDirect(job.id, trigger, slotTime, signal, force);
 
-      if (result.status === 'success' || result.status === 'skipped') {
+      // A warning continues the chain like a success (the job completed with a usable
+      // fallback) but is counted separately so the orchestrator's own note shows it.
+      if (result.status === 'success' || result.status === 'skipped' || result.status === 'warning') {
         succeeded++;
+        if (result.status === 'warning') warnings++;
         onProgress(this._evt(job.id, 'updated', i + 1, succeeded, skipped, 0, total,
           `${stepLabel} ${job.name} — ${result.status}${result.notes ? ` (${result.notes})` : ''}`));
       } else {
@@ -152,7 +156,7 @@ export class BatchOrchestratorJob implements BatchJobHandler {
 
     return {
       status: 'success',
-      notes: `${succeeded} succeeded · ${skipped} skipped`,
+      notes: `${succeeded} succeeded${warnings > 0 ? ` (${warnings} with warnings)` : ''} · ${skipped} skipped`,
       tickersAttempted: total,
       tickersUpdated: succeeded,
       tickersSkipped: skipped,
