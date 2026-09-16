@@ -185,6 +185,76 @@ try {
   section('H6b — open interest', bucketTable(measured, (m) =>
     m.open_interest == null ? 'null' : m.open_interest === 0 ? 'a 0' : m.open_interest < 100 ? 'b 1-99' : m.open_interest < 1000 ? 'c 100-999' : 'd 1000+'));
 
+  // ── H7 which spot did E*Trade price with? ─────────────────────────────────
+  // Run 1 showed the implied spot is tight WITHIN a ticker (median range 0.2 %)
+  // but ~1 % off nearPrice across tickers, and some tickers breach on nearly every
+  // contract (LEN 111/112). That is a per-ticker spot offset. nearPrice is read at
+  // collection time (18:05-18:47 ET, after hours); the option quotes and Greeks are
+  // stamped 15:55-16:15. So compare both against the regular-session close.
+  const eodCounts = db
+    .prepare(`SELECT as_of_date, COUNT(*) AS n, SUM(last IS NOT NULL) AS with_last FROM raw_eod_quote
+              WHERE as_of_date >= date(?, '-5 days') GROUP BY as_of_date ORDER BY as_of_date`)
+    .all(date);
+  console.log('## raw_eod_quote coverage (H2 found n=0 against it)\n');
+  console.log(eodCounts.length
+    ? eodCounts.map((r) => `  ${r.as_of_date}  rows ${r.n}  with last ${r.with_last}`).join('\n')
+    : '  no rows in the last 5 days');
+  console.log('');
+  const divRange = db.prepare('SELECT COUNT(*) AS n, MIN(ex_dividend_date) AS lo, MAX(ex_dividend_date) AS hi FROM raw_dividend').get();
+  console.log('## raw_dividend coverage (H5 found no ex-date in any option life)\n');
+  console.log(`  rows ${divRange.n}, ex-dates ${divRange.lo} .. ${divRange.hi}\n`);
+
+  const closeOf = new Map(
+    db.prepare(
+      // Latest observation of the session bar; SQLite returns the bare columns of the MAX() row.
+      `SELECT ticker, close, MAX(observed_at) AS latest FROM raw_daily_bar WHERE trade_date = ? GROUP BY ticker`
+    ).all(date).map((r) => [r.ticker, r.close])
+  );
+  // Implied spot on EVERY unsaturated contract, not only breaches: a saturated
+  // delta (0/1) is flat in spot, so its implied spot is arbitrary — run 1's
+  // AMG call and put at one strike implied 514 and 408.
+  const solveSpot = (m) => {
+    if (Math.abs(m.delta) < 0.05 || Math.abs(m.delta) > 0.95) return null;
+    let lo = m.underlying_price * 0.5, hi = m.underlying_price * 1.5;
+    const f = (x) => bsDelta({ spot: x, strike: m.strike, dteDays: m.dteDays, iv: m.iv, rate: rate.yield, right: m.right }) - m.delta;
+    if (f(lo) > 0 || f(hi) < 0) return null;
+    for (let i = 0; i < 50; i++) { const mid = (lo + hi) / 2; if (f(mid) > 0) hi = mid; else lo = mid; }
+    return (lo + hi) / 2;
+  };
+  const tickers = [];
+  for (const [t, xs] of groupBy(measured, (m) => m.ticker)) {
+    const close = closeOf.get(t);
+    if (!close) continue;
+    const imp = xs.map(solveSpot).filter((v) => v !== null);
+    if (imp.length < 5) continue;
+    tickers.push({
+      t, n: xs.length, rate: xs.filter(breach).length / xs.length, close,
+      near: median(xs.map((m) => m.underlying_price)), implied: median(imp)
+    });
+  }
+  const pctOff = (a, b) => (a / b - 1) * 100;
+  console.log('## H7 — nearPrice, implied spot and the session close, per ticker\n');
+  console.log(`tickers with a close and >=5 solvable contracts: ${tickers.length} (closes found for ${closeOf.size})`);
+  console.log(`nearPrice vs close, %      — ${quantiles(tickers.map((x) => pctOff(x.near, x.close)))}`);
+  console.log(`implied spot vs close, %   — ${quantiles(tickers.map((x) => pctOff(x.implied, x.close)))}`);
+  console.log(`implied spot vs nearPrice, % — ${quantiles(tickers.map((x) => pctOff(x.implied, x.near)))}\n`);
+  const bucketBy = (label, fn) => {
+    const g = groupBy(tickers, (x) => { const v = Math.abs(fn(x)); return v < 0.1 ? 'a <0.1%' : v < 0.25 ? 'b 0.1-0.25%' : v < 0.5 ? 'c 0.25-0.5%' : v < 1 ? 'd 0.5-1%' : v < 3 ? 'e 1-3%' : 'f 3%+'; });
+    console.log(`breach rate by |${label}|:`);
+    for (const [k, v] of [...g].sort((a, b) => a[0].localeCompare(b[0]))) {
+      const n = v.reduce((a, x) => a + x.n, 0), b = v.reduce((a, x) => a + x.rate * x.n, 0);
+      console.log(`  ${k.padEnd(12)} tickers ${String(v.length).padStart(4)}  contracts ${String(n).padStart(6)}  breach ${pct(b, n).padStart(6)}`);
+    }
+    console.log('');
+  };
+  bucketBy('nearPrice − close', (x) => pctOff(x.near, x.close));
+  bucketBy('implied − close', (x) => pctOff(x.implied, x.close));
+  console.log('top 15 tickers by breach rate (n >= 20):');
+  for (const x of tickers.filter((x) => x.n >= 20).sort((a, b) => b.rate - a.rate).slice(0, 15)) {
+    console.log(`  ${x.t.padEnd(6)} breach ${(x.rate * 100).toFixed(0).padStart(3)}% of ${String(x.n).padStart(4)}  close ${x.close}  near ${x.near} (${pctOff(x.near, x.close).toFixed(2)}%)  implied ${x.implied.toFixed(2)} (${pctOff(x.implied, x.close).toFixed(2)}%)`);
+  }
+  console.log('');
+
   section('concentration — top 10 tickers by breaches', (() => {
     const g = [...groupBy(measured.filter(breach), (m) => m.ticker)].sort((a, b) => b[1].length - a[1].length).slice(0, 10);
     return g.map(([t, xs]) => `  ${t.padEnd(8)} ${xs.length} of ${measured.filter((m) => m.ticker === t).length}`).join('\n');
