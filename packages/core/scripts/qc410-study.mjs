@@ -255,6 +255,68 @@ try {
   }
   console.log('');
 
+  // ── H8 are the Greeks stale, or are the prices? ───────────────────────────
+  // Run 2: nearPrice equals the session close exactly, and the breach rate is a
+  // function of how far E*Trade's delta-implied spot sits from that close (1.4 %
+  // under 0.25 % off, 94 % over 3 % off). PCTY's Greeks imply 113.58 against a
+  // 147.32 close. Two readings: E*Trade's Greeks were computed off a stale
+  // underlying, or the option prices themselves are off. Put-call parity on the
+  // quoted mids gives the spot the PRICES imply, independent of any Greek, and
+  // the ticker's recent closes say whether the delta-implied spot is a price the
+  // stock actually traded at on an earlier day.
+  const barsBefore = db.prepare(
+    `SELECT trade_date, close, low, high, MAX(observed_at) AS latest FROM raw_daily_bar
+      WHERE ticker = ? AND trade_date <= ? AND trade_date >= date(?, '-45 days')
+      GROUP BY trade_date ORDER BY trade_date DESC`
+  );
+  const paritySpot = (xs) => {
+    const spots = [];
+    for (const g of groupBy(xs, (m) => `${m.expiration_date}|${m.strike}`).values()) {
+      const c = g.find((m) => m.right === 'call'), p = g.find((m) => m.right === 'put');
+      if (!c || !p || c.dteDays < 1) continue;
+      const ok = (m) => m.bid > 0 && m.ask > m.bid && (m.ask - m.bid) / ((m.ask + m.bid) / 2) <= 0.5;
+      if (!ok(c) || !ok(p)) continue;
+      const t = c.dteDays / 365;
+      spots.push((c.bid + c.ask) / 2 - (p.bid + p.ask) / 2 + c.strike * Math.exp(-rate.yield * t));
+    }
+    return spots.length >= 3 ? median(spots) : null;
+  };
+  const withParity = tickers.map((x) => ({ ...x, parity: paritySpot(measured.filter((m) => m.ticker === x.t)) }))
+    .filter((x) => x.parity !== null);
+  console.log('## H8 — stale Greeks or stale prices?\n');
+  console.log(`tickers with >=3 usable call/put pairs: ${withParity.length}`);
+  console.log(`parity spot (from quoted mids) vs close, %  — ${quantiles(withParity.map((x) => pctOff(x.parity, x.close)))}`);
+  const far = withParity.filter((x) => Math.abs(pctOff(x.implied, x.close)) >= 1);
+  console.log(`  ... only tickers whose delta-implied spot is >=1% off the close (${far.length}) — ${quantiles(far.map((x) => pctOff(x.parity, x.close)))}`);
+  console.log(`delta-implied spot vs parity spot, % (same tickers) — ${quantiles(far.map((x) => pctOff(x.implied, x.parity)))}\n`);
+
+  // For each far-off ticker: the most recent earlier session whose close (or
+  // intraday range) contains the delta-implied spot. A consistent lag across
+  // tickers means E*Trade's Greek engine runs on an old underlying price.
+  const lags = [];
+  console.log('tickers whose delta-implied spot is >=1% off the close (worst 25):');
+  console.log('  ticker  close      implied    parity     today low-high        nearest earlier close           sessions back');
+  for (const x of [...far].sort((a, b) => Math.abs(pctOff(b.implied, b.close)) - Math.abs(pctOff(a.implied, a.close))).slice(0, 25)) {
+    const bars = barsBefore.all(x.t, date, date);
+    const today = bars[0]?.trade_date === date ? bars[0] : null;
+    let best = null;
+    bars.forEach((b, i) => {
+      if (i === 0) return;
+      const off = Math.abs(pctOff(x.implied, b.close));
+      if (!best || off < best.off) best = { date: b.trade_date, close: b.close, off, back: i };
+    });
+    const inToday = today && x.implied >= today.low && x.implied <= today.high;
+    if (best && best.off < 1) lags.push(best.back);
+    console.log(
+      `  ${x.t.padEnd(7)} ${String(x.close).padEnd(10)} ${x.implied.toFixed(2).padEnd(10)} ${x.parity.toFixed(2).padEnd(10)} ` +
+      `${today ? `${today.low}-${today.high}${inToday ? ' (inside)' : ''}` : '—'}`.padEnd(22) +
+      `${best ? `${best.date} ${best.close} (${best.off.toFixed(2)}% away)` : '—'}`.padEnd(32) +
+      `${best ? best.back : '—'}`
+    );
+  }
+  const lagCounts = [...groupBy(lags, (v) => v)].sort((a, b) => a[0] - b[0]).map(([k, v]) => `${k} back: ${v.length}`);
+  console.log(`\nmatched an earlier close within 1%: ${lags.length} of ${Math.min(far.length, 25)} — ${lagCounts.join(', ') || 'none'}\n`);
+
   section('concentration — top 10 tickers by breaches', (() => {
     const g = [...groupBy(measured.filter(breach), (m) => m.ticker)].sort((a, b) => b[1].length - a[1].length).slice(0, 10);
     return g.map(([t, xs]) => `  ${t.padEnd(8)} ${xs.length} of ${measured.filter((m) => m.ticker === t).length}`).join('\n');
