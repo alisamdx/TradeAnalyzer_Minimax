@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.251] - 2026-09-16
+
+### Two gate checks fixed: QC-604 never ran, QC-404 flagged correct put quotes
+
+- **QC-604** queried `ref_trading_day.trade_date`; the column is `date`. It threw on every run, and a throwing check is recorded as one blocking finding, so it had never evaluated a report date. It now reads the calendar and will produce real warnings (E*Trade's UTC-Saturday dates). Regression test runs against the real dictionary schema and calendar seeder.
+- **QC-404** bounded every ask by `3 × underlying`, which is only a call's ceiling. A put is worth at most its strike: BMNR at $22.81, $95 put ask $73.45 (intrinsic $72.19), and 476 correct quotes like it were blocking. The bound is now the underlying for calls and the strike for puts.
+- `core` 0.6.12. Details: `changelogs/v1.1.251_2026-09-16.md`.
+
 ## [1.1.250] - 2026-09-15
 
 ### The build now builds packages/core, and refuses to ship if it didn't

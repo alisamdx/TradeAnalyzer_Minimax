@@ -33,6 +33,8 @@ import {
 import { runEarningsSweep, runShortInterest, runTreasuryYields } from '../src/collector/phases/events.js';
 import { runGate } from '../src/qa/gate.js';
 import { EARNINGS_FUNDAMENTALS_CHECKS, MACRO_CHECKS } from '../src/qa/registry.js';
+import { QC604_EARNINGS_WEEKEND_DATE } from '../src/qa/checks/earnings-fundamentals.js';
+import { ensureTradingCalendar } from '../src/collector/trading-calendar.js';
 
 /**
  * B7a — phase 8, the event and macro domains.
@@ -768,6 +770,27 @@ function insertEarnings(rows: readonly {
     stmt.run(fixtureRun.runId, DATE, r.observedAt, rule, fixtureResponseId(), r.ticker, r.date, r.source ?? 'finnhub');
   }
 }
+
+describe('QC-604, report dates on non-trading days', () => {
+  // Threw `no such column: trade_date` on every run until v1.1.251 — the calendar's
+  // column is `date` — and a check that throws is recorded as a blocking finding,
+  // so it never once evaluated. This runs against the real dictionary schema and
+  // the real calendar seeder, which is what would have caught it.
+  it('runs against the seeded calendar and flags a weekend and a holiday, not a session', () => {
+    ensureTradingCalendar(db(), makeHost(), DATE);
+    insertEarnings([
+      { ticker: 'AAA', date: '2026-09-17', observedAt: OBSERVED }, // Thursday session
+      { ticker: 'BBB', date: '2026-09-19', observedAt: OBSERVED }, // Saturday (the UTC artefact)
+      { ticker: 'CCC', date: '2026-11-26', observedAt: OBSERVED }  // Thanksgiving — only the calendar knows
+    ]);
+    const evals = QC604_EARNINGS_WEEKEND_DATE.run({ db: db(), runId: fixtureRun.runId, tradingDate: DATE, observedAt: OBSERVED });
+    expect(evals).toHaveLength(1);
+    expect(evals[0]!.fired).toBe(true);
+    expect(evals[0]!.value).toBeCloseTo(2 / 3);
+    const sample = (evals[0]!.evidence as { sample: string[] }).sample;
+    expect(sample.map((x) => x.split(' ')[0]).sort()).toEqual(['BBB', 'CCC']);
+  });
+});
 
 describe('QC-601, the earnings truncation signature', () => {
   it('fires when a date slips more than 14 days later', () => {

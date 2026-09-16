@@ -197,13 +197,13 @@ export const QC604_EARNINGS_WEEKEND_DATE: CheckDefinition = {
     // single time base is the fallback, never a mix of the two.
     const known = new Set(
       (
-        ctx.db.prepare('SELECT trade_date FROM ref_trading_day WHERE is_trading_day = 1').all() as {
-          trade_date: string;
+        ctx.db.prepare('SELECT date FROM ref_trading_day WHERE is_trading_day = 1').all() as {
+          date: string;
         }[]
-      ).map((r) => r.trade_date)
+      ).map((r) => r.date)
     );
     const calendarMax = ctx.db
-      .prepare('SELECT MAX(trade_date) AS m FROM ref_trading_day')
+      .prepare('SELECT MAX(date) AS m FROM ref_trading_day')
       .get() as { m: string | null } | undefined;
 
     const offenders: typeof rows = [];

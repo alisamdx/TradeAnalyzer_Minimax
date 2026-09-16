@@ -116,7 +116,7 @@ A ‡ value still gets its distribution recorded like any other (§4) — measur
 | QC-401 chain-subset coverage | blocking if missing > 2 % † | subset tickers with no expirations row this run | R2 re-fetch ticker |
 | QC-402 expiration coverage | blocking | an expiration inside the capture window has no chain call, or a chain call returned zero contracts for an expiration E*Trade lists | R1 retry expiration |
 | QC-403 parse-count equality | blocking | stored contracts for a response ≠ contracts parsed from it (AC-5) | none |
-| QC-404 bid/ask sanity | warning | `bid > ask`, or `ask > 3 × underlying_price` | none (mark `invalid`) |
+| QC-404 bid/ask sanity | warning | `bid > ask`, or `ask > 3 ×` the contract's maximum value — `underlying_price` for a call, `strike` for a put (a deep ITM put on a collapsed underlying legitimately asks many times the share price; the underlying-only bound fired on 476 correct quotes, v1.1.251) | none (mark `invalid`) |
 | QC-405 IV range | warning | `iv` outside (0, 5] stored as `invalid`; blocking if > 10 % of contracts in a run | none |
 | QC-406 ladder integrity | warning | strikes for an (expiration, right) not strictly increasing, or a strike appears once as call and not as put | none |
 | QC-407 underlying disagreement | warning | \|`underlying_price` − `raw_eod_quote.last`\| / last > 1 % † | none |

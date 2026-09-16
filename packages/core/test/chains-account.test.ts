@@ -43,6 +43,7 @@ import {
 import { runGate } from '../src/qa/gate.js';
 import { CHAIN_CHECKS, ACCOUNT_CHECKS } from '../src/qa/registry.js';
 import { bsDelta } from '../src/qa/black-scholes.js';
+import { QC404_BID_ASK_SANITY } from '../src/qa/checks/chains.js';
 
 /**
  * B6 — the chain and account domains.
@@ -109,6 +110,8 @@ function chainBody(opts: {
     lastPrice?: number;
     bid?: number;
     ask?: number;
+    putBid?: number;
+    putAsk?: number;
   }[];
 }): string {
   return JSON.stringify({
@@ -131,8 +134,8 @@ function chainBody(opts: {
         Put: {
           osiKey: `SPY---260918P00${String(Math.round(p.strike)).padStart(5, '0')}`,
           strikePrice: p.strike,
-          bid: 1,
-          ask: 1.1,
+          bid: p.putBid ?? 1,
+          ask: p.putAsk ?? 1.1,
           volume: 5,
           openInterest: 10,
           inTheMoney: 'n',
@@ -1051,6 +1054,45 @@ describe('the chain and account checks', () => {
       .prepare("SELECT check_id FROM qa_exception WHERE check_id = 'QC-801'")
       .get() as { check_id: string } | undefined;
     expect(ex?.check_id).toBe('QC-801');
+  });
+
+  /**
+   * QC-404 bounded every ask by the underlying, which is only a call's ceiling —
+   * a put is worth at most its strike. Live 2026-09-16: BMNR at 22.81, the $95
+   * put asked 73.45 (intrinsic 72.19, so a correct quote) and 476 like it blocked
+   * the gate.
+   */
+  function captureChain(run: RunHandle, nearPrice: number, pairs: Parameters<typeof chainBody>[0]['pairs']) {
+    const result = captureResponse({
+      host: makeHost(), db: db(), runId: run.runId, asOfDate: DATE, provider: 'etrade',
+      endpoint: '/v1/market/optionchains', slug: 'chain', params: { symbol: 'SPY' },
+      response: response(chainBody({ nearPrice, pairs })),
+      captureRuleId: captureRuleId(db(), makeHost(), 'chains', { v: 1 }, 'test'),
+      recipe: recipes.chain({ ticker: 'SPY', expirationDate: '2026-09-18' })
+    });
+    expect(result.parseStatus).toBe('ok');
+  }
+
+  function qc404Fired(run: RunHandle): string[] {
+    const evals = QC404_BID_ASK_SANITY.run({ db: db(), runId: run.runId, tradingDate: DATE, observedAt: 't' });
+    expect(evals.length).toBeGreaterThan(0);
+    return evals.filter((e) => e.fired).map((e) => e.key).sort();
+  }
+
+  it('QC-404 does not fire on a deep in-the-money put whose ask exceeds 3x the underlying', () => {
+    const run = newRun();
+    // Call asks are sane; the put asks 3.22x the underlying and 0.77x its strike.
+    captureChain(run, 22.81, [{ strike: 95, bid: 0.01, ask: 0.05, putBid: 72.5, putAsk: 73.45 }]);
+    expect(qc404Fired(run)).toEqual([]);
+  });
+
+  it('QC-404 still fires on a put asking more than 3x its strike, and on a call above 3x the underlying', () => {
+    const run = newRun();
+    captureChain(run, 22.81, [
+      { strike: 5, bid: 17, ask: 18, putBid: 15, putAsk: 16 },   // put ask 3.2x its strike
+      { strike: 10, bid: 70, ask: 80, putBid: 0.01, putAsk: 0.05 } // call ask 3.5x the underlying
+    ]);
+    expect(qc404Fired(run)).toEqual(['SPY---260918C0000010', 'SPY---260918P0000005']);
   });
 
   it('QC-410 skips rather than fails when no 3-month yield is stored', () => {

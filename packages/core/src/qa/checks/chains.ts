@@ -132,38 +132,49 @@ export const QC404_BID_ASK_SANITY: CheckDefinition = {
   domain: 'chains',
   severity: 'warning',
   description:
-    'A quoted contract has bid <= ask and an ask no larger than three times the underlying. The ' +
-    'spread, not the last trade, is what a position actually costs, so a crossed or absurd quote is ' +
-    'worth seeing before anything prices against it.',
+    'A quoted contract has bid <= ask and an ask no larger than three times the most the contract ' +
+    'can be worth: the underlying for a call, the strike for a put. The spread, not the last trade, ' +
+    'is what a position actually costs, so a crossed or absurd quote is worth seeing before anything ' +
+    'prices against it. The bound depends on the right — a deep in-the-money put is worth nearly its ' +
+    'strike, so on a collapsed underlying its ask is legitimately many times the share price (BMNR ' +
+    '$95 put at $73.45 on a $22.81 stock, 2026-09-16), and an underlying-only bound fired on 476 correct quotes.',
   readsTables: ['raw_option_contract_snapshot'],
-  testedQuantity: 'ask_over_underlying_ratio',
+  testedQuantity: 'ask_over_max_value_ratio',
   testedUnit: 'ratio',
-  thresholds: { maxAskOverUnderlying: 3 },
+  thresholds: { maxAskOverMaxValue: 3 },
   thresholdBasis: 'structural',
   run(ctx) {
     const rows = ctx.db
       .prepare(
-        `SELECT osi_symbol, bid, ask, underlying_price FROM raw_option_contract_snapshot
-          WHERE as_of_date = ? AND price_status = 'ok' AND underlying_price > 0`
+        `SELECT osi_symbol, "right", strike, bid, ask, underlying_price FROM raw_option_contract_snapshot
+          WHERE as_of_date = ? AND price_status = 'ok' AND underlying_price > 0 AND strike > 0`
       )
       .all(ctx.tradingDate) as {
       osi_symbol: string;
+      right: 'call' | 'put';
+      strike: number;
       bid: number;
       ask: number;
       underlying_price: number;
     }[];
 
     return rows.map((r) => {
-      const ratio = r.ask / r.underlying_price;
+      // A call can never be worth more than the share; a put never more than its strike.
+      const isPut = r.right === 'put';
+      const maxValue = isPut ? r.strike : r.underlying_price;
+      const ratio = r.ask / maxValue;
       const crossed = r.bid > r.ask;
       return {
         key: r.osi_symbol,
         value: ratio,
-        fired: crossed || ratio > this.thresholds['maxAskOverUnderlying']!,
+        fired: crossed || ratio > this.thresholds['maxAskOverMaxValue']!,
         detail: crossed
           ? `${r.osi_symbol}: bid ${r.bid} above ask ${r.ask}`
-          : `${r.osi_symbol}: ask ${r.ask} is ${ratio.toFixed(2)}x the underlying ${r.underlying_price}`,
-        evidence: { osiSymbol: r.osi_symbol, bid: r.bid, ask: r.ask, underlying: r.underlying_price, crossed }
+          : `${r.osi_symbol}: ask ${r.ask} is ${ratio.toFixed(2)}x the ${isPut ? `strike ${r.strike}` : `underlying ${r.underlying_price}`}`,
+        evidence: {
+          osiSymbol: r.osi_symbol, right: r.right, strike: r.strike, bid: r.bid, ask: r.ask,
+          underlying: r.underlying_price, maxValue, crossed
+        }
       } satisfies Evaluation;
     });
   }
