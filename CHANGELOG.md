@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.1.250] - 2026-09-15
+
+### The build now builds packages/core, and refuses to ship if it didn't
+
+**v1.1.248 and v1.1.249 shipped with none of their changes in them.** `@tradeanalyzer/core` is consumed through `dist/` (`main: ./dist/index.js`, every subpath export into `dist/`), and the root build never compiled it — `prepackage` ran the not-running guard, the better-sqlite3 ABI swap, then `electron-vite build`. So `dist/` was whatever the last person to type `tsc` had left there: core 0.6.9, from v1.1.245. The cross-day dedup fix, the OSI padding fix, the gate-email cap and the run delta were all committed, tested, typechecked, packaged and version-verified off the binary, and none of them were in it.
+
+It surfaced because a manual `data-collector` run recorded `meta_run.collector_version = 0.6.9` from an app reporting itself as 1.1.249 — the only field anywhere that names the *built* collector, written into the generation rather than displayed, so it was found one run late and by luck. Nothing else could have caught it: the 529 core tests, the typecheck and the version test all read `packages/core/src`, and the exe's ProductVersion reads the root `package.json`. Four green checks that agree with each other and say nothing about what shipped. **A suite that runs against source is not evidence about an artefact built from something else.**
+
+- `build:core` (`tsc -p packages/core/tsconfig.json`) now runs in `prepackage`, `prebuild` and `predev`, before `electron-vite build`.
+- `scripts/check-core-built.mjs` runs after it and fails the build if `dist/version.js`'s `COLLECTOR_VERSION` disagrees with `packages/core/package.json`, or if anything under `src/` is newer than everything under `dist/`. A build step that silently does not run looks exactly like one that ran. The timestamp half matters on its own, because a version only moves when somebody bumps it. Verified by running the guard against the stale tree first — `built 0.6.9, source declares 0.6.11`, exit 1 — then against the built one.
+
+### The gate email was 1.25 MB
+
+v1.1.248's send-outcome logging is app-side, so it *did* reach the binary, and its first run produced the number two days of guessing had lacked: `accepted=1 bytes=1254650 CLIPPED(>102KB) relay="250 …"`. **1,254,650 bytes** — accepted by the relay with an SMTP 250, twelve times over Gmail's ~102 KB clip threshold. The message left the building every time and was never readable when it landed. The cap that reduces it to a few KB is core-side, so it was in the `dist/` that never got built; it is in this one.
+
+Note on run 13 (21:04 ET, collector 0.6.9): it verifies nothing from v1.1.248/249, and it aged the backlog — a third consecutive firing promotes an exception one severity level, so ~1,533 QC-410 and 415 QC-404 warnings became blocking and the count went 753 → 4,502. Re-running an already-collected day escalates every open exception.
+
 ## [1.1.249] - 2026-09-15
 
 ### The gate email leads with what changed
