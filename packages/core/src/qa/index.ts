@@ -9,6 +9,10 @@ export {
 } from './gate.js';
 export type { GateResult, Verdict } from './gate.js';
 export { buildStatusEmail, buildNoRunEmail } from './email.js';
+export {
+  computeRunDelta, baselineRun, deltaHeadline, deltaLines,
+  type RunDelta, type CheckDelta, type DeltaKind
+} from './delta.js';
 export type { EmailModel } from './email.js';
 export {
   ALL_CHECKS, CROSS_CUTTING_CHECKS, BAR_CHECKS, QUOTE_AND_ACTION_CHECKS,

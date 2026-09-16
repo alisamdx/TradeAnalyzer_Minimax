@@ -1,6 +1,7 @@
 import type { SqliteLike } from '../db/sqlite-like.js';
 import type { Severity } from './check.js';
 import { cleanDayStreak, type Verdict } from './gate.js';
+import { computeRunDelta, deltaHeadline, deltaLines } from './delta.js';
 
 /**
  * The status email — 03 §7.
@@ -154,7 +155,12 @@ export function buildStatusEmail(
         ? `AMBER (${warnings.length} warning${warnings.length === 1 ? '' : 's'})`
         : 'GREEN';
 
-  const subject = `[TA-Data] ${args.tradingDate} ${args.slot} — ${verdictLabel}`;
+  // The delta goes in the SUBJECT, because the subject is what gets read on a
+  // phone and it is what decides whether the email is opened at all. "RED" has
+  // been true of every daily run this generation; "RED · 1 NEW" and "RED · no
+  // change" are different pieces of news wearing the same verdict.
+  const delta = computeRunDelta(db, args.runId);
+  const subject = `[TA-Data] ${args.tradingDate} ${args.slot} — ${verdictLabel} · ${deltaHeadline(delta)}`;
 
   const lines: string[] = [];
   lines.push(
@@ -163,6 +169,10 @@ export function buildStatusEmail(
       `${args.startedAt.slice(11, 16)}–${args.finishedAt.slice(11, 16)} ET  collector ${args.collectorVersion}`
   );
   lines.push('');
+
+  // First block in the body, above BLOCKING: the standing backlog is context,
+  // and what this run changed is the news.
+  for (const line of deltaLines(delta)) lines.push(line);
 
   if (blocking.length > 0) {
     lines.push(`BLOCKING (${blocking.length})`);

@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.1.249] - 2026-09-15
+
+### The gate email leads with what changed
+
+**Why.** The gate reports state, and state has been RED on every daily run this generation has had — so a check firing for the first time at 92% looked exactly like 151 price discontinuities that had been sitting there for weeks. A signal that is always on carries no information, which is why reading the email had been replaced by asking for a manual review. Third instance of one shape, after the conviction band that could never fire and the liquidity gate that always did: a verdict is only informative where it can go both ways.
+
+- **`qa/delta.ts` computes, per check, what this run added, what stopped, and what merely persists** — from columns the gate already maintains (`first_seen_run_id`, `last_seen_run_id`, `still_firing`). Nothing new is stored. The baseline is the **previous gate run**, not the previous calendar day, so a same-day re-run compares against the run before it. Six outcomes: `new`, `growing`, `shrinking`, `churned`, `gone`, `resolved`; everything else is counted, not listed. `churned` exists because a check that swaps one ticker for another has an identical total on both runs, and calling that unchanged would hide a moving population behind a stable number.
+- **The subject carries the delta**, because the subject is what decides whether the email is opened: `RED (572 blocking) · 1 NEW, 2 growing, 1 gone` against `RED (572 blocking) · no change`. Same verdict, same count, different news.
+- **The body opens with `CHANGED SINCE RUN #N`**, above the standing backlog — blocking first, then by size of move, each changed check with one concrete row, preferring a newly added one. Blocking carries no severity marker; anything else is labelled, so a growing warning does not read as alarming as a growing blocking check purely because both moved.
+- **No baseline is not "no change".** On a generation's first run this says `first run, no baseline` and says so in the body. An absence reading as a pass is this project's most repeated bug, and the mechanism built to summarise the others was not going to join them; a test asserts the first-run body does not contain "Nothing changed".
+
+Known limitation, pre-existing and unchanged: `still_firing` stays 1 for a check that did not run, so "unchanged" means "not contradicted", not "re-verified".
+
+Tests: `packages/core/test/delta.test.ts` — nine cases including the first-run baseline, churn, a same-day re-run, the subject distinguishing two RED runs, and the email staying under 102 KB when one check contributes 300 new findings.
+
 ## [1.1.248] - 2026-09-15
 
 ### Cross-day dedup, OSI padding, and a gate email that can be read

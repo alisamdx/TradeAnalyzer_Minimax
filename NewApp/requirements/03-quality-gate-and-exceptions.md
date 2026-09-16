@@ -394,6 +394,51 @@ Every send therefore records the relay's own verdict: `accepted` count,
 size, and whether that size crosses the clip threshold. A partial rejection is
 logged at ERROR (`collector-email:partial`), not INFO.
 
+### 7.2c The delta — what this run CHANGED (added 2026-09-15)
+
+The sections above report **state**. State has been RED on every daily run of
+gen-002, so the verdict said the same thing on the night QC-401 first fired at
+92 % as on a night when nothing moved. A signal that is always on carries no
+information, and the practical consequence was that the operator stopped reading
+the email and asked for a manual review instead.
+
+So the email opens with a **delta against the previous gate run** — not the
+previous calendar day, so a re-run of the same day compares against the run
+before it. Per check:
+
+| Outcome | Meaning |
+|---|---|
+| `new` | the check had nothing open at the baseline and fires now |
+| `growing` | more findings firing than at the baseline |
+| `shrinking` | fewer |
+| `churned` | the same count, different findings — a swapped ticker is not "unchanged" |
+| `gone` | fired at the baseline, silent now, **still open** (not resolved) |
+| `resolved` | closed by the gate because a remediation succeeded |
+
+Anything not in that list is counted (`unchanged: N checks, M findings`), never
+listed. Ordering is blocking first, then by size of move. Each changed check
+carries one concrete row, preferring a newly added one — a count alone is not
+actionable.
+
+It is computed from `qa_exception.first_seen_run_id`, `last_seen_run_id` and
+`still_firing`. **Nothing is stored for it**: a snapshot table would be a second
+source of truth to keep honest.
+
+**The subject line carries the headline** (`RED (572 blocking) · 1 NEW, 2
+growing` against `RED (572 blocking) · no change`), because the subject is what
+is read on a phone and what decides whether the email is opened at all.
+
+**A missing baseline is reported as a missing baseline.** On a generation's first
+run the headline is `first run, no baseline` and the body says so. "No baseline"
+and "no change" are different facts, and rendering the first as the second would
+repeat the failure this whole document exists to prevent — the same shape as
+QC-907 passing on zero paired days and `cleanDayStreak` walking only the dates
+that have rows.
+
+**Limitation, inherited from the gate:** `still_firing` stays 1 for a check that
+did not run at all, so `unchanged` means "not contradicted this run", not
+"re-verified this run".
+
 ### 7.3 Watchdog — the email that reports no email
 
 A dead scheduler produces no run and therefore no gate and no email. A separate, tiny job in the hosting app (`collector-watchdog`, scheduled 19:30 ET on trading days) checks `meta_run` for a completed run with today's `trading_date`; if none, it sends `[TA-Data] 2026-09-05 — NO RUN` and writes `not_run` into `qa_domain_day_status` for every domain. The watchdog's own failure is the residual risk; it is intentionally the simplest code in the system.
