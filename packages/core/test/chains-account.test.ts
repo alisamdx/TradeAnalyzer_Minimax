@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { osiSymbol } from '../src/ingest/osi.js';
 import { recipes } from '../src/ingest/recipes.js';
 import Database from 'better-sqlite3';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -36,7 +37,8 @@ import {
   runChainsPhase,
   selectExpirations,
   subsetCandidates,
-  closeExpiredStickyContracts
+  closeExpiredStickyContracts,
+  repairStickyOsiPadding
 } from '../src/collector/phases/chains.js';
 import { runGate } from '../src/qa/gate.js';
 import { CHAIN_CHECKS, ACCOUNT_CHECKS } from '../src/qa/registry.js';
@@ -114,7 +116,7 @@ function chainBody(opts: {
       nearPrice: opts.nearPrice,
       OptionPair: opts.pairs.map((p) => ({
         Call: {
-          osiKey: `SPY   260918C00${String(Math.round(p.strike)).padStart(5, '0')}`,
+          osiKey: `SPY---260918C00${String(Math.round(p.strike)).padStart(5, '0')}`,
           strikePrice: p.strike,
           displaySymbol: `SPY Sep 18 '26 $${String(p.strike)} Call`,
           ...(p.bid === undefined ? {} : { bid: p.bid }),
@@ -127,7 +129,7 @@ function chainBody(opts: {
           OptionGreeks: { iv: p.iv ?? 0.1523, delta: 0.52, gamma: 0.01, theta: -0.18651, vega: 0.4, rho: 0.1 }
         },
         Put: {
-          osiKey: `SPY   260918P00${String(Math.round(p.strike)).padStart(5, '0')}`,
+          osiKey: `SPY---260918P00${String(Math.round(p.strike)).padStart(5, '0')}`,
           strikePrice: p.strike,
           bid: 1,
           ask: 1.1,
@@ -883,7 +885,7 @@ describe('phase 7 — chains, and AC-5 on every response', () => {
       .prepare(
         `INSERT INTO ref_sticky_contract (run_id, as_of_date, observed_at, source_response_id,
            osi_symbol, ticker, expiration_date, reason, valid_from)
-         VALUES (?, ?, '2026-09-07T17:00:00-04:00', ?, 'SPY   260918P0000770', 'SPY', '2026-09-18', 'recommended_by_legacy', ?)`
+         VALUES (?, ?, '2026-09-07T17:00:00-04:00', ?, 'SPY---260918P0000770', 'SPY', '2026-09-18', 'recommended_by_legacy', ?)`
       )
       .run(run0.runId, DATE, src, DATE);
 
@@ -962,6 +964,56 @@ describe('phase 7 — chains, and AC-5 on every response', () => {
       osi_symbol: string;
     }[];
     expect(open.map((r) => r.osi_symbol)).toEqual(['Y']);
+  });
+
+  /**
+   * The padding repair (2026-09-15). A pin built with the old space padding can
+   * never equal an E*Trade `osiKey`, so QC-409 fired on every one of 415 live
+   * pins and `sticky_reason` was never stamped. The correction is a close and a
+   * re-open, because the old symbol is the evidence for those findings.
+   */
+  it('closes a space-padded pin and opens the dash-padded one, keeping provenance', () => {
+    const run = beginRun(db(), makeHost(), { kind: 'daily', tradingDate: DATE });
+    raw
+      .prepare(
+        "INSERT INTO meta_response (run_id, provider, endpoint, params_json, requested_at, http_status, byte_length, archive_file, archive_offset, sha256, dedup_hash, encrypted, at_provider_cap, parse_status, parsed_row_count) " +
+          "VALUES (?, 'etrade', '/x', '{}', '2026-09-07T17:00:00-04:00', 200, 1, 'f', 0, 'h', 'repad', 1, 0, 'ok', 0)"
+      )
+      .run(run.runId);
+    const src = (raw.prepare('SELECT MAX(source_response_id) AS id FROM meta_response').get() as { id: number }).id;
+    raw
+      .prepare(
+        `INSERT INTO ref_sticky_contract (run_id, as_of_date, observed_at, source_response_id,
+           osi_symbol, ticker, expiration_date, reason, valid_from, origin_ref)
+         VALUES (?, ?, '2026-09-07T17:00:00-04:00', ?, 'AIZ   261016C00280000', 'AIZ', '2026-10-16', 'recommended_by_legacy', '2026-09-01', 'legacy-run-7')`
+      )
+      .run(run.runId, DATE, src);
+
+    const first = repairStickyOsiPadding(db(), DATE, '2026-09-15T17:05:00-04:00', run.runId);
+    expect(first).toEqual({ closed: 1, reopened: 1 });
+
+    const rows = raw
+      .prepare('SELECT osi_symbol, valid_to, source_response_id, origin_ref FROM ref_sticky_contract ORDER BY row_id')
+      .all() as { osi_symbol: string; valid_to: string | null; source_response_id: number; origin_ref: string | null }[];
+    // Nothing deleted: the old row survives, closed, so the findings it caused
+    // remain explicable.
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({ osi_symbol: 'AIZ   261016C00280000', valid_to: DATE });
+    expect(rows[1]).toMatchObject({
+      osi_symbol: 'AIZ---261016C00280000',
+      valid_to: null,
+      source_response_id: src,
+      origin_ref: 'legacy-run-7'
+    });
+    // The corrected symbol is exactly what the builder would produce.
+    expect(osiSymbol({ ticker: 'AIZ', expiration: '2026-10-16', side: 'call', strike: 280 }))
+      .toBe(rows[1]!.osi_symbol);
+
+    // Idempotent — a second pass finds nothing and opens no duplicate range.
+    expect(repairStickyOsiPadding(db(), DATE, '2026-09-15T17:05:00-04:00', run.runId))
+      .toEqual({ closed: 0, reopened: 0 });
+    expect(raw.prepare('SELECT COUNT(*) AS n FROM ref_sticky_contract WHERE valid_to IS NULL').get())
+      .toEqual({ n: 1 });
   });
 });
 

@@ -5,6 +5,7 @@ import { captureResponse } from '../capture.js';
 import { recipes } from '../../ingest/recipes.js';
 import { captureRuleId, type RunHandle } from '../run.js';
 import { type ExpirationSelection } from '../../ingest/options.js';
+import { OSI_PAD } from '../../ingest/osi.js';
 
 /**
  * Phases 6 and 7 — the chain subset and the chains themselves (04 §4.2, §4.3).
@@ -41,6 +42,8 @@ export interface ChainPhaseResult {
   readonly chainFailures: number;
   readonly contractsStored: number;
   readonly stickyClosed: number;
+  /** Pins re-padded out of the pre-2026-09-15 space form; 0 on a clean generation. */
+  readonly stickyRepadded: number;
 }
 
 interface SubsetCandidate {
@@ -302,6 +305,73 @@ export function closeExpiredStickyContracts(db: SqliteLike, tradingDate: string)
 }
 
 /**
+ * Re-pads pins written with the pre-2026-09-15 space padding (see `osi.ts`).
+ *
+ * The range is **closed and a corrected one opened**, never rewritten in place:
+ * the old symbol is what the pin actually was, and QC-409's 415 findings are
+ * only explicable if the row that produced them still exists. Provenance rides
+ * along unchanged — the pin's cause is the same handoff response — so only the
+ * symbol and the range move.
+ *
+ * Idempotent: it matches on a space, which a corrected symbol cannot contain, so
+ * a clean generation costs one indexed scan. A pin whose corrected symbol is
+ * already open is closed without a duplicate, since two open ranges for one
+ * contract is the ambiguity the range exists to prevent.
+ */
+export function repairStickyOsiPadding(
+  db: SqliteLike,
+  tradingDate: string,
+  now: string,
+  runId: number
+): { closed: number; reopened: number } {
+  const broken = db
+    .prepare(
+      `SELECT row_id, source_response_id, capture_rule_id, osi_symbol, ticker, expiration_date,
+              reason, origin_ref
+         FROM ref_sticky_contract
+        WHERE valid_to IS NULL AND osi_symbol LIKE '% %'`
+    )
+    .all() as {
+    row_id: number;
+    source_response_id: number | null;
+    capture_rule_id: number | null;
+    osi_symbol: string;
+    ticker: string;
+    expiration_date: string;
+    reason: string;
+    origin_ref: string | null;
+  }[];
+  if (broken.length === 0) return { closed: 0, reopened: 0 };
+
+  const close = db.prepare('UPDATE ref_sticky_contract SET valid_to = ? WHERE row_id = ?');
+  const isOpen = db.prepare(
+    'SELECT 1 AS present FROM ref_sticky_contract WHERE osi_symbol = ? AND valid_to IS NULL LIMIT 1'
+  );
+  const insert = db.prepare(
+    `INSERT INTO ref_sticky_contract
+       (run_id, as_of_date, observed_at, capture_rule_id, source_response_id,
+        osi_symbol, ticker, expiration_date, reason, valid_from, valid_to, origin_ref)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`
+  );
+
+  let reopened = 0;
+  const write = db.transaction(() => {
+    for (const r of broken) {
+      const corrected = r.osi_symbol.replace(/ /g, OSI_PAD);
+      close.run(tradingDate, r.row_id);
+      if (isOpen.get(corrected) !== undefined) continue;
+      insert.run(
+        runId, tradingDate, now, r.capture_rule_id, r.source_response_id,
+        corrected, r.ticker, r.expiration_date, r.reason, tradingDate, r.origin_ref
+      );
+      reopened += 1;
+    }
+  });
+  write();
+  return { closed: broken.length, reopened };
+}
+
+/**
  * Phase 7 — expirations, then one chain call per selected expiration.
  *
  * Asking each ticker which expirations it lists, rather than guessing a global
@@ -323,6 +393,7 @@ export async function runChainsPhase(
     'Every expiration inside 90 DTE plus two monthlies beyond it; every strike stored.'
   );
 
+  const stickyRepadded = repairStickyOsiPadding(db, run.tradingDate, host.nowET(), run.runId);
   const stickyClosed = closeExpiredStickyContracts(db, run.tradingDate);
   const sticky = stickyByTicker(db, run.tradingDate);
 
@@ -449,6 +520,7 @@ export async function runChainsPhase(
     chainCalls,
     chainFailures,
     contractsStored,
-    stickyClosed
+    stickyClosed,
+    stickyRepadded: stickyRepadded.reopened
   };
 }

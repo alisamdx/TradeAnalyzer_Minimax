@@ -22,7 +22,8 @@ import type { OptionsProvider } from './options-provider.js';
 import type { ShortlistResult } from '@shared/wheel-shortlist.js';
 
 export interface EmailSender {
-  send(subject: string, html: string, attachments?: EmailAttachment[]): Promise<void>;
+  // Returns the relay outcome; callers that only need success/failure ignore it.
+  send(subject: string, html: string, attachments?: EmailAttachment[]): Promise<unknown>;
 }
 
 export interface EmailOutcomeLog {

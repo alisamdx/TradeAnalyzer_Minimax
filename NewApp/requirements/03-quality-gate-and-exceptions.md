@@ -121,7 +121,7 @@ A ‡ value still gets its distribution recorded like any other (§4) — measur
 | QC-406 ladder integrity | warning | strikes for an (expiration, right) not strictly increasing, or a strike appears once as call and not as put | none |
 | QC-407 underlying disagreement | warning | \|`underlying_price` − `raw_eod_quote.last`\| / last > 1 % † | none |
 | QC-408 zero-volume default | warning | any `volume = 0` with `volume_status = ok` **and** `open_interest = 0` **and** bid = ask = 0. This *may* be a defaulted field, but a genuinely untraded far-OTM strike on a fresh expiration has the same shape, so it cannot be blocking — see the note below | none |
-| QC-409 sticky-set honoured | blocking | a `ref_sticky_contract` with `valid_to ≥ today` has no snapshot row this run. Phase 7 therefore fetches every pinned ticker, member or not — a non-member at its pinned expirations only, the rest recorded `outside` (core 0.6.1; it walked members alone, so a pin outside the subset could never be honoured) | R1 retry |
+| QC-409 sticky-set honoured | blocking | a `ref_sticky_contract` with `valid_to ≥ today` has no snapshot row this run. Phase 7 therefore fetches every pinned ticker, member or not — a non-member at its pinned expirations only, the rest recorded `outside` (core 0.6.1; it walked members alone, so a pin outside the subset could never be honoured). **The join is byte equality on `osi_symbol`, so the pin must be built with E*Trade's dash padding** — to v1.1.247 it was space-padded per the OCC spelling and matched nothing under a six-character root, so all 415 pins were unhonoured and the count only grew (core 0.6.10 corrects the builder and re-pads existing rows by closing and re-opening the range) | R1 retry |
 | QC-410 Greek reproduction | warning | Black-Scholes delta from (`underlying_price`, `strike`, DTE, `iv`, 3M yield from `raw_treasury_yield`) differs from `delta` by > 0.05 on > 5 % of ATM contracts † (checks E*Trade's Greeks are on the scale we think; P4). **This is the stage-1 consumer of `raw_treasury_yield`** (02 §11); if the yield row is missing for the date the check is skipped, not failed — a missing rate is QC-902's finding, not this one | none |
 | QC-411 weekend expiration | blocking | an `expiration_date` that is not a trading day and is not a holiday-shifted expiration (when the third Friday is a holiday, expiration moves to the **preceding Thursday** — 02 §2 `is_monthly_expiration`). Catches the UTC/local weekday bug, whose signature is a Saturday date | none |
 
@@ -362,6 +362,37 @@ Zero-fire checks this pilot: 9 of 63   (list at pilot exit)
 ```
 
 Rules: blocking first; one line per exception with key, evidence, remediation outcome and age; counts only for warnings; the domain table always present; the open-exception totals always present (P9: nothing ages out silently); plain-text body with an HTML twin; no links that require a session (the deep link opens the new exe).
+
+### 7.2a One screen is a REQUIREMENT, not a description (added 2026-09-15)
+
+The heading above says "one screen" and the implementation listed every finding,
+one line per row. On 2026-09-15 that was **773 blocking rows** — past the ~102 KB
+at which Gmail clips a body, and unreadable long before that, with 415 identical
+QC-409 lines burying the eight other checks that each needed a different
+decision. Two RED emails went unread in that state.
+
+So each section — `BLOCKING`, `REPEAT OFFENDERS`, `NO LONGER OBSERVED`,
+`EXPIRED ACCEPTANCES` — collapses to **one line per check**: the check id, its
+domain, `×N`, its age, then at most **three** real rows, then `… and N more`.
+The total count is never dropped or rounded: it is the number that says how bad
+the day is. `WARNINGS` was already counted rather than listed.
+
+**An alert that cannot be read has already failed, whatever the delivery log
+says.** The rendered HTML must stay under 102 KB; this is asserted by a test that
+fires a single check 500 times, not left as a consequence to hope about.
+
+### 7.2b The send outcome is evidence, not an assumption (added 2026-09-15)
+
+`nodemailer.sendMail` rejects only when **every** recipient is refused, so a
+partial rejection resolves and reads as success. Logging "sent" on that basis
+cannot distinguish a relay failure, a partial rejection, a spam-folder landing
+and a clipped body — all four were indistinguishable when the 2026-09-14 and
+2026-09-15 gate emails did not arrive.
+
+Every send therefore records the relay's own verdict: `accepted` count,
+`rejected` addresses, the SMTP `response` string, the `messageId`, the HTML byte
+size, and whether that size crosses the clip threshold. A partial rejection is
+logged at ERROR (`collector-email:partial`), not INFO.
 
 ### 7.3 Watchdog — the email that reports no email
 

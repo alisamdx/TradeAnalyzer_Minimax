@@ -87,12 +87,12 @@ function chainBody(expiry: string, nearPrice: number, strikes: readonly number[]
       nearPrice,
       OptionPair: strikes.map((strike) => ({
         Call: {
-          osiKey: `SPY   ${expiry}C00${String(strike).padStart(5, '0')}000`, strikePrice: strike,
+          osiKey: `SPY---${expiry}C00${String(strike).padStart(5, '0')}000`, strikePrice: strike,
           bid: 1, ask: 1.1, bidSize: 1, askSize: 1, volume: 5, openInterest: 10, inTheMoney: 'n',
           timeStamp: 1_788_552_898, OptionGreeks: { iv: 0.15, delta: 0.5, gamma: 0.01, theta: -0.1, vega: 0.4, rho: 0.1 }
         },
         Put: {
-          osiKey: `SPY   ${expiry}P00${String(strike).padStart(5, '0')}000`, strikePrice: strike,
+          osiKey: `SPY---${expiry}P00${String(strike).padStart(5, '0')}000`, strikePrice: strike,
           bid: 1, ask: 1.1, bidSize: 1, askSize: 1, volume: 5, openInterest: 10, inTheMoney: 'n',
           timeStamp: 1_788_552_898, OptionGreeks: { iv: 0.16, delta: -0.5, gamma: 0.01, theta: -0.1, vega: 0.4, rho: -0.1 }
         }
@@ -142,7 +142,7 @@ function captureDay(): RunHandle {
       response: response(chainBody(expiry, 100, [99, 101])),
       recipe: recipes.chain({
         ticker: 'SPY', expirationDate: date,
-        stickyReasons: new Map([[`SPY   ${expiry}P00099000`, 'held_position']])
+        stickyReasons: new Map([[`SPY---${expiry}P00099000`, 'held_position']])
       })
     });
   }

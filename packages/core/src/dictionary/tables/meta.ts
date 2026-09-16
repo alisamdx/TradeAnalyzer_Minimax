@@ -237,10 +237,12 @@ export const metaTables: readonly TableEntry[] = [
       {
         column: 'dedup_hash', type: 'TEXT', unit: 'sha256', nullable: false, unique: true,
         description:
-          'sha256(provider + endpoint + params_json + body) — the idempotence key of 04 §2.2. It makes ' +
-          're-ingesting an *identical* response a no-op (crash recovery, replay). It does **not** make ' +
-          're-running a day idempotent: a fresh call returns a different body and correctly appends a new ' +
-          'version (P1).',
+          'sha256(provider + endpoint + params_json + as_of_date + body) — the idempotence key of 04 §2.2. ' +
+          'It makes re-ingesting an *identical* response for the *same trading date* a no-op (crash ' +
+          'recovery, replay), and nothing more. `as_of_date` is in the key because a stable body is the ' +
+          'normal case for a reference list, not the exception: without it, an expiration list that had ' +
+          'not changed since yesterday deduped against yesterday and wrote no row for today, which ' +
+          'QC-401 then reported as 92 % of the chain subset failing to answer (2026-09-15).',
         sourceProvider: 'collector'
       },
       col.flag('encrypted', '`1` for account-domain files, which are written through safeStorage/DPAPI (Q20, P15).', { sourceProvider: 'collector' }),

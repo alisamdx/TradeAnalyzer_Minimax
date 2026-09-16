@@ -35,6 +35,52 @@ interface ExceptionRow {
   accepted_until: string | null;
 }
 
+/**
+ * How many individual rows a single check may contribute before it collapses to
+ * a count and an example.
+ *
+ * The lists here used to be uncapped, one line per finding. On 2026-09-15 that
+ * made a body of 773 blocking rows — past the ~102 KB where Gmail clips a
+ * message, and unreadable long before that. **An alert that cannot be read has
+ * already failed**, whatever the delivery log says: 415 identical QC-409 lines
+ * are one fact about one bug, and printing them 415 times buried the eight other
+ * checks that each needed a different decision.
+ */
+const MAX_ROWS_PER_CHECK = 3;
+
+/**
+ * Collapses a list of findings to one line per check, plus up to
+ * `MAX_ROWS_PER_CHECK` real rows so the reader still sees concrete evidence.
+ *
+ * The count is never dropped or rounded — "and 412 more" is the part that says
+ * how big the problem is, and a summary that hides the tail would repeat the
+ * mistake this file is fixing.
+ */
+function summariseByCheck(rows: readonly ExceptionRow[]): string[] {
+  const byCheck = new Map<string, ExceptionRow[]>();
+  for (const r of rows) {
+    const list = byCheck.get(r.check_id);
+    if (list) list.push(r);
+    else byCheck.set(r.check_id, [r]);
+  }
+
+  const out: string[] = [];
+  for (const [checkId, list] of [...byCheck.entries()].sort((a, b) => b[1].length - a[1].length)) {
+    const first = list[0]!;
+    out.push(
+      `  ${checkId} ${first.domain} ×${list.length}` +
+        (list.length === 1 ? '' : `  (open ${first.consecutive_runs} run${first.consecutive_runs === 1 ? '' : 's'})`)
+    );
+    for (const e of list.slice(0, MAX_ROWS_PER_CHECK)) {
+      out.push(`      ${e.key}  ${e.detail}`);
+    }
+    if (list.length > MAX_ROWS_PER_CHECK) {
+      out.push(`      … and ${list.length - MAX_ROWS_PER_CHECK} more`);
+    }
+  }
+  return out;
+}
+
 export function buildStatusEmail(
   db: SqliteLike,
   args: {
@@ -120,17 +166,13 @@ export function buildStatusEmail(
 
   if (blocking.length > 0) {
     lines.push(`BLOCKING (${blocking.length})`);
-    for (const e of blocking) {
-      lines.push(`  ${e.check_id} ${e.domain}  ${e.key}  ${e.detail} · open ${e.consecutive_runs} run${e.consecutive_runs === 1 ? '' : 's'}`);
-    }
+    for (const line of summariseByCheck(blocking)) lines.push(line);
     lines.push('');
   }
 
   if (repeats.length > 0) {
     lines.push(`REPEAT OFFENDERS (${repeats.length})`);
-    for (const e of repeats) {
-      lines.push(`  ${e.check_id} ${e.domain}  ${e.key}  ${e.detail} · ${e.consecutive_runs} consecutive runs`);
-    }
+    for (const line of summariseByCheck(repeats)) lines.push(line);
     lines.push('');
   }
 
@@ -157,7 +199,7 @@ export function buildStatusEmail(
     // Listed explicitly rather than quietly dropped. "It went away" is exactly
     // how the earnings-date bug hid for a quarter.
     lines.push(`NO LONGER OBSERVED, UNRESOLVED (${stopped.length})`);
-    for (const e of stopped) lines.push(`  ${e.check_id} ${e.domain}  ${e.key}  ${e.detail}`);
+    for (const line of summariseByCheck(stopped)) lines.push(line);
     lines.push('');
   }
 

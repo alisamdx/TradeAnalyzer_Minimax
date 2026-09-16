@@ -32,6 +32,16 @@ function parseEnvFile(filePath: string): Record<string, string> {
   return env;
 }
 
+/** What the relay reported back, so a non-arrival can be diagnosed from the log alone. */
+export interface EmailSendOutcome {
+  readonly accepted: string[];
+  readonly rejected: string[];
+  readonly response: string;
+  readonly messageId: string;
+  readonly htmlBytes: number;
+  readonly clippedByGmail: boolean;
+}
+
 export class EmailService {
   constructor(private readonly getAgentProjectPath: () => string) {}
 
@@ -64,11 +74,23 @@ export class EmailService {
     return this.readConfig() !== null;
   }
 
+  /**
+   * What the relay actually said — not "we called sendMail and it did not throw".
+   *
+   * `sendMail` rejects only when EVERY recipient is refused, so a partial
+   * rejection resolved and was logged as `sent`. And `accepted` means the
+   * submission relay took the message, never that it was delivered: on
+   * 2026-09-14 and 2026-09-15 the gate email logged `sent`, with no error, and
+   * did not arrive. The operator had no way to tell a relay failure from a
+   * spam-folder landing from a size problem, because none of the three leaves a
+   * trace here. Now the outcome carries the relay's own words and the byte size,
+   * which is the first thing to check when a large message vanishes.
+   */
   async send(
     subject: string,
     html: string,
     attachments: EmailAttachment[] = [],
-  ): Promise<void> {
+  ): Promise<EmailSendOutcome> {
     const config = this.readConfig();
     if (!config) throw new Error('SMTP not configured. Set up email credentials in the Agent Config → Email tab.');
 
@@ -79,7 +101,7 @@ export class EmailService {
       auth: { user: config.user, pass: config.pass },
     });
 
-    await transporter.sendMail({
+    const info = await transporter.sendMail({
       from: config.from,
       to: config.to.join(', '),
       subject,
@@ -89,6 +111,25 @@ export class EmailService {
         content: a.content,
         contentType: a.contentType,
       })),
-    });
+    }) as {
+      accepted?: unknown[];
+      rejected?: unknown[];
+      response?: string;
+      messageId?: string;
+    };
+
+    const accepted = (info.accepted ?? []).map(String);
+    const rejected = (info.rejected ?? []).map(String);
+    return {
+      accepted,
+      rejected,
+      response: info.response ?? '',
+      messageId: info.messageId ?? '',
+      htmlBytes: Buffer.byteLength(html, 'utf8'),
+      // Gmail truncates the visible body above ~102 KB and shows "[Message
+      // clipped]". A gate email that lists every finding crosses that on a bad
+      // day, so the number is reported rather than inferred.
+      clippedByGmail: Buffer.byteLength(html, 'utf8') > 102_400,
+    };
   }
 }

@@ -388,6 +388,47 @@ describe('idempotence — for crash recovery and replay, and nothing more', () =
     expect(second.deduplicated).toBe(false);
     expect(raw.prepare('SELECT COUNT(*) AS n FROM raw_ticker_reference').get()).toEqual({ n: 2 });
   });
+
+  /**
+   * The two tests above both pin `asOfDate` to one day, so neither could ever
+   * see the case that actually broke: a body that is *rightly* identical on the
+   * next trading date. That is the normal case for a list — expirations,
+   * reference data, a constituent roster — and on 2026-09-15 it discarded 496
+   * of 541 expiration responses, all of which had been fetched successfully.
+   *
+   * A stable body must therefore be tested ACROSS dates, and the assertion that
+   * matters is on the ingested row, not on the flag: `deduplicated` was only
+   * ever a return value, while the missing `raw_*` row is what a check reads.
+   */
+  it('does NOT dedupe an identical body on a later trading date — a list that did not change is still today\'s fact', () => {
+    const host = makeHost();
+    const db = raw as unknown as SqliteLike;
+    const body = JSON.stringify({ results: { ticker: 'AAPL', name: 'Apple', type: 'CS', active: true } });
+    const call = (tradingDate: string) => {
+      const run = beginRun(db, host, { kind: 'daily', tradingDate });
+      return captureResponse({
+        host, db, runId: run.runId, asOfDate: tradingDate, provider: 'polygon' as const,
+        endpoint: '/v3/reference/tickers/AAPL', slug: 'reference-tickers', params: { ticker: 'AAPL' },
+        response: response(body), captureRuleId: ruleId(), recipe: recipes.tickerReference()
+      });
+    };
+
+    const monday = call('2026-09-14');
+    const tuesday = call('2026-09-15');
+
+    expect(monday.deduplicated).toBe(false);
+    expect(tuesday.deduplicated).toBe(false);
+    expect(tuesday.sourceResponseId).not.toBe(monday.sourceResponseId);
+    // One row per date — the fact a check asks for is "is there a row for
+    // 2026-09-15", and before the fix there was not.
+    expect(
+      raw.prepare('SELECT DISTINCT as_of_date FROM raw_ticker_reference ORDER BY as_of_date').all()
+    ).toEqual([{ as_of_date: '2026-09-14' }, { as_of_date: '2026-09-15' }]);
+
+    // …and the same response re-presented for a date already captured is still
+    // a no-op, which is the whole reason the key exists.
+    expect(call('2026-09-15').deduplicated).toBe(true);
+  });
 });
 
 describe('the job queue — the entire interface between the two applications', () => {

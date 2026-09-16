@@ -88,7 +88,7 @@ export {
 export type { AccountPhaseResult } from './phases/account.js';
 export {
   runChainSubsetPhase, runChainsPhase, selectExpirations, subsetCandidates,
-  closeExpiredStickyContracts, CHAIN_SUBSET_RULE, CHAIN_RULE
+  closeExpiredStickyContracts, repairStickyOsiPadding, CHAIN_SUBSET_RULE, CHAIN_RULE
 } from './phases/chains.js';
 export type { SubsetPhaseResult, ChainPhaseResult } from './phases/chains.js';
 export {

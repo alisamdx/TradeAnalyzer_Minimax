@@ -21,7 +21,7 @@ let dir: string;
 let raw: Database.Database;
 const db = (): SqliteLike => raw as unknown as SqliteLike;
 const NOW = '2026-09-09T18:00:00-04:00';
-const OSI = 'SPY   260918P00600000';
+const OSI = 'SPY---260918P00600000';
 
 function collectorHost(): CollectorHost {
   const ok = { status: 200, body: '{}', requestedAt: 't', respondedAt: 't' };
@@ -113,8 +113,8 @@ describe('pinning a contract for study', () => {
     expect(() => pinForStudy(db(), operator(), { osiSymbol: OSI, note: '  ' })).toThrow(/needs a note/);
     expect(() => pinForStudy(db(), operator(), { osiSymbol: 'QQQ   260918C00500000', note: 'x' })).toThrow(/never been captured/);
 
-    captureContract('2026-09-05', 'SPY   260905P00600000');
-    expect(() => pinForStudy(db(), operator(), { osiSymbol: 'SPY   260905P00600000', note: 'x' })).toThrow(/expired on 2026-09-05/);
+    captureContract('2026-09-05', 'SPY---260905P00600000');
+    expect(() => pinForStudy(db(), operator(), { osiSymbol: 'SPY---260905P00600000', note: 'x' })).toThrow(/expired on 2026-09-05/);
 
     pinForStudy(db(), operator(), { osiSymbol: OSI, note: 'first' });
     expect(() => pinForStudy(db(), operator(), { osiSymbol: OSI, note: 'again' })).toThrow(/already pinned for study since 2026-09-09/);

@@ -209,7 +209,7 @@ One row per provider call. The body lives in the archive file; this row says whe
 | `archive_file` | TEXT | relative path, e.g. `archive/etrade/2026-09-05/optionchains.jsonl.gz` |
 | `archive_offset` | INTEGER | line number within the file |
 | `sha256` | TEXT | of the uncompressed body |
-| `dedup_hash` | TEXT | `sha256(provider + endpoint + params_json + body)` — the idempotence key of 04 §2.2. Unique index. It makes **re-ingesting an identical response** a no-op (crash recovery, replay); it does **not** make re-running a day idempotent, because a fresh call returns a different body and correctly appends a new version (P1) |
+| `dedup_hash` | TEXT | `sha256(provider + endpoint + params_json + as_of_date + body)` — the idempotence key of 04 §2.2. Unique index. It makes **re-ingesting an identical response for the same trading date** a no-op (crash recovery, replay), and nothing more. `as_of_date` is in the key because a stable body is the NORMAL case for a reference list: without it (to v1.1.247) an expiration list unchanged since the previous day deduped against that day and wrote no row for the current one, which QC-401 reported as 92 % of the chain subset failing to answer (2026-09-15) |
 | `encrypted` | INTEGER | `1` for account-domain files (Q20) |
 | `at_provider_cap` | INTEGER | `1` when the response is known to be **incomplete** (P8): a size equal to a known provider cap (Finnhub 1500, EDGAR 1000), or a paged sweep stopped before its cursor ran out (04 §2.2). Polygon's list endpoints page, so reaching a `limit` there is **not** a cap — an unfollowed `next_url` is. Measured 2026-09-11: the five-year split sweep returned exactly 1,000 rows, which was the parameter rather than a count, and nothing flagged it because no call site passed this column |
 | `parse_status` | TEXT | `ok` \| `partial` \| `failed` — a failed parse still keeps the archive row |
@@ -427,7 +427,7 @@ Source: E*Trade `/v1/market/optionchains?symbol&expiryYear&expiryMonth&expiryDay
 | column | type | null | source (`OptionPair.Call` / `.Put`) / notes |
 |---|---|---|---|
 | `ticker` | TEXT | no | |
-| `osi_symbol` | TEXT | no | `osiKey` — the contract's identity across days |
+| `osi_symbol` | TEXT | no | `osiKey` — the contract's identity across days. E*Trade pads a short root to six characters with **dashes** (`ACGL--260918C00095000`), not the spaces the OCC specification uses; anything built to join against this column must match those bytes (see 04 §4.3) |
 | `expiration_date` | TEXT | no | from the request |
 | `strike` | REAL | no | `strikePrice` USD |
 | `right` | TEXT | no | `call` \| `put` |

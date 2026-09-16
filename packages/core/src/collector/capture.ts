@@ -95,14 +95,34 @@ export interface CaptureResult {
   readonly parseError?: string;
 }
 
-function dedupHash(
+/**
+ * The idempotence key — and `asOfDate` is part of it.
+ *
+ * It was not, until 2026-09-15, and the omission rested on the premise written
+ * into the dictionary: "a fresh call returns a different body". That is true of
+ * a quote and false of a *list*. A ticker's expiration dates are the same bytes
+ * every day until one rolls off, so on the second daily run 496 of 541
+ * expiration responses hashed equal to the previous day's, short-circuited, and
+ * wrote no `raw_option_expiration` row for the new date. QC-401 then read the
+ * absence correctly — 91.68 % of the subset "returned no expirations" — while
+ * the calls had all been made, paid for and answered. 502 of 4,867 E*Trade
+ * responses were discarded that night.
+ *
+ * Including the date keeps what the key is FOR (a crash mid-run, or a replay,
+ * re-presents the same response for the same date and is still a no-op) and
+ * drops what it was never meant to do (silence a fact because yesterday's fact
+ * looked the same). A stable body is the normal case for a reference list, not
+ * the exception.
+ */
+export function responseDedupHash(
   provider: string,
   endpoint: string,
   paramsJson: string,
+  asOfDate: string,
   body: string
 ): string {
   return createHash('sha256')
-    .update(`${provider}\n${endpoint}\n${paramsJson}\n${body}`)
+    .update(`${provider}\n${endpoint}\n${paramsJson}\n${asOfDate}\n${body}`)
     .digest('hex');
 }
 
@@ -316,11 +336,12 @@ export function indexAndIngest(args: IndexArgs): CaptureResult {
 export function captureResponse(args: CaptureArgs): CaptureResult {
   const { host, db, response } = args;
   const paramsJson = JSON.stringify(args.params);
-  const hash = dedupHash(args.provider, args.endpoint, paramsJson, response.body);
+  const hash = responseDedupHash(args.provider, args.endpoint, paramsJson, args.asOfDate, response.body);
 
-  // Idempotence for crash recovery and replay ONLY. Re-running a day is NOT
-  // idempotent and is not meant to be: a fresh call returns a different body,
-  // so it appends a new version with a later observed_at (P1).
+  // Idempotence for crash recovery and replay ONLY — within ONE trading date.
+  // Re-running a day is NOT idempotent and is not meant to be: a fresh call
+  // appends a new version with a later observed_at (P1). A *different* date is
+  // never a repeat, however identical the bytes: see `responseDedupHash`.
   const existing = db
     .prepare('SELECT source_response_id, parse_status FROM meta_response WHERE dedup_hash = ?')
     .get(hash) as { source_response_id: number; parse_status: string } | undefined;

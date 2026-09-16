@@ -1,8 +1,7 @@
-import { createHash } from 'node:crypto';
 import type { SqliteLike } from '../db/sqlite-like.js';
 import type { CollectorHost, OperatorHost } from './host.js';
 import { archiveResponse } from './archive.js';
-import { indexAndIngest } from './capture.js';
+import { indexAndIngest, responseDedupHash } from './capture.js';
 import { OperatorActionRefused } from '../qa/operator.js';
 import { COLLECTOR_VERSION } from '../version.js';
 import { DICTIONARY_VERSION } from '../dictionary/index.js';
@@ -84,7 +83,11 @@ function archiveRequest(
     paramsJson,
     response,
     location,
-    dedupHash: createHash('sha256').update(`host_app\n${endpoint}\n${paramsJson}\n${body}`).digest('hex'),
+    // The shared key, not a second copy of the formula — an operator action
+    // repeated on a later date (unpin, then pin the same contract again with
+    // the same note) is a new fact, and with the date left out it collided on
+    // the UNIQUE index and surfaced as a crash inside the action's transaction.
+    dedupHash: responseDedupHash('host_app', endpoint, paramsJson, args.tradingDate, body),
     encrypted: false,
     atProviderCap: false,
     captureRuleId: null

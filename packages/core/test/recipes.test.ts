@@ -23,7 +23,7 @@ const SAMPLES: readonly IngestRecipe[] = [
   recipes.shortInterest(),
   recipes.tickerReference(),
   recipes.expirations({ ticker: 'SPY', selection: new Map([['2026-09-18', 'within_max_dte' as const]]) }),
-  recipes.chain({ ticker: 'SPY', expirationDate: '2026-09-18', stickyReasons: new Map([['SPY   260918P00600000', 'held_position']]) }),
+  recipes.chain({ ticker: 'SPY', expirationDate: '2026-09-18', stickyReasons: new Map([['SPY---260918P00600000', 'held_position']]) }),
   recipes.positions(KEY),
   recipes.balance(KEY),
   recipes.orders({ accountKey: KEY, knownOrders: new Map([['987', 'abc']]) }),

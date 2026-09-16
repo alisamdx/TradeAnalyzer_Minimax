@@ -870,8 +870,22 @@ app.whenReady().then(() => {
       // the generation database recorded whether it had been sent.
       sendEmail: async (msg) => {
         try {
-          await emailService.send(msg.subject, msg.html);
-          logEmailOutcome({ level: 'INFO', operation: 'collector-email:sent', message: `[collector] email sent: ${msg.subject}` });
+          const out = await emailService.send(msg.subject, msg.html);
+          // `sent` on its own could not distinguish a relay failure from a
+          // spam-folder landing from a body Gmail clipped — all three look
+          // identical from here, and two RED gate emails went missing while this
+          // line said nothing but "sent" (2026-09-14, 2026-09-15). A partial
+          // rejection does not throw, so it is an ERROR only if it happened.
+          const detail =
+            `accepted=${out.accepted.length}` +
+            (out.rejected.length > 0 ? ` rejected=${out.rejected.join(',')}` : '') +
+            ` bytes=${out.htmlBytes}${out.clippedByGmail ? ' CLIPPED(>102KB)' : ''}` +
+            ` relay="${out.response}" id=${out.messageId}`;
+          logEmailOutcome({
+            level: out.rejected.length > 0 ? 'ERROR' : 'INFO',
+            operation: out.rejected.length > 0 ? 'collector-email:partial' : 'collector-email:sent',
+            message: `[collector] email ${out.rejected.length > 0 ? 'PARTIALLY sent' : 'sent'}: ${msg.subject} — ${detail}`,
+          });
         } catch (err) {
           logEmailOutcome({
             level: 'ERROR',

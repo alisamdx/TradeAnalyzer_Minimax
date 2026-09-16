@@ -9,10 +9,34 @@
  * that never matches anything, so the sticky set would look populated and
  * capture nothing, which is the worst available failure.
  *
- * The format is taken from a real response, not from a specification:
- * `SPY   260918C00500000` — root left-aligned in **6** characters padded with
- * spaces, `YYMMDD`, `C` or `P`, then the strike in thousandths as **8** digits.
+ * The format: root left-aligned in **6** characters padded with **dashes**,
+ * `YYMMDD`, `C` or `P`, then the strike in thousandths as **8** digits —
+ * `ACGL--260918C00095000`.
+ *
+ * **It padded with SPACES until 2026-09-15, and the warning above describes
+ * exactly what happened.** The OCC specification pads with spaces and this
+ * comment claimed a real response did too; E*Trade sends dashes. Measured that
+ * night against captured bytes: `raw_option_contract_snapshot.osi_symbol`
+ * (E*Trade's `osiKey`, stored verbatim) held `ACGL--260918C00095000` and
+ * `BMNR--270115P00095000`, while `ref_sticky_contract.osi_symbol` (built here)
+ * held `AIZ   261016C00280000`. So the equality join in QC-409 could not match
+ * for **any** root shorter than six characters: every pin was unhonoured, the
+ * count only ever grew (267 → 415 in a day, one per new recommendation), and
+ * `sticky_reason` was never stamped on a captured contract.
+ *
+ * Nothing threw, and every test agreed with the bug, because each fixture spelt
+ * `osiKey` the way this function did — a reader tested against a fixture written
+ * from the reader. The test that means anything here uses a symbol copied out of
+ * a provider response; see `osi.test.ts`.
  */
+
+/** The character E*Trade pads a short root with. Measured, not specified. */
+export const OSI_PAD = '-';
+
+/** True of a symbol built by the pre-2026-09-15 space-padding, which matches nothing. */
+export function hasLegacySpacePadding(osi: string): boolean {
+  return osi.includes(' ');
+}
 
 export function osiSymbol(args: {
   readonly ticker: string;
@@ -21,7 +45,7 @@ export function osiSymbol(args: {
   readonly side: 'call' | 'put';
   readonly strike: number;
 }): string {
-  const root = args.ticker.toUpperCase().slice(0, 6).padEnd(6, ' ');
+  const root = args.ticker.toUpperCase().slice(0, 6).padEnd(6, OSI_PAD);
 
   const [y, m, d] = args.expiration.split('-');
   if (y === undefined || m === undefined || d === undefined) {

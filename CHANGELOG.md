@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.1.248] - 2026-09-15
+
+### Cross-day dedup, OSI padding, and a gate email that can be read
+
+Three faults found while validating the 2026-09-15 collector run. The run itself was healthy — 6,001 calls, 7 non-2xx, gate generated, email accepted by the relay.
+
+- **The idempotence key had no date, so a stable body deduped across days.** `dedup_hash` was `sha256(provider + endpoint + params_json + body)`, on the premise that "a fresh call returns a different body" — true of a quote, false of a list. A ticker's expiration dates are the same bytes every day until one rolls off, so on the second daily run 496 of 541 expiration responses hashed equal to the previous day's, short-circuited, and wrote no `raw_option_expiration` row for the new date. QC-401 reported 91.68 % of the chain subset "returned no expirations" while every call had been made, answered 200 and paid for: 502 of 4,867 E*Trade responses discarded, and the gap is entirely that one endpoint (polygon 1090/1090, edgar 31/31, finnhub 9/9 all captured). `as_of_date` is now in the key; crash recovery and replay still no-op within a date. `study-pin.ts` had its own copy of the formula and now calls the shared one. Dictionary v15 → v16 (description only).
+- **The constructed OSI symbol padded with spaces; E*Trade pads with dashes.** `ref_sticky_contract.osi_symbol` is matched by equality against `raw_option_contract_snapshot.osi_symbol`. Captured bytes: `ACGL--260918C00095000` from the provider, `AIZ   261016C00280000` from our builder — so the join could not match for any root shorter than six characters. Every pin was unhonoured (QC-409: 267 findings, then 415, never resolving) and `sticky_reason` was never stamped. No test caught it because every fixture spelt `osiKey` the way the builder did. `repairStickyOsiPadding()` converts pins already written, closing the old range and opening a corrected one rather than rewriting in place.
+- **The gate email said "sent" without evidence, and was too big to read.** `nodemailer.sendMail` rejects only when every recipient is refused, so a partial rejection logged as success; `accepted`/`rejected`/`response`/`messageId` were discarded. They are now logged with the body size, flagging a body over Gmail's ~102 KB clip threshold. The body also listed all 773 blocking findings one per line — 415 identical QC-409 lines burying eight checks that each needed a separate decision. Each section now collapses to one line per check with up to three real rows and `… and N more`; the total is never dropped.
+
+Why the two RED emails did not arrive is still not established — the relay accepted both. The instrumentation is what makes the next one diagnosable.
+
+Tests: `packages/core/test/osi.test.ts` (anchored on captured provider bytes), `collector.test.ts` (identical body on a later date), `chains-account.test.ts` (the padding repair), `gate.test.ts` (email stays under 102 KB with 500 findings).
+
 ## [1.1.247] - 2026-09-15
 
 ### Day report: no false alarms before a day is over

@@ -430,6 +430,59 @@ describe('the status email', () => {
     expect(email.text).toContain('NO LONGER OBSERVED, UNRESOLVED');
   });
 
+  /**
+   * The gate email is an ALERT, not a dump of `qa_exception`.
+   *
+   * On 2026-09-15 it listed all 773 blocking findings one per line. Two RED
+   * emails in a row then failed to reach the operator, and nothing in the send
+   * path could say whether size was why — Gmail clips a body over ~102 KB, and
+   * 415 identical QC-409 lines are one fact printed 415 times, which buries the
+   * eight other checks that each needed a separate decision.
+   *
+   * So the size is a property worth asserting, not a consequence worth hoping
+   * about: a pathological day must still produce a readable, deliverable email.
+   */
+  it('stays small and readable when one check fires hundreds of times', () => {
+    const host = makeHost();
+    const run = beginRun(db, host, { kind: 'daily', tradingDate: '2026-09-06' });
+    runGate(db, host, {
+      runId: run.runId, tradingDate: '2026-09-06',
+      checks: [
+        fakeCheck({
+          id: 'QC-903', severity: 'blocking',
+          evals: () => Array.from({ length: 500 }, (_, i) => ({
+            key: `AAA${i}--261016C00280000`,
+            value: 1,
+            fired: true,
+            detail: `AAA${i}--261016C00280000 is pinned (recommended_by_legacy) but has no snapshot for 2026-09-06`
+          }))
+        }),
+        fakeCheck({
+          id: 'QC-905', severity: 'blocking',
+          evals: () => [{ key: 'SPY', value: 1, fired: true, detail: 'the one that must not be buried' }]
+        })
+      ]
+    });
+
+    const email = buildStatusEmail(db, {
+      runId: run.runId, tradingDate: '2026-09-06', slot: 'after_close', verdict: 'red',
+      generationNo: 1, generationStatus: 'pilot', collectorVersion: '0.1.0',
+      startedAt: 't', finishedAt: 't', domains: {}
+    });
+
+    // Well under the clip threshold, which is what makes it arrive intact.
+    expect(Buffer.byteLength(email.html, 'utf8')).toBeLessThan(102_400);
+    // The total is never lost — that is the number that says how bad the day is.
+    expect(email.subject).toContain('RED (501 blocking)');
+    expect(email.text).toContain('QC-903');
+    expect(email.text).toContain('×500');
+    expect(email.text).toContain('and 497 more');
+    // A check that fired once is still visible beside one that fired 500 times.
+    expect(email.text).toContain('the one that must not be buried');
+    // Concrete evidence survives the collapse; a bare count is not actionable.
+    expect(email.text).toContain('AAA0--261016C00280000');
+  });
+
   it('has a no-run email that explains what silence meant', () => {
     const email = buildNoRunEmail('2026-09-06', 'The scheduler did not fire.');
     expect(email.subject).toContain('NO RUN');
