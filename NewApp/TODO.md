@@ -244,3 +244,47 @@ short 0.20–0.30Δ, credit ≥ 30% of width, IVR ≥ ~30; exit 50% profit / 15 
 35. **Tidy `.ai/AI_CONTEXT.md` §11** — e.g. "ETF-aware wheel scoring … needs validation before
     enabling (v1.1.118)" is stale (validated and shipped enabled in v1.1.172); the B1 slot-bias
     entry duplicates #28.
+
+---
+
+## H. Making the bug class findable — added 2026-09-15
+
+Both come out of the 2026-09-15 session, where three separate faults turned out to be one
+shape: **code encodes an assumption about an external system, and nothing ever compares
+that assumption to what the system actually sent.** The evidence for the right answer was
+sitting in `meta_response` the whole time in every case.
+
+46. **QC family: validate our encoded assumptions against captured provider bytes.**
+    The archive already holds every response, so each of these is a query rather than a new
+    data source. Candidates, each with the fault that motivates it:
+    - **A constructed identifier must equal a received one.** `osiSymbol()` built
+      `AIZ   261016C00280000` while E*Trade sends `ACGL--260918C00095000` — every one of 415
+      pins unmatchable, QC-409 growing daily and never resolving, for two weeks (v1.1.248).
+      Check: for each `ref_sticky_contract.osi_symbol`, does a contract with that exact
+      spelling exist anywhere in `raw_option_contract_snapshot`?
+    - **An enum we branch on must be a subset of what has been observed.** `expiryType` had
+      an undocumented fourth value (`MONTHEND`) found only by reading a live response.
+    - **A field we treat as numeric must actually be numeric in stored data.** Polygon's
+      daily `v` is fractional routinely; the parser asserted integrality and wrote `0` on
+      most bars (v1.1.236), and QC-205 reported `Evaluated 0` for three backfills.
+    - **A field we treat as boolean must not be a string.** `inTheMoney` is `"y"`/`"n"`, and
+      `Boolean("n") === true`.
+    Design note: these are *blocking* only where a mismatch means data is being silently
+    discarded; the identifier check is the clear case. Start with that one — it is a single
+    query and it would have caught the OSI bug on day one.
+
+47. **Source scan: a fixture for a provider-shaped field must come from a captured response.**
+    The rule is already written in `CLAUDE.md` ("test a reader against the schema it reads,
+    never a fixture written from the reader") and has been broken four times: the legacy
+    importer's fake tables written from the importer's own assumptions (v1.1.237), every bar
+    fixture using a whole-number volume (v1.1.236), all four OSI fixtures spelling `osiKey`
+    the way the builder did (v1.1.248), and both dedup tests pinning `asOfDate` to one
+    constant (v1.1.248). **Prose in `CLAUDE.md` demonstrably does not hold** — the rule was
+    written before two of the four breaches.
+    Make it executable: a test that fails when a fixture for a provider field is a literal
+    nobody sourced, with the anchor naming the table and date it was copied from (as
+    `osi.test.ts` now does). Follow the existing source-scan discipline — strip comments and
+    JSX text first, and give the rule `fires` and `clean` fixtures both ways so the stripping
+    cannot quietly make it vacuous.
+    **This is the meta-item of the two**: it targets the mechanism by which the assumptions in
+    #46 get baked in and confirmed, rather than any single assumption.
