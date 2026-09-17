@@ -311,3 +311,6 @@ sitting in `meta_response` the whole time in every case.
     apps closed, from a normal terminal: `node packages/core/scripts/gate-preview.mjs 2026-09-16
     QC-410 QC-414 QC-407 QC-008 QC-009`. Expected: QC-410 names ~50-90 tickers (PCTY, AMG, AIZ,
     WSM …), QC-414 does not fire, QC-407 evaluates tickers instead of zero, QC-008 and QC-009 quiet.
+    **Run 1 (2026-09-16) found two faults, fixed in v1.1.253**: QC-410 used parity as its reference and
+    flagged dividend payers whose Greeks were right; QC-009 read superseded dictionary keys and
+    counted a capped Finnhub window's halves as duplicates. Re-run once on v1.1.253 to confirm.

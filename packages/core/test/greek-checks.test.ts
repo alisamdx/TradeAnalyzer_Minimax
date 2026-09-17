@@ -208,6 +208,24 @@ describe('QC-410, per-ticker Greek consistency', () => {
     expect(ev.pinnedContracts).toBeGreaterThanOrEqual(5);
   });
 
+  it('does not fire when only parity is off — a dividend before expiry pulls parity low', () => {
+    // EIX, 2026-09-16: Greeks implied 54.72 on a 54.81 chain; parity read 53.00. As the
+    // reference, parity flagged a ticker whose Greeks were right. Modelled here as quotes
+    // priced at a spot 3 % below the chain underlying while the Greeks use the chain's.
+    captureRate();
+    capture(
+      'etrade',
+      chain('EIX', 53, { greekSpot: 54.6 }).replace('"nearPrice":53', '"nearPrice":54.6'),
+      recipes.chain({ ticker: 'EIX', expirationDate: EXPIRY }),
+      '/v1/market/optionchains/EIX'
+    );
+    const [e] = QC410_GREEK_REPRODUCTION.run(ctx());
+    expect(e!.fired).toBe(false);
+    const ev = e!.evidence as { paritySpot: number; chainUnderlying: number };
+    expect(ev.chainUnderlying).toBe(54.6);
+    expect(ev.paritySpot).toBeLessThan(54);
+  });
+
   it('counts a contract once when the same day was captured twice', () => {
     captureRate();
     captureChain('AAA', 100);

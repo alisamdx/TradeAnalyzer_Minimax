@@ -497,10 +497,13 @@ export const QC410_GREEK_REPRODUCTION: CheckDefinition = {
   domain: 'chains',
   severity: 'warning',
   description:
-    "A ticker's Greeks were computed off the price its own option quotes imply. Per ticker, the spot at " +
-    "which our Black-Scholes delta equals the provider's (median over ATM contracts) is compared with " +
-    'the spot put-call parity recovers from the quoted mids. No Greek and no volatility enters the ' +
-    'second, so a disagreement says the Greeks, not the prices, are off. Measured 2026-09-15/16 over ' +
+    "A ticker's Greeks were computed off the price its chain reports. Per ticker, the spot at which " +
+    "our Black-Scholes delta equals the provider's (median over ATM contracts) is compared with the " +
+    "chain's `underlying_price`, which QC-407 cross-checks against Polygon's session close (549 of 549 " +
+    'agreeing on 2026-09-16). Put-call parity on the quoted mids is reported beside it as evidence that ' +
+    'the PRICES are right, but is not the reference: parity is dividend-free, so it reads low by the ' +
+    'value of any dividend before expiry, and as the reference it flagged EIX, CMCSA and CLX, whose ' +
+    'Greeks matched the chain exactly (EIX 54.72 vs 54.81) while parity read 53.00. Measured 2026-09-15/16 over ' +
     '~500 tickers: parity reproduced the session close to a median of -0.03 %, while 50-70 tickers a ' +
     'day carried deltas implying a different price: PCTY 113.6 on a 147.3 close on BOTH days, JAZZ ' +
     '249.65 then 249.67 while the stock moved. Any consumer selecting strikes by provider delta picks ' +
@@ -509,7 +512,7 @@ export const QC410_GREEK_REPRODUCTION: CheckDefinition = {
     'domain RED without naming them. QC-414 carries the scale question it used to answer. A missing ' +
     "3M rate skips the check, because a missing rate is QC-902's finding.",
   readsTables: ['raw_option_contract_snapshot', 'raw_treasury_yield'],
-  testedQuantity: 'abs_delta_spot_vs_parity_spot_fraction',
+  testedQuantity: 'abs_delta_spot_vs_chain_underlying_fraction',
   testedUnit: 'fraction',
   thresholds: { maxSpotDisagreement: 0.01 },
   thresholdBasis: 'measured',
@@ -568,21 +571,21 @@ export const QC410_GREEK_REPRODUCTION: CheckDefinition = {
         if (spot !== null) parity.push(spot);
       }
 
-      if (parity.length < MIN_PARITY_PAIRS) continue;
-      const quoteSpot = median(parity);
+      const chainSpot = list[0]!.underlying_price;
+      const quoteSpot = parity.length >= MIN_PARITY_PAIRS ? median(parity) : null;
 
       // The worst case cannot be inverted. Greeks computed off a price far enough
       // away pin every near-the-money delta at 0 or 1 (PCTY's $140 put read -1.000
       // on a 147.32 close), so a ticker judged only on invertible contracts would
       // drop out of the check at exactly the moment it is most wrong. A provider
-      // delta that is pinned where our model at the parity spot is plainly not
+      // delta that is pinned where our model at the chain's spot is plainly not
       // (0.2-0.8) is the same finding, read directly.
       let pinned = 0;
       for (const r of list) {
         const dteDays = dteOn(ctx.tradingDate, r.expiration_date);
         // Out of [-1, 1] is not pinned, it is a unit fault: QC-414's finding, feed-wide.
         if (dteDays < 1 || Math.abs(r.delta) > 1 || (Math.abs(r.delta) >= 0.05 && Math.abs(r.delta) <= 0.95)) continue;
-        const model = bsDelta({ spot: quoteSpot, strike: r.strike, dteDays, iv: r.iv, rate, right: r.right });
+        const model = bsDelta({ spot: chainSpot, strike: r.strike, dteDays, iv: r.iv, rate, right: r.right });
         if (model !== null && Math.abs(model) >= 0.2 && Math.abs(model) <= 0.8) pinned++;
       }
 
@@ -591,7 +594,7 @@ export const QC410_GREEK_REPRODUCTION: CheckDefinition = {
       const deltaSpot = measurable ? median(implied) : null;
       // With no invertible contracts the disagreement has no size, only a
       // direction; 1 stands for "beyond anything the spot comparison can measure".
-      const gap = deltaSpot === null ? 1 : Math.abs(deltaSpot / quoteSpot - 1);
+      const gap = deltaSpot === null ? 1 : Math.abs(deltaSpot / chainSpot - 1);
       const fired = gap > maxGap || pinned >= MIN_IMPLIED_CONTRACTS;
       evaluations.push({
         key: ticker,
@@ -599,16 +602,16 @@ export const QC410_GREEK_REPRODUCTION: CheckDefinition = {
         fired,
         detail:
           (deltaSpot === null
-            ? `${ticker}: ${pinned} near-the-money deltas pinned at 0 or 1 where the option quotes imply ` +
-              `spot ${quoteSpot.toFixed(2)}`
-            : `${ticker}: Greeks imply spot ${deltaSpot.toFixed(2)}, option quotes imply ${quoteSpot.toFixed(2)} ` +
+            ? `${ticker}: ${pinned} near-the-money deltas pinned at 0 or 1 on a chain at ${chainSpot}`
+            : `${ticker}: Greeks imply spot ${deltaSpot.toFixed(2)} on a chain at ${chainSpot} ` +
               `(${(gap * 100).toFixed(1)}% apart${pinned > 0 ? `, ${pinned} deltas pinned` : ''})`) +
-          `; chain underlying ${list[0]!.underlying_price}; provider delta is not usable for strike selection on this ticker today`,
+          (quoteSpot === null ? '' : `; option quotes imply ${quoteSpot.toFixed(2)}`) +
+          '; provider delta is not usable for strike selection on this ticker today',
         evidence: {
           ticker,
           deltaImpliedSpot: deltaSpot,
           paritySpot: quoteSpot,
-          chainUnderlying: list[0]!.underlying_price,
+          chainUnderlying: chainSpot,
           impliedContracts: implied.length,
           pinnedContracts: pinned,
           parityPairs: parity.length

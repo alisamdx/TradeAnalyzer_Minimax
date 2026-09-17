@@ -196,9 +196,12 @@ export const QC009_DUPLICATE_NATURAL_KEY: CheckDefinition = {
   domain: 'cross_cutting',
   severity: 'warning',
   description:
-    'The same natural key was not stored twice within one run. Two rows for one key in a single run ' +
-    'is an idempotence bug, not a supersession: supersession happens across runs with a later ' +
-    'observed_at, and within a run there is only one observation.',
+    'The same natural key was not stored twice from one response. That is an idempotence bug (a ' +
+    'response ingested twice, a parser emitting one key twice); two DIFFERENT responses in one run ' +
+    'returning the same key is not: a capped Finnhub window stores its rows and its uncapped halves ' +
+    'store them again, which is the subdivision QC-008 requires (330 + 322 such keys on 2026-09-16). ' +
+    'Keys come from the CURRENT dictionary version only: meta_dictionary keeps every version, and ' +
+    'reading them all kept a superseded key firing after the key was fixed.',
   readsTables: ['meta_dictionary'],
   testedQuantity: null,
   testedUnit: null,
@@ -208,7 +211,8 @@ export const QC009_DUPLICATE_NATURAL_KEY: CheckDefinition = {
     const tables = ctx.db
       .prepare(
         `SELECT DISTINCT table_name, natural_key FROM meta_dictionary
-          WHERE layer IN ${RAW_LAYERS} AND column_name = 'run_id'`
+          WHERE layer IN ${RAW_LAYERS} AND column_name = 'run_id'
+            AND dictionary_version = (SELECT MAX(dictionary_version) FROM meta_dictionary)`
       )
       .all() as { table_name: string; natural_key: string }[];
 
@@ -216,7 +220,7 @@ export const QC009_DUPLICATE_NATURAL_KEY: CheckDefinition = {
     for (const t of tables) {
       const key = (JSON.parse(t.natural_key) as string[]).filter((c) => c !== 'observed_at');
       if (key.length === 0) continue;
-      const cols = key.map((c) => `"${c}"`).join(', ');
+      const cols = [...key, 'source_response_id'].map((c) => `"${c}"`).join(', ');
       const dupes = ctx.db
         .prepare(
           `SELECT COUNT(*) AS n FROM (
@@ -227,7 +231,7 @@ export const QC009_DUPLICATE_NATURAL_KEY: CheckDefinition = {
       out.push({
         key: t.table_name,
         fired: dupes.n > 0,
-        detail: dupes.n > 0 ? `${dupes.n} duplicate natural key(s) in ${t.table_name} within one run` : undefined,
+        detail: dupes.n > 0 ? `${dupes.n} duplicate natural key(s) in ${t.table_name} within one response` : undefined,
         evidence: { table: t.table_name, duplicateKeys: dupes.n }
       });
     }

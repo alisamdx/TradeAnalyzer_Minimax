@@ -671,6 +671,44 @@ describe('EDGAR company facts', () => {
     const edgar = QC009_DUPLICATE_NATURAL_KEY.run({ db: db(), runId: run.runId, tradingDate: DATE, observedAt: OBSERVED })
       .find((e) => e.key === 'raw_edgar_fact');
     expect(edgar?.fired).toBe(false);
+
+    // meta_dictionary keeps every version. On 2026-09-16 the check read them all, so a
+    // superseded key without period_start would have kept firing after the key was fixed.
+    // Copy the current version's rows as version N-1, from the live column list.
+    const cols = (raw.prepare('PRAGMA table_info(meta_dictionary)').all() as { name: string }[]).map((c) => c.name);
+    const select = cols.map((c) => (c === 'dictionary_version' ? 'dictionary_version - 1' : `"${c}"`)).join(', ');
+    raw.exec(
+      `INSERT INTO meta_dictionary (${cols.map((c) => `"${c}"`).join(', ')})
+         SELECT ${select} FROM meta_dictionary
+          WHERE table_name = 'raw_edgar_fact' AND dictionary_version = (SELECT MAX(dictionary_version) FROM meta_dictionary)`
+    );
+    raw.exec(
+      `UPDATE meta_dictionary SET natural_key = '["cik","taxonomy","concept","unit","period_end","fiscal_period","accession_no","observed_at"]'
+        WHERE table_name = 'raw_edgar_fact' AND dictionary_version < (SELECT MAX(dictionary_version) FROM meta_dictionary)`
+    );
+    const again = QC009_DUPLICATE_NATURAL_KEY.run({ db: db(), runId: run.runId, tradingDate: DATE, observedAt: OBSERVED })
+      .filter((e) => e.key === 'raw_edgar_fact');
+    expect(again.map((e) => e.fired)).toEqual([false]);
+  });
+
+  it('does not treat two responses returning one key as an idempotence bug (QC-009)', async () => {
+    // A capped Finnhub window stores its rows, then its uncapped halves store them again:
+    // 330 raw_earnings_event and 322 raw_analyst_estimate "duplicates" on 2026-09-16, each
+    // one the subdivision QC-008 requires.
+    const run = newRun();
+    for (const [from, to] of [['2026-09-07', '2026-09-20'], ['2026-09-07', '2026-09-13']]) {
+      captureResponse({
+        host: makeHost(), db: db(), runId: run.runId, asOfDate: DATE, provider: 'finnhub',
+        endpoint: '/calendar/earnings', slug: 'calendar-earnings', params: { from: from!, to: to! },
+        response: response(earningsBody([{ symbol: 'NVDA', date: '2026-09-10' }])), captureRuleId: ruleId(),
+        recipe: recipes.earnings({ sweepFrom: from!, sweepTo: to!, universe: new Set(['NVDA']) })
+      });
+    }
+    const stored = raw.prepare("SELECT COUNT(*) AS n FROM raw_earnings_event WHERE ticker = 'NVDA'").get() as { n: number };
+    expect(stored.n).toBe(2);
+    const e = QC009_DUPLICATE_NATURAL_KEY.run({ db: db(), runId: run.runId, tradingDate: DATE, observedAt: OBSERVED })
+      .find((x) => x.key === 'raw_earnings_event');
+    expect(e?.fired).toBe(false);
   });
 });
 

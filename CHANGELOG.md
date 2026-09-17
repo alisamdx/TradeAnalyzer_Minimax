@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.1.253] - 2026-09-16
+
+### Two check faults found by previewing v1.1.252's checks on real data
+
+`gate-preview.mjs` on 2026-09-16, before the first email:
+
+- **QC-410 measured against the chain price, not put-call parity.** Parity is dividend-free and reads low by any dividend before expiry; as the reference it flagged EIX, CMCSA and CLX, whose Greeks matched their chains exactly (EIX 54.72 vs 54.81, parity 53.00). The chain `underlying_price` is what QC-407 cross-checks (549 of 549 agreeing) and what the existing app's guard uses, so both apps now share one definition. Parity stays in the evidence.
+- **QC-009 groups by response and reads the current dictionary only.** It still reported 1,641 EDGAR duplicates after v1.1.252 fixed the key, because `meta_dictionary` keeps every version and the check read them all. Its 330 earnings and 322 estimate "duplicates" were a capped Finnhub window and its re-fetched halves, the subdivision QC-008 requires. An idempotence bug is one response stored twice, and that is what it now looks for.
+
+`core` 0.6.14. Details: `changelogs/v1.1.253_2026-09-16.md`.
+
 ## [1.1.252] - 2026-09-16
 
 ### E*Trade's Greeks can be computed off the wrong price — found, measured, and handled in both apps
