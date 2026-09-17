@@ -34,6 +34,14 @@ const { bsDelta } = await import('../dist/qa/black-scholes.js');
 const TOLERANCE = 0.05; // QC-410's maxAbsDeltaDifference
 const ATM_BAND = 0.05; // QC-410's ATM band
 
+// A malformed date matches no rows and every section then prints n=0, which reads
+// as a finding rather than a typo (2026-09-16: a double-pasted command passed
+// `2026-09-16node`, and the 3M-rate lookup still succeeded by string comparison).
+if (process.argv[2] !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(process.argv[2])) {
+  console.error(`Expected a date as yyyy-mm-dd, got "${process.argv[2]}".`);
+  process.exit(2);
+}
+
 const { dbPath } = await resolveGenerationPointer();
 const db = await openGenerationExclusively(dbPath, 'qc410-study.mjs');
 
@@ -90,6 +98,10 @@ try {
   const breach = (m) => m.diff > TOLERANCE;
   const total = measured.length;
   const nBreach = measured.filter(breach).length;
+  if (total === 0) {
+    // Thrown, not returned: this is top-level module code, and the finally still closes the db.
+    throw new Error(`No measurable ATM contracts for ${date}. Nothing to study; stopping rather than printing empty sections.`);
+  }
   console.log(`ATM contracts measured ${total}, breaching ${nBreach} (${pct(nBreach, total)})`);
   // Every run that day contributes its own observation, exactly as the gate reads them —
   // three runs on one date would count each contract three times.
