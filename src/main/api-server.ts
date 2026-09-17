@@ -32,6 +32,7 @@ import { registerCriticRoutes } from './api/routes-critic.js';
 import { registerOrchestratorRoutes } from './api/routes-orchestrator.js';
 import { registerDiagnosticsRoutes } from './api/routes-diagnostics.js';
 import type { CollectorDay } from './services/day-diagnostics.js';
+import type { GenerationSnapshot } from './services/generation-snapshot.js';
 import { secureGet, secureSet } from './services/secure-settings.js';
 
 const DATA_DIR = join(homedir(), '.tradeanalyzer');
@@ -103,6 +104,8 @@ export interface ApiServerServices {
   diagnostics?: {
     logsDir: string;
     readCollectorDay: (date: string) => CollectorDay | { unavailable: string };
+    /** A consistent copy of the TradeAnalyzer 2 generation for same-day rehearsal. */
+    snapshotGeneration?: () => GenerationSnapshot | { unavailable: string };
   };
 }
 

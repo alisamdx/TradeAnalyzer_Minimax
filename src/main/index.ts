@@ -2,9 +2,11 @@ import { app, BrowserWindow, shell, powerSaveBlocker, Notification, dialog } fro
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { readFileSync, existsSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { snapshotGeneration } from './services/generation-snapshot.js';
 import { ApiServer } from './api-server.js';
 import { ElectronCollectorHost, readSharedPointer, generationExists } from './collector-host/electron-collector-host.js';
-import { writeLegacyHandoff, type LegacyBriefHandoff } from '@tradeanalyzer/core';
+import { writeLegacyHandoff, etTimestamp, type LegacyBriefHandoff } from '@tradeanalyzer/core';
 import { createCollectorDailyJob, createCollectorWatchdogJob } from './services/jobs/collector-daily.js';
 import { createCollectorOneShotJob } from './services/jobs/collector-oneshot.js';
 import { newAppUniverseSources } from './collector-host/universe-sources.js';
@@ -1074,6 +1076,29 @@ app.whenReady().then(() => {
         const host = makeCollectorHost({ signal: new AbortController().signal, onProgress: () => undefined });
         try {
           return readCollectorDay(host.openGenerationDb(), date);
+        } finally {
+          host.close();
+        }
+      },
+      snapshotGeneration: () => {
+        const pointer = readSharedPointer();
+        if (!pointer || !generationExists(pointer)) {
+          return { unavailable: 'No TradeAnalyzer 2 generation exists yet.' };
+        }
+        // Same rule as readCollectorDay: never a second reader mid-run, so the copy is never
+        // taken halfway through a collection.
+        const running = batchService.getRunningJobId();
+        if (running === 'data-collector' || running === 'collector-oneshot' || running === 'collector-watchdog') {
+          return { unavailable: `${running} is running — take the snapshot when it finishes.` };
+        }
+        const host = makeCollectorHost({ signal: new AbortController().signal, onProgress: () => undefined });
+        try {
+          return snapshotGeneration(
+            host.openGenerationDb(),
+            join(homedir(), '.tradeanalyzer', 'rehearsal'),
+            pointer.currentGeneration,
+            etTimestamp(),
+          );
         } finally {
           host.close();
         }

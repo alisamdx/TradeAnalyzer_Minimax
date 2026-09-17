@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.256] - 2026-09-16
+
+### A gate fix can be checked the same day
+
+Validating a gate or dictionary change used to cost a night: fix, wait for the next run, find the next thing. Now:
+
+- **`POST /api/v1/diagnostics/generation-snapshot`**: the running app copies the TradeAnalyzer 2 generation with `VACUUM INTO` on its own connection, into `~/.tradeanalyzer/rehearsal`, keeping the five newest. Both apps stay open, and it refuses while a collector job runs.
+- **`packages/core/scripts/rehearse-gate.mjs --date D`**: on that copy, applies the current dictionary, runs the day's whole gate and renders its email, and prints every check's fired/evaluated count against the real run, the verdict, the email subject and size, and the slowest checks. Its exceptions land in the copy, so a rehearsal can never escalate the real generation, and it is safe to run from a Claude Code shell.
+- Not covered: collection. A change to what is fetched still needs a live run; a change to how responses are parsed is covered by replay.
+
+Details: `changelogs/v1.1.256_2026-09-16.md`.
+
 ## [1.1.255] - 2026-09-16
 
 ### The stale-Greek guard is on

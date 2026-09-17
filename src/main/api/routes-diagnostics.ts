@@ -37,4 +37,20 @@ export function registerDiagnosticsRoutes(app: FastifyInstance, svc: ApiServerSe
       return apiError(reply, err instanceof Error ? err.message : String(err), 'INTERNAL', 500);
     }
   });
+
+  // POST /diagnostics/generation-snapshot — a consistent copy of the TradeAnalyzer 2 generation
+  // (VACUUM INTO, on the app's own connection) under ~/.tradeanalyzer/rehearsal, for
+  // packages/core/scripts/rehearse-gate.mjs. Lets a gate fix be checked against today's data within
+  // minutes, with both apps open. see services/generation-snapshot.ts
+  app.post('/diagnostics/generation-snapshot', async (_req, reply) => {
+    const take = svc.diagnostics?.snapshotGeneration;
+    if (!take) return apiError(reply, 'Generation snapshots are not wired in this build', 'UNAVAILABLE', 503);
+    try {
+      const result = take();
+      if ('unavailable' in result) return apiError(reply, result.unavailable, 'UNAVAILABLE', 409);
+      return apiOk(reply, result);
+    } catch (err) {
+      return apiError(reply, err instanceof Error ? err.message : String(err), 'INTERNAL', 500);
+    }
+  });
 }
