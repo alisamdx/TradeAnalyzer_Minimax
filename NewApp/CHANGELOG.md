@@ -9,6 +9,41 @@ exit (06 §6).
 
 ---
 
+## B10b — the earnings checks, read against a real RED night (2026-09-17)
+
+`core` 0.6.17. Both fixes verified on a snapshot of the 2026-09-17 run with
+`rehearse-gate.mjs` before shipping, which is what that tool is for.
+
+That night's gate was RED on 351 blocking findings. **302 of them were one backlog
+counted twice**: QC-204 and QC-501 fired on 151 price discontinuities with identical
+keys. The only new blocking findings in the entire run were eight from QC-601 — and all
+eight were false.
+
+- **QC-601 compared the newest row to the row before it.** The bulk earnings calendar is
+  subdivided into windows because it truncates at its row cap, so one sweep writes **one
+  row per window**: MU's genuine 2026-09-30 and 2026-12-15 reports, written 409 ms apart,
+  were read as a 76-day later slip. Seven of the eight findings were that artefact; the
+  eighth was an issuer that had already reported, rolling to the next quarter. And
+  because the last row written for a ticker is always its *farthest* date, a truncation
+  moving the **nearest** one — the fault the check exists for — was masked by the same
+  confusion. It now compares the nearest future date **per sweep**, clamping a roll whose
+  previous date has passed. On the night's data: **8 fired of 9 → 0 of 3**, max 4 days
+  against a 14-day threshold, so the boundary is still reachable.
+- **QC-602 now reports its own missing second source** (9999-day sentinel) rather than
+  evaluating nothing. Its vacuity was already known and tracked as TODO #52; what was
+  missing is that the gate's own output rendered it identically to a clean check, on the
+  night it was the only corroboration available for those eight QC-601 findings. Actually
+  capturing E*Trade earnings remains TODO #52 — a collection change, not rehearsable.
+- **The email names checks that evaluated nothing** (§7.2b): `EVALUATED NOTHING (4) —
+  QC-303, QC-502, QC-909, QC-951`. `checksVacuous` was computed by the gate and carried
+  by the daily result, and rendered nowhere.
+
+Fixture note worth keeping: `beginRun` **resumes** a run still running on the same
+trading date, slot and kind, so a test that models two sweeps needs two trading dates —
+a second `newRun()` silently hands back the first.
+
+---
+
 ## B10b — short interest verified (2026-09-15)
 
 `core` **0.6.9**; existing app **v1.1.245**. The 2026-09-14 daily run stored

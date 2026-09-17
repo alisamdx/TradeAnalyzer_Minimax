@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.258] - 2026-09-17
+
+### Two earnings checks: one firing on correct data, one that could never fire
+
+The 2026-09-17 gate was RED on 351 blocking findings, of which **302 were one backlog counted twice** — QC-204 and QC-501 fired on 151 price discontinuities with identical keys. The only new blocking findings in the run were eight from QC-601, and every one was false. Both faults below were verified against that night's own data with `rehearse-gate.mjs` before shipping.
+
+- **QC-601 compared the newest row to the row before it**, assuming a sweep writes one row per ticker. The bulk calendar is subdivided into windows, so one run writes one row per window: MU's real 2026-09-30 and 2026-12-15 reports, written **409 ms apart**, read as a 76-day slip. Seven of the eight findings were that artefact; the eighth was an issuer that had already reported. Worse, since the last row written is always a ticker's *farthest* date, a truncation moving the **nearest** one — the fault the check exists for — was masked by the same confusion. It now compares the **nearest future date per sweep**, and clamps a roll whose previous date has passed. On the night's data: **8 fired of 9 → 0 of 3**, max 4 days against a 14-day threshold.
+- **QC-602 reports its own missing second source instead of passing in silence.** That it evaluates nothing was already known and tracked (TODO #52, measured 2026-09-16): it self-joins on `source = 'etrade'` and `raw_earnings_event` has only ever held finnhub rows. What was missing is that **the gate's own output never said so** — it looked identical to a check with nothing to report, on the night it was the only corroboration available for those eight QC-601 findings. A missing second source is now the finding, with a 9999-day sentinel: "cannot be compared" must not read as "compared and agreed". Actually capturing E*Trade earnings remains TODO #52 — a collection change, not rehearsable.
+- **The email now names checks that evaluated nothing** (`EVALUATED NOTHING (4) — QC-303, QC-502, QC-909, QC-951`). The gate already computed `checksVacuous` and nothing rendered it; the aggregate zero-fire count cannot tell "found nothing wrong" from "could not look".
+
+`core` 0.6.17. Details: `changelogs/v1.1.258_2026-09-17.md`.
+
 ## [1.1.257] - 2026-09-16
 
 ### Found by rehearsing the gate: two collection bugs and two checks that could never pass

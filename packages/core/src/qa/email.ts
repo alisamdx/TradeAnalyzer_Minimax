@@ -150,6 +150,18 @@ export function buildStatusEmail(
     .prepare('SELECT COUNT(*) AS n FROM qa_check_registry WHERE valid_to IS NULL')
     .get() as { n: number };
 
+  // A check that evaluated nothing is not a clean check — it is a check that
+  // COULD not have fired, and the zero-fire aggregate above cannot tell the two
+  // apart. QC-602 sat at evaluated 0 for the whole generation because it joined
+  // on a source the collector never fetches, and nothing ever said so: the gate
+  // computed `checksVacuous`, the daily result carried it, and it was rendered
+  // nowhere. Named per run, because the name is the entire value of the line.
+  const vacuous = db
+    .prepare(
+      'SELECT check_id FROM qa_check_result WHERE run_id = ? AND evaluated_count = 0 ORDER BY check_id'
+    )
+    .all(args.runId) as { check_id: string }[];
+
   const streak = cleanDayStreak(db, args.tradingDate);
   const target = args.pilotTargetDays ?? 20;
 
@@ -226,6 +238,12 @@ export function buildStatusEmail(
     for (const e of expired) {
       lines.push(`  ${e.check_id} ${e.domain}  ${e.key}  ${e.detail} · expired ${e.accepted_until ?? '?'}`);
     }
+    lines.push('');
+  }
+
+  if (vacuous.length > 0) {
+    lines.push(`EVALUATED NOTHING (${vacuous.length})                       ← could not fire; not the same as clean`);
+    lines.push(`  ${vacuous.map((v) => v.check_id).join(', ')}`);
     lines.push('');
   }
 

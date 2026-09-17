@@ -33,7 +33,11 @@ import {
 import { runEarningsSweep, runShortInterest, runTreasuryYields } from '../src/collector/phases/events.js';
 import { runGate } from '../src/qa/gate.js';
 import { EARNINGS_FUNDAMENTALS_CHECKS, MACRO_CHECKS } from '../src/qa/registry.js';
-import { QC604_EARNINGS_WEEKEND_DATE } from '../src/qa/checks/earnings-fundamentals.js';
+import {
+  QC601_EARNINGS_SLIPS_LATER,
+  QC602_EARNINGS_SOURCE_DISAGREEMENT,
+  QC604_EARNINGS_WEEKEND_DATE
+} from '../src/qa/checks/earnings-fundamentals.js';
 import { ensureTradingCalendar } from '../src/collector/trading-calendar.js';
 import { captureResponse } from '../src/collector/capture.js';
 import { recipes } from '../src/ingest/recipes.js';
@@ -839,7 +843,7 @@ function gate(checks: readonly (typeof EARNINGS_FUNDAMENTALS_CHECKS)[number][]) 
 }
 
 function insertEarnings(rows: readonly {
-  ticker: string; date: string; observedAt: string; source?: string;
+  ticker: string; date: string; observedAt: string; source?: string; runId?: number; asOf?: string;
 }[]) {
   const stmt = raw.prepare(
     `INSERT INTO raw_earnings_event
@@ -850,7 +854,10 @@ function insertEarnings(rows: readonly {
   );
   const rule = ruleId();
   for (const r of rows) {
-    stmt.run(fixtureRun.runId, DATE, r.observedAt, rule, fixtureResponseId(), r.ticker, r.date, r.source ?? 'finnhub');
+    stmt.run(
+      r.runId ?? fixtureRun.runId, r.asOf ?? DATE, r.observedAt, rule, fixtureResponseId(),
+      r.ticker, r.date, r.source ?? 'finnhub'
+    );
   }
 }
 
@@ -876,46 +883,143 @@ describe('QC-604, report dates on non-trading days', () => {
 });
 
 describe('QC-601, the earnings truncation signature', () => {
-  it('fires when a date slips more than 14 days later', () => {
-    // The NVDA case: 2026-08-26 stored as 2026-11-17 from a capped response.
+  /**
+   * The tested quantity is the NEAREST FUTURE date per sweep, so every fixture
+   * here spans two runs. The previous shape — two rows, one run, one per
+   * "observation" — was written from the check's own assumption that a sweep
+   * writes one row per ticker, and that is exactly what made the bug invisible:
+   * the real sweep is subdivided into windows and writes one row per window.
+   */
+  const SWEEP_1 = '2026-09-01T17:00:00-04:00';
+  const SWEEP_2 = '2026-09-07T17:00:00-04:00';
+
+  /**
+   * Two sweeps. `beginRun` RESUMES a run that is still running on the same
+   * trading date, slot and kind, so a second `newRun()` hands back the fixture's
+   * own run and the check sees one sweep where the test meant two. The later
+   * sweep is a different trading date, which is also the real case.
+   */
+  function sweeps(nextDate = '2026-09-08'): { prev: number; next: number; nextAsOf: string } {
+    return {
+      prev: fixtureRun.runId,
+      next: beginRun(db(), makeHost(), { kind: 'daily', tradingDate: nextDate }).runId,
+      nextAsOf: nextDate
+    };
+  }
+
+  it('fires when the nearest future date slips more than 14 days later', () => {
+    // The NVDA case: the real report replaced by the next quarter's, from a
+    // response sitting at the provider's row cap.
+    const { prev, next, nextAsOf } = sweeps();
     insertEarnings([
-      { ticker: 'NVDA', date: '2026-08-26', observedAt: '2026-09-01T17:00:00-04:00' },
-      { ticker: 'NVDA', date: '2026-11-17', observedAt: '2026-09-07T17:00:00-04:00' }
+      { ticker: 'NVDA', date: '2026-09-25', observedAt: SWEEP_1, runId: prev },
+      { ticker: 'NVDA', date: '2026-12-17', observedAt: SWEEP_2, runId: next, asOf: nextAsOf }
     ]);
-    const result = gate([EARNINGS_FUNDAMENTALS_CHECKS[0] as never]);
-    expect(result.blocking).toBe(1);
+    expect(gate([QC601_EARNINGS_SLIPS_LATER]).blocking).toBe(1);
+  });
+
+  it('does NOT fire on two windows of the SAME sweep', () => {
+    // The regression. MU has two real reports inside the 90-day horizon, and the
+    // sweep is subdivided because the bulk calendar truncates at its row cap, so
+    // ONE run writes both: 2026-09-30 from the near window and 2026-12-15 from
+    // the far one, 409 ms apart. Read as successive observations that was a
+    // 76-day slip on entirely correct data — seven of the eight findings on
+    // 2026-09-17, and it grows as a quarter-end pulls more second reports in.
+    const { prev, next, nextAsOf } = sweeps();
+    insertEarnings([
+      { ticker: 'MU', date: '2026-09-30', observedAt: SWEEP_1, runId: prev },
+      { ticker: 'MU', date: '2026-09-30', observedAt: '2026-09-08T19:00:12.615-04:00', runId: next, asOf: nextAsOf },
+      { ticker: 'MU', date: '2026-12-15', observedAt: '2026-09-08T19:00:13.024-04:00', runId: next, asOf: nextAsOf }
+    ]);
+    expect(gate([QC601_EARNINGS_SLIPS_LATER]).blocking).toBe(0);
+  });
+
+  it('does not fire when the date rolls because the issuer has already reported', () => {
+    // GIS reported 2026-09-15 and the calendar rolled to 2026-12-15 two days
+    // later. The previous nearest is in the PAST as of this sweep: the calendar
+    // working, not a slip. Still evaluated — clamped to 0, never dropped.
+    const { prev, next, nextAsOf } = sweeps('2026-09-14');
+    insertEarnings([
+      { ticker: 'GIS', date: '2026-09-10', observedAt: SWEEP_1, runId: prev, asOf: DATE },
+      { ticker: 'GIS', date: '2026-12-15', observedAt: SWEEP_2, runId: next, asOf: nextAsOf }
+    ]);
+    const evals = QC601_EARNINGS_SLIPS_LATER.run({
+      db: db(), runId: fixtureRun.runId, tradingDate: DATE, observedAt: OBSERVED
+    });
+    expect(evals).toHaveLength(1);
+    expect(evals[0]!.fired).toBe(false);
+    expect(evals[0]!.value).toBe(0);
   });
 
   it('does NOT fire when a date moves nearer, however far', () => {
     // A coverage gap hiding the near date is the common case and the correction
     // is unbounded. The asymmetry is the whole rule.
+    const { prev, next, nextAsOf } = sweeps();
     insertEarnings([
-      { ticker: 'NVDA', date: '2026-11-17', observedAt: '2026-09-01T17:00:00-04:00' },
-      { ticker: 'NVDA', date: '2026-08-26', observedAt: '2026-09-07T17:00:00-04:00' }
+      { ticker: 'NVDA', date: '2026-12-17', observedAt: SWEEP_1, runId: prev },
+      { ticker: 'NVDA', date: '2026-09-25', observedAt: SWEEP_2, runId: next, asOf: nextAsOf }
     ]);
-    expect(gate([EARNINGS_FUNDAMENTALS_CHECKS[0] as never]).blocking).toBe(0);
+    expect(gate([QC601_EARNINGS_SLIPS_LATER]).blocking).toBe(0);
   });
 
   it('does not fire on a small later slip an issuer might genuinely make', () => {
+    const { prev, next, nextAsOf } = sweeps();
     insertEarnings([
-      { ticker: 'NVDA', date: '2026-08-26', observedAt: '2026-09-01T17:00:00-04:00' },
-      { ticker: 'NVDA', date: '2026-09-02', observedAt: '2026-09-07T17:00:00-04:00' }
+      { ticker: 'NVDA', date: '2026-09-25', observedAt: SWEEP_1, runId: prev },
+      { ticker: 'NVDA', date: '2026-10-01', observedAt: SWEEP_2, runId: next, asOf: nextAsOf }
     ]);
-    expect(gate([EARNINGS_FUNDAMENTALS_CHECKS[0] as never]).blocking).toBe(0);
+    expect(gate([QC601_EARNINGS_SLIPS_LATER]).blocking).toBe(0);
   });
 
   it('records the distribution even on a clean run', () => {
     // P10: a check cannot record fires without the distribution they came from.
+    const { prev, next, nextAsOf } = sweeps();
     insertEarnings([
-      { ticker: 'NVDA', date: '2026-08-26', observedAt: '2026-09-01T17:00:00-04:00' },
-      { ticker: 'NVDA', date: '2026-09-02', observedAt: '2026-09-07T17:00:00-04:00' }
+      { ticker: 'NVDA', date: '2026-09-25', observedAt: SWEEP_1, runId: prev },
+      { ticker: 'NVDA', date: '2026-10-01', observedAt: SWEEP_2, runId: next, asOf: nextAsOf }
     ]);
-    gate([EARNINGS_FUNDAMENTALS_CHECKS[0] as never]);
+    gate([QC601_EARNINGS_SLIPS_LATER]);
     const row = raw
       .prepare("SELECT distribution_json FROM qa_check_result WHERE check_id = 'QC-601'")
       .get() as { distribution_json: string | null } | undefined;
     expect(row?.distribution_json).toBeTruthy();
     expect(JSON.parse(row?.distribution_json as string).n).toBe(1);
+  });
+});
+
+describe('QC-602, the cross-source comparison that had no second source', () => {
+  it('fires when the second source has no rows at all, rather than evaluating nothing', () => {
+    // It self-joined on source = 'etrade' and the collector fetches only
+    // finnhub, so it evaluated 0 on every daily run of the generation and could
+    // not have fired. A vacuous check and a clean one are indistinguishable
+    // from their fired count, which is the whole reason this framework records
+    // the distribution — so the absence is reported as the finding it is.
+    insertEarnings([{ ticker: 'NVDA', date: '2026-09-25', observedAt: OBSERVED, source: 'finnhub' }]);
+    const evals = QC602_EARNINGS_SOURCE_DISAGREEMENT.run({
+      db: db(), runId: fixtureRun.runId, tradingDate: DATE, observedAt: OBSERVED
+    });
+    expect(evals).toHaveLength(1);
+    expect(evals[0]!.fired).toBe(true);
+    expect(evals[0]!.detail).toContain('etrade');
+    // Never the threshold's own value: "cannot be compared" must not read as
+    // "compared and agreed".
+    expect(evals[0]!.value).toBeGreaterThan(
+      QC602_EARNINGS_SOURCE_DISAGREEMENT.thresholds['maxDisagreementDays'] as number
+    );
+  });
+
+  it('compares per ticker once both sources are present', () => {
+    insertEarnings([
+      { ticker: 'NVDA', date: '2026-09-25', observedAt: OBSERVED, source: 'finnhub' },
+      { ticker: 'NVDA', date: '2026-10-09', observedAt: OBSERVED, source: 'etrade' },
+      { ticker: 'AAPL', date: '2026-10-29', observedAt: OBSERVED, source: 'finnhub' },
+      { ticker: 'AAPL', date: '2026-10-29', observedAt: OBSERVED, source: 'etrade' }
+    ]);
+    const evals = QC602_EARNINGS_SOURCE_DISAGREEMENT.run({
+      db: db(), runId: fixtureRun.runId, tradingDate: DATE, observedAt: OBSERVED
+    });
+    expect(evals).toHaveLength(2);
+    expect(evals.filter((e) => e.fired).map((e) => e.key)).toEqual(['NVDA']);
   });
 });
 

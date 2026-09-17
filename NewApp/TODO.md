@@ -330,6 +330,9 @@ sitting in `meta_response` the whole time in every case.
     E*Trade's earnings date from the quote endpoint (`earnings-service.ts`). A collector phase for the
     chain subset is ~550 E*Trade quote calls a night; alternatively hand the existing app's dates off
     like `legacy_brief`. Either is a collection change — needs a live run, not a rehearsal.
+    **v1.1.258:** the check no longer passes in silence — it reports the missing source as a finding
+    (9999-day sentinel) and the gate email names every check that evaluated nothing. The collection
+    work below is still outstanding, and it is what makes the comparison actually run.
 
 53. **Queue a replay weekly (QC-951/956).** No replay has been queued in gen-002, so QC-951 evaluates
     nothing and QC-956 will warn after 7 sessions. Note: run 8's four recommendation responses will

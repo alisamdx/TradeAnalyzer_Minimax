@@ -30,6 +30,17 @@ export const FUND_TYPES = "('ETF', 'ETV', 'ETN', 'ETS', 'FUND')";
 /** A report this recent puts the next one about a quarter out, possibly past the 90-day sweep. */
 const RECENT_REPORT_GRACE_DAYS = 21;
 
+/** The two independent readings QC-602 exists to compare. Both must be present or it is vacuous. */
+const EARNINGS_CROSS_SOURCES = ['finnhub', 'etrade'] as const;
+
+/**
+ * The sentinel for "these dates cannot be compared at all", well past any real
+ * disagreement. QC-603 uses the same device for a date never observed: an
+ * unmeasurable case must never take the threshold's own value, or an empty
+ * domain reads as a clean one.
+ */
+const UNCOMPARABLE_DISAGREEMENT_DAYS = 9999;
+
 function daysBetween(a: string, b: string): number {
   return Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000);
 }
@@ -39,10 +50,10 @@ export const QC601_EARNINGS_SLIPS_LATER: CheckDefinition = {
   domain: 'earnings',
   severity: 'blocking',
   description:
-    'For a ticker and source, the newest observed report date is not more than 14 days later than ' +
-    'the previous observation. A large later slip is the bulk-cap truncation signature: the cap ' +
-    'drops the EARLIEST dates, so a truncated response reports the next quarter as if it were the ' +
-    'next report. The asymmetry is the point — nearer is unbounded, later is not.',
+    'For a ticker and source, the NEAREST FUTURE report date is not more than 14 days later than ' +
+    'the nearest future date the previous sweep saw. A large later slip is the bulk-cap truncation ' +
+    'signature: the cap drops the EARLIEST dates, so a truncated response reports the next quarter ' +
+    'as if it were the next report. The asymmetry is the point — nearer is unbounded, later is not.',
   readsTables: ['raw_earnings_event'],
   testedQuantity: 'later_slip_days',
   testedUnit: 'days',
@@ -54,38 +65,65 @@ export const QC601_EARNINGS_SLIPS_LATER: CheckDefinition = {
     'date and far short of a quarter.',
   remediation: 'R4',
   run(ctx) {
-    // The two newest observations per (ticker, source). Comparing to the
-    // immediately previous observation rather than to the oldest is what makes
-    // this a *change* detector: an issuer that has always reported on the 26th
-    // never fires, however far away that date is.
+    // The nearest FUTURE report date per sweep, compared sweep to sweep — not
+    // the newest row compared to the row before it.
+    //
+    // A sweep is subdivided into windows, because the bulk calendar truncates at
+    // its row cap, so one run writes one row per window per ticker. MU's
+    // 2026-09-30 and its 2026-12-15 are two real reports in two windows of the
+    // SAME sweep, written 409 ms apart; read as successive observations they
+    // reported a 76-day slip on entirely correct data. Seven of the eight
+    // findings on 2026-09-17 were that artefact, and it grows as a quarter-end
+    // pulls more tickers' second report inside the sweep horizon.
+    //
+    // Ranking by run also fixes the direction this check was blind in: the last
+    // row written for a ticker is always its FARTHEST date, so a truncation that
+    // moved the NEAREST one — the fault the check exists for — was masked by the
+    // same confusion that manufactured the false ones.
     const rows = ctx.db
       .prepare(
-        `WITH ranked AS (
-           SELECT ticker, source, report_date, observed_at,
-                  ROW_NUMBER() OVER (PARTITION BY ticker, source ORDER BY observed_at DESC, row_id DESC) AS rn
+        `WITH nearest AS (
+           SELECT ticker, source, run_id, as_of_date, MIN(report_date) AS near_date
              FROM raw_earnings_event
+            WHERE report_date >= as_of_date
+            GROUP BY ticker, source, run_id
+         ),
+         ranked AS (
+           SELECT ticker, source, run_id, as_of_date, near_date,
+                  ROW_NUMBER() OVER (PARTITION BY ticker, source ORDER BY run_id DESC) AS rn
+             FROM nearest
          )
-         SELECT n.ticker, n.source, n.report_date AS new_date, n.observed_at,
-                p.report_date AS prev_date
+         SELECT n.ticker, n.source, n.near_date AS new_date, n.as_of_date AS new_as_of,
+                p.near_date AS prev_date
            FROM ranked n
            JOIN ranked p ON p.ticker = n.ticker AND p.source = n.source AND p.rn = 2
-          WHERE n.rn = 1 AND n.report_date <> p.report_date`
+          WHERE n.rn = 1 AND n.near_date <> p.near_date`
       )
       .all() as {
-      ticker: string; source: string; new_date: string; prev_date: string; observed_at: string;
+      ticker: string; source: string; new_date: string; new_as_of: string; prev_date: string;
     }[];
 
     return rows.map((r) => {
       const slip = daysBetween(r.prev_date, r.new_date);
+      // A date the issuer has already reported on rolls to the next quarter, and
+      // that roll is the calendar working, not a slip. GIS moved 2026-09-15 ->
+      // 2026-12-15 two days after it reported. Clamped like a nearer move and
+      // for the same reason: a legitimate move left in the fault's distribution
+      // blurs the boundary the threshold is drawn against.
+      const rolledAfterReport = r.prev_date < r.new_as_of;
       return {
         key: `${r.ticker}:${r.source}`,
         // Only a LATER move is measured. A nearer move is legitimate and
         // reporting it as a negative magnitude would put it in the same
         // distribution as the fault and blur the boundary.
-        value: Math.max(slip, 0),
-        fired: slip > (this.thresholds['maxLaterSlipDays'] as number),
-        detail: `${r.ticker} (${r.source}) moved ${r.prev_date} -> ${r.new_date}, ${slip} days later`,
-        evidence: { ticker: r.ticker, source: r.source, previous: r.prev_date, observed: r.new_date, slipDays: slip }
+        value: rolledAfterReport ? 0 : Math.max(slip, 0),
+        fired: !rolledAfterReport && slip > (this.thresholds['maxLaterSlipDays'] as number),
+        detail:
+          `${r.ticker} (${r.source}) nearest report moved ${r.prev_date} -> ${r.new_date}, ${slip} days later`,
+        evidence: {
+          ticker: r.ticker, source: r.source, previous: r.prev_date, observed: r.new_date,
+          slipDays: slip, rolledAfterReport
+        }
       } satisfies Evaluation;
     });
   }
@@ -98,13 +136,48 @@ export const QC602_EARNINGS_SOURCE_DISAGREEMENT: CheckDefinition = {
   description:
     'Finnhub and E*Trade agree within a day on the same ticker\'s next report date. Two independent ' +
     'readings are the cheapest way to catch one feed drifting, and this domain has a documented ' +
-    'history of one of them being confidently wrong.',
+    'history of one of them being confidently wrong. A missing second source is itself the finding: ' +
+    'with one source every ticker passes unexamined, which is indistinguishable from agreement.',
   readsTables: ['raw_earnings_event'],
   testedQuantity: 'source_disagreement_days',
   testedUnit: 'days',
   thresholds: { maxDisagreementDays: 1 },
   thresholdBasis: 'structural',
   run(ctx) {
+    // This check self-joined on source = 'etrade', and `raw_earnings_event` has
+    // only ever held finnhub rows — the collector does not fetch the second
+    // source at all. So it evaluated 0 on every daily run of the generation and
+    // could not have fired, the vacuous pass this framework exists to make
+    // visible. It was dead on 2026-09-17, the night QC-601 fired eight earnings
+    // findings it was the only available corroboration for.
+    //
+    // Collecting E*Trade earnings is a collection change, not a check change, so
+    // until it lands the absence is REPORTED rather than passed over in silence.
+    const present = new Set(
+      (
+        ctx.db
+          .prepare('SELECT DISTINCT source FROM raw_earnings_event WHERE report_date >= ?')
+          .all(ctx.tradingDate) as { source: string }[]
+      ).map((r) => r.source)
+    );
+    const missing = EARNINGS_CROSS_SOURCES.filter((s) => !present.has(s));
+    if (missing.length > 0) {
+      return [
+        {
+          key: 'sources',
+          // The largest possible disagreement, never the threshold's own value:
+          // "cannot be compared" must not read as "compared and agreed".
+          value: UNCOMPARABLE_DISAGREEMENT_DAYS,
+          fired: true,
+          detail:
+            `no cross-source comparison is possible: ${missing.join(' and ')} ` +
+            `${missing.length === 1 ? 'has' : 'have'} no future-dated row` +
+            `${present.size > 0 ? ` (present: ${[...present].sort().join(', ')})` : ''}`,
+          evidence: { present: [...present].sort(), missing }
+        } satisfies Evaluation
+      ];
+    }
+
     const rows = ctx.db
       .prepare(
         `WITH latest AS (

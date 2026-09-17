@@ -137,8 +137,8 @@ A ‡ value still gets its distribution recorded like any other (§4) — measur
 |---|---|---|---|
 | QC-501 unexplained discontinuity | blocking | (alias of QC-204 seen from this domain) a bar discontinuity with no action within ±1 trading day | R6 per-ticker action re-fetch |
 | QC-502 action without effect | info | a `raw_split` whose ratio is not visible in the bar series on `execution_date` (already adjusted; expected) | none |
-| QC-601 earnings date slips later | blocking | for a ticker, the newest observed `report_date` is > 14 days ‡ later than the previous observation from the same source | R4 subdivide sweep around the earlier date; stays open until the earlier date is confirmed absent from a non-capped response |
-| QC-602 earnings source disagreement | warning | Finnhub vs E*Trade `report_date` differ by > 1 day for the same fiscal quarter | none |
+| QC-601 earnings date slips later | blocking | for a ticker and source, the **nearest future** `report_date` of the newest sweep is > 14 days ‡ later than the nearest future date of the previous sweep, **unless the previous nearest has already passed** (an issuer that has reported rolls to the next quarter, which is the calendar working). v1.1.258: comparing the newest ROW to the row before it read two windows of one subdivided sweep as successive observations — MU's real 2026-09-30 and 2026-12-15 reports, written 409 ms apart, reported as a 76-day slip. 7 of the 8 findings on 2026-09-17 were that artefact, and because the last row written is always a ticker's farthest date, a truncation moving the NEAREST one was masked by the same confusion | R4 subdivide sweep around the earlier date; stays open until the earlier date is confirmed absent from a non-capped response |
+| QC-602 earnings source disagreement | warning | Finnhub vs E*Trade `report_date` differ by > 1 day for the same fiscal quarter. **A missing second source is itself the finding**, reported with a 9999-day sentinel rather than evaluating nothing: with one source every ticker passes unexamined, which is indistinguishable from agreement. v1.1.258: the collector fetches only Finnhub, so this evaluated 0 on every daily run of gen-002 and could not have fired. That was known (TODO #52); what was missing is that the gate's OWN OUTPUT rendered it identically to a clean check — including on 2026-09-17, when it was the only corroboration available for eight QC-601 findings | none — collecting E*Trade earnings is a collection change, tracked separately |
 | QC-603 earnings freshness | warning | a subset ticker that is not a fund (latest `raw_ticker_reference.security_type` not in ETF/ETV/ETN/ETS/FUND) has no future `report_date` observed within 7 days, **unless it reported within the last 21 days** (the next date is then about a quarter out and can fall past the 90-day sweep). v1.1.257: 47 of 68 findings on 2026-09-16 were ETFs, and GIS and FPS had reported the day before | R2 re-fetch ticker |
 | QC-604 earnings weekend date | warning | `report_date` on a non-trading day (the UTC-Saturday artefact) — stored as observed, flagged | none |
 | QC-701 filing freshness | warning at 120 d, blocking at 180 d | a CS ticker with `cik` has no fact with `period_end` within N days | R2 re-fetch submissions |
@@ -358,6 +358,9 @@ DOMAINS                    expected   stored   status
 EXPIRED ACCEPTANCES (1)               ← needs a ruling; blocks promotion, not the day
   QC-205 bars  MRNA  accepted 2026-08-06 "genuine repricing, not reuse" · expired 2d · still firing
 
+EVALUATED NOTHING (4)                       ← could not fire; not the same as clean
+  QC-303, QC-502, QC-909, QC-951
+
 OPEN EXCEPTIONS  12 open · 4 acknowledged · 2 accepted (expiring: QC-205 MRNA in 6d) · 1 expired_review · 3 resolved today
 Zero-fire checks this pilot: 9 of 63   (list at pilot exit)
 
@@ -365,6 +368,23 @@ Zero-fire checks this pilot: 9 of 63   (list at pilot exit)
 ```
 
 Rules: blocking first; one line per exception with key, evidence, remediation outcome and age; counts only for warnings; the domain table always present; the open-exception totals always present (P9: nothing ages out silently); plain-text body with an HTML twin; no links that require a session (the deep link opens the new exe).
+
+### 7.2b A check that evaluated nothing is NAMED (added 2026-09-17)
+
+`EVALUATED NOTHING` lists, by id, every check whose `evaluated_count` was zero on
+this run. The aggregate line above it — `Zero-fire checks: N of M` — cannot
+distinguish a check that **found nothing wrong** from one that **could not
+look**, and those are opposite pieces of news.
+
+The gate already computed `checksVacuous` and the daily result already carried
+it; nothing rendered it, so the only trace of a dead check was a zero in a table
+nobody reads. QC-602 sat that way for the whole of gen-002, joining on a source
+the collector does not fetch, and was still dead on the night it was the only
+corroboration available for eight QC-601 findings.
+
+A check is expected to be vacuous only when the phase that writes its tables has
+not shipped (§1). Any other name on this list is a defect — read it before
+reading the findings.
 
 ### 7.2a One screen is a REQUIREMENT, not a description (added 2026-09-15)
 

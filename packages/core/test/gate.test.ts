@@ -383,6 +383,34 @@ describe('the status email', () => {
     expect(email.html).toContain('<pre');
   });
 
+  it('names the checks that evaluated nothing, which a fired count cannot distinguish from clean', () => {
+    // QC-602 sat at evaluated 0 for the whole of gen-002 because it joined on a
+    // source the collector never fetches. The gate computed `checksVacuous` and
+    // the daily result carried it, but nothing rendered it, so the only trace
+    // was a zero in a table nobody reads. The aggregate "Zero-fire checks: N of
+    // M" cannot tell "found nothing wrong" from "could not look".
+    const host = makeHost();
+    const run = beginRun(db, host, { kind: 'daily', tradingDate: '2026-09-06' });
+    runGate(db, host, {
+      runId: run.runId, tradingDate: '2026-09-06',
+      checks: [
+        fakeCheck({ id: 'QC-901', evals: () => [{ key: 'a', value: 0, fired: false }] }),
+        fakeCheck({ id: 'QC-902', evals: () => [] })
+      ]
+    });
+
+    const email = buildStatusEmail(db, {
+      runId: run.runId, tradingDate: '2026-09-06', slot: 'after_close', verdict: 'green',
+      generationNo: 1, generationStatus: 'pilot', collectorVersion: '0.1.0',
+      startedAt: '2026-09-06T17:05:00-04:00', finishedAt: '2026-09-06T17:31:00-04:00',
+      domains: {}
+    });
+
+    expect(email.text).toContain('EVALUATED NOTHING (1)');
+    expect(email.text).toContain('QC-902');
+    expect(email.text).not.toMatch(/EVALUATED NOTHING[^\n]*\n\s*QC-901/);
+  });
+
   it('puts blocking first and names the key, the evidence and the age', () => {
     const host = makeHost();
     const run = beginRun(db, host, { kind: 'daily', tradingDate: '2026-09-06' });
