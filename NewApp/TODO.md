@@ -314,3 +314,5 @@ sitting in `meta_response` the whole time in every case.
     **Run 1 (2026-09-16) found two faults, fixed in v1.1.253**: QC-410 used parity as its reference and
     flagged dividend payers whose Greeks were right; QC-009 read superseded dictionary keys and
     counted a capped Finnhub window's halves as duplicates. Re-run once on v1.1.253 to confirm.
+    **Run 2 (v1.1.253)**: dividend false positives in the other direction (BBY's Greeks followed parity, not
+    the chain) — fixed in v1.1.254 by requiring a > 1 % gap from both. Re-run on v1.1.254.

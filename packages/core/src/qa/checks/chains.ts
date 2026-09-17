@@ -500,10 +500,11 @@ export const QC410_GREEK_REPRODUCTION: CheckDefinition = {
     "A ticker's Greeks were computed off the price its chain reports. Per ticker, the spot at which " +
     "our Black-Scholes delta equals the provider's (median over ATM contracts) is compared with the " +
     "chain's `underlying_price`, which QC-407 cross-checks against Polygon's session close (549 of 549 " +
-    'agreeing on 2026-09-16). Put-call parity on the quoted mids is reported beside it as evidence that ' +
-    'the PRICES are right, but is not the reference: parity is dividend-free, so it reads low by the ' +
-    'value of any dividend before expiry, and as the reference it flagged EIX, CMCSA and CLX, whose ' +
-    'Greeks matched the chain exactly (EIX 54.72 vs 54.81) while parity read 53.00. Measured 2026-09-15/16 over ' +
+    'agreeing on 2026-09-16), AND with the put-call-parity spot of the quoted mids; it fires only when ' +
+    'the Greeks are more than 1 % from BOTH. A dividend before expiry separates the two readings, and ' +
+    "which one a provider's Greeks follow depends on whether its model prices the dividend: parity alone " +
+    'flagged EIX, CMCSA and CLX (Greeks 54.72 on a 54.81 chain, parity 53.00), the chain alone flagged ' +
+    'BBY, AJG, DY, EXPE, FPS and IQV (BBY Greeks 90.97, parity 91.17, chain 92.45). Measured 2026-09-15/16 over ' +
     '~500 tickers: parity reproduced the session close to a median of -0.03 %, while 50-70 tickers a ' +
     'day carried deltas implying a different price: PCTY 113.6 on a 147.3 close on BOTH days, JAZZ ' +
     '249.65 then 249.67 while the stock moved. Any consumer selecting strikes by provider delta picks ' +
@@ -512,7 +513,7 @@ export const QC410_GREEK_REPRODUCTION: CheckDefinition = {
     'domain RED without naming them. QC-414 carries the scale question it used to answer. A missing ' +
     "3M rate skips the check, because a missing rate is QC-902's finding.",
   readsTables: ['raw_option_contract_snapshot', 'raw_treasury_yield'],
-  testedQuantity: 'abs_delta_spot_vs_chain_underlying_fraction',
+  testedQuantity: 'abs_delta_spot_vs_nearest_price_reading_fraction',
   testedUnit: 'fraction',
   thresholds: { maxSpotDisagreement: 0.01 },
   thresholdBasis: 'measured',
@@ -592,9 +593,18 @@ export const QC410_GREEK_REPRODUCTION: CheckDefinition = {
       const measurable = implied.length >= MIN_IMPLIED_CONTRACTS;
       if (!measurable && pinned < MIN_IMPLIED_CONTRACTS) continue;
       const deltaSpot = measurable ? median(implied) : null;
+      // The Greeks are consistent if they agree with EITHER reading of the price.
+      // A dividend before expiry separates the two, and which one a provider's
+      // Greeks follow depends on whether its model prices the dividend: EIX's
+      // matched the chain and not parity, BBY's matched parity (90.97 vs 91.17)
+      // and not the chain (92.45). A broken Greek engine is far from both (AIZ
+      // 12.2 % and 12.0 %). Measured on 2026-09-16: 7 of 33 flagged tickers were
+      // within 1 % of one reading, and every one of them was a dividend-shaped gap.
       // With no invertible contracts the disagreement has no size, only a
       // direction; 1 stands for "beyond anything the spot comparison can measure".
-      const gap = deltaSpot === null ? 1 : Math.abs(deltaSpot / chainSpot - 1);
+      const gapChain = deltaSpot === null ? 1 : Math.abs(deltaSpot / chainSpot - 1);
+      const gapParity = deltaSpot === null || quoteSpot === null ? null : Math.abs(deltaSpot / quoteSpot - 1);
+      const gap = gapParity === null ? gapChain : Math.min(gapChain, gapParity);
       const fired = gap > maxGap || pinned >= MIN_IMPLIED_CONTRACTS;
       evaluations.push({
         key: ticker,
@@ -604,8 +614,10 @@ export const QC410_GREEK_REPRODUCTION: CheckDefinition = {
           (deltaSpot === null
             ? `${ticker}: ${pinned} near-the-money deltas pinned at 0 or 1 on a chain at ${chainSpot}`
             : `${ticker}: Greeks imply spot ${deltaSpot.toFixed(2)} on a chain at ${chainSpot} ` +
-              `(${(gap * 100).toFixed(1)}% apart${pinned > 0 ? `, ${pinned} deltas pinned` : ''})`) +
-          (quoteSpot === null ? '' : `; option quotes imply ${quoteSpot.toFixed(2)}`) +
+              `(${(gapChain * 100).toFixed(1)}% apart${pinned > 0 ? `, ${pinned} deltas pinned` : ''})`) +
+          (quoteSpot === null
+            ? ''
+            : `; option quotes imply ${quoteSpot.toFixed(2)}${gapParity === null ? '' : ` (${(gapParity * 100).toFixed(1)}% apart)`}`) +
           '; provider delta is not usable for strike selection on this ticker today',
         evidence: {
           ticker,

@@ -226,6 +226,21 @@ describe('QC-410, per-ticker Greek consistency', () => {
     expect(ev.paritySpot).toBeLessThan(54);
   });
 
+  it('does not fire when the Greeks follow parity rather than the chain — a dividend priced into the Greeks', () => {
+    // BBY, 2026-09-16: Greeks implied 90.97, parity 91.17, chain 92.45. Against the chain
+    // alone that is 1.6 % and fired; the Greeks agree with the quotes, so they are usable.
+    captureRate();
+    capture(
+      'etrade',
+      chain('BBY', 91.2, { greekSpot: 91.2 }).replace('"nearPrice":91.2', '"nearPrice":92.45'),
+      recipes.chain({ ticker: 'BBY', expirationDate: EXPIRY }),
+      '/v1/market/optionchains/BBY'
+    );
+    const [e] = QC410_GREEK_REPRODUCTION.run(ctx());
+    expect(e!.key).toBe('BBY');
+    expect(e!.fired).toBe(false);
+  });
+
   it('counts a contract once when the same day was captured twice', () => {
     captureRate();
     captureChain('AAA', 100);

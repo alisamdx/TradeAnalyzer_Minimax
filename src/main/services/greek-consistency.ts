@@ -94,10 +94,45 @@ export function assessChainGreeks(chain: OptionsChain, todayEt: string): GreekAs
     if (s !== null) implied.push(s);
   }
   if (implied.length < MIN_CONTRACTS) return { impliedSpot: null, deviation: null, stale: false, contracts: implied.length };
-  implied.sort((a, b) => a - b);
-  const impliedSpot = implied[Math.floor(implied.length / 2)]!;
-  const deviation = Math.abs(impliedSpot / spot - 1);
+  const impliedSpot = median(implied);
+  // Consistent if the Greeks agree with EITHER reading of the price. A dividend before expiry
+  // separates the chain price from the parity price, and which one a provider's Greeks follow
+  // depends on whether its model prices the dividend — BBY's followed parity (90.97 vs 91.17, chain
+  // 92.45), EIX's followed the chain. Same rule as TradeAnalyzer 2's QC-410 (v1.1.254).
+  const parity = paritySpotOf(chain, dteDays);
+  const deviation = Math.min(
+    Math.abs(impliedSpot / spot - 1),
+    parity === null ? Number.POSITIVE_INFINITY : Math.abs(impliedSpot / parity - 1),
+  );
   return { impliedSpot, deviation, stale: deviation > MAX_SPOT_DEVIATION, contracts: implied.length };
+}
+
+function median(xs: number[]): number {
+  const s = [...xs].sort((a, b) => a - b);
+  return s[Math.floor(s.length / 2)]!;
+}
+
+/**
+ * Put-call parity spot, S = C − P + K·e^(−rT), median over strikes where both sides quote a market
+ * (spread ≤ 50 % of mid). Null below 3 pairs. see docs/formulas.md#greek-consistency
+ */
+function paritySpotOf(chain: OptionsChain, dteDays: number): number | null {
+  const mid = (c: OptionContract | undefined): number | null =>
+    c && c.bid > 0 && c.ask > c.bid && (c.ask - c.bid) / ((c.ask + c.bid) / 2) <= 0.5 ? (c.bid + c.ask) / 2 : null;
+  const byStrike = new Map<number, { call?: OptionContract; put?: OptionContract }>();
+  for (const c of chain.contracts) {
+    const pair = byStrike.get(c.strike) ?? {};
+    pair[c.side] = c;
+    byStrike.set(c.strike, pair);
+  }
+  const spots: number[] = [];
+  const discount = Math.exp(-RISK_FREE_RATE * (dteDays / 365));
+  for (const [strike, { call, put }] of byStrike) {
+    const cm = mid(call);
+    const pm = mid(put);
+    if (cm !== null && pm !== null) spots.push(cm - pm + strike * discount);
+  }
+  return spots.length >= MIN_CONTRACTS ? median(spots) : null;
 }
 
 /**

@@ -1009,8 +1009,11 @@ Does a chain's delta agree with the underlying price the chain reports? (v1.1.25
 - **Chain reading**: the median over contracts within 10 % of spot (old app) or the ATM band (TA2).
 - **Parity spot** (TA2, QC-410): `S = C_mid − P_mid + K·e^(−rT)` per strike, median over pairs whose
   spread is ≤ 50 % of mid. No Greek and no volatility enters it.
-- **Stale** when `|implied / reference − 1| > 1 %` — reference = chain `underlyingPrice` (old app)
-  or the parity spot (TA2). The old app's rate is `RISK_FREE_RATE`; TA2 uses the stored 3M par yield.
+- **Stale** when `min(|implied / chain − 1|, |implied / parity − 1|) > 1 %` — the Greeks are consistent
+  if they agree with EITHER reading, because a dividend before expiry separates the two and a provider's
+  Greeks may follow either (EIX followed the chain, BBY followed parity). Parity is omitted when fewer
+  than 3 strikes quote both sides. Same rule in both apps (v1.1.254). The old app's rate is
+  `RISK_FREE_RATE`; TA2 uses the stored 3M par yield.
 
 Threshold evidence: see `MAX_SPOT_DEVIATION` in `src/main/services/greek-consistency.ts` and
 NewApp 03 §3.

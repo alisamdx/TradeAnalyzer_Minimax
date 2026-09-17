@@ -75,6 +75,27 @@ describe('greek consistency', () => {
     expect(pickShortlistContract([guarded], TODAY)).toBeNull();
   });
 
+  it('passes a chain whose Greeks follow parity rather than the chain price (BBY, a dividend)', async () => {
+    const { bsPrice, RISK_FREE_RATE } = await import('../src/main/services/black-scholes.js');
+    const quoteSpot = 91.2; // where the quotes price the stock
+    const contracts: OptionContract[] = [];
+    for (let k = -8; k <= 8; k++) {
+      const strike = 91 + k;
+      for (const side of ['call', 'put'] as const) {
+        const px = bsPrice(quoteSpot, strike, 30 / 365, 0.35, RISK_FREE_RATE, side === 'call');
+        contracts.push({
+          ticker: 'BBY', expiration: EXPIRY, strike, side, bid: px * 0.99, ask: px * 1.01,
+          delta: bsDelta(quoteSpot, strike, 30, 0.35, side), gamma: null, theta: null, vega: null,
+          iv: 0.35, openInterest: 100, volume: 10,
+        });
+      }
+    }
+    // The chain reports 92.45: 1.4 % from the Greeks, which agree with the quotes.
+    const a = assessChainGreeks({ ticker: 'BBY', expiration: EXPIRY, contracts, underlyingPrice: 92.45 }, TODAY);
+    expect(a.stale).toBe(false);
+    expect(a.deviation as number).toBeLessThan(0.002);
+  });
+
   it('is off unless STALE_GREEK_GUARD=1 (FR-SEY-5)', () => {
     expect(staleGreekGuardEnabled()).toBe(false);
     process.env['STALE_GREEK_GUARD'] = '1';

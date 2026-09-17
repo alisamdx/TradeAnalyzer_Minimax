@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.1.254] - 2026-09-16
+
+### QC-410 (and the old app's detector) accept Greeks that agree with either price reading
+
+The second preview on real data showed the mirror of v1.1.253's dividend false positive: BBY's Greeks implied 90.97, parity 91.17, chain 92.45 — the Greeks priced the dividend and followed the quotes. A dividend before expiry separates the chain price from the parity price, and which one a provider's Greeks follow depends on its model. The rule is now **stale only when more than 1 % from both**. On the 33 tickers shown, 7 drop (BBY, AJG, AYI, DY, EXPE, FPS, IQV — each within 1 % of parity) and every clear case stays (AIZ 12.2 % / 12.0 %, AMG, ECG, FERG, CRL, CW). Same rule in `greek-consistency.ts`. `core` 0.6.15. Details: `changelogs/v1.1.254_2026-09-16.md`.
+
 ## [1.1.253] - 2026-09-16
 
 ### Two check faults found by previewing v1.1.252's checks on real data
