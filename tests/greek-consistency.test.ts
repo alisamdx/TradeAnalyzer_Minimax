@@ -96,10 +96,39 @@ describe('greek consistency', () => {
     expect(a.deviation as number).toBeLessThan(0.002);
   });
 
-  it('is off unless STALE_GREEK_GUARD=1 (FR-SEY-5)', () => {
-    expect(staleGreekGuardEnabled()).toBe(false);
-    process.env['STALE_GREEK_GUARD'] = '1';
+  it('is on by default since v1.1.255, and STALE_GREEK_GUARD=0 turns it off', () => {
     expect(staleGreekGuardEnabled()).toBe(true);
+    process.env['STALE_GREEK_GUARD'] = '0';
+    expect(staleGreekGuardEnabled()).toBe(false);
+  });
+
+  it('withholds a stale chain\'s Greeks at the provider, where every delta consumer reads them', async () => {
+    const { ETradeDataProvider } = await import('../src/main/services/etrade-data-provider.js');
+    const provider = new ETradeDataProvider(() => ({}) as never);
+    // Expiry relative to the real clock: the provider dates the chain by today's ET date.
+    const todayEt = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+    const expiry = new Date(Date.parse(`${todayEt}T00:00:00Z`) + 30 * 86_400_000).toISOString().slice(0, 10);
+    const legs = (side: 'CALL' | 'PUT') =>
+      chain('WSM', 218.2, 234.97).contracts
+        .filter((c) => c.side === side.toLowerCase())
+        .map((c) => ({
+          symbol: 'WSM', osiKey: 'x', optionType: side, strikePrice: c.strike, bid: c.bid, ask: c.ask,
+          bidSize: 1, askSize: 1, lastPrice: null, volume: c.volume, openInterest: c.openInterest, inTheMoney: false,
+          greek: { delta: c.delta, gamma: c.gamma, theta: c.theta, vega: c.vega, rho: 0, iv: c.iv },
+          hasGreeks: true, hasBidAsk: true,
+        }));
+    // Replace only the network call; everything after it is the real provider path.
+    (provider as unknown as { withRenew: () => Promise<unknown> }).withRenew = async () => ({
+      calls: legs('CALL'), puts: legs('PUT'), underlyingPrice: 218.2,
+    });
+
+    const guarded = await provider.getOptionsChain('WSM', expiry);
+    expect(guarded.contracts.length).toBeGreaterThan(0);
+    expect(guarded.contracts.every((c) => c.delta === null && c.bid > 0)).toBe(true);
+
+    process.env['STALE_GREEK_GUARD'] = '0';
+    const unguarded = await provider.getOptionsChain('WSM', expiry);
+    expect(unguarded.contracts.some((c) => c.delta !== null)).toBe(true);
   });
 });
 

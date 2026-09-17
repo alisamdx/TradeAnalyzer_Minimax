@@ -24,12 +24,23 @@ export const MAX_SPOT_DEVIATION = 0.01;
 const MIN_CONTRACTS = 3;
 
 /**
- * Off until validated (FR-SEY-5): nulling a chain's Greeks changes which strikes get recommended.
- * `STALE_GREEK_GUARD=1` turns it on for a validation run or a test; checked live, not cached.
+ * ON since v1.1.255, by the operator's decision, as an explicit exception to FR-SEY-5. Nulling a
+ * chain's Greeks changes which strikes get recommended, and no replay can show that neutral: stored
+ * candidates keep the stale delta but not the chain. The evidence it rests on instead
+ * (`scripts/pick-greek-audit.mjs`, 2026-01-01..09-16): 33 of 322 invertible picks had a delta
+ * implying a spot > 1 % from the stored one, 7 rows by >= 2.8 % — OLLI's 9/16 wheel put (implied
+ * 76.09 on 73.23, matching TA2's independent 76.12), ORCL's 9/10 wheel and income puts, AVAV's 9/9
+ * income put — each nearer the money than its delta said. The guard acts only where the Greeks
+ * disagree with both the chain price and the parity price, and invents nothing: Strategy Lab falls
+ * back to moneyness, the shortlist and analysis paths skip the chain.
+ * `STALE_GREEK_GUARD=0` turns it off for a comparison run or a test; checked live, not cached.
  */
-const STALE_GREEK_GUARD = false;
+const STALE_GREEK_GUARD = true;
 export function staleGreekGuardEnabled(): boolean {
-  return STALE_GREEK_GUARD || process.env['STALE_GREEK_GUARD'] === '1';
+  const env = process.env['STALE_GREEK_GUARD'];
+  if (env === '0') return false;
+  if (env === '1') return true;
+  return STALE_GREEK_GUARD;
 }
 
 /** Black-Scholes delta, European, no dividend. `iv` as a fraction. */

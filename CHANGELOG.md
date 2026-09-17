@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.255] - 2026-09-16
+
+### The stale-Greek guard is on
+
+`STALE_GREEK_GUARD` now defaults on: an E*Trade chain whose deltas imply a spot more than 1 % from both the chain price and the put-call-parity price reaches every consumer with null Greeks, so Strategy Lab selects that ticker's strikes by moneyness and the wheel shortlist and analysis paths skip it.
+
+**Why, and why without a replay.** `scripts/pick-greek-audit.mjs` over 2026-01-01..09-16 found 33 of 322 stored picks chosen on a delta implying a spot more than 1 % from the stored one, 7 rows by 2.8 % or more — OLLI's 9/16 wheel put (delta implied 76.09 on a 73.23 stock, the same 76.12 TradeAnalyzer 2 measured independently), ORCL's 9/10 wheel and income puts, AVAV's 9/9 income put — each nearer the money than the email said. No replay can show the change neutral, because stored candidates keep the stale delta and not the chain, so this ships as an **operator-approved FR-SEY-5 exception**, recorded in `Requirements/v2-execution/06-seykota-risk-extensions.md`. `STALE_GREEK_GUARD=0` restores the old behaviour.
+
+Tests: the flag's default, and the real `ETradeDataProvider.getOptionsChain` path withholding a stale chain's Greeks (and passing them through with the guard off). Root 1,364 passing.
+
 ## [1.1.254] - 2026-09-16
 
 ### QC-410 (and the old app's detector) accept Greeks that agree with either price reading

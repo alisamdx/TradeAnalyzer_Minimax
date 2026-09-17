@@ -56,6 +56,16 @@ not shipped (it may ship **disabled**, as a configurable option, with the findin
 - Each of FR-SEY-1/2/3 below carries its validation evidence (or ships disabled with the
   null/negative result noted) before its `active`-by-default flip.
 
+**Operator-approved exceptions register** (shipped enabled without a replay delta, by explicit decision):
+- **v1.1.255 — `STALE_GREEK_GUARD` (existing app).** Withholds an E*Trade chain's Greeks when its
+  deltas imply a spot > 1 % from both the chain price and the put-call-parity price, so no strike is
+  chosen by them. Not replayable: stored candidates keep the stale delta but not the chain. Approved
+  on the evidence of `scripts/pick-greek-audit.mjs` (2026-01-01..09-16): 33 of 322 invertible picks
+  more than 1 % off, 7 rows by ≥ 2.8 % (OLLI 9/16 wheel put implied 76.09 on 73.23; ORCL 9/10 wheel and
+  income puts; AVAV 9/9 income put — each nearer the money than its delta said). It changes a data
+  input, not a scoring weight or policy, and adds no selection rule of its own. `STALE_GREEK_GUARD=0`
+  restores the old behaviour for a comparison run.
+
 **Rejected-on-data register** (changes that looked compelling and did *not* ship):
 SPY-regime gate · overbought guard · ADX in scoring · FR-SEY-3 per-name trend filter ·
 bear-call inflection recalibration · Step-3 debit-spread directional path · gap-risk entry

@@ -291,7 +291,9 @@ sitting in `meta_response` the whole time in every case.
 
 ## I. Follow-ups from the 2026-09-16 validation — added 2026-09-16
 
-48. **Decide on `STALE_GREEK_GUARD` for the existing app.** Shipped off (v1.1.252, FR-SEY-5).
+48. ~~**Decide on `STALE_GREEK_GUARD` for the existing app.** Shipped off (v1.1.252, FR-SEY-5).~~
+    **DONE 2026-09-16 — turned ON in v1.1.255** after the audit: 33 of 322 picks > 1 % off, 7 by ≥ 2.8 %.
+    Recorded as an operator-approved FR-SEY-5 exception. The original note follows.
     Run `node scripts/pick-greek-audit.mjs` with the app open: it counts stored brief candidates
     chosen on an E*Trade delta that disagrees with the stored spot by > 1 %. Zero stale picks →
     leave off and revisit; any stale `picked` rows → those recommendations were the wrong strike,
