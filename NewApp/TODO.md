@@ -304,12 +304,17 @@ sitting in `meta_response` the whole time in every case.
     2026-09-16 (`BRK.B-261016P00495000` pinned, no snapshot). Do not guess the spelling — read one
     stored `raw_option_contract_snapshot.osi_symbol` for BRK.B and anchor the fix on it (#46).
 
-50. **Confirm what held the gate for 27 minutes on 2026-09-16.** v1.1.252 indexes the table
+50. ~~**Confirm what held the gate for 27 minutes on 2026-09-16.**~~ **DONE 2026-09-16:** the day report
+    read QC-403 at **1,592.6 s** of the gate (every other check under 8 s); the first rehearsal on
+    v1.1.256, with the `source_response_id` index applied, ran the whole gate in 33.4 s. v1.1.252 indexes the table
     QC-403 scanned per response (measured: a full SCAN per count) and the day report now lists the
     slowest checks. After the next run, read "Slowest gate checks": if anything is still over a
     minute, that is the next fix.
 
-51. **Validate the rewritten checks on real data before trusting their first email.** With both
+51. ~~**Validate the rewritten checks on real data before trusting their first email.**~~ **DONE
+    2026-09-16** via gate-preview (three rounds) and then `rehearse-gate.mjs` (real → rehearsal: QC-008
+    3→0, QC-009 3→0, QC-404 518→0, QC-407 0/0→0/549, QC-410 5,135 contracts→78 tickers, QC-414 0,
+    QC-604 1→0). With both
     apps closed, from a normal terminal: `node packages/core/scripts/gate-preview.mjs 2026-09-16
     QC-410 QC-414 QC-407 QC-008 QC-009`. Expected: QC-410 names ~50-90 tickers (PCTY, AMG, AIZ,
     WSM …), QC-414 does not fire, QC-407 evaluates tickers instead of zero, QC-008 and QC-009 quiet.

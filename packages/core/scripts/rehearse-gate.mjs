@@ -103,7 +103,6 @@ try {
   if (!run) throw new Error(`No daily run for ${DATE} in this snapshot.`);
 
   // What the real run reported, captured before the rehearsal adds rows of its own.
-  const before = db.prepare('SELECT COALESCE(MAX(row_id), 0) AS m FROM qa_check_result').get().m;
   const actual = new Map(
     db.prepare(
       `SELECT check_id, fired_count, evaluated_count, duration_ms FROM qa_check_result
@@ -115,6 +114,15 @@ try {
 
   // The current dictionary, exactly as the app applies it on open (keys, indexes).
   core.applyDictionary(db);
+
+  // qa_check_result holds one row per (run, check) and is append-only, so a gate cannot run twice
+  // for one run — right for the generation, and it stopped the first rehearsal. On this copy, and
+  // only here, the run's results are cleared after the real counts were read above. The trigger is
+  // dropped AFTER applyDictionary, which would otherwise recreate it.
+  for (const t of db.prepare(`SELECT name FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'qa_check_result'`).all()) {
+    db.exec(`DROP TRIGGER "${t.name}"`);
+  }
+  db.prepare('DELETE FROM qa_check_result WHERE run_id = ?').run(run.run_id);
 
   const host = { nowET: () => core.etTimestamp(), hostApp: { name: 'rehearse-gate.mjs', version: core.COLLECTOR_VERSION } };
   const started = Date.now();
@@ -131,9 +139,11 @@ try {
     domains: actualReport ? JSON.parse(actualReport.domains_json) : {}
   });
 
+  // Every row for the run is the rehearsal's: the real ones were cleared above. Selecting by
+  // row_id would miss them, because SQLite reuses the ids a DELETE frees.
   const rehearsed = db.prepare(
-    `SELECT check_id, fired_count, evaluated_count, duration_ms FROM qa_check_result WHERE run_id = ? AND row_id > ?`
-  ).all(run.run_id, before);
+    `SELECT check_id, fired_count, evaluated_count, duration_ms FROM qa_check_result WHERE run_id = ?`
+  ).all(run.run_id);
 
   console.log(`\n# Gate rehearsal — ${DATE}, run ${run.run_id}, core ${core.COLLECTOR_VERSION}\n`);
   console.log(`real run:   ${actualReport?.overall ?? '—'}`);
