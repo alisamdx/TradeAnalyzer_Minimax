@@ -323,3 +323,14 @@ sitting in `meta_response` the whole time in every case.
     counted a capped Finnhub window's halves as duplicates. Re-run once on v1.1.253 to confirm.
     **Run 2 (v1.1.253)**: dividend false positives in the other direction (BBY's Greeks followed parity, not
     the chain) — fixed in v1.1.254 by requiring a > 1 % gap from both. Re-run on v1.1.254.
+
+52. **QC-602 has no second source: capture E*Trade earnings dates.** The check compares Finnhub's
+    next report date with E*Trade's, but `raw_earnings_event` has only ever held `source='finnhub'`
+    (measured 2026-09-16), so it evaluates nothing every run. The existing app already reads
+    E*Trade's earnings date from the quote endpoint (`earnings-service.ts`). A collector phase for the
+    chain subset is ~550 E*Trade quote calls a night; alternatively hand the existing app's dates off
+    like `legacy_brief`. Either is a collection change — needs a live run, not a rehearsal.
+
+53. **Queue a replay weekly (QC-951/956).** No replay has been queued in gen-002, so QC-951 evaluates
+    nothing and QC-956 will warn after 7 sessions. Note: run 8's four recommendation responses will
+    replay `different` after v1.1.257 changed their keying — expected, not a fault.

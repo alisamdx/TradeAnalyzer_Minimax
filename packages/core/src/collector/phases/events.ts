@@ -598,7 +598,10 @@ export async function runInsiderSweep(
   host.progress('insider', 0, 1, 'full index');
   let indexResponse = await host.httpGet(dailyFormIndexUrl(indexDate), EDGAR_HEADERS);
 
-  if (indexResponse.status === 404) {
+  // Not published yet answers 404 or 403 depending on the day: 404 on 2026-09-10/11, and a
+  // 215-byte AccessDenied 403 on every run from 2026-09-14 to 09-16, so the fallback never ran and
+  // no Form 4 was ever stored (measured: the previous day's index answered 200 each time).
+  if (indexResponse.status === 404 || indexResponse.status === 403) {
     const previous = previousTradingDay(db, run.tradingDate);
     if (previous !== null) {
       indexDate = previous;

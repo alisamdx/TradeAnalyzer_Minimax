@@ -139,7 +139,7 @@ A ‡ value still gets its distribution recorded like any other (§4) — measur
 | QC-502 action without effect | info | a `raw_split` whose ratio is not visible in the bar series on `execution_date` (already adjusted; expected) | none |
 | QC-601 earnings date slips later | blocking | for a ticker, the newest observed `report_date` is > 14 days ‡ later than the previous observation from the same source | R4 subdivide sweep around the earlier date; stays open until the earlier date is confirmed absent from a non-capped response |
 | QC-602 earnings source disagreement | warning | Finnhub vs E*Trade `report_date` differ by > 1 day for the same fiscal quarter | none |
-| QC-603 earnings freshness | warning | a CS ticker has no future `report_date` observed within the last 7 runs | R2 re-fetch ticker |
+| QC-603 earnings freshness | warning | a subset ticker that is not a fund (latest `raw_ticker_reference.security_type` not in ETF/ETV/ETN/ETS/FUND) has no future `report_date` observed within 7 days, **unless it reported within the last 21 days** (the next date is then about a quarter out and can fall past the 90-day sweep). v1.1.257: 47 of 68 findings on 2026-09-16 were ETFs, and GIS and FPS had reported the day before | R2 re-fetch ticker |
 | QC-604 earnings weekend date | warning | `report_date` on a non-trading day (the UTC-Saturday artefact) — stored as observed, flagged | none |
 | QC-701 filing freshness | warning at 120 d, blocking at 180 d | a CS ticker with `cik` has no fact with `period_end` within N days | R2 re-fetch submissions |
 | QC-702 fact sanity | warning | `Assets < 0`, `Revenues < 0`, or `SharesOutstanding` differs from `raw_ticker_reference.shares_outstanding` by > 25 % † | none |
@@ -163,7 +163,8 @@ A ‡ value still gets its distribution recorded like any other (§4) — measur
 | QC-902 yield curve | warning | fewer than **14** tenors ‡ (the published set, measured 2026-09-05), or any yield outside [−0.01, 0.25] | R1 retry / fallback source |
 | QC-903 macro calendar gap | warning | no FOMC event in the next 90 days, or no CPI in the next 45 | none |
 | QC-904 short interest freshness | warning | newest `settlement_date` older than 21 days | R1 retry |
-| QC-905 recommendation freshness | warning | no recommendation row for a CS subset ticker within 45 days | R2 re-fetch |
+| QC-905 recommendation freshness | warning | for a non-fund subset ticker, more than 45 days since the latest of: a stored recommendation row, a successful `/stock/recommendation` request for it, or its admission to the subset. It guards the SWEEP, so a ticker asked recently that Finnhub does not cover is current. v1.1.257: of 82 findings on 2026-09-16, 47 were ETFs and most of the rest were admitted after the last weekly sweep | R2 re-fetch |
+| QC-909 recommendation symbol mismatch | warning | the latest recommendation row for a ticker carries a `provider_symbol` different from the ticker asked. Measured 2026-09-14: GOOG→GOOGL, BRK.B→BRK.A, GFL→GFL.TO (same issuers) and LLYVA→FWONA (a different company); not decidable from symbols, so every mismatch is a ruling | none |
 | QC-906 insider parse | warning | a Form 4 filing indexed but no transaction rows parsed | none |
 
 ### 3.8a Derived IV and the external bootstrap (Q17)

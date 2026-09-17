@@ -20,6 +20,16 @@ import type { CheckDefinition, Evaluation } from '../check.js';
 /** An issuer refining its date moves it by days; a coverage gap moves it by a quarter. */
 const MAX_LATER_SLIP_DAYS = 14;
 
+/**
+ * Polygon reference types that are funds rather than issuers: no earnings, no analyst coverage.
+ * ETV covers commodity vehicles (GLD, SLV). A ticker with no reference row is not excluded —
+ * unknown is not the same as a fund.
+ */
+export const FUND_TYPES = "('ETF', 'ETV', 'ETN', 'ETS', 'FUND')";
+
+/** A report this recent puts the next one about a quarter out, possibly past the 90-day sweep. */
+const RECENT_REPORT_GRACE_DAYS = 21;
+
 function daysBetween(a: string, b: string): number {
   return Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000);
 }
@@ -138,22 +148,37 @@ export const QC603_EARNINGS_FRESHNESS: CheckDefinition = {
   thresholdBasis: 'working',
   remediation: 'R2',
   run(ctx) {
+    // Funds are excluded: an ETF has no earnings. On 2026-09-16, 47 of 68 findings were ETFs in
+    // the chain subset (SPY, QQQ, GLD ...) that could never pass.
     const rows = ctx.db
       .prepare(
         `SELECT m.ticker,
                 (SELECT MAX(substr(e.observed_at, 1, 10))
                    FROM raw_earnings_event e
-                  WHERE e.ticker = m.ticker AND e.report_date >= ?) AS last_seen
+                  WHERE e.ticker = m.ticker AND e.report_date >= ?) AS last_seen,
+                (SELECT MAX(e.report_date)
+                   FROM raw_earnings_event e
+                  WHERE e.ticker = m.ticker AND e.report_date < ?) AS last_reported
            FROM ref_chain_subset_membership m
-          WHERE m.valid_to IS NULL`
+          WHERE m.valid_to IS NULL
+            AND m.ticker NOT IN (
+              SELECT ticker FROM raw_ticker_reference
+               WHERE security_type IN ${FUND_TYPES}
+                 AND row_id IN (SELECT MAX(row_id) FROM raw_ticker_reference GROUP BY ticker))`
       )
-      .all(ctx.tradingDate) as { ticker: string; last_seen: string | null }[];
+      .all(ctx.tradingDate, ctx.tradingDate) as { ticker: string; last_seen: string | null; last_reported: string | null }[];
 
     return rows.map((r) => {
-      // Never observed is not zero days and not "fine". It is the largest
-      // possible staleness, and giving it the threshold's own value would let
-      // an empty domain read as a clean one.
-      const days = r.last_seen === null ? 9999 : daysBetween(r.last_seen, ctx.tradingDate);
+      // Just reported: the next date lies about a quarter out and can fall past the sweep's
+      // 90-day window. GIS and FPS reported 2026-09-15 and fired the next day. Absent from the
+      // calendar here means "not yet in range", not "dropped out".
+      const justReported =
+        r.last_seen === null &&
+        r.last_reported !== null &&
+        daysBetween(r.last_reported, ctx.tradingDate) <= RECENT_REPORT_GRACE_DAYS;
+      // Never observed (and not just reported) is the largest possible staleness, never the
+      // threshold's own value, or an empty domain would read as a clean one.
+      const days = justReported ? 0 : r.last_seen === null ? 9999 : daysBetween(r.last_seen, ctx.tradingDate);
       return {
         key: r.ticker,
         value: days,
@@ -162,7 +187,7 @@ export const QC603_EARNINGS_FRESHNESS: CheckDefinition = {
           r.last_seen === null
             ? `${r.ticker}: no future report date has ever been observed`
             : `${r.ticker}: future report date last observed ${r.last_seen} (${days} days ago)`,
-        evidence: { ticker: r.ticker, lastObserved: r.last_seen }
+        evidence: { ticker: r.ticker, lastObserved: r.last_seen, lastReported: r.last_reported, justReported }
       } satisfies Evaluation;
     });
   }

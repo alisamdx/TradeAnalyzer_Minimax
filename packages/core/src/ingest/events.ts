@@ -327,7 +327,11 @@ export function makeRecommendationIngest(opts: { readonly ticker: string }) {
           as_of_date: ctx.asOfDate,
           observed_at: ctx.observedAt,
           capture_rule_id: ctx.captureRuleId,
-          ticker: r.symbol ?? opts.ticker,
+          // What we asked, never what came back: Finnhub resolves some tickers to another listing
+          // (GOOG -> GOOGL, LLYVA -> FWONA), and keying on its answer filed rows under tickers
+          // nobody asked about. Its symbol is kept beside it for QC-909.
+          ticker: opts.ticker,
+          provider_symbol: r.symbol ?? null,
           period_month: r.period,
           // A count the provider omits is zero ratings of that kind, which is a
           // different fact from "no data" — but Finnhub sends all five on every

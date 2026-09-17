@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.257] - 2026-09-16
+
+### Found by rehearsing the gate: two collection bugs and two checks that could never pass
+
+All four were found and verified on a snapshot of today's data with `rehearse-gate.mjs` (blocking 465 → 348 on the 2026-09-16 run).
+
+- **No Form 4 was ever stored.** The insider sweep fell back to the previous day's EDGAR index only on 404; SEC answers 403 for an index not yet published (measured: 9/15's index 200, 9/16's 403), on every run since 9/14. It now falls back on either.
+- **Finnhub recommendations were filed under Finnhub's symbol, not ours.** GOOG's rows landed on GOOGL, BRK.B's on BRK.A, GFL's on GFL.TO, and LLYVA's on FWONA, a different company. Rows now key on the ticker asked, with `provider_symbol` beside it (dictionary v18); new **QC-909** reports each mismatch for a ruling.
+- **QC-603 / QC-905 skip funds.** ETFs have no earnings and no analyst coverage: 47 findings each. QC-603 also allows a ticker that reported in the last 21 days, and QC-905 measures from the last ask or subset admission, since what it guards is the sweep.
+
+`core` 0.6.16. Details: `changelogs/v1.1.257_2026-09-16.md`.
+
 ## [1.1.256] - 2026-09-16
 
 ### A gate fix can be checked the same day

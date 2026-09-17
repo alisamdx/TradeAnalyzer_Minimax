@@ -317,13 +317,14 @@ export const fundamentalsAccountTables: readonly TableEntry[] = [
     ruleDriven: true,
     standardColumns: true,
     columns: [
-      col.ident('ticker', 'The ticker symbol.', { sourceProvider: 'finnhub', sourceField: 'symbol' }),
+      col.ident('ticker', 'The ticker we ASKED about. Until dictionary v18 this was Finnhub\'s `symbol`, and Finnhub answers some tickers for a different listing: GOOG as GOOGL, BRK.B as BRK.A, GFL as GFL.TO and LLYVA as FWONA, a different company. Rows then landed on tickers nobody asked about while the asked one stayed empty.', { sourceProvider: 'collector' }),
       col.date('period_month', 'The month the counts are for, as its first day.', { sourceProvider: 'finnhub', sourceField: 'period' }),
       col.int('strong_buy', 'Strong-buy ratings.', { sourceProvider: 'finnhub', sourceField: 'strongBuy' }),
       col.int('buy', 'Buy ratings.', { sourceProvider: 'finnhub', sourceField: 'buy' }),
       col.int('hold', 'Hold ratings.', { sourceProvider: 'finnhub', sourceField: 'hold' }),
       col.int('sell', 'Sell ratings.', { sourceProvider: 'finnhub', sourceField: 'sell' }),
-      col.int('strong_sell', 'Strong-sell ratings.', { sourceProvider: 'finnhub', sourceField: 'strongSell' })
+      col.int('strong_sell', 'Strong-sell ratings.', { sourceProvider: 'finnhub', sourceField: 'strongSell' }),
+      nullable(col.ident('provider_symbol', 'The symbol Finnhub says the counts are for, verbatim. Differs from `ticker` when the provider resolved our ticker to another listing; QC-909 reports every such row, because whether that is the same issuer (BRK.A for BRK.B) or not (FWONA for LLYVA) is not decidable from the symbols.', { sourceProvider: 'finnhub', sourceField: 'symbol' }), 'the provider sent no symbol')
     ],
     indexes: [{ columns: ['ticker', 'period_month'] }]
   }),

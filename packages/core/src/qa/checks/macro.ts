@@ -1,4 +1,5 @@
 import type { CheckDefinition, Evaluation } from '../check.js';
+import { FUND_TYPES } from './earnings-fundamentals.js';
 
 /**
  * Macro, rates and sentiment-side checks — 03 §3.8.
@@ -248,26 +249,51 @@ export const QC905_RECOMMENDATION_FRESHNESS: CheckDefinition = {
   thresholdBasis: 'working',
   remediation: 'R2',
   run(ctx) {
+    // What this check guards is the SWEEP: a ticker falling out of it. So a ticker counts as
+    // current when it was last stored, last ASKED (Finnhub answering an empty list for a ticker it
+    // does not cover is not a collection failure), or admitted to the subset — whichever is latest.
+    // Funds are excluded: they have no analyst coverage. On 2026-09-16, 47 of 82 findings were ETFs
+    // and most of the rest were tickers admitted after the last weekly sweep or asked and empty.
+    const asked = new Map(
+      (
+        ctx.db
+          .prepare(
+            `SELECT json_extract(params_json, '$.symbol') AS ticker, MAX(substr(requested_at, 1, 10)) AS last_asked
+               FROM meta_response
+              WHERE endpoint = '/stock/recommendation' AND parse_status = 'ok'
+              GROUP BY ticker`
+          )
+          .all() as { ticker: string | null; last_asked: string }[]
+      ).map((r) => [r.ticker, r.last_asked])
+    );
     const rows = ctx.db
       .prepare(
-        `SELECT m.ticker,
+        `SELECT m.ticker, MAX(m.valid_from) AS admitted,
                 (SELECT MAX(substr(a.observed_at, 1, 10))
                    FROM raw_analyst_recommendation a WHERE a.ticker = m.ticker) AS last_seen
            FROM ref_chain_subset_membership m
-          WHERE m.valid_to IS NULL`
+          WHERE m.valid_to IS NULL
+            AND m.ticker NOT IN (
+              SELECT ticker FROM raw_ticker_reference
+               WHERE security_type IN ${FUND_TYPES}
+                 AND row_id IN (SELECT MAX(row_id) FROM raw_ticker_reference GROUP BY ticker))
+          GROUP BY m.ticker`
       )
-      .all() as { ticker: string; last_seen: string | null }[];
+      .all() as { ticker: string; admitted: string; last_seen: string | null }[];
 
     return rows.map((r) => {
-      const days = r.last_seen === null ? 9999 : daysBetween(r.last_seen, ctx.tradingDate);
+      const lastAsked = asked.get(r.ticker) ?? null;
+      const reference = [r.last_seen, lastAsked, r.admitted].filter((d): d is string => d !== null).sort().pop()!;
+      const days = daysBetween(reference, ctx.tradingDate);
       return {
         key: r.ticker,
         value: days,
         fired: days > (this.thresholds['maxDays'] as number),
-        detail: r.last_seen
-          ? `${r.ticker}: last observed ${r.last_seen} (${days} days ago)`
-          : `${r.ticker}: no recommendation row has ever been stored`,
-        evidence: { ticker: r.ticker, lastObserved: r.last_seen }
+        detail:
+          lastAsked === null
+            ? `${r.ticker}: never asked since admission on ${r.admitted} (${days} days)`
+            : `${r.ticker}: last asked ${lastAsked}, last stored ${r.last_seen ?? 'never'} (${days} days)`,
+        evidence: { ticker: r.ticker, lastObserved: r.last_seen, lastAsked, admitted: r.admitted }
       } satisfies Evaluation;
     });
   }
@@ -315,11 +341,47 @@ export const QC906_INSIDER_PARSE: CheckDefinition = {
   }
 };
 
+export const QC909_RECOMMENDATION_SYMBOL_MISMATCH: CheckDefinition = {
+  id: 'QC-909',
+  domain: 'sentiment',
+  severity: 'warning',
+  description:
+    'Finnhub answered a recommendation request for the symbol we asked, not another listing. Measured ' +
+    '2026-09-14: GOOG came back as GOOGL, BRK.B as BRK.A, GFL as GFL.TO and LLYVA as FWONA. The first ' +
+    'three are the same issuer; FWONA is a different company. Which it is cannot be decided from the ' +
+    'symbols, so every mismatch is reported for a ruling rather than silently kept or dropped. Reads the ' +
+    'latest observation per ticker, so it evaluates on the days between weekly sweeps too.',
+  readsTables: ['raw_analyst_recommendation'],
+  testedQuantity: null,
+  testedUnit: null,
+  thresholds: {},
+  thresholdBasis: 'not_applicable',
+  run(ctx) {
+    const rows = ctx.db
+      .prepare(
+        `SELECT a.ticker, a.provider_symbol, a.observed_at
+           FROM raw_analyst_recommendation a
+           JOIN (SELECT ticker, MAX(observed_at) AS latest FROM raw_analyst_recommendation GROUP BY ticker) m
+             ON m.ticker = a.ticker AND m.latest = a.observed_at
+          WHERE a.provider_symbol IS NOT NULL
+          GROUP BY a.ticker`
+      )
+      .all() as { ticker: string; provider_symbol: string; observed_at: string }[];
+    return rows.map((r) => ({
+      key: r.ticker,
+      fired: r.provider_symbol !== r.ticker,
+      detail: `asked Finnhub for ${r.ticker}, it answered for ${r.provider_symbol} (${r.observed_at.slice(0, 10)})`,
+      evidence: { asked: r.ticker, answered: r.provider_symbol }
+    }));
+  }
+};
+
 export const MACRO_CHECKS: readonly CheckDefinition[] = [
   QC901_VIX_RANGE,
   QC902_YIELD_CURVE,
   QC903_MACRO_CALENDAR_GAP,
   QC904_SHORT_INTEREST_FRESHNESS,
   QC905_RECOMMENDATION_FRESHNESS,
-  QC906_INSIDER_PARSE
+  QC906_INSIDER_PARSE,
+  QC909_RECOMMENDATION_SYMBOL_MISMATCH
 ];
