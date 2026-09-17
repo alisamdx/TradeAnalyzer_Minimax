@@ -18,7 +18,7 @@ export {
   ALL_CHECKS, CROSS_CUTTING_CHECKS, BAR_CHECKS, QUOTE_AND_ACTION_CHECKS,
   CHAIN_CHECKS, ACCOUNT_CHECKS, EARNINGS_FUNDAMENTALS_CHECKS, MACRO_CHECKS
 } from './registry.js';
-export { bsDelta, normCdf } from './black-scholes.js';
+export { bsDelta, normCdf, impliedSpotFromDelta, paritySpot } from './black-scholes.js';
 export {
   acknowledge, bulkAcknowledge, resolve, accept, expireAcceptances, recordTickerReuse, reviewQueue,
   OperatorActionRefused, DEFAULT_ACCEPTANCE_DAYS, MAX_ACCEPTANCE_DAYS

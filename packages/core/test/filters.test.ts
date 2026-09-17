@@ -83,7 +83,7 @@ describe('the SQL', () => {
 
 describe('anchoring a large query on an index (05 §8)', () => {
   it('knows which columns an index can start from, ignoring partial indexes', () => {
-    expect([...indexedColumns(chain)].sort()).toEqual(['as_of_date', 'osi_symbol', 'row_id', 'ticker']);
+    expect([...indexedColumns(chain)].sort()).toEqual(['as_of_date', 'osi_symbol', 'row_id', 'source_response_id', 'ticker']);
     const sticky = DICTIONARY.find((t) => t.table === 'ref_sticky_contract')!;
     // Two indexes on osi_symbol, one of them partial: still counted once, from the full one.
     expect(indexedColumns(sticky).has('osi_symbol')).toBe(true);

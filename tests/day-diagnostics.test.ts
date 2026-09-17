@@ -144,8 +144,13 @@ describe('readCollectorDay — against a real generation schema', () => {
       parse_error: 'CHECK constraint failed: mode',
     });
 
+    insertRow('qa_check_result', { run_id: runId, check_id: 'QC-001', duration_ms: 1200, evaluated_count: 10, fired_count: 0, sample_keys_json: '[]' });
+    insertRow('qa_check_result', { run_id: runId, check_id: 'QC-204', duration_ms: 1_540_000, evaluated_count: 900, fired_count: 151, sample_keys_json: '[]' });
+
     const day = readCollectorDay(raw, '2026-09-14');
     expect(day.errors).toEqual({});
+    // The slowest check first: the 27-minute gate of 2026-09-16 had to be inferred.
+    expect(day.slowChecks[0]).toMatchObject({ check_id: 'QC-204', duration_ms: 1_540_000 });
     expect(day.runs).toHaveLength(1);
     expect(day.reports[0]).toMatchObject({ overall: 'red', emailStatus: 'failed', runKind: 'daily' });
     expect(day.reports[0]?.domains).toEqual({ bars: { expected: 1089, stored: 1083, status: 'usable' } });
@@ -161,7 +166,7 @@ describe('buildAttention', () => {
   const emptyLog = { file: 'f', present: true, counts: {}, entries: [], unparseable: 0 };
   const emptyApi = { file: 'f', present: true, lines: 0, unparseable: 0, byProvider: {}, byHourEt: {}, failureGroups: 0, failures: [] };
   const collector = (over: Partial<CollectorDay> = {}): CollectorDay => ({
-    tradingDay: true, runs: [{ run_id: 1, run_kind: 'daily' }], reports: [], domainStatus: [], responses: [], responseFailures: [], exceptions: [], errors: {}, ...over,
+    tradingDay: true, runs: [{ run_id: 1, run_kind: 'daily' }], reports: [], domainStatus: [], responses: [], responseFailures: [], exceptions: [], slowChecks: [], errors: {}, ...over,
   });
   /** Monday evening's report, read the next day — every scheduled job was due. */
   const LATER = '2026-09-15T05:00:00.000Z';

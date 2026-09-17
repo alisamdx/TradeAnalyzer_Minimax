@@ -170,7 +170,11 @@ export const marketTables: readonly TableEntry[] = [
       { columns: ['as_of_date'] },
       { columns: ['ticker', 'as_of_date'] },
       { columns: ['osi_symbol', 'as_of_date'] },
-      { columns: ['ticker', 'expiration_date', 'as_of_date'] }
+      { columns: ['ticker', 'expiration_date', 'as_of_date'] },
+      // QC-403 counts stored contracts per chain response, ~4,900 times a run. Without this
+      // index each count scans the whole table (EXPLAIN: SCAN), so the gate grew with every
+      // day stored; on 2026-09-16 it held the main thread for 27 minutes.
+      { columns: ['source_response_id'] }
     ]
   }),
 

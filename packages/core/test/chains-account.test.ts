@@ -824,6 +824,41 @@ describe('phase 7 — chains, and AC-5 on every response', () => {
     });
   }
 
+  it('closes a member E*Trade no longer recognises as delisted, and keeps asking about the rest', async () => {
+    // EA, EQR and WBS, 2026-09-16: delisted, still sticky members, one error each run.
+    subsetMember('SPY');
+    subsetMember('WBS');
+    const inner = chainHost();
+    const host = makeHost({
+      etradeGet: async (path, params) => {
+        if (params['symbol'] === 'WBS') {
+          // E*Trade's body, verbatim from the 2026-09-16 API log.
+          return response('{"Error":{"code":10033,"message":"The symbol entered is invalid. Please enter another symbol."}}', 400);
+        }
+        return inner.etradeGet(path, params);
+      }
+    });
+    const run = beginRun(db(), host, { kind: 'daily', tradingDate: DATE });
+    const result = await runChainsPhase(host, db(), run);
+    expect(result.delistedClosed).toBe(1);
+    const rows = raw
+      .prepare('SELECT ticker, valid_to, removal_reason FROM ref_chain_subset_membership ORDER BY ticker')
+      .all();
+    expect(rows).toEqual([
+      { ticker: 'SPY', valid_to: null, removal_reason: null },
+      { ticker: 'WBS', valid_to: DATE, removal_reason: 'delisted' }
+    ]);
+  });
+
+  it('does not close a member on any other 400', async () => {
+    subsetMember('SPY');
+    const host = makeHost({
+      etradeGet: async () => response('{"Error":{"message":"There are no options for the given month."}}', 400)
+    });
+    const run = beginRun(db(), host, { kind: 'daily', tradingDate: DATE });
+    expect((await runChainsPhase(host, db(), run)).delistedClosed).toBe(0);
+  });
+
   it('asks each ticker for its own expirations rather than guessing a date', async () => {
     subsetMember('SPY');
     const seen: string[] = [];

@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.1.252] - 2026-09-16
+
+### E*Trade's Greeks can be computed off the wrong price — found, measured, and handled in both apps
+
+On 50–70 tickers a day E*Trade's deltas imply a different underlying price than its own option quotes (put-call parity on the same quotes recovers the close to −0.03 %): PCTY 113.6 on a 147.3 close on both days measured. Strike selection by delta picks the wrong contract on those tickers.
+
+- **TA2 QC-410 is per ticker** (delta-implied spot vs parity spot, 1 %; pinned deltas count), and **QC-414** (new, blocking) keeps the unit-fault check it used to carry.
+- **Existing app: `STALE_GREEK_GUARD`** nulls the Greeks of a stale E*Trade chain so nothing selects by them. **Off by default (FR-SEY-5)**; `scripts/pick-greek-audit.mjs` measures how many stored picks were chosen on a stale delta.
+
+### Gate checks that could not fire, or fired on nothing wrong
+
+- **QC-407** read `raw_eod_quote.last`, null on every row on this Polygon plan — it evaluated zero tickers on every run. Now `day_close`, and an empty comparison is a finding.
+- **QC-008** blocked on capped windows the sweep had already re-covered; **QC-009** read a 10-Q's quarter and year-to-date as duplicates (`period_start` now in the key, dictionary v17).
+- **Email subject** counted every open blocking exception in the generation (3,438) instead of this run's (2,321).
+
+### Collection and performance
+
+- A chain-subset member E*Trade calls an invalid symbol is closed as `delisted` (EA, EQR, WBS).
+- `raw_option_contract_snapshot` indexed on `source_response_id`: QC-403 did a full table scan per chain response, part of the 27 minutes the gate held the main thread. The day report now lists the slowest checks.
+
+`core` 0.6.13. Details: `changelogs/v1.1.252_2026-09-16.md`.
+
 ## [1.1.251] - 2026-09-16
 
 ### Two gate checks fixed: QC-604 never ran, QC-404 flagged correct put quotes

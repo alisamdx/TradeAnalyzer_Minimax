@@ -1,5 +1,5 @@
-import type { CheckDefinition, Evaluation } from '../check.js';
-import { bsDelta } from '../black-scholes.js';
+import type { CheckContext, CheckDefinition, Evaluation } from '../check.js';
+import { bsDelta, impliedSpotFromDelta, paritySpot } from '../black-scholes.js';
 
 /**
  * Option-chain checks — 03 §3.5.
@@ -268,9 +268,15 @@ export const QC407_UNDERLYING_DISAGREEMENT: CheckDefinition = {
   domain: 'chains',
   severity: 'warning',
   description:
-    'The underlying price E*Trade returns with a chain agrees with the Polygon snapshot for the same ' +
-    'ticker and day. Two independent readings of one number, from two providers, on the same run — ' +
-    'the cheapest cross-source check the chain domain has.',
+    'The underlying price E*Trade returns with a chain agrees with the Polygon snapshot session close ' +
+    'for the same ticker and day. Two independent readings of one number, from two providers, on the ' +
+    'same run: the cheapest cross-source check the chain domain has. Until v1.1.252 it compared against ' +
+    '`raw_eod_quote.last`, which Polygon never sends on this plan (`lastTrade` needs a trades ' +
+    'entitlement): every row of 2026-09-14 to 2026-09-16 had last null, the join matched nothing, and ' +
+    'the check evaluated zero tickers on every run while reporting no finding. `nearPrice` is the ' +
+    'session close (qc410-study H7: equal to the bar close on all 547 tickers of 2026-09-16), so ' +
+    '`day_close` is the like-for-like reading. When quotes exist but none carries a usable close, the ' +
+    'check now says so instead of evaluating nothing.',
   readsTables: ['raw_option_contract_snapshot', 'raw_eod_quote'],
   testedQuantity: 'abs_underlying_disagreement_fraction',
   testedUnit: 'fraction',
@@ -281,15 +287,44 @@ export const QC407_UNDERLYING_DISAGREEMENT: CheckDefinition = {
     'per-run comparison itself first exists at B6, so 1 % stands as the working bound until the ' +
     "pilot's own distribution replaces it.",
   run(ctx) {
+    // Latest quote observation per ticker: a re-run stores the snapshot again, and
+    // joining every copy let an arbitrary one stand in for the day.
     const rows = ctx.db
       .prepare(
-        `SELECT c.ticker, AVG(c.underlying_price) AS chain_price, q.last AS quote_price
+        `SELECT c.ticker, AVG(c.underlying_price) AS chain_price, q.day_close AS quote_price
            FROM raw_option_contract_snapshot c
-           JOIN raw_eod_quote q ON q.ticker = c.ticker AND q.as_of_date = c.as_of_date
-          WHERE c.as_of_date = ? AND q.last > 0
+           JOIN (SELECT ticker, day_close, MAX(observed_at) AS latest FROM raw_eod_quote
+                  WHERE as_of_date = ? AND day_status = 'ok' AND day_close > 0
+                  GROUP BY ticker) q
+             ON q.ticker = c.ticker
+          WHERE c.as_of_date = ? AND c.underlying_price > 0
           GROUP BY c.ticker`
       )
-      .all(ctx.tradingDate) as { ticker: string; chain_price: number; quote_price: number }[];
+      .all(ctx.tradingDate, ctx.tradingDate) as { ticker: string; chain_price: number; quote_price: number }[];
+
+    if (rows.length === 0) {
+      const quotes = ctx.db
+        .prepare('SELECT COUNT(*) AS n FROM raw_eod_quote WHERE as_of_date = ?')
+        .get(ctx.tradingDate) as { n: number };
+      const chains = ctx.db
+        .prepare('SELECT COUNT(*) AS n FROM raw_option_contract_snapshot WHERE as_of_date = ? AND underlying_price > 0')
+        .get(ctx.tradingDate) as { n: number };
+      // Both sides captured and nothing comparable: that is the finding, not a pass.
+      if (quotes.n > 0 && chains.n > 0) {
+        return [
+          {
+            key: `coverage:${ctx.tradingDate}`,
+            value: 1,
+            fired: true,
+            detail:
+              `${quotes.n} Polygon quote rows and ${chains.n} chain rows for ${ctx.tradingDate}, but no ticker ` +
+              'has a usable session close to compare against: the cross-check evaluated nothing',
+            evidence: { quoteRows: quotes.n, chainRows: chains.n }
+          }
+        ];
+      }
+      return [];
+    }
 
     return rows.map((r) => {
       const disagreement = Math.abs(r.chain_price - r.quote_price) / r.quote_price;
@@ -297,8 +332,8 @@ export const QC407_UNDERLYING_DISAGREEMENT: CheckDefinition = {
         key: r.ticker,
         value: disagreement,
         fired: disagreement > this.thresholds['maxAbsDisagreement']!,
-        detail: `${r.ticker}: chain underlying ${r.chain_price.toFixed(2)} vs snapshot ${r.quote_price.toFixed(2)} (${(disagreement * 100).toFixed(2)}%)`,
-        evidence: { ticker: r.ticker, chainPrice: r.chain_price, quotePrice: r.quote_price }
+        detail: `${r.ticker}: chain underlying ${r.chain_price.toFixed(2)} vs Polygon close ${r.quote_price.toFixed(2)} (${(disagreement * 100).toFixed(2)}%)`,
+        evidence: { ticker: r.ticker, chainPrice: r.chain_price, quoteClose: r.quote_price }
       } satisfies Evaluation;
     });
   }
@@ -384,105 +419,263 @@ export const QC409_STICKY_SET_HONOURED: CheckDefinition = {
   }
 };
 
-/** Roughly at the money — where a delta difference is largest and easiest to read. */
+/** Roughly at the money — where a delta responds to spot and is easiest to invert. */
 const ATM_BAND = 0.05;
 
-/** A breach on one strike is noise; on more than this share of them it is the feed. */
-const BREACH_FRACTION_TO_FIRE = 0.05;
+/** Enough contracts that a per-ticker median is a reading and not one strike. */
+const MIN_IMPLIED_CONTRACTS = 5;
+const MIN_PARITY_PAIRS = 3;
+
+/** A pair's quote is usable for parity only when its spread says it is a market. */
+const MAX_PARITY_SPREAD = 0.5;
+
+/** Below this many invertible contracts the scale verdict is not a reading. */
+const MIN_CONTRACTS_FOR_SCALE_VERDICT = 100;
+
+interface GreekRow {
+  osi_symbol: string;
+  ticker: string;
+  strike: number;
+  right: 'call' | 'put';
+  iv: number;
+  delta: number;
+  bid: number | null;
+  ask: number | null;
+  underlying_price: number;
+  expiration_date: string;
+}
+
+/**
+ * The 3M rate and the latest observation of each ATM contract for the day,
+ * shared by QC-410 and QC-414. A re-run on one date stores every contract again,
+ * and measuring both copies counted each twice (126,396 observations of 63,198
+ * contracts on 2026-09-15). Null when no rate is stored.
+ */
+function loadAtmGreeks(ctx: CheckContext): { rate: number; rows: GreekRow[] } | null {
+  const rate = ctx.db
+    .prepare(
+      `SELECT yield FROM raw_treasury_yield
+        WHERE tenor = '3M' AND curve_date <= ?
+        ORDER BY curve_date DESC LIMIT 1`
+    )
+    .get(ctx.tradingDate) as { yield: number } | undefined;
+  // Skipped, not failed: without a rate there is no comparison to make, and
+  // claiming one from a default would be exactly the fabrication P4 forbids.
+  if (!rate) return null;
+  const rows = ctx.db
+    .prepare(
+      `SELECT s.osi_symbol, s.ticker, s.strike, s."right", s.iv, s.delta, s.bid, s.ask,
+              s.underlying_price, s.expiration_date
+         FROM raw_option_contract_snapshot s
+         JOIN (SELECT osi_symbol, MAX(observed_at) AS latest FROM raw_option_contract_snapshot
+                WHERE as_of_date = ? GROUP BY osi_symbol) m
+           ON m.osi_symbol = s.osi_symbol AND m.latest = s.observed_at
+        WHERE s.as_of_date = ? AND s.iv_status = 'ok' AND s.greeks_status = 'ok'
+          AND s.delta IS NOT NULL AND s.underlying_price > 0
+          AND ABS(s.strike - s.underlying_price) <= s.underlying_price * ?`
+    )
+    .all(ctx.tradingDate, ctx.tradingDate, ATM_BAND) as GreekRow[];
+  return { rate: rate.yield, rows };
+}
+
+function dteOn(tradingDate: string, expiration: string): number {
+  return Math.round((Date.parse(`${expiration}T00:00:00Z`) - Date.parse(`${tradingDate}T00:00:00Z`)) / 86_400_000);
+}
+
+/** Saturated deltas are flat in spot: they cannot be inverted and say nothing about scale. */
+function invertible(delta: number, dteDays: number): boolean {
+  return dteDays >= 1 && Math.abs(delta) >= 0.05 && Math.abs(delta) <= 0.95;
+}
+
+function median(xs: readonly number[]): number {
+  const s = [...xs].sort((a, b) => a - b);
+  return s[Math.floor(s.length / 2)]!;
+}
 
 export const QC410_GREEK_REPRODUCTION: CheckDefinition = {
   id: 'QC-410',
   domain: 'chains',
   severity: 'warning',
   description:
-    "Black-Scholes delta from the stored inputs is within tolerance of the provider's delta on ATM " +
-    'contracts. This verifies the Greeks are on the scale the dictionary claims, not that they match ' +
-    'our model: E*Trade prices American options with an unpublished pricer, and the measured gap has ' +
-    'the shape of a model difference rather than an error. It is the stage-1 consumer of ' +
-    '`raw_treasury_yield`; a missing rate skips the check rather than failing it, because a missing ' +
-    "rate is QC-902's finding.",
+    "A ticker's Greeks were computed off the price its own option quotes imply. Per ticker, the spot at " +
+    "which our Black-Scholes delta equals the provider's (median over ATM contracts) is compared with " +
+    'the spot put-call parity recovers from the quoted mids. No Greek and no volatility enters the ' +
+    'second, so a disagreement says the Greeks, not the prices, are off. Measured 2026-09-15/16 over ' +
+    '~500 tickers: parity reproduced the session close to a median of -0.03 %, while 50-70 tickers a ' +
+    'day carried deltas implying a different price: PCTY 113.6 on a 147.3 close on BOTH days, JAZZ ' +
+    '249.65 then 249.67 while the stock moved. Any consumer selecting strikes by provider delta picks ' +
+    'the wrong contract on a flagged ticker. Until v1.1.252 this fired on the share of ALL ATM ' +
+    'contracts breaching a 0.05 delta tolerance, so a handful of broken tickers turned the whole ' +
+    'domain RED without naming them. QC-414 carries the scale question it used to answer. A missing ' +
+    "3M rate skips the check, because a missing rate is QC-902's finding.",
   readsTables: ['raw_option_contract_snapshot', 'raw_treasury_yield'],
-  testedQuantity: 'abs_delta_difference',
+  testedQuantity: 'abs_delta_spot_vs_parity_spot_fraction',
   testedUnit: 'fraction',
-  thresholds: { maxAbsDeltaDifference: 0.05 },
+  thresholds: { maxSpotDisagreement: 0.01 },
   thresholdBasis: 'measured',
   thresholdEvidence:
-    "One live SPY chain, 2026-09-07, 12 strikes within $40 of spot: E*Trade's delta sits 0.018–0.029 " +
-    'below a European Black-Scholes, monotonically in moneyness. SPY\'s ~1.15 % dividend yield halves ' +
-    'the worst gap (0.0287 to 0.0179) without closing it. 0.05 is far above a model difference and ' +
-    'far below anything a unit or scale fault could produce, since those are off by 100x or sign ' +
-    'flipped.',
+    'qc410-study.mjs on 2026-09-15 and 2026-09-16. Per ticker, the share of contracts breaching a 0.05 ' +
+    'delta tolerance, by |delta-implied spot - close|: <0.1 % 0.9-1.5 %, 0.1-0.25 % 1.3-2.8 %, ' +
+    '0.25-0.5 % 3.5-4.9 %, 0.5-1 % 11.7-19.7 %, 1-3 % 39-48 %, >3 % 86-94 %. Past 1 % the provider ' +
+    "delta disagrees with our model on nearly half the ticker's contracts. Parity vs close: median " +
+    '-0.03 % / -0.07 %, p5-p95 about -0.9 % to +0.35 %.',
   run(ctx) {
-    const rate = ctx.db
-      .prepare(
-        `SELECT yield FROM raw_treasury_yield
-          WHERE tenor = '3M' AND curve_date <= ?
-          ORDER BY curve_date DESC LIMIT 1`
-      )
-      .get(ctx.tradingDate) as { yield: number } | undefined;
-    // Skipped, not failed: without a rate there is no comparison to make, and
-    // claiming one from a default would be exactly the fabrication P4 forbids.
-    if (!rate) return [];
+    const loaded = loadAtmGreeks(ctx);
+    if (!loaded) return [];
+    const { rate, rows } = loaded;
 
-    const rows = ctx.db
-      .prepare(
-        `SELECT osi_symbol, strike, "right", iv, delta, underlying_price, expiration_date
-           FROM raw_option_contract_snapshot
-          WHERE as_of_date = ? AND iv_status = 'ok' AND greeks_status = 'ok'
-            AND delta IS NOT NULL AND underlying_price > 0
-            AND ABS(strike - underlying_price) <= underlying_price * ?`
-      )
-      .all(ctx.tradingDate, ATM_BAND) as {
-      osi_symbol: string;
-      strike: number;
-      right: 'call' | 'put';
-      iv: number;
-      delta: number;
-      underlying_price: number;
-      expiration_date: string;
-    }[];
-
-    // Every ATM contract is measured, but a single breach is not the finding —
-    // the spec's condition is a breach on more than 5 % of them. Measuring all
-    // and firing on the fraction keeps the distribution (P10) while leaving one
-    // odd strike out of the exception log.
-    const measured: { key: string; diff: number; detail: string; evidence: Record<string, unknown> }[] = [];
+    const byTicker = new Map<string, GreekRow[]>();
     for (const r of rows) {
-      const dteDays = Math.round(
-        (Date.parse(`${r.expiration_date}T00:00:00Z`) - Date.parse(`${ctx.tradingDate}T00:00:00Z`)) /
-          86_400_000
-      );
-      const modelled = bsDelta({
-        spot: r.underlying_price,
-        strike: r.strike,
-        dteDays,
-        iv: r.iv,
-        rate: rate.yield,
-        right: r.right
-      });
-      if (modelled === null) continue;
+      const list = byTicker.get(r.ticker) ?? [];
+      list.push(r);
+      byTicker.set(r.ticker, list);
+    }
 
-      measured.push({
-        key: r.osi_symbol,
-        diff: Math.abs(modelled - r.delta),
-        detail: `${r.osi_symbol}: provider delta ${r.delta.toFixed(4)} vs model ${modelled.toFixed(4)}`,
-        evidence: { osiSymbol: r.osi_symbol, providerDelta: r.delta, modelDelta: modelled, dteDays, iv: r.iv }
+    const maxGap = this.thresholds['maxSpotDisagreement']!;
+    const mid = (r: GreekRow | undefined): number | null =>
+      r && r.bid !== null && r.ask !== null && r.bid > 0 && r.ask > r.bid &&
+      (r.ask - r.bid) / ((r.ask + r.bid) / 2) <= MAX_PARITY_SPREAD
+        ? (r.bid + r.ask) / 2
+        : null;
+
+    const evaluations: Evaluation[] = [];
+    for (const [ticker, list] of [...byTicker].sort((a, b) => a[0].localeCompare(b[0]))) {
+      const implied: number[] = [];
+      for (const r of list) {
+        const dteDays = dteOn(ctx.tradingDate, r.expiration_date);
+        if (!invertible(r.delta, dteDays)) continue;
+        const spot = impliedSpotFromDelta({
+          delta: r.delta, nearSpot: r.underlying_price, strike: r.strike, dteDays, iv: r.iv, rate, right: r.right
+        });
+        if (spot !== null) implied.push(spot);
+      }
+
+      const pairs = new Map<string, { call?: GreekRow; put?: GreekRow }>();
+      for (const r of list) {
+        const k = `${r.expiration_date}|${r.strike}`;
+        const pair = pairs.get(k) ?? {};
+        pair[r.right] = r;
+        pairs.set(k, pair);
+      }
+      const parity: number[] = [];
+      for (const { call, put } of pairs.values()) {
+        const callMid = mid(call);
+        const putMid = mid(put);
+        if (!call || callMid === null || putMid === null) continue;
+        const spot = paritySpot({
+          callMid, putMid, strike: call.strike, dteDays: dteOn(ctx.tradingDate, call.expiration_date), rate
+        });
+        if (spot !== null) parity.push(spot);
+      }
+
+      if (parity.length < MIN_PARITY_PAIRS) continue;
+      const quoteSpot = median(parity);
+
+      // The worst case cannot be inverted. Greeks computed off a price far enough
+      // away pin every near-the-money delta at 0 or 1 (PCTY's $140 put read -1.000
+      // on a 147.32 close), so a ticker judged only on invertible contracts would
+      // drop out of the check at exactly the moment it is most wrong. A provider
+      // delta that is pinned where our model at the parity spot is plainly not
+      // (0.2-0.8) is the same finding, read directly.
+      let pinned = 0;
+      for (const r of list) {
+        const dteDays = dteOn(ctx.tradingDate, r.expiration_date);
+        // Out of [-1, 1] is not pinned, it is a unit fault: QC-414's finding, feed-wide.
+        if (dteDays < 1 || Math.abs(r.delta) > 1 || (Math.abs(r.delta) >= 0.05 && Math.abs(r.delta) <= 0.95)) continue;
+        const model = bsDelta({ spot: quoteSpot, strike: r.strike, dteDays, iv: r.iv, rate, right: r.right });
+        if (model !== null && Math.abs(model) >= 0.2 && Math.abs(model) <= 0.8) pinned++;
+      }
+
+      const measurable = implied.length >= MIN_IMPLIED_CONTRACTS;
+      if (!measurable && pinned < MIN_IMPLIED_CONTRACTS) continue;
+      const deltaSpot = measurable ? median(implied) : null;
+      // With no invertible contracts the disagreement has no size, only a
+      // direction; 1 stands for "beyond anything the spot comparison can measure".
+      const gap = deltaSpot === null ? 1 : Math.abs(deltaSpot / quoteSpot - 1);
+      const fired = gap > maxGap || pinned >= MIN_IMPLIED_CONTRACTS;
+      evaluations.push({
+        key: ticker,
+        value: gap,
+        fired,
+        detail:
+          (deltaSpot === null
+            ? `${ticker}: ${pinned} near-the-money deltas pinned at 0 or 1 where the option quotes imply ` +
+              `spot ${quoteSpot.toFixed(2)}`
+            : `${ticker}: Greeks imply spot ${deltaSpot.toFixed(2)}, option quotes imply ${quoteSpot.toFixed(2)} ` +
+              `(${(gap * 100).toFixed(1)}% apart${pinned > 0 ? `, ${pinned} deltas pinned` : ''})`) +
+          `; chain underlying ${list[0]!.underlying_price}; provider delta is not usable for strike selection on this ticker today`,
+        evidence: {
+          ticker,
+          deltaImpliedSpot: deltaSpot,
+          paritySpot: quoteSpot,
+          chainUnderlying: list[0]!.underlying_price,
+          impliedContracts: implied.length,
+          pinnedContracts: pinned,
+          parityPairs: parity.length
+        }
       });
     }
-    if (measured.length === 0) return [];
+    return evaluations;
+  }
+};
 
-    const tolerance = this.thresholds['maxAbsDeltaDifference']!;
-    const breaching = measured.filter((m) => m.diff > tolerance).length;
-    const breachFraction = breaching / measured.length;
-    const fires = breachFraction > BREACH_FRACTION_TO_FIRE;
-
-    return measured.map((m) => ({
-      key: m.key,
-      value: m.diff,
-      fired: fires && m.diff > tolerance,
-      detail: `${m.detail} — ${breaching} of ${measured.length} ATM contracts breach ${String(tolerance)}`,
-      evidence: { ...m.evidence, breaching, atmContracts: measured.length, breachFraction }
-    })) satisfies Evaluation[];
+export const QC414_GREEK_SCALE: CheckDefinition = {
+  id: 'QC-414',
+  domain: 'chains',
+  severity: 'blocking',
+  description:
+    "The provider's Greeks are on the scale the dictionary claims. Split out of QC-410 when that check " +
+    'became per ticker (v1.1.252): a unit fault (a sign flip, delta per contract instead of per share) ' +
+    'makes the provider delta unreachable by Black-Scholes at any plausible spot, so no ticker would ' +
+    "reach QC-410's minimum and it would evaluate nothing. The signature is a low share of ATM contracts " +
+    'whose delta is reachable: outside [-1, 0] for a put or [0, 1] for a call is never reachable, a ' +
+    'pinned in-range delta cannot be told apart and counts as reachable, and anything else must invert ' +
+    'to a spot within half to one-and-a-half times the chain underlying. IV stored as a percentage never ' +
+    "gets this far: the chain converter's 0 < iv < 5 assertion marks it invalid at ingestion.",
+  readsTables: ['raw_option_contract_snapshot', 'raw_treasury_yield'],
+  testedQuantity: 'solvable_contract_fraction',
+  testedUnit: 'fraction',
+  thresholds: { minSolvableFraction: 0.5 },
+  thresholdBasis: 'working',
+  thresholdEvidence:
+    'Every one of 5,135 contracts breaching the old contract-level tolerance on 2026-09-16 was solvable, ' +
+    'including those on tickers whose Greeks were computed off a price 20 % away; a scale fault moves ' +
+    'nearly every contract out of reach at once. To be set from the pilot distribution.',
+  run(ctx) {
+    const loaded = loadAtmGreeks(ctx);
+    if (!loaded) return [];
+    let attempted = 0;
+    let solvable = 0;
+    for (const r of loaded.rows) {
+      const dteDays = dteOn(ctx.tradingDate, r.expiration_date);
+      if (dteDays < 1) continue;
+      attempted++;
+      // Filtering to invertible deltas first would hide the faults this exists for:
+      // a delta of 52 or a put delta of +0.4 is simply not invertible.
+      const inRange = r.right === 'call' ? r.delta >= 0 && r.delta <= 1 : r.delta >= -1 && r.delta <= 0;
+      if (!inRange) continue;
+      if (!invertible(r.delta, dteDays)) {
+        solvable++;
+        continue;
+      }
+      const spot = impliedSpotFromDelta({
+        delta: r.delta, nearSpot: r.underlying_price, strike: r.strike, dteDays, iv: r.iv, rate: loaded.rate, right: r.right
+      });
+      if (spot !== null) solvable++;
+    }
+    if (attempted < MIN_CONTRACTS_FOR_SCALE_VERDICT) return [];
+    const fraction = solvable / attempted;
+    return [
+      {
+        key: ctx.tradingDate,
+        value: fraction,
+        fired: fraction < this.thresholds['minSolvableFraction']!,
+        detail:
+          `${solvable} of ${attempted} ATM contracts have a delta reachable at a plausible spot ` +
+          `(${(fraction * 100).toFixed(1)}%); the Greeks may not be on the scale the dictionary claims`,
+        evidence: { attempted, solvable, fraction }
+      }
+    ];
   }
 };
 
@@ -618,5 +811,6 @@ export const CHAIN_CHECKS: readonly CheckDefinition[] = [
   QC410_GREEK_REPRODUCTION,
   QC411_WEEKEND_EXPIRATION,
   QC412_CHAIN_ERROR_RATE,
-  QC413_RENEW_STORM
+  QC413_RENEW_STORM,
+  QC414_GREEK_SCALE
 ];

@@ -106,6 +106,10 @@ if (c.unavailable) {
     ['check', 'severity', 'state', 'findings', 'example'],
     c.exceptions.map((e) => [e.check_id, e.severity, e.state, e.findings, e.example])
   ));
+  out.push('### Slowest gate checks', '', table(
+    ['run', 'check', 'seconds', 'evaluated', 'fired'],
+    (c.slowChecks ?? []).map((k) => [k.run_id, k.check_id, (k.duration_ms / 1000).toFixed(1), k.evaluated_count, k.fired_count])
+  ));
   const errs = Object.entries(c.errors ?? {});
   if (errs.length) out.push('Unreadable sections:', '', errs.map(([k, v]) => `- ${k}: ${v}`).join('\n'), '');
 }

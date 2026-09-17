@@ -57,7 +57,13 @@ const LISTS = [
  */
 function readList(db: Database, indexName: string): readonly string[] {
   const rows = db
-    .prepare('SELECT DISTINCT ticker FROM constituents WHERE index_name = ? ORDER BY ticker')
+    // `constituents_excluded` (migration 085) holds delisted names a feed keeps
+    // listing for weeks; every constituents writer honours it, so this reader does too.
+    .prepare(
+      `SELECT DISTINCT ticker FROM constituents
+        WHERE index_name = ? AND UPPER(ticker) NOT IN (SELECT UPPER(ticker) FROM constituents_excluded)
+        ORDER BY ticker`
+    )
     .all(indexName) as { ticker: string }[];
   const tickers = rows.map((r) => r.ticker).filter((t) => typeof t === 'string' && t.length > 0);
   if (tickers.length === 0) {

@@ -242,6 +242,12 @@ export interface CollectorDay {
   responses: unknown[];
   responseFailures: unknown[];
   exceptions: unknown[];
+  /**
+   * The slowest gate checks of these runs. The 2026-09-16 gate took 27 minutes on the
+   * main thread (report stamped 18:47:29, email 19:14:29) and the app answered nothing
+   * meanwhile; `qa_check_result.duration_ms` named the culprit all along and nothing showed it.
+   */
+  slowChecks: unknown[];
   /** Sections that could not be read, with why — a schema change must not blank the whole report. */
   errors: Record<string, string>;
 }
@@ -331,7 +337,15 @@ export function readCollectorDay(db: QueryableDb, date: string): CollectorDay {
     ).all()
   );
 
-  return { tradingDay, runs, reports, domainStatus, responses, responseFailures, exceptions, errors };
+  const slowChecks = safe('slowChecks', [] as unknown[], () =>
+    db.prepare(
+      `SELECT run_id, check_id, duration_ms, evaluated_count, fired_count
+         FROM qa_check_result WHERE run_id IN ${inRuns}
+        ORDER BY duration_ms DESC LIMIT 10`
+    ).all()
+  );
+
+  return { tradingDay, runs, reports, domainStatus, responses, responseFailures, exceptions, slowChecks, errors };
 }
 
 // ─── the report ──────────────────────────────────────────────────────────────

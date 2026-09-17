@@ -998,6 +998,23 @@ failed job.
 
 see `src/main/services/roll-the-dice.ts`, `src/main/services/dice-email-builder.ts`
 
+## greek consistency (provider-data integrity) {#greek-consistency}
+
+Does a chain's delta agree with the underlying price the chain reports? (v1.1.252)
+
+- **Delta-implied spot**, per contract: the `S` at which the European, dividend-free Black-Scholes delta
+  `N(d1)` (call) or `N(d1) − 1` (put), `d1 = (ln(S/K) + (r + σ²/2)·T) / (σ·√T)`, equals the provider
+  delta — by bisection on `[0.5·S₀, 1.5·S₀]`, since delta rises with spot for both rights. Undefined for
+  a saturated delta (`|Δ| < 0.05` or `> 0.95`), which is flat in spot. `T` = calendar DTE / 365.
+- **Chain reading**: the median over contracts within 10 % of spot (old app) or the ATM band (TA2).
+- **Parity spot** (TA2, QC-410): `S = C_mid − P_mid + K·e^(−rT)` per strike, median over pairs whose
+  spread is ≤ 50 % of mid. No Greek and no volatility enters it.
+- **Stale** when `|implied / reference − 1| > 1 %` — reference = chain `underlyingPrice` (old app)
+  or the parity spot (TA2). The old app's rate is `RISK_FREE_RATE`; TA2 uses the stored 3M par yield.
+
+Threshold evidence: see `MAX_SPOT_DEVIATION` in `src/main/services/greek-consistency.ts` and
+NewApp 03 §3.
+
 ## own-at-strike (cost-basis read) {#own-at-strike}
 
 "Would I be happy owning this at the strike?" — answered from the stock's own price history

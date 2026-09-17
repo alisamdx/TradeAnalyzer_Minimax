@@ -35,6 +35,9 @@ import { runGate } from '../src/qa/gate.js';
 import { EARNINGS_FUNDAMENTALS_CHECKS, MACRO_CHECKS } from '../src/qa/registry.js';
 import { QC604_EARNINGS_WEEKEND_DATE } from '../src/qa/checks/earnings-fundamentals.js';
 import { ensureTradingCalendar } from '../src/collector/trading-calendar.js';
+import { captureResponse } from '../src/collector/capture.js';
+import { recipes } from '../src/ingest/recipes.js';
+import { QC008_PROVIDER_CAP, QC009_DUPLICATE_NATURAL_KEY } from '../src/qa/checks/cross-cutting.js';
 
 /**
  * B7a — phase 8, the event and macro domains.
@@ -397,7 +400,8 @@ describe('the earnings calendar', () => {
       }
     });
 
-    await runEarningsSweep(host, db(), newRun(), { windowDays: 30, sliceDays: 30 });
+    const sweepRun = newRun();
+    await runEarningsSweep(host, db(), sweepRun, { windowDays: 30, sliceDays: 30 });
 
     // The first 30-day request came back at the cap, so it was halved, and the
     // halves halved again, until the responses stopped being capped.
@@ -408,6 +412,12 @@ describe('the earnings calendar', () => {
       return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
     });
     expect(Math.max(...finalSpans)).toBeLessThan(30);
+
+    // And QC-008 has nothing to say: every capped window was re-covered by its
+    // uncapped halves. On 2026-09-16 it raised 3 blocking findings for exactly this.
+    const qc008 = QC008_PROVIDER_CAP.run({ db: db(), runId: sweepRun.runId, tradingDate: DATE, observedAt: OBSERVED });
+    expect(qc008.length).toBeGreaterThan(0);
+    expect(qc008.filter((e) => e.fired)).toEqual([]);
   });
 
   it('stops subdividing at a single day and leaves the cap recorded', async () => {
@@ -418,8 +428,12 @@ describe('the earnings calendar', () => {
       httpGet: async () =>
         response(earningsBody(Array.from({ length: 1500 }, () => ({ symbol: 'A', date: DATE }))))
     });
-    const result = await runEarningsSweep(host, db(), newRun(), { windowDays: 2, sliceDays: 2 });
+    const leafRun = newRun();
+    const result = await runEarningsSweep(host, db(), leafRun, { windowDays: 2, sliceDays: 2 });
     expect(result.calls).toBeLessThan(10);
+    // A capped single day could not be re-covered, so QC-008 still blocks on it.
+    const qc008 = QC008_PROVIDER_CAP.run({ db: db(), runId: leafRun.runId, tradingDate: DATE, observedAt: OBSERVED });
+    expect(qc008.some((e) => e.fired)).toBe(true);
     const capped = raw
       .prepare('SELECT COUNT(*) AS n FROM meta_response WHERE at_provider_cap = 1')
       .get() as { n: number };
@@ -626,6 +640,37 @@ describe('EDGAR company facts', () => {
   it('drops a taxonomy the dictionary does not declare', () => {
     const rows = makeCompanyFactsIngest({ cik: '0000320193' })(body, ctx(newRun()));
     expect(rows.some((r) => r.values['taxonomy'] === 'made-up-taxonomy')).toBe(false);
+  });
+
+  it('does not read a quarter and its year-to-date as one fact (QC-009)', () => {
+    // A 10-Q reports Revenues for the quarter AND the six months to date: same end,
+    // same filing, same fp, different start. 1,641 of these read as duplicates on
+    // 2026-09-16 because period_start was not part of the natural key.
+    const quarterAndYtd = JSON.stringify({
+      facts: {
+        'us-gaap': {
+          Revenues: {
+            units: {
+              USD: [
+                { start: '2026-04-01', end: '2026-06-28', val: 85_000_000_000, accn: '0000320193-26-000106', fy: 2026, fp: 'Q3', form: '10-Q', filed: '2026-08-01' },
+                { start: '2025-12-28', end: '2026-06-28', val: 210_000_000_000, accn: '0000320193-26-000106', fy: 2026, fp: 'Q3', form: '10-Q', filed: '2026-08-01' }
+              ]
+            }
+          }
+        }
+      }
+    });
+    const run = newRun();
+    const result = captureResponse({
+      host: makeHost(), db: db(), runId: run.runId, asOfDate: DATE, provider: 'edgar',
+      endpoint: '/api/xbrl/companyfacts/CIK0000320193.json', slug: 'companyfacts', params: { cik: '0000320193' },
+      response: response(quarterAndYtd), captureRuleId: ruleId(),
+      recipe: recipes.companyFacts({ cik: '0000320193' })
+    });
+    expect(result.rowsWritten).toBe(2);
+    const edgar = QC009_DUPLICATE_NATURAL_KEY.run({ db: db(), runId: run.runId, tradingDate: DATE, observedAt: OBSERVED })
+      .find((e) => e.key === 'raw_edgar_fact');
+    expect(edgar?.fired).toBe(false);
   });
 });
 

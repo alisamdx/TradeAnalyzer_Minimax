@@ -55,7 +55,10 @@ export const fundamentalsAccountTables: readonly TableEntry[] = [
       'XBRL company facts from EDGAR — the honest raw form. A **restated value in a later filing is a ' +
       'new row**, not an edit, so a study can ask what was known at the time as easily as what is ' +
       'known now.',
-    naturalKey: ['cik', 'taxonomy', 'concept', 'unit', 'period_end', 'fiscal_period', 'accession_no'],
+    // period_start is part of the key: a 10-Q reports the same concept for the quarter AND the
+    // year to date, same end, same filing, same fiscal_period, differing only in start. Without it
+    // QC-009 read every such pair as a duplicate (1,641 in one run, 2026-09-16).
+    naturalKey: ['cik', 'taxonomy', 'concept', 'unit', 'period_start', 'period_end', 'fiscal_period', 'accession_no'],
     appendOnly: true,
     ruleDriven: true,
     standardColumns: true,

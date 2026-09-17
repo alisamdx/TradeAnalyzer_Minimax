@@ -212,6 +212,12 @@ Require ≥ 21 data points, else null.
 
 ---
 
+### greek consistency (v1.1.252)
+
+A chain's Greeks are **stale** when the median spot at which Black-Scholes reproduces the provider delta
+(contracts within 10 % of spot, `0.05 ≤ |Δ| ≤ 0.95`) differs from the chain's `underlyingPrice` by more
+than 1 %. Full definition: `docs/formulas.md#greek-consistency`.
+
 ## 23.5 Portfolio Greeks
 
 ```

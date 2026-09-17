@@ -105,7 +105,7 @@ The inspector refuses any filter or sort that would scan unbounded (05 §8), so 
 | `raw_daily_bar` | `(ticker, trade_date)`, `(trade_date)`, `(ticker, observed_at)` |
 | `raw_eod_quote` | `(ticker, as_of_date)`, `(as_of_date)` |
 | `raw_option_expiration` | `(ticker, as_of_date)`, `(ticker, expiration_date)` |
-| `raw_option_contract_snapshot` | `(as_of_date)`, `(ticker, as_of_date)`, `(osi_symbol, as_of_date)`, `(ticker, expiration_date, as_of_date)` |
+| `raw_option_contract_snapshot` | `(as_of_date)`, `(ticker, as_of_date)`, `(osi_symbol, as_of_date)`, `(ticker, expiration_date, as_of_date)`, `(source_response_id)` — the last added v1.1.252: QC-403 counts contracts per chain response ~4,900 times a run, each a full table scan without it, and the 2026-09-16 gate held the main thread 27 minutes |
 | `raw_split`, `raw_dividend` | `(ticker, execution_date)` / `(ticker, ex_dividend_date)` |
 | `raw_earnings_event` | `(ticker, report_date)`, `(report_date)`, `(ticker, observed_at)` |
 | `raw_index_quote` | `(symbol, as_of_date)` |
@@ -544,6 +544,8 @@ The payload is **parallel arrays**, not an array of objects, so zipping by index
 | `primary_doc` | TEXT | |
 
 ### `raw_edgar_fact`
+
+**Natural key includes `period_start` (dictionary v17).** A 10-Q reports one concept for the quarter AND the year to date: same `period_end`, same `accession_no`, same `fiscal_period`, differing only in start. Without it QC-009 read every such pair as a duplicate (1,641 in one run, 2026-09-16).
 Source: EDGAR `api/xbrl/companyfacts/CIK##########.json`. Fetched when `raw_edgar_filing` shows a new 10-K/10-Q since the last fact pull (weekly sweep). Rows are appended per `(cik, taxonomy, concept, unit, period_end, fiscal_period, accession_no)`; a restated value in a later filing is a new row.
 
 | column | type | null | source |

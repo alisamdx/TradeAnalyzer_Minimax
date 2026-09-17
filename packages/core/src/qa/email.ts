@@ -33,6 +33,7 @@ interface ExceptionRow {
   detail: string;
   consecutive_runs: number;
   still_firing: number;
+  last_seen_run_id: number;
   accepted_until: string | null;
 }
 
@@ -100,7 +101,7 @@ export function buildStatusEmail(
 ): EmailModel {
   const open = db
     .prepare(
-      `SELECT check_id, domain, key, severity, state, detail, consecutive_runs, still_firing, accepted_until
+      `SELECT check_id, domain, key, severity, state, detail, consecutive_runs, still_firing, last_seen_run_id, accepted_until
          FROM qa_exception
         WHERE state IN ('open', 'acknowledged')
         ORDER BY CASE severity WHEN 'blocking' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END, check_id, key`
@@ -108,6 +109,10 @@ export function buildStatusEmail(
     .all() as ExceptionRow[];
 
   const blocking = open.filter((e) => e.severity === 'blocking');
+  // The subject counts what THIS run found. Counting every open exception in the
+  // generation put 3,438 in the subject of a run whose gate counted 2,321 on
+  // 2026-09-16, and the two numbers could not be reconciled from the email.
+  const blockingThisRun = blocking.filter((e) => e.last_seen_run_id === args.runId && e.still_firing === 1);
   const warnings = open.filter((e) => e.severity === 'warning');
   const repeats = open.filter((e) => e.consecutive_runs >= 3);
   const stopped = open.filter((e) => e.still_firing === 0);
@@ -150,7 +155,7 @@ export function buildStatusEmail(
 
   const verdictLabel =
     args.verdict === 'red'
-      ? `RED (${blocking.length} blocking)`
+      ? `RED (${blockingThisRun.length} blocking)`
       : args.verdict === 'amber'
         ? `AMBER (${warnings.length} warning${warnings.length === 1 ? '' : 's'})`
         : 'GREEN';
@@ -175,7 +180,10 @@ export function buildStatusEmail(
   for (const line of deltaLines(delta)) lines.push(line);
 
   if (blocking.length > 0) {
-    lines.push(`BLOCKING (${blocking.length})`);
+    lines.push(
+      `BLOCKING (${blocking.length}: ${blockingThisRun.length} found by this run, ` +
+        `${blocking.length - blockingThisRun.length} still open from earlier runs)`
+    );
     for (const line of summariseByCheck(blocking)) lines.push(line);
     lines.push('');
   }

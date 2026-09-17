@@ -122,7 +122,11 @@ export const QC008_PROVIDER_CAP: CheckDefinition = {
     'A response that came back AT a known provider cap was followed by a subdivided sweep. Finnhub ' +
     'truncates its bulk calendar from the FRONT at 1,500, so a payload at the cap is evidence of ' +
     'truncation, not of a complete answer — trusting one stored an earnings date a quarter late in ' +
-    'the existing app and silently suppressed all three mechanisms that would have corrected it.',
+    'the existing app and silently suppressed all three mechanisms that would have corrected it. ' +
+    'Until v1.1.252 the check fired on every capped response, including a date window whose halves ' +
+    'the sweep then re-fetched uncapped in the same run: 3 blocking findings on 2026-09-16 for a ' +
+    'sweep that had done exactly what the check asks. A capped `from`/`to` window now passes when ' +
+    'uncapped responses to the same endpoint in the same run cover every day of it.',
   readsTables: ['meta_response'],
   testedQuantity: null,
   testedUnit: null,
@@ -138,14 +142,54 @@ export const QC008_PROVIDER_CAP: CheckDefinition = {
 
     if (capped.length === 0) return [{ key: 'run', fired: false }];
 
-    return capped.map((r) => ({
-      key: String(r.source_response_id),
-      fired: true,
-      detail: `${r.endpoint} returned exactly the provider cap — treat as truncated and subdivide`,
-      evidence: { endpoint: r.endpoint, params: r.params_json }
-    }));
+    const window = (paramsJson: string): { from: string; to: string } | null => {
+      try {
+        const p = JSON.parse(paramsJson) as Record<string, unknown>;
+        const iso = /^\d{4}-\d{2}-\d{2}$/;
+        return typeof p['from'] === 'string' && typeof p['to'] === 'string' && iso.test(p['from']) && iso.test(p['to'])
+          ? { from: p['from'], to: p['to'] }
+          : null;
+      } catch {
+        return null;
+      }
+    };
+    const uncapped = ctx.db.prepare(
+      `SELECT params_json FROM meta_response
+        WHERE run_id = ? AND endpoint = ? AND at_provider_cap = 0 AND parse_status = 'ok'`
+    );
+
+    return capped.map((r) => {
+      const parent = window(r.params_json);
+      let covered = false;
+      if (parent) {
+        const days = new Set<string>();
+        for (const row of uncapped.all(ctx.runId, r.endpoint) as { params_json: string }[]) {
+          const child = window(row.params_json);
+          if (!child || child.from < parent.from || child.to > parent.to) continue;
+          for (let d = child.from; d <= child.to; d = addUtcDays(d, 1)) days.add(d);
+        }
+        covered = true;
+        for (let d = parent.from; d <= parent.to; d = addUtcDays(d, 1)) {
+          if (!days.has(d)) { covered = false; break; }
+        }
+      }
+      return {
+        key: String(r.source_response_id),
+        fired: !covered,
+        detail: covered
+          ? undefined
+          : `${r.endpoint} returned exactly the provider cap and was not fully re-covered by uncapped ` +
+            'responses in this run — treat as truncated',
+        evidence: { endpoint: r.endpoint, params: r.params_json, recoveredBySubdivision: covered }
+      };
+    });
   }
 };
+
+function addUtcDays(date: string, days: number): string {
+  const t = Date.parse(`${date}T00:00:00Z`) + days * 86_400_000;
+  return new Date(t).toISOString().slice(0, 10);
+}
 
 export const QC009_DUPLICATE_NATURAL_KEY: CheckDefinition = {
   id: 'QC-009',

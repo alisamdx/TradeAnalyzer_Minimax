@@ -44,7 +44,17 @@ export interface ChainPhaseResult {
   readonly stickyClosed: number;
   /** Pins re-padded out of the pre-2026-09-15 space form; 0 on a clean generation. */
   readonly stickyRepadded: number;
+  /** Subset members closed as `delisted` because E*Trade no longer recognises the symbol. */
+  readonly delistedClosed: number;
 }
+
+/**
+ * E*Trade's answer, verbatim, to an expirations call for a symbol it no longer
+ * lists. Measured 2026-09-16 on EA, EQR and WBS — delisted names that stayed in
+ * the subset because membership is sticky and nothing ever wrote the
+ * `delisted` removal reason the dictionary declares.
+ */
+export const ETRADE_INVALID_SYMBOL = 'The symbol entered is invalid';
 
 interface SubsetCandidate {
   readonly ticker: string;
@@ -420,6 +430,11 @@ export async function runChainsPhase(
   let chainCalls = 0;
   let chainFailures = 0;
   let contractsStored = 0;
+  let delistedClosed = 0;
+  const closeDelisted = db.prepare(
+    `UPDATE ref_chain_subset_membership SET valid_to = ?, removal_reason = 'delisted'
+      WHERE ticker = ? AND valid_to IS NULL`
+  );
 
   for (const [i, ticker] of tickers.entries()) {
     throwIfCancelled(host, 'phase-7-chains');
@@ -478,6 +493,22 @@ export async function runChainsPhase(
     });
     if (expResult.parseStatus !== 'ok') expirationFailures++;
 
+    // A symbol E*Trade no longer recognises leaves the subset. Stickiness (Q15)
+    // protects a series from a threshold, not from its ticker ceasing to exist,
+    // and a delisted member costs an error response every run forever. Only
+    // members close, and only with no live pin: a pin names a contract someone
+    // holds or was recommended, and that is worth an error line. A relisting
+    // is re-admitted by the rule on its next bar, since admission skips open
+    // members only.
+    if (
+      expResponse.status === 400 &&
+      expResponse.body.includes(ETRADE_INVALID_SYMBOL) &&
+      memberSet.has(ticker) &&
+      stickyExpirations.size === 0
+    ) {
+      delistedClosed += closeDelisted.run(run.tradingDate, ticker).changes;
+    }
+
     // ── chains ─────────────────────────────────────────────────────────────
     const wanted = [...selection.entries()]
       .filter(([, reason]) => reason !== 'outside')
@@ -521,6 +552,7 @@ export async function runChainsPhase(
     chainFailures,
     contractsStored,
     stickyClosed,
-    stickyRepadded: stickyRepadded.reopened
+    stickyRepadded: stickyRepadded.reopened,
+    delistedClosed
   };
 }

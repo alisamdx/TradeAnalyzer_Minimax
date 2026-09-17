@@ -288,3 +288,26 @@ sitting in `meta_response` the whole time in every case.
     cannot quietly make it vacuous.
     **This is the meta-item of the two**: it targets the mechanism by which the assumptions in
     #46 get baked in and confirmed, rather than any single assumption.
+
+## I. Follow-ups from the 2026-09-16 validation — added 2026-09-16
+
+48. **Decide on `STALE_GREEK_GUARD` for the existing app.** Shipped off (v1.1.252, FR-SEY-5).
+    Run `node scripts/pick-greek-audit.mjs` with the app open: it counts stored brief candidates
+    chosen on an E*Trade delta that disagrees with the stored spot by > 1 %. Zero stale picks →
+    leave off and revisit; any stale `picked` rows → those recommendations were the wrong strike,
+    which is the case for turning it on. Note it cannot be validated by replay: the stored
+    candidates hold the stale delta, not the chain.
+
+49. **QC-409 on BRK.B: settle how E*Trade spells class-share roots in `osiKey`.** 2 findings on
+    2026-09-16 (`BRK.B-261016P00495000` pinned, no snapshot). Do not guess the spelling — read one
+    stored `raw_option_contract_snapshot.osi_symbol` for BRK.B and anchor the fix on it (#46).
+
+50. **Confirm what held the gate for 27 minutes on 2026-09-16.** v1.1.252 indexes the table
+    QC-403 scanned per response (measured: a full SCAN per count) and the day report now lists the
+    slowest checks. After the next run, read "Slowest gate checks": if anything is still over a
+    minute, that is the next fix.
+
+51. **Validate the rewritten checks on real data before trusting their first email.** With both
+    apps closed, from a normal terminal: `node packages/core/scripts/gate-preview.mjs 2026-09-16
+    QC-410 QC-414 QC-407 QC-008 QC-009`. Expected: QC-410 names ~50-90 tickers (PCTY, AMG, AIZ,
+    WSM …), QC-414 does not fire, QC-407 evaluates tickers instead of zero, QC-008 and QC-009 quiet.

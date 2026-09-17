@@ -412,6 +412,30 @@ describe('the status email', () => {
     expect(email.text).toContain('QC-904 ×1');
   });
 
+  it('counts this run\'s blocking findings in the subject, and the backlog separately', () => {
+    // 2026-09-16: subject "RED (3438 blocking)", gate and batch note 2,321.
+    const host = makeHost();
+    const r1 = beginRun(db, host, { kind: 'daily', tradingDate: '2026-09-05' });
+    runGate(db, host, {
+      runId: r1.runId, tradingDate: '2026-09-05',
+      checks: [fakeCheck({ severity: 'blocking', evals: () => [{ key: 'OLD', value: 2, fired: true, detail: 'over' }] })]
+    });
+    raw.prepare("UPDATE meta_run SET status='complete' WHERE run_id=?").run(r1.runId);
+    const r2 = beginRun(db, host, { kind: 'daily', tradingDate: '2026-09-06' });
+    runGate(db, host, {
+      runId: r2.runId, tradingDate: '2026-09-06',
+      checks: [fakeCheck({ id: 'QC-902', severity: 'blocking', evals: () => [{ key: 'NEW', value: 2, fired: true, detail: 'over' }] })]
+    });
+
+    const email = buildStatusEmail(db, {
+      runId: r2.runId, tradingDate: '2026-09-06', slot: 'after_close', verdict: 'red',
+      generationNo: 1, generationStatus: 'pilot', collectorVersion: '0.1.0',
+      startedAt: 't', finishedAt: 't', domains: {}
+    });
+    expect(email.subject).toContain('RED (1 blocking)');
+    expect(email.text).toContain('BLOCKING (2: 1 found by this run, 1 still open from earlier runs)');
+  });
+
   it('lists exceptions that stopped firing but were never resolved', () => {
     const host = makeHost();
     const firing = fakeCheck({ evals: () => [{ key: 'AAPL', value: 2, fired: true, detail: 'over' }] });

@@ -22,6 +22,7 @@ import {
 import type { OptionsProvider } from './options-provider.js';
 import type { OptionsChain, OptionContract } from './data-provider.js';
 import { atmIvAtClosestStrike } from './iv-utils.js';
+import { assessChainGreeks, staleGreekGuardEnabled, withholdStaleGreeks } from './greek-consistency.js';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -120,7 +121,12 @@ export class ETradeDataProvider implements OptionsProvider {
       ...result.puts .map(leg => legToContract(leg, ticker, expiration)),
     ];
 
-    return { ticker: ticker.toUpperCase(), expiration, contracts, underlyingPrice: result.underlyingPrice ?? null };
+    const chain: OptionsChain = { ticker: ticker.toUpperCase(), expiration, contracts, underlyingPrice: result.underlyingPrice ?? null };
+    // One choke point for every consumer that selects a strike by delta. Off until validated
+    // (FR-SEY-5); see greek-consistency.ts for the measurement behind it.
+    if (!staleGreekGuardEnabled()) return chain;
+    const todayEt = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+    return withholdStaleGreeks(chain, assessChainGreeks(chain, todayEt));
   }
 
   // ── IV ────────────────────────────────────────────────────────────────────
