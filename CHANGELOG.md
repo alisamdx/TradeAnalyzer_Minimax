@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.1.264] - 2026-09-17
+
+### The root package build never built TradeAnalyzer 2
+
+v1.1.263 changed `packages/next/src/main/exceptions.ts`; `npm run package` succeeded, `check-core-built` passed, the exe reported `1.1.263.0` — and `packages/next/release/win-unpacked/TradeAnalyzer2.exe` was still **0.4.8, built 2026-09-12**. The change was in no binary. The root `package` script builds TradeAnalyzer only; TA2 has its own under `packages/next` and nothing in the root chain calls it. Same shape as v1.1.250's `dist/` gap, one directory over, and it survived that gap's guard because `check-core-built` checks `core`'s `dist/`, not TA2's bundle.
+
+It surfaced only because a ruling that was supposed to have been made left **no trace**: no `ticker_change` membership row, 66 exceptions still `open`, and `qa_exception_event` holding only `gate` and `escalation` actors. `meta_open_handle` gave the reason — TA2 last opened the generation 2026-09-16 21:16, closed 00:36, on **`dictionary_version 15` while TA1 was on 18**.
+
+Two corollaries, now in `CLAUDE.md`: **a stale TA2 runs stale `core`** (it bundles `@tradeanalyzer/core` as of its own build, so the old exe also predates v1.1.261's `entityStartDates` and v1.1.262's cascade — rebuilding TA1 does not fix TA2); and **`packages/next` has its own version the root bump does not touch**, so v1.1.263 changed its source while leaving it at 0.4.8, and `meta_open_handle.app_version` records exactly that string. Bumped to **0.4.9**.
+
+Also recorded: **the root `npm test` does not run the workspace suites** — `npm run test:all` does. That gap is what let `workspace-versions.test.ts` sit red for weeks with `package-lock.json` naming core 0.6.9 and the root 1.1.245.
+
+No behaviour changed; `core` stays 0.6.21. Details: `changelogs/v1.1.264_2026-09-17.md`.
+
 ## [1.1.263] - 2026-09-17
 
 ### QC-210 can launch the reuse ruling it is best at detecting
