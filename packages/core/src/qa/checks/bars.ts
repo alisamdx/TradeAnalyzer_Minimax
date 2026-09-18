@@ -1,4 +1,5 @@
 import type { CheckContext, CheckDefinition, Evaluation } from '../check.js';
+import type { SqliteLike } from '../../db/sqlite-like.js';
 import { tradingDaysInRange } from '../../collector/trading-calendar.js';
 
 /**
@@ -154,6 +155,7 @@ export const QC204_DISCONTINUITY: CheckDefinition = {
     'daily move of 2.58 %. 40 % sits in a wide empty gap between the two populations.',
   remediation: 'R5',
   run(ctx) {
+    const entityStart = entityStartDates(ctx.db);
     // Latest observation per (ticker, trade_date), so a re-fetched series is
     // compared at its current version rather than against a superseded row.
     const rows = ctx.db
@@ -173,6 +175,10 @@ export const QC204_DISCONTINUITY: CheckDefinition = {
       const prev = rows[i - 1]!;
       const cur = rows[i]!;
       if (prev.ticker !== cur.ticker || prev.close <= 0) continue;
+      // Bars from before a recorded splice belong to a previous occupant of the
+      // symbol. Comparing across or within them compares two companies.
+      const start = entityStart.get(cur.ticker);
+      if (start !== undefined && prev.trade_date < start) continue;
 
       const change = Math.abs(cur.close / prev.close - 1);
       const fired = change > this.thresholds['maxAbsChange']!;
@@ -369,7 +375,37 @@ export function dormancyBeforeSteps(
  * wrote, grouped by ticker, with the exchange calendar indexed over the span.
  * Latest by MAX(row_id) — the chain subset's supersession rule.
  */
+/**
+ * Where each ticker's CURRENT entity begins, for the tickers an operator has
+ * ruled a ticker reuse on — the `valid_from` of the open membership range whose
+ * `change_reason` is `ticker_change`.
+ *
+ * Only `recordTickerReuse` writes such a row, which is what makes this safe to
+ * read. A plain `valid_from` is when the ticker joined our universe LIST, not
+ * when the listing began, so intersecting bars with membership in general would
+ * throw away every bar before the seed and gut these checks. The narrow reading
+ * — a recorded splice, nothing else — is the only one that means what it says.
+ *
+ * Until v1.1.261 nothing read it at all: `recordTickerReuse` closed one range
+ * and opened another "so a reader intersecting bars with membership sees one
+ * entity at a time", and there was no such reader, so a ruled reuse kept firing
+ * on the previous occupant's bars every run and the operator's ruling lasted
+ * exactly until the next one.
+ */
+export function entityStartDates(db: SqliteLike): ReadonlyMap<string, string> {
+  const rows = db
+    .prepare(
+      `SELECT ticker, MIN(valid_from) AS start
+         FROM ref_universe_membership
+        WHERE valid_to IS NULL AND change_reason = 'ticker_change'
+        GROUP BY ticker`
+    )
+    .all() as { ticker: string; start: string }[];
+  return new Map(rows.map((r) => [r.ticker, r.start]));
+}
+
 function latestSeries(ctx: CheckContext): { readonly byTicker: VolumeBar[][]; readonly sessionIndex: Map<string, number> } {
+  const entityStart = entityStartDates(ctx.db);
   const rows = ctx.db
     .prepare(
       `SELECT ticker, trade_date, close, volume FROM raw_daily_bar
@@ -386,6 +422,10 @@ function latestSeries(ctx: CheckContext): { readonly byTicker: VolumeBar[][]; re
   let from: string | undefined;
   let to: string | undefined;
   for (const r of rows) {
+    // A ruled splice ends the previous occupant's series; the volume and
+    // dormancy windows must not reach back across it.
+    const start = entityStart.get(r.ticker);
+    if (start !== undefined && r.trade_date < start) continue;
     const last = byTicker[byTicker.length - 1];
     if (last && last[0]!.ticker === r.ticker) last.push(r);
     else byTicker.push([r]);
@@ -582,10 +622,15 @@ export const QC210_BARS_PREDATE_LISTING: CheckDefinition = {
       )
       .all(ctx.runId) as { ticker: string; first_bar: string; bars: number }[];
 
+    // A ruled splice is the answer to this check's own question, so the ticker
+    // leaves the population rather than firing for ever on history the operator
+    // has already accounted for.
+    const ruled = entityStartDates(ctx.db);
+
     const out: Evaluation[] = [];
     for (const r of rows) {
       const ref = listed.get(r.ticker);
-      if (ref === undefined) continue;
+      if (ref === undefined || ruled.has(r.ticker)) continue;
       if (r.first_bar >= ref.list_date) {
         // Recorded, not skipped: the zeros are the distribution this check's
         // 1 % base rate is read from.

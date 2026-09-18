@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.1.261] - 2026-09-17
+
+### A ruled ticker reuse now ends the previous occupant's series
+
+`recordTickerReuse` closes one membership range and opens another *"so a reader intersecting bars with membership sees one entity at a time"* — and **there was no such reader**. QC-204, QC-205, QC-209 and QC-210 all select from `raw_daily_bar` by ticker with no membership intersection, so a ruled reuse fired again on the very next run (the gate reopens a resolved exception whose fingerprint fires again, as a recurrence). A ruling on SOLS would have lasted until the next nightly run and the 26 findings it settles would have come back. Found while trying to rule those 26, and the reason none were ruled: the ruling had no way to stick.
+
+`entityStartDates()` returns the `valid_from` of the open membership range whose `change_reason` is `ticker_change` — written only by `recordTickerReuse`. QC-204 skips a comparison whose earlier bar precedes the splice, QC-205/QC-209 drop pre-splice bars from their windows, QC-210 drops the ticker from its population. **The narrow reading is the point, and has its own test:** an ordinary `valid_from` is when the ticker joined the universe *list* (2026-09-11 for every ticker in gen-002), so intersecting with membership in general would discard every bar before the seed and gut all four checks while looking like a tightening.
+
+Rehearsed on 2026-09-17: **`Checks that changed: none`** — 151/12/13/11 unchanged. gen-002 holds no `ticker_change` row yet, so this is inert until an operator rules one.
+
+Also recorded: **a `reuse` ruling must pass the splice date explicitly.** `inferSpliceDate` breaks ties with `ORDER BY last_seen_run_id DESC LIMIT 1`, and on a reuse ticker every finding shares a run — for JAN six of its seven QC-204 findings are 2022-2024 dates inside the previous occupant's history, so the inference would close membership years early, silently.
+
+`core` 0.6.19. Details: `changelogs/v1.1.261_2026-09-17.md`.
+
 ## [1.1.260] - 2026-09-17
 
 ### QC-210: bars that predate the ticker's current listing

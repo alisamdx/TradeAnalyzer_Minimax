@@ -9,7 +9,8 @@ import type { CollectorHost, ProviderResponse } from '../src/collector/host.js';
 import { beginRun, captureRuleId } from '../src/collector/run.js';
 import { runBackfillBars } from '../src/collector/backfill.js';
 import {
-  QC205_VOLUME_REGIME, QC209_DORMANT_SERIES_RESUMES, QC210_BARS_PREDATE_LISTING, BAR_CHECKS,
+  QC204_DISCONTINUITY, QC205_VOLUME_REGIME, QC209_DORMANT_SERIES_RESUMES,
+  QC210_BARS_PREDATE_LISTING, BAR_CHECKS, entityStartDates,
   volumeRegimeAroundSteps, dormancyBeforeSteps,
   REGIME_WINDOW, MIN_WINDOW_BARS, type VolumeBar
 } from '../src/qa/checks/bars.js';
@@ -401,5 +402,122 @@ describe('QC-210 — bars that predate the ticker\'s current listing', () => {
     // No automatic remediation: truncate-before-listing is an operator action,
     // and a relisting or redomicile may be continuous history.
     expect(QC210_BARS_PREDATE_LISTING.remediation).toBeUndefined();
+  });
+});
+
+describe('a ruled ticker reuse ends the previous occupant\'s series', () => {
+  /**
+   * `recordTickerReuse` closes one membership range and opens another "so a
+   * reader intersecting bars with membership sees one entity at a time" — and
+   * until v1.1.261 there was no such reader. QC-204, QC-205, QC-209 and QC-210
+   * all kept evaluating the previous occupant's bars, so a ruled reuse fired
+   * again on the very next run and the operator's ruling lasted one run.
+   *
+   * Measured on gen-002: SOLS carried 21 QC-204 findings and JAN 7, of which 26
+   * sit before the splice.
+   */
+  function seedMembership(ticker: string, args: { from: string; reason: string }): void {
+    const host = makeHost(async () => ({ status: 200, body: '{}', requestedAt: 't', respondedAt: 't' }));
+    const run = beginRun(db, host, { kind: 'manual', tradingDate: '2026-09-11' });
+    const ruleId = captureRuleId(db, host, 'membership', { t: ticker }, 'test');
+    raw.exec(
+      "INSERT INTO meta_response (source_response_id, run_id, provider, endpoint, params_json, requested_at, archive_file, archive_offset, dedup_hash, encrypted, at_provider_cap, parse_status) " +
+        `VALUES (9300, ${run.runId}, 'polygon', '/m', '{}', 't', 'a', 0, 'mem-${ticker}', 0, 0, 'ok')`
+    );
+    raw
+      .prepare(
+        `INSERT INTO ref_universe_membership
+           (run_id, as_of_date, observed_at, capture_rule_id, source_response_id, ticker, list_source,
+            valid_from, valid_to, change_reason)
+         VALUES (?, '2026-09-11', 't', ?, 9300, ?, 'russell1000', ?, NULL, ?)`
+      )
+      .run(run.runId, ruleId, ticker, args.from, args.reason);
+  }
+
+  /** The shell, then the listing: a step QC-204 and QC-205 both see. */
+  function seedSplicedSeries(ticker: string): { runId: number; spliceDate: string } {
+    const host = makeHost(async () => ({ status: 200, body: '{}', requestedAt: 't', respondedAt: 't' }));
+    const run = beginRun(db, host, { kind: 'daily', tradingDate: '2026-09-11' });
+    const ruleId = captureRuleId(db, host, 'bars', { t: ticker }, 'test');
+    raw.exec(
+      "INSERT INTO meta_response (source_response_id, run_id, provider, endpoint, params_json, requested_at, archive_file, archive_offset, dedup_hash, encrypted, at_provider_cap, parse_status) " +
+        `VALUES (9400, ${run.runId}, 'polygon', '/aggs', '{}', 't', 'a', 0, 'spl-${ticker}', 0, 0, 'ok')`
+    );
+    const legs = legDates(REUSE);
+    for (const { date, leg } of legs) {
+      raw
+        .prepare(
+          `INSERT INTO raw_daily_bar
+             (run_id, as_of_date, observed_at, capture_rule_id, source_response_id, ticker, trade_date,
+              open, high, low, close, volume, adjusted_as_of, fetch_kind, is_final)
+           VALUES (?, '2026-09-11', 't', ?, 9400, ?, ?, ?, ?, ?, ?, ?, '2026-09-11', 'backfill', 1)`
+        )
+        .run(run.runId, ruleId, ticker, date, leg.close, leg.close, leg.close, leg.close, leg.volume);
+    }
+    return { runId: run.runId, spliceDate: legs[30]!.date };
+  }
+
+  it('QC-204 stops comparing across a ruled splice', () => {
+    const { runId, spliceDate } = seedSplicedSeries('SOLS');
+    const before = QC204_DISCONTINUITY.run({ db, runId, tradingDate: '2026-09-11', observedAt: 't' });
+    expect(before.filter((e) => e.fired)).toHaveLength(1);
+
+    seedMembership('SOLS', { from: spliceDate, reason: 'ticker_change' });
+
+    const after = QC204_DISCONTINUITY.run({ db, runId, tradingDate: '2026-09-11', observedAt: 't' });
+    expect(after.filter((e) => e.fired)).toHaveLength(0);
+  });
+
+  it('QC-205 stops reaching its before-window across a ruled splice', () => {
+    const { runId, spliceDate } = seedSplicedSeries('SOLS');
+    expect(QC205_VOLUME_REGIME.run({ db, runId, tradingDate: '2026-09-11', observedAt: 't' })).toHaveLength(1);
+
+    seedMembership('SOLS', { from: spliceDate, reason: 'ticker_change' });
+
+    expect(QC205_VOLUME_REGIME.run({ db, runId, tradingDate: '2026-09-11', observedAt: 't' })).toHaveLength(0);
+  });
+
+  /** A reference row with a list_date, local to this block. */
+  function seedListing(ticker: string, listDate: string): void {
+    const host = makeHost(async () => ({ status: 200, body: '{}', requestedAt: 't', respondedAt: 't' }));
+    const run = beginRun(db, host, { kind: 'manual', tradingDate: '2026-09-11' });
+    const ruleId = captureRuleId(db, host, 'reference', { t: ticker }, 'test');
+    raw.exec(
+      "INSERT INTO meta_response (source_response_id, run_id, provider, endpoint, params_json, requested_at, archive_file, archive_offset, dedup_hash, encrypted, at_provider_cap, parse_status) " +
+        `VALUES (9500, ${run.runId}, 'polygon', '/ref', '{}', 't', 'a', 0, 'lst-${ticker}', 0, 0, 'ok')`
+    );
+    raw
+      .prepare(
+        `INSERT INTO raw_ticker_reference
+           (run_id, as_of_date, observed_at, capture_rule_id, source_response_id, ticker, name,
+            security_type, market_cap_status, shares_outstanding_status, list_date, active, optionable_status)
+         VALUES (?, '2026-09-11', 't', ?, 9500, ?, ?, 'CS', 'omitted', 'omitted', ?, 1, 'omitted')`
+      )
+      .run(run.runId, ruleId, ticker, `${ticker} Inc.`, listDate);
+  }
+
+  it('QC-210 leaves the population once the reuse is ruled', () => {
+    const { runId, spliceDate } = seedSplicedSeries('SOLS');
+    seedListing('SOLS', spliceDate);
+    expect(
+      QC210_BARS_PREDATE_LISTING.run({ db, runId, tradingDate: '2026-09-11', observedAt: 't' })
+        .filter((e) => e.fired)
+    ).toHaveLength(1);
+
+    seedMembership('SOLS', { from: spliceDate, reason: 'ticker_change' });
+
+    expect(QC210_BARS_PREDATE_LISTING.run({ db, runId, tradingDate: '2026-09-11', observedAt: 't' })).toEqual([]);
+  });
+
+  it('an ORDINARY membership row changes nothing — valid_from is when the ticker joined our list', () => {
+    // The trap this narrow reading avoids: every ticker has a `valid_from` at
+    // the universe seed, and intersecting bars with membership in general would
+    // throw away every bar before it and gut all four checks.
+    const { runId, spliceDate } = seedSplicedSeries('SOLS');
+    seedMembership('SOLS', { from: spliceDate, reason: 'initial' });
+
+    expect(entityStartDates(db).has('SOLS')).toBe(false);
+    expect(QC204_DISCONTINUITY.run({ db, runId, tradingDate: '2026-09-11', observedAt: 't' }).filter((e) => e.fired))
+      .toHaveLength(1);
   });
 });
