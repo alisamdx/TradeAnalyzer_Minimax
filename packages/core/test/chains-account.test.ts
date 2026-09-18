@@ -601,9 +601,15 @@ describe('phase 5 — the account, and the sticky contracts it produces', () => 
     const pin = raw
       .prepare('SELECT osi_symbol, reason, valid_to FROM ref_sticky_contract')
       .get() as { osi_symbol: string; reason: string; valid_to: string | null };
-    expect(pin.osi_symbol).toBe('TSLA  260918P00350000');
+    // The chain's form (E*Trade osiKey, dash-padded), not the position's OCC
+    // space-padded one: a space-padded pin matches no snapshot and was closed by
+    // the chain phase's repair the same day it was opened (v1.1.269).
+    expect(pin.osi_symbol).toBe('TSLA--260918P00350000');
     expect(pin.reason).toBe('held_in_book');
     expect(pin.valid_to).toBeNull();
+    // The raw column is parser output and stays as it was, so replays of earlier days still match.
+    expect(raw.prepare('SELECT osi_symbol FROM raw_account_position_snapshot').get())
+      .toEqual({ osi_symbol: 'TSLA  260918P00350000' });
   });
 
   it('marks every account response encrypted at rest (P15)', async () => {
@@ -1052,6 +1058,54 @@ describe('phase 7 — chains, and AC-5 on every response', () => {
       .toEqual({ closed: 0, reopened: 0 });
     expect(raw.prepare('SELECT COUNT(*) AS n FROM ref_sticky_contract WHERE valid_to IS NULL').get())
       .toEqual({ n: 1 });
+  });
+
+  /** Inserts an open pin as a past run wrote it. */
+  function pin(osi: string, ticker: string, reason: string, runId: number) {
+    raw
+      .prepare(
+        "INSERT INTO meta_response (run_id, provider, endpoint, params_json, requested_at, http_status, byte_length, archive_file, archive_offset, sha256, dedup_hash, encrypted, at_provider_cap, parse_status, parsed_row_count) " +
+          "VALUES (?, 'etrade', '/x', '{}', '2026-09-16T10:33:13-04:00', 200, 1, 'f', 0, 'h', ?, 1, 0, 'ok', 0)"
+      )
+      .run(runId, `pin-${osi}-${reason}`);
+    const src = (raw.prepare('SELECT MAX(source_response_id) AS id FROM meta_response').get() as { id: number }).id;
+    raw
+      .prepare(
+        `INSERT INTO ref_sticky_contract (run_id, as_of_date, observed_at, source_response_id, osi_symbol,
+           ticker, expiration_date, reason, valid_from, origin_ref)
+         VALUES (?, ?, '2026-09-16T10:33:13-04:00', ?, ?, ?, '2026-10-16', ?, '2026-09-16', 'x')`
+      )
+      .run(runId, DATE, src, osi, ticker, reason);
+  }
+
+  it('re-roots a class-share pin to the root E*Trade sends (BRK.B → BRKB, v1.1.269)', () => {
+    const run = beginRun(db(), makeHost(), { kind: 'daily', tradingDate: DATE });
+    pin('BRK.B-261016P00495000', 'BRK.B', 'recommended_by_legacy', run.runId);
+    pin('SPY---261016P00500000', 'SPY', 'recommended_by_legacy', run.runId); // already correct
+
+    expect(repairStickyOsiPadding(db(), DATE, 'now', run.runId)).toEqual({ closed: 1, reopened: 1 });
+    const open = raw
+      .prepare('SELECT osi_symbol FROM ref_sticky_contract WHERE valid_to IS NULL ORDER BY osi_symbol')
+      .all() as { osi_symbol: string }[];
+    expect(open.map((r) => r.osi_symbol)).toEqual(['BRKB--261016P00495000', 'SPY---261016P00500000']);
+    expect(repairStickyOsiPadding(db(), DATE, 'now', run.runId)).toEqual({ closed: 0, reopened: 0 });
+  });
+
+  it('keeps a held pin\'s reason when a recommendation already pins the same contract', () => {
+    // AMD 2026-09-18: the held 520 put was space-padded, its corrected symbol was already open
+    // as recommended_by_legacy, and the repair closed the held pin without reopening it.
+    const run = beginRun(db(), makeHost(), { kind: 'daily', tradingDate: DATE });
+    pin('AMD---261016P00520000', 'AMD', 'recommended_by_legacy', run.runId);
+    pin('AMD   261016P00520000', 'AMD', 'held_in_book', run.runId);
+
+    expect(repairStickyOsiPadding(db(), DATE, 'now', run.runId)).toEqual({ closed: 1, reopened: 1 });
+    const open = raw
+      .prepare('SELECT osi_symbol, reason FROM ref_sticky_contract WHERE valid_to IS NULL ORDER BY reason')
+      .all();
+    expect(open).toEqual([
+      { osi_symbol: 'AMD---261016P00520000', reason: 'held_in_book' },
+      { osi_symbol: 'AMD---261016P00520000', reason: 'recommended_by_legacy' }
+    ]);
   });
 });
 

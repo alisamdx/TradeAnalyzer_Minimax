@@ -427,7 +427,7 @@ Source: E*Trade `/v1/market/optionchains?symbol&expiryYear&expiryMonth&expiryDay
 | column | type | null | source (`OptionPair.Call` / `.Put`) / notes |
 |---|---|---|---|
 | `ticker` | TEXT | no | |
-| `osi_symbol` | TEXT | no | `osiKey` — the contract's identity across days. E*Trade pads a short root to six characters with **dashes** (`ACGL--260918C00095000`), not the spaces the OCC specification uses; anything built to join against this column must match those bytes (see 04 §4.3) |
+| `osi_symbol` | TEXT | no | `osiKey` — the contract's identity across days. E*Trade pads a short root to six characters with **dashes** (`ACGL--260918C00095000`), not the spaces the OCC specification uses, and drops a class-share dot (`BRKB--…` for BRK.B, measured 2026-09-18); anything built to join against this column must match those bytes — build it with `osiSymbol()` (see 04 §4.4) |
 | `expiration_date` | TEXT | no | from the request |
 | `strike` | REAL | no | `strikePrice` USD |
 | `right` | TEXT | no | `call` \| `put` |

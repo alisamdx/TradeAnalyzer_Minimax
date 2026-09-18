@@ -4,6 +4,7 @@ import { throwIfCancelled } from '../host.js';
 import { captureResponse } from '../capture.js';
 import { recipes } from '../../ingest/recipes.js';
 import { captureRuleId, type RunHandle } from '../run.js';
+import { osiSymbol } from '../../ingest/osi.js';
 
 /**
  * Phase 5 — the operator's account (04 §2, §4.4).
@@ -65,27 +66,42 @@ function knownTransactionIds(db: SqliteLike): Set<string> {
  * Idempotent by design: an open row for the same `(osi_symbol, reason)` is left
  * alone rather than re-opened, so re-running a day does not multiply the pins.
  * Nothing is closed here — a pin ends at expiry, which the chain phase handles.
+ *
+ * **The pin's symbol is BUILT by `osiSymbol`, not copied from the position
+ * (v1.1.269).** `raw_account_position_snapshot.osi_symbol` is constructed by the
+ * account parser in OCC's space-padded form, while a pin is matched against the
+ * chain's `osiKey`, which is dash-padded. Copying it wrote a space-padded pin
+ * every run that the chain phase's repair closed the same day — and closed
+ * WITHOUT reopening whenever the contract was also recommended, so AMD's held
+ * 520 put lost its `held_in_book` reason on 2026-09-18. The raw column is left
+ * as it is: it is parser output, and changing it would make every replay of an
+ * earlier day read `different`.
  */
 export function deriveHeldStickyContracts(
   db: SqliteLike,
   run: RunHandle
 ): number {
-  const held = db
+  const positions = db
     .prepare(
-      `SELECT osi_symbol, symbol AS ticker, expiration_date,
+      `SELECT symbol AS ticker, expiration_date, "right", strike,
               MIN(row_id) AS origin, MIN(source_response_id) AS src
          FROM raw_account_position_snapshot
         WHERE as_of_date = ? AND security_type = 'OPTN' AND osi_symbol IS NOT NULL
-          AND expiration_date IS NOT NULL
+          AND expiration_date IS NOT NULL AND "right" IS NOT NULL AND strike IS NOT NULL
         GROUP BY osi_symbol`
     )
     .all(run.tradingDate) as {
-    osi_symbol: string;
     ticker: string;
     expiration_date: string;
+    right: 'call' | 'put';
+    strike: number;
     origin: number;
     src: number;
   }[];
+  const held = positions.map((p) => ({
+    ...p,
+    osi_symbol: osiSymbol({ ticker: p.ticker, expiration: p.expiration_date, side: p.right, strike: p.strike })
+  }));
 
   let opened = 0;
   for (const h of held) {

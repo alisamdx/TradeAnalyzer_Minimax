@@ -5,7 +5,10 @@ import { captureResponse } from '../capture.js';
 import { recipes } from '../../ingest/recipes.js';
 import { captureRuleId, type RunHandle } from '../run.js';
 import { type ExpirationSelection } from '../../ingest/options.js';
-import { OSI_PAD } from '../../ingest/osi.js';
+import { osiRoot } from '../../ingest/osi.js';
+
+/** A 21-character OSI: six-character root, YYMMDD, C/P, eight-digit strike. */
+const OSI_SHAPE = /^.{6}\d{6}[CP]\d{8}$/;
 
 /**
  * Phases 6 and 7 — the chain subset and the chains themselves (04 §4.2, §4.3).
@@ -42,7 +45,7 @@ export interface ChainPhaseResult {
   readonly chainFailures: number;
   readonly contractsStored: number;
   readonly stickyClosed: number;
-  /** Pins re-padded out of the pre-2026-09-15 space form; 0 on a clean generation. */
+  /** Pins re-rooted to what `osiRoot` builds today (space padding, class-share dot); 0 on a clean generation. */
   readonly stickyRepadded: number;
   /** Subset members closed as `delisted` because E*Trade no longer recognises the symbol. */
   readonly delistedClosed: number;
@@ -323,10 +326,15 @@ export function closeExpiredStickyContracts(db: SqliteLike, tradingDate: string)
  * along unchanged — the pin's cause is the same handoff response — so only the
  * symbol and the range move.
  *
- * Idempotent: it matches on a space, which a corrected symbol cannot contain, so
- * a clean generation costs one indexed scan. A pin whose corrected symbol is
- * already open is closed without a duplicate, since two open ranges for one
- * contract is the ambiguity the range exists to prevent.
+ * **Also re-roots pins whose root is not `osiRoot(ticker)` (v1.1.269)** — the
+ * class-share dot: BRK.B pins read `BRK.B-…` while E*Trade sends `BRKB--…`.
+ * Rather than one pattern per past mistake, every open pin's root is compared
+ * with what the builder would produce today, which covers the space padding too.
+ *
+ * Idempotent: a corrected pin's root equals `osiRoot(ticker)` by construction,
+ * so a second pass finds nothing. A pin whose corrected symbol is already open
+ * is closed without a duplicate, since two open ranges for one contract is the
+ * ambiguity the range exists to prevent.
  */
 export function repairStickyOsiPadding(
   db: SqliteLike,
@@ -334,12 +342,12 @@ export function repairStickyOsiPadding(
   now: string,
   runId: number
 ): { closed: number; reopened: number } {
-  const broken = db
+  const broken = (db
     .prepare(
       `SELECT row_id, source_response_id, capture_rule_id, osi_symbol, ticker, expiration_date,
               reason, origin_ref
          FROM ref_sticky_contract
-        WHERE valid_to IS NULL AND osi_symbol LIKE '% %'`
+        WHERE valid_to IS NULL`
     )
     .all() as {
     row_id: number;
@@ -350,12 +358,15 @@ export function repairStickyOsiPadding(
     expiration_date: string;
     reason: string;
     origin_ref: string | null;
-  }[];
+  }[]).filter((r) => OSI_SHAPE.test(r.osi_symbol) && r.osi_symbol.slice(0, 6) !== osiRoot(r.ticker));
   if (broken.length === 0) return { closed: 0, reopened: 0 };
 
   const close = db.prepare('UPDATE ref_sticky_contract SET valid_to = ? WHERE row_id = ?');
+  // Per reason, as `deriveHeldStickyContracts` keys it: a contract can be both
+  // held and recommended, and matching on the symbol alone closed a held pin
+  // without reopening it whenever a recommendation already pinned the contract.
   const isOpen = db.prepare(
-    'SELECT 1 AS present FROM ref_sticky_contract WHERE osi_symbol = ? AND valid_to IS NULL LIMIT 1'
+    'SELECT 1 AS present FROM ref_sticky_contract WHERE osi_symbol = ? AND reason = ? AND valid_to IS NULL LIMIT 1'
   );
   const insert = db.prepare(
     `INSERT INTO ref_sticky_contract
@@ -367,9 +378,9 @@ export function repairStickyOsiPadding(
   let reopened = 0;
   const write = db.transaction(() => {
     for (const r of broken) {
-      const corrected = r.osi_symbol.replace(/ /g, OSI_PAD);
+      const corrected = osiRoot(r.ticker) + r.osi_symbol.slice(6);
       close.run(tradingDate, r.row_id);
-      if (isOpen.get(corrected) !== undefined) continue;
+      if (isOpen.get(corrected, r.reason) !== undefined) continue;
       insert.run(
         runId, tradingDate, now, r.capture_rule_id, r.source_response_id,
         corrected, r.ticker, r.expiration_date, r.reason, tradingDate, r.origin_ref

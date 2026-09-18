@@ -38,6 +38,21 @@ export function hasLegacySpacePadding(osi: string): boolean {
   return osi.includes(' ');
 }
 
+/**
+ * The six-character root E*Trade sends for a ticker: alphanumerics only, then
+ * dash-padded.
+ *
+ * **A class-share dot is not part of it.** Measured 2026-09-18: every one of
+ * 8,850 BRK.B contracts in `raw_option_contract_snapshot` arrived as `BRKB--…`,
+ * while the pins built here read `BRK.B-…` — so QC-409 reported both BRK.B pins
+ * unhonoured on a night their chain had been fetched and stored. OCC roots are
+ * alphanumeric by specification; BRK.B is the only dotted ticker in the chain
+ * subset, so the dot is the measured case and the rest is the specification.
+ */
+export function osiRoot(ticker: string): string {
+  return ticker.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6).padEnd(6, OSI_PAD);
+}
+
 export function osiSymbol(args: {
   readonly ticker: string;
   /** `YYYY-MM-DD`. */
@@ -45,7 +60,7 @@ export function osiSymbol(args: {
   readonly side: 'call' | 'put';
   readonly strike: number;
 }): string {
-  const root = args.ticker.toUpperCase().slice(0, 6).padEnd(6, OSI_PAD);
+  const root = osiRoot(args.ticker);
 
   const [y, m, d] = args.expiration.split('-');
   if (y === undefined || m === undefined || d === undefined) {

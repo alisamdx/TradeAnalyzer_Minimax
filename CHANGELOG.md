@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.269] - 2026-09-18
+
+### BRK.B pins can match their chain; held pins stop churning
+
+QC-409 reported both BRK.B pins unhonoured on a night their chain was fetched and stored: E\*Trade roots every BRK.B contract `BRKB--` (8,850 of 8,850), and `osiSymbol()` built `BRK.B-`. The root is now the ticker's alphanumerics only (`osiRoot`), and the chain phase's repair re-roots any open pin whose root differs from `osiRoot(ticker)`, which fixes the two BRK.B pins on the next run.
+
+Found beside it: `held_in_book` pins copied the account parser's space-padded OCC symbol, so each was closed by the repair the day it opened. They are now built with `osiSymbol()`, and the raw position column is left unchanged so replays still match. The repair also closed a held pin without reopening it when the same contract was already recommended (AMD 520P, 2026-09-18); it now keys per `(osi_symbol, reason)`.
+
+`core` 0.6.24, `next` 0.4.12. Details: `changelogs/v1.1.269_2026-09-18.md`.
+
 ## [1.1.268] - 2026-09-18
 
 ### A night with no insider data no longer looks like a quiet night; a 204 is no longer a parse failure

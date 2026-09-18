@@ -28,7 +28,11 @@ import { osiSymbol, hasLegacySpacePadding } from '../src/ingest/osi.js';
  */
 const CAPTURED = [
   { osi: 'ACGL--260918C00095000', ticker: 'ACGL', expiration: '2026-09-18', side: 'call' as const, strike: 95 },
-  { osi: 'BMNR--270115P00095000', ticker: 'BMNR', expiration: '2027-01-15', side: 'put' as const, strike: 95 }
+  { osi: 'BMNR--270115P00095000', ticker: 'BMNR', expiration: '2027-01-15', side: 'put' as const, strike: 95 },
+  // Captured 2026-09-18, gen-002: all 8,850 BRK.B contracts arrived rooted `BRKB--`. The pin
+  // was built `BRK.B-261016P00495000` and QC-409 reported it unhonoured on a night its chain
+  // was fetched and stored.
+  { osi: 'BRKB--261016P00495000', ticker: 'BRK.B', expiration: '2026-10-16', side: 'put' as const, strike: 495 }
 ];
 
 describe('the constructed symbol reproduces bytes the provider actually sent', () => {
