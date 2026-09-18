@@ -1,5 +1,6 @@
 import type { CheckDefinition, Evaluation } from '../check.js';
 import { FUND_TYPES } from './earnings-fundamentals.js';
+import { tradingDaysInRange } from '../../collector/trading-calendar.js';
 
 /**
  * Macro, rates and sentiment-side checks — 03 §3.8.
@@ -341,6 +342,61 @@ export const QC906_INSIDER_PARSE: CheckDefinition = {
   }
 };
 
+export const QC910_INSIDER_INDEX_COVERAGE: CheckDefinition = {
+  id: 'QC-910',
+  domain: 'sentiment',
+  severity: 'warning',
+  description:
+    'The insider sweep has read the EDGAR daily form index of every session before today. Without it ' +
+    'a day on which the index could not be read is indistinguishable from a day nobody filed a Form 4: ' +
+    'on 2026-09-18 the index answered HTTP 503, `events_insider` stored 0 against 299 the night before, ' +
+    'and QC-906 — which only looks at Form 4s that WERE fetched — had nothing to say. The sweep catches ' +
+    'up from the last parsed index (v1.1.268), so one session behind recovers on the next run and is ' +
+    'not a finding; two means the catch-up itself is failing. Today is excluded: its index is not ' +
+    'published until late evening.',
+  readsTables: ['meta_response', 'ref_trading_day'],
+  testedQuantity: 'sessions_without_insider_index',
+  testedUnit: 'sessions',
+  thresholds: { maxSessions: 1 },
+  thresholdBasis: 'working',
+  run(ctx) {
+    const last = (ctx.db
+      .prepare(
+        `SELECT MAX(json_extract(params_json, '$.date')) AS d FROM meta_response
+          WHERE endpoint = '/Archives/edgar/daily-index/form.idx' AND parse_status = 'ok'`
+      )
+      .get() as { d: string | null } | undefined)?.d ?? null;
+    const failures = ctx.db
+      .prepare(
+        `SELECT json_extract(params_json, '$.date') AS date, http_status FROM meta_response
+          WHERE run_id = ? AND endpoint = '/Archives/edgar/daily-index/form.idx' AND parse_status <> 'ok'`
+      )
+      .all(ctx.runId) as { date: string; http_status: number | null }[];
+
+    // Nothing ever parsed and nothing attempted: there is no sweep to measure.
+    if (last === null && failures.length === 0) return [];
+
+    const behind = last === null
+      ? null
+      : tradingDaysInRange(ctx.db, last, ctx.tradingDate).filter((d) => d > last && d < ctx.tradingDate);
+    const failedText = failures.length > 0
+      ? `; this run could not read ${failures.map((f) => `${f.date} (HTTP ${f.http_status ?? 'none'})`).join(', ')}`
+      : '';
+    const max = this.thresholds['maxSessions'] as number;
+    return [
+      {
+        key: ctx.tradingDate,
+        ...(behind === null ? {} : { value: behind.length }),
+        fired: behind === null || behind.length > max,
+        detail: behind === null
+          ? `no EDGAR daily form index has ever parsed${failedText}`
+          : `${behind.length} session(s) before today with no parsed insider index (last parsed ${last})${failedText}`,
+        evidence: { lastParsed: last, sessionsBehind: behind ?? null, failures }
+      }
+    ];
+  }
+};
+
 export const QC909_RECOMMENDATION_SYMBOL_MISMATCH: CheckDefinition = {
   id: 'QC-909',
   domain: 'sentiment',
@@ -383,5 +439,6 @@ export const MACRO_CHECKS: readonly CheckDefinition[] = [
   QC904_SHORT_INTEREST_FRESHNESS,
   QC905_RECOMMENDATION_FRESHNESS,
   QC906_INSIDER_PARSE,
+  QC910_INSIDER_INDEX_COVERAGE,
   QC909_RECOMMENDATION_SYMBOL_MISMATCH
 ];

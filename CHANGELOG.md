@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.268] - 2026-09-18
+
+### A night with no insider data no longer looks like a quiet night; a 204 is no longer a parse failure
+
+**Insider.** On 2026-09-18 the EDGAR daily form index answered **503**, which the 404/403-only fallback did not recognise. The run stored **0** insider rows (299 the night before), and since each evening run in practice sweeps the *previous* session, **09-17's filings could never have been asked for again**. QC-906 only sees Form 4s that were fetched, so it had nothing to say. The sweep now walks every session after the last parsed index (≤5 back, oldest first): today's unpublished index is skipped uncaptured, a past 404/403 (federal holidays the NYSE trades through) is stepped over, and any other past failure stops the walk so it is retried next run. New **QC-910** (warning) fires when more than one session before today has no parsed index.
+
+**204.** E\*Trade's `optionexpiredate` answers **204, empty body** for symbols with no listed options (NVR, YUM, DDS), and that was indexed as a failed parse ("Unexpected end of JSON input") ~25 times a day. `indexAndIngest` now records any 204 as parsed with zero rows.
+
+`core` 0.6.23. Details: `changelogs/v1.1.268_2026-09-18.md`.
+
 ## [1.1.267] - 2026-09-18
 
 ### The liquidity study reads through the app, and its realized vol now matches live scoring

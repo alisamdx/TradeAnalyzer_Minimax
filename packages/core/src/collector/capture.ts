@@ -208,7 +208,14 @@ export function indexAndIngest(args: IndexArgs): CaptureResult {
 
   // Parsing happens OUTSIDE the transaction so a throw cannot leave it open, and
   // so the index row can record the failure rather than vanish with it.
-  if (args.recipe && response.status !== null && response.status >= 200 && response.status < 300) {
+  if (response.status === 204) {
+    // No Content is an answer, not a malformed one. E*Trade's
+    // /v1/market/optionexpiredate sends it for a symbol with no listed options
+    // (NVR, YUM, DDS — the same symbols whose chain call says "No options are
+    // available for this symbol"), and handing its empty body to JSON.parse
+    // recorded ~25 parse failures a day that were really "zero expirations".
+    parseStatus = 'ok';
+  } else if (args.recipe && response.status !== null && response.status >= 200 && response.status < 300) {
     try {
       rows = buildIngest(args.recipe)(response.body, {
         runId: args.runId,

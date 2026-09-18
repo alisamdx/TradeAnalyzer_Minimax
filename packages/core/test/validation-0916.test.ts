@@ -125,7 +125,9 @@ describe('the insider sweep when today\'s index is not published yet', () => {
       }
     });
     const result = await runInsiderSweep(host, db(), run);
-    expect(asked.map((u) => u.slice(-17))).toEqual(['form.20260916.idx', 'form.20260915.idx']);
+    // Oldest first since v1.1.268: the sweep walks from the last parsed index, and
+    // on a generation with none that is the previous session, then today.
+    expect(asked.map((u) => u.slice(-17))).toEqual(['form.20260915.idx', 'form.20260916.idx']);
     expect(result.failed).toBe(0);
     const params = raw.prepare("SELECT params_json FROM meta_response WHERE endpoint LIKE '%form.idx%'").get() as { params_json: string };
     expect(JSON.parse(params.params_json)).toEqual({ date: '2026-09-15' });

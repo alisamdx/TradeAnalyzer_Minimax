@@ -7,7 +7,7 @@ import { captureRuleId, type RunHandle } from '../run.js';
 import { earningsResponseAtCap } from '../../ingest/events.js';
 import { BLS_RELEASES, FOMC_CALENDAR_URL, blsScheduleUrl } from '../../ingest/macro-calendar.js';
 import { parseDailyFormIndex, dailyFormIndexUrl, submissionsAtCap } from '../../ingest/edgar.js';
-import { previousTradingDay } from '../trading-calendar.js';
+import { previousTradingDay, tradingDaysInRange } from '../trading-calendar.js';
 import { sweepPolygonPages } from '../paged.js';
 
 /**
@@ -594,64 +594,109 @@ export async function runInsiderSweep(
   // one-day-late insider sweep is the honest maximum for an evening run, and the
   // date actually used is recorded in `params` rather than assumed to be
   // `run.tradingDate` — which is the difference between a late row and a wrong one.
-  let indexDate = run.tradingDate;
-  host.progress('insider', 0, 1, 'full index');
-  let indexResponse = await host.httpGet(dailyFormIndexUrl(indexDate), EDGAR_HEADERS);
+  //
+  // **And every session since the last index that parsed, not just yesterday's
+  // (v1.1.268).** Unpublished answered 404 on 2026-09-10/11, a 215-byte AccessDenied
+  // 403 on 2026-09-14..16, and HTTP 503 on 2026-09-18 — which the 404/403-only
+  // fallback did not recognise, so that run stored nothing and 09-17's filings
+  // could never be asked for again: the next run falls back to 09-18. Sweeping
+  // from the last parsed index forward makes a missed day a late day instead of
+  // a lost one, and a re-run of the same evening asks for nothing it already has.
+  const dates = insiderIndexDates(db, run.tradingDate);
 
-  // Not published yet answers 404 or 403 depending on the day: 404 on 2026-09-10/11, and a
-  // 215-byte AccessDenied 403 on every run from 2026-09-14 to 09-16, so the fallback never ran and
-  // no Form 4 was ever stored (measured: the previous day's index answered 200 each time).
-  if (indexResponse.status === 404 || indexResponse.status === 403) {
-    const previous = previousTradingDay(db, run.tradingDate);
-    if (previous !== null) {
-      indexDate = previous;
-      host.progress('insider', 0, 1, `full index (${indexDate}, today's not yet published)`);
-      indexResponse = await host.httpGet(dailyFormIndexUrl(indexDate), EDGAR_HEADERS);
+  let stored = 0;
+  let calls = 0;
+  let failed = 0;
+  let indexed = 0;
+  const limit = opts.maxFilings ?? 100;
+
+  for (const indexDate of dates) {
+    throwIfCancelled(host, 'phase-8-insider');
+    host.progress('insider', 0, 1, `full index ${indexDate}`);
+    const indexResponse = await host.httpGet(dailyFormIndexUrl(indexDate), EDGAR_HEADERS);
+    calls++;
+
+    const ok = indexResponse.status !== null && indexResponse.status >= 200 && indexResponse.status < 300;
+    // Today's index not being there yet is the normal evening case, whatever
+    // status SEC chooses to say it with. It is not captured: the next run asks
+    // for it again, and a stored failure would fire QC-910 every night.
+    if (!ok && indexDate === run.tradingDate) continue;
+    // A PAST session answering 404/403 has no index and never will: SEC publishes
+    // none on federal holidays the NYSE trades through (Columbus Day, Veterans
+    // Day). Stopping there would stall the walk on that date for ever.
+    if (indexResponse.status === 404 || indexResponse.status === 403) continue;
+
+    // The index itself writes no domain rows — it is a routing document, archived
+    // for provenance so the set of filings we chose from is recoverable.
+    const indexResult = captureResponse({
+      host, db, runId: run.runId, asOfDate: run.tradingDate, provider: 'edgar',
+      endpoint: '/Archives/edgar/daily-index/form.idx', slug: 'edgar-form-index',
+      params: { date: indexDate }, response: indexResponse, captureRuleId: ruleId
+    });
+
+    if (indexResult.parseStatus !== 'ok' || !indexResponse.body) {
+      // A past session that cannot be read stops the walk: its successors would
+      // parse, advance the "last parsed" mark past it, and lose it for good.
+      failed++;
+      break;
+    }
+
+    const form4s = parseDailyFormIndex(indexResponse.body).filter(
+      (f) => f.formType === '4' && byCik.has(f.cik)
+    );
+    indexed += form4s.length;
+
+    for (const [i, filing] of form4s.slice(0, limit).entries()) {
+      throwIfCancelled(host, 'phase-8-insider');
+      host.progress('insider', i, Math.min(form4s.length, limit), filing.companyName);
+
+      const url = `https://www.sec.gov/Archives/${filing.path}`;
+      const response = await host.httpGet(url, EDGAR_HEADERS);
+      calls++;
+
+      const result = captureResponse({
+        host, db, runId: run.runId, asOfDate: run.tradingDate, provider: 'edgar',
+        endpoint: '/Archives/edgar/data/{cik}/{accession}.txt', slug: 'edgar-form4',
+        params: { cik: filing.cik, accession: filing.accessionNo },
+        response, captureRuleId: ruleId,
+        recipe: recipes.form4({ accessionNo: filing.accessionNo, tickerByCik: byCik })
+      });
+
+      if (result.parseStatus === 'ok') stored += result.rowsWritten;
+      else failed++;
     }
   }
 
-  // The index itself writes no domain rows — it is a routing document, archived
-  // for provenance so the set of filings we chose from is recoverable.
-  const indexResult = captureResponse({
-    host, db, runId: run.runId, asOfDate: run.tradingDate, provider: 'edgar',
-    endpoint: '/Archives/edgar/daily-index/form.idx', slug: 'edgar-form-index',
-    params: { date: indexDate }, response: indexResponse, captureRuleId: ruleId
-  });
+  return { stored, calls, failed, indexed };
+}
 
-  if (indexResult.parseStatus !== 'ok' || !indexResponse.body) {
-    return { stored: 0, calls: 1, failed: 1, indexed: 0 };
-  }
+/** How many sessions back the insider sweep will catch up in one run. */
+export const INSIDER_CATCH_UP_SESSIONS = 5;
 
-  const form4s = parseDailyFormIndex(indexResponse.body).filter(
-    (f) => f.formType === '4' && byCik.has(f.cik)
-  );
+/** The newest session whose EDGAR daily form index was captured and parsed, or null. */
+export function lastParsedInsiderIndexDate(db: SqliteLike): string | null {
+  const row = db
+    .prepare(
+      `SELECT MAX(json_extract(params_json, '$.date')) AS d FROM meta_response
+        WHERE endpoint = '/Archives/edgar/daily-index/form.idx' AND parse_status = 'ok'`
+    )
+    .get() as { d: string | null } | undefined;
+  return row?.d ?? null;
+}
 
-  let stored = 0;
-  let calls = 1;
-  let failed = 0;
-  const limit = opts.maxFilings ?? 100;
-
-  for (const [i, filing] of form4s.slice(0, limit).entries()) {
-    throwIfCancelled(host, 'phase-8-insider');
-    host.progress('insider', i, Math.min(form4s.length, limit), filing.companyName);
-
-    const url = `https://www.sec.gov/Archives/${filing.path}`;
-    const response = await host.httpGet(url, EDGAR_HEADERS);
-    calls++;
-
-    const result = captureResponse({
-      host, db, runId: run.runId, asOfDate: run.tradingDate, provider: 'edgar',
-      endpoint: '/Archives/edgar/data/{cik}/{accession}.txt', slug: 'edgar-form4',
-      params: { cik: filing.cik, accession: filing.accessionNo },
-      response, captureRuleId: ruleId,
-      recipe: recipes.form4({ accessionNo: filing.accessionNo, tickerByCik: byCik })
-    });
-
-    if (result.parseStatus === 'ok') stored += result.rowsWritten;
-    else failed++;
-  }
-
-  return { stored, calls, failed, indexed: form4s.length };
+/**
+ * The sessions whose daily index the sweep should ask for, oldest first: every
+ * session after the last parsed index up to `tradingDate`, capped at the most
+ * recent five. With no parsed index yet it is the previous session and today.
+ */
+export function insiderIndexDates(db: SqliteLike, tradingDate: string): readonly string[] {
+  const last = lastParsedInsiderIndexDate(db);
+  if (last !== null && last >= tradingDate) return [];
+  const from = last ?? previousTradingDay(db, tradingDate);
+  if (from === null) return [tradingDate];
+  const days = tradingDaysInRange(db, from, tradingDate).filter((d) => (last === null ? d >= from : d > from));
+  const withToday = days.includes(tradingDate) ? days : [...days, tradingDate];
+  return withToday.slice(-(INSIDER_CATCH_UP_SESSIONS + 1));
 }
 
 /** Phase 8 — every sub-phase, each attempted independently. */
