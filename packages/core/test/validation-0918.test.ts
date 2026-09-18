@@ -11,8 +11,10 @@ import { beginRun, captureRuleId, type RunHandle } from '../src/collector/run.js
 import { captureResponse } from '../src/collector/capture.js';
 import { recipes } from '../src/ingest/recipes.js';
 import { ensureTradingCalendar } from '../src/collector/trading-calendar.js';
-import { runInsiderSweep, insiderIndexDates } from '../src/collector/phases/events.js';
+import { runInsiderSweep, insiderIndexDates, runEtradeEarnings } from '../src/collector/phases/events.js';
 import { QC910_INSIDER_INDEX_COVERAGE } from '../src/qa/checks/macro.js';
+import { QC603_EARNINGS_FRESHNESS } from '../src/qa/checks/earnings-fundamentals.js';
+import { etradeEarningDate } from '../src/ingest/events.js';
 
 /**
  * Faults found validating the 2026-09-18 collector run (v1.1.268):
@@ -198,5 +200,93 @@ describe('an HTTP 204 is an empty answer, not a parse failure', () => {
     expect(r.rowsWritten).toBe(0);
     const row = raw.prepare('SELECT http_status, parse_status, parsed_row_count FROM meta_response').get();
     expect(row).toEqual({ http_status: 204, parse_status: 'ok', parsed_row_count: 0 });
+  });
+});
+
+describe('E*Trade as the second earnings source (v1.1.270)', () => {
+  const quote = (date: string) =>
+    JSON.stringify({ QuoteResponse: { QuoteData: [{ Product: { symbol: 'X' }, All: { nextEarningDate: date } }] } });
+
+  function capture(provider: 'polygon' | 'finnhub', endpoint: string, params: Record<string, string>, body: string, recipe: ReturnType<typeof recipes.snapshot>) {
+    const r = captureResponse({
+      host: makeHost(), db: db(), runId: run.runId, asOfDate: DATE, provider, endpoint,
+      slug: endpoint.replace(/\W+/g, '-'), params, response: response(body),
+      captureRuleId: captureRuleId(db(), makeHost(), provider, { v: 1 }, 'test'), recipe
+    });
+    expect(r.parseStatus, JSON.stringify(r)).toBe('ok');
+  }
+
+  /** A subset member with a reference row of the given type. */
+  function member(ticker: string, type: string) {
+    capture('polygon', `/v3/reference/tickers/${ticker}`, { ticker }, JSON.stringify({
+      results: { ticker, name: ticker, type, weighted_shares_outstanding: 1_000_000 }
+    }), recipes.tickerReference());
+    const src = (raw.prepare('SELECT MAX(source_response_id) AS id FROM meta_response').get() as { id: number }).id;
+    const rule = captureRuleId(db(), makeHost(), 'chain_subset', { v: 1 }, 'test');
+    raw.prepare(
+      `INSERT INTO ref_chain_subset_membership (run_id, as_of_date, observed_at, capture_rule_id, source_response_id,
+         ticker, valid_from, membership_reason, rule_capture_rule_id, rule_inputs_json)
+       VALUES (?, ?, ?, ?, ?, ?, '2026-09-01', 'rule_pass', ?, '{}')`
+    ).run(run.runId, DATE, `${DATE}T17:00:00-04:00`, rule, src, ticker, rule);
+  }
+
+  /** This run's Finnhub sweep dating `ticker`. */
+  function finnhub(ticker: string, date: string) {
+    capture('finnhub', '/calendar/earnings', { from: DATE, to: '2026-12-16', t: ticker }, JSON.stringify({
+      earningsCalendar: [{ symbol: ticker, date, hour: 'amc', year: 2026, quarter: 3 }]
+    }), recipes.earnings({ sweepFrom: DATE, sweepTo: '2026-12-16' }));
+  }
+
+  it('parses E*Trade\'s MM/DD/YYYY, reads an empty date as none, and refuses a format it does not know', () => {
+    expect(etradeEarningDate('11/05/2026')).toBe('2026-11-05');
+    expect(etradeEarningDate('1/5/2027')).toBe('2027-01-05');
+    expect(etradeEarningDate('2026-11-05')).toBe('2026-11-05');
+    expect(etradeEarningDate('')).toBeNull();
+    expect(etradeEarningDate(undefined)).toBeNull();
+    expect(() => etradeEarningDate('Nov 5, 2026')).toThrow(/unrecognised/);
+  });
+
+  it('asks for the stocks Finnhub did not date plus an overlap sample, skips funds, and clears QC-603', async () => {
+    member('SWKS', 'CS'); // a Finnhub gap on 2026-09-18
+    member('NVDA', 'CS'); // Finnhub-dated: the overlap sample
+    member('SPY', 'ETF'); // a fund: no earnings, never asked
+    finnhub('NVDA', '2026-11-18');
+    expect(QC603_EARNINGS_FRESHNESS.run(ctx()).find((e) => e.key === 'SWKS')?.fired).toBe(true);
+
+    const asked: string[] = [];
+    const host = makeHost({
+      etradeGet: async (path: string, params: Record<string, string>) => {
+        asked.push(path);
+        expect(params).toEqual({ detailFlag: 'ALL', requireEarningsDate: 'true' });
+        return response(quote(path.endsWith('SWKS') ? '11/05/2026' : '11/18/2026'));
+      }
+    });
+    const result = await runEtradeEarnings(host, db(), run);
+
+    expect(asked).toEqual(['/v1/market/quote/SWKS', '/v1/market/quote/NVDA']);
+    expect(result).toEqual({ stored: 2, calls: 2, failed: 0 });
+    const rows = raw
+      .prepare("SELECT ticker, report_date FROM raw_earnings_event WHERE source = 'etrade' ORDER BY ticker")
+      .all();
+    // Keyed on the ticker asked, not the body's `Product.symbol` ('X').
+    expect(rows).toEqual([
+      { ticker: 'NVDA', report_date: '2026-11-18' },
+      { ticker: 'SWKS', report_date: '2026-11-05' }
+    ]);
+    expect(QC603_EARNINGS_FRESHNESS.run(ctx()).find((e) => e.key === 'SWKS')?.fired).toBe(false);
+  });
+
+  it('stores nothing for a ticker with no announced date, and records a format change as a failure', async () => {
+    member('HONA', 'CS');
+    member('JAN', 'CS');
+    const host = makeHost({
+      etradeGet: async (path: string) => response(quote(path.endsWith('HONA') ? '' : 'Q4 2026'))
+    });
+    const result = await runEtradeEarnings(host, db(), run);
+    expect(result).toEqual({ stored: 0, calls: 2, failed: 1 });
+    const failures = raw
+      .prepare("SELECT params_json FROM meta_response WHERE provider = 'etrade' AND parse_status = 'failed'")
+      .all() as { params_json: string }[];
+    expect(failures.map((f) => (JSON.parse(f.params_json) as { symbol: string }).symbol)).toEqual(['JAN']);
   });
 });

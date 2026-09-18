@@ -6,7 +6,7 @@ import {
 } from './account.js';
 import { makeExpirationIngest, makeChainIngest, type ExpirationSelection } from './options.js';
 import {
-  makeEarningsIngest, makeIndexQuoteIngest, ingestTreasuryYields, makeRecommendationIngest,
+  makeEarningsIngest, makeEtradeEarningsIngest, makeIndexQuoteIngest, ingestTreasuryYields, makeRecommendationIngest,
   ingestShortInterest
 } from './events.js';
 import { ingestFomcCalendar, makeBlsScheduleIngest } from './macro-calendar.js';
@@ -56,6 +56,7 @@ export const INGEST_MODULES = [
   'etrade_orders',
   'etrade_transactions',
   'etrade_index_quote',
+  'etrade_earnings',
   'finnhub_earnings',
   'finnhub_recommendations',
   'treasury_yields',
@@ -169,6 +170,7 @@ export const recipes = {
       knownIds: sortedSet(o.knownIds) ?? []
     }),
   indexQuote: (o: { readonly symbol: string }): IngestRecipe => recipe('etrade_index_quote', { symbol: o.symbol }),
+  etradeEarnings: (o: { readonly ticker: string }): IngestRecipe => recipe('etrade_earnings', { ticker: o.ticker }),
 
   earnings: (o: { readonly sweepFrom: string; readonly sweepTo: string; readonly universe?: ReadonlySet<string> }): IngestRecipe =>
     recipe('finnhub_earnings', args({ sweepFrom: o.sweepFrom, sweepTo: o.sweepTo, universe: sortedSet(o.universe) })),
@@ -277,6 +279,7 @@ const DECODERS: { readonly [M in IngestModuleName]: (a: RecipeArgs) => IngestMod
   etrade_transactions: (a) =>
     makeTransactionIngest({ accountKeyHash: str(a, 'accountKeyHash'), knownIds: new Set(strings(a, 'knownIds')) }),
   etrade_index_quote: (a) => makeIndexQuoteIngest({ symbol: str(a, 'symbol') }),
+  etrade_earnings: (a) => makeEtradeEarningsIngest({ ticker: str(a, 'ticker') }),
 
   finnhub_earnings: (a) => {
     const universe = optSet(a, 'universe');

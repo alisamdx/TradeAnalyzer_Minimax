@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.270] - 2026-09-18
+
+### E*Trade becomes the collector's second earnings source
+
+All 17 QC-603 findings on 2026-09-18 were **Finnhub coverage gaps**, not truncation: other share classes (GOOG, NWS, BRK.B, LLYVA…), recent listings (HONA, SUNB, JAN, MDLN, SPCX…) and established names Finnhub simply omits (SWKS, IOT, ROIV, JHX). The collector had one source, so nothing could fill them. It now asks E\*Trade (`/v1/market/quote/{t}?requireEarningsDate=true`) for every subset stock the Finnhub sweep did not date (≤60), plus a rotating 10-ticker overlap sample so QC-602 finally has two sources to compare. QC-602 also fires now when both sources exist but no ticker is dated by both. New listings with no announced first report will keep firing, correctly.
+
+`core` 0.6.25, `next` 0.4.13. Details: `changelogs/v1.1.270_2026-09-18.md`.
+
 ## [1.1.269] - 2026-09-18
 
 ### BRK.B pins can match their chain; held pins stop churning

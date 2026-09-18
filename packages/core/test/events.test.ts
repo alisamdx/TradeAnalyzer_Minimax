@@ -1021,6 +1021,21 @@ describe('QC-602, the cross-source comparison that had no second source', () => 
     expect(evals).toHaveLength(2);
     expect(evals.filter((e) => e.fired).map((e) => e.key)).toEqual(['NVDA']);
   });
+
+  it('fires when both sources are present but no ticker is dated by both (v1.1.270)', () => {
+    // E*Trade is asked mainly for tickers Finnhub did not date, so disjoint coverage is the
+    // default shape — and a join over it evaluates nothing.
+    insertEarnings([
+      { ticker: 'NVDA', date: '2026-09-25', observedAt: OBSERVED, source: 'finnhub' },
+      { ticker: 'SWKS', date: '2026-11-05', observedAt: OBSERVED, source: 'etrade' }
+    ]);
+    const evals = QC602_EARNINGS_SOURCE_DISAGREEMENT.run({
+      db: db(), runId: fixtureRun.runId, tradingDate: DATE, observedAt: OBSERVED
+    });
+    expect(evals).toHaveLength(1);
+    expect(evals[0]!.fired).toBe(true);
+    expect(evals[0]!.detail).toContain('no ticker has a future date from both');
+  });
 });
 
 describe('QC-901, the index range guard', () => {

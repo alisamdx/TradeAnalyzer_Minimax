@@ -138,6 +138,73 @@ export function makeEarningsIngest(opts: {
   };
 }
 
+/**
+ * E*Trade's `nextEarningDate` as ISO, or null when it is empty — which is how E*Trade says no
+ * date is announced (the existing app's `earnings-refresh` reads 82 such tickers on 2026-09-18).
+ *
+ * The format is `MM/DD/YYYY`, per the existing app's parser of the same field; ISO is accepted
+ * too. Anything else **throws**: the response is then indexed as a parse failure, so a format
+ * change surfaces instead of storing a wrong date or quietly storing none. The date is stored as
+ * observed — E*Trade's UTC artefact (a Thursday-evening report read as Saturday) is QC-604's to
+ * flag, and a raw table that corrects its source cannot be replayed.
+ */
+export function etradeEarningDate(v: unknown): string | null {
+  if (v === undefined || v === null || (typeof v === 'string' && v.trim() === '')) return null;
+  if (typeof v === 'string') {
+    const s = v.trim();
+    const mdy = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(s);
+    if (mdy) return `${mdy[3]}-${mdy[1]!.padStart(2, '0')}-${mdy[2]!.padStart(2, '0')}`;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  }
+  throw new Error(`unrecognised E*Trade nextEarningDate: ${JSON.stringify(v)}`);
+}
+
+/**
+ * E*Trade's next earnings date for ONE ticker, from `/v1/market/quote/{t}?detailFlag=ALL&
+ * requireEarningsDate=true` — the collector's second earnings source (v1.1.270).
+ *
+ * Keyed on the ticker ASKED, never the symbol in the body (v1.1.257: a provider's symbol is its
+ * claim about what it answered). No announced date writes no row: an absent date is not a date.
+ */
+export function makeEtradeEarningsIngest(opts: { readonly ticker: string }) {
+  return (body: string, ctx: IngestContext): readonly IngestedRowSpec[] => {
+    const parsed = JSON.parse(body) as {
+      QuoteResponse?: { QuoteData?: { All?: { nextEarningDate?: unknown } }[] };
+    };
+    const date = etradeEarningDate(parsed.QuoteResponse?.QuoteData?.[0]?.All?.nextEarningDate);
+    if (date === null) return [];
+    return [
+      {
+        table: 'raw_earnings_event',
+        values: {
+          run_id: ctx.runId,
+          as_of_date: ctx.asOfDate,
+          observed_at: ctx.observedAt,
+          capture_rule_id: ctx.captureRuleId,
+          ticker: opts.ticker,
+          report_date: date,
+          report_time: null,
+          report_time_status: 'omitted',
+          fiscal_year: null,
+          fiscal_quarter: null,
+          eps_estimate: null,
+          eps_estimate_status: 'omitted',
+          eps_actual: null,
+          eps_actual_status: 'omitted',
+          revenue_estimate: null,
+          revenue_estimate_status: 'omitted',
+          revenue_actual: null,
+          revenue_actual_status: 'omitted',
+          source: 'etrade',
+          sweep_from: null,
+          sweep_to: null,
+          is_confirmed: null
+        }
+      }
+    ];
+  };
+}
+
 /** Finnhub's bulk calendar caps at 1,500 and drops the EARLIEST dates (P8). */
 export const FINNHUB_BULK_CAP = 1500;
 

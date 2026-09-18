@@ -9,6 +9,7 @@ import { BLS_RELEASES, FOMC_CALENDAR_URL, blsScheduleUrl } from '../../ingest/ma
 import { parseDailyFormIndex, dailyFormIndexUrl, submissionsAtCap } from '../../ingest/edgar.js';
 import { previousTradingDay, tradingDaysInRange } from '../trading-calendar.js';
 import { sweepPolygonPages } from '../paged.js';
+import { FUND_TYPES } from '../../qa/checks/earnings-fundamentals.js';
 
 /**
  * Phase 8 — the event and macro domains (04 §2).
@@ -64,6 +65,7 @@ export interface SubPhaseCount {
 
 export interface EventsPhaseResult {
   readonly earnings: SubPhaseCount;
+  readonly etradeEarnings: SubPhaseCount;
   readonly indexQuotes: SubPhaseCount;
   readonly treasury: SubPhaseCount;
   readonly macroCalendar: SubPhaseCount;
@@ -226,6 +228,88 @@ export async function runEarningsSweep(
     }
   }
 
+  return { stored, calls, failed };
+}
+
+/** The most gap tickers asked per run, so a failed Finnhub sweep cannot become ~500 calls. */
+export const ETRADE_EARNINGS_GAP_CAP = 60;
+/** Tickers Finnhub DOES cover, asked too, so QC-602 has pairs to compare. Rotates by staleness. */
+export const ETRADE_EARNINGS_OVERLAP_SAMPLE = 10;
+
+/**
+ * E*Trade earnings dates — the collector's second earnings source (v1.1.270).
+ *
+ * One quote call per chain-subset stock that this run's Finnhub sweep gave **no** future date
+ * (on 2026-09-18: SWKS, IOT, ROIV, JHX, GOOG, BRK.B, a class of new listings — 17 QC-603
+ * findings, every one a Finnhub coverage gap, not a truncation), plus a small rotating sample of
+ * tickers Finnhub did cover. Without the sample the two sources would never overlap by
+ * construction, and QC-602 would compare zero pairs every night — the vacuous pass it was
+ * rewritten to refuse.
+ *
+ * Runs after the sweep because the gap is the sweep's answer. Funds are skipped: no earnings.
+ */
+export async function runEtradeEarnings(
+  host: CollectorHost,
+  db: SqliteLike,
+  run: RunHandle
+): Promise<SubPhaseCount> {
+  const ruleId = captureRuleId(
+    db, host, 'earnings_etrade',
+    { gapCap: ETRADE_EARNINGS_GAP_CAP, overlapSample: ETRADE_EARNINGS_OVERLAP_SAMPLE },
+    'E*Trade next earnings date for subset stocks the Finnhub sweep did not date, plus a rotating overlap sample.'
+  );
+
+  const eligible = `
+    SELECT m.ticker,
+           EXISTS (SELECT 1 FROM raw_earnings_event e
+                    WHERE e.ticker = m.ticker AND e.source = 'finnhub'
+                      AND e.run_id = ? AND e.report_date >= ?) AS finnhub_dated,
+           (SELECT MAX(e.observed_at) FROM raw_earnings_event e
+             WHERE e.ticker = m.ticker AND e.source = 'etrade') AS etrade_last
+      FROM (SELECT DISTINCT ticker FROM ref_chain_subset_membership WHERE valid_to IS NULL) m
+     WHERE m.ticker NOT IN (
+       SELECT ticker FROM raw_ticker_reference
+        WHERE security_type IN ${FUND_TYPES}
+          AND row_id IN (SELECT MAX(row_id) FROM raw_ticker_reference GROUP BY ticker))`;
+  const rows = db.prepare(eligible).all(run.runId, run.tradingDate) as {
+    ticker: string; finnhub_dated: number; etrade_last: string | null;
+  }[];
+
+  const gaps = rows.filter((r) => r.finnhub_dated === 0).map((r) => r.ticker).sort().slice(0, ETRADE_EARNINGS_GAP_CAP);
+  // Never-asked first, then the longest since last asked: the sample walks the whole
+  // covered set over the weeks instead of re-asking the same ten names.
+  const overlap = rows
+    .filter((r) => r.finnhub_dated === 1)
+    .sort((a, b) =>
+      a.etrade_last === b.etrade_last
+        ? a.ticker.localeCompare(b.ticker)
+        : a.etrade_last === null ? -1 : b.etrade_last === null ? 1 : a.etrade_last.localeCompare(b.etrade_last))
+    .slice(0, ETRADE_EARNINGS_OVERLAP_SAMPLE)
+    .map((r) => r.ticker);
+  const tickers = [...gaps, ...overlap];
+  if (tickers.length === 0) return skipped('every subset stock has a Finnhub date and the overlap sample is empty');
+
+  let stored = 0;
+  let calls = 0;
+  let failed = 0;
+  for (const [i, ticker] of tickers.entries()) {
+    throwIfCancelled(host, 'phase-8-earnings-etrade');
+    host.progress('earnings-etrade', i, tickers.length, ticker);
+
+    const path = `/v1/market/quote/${ticker}`;
+    const params = { detailFlag: 'ALL', requireEarningsDate: 'true' };
+    const response = await host.etradeGet(path, params);
+    calls++;
+
+    const result = captureResponse({
+      host, db, runId: run.runId, asOfDate: run.tradingDate, provider: 'etrade',
+      endpoint: '/v1/market/quote/{symbol}', slug: 'quote-earnings',
+      params: { symbol: ticker, ...params }, response, captureRuleId: ruleId,
+      recipe: recipes.etradeEarnings({ ticker })
+    });
+    if (result.parseStatus === 'ok') stored += result.rowsWritten;
+    else failed++;
+  }
   return { stored, calls, failed };
 }
 
@@ -724,6 +808,7 @@ export async function runEventsPhase(
 
   return {
     earnings: await attempt('earnings', () => runEarningsSweep(host, db, run)),
+    etradeEarnings: await attempt('earnings-etrade', () => runEtradeEarnings(host, db, run)),
     indexQuotes: await attempt('index-quotes', () => runIndexQuotes(host, db, run)),
     treasury: await attempt('treasury', () => runTreasuryYields(host, db, run)),
     macroCalendar: await attempt('macro-calendar', () => runMacroCalendar(host, db, run, opts)),

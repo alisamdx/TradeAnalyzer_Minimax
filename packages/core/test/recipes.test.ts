@@ -29,6 +29,7 @@ const SAMPLES: readonly IngestRecipe[] = [
   recipes.orders({ accountKey: KEY, knownOrders: new Map([['987', 'abc']]) }),
   recipes.transactions({ accountKey: KEY, knownIds: new Set(['t1']) }),
   recipes.indexQuote({ symbol: 'VIX' }),
+  recipes.etradeEarnings({ ticker: 'SWKS' }),
   recipes.earnings({ sweepFrom: '2026-09-07', sweepTo: '2026-09-16', universe: new Set(['SPY', 'AAPL']) }),
   recipes.recommendations({ ticker: 'AAPL' }),
   recipes.treasury(),

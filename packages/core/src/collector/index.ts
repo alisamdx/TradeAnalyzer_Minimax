@@ -100,7 +100,7 @@ export {
   orderFingerprint, hashAccountKey, msEpochToEt
 } from '../ingest/account.js';
 export {
-  runEventsPhase, runEarningsSweep, runIndexQuotes, runTreasuryYields, runMacroCalendar,
+  runEventsPhase, runEarningsSweep, runEtradeEarnings, runIndexQuotes, runTreasuryYields, runMacroCalendar,
   runEdgarFilings, runEdgarFacts, runShortInterest, runRecommendations, runInsiderSweep,
   EVENTS_RULE
 } from './phases/events.js';

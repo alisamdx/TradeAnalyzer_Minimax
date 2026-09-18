@@ -193,6 +193,22 @@ export const QC602_EARNINGS_SOURCE_DISAGREEMENT: CheckDefinition = {
       )
       .all(ctx.tradingDate) as { ticker: string; finnhub_date: string; etrade_date: string }[];
 
+    // Both sources present and NO ticker dated by both is the same finding as a missing
+    // source (v1.1.270). E*Trade is asked mainly for tickers Finnhub did not date, so without
+    // this the check would pass every night on zero comparisons — "no overlap" and "clean
+    // overlap" must not look alike.
+    if (rows.length === 0) {
+      return [
+        {
+          key: 'sources',
+          value: UNCOMPARABLE_DISAGREEMENT_DAYS,
+          fired: true,
+          detail: 'no cross-source comparison is possible: no ticker has a future date from both finnhub and etrade',
+          evidence: { present: [...present].sort(), paired: 0 }
+        } satisfies Evaluation
+      ];
+    }
+
     return rows.map((r) => {
       const gap = Math.abs(daysBetween(r.finnhub_date, r.etrade_date));
       return {

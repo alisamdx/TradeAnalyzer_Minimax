@@ -495,7 +495,7 @@ Every observation of an earnings date is a row (P1); "the current best date" is 
 | column | type | null | source |
 |---|---|---|---|
 | `ticker` | TEXT | no | `symbol` |
-| `report_date` | TEXT | no | Finnhub `date`; E*Trade earnings date |
+| `report_date` | TEXT | no | Finnhub `date`; E*Trade `All.nextEarningDate` (`MM/DD/YYYY` → ISO, stored as observed with no Saturday shift — QC-604 flags that; empty = no row; any other format fails the parse). **E\*Trade rows exist from v1.1.270**: one quote per subset stock the Finnhub sweep did not date, plus a rotating overlap sample, keyed on the ticker asked; `sweep_from`/`sweep_to` null |
 | `report_time` | TEXT | yes: omitted | Finnhub `hour`. **Measured 2026-09-06 over 520 universe reports: `bmo` 132, `amc` 144, and `''` (empty string, not absent) on 244 — 47 %.** `dmh` was never observed. The converter must map `''` -> null with `report_time_status = 'omitted'`; treating empty string as a value would put a fourth member in the enum and silently defeat any `report_time IS NULL` filter |
 | `fiscal_year`, `fiscal_quarter` | INTEGER | yes: omitted | `year`, `quarter` |
 | `eps_estimate`, `eps_actual` | REAL | yes + status | `epsEstimate`, `epsActual` USD |
