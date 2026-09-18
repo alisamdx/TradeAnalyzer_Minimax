@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.1.259] - 2026-09-17
+
+### `qc204-triage.mjs`: the evidence for 151 rulings, on one screen
+
+`node packages/core/scripts/qc204-triage.mjs --latest [--all] [--csv out.csv]` — read-only, snapshot-only. Per open QC-204 discontinuity it prints the step, the nearest clean split ratio and its error, the step day's own intraday range, median volume 20 bars either side and their ratio, the dormancy gap, and whether QC-205/QC-209 flagged that same step. The `suggests` column is a sort order, never a verdict.
+
+On 2026-09-17's 151 findings across 63 tickers: **95 `move?`, 22 illiquid-shell, 13 QC-209 dormant-resume, 11 QC-205 reuse, 4 `reuse?`, 3 `split?`, 2 unclear, 1 `dormant-resume?`** — so roughly 97 want an acceptance with the 30-day TTL, one class ruling covers the 22 shells (BMNR pre-2025, median volume **31 shares a day**), and only 3 want a re-fetch. `DOC 2024-03-04` is the clearest of those: ratio exactly 1.500, step-day range 2.3 %, volume 1.84x — OHLC already in the new scale.
+
+Two things the counts alone did not show:
+
+- **A high volume ratio is NOT sufficient for ticker reuse.** GME 2024-05-13 (15.3x), SMMT 2022-12-06 (52.1x) and BMNR 2025-06-30 (571.1x) all clear QC-205's 15x bar while trading continuously beforehand — GME on 4.9M shares a day. A reused ticker is a *dormant shell* whose symbol was reassigned, so the prior liquidity **level** is the missing half of the discriminator, and it is already in the window the ratio comes from. This matters because QC-205's remedy truncates `historical_prices` and `iv_history`. Recorded as an observation, not a check change.
+- **Keying a per-step finding by ticker multiplies it.** The first cut of the script marked every one of BMNR's 26 steps with its single 2025 splice; it now matches on `ticker date`.
+
+No rulings were made — `exception.mjs` needs a non-containerised shell with both apps closed. No app or `core` source changed; `core` stays 0.6.17. Details: `changelogs/v1.1.259_2026-09-17.md`.
+
 ## [1.1.258] - 2026-09-17
 
 ### Two earnings checks: one firing on correct data, one that could never fire
