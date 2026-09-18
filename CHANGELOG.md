@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.1.266] - 2026-09-18
+
+### R6 — the first remediation in the system that actually runs
+
+Spec §6 has listed seven automatic remediations since B5 and described them as current behaviour. **None existed**: all **12,970** exceptions on gen-002 carried `remediations_json = '[]'`, nothing in the repo wrote one, and every check's `remediation:` field was a declaration of intent. That left a dead branch one level up — `reconcileStoppedFiring` may auto-resolve only when *a remediation succeeded **and** the fingerprint now evaluates clean*, so it read a field nothing wrote and could never fire.
+
+`runR6ActionRefetch` re-fetches a ticker's splits and dividends around its unexplained discontinuities and records the attempt. Two tests cover the revived branch, including that it still refuses to resolve when the remediation **failed** — a finding that goes quiet without one must stay open.
+
+**Why this rather than the five-year dividend sweep.** The gap is real: QC-204 explains a step with a split or a special dividend, and `raw_split` covered five years while `raw_dividend` covered **ten days**, so for 138 of the 151 findings the dividend branch could not match at all. But the bulk fix measured at ~**845 pages / 845,000 rows** (of 4,696 recent dividends, **130** were universe members), against R6's **61 tickers and 122 calls covering all 123 findings** — which is what §6 specified in the first place.
+
+Shape: once per **ticker** not per finding (SOLS had 21 steps); window spans first-to-last step ±7 days; runs after the gate and before the email; resolves nothing itself, since the next run's QC-204 decides whether the step is now explained; **one attempt per finding ever** (the cap the removed claim loop never had, which re-ran one job 70 times in a night); 60 tickers per run, deliberately *not* tuned to today's 61; and a failure never fails the run.
+
+`rehearse-gate` cannot exercise a change to what is fetched — tomorrow's run is the first real test. `core` 0.6.22. Details: `changelogs/v1.1.266_2026-09-18.md`.
+
 ## [1.1.265] - 2026-09-17
 
 ### The workbench reports what a reuse ruling settled

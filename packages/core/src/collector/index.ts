@@ -122,6 +122,8 @@ export {
 export type { IndexedFiling } from '../ingest/edgar.js';
 
 export { runBackfillBars, backfillQueueClear, BACKFILL_RULE } from './backfill.js';
+export { runR6ActionRefetch, r6Candidates, R6_MAX_TICKERS_PER_RUN } from './remediation.js';
+export type { R6Report, RemediationAttempt } from './remediation.js';
 export type { BackfillReport } from './backfill.js';
 
 // Paging for Polygon list endpoints (a `limit` is a page size, not a total).

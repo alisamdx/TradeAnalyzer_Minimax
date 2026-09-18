@@ -9,6 +9,7 @@ import { runEventsPhase } from './phases/events.js';
 import { runDerivePhase } from './phases/derive.js';
 import { checksFor } from '../qa/registry.js';
 import { runGate, type Verdict } from '../qa/gate.js';
+import { runR6ActionRefetch, type R6Report } from './remediation.js';
 import { buildStatusEmail } from '../qa/email.js';
 import { COLLECTOR_VERSION } from '../version.js';
 
@@ -43,6 +44,8 @@ export interface DailyRunReport {
   readonly emailSent: boolean;
   readonly emailError?: string;
   readonly phaseErrors: readonly string[];
+  /** The R6 re-fetch this run attempted, if any (03 §6). */
+  readonly remediation?: R6Report;
 }
 
 export async function runDaily(
@@ -146,6 +149,22 @@ export async function runDaily(
     runId: run.runId, tradingDate: args.tradingDate, checks: checksFor(db), domainsExpected: domains
   });
 
+  // R6 runs AFTER the gate, because which discontinuities are unexplained is
+  // the gate's answer, and BEFORE the email so the attempt is on the record the
+  // operator reads. It does not resolve anything: whether the re-fetched action
+  // explains the step is decided on the NEXT run, when QC-204 re-evaluates and
+  // `reconcileStoppedFiring` weighs this attempt against a fingerprint that has
+  // gone quiet (03 §6). A failure here never fails the run — a remediation that
+  // could halt collection would be worse than the finding it chases.
+  let remediation: R6Report | undefined;
+  try {
+    remediation = await runR6ActionRefetch(host, db, {
+      runId: run.runId, tradingDate: args.tradingDate
+    });
+  } catch (err) {
+    phaseErrors.push(`remediation R6: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
   const finishedAt = host.nowET();
   finishRun(db, host, run, cancelled ? 'cancelled' : 'complete', gate.verdict);
 
@@ -189,6 +208,7 @@ export async function runDaily(
     checksVacuous: gate.checksVacuous,
     emailSent,
     ...(emailError ? { emailError } : {}),
-    phaseErrors
+    phaseErrors,
+    ...(remediation ? { remediation } : {})
   };
 }

@@ -326,6 +326,8 @@ The gate may request only these, each additive and idempotent. Every attempt is 
 | R6 | re-fetch a ticker's splits + dividends | unexplained discontinuity |
 | R7 | pull the transactions fallback for the interval | position/order mismatch |
 
+**Status (v1.1.266): R6 is the only one implemented.** Until then none of them existed — all 12,970 exceptions on gen-002 carried `remediations_json = '[]'` and nothing in the repo wrote one, so every `remediation:` field was a declaration of intent. That left §5's auto-resolve dead: the gate may resolve a stopped-firing finding only when *a remediation succeeded and the fingerprint now evaluates clean*, and it read a field nothing wrote. `runR6ActionRefetch` runs after the gate and before the email, fetches a ticker's splits and dividends **once per ticker** over its first-to-last step ±7 days, records the attempt, and resolves nothing itself — the next run's QC-204 decides whether the step is now explained. One attempt per finding (the cap), 60 tickers per run, and a failure never fails the run. Measured on run 19: 61 tickers, 122 calls, 123 findings, against the ~845 pages a five-year market-wide dividend sweep would have cost.
+
 **Operator-only actions** (recorded on the exception, never automatic): truncate-before-splice for confirmed ticker reuse (implemented as a `valid_to` on `ref_universe_membership` and a `predecessor_ticker` lineage row — the old rows stay, P1); accepting a genuine violent move; changing a threshold (new registry version); removing a ticker from the chain subset.
 
 ---
