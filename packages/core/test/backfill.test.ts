@@ -420,3 +420,104 @@ describe('the review queue', () => {
     expect(queue.map((q) => q.checkId)).toEqual(['QC-205']);
   });
 });
+
+describe('a reuse ruling settles the findings it accounts for', () => {
+  /**
+   * The ruling says *everything before this date belongs to a different
+   * company*, which settles every discontinuity, volume-regime and dormancy
+   * finding in that range at once. Resolving one by hand and leaving the rest
+   * would not merely be untidy: an exception that stops firing **stays open** on
+   * purpose, and QC-501 reads QC-204's exceptions by `state` rather than by
+   * whether they still fire — so SOLS's other 20 findings would have gone on
+   * being reported for ever after the ruling silenced QC-204.
+   */
+  function seedException(checkId: string, key: string): number {
+    const now = '2026-09-06T18:00:00-04:00';
+    raw
+      .prepare(
+        `INSERT INTO qa_exception
+           (fingerprint, check_id, domain, key, severity, base_severity, state, detail, evidence_json,
+            first_seen_run_id, last_seen_run_id, consecutive_runs, remediations_json,
+            affects_trading_dates_json, still_firing)
+         VALUES (?, ?, 'bars', ?, 'blocking', 'blocking', 'open', 'd', '{}', 1, 1, 1, '[]', '[]', 0)`
+      )
+      .run(`${checkId}|${key}`, checkId, key);
+    return Number(raw.prepare('SELECT MAX(exception_id) AS id FROM qa_exception').get().id);
+  }
+
+  function ruleReuse(anchorId: number): { alsoResolved: number } {
+    return recordTickerReuse(db, makeHost(), {
+      exceptionId: anchorId, ticker: 'BNY', spliceDate: '2026-06-03',
+      note: 'a different company from 2026-06-03'
+    });
+  }
+
+  function seedMembershipFor(ticker: string): void {
+    const host = makeHost();
+    const run = beginRun(db, host, { kind: 'manual', tradingDate: '2026-09-06' });
+    const ruleId = captureRuleId(db, host, 'membership', { t: ticker }, 'test');
+    raw.exec(
+      "INSERT INTO meta_response (source_response_id, run_id, provider, endpoint, params_json, requested_at, archive_file, archive_offset, dedup_hash, encrypted, at_provider_cap, parse_status) " +
+        `VALUES (9600, ${run.runId}, 'polygon', '/m', '{}', 't', 'a', 0, 'mem-settle', 0, 0, 'ok')`
+    );
+    raw
+      .prepare(
+        `INSERT INTO ref_universe_membership
+           (run_id, as_of_date, observed_at, capture_rule_id, source_response_id, ticker, list_source,
+            valid_from, valid_to, change_reason)
+         VALUES (?, '2026-09-06', 't', ?, 9600, ?, 'russell1000', '2026-01-01', NULL, 'initial')`
+      )
+      .run(run.runId, ruleId, ticker);
+  }
+
+  beforeEach(() => { seedMembershipFor('BNY'); });
+
+  it('resolves the ticker\'s other pre-splice findings, across every check the splice settles', () => {
+    const anchor = seedException('QC-205', 'BNY 2026-06-03');
+    const before204 = seedException('QC-204', 'BNY 2026-06-03');
+    const older204 = seedException('QC-204', 'BNY 2026-05-20');
+    const mirrored = seedException('QC-501', 'BNY 2026-05-20');
+    const listing = seedException('QC-210', 'BNY');
+
+    expect(ruleReuse(anchor).alsoResolved).toBe(4);
+
+    for (const id of [anchor, before204, older204, mirrored, listing]) {
+      expect(
+        (raw.prepare('SELECT state FROM qa_exception WHERE exception_id = ?').get(id) as { state: string }).state
+      ).toBe('resolved');
+    }
+  });
+
+  it('leaves a finding AFTER the splice alone — that one is about the new entity', () => {
+    const anchor = seedException('QC-205', 'BNY 2026-06-03');
+    const later = seedException('QC-204', 'BNY 2026-07-15');
+
+    expect(ruleReuse(anchor).alsoResolved).toBe(0);
+    expect(
+      (raw.prepare('SELECT state FROM qa_exception WHERE exception_id = ?').get(later) as { state: string }).state
+    ).toBe('open');
+  });
+
+  it('does not touch a check the ruling says nothing about', () => {
+    // QC-603's earnings staleness on the same ticker is not answered by a
+    // ruling about which company the old bars belonged to.
+    const anchor = seedException('QC-205', 'BNY 2026-06-03');
+    const unrelated = seedException('QC-603', 'BNY');
+
+    expect(ruleReuse(anchor).alsoResolved).toBe(0);
+    expect(
+      (raw.prepare('SELECT state FROM qa_exception WHERE exception_id = ?').get(unrelated) as { state: string }).state
+    ).toBe('open');
+  });
+
+  it('leaves an audit event on every one it resolves — a ruling applied, not a bulk dismissal', () => {
+    const anchor = seedException('QC-205', 'BNY 2026-06-03');
+    const other = seedException('QC-204', 'BNY 2026-05-20');
+    ruleReuse(anchor);
+
+    const events = raw
+      .prepare('SELECT note FROM qa_exception_event WHERE exception_id = ?')
+      .all(other) as { note: string }[];
+    expect(events.some((e) => e.note.includes('ticker-reuse ruling'))).toBe(true);
+  });
+});

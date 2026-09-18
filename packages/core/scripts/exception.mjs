@@ -115,9 +115,14 @@ try {
       const r = core.recordTickerReuse(db, host, {
         exceptionId: Number(id), ticker, spliceDate, note: note.join(' ')
       });
+      // `r.spliceDate`, never the argument: it is optional, and printing the
+      // argument reported "the day before undefined" on exactly the path where
+      // the operator most needs to see which date was inferred.
       console.log(
-        `Recorded. Closed ${r.closed} membership range(s) the day before ${spliceDate} and opened ${r.opened}.\n` +
-          'No bars were deleted — a reader intersecting bars with membership now sees one entity at a time.'
+        `Recorded. Closed ${r.closed} membership range(s) the day before ${r.spliceDate} and opened ${r.opened}.\n` +
+          `Resolved ${r.alsoResolved} further finding(s) the ruling accounts for.\n` +
+          'No bars were deleted. Since v1.1.261 QC-204, QC-205, QC-209 and QC-210 read the split, so\n' +
+          'the previous occupant\'s bars no longer fire — before that they came back on the next run.'
       );
       break;
     }

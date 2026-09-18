@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.1.262] - 2026-09-17
+
+### A reuse ruling settles the findings it accounts for
+
+`recordTickerReuse` resolved exactly one exception — the id passed to it — while a ruling that says *everything before this date belongs to a different company* settles every discontinuity, volume-regime and dormancy finding in that range. SOLS carries 21 QC-204 findings, JAN 7.
+
+Leaving the rest open would have made the ruling look like it did nothing, because two behaviours compound: an exception that stops firing **stays open on purpose** (*"it went away" is how the earnings-date bug hid for a quarter*), and **QC-501 reads QC-204's exceptions by `state`, not by whether they still fire**. After v1.1.261 silenced QC-204 on the previous occupant's bars, QC-501 would have gone on reporting all 28 for ever.
+
+`resolveSettledBySplice` resolves, with an audit event each, every open/acknowledged finding for that ticker from QC-204, QC-205, QC-209, QC-210 and QC-501 whose key date is at or before the splice. Three boundaries, each tested: a dated finding **after** the splice stands (it is about the new entity), a **bare-ticker** key is settled (QC-210 covers the whole pre-listing range), and a check the ruling says nothing about is untouched — QC-603's earnings staleness on the same ticker is not answered by a ruling about old bars, which is why the check list is named rather than "every finding for this ticker".
+
+Two smaller things in the same path: `exception.mjs reuse` printed the optional **argument** rather than the result, so on the inferred path it reported *"the day before undefined"* — exactly where the operator most needs to see which date was chosen; and its closing advice claimed a reader intersecting bars with membership existed, which only became true one version ago. Fourth instance of a dev script's console output going stale like any other documentation.
+
+`core` 0.6.20. Details: `changelogs/v1.1.262_2026-09-17.md`.
+
 ## [1.1.261] - 2026-09-17
 
 ### A ruled ticker reuse now ends the previous occupant's series

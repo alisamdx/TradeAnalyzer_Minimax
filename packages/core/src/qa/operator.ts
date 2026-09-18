@@ -268,7 +268,7 @@ export function recordTickerReuse(
     readonly spliceDate?: string;
     readonly note: string;
   }
-): { readonly closed: number; readonly opened: number; readonly spliceDate: string } {
+): { readonly closed: number; readonly opened: number; readonly spliceDate: string; readonly alsoResolved: number } {
   const e = load(db, args.exceptionId);
   if (!args.note.trim()) throw new OperatorActionRefused('Recording a ticker reuse needs a note.');
 
@@ -337,9 +337,78 @@ export function recordTickerReuse(
 
   event(db, args.exceptionId, now, 'operator', e.state, 'resolved', e.severity,
     `ticker reuse confirmed; membership closed ${dayBefore} and reopened ${spliceDate}. ${args.note}`);
+
+  const alsoResolved = resolveSettledBySplice(db, host, args.ticker, spliceDate, args.exceptionId, now);
+
   recomputeAffected(db, host, args.exceptionId);
 
-  return { closed: open.length, opened, spliceDate };
+  return { closed: open.length, opened, spliceDate, alsoResolved };
+}
+
+/**
+ * The series-integrity checks whose findings a splice ruling settles outright.
+ *
+ * Named explicitly rather than "every finding for this ticker", because plenty
+ * of checks key on a bare ticker and mean something else entirely — QC-603's
+ * earnings staleness is not answered by a ruling about which company the old
+ * bars belonged to.
+ */
+const SPLICE_SETTLES = ['QC-204', 'QC-205', 'QC-209', 'QC-210', 'QC-501'] as const;
+
+/**
+ * Resolves the findings the ruling has just accounted for.
+ *
+ * A reuse ruling says *everything before this date belongs to a different
+ * company*, which settles every discontinuity, volume-regime and dormancy
+ * finding in that range at once — SOLS carried 21 QC-204 findings and JAN 7 on
+ * 2026-09-17, and resolving one of each by hand would leave the rest open.
+ *
+ * That matters beyond tidiness, because **an exception that stops firing stays
+ * open on purpose** ("it went away" is how the earnings-date bug hid for a
+ * quarter), and QC-501 reads QC-204's exceptions by `state`, not by whether they
+ * still fire. Left alone, the ruling would silence QC-204 and QC-501 would go on
+ * reporting all 28 of them for ever.
+ *
+ * Each one gets its own audit event: this is a ruling applied consistently, not
+ * a bulk dismissal.
+ */
+function resolveSettledBySplice(
+  db: SqliteLike,
+  host: OperatorHost,
+  ticker: string,
+  spliceDate: string,
+  alreadyResolved: number,
+  now: string
+): number {
+  const candidates = db
+    .prepare(
+      `SELECT exception_id, check_id, key, severity, state FROM qa_exception
+        WHERE state IN ('open', 'acknowledged')
+          AND exception_id <> ?
+          AND check_id IN (${SPLICE_SETTLES.map(() => '?').join(', ')})
+          AND (key = ? OR key LIKE ? || ' %')`
+    )
+    .all(alreadyResolved, ...SPLICE_SETTLES, ticker, ticker) as {
+    exception_id: number; check_id: string; key: string; severity: string; state: string;
+  }[];
+
+  let resolved = 0;
+  for (const c of candidates) {
+    const keyed = c.key.split(' ')[1];
+    // A bare-ticker key (QC-210) is about the whole pre-listing range, so the
+    // ruling settles it. A dated key is settled only if it falls at or before
+    // the splice — a finding AFTER it is about the new entity and stands.
+    if (keyed !== undefined && keyed > spliceDate) continue;
+    db.prepare(
+      `UPDATE qa_exception SET state = 'resolved', resolved_at = ?, resolution_kind = 'data_corrected',
+              resolution_note = ? WHERE exception_id = ?`
+    ).run(now, `settled by the ${ticker} ticker-reuse ruling, series split at ${spliceDate}`, c.exception_id);
+    event(db, c.exception_id, now, 'operator', c.state, 'resolved', c.severity,
+      `settled by the ${ticker} ticker-reuse ruling at ${spliceDate}`);
+    recomputeAffected(db, host, c.exception_id);
+    resolved++;
+  }
+  return resolved;
 }
 
 /**
