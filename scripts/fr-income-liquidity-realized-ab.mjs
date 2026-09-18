@@ -29,7 +29,7 @@
 //      the sample is small — read the confidence note it prints.
 //
 // Usage: node scripts/fr-income-liquidity-realized-ab.mjs [--picks 5]
-import Database from 'better-sqlite3';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 
@@ -37,7 +37,6 @@ const argv = process.argv.slice(2);
 const argOf = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : d; };
 const PICKS = Number(argOf('--picks', 5));   // PICKS_PER_STRATEGY in the brief/replay
 
-const db = new Database(join(homedir(), 'AppData', 'Roaming', 'trade-analyzer', 'trade-analyzer.sqlite'));
 
 // ── scoring replicas (mirror scoring-service.ts BASELINE_INCOME + normalizeSignal) ──
 const clamp = (x) => Math.max(0, Math.min(100, x));
@@ -72,40 +71,39 @@ function composite(r, liq) {
   return sum / TOTAL_WEIGHT;
 }
 
-// ── load settled income CSPs with the full input set ────────────────────────────
-const maxPx = db.prepare(`SELECT MAX(date) d FROM historical_prices`).get().d;
-const rows = db.prepare(`
-  SELECT o.as_of_date, o.ticker, o.strike, o.expiration, o.dte, o.premium,
-         o.bid, o.ask, o.open_interest AS oi, o.iv_rank, o.annualized_return,
-         h.close AS settle
-  FROM options_premium_history o
-  JOIN historical_prices h ON h.ticker = o.ticker AND h.date = o.expiration
-  WHERE o.strategy = 'income' AND o.structure = 'CSP'
-    AND o.expiration <= ? AND o.bid IS NOT NULL AND o.ask IS NOT NULL
-    AND o.open_interest IS NOT NULL AND o.premium IS NOT NULL AND o.strike > 0
-  ORDER BY o.as_of_date, o.ticker
-`).all(maxPx);
+// ── load settled income CSPs through the running app ──────────────────────────────────
+// This used to open %APPDATA%	rade-analyzer	rade-analyzer.sqlite itself, write-capable. That path
+// is MSIX-redirected in the container a Claude Code session runs in, so an unattended run read the
+// container's stale shadow copy — and the 2026-09-28 re-run exists to measure a panel that has
+// doubled. The app reads its own database on its own connection instead (v1.1.267). It also
+// computes realized vol by the LIVE rule now: this script's copy accepted as few as 10 closes, so
+// its recentVolatility was never the one the engine scored on for a thin-history ticker.
+const DATA_DIR = join(homedir(), '.tradeanalyzer');
+const TOKEN = readFileSync(join(DATA_DIR, 'agent.token'), 'utf8').trim();
+let PORT = '7432';
+try { PORT = readFileSync(join(DATA_DIR, 'api.port'), 'utf8').trim() || PORT; } catch { /* default */ }
 
-// 20-day realized vol as of each (ticker, as_of_date) — the recentVolatility signal.
-const barsFor = db.prepare(
-  `SELECT close FROM historical_prices WHERE ticker=? AND date<=? ORDER BY date DESC LIMIT 21`
-);
-const volCache = new Map();
+const res = await fetch(`http://127.0.0.1:${PORT}/api/v1/diagnostics/settled-csp-panel?strategy=income`, {
+  headers: { 'X-Agent-Token': TOKEN }
+}).catch((err) => {
+  console.error(`API server not reachable on 127.0.0.1:${PORT} — the app must be RUNNING for this script. (${err.message})`);
+  process.exit(1);
+});
+const body = await res.json().catch(() => null);
+if (!res.ok || !body?.ok) {
+  console.error(`settled-csp-panel failed: HTTP ${res.status} ${body?.error ?? ''}`);
+  if (res.status === 404) console.error('This app build predates the route (v1.1.267). Install the new build.');
+  process.exit(1);
+}
+
+const rows = body.data.rows.map((r) => ({
+  as_of_date: r.asOfDate, ticker: r.ticker, strike: r.strike, expiration: r.expiration, dte: r.dte,
+  premium: r.premium, bid: r.bid, ask: r.ask, oi: r.openInterest, iv_rank: r.ivRank,
+  annualized_return: r.annualizedReturn, settle: r.settle, realizedVol: r.realizedVol
+}));
+console.log(`panel: ${rows.length} settled income CSPs through ${body.data.maxPriceDate} (via the running app)`);
+
 for (const r of rows) {
-  const key = `${r.ticker}|${r.as_of_date}`;
-  if (!volCache.has(key)) {
-    const closes = barsFor.all(r.ticker, r.as_of_date).map((x) => x.close).reverse();
-    let v = null;
-    if (closes.length >= 10) {
-      const lr = [];
-      for (let i = 1; i < closes.length; i++) if (closes[i - 1] > 0) lr.push(Math.log(closes[i] / closes[i - 1]));
-      const m = lr.reduce((a, b) => a + b, 0) / lr.length;
-      const sd = Math.sqrt(lr.reduce((a, b) => a + (b - m) ** 2, 0) / (lr.length - 1));
-      v = sd * Math.sqrt(252) * 100;
-    }
-    volCache.set(key, v);
-  }
-  r.realizedVol = volCache.get(key);
   // Realized CSP outcome, settled at intrinsic. No IV or path assumptions.
   r.pnl = r.premium - Math.max(0, r.strike - r.settle);
   r.retPct = (r.pnl / r.strike) * 100;
@@ -249,4 +247,3 @@ console.log('  applies the Stage-3 earnings penalty (−20 composite for income 
 console.log('  earnings-runner names that blow up a short put), the liquidity hard gate, and the');
 console.log('  critic. The DELTA between arms is still apples-to-apples — both omit the same things —');
 console.log('  so read section B as "which scheme ranks better", never as "this is income\'s P&L".');
-db.close();

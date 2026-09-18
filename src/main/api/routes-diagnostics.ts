@@ -3,6 +3,9 @@ import type { ApiServerServices } from '../api-server.js';
 import { apiOk, apiError } from './helpers.js';
 import { buildDayReport, etDate, isIsoDate } from '../services/day-diagnostics.js';
 import { auditPickGreeks, type PickAuditDb } from '../services/greek-consistency.js';
+import {
+  settledCspPanel, PANEL_STRATEGIES, type PanelDb, type PanelStrategy
+} from '../services/settled-csp-panel.js';
 
 export function registerDiagnosticsRoutes(app: FastifyInstance, svc: ApiServerServices): void {
   // GET /diagnostics/day?date=YYYY-MM-DD — everything recorded about one ET day: batch runs,
@@ -33,6 +36,22 @@ export function registerDiagnosticsRoutes(app: FastifyInstance, svc: ApiServerSe
     if (!isIsoDate(from) || !isIsoDate(to)) return apiError(reply, 'from and to must be YYYY-MM-DD', 'VALIDATION_ERROR');
     try {
       return apiOk(reply, auditPickGreeks(svc.db as unknown as PickAuditDb, from, to));
+    } catch (err) {
+      return apiError(reply, err instanceof Error ? err.message : String(err), 'INTERNAL', 500);
+    }
+  });
+
+  // GET /diagnostics/settled-csp-panel?strategy=income|wheel — every stored CSP recommendation that
+  // has a settlement close, with bid/ask/OI, IV rank, annualized return and the live-rule realized
+  // vol as of its date. Read-only. Read by scripts/fr-income-liquidity-realized-ab.mjs, which used to
+  // open the SQLite file itself through a redirected %APPDATA%. see settled-csp-panel.ts
+  app.get<{ Querystring: { strategy?: string } }>('/diagnostics/settled-csp-panel', async (req, reply) => {
+    const strategy = (req.query.strategy ?? 'income') as PanelStrategy;
+    if (!PANEL_STRATEGIES.includes(strategy)) {
+      return apiError(reply, `strategy must be one of ${PANEL_STRATEGIES.join(', ')}`, 'VALIDATION_ERROR');
+    }
+    try {
+      return apiOk(reply, settledCspPanel(svc.db as unknown as PanelDb, strategy));
     } catch (err) {
       return apiError(reply, err instanceof Error ? err.message : String(err), 'INTERNAL', 500);
     }

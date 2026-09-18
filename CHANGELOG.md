@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.267] - 2026-09-18
+
+### The liquidity study reads through the app, and its realized vol now matches live scoring
+
+`scripts/fr-income-liquidity-realized-ab.mjs` opened `%APPDATA%	rade-analyzer	rade-analyzer.sqlite` itself, write-capable — and that path is MSIX-redirected in the container a Claude Code session runs in (probed 2026-09-18). The scheduled 2026-09-28 re-run would have read a **stale shadow copy** of a panel it exists to measure *because* it has doubled, and returned "sweep unchanged" for an unrelated reason. It would not have prompted either: `Bash(node *)` lets any `node scripts/*.mjs` run unattended. It now calls **`GET /api/v1/diagnostics/settled-csp-panel?strategy=income|wheel`**, answered by the running app on its own connection — the v1.1.220 fix the wheel A/B already had. No database access remains in the script.
+
+**Its `recentVolatility` never matched the engine's.** The script's copy produced a value from **10 closes**; live `ScoringService` needs 16 closes and 15 returns, and the copy took `log(0)` on a zero close. So for any thin-history ticker the study scored a signal the engine never computed. `services/settled-csp-panel.ts` mirrors `loadRecentVolatility` exactly, and its test compares against **live `ScoringService.gatherSignalData` on the same bars** (agreeing to 10 decimals) rather than restating the formula. Live scoring is untouched.
+
+Also: one bar load per ticker instead of one query per (ticker, date), and a test that the vol is computed strictly as of the recommendation date. **The next run is not directly comparable with 2026-08-07's** — rows with 10–15 prior closes now carry a null vol, the engine's own rule.
+
+Details: `changelogs/v1.1.267_2026-09-18.md`.
+
 ## [1.1.266] - 2026-09-18
 
 ### R6 — the first remediation in the system that actually runs
