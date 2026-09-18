@@ -285,6 +285,33 @@ export function acceptException(id: number, note: string, until: string | null):
   return accept(currentDb() as never, operatorHost(), id, note, until ?? undefined);
 }
 
+/**
+ * What the operator reads back after a reuse ruling.
+ *
+ * **`alsoResolved` is the part that says the ruling worked.** A splice settles
+ * every discontinuity, volume-regime and dormancy finding before it — SOLS
+ * carried 21 QC-204 findings on 2026-09-17 and JAN 7 — and this message reported
+ * only the membership rows, so the operator could not tell a ruling that
+ * cascaded from one that resolved a single finding and left the other twenty
+ * open. Zero here is a finding in itself.
+ *
+ * Its own function so it can be tested: the message is the whole feedback loop,
+ * and inline in `recordReuse` it was reachable only through the app's database,
+ * which is how it came to omit the number in the first place.
+ */
+export function reuseSummary(result: {
+  readonly closed: number;
+  readonly opened: number;
+  readonly spliceDate: string;
+  readonly alsoResolved: number;
+}): string {
+  return (
+    `Closed ${result.closed} membership range(s) the day before ${result.spliceDate} and opened ${result.opened}. ` +
+    `Resolved ${result.alsoResolved} further finding(s) the ruling accounts for. ` +
+    'No bars were deleted — the earlier company\'s bars stay as evidence, and no longer fire.'
+  );
+}
+
 export function recordReuse(id: number, ticker: string, spliceDate: string | null, note: string): string {
   const result = recordTickerReuse(currentDb() as never, operatorHost(), {
     exceptionId: id,
@@ -292,10 +319,7 @@ export function recordReuse(id: number, ticker: string, spliceDate: string | nul
     ...(spliceDate ? { spliceDate } : {}),
     note
   });
-  return (
-    `Closed ${result.closed} membership range(s) the day before ${result.spliceDate} and opened ${result.opened}. ` +
-    'No bars were deleted — a reader intersecting bars with membership now sees one entity at a time.'
-  );
+  return reuseSummary(result);
 }
 
 /**

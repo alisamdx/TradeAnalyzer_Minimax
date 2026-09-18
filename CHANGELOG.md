@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.265] - 2026-09-17
+
+### The workbench reports what a reuse ruling settled
+
+`recordReuse` built its own message and dropped `alsoResolved`, so the operator read *"Closed 1 membership range(s) … and opened 1"* and could not tell a ruling that cascaded from one that resolved a single finding and left the other twenty open. A splice settles every discontinuity, volume-regime and dormancy finding before it — SOLS carried 21 QC-204 findings, JAN 7 — so that count is the confirmation the ruling worked, and **zero is a finding in itself**: it is what a stale build or a mis-dated splice looks like. Extracted as `reuseSummary()` and tested, for the same reason `reuseCandidateFor` was — inline it was reachable only through the app's database, which is how it came to omit the number. The CLI has reported it since v1.1.262; both callers now say the same thing.
+
+`next` 0.4.10. Details: `changelogs/v1.1.265_2026-09-17.md`.
+
 ## [1.1.264] - 2026-09-17
 
 ### The root package build never built TradeAnalyzer 2

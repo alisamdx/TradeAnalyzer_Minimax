@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { reuseCandidateFor } from '../src/main/exceptions.js';
+import { reuseCandidateFor, reuseSummary } from '../src/main/exceptions.js';
 
 /**
  * Which findings offer the "Confirm ticker reuse" panel, and what it pre-fills.
@@ -52,5 +52,27 @@ describe('the reuse panel offer', () => {
 
   it('returns null for an empty key rather than a candidate with no ticker', () => {
     expect(reuseCandidateFor('QC-204', '')).toBeNull();
+  });
+});
+
+describe('what the operator reads back after a ruling', () => {
+  it('reports how many further findings the ruling settled', () => {
+    // The number that says it worked. Without it a ruling that cascaded and one
+    // that resolved a single finding, leaving twenty open, read identically.
+    const text = reuseSummary({ closed: 1, opened: 1, spliceDate: '2025-10-30', alsoResolved: 43 });
+    expect(text).toContain('2025-10-30');
+    expect(text).toContain('43 further finding(s)');
+  });
+
+  it('says zero out loud rather than omitting it', () => {
+    // Zero is a finding: the ruling landed but nothing cascaded, which is what a
+    // stale build or a mis-dated splice looks like.
+    expect(reuseSummary({ closed: 1, opened: 1, spliceDate: '2026-03-20', alsoResolved: 0 }))
+      .toContain('Resolved 0 further finding(s)');
+  });
+
+  it('does not claim anything was deleted', () => {
+    const text = reuseSummary({ closed: 1, opened: 1, spliceDate: '2025-10-30', alsoResolved: 4 });
+    expect(text).toContain('No bars were deleted');
   });
 });
