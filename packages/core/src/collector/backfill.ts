@@ -5,7 +5,10 @@ import { captureResponse } from './capture.js';
 import { recipes } from '../ingest/recipes.js';
 import { beginRun, finishRun, captureRuleId, type RunHandle } from './run.js';
 import { sweepPolygonPages, POLYGON_LIST_PAGE_SIZE } from './paged.js';
-import { QC202_OHLC_ORDER, QC204_DISCONTINUITY, QC205_VOLUME_REGIME, QC209_DORMANT_SERIES_RESUMES } from '../qa/checks/bars.js';
+import {
+  QC202_OHLC_ORDER, QC204_DISCONTINUITY, QC205_VOLUME_REGIME, QC209_DORMANT_SERIES_RESUMES,
+  QC210_BARS_PREDATE_LISTING
+} from '../qa/checks/bars.js';
 import { runGate } from '../qa/gate.js';
 import { reviewQueue } from '../qa/operator.js';
 import { buildStatusEmail } from '../qa/email.js';
@@ -145,7 +148,13 @@ export async function runBackfillBars(
     const gate = runGate(db, host, {
       runId: run.runId,
       tradingDate: args.tradingDate,
-      checks: [QC202_OHLC_ORDER, QC204_DISCONTINUITY, QC205_VOLUME_REGIME, QC209_DORMANT_SERIES_RESUMES],
+      // QC-210 belongs here above all: the backfill is the one job that fetches a
+      // ticker's whole history, which is when a splice with a previous occupant of
+      // the symbol becomes visible at all.
+      checks: [
+        QC202_OHLC_ORDER, QC204_DISCONTINUITY, QC205_VOLUME_REGIME, QC209_DORMANT_SERIES_RESUMES,
+        QC210_BARS_PREDATE_LISTING
+      ],
       domainsExpected: { bars: { expected: tickers.length, stored } }
     });
 

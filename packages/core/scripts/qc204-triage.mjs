@@ -155,6 +155,24 @@ try {
    */
   const SHELL_VOLUME = 5000;
 
+  /**
+   * The current listing per ticker. A step dated before it sits in history that
+   * belongs to a previous occupant of the symbol, so it is not an individual
+   * ruling at all — one truncation resolves every finding in that range. QC-210
+   * reports the ticker; this sorts its steps out of the queue.
+   */
+  const listedFrom = new Map(
+    db
+      .prepare(
+        `SELECT t.ticker, t.list_date FROM raw_ticker_reference t
+           JOIN (SELECT ticker, MAX(row_id) AS m FROM raw_ticker_reference GROUP BY ticker) x
+             ON x.m = t.row_id
+          WHERE t.list_date IS NOT NULL`
+      )
+      .all()
+      .map((r) => [r.ticker, r.list_date])
+  );
+
   const tickers = [...new Set(findings.map((f) => String(f.key).split(' ')[0]))];
   const sessions = db
     .prepare('SELECT date FROM ref_trading_day WHERE is_trading_day = 1 ORDER BY date')
@@ -224,8 +242,14 @@ try {
     const thinBefore = medBefore !== null && medBefore < SHELL_VOLUME;
     const thinAfter = medAfter !== null && medAfter < SHELL_VOLUME;
 
+    const listDate = listedFrom.get(ticker) ?? null;
+    const preListing = listDate !== null && date < listDate;
+
     let suggests;
-    if (reuseKeys.has(key)) suggests = 'reuse (QC-205)';
+    // First, because it is not a per-step ruling: the whole range before the
+    // listing belongs to somebody else and one truncation clears all of it.
+    if (preListing) suggests = 'pre-listing (QC-210)';
+    else if (reuseKeys.has(key)) suggests = 'reuse (QC-205)';
     else if (dormantKeys.has(key)) suggests = 'dormant-resume (QC-209)';
     else if (volRatio !== null && volRatio >= 15) suggests = 'reuse?';
     else if (gapSessions !== null && gapSessions >= 20) suggests = 'dormant-resume?';
@@ -246,6 +270,7 @@ try {
       rangePct: rangePct === null ? null : rangePct * 100,
       medVolBefore: medBefore, medVolAfter: medAfter, volRatio,
       gapSessions, priorTraded,
+      listDate, preListing,
       splitsOnRecord: splitKnown,
       alsoQc205: tickersWithReuse.has(ticker), alsoQc209: tickersWithDormancy.has(ticker),
       suggests

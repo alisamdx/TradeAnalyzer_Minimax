@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.1.260] - 2026-09-17
+
+### QC-210: bars that predate the ticker's current listing
+
+A new blocking bars check — a stored bar dated before `raw_ticker_reference.list_date` belongs, by definition, to a previous occupant of the symbol. It is the same fault QC-205 and QC-209 look for, tested on **identity** rather than **behaviour**: they ask whether the volume regime or the trading gap *looks* like a splice, this asks the reference data where the listing began, so it catches a reuse whose two occupants happen to trade at similar volume.
+
+Fires on **11 of 1,082** tickers on 2026-09-17 — including **SPCX**, the 53,592× case CLAUDE.md names as the reuse exemplar and one QC-205 does *not* fire on in gen-002 — plus FIG, JAN, NIQ, SAIL, SOLS, CAI and BAM. Threshold 0, structural, with a base rate behind it: 1.0 % of tickers, and **every gap exceeds 365 days**, so there is no borderline band a grace period would protect. The error is one-directional — a `list_date` too early causes a miss, only one too late could indict good history. No automatic remediation: truncation is an operator action, and ASND, JHX, COLB and SAIL look like relistings whose history may be continuous. It also runs in the backfill's gate, the one job that fetches a whole history.
+
+`qc204-triage.mjs` now buckets a pre-listing step first, since one truncation resolves the range: **26** of the 151 findings (SOLS 20, JAN 6) leave the individual ruling queue, and `move?` drops 95 → 76.
+
+Two measurements recorded against QC-205, neither acted on:
+
+- **A prior-liquidity floor was tested as a fix for its false positives and REJECTED.** Only 2 of its 12 firings are reuse by the listing evidence, and their prior volume (12k, 20k) sits inside the range of the ten that are not — a 10k floor suppresses both true positives, a 100k floor removes only 4 of the 10 false ones.
+- **Its 15× threshold does not reproduce the gap it was drawn from.** Over gen-002's 109 evaluations: p50 1.92, p90 15.34, p99 403.93, max 467.6 — a continuum with the threshold on exactly **p90**, firing on the top decile by construction. Left in force; one generation is not grounds for moving a `measured` threshold on a check whose remedy truncates history, and the pilot's distribution review is where that belongs.
+
+`core` 0.6.18. Details: `changelogs/v1.1.260_2026-09-17.md`.
+
 ## [1.1.259] - 2026-09-17
 
 ### `qc204-triage.mjs`: the evidence for 151 rulings, on one screen

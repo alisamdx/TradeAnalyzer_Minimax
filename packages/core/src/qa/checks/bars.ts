@@ -525,6 +525,98 @@ export const QC207_TRADING_DAY_GAP: CheckDefinition = {
   }
 };
 
+export const QC210_BARS_PREDATE_LISTING: CheckDefinition = {
+  id: 'QC-210',
+  domain: 'bars',
+  severity: 'blocking',
+  description:
+    'A stored bar dated before the ticker\'s current listing began. A bar older than `list_date` ' +
+    'belongs, by definition, to a previous occupant of the symbol, so the series splices two ' +
+    'entities and no re-fetch can repair it — the provider keys by ticker too. This is the same ' +
+    'fault QC-205 and QC-209 look for, tested on identity rather than on behaviour: they ask ' +
+    'whether the volume regime or the trading gap LOOKS like a splice, and this asks the reference ' +
+    'data where the listing started.',
+  readsTables: ['raw_daily_bar', 'raw_ticker_reference'],
+  testedQuantity: 'bars_before_list_date',
+  testedUnit: 'count',
+  thresholds: { maxBarsBeforeListing: 0 },
+  // Structural: one bar belonging to another company is a finding, and that is a
+  // definition rather than a number anyone chose.
+  thresholdBasis: 'structural',
+  thresholdEvidence:
+    'Measured over gen-002 on 2026-09-17: 11 of 1,082 tickers with a list_date (1.0 %) hold bars ' +
+    'before it, and EVERY gap exceeds 365 days — none in the 1-5 or 6-90 day bands. So there is no ' +
+    'borderline population for a grace period to protect, and a zero threshold costs nothing. The ' +
+    'error is also one-directional: a list_date that is too EARLY causes a miss, and only one that ' +
+    'is too late could indict good history. Detail carries the day gap so a future artefact is ' +
+    'ruled out at a glance.',
+  // None. Truncate-before-listing is an operator action (03 section 6), exactly as
+  // for QC-205 and QC-209 — and a relisting or redomicile (ASND, JHX, COLB, SAIL
+  // on this sample) may be continuous history that must NOT be truncated.
+  run(ctx) {
+    // The CURRENT listing, one row per ticker. A newer reference row supersedes an
+    // older one, so read the latest rather than any.
+    const listed = new Map(
+      (
+        ctx.db
+          .prepare(
+            `SELECT t.ticker, t.list_date, t.name
+               FROM raw_ticker_reference t
+               JOIN (SELECT ticker, MAX(row_id) AS m FROM raw_ticker_reference GROUP BY ticker) x
+                 ON x.m = t.row_id
+              WHERE t.list_date IS NOT NULL`
+          )
+          .all() as { ticker: string; list_date: string; name: string | null }[]
+      ).map((r) => [r.ticker, r])
+    );
+
+    // Only tickers whose listing we actually know are evaluated. A ticker with no
+    // reference row is untestable, and recording it as zero would be a pass this
+    // check never earned.
+    const rows = ctx.db
+      .prepare(
+        `SELECT ticker, MIN(trade_date) AS first_bar, COUNT(*) AS bars
+           FROM raw_daily_bar
+          WHERE ticker IN (SELECT DISTINCT ticker FROM raw_daily_bar WHERE run_id = ?)
+          GROUP BY ticker`
+      )
+      .all(ctx.runId) as { ticker: string; first_bar: string; bars: number }[];
+
+    const out: Evaluation[] = [];
+    for (const r of rows) {
+      const ref = listed.get(r.ticker);
+      if (ref === undefined) continue;
+      if (r.first_bar >= ref.list_date) {
+        // Recorded, not skipped: the zeros are the distribution this check's
+        // 1 % base rate is read from.
+        out.push({ key: r.ticker, value: 0, fired: false });
+        continue;
+      }
+      const before = (
+        ctx.db
+          .prepare('SELECT COUNT(*) AS n FROM raw_daily_bar WHERE ticker = ? AND trade_date < ?')
+          .get(r.ticker, ref.list_date) as { n: number }
+      ).n;
+      const gapDays = Math.round(
+        (Date.parse(`${ref.list_date}T00:00:00Z`) - Date.parse(`${r.first_bar}T00:00:00Z`)) / 86_400_000
+      );
+      out.push({
+        key: r.ticker,
+        value: before,
+        fired: before > (this.thresholds['maxBarsBeforeListing'] as number),
+        detail:
+          `${r.ticker} (${ref.name ?? '?'}) listed ${ref.list_date}, but ${before} bar(s) are stored ` +
+          `from ${r.first_bar} — ${gapDays} days earlier, so the series splices two entities`,
+        evidence: {
+          ticker: r.ticker, listDate: ref.list_date, firstBar: r.first_bar,
+          barsBeforeListing: before, gapDays, name: ref.name
+        }
+      });
+    }
+    return out;
+  }
+};
+
 export const BAR_CHECKS: readonly CheckDefinition[] = [
   QC201_BAR_COMPLETENESS,
   QC202_OHLC_ORDER,
@@ -532,5 +624,6 @@ export const BAR_CHECKS: readonly CheckDefinition[] = [
   QC204_DISCONTINUITY,
   QC205_VOLUME_REGIME,
   QC207_TRADING_DAY_GAP,
-  QC209_DORMANT_SERIES_RESUMES
+  QC209_DORMANT_SERIES_RESUMES,
+  QC210_BARS_PREDATE_LISTING
 ];

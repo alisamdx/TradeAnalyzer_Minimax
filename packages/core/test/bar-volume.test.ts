@@ -9,7 +9,8 @@ import type { CollectorHost, ProviderResponse } from '../src/collector/host.js';
 import { beginRun, captureRuleId } from '../src/collector/run.js';
 import { runBackfillBars } from '../src/collector/backfill.js';
 import {
-  QC205_VOLUME_REGIME, QC209_DORMANT_SERIES_RESUMES, volumeRegimeAroundSteps, dormancyBeforeSteps,
+  QC205_VOLUME_REGIME, QC209_DORMANT_SERIES_RESUMES, QC210_BARS_PREDATE_LISTING, BAR_CHECKS,
+  volumeRegimeAroundSteps, dormancyBeforeSteps,
   REGIME_WINDOW, MIN_WINDOW_BARS, type VolumeBar
 } from '../src/qa/checks/bars.js';
 import { makeBarIngest, volumeOrNull } from '../src/ingest/market.js';
@@ -289,5 +290,116 @@ describe('a one-shot job is dated to its session, not the calendar', () => {
   it('skips a rule holiday and an unscheduled closure', () => {
     expect(sessionOnOrBefore('2026-04-03')).toBe('2026-04-02'); // Good Friday
     expect(sessionOnOrBefore('2025-01-09')).toBe('2025-01-08'); // National Day of Mourning
+  });
+});
+
+describe('QC-210 — bars that predate the ticker\'s current listing', () => {
+  /**
+   * The identity test, against QC-205's and QC-209's behavioural ones. Those ask
+   * whether a splice LOOKS like one; this asks the reference data where the
+   * listing began, so it catches a reuse whose two occupants happen to trade at
+   * similar volume — which is most of them. Measured on gen-002 (2026-09-17):
+   * QC-205 fired on 2 of the 11 tickers holding pre-listing bars, and 12 steps
+   * sat in history belonging to a previous occupant with no check firing at all.
+   */
+  let refSeq = 0;
+  function seedReference(
+    rows: readonly { ticker: string; listDate: string | null; name?: string }[]
+  ): void {
+    const host = makeHost(async () => ({ status: 200, body: '{}', requestedAt: 't', respondedAt: 't' }));
+    const run = beginRun(db, host, { kind: 'manual', tradingDate: '2026-09-11' });
+    const ruleId = captureRuleId(db, host, 'reference', { source: 'test' }, 'test');
+    // A distinct response per call: two reference sweeps are two responses, and
+    // the supersession test needs both to exist.
+    const responseId = 9100 + refSeq++;
+    raw.exec(
+      "INSERT INTO meta_response (source_response_id, run_id, provider, endpoint, params_json, requested_at, archive_file, archive_offset, dedup_hash, encrypted, at_provider_cap, parse_status) " +
+        `VALUES (${responseId}, ${run.runId}, 'polygon', '/ref', '{}', 't', 'a', 0, 'ref-hash-${responseId}', 0, 0, 'ok')`
+    );
+    for (const r of rows) {
+      raw
+        .prepare(
+          `INSERT INTO raw_ticker_reference
+             (run_id, as_of_date, observed_at, capture_rule_id, source_response_id, ticker, name,
+              security_type, market_cap_status, shares_outstanding_status, list_date, active,
+              optionable_status)
+           VALUES (?, '2026-09-11', 't', ?, ?, ?, ?, 'CS', 'omitted', 'omitted', ?, 1, 'omitted')`
+        )
+        .run(run.runId, ruleId, responseId, r.ticker, r.name ?? `${r.ticker} Inc.`, r.listDate);
+    }
+  }
+
+  /** Bars for one ticker on real sessions, starting at session `start`. */
+  function seedBars(ticker: string, start: number, count: number): number {
+    const host = makeHost(async () => ({ status: 200, body: '{}', requestedAt: 't', respondedAt: 't' }));
+    const run = beginRun(db, host, { kind: 'daily', tradingDate: '2026-09-11' });
+    const ruleId = captureRuleId(db, host, 'bars', { k: ticker }, 'test');
+    raw.exec(
+      "INSERT INTO meta_response (source_response_id, run_id, provider, endpoint, params_json, requested_at, archive_file, archive_offset, dedup_hash, encrypted, at_provider_cap, parse_status) " +
+        `VALUES (920${start}, ${run.runId}, 'polygon', '/aggs', '{}', 't', 'a', 0, 'bar-hash-${ticker}-${start}', 0, 0, 'ok')`
+    );
+    for (let k = 0; k < count; k++) {
+      raw
+        .prepare(
+          `INSERT INTO raw_daily_bar
+             (run_id, as_of_date, observed_at, capture_rule_id, source_response_id, ticker, trade_date,
+              open, high, low, close, volume, adjusted_as_of, fetch_kind, is_final)
+           VALUES (?, '2026-09-11', 't', ?, 920${start}, ?, ?, 10, 10, 10, 10, 1000, '2026-09-11', 'backfill', 1)`
+        )
+        .run(run.runId, ruleId, ticker, SESSIONS[start + k]);
+    }
+    return run.runId;
+  }
+
+  it('fires when the stored series starts before the listing did', () => {
+    // SOLS: Solstice listed 2025-10-20 with 582 bars stored from 2021-12-31.
+    const runId = seedBars('SOLS', 0, 40);
+    seedReference([{ ticker: 'SOLS', listDate: SESSIONS[30]!, name: 'Solstice Advanced Materials' }]);
+
+    const out = QC210_BARS_PREDATE_LISTING.run({ db, runId, tradingDate: '2026-09-11', observedAt: 't' });
+    expect(out).toHaveLength(1);
+    expect(out[0]!.fired).toBe(true);
+    expect(out[0]!.value).toBe(30);
+    expect(out[0]!.detail).toContain('Solstice');
+    expect(out[0]!.evidence!['listDate']).toBe(SESSIONS[30]);
+  });
+
+  it('records a zero for a clean ticker rather than staying silent', () => {
+    // The zeros ARE the base rate: 11 of 1,082 is only readable because the
+    // 1,071 that are fine were evaluated too.
+    const runId = seedBars('AAPL', 10, 20);
+    seedReference([{ ticker: 'AAPL', listDate: SESSIONS[10]! }]);
+
+    const out = QC210_BARS_PREDATE_LISTING.run({ db, runId, tradingDate: '2026-09-11', observedAt: 't' });
+    expect(out).toHaveLength(1);
+    expect(out[0]!.fired).toBe(false);
+    expect(out[0]!.value).toBe(0);
+  });
+
+  it('does not evaluate a ticker whose listing is unknown — untestable is not a pass', () => {
+    const runId = seedBars('MYST', 0, 20);
+    seedReference([{ ticker: 'MYST', listDate: null }]);
+
+    expect(QC210_BARS_PREDATE_LISTING.run({ db, runId, tradingDate: '2026-09-11', observedAt: 't' })).toEqual([]);
+  });
+
+  it('reads the LATEST reference row, so a corrected list_date supersedes', () => {
+    const runId = seedBars('BAM', 0, 40);
+    seedReference([{ ticker: 'BAM', listDate: SESSIONS[0]! }]);
+    seedReference([{ ticker: 'BAM', listDate: SESSIONS[25]! }]);
+
+    const out = QC210_BARS_PREDATE_LISTING.run({ db, runId, tradingDate: '2026-09-11', observedAt: 't' });
+    expect(out).toHaveLength(1);
+    expect(out[0]!.fired).toBe(true);
+    expect(out[0]!.value).toBe(25);
+  });
+
+  it('is registered and blocking, with a structural threshold', () => {
+    expect(BAR_CHECKS.map((c) => c.id)).toContain('QC-210');
+    expect(QC210_BARS_PREDATE_LISTING.severity).toBe('blocking');
+    expect(QC210_BARS_PREDATE_LISTING.thresholds['maxBarsBeforeListing']).toBe(0);
+    // No automatic remediation: truncate-before-listing is an operator action,
+    // and a relisting or redomicile may be continuous history.
+    expect(QC210_BARS_PREDATE_LISTING.remediation).toBeUndefined();
   });
 });
