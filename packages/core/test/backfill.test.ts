@@ -379,6 +379,42 @@ describe('the ticker-reuse ruling destroys nothing', () => {
       .toEqual({ valid_to: '2026-06-25' });
   });
 
+  it('REFUSES to infer when the ticker has more than one discontinuity', () => {
+    // The case that matters, because it is every real reuse: SOLS carried 21
+    // QC-204 findings on 2026-09-17 and JAN 7, six of JAN's dated 2022-2024
+    // inside the PREVIOUS occupant's history. The old inference ordered by
+    // `last_seen_run_id DESC LIMIT 1` and every finding shares a run, so it
+    // broke the tie arbitrarily — closing the membership range on whichever row
+    // SQLite returned, silently, years from the real boundary.
+    seedUniverse(['BNY']);
+    const host = makeHost();
+    const run = beginRun(db, host, { kind: 'daily', tradingDate: '2026-09-06' });
+    runGate(db, host, {
+      runId: run.runId, tradingDate: '2026-09-06',
+      checks: [
+        {
+          ...QC204_DISCONTINUITY,
+          run: () => [
+            { key: 'BNY 2022-07-26', value: 44, fired: true, detail: 'step' },
+            { key: 'BNY 2026-06-26', value: 44, fired: true, detail: 'step' }
+          ]
+        },
+        { ...QC205_VOLUME_REGIME, run: () => [{ key: 'BNY', value: 76, fired: true, detail: 'reuse' }] }
+      ]
+    });
+    const id = (raw.prepare("SELECT exception_id FROM qa_exception WHERE check_id='QC-205'").get() as { exception_id: number }).exception_id;
+
+    expect(() => recordTickerReuse(db, host, { exceptionId: id, ticker: 'BNY', note: 'reuse' }))
+      .toThrow(OperatorActionRefused);
+    // The refusal names the candidates, so the operator can pick rather than
+    // going to look them up.
+    expect(() => recordTickerReuse(db, host, { exceptionId: id, ticker: 'BNY', note: 'reuse' }))
+      .toThrow(/2022-07-26.*2026-06-26/s);
+    // And nothing was written on the way to refusing.
+    expect(raw.prepare("SELECT COUNT(*) AS n FROM ref_universe_membership WHERE valid_to IS NOT NULL").get())
+      .toEqual({ n: 0 });
+  });
+
   it('refuses when it has neither a given splice date nor a discontinuity to take one from', () => {
     const host = makeHost();
     seedUniverse(['QUIET']);

@@ -277,12 +277,31 @@ export function recordTickerReuse(
   // nothing complains. The date is already known — QC-204 keys its finding by
   // `TICKER YYYY-MM-DD` at the exact boundary — so the default is that observed
   // date rather than the operator's recollection of it.
-  const spliceDate = args.spliceDate ?? inferSpliceDate(db, args.ticker);
+  let spliceDate = args.spliceDate;
   if (!spliceDate) {
-    throw new OperatorActionRefused(
-      `No splice date given and no QC-204 discontinuity for ${args.ticker} to take one from. ` +
-        'Pass the first trading date belonging to the new entity explicitly.'
-    );
+    const candidates = spliceCandidates(db, args.ticker);
+    if (candidates.length === 0) {
+      throw new OperatorActionRefused(
+        `No splice date given and no QC-204 discontinuity for ${args.ticker} to take one from. ` +
+          'Pass the first trading date belonging to the new entity explicitly.'
+      );
+    }
+    // Inferring is safe only when there is nothing to choose between. A ticker
+    // under reuse is precisely the case with many candidates — SOLS carried 21
+    // QC-204 findings on 2026-09-17 and JAN 7, six of JAN's dated 2022-2024,
+    // inside the PREVIOUS occupant's history. The old inference took
+    // `ORDER BY last_seen_run_id DESC LIMIT 1`, and every one of those findings
+    // shares a run, so it broke the tie arbitrarily and closed the membership
+    // range on whichever row SQLite happened to return. Getting this wrong is
+    // silent, which is why ambiguity is refused rather than guessed.
+    if (candidates.length > 1) {
+      throw new OperatorActionRefused(
+        `${args.ticker} has ${candidates.length} discontinuities, so the splice date cannot be inferred: ` +
+          `${candidates.slice(0, 8).join(', ')}${candidates.length > 8 ? `, … and ${candidates.length - 8} more` : ''}. ` +
+          'Pass the first trading date belonging to the new entity explicitly.'
+      );
+    }
+    spliceDate = candidates[0]!;
   }
 
   const now = host.nowET();
@@ -417,16 +436,21 @@ function resolveSettledBySplice(
  * The discontinuity check keys its finding at the first bar of the new regime,
  * which is exactly the first trading date belonging to the new entity.
  */
-function inferSpliceDate(db: SqliteLike, ticker: string): string | undefined {
-  const row = db
+/** Every discontinuity date observed for a ticker, oldest first, deduplicated. */
+function spliceCandidates(db: SqliteLike, ticker: string): readonly string[] {
+  const rows = db
     .prepare(
-      `SELECT key FROM qa_exception
-        WHERE check_id = 'QC-204' AND key LIKE ? || ' %'
-        ORDER BY last_seen_run_id DESC LIMIT 1`
+      `SELECT DISTINCT key FROM qa_exception
+        WHERE check_id = 'QC-204' AND key LIKE ? || ' %'`
     )
-    .get(ticker) as { key: string } | undefined;
-  const date = row?.key.split(' ')[1];
-  return date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : undefined;
+    .all(ticker) as { key: string }[];
+  return [
+    ...new Set(
+      rows
+        .map((r) => r.key.split(' ')[1])
+        .filter((d): d is string => d !== undefined && /^\d{4}-\d{2}-\d{2}$/.test(d))
+    )
+  ].sort();
 }
 
 function recomputeAffected(db: SqliteLike, host: OperatorHost, exceptionId: number): void {

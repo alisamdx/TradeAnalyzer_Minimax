@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.1.263] - 2026-09-17
+
+### QC-210 can launch the reuse ruling it is best at detecting
+
+`REUSE_CHECKS` in the Exceptions workbench was `QC-204, QC-205, QC-209`, so the check with the strongest reuse evidence offered no "Confirm ticker reuse" panel. It does now. The rule moved out of `exceptionDetail()` into an exported `reuseCandidateFor(checkId, key)` — inline it was reachable only through the app's database and so had never been tested; seven tests pin it now.
+
+Two boundaries worth naming. **QC-210 offers no splice date**, because its key is a bare ticker: its evidence is *"some bars predate the listing"*, not *"the splice is here"*, so an empty field asks the operator rather than proposing a date the check never measured. And **a pre-splice finding offers the wrong date, with a test pinning that it does** — the panel pre-fills from the key of the finding being ruled on, so opening `SOLS 2022-07-26` offers a date three years early in a field that looks authoritative. The test exists so nobody later "improves" the pre-fill by inferring from elsewhere; the fix is to open the finding at the splice.
+
+**The inference behind that empty field now refuses to guess.** `recordTickerReuse` took the splice date with `ORDER BY last_seen_run_id DESC LIMIT 1` over the ticker's QC-204 findings — and every finding of a reuse ticker shares a run, so the tie broke arbitrarily. SOLS carried 21 such findings on 2026-09-17 and JAN 7, six of JAN's dated 2022-2024 inside the previous occupant's history; a wrong splice closes the membership range in the wrong place, silently. It now infers only when there is exactly one candidate and otherwise refuses with the candidates listed, writing nothing. The fix belongs in `core` rather than the form, per that file's own header: *a rule enforced by the form is enforced only for the callers who use the form.*
+
+Also: `package-lock.json` recorded `packages/core` at **0.6.9** and the root at **1.1.245**, so `packages/next`'s `workspace-versions.test.ts` had been red since before tonight. Nothing surfaced it because **the root `npm test` does not include the workspace suites** — `npm run test:all` does. Refreshed with `npm install --package-lock-only`.
+
+`core` 0.6.21. Details: `changelogs/v1.1.263_2026-09-17.md`.
+
 ## [1.1.262] - 2026-09-17
 
 ### A reuse ruling settles the findings it accounts for

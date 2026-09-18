@@ -38,10 +38,35 @@ const RESOLUTION_KINDS: readonly ResolutionKind[] = ['data_corrected', 'provider
 
 /**
  * QC-204 is the step itself, QC-205 the volume-regime shift, QC-209 a dormant
- * symbol resuming as an active one; any of them can be the evidence for a reuse
- * ruling (03 §6).
+ * symbol resuming as an active one, QC-210 a bar older than the listing; any of
+ * them can be the evidence for a reuse ruling (03 §6).
  */
-const REUSE_CHECKS = new Set(['QC-204', 'QC-205', 'QC-209']);
+const REUSE_CHECKS = new Set(['QC-204', 'QC-205', 'QC-209', 'QC-210']);
+
+/**
+ * The reuse panel's pre-fill for one finding, or null if the finding is not
+ * evidence for a reuse ruling.
+ *
+ * Extracted so the rule can be tested without the app's database, which is the
+ * only reason it went untested when the splice date was first pre-filled here.
+ *
+ * **The splice date comes from the key of the finding being ruled on, and only
+ * from there.** A ticker under reuse carries many findings — SOLS had 21 QC-204
+ * steps on 2026-09-17 — and all but one are dated inside the *previous*
+ * occupant's history. Opening `SOLS 2022-07-26` pre-fills 2022-07-26, which is
+ * an editable field that looks authoritative and is wrong by three years, so
+ * the operator must open the finding at the splice. QC-210 keys on a bare
+ * ticker and therefore offers no date at all, which is the honest answer: its
+ * evidence is "some bars predate the listing", not "the splice is here".
+ */
+export function reuseCandidateFor(
+  checkId: string,
+  key: string
+): { readonly ticker: string; readonly spliceDate: string | null } | null {
+  const [ticker, date] = key.split(' ');
+  if (!REUSE_CHECKS.has(checkId) || !ticker) return null;
+  return { ticker, spliceDate: date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : null };
+}
 
 interface ExceptionRow {
   exception_id: number;
@@ -211,7 +236,6 @@ export function exceptionDetail(id: number): ExceptionDetailDto {
     for (const f of found) statusByDate.set(f.trading_date, f.status);
   }
 
-  const [keyTicker, keyDate] = row.key.split(' ');
   return {
     row: toRow(row),
     evidence: pretty(full.evidence_json),
@@ -232,10 +256,7 @@ export function exceptionDetail(id: number): ExceptionDetailDto {
     resolvedNote: full.resolution_note,
     acceptedAt: full.accepted_at,
     acceptedNote: full.accepted_note,
-    reuseCandidate:
-      REUSE_CHECKS.has(row.check_id) && keyTicker
-        ? { ticker: keyTicker, spliceDate: keyDate && /^\d{4}-\d{2}-\d{2}$/.test(keyDate) ? keyDate : null }
-        : null
+    reuseCandidate: reuseCandidateFor(row.check_id, row.key)
   };
 }
 
