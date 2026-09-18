@@ -8,7 +8,7 @@
 
 **204.** E\*Trade's `optionexpiredate` answers **204, empty body** for symbols with no listed options (NVR, YUM, DDS), and that was indexed as a failed parse ("Unexpected end of JSON input") ~25 times a day. `indexAndIngest` now records any 204 as parsed with zero rows.
 
-`core` 0.6.23. Details: `changelogs/v1.1.268_2026-09-18.md`.
+`core` 0.6.23; `next` 0.4.11 (no code change — TradeAnalyzer 2 rebuilt so it bundles core 0.6.23, and bumped so `meta_open_handle.app_version` names that build). Details: `changelogs/v1.1.268_2026-09-18.md`.
 
 ## [1.1.267] - 2026-09-18
 
