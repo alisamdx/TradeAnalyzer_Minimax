@@ -117,11 +117,16 @@ export const QC203_NON_FINAL_BAR: CheckDefinition = {
   // pilot's threshold-review queue forever.
   thresholdBasis: 'structural',
   run(ctx) {
+    // The LATEST observation per ticker in this run: a provisional bar that R3 re-fetched final
+    // (v1.1.288) is superseded, not outstanding, and counting its row would fire on a fixed bar.
     const row = ctx.db
       .prepare(
         `SELECT COUNT(*) AS total,
-                SUM(CASE WHEN is_final = 0 THEN 1 ELSE 0 END) AS non_final
-           FROM raw_daily_bar WHERE run_id = ? AND trade_date = ?`
+                SUM(CASE WHEN b.is_final = 0 THEN 1 ELSE 0 END) AS non_final
+           FROM raw_daily_bar b
+          WHERE b.run_id = ? AND b.trade_date = ?
+            AND b.row_id = (SELECT MAX(row_id) FROM raw_daily_bar x
+                             WHERE x.run_id = b.run_id AND x.trade_date = b.trade_date AND x.ticker = b.ticker)`
       )
       .get(ctx.runId, ctx.tradingDate) as { total: number; non_final: number | null };
     const today: Evaluation[] = [];

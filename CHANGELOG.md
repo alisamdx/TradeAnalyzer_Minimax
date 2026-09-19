@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.288] - 2026-09-19
+
+### R3: provisional bars are re-fetched final before the gate
+
+v1.1.287 stores a same-day bar provisional when it arrived before 17:00 ET, which only happens when a run starts before the window closes. R3 (spec 03 §6, never built until now) finishes the job. After the last collection phase and before the gate, it finds the tickers whose latest same-day bar in the run is provisional. If the run's clock has passed 17:00 ET, it re-fetches that one day for them: new observations in the append-only table, stored final. The chain phase alone takes ~40 minutes, so a run that began at 16:40 is usually past the window by then. Otherwise it re-fetches nothing, and the bars stay provisional for QC-203 to report.
+
+- QC-203 now counts the **latest** observation per ticker, so a superseded provisional row is not outstanding.
+- The gate email's REMEDIATION block gains an R3 line: *"12 re-fetched, 0 still provisional"*, *"settlement window still open at 16:50 ET — 1083 bar(s) left provisional"*, *"nothing provisional"*, or *"did not run: …"*.
+
+A normal after-close run has nothing to do: its bars arrive settled. R3 is collection, so it cannot be rehearsed; the tests drive it end to end.
+
+`core` 0.6.43, `next` 0.4.31. Details: `changelogs/v1.1.288_2026-09-19.md`.
+
 ## [1.1.287] - 2026-09-19
 
 ### Same-day bars fetched after 17:00 ET are final, as the spec always said

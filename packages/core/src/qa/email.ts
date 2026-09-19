@@ -110,6 +110,26 @@ function r6Line(r6: R6Summary): string {
   );
 }
 
+/** R3's outcome as the email reports it (v1.1.288). */
+export type R3Summary =
+  | {
+      readonly provisional: number;
+      readonly refetched: number;
+      readonly stillProvisional: number;
+      readonly windowOpenAt?: string;
+    }
+  | { readonly error: string };
+
+function r3Line(r3: R3Summary): string {
+  const head = 'REMEDIATION  R3 (final re-fetch of provisional bars)';
+  if ('error' in r3) return `${head} did not run: ${r3.error}`;
+  if (r3.provisional === 0) return `${head}: nothing provisional`;
+  if (r3.windowOpenAt !== undefined) {
+    return `${head}: settlement window still open at ${r3.windowOpenAt} ET — ${r3.provisional} bar(s) left provisional`;
+  }
+  return `${head}: ${r3.refetched} re-fetched, ${r3.stillProvisional} still provisional`;
+}
+
 export function buildStatusEmail(
   db: SqliteLike,
   args: {
@@ -126,6 +146,8 @@ export function buildStatusEmail(
     readonly pilotTargetDays?: number;
     /** What R6 did this run, or why it did not run. Absent: the caller ran no remediation. */
     readonly r6?: R6Summary;
+    /** What R3 did with this run's provisional bars, or why it did not run. */
+    readonly r3?: R3Summary;
   }
 ): EmailModel {
   const open = db
@@ -254,8 +276,9 @@ export function buildStatusEmail(
   }
   lines.push('');
 
-  if (args.r6 !== undefined) {
-    lines.push(r6Line(args.r6));
+  if (args.r6 !== undefined || args.r3 !== undefined) {
+    if (args.r3 !== undefined) lines.push(r3Line(args.r3));
+    if (args.r6 !== undefined) lines.push(r6Line(args.r6));
     lines.push('');
   }
 

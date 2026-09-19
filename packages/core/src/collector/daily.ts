@@ -9,7 +9,7 @@ import { runEventsPhase } from './phases/events.js';
 import { runDerivePhase } from './phases/derive.js';
 import { checksFor } from '../qa/registry.js';
 import { runGate, type Verdict } from '../qa/gate.js';
-import { runR6ActionRefetch, R6_MAX_TICKERS_PER_RUN, type R6Report } from './remediation.js';
+import { runR6ActionRefetch, runR3FinalBarRefetch, R6_MAX_TICKERS_PER_RUN, type R6Report, type R3Report } from './remediation.js';
 import { buildStatusEmail } from '../qa/email.js';
 import { COLLECTOR_VERSION } from '../version.js';
 
@@ -46,6 +46,8 @@ export interface DailyRunReport {
   readonly phaseErrors: readonly string[];
   /** The R6 re-fetch this run attempted, if any (03 §6). */
   readonly remediation?: R6Report;
+  /** The R3 final re-fetch of this run's provisional bars, if it ran (03 §6). */
+  readonly r3?: R3Report;
 }
 
 export async function runDaily(
@@ -141,6 +143,22 @@ export async function runDaily(
     // before the signal was honoured, so what exists is consistent.
   }
 
+  // R3 — the last thing before the gate, so as much of the run as possible has passed 17:00 ET:
+  // today's provisional bars are re-fetched final, or reported as still provisional (v1.1.288).
+  let r3: R3Report | undefined;
+  let r3Error: string | undefined;
+  if (!cancelled) {
+    try {
+      r3 = await runR3FinalBarRefetch(host, db, run);
+    } catch (err) {
+      if (err instanceof CollectorCancelled) cancelled = true;
+      else {
+        r3Error = err instanceof Error ? err.message : String(err);
+        phaseErrors.push(`remediation R3: ${r3Error}`);
+      }
+    }
+  }
+
   // The gate runs on whatever exists, including after a cancellation.
   // `checksFor` rather than `ALL_CHECKS`: the bootstrap's overlap checks are
   // registered only once a load exists to compare against (03 §3.8a), and the
@@ -189,7 +207,8 @@ export async function runDaily(
             deferred: remediation.deferred, cap: R6_MAX_TICKERS_PER_RUN
           }
         }
-      : r6Error !== undefined ? { r6: { error: r6Error } } : {})
+      : r6Error !== undefined ? { r6: { error: r6Error } } : {}),
+    ...(r3 ? { r3 } : r3Error !== undefined ? { r3: { error: r3Error } } : {})
   });
 
   let emailSent = false;
@@ -220,6 +239,7 @@ export async function runDaily(
     emailSent,
     ...(emailError ? { emailError } : {}),
     phaseErrors,
-    ...(remediation ? { remediation } : {})
+    ...(remediation ? { remediation } : {}),
+    ...(r3 ? { r3 } : {})
   };
 }

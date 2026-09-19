@@ -9,6 +9,7 @@ import type { CollectorHost, ProviderResponse } from '../src/collector/host.js';
 import { beginRun, captureRuleId } from '../src/collector/run.js';
 import { resetOffsetCache } from '../src/collector/archive.js';
 import { barSettled, runBarsPhase } from '../src/collector/phases/market.js';
+import { runR3FinalBarRefetch } from '../src/collector/remediation.js';
 import { QC203_NON_FINAL_BAR } from '../src/qa/checks/bars.js';
 import { runGate } from '../src/qa/gate.js';
 
@@ -53,7 +54,7 @@ describe('the bars phase stores what the clock says', () => {
   let raw: Database.Database;
   const db = (): SqliteLike => raw as unknown as SqliteLike;
 
-  function host(respondedAt: string): CollectorHost {
+  function host(respondedAt: string, now = '2026-09-18T18:23:00-04:00'): CollectorHost {
     const bars = JSON.stringify({ results: [
       { t: Date.parse('2026-09-17T17:00:00Z'), o: 99, h: 101, l: 98, c: 100, v: 1000.5 },
       { t: Date.parse('2026-09-18T17:00:00Z'), o: 100, h: 102, l: 99, c: 101, v: 1200.5 }
@@ -67,7 +68,7 @@ describe('the bars phase stores what the clock says', () => {
       polygonGet: async () => reply(bars),
       etradeGet: async () => reply('{}'),
       httpGet: async () => reply('{}'),
-      nowET: () => '2026-09-18T18:23:00-04:00',
+      nowET: () => now,
       sendEmail: async () => undefined,
       progress: () => undefined,
       signal: new AbortController().signal,
@@ -145,6 +146,40 @@ describe('the bars phase stores what the clock says', () => {
     expect(rows['2026-09-16']!.resolution_note).toContain('arrived 17:59–17:59 ET, after the 17:00 settlement window');
     expect(rows['2026-09-17']!.state).toBe('open');
     expect(rows['2026-09-18']).toBeUndefined(); // today's bars are final: nothing raised
+  });
+
+  it('R3 re-fetches a provisional bar once the window has closed, and QC-203 then passes (v1.1.288)', async () => {
+    // A run that began before 17:00: phase 2 fetched at 16:40 EDT, the chain phase took the rest.
+    const early = host('2026-09-18T20:40:00.000Z');
+    const run = beginRun(db(), early, { kind: 'daily', tradingDate: DATE });
+    await runBarsPhase(early, db(), run);
+    expect(QC203_NON_FINAL_BAR.run({ db: db(), runId: run.runId, tradingDate: DATE, observedAt: 't' })[0]!.fired).toBe(true);
+
+    const report = await runR3FinalBarRefetch(host('2026-09-18T21:45:00.000Z', '2026-09-18T17:45:00-04:00'), db(), run);
+    expect(report).toEqual({ provisional: 1, refetched: 1, stillProvisional: 0 });
+    // Append-only: the provisional row stays as the record of what was fetched first.
+    expect(raw.prepare("SELECT is_final FROM raw_daily_bar WHERE run_id = ? AND trade_date = ? ORDER BY row_id").all(run.runId, DATE))
+      .toEqual([{ is_final: 0 }, { is_final: 1 }]);
+    expect(QC203_NON_FINAL_BAR.run({ db: db(), runId: run.runId, tradingDate: DATE, observedAt: 't' })[0]!.fired).toBe(false);
+  });
+
+  it('R3 re-fetches nothing while the window is open, and says so', async () => {
+    const early = host('2026-09-18T20:40:00.000Z', '2026-09-18T16:50:00-04:00');
+    const run = beginRun(db(), early, { kind: 'daily', tradingDate: DATE });
+    await runBarsPhase(early, db(), run);
+    const calls = raw.prepare('SELECT COUNT(*) AS n FROM meta_response').get() as { n: number };
+
+    const report = await runR3FinalBarRefetch(early, db(), run);
+    expect(report).toEqual({ provisional: 1, refetched: 0, stillProvisional: 1, windowOpenAt: '16:50' });
+    expect(raw.prepare('SELECT COUNT(*) AS n FROM meta_response').get()).toEqual(calls);
+    expect(QC203_NON_FINAL_BAR.run({ db: db(), runId: run.runId, tradingDate: DATE, observedAt: 't' })[0]!.fired).toBe(true);
+  });
+
+  it('R3 has nothing to do after an after-close fetch', async () => {
+    const late = host('2026-09-18T22:23:00.000Z');
+    const run = beginRun(db(), late, { kind: 'daily', tradingDate: DATE });
+    await runBarsPhase(late, db(), run);
+    expect(await runR3FinalBarRefetch(late, db(), run)).toEqual({ provisional: 0, refetched: 0, stillProvisional: 0 });
   });
 
   it('stores a bar fetched before 17:00 ET provisional, and QC-203 still fires on it', async () => {

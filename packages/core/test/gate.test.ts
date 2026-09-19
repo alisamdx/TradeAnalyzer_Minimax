@@ -517,6 +517,15 @@ describe('the status email', () => {
     expect(buildStatusEmail(db, { ...base, r6: { error: 'polygon 503' } }).text)
       .toContain('R6 (splits/dividends re-fetch) did not run: polygon 503');
     expect(buildStatusEmail(db, base).text).not.toContain('REMEDIATION');
+
+    // R3 (v1.1.288): above R6, one line whatever it did.
+    const r3 = (x: Parameters<typeof buildStatusEmail>[1]['r3']) => buildStatusEmail(db, { ...base, ...(x ? { r3: x } : {}) }).text;
+    expect(r3({ provisional: 12, refetched: 12, stillProvisional: 0 }))
+      .toContain('REMEDIATION  R3 (final re-fetch of provisional bars): 12 re-fetched, 0 still provisional');
+    expect(r3({ provisional: 1083, refetched: 0, stillProvisional: 1083, windowOpenAt: '16:50' }))
+      .toContain('R3 (final re-fetch of provisional bars): settlement window still open at 16:50 ET — 1083 bar(s) left provisional');
+    expect(r3({ provisional: 0, refetched: 0, stillProvisional: 0 })).toContain('R3 (final re-fetch of provisional bars): nothing provisional');
+    expect(r3({ error: 'polygon 503' })).toContain('R3 (final re-fetch of provisional bars) did not run: polygon 503');
   });
 
   it('names the checks that evaluated nothing, which a fired count cannot distinguish from clean', () => {

@@ -2,7 +2,9 @@ import type { SqliteLike } from '../db/sqlite-like.js';
 import type { CollectorHost } from './host.js';
 import { captureResponse } from './capture.js';
 import { recipes } from '../ingest/recipes.js';
-import { captureRuleId } from './run.js';
+import { captureRuleId, type RunHandle } from './run.js';
+import { barSettled } from './bar-settlement.js';
+import { runBarsPhase } from './phases/market.js';
 import { sweepPolygonPages, POLYGON_LIST_PAGE_SIZE } from './paged.js';
 
 /**
@@ -270,5 +272,68 @@ export async function runR6ActionRefetch(
     splitRowsStored: splitRows,
     dividendRowsStored: dividendRows,
     deferred: all.length - candidates.length
+  };
+}
+
+export interface R3Report {
+  /** Tickers whose latest same-day bar in this run was provisional when R3 started. */
+  readonly provisional: number;
+  /** Tickers re-fetched. */
+  readonly refetched: number;
+  /** Tickers still provisional at the end: the window was open, or the re-fetch did not land. */
+  readonly stillProvisional: number;
+  /** Set when R3 did not re-fetch because the settlement window had not closed. */
+  readonly windowOpenAt?: string;
+}
+
+/** Tickers whose LATEST bar for the run's trading date, among this run's rows, is provisional. */
+export function provisionalBarTickers(db: SqliteLike, runId: number, tradingDate: string): readonly string[] {
+  return (
+    db
+      .prepare(
+        `SELECT b.ticker FROM raw_daily_bar b
+          WHERE b.run_id = ? AND b.trade_date = ? AND b.is_final = 0
+            AND b.row_id = (SELECT MAX(row_id) FROM raw_daily_bar x
+                             WHERE x.run_id = b.run_id AND x.trade_date = b.trade_date AND x.ticker = b.ticker)
+          ORDER BY b.ticker`
+      )
+      .all(runId, tradingDate) as { ticker: string }[]
+  ).map((r) => r.ticker);
+}
+
+/**
+ * R3 — re-fetch today's provisional bars once the settlement window has closed (03 §6, 04 phase 2;
+ * v1.1.288).
+ *
+ * A bar that arrived before 17:00 ET is stored provisional (v1.1.287), because Polygon is still
+ * settling the day. Run at the end of the collection phases — the chain phase alone takes ~40
+ * minutes, so a run that began before 17:00 has usually passed it by now — and only for the tickers
+ * whose latest same-day bar in THIS run is still provisional. Each re-fetch asks for the one day,
+ * which also makes its params differ from the phase-2 request, so dedup cannot swallow an unchanged
+ * body; its rows are new observations (the raw table is append-only), stored final because they
+ * arrived settled. If the window is still open R3 does nothing and says so: re-fetching before 17:00
+ * would only store another provisional bar.
+ */
+export async function runR3FinalBarRefetch(
+  host: CollectorHost,
+  db: SqliteLike,
+  run: RunHandle
+): Promise<R3Report> {
+  const provisional = provisionalBarTickers(db, run.runId, run.tradingDate);
+  if (provisional.length === 0) return { provisional: 0, refetched: 0, stillProvisional: 0 };
+
+  const now = host.nowET();
+  if (!barSettled(run.tradingDate, now)) {
+    return {
+      provisional: provisional.length, refetched: 0, stillProvisional: provisional.length,
+      windowOpenAt: now.slice(11, 16)
+    };
+  }
+
+  await runBarsPhase(host, db, run, { tickers: provisional, depthDays: 0 });
+  return {
+    provisional: provisional.length,
+    refetched: provisional.length,
+    stillProvisional: provisionalBarTickers(db, run.runId, run.tradingDate).length
   };
 }
