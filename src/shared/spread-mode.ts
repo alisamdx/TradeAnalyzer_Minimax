@@ -44,10 +44,14 @@ export interface SpreadModeSettings {
   maxOpenPositions: number;
 }
 
-/** Operator defaults (approved 2026-09-13): the study's placeholders until real numbers are set. */
+/**
+ * Operator defaults. Max loss per position set by the operator 2026-09-19 (08 §6 Q1): 10% of a
+ * $25,000 account = $2,500 (was the study's $1,000 placeholder). Max open positions is still the
+ * placeholder, and is guidance only until the `on` mode enforces it.
+ */
 export const SPREAD_MODE_DEFAULTS: SpreadModeSettings = {
   mode: 'shadow',
-  maxLossPerPosition: 1000,
+  maxLossPerPosition: 2500,
   maxOpenPositions: 10,
 };
 

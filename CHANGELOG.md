@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.293] - 2026-09-19
+
+### Bull put spread (shadow): max loss per position is $2,500
+
+- The operator's answer to 08 §6 Q1 is a $25,000 account at 10% per position, so the default `maxLossPerPosition` is now **$2,500**, up from the $1,000 placeholder. Picks are sized up to 2.5×, and spreads risking $1,000–$2,500 per contract (e.g. MPC) are no longer rejected. Max open positions stays at 10 (guidance only).
+
+Details: `changelogs/v1.1.293_2026-09-19.md`.
+
 ## [1.1.292] - 2026-09-19
 
 ### Bull put spread (shadow): leg rules fit real strike grids; ETFs skip the earnings gate

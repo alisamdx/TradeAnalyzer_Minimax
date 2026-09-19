@@ -222,15 +222,15 @@ describe('computeSpreadMode', () => {
 });
 
 describe('readSpreadModeSettings', () => {
-  it('defaults to shadow, $1,000 and 10 positions, and ignores malformed values', () => {
+  it('defaults to shadow, $2,500 (the operator\'s 10% of $25,000) and 10 positions, and ignores malformed values', () => {
     const db = openDatabase(':memory:');
     runMigrations(db, MIGRATIONS_DIR);
-    expect(readSpreadModeSettings(db)).toEqual({ mode: 'shadow', maxLossPerPosition: 1000, maxOpenPositions: 10 });
+    expect(readSpreadModeSettings(db)).toEqual({ mode: 'shadow', maxLossPerPosition: 2500, maxOpenPositions: 10 });
     const set = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
     set.run('bullPutSpreadMode', 'on');               // not built yet → default
     set.run('bullPutSpreadMaxLossPerPosition', '-5'); // invalid → default
     set.run('bullPutSpreadMaxOpenPositions', '4');
-    expect(readSpreadModeSettings(db)).toEqual({ mode: 'shadow', maxLossPerPosition: 1000, maxOpenPositions: 4 });
+    expect(readSpreadModeSettings(db)).toEqual({ mode: 'shadow', maxLossPerPosition: 2500, maxOpenPositions: 4 });
     set.run('bullPutSpreadMode', 'off');
     set.run('bullPutSpreadMaxLossPerPosition', '750');
     expect(readSpreadModeSettings(db)).toMatchObject({ mode: 'off', maxLossPerPosition: 750 });

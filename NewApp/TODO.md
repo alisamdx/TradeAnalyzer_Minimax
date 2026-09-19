@@ -239,6 +239,8 @@ short 0.20–0.30Δ, credit ≥ 30% of width, IVR ≥ ~30; exit 50% profit / 15 
     series until expiry.
     **v1.1.292:** leg rules widened after the first week's rejections (08 S7). Short 0.20–0.40Δ, long nearest
     5% within 3–10%, ETFs exempt from the earnings gate. The §4 study re-run must use the same rules.
+    **v1.1.293:** Q1 answered: $25,000 account, $2,500 (10%) max loss per position. Re-run the §4 study with
+    `--capital 25000 --risk 2500`. Max open positions still to be given (10 placeholder).
 45. **Revisit the v2 engine's 2× stop on wheel put spreads.** The engine trades wheel as a put spread with
     a 50% target and a 2× stop, validated in June with no costs; #43 found the stop + time stop halved a
     portfolio's result and a 1× stop was negative once costs exist. Needs an FR-SEY-5 replay on the

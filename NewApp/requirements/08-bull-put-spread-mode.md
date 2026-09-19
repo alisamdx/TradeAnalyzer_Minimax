@@ -16,6 +16,7 @@ evidence is TODO #43 and `scripts/fr-bull-put-spread-study.mjs`.
 | S4 | 2026-09-12 | **Delivered as a new brief mode alongside wheel.** |
 | S5 | 2026-09-13 | **Write the design now; build it switched off; enable after a re-run on captured quotes (§4).** |
 | S6 | 2026-09-13 | **Design approved; every §6 question at its recommended default** — $1,000 max loss and 10 positions until real numbers are set, wheel pool only, ship `shadow`, 50% target, engine stop as a separate item (TODO #45). |
+| S8 | 2026-09-19 | **Q1 answered: a $25,000 account, 10% per position → `maxLossPerPosition` = $2,500** (was the $1,000 placeholder; v1.1.293). Max open positions not yet given — stays 10, guidance only until `on` enforces it. Note the arithmetic: at $2,500 × 10 open, a spread's margin equals its max loss, so ten positions commit the whole $25,000 and the worst case is all of it. The §4 study re-run must use `--capital 25000 --risk 2500` so the gate tests these numbers, not the $1,000 ones the #43 portfolio result came from. |
 | S7 | 2026-09-19 | **Leg rules widened to match real strike grids, and the study (v1.1.292).** The first shadow week rejected 25 of 80 candidates for strike spacing alone: the 0.25–0.35Δ band fell between two strikes on liquid DVN/EOG/COP/MDT (12), and on CF-like grids ($5 strikes at ~$120) no strike sat 5–7.5% below the short (13). The #43 study took the strike *nearest* short − 5% of spot, so the mode was stricter than its evidence. Short: 0.20–0.40Δ, nearest 0.30. Long: nearest short − 5% of spot, within 3–10%. ETFs skip the earnings gate (EWZ was rejected ×5 as "earnings date unknown"). |
 
 ---
@@ -179,7 +180,7 @@ deltas (the stale-Greeks guard or E*Trade), no strike in the band or wing range,
 
 | # | Question | Default until answered |
 |---|---|---|
-| Q1 | **Your account size, max loss per position, and max open positions?** | $1,000 and 10 — the study's placeholders |
+| Q1 | **Your account size, max loss per position, and max open positions?** | **Answered 2026-09-19 (S8):** $25,000, 10% = $2,500 per position; max open still open (10 placeholder) |
 | Q2 | Include the income pool? | No — unmeasured |
 | Q3 | Ship as `shadow` (stores picks for validation, no email/panel) or `off`? | `shadow` |
 | Q4 | Profit target 50% or 75%? 75% returned slightly more with lower drawdown on flat costs; 50% exits sooner. | 50% |
