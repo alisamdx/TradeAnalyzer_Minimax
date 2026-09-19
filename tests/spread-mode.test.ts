@@ -2,9 +2,10 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
-  buildBullPutSpread, pickSpreadExpiration, computeSpreadMode, readSpreadModeSettings,
+  buildBullPutSpread, pickSpreadExpiration, computeSpreadMode, readSpreadModeSettings, writeSpreadModeSettings,
 } from '../src/main/services/spread-mode.js';
 import type { CapturedPut } from '../src/main/services/spread-chain-capture.js';
+import { SPREAD_MODE_LIMITS, type SpreadModeSettings } from '../src/shared/spread-mode.js';
 import { openDatabase } from '../src/main/db/connection.js';
 import { runMigrations } from '../src/main/db/migrations.js';
 import { MIGRATIONS_DIR } from './helpers.js';
@@ -139,7 +140,7 @@ describe('computeSpreadMode', () => {
     chain.run(TODAY, 'after_close', 'NOC', EXP_28, 28, 'entry', 100, JSON.stringify(GOOD_100)); // other slot only
     return db;
   }
-  const SETTINGS = { mode: 'shadow' as const, maxLossPerPosition: 1000, maxOpenPositions: 10 };
+  const SETTINGS = { mode: 'shadow' as const, maxLossPerPosition: 1000, maxOpenPositions: 10, maxOpenPerSector: 3 };
 
   it('picks, sizes and ranks from this run\'s captured chains, and explains every exclusion', () => {
     const db = seed();
@@ -225,15 +226,53 @@ describe('readSpreadModeSettings', () => {
   it('defaults to shadow, $2,500 (the operator\'s 10% of $25,000) and 10 positions, and ignores malformed values', () => {
     const db = openDatabase(':memory:');
     runMigrations(db, MIGRATIONS_DIR);
-    expect(readSpreadModeSettings(db)).toEqual({ mode: 'shadow', maxLossPerPosition: 2500, maxOpenPositions: 10 });
+    expect(readSpreadModeSettings(db)).toEqual({ mode: 'shadow', maxLossPerPosition: 2500, maxOpenPositions: 10, maxOpenPerSector: 3 });
     const set = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
     set.run('bullPutSpreadMode', 'on');               // not built yet → default
     set.run('bullPutSpreadMaxLossPerPosition', '-5'); // invalid → default
     set.run('bullPutSpreadMaxOpenPositions', '4');
-    expect(readSpreadModeSettings(db)).toEqual({ mode: 'shadow', maxLossPerPosition: 2500, maxOpenPositions: 4 });
+    expect(readSpreadModeSettings(db)).toEqual({ mode: 'shadow', maxLossPerPosition: 2500, maxOpenPositions: 4, maxOpenPerSector: 3 });
     set.run('bullPutSpreadMode', 'off');
     set.run('bullPutSpreadMaxLossPerPosition', '750');
     expect(readSpreadModeSettings(db)).toMatchObject({ mode: 'off', maxLossPerPosition: 750 });
+  });
+});
+
+describe('writeSpreadModeSettings — the one choke point every writer passes (v1.1.296)', () => {
+  function db() {
+    const d = openDatabase(':memory:');
+    runMigrations(d, MIGRATIONS_DIR);
+    return d;
+  }
+  const settings = (over: Partial<SpreadModeSettings> = {}): SpreadModeSettings =>
+    ({ mode: 'shadow', maxLossPerPosition: 2500, maxOpenPositions: 10, maxOpenPerSector: 3, ...over });
+
+  it('stores what it returns, and readSpreadModeSettings reads it back', () => {
+    const d = db();
+    const saved = writeSpreadModeSettings(d, settings({ mode: 'off', maxLossPerPosition: 750, maxOpenPositions: 4, maxOpenPerSector: 2 }));
+    expect(saved).toEqual({ mode: 'off', maxLossPerPosition: 750, maxOpenPositions: 4, maxOpenPerSector: 2 });
+    expect(readSpreadModeSettings(d)).toEqual(saved);
+  });
+
+  it('clamps to the allowed range instead of rejecting, and rounds', () => {
+    const d = db();
+    expect(writeSpreadModeSettings(d, settings({ maxLossPerPosition: 1, maxOpenPositions: 0 })))
+      .toMatchObject({ maxLossPerPosition: SPREAD_MODE_LIMITS.maxLossPerPosition.min, maxOpenPositions: 1 });
+    expect(writeSpreadModeSettings(d, settings({ maxLossPerPosition: 2_000_000 })).maxLossPerPosition)
+      .toBe(SPREAD_MODE_LIMITS.maxLossPerPosition.max);
+    expect(writeSpreadModeSettings(d, settings({ maxLossPerPosition: 2500.6 })).maxLossPerPosition).toBe(2501);
+    expect(writeSpreadModeSettings(d, settings({ maxLossPerPosition: Number.NaN })).maxLossPerPosition).toBe(2500);
+  });
+
+  it('never stores a sector cap above the position cap — a cap that cannot bind reads as a rule that is on but silent', () => {
+    const d = db();
+    expect(writeSpreadModeSettings(d, settings({ maxOpenPositions: 4, maxOpenPerSector: 9 })))
+      .toMatchObject({ maxOpenPositions: 4, maxOpenPerSector: 4 });
+  });
+
+  it('refuses `on`, which is not built: an unknown mode stores as shadow', () => {
+    const d = db();
+    expect(writeSpreadModeSettings(d, { ...settings(), mode: 'on' as unknown as SpreadModeSettings['mode'] }).mode).toBe('shadow');
   });
 });
 

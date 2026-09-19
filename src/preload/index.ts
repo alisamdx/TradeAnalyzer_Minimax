@@ -131,7 +131,7 @@ import type {
 } from '@shared/types.js';
 import type { OwnAtStrikeRead } from '@shared/own-at-strike.js';
 import type { ShortlistResult } from '@shared/wheel-shortlist.js';
-import type { SpreadShadowReport } from '@shared/spread-mode.js';
+import type { SpreadModeSettings, SpreadShadowReport } from '@shared/spread-mode.js';
 export type {
   ScreenPreset, ScreenCriteria, ScreenRunResult, ScreenResultRow, Universe,
   ConstituentsMeta, ConstituentRow, CachedQuote, AnalysisModeInfo, AnalysisRunResult,
@@ -1266,6 +1266,9 @@ type DicePickShape = {
   };
 
   const spreadMode = {
+    getSettings: () => invoke<SpreadModeSettings>('spread-mode:get-settings'),
+    /** Returns the values as STORED — the service clamps them. */
+    setSettings: (next: SpreadModeSettings) => invoke<SpreadModeSettings>('spread-mode:set-settings', next),
     /** Bull put spread shadow picks settled forward, and the 08 §4 enable-gate progress. Read-only. */
     shadowReport: () => invoke<SpreadShadowReport>('spread-mode:shadow-report'),
   };

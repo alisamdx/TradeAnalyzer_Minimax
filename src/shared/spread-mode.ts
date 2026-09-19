@@ -35,6 +35,14 @@ export const SPREAD_MODE_SETTING_KEYS = {
   mode: 'bullPutSpreadMode',
   maxLossPerPosition: 'bullPutSpreadMaxLossPerPosition',
   maxOpenPositions: 'bullPutSpreadMaxOpenPositions',
+  maxOpenPerSector: 'bullPutSpreadMaxOpenPerSector',
+} as const;
+
+/** Bounds the Settings screen and `writeSpreadModeSettings` both enforce. */
+export const SPREAD_MODE_LIMITS = {
+  maxLossPerPosition: { min: 50, max: 1_000_000 },
+  maxOpenPositions: { min: 1, max: 100 },
+  maxOpenPerSector: { min: 1, max: 100 },
 } as const;
 
 /**
@@ -47,6 +55,8 @@ export interface SpreadModeSettings {
   mode: SpreadModeSwitch;
   maxLossPerPosition: number;
   maxOpenPositions: number;
+  /** At most this many open positions per sector. Simulated in the shadow report; `on` will enforce it. */
+  maxOpenPerSector: number;
 }
 
 /**
@@ -58,6 +68,7 @@ export const SPREAD_MODE_DEFAULTS: SpreadModeSettings = {
   mode: 'shadow',
   maxLossPerPosition: 2500,
   maxOpenPositions: 10,
+  maxOpenPerSector: 3,
 };
 
 export interface SpreadLegQuote {

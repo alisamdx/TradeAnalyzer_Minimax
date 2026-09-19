@@ -3,6 +3,7 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import type { AppSettings, DiagnosticsResult } from '@shared/types.js';
+import { SPREAD_MODE_LIMITS, type SpreadModeSettings } from '@shared/spread-mode.js';
 
 declare const __APP_VERSION__: string;
 
@@ -277,6 +278,127 @@ function ETradeConnectPanel({ warning, onConnected }: ETradeConnectPanelProps) {
 
 // ─── Main SettingsView ─────────────────────────────────────────────────────────
 
+/**
+ * Bull put spread (shadow) — the operator's risk numbers, stored in `settings` (08 §6 Q1, S9).
+ *
+ * The service clamps what it stores, so this renders whatever came back from the write rather than
+ * what was typed. `on` is deliberately absent from the mode choice: it is built when the 08 §4 gate
+ * passes, and offering it here would suggest the mode can be traded today.
+ */
+function SpreadModeSettingsSection() {
+  const [draft, setDraft] = useState<SpreadModeSettings | null>(null);
+  const [stored, setStored] = useState<SpreadModeSettings | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    window.api.spreadMode.getSettings()
+      .then(s => { setStored(s); setDraft(s); })
+      .catch(e => setError(e instanceof Error ? e.message : String(e)));
+  }, []);
+
+  const save = useCallback(async () => {
+    if (!draft) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const saved = await window.api.spreadMode.setSettings(draft);
+      setStored(saved);
+      setDraft(saved);
+      const clamped = JSON.stringify(saved) !== JSON.stringify(draft);
+      setNote(clamped ? 'Saved — some values were adjusted to their allowed range.' : 'Saved.');
+      setTimeout(() => setNote(null), 4000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, [draft]);
+
+  if (error && !draft) return <div className="settings-section"><h2>Strategies</h2><p className="hint" style={{ color: 'var(--danger)' }}>{error}</p></div>;
+  if (!draft || !stored) return <div className="settings-section"><h2>Strategies</h2><p className="hint">Loading…</p></div>;
+
+  const dirty = JSON.stringify(draft) !== JSON.stringify(stored);
+  const worstCase = draft.maxLossPerPosition * draft.maxOpenPositions;
+  const num = (v: number, set: (n: number) => void, min: number, max: number, step = 1) => (
+    <input type="number" min={min} max={max} step={step} value={v} style={{ width: 110 }}
+      onChange={e => set(Number(e.target.value))} />
+  );
+
+  return (
+    <div className="settings-section">
+      <h2>Strategies</h2>
+
+      <h3>Bull put spread (shadow)</h3>
+      <p className="hint">
+        The second strategy, running in <strong>shadow</strong>: picks are stored after every Daily Brief but never
+        emailed or traded. These numbers size and filter those picks — see 🪜 Spread Shadow for what they produced.
+      </p>
+
+      <div className="settings-row">
+        <label>Mode</label>
+        <div className="preset-btns">
+          {(['shadow', 'off'] as const).map(m => (
+            <button key={m} className={`preset-btn ${draft.mode === m ? 'active' : ''}`}
+              onClick={() => setDraft({ ...draft, mode: m })}
+              title={m === 'shadow' ? 'Compute and store picks after every brief (no email, no trading)' : 'Do not run at all'}>
+              {m === 'shadow' ? 'Shadow' : 'Off'}
+              <span className="preset-hint">{m === 'shadow' ? 'store only' : 'nothing runs'}</span>
+            </button>
+          ))}
+        </div>
+        <p className="hint">“On” (a brief panel and an email) is built once the enable gate in 🪜 Spread Shadow passes.</p>
+      </div>
+
+      <div className="settings-row">
+        <label>Max loss per position</label>
+        <div className="inline-inputs">
+          <span>$</span>
+          {num(draft.maxLossPerPosition, n => setDraft({ ...draft, maxLossPerPosition: n }),
+            SPREAD_MODE_LIMITS.maxLossPerPosition.min, SPREAD_MODE_LIMITS.maxLossPerPosition.max, 100)}
+        </div>
+        <p className="hint">
+          The most one spread may lose. It sets the number of contracts, and rejects any spread whose single
+          contract risks more than this. Currently <strong>${stored.maxLossPerPosition.toLocaleString()}</strong>.
+        </p>
+      </div>
+
+      <div className="settings-row">
+        <label>Max open positions</label>
+        <div className="inline-inputs">
+          {num(draft.maxOpenPositions, n => setDraft({ ...draft, maxOpenPositions: n }),
+            SPREAD_MODE_LIMITS.maxOpenPositions.min, SPREAD_MODE_LIMITS.maxOpenPositions.max)}
+        </div>
+        <p className="hint">
+          Guidance while in shadow; the “on” mode will enforce it. Worst case if every open position lost in
+          full: <strong>${worstCase.toLocaleString()}</strong>.
+        </p>
+      </div>
+
+      <div className="settings-row">
+        <label>Max open per sector</label>
+        <div className="inline-inputs">
+          {num(draft.maxOpenPerSector, n => setDraft({ ...draft, maxOpenPerSector: n }),
+            SPREAD_MODE_LIMITS.maxOpenPerSector.min, SPREAD_MODE_LIMITS.maxOpenPerSector.max)}
+        </div>
+        <p className="hint">
+          Concentration limit, simulated in 🪜 Spread Shadow today (the capped book beside the full one) and
+          enforced by the “on” mode. Never stored above the position cap.
+        </p>
+      </div>
+
+      <div className="settings-row">
+        <button className="btn-primary" onClick={() => void save()} disabled={busy || !dirty}>
+          {busy ? 'Saving…' : dirty ? 'Save' : 'Saved'}
+        </button>
+        {note && <span className="hint" style={{ marginLeft: 10 }}>{note}</span>}
+        {error && <span className="hint" style={{ marginLeft: 10, color: 'var(--danger)' }}>{error}</span>}
+      </div>
+    </div>
+  );
+}
+
 export function SettingsView({ etradeWarning, onEtradeWarningDismiss }: SettingsViewProps = {}) {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [loading, setLoading] = useState(true);
@@ -437,6 +559,7 @@ export function SettingsView({ etradeWarning, onEtradeWarningDismiss }: Settings
           <button className={`settings-tab ${activeTab === 'General' ? 'active' : ''}`} onClick={() => setActiveTab('General')}>General</button>
           <button className={`settings-tab ${activeTab === 'API & Data' ? 'active' : ''}`} onClick={() => setActiveTab('API & Data')}>API & Data</button>
           <button className={`settings-tab ${activeTab === 'Cache & Limits' ? 'active' : ''}`} onClick={() => setActiveTab('Cache & Limits')}>Cache & Limits</button>
+          <button className={`settings-tab ${activeTab === 'Strategies' ? 'active' : ''}`} onClick={() => setActiveTab('Strategies')}>Strategies</button>
           <button className={`settings-tab ${activeTab === 'Keyboard' ? 'active' : ''}`} onClick={() => setActiveTab('Keyboard')}>Keyboard</button>
           <button className={`settings-tab ${activeTab === 'Diagnostics' ? 'active' : ''}`} onClick={() => setActiveTab('Diagnostics')}>Diagnostics</button>
           <button className={`settings-tab ${activeTab === 'Backup' ? 'active' : ''}`} onClick={() => setActiveTab('Backup')}>Backup</button>
@@ -725,6 +848,9 @@ export function SettingsView({ etradeWarning, onEtradeWarningDismiss }: Settings
             </div>
           </div>
           )}
+
+          {/* ── Strategies ── */}
+          {activeTab === 'Strategies' && <SpreadModeSettingsSection />}
 
           {/* ── Diagnostics ── */}
           {activeTab === 'Diagnostics' && (

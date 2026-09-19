@@ -23,6 +23,7 @@
 import type { DbHandle } from '../db/connection.js';
 import type { CapturedPut } from './spread-chain-capture.js';
 import { fillPrice } from './options-fill.js';
+import { readSpreadModeSettings } from './spread-mode.js';
 import {
   SPREAD_MODE_PROFILE as P,
   type BookSummary, type LegCause, type ShadowPick, type ShadowPickRow, type SpreadSettlement, type SpreadShadowReport,
@@ -244,7 +245,8 @@ export function buildSpreadShadowReport(db: DbHandle, todayEt: string): SpreadSh
     `SELECT sector FROM constituents WHERE ticker = ? AND sector IS NOT NULL AND TRIM(sector) <> '' LIMIT 1`,
   );
   for (const p of list) p.sector = (sectorStmt.get(p.ticker) as { sector: string } | undefined)?.sector ?? null;
-  simulateSectorCap(list, P.maxOpenPerSector);
+  const cap = readSpreadModeSettings(db).maxOpenPerSector; // Settings → Strategies (v1.1.296)
+  simulateSectorCap(list, cap);
   const tally = (keys: string[]) => {
     const m = new Map<string, number>();
     for (const k of keys) m.set(k, (m.get(k) ?? 0) + 1);
@@ -320,7 +322,7 @@ export function buildSpreadShadowReport(db: DbHandle, todayEt: string): SpreadSh
       }))
       .sort((a, b) => b.n - a.n),
     sectorCap: {
-      cap: P.maxOpenPerSector,
+      cap,
       unknownSector: list.filter(p => p.sector == null).length,
       skipped: list.filter(p => p.sectorCapSkipped).length,
       all: summarise(list),

@@ -16,7 +16,7 @@ import type { BriefCandidateSlot } from './brief-candidates.js';
 import type { CapturedPut } from './spread-chain-capture.js';
 import { fillPrice } from './options-fill.js';
 import {
-  SPREAD_MODE_PROFILE as P, SPREAD_MODE_DEFAULTS, SPREAD_MODE_SETTING_KEYS,
+  SPREAD_MODE_PROFILE as P, SPREAD_MODE_DEFAULTS, SPREAD_MODE_SETTING_KEYS, SPREAD_MODE_LIMITS,
   type SpreadConstruction, type SpreadLegQuote, type SpreadModePick, type SpreadModeResult, type SpreadModeSettings,
 } from '@shared/spread-mode.js';
 
@@ -42,7 +42,38 @@ export function readSpreadModeSettings(db: DbHandle): SpreadModeSettings {
     mode: mode === 'off' || mode === 'shadow' ? mode : SPREAD_MODE_DEFAULTS.mode,
     maxLossPerPosition: positiveInt(get(SPREAD_MODE_SETTING_KEYS.maxLossPerPosition), SPREAD_MODE_DEFAULTS.maxLossPerPosition),
     maxOpenPositions: positiveInt(get(SPREAD_MODE_SETTING_KEYS.maxOpenPositions), SPREAD_MODE_DEFAULTS.maxOpenPositions),
+    maxOpenPerSector: positiveInt(get(SPREAD_MODE_SETTING_KEYS.maxOpenPerSector), SPREAD_MODE_DEFAULTS.maxOpenPerSector),
   };
+}
+
+/**
+ * Write the operator's settings, clamped to `SPREAD_MODE_LIMITS`, and return what was stored.
+ *
+ * Every writer passes through here, so the bounds cannot be bypassed by a second caller — the
+ * lesson from the conviction bands, where the edit modal validated and the AI "Apply" path did not.
+ * A non-finite or out-of-range number is clamped rather than rejected: these are operator
+ * preferences, and the stored value is always one the mode can run with.
+ */
+export function writeSpreadModeSettings(db: DbHandle, next: SpreadModeSettings): SpreadModeSettings {
+  const clamp = (v: number, { min, max }: { min: number; max: number }, fallback: number): number =>
+    Number.isFinite(v) ? Math.min(max, Math.max(min, Math.round(v))) : fallback;
+  const stored: SpreadModeSettings = {
+    mode: next.mode === 'off' ? 'off' : 'shadow',
+    maxLossPerPosition: clamp(next.maxLossPerPosition, SPREAD_MODE_LIMITS.maxLossPerPosition, SPREAD_MODE_DEFAULTS.maxLossPerPosition),
+    maxOpenPositions: clamp(next.maxOpenPositions, SPREAD_MODE_LIMITS.maxOpenPositions, SPREAD_MODE_DEFAULTS.maxOpenPositions),
+    maxOpenPerSector: clamp(next.maxOpenPerSector, SPREAD_MODE_LIMITS.maxOpenPerSector, SPREAD_MODE_DEFAULTS.maxOpenPerSector),
+  };
+  // A per-sector cap above the book cap can never bind, which reads as a rule that is on but silent.
+  stored.maxOpenPerSector = Math.min(stored.maxOpenPerSector, stored.maxOpenPositions);
+
+  const write = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
+  withTransaction(db, () => {
+    write.run(SPREAD_MODE_SETTING_KEYS.mode, stored.mode);
+    write.run(SPREAD_MODE_SETTING_KEYS.maxLossPerPosition, String(stored.maxLossPerPosition));
+    write.run(SPREAD_MODE_SETTING_KEYS.maxOpenPositions, String(stored.maxOpenPositions));
+    write.run(SPREAD_MODE_SETTING_KEYS.maxOpenPerSector, String(stored.maxOpenPerSector));
+  });
+  return stored;
 }
 
 /** The listed expiry at 21–35 DTE, strictly before the next report, nearest 30 DTE (earlier on a tie). */

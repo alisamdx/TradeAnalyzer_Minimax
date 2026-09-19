@@ -203,6 +203,18 @@ see whether the strategy earns its keep before it is switched on. Press **↻ Re
 - **Rejection reasons** list why candidates were refused, with the tickers, and for a missing option leg, what
   the stored chain showed.
 
+Its numbers live in **Settings → Strategies**:
+
+- **Mode** — *Shadow* stores picks after every brief; *Off* runs nothing. ("On", with a brief panel and an
+  email, is built once the enable gate passes.)
+- **Max loss per position** — the most one spread may lose. It decides how many contracts a pick gets, and
+  rejects any spread whose single contract risks more than this.
+- **Max open positions** — guidance for now; the screen shows your worst case (this × the number of positions).
+- **Max open per sector** — your concentration limit, simulated in the report today.
+
+Out-of-range values are pulled back to the nearest allowed one when saved, and the sector limit is never
+stored above the position limit. The screen always shows what was actually saved.
+
 ---
 
 ## 5. Screen map (what each view is for)
@@ -210,6 +222,7 @@ see whether the strategy earns its keep before it is switched on. Press **↻ Re
 **Data**
 - **⚙ Settings** — API keys, E*Trade connection, account size, email, options-provider choice.
 - **⚖ Trade Scoring** — tune the scoring weights per strategy (see §9).
+- **⚙ Settings → Strategies** — the bull put spread's risk numbers: shadow or off, max loss per position, max open positions, and max open per sector (§4.8).
 - **🔄 Batch Jobs** — the background job scheduler (see §8).
 
 **Intelligence**

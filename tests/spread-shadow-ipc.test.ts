@@ -37,10 +37,29 @@ describe('spread-mode:shadow-report', () => {
   });
 });
 
+describe('spread-mode settings over IPC (v1.1.296)', () => {
+  it('round-trips through the service, returning what was STORED', () => {
+    const db = openDatabase(':memory:');
+    runMigrations(db, MIGRATIONS_DIR);
+    registerSpreadModeIpc(db);
+    const set = handlers.get('spread-mode:set-settings')!;
+    const saved = set({}, { mode: 'shadow', maxLossPerPosition: 3000, maxOpenPositions: 6, maxOpenPerSector: 9 }) as
+      { ok: boolean; value: { maxOpenPerSector: number; maxLossPerPosition: number } };
+    expect(saved.ok).toBe(true);
+    expect(saved.value).toMatchObject({ maxLossPerPosition: 3000, maxOpenPositions: 6, maxOpenPerSector: 6 });
+    const got = handlers.get('spread-mode:get-settings')!() as { value: unknown };
+    expect(got.value).toEqual(saved.value);
+  });
+});
+
 describe('the view is reachable', () => {
   it('is bridged in preload and routed in the sidebar', () => {
     const preload = readFileSync(resolve('src/preload/index.ts'), 'utf8');
     expect(preload).toContain("invoke<SpreadShadowReport>('spread-mode:shadow-report')");
+    expect(preload).toContain("invoke<SpreadModeSettings>('spread-mode:set-settings', next)");
+    const settingsView = readFileSync(resolve('src/renderer/src/views/SettingsView.tsx'), 'utf8');
+    expect(settingsView).toContain("setActiveTab('Strategies')");
+    expect(settingsView).toContain('window.api.spreadMode.setSettings');
     expect(preload).toMatch(/briefReplay, spreadMode, execution/);
     const app = readFileSync(resolve('src/renderer/src/App.tsx'), 'utf8');
     expect(app).toContain("case 'spreadShadow': return <SpreadShadowView />;");

@@ -114,6 +114,9 @@ Runs immediately after spread chain capture, from that run's captured chains (no
   no chain, expiry, underlying price, short or long; cost; one contract's max loss > `bullPutSpreadMaxLossPerPosition`.
 - **Size and rank:** contracts = floor(budget ÷ max loss per contract); rank by net credit ÷ max loss
   (unvalidated), top 5; the rest recorded as "ranked below the top 5".
+- **Settings → Strategies (v1.1.296):** mode, max loss per position, max open positions and max open per sector,
+  written through `writeSpreadModeSettings` (clamped; sector cap never above the position cap) over IPC
+  `spread-mode:get-settings` / `spread-mode:set-settings`.
 - **Switch:** `bullPutSpreadMode` = `shadow` (default: store only) | `off`. The `on` panel and email are built
   when 08 §4's enable gate passes. Stored in `spread_mode_picks` (§2); logged `spread-mode:run`; never fails the brief.
 - **Shadow settlement (v1.1.290):** `GET /api/v1/diagnostics/spread-shadow` (`spread-mode-settle.ts`) settles every pick

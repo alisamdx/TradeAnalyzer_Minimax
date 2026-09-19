@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.296] - 2026-09-19
+
+### Settings → Strategies: the bull put spread's risk numbers are editable
+
+- New **Strategies** tab: mode (shadow/off), max loss per position, max open positions, and max open per sector, with the worst-case total shown as you edit. They were code defaults before.
+- `writeSpreadModeSettings` is the single writer: it clamps to the allowed range, never stores a sector cap above the position cap, and returns what it stored, so the screen shows any adjusted value.
+- The shadow report reads the sector cap from the setting.
+
+Details: `changelogs/v1.1.296_2026-09-19.md`.
+
 ## [1.1.295] - 2026-09-19
 
 ### 🪜 Spread Shadow: the bull put spread shadow report as an in-app view

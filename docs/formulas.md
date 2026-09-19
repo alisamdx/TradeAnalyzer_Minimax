@@ -827,7 +827,9 @@ Operator profile: short put **0.35 ≤ |delta| ≤ 0.45**, **14 ≤ DTE ≤ 30**
 - **Round-trip cost share** = `2 × [(short mid − short fill) + (long fill − long mid)] ÷ mid credit`. Excluded if `> 0.25`.
 - **Width** = `short − long`; **max loss** = `width − net credit`; **return on risk** = `net credit ÷ max loss`;
   **breakeven** = `short − net credit`; **take-profit debit** = `0.5 × net credit`.
-- **Contracts** = `floor(maxLossPerPosition ÷ (max loss × 100))`; excluded if `< 1`. **Total max loss** = `contracts × max loss × 100`.
+- **Contracts** = `floor(maxLossPerPosition ÷ (max loss × 100))`; excluded if `< 1`. `maxLossPerPosition`,
+  `maxOpenPositions` and `maxOpenPerSector` are operator settings (Settings → Strategies, v1.1.296), clamped by
+  `writeSpreadModeSettings`; the sector cap is never stored above the position cap. **Total max loss** = `contracts × max loss × 100`.
 - **Ranking** — return on risk descending, ties by ticker; keep 5. Unvalidated.
 
 **Shadow settlement** (`spread-mode-settle.ts`, v1.1.290 — the 08 §4.2 gate). Recomputed on every read, never stored.

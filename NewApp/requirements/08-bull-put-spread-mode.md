@@ -96,7 +96,9 @@ No SMA50, IV-rank or credit-to-width gate (§2).
 
 ### 3.5 Sizing
 
-- Settings: **`maxLossPerPosition`** ($) and **`maxOpenPositions`** — operator numbers (§6 Q1).
+- Settings: **`maxLossPerPosition`** ($), **`maxOpenPositions`** and **`maxOpenPerSector`** — operator numbers
+  (§6 Q1, S9), edited in **Settings → Strategies** since v1.1.296 and written through `writeSpreadModeSettings`,
+  which clamps to `SPREAD_MODE_LIMITS` and never stores a sector cap above the position cap.
 - **Contracts** = floor(maxLossPerPosition ÷ max loss per contract), shown per pick with the total
   max loss. Open positions are not tracked in v1, so the position cap is shown as guidance.
 
@@ -162,6 +164,12 @@ counting rows would inflate n and let one name set the mean (the episode rule th
 change fixes a data gap. Picks are held to the target or expiry at 21–35 DTE, but capture re-quoted a series
 for only 21 days after its entry, so a pick's last ~2 weeks could not be marked. Capture now tracks every
 picked series until it expires.*
+
+*Revision 2026-09-19 (v1.1.296): the operator's numbers are editable in **Settings → Strategies** — mode
+(shadow/off), max loss per position, max open positions, max open per sector — instead of being code defaults.
+`writeSpreadModeSettings` is the single writer and clamps every value; the screen renders what was stored, not
+what was typed. The shadow report reads the sector cap from the setting. `on` is not offered in the switch:
+it does not exist until §4 passes.*
 
 *Revision 2026-09-19 (v1.1.295): the report is also an in-app view, **🪜 Spread Shadow** (Intelligence). This is a
 reading surface for the operator, not the `on` panel of §3.9: it shows shadow results and the gate, never a
