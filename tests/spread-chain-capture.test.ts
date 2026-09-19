@@ -110,6 +110,29 @@ describe('captureSpreadChains', () => {
     expect(n).toEqual([{ slot: 'after_close', n: 2 }, { slot: 'intraday', n: 2 }]);
   });
 
+  it('tracks a spread-mode pick to expiry, past the 21-day entry window, across both legs (v1.1.290)', async () => {
+    const db = seed();
+    // Picked 2026-08-20 at 42 DTE — its entry row is older than trackDays, so only the pick keeps it marked.
+    const pick = db.prepare(
+      `INSERT INTO spread_mode_picks (as_of_date, slot, generated_at, mode, ticker, outcome, expiration, short_strike, long_strike)
+       VALUES (?, 'intraday', 'x', 'shadow', ?, ?, ?, ?, ?)`,
+    );
+    pick.run('2026-08-20', 'PKD', 'pick', EXP_18, 45, 40);
+    pick.run('2026-08-20', 'GONE', 'pick', '2026-09-11', 45, 40);   // expired — not tracked
+    pick.run('2026-08-20', 'REJ', 'rejected', EXP_18, null, null);  // a rejection is not a position
+    calls.length = 0;
+    const r = await captureSpreadChains({ db, provider, slot: 'intraday', now: NOW });
+
+    expect(r.trackedSeries).toBe(2);            // ZZZ (entry) + PKD (pick)
+    expect(calls).toContain(`chain:PKD:${EXP_18}`);
+    expect(calls.some(x => x.includes('GONE') || x.includes('REJ'))).toBe(false);
+    const row = db.prepare(`SELECT reason, puts_json FROM spread_chain_capture WHERE ticker = 'PKD'`).get() as { reason: string; puts_json: string };
+    expect(row.reason).toBe('track');
+    // The provider's PKD chain holds 95/90 at spot 100; the pick's legs (40–45) widen the kept range,
+    // so the 90/95 strikes stay (delta band) and nothing is lost.
+    expect((JSON.parse(row.puts_json) as CapturedPut[]).map(p => p[0])).toEqual([90, 95]);
+  });
+
   it('never throws, even without a usable database', async () => {
     const db = openDatabase(':memory:'); // no migrations
     const r = await captureSpreadChains({ db, provider, slot: 'intraday', now: NOW });

@@ -98,7 +98,7 @@ Interim, advisory answer to "the best wheel trades today" — design `NewApp/req
 The last step of every brief run, independent of email: `captureSpreadChains` records the put-side
 chains a bull put spread would use into `spread_chain_capture` (§2) — entry chains for the run's
 validated wheel/income/bullish candidates at 14–45 DTE, and daily re-quotes of any series entered in
-the prior 21 days until expiry. Data collection only; a failure is logged (`spread-capture:run`) and
+the prior 21 days until expiry, plus every series a spread-mode pick opened, until it expires (v1.1.290). Data collection only; a failure is logged (`spread-capture:run`) and
 never fails the brief. Acceptance: `tests/spread-chain-capture.test.ts`.
 
 ## Bull put spread mode (v1.1.244) — shadow
@@ -116,7 +116,11 @@ Runs immediately after spread chain capture, from that run's captured chains (no
   (unvalidated), top 5; the rest recorded as "ranked below the top 5".
 - **Switch:** `bullPutSpreadMode` = `shadow` (default: store only) | `off`. The `on` panel and email are built
   when 08 §4's enable gate passes. Stored in `spread_mode_picks` (§2); logged `spread-mode:run`; never fails the brief.
-- Acceptance: `tests/spread-mode.test.ts`.
+- **Shadow settlement (v1.1.290):** `GET /api/v1/diagnostics/spread-shadow` (`spread-mode-settle.ts`) settles every pick
+  forward on its own captured quotes: the 50% target (decided on mid, realised with fills), or intrinsic at the
+  expiry close. Repeat picks of one position count once. It reports progress against 08 §4.
+  `node scripts/spread-shadow-report.mjs` prints it. Chain capture tracks every picked series until expiry.
+- Acceptance: `tests/spread-mode.test.ts`, `tests/spread-mode-settle.test.ts`.
 
 ## Roll the Dice (v1.1.162)
 

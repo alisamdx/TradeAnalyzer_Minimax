@@ -144,6 +144,15 @@ Switch to `on` only when **both** hold:
 
 If either fails, the mode stays `shadow` and the failure is written down with its numbers.
 
+*Revision 2026-09-19 (v1.1.290): condition 2 is now computed. `spread-mode-settle.ts`, read through
+`GET /api/v1/diagnostics/spread-shadow` and printed by `node scripts/spread-shadow-report.mjs`, settles every
+shadow pick on its own later captured quotes, with rules in `docs/formulas.md#bull-put-spread-mode`. It counts
+**positions**, not pick rows. The same spread picked on consecutive days or in both slots is one trade, so
+counting rows would inflate n and let one name set the mean (the episode rule the #43 study uses). The same
+change fixes a data gap. Picks are held to the target or expiry at 21–35 DTE, but capture re-quoted a series
+for only 21 days after its entry, so a pick's last ~2 weeks could not be marked. Capture now tracks every
+picked series until it expires.*
+
 ---
 
 ## 5. Out of scope for v1

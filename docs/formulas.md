@@ -830,6 +830,19 @@ Operator profile: short put **0.35 ≤ |delta| ≤ 0.45**, **14 ≤ DTE ≤ 30**
 - **Contracts** = `floor(maxLossPerPosition ÷ (max loss × 100))`; excluded if `< 1`. **Total max loss** = `contracts × max loss × 100`.
 - **Ranking** — return on risk descending, ties by ticker; keep 5. Unvalidated.
 
+**Shadow settlement** (`spread-mode-settle.ts`, v1.1.290 — the 08 §4.2 gate). Recomputed on every read, never stored.
+- **Marks** — `spread_chain_capture` rows of the same ticker + expiry strictly after the entry (date, then
+  intraday < after_close), up to expiry. A leg is usable when `ask > 0` and `0 ≤ bid ≤ ask`; a mark missing
+  either leg is a *gap*.
+- **Target** — the first mark with `short mid − long mid ≤ 0.5 × net credit` (decided on mid). Exit debit =
+  `fillPrice(short, 'buy') − fillPrice(long, 'sell')` (realised with fills).
+- **Expiry** — no target: exit debit = `max(0, short − S) − max(0, long − S)`, S = close on the expiry date (or
+  the last session ≤ 4 days before it); no closing cost. Settled only after the expiry date; not settled when
+  `S ÷ entry spot` is outside [0.5, 2] (possible split — listed, not dropped).
+- **Return on max loss** = `(net credit − exit debit) ÷ max loss`.
+- **Positions** — picks with the same ticker, expiry and both strikes are one position; the first entry is kept.
+  The gate counts positions: ≥ 15 intraday capture days, ≥ 30 settled positions, mean return on max loss > 0.
+
 ## split-adjustment (data integrity) {#split-adjustment}
 
 `historical_prices` must hold a **self-consistent, split-adjusted** close series: every bar

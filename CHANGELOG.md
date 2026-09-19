@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.290] - 2026-09-19
+
+### Bull put spread: shadow picks are settled, and the enable gate can be read
+
+- **Capture gap fixed.** Shadow picks are held to target or expiry at 21–35 DTE, but spread chain capture re-quoted a series for only 21 days after entry, so a pick's last ~2 weeks could never be marked. Capture now tracks every picked series until it expires.
+- **Settlement.** New `spread-mode-settle.ts` settles every shadow position on its own captured quotes: the 50% target (decided on mid, realised with fills), or intrinsic at the expiry close, with a split guard. Repeat picks of one position count once.
+- **Readout.** `GET /api/v1/diagnostics/spread-shadow` and `node scripts/spread-shadow-report.mjs` show progress against 08 §4: intraday capture days (≥ 15), settled positions (≥ 30), and mean return on max loss (> 0). They also list positions, per-run counts, and rejection reasons by kind.
+
+Details: `changelogs/v1.1.290_2026-09-19.md`.
+
 ## [1.1.289] - 2026-09-19
 
 ### The gate closes a check's `check_error` finding once the check stops throwing

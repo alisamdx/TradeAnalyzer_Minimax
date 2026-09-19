@@ -6,6 +6,7 @@ import { auditPickGreeks, type PickAuditDb } from '../services/greek-consistency
 import {
   settledCspPanel, PANEL_STRATEGIES, type PanelDb, type PanelStrategy
 } from '../services/settled-csp-panel.js';
+import { buildSpreadShadowReport } from '../services/spread-mode-settle.js';
 
 export function registerDiagnosticsRoutes(app: FastifyInstance, svc: ApiServerServices): void {
   // GET /diagnostics/day?date=YYYY-MM-DD — everything recorded about one ET day: batch runs,
@@ -52,6 +53,17 @@ export function registerDiagnosticsRoutes(app: FastifyInstance, svc: ApiServerSe
     }
     try {
       return apiOk(reply, settledCspPanel(svc.db as unknown as PanelDb, strategy));
+    } catch (err) {
+      return apiError(reply, err instanceof Error ? err.message : String(err), 'INTERNAL', 500);
+    }
+  });
+
+  // GET /diagnostics/spread-shadow — every bull put spread shadow pick settled forward on its own
+  // captured quotes, and progress against the 08 §4 enable gate. Read-only. Read by
+  // scripts/spread-shadow-report.mjs. see services/spread-mode-settle.ts
+  app.get('/diagnostics/spread-shadow', async (_req, reply) => {
+    try {
+      return apiOk(reply, buildSpreadShadowReport(svc.db, etDate(new Date().toISOString())));
     } catch (err) {
       return apiError(reply, err instanceof Error ? err.message : String(err), 'INTERNAL', 500);
     }

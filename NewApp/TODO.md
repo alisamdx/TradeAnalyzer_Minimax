@@ -234,6 +234,9 @@ short 0.20–0.30Δ, credit ≥ 30% of width, IVR ≥ ~30; exit 50% profit / 15 
     **Enable check (08 §4), earliest ~early October:** re-run `fr-bull-put-spread-study.mjs --slip-model
     quoted` after ≥ 15 intraday capture days, and settle ≥ 30 shadow picks. Real account numbers still
     to set (defaults $1,000 / 10).
+    **v1.1.290:** progress is now readable. Run `node scripts/spread-shadow-report.mjs` (with the app running)
+    for intraday capture days, settled positions and mean return against the gate. Capture tracks picked
+    series until expiry.
 45. **Revisit the v2 engine's 2× stop on wheel put spreads.** The engine trades wheel as a put spread with
     a 50% target and a 2× stop, validated in June with no costs; #43 found the stop + time stop halved a
     portfolio's result and a 1× stop was negative once costs exist. Needs an FR-SEY-5 replay on the

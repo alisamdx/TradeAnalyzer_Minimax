@@ -9,7 +9,8 @@
 // Two kinds of row per run (migration 083):
 //   entry — tickers in this run's validated wheel/income/bullish pools, every expiry at 14–45 DTE
 //   track — ticker+expiries that had an entry in the last 21 days and are unexpired, re-quoted so a
-//           spread opened then can be marked daily on real quotes (the 50%-profit / loss-stop exits)
+//           spread opened then can be marked daily on real quotes (the 50%-profit / loss-stop exits);
+//           plus every unexpired series a spread-mode pick opened, until it expires (v1.1.290)
 //
 // Never throws: a study convenience must not be able to fail the brief it runs after.
 // see migrations/083_spread_chain_capture.sql
@@ -134,6 +135,21 @@ export async function captureSpreadChains(deps: {
       const hi = Math.max(...puts.map(p => p[0]));
       const cur = trackRange.get(key);
       trackRange.set(key, cur ? { min: Math.min(cur.min, lo), max: Math.max(cur.max, hi) } : { min: lo, max: hi });
+    }
+
+    // Spread-mode picks are held to the profit target or EXPIRY (no time stop), at 21–35 DTE — longer
+    // than `trackDays`. Their series are tracked until they expire, whenever they were picked, and
+    // always across both legs' strikes, or a pick's last ~2 weeks could never be marked (v1.1.290).
+    const picked = db.prepare(
+      `SELECT ticker, expiration, MIN(long_strike) AS lo, MAX(short_strike) AS hi FROM spread_mode_picks
+        WHERE outcome = 'pick' AND expiration >= ? AND as_of_date <= ?
+        GROUP BY ticker, expiration`,
+    ).all(todayEt, todayEt) as Array<{ ticker: string; expiration: string; lo: number | null; hi: number | null }>;
+    for (const p of picked) {
+      if (p.lo == null || p.hi == null) continue;
+      const key = `${p.ticker}|${p.expiration}`;
+      const cur = trackRange.get(key);
+      trackRange.set(key, cur ? { min: Math.min(cur.min, p.lo), max: Math.max(cur.max, p.hi) } : { min: p.lo, max: p.hi });
     }
     result.trackedSeries = trackRange.size;
 
