@@ -6,12 +6,16 @@ export const SPREAD_MODE_PROFILE = {
   dteMin: 21,
   dteMax: 35,
   dteTarget: 30,
-  deltaMin: 0.25,
-  deltaMax: 0.35,
+  // 0.20–0.40, nearest 0.30 (v1.1.292): the 0.25–0.35 band was narrower than one strike step in delta on
+  // many names, so no strike fell inside it (12 of 80 first-week rejections on liquid DVN/EOG/COP/MDT).
+  deltaMin: 0.20,
+  deltaMax: 0.40,
   deltaTarget: 0.30,
   /** Long put distance below the SHORT strike, as a fraction of spot. */
-  wingMinPct: 0.05,
-  wingMaxPct: 0.075,
+  // The #43 study took the strike NEAREST short − 5% of spot. A 5–7.5% band rejected CF-like grids ($5 strikes at
+  // ~$120: 4% or 8.3%, neither inside) — 13 of 80 first-week rejections. 3–10% bounds the nearest-strike rule (v1.1.292).
+  wingMinPct: 0.03,
+  wingMaxPct: 0.10,
   wingTargetPct: 0.05,
   /** Round-trip slippage (open + close, both legs) as a share of the mid credit. */
   maxCostShare: 0.25,
@@ -79,7 +83,8 @@ export interface SpreadModePick extends SpreadConstruction {
   spot: number;
   contracts: number;
   totalMaxLoss: number;
-  earningsDate: string;
+  /** Null for an ETF, which has no earnings. */
+  earningsDate: string | null;
   criticVerdict: 'pass' | 'caution' | null;
 }
 

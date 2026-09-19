@@ -16,6 +16,7 @@ evidence is TODO #43 and `scripts/fr-bull-put-spread-study.mjs`.
 | S4 | 2026-09-12 | **Delivered as a new brief mode alongside wheel.** |
 | S5 | 2026-09-13 | **Write the design now; build it switched off; enable after a re-run on captured quotes (§4).** |
 | S6 | 2026-09-13 | **Design approved; every §6 question at its recommended default** — $1,000 max loss and 10 positions until real numbers are set, wheel pool only, ship `shadow`, 50% target, engine stop as a separate item (TODO #45). |
+| S7 | 2026-09-19 | **Leg rules widened to match real strike grids, and the study (v1.1.292).** The first shadow week rejected 25 of 80 candidates for strike spacing alone: the 0.25–0.35Δ band fell between two strikes on liquid DVN/EOG/COP/MDT (12), and on CF-like grids ($5 strikes at ~$120) no strike sat 5–7.5% below the short (13). The #43 study took the strike *nearest* short − 5% of spot, so the mode was stricter than its evidence. Short: 0.20–0.40Δ, nearest 0.30. Long: nearest short − 5% of spot, within 3–10%. ETFs skip the earnings gate (EWZ was rejected ×5 as "earnings date unknown"). |
 
 ---
 
@@ -67,9 +68,9 @@ Read from `spread_chain_capture` rows this run just wrote (`reason = 'entry'`), 
 **makes no E\*Trade calls of its own**. For each ticker:
 
 - **Expiry:** listed, **21–35 DTE**, before the next earnings report; the one nearest **30 DTE**.
-- **Short put:** two-sided quote, |Δ| in **0.25–0.35**, closest to **0.30**.
+- **Short put:** two-sided quote, |Δ| in **0.20–0.40**, closest to **0.30** (0.25–0.35 until v1.1.292, S7).
 - **Long put:** two-sided quote, strike closest to **short strike − 5% of spot**, accepting
-  **5–7.5%**; if none, none.
+  **3–10%**; if none, none (5–7.5% until v1.1.292, S7).
 
 ### 3.3 Costs and the liquidity gate
 
@@ -81,7 +82,10 @@ Read from `spread_chain_capture` rows this run just wrote (`reason = 'entry'`), 
 ### 3.4 Gates (each exclusion reported with its reason)
 
 1. Critic verdict `flag`.
-2. Earnings date unknown, stale, or on/before the expiry — fail closed, as Roll the Dice.
+2. Earnings date unknown, stale, or on/before the expiry — fail closed, as Roll the Dice. **ETFs are exempt**
+   (no earnings; `constituents.index_name = 'etf'`, v1.1.292). A stale date means no provider has announced the
+   next one yet: measured for NTAP and INTU on 2026-09-19, both E*Trade (asked every brief run) and Finnhub
+   (asked nightly) had none. The gate is doing its job.
 3. No qualifying expiry, short or long leg (§3.2).
 4. Round-trip cost share > 25% (§3.3).
 5. One contract's max loss exceeds the per-position budget (§3.5).

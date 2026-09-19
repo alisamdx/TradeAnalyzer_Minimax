@@ -23,6 +23,8 @@ import {
 export { SPREAD_MODE_PROFILE, SPREAD_MODE_DEFAULTS } from '@shared/spread-mode.js';
 
 const RETENTION_DAYS = 730;
+/** An ETF's "next report": later than every expiry, so the earnings gate never binds. */
+const NO_EARNINGS = '9999-12-31';
 
 /** Read the mode's settings; anything missing or malformed falls back to the approved defaults. */
 export function readSpreadModeSettings(db: DbHandle): SpreadModeSettings {
@@ -60,7 +62,7 @@ const pct = (x: number): string => `${Math.round(x * 100)}%`;
 
 /**
  * Build the spread from one chain, or say why not.
- * short: |Δ| 0.25–0.35, closest to 0.30 · long: strike closest to short − 5% of spot, within 5–7.5% ·
+ * short: |Δ| 0.20–0.40, closest to 0.30 · long: strike closest to short − 5% of spot, within 3–10% ·
  * fills by options-fill.ts · gates: net credit > $0.05, round-trip cost ≤ 25% of mid credit.
  * see docs/formulas.md#bull-put-spread-mode
  */
@@ -148,6 +150,15 @@ export function computeSpreadMode(deps: {
     ).all(latest.generated_at) as Array<{ ticker: string }>).map(r => r.ticker);
     result.considered = tickers.length;
 
+    // ETFs have no earnings, so the earnings gate cannot apply to them — without this every ETF was
+    // rejected as "earnings date unknown" (EWZ ×5 in the first week; v1.1.292).
+    const etfs = new Set<string>();
+    if (tickers.length > 0) {
+      for (const r of db.prepare(
+        `SELECT DISTINCT ticker FROM constituents WHERE index_name = 'etf' AND ticker IN (${tickers.map(() => '?').join(',')})`,
+      ).all(...tickers) as Array<{ ticker: string }>) etfs.add(r.ticker);
+    }
+
     const verdicts = new Map<string, string>();
     const brief = db.prepare(`SELECT picks FROM daily_briefs WHERE strategy = 'wheel' ORDER BY generated_at DESC LIMIT 1`)
       .get() as { picks: string } | undefined;
@@ -185,7 +196,8 @@ export function computeSpreadMode(deps: {
     for (const ticker of tickers) {
       const verdict = verdicts.get(ticker) ?? null;
       if (verdict === 'flag') { reject(ticker, 'critic flag'); continue; }
-      const rd = earnings.get(ticker);
+      const isEtf = etfs.has(ticker);
+      const rd = isEtf ? NO_EARNINGS : earnings.get(ticker);
       if (rd === undefined) { reject(ticker, 'earnings date unknown'); continue; }
       if (rd < todayEt) { reject(ticker, `earnings calendar stale (last known ${rd})`); continue; }
 
@@ -210,7 +222,7 @@ export function computeSpreadMode(deps: {
       }
       candidates.push({
         ...s, ticker, expiration: chain.expiration, dte: chain.dte, spot: chain.spot,
-        contracts, totalMaxLoss: contracts * perContract, earningsDate: rd,
+        contracts, totalMaxLoss: contracts * perContract, earningsDate: isEtf ? null : rd,
         criticVerdict: verdict === 'pass' || verdict === 'caution' ? verdict : null,
       });
     }

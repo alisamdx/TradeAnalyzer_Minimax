@@ -817,10 +817,10 @@ Operator profile: short put **0.35 ≤ |delta| ≤ 0.45**, **14 ≤ DTE ≤ 30**
 
 `src/main/services/spread-mode.ts` — shadow (NewApp `08-bull-put-spread-mode.md`). Per share unless noted.
 
-- **Expiry** — among captured expiries with **21 ≤ DTE ≤ 35** and `expiration < next report date`: minimise
+- **Expiry** — among captured expiries with **21 ≤ DTE ≤ 35** and `expiration < next report date` (no report date for an ETF): minimise
   `|DTE − 30|`, earlier on a tie.
-- **Short leg** — two-sided (`bid > 0`, `ask ≥ bid`), **0.25 ≤ |Δ| ≤ 0.35**, minimise `||Δ| − 0.30|`.
-- **Long leg** — two-sided, `strike < short strike`, **0.05 ≤ (short − long) ÷ spot ≤ 0.075**, minimise
+- **Short leg** — two-sided (`bid > 0`, `ask ≥ bid`), **0.20 ≤ |Δ| ≤ 0.40**, minimise `||Δ| − 0.30|`, lower strike on a tie (v1.1.292; was 0.25–0.35).
+- **Long leg** — two-sided, `strike < short strike`, **0.03 ≤ (short − long) ÷ spot ≤ 0.10** (v1.1.292; was 0.05–0.075), minimise
   `|long − (short − 0.05 × spot)|`.
 - **Fills** — `docs/formulas.md#fill-model`: short = `fillPrice(bid, ask, 'sell')`, long = `fillPrice(bid, ask, 'buy')`.
 - **Mid credit** = `short mid − long mid`; **net credit** = `short fill − long fill`.

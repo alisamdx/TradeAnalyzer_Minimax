@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.292] - 2026-09-19
+
+### Bull put spread (shadow): leg rules fit real strike grids; ETFs skip the earnings gate
+
+- **Short put 0.20–0.40Δ, nearest 0.30** (was 0.25–0.35). **Long put: the strike nearest short − 5% of spot, within 3–10%** (was 5–7.5%). The first week rejected 25 of 80 candidates on strike spacing alone, and the #43 study used the nearest strike, so the mode now matches its evidence.
+- **ETFs are exempt from the earnings gate.** EWZ was rejected ×5 as "earnings date unknown".
+- NTAP/INTU "stale earnings": investigated, no change. Neither E*Trade nor Finnhub has announced their next dates yet.
+
+Details: `changelogs/v1.1.292_2026-09-19.md`.
+
 ## [1.1.291] - 2026-09-19
 
 ### Bull put spread shadow report: one position per ticker episode; rejections name tickers and causes

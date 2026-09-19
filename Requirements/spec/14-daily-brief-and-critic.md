@@ -108,9 +108,9 @@ Runs immediately after spread chain capture, from that run's captured chains (no
 
 - **Pool:** the latest run's `brief_candidates` for `wheel` with disposition `picked`/`capped_out`.
 - **Construction:** expiry 21–35 DTE nearest 30, strictly before the next report; short put two-sided,
-  |Δ| 0.25–0.35 nearest 0.30; long put two-sided, strike nearest `short − 5% × spot`, width 5–7.5% of spot.
+  |Δ| 0.20–0.40 nearest 0.30; long put two-sided, strike nearest `short − 5% × spot`, width 3–10% of spot (v1.1.292).
 - **Costs:** legs fill by `options-fill.ts`; excluded if round-trip cost > 25% of mid credit or net credit ≤ $0.05.
-- **Gates (reason stored):** critic `flag`; earnings unknown / stale / on or before every in-window expiry;
+- **Gates (reason stored):** critic `flag`; earnings unknown / stale / on or before every in-window expiry (ETFs exempt, v1.1.292);
   no chain, expiry, underlying price, short or long; cost; one contract's max loss > `bullPutSpreadMaxLossPerPosition`.
 - **Size and rank:** contracts = floor(budget ÷ max loss per contract); rank by net credit ÷ max loss
   (unvalidated), top 5; the rest recorded as "ranked below the top 5".

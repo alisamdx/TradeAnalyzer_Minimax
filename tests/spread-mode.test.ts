@@ -9,8 +9,8 @@ import { openDatabase } from '../src/main/db/connection.js';
 import { runMigrations } from '../src/main/db/migrations.js';
 import { MIGRATIONS_DIR } from './helpers.js';
 
-// Bull put spread mode (TODO #44, NewApp/requirements/08): 21–35 DTE nearest 30, short 0.25–0.35Δ nearest
-// 0.30, long 5–7.5% of spot below the short, options-fill fills, round-trip cost ≤ 25% of mid credit,
+// Bull put spread mode (TODO #44, NewApp/requirements/08): 21–35 DTE nearest 30, short 0.20–0.40Δ nearest
+// 0.30, long the strike nearest 5% of spot below the short within 3–10% (v1.1.292), options-fill fills, round-trip cost ≤ 25% of mid credit,
 // sized by max loss, ranked by return on risk, shadow-stored.
 
 const TODAY = '2026-09-14';
@@ -23,14 +23,14 @@ const EXP_33 = '2026-10-17';
 const put = (strike: number, bid: number, ask: number, delta: number | null, oi = 500): CapturedPut => [strike, bid, ask, delta, 35, oi, 10];
 
 const GOOD_100: CapturedPut[] = [
-  put(97.5, 2.9, 3.0, -0.36),   // above the band
+  put(97.5, 2.9, 3.0, -0.36),   // in band, further from 0.30
   put(95, 1.9, 2.0, -0.30),     // the short
   put(94, 1.6, 1.7, -0.27),     // in band, further from 0.30
-  put(92.5, 1.2, 1.3, -0.24),   // below the band
-  put(91, 1.0, 1.1, -0.18),     // wing only 4% of spot
+  put(92.5, 1.2, 1.3, -0.24),   // in band, further from 0.30
+  put(91, 1.0, 1.1, -0.18),     // 4% — allowed, further from target
   put(90, 0.8, 0.9, -0.15),     // the long: exactly 5%
   put(87.5, 0.55, 0.65, -0.11), // 7.5% — allowed, further from target
-  put(85, 0.4, 0.5, -0.08),     // 10% — too wide
+  put(85, 0.4, 0.5, -0.08),     // 10% — allowed at the edge, furthest
 ];
 
 describe('buildBullPutSpread', () => {
@@ -54,19 +54,35 @@ describe('buildBullPutSpread', () => {
 
   it('says why when there is no short, no long, too little credit or too much cost', () => {
     const noShort = buildBullPutSpread([put(95, 1.9, 2.0, -0.45), put(90, 0.8, 0.9, -0.15)], 100);
-    expect('reason' in noShort && noShort.reason).toMatch(/no two-sided put at 0\.25–0\.35Δ/);
+    expect('reason' in noShort && noShort.reason).toMatch(/no two-sided put at 0\.2–0\.4Δ/);
 
     const oneSided = buildBullPutSpread([put(95, 0, 2.0, -0.30), put(90, 0.8, 0.9, -0.15)], 100);
     expect('reason' in oneSided && oneSided.reason).toMatch(/no two-sided put/);
 
-    const noLong = buildBullPutSpread([put(95, 1.9, 2.0, -0.30), put(91, 1.0, 1.1, -0.18), put(85, 0.4, 0.5, -0.08)], 100);
-    expect('reason' in noLong && noLong.reason).toMatch(/no two-sided long put 5–7\.5% of spot below the short strike/);
+    const noLong = buildBullPutSpread([put(95, 1.9, 2.0, -0.30), put(93, 1.4, 1.5, -0.24), put(84, 0.4, 0.5, -0.08)], 100);
+    expect('reason' in noLong && noLong.reason).toMatch(/no two-sided long put 3–10% of spot below the short strike/);
 
     const costly = buildBullPutSpread([put(95, 1.5, 2.4, -0.30), put(90, 0.6, 1.1, -0.15)], 100);
     expect('reason' in costly && costly.reason).toMatch(/round-trip cost 64% of credit \(max 25%\)/);
 
     const thin = buildBullPutSpread([put(95, 0.20, 0.22, -0.30), put(90, 0.17, 0.19, -0.15)], 100);
     expect('reason' in thin && thin.reason).toMatch(/net credit \$0\.02 after fills/);
+  });
+});
+
+describe('leg rules on real strike grids (v1.1.292)', () => {
+  it('takes the wing strike NEAREST short − 5% of spot even when none sits in 5–7.5% (CF, $5 strikes at ~$120)', () => {
+    // short 125 on a $121 stock: 120 is 4.1% below, 115 is 8.3% — the old 5–7.5% band rejected both.
+    const r = buildBullPutSpread([put(125, 4.0, 4.2, -0.31), put(120, 2.4, 2.5, -0.21), put(115, 1.4, 1.5, -0.13)], 121);
+    if (!('spread' in r)) throw new Error(r.reason);
+    expect(r.spread.long.strike).toBe(120); // |120 − 118.95| < |115 − 118.95|
+  });
+
+  it('finds a short when the strike grid straddles the old 0.25–0.35 band (DVN-like: 0.22 then 0.38)', () => {
+    const r = buildBullPutSpread([put(47.5, 1.3, 1.32, -0.38), put(45, 0.6, 0.62, -0.22), put(42.5, 0.25, 0.27, -0.10)], 47.8);
+    if (!('spread' in r)) throw new Error(r.reason);
+    expect(r.spread.short.strike).toBe(45);  // both 0.08 from 0.30 — the tie goes to the lower strike
+    expect(r.spread.long.strike).toBe(42.5);
   });
 });
 
@@ -171,6 +187,27 @@ describe('computeSpreadMode', () => {
   it('respects the per-position budget', () => {
     const r = computeSpreadMode({ db: seed(), slot: 'intraday', now: NOW, settings: { ...SETTINGS, maxLossPerPosition: 5000 } });
     expect(r.picks.map(p => p.ticker)).toEqual(['HHH', 'AAA', 'BIG']);
+  });
+
+  it('does not apply the earnings gate to an ETF, and stores no earnings date for it (v1.1.292)', () => {
+    const db = seed();
+    db.prepare(
+      `INSERT INTO brief_candidates (as_of_date, generated_at, strategy, ticker, composite_score, rank, disposition, slot)
+       VALUES (?, '2026-09-14T14:25:00.000Z', 'wheel', 'EWZ', 60, 1, 'picked', 'intraday')`,
+    ).run(TODAY);
+    db.prepare(`INSERT INTO constituents (ticker, index_name) VALUES ('EWZ', 'etf')`).run();
+    db.prepare(
+      `INSERT INTO spread_chain_capture (as_of_date, slot, captured_at, ticker, expiration, dte, reason, underlying_price, contract_count, puts_json)
+       VALUES (?, 'intraday', 'x', 'EWZ', ?, 28, 'entry', 100, 1, ?)`,
+    ).run(TODAY, EXP_28, JSON.stringify(GOOD_100));
+    // EWZ has no earnings row — before v1.1.292 it was rejected as "earnings date unknown".
+    const r = computeSpreadMode({ db, slot: 'intraday', now: NOW, settings: SETTINGS });
+    const ewz = r.picks.find(p => p.ticker === 'EWZ');
+    expect(ewz).toMatchObject({ expiration: EXP_28, earningsDate: null });
+    expect(r.rejections.find(x => x.ticker === 'EWZ')).toBeUndefined();
+    // A stock with no earnings row is still rejected.
+    expect(r.rejections.find(x => x.ticker === 'UNK')?.reason).toBe('earnings date unknown');
+    expect((db.prepare(`SELECT earnings_date FROM spread_mode_picks WHERE ticker = 'EWZ'`).get() as { earnings_date: string | null }).earnings_date).toBeNull();
   });
 
   it('does nothing when off, and never throws', () => {
