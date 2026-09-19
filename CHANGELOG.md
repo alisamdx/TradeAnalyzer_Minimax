@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.298] - 2026-09-19
+
+### The Spread Shadow page scrolls
+
+`section.main` hides its overflow, so every view must scroll itself; Spread Shadow did not, and anything past the window height was unreachable. New shared `.view-scroll` class (`flex: 1 1 auto; min-height: 0; overflow-y: auto`), applied to Spread Shadow and to Roll/Close and Constituents, which had the same shape. The positions table no longer has its own vertical scroll box, so the page scrolls as one.
+
+Details: `changelogs/v1.1.298_2026-09-19.md`.
+
 ## [1.1.297] - 2026-09-19
 
 ### Quality checks for the bull put spread's own captured chains

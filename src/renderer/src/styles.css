@@ -5715,3 +5715,13 @@ input[type='checkbox'] {
 /* Neutral, not a warning: the gap between cash+positions and net liq is normal whenever a short
    option is open — it is explanation, not a problem to fix. */
 .capital-note { font-size: 11px; color: var(--text-muted); line-height: 1.5; }
+
+/* A plain, scrollable page inside `.main` (which is a flex column with overflow:hidden, so a view
+   that does not scroll itself is clipped at the window edge — v1.1.298). `min-height: 0` is what
+   lets a flex child shrink far enough for `overflow-y` to engage. */
+.view-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px;
+}

@@ -106,7 +106,9 @@ export function SpreadShadowView() {
   const sc = report?.sectorCap;
 
   return (
-    <div style={{ padding: 16, maxWidth: 1240 }}>
+    // `view-scroll` makes the page scroll: `.main` is a flex column with overflow:hidden, so a view
+    // that does not scroll itself is clipped at the window edge (v1.1.298).
+    <div className="view-scroll" style={{ maxWidth: 1240 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
         <h2 style={{ margin: 0 }}>🪜 Bull Put Spread — Shadow</h2>
         <Pill color="var(--warning)" title="Picks are stored after every brief but never emailed, shown elsewhere or traded, until the enable gate passes">
@@ -231,7 +233,8 @@ export function SpreadShadowView() {
                 </button>
               ))}
             </div>
-            <div style={{ overflowX: 'auto', maxHeight: 520 }}>
+            {/* Only sideways: the page scrolls as one, so a nested vertical box would trap the wheel. */}
+            <div style={{ overflowX: 'auto' }}>
               <table style={{ borderCollapse: 'collapse', width: '100%' }}>
                 <thead>
                   <tr>

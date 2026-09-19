@@ -87,7 +87,7 @@ export function ConstituentsView() {
   const td: CSSProperties = { padding: '6px 10px', borderBottom: '1px solid var(--border)' };
 
   return (
-    <div style={{ padding: 16, maxWidth: 1000 }}>
+    <div className="view-scroll" style={{ maxWidth: 1000 }}>
       <h2 style={{ marginTop: 0 }}>📇 Index Constituents</h2>
       <p style={{ color: 'var(--text-muted)', marginTop: 0 }}>
         The S&P 500 and Russell 1000 lists the app tracks. Refreshed daily by the constituents job —

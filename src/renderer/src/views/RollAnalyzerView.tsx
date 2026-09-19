@@ -130,7 +130,7 @@ export function RollAnalyzerView() {
   const td: CSSProperties = { textAlign: 'right', padding: '5px 8px', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' };
 
   return (
-    <div style={{ padding: 16, maxWidth: 1120 }}>
+    <div className="view-scroll" style={{ maxWidth: 1120 }}>
       <h2 style={{ marginTop: 0 }}>🔄 Roll / Closure Analyzer</h2>
       <p style={{ color: 'var(--text-muted)', marginTop: 0 }}>
         For a single short option (cash-secured put or covered call) you hold — or want to model —

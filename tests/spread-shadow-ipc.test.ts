@@ -67,4 +67,11 @@ describe('the view is reachable', () => {
     const main = readFileSync(resolve('src/main/index.ts'), 'utf8');
     expect(main).toContain('registerSpreadModeIpc(db);');
   });
+
+  it('scrolls: `.main` clips a view that does not scroll itself (v1.1.298)', () => {
+    const css = readFileSync(resolve('src/renderer/src/styles.css'), 'utf8');
+    expect(css).toMatch(/\.view-scroll\s*\{[^}]*overflow-y:\s*auto[^}]*\}/);
+    expect(css).toMatch(/\.view-scroll\s*\{[^}]*min-height:\s*0[^}]*\}/); // or overflow-y never engages
+    expect(readFileSync(resolve('src/renderer/src/views/SpreadShadowView.tsx'), 'utf8')).toContain('className="view-scroll"');
+  });
 });
