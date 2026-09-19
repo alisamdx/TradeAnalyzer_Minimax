@@ -1,4 +1,5 @@
-import type { CheckDefinition, Evaluation } from '../check.js';
+import type { CheckContext, CheckDefinition, Evaluation } from '../check.js';
+import { FUND_TYPES } from './earnings-fundamentals.js';
 
 /**
  * Cross-cutting checks — 03 §3.1. These run on every table the run wrote.
@@ -126,8 +127,10 @@ export const QC008_PROVIDER_CAP: CheckDefinition = {
     'Until v1.1.252 the check fired on every capped response, including a date window whose halves ' +
     'the sweep then re-fetched uncapped in the same run: 3 blocking findings on 2026-09-16 for a ' +
     'sweep that had done exactly what the check asks. A capped `from`/`to` window now passes when ' +
-    'uncapped responses to the same endpoint in the same run cover every day of it.',
-  readsTables: ['meta_response'],
+    'uncapped responses to the same endpoint in the same run cover every day of it. Open findings from ' +
+    'earlier runs are re-judged against their own run, and a submissions finding on a fund closes since ' +
+    'funds left the EDGAR sweep.',
+  readsTables: ['meta_response', 'qa_exception', 'raw_ticker_reference'],
   testedQuantity: null,
   testedUnit: null,
   thresholds: {},
@@ -140,51 +143,132 @@ export const QC008_PROVIDER_CAP: CheckDefinition = {
       )
       .all(ctx.runId) as { source_response_id: number; endpoint: string; params_json: string }[];
 
-    if (capped.length === 0) return [{ key: 'run', fired: false }];
+    const covered = coveredBySubdivision(ctx);
+    const rejudged = rejudgeCapFindings(ctx, new Set(capped.map((r) => String(r.source_response_id))), covered);
+    if (capped.length === 0) return [{ key: 'run', fired: false }, ...rejudged];
 
-    const window = (paramsJson: string): { from: string; to: string } | null => {
-      try {
-        const p = JSON.parse(paramsJson) as Record<string, unknown>;
-        const iso = /^\d{4}-\d{2}-\d{2}$/;
-        return typeof p['from'] === 'string' && typeof p['to'] === 'string' && iso.test(p['from']) && iso.test(p['to'])
-          ? { from: p['from'], to: p['to'] }
-          : null;
-      } catch {
-        return null;
-      }
-    };
-    const uncapped = ctx.db.prepare(
-      `SELECT params_json FROM meta_response
-        WHERE run_id = ? AND endpoint = ? AND at_provider_cap = 0 AND parse_status = 'ok'`
-    );
-
-    return capped.map((r) => {
-      const parent = window(r.params_json);
-      let covered = false;
-      if (parent) {
-        const days = new Set<string>();
-        for (const row of uncapped.all(ctx.runId, r.endpoint) as { params_json: string }[]) {
-          const child = window(row.params_json);
-          if (!child || child.from < parent.from || child.to > parent.to) continue;
-          for (let d = child.from; d <= child.to; d = addUtcDays(d, 1)) days.add(d);
-        }
-        covered = true;
-        for (let d = parent.from; d <= parent.to; d = addUtcDays(d, 1)) {
-          if (!days.has(d)) { covered = false; break; }
-        }
-      }
+    return capped.map((r): Evaluation => {
+      const isCovered = covered(ctx.runId, r.endpoint, r.params_json);
       return {
         key: String(r.source_response_id),
-        fired: !covered,
-        detail: covered
+        fired: !isCovered,
+        detail: isCovered
           ? undefined
           : `${r.endpoint} returned exactly the provider cap and was not fully re-covered by uncapped ` +
             'responses in this run — treat as truncated',
-        evidence: { endpoint: r.endpoint, params: r.params_json, recoveredBySubdivision: covered }
+        evidence: { endpoint: r.endpoint, params: r.params_json, recoveredBySubdivision: isCovered }
       };
-    });
+    }).concat(rejudged);
   }
 };
+
+/**
+ * Whether a capped `from`/`to` response was re-covered, day by day, by uncapped responses to the
+ * same endpoint in `runId` — the v1.1.252 rule. A response without a date window is never covered.
+ */
+function coveredBySubdivision(ctx: CheckContext): (runId: number, endpoint: string, paramsJson: string) => boolean {
+  const window = (paramsJson: string): { from: string; to: string } | null => {
+    try {
+      const p = JSON.parse(paramsJson) as Record<string, unknown>;
+      const iso = /^\d{4}-\d{2}-\d{2}$/;
+      return typeof p['from'] === 'string' && typeof p['to'] === 'string' && iso.test(p['from']) && iso.test(p['to'])
+        ? { from: p['from'], to: p['to'] }
+        : null;
+    } catch {
+      return null;
+    }
+  };
+  const uncapped = ctx.db.prepare(
+    `SELECT params_json FROM meta_response
+      WHERE run_id = ? AND endpoint = ? AND at_provider_cap = 0 AND parse_status = 'ok'`
+  );
+  return (runId, endpoint, paramsJson) => {
+    const parent = window(paramsJson);
+    if (!parent) return false;
+    const days = new Set<string>();
+    for (const row of uncapped.all(runId, endpoint) as { params_json: string }[]) {
+      const child = window(row.params_json);
+      if (!child || child.from < parent.from || child.to > parent.to) continue;
+      for (let d = child.from; d <= child.to; d = addUtcDays(d, 1)) days.add(d);
+    }
+    for (let d = parent.from; d <= parent.to; d = addUtcDays(d, 1)) {
+      if (!days.has(d)) return false;
+    }
+    return true;
+  };
+}
+
+/**
+ * QC-008's open findings from EARLIER runs, judged again with what the database holds (v1.1.283).
+ *
+ * Each finding is keyed by a response from the run that raised it, and the check reads only the
+ * current run's responses, so an earlier finding is never looked at again. On 2026-09-18, 18 sat open:
+ *
+ * - **nine Finnhub calendar windows** raised before v1.1.252, each of which the same run's
+ *   subdivided sweep had in fact re-covered day by day. The current rule is applied to the
+ *   response's OWN run; covered closes `rule_changed`.
+ * - **iShares submissions responses** (IVV, IWD, IWF, IWM, IWO, IYR, and LQD from 2026-09-18 once
+ *   its run is an earlier one). EDGAR's sweep no longer asks for funds (v1.1.275), and the ticker's
+ *   reference says fund; closes `rule_changed`.
+ *
+ * What cannot be re-judged here stays open: whether a stock's submissions list reached back far
+ * enough depends on the oldest date in the response body, which lives only in the encrypted
+ * archive (JEF, JPM — v1.1.275 read them complete by hand; that is the operator's ruling to make).
+ */
+function rejudgeCapFindings(
+  ctx: CheckContext,
+  evaluatedToday: ReadonlySet<string>,
+  covered: (runId: number, endpoint: string, paramsJson: string) => boolean
+): Evaluation[] {
+  const open = ctx.db
+    .prepare(
+      `SELECT x.key, r.run_id, r.endpoint, r.params_json
+         FROM qa_exception x
+         JOIN meta_response r ON r.source_response_id = CAST(x.key AS INTEGER)
+        WHERE x.check_id = 'QC-008' AND x.state IN ('open', 'acknowledged')`
+    )
+    .all() as { key: string; run_id: number; endpoint: string; params_json: string }[];
+  const fund = ctx.db.prepare(
+    `SELECT security_type FROM raw_ticker_reference
+      WHERE ticker = ? AND security_type IN ${FUND_TYPES}
+      ORDER BY row_id DESC LIMIT 1`
+  );
+
+  const out: Evaluation[] = [];
+  for (const f of open) {
+    if (evaluatedToday.has(f.key)) continue; // this run's own response: today's reading decides
+    if (covered(f.run_id, f.endpoint, f.params_json)) {
+      out.push({
+        key: f.key, fired: false,
+        closesAs: {
+          kind: 'rule_changed',
+          note: `${f.endpoint} ${f.params_json}: re-covered day by day by run ${f.run_id}'s own uncapped ` +
+            'responses — raised before v1.1.252 counted a subdivided sweep as recovery'
+        }
+      });
+      continue;
+    }
+    if (f.endpoint.startsWith('/submissions/')) {
+      let ticker: unknown;
+      try {
+        ticker = (JSON.parse(f.params_json) as { ticker?: unknown }).ticker;
+      } catch {
+        continue;
+      }
+      const type = typeof ticker === 'string' ? (fund.get(ticker) as { security_type: string } | undefined) : undefined;
+      if (type) {
+        out.push({
+          key: f.key, fired: false,
+          closesAs: {
+            kind: 'rule_changed',
+            note: `${String(ticker)} is a fund (${type.security_type}); EDGAR's filings sweep has not asked for funds since v1.1.275`
+          }
+        });
+      }
+    }
+  }
+  return out;
+}
 
 function addUtcDays(date: string, days: number): string {
   const t = Date.parse(`${date}T00:00:00Z`) + days * 86_400_000;

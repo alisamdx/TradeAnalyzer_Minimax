@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.1.283] - 2026-09-19
+
+### QC-008 and QC-601 re-judge their stale findings under today's rules
+
+Both checks only read the current run's data, so a finding from an earlier run was never looked at again. Each now re-judges its open findings on the data they were raised from:
+
+- **QC-601 ×9** (AZO, COST, FERG, MTN, THO, LEN, GIS, JBL, MU): the current sweep-to-sweep rule is applied to every sweep pair in the runs each finding was seen in. None slipped. AZO's nearest date was 2026-09-22 in all six sweeps, and LEN and GIS rolled only after reporting. So all nine were the first rule reading two windows of one sweep, and they close `rule_changed`. A finding with any slipping pair would stay open.
+- **QC-008 ×15:** 9 Finnhub calendar windows that their own run had re-covered day by day (the v1.1.252 rule, applied to that run), and 6 iShares submissions responses from before funds left the EDGAR sweep (v1.1.275). All close `rule_changed`.
+- **JEF, JPM stay open:** whether their EDGAR list reached back far enough depends on the oldest date in the archived response body, and a check cannot read the archive. v1.1.275 read them complete by hand, so they need your `false_positive` ruling.
+
+Rehearsed on the 2026-09-18 snapshot: QC-601 9 → 0 open, QC-008 18 stale → 2 (plus this run's LQD, which closes on the next run by the fund rule), and the email's blocking backlog 133 → 109.
+
+`core` 0.6.38, `next` 0.4.26. Details: `changelogs/v1.1.283_2026-09-19.md`.
+
 ## [1.1.282] - 2026-09-19
 
 ### QC-603 and QC-905 close their stale findings, and say why

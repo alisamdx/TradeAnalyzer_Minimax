@@ -424,6 +424,49 @@ describe('the earnings calendar', () => {
     expect(qc008.filter((e) => e.fired)).toEqual([]);
   });
 
+  it('re-judges findings from EARLIER runs: a re-covered window and a fund close, a stock stays (v1.1.283)', () => {
+    // gen-002 on 2026-09-18: nine calendar windows raised before v1.1.252 that their own run had
+    // re-covered, and six iShares submissions responses from before funds left the EDGAR sweep.
+    const earlier = newRun();
+    const insert = raw.prepare(
+      `INSERT INTO meta_response (run_id, provider, endpoint, params_json, requested_at, http_status, byte_length,
+         archive_file, archive_offset, sha256, dedup_hash, encrypted, at_provider_cap, parse_status, parsed_row_count)
+       VALUES (?, ?, ?, ?, ?, 200, 1, 'f', 0, 'h', ?, 1, ?, 'ok', 0)`
+    );
+    const add = (provider: string, endpoint: string, params: object, cap: 0 | 1): number =>
+      Number(insert.run(earlier.runId, provider, endpoint, JSON.stringify(params), OBSERVED, `rj-${JSON.stringify(params)}`, cap).lastInsertRowid);
+    const window = add('finnhub', '/calendar/earnings', { from: '2026-10-01', to: '2026-10-10' }, 1);
+    add('finnhub', '/calendar/earnings', { from: '2026-10-01', to: '2026-10-05' }, 0);
+    add('finnhub', '/calendar/earnings', { from: '2026-10-06', to: '2026-10-10' }, 0);
+    const fund = add('edgar', '/submissions/CIK{cik}.json', { cik: '0001100663', ticker: 'IVV' }, 1);
+    const stock = add('edgar', '/submissions/CIK{cik}.json', { cik: '0000019617', ticker: 'JPM' }, 1);
+    const ref = raw.prepare(
+      `INSERT INTO raw_ticker_reference (run_id, as_of_date, observed_at, capture_rule_id, source_response_id, ticker, name,
+         security_type, market_cap_status, shares_outstanding_status, list_date, active, optionable_status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'omitted', 'omitted', NULL, 1, 'omitted')`
+    );
+    ref.run(earlier.runId, DATE, OBSERVED, ruleId(), fund, 'IVV', 'iShares Core S&P 500 ETF', 'ETF');
+    ref.run(earlier.runId, DATE, OBSERVED, ruleId(), stock, 'JPM', 'JPMorgan Chase', 'CS');
+
+    // Raised by the rules of the day: every capped response fired.
+    runGate(db(), makeHost(), {
+      runId: earlier.runId, tradingDate: DATE, domainsExpected: {},
+      checks: [{ ...QC008_PROVIDER_CAP, run: () => [window, fund, stock].map((id) => ({ key: String(id), fired: true, detail: 'capped' })) }]
+    });
+    raw.prepare("UPDATE meta_run SET status = 'complete' WHERE run_id = ?").run(earlier.runId);
+
+    // A later run with no capped response of its own.
+    const later = beginRun(db(), makeHost(), { kind: 'daily', tradingDate: '2026-09-08' });
+    runGate(db(), makeHost(), { runId: later.runId, tradingDate: '2026-09-08', domainsExpected: {}, checks: [QC008_PROVIDER_CAP] });
+
+    const state = (id: number) =>
+      raw.prepare("SELECT state, resolution_kind FROM qa_exception WHERE check_id = 'QC-008' AND key = ?").get(String(id));
+    expect(state(window)).toEqual({ state: 'resolved', resolution_kind: 'rule_changed' });
+    expect(state(fund)).toEqual({ state: 'resolved', resolution_kind: 'rule_changed' });
+    // Whether JPM's list reached far enough is in the archived body, which a check cannot read.
+    expect(state(stock)).toEqual({ state: 'open', resolution_kind: null });
+  });
+
   it('stops subdividing at a single day and leaves the cap recorded', async () => {
     // A one-day slice cannot be split further. The rows are kept and the cap
     // stays on the response row: knowing the answer is incomplete beats
@@ -949,6 +992,41 @@ describe('QC-601, the earnings truncation signature', () => {
     expect(evals).toHaveLength(1);
     expect(evals[0]!.fired).toBe(false);
     expect(evals[0]!.value).toBe(0);
+  });
+
+  it('closes a finding the first rule raised when no sweep pair in its runs slipped, and keeps a real slip (v1.1.283)', () => {
+    // AZO on gen-002: nearest date 2026-09-22 in every sweep, yet a finding "09-22 -> 12-07" from the
+    // first rule reading two windows of one sweep. It sat open, because the current rule compares
+    // only the latest two sweeps and never looks at it again.
+    const s2 = beginRun(db(), makeHost(), { kind: 'daily', tradingDate: '2026-09-08' });
+    insertEarnings([
+      { ticker: 'AZO', date: '2026-09-22', observedAt: SWEEP_1 },
+      { ticker: 'AZO', date: '2026-09-22', observedAt: SWEEP_2, runId: s2.runId, asOf: '2026-09-08' },
+      { ticker: 'AZO', date: '2026-12-07', observedAt: SWEEP_2, runId: s2.runId, asOf: '2026-09-08' },
+      { ticker: 'NVDA', date: '2026-09-25', observedAt: SWEEP_1 },
+      { ticker: 'NVDA', date: '2026-12-17', observedAt: SWEEP_2, runId: s2.runId, asOf: '2026-09-08' }
+    ]);
+    runGate(db(), makeHost(), {
+      runId: s2.runId, tradingDate: '2026-09-08', domainsExpected: {},
+      checks: [{
+        ...QC601_EARNINGS_SLIPS_LATER,
+        run: () => ['AZO:finnhub', 'NVDA:finnhub'].map((key) => ({ key, value: 76, fired: true, detail: 'slip' }))
+      }]
+    });
+
+    // A third sweep that changes nothing: today's rule has no pair to report for either ticker.
+    const s3 = beginRun(db(), makeHost(), { kind: 'daily', tradingDate: '2026-09-09' });
+    insertEarnings([
+      { ticker: 'AZO', date: '2026-09-22', observedAt: '2026-09-09T17:00:00-04:00', runId: s3.runId, asOf: '2026-09-09' },
+      { ticker: 'NVDA', date: '2026-12-17', observedAt: '2026-09-09T17:00:00-04:00', runId: s3.runId, asOf: '2026-09-09' }
+    ]);
+    runGate(db(), makeHost(), { runId: s3.runId, tradingDate: '2026-09-09', domainsExpected: {}, checks: [QC601_EARNINGS_SLIPS_LATER] });
+
+    const rows = Object.fromEntries(
+      (raw.prepare("SELECT key, state, resolution_kind FROM qa_exception WHERE check_id = 'QC-601'").all() as
+        { key: string; state: string; resolution_kind: string | null }[]).map((r) => [r.key, r.resolution_kind ?? r.state])
+    );
+    expect(rows).toEqual({ 'AZO:finnhub': 'rule_changed', 'NVDA:finnhub': 'open' });
   });
 
   it('does NOT fire when a date moves nearer, however far', () => {

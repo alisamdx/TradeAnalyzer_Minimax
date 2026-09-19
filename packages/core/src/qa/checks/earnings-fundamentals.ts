@@ -92,8 +92,9 @@ export const QC601_EARNINGS_SLIPS_LATER: CheckDefinition = {
     'For a ticker and source, the NEAREST FUTURE report date is not more than 14 days later than ' +
     'the nearest future date the previous sweep saw. A large later slip is the bulk-cap truncation ' +
     'signature: the cap drops the EARLIEST dates, so a truncated response reports the next quarter ' +
-    'as if it were the next report. The asymmetry is the point — nearer is unbounded, later is not.',
-  readsTables: ['raw_earnings_event'],
+    'as if it were the next report. The asymmetry is the point — nearer is unbounded, later is not. ' +
+    'Open findings are re-judged under this rule over the runs they were seen in.',
+  readsTables: ['raw_earnings_event', 'qa_exception'],
   testedQuantity: 'later_slip_days',
   testedUnit: 'days',
   thresholds: { maxLaterSlipDays: MAX_LATER_SLIP_DAYS },
@@ -142,7 +143,8 @@ export const QC601_EARNINGS_SLIPS_LATER: CheckDefinition = {
       ticker: string; source: string; new_date: string; new_as_of: string; prev_date: string;
     }[];
 
-    return rows.map((r) => {
+    const maxSlip = this.thresholds['maxLaterSlipDays'] as number;
+    const today = rows.map((r): Evaluation => {
       const slip = daysBetween(r.prev_date, r.new_date);
       // A date the issuer has already reported on rolls to the next quarter, and
       // that roll is the calendar working, not a slip. GIS moved 2026-09-15 ->
@@ -163,10 +165,76 @@ export const QC601_EARNINGS_SLIPS_LATER: CheckDefinition = {
           ticker: r.ticker, source: r.source, previous: r.prev_date, observed: r.new_date,
           slipDays: slip, rolledAfterReport
         }
-      } satisfies Evaluation;
+      };
     });
+    return today.concat(rejudgeSlipFindings(ctx, today, maxSlip));
   }
 };
+
+/**
+ * QC-601's open findings, judged again under the current sweep-to-sweep rule over the runs they
+ * were seen in (v1.1.283).
+ *
+ * The first rule compared a ticker's newest row with the row before it, and one sweep writes a row
+ * per subdivided window — so MU's 2026-09-30 and 2026-12-15, two real reports from two windows of
+ * ONE sweep, read as a 76-day slip. Seven of eight findings on 2026-09-17 were that artefact, and
+ * nine were still open on 2026-09-18 with nothing able to close them: the current rule compares
+ * only the latest two sweeps, so a finding from earlier sweeps is never looked at again.
+ *
+ * So each open finding gets the current rule applied to every sweep pair in the runs it was seen
+ * in: the nearest future date per run, a roll after the issuer reported excused. If no pair would
+ * fire, the finding came from the old rule and closes `rule_changed`. If any pair still fires, it
+ * is a real slip and stays open, whatever the latest sweep says.
+ */
+function rejudgeSlipFindings(ctx: CheckContext, today: readonly Evaluation[], maxSlip: number): Evaluation[] {
+  const evaluatedToday = new Set(today.map((e) => e.key));
+  const open = ctx.db
+    .prepare(
+      `SELECT key, first_seen_run_id, last_seen_run_id FROM qa_exception
+        WHERE check_id = 'QC-601' AND state IN ('open', 'acknowledged')`
+    )
+    .all() as { key: string; first_seen_run_id: number; last_seen_run_id: number }[];
+  const nearestByRun = ctx.db.prepare(
+    `SELECT run_id, as_of_date, MIN(report_date) AS near_date
+       FROM raw_earnings_event
+      WHERE ticker = ? AND source = ? AND report_date >= as_of_date
+      GROUP BY run_id
+      ORDER BY run_id`
+  );
+
+  const out: Evaluation[] = [];
+  for (const f of open) {
+    if (evaluatedToday.has(f.key)) continue; // today's reading decides it
+    const sep = f.key.lastIndexOf(':');
+    if (sep <= 0) continue;
+    const sweeps = nearestByRun.all(f.key.slice(0, sep), f.key.slice(sep + 1)) as
+      { run_id: number; as_of_date: string; near_date: string }[];
+
+    let pairs = 0;
+    let fires = false;
+    for (let i = 1; i < sweeps.length; i++) {
+      const prev = sweeps[i - 1]!;
+      const cur = sweeps[i]!;
+      if (cur.run_id < f.first_seen_run_id || cur.run_id > f.last_seen_run_id) continue;
+      pairs++;
+      const rolledAfterReport = prev.near_date < cur.as_of_date;
+      if (!rolledAfterReport && daysBetween(prev.near_date, cur.near_date) > maxSlip) { fires = true; break; }
+    }
+    if (fires) continue;
+    out.push({
+      key: f.key,
+      fired: false,
+      closesAs: {
+        kind: 'rule_changed',
+        note:
+          `re-judged sweep to sweep over runs ${f.first_seen_run_id}–${f.last_seen_run_id} (${pairs} ` +
+          `pair${pairs === 1 ? '' : 's'}): the nearest report date never slipped more than ${maxSlip} days — ` +
+          'raised by the first rule, which read two windows of one sweep as successive observations'
+      }
+    });
+  }
+  return out;
+}
 
 export const QC602_EARNINGS_SOURCE_DISAGREEMENT: CheckDefinition = {
   id: 'QC-602',
