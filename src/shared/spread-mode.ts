@@ -107,3 +107,85 @@ export interface SpreadModeResult {
   /** Set when the run itself failed; the brief is never affected. */
   error: string | null;
 }
+
+// ── Shadow report (src/main/services/spread-mode-settle.ts; the Spread Shadow view) ──────────────
+
+/** One shadow position as the settler sees it. Per share. */
+export interface ShadowPick {
+  id: number;
+  asOfDate: string;
+  slot: 'intraday' | 'after_close';
+  ticker: string;
+  expiration: string;
+  spot: number;
+  shortStrike: number;
+  longStrike: number;
+  netCredit: number;
+  maxLoss: number;
+}
+
+export type SpreadSettlement =
+  | { status: 'open'; marks: number; gaps: number; lastMarkDate: string | null; lastMidDebit: number | null }
+  | { status: 'target'; exitDate: string; exitSlot: string; exitDebit: number; returnOnMaxLoss: number; daysHeld: number; marks: number; gaps: number }
+  | { status: 'expired'; exitDate: string; expiryClose: number; exitDebit: number; returnOnMaxLoss: number; daysHeld: number; marks: number; gaps: number }
+  | { status: 'unsettleable'; reason: string; marks: number; gaps: number };
+
+export interface ShadowPickRow extends ShadowPick {
+  rank: number | null;
+  dte: number | null;
+  /** Later picks of the same ticker within EPISODE_DAYS of this entry, collapsed into it. */
+  repeats: number;
+  settlement: SpreadSettlement;
+  /** From `constituents.sector`; null when unknown (each such ticker is its own bucket for the cap). */
+  sector: string | null;
+  /** True when a book capped at `maxOpenPerSector` would NOT have opened this position. */
+  sectorCapSkipped: boolean;
+}
+
+/** One book's result: every position, or the sector-capped subset. */
+export interface BookSummary {
+  positions: number;
+  settled: number;
+  meanReturnOnMaxLoss: number | null;
+  winRate: number | null;
+}
+
+export type LegCause =
+  | 'no chain stored'
+  | 'no underlying price'
+  | 'chain carried no deltas'
+  | 'no put in the Δ band'
+  | 'Δ-band put not two-sided'
+  | 'no strike in the wing range'
+  | 'wing strike has no bid'
+  | 'legs present (another expiry was chosen)';
+
+export interface SpreadShadowReport {
+  asOf: string;
+  gate: {
+    intradayCaptureDays: number;
+    intradayCaptureDaysNeeded: number;
+    settledPositions: number;
+    settledPositionsNeeded: number;
+    meanReturnOnMaxLoss: number | null;
+    captureDaysMet: boolean;
+    settledMet: boolean;
+    meanPositive: boolean | null;
+  };
+  counts: { pickRows: number; positions: number; open: number; target: number; expired: number; unsettleable: number };
+  winRate: number | null;
+  medianDaysHeld: number | null;
+  runs: Array<{ asOfDate: string; slot: string; picks: number; rejected: number }>;
+  rejectionReasons: Array<{
+    reason: string;
+    n: number;
+    tickers: Array<{ ticker: string; n: number }>;
+    /** Only for the two missing-leg reasons: what the stored chain shows. */
+    causes: Array<{ cause: LegCause; n: number }>;
+  }>;
+  /** The sector cap (08 S9) simulated over the same positions — shadow picks are not capped. */
+  sectorCap: { cap: number; unknownSector: number; skipped: number; all: BookSummary; capped: BookSummary };
+  /** Currently open positions by sector and by expiry, largest first. */
+  concentration: { bySector: Array<{ key: string; n: number }>; byExpiry: Array<{ key: string; n: number }> };
+  positions: ShadowPickRow[];
+}

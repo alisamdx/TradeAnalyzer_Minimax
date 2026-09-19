@@ -163,6 +163,10 @@ change fixes a data gap. Picks are held to the target or expiry at 21–35 DTE, 
 for only 21 days after its entry, so a pick's last ~2 weeks could not be marked. Capture now tracks every
 picked series until it expires.*
 
+*Revision 2026-09-19 (v1.1.295): the report is also an in-app view, **🪜 Spread Shadow** (Intelligence). This is a
+reading surface for the operator, not the `on` panel of §3.9: it shows shadow results and the gate, never a
+pick to act on.*
+
 *Revision 2026-09-19 (v1.1.291): a position is a ticker **episode**, as in the #43 study. A pick within 14
 days of that ticker's last kept entry is a repeat, even with different strikes or expiry. The first week
 had EOG 145/135 (09-14) and EOG 140/130 (09-16) counted as two positions, which is one bet counted twice.

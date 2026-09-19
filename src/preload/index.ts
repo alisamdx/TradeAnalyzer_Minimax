@@ -131,6 +131,7 @@ import type {
 } from '@shared/types.js';
 import type { OwnAtStrikeRead } from '@shared/own-at-strike.js';
 import type { ShortlistResult } from '@shared/wheel-shortlist.js';
+import type { SpreadShadowReport } from '@shared/spread-mode.js';
 export type {
   ScreenPreset, ScreenCriteria, ScreenRunResult, ScreenResultRow, Universe,
   ConstituentsMeta, ConstituentRow, CachedQuote, AnalysisModeInfo, AnalysisRunResult,
@@ -1264,6 +1265,11 @@ type DicePickShape = {
     clearNonManual: () => invoke<number>('earnings:clearNonManual'),
   };
 
+  const spreadMode = {
+    /** Bull put spread shadow picks settled forward, and the 08 §4 enable-gate progress. Read-only. */
+    shadowReport: () => invoke<SpreadShadowReport>('spread-mode:shadow-report'),
+  };
+
   const briefReplay = {
     runRange:   (from: string, to: string) =>
       invoke<{ started: boolean }>('replay:run-range', from, to),
@@ -1312,7 +1318,7 @@ type DicePickShape = {
   };
 
   return {
-    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, historical, portfolio, alerts, optionsChain, agent, backtest, leapsCsp, collaredLeaps, testApi, etrade, filters, payoff, roll, pretradeValidator, ivHistory, opportunity, strategyLab, batch, scoring, paper, conviction, news, earnings, briefReplay, execution },
+    api: { watchlists, screen, quotes, analysis, validateAll, validate, jobs, settings, diagnostics, cache, historical, portfolio, alerts, optionsChain, agent, backtest, leapsCsp, collaredLeaps, testApi, etrade, filters, payoff, roll, pretradeValidator, ivHistory, opportunity, strategyLab, batch, scoring, paper, conviction, news, earnings, briefReplay, spreadMode, execution },
     dialog: {
       prompt: (opts: { title: string; defaultValue?: string }) =>
         invoke<string | null>('dialog:prompt', opts),

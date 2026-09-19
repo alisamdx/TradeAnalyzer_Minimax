@@ -87,6 +87,7 @@ import { NewsAIService } from './services/news-ai-service.js';
 import { registerNewsIpc } from './ipc/ipc-news.js';
 import { EarningsService } from './services/earnings-service.js';
 import { registerEarningsIpc } from './ipc/ipc-earnings.js';
+import { registerSpreadModeIpc } from './ipc/ipc-spread-mode.js';
 import { EarningsRefreshJob } from './services/jobs/earnings-refresh-job.js';
 import { PortfolioSyncJob } from './services/jobs/portfolio-sync-job.js';
 import { BatchOrchestratorJob } from './services/jobs/batch-orchestrator-job.js';
@@ -557,6 +558,7 @@ app.whenReady().then(() => {
   // v0.32.89 — Brief Replay (point-in-time scoring back-test)
   const briefReplayService = new BriefReplayService(db, scoringService);
   registerBriefReplayIpc(briefReplayService);
+  registerSpreadModeIpc(db);
 
   // v2 execution subsystem. The engine is assembled behind the ExecutionBroker seam and
   // starts `stopped`: constructing it opens no broker connection and places no orders.

@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.295] - 2026-09-19
+
+### 🪜 Spread Shadow: the bull put spread shadow report as an in-app view
+
+- New **🪜 Spread Shadow** screen (Intelligence), showing the same data as `scripts/spread-shadow-report.mjs`: enable-gate tiles with progress, the full vs 3-per-sector capped book, open concentration by sector and expiry, filterable positions with settlement or paper marks, rejection reasons with causes, and runs. Read-only.
+- New IPC `spread-mode:shadow-report` and preload `window.api.spreadMode.shadowReport()`. The report types moved to `@shared/spread-mode`.
+
+Details: `changelogs/v1.1.295_2026-09-19.md`.
+
 ## [1.1.294] - 2026-09-19
 
 ### Bull put spread (shadow): 3-per-sector cap simulated in the report

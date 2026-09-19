@@ -179,6 +179,30 @@ Not sure which structure fits? Open **🔬 Strategy Lab**, enter a ticker, and t
 
 **⭐ My Stocks** (Personal) is your conviction list. For each name you set three price bands — *buy here* / *experimental* / *never above*. When a stock drops into your buy zone you get a toast notification, a count badge on the sidebar, and a callout at the top of the Daily Brief.
 
+### 4.8 Watch the bull put spread in shadow
+
+**🪜 Spread Shadow** (Intelligence) shows the second strategy, the bull put credit spread, while it runs in
+**shadow**. After every Daily Brief the app builds up to five spreads from the wheel shortlist and stores them.
+Nothing is emailed or traded. This screen settles each one on the option quotes captured afterwards, so you can
+see whether the strategy earns its keep before it is switched on. Press **↻ Refresh** for the latest numbers.
+
+- **Enable gate** has three tiles, and the mode can be switched on only when all three are green:
+  - at least 15 days of captured intraday quotes (then the study is re-run on real costs);
+  - at least 30 settled positions;
+  - a mean return on max loss above zero.
+- **Sector cap** compares every shadow position with a book that holds at most 3 open positions per sector. It
+  shows whether the cap you chose costs or saves money. The chips show where open risk sits today, by sector
+  (amber at the cap, red over it) and by expiry date.
+- **Positions**, newest first. Filter by open, settled or unsettleable.
+  - A **50% target** exit is taken when the spread could be bought back for half its credit. **Expired** means it
+    ran to expiry and settled at intrinsic value.
+  - An *~italic* return on an open position is a paper value at the last quote. It is not a result and not a
+    signal to close: the strategy holds to the target or to expiry.
+  - **cap: skipped** marks a position the 3-per-sector book would not have opened.
+  - **+N** after a ticker means it was picked again within 14 days; that counts as the same position.
+- **Rejection reasons** list why candidates were refused, with the tickers, and for a missing option leg, what
+  the stored chain showed.
+
 ---
 
 ## 5. Screen map (what each view is for)
@@ -191,6 +215,7 @@ Not sure which structure fits? Open **🔬 Strategy Lab**, enter a ticker, and t
 **Intelligence**
 - **📋 Daily Brief** — today's top scored picks per strategy, with AI rationale + critic. Includes **🎲 Roll the Dice** (§4.1a): one wheel entry that clears every gate, or an explicit nothing.
 - **🪞 Retrospect** — paper-trade tracking of past picks; win rates and learnings.
+- **🪜 Spread Shadow** — the bull put spread strategy in shadow: its picks settled forward, the enable gate, and the 3-per-sector cap (§4.8).
 - **📅 Earnings** — earnings calendar (month/list) across the universe.
 - **🤖 Agent** — view/run the external autonomous TraderAgent.
 

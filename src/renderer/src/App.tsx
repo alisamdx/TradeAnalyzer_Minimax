@@ -37,10 +37,11 @@ import { ExecutionSettingsView } from './views/ExecutionSettingsView.js';
 import { MiscView } from './views/MiscView.js';
 import { ConstituentsView } from './views/ConstituentsView.js';
 import { RollAnalyzerView } from './views/RollAnalyzerView.js';
+import { SpreadShadowView } from './views/SpreadShadowView.js';
 
 declare const __APP_VERSION__: string;
 
-type View = 'watchlists' | 'screener' | 'filters' | 'analysis' | 'validate' | 'portfolio' | 'opportunity' | 'settings' | 'alerts' | 'data' | 'optionsChain' | 'payoff' | 'agent' | 'backtest' | 'testApi' | 'ivHistory' | 'knowledge' | 'strategyLab' | 'batch' | 'dailyBrief' | 'tradeScoring' | 'retrospect' | 'conviction' | 'newsResearch' | 'earningsCalendar' | 'briefReplay' | 'tradingDesk' | 'executionSettings' | 'misc' | 'constituents' | 'rollAnalyzer';
+type View = 'watchlists' | 'screener' | 'filters' | 'analysis' | 'validate' | 'portfolio' | 'opportunity' | 'settings' | 'alerts' | 'data' | 'optionsChain' | 'payoff' | 'agent' | 'backtest' | 'testApi' | 'ivHistory' | 'knowledge' | 'strategyLab' | 'batch' | 'dailyBrief' | 'tradeScoring' | 'retrospect' | 'conviction' | 'newsResearch' | 'earningsCalendar' | 'briefReplay' | 'tradingDesk' | 'executionSettings' | 'misc' | 'constituents' | 'rollAnalyzer' | 'spreadShadow';
 
 type NavEntry = {
   id: number;
@@ -711,6 +712,7 @@ export function App() {
       );
       case 'constituents': return <ConstituentsView />;
       case 'rollAnalyzer': return <RollAnalyzerView />;
+      case 'spreadShadow': return <SpreadShadowView />;
       case 'settings': return (
         <SettingsView
           etradeWarning={etradeWarning}
@@ -944,6 +946,12 @@ export function App() {
             onClick={() => navigateSidebar('briefReplay')}
           >
             ⏪ Replay
+          </button>
+          <button
+            className={`nav-btn ${currentView === 'spreadShadow' ? 'active' : ''}`}
+            onClick={() => navigateSidebar('spreadShadow')}
+          >
+            🪜 Spread Shadow
           </button>
 
           <button

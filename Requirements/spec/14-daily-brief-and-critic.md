@@ -122,6 +122,9 @@ Runs immediately after spread chain capture, from that run's captured chains (no
   progress against 08 §4, with each rejection reason's tickers and, for a missing leg, the cause read from the stored chain.
   It also simulates the operator's 3-per-sector cap (08 S9, v1.1.294), showing the capped book beside the full one,
   and open positions by sector and expiry. Shadow picks are not capped; the `on` mode will enforce it.
+- **View (v1.1.295):** 🪜 Spread Shadow (Intelligence) renders the same report in the app: gate tiles, the
+  full vs capped book, concentration chips, positions (filterable), rejection reasons and runs. IPC
+  `spread-mode:shadow-report`, preload `window.api.spreadMode.shadowReport()`. Read-only.
   `node scripts/spread-shadow-report.mjs` prints it. Chain capture tracks every picked series until expiry.
 - Acceptance: `tests/spread-mode.test.ts`, `tests/spread-mode-settle.test.ts`.
 
