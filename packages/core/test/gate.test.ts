@@ -393,6 +393,40 @@ describe('a check that changed its keying retires findings it can no longer prod
   });
 });
 
+describe('a check that threw and then ran cleanly closes its check_error finding (v1.1.289)', () => {
+  // QC-604 threw "no such column: trade_date" until v1.1.251 and ran cleanly on every run
+  // after, yet its check_error finding stayed open and blocking: no clean evaluation of the
+  // key `check_error` can exist, so nothing could ever close it.
+  function runs(...checks: CheckDefinition[]) {
+    const host = makeHost();
+    checks.forEach((check, i) => {
+      const date = `2026-09-0${i + 5}`;
+      const r = beginRun(db, host, { kind: 'daily', tradingDate: date });
+      runGate(db, host, { runId: r.runId, tradingDate: date, checks: [check] });
+      raw.prepare("UPDATE meta_run SET status='complete' WHERE run_id=?").run(r.runId);
+    });
+    return raw.prepare("SELECT state, resolution_kind FROM qa_exception WHERE key = 'check_error'").get() as
+      { state: string; resolution_kind: string | null };
+  }
+  const throws = fakeCheck({ evals: () => { throw new Error('no such column: trade_date'); } });
+
+  it('resolves it as rule_changed, by the gate, once the check runs without throwing', () => {
+    const row = runs(throws, fakeCheck({ evals: () => [{ key: 'AAPL', value: 0, fired: false }] }));
+    expect(row).toEqual({ state: 'resolved', resolution_kind: 'rule_changed' });
+    const ev = raw.prepare("SELECT actor, note FROM qa_exception_event WHERE to_state = 'resolved'").get() as { actor: string; note: string };
+    expect(ev.actor).toBe('gate');
+    expect(ev.note).toContain('ran without throwing');
+  });
+
+  it('also resolves it when the recovered check evaluates nothing — not throwing is the evidence', () => {
+    expect(runs(throws, fakeCheck({ evals: () => [] })).state).toBe('resolved');
+  });
+
+  it('keeps it open while the check still throws', () => {
+    expect(runs(throws, throws).state).toBe('open');
+  });
+});
+
 describe('usability is derived, never stored on the run', () => {
   it('marks a domain-day unusable while a blocking exception is open, and usable when it is not', () => {
     const host = makeHost();

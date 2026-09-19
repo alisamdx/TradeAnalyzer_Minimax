@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.289] - 2026-09-19
+
+### The gate closes a check's `check_error` finding once the check stops throwing
+
+A check that throws is recorded as one blocking `check_error` finding, and nothing could close it: a recovered check never evaluates that key. QC-604's pre-v1.1.251 error was still in the blocking backlog on 2026-09-18. Whether a check threw is something the gate observes itself, so now, when a check completes without throwing, the gate resolves its `check_error` finding as `rule_changed`.
+
+### Existing app: no chain request for an expiration the ticker does not list
+
+`getNearTermExpirations` guessed Fridays for every ticker, and on 2026-09-18 that cost 5,295 E*Trade calls answered 400 ("There are no options for the given month"), mostly weeklies of monthly-only tickers in the options snapshot and premium-history jobs. The guesses are now intersected with the ticker's listed expirations, fetched once per ET day. Dates are only removed, so the chosen contracts are unchanged. A failed or empty listing falls back to the old guesses.
+
+`core` 0.6.44, `next` 0.4.32. Details: `changelogs/v1.1.289_2026-09-19.md`.
+
 ## [1.1.288] - 2026-09-19
 
 ### R3: provisional bars are re-fetched final before the gate

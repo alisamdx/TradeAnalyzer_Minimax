@@ -199,6 +199,13 @@ export function runGate(
         evaluatedClean.add(fp);
         if (e.closesAs) closers.set(fp, e.closesAs);
       }
+      // A `check_error` finding says the check threw. This run it did not, which the gate
+      // observed itself — a fact about the check, like a retired key shape, so the gate closes
+      // it. No clean evaluation of the key `check_error` can ever exist to close it otherwise.
+      closers.set(fingerprint(def.id, def.domain, 'check_error'), {
+        kind: 'rule_changed',
+        note: `${def.id} ran without throwing on this run; the error this finding recorded no longer occurs`
+      });
     }
     if (fired.length > 0) checksFired++;
     if (evaluations.length === 0) vacuous.push(def.id);

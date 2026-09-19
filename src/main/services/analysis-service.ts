@@ -418,6 +418,47 @@ export function wheelExpirationOrder(expirations: string[], monthlyFirst: boolea
   return [...monthlies, ...rest];
 }
 
+/**
+ * Drops the guessed Fridays a ticker has no listed expiration on, so a chain is never requested
+ * for a date the provider will answer "There are no options for the given month" (E*Trade 10031).
+ * On 2026-09-18 that was 5,295 wasted calls, almost all for the 2nd/4th/5th Friday weeklies of
+ * tickers that list only monthlies (NewApp/requirements/04-collector.md §10).
+ *
+ * It only ever REMOVES dates the provider does not list, so every chain that was fetched before
+ * is still fetched, in the same order, and the chosen contract is unchanged. Anything short of a
+ * usable list — a throw, or an empty list, which a transient HTTP 204 also produces — falls back
+ * to the guesses, i.e. to the old behaviour, and is not cached. A good list is cached per ticker
+ * for the ET day: listed expirations change at most once a session, and the wheel snapshot and
+ * the premium-history job ask about the same tickers within the hour.
+ */
+export class ListedExpirationFilter {
+  private readonly cache = new Map<string, { day: string; listed: ReadonlySet<string> }>();
+
+  constructor(
+    private readonly today: () => string = () =>
+      new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
+  ) {}
+
+  async filter(ticker: string, guessed: string[], fetchListed: () => Promise<string[]>): Promise<string[]> {
+    const day = this.today();
+    const key = ticker.toUpperCase();
+    let hit = this.cache.get(key);
+    if (hit?.day !== day) {
+      let listed: string[];
+      try {
+        listed = await fetchListed();
+      } catch {
+        return guessed;
+      }
+      if (listed.length === 0) return guessed;
+      hit = { day, listed: new Set(listed) };
+      this.cache.set(key, hit);
+    }
+    const listed = hit.listed;
+    return guessed.filter((d) => listed.has(d));
+  }
+}
+
 export function wheelOptionLiquidityScore(
   contract: { bid: number; ask: number; openInterest: number | null; volume: number | null } | null,
   graded = wheelGradedLiquidityEnabled()
@@ -476,6 +517,8 @@ export class AnalysisService {
     this.quoteCache = new QuoteCache(db);
     this.fundamentalsCache = new FundamentalsCache(db);
   }
+
+  private readonly listedExpirations = new ListedExpirationFilter();
 
   /** Cancel the running analysis. */
   cancel(): void {
@@ -1555,6 +1598,13 @@ export class AnalysisService {
   }
 
   private async getNearTermExpirations(ticker: string, count = 7): Promise<string[]> {
+    const guessed = this.guessNearTermFridays(count);
+    const provider = this.optionsProvider;
+    if (!provider) return guessed;
+    return this.listedExpirations.filter(ticker, guessed, () => provider.getOptionsExpirations(ticker));
+  }
+
+  private guessNearTermFridays(count: number): string[] {
     // Generate next `count` Fridays starting from the upcoming one (or today if Friday).
     // We look out enough weeks to cover the 30–45 DTE window.
     // Holiday Fridays (market closed) shift the expiry back to Thursday.
