@@ -247,6 +247,7 @@ h2 { font-size: 15px; margin: 0; font-weight: 600; }
 }
 .chain-grid tr.is-atm td, .chain-grid tr.is-atm .strike { background: rgba(200, 150, 40, 0.12); }
 .chain-grid td.is-sticky { box-shadow: inset 0 0 0 1px var(--accent-dim); }
+.chain-grid td.is-unusable { opacity: 0.35; text-decoration: line-through; }
 .pin { color: var(--accent); margin-left: 4px; }
 
 .tabs { align-items: center; display: flex; gap: 4px; margin: 12px 0; }

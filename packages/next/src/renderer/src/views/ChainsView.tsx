@@ -30,6 +30,20 @@ const PIN_LABEL: Readonly<Record<string, string>> = {
   manual: 'pinned manually'
 };
 
+/** The provider's Greek columns — the ones QC-410 can declare unusable for a ticker and date. */
+const GREEK_COLUMNS: ReadonlySet<string> = new Set(['delta', 'gamma', 'theta', 'vega']);
+
+function cellClass(
+  stickyReason: string | null | undefined,
+  column: string,
+  greeks: ChainGridDto['greeks']
+): string {
+  const classes: string[] = [];
+  if (stickyReason) classes.push('is-sticky');
+  if (greeks && !greeks.usable && GREEK_COLUMNS.has(column)) classes.push('is-unusable');
+  return classes.join(' ');
+}
+
 export function ChainsView({ readOnly = false }: { readOnly?: boolean }) {
   const [dates, setDates] = useState<readonly string[]>([]);
   const [date, setDate] = useState<string | null>(null);
@@ -134,6 +148,12 @@ export function ChainsView({ readOnly = false }: { readOnly?: boolean }) {
             QC-407 compares against the Polygon snapshot. Click a contract for its history, and to pin it
             for study.
           </p>
+          {grid.greeks && !grid.greeks.usable && (
+            <div className="notice notice-refused">
+              Greeks not usable on this date — E*Trade&apos;s deltas imply a different price than this
+              chain&apos;s own quotes (QC-410). Prices, IV and open interest are unaffected. {grid.greeks.detail}
+            </div>
+          )}
           <div className="grid-scroll">
             <table className="chain-grid">
               <thead>
@@ -154,7 +174,7 @@ export function ChainsView({ readOnly = false }: { readOnly?: boolean }) {
                     {grid.columns.map((c, i) => (
                       <td
                         key={`c-${c.key}`}
-                        className={row.call?.stickyReason ? 'is-sticky' : ''}
+                        className={cellClass(row.call?.stickyReason, c.key, grid.greeks)}
                         onClick={() => {
                           if (!row.call) return;
                           void window.api.chains
@@ -176,7 +196,7 @@ export function ChainsView({ readOnly = false }: { readOnly?: boolean }) {
                     {grid.columns.map((c, i) => (
                       <td
                         key={`p-${c.key}`}
-                        className={row.put?.stickyReason ? 'is-sticky' : ''}
+                        className={cellClass(row.put?.stickyReason, c.key, grid.greeks)}
                         onClick={() => {
                           if (!row.put) return;
                           void window.api.chains

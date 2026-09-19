@@ -14,7 +14,8 @@ import { bsDelta, impliedSpotFromDelta, normCdf, paritySpot } from '../src/qa/bl
 import {
   QC407_UNDERLYING_DISAGREEMENT,
   QC410_GREEK_REPRODUCTION,
-  QC414_GREEK_SCALE
+  QC414_GREEK_SCALE,
+  greekConsistencyFor
 } from '../src/qa/checks/chains.js';
 
 /**
@@ -323,5 +324,33 @@ describe('QC-407, chain underlying vs the Polygon close', () => {
     expect(evals).toHaveLength(1);
     expect(evals[0]!.key).toBe(`coverage:${DATE}`);
     expect(evals[0]!.fired).toBe(true);
+  });
+});
+
+describe('greekConsistencyFor — QC-410\'s verdict for one ticker, for a reader (v1.1.272)', () => {
+  it('agrees with the check on every ticker, flagged or not', () => {
+    captureRate();
+    captureChain('AAA', 100);
+    captureChain('WSM', 147, { greekSpot: 141 });
+    captureChain('PCTY', 147, { greekSpot: 117.6 });
+    for (const e of QC410_GREEK_REPRODUCTION.run(ctx())) {
+      const v = greekConsistencyFor(db(), DATE, e.key);
+      expect(v, e.key).not.toBeNull();
+      expect(v!.usable, e.key).toBe(!e.fired);
+      expect(v!.detail, e.key).toBe(e.detail);
+    }
+    expect(greekConsistencyFor(db(), DATE, 'WSM')?.usable).toBe(false);
+    expect(greekConsistencyFor(db(), DATE, 'AAA')?.usable).toBe(true);
+  });
+
+  it('reads only the ticker asked for', () => {
+    captureRate();
+    captureChain('WSM', 147, { greekSpot: 141 });
+    expect(greekConsistencyFor(db(), DATE, 'AAA')).toBeNull();
+  });
+
+  it('is null with no 3-month rate, rather than judging against a default', () => {
+    captureChain('WSM', 147, { greekSpot: 141 });
+    expect(greekConsistencyFor(db(), DATE, 'WSM')).toBeNull();
   });
 });

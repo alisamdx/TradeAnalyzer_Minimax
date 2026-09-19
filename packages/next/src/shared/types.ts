@@ -205,6 +205,12 @@ export interface ChainGridDto {
   readonly underlyingPrice: number | null;
   readonly columns: readonly ViewColumn[];
   readonly rows: readonly ChainRowDto[];
+  /**
+   * QC-410's verdict on this ticker's provider Greeks for the date (v1.1.272). `usable: false`
+   * means E*Trade's deltas imply a different price than the chain's own quotes. Null when
+   * nothing could be judged (no 3M rate, too few near-the-money contracts).
+   */
+  readonly greeks: { readonly usable: boolean; readonly detail: string } | null;
 }
 
 export interface ExpirationOptionDto {

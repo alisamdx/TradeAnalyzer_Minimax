@@ -1,3 +1,4 @@
+import { greekConsistencyFor, type SqliteLike } from '@tradeanalyzer/core';
 import { currentDb } from './generation.js';
 import { cellsFor, viewColumns } from './view-columns.js';
 import type {
@@ -148,7 +149,11 @@ export function chainGrid(ticker: string, asOfDate: string, expirationDate: stri
     expirationDate,
     underlyingPrice: underlying,
     columns: LEG_COLUMNS,
-    rows: grid
+    rows: grid,
+    // QC-410's own verdict for the ticker and date, not a copy of its exception row:
+    // an exception's dates are overwritten every run, so it cannot say what held on
+    // a past date, while recomputing from the stored chain always can.
+    greeks: greekConsistencyFor(db as unknown as SqliteLike, asOfDate, ticker)
   };
 }
 

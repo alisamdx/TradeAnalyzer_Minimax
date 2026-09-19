@@ -19,6 +19,7 @@ export {
   CHAIN_CHECKS, ACCOUNT_CHECKS, EARNINGS_FUNDAMENTALS_CHECKS, MACRO_CHECKS
 } from './registry.js';
 export { bsDelta, normCdf, impliedSpotFromDelta, paritySpot } from './black-scholes.js';
+export { greekConsistencyFor } from './checks/chains.js';
 export {
   acknowledge, bulkAcknowledge, resolve, accept, expireAcceptances, recordTickerReuse, reviewQueue,
   OperatorActionRefused, DEFAULT_ACCEPTANCE_DAYS, MAX_ACCEPTANCE_DAYS

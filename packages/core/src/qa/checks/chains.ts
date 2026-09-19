@@ -451,7 +451,7 @@ interface GreekRow {
  * and measuring both copies counted each twice (126,396 observations of 63,198
  * contracts on 2026-09-15). Null when no rate is stored.
  */
-function loadAtmGreeks(ctx: CheckContext): { rate: number; rows: GreekRow[] } | null {
+function loadAtmGreeks(ctx: CheckContext, ticker?: string): { rate: number; rows: GreekRow[] } | null {
   const rate = ctx.db
     .prepare(
       `SELECT yield FROM raw_treasury_yield
@@ -462,19 +462,23 @@ function loadAtmGreeks(ctx: CheckContext): { rate: number; rows: GreekRow[] } | 
   // Skipped, not failed: without a rate there is no comparison to make, and
   // claiming one from a default would be exactly the fabrication P4 forbids.
   if (!rate) return null;
+  // One ticker for a reader (`greekConsistencyFor`), every ticker for the check.
+  const only = ticker === undefined ? '' : 'AND ticker = ?';
   const rows = ctx.db
     .prepare(
       `SELECT s.osi_symbol, s.ticker, s.strike, s."right", s.iv, s.delta, s.bid, s.ask,
               s.underlying_price, s.expiration_date
          FROM raw_option_contract_snapshot s
          JOIN (SELECT osi_symbol, MAX(observed_at) AS latest FROM raw_option_contract_snapshot
-                WHERE as_of_date = ? GROUP BY osi_symbol) m
+                WHERE as_of_date = ? ${only} GROUP BY osi_symbol) m
            ON m.osi_symbol = s.osi_symbol AND m.latest = s.observed_at
         WHERE s.as_of_date = ? AND s.iv_status = 'ok' AND s.greeks_status = 'ok'
           AND s.delta IS NOT NULL AND s.underlying_price > 0
           AND ABS(s.strike - s.underlying_price) <= s.underlying_price * ?`
     )
-    .all(ctx.tradingDate, ctx.tradingDate, ATM_BAND) as GreekRow[];
+    .all(...(ticker === undefined
+      ? [ctx.tradingDate, ctx.tradingDate, ATM_BAND]
+      : [ctx.tradingDate, ticker, ctx.tradingDate, ATM_BAND])) as GreekRow[];
   return { rate: rate.yield, rows };
 }
 
@@ -536,103 +540,136 @@ export const QC410_GREEK_REPRODUCTION: CheckDefinition = {
     }
 
     const maxGap = this.thresholds['maxSpotDisagreement']!;
-    const mid = (r: GreekRow | undefined): number | null =>
-      r && r.bid !== null && r.ask !== null && r.bid > 0 && r.ask > r.bid &&
-      (r.ask - r.bid) / ((r.ask + r.bid) / 2) <= MAX_PARITY_SPREAD
-        ? (r.bid + r.ask) / 2
-        : null;
-
     const evaluations: Evaluation[] = [];
     for (const [ticker, list] of [...byTicker].sort((a, b) => a[0].localeCompare(b[0]))) {
-      const implied: number[] = [];
-      for (const r of list) {
-        const dteDays = dteOn(ctx.tradingDate, r.expiration_date);
-        if (!invertible(r.delta, dteDays)) continue;
-        const spot = impliedSpotFromDelta({
-          delta: r.delta, nearSpot: r.underlying_price, strike: r.strike, dteDays, iv: r.iv, rate, right: r.right
-        });
-        if (spot !== null) implied.push(spot);
-      }
-
-      const pairs = new Map<string, { call?: GreekRow; put?: GreekRow }>();
-      for (const r of list) {
-        const k = `${r.expiration_date}|${r.strike}`;
-        const pair = pairs.get(k) ?? {};
-        pair[r.right] = r;
-        pairs.set(k, pair);
-      }
-      const parity: number[] = [];
-      for (const { call, put } of pairs.values()) {
-        const callMid = mid(call);
-        const putMid = mid(put);
-        if (!call || callMid === null || putMid === null) continue;
-        const spot = paritySpot({
-          callMid, putMid, strike: call.strike, dteDays: dteOn(ctx.tradingDate, call.expiration_date), rate
-        });
-        if (spot !== null) parity.push(spot);
-      }
-
-      const chainSpot = list[0]!.underlying_price;
-      const quoteSpot = parity.length >= MIN_PARITY_PAIRS ? median(parity) : null;
-
-      // The worst case cannot be inverted. Greeks computed off a price far enough
-      // away pin every near-the-money delta at 0 or 1 (PCTY's $140 put read -1.000
-      // on a 147.32 close), so a ticker judged only on invertible contracts would
-      // drop out of the check at exactly the moment it is most wrong. A provider
-      // delta that is pinned where our model at the chain's spot is plainly not
-      // (0.2-0.8) is the same finding, read directly.
-      let pinned = 0;
-      for (const r of list) {
-        const dteDays = dteOn(ctx.tradingDate, r.expiration_date);
-        // Out of [-1, 1] is not pinned, it is a unit fault: QC-414's finding, feed-wide.
-        if (dteDays < 1 || Math.abs(r.delta) > 1 || (Math.abs(r.delta) >= 0.05 && Math.abs(r.delta) <= 0.95)) continue;
-        const model = bsDelta({ spot: chainSpot, strike: r.strike, dteDays, iv: r.iv, rate, right: r.right });
-        if (model !== null && Math.abs(model) >= 0.2 && Math.abs(model) <= 0.8) pinned++;
-      }
-
-      const measurable = implied.length >= MIN_IMPLIED_CONTRACTS;
-      if (!measurable && pinned < MIN_IMPLIED_CONTRACTS) continue;
-      const deltaSpot = measurable ? median(implied) : null;
-      // The Greeks are consistent if they agree with EITHER reading of the price.
-      // A dividend before expiry separates the two, and which one a provider's
-      // Greeks follow depends on whether its model prices the dividend: EIX's
-      // matched the chain and not parity, BBY's matched parity (90.97 vs 91.17)
-      // and not the chain (92.45). A broken Greek engine is far from both (AIZ
-      // 12.2 % and 12.0 %). Measured on 2026-09-16: 7 of 33 flagged tickers were
-      // within 1 % of one reading, and every one of them was a dividend-shaped gap.
-      // With no invertible contracts the disagreement has no size, only a
-      // direction; 1 stands for "beyond anything the spot comparison can measure".
-      const gapChain = deltaSpot === null ? 1 : Math.abs(deltaSpot / chainSpot - 1);
-      const gapParity = deltaSpot === null || quoteSpot === null ? null : Math.abs(deltaSpot / quoteSpot - 1);
-      const gap = gapParity === null ? gapChain : Math.min(gapChain, gapParity);
-      const fired = gap > maxGap || pinned >= MIN_IMPLIED_CONTRACTS;
-      evaluations.push({
-        key: ticker,
-        value: gap,
-        fired,
-        detail:
-          (deltaSpot === null
-            ? `${ticker}: ${pinned} near-the-money deltas pinned at 0 or 1 on a chain at ${chainSpot}`
-            : `${ticker}: Greeks imply spot ${deltaSpot.toFixed(2)} on a chain at ${chainSpot} ` +
-              `(${(gapChain * 100).toFixed(1)}% apart${pinned > 0 ? `, ${pinned} deltas pinned` : ''})`) +
-          (quoteSpot === null
-            ? ''
-            : `; option quotes imply ${quoteSpot.toFixed(2)}${gapParity === null ? '' : ` (${(gapParity * 100).toFixed(1)}% apart)`}`) +
-          '; provider delta is not usable for strike selection on this ticker today',
-        evidence: {
-          ticker,
-          deltaImpliedSpot: deltaSpot,
-          paritySpot: quoteSpot,
-          chainUnderlying: chainSpot,
-          impliedContracts: implied.length,
-          pinnedContracts: pinned,
-          parityPairs: parity.length
-        }
-      });
+      const e = assessTickerGreeks(ticker, list, ctx.tradingDate, rate, maxGap);
+      if (e) evaluations.push(e);
     }
     return evaluations;
   }
 };
+
+/**
+ * Whether one ticker's provider Greeks are usable on one date — QC-410's verdict, for a
+ * reader (v1.1.272). TradeAnalyzer 2's chain view showed E*Trade's deltas with no sign that
+ * the gate had flagged them, on the 50-70 tickers a day whose Greeks imply a different price
+ * than the chain's own quotes. Same code path as the check, so the two cannot disagree.
+ *
+ * Null when there is nothing to judge: no 3M rate stored, or too few near-the-money contracts.
+ */
+export function greekConsistencyFor(
+  db: CheckContext['db'],
+  tradingDate: string,
+  ticker: string
+): { readonly usable: boolean; readonly detail: string } | null {
+  const loaded = loadAtmGreeks({ db, runId: 0, tradingDate, observedAt: '' }, ticker);
+  if (!loaded || loaded.rows.length === 0) return null;
+  const e = assessTickerGreeks(
+    ticker, loaded.rows, tradingDate, loaded.rate,
+    QC410_GREEK_REPRODUCTION.thresholds['maxSpotDisagreement']!
+  );
+  return e ? { usable: !e.fired, detail: e.detail ?? '' } : null;
+}
+
+function assessTickerGreeks(
+  ticker: string,
+  list: readonly GreekRow[],
+  tradingDate: string,
+  rate: number,
+  maxGap: number
+): Evaluation | null {
+  const mid = (r: GreekRow | undefined): number | null =>
+    r && r.bid !== null && r.ask !== null && r.bid > 0 && r.ask > r.bid &&
+    (r.ask - r.bid) / ((r.ask + r.bid) / 2) <= MAX_PARITY_SPREAD
+      ? (r.bid + r.ask) / 2
+      : null;
+
+  const implied: number[] = [];
+  for (const r of list) {
+    const dteDays = dteOn(tradingDate, r.expiration_date);
+    if (!invertible(r.delta, dteDays)) continue;
+    const spot = impliedSpotFromDelta({
+      delta: r.delta, nearSpot: r.underlying_price, strike: r.strike, dteDays, iv: r.iv, rate, right: r.right
+    });
+    if (spot !== null) implied.push(spot);
+  }
+
+  const pairs = new Map<string, { call?: GreekRow; put?: GreekRow }>();
+  for (const r of list) {
+    const k = `${r.expiration_date}|${r.strike}`;
+    const pair = pairs.get(k) ?? {};
+    pair[r.right] = r;
+    pairs.set(k, pair);
+  }
+  const parity: number[] = [];
+  for (const { call, put } of pairs.values()) {
+    const callMid = mid(call);
+    const putMid = mid(put);
+    if (!call || callMid === null || putMid === null) continue;
+    const spot = paritySpot({
+      callMid, putMid, strike: call.strike, dteDays: dteOn(tradingDate, call.expiration_date), rate
+    });
+    if (spot !== null) parity.push(spot);
+  }
+
+  const chainSpot = list[0]!.underlying_price;
+  const quoteSpot = parity.length >= MIN_PARITY_PAIRS ? median(parity) : null;
+
+  // The worst case cannot be inverted. Greeks computed off a price far enough
+  // away pin every near-the-money delta at 0 or 1 (PCTY's $140 put read -1.000
+  // on a 147.32 close), so a ticker judged only on invertible contracts would
+  // drop out of the check at exactly the moment it is most wrong. A provider
+  // delta that is pinned where our model at the chain's spot is plainly not
+  // (0.2-0.8) is the same finding, read directly.
+  let pinned = 0;
+  for (const r of list) {
+    const dteDays = dteOn(tradingDate, r.expiration_date);
+    // Out of [-1, 1] is not pinned, it is a unit fault: QC-414's finding, feed-wide.
+    if (dteDays < 1 || Math.abs(r.delta) > 1 || (Math.abs(r.delta) >= 0.05 && Math.abs(r.delta) <= 0.95)) continue;
+    const model = bsDelta({ spot: chainSpot, strike: r.strike, dteDays, iv: r.iv, rate, right: r.right });
+    if (model !== null && Math.abs(model) >= 0.2 && Math.abs(model) <= 0.8) pinned++;
+  }
+
+  const measurable = implied.length >= MIN_IMPLIED_CONTRACTS;
+  if (!measurable && pinned < MIN_IMPLIED_CONTRACTS) return null;
+  const deltaSpot = measurable ? median(implied) : null;
+  // The Greeks are consistent if they agree with EITHER reading of the price.
+  // A dividend before expiry separates the two, and which one a provider's
+  // Greeks follow depends on whether its model prices the dividend: EIX's
+  // matched the chain and not parity, BBY's matched parity (90.97 vs 91.17)
+  // and not the chain (92.45). A broken Greek engine is far from both (AIZ
+  // 12.2 % and 12.0 %). Measured on 2026-09-16: 7 of 33 flagged tickers were
+  // within 1 % of one reading, and every one of them was a dividend-shaped gap.
+  // With no invertible contracts the disagreement has no size, only a
+  // direction; 1 stands for "beyond anything the spot comparison can measure".
+  const gapChain = deltaSpot === null ? 1 : Math.abs(deltaSpot / chainSpot - 1);
+  const gapParity = deltaSpot === null || quoteSpot === null ? null : Math.abs(deltaSpot / quoteSpot - 1);
+  const gap = gapParity === null ? gapChain : Math.min(gapChain, gapParity);
+  const fired = gap > maxGap || pinned >= MIN_IMPLIED_CONTRACTS;
+  return {
+    key: ticker,
+    value: gap,
+    fired,
+    detail:
+      (deltaSpot === null
+        ? `${ticker}: ${pinned} near-the-money deltas pinned at 0 or 1 on a chain at ${chainSpot}`
+        : `${ticker}: Greeks imply spot ${deltaSpot.toFixed(2)} on a chain at ${chainSpot} ` +
+          `(${(gapChain * 100).toFixed(1)}% apart${pinned > 0 ? `, ${pinned} deltas pinned` : ''})`) +
+      (quoteSpot === null
+        ? ''
+        : `; option quotes imply ${quoteSpot.toFixed(2)}${gapParity === null ? '' : ` (${(gapParity * 100).toFixed(1)}% apart)`}`) +
+      '; provider delta is not usable for strike selection on this ticker today',
+    evidence: {
+      ticker,
+      deltaImpliedSpot: deltaSpot,
+      paritySpot: quoteSpot,
+      chainUnderlying: chainSpot,
+      impliedContracts: implied.length,
+      pinnedContracts: pinned,
+      parityPairs: parity.length
+    }
+  };
+}
 
 export const QC414_GREEK_SCALE: CheckDefinition = {
   id: 'QC-414',

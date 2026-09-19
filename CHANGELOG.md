@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.272] - 2026-09-18
+
+### TradeAnalyzer 2's chain view marks Greeks QC-410 found unusable
+
+QC-410's 50–70 nightly findings are correct and will recur — E\*Trade's deltas imply a different price than its own quotes (AMG 418.46 on a 355.80 chain). TradeAnalyzer has guarded itself since v1.1.255; TradeAnalyzer 2's Chains view did not, and showed those deltas as if usable. It now shows a notice and strikes through delta/gamma/theta/vega when QC-410 judges the ticker's Greeks unusable for that date, using `core`'s new `greekConsistencyFor` — the check's own code, recomputed from the stored chain. Found alongside: 11,468 stale contract-keyed QC-410 exceptions from before v1.1.252 still sit `open`; left for a separate decision.
+
+`core` 0.6.27, `next` 0.4.15. Details: `changelogs/v1.1.272_2026-09-18.md`.
+
 ## [1.1.271] - 2026-09-18
 
 ### QC-701: SEC's companyfacts is behind for IQV and JCI, and the fact queue could not tell
