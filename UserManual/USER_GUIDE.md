@@ -200,6 +200,9 @@ see whether the strategy earns its keep before it is switched on. Press **↻ Re
     signal to close: the strategy holds to the target or to expiry.
   - **cap: skipped** marks a position the 3-per-sector book would not have opened.
   - **+N** after a ticker means it was picked again within 14 days; that counts as the same position.
+- **Capture quality** checks the option quotes the results rest on: how many days were captured, marks missing
+  a leg, and positions that were not re-quoted on a day the capture ran. "✓ nothing to look at" is the normal
+  state. Anything listed is worth a look, because a missed quote cannot be recovered later.
 - **Rejection reasons** list why candidates were refused, with the tickers, and for a missing option leg, what
   the stored chain showed.
 

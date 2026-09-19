@@ -165,6 +165,16 @@ change fixes a data gap. Picks are held to the target or expiry at 21–35 DTE, 
 for only 21 days after its entry, so a pick's last ~2 weeks could not be marked. Capture now tracks every
 picked series until it expires.*
 
+*Revision 2026-09-19 (v1.1.297): the captures the gate rests on get their own checks. `spread_chain_capture` is
+written by TradeAnalyzer, so **TradeAnalyzer 2's quality gate says nothing about it**, and a silent capture
+failure would decide §4 by shrinking or distorting the sample. `spread-capture-quality.ts` reports four, all
+warnings and none blocking: SC-1 the capture has stopped while positions are open; SC-2 a live position was not
+re-quoted on a day the capture ran (unrecoverable marks); SC-3 too many captures missing one of the two legs;
+SC-4 an open position whose both-leg quotes have not moved for three captures. SC-2 compares against the days
+the capture ran at all, so it needs no trading calendar and cannot fire on a holiday. Shown in the report, the
+view and the script. **The proper fix stays (b):** move this capture into the collector once TA2 is promoted,
+so it inherits the gate and the duplicate E*Trade fetching ends.*
+
 *Revision 2026-09-19 (v1.1.296): the operator's numbers are editable in **Settings → Strategies** — mode
 (shadow/off), max loss per position, max open positions, max open per sector — instead of being code defaults.
 `writeSpreadModeSettings` is the single writer and clamps every value; the screen renders what was stored, not

@@ -24,6 +24,7 @@ import type { DbHandle } from '../db/connection.js';
 import type { CapturedPut } from './spread-chain-capture.js';
 import { fillPrice } from './options-fill.js';
 import { readSpreadModeSettings } from './spread-mode.js';
+import { assessCaptureQuality, type PositionCapture } from './spread-capture-quality.js';
 import {
   SPREAD_MODE_PROFILE as P,
   type BookSummary, type LegCause, type ShadowPick, type ShadowPickRow, type SpreadSettlement, type SpreadShadowReport,
@@ -227,16 +228,32 @@ export function buildSpreadShadowReport(db: DbHandle, todayEt: string): SpreadSh
   const closeStmt = db.prepare(
     `SELECT close FROM historical_prices WHERE ticker = ? AND date <= ? AND date >= ? ORDER BY date DESC LIMIT 1`,
   );
+  const captures: PositionCapture[] = [];
   for (const p of positions.values()) {
     const marks: ShadowMark[] = [];
     for (const m of marksStmt.all(p.ticker, p.expiration, p.asOfDate) as Array<{ as_of_date: string; slot: 'intraday' | 'after_close'; puts_json: string }>) {
       try { marks.push({ asOfDate: m.as_of_date, slot: m.slot, puts: JSON.parse(m.puts_json) as CapturedPut[] }); } catch { /* an unreadable mark is a gap */ }
     }
+    // What the capture actually delivered for this series, for the quality checks (v1.1.297).
+    const live = marks.filter(m => m.asOfDate > p.asOfDate && m.asOfDate <= p.expiration)
+      .sort((a, b) => a.asOfDate.localeCompare(b.asOfDate) || slotOrder(a.slot) - slotOrder(b.slot));
+    captures.push({
+      ticker: p.ticker, asOfDate: p.asOfDate, expiration: p.expiration, status: 'open',
+      markDates: [...new Set(live.map(m => m.asOfDate))],
+      quotes: live.map(m => {
+        const s = leg(m.puts, p.shortStrike), l = leg(m.puts, p.longStrike);
+        return s && l ? ([s.bid, s.ask, l.bid, l.ask] as const) : null;
+      }),
+    });
     // A holiday expiry settles on the last session before it (at most four days back).
     const floor = new Date(Date.parse(`${p.expiration}T00:00:00Z`) - 4 * 86_400_000).toISOString().slice(0, 10);
     const close = (closeStmt.get(p.ticker, p.expiration, floor) as { close: number } | undefined)?.close ?? null;
     p.settlement = settleSpreadPick(p, marks, close, todayEt);
+    captures[captures.length - 1]!.status = p.settlement.status;
   }
+  const captureDays = (db.prepare('SELECT DISTINCT as_of_date AS d FROM spread_chain_capture ORDER BY d').all() as Array<{ d: string }>)
+    .map(r => r.d);
+  const captureQuality = assessCaptureQuality(captures, captureDays, todayEt);
 
   const list = [...positions.values()];
 
@@ -332,6 +349,7 @@ export function buildSpreadShadowReport(db: DbHandle, todayEt: string): SpreadSh
       bySector: tally(openNow.map(p => p.sector ?? '(unknown)')),
       byExpiry: tally(openNow.map(p => p.expiration)),
     },
+    captureQuality,
     positions: list,
   };
 }

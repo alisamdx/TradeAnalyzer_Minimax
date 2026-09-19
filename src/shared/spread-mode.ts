@@ -198,5 +198,29 @@ export interface SpreadShadowReport {
   sectorCap: { cap: number; unknownSector: number; skipped: number; all: BookSummary; capped: BookSummary };
   /** Currently open positions by sector and by expiry, largest first. */
   concentration: { bySector: Array<{ key: string; n: number }>; byExpiry: Array<{ key: string; n: number }> };
+  /** Quality of the captures the settlements rest on (v1.1.297). */
+  captureQuality: CaptureQualityReport;
   positions: ShadowPickRow[];
+}
+
+/** A capture-quality prompt to look at something; never a blocker. see spread-capture-quality.ts */
+export interface CaptureQualityFinding {
+  /** SC-1 capture stopped · SC-2 a live position was not re-quoted · SC-3 leg gaps · SC-4 unchanged quotes. */
+  code: 'SC-1' | 'SC-2' | 'SC-3' | 'SC-4';
+  severity: 'warning';
+  detail: string;
+  subjects: string[];
+}
+
+export interface CaptureQualityReport {
+  captureDays: number;
+  lastCaptureDate: string | null;
+  /** Captures with both legs usable, and those missing one. */
+  marks: number;
+  gaps: number;
+  gapRate: number | null;
+  /** Captures a live position should have had (days the capture ran at all), and how many are absent. */
+  expectedMarks: number;
+  missingMarks: number;
+  findings: CaptureQualityFinding[];
 }

@@ -832,6 +832,12 @@ Operator profile: short put **0.35 ≤ |delta| ≤ 0.45**, **14 ≤ DTE ≤ 30**
   `writeSpreadModeSettings`; the sector cap is never stored above the position cap. **Total max loss** = `contracts × max loss × 100`.
 - **Ranking** — return on risk descending, ties by ticker; keep 5. Unvalidated.
 
+**Capture quality** (`spread-capture-quality.ts`, v1.1.297). Over the same captures, warnings only:
+- **SC-1** — no capture for ≥ 4 days while positions are open (or none ever).
+- **SC-2** — a live position has no row on a date the capture ran for other series; `missingMarks` counts them.
+- **SC-3** — `gaps ÷ (marks + gaps) > 5%`, a capture present but missing one of the two legs.
+- **SC-4** — an open position's four quote numbers identical across the last 3 captures.
+
 **Shadow settlement** (`spread-mode-settle.ts`, v1.1.290 — the 08 §4.2 gate). Recomputed on every read, never stored.
 - **Marks** — `spread_chain_capture` rows of the same ticker + expiry strictly after the entry (date, then
   intraday < after_close), up to expiry. A leg is usable when `ask > 0` and `0 ≤ bid ≤ ask`; a mark missing

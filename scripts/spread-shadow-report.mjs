@@ -40,6 +40,16 @@ console.log(`  ${mark(g.settledMet)} settled positions         ${g.settledPositi
 console.log(`  ${mark(g.meanPositive)} mean return on max loss   ${pct(g.meanReturnOnMaxLoss)}   (must be > 0)`);
 console.log(`\n  win rate ${pct(r.winRate)} · median days held ${r.medianDaysHeld ?? '—'}`);
 
+const cq = r.captureQuality;
+if (cq) {
+  console.log(`\n## Capture quality (${cq.findings.length === 0 ? 'clean' : `${cq.findings.length} to look at`})\n`);
+  console.log(`  ${cq.captureDays} capture day(s), last ${cq.lastCaptureDate ?? '—'} · marks ${cq.marks} · missing a leg ${cq.gaps} (${pct(cq.gapRate)}) · not re-quoted ${cq.missingMarks} of ${cq.expectedMarks} expected`);
+  for (const f of cq.findings) {
+    console.log(`  ! ${f.code}  ${f.detail}`);
+    for (const s of f.subjects) console.log(`        ${s}`);
+  }
+}
+
 const sc = r.sectorCap;
 if (sc) {
   const book = (b) => `${b.positions} positions · ${b.settled} settled · mean ${pct(b.meanReturnOnMaxLoss)} · win ${pct(b.winRate)}`;

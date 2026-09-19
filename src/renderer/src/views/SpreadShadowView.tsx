@@ -150,6 +150,33 @@ export function SpreadShadowView() {
             </div>
           </div>
 
+          {/* ── Capture quality ── */}
+          <div style={card}>
+            <h3 style={h3}>
+              Capture quality{' '}
+              <span style={muted}>(the quotes every settlement rests on — TradeAnalyzer 2&apos;s gate does not check this table)</span>
+            </h3>
+            <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', alignItems: 'baseline' }}>
+              <span>{report.captureQuality.captureDays} capture days</span>
+              <span style={muted}>last {report.captureQuality.lastCaptureDate ?? '—'}</span>
+              <span style={muted}>marks {report.captureQuality.marks}</span>
+              <span style={muted}>missing a leg {report.captureQuality.gaps} ({pct(report.captureQuality.gapRate)})</span>
+              <span style={muted}>not re-quoted {report.captureQuality.missingMarks} of {report.captureQuality.expectedMarks}</span>
+            </div>
+            {report.captureQuality.findings.length === 0 ? (
+              <div style={{ marginTop: 10, color: 'var(--success)' }}>✓ nothing to look at</div>
+            ) : (
+              <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {report.captureQuality.findings.map(f => (
+                  <div key={f.code + f.detail} style={{ borderLeft: '3px solid var(--warning)', paddingLeft: 10 }}>
+                    <div><Pill color="var(--warning)">{f.code}</Pill> <span style={{ marginLeft: 6 }}>{f.detail}</span></div>
+                    {f.subjects.length > 0 && <div style={{ ...muted, marginTop: 3 }}>{f.subjects.join(' · ')}</div>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* ── Sector cap + concentration ── */}
           <div style={card}>
             <h3 style={h3}>Sector cap <span style={muted}>({sc.cap} open per sector — simulated; shadow picks are not capped)</span></h3>

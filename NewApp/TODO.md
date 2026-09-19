@@ -243,6 +243,9 @@ short 0.20–0.30Δ, credit ≥ 30% of width, IVR ≥ ~30; exit 50% profit / 15 
     `--capital 25000 --risk 2500`. Max open positions still to be given (10 placeholder).
     **v1.1.294:** Q2 answered: at most 3 open positions per sector (08 S9). Simulated in the shadow report now;
     the `on` mode must enforce it.
+    **v1.1.297:** `spread_chain_capture` has its own quality checks (SC-1…SC-4) in the report — TA2's gate does
+    not judge that table. **Open:** move the spread capture into the collector after TA2 is promoted, so it
+    inherits the gate and the duplicate E*Trade chain fetching (TA1 capture + TA2 chain subset) ends.
 45. **Revisit the v2 engine's 2× stop on wheel put spreads.** The engine trades wheel as a put spread with
     a 50% target and a 2× stop, validated in June with no costs; #43 found the stop + time stop halved a
     portfolio's result and a 1× stop was negative once costs exist. Needs an FR-SEY-5 replay on the

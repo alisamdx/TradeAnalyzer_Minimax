@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.297] - 2026-09-19
+
+### Quality checks for the bull put spread's own captured chains
+
+The enable gate is decided on `spread_chain_capture`, which TradeAnalyzer writes and TradeAnalyzer 2's quality gate never judged. Four warning-level checks now cover it: the capture stopping while positions are open (SC-1), a live position not re-quoted on a day the capture ran (SC-2), captures missing one of the two legs (SC-3), and quotes that have not moved in three captures (SC-4). Shown in 🪜 Spread Shadow, the report script and the API. Moving this capture into the collector after promotion remains the proper fix.
+
+Details: `changelogs/v1.1.297_2026-09-19.md`.
+
 ## [1.1.296] - 2026-09-19
 
 ### Settings → Strategies: the bull put spread's risk numbers are editable

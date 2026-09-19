@@ -125,6 +125,10 @@ Runs immediately after spread chain capture, from that run's captured chains (no
   progress against 08 §4, with each rejection reason's tickers and, for a missing leg, the cause read from the stored chain.
   It also simulates the operator's 3-per-sector cap (08 S9, v1.1.294), showing the capped book beside the full one,
   and open positions by sector and expiry. Shadow picks are not capped; the `on` mode will enforce it.
+- **Capture quality (v1.1.297):** `spread-capture-quality.ts` checks the captures the settlements rest on —
+  SC-1 capture stopped, SC-2 a live position not re-quoted on a day the capture ran, SC-3 leg-gap rate > 5%,
+  SC-4 quotes unchanged over three captures. Warnings only; nothing blocks a pick. TradeAnalyzer 2's gate does
+  not cover `spread_chain_capture`, which is why these exist.
 - **View (v1.1.295):** 🪜 Spread Shadow (Intelligence) renders the same report in the app: gate tiles, the
   full vs capped book, concentration chips, positions (filterable), rejection reasons and runs. IPC
   `spread-mode:shadow-report`, preload `window.api.spreadMode.shadowReport()`. Read-only.
