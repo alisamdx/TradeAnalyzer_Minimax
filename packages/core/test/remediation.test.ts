@@ -159,6 +159,28 @@ describe('R6 — a ticker\'s splits and dividends, re-fetched around an unexplai
     expect(report.deferred).toBe(1);
   });
 
+  it('spends the cap on the OLDEST findings first, not the alphabet (v1.1.286)', async () => {
+    // 2026-09-18, R6's first run: the 60-ticker cap stopped before W, and WULF — among the oldest
+    // findings open — waited a run while tickers first seen later were re-fetched.
+    const older = raiseDiscontinuities(['ZZZ 2022-03-11']);
+    raw.prepare("UPDATE meta_run SET status = 'complete' WHERE run_id = ?").run(older);
+    const host = makeHost();
+    const later = beginRun(db, host, { kind: 'daily', tradingDate: '2026-09-18' });
+    runGate(db, host, {
+      runId: later.runId, tradingDate: '2026-09-18',
+      checks: [{
+        ...QC204_DISCONTINUITY,
+        run: () => ['AAA 2024-01-05', 'ZZZ 2022-03-11'].map((key) => ({ key, value: 0.9, fired: true, detail: 'step' }))
+      }]
+    });
+
+    expect(r6Candidates(db, later.runId).map((c) => c.ticker)).toEqual(['ZZZ', 'AAA']);
+    const report = await runR6ActionRefetch(makeHost(), db, { runId: later.runId, tradingDate: '2026-09-18', maxTickers: 1 });
+    expect(report.deferred).toBe(1);
+    expect(attemptsOn('ZZZ 2022-03-11')).toHaveLength(1);
+    expect(attemptsOn('AAA 2024-01-05')).toHaveLength(0);
+  });
+
   it('ignores findings from an earlier run — it remediates what THIS run raised', async () => {
     const first = raiseDiscontinuities(['AAOI 2022-09-16']);
     const second = beginRun(db, makeHost(), { kind: 'manual', tradingDate: DATE }).runId;

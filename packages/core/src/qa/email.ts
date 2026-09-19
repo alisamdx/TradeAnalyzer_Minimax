@@ -83,6 +83,33 @@ function summariseByCheck(rows: readonly ExceptionRow[]): string[] {
   return out;
 }
 
+/**
+ * R6's outcome as the email reports it (v1.1.286). The collector's report carried a `deferred`
+ * count from the day R6 shipped and nothing rendered it: on 2026-09-18 WULF was left for a later
+ * run by the per-run cap, and the only record was a job result nobody reads. A remediation that
+ * did work — or chose not to — belongs beside the findings it works on.
+ */
+export type R6Summary =
+  | {
+      readonly attempted: number;
+      readonly succeeded: number;
+      readonly failed: number;
+      readonly findingsMarked: number;
+      readonly deferred: number;
+      readonly cap: number;
+    }
+  | { readonly error: string };
+
+function r6Line(r6: R6Summary): string {
+  if ('error' in r6) return `REMEDIATION  R6 (splits/dividends re-fetch) did not run: ${r6.error}`;
+  if (r6.attempted === 0 && r6.deferred === 0) return 'REMEDIATION  R6 (splits/dividends re-fetch): nothing to re-fetch';
+  return (
+    `REMEDIATION  R6 (splits/dividends re-fetch): ${r6.attempted} ticker${r6.attempted === 1 ? '' : 's'} ` +
+    `(${r6.succeeded} ok, ${r6.failed} failed), ${r6.findingsMarked} finding${r6.findingsMarked === 1 ? '' : 's'} marked` +
+    (r6.deferred > 0 ? ` · ${r6.deferred} deferred to a later run (cap ${r6.cap} per run, oldest first)` : '')
+  );
+}
+
 export function buildStatusEmail(
   db: SqliteLike,
   args: {
@@ -97,6 +124,8 @@ export function buildStatusEmail(
     readonly finishedAt: string;
     readonly domains: Readonly<Record<string, { expected: number; stored: number }>>;
     readonly pilotTargetDays?: number;
+    /** What R6 did this run, or why it did not run. Absent: the caller ran no remediation. */
+    readonly r6?: R6Summary;
   }
 ): EmailModel {
   const open = db
@@ -224,6 +253,11 @@ export function buildStatusEmail(
     );
   }
   lines.push('');
+
+  if (args.r6 !== undefined) {
+    lines.push(r6Line(args.r6));
+    lines.push('');
+  }
 
   if (stopped.length > 0) {
     // Listed explicitly rather than quietly dropped. "It went away" is exactly

@@ -498,6 +498,27 @@ describe('the status email', () => {
     expect(email.html).toContain('<pre');
   });
 
+  it('reports what R6 did, what it deferred, and when it did not run (v1.1.286)', () => {
+    // 2026-09-18: the per-run cap deferred WULF and nothing rendered the count.
+    const host = makeHost();
+    const run = beginRun(db, host, { kind: 'daily', tradingDate: '2026-09-06' });
+    const base = {
+      runId: run.runId, tradingDate: '2026-09-06', slot: 'after_close', verdict: 'green' as const,
+      generationNo: 1, generationStatus: 'pilot', collectorVersion: '0.1.0',
+      startedAt: '2026-09-06T17:05:00-04:00', finishedAt: '2026-09-06T17:31:00-04:00', domains: {}
+    };
+
+    const ran = buildStatusEmail(db, { ...base, r6: { attempted: 60, succeeded: 59, failed: 1, findingsMarked: 121, deferred: 1, cap: 60 } });
+    expect(ran.text).toContain(
+      'REMEDIATION  R6 (splits/dividends re-fetch): 60 tickers (59 ok, 1 failed), 121 findings marked · 1 deferred to a later run (cap 60 per run, oldest first)'
+    );
+    expect(buildStatusEmail(db, { ...base, r6: { attempted: 0, succeeded: 0, failed: 0, findingsMarked: 0, deferred: 0, cap: 60 } }).text)
+      .toContain('R6 (splits/dividends re-fetch): nothing to re-fetch');
+    expect(buildStatusEmail(db, { ...base, r6: { error: 'polygon 503' } }).text)
+      .toContain('R6 (splits/dividends re-fetch) did not run: polygon 503');
+    expect(buildStatusEmail(db, base).text).not.toContain('REMEDIATION');
+  });
+
   it('names the checks that evaluated nothing, which a fired count cannot distinguish from clean', () => {
     // QC-602 sat at evaluated 0 for the whole of gen-002 because it joined on a
     // source the collector never fetches. The gate computed `checksVacuous` and

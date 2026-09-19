@@ -9,7 +9,7 @@ import { runEventsPhase } from './phases/events.js';
 import { runDerivePhase } from './phases/derive.js';
 import { checksFor } from '../qa/registry.js';
 import { runGate, type Verdict } from '../qa/gate.js';
-import { runR6ActionRefetch, type R6Report } from './remediation.js';
+import { runR6ActionRefetch, R6_MAX_TICKERS_PER_RUN, type R6Report } from './remediation.js';
 import { buildStatusEmail } from '../qa/email.js';
 import { COLLECTOR_VERSION } from '../version.js';
 
@@ -157,12 +157,14 @@ export async function runDaily(
   // gone quiet (03 §6). A failure here never fails the run — a remediation that
   // could halt collection would be worse than the finding it chases.
   let remediation: R6Report | undefined;
+  let r6Error: string | undefined;
   try {
     remediation = await runR6ActionRefetch(host, db, {
       runId: run.runId, tradingDate: args.tradingDate
     });
   } catch (err) {
-    phaseErrors.push(`remediation R6: ${err instanceof Error ? err.message : String(err)}`);
+    r6Error = err instanceof Error ? err.message : String(err);
+    phaseErrors.push(`remediation R6: ${r6Error}`);
   }
 
   const finishedAt = host.nowET();
@@ -178,7 +180,16 @@ export async function runDaily(
     collectorVersion: COLLECTOR_VERSION,
     startedAt: run.startedAt,
     finishedAt,
-    domains
+    domains,
+    ...(remediation
+      ? {
+          r6: {
+            attempted: remediation.tickersAttempted, succeeded: remediation.tickersSucceeded,
+            failed: remediation.tickersFailed, findingsMarked: remediation.exceptionsMarked,
+            deferred: remediation.deferred, cap: R6_MAX_TICKERS_PER_RUN
+          }
+        }
+      : r6Error !== undefined ? { r6: { error: r6Error } } : {})
   });
 
   let emailSent = false;

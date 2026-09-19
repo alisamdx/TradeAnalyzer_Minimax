@@ -87,7 +87,7 @@ interface Candidate {
 }
 
 /**
- * Tickers with an unexplained discontinuity that has not been remediated yet.
+ * Tickers with an unexplained discontinuity that has not been remediated yet, oldest finding first.
  *
  * One entry per TICKER, not per finding: SOLS carried 21 QC-204 findings and a
  * ticker's splits and dividends are one fetch whatever the number of steps. The
@@ -98,16 +98,15 @@ interface Candidate {
 export function r6Candidates(db: SqliteLike, runId: number): readonly Candidate[] {
   const rows = db
     .prepare(
-      `SELECT exception_id, key, remediations_json FROM qa_exception
+      `SELECT exception_id, key, remediations_json, first_seen_run_id FROM qa_exception
         WHERE check_id = 'QC-204'
           AND state IN ('open', 'acknowledged')
           AND still_firing = 1
-          AND last_seen_run_id = ?
-        ORDER BY key`
+          AND last_seen_run_id = ?`
     )
-    .all(runId) as { exception_id: number; key: string; remediations_json: string }[];
+    .all(runId) as { exception_id: number; key: string; remediations_json: string; first_seen_run_id: number }[];
 
-  const byTicker = new Map<string, { ids: number[]; dates: string[] }>();
+  const byTicker = new Map<string, { ids: number[]; dates: string[]; oldestRun: number; oldestId: number }>();
   for (const r of rows) {
     let attempts: { code?: string }[] = [];
     try {
@@ -119,13 +118,22 @@ export function r6Candidates(db: SqliteLike, runId: number): readonly Candidate[
 
     const [ticker, date] = r.key.split(' ');
     if (!ticker || !date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
-    const entry = byTicker.get(ticker) ?? { ids: [], dates: [] };
+    const entry = byTicker.get(ticker) ?? { ids: [], dates: [], oldestRun: r.first_seen_run_id, oldestId: r.exception_id };
     entry.ids.push(r.exception_id);
     entry.dates.push(date);
+    entry.oldestRun = Math.min(entry.oldestRun, r.first_seen_run_id);
+    entry.oldestId = Math.min(entry.oldestId, r.exception_id);
     byTicker.set(ticker, entry);
   }
 
-  return [...byTicker.entries()].map(([ticker, e]) => {
+  // Oldest finding first, so the per-run cap drains the queue in the order the findings arrived
+  // (v1.1.286). It was alphabetical: on R6's first run (2026-09-18) the 60-ticker cap stopped at
+  // the letters before W, and WULF — whose findings dated from run 5, among the oldest open —
+  // waited another run. The ticker is only the tie-break, so the order is still deterministic.
+  const ordered = [...byTicker.entries()].sort(([ta, a], [tb, b]) =>
+    a.oldestRun - b.oldestRun || a.oldestId - b.oldestId || (ta < tb ? -1 : ta > tb ? 1 : 0)
+  );
+  return ordered.map(([ticker, e]) => {
     const sorted = [...e.dates].sort();
     return {
       ticker,

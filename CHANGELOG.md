@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.286] - 2026-09-19
+
+### R6 re-fetches the oldest findings first, and the gate email says what it did
+
+R6 (re-fetching a ticker's splits and dividends around an unexplained price step) takes at most 60 tickers a run. On its first live run (2026-09-18) it took them alphabetically, so WULF, whose findings dated from run 5 and were among the oldest open, was deferred behind tickers first seen later. The deferral was invisible: R6's report counted it and nothing rendered the count.
+
+- **Oldest first:** candidates are ordered by their oldest unattempted finding (`first_seen_run_id`, then `exception_id`), with the ticker only as a tie-break.
+- **In the email:** a `REMEDIATION` line, e.g. *"R6 (splits/dividends re-fetch): 60 tickers (59 ok, 1 failed), 121 findings marked · 1 deferred to a later run (cap 60 per run, oldest first)"*. It says "nothing to re-fetch" on a quiet run and "did not run: …" when R6 threw.
+
+WULF itself needs no action. Monday's R6 reaches it, and a rehearsal with a simulated successful re-fetch closes all four of its findings as verified genuine moves.
+
+`core` 0.6.41, `next` 0.4.29. Details: `changelogs/v1.1.286_2026-09-19.md`.
+
 ## [1.1.285] - 2026-09-19
 
 ### Findings on a ticker that left the subset close from the recorded exit
