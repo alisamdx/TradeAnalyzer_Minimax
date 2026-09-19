@@ -41,7 +41,7 @@ console.log(`  ${mark(g.meanPositive)} mean return on max loss   ${pct(g.meanRet
 console.log(`\n  win rate ${pct(r.winRate)} · median days held ${r.medianDaysHeld ?? '—'}`);
 
 const c = r.counts;
-console.log(`\n## Positions\n\n  ${c.pickRows} pick rows → ${c.positions} positions (repeat picks of one position collapsed)`);
+console.log(`\n## Positions\n\n  ${c.pickRows} pick rows → ${c.positions} positions (picks of a ticker within 14 days of its kept entry are one position)`);
 console.log(`  open ${c.open} · target ${c.target} · expired ${c.expired} · unsettleable ${c.unsettleable}\n`);
 
 const rows = r.positions
@@ -66,4 +66,9 @@ console.log('\n## Runs\n');
 for (const run of r.runs) console.log(`  ${run.asOfDate} ${run.slot.padEnd(11)} picks ${String(run.picks).padStart(2)} · rejected ${run.rejected}`);
 
 console.log('\n## Rejection reasons (all runs)\n');
-for (const x of r.rejectionReasons) console.log(`  ${String(x.n).padStart(4)}  ${x.reason}`);
+for (const x of r.rejectionReasons) {
+  console.log(`  ${String(x.n).padStart(4)}  ${x.reason}`);
+  const tickers = (x.tickers ?? []).map((t) => (t.n > 1 ? `${t.ticker}×${t.n}` : t.ticker)).join(', ');
+  if (tickers) console.log(`        ${tickers}`);
+  for (const c of x.causes ?? []) console.log(`        ↳ ${String(c.n).padStart(3)}  ${c.cause}`);
+}

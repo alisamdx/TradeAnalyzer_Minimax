@@ -14,7 +14,7 @@
 //   • No loss stop, no time stop.
 // Outcomes are never stored (migration 084): recomputed each read, so a split repair corrects them.
 //
-// De-biasing (CLAUDE.md): the same position picked on several days or slots is ONE position — the gate
+// De-biasing (CLAUDE.md): picks of one ticker within 14 days of its last kept entry are ONE position — the gate
 // counts positions, first entry kept; a close on expiry that is < 0.5× or > 2× the entry spot is not
 // settled (a split between entry and expiry would manufacture the result) but listed for a look.
 //
@@ -30,6 +30,9 @@ export const SPREAD_ENABLE_GATE = {
   minIntradayCaptureDays: 15,
   minSettledPositions: 30,
 } as const;
+
+/** Picks of one ticker within this many calendar days of its last kept entry are one position (#43 study). */
+export const EPISODE_DAYS = 14;
 
 /** Close-on-expiry vs entry spot outside this band is treated as a possible split. */
 const SCALE_BAND = { min: 0.5, max: 2 } as const;
@@ -128,7 +131,7 @@ export function settleSpreadPick(
 export interface ShadowPickRow extends ShadowPick {
   rank: number | null;
   dte: number | null;
-  /** Earlier (date, slot) entries of the same position collapsed into this one. */
+  /** Later picks of the same ticker within EPISODE_DAYS of this entry, collapsed into it. */
   repeats: number;
   settlement: SpreadSettlement;
 }
@@ -149,8 +152,51 @@ export interface SpreadShadowReport {
   winRate: number | null;
   medianDaysHeld: number | null;
   runs: Array<{ asOfDate: string; slot: string; picks: number; rejected: number }>;
-  rejectionReasons: Array<{ reason: string; n: number }>;
+  rejectionReasons: Array<{
+    reason: string;
+    n: number;
+    tickers: Array<{ ticker: string; n: number }>;
+    /** Only for the two missing-leg reasons: what the stored chain shows. */
+    causes: Array<{ cause: LegCause; n: number }>;
+  }>;
   positions: ShadowPickRow[];
+}
+
+export type LegCause =
+  | 'no chain stored'
+  | 'no underlying price'
+  | 'chain carried no deltas'
+  | 'no put in the Δ band'
+  | 'Δ-band put not two-sided'
+  | 'no strike in the wing range'
+  | 'wing strike has no bid'
+  | 'legs present (another expiry was chosen)';
+
+/**
+ * Why a chain yields no spread, mirroring `buildBullPutSpread`'s leg rules. "chain carried no deltas" is
+ * the stale-Greeks guard (v1.1.255 withholds deltas on a chain whose Greeks disagree with its prices) or
+ * E*Trade not sending them; "wing strike has no bid" is a far put quoted 0 bid, which the two-sided rule
+ * refuses. see spread-mode.ts
+ */
+export function diagnoseLegs(puts: readonly CapturedPut[], spot: number | null): LegCause {
+  if (spot == null || !(spot > 0)) return 'no underlying price';
+  if (!puts.some(p => p[3] != null)) return 'chain carried no deltas';
+  const twoSided = (p: CapturedPut): boolean => p[1] > 0 && p[2] >= p[1];
+  const inBand = puts.filter(p => p[3] != null && Math.abs(p[3]) >= P.deltaMin && Math.abs(p[3]) <= P.deltaMax);
+  if (inBand.length === 0) return 'no put in the Δ band';
+  const shorts = inBand.filter(twoSided)
+    .sort((a, b) => Math.abs(Math.abs(a[3]!) - P.deltaTarget) - Math.abs(Math.abs(b[3]!) - P.deltaTarget) || a[0] - b[0]);
+  const short = shorts[0];
+  if (!short) return 'Δ-band put not two-sided';
+  const eps = 1e-9;
+  const wing = puts.filter(p => {
+    if (p[0] >= short[0]) return false;
+    const w = (short[0] - p[0]) / spot;
+    return w >= P.wingMinPct - eps && w <= P.wingMaxPct + eps;
+  });
+  if (wing.length === 0) return 'no strike in the wing range';
+  if (!wing.some(twoSided)) return 'wing strike has no bid';
+  return 'legs present (another expiry was chosen)';
 }
 
 /** "net credit $0.03 after fills" → "net credit $# after fills" — so reasons group by kind. */
@@ -180,17 +226,22 @@ export function buildSpreadShadowReport(db: DbHandle, todayEt: string): SpreadSh
     net_credit: number; max_loss: number;
   }>;
 
-  // One position per ticker+expiry+strikes; the first entry is the one that would have been placed.
-  const positions = new Map<string, ShadowPickRow>();
+  // One position per ticker episode, the #43 study's rule: a pick of a ticker within EPISODE_DAYS of that
+  // ticker's last KEPT entry is a repeat, whatever its strikes or expiry — a second EOG spread two days
+  // after the first is the same bet, and counting it twice inflates the gate's n with one risk (v1.1.291).
+  // The first entry is the one that would have been placed. `rows` is in (date, slot, rank) order.
+  const positions = new Map<number, ShadowPickRow>();
+  const lastKept = new Map<string, ShadowPickRow>();
   for (const r of rows) {
-    const key = `${r.ticker}|${r.expiration}|${r.short_strike}|${r.long_strike}`;
-    const existing = positions.get(key);
-    if (existing) { existing.repeats++; continue; }
-    positions.set(key, {
+    const kept = lastKept.get(r.ticker);
+    if (kept && daysBetween(kept.asOfDate, r.as_of_date) <= EPISODE_DAYS) { kept.repeats++; continue; }
+    const position: ShadowPickRow = {
       id: r.id, asOfDate: r.as_of_date, slot: r.slot, ticker: r.ticker, expiration: r.expiration, spot: r.spot,
       shortStrike: r.short_strike, longStrike: r.long_strike, netCredit: r.net_credit, maxLoss: r.max_loss,
       rank: r.rank, dte: r.dte, repeats: 0, settlement: { status: 'open', marks: 0, gaps: 0, lastMarkDate: null, lastMidDebit: null },
-    });
+    };
+    positions.set(r.id, position);
+    lastKept.set(r.ticker, position);
   }
 
   const marksStmt = db.prepare(
@@ -226,10 +277,30 @@ export function buildSpreadShadowReport(db: DbHandle, todayEt: string): SpreadSh
       ORDER BY as_of_date, CASE slot WHEN 'intraday' THEN 0 ELSE 1 END`,
   ).all() as Array<{ as_of_date: string; slot: string; picks: number; rejected: number }>;
 
-  const kinds = new Map<string, number>();
-  for (const r of db.prepare(`SELECT reason FROM spread_mode_picks WHERE outcome = 'rejected' AND reason IS NOT NULL`).all() as Array<{ reason: string }>) {
+  // Rejections by kind, with the tickers behind each, and — for a missing leg — what the stored chain says
+  // caused it (v1.1.291). The chain examined is that run's captured entry chain nearest 30 DTE in the window.
+  const chainStmt = db.prepare(
+    `SELECT dte, underlying_price, puts_json FROM spread_chain_capture
+      WHERE as_of_date = ? AND slot = ? AND ticker = ? AND dte BETWEEN ? AND ?`,
+  );
+  const kinds = new Map<string, { n: number; tickers: Map<string, number>; causes: Map<LegCause, number> }>();
+  for (const r of db.prepare(
+    `SELECT as_of_date, slot, ticker, reason FROM spread_mode_picks WHERE outcome = 'rejected' AND reason IS NOT NULL`,
+  ).all() as Array<{ as_of_date: string; slot: string; ticker: string; reason: string }>) {
     const k = reasonKind(r.reason);
-    kinds.set(k, (kinds.get(k) ?? 0) + 1);
+    const e = kinds.get(k) ?? { n: 0, tickers: new Map<string, number>(), causes: new Map<LegCause, number>() };
+    e.n++;
+    e.tickers.set(r.ticker, (e.tickers.get(r.ticker) ?? 0) + 1);
+    if (r.reason.startsWith('no two-sided')) {
+      const chains = chainStmt.all(r.as_of_date, r.slot, r.ticker, P.dteMin, P.dteMax) as Array<{ dte: number; underlying_price: number | null; puts_json: string }>;
+      const chain = chains.sort((a, b) => Math.abs(a.dte - P.dteTarget) - Math.abs(b.dte - P.dteTarget) || a.dte - b.dte)[0];
+      let cause: LegCause = 'no chain stored';
+      if (chain) {
+        try { cause = diagnoseLegs(JSON.parse(chain.puts_json) as CapturedPut[], chain.underlying_price); } catch { /* stays 'no chain stored' */ }
+      }
+      e.causes.set(cause, (e.causes.get(cause) ?? 0) + 1);
+    }
+    kinds.set(k, e);
   }
 
   return {
@@ -251,7 +322,13 @@ export function buildSpreadShadowReport(db: DbHandle, todayEt: string): SpreadSh
     winRate: returns.length ? returns.filter(r => r > 0).length / returns.length : null,
     medianDaysHeld: median(settled.map(p => (p.settlement as { daysHeld: number }).daysHeld)),
     runs: runs.map(r => ({ asOfDate: r.as_of_date, slot: r.slot, picks: r.picks, rejected: r.rejected })),
-    rejectionReasons: [...kinds].map(([reason, n]) => ({ reason, n })).sort((a, b) => b.n - a.n),
+    rejectionReasons: [...kinds]
+      .map(([reason, e]) => ({
+        reason, n: e.n,
+        tickers: [...e.tickers].map(([ticker, n]) => ({ ticker, n })).sort((a, b) => b.n - a.n || a.ticker.localeCompare(b.ticker)),
+        causes: [...e.causes].map(([cause, n]) => ({ cause, n })).sort((a, b) => b.n - a.n),
+      }))
+      .sort((a, b) => b.n - a.n),
     positions: list,
   };
 }

@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.291] - 2026-09-19
+
+### Bull put spread shadow report: one position per ticker episode; rejections name tickers and causes
+
+- **Positions follow the #43 study's episode rule.** A pick of a ticker within 14 days of its last kept entry is the same position, even with different strikes. The first week counted EOG 145/135 and 140/130 (and two CF spreads) twice.
+- **Rejections list their tickers**, and the two missing-leg reasons (27 of the first 80 rejections) are diagnosed from the stored chain: no deltas (stale-Greeks guard or E*Trade), no strike in the band or wing range, or a zero-bid wing.
+
+Details: `changelogs/v1.1.291_2026-09-19.md`.
+
 ## [1.1.290] - 2026-09-19
 
 ### Bull put spread: shadow picks are settled, and the enable gate can be read

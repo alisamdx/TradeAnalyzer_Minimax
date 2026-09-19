@@ -1,7 +1,7 @@
 // Bull put spread shadow settlement (08 §4.2) — the rules the enable gate is judged on.
 import { describe, it, expect } from 'vitest';
 import {
-  settleSpreadPick, buildSpreadShadowReport, reasonKind, type ShadowPick, type ShadowMark,
+  settleSpreadPick, buildSpreadShadowReport, reasonKind, diagnoseLegs, type ShadowPick, type ShadowMark,
 } from '../src/main/services/spread-mode-settle.js';
 import type { CapturedPut } from '../src/main/services/spread-chain-capture.js';
 import { openDatabase } from '../src/main/db/connection.js';
@@ -67,6 +67,19 @@ describe('settleSpreadPick', () => {
   });
 });
 
+describe('diagnoseLegs — why a stored chain yields no spread (v1.1.291)', () => {
+  const p = (strike: number, bid: number, ask: number, delta: number | null): CapturedPut => [strike, bid, ask, delta, 40, 100, 1];
+  it('names each cause in the order buildBullPutSpread would meet it', () => {
+    expect(diagnoseLegs([p(95, 1, 1.1, -0.3)], null)).toBe('no underlying price');
+    expect(diagnoseLegs([p(95, 1, 1.1, null), p(90, 0.5, 0.6, null)], 100)).toBe('chain carried no deltas');
+    expect(diagnoseLegs([p(95, 1, 1.1, -0.45)], 100)).toBe('no put in the Δ band');
+    expect(diagnoseLegs([p(95, 0, 1.1, -0.3)], 100)).toBe('Δ-band put not two-sided');
+    expect(diagnoseLegs([p(95, 1, 1.1, -0.3), p(80, 0.1, 0.2, -0.05)], 100)).toBe('no strike in the wing range');
+    expect(diagnoseLegs([p(95, 1, 1.1, -0.3), p(90, 0, 0.05, -0.08)], 100)).toBe('wing strike has no bid');
+    expect(diagnoseLegs([p(95, 1, 1.1, -0.3), p(90, 0.3, 0.4, -0.12)], 100)).toBe('legs present (another expiry was chosen)');
+  });
+});
+
 describe('reasonKind', () => {
   it('groups rejection reasons by kind', () => {
     expect(reasonKind('net credit $0.03 after fills')).toBe('net credit $# after fills');
@@ -100,8 +113,51 @@ describe('buildSpreadShadowReport', () => {
     expect(r.counts).toMatchObject({ pickRows: 3, positions: 2, target: 1, open: 1 });
     expect(r.positions.find(p => p.ticker === 'AAA')?.repeats).toBe(1);
     expect(r.gate).toMatchObject({ intradayCaptureDays: 2, settledPositions: 1, captureDaysMet: false, settledMet: false, meanPositive: true });
-    expect(r.rejectionReasons).toEqual([{ reason: 'net credit $# after fills', n: 2 }]);
+    expect(r.rejectionReasons).toEqual([{
+      reason: 'net credit $# after fills', n: 2,
+      tickers: [{ ticker: 'CCC', n: 1 }, { ticker: 'DDD', n: 1 }], causes: [],
+    }]);
     expect(r.runs).toHaveLength(4);
+  });
+
+  it('counts one position per ticker episode: different strikes within 14 days collapse, day 15 is new (v1.1.291)', () => {
+    const db = openDatabase(':memory:');
+    runMigrations(db, MIGRATIONS_DIR);
+    const pick = db.prepare(
+      `INSERT INTO spread_mode_picks (as_of_date, slot, generated_at, mode, ticker, outcome, rank, expiration, dte, spot,
+         short_strike, long_strike, net_credit, max_loss) VALUES (?, 'intraday', 'x', 'shadow', 'EOG', 'pick', 1, ?, 30, 150, ?, ?, 2, 8)`,
+    );
+    pick.run('2026-09-14', '2026-10-16', 145, 135); // kept
+    pick.run('2026-09-16', '2026-10-16', 140, 130); // other strikes, 2 days later — the same bet
+    pick.run('2026-09-28', '2026-10-30', 140, 130); // 14 days after the kept entry — still the episode
+    pick.run('2026-09-29', '2026-10-30', 140, 130); // 15 days — a new position
+    const r = buildSpreadShadowReport(db, '2026-09-30');
+    expect(r.positions.map(p => [p.asOfDate, p.repeats])).toEqual([['2026-09-14', 2], ['2026-09-29', 0]]);
+  });
+
+  it('lists the tickers behind a missing-leg rejection and what their stored chain shows', () => {
+    const db = openDatabase(':memory:');
+    runMigrations(db, MIGRATIONS_DIR);
+    const rej = db.prepare(
+      `INSERT INTO spread_mode_picks (as_of_date, slot, generated_at, mode, ticker, outcome, reason) VALUES ('2026-09-18', 'intraday', 'x', 'shadow', ?, 'rejected', ?)`,
+    );
+    rej.run('NODELTA', 'no two-sided put at 0.25–0.35Δ');
+    rej.run('NOCHAIN', 'no two-sided put at 0.25–0.35Δ');
+    rej.run('ZEROBID', 'no two-sided long put 5–7.5% of spot below the short strike');
+    const cap = db.prepare(
+      `INSERT INTO spread_chain_capture (as_of_date, slot, captured_at, ticker, expiration, dte, reason, underlying_price, contract_count, puts_json)
+       VALUES ('2026-09-18', 'intraday', 'x', ?, ?, ?, 'entry', 100, 2, ?)`,
+    );
+    cap.run('NODELTA', '2026-10-16', 28, JSON.stringify([[95, 1, 1.1, null, null, 1, 1], [90, 0.5, 0.6, null, null, 1, 1]]));
+    cap.run('ZEROBID', '2026-10-16', 28, JSON.stringify([[95, 1, 1.1, -0.3, 40, 1, 1], [90, 0, 0.05, -0.08, 40, 1, 1]]));
+    cap.run('ZEROBID', '2026-11-20', 63, JSON.stringify([[95, 2, 2.1, -0.3, 40, 1, 1], [90, 1, 1.1, -0.2, 40, 1, 1]])); // out of window
+    const byReason = Object.fromEntries(buildSpreadShadowReport(db, '2026-09-19').rejectionReasons.map(x => [x.reason, x]));
+    expect(byReason['no two-sided put at #–#Δ']).toMatchObject({
+      n: 2, causes: expect.arrayContaining([{ cause: 'chain carried no deltas', n: 1 }, { cause: 'no chain stored', n: 1 }]),
+    });
+    expect(byReason['no two-sided long put #–#% of spot below the short strike']).toMatchObject({
+      tickers: [{ ticker: 'ZEROBID', n: 1 }], causes: [{ cause: 'wing strike has no bid', n: 1 }],
+    });
   });
 
   it('settles an expired position on the stored close, falling back to the last session before a holiday expiry', () => {

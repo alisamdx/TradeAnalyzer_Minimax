@@ -840,7 +840,8 @@ Operator profile: short put **0.35 ≤ |delta| ≤ 0.45**, **14 ≤ DTE ≤ 30**
   the last session ≤ 4 days before it); no closing cost. Settled only after the expiry date; not settled when
   `S ÷ entry spot` is outside [0.5, 2] (possible split — listed, not dropped).
 - **Return on max loss** = `(net credit − exit debit) ÷ max loss`.
-- **Positions** — picks with the same ticker, expiry and both strikes are one position; the first entry is kept.
+- **Positions** — a pick of a ticker within **14 calendar days** of that ticker's last kept entry is a repeat of it,
+  whatever its strikes or expiry (the #43 study's episode rule, v1.1.291); the first entry is kept.
   The gate counts positions: ≥ 15 intraday capture days, ≥ 30 settled positions, mean return on max loss > 0.
 
 ## split-adjustment (data integrity) {#split-adjustment}

@@ -118,7 +118,8 @@ Runs immediately after spread chain capture, from that run's captured chains (no
   when 08 §4's enable gate passes. Stored in `spread_mode_picks` (§2); logged `spread-mode:run`; never fails the brief.
 - **Shadow settlement (v1.1.290):** `GET /api/v1/diagnostics/spread-shadow` (`spread-mode-settle.ts`) settles every pick
   forward on its own captured quotes: the 50% target (decided on mid, realised with fills), or intrinsic at the
-  expiry close. Repeat picks of one position count once. It reports progress against 08 §4.
+  expiry close. Picks of a ticker within 14 days of its kept entry are one position (v1.1.291). It reports
+  progress against 08 §4, with each rejection reason's tickers and, for a missing leg, the cause read from the stored chain.
   `node scripts/spread-shadow-report.mjs` prints it. Chain capture tracks every picked series until expiry.
 - Acceptance: `tests/spread-mode.test.ts`, `tests/spread-mode-settle.test.ts`.
 
