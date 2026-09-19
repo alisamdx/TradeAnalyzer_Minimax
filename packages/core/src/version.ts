@@ -6,4 +6,4 @@
  * drift between the two would mislabel every run of a generation, silently, and
  * only visibly much later.
  */
-export const COLLECTOR_VERSION = '0.6.29';
+export const COLLECTOR_VERSION = '0.6.30';

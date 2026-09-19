@@ -442,25 +442,62 @@ export async function runMacroCalendar(
  * EDGAR submissions for filers whose reference row changed, plus a rolling
  * heartbeat slice so a filer that never changes is still checked.
  */
+/**
+ * How far back the filings sweep stores report filings — deliberately INSIDE the year EDGAR
+ * guarantees in `filings.recent` (v1.1.275).
+ *
+ * EDGAR's `recent` block holds "at least one year of filings or 1,000, whichever is more": JPM's
+ * held 26,192 on 2026-09-15, oldest exactly one year back. The sweep asked for the 400-day facts
+ * lookback, so for every filer with 1,000+ filings a year, the 35 days past EDGAR's year sat in
+ * overflow files and QC-008 read the response as truncated: iShares Trust, JEF, JPM. Nothing
+ * here needs a report filing older than a year — the fact pull reads companyfacts whole and
+ * keeps its own 400-day window — so the fix is to ask for what `recent` always contains.
+ */
+export const FILINGS_LOOKBACK_DAYS = 360;
+
 export async function runEdgarFilings(
   host: CollectorHost,
   db: SqliteLike,
   run: RunHandle,
   opts: { readonly maxFilers?: number } = {}
 ): Promise<SubPhaseCount> {
-  const ruleId = captureRuleId(db, host, 'edgar_filings', { forms: [...REPORT_FORMS] }, 'Submissions index for a rolling slice of filers.');
+  const ruleId = captureRuleId(
+    db, host, 'edgar_filings',
+    { forms: [...REPORT_FORMS], lookbackDays: FILINGS_LOOKBACK_DAYS, funds: 'excluded' },
+    'Submissions index for a rolling slice of operating-company filers.'
+  );
   const { byTicker } = cikMap(db);
   if (byTicker.size === 0) return skipped('no CIKs known yet — raw_ticker_reference has none');
+
+  // Funds file no 10-K/10-Q, so their submissions can only ever store nothing — and a
+  // trust's thousands of fund filings made every one of them read as capped (v1.1.275).
+  // One filer per CIK: iShares Trust stands behind seven universe tickers and was
+  // fetched six times in one run.
+  const funds = new Set(
+    (
+      db
+        .prepare(
+          `SELECT ticker FROM raw_ticker_reference
+            WHERE security_type IN ${FUND_TYPES}
+              AND row_id IN (SELECT MAX(row_id) FROM raw_ticker_reference GROUP BY ticker)`
+        )
+        .all() as { ticker: string }[]
+    ).map((r) => r.ticker)
+  );
+  const seenCik = new Set<string>();
+  const entries = [...byTicker.entries()]
+    .filter(([ticker]) => !funds.has(ticker))
+    .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+    .filter(([, cik]) => (seenCik.has(cik) ? false : (seenCik.add(cik), true)));
 
   // A rolling slice keyed on the trading date: every filer is visited within a
   // fixed number of days without a stored cursor to fall out of step.
   const maxFilers = opts.maxFilers ?? 20;
-  const entries = [...byTicker.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1));
   const dayIndex = Math.floor(Date.parse(`${run.tradingDate}T00:00:00Z`) / 86_400_000);
   const start = (dayIndex * maxFilers) % Math.max(entries.length, 1);
-  const slice = [...entries, ...entries].slice(start, start + maxFilers);
+  const slice = [...entries, ...entries].slice(start, Math.min(start + maxFilers, start + entries.length));
 
-  const since = addDays(run.tradingDate, -EVENTS_RULE.factsLookbackDays);
+  const since = addDays(run.tradingDate, -FILINGS_LOOKBACK_DAYS);
   let stored = 0;
   let calls = 0;
   let failed = 0;

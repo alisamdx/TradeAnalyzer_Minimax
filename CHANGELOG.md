@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.275] - 2026-09-18
+
+### QC-008's EDGAR submissions "cap" was our window, not EDGAR's
+
+EDGAR's `filings.recent` holds at least one year of filings (JPM: 26,192), not a 1,000-row cap. The filings sweep asked for the 400-day facts lookback, so every filer with 1,000+ filings a year read as truncated for the 35 days past EDGAR's year (iShares Trust, JEF, JPM). The sweep now asks for 360 days, skips funds (no 10-K/10-Q — every iShares response stored nothing) and fetches each CIK once (iShares was fetched six times in one run). All three archived responses read complete; a genuinely short list still fires. The 18 already-open QC-008 findings are about past responses and stay for the operator.
+
+`core` 0.6.30, `next` 0.4.18. Details: `changelogs/v1.1.275_2026-09-18.md`.
+
 ## [1.1.274] - 2026-09-18
 
 ### QC-603 no longer fires on a new listing whose first report is not yet due

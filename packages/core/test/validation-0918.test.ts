@@ -11,7 +11,7 @@ import { beginRun, captureRuleId, type RunHandle } from '../src/collector/run.js
 import { captureResponse } from '../src/collector/capture.js';
 import { recipes } from '../src/ingest/recipes.js';
 import { ensureTradingCalendar } from '../src/collector/trading-calendar.js';
-import { runInsiderSweep, insiderIndexDates, runEtradeEarnings, factsQueue } from '../src/collector/phases/events.js';
+import { runInsiderSweep, insiderIndexDates, runEtradeEarnings, factsQueue, runEdgarFilings } from '../src/collector/phases/events.js';
 import { QC910_INSIDER_INDEX_COVERAGE } from '../src/qa/checks/macro.js';
 import { QC603_EARNINGS_FRESHNESS, QC701_FILING_FRESHNESS } from '../src/qa/checks/earnings-fundamentals.js';
 import { etradeEarningDate } from '../src/ingest/events.js';
@@ -354,5 +354,64 @@ describe('the EDGAR fact pull when SEC companyfacts lags a filing (v1.1.271)', (
     expect(e?.fired).toBe(true);
     expect(e?.evidence?.['cause']).toBe('sec_companyfacts_missing');
     expect(e?.detail).toContain('SEC companyfacts fetched 2026-09-16 still has no facts for the 10-Q filed 2026-07-28');
+  });
+});
+
+describe('the EDGAR filings sweep asks for what EDGAR\'s `recent` block always holds (v1.1.275)', () => {
+  const rule = () => captureRuleId(db(), makeHost(), 'test', { v: 1 }, 'test');
+
+  /** A universe member with a reference row. */
+  function listed(ticker: string, type: string, cik: string) {
+    captureResponse({
+      host: makeHost(), db: db(), runId: run.runId, asOfDate: DATE, provider: 'polygon',
+      endpoint: `/v3/reference/tickers/${ticker}`, slug: 'ref', params: { ticker },
+      response: response(JSON.stringify({ results: { ticker, name: ticker, type, cik } })),
+      captureRuleId: rule(), recipe: recipes.tickerReference()
+    });
+    raw.prepare(
+      `INSERT INTO ref_universe_membership (run_id, as_of_date, observed_at, capture_rule_id, source_response_id,
+         ticker, list_source, valid_from, change_reason)
+       VALUES (?, ?, ?, ?, (SELECT MAX(source_response_id) FROM meta_response), ?, 'sp500', '2026-09-01', 'initial')`
+    ).run(run.runId, DATE, `${DATE}T17:00:00-04:00`, rule(), ticker);
+  }
+
+  /** A submissions body whose `recent` holds `n` filings spread evenly from `oldest` to DATE. */
+  function submissions(n: number, oldest: string): string {
+    const from = Date.parse(`${oldest}T00:00:00Z`);
+    const span = Date.parse(`${DATE}T00:00:00Z`) - from;
+    const dates = Array.from({ length: n }, (_, i) =>
+      new Date(from + Math.round((span * (n - 1 - i)) / Math.max(n - 1, 1))).toISOString().slice(0, 10));
+    return JSON.stringify({ filings: { recent: {
+      accessionNumber: dates.map((_, i) => `A-${i}`), form: dates.map(() => '424B2'), filingDate: dates,
+      reportDate: dates.map(() => ''), primaryDocument: dates.map(() => 'x.htm')
+    }, files: [] } });
+  }
+
+  const capped = () =>
+    raw.prepare("SELECT json_extract(params_json, '$.ticker') AS t, at_provider_cap AS cap FROM meta_response WHERE endpoint = '/submissions/CIK{cik}.json' ORDER BY t").all();
+
+  it('skips funds and asks each CIK once', async () => {
+    listed('IVV', 'ETF', '0001100663');
+    listed('IWM', 'ETF', '0001100663');
+    listed('GOOG', 'CS', '0001652044');
+    listed('GOOGL', 'CS', '0001652044');
+    listed('JPM', 'CS', '0000019617');
+    const asked: string[] = [];
+    const host = makeHost({ httpGet: async (url: string) => { asked.push(url.slice(url.lastIndexOf("/") + 1)); return response(submissions(3, '2026-06-01')); } });
+    await runEdgarFilings(host, db(), run);
+    expect(asked.sort()).toEqual(['CIK0000019617.json', 'CIK0001652044.json']);
+  });
+
+  it('reads a large filer\'s one-year `recent` block as complete, and still flags a truly truncated one', async () => {
+    // JPM on 2026-09-15: 26,192 filings in `recent`, oldest exactly one year back.
+    listed('JPM', 'CS', '0000019617');
+    listed('JEF', 'CS', '0000096223');
+    const host = makeHost({
+      httpGet: async (url: string) =>
+        response(url.includes('0000019617') ? submissions(1500, '2025-09-18') : submissions(1000, '2026-08-20'))
+    });
+    await runEdgarFilings(host, db(), run);
+    // JEF's shape here is 1,000 filings in four weeks: that one IS cut short of the window.
+    expect(capped()).toEqual([{ t: 'JEF', cap: 1 }, { t: 'JPM', cap: 0 }]);
   });
 });
