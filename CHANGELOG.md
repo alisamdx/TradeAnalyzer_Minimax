@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.280] - 2026-09-18
+
+### A "same issuer" ruling on a QC-210 finding now sticks
+
+QC-210 fires when bars predate the ticker's `list_date`. Polygon also moves `list_date` when the *same* issuer changes share line: ASND's ADRs became ordinary shares (2026-04-20), JHX moved to NYSE ordinary shares (2025-07-01), and COLB's merger closed with Columbia as the legal survivor (2023-03-01). In all three the price runs straight through. A `false_positive` ruling on these was reopened the next run, because QC-210 read no rulings. It now honours one, tied to the `list_date` the finding recorded, so a later listing change fires again.
+
+The fourth finding, BAM, is real reuse: the old Brookfield Asset Management became Brookfield Corp (BN), and the new BAM began regular trading on 2022-12-12 (a −24.9% step, under QC-204's 40%), not on its 2022-12-01 `list_date`. Rehearsal on a snapshot copy with all proposed rulings from v1.1.279 onward applied: 95 → 23 blocking, with QC-205, QC-209 and QC-210 at 0.
+
+`core` 0.6.35, `next` 0.4.23. Details: `changelogs/v1.1.280_2026-09-18.md`.
+
 ## [1.1.279] - 2026-09-18
 
 ### A "not reuse" ruling on a QC-209 finding now sticks

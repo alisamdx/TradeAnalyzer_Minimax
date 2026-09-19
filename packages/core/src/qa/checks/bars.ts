@@ -734,8 +734,9 @@ export const QC210_BARS_PREDATE_LISTING: CheckDefinition = {
     'entities and no re-fetch can repair it — the provider keys by ticker too. This is the same ' +
     'fault QC-205 and QC-209 look for, tested on identity rather than on behaviour: they ask ' +
     'whether the volume regime or the trading gap LOOKS like a splice, and this asks the reference ' +
-    'data where the listing started.',
-  readsTables: ['raw_daily_bar', 'raw_ticker_reference'],
+    'data where the listing started. A ticker ruled `false_positive` (a new share line of the same ' +
+    'issuer, history continuous) is measured but never fires again for that list_date.',
+  readsTables: ['raw_daily_bar', 'raw_ticker_reference', 'qa_exception'],
   testedQuantity: 'bars_before_list_date',
   testedUnit: 'count',
   thresholds: { maxBarsBeforeListing: 0 },
@@ -785,6 +786,7 @@ export const QC210_BARS_PREDATE_LISTING: CheckDefinition = {
     // leaves the population rather than firing for ever on history the operator
     // has already accounted for.
     const ruled = entityStartDates(ctx.db);
+    const continuous = continuousListingRulings(ctx);
 
     const out: Evaluation[] = [];
     for (const r of rows) {
@@ -804,22 +806,58 @@ export const QC210_BARS_PREDATE_LISTING: CheckDefinition = {
       const gapDays = Math.round(
         (Date.parse(`${ref.list_date}T00:00:00Z`) - Date.parse(`${r.first_bar}T00:00:00Z`)) / 86_400_000
       );
+      // Ruled continuous against THIS list_date: measured, not fired. A later list_date is a
+      // new listing the ruling never saw, so it fires again.
+      const ruling = continuous.get(r.ticker);
+      const ruledHere = ruling !== undefined && ruling.listDate === ref.list_date;
       out.push({
         key: r.ticker,
         value: before,
-        fired: before > (this.thresholds['maxBarsBeforeListing'] as number),
+        fired: !ruledHere && before > (this.thresholds['maxBarsBeforeListing'] as number),
         detail:
           `${r.ticker} (${ref.name ?? '?'}) listed ${ref.list_date}, but ${before} bar(s) are stored ` +
           `from ${r.first_bar} — ${gapDays} days earlier, so the series splices two entities`,
         evidence: {
           ticker: r.ticker, listDate: ref.list_date, firstBar: r.first_bar,
-          barsBeforeListing: before, gapDays, name: ref.name
+          barsBeforeListing: before, gapDays, name: ref.name,
+          ...(ruledHere ? { ruledContinuous: ruling.note } : {})
         }
       });
     }
     return out;
   }
 };
+
+/**
+ * QC-210 findings the operator resolved `false_positive`: the listing date marks a new share
+ * line of the SAME issuer, and the history before it is continuous (v1.1.280). Polygon moves
+ * `list_date` when an issuer changes share line — ASND's ADRs became ordinary shares on
+ * 2026-04-20, JHX moved its primary listing to NYSE on 2025-07-01, COLB's merger closed on
+ * 2023-03-01 with Columbia as the legal survivor — and the price runs straight through each.
+ * Keyed by ticker with the `list_date` the ruling was made against, which the finding's evidence
+ * records, so a later listing change is a new question and fires again.
+ */
+function continuousListingRulings(
+  ctx: Parameters<CheckDefinition['run']>[0]
+): ReadonlyMap<string, { listDate: string; note: string }> {
+  const rows = ctx.db
+    .prepare(
+      `SELECT key, evidence_json, resolution_note FROM qa_exception
+        WHERE check_id = 'QC-210' AND state = 'resolved' AND resolution_kind = 'false_positive'`
+    )
+    .all() as { key: string; evidence_json: string; resolution_note: string | null }[];
+  const out = new Map<string, { listDate: string; note: string }>();
+  for (const r of rows) {
+    let listDate: unknown;
+    try {
+      listDate = (JSON.parse(r.evidence_json) as { listDate?: unknown }).listDate;
+    } catch {
+      continue;
+    }
+    if (typeof listDate === 'string') out.set(r.key, { listDate, note: r.resolution_note ?? '' });
+  }
+  return out;
+}
 
 export const BAR_CHECKS: readonly CheckDefinition[] = [
   QC201_BAR_COMPLETENESS,

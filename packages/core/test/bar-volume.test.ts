@@ -9,6 +9,7 @@ import type { CollectorHost, ProviderResponse } from '../src/collector/host.js';
 import { beginRun, captureRuleId } from '../src/collector/run.js';
 import { runBackfillBars } from '../src/collector/backfill.js';
 import { resolve } from '../src/qa/operator.js';
+import { runGate } from '../src/qa/gate.js';
 import { QC501_UNEXPLAINED_DISCONTINUITY } from '../src/qa/checks/quotes-actions.js';
 import {
   QC204_DISCONTINUITY, QC205_VOLUME_REGIME, QC209_DORMANT_SERIES_RESUMES,
@@ -449,6 +450,32 @@ describe('QC-210 — bars that predate the ticker\'s current listing', () => {
     expect(out).toHaveLength(1);
     expect(out[0]!.fired).toBe(true);
     expect(out[0]!.value).toBe(25);
+  });
+
+  it('a "same issuer" ruling holds for that list_date, and a later listing fires again (v1.1.280)', () => {
+    // ASND on 2026-09-18: the ADRs became ordinary shares on 2026-04-20, Polygon moved list_date
+    // there, and the price ran straight through (244.48 -> 245.38). Continuous history, one issuer.
+    const runId = seedBars('ASND', 0, 40);
+    seedReference([{ ticker: 'ASND', listDate: SESSIONS[30]!, name: 'Ascendis Pharma A/S Ordinary Share' }]);
+    const host = makeHost(async () => ({ status: 200, body: '{}', requestedAt: 't', respondedAt: 't' }));
+    runGate(db, host, { runId, tradingDate: '2026-09-11', checks: [QC210_BARS_PREDATE_LISTING] });
+    const finding = raw
+      .prepare("SELECT exception_id FROM qa_exception WHERE check_id = 'QC-210' AND key = 'ASND' AND state = 'open'")
+      .get() as { exception_id: number };
+    expect(finding).toBeDefined();
+
+    resolve(db, host, finding.exception_id, 'false_positive', 'same issuer: ADRs converted to ordinary shares');
+
+    const ruled = QC210_BARS_PREDATE_LISTING.run({ db, runId, tradingDate: '2026-09-11', observedAt: 't' });
+    expect(ruled[0]!.fired).toBe(false);
+    expect(ruled[0]!.value).toBe(30); // still measured
+    expect(ruled[0]!.evidence!['ruledContinuous']).toContain('ADRs');
+
+    // A NEW list_date is a question the ruling never answered.
+    seedReference([{ ticker: 'ASND', listDate: SESSIONS[35]! }]);
+    const moved = QC210_BARS_PREDATE_LISTING.run({ db, runId, tradingDate: '2026-09-11', observedAt: 't' });
+    expect(moved[0]!.fired).toBe(true);
+    expect(moved[0]!.value).toBe(35);
   });
 
   it('is registered and blocking, with a structural threshold', () => {
