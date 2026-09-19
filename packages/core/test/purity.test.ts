@@ -36,8 +36,15 @@ function sourceFiles(dir: string): string[] {
 }
 
 /** Strips line and block comments so a rule cannot fire on prose about itself. */
+/**
+ * Removes comments but keeps every newline, so a violation is reported at the line it is on.
+ * Deleting a block comment whole used to renumber everything after it: on 2026-09-18 a match
+ * on line 358 of `earnings-fundamentals.ts` was reported as `:33`.
+ */
 function stripComments(src: string): string {
-  return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+  return src
+    .replace(/\/\*[\s\S]*?\*\//g, (block) => block.replace(/[^\n]/g, ''))
+    .replace(/(^|[^:])\/\/.*$/gm, '$1');
 }
 
 /** Blanks the contents of string literals, keeping the quotes so syntax survives. */
@@ -144,16 +151,23 @@ interface Violation {
   text: string;
 }
 
+/** The violations in one file's source, with 1-based line numbers into the ORIGINAL text. */
+function scanSource(rule: Rule, src: string): { line: number; text: string }[] {
+  const found: { line: number; text: string }[] = [];
+  stripComments(src)
+    .split('\n')
+    .forEach((raw, i) => {
+      if (matches(rule, raw)) found.push({ line: i + 1, text: raw.trim() });
+    });
+  return found;
+}
+
 function scanTree(rule: Rule): Violation[] {
   const found: Violation[] = [];
   for (const file of sourceFiles(SRC)) {
-    stripComments(readFileSync(file, 'utf8'))
-      .split('\n')
-      .forEach((raw, i) => {
-        if (matches(rule, raw)) {
-          found.push({ file: relative(SRC, file).split(sep).join('/'), line: i + 1, text: raw.trim() });
-        }
-      });
+    for (const v of scanSource(rule, readFileSync(file, 'utf8'))) {
+      found.push({ file: relative(SRC, file).split(sep).join('/'), ...v });
+    }
   }
   return found;
 }
@@ -184,6 +198,22 @@ describe('core purity', () => {
   it('ignores a violation that appears only inside a comment', () => {
     const body = stripComments(`// import { app } from 'electron';\nconst x = 1;`);
     expect(body.split('\n').some((l) => matches(RULES[0] as Rule, l))).toBe(false);
+  });
+
+  it('reports a violation at its real line, past block and line comments, LF or CRLF', () => {
+    const network = RULES.find((r) => r.name === 'makes no network call of its own') as Rule;
+    const lines = [
+      '/**',
+      ' * A doc comment spanning',
+      ' * several lines.',
+      ' */',
+      'const a = 1; // trailing',
+      '/* one-line block */ const b = 2;',
+      'const res = await fetch(url);'
+    ];
+    for (const eol of ['\n', '\r\n']) {
+      expect(scanSource(network, lines.join(eol)).map((v) => v.line), JSON.stringify(eol)).toEqual([7]);
+    }
   });
 
   it('exports the two version constants the run header needs', async () => {
