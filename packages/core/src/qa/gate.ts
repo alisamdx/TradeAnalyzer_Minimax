@@ -146,6 +146,7 @@ export function runGate(
   const raised: RaisedFinding[] = [];
   const firedFingerprints = new Set<string>();
   const vacuous: string[] = [];
+  const untrustedShapes = new Set<string>();
   let checksFired = 0;
 
   for (const def of args.checks) {
@@ -162,6 +163,26 @@ export function runGate(
       evaluations = [
         { key: 'check_error', fired: true, detail: `check threw: ${failure}`, evidence: { error: failure } }
       ];
+    }
+
+    // A declared key shape is trusted to retire findings only while the check keeps to it.
+    // A check that threw, or produced a key outside its own declaration, retires nothing
+    // this run — and the mismatch is a finding, because the declaration is now wrong.
+    if (def.keyShape) {
+      const stray = failure === undefined
+        ? evaluations.find((e) => !def.keyShape!.pattern.test(e.key))
+        : undefined;
+      if (failure !== undefined || stray) untrustedShapes.add(def.id);
+      if (stray) {
+        evaluations = [
+          ...evaluations,
+          {
+            key: 'key_shape_violation', fired: true,
+            detail: `produced key "${stray.key}", outside its declared shape ${String(def.keyShape.pattern)}`,
+            evidence: { key: stray.key, pattern: String(def.keyShape.pattern) }
+          }
+        ];
+      }
     }
 
     const durationMs = Date.now() - started;
@@ -243,7 +264,7 @@ export function runGate(
     counts[severity]++;
   }
 
-  const resolvedByGate = reconcileStoppedFiring(db, host, args.runId, firedFingerprints, args.checks);
+  const resolvedByGate = reconcileStoppedFiring(db, host, args.runId, firedFingerprints, args.checks, untrustedShapes);
   recomputeDomainDayStatus(db, host, args.runId, args.tradingDate);
 
   const verdict: Verdict = counts.blocking > 0 ? 'red' : counts.warning > 0 ? 'amber' : 'green';
@@ -364,22 +385,27 @@ function upsertException(
  * away" is exactly how the earnings-date bug hid for a quarter. The gate may
  * resolve only when a remediation in `remediations_json` succeeded *and* the
  * fingerprint now evaluates clean; anything else is an operator's call.
+ *
+ * The one other case the gate closes itself (v1.1.273): a finding whose key its
+ * check can no longer produce, per the check's declared `keyShape`. That is a
+ * fact about the check, not about the data, so it is the gate's to state.
  */
 function reconcileStoppedFiring(
   db: SqliteLike,
   host: CollectorHost,
   runId: number,
   firedFingerprints: ReadonlySet<string>,
-  checks: readonly CheckDefinition[]
+  checks: readonly CheckDefinition[],
+  untrustedShapes: ReadonlySet<string> = new Set()
 ): number {
-  const checkIds = new Set(checks.map((c) => c.id));
+  const byId = new Map(checks.map((c) => [c.id, c]));
   const openOnes = db
     .prepare(
-      `SELECT exception_id, fingerprint, check_id, severity, state, remediations_json
+      `SELECT exception_id, fingerprint, check_id, key, severity, state, remediations_json
          FROM qa_exception WHERE state IN ('open', 'acknowledged')`
     )
     .all() as {
-    exception_id: number; fingerprint: string; check_id: string; severity: Severity;
+    exception_id: number; fingerprint: string; check_id: string; key: string; severity: Severity;
     state: string; remediations_json: string;
   }[];
 
@@ -387,8 +413,25 @@ function reconcileStoppedFiring(
   let resolved = 0;
 
   for (const e of openOnes) {
-    if (!checkIds.has(e.check_id)) continue;           // its check did not run
+    const def = byId.get(e.check_id);
+    if (!def) continue;                                  // its check did not run
     if (firedFingerprints.has(e.fingerprint)) continue; // still firing
+
+    // A key the check can no longer produce: the finding cannot fire again, and no
+    // remediation exists for it. Retired by the gate, not the operator — the claim is
+    // about the check's shape, which the gate knows, not about the data.
+    if (def.keyShape && !untrustedShapes.has(def.id) && !def.keyShape.pattern.test(e.key)) {
+      const note = `retired: ${e.check_id} no longer produces a key like "${e.key}" — ${def.keyShape.note}`;
+      db.prepare(
+        `UPDATE qa_exception
+            SET state = 'resolved', resolved_at = ?, resolution_kind = 'rule_changed',
+                resolution_note = ?, still_firing = 0
+          WHERE exception_id = ?`
+      ).run(now, note, e.exception_id);
+      recordEvent(db, e.exception_id, now, 'gate', e.state, 'resolved', e.severity, e.severity, note);
+      resolved++;
+      continue;
+    }
 
     const remediations = JSON.parse(e.remediations_json) as { outcome?: string }[];
     const remediationSucceeded = remediations.some((r) => r.outcome === 'success');

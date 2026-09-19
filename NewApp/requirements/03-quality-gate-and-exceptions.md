@@ -297,6 +297,8 @@ Recomputed whenever an exception changes state. **This is the only table a downs
 
 An exception whose fingerprint stops firing without a remediation stays `open` and is listed as "no longer observed, unresolved" — because "it went away" is exactly how the earnings-date bug hid.
 
+**One other case the gate closes itself (v1.1.273): a key its check can no longer produce.** A check whose keying changed declares `keyShape` — the pattern every key it produces now matches. A finding of that check which has stopped firing and whose key does not match can never fire again, and no remediation exists for a key that no longer exists, so the gate resolves it as `rule_changed` with actor `gate` and one event per finding, naming the old key. This is a fact about the check, which the gate knows, not a claim about the data, so it does not breach the operator-only rule above or 05 §5's "no bulk resolve". Two guards: a check that throws, or produces a key outside its own declaration, retires nothing that run (the stray key is raised as a `key_shape_violation` finding, since the declaration is now wrong); and a finding still firing is never retired. First use: QC-410, keyed per contract until v1.1.252 and per ticker since — 11,444 contract-keyed findings open on gen-002 with nothing able to close them, retired on the first run of v1.1.273 (rehearsed on the 2026-09-18 snapshot: open queue 12,963 → 1,496).
+
 ### 5.2 Effect on usability
 
 Recompute `qa_domain_day_status` for every date in `affects_trading_dates_json` on any state change. `unusable` iff any blocking exception on that domain-day is `open` or `acknowledged`.
@@ -444,7 +446,7 @@ before it. Per check:
 | `shrinking` | fewer |
 | `churned` | the same count, different findings — a swapped ticker is not "unchanged" |
 | `gone` | fired at the baseline, silent now, **still open** (not resolved) |
-| `resolved` | closed by the gate because a remediation succeeded |
+| `resolved` | closed by the gate because a remediation succeeded, or because its check can no longer produce its key (`rule_changed`, v1.1.273) |
 
 Anything not in that list is counted (`unchanged: N checks, M findings`), never
 listed. Ordering is blocking first, then by size of move. Each changed check

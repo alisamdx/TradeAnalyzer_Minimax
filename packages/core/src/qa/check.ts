@@ -79,6 +79,17 @@ export interface CheckDefinition {
   /** Which remediation the gate may request when this fires. */
   readonly remediation?: RemediationCode;
   /**
+   * The shape of every key this check produces NOW, declared when its keying has changed
+   * (v1.1.273). An open finding of this check that has stopped firing and whose key does not
+   * match can never fire again — the check no longer produces keys like it — so the gate
+   * resolves it as `rule_changed`, with actor `gate` and one event per finding. QC-410 was
+   * keyed per contract until v1.1.252 and per ticker since, which left 11,468 contract-keyed
+   * findings open with nothing able to close them: auto-resolve needs a successful
+   * remediation, and there is none for a finding about a key that no longer exists. Findings
+   * still firing are never retired, whatever their key.
+   */
+  readonly keyShape?: { readonly pattern: RegExp; readonly note: string };
+  /**
    * Promotes the finding to blocking when the fired fraction exceeds this — a
    * cross-source drift is a warning per ticker and blocking when it affects
    * enough of them (03 §2).

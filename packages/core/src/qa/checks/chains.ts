@@ -517,6 +517,9 @@ export const QC410_GREEK_REPRODUCTION: CheckDefinition = {
     'domain RED without naming them. QC-414 carries the scale question it used to answer. A missing ' +
     "3M rate skips the check, because a missing rate is QC-902's finding.",
   readsTables: ['raw_option_contract_snapshot', 'raw_treasury_yield'],
+  // Per ticker since v1.1.252; it was per contract before (`ADP---260918C00275000`), and
+  // those findings can never fire again. Tickers here are letters, digits and a class dot.
+  keyShape: { pattern: /^[A-Z][A-Z0-9.]{0,9}$/, note: 'keyed per ticker since v1.1.252, per contract before' },
   testedQuantity: 'abs_delta_spot_vs_nearest_price_reading_fraction',
   testedUnit: 'fraction',
   thresholds: { maxSpotDisagreement: 0.01 },

@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.273] - 2026-09-18
+
+### The gate retires findings whose key its check can no longer produce
+
+11,444 QC-410 findings keyed per contract sat open since v1.1.252 re-keyed the check per ticker — unable to fire again and unable to be closed. Rather than a bulk resolve (05 §5 forbids one, deliberately), a check can now declare `keyShape`, and the gate resolves a stopped finding whose key is outside it as `rule_changed`, actor `gate`, one event each. A check that throws or strays outside its own shape retires nothing and raises `key_shape_violation`. Rehearsed on the 2026-09-18 snapshot: open queue 12,963 → 1,496; happens live on the next run.
+
+`core` 0.6.28, `next` 0.4.16. Details: `changelogs/v1.1.273_2026-09-18.md`.
+
 ## [1.1.272] - 2026-09-18
 
 ### TradeAnalyzer 2's chain view marks Greeks QC-410 found unusable

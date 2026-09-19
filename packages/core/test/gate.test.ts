@@ -278,6 +278,70 @@ describe('exceptions are facts about the data, not about the run', () => {
   });
 });
 
+describe('a check that changed its keying retires findings it can no longer produce (v1.1.273)', () => {
+  // QC-410 was keyed per contract until v1.1.252 and per ticker since, which left 11,468
+  // contract-keyed findings open on gen-002 with nothing able to close them.
+  const SHAPE = { pattern: /^[A-Z][A-Z0-9.]{0,9}$/, note: 'keyed per ticker since v1.1.252' };
+
+  function twoRuns(second: CheckDefinition) {
+    const host = makeHost();
+    const oldKeying = fakeCheck({
+      evals: () => [
+        { key: 'ADP---260918C00275000', value: 2, fired: true, detail: 'old contract key' },
+        { key: 'AMG', value: 2, fired: true, detail: 'ticker, will stop' },
+        { key: 'PCTY', value: 2, fired: true, detail: 'ticker, keeps firing' }
+      ]
+    });
+    const r1 = beginRun(db, host, { kind: 'daily', tradingDate: '2026-09-05' });
+    runGate(db, host, { runId: r1.runId, tradingDate: '2026-09-05', checks: [oldKeying] });
+    raw.prepare("UPDATE meta_run SET status='complete' WHERE run_id=?").run(r1.runId);
+    const r2 = beginRun(db, host, { kind: 'daily', tradingDate: '2026-09-06' });
+    const result = runGate(db, host, { runId: r2.runId, tradingDate: '2026-09-06', checks: [second] });
+    const states = Object.fromEntries(
+      (raw.prepare('SELECT key, state, resolution_kind FROM qa_exception').all() as { key: string; state: string; resolution_kind: string | null }[])
+        .map((r) => [r.key, `${r.state}${r.resolution_kind ? `:${r.resolution_kind}` : ''}`])
+    );
+    return { result, states };
+  }
+
+  it('resolves only the stopped finding whose key is outside the shape, as the gate', () => {
+    const { result, states } = twoRuns(fakeCheck({
+      keyShape: SHAPE,
+      evals: () => [{ key: 'PCTY', value: 2, fired: true, detail: 'still broken' }, { key: 'AAPL', value: 0, fired: false }]
+    }));
+    expect(result.resolvedByGate).toBe(1);
+    // The stopped ticker stays open: its going quiet is a fact about the data, the operator's call.
+    expect(states).toEqual({ 'ADP---260918C00275000': 'resolved:rule_changed', AMG: 'open', PCTY: 'open' });
+    const ev = raw.prepare("SELECT actor, note FROM qa_exception_event WHERE to_state = 'resolved'").get() as { actor: string; note: string };
+    expect(ev.actor).toBe('gate');
+    expect(ev.note).toContain('ADP---260918C00275000');
+  });
+
+  it('retires nothing, and says so, when the check produces a key outside its own declaration', () => {
+    const { result, states } = twoRuns(fakeCheck({
+      keyShape: SHAPE,
+      evals: () => [{ key: 'pcty lower-case', value: 0, fired: false }]
+    }));
+    expect(result.resolvedByGate).toBe(0);
+    expect(states['ADP---260918C00275000']).toBe('open');
+    expect(states['key_shape_violation']).toBe('open');
+  });
+
+  it('retires nothing when the check throws', () => {
+    const { result, states } = twoRuns(fakeCheck({
+      keyShape: SHAPE,
+      evals: () => { throw new Error('boom'); }
+    }));
+    expect(result.resolvedByGate).toBe(0);
+    expect(states['ADP---260918C00275000']).toBe('open');
+  });
+
+  it('retires nothing for a check that declares no shape', () => {
+    const { states } = twoRuns(fakeCheck({ evals: () => [{ key: 'PCTY', value: 2, fired: true }] }));
+    expect(states['ADP---260918C00275000']).toBe('open');
+  });
+});
+
 describe('usability is derived, never stored on the run', () => {
   it('marks a domain-day unusable while a blocking exception is open, and usable when it is not', () => {
     const host = makeHost();
