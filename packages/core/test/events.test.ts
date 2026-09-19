@@ -42,6 +42,9 @@ import { ensureTradingCalendar } from '../src/collector/trading-calendar.js';
 import { captureResponse } from '../src/collector/capture.js';
 import { recipes } from '../src/ingest/recipes.js';
 import { QC008_PROVIDER_CAP, QC009_DUPLICATE_NATURAL_KEY } from '../src/qa/checks/cross-cutting.js';
+import { getTable } from '../src/dictionary/index.js';
+
+const INSIDER_KEY = (): readonly string[] | undefined => getTable('raw_insider_transaction')?.naturalKey;
 
 /**
  * B7a — phase 8, the event and macro domains.
@@ -757,6 +760,62 @@ describe('EDGAR company facts', () => {
       .find((x) => x.key === 'raw_earnings_event');
     expect(e?.fired).toBe(false);
   });
+
+  it('re-judges its open findings: a per-run artefact and a redefined key close, a real duplicate stays (v1.1.284)', () => {
+    const earlier = newRun();
+    // Two windows of one sweep storing one key — the first rule's "duplicate".
+    for (const [from, to] of [['2026-09-07', '2026-09-20'], ['2026-09-07', '2026-09-13']]) {
+      captureResponse({
+        host: makeHost(), db: db(), runId: earlier.runId, asOfDate: DATE, provider: 'finnhub',
+        endpoint: '/calendar/earnings', slug: 'calendar-earnings', params: { from: from!, to: to! },
+        response: response(earningsBody([{ symbol: 'NVDA', date: '2026-09-10' }])), captureRuleId: ruleId(),
+        recipe: recipes.earnings({ sweepFrom: from!, sweepTo: to!, universe: new Set(['NVDA']) })
+      });
+    }
+    // Finnhub sending XOM's July period twice in ONE response (gen-002, 2026-09-14): a real duplicate.
+    const period = { symbol: 'XOM', period: '2026-07-01', strongBuy: 7, buy: 9, hold: 13, sell: 1, strongSell: 0 };
+    captureResponse({
+      host: makeHost(), db: db(), runId: earlier.runId, asOfDate: DATE, provider: 'finnhub',
+      endpoint: '/stock/recommendation', slug: 'recommendation', params: { symbol: 'XOM' },
+      response: response(JSON.stringify([period, period])), captureRuleId: ruleId(),
+      recipe: recipes.recommendations({ ticker: 'XOM' })
+    });
+    // The Form 4 finding was raised when the table's key was (accession, date, filer, code): record
+    // that key as the dictionary of the run that raised it.
+    const cols = (raw.prepare('PRAGMA table_info(meta_dictionary)').all() as { name: string }[]).map((c) => c.name);
+    const older = (raw.prepare('SELECT MAX(dictionary_version) AS v FROM meta_dictionary').get() as { v: number }).v - 1;
+    raw.exec(
+      `INSERT INTO meta_dictionary (${cols.map((c) => `"${c}"`).join(', ')})
+         SELECT ${cols.map((c) => (c === 'dictionary_version' ? String(older) : `"${c}"`)).join(', ')} FROM meta_dictionary
+          WHERE table_name = 'raw_insider_transaction' AND dictionary_version = ${older + 1}`
+    );
+    raw.prepare(`UPDATE meta_dictionary SET natural_key = ? WHERE table_name = 'raw_insider_transaction' AND dictionary_version = ?`)
+      .run(JSON.stringify(['accession_no', 'transaction_date', 'filer_name', 'transaction_code']), older);
+    raw.prepare('UPDATE meta_run SET dictionary_version = ? WHERE run_id = ?').run(older, earlier.runId);
+
+    runGate(db(), makeHost(), {
+      runId: earlier.runId, tradingDate: DATE, domainsExpected: {},
+      checks: [{
+        ...QC009_DUPLICATE_NATURAL_KEY,
+        run: () => ['raw_earnings_event', 'raw_analyst_recommendation', 'raw_insider_transaction']
+          .map((key) => ({ key, fired: true, detail: 'duplicates' }))
+      }]
+    });
+    raw.prepare("UPDATE meta_run SET status = 'complete' WHERE run_id = ?").run(earlier.runId);
+
+    const later = beginRun(db(), makeHost(), { kind: 'daily', tradingDate: '2026-09-08' });
+    runGate(db(), makeHost(), { runId: later.runId, tradingDate: '2026-09-08', domainsExpected: {}, checks: [QC009_DUPLICATE_NATURAL_KEY] });
+
+    const rows = Object.fromEntries(
+      (raw.prepare("SELECT key, state, resolution_kind, resolution_note FROM qa_exception WHERE check_id = 'QC-009'").all() as
+        { key: string; state: string; resolution_kind: string | null; resolution_note: string | null }[]).map((r) => [r.key, r])
+    );
+    expect(rows['raw_earnings_event']!.resolution_kind).toBe('rule_changed');
+    expect(rows['raw_insider_transaction']!.resolution_kind).toBe('rule_changed');
+    expect(rows['raw_insider_transaction']!.resolution_note).toContain('["accession_no","line_no"]');
+    // Stopped firing (the later run stored nothing), but its own run still holds the duplicate.
+    expect(rows['raw_analyst_recommendation']!.state).toBe('open');
+  });
 });
 
 describe('the EDGAR daily form index', () => {
@@ -866,6 +925,30 @@ describe('Form 4', () => {
 
   it('falls back to the issuer trading symbol when the CIK is not in our map', () => {
     expect(parse()[0]?.values['ticker']).toBe('ACTG');
+  });
+
+  it('numbers each line as the filing does, so same-day lots are distinct facts (v1.1.284)', () => {
+    // Japan Post, AFL, 2026-09-14: two sales on one day at different prices. The old key
+    // (accession, date, filer, code) could not tell them apart and QC-009 read 39 such pairs as
+    // duplicates. The number is counted before a line is skipped, so it is the filing's own.
+    const lot = (shares: string, price: string, after: string) => `
+  <nonDerivativeTransaction>
+    <transactionDate><value>2026-09-14</value></transactionDate>
+    <transactionCoding><transactionCode>S</transactionCode></transactionCoding>
+    <transactionAmounts>
+      <transactionShares><value>${shares}</value></transactionShares>
+      <transactionPricePerShare><value>${price}</value></transactionPricePerShare>
+    </transactionAmounts>
+    <postTransactionAmounts><sharesOwnedFollowingTransaction><value>${after}</value></sharesOwnedFollowingTransaction></postTransactionAmounts>
+  </nonDerivativeTransaction>`;
+    const doc = FORM4.replace(
+      /<nonDerivativeTransaction>[\s\S]*<\/nonDerivativeTransaction>/,
+      lot('9545', '116.62', '50588645') + lot('', '116.80', '50588645') + lot('4055', '117.02', '50584590')
+    );
+    const rows = makeForm4Ingest({ accessionNo: '0001104659-26-108107' })(doc, ctx(newRun()));
+    // The middle line has no share count and is skipped; the third keeps its number.
+    expect(rows.map((r) => [r.values['line_no'], r.values['shares']])).toEqual([[1, 9545], [3, 4055]]);
+    expect(INSIDER_KEY()).toEqual(['accession_no', 'line_no']);
   });
 
   it('prefers our own CIK mapping over the filing\'s symbol', () => {

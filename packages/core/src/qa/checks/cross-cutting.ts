@@ -285,8 +285,9 @@ export const QC009_DUPLICATE_NATURAL_KEY: CheckDefinition = {
     'returning the same key is not: a capped Finnhub window stores its rows and its uncapped halves ' +
     'store them again, which is the subdivision QC-008 requires (330 + 322 such keys on 2026-09-16). ' +
     'Keys come from the CURRENT dictionary version only: meta_dictionary keeps every version, and ' +
-    'reading them all kept a superseded key firing after the key was fixed.',
-  readsTables: ['meta_dictionary'],
+    'reading them all kept a superseded key firing after the key was fixed. Open findings are ' +
+    're-judged on the runs they were seen in, and one raised against a since-redefined key closes.',
+  readsTables: ['meta_dictionary', 'meta_run', 'qa_exception'],
   testedQuantity: null,
   testedUnit: null,
   thresholds: {},
@@ -304,24 +305,95 @@ export const QC009_DUPLICATE_NATURAL_KEY: CheckDefinition = {
     for (const t of tables) {
       const key = (JSON.parse(t.natural_key) as string[]).filter((c) => c !== 'observed_at');
       if (key.length === 0) continue;
-      const cols = [...key, 'source_response_id'].map((c) => `"${c}"`).join(', ');
-      const dupes = ctx.db
-        .prepare(
-          `SELECT COUNT(*) AS n FROM (
-             SELECT ${cols} FROM "${t.table_name}" WHERE run_id = ?
-             GROUP BY ${cols} HAVING COUNT(*) > 1)`
-        )
-        .get(ctx.runId) as { n: number };
+      const dupes = duplicatesPerResponse(ctx, t.table_name, key, ctx.runId, ctx.runId);
       out.push({
         key: t.table_name,
-        fired: dupes.n > 0,
-        detail: dupes.n > 0 ? `${dupes.n} duplicate natural key(s) in ${t.table_name} within one response` : undefined,
-        evidence: { table: t.table_name, duplicateKeys: dupes.n }
+        fired: dupes > 0,
+        detail: dupes > 0 ? `${dupes} duplicate natural key(s) in ${t.table_name} within one response` : undefined,
+        evidence: { table: t.table_name, duplicateKeys: dupes, naturalKey: key }
       });
     }
-    return out;
+    return withRejudgedDuplicateFindings(ctx, out, new Map(tables.map((t) => [t.table_name, t.natural_key])));
   }
 };
+
+/** Natural keys stored twice from one response, in runs `fromRun`..`toRun`. */
+function duplicatesPerResponse(ctx: CheckContext, table: string, key: readonly string[], fromRun: number, toRun: number): number {
+  const cols = [...key, 'source_response_id'].map((c) => `"${c}"`).join(', ');
+  return (
+    ctx.db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM (
+           SELECT run_id, ${cols} FROM "${table}" WHERE run_id BETWEEN ? AND ?
+           GROUP BY run_id, ${cols} HAVING COUNT(*) > 1)`
+      )
+      .get(fromRun, toRun) as { n: number }
+  ).n;
+}
+
+/**
+ * QC-009's open findings, judged again under today's rule on the runs they were seen in (v1.1.284).
+ *
+ * A finding is keyed by TABLE, so today's clean reading of the table says nothing about the runs
+ * that fired — and on gen-002 five findings sat open with nothing able to close them:
+ *
+ * - **three raised by the first rule** (raw_analyst_estimate, raw_earnings_event, raw_edgar_fact),
+ *   which counted a key stored twice anywhere in a RUN. A subdivided Finnhub sweep stores its capped
+ *   window's rows and then its halves' — the recovery QC-008 demands — so that fired on correct
+ *   data. Re-counted per response over the same runs: zero; closes `rule_changed`.
+ * - **one raised against a key since redefined** (raw_insider_transaction, whose key could not tell
+ *   one Form 4 line from the next until dictionary v19). The key in force when the finding last
+ *   fired is read from `meta_dictionary` at that run's `dictionary_version`; if it is not today's
+ *   key, the finding was about a key that no longer exists; closes `rule_changed`, naming both.
+ *
+ * A finding whose runs still show duplicates under today's rule stays open — raw_analyst_recommendation
+ * on 2026-09-14, where Finnhub sent XOM's July period twice in one response, is exactly what the check
+ * is for. Only a table evaluated clean TODAY is considered: one firing today is live.
+ */
+function withRejudgedDuplicateFindings(
+  ctx: CheckContext,
+  today: Evaluation[],
+  currentKeys: ReadonlyMap<string, string>
+): Evaluation[] {
+  const open = ctx.db
+    .prepare(
+      `SELECT x.key, x.first_seen_run_id, x.last_seen_run_id, r.dictionary_version
+         FROM qa_exception x
+         LEFT JOIN meta_run r ON r.run_id = x.last_seen_run_id
+        WHERE x.check_id = 'QC-009' AND x.state IN ('open', 'acknowledged')`
+    )
+    .all() as { key: string; first_seen_run_id: number; last_seen_run_id: number; dictionary_version: number | null }[];
+  if (open.length === 0) return today;
+
+  const keyAt = ctx.db.prepare(
+    `SELECT natural_key FROM meta_dictionary
+      WHERE table_name = ? AND column_name = 'run_id' AND dictionary_version = ? LIMIT 1`
+  );
+  const byTable = new Map(today.map((e, i) => [e.key, i]));
+  const out = [...today];
+  for (const f of open) {
+    const i = byTable.get(f.key);
+    const current = currentKeys.get(f.key);
+    if (i === undefined || out[i]!.fired || current === undefined) continue;
+    const then = f.dictionary_version === null
+      ? undefined
+      : (keyAt.get(f.key, f.dictionary_version) as { natural_key: string } | undefined)?.natural_key;
+
+    let note: string | undefined;
+    if (then !== undefined && then !== current) {
+      note = `raised against the natural key ${then} (dictionary v${f.dictionary_version}); the key is now ${current}`;
+    } else {
+      const key = (JSON.parse(current) as string[]).filter((c) => c !== 'observed_at');
+      if (duplicatesPerResponse(ctx, f.key, key, f.first_seen_run_id, f.last_seen_run_id) === 0) {
+        note =
+          `re-counted per response over runs ${f.first_seen_run_id}–${f.last_seen_run_id}: no key stored twice — ` +
+          'raised when duplicates were counted per run, which a subdivided sweep produces on correct data';
+      }
+    }
+    if (note !== undefined) out[i] = { ...out[i]!, closesAs: { kind: 'rule_changed', note } };
+  }
+  return out;
+}
 
 export const QC010_LEGACY_HANDOFF_PARSED: CheckDefinition = {
   id: 'QC-010',

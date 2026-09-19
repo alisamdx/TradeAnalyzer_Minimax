@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.1.284] - 2026-09-19
+
+### QC-009's stale findings, and a Form 4 key that could not tell one line from the next
+
+Five QC-009 (duplicate natural key) findings sat open. Each is keyed by table, so today's clean reading of a table said nothing about the runs that fired. QC-009 now re-judges them, and four close `rule_changed`:
+
+- **raw_analyst_estimate, raw_earnings_event:** re-counted per response over runs 8–16, nothing is stored twice. They were raised when duplicates were counted per *run*, which a subdivided Finnhub sweep produces on correct data.
+- **raw_edgar_fact:** raised against dictionary v16's key, which lacked `period_start`.
+- **raw_insider_transaction:** raised against a key that is now fixed. A Form 4 lists the lots one filer sells on one day at different prices (Japan Post sold AFL 9,545 @ 116.62 and 4,055 @ 117.02 on 2026-09-14), and `(accession, date, filer, code)` could not tell them apart: 39 false duplicates. **Dictionary v19** adds `line_no`, the transaction's position in the filing, counted before any skip. The key is now `(accession_no, line_no)`, since content columns cannot identify a line either (two identical conversion lines exist in the same run).
+
+**raw_analyst_recommendation stays open.** Finnhub sent XOM's July period twice in one response on 2026-09-14, which is exactly what the check is for, so it needs your ruling.
+
+**Replay compares only columns the source run's dictionary had.** A nullable column added since (`line_no` now, `provider_symbol` in v1.1.257) is null on older rows and filled by today's parser. A replay of any earlier day would therefore have read `different` and blocked through QC-951.
+
+Rehearsed on the 2026-09-18 snapshot: `line_no` added in place to the populated table (299 rows); QC-009 5 → 1 open; the email's blocking backlog 109 → 106.
+
+`core` 0.6.39, `next` 0.4.27, dictionary v19. Details: `changelogs/v1.1.284_2026-09-19.md`.
+
 ## [1.1.283] - 2026-09-19
 
 ### QC-008 and QC-601 re-judge their stale findings under today's rules

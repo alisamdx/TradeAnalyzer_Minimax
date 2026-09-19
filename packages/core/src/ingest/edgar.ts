@@ -339,7 +339,13 @@ export function makeForm4Ingest(opts: {
     const role = filerRole(owner);
 
     const rows: IngestedRowSpec[] = [];
+    // The transaction's position in the filing, counted BEFORE any line is skipped, so it names
+    // the filing's own line and never shifts (v1.1.284). A Form 4 routinely lists several sales by
+    // one filer on one day at different prices — Japan Post sold 9,545 @ 116.62 and 4,055 @ 117.02
+    // on 2026-09-14 — and without it those are indistinguishable by key.
+    let lineNo = 0;
     for (const tx of xml.matchAll(/<nonDerivativeTransaction>([\s\S]*?)<\/nonDerivativeTransaction>/g)) {
+      lineNo += 1;
       const scope = tx[1] as string;
       const transactionDate = xmlValue(scope, 'transactionDate');
       const code = /<transactionCode>([\s\S]*?)<\/transactionCode>/.exec(scope)?.[1]?.trim() ?? null;
@@ -367,7 +373,8 @@ export function makeForm4Ingest(opts: {
             const v = numberOrNull(xmlValue(scope, 'sharesOwnedFollowingTransaction'));
             return v === null ? null : Math.round(v);
           })(),
-          accession_no: opts.accessionNo
+          accession_no: opts.accessionNo,
+          line_no: lineNo
         }
       });
     }

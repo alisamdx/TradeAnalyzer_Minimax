@@ -405,13 +405,27 @@ export function runReplay(args: {
 
   const sourceIds = [...idMap.keys()];
   const targetIds = [...idMap.values()];
+  // Compared over the columns the SOURCE could have filled: those in the dictionary of the oldest
+  // run replayed (v1.1.284). A nullable column added since is null on every earlier row and filled
+  // by today's parser — `raw_insider_transaction.line_no` (v19), `provider_symbol` (v1.1.257) — so
+  // comparing it reports `different` for a change that is growth, not a parser disagreement.
+  // `TableDiff.columns` lists what was compared, so the narrowing is visible in the report.
+  const oldestVersion = Math.min(...runs.map((r) => r.dictionary_version));
+  const columnsThen = source.prepare(
+    'SELECT column_name FROM meta_dictionary WHERE table_name = ? AND dictionary_version = ?'
+  );
+  const comparable = (entry: TableEntry): TableEntry => {
+    const then = new Set((columnsThen.all(entry.table, oldestVersion) as { column_name: string }[]).map((r) => r.column_name));
+    // A table the old dictionary did not have holds no old rows: nothing to narrow.
+    return then.size === 0 ? entry : { ...entry, columns: entry.columns.filter((c) => then.has(c.column)) };
+  };
   const tables: TableDiff[] = [];
   for (const entry of DICTIONARY) {
     if (entry.layer === 'derived') continue;
     if (!['raw', 'ext', 'legacy'].includes(entry.layer)) continue;
     if (!entry.columns.some((c) => c.column === 'source_response_id')) continue;
     const diff = diffTable(
-      entry,
+      comparable(entry),
       { db: source, column: 'source_response_id', ids: sourceIds },
       { db: target, column: 'source_response_id', ids: targetIds }
     );

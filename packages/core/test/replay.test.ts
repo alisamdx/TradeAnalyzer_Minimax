@@ -266,6 +266,43 @@ describe('a replay that finds something', () => {
   });
 });
 
+describe('a column added after a run was recorded', () => {
+  it('is not compared — growth is not a parser disagreement (v1.1.284)', () => {
+    // raw_insider_transaction.line_no (dictionary v19) is null on every earlier row and filled by
+    // today's parser; compared, every replay of an earlier day would read `different`. Stand-in
+    // here: the bar table's volume, blanked on the stored rows as if the column were newer.
+    const run = captureDay();
+    // Test-only: the append-only trigger forbids rewriting a stored row, which is what makes this
+    // a simulation of a day recorded before the column existed.
+    for (const t of raw.prepare(`SELECT name FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'raw_daily_bar'`).all() as { name: string }[]) {
+      raw.exec(`DROP TRIGGER "${t.name}"`);
+    }
+    raw.exec('UPDATE raw_daily_bar SET volume = NULL');
+    const before = runReplayJob(makeHost(), { tradingDate: DATE });
+    expect(before.verdict).toBe('different');
+    // A different replay keeps its scratch as evidence; the fixed test clock would reuse its name.
+    for (const s of scratches.splice(0)) if (s.open) s.close();
+    rmSync(before.scratchPath!, { force: true });
+
+    // Record that the run's dictionary did not have the column: the version before, minus volume.
+    const cols = (raw.prepare('PRAGMA table_info(meta_dictionary)').all() as { name: string }[]).map((c) => c.name);
+    const current = (raw.prepare('SELECT MAX(dictionary_version) AS v FROM meta_dictionary').get() as { v: number }).v;
+    raw.exec(
+      `INSERT INTO meta_dictionary (${cols.map((c) => `"${c}"`).join(', ')})
+         SELECT ${cols.map((c) => (c === 'dictionary_version' ? String(current - 1) : `"${c}"`)).join(', ')} FROM meta_dictionary
+          WHERE dictionary_version = ${current} AND NOT (table_name = 'raw_daily_bar' AND column_name = 'volume')`
+    );
+    raw.prepare('UPDATE meta_run SET dictionary_version = ? WHERE run_id = ?').run(current - 1, run.runId);
+
+    const report = runReplayJob(makeHost(), { tradingDate: DATE });
+    expect(report.verdict).toBe('equal');
+    const bars = tableOf(report, 'raw_daily_bar')!;
+    expect(bars.columns).not.toContain('volume');
+    expect(bars.columns).toContain('close');
+    expect(bars).toMatchObject({ added: 0, removed: 0 });
+  });
+});
+
 describe('what a replay refuses to call equal', () => {
   it('a run captured before recipes existed is nothing_replayable — never equal', () => {
     // The zero-overlap trap: an equivalence check over zero comparisons

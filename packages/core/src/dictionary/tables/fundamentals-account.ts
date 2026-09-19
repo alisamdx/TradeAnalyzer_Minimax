@@ -362,7 +362,10 @@ export const fundamentalsAccountTables: readonly TableEntry[] = [
       'ticker: EDGAR publishes an index listing every filing of the day, so a single call yields every ' +
       'Form 4 and the universe filter is applied locally. Per-ticker polling would be ~300 calls a day ' +
       'to learn that almost nothing was filed.',
-    naturalKey: ['accession_no', 'transaction_date', 'filer_name', 'transaction_code'],
+    // A filing and its line. Until dictionary v19 the key was (accession, date, filer, code), which
+    // a Form 4 routinely repeats: one filer selling in several lots on one day, each at its own price.
+    // QC-009 read 39 such keys as duplicates on 2026-09-17, on correct data.
+    naturalKey: ['accession_no', 'line_no'],
     appendOnly: true,
     ruleDriven: true,
     standardColumns: true,
@@ -376,7 +379,11 @@ export const fundamentalsAccountTables: readonly TableEntry[] = [
       col.int('shares', 'Shares transacted.', { sourceProvider: 'edgar' }),
       nullable(col.perShare('price', 'Price per share.', { sourceProvider: 'edgar' }), 'the filing reported no price — awards and gifts often have none'),
       nullable(col.int('shares_owned_after', 'Shares held after the transaction.', { sourceProvider: 'edgar' }), 'the filing did not state it'),
-      col.ident('accession_no', 'The Form 4 filing this came from.', { sourceProvider: 'edgar' })
+      col.ident('accession_no', 'The Form 4 filing this came from.', { sourceProvider: 'edgar' }),
+      nullable(
+        col.int('line_no', 'The transaction\'s position among the filing\'s non-derivative transactions, 1-based, counted before any line is skipped — so it is the filing\'s own line number.', { sourceProvider: 'derived_at_ingestion' }),
+        'ingested before dictionary v19, which did not record the line'
+      )
     ],
     indexes: [
       { columns: ['ticker', 'transaction_date'] },
