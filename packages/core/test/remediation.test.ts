@@ -9,6 +9,8 @@ import type { CollectorHost } from '../src/collector/host.js';
 import { beginRun } from '../src/collector/run.js';
 import { runGate } from '../src/qa/gate.js';
 import { QC204_DISCONTINUITY } from '../src/qa/checks/bars.js';
+import { QC501_UNEXPLAINED_DISCONTINUITY } from '../src/qa/checks/quotes-actions.js';
+import type { CheckDefinition } from '../src/qa/check.js';
 import { runR6ActionRefetch, r6Candidates, type RemediationAttempt } from '../src/collector/remediation.js';
 
 /**
@@ -210,5 +212,36 @@ describe('the gate\'s auto-resolve branch, which could never fire before', () =>
       .get('AAOI 2022-09-16') as { state: string; still_firing: number };
     expect(row.state).toBe('open');
     expect(row.still_firing).toBe(0);
+  });
+
+  it('closes the QC-501 alias the way its QC-204 finding was closed (v1.1.278)', async () => {
+    // QC-501 reads only OPEN QC-204 findings, so after QC-204 resolved it stopped evaluating the
+    // key — and a key never evaluated no longer counts as clean. Without mirroring, the alias
+    // would stay open for ever with nothing able to close it.
+    const key = 'AAOI 2022-09-16';
+    const firing204 = { ...QC204_DISCONTINUITY, run: () => [{ key, value: 0.9, fired: true, detail: 'step' }] };
+    const clean204 = { ...QC204_DISCONTINUITY, run: () => [{ key, value: 0.9, fired: false }] };
+    const gate = (checks: CheckDefinition[]): number => {
+      const host = makeHost();
+      const run = beginRun(db, host, { kind: 'manual', tradingDate: DATE });
+      runGate(db, host, { runId: run.runId, tradingDate: DATE, checks });
+      raw.prepare("UPDATE meta_run SET status = 'complete' WHERE run_id = ?").run(run.runId);
+      return run.runId;
+    };
+
+    raw.prepare("UPDATE meta_run SET status = 'complete' WHERE run_id = ?").run(raiseDiscontinuities([key]));
+    const runId = gate([firing204, QC501_UNEXPLAINED_DISCONTINUITY]); // QC-501 now sees QC-204 open
+    await runR6ActionRefetch(makeHost(), db, { runId, tradingDate: DATE });
+    gate([clean204, QC501_UNEXPLAINED_DISCONTINUITY]);            // QC-204 resolves; QC-501 lags a run
+    gate([clean204, QC501_UNEXPLAINED_DISCONTINUITY]);
+
+    const rows = raw
+      .prepare('SELECT check_id, state, resolution_kind, resolution_note FROM qa_exception WHERE key = ? ORDER BY check_id')
+      .all(key) as { check_id: string; state: string; resolution_kind: string; resolution_note: string }[];
+    expect(rows.map((r) => [r.check_id, r.state, r.resolution_kind])).toEqual([
+      ['QC-204', 'resolved', 'data_corrected'],
+      ['QC-501', 'resolved', 'data_corrected']
+    ]);
+    expect(rows[1]!.resolution_note).toContain('QC-204 finding resolved data_corrected');
   });
 });

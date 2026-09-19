@@ -49,9 +49,13 @@ export interface Evaluation {
    * when the check itself holds the evidence that the finding was wrong (v1.1.277). QC-204 sets
    * it on a verified genuine move — the data was right and the check was wrong to flag it — so the
    * gate records `false_positive` with the check's reason, not `data_corrected`, which would say
-   * the data had been fixed.
+   * the data had been fixed. QC-501, an alias of QC-204, sets it to close its own finding the way
+   * QC-204's was closed (v1.1.278), `data_corrected` included — the evidence is QC-204's record.
    */
-  readonly closesAs?: { readonly kind: 'false_positive' | 'rule_changed'; readonly note: string } | undefined;
+  readonly closesAs?: {
+    readonly kind: 'data_corrected' | 'provider_fixed' | 'false_positive' | 'rule_changed';
+    readonly note: string;
+  } | undefined;
 }
 
 export interface CheckDefinition {

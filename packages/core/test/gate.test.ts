@@ -243,6 +243,45 @@ describe('exceptions are facts about the data, not about the run', () => {
     expect(row['resolution_kind']).toBe('data_corrected');
   });
 
+  it('does NOT resolve when the remediation succeeded but the check never evaluated the key', () => {
+    // v1.1.278: absent from the evaluations is unobserved, not clean. Before, a run that did not
+    // cover the key (ticker not collected, a deduplicated fetch that stored nothing) closed the
+    // finding as data_corrected on no evidence.
+    const host = makeHost();
+    const firing = fakeCheck({ evals: () => [{ key: 'AAPL', value: 2, fired: true, detail: 'over' }] });
+    const elsewhere = fakeCheck({ evals: () => [{ key: 'MSFT', value: 0.1, fired: false }] });
+
+    const r1 = beginRun(db, host, { kind: 'daily', tradingDate: '2026-09-05' });
+    runGate(db, host, { runId: r1.runId, tradingDate: '2026-09-05', checks: [firing] });
+    raw.prepare(`UPDATE qa_exception SET remediations_json = '[{"code":"R5","outcome":"success"}]'`).run();
+    raw.prepare("UPDATE meta_run SET status='complete' WHERE run_id=?").run(r1.runId);
+
+    const r2 = beginRun(db, host, { kind: 'daily', tradingDate: '2026-09-06' });
+    const result = runGate(db, host, { runId: r2.runId, tradingDate: '2026-09-06', checks: [elsewhere] });
+
+    expect(result.resolvedByGate).toBe(0);
+    const row = raw.prepare(`SELECT state, still_firing FROM qa_exception WHERE key = 'AAPL'`).get() as Record<string, unknown>;
+    expect(row['state']).toBe('open');
+    expect(row['still_firing']).toBe(0);
+  });
+
+  it('does NOT resolve when the check threw, whatever it evaluated before', () => {
+    const host = makeHost();
+    const firing = fakeCheck({ evals: () => [{ key: 'AAPL', value: 2, fired: true, detail: 'over' }] });
+    const broken = fakeCheck({ evals: () => { throw new Error('no such column'); } });
+
+    const r1 = beginRun(db, host, { kind: 'daily', tradingDate: '2026-09-05' });
+    runGate(db, host, { runId: r1.runId, tradingDate: '2026-09-05', checks: [firing] });
+    raw.prepare(`UPDATE qa_exception SET remediations_json = '[{"code":"R5","outcome":"success"}]'`).run();
+    raw.prepare("UPDATE meta_run SET status='complete' WHERE run_id=?").run(r1.runId);
+
+    const r2 = beginRun(db, host, { kind: 'daily', tradingDate: '2026-09-06' });
+    runGate(db, host, { runId: r2.runId, tradingDate: '2026-09-06', checks: [broken] });
+
+    const row = raw.prepare(`SELECT state FROM qa_exception WHERE key = 'AAPL'`).get() as Record<string, unknown>;
+    expect(row['state']).toBe('open');
+  });
+
   it('reopens the same exception on recurrence rather than raising a second', () => {
     const host = makeHost();
     const firing = fakeCheck({ evals: () => [{ key: 'AAPL', value: 2, fired: true, detail: 'over' }] });

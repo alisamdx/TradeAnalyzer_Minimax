@@ -147,7 +147,10 @@ export function runGate(
   const firedFingerprints = new Set<string>();
   const vacuous: string[] = [];
   const untrustedShapes = new Set<string>();
-  const closers = new Map<string, { kind: 'false_positive' | 'rule_changed'; note: string }>();
+  const closers = new Map<string, NonNullable<Evaluation['closesAs']>>();
+  // Fingerprints a check evaluated this run and found NOT firing. Auto-resolve needs one of
+  // these: a finding its check never looked at is unobserved, not clean (v1.1.278).
+  const evaluatedClean = new Set<string>();
   let checksFired = 0;
 
   for (const def of args.checks) {
@@ -188,8 +191,14 @@ export function runGate(
 
     const durationMs = Date.now() - started;
     const fired = evaluations.filter((e) => e.fired);
-    for (const e of evaluations) {
-      if (!e.fired && e.closesAs) closers.set(fingerprint(def.id, def.domain, e.key), e.closesAs);
+    // A check that threw evaluated nothing, whatever it returned before throwing.
+    if (failure === undefined) {
+      for (const e of evaluations) {
+        if (e.fired) continue;
+        const fp = fingerprint(def.id, def.domain, e.key);
+        evaluatedClean.add(fp);
+        if (e.closesAs) closers.set(fp, e.closesAs);
+      }
     }
     if (fired.length > 0) checksFired++;
     if (evaluations.length === 0) vacuous.push(def.id);
@@ -268,7 +277,9 @@ export function runGate(
     counts[severity]++;
   }
 
-  const resolvedByGate = reconcileStoppedFiring(db, host, args.runId, firedFingerprints, args.checks, untrustedShapes, closers);
+  const resolvedByGate = reconcileStoppedFiring(
+    db, host, args.runId, firedFingerprints, args.checks, untrustedShapes, closers, evaluatedClean
+  );
   recomputeDomainDayStatus(db, host, args.runId, args.tradingDate);
 
   const verdict: Verdict = counts.blocking > 0 ? 'red' : counts.warning > 0 ? 'amber' : 'green';
@@ -388,7 +399,8 @@ function upsertException(
  * remediation is listed as "no longer observed, unresolved" — because "it went
  * away" is exactly how the earnings-date bug hid for a quarter. The gate may
  * resolve only when a remediation in `remediations_json` succeeded *and* the
- * fingerprint now evaluates clean; anything else is an operator's call.
+ * fingerprint now evaluates clean — evaluated this run and not fired, never
+ * merely absent from the evaluations; anything else is an operator's call.
  *
  * The one other case the gate closes itself (v1.1.273): a finding whose key its
  * check can no longer produce, per the check's declared `keyShape`. That is a
@@ -401,7 +413,8 @@ function reconcileStoppedFiring(
   firedFingerprints: ReadonlySet<string>,
   checks: readonly CheckDefinition[],
   untrustedShapes: ReadonlySet<string> = new Set(),
-  closers: ReadonlyMap<string, { kind: string; note: string }> = new Map()
+  closers: ReadonlyMap<string, { kind: string; note: string }> = new Map(),
+  evaluatedClean: ReadonlySet<string> = new Set()
 ): number {
   const byId = new Map(checks.map((c) => [c.id, c]));
   const openOnes = db
@@ -454,7 +467,12 @@ function reconcileStoppedFiring(
     const remediations = JSON.parse(e.remediations_json) as { outcome?: string }[];
     const remediationSucceeded = remediations.some((r) => r.outcome === 'success');
 
-    if (remediationSucceeded) {
+    // "Not firing" has two causes and only one of them is evidence: the check measured this
+    // key and found it clean, or it never looked (the ticker was not collected this run, a
+    // deduplicated fetch stored no rows, the key fell outside its window). Until v1.1.278 both
+    // read as clean, so a successful remediation followed by a run that happened not to cover
+    // the key closed the finding as `data_corrected` on no evidence at all.
+    if (remediationSucceeded && evaluatedClean.has(e.fingerprint)) {
       db.prepare(
         `UPDATE qa_exception
             SET state = 'resolved', resolved_at = ?, resolution_kind = 'data_corrected',

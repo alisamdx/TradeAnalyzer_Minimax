@@ -153,7 +153,33 @@ export const QC501_UNEXPLAINED_DISCONTINUITY: CheckDefinition = {
       )
       .all() as { key: string; evidence_json: string }[];
 
-    if (open.length === 0) return [{ key: ctx.tradingDate, value: 0, fired: false }];
+    // This check's own open findings whose QC-204 finding has since been resolved. QC-501 reads
+    // only OPEN QC-204 findings, so once QC-204's closed this key was never evaluated again —
+    // and since v1.1.278 the gate does not read "not evaluated" as clean, so the alias would
+    // stay open for ever. It is the same finding, so it closes the way QC-204's did.
+    const settled = (
+      ctx.db
+        .prepare(
+          `SELECT a.key, b.resolution_kind, b.resolution_note
+             FROM qa_exception a
+             JOIN qa_exception b ON b.check_id = 'QC-204' AND b.key = a.key
+            WHERE a.check_id = 'QC-501' AND a.state IN ('open', 'acknowledged')
+              AND b.state = 'resolved' AND b.resolution_kind IS NOT NULL`
+        )
+        .all() as { key: string; resolution_kind: NonNullable<Evaluation['closesAs']>['kind']; resolution_note: string | null }[]
+    ).map(
+      (r): Evaluation => ({
+        key: r.key,
+        value: 0,
+        fired: false,
+        closesAs: {
+          kind: r.resolution_kind,
+          note: `QC-204 finding resolved ${r.resolution_kind}: ${r.resolution_note ?? '(no note)'}`
+        }
+      })
+    );
+
+    if (open.length === 0) return settled.length > 0 ? settled : [{ key: ctx.tradingDate, value: 0, fired: false }];
 
     // QC-204 closes its verified genuine moves in this same gate run, AFTER every check has
     // run — so reading its open findings alone left QC-501 firing on all of them for one more
@@ -161,7 +187,7 @@ export const QC501_UNEXPLAINED_DISCONTINUITY: CheckDefinition = {
     // reached the same way, closing this check's finding with the same reason.
     const verified = verifiedGenuineSteps(ctx, open.map((e) => e.key));
 
-    return open.map((e) => {
+    return open.map((e): Evaluation => {
       const note = verified.get(e.key);
       return note === undefined
         ? {
@@ -178,7 +204,7 @@ export const QC501_UNEXPLAINED_DISCONTINUITY: CheckDefinition = {
             evidence: { ...(JSON.parse(e.evidence_json) as Record<string, unknown>), verifiedGenuineMove: true },
             closesAs: { kind: 'false_positive' as const, note }
           };
-    });
+    }).concat(settled);
   }
 };
 

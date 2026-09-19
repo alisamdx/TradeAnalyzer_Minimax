@@ -289,7 +289,7 @@ Recomputed whenever an exception changes state. **This is the only table a downs
 |---|---|---|
 | create → `open` | gate | first run where the fingerprint fires |
 | `open` → `acknowledged` | operator | note optional; stops QC-954 aging |
-| `open`/`acknowledged` → `resolved` | operator, **or** gate | gate may resolve only when the *same fingerprint* evaluates clean **and** a remediation in `remediations_json` succeeded — never merely because it stopped firing (P9) |
+| `open`/`acknowledged` → `resolved` | operator, **or** gate | gate may resolve only when the *same fingerprint* evaluates clean **and** a remediation in `remediations_json` succeeded — never merely because it stopped firing (P9). "Evaluates clean" means the check returned an evaluation for that key **this run** and it did not fire; a key absent from the evaluations (not collected this run, a deduplicated fetch that stored nothing, the check threw) is unobserved and stays open with `still_firing = 0` (v1.1.278 — until then absence read as clean). QC-501, which reads only open QC-204 findings, closes its own finding with the kind and note QC-204's was resolved with |
 | `open`/`acknowledged` → `accepted` | operator only | note **required**, `accepted_until` required (default +30 d); domain-day becomes usable |
 | `accepted` → `expired_review` | gate | on `accepted_until` passing while the fingerprint still fires |
 | `expired_review` → `accepted` / `open` / `resolved` | operator only | re-accept with a fresh expiry, or open it for real work |

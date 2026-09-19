@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.278] - 2026-09-18
+
+### The gate no longer reads "not evaluated" as "clean"
+
+Auto-resolve requires a successful remediation *and* a clean evaluation of the same fingerprint, but the gate only checked that the fingerprint had not fired — so a finding whose check never looked at its key this run (ticker not collected, a deduplicated fetch that stored no rows, a check that threw) was closed as `data_corrected` on no evidence. It now needs an evaluation of that key, this run, that did not fire; otherwise the finding stays open and unobserved. No production finding had been closed this way yet — all 28 `data_corrected` resolutions came from the JAN and SOLS reuse rulings — so this is preventive. The same review found QC-501 could never close once its QC-204 finding was auto-resolved (it reads only open QC-204 findings); it now closes with QC-204's resolution kind and note. Rehearsal unchanged: QC-204/QC-501 123 → 25.
+
+`core` 0.6.33, `next` 0.4.21. Details: `changelogs/v1.1.278_2026-09-18.md`.
+
 ## [1.1.277] - 2026-09-18
 
 ### QC-204 closes the price steps it can verify as genuine moves
