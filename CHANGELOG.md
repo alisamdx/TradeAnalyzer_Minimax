@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.285] - 2026-09-19
+
+### Findings on a ticker that left the subset close from the recorded exit
+
+EQR dropped out of the S&P 500 and the Russell 1000 on 2026-09-15 and out of the chain subset on 09-17; its last bar is 08-17. QC-603 and QC-905 judge subset members only, so its two findings were never evaluated again and would have stayed open for ever. Every future delisting or acquisition does the same, and EA and WBS left on the same day. This is not a disappearance: the collector recorded the exit as a closed membership range with the universe's reason. Both checks now close such a finding `rule_changed`, with the dates and reason in the note, e.g. *"EQR left the chain subset on 2026-09-17 (universe exit 2026-09-15: russell1000:index_drop, sp500:index_drop); QC-603 covers subset members only"*. A ticker with no membership record at all stays open.
+
+`rule_changed` now officially also means "the rule no longer applies to this key". A dedicated `out_of_scope` kind would need `qa_exception`'s CHECK changed, which a populated table cannot take within a generation. Rehearsed: EQR ×2 closed, nothing else touched; the email's blocking backlog 106 → 104.
+
+`core` 0.6.40, `next` 0.4.28. Details: `changelogs/v1.1.285_2026-09-19.md`.
+
 ## [1.1.284] - 2026-09-19
 
 ### QC-009's stale findings, and a Form 4 key that could not tell one line from the next

@@ -56,6 +56,55 @@ export function fundFindingClosers(ctx: CheckContext, checkId: string, why: stri
   }));
 }
 
+/**
+ * Closers for a subset-scoped check's open findings on tickers that have LEFT the chain subset
+ * (v1.1.285).
+ *
+ * QC-603 and QC-905 judge current subset members only, so a ticker that leaves is never evaluated
+ * again and its finding would stay open for ever. EQR: dropped from the S&P 500 and the Russell
+ * 1000 on 2026-09-15, out of the subset on 09-17, last bar 08-17. Every future delisting and
+ * acquisition does the same. This is not a disappearance: the collector RECORDED the exit — a
+ * closed membership range, with the universe's reason beside it — and that record is the evidence.
+ * A ticker with no membership row at all is not closed here; that would be absence, not a record.
+ *
+ * Kind `rule_changed`, read as "the rule no longer applies to this key": none of the four kinds
+ * names a scope exit, and `resolution_kind`'s CHECK is baked into a populated table, so a fifth
+ * kind waits for the next generation. Funds are skipped — `fundFindingClosers` owns those.
+ */
+export function departedFindingClosers(ctx: CheckContext, checkId: string): Evaluation[] {
+  return (
+    ctx.db
+      .prepare(
+        `SELECT x.key,
+                (SELECT MAX(m.valid_to) FROM ref_chain_subset_membership m WHERE m.ticker = x.key) AS left_subset,
+                (SELECT MAX(u.valid_to) FROM ref_universe_membership u
+                  WHERE u.ticker = x.key AND u.valid_to IS NOT NULL) AS left_universe,
+                (SELECT GROUP_CONCAT(DISTINCT u.list_source || ':' || u.change_reason) FROM ref_universe_membership u
+                  WHERE u.ticker = x.key AND u.valid_to IS NOT NULL
+                    AND NOT EXISTS (SELECT 1 FROM ref_universe_membership o WHERE o.ticker = x.key AND o.valid_to IS NULL)) AS why
+           FROM qa_exception x
+          WHERE x.check_id = ? AND x.state IN ('open', 'acknowledged')
+            AND EXISTS (SELECT 1 FROM ref_chain_subset_membership m WHERE m.ticker = x.key AND m.valid_to IS NOT NULL)
+            AND NOT EXISTS (SELECT 1 FROM ref_chain_subset_membership m WHERE m.ticker = x.key AND m.valid_to IS NULL)
+            AND NOT EXISTS (
+              SELECT 1 FROM raw_ticker_reference r
+               WHERE r.ticker = x.key AND r.security_type IN ${FUND_TYPES}
+                 AND r.row_id = (SELECT MAX(row_id) FROM raw_ticker_reference WHERE ticker = x.key))`
+      )
+      .all(checkId) as { key: string; left_subset: string; left_universe: string | null; why: string | null }[]
+  ).map((r) => ({
+    key: r.key,
+    fired: false,
+    closesAs: {
+      kind: 'rule_changed' as const,
+      note:
+        `${r.key} left the chain subset on ${r.left_subset}` +
+        (r.why && r.left_universe ? ` (universe exit ${r.left_universe}: ${r.why.split(',').sort().join(', ')})` : '') +
+        `; ${checkId} covers subset members only`
+    }
+  }));
+}
+
 /** How long a filer whose companyfacts lacked its newest report waits before the fact pull asks again. */
 export const FACTS_RETRY_DAYS = 7;
 
@@ -339,7 +388,7 @@ export const QC603_EARNINGS_FRESHNESS: CheckDefinition = {
     'fire, which is indistinguishable from a ticker with no earnings coming. Two cases are not ' +
     'staleness: a ticker that reported in the last 21 days (its next date can sit past the sweep), and ' +
     'one listed within 135 days that has never been dated (its first report is not yet due).',
-  readsTables: ['raw_earnings_event', 'ref_chain_subset_membership', 'raw_ticker_reference', 'qa_exception'],
+  readsTables: ['raw_earnings_event', 'ref_chain_subset_membership', 'raw_ticker_reference', 'qa_exception', 'ref_universe_membership'],
   testedQuantity: 'days_since_future_date_observed',
   testedUnit: 'days',
   thresholds: { maxDaysSinceObserved: 7 },
@@ -412,7 +461,10 @@ export const QC603_EARNINGS_FRESHNESS: CheckDefinition = {
               ? { kind: 'rule_changed', note: `${r.ticker} listed ${r.list_date}; its first report is not yet due (${NEW_LISTING_GRACE_DAYS}-day new-listing grace)` }
               : { kind: 'data_corrected', note: `${r.ticker}: a future report date was observed ${r.last_seen}` }
       };
-    }).concat(fundFindingClosers(ctx, 'QC-603', 'funds have no earnings and are excluded from QC-603 since v1.1.257'));
+    }).concat(
+      fundFindingClosers(ctx, 'QC-603', 'funds have no earnings and are excluded from QC-603 since v1.1.257'),
+      departedFindingClosers(ctx, 'QC-603')
+    );
   }
 };
 

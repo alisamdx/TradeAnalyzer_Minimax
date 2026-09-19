@@ -1,5 +1,5 @@
 import type { CheckDefinition, Evaluation } from '../check.js';
-import { FUND_TYPES, fundFindingClosers } from './earnings-fundamentals.js';
+import { FUND_TYPES, fundFindingClosers, departedFindingClosers } from './earnings-fundamentals.js';
 import { tradingDaysInRange } from '../../collector/trading-calendar.js';
 
 /**
@@ -243,7 +243,7 @@ export const QC905_RECOMMENDATION_FRESHNESS: CheckDefinition = {
     'Every chain-subset ticker has a recommendation observation within 45 days. Finnhub returns ' +
     'four monthly periods per call, so a ticker falling out of the weekly sweep shows up here well ' +
     'before its data is actually stale.',
-  readsTables: ['raw_analyst_recommendation', 'ref_chain_subset_membership', 'raw_ticker_reference', 'meta_response', 'qa_exception'],
+  readsTables: ['raw_analyst_recommendation', 'ref_chain_subset_membership', 'raw_ticker_reference', 'meta_response', 'qa_exception', 'ref_universe_membership'],
   testedQuantity: 'days_since_observed',
   testedUnit: 'days',
   thresholds: { maxDays: 45 },
@@ -308,7 +308,10 @@ export const QC905_RECOMMENDATION_FRESHNESS: CheckDefinition = {
               ? { kind: 'rule_changed', note: `${r.ticker}: asked ${lastAsked} and Finnhub returned no rows — an asked ticker counts as current` }
               : { kind: 'rule_changed', note: `${r.ticker}: admitted to the subset ${r.admitted}, inside the ${maxDays}-day window before its first weekly sweep` }
       };
-    }).concat(fundFindingClosers(ctx, 'QC-905', 'funds have no analyst coverage and are excluded from QC-905 since v1.1.257'));
+    }).concat(
+      fundFindingClosers(ctx, 'QC-905', 'funds have no analyst coverage and are excluded from QC-905 since v1.1.257'),
+      departedFindingClosers(ctx, 'QC-905')
+    );
   }
 };
 

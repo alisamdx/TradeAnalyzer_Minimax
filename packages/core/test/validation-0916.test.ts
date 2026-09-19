@@ -233,6 +233,49 @@ describe('QC-603 and QC-905 — funds, recent reports and recent admissions', ()
     });
   });
 
+  it('closes findings on a ticker that LEFT the subset, from the recorded exit — not one merely absent (v1.1.285)', () => {
+    // EQR on gen-002: out of the S&P 500 and Russell 1000 on 2026-09-15, out of the subset 09-17.
+    reference('EQR', 'CS');
+    member('EQR', '2026-09-01');
+    raw.prepare("UPDATE ref_chain_subset_membership SET valid_to = '2026-09-15' WHERE ticker = 'EQR'").run();
+    const src = (raw.prepare('SELECT MAX(source_response_id) AS id FROM meta_response').get() as { id: number }).id;
+    const rule = captureRuleId(db(), makeHost(), 'universe', { v: 1 }, 'test');
+    for (const list of ['sp500', 'russell1000']) {
+      raw.prepare(
+        `INSERT INTO ref_universe_membership (run_id, as_of_date, observed_at, capture_rule_id, source_response_id,
+           ticker, list_source, valid_from, valid_to, change_reason)
+         VALUES (?, ?, 't', ?, ?, 'EQR', ?, '2026-09-01', '2026-09-14', 'index_drop')`
+      ).run(run.runId, DATE, rule, src, list);
+    }
+
+    const raise = (def: typeof QC603_EARNINGS_FRESHNESS) =>
+      ({ ...def, run: () => ['EQR', 'GHOST'].map((key) => ({ key, value: 9999, fired: true, detail: 'stale' })) });
+    runGate(db(), makeHost(), {
+      runId: run.runId, tradingDate: DATE, domainsExpected: {},
+      checks: [raise(QC603_EARNINGS_FRESHNESS), raise(QC905_RECOMMENDATION_FRESHNESS)]
+    });
+    raw.prepare("UPDATE meta_run SET status = 'complete' WHERE run_id = ?").run(run.runId);
+
+    run = beginRun(db(), makeHost(), { kind: 'daily', tradingDate: DATE });
+    runGate(db(), makeHost(), {
+      runId: run.runId, tradingDate: DATE, domainsExpected: {},
+      checks: [QC603_EARNINGS_FRESHNESS, QC905_RECOMMENDATION_FRESHNESS]
+    });
+
+    const rows = raw.prepare(
+      "SELECT check_id, key, state, resolution_kind, resolution_note FROM qa_exception WHERE key IN ('EQR', 'GHOST') ORDER BY check_id, key"
+    ).all() as { check_id: string; key: string; state: string; resolution_kind: string | null; resolution_note: string | null }[];
+    expect(rows.map((r) => [r.check_id, r.key, r.resolution_kind ?? r.state])).toEqual([
+      ['QC-603', 'EQR', 'rule_changed'],
+      ['QC-603', 'GHOST', 'open'],   // no membership record at all: absence, not a recorded exit
+      ['QC-905', 'EQR', 'rule_changed'],
+      ['QC-905', 'GHOST', 'open']
+    ]);
+    expect(rows[0]!.resolution_note).toBe(
+      'EQR left the chain subset on 2026-09-15 (universe exit 2026-09-14: russell1000:index_drop, sp500:index_drop); QC-603 covers subset members only'
+    );
+  });
+
   it('QC-905 skips funds, measures from the last ask or admission, and fires on a ticker the sweep missed', () => {
     reference('SPY', 'ETF');
     member('SPY', '2026-07-01');
