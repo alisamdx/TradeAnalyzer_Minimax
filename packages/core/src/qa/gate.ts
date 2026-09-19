@@ -147,6 +147,7 @@ export function runGate(
   const firedFingerprints = new Set<string>();
   const vacuous: string[] = [];
   const untrustedShapes = new Set<string>();
+  const closers = new Map<string, { kind: 'false_positive' | 'rule_changed'; note: string }>();
   let checksFired = 0;
 
   for (const def of args.checks) {
@@ -187,6 +188,9 @@ export function runGate(
 
     const durationMs = Date.now() - started;
     const fired = evaluations.filter((e) => e.fired);
+    for (const e of evaluations) {
+      if (!e.fired && e.closesAs) closers.set(fingerprint(def.id, def.domain, e.key), e.closesAs);
+    }
     if (fired.length > 0) checksFired++;
     if (evaluations.length === 0) vacuous.push(def.id);
 
@@ -264,7 +268,7 @@ export function runGate(
     counts[severity]++;
   }
 
-  const resolvedByGate = reconcileStoppedFiring(db, host, args.runId, firedFingerprints, args.checks, untrustedShapes);
+  const resolvedByGate = reconcileStoppedFiring(db, host, args.runId, firedFingerprints, args.checks, untrustedShapes, closers);
   recomputeDomainDayStatus(db, host, args.runId, args.tradingDate);
 
   const verdict: Verdict = counts.blocking > 0 ? 'red' : counts.warning > 0 ? 'amber' : 'green';
@@ -396,7 +400,8 @@ function reconcileStoppedFiring(
   runId: number,
   firedFingerprints: ReadonlySet<string>,
   checks: readonly CheckDefinition[],
-  untrustedShapes: ReadonlySet<string> = new Set()
+  untrustedShapes: ReadonlySet<string> = new Set(),
+  closers: ReadonlyMap<string, { kind: string; note: string }> = new Map()
 ): number {
   const byId = new Map(checks.map((c) => [c.id, c]));
   const openOnes = db
@@ -429,6 +434,19 @@ function reconcileStoppedFiring(
           WHERE exception_id = ?`
       ).run(now, note, e.exception_id);
       recordEvent(db, e.exception_id, now, 'gate', e.state, 'resolved', e.severity, e.severity, note);
+      resolved++;
+      continue;
+    }
+
+    // The check holds the evidence that this finding was wrong, and says how to record it.
+    const closer = closers.get(e.fingerprint);
+    if (closer) {
+      db.prepare(
+        `UPDATE qa_exception
+            SET state = 'resolved', resolved_at = ?, resolution_kind = ?, resolution_note = ?, still_firing = 0
+          WHERE exception_id = ?`
+      ).run(now, closer.kind, closer.note, e.exception_id);
+      recordEvent(db, e.exception_id, now, 'gate', e.state, 'resolved', e.severity, e.severity, closer.note);
       resolved++;
       continue;
     }

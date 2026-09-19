@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.277] - 2026-09-18
+
+### QC-204 closes the price steps it can verify as genuine moves
+
+123 QC-204/QC-501 findings sat open on steps the data already explained: both bars came from one split-adjusted fetch made after the step, R6 had re-fetched the ticker's splits and dividends and found none, and the step was months old. Such a step is now evaluated as not fired and its open finding closes as `false_positive` (actor `gate`, with the reason in the note) — not `data_corrected`, since the data was never wrong. Steps under 90 days old stay open (providers backfill actions late), and any step with reuse evidence (open QC-205/209/210) stays for the operator. Rehearsed on the 2026-09-18 snapshot: 123 → 25.
+
+`core` 0.6.32, `next` 0.4.20. Details: `changelogs/v1.1.277_2026-09-18.md`.
+
 ## [1.1.276] - 2026-09-18
 
 ### A durable "not reuse" ruling for QC-205

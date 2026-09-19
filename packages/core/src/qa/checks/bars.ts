@@ -136,6 +136,88 @@ export const QC203_NON_FINAL_BAR: CheckDefinition = {
   }
 };
 
+/**
+ * How old a step must be before a verified-genuine verdict is final (v1.1.277). The documented
+ * rule is that a "genuine move" verdict must expire, because providers backfill corporate actions
+ * late; 90 days is past any realistic late backfill, so a step older than that whose bars came
+ * from one adjusted fetch and whose actions R6 re-fetched is not re-examined again.
+ */
+export const VERIFIED_MOVE_MIN_AGE_DAYS = 90;
+
+function daysBetween(a: string, b: string): number {
+  return Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000);
+}
+
+/**
+ * QC-204 steps whose splits and dividends R6 re-fetched successfully, keyed by the finding's key,
+ * with when. On 2026-09-18, 121 of 123 open steps had one — the re-fetch found nothing, which is
+ * the evidence a genuine move needs and that the old rule could only ask an operator to restate.
+ */
+function refetchedByR6(ctx: CheckContext): ReadonlyMap<string, string> {
+  const rows = ctx.db
+    .prepare(
+      `SELECT key, remediations_json FROM qa_exception
+        WHERE check_id = 'QC-204' AND remediations_json LIKE '%"R6"%'`
+    )
+    .all() as { key: string; remediations_json: string }[];
+  // A step that is evidence of ticker REUSE is not a genuine move, however well verified its
+  // prices are: META's 2022-06-09 step is a Roundhill ETF becoming Meta. It stays a finding until
+  // the operator's reuse ruling splits the series (after which it is not compared at all).
+  const reuse = ctx.db
+    .prepare(
+      `SELECT check_id, key FROM qa_exception
+        WHERE check_id IN ('QC-205', 'QC-209', 'QC-210') AND state IN ('open', 'acknowledged')`
+    )
+    .all() as { check_id: string; key: string }[];
+  const reuseSteps = new Set(reuse.filter((r) => r.check_id !== 'QC-210').map((r) => r.key));
+  const reuseTickers = new Set(reuse.filter((r) => r.check_id === 'QC-210').map((r) => r.key));
+  const out = new Map<string, string>();
+  for (const r of rows) {
+    if (reuseSteps.has(r.key) || reuseTickers.has(r.key.split(' ')[0]!)) continue;
+    const ok = (JSON.parse(r.remediations_json) as { code?: string; outcome?: string; at?: string }[])
+      .filter((x) => x.code === 'R6' && x.outcome === 'success');
+    if (ok.length > 0) out.set(r.key, ok[ok.length - 1]!.at ?? '');
+  }
+  return out;
+}
+
+/**
+ * The verified-genuine-move verdict for specific QC-204 keys, for a check that mirrors QC-204
+ * (QC-501) and must reach the same answer on the same run without re-reading 1.3 M bars. Same
+ * conditions as QC-204's own: one adjusted fetch after the step, a successful R6 re-fetch, no
+ * open reuse evidence, older than `VERIFIED_MOVE_MIN_AGE_DAYS`. Returns key → closing note.
+ */
+function verifiedNote(adjustedAsOf: string, refetchedAt: string): string {
+  return (
+    `verified genuine move: both bars from one split-adjusted fetch dated ${adjustedAsOf}, ` +
+    `R6 re-fetched splits and dividends (${refetchedAt}) and found none, step older than ` +
+    `${VERIFIED_MOVE_MIN_AGE_DAYS} days`
+  );
+}
+
+export function verifiedGenuineSteps(ctx: CheckContext, keys: readonly string[]): ReadonlyMap<string, string> {
+  const refetched = refetchedByR6(ctx);
+  const bar = ctx.db.prepare(
+    `SELECT b.trade_date, b.adjusted_as_of FROM raw_daily_bar b
+      WHERE b.ticker = ? AND b.trade_date <= ?
+        AND b.observed_at = (SELECT MAX(x.observed_at) FROM raw_daily_bar x
+                              WHERE x.ticker = b.ticker AND x.trade_date = b.trade_date)
+      ORDER BY b.trade_date DESC LIMIT 2`
+  );
+  const out = new Map<string, string>();
+  for (const key of keys) {
+    const [ticker, date] = key.split(' ');
+    const r6At = refetched.get(key);
+    if (!ticker || !date || r6At === undefined) continue;
+    if (daysBetween(date, ctx.tradingDate) <= VERIFIED_MOVE_MIN_AGE_DAYS) continue;
+    const [cur, prev] = bar.all(ticker, date) as { trade_date: string; adjusted_as_of: string }[];
+    if (!cur || !prev || cur.trade_date !== date) continue;
+    if (prev.adjusted_as_of !== cur.adjusted_as_of || !(date < cur.adjusted_as_of)) continue;
+    out.set(key, verifiedNote(cur.adjusted_as_of, r6At));
+  }
+  return out;
+}
+
 export const QC204_DISCONTINUITY: CheckDefinition = {
   id: 'QC-204',
   domain: 'bars',
@@ -143,8 +225,10 @@ export const QC204_DISCONTINUITY: CheckDefinition = {
   description:
     'A close that moves more than 40 % against the previous close, with no split or special dividend ' +
     'on the boundary. An unadjusted split is the usual cause and it corrupts every indicator that ' +
-    'spans the date — silently, because the series still looks like prices.',
-  readsTables: ['raw_daily_bar', 'raw_split', 'raw_dividend'],
+    'spans the date — silently, because the series still looks like prices. A step is a VERIFIED ' +
+    'genuine move, measured but not fired, when both bars come from one split-adjusted fetch made ' +
+    'after it, R6 re-fetched its splits and dividends and found none, and it is over 90 days old.',
+  readsTables: ['raw_daily_bar', 'raw_split', 'raw_dividend', 'qa_exception'],
   testedQuantity: 'abs_close_change_fraction',
   testedUnit: 'fraction',
   thresholds: { maxAbsChange: 0.4 },
@@ -160,7 +244,7 @@ export const QC204_DISCONTINUITY: CheckDefinition = {
     // compared at its current version rather than against a superseded row.
     const rows = ctx.db
       .prepare(
-        `SELECT b.ticker, b.trade_date, b.close
+        `SELECT b.ticker, b.trade_date, b.close, b.adjusted_as_of
            FROM raw_daily_bar b
            JOIN (SELECT ticker, trade_date, MAX(observed_at) AS latest
                    FROM raw_daily_bar GROUP BY ticker, trade_date) m
@@ -168,8 +252,9 @@ export const QC204_DISCONTINUITY: CheckDefinition = {
           WHERE b.ticker IN (SELECT DISTINCT ticker FROM raw_daily_bar WHERE run_id = ?)
           ORDER BY b.ticker, b.trade_date`
       )
-      .all(ctx.runId) as { ticker: string; trade_date: string; close: number }[];
+      .all(ctx.runId) as { ticker: string; trade_date: string; close: number; adjusted_as_of: string }[];
 
+    const refetched = refetchedByR6(ctx);
     const out: Evaluation[] = [];
     for (let i = 1; i < rows.length; i++) {
       const prev = rows[i - 1]!;
@@ -196,16 +281,40 @@ export const QC204_DISCONTINUITY: CheckDefinition = {
         explained = action !== undefined;
       }
 
+      // A verified genuine move (v1.1.277): both bars come from one split-adjusted fetch made
+      // after the step, so no split between them can be left unadjusted; R6 re-fetched the
+      // splits and dividends around it and found none; and it is old enough that a late
+      // corporate-action backfill is no longer a realistic explanation.
+      const key = `${cur.ticker} ${cur.trade_date}`;
+      const r6At = refetched.get(key);
+      const verified =
+        fired && !explained && r6At !== undefined &&
+        prev.adjusted_as_of === cur.adjusted_as_of && cur.trade_date < cur.adjusted_as_of &&
+        daysBetween(cur.trade_date, ctx.tradingDate) > VERIFIED_MOVE_MIN_AGE_DAYS;
+
       // Every comparison is recorded, fired or not — that is the distribution.
       out.push({
-        key: `${cur.ticker} ${cur.trade_date}`,
+        key,
         value: change,
-        fired: fired && !explained,
+        fired: fired && !explained && !verified,
         detail: fired
           ? `close ${cur.close} vs prev ${prev.close} (${((cur.close / prev.close - 1) * 100).toFixed(1)}%)` +
-            (explained ? ' — explained by a corporate action' : ' with no explaining action')
+            (explained
+              ? ' — explained by a corporate action'
+              : verified
+                ? ' — verified genuine move: one adjusted fetch, R6 found no action'
+                : ' with no explaining action')
           : undefined,
-        evidence: { ticker: cur.ticker, close: cur.close, prevClose: prev.close, change, explained },
+        evidence: {
+          ticker: cur.ticker, close: cur.close, prevClose: prev.close, change, explained,
+          ...(verified ? { verifiedGenuineMove: { adjustedAsOf: cur.adjusted_as_of, refetchedAt: r6At } } : {})
+        },
+        closesAs: verified
+          ? {
+              kind: 'false_positive',
+              note: verifiedNote(cur.adjusted_as_of, r6At as string)
+            }
+          : undefined,
         affects: [cur.trade_date]
       });
     }

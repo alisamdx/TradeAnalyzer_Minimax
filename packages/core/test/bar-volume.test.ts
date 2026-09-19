@@ -9,6 +9,7 @@ import type { CollectorHost, ProviderResponse } from '../src/collector/host.js';
 import { beginRun, captureRuleId } from '../src/collector/run.js';
 import { runBackfillBars } from '../src/collector/backfill.js';
 import { resolve } from '../src/qa/operator.js';
+import { QC501_UNEXPLAINED_DISCONTINUITY } from '../src/qa/checks/quotes-actions.js';
 import {
   QC204_DISCONTINUITY, QC205_VOLUME_REGIME, QC209_DORMANT_SERIES_RESUMES,
   QC210_BARS_PREDATE_LISTING, BAR_CHECKS, entityStartDates,
@@ -547,5 +548,78 @@ describe('a ruled ticker reuse ends the previous occupant\'s series', () => {
     expect(entityStartDates(db).has('SOLS')).toBe(false);
     expect(QC204_DISCONTINUITY.run({ db, runId, tradingDate: '2026-09-11', observedAt: 't' }).filter((e) => e.fired))
       .toHaveLength(1);
+  });
+});
+
+describe('QC-204 closes a verified genuine move itself (v1.1.277)', () => {
+  // On 2026-09-18, 109 of 123 open QC-204 steps sat inside one split-adjusted fetch, R6 had
+  // re-fetched their splits and dividends and found none, and they were years old. The rule that
+  // a genuine-move verdict must expire would have had the operator re-accept all of them monthly.
+  const GENUINE: readonly Leg[] = [
+    { count: 30, close: 10, volume: 1_000_000 },
+    { count: 30, close: 20, volume: 1_000_000 }  // +100 %, same volume: a move, not a new issuer
+  ];
+
+  // A different fetch each time: identical bytes would dedupe, store no bars for the run, and
+  // leave QC-204 nothing to evaluate — the daily run always stores the ticker's bars.
+  let fetchNo = 0;
+  function hostFor(legs: readonly Leg[]) {
+    fetchNo++;
+    const n = fetchNo;
+    return makeHost(async (path): Promise<ProviderResponse> => ({
+      status: 200,
+      body: path.includes('/splits') ? '{"results":[]}' : aggs(legs).replace('{"results"', `{"fetch":${n},"results"`),
+      requestedAt: 't', respondedAt: 't'
+    }));
+  }
+  const r6Succeeded = () =>
+    raw.prepare(
+      `UPDATE qa_exception SET remediations_json = '[{"code":"R6","at":"2026-09-11T19:05:00-04:00","outcome":"success","detail":"re-fetched"}]'
+        WHERE check_id = 'QC-204'`
+    ).run();
+  const state = (check: string) =>
+    raw.prepare('SELECT state, resolution_kind AS kind FROM qa_exception WHERE check_id = ?').all(check);
+
+  it('keeps firing until R6 has re-checked the corporate actions', async () => {
+    seedUniverse(['AAOI']);
+    await runBackfillBars(hostFor(GENUINE), { tradingDate: '2026-09-11' });
+    await runBackfillBars(hostFor(GENUINE), { tradingDate: '2026-09-11' });
+    expect(state('QC-204')).toEqual([{ state: 'open', kind: null }]);
+  });
+
+  it('closes QC-204 and QC-501 as false_positive in the same run once R6 found nothing', async () => {
+    seedUniverse(['AAOI']);
+    await runBackfillBars(hostFor(GENUINE), { tradingDate: '2026-09-11' });
+    r6Succeeded();
+    // QC-501 runs in the daily gate, before QC-204's finding is closed: it must reach the same
+    // verdict itself rather than fire once more on a finding about to be resolved.
+    const [mirror] = QC501_UNEXPLAINED_DISCONTINUITY.run({ db, runId: 0, tradingDate: '2026-09-11', observedAt: 't' });
+    expect(mirror!.fired).toBe(false);
+    expect(mirror!.closesAs?.kind).toBe('false_positive');
+    await runBackfillBars(hostFor(GENUINE), { tradingDate: '2026-09-11' });
+    expect(state('QC-204')).toEqual([{ state: 'resolved', kind: 'false_positive' }]);
+    const note = (raw.prepare("SELECT resolution_note AS n FROM qa_exception WHERE check_id = 'QC-204'").get() as { n: string }).n;
+    expect(note).toContain('verified genuine move');
+  });
+
+  it('never verifies a step that is evidence of reuse — QC-205 holds it open', async () => {
+    seedUniverse(['BNY']);
+    await runBackfillBars(hostFor(REUSE), { tradingDate: '2026-09-11' });
+    r6Succeeded();
+    await runBackfillBars(hostFor(REUSE), { tradingDate: '2026-09-11' });
+    expect(state('QC-204')).toEqual([{ state: 'open', kind: null }]);
+  });
+
+  it('does not verify a recent step — a late corporate-action backfill is still possible', async () => {
+    seedUniverse(['MRNA']);
+    // The step lands 20 sessions before the trading date, well inside 90 days.
+    const recent: readonly Leg[] = [
+      { count: SESSIONS.length - 20, close: 60, volume: 1_000_000 },
+      { count: 20, close: 170, volume: 1_000_000 }
+    ];
+    await runBackfillBars(hostFor(recent), { tradingDate: '2026-09-11' });
+    r6Succeeded();
+    await runBackfillBars(hostFor(recent), { tradingDate: '2026-09-11' });
+    expect(state('QC-204')).toEqual([{ state: 'open', kind: null }]);
   });
 });

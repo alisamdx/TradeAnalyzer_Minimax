@@ -1,4 +1,5 @@
 import type { CheckDefinition, Evaluation } from '../check.js';
+import { verifiedGenuineSteps } from './bars.js';
 
 /**
  * End-of-day quote and corporate-action checks — 03 §3.4, §3.6.
@@ -135,7 +136,7 @@ export const QC501_UNEXPLAINED_DISCONTINUITY: CheckDefinition = {
     'Seen from the actions side: a bar discontinuity has a split or dividend within a trading day of ' +
     'the boundary. The same finding as QC-204 from the other direction — this one asks whether the ' +
     'ACTION feed is complete, rather than whether the price series is.',
-  readsTables: ['raw_daily_bar', 'raw_split', 'raw_dividend'],
+  readsTables: ['raw_daily_bar', 'raw_split', 'raw_dividend', 'qa_exception'],
   testedQuantity: 'unexplained_count',
   testedUnit: 'count',
   thresholds: { maxUnexplained: 0 },
@@ -154,13 +155,30 @@ export const QC501_UNEXPLAINED_DISCONTINUITY: CheckDefinition = {
 
     if (open.length === 0) return [{ key: ctx.tradingDate, value: 0, fired: false }];
 
-    return open.map((e) => ({
-      key: e.key,
-      value: 1,
-      fired: true,
-      detail: `bar discontinuity on ${e.key} still has no corporate action explaining it`,
-      evidence: JSON.parse(e.evidence_json) as Record<string, unknown>
-    }));
+    // QC-204 closes its verified genuine moves in this same gate run, AFTER every check has
+    // run — so reading its open findings alone left QC-501 firing on all of them for one more
+    // night, and its own findings open with nothing to close them (v1.1.277). Same verdict,
+    // reached the same way, closing this check's finding with the same reason.
+    const verified = verifiedGenuineSteps(ctx, open.map((e) => e.key));
+
+    return open.map((e) => {
+      const note = verified.get(e.key);
+      return note === undefined
+        ? {
+            key: e.key,
+            value: 1,
+            fired: true,
+            detail: `bar discontinuity on ${e.key} still has no corporate action explaining it`,
+            evidence: JSON.parse(e.evidence_json) as Record<string, unknown>
+          }
+        : {
+            key: e.key,
+            value: 0,
+            fired: false,
+            evidence: { ...(JSON.parse(e.evidence_json) as Record<string, unknown>), verifiedGenuineMove: true },
+            closesAs: { kind: 'false_positive' as const, note }
+          };
+    });
   }
 };
 

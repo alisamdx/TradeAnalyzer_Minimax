@@ -44,6 +44,14 @@ export interface Evaluation {
   readonly evidence?: Readonly<Record<string, unknown>> | undefined;
   /** Trading days this finding makes unusable. Defaults to the run's trading date. */
   readonly affects?: readonly string[] | undefined;
+  /**
+   * For an evaluation that did NOT fire: how to record closing an open finding with this key,
+   * when the check itself holds the evidence that the finding was wrong (v1.1.277). QC-204 sets
+   * it on a verified genuine move — the data was right and the check was wrong to flag it — so the
+   * gate records `false_positive` with the check's reason, not `data_corrected`, which would say
+   * the data had been fixed.
+   */
+  readonly closesAs?: { readonly kind: 'false_positive' | 'rule_changed'; readonly note: string } | undefined;
 }
 
 export interface CheckDefinition {
