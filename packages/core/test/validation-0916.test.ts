@@ -58,9 +58,9 @@ function capture(provider: 'polygon' | 'finnhub', endpoint: string, params: Reco
   expect(r.parseStatus, JSON.stringify(r)).toBe('ok');
 }
 
-function reference(ticker: string, type: string) {
+function reference(ticker: string, type: string, listDate?: string) {
   capture('polygon', `/v3/reference/tickers/${ticker}`, { ticker }, JSON.stringify({
-    results: { ticker, name: ticker, type, weighted_shares_outstanding: 1_000_000 }
+    results: { ticker, name: ticker, type, weighted_shares_outstanding: 1_000_000, ...(listDate ? { list_date: listDate } : {}) }
   }), recipes.tickerReference());
 }
 
@@ -163,6 +163,28 @@ describe('QC-603 and QC-905 — funds, recent reports and recent admissions', ()
     const evals = QC603_EARNINGS_FRESHNESS.run(ctx());
     expect(evals.map((e) => e.key).sort()).toEqual(['GIS', 'NVDA', 'SWKS']);
     expect(evals.filter((e) => e.fired).map((e) => e.key)).toEqual(['SWKS']);
+  });
+
+  it('QC-603 does not fire on a new listing whose first report is not yet due, and does once it is (v1.1.274)', () => {
+    // Listing dates from gen-002 on 2026-09-18, measured against DATE (2026-09-16).
+    reference('HONA', 'CS', '2026-06-15'); // 93 days: first report not due — quiet
+    reference('CBRS', 'CS', '2026-05-14'); // 125 days: still inside 135 — quiet
+    reference('SUNB', 'CS', '2026-03-02'); // 198 days: should have reported by now — fires
+    reference('SWKS', 'CS', '1972-06-01'); // an old listing Finnhub does not date — fires
+    reference('NOLD', 'CS');               // no listing date at all: nothing to excuse it — fires
+    for (const t of ['HONA', 'CBRS', 'SUNB', 'SWKS', 'NOLD']) member(t, '2026-09-01');
+    const byKey = new Map(QC603_EARNINGS_FRESHNESS.run(ctx()).map((e) => [e.key, e]));
+    expect([...byKey].filter(([, e]) => e.fired).map(([k]) => k).sort()).toEqual(['NOLD', 'SUNB', 'SWKS']);
+    expect(byKey.get('HONA')?.evidence?.['newlyListed']).toBe(true);
+  });
+
+  it('QC-603 does not excuse a new listing that already has an earnings row', () => {
+    // Grace covers "never dated", not "dated once and then dropped out of the calendar".
+    reference('SPCX', 'CS', '2026-06-12');
+    member('SPCX', '2026-09-01');
+    earnings('SPCX', '2026-08-10');
+    const e = QC603_EARNINGS_FRESHNESS.run(ctx()).find((x) => x.key === 'SPCX');
+    expect(e?.evidence?.['newlyListed']).toBe(false);
   });
 
   it('QC-905 skips funds, measures from the last ask or admission, and fires on a ticker the sweep missed', () => {

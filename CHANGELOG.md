@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.274] - 2026-09-18
+
+### QC-603 no longer fires on a new listing whose first report is not yet due
+
+A ticker never dated by any source and listed within **135 days** (first full quarter + a non-accelerated filer's 45-day 10-Q deadline) is not stale — it has no report to have missed. On 2026-09-18 that excuses HONA, SPCX and CBRS (17 → 14 findings). SUNB, JAN and MDLN, listed 182–275 days ago, keep firing: they should have reported by now, so "never dated" is a coverage gap for E\*Trade (v1.1.270) to fill, not an exemption.
+
+`core` 0.6.29, `next` 0.4.17. Details: `changelogs/v1.1.274_2026-09-18.md`.
+
 ## [1.1.273] - 2026-09-18
 
 ### The gate retires findings whose key its check can no longer produce

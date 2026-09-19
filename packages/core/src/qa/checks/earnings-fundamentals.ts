@@ -30,6 +30,13 @@ export const FUND_TYPES = "('ETF', 'ETV', 'ETN', 'ETS', 'FUND')";
 /** How long a filer whose companyfacts lacked its newest report waits before the fact pull asks again. */
 export const FACTS_RETRY_DAYS = 7;
 
+/**
+ * How long a newly listed stock may go with no report and no announced date: its first full
+ * quarter (<= 90 days) plus the 45-day 10-Q deadline of a non-accelerated filer, which every newly
+ * public company is.
+ */
+const NEW_LISTING_GRACE_DAYS = 135;
+
 /** A report this recent puts the next one about a quarter out, possibly past the 90-day sweep. */
 const RECENT_REPORT_GRACE_DAYS = 21;
 
@@ -232,8 +239,10 @@ export const QC603_EARNINGS_FRESHNESS: CheckDefinition = {
   description:
     'A common-stock ticker in the chain subset has a future report date observed recently. A ticker ' +
     'that has quietly dropped out of the calendar is the state in which no earnings penalty can ' +
-    'fire, which is indistinguishable from a ticker with no earnings coming.',
-  readsTables: ['raw_earnings_event', 'ref_chain_subset_membership'],
+    'fire, which is indistinguishable from a ticker with no earnings coming. Two cases are not ' +
+    'staleness: a ticker that reported in the last 21 days (its next date can sit past the sweep), and ' +
+    'one listed within 135 days that has never been dated (its first report is not yet due).',
+  readsTables: ['raw_earnings_event', 'ref_chain_subset_membership', 'raw_ticker_reference'],
   testedQuantity: 'days_since_future_date_observed',
   testedUnit: 'days',
   thresholds: { maxDaysSinceObserved: 7 },
@@ -250,7 +259,9 @@ export const QC603_EARNINGS_FRESHNESS: CheckDefinition = {
                   WHERE e.ticker = m.ticker AND e.report_date >= ?) AS last_seen,
                 (SELECT MAX(e.report_date)
                    FROM raw_earnings_event e
-                  WHERE e.ticker = m.ticker AND e.report_date < ?) AS last_reported
+                  WHERE e.ticker = m.ticker AND e.report_date < ?) AS last_reported,
+                (SELECT r.list_date FROM raw_ticker_reference r
+                  WHERE r.ticker = m.ticker ORDER BY r.row_id DESC LIMIT 1) AS list_date
            FROM ref_chain_subset_membership m
           WHERE m.valid_to IS NULL
             AND m.ticker NOT IN (
@@ -258,7 +269,9 @@ export const QC603_EARNINGS_FRESHNESS: CheckDefinition = {
                WHERE security_type IN ${FUND_TYPES}
                  AND row_id IN (SELECT MAX(row_id) FROM raw_ticker_reference GROUP BY ticker))`
       )
-      .all(ctx.tradingDate, ctx.tradingDate) as { ticker: string; last_seen: string | null; last_reported: string | null }[];
+      .all(ctx.tradingDate, ctx.tradingDate) as {
+      ticker: string; last_seen: string | null; last_reported: string | null; list_date: string | null;
+    }[];
 
     return rows.map((r) => {
       // Just reported: the next date lies about a quarter out and can fall past the sweep's
@@ -268,9 +281,17 @@ export const QC603_EARNINGS_FRESHNESS: CheckDefinition = {
         r.last_seen === null &&
         r.last_reported !== null &&
         daysBetween(r.last_reported, ctx.tradingDate) <= RECENT_REPORT_GRACE_DAYS;
+      // Newly listed and never dated: its first report is not due yet, so there is no date to
+      // have missed (v1.1.274). HONA and SPCX listed in June 2026 and fired from their first run.
+      // Bounded by a newly public company's own deadline — a 10-Q is due 45 days after its first
+      // full quarter ends — so past ~135 days "never dated" is a coverage gap again and fires.
+      const listedDays = r.list_date === null ? null : daysBetween(r.list_date, ctx.tradingDate);
+      const newlyListed =
+        r.last_seen === null && r.last_reported === null &&
+        listedDays !== null && listedDays >= 0 && listedDays <= NEW_LISTING_GRACE_DAYS;
       // Never observed (and not just reported) is the largest possible staleness, never the
       // threshold's own value, or an empty domain would read as a clean one.
-      const days = justReported ? 0 : r.last_seen === null ? 9999 : daysBetween(r.last_seen, ctx.tradingDate);
+      const days = justReported || newlyListed ? 0 : r.last_seen === null ? 9999 : daysBetween(r.last_seen, ctx.tradingDate);
       return {
         key: r.ticker,
         value: days,
@@ -279,7 +300,10 @@ export const QC603_EARNINGS_FRESHNESS: CheckDefinition = {
           r.last_seen === null
             ? `${r.ticker}: no future report date has ever been observed`
             : `${r.ticker}: future report date last observed ${r.last_seen} (${days} days ago)`,
-        evidence: { ticker: r.ticker, lastObserved: r.last_seen, lastReported: r.last_reported, justReported }
+        evidence: {
+          ticker: r.ticker, lastObserved: r.last_seen, lastReported: r.last_reported, justReported,
+          listDate: r.list_date, newlyListed
+        }
       } satisfies Evaluation;
     });
   }
