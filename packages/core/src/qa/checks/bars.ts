@@ -577,16 +577,9 @@ export const QC205_VOLUME_REGIME: CheckDefinition = {
     const { byTicker, sessionIndex } = latestSeries(ctx);
     const stepAt = QC204_DISCONTINUITY.thresholds['maxAbsChange']!;
     const minRatio = this.thresholds['minRegimeRatio']!;
-    const ruled = notReuseRulings(ctx);
-    return byTicker
-      .flatMap((series) => volumeRegimeAroundSteps(series, sessionIndex, stepAt, minRatio))
-      .map((e) => {
-        const note = ruled.get(e.key);
-        // Still measured, so the distribution stays whole; just no longer a finding.
-        return note === undefined || !e.fired
-          ? e
-          : { ...e, fired: false, evidence: { ...(e.evidence ?? {}), ruledNotReuse: note } };
-      });
+    return withNotReuseRulings(
+      ctx, byTicker.flatMap((series) => volumeRegimeAroundSteps(series, sessionIndex, stepAt, minRatio))
+    );
   }
 };
 
@@ -607,10 +600,30 @@ function notReuseRulings(ctx: Parameters<CheckDefinition['run']>[0]): ReadonlyMa
   const rows = ctx.db
     .prepare(
       `SELECT key, resolution_note FROM qa_exception
-        WHERE check_id = 'QC-205' AND state = 'resolved' AND resolution_kind = 'false_positive'`
+        WHERE check_id IN ('QC-205', 'QC-209') AND state = 'resolved' AND resolution_kind = 'false_positive'`
     )
     .all() as { key: string; resolution_note: string | null }[];
   return new Map(rows.map((r) => [r.key, r.resolution_note ?? '']));
+}
+
+/**
+ * Applies the "not reuse" rulings to QC-205's or QC-209's evaluations (v1.1.279). The ruling is
+ * about the STEP — both checks key it `TICKER yyyy-mm-dd` and ask the same question of it — so a
+ * ruling made on either finding holds for both. Until v1.1.279 only QC-205 read them, and a
+ * `false_positive` on a QC-209 finding was reopened by the next run as a recurrence.
+ */
+function withNotReuseRulings(
+  ctx: Parameters<CheckDefinition['run']>[0],
+  evaluations: readonly Evaluation[]
+): Evaluation[] {
+  const ruled = notReuseRulings(ctx);
+  return evaluations.map((e) => {
+    const note = ruled.get(e.key);
+    // Still measured, so the distribution stays whole; just no longer a finding.
+    return note === undefined || !e.fired
+      ? e
+      : { ...e, fired: false, evidence: { ...(e.evidence ?? {}), ruledNotReuse: note } };
+  });
 }
 
 export const QC209_DORMANT_SERIES_RESUMES: CheckDefinition = {
@@ -623,8 +636,9 @@ export const QC209_DORMANT_SERIES_RESUMES: CheckDefinition = {
     'ticker reuse QC-205 cannot measure, because a symbol that printed a few times a year has no ' +
     '20-session volume window before the step. Found 2026-09-12 on SOLS: a $0.0001 shell trading once ' +
     'every few weeks until 2025-10-30, then Solstice Advanced Materials at $48.74 with ~100,000 trades a ' +
-    'day — the step that was also QC-204\'s maximum (487,399x).',
-  readsTables: ['raw_daily_bar', 'ref_trading_day'],
+    'day — the step that was also QC-204\'s maximum (487,399x). A step ruled `false_positive` (not ' +
+    'reuse) on this finding or its QC-205 twin is measured but never fires again.',
+  readsTables: ['raw_daily_bar', 'ref_trading_day', 'qa_exception'],
   testedQuantity: 'sessions_without_bar_before_step',
   testedUnit: 'sessions',
   thresholds: { minGapSessions: 20 },
@@ -636,7 +650,9 @@ export const QC209_DORMANT_SERIES_RESUMES: CheckDefinition = {
     const { byTicker, sessionIndex } = latestSeries(ctx);
     const stepAt = QC204_DISCONTINUITY.thresholds['maxAbsChange']!;
     const minGap = this.thresholds['minGapSessions']!;
-    return byTicker.flatMap((series) => dormancyBeforeSteps(series, sessionIndex, stepAt, minGap));
+    return withNotReuseRulings(
+      ctx, byTicker.flatMap((series) => dormancyBeforeSteps(series, sessionIndex, stepAt, minGap))
+    );
   }
 };
 

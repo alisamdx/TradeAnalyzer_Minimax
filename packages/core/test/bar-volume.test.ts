@@ -304,6 +304,33 @@ describe('QC-209 — a dormant symbol resuming as an active one', () => {
     expect(report.reviewQueue.filter((q) => q.checkId === 'QC-205')).toHaveLength(0);
     expect(QC209_DORMANT_SERIES_RESUMES.thresholds['minGapSessions']).toBe(REGIME_WINDOW);
   });
+
+  it('a "not reuse" ruling on the QC-209 finding holds, and the next gate run does not reopen it (v1.1.279)', async () => {
+    // FISV on 2026-09-18: Fiserv traded as FI from June 2023 to November 2025, so its FISV series
+    // is dormant for 610 sessions and resumes at a different price — the same issuer both sides.
+    // Until v1.1.279 only QC-205 read the ruling, so a false_positive here reopened next run.
+    seedUniverse(['SOLS']);
+    const host = makeHost(async (path): Promise<ProviderResponse> => ({
+      status: 200, body: path.includes('/splits') ? '{"results":[]}' : aggs(DORMANT_SHELL), requestedAt: 't', respondedAt: 't'
+    }));
+    const first = await runBackfillBars(host, { tradingDate: '2026-09-11' });
+    const finding = raw
+      .prepare("SELECT exception_id, key FROM qa_exception WHERE check_id = 'QC-209' AND state = 'open'")
+      .get() as { exception_id: number; key: string };
+    expect(finding).toBeDefined();
+
+    resolve(db, host, finding.exception_id, 'false_positive', 'same issuer — traded under another ticker in between');
+
+    const out = QC209_DORMANT_SERIES_RESUMES.run({ db, runId: first.runId, tradingDate: '2026-09-11', observedAt: 't' });
+    const same = out.find((e) => e.key === finding.key)!;
+    expect(same.fired).toBe(false);
+    expect(same.value).toBe(29); // still measured
+    expect(same.evidence!['ruledNotReuse']).toContain('same issuer');
+
+    await runBackfillBars(host, { tradingDate: '2026-09-11' });
+    expect(raw.prepare('SELECT state FROM qa_exception WHERE exception_id = ?').get(finding.exception_id))
+      .toEqual({ state: 'resolved' });
+  });
 });
 
 describe('a one-shot job is dated to its session, not the calendar', () => {

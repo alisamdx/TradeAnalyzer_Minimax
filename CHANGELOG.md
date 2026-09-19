@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.279] - 2026-09-18
+
+### A "not reuse" ruling on a QC-209 finding now sticks
+
+v1.1.276 made a `false_positive` ruling on a QC-205 step permanent, but QC-209 never read rulings. A "not reuse" decision on a dormant-symbol finding was therefore reopened by the next run as a recurrence. Both checks key the same step `TICKER yyyy-mm-dd` and ask the same question about it, so a ruling on either now holds for both. The step is still measured, and a new step on the ticker still fires.
+
+The 11 open QC-209 findings themselves are operator rulings (spec 05 §5). They were reviewed on the 2026-09-18 snapshot: 10 are genuine symbol reuse, and FISV is Fiserv returning to its old ticker after 2.4 years as FI. Each can be confirmed from TA2's Exceptions view, where the reuse panel is pre-filled with the ticker and splice date. One ruling settles that ticker's QC-204, QC-205, QC-209, QC-210 and QC-501 findings on or before the splice.
+
+`core` 0.6.34, `next` 0.4.22. Details: `changelogs/v1.1.279_2026-09-18.md`.
+
 ## [1.1.278] - 2026-09-18
 
 ### The gate no longer reads "not evaluated" as "clean"
