@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.282] - 2026-09-19
+
+### QC-603 and QC-905 close their stale findings, and say why
+
+149 open findings could not close. 47 in each check were funds (SPY, GLD, DIA…) raised before v1.1.257 excluded funds; an excluded ticker is never evaluated, so its finding stayed open for ever. The rest were exempted by rules added after they fired: the just-reported and new-listing graces, and QC-905's "asked and Finnhub has no rows" and "admitted before its first weekly sweep". Freshness is a claim about *now*, unlike QC-404's past quote, so a clean reading today settles the finding. Each check now tells the gate why:
+
+- a grace, or a ticker that is now a fund → `rule_changed`, naming the rule;
+- a newly observed future date or a newly stored recommendation → `data_corrected`, naming the date.
+
+A finding that still fires stays open. EQR (delisted, out of the subset) is not evaluated and stays for the operator. Rehearsed on the 2026-09-18 snapshot: QC-603 67 → 15 open (the 14 firing, plus EQR), QC-905 82 → 1 (EQR), and the email's blocking backlog 252 → 133.
+
+`core` 0.6.37, `next` 0.4.25. Details: `changelogs/v1.1.282_2026-09-19.md`.
+
 ## [1.1.281] - 2026-09-19
 
 ### The gate closes QC-404's and QC-409's stale findings itself

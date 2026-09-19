@@ -13,6 +13,7 @@ import { recipes } from '../src/ingest/recipes.js';
 import { ensureTradingCalendar } from '../src/collector/trading-calendar.js';
 import { runInsiderSweep } from '../src/collector/phases/events.js';
 import { QC603_EARNINGS_FRESHNESS } from '../src/qa/checks/earnings-fundamentals.js';
+import { runGate } from '../src/qa/gate.js';
 import { QC905_RECOMMENDATION_FRESHNESS, QC909_RECOMMENDATION_SYMBOL_MISMATCH } from '../src/qa/checks/macro.js';
 
 /**
@@ -185,6 +186,51 @@ describe('QC-603 and QC-905 — funds, recent reports and recent admissions', ()
     earnings('SPCX', '2026-08-10');
     const e = QC603_EARNINGS_FRESHNESS.run(ctx()).find((x) => x.key === 'SPCX');
     expect(e?.evidence?.['newlyListed']).toBe(false);
+  });
+
+  it('closes the findings a clean reading settles, and says why — and leaves a live one open (v1.1.282)', () => {
+    // gen-002 on 2026-09-18: 47 fund findings per check, raised before v1.1.257 excluded funds,
+    // plus findings exempted by later rules, none of which anything could close.
+    for (const [t, type] of [['SPY', 'ETF'], ['GIS', 'CS'], ['NVDA', 'CS'], ['SWKS', 'CS'], ['AAPL', 'CS'], ['CAI', 'CS'], ['OLD', 'CS']] as const) {
+      reference(t, type);
+    }
+    for (const t of ['SPY', 'GIS', 'NVDA', 'SWKS', 'AAPL', 'OLD']) member(t, '2026-07-01');
+    member('CAI', '2026-09-16');
+
+    // Every one of them fired once, under older rules or before its data arrived.
+    const raise = (def: typeof QC603_EARNINGS_FRESHNESS, keys: string[]) =>
+      ({ ...def, run: () => keys.map((key) => ({ key, value: 9999, fired: true, detail: 'stale' })) });
+    runGate(db(), makeHost(), {
+      runId: run.runId, tradingDate: DATE, domainsExpected: {},
+      checks: [raise(QC603_EARNINGS_FRESHNESS, ['SPY', 'GIS', 'NVDA', 'SWKS']), raise(QC905_RECOMMENDATION_FRESHNESS, ['SPY', 'AAPL', 'CAI', 'OLD'])]
+    });
+    raw.prepare("UPDATE meta_run SET status = 'complete' WHERE run_id = ?").run(run.runId);
+
+    run = beginRun(db(), makeHost(), { kind: 'daily', tradingDate: DATE });
+    earnings('GIS', '2026-09-15');   // just reported
+    earnings('NVDA', '2026-11-18');  // a future date, observed now
+    recommendations('AAPL', 'AAPL'); // a row stored now
+    runGate(db(), makeHost(), {
+      runId: run.runId, tradingDate: DATE, domainsExpected: {},
+      checks: [QC603_EARNINGS_FRESHNESS, QC905_RECOMMENDATION_FRESHNESS]
+    });
+
+    // Only the eight raised above; the second run's own new findings (AAPL's missing earnings...) are not the point.
+    const state = Object.fromEntries(
+      (raw.prepare('SELECT check_id, key, state, resolution_kind FROM qa_exception WHERE first_seen_run_id < ?').all(run.runId) as
+        { check_id: string; key: string; state: string; resolution_kind: string | null }[])
+        .map((r) => [`${r.check_id} ${r.key}`, r.resolution_kind ?? r.state])
+    );
+    expect(state).toEqual({
+      'QC-603 SPY': 'rule_changed',     // a fund — excluded since v1.1.257
+      'QC-603 GIS': 'rule_changed',     // just-reported grace
+      'QC-603 NVDA': 'data_corrected',  // a future date observed
+      'QC-603 SWKS': 'open',            // still undated: still firing
+      'QC-905 SPY': 'rule_changed',
+      'QC-905 AAPL': 'data_corrected',  // a recommendation row stored
+      'QC-905 CAI': 'rule_changed',     // admitted today, before its first weekly sweep
+      'QC-905 OLD': 'open'              // never asked since July: still firing
+    });
   });
 
   it('QC-905 skips funds, measures from the last ask or admission, and fires on a ticker the sweep missed', () => {

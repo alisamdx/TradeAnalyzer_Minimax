@@ -1,5 +1,5 @@
 import type { CheckDefinition, Evaluation } from '../check.js';
-import { FUND_TYPES } from './earnings-fundamentals.js';
+import { FUND_TYPES, fundFindingClosers } from './earnings-fundamentals.js';
 import { tradingDaysInRange } from '../../collector/trading-calendar.js';
 
 /**
@@ -243,7 +243,7 @@ export const QC905_RECOMMENDATION_FRESHNESS: CheckDefinition = {
     'Every chain-subset ticker has a recommendation observation within 45 days. Finnhub returns ' +
     'four monthly periods per call, so a ticker falling out of the weekly sweep shows up here well ' +
     'before its data is actually stale.',
-  readsTables: ['raw_analyst_recommendation', 'ref_chain_subset_membership'],
+  readsTables: ['raw_analyst_recommendation', 'ref_chain_subset_membership', 'raw_ticker_reference', 'meta_response', 'qa_exception'],
   testedQuantity: 'days_since_observed',
   testedUnit: 'days',
   thresholds: { maxDays: 45 },
@@ -282,21 +282,33 @@ export const QC905_RECOMMENDATION_FRESHNESS: CheckDefinition = {
       )
       .all() as { ticker: string; admitted: string; last_seen: string | null }[];
 
-    return rows.map((r) => {
+    const maxDays = this.thresholds['maxDays'] as number;
+    const within = (d: string | null): d is string => d !== null && daysBetween(d, ctx.tradingDate) <= maxDays;
+    return rows.map((r): Evaluation => {
       const lastAsked = asked.get(r.ticker) ?? null;
       const reference = [r.last_seen, lastAsked, r.admitted].filter((d): d is string => d !== null).sort().pop()!;
       const days = daysBetween(reference, ctx.tradingDate);
+      const fired = days > maxDays;
       return {
         key: r.ticker,
         value: days,
-        fired: days > (this.thresholds['maxDays'] as number),
+        fired,
         detail:
           lastAsked === null
             ? `${r.ticker}: never asked since admission on ${r.admitted} (${days} days)`
             : `${r.ticker}: last asked ${lastAsked}, last stored ${r.last_seen ?? 'never'} (${days} days)`,
-        evidence: { ticker: r.ticker, lastObserved: r.last_seen, lastAsked, admitted: r.admitted }
-      } satisfies Evaluation;
-    });
+        evidence: { ticker: r.ticker, lastObserved: r.last_seen, lastAsked, admitted: r.admitted },
+        // A clean reading settles an open finding, and says why (v1.1.282): a stored row is data;
+        // an asked-and-empty answer or a recent admission is a rule the finding predates.
+        closesAs: fired
+          ? undefined
+          : within(r.last_seen)
+            ? { kind: 'data_corrected', note: `${r.ticker}: a recommendation row was stored ${r.last_seen}` }
+            : within(lastAsked)
+              ? { kind: 'rule_changed', note: `${r.ticker}: asked ${lastAsked} and Finnhub returned no rows — an asked ticker counts as current` }
+              : { kind: 'rule_changed', note: `${r.ticker}: admitted to the subset ${r.admitted}, inside the ${maxDays}-day window before its first weekly sweep` }
+      };
+    }).concat(fundFindingClosers(ctx, 'QC-905', 'funds have no analyst coverage and are excluded from QC-905 since v1.1.257'));
   }
 };
 

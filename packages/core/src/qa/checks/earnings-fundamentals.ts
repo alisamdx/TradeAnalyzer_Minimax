@@ -1,4 +1,4 @@
-import type { CheckDefinition, Evaluation } from '../check.js';
+import type { CheckContext, CheckDefinition, Evaluation } from '../check.js';
 
 /**
  * Earnings and fundamentals checks — 03 §3.6.
@@ -26,6 +26,35 @@ const MAX_LATER_SLIP_DAYS = 14;
  * unknown is not the same as a fund.
  */
 export const FUND_TYPES = "('ETF', 'ETV', 'ETN', 'ETS', 'FUND')";
+
+/**
+ * Closers for a check's open findings on tickers that are now funds (v1.1.282).
+ *
+ * QC-603 and QC-905 excluded funds in v1.1.257, and the 47 findings each had already raised on
+ * SPY, GLD, DIA and the rest could then never close: an excluded ticker is never evaluated, and
+ * a finding its check never looks at stays open by design. The check does hold the evidence here
+ * — the ticker's current reference says it is a fund, which is exactly what the rule excludes — so
+ * it says so, and the gate records `rule_changed`. Not evaluated in the distribution: no value.
+ */
+export function fundFindingClosers(ctx: CheckContext, checkId: string, why: string): Evaluation[] {
+  return (
+    ctx.db
+      .prepare(
+        `SELECT x.key, r.security_type
+           FROM qa_exception x
+           JOIN raw_ticker_reference r
+             ON r.ticker = x.key
+            AND r.row_id = (SELECT MAX(row_id) FROM raw_ticker_reference WHERE ticker = x.key)
+          WHERE x.check_id = ? AND x.state IN ('open', 'acknowledged')
+            AND r.security_type IN ${FUND_TYPES}`
+      )
+      .all(checkId) as { key: string; security_type: string }[]
+  ).map((r) => ({
+    key: r.key,
+    fired: false,
+    closesAs: { kind: 'rule_changed' as const, note: `${r.key} is a fund (${r.security_type}) — ${why}` }
+  }));
+}
 
 /** How long a filer whose companyfacts lacked its newest report waits before the fact pull asks again. */
 export const FACTS_RETRY_DAYS = 7;
@@ -242,7 +271,7 @@ export const QC603_EARNINGS_FRESHNESS: CheckDefinition = {
     'fire, which is indistinguishable from a ticker with no earnings coming. Two cases are not ' +
     'staleness: a ticker that reported in the last 21 days (its next date can sit past the sweep), and ' +
     'one listed within 135 days that has never been dated (its first report is not yet due).',
-  readsTables: ['raw_earnings_event', 'ref_chain_subset_membership', 'raw_ticker_reference'],
+  readsTables: ['raw_earnings_event', 'ref_chain_subset_membership', 'raw_ticker_reference', 'qa_exception'],
   testedQuantity: 'days_since_future_date_observed',
   testedUnit: 'days',
   thresholds: { maxDaysSinceObserved: 7 },
@@ -273,7 +302,7 @@ export const QC603_EARNINGS_FRESHNESS: CheckDefinition = {
       ticker: string; last_seen: string | null; last_reported: string | null; list_date: string | null;
     }[];
 
-    return rows.map((r) => {
+    return rows.map((r): Evaluation => {
       // Just reported: the next date lies about a quarter out and can fall past the sweep's
       // 90-day window. GIS and FPS reported 2026-09-15 and fired the next day. Absent from the
       // calendar here means "not yet in range", not "dropped out".
@@ -292,10 +321,11 @@ export const QC603_EARNINGS_FRESHNESS: CheckDefinition = {
       // Never observed (and not just reported) is the largest possible staleness, never the
       // threshold's own value, or an empty domain would read as a clean one.
       const days = justReported || newlyListed ? 0 : r.last_seen === null ? 9999 : daysBetween(r.last_seen, ctx.tradingDate);
+      const fired = days > (this.thresholds['maxDaysSinceObserved'] as number);
       return {
         key: r.ticker,
         value: days,
-        fired: days > (this.thresholds['maxDaysSinceObserved'] as number),
+        fired,
         detail:
           r.last_seen === null
             ? `${r.ticker}: no future report date has ever been observed`
@@ -303,9 +333,18 @@ export const QC603_EARNINGS_FRESHNESS: CheckDefinition = {
         evidence: {
           ticker: r.ticker, lastObserved: r.last_seen, lastReported: r.last_reported, justReported,
           listDate: r.list_date, newlyListed
-        }
-      } satisfies Evaluation;
-    });
+        },
+        // Freshness is a claim about NOW, so a clean reading today settles an open finding — and
+        // says why (v1.1.282). An exemption is a rule the finding predates; a fresh date is data.
+        closesAs: fired
+          ? undefined
+          : justReported
+            ? { kind: 'rule_changed', note: `${r.ticker} reported ${r.last_reported}, inside the ${RECENT_REPORT_GRACE_DAYS}-day just-reported grace` }
+            : newlyListed
+              ? { kind: 'rule_changed', note: `${r.ticker} listed ${r.list_date}; its first report is not yet due (${NEW_LISTING_GRACE_DAYS}-day new-listing grace)` }
+              : { kind: 'data_corrected', note: `${r.ticker}: a future report date was observed ${r.last_seen}` }
+      };
+    }).concat(fundFindingClosers(ctx, 'QC-603', 'funds have no earnings and are excluded from QC-603 since v1.1.257'));
   }
 };
 
