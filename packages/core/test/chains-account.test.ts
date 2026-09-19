@@ -119,7 +119,7 @@ function chainBody(opts: {
       nearPrice: opts.nearPrice,
       OptionPair: opts.pairs.map((p) => ({
         Call: {
-          osiKey: `SPY---260918C00${String(Math.round(p.strike)).padStart(5, '0')}`,
+          osiKey: `SPY---260918C${String(Math.round(p.strike * 1000)).padStart(8, '0')}`,
           strikePrice: p.strike,
           displaySymbol: `SPY Sep 18 '26 $${String(p.strike)} Call`,
           ...(p.bid === undefined ? {} : { bid: p.bid }),
@@ -132,7 +132,7 @@ function chainBody(opts: {
           OptionGreeks: { iv: p.iv ?? 0.1523, delta: 0.52, gamma: 0.01, theta: -0.18651, vega: 0.4, rho: 0.1 }
         },
         Put: {
-          osiKey: `SPY---260918P00${String(Math.round(p.strike)).padStart(5, '0')}`,
+          osiKey: `SPY---260918P${String(Math.round(p.strike * 1000)).padStart(8, '0')}`,
           strikePrice: p.strike,
           bid: p.putBid ?? 1,
           ask: p.putAsk ?? 1.1,
@@ -929,7 +929,7 @@ describe('phase 7 — chains, and AC-5 on every response', () => {
       .prepare(
         `INSERT INTO ref_sticky_contract (run_id, as_of_date, observed_at, source_response_id,
            osi_symbol, ticker, expiration_date, reason, valid_from)
-         VALUES (?, ?, '2026-09-07T17:00:00-04:00', ?, 'SPY---260918P0000770', 'SPY', '2026-09-18', 'recommended_by_legacy', ?)`
+         VALUES (?, ?, '2026-09-07T17:00:00-04:00', ?, 'SPY---260918P00770000', 'SPY', '2026-09-18', 'recommended_by_legacy', ?)`
       )
       .run(run0.runId, DATE, src, DATE);
 
@@ -1181,7 +1181,41 @@ describe('the chain and account checks', () => {
       { strike: 5, bid: 17, ask: 18, putBid: 15, putAsk: 16 },   // put ask 3.2x its strike
       { strike: 10, bid: 70, ask: 80, putBid: 0.01, putAsk: 0.05 } // call ask 3.5x the underlying
     ]);
-    expect(qc404Fired(run)).toEqual(['SPY---260918C0000010', 'SPY---260918P0000005']);
+    expect(qc404Fired(run)).toEqual(['SPY---260918C00010000', 'SPY---260918P00005000']);
+  });
+
+  it('QC-404 closes findings raised under the old bound as rule_changed, judged on their own quote (v1.1.281)', () => {
+    // 519 findings on gen-002 were raised by the underlying-only bound before v1.1.251 and could
+    // never close: today's quote is a different quote, and there is no remediation for a rule error.
+    // The evidence they recorded predates `right` and `strike`, so both come from the symbol.
+    const first = newRun();
+    runGate(db(), makeHost(), {
+      runId: first.runId, tradingDate: DATE, domainsExpected: {},
+      checks: [{
+        ...QC404_BID_ASK_SANITY,
+        run: () => [
+          { key: 'BMNR--270115P00095000', value: 3.22, fired: true, detail: 'old bound',
+            evidence: { osiSymbol: 'BMNR--270115P00095000', bid: 72.5, ask: 73.45, underlying: 22.81, crossed: false } },
+          { key: 'XYZ---270115P00005000', value: 0.7, fired: true, detail: 'put asks 3.2x its strike',
+            evidence: { osiSymbol: 'XYZ---270115P00005000', bid: 15, ask: 16, underlying: 22.81, crossed: false } }
+        ]
+      }]
+    });
+    raw.prepare("UPDATE meta_run SET status = 'complete' WHERE run_id = ?").run(first.runId);
+
+    const second = newRun();
+    runGate(db(), makeHost(), { runId: second.runId, tradingDate: DATE, domainsExpected: {}, checks: [QC404_BID_ASK_SANITY] });
+
+    const rows = Object.fromEntries(
+      (raw.prepare("SELECT key, state, resolution_kind, resolution_note FROM qa_exception WHERE check_id = 'QC-404'").all() as
+        { key: string; state: string; resolution_kind: string | null; resolution_note: string | null }[])
+        .map((r) => [r.key, r])
+    );
+    expect(rows['BMNR--270115P00095000']!.state).toBe('resolved');
+    expect(rows['BMNR--270115P00095000']!.resolution_kind).toBe('rule_changed');
+    expect(rows['BMNR--270115P00095000']!.resolution_note).toContain('strike 95');
+    // The current rule fires on this quote too, so it stays — going quiet is not a ruling.
+    expect(rows['XYZ---270115P00005000']!.state).toBe('open');
   });
 
   it('QC-410 skips rather than fails when no 3-month yield is stored', () => {

@@ -13,6 +13,7 @@ import {
 } from '../src/qa/gate.js';
 import { buildStatusEmail, buildNoRunEmail } from '../src/qa/email.js';
 import { ALL_CHECKS } from '../src/qa/registry.js';
+import { QC409_STICKY_SET_HONOURED } from '../src/qa/checks/chains.js';
 
 let dir: string;
 let raw: Database.Database;
@@ -373,6 +374,17 @@ describe('a check that changed its keying retires findings it can no longer prod
     }));
     expect(result.resolvedByGate).toBe(0);
     expect(states['ADP---260918C00275000']).toBe('open');
+  });
+
+  it("QC-409's declared shape accepts E*Trade's symbols and rejects the pre-repair spellings (v1.1.281)", () => {
+    const { pattern } = QC409_STICKY_SET_HONOURED.keyShape!;
+    for (const ok of ['BRKB--261016P00495000', 'AIZ---261016C00280000', 'GOOGL-261016C00150000', 'X-----261016C00030000']) {
+      expect(pattern.test(ok), ok).toBe(true);
+    }
+    // Space padding (before v1.1.248), the class-share dot (before v1.1.269), and a short symbol.
+    for (const bad of ['AIZ   261016C00280000', 'BRK.B-261016P00495000', 'AIZ--261016C00280000']) {
+      expect(pattern.test(bad), bad).toBe(false);
+    }
   });
 
   it('retires nothing for a check that declares no shape', () => {

@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.281] - 2026-09-19
+
+### The gate closes QC-404's and QC-409's stale findings itself
+
+936 blocking findings sat open with nothing able to close them, all raised by checks that have since been corrected:
+
+- **QC-404 ×519.** Raised by the underlying-only bound that v1.1.251 replaced. Deep in-the-money puts such as BMNR's $105 put at $83.45 on a $22.81 stock are correct quotes. Each open finding is now re-judged on the quote it recorded, under the current rule. If that rule would not fire, the gate closes it `rule_changed`, with the arithmetic in the note. A finding the current rule still fires on stays open, because "today's quote is fine" says nothing about the day it fired.
+- **QC-409 ×417.** 415 keyed on the space-padded pin symbols v1.1.248 replaced, and 2 on `BRK.B-…`, which v1.1.269 re-roots. QC-409 now declares its key shape (E\*Trade's 21-character symbol), so v1.1.273's retirement closes keys it can no longer produce.
+
+Rehearsed on a snapshot copy with v1.1.269's pin repair applied (as Monday's chains phase will): QC-404 519 → 0 open, QC-409 417 → 0 open and 0 firing, and the email's blocking backlog 1,067 → 252. The test chain fixture now spells symbols as E\*Trade does (strike ×1000 in eight digits); it had used a 20-character form no provider sends.
+
+`core` 0.6.36, `next` 0.4.24. Details: `changelogs/v1.1.281_2026-09-19.md`.
+
 ## [1.1.280] - 2026-09-18
 
 ### A "same issuer" ruling on a QC-210 finding now sticks

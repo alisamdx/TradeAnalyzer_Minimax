@@ -137,8 +137,10 @@ export const QC404_BID_ASK_SANITY: CheckDefinition = {
     'is what a position actually costs, so a crossed or absurd quote is worth seeing before anything ' +
     'prices against it. The bound depends on the right — a deep in-the-money put is worth nearly its ' +
     'strike, so on a collapsed underlying its ask is legitimately many times the share price (BMNR ' +
-    '$95 put at $73.45 on a $22.81 stock, 2026-09-16), and an underlying-only bound fired on 476 correct quotes.',
-  readsTables: ['raw_option_contract_snapshot'],
+    '$95 put at $73.45 on a $22.81 stock, 2026-09-16), and an underlying-only bound fired on 476 correct quotes. ' +
+    'Open findings are re-judged on their own recorded quote under the current rule, and closed as ' +
+    'rule_changed when it would not have fired.',
+  readsTables: ['raw_option_contract_snapshot', 'qa_exception'],
   testedQuantity: 'ask_over_max_value_ratio',
   testedUnit: 'ratio',
   thresholds: { maxAskOverMaxValue: 3 },
@@ -158,7 +160,8 @@ export const QC404_BID_ASK_SANITY: CheckDefinition = {
       underlying_price: number;
     }[];
 
-    return rows.map((r) => {
+    const maxRatio = this.thresholds['maxAskOverMaxValue']!;
+    const out = rows.map((r): Evaluation => {
       // A call can never be worth more than the share; a put never more than its strike.
       const isPut = r.right === 'put';
       const maxValue = isPut ? r.strike : r.underlying_price;
@@ -167,7 +170,7 @@ export const QC404_BID_ASK_SANITY: CheckDefinition = {
       return {
         key: r.osi_symbol,
         value: ratio,
-        fired: crossed || ratio > this.thresholds['maxAskOverMaxValue']!,
+        fired: crossed || ratio > maxRatio,
         detail: crossed
           ? `${r.osi_symbol}: bid ${r.bid} above ask ${r.ask}`
           : `${r.osi_symbol}: ask ${r.ask} is ${ratio.toFixed(2)}x the ${isPut ? `strike ${r.strike}` : `underlying ${r.underlying_price}`}`,
@@ -175,10 +178,69 @@ export const QC404_BID_ASK_SANITY: CheckDefinition = {
           osiSymbol: r.osi_symbol, right: r.right, strike: r.strike, bid: r.bid, ask: r.ask,
           underlying: r.underlying_price, maxValue, crossed
         }
-      } satisfies Evaluation;
+      };
     });
+    return rejudgeOpenFindings(ctx, out, maxRatio);
   }
 };
+
+/**
+ * QC-404's open findings, judged again on their OWN stored quote under the current rule (v1.1.281).
+ *
+ * Until v1.1.251 the bound was the underlying for both rights, and it fired on 519 deep
+ * in-the-money puts whose ask was correct — BMNR's $95 put at $73.45 on a $22.81 stock. The rule
+ * was fixed, and every one of those findings stayed open for ever: the contract's quote today is a
+ * different quote, so "clean today" says nothing about the day it fired, and there is no
+ * remediation for a finding the check should never have raised.
+ *
+ * What does settle it is the finding's own evidence: the ask, bid and underlying it recorded, with
+ * the right and strike read from the symbol (older evidence did not store them). If the CURRENT
+ * rule would not fire on that exact quote, the verdict came from the old rule, and the gate closes
+ * it `rule_changed`. A finding the current rule would still fire on stays open, whatever today's
+ * quote says — that is a stopped-firing finding, and those are the operator's (P9).
+ */
+function rejudgeOpenFindings(ctx: CheckContext, today: Evaluation[], maxRatio: number): Evaluation[] {
+  const open = ctx.db
+    .prepare(`SELECT key, evidence_json FROM qa_exception WHERE check_id = 'QC-404' AND state IN ('open', 'acknowledged')`)
+    .all() as { key: string; evidence_json: string }[];
+  if (open.length === 0) return today;
+
+  const byKey = new Map(today.map((e, i) => [e.key, i]));
+  const out = [...today];
+  for (const f of open) {
+    const tail = /(\d{6})([CP])(\d{8})$/.exec(f.key);
+    let e: { bid?: unknown; ask?: unknown; underlying?: unknown };
+    try {
+      e = JSON.parse(f.evidence_json) as typeof e;
+    } catch {
+      continue;
+    }
+    if (!tail || typeof e.ask !== 'number' || typeof e.bid !== 'number' || typeof e.underlying !== 'number') continue;
+    const isPut = tail[2] === 'P';
+    const strike = Number(tail[3]) / 1000;
+    const maxValue = isPut ? strike : e.underlying;
+    if (!(maxValue > 0)) continue;
+    const ratio = e.ask / maxValue;
+    if (e.bid > e.ask || ratio > maxRatio) continue; // the current rule fires on it too
+
+    const closesAs = {
+      kind: 'rule_changed' as const,
+      note:
+        `re-judged on its own quote under the current rule: ask ${e.ask} is ${ratio.toFixed(2)}x the ` +
+        `${isPut ? `strike ${strike}` : `underlying ${e.underlying}`}, within ${maxRatio}x — raised under the ` +
+        'underlying-only bound, which a deep in-the-money put exceeds legitimately'
+    };
+    const i = byKey.get(f.key);
+    if (i === undefined) {
+      // Not quoted today. No value: the distribution is today's quotes, not re-judged history.
+      out.push({ key: f.key, fired: false, closesAs });
+    } else if (!out[i]!.fired) {
+      out[i] = { ...out[i]!, closesAs };
+    }
+    // Firing today on today's quote: a live finding, left to fire.
+  }
+  return out;
+}
 
 export const QC405_IV_RANGE: CheckDefinition = {
   id: 'QC-405',
@@ -394,6 +456,14 @@ export const QC409_STICKY_SET_HONOURED: CheckDefinition = {
   thresholds: { maxUnhonoured: 0 },
   thresholdBasis: 'structural',
   remediation: 'R1',
+  // Keyed on the pin's symbol, which since v1.1.248 (space padding) and v1.1.269 (the class-share
+  // dot) is built exactly as E*Trade sends it: a dotless root dash-padded to six, 21 characters.
+  // 415 findings keyed `AIZ   261016C…` and two keyed `BRK.B-261016P…` belong to pins the repair
+  // closed, so the check can never produce those keys again; the gate retires them (v1.1.281).
+  keyShape: {
+    pattern: /^(?=.{21}$)[A-Z0-9]{1,6}-{0,5}\d{6}[CP]\d{8}$/,
+    note: "keyed on E*Trade's dash-padded OSI since v1.1.248/v1.1.269; the pin behind this key was re-rooted"
+  },
   run(ctx) {
     const pins = ctx.db
       .prepare(
