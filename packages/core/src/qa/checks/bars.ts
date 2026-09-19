@@ -1,6 +1,8 @@
 import type { CheckContext, CheckDefinition, Evaluation } from '../check.js';
 import type { SqliteLike } from '../../db/sqlite-like.js';
 import { tradingDaysInRange } from '../../collector/trading-calendar.js';
+import { barSettled, BAR_SETTLED_AT_ET } from '../../collector/bar-settlement.js';
+import { etTimestamp } from '../../time.js';
 
 /**
  * Daily bar checks — 03 §3.3.
@@ -106,7 +108,7 @@ export const QC203_NON_FINAL_BAR: CheckDefinition = {
     'A bar fetched before the settlement window closed was re-fetched before the run ended. Polygon ' +
     'keeps settling the day past 16:00 ET, and the existing app stored a partial same-day bar from ' +
     'its morning slot and then scored breakouts and volume surges off it.',
-  readsTables: ['raw_daily_bar'],
+  readsTables: ['raw_daily_bar', 'meta_response', 'meta_run', 'qa_exception'],
   testedQuantity: 'non_final_fraction',
   testedUnit: 'fraction',
   thresholds: { maxNonFinalFraction: 0 },
@@ -122,19 +124,65 @@ export const QC203_NON_FINAL_BAR: CheckDefinition = {
            FROM raw_daily_bar WHERE run_id = ? AND trade_date = ?`
       )
       .get(ctx.runId, ctx.tradingDate) as { total: number; non_final: number | null };
-    if (row.total === 0) return [];
-    const fraction = (row.non_final ?? 0) / row.total;
-    return [
-      {
+    const today: Evaluation[] = [];
+    if (row.total > 0) {
+      const fraction = (row.non_final ?? 0) / row.total;
+      today.push({
         key: ctx.tradingDate,
         value: fraction,
         fired: fraction > 0,
         detail: `${row.non_final ?? 0} of ${row.total} bars are still non-final at run end`,
         evidence: { total: row.total, nonFinal: row.non_final ?? 0 }
-      }
-    ];
+      });
+    }
+    return today.concat(rejudgeNonFinalFindings(ctx));
   }
 };
+
+/**
+ * QC-203's open findings for EARLIER dates, judged on when their bars actually arrived (v1.1.287).
+ *
+ * Until v1.1.287 every same-day bar was stored provisional whatever the clock said, so the check
+ * fired on every run, and each finding is keyed by a date the check never evaluates again. The
+ * spec's rule is `is_final` from `respondedAt >= 17:00 ET`, and the arrival time of every bar
+ * response is on `meta_response`. If every bar response for that date in the runs that raised the
+ * finding arrived settled, the current rule would have stored them final: closes `rule_changed`.
+ * One fetched before 17:00 — a morning run — keeps it open, because that bar really was provisional.
+ */
+function rejudgeNonFinalFindings(ctx: CheckContext): Evaluation[] {
+  const open = ctx.db
+    .prepare(
+      `SELECT key, first_seen_run_id, last_seen_run_id FROM qa_exception
+        WHERE check_id = 'QC-203' AND state IN ('open', 'acknowledged') AND key <> ?`
+    )
+    .all(ctx.tradingDate) as { key: string; first_seen_run_id: number; last_seen_run_id: number }[];
+
+  const arrivals = ctx.db.prepare(
+    `SELECT r.responded_at FROM meta_response r JOIN meta_run n ON n.run_id = r.run_id
+      WHERE r.run_id BETWEEN ? AND ? AND n.trading_date = ?
+        AND r.endpoint LIKE '/v2/aggs/ticker/%/range/1/day/%'`
+  );
+
+  const out: Evaluation[] = [];
+  for (const f of open) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(f.key)) continue;
+    const times = (arrivals.all(f.first_seen_run_id, f.last_seen_run_id, f.key) as { responded_at: string | null }[])
+      .map((r) => r.responded_at);
+    if (times.length === 0 || !times.every((t) => barSettled(f.key, t))) continue;
+    const et = times.map((t) => etTimestamp(new Date(Date.parse(t as string))).slice(11, 16)).sort();
+    out.push({
+      key: f.key,
+      fired: false,
+      closesAs: {
+        kind: 'rule_changed',
+        note:
+          `${f.key}'s ${times.length} bar responses arrived ${et[0]}–${et[et.length - 1]} ET, after the ` +
+          `${BAR_SETTLED_AT_ET} settlement window — raised when every same-day bar was stored provisional`
+      }
+    });
+  }
+  return out;
+}
 
 /**
  * How old a step must be before a verified-genuine verdict is final (v1.1.277). The documented

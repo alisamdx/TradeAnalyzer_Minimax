@@ -5,6 +5,8 @@ import { captureResponse } from '../capture.js';
 import { recipes } from '../../ingest/recipes.js';
 import { captureRuleId, type RunHandle } from '../run.js';
 import { sweepPolygonPages, POLYGON_LIST_PAGE_SIZE } from '../paged.js';
+import { barSettled } from '../bar-settlement.js';
+export { barSettled, BAR_SETTLED_AT_ET } from '../bar-settlement.js';
 
 /**
  * Phases 2, 3 and 4 — daily bars, the end-of-day snapshot, corporate actions
@@ -75,10 +77,10 @@ export async function runBarsPhase(
         ticker,
         fetchKind: 'daily',
         adjustedAsOf: run.tradingDate,
-        // Anything dated today may still be settling — Polygon keeps adjusting
-        // past 16:00 ET, which is why the run is scheduled at 17:05 rather than
-        // 16:30.
-        provisionalDate: run.tradingDate
+        // Anything dated today may still be settling before 17:00 ET — Polygon keeps adjusting
+        // past 16:00, which is why the run is scheduled at 17:05 rather than 16:30. Decided per
+        // response from when it ARRIVED, and recorded in the recipe, so replay agrees.
+        ...(barSettled(run.tradingDate, response.respondedAt) ? {} : { provisionalDate: run.tradingDate })
       })
     });
 

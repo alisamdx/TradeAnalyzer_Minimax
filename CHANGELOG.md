@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.1.287] - 2026-09-19
+
+### Same-day bars fetched after 17:00 ET are final, as the spec always said
+
+QC-203 reported *"1083 of 1083 bars are still non-final at run end"* on **every** run of gen-002, including run 22, which fetched at 18:23 ET. It was a check that could not pass. Spec 02/04 set `is_final` from when the response arrived (`respondedAt ≥ 17:00 ET`), but the bars phase marked every same-day bar provisional whatever the clock said. Its final version only arrived with the next day's five-day fetch.
+
+- **Collector:** `barSettled` decides per response: final when it arrived on a later ET date, or on the trading date at or after 17:00 ET. It is DST-safe via `etTimestamp`, and a missing response time means provisional. The decision is recorded in the bar recipe, so replay agrees. A genuine morning fetch still stores provisional, and QC-203 still fires on it.
+- **Stale findings:** QC-203's open findings for earlier dates are re-judged on their runs' recorded arrival times. All four (2026-09-14 to 09-17, bars arriving 17:59–21:06 ET) close `rule_changed`. Run 22's own finding closes the same way on Monday.
+
+Also reviewed in the 62 warnings, and left alone:
+
+- **QC-410 (55 + 24 stale):** the known E\*Trade Greeks fault. TA2 recomputes the flag per date, so stale rows cannot mislabel a chain.
+- **QC-405:** real out-of-range IVs on past days.
+- **QC-603/602:** await Monday's E\*Trade earnings.
+- **QC-009 XOM:** on your ruling list.
+- **QC-906:** 18 of 94 Form 4s parsed to no rows. Possibly derivative-only filings, which the parser skips by design; unverifiable without the archive.
+
+`core` 0.6.42, `next` 0.4.30. Details: `changelogs/v1.1.287_2026-09-19.md`.
+
 ## [1.1.286] - 2026-09-19
 
 ### R6 re-fetches the oldest findings first, and the gate email says what it did
