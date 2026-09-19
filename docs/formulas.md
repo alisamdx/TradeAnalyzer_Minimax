@@ -843,6 +843,10 @@ Operator profile: short put **0.35 ≤ |delta| ≤ 0.45**, **14 ≤ DTE ≤ 30**
 - **Positions** — a pick of a ticker within **14 calendar days** of that ticker's last kept entry is a repeat of it,
   whatever its strikes or expiry (the #43 study's episode rule, v1.1.291); the first entry is kept.
   The gate counts positions: ≥ 15 intraday capture days, ≥ 30 settled positions, mean return on max loss > 0.
+- **Sector cap** (`simulateSectorCap`, v1.1.294, 08 S9) — walk positions in entry order (date, slot, rank, id); a
+  position is skipped when **3** kept positions of its `constituents.sector` are open on its entry date (open =
+  no exit yet, or exit date after the entry date). Skipped positions never occupy a slot; an unknown sector is
+  its own bucket. The report shows the full and the capped book side by side; shadow picks are not capped.
 
 ## split-adjustment (data integrity) {#split-adjustment}
 

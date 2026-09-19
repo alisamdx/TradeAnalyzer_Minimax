@@ -40,6 +40,18 @@ console.log(`  ${mark(g.settledMet)} settled positions         ${g.settledPositi
 console.log(`  ${mark(g.meanPositive)} mean return on max loss   ${pct(g.meanReturnOnMaxLoss)}   (must be > 0)`);
 console.log(`\n  win rate ${pct(r.winRate)} · median days held ${r.medianDaysHeld ?? '—'}`);
 
+const sc = r.sectorCap;
+if (sc) {
+  const book = (b) => `${b.positions} positions · ${b.settled} settled · mean ${pct(b.meanReturnOnMaxLoss)} · win ${pct(b.winRate)}`;
+  console.log(`\n## Sector cap (${sc.cap} open per sector — simulated; shadow picks are not capped)\n`);
+  console.log(`  all positions   ${book(sc.all)}`);
+  console.log(`  capped book     ${book(sc.capped)}   (${sc.skipped} skipped by the cap)`);
+  if (sc.unknownSector) console.log(`  ${sc.unknownSector} position(s) have no sector in constituents — each counted as its own sector`);
+  const line = (xs) => xs.map((x) => `${x.key} ${x.n}`).join(' · ') || '—';
+  console.log(`\n  open now by sector:  ${line(r.concentration.bySector)}`);
+  console.log(`  open now by expiry:  ${line(r.concentration.byExpiry)}`);
+}
+
 const c = r.counts;
 console.log(`\n## Positions\n\n  ${c.pickRows} pick rows → ${c.positions} positions (picks of a ticker within 14 days of its kept entry are one position)`);
 console.log(`  open ${c.open} · target ${c.target} · expired ${c.expired} · unsettleable ${c.unsettleable}\n`);
@@ -56,7 +68,8 @@ if (rows.length) {
     console.log(
       `  ${p.asOfDate}  ${p.slot.padEnd(11)} ${p.ticker.padEnd(7)} ${p.expiration}  ${`${p.shortStrike}/${p.longStrike}`.padEnd(13)} ` +
       `${p.netCredit.toFixed(2).padStart(6)}  ${p.maxLoss.toFixed(2).padStart(7)}  ${s.status.padEnd(12)}  ${exit.padEnd(10)}  ` +
-      `${ret.padStart(7)}  ${s.marks}/${s.gaps}${p.repeats ? `  (+${p.repeats} repeat)` : ''}`,
+      `${ret.padStart(7)}  ${s.marks}/${s.gaps}${p.repeats ? `  (+${p.repeats} repeat)` : ''}` +
+      `${p.sectorCapSkipped ? '  [cap: skipped]' : ''}${p.sector ? `  ${p.sector}` : ''}`,
     );
     if (s.status === 'unsettleable') console.log(`      ↳ ${s.reason}`);
   }

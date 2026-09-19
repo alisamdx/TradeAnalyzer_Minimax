@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.294] - 2026-09-19
+
+### Bull put spread (shadow): 3-per-sector cap simulated in the report
+
+- The operator's concentration rule (08 S9) is **at most 3 open positions per sector**. The shadow report now shows the capped book beside the full one, plus open positions by sector and expiry. Shadow picks stay uncapped; the `on` mode will enforce the cap.
+- Positions picked in the same run with equal rank now order deterministically.
+
+Details: `changelogs/v1.1.294_2026-09-19.md`.
+
 ## [1.1.293] - 2026-09-19
 
 ### Bull put spread (shadow): max loss per position is $2,500

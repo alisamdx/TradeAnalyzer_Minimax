@@ -134,6 +134,50 @@ export interface ShadowPickRow extends ShadowPick {
   /** Later picks of the same ticker within EPISODE_DAYS of this entry, collapsed into it. */
   repeats: number;
   settlement: SpreadSettlement;
+  /** From `constituents.sector`; null when unknown (each such ticker is its own bucket for the cap). */
+  sector: string | null;
+  /** True when a book capped at `maxOpenPerSector` would NOT have opened this position. */
+  sectorCapSkipped: boolean;
+}
+
+/** One book's result: every position, or the sector-capped subset. */
+export interface BookSummary {
+  positions: number;
+  settled: number;
+  meanReturnOnMaxLoss: number | null;
+  winRate: number | null;
+}
+
+/** When a position leaves the book: its exit date, or never (still open / unsettleable). */
+function exitDateOf(s: SpreadSettlement): string | null {
+  return s.status === 'target' || s.status === 'expired' ? s.exitDate : null;
+}
+
+/**
+ * Walk positions in entry order and mark those a book capped at `cap` open positions per sector would
+ * have skipped. A position occupies its sector from entry until its exit date (a position exiting on the
+ * day of a new entry has freed its slot). Unknown sectors are never pooled — capping "unknown" would
+ * cap unrelated names together. Mutates `sectorCapSkipped`. see 08 S9
+ */
+export function simulateSectorCap(positions: ShadowPickRow[], cap: number): void {
+  const held: Array<{ bucket: string; exit: string | null }> = [];
+  for (const p of positions) {
+    const bucket = p.sector ?? `ticker:${p.ticker}`;
+    const occupied = held.filter(h => h.bucket === bucket && (h.exit == null || h.exit > p.asOfDate)).length;
+    p.sectorCapSkipped = occupied >= cap;
+    if (!p.sectorCapSkipped) held.push({ bucket, exit: exitDateOf(p.settlement) });
+  }
+}
+
+function summarise(positions: readonly ShadowPickRow[]): BookSummary {
+  const settled = positions.filter(p => exitDateOf(p.settlement) != null);
+  const returns = settled.map(p => (p.settlement as { returnOnMaxLoss: number }).returnOnMaxLoss);
+  return {
+    positions: positions.length,
+    settled: settled.length,
+    meanReturnOnMaxLoss: returns.length ? returns.reduce((a, b) => a + b, 0) / returns.length : null,
+    winRate: returns.length ? returns.filter(r => r > 0).length / returns.length : null,
+  };
 }
 
 export interface SpreadShadowReport {
@@ -159,6 +203,10 @@ export interface SpreadShadowReport {
     /** Only for the two missing-leg reasons: what the stored chain shows. */
     causes: Array<{ cause: LegCause; n: number }>;
   }>;
+  /** The sector cap (08 S9) simulated over the same positions — shadow picks are not capped. */
+  sectorCap: { cap: number; unknownSector: number; skipped: number; all: BookSummary; capped: BookSummary };
+  /** Currently open positions by sector and by expiry, largest first. */
+  concentration: { bySector: Array<{ key: string; n: number }>; byExpiry: Array<{ key: string; n: number }> };
   positions: ShadowPickRow[];
 }
 
@@ -219,7 +267,7 @@ export function buildSpreadShadowReport(db: DbHandle, todayEt: string): SpreadSh
        FROM spread_mode_picks
       WHERE outcome = 'pick' AND expiration IS NOT NULL AND short_strike IS NOT NULL AND long_strike IS NOT NULL
         AND net_credit IS NOT NULL AND max_loss > 0 AND spot > 0
-      ORDER BY as_of_date, CASE slot WHEN 'intraday' THEN 0 ELSE 1 END, rank`,
+      ORDER BY as_of_date, CASE slot WHEN 'intraday' THEN 0 ELSE 1 END, rank, id`,
   ).all() as Array<{
     id: number; as_of_date: string; slot: 'intraday' | 'after_close'; ticker: string; rank: number | null;
     expiration: string; dte: number | null; spot: number; short_strike: number; long_strike: number;
@@ -239,6 +287,7 @@ export function buildSpreadShadowReport(db: DbHandle, todayEt: string): SpreadSh
       id: r.id, asOfDate: r.as_of_date, slot: r.slot, ticker: r.ticker, expiration: r.expiration, spot: r.spot,
       shortStrike: r.short_strike, longStrike: r.long_strike, netCredit: r.net_credit, maxLoss: r.max_loss,
       rank: r.rank, dte: r.dte, repeats: 0, settlement: { status: 'open', marks: 0, gaps: 0, lastMarkDate: null, lastMidDebit: null },
+      sector: null, sectorCapSkipped: false,
     };
     positions.set(r.id, position);
     lastKept.set(r.ticker, position);
@@ -262,6 +311,20 @@ export function buildSpreadShadowReport(db: DbHandle, todayEt: string): SpreadSh
   }
 
   const list = [...positions.values()];
+
+  // Sector cap (08 S9): simulated, never applied to the shadow picks themselves.
+  const sectorStmt = db.prepare(
+    `SELECT sector FROM constituents WHERE ticker = ? AND sector IS NOT NULL AND TRIM(sector) <> '' LIMIT 1`,
+  );
+  for (const p of list) p.sector = (sectorStmt.get(p.ticker) as { sector: string } | undefined)?.sector ?? null;
+  simulateSectorCap(list, P.maxOpenPerSector);
+  const tally = (keys: string[]) => {
+    const m = new Map<string, number>();
+    for (const k of keys) m.set(k, (m.get(k) ?? 0) + 1);
+    return [...m].map(([key, n]) => ({ key, n })).sort((a, b) => b.n - a.n || a.key.localeCompare(b.key));
+  };
+  const openNow = list.filter(p => p.settlement.status === 'open');
+
   const settled = list.filter(p => p.settlement.status === 'target' || p.settlement.status === 'expired');
   const returns = settled.map(p => (p.settlement as { returnOnMaxLoss: number }).returnOnMaxLoss);
   const mean = returns.length ? returns.reduce((a, b) => a + b, 0) / returns.length : null;
@@ -329,6 +392,17 @@ export function buildSpreadShadowReport(db: DbHandle, todayEt: string): SpreadSh
         causes: [...e.causes].map(([cause, n]) => ({ cause, n })).sort((a, b) => b.n - a.n),
       }))
       .sort((a, b) => b.n - a.n),
+    sectorCap: {
+      cap: P.maxOpenPerSector,
+      unknownSector: list.filter(p => p.sector == null).length,
+      skipped: list.filter(p => p.sectorCapSkipped).length,
+      all: summarise(list),
+      capped: summarise(list.filter(p => !p.sectorCapSkipped)),
+    },
+    concentration: {
+      bySector: tally(openNow.map(p => p.sector ?? '(unknown)')),
+      byExpiry: tally(openNow.map(p => p.expiration)),
+    },
     positions: list,
   };
 }

@@ -1,7 +1,8 @@
 // Bull put spread shadow settlement (08 §4.2) — the rules the enable gate is judged on.
 import { describe, it, expect } from 'vitest';
 import {
-  settleSpreadPick, buildSpreadShadowReport, reasonKind, diagnoseLegs, type ShadowPick, type ShadowMark,
+  settleSpreadPick, buildSpreadShadowReport, reasonKind, diagnoseLegs, simulateSectorCap,
+  type ShadowPick, type ShadowMark, type ShadowPickRow,
 } from '../src/main/services/spread-mode-settle.js';
 import type { CapturedPut } from '../src/main/services/spread-chain-capture.js';
 import { openDatabase } from '../src/main/db/connection.js';
@@ -80,6 +81,53 @@ describe('diagnoseLegs — why a stored chain yields no spread (v1.1.291)', () =
   });
 });
 
+describe('simulateSectorCap — the operator\'s 3-per-sector book (08 S9)', () => {
+  const pos = (ticker: string, asOfDate: string, sector: string | null, exit: string | null): ShadowPickRow => ({
+    ...PICK, ticker, asOfDate, sector, rank: 1, dte: 30, repeats: 0, sectorCapSkipped: false,
+    settlement: exit
+      ? { status: 'target', exitDate: exit, exitSlot: 'intraday', exitDebit: 0.8, returnOnMaxLoss: 0.2, daysHeld: 5, marks: 1, gaps: 0 }
+      : { status: 'open', marks: 0, gaps: 0, lastMarkDate: null, lastMidDebit: null },
+  });
+
+  it('skips the 4th concurrent position in a sector, in entry order, and never pools unknown sectors', () => {
+    const book = [
+      pos('EOG', '2026-09-14', 'Energy', null),
+      pos('APA', '2026-09-14', 'Energy', null),
+      pos('DVN', '2026-09-16', 'Energy', null),
+      pos('COP', '2026-09-16', 'Energy', null),   // 4th open Energy — skipped
+      pos('CRWD', '2026-09-18', 'Information Technology', null),
+      pos('X1', '2026-09-18', null, null), pos('X2', '2026-09-18', null, null),
+      pos('X3', '2026-09-18', null, null), pos('X4', '2026-09-18', null, null), // unknown: each its own bucket
+    ];
+    simulateSectorCap(book, 3);
+    expect(book.filter(p => p.sectorCapSkipped).map(p => p.ticker)).toEqual(['COP']);
+  });
+
+  it('frees a slot once a position has exited — on or before the new entry date', () => {
+    const book = [
+      pos('EOG', '2026-09-14', 'Energy', '2026-09-20'),  // exits on the 4th entry's date
+      pos('APA', '2026-09-14', 'Energy', null),
+      pos('DVN', '2026-09-15', 'Energy', null),
+      pos('COP', '2026-09-20', 'Energy', null),          // EOG's slot is free
+      pos('OXY', '2026-09-21', 'Energy', null),          // 3 open again — skipped
+    ];
+    simulateSectorCap(book, 3);
+    expect(book.map(p => [p.ticker, p.sectorCapSkipped])).toEqual([
+      ['EOG', false], ['APA', false], ['DVN', false], ['COP', false], ['OXY', true],
+    ]);
+  });
+
+  it('a skipped position never occupies a slot', () => {
+    const book = [
+      pos('A', '2026-09-14', 'Energy', null), pos('B', '2026-09-14', 'Energy', null), pos('C', '2026-09-14', 'Energy', null),
+      pos('D', '2026-09-15', 'Energy', null),            // skipped
+      pos('E', '2026-09-16', 'Materials', null),
+    ];
+    simulateSectorCap(book, 3);
+    expect(book.map(p => p.sectorCapSkipped)).toEqual([false, false, false, true, false]);
+  });
+});
+
 describe('reasonKind', () => {
   it('groups rejection reasons by kind', () => {
     expect(reasonKind('net credit $0.03 after fills')).toBe('net credit $# after fills');
@@ -118,6 +166,28 @@ describe('buildSpreadShadowReport', () => {
       tickers: [{ ticker: 'CCC', n: 1 }, { ticker: 'DDD', n: 1 }], causes: [],
     }]);
     expect(r.runs).toHaveLength(4);
+    // No constituents rows here: both sectors unknown, nothing capped, both books identical.
+    expect(r.sectorCap).toMatchObject({ cap: 3, unknownSector: 2, skipped: 0 });
+    expect(r.sectorCap.capped).toEqual(r.sectorCap.all);
+    expect(r.concentration).toEqual({ bySector: [{ key: '(unknown)', n: 1 }], byExpiry: [{ key: '2026-10-16', n: 1 }] });
+  });
+
+  it('reads sectors from constituents and reports the capped book beside the full one', () => {
+    const db = openDatabase(':memory:');
+    runMigrations(db, MIGRATIONS_DIR);
+    const pick = db.prepare(
+      `INSERT INTO spread_mode_picks (as_of_date, slot, generated_at, mode, ticker, outcome, rank, expiration, dte, spot,
+         short_strike, long_strike, net_credit, max_loss) VALUES (?, 'intraday', 'x', 'shadow', ?, 'pick', 1, '2026-10-16', 30, 100, 95, 90, 1.6, 3.4)`,
+    );
+    const sector = db.prepare(`INSERT INTO constituents (ticker, index_name, sector) VALUES (?, 'sp500', ?)`);
+    for (const [t, d] of [['EOG', '2026-09-14'], ['APA', '2026-09-14'], ['DVN', '2026-09-16'], ['COP', '2026-09-16']] as const) {
+      pick.run(d, t);
+      sector.run(t, 'Energy');
+    }
+    const r = buildSpreadShadowReport(db, '2026-09-19');
+    expect(r.positions.filter(p => p.sectorCapSkipped).map(p => p.ticker)).toEqual(['COP']);
+    expect(r.sectorCap).toMatchObject({ skipped: 1, unknownSector: 0, all: { positions: 4 }, capped: { positions: 3 } });
+    expect(r.concentration.bySector).toEqual([{ key: 'Energy', n: 4 }]);
   });
 
   it('counts one position per ticker episode: different strikes within 14 days collapse, day 15 is new (v1.1.291)', () => {

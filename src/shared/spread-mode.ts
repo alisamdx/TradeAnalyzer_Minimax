@@ -23,6 +23,11 @@ export const SPREAD_MODE_PROFILE = {
   /** Take profit when the spread can be bought back for this fraction of the net credit. */
   takeProfitAtDebitFraction: 0.5,
   topN: 5,
+  /**
+   * At most this many open positions per sector (operator, 2026-09-19, 08 S9). Simulated in the shadow
+   * report (spread-mode-settle.ts); the `on` mode enforces it when built. Not applied to shadow picks.
+   */
+  maxOpenPerSector: 3,
 } as const;
 
 /** Keys in the `settings` table. */
