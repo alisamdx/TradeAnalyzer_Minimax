@@ -9,7 +9,7 @@ import { BLS_RELEASES, FOMC_CALENDAR_URL, blsScheduleUrl } from '../../ingest/ma
 import { parseDailyFormIndex, dailyFormIndexUrl, submissionsAtCap } from '../../ingest/edgar.js';
 import { previousTradingDay, tradingDaysInRange } from '../trading-calendar.js';
 import { sweepPolygonPages } from '../paged.js';
-import { FUND_TYPES } from '../../qa/checks/earnings-fundamentals.js';
+import { FUND_TYPES, FACTS_RETRY_DAYS } from '../../qa/checks/earnings-fundamentals.js';
 
 /**
  * Phase 8 — the event and macro domains (04 §2).
@@ -493,6 +493,56 @@ export async function runEdgarFilings(
  * yet — filing-triggered rather than clock-triggered, so a quiet quarter costs
  * nothing.
  */
+/**
+ * The filers the fact pull should fetch, in order (v1.1.271).
+ *
+ * A filer is pending when a report filing of its has no harvested facts. It is DUE when
+ * companyfacts has never been fetched for it, or was last fetched before that filing (a new
+ * filing — ask now), or was last fetched more than `FACTS_RETRY_DAYS` ago (SEC's aggregate still
+ * lacked it — ask again, weekly).
+ *
+ * It used to take the ten newest pending filers every run, with no memory of having asked.
+ * SEC's companyfacts omits some filings for weeks — IQV's and JCI's July 10-Qs were still
+ * absent on 2026-09-18, though both were filed with inline XBRL — so a filer SEC never updated
+ * held a slot for ever: JBS N.V. was fetched on four of six runs, while 31 other pending filers
+ * waited behind the newest few. Due-first by filing date, then retries oldest-fetch first.
+ */
+export function factsQueue(db: SqliteLike, tradingDate: string): readonly { cik: string }[] {
+  const pending = db
+    .prepare(
+      `SELECT f.cik, MAX(f.filed_date) AS filed
+         FROM raw_edgar_filing f
+        WHERE f.form IN ('10-K', '10-Q', '20-F', '40-F')
+          AND NOT EXISTS (SELECT 1 FROM raw_edgar_fact x WHERE x.accession_no = f.accession_no)
+        GROUP BY f.cik`
+    )
+    .all() as { cik: string; filed: string }[];
+  const lastFetch = new Map(
+    (
+      db
+        .prepare(
+          `SELECT json_extract(params_json, '$.cik') AS cik, MAX(substr(requested_at, 1, 10)) AS at
+             FROM meta_response
+            WHERE endpoint = '/api/xbrl/companyfacts/CIK{cik}.json' AND parse_status = 'ok'
+            GROUP BY json_extract(params_json, '$.cik')`
+        )
+        .all() as { cik: string; at: string }[]
+    ).map((r) => [r.cik, r.at])
+  );
+  const retryBefore = addDays(tradingDate, -FACTS_RETRY_DAYS);
+
+  const fresh: { cik: string; filed: string }[] = [];
+  const retry: { cik: string; at: string }[] = [];
+  for (const p of pending) {
+    const at = lastFetch.get(p.cik);
+    if (at === undefined || at < p.filed) fresh.push(p);
+    else if (at < retryBefore) retry.push({ cik: p.cik, at });
+  }
+  fresh.sort((a, b) => b.filed.localeCompare(a.filed) || a.cik.localeCompare(b.cik));
+  retry.sort((a, b) => a.at.localeCompare(b.at) || a.cik.localeCompare(b.cik));
+  return [...fresh, ...retry].map(({ cik }) => ({ cik }));
+}
+
 export async function runEdgarFacts(
   host: CollectorHost,
   db: SqliteLike,
@@ -501,20 +551,8 @@ export async function runEdgarFacts(
 ): Promise<SubPhaseCount> {
   const ruleId = captureRuleId(db, host, 'edgar_facts', { trigger: 'new_report_filing' }, 'Company facts for filers with an unharvested report filing.');
 
-  const pending = db
-    .prepare(
-      `SELECT DISTINCT f.cik
-         FROM raw_edgar_filing f
-        WHERE f.form IN ('10-K', '10-Q', '20-F', '40-F')
-          AND NOT EXISTS (
-                SELECT 1 FROM raw_edgar_fact x WHERE x.accession_no = f.accession_no
-              )
-        ORDER BY f.filed_date DESC
-        LIMIT ?`
-    )
-    .all(opts.maxFilers ?? 10) as { cik: string }[];
-
-  if (pending.length === 0) return skipped('no filing without harvested facts');
+  const pending = factsQueue(db, run.tradingDate).slice(0, opts.maxFilers ?? 10);
+  if (pending.length === 0) return skipped('no filing without harvested facts due for a fetch');
 
   const since = addDays(run.tradingDate, -EVENTS_RULE.factsLookbackDays);
   let stored = 0;

@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.271] - 2026-09-18
+
+### QC-701: SEC's companyfacts is behind for IQV and JCI, and the fact queue could not tell
+
+Both companies filed their July 10-Qs with inline XBRL; the collector fetched companyfacts after those filings, and SEC's aggregate still stops at May (confirmed again on 09-18). The pipeline fault was elsewhere: the fact pull took the 10 newest pending filers every run with no memory, so a filer SEC never updates (JBS N.V.) held a slot on four of six runs while 31 others waited, and IQV/JCI were asked once. `factsQueue` now asks new filings first and retries a lagging filer weekly. QC-701 names its cause (`sec_companyfacts_missing` / `awaiting_fetch` / `no_newer_filing_seen`); the findings stay, because the facts really are stale.
+
+`core` 0.6.26, `next` 0.4.14. Details: `changelogs/v1.1.271_2026-09-18.md`.
+
 ## [1.1.270] - 2026-09-18
 
 ### E*Trade becomes the collector's second earnings source

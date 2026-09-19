@@ -11,9 +11,9 @@ import { beginRun, captureRuleId, type RunHandle } from '../src/collector/run.js
 import { captureResponse } from '../src/collector/capture.js';
 import { recipes } from '../src/ingest/recipes.js';
 import { ensureTradingCalendar } from '../src/collector/trading-calendar.js';
-import { runInsiderSweep, insiderIndexDates, runEtradeEarnings } from '../src/collector/phases/events.js';
+import { runInsiderSweep, insiderIndexDates, runEtradeEarnings, factsQueue } from '../src/collector/phases/events.js';
 import { QC910_INSIDER_INDEX_COVERAGE } from '../src/qa/checks/macro.js';
-import { QC603_EARNINGS_FRESHNESS } from '../src/qa/checks/earnings-fundamentals.js';
+import { QC603_EARNINGS_FRESHNESS, QC701_FILING_FRESHNESS } from '../src/qa/checks/earnings-fundamentals.js';
 import { etradeEarningDate } from '../src/ingest/events.js';
 
 /**
@@ -288,5 +288,71 @@ describe('E*Trade as the second earnings source (v1.1.270)', () => {
       .prepare("SELECT params_json FROM meta_response WHERE provider = 'etrade' AND parse_status = 'failed'")
       .all() as { params_json: string }[];
     expect(failures.map((f) => (JSON.parse(f.params_json) as { symbol: string }).symbol)).toEqual(['JAN']);
+  });
+});
+
+describe('the EDGAR fact pull when SEC companyfacts lags a filing (v1.1.271)', () => {
+  const rule = () => captureRuleId(db(), makeHost(), 'edgar', { v: 1 }, 'test');
+
+  /** A submissions response listing one report filing for `cik`. */
+  function filing(cik: string, ticker: string, accession: string, filed: string) {
+    const r = captureResponse({
+      host: makeHost(), db: db(), runId: run.runId, asOfDate: DATE, provider: 'edgar',
+      endpoint: '/submissions/CIK{cik}.json', slug: 'edgar-submissions', params: { cik, n: accession },
+      response: response(JSON.stringify({ filings: { recent: {
+        accessionNumber: [accession], form: ['10-Q'], filingDate: [filed], reportDate: ['2026-06-30'],
+        primaryDocument: ['q.htm']
+      } } })),
+      captureRuleId: rule(), recipe: recipes.submissions({ cik, ticker })
+    });
+    expect(r.parseStatus).toBe('ok');
+  }
+
+  /** A companyfacts response for `cik` fetched on `fetchedOn`, holding one fact from `accession`. */
+  function facts(cik: string, accession: string, filed: string, end: string, fetchedOn: string) {
+    const r = captureResponse({
+      host: makeHost(), db: db(), runId: run.runId, asOfDate: DATE, provider: 'edgar',
+      endpoint: '/api/xbrl/companyfacts/CIK{cik}.json', slug: 'edgar-companyfacts', params: { cik },
+      response: { status: 200, requestedAt: `${fetchedOn}T22:00:00Z`, respondedAt: `${fetchedOn}T22:00:01Z`,
+        body: JSON.stringify({ facts: { 'us-gaap': { Revenues: { units: { USD: [
+          { end, val: 1, accn: accession, fy: 2026, fp: 'Q1', form: '10-Q', filed }
+        ] } } } } }) },
+      captureRuleId: rule(), recipe: recipes.companyFacts({ cik })
+    });
+    expect(r.parseStatus).toBe('ok');
+  }
+
+  it('asks a new filing first, retries a lagging filer weekly, and never re-asks one checked this week', () => {
+    // IQV shape: companyfacts fetched AFTER the July 10-Q and still missing it.
+    filing('0001478242', 'IQV', 'A-IQV-JUL', '2026-07-28');
+    facts('0001478242', 'A-IQV-MAY', '2026-05-05', '2026-03-31', '2026-09-09');
+    // JBS shape: fetched two days ago, still missing — not due again yet.
+    filing('0001791942', 'JBS', 'A-JBS-AUG', '2026-08-10');
+    facts('0001791942', 'A-JBS-MAR', '2026-03-25', '2025-12-31', '2026-09-16');
+    // A filer never fetched at all.
+    filing('0000000001', 'NEW', 'A-NEW', '2026-08-01');
+
+    expect(factsQueue(db(), DATE)).toEqual([{ cik: '0000000001' }, { cik: '0001478242' }]);
+  });
+
+  it('QC-701 names SEC\'s aggregate as the cause when companyfacts was fetched after the filing', () => {
+    captureResponse({
+      host: makeHost(), db: db(), runId: run.runId, asOfDate: DATE, provider: 'polygon',
+      endpoint: '/v3/reference/tickers/IQV', slug: 'ref', params: { ticker: 'IQV' },
+      response: response(JSON.stringify({ results: { ticker: 'IQV', name: 'IQVIA', type: 'CS', cik: '0001478242' } })),
+      captureRuleId: rule(), recipe: recipes.tickerReference()
+    });
+    raw.prepare(
+      `INSERT INTO ref_chain_subset_membership (run_id, as_of_date, observed_at, capture_rule_id, source_response_id,
+         ticker, valid_from, membership_reason, rule_capture_rule_id, rule_inputs_json)
+       VALUES (?, ?, ?, ?, (SELECT MAX(source_response_id) FROM meta_response), 'IQV', '2026-09-01', 'rule_pass', ?, '{}')`
+    ).run(run.runId, DATE, `${DATE}T17:00:00-04:00`, rule(), rule());
+    filing('0001478242', 'IQV', 'A-IQV-JUL', '2026-07-28');
+    facts('0001478242', 'A-IQV-MAY', '2026-05-05', '2026-04-30', '2026-09-16');
+
+    const [e] = QC701_FILING_FRESHNESS.run(ctx());
+    expect(e?.fired).toBe(true);
+    expect(e?.evidence?.['cause']).toBe('sec_companyfacts_missing');
+    expect(e?.detail).toContain('SEC companyfacts fetched 2026-09-16 still has no facts for the 10-Q filed 2026-07-28');
   });
 });

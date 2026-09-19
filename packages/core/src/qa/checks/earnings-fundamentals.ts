@@ -27,6 +27,9 @@ const MAX_LATER_SLIP_DAYS = 14;
  */
 export const FUND_TYPES = "('ETF', 'ETV', 'ETN', 'ETS', 'FUND')";
 
+/** How long a filer whose companyfacts lacked its newest report waits before the fact pull asks again. */
+export const FACTS_RETRY_DAYS = 7;
+
 /** A report this recent puts the next one about a quarter out, possibly past the 90-day sweep. */
 const RECENT_REPORT_GRACE_DAYS = 21;
 
@@ -351,9 +354,10 @@ export const QC701_FILING_FRESHNESS: CheckDefinition = {
   severity: 'warning',
   description:
     'A common-stock ticker with a CIK has an XBRL fact whose period ends within 120 days, and is ' +
-    'blocking past 180. A late filer is a real thing and the warning band is where it lives; past ' +
-    'two quarters it is our pipeline, not the filer.',
-  readsTables: ['raw_edgar_fact', 'raw_ticker_reference'],
+    'blocking past 180. Each finding names its cause: no newer filing seen (a late filer), a filing ' +
+    'still queued for companyfacts, which is our backlog, or SEC companyfacts read after the filing and still ' +
+    'missing it (SEC\'s aggregate — IQV and JCI on 2026-09-18, July 10-Qs filed with inline XBRL).',
+  readsTables: ['raw_edgar_fact', 'raw_ticker_reference', 'raw_edgar_filing', 'meta_response'],
   testedQuantity: 'days_since_newest_period_end',
   testedUnit: 'days',
   thresholds: { warnAfterDays: 120 },
@@ -373,6 +377,22 @@ export const QC701_FILING_FRESHNESS: CheckDefinition = {
       )
       .all() as { ticker: string; cik: string; newest: string | null }[];
 
+    // Why the facts are old, stated rather than assumed (v1.1.271). The description used to
+    // say past 180 days "it is our pipeline, not the filer" — and on 2026-09-18 both findings
+    // were neither: IQV and JCI filed their July 10-Qs with inline XBRL, the collector fetched
+    // companyfacts AFTER those filings, and SEC's aggregate still did not contain them.
+    const pendingFiling = ctx.db.prepare(
+      `SELECT form, filed_date FROM raw_edgar_filing f
+        WHERE f.cik = ? AND f.form IN ('10-K', '10-Q', '20-F', '40-F')
+          AND NOT EXISTS (SELECT 1 FROM raw_edgar_fact x WHERE x.accession_no = f.accession_no)
+        ORDER BY f.filed_date DESC LIMIT 1`
+    );
+    const lastFetch = ctx.db.prepare(
+      `SELECT MAX(substr(requested_at, 1, 10)) AS at FROM meta_response
+        WHERE endpoint = '/api/xbrl/companyfacts/CIK{cik}.json' AND parse_status = 'ok'
+          AND json_extract(params_json, '$.cik') = ?`
+    );
+
     // A filer whose facts have never been pulled is not a stale filer — the
     // fact pull is filing-triggered and works through a queue. Reporting it as
     // 9999 days stale would fill the gate with findings about our own backlog.
@@ -380,12 +400,30 @@ export const QC701_FILING_FRESHNESS: CheckDefinition = {
       .filter((r) => r.newest !== null)
       .map((r) => {
         const days = daysBetween(r.newest as string, ctx.tradingDate);
+        const fired = days > (this.thresholds['warnAfterDays'] as number);
+        let cause: 'sec_companyfacts_missing' | 'awaiting_fetch' | 'no_newer_filing_seen' | null = null;
+        let why = '';
+        if (fired) {
+          const filing = pendingFiling.get(r.cik) as { form: string; filed_date: string } | undefined;
+          const fetched = (lastFetch.get(r.cik) as { at: string | null } | undefined)?.at ?? null;
+          if (!filing) {
+            cause = 'no_newer_filing_seen';
+            why = ' — no newer report filing has been seen (a late filer, or a filing the submissions slice has not reached)';
+          } else if (fetched !== null && fetched >= filing.filed_date) {
+            cause = 'sec_companyfacts_missing';
+            why = ` — SEC companyfacts fetched ${fetched} still has no facts for the ${filing.form} filed ${filing.filed_date}; SEC's aggregate is behind, not the pipeline (retried every ${FACTS_RETRY_DAYS} days)`;
+          } else {
+            cause = 'awaiting_fetch';
+            const last = fetched ? `; companyfacts last read ${fetched}` : '';
+            why = ` — the ${filing.form} filed ${filing.filed_date} is queued for companyfacts${last}`;
+          }
+        }
         return {
           key: r.ticker,
           value: days,
-          fired: days > (this.thresholds['warnAfterDays'] as number),
-          detail: `${r.ticker} (CIK ${r.cik}): newest fact period ends ${r.newest}, ${days} days ago`,
-          evidence: { ticker: r.ticker, cik: r.cik, newestPeriodEnd: r.newest, days }
+          fired,
+          detail: `${r.ticker} (CIK ${r.cik}): newest fact period ends ${r.newest}, ${days} days ago${why}`,
+          evidence: { ticker: r.ticker, cik: r.cik, newestPeriodEnd: r.newest, days, ...(cause ? { cause } : {}) }
         } satisfies Evaluation;
       });
   }
