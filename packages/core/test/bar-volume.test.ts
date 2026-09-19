@@ -8,6 +8,7 @@ import type { SqliteLike } from '../src/db/sqlite-like.js';
 import type { CollectorHost, ProviderResponse } from '../src/collector/host.js';
 import { beginRun, captureRuleId } from '../src/collector/run.js';
 import { runBackfillBars } from '../src/collector/backfill.js';
+import { resolve } from '../src/qa/operator.js';
 import {
   QC204_DISCONTINUITY, QC205_VOLUME_REGIME, QC209_DORMANT_SERIES_RESUMES,
   QC210_BARS_PREDATE_LISTING, BAR_CHECKS, entityStartDates,
@@ -238,6 +239,33 @@ describe('QC-205 measures volume AROUND each discontinuity, in sessions', () => 
     // One step, measured once, on the newest observation of every day.
     expect(out).toHaveLength(1);
     expect(out[0]!.value).toBeCloseTo(2_000_000.5 / 1_000.5, 6);
+  });
+
+  it('a "not reuse" ruling closes that step for good, and the next gate run does not reopen it (v1.1.276)', async () => {
+    // On 2026-09-18 all ten QC-205 findings were genuine events on continuing listings (APLD's
+    // uplisting, GME's squeeze, WAL's bank run). A false_positive resolution used to be reopened
+    // by the very next run as a recurrence, because a historic step fires every night.
+    seedUniverse(['BNY']);
+    const host = makeHost(async (path): Promise<ProviderResponse> => ({
+      status: 200, body: path.includes('/splits') ? '{"results":[]}' : aggs(REUSE), requestedAt: 't', respondedAt: 't'
+    }));
+    const first = await runBackfillBars(host, { tradingDate: '2026-09-11' });
+    const finding = raw
+      .prepare("SELECT exception_id, key FROM qa_exception WHERE check_id = 'QC-205' AND state = 'open'")
+      .get() as { exception_id: number; key: string };
+    expect(finding).toBeDefined();
+
+    resolve(db, host, finding.exception_id, 'false_positive', 'continuing listing — the volume came with an uplisting, not a new issuer');
+
+    const out = QC205_VOLUME_REGIME.run({ db, runId: first.runId, tradingDate: '2026-09-11', observedAt: 't' });
+    const same = out.find((e) => e.key === finding.key)!;
+    expect(same.fired).toBe(false);
+    expect(same.value).toBeGreaterThan(15); // still measured: the distribution stays whole
+    expect(same.evidence!['ruledNotReuse']).toContain('uplisting');
+
+    await runBackfillBars(host, { tradingDate: '2026-09-11' });
+    expect(raw.prepare('SELECT state FROM qa_exception WHERE exception_id = ?').get(finding.exception_id))
+      .toEqual({ state: 'resolved' });
   });
 });
 

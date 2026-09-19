@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.276] - 2026-09-18
+
+### A durable "not reuse" ruling for QC-205
+
+All ten QC-205 findings on 2026-09-18 were genuine events on continuing listings (APLD's uplisting, BMNR's treasury pivot, GME's squeeze, QXO's takeover, SMMT, WAL), and none could be closed: historic steps fire every night, acceptances expire, and a `false_positive` resolution was reopened by the next run. Resolving a QC-205 finding as `false_positive` now makes the check evaluate that exact step as not fired from then on — still measured for the distribution, note kept in the evidence. A new step on the ticker still fires; the threshold is untouched pending the pilot review. Rehearsed on the snapshot: 10 → 0.
+
+`core` 0.6.31, `next` 0.4.19. Details: `changelogs/v1.1.276_2026-09-18.md`.
+
 ## [1.1.275] - 2026-09-18
 
 ### QC-008's EDGAR submissions "cap" was our window, not EDGAR's

@@ -450,8 +450,10 @@ export const QC205_VOLUME_REGIME: CheckDefinition = {
     'and it discriminates on VOLUME rather than price: ticker reuse shifts the volume regime ' +
     'permanently by 15x or more, while a genuine violent move stays within 5x. No re-fetch can ever ' +
     'fix reuse — the provider keys by ticker too — so the operator must truncate before the splice. ' +
-    'A dormant symbol has no window to measure; QC-209 covers that form.',
-  readsTables: ['raw_daily_bar', 'ref_trading_day'],
+    'A dormant symbol has no window to measure; QC-209 covers that form. A step the operator ' +
+    'resolved as `false_positive` (a genuine event on a continuing listing, not reuse) is measured ' +
+    'but never fires again.',
+  readsTables: ['raw_daily_bar', 'ref_trading_day', 'qa_exception'],
   testedQuantity: 'volume_regime_ratio',
   testedUnit: 'ratio',
   thresholds: { minRegimeRatio: 15 },
@@ -466,9 +468,41 @@ export const QC205_VOLUME_REGIME: CheckDefinition = {
     const { byTicker, sessionIndex } = latestSeries(ctx);
     const stepAt = QC204_DISCONTINUITY.thresholds['maxAbsChange']!;
     const minRatio = this.thresholds['minRegimeRatio']!;
-    return byTicker.flatMap((series) => volumeRegimeAroundSteps(series, sessionIndex, stepAt, minRatio));
+    const ruled = notReuseRulings(ctx);
+    return byTicker
+      .flatMap((series) => volumeRegimeAroundSteps(series, sessionIndex, stepAt, minRatio))
+      .map((e) => {
+        const note = ruled.get(e.key);
+        // Still measured, so the distribution stays whole; just no longer a finding.
+        return note === undefined || !e.fired
+          ? e
+          : { ...e, fired: false, evidence: { ...(e.evidence ?? {}), ruledNotReuse: note } };
+      });
   }
 };
+
+/**
+ * QC-205 steps the operator has ruled are NOT ticker reuse, keyed by the finding's key
+ * (`TICKER yyyy-mm-dd`), with the ruling's note (v1.1.276).
+ *
+ * The counterpart of the reuse ruling. On 2026-09-18 all ten QC-205 findings were genuine
+ * events on continuing listings — APLD's uplisting from OTC, BMNR's treasury pivot, GME's May
+ * 2024 squeeze, QXO's takeover, SMMT's licensing deal, WAL in the regional-bank crisis — and none
+ * could be closed: they are historic steps, so they fire every night; an acceptance expires; a
+ * `false_positive` resolution was reopened by the next run as a recurrence. A step's volume
+ * regime cannot change after the fact, so the ruling is permanent for THAT step: a resolution
+ * of kind `false_positive` on a QC-205 finding makes the check evaluate that key as not fired.
+ * A new step on the same ticker is a different key and still fires.
+ */
+function notReuseRulings(ctx: Parameters<CheckDefinition['run']>[0]): ReadonlyMap<string, string> {
+  const rows = ctx.db
+    .prepare(
+      `SELECT key, resolution_note FROM qa_exception
+        WHERE check_id = 'QC-205' AND state = 'resolved' AND resolution_kind = 'false_positive'`
+    )
+    .all() as { key: string; resolution_note: string | null }[];
+  return new Map(rows.map((r) => [r.key, r.resolution_note ?? '']));
+}
 
 export const QC209_DORMANT_SERIES_RESUMES: CheckDefinition = {
   id: 'QC-209',
