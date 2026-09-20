@@ -18,7 +18,7 @@ evidence is TODO #43 and `scripts/fr-bull-put-spread-study.mjs`.
 | S6 | 2026-09-13 | **Design approved; every §6 question at its recommended default** — $1,000 max loss and 10 positions until real numbers are set, wheel pool only, ship `shadow`, 50% target, engine stop as a separate item (TODO #45). |
 | S9 | 2026-09-19 | **Concentration: at most 3 open positions per sector** (option B; per-expiry cap not adopted). The first week held 5 energy/nat-gas positions (EOG, APA, DVN, COP, CF) and 4 tech, all on one expiry; at $2,500 each the energy group alone was a $12,500 (50%) single-event risk. **Simulated in the shadow report now, enforced by the `on` mode when built**: shadow picks stay uncapped so the evidence is not shaped by the cap, and the report shows the capped book beside the full one (v1.1.294). Sectors come from `constituents.sector`; an unknown sector is never pooled. Known limit: GICS labels are coarse, so CF counts as Materials although it trades with natural gas. |
 | S8 | 2026-09-19 | **Q1 answered: a $25,000 account, 10% per position → `maxLossPerPosition` = $2,500** (was the $1,000 placeholder; v1.1.293). Max open positions not yet given — stays 10, guidance only until `on` enforces it. Note the arithmetic: at $2,500 × 10 open, a spread's margin equals its max loss, so ten positions commit the whole $25,000 and the worst case is all of it. The §4 study re-run must use `--capital 25000 --risk 2500` so the gate tests these numbers, not the $1,000 ones the #43 portfolio result came from. |
-| S10 | 2026-09-20 | **`maxLossPerPosition` stays at the stored $250 while the mode is in shadow** — deliberate, not the missing zero it looks like beside S8's $2,500. Confirmed by the operator after v1.1.299's report surfaced the stored value. **Do not "correct" it to $2,500.** Recorded because the consequence is easy to misread as a bug: the budget is a *gate* (§3.4.5 rejects a candidate whose one contract exceeds it), not only a sizing input, so at $250 only a spread with ≤ $2.50 max loss per contract survives — **8 of the 10 positions open on 2026-09-20 would have been rejected** (only APA $198 and DVN $184 clear it), and the 11 stored `one contract risks $# > $#` rejections grow accordingly. That slows §4 condition 2, which counts **settled positions**: a budget rejection is stored as a rejection, never becomes a position, and so never settles. If the 30-position target proves too slow at this budget, the fix is §3.4.5 rather than the number — see the note under §3.5. |
+| S10 | 2026-09-20 | **`maxLossPerPosition` stays at the stored $250 while the mode is in shadow** — deliberate, not the missing zero it looks like beside S8's $2,500. Confirmed by the operator after v1.1.299's report surfaced the stored value. **Do not "correct" it to $2,500.** Recorded because the consequence is easy to misread as a bug: the budget is a *gate* (§3.4.5 rejects a candidate whose one contract exceeds it), not only a sizing input, so at $250 only a spread with ≤ $2.50 max loss per contract survives — **8 of the 10 positions open on 2026-09-20 would have been rejected** (only APA $198 and DVN $184 clear it), and the 11 stored `one contract risks $# > $#` rejections grow accordingly. That slows §4 condition 2, which counts **settled positions**: a budget rejection is stored as a rejection, never becomes a position, and so never settles. **Resolved in v1.1.300**: §3.4.5 now binds only in `on`, so the $250 budget no longer costs the sample anything — shadow records an unaffordable pick with `contracts = 0` and the report shows the affordable subset beside the full book. |
 | S7 | 2026-09-19 | **Leg rules widened to match real strike grids, and the study (v1.1.292).** The first shadow week rejected 25 of 80 candidates for strike spacing alone: the 0.25–0.35Δ band fell between two strikes on liquid DVN/EOG/COP/MDT (12), and on CF-like grids ($5 strikes at ~$120) no strike sat 5–7.5% below the short (13). The #43 study took the strike *nearest* short − 5% of spot, so the mode was stricter than its evidence. Short: 0.20–0.40Δ, nearest 0.30. Long: nearest short − 5% of spot, within 3–10%. ETFs skip the earnings gate (EWZ was rejected ×5 as "earnings date unknown"). |
 
 ---
@@ -91,7 +91,12 @@ Read from `spread_chain_capture` rows this run just wrote (`reason = 'entry'`), 
    (asked nightly) had none. The gate is doing its job.
 3. No qualifying expiry, short or long leg (§3.2).
 4. Round-trip cost share > 25% (§3.3).
-5. One contract's max loss exceeds the per-position budget (§3.5).
+5. One contract's max loss exceeds the per-position budget (§3.5) — **`on` only, and therefore not yet
+   implemented** (v1.1.300, S10). In `shadow` the budget sizes and never excludes: a rejection never becomes
+   a position and so never settles, so gating here would shrink the §4 *sample* rather than the book, and §4
+   measures a per-share ratio that does not depend on contract count. The candidate is kept with
+   `contracts = 0`. Enforced in `budgetGates()` as an exhaustive switch over `SpreadModeSwitch`, so adding
+   `'on'` to that union fails the build at this decision rather than silently inheriting today's answer.
 
 No SMA50, IV-rank or credit-to-width gate (§2).
 
@@ -103,13 +108,19 @@ No SMA50, IV-rank or credit-to-width gate (§2).
 - **Contracts** = floor(maxLossPerPosition ÷ max loss per contract), shown per pick with the total
   max loss. Open positions are not tracked in v1, so the position cap is shown as guidance.
 
-- **Open question (2026-09-20, from S10): in `shadow`, should the budget gate at all?** Shadow exists to
-  accumulate evidence, and §3.4.5 currently removes a candidate the budget cannot afford — so a small
-  budget shrinks the very sample §4 is waiting on, while the thing being measured (return **on max loss**)
-  is a ratio that does not depend on contract count. Sizing genuinely binds in `on`, not here. The
-  alternative is to record the pick in shadow with `contracts = 0` and let §3.4.5 bind only in `on`, which
-  would keep the operator's budget and the sample. Not adopted without a decision, because it changes what
-  the gate is computed over.
+- **Resolved 2026-09-20 (v1.1.300), was an open question under S10: in `shadow` the budget does not gate.**
+  A candidate the budget cannot afford is recorded with `contracts = 0` instead of rejected, so the
+  operator's budget still expresses the account without shrinking the evidence §4 is waiting on. `contracts`
+  is never a divisor and `spread-mode-settle.ts` never reads it, so settlement and the gate's mean are
+  unaffected. **A stored zero is the affordability flag** — `on` cannot produce one, because there the
+  budget excludes (§3.4.5).
+- **What this changes about the sample, stated plainly:** picks from 2026-09-21 onward are drawn from a
+  wider candidate pool than those before it, and the §3.6 ranking now ranks unaffordable spreads alongside
+  affordable ones, so the top-5 cut can differ. The §4 sample therefore has a seam at that date. It is
+  recorded rather than smoothed, because an undeclared join between two differently-selected populations is
+  the `iv_history` splice all over again — and unlike that one, this seam is documented on the day it was
+  made. The report shows both books (`budget.affordable` beside `sectorCap.all`) so the two readings —
+  about the strategy, and about this account — never have to be untangled later.
 
 - **Sector cap (S9):** at most **3** open positions per sector (`SPREAD_MODE_PROFILE.maxOpenPerSector`). A
   position occupies its sector from entry until its exit. Shadow: simulated only (`simulateSectorCap` in the

@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.300] - 2026-09-20
+
+### In shadow the per-position budget sizes a spread, it no longer gates it away
+
+The budget did both jobs: it set the contract count *and* excluded any candidate whose single contract cost more than it. In `shadow` that is the wrong job — a rejection never becomes a position and so never settles, so a small budget shrank the §4 sample rather than the book. With the operator's $250 shadow budget (08 S10), 8 of the 10 positions open on 2026-09-20 would have been excluded. §4 measures return on **max loss**, a per-share ratio that does not depend on contract count at all, so an unaffordable spread is still evidence about the strategy — it is only not evidence about this account. Such a pick is now recorded with `contracts = 0`, which is itself the affordability flag, and the report shows the affordable book beside the full one. The exclusion belongs to `on` and is written as an exhaustive switch, so adding `'on'` to `SpreadModeSwitch` fails the build at that decision instead of silently inheriting today's answer.
+
+Details: `changelogs/v1.1.300_2026-09-20.md`.
+
 ## [1.1.299] - 2026-09-20
 
 ### A stored spread rejection is re-judged under the band that actually made it

@@ -232,7 +232,8 @@ const median = (xs: number[]): number | null => {
 /** Read-only: every shadow pick settled as of `todayEt`, plus progress against the 08 §4 gate. */
 export function buildSpreadShadowReport(db: DbHandle, todayEt: string): SpreadShadowReport {
   const rows = db.prepare(
-    `SELECT id, as_of_date, slot, ticker, rank, expiration, dte, spot, short_strike, long_strike, net_credit, max_loss
+    `SELECT id, as_of_date, slot, ticker, rank, expiration, dte, spot, short_strike, long_strike, net_credit, max_loss,
+            contracts
        FROM spread_mode_picks
       WHERE outcome = 'pick' AND expiration IS NOT NULL AND short_strike IS NOT NULL AND long_strike IS NOT NULL
         AND net_credit IS NOT NULL AND max_loss > 0 AND spot > 0
@@ -240,7 +241,7 @@ export function buildSpreadShadowReport(db: DbHandle, todayEt: string): SpreadSh
   ).all() as Array<{
     id: number; as_of_date: string; slot: 'intraday' | 'after_close'; ticker: string; rank: number | null;
     expiration: string; dte: number | null; spot: number; short_strike: number; long_strike: number;
-    net_credit: number; max_loss: number;
+    net_credit: number; max_loss: number; contracts: number | null;
   }>;
 
   // One position per ticker episode, the #43 study's rule: a pick of a ticker within EPISODE_DAYS of that
@@ -256,7 +257,9 @@ export function buildSpreadShadowReport(db: DbHandle, todayEt: string): SpreadSh
       id: r.id, asOfDate: r.as_of_date, slot: r.slot, ticker: r.ticker, expiration: r.expiration, spot: r.spot,
       shortStrike: r.short_strike, longStrike: r.long_strike, netCredit: r.net_credit, maxLoss: r.max_loss,
       rank: r.rank, dte: r.dte, repeats: 0, settlement: { status: 'open', marks: 0, gaps: 0, lastMarkDate: null, lastMidDebit: null },
-      sector: null, sectorCapSkipped: false,
+      // A row written before v1.1.300 always cleared the budget (it was a gate then), so a null reads as
+      // affordable — the absence of the column is not evidence that it was not affordable.
+      sector: null, sectorCapSkipped: false, affordable: (r.contracts ?? 1) >= 1,
     };
     positions.set(r.id, position);
     lastKept.set(r.ticker, position);
@@ -392,6 +395,13 @@ export function buildSpreadShadowReport(db: DbHandle, todayEt: string): SpreadSh
       skipped: list.filter(p => p.sectorCapSkipped).length,
       all: summarise(list),
       capped: summarise(list.filter(p => !p.sectorCapSkipped)),
+    },
+    // Shadow records a pick the budget could not afford instead of rejecting it (08 S10), so the two books
+    // are reported side by side: `all` is evidence about the STRATEGY, `affordable` about THIS ACCOUNT.
+    budget: {
+      maxLossPerPosition: settings.maxLossPerPosition,
+      unaffordable: list.filter(p => !p.affordable).length,
+      affordable: summarise(list.filter(p => p.affordable)),
     },
     concentration: {
       bySector: tally(openNow.map(p => p.sector ?? '(unknown)')),

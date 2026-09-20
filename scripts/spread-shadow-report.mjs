@@ -60,6 +60,14 @@ if (cq) {
   }
 }
 
+const bg = r.budget;
+if (bg) {
+  const book = (b) => `${b.positions} positions · ${b.settled} settled · mean ${pct(b.meanReturnOnMaxLoss)} · win ${pct(b.winRate)}`;
+  console.log(`\n## Per-position budget ($${Number(bg.maxLossPerPosition).toLocaleString('en-US')} — shadow records what it cannot afford)\n`);
+  console.log(`  all positions   ${book(r.sectorCap.all)}   ← the §4 sample (return on max loss is a ratio)`);
+  console.log(`  affordable      ${book(bg.affordable)}   (${bg.unaffordable} could not be opened at this budget)`);
+}
+
 const sc = r.sectorCap;
 if (sc) {
   const book = (b) => `${b.positions} positions · ${b.settled} settled · mean ${pct(b.meanReturnOnMaxLoss)} · win ${pct(b.winRate)}`;

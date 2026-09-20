@@ -101,7 +101,13 @@ export interface SpreadModePick extends SpreadConstruction {
   expiration: string;
   dte: number;
   spot: number;
+  /**
+   * Contracts at the per-position budget. **Zero means the budget could not afford one**, which `shadow`
+   * records rather than rejects (08 §3.5, S10) so the evidence survives; `on` rejects instead, so a stored
+   * zero is by construction a shadow row and is the affordability flag. Never a divisor.
+   */
   contracts: number;
+  /** `contracts × maxLoss × 100` — so zero for a pick the budget could not afford. */
   totalMaxLoss: number;
   /** Null for an ETF, which has no earnings. */
   earningsDate: string | null;
@@ -151,6 +157,12 @@ export interface ShadowPickRow extends ShadowPick {
   sector: string | null;
   /** True when a book capped at `maxOpenPerSector` would NOT have opened this position. */
   sectorCapSkipped: boolean;
+  /**
+   * False when one contract cost more than the per-position budget on the day it was picked, so a real
+   * book could not have opened it. Shadow keeps these (08 S10) — they are evidence about the strategy,
+   * whose return is a ratio, but not about this account. Stored as `contracts = 0`.
+   */
+  affordable: boolean;
 }
 
 /** One book's result: every position, or the sector-capped subset. */
@@ -217,6 +229,12 @@ export interface SpreadShadowReport {
   }>;
   /** The sector cap (08 S9) simulated over the same positions — shadow picks are not capped. */
   sectorCap: { cap: number; unknownSector: number; skipped: number; all: BookSummary; capped: BookSummary };
+  /**
+   * The per-position budget as a filter rather than a gate (08 S10). `affordable` is the subset a book at
+   * `maxLossPerPosition` could actually have opened; the full book stays the §4 sample, because §4 measures
+   * a per-share ratio and an unaffordable spread is still evidence about the strategy.
+   */
+  budget: { maxLossPerPosition: number; unaffordable: number; affordable: BookSummary };
   /** Currently open positions by sector and by expiry, largest first. */
   concentration: { bySector: Array<{ key: string; n: number }>; byExpiry: Array<{ key: string; n: number }> };
   /** Quality of the captures the settlements rest on (v1.1.297). */

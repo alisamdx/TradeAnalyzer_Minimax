@@ -272,6 +272,7 @@ export function SpreadShadowView() {
                         <td style={td}>
                           <span style={muted}>{p.sector ?? '—'}</span>
                           {p.sectorCapSkipped && <span style={{ marginLeft: 6 }}><Pill color="var(--warning)" title={`A book capped at ${sc.cap} per sector would not have opened this`}>cap: skipped</Pill></span>}
+                          {!p.affordable && <span style={{ marginLeft: 6 }}><Pill color="var(--warning)" title="One contract cost more than the per-position budget on the day it was picked. Shadow keeps it: the §4 gate measures return on max loss, a ratio that does not depend on contract count.">over budget</Pill></span>}
                         </td>
                         <td style={td}>{p.expiration}</td>
                         <td style={num}>{p.shortStrike} / {p.longStrike}</td>

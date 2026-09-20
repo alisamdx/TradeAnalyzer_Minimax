@@ -124,7 +124,7 @@ describe('re-judging a stored rejection under the band that made it (v1.1.299)',
 
 describe('simulateSectorCap — the operator\'s 3-per-sector book (08 S9)', () => {
   const pos = (ticker: string, asOfDate: string, sector: string | null, exit: string | null): ShadowPickRow => ({
-    ...PICK, ticker, asOfDate, sector, rank: 1, dte: 30, repeats: 0, sectorCapSkipped: false,
+    ...PICK, ticker, asOfDate, sector, rank: 1, dte: 30, repeats: 0, sectorCapSkipped: false, affordable: true,
     settlement: exit
       ? { status: 'target', exitDate: exit, exitSlot: 'intraday', exitDebit: 0.8, returnOnMaxLoss: 0.2, daysHeld: 5, marks: 1, gaps: 0 }
       : { status: 'open', marks: 0, gaps: 0, lastMarkDate: null, lastMidDebit: null },
@@ -210,7 +210,35 @@ describe('buildSpreadShadowReport', () => {
     // No constituents rows here: both sectors unknown, nothing capped, both books identical.
     expect(r.sectorCap).toMatchObject({ cap: 3, unknownSector: 2, skipped: 0 });
     expect(r.sectorCap.capped).toEqual(r.sectorCap.all);
+    // `contracts` is NULL on these rows — written when the budget was still a gate, so they cleared it by
+    // definition. A null must read as affordable, not as unaffordable (v1.1.300).
+    expect(r.budget).toMatchObject({ maxLossPerPosition: 2500, unaffordable: 0 });
+    expect(r.budget.affordable).toEqual(r.sectorCap.all);
+    expect(r.positions.every(p => p.affordable)).toBe(true);
     expect(r.concentration).toEqual({ bySector: [{ key: '(unknown)', n: 1 }], byExpiry: [{ key: '2026-10-16', n: 1 }] });
+  });
+
+  // 08 S10: a shadow pick the budget could not afford is stored with contracts = 0 rather than rejected,
+  // so the report must show both books — the full one is the §4 sample, the affordable one is this account.
+  it('reports the affordable book beside the full one, keeping an over-budget pick in the sample (v1.1.300)', () => {
+    const db = openDatabase(':memory:');
+    runMigrations(db, MIGRATIONS_DIR);
+    const pick = db.prepare(
+      `INSERT INTO spread_mode_picks (as_of_date, slot, generated_at, mode, ticker, outcome, rank, reason, expiration, dte, spot,
+         short_strike, long_strike, net_credit, max_loss, contracts) VALUES (?, 'intraday', 'x', 'shadow', ?, 'pick', 1, NULL,
+         '2026-10-16', 30, 100, 95, 90, 1.6, 3.4, ?)`,
+    );
+    pick.run('2026-09-14', 'AAA', 2); // affordable
+    pick.run('2026-09-15', 'BIG', 0); // one contract cost more than the budget
+
+    const r = buildSpreadShadowReport(db, '2026-09-19');
+    expect(r.counts.positions).toBe(2);
+    expect(r.budget.unaffordable).toBe(1);
+    // The over-budget position stays in the full book — it is evidence about the strategy.
+    expect(r.sectorCap.all.positions).toBe(2);
+    expect(r.budget.affordable.positions).toBe(1);
+    expect(r.positions.find(p => p.ticker === 'BIG')!.affordable).toBe(false);
+    expect(r.positions.find(p => p.ticker === 'AAA')!.affordable).toBe(true);
   });
 
   it('reads sectors from constituents and reports the capped book beside the full one', () => {

@@ -18,6 +18,7 @@ import { fillPrice } from './options-fill.js';
 import {
   SPREAD_MODE_PROFILE as P, SPREAD_MODE_DEFAULTS, SPREAD_MODE_SETTING_KEYS, SPREAD_MODE_LIMITS,
   type SpreadConstruction, type SpreadLegQuote, type SpreadModePick, type SpreadModeResult, type SpreadModeSettings,
+  type SpreadModeSwitch,
 } from '@shared/spread-mode.js';
 
 export { SPREAD_MODE_PROFILE, SPREAD_MODE_DEFAULTS } from '@shared/spread-mode.js';
@@ -147,6 +148,32 @@ export function buildBullPutSpread(
   };
 }
 
+/**
+ * Does the per-position budget EXCLUDE a candidate it cannot afford, or only size it?
+ *
+ * It sizes in every mode. It excludes only in `on` (08 §3.4.5) — and `on` does not exist yet (§3.9), so
+ * today the answer is always false and the budget never removes a pick. That is deliberate, not an
+ * oversight: `shadow` exists to accumulate the evidence §4 is waiting on, and a rejection never becomes a
+ * position and so never settles, which means a small budget would shrink the *sample* rather than the
+ * book (08 S10). §4 measures return on max loss — a per-share ratio that does not depend on contract count
+ * at all (`spread-mode-settle.ts` never reads `contracts`) — so an unaffordable spread is still evidence
+ * about the strategy; it is simply not evidence about this account. It is recorded with `contracts = 0`,
+ * which is the affordability flag itself.
+ *
+ * Written as an exhaustive switch rather than `mode === 'on'`, which would not compile: `SpreadModeSwitch`
+ * has no `on` member, so that comparison is a guard whose input cannot contain what it looks for — the
+ * shape that left `rebuild-better-sqlite3`'s EBUSY message unable to fire since the day it was written.
+ * **Adding `'on'` to `SpreadModeSwitch` makes the `default` branch stop narrowing to `never` and breaks
+ * the build here**, which puts this decision in front of whoever builds that mode.
+ */
+function budgetGates(mode: SpreadModeSwitch): boolean {
+  switch (mode) {
+    case 'off': return false;    // unreachable: `off` returns before any candidate is built
+    case 'shadow': return false; // S10 — sizes, never gates
+    default: { const unhandled: never = mode; return Boolean(unhandled); }
+  }
+}
+
 const errText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 /** Compute this run's picks from the wheel pool and this run's captured chains, and store them. */
@@ -247,7 +274,7 @@ export function computeSpreadMode(deps: {
 
       const perContract = s.maxLoss * 100;
       const contracts = Math.floor(settings.maxLossPerPosition / perContract);
-      if (contracts < 1) {
+      if (contracts < 1 && budgetGates(settings.mode)) {
         reject(ticker, `one contract risks $${Math.round(perContract)} > $${settings.maxLossPerPosition} per-position budget`);
         continue;
       }

@@ -148,8 +148,9 @@ describe('computeSpreadMode', () => {
 
     expect(r.error).toBeNull();
     expect(r.considered).toBe(9);
-    // HHH: 0.675 ÷ 1.825 = 0.37 beats AAA: 1.05 ÷ 3.95 = 0.27
-    expect(r.picks.map(p => [p.ticker, p.rank])).toEqual([['HHH', 1], ['AAA', 2]]);
+    // HHH: 0.675 ÷ 1.825 = 0.37 beats AAA: 1.05 ÷ 3.95 = 0.27. BIG ranks last on return and is kept at
+    // contracts = 0 — in shadow the budget sizes but does not gate (v1.1.300), so it joins the ranking.
+    expect(r.picks.map(p => [p.ticker, p.rank])).toEqual([['HHH', 1], ['AAA', 2], ['BIG', 3]]);
     const aaa = r.picks[1]!;
     expect(aaa.expiration).toBe(EXP_28);
     expect(aaa.contracts).toBe(2);                    // floor(1000 ÷ 395)
@@ -163,14 +164,17 @@ describe('computeSpreadMode', () => {
     expect(why['ERN']).toMatch(/earnings 2026-10-05 on\/before every 21–35 DTE expiry/);
     expect(why['UNK']).toBe('earnings date unknown');
     expect(why['NOC']).toBe('no chain captured this run');
-    expect(why['BIG']).toMatch(/one contract risks \$3950 > \$1000 per-position budget/);
+    // Shadow SIZES on the budget but does not gate on it (v1.1.300, 08 S10): BIG is unaffordable at
+    // $1,000 and is kept with contracts = 0 rather than rejected, so it still settles into the §4 sample.
+    expect(why['BIG']).toBeUndefined();
+    expect(r.picks.find(p => p.ticker === 'BIG')).toMatchObject({ contracts: 0, totalMaxLoss: 0 });
     expect(why['WID']).toMatch(/round-trip cost/);
     expect(why['ILQ']).toBeUndefined();
     expect(why['INC']).toBeUndefined();
 
     const rows = db.prepare(`SELECT outcome, COUNT(*) n FROM spread_mode_picks WHERE as_of_date = ? AND slot = 'intraday' GROUP BY outcome ORDER BY outcome`)
       .all(TODAY);
-    expect(rows).toEqual([{ outcome: 'pick', n: 2 }, { outcome: 'rejected', n: 7 }]);
+    expect(rows).toEqual([{ outcome: 'pick', n: 3 }, { outcome: 'rejected', n: 6 }]);
     const stored = db.prepare(`SELECT * FROM spread_mode_picks WHERE ticker = 'AAA'`).get() as Record<string, unknown>;
     expect(stored).toMatchObject({ mode: 'shadow', rank: 2, short_strike: 95, long_strike: 90, contracts: 2, expiration: EXP_28 });
     expect(r.rowsWritten).toBe(9);
@@ -188,6 +192,29 @@ describe('computeSpreadMode', () => {
   it('respects the per-position budget', () => {
     const r = computeSpreadMode({ db: seed(), slot: 'intraday', now: NOW, settings: { ...SETTINGS, maxLossPerPosition: 5000 } });
     expect(r.picks.map(p => p.ticker)).toEqual(['HHH', 'AAA', 'BIG']);
+    expect(r.picks.every(p => p.contracts >= 1)).toBe(true);
+  });
+
+  // 08 S10: the budget sizes but does not gate. Shadow exists to accumulate the evidence §4 is waiting on,
+  // and a rejection never becomes a position, so it never settles — a small budget would shrink the sample
+  // rather than the book. Return on max loss is a per-share ratio, so an unaffordable spread is evidence
+  // about the strategy even though it is not evidence about this account. `on` is the mode that would
+  // exclude it (§3.4.5) and does not exist yet, which is why there is no `on` arm here to test:
+  // `SpreadModeSwitch` has no such member, and `budgetGates` breaks the build when one is added.
+  it('sizes on the budget without gating on it, keeping an unaffordable spread (v1.1.300)', () => {
+    const db = seed();
+    const r = computeSpreadMode({ db, slot: 'intraday', now: NOW, settings: { ...SETTINGS, maxLossPerPosition: 1000 } });
+
+    const big = r.picks.find(p => p.ticker === 'BIG');
+    expect(big).toBeDefined();
+    expect(big!.contracts).toBe(0);
+    expect(big!.totalMaxLoss).toBe(0);
+    // The sizing itself is unchanged for everything the budget CAN afford.
+    expect(r.picks.find(p => p.ticker === 'AAA')!.contracts).toBe(2);
+    expect(r.rejections.some(x => /per-position budget/.test(x.reason))).toBe(false);
+    // It is stored, not just returned — the gate reads the table, not this result.
+    const stored = db.prepare(`SELECT outcome, contracts FROM spread_mode_picks WHERE ticker = 'BIG'`).get();
+    expect(stored).toMatchObject({ outcome: 'pick', contracts: 0 });
   });
 
   it('does not apply the earnings gate to an ETF, and stores no earnings date for it (v1.1.292)', () => {
