@@ -243,6 +243,10 @@ short 0.20–0.30Δ, credit ≥ 30% of width, IVR ≥ ~30; exit 50% profit / 15 
     `--capital 25000 --risk 2500`. Max open positions still to be given (10 placeholder).
     **v1.1.294:** Q2 answered: at most 3 open positions per sector (08 S9). Simulated in the shadow report now;
     the `on` mode must enforce it.
+    **2026-09-20 (08 S10):** `maxLossPerPosition` stays at the stored **$250** in shadow — deliberate, do not
+    "correct" it to S8's $2,500. It gates as well as sizes (§3.4.5), so 8 of the 10 positions open that day
+    would have been rejected, which slows §4's 30-**settled**-positions target. Open question recorded under
+    §3.5: whether the budget should gate at all in shadow, or bind only in `on`.
     **v1.1.299:** the report's missing-leg diagnosis judges a stored rejection under **both** the current band
     and the one that made it (recovered from the rejection's own text), so the count under `the widened rules
     would now build it` is the dry run of v1.1.292's widening — readable without waiting for a run under the new
