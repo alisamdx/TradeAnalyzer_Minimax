@@ -145,6 +145,12 @@ capital cap; after both briefs; TA2 view + email.
 
 ## G. Bull put spread — second strategy after wheel
 
+> **Active work for this strategy has moved to its own list: `NewApp/TODO-bull-put-spread.md`**
+> (numbered `BPS-n`, 2026-09-20), so a review of the trade is not interleaved with pilot and collector
+> work. **What stays here is the evidence ledger below** — #42–45 are cited as "TODO #43"/"#44" from the
+> design, the changelogs and memory, so they keep their numbers and their place. New spread items go in
+> the BPS list, not here.
+
 Decisions 2026-09-12: bull put **credit** spread (premium, not direction); 5–15 day hold; risk as
 fixed dollars or % of the trade; a new brief mode alongside wheel. Draft criteria: 21–35 DTE,
 short 0.20–0.30Δ, credit ≥ 30% of width, IVR ≥ ~30; exit 50% profit / 15 days / 2× credit loss.
@@ -262,7 +268,8 @@ short 0.20–0.30Δ, credit ≥ 30% of width, IVR ≥ ~30; exit 50% profit / 15 
 45. **Revisit the v2 engine's 2× stop on wheel put spreads.** The engine trades wheel as a put spread with
     a 50% target and a 2× stop, validated in June with no costs; #43 found the stop + time stop halved a
     portfolio's result and a 1× stop was negative once costs exist. Needs an FR-SEY-5 replay on the
-    engine's own exit path before any change.
+    engine's own exit path before any change. **Tracked as BPS-17 from 2026-09-20** — worked from the
+    BPS list; this entry stays for the number and the evidence.
 
 ---
 
@@ -362,82 +369,3 @@ sitting in `meta_response` the whole time in every case.
 53. **Queue a replay weekly (QC-951/956).** No replay has been queued in gen-002, so QC-951 evaluates
     nothing and QC-956 will warn after 7 sessions. Note: run 8's four recommendation responses will
     replay `different` after v1.1.257 changed their keying — expected, not a fault.
-
----
-
-## J. Bull put spread — step-by-step review of the selection rules — added 2026-09-20
-
-The operator asked to walk the pipeline one step at a time. **One item per decision point**, in the order
-the code applies them (`spread-mode.ts`, design 08 §3). Each says what it does today, where the rule came
-from, and what is actually unsettled — so a review can start from evidence rather than re-deriving it.
-
-Provenance tags: **measured** (a #43 study result), **inherited** (a wheel-screen rule the spread adopted
-without testing), **drafted** (written into the design, never tested), **fixed** (a bug fix, not a choice).
-
-54. **Pool source — the wheel screen's output.** Today: `brief_candidates` where `strategy = 'wheel'` and
-    disposition is `picked` or `capped_out`, latest `generated_at` (up to 15 tickers). *Inherited.* The
-    spread never sees anything the wheel screen did not already like. Unsettled: income and bullish are
-    excluded until measured (§6 Q2) although chain capture already stores their chains, so testing them
-    costs no API calls; and the deeper question — whether a screen tuned for "good stock to be assigned"
-    is the right filter for a trade that never wants assignment.
-55. **The composite selects but does not rank.** Today: the pool is the composite's top 15, then §3.1
-    discards composite rank entirely (v1.1.173 measured its top end anti-predictive for wheel). *Measured,
-    half-applied.* Unsettled: if the composite's ranking is not trustworthy, what justifies its
-    *selection*? The 15-cut is the same number from the same signal. Either it screens usefully or it does
-    not.
-56. **Price cap $750 and the liquidity gate at 5 of 15.** Today: both inherited from the brief funnel;
-    `hasAdequateLiquidity` **fails open** when Strategy Lab never ran. *Inherited.* Unsettled: 5/15 was set
-    for a one-leg CSP, while a spread crosses **two** spreads on entry and two on exit — the v2 engine's
-    own tradability bar is 8/15, and the dice inherited 8. A bar set for one leg is probably wrong for four
-    fills. Note the measured caution before raising it: liquidity is a **risk proxy**, confirmed twice — a
-    gate, never a ranking signal.
-57. **Expiry — 21–35 DTE, nearest 30, strictly before earnings.** Today: `pickSpreadExpiration`, earlier
-    DTE wins a tie. *Measured, and the evidence disagrees with itself.* Per-trade, **21 DTE beat 30 and 35
-    at every delta**; in the v4 portfolio sim 30 DTE returned **+75.1%** against 21 DTE's **+61.3%**. The
-    mode targets 30. Unsettled: which measurement governs, and why they differ (turnover vs per-trade edge).
-58. **Earnings gate — fail closed, ETFs exempt.** Today: unknown, stale, or on/before the expiry rejects;
-    `constituents.index_name = 'etf'` skips it. *Drafted* (copied from Roll the Dice). It cost **16 of 75**
-    rejections in the first week — 10 stale (NTAP, INTU: no provider had announced yet) and 6 unknown.
-    Unsettled: "no provider has announced the next date" is a different fact from "this reports before
-    expiry", and today they produce the same refusal.
-59. **Short leg — |Δ| 0.20–0.40, nearest 0.30.** Today: two-sided quotes only, ties to the lower strike.
-    *Measured at the centre, widened by fix.* 0.30 holds under cost while 0.20 goes to ~zero, so the
-    **target** is evidenced; the 0.20–0.40 **band** was widened in v1.1.292 to fit real strike grids, not
-    because 0.40Δ was tested. Unsettled: the 0.40 end ships unmeasured, and a 0.40Δ short is a materially
-    different trade from a 0.30Δ one.
-60. **Long leg — 3–10% of spot below the short, target 5%.** Today: nearest the 5% target, ties to the
-    higher strike (narrower wing). *Measured, and the target contradicts the measurement.* Under quoted
-    costs a **7.5–10% wing beat 5% per trade** (a fixed per-leg cost spread over a larger credit), yet the
-    best v4 *portfolio* row used a 5% wing. Same shape as #57. Unsettled: the wing target is doing two jobs
-    — cost absorption and capital efficiency — and they point opposite ways.
-61. **Fill model — mid ∓ half the half-spread, per leg.** Today: `options-fill.ts`, `SLIPPAGE_FRACTION 0.5`,
-    applied to each leg independently. *Inherited* (the app's one fill convention). Unsettled: a spread is
-    submitted as **one combo order**, and a combo routinely fills better than legging in, so four
-    independent half-spread haircuts may overstate cost — which matters because #62 is computed from it.
-62. **Cost gate — round-trip cost ≤ 25% of mid credit.** Today: the most active gate, **20 of 75**
-    rejections, HUM alone 9. *Measured, and the best single finding in #43* — with it the portfolio
-    returned +61.7% on flat costs and +60.8% on quoted, i.e. **the gate makes the result insensitive to how
-    costs are modelled**. Unsettled: 25% was chosen, not swept; and it is a share of *credit*, so it
-    tightens exactly where credit is thin, which may be the intent or may be a second liquidity gate
-    wearing a costume.
-63. **Ranking — net credit ÷ max loss, top 5. UNVALIDATED, and about to start binding.** Today: descending,
-    ties by ticker. *Drafted.* The only related evidence is that premium richness ranked positively for
-    CSPs (v1.1.176). It has been nearly inert: **"ranked below the top 5" fired once in ten runs**, because
-    the pool was starved — the same shape as the wheel tiebreak that faces a choice on 7 of 62 days. With
-    the 36 rejections that v1.1.292/300 removed, the pool goes from ~1.9 to ~5.5 survivors per run and the
-    cut starts deciding most days. **Do the cheap thing first: an eligible-set-size histogram per run.**
-    If it stays at 1–2 the ranking needs no work; if it is 5+, the §4 sample is being selected by an
-    untested rule.
-64. **Sizing — floor(budget ÷ per-contract max loss), and it no longer gates.** Today: $2,500 default,
-    $250 stored (S10); shadow records an unaffordable pick at `contracts = 0` (v1.1.300). *Fixed.*
-    Unsettled: `maxOpenPositions` has never been given a real number (10 placeholder), and nothing tracks
-    open positions, so the cap is guidance.
-65. **Sector cap — 3 per sector, simulated only.** Today: `simulateSectorCap` in the report; shadow picks
-    are uncapped so the evidence is not shaped by it. *Operator decision (S9).* Unsettled: enforcement at
-    `on`, and the known GICS coarseness — CF counts as Materials but trades with natural gas, so the first
-    week's "4 energy positions" was really 5.
-66. **Exit — 50% of net credit, no loss stop, no time stop.** Today: printed guidance only. *Measured, and
-    the strongest result in #43* — the profit target is the dominant lever, monotonic across every
-    stop/time cell; the stop plus time stop **halved** the portfolio return. Unsettled: nothing tracks an
-    open spread or fires an alert (§5 out of scope), so the one rule with the best evidence behind it is
-    the one the system does not actually execute.
