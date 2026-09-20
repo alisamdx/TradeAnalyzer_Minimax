@@ -27,11 +27,12 @@ import { readSpreadModeSettings } from './spread-mode.js';
 import { assessCaptureQuality, type PositionCapture } from './spread-capture-quality.js';
 import {
   SPREAD_MODE_PROFILE as P,
-  type BookSummary, type LegCause, type ShadowPick, type ShadowPickRow, type SpreadSettlement, type SpreadShadowReport,
+  type BookSummary, type LegBand, type LegCause, type ShadowPick, type ShadowPickRow, type SpreadSettlement,
+  type SpreadShadowReport,
 } from '@shared/spread-mode.js';
 
 // The report types live in @shared so the Spread Shadow view can use them (v1.1.295).
-export type { BookSummary, LegCause, ShadowPick, ShadowPickRow, SpreadSettlement, SpreadShadowReport };
+export type { BookSummary, LegBand, LegCause, ShadowPick, ShadowPickRow, SpreadSettlement, SpreadShadowReport };
 
 /** 08 §4 thresholds. */
 export const SPREAD_ENABLE_GATE = {
@@ -155,25 +156,64 @@ function summarise(positions: readonly ShadowPickRow[]): BookSummary {
  * E*Trade not sending them; "wing strike has no bid" is a far put quoted 0 bid, which the two-sided rule
  * refuses. see spread-mode.ts
  */
-export function diagnoseLegs(puts: readonly CapturedPut[], spot: number | null): LegCause {
+export function diagnoseLegs(puts: readonly CapturedPut[], spot: number | null, band: LegBand = P): LegCause {
   if (spot == null || !(spot > 0)) return 'no underlying price';
   if (!puts.some(p => p[3] != null)) return 'chain carried no deltas';
   const twoSided = (p: CapturedPut): boolean => p[1] > 0 && p[2] >= p[1];
-  const inBand = puts.filter(p => p[3] != null && Math.abs(p[3]) >= P.deltaMin && Math.abs(p[3]) <= P.deltaMax);
+  const inBand = puts.filter(p => p[3] != null && Math.abs(p[3]) >= band.deltaMin && Math.abs(p[3]) <= band.deltaMax);
   if (inBand.length === 0) return 'no put in the Δ band';
   const shorts = inBand.filter(twoSided)
-    .sort((a, b) => Math.abs(Math.abs(a[3]!) - P.deltaTarget) - Math.abs(Math.abs(b[3]!) - P.deltaTarget) || a[0] - b[0]);
+    .sort((a, b) => Math.abs(Math.abs(a[3]!) - band.deltaTarget) - Math.abs(Math.abs(b[3]!) - band.deltaTarget) || a[0] - b[0]);
   const short = shorts[0];
   if (!short) return 'Δ-band put not two-sided';
   const eps = 1e-9;
   const wing = puts.filter(p => {
     if (p[0] >= short[0]) return false;
     const w = (short[0] - p[0]) / spot;
-    return w >= P.wingMinPct - eps && w <= P.wingMaxPct + eps;
+    return w >= band.wingMinPct - eps && w <= band.wingMaxPct + eps;
   });
   if (wing.length === 0) return 'no strike in the wing range';
   if (!wing.some(twoSided)) return 'wing strike has no bid';
   return 'legs present (another expiry was chosen)';
+}
+
+/**
+ * Recover the band a stored rejection was made under from the rejection's own text, so a chain can be
+ * re-judged under the rules that refused it. `buildBullPutSpread` formats the live profile into both
+ * missing-leg reasons — "no two-sided put at 0.25–0.35Δ", "no two-sided long put 5–7.5% of spot below
+ * the short strike" — which makes the reason the only surviving record of the band in force that day.
+ *
+ * A reason naming neither band (or one this cannot parse) falls back to the current profile, which makes
+ * the comparison a no-op rather than a wrong answer. The target is never in the text, so it stays today's:
+ * it orders candidates and cannot decide whether any exist. see spread-mode.ts `buildBullPutSpread`
+ */
+export function parseLegBand(reason: string): LegBand {
+  // en dash (U+2013) as written; a hyphen is accepted so a reworded reason still parses.
+  const delta = /put at\s*([0-9.]+)\s*[–-]\s*([0-9.]+)\s*Δ/u.exec(reason);
+  const wing = /long put\s*([0-9.]+)\s*[–-]\s*([0-9.]+)\s*%/u.exec(reason);
+  const band: LegBand = { ...P };
+  const num = (s: string | undefined): number | null => {
+    const n = Number(s);
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  };
+  const dMin = num(delta?.[1]), dMax = num(delta?.[2]);
+  if (dMin != null && dMax != null && dMin < dMax) { band.deltaMin = dMin; band.deltaMax = dMax; }
+  const wMin = num(wing?.[1]), wMax = num(wing?.[2]);
+  if (wMin != null && wMax != null && wMin < wMax) { band.wingMinPct = wMin / 100; band.wingMaxPct = wMax / 100; }
+  return band;
+}
+
+/**
+ * What a stored missing-leg rejection means today: judge the chain under the current band and, when that
+ * finds legs, under the band that actually refused it. Only when BOTH find legs was the expiry the cause.
+ */
+export function diagnoseStoredRejection(
+  puts: readonly CapturedPut[], spot: number | null, reason: string,
+): LegCause {
+  const now = diagnoseLegs(puts, spot, P);
+  if (now !== 'legs present (another expiry was chosen)') return now;
+  const then = diagnoseLegs(puts, spot, parseLegBand(reason));
+  return then === now ? now : 'the widened rules would now build it';
 }
 
 /** "net credit $0.03 after fills" → "net credit $# after fills" — so reasons group by kind. */
@@ -262,7 +302,11 @@ export function buildSpreadShadowReport(db: DbHandle, todayEt: string): SpreadSh
     `SELECT sector FROM constituents WHERE ticker = ? AND sector IS NOT NULL AND TRIM(sector) <> '' LIMIT 1`,
   );
   for (const p of list) p.sector = (sectorStmt.get(p.ticker) as { sector: string } | undefined)?.sector ?? null;
-  const cap = readSpreadModeSettings(db).maxOpenPerSector; // Settings → Strategies (v1.1.296)
+  // Settings → Strategies (v1.1.296). Reported whole (v1.1.299) because `GET /settings` is a fixed
+  // allowlist that does not carry these, so until now the only way to see what the screen had actually
+  // stored was to open the database — which from a redirected shell is exactly what must never be done.
+  const settings = readSpreadModeSettings(db);
+  const cap = settings.maxOpenPerSector;
   simulateSectorCap(list, cap);
   const tally = (keys: string[]) => {
     const m = new Map<string, number>();
@@ -287,7 +331,8 @@ export function buildSpreadShadowReport(db: DbHandle, todayEt: string): SpreadSh
   ).all() as Array<{ as_of_date: string; slot: string; picks: number; rejected: number }>;
 
   // Rejections by kind, with the tickers behind each, and — for a missing leg — what the stored chain says
-  // caused it (v1.1.291). The chain examined is that run's captured entry chain nearest 30 DTE in the window.
+  // caused it (v1.1.291), judged under both today's band and the one that refused it (v1.1.299). The chain
+  // examined is that run's captured entry chain nearest 30 DTE in the window.
   const chainStmt = db.prepare(
     `SELECT dte, underlying_price, puts_json FROM spread_chain_capture
       WHERE as_of_date = ? AND slot = ? AND ticker = ? AND dte BETWEEN ? AND ?`,
@@ -305,7 +350,9 @@ export function buildSpreadShadowReport(db: DbHandle, todayEt: string): SpreadSh
       const chain = chains.sort((a, b) => Math.abs(a.dte - P.dteTarget) - Math.abs(b.dte - P.dteTarget) || a.dte - b.dte)[0];
       let cause: LegCause = 'no chain stored';
       if (chain) {
-        try { cause = diagnoseLegs(JSON.parse(chain.puts_json) as CapturedPut[], chain.underlying_price); } catch { /* stays 'no chain stored' */ }
+        try {
+          cause = diagnoseStoredRejection(JSON.parse(chain.puts_json) as CapturedPut[], chain.underlying_price, r.reason);
+        } catch { /* stays 'no chain stored' */ }
       }
       e.causes.set(cause, (e.causes.get(cause) ?? 0) + 1);
     }
@@ -314,6 +361,7 @@ export function buildSpreadShadowReport(db: DbHandle, todayEt: string): SpreadSh
 
   return {
     asOf: todayEt,
+    settings,
     gate: {
       intradayCaptureDays,
       intradayCaptureDaysNeeded: SPREAD_ENABLE_GATE.minIntradayCaptureDays,

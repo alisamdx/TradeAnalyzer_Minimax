@@ -161,6 +161,19 @@ export interface BookSummary {
   winRate: number | null;
 }
 
+/**
+ * The leg-selection band, so a stored rejection can be re-judged under the rules that made it as well as
+ * under today's. `SPREAD_MODE_PROFILE` is the current one; `parseLegBand` recovers the older one from the
+ * rejection's own text. see spread-mode-settle.ts `diagnoseLegs`
+ */
+export interface LegBand {
+  deltaMin: number;
+  deltaMax: number;
+  deltaTarget: number;
+  wingMinPct: number;
+  wingMaxPct: number;
+}
+
 export type LegCause =
   | 'no chain stored'
   | 'no underlying price'
@@ -169,10 +182,18 @@ export type LegCause =
   | 'Δ-band put not two-sided'
   | 'no strike in the wing range'
   | 'wing strike has no bid'
+  // Both of these mean the stored chain yields two legs under TODAY'S band. They are split because the
+  // answer to "why was it rejected, then" differs: the first is a rule change since, the second is not.
+  // Before v1.1.299 they were one cause worded "(another expiry was chosen)", which became wrong the
+  // commit after it was written — v1.1.292 widened the band, so the widened rules found legs on chains
+  // the narrow rules had refused and every one of them was reported as an expiry choice.
+  | 'the widened rules would now build it'
   | 'legs present (another expiry was chosen)';
 
 export interface SpreadShadowReport {
   asOf: string;
+  /** What Settings → Strategies has actually stored — not the defaults (v1.1.299). */
+  settings: SpreadModeSettings;
   gate: {
     intradayCaptureDays: number;
     intradayCaptureDaysNeeded: number;

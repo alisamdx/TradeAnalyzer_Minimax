@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.299] - 2026-09-20
+
+### A stored spread rejection is re-judged under the band that actually made it
+
+`diagnoseLegs` reads the live profile, so v1.1.292's widened leg band was already being applied to rejections stored under the narrow one — and every chain the widening rescued was reported as `legs present (another expiry was chosen)`, a label written one commit earlier that the widening made wrong. The band in force is recoverable from the rejection's own text, so a missing-leg rejection is now judged under both bands and only counts as an expiry choice when both find legs; otherwise it reads `the widened rules would now build it`. That answers, without waiting for Monday's run, whether v1.1.292 actually fixes the 25 strike-spacing rejections it was written for. The shadow report and 🪜 Spread Shadow also show what Settings → Strategies has **stored** — `GET /settings` is a fixed allowlist that never carried these, so the only way to see the saved numbers was to open the database.
+
+Details: `changelogs/v1.1.299_2026-09-20.md`.
+
 ## [1.1.298] - 2026-09-19
 
 ### The Spread Shadow page scrolls

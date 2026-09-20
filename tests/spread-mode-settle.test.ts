@@ -1,9 +1,10 @@
 // Bull put spread shadow settlement (08 §4.2) — the rules the enable gate is judged on.
 import { describe, it, expect } from 'vitest';
 import {
-  settleSpreadPick, buildSpreadShadowReport, reasonKind, diagnoseLegs, simulateSectorCap,
-  type ShadowPick, type ShadowMark, type ShadowPickRow,
+  settleSpreadPick, buildSpreadShadowReport, reasonKind, diagnoseLegs, diagnoseStoredRejection, parseLegBand,
+  simulateSectorCap, type ShadowPick, type ShadowMark, type ShadowPickRow,
 } from '../src/main/services/spread-mode-settle.js';
+import { SPREAD_MODE_PROFILE as P } from '../src/shared/spread-mode.js';
 import type { CapturedPut } from '../src/main/services/spread-chain-capture.js';
 import { openDatabase } from '../src/main/db/connection.js';
 import { runMigrations } from '../src/main/db/migrations.js';
@@ -78,6 +79,46 @@ describe('diagnoseLegs — why a stored chain yields no spread (v1.1.291)', () =
     expect(diagnoseLegs([p(95, 1, 1.1, -0.3), p(80, 0.1, 0.2, -0.05)], 100)).toBe('no strike in the wing range');
     expect(diagnoseLegs([p(95, 1, 1.1, -0.3), p(90, 0, 0.05, -0.08)], 100)).toBe('wing strike has no bid');
     expect(diagnoseLegs([p(95, 1, 1.1, -0.3), p(90, 0.3, 0.4, -0.12)], 100)).toBe('legs present (another expiry was chosen)');
+  });
+});
+
+describe('re-judging a stored rejection under the band that made it (v1.1.299)', () => {
+  const p = (strike: number, bid: number, ask: number, delta: number | null): CapturedPut => [strike, bid, ask, delta, 40, 100, 1];
+  const DELTA_THEN = 'no two-sided put at 0.25–0.35Δ';
+  const WING_THEN = 'no two-sided long put 5–7.5% of spot below the short strike';
+
+  it('recovers the band from the rejection text, and falls back to the current profile', () => {
+    expect(parseLegBand(DELTA_THEN)).toMatchObject({ deltaMin: 0.25, deltaMax: 0.35 });
+    expect(parseLegBand(WING_THEN)).toMatchObject({ wingMinPct: 0.05, wingMaxPct: 0.075 });
+    // The half a reason does not name keeps today's value.
+    expect(parseLegBand(DELTA_THEN)).toMatchObject({ wingMinPct: P.wingMinPct, wingMaxPct: P.wingMaxPct });
+    expect(parseLegBand(WING_THEN)).toMatchObject({ deltaMin: P.deltaMin, deltaMax: P.deltaMax });
+    // A hyphen instead of the en dash still parses, so a reworded reason does not silently stop matching.
+    expect(parseLegBand('no two-sided put at 0.25-0.35Δ')).toMatchObject({ deltaMin: 0.25, deltaMax: 0.35 });
+    // Unparseable, reversed or non-numeric → today's band, which makes the comparison a no-op, not a lie.
+    for (const bad of ['critic flag', 'no two-sided put at 0.35–0.25Δ', 'no two-sided put at a–bΔ']) {
+      expect(parseLegBand(bad)).toMatchObject({ deltaMin: P.deltaMin, deltaMax: P.deltaMax });
+    }
+  });
+
+  it('separates a rule change from an expiry choice', () => {
+    // DVN/EOG/COP/MDT shape: the only Δ-band strike sits at 0.38, outside the old 0.25–0.35 and inside 0.20–0.40.
+    const deltaCase = [p(95, 1, 1.1, -0.38), p(90, 0.3, 0.4, -0.12)];
+    expect(diagnoseLegs(deltaCase, 100, parseLegBand(DELTA_THEN))).toBe('no put in the Δ band');
+    expect(diagnoseStoredRejection(deltaCase, 100, DELTA_THEN)).toBe('the widened rules would now build it');
+
+    // CF shape: $5 strikes at ~$120, so the wings sit at 4.17% and 8.33% — neither inside the old 5–7.5%.
+    const wingCase = [p(115, 2, 2.2, -0.3), p(110, 0.9, 1.0, -0.18), p(105, 0.4, 0.5, -0.1)];
+    expect(diagnoseLegs(wingCase, 120, parseLegBand(WING_THEN))).toBe('no strike in the wing range');
+    expect(diagnoseStoredRejection(wingCase, 120, WING_THEN)).toBe('the widened rules would now build it');
+
+    // Legs under BOTH bands: the widening changed nothing, so the expiry really was the choice.
+    const bothCase = [p(95, 1, 1.1, -0.3), p(90, 0.3, 0.4, -0.12)];
+    expect(diagnoseStoredRejection(bothCase, 100, DELTA_THEN)).toBe('legs present (another expiry was chosen)');
+
+    // A cause that is not about the band is reported as itself, never as a rule change.
+    expect(diagnoseStoredRejection([p(95, 1, 1.1, null)], 100, DELTA_THEN)).toBe('chain carried no deltas');
+    expect(diagnoseStoredRejection([p(95, 1, 1.1, -0.3), p(90, 0, 0.05, -0.12)], 100, WING_THEN)).toBe('wing strike has no bid');
   });
 });
 

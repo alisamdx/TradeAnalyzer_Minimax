@@ -243,6 +243,12 @@ short 0.20–0.30Δ, credit ≥ 30% of width, IVR ≥ ~30; exit 50% profit / 15 
     `--capital 25000 --risk 2500`. Max open positions still to be given (10 placeholder).
     **v1.1.294:** Q2 answered: at most 3 open positions per sector (08 S9). Simulated in the shadow report now;
     the `on` mode must enforce it.
+    **v1.1.299:** the report's missing-leg diagnosis judges a stored rejection under **both** the current band
+    and the one that made it (recovered from the rejection's own text), so the count under `the widened rules
+    would now build it` is the dry run of v1.1.292's widening — readable without waiting for a run under the new
+    rules. Before this, `diagnoseLegs` read the live profile and reported every rescued chain as
+    `(another expiry was chosen)`, a label v1.1.292 made wrong the commit after it was written. The report also
+    prints the **stored** Settings → Strategies numbers and the fully-deployed total (08 S8).
     **v1.1.297:** `spread_chain_capture` has its own quality checks (SC-1…SC-4) in the report — TA2's gate does
     not judge that table. **Open:** move the spread capture into the collector after TA2 is promoted, so it
     inherits the gate and the duplicate E*Trade chain fetching (TA1 capture + TA2 chain subset) ends.

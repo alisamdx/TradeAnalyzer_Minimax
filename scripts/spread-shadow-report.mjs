@@ -40,6 +40,16 @@ console.log(`  ${mark(g.settledMet)} settled positions         ${g.settledPositi
 console.log(`  ${mark(g.meanPositive)} mean return on max loss   ${pct(g.meanReturnOnMaxLoss)}   (must be > 0)`);
 console.log(`\n  win rate ${pct(r.winRate)} · median days held ${r.medianDaysHeld ?? '—'}`);
 
+// What Settings → Strategies has stored, not the defaults — `GET /settings` does not carry these.
+const st = r.settings;
+if (st) {
+  const usd = (x) => `$${Number(x).toLocaleString('en-US')}`;
+  const full = usd(st.maxLossPerPosition * st.maxOpenPositions);
+  console.log(`\n## Settings → Strategies (stored)\n`);
+  console.log(`  mode ${st.mode} · max loss/position ${usd(st.maxLossPerPosition)} · max open ${st.maxOpenPositions} · max open/sector ${st.maxOpenPerSector}`);
+  console.log(`  fully deployed that is ${full} at risk`);
+}
+
 const cq = r.captureQuality;
 if (cq) {
   console.log(`\n## Capture quality (${cq.findings.length === 0 ? 'clean' : `${cq.findings.length} to look at`})\n`);

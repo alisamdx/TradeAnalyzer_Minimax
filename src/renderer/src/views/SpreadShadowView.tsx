@@ -150,6 +150,15 @@ export function SpreadShadowView() {
                 sub={`must be > 0 · win rate ${pct(report.winRate, 0)} · median hold ${report.medianDaysHeld ?? '—'} d`}
               />
             </div>
+            {report.settings && (
+              <div style={{ ...muted, marginTop: 10 }}>
+                Settings → Strategies: mode <b>{report.settings.mode}</b> · max loss/position{' '}
+                <b>${report.settings.maxLossPerPosition.toLocaleString('en-US')}</b> · max open{' '}
+                <b>{report.settings.maxOpenPositions}</b> · max open/sector <b>{report.settings.maxOpenPerSector}</b>
+                {' — fully deployed that is '}
+                <b>${(report.settings.maxLossPerPosition * report.settings.maxOpenPositions).toLocaleString('en-US')}</b> at risk
+              </div>
+            )}
           </div>
 
           {/* ── Capture quality ── */}

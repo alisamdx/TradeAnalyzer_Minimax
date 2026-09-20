@@ -185,6 +185,19 @@ it does not exist until §4 passes.*
 reading surface for the operator, not the `on` panel of §3.9: it shows shadow results and the gate, never a
 pick to act on.*
 
+*Revision 2026-09-20 (v1.1.299): a stored missing-leg rejection is judged under **both** bands — today's and
+the one that made it. `diagnoseLegs` reads the live profile, so from v1.1.292 it applied the widened band
+(S7) to rejections stored under the narrow one, and every chain the widening rescued was reported as
+`legs present (another expiry was chosen)` — a label written one commit earlier, which the widening made
+wrong. The band in force that day survives in the rejection's own text, because `buildBullPutSpread`
+formats the live profile into both reasons ("no two-sided put at 0.25–0.35Δ"), so `parseLegBand` recovers it
+with no new column. A rejection now reads `the widened rules would now build it` unless **both** bands find
+legs, in which case the expiry really was the choice. This is what makes S7 checkable without waiting for a
+run under the new rules: the count under that cause is the dry run of v1.1.292. Where a reason names only
+its own half of the band the other half stays today's, which can only under-report the rule change, never
+over-claim it. The report also returns the **stored** Settings → Strategies numbers, which `GET /settings`
+(a fixed allowlist) never carried — until now the saved values could only be seen by opening the database.*
+
 *Revision 2026-09-19 (v1.1.291): a position is a ticker **episode**, as in the #43 study. A pick within 14
 days of that ticker's last kept entry is a repeat, even with different strikes or expiry. The first week
 had EOG 145/135 (09-14) and EOG 140/130 (09-16) counted as two positions, which is one bet counted twice.
