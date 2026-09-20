@@ -60,11 +60,28 @@ if (cq) {
   }
 }
 
+const pl = r.pools;
+if (pl) {
+  const book = (b) => `${b.positions} positions · ${b.settled} settled · mean ${pct(b.meanReturnOnMaxLoss)} · win ${pct(b.winRate)}`;
+  console.log(`\n## Candidate pools (08 S11 — both run in shadow)\n`);
+  if (!pl.pairedDays) {
+    console.log('  NO PAIRED DAYS YET — the arms have not both run on any date, so there is nothing to compare.');
+    console.log('  This is not a weak result, it is no result. The income arm starts on the next brief run.');
+  } else {
+    console.log(`  paired window: ${pl.pairedDays} day(s) from ${pl.pairedFrom} — both arms ran; earlier wheel-only days are excluded\n`);
+    for (const b of pl.books) {
+      const tag = b.pool === pl.gatePool ? '  ← §4 gate' : '';
+      console.log(`  ${b.pool.padEnd(8)}      ${book(b)}${tag}`);
+    }
+    console.log(`\n  ${pl.overlap} ticker+expiry pair(s) picked by every pool — if that is most of the book, the screens agree`);
+  }
+}
+
 const bg = r.budget;
 if (bg) {
   const book = (b) => `${b.positions} positions · ${b.settled} settled · mean ${pct(b.meanReturnOnMaxLoss)} · win ${pct(b.winRate)}`;
   console.log(`\n## Per-position budget ($${Number(bg.maxLossPerPosition).toLocaleString('en-US')} — shadow records what it cannot afford)\n`);
-  console.log(`  all positions   ${book(r.sectorCap.all)}   ← the §4 sample (return on max loss is a ratio)`);
+  console.log(`  all positions   ${book(r.sectorCap.all)}   (both pools; return on max loss is a ratio, so an unaffordable pick still counts)`);
   console.log(`  affordable      ${book(bg.affordable)}   (${bg.unaffordable} could not be opened at this budget)`);
 }
 
@@ -88,13 +105,13 @@ const rows = r.positions
   .filter((p) => ALL || p.settlement.status !== 'open')
   .concat(ALL ? [] : r.positions.filter((p) => p.settlement.status === 'open').slice(-15));
 if (rows.length) {
-  console.log('  entry       slot        ticker  expiry      short/long     credit  maxloss  status        exit        ret      marks/gaps');
+  console.log('  entry       slot        pool    ticker  expiry      short/long     credit  maxloss  status        exit        ret      marks/gaps');
   for (const p of rows) {
     const s = p.settlement;
     const exit = s.exitDate ?? s.lastMarkDate ?? '';
     const ret = s.returnOnMaxLoss != null ? pct(s.returnOnMaxLoss) : s.lastMidDebit != null ? `mid ${s.lastMidDebit.toFixed(2)}` : '';
     console.log(
-      `  ${p.asOfDate}  ${p.slot.padEnd(11)} ${p.ticker.padEnd(7)} ${p.expiration}  ${`${p.shortStrike}/${p.longStrike}`.padEnd(13)} ` +
+      `  ${p.asOfDate}  ${p.slot.padEnd(11)} ${String(p.pool ?? "").padEnd(7)} ${p.ticker.padEnd(7)} ${p.expiration}  ${`${p.shortStrike}/${p.longStrike}`.padEnd(13)} ` +
       `${p.netCredit.toFixed(2).padStart(6)}  ${p.maxLoss.toFixed(2).padStart(7)}  ${s.status.padEnd(12)}  ${exit.padEnd(10)}  ` +
       `${ret.padStart(7)}  ${s.marks}/${s.gaps}${p.repeats ? `  (+${p.repeats} repeat)` : ''}` +
       `${p.sectorCapSkipped ? '  [cap: skipped]' : ''}${p.sector ? `  ${p.sector}` : ''}`,
@@ -104,7 +121,7 @@ if (rows.length) {
 }
 
 console.log('\n## Runs\n');
-for (const run of r.runs) console.log(`  ${run.asOfDate} ${run.slot.padEnd(11)} picks ${String(run.picks).padStart(2)} · rejected ${run.rejected}`);
+for (const run of r.runs) console.log(`  ${run.asOfDate} ${run.slot.padEnd(11)} ${String(run.pool ?? "").padEnd(7)} picks ${String(run.picks).padStart(2)} · rejected ${run.rejected}`);
 
 console.log('\n## Rejection reasons (all runs)\n');
 for (const x of r.rejectionReasons) {

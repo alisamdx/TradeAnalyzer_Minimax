@@ -111,7 +111,7 @@ describe('computeSpreadMode', () => {
       ['wheel', 'STL', 'picked'], ['wheel', 'ERN', 'picked'], ['wheel', 'NOC', 'picked'],
       ['wheel', 'BIG', 'picked'], ['wheel', 'WID', 'picked'], ['wheel', 'UNK', 'picked'],
       ['wheel', 'ILQ', 'failed_liquidity'],   // not a validated candidate
-      ['income', 'INC', 'picked'],            // not the measured pool
+      ['income', 'INC', 'picked'],            // the challenger pool (08 S11)
     ] as const) cand.run(TODAY, GEN, s, t, d);
 
     db.prepare(`INSERT INTO daily_briefs (generated_at, valid_until, strategy, picks) VALUES (?, ?, 'wheel', ?)`)
@@ -215,6 +215,41 @@ describe('computeSpreadMode', () => {
     // It is stored, not just returned — the gate reads the table, not this result.
     const stored = db.prepare(`SELECT outcome, contracts FROM spread_mode_picks WHERE ticker = 'BIG'`).get();
     expect(stored).toMatchObject({ outcome: 'pick', contracts: 0 });
+  });
+
+  // 08 S11: wheel and income run as two passes over the same captured chains. They must not overwrite
+  // each other — the whole point is a paired same-day sample, and a second pass clobbering the first
+  // would leave one arm silently empty while still looking like it ran.
+  it('runs each candidate pool as its own pass, and neither overwrites the other (v1.1.301)', () => {
+    const db = seed();
+
+    const income = computeSpreadMode({ db, slot: 'intraday', now: NOW, settings: SETTINGS, pool: 'income' });
+    expect(income.pool).toBe('income');
+    // INC is the only income candidate; the wheel names are invisible to this pass.
+    expect(income.picks.map(p => p.ticker)).toEqual(['INC']);
+    expect(income.considered).toBe(1);
+
+    const wheel = computeSpreadMode({ db, slot: 'intraday', now: NOW, settings: SETTINGS, pool: 'wheel' });
+    expect(wheel.pool).toBe('wheel');
+    expect(wheel.picks.some(p => p.ticker === 'INC')).toBe(false);
+
+    // Both arms survive the other's pass, each row tagged with the pool that produced it.
+    const byPool = db.prepare(
+      `SELECT pool, COUNT(*) n FROM spread_mode_picks WHERE as_of_date = ? AND slot = 'intraday' GROUP BY pool ORDER BY pool`,
+    ).all(TODAY) as Array<{ pool: string; n: number }>;
+    expect(byPool.map(r => r.pool)).toEqual(['income', 'wheel']);
+    expect(db.prepare(`SELECT pool FROM spread_mode_picks WHERE ticker = 'INC'`).get()).toEqual({ pool: 'income' });
+
+    // A re-run of one pool replaces only that pool's rows.
+    const before = (db.prepare(`SELECT COUNT(*) n FROM spread_mode_picks WHERE pool = 'wheel'`).get() as { n: number }).n;
+    computeSpreadMode({ db, slot: 'intraday', now: NOW, settings: SETTINGS, pool: 'income' });
+    expect((db.prepare(`SELECT COUNT(*) n FROM spread_mode_picks WHERE pool = 'wheel'`).get() as { n: number }).n).toBe(before);
+    expect((db.prepare(`SELECT COUNT(*) n FROM spread_mode_picks WHERE pool = 'income'`).get() as { n: number }).n).toBe(1);
+  });
+
+  it('defaults to the wheel pool when none is given', () => {
+    const r = computeSpreadMode({ db: seed(), slot: 'intraday', now: NOW, settings: SETTINGS });
+    expect(r.pool).toBe('wheel');
   });
 
   it('does not apply the earnings gate to an ETF, and stores no earnings date for it (v1.1.292)', () => {

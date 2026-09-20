@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.301] - 2026-09-20
+
+### The bull put spread runs over two candidate pools, side by side
+
+Every number in the #43 study was measured on **wheel-selected** names, so "+75% at Δ0.30" is a fact about spreads on stocks the wheel screen liked, not about spreads. The wheel composite spends **21% of its weight on fundamentals + leverage** — which exists because an assigned CSP means you own the stock, and a defined-risk spread never owns anything — plus 8% on `notDowntrend`, which the spread's own study measured backwards (closes *below* SMA50 did better). Roughly 29 of 100 weight is irrelevant or inverted for this trade. `income` is structurally much closer: no ownership weight at all, IV rank 30, premium/risk 22, and its `trendNeutral` is always missing because ADX is disabled, so it runs four live signals on 85 weight. Both pools now run in shadow after every brief (08 S11) — wheel stays the pool §4 is judged on, income is the challenger — giving a **paired same-day sample** rather than a switch that would forfeit the comparison permanently. It costs no extra E\*Trade calls: income chains are already captured and income candidates are already stored. Migration 086 adds `pool`, widens the uniqueness key so a name both screens like is two observations rather than an overwrite, and the episode collapse, sector-cap simulation and run grouping are all per pool.
+
+Details: `changelogs/v1.1.301_2026-09-20.md`.
+
 ## [1.1.300] - 2026-09-20
 
 ### In shadow the per-position budget sizes a spread, it no longer gates it away

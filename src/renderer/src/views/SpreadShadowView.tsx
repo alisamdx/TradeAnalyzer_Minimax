@@ -150,6 +150,25 @@ export function SpreadShadowView() {
                 sub={`must be > 0 · win rate ${pct(report.winRate, 0)} · median hold ${report.medianDaysHeld ?? '—'} d`}
               />
             </div>
+            {report.pools && (
+              <div style={{ ...muted, marginTop: 10 }}>
+                {report.pools.pairedDays === 0 ? (
+                  <>Candidate pools (08 S11): <b>no paired days yet</b> — the arms have not both run on any date, so there is nothing to compare.</>
+                ) : (
+                  <>
+                    Candidate pools (08 S11), {report.pools.pairedDays} paired day(s) from {report.pools.pairedFrom}:{' '}
+                    {report.pools.books.map((b, i) => (
+                      <span key={b.pool}>
+                        {i > 0 && ' · '}
+                        <b>{b.pool}</b> {b.positions} pos, {b.settled} settled, mean {pct(b.meanReturnOnMaxLoss)}
+                        {b.pool === report.pools!.gatePool && ' (§4 gate)'}
+                      </span>
+                    ))}
+                    {` — ${report.pools.overlap} ticker+expiry pair(s) picked by both`}
+                  </>
+                )}
+              </div>
+            )}
             {report.settings && (
               <div style={{ ...muted, marginTop: 10 }}>
                 Settings → Strategies: mode <b>{report.settings.mode}</b> · max loss/position{' '}
@@ -273,6 +292,7 @@ export function SpreadShadowView() {
                           <span style={muted}>{p.sector ?? '—'}</span>
                           {p.sectorCapSkipped && <span style={{ marginLeft: 6 }}><Pill color="var(--warning)" title={`A book capped at ${sc.cap} per sector would not have opened this`}>cap: skipped</Pill></span>}
                           {!p.affordable && <span style={{ marginLeft: 6 }}><Pill color="var(--warning)" title="One contract cost more than the per-position budget on the day it was picked. Shadow keeps it: the §4 gate measures return on max loss, a ratio that does not depend on contract count.">over budget</Pill></span>}
+                          {p.pool && p.pool !== report.pools?.gatePool && <span style={{ marginLeft: 6 }}><Pill color="var(--text-accent)" title={`From the ${p.pool} candidate pool — the challenger arm (08 S11). The §4 gate is judged on ${report.pools?.gatePool}.`}>{p.pool}</Pill></span>}
                         </td>
                         <td style={td}>{p.expiration}</td>
                         <td style={num}>{p.shortStrike} / {p.longStrike}</td>

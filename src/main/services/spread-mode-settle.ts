@@ -26,9 +26,9 @@ import { fillPrice } from './options-fill.js';
 import { readSpreadModeSettings } from './spread-mode.js';
 import { assessCaptureQuality, type PositionCapture } from './spread-capture-quality.js';
 import {
-  SPREAD_MODE_PROFILE as P,
+  SPREAD_MODE_PROFILE as P, SPREAD_MODE_POOLS, SPREAD_GATE_POOL,
   type BookSummary, type LegBand, type LegCause, type ShadowPick, type ShadowPickRow, type SpreadSettlement,
-  type SpreadShadowReport,
+  type SpreadShadowReport, type SpreadPool,
 } from '@shared/spread-mode.js';
 
 // The report types live in @shared so the Spread Shadow view can use them (v1.1.295).
@@ -232,14 +232,14 @@ const median = (xs: number[]): number | null => {
 /** Read-only: every shadow pick settled as of `todayEt`, plus progress against the 08 §4 gate. */
 export function buildSpreadShadowReport(db: DbHandle, todayEt: string): SpreadShadowReport {
   const rows = db.prepare(
-    `SELECT id, as_of_date, slot, ticker, rank, expiration, dte, spot, short_strike, long_strike, net_credit, max_loss,
+    `SELECT id, pool, as_of_date, slot, ticker, rank, expiration, dte, spot, short_strike, long_strike, net_credit, max_loss,
             contracts
        FROM spread_mode_picks
       WHERE outcome = 'pick' AND expiration IS NOT NULL AND short_strike IS NOT NULL AND long_strike IS NOT NULL
         AND net_credit IS NOT NULL AND max_loss > 0 AND spot > 0
       ORDER BY as_of_date, CASE slot WHEN 'intraday' THEN 0 ELSE 1 END, rank, id`,
   ).all() as Array<{
-    id: number; as_of_date: string; slot: 'intraday' | 'after_close'; ticker: string; rank: number | null;
+    id: number; pool: SpreadPool; as_of_date: string; slot: 'intraday' | 'after_close'; ticker: string; rank: number | null;
     expiration: string; dte: number | null; spot: number; short_strike: number; long_strike: number;
     net_credit: number; max_loss: number; contracts: number | null;
   }>;
@@ -251,10 +251,12 @@ export function buildSpreadShadowReport(db: DbHandle, todayEt: string): SpreadSh
   const positions = new Map<number, ShadowPickRow>();
   const lastKept = new Map<string, ShadowPickRow>();
   for (const r of rows) {
-    const kept = lastKept.get(r.ticker);
+    // Keyed by POOL and ticker: a name both screens like is two independent observations, and collapsing
+    // them would delete exactly the paired rows the comparison is made of (08 S11).
+    const kept = lastKept.get(`${r.pool}|${r.ticker}`);
     if (kept && daysBetween(kept.asOfDate, r.as_of_date) <= EPISODE_DAYS) { kept.repeats++; continue; }
     const position: ShadowPickRow = {
-      id: r.id, asOfDate: r.as_of_date, slot: r.slot, ticker: r.ticker, expiration: r.expiration, spot: r.spot,
+      id: r.id, pool: r.pool, asOfDate: r.as_of_date, slot: r.slot, ticker: r.ticker, expiration: r.expiration, spot: r.spot,
       shortStrike: r.short_strike, longStrike: r.long_strike, netCredit: r.net_credit, maxLoss: r.max_loss,
       rank: r.rank, dte: r.dte, repeats: 0, settlement: { status: 'open', marks: 0, gaps: 0, lastMarkDate: null, lastMidDebit: null },
       // A row written before v1.1.300 always cleared the budget (it was a gate then), so a null reads as
@@ -262,7 +264,7 @@ export function buildSpreadShadowReport(db: DbHandle, todayEt: string): SpreadSh
       sector: null, sectorCapSkipped: false, affordable: (r.contracts ?? 1) >= 1,
     };
     positions.set(r.id, position);
-    lastKept.set(r.ticker, position);
+    lastKept.set(`${r.pool}|${r.ticker}`, position);
   }
 
   const marksStmt = db.prepare(
@@ -310,7 +312,10 @@ export function buildSpreadShadowReport(db: DbHandle, todayEt: string): SpreadSh
   // stored was to open the database — which from a redirected shell is exactly what must never be done.
   const settings = readSpreadModeSettings(db);
   const cap = settings.maxOpenPerSector;
-  simulateSectorCap(list, cap);
+  // Per POOL: the two arms are alternative books, not one book. Capping them together would let an
+  // `income` position consume a sector slot from the `wheel` book that a real `wheel`-only book would
+  // have had free, and the skipped counts would describe a portfolio nobody would ever hold.
+  for (const pool of SPREAD_MODE_POOLS) simulateSectorCap(list.filter(p => p.pool === pool), cap);
   const tally = (keys: string[]) => {
     const m = new Map<string, number>();
     for (const k of keys) m.set(k, (m.get(k) ?? 0) + 1);
@@ -318,20 +323,25 @@ export function buildSpreadShadowReport(db: DbHandle, todayEt: string): SpreadSh
   };
   const openNow = list.filter(p => p.settlement.status === 'open');
 
-  const settled = list.filter(p => p.settlement.status === 'target' || p.settlement.status === 'expired');
+  // The §4 gate is judged on ONE pool — the incumbent (08 S11). Letting it follow whichever arm currently
+  // looks better would change what the gate measures mid-sample, which is the seam the two-arm comparison
+  // exists to avoid; the challenger is reported beside it, never folded into it.
+  const gateBook = list.filter(p => p.pool === SPREAD_GATE_POOL);
+  const settled = gateBook.filter(p => p.settlement.status === 'target' || p.settlement.status === 'expired');
   const returns = settled.map(p => (p.settlement as { returnOnMaxLoss: number }).returnOnMaxLoss);
   const mean = returns.length ? returns.reduce((a, b) => a + b, 0) / returns.length : null;
-  const count = (s: SpreadSettlement['status']) => list.filter(p => p.settlement.status === s).length;
+  const count = (s: SpreadSettlement['status']) => gateBook.filter(p => p.settlement.status === s).length;
 
   const intradayCaptureDays = (db.prepare(
     `SELECT COUNT(DISTINCT as_of_date) AS n FROM spread_chain_capture WHERE slot = 'intraday'`,
   ).get() as { n: number }).n;
 
   const runs = db.prepare(
-    `SELECT as_of_date, slot, SUM(outcome = 'pick') AS picks, SUM(outcome = 'rejected') AS rejected
-       FROM spread_mode_picks GROUP BY as_of_date, slot
-      ORDER BY as_of_date, CASE slot WHEN 'intraday' THEN 0 ELSE 1 END`,
-  ).all() as Array<{ as_of_date: string; slot: string; picks: number; rejected: number }>;
+    // Grouped by POOL as well, or the two arms merge into one row and neither run's funnel is readable.
+    `SELECT as_of_date, slot, pool, SUM(outcome = 'pick') AS picks, SUM(outcome = 'rejected') AS rejected
+       FROM spread_mode_picks GROUP BY as_of_date, slot, pool
+      ORDER BY as_of_date, CASE slot WHEN 'intraday' THEN 0 ELSE 1 END, pool`,
+  ).all() as Array<{ as_of_date: string; slot: string; pool: SpreadPool; picks: number; rejected: number }>;
 
   // Rejections by kind, with the tickers behind each, and — for a missing leg — what the stored chain says
   // caused it (v1.1.291), judged under both today's band and the one that refused it (v1.1.299). The chain
@@ -381,7 +391,7 @@ export function buildSpreadShadowReport(db: DbHandle, todayEt: string): SpreadSh
     },
     winRate: returns.length ? returns.filter(r => r > 0).length / returns.length : null,
     medianDaysHeld: median(settled.map(p => (p.settlement as { daysHeld: number }).daysHeld)),
-    runs: runs.map(r => ({ asOfDate: r.as_of_date, slot: r.slot, picks: r.picks, rejected: r.rejected })),
+    runs: runs.map(r => ({ asOfDate: r.as_of_date, slot: r.slot, pool: r.pool, picks: r.picks, rejected: r.rejected })),
     rejectionReasons: [...kinds]
       .map(([reason, e]) => ({
         reason, n: e.n,
@@ -403,6 +413,33 @@ export function buildSpreadShadowReport(db: DbHandle, todayEt: string): SpreadSh
       unaffordable: list.filter(p => !p.affordable).length,
       affordable: summarise(list.filter(p => p.affordable)),
     },
+    // The two arms side by side (08 S11). `overlap` is the count of ticker+expiry pairs BOTH pools picked
+    // — the paired rows where the two screens agree, and the population that says whether `income` is a
+    // genuinely different selection or mostly the same names arriving by another route.
+    pools: (() => {
+      // The arms started on different days — `wheel` ran alone from 2026-09-14 and `income` joined at
+      // v1.1.301 — so a lifetime total would compare a full book against an empty one and call it a
+      // result. The books below cover ONLY the days every pool ran, and `pairedDays` is reported as a
+      // quantity in its own right so "no overlap yet" can never be mistaken for "a clean comparison":
+      // the same failure as an overlap check that passes silently on zero paired days (QC-907).
+      const runDates = new Map<SpreadPool, Set<string>>(SPREAD_MODE_POOLS.map(p => [p, new Set<string>()]));
+      for (const r of runs) runDates.get(r.pool)?.add(r.as_of_date);
+      const everyPoolRan = [...(runDates.get(SPREAD_MODE_POOLS[0]) ?? [])]
+        .filter(d => SPREAD_MODE_POOLS.every(p => runDates.get(p)?.has(d)))
+        .sort();
+      const pairedFrom = everyPoolRan[0] ?? null;
+      const paired = pairedFrom == null ? [] : list.filter(p => p.asOfDate >= pairedFrom);
+      const key = (p: ShadowPickRow) => `${p.ticker}|${p.expiration}`;
+      const byPool = SPREAD_MODE_POOLS.map(pool => new Set(paired.filter(p => p.pool === pool).map(key)));
+      const [first, ...rest] = byPool;
+      return {
+        gatePool: SPREAD_GATE_POOL,
+        pairedFrom,
+        pairedDays: everyPoolRan.length,
+        books: SPREAD_MODE_POOLS.map(pool => ({ pool, ...summarise(paired.filter(p => p.pool === pool)) })),
+        overlap: first ? [...first].filter(k => rest.every(s => s.has(k))).length : 0,
+      };
+    })(),
     concentration: {
       bySector: tally(openNow.map(p => p.sector ?? '(unknown)')),
       byExpiry: tally(openNow.map(p => p.expiration)),

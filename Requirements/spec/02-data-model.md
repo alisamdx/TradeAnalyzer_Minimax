@@ -212,7 +212,8 @@ Written by `computeSpreadMode` after every brief run; read by nothing that decid
 
 | column | note |
 |---|---|
-| `as_of_date`, `slot`, `ticker` | unique; a slot re-run deletes and rewrites that slot, the other slot is kept |
+| `pool`, `as_of_date`, `slot`, `ticker` | unique (migration 086, v1.1.301); a slot re-run deletes and rewrites that slot **for that pool**, the other slot and the other pool are kept |
+| `pool` | CHECK `wheel` \| `income` — the candidate pool this row came from (08 S11). Default `wheel`, which is a fact for pre-086 rows, not a guess: it was the only pool that existed. A ticker both screens pick is **two** rows, the paired observation the comparison is made of |
 | `generated_at`, `mode` | `mode` CHECK `shadow` \| `on` |
 | `outcome`, `rank`, `reason` | `pick` with `rank` 1–5, or `rejected` with the gate's `reason` |
 | `expiration`, `dte`, `spot` | `spot` from the captured chain (split scale guard) |

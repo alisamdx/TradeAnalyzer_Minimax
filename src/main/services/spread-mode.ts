@@ -17,8 +17,9 @@ import type { CapturedPut } from './spread-chain-capture.js';
 import { fillPrice } from './options-fill.js';
 import {
   SPREAD_MODE_PROFILE as P, SPREAD_MODE_DEFAULTS, SPREAD_MODE_SETTING_KEYS, SPREAD_MODE_LIMITS,
+  SPREAD_GATE_POOL,
   type SpreadConstruction, type SpreadLegQuote, type SpreadModePick, type SpreadModeResult, type SpreadModeSettings,
-  type SpreadModeSwitch,
+  type SpreadModeSwitch, type SpreadPool,
 } from '@shared/spread-mode.js';
 
 export { SPREAD_MODE_PROFILE, SPREAD_MODE_DEFAULTS } from '@shared/spread-mode.js';
@@ -182,12 +183,15 @@ export function computeSpreadMode(deps: {
   readonly slot: BriefCandidateSlot;
   readonly now?: Date;
   readonly settings?: SpreadModeSettings;
+  /** Candidate pool; defaults to the incumbent `wheel` (08 S11). */
+  readonly pool?: SpreadPool;
 }): SpreadModeResult {
   const { db, slot } = deps;
+  const pool = deps.pool ?? SPREAD_GATE_POOL;
   const now = deps.now ?? new Date();
   const todayEt = now.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
   const result: SpreadModeResult = {
-    mode: SPREAD_MODE_DEFAULTS.mode, briefGeneratedAt: null, considered: 0, picks: [], rejections: [], rowsWritten: 0, error: null,
+    mode: SPREAD_MODE_DEFAULTS.mode, pool, briefGeneratedAt: null, considered: 0, picks: [], rejections: [], rowsWritten: 0, error: null,
   };
 
   try {
@@ -196,16 +200,16 @@ export function computeSpreadMode(deps: {
     if (settings.mode === 'off') return result;
 
     const latest = db.prepare(
-      `SELECT generated_at FROM brief_candidates WHERE strategy = 'wheel' ORDER BY generated_at DESC LIMIT 1`,
-    ).get() as { generated_at: string } | undefined;
+      `SELECT generated_at FROM brief_candidates WHERE strategy = ? ORDER BY generated_at DESC LIMIT 1`,
+    ).get(pool) as { generated_at: string } | undefined;
     if (!latest) return result;
     result.briefGeneratedAt = latest.generated_at;
 
     const tickers = (db.prepare(
       `SELECT DISTINCT ticker FROM brief_candidates
-        WHERE generated_at = ? AND strategy = 'wheel' AND disposition IN ('picked', 'capped_out')
+        WHERE generated_at = ? AND strategy = ? AND disposition IN ('picked', 'capped_out')
         ORDER BY ticker`,
-    ).all(latest.generated_at) as Array<{ ticker: string }>).map(r => r.ticker);
+    ).all(latest.generated_at, pool) as Array<{ ticker: string }>).map(r => r.ticker);
     result.considered = tickers.length;
 
     // ETFs have no earnings, so the earnings gate cannot apply to them — without this every ETF was
@@ -218,8 +222,10 @@ export function computeSpreadMode(deps: {
     }
 
     const verdicts = new Map<string, string>();
-    const brief = db.prepare(`SELECT picks FROM daily_briefs WHERE strategy = 'wheel' ORDER BY generated_at DESC LIMIT 1`)
-      .get() as { picks: string } | undefined;
+    // Verdicts come from the SAME pool's brief — a critic read of a ticker as a wheel candidate is an
+    // opinion about owning it, which is not the question an income/spread candidate is asking.
+    const brief = db.prepare(`SELECT picks FROM daily_briefs WHERE strategy = ? ORDER BY generated_at DESC LIMIT 1`)
+      .get(pool) as { picks: string } | undefined;
     if (brief) {
       try {
         for (const p of JSON.parse(brief.picks) as Array<{ ticker?: string; criticVerdict?: { verdict?: string } | null }>) {
@@ -295,7 +301,7 @@ export function computeSpreadMode(deps: {
     result.picks = candidates.slice(0, P.topN).map((c, i) => ({ ...c, rank: i + 1 }));
     for (const c of candidates.slice(P.topN)) reject(c.ticker, `ranked below the top ${P.topN}`);
 
-    result.rowsWritten = storeSpreadModePicks(db, todayEt, slot, settings.mode, result);
+    result.rowsWritten = storeSpreadModePicks(db, todayEt, slot, pool, settings.mode, result);
   } catch (e) {
     result.error = errText(e);
   }
@@ -303,26 +309,28 @@ export function computeSpreadMode(deps: {
 }
 
 function storeSpreadModePicks(
-  db: DbHandle, asOfDate: string, slot: BriefCandidateSlot, mode: SpreadModeSettings['mode'], result: SpreadModeResult,
+  db: DbHandle, asOfDate: string, slot: BriefCandidateSlot, pool: SpreadPool,
+  mode: SpreadModeSettings['mode'], result: SpreadModeResult,
 ): number {
   const generatedAt = new Date().toISOString();
   const insert = db.prepare(`
     INSERT OR REPLACE INTO spread_mode_picks
-      (as_of_date, slot, generated_at, mode, ticker, outcome, rank, reason,
+      (pool, as_of_date, slot, generated_at, mode, ticker, outcome, rank, reason,
        expiration, dte, spot, short_strike, short_bid, short_ask, short_delta, short_oi,
        long_strike, long_bid, long_ask, long_delta, long_oi, width, mid_credit, net_credit, max_loss,
        return_on_risk, cost_share, contracts, total_max_loss, earnings_date, critic_verdict)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const cutoffMs = Date.parse(`${asOfDate}T00:00:00Z`) - RETENTION_DAYS * 86_400_000;
   const cutoff = new Date(cutoffMs).toISOString().slice(0, 10);
   let written = 0;
   withTransaction(db, () => {
-    // A re-run of a slot replaces the whole slot, so a name that dropped out does not linger.
-    db.prepare('DELETE FROM spread_mode_picks WHERE as_of_date = ? AND slot = ?').run(asOfDate, slot);
+    // A re-run of a slot replaces the whole slot FOR THIS POOL ONLY, so a name that dropped out does not
+    // linger and the other arm's rows are untouched — the two pools run as separate passes (08 S11).
+    db.prepare('DELETE FROM spread_mode_picks WHERE as_of_date = ? AND slot = ? AND pool = ?').run(asOfDate, slot, pool);
     for (const p of result.picks) {
       insert.run(
-        asOfDate, slot, generatedAt, mode, p.ticker, 'pick', p.rank, null,
+        pool, asOfDate, slot, generatedAt, mode, p.ticker, 'pick', p.rank, null,
         p.expiration, p.dte, p.spot, p.short.strike, p.short.bid, p.short.ask, p.short.delta, p.short.openInterest,
         p.long.strike, p.long.bid, p.long.ask, p.long.delta, p.long.openInterest, p.width, p.midCredit, p.netCredit, p.maxLoss,
         p.returnOnRisk, p.costShare, p.contracts, p.totalMaxLoss, p.earningsDate, p.criticVerdict,
@@ -331,7 +339,7 @@ function storeSpreadModePicks(
     }
     for (const r of result.rejections) {
       insert.run(
-        asOfDate, slot, generatedAt, mode, r.ticker, 'rejected', null, r.reason,
+        pool, asOfDate, slot, generatedAt, mode, r.ticker, 'rejected', null, r.reason,
         null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
         null, null, null, null, null, null,
       );

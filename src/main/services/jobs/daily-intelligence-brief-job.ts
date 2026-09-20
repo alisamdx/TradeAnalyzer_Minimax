@@ -21,6 +21,7 @@ import { buildEmailHtml, buildPdf } from '../brief-report-builder.js';
 import { sendDiceEmail, sendShortlistEmail } from '../brief-emails.js';
 import { captureSpreadChains } from '../spread-chain-capture.js';
 import { computeSpreadMode } from '../spread-mode.js';
+import { SPREAD_MODE_POOLS } from '@shared/spread-mode.js';
 import { logEmailOutcome } from '../email-log.js';
 import type { PaperTradingService } from '../paper-trading-service.js';
 import { CriticService } from '../critic-service.js';
@@ -1087,15 +1088,24 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
 
       // ── Bull put spread mode (TODO #44, NewApp 08) — SHADOW: computed + stored, no panel, no email ──
       // Reads the chains captured just above, so it costs no E*Trade calls; never throws.
-      const spreadMode = computeSpreadMode({ db: this.db, slot: candidateSlot });
-      logEmailOutcome({
-        level: spreadMode.error ? 'ERROR' : 'INFO',
-        operation: 'spread-mode:run',
-        message: spreadMode.error
-          ? `[brief] spread mode failed (brief unaffected): ${spreadMode.error}`
-          : `[brief] spread mode ${spreadMode.mode}: ${spreadMode.picks.length} picks from ${spreadMode.considered} wheel candidates, `
-            + `${spreadMode.rejections.length} rejected, ${spreadMode.rowsWritten} rows stored`,
-      });
+      //
+      // One pass per candidate pool (08 S11, v1.1.301). `wheel` is the incumbent and the pool §4 judges;
+      // `income` is the challenger, run side by side so the comparison is a PAIRED same-day sample. Both
+      // pools' chains are already captured (SPREAD_CAPTURE.strategies) and both strategies' candidates are
+      // already stored, so the second arm costs nothing beyond the arithmetic. A failure in one pool is
+      // logged and the next still runs.
+      for (const pool of SPREAD_MODE_POOLS) {
+        const spreadMode = computeSpreadMode({ db: this.db, slot: candidateSlot, pool });
+        logEmailOutcome({
+          level: spreadMode.error ? 'ERROR' : 'INFO',
+          operation: 'spread-mode:run',
+          message: spreadMode.error
+            ? `[brief] spread mode (${pool}) failed (brief unaffected): ${spreadMode.error}`
+            : `[brief] spread mode ${spreadMode.mode} (${pool}): ${spreadMode.picks.length} picks from `
+              + `${spreadMode.considered} ${pool} candidates, ${spreadMode.rejections.length} rejected, `
+              + `${spreadMode.rowsWritten} rows stored`,
+        });
+      }
     }
 
     return {

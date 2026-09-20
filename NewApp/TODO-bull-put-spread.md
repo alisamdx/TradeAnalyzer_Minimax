@@ -42,12 +42,15 @@ re-deriving it.
 Provenance: **measured** (a #43 study result) · **inherited** (a wheel-screen rule adopted untested) ·
 **drafted** (written into the design, never tested) · **fixed** (a bug fix, not a choice).
 
-- **BPS-1. Pool source — the wheel screen's output.** *Inherited.* Today: `brief_candidates` where
-  `strategy = 'wheel'` and disposition is `picked` or `capped_out`, latest `generated_at` (≤ 15 tickers).
-  The spread never sees anything the wheel screen did not already like. Unsettled: income and bullish are
-  excluded until measured (§6 Q2) although chain capture already stores their chains, so testing them
-  costs no API calls; and the deeper question — whether a screen tuned for "a good stock to be assigned"
-  is the right filter for a trade that never wants assignment.
+- **BPS-1. ~~Pool source — the wheel screen's output.~~ DECIDED 2026-09-20 (08 S11, v1.1.301):**
+  **both pools run side by side in shadow** — `wheel` (incumbent, the pool §4 judges) and `income`
+  (challenger) — rather than switching, because every #43 number was measured on wheel-selected names and
+  a switch would forfeit the comparison permanently. Also decided: **a defined-risk trade may go into
+  names the wheel would refuse on quality.** Costs no extra E*Trade calls. The comparison is reported over
+  the **paired window only**, with `pairedDays` beside it so a wheel-only stretch cannot read as a win.
+  **Still open, and now measurable:** whether income actually selects differently — read `overlap` in the
+  report; if most of the book is picked by both, the two screens agree and BPS-1 answers itself.
+
 - **BPS-2. The composite selects but does not rank.** *Measured, half-applied.* Today: the pool is the
   composite's top 15, then §3.1 discards composite rank entirely (v1.1.173 measured its top end
   anti-predictive for wheel). Unsettled: if the ranking is not trustworthy, what justifies the

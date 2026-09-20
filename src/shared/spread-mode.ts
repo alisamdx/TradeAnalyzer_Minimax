@@ -51,6 +51,27 @@ export const SPREAD_MODE_LIMITS = {
  */
 export type SpreadModeSwitch = 'off' | 'shadow';
 
+/**
+ * The candidate pools the mode builds spreads from, run side by side in shadow (08 S11, v1.1.301).
+ *
+ * `wheel` is the incumbent — and every number in the #43 study was measured on wheel-selected names, so
+ * that evidence is a statement about spreads *on stocks the wheel screen liked*. `income` is the
+ * challenger: no ownership weight at all, where wheel spends 21% on fundamentals + leverage because an
+ * assigned CSP means you own the stock, which a defined-risk spread never does.
+ *
+ * Both run because switching would forfeit the comparison permanently, the same way the `iv_history`
+ * splice joined two sources with zero overlapping days and left nothing able to separate them.
+ */
+export const SPREAD_MODE_POOLS = ['wheel', 'income'] as const;
+export type SpreadPool = (typeof SPREAD_MODE_POOLS)[number];
+
+/**
+ * The pool the 08 §4 enable gate is judged on. It stays `wheel` while the comparison runs: letting the
+ * gate follow whichever arm looks better would change what it measures mid-sample, which is the seam the
+ * whole exercise exists to avoid.
+ */
+export const SPREAD_GATE_POOL: SpreadPool = 'wheel';
+
 export interface SpreadModeSettings {
   mode: SpreadModeSwitch;
   maxLossPerPosition: number;
@@ -116,6 +137,8 @@ export interface SpreadModePick extends SpreadConstruction {
 
 export interface SpreadModeResult {
   mode: SpreadModeSwitch;
+  /** Which candidate pool this run built from. */
+  pool: SpreadPool;
   briefGeneratedAt: string | null;
   considered: number;
   picks: SpreadModePick[];
@@ -148,6 +171,8 @@ export type SpreadSettlement =
   | { status: 'unsettleable'; reason: string; marks: number; gaps: number };
 
 export interface ShadowPickRow extends ShadowPick {
+  /** The candidate pool that produced this position (08 S11). */
+  pool: SpreadPool;
   rank: number | null;
   dte: number | null;
   /** Later picks of the same ticker within EPISODE_DAYS of this entry, collapsed into it. */
@@ -219,7 +244,7 @@ export interface SpreadShadowReport {
   counts: { pickRows: number; positions: number; open: number; target: number; expired: number; unsettleable: number };
   winRate: number | null;
   medianDaysHeld: number | null;
-  runs: Array<{ asOfDate: string; slot: string; picks: number; rejected: number }>;
+  runs: Array<{ asOfDate: string; slot: string; pool: SpreadPool; picks: number; rejected: number }>;
   rejectionReasons: Array<{
     reason: string;
     n: number;
@@ -235,6 +260,25 @@ export interface SpreadShadowReport {
    * a per-share ratio and an unaffordable spread is still evidence about the strategy.
    */
   budget: { maxLossPerPosition: number; unaffordable: number; affordable: BookSummary };
+  /**
+   * The candidate pools run side by side (08 S11). `gatePool` is the one §4 is judged on; the others are
+   * challengers reported beside it. `overlap` counts ticker+expiry pairs every pool picked — if it is
+   * most of the book the two screens are not really choosing differently.
+   */
+  pools: {
+    gatePool: SpreadPool;
+    /**
+     * First date every pool ran, and how many such dates there are. The arms started on different days,
+     * so `books` covers **only** the paired window — and `pairedDays` is reported on its own so that
+     * "no overlap yet" and "a clean comparison" cannot look alike. **A comparison read at
+     * `pairedDays = 0` is not a weak result, it is no result.**
+     */
+    pairedFrom: string | null;
+    pairedDays: number;
+    /** Per pool, over the paired window only. */
+    books: Array<{ pool: SpreadPool } & BookSummary>;
+    overlap: number;
+  };
   /** Currently open positions by sector and by expiry, largest first. */
   concentration: { bySector: Array<{ key: string; n: number }>; byExpiry: Array<{ key: string; n: number }> };
   /** Quality of the captures the settlements rest on (v1.1.297). */

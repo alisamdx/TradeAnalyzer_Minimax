@@ -124,7 +124,7 @@ describe('re-judging a stored rejection under the band that made it (v1.1.299)',
 
 describe('simulateSectorCap — the operator\'s 3-per-sector book (08 S9)', () => {
   const pos = (ticker: string, asOfDate: string, sector: string | null, exit: string | null): ShadowPickRow => ({
-    ...PICK, ticker, asOfDate, sector, rank: 1, dte: 30, repeats: 0, sectorCapSkipped: false, affordable: true,
+    ...PICK, ticker, asOfDate, sector, pool: 'wheel', rank: 1, dte: 30, repeats: 0, sectorCapSkipped: false, affordable: true,
     settlement: exit
       ? { status: 'target', exitDate: exit, exitSlot: 'intraday', exitDebit: 0.8, returnOnMaxLoss: 0.2, daysHeld: 5, marks: 1, gaps: 0 }
       : { status: 'open', marks: 0, gaps: 0, lastMarkDate: null, lastMidDebit: null },
@@ -239,6 +239,63 @@ describe('buildSpreadShadowReport', () => {
     expect(r.budget.affordable.positions).toBe(1);
     expect(r.positions.find(p => p.ticker === 'BIG')!.affordable).toBe(false);
     expect(r.positions.find(p => p.ticker === 'AAA')!.affordable).toBe(true);
+  });
+
+  // 08 S11: wheel and income run as separate books. The comparison only means anything if the two arms
+  // cannot contaminate each other — and the same ticker in both is the paired observation, not a repeat.
+  it('keeps the two candidate pools as separate books (v1.1.301)', () => {
+    const db = openDatabase(':memory:');
+    runMigrations(db, MIGRATIONS_DIR);
+    const pick = db.prepare(
+      `INSERT INTO spread_mode_picks (as_of_date, slot, generated_at, mode, ticker, outcome, rank, reason, expiration, dte, spot,
+         short_strike, long_strike, net_credit, max_loss, contracts, pool) VALUES (?, 'intraday', 'x', 'shadow', ?, 'pick', 1, NULL,
+         '2026-10-16', 30, 100, 95, 90, 1.6, 3.4, 2, ?)`,
+    );
+    pick.run('2026-09-14', 'AAA', 'wheel');
+    pick.run('2026-09-14', 'AAA', 'income');  // same name, both screens — a PAIR, not a repeat
+    pick.run('2026-09-15', 'BBB', 'income');  // income-only name
+
+    const r = buildSpreadShadowReport(db, '2026-09-19');
+    // Three positions, not two: the episode collapse is keyed by pool as well as ticker.
+    expect(r.counts.positions).toBe(3);
+    expect(r.positions.filter(p => p.ticker === 'AAA').map(p => p.pool).sort()).toEqual(['income', 'wheel']);
+    expect(r.positions.every(p => p.repeats === 0)).toBe(true);
+
+    expect(r.pools.gatePool).toBe('wheel');
+    expect(r.pools).toMatchObject({ pairedFrom: '2026-09-14', pairedDays: 1 });
+    expect(r.pools.books).toEqual([
+      { pool: 'wheel', positions: 1, settled: 0, meanReturnOnMaxLoss: null, winRate: null },
+      { pool: 'income', positions: 2, settled: 0, meanReturnOnMaxLoss: null, winRate: null },
+    ]);
+    // AAA on 2026-10-16 is the only ticker+expiry both pools chose.
+    expect(r.pools.overlap).toBe(1);
+
+    // The gate counts the gate pool ALONE — the challenger must not inflate the §4 sample.
+    expect(r.gate.settledPositions).toBe(0);
+    expect(r.counts.open).toBe(1);
+
+    // Runs are grouped per pool, or one arm's funnel is unreadable.
+    expect(r.runs.filter(x => x.asOfDate === '2026-09-14').map(x => x.pool).sort()).toEqual(['income', 'wheel']);
+  });
+
+  // The arms start on different days, so the first reports have a full wheel book beside an empty income
+  // one. A lifetime comparison there would read as "income is worse" when it simply has not run — the
+  // zero-paired-days failure (QC-907), where "no overlap" and "clean overlap" looked identical.
+  it('refuses to compare pools that have never run on the same day (v1.1.301)', () => {
+    const db = openDatabase(':memory:');
+    runMigrations(db, MIGRATIONS_DIR);
+    db.prepare(
+      `INSERT INTO spread_mode_picks (as_of_date, slot, generated_at, mode, ticker, outcome, rank, reason, expiration, dte, spot,
+         short_strike, long_strike, net_credit, max_loss, contracts, pool) VALUES (?, 'intraday', 'x', 'shadow', ?, 'pick', 1, NULL,
+         '2026-10-16', 30, 100, 95, 90, 1.6, 3.4, 2, 'wheel')`,
+    ).run('2026-09-14', 'AAA');
+
+    const r = buildSpreadShadowReport(db, '2026-09-19');
+    expect(r.pools).toMatchObject({ pairedFrom: null, pairedDays: 0, overlap: 0 });
+    // Every book reads empty — the wheel-only day is NOT presented as a one-sided win.
+    expect(r.pools.books.every(b => b.positions === 0)).toBe(true);
+    // The position itself is still counted everywhere else; only the comparison is withheld.
+    expect(r.counts.positions).toBe(1);
   });
 
   it('reads sectors from constituents and reports the capped book beside the full one', () => {
