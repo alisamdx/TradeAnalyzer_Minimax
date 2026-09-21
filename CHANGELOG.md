@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.302] - 2026-09-20
+
+### A third spread arm on the rule that actually won the study, and BPS-2 closed
+
+T7 measured selection rules over the whole universe — 6,221 settled rows, 54 dates — against the null the earlier studies lacked: **a random draw of the same size on the same dates**. Ranking by annualized premium return was the best rule tested (**+0.54% mean / 2.86% median** against a random band of −1.29…−0.52 / 1.14…1.34), beating both the wheel composite (−0.12 / 2.02) and income (−0.56 / 1.67). Two findings came with it. **`ivRank`, the composite's largest weight at 22, sits inside the random band** — chance — and adding it to `premiumYield` made the pair worse than `premiumYield` alone; whether that is a dead signal or the `iv_history` splice with its zero overlapping days cannot be separated from stored data. And **no rule moved the assigned rate at all** (every one inside 29.3–34.7%), which is the bull put spread's own win condition: selection changes how much credit you collect, not how often you are breached. So a `premium` pool now runs as a third shadow arm. It is not a brief strategy — its tickers come from `analysis_snapshots`, which `DailyOptionsSnapshotJob` already fills nightly for ~1,100 tickers, so the pool itself costs no new market data. Pool resolution moved into one shared function both the chain capture and the mode call, because a capture that missed an arm's tickers would look like a screen with no candidates rather than a plumbing gap.
+
+Details: `changelogs/v1.1.302_2026-09-20.md`.
+
 ## [1.1.301] - 2026-09-20
 
 ### The bull put spread runs over two candidate pools, side by side

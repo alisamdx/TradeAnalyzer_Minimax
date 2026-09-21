@@ -254,10 +254,11 @@ describe('buildSpreadShadowReport', () => {
     pick.run('2026-09-14', 'AAA', 'wheel');
     pick.run('2026-09-14', 'AAA', 'income');  // same name, both screens — a PAIR, not a repeat
     pick.run('2026-09-15', 'BBB', 'income');  // income-only name
+    pick.run('2026-09-14', 'CCC', 'premium'); // EVERY arm must have run, or no date is paired at all
 
     const r = buildSpreadShadowReport(db, '2026-09-19');
-    // Three positions, not two: the episode collapse is keyed by pool as well as ticker.
-    expect(r.counts.positions).toBe(3);
+    // Four positions: the episode collapse is keyed by pool as well as ticker.
+    expect(r.counts.positions).toBe(4);
     expect(r.positions.filter(p => p.ticker === 'AAA').map(p => p.pool).sort()).toEqual(['income', 'wheel']);
     expect(r.positions.every(p => p.repeats === 0)).toBe(true);
 
@@ -266,16 +267,19 @@ describe('buildSpreadShadowReport', () => {
     expect(r.pools.books).toEqual([
       { pool: 'wheel', positions: 1, settled: 0, meanReturnOnMaxLoss: null, winRate: null },
       { pool: 'income', positions: 2, settled: 0, meanReturnOnMaxLoss: null, winRate: null },
+      { pool: 'premium', positions: 1, settled: 0, meanReturnOnMaxLoss: null, winRate: null },
     ]);
-    // AAA on 2026-10-16 is the only ticker+expiry both pools chose.
-    expect(r.pools.overlap).toBe(1);
+    // Overlap is what EVERY pool picked. AAA is in wheel and income but not premium, so nothing is
+    // common to all three — a three-way overlap is a stricter thing than a pairwise one, deliberately:
+    // it answers "are the screens choosing the same names", and one arm differing is the answer.
+    expect(r.pools.overlap).toBe(0);
 
     // The gate counts the gate pool ALONE — the challenger must not inflate the §4 sample.
     expect(r.gate.settledPositions).toBe(0);
     expect(r.counts.open).toBe(1);
 
     // Runs are grouped per pool, or one arm's funnel is unreadable.
-    expect(r.runs.filter(x => x.asOfDate === '2026-09-14').map(x => x.pool).sort()).toEqual(['income', 'wheel']);
+    expect(r.runs.filter(x => x.asOfDate === '2026-09-14').map(x => x.pool).sort()).toEqual(['income', 'premium', 'wheel']);
   });
 
   // The arms start on different days, so the first reports have a full wheel book beside an empty income

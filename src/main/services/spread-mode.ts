@@ -21,6 +21,7 @@ import {
   type SpreadConstruction, type SpreadLegQuote, type SpreadModePick, type SpreadModeResult, type SpreadModeSettings,
   type SpreadModeSwitch, type SpreadPool,
 } from '@shared/spread-mode.js';
+import { resolvePoolTickers } from './spread-pools.js';
 
 export { SPREAD_MODE_PROFILE, SPREAD_MODE_DEFAULTS } from '@shared/spread-mode.js';
 
@@ -199,17 +200,17 @@ export function computeSpreadMode(deps: {
     result.mode = settings.mode;
     if (settings.mode === 'off') return result;
 
+    // The run still needs a brief to have happened — `premium` has no brief of its own, so it keys off
+    // whichever one ran, which is also what makes its captured chains this run's.
     const latest = db.prepare(
-      `SELECT generated_at FROM brief_candidates WHERE strategy = ? ORDER BY generated_at DESC LIMIT 1`,
-    ).get(pool) as { generated_at: string } | undefined;
+      `SELECT generated_at FROM brief_candidates ORDER BY generated_at DESC LIMIT 1`,
+    ).get() as { generated_at: string } | undefined;
     if (!latest) return result;
     result.briefGeneratedAt = latest.generated_at;
 
-    const tickers = (db.prepare(
-      `SELECT DISTINCT ticker FROM brief_candidates
-        WHERE generated_at = ? AND strategy = ? AND disposition IN ('picked', 'capped_out')
-        ORDER BY ticker`,
-    ).all(latest.generated_at, pool) as Array<{ ticker: string }>).map(r => r.ticker);
+    // One resolver, shared with `captureSpreadChains` — if the two disagreed, a pool would have no
+    // chains and read as "no candidates" rather than as the plumbing gap it would be.
+    const tickers = resolvePoolTickers(db, pool);
     result.considered = tickers.length;
 
     // ETFs have no earnings, so the earnings gate cannot apply to them — without this every ETF was
@@ -224,9 +225,16 @@ export function computeSpreadMode(deps: {
     const verdicts = new Map<string, string>();
     // Verdicts come from the SAME pool's brief — a critic read of a ticker as a wheel candidate is an
     // opinion about owning it, which is not the question an income/spread candidate is asking.
-    const brief = db.prepare(`SELECT picks FROM daily_briefs WHERE strategy = ? ORDER BY generated_at DESC LIMIT 1`)
-      .get(pool) as { picks: string } | undefined;
-    if (brief) {
+    //
+    // `premium` has no brief of its own, so it takes verdicts from EVERY strategy's latest brief. That is
+    // deliberate and it is still an asymmetry: a premium-pool ticker that no brief covers carries no
+    // verdict, so the critic gate cannot bind on it. `criticCovered` counts how often a verdict was
+    // found, because a gate that silently applies to one arm and not another would bias the comparison
+    // the whole third arm exists to make. see 08 S12
+    const briefs = pool === 'premium'
+      ? db.prepare(`SELECT picks FROM daily_briefs WHERE generated_at = (SELECT MAX(generated_at) FROM daily_briefs)`).all() as Array<{ picks: string }>
+      : db.prepare(`SELECT picks FROM daily_briefs WHERE strategy = ? ORDER BY generated_at DESC LIMIT 1`).all(pool) as Array<{ picks: string }>;
+    for (const brief of briefs) {
       try {
         for (const p of JSON.parse(brief.picks) as Array<{ ticker?: string; criticVerdict?: { verdict?: string } | null }>) {
           if (p.ticker && p.criticVerdict?.verdict) verdicts.set(p.ticker, p.criticVerdict.verdict);

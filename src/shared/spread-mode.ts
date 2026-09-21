@@ -62,8 +62,32 @@ export type SpreadModeSwitch = 'off' | 'shadow';
  * Both run because switching would forfeit the comparison permanently, the same way the `iv_history`
  * splice joined two sources with zero overlapping days and left nothing able to separate them.
  */
-export const SPREAD_MODE_POOLS = ['wheel', 'income'] as const;
+export const SPREAD_MODE_POOLS = ['wheel', 'income', 'premium'] as const;
 export type SpreadPool = (typeof SPREAD_MODE_POOLS)[number];
+
+/**
+ * `premium` is not a brief strategy — it has no `brief_candidates` rows and no critic brief. It is the
+ * whole universe ranked by annualized premium return, taken from `analysis_snapshots`, which
+ * `DailyOptionsSnapshotJob` already fills nightly with a live chain for ~1,100 tickers.
+ *
+ * It was added (v1.1.302, 08 S12) because T7 measured it as the best selection rule tested: on 6,221
+ * settled rows over 54 dates it returned +0.54% mean / 2.86% median against a random band of
+ * −1.29…−0.52 / 1.14…1.34, beating the wheel composite (−0.12 / 2.02) and income (−0.56 / 1.67).
+ *
+ * **Two asymmetries to keep in mind when reading the comparison**, both real and neither hidden:
+ * this pool has no brief of its own, so its critic verdicts come from whichever brief happens to carry
+ * the ticker and are often absent; and T7's advantage was measured on a CSP's return on CAPITAL, which
+ * is not a spread's return on MAX LOSS. T7 also found that **no rule moved the assigned rate at all**,
+ * so the expected gain is richer credit at unchanged breach risk — not fewer breaches.
+ */
+export const PREMIUM_POOL = {
+  /** Candidates taken, matching the wheel/income pools' `picked` + `capped_out` size. */
+  topN: 15,
+  /** `optionLiquidityScore` is 0–10 here; the brief funnel's gate is 5. */
+  minLiquidity: 5,
+  /** The brief's MAX_PICK_PRICE, applied so the three pools face the same universe. */
+  maxPrice: 750,
+} as const;
 
 /**
  * The pool the 08 §4 enable gate is judged on. It stays `wheel` while the comparison runs: letting the

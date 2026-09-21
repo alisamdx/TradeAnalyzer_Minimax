@@ -75,8 +75,14 @@ Provenance: **measured** (a #43 study result) · **inherited** (a wheel-screen r
   premiumYield alone. **And no rule moves the assigned rate: every one sits inside 29.3–34.7%.** For a
   spread that is the finding — selection changes how much credit you collect, not how often you are
   breached, so premium richness argues for the EXISTING ranking metric (BPS-10), not a pool change.
-  **Open:** re-run with the new `income-72` rule — ivRank is 35% of income's live weight, so BPS-1's
-  challenger may lean harder on the coin flip than the incumbent. Then close BPS-2.
+  **CLOSED 2026-09-20 (v1.1.302, 08 S12): the composite's cut STAYS, and a third arm was added on the
+  rule that won.** The re-run put `income-72` at mean −0.56 (back INSIDE the random band), median 1.67,
+  assigned 32.7% — **worse than the incumbent on all four**. BPS-1's structural argument was right about
+  the weights and wrong about the outcome. Premium richness (+0.54 / 2.86) was the best rule tested, so a
+  `premium` pool now runs as a third shadow arm: the whole universe from `analysis_snapshots`, which is
+  already filled nightly, so the pool costs no new market data. **The cut itself is not changed** — it
+  clears the null and beats both challengers retrospectively; what the arm tests is whether richer credit
+  at unchanged breach risk survives into real spread economics, which the CSP proxy cannot say.
 
 - **BPS-3. Price cap $750 and the liquidity gate at 5 of 15.** *Inherited.* `hasAdequateLiquidity`
   **fails open** when Strategy Lab never ran. Unsettled: 5/15 was set for a one-leg CSP, while a spread

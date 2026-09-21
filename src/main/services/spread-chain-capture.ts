@@ -18,6 +18,7 @@
 import type { DbHandle } from '../db/connection.js';
 import type { OptionContract, OptionsProvider } from './options-provider.js';
 import type { BriefCandidateSlot } from './brief-candidates.js';
+import { resolvePoolTickers } from './spread-pools.js';
 
 type ChainSource = Pick<OptionsProvider, 'getOptionsExpirations' | 'getOptionsChain'>;
 
@@ -107,13 +108,20 @@ export async function captureSpreadChains(deps: {
     const latest = db.prepare(
       `SELECT generated_at FROM brief_candidates WHERE strategy IN (${marks}) ORDER BY generated_at DESC LIMIT 1`,
     ).get(...P.strategies) as { generated_at: string } | undefined;
-    const entryTickers = latest
+    const briefTickers = latest
       ? (db.prepare(
           `SELECT DISTINCT ticker FROM brief_candidates
             WHERE generated_at = ? AND strategy IN (${marks}) AND disposition IN ('picked', 'capped_out')
             ORDER BY ticker`,
         ).all(latest.generated_at, ...P.strategies) as Array<{ ticker: string }>).map(r => r.ticker)
       : [];
+
+    // The `premium` pool is not a brief strategy, so its tickers are not in `brief_candidates` and would
+    // be missed here (08 S12, v1.1.302). Without their chains that arm builds nothing and reads as a
+    // screen with no candidates rather than as the plumbing gap it would be — which is exactly why the
+    // resolver is shared with `spread-mode.ts` rather than reimplemented on each side.
+    // Union, so a name both a brief and the premium ranking like is fetched once.
+    const entryTickers = [...new Set([...briefTickers, ...resolvePoolTickers(db, 'premium')])].sort();
     result.entryTickers = entryTickers.length;
 
     // ── track set: recent entry series that have not expired ───────────────────────────────────
