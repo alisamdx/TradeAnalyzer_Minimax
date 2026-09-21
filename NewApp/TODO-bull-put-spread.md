@@ -68,6 +68,15 @@ Provenance: **measured** (a #43 study result) · **inherited** (a wheel-screen r
   richness vs a random draw of the same size, on both return on capital and **assigned rate** — the
   spread's own win condition. Episode-collapsed, scale-guarded, with a random band as the null.
   **Run it from a normal terminal** (`npm run rebuild:node` first if you have just packaged).
+  **RUN 2026-09-20 (6,221 rows, 54 dates, top-15, episode-collapsed) — docs/wheel-parameters.md T7:**
+  the cut EARNS something and is DOMINATED. composite-70 clears the random null (mean −0.12% vs band
+  −1.29…−0.52) but premium richness beats it (+0.54%, median 2.86 vs 2.02). **ivRank — the composite's
+  largest weight, 22 — is INSIDE the band**, and adding it to premiumYield made the pair worse than
+  premiumYield alone. **And no rule moves the assigned rate: every one sits inside 29.3–34.7%.** For a
+  spread that is the finding — selection changes how much credit you collect, not how often you are
+  breached, so premium richness argues for the EXISTING ranking metric (BPS-10), not a pool change.
+  **Open:** re-run with the new `income-72` rule — ivRank is 35% of income's live weight, so BPS-1's
+  challenger may lean harder on the coin flip than the incumbent. Then close BPS-2.
 
 - **BPS-3. Price cap $750 and the liquidity gate at 5 of 15.** *Inherited.* `hasAdequateLiquidity`
   **fails open** when Strategy Lab never ran. Unsettled: 5/15 was set for a one-leg CSP, while a spread

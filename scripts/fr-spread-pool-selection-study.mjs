@@ -104,6 +104,9 @@ function upTo(rows, date) {
 // study measures the BASELINE composite and not the live one — stated rather than silently assumed.
 const W = { ivRank: 22, premiumYield: 19, technicalNeutral: 11, recentVolatility: 10, notDowntrend: 8 };
 const W_TOTAL = Object.values(W).reduce((a, b) => a + b, 0);   // 70 of 91
+// BASELINE_INCOME, the BPS-1 challenger pool. `trendNeutral` (15) is omitted: USE_ADX_IN_SCORING is
+// false, so it is always missing live and income really runs on 85 points, of which these are 72.
+const WI = { ivRank: 30, premiumRiskRatio: 22, recentVolatility: 20 };
 
 function rsi14(rows, end) {
   if (end < 15) return null;
@@ -265,6 +268,12 @@ const line = (label, s) => `  ${label.padEnd(30)} n=${String(s.n).padStart(5)}  
 // ── Selection rules ─────────────────────────────────────────────────────────
 const RULES = [
   ['composite-70 (the live cut)', r => r.composite],
+  // BPS-1's challenger pool, and it can be reconstructed MORE completely than wheel's: income carries no
+  // fundamentals weight at all, so 72 of its 85 live points are here (the missing 13 is optionLiquidity,
+  // already applied above as a gate). `trendNeutral` (15) is excluded because USE_ADX_IN_SCORING is false
+  // and it is always missing live — including it here would measure a composite the app never computes.
+  ['income-72 (BPS-1 challenger)', r => (r.nIvRank ?? 0) * WI.ivRank
+    + (r.nPremiumYield ?? 0) * WI.premiumRiskRatio + (r.nRecentVolatility ?? 0) * WI.recentVolatility],
   ['premium richness (annRet)', r => r.annRet ?? -1],
   ['ivRank only', r => r.ivRank ?? -1],
   ['ivRank + premiumYield (41pts)', r => (r.nIvRank ?? 0) * W.ivRank + (r.nPremiumYield ?? 0) * W.premiumYield],
@@ -297,7 +306,7 @@ const universeEps = summarise(collapse(eligible.flatMap(([, rows]) => rows)));
 
 let rngState = 20260920;
 const rnd = () => { rngState = (rngState * 1103515245 + 12345) & 0x7fffffff; return rngState / 0x7fffffff; };
-const drawMeans = [], drawAssigned = [], drawMedians = [];
+const drawMeans = [], drawAssigned = [], drawMedians = [], drawTrimmed = [];
 for (let d = 0; d < DRAWS; d++) {
   const picked = eligible.flatMap(([, rows]) => {
     const pool = [...rows];
@@ -305,7 +314,7 @@ for (let d = 0; d < DRAWS; d++) {
     return pool.slice(0, TOP_N);
   });
   const s = summarise(collapse(picked));
-  drawMeans.push(s.mean); drawMedians.push(s.median); drawAssigned.push(s.assigned);
+  drawMeans.push(s.mean); drawMedians.push(s.median); drawAssigned.push(s.assigned); drawTrimmed.push(s.trimmed);
 }
 const pctl = (a, p) => { const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length * p)]; };
 
@@ -313,8 +322,13 @@ say(`\n## Baselines\n`);
 say(line('whole universe (raw)', universe));
 say(line('whole universe (episodes)', universeEps));
 say(`  ${`random ${TOP_N}/date × ${DRAWS} draws`.padEnd(30)}        mean ${(f(mean(drawMeans)) + '%').padStart(8)}`
-  + `  median ${(f(mean(drawMedians)) + '%').padStart(8)}  ` + ' '.repeat(18) + `assigned ${(f(mean(drawAssigned), 1) + '%').padStart(7)}`);
+  + `  median ${(f(mean(drawMedians)) + '%').padStart(8)}  trimmed ${(f(mean(drawTrimmed)) + '%').padStart(8)}`
+  + `  assigned ${(f(mean(drawAssigned), 1) + '%').padStart(7)}`);
+// Every reported statistic gets its own band. Without one, a rule that wins on the trimmed mean has no
+// null to be judged against, and the reader supplies an imaginary one.
 say(`  random 5th–95th pct:  mean ${f(pctl(drawMeans, 0.05))}% … ${f(pctl(drawMeans, 0.95))}%` +
+    `   median ${f(pctl(drawMedians, 0.05))}% … ${f(pctl(drawMedians, 0.95))}%` +
+    `   trimmed ${f(pctl(drawTrimmed, 0.05))}% … ${f(pctl(drawTrimmed, 0.95))}%` +
     `   assigned ${f(pctl(drawAssigned, 0.05), 1)}% … ${f(pctl(drawAssigned, 0.95), 1)}%`);
 
 say(`\n## Read this as\n`);

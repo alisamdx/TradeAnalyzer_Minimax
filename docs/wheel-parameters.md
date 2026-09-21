@@ -354,9 +354,49 @@ the parked open thread reports as flat across composite quintiles. Episode-colla
 days fold into one bet — T5 and T6 did not do this, and it is reported both ways), scale-guarded with the
 exclusions printed rather than dropped.
 
-**Not yet run** — needs a normal terminal, not a Claude session, and the Node better-sqlite3 ABI. If the
-composite's episode-collapsed result sits inside the random band, the cut is picking no better than chance,
-and BPS-2 resolves toward dropping the composite from the pool rather than restoring it to the ranking.
+**First run 2026-09-20 — 6,221 usable rows, 54 dates, top-15, episode-collapsed.** Random band (5th–95th):
+mean **−1.29% … −0.52%**, assigned **29.3% … 34.7%**.
+
+| rule | mean | median | assigned | vs the random null |
+|---|---|---|---|---|
+| premium richness (annRet) | **+0.54%** | **2.86%** | 31.0% | outside, best on every return measure |
+| composite-70 (the live cut) | −0.12% | 2.02% | 30.3% | outside |
+| ivRank + premiumYield (41 pts) | −0.17% | 2.40% | 30.6% | outside, but **worse than premiumYield alone** |
+| **ivRank only** | **−1.01%** | 1.79% | 31.6% | **INSIDE — no better than chance** |
+| the 29 price-derived points | −1.32% | 0.86% | 34.4% | at/below the band |
+| inverted composite-70 | −1.50% | 1.14% | 33.4% | below the band |
+
+**Three findings.**
+
+1. **The cut earns something, and is dominated.** composite-70 clears the random null, so it is not
+   decoration — but premium richness beats it by 0.66pp mean / 0.84pp median. Exactly the shape F8/T5/T6
+   predicted: 19 of 91 points carry it and the rest dilute.
+2. **`ivRank` — the composite's LARGEST weight (22) — is inside the random band**, and adding it to
+   `premiumYield` made the pair *worse* than `premiumYield` alone (−0.17 vs +0.54). T5 read it as weakly
+   positive against "no selection"; against a same-size random draw, the null T5 lacked, it is chance.
+   **Unresolvable caveat:** `iv_history` is the IVolatility→E\*Trade splice with zero overlapping
+   ticker-days, so this may be a broken input rather than a broken signal, and no analysis of the stored
+   data can separate those.
+3. **No rule moves the assigned rate. At all.** Every one sits inside 29.3–34.7%. This confirms the parked
+   "composite is disconnected from the win condition" thread on 6,221 rows rather than a quintile sketch,
+   and it is the finding that matters for a bull put spread: **selection changes how much credit you
+   collect, not how often you are breached.** What premium richness buys is more credit at unchanged
+   breach risk — a real VRP edge, and not a tautology precisely because assignment stayed flat.
+
+**Consequence for BPS-2:** the return result is measured on a CSP's return on capital, which is not a
+spread's return on max loss, so it does not transfer automatically — but the assignment result does, and
+it says the pool rule cannot improve a spread's win condition. Premium richness therefore argues for the
+spread's **existing** ranking metric (credit ÷ max loss, BPS-10), not for a pool change.
+
+**Follow-up added the same day:** `income-72`, BPS-1's challenger pool, which — having no fundamentals
+weight — is *more* completely reconstructible than wheel's (72 of its 85 live points; the missing 13 is
+`optionLiquidity`, already applied as a gate). It matters because **`ivRank` is 30 of income's 85 live
+points, 35%**, so if ivRank is chance then income leans harder on chance than the incumbent does. Re-run
+pending. Every statistic now carries its own random band, which the first run lacked for the trimmed mean.
+
+**Side-finding, not chased:** 13 scale-guard exclusions, and LBRDA/LBRDK appear three times among them —
+both are on the delisted list that sat in `constituents` for ~4 weeks (migration 085), so their snapshots
+are stale rather than split-affected.
 
 ---
 

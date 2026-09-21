@@ -135,6 +135,14 @@ check('inverting the composite picks the assigned names', numAfter(inv, 'assigne
 check('a random baseline band is reported',
   /random 5th–95th pct/.test(outText) && /random 3\/date × 40 draws/.test(outText));
 check('the reconstructed-weight caveat is stated', /70 of 91 ranking points/.test(outText));
+
+// income-72 has no fundamentals weight, so it is more completely reconstructible than wheel's. In this
+// fixture its ivRank + premium halves both point at GOOD, so it must land on the never-assigned names.
+const inc = epsBlock.split('\n').find(l => l.includes('income-72')) ?? '';
+check('income-72 is reported and picks the never-assigned names', inc !== '' && numAfter(inc, 'assigned') === 0, inc.trim());
+
+check('every statistic has its own random band',
+  /median .* … .*trimmed .* … .*assigned/.test(lineOf('random 5th–95th pct')), lineOf('random 5th–95th pct').trim());
 check('eligible-date count is reported', /dates with at least 3 candidates: 3 of 3/.test(outText));
 
 rmSync(dir, { recursive: true, force: true });
