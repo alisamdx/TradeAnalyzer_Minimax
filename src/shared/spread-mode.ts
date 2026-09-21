@@ -255,6 +255,25 @@ export interface SpreadShadowReport {
   asOf: string;
   /** What Settings → Strategies has actually stored — not the defaults (v1.1.299). */
   settings: SpreadModeSettings;
+  /**
+   * BPS-3: does the upstream 0–15 liquidity gate predict the spread's actual round-trip cost?
+   *
+   * The gate scores a ONE-leg structure (`short-naked-put`), averaged per leg, so it never sees the long
+   * wing — the leg most likely to be illiquid. `costShare` is the direct measurement of the same thing on
+   * the two contracts actually traded. A flat relationship means no threshold fixes the gate, because it
+   * is measuring the wrong structure.
+   *
+   * **Censored:** everything in the pool already cleared the bar, so only scores at or above it appear.
+   * This says whether the score discriminates where it operates, never what a lower bar would admit.
+   */
+  liquidityVsCost: {
+    paired: number;
+    /** Rows with a cost but no score — the `premium` pool has no `brief_candidates` row to join. */
+    unpaired: number;
+    /** Negative = more liquid means cheaper, i.e. the proxy works. Null below 3 pairs. */
+    spearman: number | null;
+    bands: Array<{ label: string; n: number; medianCostShare: number | null; overGate: number }>;
+  };
   gate: {
     intradayCaptureDays: number;
     intradayCaptureDaysNeeded: number;

@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.303] - 2026-09-20
+
+### BPS-3: does the liquidity gate predict the spread's actual cost?
+
+The gate admitting a ticker to the spread's pool scores `short-naked-put` / `covered-call` — a **one-leg** structure, averaged per leg. The spread trades a two-leg vertical, so the bar says nothing about the long wing, which is further OTM, thinner and lower-OI, and is the leg most likely to be illiquid. Meanwhile the spread already has a direct measurement of the same thing: the round-trip cost share of the two contracts it would actually trade. The report now asks whether the proxy tracks the direct measurement — Spearman plus bands, over picks (whose `cost_share` is stored) **and** cost rejections (whose number survives only inside the reason sentence, and is parsed back so the expensive half of the distribution is not excluded from a check about expense). A flat result means no threshold fixes the gate, because it is measuring the wrong structure. Stated with it: the sample is **censored by construction** — everything in the pool already cleared the bar, so no score below it is observable, and this can say whether the score discriminates where it operates but never what a lower bar would admit.
+
+Details: `changelogs/v1.1.303_2026-09-20.md`.
+
 ## [1.1.302] - 2026-09-20
 
 ### A third spread arm on the rule that actually won the study, and BPS-2 closed

@@ -2,7 +2,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   settleSpreadPick, buildSpreadShadowReport, reasonKind, diagnoseLegs, diagnoseStoredRejection, parseLegBand,
-  simulateSectorCap, type ShadowPick, type ShadowMark, type ShadowPickRow,
+  simulateSectorCap, liquidityVsCost, parseCostShareFromReason,
+  type ShadowPick, type ShadowMark, type ShadowPickRow,
 } from '../src/main/services/spread-mode-settle.js';
 import { SPREAD_MODE_PROFILE as P } from '../src/shared/spread-mode.js';
 import type { CapturedPut } from '../src/main/services/spread-chain-capture.js';
@@ -174,6 +175,52 @@ describe('reasonKind', () => {
     expect(reasonKind('net credit $0.03 after fills')).toBe('net credit $# after fills');
     expect(reasonKind('round-trip cost 31% of credit (max 25%)')).toBe('round-trip cost #% of credit (max #%)');
     expect(reasonKind('earnings 2026-10-01 on/before every 21–35 DTE expiry')).toBe('earnings DATE on/before every #–# DTE expiry');
+  });
+});
+
+// BPS-3: the pool's gate scores a ONE-leg structure, so it never sees the long wing. This check asks
+// whether it predicts the spread's own round-trip cost at all. It must be able to come out BOTH ways —
+// a check that can only report "flat" would be decoration, the shape of the conviction band that could
+// never fire (v1.1.168).
+describe('liquidityVsCost — the BPS-3 proxy check (v1.1.303)', () => {
+  it('recovers the cost share a rejection kept only in its sentence', () => {
+    expect(parseCostShareFromReason('round-trip cost 64% of credit (max 25%)')).toBeCloseTo(0.64, 9);
+    expect(parseCostShareFromReason('round-trip cost 7.5% of credit (max 25%)')).toBeCloseTo(0.075, 9);
+    expect(parseCostShareFromReason('net credit $0.03 after fills')).toBeNull();
+    expect(parseCostShareFromReason('critic flag')).toBeNull();
+  });
+
+  it('detects a proxy that WORKS — more liquid really is cheaper', () => {
+    const rows = [
+      { liquidity: 14, costShare: 0.05 }, { liquidity: 13, costShare: 0.07 },
+      { liquidity: 10, costShare: 0.12 }, { liquidity: 9, costShare: 0.15 },
+      { liquidity: 6, costShare: 0.40 }, { liquidity: 5, costShare: 0.55 },
+    ];
+    const r = liquidityVsCost(rows);
+    expect(r.paired).toBe(6);
+    expect(r.spearman).not.toBeNull();
+    expect(r.spearman!).toBeLessThan(-0.9);           // strongly negative = the proxy tracks cost
+    expect(r.bands.find(b => b.label === '11–15')!.medianCostShare).toBeLessThan(0.1);
+    expect(r.bands.find(b => b.label === '0–6')!.overGate).toBe(2);
+  });
+
+  it('detects a proxy that does NOT work — cost is flat across the score', () => {
+    const rows = [
+      { liquidity: 14, costShare: 0.30 }, { liquidity: 13, costShare: 0.10 },
+      { liquidity: 10, costShare: 0.31 }, { liquidity: 9, costShare: 0.09 },
+      { liquidity: 6, costShare: 0.29 }, { liquidity: 5, costShare: 0.11 },
+    ];
+    const r = liquidityVsCost(rows);
+    expect(Math.abs(r.spearman!)).toBeLessThan(0.3);   // no relationship where the gate operates
+  });
+
+  it('counts rows it cannot pair rather than dropping them, and stays null below 3 pairs', () => {
+    const r = liquidityVsCost([
+      { liquidity: 10, costShare: 0.1 },
+      { liquidity: null, costShare: 0.2 },   // the premium pool has no brief_candidates row
+      { liquidity: 8, costShare: null },     // a pick with no cost recorded
+    ]);
+    expect(r).toMatchObject({ paired: 1, unpaired: 2, spearman: null });
   });
 });
 

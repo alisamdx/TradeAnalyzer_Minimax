@@ -216,6 +216,84 @@ export function diagnoseStoredRejection(
   return then === now ? now : 'the widened rules would now build it';
 }
 
+/**
+ * "round-trip cost 64% of credit (max 25%)" → 0.64. Null when the reason is not a cost rejection.
+ *
+ * The cost share a REJECTION was computed from is never stored as a column — the row carries nulls and
+ * the number survives only inside the sentence. Recovering it doubles the sample this check can see, and
+ * more importantly keeps the *expensive* half of the distribution in it: judging the liquidity proxy on
+ * accepted picks alone would be judging it on the rows that already passed the cost gate.
+ */
+export function parseCostShareFromReason(reason: string): number | null {
+  const m = /round-trip cost\s+(\d+(?:\.\d+)?)%\s+of credit/u.exec(reason);
+  if (!m) return null;
+  const pct = Number(m[1]);
+  return Number.isFinite(pct) && pct >= 0 ? pct / 100 : null;
+}
+
+/**
+ * Does the upstream 0–15 liquidity score predict the spread's ACTUAL round-trip cost? (BPS-3)
+ *
+ * The pool's gate scores `short-naked-put` / `covered-call` — a ONE-leg structure, averaged per leg — so
+ * it says nothing about the long wing, which is further OTM, thinner and lower-OI, and is the leg most
+ * likely to be illiquid. The spread meanwhile has a direct measurement of the same thing: the round-trip
+ * cost share of the two contracts it would actually trade. If the proxy does not track the direct
+ * measurement, no threshold fixes it and the gate is measuring the wrong structure.
+ *
+ * **Censored by construction, and that is stated rather than worked around:** everything in the pool
+ * already cleared the gate, so only scores at or above the bar are observable. This can say whether the
+ * score discriminates WHERE IT OPERATES; it cannot say what a lower bar would admit.
+ */
+export function liquidityVsCost(
+  rows: ReadonlyArray<{ liquidity: number | null; costShare: number | null }>,
+): SpreadShadowReport['liquidityVsCost'] {
+  const paired = rows.filter(r => r.liquidity != null && r.costShare != null && Number.isFinite(r.costShare))
+    .map(r => ({ liquidity: r.liquidity!, costShare: r.costShare! }));
+
+  // Spearman: rank correlation, so one wide quote cannot set the answer. Ties get average ranks.
+  const rank = (xs: number[]): number[] => {
+    const order = xs.map((v, i) => ({ v, i })).sort((a, b) => a.v - b.v);
+    const out = new Array<number>(xs.length);
+    for (let i = 0; i < order.length;) {
+      let j = i;
+      while (j + 1 < order.length && order[j + 1]!.v === order[i]!.v) j++;
+      const avg = (i + j) / 2 + 1;
+      for (let k = i; k <= j; k++) out[order[k]!.i] = avg;
+      i = j + 1;
+    }
+    return out;
+  };
+  let spearman: number | null = null;
+  if (paired.length >= 3) {
+    const a = rank(paired.map(p => p.liquidity)), b = rank(paired.map(p => p.costShare));
+    const ma = a.reduce((x, y) => x + y, 0) / a.length, mb = b.reduce((x, y) => x + y, 0) / b.length;
+    let num = 0, da = 0, dbb = 0;
+    for (let i = 0; i < a.length; i++) {
+      const x = a[i]! - ma, y = b[i]! - mb;
+      num += x * y; da += x * x; dbb += y * y;
+    }
+    spearman = da > 0 && dbb > 0 ? num / Math.sqrt(da * dbb) : null;
+  }
+
+  const band = (lo: number, hi: number) => {
+    const inBand = paired.filter(p => p.liquidity >= lo && p.liquidity < hi);
+    const costs = inBand.map(p => p.costShare).sort((x, y) => x - y);
+    return {
+      label: `${lo}–${hi === Infinity ? '15' : hi - 1}`,
+      n: inBand.length,
+      medianCostShare: costs.length ? costs[Math.floor(costs.length / 2)]! : null,
+      overGate: inBand.filter(p => p.costShare > P.maxCostShare).length,
+    };
+  };
+
+  return {
+    paired: paired.length,
+    unpaired: rows.length - paired.length,
+    spearman,
+    bands: [band(0, 7), band(7, 9), band(9, 11), band(11, Infinity)],
+  };
+}
+
 /** "net credit $0.03 after fills" → "net credit $# after fills" — so reasons group by kind. */
 export function reasonKind(reason: string): string {
   return reason.replace(/\d{4}-\d{2}-\d{2}/g, 'DATE')
@@ -372,9 +450,26 @@ export function buildSpreadShadowReport(db: DbHandle, todayEt: string): SpreadSh
     kinds.set(k, e);
   }
 
+  // BPS-3: the upstream 0–15 gate against the spread's own round-trip cost. Picks carry `cost_share`;
+  // cost REJECTIONS carry the number only inside their sentence, and are recovered so the expensive half
+  // of the distribution is not excluded from a check about expense. The premium pool has no
+  // `brief_candidates` row and so no score — it lands in `unpaired`, reported rather than dropped.
+  const liqRows = (db.prepare(
+    `SELECT p.cost_share AS cost_share, p.reason AS reason, c.liquidity_score AS liquidity
+       FROM spread_mode_picks p
+       LEFT JOIN brief_candidates c
+         ON c.ticker = p.ticker AND c.as_of_date = p.as_of_date AND c.slot = p.slot AND c.strategy = p.pool
+      WHERE p.outcome = 'pick' OR p.reason LIKE 'round-trip cost%'`,
+  ).all() as Array<{ cost_share: number | null; reason: string | null; liquidity: number | null }>)
+    .map(r => ({
+      liquidity: r.liquidity,
+      costShare: r.cost_share ?? (r.reason ? parseCostShareFromReason(r.reason) : null),
+    }));
+
   return {
     asOf: todayEt,
     settings,
+    liquidityVsCost: liquidityVsCost(liqRows),
     gate: {
       intradayCaptureDays,
       intradayCaptureDaysNeeded: SPREAD_ENABLE_GATE.minIntradayCaptureDays,

@@ -60,6 +60,27 @@ if (cq) {
   }
 }
 
+// BPS-3 — does the upstream 0-15 gate predict the spread's own round-trip cost?
+const lv = r.liquidityVsCost;
+if (lv) {
+  console.log(`\n## Liquidity gate vs actual cost (BPS-3)\n`);
+  if (lv.paired < 3) {
+    console.log(`  ${lv.paired} paired row(s) — too few to say anything. NOT a weak signal, no signal yet.`);
+  } else {
+    const dir = lv.spearman == null ? 'n/a'
+      : lv.spearman < -0.3 ? 'the proxy TRACKS cost (more liquid = cheaper)'
+      : lv.spearman > 0.3 ? 'the proxy is INVERTED'
+      : 'FLAT — the score does not predict the spread’s cost where it operates';
+    console.log(`  ${lv.paired} paired · Spearman ${lv.spearman == null ? '—' : lv.spearman.toFixed(2)} — ${dir}`);
+    for (const b of lv.bands) {
+      if (!b.n) continue;
+      console.log(`    liquidity ${b.label.padEnd(6)} n=${String(b.n).padStart(4)}  median cost share ${pct(b.medianCostShare).padStart(7)}  over the 25% gate: ${b.overGate}`);
+    }
+  }
+  if (lv.unpaired) console.log(`  ${lv.unpaired} row(s) have a cost but no score (the premium pool has no brief_candidates row)`);
+  console.log(`  CENSORED: everything here already cleared the bar, so no score below it is observable.`);
+}
+
 const pl = r.pools;
 if (pl) {
   const book = (b) => `${b.positions} positions · ${b.settled} settled · mean ${pct(b.meanReturnOnMaxLoss)} · win ${pct(b.winRate)}`;

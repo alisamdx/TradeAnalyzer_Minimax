@@ -84,11 +84,26 @@ Provenance: **measured** (a #43 study result) · **inherited** (a wheel-screen r
   clears the null and beats both challengers retrospectively; what the arm tests is whether richer credit
   at unchanged breach risk survives into real spread economics, which the CSP proxy cannot say.
 
-- **BPS-3. Price cap $750 and the liquidity gate at 5 of 15.** *Inherited.* `hasAdequateLiquidity`
-  **fails open** when Strategy Lab never ran. Unsettled: 5/15 was set for a one-leg CSP, while a spread
-  crosses **two** spreads on entry and two on exit; the v2 engine's tradability bar is 8/15 and the dice
-  inherited 8. A bar set for one fill is probably wrong for four. Caution before raising it: liquidity is
-  a **risk proxy**, confirmed twice — a gate, never a ranking signal.
+- **BPS-3. Price cap $750 and the liquidity gate at 5 of 15.** *Inherited.* **Reframed 2026-09-20: it is
+  not the threshold that is wrong, it is the STRUCTURE being scored.** `STRATEGY_RELEVANT_SLUGS.wheel` is
+  `[short-naked-put, covered-call]` — a ONE-leg structure, and the Lab sums its components **per leg and
+  divides by n**. So the bar is a statement about one near-the-money short put and says nothing about the
+  long wing, which is further OTM, thinner, lower-OI, and the leg most likely to be illiquid.
+  `hasAdequateLiquidity` also **fails open** when the Lab never ran. Two things reinforce it: the Lab
+  ALREADY computes a both-leg score for `short-put-vertical` (it is in `inflection`'s slugs), and the
+  spread already has a direct measurement — the round-trip cost share of the two real contracts (BPS-9).
+  **Raising to 8 is measurably wrong:** the 8 bar sits in the densest part of the distribution (mode is
+  exactly 7), 31% have a tradable <=15% spread and are rejected anyway, 37% flip on the VOLUME component
+  which is cumulative intraday (so the bar means different things at the two slots), and liquidity is a
+  risk proxy — the liquid subset underperforms.
+  **Decision 2026-09-20: measure first (v1.1.303).** The report now shows `liquidityVsCost` — Spearman
+  plus bands, over picks and over cost rejections (whose number is parsed back out of the reason
+  sentence, so the expensive half of the distribution is not excluded from a check about expense).
+  **Censored by construction** and it says so: everything in the pool already cleared the bar, so no score
+  below it is observable. **Flat -> the gate measures the wrong structure and no threshold fixes it; the
+  options are the vertical's own score (already computed) or dropping the upstream bar for the cost gate.
+  Tracks -> the bar earns its place and the threshold becomes a fair question.** n triples from Monday.
+
 - **BPS-4. Expiry — 21–35 DTE, nearest 30, strictly before earnings.** *Measured, and the evidence
   disagrees with itself.* Per-trade, **21 DTE beat 30 and 35 at every delta**; in the v4 portfolio sim
   30 DTE returned **+75.1%** against 21 DTE's **+61.3%**. The mode targets 30. Unsettled: which

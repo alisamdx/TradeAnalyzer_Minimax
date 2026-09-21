@@ -150,6 +150,24 @@ export function SpreadShadowView() {
                 sub={`must be > 0 · win rate ${pct(report.winRate, 0)} · median hold ${report.medianDaysHeld ?? '—'} d`}
               />
             </div>
+            {report.liquidityVsCost && (
+              <div style={{ ...muted, marginTop: 10 }}>
+                {report.liquidityVsCost.paired < 3 ? (
+                  <>Liquidity gate vs actual cost (BPS-3): <b>{report.liquidityVsCost.paired} paired</b> — too few to say anything yet.</>
+                ) : (
+                  <>
+                    Liquidity gate vs actual cost (BPS-3): {report.liquidityVsCost.paired} paired · Spearman{' '}
+                    <b>{report.liquidityVsCost.spearman?.toFixed(2) ?? '—'}</b>
+                    {report.liquidityVsCost.spearman != null && (
+                      report.liquidityVsCost.spearman < -0.3 ? ' — the proxy tracks cost'
+                        : report.liquidityVsCost.spearman > 0.3 ? ' — the proxy is inverted'
+                        : ' — flat: the 0–15 score does not predict the spread’s cost where it operates'
+                    )}
+                    {'. Censored — everything here already cleared the bar.'}
+                  </>
+                )}
+              </div>
+            )}
             {report.pools && (
               <div style={{ ...muted, marginTop: 10 }}>
                 {report.pools.pairedDays === 0 ? (
