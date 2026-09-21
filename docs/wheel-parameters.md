@@ -334,6 +334,32 @@ well as means because the worst single outcome in the sample is −87.5%.
 `analysis_snapshots` carries a `daysToEarnings` field. It is **null on 100% of rows** — the column
 exists and is never populated. A fourth place where the earnings gate cannot be evaluated.
 
+### T7 — does the composite's top-N CUT earn its place? — OPEN, harness written 2026-09-20
+
+`scripts/fr-spread-pool-selection-study.mjs` (self-test 14/14, `scripts/selftest-spread-pool-selection.mjs`).
+Raised by BPS-2: the bull put spread's pool is the composite's top 15 and then 08 §3.1 discards the
+composite's *rank*, so the cut and the rank are the same number off the same signal. T2 tested a FLOOR,
+T5 tested the composite's premium-richness ingredients and T6 three more — **nobody has tested the
+composite itself as a selection rule** over the whole universe.
+
+It ranks the universe by **composite-70** (the 70 of 91 points that can be reconstructed;
+`fundamentalScore` 17 + `leverageQuality` 4 draw on `fundamentals_cache` and never can be) against premium
+richness, ivRank, the 41-point richness half, the 29-point remainder, the inverted composite, and — the
+null T5 and T6 both lacked — **repeated random draws of the same size on the same dates**. A top-N rule
+carries sampling noise that a whole-universe mean does not, so "beats the universe" is the wrong test.
+
+Two measures. Return on capital, comparable to T5/T6; and **assigned rate**, which is the bull put
+spread's actual win condition (stayed above the short strike), is immune to the return tails, and is what
+the parked open thread reports as flat across composite quintiles. Episode-collapsed (repeats within 14
+days fold into one bet — T5 and T6 did not do this, and it is reported both ways), scale-guarded with the
+exclusions printed rather than dropped.
+
+**Not yet run** — needs a normal terminal, not a Claude session, and the Node better-sqlite3 ABI. If the
+composite's episode-collapsed result sits inside the random band, the cut is picking no better than chance,
+and BPS-2 resolves toward dropping the composite from the pool rather than restoring it to the ranking.
+
+---
+
 ### T6 — the composite's price-derived signals — CLOSED 2026-09-03, they add nothing
 
 `scripts/fr-wheel-price-signals-study.mjs`. After T5 cleared premium richness, the remaining

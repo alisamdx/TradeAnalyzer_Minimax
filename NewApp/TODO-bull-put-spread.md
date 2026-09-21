@@ -51,11 +51,24 @@ Provenance: **measured** (a #43 study result) · **inherited** (a wheel-screen r
   **Still open, and now measurable:** whether income actually selects differently — read `overlap` in the
   report; if most of the book is picked by both, the two screens agree and BPS-1 answers itself.
 
-- **BPS-2. The composite selects but does not rank.** *Measured, half-applied.* Today: the pool is the
-  composite's top 15, then §3.1 discards composite rank entirely (v1.1.173 measured its top end
-  anti-predictive for wheel). Unsettled: if the ranking is not trustworthy, what justifies the
-  *selection*? The 15-cut is the same number off the same signal — either it screens usefully or it does
-  not. **Most likely to change everything downstream.**
+- **BPS-2. The composite selects but does not rank.** *Measured, half-applied.* The pool is the
+  composite's top 15, then §3.1 discards its rank (v1.1.173: top end anti-predictive). **Evidence already
+  in hand (docs/wheel-parameters.md):** F7 a composite FLOOR is harmful (every threshold made the book
+  monotonically worse); T5 ranking the universe on premium richness BEATS no selection (+1.03 mean /
+  +2.67 median) and lowest-premium is the worst rule — so selection is not the problem, this composite
+  dilutes the signal that carries it; T6 the three price-derived signals (29 pts) add +0.14 mean /
+  −0.18 median and INVERTING them beats that. Of 91 ranking points: 19 positively predictive, 22 weakly,
+  29 ≈ zero or inverted, **21 permanently unverifiable** (`fundamentals_cache` has no history).
+  **Cheap surprise:** `DailyOptionsSnapshotJob` already runs a live chain for the full ~1,100-ticker
+  universe nightly, so annualized premium and liquidity are stored for everything — a premium-ranked
+  pool would need no new API budget, only a different choice of which ~15 get chains captured.
+  **Decision 2026-09-20: run the study first; add a third shadow arm only if it is inconclusive.**
+  Harness written: `scripts/fr-spread-pool-selection-study.mjs` (self-test 14/14,
+  `scripts/selftest-spread-pool-selection.mjs`). It ranks the WHOLE universe by composite-70 vs premium
+  richness vs a random draw of the same size, on both return on capital and **assigned rate** — the
+  spread's own win condition. Episode-collapsed, scale-guarded, with a random band as the null.
+  **Run it from a normal terminal** (`npm run rebuild:node` first if you have just packaged).
+
 - **BPS-3. Price cap $750 and the liquidity gate at 5 of 15.** *Inherited.* `hasAdequateLiquidity`
   **fails open** when Strategy Lab never ran. Unsettled: 5/15 was set for a one-leg CSP, while a spread
   crosses **two** spreads on entry and two on exit; the v2 engine's tradability bar is 8/15 and the dice
