@@ -210,5 +210,45 @@ export const referenceTables: readonly TableEntry[] = [
       col.ts('added_at', 'When the series was added.', { sourceProvider: 'collector' })
     ],
     indexes: []
+  }),
+
+  defineTable({
+    table: 'ref_provider_symbol_ruling',
+    layer: 'ref',
+    domain: 'sentiment',
+    description:
+      'The operator\'s standing answer to "the provider answered for a different symbol than we ' +
+      'asked — is that the same issuer?". Finnhub resolves GOOG to GOOGL and BRK.B to BRK.A, which ' +
+      'are the same company, and **LLYVA and LLYVK to FWONA, which is not** — Liberty Live Group ' +
+      'carrying Liberty Media Formula One\'s analyst ratings. Which it is cannot be decided from the ' +
+      'symbols, so QC-909 reports every mismatch and an ingest consults this table rather than ' +
+      'guessing (v1.1.306). **Absence means unruled, and an unruled answer is STORED and reported** ' +
+      '— failing open here is deliberate, because dropping a row on no evidence would hide a feed ' +
+      'gap behind silence, and QC-909 is what makes the pending decision visible. Only a ' +
+      '`different_issuer` ruling stops a write.',
+    // Composite, so no column carries `primaryKey`: the DDL generator emits
+    // PRIMARY KEY inline per column and two of them is `table has more than one
+    // primary key`. The uniqueness is the index below.
+    naturalKey: ['provider', 'asked_ticker', 'answered_symbol'],
+    appendOnly: false,
+    ruleDriven: false,
+    standardColumns: false,
+    columns: [
+      col.text('provider', 'The feed that answered — the ruling is about one provider\'s symbol resolution and does not transfer to another.', { sourceProvider: 'operator' }),
+      col.ident('asked_ticker', 'The ticker we asked for.', { sourceProvider: 'operator' }),
+      col.ident('answered_symbol', 'The symbol the provider answered for, verbatim.', { sourceProvider: 'operator' }),
+      col.enumOf(
+        'decision',
+        ['same_issuer', 'different_issuer'],
+        '`same_issuer` keeps storing the answer under the asked ticker — another listing of one ' +
+          'company. `different_issuer` refuses the write, so the asked ticker reads as having no ' +
+          'coverage, which is true and which QC-905 will then report honestly.',
+        { sourceProvider: 'operator' }
+      ),
+      col.text('note', 'Why, in the operator\'s words. Required — a ruling without a reason cannot be revisited.', { sourceProvider: 'operator' }),
+      col.ts('ruled_at', 'When the ruling was made.', { sourceProvider: 'operator' }),
+      col.text('ruled_by', 'Who ruled.', { sourceProvider: 'operator' })
+    ],
+    indexes: [{ columns: ['provider', 'asked_ticker', 'answered_symbol'], unique: true }]
   })
 ];

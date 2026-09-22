@@ -15,6 +15,9 @@ import { runInsiderSweep } from '../src/collector/phases/events.js';
 import { QC603_EARNINGS_FRESHNESS } from '../src/qa/checks/earnings-fundamentals.js';
 import { runGate } from '../src/qa/gate.js';
 import { QC905_RECOMMENDATION_FRESHNESS, QC909_RECOMMENDATION_SYMBOL_MISMATCH } from '../src/qa/checks/macro.js';
+import { ensureSymbolRulings, refusedSymbolAnswers, refusedFor, DEFAULT_SYMBOL_RULINGS } from '../src/collector/symbol-rulings.js';
+import { makeRecommendationIngest } from '../src/ingest/events.js';
+import { recipeDigest } from '../src/ingest/recipes.js';
 
 /**
  * Faults found rehearsing the 2026-09-16 gate on a snapshot of the real generation (v1.1.257).
@@ -149,6 +152,62 @@ describe('Finnhub recommendations are filed under the ticker we asked for', () =
     const fired = QC909_RECOMMENDATION_SYMBOL_MISMATCH.run(ctx()).filter((e) => e.fired);
     expect(fired.map((e) => e.key)).toEqual(['LLYVA']);
     expect(fired[0]!.detail).toContain('FWONA');
+  });
+
+  it('QC-909 stops firing on a pairing the operator has ruled (v1.1.306)', () => {
+    // A standing answer is not an open question, and leaving the ruled ones in
+    // made the unruled ones harder to see — which is the point of the check.
+    // GOOG → GOOGL is ruled; SWKS → SWKS.XX is not and must still fire.
+    recommendations('GOOG', 'GOOGL');
+    recommendations('SWKS', 'SWKS.XX');
+    ensureSymbolRulings(db(), makeHost(), [
+      { provider: 'finnhub', askedTicker: 'GOOG', answeredSymbol: 'GOOGL', decision: 'same_issuer', note: 'Alphabet C and A.' }
+    ]);
+    const evals = QC909_RECOMMENDATION_SYMBOL_MISMATCH.run(ctx());
+    expect(evals.filter((e) => e.fired).map((e) => e.key)).toEqual(['SWKS']);
+    // Ruled, so it closes as a rule change and says which ruling settled it.
+    const goog = evals.find((e) => e.key === 'GOOG');
+    expect(goog?.fired).toBe(false);
+    expect(goog?.closesAs?.kind).toBe('rule_changed');
+  });
+
+  it('the seed is idempotent and never overwrites a ruling already there', () => {
+    // An operator who changes their mind in the workbench keeps that change
+    // across runs — the same rule ref_trading_day uses for the one closure no
+    // generator can produce.
+    const first = ensureSymbolRulings(db(), makeHost());
+    expect(first.inserted).toBe(DEFAULT_SYMBOL_RULINGS.length);
+    const second = ensureSymbolRulings(db(), makeHost());
+    expect(second.inserted).toBe(0);
+    expect(second.present).toBe(DEFAULT_SYMBOL_RULINGS.length);
+    // Both Liberty Live classes are refused; FWONA is Liberty Media Formula One.
+    const refusals = refusedSymbolAnswers(db());
+    expect([...(refusedFor(refusals, 'finnhub', 'LLYVA') ?? [])]).toEqual(['FWONA']);
+    expect([...(refusedFor(refusals, 'finnhub', 'LLYVK') ?? [])]).toEqual(['FWONA']);
+    // A same-issuer ruling is not a refusal.
+    expect(refusedFor(refusals, 'finnhub', 'GOOG')).toBeUndefined();
+  });
+
+  it('a ruled different issuer writes no row, so the ticker reads as uncovered rather than wrong', () => {
+    // The alternative is LLYVA and LLYVK quietly carrying FWONA's ratings —
+    // identical counts under two tickers that are not that company.
+    const body = JSON.stringify([{ symbol: 'FWONA', period: '2026-09-01', strongBuy: 6, buy: 11, hold: 1, sell: 0, strongSell: 0 }]);
+    const ictx = { runId: run.runId, asOfDate: DATE, observedAt: 't', captureRuleId: null };
+    expect(makeRecommendationIngest({ ticker: 'LLYVA', refusedSymbols: ['FWONA'] })(body, ictx)).toHaveLength(0);
+    // Unruled is STORED and reported — dropping a row on no evidence would hide
+    // a feed gap behind silence.
+    expect(makeRecommendationIngest({ ticker: 'LLYVA' })(body, ictx)).toHaveLength(1);
+  });
+
+  it('the refusal rides in the recipe, so a pre-ruling response replays unchanged', () => {
+    // A parser that stores FEWER rows breaks replay equality (AC-4/QC-951)
+    // exactly as one storing more does. A ruling made today must not
+    // retroactively change what last week's response parsed to.
+    const plain = recipes.recommendations({ ticker: 'LLYVA' });
+    const ruled = recipes.recommendations({ ticker: 'LLYVA', refusedSymbols: new Set(['FWONA']) });
+    expect(Object.keys(plain.args)).not.toContain('refusedSymbols');
+    expect(recipes.recommendations({ ticker: 'LLYVA', refusedSymbols: new Set() }).args).toEqual(plain.args);
+    expect(recipeDigest(plain)).not.toBe(recipeDigest(ruled));
   });
 });
 

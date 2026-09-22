@@ -9,6 +9,7 @@ import { BLS_RELEASES, FOMC_CALENDAR_URL, blsScheduleUrl } from '../../ingest/ma
 import { parseDailyFormIndex, dailyFormIndexUrl, submissionsAtCap } from '../../ingest/edgar.js';
 import { previousTradingDay, tradingDaysInRange } from '../trading-calendar.js';
 import { sweepPolygonPages } from '../paged.js';
+import { refusedSymbolAnswers, withRefusals } from '../symbol-rulings.js';
 import { FUND_TYPES, FACTS_RETRY_DAYS } from '../../qa/checks/earnings-fundamentals.js';
 
 /**
@@ -697,6 +698,10 @@ export async function runRecommendations(
   const tickers = subsetMembers(db);
   if (tickers.length === 0) return skipped('chain subset is empty');
 
+  // Read once for the phase, not once per ticker: the table holds a handful of
+  // operator rulings and a query per ticker would be a query per ticker.
+  const refusals = refusedSymbolAnswers(db);
+
   let stored = 0;
   let calls = 0;
   let failed = 0;
@@ -712,7 +717,8 @@ export async function runRecommendations(
     const result = captureResponse({
       host, db, runId: run.runId, asOfDate: run.tradingDate, provider: 'finnhub',
       endpoint: path, slug: 'recommendation', params: { symbol: ticker },
-      response, captureRuleId: ruleId, recipe: recipes.recommendations({ ticker })
+      response, captureRuleId: ruleId,
+      recipe: recipes.recommendations({ ticker, ...withRefusals(refusals, ticker) })
     });
 
     if (result.parseStatus === 'ok') stored += result.rowsWritten;

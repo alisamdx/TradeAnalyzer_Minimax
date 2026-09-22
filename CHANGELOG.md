@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.306] - 2026-09-22
+
+### An alias ruling is data, and now it has somewhere to live
+
+QC-909 fired for the first time on 2026-09-21, seven times: Finnhub answered a recommendation request for a different symbol than was asked. Five are other listings of one company (GOOG→GOOGL, BRK.B→BRK.A, NWS→NWSA, GFL→GFL.TO, JHX→JHX.AX). **Two are not — LLYVA and LLYVK were both carrying Liberty Media Formula One's analyst counts, identical numbers under two tickers that are not that company.** `provider_symbol` recorded what came back so nothing was lost; what was missing was anywhere to put the *answer*. `ref_provider_symbol_ruling` (dictionary **v21**) holds it — provider, asked ticker, answered symbol, `same_issuer` / `different_issuer`, note, who and when — seeded idempotently in **preflight** beside `ref_trading_day` and `ref_macro_series`, for the reason those are. The recommendations ingest now refuses a `different_issuer` answer, so LLYVA and LLYVK read as having **no analyst coverage**, which is true and which QC-905 reports as the gap it is; QC-909 stops firing on a ruled pairing and closes it `rule_changed`, because a standing answer is not an open question and seven settled rows made an unruled eighth harder to see. Verified on a copy of the live generation: 7 fired before seeding, none after, all closed, exactly two refusals.
+
+Two things worth carrying. **The fail-open direction is the OPPOSITE of the calendar's, deliberately** — `ref_trading_day` treats an unknown date as a trading day, while an unruled mismatch here is still *stored and reported*, because dropping a row on no evidence would hide a feed gap behind silence. And **a parser that stores FEWER rows breaks replay equality (AC-4/QC-951) exactly as one storing more does**, so the refusal rides in the recipe (`refusedSymbols`, omitted when empty) and a pre-ruling response replays to the rows it produced then. The 28 rows already stored stay: deleting them would destroy the evidence of what Finnhub answered, the same call `repairStickyOsiPadding` made — and every one carries `provider_symbol`, which is that column's declared purpose.
+
+Details: `changelogs/v1.1.306_2026-09-22.md`.
+
 ## [1.1.305] - 2026-09-22
 
 ### QC-906 was measuring a normal option grant, and the fix had to survive replay

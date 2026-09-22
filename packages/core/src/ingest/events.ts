@@ -379,14 +379,38 @@ interface FinnhubRecommendation {
   strongBuy?: number; buy?: number; hold?: number; sell?: number; strongSell?: number;
 }
 
-/** Finnhub `/stock/recommendation` — confirmed free 2026-09-06, four months per call. */
-export function makeRecommendationIngest(opts: { readonly ticker: string }) {
+/**
+ * Finnhub `/stock/recommendation` — confirmed free 2026-09-06, four months per call.
+ *
+ * `refusedSymbols` names answers the operator has ruled a **different issuer**
+ * (`ref_provider_symbol_ruling`), and like the Form 4 widening it is carried in
+ * the RECIPE rather than read from the table at replay time. A parser that
+ * stores FEWER rows than are already stored breaks replay equality (AC-4 /
+ * QC-951) exactly as one storing more does, and a ruling made today must not
+ * retroactively change what a response captured last week parsed to. A
+ * pre-ruling response's stored recipe has no `refusedSymbols` key and replays
+ * to the rows it produced then; the rows it produced stay as evidence of what
+ * Finnhub answered, which is what `provider_symbol` is for.
+ *
+ * Absence is UNRULED, not allowed-by-default-forever: an unruled mismatch is
+ * stored and QC-909 reports it, because dropping a row on no evidence would
+ * hide a feed gap behind silence.
+ */
+export function makeRecommendationIngest(opts: {
+  readonly ticker: string;
+  readonly refusedSymbols?: readonly string[];
+}) {
   return (body: string, ctx: IngestContext): readonly IngestedRowSpec[] => {
     const parsed = JSON.parse(body) as FinnhubRecommendation[];
     if (!Array.isArray(parsed)) return [];
 
+    const refused = new Set(opts.refusedSymbols ?? []);
     return parsed
       .filter((r) => typeof r.period === 'string' && r.period.length > 0)
+      // A ruled different issuer writes nothing, so the asked ticker reads as
+      // having no coverage — which is true, and QC-905 reports it as the gap it
+      // is. The alternative is LLYVA and LLYVK quietly carrying FWONA's ratings.
+      .filter((r) => !(typeof r.symbol === 'string' && refused.has(r.symbol)))
       .map((r) => ({
         table: 'raw_analyst_recommendation',
         values: {

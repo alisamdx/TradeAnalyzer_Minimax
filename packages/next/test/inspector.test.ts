@@ -102,7 +102,17 @@ describe('AC-13 — the inspector is schema-driven', () => {
       // `Intl` options object and also a dividend column; `close` is the bar
       // close and also the English verb. Both match as bare words without
       // saying anything about whether the renderer is schema-driven.
-      'currency', 'close'
+      'currency', 'close',
+      // Added with `ref_provider_symbol_ruling` (v1.1.306). `provider` is
+      // `meta_response.provider` first and foremost — part of the machinery's
+      // own vocabulary, which AccountView and RunsView must name — and it only
+      // came into scope because a `ref_` table reused the word. Excluding the
+      // meta layer wholesale and then catching its vocabulary through a
+      // same-named domain column is the exclusion leaking, not a finding. The
+      // distinctive names on that table (`asked_ticker`, `answered_symbol`,
+      // `decision`, `ruled_by`) stay in scope, so a genuinely table-specific
+      // reference to it would still be caught.
+      'provider'
     ]);
     const columnNames = new Set(
       DICTIONARY.filter((t) => t.layer !== 'meta')

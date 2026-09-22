@@ -174,8 +174,13 @@ export const recipes = {
 
   earnings: (o: { readonly sweepFrom: string; readonly sweepTo: string; readonly universe?: ReadonlySet<string> }): IngestRecipe =>
     recipe('finnhub_earnings', args({ sweepFrom: o.sweepFrom, sweepTo: o.sweepTo, universe: sortedSet(o.universe) })),
-  recommendations: (o: { readonly ticker: string }): IngestRecipe =>
-    recipe('finnhub_recommendations', { ticker: o.ticker }),
+  // `refusedSymbols` is omitted when empty so a ticker with no ruling keeps its
+  // exact digest — the same reason `form4` omits `derivatives: false`.
+  recommendations: (o: { readonly ticker: string; readonly refusedSymbols?: ReadonlySet<string> }): IngestRecipe =>
+    recipe('finnhub_recommendations', {
+      ticker: o.ticker,
+      ...(o.refusedSymbols && o.refusedSymbols.size > 0 ? { refusedSymbols: [...o.refusedSymbols].sort() } : {})
+    }),
 
   treasury: (): IngestRecipe => recipe('treasury_yields'),
   fomc: (): IngestRecipe => recipe('fomc_calendar'),
@@ -313,7 +318,13 @@ const DECODERS: { readonly [M in IngestModuleName]: (a: RecipeArgs) => IngestMod
       ...(universe ? { universe } : {})
     });
   },
-  finnhub_recommendations: (a) => makeRecommendationIngest({ ticker: str(a, 'ticker') }),
+  finnhub_recommendations: (a) => {
+    const refused = optSet(a, 'refusedSymbols');
+    return makeRecommendationIngest({
+      ticker: str(a, 'ticker'),
+      ...(refused ? { refusedSymbols: [...refused] } : {})
+    });
+  },
 
   treasury_yields: () => ingestTreasuryYields,
   fomc_calendar: () => ingestFomcCalendar,

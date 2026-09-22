@@ -428,8 +428,14 @@ export const QC909_RECOMMENDATION_SYMBOL_MISMATCH: CheckDefinition = {
     '2026-09-14: GOOG came back as GOOGL, BRK.B as BRK.A, GFL as GFL.TO and LLYVA as FWONA. The first ' +
     'three are the same issuer; FWONA is a different company. Which it is cannot be decided from the ' +
     'symbols, so every mismatch is reported for a ruling rather than silently kept or dropped. Reads the ' +
-    'latest observation per ticker, so it evaluates on the days between weekly sweeps too.',
-  readsTables: ['raw_analyst_recommendation'],
+    'latest observation per ticker, so it evaluates on the days between weekly sweeps too. ' +
+    'v1.1.306: a mismatch the operator has RULED in `ref_provider_symbol_ruling` no longer fires — a ' +
+    'standing answer is not an open question, and leaving the ruled ones in made the unruled ones ' +
+    'harder to see, which is the whole point of the check. A `different_issuer` ruling also stops the ' +
+    'ingest storing the answer, so that pairing stops appearing on its own once the next sweep runs; ' +
+    'rows written before the ruling stay as evidence of what the provider answered, carrying their ' +
+    '`provider_symbol`.',
+  readsTables: ['raw_analyst_recommendation', 'ref_provider_symbol_ruling'],
   testedQuantity: null,
   testedUnit: null,
   thresholds: {},
@@ -445,12 +451,34 @@ export const QC909_RECOMMENDATION_SYMBOL_MISMATCH: CheckDefinition = {
           GROUP BY a.ticker`
       )
       .all() as { ticker: string; provider_symbol: string; observed_at: string }[];
-    return rows.map((r) => ({
-      key: r.ticker,
-      fired: r.provider_symbol !== r.ticker,
-      detail: `asked Finnhub for ${r.ticker}, it answered for ${r.provider_symbol} (${r.observed_at.slice(0, 10)})`,
-      evidence: { asked: r.ticker, answered: r.provider_symbol }
-    }));
+
+    const ruled = new Set(
+      (
+        ctx.db
+          .prepare(
+            `SELECT asked_ticker, answered_symbol, decision FROM ref_provider_symbol_ruling
+              WHERE provider = 'finnhub'`
+          )
+          .all() as { asked_ticker: string; answered_symbol: string; decision: string }[]
+      ).map((r) => `${r.asked_ticker}|${r.answered_symbol}`)
+    );
+
+    return rows.map((r) => {
+      const isRuled = ruled.has(`${r.ticker}|${r.provider_symbol}`);
+      return {
+        key: r.ticker,
+        fired: r.provider_symbol !== r.ticker && !isRuled,
+        detail: isRuled
+          ? `asked Finnhub for ${r.ticker}, it answered for ${r.provider_symbol} — ruled in ref_provider_symbol_ruling`
+          : `asked Finnhub for ${r.ticker}, it answered for ${r.provider_symbol} (${r.observed_at.slice(0, 10)})`,
+        evidence: { asked: r.ticker, answered: r.provider_symbol, ruled: isRuled },
+        // A ruling is a decision the finding predates, not new data — so an open
+        // finding closes as `rule_changed` and says which ruling settled it.
+        ...(isRuled
+          ? { closesAs: { kind: 'rule_changed' as const, note: `${r.ticker} → ${r.provider_symbol} is ruled in ref_provider_symbol_ruling` } }
+          : {})
+      };
+    });
   }
 };
 

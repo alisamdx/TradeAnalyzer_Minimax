@@ -4,6 +4,7 @@ import { captureResponse } from '../capture.js';
 import type { RunHandle } from '../run.js';
 import { ensureTradingCalendar } from '../trading-calendar.js';
 import { ensureMacroSeries } from '../macro-series.js';
+import { ensureSymbolRulings } from '../symbol-rulings.js';
 
 /**
  * Phase 0 — preflight (04 §2.1).
@@ -60,6 +61,14 @@ export async function runPreflight(
   //     empty table it evaluated nothing: a blocking check that could not fire,
   //     guarding a VIX that was never fetched.
   ensureMacroSeries(db, host);
+
+  // 0c. The provider-symbol rulings, third table in the same family — seeded
+  //     before it is read so the ingest never has to guess. Note the fail-open
+  //     direction is the OPPOSITE of the calendar's and that is deliberate: an
+  //     unruled mismatch is stored and reported by QC-909, because dropping a
+  //     row on no evidence would hide a feed gap behind silence. Only a
+  //     `different_issuer` ruling stops a write.
+  ensureSymbolRulings(db, host);
 
   // 1. Trading day. An unknown date is treated as a trading day rather than a
   //    holiday: refusing to collect because the calendar has not been seeded

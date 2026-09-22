@@ -58,6 +58,8 @@ export {
 } from './trading-calendar.js';
 export { ensureMacroSeries, DEFAULT_MACRO_SERIES } from './macro-series.js';
 export type { MacroSeriesSeed, MacroSeedResult } from './macro-series.js';
+export { ensureSymbolRulings, refusedSymbolAnswers, refusedFor, withRefusals, DEFAULT_SYMBOL_RULINGS } from './symbol-rulings.js';
+export type { SymbolRulingSeed, SymbolRulingSeedResult, SymbolRefusals } from './symbol-rulings.js';
 export type { TradingDayRow, HolidayRule, CalendarSeedResult } from './trading-calendar.js';
 export type { PreflightOutcome } from './phases/preflight.js';
 
