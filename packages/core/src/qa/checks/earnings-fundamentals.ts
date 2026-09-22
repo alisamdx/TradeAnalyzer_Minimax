@@ -334,17 +334,34 @@ export const QC602_EARNINGS_SOURCE_DISAGREEMENT: CheckDefinition = {
       ];
     }
 
+    // The NEAREST future date per source, ranked by run — not the last row written.
+    //
+    // This is QC-601's artefact in the sibling that reads the same table, and it
+    // survived the fix there (v1.1.285) because only QC-601's query was changed.
+    // A sweep is subdivided into windows, so one run writes one row per window
+    // per ticker and the last row written for a ticker is always its FARTHEST
+    // date. On 2026-09-21 ACN had Finnhub's 2026-10-01 and its 2026-12-16 from
+    // two windows of one sweep, 204 ms apart; ordering by `observed_at` picked
+    // the December date and reported "80 days apart" against E*Trade's
+    // 2026-09-27. The real disagreement is four days. The finding was true and
+    // its number was fiction, which is worse than either alone — it invites a
+    // diagnosis of the wrong feed.
     const rows = ctx.db
       .prepare(
-        `WITH latest AS (
-           SELECT ticker, source, report_date,
-                  ROW_NUMBER() OVER (PARTITION BY ticker, source ORDER BY observed_at DESC, row_id DESC) AS rn
+        `WITH nearest AS (
+           SELECT ticker, source, run_id, MIN(report_date) AS near_date
              FROM raw_earnings_event
             WHERE report_date >= ?
+            GROUP BY ticker, source, run_id
+         ),
+         ranked AS (
+           SELECT ticker, source, near_date,
+                  ROW_NUMBER() OVER (PARTITION BY ticker, source ORDER BY run_id DESC) AS rn
+             FROM nearest
          )
-         SELECT f.ticker, f.report_date AS finnhub_date, e.report_date AS etrade_date
-           FROM latest f
-           JOIN latest e ON e.ticker = f.ticker AND e.rn = 1 AND e.source = 'etrade'
+         SELECT f.ticker, f.near_date AS finnhub_date, e.near_date AS etrade_date
+           FROM ranked f
+           JOIN ranked e ON e.ticker = f.ticker AND e.rn = 1 AND e.source = 'etrade'
           WHERE f.rn = 1 AND f.source = 'finnhub'`
       )
       .all(ctx.tradingDate) as { ticker: string; finnhub_date: string; etrade_date: string }[];

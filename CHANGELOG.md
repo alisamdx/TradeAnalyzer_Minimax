@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.304] - 2026-09-22
+
+### QC-602 compared the farthest earnings date, not the nearest
+
+The 2026-09-21 gate reported `ACN: finnhub 2026-12-16 vs etrade 2026-09-27 (80 days apart)` — eighty days between two sources is the Finnhub bulk-cap truncation signature, the fault that put NVDA's earnings a quarter late in the existing app, so the finding pointed at Finnhub's calendar. Finnhub was right. The earnings sweep is subdivided into windows, so one run writes one row per window per ticker: ACN's 2026-10-01 (FY26 Q4) and 2026-12-16 (FY27 Q1) are both correct and were written **204 ms apart in one sweep**. QC-602 ranked by `observed_at DESC`, and the last row written for a ticker is always its FARTHEST date. The real disagreement is **four days**. It now takes `MIN(report_date)` per `(ticker, source, run_id)` ranked by run — exactly what QC-601 does, twenty lines away in the same file, whose own comment describes this artefact and whose v1.1.285 fix changed only QC-601's query. Every QC-602 test inserted one row per ticker per source, so the shape it meets in production had no fixture; the new regression fails on the old code with `expected 80 to be 4`. **A finding can be true and still carry a fictional number — a real problem wearing a more serious problem's signature, spending the operator's attention on the wrong feed.**
+
+Details: `changelogs/v1.1.304_2026-09-22.md`.
+
 ## [1.1.303] - 2026-09-20
 
 ### BPS-3: does the liquidity gate predict the spread's actual cost?

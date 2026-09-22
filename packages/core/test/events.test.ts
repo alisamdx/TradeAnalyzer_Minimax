@@ -1183,6 +1183,44 @@ describe('QC-602, the cross-source comparison that had no second source', () => 
     expect(evals.filter((e) => e.fired).map((e) => e.key)).toEqual(['NVDA']);
   });
 
+  it('compares the NEAREST future date, not the last row a multi-window sweep wrote', () => {
+    // The shape every other test here misses: a sweep is subdivided into windows,
+    // so one run writes one row per window per ticker and the LAST row written is
+    // the ticker's FARTHEST date. ACN's real 2026-09-21 rows — Finnhub's
+    // 2026-10-01 and 2026-12-16 from two windows 204 ms apart — read as
+    // "80 days apart" from E*Trade's 2026-09-27 when the real gap is four.
+    // QC-601 was fixed for exactly this and QC-602 was not.
+    insertEarnings([
+      { ticker: 'ACN', date: '2026-10-01', observedAt: '2026-09-21T22:40:26.126Z', source: 'finnhub' },
+      { ticker: 'ACN', date: '2026-12-16', observedAt: '2026-09-21T22:40:26.330Z', source: 'finnhub' },
+      { ticker: 'ACN', date: '2026-09-27', observedAt: '2026-09-21T22:40:43.739Z', source: 'etrade' }
+    ]);
+    const evals = QC602_EARNINGS_SOURCE_DISAGREEMENT.run({
+      db: db(), runId: fixtureRun.runId, tradingDate: DATE, observedAt: OBSERVED
+    });
+    expect(evals).toHaveLength(1);
+    expect(evals[0]!.value).toBe(4);
+    expect(evals[0]!.detail).toContain('finnhub 2026-10-01');
+  });
+
+  it('still reads the newest run when a later sweep moves the nearest date', () => {
+    // Ranking by run is what makes the nearest-date read a fresh one: an older
+    // sweep's nearer date must not outrank the newest sweep's.
+    const nextDate = '2026-09-08';
+    const newer = beginRun(db(), makeHost(), { kind: 'daily', tradingDate: nextDate }).runId;
+    insertEarnings([
+      { ticker: 'NVDA', date: '2026-09-25', observedAt: '2026-09-07T22:00:00.000Z', source: 'finnhub' },
+      { ticker: 'NVDA', date: '2026-10-09', observedAt: '2026-09-08T22:00:00.000Z', source: 'finnhub', runId: newer, asOf: nextDate },
+      { ticker: 'NVDA', date: '2026-10-09', observedAt: '2026-09-08T22:00:01.000Z', source: 'etrade', runId: newer, asOf: nextDate }
+    ]);
+    const evals = QC602_EARNINGS_SOURCE_DISAGREEMENT.run({
+      db: db(), runId: newer, tradingDate: nextDate, observedAt: OBSERVED
+    });
+    expect(evals).toHaveLength(1);
+    expect(evals[0]!.fired).toBe(false);
+    expect(evals[0]!.value).toBe(0);
+  });
+
   it('fires when both sources are present but no ticker is dated by both (v1.1.270)', () => {
     // E*Trade is asked mainly for tickers Finnhub did not date, so disjoint coverage is the
     // default shape — and a join over it evaluates nothing.
