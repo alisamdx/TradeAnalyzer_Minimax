@@ -191,8 +191,19 @@ export const recipes = {
     recipe('edgar_submissions', args({ cik: o.cik, ticker: o.ticker, since: o.since, forms: sortedSet(o.forms) })),
   companyFacts: (o: { readonly cik: string; readonly since?: string; readonly concepts?: ReadonlySet<string> }): IngestRecipe =>
     recipe('edgar_companyfacts', args({ cik: o.cik, since: o.since, concepts: sortedSet(o.concepts) })),
-  form4: (o: { readonly accessionNo: string; readonly tickerByCik?: ReadonlyMap<string, string> }): IngestRecipe =>
-    recipe('edgar_form4', { accessionNo: o.accessionNo, tickerByCik: sortedPairs(o.tickerByCik) }),
+  // `derivatives` is omitted when false so a pre-v20 recipe keeps its exact
+  // digest: adding the key unconditionally would give every already-captured
+  // Form 4 a new recipe id and make its replay a different parse.
+  form4: (o: {
+    readonly accessionNo: string;
+    readonly tickerByCik?: ReadonlyMap<string, string>;
+    readonly derivatives?: boolean;
+  }): IngestRecipe =>
+    recipe('edgar_form4', {
+      accessionNo: o.accessionNo,
+      tickerByCik: sortedPairs(o.tickerByCik),
+      ...(o.derivatives === true ? { derivatives: true } : {})
+    }),
 
   ivBootstrap: (o: IvBootstrapIngestArgs): IngestRecipe =>
     recipe('ivolatility_ivx', args({ ticker: o.ticker, source: o.source, methodNote: o.methodNote })),
@@ -211,6 +222,19 @@ function optStr(a: RecipeArgs, key: string): string | undefined {
   const v = a[key];
   if (v === undefined) return undefined;
   if (typeof v !== 'string') throw new RecipeError(`recipe argument "${key}" must be a string when present`);
+  return v;
+}
+
+/**
+ * Absent is FALSE and is the pre-v20 shape — never a throw, or every Form 4
+ * captured before the flag existed would become unreplayable. A present value
+ * must still be a real boolean: a stray `"false"` silently truthy here would
+ * widen a parse that a stored recipe says was narrow.
+ */
+function optBool(a: RecipeArgs, key: string): boolean {
+  const v = a[key];
+  if (v === undefined) return false;
+  if (typeof v !== 'boolean') throw new RecipeError(`recipe argument "${key}" must be a boolean when present`);
   return v;
 }
 
@@ -320,7 +344,11 @@ const DECODERS: { readonly [M in IngestModuleName]: (a: RecipeArgs) => IngestMod
     });
   },
   edgar_form4: (a) =>
-    makeForm4Ingest({ accessionNo: str(a, 'accessionNo'), tickerByCik: pairMap(a, 'tickerByCik') }),
+    makeForm4Ingest({
+      accessionNo: str(a, 'accessionNo'),
+      tickerByCik: pairMap(a, 'tickerByCik'),
+      derivatives: optBool(a, 'derivatives')
+    }),
 
   ivolatility_ivx: (a) => {
     const methodNote = optStr(a, 'methodNote');

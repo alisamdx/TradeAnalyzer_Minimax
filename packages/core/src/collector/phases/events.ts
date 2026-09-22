@@ -818,7 +818,7 @@ export async function runInsiderSweep(
         endpoint: '/Archives/edgar/data/{cik}/{accession}.txt', slug: 'edgar-form4',
         params: { cik: filing.cik, accession: filing.accessionNo },
         response, captureRuleId: ruleId,
-        recipe: recipes.form4({ accessionNo: filing.accessionNo, tickerByCik: byCik })
+        recipe: recipes.form4({ accessionNo: filing.accessionNo, tickerByCik: byCik, derivatives: true })
       });
 
       if (result.parseStatus === 'ok') stored += result.rowsWritten;

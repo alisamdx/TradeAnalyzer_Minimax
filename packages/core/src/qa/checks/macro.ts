@@ -322,7 +322,14 @@ export const QC906_INSIDER_PARSE: CheckDefinition = {
   description:
     'A Form 4 that was fetched yielded at least one transaction row. A filing that parses to nothing ' +
     'is the signature of a schema change, and it is invisible from row counts alone: the domain ' +
-    'simply gets quieter. Comparing responses against rows is what makes the silence audible.',
+    'simply gets quieter. Comparing responses against rows is what makes the silence audible. ' +
+    'v1.1.305: until dictionary v20 the parser dropped derivative transactions, so an ordinary ' +
+    'option-grant filing parsed to nothing and the benign case dominated the measurement — it fired ' +
+    'on 2 of the 2 runs that ever had data (19.1% and 11.7%) and had never once passed. All 11 ' +
+    'filings it named on 2026-09-21 were correct Form 4s with only derivative transactions. Both ' +
+    'classes are now stored, so zero rows again means what the check says it means: a readable ' +
+    'filing that yielded nothing. A Form 4 reporting only HOLDINGS still parses to no rows, which ' +
+    'is rare and worth the finding.',
   readsTables: ['raw_insider_transaction', 'meta_response'],
   testedQuantity: 'unparsed_filing_fraction',
   testedUnit: 'fraction',

@@ -37,7 +37,7 @@ const SAMPLES: readonly IngestRecipe[] = [
   recipes.bls({ slug: 'cpi', type: 'CPI', label: 'Consumer Price Index' }),
   recipes.submissions({ cik: '0000320193', ticker: 'AAPL', since: '2025-09-07', forms: new Set(['10-K', '10-Q']) }),
   recipes.companyFacts({ cik: '0000320193', since: '2025-09-07' }),
-  recipes.form4({ accessionNo: '0000320193-26-000001', tickerByCik: new Map([['0000320193', 'AAPL']]) }),
+  recipes.form4({ accessionNo: '0000320193-26-000001', tickerByCik: new Map([['0000320193', 'AAPL']]), derivatives: true }),
   recipes.ivBootstrap({ ticker: 'SPY', source: 'ivolatility', methodNote: 'IVX' }),
   recipes.legacyBrief()
 ];
@@ -56,7 +56,37 @@ describe('the registry', () => {
     }
   });
 
+  it('keeps a pre-v20 form4 recipe byte-identical, so its replay is the same narrow parse (v1.1.305)', () => {
+    // Widening a parser mid-generation breaks replay equality (AC-4/QC-951) for
+    // every response captured before it — unless the widening is an ARGUMENT,
+    // which is what `meta_ingest_recipe` is for. Two things have to hold and
+    // only the first is obvious: the flag must change the digest when present,
+    // and it must be ABSENT from the args when false, or every already-captured
+    // Form 4 silently acquires a new recipe id.
+    const narrow = recipes.form4({ accessionNo: 'a' });
+    const wide = recipes.form4({ accessionNo: 'a', derivatives: true });
+    expect(Object.keys(narrow.args)).not.toContain('derivatives');
+    expect(recipes.form4({ accessionNo: 'a', derivatives: false }).args).toEqual(narrow.args);
+    expect(recipeDigest(narrow)).not.toBe(recipeDigest(wide));
+    // A stored narrow recipe rebuilds a narrow parser.
+    const rebuilt = buildIngest(parseStoredRecipe(narrow.module, canonicalJson(narrow.args)));
+    const doc =
+      '<ownershipDocument><issuer><issuerCik>1</issuerCik><issuerTradingSymbol>X</issuerTradingSymbol></issuer>' +
+      '<reportingOwner><reportingOwnerId><rptOwnerName>Y</rptOwnerName></reportingOwnerId></reportingOwner>' +
+      '<derivativeTransaction><transactionDate><value>2026-09-02</value></transactionDate>' +
+      '<transactionCoding><transactionCode>A</transactionCode></transactionCoding>' +
+      '<transactionAmounts><transactionShares><value>7</value></transactionShares></transactionAmounts>' +
+      '</derivativeTransaction></ownershipDocument>';
+    const ctx = { runId: 1, asOfDate: '2026-09-07', observedAt: '2026-09-07T17:05:00-04:00', captureRuleId: null };
+    expect(rebuilt(doc, ctx)).toHaveLength(0);
+    expect(buildIngest(parseStoredRecipe(wide.module, canonicalJson(wide.args)))(doc, ctx)).toHaveLength(1);
+  });
+
   it('refuses a module it does not know and arguments of the wrong shape', () => {
+    // A present-but-not-boolean flag must throw rather than read as truthy: a
+    // stored recipe saying the parse was narrow must never widen it.
+    expect(() => buildIngest(parseStoredRecipe('edgar_form4', '{"accessionNo":"a","tickerByCik":[],"derivatives":"false"}')))
+      .toThrow(/boolean/);
     expect(() => parseStoredRecipe('polygon_minute_bars', '{}')).toThrow(RecipeError);
     expect(() => buildIngest(parseStoredRecipe('etrade_chain', '{"ticker":"SPY"}'))).toThrow(/expirationDate/);
     expect(() => buildIngest(parseStoredRecipe('polygon_bars', '{"ticker":"SPY","fetchKind":"weekly","adjustedAsOf":"2026-09-07"}')))

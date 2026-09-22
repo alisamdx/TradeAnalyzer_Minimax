@@ -381,8 +381,29 @@ export const fundamentalsAccountTables: readonly TableEntry[] = [
       nullable(col.int('shares_owned_after', 'Shares held after the transaction.', { sourceProvider: 'edgar' }), 'the filing did not state it'),
       col.ident('accession_no', 'The Form 4 filing this came from.', { sourceProvider: 'edgar' }),
       nullable(
-        col.int('line_no', 'The transaction\'s position among the filing\'s non-derivative transactions, 1-based, counted before any line is skipped — so it is the filing\'s own line number.', { sourceProvider: 'derived_at_ingestion' }),
+        col.int('line_no', 'The transaction\'s position within the filing, 1-based, counted before any line is skipped — so it is the filing\'s own line number. Non-derivative transactions are numbered first and derivative ones continue the sequence, which leaves every pre-v20 row\'s number unchanged.', { sourceProvider: 'derived_at_ingestion' }),
         'ingested before dictionary v19, which did not record the line'
+      ),
+      // Deliberately a plain TEXT and not `enumOf`. `applyDictionary` grows a
+      // populated table with a bare `ALTER TABLE … ADD COLUMN <type>`, so a
+      // declared CHECK would live in the generated DDL and never in the stored
+      // one, and this table would be reported as drifted on every open — the
+      // same reason `meta_response.ingest_recipe_id` carries no `references`.
+      // Values: `non_derivative`, `derivative`.
+      nullable(
+        col.text(
+          'security_class',
+          'Whether the row is a **non-derivative** transaction (shares changing hands) or a ' +
+            '**derivative** one (an option or RSU granted, exercised or disposed of). Until ' +
+            'dictionary v20 only non-derivative transactions were stored at all, because without ' +
+            'this column an option grant\'s notional share count would sit in the same `shares` ' +
+            'column as an open-market purchase and every insider-buying signal computed from the ' +
+            'table would be wrong in a way nothing could detect afterwards. Read it before summing ' +
+            '`shares`: the two are not the same quantity and must never be pooled.',
+          { sourceProvider: 'derived_at_ingestion' }
+        ),
+        'ingested before dictionary v20, when only non-derivative transactions were captured — ' +
+          'so a null is a non-derivative row, but an absence of derivative rows beside it says nothing'
       )
     ],
     indexes: [

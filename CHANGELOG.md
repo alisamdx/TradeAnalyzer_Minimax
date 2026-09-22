@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.305] - 2026-09-22
+
+### QC-906 was measuring a normal option grant, and the fix had to survive replay
+
+The 2026-09-21 gate said `11 of 94 fetched Form 4 filings parsed to no rows` — QC-906 reads that as the signature of a schema change. All 11 were pulled back from EDGAR and every one is a correct Form 4 carrying **only derivative transactions** (AMCR, AUGO, BILL, CTAS). The parser dropped those on purpose, for a good reason: `raw_insider_transaction` had no column to tell an option grant's notional share count from an open-market purchase, so pooling them would have made every insider-buying signal wrong undetectably. So the parser was right and the check was measuring the wrong quantity — the dominant cause of "no rows" was an ordinary option grant. Over every run that ever had Form 4 data it fired **2 of 2** (19.1 % and 11.7 % against a 10 % threshold) and **had never once passed**: the liquidity-gate-that-always-fires shape. Dictionary **v20** adds `security_class` (`non_derivative` / `derivative`) and both classes are now stored, so zero rows again means a readable filing that yielded nothing. **`security_class` must be read before `shares` is summed** — the original concern has not gone away, it has been given a column.
+
+The harder half is replay. A parser that produces more rows than are already stored breaks replay equality (AC-4/QC-951, which is **blocking**) for every response captured before it, and changing a parser's behaviour does not change its recipe digest — `replay.ts` narrows the comparison to columns the old dictionary had, but it cannot narrow rows. So the widening is an **argument carried in the recipe**: a pre-v20 response's stored recipe has no `derivatives` key, `parseStoredRecipe` rebuilds the parser without it, and its replay reproduces exactly the rows it produced then. Details that had to be right: the key is **omitted** when false (writing `derivatives: false` would re-digest every captured Form 4); the legacy path writes `security_class` **null**, not `'non_derivative'`, because a replay compares values, not intent; `line_no` numbers derivative lines after the non-derivative ones so nothing stored is renumbered; and a present-but-non-boolean flag throws rather than reading as truthy. Verified by applying the new dictionary to a **real 1.73 GB copy of the live generation** with 487 rows in the table: the `ALTER` landed, `meta_dictionary` recorded v20, 54 checks ran, no drift.
+
+Details: `changelogs/v1.1.305_2026-09-22.md`.
+
 ## [1.1.304] - 2026-09-22
 
 ### QC-602 compared the farthest earnings date, not the nearest

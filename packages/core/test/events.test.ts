@@ -905,12 +905,53 @@ describe('Form 4', () => {
     expect(gift?.values['shares']).toBe(500);
   });
 
-  it('excludes derivative transactions, which have no column to distinguish them', () => {
-    // An option grant's notional share count in the same `shares` column as an
-    // open-market purchase would corrupt every insider-buying signal computed
-    // from the table, undetectably.
+  it('excludes derivative transactions under the pre-v20 recipe, so old responses replay identically', () => {
+    // NOT dead behaviour: this is what a Form 4 captured before dictionary v20
+    // must still parse to. Its stored recipe has no `derivatives` key, so
+    // `parseStoredRecipe` rebuilds the parser without it and the replay
+    // reproduces exactly the rows stored then (AC-4/QC-951). A parser that
+    // silently produced more rows than are stored would report every earlier
+    // day as unrebuildable.
     expect(parse().every((r) => r.values['shares'] !== 99999)).toBe(true);
     expect(parse()).toHaveLength(2);
+    // The column did not exist then, so the legacy path must write null, not
+    // 'non_derivative' — a replay compares values, not intent.
+    expect(parse().every((r) => r.values['security_class'] === null)).toBe(true);
+  });
+
+  it('captures both classes when the recipe says so, marking which is which (v1.1.305)', () => {
+    // QC-906 reads "a fetched Form 4 yielded no rows" as a schema change, and
+    // with derivative-only filings dropped the benign case dominated: it fired
+    // on 2 of the 2 runs that ever had data and never once passed. All 11
+    // filings it named on 2026-09-21 were correct Form 4s with only derivative
+    // transactions (AMCR, AUGO, BILL, CTAS).
+    const rows = makeForm4Ingest({ accessionNo: 'x', derivatives: true })(FORM4, ctx(newRun()));
+    expect(rows).toHaveLength(3);
+    expect(rows.map((r) => [r.values['security_class'], r.values['shares']])).toEqual([
+      ['non_derivative', 20534],
+      ['non_derivative', 500],
+      ['derivative', 99999]
+    ]);
+  });
+
+  it('numbers derivative lines AFTER the non-derivative ones, so no pre-v20 line moves', () => {
+    // `(accession_no, line_no)` is the natural key. Numbering the derivative
+    // section first — or interleaving — would renumber rows already stored and
+    // collide with them.
+    const rows = makeForm4Ingest({ accessionNo: 'x', derivatives: true })(FORM4, ctx(newRun()));
+    expect(rows.map((r) => r.values['line_no'])).toEqual([1, 2, 3]);
+    const legacy = parse().map((r) => r.values['line_no']);
+    expect(rows.slice(0, legacy.length).map((r) => r.values['line_no'])).toEqual(legacy);
+  });
+
+  it('a derivative-only filing yields rows now, which is what makes QC-906 mean what it says', () => {
+    // The real shape: BILL Holdings 0001795497-26-000006, one derivative
+    // transaction and no non-derivative section at all.
+    const derivativeOnly = FORM4.replace(/<nonDerivativeTransaction>[\s\S]*<\/nonDerivativeTransaction>/, '');
+    expect(makeForm4Ingest({ accessionNo: 'x' })(derivativeOnly, ctx(newRun()))).toHaveLength(0);
+    const rows = makeForm4Ingest({ accessionNo: 'x', derivatives: true })(derivativeOnly, ctx(newRun()));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.values['security_class']).toBe('derivative');
   });
 
   it('keeps the transaction code verbatim', () => {

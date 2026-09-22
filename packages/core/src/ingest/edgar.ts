@@ -303,16 +303,32 @@ function filerRole(scope: string): string | null {
 }
 
 /**
- * One Form 4's non-derivative transactions.
+ * One Form 4's transactions.
  *
- * **Derivative transactions are deliberately not captured.** They are option
- * grants and exercises, and `raw_insider_transaction` has no column that would
- * distinguish them from share trades — so storing both would put an option
- * grant's notional share count in the same `shares` column as an open-market
- * purchase, and every insider-buying signal computed from the table would be
- * wrong in a way nothing could detect afterwards. Adding them needs a column
- * first, which is a dictionary change and therefore a decision, not an
- * ingestion detail.
+ * **`derivatives` widens this parser and is carried in the RECIPE, not read
+ * from config.** Until dictionary v20 only non-derivative transactions were
+ * captured, because `raw_insider_transaction` had no column to tell an option
+ * grant's notional share count from an open-market purchase and pooling them
+ * would have made every insider-buying signal wrong undetectably. `v20` adds
+ * `security_class`, so both can be stored — but a parser that produces more
+ * rows than are already stored breaks replay equality (AC-4/QC-951) for every
+ * response captured before it. The flag lives in the recipe args precisely so
+ * that does not happen: a pre-v20 response's stored recipe has no
+ * `derivatives` key, `parseStoredRecipe` rebuilds this function without it,
+ * and its replay reproduces exactly the rows it produced then. That is what
+ * `meta_ingest_recipe` is for — a replay is a re-run of the SAME parse, not a
+ * reconstruction of it.
+ *
+ * Why it had to change: QC-906 reads "a fetched Form 4 yielded no rows" as the
+ * signature of a schema change, and with derivative-only filings dropped the
+ * dominant cause of zero rows was a normal option grant. It fired on 2 of the
+ * 2 runs that ever had data (19.1 % and 11.7 % against a 10 % threshold) and
+ * had never once passed. All 11 filings it named on 2026-09-21 were correct
+ * Form 4s with only derivative transactions — AMCR, AUGO, BILL, CTAS.
+ *
+ * `line_no` numbers non-derivative transactions first and continues into the
+ * derivative ones, so every row written before v20 keeps its number and
+ * `(accession_no, line_no)` stays unique.
  *
  * `transaction_code` is stored verbatim — `P`, `S`, `A`, `G`, `F` and the rest.
  * A two-way buy/sell mapping would destroy exactly the distinctions the code
@@ -322,6 +338,7 @@ function filerRole(scope: string): string | null {
 export function makeForm4Ingest(opts: {
   readonly accessionNo: string;
   readonly tickerByCik?: ReadonlyMap<string, string>;
+  readonly derivatives?: boolean;
 }) {
   return (body: string, ctx: IngestContext): readonly IngestedRowSpec[] => {
     const doc = /<ownershipDocument>([\s\S]*?)<\/ownershipDocument>/.exec(body);
@@ -344,40 +361,49 @@ export function makeForm4Ingest(opts: {
     // one filer on one day at different prices — Japan Post sold 9,545 @ 116.62 and 4,055 @ 117.02
     // on 2026-09-14 — and without it those are indistinguishable by key.
     let lineNo = 0;
-    for (const tx of xml.matchAll(/<nonDerivativeTransaction>([\s\S]*?)<\/nonDerivativeTransaction>/g)) {
-      lineNo += 1;
-      const scope = tx[1] as string;
-      const transactionDate = xmlValue(scope, 'transactionDate');
-      const code = /<transactionCode>([\s\S]*?)<\/transactionCode>/.exec(scope)?.[1]?.trim() ?? null;
-      const shares = numberOrNull(xmlValue(scope, 'transactionShares'));
-      if (!transactionDate || !code || shares === null) continue;
+    const collect = (element: string, securityClass: string | null): void => {
+      for (const tx of xml.matchAll(new RegExp(`<${element}>([\\s\\S]*?)</${element}>`, 'g'))) {
+        lineNo += 1;
+        const scope = tx[1] as string;
+        const transactionDate = xmlValue(scope, 'transactionDate');
+        const code = /<transactionCode>([\s\S]*?)<\/transactionCode>/.exec(scope)?.[1]?.trim() ?? null;
+        const shares = numberOrNull(xmlValue(scope, 'transactionShares'));
+        if (!transactionDate || !code || shares === null) continue;
 
-      rows.push({
-        table: 'raw_insider_transaction',
-        values: {
-          run_id: ctx.runId,
-          as_of_date: ctx.asOfDate,
-          observed_at: ctx.observedAt,
-          capture_rule_id: ctx.captureRuleId,
-          cik: issuerCik,
-          ticker,
-          filer_name: filerName,
-          filer_role: role,
-          transaction_date: transactionDate,
-          transaction_code: code,
-          shares: Math.round(shares),
-          // Awards and gifts genuinely report no price. That is the column's
-          // declared null meaning; a zero there would read as a free purchase.
-          price: numberOrNull(xmlValue(scope, 'transactionPricePerShare')),
-          shares_owned_after: (() => {
-            const v = numberOrNull(xmlValue(scope, 'sharesOwnedFollowingTransaction'));
-            return v === null ? null : Math.round(v);
-          })(),
-          accession_no: opts.accessionNo,
-          line_no: lineNo
-        }
-      });
-    }
+        rows.push({
+          table: 'raw_insider_transaction',
+          values: {
+            run_id: ctx.runId,
+            as_of_date: ctx.asOfDate,
+            observed_at: ctx.observedAt,
+            capture_rule_id: ctx.captureRuleId,
+            cik: issuerCik,
+            ticker,
+            filer_name: filerName,
+            filer_role: role,
+            transaction_date: transactionDate,
+            transaction_code: code,
+            shares: Math.round(shares),
+            // Awards and gifts genuinely report no price. That is the column's
+            // declared null meaning; a zero there would read as a free purchase.
+            price: numberOrNull(xmlValue(scope, 'transactionPricePerShare')),
+            shares_owned_after: (() => {
+              const v = numberOrNull(xmlValue(scope, 'sharesOwnedFollowingTransaction'));
+              return v === null ? null : Math.round(v);
+            })(),
+            accession_no: opts.accessionNo,
+            line_no: lineNo,
+            // Null under the pre-v20 recipe, so a replay of a response captured
+            // then reproduces its stored rows exactly — the column did not exist.
+            security_class: securityClass
+          }
+        });
+      }
+    };
+
+    collect('nonDerivativeTransaction', opts.derivatives === true ? 'non_derivative' : null);
+    // Numbered after the non-derivative ones, so every pre-v20 row keeps its line.
+    if (opts.derivatives === true) collect('derivativeTransaction', 'derivative');
     return rows;
   };
 }
