@@ -129,6 +129,40 @@ Provenance: **measured** (a #43 study result) · **inherited** (a wheel-screen r
   disagrees with itself.* Per-trade, **21 DTE beat 30 and 35 at every delta**; in the v4 portfolio sim
   30 DTE returned **+75.1%** against 21 DTE's **+61.3%**. The mode targets 30. Unsettled: which
   measurement governs, and why they differ (turnover vs per-trade edge).
+  **REFRAMED 2026-09-22: the disagreement is not real — one side is measured under a rule the study
+  threw away.** §4's DTE sweep runs on `BASE` = the DRAFT exits (`pt 0.5 sl 2 ts 15`), and BPS-13 found
+  the stop plus time stop **halved** the portfolio return, so they were dropped. A fixed 15-day time
+  stop is not DTE-neutral: it cuts at **71%** of a 21-DTE trade's life and **43%** of a 35-DTE one, and
+  the study's own table shows time-stop exits at **18% / 36% / 42%** for 21 / 30 / 35 DTE (Δ0.30). §4
+  measures how much of each trade's life the time stop lets you keep, not DTE. **The confound is 2.4×
+  the effect:** at Δ0.25 the 21-over-30 gap is **0.85 pts** of mean return, while removing the time stop
+  adds **2.08 pts** to the 30-DTE arm alone (§4 1.72 → §4b 3.80) — and under the adopted exits 30 DTE's
+  mean already beats 21 DTE's draft-exit mean. **The sweep was never re-run:** §4b and §4c switch to
+  `LEAN` and hold DTE at 30, so there is no per-trade 21-vs-30 comparison under the shipped rule
+  anywhere in #43.
+  **The portfolio side is one pair, one path, and the figure above is from the wrong run.** `+75.1 /
+  +61.3` is `bull-put-spread-v4-flat.md` — the **flat $0.03/leg** costs. On quoted costs it is
+  **51.8% vs 47.7%**, so the gap goes **13.8 → 4.1 points** and the 30-DTE arm loses 23 points to
+  realistic costs against the 21-DTE arm's 14. 21 DTE also carried the lower drawdown (9.6% vs 10.2%)
+  on 337 trades against 263. `portfolioConfigs` has **one** 21-DTE row and **no 35-DTE row at all**.
+  **Shadow cannot answer this** — the mode targets 30, so stored DTEs run 24–32 and cluster at 32; it
+  generates no 21-DTE observation by construction. **But the data is already paid for:**
+  `SPREAD_CAPTURE` fetches every expiry in a **14–45 day** window for each entry ticker every run, at
+  real bid/ask — wider than the mode's own 21–35.
+  **Decision 2026-09-22: measure the cost half on real quotes first (v1.1.311).**
+  `scripts/fr-spread-dte-cost-study.mjs` (self-test 15/15, `scripts/selftest-spread-dte-cost.mjs`)
+  builds the mode's spread at 21 and at 30 DTE from the **same** stored chain, paired on
+  ticker+date+slot, and reports credit, round-trip cost, cost share and who clears BPS-9's 25% gate.
+  **Run it from a normal terminal.** Three things it gets right on purpose: **paired only** (a pooled
+  weekly-vs-monthly friction comparison INVERTS in this codebase — the 2026-08-04 expiry-selection
+  finding); **the cost gate is an outcome, never a filter**, or the expensive half of the distribution
+  under study disappears; and the **monthly share of each bucket is reported**, because a ~30 DTE
+  bucket lands on a third-Friday monthly far more often than a ~21 one and the answer could be about
+  expiry type rather than DTE. Deliberately silent on returns — nothing is settled yet.
+  **Still open after it runs:** returns and %/day under the adopted exits, which needs §4's grid
+  re-run on `LEAN` plus 21/35 rows in §7 — worth doing only if the cost measurement leaves 21 DTE
+  viable, and read knowing the study's wing is Black-Scholes plus a flat skew whose error is itself
+  DTE-dependent (§3 moves the 30-DTE answer 0.277 → 0.081 %/day across skew 0→6).
 - **BPS-5. Earnings gate — fail closed, ETFs exempt.** *Drafted* (copied from Roll the Dice). Cost
   **16 of 75** first-week rejections: 10 stale (NTAP, INTU — no provider had announced yet) and 6 unknown.
   Unsettled: "no provider has announced the next date" is a different fact from "this reports before

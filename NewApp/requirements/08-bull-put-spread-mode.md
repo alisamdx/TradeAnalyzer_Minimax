@@ -91,6 +91,16 @@ Read from `spread_chain_capture` rows this run just wrote (`reason = 'entry'`), 
 **makes no E\*Trade calls of its own**. For each ticker:
 
 - **Expiry:** listed, **21–35 DTE**, before the next earnings report; the one nearest **30 DTE**.
+  **The 30 target rests on less than it looks (BPS-4, 2026-09-22).** The #43 per-trade grid that
+  favours 21 DTE runs on the DRAFT exits, whose 15-day time stop truncates 71% of the way through a
+  21-DTE trade and 43% of the way through a 35-DTE one — time-stop exits are 18% / 36% / 42% at
+  21 / 30 / 35 DTE, so the sweep handicaps the longer arms, and the handicap (2.08 pts of mean return
+  at Δ0.25) is **2.4× the gap it established** (0.85 pts). The sweep was never re-run under the
+  adopted exits. The portfolio evidence for 30 is one pair on one path, and it is **4.1 points** on
+  quoted costs, not the 13.8 the flat-cost run shows. Being measured by
+  `scripts/fr-spread-dte-cost-study.mjs` on real captured quotes; **this window is not settled
+  evidence, and the mode's own picks cannot settle it** — targeting 30 means no 21-DTE observation is
+  ever generated.
 - **Short put:** two-sided quote, |Δ| in **0.20–0.40**, closest to **0.30** (0.25–0.35 until v1.1.292, S7).
 - **Long put:** two-sided quote, strike closest to **short strike − 5% of spot**, accepting
   **3–10%**; if none, none (5–7.5% until v1.1.292, S7).
