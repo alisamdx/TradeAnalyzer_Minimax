@@ -109,7 +109,7 @@ The inspector refuses any filter or sort that would scan unbounded (05 §8), so 
 | `raw_split`, `raw_dividend` | `(ticker, execution_date)` / `(ticker, ex_dividend_date)` |
 | `raw_earnings_event` | `(ticker, report_date)`, `(report_date)`, `(ticker, observed_at)` |
 | `raw_index_quote` | `(symbol, as_of_date)` |
-| `raw_edgar_filing` | `(cik, filed_date)`, unique `(accession_no)` |
+| `raw_edgar_filing` | `(cik, filed_date)`, unique `(accession_no)` — **wrong, and must become `(accession_no, observed_at)` at the next generation (v1.1.308).** The table is append-only and every other supersession in the schema keys on `(natural_key, observed_at)`; worse, the transaction is the whole response, so one already-stored filing aborts the insert of every filing beside it and reports `UNIQUE constraint failed`, which reads as a parser fault. The filers’ slice is keyed on the trading date, so any day with two collector runs asks the identical twenty and hits it — HSY on 2026-09-22, stored at 17:05 and re-asked at 20:47. Mitigated in-generation by `knownAccessions` in the ingest recipe, which never offers the constraint a duplicate; dropping a unique index is not additive, so the key itself cannot change inside a generation |
 | `raw_edgar_fact` | `(cik, concept, period_end)`, `(accession_no)` |
 | `raw_account_position_snapshot` | `(as_of_date)`, `(symbol, as_of_date)` |
 | `raw_account_balance_snapshot` | `(as_of_date)` |

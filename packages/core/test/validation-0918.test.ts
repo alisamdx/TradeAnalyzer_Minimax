@@ -414,4 +414,37 @@ describe('the EDGAR filings sweep asks for what EDGAR\'s `recent` block always h
     // JEF's shape here is 1,000 filings in four weeks: that one IS cut short of the window.
     expect(capped()).toEqual([{ t: 'JEF', cap: 1 }, { t: 'JPM', cap: 0 }]);
   });
+
+  it('a second run on one trading date re-asks the same filers and must not lose the response (v1.1.308)', async () => {
+    // `raw_edgar_filing` is append-only yet UNIQUE on `accession_no` alone, and
+    // the transaction is the WHOLE response — so one already-stored filing
+    // discarded every filing beside it and reported
+    // `UNIQUE constraint failed: raw_edgar_filing.accession_no`, which reads as
+    // "the parser broke". The filers' slice is keyed on the trading date, so any
+    // day with two collector runs asks the identical twenty: HSY was stored at
+    // 17:05 on 2026-09-22 and re-asked at 20:47.
+    listed('HSY', 'CS', '0000047111');
+    const body = (accessions: readonly string[], dates: readonly string[]) =>
+      JSON.stringify({ filings: { recent: {
+        accessionNumber: accessions, form: accessions.map(() => '10-Q'), filingDate: dates,
+        reportDate: dates.map(() => ''), primaryDocument: dates.map(() => 'x.htm')
+      }, files: [] } });
+
+    const first = makeHost({ httpGet: async () => response(body(['A-1', 'A-2'], ['2026-07-30', '2026-04-30'])) });
+    expect((await runEdgarFilings(first, db(), run)).stored).toBe(2);
+
+    // The same two come back, plus one genuinely new filing.
+    const second = makeHost({
+      httpGet: async () => response(body(['A-3', 'A-1', 'A-2'], ['2026-09-17', '2026-07-30', '2026-04-30']))
+    });
+    const again = await runEdgarFilings(second, db(), run);
+
+    // The duplicate is a no-op and the NEW filing survives. Before the fix this
+    // was `failed: 1, stored: 0` and A-3 was thrown away with the duplicates —
+    // QC-701 would then call the filer stale with no trace of why.
+    expect(again.failed).toBe(0);
+    expect(again.stored).toBe(1);
+    const held = raw.prepare("SELECT accession_no a FROM raw_edgar_filing WHERE cik = '0000047111' ORDER BY a").all();
+    expect(held.map((r: { a: string }) => r.a)).toEqual(['A-1', 'A-2', 'A-3']);
+  });
 });

@@ -192,8 +192,14 @@ export const recipes = {
     readonly ticker: string;
     readonly since?: string;
     readonly forms?: ReadonlySet<string>;
+    readonly knownAccessions?: ReadonlySet<string>;
   }): IngestRecipe =>
-    recipe('edgar_submissions', args({ cik: o.cik, ticker: o.ticker, since: o.since, forms: sortedSet(o.forms) })),
+    // `sortedSet` returns undefined for an empty set and `args` drops undefined,
+    // so a first-ever pull keeps the digest it had before this argument existed.
+    recipe('edgar_submissions', args({
+      cik: o.cik, ticker: o.ticker, since: o.since, forms: sortedSet(o.forms),
+      knownAccessions: sortedSet(o.knownAccessions)
+    })),
   companyFacts: (o: { readonly cik: string; readonly since?: string; readonly concepts?: ReadonlySet<string> }): IngestRecipe =>
     recipe('edgar_companyfacts', args({ cik: o.cik, since: o.since, concepts: sortedSet(o.concepts) })),
   // `derivatives` is omitted when false so a pre-v20 recipe keeps its exact
@@ -338,11 +344,13 @@ const DECODERS: { readonly [M in IngestModuleName]: (a: RecipeArgs) => IngestMod
   edgar_submissions: (a) => {
     const since = optStr(a, 'since');
     const forms = optSet(a, 'forms');
+    const knownAccessions = optSet(a, 'knownAccessions');
     return makeSubmissionsIngest({
       cik: str(a, 'cik'),
       ticker: str(a, 'ticker'),
       ...(since !== undefined ? { since } : {}),
-      ...(forms ? { forms } : {})
+      ...(forms ? { forms } : {}),
+      ...(knownAccessions ? { knownAccessions } : {})
     });
   },
   edgar_companyfacts: (a) => {

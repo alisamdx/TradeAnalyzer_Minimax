@@ -499,6 +499,16 @@ export async function runEdgarFilings(
   const slice = [...entries, ...entries].slice(start, Math.min(start + maxFilers, start + entries.length));
 
   const since = addDays(run.tradingDate, -FILINGS_LOOKBACK_DAYS);
+  // What is already stored for this CIK, so a re-pull skips it instead of
+  // throwing. `raw_edgar_filing` is UNIQUE on `accession_no` alone, and the
+  // transaction is the whole response — so one already-seen filing discards
+  // every NEW filing beside it and reports as a parse failure. The slice is
+  // keyed on the trading date, so any day with two collector runs asks the
+  // identical twenty filers and hits this: HSY on 2026-09-22, stored at 17:05
+  // and re-asked at 20:47.
+  const storedAccessions = db.prepare(
+    'SELECT accession_no FROM raw_edgar_filing WHERE cik = ?'
+  );
   let stored = 0;
   let calls = 0;
   let failed = 0;
@@ -516,7 +526,10 @@ export async function runEdgarFilings(
       endpoint: `/submissions/CIK{cik}.json`, slug: 'edgar-submissions',
       params: { cik, ticker }, response, captureRuleId: ruleId,
       atProviderCap: response.body ? submissionsAtCap(response.body, since) : false,
-      recipe: recipes.submissions({ cik, ticker, since, forms: REPORT_FORMS })
+      recipe: recipes.submissions({
+        cik, ticker, since, forms: REPORT_FORMS,
+        knownAccessions: new Set((storedAccessions.all(cik) as { accession_no: string }[]).map((r) => r.accession_no))
+      })
     });
 
     if (result.parseStatus === 'ok') stored += result.rowsWritten;

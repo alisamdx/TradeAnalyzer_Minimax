@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.308] - 2026-09-22
+
+### A re-pulled EDGAR filing discarded every filing beside it
+
+One line in the 2026-09-22 day report: `/submissions/CIK{cik}.json` — **HTTP 200**, parse failed, `UNIQUE constraint failed: raw_edgar_filing.accession_no`. `raw_edgar_filing` is `appendOnly` yet UNIQUE on `accession_no` alone — the `raw_executed_order` shape already written up — and here it is worse than losing the evidence of a difference, because **the transaction is the whole response**: one already-stored filing aborts the insert of every filing beside it and `parsed_row_count` comes back 0, reported as though the parser had broken. The trigger is structural: the filers' slice is keyed on the trading date, so **two collector runs on one trading date ask the identical twenty filers** — now the normal shape of a day whose scheduled run failed and was re-run by hand. Run 28 stored HSY's four filings at 17:05; run 30 asked the same CIK at 20:47 and stored nothing. It cost nothing only because HSY filed nothing in between — a new 10-Q in that window would have been thrown away with the duplicates, and QC-701 would have called the filer stale with no trace but a constraint name. Fixed with `knownAccessions`, passed as a **recipe argument** (like v1.1.305's `derivatives` and v1.1.306's `refusedSymbols`, and omitted when empty): what was already stored is a fact about capture time, not replay time.
+
+**The key itself is still wrong and has to stay wrong for now.** Every other supersession in the schema is `(natural_key, observed_at)`; this one is the provider's id alone. Dropping a unique index is not additive, so inside a generation it is a spec note rather than a migration — and until then, an accession re-issued with different content would still throw rather than record the difference, which is the original complaint. Also recorded: run 19's two failures are a **different** bug with an identical error string — LBTYA/LBTYK and LEN/LEN.B, share classes behind one CIK asked twice in ONE run, fixed by the per-CIK dedupe in v1.1.275. The run's `host_version` is what separates the two causes.
+
+Details: `changelogs/v1.1.308_2026-09-22.md`.
+
 ## [1.1.307] - 2026-09-22
 
 ### QC-601 manufactured its own worst finding

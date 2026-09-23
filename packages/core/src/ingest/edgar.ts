@@ -80,12 +80,42 @@ export function submissionsAtCap(body: string, since?: string): boolean {
  * and any row whose companion fields are missing is stored with nulls rather
  * than shifted into alignment.
  */
+/**
+ * EDGAR submissions → `raw_edgar_filing`.
+ *
+ * **`knownAccessions` is idempotence a level up, and without it a re-pull loses
+ * the whole response (v1.1.308).** `raw_edgar_filing` is append-only yet UNIQUE
+ * on `accession_no` alone, so re-storing a filing already stored throws inside
+ * the capture transaction — and the transaction is the whole response, so
+ * `parsed_row_count` comes back **0** and every filing in it is discarded, not
+ * just the duplicate. It surfaces as `UNIQUE constraint failed:
+ * raw_edgar_filing.accession_no`, which reads as "the parser broke".
+ *
+ * It fires whenever one trading date has two collector runs, because the
+ * filers' rolling slice is keyed on the trading date and so asks the identical
+ * twenty. Measured 2026-09-22: run 28 stored HSY's four filings at 17:05 and
+ * run 30 asked the same CIK at 20:47, got the same four back, and stored
+ * nothing. That cost nothing only because HSY filed nothing in between — a new
+ * 10-Q in that window would have been thrown away with the duplicates, and
+ * QC-701 would then have reported the filer stale with no trace of why.
+ *
+ * Passed as a recipe argument rather than read from the database here, so a
+ * replay re-runs the parse that actually happened: what was already stored is a
+ * fact about capture time, not about replay time. Omitted when empty, so a
+ * first-ever pull keeps its digest.
+ *
+ * This is the narrow fix. The key itself is wrong — every other supersession in
+ * the schema is `(natural_key, observed_at)` — but dropping a unique index is
+ * not additive and so cannot happen inside a generation (02 §1).
+ */
 export function makeSubmissionsIngest(opts: {
   readonly cik: string;
   readonly ticker: string;
   /** Only filings on or after this date are stored; the feed carries years. */
   readonly since?: string;
   readonly forms?: ReadonlySet<string>;
+  /** Accession numbers already stored, which must not be inserted a second time. */
+  readonly knownAccessions?: ReadonlySet<string>;
 }) {
   return (body: string, ctx: IngestContext): readonly IngestedRowSpec[] => {
     const parsed = JSON.parse(body) as { filings?: { recent?: EdgarRecentFilings } };
@@ -100,6 +130,9 @@ export function makeSubmissionsIngest(opts: {
       if (!form || !filedDate) continue;
       if (opts.forms && !opts.forms.has(form)) continue;
       if (opts.since && filedDate < opts.since) continue;
+      // A filing is immutable once filed, so an accession already stored is a
+      // genuine no-op rather than a fact being dropped.
+      if (opts.knownAccessions?.has(accession)) continue;
 
       rows.push({
         table: 'raw_edgar_filing',
