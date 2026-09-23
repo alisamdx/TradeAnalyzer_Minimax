@@ -128,6 +128,13 @@ check('same-expiry-type subgroup reported as too few at n=4', /Same expiry type:
 // rather than quoting one off two observations.
 check('conditional-on-tradable subgroup refuses at n=2',
   /Both buckets clear the gate: 2 pairs — too few to say anything/.test(outText));
+check('the both-controls-on cell refuses at n=2',
+  /Same type AND both clear: 2 pairs — too few to say anything/.test(outText));
+// As traded: TIGHT clears at both DTEs, WIDE only at 30 — so 2 of 4 at 21 and 4 of 4 at 30.
+check('as-traded book counts are 2 of 4 at 21 DTE and 4 of 4 at 30 DTE',
+  /\| 21 DTE \| 2 of 4 \|/.test(outText) && /\| 30 DTE \| 4 of 4 \|/.test(outText));
+check('the pool change from moving the target is reported as −50%',
+  /changes the tradable pool by \*\*−50%\*\*/.test(outText));
 
 // ── the answer must be able to come out the OTHER way ───────────────────────────────────────────
 // A check that can only report "the shorter expiry costs more" is decoration — the shape of the

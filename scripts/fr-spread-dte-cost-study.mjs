@@ -324,6 +324,42 @@ if (bothOk.length >= 10) {
       `${LONG_DTE} DTE **${pctf(med(bothOk.map(p => p.long.costShare)))}**.`);
 }
 
+// Conditioning on gate-clearance SELECTS FOR the liquid leg, which is the monthly — so the row above
+// is still an expiry-type comparison, measured after the gate instead of before it. Only the
+// intersection controls both at once, and if the two controls point opposite ways this is the cell
+// that decides which one was carrying the answer.
+say();
+say('#### …and same expiry type at the same time — the only cell with both controls on');
+say();
+report('Same type AND both clear', bothOk.filter(p => p.short.monthly === p.long.monthly),
+  'Controls expiry type and tradability together. Anything above controls one of them.');
+
+// The DECISION is not a paired difference. Changing the target changes WHICH names are tradable, so
+// the two books are different populations — and that is the thing being chosen between, not a
+// confound to remove.
+const book = k => pairs.filter(p => p[k].clearsGate).map(p => p[k]);
+const shortBook = book('short'), longBook = book('long');
+say();
+say('## As traded — the book each target would actually produce');
+say();
+say('Not paired, deliberately: a DTE target changes which names clear the gate, so these are different ' +
+    'populations. That difference IS the decision. (It is not evidence about tenor — a target that ' +
+    'lands on monthlies gets the monthlies\' liquidity, which is a fact about the rule, not about DTE.)');
+say();
+say('| target | candidates clearing the 25% gate | median cost share | median mid credit | monthly |');
+say('|---|--:|--:|--:|--:|');
+for (const [label, b] of [[`${SHORT_DTE} DTE`, shortBook], [`${LONG_DTE} DTE`, longBook]]) {
+  say(`| ${label} | ${b.length} of ${pairs.length} | ${pctf(med(b.map(x => x.costShare)))} | ` +
+      `$${f(med(b.map(x => x.midCredit)))} | ${pctf(b.length ? b.filter(x => x.monthly).length / b.length : null, 0)} |`);
+}
+if (shortBook.length && longBook.length) {
+  const lost = 1 - shortBook.length / longBook.length;
+  say();
+  say(`Moving the target from ${LONG_DTE} to ${SHORT_DTE} DTE changes the tradable pool by ` +
+      `**${lost > 0 ? '−' : '+'}${Math.abs(lost * 100).toFixed(0)}%**. Read that against BPS-10: the ` +
+      'eligible set is what the top-5 cut chooses between, and it is already thin.');
+}
+
 const reasons = m => ([...m].sort((a, b) => b[1] - a[1]).map(([r, n]) => `${r} ${n}`).join(' · ') || 'none');
 say();
 say('## Could not build');
