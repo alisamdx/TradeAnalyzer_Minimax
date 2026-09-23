@@ -662,8 +662,14 @@ export const QC702_FACT_SANITY: CheckDefinition = {
     'Share count from EDGAR agrees with the provider reference within 25 %. Neither side of this ' +
     'comparison existed in the old schema — its only share-count column is empty in practice and it ' +
     'has no CIK column at all — so the threshold could not be measured before the pilot, and it is a ' +
-    'working value rather than a guess dressed as one.',
-  readsTables: ['raw_edgar_fact', 'raw_ticker_reference'],
+    'working value rather than a guess dressed as one. ' +
+    'v1.1.309: the two sides are observed on DIFFERENT DATES, so a split between them puts them on ' +
+    'different scales and the comparison measures the corporate action rather than the data. IESC ' +
+    'read 50.0 % on 2026-09-22 — EDGAR 19,924,356 stated 2026-07-27, Polygon 39,848,712 observed ' +
+    '2026-09-11, and a 1:2 split on 2026-08-24 sits between them; both numbers are exactly right. ' +
+    'The EDGAR figure is now carried across any split in the window before comparing, and the ' +
+    'adjustment is named in the finding rather than applied silently.',
+  readsTables: ['raw_edgar_fact', 'raw_ticker_reference', 'raw_split'],
   testedQuantity: 'shares_disagreement_fraction',
   testedUnit: 'fraction',
   thresholds: { maxDisagreement: 0.25 },
@@ -672,7 +678,7 @@ export const QC702_FACT_SANITY: CheckDefinition = {
     const rows = ctx.db
       .prepare(
         `WITH latest_ref AS (
-           SELECT ticker, cik, shares_outstanding
+           SELECT ticker, cik, shares_outstanding, as_of_date
              FROM raw_ticker_reference
             WHERE cik IS NOT NULL AND shares_outstanding IS NOT NULL
               AND row_id IN (SELECT MAX(row_id) FROM raw_ticker_reference GROUP BY ticker)
@@ -684,24 +690,60 @@ export const QC702_FACT_SANITY: CheckDefinition = {
             WHERE taxonomy = 'dei' AND concept = 'EntityCommonStockSharesOutstanding'
               AND unit = 'shares' AND value > 0
          )
-         SELECT r.ticker, r.shares_outstanding AS ref_shares, f.value AS fact_shares, f.period_end
+         SELECT r.ticker, r.shares_outstanding AS ref_shares, f.value AS fact_shares, f.period_end,
+                r.as_of_date AS ref_as_of
            FROM latest_ref r JOIN latest_fact f ON f.cik = r.cik AND f.rn = 1`
       )
       .all() as {
-      ticker: string; ref_shares: number; fact_shares: number; period_end: string;
+      ticker: string; ref_shares: number; fact_shares: number; period_end: string; ref_as_of: string;
     }[];
 
+    // Splits per ticker, so the EDGAR figure can be carried onto the reference's
+    // scale. Read once — the table holds thousands of rows and the comparison
+    // runs over dozens of tickers.
+    //
+    // An incomplete `raw_split` makes this UNDER-adjust and therefore fire,
+    // which is the right direction to fail in: a missing corporate action shows
+    // up as a loud disagreement rather than as a silent correction.
+    const splitsByTicker = new Map<string, { date: string; factor: number }[]>();
+    for (const s of ctx.db
+      .prepare('SELECT ticker, execution_date, split_from, split_to FROM raw_split WHERE split_from > 0')
+      .all() as { ticker: string; execution_date: string; split_from: number; split_to: number }[]) {
+      const list = splitsByTicker.get(s.ticker) ?? [];
+      list.push({ date: s.execution_date, factor: s.split_to / s.split_from });
+      splitsByTicker.set(s.ticker, list);
+    }
+
     return rows.map((r) => {
-      const disagreement = Math.abs(r.fact_shares - r.ref_shares) / r.ref_shares;
+      // The two sides are observed on different dates, so only a split BETWEEN
+      // them separates their scales: one on or before `period_end` is already
+      // in the EDGAR figure, and one after the reference observation is in
+      // neither.
+      const between = (splitsByTicker.get(r.ticker) ?? []).filter(
+        (s) => s.date > r.period_end && s.date <= r.ref_as_of
+      );
+      const factor = between.reduce((acc, s) => acc * s.factor, 1);
+      const adjusted = r.fact_shares * factor;
+      const disagreement = Math.abs(adjusted - r.ref_shares) / r.ref_shares;
+      const carried =
+        factor === 1
+          ? ''
+          : ` [EDGAR carried ×${factor} across ${between.length} split(s) on ${between.map((s) => s.date).join(', ')}]`;
       return {
         key: r.ticker,
         value: disagreement,
         fired: disagreement > (this.thresholds['maxDisagreement'] as number),
         detail:
-          `${r.ticker}: EDGAR ${r.fact_shares.toLocaleString()} vs reference ` +
-          `${r.ref_shares.toLocaleString()} shares (${(disagreement * 100).toFixed(1)}%)`,
+          `${r.ticker}: EDGAR ${adjusted.toLocaleString()} vs reference ` +
+          `${r.ref_shares.toLocaleString()} shares (${(disagreement * 100).toFixed(1)}%)${carried}`,
         evidence: {
-          ticker: r.ticker, edgarShares: r.fact_shares, referenceShares: r.ref_shares,
+          splitFactor: factor,
+          splitsBetween: between.map((s) => s.date),
+          // As filed AND as compared. Keeping only one of them would make a
+          // carried figure impossible to check back against the filing.
+          edgarSharesAsFiled: r.fact_shares,
+          referenceObservedAt: r.ref_as_of,
+          ticker: r.ticker, edgarShares: adjusted, referenceShares: r.ref_shares,
           periodEnd: r.period_end, disagreement
         }
       } satisfies Evaluation;

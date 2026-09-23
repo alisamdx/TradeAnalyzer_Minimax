@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.309] - 2026-09-22
+
+### QC-702 was measuring a stock split
+
+`IESC: EDGAR 19,924,356 vs reference 39,848,712 shares (50.0%)` — the ratio is exactly 2.0000, which is the tell. Both numbers are right: EDGAR's `dei:EntityCommonStockSharesOutstanding` was stated **2026-07-27** on the Q3 10-Q cover page, Polygon's reference was observed **2026-09-11**, and `raw_split` holds `IESC 2026-08-24 1:2` sitting between them. The check was comparing a pre-split figure with a post-split one as though they shared a scale — measuring the corporate action, not the data. It now carries the EDGAR figure across any split strictly after the fact's `period_end` and on or before the reference's `as_of_date`: **75 evaluated, 0 fired** on the 2026-09-22 generation, IESC reading `0.0% [EDGAR carried ×2 across 1 split(s) on 2026-08-24]`. The window boundaries are the two observation dates and nothing else — a split on or before `period_end` is already inside the EDGAR figure and one after the reference observation is inside neither, so applying either would manufacture the disagreement the adjustment exists to remove. **The adjustment is named in the finding, never applied silently**, and the evidence keeps both `edgarSharesAsFiled` and the carried `edgarShares`, because a figure that has been moved must stay checkable against the filing it came from.
+
+**The failure direction is deliberate:** an incomplete `raw_split` makes this UNDER-adjust and therefore FIRE, so a missing corporate action is loud rather than silently corrected — the check can never explain away a real fault with an adjustment it invented. A test pins it. **General shape, now the third instance in this project: two quantities captured at different times are not comparable across a corporate action, and nothing about either number says so** — unadjusted splits in `historical_prices`, strikes frozen in `daily_briefs.picks` against a repaired series, and now a share count. Every one looked like a data error and was a timing difference. Noted but not fixed: `raw_ticker_reference` for IESC holds one row from **run 1 on 2026-09-11**, the universe seed, so the reference side can be weeks stale; the adjustment reads that row's own `as_of_date` and stays correct either way, but the staleness deserves its own look.
+
+Details: `changelogs/v1.1.309_2026-09-22.md`.
+
 ## [1.1.308] - 2026-09-22
 
 ### A re-pulled EDGAR filing discarded every filing beside it

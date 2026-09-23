@@ -13,7 +13,7 @@ import { recipes } from '../src/ingest/recipes.js';
 import { ensureTradingCalendar } from '../src/collector/trading-calendar.js';
 import { runInsiderSweep, insiderIndexDates, runEtradeEarnings, factsQueue, runEdgarFilings } from '../src/collector/phases/events.js';
 import { QC910_INSIDER_INDEX_COVERAGE } from '../src/qa/checks/macro.js';
-import { QC603_EARNINGS_FRESHNESS, QC701_FILING_FRESHNESS } from '../src/qa/checks/earnings-fundamentals.js';
+import { QC603_EARNINGS_FRESHNESS, QC701_FILING_FRESHNESS, QC702_FACT_SANITY } from '../src/qa/checks/earnings-fundamentals.js';
 import { etradeEarningDate } from '../src/ingest/events.js';
 
 /**
@@ -354,6 +354,92 @@ describe('the EDGAR fact pull when SEC companyfacts lags a filing (v1.1.271)', (
     expect(e?.fired).toBe(true);
     expect(e?.evidence?.['cause']).toBe('sec_companyfacts_missing');
     expect(e?.detail).toContain('SEC companyfacts fetched 2026-09-16 still has no facts for the 10-Q filed 2026-07-28');
+  });
+});
+
+describe('QC-702 compares share counts observed on different dates (v1.1.309)', () => {
+  const rule2 = () => captureRuleId(db(), makeHost(), 'test', { v: 1 }, 'test');
+
+  /** A reference row carrying a share count, through the real ingest. */
+  function referenceShares(ticker: string, cik: string, shares: number) {
+    captureResponse({
+      host: makeHost(), db: db(), runId: run.runId, asOfDate: DATE, provider: 'polygon',
+      endpoint: `/v3/reference/tickers/${ticker}`, slug: 'ref', params: { ticker },
+      response: response(JSON.stringify({
+        results: { ticker, name: ticker, type: 'CS', cik, weighted_shares_outstanding: shares }
+      })),
+      captureRuleId: rule2(), recipe: recipes.tickerReference()
+    });
+  }
+
+  /** The dei cover-page share count, as filed on `periodEnd`. */
+  function coverShares(cik: string, periodEnd: string, shares: number) {
+    captureResponse({
+      host: makeHost(), db: db(), runId: run.runId, asOfDate: DATE, provider: 'edgar',
+      endpoint: `/api/xbrl/companyfacts/CIK${cik}.json`, slug: 'facts', params: { cik },
+      response: response(JSON.stringify({ cik, facts: { dei: { EntityCommonStockSharesOutstanding: {
+        units: { shares: [{ end: periodEnd, val: shares, fy: 2026, fp: 'Q3', form: '10-Q', accn: `${cik}-26-000130`, filed: periodEnd }] }
+      } } } })),
+      captureRuleId: rule2(), recipe: recipes.companyFacts({ cik })
+    });
+  }
+
+  function split(ticker: string, executionDate: string, from: number, to: number) {
+    captureResponse({
+      host: makeHost(), db: db(), runId: run.runId, asOfDate: DATE, provider: 'polygon',
+      endpoint: '/v3/reference/splits', slug: 'splits', params: {},
+      response: response(JSON.stringify({ results: [
+        { id: `${ticker}-${executionDate}`, ticker, execution_date: executionDate, split_from: from, split_to: to }
+      ] })),
+      captureRuleId: rule2(), recipe: recipes.splits()
+    });
+  }
+
+  const evaluate = () =>
+    QC702_FACT_SANITY.run({ db: db(), runId: run.runId, tradingDate: DATE, observedAt: `${DATE}T17:05:00-04:00` });
+
+  it('carries the EDGAR figure across a split between the two observations', () => {
+    // IESC, measured 2026-09-22: EDGAR 19,924,356 stated 2026-07-27, Polygon
+    // 39,848,712 observed 2026-09-11, and a 1:2 split on 2026-08-24 sits
+    // between them. Both numbers are exactly right; the check was measuring the
+    // corporate action. It read 50.0%.
+    referenceShares('IESC', '0001048268', 39_848_712);
+    coverShares('0001048268', '2026-07-27', 19_924_356);
+    split('IESC', '2026-08-24', 1, 2);
+
+    const [e] = evaluate();
+    expect(e?.fired).toBe(false);
+    expect(e?.value).toBe(0);
+    // Named, not applied silently — a carried figure must be checkable back
+    // against the filing.
+    expect(e?.detail).toContain('×2');
+    expect(e?.evidence?.['edgarSharesAsFiled']).toBe(19_924_356);
+    expect(e?.evidence?.['edgarShares']).toBe(39_848_712);
+  });
+
+  it('takes only the splits between the filing date and the reference observation', () => {
+    // One on or before the filing's date is already in the EDGAR figure, and
+    // one after the reference observation is in neither. Applying either would
+    // manufacture the disagreement it exists to remove.
+    referenceShares('AAA', '0000000001', 1_000_000);
+    coverShares('0000000001', '2026-07-27', 1_000_000);
+    split('AAA', '2026-07-01', 1, 2);          // before the filing
+    split('AAA', `${DATE}`, 1, 2);             // on the reference observation...
+    const [e] = evaluate();
+    // The second split lands ON as_of_date, which IS inside the window: the
+    // reference was observed that day and so already reflects it.
+    expect(e?.evidence?.['splitsBetween']).toEqual([DATE]);
+  });
+
+  it('still fires when a split cannot explain the gap', () => {
+    // The failure direction that matters: an incomplete raw_split under-adjusts
+    // and therefore fires, so a missing corporate action is loud rather than
+    // silently corrected.
+    referenceShares('BBB', '0000000002', 90_000_000);
+    coverShares('0000000002', '2026-07-27', 10_000_000);
+    const [e] = evaluate();
+    expect(e?.fired).toBe(true);
+    expect(e?.detail).not.toContain('×');
   });
 });
 
