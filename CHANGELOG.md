@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.307] - 2026-09-22
+
+### QC-601 manufactured its own worst finding
+
+The 2026-09-22 gate reported `FERG (finnhub) nearest report moved 2026-09-22 -> 2026-12-07, 76 days later` — the bulk-cap truncation signature, and **the single largest later slip in 121 measured across the generation**. It was not a slip. FERG's FY2026 Q4 (2026-09-22) and FY2026 Q3 (2026-12-07) were **both stored from run 8**; on the day FERG reported, Finnhub dropped the Q4 row and the nearest became the Q3 date that had sat beside it for seven runs. The excusal was strict — `prev_date < as_of` — so a nearest date landing **exactly on the run's own date** was not excused, and a ticker reporting *today* is precisely the case where the roll is most certainly legitimate. Now `<=`, in a named function both call sites share: the comparison existed in two copies (the live reading and `rejudgeSlipFindings`), the patch-one-call-site shape again, and extracting it is most of the fix. Nothing is given up — the collector runs after the close, so a report dated today has happened, and a truncation dropping a date equal to today would roll anyway. **Same bug as v1.1.304's QC-602**: both were true-looking findings carrying fictional numbers, and in both the fiction was the signature of a *more serious* fault than the one present, so the number spent attention in the wrong place.
+
+**The threshold was deliberately not moved.** The distribution over 121 slips: 53 at 1 day, 11 at 2–3, 41 at 4–7, 12 at 8–14, **3 at 15–22**, **zero at 23–45**, one at 76 (this bug). Median 3, p90 8. The three survivors are Finnhub refining an estimate — Macy's to 2026-12-03, Blue Owl to 2026-10-29, and MarketAxess *reverting* to the 2026-11-05 it had held for five runs. The empty 23–45 band hints that 14 is tight, but **with FERG reclassified this dataset contains zero confirmed truncation events, and raising a threshold when every sample is a negative is how a check becomes unable to fire.** Also worth carrying: the check does not measure nearer moves, so a spurious nearer move is invisible going in and fires on the way back out.
+
+Details: `changelogs/v1.1.307_2026-09-22.md`.
+
 ## [1.1.306] - 2026-09-22
 
 ### An alias ruling is data, and now it has somewhere to live

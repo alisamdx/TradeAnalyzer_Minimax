@@ -1173,6 +1173,37 @@ describe('QC-601, the earnings truncation signature', () => {
     expect(gate([QC601_EARNINGS_SLIPS_LATER]).blocking).toBe(0);
   });
 
+  it('does NOT fire when the issuer reported ON the run\'s own date (v1.1.307)', () => {
+    // FERG, measured on the real generation. Its FY2026 Q4 sat at 2026-09-22
+    // for seven consecutive runs while its FY2026 Q3 at 2026-12-07 sat beside
+    // it from run 8. On 2026-09-22 — the day it reported — Finnhub dropped the
+    // Q4 row and the nearest became the Q3 date that had been there all along.
+    // Nothing was truncated and no date was lost.
+    //
+    // The excusal was `prev < as_of`, strict, so a date landing exactly on the
+    // run's own date was not excused: the check reported 76 DAYS LATER, the
+    // single largest slip in the generation and the exact bulk-cap truncation
+    // signature, from entirely correct data.
+    const { prev, next, nextAsOf } = sweeps('2026-09-22');
+    insertEarnings([
+      { ticker: 'FERG', date: '2026-09-22', observedAt: SWEEP_1, runId: prev },
+      { ticker: 'FERG', date: '2026-12-07', observedAt: SWEEP_1, runId: prev },
+      { ticker: 'FERG', date: '2026-12-07', observedAt: SWEEP_2, runId: next, asOf: nextAsOf }
+    ]);
+    expect(gate([QC601_EARNINGS_SLIPS_LATER]).blocking).toBe(0);
+  });
+
+  it('still fires when the previous nearest is genuinely in the future', () => {
+    // The boundary moved by one day, not away: a date the sweep has NOT reached
+    // must still be measured, or the check stops being able to see truncation.
+    const { prev, next, nextAsOf } = sweeps('2026-09-22');
+    insertEarnings([
+      { ticker: 'FERG', date: '2026-09-23', observedAt: SWEEP_1, runId: prev },
+      { ticker: 'FERG', date: '2026-12-07', observedAt: SWEEP_2, runId: next, asOf: nextAsOf }
+    ]);
+    expect(gate([QC601_EARNINGS_SLIPS_LATER]).blocking).toBe(1);
+  });
+
   it('records the distribution even on a clean run', () => {
     // P10: a check cannot record fires without the distribution they came from.
     const { prev, next, nextAsOf } = sweeps();

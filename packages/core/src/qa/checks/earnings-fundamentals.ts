@@ -133,6 +133,32 @@ function daysBetween(a: string, b: string): number {
   return Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000);
 }
 
+/**
+ * Whether a nearest-report date has been reached by the sweep that observed the
+ * move, so the roll to the next quarter is the calendar working rather than a slip.
+ *
+ * **Inclusive, and that boundary is the whole point (v1.1.307).** It was `<`,
+ * so a date landing exactly on the run's own `as_of_date` was not excused —
+ * and a ticker reporting *today* is precisely the case where the roll is most
+ * certainly legitimate. FERG's FY2026 Q4 sat at 2026-09-22 for seven runs; on
+ * 2026-09-22 Finnhub dropped that row and the nearest became the FY2026 Q3 row
+ * at 2026-12-07 that had been stored since run 8. Nothing was truncated and no
+ * date was lost, yet the check reported **76 days later** — the single largest
+ * slip in the generation and the exact bulk-cap signature it exists to catch,
+ * manufactured from entirely correct data.
+ *
+ * The collector runs after the close, so a report dated today has happened
+ * (BMO hours ago, AMC within the hour). Nothing is given up by including it:
+ * a truncation that dropped a date equal to today would roll to the next
+ * quarter anyway, because that date has passed.
+ *
+ * One spelling, called from both the live reading and the re-judge, which
+ * carried their own copies of this comparison.
+ */
+function rolledAfterReport(previousNearest: string, asOfDate: string): boolean {
+  return previousNearest <= asOfDate;
+}
+
 export const QC601_EARNINGS_SLIPS_LATER: CheckDefinition = {
   id: 'QC-601',
   domain: 'earnings',
@@ -200,19 +226,19 @@ export const QC601_EARNINGS_SLIPS_LATER: CheckDefinition = {
       // 2026-12-15 two days after it reported. Clamped like a nearer move and
       // for the same reason: a legitimate move left in the fault's distribution
       // blurs the boundary the threshold is drawn against.
-      const rolledAfterReport = r.prev_date < r.new_as_of;
+      const rolled = rolledAfterReport(r.prev_date, r.new_as_of);
       return {
         key: `${r.ticker}:${r.source}`,
         // Only a LATER move is measured. A nearer move is legitimate and
         // reporting it as a negative magnitude would put it in the same
         // distribution as the fault and blur the boundary.
-        value: rolledAfterReport ? 0 : Math.max(slip, 0),
-        fired: !rolledAfterReport && slip > (this.thresholds['maxLaterSlipDays'] as number),
+        value: rolled ? 0 : Math.max(slip, 0),
+        fired: !rolled && slip > (this.thresholds['maxLaterSlipDays'] as number),
         detail:
           `${r.ticker} (${r.source}) nearest report moved ${r.prev_date} -> ${r.new_date}, ${slip} days later`,
         evidence: {
           ticker: r.ticker, source: r.source, previous: r.prev_date, observed: r.new_date,
-          slipDays: slip, rolledAfterReport
+          slipDays: slip, rolledAfterReport: rolled
         }
       };
     });
@@ -266,8 +292,7 @@ function rejudgeSlipFindings(ctx: CheckContext, today: readonly Evaluation[], ma
       const cur = sweeps[i]!;
       if (cur.run_id < f.first_seen_run_id || cur.run_id > f.last_seen_run_id) continue;
       pairs++;
-      const rolledAfterReport = prev.near_date < cur.as_of_date;
-      if (!rolledAfterReport && daysBetween(prev.near_date, cur.near_date) > maxSlip) { fires = true; break; }
+      if (!rolledAfterReport(prev.near_date, cur.as_of_date) && daysBetween(prev.near_date, cur.near_date) > maxSlip) { fires = true; break; }
     }
     if (fires) continue;
     out.push({
