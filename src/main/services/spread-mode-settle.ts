@@ -416,10 +416,40 @@ export function buildSpreadShadowReport(db: DbHandle, todayEt: string): SpreadSh
 
   const runs = db.prepare(
     // Grouped by POOL as well, or the two arms merge into one row and neither run's funnel is readable.
-    `SELECT as_of_date, slot, pool, SUM(outcome = 'pick') AS picks, SUM(outcome = 'rejected') AS rejected
+    // `ranked_below` is counted here rather than derived from the reason tally, because the tally is
+    // grouped by kind across every run and cannot be split back out per run — which is the whole of
+    // BPS-10's question. The LIKE matches the one reason spread-mode.ts writes at the cut.
+    `SELECT as_of_date, slot, pool,
+            SUM(outcome = 'pick') AS picks,
+            SUM(outcome = 'rejected') AS rejected,
+            SUM(outcome = 'rejected' AND reason LIKE 'ranked below the top%') AS ranked_below
        FROM spread_mode_picks GROUP BY as_of_date, slot, pool
       ORDER BY as_of_date, CASE slot WHEN 'intraday' THEN 0 ELSE 1 END, pool`,
-  ).all() as Array<{ as_of_date: string; slot: string; pool: SpreadPool; picks: number; rejected: number }>;
+  ).all() as Array<{
+    as_of_date: string; slot: string; pool: SpreadPool;
+    picks: number; rejected: number; ranked_below: number;
+  }>;
+
+  // BPS-10: the eligible set is what the ranking chose between — everything else was refused upstream.
+  // A run where `eligible <= topN` had every candidate picked, so the cut decided nothing there however
+  // full the pool looks. Same lesson as the wheel tiebreak (v1.1.174): count the choices before
+  // studying the chooser.
+  const eligibility = SPREAD_MODE_POOLS.map(pool => {
+    const mine = runs.filter(r => r.pool === pool);
+    const sizes = mine.map(r => r.picks + r.ranked_below).sort((a, b) => a - b);
+    const hist = new Map<number, number>();
+    for (const s of sizes) hist.set(s, (hist.get(s) ?? 0) + 1);
+    return {
+      pool,
+      topN: P.topN,
+      runs: mine.length,
+      binding: mine.filter(r => r.ranked_below > 0).length,
+      droppedTotal: mine.reduce((a, r) => a + r.ranked_below, 0),
+      medianEligible: median(sizes),
+      maxEligible: sizes.length ? sizes[sizes.length - 1]! : 0,
+      histogram: [...hist].map(([size, n]) => ({ size, runs: n })).sort((a, b) => a.size - b.size),
+    };
+  });
 
   // Rejections by kind, with the tickers behind each, and — for a missing leg — what the stored chain says
   // caused it (v1.1.291), judged under both today's band and the one that refused it (v1.1.299). The chain
@@ -428,14 +458,19 @@ export function buildSpreadShadowReport(db: DbHandle, todayEt: string): SpreadSh
     `SELECT dte, underlying_price, puts_json FROM spread_chain_capture
       WHERE as_of_date = ? AND slot = ? AND ticker = ? AND dte BETWEEN ? AND ?`,
   );
-  const kinds = new Map<string, { n: number; tickers: Map<string, number>; causes: Map<LegCause, number> }>();
+  const kinds = new Map<string, {
+    n: number; tickers: Map<string, number>; pools: Map<SpreadPool, number>; causes: Map<LegCause, number>;
+  }>();
   for (const r of db.prepare(
-    `SELECT as_of_date, slot, ticker, reason FROM spread_mode_picks WHERE outcome = 'rejected' AND reason IS NOT NULL`,
-  ).all() as Array<{ as_of_date: string; slot: string; ticker: string; reason: string }>) {
+    `SELECT as_of_date, slot, pool, ticker, reason FROM spread_mode_picks WHERE outcome = 'rejected' AND reason IS NOT NULL`,
+  ).all() as Array<{ as_of_date: string; slot: string; pool: SpreadPool; ticker: string; reason: string }>) {
     const k = reasonKind(r.reason);
-    const e = kinds.get(k) ?? { n: 0, tickers: new Map<string, number>(), causes: new Map<LegCause, number>() };
+    const e = kinds.get(k) ?? {
+      n: 0, tickers: new Map<string, number>(), pools: new Map<SpreadPool, number>(), causes: new Map<LegCause, number>(),
+    };
     e.n++;
     e.tickers.set(r.ticker, (e.tickers.get(r.ticker) ?? 0) + 1);
+    e.pools.set(r.pool, (e.pools.get(r.pool) ?? 0) + 1);
     if (r.reason.startsWith('no two-sided')) {
       const chains = chainStmt.all(r.as_of_date, r.slot, r.ticker, P.dteMin, P.dteMax) as Array<{ dte: number; underlying_price: number | null; puts_json: string }>;
       const chain = chains.sort((a, b) => Math.abs(a.dte - P.dteTarget) - Math.abs(b.dte - P.dteTarget) || a.dte - b.dte)[0];
@@ -486,11 +521,17 @@ export function buildSpreadShadowReport(db: DbHandle, todayEt: string): SpreadSh
     },
     winRate: returns.length ? returns.filter(r => r > 0).length / returns.length : null,
     medianDaysHeld: median(settled.map(p => (p.settlement as { daysHeld: number }).daysHeld)),
-    runs: runs.map(r => ({ asOfDate: r.as_of_date, slot: r.slot, pool: r.pool, picks: r.picks, rejected: r.rejected })),
+    runs: runs.map(r => ({
+      asOfDate: r.as_of_date, slot: r.slot, pool: r.pool,
+      picks: r.picks, rejected: r.rejected,
+      eligible: r.picks + r.ranked_below, rankedBelow: r.ranked_below,
+    })),
+    eligibility,
     rejectionReasons: [...kinds]
       .map(([reason, e]) => ({
         reason, n: e.n,
         tickers: [...e.tickers].map(([ticker, n]) => ({ ticker, n })).sort((a, b) => b.n - a.n || a.ticker.localeCompare(b.ticker)),
+        pools: SPREAD_MODE_POOLS.filter(p => e.pools.has(p)).map(p => ({ pool: p, n: e.pools.get(p)! })),
         causes: [...e.causes].map(([cause, n]) => ({ cause, n })).sort((a, b) => b.n - a.n),
       }))
       .sort((a, b) => b.n - a.n),

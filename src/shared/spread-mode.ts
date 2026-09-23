@@ -287,11 +287,53 @@ export interface SpreadShadowReport {
   counts: { pickRows: number; positions: number; open: number; target: number; expired: number; unsettleable: number };
   winRate: number | null;
   medianDaysHeld: number | null;
-  runs: Array<{ asOfDate: string; slot: string; pool: SpreadPool; picks: number; rejected: number }>;
+  runs: Array<{
+    asOfDate: string;
+    slot: string;
+    pool: SpreadPool;
+    picks: number;
+    rejected: number;
+    /**
+     * BPS-10. Candidates that reached the ranking — `picks` plus the ones cut by it. Every other
+     * rejection happened earlier, so this is the only number that says how many names the top-N cut
+     * was actually choosing between.
+     */
+    eligible: number;
+    rankedBelow: number;
+  }>;
+  /**
+   * BPS-10: how often does the top-5 cut face a choice?
+   *
+   * The wheel tiebreak was studied at length (v1.1.174) before anyone counted that it faced a choice on
+   * 7 of 62 days — the upstream gates were doing all the selecting. A ranking can only matter as often
+   * as `eligible > topN`, and that is one query, so it is answered before the rule is.
+   *
+   * Per pool, because the arms are nothing like each other: a pool that never fills its five slots and a
+   * pool that fills them every run need different work, and averaged together they look like neither.
+   */
+  eligibility: Array<{
+    pool: SpreadPool;
+    topN: number;
+    runs: number;
+    /** Runs where the cut actually discarded something (`rankedBelow > 0`) — not merely reached. */
+    binding: number;
+    /** Names dropped by the cut, summed. `binding` says how often, this says how much. */
+    droppedTotal: number;
+    medianEligible: number | null;
+    maxEligible: number;
+    /** One entry per observed size, ascending. */
+    histogram: Array<{ size: number; runs: number }>;
+  }>;
   rejectionReasons: Array<{
     reason: string;
     n: number;
     tickers: Array<{ ticker: string; n: number }>;
+    /**
+     * BPS-1: the same reason means different things per arm. `income` refusing everything and `wheel`
+     * refusing a third of its pool are one row when the pools are merged, and the merge is what hides
+     * an arm that is contributing no evidence at all.
+     */
+    pools: Array<{ pool: SpreadPool; n: number }>;
     /** Only for the two missing-leg reasons: what the stored chain shows. */
     causes: Array<{ cause: LegCause; n: number }>;
   }>;

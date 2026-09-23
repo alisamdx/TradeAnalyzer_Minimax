@@ -142,11 +142,31 @@ if (rows.length) {
 }
 
 console.log('\n## Runs\n');
-for (const run of r.runs) console.log(`  ${run.asOfDate} ${run.slot.padEnd(11)} ${String(run.pool ?? "").padEnd(7)} picks ${String(run.picks).padStart(2)} · rejected ${run.rejected}`);
+console.log('  eligible = what the top-5 cut chose between (picks + cut). Everything else was refused earlier.\n');
+for (const run of r.runs) {
+  const el = run.eligible == null ? '' : `  ·  eligible ${String(run.eligible).padStart(2)}${run.rankedBelow ? ` (cut ${run.rankedBelow})` : ''}`;
+  console.log(`  ${run.asOfDate} ${run.slot.padEnd(11)} ${String(run.pool ?? "").padEnd(7)} picks ${String(run.picks).padStart(2)} · rejected ${String(run.rejected).padStart(2)}${el}`);
+}
+
+if (r.eligibility?.length) {
+  console.log('\n## Does the ranking face a choice? (BPS-10)\n');
+  for (const e of r.eligibility) {
+    if (e.runs === 0) { console.log(`  ${e.pool.padEnd(8)} no runs yet`); continue; }
+    const hist = e.histogram.map((h) => `${h.size}:${h.runs}`).join('  ');
+    console.log(
+      `  ${e.pool.padEnd(8)} binding on ${e.binding}/${e.runs} runs · ${e.droppedTotal} name(s) dropped · ` +
+      `median eligible ${e.medianEligible ?? '—'} · max ${e.maxEligible}`,
+    );
+    console.log(`  ${''.padEnd(8)} sizes  ${hist}`);
+  }
+  console.log('\n  A cut that never fires cannot be right or wrong — it is not selecting. Binding on most');
+  console.log('  runs means an UNVALIDATED rule (08 §3.6) is choosing the §4 sample.');
+}
 
 console.log('\n## Rejection reasons (all runs)\n');
 for (const x of r.rejectionReasons) {
-  console.log(`  ${String(x.n).padStart(4)}  ${x.reason}`);
+  const pools = (x.pools ?? []).map((p) => `${p.pool} ${p.n}`).join(' · ');
+  console.log(`  ${String(x.n).padStart(4)}  ${x.reason}${pools ? `   [${pools}]` : ''}`);
   const tickers = (x.tickers ?? []).map((t) => (t.n > 1 ? `${t.ticker}×${t.n}` : t.ticker)).join(', ');
   if (tickers) console.log(`        ${tickers}`);
   for (const c of x.causes ?? []) console.log(`        ↳ ${String(c.n).padStart(3)}  ${c.cause}`);

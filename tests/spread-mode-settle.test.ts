@@ -251,9 +251,12 @@ describe('buildSpreadShadowReport', () => {
     expect(r.gate).toMatchObject({ intradayCaptureDays: 2, settledPositions: 1, captureDaysMet: false, settledMet: false, meanPositive: true });
     expect(r.rejectionReasons).toEqual([{
       reason: 'net credit $# after fills', n: 2,
-      tickers: [{ ticker: 'CCC', n: 1 }, { ticker: 'DDD', n: 1 }], causes: [],
+      tickers: [{ ticker: 'CCC', n: 1 }, { ticker: 'DDD', n: 1 }],
+      pools: [{ pool: 'wheel', n: 2 }], causes: [],
     }]);
     expect(r.runs).toHaveLength(4);
+    // Nothing here was cut by the ranking, so the eligible set is just the picks (BPS-10).
+    expect(r.runs.every(x => x.eligible === x.picks && x.rankedBelow === 0)).toBe(true);
     // No constituents rows here: both sectors unknown, nothing capped, both books identical.
     expect(r.sectorCap).toMatchObject({ cap: 3, unknownSector: 2, skipped: 0 });
     expect(r.sectorCap.capped).toEqual(r.sectorCap.all);
@@ -417,5 +420,66 @@ describe('buildSpreadShadowReport', () => {
     db.prepare(`INSERT INTO historical_prices (ticker, date, open, high, low, close, volume) VALUES ('AAA', '2026-10-15', 93, 93, 93, 93, 1)`).run();
     const r = buildSpreadShadowReport(db, '2026-10-19');
     expect(r.positions[0]!.settlement).toMatchObject({ status: 'expired', expiryClose: 93, exitDebit: 2 });
+  });
+
+  // BPS-10 (v1.1.310). The ranking can only matter on a run where more candidates reached it than there
+  // are slots. The wheel tiebreak was studied before anyone counted that it faced a choice on 7 of 62
+  // days — so the count comes first, and it has to separate "reached the cut" from "was cut by it".
+  describe('eligible-set size — does the top-N cut face a choice? (BPS-10)', () => {
+    const seed = (db: ReturnType<typeof openDatabase>) => db.prepare(
+      `INSERT INTO spread_mode_picks (as_of_date, slot, generated_at, mode, ticker, outcome, rank, reason, expiration, dte, spot,
+         short_strike, long_strike, net_credit, max_loss, contracts, pool) VALUES (?, ?, 'x', 'shadow', ?, ?, NULL, ?,
+         '2026-10-16', 30, 100, 95, 90, 1.6, 3.4, 2, ?)`,
+    );
+
+    it('counts only the candidates that reached the ranking, not every rejection', () => {
+      const db = openDatabase(':memory:');
+      runMigrations(db, MIGRATIONS_DIR);
+      const p = seed(db);
+      // One run: 5 picks, 1 cut by the ranking, 4 refused upstream. Eligible is 6, never 10.
+      for (const t of ['A1', 'A2', 'A3', 'A4', 'A5']) p.run('2026-09-21', 'intraday', t, 'pick', null, 'premium');
+      p.run('2026-09-21', 'intraday', 'A6', 'rejected', 'ranked below the top 5', 'premium');
+      for (const t of ['B1', 'B2', 'B3', 'B4']) {
+        p.run('2026-09-21', 'intraday', t, 'rejected', 'round-trip cost 60% of credit (max 25%)', 'premium');
+      }
+
+      const r = buildSpreadShadowReport(db, '2026-09-22');
+      const run = r.runs.find(x => x.pool === 'premium')!;
+      expect(run).toMatchObject({ picks: 5, rejected: 5, eligible: 6, rankedBelow: 1 });
+
+      const e = r.eligibility.find(x => x.pool === 'premium')!;
+      expect(e).toMatchObject({ topN: 5, runs: 1, binding: 1, droppedTotal: 1, medianEligible: 6, maxEligible: 6 });
+      expect(e.histogram).toEqual([{ size: 6, runs: 1 }]);
+    });
+
+    // The half that matters: a pool can fill all five slots every run and still never have made a choice.
+    // If that read as "binding" the check would be the liquidity gate that always fired.
+    it('does not call the cut binding on a run where nothing was cut', () => {
+      const db = openDatabase(':memory:');
+      runMigrations(db, MIGRATIONS_DIR);
+      const p = seed(db);
+      for (const t of ['A1', 'A2', 'A3', 'A4', 'A5']) p.run('2026-09-21', 'intraday', t, 'pick', null, 'wheel');
+      p.run('2026-09-21', 'intraday', 'B1', 'rejected', 'critic flag', 'wheel');
+
+      const e = buildSpreadShadowReport(db, '2026-09-22').eligibility.find(x => x.pool === 'wheel')!;
+      expect(e).toMatchObject({ runs: 1, binding: 0, droppedTotal: 0, maxEligible: 5 });
+    });
+
+    // BPS-1: an arm that picks nothing is a real finding about the arm, and summing the pools hides it.
+    it('splits a rejection reason by pool, so an arm that refuses everything is visible', () => {
+      const db = openDatabase(':memory:');
+      runMigrations(db, MIGRATIONS_DIR);
+      const p = seed(db);
+      p.run('2026-09-21', 'intraday', 'AAA', 'pick', null, 'wheel');
+      p.run('2026-09-21', 'intraday', 'CCC', 'rejected', 'critic flag', 'wheel');
+      for (const t of ['D1', 'D2', 'D3']) p.run('2026-09-21', 'intraday', t, 'rejected', 'critic flag', 'income');
+
+      const r = buildSpreadShadowReport(db, '2026-09-22');
+      expect(r.rejectionReasons.find(x => x.reason === 'critic flag')!.pools)
+        .toEqual([{ pool: 'wheel', n: 1 }, { pool: 'income', n: 3 }]);
+      // The empty arm still gets a row — "ran and picked nothing" must not look like "never ran".
+      expect(r.eligibility.find(x => x.pool === 'income')).toMatchObject({ runs: 1, maxEligible: 0 });
+      expect(r.eligibility.find(x => x.pool === 'premium')).toMatchObject({ runs: 0, medianEligible: null });
+    });
   });
 });

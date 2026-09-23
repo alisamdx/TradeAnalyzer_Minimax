@@ -17,19 +17,23 @@ can never be confused with `#5` in the main list.
 
 ---
 
-## Status — 2026-09-20
+## Status — 2026-09-22
 
 Mode is `shadow`: picks are computed after every brief and stored, with no panel, no email, and nothing
 reaching the v2 engine. The 08 §4 enable gate is **time-blocked, not work-blocked**:
 
 | §4 condition | State |
 |---|---|
-| ≥ 15 intraday capture days, then re-run the study `--slip-model quoted --capital 25000 --risk 2500` | **5 / 15** — earliest ~2026-10-02 |
-| ≥ 30 settled positions, mean return on max loss > 0 | **0 / 30** — all 10 open, expiring 2026-10-16 |
+| ≥ 15 intraday capture days, then re-run the study `--slip-model quoted --capital 25000 --risk 2500` | **6 / 15** — earliest ~2026-10-02 |
+| ≥ 30 settled positions, mean return on max loss > 0 | **0 / 30** — 13 open; the first entries expire 2026-10-16 |
 
 First week's funnel (2026-09-14 → 09-18, 10 runs): 94 ticker-runs → 75 rejected → 19 picks → 10 positions.
 **36 of those 75 rejections no longer occur** (25 leg-rule, fixed v1.1.292 and confirmed 25/25 by the
 v1.1.299 dry run; 11 budget, which stopped gating in v1.1.300).
+
+**Three arms live since 2026-09-21** (`wheel` 3 positions · `income` 0 · `premium` 9, `overlap` 0).
+The book is now 22 positions, and **the dominant rejection is cost — 47 of 139**, ahead of the leg rules
+(31) and the critic (17). Capture quality is clean: 73 marks, 0 gaps.
 
 ---
 
@@ -50,6 +54,11 @@ Provenance: **measured** (a #43 study result) · **inherited** (a wheel-screen r
   the **paired window only**, with `pairedDays` beside it so a wheel-only stretch cannot read as a win.
   **Still open, and now measurable:** whether income actually selects differently — read `overlap` in the
   report; if most of the book is picked by both, the two screens agree and BPS-1 answers itself.
+  **First read 2026-09-22: `overlap` is 0 across all three arms — and `income` has picked NOTHING.** Three
+  runs, 0 picks, 7 rejections each, the same count every time. The arms do select differently; the live
+  question is now whether income selects *anything*, because an arm that never produces a position
+  contributes no evidence to the comparison it was added for. `rejectionReasons[].pools` (v1.1.310) is
+  what splits its 7 out of the merged tally — **read it next run** before concluding anything about why.
 
 - **BPS-2. The composite selects but does not rank.** *Measured, half-applied.* The pool is the
   composite's top 15, then §3.1 discards its rank (v1.1.173: top end anti-predictive). **Evidence already
@@ -103,6 +112,18 @@ Provenance: **measured** (a #43 study result) · **inherited** (a wheel-screen r
   below it is observable. **Flat -> the gate measures the wrong structure and no threshold fixes it; the
   options are the vertical's own score (already computed) or dropping the upstream bar for the cost gate.
   Tracks -> the bar earns its place and the threshold becomes a fair question.** n triples from Monday.
+  **~~CLOSED 2026-09-22 (08 S13): it TRACKS, and the structural argument above was wrong.~~** 52 paired
+  rows, Spearman **−0.51**; median cost share **44% / 41% / 20% / 16.5%** across 0–6 / 7–8 / 9–10 / 11–15,
+  over the 25% gate 11/16, 11/15, 3/10, 2/11. A one-leg score that cannot see the long wing predicts the
+  cost of trading both anyway — it proxies the whole chain. **The break is between 8 and 9**, not at 5 or
+  8, so this item's founding proposal (5→8) would have moved the bar inside a flat stretch; the bottom two
+  bands are one population and the top two another. **No threshold changed, and not out of caution:** the
+  BPS-9 cost gate measures the same quantity *directly* on the two contracts actually traded, so a
+  liquidity bar at 9 gates one quantity twice — once by a proxy that carries a known risk tilt (the liquid
+  subset underperforms on two independent samples). The one honest argument for raising it is **call
+  budget** (a liquidity refusal is free; a cost refusal costs a chain fetch) — worth revisiting if capture
+  budget ever binds, not worth moving a gate on 52 rows. Still censored: the 0–6 band is mostly 5s and 6s.
+  The price cap ($750) is untouched and unexamined — it gates the `premium` pool only.
 
 - **BPS-4. Expiry — 21–35 DTE, nearest 30, strictly before earnings.** *Measured, and the evidence
   disagrees with itself.* Per-trade, **21 DTE beat 30 and 35 at every delta**; in the v4 portfolio sim
@@ -139,6 +160,19 @@ Provenance: **measured** (a #43 study result) · **inherited** (a wheel-screen r
   first: an eligible-set-size histogram per run.** If it stays at 1–2 the ranking needs no work; if it is
   5+, the §4 sample is being selected by an untested rule. **The only item with a deadline** — it needs
   Monday's data either way.
+  **Instrumented 2026-09-22 (v1.1.310):** `runs[].eligible` and `eligibility` per pool — binding runs,
+  names dropped, median, max, size histogram. Counted from the cut's own rejection reason, not from
+  `rejected` (every other refusal happened upstream) and not from the rejection tally (grouped by kind
+  across runs, so it cannot be split back per run). **`eligible == topN` is not binding** — every
+  candidate was picked and the cut decided nothing.
+  **First read (3 pool-runs on 09-21/22):** the cut has fired **8 times** against once in ten runs before,
+  so it is live — but it is dropping **one name at a time**, not five. `premium` fills all 5 slots on
+  every run; `wheel` runs 1–3 picks; `income` fills none. **So the answer is "binding, barely":** the §4
+  sample is not being shaped much by the untested rule *yet*, and the number to watch is `droppedTotal`
+  per run rather than whether the pool looks full. **Still open:** the arms diverge sharply on the ranking
+  metric itself — `premium` picks return-on-risk **0.37–0.48** against `wheel`'s **0.19–0.37** — so the
+  cut behaves differently per arm, and a rule validated on one may not transfer. Re-read once `premium`
+  has ~10 runs.
 - **BPS-11. Sizing — floor(budget ÷ per-contract max loss), no longer a gate.** *Fixed.* $2,500 default,
   $250 stored (S10); shadow records an unaffordable pick at `contracts = 0` (v1.1.300). Unsettled:
   `maxOpenPositions` has never been given a real number (10 placeholder), and nothing tracks open
@@ -165,6 +199,17 @@ Provenance: **measured** (a #43 study result) · **inherited** (a wheel-screen r
 - **BPS-16. Move spread chain capture into the collector** after TradeAnalyzer 2 is promoted, so it
   inherits the quality gate and the duplicate E\*Trade chain fetching (TA1 capture + TA2 chain subset)
   ends. `spread-capture-quality.ts` (SC-1…SC-4) is the interim cover. (Was #44's "Open".)
+- **BPS-18. The `premium` arm and the budget interact, and nobody chose that.** *Observed 2026-09-22,
+  untested.* 7 of 22 shadow positions are unaffordable at the stored $250, and they are overwhelmingly
+  premium's: BE $1,055, AMD $2,129, MRVL $1,094, MSTR $540, INTC $422 per contract. Premium ranks the
+  universe on annualized return with a **$750 price cap** and no width rule, so it selects high-priced
+  names whose strike grids are wide — and a wide grid is a large per-contract max loss. **The budget is
+  size-only in shadow (BPS-11, v1.1.300), so this shapes nothing today.** At `on` it would, and in a way
+  nobody decided: the arm T7 measured as best is the arm the budget would empty hardest, so the enable
+  decision could silently be made by an account size rather than by the evidence. Two things to settle
+  before `on`: whether the budget filters premium picks or sizes them at one contract, and whether the
+  pool needs a width or per-contract-risk rule of its own. Related: BPS-11, S10, 08 §3.5.
+
 - **BPS-17. Revisit the v2 engine's 2× stop on wheel put spreads.** The engine trades wheel as a put
   spread with a 50% target and a 2× stop, validated in June with no costs; #43 found the stop plus time
   stop halved a portfolio's result and a 1× stop is negative once costs exist. Needs an FR-SEY-5 replay

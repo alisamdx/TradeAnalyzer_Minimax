@@ -339,7 +339,7 @@ export function SpreadShadowView() {
             <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Rejection reasons <span style={muted}>(all runs)</span></summary>
             <table style={{ borderCollapse: 'collapse', width: '100%', marginTop: 12 }}>
               <thead>
-                <tr><th style={{ ...th, textAlign: 'right' }}>n</th><th style={th}>Reason</th><th style={th}>Tickers</th></tr>
+                <tr><th style={{ ...th, textAlign: 'right' }}>n</th><th style={th}>Reason</th><th style={th}>Pools</th><th style={th}>Tickers</th></tr>
               </thead>
               <tbody>
                 {report.rejectionReasons.map(r => (
@@ -353,6 +353,10 @@ export function SpreadShadowView() {
                         </div>
                       )}
                     </td>
+                    {/* BPS-1: one arm refusing everything is invisible once the pools are summed. */}
+                    <td style={{ ...td, verticalAlign: 'top', color: 'var(--text-muted)' }}>
+                      {(r.pools ?? []).map(p => `${p.pool} ${p.n}`).join(' · ')}
+                    </td>
                     <td style={{ ...td, whiteSpace: 'normal', color: 'var(--text-muted)' }}>
                       {r.tickers.map(t => (t.n > 1 ? `${t.ticker}×${t.n}` : t.ticker)).join(', ')}
                     </td>
@@ -362,18 +366,65 @@ export function SpreadShadowView() {
             </table>
           </details>
 
+          {/* ── Does the ranking face a choice? (BPS-10) ── */}
+          {(report.eligibility ?? []).some(e => e.runs > 0) && (
+            <details style={card} open>
+              <summary style={{ cursor: 'pointer', fontWeight: 600 }}>
+                Does the ranking face a choice? <span style={muted}>(BPS-10)</span>
+              </summary>
+              <div style={{ ...muted, marginTop: 8 }}>
+                Eligible = what the top-{report.eligibility[0]?.topN ?? 5} cut chose between. A cut that never
+                fires is not selecting; one that binds on most runs means an unvalidated rule is choosing
+                the §4 sample.
+              </div>
+              <table style={{ borderCollapse: 'collapse', marginTop: 12 }}>
+                <thead>
+                  <tr>
+                    <th style={th}>Pool</th>
+                    <th style={{ ...th, textAlign: 'right' }}>Binding</th>
+                    <th style={{ ...th, textAlign: 'right' }}>Dropped</th>
+                    <th style={{ ...th, textAlign: 'right' }}>Median</th>
+                    <th style={{ ...th, textAlign: 'right' }}>Max</th>
+                    <th style={th}>Sizes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.eligibility.filter(e => e.runs > 0).map(e => (
+                    <tr key={e.pool}>
+                      <td style={td}>{e.pool}</td>
+                      <td style={num}>{e.binding} / {e.runs}</td>
+                      <td style={num}>{e.droppedTotal}</td>
+                      <td style={num}>{e.medianEligible ?? '—'}</td>
+                      <td style={num}>{e.maxEligible}</td>
+                      <td style={{ ...td, color: 'var(--text-muted)' }}>
+                        {e.histogram.map(h => `${h.size}:${h.runs}`).join('  ')}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </details>
+          )}
+
           {/* ── Runs ── */}
           <details style={card}>
             <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Runs <span style={muted}>({report.runs.length})</span></summary>
             <table style={{ borderCollapse: 'collapse', marginTop: 12 }}>
               <thead>
-                <tr><th style={th}>Date</th><th style={th}>Slot</th><th style={{ ...th, textAlign: 'right' }}>Picks</th><th style={{ ...th, textAlign: 'right' }}>Rejected</th></tr>
+                <tr>
+                  <th style={th}>Date</th><th style={th}>Slot</th><th style={th}>Pool</th>
+                  <th style={{ ...th, textAlign: 'right' }}>Picks</th>
+                  <th style={{ ...th, textAlign: 'right' }}>Rejected</th>
+                  <th style={{ ...th, textAlign: 'right' }}>Eligible</th>
+                </tr>
               </thead>
               <tbody>
+                {/* The pool is part of the key: three arms share a date and slot (v1.1.302). */}
                 {[...report.runs].reverse().map(r => (
-                  <tr key={`${r.asOfDate}-${r.slot}`}>
-                    <td style={td}>{r.asOfDate}</td><td style={td}>{r.slot}</td>
+                  <tr key={`${r.asOfDate}-${r.slot}-${r.pool}`}>
+                    <td style={td}>{r.asOfDate}</td><td style={td}>{r.slot}</td><td style={td}>{r.pool}</td>
                     <td style={num}>{r.picks}</td><td style={num}>{r.rejected}</td>
+                    <td style={num}>{r.eligible}{r.rankedBelow > 0 ? ` (cut ${r.rankedBelow})` : ''}</td>
                   </tr>
                 ))}
               </tbody>
