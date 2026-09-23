@@ -168,7 +168,46 @@ check('inverted fixture: the shorter expiry is cheaper on 2 of 2', /cheaper on \
 check('inverted fixture: the 2×2 puts both names on the "only at 21" cell',
   /\| \*\*clears at 21\*\* \| 0 \| 2 \|/.test(invText));
 
+// ── the discordant cell, with the expiry types swapped ──────────────────────────────────────────
+// 2026-06-19 IS a third Friday; 2026-06-26 is not. From 2026-05-29 they are 21 and 28 days out, so the
+// SHORT bucket holds the monthly and the LONG bucket a weekly — the falsification cell. 12 pairs, so
+// it is over the 10-pair floor and must print numbers rather than refuse.
+const dir3 = mkdtempSync(join(tmpdir(), 'bps4-swap-'));
+const dbPath3 = join(dir3, 'fixture.sqlite');
+const db3 = new Database(dbPath3);
+db3.exec(`CREATE TABLE spread_chain_capture (
+  as_of_date TEXT, slot TEXT, captured_at TEXT, ticker TEXT, expiration TEXT, dte INTEGER,
+  reason TEXT, underlying_price REAL, contract_count INTEGER, puts_json TEXT
+);`);
+const ins3 = db3.prepare(
+  `INSERT INTO spread_chain_capture
+     (as_of_date, slot, captured_at, ticker, expiration, dte, reason, underlying_price, contract_count, puts_json)
+   VALUES (?, 'intraday', 'x', ?, ?, ?, 'entry', ?, ?, ?)`,
+);
+for (let i = 0; i < 12; i++) {
+  // The monthly at 21 DTE is penny-wide and clears; the weekly at 30 DTE is wide and fails.
+  ins3.run('2026-05-29', `SWAP${i}`, '2026-06-19', 21, 100, 2, JSON.stringify(chain(0.02, 3.00, 1.50)));
+  ins3.run('2026-05-29', `SWAP${i}`, '2026-06-26', 28, 100, 2, JSON.stringify(chain(0.50, 5.00, 2.50)));
+}
+db3.close();
+
+const swapText = execFileSync(process.execPath, [
+  join(import.meta.dirname, 'fr-spread-dte-cost-study.mjs'), '--db', dbPath3,
+], { encoding: 'utf8' });
+
+check('swapped fixture: the 2×2 puts all 12 pairs in the 21-monthly / 30-weekly cell',
+  /\| \*\*21 DTE monthly\*\* \| 12 \| 0 \|/.test(swapText));
+const swapCell = swapText.match(/21 DTE monthly vs 30 DTE weekly\*\* \(12 pairs\): median difference \*\*([-\d.]+)%\*\*/);
+check('swapped fixture: the discordant cell reports a NEGATIVE median (the sign reverses)',
+  swapCell != null && Number(swapCell[1]) < 0, swapCell?.[1]);
+check('swapped fixture: the prefer-the-monthly count is 12 clearing at 21 and 0 at 30',
+  /the monthly at 21 DTE \*\*12\*\*, the weekly at 30 DTE \*\*0\*\*/.test(swapText));
+// The same-type row must refuse here — there are no same-type pairs at all in this fixture.
+check('swapped fixture: the same-type row refuses at n=0',
+  /Same expiry type: 0 pairs — too few to say anything/.test(swapText));
+
 rmSync(dir, { recursive: true, force: true });
 rmSync(dir2, { recursive: true, force: true });
+rmSync(dir3, { recursive: true, force: true });
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

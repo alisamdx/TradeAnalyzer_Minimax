@@ -308,6 +308,33 @@ report('Same expiry type', sameType,
   'If this is much smaller than the headline — or points the other way — the headline is about expiry ' +
   'type, not about DTE.');
 
+// The DISCORDANT cell is the falsification test, and it is free. If the headline is expiry type rather
+// than tenor, then where the SHORT bucket holds the monthly the sign must REVERSE — the shorter expiry
+// becoming markedly cheaper. If it does not reverse there, type is not the explanation and something
+// else is doing the work. A hypothesis that only ever gets checked where it is comfortable is not a
+// hypothesis (v1.1.176: a mechanism read off a structure is a hypothesis, and this data can test it).
+say();
+say(`### The discordant cells — where the expiry types are swapped`);
+say();
+report(`${SHORT_DTE} DTE monthly vs ${LONG_DTE} DTE weekly`, cell(true, false),
+  'The falsification test: if expiry type is the explanation, the sign must REVERSE here.');
+report(`${SHORT_DTE} DTE weekly vs ${LONG_DTE} DTE monthly`, cell(false, true),
+  'The majority case, and the one the headline is made of.');
+
+// What the swapped cell is worth operationally: in those runs the nearest-30 rule takes the weekly
+// while a monthly sits inside the DTE window. That is the whole of the prefer-the-monthly lever.
+const swapped = cell(true, false);
+if (swapped.length >= 10) {
+  const shortOk = swapped.filter(p => p.short.clearsGate).length;
+  const longOk = swapped.filter(p => p.long.clearsGate).length;
+  say();
+  say(`In those ${swapped.length} runs the nearest-${LONG_DTE} rule takes a **weekly** while a monthly ` +
+      `sits inside the DTE window. Clearing the ${pctf(P.maxCostShare, 0)} gate there: the monthly at ` +
+      `${SHORT_DTE} DTE **${shortOk}**, the weekly at ${LONG_DTE} DTE **${longOk}**. ` +
+      'That difference is what a prefer-the-monthly rule would be worth — on cost alone, which is not ' +
+      'the same as being worth it (FR-SEY-5 needs returns).');
+}
+
 // The half that killed the wheel's expiry lever (2026-08-04): the friction gap was real and VANISHED
 // conditional on clearing the entry gate — the whole gap sat in structures already rejected. A saving
 // that is only available on trades you would not take is not a saving.

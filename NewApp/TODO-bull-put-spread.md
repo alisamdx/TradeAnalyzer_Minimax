@@ -173,12 +173,22 @@ Provenance: **measured** (a #43 study result) · **inherited** (a wheel-screen r
   monthly is **structurally impossible** (consecutive third Fridays are 28–35 days apart, these
   buckets span at most 17), so there is no monthly-vs-monthly evidence and the same-type number is
   weekly-vs-weekly only.
-  **The deciding number is still missing, and it is the one that killed the wheel's version of this
-  lever:** conditional on clearing the entry gate, the wheel's 19.6%-vs-40.3% friction gap became
-  6.9% vs 6.0% — the whole gap sat in structures already refused, so the saving was never payable.
-  **78 pairs clear BPS-9's 25% gate at both DTEs**; whether a difference survives among those decides
-  it. v1.1.312 adds that breakdown, the expiry-type 2×2, and a sign count on every subgroup median
-  (under 10 pairs it says "too few to say anything" rather than quoting one). **Re-run needed.**
+  **ANSWERED 2026-09-22 (v1.1.313): with expiry type AND tradability both held fixed, tenor is worth
+  about nothing.** The two single controls pointed opposite ways — type-matched **−4.9%** (21 cheaper
+  on 45 of 60) against gate-conditional **+3.5%** (cheaper on 23 of 78) — because conditioning on
+  gate-clearance *selects for the liquid leg, which is the monthly*, so that row was still an
+  expiry-type comparison measured after the gate. The intersection, the only cell with both controls
+  on: **15 pairs, median −0.9%, the shorter expiry cheaper on 11 of 15.** A difference of one point of
+  cost share against a 25% gate is noise-scale, and 11 of 15 is not significant on its own
+  (binomial p ≈ 0.06). **The whole 13.6% headline is expiry type.**
+  **And the decision is settled separately, by the as-traded book:** at 30 DTE **156 of 296**
+  candidates clear the cost gate at a **12.6%** median share; at 21 DTE **102** clear at **18.4%**.
+  Moving the target costs **−35% of the tradable pool** — read against BPS-10, where the eligible set
+  is already thin. **So keep 30 DTE, and record the real reason: the rule lands on a monthly two
+  times in three and inherits its liquidity (OI 460/565 vs 37/42, a 12× depth difference).** The
+  justification on file was per-trade edge, which was a time-stop artifact; the justification that
+  survives is liquidity selection nobody credited the rule with. **Both statements are true and must
+  be kept apart — operationally 30 wins, mechanistically tenor is not why.**
   **Still open after that:** returns and %/day under the adopted exits, which needs §4's grid
   re-run on `LEAN` plus 21/35 rows in §7 — worth doing only if the cost measurement leaves 21 DTE
   viable, and read knowing the study's wing is Black-Scholes plus a flat skew whose error is itself
@@ -260,6 +270,22 @@ Provenance: **measured** (a #43 study result) · **inherited** (a wheel-screen r
 - **BPS-16. Move spread chain capture into the collector** after TradeAnalyzer 2 is promoted, so it
   inherits the quality gate and the duplicate E\*Trade chain fetching (TA1 capture + TA2 chain subset)
   ends. `spread-capture-quality.ts` (SC-1…SC-4) is the interim cover. (Was #44's "Open".)
+- **BPS-19. Prefer the MONTHLY inside 21–35 DTE, instead of getting it by accident.** *Opened
+  2026-09-22 out of BPS-4, untested.* If the expiry advantage is type rather than tenor — and the
+  intersection cell says it is — then "nearest 30" is a proxy for "usually the monthly", and it misses
+  on the **31%** of runs where the 30-DTE pick is a weekly. The data already holds the natural
+  experiment: **32 pairs where the 21-DTE bucket is the monthly and the 30-DTE bucket is a weekly.**
+  If type is the explanation the sign must reverse there — v1.1.314 reports that cell, plus how many
+  clear the cost gate on each side, which is what the lever would be worth on cost. **Check the
+  precedent before building anything:** the wheel's version of exactly this rule was tested on
+  realized P&L and **REJECTED** on 2026-08-04 (memory `expiry-selection-followup`) — the friction
+  saving was never paid once the liquidity gate was applied, and snapping away from ~30 DTE landed on
+  a contract *thinner than the weekly it replaced*. That was a one-leg CSP behind a `liquidityScore ≥ 8`
+  gate; this is a four-fill spread behind a cost gate that refuses 47% of candidates, so it is a
+  genuinely different question — but the same trap is available, and the same answer is a live
+  possibility. **FR-SEY-5: cost is not return.** A cheaper entry that systematically picks a different
+  population is not shown to be better until the returns are measured.
+
 - **BPS-18. The `premium` arm and the budget interact, and nobody chose that.** *Observed 2026-09-22,
   untested.* 7 of 22 shadow positions are unaffordable at the stored $250, and they are overwhelmingly
   premium's: BE $1,055, AMD $2,129, MRVL $1,094, MSTR $540, INTC $422 per contract. Premium ranks the
