@@ -271,15 +271,57 @@ say();
 say('## Is this DTE, or is it monthly vs weekly?');
 say();
 say(`Monthly share: ${SHORT_DTE} DTE **${pctf(shortMonthly, 0)}** · ${LONG_DTE} DTE **${pctf(longMonthly, 0)}**.`);
+say();
+
+// The composition, spelled out rather than deduced. Both buckets landing on a monthly is IMPOSSIBLE
+// whenever the buckets are closer together than two third Fridays (28–35 days) — with ±4 tolerance the
+// widest gap here is (LONG+TOL) − (SHORT−TOL) days. Print the cell counts anyway: a calendar argument
+// that decides how a result is read belongs in the output, not in the reader's head.
+const cell = (sm, lm) => pairs.filter(p => p.short.monthly === sm && p.long.monthly === lm);
+const maxGap = (LONG_DTE + TOL) - (SHORT_DTE - TOL);
+say(`| | ${LONG_DTE} DTE weekly | ${LONG_DTE} DTE monthly |`);
+say('|---|--:|--:|');
+say(`| **${SHORT_DTE} DTE weekly** | ${cell(false, false).length} | ${cell(false, true).length} |`);
+say(`| **${SHORT_DTE} DTE monthly** | ${cell(true, false).length} | ${cell(true, true).length} |`);
+say();
+if (maxGap < 28) {
+  say(`The both-monthly cell is **structurally empty**: consecutive third Fridays are 28–35 days apart ` +
+      `and these buckets can be at most ${maxGap} days apart. So the same-type comparison below is ` +
+      `weekly-vs-weekly, and there is no monthly-vs-monthly evidence here at any n.`);
+  say();
+}
+
+// Same-type: the median AND the sign count. A median with no sign count is a point estimate nobody has
+// looked at the distribution of.
 const sameType = pairs.filter(p => p.short.monthly === p.long.monthly);
-if (sameType.length >= 10) {
-  const d2 = sameType.map(p => p.short.costShare - p.long.costShare).filter(Number.isFinite);
-  say(`On the **${sameType.length}** pairs where both buckets are the same expiry type, the median ` +
-      `difference is **${pctf(med(d2))}** — if that is much smaller than the headline, the headline is ` +
-      'about expiry type, not about DTE.');
-} else {
-  say(`Only **${sameType.length}** pairs have both buckets on the same expiry type — too few to separate ` +
-      'the two explanations. Until that grows, a difference here may be either.');
+const report = (label, subset, note) => {
+  const d = subset.map(p => p.short.costShare - p.long.costShare).filter(Number.isFinite);
+  if (d.length < 10) {
+    say(`**${label}: ${d.length} pairs — too few to say anything.** ${note}`);
+    return;
+  }
+  const cheaper = d.filter(x => x < 0).length;
+  say(`**${label}** (${d.length} pairs): median difference **${pctf(med(d))}**, the shorter expiry ` +
+      `cheaper on **${cheaper} of ${d.length}** (${pctf(cheaper / d.length, 0)}). ${note}`);
+};
+report('Same expiry type', sameType,
+  'If this is much smaller than the headline — or points the other way — the headline is about expiry ' +
+  'type, not about DTE.');
+
+// The half that killed the wheel's expiry lever (2026-08-04): the friction gap was real and VANISHED
+// conditional on clearing the entry gate — the whole gap sat in structures already rejected. A saving
+// that is only available on trades you would not take is not a saving.
+say();
+say(`### Conditional on being tradable — does the gap survive BPS-9's ${pctf(P.maxCostShare, 0)} gate?`);
+say();
+const bothOk = pairs.filter(p => p.short.clearsGate && p.long.clearsGate);
+report('Both buckets clear the gate', bothOk,
+  'This is the population the mode would actually trade either way. The wheel\'s expiry lever was ' +
+  'rejected here: a real friction gap that sat entirely in structures the gate already refused.');
+if (bothOk.length >= 10) {
+  say();
+  say(`Median cost share among those: ${SHORT_DTE} DTE **${pctf(med(bothOk.map(p => p.short.costShare)))}** · ` +
+      `${LONG_DTE} DTE **${pctf(med(bothOk.map(p => p.long.costShare)))}**.`);
 }
 
 const reasons = m => ([...m].sort((a, b) => b[1] - a[1]).map(([r, n]) => `${r} ${n}`).join(' · ') || 'none');

@@ -159,7 +159,27 @@ Provenance: **measured** (a #43 study result) · **inherited** (a wheel-screen r
   under study disappears; and the **monthly share of each bucket is reported**, because a ~30 DTE
   bucket lands on a third-Friday monthly far more often than a ~21 one and the answer could be about
   expiry type rather than DTE. Deliberately silent on returns — nothing is settled yet.
-  **Still open after it runs:** returns and %/day under the adopted exits, which needs §4's grid
+  **RUN 2026-09-22 (296 paired ticker-runs) — and it INVERTED its own headline.** Pooled: 21 DTE
+  round-trips at **36.7%** of credit against 30 DTE's **23.9%**, paired difference **+13.6%**, the
+  shorter expiry cheaper on only 27% of pairs — decisive for 30, read alone. **But monthly share is
+  11% vs 69%, and on the 60 same-expiry-type pairs the median difference is −4.9% — the sign flips.**
+  OI is **37/42 vs 460/565** (12× the depth) while credit barely moves ($2.17 vs $2.42; 26.9% vs 28.5%
+  of width), so the gap is **quote width, not tenor**. "Nearest 30" lands on a monthly two times in
+  three; "nearest 21" on a weekly nine times in ten. **This is the 2026-08-04 expiry-selection trap on
+  a different instrument**, and the magnitudes corroborate it independently (that study: monthly vs
+  weekly friction 19.6% vs 40.3% of credit; this one: 23.9% vs 36.7% on real spread quotes).
+  **So BPS-4 is not really a DTE question — the nearest-30 rule has been doing liquidity selection
+  nobody credited it with.** Note what cannot be learned here at any n: both buckets landing on a
+  monthly is **structurally impossible** (consecutive third Fridays are 28–35 days apart, these
+  buckets span at most 17), so there is no monthly-vs-monthly evidence and the same-type number is
+  weekly-vs-weekly only.
+  **The deciding number is still missing, and it is the one that killed the wheel's version of this
+  lever:** conditional on clearing the entry gate, the wheel's 19.6%-vs-40.3% friction gap became
+  6.9% vs 6.0% — the whole gap sat in structures already refused, so the saving was never payable.
+  **78 pairs clear BPS-9's 25% gate at both DTEs**; whether a difference survives among those decides
+  it. v1.1.312 adds that breakdown, the expiry-type 2×2, and a sign count on every subgroup median
+  (under 10 pairs it says "too few to say anything" rather than quoting one). **Re-run needed.**
+  **Still open after that:** returns and %/day under the adopted exits, which needs §4's grid
   re-run on `LEAN` plus 21/35 rows in §7 — worth doing only if the cost measurement leaves 21 DTE
   viable, and read knowing the study's wing is Black-Scholes plus a flat skew whose error is itself
   DTE-dependent (§3 moves the 30-DTE answer 0.277 → 0.081 %/day across skew 0→6).
@@ -181,7 +201,14 @@ Provenance: **measured** (a #43 study result) · **inherited** (a wheel-screen r
   fills better than legging in, so four independent half-spread haircuts may overstate cost — which
   matters because BPS-9 is computed from it.
 - **BPS-9. Cost gate — round-trip cost ≤ 25% of mid credit.** *Measured, and the best single finding in
-  #43.* With it the portfolio returned +61.7% on flat costs and +60.8% on quoted — **the gate makes the
+  #43.* **New 2026-09-22 (BPS-4's run, 296 paired candidates): the gate cuts the distribution almost
+  exactly in half.** Median cost share at 30 DTE is **23.9%** against a 25% bar, with **140 of 296**
+  failing. That is the liquidity-bar-at-8-with-a-mode-of-7 shape — a threshold sitting in the densest
+  part of what it measures, where one point of movement changes the population a great deal. Not a
+  reason to move it (this gate is the best-evidenced rule here and the one that makes the #43 result
+  insensitive to the cost model), but it means **25% was never swept and the sweep is now cheap**: the
+  harness already computes the share for every candidate, so the population at 20/25/30/35% is one
+  pass away. With it the portfolio returned +61.7% on flat costs and +60.8% on quoted — **the gate makes the
   result insensitive to how costs are modelled**. It is also the most active gate: **20 of 75**
   rejections, HUM alone 9. Unsettled: 25% was chosen, not swept; and it is a share of *credit*, so it
   tightens exactly where credit is thin — which may be the intent, or may be a second liquidity gate

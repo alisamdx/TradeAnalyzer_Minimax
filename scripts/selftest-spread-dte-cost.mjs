@@ -119,7 +119,15 @@ check('nothing failed to build at 21 DTE', /At 21 DTE: none/.test(outText));
 
 // The monthly confound is reported even when it is 0/0 — a silent 0 and an unreported 0 look alike.
 check('monthly share reported for both buckets', /Monthly share: 21 DTE \*\*0%\*\* · 30 DTE \*\*0%\*\*/.test(outText));
-check('same-expiry-type subgroup named as too few to separate', /too few to separate/.test(outText));
+check('expiry-type 2×2 puts all 4 pairs in the weekly/weekly cell',
+  /\| \*\*21 DTE weekly\*\* \| 4 \| 0 \|/.test(outText) && /\| \*\*21 DTE monthly\*\* \| 0 \| 0 \|/.test(outText));
+check('the both-monthly cell is named as structurally empty (17 < 28 days apart)',
+  /structurally empty/.test(outText) && /at most 17 days apart/.test(outText));
+check('same-expiry-type subgroup reported as too few at n=4', /Same expiry type: 4 pairs — too few to say anything/.test(outText));
+// Only TIGHT clears at both DTEs (2 pairs), so the conditional subgroup must refuse to report a number
+// rather than quoting one off two observations.
+check('conditional-on-tradable subgroup refuses at n=2',
+  /Both buckets clear the gate: 2 pairs — too few to say anything/.test(outText));
 
 // ── the answer must be able to come out the OTHER way ───────────────────────────────────────────
 // A check that can only report "the shorter expiry costs more" is decoration — the shape of the
