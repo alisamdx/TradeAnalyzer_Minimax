@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.316] - 2026-09-23
+
+### QC-904 counted from settlement as though FINRA published instantly
+
+`newest settlement date 2026-08-31, 23 days ago` fired on three runs and was escalated to blocking, while the domain was exactly on schedule. FINRA publishes the 09-15 settlement on 09-24, and the collector's weekly sweep can first capture it on 09-28, so a healthy pipeline reads the 08-31 date as **28 days old** at the earliest moment it could have been replaced. The drafted 21 days counted from the settlement date and ignored both the publication lag and the fetch cadence. The allowance is now its three parts as named constants: 18 (widest settlement gap) + 12 (7-business-day publication, one holiday) + 8 (weekly fetch, one holiday-skipped Monday) = **38**. A missed publication still fires. A clean reading closes an open finding: `rule_changed` past the old 21 days, `data_corrected` inside it. The test sweeps a year of the settlement → publication → fetch schedule and asserts that no healthy age exceeds the threshold. **Not changed:** ACN's E*Trade date 2026-09-27 is a Sunday, but Accenture reports **2026-10-01 before the open**, so Finnhub is right and E*Trade is wrong by four days. A few hours of UTC offset cannot produce a Sunday, so this is not the Saturday artefact. A Sunday→Friday shift would make the date six days wrong instead of four. QC-602 and QC-604 both reported it correctly.
+
+Details: `changelogs/v1.1.316_2026-09-23.md`.
+
 ## [1.1.309] - 2026-09-22
 
 ### QC-702 was measuring a stock split

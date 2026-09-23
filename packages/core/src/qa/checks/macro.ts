@@ -1,6 +1,7 @@
 import type { CheckDefinition, Evaluation } from '../check.js';
 import { FUND_TYPES, fundFindingClosers, departedFindingClosers } from './earnings-fundamentals.js';
 import { tradingDaysInRange } from '../../collector/trading-calendar.js';
+import { EVENTS_RULE } from '../../collector/phases/events.js';
 
 /**
  * Macro, rates and sentiment-side checks — 03 §3.8.
@@ -19,6 +20,16 @@ const VIX_MAX = 150;
 
 /** The 14 tenors the Treasury actually publishes, read from the live CSV. */
 const PUBLISHED_TENORS = 14;
+
+/**
+ * QC-904's allowance, as its three parts. FINRA settles mid-month and at month end (each moved
+ * back to a business day), so consecutive settlements are 13-18 days apart; it publishes after
+ * the close on the 7th business day after settlement; the collector sweeps weekly.
+ */
+const MAX_SETTLEMENT_GAP_DAYS = 18;
+const MAX_PUBLICATION_LAG_DAYS = 12;
+export const SHORT_INTEREST_MAX_DAYS =
+  MAX_SETTLEMENT_GAP_DAYS + MAX_PUBLICATION_LAG_DAYS + EVENTS_RULE.shortInterestCadenceDays + 1;
 
 function daysBetween(a: string, b: string): number {
   return Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000);
@@ -202,15 +213,23 @@ export const QC904_SHORT_INTEREST_FRESHNESS: CheckDefinition = {
   domain: 'sentiment',
   severity: 'warning',
   description:
-    'The newest short-interest settlement date is within 21 days. FINRA publishes twice monthly, so ' +
-    'three weeks is one missed publication. This is the domain with no confirmed free source, which ' +
-    'makes its freshness check the thing most likely to be reporting a real gap rather than a fault.',
+    'The newest short-interest settlement date is no older than the NEXT settlement could be before ' +
+    'it reaches us: one settlement interval, plus FINRA\'s publication lag, plus the collector\'s ' +
+    'weekly cadence. Older than that means a publication was missed. This is the domain with no ' +
+    'confirmed free source, which makes its freshness check the thing most likely to be reporting ' +
+    'a real gap rather than a fault.',
   readsTables: ['raw_short_interest'],
   testedQuantity: 'days_since_settlement',
   testedUnit: 'days',
-  thresholds: { maxDays: 21 },
+  thresholds: { maxDays: SHORT_INTEREST_MAX_DAYS },
   thresholdBasis: 'measured',
-  thresholdEvidence: 'FINRA publishes twice monthly; 21 days is one missed publication plus slack.',
+  thresholdEvidence:
+    `${MAX_SETTLEMENT_GAP_DAYS} (widest gap between FINRA settlement dates) + ${MAX_PUBLICATION_LAG_DAYS} ` +
+    `(7 business days to publication, one holiday, available the next session) + ` +
+    `${EVENTS_RULE.shortInterestCadenceDays + 1} (weekly fetch, one holiday-skipped Monday). The old 21 counted ` +
+    'from settlement as if publication were instant: the 2026-08-31 settlement read 22-25 days old on ' +
+    '2026-09-22..25 while the 2026-09-15 data was not yet published (FINRA: 2026-09-24) nor due to be ' +
+    'fetched (2026-09-28), and escalated to blocking on a domain that was exactly on schedule.',
   remediation: 'R1',
   run(ctx) {
     const row = ctx.db
@@ -229,7 +248,15 @@ export const QC904_SHORT_INTEREST_FRESHNESS: CheckDefinition = {
         detail: row?.d
           ? `newest settlement date ${row.d}, ${days} days ago`
           : 'no short-interest row has ever been stored',
-        evidence: { newestSettlementDate: row?.d ?? null }
+        evidence: { newestSettlementDate: row?.d ?? null },
+        // Freshness is a claim about now, so a clean reading settles an open finding. Past the old
+        // 21 days it is clean only because the rule changed (v1.1.316), and must say so.
+        closesAs:
+          days <= (this.thresholds['maxDays'] as number)
+            ? days > 21
+              ? { kind: 'rule_changed', note: `${days} days is inside the publication-aware allowance of ${SHORT_INTEREST_MAX_DAYS} (v1.1.316)` }
+              : { kind: 'data_corrected', note: `newest settlement ${row?.d} is ${days} days old` }
+            : undefined
       }
     ];
   }
