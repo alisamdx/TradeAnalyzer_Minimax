@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.317] - 2026-09-23
+
+### QC-602 escalated on repetition, not evidence, and fired on estimate noise
+
+QC-602 fired on 10 of 11 comparisons, with **AAPL, ABT, ACN and ABBV blocking**. There were two faults. **(1)** The overlap sample asks E*Trade about each covered ticker about once every eleven weeks, but the check re-compared that ticker's latest E*Trade row against fresh Finnhub data every night. Each night counted as a consecutive firing, so the gate escalated one observation to blocking, and the finding could not clear until E*Trade was asked again. E*Trade is now compared **only in the run that fetched it**. **(2)** On all 11 same-run pairs the gaps were 1 (1), 2 (7), 4, 7 and 11. Before a company announces, both sources publish an estimate, and they differ by about 2 days by construction. The two *announced* dates (ACN 10-01, ABBV 10-23) were E*Trade errors of 4 and 7 days. The threshold therefore goes from 1 to **3** days: 5 would have missed ACN. Open findings are re-judged on their own evidence and closed as `rule_changed` when inside the threshold, escalated under the old rule, or past both dates. A clean re-observation closes a finding as `data_corrected` only if the dates moved. Rehearsed on 2026-09-23: **10/11 → 0/10**, blocking 131 → 127, AEP's 11-day gap left open.
+
+Details: `changelogs/v1.1.317_2026-09-23.md`.
+
 ## [1.1.316] - 2026-09-23
 
 ### QC-904 counted from settlement as though FINRA published instantly

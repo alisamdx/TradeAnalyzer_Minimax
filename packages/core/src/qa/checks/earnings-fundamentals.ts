@@ -315,15 +315,21 @@ export const QC602_EARNINGS_SOURCE_DISAGREEMENT: CheckDefinition = {
   domain: 'earnings',
   severity: 'warning',
   description:
-    'Finnhub and E*Trade agree within a day on the same ticker\'s next report date. Two independent ' +
-    'readings are the cheapest way to catch one feed drifting, and this domain has a documented ' +
-    'history of one of them being confidently wrong. A missing second source is itself the finding: ' +
-    'with one source every ticker passes unexamined, which is indistinguishable from agreement.',
-  readsTables: ['raw_earnings_event'],
+    'Finnhub and E*Trade agree within three days on the same ticker\'s next report date, E*Trade read ' +
+    'in the run that fetched it. Two independent readings are the cheapest way to catch one feed ' +
+    'drifting, and this domain has a documented history of one of them being confidently wrong. A ' +
+    'missing second source is itself the finding: with one source every ticker passes unexamined, ' +
+    'which is indistinguishable from agreement.',
+  readsTables: ['raw_earnings_event', 'qa_exception'],
   testedQuantity: 'source_disagreement_days',
   testedUnit: 'days',
-  thresholds: { maxDisagreementDays: 1 },
-  thresholdBasis: 'structural',
+  thresholds: { maxDisagreementDays: 3 },
+  thresholdBasis: 'measured',
+  thresholdEvidence:
+    'All 11 same-run pairs through 2026-09-23: |gap| 1 (1), 2 (7), 4, 7, 11. Before a company announces, ' +
+    'both sources publish an estimate and they differ by ~2 days by construction (AAPL, ABT, ADI, ADM, ADP, ' +
+    'AFL, AIG); the two announced dates in the sample were E*Trade errors of 4 (ACN) and 7 (ABBV) days. ' +
+    'Three separates the two; the drafted 1 fired 10 of 11 and 5 would have missed ACN.',
   run(ctx) {
     // This check self-joined on source = 'etrade', and `raw_earnings_event` has
     // only ever held finnhub rows — the collector does not fetch the second
@@ -386,10 +392,18 @@ export const QC602_EARNINGS_SOURCE_DISAGREEMENT: CheckDefinition = {
          )
          SELECT f.ticker, f.near_date AS finnhub_date, e.near_date AS etrade_date
            FROM ranked f
-           JOIN ranked e ON e.ticker = f.ticker AND e.rn = 1 AND e.source = 'etrade'
+           JOIN nearest e ON e.ticker = f.ticker AND e.source = 'etrade' AND e.run_id = ?
           WHERE f.rn = 1 AND f.source = 'finnhub'`
       )
-      .all(ctx.tradingDate) as { ticker: string; finnhub_date: string; etrade_date: string }[];
+      .all(ctx.tradingDate, ctx.runId) as { ticker: string; finnhub_date: string; etrade_date: string }[];
+    // E*Trade is compared ONLY in the run that fetched it (v1.1.317). The overlap sample asks each
+    // covered ticker about once every eleven weeks, and until this the check re-compared that one
+    // old row every night — so the consecutive-runs escalation promoted AAPL, ABT, ACN and ABBV to
+    // blocking on a single observation each, and the findings could not move until E*Trade was
+    // asked again months later. A ticker not re-asked this run is simply not evaluated: its open
+    // finding stays open, not firing, and cannot escalate.
+    const openFindings = openQc602Findings(ctx);
+    const closers = qc602Closers(ctx, openFindings, this.thresholds['maxDisagreementDays'] as number, new Set(rows.map((r) => r.ticker)));
 
     // Both sources present and NO ticker dated by both is the same finding as a missing
     // source (v1.1.270). E*Trade is asked mainly for tickers Finnhub did not date, so without
@@ -401,24 +415,93 @@ export const QC602_EARNINGS_SOURCE_DISAGREEMENT: CheckDefinition = {
           key: 'sources',
           value: UNCOMPARABLE_DISAGREEMENT_DAYS,
           fired: true,
-          detail: 'no cross-source comparison is possible: no ticker has a future date from both finnhub and etrade',
+          detail: 'no cross-source comparison is possible: no ticker has a future date from finnhub and from this run\'s etrade fetch',
           evidence: { present: [...present].sort(), paired: 0 }
-        } satisfies Evaluation
+        } satisfies Evaluation,
+        ...closers
       ];
     }
 
-    return rows.map((r) => {
+    const max = this.thresholds['maxDisagreementDays'] as number;
+    return rows.map((r): Evaluation => {
       const gap = Math.abs(daysBetween(r.finnhub_date, r.etrade_date));
+      const fired = gap > max;
       return {
         key: r.ticker,
         value: gap,
-        fired: gap > (this.thresholds['maxDisagreementDays'] as number),
+        fired,
         detail: `${r.ticker}: finnhub ${r.finnhub_date} vs etrade ${r.etrade_date} (${gap} days apart)`,
-        evidence: { ticker: r.ticker, finnhub: r.finnhub_date, etrade: r.etrade_date, gapDays: gap }
-      } satisfies Evaluation;
-    });
+        evidence: { ticker: r.ticker, finnhub: r.finnhub_date, etrade: r.etrade_date, gapDays: gap },
+        // A clean evaluation settles an open finding — as `data_corrected` only when the dates
+        // actually moved. The same gap judged under a wider threshold is a rule change, not a fix.
+        closesAs: fired
+          ? undefined
+          : (openFindings.get(r.ticker)?.gapDays ?? Infinity) <= max
+            ? { kind: 'rule_changed', note: `${gap} days is inside the ${max}-day threshold (v1.1.317): two estimates of an unannounced date differ by ~2 days by construction` }
+            : { kind: 'data_corrected', note: `${r.ticker} re-asked: finnhub ${r.finnhub_date} vs etrade ${r.etrade_date} (${gap} days apart)` }
+      };
+    }).concat(closers);
   }
 };
+
+/**
+ * Closers for QC-602 findings on tickers NOT compared this run (v1.1.317). Three cases, each on
+ * the finding's own recorded evidence, never on absence:
+ *  - both report dates have passed: there is nothing left for the two sources to disagree about;
+ *  - the recorded gap is inside the current threshold: it would not fire under today's rule;
+ *  - the finding was escalated above its base severity: under the old rule that escalation came
+ *    from re-comparing one stale E*Trade row night after night, not from repeated observation.
+ * Anything else (a real, still-future disagreement at base severity) stays open until E*Trade is
+ * asked again.
+ */
+interface OpenQc602Finding {
+  readonly severity: string;
+  readonly baseSeverity: string;
+  readonly firstSeenRunId: number;
+  readonly finnhub: string | undefined;
+  readonly etrade: string | undefined;
+  readonly gapDays: number | undefined;
+}
+
+function openQc602Findings(ctx: CheckContext): Map<string, OpenQc602Finding> {
+  const rows = ctx.db
+    .prepare(
+      `SELECT key, severity, base_severity, first_seen_run_id, evidence_json
+         FROM qa_exception
+        WHERE check_id = 'QC-602' AND state IN ('open', 'acknowledged') AND key <> 'sources'`
+    )
+    .all() as { key: string; severity: string; base_severity: string; first_seen_run_id: number; evidence_json: string }[];
+  return new Map(rows.map((r) => {
+    const ev = JSON.parse(r.evidence_json) as { finnhub?: string; etrade?: string; gapDays?: number };
+    return [r.key, {
+      severity: r.severity, baseSeverity: r.base_severity, firstSeenRunId: r.first_seen_run_id,
+      finnhub: ev.finnhub, etrade: ev.etrade, gapDays: ev.gapDays
+    }];
+  }));
+}
+
+function qc602Closers(
+  ctx: CheckContext, open: ReadonlyMap<string, OpenQc602Finding>, maxGap: number, comparedNow: ReadonlySet<string>
+): Evaluation[] {
+  const out: Evaluation[] = [];
+  for (const [key, ev] of open) {
+    if (comparedNow.has(key)) continue;
+    if (!ev.finnhub || !ev.etrade || ev.gapDays === undefined) continue;
+    const f = { key, severity: ev.severity, base_severity: ev.baseSeverity, first_seen_run_id: ev.firstSeenRunId };
+    const later = ev.finnhub > ev.etrade ? ev.finnhub : ev.etrade;
+    const note =
+      later < ctx.tradingDate
+        ? `both report dates have passed (finnhub ${ev.finnhub}, etrade ${ev.etrade})`
+        : ev.gapDays <= maxGap
+          ? `${ev.gapDays} days is inside the ${maxGap}-day threshold (v1.1.317): two estimates of an unannounced date differ by ~2 days by construction`
+          : f.severity !== f.base_severity
+            ? `escalated to ${f.severity} by re-comparing one E*Trade observation (run ${f.first_seen_run_id}) every night; ` +
+              `QC-602 compares only same-run observations since v1.1.317 — recorded ${ev.gapDays}-day gap kept in evidence`
+            : null;
+    if (note) out.push({ key: f.key, fired: false, closesAs: { kind: 'rule_changed', note } });
+  }
+  return out;
+}
 
 export const QC603_EARNINGS_FRESHNESS: CheckDefinition = {
   id: 'QC-603',

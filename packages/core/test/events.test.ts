@@ -1305,7 +1305,113 @@ describe('QC-602, the cross-source comparison that had no second source', () => 
     });
     expect(evals).toHaveLength(1);
     expect(evals[0]!.fired).toBe(true);
-    expect(evals[0]!.detail).toContain('no ticker has a future date from both');
+    expect(evals[0]!.detail).toContain('no ticker has a future date from finnhub and from this run');
+  });
+
+  // v1.1.317. The overlap sample asks each covered ticker about once every eleven weeks, and the
+  // check re-compared that one E*Trade row every night — so the consecutive-runs escalation turned
+  // AAPL, ABT, ACN and ABBV into blocking findings on ONE observation each.
+  const qc602Gate = (runId: number, tradingDate: string) =>
+    runGate(db(), makeHost(), { runId, tradingDate, domainsExpected: {}, checks: [QC602_EARNINGS_SOURCE_DISAGREEMENT] });
+  const qc602Finding = (key: string) =>
+    raw.prepare("SELECT severity, state, still_firing, resolution_kind, resolution_note FROM qa_exception WHERE check_id = 'QC-602' AND key = ?")
+      .get(key) as { severity: string; state: string; still_firing: number; resolution_kind: string | null; resolution_note: string | null } | undefined;
+
+  it('compares E*Trade only in the run that fetched it, so one observation cannot escalate', () => {
+    insertEarnings([
+      { ticker: 'ACN', date: '2026-10-01', observedAt: OBSERVED, source: 'finnhub' },
+      { ticker: 'ACN', date: '2026-09-27', observedAt: OBSERVED, source: 'etrade' }
+    ]);
+    qc602Gate(fixtureRun.runId, DATE);
+    expect(qc602Finding('ACN')).toMatchObject({ severity: 'warning', state: 'open', still_firing: 1 });
+
+    // Four more runs: Finnhub every night, E*Trade never re-asked. The old check fired on each.
+    for (const d of ['2026-09-08', '2026-09-09', '2026-09-10', '2026-09-11']) {
+      const run = beginRun(db(), makeHost(), { kind: 'daily', tradingDate: d }).runId;
+      insertEarnings([{ ticker: 'ACN', date: '2026-10-01', observedAt: `${d}T22:00:00Z`, source: 'finnhub', runId: run, asOf: d }]);
+      const evals = QC602_EARNINGS_SOURCE_DISAGREEMENT.run({ db: db(), runId: run, tradingDate: d, observedAt: OBSERVED });
+      expect(evals.some((e) => e.key === 'ACN')).toBe(false);
+      qc602Gate(run, d);
+    }
+    expect(qc602Finding('ACN')).toMatchObject({ severity: 'warning', state: 'open', still_firing: 0 });
+  });
+
+  it('does not fire on the two-day gap between two estimates of an unannounced date', () => {
+    insertEarnings([
+      { ticker: 'AAPL', date: '2026-10-28', observedAt: OBSERVED, source: 'finnhub' },
+      { ticker: 'AAPL', date: '2026-10-30', observedAt: OBSERVED, source: 'etrade' },
+      { ticker: 'ACN', date: '2026-10-01', observedAt: OBSERVED, source: 'finnhub' },
+      { ticker: 'ACN', date: '2026-09-27', observedAt: OBSERVED, source: 'etrade' }
+    ]);
+    const evals = QC602_EARNINGS_SOURCE_DISAGREEMENT.run({ db: db(), runId: fixtureRun.runId, tradingDate: DATE, observedAt: OBSERVED });
+    expect(evals.filter((e) => e.fired).map((e) => e.key)).toEqual(['ACN']);
+  });
+
+  it('closes findings the old rule raised, on their own evidence, and keeps a real one open', () => {
+    insertEarnings([
+      { ticker: 'ACN', date: '2026-10-01', observedAt: OBSERVED, source: 'finnhub' },
+      { ticker: 'ACN', date: '2026-09-27', observedAt: OBSERVED, source: 'etrade' },
+      { ticker: 'AEP', date: '2026-10-22', observedAt: OBSERVED, source: 'finnhub' },
+      { ticker: 'AEP', date: '2026-11-02', observedAt: OBSERVED, source: 'etrade' },
+      { ticker: 'NOW', date: '2026-09-20', observedAt: OBSERVED, source: 'finnhub' },
+      { ticker: 'NOW', date: '2026-09-25', observedAt: OBSERVED, source: 'etrade' }
+    ]);
+    qc602Gate(fixtureRun.runId, DATE);
+    // What the old rule left behind: an escalated finding, and one at a gap today's rule passes.
+    raw.exec("UPDATE qa_exception SET severity = 'blocking' WHERE check_id = 'QC-602' AND key = 'ACN'");
+    raw.exec(`UPDATE qa_exception SET evidence_json = json_set(evidence_json, '$.gapDays', 2) WHERE check_id = 'QC-602' AND key = 'AEP'`);
+
+    const later = '2026-09-28';
+    const run = beginRun(db(), makeHost(), { kind: 'daily', tradingDate: later }).runId;
+    insertEarnings([{ ticker: 'ACN', date: '2026-10-01', observedAt: `${later}T22:00:00Z`, source: 'finnhub', runId: run, asOf: later }]);
+    qc602Gate(run, later);
+
+    expect(qc602Finding('ACN')).toMatchObject({ state: 'resolved', resolution_kind: 'rule_changed' });
+    expect(qc602Finding('ACN')!.resolution_note).toContain('re-comparing one E*Trade observation');
+    expect(qc602Finding('AEP')).toMatchObject({ state: 'resolved', resolution_kind: 'rule_changed' });
+    expect(qc602Finding('AEP')!.resolution_note).toContain('inside the 3-day threshold');
+    expect(qc602Finding('NOW')).toMatchObject({ state: 'resolved', resolution_kind: 'rule_changed' });
+    expect(qc602Finding('NOW')!.resolution_note).toContain('both report dates have passed');
+  });
+
+  it('closes a same-run finding the old threshold raised as rule_changed, not data_corrected', () => {
+    // AFL on 2026-09-23: the same two-day gap, judged again under the wider threshold. Nothing
+    // was corrected, so the record must not say so.
+    insertEarnings([
+      { ticker: 'AFL', date: '2026-11-04', observedAt: OBSERVED, source: 'finnhub' },
+      { ticker: 'AFL', date: '2026-11-12', observedAt: OBSERVED, source: 'etrade' }
+    ]);
+    qc602Gate(fixtureRun.runId, DATE);
+    raw.exec(`UPDATE qa_exception SET evidence_json = json_set(evidence_json, '$.gapDays', 2) WHERE check_id = 'QC-602' AND key = 'AFL'`);
+    const run = beginRun(db(), makeHost(), { kind: 'daily', tradingDate: '2026-09-08' }).runId;
+    insertEarnings([
+      { ticker: 'AFL', date: '2026-11-04', observedAt: '2026-09-08T22:00:00Z', source: 'finnhub', runId: run, asOf: '2026-09-08' },
+      { ticker: 'AFL', date: '2026-11-02', observedAt: '2026-09-08T22:00:01Z', source: 'etrade', runId: run, asOf: '2026-09-08' }
+    ]);
+    qc602Gate(run, '2026-09-08');
+    expect(qc602Finding('AFL')).toMatchObject({ state: 'resolved', resolution_kind: 'rule_changed' });
+  });
+
+  it('leaves a real, still-future disagreement at base severity open until E*Trade is asked again', () => {
+    insertEarnings([
+      { ticker: 'AEP', date: '2026-10-22', observedAt: OBSERVED, source: 'finnhub' },
+      { ticker: 'AEP', date: '2026-11-02', observedAt: OBSERVED, source: 'etrade' }
+    ]);
+    qc602Gate(fixtureRun.runId, DATE);
+    const later = '2026-09-08';
+    const run = beginRun(db(), makeHost(), { kind: 'daily', tradingDate: later }).runId;
+    insertEarnings([{ ticker: 'AEP', date: '2026-10-22', observedAt: `${later}T22:00:00Z`, source: 'finnhub', runId: run, asOf: later }]);
+    qc602Gate(run, later);
+    expect(qc602Finding('AEP')).toMatchObject({ severity: 'warning', state: 'open', still_firing: 0 });
+
+    // Re-asked, now agreeing: new data settles it.
+    const again = beginRun(db(), makeHost(), { kind: 'daily', tradingDate: '2026-09-09' }).runId;
+    insertEarnings([
+      { ticker: 'AEP', date: '2026-10-22', observedAt: '2026-09-09T22:00:00Z', source: 'finnhub', runId: again, asOf: '2026-09-09' },
+      { ticker: 'AEP', date: '2026-10-22', observedAt: '2026-09-09T22:00:01Z', source: 'etrade', runId: again, asOf: '2026-09-09' }
+    ]);
+    qc602Gate(again, '2026-09-09');
+    expect(qc602Finding('AEP')).toMatchObject({ state: 'resolved', resolution_kind: 'data_corrected' });
   });
 });
 
