@@ -14,6 +14,10 @@
  *
  * and reports how often the chosen contract differs, split by QC-410's per-ticker verdict.
  *
+ * This is the UNGUARDED rule. TradeAnalyzer itself nulls an inconsistent chain's Greeks at
+ * `ETradeDataProvider.getOptionsChain` (v1.1.255, `greek-consistency.ts`), so live it skips a
+ * flagged chain rather than mis-picking on it.
+ *
  * Read a COPY only — `POST /api/v1/diagnostics/generation-snapshot` writes one under
  * ~/.tradeanalyzer/rehearsal. Never point this at the live generation.
  */
