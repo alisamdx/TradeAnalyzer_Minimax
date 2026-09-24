@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.321] - 2026-09-23
+
+### A share class inherits its sibling's earnings date, in both apps
+
+Finnhub dated **GOOGL 10-27** and **NWSA 11-04** and never GOOG or NWS, and E*Trade returned nothing for either. TradeAnalyzer 1 reads a missing date as "no earnings", so a GOOG put across 10-27 passed every earnings check. **TradeAnalyzer 1:** `syncShareClassSiblings` runs at the end of the earnings refresh and copies a class's future date onto its undated sibling as source `share_class`, at the writer because ten readers query the table directly. It never overwrites a sibling's own future date or a manual entry, and never copies a copy. **TradeAnalyzer 2:** QC-603 accepts a date from a sibling ruled `same_issuer` (the existing QC-909 rulings) and names it; a `different_issuer` ruling never supplies one. Rehearsed: 13 → 11 fired, GOOG and NWS closed, BRK.B still correctly firing because BRK.A is undated too. **Found, not changed:** `analyzeWheel`'s earnings check reads a Polygon stub that always returns null, so it has never fired; recorded in AI_CONTEXT §11 for an FR-SEY-5 decision.
+
+Details: `changelogs/v1.1.321_2026-09-23.md`.
+
 ## [1.1.320] - 2026-09-23
 
 ### Shadow log for `STALE_GREEK_MODEL_DELTA`

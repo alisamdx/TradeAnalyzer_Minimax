@@ -36,3 +36,64 @@ describe('isEarningsPending', () => {
     expect(isEarningsPending(today, null, today)).toBe(true);
   });
 });
+
+// v1.1.321: the sources date one share class and not the other. On 2026-09-23 Finnhub had GOOGL
+// 10-27 and NWSA 11-04 and nothing for GOOG or NWS, so every earnings_calendar reader saw GOOG as
+// having no earnings and passed it. The sibling's date is copied at the writer, where all ten
+// readers see it.
+describe('syncShareClassSiblings', () => {
+  const TODAY = '2026-09-23';
+  async function service() {
+    const { openDatabase } = await import('../src/main/db/connection.js');
+    const { runMigrations } = await import('../src/main/db/migrations.js');
+    const { MIGRATIONS_DIR } = await import('./helpers.js');
+    const { EarningsService } = await import('../src/main/services/earnings-service.js');
+    const db = openDatabase(':memory:');
+    runMigrations(db, MIGRATIONS_DIR);
+    return new EarningsService(db);
+  }
+
+  it('gives an undated class its sibling\'s date, in either direction', async () => {
+    const s = await service();
+    s.upsertFromProvider('GOOGL', '2026-10-27', 'amc', 'finnhub', true);
+    s.upsertFromProvider('NWS', '2026-11-04', null, 'finnhub', false);
+    expect(s.syncShareClassSiblings(TODAY)).toBe(2);
+    expect(s.getForTicker('GOOG')).toMatchObject({ reportDate: '2026-10-27', reportTime: 'amc', source: 'share_class', confirmed: true });
+    expect(s.getForTicker('NWSA')).toMatchObject({ reportDate: '2026-11-04', source: 'share_class', confirmed: false });
+    // Idempotent: a second run writes nothing.
+    expect(s.syncShareClassSiblings(TODAY)).toBe(0);
+  });
+
+  it('never overwrites a class\'s own future date or a manual entry', async () => {
+    const s = await service();
+    s.upsertFromProvider('GOOGL', '2026-10-27', 'amc', 'finnhub', true);
+    s.upsertFromProvider('GOOG', '2026-10-28', 'amc', 'finnhub', true);
+    s.upsertFromProvider('NWSA', '2026-11-04', null, 'finnhub', true);
+    s.setManual('NWS', '2026-11-05', 'amc');
+    expect(s.syncShareClassSiblings(TODAY)).toBe(0);
+    expect(s.getForTicker('GOOG')!.reportDate).toBe('2026-10-28');
+    expect(s.getForTicker('NWS')!.source).toBe('manual');
+  });
+
+  it('replaces a stale date, and follows the sibling when its date moves', async () => {
+    const s = await service();
+    s.upsertFromProvider('GOOG', '2026-07-23', 'amc', 'finnhub', true); // last quarter, passed
+    s.upsertFromProvider('GOOGL', '2026-10-27', 'amc', 'finnhub', true);
+    expect(s.syncShareClassSiblings(TODAY)).toBe(1);
+    expect(s.getForTicker('GOOG')!.reportDate).toBe('2026-10-27');
+    s.upsertFromProvider('GOOGL', '2026-10-29', 'amc', 'finnhub', true);
+    expect(s.syncShareClassSiblings(TODAY)).toBe(1);
+    expect(s.getForTicker('GOOG')).toMatchObject({ reportDate: '2026-10-29', source: 'share_class' });
+  });
+
+  it('never copies a copy back, and does nothing when neither class is dated', async () => {
+    const s = await service();
+    s.upsertFromProvider('GOOGL', '2026-10-27', 'amc', 'finnhub', true);
+    s.syncShareClassSiblings(TODAY);
+    s.deleteTicker('GOOGL');
+    // GOOG holds only a share_class copy, which is not a source for GOOGL.
+    expect(s.syncShareClassSiblings(TODAY)).toBe(0);
+    expect(s.getForTicker('GOOGL')).toBeNull();
+    expect(s.getForTicker('BRK.B')).toBeNull();
+  });
+});

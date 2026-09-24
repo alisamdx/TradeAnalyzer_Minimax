@@ -20,6 +20,7 @@ const SOURCE_LABEL: Record<string, string> = {
   polygon_est: '~Estimated',
   manual:      'Manual',
   finnhub:     'Finnhub',
+  share_class: 'Share class',
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

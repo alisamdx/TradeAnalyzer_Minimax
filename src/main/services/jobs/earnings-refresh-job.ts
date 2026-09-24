@@ -282,10 +282,14 @@ export class EarningsRefreshJob implements BatchJobHandler {
       if (!signal.aborted) await sleep(1000);
     }
 
+    // A share class the sources did not date inherits its sibling's report (v1.1.321).
+    const siblingCopies = signal.aborted ? 0 : this.earningsService.syncShareClassSiblings(todayStr);
+
     return {
       status: signal.aborted ? 'failed' : 'success',
       notes: `Sweep${sweepComplete ? '' : ' (INCOMPLETE)'}: ${finnhubFilled} dates · ` +
-             `Per-ticker: ${perTickerFilled} found, ${needsLookup.length - perTickerFilled} not yet announced`,
+             `Per-ticker: ${perTickerFilled} found, ${needsLookup.length - perTickerFilled} not yet announced` +
+             (siblingCopies > 0 ? ` · Share class: ${siblingCopies} copied` : ''),
       tickersAttempted: tickers.length,
       tickersUpdated: finnhubFilled + perTickerFilled,
       tickersSkipped: tickers.length - needsLookup.length,

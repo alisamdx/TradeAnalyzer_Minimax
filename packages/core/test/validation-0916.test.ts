@@ -238,6 +238,29 @@ describe('QC-603 and QC-905 — funds, recent reports and recent admissions', ()
     expect(byKey.get('HONA')?.evidence?.['newlyListed']).toBe(true);
   });
 
+  it('QC-603 takes a date from a share class ruled the same issuer, never from a different one (v1.1.321)', () => {
+    // 2026-09-23: Finnhub dated GOOGL 10-27 and NWSA 11-04, never GOOG or NWS; LLYVA is answered
+    // for FWONA, which the operator ruled a DIFFERENT issuer.
+    const rule = raw.prepare(
+      `INSERT INTO ref_provider_symbol_ruling (provider, asked_ticker, answered_symbol, decision, note, ruled_at, ruled_by)
+       VALUES ('finnhub', ?, ?, ?, 'test', '2026-09-21T12:00:00-04:00', 'operator')`
+    );
+    rule.run('GOOG', 'GOOGL', 'same_issuer');
+    rule.run('NWS', 'NWSA', 'same_issuer');
+    rule.run('LLYVA', 'FWONA', 'different_issuer');
+    for (const t of ['GOOG', 'GOOGL', 'NWSA', 'NWS', 'LLYVA']) { reference(t, 'CS', '2010-01-01'); member(t, '2026-09-01'); }
+    earnings('GOOGL', '2026-10-27');
+    earnings('NWS', '2026-11-04');   // the ruling works in either direction: NWSA is dated by NWS
+    earnings('FWONA', '2026-11-03');
+    const byKey = new Map(QC603_EARNINGS_FRESHNESS.run(ctx()).map((e) => [e.key, e]));
+    expect(byKey.get('GOOG')!.fired).toBe(false);
+    expect(byKey.get('GOOG')!.evidence?.['via']).toBe('GOOGL');
+    expect(byKey.get('GOOG')!.closesAs).toMatchObject({ kind: 'rule_changed' });
+    expect(byKey.get('NWSA')!.fired).toBe(false);
+    expect(byKey.get('GOOGL')!.evidence?.['via']).toBeNull(); // dated itself: no borrowed date named
+    expect(byKey.get('LLYVA')!.fired).toBe(true);
+  });
+
   it('QC-603 does not excuse a new listing that already has an earnings row', () => {
     // Grace covers "never dated", not "dated once and then dropped out of the calendar".
     reference('SPCX', 'CS', '2026-06-12');

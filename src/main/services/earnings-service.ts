@@ -17,7 +17,7 @@ export interface EarningsEntry {
   reportDate:  string;          // ISO YYYY-MM-DD
   reportTime:  'bmo' | 'amc' | null;
   epsEstimate: number | null;
-  source:      'etrade' | 'polygon_est' | 'manual' | 'finnhub';
+  source:      'etrade' | 'polygon_est' | 'manual' | 'finnhub' | 'share_class';
   confirmed:   boolean;
   cachedAt:    string;
   dte:         number | null;   // days from today to reportDate (computed at read time)
@@ -29,6 +29,24 @@ export interface EarningsEntry {
 // and re-checking cannot change the outcome), while every date claiming to be outside
 // it gets confirmed — that is the direction a wrong value disables the gate. v1.1.138
 const TRUST_STORED_WITHIN_DAYS = 60;
+
+/**
+ * Share classes of ONE issuer, which report on the same day (v1.1.321). The earnings sources date
+ * one class and not the other — on 2026-09-23 Finnhub had GOOGL 10-27 and NWSA 11-04 and nothing
+ * for GOOG or NWS, and E*Trade returned no date for either — so every consumer read GOOG as
+ * having no earnings and passed it. Symmetric: whichever class is dated supplies the other.
+ */
+export const SHARE_CLASS_SIBLINGS: ReadonlyArray<readonly [string, string]> = [
+  ['GOOG', 'GOOGL'],
+  ['NWS', 'NWSA'],
+  ['BRK.B', 'BRK.A'],
+  ['FOX', 'FOXA'],
+  ['UA', 'UAA'],
+  ['LEN', 'LEN.B'],
+  ['HEI', 'HEI.A'],
+  ['BF.A', 'BF.B'],
+  ['Z', 'ZG'],
+];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -166,6 +184,32 @@ export class EarningsService {
     confirmed: boolean,
   ): void {
     this.upsert(ticker.toUpperCase(), reportDate, reportTime, null, source, confirmed);
+  }
+
+  /**
+   * Copies a dated share class's next report onto its undated sibling, as source 'share_class'
+   * (v1.1.321). Done at the WRITER because ten readers query earnings_calendar directly — patching
+   * each would leave the next one out. A sibling with its own future provider or manual date is
+   * never overwritten; a stale or share_class row is replaced. Returns how many rows it wrote.
+   */
+  syncShareClassSiblings(todayStr: string): number {
+    // A provider or manual date that has not passed. Plain boolean, not a type guard: a guard's
+    // false branch would narrow `dst` to null and hide the share_class comparison below.
+    const live = (e: EarningsEntry): boolean => e.source !== 'share_class' && e.reportDate >= todayStr;
+    let written = 0;
+    for (const [a, b] of SHARE_CLASS_SIBLINGS) {
+      for (const [from, to] of [[a, b], [b, a]] as const) {
+        const src = this.getForTicker(from);
+        const dst = this.getForTicker(to);
+        if (!src || !live(src)) continue;
+        if (dst && dst.source === 'manual') continue;
+        if (dst && live(dst)) continue;                // it has its own date — keep it
+        if (dst && dst.source === 'share_class' && dst.reportDate === src.reportDate && dst.reportTime === src.reportTime) continue;
+        this.upsert(to, src.reportDate, src.reportTime, null, 'share_class', src.confirmed);
+        written++;
+      }
+    }
+    return written;
   }
 
   // Refresh a batch of tickers via E*Trade — an INDEPENDENT second source used to

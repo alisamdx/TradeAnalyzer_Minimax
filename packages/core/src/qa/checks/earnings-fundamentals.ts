@@ -513,7 +513,7 @@ export const QC603_EARNINGS_FRESHNESS: CheckDefinition = {
     'fire, which is indistinguishable from a ticker with no earnings coming. Two cases are not ' +
     'staleness: a ticker that reported in the last 21 days (its next date can sit past the sweep), and ' +
     'one listed within 135 days that has never been dated (its first report is not yet due).',
-  readsTables: ['raw_earnings_event', 'ref_chain_subset_membership', 'raw_ticker_reference', 'qa_exception', 'ref_universe_membership'],
+  readsTables: ['raw_earnings_event', 'ref_chain_subset_membership', 'raw_ticker_reference', 'qa_exception', 'ref_universe_membership', 'ref_provider_symbol_ruling'],
   testedQuantity: 'days_since_future_date_observed',
   testedUnit: 'days',
   thresholds: { maxDaysSinceObserved: 7 },
@@ -522,12 +522,26 @@ export const QC603_EARNINGS_FRESHNESS: CheckDefinition = {
   run(ctx) {
     // Funds are excluded: an ETF has no earnings. On 2026-09-16, 47 of 68 findings were ETFs in
     // the chain subset (SPY, QQQ, GLD ...) that could never pass.
+    // A share class reports with its siblings, and the sources date only one of them — Finnhub
+    // had GOOGL 10-27 and NWSA 11-04 on 2026-09-23 and never GOOG or NWS (v1.1.321). A sibling
+    // the operator has ruled `same_issuer` in ref_provider_symbol_ruling (the QC-909 rulings, in
+    // either direction) supplies the date. A `different_issuer` ruling (LLYVA→FWONA) never does.
+    const issuer = (col: string): string =>
+      `(${col} = m.ticker
+          OR ${col} IN (SELECT answered_symbol FROM ref_provider_symbol_ruling
+                         WHERE asked_ticker = m.ticker AND decision = 'same_issuer')
+          OR ${col} IN (SELECT asked_ticker FROM ref_provider_symbol_ruling
+                         WHERE answered_symbol = m.ticker AND decision = 'same_issuer'))`;
     const rows = ctx.db
       .prepare(
         `SELECT m.ticker,
                 (SELECT MAX(substr(e.observed_at, 1, 10))
                    FROM raw_earnings_event e
-                  WHERE e.ticker = m.ticker AND e.report_date >= ?) AS last_seen,
+                  WHERE ${issuer('e.ticker')} AND e.report_date >= ?) AS last_seen,
+                (SELECT e.ticker FROM raw_earnings_event e
+                  WHERE ${issuer('e.ticker')} AND e.ticker <> m.ticker AND e.report_date >= ?
+                    AND NOT EXISTS (SELECT 1 FROM raw_earnings_event o WHERE o.ticker = m.ticker AND o.report_date >= ?)
+                  ORDER BY e.observed_at DESC LIMIT 1) AS via,
                 (SELECT MAX(e.report_date)
                    FROM raw_earnings_event e
                   WHERE e.ticker = m.ticker AND e.report_date < ?) AS last_reported,
@@ -540,8 +554,8 @@ export const QC603_EARNINGS_FRESHNESS: CheckDefinition = {
                WHERE security_type IN ${FUND_TYPES}
                  AND row_id IN (SELECT MAX(row_id) FROM raw_ticker_reference GROUP BY ticker))`
       )
-      .all(ctx.tradingDate, ctx.tradingDate) as {
-      ticker: string; last_seen: string | null; last_reported: string | null; list_date: string | null;
+      .all(ctx.tradingDate, ctx.tradingDate, ctx.tradingDate, ctx.tradingDate) as {
+      ticker: string; last_seen: string | null; via: string | null; last_reported: string | null; list_date: string | null;
     }[];
 
     return rows.map((r): Evaluation => {
@@ -571,9 +585,10 @@ export const QC603_EARNINGS_FRESHNESS: CheckDefinition = {
         detail:
           r.last_seen === null
             ? `${r.ticker}: no future report date has ever been observed`
-            : `${r.ticker}: future report date last observed ${r.last_seen} (${days} days ago)`,
+            : `${r.ticker}: future report date last observed ${r.last_seen} (${days} days ago)` +
+              (r.via ? ` via ${r.via}, ruled the same issuer` : ''),
         evidence: {
-          ticker: r.ticker, lastObserved: r.last_seen, lastReported: r.last_reported, justReported,
+          ticker: r.ticker, lastObserved: r.last_seen, via: r.via, lastReported: r.last_reported, justReported,
           listDate: r.list_date, newlyListed
         },
         // Freshness is a claim about NOW, so a clean reading today settles an open finding — and
@@ -584,7 +599,9 @@ export const QC603_EARNINGS_FRESHNESS: CheckDefinition = {
             ? { kind: 'rule_changed', note: `${r.ticker} reported ${r.last_reported}, inside the ${RECENT_REPORT_GRACE_DAYS}-day just-reported grace` }
             : newlyListed
               ? { kind: 'rule_changed', note: `${r.ticker} listed ${r.list_date}; its first report is not yet due (${NEW_LISTING_GRACE_DAYS}-day new-listing grace)` }
-              : { kind: 'data_corrected', note: `${r.ticker}: a future report date was observed ${r.last_seen}` }
+              : r.via
+                ? { kind: 'rule_changed', note: `${r.ticker}: dated through its share class ${r.via}, ruled the same issuer (v1.1.321)` }
+                : { kind: 'data_corrected', note: `${r.ticker}: a future report date was observed ${r.last_seen}` }
       };
     }).concat(
       fundFindingClosers(ctx, 'QC-603', 'funds have no earnings and are excluded from QC-603 since v1.1.257'),
