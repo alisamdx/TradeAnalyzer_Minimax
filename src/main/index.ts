@@ -93,6 +93,7 @@ import { PortfolioSyncJob } from './services/jobs/portfolio-sync-job.js';
 import { BatchOrchestratorJob } from './services/jobs/batch-orchestrator-job.js';
 import { BetaService } from './services/beta-service.js';
 import { BriefReplayService } from './services/brief-replay-service.js';
+import { recordStaleGreekShadow } from './services/stale-greek-shadow.js';
 import { registerBriefReplayIpc } from './ipc/ipc-brief-replay.js';
 import { ExecutionEngine, type ExecNotifier } from './execution/execution-engine.js';
 import { RiskGovernor } from './execution/risk-governor.js';
@@ -337,7 +338,9 @@ app.whenReady().then(() => {
     accessToken:    secureGet(db, 'etradeAccessToken'),
     accessSecret:   secureGet(db, 'etradeAccessSecret'),
   });
-  const optionsProvider: OptionsProvider = new ETradeDataProvider(etradeCredsFactory);
+  // Stale-Greek shadow log (v1.1.320): what STALE_GREEK_MODEL_DELTA would have picked, for deciding it.
+  const optionsProvider: OptionsProvider = new ETradeDataProvider(etradeCredsFactory, (chain, assessment, todayEt) =>
+    recordStaleGreekShadow(db, chain, assessment, todayEt));
   console.log('[options] provider = E*Trade (enforced)');
 
   // Register watchlist IPC with data provider for ticker validation

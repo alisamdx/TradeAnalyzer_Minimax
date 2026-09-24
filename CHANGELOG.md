@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.320] - 2026-09-23
+
+### Shadow log for `STALE_GREEK_MODEL_DELTA`
+
+The OFF flag is to be decided on the outcomes of the picks it would have made, but the guard makes the wheel skip those chains, so nothing recorded them. **Migration 088 `stale_greek_shadow_picks`** now stores, for every stale chain in the wheel DTE window, the put the wheel rule would pick by our model delta, beside E*Trade's delta and the quote. It is written through a new `onStaleChain` hook on `ETradeDataProvider` that receives the chain as fetched; a failing hook never costs the chain. The rows are read via `GET /diagnostics/stale-greek-shadow`. The live path is unchanged. Score after the first expiries on 2026-10-16.
+
+Details: `changelogs/v1.1.320_2026-09-23.md`.
+
 ## [1.1.319] - 2026-09-23
 
 ### `STALE_GREEK_MODEL_DELTA`: a model-delta fallback for stale chains, shipped OFF

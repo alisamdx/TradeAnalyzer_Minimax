@@ -75,6 +75,8 @@ not shipped (it may ship **disabled**, as a configurable option, with the findin
   a mid-solved IV on 93 % of chosen contracts. Not enabled because it ADDS candidates on tickers whose
   feed is currently unreliable, and none can be scored before expiry (earliest 2026-10-16). Decide on
   realized outcomes of the flagged-ticker picks it would have made, against the picks actually taken.
+  **Shadow log since v1.1.320:** `stale_greek_shadow_picks` (migration 088) records every such would-be
+  pick with its quote; read it via `GET /diagnostics/stale-greek-shadow` once the first expire.
 
 **Rejected-on-data register** (changes that looked compelling and did *not* ship):
 SPY-regime gate · overbought guard · ADX in scoring · FR-SEY-3 per-name trend filter ·

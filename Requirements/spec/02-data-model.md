@@ -251,3 +251,22 @@ of being frozen into a snapshot.
 `utilisation = committed / total`. Deriving idle as `available − committed` double-counts CSP
 collateral. A covered call contributes **zero** committed capital — the shares behind it are
 already counted and its market value is a negative liability.
+
+### `stale_greek_shadow_picks` (migration 088, v1.1.320)
+
+Shadow log for the OFF flag `STALE_GREEK_MODEL_DELTA`. `ETradeDataProvider.getOptionsChain` calls
+`recordStaleGreekShadow` for every chain the stale-Greek guard flags (`greek-consistency.ts`) that falls
+in the wheel DTE window, passing the chain **as fetched**, before its Greeks are withheld. The row is the
+put the wheel CSP rule would pick by our Black-Scholes delta at the chain's own price (|delta| 0.20–0.30,
+bid > 0, nearest 0.25). Nothing on the live path reads it; `GET /diagnostics/stale-greek-shadow` does.
+
+| column | meaning |
+|---|---|
+| `as_of_date`, `slot` | ET date and `intraday` / `after_close` (`resolveSlot`). UNIQUE with `ticker`, `expiration`; a re-fetch within a slot overwrites |
+| `dte`, `underlying_price` | calendar DTE; the chain's own underlying price |
+| `implied_spot`, `deviation` | the guard's reading: median delta-implied spot and its gap to the nearer of chain / parity price |
+| `strike`, `model_delta` | the shadow pick. NULL when no put fell in the band — the stale chain is still recorded, so the skipped-chain count survives |
+| `provider_delta` | the delta E*Trade sent for that contract |
+| `bid`, `ask`, `iv`, `open_interest`, `volume` | the contract's quote and inputs, for settling it at expiry |
+
+The scorer takes the earliest expiration per ticker and slot, as `AnalysisService.findSuitableChain` does.

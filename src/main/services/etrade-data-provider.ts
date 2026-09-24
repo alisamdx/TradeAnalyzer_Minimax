@@ -22,7 +22,7 @@ import {
 import type { OptionsProvider } from './options-provider.js';
 import type { OptionsChain, OptionContract } from './data-provider.js';
 import { atmIvAtClosestStrike } from './iv-utils.js';
-import { assessChainGreeks, staleGreekGuardEnabled, withholdStaleGreeks } from './greek-consistency.js';
+import { assessChainGreeks, staleGreekGuardEnabled, withholdStaleGreeks, type GreekAssessment } from './greek-consistency.js';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -60,7 +60,15 @@ function legToContract(
 export class ETradeDataProvider implements OptionsProvider {
   readonly name = 'etrade';
 
-  constructor(private readonly getCreds: () => OAuthCredentials) {}
+  /**
+   * `onStaleChain` receives every chain the stale-Greek guard flags, AS FETCHED (before its Greeks
+   * are withheld) — the STALE_GREEK_MODEL_DELTA shadow log (v1.1.320). Its failure never reaches
+   * the caller: a logging fault must not cost a chain.
+   */
+  constructor(
+    private readonly getCreds: () => OAuthCredentials,
+    private readonly onStaleChain?: (chain: OptionsChain, assessment: GreekAssessment, todayEt: string) => void,
+  ) {}
 
   /**
    * Attempt to renew a dormant token (inactive > 2 h, same calendar day).
@@ -126,7 +134,11 @@ export class ETradeDataProvider implements OptionsProvider {
     // (FR-SEY-5); see greek-consistency.ts for the measurement behind it.
     if (!staleGreekGuardEnabled()) return chain;
     const todayEt = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-    return withholdStaleGreeks(chain, assessChainGreeks(chain, todayEt), todayEt);
+    const assessment = assessChainGreeks(chain, todayEt);
+    if (assessment.stale && this.onStaleChain) {
+      try { this.onStaleChain(chain, assessment, todayEt); } catch { /* shadow log only — never fail the fetch */ }
+    }
+    return withholdStaleGreeks(chain, assessment, todayEt);
   }
 
   // ── IV ────────────────────────────────────────────────────────────────────

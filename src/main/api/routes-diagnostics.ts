@@ -7,6 +7,7 @@ import {
   settledCspPanel, PANEL_STRATEGIES, type PanelDb, type PanelStrategy
 } from '../services/settled-csp-panel.js';
 import { buildSpreadShadowReport } from '../services/spread-mode-settle.js';
+import { readStaleGreekShadow } from '../services/stale-greek-shadow.js';
 
 export function registerDiagnosticsRoutes(app: FastifyInstance, svc: ApiServerServices): void {
   // GET /diagnostics/day?date=YYYY-MM-DD — everything recorded about one ET day: batch runs,
@@ -37,6 +38,20 @@ export function registerDiagnosticsRoutes(app: FastifyInstance, svc: ApiServerSe
     if (!isIsoDate(from) || !isIsoDate(to)) return apiError(reply, 'from and to must be YYYY-MM-DD', 'VALIDATION_ERROR');
     try {
       return apiOk(reply, auditPickGreeks(svc.db as unknown as PickAuditDb, from, to));
+    } catch (err) {
+      return apiError(reply, err instanceof Error ? err.message : String(err), 'INTERNAL', 500);
+    }
+  });
+
+  // GET /diagnostics/stale-greek-shadow?from=YYYY-MM-DD&to=YYYY-MM-DD — the wheel put STALE_GREEK_MODEL_DELTA
+  // would have picked on each chain the stale-Greek guard flagged (v1.1.320). Read-only; the evidence the
+  // OFF flag is to be decided on. see services/stale-greek-shadow.ts
+  app.get<{ Querystring: { from?: string; to?: string } }>('/diagnostics/stale-greek-shadow', async (req, reply) => {
+    const to = req.query.to ?? etDate(new Date().toISOString());
+    const from = req.query.from ?? '2026-09-01';
+    if (!isIsoDate(from) || !isIsoDate(to)) return apiError(reply, 'from and to must be YYYY-MM-DD', 'VALIDATION_ERROR');
+    try {
+      return apiOk(reply, readStaleGreekShadow(svc.db, from, to));
     } catch (err) {
       return apiError(reply, err instanceof Error ? err.message : String(err), 'INTERNAL', 500);
     }
