@@ -8,7 +8,7 @@
  * 30-45 DTE by date, puts with |delta| in [0.20, 0.30] and bid > 0, the one nearest 0.25) on
  * every stored E*Trade chain in a TradeAnalyzer 2 generation, three ways:
  *
- *   provider   E*Trade's delta, exactly as the live code does today
+ *   provider   E*Trade's delta, as the live rule would read it without its v1.1.255 guard
  *   model      Black-Scholes delta at the chain's own underlying price, E*Trade's IV
  *   model-mid  Black-Scholes delta at the chain's price, IV solved from the contract's own mid
  *
