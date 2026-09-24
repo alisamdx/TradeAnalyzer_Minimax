@@ -195,6 +195,18 @@ describe('QC-410, per-ticker Greek consistency', () => {
     expect(ev.deltaImpliedSpot).toBeCloseTo(141, 0);
   });
 
+  it('closes an open finding on a clean day, and never on a firing one (v1.1.318)', () => {
+    // 132 open against 69 firing on 2026-09-23: a ticker that drifted back under 1 % kept its
+    // finding for ever, because a clean evaluation carried no closer.
+    captureRate();
+    captureChain('AAA', 100);
+    captureChain('WSM', 147, { greekSpot: 141 });
+    const byKey = new Map(QC410_GREEK_REPRODUCTION.run(ctx()).map((e) => [e.key, e]));
+    expect(byKey.get('AAA')!.closesAs).toMatchObject({ kind: 'provider_fixed' });
+    expect(byKey.get('AAA')!.closesAs!.note).toContain('AAA: Greeks now within 1%');
+    expect(byKey.get('WSM')!.closesAs).toBeUndefined();
+  });
+
   it('still fires when the Greeks are so far off that no delta can be inverted', () => {
     // The PCTY shape, 2026-09-15/16: Greeks at a price 20 % below the close pin every
     // near-the-money delta at 0 or 1. Judged on invertible contracts alone, the ticker

@@ -740,7 +740,17 @@ function assessTickerGreeks(
       impliedContracts: implied.length,
       pinnedContracts: pinned,
       parityPairs: parity.length
-    }
+    },
+    // Consistency is a claim about TODAY's chain, re-fetched every run, so a clean reading settles
+    // an open finding (v1.1.318). Before this a ticker that drifted back under 1 % left its finding
+    // open for ever: 132 open against 69 firing on 2026-09-23, 89 of them warnings nobody could act on.
+    closesAs: fired
+      ? undefined
+      : {
+          kind: 'provider_fixed',
+          note: `${ticker}: Greeks now within ${(maxGap * 100).toFixed(0)}% of the chain or parity price ` +
+            `(${(gap * 100).toFixed(2)}%) on ${tradingDate}`
+        }
   };
 }
 
