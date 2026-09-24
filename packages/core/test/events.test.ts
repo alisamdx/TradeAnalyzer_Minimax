@@ -1392,6 +1392,28 @@ describe('QC-602, the cross-source comparison that had no second source', () => 
     expect(qc602Finding('AFL')).toMatchObject({ state: 'resolved', resolution_kind: 'rule_changed' });
   });
 
+  it('closes the "no comparison possible" finding once a comparison happens (v1.1.323)', () => {
+    // Raised 2026-09-18, before E*Trade earnings were collected; nothing could ever close it,
+    // because `sources` was only produced firing.
+    insertEarnings([{ ticker: 'NVDA', date: '2026-10-09', observedAt: OBSERVED, source: 'finnhub' }]);
+    qc602Gate(fixtureRun.runId, DATE);
+    expect(qc602Finding('sources')).toMatchObject({ state: 'open', still_firing: 1 });
+
+    const later = '2026-09-08';
+    const run = beginRun(db(), makeHost(), { kind: 'daily', tradingDate: later }).runId;
+    insertEarnings([
+      { ticker: 'NVDA', date: '2026-10-09', observedAt: `${later}T22:00:00Z`, source: 'finnhub', runId: run, asOf: later },
+      { ticker: 'NVDA', date: '2026-10-09', observedAt: `${later}T22:00:01Z`, source: 'etrade', runId: run, asOf: later }
+    ]);
+    qc602Gate(run, later);
+    expect(qc602Finding('sources')).toMatchObject({ state: 'resolved', resolution_kind: 'data_corrected' });
+    expect(qc602Finding('sources')!.resolution_note).toContain('1 ticker compared');
+
+    // With nothing open, a normal run says nothing about `sources` at all.
+    const quiet = QC602_EARNINGS_SOURCE_DISAGREEMENT.run({ db: db(), runId: run, tradingDate: later, observedAt: OBSERVED });
+    expect(quiet.map((e) => e.key)).toEqual(['NVDA']);
+  });
+
   it('leaves a real, still-future disagreement at base severity open until E*Trade is asked again', () => {
     insertEarnings([
       { ticker: 'AEP', date: '2026-10-22', observedAt: OBSERVED, source: 'finnhub' },

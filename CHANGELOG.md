@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.323] - 2026-09-23
+
+### QC-602's "no comparison possible" finding could never close
+
+The `sources` key was only ever produced firing, so the finding raised on 2026-09-18, before E*Trade earnings were collected at all, sat open for ever. A run that compares at least one ticker now closes it as `data_corrected`, naming the count. It is emitted only while such a finding is open. Rehearsed: resolved; AEP's genuine 11-day disagreement stays open.
+
+Details: `changelogs/v1.1.323_2026-09-23.md`.
+
 ## [1.1.322] - 2026-09-23
 
 ### The companyfacts retry could be starved, and QC-701 said otherwise

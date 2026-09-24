@@ -443,9 +443,32 @@ export const QC602_EARNINGS_SOURCE_DISAGREEMENT: CheckDefinition = {
             ? { kind: 'rule_changed', note: `${gap} days is inside the ${max}-day threshold (v1.1.317): two estimates of an unannounced date differ by ~2 days by construction` }
             : { kind: 'data_corrected', note: `${r.ticker} re-asked: finnhub ${r.finnhub_date} vs etrade ${r.etrade_date} (${gap} days apart)` }
       };
-    }).concat(closers);
+    }).concat(closers, sourcesCloser(ctx, rows.length));
   }
 };
+
+/**
+ * Closes an open `sources` finding once a comparison has actually happened (v1.1.323).
+ *
+ * The `sources` key is only ever produced FIRING — "no cross-source comparison is possible" — so a
+ * run that compares fine never mentions it, and the finding raised on 2026-09-18 (run 22, before
+ * E*Trade earnings were collected at all) sat open for ever. Emitted only when such a finding is
+ * open, so a normal run's evaluated count is not inflated by a key it has nothing to say about.
+ */
+function sourcesCloser(ctx: CheckContext, compared: number): Evaluation[] {
+  const open = ctx.db
+    .prepare(`SELECT 1 FROM qa_exception WHERE check_id = 'QC-602' AND key = 'sources' AND state IN ('open', 'acknowledged')`)
+    .get();
+  if (!open) return [];
+  return [{
+    key: 'sources',
+    fired: false,
+    closesAs: {
+      kind: 'data_corrected',
+      note: `both sources present: ${compared} ticker${compared === 1 ? '' : 's'} compared finnhub against this run's etrade fetch on ${ctx.tradingDate}`
+    }
+  }];
+}
 
 /**
  * Closers for QC-602 findings on tickers NOT compared this run (v1.1.317). Three cases, each on
