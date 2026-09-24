@@ -146,12 +146,42 @@ export const QC501_UNEXPLAINED_DISCONTINUITY: CheckDefinition = {
   thresholdBasis: 'structural',
   remediation: 'R6',
   run(ctx) {
+    // `expired_review` counts as open (v1.1.324): once an acceptance of the QC-204 step lapses,
+    // this check fires on it again, and its own finding — closed while the acceptance held —
+    // reopens as a recurrence. Without it an accepted step would drop out of QC-501 for good.
     const open = ctx.db
       .prepare(
         `SELECT key, evidence_json FROM qa_exception
-          WHERE check_id = 'QC-204' AND state IN ('open', 'acknowledged')`
+          WHERE check_id = 'QC-204' AND state IN ('open', 'acknowledged', 'expired_review')`
       )
       .all() as { key: string; evidence_json: string }[];
+
+    // QC-204 steps the operator ACCEPTED (v1.1.324). `settled` below mirrors only a RESOLVED
+    // QC-204, and this check reads only open ones, so an accepted step left its QC-501 twin
+    // unevaluated — open and blocking for ever, and the only way out was accepting both findings
+    // with two expiries to keep in step. The acceptance is the operator's verdict on the same
+    // step, so it closes this finding too, naming the acceptance and when it lapses.
+    const accepted = (
+      ctx.db
+        .prepare(
+          `SELECT a.key, b.accepted_until, b.accepted_note
+             FROM qa_exception a
+             JOIN qa_exception b ON b.check_id = 'QC-204' AND b.key = a.key
+            WHERE a.check_id = 'QC-501' AND a.state IN ('open', 'acknowledged')
+              AND b.state = 'accepted'`
+        )
+        .all() as { key: string; accepted_until: string | null; accepted_note: string | null }[]
+    ).map(
+      (r): Evaluation => ({
+        key: r.key,
+        value: 0,
+        fired: false,
+        closesAs: {
+          kind: 'false_positive',
+          note: `QC-204 finding accepted${r.accepted_until ? ` until ${r.accepted_until}` : ''}: ${r.accepted_note ?? '(no note)'} — reopens here if the acceptance lapses and QC-204 still fires`
+        }
+      })
+    );
 
     // This check's own open findings whose QC-204 finding has since been resolved. QC-501 reads
     // only OPEN QC-204 findings, so once QC-204's closed this key was never evaluated again —
@@ -179,7 +209,10 @@ export const QC501_UNEXPLAINED_DISCONTINUITY: CheckDefinition = {
       })
     );
 
-    if (open.length === 0) return settled.length > 0 ? settled : [{ key: ctx.tradingDate, value: 0, fired: false }];
+    if (open.length === 0) {
+      const closers = [...settled, ...accepted];
+      return closers.length > 0 ? closers : [{ key: ctx.tradingDate, value: 0, fired: false }];
+    }
 
     // QC-204 closes its verified genuine moves in this same gate run, AFTER every check has
     // run — so reading its open findings alone left QC-501 firing on all of them for one more
@@ -204,7 +237,7 @@ export const QC501_UNEXPLAINED_DISCONTINUITY: CheckDefinition = {
             evidence: { ...(JSON.parse(e.evidence_json) as Record<string, unknown>), verifiedGenuineMove: true },
             closesAs: { kind: 'false_positive' as const, note }
           };
-    }).concat(settled);
+    }).concat(settled, accepted);
   }
 };
 

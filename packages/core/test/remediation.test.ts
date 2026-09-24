@@ -8,6 +8,7 @@ import type { SqliteLike } from '../src/db/sqlite-like.js';
 import type { CollectorHost } from '../src/collector/host.js';
 import { beginRun } from '../src/collector/run.js';
 import { runGate } from '../src/qa/gate.js';
+import { accept } from '../src/qa/operator.js';
 import { QC204_DISCONTINUITY } from '../src/qa/checks/bars.js';
 import { QC501_UNEXPLAINED_DISCONTINUITY } from '../src/qa/checks/quotes-actions.js';
 import type { CheckDefinition } from '../src/qa/check.js';
@@ -265,5 +266,37 @@ describe('the gate\'s auto-resolve branch, which could never fire before', () =>
       ['QC-501', 'resolved', 'data_corrected']
     ]);
     expect(rows[1]!.resolution_note).toContain('QC-204 finding resolved data_corrected');
+  });
+
+  it('closes the QC-501 alias when its QC-204 step is ACCEPTED, and reopens it when the acceptance lapses (v1.1.324)', () => {
+    // QC-501 mirrored only a RESOLVED QC-204, so accepting a genuine move (GME's 2024 squeeze,
+    // WAL in the bank crisis) left the alias open and blocking for ever.
+    const key = 'GME 2024-05-13';
+    const firing204 = { ...QC204_DISCONTINUITY, run: () => [{ key, value: 0.74, fired: true, detail: 'step' }] };
+    const gate = (): void => {
+      const host = makeHost();
+      const run = beginRun(db, host, { kind: 'manual', tradingDate: DATE });
+      runGate(db, host, { runId: run.runId, tradingDate: DATE, checks: [firing204, QC501_UNEXPLAINED_DISCONTINUITY] });
+      raw.prepare("UPDATE meta_run SET status = 'complete' WHERE run_id = ?").run(run.runId);
+    };
+    const state = (check: string) =>
+      raw.prepare('SELECT state, resolution_kind, resolution_note FROM qa_exception WHERE check_id = ? AND key = ?')
+        .get(check, key) as { state: string; resolution_kind: string | null; resolution_note: string | null };
+
+    gate();                                   // QC-204 raised
+    gate();                                   // QC-501 sees it open and fires
+    expect(state('QC-501').state).toBe('open');
+
+    const id = (raw.prepare("SELECT exception_id FROM qa_exception WHERE check_id = 'QC-204' AND key = ?").get(key) as { exception_id: number }).exception_id;
+    accept(db, makeHost(), id, 'meme squeeze, same issuer', '2026-10-17');
+    gate();
+    expect(state('QC-204').state).toBe('accepted');
+    expect(state('QC-501')).toMatchObject({ state: 'resolved', resolution_kind: 'false_positive' });
+    expect(state('QC-501').resolution_note).toContain('QC-204 finding accepted until 2026-10-17');
+
+    // The acceptance lapses: QC-204 is back for review, and the alias fires again — a recurrence.
+    raw.prepare("UPDATE qa_exception SET state = 'expired_review' WHERE check_id = 'QC-204' AND key = ?").run(key);
+    gate();
+    expect(state('QC-501').state).toBe('open');
   });
 });

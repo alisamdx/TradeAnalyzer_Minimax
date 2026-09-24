@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.324] - 2026-09-23
+
+### QC-501 now follows an accepted QC-204 step
+
+QC-501 mirrored QC-204 only when it was resolved (or ruled a reuse), so **accepting** a genuine move on QC-204 left the QC-501 twin open and blocking for ever, and the only way out was accepting both with two expiries to keep in step. An accepted QC-204 step now closes QC-501 as `false_positive`, naming the acceptance and its expiry. When the acceptance lapses (`expired_review`), QC-501 fires again and reopens as a recurrence.
+
+Details: `changelogs/v1.1.324_2026-09-23.md`.
+
 ## [1.1.323] - 2026-09-23
 
 ### QC-602's "no comparison possible" finding could never close
