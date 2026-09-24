@@ -126,7 +126,7 @@ export class ETradeDataProvider implements OptionsProvider {
     // (FR-SEY-5); see greek-consistency.ts for the measurement behind it.
     if (!staleGreekGuardEnabled()) return chain;
     const todayEt = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-    return withholdStaleGreeks(chain, assessChainGreeks(chain, todayEt));
+    return withholdStaleGreeks(chain, assessChainGreeks(chain, todayEt), todayEt);
   }
 
   // ── IV ────────────────────────────────────────────────────────────────────

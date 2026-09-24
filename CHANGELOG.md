@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.319] - 2026-09-23
+
+### `STALE_GREEK_MODEL_DELTA`: a model-delta fallback for stale chains, shipped OFF
+
+Since v1.1.255 a chain whose Greeks disagree with its price has its deltas nulled, so the wheel skips the ticker and Strategy Lab falls back to a crude moneyness heuristic. With `STALE_GREEK_MODEL_DELTA=1` such a chain instead gets our Black-Scholes delta at its own underlying price with E*Trade's IV, and clean chains are never touched. On TradeAnalyzer 2's raw chains for 09-14..23, about 200 of 228 flagged ticker-days would get a correctly targeted wheel put back (~25 a day). **Off by default:** it adds candidates on tickers with an unreliable feed that cannot be scored before expiry, so it is recorded in the FR-SEY-5 register as shipped-disabled.
+
+Details: `changelogs/v1.1.319_2026-09-23.md`.
+
 ## [1.1.318] - 2026-09-23
 
 ### QC-410 closes findings on a clean day, and a study of what flagged Greeks cost the wheel

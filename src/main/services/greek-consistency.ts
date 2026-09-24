@@ -147,13 +147,48 @@ function paritySpotOf(chain: OptionsChain, dteDays: number): number | null {
 }
 
 /**
+ * OFF by default (v1.1.319), by the operator's decision: on a stale chain, replace the provider's
+ * delta with a Black-Scholes delta at the chain's OWN underlying price and E*Trade's IV, instead of
+ * withholding it. Measured by `scripts/wheel-delta-selection-study.mjs` on TradeAnalyzer 2's raw
+ * chains, 2026-09-14..23: on 228 flagged ticker-days the model delta yields a correctly targeted
+ * wheel put on ~200, about 25 a day the guard currently drops; E*Trade's IV is usable there (an
+ * IV solved from each contract's mid picks the same contract 2,898 times in 3,110). It stays off
+ * because it ADDS candidates — which trades get recommended changes, so FR-SEY-5 applies — and
+ * those picks cannot be scored until they expire. Only stale chains are touched, so a clean
+ * chain's pick is identical either way (plain Black-Scholes and E*Trade's pricer differ on 19 % of
+ * clean picks, which is why this is not applied everywhere). `STALE_GREEK_MODEL_DELTA=1` turns it
+ * on; checked live, not cached. see docs/formulas.md#greek-consistency
+ */
+const STALE_GREEK_MODEL_DELTA = false;
+export function staleGreekModelDeltaEnabled(): boolean {
+  const env = process.env['STALE_GREEK_MODEL_DELTA'];
+  if (env === '1') return true;
+  if (env === '0') return false;
+  return STALE_GREEK_MODEL_DELTA;
+}
+
+/**
  * The chain with its Greeks withheld when they are stale: delta/gamma/theta/vega become null, so
  * every consumer that selects by delta falls back to moneyness (Strategy Lab) or skips the chain
  * (wheel shortlist, analysis), rather than picking the wrong contract. Prices and IV are kept.
+ *
+ * With `staleGreekModelDeltaEnabled()` and `todayEt` given, delta is instead our Black-Scholes
+ * delta at the chain's underlying price (null where it cannot be computed); gamma/theta/vega are
+ * still withheld, since nothing selects by them.
  */
-export function withholdStaleGreeks(chain: OptionsChain, assessment: GreekAssessment): OptionsChain {
+export function withholdStaleGreeks(chain: OptionsChain, assessment: GreekAssessment, todayEt?: string): OptionsChain {
   if (!assessment.stale) return chain;
-  const contracts: OptionContract[] = chain.contracts.map((c) => ({ ...c, delta: null, gamma: null, theta: null, vega: null }));
+  const spot = chain.underlyingPrice;
+  const dteDays = todayEt === undefined
+    ? 0
+    : Math.round((Date.parse(`${chain.expiration}T00:00:00Z`) - Date.parse(`${todayEt}T00:00:00Z`)) / 86_400_000);
+  const model = staleGreekModelDeltaEnabled() && spot !== null && spot > 0 && dteDays >= 1;
+  const contracts: OptionContract[] = chain.contracts.map((c) => ({
+    ...c,
+    // see docs/formulas.md#greek-consistency
+    delta: model && c.iv > 0 ? bsDelta(spot as number, c.strike, dteDays, fractionIv(c.iv), c.side) : null,
+    gamma: null, theta: null, vega: null,
+  }));
   return { ...chain, contracts };
 }
 

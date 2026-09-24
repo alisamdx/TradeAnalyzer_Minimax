@@ -1041,6 +1041,11 @@ Does a chain's delta agree with the underlying price the chain reports? (v1.1.25
   than 3 strikes quote both sides. Same rule in both apps (v1.1.254). The old app's rate is
   `RISK_FREE_RATE`; TA2 uses the stored 3M par yield.
 
+- **Model-delta fallback** (old app, v1.1.319, **off** — `STALE_GREEK_MODEL_DELTA=1`): on a STALE chain only,
+  delta is replaced by the Black-Scholes delta above evaluated at the chain's own `underlyingPrice`, the
+  provider's IV (as a fraction), `T` = calendar DTE / 365 and `RISK_FREE_RATE`; gamma/theta/vega stay
+  withheld. Off, a stale chain's delta is null (v1.1.255). A clean chain is never touched either way.
+
 Threshold evidence: see `MAX_SPOT_DEVIATION` in `src/main/services/greek-consistency.ts` and
 NewApp 03 §3.
 

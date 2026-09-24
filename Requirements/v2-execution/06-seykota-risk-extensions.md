@@ -66,6 +66,16 @@ not shipped (it may ship **disabled**, as a configurable option, with the findin
   input, not a scoring weight or policy, and adds no selection rule of its own. `STALE_GREEK_GUARD=0`
   restores the old behaviour for a comparison run.
 
+**Shipped-disabled, pending validation:**
+- **v1.1.319 — `STALE_GREEK_MODEL_DELTA` (existing app), OFF.** On a chain `STALE_GREEK_GUARD` flags,
+  give delta our Black-Scholes value at the chain's own price (E*Trade IV) instead of null, so the wheel
+  picks a correctly targeted put rather than skipping the ticker and Strategy Lab selects by delta rather
+  than its moneyness heuristic. `scripts/wheel-delta-selection-study.mjs` (TradeAnalyzer 2 raw chains,
+  2026-09-14..23): ~200 of 228 flagged ticker-days regain a wheel pick, ~25 a day; E*Trade IV agrees with
+  a mid-solved IV on 93 % of chosen contracts. Not enabled because it ADDS candidates on tickers whose
+  feed is currently unreliable, and none can be scored before expiry (earliest 2026-10-16). Decide on
+  realized outcomes of the flagged-ticker picks it would have made, against the picks actually taken.
+
 **Rejected-on-data register** (changes that looked compelling and did *not* ship):
 SPY-regime gate · overbought guard · ADX in scoring · FR-SEY-3 per-name trend filter ·
 bear-call inflection recalibration · Step-3 debit-spread directional path · gap-risk entry

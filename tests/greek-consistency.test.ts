@@ -10,6 +10,7 @@ import {
   impliedSpotFromDelta,
   MAX_SPOT_DEVIATION,
   staleGreekGuardEnabled,
+  staleGreekModelDeltaEnabled,
   withholdStaleGreeks,
 } from '../src/main/services/greek-consistency.js';
 import type { OptionContract, OptionsChain } from '../src/main/services/data-provider.js';
@@ -94,6 +95,46 @@ describe('greek consistency', () => {
     const a = assessChainGreeks({ ticker: 'BBY', expiration: EXPIRY, contracts, underlyingPrice: 92.45 }, TODAY);
     expect(a.stale).toBe(false);
     expect(a.deviation as number).toBeLessThan(0.002);
+  });
+
+  describe('the model-delta fallback (v1.1.319, off by default)', () => {
+    afterEach(() => { delete process.env['STALE_GREEK_MODEL_DELTA']; });
+
+    it('is off by default, so a stale chain still has its deltas withheld', () => {
+      expect(staleGreekModelDeltaEnabled()).toBe(false);
+      const stale = chain('WSM', 218.2, 234.97);
+      const out = withholdStaleGreeks(stale, assessChainGreeks(stale, TODAY), TODAY);
+      expect(out.contracts.every((c) => c.delta === null)).toBe(true);
+    });
+
+    it('when on, re-derives delta at the chain\'s own price, so the chosen put is the one its delta claims', () => {
+      process.env['STALE_GREEK_MODEL_DELTA'] = '1';
+      const stale = chain('WSM', 218.2, 234.97);
+      const out = withholdStaleGreeks(stale, assessChainGreeks(stale, TODAY), TODAY);
+      for (const c of out.contracts) {
+        expect(c.delta as number).toBeCloseTo(bsDelta(218.2, c.strike, 30, 0.35, c.side) as number, 10);
+        expect(c.gamma).toBeNull();
+      }
+      // The shortlist now picks by the corrected delta: a real 0.40-delta put at 218.2, not one
+      // chosen by Greeks computed at 234.97 (which read every strike ~8 % too far out).
+      const pick = pickShortlistContract([out], TODAY);
+      expect(pick).not.toBeNull();
+      const unguarded = pickShortlistContract([stale], TODAY)!;
+      expect(pick!.strike).toBeLessThan(unguarded.strike);
+    });
+
+    it('never touches a clean chain, on or off', () => {
+      process.env['STALE_GREEK_MODEL_DELTA'] = '1';
+      const fine = chain('AAA', 100);
+      expect(withholdStaleGreeks(fine, assessChainGreeks(fine, TODAY), TODAY)).toBe(fine);
+    });
+
+    it('withholds rather than guesses when it has no date to compute DTE from', () => {
+      process.env['STALE_GREEK_MODEL_DELTA'] = '1';
+      const stale = chain('WSM', 218.2, 234.97);
+      const out = withholdStaleGreeks(stale, assessChainGreeks(stale, TODAY));
+      expect(out.contracts.every((c) => c.delta === null)).toBe(true);
+    });
   });
 
   it('is on by default since v1.1.255, and STALE_GREEK_GUARD=0 turns it off', () => {
