@@ -1,4 +1,7 @@
 import type { CheckContext, CheckDefinition, Evaluation } from '../check.js';
+import {
+  FACTS_RETRY_DAYS, FACTS_RETRY_RESERVE, factsQueueEntries, factsRetryDue, lastFactsFetchEt
+} from '../../collector/facts-queue.js';
 
 /**
  * Earnings and fundamentals checks — 03 §3.6.
@@ -105,8 +108,8 @@ export function departedFindingClosers(ctx: CheckContext, checkId: string): Eval
   }));
 }
 
-/** How long a filer whose companyfacts lacked its newest report waits before the fact pull asks again. */
-export const FACTS_RETRY_DAYS = 7;
+// FACTS_RETRY_DAYS lives with the queue that honours it (v1.1.322); re-exported for existing callers.
+export { FACTS_RETRY_DAYS };
 
 /**
  * How long a newly listed stock may go with no report and no announced date: its first full
@@ -712,11 +715,13 @@ export const QC701_FILING_FRESHNESS: CheckDefinition = {
           AND NOT EXISTS (SELECT 1 FROM raw_edgar_fact x WHERE x.accession_no = f.accession_no)
         ORDER BY f.filed_date DESC LIMIT 1`
     );
-    const lastFetch = ctx.db.prepare(
-      `SELECT MAX(substr(requested_at, 1, 10)) AS at FROM meta_response
-        WHERE endpoint = '/api/xbrl/companyfacts/CIK{cik}.json' AND parse_status = 'ok'
-          AND json_extract(params_json, '$.cik') = ?`
-    );
+    // ET dates, from the same function the fetch queue uses (v1.1.322): the old UTC substring read
+    // an evening fetch as the next day, in both places, against an ET trading date.
+    const lastFetch = lastFactsFetchEt(ctx.db);
+    // Where each due retry stands in the queue, so the finding says when it will really be asked —
+    // it used to promise "retried every 7 days" while 34 new filers sat ahead of every retry.
+    const retries = factsQueueEntries(ctx.db, ctx.tradingDate).filter((e) => e.kind === 'retry');
+    const retryRank = new Map(retries.map((e, i) => [e.cik, i + 1]));
 
     // A filer whose facts have never been pulled is not a stale filer — the
     // fact pull is filing-triggered and works through a queue. Reporting it as
@@ -730,13 +735,20 @@ export const QC701_FILING_FRESHNESS: CheckDefinition = {
         let why = '';
         if (fired) {
           const filing = pendingFiling.get(r.cik) as { form: string; filed_date: string } | undefined;
-          const fetched = (lastFetch.get(r.cik) as { at: string | null } | undefined)?.at ?? null;
+          const fetched = lastFetch.get(r.cik) ?? null;
           if (!filing) {
             cause = 'no_newer_filing_seen';
             why = ' — no newer report filing has been seen (a late filer, or a filing the submissions slice has not reached)';
           } else if (fetched !== null && fetched >= filing.filed_date) {
             cause = 'sec_companyfacts_missing';
-            why = ` — SEC companyfacts fetched ${fetched} still has no facts for the ${filing.form} filed ${filing.filed_date}; SEC's aggregate is behind, not the pipeline (retried every ${FACTS_RETRY_DAYS} days)`;
+            const due = factsRetryDue(fetched);
+            const rank = retryRank.get(r.cik);
+            const next = due > ctx.tradingDate
+              ? `next retry due ${due}`
+              : rank !== undefined
+                ? `retry due since ${due}, ${rank} of ${retries.length} waiting retries (${FACTS_RETRY_RESERVE} reserved slots a run)`
+                : `retry due since ${due}`;
+            why = ` — SEC companyfacts fetched ${fetched} still has no facts for the ${filing.form} filed ${filing.filed_date}; SEC's aggregate is behind, not the pipeline (${next})`;
           } else {
             cause = 'awaiting_fetch';
             const last = fetched ? `; companyfacts last read ${fetched}` : '';

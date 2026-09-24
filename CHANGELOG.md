@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.322] - 2026-09-23
+
+### The companyfacts retry could be starved, and QC-701 said otherwise
+
+QC-701's three findings (IQV, JCI, LNT) blame SEC's aggregate, and the archived responses confirm it: none contains its July 10-Q. But the finding promised "retried every 7 days", and IQV and JCI were fetched once, on 09-15, and never again. Every never-fetched filer sorted ahead of every retry and a run fetched 10, so with 34 new filers queued they sat 34th and 35th. The age was also counted from the **UTC** date of `requested_at` against an **ET** trading date, so an evening fetch waited 8 days, not 7. **Fix:** one shared queue (`collector/facts-queue.ts`); 20 filers a run with 3 reserved for due retries, and unused slots lent either way; retry age in ET; QC-701 now names the real next retry. Rehearsed: the 09-24 batch is 18 new filers plus JCI and IQV.
+
+Details: `changelogs/v1.1.322_2026-09-23.md`.
+
 ## [1.1.321] - 2026-09-23
 
 ### A share class inherits its sibling's earnings date, in both apps

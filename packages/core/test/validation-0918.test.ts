@@ -11,7 +11,8 @@ import { beginRun, captureRuleId, type RunHandle } from '../src/collector/run.js
 import { captureResponse } from '../src/collector/capture.js';
 import { recipes } from '../src/ingest/recipes.js';
 import { ensureTradingCalendar } from '../src/collector/trading-calendar.js';
-import { runInsiderSweep, insiderIndexDates, runEtradeEarnings, factsQueue, runEdgarFilings } from '../src/collector/phases/events.js';
+import { runInsiderSweep, insiderIndexDates, runEtradeEarnings, factsQueue, factsBatch, runEdgarFilings } from '../src/collector/phases/events.js';
+import { lastFactsFetchEt } from '../src/collector/facts-queue.js';
 import { QC910_INSIDER_INDEX_COVERAGE } from '../src/qa/checks/macro.js';
 import { QC603_EARNINGS_FRESHNESS, QC701_FILING_FRESHNESS, QC702_FACT_SANITY } from '../src/qa/checks/earnings-fundamentals.js';
 import { etradeEarningDate } from '../src/ingest/events.js';
@@ -354,6 +355,46 @@ describe('the EDGAR fact pull when SEC companyfacts lags a filing (v1.1.271)', (
     expect(e?.fired).toBe(true);
     expect(e?.evidence?.['cause']).toBe('sec_companyfacts_missing');
     expect(e?.detail).toContain('SEC companyfacts fetched 2026-09-16 still has no facts for the 10-Q filed 2026-07-28');
+    // Fetched two days ago: it says when it will be asked again, not "retried every 7 days" (v1.1.322).
+    expect(e?.detail).toContain('next retry due 2026-09-23');
+    expect(e?.detail).not.toContain('retried every');
+  });
+
+  // v1.1.322. IQV and JCI were fetched once, 2026-09-15, and sat 34th and 35th in the queue a week
+  // later — every never-fetched filer sorted ahead of every retry, and a run fetched ten.
+  it('reserves slots for due retries, and lends unused slots either way', () => {
+    for (let i = 0; i < 25; i++) filing(String(i + 1).padStart(10, '0'), `N${i}`, `A-N${i}`, '2026-08-01');
+    filing('0001478242', 'IQV', 'A-IQV-JUL', '2026-07-28');
+    facts('0001478242', 'A-IQV-MAY', '2026-05-05', '2026-03-31', '2026-09-09');
+    filing('0000833444', 'JCI', 'A-JCI-JUL', '2026-07-29');
+    facts('0000833444', 'A-JCI-MAY', '2026-05-06', '2026-03-31', '2026-09-10');
+
+    const batch = factsBatch(db(), DATE, 20, 3);
+    expect(batch).toHaveLength(20);
+    expect(batch.filter((e) => e.kind === 'retry').map((e) => e.cik)).toEqual(['0001478242', '0000833444']);
+    expect(batch.filter((e) => e.kind === 'fresh')).toHaveLength(18);
+    // The whole queue is still in priority order: every new filer, then the retries.
+    expect(factsQueue(db(), DATE).slice(-2)).toEqual([{ cik: '0001478242' }, { cik: '0000833444' }]);
+    // More retries than the reserve: they take whatever new filers leave.
+    expect(factsBatch(db(), DATE, 30, 3)).toHaveLength(27);
+  });
+
+  it('counts the retry age in ET days, so an evening fetch is not a day younger than it is', () => {
+    // The real IQV fetch: 2026-09-15 21:46 ET, stored as 2026-09-16T01:46:48Z.
+    filing('0001478242', 'IQV', 'A-IQV-JUL', '2026-07-28');
+    const r = captureResponse({
+      host: makeHost(), db: db(), runId: run.runId, asOfDate: DATE, provider: 'edgar',
+      endpoint: '/api/xbrl/companyfacts/CIK{cik}.json', slug: 'edgar-companyfacts', params: { cik: '0001478242' },
+      response: { status: 200, requestedAt: '2026-09-16T01:46:48.483Z', respondedAt: '2026-09-16T01:46:49.000Z',
+        body: JSON.stringify({ facts: { 'us-gaap': { Revenues: { units: { USD: [
+          { end: '2026-03-31', val: 1, accn: 'A-IQV-MAY', fy: 2026, fp: 'Q1', form: '10-Q', filed: '2026-05-05' }
+        ] } } } } }) },
+      captureRuleId: rule(), recipe: recipes.companyFacts({ cik: '0001478242' })
+    });
+    expect(r.parseStatus).toBe('ok');
+    expect(lastFactsFetchEt(db()).get('0001478242')).toBe('2026-09-15');
+    expect(factsQueue(db(), '2026-09-21')).toEqual([]);                           // six days: not due
+    expect(factsQueue(db(), '2026-09-22')).toEqual([{ cik: '0001478242' }]);      // seven: due (the UTC date made it eight)
   });
 });
 
