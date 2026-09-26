@@ -26,6 +26,7 @@ import {
   makeSubmissionsIngest,
   makeCompanyFactsIngest,
   makeForm4Ingest,
+  makeFormIndexFilingsIngest,
   parseDailyFormIndex,
   dailyFormIndexUrl,
   submissionsAtCap
@@ -842,6 +843,49 @@ describe('the EDGAR daily form index', () => {
 
   it('skips the header and separator lines by shape', () => {
     expect(parseDailyFormIndex(IDX).every((f) => f.path.startsWith('edgar/data/'))).toBe(true);
+  });
+
+  describe('as the source of report filings (v1.1.325)', () => {
+    // Shaped like the lines above. KR's 10-Q filed 2026-09-18 is the one filing the 20-filer
+    // rotation found on 2026-09-25 — seven days after the index could have named it.
+    // (The accession numbers are illustrative.)
+    const REPORTS =
+      IDX +
+      '10-Q             KROGER CO                            56873      20260918    edgar/data/56873/0000056873-26-000074.txt\n' +
+      '10-Q             KROGER CO                            56873      20260918    edgar/data/56873/0000056873-26-000074.txt\n' +
+      '10-Q             NOT IN OUR UNIVERSE INC              9999999    20260918    edgar/data/9999999/0009999999-26-000001.txt\n' +
+      '10-Q/A           KROGER CO                            56873      20260918    edgar/data/56873/0000056873-26-000075.txt\n' +
+      '10-K             AAPL CO-REGISTRANT                   320193     20260918    edgar/data/320193/0000056873-26-000074.txt\n' +
+      '10-K             APPLE INC                            320193     20260918    edgar/data/320193/0000320193-26-000200.txt\n';
+    const filers = new Map([['0000056873', 'KR'], ['0000320193', 'AAPL']]);
+    const forms = new Set(['10-K', '10-Q', '20-F', '40-F']);
+
+    it('stores the universe\'s report filings and nothing else', () => {
+      const rows = makeFormIndexFilingsIngest({ filers, forms })(REPORTS, ctx(newRun()));
+      expect(rows.map((r) => [r.values['ticker'], r.values['form'], r.values['accession_no']])).toEqual([
+        ['KR', '10-Q', '0000056873-26-000074'],
+        ['AAPL', '10-K', '0000320193-26-000200']
+      ]);
+      // The index carries neither; null is the column's declared meaning, not a guess.
+      expect(rows[0]?.values['report_date']).toBeNull();
+      expect(rows[0]?.values['filed_date']).toBe('2026-09-18');
+    });
+
+    it('never repeats an accession, since one repeat would throw away the whole index', () => {
+      // `accession_no` is unique and the transaction is the whole response: a repeat —
+      // a duplicated line, or a co-registrant under a second CIK — would fail the index
+      // and the day's insider sweep with it.
+      const rows = makeFormIndexFilingsIngest({ filers, forms })(REPORTS, ctx(newRun()));
+      const accessions = rows.map((r) => r.values['accession_no']);
+      expect(new Set(accessions).size).toBe(accessions.length);
+    });
+
+    it('skips a filing already stored', () => {
+      const rows = makeFormIndexFilingsIngest({ filers, forms, knownAccessions: new Set(['0000056873-26-000074']) })(
+        REPORTS, ctx(newRun())
+      );
+      expect(rows.map((r) => r.values['ticker'])).toEqual(['AAPL']);
+    });
   });
 
   it('builds the index URL with the right quarter', () => {

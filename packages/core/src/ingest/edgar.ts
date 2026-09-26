@@ -291,6 +291,65 @@ export function parseDailyFormIndex(body: string): readonly IndexedFiling[] {
   return filings;
 }
 
+/**
+ * The daily form index → `raw_edgar_filing`, for the universe's report filings (v1.1.325).
+ *
+ * The index lists every filing EDGAR disseminated that day, so it names each new 10-K and 10-Q
+ * within a session of filing, for every filer at once, from the response the insider sweep already
+ * fetches. Before this, report filings came only from the submissions sweep's 20-filer rotation,
+ * which after two weeks had asked 135 of 1,012 filers — so a filing waited up to a whole rotation
+ * (and longer, since the rotation stepped by calendar day and never ran on weekends) before the
+ * companyfacts pull could see it.
+ *
+ * The index carries no period and no primary document, so `report_date` and `primary_doc` are
+ * null on these rows. Nothing reads either column.
+ *
+ * `filers` and `knownAccessions` are narrowed by the caller to this index's own candidates, so a
+ * recipe stays small. One accession can appear under several CIKs (co-registrants file one
+ * report), and `accession_no` is unique: a repeat would throw inside the capture transaction and
+ * take the index — and the day's insider sweep — down with it, so the first CIK wins.
+ */
+export function makeFormIndexFilingsIngest(opts: {
+  readonly filers: ReadonlyMap<string, string>;
+  readonly forms: ReadonlySet<string>;
+  readonly knownAccessions?: ReadonlySet<string>;
+}) {
+  return (body: string, ctx: IngestContext): readonly IngestedRowSpec[] => {
+    const rows: IngestedRowSpec[] = [];
+    const seen = new Set<string>();
+    for (const f of reportFilingsInIndex(body, opts.filers, opts.forms)) {
+      if (seen.has(f.accessionNo) || opts.knownAccessions?.has(f.accessionNo)) continue;
+      seen.add(f.accessionNo);
+      rows.push({
+        table: 'raw_edgar_filing',
+        values: {
+          run_id: ctx.runId,
+          as_of_date: ctx.asOfDate,
+          observed_at: ctx.observedAt,
+          capture_rule_id: ctx.captureRuleId,
+          cik: f.cik,
+          ticker: opts.filers.get(f.cik) as string,
+          accession_no: f.accessionNo,
+          form: f.formType,
+          filed_date: f.filedDate,
+          report_date: null,
+          primary_doc: null
+        }
+      });
+    }
+    return rows;
+  };
+}
+
+/** The index's filings of `forms` by a CIK in `filers` — what the recipe above may store. */
+export function reportFilingsInIndex(
+  body: string,
+  filers: ReadonlyMap<string, string>,
+  forms: ReadonlySet<string>
+): readonly IndexedFiling[] {
+  return parseDailyFormIndex(body).filter((f) => forms.has(f.formType) && filers.has(f.cik));
+}
+
 // ── Form 4 ─────────────────────────────────────────────────────────────────
 
 function xmlValue(scope: string, tag: string): string | null {

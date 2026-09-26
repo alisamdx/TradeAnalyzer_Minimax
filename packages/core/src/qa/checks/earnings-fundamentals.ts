@@ -761,7 +761,7 @@ export const QC701_FILING_FRESHNESS: CheckDefinition = {
           const fetched = lastFetch.get(r.cik) ?? null;
           if (!filing) {
             cause = 'no_newer_filing_seen';
-            why = ' — no newer report filing has been seen (a late filer, or a filing the submissions slice has not reached)';
+            why = ' — no newer report filing has been seen (a late filer, or one filed before the daily form index began storing report filings and not yet re-read by the submissions sweep)';
           } else if (fetched !== null && fetched >= filing.filed_date) {
             cause = 'sec_companyfacts_missing';
             const due = factsRetryDue(fetched);

@@ -10,7 +10,7 @@ import {
   ingestShortInterest
 } from './events.js';
 import { ingestFomcCalendar, makeBlsScheduleIngest } from './macro-calendar.js';
-import { makeSubmissionsIngest, makeCompanyFactsIngest, makeForm4Ingest } from './edgar.js';
+import { makeSubmissionsIngest, makeCompanyFactsIngest, makeForm4Ingest, makeFormIndexFilingsIngest } from './edgar.js';
 import { makeIvBootstrapIngest, type IvBootstrapIngestArgs } from './iv-bootstrap.js';
 import { makeLegacyBriefIngest } from './legacy-brief.js';
 import { ingestTickerReference } from './raw-ticker-reference.js';
@@ -65,6 +65,7 @@ export const INGEST_MODULES = [
   'edgar_submissions',
   'edgar_companyfacts',
   'edgar_form4',
+  'edgar_form_index_filings',
   'ivolatility_ivx',
   'legacy_brief'
 ] as const;
@@ -215,6 +216,17 @@ export const recipes = {
       tickerByCik: sortedPairs(o.tickerByCik),
       ...(o.derivatives === true ? { derivatives: true } : {})
     }),
+
+  formIndexFilings: (o: {
+    readonly filers: ReadonlyMap<string, string>;
+    readonly forms: ReadonlySet<string>;
+    readonly knownAccessions?: ReadonlySet<string>;
+  }): IngestRecipe =>
+    recipe('edgar_form_index_filings', args({
+      filers: sortedPairs(o.filers),
+      forms: sortedSet(o.forms) ?? [],
+      knownAccessions: sortedSet(o.knownAccessions)
+    })),
 
   ivBootstrap: (o: IvBootstrapIngestArgs): IngestRecipe =>
     recipe('ivolatility_ivx', args({ ticker: o.ticker, source: o.source, methodNote: o.methodNote })),
@@ -368,6 +380,14 @@ const DECODERS: { readonly [M in IngestModuleName]: (a: RecipeArgs) => IngestMod
       tickerByCik: pairMap(a, 'tickerByCik'),
       derivatives: optBool(a, 'derivatives')
     }),
+  edgar_form_index_filings: (a) => {
+    const knownAccessions = optSet(a, 'knownAccessions');
+    return makeFormIndexFilingsIngest({
+      filers: pairMap(a, 'filers'),
+      forms: new Set(strings(a, 'forms')),
+      ...(knownAccessions ? { knownAccessions } : {})
+    });
+  },
 
   ivolatility_ivx: (a) => {
     const methodNote = optStr(a, 'methodNote');

@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.325] - 2026-09-26
+
+### EDGAR report filings come from the daily form index
+
+`events_filings` stored 20 / 0 / 1 on 2026-09-23..25. The rows were right, but the submissions sweep chose its 20 filers at `(calendar day × 20) mod filers`. That rule never asked the weekend slices, and it jumped when v1.1.275 changed the filer count, so it re-asked filers read nine days earlier. Only 135 of 1,012 filers had ever been asked. **Fix:** the insider sweep's daily `form.YYYYMMDD.idx`, already fetched, now stores every universe filer's 10-K/10-Q/20-F/40-F a session after filing, at no extra call. The sweep runs before filings and facts. The submissions sweep is now a backstop that asks the filers asked longest ago. Checked on the live 09-24 index: it picks CPB's 10-K and PAYX's 10-Q, neither of which had been stored.
+
+Details: `changelogs/v1.1.325_2026-09-26.md`.
+
 ## [1.1.324] - 2026-09-23
 
 ### QC-501 now follows an accepted QC-204 step

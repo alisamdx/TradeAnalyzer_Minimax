@@ -38,6 +38,9 @@ const SAMPLES: readonly IngestRecipe[] = [
   recipes.submissions({ cik: '0000320193', ticker: 'AAPL', since: '2025-09-07', forms: new Set(['10-K', '10-Q']) }),
   recipes.companyFacts({ cik: '0000320193', since: '2025-09-07' }),
   recipes.form4({ accessionNo: '0000320193-26-000001', tickerByCik: new Map([['0000320193', 'AAPL']]), derivatives: true }),
+  recipes.formIndexFilings({
+    filers: new Map([['0000320193', 'AAPL']]), forms: new Set(['10-K', '10-Q']), knownAccessions: new Set(['0000320193-26-000106'])
+  }),
   recipes.ivBootstrap({ ticker: 'SPY', source: 'ivolatility', methodNote: 'IVX' }),
   recipes.legacyBrief()
 ];

@@ -574,4 +574,59 @@ describe('the EDGAR filings sweep asks for what EDGAR\'s `recent` block always h
     const held = raw.prepare("SELECT accession_no a FROM raw_edgar_filing WHERE cik = '0000047111' ORDER BY a").all();
     expect(held.map((r: { a: string }) => r.a)).toEqual(['A-1', 'A-2', 'A-3']);
   });
+
+  it('asks the filers asked longest ago, so no filer is skipped and a re-run asks the next ones (v1.1.325)', async () => {
+    // The old slice was `(calendar day × 20) mod filers`: weekend slices were never asked, and
+    // v1.1.275 changing the filer count sent the pointer back over filers read nine days earlier.
+    for (const [t, cik] of [['AAA', '0000000001'], ['BBB', '0000000002'], ['CCC', '0000000003'], ['DDD', '0000000004'], ['EEE', '0000000005']] as const) {
+      listed(t, 'CS', cik);
+    }
+    const asked: string[] = [];
+    let clock = 0;
+    const host = makeHost({
+      httpGet: async (url: string) => {
+        asked.push(/CIK(\d+)/.exec(url)?.[1] ?? '');
+        // A distinct body per call: an identical body on the same date is deduplicated at
+        // capture, which would keep the earlier ask's timestamp.
+        const body = submissions(1, '2026-06-01').replace('"files":[]', `"files":[],"call":${clock}`);
+        return { ...response(body), requestedAt: new Date(Date.UTC(2026, 8, 18, 22, 0, clock++)).toISOString() };
+      }
+    });
+    const round = async () => { asked.length = 0; await runEdgarFilings(host, db(), run, { maxFilers: 2 }); return [...asked]; };
+    expect(await round()).toEqual(['0000000001', '0000000002']);
+    expect(await round()).toEqual(['0000000003', '0000000004']);
+    // EEE has never been asked; AAA is now the longest ago.
+    expect(await round()).toEqual(['0000000005', '0000000001']);
+    // A filer joining the universe goes to the front — it has never been asked.
+    listed('ABC', 'CS', '0000000009');
+    expect(await round()).toEqual(['0000000009', '0000000002']);
+  });
+
+  it('stores the universe\'s report filings from the daily form index, before the rotation reaches them (v1.1.325)', async () => {
+    listed('KR', 'CS', '0000056873');
+    listed('IVV', 'ETF', '0001100663');
+    parsedIndex('2026-09-17');
+    const index =
+      HEADER +
+      '10-Q    KROGER CO           56873      20260918    edgar/data/56873/0000056873-26-000074.txt\n' +
+      '10-Q    ISHARES TRUST       1100663    20260918    edgar/data/1100663/0001100663-26-000001.txt\n' +
+      '8-K     KROGER CO           56873      20260918    edgar/data/56873/0000056873-26-000073.txt\n';
+    const host = makeHost({ httpGet: async () => response(index) });
+
+    const first = await runInsiderSweep(host, db(), run);
+    expect(first.failed).toBe(0);
+    expect(first.reportFilings).toBe(1);
+    const rows = raw.prepare('SELECT ticker, form, filed_date, report_date FROM raw_edgar_filing').all();
+    expect(rows).toEqual([{ ticker: 'KR', form: '10-Q', filed_date: '2026-09-18', report_date: null }]);
+
+    // The rotation then reads KR's own list, which repeats the filing: a no-op, not a failure.
+    const again = await runEdgarFilings(makeHost({
+      httpGet: async () => response(JSON.stringify({ filings: { recent: {
+        accessionNumber: ['0000056873-26-000074'], form: ['10-Q'], filingDate: ['2026-09-18'],
+        reportDate: ['2026-08-15'], primaryDocument: ['kr-20260815.htm']
+      }, files: [] } }))
+    }), db(), run);
+    expect(again).toMatchObject({ failed: 0, stored: 0 });
+    expect(raw.prepare('SELECT COUNT(*) AS n FROM raw_edgar_filing').get()).toEqual({ n: 1 });
+  });
 });

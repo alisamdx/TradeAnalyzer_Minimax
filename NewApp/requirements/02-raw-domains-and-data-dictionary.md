@@ -529,7 +529,9 @@ Source: E*Trade `/v1/market/quote/{symbol}` (Polygon's stock snapshot cannot ser
 Stored in the honest raw form SEC publishes — **facts**, not statements. Statements (income, balance, cash flow), TTM roll-forwards and ratios are derived (stage 2), reproducible from these rows.
 
 ### `raw_edgar_filing`
-Source: EDGAR `submissions/CIK##########.json`.
+Sources: the EDGAR daily form index `form.YYYYMMDD.idx` (primary since v1.1.325) and `submissions/CIK##########.json` (a least-recently-asked backstop).
+
+**The daily index is the primary source (v1.1.325, recipe `edgar_form_index_filings`).** The insider sweep already fetches it, and it lists every filing of the session, so each universe filer's new report filing is stored a session after filing, with no extra call. The index carries **no period and no primary document**, so `report_date` and `primary_doc` are null on those rows; the submissions sweep later sees the same accession and skips it as known. Nothing reads either column. One accession can appear under several CIKs (co-registrants) or on repeated lines, and `accession_no` is unique while the transaction is the whole index, so the parser stores each accession once — a repeat would fail the index and the day's insider sweep with it.
 
 **`filings.recent` is capped at 1,000 entries**, with the remainder in a `filings.files` overflow list — measured 2026-09-07 on CIK 0000320193, exactly 1,000 in every parallel array. It is the same truncation shape as Finnhub's 1,500-row calendar and it is flagged the same way (`at_provider_cap`), even though this one truncates from the *older* end and so happens to be harmless for a phase that only wants new filings. **"Harmless in the current usage" is not a reason to leave a cap undetected** — the Finnhub one was harmless too, until a window grew.
 

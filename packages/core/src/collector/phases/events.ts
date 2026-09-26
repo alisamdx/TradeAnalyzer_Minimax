@@ -6,7 +6,7 @@ import { recipes } from '../../ingest/recipes.js';
 import { captureRuleId, type RunHandle } from '../run.js';
 import { earningsResponseAtCap } from '../../ingest/events.js';
 import { BLS_RELEASES, FOMC_CALENDAR_URL, blsScheduleUrl } from '../../ingest/macro-calendar.js';
-import { parseDailyFormIndex, dailyFormIndexUrl, submissionsAtCap } from '../../ingest/edgar.js';
+import { parseDailyFormIndex, dailyFormIndexUrl, submissionsAtCap, reportFilingsInIndex } from '../../ingest/edgar.js';
 import { previousTradingDay, tradingDaysInRange } from '../trading-calendar.js';
 import { sweepPolygonPages } from '../paged.js';
 import { refusedSymbolAnswers, withRefusals } from '../symbol-rulings.js';
@@ -459,24 +459,17 @@ export async function runMacroCalendar(
  */
 export const FILINGS_LOOKBACK_DAYS = 360;
 
-export async function runEdgarFilings(
-  host: CollectorHost,
-  db: SqliteLike,
-  run: RunHandle,
-  opts: { readonly maxFilers?: number } = {}
-): Promise<SubPhaseCount> {
-  const ruleId = captureRuleId(
-    db, host, 'edgar_filings',
-    { forms: [...REPORT_FORMS], lookbackDays: FILINGS_LOOKBACK_DAYS, funds: 'excluded' },
-    'Submissions index for a rolling slice of operating-company filers.'
-  );
+/**
+ * The universe's report filers, one entry per CIK: `[ticker, cik]`, ticker order, funds excluded.
+ *
+ * Funds file no 10-K/10-Q, so their submissions can only ever store nothing — and a trust's
+ * thousands of fund filings made every one of them read as capped (v1.1.275). One filer per CIK:
+ * iShares Trust stands behind seven universe tickers and was fetched six times in one run. A CIK
+ * with several share classes is filed under its alphabetically first ticker, by both the
+ * submissions sweep and the daily index, so the two never disagree about a filing's ticker.
+ */
+export function reportFilers(db: SqliteLike): readonly (readonly [string, string])[] {
   const { byTicker } = cikMap(db);
-  if (byTicker.size === 0) return skipped('no CIKs known yet — raw_ticker_reference has none');
-
-  // Funds file no 10-K/10-Q, so their submissions can only ever store nothing — and a
-  // trust's thousands of fund filings made every one of them read as capped (v1.1.275).
-  // One filer per CIK: iShares Trust stands behind seven universe tickers and was
-  // fetched six times in one run.
   const funds = new Set(
     (
       db
@@ -489,26 +482,70 @@ export async function runEdgarFilings(
     ).map((r) => r.ticker)
   );
   const seenCik = new Set<string>();
-  const entries = [...byTicker.entries()]
+  return [...byTicker.entries()]
     .filter(([ticker]) => !funds.has(ticker))
     .sort((a, b) => (a[0] < b[0] ? -1 : 1))
     .filter(([, cik]) => (seenCik.has(cik) ? false : (seenCik.add(cik), true)));
+}
 
-  // A rolling slice keyed on the trading date: every filer is visited within a
-  // fixed number of days without a stored cursor to fall out of step.
-  const maxFilers = opts.maxFilers ?? 20;
-  const dayIndex = Math.floor(Date.parse(`${run.tradingDate}T00:00:00Z`) / 86_400_000);
-  const start = (dayIndex * maxFilers) % Math.max(entries.length, 1);
-  const slice = [...entries, ...entries].slice(start, Math.min(start + maxFilers, start + entries.length));
+/**
+ * The filers the submissions sweep asks this run: the ones asked longest ago, never-asked first
+ * (v1.1.325).
+ *
+ * The daily form index is now what finds new report filings (see `runInsiderSweep`); this sweep
+ * is the backstop that reads each filer's own list, which also carries the period and primary
+ * document the index lacks. It used to be a slice at `(day × 20) mod filers`, and that had two
+ * faults measured on gen-002: the day was a CALENDAR day while the collector runs on trading
+ * days, so every weekend's two slices were never asked; and any change in the filer count moved
+ * the pointer — v1.1.275's fund exclusion (1,083 → 1,012) sent it back from L to H, so
+ * 2026-09-23..25 re-asked filers already read nine days earlier and stored 20, 0 and 1 filings
+ * while 877 filers had never been asked at all. Ordering by the last ask, read from
+ * `meta_response`, has no pointer to move: it cannot skip a filer, and a second run on one date
+ * asks the next twenty instead of the same ones.
+ */
+export function submissionsSlice(
+  db: SqliteLike,
+  filers: readonly (readonly [string, string])[],
+  maxFilers: number
+): readonly (readonly [string, string])[] {
+  const lastAsked = new Map<string, number>();
+  for (const r of db
+    .prepare(
+      `SELECT json_extract(params_json, '$.cik') AS cik, requested_at FROM meta_response
+        WHERE endpoint = '/submissions/CIK{cik}.json' AND parse_status = 'ok'`
+    )
+    .all() as { cik: string; requested_at: string }[]) {
+    const t = Date.parse(r.requested_at);
+    if (!Number.isNaN(t) && t > (lastAsked.get(r.cik) ?? -Infinity)) lastAsked.set(r.cik, t);
+  }
+  // A stable sort keeps ticker order among equals, so never-asked filers go alphabetically.
+  return [...filers]
+    .sort((a, b) => (lastAsked.get(a[1]) ?? -Infinity) - (lastAsked.get(b[1]) ?? -Infinity))
+    .slice(0, maxFilers);
+}
+
+export async function runEdgarFilings(
+  host: CollectorHost,
+  db: SqliteLike,
+  run: RunHandle,
+  opts: { readonly maxFilers?: number } = {}
+): Promise<SubPhaseCount> {
+  const ruleId = captureRuleId(
+    db, host, 'edgar_filings',
+    { forms: [...REPORT_FORMS], lookbackDays: FILINGS_LOOKBACK_DAYS, funds: 'excluded', order: 'least_recently_asked' },
+    'Submissions index for the operating-company filers asked longest ago.'
+  );
+  const filers = reportFilers(db);
+  if (filers.length === 0) return skipped('no CIKs known yet — raw_ticker_reference has none');
+  const slice = submissionsSlice(db, filers, opts.maxFilers ?? 20);
 
   const since = addDays(run.tradingDate, -FILINGS_LOOKBACK_DAYS);
   // What is already stored for this CIK, so a re-pull skips it instead of
   // throwing. `raw_edgar_filing` is UNIQUE on `accession_no` alone, and the
   // transaction is the whole response — so one already-seen filing discards
-  // every NEW filing beside it and reports as a parse failure. The slice is
-  // keyed on the trading date, so any day with two collector runs asks the
-  // identical twenty filers and hits this: HSY on 2026-09-22, stored at 17:05
-  // and re-asked at 20:47.
+  // every NEW filing beside it and reports as a parse failure. HSY on
+  // 2026-09-22, stored at 17:05 and re-asked at 20:47; and since v1.1.325 the
+  // daily index stores most report filings before this sweep reaches the filer.
   const storedAccessions = db.prepare(
     'SELECT accession_no FROM raw_edgar_filing WHERE cik = ?'
   );
@@ -710,9 +747,15 @@ export async function runInsiderSweep(
   db: SqliteLike,
   run: RunHandle,
   opts: { readonly maxFilings?: number } = {}
-): Promise<SubPhaseCount & { readonly indexed: number }> {
-  const ruleId = captureRuleId(db, host, 'insider', { source: 'edgar_full_index' }, 'Daily Form 4 sweep from the EDGAR full index.');
+): Promise<SubPhaseCount & { readonly indexed: number; readonly reportFilings: number }> {
+  const ruleId = captureRuleId(
+    db, host, 'insider',
+    { source: 'edgar_full_index', reportForms: [...REPORT_FORMS] },
+    'Daily sweep of the EDGAR full index: Form 4s fetched, and the universe\'s report filings stored from the index itself.'
+  );
   const { byCik } = cikMap(db);
+  const filerTicker = new Map(reportFilers(db).map(([ticker, cik]) => [cik, ticker] as const));
+  const storedAccession = db.prepare('SELECT 1 FROM raw_edgar_filing WHERE accession_no = ?');
 
   // **The day's index is published after the collector runs.** EDGAR posts
   // `form.YYYYMMDD.idx` late in the evening, and the 17:05 slot (in practice
@@ -740,6 +783,7 @@ export async function runInsiderSweep(
   let calls = 0;
   let failed = 0;
   let indexed = 0;
+  let reportFilings = 0;
   const limit = opts.maxFilings ?? 100;
 
   for (const indexDate of dates) {
@@ -758,13 +802,30 @@ export async function runInsiderSweep(
     // Day). Stopping there would stall the walk on that date for ever.
     if (indexResponse.status === 404 || indexResponse.status === 403) continue;
 
-    // The index itself writes no domain rows — it is a routing document, archived
-    // for provenance so the set of filings we chose from is recoverable.
+    // The index is a routing document for the Form 4s, archived for provenance so the
+    // set of filings we chose from is recoverable — and, since v1.1.325, the source of
+    // the universe's new 10-K/10-Q rows (`raw_edgar_filing`), a session after filing.
+    // The recipe carries only this index's own candidates, so it stays a few lines.
+    const candidates = ok && indexResponse.body
+      ? reportFilingsInIndex(indexResponse.body, filerTicker, REPORT_FORMS)
+      : [];
     const indexResult = captureResponse({
       host, db, runId: run.runId, asOfDate: run.tradingDate, provider: 'edgar',
       endpoint: '/Archives/edgar/daily-index/form.idx', slug: 'edgar-form-index',
-      params: { date: indexDate }, response: indexResponse, captureRuleId: ruleId
+      params: { date: indexDate }, response: indexResponse, captureRuleId: ruleId,
+      ...(candidates.length > 0
+        ? {
+            recipe: recipes.formIndexFilings({
+              filers: new Map(candidates.map((f) => [f.cik, filerTicker.get(f.cik) as string] as const)),
+              forms: REPORT_FORMS,
+              knownAccessions: new Set(
+                candidates.filter((f) => storedAccession.get(f.accessionNo) !== undefined).map((f) => f.accessionNo)
+              )
+            })
+          }
+        : {})
     });
+    if (indexResult.parseStatus === 'ok') reportFilings += indexResult.rowsWritten;
 
     if (indexResult.parseStatus !== 'ok' || !indexResponse.body) {
       // A past session that cannot be read stops the walk: its successors would
@@ -799,7 +860,7 @@ export async function runInsiderSweep(
     }
   }
 
-  return { stored, calls, failed, indexed };
+  return { stored, calls, failed, indexed, reportFilings };
 }
 
 /** How many sessions back the insider sweep will catch up in one run. */
@@ -854,16 +915,27 @@ export async function runEventsPhase(
     }
   };
 
+  const earnings = await attempt('earnings', () => runEarningsSweep(host, db, run));
+  const etradeEarnings = await attempt('earnings-etrade', () => runEtradeEarnings(host, db, run));
+  const indexQuotes = await attempt('index-quotes', () => runIndexQuotes(host, db, run));
+  const treasury = await attempt('treasury', () => runTreasuryYields(host, db, run));
+  const macroCalendar = await attempt('macro-calendar', () => runMacroCalendar(host, db, run, opts));
+  // The insider sweep runs BEFORE the filings and facts (v1.1.325): its daily index is
+  // now where new report filings come from, and the fact pull is triggered by them.
+  const insider = await attempt('insider', () => runInsiderSweep(host, db, run));
+  const rotation = await attempt('edgar-filings', () => runEdgarFilings(host, db, run));
+  const fromIndex = 'reportFilings' in insider ? (insider as { reportFilings: number }).reportFilings : 0;
   return {
-    earnings: await attempt('earnings', () => runEarningsSweep(host, db, run)),
-    etradeEarnings: await attempt('earnings-etrade', () => runEtradeEarnings(host, db, run)),
-    indexQuotes: await attempt('index-quotes', () => runIndexQuotes(host, db, run)),
-    treasury: await attempt('treasury', () => runTreasuryYields(host, db, run)),
-    macroCalendar: await attempt('macro-calendar', () => runMacroCalendar(host, db, run, opts)),
-    filings: await attempt('edgar-filings', () => runEdgarFilings(host, db, run)),
+    earnings,
+    etradeEarnings,
+    indexQuotes,
+    treasury,
+    macroCalendar,
+    // `events_filings` counts every report filing stored, from either source.
+    filings: { ...rotation, stored: rotation.stored + fromIndex },
     facts: await attempt('edgar-facts', () => runEdgarFacts(host, db, run)),
     shortInterest: await attempt('short-interest', () => runShortInterest(host, db, run, opts)),
     recommendations: await attempt('recommendations', () => runRecommendations(host, db, run, opts)),
-    insider: await attempt('insider', () => runInsiderSweep(host, db, run))
+    insider
   };
 }
