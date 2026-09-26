@@ -193,6 +193,11 @@ see whether the strategy earns its keep before it is switched on. Press **↻ Re
 - **Sector cap** compares every shadow position with a book that holds at most 3 open positions per sector. It
   shows whether the cap you chose costs or saves money. The chips show where open risk sits today, by sector
   (amber at the cap, red over it) and by expiry date.
+- **Does the ranking face a choice?** shows how often the top-5 cut actually drops candidates. Below it, a
+  second table tests the cut. It compares the five spreads each busy run picked with the ones that run dropped,
+  both settled on real quotes. The ranking is worth keeping only if **top** beats **cut** once enough of both
+  have settled. This comparison never counts toward the enable gate. Names dropped before v1.1.327 were not
+  saved with their strikes, so the table only covers later runs.
 - **Positions**, newest first. Filter by open, settled or unsettleable.
   - A **50% target** exit is taken when the spread could be bought back for half its credit. **Expired** means it
     ran to expiry and settled at intrinsic value.

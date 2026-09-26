@@ -192,7 +192,8 @@ export function computeSpreadMode(deps: {
   const now = deps.now ?? new Date();
   const todayEt = now.toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
   const result: SpreadModeResult = {
-    mode: SPREAD_MODE_DEFAULTS.mode, pool, briefGeneratedAt: null, considered: 0, picks: [], rejections: [], rowsWritten: 0, error: null,
+    mode: SPREAD_MODE_DEFAULTS.mode, pool, briefGeneratedAt: null, considered: 0, picks: [], rankedOut: [], rejections: [],
+    rowsWritten: 0, error: null,
   };
 
   try {
@@ -307,7 +308,11 @@ export function computeSpreadMode(deps: {
       return Math.abs(d) > 1e-9 ? d : a.ticker.localeCompare(b.ticker);
     });
     result.picks = candidates.slice(0, P.topN).map((c, i) => ({ ...c, rank: i + 1 }));
-    for (const c of candidates.slice(P.topN)) reject(c.ticker, `ranked below the top ${P.topN}`);
+    // The cut's losers keep their construction and would-be rank (v1.1.327): they are settled as a
+    // counterfactual so the ranking can be tested on real quotes (BPS-10). Stored before v1.1.327 they
+    // were a bare reason, and every one of those comparisons was lost.
+    result.rankedOut = candidates.slice(P.topN).map((c, i) => ({ ...c, rank: P.topN + i + 1 }));
+    for (const c of result.rankedOut) reject(c.ticker, `ranked below the top ${P.topN}`);
 
     result.rowsWritten = storeSpreadModePicks(db, todayEt, slot, pool, settings.mode, result);
   } catch (e) {
@@ -345,12 +350,25 @@ function storeSpreadModePicks(
       );
       written++;
     }
+    const rankedOut = new Map(result.rankedOut.map(p => [p.ticker, p]));
     for (const r of result.rejections) {
-      insert.run(
-        pool, asOfDate, slot, generatedAt, mode, r.ticker, 'rejected', null, r.reason,
-        null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
-        null, null, null, null, null, null,
-      );
+      const p = rankedOut.get(r.ticker);
+      if (p) {
+        // Still `rejected`, with the same reason, so every reader of the funnel is unchanged — but with
+        // the legs and would-be rank, so it can be settled beside the picks (v1.1.327, BPS-10).
+        insert.run(
+          pool, asOfDate, slot, generatedAt, mode, p.ticker, 'rejected', p.rank, r.reason,
+          p.expiration, p.dte, p.spot, p.short.strike, p.short.bid, p.short.ask, p.short.delta, p.short.openInterest,
+          p.long.strike, p.long.bid, p.long.ask, p.long.delta, p.long.openInterest, p.width, p.midCredit, p.netCredit, p.maxLoss,
+          p.returnOnRisk, p.costShare, p.contracts, p.totalMaxLoss, p.earningsDate, p.criticVerdict,
+        );
+      } else {
+        insert.run(
+          pool, asOfDate, slot, generatedAt, mode, r.ticker, 'rejected', null, r.reason,
+          null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
+          null, null, null, null, null, null,
+        );
+      }
       written++;
     }
     db.prepare('DELETE FROM spread_mode_picks WHERE as_of_date < ?').run(cutoff);

@@ -425,6 +425,47 @@ describe('buildSpreadShadowReport', () => {
   // BPS-10 (v1.1.310). The ranking can only matter on a run where more candidates reached it than there
   // are slots. The wheel tiebreak was studied before anyone counted that it faced a choice on 7 of 62
   // days — so the count comes first, and it has to separate "reached the cut" from "was cut by it".
+  // BPS-10 on real quotes (v1.1.327): the cut's losers, settled as a counterfactual beside the picks of
+  // the same binding runs. Never part of the §4 gate.
+  it('settles the names the top-N cut discarded beside the picks of the same binding runs (v1.1.327)', () => {
+    const db = openDatabase(':memory:');
+    runMigrations(db, MIGRATIONS_DIR);
+    const row = db.prepare(
+      `INSERT INTO spread_mode_picks (as_of_date, slot, generated_at, mode, ticker, outcome, rank, reason, expiration, dte, spot,
+         short_strike, long_strike, net_credit, max_loss, return_on_risk, pool)
+       VALUES (?, 'intraday', 'x', 'shadow', ?, ?, ?, ?, '2026-10-16', 30, 100, ?, ?, 1.6, 3.4, ?, 'premium')`,
+    );
+    // Binding run on 09-21: AAA picked, CUT and REP cut. A non-binding run on 09-22: NB picked.
+    row.run('2026-09-21', 'AAA', 'pick', 1, null, 95, 90, 0.47);
+    row.run('2026-09-21', 'CUT', 'rejected', 6, 'ranked below the top 5', 95, 90, 0.30);
+    row.run('2026-09-21', 'REP', 'rejected', 7, 'ranked below the top 5', 95, 90, 0.28);
+    row.run('2026-09-21', 'OLD', 'rejected', null, 'ranked below the top 5', null, null, null); // pre-v1.1.327: no legs
+    row.run('2026-09-22', 'NB', 'pick', 1, null, 95, 90, 0.40);
+    row.run('2026-09-23', 'REP', 'pick', 1, null, 95, 90, 0.44); // REP picked two days after being cut
+
+    const cap = db.prepare(
+      `INSERT INTO spread_chain_capture (as_of_date, slot, captured_at, ticker, expiration, dte, reason, underlying_price, contract_count, puts_json)
+       VALUES ('2026-09-24', 'intraday', 'x', ?, '2026-10-16', 22, 'track', 100, 2, ?)`,
+    );
+    cap.run('AAA', JSON.stringify([put(90, 0.3, 0.4), put(95, 1.0, 1.2)])); // mid 0.75 ≤ 0.80 → target
+    cap.run('CUT', JSON.stringify([put(90, 0.6, 0.7), put(95, 2.4, 2.6)])); // mid 1.85 → still open
+
+    const r = buildSpreadShadowReport(db, '2026-09-25');
+    const t = r.rankingTest.find(x => x.pool === 'premium')!;
+    expect(t.bindingRuns).toBe(1);
+    // Only AAA: NB's run cut nothing, and REP's pick run cut nothing either.
+    expect(t.top).toMatchObject({ positions: 1, settled: 1 });
+    expect(t.top.meanReturnOnMaxLoss).toBeGreaterThan(0);
+    // CUT is the counterfactual; REP was picked anyway (one bet, not two sides); OLD has no legs.
+    expect(t.cut).toMatchObject({ positions: 1, settled: 0 });
+    expect(t.cutAlsoPicked).toBe(1);
+    expect(t.medianReturnOnRiskTop).toBeCloseTo(0.47, 6);
+    expect(t.medianReturnOnRiskCut).toBeCloseTo(0.30, 6);
+    // The counterfactual never reaches the gate or the position list.
+    expect(r.positions.map(p => p.ticker).sort()).toEqual(['AAA', 'NB', 'REP']);
+    expect(r.rankingTest.find(x => x.pool === 'wheel')).toMatchObject({ bindingRuns: 0, top: { positions: 0 }, cut: { positions: 0 } });
+  });
+
   describe('eligible-set size — does the top-N cut face a choice? (BPS-10)', () => {
     const seed = (db: ReturnType<typeof openDatabase>) => db.prepare(
       `INSERT INTO spread_mode_picks (as_of_date, slot, generated_at, mode, ticker, outcome, rank, reason, expiration, dte, spot,

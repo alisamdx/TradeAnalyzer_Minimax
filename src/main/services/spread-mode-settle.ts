@@ -150,6 +150,78 @@ function summarise(positions: readonly ShadowPickRow[]): BookSummary {
   };
 }
 
+/** A candidate the top-N cut discarded, stored with its legs (v1.1.327). */
+export interface CutRow extends ShadowPick {
+  pool: SpreadPool;
+  rank: number | null;
+  returnOnRisk: number | null;
+}
+
+/**
+ * BPS-10 on real quotes: the picks of every BINDING run against the names that run's cut discarded,
+ * both settled by the same rules (v1.1.327).
+ *
+ * - **Top** is the pick positions whose entry run was binding — a run where the cut discarded nothing
+ *   made no choice, so its picks say nothing about the ranking.
+ * - **Cut** is episode-collapsed the same way as the picks (a name cut on consecutive runs is one bet),
+ *   and a cut name the same pool picked within the episode window is dropped and counted: it was not
+ *   actually excluded, and counting it would put one bet on both sides of the comparison.
+ *
+ * Never part of the §4 gate. `cutRows` must be in (date, slot, rank) order.
+ */
+export function buildRankingTest(input: {
+  positions: readonly ShadowPickRow[];
+  pickRows: ReadonlyArray<{ pool: SpreadPool; asOfDate: string; ticker: string }>;
+  pickReturnOnRisk: ReadonlyMap<number, number | null>;
+  cutRows: readonly CutRow[];
+  bindingRuns: ReadonlySet<string>;
+  settle: (p: ShadowPick) => SpreadSettlement;
+}): SpreadShadowReport['rankingTest'] {
+  const runKey = (pool: string, date: string, slot: string): string => `${pool}|${date}|${slot}`;
+  return SPREAD_MODE_POOLS.map(pool => {
+    const bindingRuns = [...input.bindingRuns].filter(k => k.startsWith(`${pool}|`)).length;
+    const top = input.positions.filter(p => p.pool === pool && input.bindingRuns.has(runKey(pool, p.asOfDate, p.slot)));
+
+    const picked = input.pickRows.filter(r => r.pool === pool);
+    const lastKept = new Map<string, string>();
+    const cut: Array<{ row: CutRow; settlement: SpreadSettlement }> = [];
+    let cutAlsoPicked = 0;
+    for (const r of input.cutRows) {
+      if (r.pool !== pool) continue;
+      const prev = lastKept.get(r.ticker);
+      if (prev != null && daysBetween(prev, r.asOfDate) <= EPISODE_DAYS) continue;
+      lastKept.set(r.ticker, r.asOfDate);
+      if (picked.some(p => p.ticker === r.ticker && Math.abs(daysBetween(p.asOfDate, r.asOfDate)) <= EPISODE_DAYS)) {
+        cutAlsoPicked++;
+        continue;
+      }
+      cut.push({ row: r, settlement: input.settle(r) });
+    }
+
+    const book = (settlements: SpreadSettlement[]): BookSummary => {
+      const returns = settlements
+        .filter(s => s.status === 'target' || s.status === 'expired')
+        .map(s => (s as { returnOnMaxLoss: number }).returnOnMaxLoss);
+      return {
+        positions: settlements.length,
+        settled: returns.length,
+        meanReturnOnMaxLoss: returns.length ? returns.reduce((a, b) => a + b, 0) / returns.length : null,
+        winRate: returns.length ? returns.filter(x => x > 0).length / returns.length : null,
+      };
+    };
+    const rors = (xs: Array<number | null | undefined>): number[] => xs.filter((x): x is number => x != null && Number.isFinite(x));
+    return {
+      pool,
+      bindingRuns,
+      top: book(top.map(p => p.settlement)),
+      cut: book(cut.map(c => c.settlement)),
+      cutAlsoPicked,
+      medianReturnOnRiskTop: median(rors(top.map(p => input.pickReturnOnRisk.get(p.id)))),
+      medianReturnOnRiskCut: median(rors(cut.map(c => c.row.returnOnRisk))),
+    };
+  });
+}
+
 /**
  * Why a chain yields no spread, mirroring `buildBullPutSpread`'s leg rules. "chain carried no deltas" is
  * the stale-Greeks guard (v1.1.255 withholds deltas on a chain whose Greeks disagree with its prices) or
@@ -311,7 +383,7 @@ const median = (xs: number[]): number | null => {
 export function buildSpreadShadowReport(db: DbHandle, todayEt: string): SpreadShadowReport {
   const rows = db.prepare(
     `SELECT id, pool, as_of_date, slot, ticker, rank, expiration, dte, spot, short_strike, long_strike, net_credit, max_loss,
-            contracts
+            contracts, return_on_risk
        FROM spread_mode_picks
       WHERE outcome = 'pick' AND expiration IS NOT NULL AND short_strike IS NOT NULL AND long_strike IS NOT NULL
         AND net_credit IS NOT NULL AND max_loss > 0 AND spot > 0
@@ -319,7 +391,7 @@ export function buildSpreadShadowReport(db: DbHandle, todayEt: string): SpreadSh
   ).all() as Array<{
     id: number; pool: SpreadPool; as_of_date: string; slot: 'intraday' | 'after_close'; ticker: string; rank: number | null;
     expiration: string; dte: number | null; spot: number; short_strike: number; long_strike: number;
-    net_credit: number; max_loss: number; contracts: number | null;
+    net_credit: number; max_loss: number; contracts: number | null; return_on_risk: number | null;
   }>;
 
   // One position per ticker episode, the #43 study's rule: a pick of a ticker within EPISODE_DAYS of that
@@ -351,12 +423,21 @@ export function buildSpreadShadowReport(db: DbHandle, todayEt: string): SpreadSh
   const closeStmt = db.prepare(
     `SELECT close FROM historical_prices WHERE ticker = ? AND date <= ? AND date >= ? ORDER BY date DESC LIMIT 1`,
   );
-  const captures: PositionCapture[] = [];
-  for (const p of positions.values()) {
+  const loadMarks = (p: ShadowPick): ShadowMark[] => {
     const marks: ShadowMark[] = [];
     for (const m of marksStmt.all(p.ticker, p.expiration, p.asOfDate) as Array<{ as_of_date: string; slot: 'intraday' | 'after_close'; puts_json: string }>) {
       try { marks.push({ asOfDate: m.as_of_date, slot: m.slot, puts: JSON.parse(m.puts_json) as CapturedPut[] }); } catch { /* an unreadable mark is a gap */ }
     }
+    return marks;
+  };
+  // A holiday expiry settles on the last session before it (at most four days back).
+  const expiryClose = (p: ShadowPick): number | null => {
+    const floor = new Date(Date.parse(`${p.expiration}T00:00:00Z`) - 4 * 86_400_000).toISOString().slice(0, 10);
+    return (closeStmt.get(p.ticker, p.expiration, floor) as { close: number } | undefined)?.close ?? null;
+  };
+  const captures: PositionCapture[] = [];
+  for (const p of positions.values()) {
+    const marks = loadMarks(p);
     // What the capture actually delivered for this series, for the quality checks (v1.1.297).
     const live = marks.filter(m => m.asOfDate > p.asOfDate && m.asOfDate <= p.expiration)
       .sort((a, b) => a.asOfDate.localeCompare(b.asOfDate) || slotOrder(a.slot) - slotOrder(b.slot));
@@ -368,10 +449,7 @@ export function buildSpreadShadowReport(db: DbHandle, todayEt: string): SpreadSh
         return s && l ? ([s.bid, s.ask, l.bid, l.ask] as const) : null;
       }),
     });
-    // A holiday expiry settles on the last session before it (at most four days back).
-    const floor = new Date(Date.parse(`${p.expiration}T00:00:00Z`) - 4 * 86_400_000).toISOString().slice(0, 10);
-    const close = (closeStmt.get(p.ticker, p.expiration, floor) as { close: number } | undefined)?.close ?? null;
-    p.settlement = settleSpreadPick(p, marks, close, todayEt);
+    p.settlement = settleSpreadPick(p, marks, expiryClose(p), todayEt);
     captures[captures.length - 1]!.status = p.settlement.status;
   }
   const captureDays = (db.prepare('SELECT DISTINCT as_of_date AS d FROM spread_chain_capture ORDER BY d').all() as Array<{ d: string }>)
@@ -501,9 +579,39 @@ export function buildSpreadShadowReport(db: DbHandle, todayEt: string): SpreadSh
       costShare: r.cost_share ?? (r.reason ? parseCostShareFromReason(r.reason) : null),
     }));
 
+  // BPS-10 on real quotes (v1.1.327): the cut's losers carry their legs from v1.1.327 on, and are settled
+  // here as a counterfactual beside the picks of the same binding runs. Rows cut before then are bare
+  // reasons and are excluded by the leg filter — that comparison was lost when they were written.
+  const cutRows = (db.prepare(
+    `SELECT id, pool, as_of_date, slot, ticker, rank, expiration, spot, short_strike, long_strike, net_credit, max_loss,
+            return_on_risk
+       FROM spread_mode_picks
+      WHERE outcome = 'rejected' AND reason LIKE 'ranked below the top%'
+        AND expiration IS NOT NULL AND short_strike IS NOT NULL AND long_strike IS NOT NULL
+        AND net_credit IS NOT NULL AND max_loss > 0 AND spot > 0
+      ORDER BY as_of_date, CASE slot WHEN 'intraday' THEN 0 ELSE 1 END, rank, id`,
+  ).all() as Array<{
+    id: number; pool: SpreadPool; as_of_date: string; slot: 'intraday' | 'after_close'; ticker: string; rank: number | null;
+    expiration: string; spot: number; short_strike: number; long_strike: number; net_credit: number; max_loss: number;
+    return_on_risk: number | null;
+  }>).map((r): CutRow => ({
+    id: r.id, pool: r.pool, asOfDate: r.as_of_date, slot: r.slot, ticker: r.ticker, rank: r.rank,
+    expiration: r.expiration, spot: r.spot, shortStrike: r.short_strike, longStrike: r.long_strike,
+    netCredit: r.net_credit, maxLoss: r.max_loss, returnOnRisk: r.return_on_risk,
+  }));
+  const rankingTest = buildRankingTest({
+    positions: list,
+    pickRows: rows.map(r => ({ pool: r.pool, asOfDate: r.as_of_date, ticker: r.ticker })),
+    pickReturnOnRisk: new Map(rows.map(r => [r.id, r.return_on_risk])),
+    cutRows,
+    bindingRuns: new Set(runs.filter(r => r.ranked_below > 0).map(r => `${r.pool}|${r.as_of_date}|${r.slot}`)),
+    settle: p => settleSpreadPick(p, loadMarks(p), expiryClose(p), todayEt),
+  });
+
   return {
     asOf: todayEt,
     settings,
+    rankingTest,
     liquidityVsCost: liquidityVsCost(liqRows),
     gate: {
       intradayCaptureDays,

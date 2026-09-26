@@ -403,6 +403,42 @@ export function SpreadShadowView() {
                   ))}
                 </tbody>
               </table>
+              {(report.rankingTest ?? []).some(t => t.bindingRuns > 0) && (
+                <>
+                  <div style={{ ...muted, marginTop: 16 }}>
+                    Does the ranking pick better than what it cut? The top-{report.eligibility[0]?.topN ?? 5} of each
+                    binding run against the names it discarded, both settled on real quotes. Counterfactual only —
+                    never part of the §4 gate; names cut before v1.1.327 have no legs and cannot be settled.
+                  </div>
+                  <table style={{ borderCollapse: 'collapse', marginTop: 8 }}>
+                    <thead>
+                      <tr>
+                        <th style={th}>Pool</th><th style={th}>Side</th>
+                        <th style={{ ...th, textAlign: 'right' }}>Positions</th>
+                        <th style={{ ...th, textAlign: 'right' }}>Settled</th>
+                        <th style={{ ...th, textAlign: 'right' }}>Mean return</th>
+                        <th style={{ ...th, textAlign: 'right' }}>Win</th>
+                        <th style={{ ...th, textAlign: 'right' }}>Entry return on risk</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {report.rankingTest.filter(t => t.bindingRuns > 0).flatMap(t => ([
+                        ['top', t.top, t.medianReturnOnRiskTop], ['cut', t.cut, t.medianReturnOnRiskCut],
+                      ] as const).map(([side, b, ror]) => (
+                        <tr key={`${t.pool}-${side}`}>
+                          <td style={td}>{side === 'top' ? t.pool : ''}</td>
+                          <td style={td}>{side}</td>
+                          <td style={num}>{b.positions}</td>
+                          <td style={num}>{b.settled}</td>
+                          <td style={num}>{b.meanReturnOnMaxLoss == null ? '—' : `${(b.meanReturnOnMaxLoss * 100).toFixed(1)}%`}</td>
+                          <td style={num}>{b.winRate == null ? '—' : `${(b.winRate * 100).toFixed(0)}%`}</td>
+                          <td style={num}>{ror == null ? '—' : ror.toFixed(2)}</td>
+                        </tr>
+                      )))}
+                    </tbody>
+                  </table>
+                </>
+              )}
             </details>
           )}
 

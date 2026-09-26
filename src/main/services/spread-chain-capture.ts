@@ -148,9 +148,12 @@ export async function captureSpreadChains(deps: {
     // Spread-mode picks are held to the profit target or EXPIRY (no time stop), at 21–35 DTE — longer
     // than `trackDays`. Their series are tracked until they expire, whenever they were picked, and
     // always across both legs' strikes, or a pick's last ~2 weeks could never be marked (v1.1.290).
+    // The top-N cut's losers too (v1.1.327): they are settled as BPS-10's counterfactual, and a series
+    // dropped from tracking after 21 days could not be marked for its last week or so.
     const picked = db.prepare(
       `SELECT ticker, expiration, MIN(long_strike) AS lo, MAX(short_strike) AS hi FROM spread_mode_picks
-        WHERE outcome = 'pick' AND expiration >= ? AND as_of_date <= ?
+        WHERE (outcome = 'pick' OR (outcome = 'rejected' AND reason LIKE 'ranked below the top%'))
+          AND expiration >= ? AND as_of_date <= ?
         GROUP BY ticker, expiration`,
     ).all(todayEt, todayEt) as Array<{ ticker: string; expiration: string; lo: number | null; hi: number | null }>;
     for (const p of picked) {

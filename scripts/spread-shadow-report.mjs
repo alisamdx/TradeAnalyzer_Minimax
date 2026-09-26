@@ -163,6 +163,21 @@ if (r.eligibility?.length) {
   console.log('  runs means an UNVALIDATED rule (08 §3.6) is choosing the §4 sample.');
 }
 
+if (r.rankingTest?.length) {
+  console.log('\n## Does the ranking pick better than what it cut? (BPS-10, real quotes, from v1.1.327)\n');
+  const pct = (x) => (x == null ? '—' : `${(x * 100).toFixed(1)}%`);
+  const book = (b) => `${String(b.positions).padStart(3)} positions · ${String(b.settled).padStart(3)} settled · mean ${pct(b.meanReturnOnMaxLoss).padStart(6)} · win ${pct(b.winRate)}`;
+  for (const t of r.rankingTest) {
+    if (t.bindingRuns === 0) { console.log(`  ${t.pool.padEnd(8)} no binding runs`); continue; }
+    console.log(`  ${t.pool.padEnd(8)} ${t.bindingRuns} binding run(s)`);
+    console.log(`           top  ${book(t.top)}   entry return on risk ${t.medianReturnOnRiskTop?.toFixed(2) ?? '—'}`);
+    console.log(`           cut  ${book(t.cut)}   entry return on risk ${t.medianReturnOnRiskCut?.toFixed(2) ?? '—'}`);
+    if (t.cutAlsoPicked) console.log(`           ${t.cutAlsoPicked} cut name(s) picked by the same pool within 14 days — one bet, left out of both sides`);
+  }
+  console.log('\n  Counterfactual only — never part of the §4 gate. Names cut before v1.1.327 were stored without');
+  console.log('  legs and cannot be settled. The ranking earns its place only if top beats cut once both are settled.');
+}
+
 console.log('\n## Rejection reasons (all runs)\n');
 for (const x of r.rejectionReasons) {
   const pools = (x.pools ?? []).map((p) => `${p.pool} ${p.n}`).join(' · ');

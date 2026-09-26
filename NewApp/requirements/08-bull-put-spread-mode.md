@@ -170,6 +170,21 @@ choice on 7 of 62 days; the upstream gates were doing all the selecting. **`elig
 binding** — every candidate was picked, and calling that a decision would make the check the liquidity
 gate that always fired.
 
+**Testing it (BPS-10, v1.1.327).** By 2026-09-26 the cut bound on 7 of 8 `premium` runs and dropped 23
+names, so the unvalidated rule was choosing most of that arm's sample. Two measurements:
+
+- **Real quotes, going forward.** A name the cut discards stays `outcome = 'rejected'` with the reason
+  `ranked below the top 5`, but now carries its full construction and the rank it would have had.
+  Capture tracks its series to expiry, like a pick's, and the report settles it by the same rules as a
+  counterfactual (`rankingTest`). Per pool, it compares the picks of every **binding** run against those
+  runs' cut names. A cut name the same pool picked within the 14-day episode window is one bet and is
+  left out of both sides (`cutAlsoPicked`). The counterfactual never reaches §4. Names cut before
+  v1.1.327 were stored as a bare reason and cannot be settled.
+- **History, now.** §8 of `fr-bull-put-spread-study.mjs` ranks each replay day's eligible set by return
+  on risk, its inverse, the brief's rank and ATM IV. It reports the top-5 lift over that day's mean
+  against a random-5 null band drawn on the same days. With a Black-Scholes wing and a flat skew, return
+  on risk is mostly ATM IV, so this tests "rank by IV" more than the real metric.
+
 ### 3.7 Exit guidance, printed with every pick
 
 - **Take profit at 50%** of the net credit — e.g. a GTC limit to buy the spread back at half the credit.

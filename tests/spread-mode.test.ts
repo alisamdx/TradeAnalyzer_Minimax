@@ -180,6 +180,48 @@ describe('computeSpreadMode', () => {
     expect(r.rowsWritten).toBe(9);
   });
 
+  // BPS-10 (v1.1.327). The names the top-N cut discards are the only data that can test the ranking, and
+  // until now they were stored as a bare reason. They stay `rejected` with the same reason — every reader
+  // of the funnel is unchanged — but carry their legs and the rank they would have had.
+  it('stores the top-N cut\'s losers with their legs and would-be rank', () => {
+    const db = openDatabase(':memory:');
+    runMigrations(db, MIGRATIONS_DIR);
+    const GEN = '2026-09-14T14:25:00.000Z';
+    const names = ['T1', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+    const cand = db.prepare(
+      `INSERT INTO brief_candidates (as_of_date, generated_at, strategy, ticker, composite_score, rank, disposition, slot)
+       VALUES (?, ?, 'wheel', ?, 60, 1, 'picked', 'intraday')`,
+    );
+    const earn = db.prepare('INSERT INTO earnings_calendar (ticker, report_date) VALUES (?, ?)');
+    const chain = db.prepare(
+      `INSERT INTO spread_chain_capture (as_of_date, slot, captured_at, ticker, expiration, dte, reason, underlying_price, contract_count, puts_json)
+       VALUES (?, 'intraday', 'x', ?, ?, 28, 'entry', 100, 1, ?)`,
+    );
+    for (const [i, t] of names.entries()) {
+      cand.run(TODAY, GEN, t);
+      earn.run(t, '2026-12-01');
+      // A richer short on the earlier names, so the ranking order is T1…T7 by construction.
+      const bump = (names.length - i) * 0.05;
+      chain.run(TODAY, t, EXP_28, JSON.stringify([put(95, 1.9 + bump, 2.0 + bump, -0.30), put(90, 0.8, 0.9, -0.15)]));
+    }
+    db.prepare(`INSERT INTO daily_briefs (generated_at, valid_until, strategy, picks) VALUES (?, ?, 'wheel', '[]')`).run(GEN, GEN);
+
+    const r = computeSpreadMode({ db, slot: 'intraday', now: NOW, settings: SETTINGS });
+    expect(r.picks.map(p => p.ticker)).toEqual(['T1', 'T2', 'T3', 'T4', 'T5']);
+    expect(r.rankedOut.map(p => [p.ticker, p.rank])).toEqual([['T6', 6], ['T7', 7]]);
+    expect(r.rejections.filter(x => x.reason === 'ranked below the top 5').map(x => x.ticker)).toEqual(['T6', 'T7']);
+
+    const cut = db.prepare(`SELECT * FROM spread_mode_picks WHERE ticker = 'T6'`).get() as Record<string, unknown>;
+    expect(cut).toMatchObject({
+      outcome: 'rejected', reason: 'ranked below the top 5', rank: 6,
+      expiration: EXP_28, short_strike: 95, long_strike: 90, spot: 100,
+    });
+    expect(cut['net_credit']).toBeGreaterThan(0);
+    expect(cut['return_on_risk']).toBeGreaterThan(0);
+    // Any other rejection is still a bare reason.
+    expect(db.prepare(`SELECT COUNT(*) n FROM spread_mode_picks WHERE outcome = 'rejected' AND short_strike IS NULL`).get()).toEqual({ n: 0 });
+  });
+
   it('replaces a re-run of the same slot and keeps the other slot', () => {
     const db = seed();
     computeSpreadMode({ db, slot: 'intraday', now: NOW, settings: SETTINGS });

@@ -133,6 +133,23 @@ describe('captureSpreadChains', () => {
     expect((JSON.parse(row.puts_json) as CapturedPut[]).map(p => p[0])).toEqual([90, 95]);
   });
 
+  it('tracks a name the top-N cut discarded to expiry, so BPS-10 can settle it (v1.1.327)', async () => {
+    const db = seed();
+    const row = db.prepare(
+      `INSERT INTO spread_mode_picks (as_of_date, slot, generated_at, mode, ticker, outcome, reason, expiration, short_strike, long_strike)
+       VALUES ('2026-08-20', 'intraday', 'x', 'shadow', ?, 'rejected', ?, ?, ?, ?)`,
+    );
+    row.run('CUT', 'ranked below the top 5', EXP_18, 45, 40);
+    // Cut before v1.1.327: a bare reason with no legs — nothing to track, and it must not be fetched.
+    row.run('OLD', 'ranked below the top 5', EXP_18, null, null);
+    calls.length = 0;
+    const r = await captureSpreadChains({ db, provider, slot: 'intraday', now: NOW });
+
+    expect(r.trackedSeries).toBe(2);            // ZZZ (entry) + CUT
+    expect(calls).toContain(`chain:CUT:${EXP_18}`);
+    expect(calls.some(x => x.includes('OLD'))).toBe(false);
+  });
+
   it('never throws, even without a usable database', async () => {
     const db = openDatabase(':memory:'); // no migrations
     const r = await captureSpreadChains({ db, provider, slot: 'intraday', now: NOW });

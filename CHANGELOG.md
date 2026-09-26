@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.327] - 2026-09-26
+
+### BPS-10: testing the spread's top-5 ranking
+
+The spread's untested ranking (return on risk, top 5) bound on 7 of 8 `premium` runs and dropped 23 names. Every one of those names was stored as a bare reason, so the data that could test the ranking was thrown away. **Now:**
+- **Cut names keep their legs and would-be rank.** They are still `rejected`, with the same reason.
+- **Capture tracks them to expiry.**
+- **The shadow report settles them as a counterfactual** against the same binding runs' picks (`rankingTest`, in the script and 🪜 Spread Shadow; never part of §4).
+
+**History:** `fr-bull-put-spread-study.mjs` §8 ranks each replay day's eligible set four ways (return on risk, its inverse, brief rank, ATM IV) against a random-5 null band on the same days. With a Black-Scholes wing that tests ranking by IV. Self-test: 6 new checks, all passing. No selection rule changed.
+
+Details: `changelogs/v1.1.327_2026-09-26.md`.
+
 ## [1.1.326] - 2026-09-26
 
 ### BPS-19 harness: should the spread's expiry rule prefer the monthly?

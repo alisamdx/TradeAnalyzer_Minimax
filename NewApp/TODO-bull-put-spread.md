@@ -244,6 +244,22 @@ Provenance: **measured** (a #43 study result) · **inherited** (a wheel-screen r
   metric itself — `premium` picks return-on-risk **0.37–0.48** against `wheel`'s **0.19–0.37** — so the
   cut behaves differently per arm, and a rule validated on one may not transfer. Re-read once `premium`
   has ~10 runs.
+  **Re-read 2026-09-26: it now binds on 7 of 8 `premium` runs, 23 names dropped (up to 7 in one run),**
+  so the untested rule is choosing most of that arm's sample. `wheel` binds 1/18 and `income` 0/8.
+  **The data to test it was being thrown away.** Every cut name was stored as a bare reason with no legs,
+  so none of the 23 can ever be settled (the CLAUDE.md shape: "when a ranking's quality is in question,
+  the losers are the data you need").
+  **Test built 2026-09-26 (v1.1.327), two halves:**
+  - **Real quotes:** cut names now keep their legs and would-be rank, capture tracks them to expiry, and
+    the report settles them as a counterfactual beside the same binding runs' picks (`rankingTest`, in
+    the script and the 🪜 view; never in §4).
+    **Read it once ≥ 15 cut positions have settled on each side, earliest late October.**
+  - **History now:** §8 of `fr-bull-put-spread-study.mjs` — the within-day top-5 lift against a random-5
+    null, for return on risk, its inverse, brief rank and ATM IV (self-test covers rich-wins, inverted and
+    unrelated worlds). **Run from a normal terminal:**
+    `node scripts/fr-bull-put-spread-study.mjs --slip-model quoted --capital 25000 --risk 2500 --out bps10-ranking.md`.
+    It uses a Black-Scholes wing with a flat skew, so it answers "does ranking by IV pick better", not the
+    real metric.
 - **BPS-11. Sizing — floor(budget ÷ per-contract max loss), no longer a gate.** *Fixed.* $2,500 default,
   $250 stored (S10); shadow records an unaffordable pick at `contracts = 0` (v1.1.300). Unsettled:
   `maxOpenPositions` has never been given a real number (10 placeholder), and nothing tracks open

@@ -166,6 +166,12 @@ export interface SpreadModeResult {
   briefGeneratedAt: string | null;
   considered: number;
   picks: SpreadModePick[];
+  /**
+   * Candidates the top-N cut discarded, with their full construction and the rank they would have had
+   * (v1.1.327). Each is also in `rejections`; this keeps the legs so the cut can be settled as a
+   * counterfactual (BPS-10) — the losers of a ranking are the data that tests it.
+   */
+  rankedOut: SpreadModePick[];
   rejections: Array<{ ticker: string; reason: string }>;
   rowsWritten: number;
   /** Set when the run itself failed; the brief is never affected. */
@@ -311,6 +317,21 @@ export interface SpreadShadowReport {
    * Per pool, because the arms are nothing like each other: a pool that never fills its five slots and a
    * pool that fills them every run need different work, and averaged together they look like neither.
    */
+  /**
+   * BPS-10 on real quotes (v1.1.327): the top-N against the names the cut discarded, from the SAME
+   * binding runs, each settled by the same rules. Never part of the §4 gate. A cut name whose ticker
+   * the same pool picked within the episode window is the same bet and is excluded (`cutAlsoPicked`).
+   */
+  rankingTest: Array<{
+    pool: SpreadPool;
+    bindingRuns: number;
+    top: BookSummary;
+    cut: BookSummary;
+    cutAlsoPicked: number;
+    /** Median entry return on risk — how far apart the ranking metric put the two groups. */
+    medianReturnOnRiskTop: number | null;
+    medianReturnOnRiskCut: number | null;
+  }>;
   eligibility: Array<{
     pool: SpreadPool;
     topN: number;

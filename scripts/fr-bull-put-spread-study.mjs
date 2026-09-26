@@ -309,6 +309,83 @@ function line(label, rows) {
 const cfgLabel = c => `${c.dte}d Δ${c.delta} w${f((c.wing ?? 0.05) * 100, 1)}% skew${c.skew} pt${c.pt ?? '–'} sl${c.sl ?? '–'} ts${c.ts ?? '–'}`
   + (c.maxCostShare != null ? ` cost≤${f(c.maxCostShare * 100, 0)}%` : '');
 
+// ── BPS-10: does ranking the day's eligible set pick better than what it cuts? ───────────────
+/**
+ * rows: runAll() output (one per replay entry, several per date). On every date with more than `topN`
+ * rows, each rule takes its top `topN` and the rest are "cut". The measure is the per-date LIFT — mean
+ * return of the chosen minus mean return of the whole eligible set — averaged over dates, against the
+ * same statistic for `draws` random choices of `topN` on the same dates. The null is built on the very
+ * dates and candidate sets the rule saw, so day-to-day overlap in names (the same ticker on consecutive
+ * replay days) inflates both sides equally instead of flattering the rule.
+ *
+ * In this model the mode's metric — net credit ÷ max loss — is a function of the credit's share of the
+ * width, which at a fixed delta, wing and skew is set almost entirely by ATM IV. So the mode's rule and
+ * "highest IV" are expected to agree here; `rorIvSpearman` reports how closely. Real quotes add skew and
+ * strike-grid effects this cannot see — that half is what v1.1.327's shadow counterfactual measures.
+ */
+function rankingTest(rows, { topN = 5, draws = 500, seed = 12345 } = {}) {
+  const byDate = new Map();
+  for (const r of rows) {
+    if (!r.spread) continue;
+    (byDate.get(r.e.date) ?? byDate.set(r.e.date, []).get(r.e.date)).push(r);
+  }
+  const dates = [...byDate.entries()].filter(([, list]) => list.length > topN).sort((a, b) => a[0].localeCompare(b[0]));
+  const ret = r => (r.spread.pnl / r.spread.cap) * 100;
+  const ror = r => r.creditPctWidth / (1 - r.creditPctWidth);
+  const byTicker = (a, b) => a.e.ticker.localeCompare(b.e.ticker);
+  const avg = xs => (xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : null);
+  const rules = [
+    ['return on risk — the mode', (a, b) => ror(b) - ror(a) || byTicker(a, b)],
+    ['lowest return on risk', (a, b) => ror(a) - ror(b) || byTicker(a, b)],
+    ['brief rank', (a, b) => (a.e.rank ?? 1e9) - (b.e.rank ?? 1e9) || byTicker(a, b)],
+    ['highest ATM IV', (a, b) => b.e.sig0 - a.e.sig0 || byTicker(a, b)],
+  ];
+  const summary = xs => ({
+    n: xs.length,
+    mean: avg(xs.map(ret)),
+    win: xs.length ? (xs.filter(r => r.spread.pnl > 0).length / xs.length) * 100 : null,
+    // A spread that lost ≥ 90% of its max loss: the tail a ranking on credit richness might buy.
+    maxLoss: xs.length ? (xs.filter(r => ret(r) <= -90).length / xs.length) * 100 : null,
+  });
+  const out = { dates: dates.length, medianEligible: median(dates.map(([, l]) => l.length)), rules: [] };
+  for (const [label, cmp] of rules) {
+    const top = [], cut = [], lifts = [];
+    for (const [, list] of dates) {
+      const s = [...list].sort(cmp);
+      top.push(...s.slice(0, topN)); cut.push(...s.slice(topN));
+      lifts.push(avg(s.slice(0, topN).map(ret)) - avg(list.map(ret)));
+    }
+    out.rules.push({ label, lift: avg(lifts), top: summary(top), cut: summary(cut) });
+  }
+  // Seeded, so a re-run reproduces the band exactly.
+  let st = seed >>> 0;
+  const rand = () => { st = (Math.imul(st, 1664525) + 1013904223) >>> 0; return st / 4294967296; };
+  const nullLifts = [];
+  for (let d = 0; d < draws; d++) {
+    const lifts = [];
+    for (const [, list] of dates) {
+      const a = [...list];
+      for (let i = 0; i < topN; i++) { const j = i + Math.floor(rand() * (a.length - i)); [a[i], a[j]] = [a[j], a[i]]; }
+      lifts.push(avg(a.slice(0, topN).map(ret)) - avg(list.map(ret)));
+    }
+    nullLifts.push(avg(lifts));
+  }
+  nullLifts.sort((a, b) => a - b);
+  const q = p => nullLifts[Math.min(nullLifts.length - 1, Math.floor(nullLifts.length * p))];
+  out.nullBand = nullLifts.length ? { p5: q(0.05), p50: q(0.5), p95: q(0.95) } : null;
+  for (const r of out.rules) r.pAbove = nullLifts.length ? nullLifts.filter(x => x >= r.lift).length / nullLifts.length : null;
+  // How closely the mode's metric follows ATM IV within a day (Spearman, median over dates).
+  const rankOf = xs => { const o = xs.map((v, i) => [v, i]).sort((a, b) => a[0] - b[0]); const r = new Array(xs.length); o.forEach(([, i], k) => { r[i] = k; }); return r; };
+  const corr = [];
+  for (const [, list] of dates) {
+    const a = rankOf(list.map(ror)), b = rankOf(list.map(r => r.e.sig0));
+    const n = a.length, d2 = a.reduce((s, x, i) => s + (x - b[i]) ** 2, 0);
+    corr.push(1 - (6 * d2) / (n * (n * n - 1)));
+  }
+  out.rorIvSpearman = median(corr);
+  return out;
+}
+
 // ── self-test (no database) ───────────────────────────────────────────────────────────────────
 function syntheticEntry(pathFn, iv = 0.35) {
   const start = '2025-01-01', bars = [];
@@ -391,6 +468,35 @@ function selftest() {
   check('portfolio: drawdown is measured on realised equity', Math.abs(port.maxDd - 50) < 1e-6);
   const cspPort = simulatePortfolio([mk('2025-01-01', 'AAA', 1, 400, 100, 10)], 'csp', { capital: 1000, risk: 500, cspAlloc: 0.25, maxPositions: 10 });
   check('portfolio: a CSP needing more cash than its allocation is skipped for size', cspPort.taken === 0 && cspPort.skipped.size === 1);
+
+  // BPS-10 ranking test: 30 days × 8 candidates, credit share 10–45%. `outcome` decides each row's return.
+  const rankRows = (outcome, perDay = 8) => {
+    const rows = [];
+    for (let d = 0; d < 30; d++) {
+      const date = addDays('2025-06-02', d);
+      for (let k = 0; k < perDay; k++) {
+        const cpw = 0.10 + 0.05 * ((k * 3 + d) % perDay);
+        rows.push({ e: { date, ticker: `T${k}`, rank: k + 1, sig0: 0.2 + cpw }, creditPctWidth: cpw,
+          spread: { cap: 100, pnl: outcome(cpw, k, d) } });
+      }
+    }
+    return rows;
+  };
+  const richWins = rankingTest(rankRows(cpw => (cpw - 0.25) * 100), { draws: 200 });
+  const byLabel = (t, l) => t.rules.find(r => r.label.startsWith(l));
+  check('ranking: when richer credit really does win, the mode\'s rule clears the random band',
+    richWins.dates === 30 && byLabel(richWins, 'return on risk').lift > richWins.nullBand.p95 && byLabel(richWins, 'return on risk').pAbove < 0.05);
+  check('ranking: …and the inverted rule falls below it', byLabel(richWins, 'lowest').lift < richWins.nullBand.p5);
+  check('ranking: return on risk and ATM IV agree exactly when IV sets the credit', Math.abs(richWins.rorIvSpearman - 1) < 1e-9);
+  const inverted = rankingTest(rankRows(cpw => (0.25 - cpw) * 100), { draws: 200 });
+  check('ranking: an inverted world reverses it — a harness that can only say "helps" is decoration',
+    byLabel(inverted, 'return on risk').lift < inverted.nullBand.p5 && byLabel(inverted, 'lowest').lift > inverted.nullBand.p95);
+  const unrelated = rankingTest(rankRows((cpw, k, d) => (((k * 7 + d * 13) % 11) - 5) * 4), { draws: 400 });
+  const mode = byLabel(unrelated, 'return on risk');
+  check('ranking: when credit carries no information the rule sits inside the band',
+    mode.lift >= unrelated.nullBand.p5 && mode.lift <= unrelated.nullBand.p95);
+  check('ranking: a day with no more than 5 candidates cannot bind, so it is not a test day',
+    rankingTest(rankRows(cpw => cpw, 5), { draws: 10 }).dates === 0);
 
   console.log(fails.length ? `\n${fails.length} FAILED` : '\nall passed');
   process.exit(fails.length ? 1 : 0);
@@ -719,6 +825,31 @@ async function main() {
     const sk = x => `${x.skipped.size}/${x.skipped.capital}/${x.skipped.dup}/${x.skipped.full}`;
     console.log(`| ${cfgLabel(cfg)} | ${money(s.final)} | **${f(s.retPct)}** | ${f(s.annPct)} | ${f(s.onDeployedPct)} | ${money(s.maxDd)} (${f(s.maxDdPct)}%) | ${s.taken} | ${f(s.util, 0)} | ${sk(s)} `
       + `| ${money(c.final)} | **${f(c.retPct)}** | ${f(c.annPct)} | ${f(c.onDeployedPct)} | ${money(c.maxDd)} (${f(c.maxDdPct)}%) | ${c.taken} | ${f(c.util, 0)} | ${sk(c)} |`);
+  }
+
+  // BPS-10 — the mode's adopted profile (08 §3): 30 DTE, Δ0.30, 5% wing, 50% target, no stop, no time
+  // stop, round-trip cost ≤ 25%. Every replay day, not episodes: the ranking chooses within a day.
+  const MODE = { ...LEAN, delta: 0.3, maxCostShare: 0.25 };
+  console.log(`\n## 8. Ranking within the day (BPS-10) — ${cfgLabel(MODE)}, top 5 of each day's eligible set\n`);
+  console.log('lift = mean return of the chosen 5 minus the mean of that day\'s whole eligible set, averaged over days. '
+    + 'The null band is 500 random choices of 5 on the same days. p = share of random choices that did at least as well.\n');
+  for (const skew of [3, 0, 6]) {
+    const t = rankingTest(runAll(pooled, { ...MODE, skew }));
+    if (t.dates === 0) { console.log(`skew ${skew}: no day had more than 5 eligible candidates — the cut never binds here.`); continue; }
+    console.log(`### skew ${skew} — ${t.dates} days with more than 5 eligible (median ${t.medianEligible}); `
+      + `within-day Spearman of return on risk vs ATM IV ${f(t.rorIvSpearman, 2)}; null lift p5 ${f(t.nullBand.p5, 2)} · p50 ${f(t.nullBand.p50, 2)} · p95 ${f(t.nullBand.p95, 2)}\n`);
+    console.log('| rule | lift % | p | top n | top mean ret% | top win% | top max-loss% | cut n | cut mean ret% | cut win% | cut max-loss% |');
+    console.log('|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|');
+    for (const r of t.rules) {
+      console.log(`| ${r.label} | **${f(r.lift, 2)}** | ${f(r.pAbove, 2)} | ${r.top.n} | ${f(r.top.mean, 2)} | ${f(r.top.win)} | ${f(r.top.maxLoss)} `
+        + `| ${r.cut.n} | ${f(r.cut.mean, 2)} | ${f(r.cut.win)} | ${f(r.cut.maxLoss)} |`);
+    }
+    if (skew === 3) {
+      console.log('\nRead: the mode\'s rule earns its place only if its lift sits ABOVE the null band (p small) and its top '
+        + 'does not buy the gain with a fatter max-loss tail. This is a Black-Scholes wing with a flat skew, where return '
+        + 'on risk is mostly ATM IV; the shadow counterfactual (v1.1.327) is the real-quote test. FR-SEY-5: a null or '
+        + 'negative lift is a reason not to rank, not a reason to invent a different ranking on this sample.\n');
+    }
   }
 
   console.log(`\n64 configurations were compared in §2–4c and ${portfolioConfigs.length} in §7; expect the best to look better than it is. `
