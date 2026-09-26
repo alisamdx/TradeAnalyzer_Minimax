@@ -285,6 +285,11 @@ Provenance: **measured** (a #43 study result) · **inherited** (a wheel-screen r
   genuinely different question — but the same trap is available, and the same answer is a live
   possibility. **FR-SEY-5: cost is not return.** A cheaper entry that systematically picks a different
   population is not shown to be better until the returns are measured.
+  **Harness committed 2026-09-26 (v1.1.326, written 09-22):** `scripts/fr-spread-monthly-rule-study.mjs`
+  runs the two PICKERS over the same captured expiry set — A nearest-30, B the monthly in 21–35 else A —
+  and reports cost, gate clearance, open interest of both picks (the wheel's failure mode) and the
+  dilution. Self-test 19/19 (`scripts/selftest-spread-monthly-rule.mjs`). **Not yet run** — from a
+  normal terminal: `node scripts/fr-spread-monthly-rule-study.mjs --out bps19-monthly-rule.md`.
 
 - **BPS-18. The `premium` arm and the budget interact, and nobody chose that.** *Observed 2026-09-22,
   untested.* 7 of 22 shadow positions are unaffordable at the stored $250, and they are overwhelmingly

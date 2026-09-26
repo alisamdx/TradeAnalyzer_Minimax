@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.326] - 2026-09-26
+
+### BPS-19 harness: should the spread's expiry rule prefer the monthly?
+
+BPS-4 found the 13.6% cost gap between ~21 and ~30 DTE spreads is **expiry type, not tenor**. Nearest-30 lands on a monthly about two times in three and inherits its depth, and takes a weekly otherwise even when a monthly sits in the same 21–35 window. `scripts/fr-spread-monthly-rule-study.mjs` runs both **pickers** over the same captured expiry set:
+- **A (incumbent):** nearest 30.
+- **B (candidate):** the monthly in the eligible set, or else A's pick.
+
+It reports cost, gate clearance, open interest and dilution, and checks both reasons the wheel's version of this rule was rejected (2026-08-04). `scripts/lib/spread-study-lib.mjs` is now shared by both spread studies. Self-tests: 19/19 new, 25/25 for the refactored DTE-cost study. No application code or rule changed.
+
+Details: `changelogs/v1.1.326_2026-09-26.md`.
+
 ## [1.1.325] - 2026-09-26
 
 ### EDGAR report filings come from the daily form index

@@ -55,109 +55,27 @@
 //       [--short-dte 21] [--long-dte 30] [--tol 4]
 //   node scripts/selftest-spread-dte-cost.mjs   (synthetic fixture, known answers)
 
-import Database from 'better-sqlite3';
 import { writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { homedir } from 'node:os';
+import {
+  P, med, f, pctf, openStudyDb, loadRuns, buildFromRow, reportPaired,
+} from './lib/spread-study-lib.mjs';
 
 const argv = process.argv.slice(2);
-const numOf = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? Number(argv[i + 1]) : d; };
-const strOf = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : d; };
+const numOf = (n, d) => { const k = argv.indexOf(n); return k >= 0 ? Number(argv[k + 1]) : d; };
+const strOf = (n, d) => { const k = argv.indexOf(n); return k >= 0 ? argv[k + 1] : d; };
 
 const SHORT_DTE = numOf('--short-dte', 21);
 const LONG_DTE = numOf('--long-dte', 30);
 const TOL = numOf('--tol', 4);
 const OUT = strOf('--out', null);
 
-// The mode's profile (src/shared/spread-mode.ts). Duplicated because a scripts/*.mjs harness cannot
-// import the real service — plain node cannot resolve the `@shared/*` aliases. selftest-spread-dte-cost
-// exists because of that duplication.
-const P = {
-  deltaMin: 0.20, deltaMax: 0.40, deltaTarget: 0.30,
-  wingMinPct: 0.03, wingMaxPct: 0.10, wingTargetPct: 0.05,
-  maxCostShare: 0.25, minNetCredit: 0.05,
-  slipFraction: 0.5,
-};
-
 const out = [];
 const say = (s = '') => { out.push(s); console.log(s); };
 
-const med = a => { const s = [...a].sort((x, y) => x - y); return s.length ? s[Math.floor(s.length / 2)] : null; };
-const f = (x, d = 2) => (x == null || Number.isNaN(x) ? '—' : x.toFixed(d));
-const pctf = (x, d = 1) => (x == null || !Number.isFinite(x) ? '—' : `${(x * 100).toFixed(d)}%`);
-
-// --db is for the self-test's synthetic fixture only. It is NOT for pointing at a copy of the live
-// database: a copy read while the app is running is a stale shadow (CLAUDE.md).
-const db = new Database(strOf('--db', join(homedir(), 'AppData', 'Roaming', 'trade-analyzer', 'trade-analyzer.sqlite')));
-
-// ── the mode's fill convention (src/main/services/options-fill.ts) ──────────────────────────────
-function fillPrice(bid, ask, action) {
-  const mid = (bid + ask) / 2;
-  if (!(ask > bid) || mid <= 0) return Math.max(0, mid);   // locked/crossed/degenerate → mid
-  const adj = P.slipFraction * (ask - bid) / 2;
-  return action === 'sell' ? Math.max(0, mid - adj) : mid + adj;
-}
-
-// ── the mode's construction, WITHOUT its two refusals ───────────────────────────────────────────
-// buildBullPutSpread rejects on net credit and on cost share. Both are reported here instead, because
-// a study of what things cost must be able to see the expensive ones.
-const twoSided = p => p[1] > 0 && p[2] >= p[1];
-function buildSpread(puts, spot) {
-  const shorts = puts
-    .filter(p => twoSided(p) && p[3] != null && Math.abs(p[3]) >= P.deltaMin && Math.abs(p[3]) <= P.deltaMax)
-    .sort((a, b) => Math.abs(Math.abs(a[3]) - P.deltaTarget) - Math.abs(Math.abs(b[3]) - P.deltaTarget) || a[0] - b[0]);
-  const s = shorts[0];
-  if (!s) return { reason: 'no two-sided put in the delta band' };
-
-  const eps = 1e-9;
-  const target = s[0] - P.wingTargetPct * spot;
-  const longs = puts
-    .filter(p => {
-      if (!twoSided(p) || p[0] >= s[0]) return false;
-      const w = (s[0] - p[0]) / spot;
-      return w >= P.wingMinPct - eps && w <= P.wingMaxPct + eps;
-    })
-    .sort((a, b) => Math.abs(a[0] - target) - Math.abs(b[0] - target) || b[0] - a[0]);
-  const l = longs[0];
-  if (!l) return { reason: 'no two-sided long put in the wing band' };
-
-  const shortMid = (s[1] + s[2]) / 2, longMid = (l[1] + l[2]) / 2;
-  const shortFill = fillPrice(s[1], s[2], 'sell'), longFill = fillPrice(l[1], l[2], 'buy');
-  const midCredit = shortMid - longMid;
-  const netCredit = shortFill - longFill;
-  const entrySlip = (shortMid - shortFill) + (longFill - longMid);
-  const width = s[0] - l[0];
-  return {
-    shortStrike: s[0], longStrike: l[0], width,
-    shortDelta: Math.abs(s[3]), shortOi: s[5], longOi: l[5],
-    midCredit, netCredit,
-    roundTripCost: 2 * entrySlip,
-    costShare: midCredit > 0 ? (2 * entrySlip) / midCredit : Infinity,
-    creditOverWidth: width > 0 ? midCredit / width : null,
-    clearsGate: midCredit > 0 && netCredit > P.minNetCredit && (2 * entrySlip) / midCredit <= P.maxCostShare,
-  };
-}
-
-// ── third-Friday monthly, in ONE time base (CLAUDE.md: mixing local weekday math with toISOString
-// shifts every date to Saturday on evening runs) ────────────────────────────────────────────────
-function isMonthly(iso) {
-  const d = new Date(`${iso}T00:00:00Z`);
-  if (d.getUTCDay() !== 5) return false;
-  return Math.ceil(d.getUTCDate() / 7) === 3;
-}
+const db = openStudyDb(argv);
 
 // ── load ────────────────────────────────────────────────────────────────────────────────────────
-const rows = db.prepare(
-  `SELECT as_of_date, slot, ticker, expiration, dte, underlying_price, puts_json
-     FROM spread_chain_capture WHERE reason = 'entry' ORDER BY as_of_date, slot, ticker, dte`,
-).all();
-
-const runs = new Map();                       // ticker|date|slot -> [row]
-for (const r of rows) {
-  const k = `${r.ticker}|${r.as_of_date}|${r.slot}`;
-  if (!runs.has(k)) runs.set(k, []);
-  runs.get(k).push(r);
-}
+const { rows, runs } = loadRuns(db);
 
 const nearest = (list, want) => {
   const inTol = list.filter(r => Math.abs(r.dte - want) <= TOL);
@@ -177,18 +95,9 @@ for (const list of runs.values()) {
   if (a.expiration === b.expiration) { sameExpiry++; continue; }
 
   const build = (r, side) => {
-    if (r.underlying_price == null || !(r.underlying_price > 0)) {
-      unbuilt[side].set('no underlying price', (unbuilt[side].get('no underlying price') ?? 0) + 1);
-      return null;
-    }
-    let puts;
-    try { puts = JSON.parse(r.puts_json); } catch {
-      unbuilt[side].set('unreadable chain', (unbuilt[side].get('unreadable chain') ?? 0) + 1);
-      return null;
-    }
-    const s = buildSpread(puts, r.underlying_price);
-    if (s.reason) { unbuilt[side].set(s.reason, (unbuilt[side].get(s.reason) ?? 0) + 1); return null; }
-    return { ...s, dte: r.dte, expiration: r.expiration, monthly: isMonthly(r.expiration) };
+    const built = buildFromRow(r);
+    if (built.reason) { unbuilt[side].set(built.reason, (unbuilt[side].get(built.reason) ?? 0) + 1); return null; }
+    return built;
   };
   const sa = build(a, 'short'), sb = build(b, 'long');
   if (!sa || !sb) continue;          // paired only — one side missing is not a pair
@@ -294,16 +203,12 @@ if (maxGap < 28) {
 // Same-type: the median AND the sign count. A median with no sign count is a point estimate nobody has
 // looked at the distribution of.
 const sameType = pairs.filter(p => p.short.monthly === p.long.monthly);
-const report = (label, subset, note) => {
-  const d = subset.map(p => p.short.costShare - p.long.costShare).filter(Number.isFinite);
-  if (d.length < 10) {
-    say(`**${label}: ${d.length} pairs — too few to say anything.** ${note}`);
-    return;
-  }
-  const cheaper = d.filter(x => x < 0).length;
-  say(`**${label}** (${d.length} pairs): median difference **${pctf(med(d))}**, the shorter expiry ` +
-      `cheaper on **${cheaper} of ${d.length}** (${pctf(cheaper / d.length, 0)}). ${note}`);
-};
+// A thin adapter: this harness's subgroups are pair SUBSETS, while the shared reporter takes the
+// differences. The floor, the sign count and the refusal wording live in one place (the lib) so a
+// second harness cannot drift from them.
+const report = (label, subset, note) =>
+  reportPaired(say, label, subset.map(p => p.short.costShare - p.long.costShare), note,
+    { phrase: 'the shorter expiry cheaper' });
 report('Same expiry type', sameType,
   'If this is much smaller than the headline — or points the other way — the headline is about expiry ' +
   'type, not about DTE.');
