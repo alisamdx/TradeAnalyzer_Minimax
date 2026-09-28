@@ -129,7 +129,8 @@ export const QC008_PROVIDER_CAP: CheckDefinition = {
     'sweep that had done exactly what the check asks. A capped `from`/`to` window now passes when ' +
     'uncapped responses to the same endpoint in the same run cover every day of it. Open findings from ' +
     'earlier runs are re-judged against their own run, and a submissions finding on a fund closes since ' +
-    'funds left the EDGAR sweep.',
+    'funds left the EDGAR sweep. A stock\'s submissions finding closes once the same CIK is asked again ' +
+    'later and that answer is not at the cap (v1.1.333).',
   readsTables: ['meta_response', 'qa_exception', 'raw_ticker_reference'],
   testedQuantity: null,
   testedUnit: null,
@@ -211,9 +212,14 @@ function coveredBySubdivision(ctx: CheckContext): (runId: number, endpoint: stri
  *   its run is an earlier one). EDGAR's sweep no longer asks for funds (v1.1.275), and the ticker's
  *   reference says fund; closes `rule_changed`.
  *
- * What cannot be re-judged here stays open: whether a stock's submissions list reached back far
- * enough depends on the oldest date in the response body, which lives only in the encrypted
- * archive (JEF, JPM — v1.1.275 read them complete by hand; that is the operator's ruling to make).
+ * - **a stock's submissions response** closes once the SAME CIK has been asked again LATER and that
+ *   answer was not at the cap (v1.1.333). Whether the capped response itself reached far enough back
+ *   is in its body, which lives only in the encrypted archive — but that is no longer the question:
+ *   the pipeline stores only `FILINGS_LOOKBACK_DAYS` of filings, and an uncapped later answer holds
+ *   all of them. JEF and JPM were capped on 2026-09-15 under the old 400-day window, re-asked on
+ *   09-24 under the 360-day one (v1.1.275) uncapped, and had nothing new to store; both sat open and
+ *   blocking for two weeks because the only close path was an operator ruling. Closes `rule_changed`.
+ *   A stock never asked again stays open.
  */
 function rejudgeCapFindings(
   ctx: CheckContext,
@@ -233,6 +239,12 @@ function rejudgeCapFindings(
       WHERE ticker = ? AND security_type IN ${FUND_TYPES}
       ORDER BY row_id DESC LIMIT 1`
   );
+  const laterUncapped = ctx.db.prepare(
+    `SELECT source_response_id, substr(requested_at, 1, 10) AS asked FROM meta_response
+      WHERE endpoint = ? AND json_extract(params_json, '$.cik') = ?
+        AND source_response_id > ? AND at_provider_cap = 0 AND parse_status = 'ok'
+      ORDER BY source_response_id LIMIT 1`
+  );
 
   const out: Evaluation[] = [];
   for (const f of open) {
@@ -250,8 +262,9 @@ function rejudgeCapFindings(
     }
     if (f.endpoint.startsWith('/submissions/')) {
       let ticker: unknown;
+      let cik: unknown;
       try {
-        ticker = (JSON.parse(f.params_json) as { ticker?: unknown }).ticker;
+        ({ ticker, cik } = JSON.parse(f.params_json) as { ticker?: unknown; cik?: unknown });
       } catch {
         continue;
       }
@@ -262,6 +275,20 @@ function rejudgeCapFindings(
           closesAs: {
             kind: 'rule_changed',
             note: `${String(ticker)} is a fund (${type.security_type}); EDGAR's filings sweep has not asked for funds since v1.1.275`
+          }
+        });
+        continue;
+      }
+      const later = typeof cik === 'string'
+        ? (laterUncapped.get(f.endpoint, cik, Number(f.key)) as { source_response_id: number; asked: string } | undefined)
+        : undefined;
+      if (later) {
+        out.push({
+          key: f.key, fired: false,
+          closesAs: {
+            kind: 'rule_changed',
+            note: `${String(ticker)} (CIK ${String(cik)}) was asked again on ${later.asked} (response ${later.source_response_id}) ` +
+              'and that answer was not at the cap, so it holds every filing in the window now stored'
           }
         });
       }

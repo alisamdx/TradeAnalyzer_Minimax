@@ -469,6 +469,21 @@ describe('the earnings calendar', () => {
     expect(state(fund)).toEqual({ state: 'resolved', resolution_kind: 'rule_changed' });
     // Whether JPM's list reached far enough is in the archived body, which a check cannot read.
     expect(state(stock)).toEqual({ state: 'open', resolution_kind: null });
+
+    // v1.1.333: JPM is asked again later and the answer is not at the cap — the window now stored is
+    // complete, so the finding closes. (JEF and JPM on 2026-09-24, both open and blocking until then.)
+    const reasked = raw.prepare(
+      `INSERT INTO meta_response (run_id, provider, endpoint, params_json, requested_at, http_status, byte_length,
+         archive_file, archive_offset, sha256, dedup_hash, encrypted, at_provider_cap, parse_status, parsed_row_count)
+       VALUES (?, 'edgar', '/submissions/CIK{cik}.json', ?, ?, 200, 1, 'f', 0, 'h', 'rj-later-jpm', 1, 0, 'ok', 0)`
+    );
+    reasked.run(later.runId, JSON.stringify({ cik: '0000019617', ticker: 'JPM' }), '2026-09-24T22:00:00Z');
+    raw.prepare("UPDATE meta_run SET status = 'complete' WHERE run_id = ?").run(later.runId);
+    const third = beginRun(db(), makeHost(), { kind: 'daily', tradingDate: '2026-09-09' });
+    runGate(db(), makeHost(), { runId: third.runId, tradingDate: '2026-09-09', domainsExpected: {}, checks: [QC008_PROVIDER_CAP] });
+    expect(state(stock)).toEqual({ state: 'resolved', resolution_kind: 'rule_changed' });
+    const note = raw.prepare("SELECT resolution_note n FROM qa_exception WHERE check_id = 'QC-008' AND key = ?").get(String(stock)) as { n: string };
+    expect(note.n).toContain('2026-09-24');
   });
 
   it('stops subdividing at a single day and leaves the cap recorded', async () => {

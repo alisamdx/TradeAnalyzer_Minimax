@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.333] - 2026-09-28
+
+### QC-008: a stock's capped submissions response closes once it's re-asked uncapped
+
+JEF and JPM were capped on 09-15 under the old 400-day filings window, then re-asked uncapped on 09-24 under the 360-day one with nothing new to store. They stayed open and blocking, because QC-008 left a stock's finding for an operator ruling. The pipeline only stores the 360-day window, so a later uncapped answer for the same CIK now closes the finding as `rule_changed`. Rehearsed: both closed, and the open blocking queue is 13.
+
+Details: `changelogs/v1.1.333_2026-09-28.md`.
+
 ## [1.1.332] - 2026-09-28
 
 ### Fix: v1.1.331 emptied QC-701; QC-704 lists filings SEC's aggregate omitted
