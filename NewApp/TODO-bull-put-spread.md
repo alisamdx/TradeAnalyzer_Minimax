@@ -260,6 +260,11 @@ Provenance: **measured** (a #43 study result) · **inherited** (a wheel-screen r
     `node scripts/fr-bull-put-spread-study.mjs --slip-model quoted --capital 25000 --risk 2500 --out bps10-ranking.md`.
     It uses a Black-Scholes wing with a flat skew, so it answers "does ranking by IV pick better", not the
     real metric.
+    **RUN 2026-09-26 (`bps10-ranking.md`): structurally unable to answer — no replay day has more than 5
+    eligible candidates, at any skew.** The wheel replay stores only each day's top 5 picks (1,495 over
+    ~300 days), so the names below the cut were never kept. It is the same survivors-only shape v1.1.327
+    fixed going forward. **The shadow counterfactual is now the only test of the ranking.** Do not try
+    to reconstruct the losers historically.
 - **BPS-11. Sizing — floor(budget ÷ per-contract max loss), no longer a gate.** *Fixed.* $2,500 default,
   $250 stored (S10); shadow records an unaffordable pick at `contracts = 0` (v1.1.300). Unsettled:
   `maxOpenPositions` has never been given a real number (10 placeholder), and nothing tracks open
@@ -280,6 +285,12 @@ Provenance: **measured** (a #43 study result) · **inherited** (a wheel-screen r
   `fr-bull-put-spread-study.mjs --slip-model quoted --capital 25000 --risk 2500`, with the v1.1.292 leg
   rules. Must beat the CSP on total return at ≥ 20% annualised, with quoted-cost coverage ≥ 50% of
   entries so the answer does not rest on the $0.03 fallback. (Was #44's enable check.)
+  **Warning from the 2026-09-26 run (`bps10-ranking.md`, run for BPS-10, not a gate run):**
+  - **Coverage:** only **468 of 1,495** entries had real quotes (31%), and with no `--slip` the rest were
+    priced at **$0**. So pass `--slip 0.03` explicitly, or §7's +111…+229% is mostly free fills.
+  - **§5:** the quoted entries **lost money** under the draft exits (mean −3.2% / −4.7%, against +5.75%
+    for the $0 ones). They are a selected subset (tickers with intraday quotes), so this is not a finding
+    yet. It is the first sight of real costs on this sample, and the gate run must look at it directly.
 - **BPS-15. Build the `on` surfaces** — Daily Brief panel and email — only once §4 passes. `on` is
   deliberately not a member of `SpreadModeSwitch`; adding it **fails the build** at `budgetGates()` in
   `spread-mode.ts`, which is where the BPS-11 decision must be made. (Was part of #44.)
@@ -304,8 +315,19 @@ Provenance: **measured** (a #43 study result) · **inherited** (a wheel-screen r
   **Harness committed 2026-09-26 (v1.1.326, written 09-22):** `scripts/fr-spread-monthly-rule-study.mjs`
   runs the two PICKERS over the same captured expiry set — A nearest-30, B the monthly in 21–35 else A —
   and reports cost, gate clearance, open interest of both picks (the wheel's failure mode) and the
-  dilution. Self-test 19/19 (`scripts/selftest-spread-monthly-rule.mjs`). **Not yet run** — from a
-  normal terminal: `node scripts/fr-spread-monthly-rule-study.mjs --out bps19-monthly-rule.md`.
+  dilution. Self-test 19/19 (`scripts/selftest-spread-monthly-rule.mjs`).
+  **RUN 2026-09-26 (`bps19-monthly-rule.md`), 564 ticker-runs, the rules disagree on 231 (43%):**
+  - **Cost:** B's median cost share is **18.2%** against A's **29.8%**. The paired difference is −8.2%,
+    and B is cheaper on 189 of 231. Credit barely moves (−$0.07); DTE moves −7.
+  - **The saving is payable, which is where the wheel's version failed.** On the 85 pairs both rules can
+    trade, B is still cheaper: −3.1%, cheaper on 69 of 85. The gate 2×2 is 66 turned tradable against 7
+    the other way, a net **+59**.
+  - **OI:** B's short leg is thinner on 44% of pairs, but its median OI is 179 against 101.
+  - **ONE MONTHLY CYCLE.** Captures run 09-14…09-25, so every run's 21–35 window contained the same
+    monthly (Oct 16). That is why "no monthly in the window" read 0. This is Oct 16 against its
+    neighbouring weeklies, not yet evidence about monthlies.
+  - **Next:** re-run after late October, once captures cover the November cycle. If it holds, add a
+    shadow variant for B so returns can be measured (FR-SEY-5: cost is not return). No rule changed.
 
 - **BPS-18. The `premium` arm and the budget interact, and nobody chose that.** *Observed 2026-09-22,
   untested.* 7 of 22 shadow positions are unaffordable at the stored $250, and they are overwhelmingly
