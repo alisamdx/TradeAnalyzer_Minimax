@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.330] - 2026-09-27
+
+### QC-603: a recent SEC report filing means the next date is not announced yet
+
+11 subset stocks had never been dated by Finnhub or E*Trade. For IOT, JHX and JAN the reason is normal: they filed their 10-Qs on 09-08, 08-06 and 08-05, and their next dates are simply not announced. The "just reported" grace couldn't see that, because it only recognises a report the calendar once listed as upcoming. **New exemption:** when nothing is dated and the last 10-K/10-Q was filed within 60 days (working threshold), QC-603 evaluates 0 and closes `rule_changed`, naming the filing. Rehearsed: those 3 closed, 8 stay open. **Found, not fixed:** Polygon gives FWONA, LLYVA and LLYVK the stale CIK 869614 (the old Liberty Media Corporation). SEC maps them to 1560385 and 2078416. All other 1,027 stock CIKs match SEC.
+
+Details: `changelogs/v1.1.330_2026-09-27.md`.
+
 ## [1.1.329] - 2026-09-27
 
 ### 1,004 blocking QC-409 findings nothing could close

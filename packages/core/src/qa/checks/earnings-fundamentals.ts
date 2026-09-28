@@ -121,6 +121,17 @@ const NEW_LISTING_GRACE_DAYS = 135;
 /** A report this recent puts the next one about a quarter out, possibly past the 90-day sweep. */
 const RECENT_REPORT_GRACE_DAYS = 21;
 
+/**
+ * A 10-Q/10-K filed this recently means the company has just reported, so its next date is still
+ * about a month or more away and usually not announced yet (v1.1.330). Working, not measured: a
+ * quarterly cycle is ~91 days, a 10-Q is filed on or up to ~40 days after the release, and dates are
+ * typically announced 2-5 weeks ahead. It exists because RECENT_REPORT_GRACE_DAYS can only see a
+ * report date the calendar once listed as FUTURE. A company that reported before gen-002 began
+ * (2026-09-11), or that Finnhub never covers, looked exactly like one that had dropped out of the
+ * calendar: IOT (10-Q 09-08), JHX (08-06) and JAN (08-05) on 2026-09-27.
+ */
+const REPORT_FILING_GRACE_DAYS = 60;
+
 /** The two independent readings QC-602 exists to compare. Both must be present or it is vacuous. */
 const EARNINGS_CROSS_SOURCES = ['finnhub', 'etrade'] as const;
 
@@ -537,9 +548,10 @@ export const QC603_EARNINGS_FRESHNESS: CheckDefinition = {
     'A common-stock ticker in the chain subset has a future report date observed recently. A ticker ' +
     'that has quietly dropped out of the calendar is the state in which no earnings penalty can ' +
     'fire, which is indistinguishable from a ticker with no earnings coming. Two cases are not ' +
-    'staleness: a ticker that reported in the last 21 days (its next date can sit past the sweep), and ' +
-    'one listed within 135 days that has never been dated (its first report is not yet due).',
-  readsTables: ['raw_earnings_event', 'ref_chain_subset_membership', 'raw_ticker_reference', 'qa_exception', 'ref_universe_membership', 'ref_provider_symbol_ruling'],
+    'staleness: a ticker that reported in the last 21 days (its next date can sit past the sweep), ' +
+    'one listed within 135 days that has never been dated (its first report is not yet due), and ' +
+    'one whose last 10-Q/10-K was filed with the SEC within 60 days (its next date is not yet announced).',
+  readsTables: ['raw_earnings_event', 'ref_chain_subset_membership', 'raw_ticker_reference', 'qa_exception', 'ref_universe_membership', 'ref_provider_symbol_ruling', 'raw_edgar_filing'],
   testedQuantity: 'days_since_future_date_observed',
   testedUnit: 'days',
   thresholds: { maxDaysSinceObserved: 7 },
@@ -572,7 +584,11 @@ export const QC603_EARNINGS_FRESHNESS: CheckDefinition = {
                    FROM raw_earnings_event e
                   WHERE e.ticker = m.ticker AND e.report_date < ?) AS last_reported,
                 (SELECT r.list_date FROM raw_ticker_reference r
-                  WHERE r.ticker = m.ticker ORDER BY r.row_id DESC LIMIT 1) AS list_date
+                  WHERE r.ticker = m.ticker ORDER BY r.row_id DESC LIMIT 1) AS list_date,
+                (SELECT MAX(f.filed_date) FROM raw_edgar_filing f
+                  WHERE f.cik = (SELECT r.cik FROM raw_ticker_reference r
+                                  WHERE r.ticker = m.ticker ORDER BY r.row_id DESC LIMIT 1)
+                    AND f.form IN ('10-K', '10-Q', '20-F', '40-F') AND f.filed_date <= ?) AS last_filing
            FROM ref_chain_subset_membership m
           WHERE m.valid_to IS NULL
             AND m.ticker NOT IN (
@@ -580,8 +596,9 @@ export const QC603_EARNINGS_FRESHNESS: CheckDefinition = {
                WHERE security_type IN ${FUND_TYPES}
                  AND row_id IN (SELECT MAX(row_id) FROM raw_ticker_reference GROUP BY ticker))`
       )
-      .all(ctx.tradingDate, ctx.tradingDate, ctx.tradingDate, ctx.tradingDate) as {
+      .all(ctx.tradingDate, ctx.tradingDate, ctx.tradingDate, ctx.tradingDate, ctx.tradingDate) as {
       ticker: string; last_seen: string | null; via: string | null; last_reported: string | null; list_date: string | null;
+      last_filing: string | null;
     }[];
 
     return rows.map((r): Evaluation => {
@@ -600,9 +617,17 @@ export const QC603_EARNINGS_FRESHNESS: CheckDefinition = {
       const newlyListed =
         r.last_seen === null && r.last_reported === null &&
         listedDays !== null && listedDays >= 0 && listedDays <= NEW_LISTING_GRACE_DAYS;
+      // Reported recently by the SEC's record, not the calendar's (v1.1.330): the next date is not
+      // announced yet, and no source can be expected to carry it. Only when nothing is dated at all.
+      const filedDays = r.last_filing === null ? null : daysBetween(r.last_filing, ctx.tradingDate);
+      const recentFiling =
+        r.last_seen === null && !justReported && !newlyListed &&
+        filedDays !== null && filedDays >= 0 && filedDays <= REPORT_FILING_GRACE_DAYS;
       // Never observed (and not just reported) is the largest possible staleness, never the
       // threshold's own value, or an empty domain would read as a clean one.
-      const days = justReported || newlyListed ? 0 : r.last_seen === null ? 9999 : daysBetween(r.last_seen, ctx.tradingDate);
+      const days = justReported || newlyListed || recentFiling
+        ? 0
+        : r.last_seen === null ? 9999 : daysBetween(r.last_seen, ctx.tradingDate);
       const fired = days > (this.thresholds['maxDaysSinceObserved'] as number);
       return {
         key: r.ticker,
@@ -615,7 +640,7 @@ export const QC603_EARNINGS_FRESHNESS: CheckDefinition = {
               (r.via ? ` via ${r.via}, ruled the same issuer` : ''),
         evidence: {
           ticker: r.ticker, lastObserved: r.last_seen, via: r.via, lastReported: r.last_reported, justReported,
-          listDate: r.list_date, newlyListed
+          listDate: r.list_date, newlyListed, lastReportFiling: r.last_filing, recentFiling
         },
         // Freshness is a claim about NOW, so a clean reading today settles an open finding — and
         // says why (v1.1.282). An exemption is a rule the finding predates; a fresh date is data.
@@ -625,6 +650,8 @@ export const QC603_EARNINGS_FRESHNESS: CheckDefinition = {
             ? { kind: 'rule_changed', note: `${r.ticker} reported ${r.last_reported}, inside the ${RECENT_REPORT_GRACE_DAYS}-day just-reported grace` }
             : newlyListed
               ? { kind: 'rule_changed', note: `${r.ticker} listed ${r.list_date}; its first report is not yet due (${NEW_LISTING_GRACE_DAYS}-day new-listing grace)` }
+              : recentFiling
+                ? { kind: 'rule_changed', note: `${r.ticker} filed its last report with the SEC on ${r.last_filing} (${filedDays} days ago); the next date is not yet announced (${REPORT_FILING_GRACE_DAYS}-day report-filing grace, v1.1.330)` }
               : r.via
                 ? { kind: 'rule_changed', note: `${r.ticker}: dated through its share class ${r.via}, ruled the same issuer (v1.1.321)` }
                 : { kind: 'data_corrected', note: `${r.ticker}: a future report date was observed ${r.last_seen}` }

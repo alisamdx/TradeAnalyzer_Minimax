@@ -62,10 +62,27 @@ function capture(provider: 'polygon' | 'finnhub', endpoint: string, params: Reco
   expect(r.parseStatus, JSON.stringify(r)).toBe('ok');
 }
 
-function reference(ticker: string, type: string, listDate?: string) {
+function reference(ticker: string, type: string, listDate?: string, cik?: string) {
   capture('polygon', `/v3/reference/tickers/${ticker}`, { ticker }, JSON.stringify({
-    results: { ticker, name: ticker, type, weighted_shares_outstanding: 1_000_000, ...(listDate ? { list_date: listDate } : {}) }
+    results: {
+      ticker, name: ticker, type, weighted_shares_outstanding: 1_000_000,
+      ...(listDate ? { list_date: listDate } : {}), ...(cik ? { cik } : {})
+    }
   }), recipes.tickerReference());
+}
+
+/** One report filing for `cik`, stored the way the submissions sweep stores it. */
+function filing(cik: string, ticker: string, form: string, filed: string) {
+  const r = captureResponse({
+    host: makeHost(), db: db(), runId: run.runId, asOfDate: DATE, provider: 'edgar',
+    endpoint: '/submissions/CIK{cik}.json', slug: `sub-${ticker}-${filed}`, params: { cik, ticker, filed },
+    response: response(JSON.stringify({ filings: { recent: {
+      accessionNumber: [`${cik}-${filed}`], form: [form], filingDate: [filed], reportDate: [''], primaryDocument: ['x.htm']
+    } } })),
+    captureRuleId: captureRuleId(db(), makeHost(), 'edgar', { v: 1 }, 'test'),
+    recipe: recipes.submissions({ cik, ticker, forms: new Set(['10-K', '10-Q']) })
+  });
+  expect(r.parseStatus, JSON.stringify(r)).toBe('ok');
 }
 
 function member(ticker: string, admitted: string) {
@@ -236,6 +253,27 @@ describe('QC-603 and QC-905 — funds, recent reports and recent admissions', ()
     const byKey = new Map(QC603_EARNINGS_FRESHNESS.run(ctx()).map((e) => [e.key, e]));
     expect([...byKey].filter(([, e]) => e.fired).map(([k]) => k).sort()).toEqual(['NOLD', 'SUNB', 'SWKS']);
     expect(byKey.get('HONA')?.evidence?.['newlyListed']).toBe(true);
+  });
+
+  it('QC-603 does not fire on a stock whose last report was filed with the SEC within 60 days (v1.1.330)', () => {
+    // 2026-09-27: IOT (10-Q 09-08), JHX (08-06) and JAN (08-05) had no date from any source, because
+    // their next results were not announced yet, and the just-reported grace could not see a report the
+    // calendar never listed. DATE is 2026-09-16.
+    reference('IOT', 'CS', '2021-12-15', '0001642896');
+    reference('OLD', 'CS', '2010-01-01', '0000000002');
+    reference('NOF', 'CS', '2010-01-01', '0000000003');
+    for (const t of ['IOT', 'OLD', 'NOF']) member(t, '2026-09-01');
+    filing('0001642896', 'IOT', '10-Q', '2026-09-08');   // 8 days: quiet
+    filing('0000000002', 'OLD', '10-Q', '2026-06-10');   // 98 days: the next report is due — fires
+    filing('0000000002', 'OLD', '8-K', '2026-09-10');    // an 8-K is not a report filing
+    // NOF has no filing at all — fires, as before
+    const byKey = new Map(QC603_EARNINGS_FRESHNESS.run(ctx()).map((e) => [e.key, e]));
+    expect(byKey.get('IOT')).toMatchObject({ fired: false, value: 0 });
+    expect(byKey.get('IOT')!.evidence).toMatchObject({ recentFiling: true, lastReportFiling: '2026-09-08' });
+    expect(byKey.get('IOT')!.closesAs).toMatchObject({ kind: 'rule_changed' });
+    expect(byKey.get('IOT')!.closesAs!.note).toContain('2026-09-08');
+    expect(byKey.get('OLD')!.fired).toBe(true);
+    expect(byKey.get('NOF')!.fired).toBe(true);
   });
 
   it('QC-603 takes a date from a share class ruled the same issuer, never from a different one (v1.1.321)', () => {
