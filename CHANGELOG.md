@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.334] - 2026-09-28
+
+### QC-601: a Finnhub slip is judged against the sweep that made it
+
+QC-601's 14-day later-slip bound exists to catch Finnhub's cap truncating the earliest dates. OWL (10-12 → 10-29), M (11-11 → 12-03) and MKTX (10-21 → 11-05) were open and blocking since 09-22, but run 30 had covered every day 09-22..12-20 with *uncapped* windows. Finnhub revised the dates; nothing was cut off. A Finnhub slip whose old date sat in an uncapped window of the new sweep that didn't list the ticker no longer fires, and it closes `rule_changed` naming the move. The spec's remediation column had always said exactly this. Rehearsed: all three closed, and the open blocking queue is 10.
+
+Details: `changelogs/v1.1.334_2026-09-28.md`.
+
 ## [1.1.333] - 2026-09-28
 
 ### QC-008: a stock's capped submissions response closes once it's re-asked uncapped

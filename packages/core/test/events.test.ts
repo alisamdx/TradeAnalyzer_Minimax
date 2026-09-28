@@ -1144,6 +1144,63 @@ describe('QC-601, the earnings truncation signature', () => {
     expect(gate([QC601_EARNINGS_SLIPS_LATER]).blocking).toBe(1);
   });
 
+  // v1.1.334. On 2026-09-22 run 30 covered every day 09-22..12-20 with UNCAPPED windows, and OWL
+  // (10-12 -> 10-29), M (11-11 -> 12-03) and MKTX (10-21 -> 11-05) all moved inside it — Finnhub revising
+  // its dates, not truncation. All three sat open and blocking.
+  describe('whether the new sweep covered the old date uncapped', () => {
+    function window(runId: number, from: string, to: string, cap: 0 | 1): void {
+      raw.prepare(
+        `INSERT INTO meta_response (run_id, provider, endpoint, params_json, requested_at, http_status, byte_length,
+           archive_file, archive_offset, sha256, dedup_hash, encrypted, at_provider_cap, parse_status, parsed_row_count)
+         VALUES (?, 'finnhub', '/calendar/earnings', ?, ?, 200, 1, 'f', 0, 'h', ?, 0, ?, 'ok', 0)`
+      ).run(runId, JSON.stringify({ from, to }), SWEEP_2, `win-${runId}-${from}-${to}-${cap}`, cap);
+    }
+    const slip = (prev: number, next: number, nextAsOf: string) => insertEarnings([
+      { ticker: 'OWL', date: '2026-09-25', observedAt: SWEEP_1, runId: prev },
+      { ticker: 'OWL', date: '2026-10-29', observedAt: SWEEP_2, runId: next, asOf: nextAsOf }
+    ]);
+
+    it('does not fire when an uncapped window covered the old date and left the ticker out', () => {
+      const { prev, next, nextAsOf } = sweeps();
+      slip(prev, next, nextAsOf);
+      window(next, '2026-09-08', '2026-10-07', 0);
+      const [e] = QC601_EARNINGS_SLIPS_LATER.run({ db: db(), runId: next, tradingDate: nextAsOf, observedAt: SWEEP_2 });
+      expect(e).toMatchObject({ fired: false, value: 34, closesAs: { kind: 'rule_changed' } });
+      expect(e?.evidence).toMatchObject({ revisedByProvider: true });
+      expect(e?.detail).toContain('not truncation');
+    });
+
+    it('closes an open finding raised before the rule, and says it was a provider revision', () => {
+      const { prev, next, nextAsOf } = sweeps();
+      slip(prev, next, nextAsOf);
+      window(next, '2026-09-08', '2026-10-07', 0);
+      // Raised under the old rule, which fired on the slip alone.
+      runGate(db(), makeHost(), {
+        runId: next, tradingDate: nextAsOf, domainsExpected: {},
+        checks: [{ ...QC601_EARNINGS_SLIPS_LATER, run: () => [{ key: 'OWL:finnhub', value: 34, fired: true, detail: 'slipped' }] }]
+      });
+      raw.prepare("UPDATE meta_run SET status = 'complete' WHERE run_id = ?").run(next);
+      const later = beginRun(db(), makeHost(), { kind: 'daily', tradingDate: '2026-09-09' });
+      runGate(db(), makeHost(), { runId: later.runId, tradingDate: '2026-09-09', domainsExpected: {}, checks: [QC601_EARNINGS_SLIPS_LATER] });
+      const row = raw.prepare("SELECT state, resolution_kind, resolution_note FROM qa_exception WHERE key = 'OWL:finnhub'").get() as
+        { state: string; resolution_kind: string; resolution_note: string };
+      expect(row).toMatchObject({ state: 'resolved', resolution_kind: 'rule_changed' });
+      // Closed by whichever reading covers it — here today's, as the slip is still the latest pair —
+      // and either way the record names the move and says it is not truncation.
+      expect(row.resolution_note).toContain('2026-09-25 -> 2026-10-29');
+      expect(row.resolution_note).toContain('not truncation');
+    });
+
+    it('still fires when the window covering the old date was AT the cap — that is the truncation case', () => {
+      const { prev, next, nextAsOf } = sweeps();
+      slip(prev, next, nextAsOf);
+      window(next, '2026-09-08', '2026-10-07', 1);
+      const [e] = QC601_EARNINGS_SLIPS_LATER.run({ db: db(), runId: next, tradingDate: nextAsOf, observedAt: SWEEP_2 });
+      expect(e).toMatchObject({ fired: true });
+      expect(e?.evidence).toMatchObject({ revisedByProvider: false });
+    });
+  });
+
   it('does NOT fire on two windows of the SAME sweep', () => {
     // The regression. MU has two real reports inside the 90-day horizon, and the
     // sweep is subdivided because the bulk calendar truncates at its row cap, so

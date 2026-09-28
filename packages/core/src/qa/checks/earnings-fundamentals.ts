@@ -190,8 +190,10 @@ export const QC601_EARNINGS_SLIPS_LATER: CheckDefinition = {
     'the nearest future date the previous sweep saw. A large later slip is the bulk-cap truncation ' +
     'signature: the cap drops the EARLIEST dates, so a truncated response reports the next quarter ' +
     'as if it were the next report. The asymmetry is the point — nearer is unbounded, later is not. ' +
+    'A Finnhub slip whose old date sat inside an uncapped window of the new sweep that did not list the ' +
+    'ticker is a provider revision, not truncation, and does not fire (v1.1.334). ' +
     'Open findings are re-judged under this rule over the runs they were seen in.',
-  readsTables: ['raw_earnings_event', 'qa_exception'],
+  readsTables: ['raw_earnings_event', 'qa_exception', 'meta_response'],
   testedQuantity: 'later_slip_days',
   testedUnit: 'days',
   thresholds: { maxLaterSlipDays: MAX_LATER_SLIP_DAYS },
@@ -231,16 +233,17 @@ export const QC601_EARNINGS_SLIPS_LATER: CheckDefinition = {
              FROM nearest
          )
          SELECT n.ticker, n.source, n.near_date AS new_date, n.as_of_date AS new_as_of,
-                p.near_date AS prev_date
+                p.near_date AS prev_date, n.run_id AS new_run
            FROM ranked n
            JOIN ranked p ON p.ticker = n.ticker AND p.source = n.source AND p.rn = 2
           WHERE n.rn = 1 AND n.near_date <> p.near_date`
       )
       .all() as {
-      ticker: string; source: string; new_date: string; new_as_of: string; prev_date: string;
+      ticker: string; source: string; new_date: string; new_as_of: string; prev_date: string; new_run: number;
     }[];
 
     const maxSlip = this.thresholds['maxLaterSlipDays'] as number;
+    const coveredBy = slipCoverage(ctx);
     const today = rows.map((r): Evaluation => {
       const slip = daysBetween(r.prev_date, r.new_date);
       // A date the issuer has already reported on rolls to the next quarter, and
@@ -249,22 +252,30 @@ export const QC601_EARNINGS_SLIPS_LATER: CheckDefinition = {
       // for the same reason: a legitimate move left in the fault's distribution
       // blurs the boundary the threshold is drawn against.
       const rolled = rolledAfterReport(r.prev_date, r.new_as_of);
+      // A slip the new sweep can be shown NOT to be truncation (v1.1.334): the old date's day sat inside
+      // an uncapped Finnhub window of that run which did not list the ticker. Finnhub revised it.
+      const revisedBy = !rolled && slip > maxSlip ? coveredBy(r.source, r.new_run, r.prev_date) : null;
       return {
         key: `${r.ticker}:${r.source}`,
         // Only a LATER move is measured. A nearer move is legitimate and
         // reporting it as a negative magnitude would put it in the same
         // distribution as the fault and blur the boundary.
         value: rolled ? 0 : Math.max(slip, 0),
-        fired: !rolled && slip > (this.thresholds['maxLaterSlipDays'] as number),
+        fired: !rolled && revisedBy === null && slip > (this.thresholds['maxLaterSlipDays'] as number),
         detail:
-          `${r.ticker} (${r.source}) nearest report moved ${r.prev_date} -> ${r.new_date}, ${slip} days later`,
+          `${r.ticker} (${r.source}) nearest report moved ${r.prev_date} -> ${r.new_date}, ${slip} days later` +
+          (revisedBy === null ? '' : ` — not truncation: response ${revisedBy} covered ${r.prev_date} uncapped and did not list it`),
         evidence: {
           ticker: r.ticker, source: r.source, previous: r.prev_date, observed: r.new_date,
-          slipDays: slip, rolledAfterReport: rolled
+          slipDays: slip, rolledAfterReport: rolled, revisedByProvider: revisedBy !== null, coveringResponse: revisedBy
+        },
+        closesAs: revisedBy === null ? undefined : {
+          kind: 'rule_changed',
+          note: `${r.ticker}: Finnhub moved ${r.prev_date} -> ${r.new_date}; response ${revisedBy} covered ${r.prev_date} uncapped and did not list it, so the slip is a provider revision, not truncation (v1.1.334)`
         }
       };
     });
-    return today.concat(rejudgeSlipFindings(ctx, today, maxSlip));
+    return today.concat(rejudgeSlipFindings(ctx, today, maxSlip, coveredBy));
   }
 };
 
@@ -283,7 +294,12 @@ export const QC601_EARNINGS_SLIPS_LATER: CheckDefinition = {
  * fire, the finding came from the old rule and closes `rule_changed`. If any pair still fires, it
  * is a real slip and stays open, whatever the latest sweep says.
  */
-function rejudgeSlipFindings(ctx: CheckContext, today: readonly Evaluation[], maxSlip: number): Evaluation[] {
+function rejudgeSlipFindings(
+  ctx: CheckContext,
+  today: readonly Evaluation[],
+  maxSlip: number,
+  coveredBy: (source: string, runId: number, date: string) => number | null
+): Evaluation[] {
   const evaluatedToday = new Set(today.map((e) => e.key));
   const open = ctx.db
     .prepare(
@@ -309,12 +325,17 @@ function rejudgeSlipFindings(ctx: CheckContext, today: readonly Evaluation[], ma
 
     let pairs = 0;
     let fires = false;
+    // Slips over the bound that the new sweep covered uncapped: provider revisions (v1.1.334).
+    const revised: string[] = [];
     for (let i = 1; i < sweeps.length; i++) {
       const prev = sweeps[i - 1]!;
       const cur = sweeps[i]!;
       if (cur.run_id < f.first_seen_run_id || cur.run_id > f.last_seen_run_id) continue;
       pairs++;
-      if (!rolledAfterReport(prev.near_date, cur.as_of_date) && daysBetween(prev.near_date, cur.near_date) > maxSlip) { fires = true; break; }
+      if (rolledAfterReport(prev.near_date, cur.as_of_date) || daysBetween(prev.near_date, cur.near_date) <= maxSlip) continue;
+      const covering = coveredBy(f.key.slice(sep + 1), cur.run_id, prev.near_date);
+      if (covering === null) { fires = true; break; }
+      revised.push(`${prev.near_date} -> ${cur.near_date} (response ${covering}, run ${cur.run_id})`);
     }
     if (fires) continue;
     out.push({
@@ -322,14 +343,40 @@ function rejudgeSlipFindings(ctx: CheckContext, today: readonly Evaluation[], ma
       fired: false,
       closesAs: {
         kind: 'rule_changed',
-        note:
-          `re-judged sweep to sweep over runs ${f.first_seen_run_id}–${f.last_seen_run_id} (${pairs} ` +
-          `pair${pairs === 1 ? '' : 's'}): the nearest report date never slipped more than ${maxSlip} days — ` +
-          'raised by the first rule, which read two windows of one sweep as successive observations'
+        // Say which reason closed it: the note is the permanent record of why.
+        note: revised.length > 0
+          ? `Finnhub revised the date: ${revised.join('; ')} — each old date sat inside an uncapped window ` +
+            'of the new sweep that did not list the ticker, so not truncation (v1.1.334)'
+          : `re-judged sweep to sweep over runs ${f.first_seen_run_id}–${f.last_seen_run_id} (${pairs} ` +
+            `pair${pairs === 1 ? '' : 's'}): the nearest report date never slipped more than ${maxSlip} days — ` +
+            'raised by the first rule, which read two windows of one sweep as successive observations'
       }
     });
   }
   return out;
+}
+
+/**
+ * The uncapped Finnhub calendar response in `runId` whose window contains `date`, or null (v1.1.334).
+ *
+ * QC-601's 14-day bound exists to catch TRUNCATION: Finnhub's bulk calendar drops the earliest dates
+ * at its cap, so a truncated window reports the next quarter as the next report. If the day of the
+ * old date was covered by an UNCAPPED window in the sweep that no longer lists the ticker, nothing
+ * was cut off — Finnhub revised the date. On 2026-09-22 run 30 re-collected the day with every day
+ * from 09-22 to 12-20 covered uncapped, and OWL (10-12 -> 10-29), M (11-11 -> 12-03) and MKTX
+ * (10-21 -> 11-05, back to 10-21 the next day) all moved inside it; all three sat open and blocking.
+ * Only Finnhub is judged: E*Trade is asked per ticker and has no cap to truncate at.
+ */
+function slipCoverage(ctx: CheckContext): (source: string, runId: number, date: string) => number | null {
+  const stmt = ctx.db.prepare(
+    `SELECT source_response_id AS id FROM meta_response
+      WHERE run_id = ? AND provider = 'finnhub' AND endpoint = '/calendar/earnings'
+        AND at_provider_cap = 0 AND parse_status = 'ok'
+        AND json_extract(params_json, '$.from') <= ? AND json_extract(params_json, '$.to') >= ?
+      ORDER BY source_response_id LIMIT 1`
+  );
+  return (source, runId, date) =>
+    source === 'finnhub' ? ((stmt.get(runId, date, date) as { id: number } | undefined)?.id ?? null) : null;
 }
 
 export const QC602_EARNINGS_SOURCE_DISAGREEMENT: CheckDefinition = {
