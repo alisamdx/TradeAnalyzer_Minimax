@@ -14,7 +14,7 @@ import { ensureTradingCalendar } from '../src/collector/trading-calendar.js';
 import { runInsiderSweep, insiderIndexDates, runEtradeEarnings, factsQueue, factsBatch, runEdgarFilings, runSecTickerMap } from '../src/collector/phases/events.js';
 import { lastFactsFetchEt } from '../src/collector/facts-queue.js';
 import { QC910_INSIDER_INDEX_COVERAGE } from '../src/qa/checks/macro.js';
-import { QC603_EARNINGS_FRESHNESS, QC701_FILING_FRESHNESS, QC702_FACT_SANITY, QC703_CIK_SOURCE_DISAGREEMENT } from '../src/qa/checks/earnings-fundamentals.js';
+import { QC603_EARNINGS_FRESHNESS, QC701_FILING_FRESHNESS, QC702_FACT_SANITY, QC703_CIK_SOURCE_DISAGREEMENT, QC704_COMPANYFACTS_OMISSION } from '../src/qa/checks/earnings-fundamentals.js';
 import { etradeEarningDate } from '../src/ingest/events.js';
 
 /**
@@ -354,10 +354,65 @@ describe('the EDGAR fact pull when SEC companyfacts lags a filing (v1.1.271)', (
     const [e] = QC701_FILING_FRESHNESS.run(ctx());
     expect(e?.fired).toBe(true);
     expect(e?.evidence?.['cause']).toBe('sec_companyfacts_missing');
-    expect(e?.detail).toContain('SEC companyfacts fetched 2026-09-16 still has no facts for the 10-Q filed 2026-07-28');
+    // Read 50 days after filing: omitted, not behind (v1.1.332), and QC-704 is named.
+    expect(e?.detail).toContain('SEC companyfacts, read 2026-09-16 (50 days after the 10-Q filed 2026-07-28), omits that filing');
+    expect(e?.detail).toContain('QC-704');
     // Fetched two days ago: it says when it will be asked again, not "retried every 7 days" (v1.1.322).
     expect(e?.detail).toContain('next retry due 2026-09-23');
     expect(e?.detail).not.toContain('retried every');
+  });
+
+  // v1.1.332: effectiveCikSql named its inner tables `s` and `r`, and QC-701 passes `r.ticker` from its
+  // own `raw_ticker_reference r` — so `r.ticker = r.ticker` bound both sides to the inner table and every
+  // stock got the newest reference row's CIK. QC-701 evaluated 0 of 69 on rehearsal. The test above
+  // holds ONE ticker, for which "the newest row" is the right one, so it could not see it.
+  it('QC-701 reads each stock\'s OWN CIK when several are listed', () => {
+    const listIn = (ticker: string, cik: string) => {
+      captureResponse({
+        host: makeHost(), db: db(), runId: run.runId, asOfDate: DATE, provider: 'polygon',
+        endpoint: `/v3/reference/tickers/${ticker}`, slug: 'ref', params: { ticker },
+        response: response(JSON.stringify({ results: { ticker, name: ticker, type: 'CS', cik } })),
+        captureRuleId: rule(), recipe: recipes.tickerReference()
+      });
+      raw.prepare(
+        `INSERT INTO ref_chain_subset_membership (run_id, as_of_date, observed_at, capture_rule_id, source_response_id,
+           ticker, valid_from, membership_reason, rule_capture_rule_id, rule_inputs_json)
+         VALUES (?, ?, ?, ?, (SELECT MAX(source_response_id) FROM meta_response), ?, '2026-09-01', 'rule_pass', ?, '{}')`
+      ).run(run.runId, DATE, `${DATE}T17:00:00-04:00`, rule(), ticker, rule());
+    };
+    listIn('IQV', '0001478242');
+    listIn('KO', '0000021344');
+    facts('0001478242', 'A-IQV-MAY', '2026-05-05', '2026-04-30', '2026-09-16');
+    facts('0000021344', 'A-KO-JUL', '2026-07-29', '2026-07-03', '2026-09-16');
+    const byKey = new Map(QC701_FILING_FRESHNESS.run(ctx()).map((e) => [e.key, e]));
+    expect([...byKey.keys()].sort()).toEqual(['IQV', 'KO']);
+    expect(byKey.get('IQV')!.evidence?.['newestPeriodEnd']).toBe('2026-04-30');
+    expect(byKey.get('KO')!.evidence?.['newestPeriodEnd']).toBe('2026-07-03');
+  });
+
+  // v1.1.332: SEC's companyfacts dropped most 10-Qs filed 2026-07-28/29 (KO still missing live two
+  // months later) while filings either side landed. QC-701 saw 7 of them; this sees every one.
+  describe('QC-704 — a report filing SEC companyfacts has left out', () => {
+    const byKey = () => new Map(QC704_COMPANYFACTS_OMISSION.run(ctx()).map((e) => [e.key, e]));
+
+    it('fires on a filing still absent two weeks after filing, and closes when it arrives', () => {
+      filing('0001478242', 'IQV', 'A-IQV-JUL', '2026-07-28');
+      filing('0001478242', 'IQV', 'A-IQV-MAY', '2026-05-05');
+      facts('0001478242', 'A-IQV-MAY', '2026-05-05', '2026-04-30', '2026-09-16');
+      const e = byKey();
+      expect(e.get('A-IQV-JUL')).toMatchObject({ fired: true, value: 52 });
+      expect(e.get('A-IQV-JUL')!.detail).toContain('omitted by SEC\'s aggregate');
+      expect(e.get('A-IQV-MAY')).toMatchObject({ fired: false, closesAs: { kind: 'provider_fixed' } });
+      expect(QC704_COMPANYFACTS_OMISSION.escalatesOnRepeat).toBe(false);
+    });
+
+    it('does not judge a filing companyfacts was read too soon after to have held', () => {
+      filing('0001791942', 'JBS', 'A-JBS-AUG', '2026-09-10');
+      facts('0001791942', 'A-JBS-MAR', '2026-03-25', '2025-12-31', '2026-09-16');   // 6 days after filing
+      expect(byKey().has('A-JBS-AUG')).toBe(false);
+      filing('0000000009', 'NEW', 'A-NEW', '2026-08-01');                            // never read at all
+      expect(byKey().has('A-NEW')).toBe(false);
+    });
   });
 
   // v1.1.322. IQV and JCI were fetched once, 2026-09-15, and sat 34th and 35th in the queue a week

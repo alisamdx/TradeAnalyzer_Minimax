@@ -15,13 +15,20 @@ import type { SqliteLike } from '../db/sqlite-like.js';
  *
  * `tickerExpr` is a SQL expression naming the ticker (a column reference); it is interpolated, never
  * user input.
+ *
+ * **The inner aliases are deliberately unlike anything a caller would use** (v1.1.332). They were
+ * `s` and `r`, and QC-701 calls this with `r.ticker` from its own `raw_ticker_reference r`. Inside the
+ * subquery `r.ticker = r.ticker` then bound BOTH sides to the inner table — always true — so every
+ * stock got the CIK of the newest reference row in the table, found no facts, and QC-701 evaluated
+ * 0 of 69 on rehearsal. Its test used one ticker, where "the newest row" happened to be the right one.
  */
 export function effectiveCikSql(tickerExpr: string): string {
   return `COALESCE(
-      (SELECT s.cik FROM raw_sec_ticker_map s
-        WHERE s.ticker = ${tickerExpr}
-          AND s.source_response_id = (SELECT MAX(source_response_id) FROM raw_sec_ticker_map)),
-      (SELECT r.cik FROM raw_ticker_reference r WHERE r.ticker = ${tickerExpr} ORDER BY r.row_id DESC LIMIT 1))`;
+      (SELECT cik__sec.cik FROM raw_sec_ticker_map cik__sec
+        WHERE cik__sec.ticker = ${tickerExpr}
+          AND cik__sec.source_response_id = (SELECT MAX(source_response_id) FROM raw_sec_ticker_map)),
+      (SELECT cik__ref.cik FROM raw_ticker_reference cik__ref
+        WHERE cik__ref.ticker = ${tickerExpr} ORDER BY cik__ref.row_id DESC LIMIT 1))`;
 }
 
 /** Every active universe ticker's effective CIK, in ticker order. Tickers with none are omitted. */

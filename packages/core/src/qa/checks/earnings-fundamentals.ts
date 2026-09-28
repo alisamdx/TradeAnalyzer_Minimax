@@ -133,6 +133,13 @@ const RECENT_REPORT_GRACE_DAYS = 21;
  */
 const REPORT_FILING_GRACE_DAYS = 60;
 
+/**
+ * A report filing still absent from companyfacts this long after it was filed has been OMITTED from
+ * SEC's aggregate, not merely delayed (v1.1.332). Working: filings either side of the hole landed
+ * within days (all 15 filed 07-21..24 and 52 of 53 filed 08-03..11 were present when next read).
+ */
+const COMPANYFACTS_OMITTED_AFTER_DAYS = 14;
+
 /** The two independent readings QC-602 exists to compare. Both must be present or it is vacuous. */
 const EARNINGS_CROSS_SOURCES = ['finnhub', 'etrade'] as const;
 
@@ -801,7 +808,12 @@ export const QC701_FILING_FRESHNESS: CheckDefinition = {
               : rank !== undefined
                 ? `retry due since ${due}, ${rank} of ${retries.length} waiting retries (${FACTS_RETRY_RESERVE} reserved slots a run)`
                 : `retry due since ${due}`;
-            why = ` — SEC companyfacts fetched ${fetched} still has no facts for the ${filing.form} filed ${filing.filed_date}; SEC's aggregate is behind, not the pipeline (${next})`;
+            // Two weeks after filing it is not lag (v1.1.332): SEC's aggregate dropped most 10-Qs filed
+            // 2026-07-28/29 and still lacked KO's two months later, while filings either side landed.
+            const lag = daysBetween(filing.filed_date, fetched);
+            why = lag >= COMPANYFACTS_OMITTED_AFTER_DAYS
+              ? ` — SEC companyfacts, read ${fetched} (${lag} days after the ${filing.form} filed ${filing.filed_date}), omits that filing; SEC's aggregate has left it out, not the pipeline — QC-704 lists every such filing (${next})`
+              : ` — SEC companyfacts fetched ${fetched} still has no facts for the ${filing.form} filed ${filing.filed_date}; SEC's aggregate is behind, not the pipeline (${next})`;
           } else {
             cause = 'awaiting_fetch';
             const last = fetched ? `; companyfacts last read ${fetched}` : '';
@@ -962,6 +974,61 @@ export const QC703_CIK_SOURCE_DISAGREEMENT: CheckDefinition = {
   }
 };
 
+export const QC704_COMPANYFACTS_OMISSION: CheckDefinition = {
+  id: 'QC-704',
+  domain: 'fundamentals',
+  severity: 'warning',
+  description:
+    "Every stored report filing (10-K/10-Q/20-F/40-F) appears in SEC's companyfacts once that has been read " +
+    `at least ${COMPANYFACTS_OMITTED_AFTER_DAYS} days after the filing. Per filing, so it catches what QC-701 cannot: ` +
+    'QC-701 looks only at chain-subset stocks whose newest fact is over 120 days old, and on 2026-09-28 it ' +
+    "named 7 of at least 15 filings the aggregate had dropped. SEC's companyfacts omitted most 10-Qs filed " +
+    '2026-07-28 and 07-29 (5 of 6 and 8 of 12 read afterwards), while filings on either side landed. KO\'s ' +
+    'was still missing live two months later, though it carries inline XBRL. The pipeline is not the cause, so ' +
+    'this reports rather than gates, and the weekly companyfacts retry is what may close it.',
+  readsTables: ['raw_edgar_filing', 'raw_edgar_fact', 'meta_response'],
+  testedQuantity: 'days_since_filing_without_facts',
+  testedUnit: 'days',
+  thresholds: { omittedAfterDays: COMPANYFACTS_OMITTED_AFTER_DAYS },
+  thresholdBasis: 'working',
+  // SEC's aggregate, retried weekly by the fact pull; firing again is the expected state (03 §5.4).
+  escalatesOnRepeat: false,
+  run(ctx) {
+    const lastFetch = lastFactsFetchEt(ctx.db);
+    const rows = ctx.db
+      .prepare(
+        `SELECT f.ticker, f.cik, f.form, f.filed_date, f.accession_no,
+                EXISTS (SELECT 1 FROM raw_edgar_fact x WHERE x.accession_no = f.accession_no) AS has_facts
+           FROM raw_edgar_filing f
+          WHERE f.form IN ('10-K', '10-Q', '20-F', '40-F') AND f.filed_date <= ?
+          ORDER BY f.filed_date, f.ticker`
+      )
+      .all(ctx.tradingDate) as {
+      ticker: string; cik: string; form: string; filed_date: string; accession_no: string; has_facts: number;
+    }[];
+    const out: Evaluation[] = [];
+    for (const r of rows) {
+      const fetched = lastFetch.get(r.cik) ?? null;
+      // Judged only once companyfacts has been read long enough after the filing to have held it.
+      if (fetched === null || daysBetween(r.filed_date, fetched) < COMPANYFACTS_OMITTED_AFTER_DAYS) continue;
+      const fired = r.has_facts === 0;
+      const days = daysBetween(r.filed_date, ctx.tradingDate);
+      out.push({
+        key: r.accession_no,
+        value: fired ? days : 0,
+        fired,
+        detail: fired
+          ? `${r.ticker} ${r.form} filed ${r.filed_date} (${r.accession_no}) is absent from SEC companyfacts read ${fetched}, ` +
+            `${daysBetween(r.filed_date, fetched)} days after filing — omitted by SEC's aggregate`
+          : `${r.ticker} ${r.form} filed ${r.filed_date} is in companyfacts`,
+        evidence: { ticker: r.ticker, cik: r.cik, form: r.form, filedDate: r.filed_date, accession: r.accession_no, companyfactsRead: fetched },
+        closesAs: fired ? undefined : { kind: 'provider_fixed', note: `${r.ticker} ${r.form} filed ${r.filed_date}: now in SEC companyfacts (read ${fetched})` }
+      });
+    }
+    return out;
+  }
+};
+
 export const EARNINGS_FUNDAMENTALS_CHECKS: readonly CheckDefinition[] = [
   QC601_EARNINGS_SLIPS_LATER,
   QC602_EARNINGS_SOURCE_DISAGREEMENT,
@@ -969,5 +1036,6 @@ export const EARNINGS_FUNDAMENTALS_CHECKS: readonly CheckDefinition[] = [
   QC604_EARNINGS_WEEKEND_DATE,
   QC701_FILING_FRESHNESS,
   QC702_FACT_SANITY,
-  QC703_CIK_SOURCE_DISAGREEMENT
+  QC703_CIK_SOURCE_DISAGREEMENT,
+  QC704_COMPANYFACTS_OMISSION
 ];

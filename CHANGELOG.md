@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.332] - 2026-09-28
+
+### Fix: v1.1.331 emptied QC-701; QC-704 lists filings SEC's aggregate omitted
+
+**Fix:** v1.1.331's shared CIK SQL named its inner table `r`, and QC-701 passes `r.ticker`. So `r.ticker = r.ticker` matched everything, every stock got the same wrong CIK, and **QC-701 evaluated 0 of 69** on rehearsal. Its one-ticker test couldn't see it. There are now distinct aliases and a two-stock test, which fails on v1.1.331.
+
+**QC-701 / QC-704:** SEC's companyfacts dropped most 10-Qs filed 07-28 and 07-29 (KO's was still missing live today), while filings on either side landed. QC-701 now says "omitted" rather than "behind" once the read is 14 or more days after filing. New **QC-704** (warning, per filing) finds every such filing: 17 on rehearsal against QC-701's 7, including IDA's April 10-Q.
+
+Details: `changelogs/v1.1.332_2026-09-28.md`.
+
 ## [1.1.331] - 2026-09-27
 
 ### SEC's own ticker map overrides a stale Polygon CIK
