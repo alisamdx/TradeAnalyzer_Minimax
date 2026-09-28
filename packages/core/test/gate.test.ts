@@ -303,6 +303,78 @@ describe('exceptions are facts about the data, not about the run', () => {
     expect(events.some((e) => e.note.includes('recurrence'))).toBe(true);
   });
 
+  /** Runs the gate once per date with `checks`, closing each run. */
+  function runDays(host: CollectorHost, dates: readonly string[], checks: () => CheckDefinition[]): void {
+    for (const date of dates) {
+      const run = beginRun(db, host, { kind: 'daily', tradingDate: date });
+      runGate(db, host, { runId: run.runId, tradingDate: date, checks: checks() });
+      raw.prepare("UPDATE meta_run SET status = 'complete' WHERE run_id = ?").run(run.runId);
+    }
+  }
+  const sev = (): Record<string, unknown> =>
+    raw.prepare('SELECT severity, consecutive_runs, state FROM qa_exception').get() as Record<string, unknown>;
+
+  // v1.1.328: on 2026-09-25, 10 QC-410 findings (AIZ, PCTY, …) reopened as BLOCKING with
+  // consecutive_runs = 1 — the escalation survived the resolution that should have ended it.
+  it('starts a recurrence from the base severity, and re-earns the escalation', () => {
+    const host = makeHost();
+    const firing = () => [fakeCheck({ evals: () => [{ key: 'AAPL', value: 2, fired: true, detail: 'over' }] })];
+    runDays(host, ['2026-09-02', '2026-09-03', '2026-09-04'], firing);
+    expect(sev()).toMatchObject({ severity: 'blocking', consecutive_runs: 3 });
+
+    raw.prepare("UPDATE qa_exception SET state='resolved', resolved_at='t'").run();
+    runDays(host, ['2026-09-05'], firing);
+    expect(sev()).toMatchObject({ state: 'open', severity: 'warning', consecutive_runs: 1 });
+
+    runDays(host, ['2026-09-08', '2026-09-09'], firing);
+    expect(sev()).toMatchObject({ severity: 'blocking', consecutive_runs: 3 });
+  });
+
+  it('never escalates a check exempt from it, however long it fires', () => {
+    const host = makeHost();
+    const exempt = () => [fakeCheck({
+      escalatesOnRepeat: false, evals: () => [{ key: 'AAPL', value: 2, fired: true, detail: 'over' }]
+    })];
+    runDays(host, ['2026-09-02', '2026-09-03', '2026-09-04', '2026-09-05', '2026-09-08'], exempt);
+    expect(sev()).toMatchObject({ severity: 'warning', consecutive_runs: 5 });
+  });
+
+  it('still promotes an exempt check by its own value — only the repeat rule is off', () => {
+    const host = makeHost();
+    const exempt = () => [fakeCheck({
+      escalatesOnRepeat: false, promoteToBlockingAtValue: 1,
+      evals: () => [{ key: 'AAPL', value: 2, fired: true, detail: 'over' }]
+    })];
+    runDays(host, ['2026-09-02'], exempt);
+    expect(sev()).toMatchObject({ severity: 'blocking' });
+  });
+
+  it('returns an already-escalated finding of an exempt check to base, firing or not', () => {
+    const host = makeHost();
+    // Escalated under the old rule: two keys, both blocking.
+    const both = fakeCheck({
+      evals: () => [{ key: 'AAPL', value: 2, fired: true, detail: 'over' }, { key: 'REXR', value: 2, fired: true, detail: 'over' }]
+    });
+    runDays(host, ['2026-09-02', '2026-09-03', '2026-09-04'], () => [both]);
+    expect(raw.prepare("SELECT COUNT(*) AS n FROM qa_exception WHERE severity='blocking'").get()).toEqual({ n: 2 });
+
+    // Now exempt. AAPL fires again; REXR cannot be evaluated at all (no evaluation, so it stays open).
+    runDays(host, ['2026-09-05'], () => [fakeCheck({
+      escalatesOnRepeat: false, evals: () => [{ key: 'AAPL', value: 2, fired: true, detail: 'over' }]
+    })]);
+    const rows = raw.prepare('SELECT key, severity, state FROM qa_exception ORDER BY key').all();
+    expect(rows).toEqual([
+      { key: 'AAPL', severity: 'warning', state: 'open' },
+      { key: 'REXR', severity: 'warning', state: 'open' }
+    ]);
+    const notes = (raw.prepare("SELECT note FROM qa_exception_event WHERE note LIKE '%does not escalate%'").all() as { note: string }[]);
+    expect(notes).toHaveLength(2);
+  });
+
+  it('declares QC-410 exempt from the repeat escalation', () => {
+    expect(ALL_CHECKS.find((c) => c.id === 'QC-410')?.escalatesOnRepeat).toBe(false);
+  });
+
   it('treats a check that throws as a finding rather than as a clean pass', () => {
     // A broken check that silently passes is the gate failing at its own job.
     const host = makeHost();

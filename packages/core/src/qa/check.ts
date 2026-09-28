@@ -118,6 +118,16 @@ export interface CheckDefinition {
    * promoting is enough.
    */
   readonly promoteToBlockingAtValue?: number;
+  /**
+   * `false` exempts the check from the consecutive-runs escalation (03 §5.4) (v1.1.328). This is for a
+   * check that reports a persistent PROVIDER property, which is already handled per key where it is
+   * consumed and cannot be fixed on this side. For such a check, "fired again tonight" is the expected
+   * state, not new evidence. QC-410 (E*Trade Greeks computed off the wrong price, 60–80 tickers a
+   * night) escalated about 25 tickers to blocking, and that held the chains domain `unusable`
+   * permanently. It was the gate-wide RED that v1.1.252 had removed, back again one ticker at a time.
+   * Findings already escalated drop to their base severity. Value and fraction promotion still apply.
+   */
+  readonly escalatesOnRepeat?: boolean;
   run(ctx: CheckContext): readonly Evaluation[];
 }
 

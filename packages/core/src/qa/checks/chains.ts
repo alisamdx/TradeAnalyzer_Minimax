@@ -590,6 +590,11 @@ export const QC410_GREEK_REPRODUCTION: CheckDefinition = {
   // Per ticker since v1.1.252; it was per contract before (`ADP---260918C00275000`), and
   // those findings can never fire again. Tickers here are letters, digits and a class dot.
   keyShape: { pattern: /^[A-Z][A-Z0-9.]{0,9}$/, note: 'keyed per ticker since v1.1.252, per contract before' },
+  // A persistent E*Trade property on 60–80 tickers a night, already handled per ticker where it is
+  // consumed (TA1 STALE_GREEK_GUARD withholds the deltas; TA2 `greekConsistencyFor`). Escalating each
+  // ticker on repeat held the chains domain `unusable` for good over something no action here can
+  // repair (v1.1.328).
+  escalatesOnRepeat: false,
   testedQuantity: 'abs_delta_spot_vs_nearest_price_reading_fraction',
   testedUnit: 'fraction',
   thresholds: { maxSpotDisagreement: 0.01 },

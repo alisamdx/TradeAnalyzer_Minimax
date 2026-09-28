@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.328] - 2026-09-27
+
+### A recurring finding kept its escalated severity; QC-410 no longer escalates
+
+**Gate bug:** a resolved finding that fired again reopened with its counter reset to 1 but its *escalated* severity kept. On 2026-09-25, 10 QC-410 findings reopened as blocking citing "fired on 3 consecutive runs" after firing once. A recurrence now starts from that run's own severity and re-earns the escalation.
+
+**QC-410** (E*Trade Greeks computed off the wrong price, 60–80 tickers a night) is a provider defect already handled per ticker where it is consumed. Escalating each ticker on repeat kept about 25 permanently blocking and the chains domain `unusable`. New check option `escalatesOnRepeat: false`. QC-410 findings stay warnings, and those already escalated return to base.
+
+**Rehearsed on 09-25:** QC-410 has 0 blocking, and the run's blocking count is 16 against 124, most of that drop from the 09-26 rulings. **Found, not fixed:** 1,004 stale QC-409 blocking findings from the broken 2026-09-22 run.
+
+Details: `changelogs/v1.1.328_2026-09-27.md`.
+
 ## [1.1.327] - 2026-09-26
 
 ### BPS-10: testing the spread's top-5 ranking

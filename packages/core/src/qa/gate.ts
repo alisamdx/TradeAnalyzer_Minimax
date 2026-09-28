@@ -284,6 +284,8 @@ export function runGate(
     counts[severity]++;
   }
 
+  deescalateExempt(db, host, firedFingerprints, args.checks);
+
   const resolvedByGate = reconcileStoppedFiring(
     db, host, args.runId, firedFingerprints, args.checks, untrustedShapes, closers, evaluatedClean
   );
@@ -368,8 +370,18 @@ function upsertException(
     ? existing.consecutive_runs
     : reopened ? 1 : existing.consecutive_runs + 1;
 
-  let severity = existing.severity;
-  if (!reopened && consecutive >= ESCALATE_AFTER_RUNS && (existing.state === 'open' || existing.state === 'acknowledged')) {
+  // A recurrence starts again from this run's own severity: the base, or whatever the run's value or
+  // fraction promoted it to. Until v1.1.328 it kept the escalated severity while its counter reset to
+  // 1. So on 2026-09-25, 10 QC-410 findings reopened as blocking, citing "fired on 3 consecutive runs"
+  // after firing once (AIZ, PCTY, …). The escalation is re-earned by firing on 3 runs again.
+  // A check exempt from escalation (`escalatesOnRepeat: false`) always takes this run's severity.
+  const noEscalation = def.escalatesOnRepeat === false;
+  let severity = reopened || noEscalation ? finding.severity : existing.severity;
+  if (noEscalation && !reopened && severity !== existing.severity) {
+    recordEvent(db, existing.exception_id, now, 'gate', existing.state, existing.state, existing.severity, severity,
+      `${def.id} does not escalate on consecutive runs (v1.1.328); severity is this run's own`);
+  }
+  if (!reopened && !noEscalation && consecutive >= ESCALATE_AFTER_RUNS && (existing.state === 'open' || existing.state === 'acknowledged')) {
     const next = promote(existing.severity);
     if (next !== existing.severity) {
       severity = next;
@@ -413,6 +425,39 @@ function upsertException(
  * check can no longer produce, per the check's declared `keyShape`. That is a
  * fact about the check, not about the data, so it is the gate's to state.
  */
+/**
+ * Open findings of a check exempt from escalation that did NOT fire this run, returned to their base
+ * severity (v1.1.328). A finding that fires is handled in `upsertException`. This covers the rest: an
+ * escalated finding the check could not evaluate tonight, which would otherwise stay blocking for as
+ * long as it cannot be judged (QC-410 on REXR, whose chain has had no strike near the money since
+ * 2026-09-24).
+ */
+function deescalateExempt(
+  db: SqliteLike,
+  host: CollectorHost,
+  firedFingerprints: ReadonlySet<string>,
+  checks: readonly CheckDefinition[]
+): void {
+  const exempt = checks.filter((c) => c.escalatesOnRepeat === false).map((c) => c.id);
+  if (exempt.length === 0) return;
+  const rows = db
+    .prepare(
+      `SELECT exception_id, fingerprint, check_id, state, severity, base_severity FROM qa_exception
+        WHERE state IN ('open', 'acknowledged') AND severity <> base_severity
+          AND check_id IN (${exempt.map(() => '?').join(',')})`
+    )
+    .all(...exempt) as {
+    exception_id: number; fingerprint: string; check_id: string; state: string; severity: Severity; base_severity: Severity;
+  }[];
+  const now = host.nowET();
+  for (const r of rows) {
+    if (firedFingerprints.has(r.fingerprint)) continue;
+    db.prepare('UPDATE qa_exception SET severity = ? WHERE exception_id = ?').run(r.base_severity, r.exception_id);
+    recordEvent(db, r.exception_id, now, 'gate', r.state, r.state, r.severity, r.base_severity,
+      `${r.check_id} does not escalate on consecutive runs (v1.1.328); returned to its base severity`);
+  }
+}
+
 function reconcileStoppedFiring(
   db: SqliteLike,
   host: CollectorHost,
