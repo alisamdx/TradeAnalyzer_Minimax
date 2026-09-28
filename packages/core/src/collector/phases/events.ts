@@ -7,6 +7,8 @@ import { captureRuleId, type RunHandle } from '../run.js';
 import { earningsResponseAtCap } from '../../ingest/events.js';
 import { BLS_RELEASES, FOMC_CALENDAR_URL, blsScheduleUrl } from '../../ingest/macro-calendar.js';
 import { parseDailyFormIndex, dailyFormIndexUrl, submissionsAtCap, reportFilingsInIndex } from '../../ingest/edgar.js';
+import { SEC_TICKER_MAP_URL } from '../../ingest/sec-ticker-map.js';
+import { effectiveCikByTicker } from '../cik.js';
 import { previousTradingDay, tradingDaysInRange } from '../trading-calendar.js';
 import { sweepPolygonPages } from '../paged.js';
 import { refusedSymbolAnswers, withRefusals } from '../symbol-rulings.js';
@@ -73,6 +75,7 @@ export interface EventsPhaseResult {
   readonly indexQuotes: SubPhaseCount;
   readonly treasury: SubPhaseCount;
   readonly macroCalendar: SubPhaseCount;
+  readonly secTickerMap: SubPhaseCount;
   readonly filings: SubPhaseCount;
   readonly facts: SubPhaseCount;
   readonly shortInterest: SubPhaseCount;
@@ -127,28 +130,51 @@ function subsetMembers(db: SqliteLike): readonly string[] {
   ).map((r) => r.ticker);
 }
 
-/** The latest known CIK per active ticker — the join EDGAR needs in both directions. */
+/**
+ * The effective CIK per active ticker — SEC's map first, Polygon's otherwise (v1.1.331,
+ * `collector/cik.ts`) — the join EDGAR needs in both directions.
+ */
 function cikMap(db: SqliteLike): { byTicker: Map<string, string>; byCik: Map<string, string> } {
-  const rows = db
-    .prepare(
-      `SELECT r.ticker, r.cik FROM raw_ticker_reference r
-        WHERE r.cik IS NOT NULL
-          AND r.row_id IN (SELECT MAX(row_id) FROM raw_ticker_reference GROUP BY ticker)
-          AND r.ticker IN (SELECT ticker FROM ref_universe_membership WHERE valid_to IS NULL)`
-    )
-    .all() as { ticker: string; cik: string }[];
-
-  const byTicker = new Map<string, string>();
+  const byTicker = effectiveCikByTicker(db);
   const byCik = new Map<string, string>();
-  for (const r of rows) {
-    byTicker.set(r.ticker, r.cik);
-    // A CIK can carry several tickers (share classes). First wins, and the
-    // ordering is the query's, which is stable — good enough for attributing a
-    // Form 4, and not good enough to be the only record, which is why the
-    // filing keeps its own CIK.
-    if (!byCik.has(r.cik)) byCik.set(r.cik, r.ticker);
+  for (const [ticker, cik] of byTicker) {
+    // A CIK can carry several tickers (share classes). First in ticker order wins — good
+    // enough for attributing a Form 4, and not good enough to be the only record, which is
+    // why the filing keeps its own CIK.
+    if (!byCik.has(cik)) byCik.set(cik, ticker);
   }
   return { byTicker, byCik };
+}
+
+/**
+ * SEC's ticker → CIK map, weekly (v1.1.331). One call to a ~1 MB file, filtered to the universe at
+ * ingestion. It runs before every EDGAR sub-phase so a corrected CIK is used the same night.
+ */
+export const SEC_TICKER_MAP_CADENCE_DAYS = 7;
+
+export async function runSecTickerMap(
+  host: CollectorHost,
+  db: SqliteLike,
+  run: RunHandle,
+  opts: { readonly force?: boolean } = {}
+): Promise<SubPhaseCount> {
+  if (!opts.force && !dueForCadence(db, '%company_tickers%', run.tradingDate, SEC_TICKER_MAP_CADENCE_DAYS)) {
+    return skipped(`not due — cadence is ${SEC_TICKER_MAP_CADENCE_DAYS} days`);
+  }
+  const universe = new Set(activeMembers(db));
+  if (universe.size === 0) return skipped('no active universe members');
+  const ruleId = captureRuleId(
+    db, host, 'sec_ticker_map', { cadenceDays: SEC_TICKER_MAP_CADENCE_DAYS, filter: 'universe' },
+    "SEC's company_tickers.json, the CIK every EDGAR lookup prefers."
+  );
+  host.progress('sec-ticker-map', 0, 1, 'company_tickers.json');
+  const response = await host.httpGet(SEC_TICKER_MAP_URL, EDGAR_HEADERS);
+  const result = captureResponse({
+    host, db, runId: run.runId, asOfDate: run.tradingDate, provider: 'edgar',
+    endpoint: '/files/company_tickers.json', slug: 'sec-company-tickers', params: {}, response,
+    captureRuleId: ruleId, recipe: recipes.secTickerMap({ universe })
+  });
+  return { stored: result.rowsWritten, calls: 1, failed: result.parseStatus === 'ok' ? 0 : 1 };
 }
 
 const EMPTY: SubPhaseCount = { stored: 0, calls: 0, failed: 0 };
@@ -920,6 +946,8 @@ export async function runEventsPhase(
   const indexQuotes = await attempt('index-quotes', () => runIndexQuotes(host, db, run));
   const treasury = await attempt('treasury', () => runTreasuryYields(host, db, run));
   const macroCalendar = await attempt('macro-calendar', () => runMacroCalendar(host, db, run, opts));
+  // SEC's own CIK map first (v1.1.331): every EDGAR sub-phase below maps tickers through it.
+  const secTickerMap = await attempt('sec-ticker-map', () => runSecTickerMap(host, db, run, opts));
   // The insider sweep runs BEFORE the filings and facts (v1.1.325): its daily index is
   // now where new report filings come from, and the fact pull is triggered by them.
   const insider = await attempt('insider', () => runInsiderSweep(host, db, run));
@@ -931,6 +959,7 @@ export async function runEventsPhase(
     indexQuotes,
     treasury,
     macroCalendar,
+    secTickerMap,
     // `events_filings` counts every report filing stored, from either source.
     filings: { ...rotation, stored: rotation.stored + fromIndex },
     facts: await attempt('edgar-facts', () => runEdgarFacts(host, db, run)),

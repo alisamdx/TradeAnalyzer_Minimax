@@ -14,6 +14,7 @@ import { makeSubmissionsIngest, makeCompanyFactsIngest, makeForm4Ingest, makeFor
 import { makeIvBootstrapIngest, type IvBootstrapIngestArgs } from './iv-bootstrap.js';
 import { makeLegacyBriefIngest } from './legacy-brief.js';
 import { ingestTickerReference } from './raw-ticker-reference.js';
+import { makeSecTickerMapIngest } from './sec-ticker-map.js';
 
 /**
  * Ingest recipes — what turned a response into rows, recorded so it can be done
@@ -66,6 +67,7 @@ export const INGEST_MODULES = [
   'edgar_companyfacts',
   'edgar_form4',
   'edgar_form_index_filings',
+  'sec_ticker_map',
   'ivolatility_ivx',
   'legacy_brief'
 ] as const;
@@ -228,6 +230,9 @@ export const recipes = {
       knownAccessions: sortedSet(o.knownAccessions)
     })),
 
+  secTickerMap: (o: { readonly universe: ReadonlySet<string> }): IngestRecipe =>
+    recipe('sec_ticker_map', { universe: sortedSet(o.universe) ?? [] }),
+
   ivBootstrap: (o: IvBootstrapIngestArgs): IngestRecipe =>
     recipe('ivolatility_ivx', args({ ticker: o.ticker, source: o.source, methodNote: o.methodNote })),
   legacyBrief: (): IngestRecipe => recipe('legacy_brief')
@@ -388,6 +393,8 @@ const DECODERS: { readonly [M in IngestModuleName]: (a: RecipeArgs) => IngestMod
       ...(knownAccessions ? { knownAccessions } : {})
     });
   },
+
+  sec_ticker_map: (a) => makeSecTickerMapIngest({ universe: new Set(strings(a, 'universe')) }),
 
   ivolatility_ivx: (a) => {
     const methodNote = optStr(a, 'methodNote');

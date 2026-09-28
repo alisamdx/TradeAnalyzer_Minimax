@@ -11,10 +11,10 @@ import { beginRun, captureRuleId, type RunHandle } from '../src/collector/run.js
 import { captureResponse } from '../src/collector/capture.js';
 import { recipes } from '../src/ingest/recipes.js';
 import { ensureTradingCalendar } from '../src/collector/trading-calendar.js';
-import { runInsiderSweep, insiderIndexDates, runEtradeEarnings, factsQueue, factsBatch, runEdgarFilings } from '../src/collector/phases/events.js';
+import { runInsiderSweep, insiderIndexDates, runEtradeEarnings, factsQueue, factsBatch, runEdgarFilings, runSecTickerMap } from '../src/collector/phases/events.js';
 import { lastFactsFetchEt } from '../src/collector/facts-queue.js';
 import { QC910_INSIDER_INDEX_COVERAGE } from '../src/qa/checks/macro.js';
-import { QC603_EARNINGS_FRESHNESS, QC701_FILING_FRESHNESS, QC702_FACT_SANITY } from '../src/qa/checks/earnings-fundamentals.js';
+import { QC603_EARNINGS_FRESHNESS, QC701_FILING_FRESHNESS, QC702_FACT_SANITY, QC703_CIK_SOURCE_DISAGREEMENT } from '../src/qa/checks/earnings-fundamentals.js';
 import { etradeEarningDate } from '../src/ingest/events.js';
 
 /**
@@ -600,6 +600,67 @@ describe('the EDGAR filings sweep asks for what EDGAR\'s `recent` block always h
     // A filer joining the universe goes to the front — it has never been asked.
     listed('ABC', 'CS', '0000000009');
     expect(await round()).toEqual(['0000000009', '0000000002']);
+  });
+
+  describe("SEC's ticker map overrides a stale Polygon CIK (v1.1.331)", () => {
+    // 2026-09-27: Polygon gave FWONA, LLYVA and LLYVK CIK 0000869614, the old Liberty Media
+    // Corporation, with no 10-Q or 10-K. SEC's company_tickers.json maps them to 1560385 / 2078416.
+    const SEC_MAP = JSON.stringify({
+      0: { cik_str: 2078416, ticker: 'LLYVA', title: 'Liberty Live Holdings, Inc.' },
+      1: { cik_str: 2078416, ticker: 'LLYVK', title: 'Liberty Live Holdings, Inc.' },
+      2: { cik_str: 19617, ticker: 'JPM', title: 'JPMORGAN CHASE & CO' },
+      3: { cik_str: 1067983, ticker: 'BRK-B', title: 'BERKSHIRE HATHAWAY INC' },
+      4: { cik_str: 320193, ticker: 'AAPL', title: 'Apple Inc.' }            // not in the universe
+    });
+    const secHost = (asked: string[] = []) => makeHost({
+      httpGet: async (url: string) => {
+        asked.push(url);
+        return url.includes('company_tickers') ? response(SEC_MAP) : response(submissions(1, '2026-06-01'));
+      }
+    });
+
+    it('stores the universe\'s rows only, in our spelling, zero-padded', async () => {
+      listed('LLYVA', 'CS', '0000869614');
+      listed('BRK.B', 'CS', '0001067983');
+      listed('JPM', 'CS', '0000019617');
+      const r = await runSecTickerMap(secHost(), db(), run);
+      expect(r).toMatchObject({ calls: 1, failed: 0, stored: 3 });
+      const rows = raw.prepare('SELECT ticker, cik FROM raw_sec_ticker_map ORDER BY ticker').all();
+      expect(rows).toEqual([
+        { ticker: 'BRK.B', cik: '0001067983' }, { ticker: 'JPM', cik: '0000019617' }, { ticker: 'LLYVA', cik: '0002078416' }
+      ]);
+      // Weekly: a second run inside the cadence asks nothing.
+      const asked: string[] = [];
+      expect((await runSecTickerMap(secHost(asked), db(), run)).calls).toBe(0);
+      expect(asked).toEqual([]);
+    });
+
+    it('makes the filings sweep ask EDGAR about SEC\'s CIK, not Polygon\'s', async () => {
+      listed('LLYVA', 'CS', '0000869614');
+      await runSecTickerMap(secHost(), db(), run);
+      const asked: string[] = [];
+      await runEdgarFilings(secHost(asked), db(), run);
+      expect(asked.filter((u) => u.includes('/submissions/'))).toEqual(['https://data.sec.gov/submissions/CIK0002078416.json']);
+    });
+
+    it('falls back to Polygon for a ticker SEC does not list', async () => {
+      listed('XYZ', 'CS', '0000000042');
+      await runSecTickerMap(secHost(), db(), run);
+      const asked: string[] = [];
+      await runEdgarFilings(secHost(asked), db(), run);
+      expect(asked.some((u) => u.includes('CIK0000000042'))).toBe(true);
+    });
+
+    it('QC-703 reports the disagreement, and closes when Polygon agrees', async () => {
+      listed('LLYVA', 'CS', '0000869614');
+      listed('JPM', 'CS', '0000019617');
+      await runSecTickerMap(secHost(), db(), run);
+      const byKey = new Map(QC703_CIK_SOURCE_DISAGREEMENT.run(ctx()).map((e) => [e.key, e]));
+      expect(byKey.get('LLYVA')).toMatchObject({ fired: true });
+      expect(byKey.get('LLYVA')!.detail).toContain('0002078416');
+      expect(byKey.get('JPM')).toMatchObject({ fired: false, closesAs: { kind: 'provider_fixed' } });
+      expect(QC703_CIK_SOURCE_DISAGREEMENT.escalatesOnRepeat).toBe(false);
+    });
   });
 
   it('stores the universe\'s report filings from the daily form index, before the rotation reaches them (v1.1.325)', async () => {

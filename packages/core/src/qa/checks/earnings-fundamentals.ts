@@ -2,6 +2,7 @@ import type { CheckContext, CheckDefinition, Evaluation } from '../check.js';
 import {
   FACTS_RETRY_DAYS, FACTS_RETRY_RESERVE, factsQueueEntries, factsRetryDue, lastFactsFetchEt
 } from '../../collector/facts-queue.js';
+import { effectiveCikSql } from '../../collector/cik.js';
 
 /**
  * Earnings and fundamentals checks — 03 §3.6.
@@ -551,7 +552,7 @@ export const QC603_EARNINGS_FRESHNESS: CheckDefinition = {
     'staleness: a ticker that reported in the last 21 days (its next date can sit past the sweep), ' +
     'one listed within 135 days that has never been dated (its first report is not yet due), and ' +
     'one whose last 10-Q/10-K was filed with the SEC within 60 days (its next date is not yet announced).',
-  readsTables: ['raw_earnings_event', 'ref_chain_subset_membership', 'raw_ticker_reference', 'qa_exception', 'ref_universe_membership', 'ref_provider_symbol_ruling', 'raw_edgar_filing'],
+  readsTables: ['raw_earnings_event', 'ref_chain_subset_membership', 'raw_ticker_reference', 'qa_exception', 'ref_universe_membership', 'ref_provider_symbol_ruling', 'raw_edgar_filing', 'raw_sec_ticker_map'],
   testedQuantity: 'days_since_future_date_observed',
   testedUnit: 'days',
   thresholds: { maxDaysSinceObserved: 7 },
@@ -586,8 +587,7 @@ export const QC603_EARNINGS_FRESHNESS: CheckDefinition = {
                 (SELECT r.list_date FROM raw_ticker_reference r
                   WHERE r.ticker = m.ticker ORDER BY r.row_id DESC LIMIT 1) AS list_date,
                 (SELECT MAX(f.filed_date) FROM raw_edgar_filing f
-                  WHERE f.cik = (SELECT r.cik FROM raw_ticker_reference r
-                                  WHERE r.ticker = m.ticker ORDER BY r.row_id DESC LIMIT 1)
+                  WHERE f.cik = ${effectiveCikSql('m.ticker')}
                     AND f.form IN ('10-K', '10-Q', '20-F', '40-F') AND f.filed_date <= ?) AS last_filing
            FROM ref_chain_subset_membership m
           WHERE m.valid_to IS NULL
@@ -735,7 +735,7 @@ export const QC701_FILING_FRESHNESS: CheckDefinition = {
     'blocking past 180. Each finding names its cause: no newer filing seen (a late filer), a filing ' +
     'still queued for companyfacts, which is our backlog, or SEC companyfacts read after the filing and still ' +
     'missing it (SEC\'s aggregate — IQV and JCI on 2026-09-18, July 10-Qs filed with inline XBRL).',
-  readsTables: ['raw_edgar_fact', 'raw_ticker_reference', 'raw_edgar_filing', 'meta_response'],
+  readsTables: ['raw_edgar_fact', 'raw_ticker_reference', 'raw_edgar_filing', 'meta_response', 'raw_sec_ticker_map'],
   testedQuantity: 'days_since_newest_period_end',
   testedUnit: 'days',
   thresholds: { warnAfterDays: 120 },
@@ -745,13 +745,16 @@ export const QC701_FILING_FRESHNESS: CheckDefinition = {
   run(ctx) {
     const rows = ctx.db
       .prepare(
-        `SELECT r.ticker, r.cik,
-                (SELECT MAX(f.period_end) FROM raw_edgar_fact f WHERE f.cik = r.cik) AS newest
-           FROM raw_ticker_reference r
-          WHERE r.cik IS NOT NULL
-            AND r.security_type = 'CS'
-            AND r.row_id IN (SELECT MAX(row_id) FROM raw_ticker_reference GROUP BY ticker)
-            AND r.ticker IN (SELECT ticker FROM ref_chain_subset_membership WHERE valid_to IS NULL)`
+        // The effective CIK — SEC's map first (v1.1.331) — or FWONA/LLYVA/LLYVK read the old
+        // Liberty Media Corporation's facts, of which there are none.
+        `SELECT x.ticker, x.cik,
+                (SELECT MAX(f.period_end) FROM raw_edgar_fact f WHERE f.cik = x.cik) AS newest
+           FROM (SELECT r.ticker, ${effectiveCikSql('r.ticker')} AS cik
+                   FROM raw_ticker_reference r
+                  WHERE r.security_type = 'CS'
+                    AND r.row_id IN (SELECT MAX(row_id) FROM raw_ticker_reference GROUP BY ticker)
+                    AND r.ticker IN (SELECT ticker FROM ref_chain_subset_membership WHERE valid_to IS NULL)) x
+          WHERE x.cik IS NOT NULL`
       )
       .all() as { ticker: string; cik: string; newest: string | null }[];
 
@@ -831,7 +834,7 @@ export const QC702_FACT_SANITY: CheckDefinition = {
     '2026-09-11, and a 1:2 split on 2026-08-24 sits between them; both numbers are exactly right. ' +
     'The EDGAR figure is now carried across any split in the window before comparing, and the ' +
     'adjustment is named in the finding rather than applied silently.',
-  readsTables: ['raw_edgar_fact', 'raw_ticker_reference', 'raw_split'],
+  readsTables: ['raw_edgar_fact', 'raw_ticker_reference', 'raw_split', 'raw_sec_ticker_map'],
   testedQuantity: 'shares_disagreement_fraction',
   testedUnit: 'fraction',
   thresholds: { maxDisagreement: 0.25 },
@@ -840,10 +843,12 @@ export const QC702_FACT_SANITY: CheckDefinition = {
     const rows = ctx.db
       .prepare(
         `WITH latest_ref AS (
-           SELECT ticker, cik, shares_outstanding, as_of_date
-             FROM raw_ticker_reference
-            WHERE cik IS NOT NULL AND shares_outstanding IS NOT NULL
-              AND row_id IN (SELECT MAX(row_id) FROM raw_ticker_reference GROUP BY ticker)
+           SELECT * FROM (
+             SELECT t.ticker, ${effectiveCikSql('t.ticker')} AS cik, t.shares_outstanding, t.as_of_date
+               FROM raw_ticker_reference t
+              WHERE t.shares_outstanding IS NOT NULL
+                AND t.row_id IN (SELECT MAX(row_id) FROM raw_ticker_reference GROUP BY ticker)
+           ) WHERE cik IS NOT NULL
          ),
          latest_fact AS (
            SELECT cik, value, period_end,
@@ -913,11 +918,56 @@ export const QC702_FACT_SANITY: CheckDefinition = {
   }
 };
 
+export const QC703_CIK_SOURCE_DISAGREEMENT: CheckDefinition = {
+  id: 'QC-703',
+  domain: 'fundamentals',
+  severity: 'warning',
+  description:
+    "Polygon's CIK for a universe ticker agrees with SEC's own ticker map. Where they differ every EDGAR " +
+    'lookup already uses SEC\'s (v1.1.331), so this is a report, not a gate: without it a stale provider ' +
+    'CIK is silent. Measured 2026-09-27 over 1,083 tickers: 1,027 agreed, and FWONA, LLYVA and LLYVK ' +
+    "carried 0000869614 — the old Liberty Media Corporation, no 10-Q or 10-K — against SEC's 1560385 and " +
+    '2078416. A ticker SEC does not list (every ETF) is not evaluated.',
+  readsTables: ['raw_sec_ticker_map', 'raw_ticker_reference', 'ref_universe_membership'],
+  testedQuantity: null,
+  testedUnit: null,
+  thresholds: {},
+  thresholdBasis: 'not_applicable',
+  // A provider's stale reference field, already corrected where it is consumed; firing again tomorrow
+  // is expected, not new evidence (03 §5.4).
+  escalatesOnRepeat: false,
+  run(ctx) {
+    const rows = ctx.db
+      .prepare(
+        `SELECT s.ticker, s.cik AS sec_cik, s.registrant AS title,
+                (SELECT r.cik FROM raw_ticker_reference r WHERE r.ticker = s.ticker ORDER BY r.row_id DESC LIMIT 1) AS polygon_cik
+           FROM raw_sec_ticker_map s
+          WHERE s.source_response_id = (SELECT MAX(source_response_id) FROM raw_sec_ticker_map)
+            AND s.ticker IN (SELECT ticker FROM ref_universe_membership WHERE valid_to IS NULL)
+          ORDER BY s.ticker`
+      )
+      .all() as { ticker: string; sec_cik: string; title: string; polygon_cik: string | null }[];
+    return rows.map((r): Evaluation => {
+      const fired = r.polygon_cik !== r.sec_cik;
+      return {
+        key: r.ticker,
+        fired,
+        detail: fired
+          ? `${r.ticker}: Polygon's CIK is ${r.polygon_cik ?? 'missing'}, SEC maps it to ${r.sec_cik} (${r.title}); EDGAR lookups use SEC's`
+          : `${r.ticker}: Polygon and SEC agree on ${r.sec_cik}`,
+        evidence: { ticker: r.ticker, polygonCik: r.polygon_cik, secCik: r.sec_cik, secTitle: r.title },
+        closesAs: fired ? undefined : { kind: 'provider_fixed', note: `${r.ticker}: Polygon now agrees with SEC on CIK ${r.sec_cik}` }
+      };
+    });
+  }
+};
+
 export const EARNINGS_FUNDAMENTALS_CHECKS: readonly CheckDefinition[] = [
   QC601_EARNINGS_SLIPS_LATER,
   QC602_EARNINGS_SOURCE_DISAGREEMENT,
   QC603_EARNINGS_FRESHNESS,
   QC604_EARNINGS_WEEKEND_DATE,
   QC701_FILING_FRESHNESS,
-  QC702_FACT_SANITY
+  QC702_FACT_SANITY,
+  QC703_CIK_SOURCE_DISAGREEMENT
 ];

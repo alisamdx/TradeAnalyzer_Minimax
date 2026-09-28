@@ -528,6 +528,9 @@ Source: E*Trade `/v1/market/quote/{symbol}` (Polygon's stock snapshot cannot ser
 
 Stored in the honest raw form SEC publishes — **facts**, not statements. Statements (income, balance, cash flow), TTM roll-forwards and ratios are derived (stage 2), reproducible from these rows.
 
+### `raw_sec_ticker_map`
+Source: SEC `www.sec.gov/files/company_tickers.json`, weekly (v1.1.331), filtered to the universe at ingestion. The body is an **object keyed "0", "1", …** whose values are `{ cik_str, ticker, title }`. `cik_str` is a **number** despite its name, so it is zero-padded to 10 like every other CIK, and SEC spells a class share with a dash (`BRK-B`), converted to our dot. Columns: `ticker`, `cik`, `registrant` (SEC's `title`; the name `title` collides with page copy in the inspector's AC-13 scan). **It is the CIK every EDGAR lookup prefers** (`effectiveCikSql`: the latest capture's CIK, else Polygon's). Polygon gave FWONA, LLYVA and LLYVK the stale 0000869614, so their filings, facts and insider mapping were asked of the wrong filer. Only the latest capture is read, so a ticker SEC stops listing falls back to Polygon, not to an old SEC row. The disagreement is QC-703.
+
 ### `raw_edgar_filing`
 Sources: the EDGAR daily form index `form.YYYYMMDD.idx` (primary since v1.1.325) and `submissions/CIK##########.json` (a least-recently-asked backstop).
 

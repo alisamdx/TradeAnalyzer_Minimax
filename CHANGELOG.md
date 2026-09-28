@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.331] - 2026-09-27
+
+### SEC's own ticker map overrides a stale Polygon CIK
+
+Polygon gives FWONA, LLYVA and LLYVK CIK 0000869614, the old Liberty Media Corporation, which has no 10-Q or 10-K. So every EDGAR lookup for them asked about the wrong filer. **New:**
+- `raw_sec_ticker_map` (dictionary v22): SEC's `company_tickers.json`, fetched weekly with one call and filtered to the universe.
+- A single rule (`collector/cik.ts`): SEC's CIK first, Polygon's otherwise. Used by the filings, daily-index and insider paths and by QC-603, QC-701 and QC-702.
+- New check **QC-703** (warning, doesn't escalate) reporting each disagreement.
+
+On SEC's real file: 1,030 stocks stored, and QC-703 fires on exactly those 3.
+
+Details: `changelogs/v1.1.331_2026-09-27.md`.
+
 ## [1.1.330] - 2026-09-27
 
 ### QC-603: a recent SEC report filing means the next date is not announced yet

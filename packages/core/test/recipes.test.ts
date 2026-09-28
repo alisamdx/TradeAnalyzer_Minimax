@@ -41,6 +41,7 @@ const SAMPLES: readonly IngestRecipe[] = [
   recipes.formIndexFilings({
     filers: new Map([['0000320193', 'AAPL']]), forms: new Set(['10-K', '10-Q']), knownAccessions: new Set(['0000320193-26-000106'])
   }),
+  recipes.secTickerMap({ universe: new Set(['LLYVA', 'BRK.B']) }),
   recipes.ivBootstrap({ ticker: 'SPY', source: 'ivolatility', methodNote: 'IVX' }),
   recipes.legacyBrief()
 ];

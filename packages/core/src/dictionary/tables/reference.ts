@@ -81,6 +81,29 @@ export const referenceTables: readonly TableEntry[] = [
   }),
 
   defineTable({
+    table: 'raw_sec_ticker_map',
+    layer: 'raw',
+    domain: 'universe',
+    description:
+      "SEC's own ticker → CIK map (`www.sec.gov/files/company_tickers.json`), captured weekly and filtered " +
+      'to the universe at ingestion (v1.1.331). Where it disagrees with Polygon\'s `raw_ticker_reference.cik`, ' +
+      'every EDGAR lookup uses this one: Polygon gave FWONA, LLYVA and LLYVK the stale CIK 0000869614 (the old ' +
+      'Liberty Media Corporation, which has no 10-Q or 10-K), so their filings, facts and insider mapping were ' +
+      'asked of the wrong filer. The disagreement itself is QC-703. Only the latest capture is read — a ' +
+      'ticker SEC no longer lists falls back to Polygon rather than to an old SEC row.',
+    naturalKey: ['ticker', 'observed_at'],
+    appendOnly: true,
+    ruleDriven: true,
+    standardColumns: true,
+    columns: [
+      col.ident('ticker', 'The ticker in OUR spelling — SEC writes a class share with a dash (`BRK-B`), converted to a dot at ingestion.', { sourceProvider: 'edgar', sourceField: 'ticker' }),
+      col.ident('cik', 'SEC filer identifier, zero-padded to 10.', { sourceProvider: 'edgar', sourceField: 'cik_str', converter: 'zeroPadCik' }),
+      col.text('registrant', "The filer's name as SEC lists it (SEC's `title`).", { sourceProvider: 'edgar', sourceField: 'title' })
+    ],
+    indexes: [{ columns: ['ticker', 'observed_at'] }, { columns: ['source_response_id'] }]
+  }),
+
+  defineTable({
     table: 'ref_sic_sector',
     layer: 'ref',
     domain: 'universe',
