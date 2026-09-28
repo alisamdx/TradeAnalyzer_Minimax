@@ -450,7 +450,7 @@ export const QC409_STICKY_SET_HONOURED: CheckDefinition = {
     'Every currently pinned contract has a snapshot row this run. A pin exists so a held or ' +
     'recommended contract keeps being priced to expiry even when its underlying leaves the subset; a ' +
     'pin that stops producing rows silently is the pin failing to do the one thing it is for.',
-  readsTables: ['ref_sticky_contract', 'raw_option_contract_snapshot'],
+  readsTables: ['ref_sticky_contract', 'raw_option_contract_snapshot', 'qa_exception', 'meta_run'],
   testedQuantity: 'unhonoured_pin_count',
   testedUnit: 'count',
   thresholds: { maxUnhonoured: 0 },
@@ -475,15 +475,44 @@ export const QC409_STICKY_SET_HONOURED: CheckDefinition = {
     const captured = ctx.db.prepare(
       'SELECT 1 FROM raw_option_contract_snapshot WHERE osi_symbol = ? AND as_of_date = ? LIMIT 1'
     );
+    const has = (osi: string, date: string): boolean => captured.get(osi, date) !== undefined;
+
+    // The dates each open finding missed: the trading dates of its first and last firing run.
+    // A finding closes itself only when the pin is captured tonight AND those dates now hold a
+    // snapshot, i.e. the day was re-collected (v1.1.329). On 2026-09-22 run 28 collected nothing from
+    // E*Trade and raised 1,004 of these; run 30 re-collected the date and captured every pin. But
+    // the only way to close was remediation R1, which never ran, so all 1,004 stayed open and
+    // blocking. A pin that works again after a day nobody re-collected has left a real hole in a
+    // held contract's price history. The gate cannot repair that, so it stays open for the operator.
+    const missed = new Map<string, { first: string; last: string }>();
+    for (const r of ctx.db
+      .prepare(
+        `SELECT e.key, f.trading_date AS first, l.trading_date AS last FROM qa_exception e
+           JOIN meta_run f ON f.run_id = e.first_seen_run_id
+           JOIN meta_run l ON l.run_id = e.last_seen_run_id
+          WHERE e.check_id = 'QC-409' AND e.state IN ('open', 'acknowledged')`
+      )
+      .all() as { key: string; first: string; last: string }[]) {
+      missed.set(r.key, { first: r.first, last: r.last });
+    }
 
     return pins.map((p) => {
-      const has = captured.get(p.osi_symbol, ctx.tradingDate) !== undefined;
+      const ok = has(p.osi_symbol, ctx.tradingDate);
+      const gap = missed.get(p.osi_symbol);
+      const refilled = ok && gap !== undefined && has(p.osi_symbol, gap.first) && has(p.osi_symbol, gap.last);
       return {
         key: p.osi_symbol,
-        value: has ? 0 : 1,
-        fired: !has,
+        value: ok ? 0 : 1,
+        fired: !ok,
         detail: `${p.osi_symbol} is pinned (${p.reason}) but has no snapshot for ${ctx.tradingDate}`,
-        evidence: { osiSymbol: p.osi_symbol, ticker: p.ticker, reason: p.reason }
+        evidence: { osiSymbol: p.osi_symbol, ticker: p.ticker, reason: p.reason },
+        closesAs: refilled
+          ? {
+              kind: 'data_corrected' as const,
+              note: `${p.osi_symbol}: the missed ${gap.first === gap.last ? gap.first : `${gap.first}…${gap.last}`} ` +
+                `was re-collected and the pin is captured on ${ctx.tradingDate}`
+            }
+          : undefined
       } satisfies Evaluation;
     });
   }

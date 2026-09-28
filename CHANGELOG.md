@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.329] - 2026-09-27
+
+### 1,004 blocking QC-409 findings nothing could close
+
+On 2026-09-22 run 28 collected nothing from E*Trade and raised a QC-409 finding for every pinned contract (1,004). Run 30 re-collected the date and captured all of them, but QC-409 closed only through remediation R1, which never ran, so every one stayed open and blocking. **Fix:** a finding closes `data_corrected` once the pin is captured tonight and the day it missed now holds a snapshot. A day nobody re-collected stays open for the operator. **Rehearsed on 09-25:** all 1,004 resolved, and the open blocking queue is 24.
+
+Details: `changelogs/v1.1.329_2026-09-27.md`.
+
 ## [1.1.328] - 2026-09-27
 
 ### A recurring finding kept its escalated severity; QC-410 no longer escalates

@@ -957,6 +957,66 @@ describe('phase 7 — chains, and AC-5 on every response', () => {
     expect(pinFinding).toBeUndefined();
   });
 
+  describe('an unhonoured pin closes once the day it missed is captured (v1.1.329)', () => {
+    // 2026-09-22: run 28 collected nothing from E*Trade (599 of 599 tickers with no expirations), raising
+    // 1,004 QC-409 findings. Run 30 re-collected the same date and every pin was captured, but QC-409
+    // closed only through remediation R1, which never ran, so all 1,004 stayed open and blocking.
+    function pinSpy(tag: string): void {
+      const run0 = newRun();
+      raw
+        .prepare(
+          "INSERT INTO meta_response (run_id, provider, endpoint, params_json, requested_at, http_status, byte_length, archive_file, archive_offset, sha256, dedup_hash, encrypted, at_provider_cap, parse_status, parsed_row_count) " +
+            "VALUES (?, 'etrade', '/x', '{}', '2026-09-07T17:00:00-04:00', 200, 1, 'f', 0, 'h', ?, 1, 0, 'ok', 0)"
+        )
+        .run(run0.runId, tag);
+      const src = (raw.prepare('SELECT MAX(source_response_id) AS id FROM meta_response').get() as { id: number }).id;
+      raw
+        .prepare(
+          `INSERT INTO ref_sticky_contract (run_id, as_of_date, observed_at, source_response_id,
+             osi_symbol, ticker, expiration_date, reason, valid_from)
+           VALUES (?, ?, '2026-09-07T17:00:00-04:00', ?, 'SPY---260918P00770000', 'SPY', '2026-09-18', 'recommended_by_legacy', ?)`
+        )
+        .run(run0.runId, DATE, src, DATE);
+    }
+    const finding = () =>
+      raw.prepare("SELECT state, resolution_kind, resolution_note FROM qa_exception WHERE check_id = 'QC-409'").get() as
+        { state: string; resolution_kind: string | null; resolution_note: string | null };
+    const gate = (runId: number, date: string) =>
+      runGate(db(), makeHost(), { runId, tradingDate: date, checks: [...CHAIN_CHECKS], domainsExpected: {} });
+
+    it('closes it data_corrected when a re-run of the same date captures the pin', async () => {
+      pinSpy('pin-rerun');
+      const dead = beginRun(db(), makeHost(), { kind: 'daily', tradingDate: DATE });
+      gate(dead.runId, DATE);                     // nothing collected: the pin fires
+      expect(finding().state).toBe('open');
+      // Run 28 had finished before run 30 began — otherwise beginRun resumes the same run.
+      raw.prepare("UPDATE meta_run SET status = 'complete' WHERE run_id = ?").run(dead.runId);
+
+      const host = chainHost();
+      const rerun = beginRun(db(), host, { kind: 'daily', tradingDate: DATE });
+      await runChainsPhase(host, db(), rerun);
+      gate(rerun.runId, DATE);
+      expect(finding()).toMatchObject({ state: 'resolved', resolution_kind: 'data_corrected' });
+      expect(finding().resolution_note).toContain(DATE);
+    });
+
+    it('keeps it open when the pin works again but the missed day was never captured', async () => {
+      pinSpy('pin-gap');
+      const dead = beginRun(db(), makeHost(), { kind: 'daily', tradingDate: DATE });
+      gate(dead.runId, DATE);
+      raw.prepare("UPDATE meta_run SET status = 'complete' WHERE run_id = ?").run(dead.runId);
+
+      const NEXT = '2026-09-08';
+      const host = chainHost();
+      const next = beginRun(db(), host, { kind: 'daily', tradingDate: NEXT });
+      await runChainsPhase(host, db(), next);
+      expect(raw.prepare("SELECT 1 FROM raw_option_contract_snapshot WHERE osi_symbol = 'SPY---260918P00770000' AND as_of_date = ?").get(NEXT)).toBeDefined();
+      gate(next.runId, NEXT);
+      // A held contract has no price for DATE and never will: that is for the operator, not the gate.
+      expect(finding().state).toBe('open');
+    });
+  });
+
   it('an explicit ticker list means exactly that list — pins do not widen a one-shot', async () => {
     const run0 = newRun();
     raw
