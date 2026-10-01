@@ -4,7 +4,7 @@
 // API keys and PII are scrubbed at write time.
 // see SPEC: EP-3, EP-4
 
-import { createWriteStream, existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { appendFileSync, createWriteStream, existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { app } from 'electron';
 
@@ -31,6 +31,12 @@ function apiLogsDir(): string {
 
 function errorLogsDir(): string {
   return join(logsDir(), 'errors');
+}
+
+// Was a hardcoded '0.1.2' for every exception-derived entry, so the errors log named a
+// version two hundred releases old on exactly the rows a diagnosis reads.
+function safeAppVersion(): string {
+  try { return app.getVersion(); } catch { return 'unknown'; }
 }
 
 function ensureDir(dir: string): void {
@@ -146,6 +152,17 @@ export function logError(entry: ErrorLogEntry): void {
   stream.write(JSON.stringify(entry) + '\n');
 }
 
+/**
+ * Synchronous variant for the moments the process may not outlive: quit and an uncaught
+ * exception. The stream above is buffered, so an entry written as the app exits can be
+ * lost — exactly the entry that says how it exited. Same file, O_APPEND, so lines from
+ * both writers stay whole.
+ */
+export function logErrorSync(entry: ErrorLogEntry): void {
+  ensureDir(errorLogsDir());
+  appendFileSync(join(errorLogsDir(), todayFilename('errors')), JSON.stringify(entry) + '\n', 'utf8');
+}
+
 export function logErrorFromException(
   err: unknown,
   operation: string,
@@ -158,7 +175,7 @@ export function logErrorFromException(
   const errorClass = err instanceof Error ? err.constructor.name : 'UnknownError';
   logError({
     timestamp: new Date().toISOString(),
-    appVersion: '0.1.2', // updated on version bump
+    appVersion: safeAppVersion(),
     errorClass,
     message,
     stack,

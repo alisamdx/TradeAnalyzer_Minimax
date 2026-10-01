@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.335] - 2026-10-01
+
+### Every way the app can end now leaves a record
+
+On 09-28 the app went silent at 10:41:54 ET mid-brief and wasn't restarted until 07:52 the next day, so the collector, watchdog and after-close batch never ran. Nothing could say whether it quit, crashed or froze. A session sentinel (`logs/session.json`, heartbeat every 60 s) now lets the next boot log `app:previous-session` with the last-alive time when a session ended without a clean quit. Quit, Windows session end, uncaught exceptions, unhandled rejections and renderer/child-process loss are logged synchronously to `logs/errors`. Exception entries also carry the real app version instead of a hardcoded `0.1.2`.
+
+Details: `changelogs/v1.1.335_2026-10-01.md`.
+
 ## [1.1.334] - 2026-09-28
 
 ### QC-601: a Finnhub slip is judged against the sweep that made it

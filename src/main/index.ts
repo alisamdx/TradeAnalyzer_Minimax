@@ -20,7 +20,8 @@ import { ScreenerService } from './services/screener-service.js';
 import { PolygonDataProvider } from './services/polygon-provider.js';
 import { QuoteCache, FundamentalsCache, initCacheTables } from './services/cache-service.js';
 import { registerScreenerIpc } from './ipc/ipc-screener.js';
-import { pruneOldLogsOnStartup, logError, logErrorFromException } from './services/logger.js';
+import { pruneOldLogsOnStartup, logError, logErrorFromException, logErrorSync } from './services/logger.js';
+import { startSessionSentinel, type SessionSentinel } from './services/session-sentinel.js';
 import { TokenBucketRateLimiter } from './services/rate-limiter.js';
 import { JobQueue } from './services/job-queue.js';
 import { AnalysisService } from './services/analysis-service.js';
@@ -137,6 +138,13 @@ function createWindow(): BrowserWindow {
     win.maximize();
     win.show();
   });
+  win.on('unresponsive', () => lifecycleLog('WARNING', 'app:window-unresponsive', 'renderer stopped responding'));
+  win.on('responsive', () => lifecycleLog('INFO', 'app:window-responsive', 'renderer responding again'));
+  // Windows logoff/shutdown/restart: the app is ended without before-quit firing.
+  win.on('session-end', () => {
+    lifecycleLog('INFO', 'app:session-end', 'Windows session ending (logoff, shutdown or restart)');
+    _sessionSentinel?.markCleanExit('windows-session-end');
+  });
   win.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: 'deny' };
@@ -242,7 +250,60 @@ function repairWatchlistItems(db: ReturnType<typeof openDatabase>): void {
 
 // ─── Single instance lock ─────────────────────────────────────────────────────
 
+// ─── Lifecycle logging ────────────────────────────────────────────────────────
+//
+// On 2026-09-28 the app went silent at 10:41:54 ET mid-brief and nothing could say
+// whether it was closed, crashed or froze: a normal quit logged nothing and the main
+// process had no uncaught-error handler. Every way the session can end now leaves a
+// line in logs/errors, written synchronously because the process may not outlive it,
+// and the session sentinel lets the next boot report an end that left no line at all
+// (a frozen main thread cannot log its own freeze).
+
+let _sessionSentinel: SessionSentinel | null = null;
+
+function lifecycleLog(
+  level: 'INFO' | 'WARNING' | 'ERROR' | 'FATAL',
+  operation: string,
+  message: string,
+  err?: unknown
+): void {
+  try {
+    logErrorSync({
+      timestamp: new Date().toISOString(),
+      appVersion: appVersion(),
+      errorClass: err instanceof Error ? err.constructor.name : 'AppLifecycle',
+      message: err === undefined ? message : `${message}: ${err instanceof Error ? err.message : String(err)}`,
+      stack: err instanceof Error ? err.stack ?? null : null,
+      operation,
+      ticker: null,
+      correlationId: null,
+      level
+    });
+  } catch { /* logging must never become the failure */ }
+}
+
 const gotLock = app.requestSingleInstanceLock();
+if (gotLock) {
+  // Registering a listener replaces Electron's default dialog for uncaught exceptions,
+  // so the dialog is shown here too — logging must not make the error less visible.
+  process.on('uncaughtException', (err) => {
+    lifecycleLog('FATAL', 'main:uncaught-exception', 'uncaught exception in the main process', err);
+    try {
+      dialog.showErrorBox('TradeAnalyzer — unexpected error', `${err.message}\n\nDetails are in logs/errors.`);
+    } catch { /* the log above is the record */ }
+  });
+  // Non-fatal, as before (Electron only warned on stderr); now it is on disk.
+  process.on('unhandledRejection', (reason) => {
+    lifecycleLog('ERROR', 'main:unhandled-rejection', 'unhandled promise rejection in the main process', reason);
+  });
+  app.on('render-process-gone', (_e, _wc, details) => {
+    lifecycleLog('ERROR', 'app:render-process-gone', `renderer gone: reason=${details.reason} exitCode=${details.exitCode}`);
+  });
+  app.on('child-process-gone', (_e, details) => {
+    lifecycleLog('ERROR', 'app:child-process-gone', `${details.type} process gone: reason=${details.reason} exitCode=${details.exitCode}`);
+  });
+}
+
 if (!gotLock) {
   app.quit();
 } else {
@@ -257,6 +318,16 @@ if (!gotLock) {
 
 app.whenReady().then(() => {
   pruneOldLogsOnStartup();
+
+  // A second instance quits immediately; it must not take over the running one's record.
+  if (gotLock) {
+    _sessionSentinel = startSessionSentinel({
+      path: join(app.getPath('userData'), 'logs', 'session.json'),
+      appVersion: appVersion(),
+      log: (entry) => { try { logErrorSync(entry); } catch { /* diagnostic only */ } }
+    });
+    lifecycleLog('INFO', 'app:start', `pid ${process.pid}`);
+  }
 
   // Dev: store DB in project folder for portability.
   // Production: store in userData (writable; app.getAppPath() is inside the read-only ASAR in packaged builds).
@@ -1152,6 +1223,10 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  if (_sessionSentinel) {
+    lifecycleLog('INFO', 'app:quit', `clean quit, pid ${process.pid}`);
+    _sessionSentinel.markCleanExit('quit');
+  }
   if (_etradeKeepAlive) { clearInterval(_etradeKeepAlive); _etradeKeepAlive = null; }
   _apiServer?.stop().catch(console.error);
 });
