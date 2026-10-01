@@ -6,6 +6,7 @@ import { auditPickGreeks, type PickAuditDb } from '../services/greek-consistency
 import {
   settledCspPanel, PANEL_STRATEGIES, type PanelDb, type PanelStrategy
 } from '../services/settled-csp-panel.js';
+import { premiumRoc, ROC_STRATEGIES, type RocStrategy } from '../services/premium-roc.js';
 import { buildSpreadShadowReport } from '../services/spread-mode-settle.js';
 import { readStaleGreekShadow } from '../services/stale-greek-shadow.js';
 
@@ -68,6 +69,21 @@ export function registerDiagnosticsRoutes(app: FastifyInstance, svc: ApiServerSe
     }
     try {
       return apiOk(reply, settledCspPanel(svc.db as unknown as PanelDb, strategy));
+    } catch (err) {
+      return apiError(reply, err instanceof Error ? err.message : String(err), 'INTERNAL', 500);
+    }
+  });
+
+  // GET /diagnostics/premium-roc?strategy=income|wheel — every stored CSP settled at expiry on its
+  // real premium, beside Brief Replay's 0.85×-entry proxy on the same row; split-scale mismatches
+  // are listed, not settled. Read-only. Read by scripts/premium-roc-report.mjs. see premium-roc.ts
+  app.get<{ Querystring: { strategy?: string } }>('/diagnostics/premium-roc', async (req, reply) => {
+    const strategy = (req.query.strategy ?? 'income') as RocStrategy;
+    if (!ROC_STRATEGIES.includes(strategy)) {
+      return apiError(reply, `strategy must be one of ${ROC_STRATEGIES.join(', ')}`, 'VALIDATION_ERROR');
+    }
+    try {
+      return apiOk(reply, premiumRoc(svc.db as unknown as PanelDb, strategy));
     } catch (err) {
       return apiError(reply, err instanceof Error ? err.message : String(err), 'INTERNAL', 500);
     }

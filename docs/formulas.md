@@ -1153,3 +1153,26 @@ history, so any P/E- or grade-based signal would be scored against *today's* val
 the same trap that makes the earnings gate unreplayable. Only price anchors are honestly testable.
 
 see `src/main/services/own-at-strike.ts`, `scripts/own-at-strike-study.mjs`
+
+## premium-roc (real income/wheel return on capital) {#premium-roc}
+
+Every stored CSP in `options_premium_history` settled at expiry on its **real** premium
+(`src/main/services/premium-roc.ts`, `GET /api/v1/diagnostics/premium-roc`,
+`scripts/premium-roc-report.mjs`, v1.1.336):
+
+```
+S_T          = close on the last bar ≤ expiration (≤ 4 calendar days before it)
+P&L/share    = premium − max(0, strike − S_T)
+ROC %        = P&L / strike × 100                 // capital = the cash securing the put
+annualized % = ROC × 365 / DTE
+assigned     = S_T < strike
+```
+
+**Scale guard** (a split repaired after capture puts strike and closes on different scales):
+exclude when `|last_price / close(as_of) − 1| > 0.15`, or — without a stored `last_price` — when
+`strike / close(as_of) ∉ [0.5, 1.2]`, or when `S_T / close(as_of) ∉ [0.35, 3.0]`. Excluded rows are
+listed, never settled.
+
+Each row also carries Brief Replay's proxy verdict on the same ticker/date
+(`brief-replay-service.ts`): synthetic strike `0.85 × entry`, kept iff every low over the entry bar
+and the next 21 sessions is ≥ it; no premium. Held to expiry; covered-call rows are not settled.

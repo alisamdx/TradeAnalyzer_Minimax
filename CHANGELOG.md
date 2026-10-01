@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.336] - 2026-10-01
+
+### Real income/wheel return on capital
+
+Enough premium history has matured (≥ 40 dates) to settle income and wheel on real premium instead of Brief Replay's proxy, which uses a synthetic 0.85 × entry strike, a 21-session low and no premium. `premium-roc.ts` settles every stored CSP at expiry, `ROC = (premium − max(0, K − S_T)) / K`. It does not require bid/ask, so pre-v1.1.132 wheel rows count. Split-scale mismatches are excluded and listed, never settled. It also computes the proxy on the same rows, so their agreement is measured. Read it with `node scripts/premium-roc-report.mjs`. Brief Replay itself is unchanged for now.
+
+Details: `changelogs/v1.1.336_2026-10-01.md`.
+
 ## [1.1.335] - 2026-10-01
 
 ### Every way the app can end now leaves a record

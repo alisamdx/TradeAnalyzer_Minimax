@@ -280,3 +280,5 @@ pop-weighted-premium (EXPERIMENTAL, USE_POP_WEIGHTED_PREMIUM default false):
 
 Disabled pending an FR-SEY-5 realized backtest (`scripts/backtest-lizard-vs-spread.mjs`).
 see `docs/formulas.md#structure-settle` / `#pop-weighted-premium`.
+
+**Real income/wheel return on capital** (v1.1.336, `premium-roc.ts`): every stored CSP in `options_premium_history` settled at expiry on its real premium — `ROC % = (premium − max(0, strike − S_T)) / strike × 100`, `S_T` = close on the last bar ≤ expiration — with a split-scale guard that excludes and lists mismatched rows, and Brief Replay's 0.85×-entry proxy computed on the same rows for comparison. see `docs/formulas.md#premium-roc`.
