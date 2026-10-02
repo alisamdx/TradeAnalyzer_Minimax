@@ -223,6 +223,32 @@ Provenance: **measured** (a #43 study result) · **inherited** (a wheel-screen r
   rejections, HUM alone 9. Unsettled: 25% was chosen, not swept; and it is a share of *credit*, so it
   tightens exactly where credit is thin — which may be the intent, or may be a second liquidity gate
   wearing a costume.
+  **SWEPT 2026-10-01 (§9 of `fr-bull-put-spread-study.mjs`, `bps9-cost-gate.md`; quoted costs, $0.03
+  fallback, 479 episodes, 134 with quoted costs).** Adopted profile (30d Δ0.30 w5% pt0.5, no stop, no
+  time stop), gate varied:
+
+  | gate | all: n / mean ret% | quoted only: n / mean ret% | portfolio ret / max DD |
+  |---|--:|--:|--:|
+  | none | 479 / +3.20 | 134 / **−2.38** | **+75.5%** / 21.2% |
+  | ≤ 40% | 409 / +4.42 | 74 / −0.15 | +119.4% / 17.2% |
+  | ≤ 35% | 403 / +4.29 | 72 / −0.53 | +100.1% / 21.6% |
+  | ≤ 30% | 386 / +4.37 | 58 / −0.30 | +107.9% / 16.5% |
+  | **≤ 25%** | 354 / +4.54 | 48 / +1.10 | +96.0% / 19.2% |
+  | ≤ 20% | 313 / +5.91 | 32 / +11.24 | +114.3% / 20.2% |
+  | ≤ 15% | 275 / +6.03 | 19 / +14.49 | +114.6% / 20.8% |
+
+  - **A gate helps; the level is not measured.** No gate is clearly worst (quoted entries lose, the
+    portfolio earns least). Between 40% and 15% the portfolio does not trend, and the quoted per-trade
+    rise rests on 32 then 19 trades. Per band the quoted means are non-monotone — the **20–25% band
+    (16 trades) averages −19%** while the bands either side are positive — which is noise, not a dose
+    response. **Decision: keep the gate at 25% as a judgement call.** Re-sweep when quoted coverage
+    reaches BPS-14's 50%.
+  - **For unquoted entries the gate is a PRICE filter, by construction.** Cost share = 4 × slip ÷ credit,
+    and with a flat slip the credit scales with the underlying's price, so the gate removes cheaper
+    stocks. Visible in the CSP column: as the gate tightens, fewer CSPs fit the 25% cash allocation, and
+    at ≤ 15% none do (60 → 26 → 0 trades). So the "costume" question above has an answer for most of
+    the sample: it is price, not liquidity. Only on quoted entries does the share reflect real spreads.
+  - 78 configurations across §2–4c and §9: the best row flatters itself; FR-SEY-5 applies.
 - **BPS-10. Ranking — net credit ÷ max loss, top 5. UNVALIDATED, and about to start binding.** *Drafted.*
   The only related evidence is that premium richness ranked positively for CSPs (v1.1.176). It has been
   nearly inert: **"ranked below the top 5" fired once in ten runs**, because the pool was starved — the
