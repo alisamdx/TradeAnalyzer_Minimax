@@ -256,7 +256,8 @@ Provenance: **measured** (a #43 study result) · **inherited** (a wheel-screen r
     **Read it once ≥ 15 cut positions have settled on each side, earliest late October.**
   - **History now:** §8 of `fr-bull-put-spread-study.mjs` — the within-day top-5 lift against a random-5
     null, for return on risk, its inverse, brief rank and ATM IV (self-test covers rich-wins, inverted and
-    unrelated worlds). **Run from a normal terminal:**
+    unrelated worlds). **Runs from any shell with TradeAnalyzer running** (since v1.1.338 it reads
+    `GET /diagnostics/spread-study-panel`, not the SQLite file):
     `node scripts/fr-bull-put-spread-study.mjs --slip-model quoted --capital 25000 --risk 2500 --out bps10-ranking.md`.
     It uses a Black-Scholes wing with a flat skew, so it answers "does ranking by IV pick better", not the
     real metric.
@@ -265,6 +266,9 @@ Provenance: **measured** (a #43 study result) · **inherited** (a wheel-screen r
     ~300 days), so the names below the cut were never kept. It is the same survivors-only shape v1.1.327
     fixed going forward. **The shadow counterfactual is now the only test of the ranking.** Do not try
     to reconstruct the losers historically.
+    **Re-run 2026-10-01 (`bps10-ranking.md` regenerated — the 09-26 file had never been kept), prices to
+    10-01, 480 episodes:** same answer at skew 0/3/6 — the cut never binds. Confirmed, not a fluke of
+    the earlier sample.
 - **BPS-11. Sizing — floor(budget ÷ per-contract max loss), no longer a gate.** *Fixed.* $2,500 default,
   $250 stored (S10); shadow records an unaffordable pick at `contracts = 0` (v1.1.300). Unsettled:
   `maxOpenPositions` has never been given a real number (10 placeholder), and nothing tracks open
@@ -291,6 +295,32 @@ Provenance: **measured** (a #43 study result) · **inherited** (a wheel-screen r
   - **§5:** the quoted entries **lost money** under the draft exits (mean −3.2% / −4.7%, against +5.75%
     for the $0 ones). They are a selected subset (tickers with intraday quotes), so this is not a finding
     yet. It is the first sight of real costs on this sample, and the gate run must look at it directly.
+
+  **Re-run 2026-10-01 with `--slip 0.03`, beside the $0-fallback run** (`bps10-ranking-slip03.md` vs
+  `bps10-ranking.md`; prices to 10-01, 480 episodes, 1,495 entries). Quoted coverage **496 of 1,495
+  (33%)**, still short of the 50% this item requires, so **this is not the gate run** — but it sizes how
+  much of the §7 headline the free fills were. §7, $25,000 pot, spread return / max drawdown:
+
+  | profile | $0 fallback | $0.03 fallback | CSP ($0 → $0.03) |
+  |---|--:|--:|--:|
+  | draft Δ0.25 w5% pt0.5 sl2 ts15 | +111.8% / 31.4% | **+32.8% / 43.2%** | +18.9% → +15.9% |
+  | Δ0.3 w5% pt0.5 | +155.4% / 21.8% | **+75.5% / 21.2%** | +26.8% → +25.5% |
+  | Δ0.3 **w10%** pt0.5 | +175.7% / 7.9% | **+136.2% / 10.1%** | +26.8% → +25.5% |
+  | Δ0.3 w5% hold to expiry | +125.2% / 10.3% | **+108.6% / 10.9%** | +20.1% → +19.3% |
+
+  - **Three cents a leg removed about two-thirds of the draft profile's return** and left it with the
+    worst drawdown in the table; the CSP lost ~3 points. A spread pays on two legs and again on every
+    early close, and the draft exits close most often — the BPS-13 finding (stop + time stop halve the
+    return) seen from the cost side.
+  - **What survives cost is fewer paid closes and bigger credits:** hold-to-expiry loses 17 points, the
+    10% wing 39 with drawdown near 10% — consistent with BPS-7 (wider wing absorbs a fixed per-leg cost)
+    and BPS-13.
+  - **§5, the quoted entries, still lose:** 115 episodes with quoted slip > $0.03/leg average **−4.88%**
+    per spread trade (CSP **+0.45%** on the same entries); the 18 at ≤ $0.03 are flat. The 345 fallback
+    entries go from +5.60% at $0 to **+2.27%** at $0.03. Same caveat as 09-26: the quoted set is the
+    tickers that happened to be captured intraday, not a random sample.
+  - 64 configurations in §2–4c and 9 in §7: the best row flatters itself. One replay sample, BS-priced
+    wings with an assumed skew — shapes criteria only (FR-SEY-5).
 - **BPS-15. Build the `on` surfaces** — Daily Brief panel and email — only once §4 passes. `on` is
   deliberately not a member of `SpreadModeSwitch`; adding it **fails the build** at `budgetGates()` in
   `spread-mode.ts`, which is where the BPS-11 decision must be made. (Was part of #44.)
