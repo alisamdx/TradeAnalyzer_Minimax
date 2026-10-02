@@ -337,6 +337,20 @@ Provenance: **measured** (a #43 study result) · **inherited** (a wheel-screen r
   uncapped so the evidence is not shaped by the cap. Unsettled: enforcement at `on`, and the known GICS
   coarseness — CF counts as Materials but trades with natural gas, so the first week's "4 energy
   positions" was really 5.
+  **Found 2026-10-02: the cap is per GICS SUB-INDUSTRY, not per sector — far looser than described.**
+  `constituents.sector`, which the report and the cap read, holds sub-industries: `Application
+  Software`, `Semiconductors`, `Oil & Gas Exploration & Production`, `Fertilizers & Agricultural
+  Chemicals` (CF's own value, so the "CF counts as Materials" note above describes a level the data
+  does not hold). Six semiconductor names would pass as 3 `Semiconductors` + 3 `Semiconductor
+  Materials & Equipment`; `Application Software` and `Systems Software` are separate buckets. The
+  10-02 report's open book already shows **6** `Application Software` positions — over the cap only
+  because shadow is uncapped. Also **12 open positions have no sector at all** (ETFs and names the
+  constituents feed never gave one), and each counts as its own bucket. Unexplained: why the Wikipedia
+  parser stored sub-industries — its column detection takes the first qualifying column from index 2,
+  which on the S&P 500 page should be GICS Sector; not investigated. **Decide before `on`:** cap per
+  sector (needs a sub-industry → sector map, or the GICS Sector column) or per sub-industry
+  (deliberately looser), and whether an unknown sector should count as its own bucket.
+  (Separately, v1.1.341 fixed these values being stored HTML-escaped.)
 - **BPS-13. Exit — 50% of net credit, no loss stop, no time stop.** *Measured, and the strongest result
   in #43* — the profit target is the dominant lever, monotonic across every stop/time cell; the stop plus
   time stop **halved** the portfolio return. Unsettled: nothing tracks an open spread or fires an alert
