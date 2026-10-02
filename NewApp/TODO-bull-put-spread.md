@@ -193,6 +193,31 @@ Provenance: **measured** (a #43 study result) · **inherited** (a wheel-screen r
   re-run on `LEAN` plus 21/35 rows in §7 — worth doing only if the cost measurement leaves 21 DTE
   viable, and read knowing the study's wing is Black-Scholes plus a flat skew whose error is itself
   DTE-dependent (§3 moves the 30-DTE answer 0.277 → 0.081 %/day across skew 0→6).
+  **RE-RUN 2026-10-01 (`bps4-dte-cost-2026-10-01.md`, 665 paired runs — 2.2× the sample; first run
+  through the app's API, v1.1.339): the mechanism holds, the operational reason for 30 does NOT.**
+
+  | | 2026-09-22 (296) | 2026-10-01 (665) |
+  |---|--:|--:|
+  | monthly share, 21 / 30 bucket | 11% / **69%** | 30% / **31%** |
+  | median cost share, 21 / 30 | 36.7% / 23.9% | 26.8% / 26.5% |
+  | paired headline (21 − 30) | +13.6% | **+0.3%** (21 cheaper on 49%) |
+  | same type AND both clear | −0.9% (15 pairs) | **−0.8% (86 pairs)**, 52 of 86 |
+  | tradable pool moving 30 → 21 | **−35%** | **−3%** |
+
+  - **Tenor is worth nothing — now on 86 pairs, not 15.** Expiry type is the whole effect, and the
+    falsification test passes cleanly: 21-monthly vs 30-weekly, the shorter expiry is cheaper on
+    **79%** (median −7.1%); 21-weekly vs 30-monthly, on **5%** (+23.5%). The sign reverses with type.
+  - **"Nearest 30 lands on a monthly two times in three" was a property of the 09-22 capture days, not
+    of the rule.** Over the longer window nearest-30 lands on a monthly **31%** of the time, the same as
+    nearest-21. Which bucket holds the monthly depends on where the next third Friday sits — the
+    calendar-phase effect that decides the WHEEL_MONTHLY_FIRST A/B days. So the −35% pool cost of
+    moving to 21 shrinks to **−3%**, and the 09-22 "keep 30" decision has lost its stated reason.
+  - **What matters is landing on a monthly, not the DTE target** — BPS-19's question, not this one. In
+    the 197 runs where the monthly was the 21-DTE bucket, **126** cleared the gate at the monthly
+    against **80** at the nearest-30 weekly.
+  - **Decision unchanged for now:** 30 DTE stays (switching to 21 buys nothing either), but its
+    justification is gone. Read BPS-19 next. Entry cost only, ~2 weeks of captures in one regime; no
+    returns. FR-SEY-5.
 - **BPS-5. Earnings gate — fail closed, ETFs exempt.** *Drafted* (copied from Roll the Dice). Cost
   **16 of 75** first-week rejections: 10 stale (NTAP, INTU — no provider had announced yet) and 6 unknown.
   Unsettled: "no provider has announced the next date" is a different fact from "this reports before
