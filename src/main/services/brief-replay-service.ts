@@ -14,6 +14,7 @@ import { isTradingDay } from './iv-history-service.js';
 import { computeADX, type Bar } from './analysis-service.js';
 import type { ReplayProgressEvent, ReplayPickRow, ReplaySummary, ReplayChartData, ReplayChartMonthlyRow, ScreenResultPayload, PremiumHistoryReadiness } from '@shared/types.js';
 import { withTransaction } from '../db/connection.js';
+import { settleStoredCsp } from './premium-roc.js';
 
 // ─── Replay's options blind spot (FR-SEY-5 consumers: read this) ──────────────
 //
@@ -653,6 +654,81 @@ export class BriefReplayService {
         );
       }
     });
+
+    this.settleRealOutcomes();
+  }
+
+  // Income/wheel picks settled on the REAL premium of the CSP the app recommended for that ticker
+  // on that date (options_premium_history), at expiry, with the same scale guard as the
+  // premium-roc report — one implementation, `settleStoredCsp`. A pick with no stored CSP, or one
+  // not yet expired or not settleable, keeps the 0.85 × entry proxy and is marked 'proxy'.
+  // Re-run on every evaluation until a pick goes 'real': its option expires after the 21-session
+  // window the proxy needs, so a recent pick starts as 'proxy'. see docs/formulas.md#premium-roc
+  settleRealOutcomes(): void {
+    type Row = {
+      id: number; ticker: string; as_of_date: string;
+      strike: number | null; expiration: string | null; dte: number | null; premium: number | null;
+      last_price: number | null; iv_rank: number | null; annualized_return: number | null;
+    };
+    const rows = this.db.prepare(`
+      SELECT ro.id, ro.ticker, rb.as_of_date,
+             o.strike, o.expiration, o.dte, o.premium, o.last_price, o.iv_rank, o.annualized_return
+      FROM replay_outcomes ro
+      JOIN replay_briefs rb ON rb.id = ro.replay_brief_id
+      LEFT JOIN options_premium_history o
+        ON o.as_of_date = rb.as_of_date AND o.ticker = ro.ticker
+       AND o.strategy = rb.strategy AND o.structure = 'CSP'
+       AND o.premium IS NOT NULL AND o.premium > 0 AND o.strike > 0
+      WHERE rb.strategy IN ('income', 'wheel')
+        AND (ro.outcome_source IS NULL OR ro.outcome_source = 'proxy')
+    `).all() as Row[];
+    if (rows.length === 0) return;
+
+    const maxPriceDate = (this.db.prepare('SELECT MAX(date) AS d FROM historical_prices').get() as { d: string | null }).d;
+    type SBar = { date: string; low: number; close: number };
+    const barsFor = this.db.prepare('SELECT date, low, close FROM historical_prices WHERE ticker = ? ORDER BY date');
+    const series = new Map<string, SBar[]>();
+
+    const setProxy = this.db.prepare(`
+      UPDATE replay_outcomes SET outcome_source = 'proxy',
+        real_strike = NULL, real_premium = NULL, real_expiration = NULL, real_settle = NULL,
+        real_assigned = NULL, real_roc_pct = NULL, real_skip_reason = ?
+      WHERE id = ?
+    `);
+    const setReal = this.db.prepare(`
+      UPDATE replay_outcomes SET outcome_source = 'real',
+        real_strike = ?, real_premium = ?, real_expiration = ?, real_settle = ?,
+        real_assigned = ?, real_roc_pct = ?, real_skip_reason = NULL
+      WHERE id = ?
+    `);
+
+    withTransaction(this.db, () => {
+      for (const r of rows) {
+        if (r.strike === null || r.expiration === null || r.premium === null) {
+          setProxy.run(null, r.id);
+          continue;
+        }
+        if (maxPriceDate === null || r.expiration > maxPriceDate) {
+          setProxy.run('not_expired', r.id);
+          continue;
+        }
+        let bars = series.get(r.ticker);
+        if (!bars) {
+          bars = barsFor.all(r.ticker) as SBar[];
+          series.set(r.ticker, bars);
+        }
+        const res = settleStoredCsp(bars, {
+          asOfDate: r.as_of_date, ticker: r.ticker, strike: r.strike, expiration: r.expiration, dte: r.dte,
+          premium: r.premium, lastPrice: r.last_price, ivRank: r.iv_rank, expectedAnnualizedPct: r.annualized_return
+        });
+        if ('excluded' in res) {
+          setProxy.run(res.excluded.reason, r.id);
+        } else {
+          const x = res.row;
+          setReal.run(x.strike, x.premium, x.expiration, x.settle, x.assigned ? 1 : 0, x.rocPct, r.id);
+        }
+      }
+    });
   }
 
   // ── Query methods ─────────────────────────────────────────────────────────
@@ -704,7 +780,36 @@ export class BriefReplayService {
 
       const hitRate = (pos: number, n: number) => n > 0 ? Math.round((pos / n) * 1000) / 10 : null;
 
+      // Income/wheel: real outcome where the recommended CSP has settled, proxy for the rest.
+      let real: ReplaySummary['real'] = null;
+      if (strategy === 'income' || strategy === 'wheel') {
+        type RRow = { roc: number; assigned: number };
+        const settled = this.db.prepare(`
+          SELECT ro.real_roc_pct AS roc, ro.real_assigned AS assigned
+          FROM replay_outcomes ro JOIN replay_briefs rb ON rb.id = ro.replay_brief_id
+          WHERE rb.strategy = ? AND ro.outcome_source = 'real' AND ro.real_roc_pct IS NOT NULL
+        `).all(strategy) as RRow[];
+        const proxy = this.db.prepare(`
+          SELECT COUNT(*) AS n,
+                 SUM(CASE WHEN ro.stayed_above_strike = 1 THEN 1 ELSE 0 END) AS kept,
+                 COUNT(ro.stayed_above_strike) AS judged
+          FROM replay_outcomes ro JOIN replay_briefs rb ON rb.id = ro.replay_brief_id
+          WHERE rb.strategy = ? AND (ro.outcome_source IS NULL OR ro.outcome_source = 'proxy')
+        `).get(strategy) as { n: number; kept: number | null; judged: number };
+        const rocs = settled.map(x => x.roc).sort((a, b) => a - b);
+        const round2 = (v: number) => Math.round(v * 100) / 100;
+        real = {
+          n: settled.length,
+          assignedRate: hitRate(settled.filter(x => x.assigned === 1).length, settled.length),
+          avgRocPct: rocs.length ? round2(rocs.reduce((s, v) => s + v, 0) / rocs.length) : null,
+          medianRocPct: rocs.length ? round2(rocs[Math.floor((rocs.length - 1) / 2)]!) : null,
+          proxyOnlyN: proxy.n,
+          proxyOnlyKeptRate: hitRate(proxy.kept ?? 0, proxy.judged),
+        };
+      }
+
       return {
+        real,
         strategy,
         totalDates:  briefs.total_dates,
         totalPicks:  picks.total_picks,
@@ -741,6 +846,13 @@ export class BriefReplayService {
       close_price: number | null;
       close_date: string | null;
       evaluated_at: string | null;
+      outcome_source: 'real' | 'proxy' | null;
+      real_strike: number | null;
+      real_premium: number | null;
+      real_expiration: string | null;
+      real_assigned: number | null;
+      real_roc_pct: number | null;
+      real_skip_reason: string | null;
     };
 
     const rows = this.db.prepare(`
@@ -749,7 +861,9 @@ export class BriefReplayService {
         ro.ticker, ro.rank, ro.composite_score,
         ro.entry_price, ro.ret_5d, ro.ret_10d, ro.ret_21d,
         ro.max_drawdown_21d, ro.stayed_above_strike,
-        ro.close_price, ro.close_date, ro.evaluated_at
+        ro.close_price, ro.close_date, ro.evaluated_at,
+        ro.outcome_source, ro.real_strike, ro.real_premium, ro.real_expiration,
+        ro.real_assigned, ro.real_roc_pct, ro.real_skip_reason
       FROM replay_outcomes ro
       JOIN replay_briefs rb ON rb.id = ro.replay_brief_id
       WHERE 1=1 ${strategyFilter}
@@ -773,6 +887,13 @@ export class BriefReplayService {
       closePrice:         r.close_price,
       closeDate:          r.close_date,
       evaluatedAt:        r.evaluated_at,
+      outcomeSource:      r.outcome_source,
+      realStrike:         r.real_strike,
+      realPremium:        r.real_premium,
+      realExpiration:     r.real_expiration,
+      realAssigned:       r.real_assigned === null ? null : r.real_assigned === 1,
+      realRocPct:         r.real_roc_pct,
+      realSkipReason:     r.real_skip_reason,
     }));
   }
 

@@ -1,6 +1,7 @@
 import { ipcMain, BrowserWindow } from 'electron';
 import type { BriefReplayService } from '../services/brief-replay-service.js';
 import type { IpcResult, ReplayProgressEvent } from '@shared/types.js';
+import { logErrorFromException } from '../services/logger.js';
 
 function ok<T>(value: T): IpcResult<T> { return { ok: true, value }; }
 function fail(message: string): IpcResult<never> { return { ok: false, error: { code: 'ERR', message } }; }
@@ -61,6 +62,10 @@ export function registerBriefReplayIpc(service: BriefReplayService): void {
 
   ipcMain.handle('replay:get-summaries', (): IpcResult<ReturnType<BriefReplayService['getSummaries']>> => {
     try {
+      // Income/wheel options expire weeks after a replay runs, so settle any that have expired
+      // since — otherwise a replay keeps its proxy outcomes until it is re-run. A failure here
+      // must not hide the summaries.
+      try { service.settleRealOutcomes(); } catch (err) { logErrorFromException(err, 'replay:settle-real-outcomes', null, 'ERROR'); }
       return ok(service.getSummaries());
     } catch (err) {
       return fail(err instanceof Error ? err.message : String(err));

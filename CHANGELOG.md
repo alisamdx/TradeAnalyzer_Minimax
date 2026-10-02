@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.337] - 2026-10-01
+
+### Brief Replay settles income/wheel picks on real premium
+
+The proxy for income and wheel uses a synthetic 0.85 × entry strike and a 21-session low, with no premium. On ~58k puts it agreed with real outcomes only ~77% of the time and overstated "kept" (85% vs ~73%). Each income/wheel pick is now settled at expiry on the CSP the app actually recommended that day (migration 089, `settleRealOutcomes`). It uses the same `settleStoredCsp` and split guard as the premium-roc report, and re-checks on every summary load as puts expire. Picks without a recorded put, or whose put hasn't expired, keep the proxy, labelled with the reason. The view adds a separate "Income & Wheel — real option outcome" table and a per-pick Real ROC column. The stock-move HR/Avg columns are unchanged.
+
+Details: `changelogs/v1.1.337_2026-10-01.md`.
+
 ## [1.1.336] - 2026-10-01
 
 ### Real income/wheel return on capital

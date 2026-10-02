@@ -2379,10 +2379,24 @@ export interface ReplayPickRow {
   ret10d: number | null;
   ret21d: number | null;
   maxDrawdown21d: number | null;
+  /** Brief Replay's PROXY verdict (0.85 × entry strike, 21-session low). Kept for comparison. */
   stayedAboveStrike: boolean | null;
   closePrice: number | null;
   closeDate: string | null;
   evaluatedAt: string | null;
+  /**
+   * Income/wheel only: 'real' when the pick was settled on the CSP actually recommended that day
+   * (options_premium_history), 'proxy' when only the proxy exists; null for other strategies.
+   */
+  outcomeSource: 'real' | 'proxy' | null;
+  realStrike: number | null;
+  realPremium: number | null;
+  realExpiration: string | null;
+  realAssigned: boolean | null;
+  /** (premium − max(0, strike − settle)) / strike × 100. see docs/formulas.md#premium-roc */
+  realRocPct: number | null;
+  /** Why a stored CSP was not settled (not_expired, scale_mismatch_*, no_*_bar). */
+  realSkipReason: string | null;
 }
 
 // Coverage/readiness of the options_premium_history table — drives the in-app
@@ -2411,6 +2425,19 @@ export interface ReplaySummary {
   avgReturn5d: number | null;
   avgReturn10d: number | null;
   avgReturn21d: number | null;
+  /**
+   * Income/wheel only (null otherwise): picks settled on real premium at expiry, and the rest,
+   * which only have the 0.85 × entry proxy. see docs/formulas.md#premium-roc
+   */
+  real: {
+    n: number;
+    assignedRate: number | null;
+    avgRocPct: number | null;
+    medianRocPct: number | null;
+    proxyOnlyN: number;
+    /** Proxy "kept" rate on the proxy-only picks — the old measure, shown for what it is. */
+    proxyOnlyKeptRate: number | null;
+  } | null;
 }
 
 export interface ReplayChartStrategyStats {

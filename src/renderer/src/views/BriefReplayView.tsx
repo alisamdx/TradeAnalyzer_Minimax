@@ -210,7 +210,78 @@ function PickPnlModal({ result, onClose }: { result: AggregatePickBacktest; onCl
   );
 }
 
-type PickSortKey = 'asOfDate' | 'strategy' | 'ticker' | 'rank' | 'compositeScore' | 'entryPrice' | 'ret5d' | 'ret10d' | 'ret21d' | 'closeDate' | 'closePrice' | 'maxDrawdown21d';
+// Income/wheel picks settled on the real premium of the CSP recommended that day, held to expiry.
+// The HR/Avg columns above score the STOCK's move for every strategy; this is the option's result.
+// Picks with no stored CSP (before premium history began) or not yet expired keep the old
+// 0.85 × entry proxy, shown separately so the two are never blended. see docs/formulas.md#premium-roc
+function RealOutcomeTable({ summaries }: { summaries: ReplaySummary[] }) {
+  const rows = summaries.filter(s => s.real !== null);
+  if (rows.length === 0) return null;
+  const muted: React.CSSProperties = { textAlign: 'right', color: 'var(--text-muted)' };
+  return (
+    <div style={{ overflowX: 'auto', marginBottom: 24 }}>
+      <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>Income &amp; Wheel — real option outcome</h3>
+      <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '0 0 8px' }}>
+        Each pick settled at expiry on the put actually recommended that day: premium kept, minus any
+        shortfall below the strike, as a % of the strike. Picks without a recorded put, or whose put has
+        not expired yet, fall back to the proxy (a strike at 85% of entry never touched in 21 sessions).
+      </p>
+      <table className="data-table" style={{ width: '100%', fontSize: 13 }}>
+        <thead>
+          <tr>
+            <th style={{ textAlign: 'left' }}>Strategy</th>
+            <th style={{ textAlign: 'right' }} title="Picks settled on real premium">Settled</th>
+            <th style={{ textAlign: 'right' }}>Assigned</th>
+            <th style={{ textAlign: 'right' }} title="Mean return on capital per trade">Avg ROC</th>
+            <th style={{ textAlign: 'right' }} title="Median return on capital per trade">Median ROC</th>
+            <th style={{ textAlign: 'right' }} title="Picks with only the proxy outcome">Proxy only</th>
+            <th style={{ textAlign: 'right' }} title="Proxy 'kept' rate on those picks — the old measure; it overstates how often a put avoids assignment">Proxy kept</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(s => {
+            const r = s.real!;
+            return (
+              <tr key={s.strategy}>
+                <td style={{ fontWeight: 600, textTransform: 'capitalize' }}>{s.strategy}</td>
+                <td style={{ textAlign: 'right' }}>{r.n}</td>
+                <td style={{ textAlign: 'right' }}>{r.assignedRate !== null ? `${r.assignedRate}%` : '—'}</td>
+                <td style={{ textAlign: 'right', color: retColor(r.avgRocPct) }}>{fmtRoc(r.avgRocPct)}</td>
+                <td style={{ textAlign: 'right', color: retColor(r.medianRocPct) }}>{fmtRoc(r.medianRocPct)}</td>
+                <td style={muted}>{r.proxyOnlyN}</td>
+                <td style={muted}>{r.proxyOnlyKeptRate !== null ? `${r.proxyOnlyKeptRate}%` : '—'}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function fmtRoc(v: number | null): string {
+  if (v === null) return '—';
+  return `${v > 0 ? '+' : ''}${v.toFixed(2)}%`;
+}
+
+function realOutcomeCell(p: ReplayPickRow): { text: string; color: string; title: string } {
+  if (p.outcomeSource === 'real' && p.realRocPct !== null) {
+    return {
+      text: `${fmtRoc(p.realRocPct)}${p.realAssigned ? ' A' : ''}`,
+      color: retColor(p.realRocPct),
+      title: `$${p.realStrike?.toFixed(2)} put exp ${p.realExpiration}, premium $${p.realPremium?.toFixed(2)}` +
+        (p.realAssigned ? ' — assigned' : ' — expired worthless'),
+    };
+  }
+  if (p.outcomeSource === 'proxy') {
+    const why = p.realSkipReason === 'not_expired' ? 'put not expired yet'
+      : p.realSkipReason ? `not settled: ${p.realSkipReason}` : 'no recorded put for this date';
+    return { text: 'proxy', color: 'var(--text-muted)', title: `${why}. Proxy verdict: ${p.stayedAboveStrike === null ? '—' : p.stayedAboveStrike ? 'kept' : 'breached'}` };
+  }
+  return { text: '—', color: '', title: '' };
+}
+
+type PickSortKey = 'asOfDate' | 'strategy' | 'ticker' | 'rank' | 'compositeScore' | 'entryPrice' | 'ret5d' | 'ret10d' | 'ret21d' | 'closeDate' | 'closePrice' | 'maxDrawdown21d' | 'realRocPct';
 
 function sortPicks(rows: ReplayPickRow[], key: PickSortKey, dir: 'asc' | 'desc'): ReplayPickRow[] {
   return [...rows].sort((a, b) => {
@@ -259,6 +330,8 @@ function PicksTable({ picks }: { picks: ReplayPickRow[] }) {
             <th style={thStyle('closeDate')}           onClick={() => handleSort('closeDate')}>Close Date{arrow('closeDate')}</th>
             <th style={thStyle('closePrice')}          onClick={() => handleSort('closePrice')}>Close{arrow('closePrice')}</th>
             <th style={thStyle('maxDrawdown21d')}      onClick={() => handleSort('maxDrawdown21d')}>Drawdown{arrow('maxDrawdown21d')}</th>
+            <th style={thStyle('realRocPct')}          onClick={() => handleSort('realRocPct')}
+                title="Income/wheel: return on capital of the put recommended that day, held to expiry (A = assigned)">Real ROC{arrow('realRocPct')}</th>
           </tr>
         </thead>
         <tbody>
@@ -282,6 +355,10 @@ function PicksTable({ picks }: { picks: ReplayPickRow[] }) {
               <td style={{ textAlign: 'right', color: p.maxDrawdown21d !== null && p.maxDrawdown21d < -5 ? '#ef5350' : '' }}>
                 {fmtPct(p.maxDrawdown21d)}
               </td>
+              {(() => {
+                const c = realOutcomeCell(p);
+                return <td style={{ textAlign: 'right', color: c.color, whiteSpace: 'nowrap' }} title={c.title}>{c.text}</td>;
+              })()}
             </tr>
           ))}
         </tbody>
@@ -318,8 +395,8 @@ function PremiumHistoryBanner({ readiness }: { readiness: PremiumHistoryReadines
       {ready ? (
         <>
           📊 <strong>Options premium history is ready</strong> — {maturedDays} matured days captured
-          {fromDate ? ` since ${fromDate}` : ''}. Real income/wheel return-on-capital can now be computed
-          from actual premium (not the stayed-above-strike proxy). Ask Claude to build the ROC view.
+          {fromDate ? ` since ${fromDate}` : ''}. Income/wheel picks are settled on the real premium of the
+          recommended put wherever one was recorded — see “Income &amp; Wheel — real option outcome” below.
         </>
       ) : (
         <>
@@ -539,6 +616,7 @@ export default function BriefReplayView() {
         <>
           <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 10, marginTop: 8 }}>Hit-Rate Summary</h3>
           <SummaryTable summaries={summaries} onBacktest={handlePnlBacktest} />
+          <RealOutcomeTable summaries={summaries} />
         </>
       )}
 

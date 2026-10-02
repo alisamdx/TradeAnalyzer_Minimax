@@ -86,7 +86,7 @@ export interface PremiumRocReport {
   readonly excluded: readonly ExcludedRow[];
 }
 
-interface Bar { date: string; low: number; close: number }
+export interface Bar { date: string; low: number; close: number }
 
 function lastIndexAtOrBefore(bars: readonly Bar[], target: string): number {
   let lo = 0;
@@ -108,6 +108,89 @@ export function settleShortPut(strike: number, premium: number, settle: number):
   const intrinsic = Math.max(0, strike - settle);
   const pnl = premium - intrinsic;
   return { pnl, rocPct: (pnl / strike) * 100, assigned: settle < strike };
+}
+
+/** One stored CSP as read from `options_premium_history`. */
+export interface StoredCsp {
+  readonly asOfDate: string;
+  readonly ticker: string;
+  readonly strike: number;
+  readonly expiration: string;
+  readonly dte: number | null;
+  readonly premium: number;
+  readonly lastPrice: number | null;
+  readonly ivRank: number | null;
+  readonly expectedAnnualizedPct: number | null;
+}
+
+export type SettleResult = { row: PremiumRocRow } | { excluded: ExcludedRow };
+
+/**
+ * Settle one stored CSP against its ticker's bars (ascending by date), applying the scale guard.
+ * The single implementation behind both this report and Brief Replay's real outcome, so the two
+ * can never settle the same put differently. see docs/formulas.md#premium-roc
+ */
+export function settleStoredCsp(bars: readonly Bar[], r: StoredCsp): SettleResult {
+  const base = { asOfDate: r.asOfDate, ticker: r.ticker, strike: r.strike, expiration: r.expiration };
+  const exclude = (reason: ExclusionReason, detail: string): SettleResult => ({ excluded: { ...base, reason, detail } });
+
+  const ei = lastIndexAtOrBefore(bars, r.asOfDate);
+  if (ei < 0 || daysBetween(bars[ei]!.date, r.asOfDate) > MAX_SETTLE_GAP_DAYS) {
+    return exclude('no_entry_bar', 'no close on or just before the capture date');
+  }
+  const entryClose = bars[ei]!.close;
+
+  if (r.lastPrice !== null && r.lastPrice > 0) {
+    const ratio = r.lastPrice / entryClose;
+    if (Math.abs(ratio - 1) > ENTRY_SCALE_TOLERANCE) {
+      return exclude('scale_mismatch_entry', `last_price/close = ${ratio.toFixed(3)}`);
+    }
+  } else {
+    const ratio = r.strike / entryClose;
+    if (ratio < STRIKE_TO_ENTRY_BAND[0] || ratio > STRIKE_TO_ENTRY_BAND[1]) {
+      return exclude('scale_mismatch_entry', `strike/close = ${ratio.toFixed(3)} (no last_price)`);
+    }
+  }
+
+  const si = lastIndexAtOrBefore(bars, r.expiration);
+  if (si <= ei || daysBetween(bars[si]!.date, r.expiration) > MAX_SETTLE_GAP_DAYS) {
+    return exclude('no_settle_bar', 'no close on or just before expiration');
+  }
+  const settleBar = bars[si]!;
+  const move = settleBar.close / entryClose;
+  if (move < SETTLE_TO_ENTRY_BAND[0] || move > SETTLE_TO_ENTRY_BAND[1]) {
+    return exclude('scale_mismatch_settle', `settle/entry = ${move.toFixed(3)}`);
+  }
+
+  const { rocPct, assigned } = settleShortPut(r.strike, r.premium, settleBar.close);
+  const dte = r.dte !== null && r.dte > 0 ? r.dte : Math.max(1, daysBetween(r.asOfDate, r.expiration));
+
+  // Brief Replay's proxy, exactly: entry bar plus the next 21 sessions, every low ≥ 0.85 × entry.
+  let proxyKept: boolean | null = null;
+  if (ei + PROXY_SESSIONS < bars.length) {
+    const synth = entryClose * PROXY_STRIKE_FRACTION;
+    proxyKept = bars.slice(ei, ei + PROXY_SESSIONS + 1).every((b) => b.low >= synth);
+  }
+
+  return {
+    row: {
+      asOfDate: r.asOfDate,
+      ticker: r.ticker,
+      strike: r.strike,
+      expiration: r.expiration,
+      dte,
+      premium: r.premium,
+      ivRank: r.ivRank,
+      expectedAnnualizedPct: r.expectedAnnualizedPct,
+      entryClose,
+      settle: settleBar.close,
+      settleDate: settleBar.date,
+      assigned,
+      rocPct,
+      annualizedRocPct: rocPct * (365 / dte),
+      proxyKept
+    }
+  };
 }
 
 export function premiumRoc(db: PanelDb, strategy: RocStrategy): PremiumRocReport {
@@ -150,68 +233,12 @@ export function premiumRoc(db: PanelDb, strategy: RocStrategy): PremiumRocReport
       bars = barsFor.all(r.ticker) as Bar[];
       series.set(r.ticker, bars);
     }
-    const base = { asOfDate: r.as_of_date, ticker: r.ticker, strike: r.strike, expiration: r.expiration };
-
-    const ei = lastIndexAtOrBefore(bars, r.as_of_date);
-    if (ei < 0 || daysBetween(bars[ei]!.date, r.as_of_date) > MAX_SETTLE_GAP_DAYS) {
-      excluded.push({ ...base, reason: 'no_entry_bar', detail: 'no close on or just before the capture date' });
-      continue;
-    }
-    const entryClose = bars[ei]!.close;
-
-    if (r.last_price !== null && r.last_price > 0) {
-      const ratio = r.last_price / entryClose;
-      if (Math.abs(ratio - 1) > ENTRY_SCALE_TOLERANCE) {
-        excluded.push({ ...base, reason: 'scale_mismatch_entry', detail: `last_price/close = ${ratio.toFixed(3)}` });
-        continue;
-      }
-    } else {
-      const ratio = r.strike / entryClose;
-      if (ratio < STRIKE_TO_ENTRY_BAND[0] || ratio > STRIKE_TO_ENTRY_BAND[1]) {
-        excluded.push({ ...base, reason: 'scale_mismatch_entry', detail: `strike/close = ${ratio.toFixed(3)} (no last_price)` });
-        continue;
-      }
-    }
-
-    const si = lastIndexAtOrBefore(bars, r.expiration);
-    if (si <= ei || daysBetween(bars[si]!.date, r.expiration) > MAX_SETTLE_GAP_DAYS) {
-      excluded.push({ ...base, reason: 'no_settle_bar', detail: 'no close on or just before expiration' });
-      continue;
-    }
-    const settleBar = bars[si]!;
-    const move = settleBar.close / entryClose;
-    if (move < SETTLE_TO_ENTRY_BAND[0] || move > SETTLE_TO_ENTRY_BAND[1]) {
-      excluded.push({ ...base, reason: 'scale_mismatch_settle', detail: `settle/entry = ${move.toFixed(3)}` });
-      continue;
-    }
-
-    const { rocPct, assigned } = settleShortPut(r.strike, r.premium, settleBar.close);
-    const dte = r.dte !== null && r.dte > 0 ? r.dte : Math.max(1, daysBetween(r.as_of_date, r.expiration));
-
-    // Brief Replay's proxy, exactly: entry bar plus the next 21 sessions, every low ≥ 0.85 × entry.
-    let proxyKept: boolean | null = null;
-    if (ei + PROXY_SESSIONS < bars.length) {
-      const synth = entryClose * PROXY_STRIKE_FRACTION;
-      proxyKept = bars.slice(ei, ei + PROXY_SESSIONS + 1).every((b) => b.low >= synth);
-    }
-
-    rows.push({
-      asOfDate: r.as_of_date,
-      ticker: r.ticker,
-      strike: r.strike,
-      expiration: r.expiration,
-      dte,
-      premium: r.premium,
-      ivRank: r.iv_rank,
-      expectedAnnualizedPct: r.annualized_return,
-      entryClose,
-      settle: settleBar.close,
-      settleDate: settleBar.date,
-      assigned,
-      rocPct,
-      annualizedRocPct: rocPct * (365 / dte),
-      proxyKept
+    const res = settleStoredCsp(bars, {
+      asOfDate: r.as_of_date, ticker: r.ticker, strike: r.strike, expiration: r.expiration, dte: r.dte,
+      premium: r.premium, lastPrice: r.last_price, ivRank: r.iv_rank, expectedAnnualizedPct: r.annualized_return
     });
+    if ('excluded' in res) excluded.push(res.excluded);
+    else rows.push(res.row);
   }
 
   return { strategy, maxPriceDate, eligible: raw.length, coveredCallsSkipped: cc.n, rows, excluded };
