@@ -409,6 +409,13 @@ Provenance: **measured** (a #43 study result) · **inherited** (a wheel-screen r
     neighbouring weeklies, not yet evidence about monthlies.
   - **Next:** re-run after late October, once captures cover the November cycle. If it holds, add a
     shadow variant for B so returns can be measured (FR-SEY-5: cost is not return). No rule changed.
+  **RE-RUN 2026-10-01 (`bps19-monthly-rule-2026-10-01.md`, through the app's API, v1.1.339) — no new
+  cycle, so no new evidence.** 793 runs, disagreements 231 → **236**; every figure within a point of
+  09-26 (B 18.2% vs A 30.4%, paired −8.2% on 192/236, both-tradable −2.9% on 70/86, net +60, B thinner
+  on 44%). The 229 added runs mostly read **"no monthly in the window" (198, was 0)**: Oct 16 has fallen
+  below 21 DTE and Nov 20 is still beyond 35, so the rules cannot disagree. The disagreements are still
+  the Oct 16 cycle. **Do not re-run before ~2026-10-20**, when Nov 20 enters 21–35 DTE; until then a
+  re-run repeats this one.
 
 - **BPS-18. The `premium` arm and the budget interact, and nobody chose that.** *Observed 2026-09-22,
   untested.* 7 of 22 shadow positions are unaffordable at the stored $250, and they are overwhelmingly
