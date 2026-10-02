@@ -849,8 +849,44 @@ async function main() {
     }
   }
 
-  console.log(`\n64 configurations were compared in §2–4c and ${portfolioConfigs.length} in §7; expect the best to look better than it is. `
-    + 'Prefer a setting that is good across neighbours over the single top row.');
+  // BPS-9 — the 25% cost gate was chosen, never swept. Same adopted profile with the gate varied. The
+  // share is 4 leg-fills of slip ÷ mid credit, so with `--slip-model quoted` a quoted ticker's share
+  // comes from real captured spreads and an unquoted one's from the flat fallback: a $0 fallback puts
+  // every unquoted entry at 0% and through every gate, so the quoted-only rows are the ones to read.
+  const COST_GATES = [null, 0.40, 0.35, 0.30, 0.25, 0.20, 0.15];
+  const NOGATE = { ...MODE, maxCostShare: null };
+  console.log(`\n## 9. Cost-gate sweep (BPS-9) — ${cfgLabel(NOGATE)} with round-trip cost ≤ X% of mid credit\n`);
+  console.log(`Fallback slip $${SLIP}/leg for entries without quotes${SLIP === 0 ? ' — at $0 they all pass every gate; read the quoted rows' : ''}. `
+    + 'Each row keeps the entries whose spread clears the gate; the CSP columns are the SAME entries.\n');
+  const gated = g => runAll(episodes, { ...NOGATE, maxCostShare: g });
+  const allN = gated(null).length;
+  const isQuoted = r => quoted != null && quoted.perTicker.has(r.e.ticker);
+  console.log(HEAD); console.log(SEP);
+  for (const g of COST_GATES) {
+    const rows = gated(g);
+    console.log(line(`${g == null ? 'no gate' : `cost ≤ ${f(g * 100, 0)}%`} — all (${rows.length}/${allN} pass)`, rows));
+  }
+  if (quoted) {
+    const qAll = gated(null).filter(isQuoted).length;
+    for (const g of COST_GATES) {
+      const rows = gated(g).filter(isQuoted);
+      console.log(line(`${g == null ? 'no gate' : `cost ≤ ${f(g * 100, 0)}%`} — quoted only (${rows.length}/${qAll})`, rows));
+    }
+  }
+  console.log('\nPortfolio, same pot and sizing as §7, every replay day:\n');
+  console.log('| gate | SPREAD final | return % | ann. % | max DD | trades | CSP final | return % | max DD | trades |');
+  console.log('|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|');
+  for (const g of COST_GATES) {
+    const rows = runAll(pooled, { ...NOGATE, maxCostShare: g });
+    const s = simulatePortfolio(rows, 'spread', opts), c = simulatePortfolio(rows, 'csp', opts);
+    console.log(`| ${g == null ? 'none' : `≤ ${f(g * 100, 0)}%`} | ${money(s.final)} | **${f(s.retPct)}** | ${f(s.annPct)} | ${money(s.maxDd)} (${f(s.maxDdPct)}%) | ${s.taken} `
+      + `| ${money(c.final)} | **${f(c.retPct)}** | ${money(c.maxDd)} (${f(c.maxDdPct)}%) | ${c.taken} |`);
+  }
+  console.log('\nRead: a gate earns its level if tightening it improves the spread\'s mean and tail on the QUOTED rows '
+    + 'without emptying the sample; a flat or noisy curve means the level is a judgement call, not a finding.');
+
+  console.log(`\n${64 + COST_GATES.length * 2} configurations were compared in §2–4c and §9, and ${portfolioConfigs.length + COST_GATES.length} portfolios in §7 and §9; `
+    + 'expect the best to look better than it is. Prefer a setting that is good across neighbours over the single top row.');
 }
 
 main();
