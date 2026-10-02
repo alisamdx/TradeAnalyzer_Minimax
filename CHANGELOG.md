@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.340] - 2026-10-02
+
+### The BPS-2 pool-selection study reads through the app
+
+The last bull-put-spread study that opened the production SQLite file now reads a new read-only `GET /diagnostics/pool-selection-panel`. It returns the wheel snapshots (latest run per date, projected to the eight fields the study uses) and each ticker's closes from 400 days before the first snapshot, enough for the study's 200-bar lookbacks to see identical bars. `--db` stays for the self-test fixture only (16/16). No spread study opens the live database any more.
+
+Details: `changelogs/v1.1.340_2026-10-02.md`.
+
 ## [1.1.339] - 2026-10-01
 
 ### The DTE-cost and monthly-rule harnesses read through the app

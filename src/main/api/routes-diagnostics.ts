@@ -10,6 +10,7 @@ import { premiumRoc, ROC_STRATEGIES, type RocStrategy } from '../services/premiu
 import { buildSpreadShadowReport } from '../services/spread-mode-settle.js';
 import { spreadStudyPanel } from '../services/spread-study-panel.js';
 import { spreadCapturePanel } from '../services/spread-capture-panel.js';
+import { poolSelectionPanel } from '../services/pool-selection-panel.js';
 import { readStaleGreekShadow } from '../services/stale-greek-shadow.js';
 
 export function registerDiagnosticsRoutes(app: FastifyInstance, svc: ApiServerServices): void {
@@ -110,6 +111,17 @@ export function registerDiagnosticsRoutes(app: FastifyInstance, svc: ApiServerSe
   app.get<{ Querystring: { earnings?: string } }>('/diagnostics/spread-capture-panel', async (req, reply) => {
     try {
       return apiOk(reply, spreadCapturePanel(svc.db as unknown as PanelDb, req.query.earnings === '1'));
+    } catch (err) {
+      return apiError(reply, err instanceof Error ? err.message : String(err), 'INTERNAL', 500);
+    }
+  });
+
+  // GET /diagnostics/pool-selection-panel — the wheel analysis snapshots (latest per date, projected)
+  // and price series that scripts/fr-spread-pool-selection-study.mjs (BPS-2) reads. Read-only.
+  // see services/pool-selection-panel.ts
+  app.get('/diagnostics/pool-selection-panel', async (_req, reply) => {
+    try {
+      return apiOk(reply, poolSelectionPanel(svc.db as unknown as PanelDb));
     } catch (err) {
       return apiError(reply, err instanceof Error ? err.message : String(err), 'INTERNAL', 500);
     }

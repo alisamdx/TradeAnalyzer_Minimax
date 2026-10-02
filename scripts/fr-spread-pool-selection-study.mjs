@@ -41,19 +41,15 @@
 //     N has sampling noise a whole-universe mean does not. Each rule is compared against repeated
 //     random draws of the SAME size on the SAME dates.
 //
-// Needs the NODE better-sqlite3 ABI. `npm run package` leaves it set to ELECTRON, so if you have just
-// built, run `npm run rebuild:node` first or this dies with NODE_MODULE_VERSION 128 vs 137.
-//
-// Run from a NORMAL terminal (not a Claude session — that shell is MSIX-redirected and reads a shadow
-// copy of the database; see CLAUDE.md). The app may be running: this only reads.
+// Run with TradeAnalyzer RUNNING (it reads GET /api/v1/diagnostics/pool-selection-panel, v1.1.340+). It
+// never opens the live SQLite file, so any shell works, including the Claude app's, and no rebuild:node.
 //
 //   node scripts/fr-spread-pool-selection-study.mjs [--top 15] [--min-liq 5] [--episode-days 14]
 //                                                   [--draws 400] [--out FILE]
 //
 // see docs/wheel-parameters.md (F7, F8, T5, T6), NewApp/TODO-bull-put-spread.md BPS-2
 
-import Database from 'better-sqlite3';
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 
@@ -70,11 +66,59 @@ const SCALE_TOLERANCE = 0.35;
 const out = [];
 const say = (s = '') => { out.push(s); console.log(s); };
 
-// --db exists so the harness can be exercised end-to-end against a synthetic fixture before it is
-// trusted on real data (scripts/selftest-spread-pool-selection.mjs). It is NOT for pointing at a copy
-// of the live database: a copy read while the app is running is a stale shadow (CLAUDE.md).
-const db = new Database(strOf('--db', join(homedir(), 'AppData', 'Roaming', 'trade-analyzer', 'trade-analyzer.sqlite')));
-const maxPx = db.prepare('SELECT MAX(date) d FROM historical_prices').get().d;
+// Real data comes from the RUNNING app (GET /diagnostics/pool-selection-panel, v1.1.340+): one wheel
+// snapshot per date (latest wins) and each snapshot ticker's closes. --db exists ONLY so the harness can
+// be exercised end-to-end against a synthetic fixture (scripts/selftest-spread-pool-selection.mjs) — a
+// fresh file nothing else has open. It is NOT for pointing at the live database or a copy of it
+// (CLAUDE.md), and it is the only path that imports better-sqlite3.
+async function loadPanel() {
+  const dbPath = strOf('--db', null);
+  if (dbPath) {
+    const { default: Database } = await import('better-sqlite3');
+    const db = new Database(dbPath, { fileMustExist: true });
+    try {
+      const perDate = new Map();
+      for (const r of db.prepare(
+        `SELECT run_at, payload_json FROM analysis_snapshots WHERE mode='wheel' ORDER BY run_at`).all()) {
+        perDate.set(r.run_at.slice(0, 10), r.payload_json);
+      }
+      const snapshots = [];
+      for (const [date, payload] of perDate) {
+        let p; try { p = JSON.parse(payload); } catch { snapshots.push({ date, rows: [] }); continue; }
+        snapshots.push({ date, rows: Array.isArray(p) ? p : p?.results ?? [] });
+      }
+      const stmt = db.prepare('SELECT date, close FROM historical_prices WHERE ticker = ? ORDER BY date');
+      const series = {};
+      for (const s of snapshots) for (const x of s.rows) {
+        if (x?.ticker && !series[x.ticker]) series[x.ticker] = stmt.all(x.ticker).map(b => [b.date, b.close]);
+      }
+      return { maxPx: db.prepare('SELECT MAX(date) d FROM historical_prices').get().d, snapshots, series };
+    } finally { db.close(); }
+  }
+  const dataDir = join(homedir(), '.tradeanalyzer');
+  let token;
+  try { token = readFileSync(join(dataDir, 'agent.token'), 'utf8').trim(); } catch {
+    console.error(`No agent token at ${join(dataDir, 'agent.token')} — start TradeAnalyzer once to create it.`);
+    process.exit(2);
+  }
+  let port = '7432';
+  try { port = readFileSync(join(dataDir, 'api.port'), 'utf8').trim() || port; } catch { /* default */ }
+  const res = await fetch(`http://127.0.0.1:${port}/api/v1/diagnostics/pool-selection-panel`, {
+    headers: { 'X-Agent-Token': token },
+  }).catch((err) => {
+    console.error(`API server not reachable on 127.0.0.1:${port} — the app must be RUNNING. (${err.message})`);
+    process.exit(3);
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok || !body?.ok) {
+    console.error(`pool-selection-panel failed: HTTP ${res.status} ${body?.error ?? ''}`);
+    if (res.status === 404) console.error('This app build predates the route (v1.1.340). Install the new build.');
+    process.exit(4);
+  }
+  return body.data;
+}
+const panel = await loadPanel();
+const maxPx = panel.maxPx;
 
 const mean = a => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
 const med = a => { const s = [...a].sort((x, y) => x - y); return s.length ? s[Math.floor(s.length / 2)] : null; };
@@ -88,9 +132,8 @@ const clamp = x => Math.max(0, Math.min(100, x));
 
 // ── Price series, cached ────────────────────────────────────────────────────
 const seriesCache = new Map();
-const seriesStmt = db.prepare('SELECT date, close FROM historical_prices WHERE ticker = ? ORDER BY date');
 const series = t => {
-  if (!seriesCache.has(t)) seriesCache.set(t, seriesStmt.all(t));
+  if (!seriesCache.has(t)) seriesCache.set(t, (panel.series[t] ?? []).map(([date, close]) => ({ date, close })));
   return seriesCache.get(t);
 };
 function upTo(rows, date) {
@@ -171,20 +214,14 @@ function composite70(r) {
   return num / W_TOTAL;
 }
 
-// ── Universe, one snapshot per date (the batch runs twice a day; later wins) ─
-const perDate = new Map();
-for (const r of db.prepare(
-  `SELECT run_at, payload_json FROM analysis_snapshots WHERE mode='wheel' ORDER BY run_at`).all()) {
-  perDate.set(r.run_at.slice(0, 10), r.payload_json);
-}
+// ── Universe, one snapshot per date (the batch runs twice a day; later wins — done by loadPanel) ─
 
 let rawRows = 0, noStructure = 0, unsettled = 0, illiquidDropped = 0, noSignals = 0;
 const scaleRejects = [];
 const byDate = new Map();
-for (const [date, payload] of perDate) {
-  let p; try { p = JSON.parse(payload); } catch { continue; }
+for (const { date, rows: snapRows } of panel.snapshots) {
   const kept = [];
-  for (const x of (Array.isArray(p) ? p : p?.results ?? [])) {
+  for (const x of snapRows) {
     rawRows++;
     const strike = x?.recommendedStrike, prem = x?.premium, exp = x?.expiration;
     if (!x?.ticker || strike == null || prem == null || !exp) { noStructure++; continue; }
@@ -342,4 +379,3 @@ say(`\n  Sample: ${byDate.size} dates, one regime. A rule that wins here has not
 say(`  generalise — see the hold_days sweep, which was monotone on one month and inverted on six.`);
 
 if (OUT) { writeFileSync(OUT, out.join('\n') + '\n', 'utf8'); console.error(`\nwritten to ${OUT}`); }
-db.close();
