@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.339] - 2026-10-01
+
+### The DTE-cost and monthly-rule harnesses read through the app
+
+The BPS-4 and BPS-19 harnesses loaded `spread_chain_capture` through `spread-study-lib.mjs`, which opened the production SQLite file itself, so they couldn't run from the Claude app's redirected shell. They now read a new read-only `GET /diagnostics/spread-capture-panel`, with the same entry rows in the same order plus optional earnings dates. `loadStudyData` replaces the library's three database functions. `--db` remains for the self-tests' fixtures only, and their 25/25 and 19/19 checks pass through it. A real run no longer needs `rebuild:node`. The BPS-2 pool-selection study is not ported.
+
+Details: `changelogs/v1.1.339_2026-10-01.md`.
+
 ## [1.1.338] - 2026-10-01
 
 ### The bull put spread study reads through the app

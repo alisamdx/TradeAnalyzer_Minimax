@@ -11,7 +11,7 @@
 // Mirrors: src/shared/spread-mode.ts (profile), src/main/services/options-fill.ts (fills),
 // src/main/services/spread-mode.ts (construction and expiry choice).
 
-import Database from 'better-sqlite3';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 
@@ -31,15 +31,65 @@ export const med = a => { const s = [...a].sort((x, y) => x - y); return s.lengt
 export const f = (x, d = 2) => (x == null || Number.isNaN(x) ? '—' : x.toFixed(d));
 export const pctf = (x, d = 1) => (x == null || !Number.isFinite(x) ? '—' : `${(x * 100).toFixed(d)}%`);
 
+const CAPTURE_SQL = `SELECT as_of_date, slot, ticker, expiration, dte, underlying_price, puts_json
+  FROM spread_chain_capture WHERE reason = 'entry' ORDER BY as_of_date, slot, ticker, dte`;
+
 /**
- * --db exists so a harness can be exercised end-to-end against a synthetic fixture before it is
- * trusted on real data. It is NOT for pointing at a copy of the live database: a copy read while the
- * app is running is a stale shadow (CLAUDE.md).
+ * The harnesses' data: `spread_chain_capture` entry rows grouped into runs, plus — when asked —
+ * earnings dates.
+ *
+ * Real data comes from the RUNNING app (GET /diagnostics/spread-capture-panel, v1.1.339+). These
+ * harnesses used to open `%APPDATA%\trade-analyzer\trade-analyzer.sqlite` themselves, which cannot be
+ * done from a redirected shell such as the Claude app's (CLAUDE.md).
+ *
+ * `--db <file>` remains, for the self-tests' synthetic fixtures ONLY — a fresh file no other process
+ * has open. It is NOT for pointing at a copy of the live database: a copy read while the app is running
+ * is a stale shadow (CLAUDE.md). better-sqlite3 is imported only on that path, so a real run does not
+ * need the Node ABI.
  */
-export function openStudyDb(argv) {
+export async function loadStudyData(argv, { earnings: wantEarnings = false } = {}) {
   const i = argv.indexOf('--db');
-  const path = i >= 0 ? argv[i + 1] : join(homedir(), 'AppData', 'Roaming', 'trade-analyzer', 'trade-analyzer.sqlite');
-  return new Database(path);
+  let captures, earningsRows;
+  if (i >= 0) {
+    const { default: Database } = await import('better-sqlite3');
+    const db = new Database(argv[i + 1], { fileMustExist: true });
+    try {
+      captures = db.prepare(CAPTURE_SQL).all();
+      if (wantEarnings) {
+        try { earningsRows = db.prepare('SELECT ticker, report_date FROM earnings_calendar').all(); }
+        catch { earningsRows = null; }   // no table in this fixture — every ticker reads as unconstrained
+      }
+    } finally { db.close(); }
+  } else {
+    const dataDir = join(homedir(), '.tradeanalyzer');
+    let token;
+    try { token = readFileSync(join(dataDir, 'agent.token'), 'utf8').trim(); } catch {
+      console.error(`No agent token at ${join(dataDir, 'agent.token')} — start TradeAnalyzer once to create it.`);
+      process.exit(2);
+    }
+    let port = '7432';
+    try { port = readFileSync(join(dataDir, 'api.port'), 'utf8').trim() || port; } catch { /* default */ }
+    const url = `http://127.0.0.1:${port}/api/v1/diagnostics/spread-capture-panel${wantEarnings ? '?earnings=1' : ''}`;
+    const res = await fetch(url, { headers: { 'X-Agent-Token': token } }).catch((err) => {
+      console.error(`API server not reachable on 127.0.0.1:${port} — the app must be RUNNING. (${err.message})`);
+      process.exit(3);
+    });
+    const body = await res.json().catch(() => null);
+    if (!res.ok || !body?.ok) {
+      console.error(`spread-capture-panel failed: HTTP ${res.status} ${body?.error ?? ''}`);
+      if (res.status === 404) console.error('This app build predates the route (v1.1.339). Install the new build.');
+      process.exit(4);
+    }
+    captures = body.data.captures;
+    earningsRows = body.data.earnings;
+    if (captures == null) {
+      console.error('spread_chain_capture could not be read by the app (no table?) — nothing to study.');
+      process.exit(5);
+    }
+  }
+  const earnings = new Map();
+  for (const r of earningsRows ?? []) if (r.report_date) earnings.set(r.ticker, r.report_date);
+  return { ...groupRuns(captures), earnings };
 }
 
 /** src/main/services/options-fill.ts — a fill sits halfway between mid and the far side. */
@@ -137,11 +187,7 @@ export function pickPreferMonthly(expiries, earningsDate) {
  * `reason = 'entry'` only: those come from the uniform 14–45 day sweep, while a `track` row exists only
  * because that expiry was already picked — a selection effect on whichever bucket it lands in.
  */
-export function loadRuns(db) {
-  const rows = db.prepare(
-    `SELECT as_of_date, slot, ticker, expiration, dte, underlying_price, puts_json
-       FROM spread_chain_capture WHERE reason = 'entry' ORDER BY as_of_date, slot, ticker, dte`,
-  ).all();
+export function groupRuns(rows) {
   const runs = new Map();
   for (const r of rows) {
     const k = `${r.ticker}|${r.as_of_date}|${r.slot}`;
@@ -162,20 +208,12 @@ export function buildFromRow(r) {
 }
 
 /**
- * Earnings dates, as the mode reads them. A ticker with no row gets the sentinel here rather than
- * being dropped: the mode rejects it ("earnings date unknown"), but that refusal is identical for
- * every rule being compared, so dropping those runs would only shrink the sample without changing
- * any difference. Harnesses report how many runs the filter actually bound.
+ * Earnings dates, as the mode reads them, come from `loadStudyData(argv, { earnings: true })`. A ticker
+ * with no row gets the NO_EARNINGS sentinel in the harness rather than being dropped: the mode rejects
+ * it ("earnings date unknown"), but that refusal is identical for every rule being compared, so
+ * dropping those runs would only shrink the sample without changing any difference. Harnesses report
+ * how many runs the filter actually bound.
  */
-export function loadEarnings(db) {
-  const m = new Map();
-  try {
-    for (const r of db.prepare('SELECT ticker, report_date FROM earnings_calendar').all()) {
-      if (r.report_date) m.set(r.ticker, r.report_date);
-    }
-  } catch { /* no table (a fixture) — every ticker reads as unconstrained */ }
-  return m;
-}
 
 /**
  * Median of the per-pair differences with a sign count beside it, or an explicit refusal under `floor`

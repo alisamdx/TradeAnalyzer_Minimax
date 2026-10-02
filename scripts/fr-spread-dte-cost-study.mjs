@@ -48,16 +48,15 @@
 // those come from the uniform 14–45 day sweep, while a 'track' row exists only because that expiry was
 // already picked, which is a selection effect on the long bucket.
 //
-// RUN from a normal terminal (NOT from inside a packaged app's shell — CLAUDE.md: this shell is
-// MSIX-containerised and reads a stale shadow copy of the database):
-//   npm run rebuild:node        (if you have just packaged — the Electron ABI will not load here)
+// RUN with TradeAnalyzer running (it reads GET /api/v1/diagnostics/spread-capture-panel, v1.1.339+;
+// the harness never opens the live SQLite file, so any shell works, including the Claude app's):
 //   node scripts/fr-spread-dte-cost-study.mjs --out bps4-dte-cost.md
 //       [--short-dte 21] [--long-dte 30] [--tol 4]
 //   node scripts/selftest-spread-dte-cost.mjs   (synthetic fixture, known answers)
 
 import { writeFileSync } from 'node:fs';
 import {
-  P, med, f, pctf, openStudyDb, loadRuns, buildFromRow, reportPaired,
+  P, med, f, pctf, loadStudyData, buildFromRow, reportPaired,
 } from './lib/spread-study-lib.mjs';
 
 const argv = process.argv.slice(2);
@@ -72,10 +71,8 @@ const OUT = strOf('--out', null);
 const out = [];
 const say = (s = '') => { out.push(s); console.log(s); };
 
-const db = openStudyDb(argv);
-
 // ── load ────────────────────────────────────────────────────────────────────────────────────────
-const { rows, runs } = loadRuns(db);
+const { rows, runs } = await loadStudyData(argv);
 
 const nearest = (list, want) => {
   const inTol = list.filter(r => Math.abs(r.dte - want) <= TOL);

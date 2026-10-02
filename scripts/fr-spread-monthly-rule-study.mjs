@@ -37,15 +37,14 @@
 // systematically selects a different population is not shown to be better until returns are measured,
 // and a switch would also interact with the earnings gate (BPS-5), which can move either arm's pick.
 //
-// RUN from a normal terminal (NOT from inside a packaged app's shell — CLAUDE.md: this shell is
-// MSIX-containerised and reads a stale shadow copy of the database):
-//   npm run rebuild:node        (if you have just packaged)
+// RUN with TradeAnalyzer running (it reads GET /api/v1/diagnostics/spread-capture-panel, v1.1.339+;
+// the harness never opens the live SQLite file, so any shell works, including the Claude app's):
 //   node scripts/fr-spread-monthly-rule-study.mjs --out bps19-monthly-rule.md
 //   node scripts/selftest-spread-monthly-rule.mjs   (synthetic fixture, known answers)
 
 import { writeFileSync } from 'node:fs';
 import {
-  P, NO_EARNINGS, med, f, pctf, openStudyDb, loadRuns, loadEarnings, buildFromRow,
+  P, NO_EARNINGS, med, f, pctf, loadStudyData, buildFromRow,
   pickNearestTarget, pickPreferMonthly, isMonthly, reportPaired,
 } from './lib/spread-study-lib.mjs';
 
@@ -56,9 +55,7 @@ const OUT = strOf('--out', null);
 const out = [];
 const say = (s = '') => { out.push(s); console.log(s); };
 
-const db = openStudyDb(argv);
-const { rows, runs } = loadRuns(db);
-const earnings = loadEarnings(db);
+const { rows, runs, earnings } = await loadStudyData(argv, { earnings: true });
 
 const pairs = [];            // runs where the two rules disagree
 let agreed = 0, noEligible = 0, noMonthly = 0, unbuilt = 0, earningsBound = 0;

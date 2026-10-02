@@ -9,6 +9,7 @@ import {
 import { premiumRoc, ROC_STRATEGIES, type RocStrategy } from '../services/premium-roc.js';
 import { buildSpreadShadowReport } from '../services/spread-mode-settle.js';
 import { spreadStudyPanel } from '../services/spread-study-panel.js';
+import { spreadCapturePanel } from '../services/spread-capture-panel.js';
 import { readStaleGreekShadow } from '../services/stale-greek-shadow.js';
 
 export function registerDiagnosticsRoutes(app: FastifyInstance, svc: ApiServerServices): void {
@@ -98,6 +99,17 @@ export function registerDiagnosticsRoutes(app: FastifyInstance, svc: ApiServerSe
     if (!/^[a-z_]{1,32}$/.test(strategy)) return apiError(reply, 'strategy must be a strategy name', 'VALIDATION_ERROR');
     try {
       return apiOk(reply, spreadStudyPanel(svc.db as unknown as PanelDb, strategy, req.query.quotes === '1'));
+    } catch (err) {
+      return apiError(reply, err instanceof Error ? err.message : String(err), 'INTERNAL', 500);
+    }
+  });
+
+  // GET /diagnostics/spread-capture-panel?earnings=1 — the spread_chain_capture entry rows (and with
+  // earnings=1, earnings_calendar) that the BPS-4/BPS-19 harnesses read through
+  // scripts/lib/spread-study-lib.mjs. Read-only. see services/spread-capture-panel.ts
+  app.get<{ Querystring: { earnings?: string } }>('/diagnostics/spread-capture-panel', async (req, reply) => {
+    try {
+      return apiOk(reply, spreadCapturePanel(svc.db as unknown as PanelDb, req.query.earnings === '1'));
     } catch (err) {
       return apiError(reply, err instanceof Error ? err.message : String(err), 'INTERNAL', 500);
     }
