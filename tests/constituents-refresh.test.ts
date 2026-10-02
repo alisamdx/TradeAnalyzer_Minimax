@@ -195,6 +195,26 @@ describe('ConstituentsService — Vanguard refresh', () => {
     expect(svc.getConstituents('sp500').find((r) => r.ticker === 'T0')?.sector).toBe('Industrials');
   });
 
+  it('decodes HTML entities in Wikipedia sector and company cells (v1.1.341)', async () => {
+    // Stored as page source until v1.1.341: the spread shadow report printed
+    // `Oil &amp; Gas Exploration &amp; Production`, which a sector cap counts as its own sector.
+    const rows = makeHoldings(503)
+      .map((h, i) => i === 0
+        ? `<tr><td>${h.ticker}</td><td>AT&amp;T Inc.</td><td>Oil &amp; Gas Exploration &amp; Production</td></tr>`
+        : `<tr><td>${h.ticker}</td><td>${h.longName}</td><td>Industrials</td></tr>`)
+      .join('');
+    const html = `<table class="wikitable"><tr><th>Symbol</th><th>Security</th><th>Sector</th></tr>${rows}</table>`;
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('vanguard.com')) return { ok: false, status: 500 } as Response;
+      return { ok: true, text: async () => html } as Response;
+    }));
+
+    await svc.refreshIndexAuto('sp500');
+    const t0 = svc.getConstituents('sp500').find((r) => r.ticker === 'T0');
+    expect(t0?.sector).toBe('Oil & Gas Exploration & Production');
+    expect(t0?.companyName).toBe('AT&T Inc.');
+  });
+
   it('calls Vanguard at its moved /vmf/api/ path, and names an HTML answer instead of a JSON parse error', async () => {
     const urls: string[] = [];
     vi.stubGlobal('fetch', vi.fn(async (url: string) => {
@@ -288,5 +308,41 @@ describe('ConstituentsRefreshJob', () => {
     expect(result.tickersFailed).toBe(2);
     expect(result.notes).toContain('kept existing list');
     expect(fetchAndStorePricesMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('HTML entities in constituents (v1.1.341)', () => {
+  it('decodeHtmlEntities decodes named and numeric entities in one pass', async () => {
+    const { decodeHtmlEntities } = await import('../src/main/services/constituents-service.js');
+    expect(decodeHtmlEntities('Oil &amp; Gas Exploration &amp; Production')).toBe('Oil & Gas Exploration & Production');
+    expect(decodeHtmlEntities('Moody&#39;s &#x26; Co &quot;A&quot;')).toBe(`Moody's & Co "A"`);
+    expect(decodeHtmlEntities('Lowe&#039;s&nbsp;Cos')).toBe("Lowe's Cos");
+    expect(decodeHtmlEntities('a &amp;lt; b')).toBe('a &lt; b');      // one pass, never `<`
+    expect(decodeHtmlEntities('Johnson & Johnson')).toBe('Johnson & Johnson');
+    expect(decodeHtmlEntities('&bogus; stays')).toBe('&bogus; stays');
+  });
+
+  it('migration 090 repairs stored escaped sectors and names, and is idempotent', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const db = openDatabase(':memory:');
+    runMigrations(db, MIGRATIONS_DIR);
+    db.prepare(`INSERT INTO constituents (ticker, index_name, company_name, sector) VALUES (?, 'sp500', ?, ?)`)
+      .run('XOM', 'Exxon Mobil', 'Oil &amp; Gas Exploration &amp; Production');
+    db.prepare(`INSERT INTO constituents (ticker, index_name, company_name, sector) VALUES (?, 'sp500', ?, ?)`)
+      .run('T', 'AT&amp;T Inc.', 'Telecom &amp;lt;x&amp;gt;');
+    db.prepare(`INSERT INTO constituents (ticker, index_name, company_name, sector) VALUES (?, 'sp500', ?, ?)`)
+      .run('JNJ', 'Johnson & Johnson', 'Pharmaceuticals');
+
+    const sql = readFileSync(join(MIGRATIONS_DIR, '090_constituents_decode_entities.sql'), 'utf8');
+    db.exec(sql);
+    db.exec(sql);   // a second application changes nothing
+
+    const get = (t: string) => db.prepare(`SELECT company_name, sector FROM constituents WHERE ticker = ?`).get(t) as
+      { company_name: string; sector: string };
+    expect(get('XOM').sector).toBe('Oil & Gas Exploration & Production');
+    expect(get('T').company_name).toBe('AT&T Inc.');
+    expect(get('JNJ')).toEqual({ company_name: 'Johnson & Johnson', sector: 'Pharmaceuticals' });
+    db.close();
   });
 });

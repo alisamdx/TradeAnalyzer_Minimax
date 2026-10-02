@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.341] - 2026-10-02
+
+### Fix: constituent sectors and names were stored HTML-escaped
+
+The Wikipedia constituents parser stripped tags but never decoded entities, so sectors and company names were stored as `Oil &amp; Gas Exploration &amp; Production` and `AT&amp;T`. Since a refresh keeps a stored sector, they persisted. A sector grouping such as the spread mode's 3-per-sector cap could split one sector into two spellings. Cells are now decoded with `decodeHtmlEntities`, and migration 090 repairs stored rows. The same escaping hid a second fault: column detection's 40-character sector limit was measured on raw text, so a long escaped sub-industry in the sample row dropped the whole sector column.
+
+Details: `changelogs/v1.1.341_2026-10-02.md`.
+
 ## [1.1.340] - 2026-10-02
 
 ### The BPS-2 pool-selection study reads through the app

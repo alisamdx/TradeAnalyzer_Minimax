@@ -31,7 +31,7 @@ All persistence is a single local SQLite database (better-sqlite3), opened once 
 
 ## 2.4 Screener & universe (migrations 002, 010, 018, 019)
 
-**`constituents`** — `(ticker, index_name) PK`, `company_name`, `sector`, `added_at`. `index_name ∈ {sp500, russell1000, etf}`. Defines the scannable universe.
+**`constituents`** — `(ticker, index_name) PK`, `company_name`, `sector`, `added_at`. `index_name ∈ {sp500, russell1000, etf}`. Defines the scannable universe. `sector` and `company_name` are decoded text: migration 090 (v1.1.341) repaired values stored HTML-escaped (`Oil &amp; Gas …`, `AT&amp;T`) by the Wikipedia parser.
 
 **`constituents_meta`** — `index_name PK`, `refreshed_at`, `source` (`bundled|wikipedia|csv`). Drives the 7-day refresh display.
 

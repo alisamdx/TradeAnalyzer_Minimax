@@ -55,6 +55,34 @@ interface VanguardHoldingsResponse {
   fund?: { entity?: VanguardHoldingEntity[] };
 }
 
+const NAMED_ENTITIES: Record<string, string> = {
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ',
+};
+
+/**
+ * Decode the HTML entities a Wikipedia table cell carries once its tags are stripped. The parser used
+ * to store cell text as-is, so GICS sub-industries and company names reached `constituents` as
+ * `Oil &amp; Gas Exploration &amp; Production` and `AT&amp;T` — and since Vanguard has no sector and
+ * a refresh keeps the stored one, the escaped value then persisted indefinitely (fixed v1.1.341,
+ * migration 090 repairs stored rows). One pass, so `&amp;lt;` decodes to `&lt;`, never to `<`.
+ */
+export function decodeHtmlEntities(s: string): string {
+  return s.replace(/&(#x[0-9a-f]+|#[0-9]+|[a-z]+);/gi, (m, body: string) => {
+    if (body[0] === '#') {
+      const code = body[1] === 'x' || body[1] === 'X' ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10);
+      if (!Number.isFinite(code)) return m;
+      // A non-breaking space is a space in a sector or company name.
+      return code === 160 ? ' ' : String.fromCodePoint(code);
+    }
+    return NAMED_ENTITIES[body.toLowerCase()] ?? m;
+  });
+}
+
+/** Cell HTML → plain text: tags stripped, entities decoded, whitespace trimmed. */
+function cellText(cellHtml: string): string {
+  return decodeHtmlEntities(cellHtml.replace(/<[^>]+>/g, '')).trim();
+}
+
 function thisDir(): string {
   return dirname(fileURLToPath(import.meta.url));
 }
@@ -345,7 +373,7 @@ export class ConstituentsService {
         const ticker = (e.ticker ?? '').trim().toUpperCase().replace(/[^A-Z0-9.-]/g, '');
         if (!ticker) continue;
         // Vanguard holdings carry no sector — applyRefresh preserves the stored one.
-        rows.push({ ticker, companyName: e.longName?.trim() || null, sector: null });
+        rows.push({ ticker, companyName: e.longName ? decodeHtmlEntities(e.longName).trim() || null : null, sector: null });
       }
       start += VANGUARD_PAGE_SIZE;
     }
@@ -429,7 +457,7 @@ export class ConstituentsService {
 
     // Helper to detect if a cell looks like a company name
     const looksLikeCompany = (cellHtml: string): boolean => {
-      const text = cellHtml.replace(/<[^>]+>/g, '').trim();
+      const text = cellText(cellHtml);
       // Company names usually have spaces, are longer, don't look like tickers
       return text.length > 3 && text.length < 100 && !looksLikeTicker(cellHtml) && !/^[\d.-]+$/.test(text);
     };
@@ -451,10 +479,8 @@ export class ConstituentsService {
         const ticker = cleaned.replace(/[^A-Z0-9.-]/g, '');
         if (!ticker || ticker.length > 8) continue;
 
-        const companyName = cells[companyCol]?.replace(/<[^>]+>/g, '').trim() || null;
-        const sector = sectorCol >= 0 && cells[sectorCol]
-          ? cells[sectorCol]!.replace(/<[^>]+>/g, '').trim() || null
-          : null;
+        const companyName = cells[companyCol] !== undefined ? cellText(cells[companyCol]!) || null : null;
+        const sector = sectorCol >= 0 && cells[sectorCol] ? cellText(cells[sectorCol]!) || null : null;
 
         results.push({ ticker, companyName, sector });
       }
@@ -506,7 +532,9 @@ export class ConstituentsService {
       // Find sector (usually 3rd or 4th column with sector-like content)
       for (let i = 2; i < sampleRow.length; i++) {
         if (i !== tickerCol && i !== companyCol) {
-          const text = sampleRow[i]!.replace(/<[^>]+>/g, '').trim();
+          // Decoded: an escaped `&amp;` adds 4 characters, and the 40-character cap below used to
+          // drop the whole sector column when the sample row's value was long and escaped.
+          const text = cellText(sampleRow[i]!);
           // Valid sectors: don't look like tickers or numbers, reasonable length
           if (text.length > 2 && text.length < 40 && !looksLikeTicker(sampleRow[i]!) && !/^[\d.-]+$/.test(text)) {
             sectorCol = i;
