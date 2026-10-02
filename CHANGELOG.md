@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.338] - 2026-10-01
+
+### The bull put spread study reads through the app
+
+`fr-bull-put-spread-study.mjs` opened the production SQLite file itself, so it refused to run inside the Claude app's redirected shell and needed a separate terminal plus `rebuild:node`. It now reads a new read-only `GET /diagnostics/spread-study-panel` with the same picks, bars, `iv_history` and quote sources its SQL selected, so its output is unchanged by the move. An unreadable quote table comes back as `null`, never `[]`. Spec 22's route list also gains `premium-roc` (v1.1.336).
+
+Details: `changelogs/v1.1.338_2026-10-01.md`.
+
 ## [1.1.337] - 2026-10-01
 
 ### Brief Replay settles income/wheel picks on real premium

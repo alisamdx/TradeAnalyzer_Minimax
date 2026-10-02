@@ -42,14 +42,15 @@
 // both legs. IV rank uses iv_history, which splices two sources with zero overlap. FR-SEY-5: this shapes
 // criteria; it cannot by itself enable a live gate.
 //
-// RUN from a normal terminal (NOT from inside a packaged app's shell):
-//   npm run rebuild:node
+// RUN with TradeAnalyzer running (it reads GET /api/v1/diagnostics/spread-study-panel, v1.1.338+;
+// the script never opens the SQLite file, so any shell works, including the Claude app's):
 //   node scripts/fr-bull-put-spread-study.mjs --out bull-put-spread-study.md
 //       [--slip 0.05] [--slip-model quoted] [--capital 25000] [--risk 500] [--csp-alloc 0.25]
 //       [--max-positions 10] [--strategy wheel]
-//   node scripts/fr-bull-put-spread-study.mjs --selftest   (no database)
+//   node scripts/fr-bull-put-spread-study.mjs --selftest   (no app needed)
 
-import { existsSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 const argv = process.argv.slice(2);
@@ -512,7 +513,7 @@ function selftest() {
  * evening quotes and read a median of $0.275/leg, p90 $0.95 — a cost no in-session limit order pays.
  * `--quote-slot any` falls back to after-close quotes where a ticker has no intraday ones.
  */
-function loadQuotedSlip(db) {
+function loadQuotedSlip(q) {
   const halves = { intraday: new Map(), afterClose: new Map() };
   const push = (bucket, t, bid, ask) => {
     if (!(bid > 0) || !(ask >= bid)) return false;
@@ -525,14 +526,17 @@ function loadQuotedSlip(db) {
     briefCandidatesIntraday: 0, briefCandidatesAfterClose: 0,
     spreadChainsIntraday: 0, spreadChainsAfterClose: 0, premiumHistoryAfterClose: 0,
   };
-  try {
-    for (const r of db.prepare('SELECT ticker, bid, ask, slot FROM brief_candidates WHERE bid > 0 AND ask > 0').all()) {
+  // A source the app could not read arrives as null — "no table", kept distinct from "no rows".
+  if (q.briefCandidates == null) sources.briefCandidatesIntraday = 'unavailable';
+  else {
+    for (const r of q.briefCandidates) {
       const bucket = r.slot === 'intraday' ? 'intraday' : 'afterClose';
       if (push(bucket, r.ticker, r.bid, r.ask)) sources[bucket === 'intraday' ? 'briefCandidatesIntraday' : 'briefCandidatesAfterClose']++;
     }
-  } catch { sources.briefCandidatesIntraday = 'unavailable'; }
-  try {
-    for (const r of db.prepare('SELECT ticker, slot, puts_json FROM spread_chain_capture').all()) {
+  }
+  if (q.spreadChains == null) sources.spreadChainsIntraday = 'unavailable (table not created yet)';
+  else {
+    for (const r of q.spreadChains) {
       let puts = [];
       try { puts = JSON.parse(r.puts_json); } catch { continue; }
       const bucket = r.slot === 'intraday' ? 'intraday' : 'afterClose';
@@ -541,12 +545,13 @@ function loadQuotedSlip(db) {
         if (push(bucket, r.ticker, p[1], p[2])) sources[bucket === 'intraday' ? 'spreadChainsIntraday' : 'spreadChainsAfterClose']++;
       }
     }
-  } catch { sources.spreadChainsIntraday = 'unavailable (table not created yet)'; }
-  try {
-    for (const r of db.prepare('SELECT ticker, bid, ask FROM options_premium_history WHERE bid > 0 AND ask > 0').all()) {
+  }
+  if (q.premiumHistory == null) sources.premiumHistoryAfterClose = 'unavailable';
+  else {
+    for (const r of q.premiumHistory) {
       if (push('afterClose', r.ticker, r.bid, r.ask)) sources.premiumHistoryAfterClose++;
     }
-  } catch { sources.premiumHistoryAfterClose = 'unavailable'; }
+  }
 
   const perTicker = new Map(), fromSlot = { intraday: 0, afterClose: 0 };
   const tickers = new Set([...halves.intraday.keys(), ...halves.afterClose.keys()]);
@@ -559,16 +564,16 @@ function loadQuotedSlip(db) {
   return { perTicker, sources, fromSlot };
 }
 
-function loadEntries(db, quoted) {
-  const picks = db.prepare(
-    `SELECT ro.ticker AS ticker, rb.as_of_date AS date, MIN(ro.rank) AS rank
-       FROM replay_outcomes ro JOIN replay_briefs rb ON rb.id = ro.replay_brief_id
-      WHERE rb.strategy = ? GROUP BY ro.ticker, rb.as_of_date ORDER BY ro.ticker, rb.as_of_date`,
-  ).all(STRATEGY);
-  const maxPx = db.prepare('SELECT MAX(date) d FROM historical_prices').get().d;
-  const barsStmt = db.prepare(
-    'SELECT date, close, volume FROM historical_prices WHERE ticker = ? AND date >= ? AND date <= ? AND close > 0 ORDER BY date');
-  const ivStmt = db.prepare('SELECT date, atm_iv FROM iv_history WHERE ticker = ? AND atm_iv > 0 ORDER BY date');
+function loadEntries(panel, quoted) {
+  // Same rows the script's SQL used to select, now served by GET /diagnostics/spread-study-panel.
+  const picks = panel.picks;
+  const maxPx = panel.maxPx;
+  const barsStmt = {
+    all: (ticker, lo, hi) => (panel.bars[ticker] ?? [])
+      .filter(([d]) => d >= lo && d <= hi)
+      .map(([date, close, volume]) => ({ date, close, volume })),
+  };
+  const ivStmt = { all: ticker => (panel.iv[ticker] ?? []).map(([date, atm_iv]) => ({ date, atm_iv })) };
   const ivCache = new Map();
   const counts = { picks: picks.length, unsettled: 0, noBars: 0, split: 0, reuse: 0, ivFallback: 0, collapsed: 0, quotedSlip: 0 };
   const excluded = [], movesKept = new Set();
@@ -655,40 +660,32 @@ async function main() {
   }
   if (SLIP_MODEL !== 'flat' && SLIP_MODEL !== 'quoted') { console.error('--slip-model must be flat or quoted'); process.exit(1); }
 
-  const dir = join(process.env.APPDATA ?? '', 'trade-analyzer');
-  const dbPath = join(dir, 'trade-analyzer.sqlite');
-  let guard;
-  try {
-    guard = await import('../packages/core/dist/db/appdata-redirect.js');
-  } catch {
-    console.error('packages/core is not built, so the redirect guard cannot load. Run: npm run build --prefix packages/core');
+  // Read through the RUNNING app (v1.1.338+), never the SQLite file: this used to open the production
+  // database itself, which from a redirected shell (the Claude app's own) is the WAL hazard in CLAUDE.md.
+  const DATA_DIR = join(homedir(), '.tradeanalyzer');
+  let token;
+  try { token = readFileSync(join(DATA_DIR, 'agent.token'), 'utf8').trim(); } catch {
+    console.error(`No agent token at ${join(DATA_DIR, 'agent.token')} — start TradeAnalyzer once to create it.`);
     process.exit(2);
   }
-  try {
-    guard.assertNotRedirected([dir], 'fr-bull-put-spread-study');
-  } catch (err) {
-    console.error(err instanceof Error ? err.message : String(err));
+  let port = '7432';
+  try { port = readFileSync(join(DATA_DIR, 'api.port'), 'utf8').trim() || port; } catch { /* default */ }
+  const url = `http://127.0.0.1:${port}/api/v1/diagnostics/spread-study-panel`
+    + `?strategy=${encodeURIComponent(STRATEGY)}${SLIP_MODEL === 'quoted' ? '&quotes=1' : ''}`;
+  const res = await fetch(url, { headers: { 'X-Agent-Token': token } }).catch((err) => {
+    console.error(`API server not reachable on 127.0.0.1:${port} — the app must be RUNNING. (${err.message})`);
     process.exit(3);
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok || !body?.ok) {
+    console.error(`spread-study-panel failed: HTTP ${res.status} ${body?.error ?? ''}`);
+    if (res.status === 404) console.error('This app build predates the route (v1.1.338). Install the new build.');
+    process.exit(4);
   }
-  if (!existsSync(dbPath)) { console.error(`No database at ${dbPath} — refusing to create one.`); process.exit(4); }
+  const panel = body.data;
 
-  let db;
-  try {
-    const { default: Database } = await import('better-sqlite3');
-    // Write-capable on purpose: a readonly connection on Windows cannot attach the live WAL index
-    // and silently reads a stale checkpoint (CLAUDE.md). Only SELECTs are issued.
-    db = new Database(dbPath, { fileMustExist: true });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error(/NODE_MODULE_VERSION/.test(msg)
-      ? 'better-sqlite3 is built for Electron (after npm run package). Run: npm run rebuild:node'
-      : msg);
-    process.exit(6);
-  }
-
-  const quoted = SLIP_MODEL === 'quoted' ? loadQuotedSlip(db) : null;
-  const { pooled, episodes, counts, excluded, movesKept, maxPx } = loadEntries(db, quoted);
-  db.close();
+  const quoted = SLIP_MODEL === 'quoted' ? loadQuotedSlip(panel.quotes) : null;
+  const { pooled, episodes, counts, excluded, movesKept, maxPx } = loadEntries(panel, quoted);
 
   if (QUOTE_SLOT !== 'intraday' && QUOTE_SLOT !== 'any') { console.error('--quote-slot must be intraday or any'); process.exit(1); }
   const slipText = quoted

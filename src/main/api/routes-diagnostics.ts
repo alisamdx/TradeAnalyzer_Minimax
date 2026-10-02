@@ -8,6 +8,7 @@ import {
 } from '../services/settled-csp-panel.js';
 import { premiumRoc, ROC_STRATEGIES, type RocStrategy } from '../services/premium-roc.js';
 import { buildSpreadShadowReport } from '../services/spread-mode-settle.js';
+import { spreadStudyPanel } from '../services/spread-study-panel.js';
 import { readStaleGreekShadow } from '../services/stale-greek-shadow.js';
 
 export function registerDiagnosticsRoutes(app: FastifyInstance, svc: ApiServerServices): void {
@@ -84,6 +85,19 @@ export function registerDiagnosticsRoutes(app: FastifyInstance, svc: ApiServerSe
     }
     try {
       return apiOk(reply, premiumRoc(svc.db as unknown as PanelDb, strategy));
+    } catch (err) {
+      return apiError(reply, err instanceof Error ? err.message : String(err), 'INTERNAL', 500);
+    }
+  });
+
+  // GET /diagnostics/spread-study-panel?strategy=wheel&quotes=1 — the replay picks, bars, iv_history
+  // and (with quotes=1) quote sources that scripts/fr-bull-put-spread-study.mjs reads, so it no longer
+  // opens the SQLite file itself. Read-only. see services/spread-study-panel.ts
+  app.get<{ Querystring: { strategy?: string; quotes?: string } }>('/diagnostics/spread-study-panel', async (req, reply) => {
+    const strategy = req.query.strategy ?? 'wheel';
+    if (!/^[a-z_]{1,32}$/.test(strategy)) return apiError(reply, 'strategy must be a strategy name', 'VALIDATION_ERROR');
+    try {
+      return apiOk(reply, spreadStudyPanel(svc.db as unknown as PanelDb, strategy, req.query.quotes === '1'));
     } catch (err) {
       return apiError(reply, err instanceof Error ? err.message : String(err), 'INTERNAL', 500);
     }
