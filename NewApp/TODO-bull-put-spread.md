@@ -76,7 +76,8 @@ Provenance: **measured** (a #43 study result) · **inherited** (a wheel-screen r
   `scripts/selftest-spread-pool-selection.mjs`). It ranks the WHOLE universe by composite-70 vs premium
   richness vs a random draw of the same size, on both return on capital and **assigned rate** — the
   spread's own win condition. Episode-collapsed, scale-guarded, with a random band as the null.
-  **Run it from a normal terminal** (`npm run rebuild:node` first if you have just packaged).
+  **Runs from any shell with TradeAnalyzer running** (since v1.1.340 it reads
+  `GET /diagnostics/pool-selection-panel`, not the SQLite file; no `rebuild:node`).
   **RUN 2026-09-20 (6,221 rows, 54 dates, top-15, episode-collapsed) — docs/wheel-parameters.md T7:**
   the cut EARNS something and is DOMINATED. composite-70 clears the random null (mean −0.12% vs band
   −1.29…−0.52) but premium richness beats it (+0.54%, median 2.86 vs 2.02). **ivRank — the composite's
@@ -92,6 +93,14 @@ Provenance: **measured** (a #43 study result) · **inherited** (a wheel-screen r
   already filled nightly, so the pool costs no new market data. **The cut itself is not changed** — it
   clears the null and beats both challengers retrospectively; what the arm tests is whether richer credit
   at unchanged breach risk survives into real spread economics, which the CSP proxy cannot say.
+  **RE-RUN 2026-10-02 (`bps2-pool-selection-2026-10-02.md`, 6,344 rows, 58 dates — only 4 new, since a
+  snapshot counts once its options expire; first run through the app's API): every 09-20 finding holds.**
+  composite-70 +0.01% (above the random band −1.19…−0.46); premium richness still best (+0.64%, median
+  2.81); ivRank alone still inside the band (−0.78%) and still worsens premiumYield when paired (+0.06 vs
+  +0.64); income-72 still worse than the incumbent on all four. Two borderline moves, neither a finding:
+  **income-72 now sits just OUTSIDE the band** (−0.40 vs −0.46 — the "back inside" above was a 0.06-point
+  call), and ivRank+premiumYield's assigned rate 28.9% is just under the band's 29.4% — one of seven
+  rules half a point outside a 5–95% band is chance. The live answer stays the `premium` shadow arm.
 
 - **BPS-3. Price cap $750 and the liquidity gate at 5 of 15.** *Inherited.* **Reframed 2026-09-20: it is
   not the threshold that is wrong, it is the STRUCTURE being scored.** `STRATEGY_RELEVANT_SLUGS.wheel` is
