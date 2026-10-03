@@ -360,6 +360,22 @@ Provenance: **measured** (a #43 study result) · **inherited** (a wheel-screen r
   above assumed). The open decision narrows to: keep per-sector (now the default), or cap per
   sub-industry by reading `sub_industry` — plus how unknown sectors count. Russell-only names keep
   whatever value they had (no Wikipedia table exists for the Russell 1000).
+  **APPLIED 2026-10-03 (manual `constituents-refresh`, run #2886: 998 rows set from 503 S&P names) —
+  the cap now binds hard, and the book is concentrated.** Same 53 positions, before → after:
+
+  | | per sub-industry | **per GICS sector** |
+  |---|--:|--:|
+  | skipped by the 3-per-sector cap | 2 of 53 | **13 of 53** |
+  | capped book | 51 · mean 19.0% | **40 · mean 18.2%** (9 of 12 settled) |
+  | positions with no sector | 14 | **10** |
+
+  Open now: **Information Technology 16**, unknown 8, Energy 5, Fixed Income 3 (ETF category), then
+  1–2 each. The IT weight was invisible at sub-industry level (Application Software, Semiconductors,
+  Systems Software, Technology Hardware…). On 12 settled positions, all wins, the cap costs 0.8 points —
+  far too few to say what it does to returns. **For the decision:** a per-sector cap removes a quarter
+  of the shadow book, nearly all of it IT; per-sub-industry would let the IT concentration through.
+  Note the ETF categories (`Fixed Income`, `International - Brazil`) come from the bundled `etf.csv`
+  and are not GICS sectors, so an ETF never shares a bucket with a stock.
 - **BPS-13. Exit — 50% of net credit, no loss stop, no time stop.** *Measured, and the strongest result
   in #43* — the profit target is the dominant lever, monotonic across every stop/time cell; the stop plus
   time stop **halved** the portfolio return. Unsettled: nothing tracks an open spread or fires an alert
