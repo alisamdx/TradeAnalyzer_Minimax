@@ -86,6 +86,21 @@ export class ConstituentsRefreshJob implements BatchJobHandler {
       }
     }
 
+    // ── 1b. Sectors from Wikipedia (v1.1.342) ─────────────────────────────────
+    // Vanguard carries no sector, so without this new members never get one and the stored values
+    // stay whatever the last Wikipedia parse wrote — which until v1.1.342 was the GICS SUB-INDUSTRY.
+    // A failure keeps the stored sectors and is a warning, never a chain-halting failure.
+    let sectorFailure = false;
+    if (!signal.aborted) {
+      try {
+        const s = await this.constituentsService.refreshSectorsFromWikipedia();
+        noteParts.push(`sectors: ${s.updated} rows set from Wikipedia (${s.parsed} S&P 500 names)`);
+      } catch (err) {
+        sectorFailure = true;
+        noteParts.push(`sectors: refresh FAILED — kept stored sectors (${err instanceof Error ? err.message : String(err)})`);
+      }
+    }
+
     // ── 2. Bootstrap 1Y price history for genuinely new tickers ──────────────
     // "New to an index" ≠ "new to the DB" — a ticker moving between lists (or already
     // tracked via a watchlist) has bars; only fetch those with no history at all.
@@ -146,7 +161,7 @@ export class ConstituentsRefreshJob implements BatchJobHandler {
     // (v1.1.246): from ~2026-09-08 both sources failed every run for a week while the
     // Batch view showed green.
     return {
-      status: refreshFailures > 0 ? 'warning' : 'success',
+      status: refreshFailures > 0 || sectorFailure ? 'warning' : 'success',
       notes: noteParts.join(' · '),
       tickersAttempted: attempted,
       tickersUpdated:   updated,

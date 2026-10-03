@@ -351,6 +351,15 @@ Provenance: **measured** (a #43 study result) · **inherited** (a wheel-screen r
   sector (needs a sub-industry → sector map, or the GICS Sector column) or per sub-industry
   (deliberately looser), and whether an unknown sector should count as its own bucket.
   (Separately, v1.1.341 fixed these values being stored HTML-escaped.)
+  **CAUSE FOUND AND FIXED 2026-10-03 (v1.1.342).** The Wikipedia parser guessed columns from the first
+  data row — 3M, whose two-character name failed its "company names are longer than 3 characters" test
+  — so every guess shifted one column right: company ← GICS Sector, `sector` ← GICS Sub-Industry.
+  Columns are now found by header; `sector` holds the GICS **Sector** and the new `sub_industry` the
+  sub-industry; `constituents-refresh` re-sets both from Wikipedia every run. **So from the first
+  refresh after v1.1.342 the cap IS per GICS sector** (11 buckets; CF reads `Materials`, as the note
+  above assumed). The open decision narrows to: keep per-sector (now the default), or cap per
+  sub-industry by reading `sub_industry` — plus how unknown sectors count. Russell-only names keep
+  whatever value they had (no Wikipedia table exists for the Russell 1000).
 - **BPS-13. Exit — 50% of net credit, no loss stop, no time stop.** *Measured, and the strongest result
   in #43* — the profit target is the dominant lever, monotonic across every stop/time cell; the stop plus
   time stop **halved** the portfolio return. Unsettled: nothing tracks an open spread or fires an alert

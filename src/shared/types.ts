@@ -72,7 +72,10 @@ export interface ConstituentsMeta {
 export interface ConstituentRow {
   ticker: string;
   companyName: string | null;
+  /** GICS SECTOR (e.g. "Information Technology"). Before v1.1.342 the Wikipedia parser stored the sub-industry here. */
   sector: string | null;
+  /** GICS sub-industry (e.g. "Application Software"), when the source carries it. v1.1.342. */
+  subIndustry?: string | null;
 }
 
 /** A constituent row with its stored membership metadata (for the Constituents viewer). */

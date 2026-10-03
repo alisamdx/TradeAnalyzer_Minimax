@@ -267,9 +267,11 @@ export class ConstituentsService {
       );
     }
 
-    type OldRow = { ticker: string; company_name: string | null; sector: string | null; added_at: string };
+    type OldRow = {
+      ticker: string; company_name: string | null; sector: string | null; sub_industry: string | null; added_at: string;
+    };
     const oldRows = this.db
-      .prepare(`SELECT ticker, company_name, sector, added_at FROM constituents WHERE index_name = ?`)
+      .prepare(`SELECT ticker, company_name, sector, sub_industry, added_at FROM constituents WHERE index_name = ?`)
       .all(index) as OldRow[];
     const oldByTicker = new Map(oldRows.map((r) => [r.ticker.toUpperCase(), r]));
 
@@ -294,16 +296,21 @@ export class ConstituentsService {
     withTransaction(this.db, () => {
       this.db.prepare(`DELETE FROM constituents WHERE index_name = ?`).run(index);
       const insertStmt = this.db.prepare(
-        `INSERT OR REPLACE INTO constituents (ticker, index_name, company_name, sector, added_at)
-         VALUES (?, ?, ?, ?, ?)`
+        `INSERT OR REPLACE INTO constituents (ticker, index_name, company_name, sector, sub_industry, added_at)
+         VALUES (?, ?, ?, ?, ?, ?)`
       );
       for (const c of fresh) {
         const old = oldByTicker.get(c.ticker);
+        // Sector and sub-industry travel as a PAIR: a source that supplies a sector (Wikipedia) sets
+        // both; one that supplies none (Vanguard) keeps both. Mixing a new sector with an old
+        // sub-industry would pair values from different classifications.
+        const hasSector = c.sector != null;
         insertStmt.run(
           c.ticker,
           index,
           c.companyName ?? old?.company_name ?? null,
-          c.sector ?? old?.sector ?? null,
+          hasSector ? c.sector : old?.sector ?? null,
+          hasSector ? c.subIndustry ?? null : old?.sub_industry ?? null,
           old?.added_at ?? nowIso
         );
       }
@@ -318,6 +325,10 @@ export class ConstituentsService {
 
   /** Fetch and parse the Wikipedia constituents table for an index. */
   private async fetchWikipediaConstituents(index: 'sp500' | 'russell1000'): Promise<ConstituentRow[]> {
+    return (await this.fetchWikipediaParse(index)).rows;
+  }
+
+  private async fetchWikipediaParse(index: 'sp500' | 'russell1000'): Promise<WikipediaParse> {
     const wikiUrl = index === 'sp500'
       ? 'https://en.wikipedia.org/wiki/List_of_S%26P_500_companies'
       : 'https://en.wikipedia.org/wiki/Russell_1000_Index';
@@ -326,8 +337,40 @@ export class ConstituentsService {
       headers: { 'User-Agent': 'TradeAnalyzer/1.0 (desktop app; maintainer contact@example.com)' }
     });
     if (!response.ok) throw new Error(`Wikipedia fetch failed: ${response.status}`);
-    const html = await response.text();
-    return this.parseWikipediaTable(html);
+    return parseWikipediaConstituents(await response.text());
+  }
+
+  /**
+   * Sector-only refresh (v1.1.342): sets `sector` (GICS Sector) and `sub_industry` from Wikipedia's
+   * S&P 500 table for every stored constituent row of those tickers, in any index. Membership and
+   * company names are untouched — Vanguard owns those.
+   *
+   * Why it exists: Vanguard carries no sector, so stored sectors only ever came from Wikipedia, and
+   * until v1.1.342 the parser stored the SUB-INDUSTRY in `sector` (see parseWikipediaConstituents).
+   * A fixed parser alone would never correct them, because Wikipedia only runs when Vanguard fails;
+   * this also gives new Vanguard members a sector.
+   *
+   * Refuses rather than write a guess: the page must identify its sector column by the "GICS Sector"
+   * header and yield at least the index's row floor.
+   */
+  async refreshSectorsFromWikipedia(): Promise<{ parsed: number; updated: number }> {
+    const { rows, sectorFromHeader } = await this.fetchWikipediaParse('sp500');
+    if (!sectorFromHeader) {
+      throw new Error('Wikipedia S&P 500 table has no recognisable "GICS Sector" header — refusing to write sectors');
+    }
+    const withSector = rows.filter((r) => r.sector);
+    if (withSector.length < MIN_ROWS_BY_INDEX.sp500) {
+      throw new Error(`Wikipedia gave sectors for only ${withSector.length} S&P 500 rows (floor ${MIN_ROWS_BY_INDEX.sp500}) — refusing to write sectors`);
+    }
+    let updated = 0;
+    withTransaction(this.db, () => {
+      const stmt = this.db.prepare(
+        `UPDATE constituents SET sector = ?, sub_industry = ?
+          WHERE upper(ticker) = ? AND index_name IN ('sp500', 'russell1000')`
+      );
+      for (const r of withSector) updated += stmt.run(r.sector, r.subIndustry ?? null, r.ticker.toUpperCase()).changes;
+    });
+    return { parsed: withSector.length, updated };
   }
 
   /**
@@ -435,125 +478,104 @@ export class ConstituentsService {
 
   // ─── Wikipedia parsing ────────────────────────────────────────────────────
 
+  /** The constituent rows of the best Wikipedia table on the page. */
   private parseWikipediaTable(html: string): ConstituentRow[] {
-    // Find all wikitable tables and pick the one with the most valid tickers.
-    // S&P 500: Column 1 = Ticker, Column 2 = Company name
-    // Russell 1000: Column 1 = Company name, Column 2 = Ticker
-    const tableRegex = /<table[^>]*class="wikitable[^"]*"[^>]*>[\s\S]*?<\/table>/gi;
-    // Rows carry attributes since Wikipedia moved to Parsoid HTML (`<tr id="mwLQ">`); a bare
-    // `<tr>` pattern matched none of the 504 rows, so the fallback parsed 0 from ~2026-09-08.
-    const rowRegex = /<tr(?:\s[^>]*)?>[\s\S]*?<\/tr>/gi;
-    const cellRegex = /<t[hd][^>]*>([\s\S]*?)<\/t[hd]>/gi;
+    return parseWikipediaConstituents(html).rows;
+  }
+}
 
-    const allTables = [...html.matchAll(tableRegex)];
-    if (allTables.length === 0) return [];
+// ─── Wikipedia parsing (pure, exported for tests) ────────────────────────────
 
-    // Helper to detect if a cell looks like a valid ticker (e.g., "AAPL", "MSFT", "BRK.B")
-    const looksLikeTicker = (cellHtml: string): boolean => {
-      const text = cellHtml.replace(/<[^>]+>/g, '').trim().toUpperCase();
-      // Valid tickers: 1-5 letters, possibly with . or - (like BRK.B, BRK-B)
-      return /^[A-Z]{1,5}[.-]?[A-Z0-9]{0,2}$/.test(text) && text.length >= 1 && text.length <= 8;
-    };
+/** Which header names mean which column. Compared lower-cased, decoded, whitespace-collapsed. */
+const HEADER_TICKER = new Set(['symbol', 'ticker', 'ticker symbol']);
+const HEADER_COMPANY = new Set(['security', 'company', 'company name', 'name']);
+const HEADER_SECTOR = new Set(['gics sector', 'sector']);
+const HEADER_SUB_INDUSTRY = new Set(['gics sub-industry', 'gics sub industry', 'sub-industry', 'sub industry', 'industry']);
 
-    // Helper to detect if a cell looks like a company name
-    const looksLikeCompany = (cellHtml: string): boolean => {
-      const text = cellText(cellHtml);
-      // Company names usually have spaces, are longer, don't look like tickers
-      return text.length > 3 && text.length < 100 && !looksLikeTicker(cellHtml) && !/^[\d.-]+$/.test(text);
-    };
+export interface WikipediaParse {
+  rows: ConstituentRow[];
+  /**
+   * True only when the sector column was identified by its HEADER ("GICS Sector"). A sector found by
+   * the content fallback may be any short text column — before v1.1.342 it was the sub-industry —
+   * so a sector-only refresh must not write it.
+   */
+  sectorFromHeader: boolean;
+}
 
-    // Helper to parse rows from a table with given column positions
-    const parseTable = (tableHtml: string, tickerCol: number, companyCol: number, sectorCol: number): ConstituentRow[] => {
-      const results: ConstituentRow[] = [];
-      const matches = tableHtml.matchAll(rowRegex);
-      let headerSeen = false;
+/**
+ * Parse the constituents table from a Wikipedia list page.
+ *
+ * Columns are found by HEADER NAME first. Until v1.1.342 they were guessed from the first data row's
+ * content, and on the S&P 500 page that row is 3M: its two-character name failed the
+ * "company names are longer than 3 characters" test, every choice shifted one column right, and
+ * `company_name` got the GICS Sector while `sector` got the GICS Sub-Industry. The content guess
+ * remains only as a fallback for a table whose headers are not recognised.
+ */
+export function parseWikipediaConstituents(html: string): WikipediaParse {
+  const tableRegex = /<table[^>]*class="wikitable[^"]*"[^>]*>[\s\S]*?<\/table>/gi;
+  // Rows carry attributes since Wikipedia moved to Parsoid HTML (`<tr id="mwLQ">`); a bare
+  // `<tr>` pattern matched none of the 504 rows, so the fallback parsed 0 from ~2026-09-08.
+  const rowRegex = /<tr(?:\s[^>]*)?>[\s\S]*?<\/tr>/gi;
+  const cellRegex = /<t[hd][^>]*>([\s\S]*?)<\/t[hd]>/gi;
 
-      for (const rowMatch of matches) {
-        const rowHtml = rowMatch[0]!;
-        if (!headerSeen) { headerSeen = true; continue; }
-        const cells = [...rowHtml.matchAll(cellRegex)].map((m) => m[1]!);
-        if (cells.length <= Math.max(tickerCol, companyCol)) continue;
+  const looksLikeTicker = (cellHtml: string): boolean => {
+    const text = cellHtml.replace(/<[^>]+>/g, '').trim().toUpperCase();
+    // Valid tickers: 1-5 letters, possibly with . or - (like BRK.B, BRK-B)
+    return /^[A-Z]{1,5}[.-]?[A-Z0-9]{0,2}$/.test(text) && text.length >= 1 && text.length <= 8;
+  };
+  const looksLikeCompany = (cellHtml: string): boolean => {
+    const text = cellText(cellHtml);
+    return text.length > 3 && text.length < 100 && !looksLikeTicker(cellHtml) && !/^[\d.-]+$/.test(text);
+  };
+  const headerKey = (cellHtml: string): string => cellText(cellHtml).toLowerCase().replace(/\s+/g, ' ');
 
-        const tickerCell = cells[tickerCol]!;
-        const cleaned = tickerCell.replace(/<[^>]+>/g, '').trim().toUpperCase();
-        const ticker = cleaned.replace(/[^A-Z0-9.-]/g, '');
-        if (!ticker || ticker.length > 8) continue;
+  let best: WikipediaParse = { rows: [], sectorFromHeader: false };
 
-        const companyName = cells[companyCol] !== undefined ? cellText(cells[companyCol]!) || null : null;
-        const sector = sectorCol >= 0 && cells[sectorCol] ? cellText(cells[sectorCol]!) || null : null;
+  for (const tableEntry of html.matchAll(tableRegex)) {
+    const tableHtml = tableEntry[0]!;
+    const rows = [...tableHtml.matchAll(rowRegex)].map((m) => [...m[0]!.matchAll(cellRegex)].map((c) => c[1]!));
+    if (rows.length < 10) continue;
 
-        results.push({ ticker, companyName, sector });
-      }
-      return results;
-    };
+    const header = rows[0]!.map(headerKey);
+    const byName = (names: Set<string>): number => header.findIndex((h) => names.has(h));
+    let tickerCol = byName(HEADER_TICKER);
+    let companyCol = byName(HEADER_COMPANY);
+    let sectorCol = byName(HEADER_SECTOR);
+    let subCol = byName(HEADER_SUB_INDUSTRY);
+    let sectorFromHeader = sectorCol >= 0;
 
-    // Try each table and pick the one with the most valid tickers
-    let bestRows: ConstituentRow[] = [];
-    let bestCount = 0;
-
-    for (const tableEntry of allTables) {
-      const tableHtml = tableEntry[0]!;
-      const matches = [...tableHtml.matchAll(rowRegex)];
-
-      // Skip tables with very few rows
-      if (matches.length < 10) continue;
-
-      // Sample a few non-header rows to determine column layout
-      let sampleRow: string[] = [];
-      let headerSkipped = false;
-      for (const rowMatch of matches) {
-        const rowHtml = rowMatch[0]!;
-        if (!headerSkipped) { headerSkipped = true; continue; }
-        sampleRow = [...rowHtml.matchAll(cellRegex)].map((m) => m[1]!);
-        if (sampleRow.length >= 2) break;
-      }
-
-      if (sampleRow.length < 2) continue;
-
-      // Detect column positions based on content
-      let tickerCol = -1, companyCol = -1, sectorCol = -1;
-
-      // Find which column has tickers
-      for (let i = 0; i < sampleRow.length; i++) {
-        if (looksLikeTicker(sampleRow[i]!)) {
-          tickerCol = i;
+    if (tickerCol < 0 || companyCol < 0) {
+      // Fallback: guess from the first data row's content. Never trusted for a sector-only refresh.
+      const sample = rows.slice(1).find((r) => r.length >= 2) ?? [];
+      if (sample.length < 2) continue;
+      tickerCol = sample.findIndex((c) => looksLikeTicker(c));
+      companyCol = sample.findIndex((c, i) => i !== tickerCol && looksLikeCompany(c));
+      sectorCol = -1;
+      subCol = -1;
+      sectorFromHeader = false;
+      for (let i = 2; i < sample.length; i++) {
+        if (i === tickerCol || i === companyCol) continue;
+        // Decoded: an escaped `&amp;` adds 4 characters to the 40-character cap (v1.1.341).
+        const text = cellText(sample[i]!);
+        if (text.length > 2 && text.length < 40 && !looksLikeTicker(sample[i]!) && !/^[\d.-]+$/.test(text)) {
+          sectorCol = i;
           break;
-        }
-      }
-
-      // Find company name (not a ticker, looks like a name)
-      for (let i = 0; i < sampleRow.length; i++) {
-        if (i !== tickerCol && looksLikeCompany(sampleRow[i]!)) {
-          companyCol = i;
-          break;
-        }
-      }
-
-      // Find sector (usually 3rd or 4th column with sector-like content)
-      for (let i = 2; i < sampleRow.length; i++) {
-        if (i !== tickerCol && i !== companyCol) {
-          // Decoded: an escaped `&amp;` adds 4 characters, and the 40-character cap below used to
-          // drop the whole sector column when the sample row's value was long and escaped.
-          const text = cellText(sampleRow[i]!);
-          // Valid sectors: don't look like tickers or numbers, reasonable length
-          if (text.length > 2 && text.length < 40 && !looksLikeTicker(sampleRow[i]!) && !/^[\d.-]+$/.test(text)) {
-            sectorCol = i;
-            break;
-          }
-        }
-      }
-
-      if (tickerCol >= 0 && companyCol >= 0) {
-        const rows = parseTable(tableHtml, tickerCol, companyCol, sectorCol);
-        if (rows.length > bestCount) {
-          bestCount = rows.length;
-          bestRows = rows;
         }
       }
     }
+    if (tickerCol < 0 || companyCol < 0) continue;
 
-    return bestRows;
+    const parsed: ConstituentRow[] = [];
+    for (const cells of rows.slice(1)) {
+      if (cells.length <= Math.max(tickerCol, companyCol)) continue;
+      const ticker = cells[tickerCol]!.replace(/<[^>]+>/g, '').trim().toUpperCase().replace(/[^A-Z0-9.-]/g, '');
+      if (!ticker || ticker.length > 8) continue;
+      const at = (col: number): string | null => (col >= 0 && cells[col] !== undefined ? cellText(cells[col]!) || null : null);
+      parsed.push({ ticker, companyName: at(companyCol), sector: at(sectorCol), subIndustry: at(subCol) });
+    }
+    if (parsed.length > best.rows.length) best = { rows: parsed, sectorFromHeader };
   }
+  return best;
 }
 
 // ─── CSV helpers (local, not the watchlist CSV service) ──────────────────────

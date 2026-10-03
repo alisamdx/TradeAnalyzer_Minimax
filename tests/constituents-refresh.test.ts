@@ -262,15 +262,39 @@ describe('ConstituentsRefreshJob', () => {
     vi.restoreAllMocks();
   });
 
-  function stubService(outcomes: Record<string, { added: string[]; removed: string[]; total: number } | Error>) {
+  function stubService(
+    outcomes: Record<string, { added: string[]; removed: string[]; total: number } | Error>,
+    sectors: { parsed: number; updated: number } | Error = { parsed: 503, updated: 1100 },
+  ) {
     return {
       refreshIndexAuto: vi.fn(async (index: 'sp500' | 'russell1000') => {
         const o = outcomes[index];
         if (o instanceof Error) throw o;
         return { indexName: index, source: 'vanguard' as const, ...o };
       }),
+      refreshSectorsFromWikipedia: vi.fn(async () => {
+        if (sectors instanceof Error) throw sectors;
+        return sectors;
+      }),
     } as unknown as ConstituentsService;
   }
+
+  it('a failed sector refresh alone is a warning that keeps the stored sectors (v1.1.342)', async () => {
+    const svc = stubService(
+      { sp500: { added: [], removed: [], total: 503 }, russell1000: { added: [], removed: [], total: 1002 } },
+      new Error('Wikipedia fetch failed: 503'),
+    );
+    const result = await new ConstituentsRefreshJob(db, svc, () => 'polygon-key').run(noop, signal);
+    expect(result.status).toBe('warning');
+    expect(result.notes).toContain('sectors: refresh FAILED — kept stored sectors');
+  });
+
+  it('reports the sector refresh in the notes when it succeeds', async () => {
+    const svc = stubService({ sp500: { added: [], removed: [], total: 503 }, russell1000: { added: [], removed: [], total: 1002 } });
+    const result = await new ConstituentsRefreshJob(db, svc, () => 'polygon-key').run(noop, signal);
+    expect(result.status).toBe('success');
+    expect(result.notes).toContain('sectors: 1100 rows set from Wikipedia (503 S&P 500 names)');
+  });
 
   it('bootstraps 1Y prices only for added tickers with no history at all', async () => {
     // AAPL already has bars (e.g. tracked via a watchlist) — must NOT be re-fetched.

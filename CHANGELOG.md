@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.342] - 2026-10-03
+
+### Fix: constituent `sector` held GICS sub-industries
+
+The Wikipedia parser guessed columns from the first data row, and on the S&P 500 page that row is 3M. Its two-character name failed the parser's "company names are longer than 3 characters" test, so company got the GICS Sector and `sector` got the Sub-Industry. Vanguard has no sector, so those sub-industries stayed. As a result the spread mode's per-sector cap was per sub-industry, and the screener's `sector_exclude` couldn't match a sector name. Columns are now found by header. Migration 091 adds `sub_industry`, carried alongside `sector` through every refresh. `constituents-refresh` re-sets both from Wikipedia after membership, refusing unless the "GICS Sector" header is found. The v2 engine's sector cap was never affected.
+
+Details: `changelogs/v1.1.342_2026-10-03.md`.
+
 ## [1.1.341] - 2026-10-02
 
 ### Fix: constituent sectors and names were stored HTML-escaped
