@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   settleSpreadPick, buildSpreadShadowReport, reasonKind, diagnoseLegs, diagnoseStoredRejection, parseLegBand,
-  simulateSectorCap, liquidityVsCost, parseCostShareFromReason,
+  simulateSectorCap, liquidityVsCost, parseCostShareFromReason, isEarningsRejection, judgeEarningsRejection,
   type ShadowPick, type ShadowMark, type ShadowPickRow,
 } from '../src/main/services/spread-mode-settle.js';
 import { SPREAD_MODE_PROFILE as P } from '../src/shared/spread-mode.js';
@@ -522,5 +522,43 @@ describe('buildSpreadShadowReport', () => {
       expect(r.eligibility.find(x => x.pool === 'income')).toMatchObject({ runs: 1, maxEligible: 0 });
       expect(r.eligibility.find(x => x.pool === 'premium')).toMatchObject({ runs: 0, medianEligible: null });
     });
+  });
+});
+
+// v1.1.343 — the report's rejection tallies are cumulative since the first shadow run and carry no rule
+// version, so "earnings date unknown — EWZ ×5" read as a live fault two weeks after v1.1.292 exempted
+// ETFs. Each earnings-gate rejection is now re-judged under today's rule, like the missing-leg causes.
+describe('earnings-gate rejections re-judged under today\'s rule', () => {
+  it('recognises exactly the three earnings refusals spread-mode.ts writes', () => {
+    expect(isEarningsRejection('earnings date unknown')).toBe(true);
+    expect(isEarningsRejection('earnings calendar stale (last known 2026-08-26)')).toBe(true);
+    expect(isEarningsRejection('earnings 2026-10-22 on/before every 21–35 DTE expiry')).toBe(true);
+    expect(isEarningsRejection('round-trip cost 64% of credit (max 25%)')).toBe(false);
+    expect(isEarningsRejection('critic flag')).toBe(false);
+  });
+
+  it('names an ETF as exempt and a stock as still gated', () => {
+    expect(judgeEarningsRejection(true)).toBe('an ETF — exempt from the earnings gate since v1.1.292');
+    expect(judgeEarningsRejection(false)).toBe('not an ETF — the gate still applies');
+  });
+
+  it('the report splits the EWZ/BMNR line into an exempt ETF and a gated stock', () => {
+    const db = openDatabase(':memory:');
+    runMigrations(db, MIGRATIONS_DIR);
+    db.prepare(`INSERT INTO constituents (ticker, index_name, company_name, sector) VALUES ('EWZ', 'etf', 'iShares MSCI Brazil', 'International - Brazil')`).run();
+    const rej = db.prepare(
+      `INSERT INTO spread_mode_picks (as_of_date, slot, generated_at, mode, ticker, outcome, reason)
+       VALUES (?, 'intraday', 'x', 'shadow', ?, 'rejected', 'earnings date unknown')`,
+    );
+    for (const d of ['2026-09-14', '2026-09-15', '2026-09-16']) rej.run(d, 'EWZ');
+    for (const d of ['2026-09-22', '2026-09-23']) rej.run(d, 'BMNR');
+
+    const line = buildSpreadShadowReport(db, '2026-10-03').rejectionReasons.find(x => x.reason === 'earnings date unknown')!;
+    expect(line.n).toBe(5);
+    expect(line.causes).toEqual([
+      { cause: 'an ETF — exempt from the earnings gate since v1.1.292', n: 3 },
+      { cause: 'not an ETF — the gate still applies', n: 2 },
+    ]);
+    db.close();
   });
 });

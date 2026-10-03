@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.343] - 2026-10-03
+
+### Spread shadow report: earnings-gate rejections re-judged under today's rule
+
+The report's rejection tallies are cumulative since the first run and carry no rule version. So "earnings date unknown — EWZ ×5" read as a live fault two weeks after v1.1.292 exempted ETFs: all five predate the exemption, and EWZ was picked on Sep 30. Each earnings-gate refusal is now tagged either "an ETF — exempt from the earnings gate since v1.1.292" or "not an ETF — the gate still applies". The tag uses the same `causes` field as v1.1.299's missing-leg re-judgement, so the script and the in-app view show it unchanged.
+
+Details: `changelogs/v1.1.343_2026-10-03.md`.
+
 ## [1.1.342] - 2026-10-03
 
 ### Fix: constituent `sector` held GICS sub-industries

@@ -27,12 +27,12 @@ import { readSpreadModeSettings } from './spread-mode.js';
 import { assessCaptureQuality, type PositionCapture } from './spread-capture-quality.js';
 import {
   SPREAD_MODE_PROFILE as P, SPREAD_MODE_POOLS, SPREAD_GATE_POOL,
-  type BookSummary, type LegBand, type LegCause, type ShadowPick, type ShadowPickRow, type SpreadSettlement,
-  type SpreadShadowReport, type SpreadPool,
+  type BookSummary, type EarningsCause, type LegBand, type LegCause, type RejectionCause, type ShadowPick,
+  type ShadowPickRow, type SpreadSettlement, type SpreadShadowReport, type SpreadPool,
 } from '@shared/spread-mode.js';
 
 // The report types live in @shared so the Spread Shadow view can use them (v1.1.295).
-export type { BookSummary, LegBand, LegCause, ShadowPick, ShadowPickRow, SpreadSettlement, SpreadShadowReport };
+export type { BookSummary, EarningsCause, LegBand, LegCause, RejectionCause, ShadowPick, ShadowPickRow, SpreadSettlement, SpreadShadowReport };
 
 /** 08 §4 thresholds. */
 export const SPREAD_ENABLE_GATE = {
@@ -289,6 +289,25 @@ export function diagnoseStoredRejection(
 }
 
 /**
+ * Is this one of the earnings gate's three refusals? They are worded in spread-mode.ts: "earnings date
+ * unknown", "earnings calendar stale (last known DATE)", "earnings DATE on/before every …".
+ */
+export function isEarningsRejection(reason: string): boolean {
+  return reason === 'earnings date unknown'
+    || reason.startsWith('earnings calendar stale')
+    || /^earnings \d{4}-\d{2}-\d{2} on\/before/u.test(reason);
+}
+
+/**
+ * An earnings-gate rejection under TODAY'S rule (v1.1.343): since v1.1.292 an ETF never meets the gate,
+ * so a stored refusal of one predates the exemption. Judged on current ETF membership, the same "what
+ * would happen now" reading v1.1.299 gives a missing-leg rejection.
+ */
+export function judgeEarningsRejection(isEtfNow: boolean): EarningsCause {
+  return isEtfNow ? 'an ETF — exempt from the earnings gate since v1.1.292' : 'not an ETF — the gate still applies';
+}
+
+/**
  * "round-trip cost 64% of credit (max 25%)" → 0.64. Null when the reason is not a cost rejection.
  *
  * The cost share a REJECTION was computed from is never stored as a column — the row carries nulls and
@@ -537,14 +556,15 @@ export function buildSpreadShadowReport(db: DbHandle, todayEt: string): SpreadSh
       WHERE as_of_date = ? AND slot = ? AND ticker = ? AND dte BETWEEN ? AND ?`,
   );
   const kinds = new Map<string, {
-    n: number; tickers: Map<string, number>; pools: Map<SpreadPool, number>; causes: Map<LegCause, number>;
+    n: number; tickers: Map<string, number>; pools: Map<SpreadPool, number>; causes: Map<RejectionCause, number>;
   }>();
+  const etfStmt = db.prepare(`SELECT 1 AS yes FROM constituents WHERE index_name = 'etf' AND ticker = ? LIMIT 1`);
   for (const r of db.prepare(
     `SELECT as_of_date, slot, pool, ticker, reason FROM spread_mode_picks WHERE outcome = 'rejected' AND reason IS NOT NULL`,
   ).all() as Array<{ as_of_date: string; slot: string; pool: SpreadPool; ticker: string; reason: string }>) {
     const k = reasonKind(r.reason);
     const e = kinds.get(k) ?? {
-      n: 0, tickers: new Map<string, number>(), pools: new Map<SpreadPool, number>(), causes: new Map<LegCause, number>(),
+      n: 0, tickers: new Map<string, number>(), pools: new Map<SpreadPool, number>(), causes: new Map<RejectionCause, number>(),
     };
     e.n++;
     e.tickers.set(r.ticker, (e.tickers.get(r.ticker) ?? 0) + 1);
@@ -558,6 +578,9 @@ export function buildSpreadShadowReport(db: DbHandle, todayEt: string): SpreadSh
           cause = diagnoseStoredRejection(JSON.parse(chain.puts_json) as CapturedPut[], chain.underlying_price, r.reason);
         } catch { /* stays 'no chain stored' */ }
       }
+      e.causes.set(cause, (e.causes.get(cause) ?? 0) + 1);
+    } else if (isEarningsRejection(r.reason)) {
+      const cause = judgeEarningsRejection(etfStmt.get(r.ticker) !== undefined);
       e.causes.set(cause, (e.causes.get(cause) ?? 0) + 1);
     }
     kinds.set(k, e);

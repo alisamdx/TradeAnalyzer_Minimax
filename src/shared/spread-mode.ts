@@ -257,6 +257,17 @@ export type LegCause =
   | 'the widened rules would now build it'
   | 'legs present (another expiry was chosen)';
 
+/**
+ * An earnings-gate rejection re-judged under TODAY'S rule (v1.1.343). The report's rejection tallies are
+ * cumulative since the first shadow run and carry no rule version, so "earnings date unknown — EWZ ×5"
+ * kept showing two weeks after v1.1.292 exempted ETFs, reading like a live fault.
+ */
+export type EarningsCause =
+  | 'an ETF — exempt from the earnings gate since v1.1.292'
+  | 'not an ETF — the gate still applies';
+
+export type RejectionCause = LegCause | EarningsCause;
+
 export interface SpreadShadowReport {
   asOf: string;
   /** What Settings → Strategies has actually stored — not the defaults (v1.1.299). */
@@ -355,8 +366,11 @@ export interface SpreadShadowReport {
      * an arm that is contributing no evidence at all.
      */
     pools: Array<{ pool: SpreadPool; n: number }>;
-    /** Only for the two missing-leg reasons: what the stored chain shows. */
-    causes: Array<{ cause: LegCause; n: number }>;
+    /**
+     * For the two missing-leg reasons, what the stored chain shows; for the earnings-gate reasons,
+     * whether today's rule would still apply (v1.1.343). Empty for every other reason.
+     */
+    causes: Array<{ cause: RejectionCause; n: number }>;
   }>;
   /** The sector cap (08 S9) simulated over the same positions — shadow picks are not capped. */
   sectorCap: { cap: number; unknownSector: number; skipped: number; all: BookSummary; capped: BookSummary };

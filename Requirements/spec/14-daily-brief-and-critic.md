@@ -122,7 +122,7 @@ Runs immediately after spread chain capture, from that run's captured chains (no
 - **Shadow settlement (v1.1.290):** `GET /api/v1/diagnostics/spread-shadow` (`spread-mode-settle.ts`) settles every pick
   forward on its own captured quotes: the 50% target (decided on mid, realised with fills), or intrinsic at the
   expiry close. Picks of a ticker within 14 days of its kept entry are one position (v1.1.291). It reports
-  progress against 08 §4, with each rejection reason's tickers and, for a missing leg, the cause read from the stored chain.
+  progress against 08 §4, with each rejection reason's tickers and, for a missing leg, the cause read from the stored chain. An earnings-gate rejection is re-judged under today's rule (v1.1.343): a ticker that is an ETF now is tagged "exempt since v1.1.292", because the tallies are cumulative since the first run and carry no rule version.
   It also simulates the operator's 3-per-sector cap (08 S9, v1.1.294), showing the capped book beside the full one,
   and open positions by sector and expiry. Shadow picks are not capped; the `on` mode will enforce it.
 - **Capture quality (v1.1.297):** `spread-capture-quality.ts` checks the captures the settlements rest on —
