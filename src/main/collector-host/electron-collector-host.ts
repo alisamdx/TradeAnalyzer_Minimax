@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import type { CollectorHost, ProviderResponse, ScratchDb, SqliteLike } from '@tradeanalyzer/core';
 import { applyDictionary, assertNotRedirected, etTimestamp, recordCloseHandle, recordOpenHandle, DICTIONARY_VERSION } from '@tradeanalyzer/core';
 import { etradeGetRaw, renewAccessToken, type OAuthCredentials } from '../services/etrade-auth.js';
+import { ExpiredTokenLatch, EXPIRED_TOKEN_SKIP_MESSAGE, isExpiredTokenResponse } from '../services/etrade-token-latch.js';
 import type { TokenBucketRateLimiter } from '../services/rate-limiter.js';
 import { logApiCall, logError } from '../services/logger.js';
 import { edgarUserAgent } from '../services/edgar-identity.js';
@@ -455,6 +456,12 @@ export class ElectronCollectorHost implements CollectorHost {
       };
     }
 
+    // Once E*Trade has said this token is expired, nothing more is sent this run
+    // (see `etrade-token-latch.ts`). A re-auth changes the token and clears it.
+    if (this.expiredToken.isTripped(creds.accessToken)) {
+      return { status: null, body: '', requestedAt: new Date().toISOString(), respondedAt: null, error: EXPIRED_TOKEN_SKIP_MESSAGE };
+    }
+
     // Paced before each market call, the retry included — it is a second call
     // against the same per-second allowance. The OAuth renew between them is a
     // different module and only happens after a failure, so it is not queued.
@@ -471,7 +478,30 @@ export class ElectronCollectorHost implements CollectorHost {
       // re-auth that no amount of retrying can substitute for.
     }
     await this.opts.etradeLimiter.acquire(1);
-    return etradeGetRaw(path, params, this.opts.getEtradeCredentials() ?? creds);
+    const retryCreds = this.opts.getEtradeCredentials() ?? creds;
+    const retry = await etradeGetRaw(path, params, retryCreds);
+    if (isExpiredTokenResponse(retry)) this.tripExpiredToken(retryCreds.accessToken, path);
+    return retry;
+  }
+
+  private readonly expiredToken = new ExpiredTokenLatch();
+
+  private tripExpiredToken(accessToken: string, path: string): void {
+    if (this.expiredToken.isTripped(accessToken)) return;
+    this.expiredToken.trip(accessToken);
+    logError({
+      timestamp: etTimestamp(),
+      appVersion: this.hostApp.version,
+      errorClass: 'ETradeTokenExpired',
+      message:
+        `E*Trade declared the token expired after a renew (at ${path}); ` +
+        'the rest of this run sends no E*Trade calls. Re-authenticate in Settings.',
+      stack: null,
+      operation: 'collector-host:etrade-token-expired',
+      ticker: null,
+      correlationId: null,
+      level: 'ERROR'
+    });
   }
 
   /**

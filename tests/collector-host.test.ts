@@ -545,11 +545,13 @@ describe('registration in the existing app', () => {
     // would fire on that and teach the wrong lesson.
     expect(index).not.toContain("runJob('collector-oneshot'");
     expect(index).not.toContain('claim loop started');
-    const keepAliveOnly = index.match(/setInterval/g) ?? [];
-    expect(keepAliveOnly).toHaveLength(1);
-    expect(index.slice(index.indexOf('setInterval') - 200, index.indexOf('setInterval'))).toContain(
-      '_etradeKeepAlive'
-    );
+    // v1.1.344 added a second: the morning expired-token check, which probes
+    // E*Trade at most once a day and runs no job. Every interval must be one of
+    // these named E*Trade timers.
+    const intervals = index.match(/setInterval/g) ?? [];
+    const named = index.match(/(_etradeKeepAlive|_etradeMorningCheck) = setInterval\(/g) ?? [];
+    expect(intervals).toHaveLength(2);
+    expect(named).toHaveLength(intervals.length);
   });
 });
 

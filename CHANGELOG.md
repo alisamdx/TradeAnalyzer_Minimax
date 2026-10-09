@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.344] - 2026-10-09
+
+### Fix: an expired E*Trade token is reported early and no longer floods the collector with retries
+
+On 2026-10-08 the token expired at midnight and nothing reported it until both batch slots refused to start. The collector then sent ~2,000 E*Trade calls that all returned 401, each with a failed renew in between. A manual chain re-run that night lost its fresh token at midnight mid-run and was halted at 00:14 by the watchdog asking about 2026-10-09. Three changes. (1) The collector latches a token that E*Trade calls `token_expired` after a renew, and sends no further E*Trade calls that run. (2) Before 17:05 ET the watchdog checks the previous trading day. (3) The app probes E*Trade once in the 07:30–10:15 ET window on trading days, and the keep-alive also reports an expired token; either sends a re-auth email, at most once per day.
+
+Details: `changelogs/v1.1.344_2026-10-09.md`.
+
 ## [1.1.343] - 2026-10-03
 
 ### Spread shadow report: earnings-gate rejections re-judged under today's rule

@@ -7,7 +7,7 @@ import { snapshotGeneration } from './services/generation-snapshot.js';
 import { ApiServer } from './api-server.js';
 import { ElectronCollectorHost, readSharedPointer, generationExists } from './collector-host/electron-collector-host.js';
 import { writeLegacyHandoff, etTimestamp, type LegacyBriefHandoff } from '@tradeanalyzer/core';
-import { createCollectorDailyJob, createCollectorWatchdogJob } from './services/jobs/collector-daily.js';
+import { createCollectorDailyJob, createCollectorWatchdogJob, etClockHHMM } from './services/jobs/collector-daily.js';
 import { createCollectorOneShotJob } from './services/jobs/collector-oneshot.js';
 import { newAppUniverseSources } from './collector-host/universe-sources.js';
 import { openDatabase } from './db/connection.js';
@@ -57,7 +57,8 @@ import { registerPayoffIpc } from './ipc/ipc-payoff.js';
 import { registerRollIpc } from './ipc/ipc-roll.js';
 import { MarketDataProvider } from './services/marketdata-provider.js';
 import { IVolatilityProvider } from './services/ivolatility-provider.js';
-import { IvHistoryService } from './services/iv-history-service.js';
+import { IvHistoryService, isTradingDay } from './services/iv-history-service.js';
+import { ETradeTokenAlert } from './services/etrade-token-alert.js';
 import { registerIvHistoryIpc } from './ipc/ipc-iv-history.js';
 import { registerStrategyLabIpc } from './ipc/ipc-strategy-lab.js';
 import { registerPretradeValidatorIpc } from './ipc/ipc-pretrade-validator.js';
@@ -106,6 +107,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 let _apiServer: ApiServer | null = null;
 let _etradeKeepAlive: NodeJS.Timeout | null = null;
+let _etradeMorningCheck: NodeJS.Timeout | null = null;
 
 // Resolve migrations dir whether running from `out/main/index.js` (built)
 // or via electron-vite dev (source). Both layouts have /migrations at repo root.
@@ -525,10 +527,13 @@ app.whenReady().then(() => {
   // token. Ping E*Trade every ~90 min (well inside the 2h window) to keep it warm — and,
   // with renewal fixed (v1.1.99), auto-revive it if it did lapse. Only acts on a date-valid
   // token; a midnight-expired one is left for manual re-auth (no spam). See CLAUDE.md.
+  // An expired token is reported by email, at most once per ET day (v1.1.344). The
+  // alert is assigned once emailService exists, further down; until then it is null.
+  let etradeTokenAlert: ETradeTokenAlert | null = null;
   _etradeKeepAlive = setInterval(() => {
     void probeETradeConnection(db).then(r => {
       if (r.status === 'renewed')      console.log('[etrade] keep-alive revived a dormant token');
-      else if (r.status === 'expired') console.warn('[etrade] keep-alive: token needs manual re-auth');
+      else if (r.status === 'expired') void etradeTokenAlert?.reportExpired(r.detail);
       // ok / no_token / no_credentials / error → stay quiet
     }).catch(() => { /* best-effort keep-alive */ });
   }, 90 * 60 * 1000);
@@ -628,6 +633,21 @@ app.whenReady().then(() => {
   );
   registerScoringIpc(scoringService, emailService, db, optionsProvider);
   registerConvictionIpc(new ConvictionService(db), emailService);
+
+  // Morning E*Trade token check: once per trading day in [07:30, 10:15) ET, before
+  // the first batch slot. Ticks every 5 min; probes at most once a day (v1.1.344).
+  etradeTokenAlert = new ETradeTokenAlert({
+    probe: () => probeETradeConnection(db),
+    sendEmail: async (subject, html) => { await emailService.send(subject, html); },
+    isEmailConfigured: () => emailService.isConfigured(),
+    today: () => batchService.todayET(),
+    timeEt: () => etClockHHMM(),
+    isTradingDay,
+    appVersion: app.getVersion(),
+  });
+  _etradeMorningCheck = setInterval(() => {
+    void etradeTokenAlert?.morningTick().catch(() => { /* best-effort */ });
+  }, 5 * 60 * 1000);
 
   // v0.32.89 — Brief Replay (point-in-time scoring back-test)
   const briefReplayService = new BriefReplayService(db, scoringService);
@@ -1027,7 +1047,7 @@ app.whenReady().then(() => {
 
   batchService.registerJob(
     'collector-watchdog',
-    createCollectorWatchdogJob({ makeHost: makeCollectorHost, todayET }),
+    createCollectorWatchdogJob({ makeHost: makeCollectorHost, todayET, nowTimeET: () => etClockHHMM() }),
     {
       // The watchdog emails when no daily run happened, so it is only coherent
       // while the daily run is scheduled — with the run off, it would alarm
@@ -1228,5 +1248,6 @@ app.on('before-quit', () => {
     _sessionSentinel.markCleanExit('quit');
   }
   if (_etradeKeepAlive) { clearInterval(_etradeKeepAlive); _etradeKeepAlive = null; }
+  if (_etradeMorningCheck) { clearInterval(_etradeMorningCheck); _etradeMorningCheck = null; }
   _apiServer?.stop().catch(console.error);
 });

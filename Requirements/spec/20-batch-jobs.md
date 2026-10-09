@@ -33,6 +33,8 @@ IPC: `listJobs`, `listRuns(jobId)`, `runNow(jobId)`, `runNowSync(jobId)`, `cance
 - `collector`: the TradeAnalyzer 2 generation's `meta_run` rows, `qa_quality_report` (verdict, parsed domains, **email status and error**), latest `qa_domain_day_status` per domain, `meta_response` counts and failures, and `qa_exception` counts, each section failing independently
 - `attention`: failed, warning or still-running jobs; expected jobs (`daily-intelligence-brief`, `data-collector`, `collector-watchdog`) missing on a trading day, and a trading day with no **daily** collector run — both only once the day is complete (a past date, or today from 20:00 ET, after the 19:30 watchdog; v1.1.247); a daily run with no gate report (manual one-shots never write one); a non-green gate verdict; an unsent gate email; ERROR log lines; calls with no HTTP response; 401 and 403 responses
 
+**`collector-watchdog` asks about the session that should have been collected** (v1.1.344, `watchdogTargetDate`). From 17:05 ET (the collector slot) onward, that is today. Before 17:05 it is the most recent `ref_trading_day` before today, because today's run cannot exist yet. Without this, a manual chain that crossed midnight (started 22:47 on 2026-10-08, watchdog at 00:14) asked about 2026-10-09, halted the chain, marked 2026-10-09 `not_run` and emailed NO RUN for a day that had not started.
+
 The generation is opened through the collector host (write-capable, redirect-guarded) and never while a collector job holds the batch mutex. `scripts/day-report.mjs --date <d> [--json]` renders it to `~/.tradeanalyzer/day-reports/day-<d>.md`. Collector emails (gate status, NO RUN, backfill) log `collector-email:sent` or `collector-email:failed`.
 
 ## 20.2 Live activity panel

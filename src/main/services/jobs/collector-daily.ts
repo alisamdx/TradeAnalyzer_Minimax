@@ -110,9 +110,41 @@ export function createCollectorDailyJob(deps: {
  * looks exactly like a quiet day — and a green inbox that means "nothing ran" is
  * worse than a red one.
  */
+/**
+ * ET wall clock as 'HH:MM', 00-23. `hourCycle: 'h23'` because some ICU builds
+ * render midnight as '24:xx' under `hour12: false`, which sorts after the cutoff.
+ */
+export function etClockHHMM(now: Date = new Date()): string {
+  return new Intl.DateTimeFormat('en-GB', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(now);
+}
+
+/** When the daily collector is scheduled; before this, today's run cannot exist yet. */
+export const COLLECTOR_SESSION_CUTOFF_ET = '17:05';
+
+/**
+ * The trading date the watchdog should ask about (v1.1.344).
+ *
+ * At 19:30 that is today. It is not today when the watchdog runs before
+ * the collector's 17:05 slot. The case that hit: a manual orchestrator chain
+ * started at 22:47 on 2026-10-08 reached the watchdog at 00:14, after midnight,
+ * asked about 2026-10-09, found no run and halted the chain. It also marked
+ * 2026-10-09's domains `not_run` and emailed NO RUN for a day that had not
+ * started. Before the cutoff the question is about the previous trading day.
+ */
+export function watchdogTargetDate(
+  today: string,
+  timeEt: string,
+  previousTradingDay: (date: string) => string | undefined
+): string {
+  if (timeEt >= COLLECTOR_SESSION_CUTOFF_ET) return today;
+  return previousTradingDay(today) ?? today;
+}
+
 export function createCollectorWatchdogJob(deps: {
   readonly makeHost: HostFactory;
   readonly todayET: () => string;
+  /** Current ET wall-clock time as 'HH:MM'. */
+  readonly nowTimeET: () => string;
 }): BatchJobHandler {
   return {
     name: 'Collector watchdog',
@@ -136,7 +168,11 @@ export function createCollectorWatchdogJob(deps: {
       const host = deps.makeHost({ signal, onProgress: () => undefined });
       try {
         const db = host.openGenerationDb();
-        const today = deps.todayET();
+        const today = watchdogTargetDate(deps.todayET(), deps.nowTimeET(), (d) =>
+          (db
+            .prepare('SELECT MAX(date) AS d FROM ref_trading_day WHERE date < ? AND is_trading_day = 1')
+            .get(d) as { d: string | null } | undefined)?.d ?? undefined
+        );
 
         const trading = db
           .prepare('SELECT is_trading_day FROM ref_trading_day WHERE date = ?')
@@ -157,7 +193,7 @@ export function createCollectorWatchdogJob(deps: {
         // turn "the collector did not run" into "the collector ran late", and
         // the second is much harder to notice going wrong repeatedly.
         const detail = runs.length === 0
-          ? 'No daily run exists for today.'
+          ? 'No daily run exists for this trading day.'
           : `Runs exist but none completed (${runs.map((r) => r.status).join(', ')}).`;
 
         // The registry must exist before `not_run` can be written per domain —
