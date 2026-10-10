@@ -137,7 +137,10 @@ console.log(`
 if (args.includes('--json')) {
   const dir = join(DATA_DIR, 'premium-roc');
   mkdirSync(dir, { recursive: true });
-  const file = join(dir, `premium-roc-${new Date().toISOString().slice(0, 10)}.json`);
+  // The ET date, not UTC: toISOString() names an evening run after tomorrow (2026-10-09 20:40 ET
+  // saved as premium-roc-2026-10-10.json).
+  const etDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  const file = join(dir, `premium-roc-${etDate}.json`);
   writeFileSync(file, JSON.stringify(results));
   console.log(`\nSaved ${file}`);
 }
