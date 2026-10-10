@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS iv_history (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
   ticker          TEXT    NOT NULL,
   date            TEXT    NOT NULL,        -- YYYY-MM-DD (trading day, ET)
-  atm_iv          REAL    NOT NULL,        -- 30-day constant-maturity IV, decimal (0.285 = 28.5%)
+  atm_iv          REAL    NOT NULL,        -- 30-day constant-maturity IV. PERCENTAGE (28.5) since migration 017 converted it; created here as a decimal (0.285)
   underlying_px   REAL,                   -- stock price at time of capture
   exp_near        TEXT,                   -- nearer expiration used (YYYY-MM-DD)
   exp_far         TEXT,                   -- farther expiration used (YYYY-MM-DD)

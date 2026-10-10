@@ -200,7 +200,7 @@ Authoritative DDL is in `migrations/`. Tables are created lazily (`CREATE TABLE 
 
 ## 10. Known quirks & gotchas
 
-- **`iv_history.atm_iv` is stored as a PERCENTAGE; the schema comment in migration 022 ("decimal") is stale (checked 2026-10-09).** Six tickers, 343 rows each, on both sides of the IVolatility → E*Trade splice: every value is a percentage (SPY ~12.7, MRNA ~102). Divide by 100 before Black-Scholes. NewApp's `derived_iv30_daily` and IVolatility's `iv30` ARE decimals.
+- **`iv_history.atm_iv` is stored as a PERCENTAGE (checked 2026-10-09).** Migration 016 created it as a decimal and 017 multiplied every row by 100. 016's column comment said "decimal" until 2026-10-10. Six tickers, 343 rows each, on both sides of the IVolatility → E*Trade splice: every value is a percentage (SPY ~12.7, MRNA ~102). Divide by 100 before Black-Scholes. NewApp's `derived_iv30_daily` and IVolatility's `iv30` ARE decimals.
 
 - **QC-602 compares E*Trade earnings only in the run that fetched them (v1.1.317; threshold 3 days, measured).** The overlap sample re-asks a covered ticker about once in eleven weeks; re-comparing that one row nightly let the consecutive-runs escalation make four findings blocking on a single observation each. Unannounced dates: Finnhub and E*Trade estimates differ by ~2 days by construction. Announced dates in the sample (ACN, ABBV): Finnhub right, E*Trade off by 4–7.
 
