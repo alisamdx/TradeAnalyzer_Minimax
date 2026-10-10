@@ -37,6 +37,7 @@ import Database from 'better-sqlite3';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { etDate } from './lib/et-time.mjs';
 
 const DELTA_MIN = 0.20, DELTA_MAX = 0.30, DELTA_TARGET = 0.25;
 const WINDOW = { minDTE: 28, maxDTE: 52 };   // monthly-first window — the better contract choice
@@ -180,7 +181,7 @@ function collectFromDb() {
   db.close();
   const seen = new Set(), out = [];
   for (const b of briefs) {
-    const day = new Date(new Date(b.generated_at).getTime() - 4 * 3600_000).toISOString().slice(0, 10);
+    const day = etDate(b.generated_at);
     let picks; try { picks = JSON.parse(b.picks); } catch { continue; }
     for (const p of picks) {
       for (const s of (p.strategyLabResult?.scores ?? [])) {

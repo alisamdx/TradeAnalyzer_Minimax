@@ -10,6 +10,7 @@
 import Database from 'better-sqlite3';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { etParts } from './lib/et-time.mjs';
 
 const db = new Database(join(homedir(), 'AppData', 'Roaming', 'trade-analyzer', 'trade-analyzer.sqlite'));
 
@@ -22,12 +23,6 @@ const STRATEGY_RELEVANT_SLUGS = {
   inflection: ['short-put-vertical', 'short-call-vertical'],
 };
 
-// ET calendar date + ET hour from a UTC ISO string (handles EDT approx via fixed -4 —
-// the sample is Apr–Jul, all EDT).
-function etParts(iso) {
-  const d = new Date(new Date(iso).getTime() - 4 * 3600_000);
-  return { date: d.toISOString().slice(0, 10), hour: d.getUTCHours() };
-}
 
 // key = date|…|ticker|slug → { morning: {liq, noBid}, evening: {...} }
 const pairs = new Map();

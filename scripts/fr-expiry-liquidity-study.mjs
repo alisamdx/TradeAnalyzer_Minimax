@@ -21,6 +21,7 @@
 import Database from 'better-sqlite3';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { etDate } from './lib/et-time.mjs';
 
 const db = new Database(join(homedir(), 'AppData', 'Roaming', 'trade-analyzer', 'trade-analyzer.sqlite'));
 
@@ -56,8 +57,6 @@ function nearestMonthlyDte(fromIso) {
   return best;
 }
 
-// ET calendar date from a UTC ISO timestamp (EDT for the Apr–Jul sample; -4h approx).
-const etDate = (iso) => new Date(new Date(iso).getTime() - 4 * 3600_000).toISOString().slice(0, 10);
 const dteBetween = (fromEt, exp) =>
   Math.round((new Date(exp + 'T16:00:00Z').getTime() - new Date(fromEt + 'T16:00:00Z').getTime()) / 86_400_000);
 

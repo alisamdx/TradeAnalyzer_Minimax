@@ -32,6 +32,7 @@
 import Database from 'better-sqlite3';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { etDate } from './lib/et-time.mjs';
 
 const db = new Database(join(homedir(), 'AppData', 'Roaming', 'trade-analyzer', 'trade-analyzer.sqlite'));
 
@@ -49,7 +50,6 @@ function thirdFriday(y, m0) {
   return new Date(Date.UTC(y, m0, firstFri + 14)).toISOString().slice(0, 10);
 }
 const isMonthly = (iso) => { const [y, m] = iso.split('-').map(Number); return thirdFriday(y, m - 1) === iso; };
-const etDate = (iso) => new Date(new Date(iso).getTime() - 4 * 3600_000).toISOString().slice(0, 10);
 const addDays = (d, n) => { const x = new Date(d + 'T00:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
 const daysBetween = (a, b) => (new Date(b + 'T00:00:00Z') - new Date(a + 'T00:00:00Z')) / 86_400_000;
 
