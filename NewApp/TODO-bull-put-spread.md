@@ -17,15 +17,17 @@ can never be confused with `#5` in the main list.
 
 ---
 
-## Status — 2026-09-22
+## Status — 2026-10-09
 
 Mode is `shadow`: picks are computed after every brief and stored, with no panel, no email, and nothing
 reaching the v2 engine. The 08 §4 enable gate is **time-blocked, not work-blocked**:
 
 | §4 condition | State |
 |---|---|
-| ≥ 15 intraday capture days, then re-run the study `--slip-model quoted --capital 25000 --risk 2500` | **6 / 15** — earliest ~2026-10-02 |
-| ≥ 30 settled positions, mean return on max loss > 0 | **0 / 30** — 13 open; the first entries expire 2026-10-16 |
+| ≥ 15 intraday capture days, then re-run the study `--slip-model quoted --capital 25000 --risk 2500` | **16 / 15 — study run 10-09 (BPS-14): return passes, quoted coverage 44% < 50% fails.** Re-run ~mid-October |
+| ≥ 30 settled positions, mean return on max loss > 0 | **15 / 30**, mean +16.4% — most of the book settles 10-16…10-30 |
+
+*(Status as of 2026-09-22, kept for history:)*
 
 First week's funnel (2026-09-14 → 09-18, 10 runs): 94 ticker-runs → 75 rejected → 19 picks → 10 positions.
 **36 of those 75 rejections no longer occur** (25 leg-rule, fixed v1.1.292 and confirmed 25/25 by the
@@ -420,6 +422,31 @@ Provenance: **measured** (a #43 study result) · **inherited** (a wheel-screen r
     tickers that happened to be captured intraday, not a random sample.
   - 64 configurations in §2–4c and 9 in §7: the best row flatters itself. One replay sample, BS-priced
     wings with an assumed skew — shapes criteria only (FR-SEY-5).
+  **GATE RUN 2026-10-09 (`bull-put-spread-gate-2026-10-09.md`; 16 intraday capture days; `--slip-model
+  quoted --slip 0.03 --capital 25000 --risk 2500`; prices to 10-09, 480 episodes, 1,495 entries) — NOT
+  PASSED, on coverage alone.**
+  - **Coverage: 660 of 1,495 entries (44%)**, up from 496 (33%) on 10-01. 169 tickers have quotes, up
+    from 141. The bar is 748 (50%). At the 10-01→10-09 pace (+164 in 8 days) that is ~5 more capture
+    days, so roughly **mid-October**. But the replay entries are fixed (2025-06…2026-08), so coverage
+    grows only when capture reaches a ticker not quoted before, and the pace should slow. Re-run when
+    the shadow report's capture-day count reaches ~21.
+  - **Return: passes for the profile shadow actually runs** (Δ0.30, 5% wing, 50% target, no stop, no time
+    stop, cost ≤ 25%): **+86.3% (63.1% ann.)**, drawdown 23.7%, against the CSP's +12.5% on the same
+    entries. The ungated version reaches +81.3% / 59.7% ann. against +25.5%. Both clear "beat the CSP at
+    ≥ 20% ann."
+  - **The DRAFT profile now loses money: −24.5%, 53.7% drawdown** (was +32.8% / 43.2% on 10-01). More
+    entries are priced at real quotes (median $0.133/leg, against the $0.03 fallback), and the draft's
+    stop and time stop pay for an extra close on most trades. That is BPS-13 again, and it confirms that
+    shadow runs the right exits. **The draft profile must not be what `on` ships.**
+  - **Quoted-only rows (§9) finally turn positive behind the cost gate:** 64 of 179 quoted episodes clear
+    ≤ 25%, mean **+2.69%** per trade (CSP +0.50%); ungated quoted is −1.49%. The gate is doing the work
+    on real costs. Tighter is better here (≤ 20% +4.42% on 53, ≤ 15% +9.17% on 35), but the samples
+    are small. This is the first evidence about the gate level from real costs rather than the price
+    filter (BPS-9); not a finding yet.
+  - Wider wings and fewer closes still lead (w10% +136.9% / 8.6% DD gated; hold to expiry +103.6% /
+    11.1%). Same 78-configuration multiple-comparison caveat; FR-SEY-5 applies.
+  - **The shadow book (other half of §4) on 10-09:** 15 / 30 settled, mean +16.4%, 100% win, median hold
+    7 days. Most of the book settles 10-16…10-30.
 - **BPS-15. Build the `on` surfaces** — Daily Brief panel and email — only once §4 passes. `on` is
   deliberately not a member of `SpreadModeSwitch`; adding it **fails the build** at `budgetGates()` in
   `spread-mode.ts`, which is where the BPS-11 decision must be made. (Was part of #44.)
