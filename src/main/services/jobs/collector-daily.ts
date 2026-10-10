@@ -1,6 +1,6 @@
 import type { BatchJobHandler, BatchJobResult } from '../batch-service.js';
 import type { BatchProgressEvent } from '@shared/types.js';
-import { runDaily, markNotRun, syncRegistry, ALL_CHECKS, buildNoRunEmail } from '@tradeanalyzer/core';
+import { runDaily, markNotRun, syncRegistry, ALL_CHECKS, buildNoRunEmail, sessionOnOrBefore } from '@tradeanalyzer/core';
 import { generationExists, readSharedPointer } from '../../collector-host/electron-collector-host.js';
 import type { HostFactory } from './collector-oneshot.js';
 
@@ -21,9 +21,36 @@ import type { HostFactory } from './collector-oneshot.js';
  * 16:00 ET — the existing app learned that by storing partial bars and scoring
  * breakouts off them.
  */
+/** The regular session opens here; before it, the latest session is a previous day's. */
+export const SESSION_OPEN_ET = '09:30';
+
+/**
+ * The session a daily collector run belongs to (v1.1.345).
+ *
+ * It used to be the ET calendar date at start. A manual chain started in the
+ * evening reaches the collector late, and once that is past midnight the run
+ * would be recorded against the NEW date, whose session has not happened. Its
+ * bars and chains are the previous session's. That case nearly happened on
+ * 2026-10-08, when run 66 started at 23:52.
+ *
+ * Before 09:30 ET the run belongs to the latest session strictly before today,
+ * from core's rule-based calendar: a Saturday 00:30 or a Monday 08:00 run is
+ * Friday's. From 09:30 onward it stays today. A daytime run sees today's
+ * market, and labelling it yesterday would file live quotes under a closed
+ * session. This is why the cutoff is not the watchdog's 17:05.
+ */
+export function collectorTradingDate(today: string, timeEt: string): string {
+  if (timeEt >= SESSION_OPEN_ET) return today;
+  const d = new Date(`${today}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return sessionOnOrBefore(d.toISOString().slice(0, 10));
+}
+
 export function createCollectorDailyJob(deps: {
   readonly makeHost: HostFactory;
   readonly todayET: () => string;
+  /** Current ET wall-clock time as 'HH:MM'. */
+  readonly nowTimeET: () => string;
 }): BatchJobHandler {
   return {
     name: 'Data collector (new application)',
@@ -61,7 +88,7 @@ export function createCollectorDailyJob(deps: {
       });
 
       try {
-        const tradingDate = deps.todayET();
+        const tradingDate = collectorTradingDate(deps.todayET(), deps.nowTimeET());
         const report = await runDaily(host, { tradingDate });
 
         if (report.verdict === 'skipped') {

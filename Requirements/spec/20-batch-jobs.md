@@ -35,6 +35,8 @@ IPC: `listJobs`, `listRuns(jobId)`, `runNow(jobId)`, `runNowSync(jobId)`, `cance
 
 **`collector-watchdog` asks about the session that should have been collected** (v1.1.344, `watchdogTargetDate`). From 17:05 ET (the collector slot) onward, that is today. Before 17:05 it is the most recent `ref_trading_day` before today, because today's run cannot exist yet. Without this, a manual chain that crossed midnight (started 22:47 on 2026-10-08, watchdog at 00:14) asked about 2026-10-09, halted the chain, marked 2026-10-09 `not_run` and emailed NO RUN for a day that had not started.
 
+**`data-collector` records the session its data belongs to** (v1.1.345, `collectorTradingDate`). A run started before 09:30 ET belongs to the latest session strictly before today, taken from core's rule-based calendar (`sessionOnOrBefore`): a run at 00:30 on Saturday or 08:00 on Monday is Friday's. From 09:30 onward it is today. A daytime run sees today's market, so its cutoff is the open and not the watchdog's 17:05.
+
 The generation is opened through the collector host (write-capable, redirect-guarded) and never while a collector job holds the batch mutex. `scripts/day-report.mjs --date <d> [--json]` renders it to `~/.tradeanalyzer/day-reports/day-<d>.md`. Collector emails (gate status, NO RUN, backfill) log `collector-email:sent` or `collector-email:failed`.
 
 ## 20.2 Live activity panel

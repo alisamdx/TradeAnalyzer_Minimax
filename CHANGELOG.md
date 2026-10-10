@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.345] - 2026-10-09
+
+### Fix: a collector run after midnight is recorded against the previous session
+
+`data-collector` used the ET calendar date at start. A manual chain that reached it after midnight would have recorded the previous session's bars and chains under a date with no session yet (on 2026-10-08 the collector started at 23:52, eight minutes short). Before 09:30 ET the run now belongs to the latest session before today, from core's rule-based calendar. From the open onward it stays today, because a daytime run sees today's market.
+
+Details: `changelogs/v1.1.345_2026-10-09.md`.
+
 ## [1.1.344] - 2026-10-09
 
 ### Fix: an expired E*Trade token is reported early and no longer floods the collector with retries

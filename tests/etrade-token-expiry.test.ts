@@ -8,7 +8,7 @@ vi.mock('../src/main/services/logger.js', () => ({
 }));
 
 import { isExpiredTokenResponse, ExpiredTokenLatch } from '../src/main/services/etrade-token-latch.js';
-import { etClockHHMM, watchdogTargetDate } from '../src/main/services/jobs/collector-daily.js';
+import { collectorTradingDate, etClockHHMM, watchdogTargetDate } from '../src/main/services/jobs/collector-daily.js';
 import { ETradeTokenAlert, shouldRunMorningCheck } from '../src/main/services/etrade-token-alert.js';
 
 /**
@@ -69,6 +69,32 @@ describe('collector watchdog target date', () => {
     expect(etClockHHMM(new Date('2026-10-09T04:14:00Z'))).toBe('00:14');
     expect(etClockHHMM(new Date('2026-10-08T23:30:00Z'))).toBe('19:30');
     expect(etClockHHMM(new Date('2026-01-15T05:00:00Z'))).toBe('00:00'); // EST
+  });
+});
+
+describe('daily collector trading date', () => {
+  it('files a run started after midnight under the previous session', () => {
+    expect(collectorTradingDate('2026-10-09', '00:30')).toBe('2026-10-08');
+    expect(collectorTradingDate('2026-10-09', '09:29')).toBe('2026-10-08');
+  });
+
+  it('walks back over weekends and holidays', () => {
+    expect(collectorTradingDate('2026-10-10', '00:30')).toBe('2026-10-09'); // Saturday → Friday
+    expect(collectorTradingDate('2026-10-12', '08:00')).toBe('2026-10-09'); // Monday pre-open → Friday
+    expect(collectorTradingDate('2026-11-27', '01:00')).toBe('2026-11-25'); // past Thanksgiving
+  });
+
+  it('keeps today from the open onward, including a late-evening start', () => {
+    expect(collectorTradingDate('2026-10-08', '09:30')).toBe('2026-10-08');
+    expect(collectorTradingDate('2026-10-08', '17:05')).toBe('2026-10-08');
+    expect(collectorTradingDate('2026-10-08', '23:52')).toBe('2026-10-08');
+  });
+
+  it('is what the job passes to runDaily', () => {
+    const src = readFileSync(join(__dirname, '../src/main/services/jobs/collector-daily.ts'), 'utf8');
+    const job = src.slice(src.indexOf('export function createCollectorDailyJob'), src.indexOf('export function etClockHHMM'));
+    expect(job).toContain('collectorTradingDate(deps.todayET(), deps.nowTimeET())');
+    expect(job).not.toMatch(/const tradingDate = deps\.todayET\(\)/);
   });
 });
 

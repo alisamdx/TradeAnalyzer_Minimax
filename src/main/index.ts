@@ -1031,7 +1031,7 @@ app.whenReady().then(() => {
   // faster than one could be acted on.
   batchService.registerJob(
     'data-collector',
-    createCollectorDailyJob({ makeHost: makeCollectorHost, todayET }),
+    createCollectorDailyJob({ makeHost: makeCollectorHost, todayET, nowTimeET: () => etClockHHMM() }),
     {
       // 17:05 would put it after this app's after-close chain has started; the
       // batch mutex makes it wait if that chain is still running, and the 19:30
