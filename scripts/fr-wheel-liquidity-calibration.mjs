@@ -33,11 +33,11 @@
 // which kills two of the three components).
 //
 // Usage: node scripts/fr-wheel-liquidity-calibration.mjs [--source db|live] [--limit 60] [--out file.json]
-import Database from 'better-sqlite3';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { etDate } from './lib/et-time.mjs';
+import { apiGet, loadBriefHistory } from './lib/app-api.mjs';
 
 const DELTA_MIN = 0.20, DELTA_MAX = 0.30, DELTA_TARGET = 0.25;
 const WINDOW = { minDTE: 28, maxDTE: 52 };   // monthly-first window — the better contract choice
@@ -155,11 +155,10 @@ function entropy(vals) {
 }
 
 // ── sample + collect ────────────────────────────────────────────────────────────
-function sampleTickers() {
-  const db = new Database(join(homedir(), 'AppData', 'Roaming', 'trade-analyzer', 'trade-analyzer.sqlite'));
-  const row = db.prepare(`SELECT payload_json FROM analysis_snapshots WHERE mode='wheel' ORDER BY run_at DESC LIMIT 1`).get();
-  db.close();
-  const list = row ? (() => { const a = JSON.parse(row.payload_json); return Array.isArray(a) ? a : (a.results ?? a.rows ?? []); })() : [];
+async function sampleTickers() {
+  // Latest batch wheel snapshot, through the API (v1.1.220 route), never the SQLite file.
+  const snap = await apiGet('/analysis/snapshots/latest?mode=wheel');
+  const list = Array.isArray(snap?.results) ? snap.results : [];
   return list.filter((r) => r.recommendedStrike != null && r.ivRank != null)
     .sort((a, b) => b.ivRank - a.ivRank).slice(0, LIMIT).map((r) => r.ticker);
 }
@@ -175,10 +174,8 @@ function observe(base, bid, ask, oi, volume) {
 }
 
 /** Real short-put legs in the wheel delta band, from stored brief structures (market-hours quotes). */
-function collectFromDb() {
-  const db = new Database(join(homedir(), 'AppData', 'Roaming', 'trade-analyzer', 'trade-analyzer.sqlite'));
-  const briefs = db.prepare(`SELECT generated_at, picks FROM daily_briefs ORDER BY generated_at`).all();
-  db.close();
+async function collectFromDb() {
+  const { briefs } = await loadBriefHistory();
   const seen = new Set(), out = [];
   for (const b of briefs) {
     const day = etDate(b.generated_at);
@@ -209,7 +206,7 @@ function collectFromDb() {
 async function collectLive() {
   const health = await fetch(`${API}/health`, { headers: { 'X-Agent-Token': TOKEN } }).catch(() => null);
   if (!health?.ok) { console.error('API server unreachable — the app must be RUNNING for --source live.'); process.exit(1); }
-  const tickers = sampleTickers();
+  const tickers = await sampleTickers();
   const expirations = nearTermExpirations(Math.ceil(WINDOW.maxDTE / 7) + 2);
   const inWin = expirations.filter((e) => { const d = dteDays(e); return d >= WINDOW.minDTE && d <= WINDOW.maxDTE; }).sort();
   const tryOrder = [...inWin.filter(isMonthly), ...inWin.filter((e) => !isMonthly(e))];
@@ -242,7 +239,7 @@ console.log(`\nWheel liquidity threshold calibration — source=${SOURCE}, ${new
 console.log(`observations = short puts, ${DELTA_MIN}–${DELTA_MAX} delta, live bid` +
             (SOURCE === 'live' ? `, monthly-first pick in [${WINDOW.minDTE},${WINDOW.maxDTE}] DTE\n` : `, from stored brief structures\n`));
 
-const rows = SOURCE === 'live' ? await collectLive() : collectFromDb();
+const rows = SOURCE === 'live' ? await collectLive() : await collectFromDb();
 
 const usable = rows.filter((r) => r.costPct != null);
 console.log(`\n${usable.length} contracts with a usable quote.`);

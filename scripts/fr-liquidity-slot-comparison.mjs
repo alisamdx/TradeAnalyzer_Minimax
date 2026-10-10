@@ -5,14 +5,13 @@
 // critic's warnings partly reflect WHEN we measure, not true tradability.
 //
 // Pairs picks by (date-ET, strategy, ticker, slug) across the two slots and compares
-// liquidityScore + zero-bid-leg incidence. Read-only over a write-capable connection.
+// liquidityScore + zero-bid-leg incidence. Reads through the running app's API
+// (scripts/lib/app-api.mjs), never the SQLite file.
 
-import Database from 'better-sqlite3';
-import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { loadBriefHistory } from './lib/app-api.mjs';
 import { etParts } from './lib/et-time.mjs';
 
-const db = new Database(join(homedir(), 'AppData', 'Roaming', 'trade-analyzer', 'trade-analyzer.sqlite'));
+const { briefs: BRIEFS, liquidityLog: LOG } = await loadBriefHistory({ liquidityLog: true });
 
 const STRATEGY_RELEVANT_SLUGS = {
   wheel:   ['short-naked-put', 'covered-call'],
@@ -31,16 +30,11 @@ let morningRuns = new Set(), eveningRuns = new Set();
 // Preferred source (v1.1.93+): the structure_liquidity_log instrumentation table —
 // persists EVERY Stage-4 measurement, so intraday/after-close pairs survive the
 // evening brief's same-day delete. Falls back to stored briefs when empty.
-const hasLog = (() => {
-  try { return db.prepare(`SELECT COUNT(*) n FROM structure_liquidity_log`).get().n > 0; }
-  catch { return false; }
-})();
+const hasLog = LOG !== null && LOG.length > 0;
 
 if (hasLog) {
   console.log('\nSource: structure_liquidity_log (instrumentation table)');
-  const logRows = db.prepare(
-    `SELECT captured_at, date_et, ticker, slug, liquidity_score, no_bid_leg FROM structure_liquidity_log`
-  ).all();
+  const logRows = LOG;
   for (const r of logRows) {
     if (r.liquidity_score == null) continue;
     const { hour } = etParts(r.captured_at);
@@ -54,7 +48,7 @@ if (hasLog) {
   }
 } else {
   console.log('\nSource: daily_briefs picks (fallback — instrumentation table empty)');
-  const rows = db.prepare(`SELECT strategy, generated_at, picks FROM daily_briefs ORDER BY generated_at`).all();
+  const rows = BRIEFS;
   for (const row of rows) {
     let picks; try { picks = JSON.parse(row.picks); } catch { continue; }
     const { date, hour } = etParts(row.generated_at);
@@ -85,7 +79,7 @@ console.log(`Structure observations paired across both slots (same date+strategy
 
 if (paired.length === 0) {
   console.log('No paired observations — cannot compare slots.');
-  db.close(); process.exit(0);
+  process.exit(0);
 }
 
 const f = (x, d = 2) => x.toFixed(d);
@@ -112,4 +106,3 @@ console.log('\npaired delta histogram (evening − morning):');
 for (const k of Object.keys(hist).sort((a, b) => (parseInt(a) || -99) - (parseInt(b) || 99))) {
   console.log(`  ${k.padStart(4)}: ${hist[k]}`);
 }
-db.close();

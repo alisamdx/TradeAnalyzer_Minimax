@@ -29,12 +29,11 @@
 //   Friction from Stage 1 is then applied per arm.
 //
 // Usage: node scripts/fr-expiry-realized-ab.mjs [budget=500]
-import Database from 'better-sqlite3';
-import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { latestPriceDate, loadBriefHistory, loadPriceSeries } from './lib/app-api.mjs';
 import { etDate } from './lib/et-time.mjs';
 
-const db = new Database(join(homedir(), 'AppData', 'Roaming', 'trade-analyzer', 'trade-analyzer.sqlite'));
+// Reads through the running app's API (scripts/lib/app-api.mjs), never the SQLite file.
+const { briefs: BRIEFS } = await loadBriefHistory();
 
 const BUDGET = Number(process.argv[2] ?? 500);   // per-trade risk budget $ (5% of $10k)
 const MAX_WIDTH_PTS = 25;                        // mirror findBudgetWidthHedge maxWidth default
@@ -111,7 +110,7 @@ const f = (x, d = 1) => (x == null || Number.isNaN(x) ? '—' : x.toFixed(d));
 // STAGE 1 — real-quote execution friction, matched ticker|slug, DTE held fixed
 // ════════════════════════════════════════════════════════════════════════════════
 function stage1() {
-  const rows = db.prepare(`SELECT generated_at, picks FROM daily_briefs ORDER BY generated_at`).all();
+  const rows = BRIEFS;
   const seen = new Set();
   const cell = new Map();       // ticker|slug -> { mo:[], wk:[] }
   const gate = { mo: [0, 0], wk: [0, 0] };   // [clears>=8, total]
@@ -184,7 +183,7 @@ function stage1() {
   // The 27-33 DTE gate rates above are measured at the tenor the CURRENT rule lands on. A
   // monthly tie-break inside [20,50] can land at 20 or 50 DTE, so the advantage must hold
   // across the whole band or the deployment gain is overstated.
-  const byBand = db.prepare(`SELECT generated_at, picks FROM daily_briefs`).all();
+  const byBand = BRIEFS;
   const band = {};   // "arm|bucket" -> [clears, total]
   const seen2 = new Set();
   for (const row of byBand) {
@@ -242,8 +241,6 @@ function stage1() {
 // ════════════════════════════════════════════════════════════════════════════════
 // STAGE 2 — realized P&L of the tenor shift, 12-month simulated panel
 // ════════════════════════════════════════════════════════════════════════════════
-const barRange = db.prepare(`SELECT date,close FROM historical_prices WHERE ticker=? AND date>=? AND date<=? ORDER BY date ASC`);
-const ivAll = db.prepare(`SELECT date,atm_iv FROM iv_history WHERE ticker=? AND atm_iv>0 ORDER BY date ASC`);
 
 /** Widest wing on a realistic strike grid whose max loss fits the budget (findBudgetWidthHedge). */
 function chooseWing(S0, T, sigma0, shortK, side) {
@@ -300,10 +297,10 @@ function simSpread(bars, ivRows, entryDate, exp, side, fricRate) {
   return null;
 }
 
-function stage2(rates) {
-  const maxPx = db.prepare(`SELECT MAX(date) d FROM historical_prices`).get().d;
+async function stage2(rates) {
+  const maxPx = await latestPriceDate();
   // panel tickers: brief names that actually carry weeklies (where the lever bites at all)
-  const briefRows = db.prepare(`SELECT picks FROM daily_briefs`).all();
+  const briefRows = BRIEFS;
   const tick = new Map();
   for (const r of briefRows) {
     let p; try { p = JSON.parse(r.picks); } catch { continue; }
@@ -317,9 +314,10 @@ function stage2(rates) {
   }
   const panel = [...tick.entries()].filter(([, t]) => t.wk > 0).map(([t]) => t);
 
-  const tradingDays = db.prepare(
-    `SELECT date FROM historical_prices WHERE ticker='SPY' AND date>=? AND date<=? ORDER BY date`
-  ).all('2025-08-01', addDays(maxPx, -58)).map((r) => r.date);
+  // One fetch for the whole panel plus SPY (whose bars define the trading days).
+  const series = await loadPriceSeries([...panel, 'SPY'], { from: '2025-06-01', to: maxPx, iv: true });
+  const lastEntry = addDays(maxPx, -58);
+  const tradingDays = (series.bars['SPY'] ?? []).map((r) => r.date).filter((d) => d >= '2025-08-01' && d <= lastEntry);
 
   const POLICIES = [
     ['current',        (d, e) => selectCurrent(d, e)],
@@ -334,10 +332,10 @@ function stage2(rates) {
   let attempted = 0, sameAsCurrent = { 'monthly[23,33]': 0, 'monthly[20,50]': 0, 'monthly[14,55]': 0 };
 
   for (const ticker of panel) {
-    const bars = barRange.all(ticker, '2025-06-01', maxPx);
+    const bars = series.bars[ticker] ?? [];
     if (bars.length < 100) continue;
     const barDates = new Set(bars.map((b) => b.date));
-    const ivRows = ivAll.all(ticker);
+    const ivRows = series.iv[ticker] ?? [];
     if (ivRows.length < 50) continue;
     for (const d of tradingDays) {
       if (!barDates.has(d)) continue;
@@ -431,5 +429,4 @@ function stage2(rates) {
 }
 
 const rates = stage1();
-stage2(rates);
-db.close();
+await stage2(rates);

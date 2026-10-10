@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.346] - 2026-10-09
+
+### Four study scripts read through the API instead of opening the database
+
+`fr-expiry-liquidity-study`, `fr-expiry-realized-ab`, `fr-liquidity-slot-comparison` and `fr-wheel-liquidity-calibration` opened `trade-analyzer.sqlite` directly. From Claude Code's MSIX-redirected shell that open can move a WAL database (CLAUDE.md). They now read two new read-only routes through `scripts/lib/app-api.mjs`: `GET /diagnostics/brief-history-panel` (stored briefs, optionally the structure liquidity log) and `GET /diagnostics/price-series` (closes and optionally IV history per ticker). The calibration script's ticker sample uses the existing `/analysis/snapshots/latest?mode=wheel`. They need the app running and no longer need `rebuild:node`.
+
+Details: `changelogs/v1.1.346_2026-10-09.md`.
+
 ## [1.1.345] - 2026-10-09
 
 ### Fix: a collector run after midnight is recorded against the previous session

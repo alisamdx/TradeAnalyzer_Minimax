@@ -12,6 +12,8 @@ import { spreadStudyPanel } from '../services/spread-study-panel.js';
 import { spreadCapturePanel } from '../services/spread-capture-panel.js';
 import { poolSelectionPanel } from '../services/pool-selection-panel.js';
 import { readStaleGreekShadow } from '../services/stale-greek-shadow.js';
+import { briefHistoryPanel } from '../services/brief-history-panel.js';
+import { priceSeriesPanel, MAX_SERIES_TICKERS } from '../services/price-series-panel.js';
 
 export function registerDiagnosticsRoutes(app: FastifyInstance, svc: ApiServerServices): void {
   // GET /diagnostics/day?date=YYYY-MM-DD — everything recorded about one ET day: batch runs,
@@ -111,6 +113,41 @@ export function registerDiagnosticsRoutes(app: FastifyInstance, svc: ApiServerSe
   app.get<{ Querystring: { earnings?: string } }>('/diagnostics/spread-capture-panel', async (req, reply) => {
     try {
       return apiOk(reply, spreadCapturePanel(svc.db as unknown as PanelDb, req.query.earnings === '1'));
+    } catch (err) {
+      return apiError(reply, err instanceof Error ? err.message : String(err), 'INTERNAL', 500);
+    }
+  });
+
+  // GET /diagnostics/brief-history-panel?strategy=wheel&liquidityLog=1 — every stored daily_briefs
+  // row (picks as stored JSON text) and, with liquidityLog=1, structure_liquidity_log. Read by the
+  // fr-expiry-* / fr-liquidity-* / fr-wheel-liquidity-calibration scripts through
+  // scripts/lib/app-api.mjs. Read-only. see services/brief-history-panel.ts
+  app.get<{ Querystring: { strategy?: string; liquidityLog?: string } }>('/diagnostics/brief-history-panel', async (req, reply) => {
+    const strategy = req.query.strategy;
+    if (strategy !== undefined && !/^[a-z_]{1,32}$/.test(strategy)) return apiError(reply, 'strategy must be a strategy name', 'VALIDATION_ERROR');
+    try {
+      return apiOk(reply, briefHistoryPanel(svc.db as unknown as PanelDb, {
+        ...(strategy !== undefined ? { strategy } : {}),
+        liquidityLog: req.query.liquidityLog === '1',
+      }));
+    } catch (err) {
+      return apiError(reply, err instanceof Error ? err.message : String(err), 'INTERNAL', 500);
+    }
+  });
+
+  // GET /diagnostics/price-series?tickers=AAA,BBB&from=YYYY-MM-DD&to=YYYY-MM-DD&iv=1 — daily closes
+  // per ticker in [from, to] and, with iv=1, iv_history. Read by scripts/fr-expiry-realized-ab.mjs.
+  // Read-only. see services/price-series-panel.ts
+  app.get<{ Querystring: { tickers?: string; from?: string; to?: string; iv?: string } }>('/diagnostics/price-series', async (req, reply) => {
+    const tickers = (req.query.tickers ?? '').split(',').map((t) => t.trim().toUpperCase()).filter(Boolean);
+    if (tickers.length === 0) return apiError(reply, 'tickers is required (comma-separated)', 'VALIDATION_ERROR');
+    if (tickers.length > MAX_SERIES_TICKERS) return apiError(reply, `at most ${MAX_SERIES_TICKERS} tickers per request`, 'VALIDATION_ERROR');
+    if (tickers.some((t) => !/^[A-Z0-9.-]{1,12}$/.test(t))) return apiError(reply, 'tickers must be symbols', 'VALIDATION_ERROR');
+    const from = req.query.from ?? '1900-01-01';
+    const to = req.query.to ?? '9999-12-31';
+    if (!isIsoDate(from) || !isIsoDate(to)) return apiError(reply, 'from and to must be YYYY-MM-DD', 'VALIDATION_ERROR');
+    try {
+      return apiOk(reply, priceSeriesPanel(svc.db as unknown as PanelDb, tickers, from, to, req.query.iv === '1'));
     } catch (err) {
       return apiError(reply, err instanceof Error ? err.message : String(err), 'INTERNAL', 500);
     }

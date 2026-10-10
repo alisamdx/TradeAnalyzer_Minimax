@@ -14,16 +14,13 @@
 //   C) for weekly-landed picks, how far the NEAREST monthly sat from 30 DTE — i.e. the
 //      DTE cost of snapping to the monthly instead.
 //
-// Read-only over a write-capable connection (CLAUDE.md). The clean same-ticker A/B
+// Reads through the running app's API (scripts/lib/app-api.mjs), never the SQLite file. The clean same-ticker A/B
 // (re-price the identical structure at the nearest monthly) needs the app running and is
 // the confirmation step if this aggregate looks promising.
 
-import Database from 'better-sqlite3';
-import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { loadBriefHistory } from './lib/app-api.mjs';
 import { etDate } from './lib/et-time.mjs';
 
-const db = new Database(join(homedir(), 'AppData', 'Roaming', 'trade-analyzer', 'trade-analyzer.sqlite'));
 
 // ── 3rd-Friday monthly detection ────────────────────────────────────────────────
 // Standard monthly options expire the 3rd Friday. Return that date (YYYY-MM-DD) for the
@@ -62,7 +59,7 @@ const dteBetween = (fromEt, exp) =>
 
 const legSpreadPct = (l) => (l.bid > 0 ? ((l.ask - l.bid) / ((l.ask + l.bid) / 2)) * 100 : null);
 
-const rows = db.prepare(`SELECT strategy, generated_at, picks FROM daily_briefs ORDER BY generated_at`).all();
+const { briefs: rows } = await loadBriefHistory();
 
 const seen = new Set();
 const buckets = { monthly: [], weekly: [] }; // each entry: { liq, oiAvg, spreadAvg, dte }
@@ -181,4 +178,3 @@ const posGap = slugRows.filter((r) => r.liqMo > r.liqWk).length;
 console.log(`\n${posGap}/${slugRows.length} structure types are more liquid on the monthly. ` +
   `(Per-leg spread% in the top table is confounded by far-OTM wings — liquidityScore/OI are the reliable measures.)`);
 console.log('\nNote: still aggregate. Same-ticker A/B (re-price identical structure at nearest monthly) needs the app running — the confirmation step.');
-db.close();
