@@ -65,7 +65,13 @@ export async function runDaily(
 
   const preflight = await runPreflight(host, db, run);
   if (!preflight.proceed) {
-    finishRun(db, host, run, 'complete');
+    // `cancelled`, never `complete` (v1.1.350). A run preflight stopped collected nothing. Until
+    // v1.1.350 it closed `complete`, so every weekend left an empty "completed daily run" (runs 3, 23,
+    // 24, 40, 41, 54, 70 in gen-002). The replay job's "latest completed daily run" then picked Sunday's
+    // and replayed 0 of 0 responses. Worse, the watchdog reads any `complete` daily run for a date as
+    // "collection done", so a run stopped on a TRADING day (generation closed) would have silenced the
+    // NO RUN email.
+    finishRun(db, host, run, 'cancelled');
     return {
       runId: run.runId, tradingDate: args.tradingDate, verdict: 'skipped',
       skippedReason: preflight.detail, domains: {}, blocking: 0, warnings: 0,

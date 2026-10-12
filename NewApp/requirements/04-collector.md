@@ -343,7 +343,7 @@ Every `candidates[]` entry the brief scored is included — **the losers too** (
 | Crash mid-phase | restart resumes from checkpoint (§5) | run continues; if no restart before 19:15 → watchdog |
 | Ingestion bug | `parse_status = failed`, archive intact | QC-001 blocking; fix code → `replay` recovers without refetch |
 | Disk full / archive write error | run **stops** (a row without provenance is worse than no row) | QC-006 blocking; email from watchdog if the stop prevented phase 10 |
-| Non-trading day run triggered | exits at preflight | no email |
+| Non-trading day run triggered | exits at preflight; the run closes **`cancelled`** (v1.1.350 — it closed `complete`, leaving an empty "completed daily run" every weekend that the replay job then picked as its default source) | no email |
 | Gate itself throws | run marked `failed`, minimal email "GATE FAILED" with the stack | everything `unusable` until re-gated |
 
 ---

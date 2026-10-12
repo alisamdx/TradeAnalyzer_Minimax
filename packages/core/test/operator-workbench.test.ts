@@ -231,7 +231,13 @@ describe('reset — AC-14', () => {
 
   it('opens a new generation and leaves the previous one intact and readable', () => {
     const g1 = openGen(1);
-    run(g1.db, 'complete', '2026-09-04T17:05:00-04:00');
+    const day = run(g1.db, 'complete', '2026-09-04T17:05:00-04:00');
+    // A data day is a run that captured something (v1.1.350): a weekend's preflight-stopped run used
+    // to close `complete` with nothing in it, so this one gets a response.
+    g1.db.prepare(
+      "INSERT INTO meta_response (run_id, provider, endpoint, params_json, requested_at, archive_file, archive_offset, dedup_hash, encrypted, at_provider_cap, parse_status) " +
+        "VALUES (?, 'polygon', '/x', '{}', 't', 'a', 0, 'reset-day', 0, 0, 'ok')"
+    ).run(day);
     const exceptionId = raise(g1.db);
     queueJob(g1.db, operator(), 'backfill_bars'); // would never be claimed once the pointer moves
 

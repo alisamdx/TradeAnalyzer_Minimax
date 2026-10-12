@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.350] - 2026-10-12
+
+### Fix: weekend runs no longer pose as completed collections
+
+Every weekend the scheduler's catch-up started a `daily` collector run that preflight stopped, and the run closed `complete` with nothing captured. Seven such runs exist. The replay job's default source then picked Sunday 10-11's and replayed "0/0 responses". The same flaw meant a run stopped on a trading day (closed generation) would have silenced the watchdog. Preflight-stopped runs now close `cancelled`. The replay default, TA2's replay queue and the reset count all require a run that captured something.
+
+Details: `changelogs/v1.1.350_2026-10-12.md`.
+
 ## [1.1.349] - 2026-10-12
 
 ### Two share-class symbol rulings: HEI.A → HEI, FWONK → FWONA

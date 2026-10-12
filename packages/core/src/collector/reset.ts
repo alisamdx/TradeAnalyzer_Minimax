@@ -105,7 +105,8 @@ export function resetPreview(db: SqliteLike, nowIso: string, generationNo: numbe
     db
       .prepare(
         `SELECT COUNT(DISTINCT trading_date) AS n FROM meta_run
-          WHERE run_kind = 'daily' AND status = 'complete'`
+          WHERE run_kind = 'daily' AND status = 'complete'
+            AND EXISTS (SELECT 1 FROM meta_response r WHERE r.run_id = meta_run.run_id)`
       )
       .get() as { n: number }
   ).n;

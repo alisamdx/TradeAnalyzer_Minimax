@@ -13,6 +13,7 @@ import { captureResponse } from '../src/collector/capture.js';
 import { resetOffsetCache } from '../src/collector/archive.js';
 import { runDerivePhase } from '../src/collector/phases/derive.js';
 import { runReplayJob, factColumns } from '../src/collector/replay.js';
+import { runDaily } from '../src/collector/daily.js';
 import { canonicalJson, recipes } from '../src/ingest/recipes.js';
 import { hashAccountKey } from '../src/ingest/account.js';
 
@@ -335,6 +336,24 @@ describe('what a replay refuses to call equal', () => {
     const host = makeHost();
     expect(() => runReplayJob(host, { tradingDate: DATE })).toThrow(/no completed daily run/);
     expect(raw.prepare("SELECT status FROM meta_run WHERE run_kind = 'replay'").get()).toEqual({ status: 'failed' });
+  });
+
+  // Regression, 2026-10-12: replay request 7 replayed run 70, Sunday 2026-10-11's empty preflight-stopped
+  // run that had closed `complete`, and reported "NOTHING_REPLAYABLE — 0/0 responses replayed".
+  it('by default skips a completed daily run that captured nothing', () => {
+    const real = captureDay();
+    const host = makeHost();
+    const weekend = beginRun(db(), host, { kind: 'daily', tradingDate: '2026-09-12' });
+    finishRun(db(), host, weekend, 'complete');
+    const report = runReplayJob(host, { tradingDate: DATE });
+    expect(report.sourceRunIds).toEqual([real.runId]);
+    expect(report.verdict).toBe('equal');
+  });
+
+  it('a run preflight stops on a non-trading day closes cancelled, not complete', async () => {
+    const report = await runDaily(makeHost(), { tradingDate: '2026-10-11' });
+    expect(report.verdict).toBe('skipped');
+    expect(raw.prepare('SELECT status FROM meta_run WHERE run_id = ?').get(report.runId)).toEqual({ status: 'cancelled' });
   });
 
   it('refuses a host that cannot open a scratch database', () => {

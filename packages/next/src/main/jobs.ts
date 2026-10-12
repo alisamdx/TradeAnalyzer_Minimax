@@ -69,7 +69,7 @@ const CARDS: readonly Omit<JobCardDto, 'last'>[] = [
     title: 'Replay a day',
     what:
       'Re-runs today\'s parsers over one daily run\'s archived responses into a scratch file and compares the ' +
-      'result with what is stored, column by column (AC-4). Blank run id = the latest completed daily run.',
+      'result with what is stored, column by column (AC-4). Blank run id = the latest completed daily run that captured something.',
     cost:
       'No provider calls. Runs in TradeAnalyzer, the only app that can decrypt the account archive. Only runs ' +
       'captured from core 0.4.0 on carry the recipes a replay needs — older ones report "nothing replayable".',
@@ -227,6 +227,10 @@ function paramsFor(kind: string, params: unknown): Readonly<Record<string, unkno
   if (!run) throw new Error(`There is no run ${runId} in this generation.`);
   if (run.run_kind !== 'daily' || run.status !== 'complete') {
     throw new Error(`Run ${runId} is a ${run.status} ${run.run_kind} run; only a completed daily run can be replayed.`);
+  }
+  // Before v1.1.350 a weekend's preflight-stopped run closed `complete` with nothing captured.
+  if (currentDb().prepare('SELECT 1 FROM meta_response WHERE run_id = ? LIMIT 1').get(runId) === undefined) {
+    throw new Error(`Run ${runId} captured nothing (a non-trading day stopped at preflight), so there is nothing to replay.`);
   }
   return { runId };
 }

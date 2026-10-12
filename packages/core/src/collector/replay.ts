@@ -495,7 +495,14 @@ export function runReplayJob(
       args.runId ??
       (
         source
-          .prepare("SELECT run_id FROM meta_run WHERE run_kind = 'daily' AND status = 'complete' ORDER BY run_id DESC LIMIT 1")
+          // A run that captured something. Weekend runs before v1.1.350 closed `complete` with no
+          // responses, and the default picked Sunday 2026-10-11's: "0/0 responses replayed".
+          .prepare(
+            `SELECT m.run_id FROM meta_run m
+              WHERE m.run_kind = 'daily' AND m.status = 'complete'
+                AND EXISTS (SELECT 1 FROM meta_response r WHERE r.run_id = m.run_id)
+              ORDER BY m.run_id DESC LIMIT 1`
+          )
           .get() as { run_id: number } | undefined
       )?.run_id;
     if (runId === undefined) throw new Error('There is no completed daily run in this generation to replay yet.');
