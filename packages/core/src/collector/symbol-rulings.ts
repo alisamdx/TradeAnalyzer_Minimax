@@ -27,7 +27,7 @@ export interface SymbolRulingSeed {
 
 /**
  * The seven Finnhub aliases QC-909 raised on 2026-09-21, ruled by the operator
- * on 2026-09-22.
+ * on 2026-09-22, and two more share-class rulings from 2026-10-12 (HEI.A, FWONK).
  *
  * Five are other listings of one company and their counts are the company's, so
  * they are kept. **FWONA is not** — Liberty Media Formula One, answered for
@@ -49,7 +49,12 @@ export const DEFAULT_SYMBOL_RULINGS: readonly SymbolRulingSeed[] = [
   { provider: 'finnhub', askedTicker: 'GFL', answeredSymbol: 'GFL.TO', decision: 'same_issuer', note: 'GFL Environmental, Toronto listing of the same company (operator ruling 2026-09-22).' },
   { provider: 'finnhub', askedTicker: 'JHX', answeredSymbol: 'JHX.AX', decision: 'same_issuer', note: 'James Hardie, Australian listing of the same company (operator ruling 2026-09-22).' },
   { provider: 'finnhub', askedTicker: 'LLYVA', answeredSymbol: 'FWONA', decision: 'different_issuer', note: 'FWONA is Liberty Media Formula One, not Liberty Live Group — a different company (operator ruling 2026-09-22).' },
-  { provider: 'finnhub', askedTicker: 'LLYVK', answeredSymbol: 'FWONA', decision: 'different_issuer', note: 'FWONA is Liberty Media Formula One, not Liberty Live Group — a different company (operator ruling 2026-09-22).' }
+  { provider: 'finnhub', askedTicker: 'LLYVK', answeredSymbol: 'FWONA', decision: 'different_issuer', note: 'FWONA is Liberty Media Formula One, not Liberty Live Group — a different company (operator ruling 2026-09-22).' },
+  // 2026-10-12 (v1.1.349). HEI.A is QC-909's open finding (Finnhub answered for HEI since 10-06).
+  // FWONK is for QC-603: Finnhub dates FWONA (11-03) and never FWONK, the same Liberty Formula One
+  // tracking stock in its Series C form. QC-603 reads a same_issuer sibling's date (v1.1.321).
+  { provider: 'finnhub', askedTicker: 'HEI.A', answeredSymbol: 'HEI', decision: 'same_issuer', note: 'HEICO Class A and common — one company (operator ruling 2026-10-12).' },
+  { provider: 'finnhub', askedTicker: 'FWONK', answeredSymbol: 'FWONA', decision: 'same_issuer', note: 'Liberty Media Formula One Series C and Series A — one tracking stock, one report (operator ruling 2026-10-12).' }
 ];
 
 export interface SymbolRulingSeedResult {

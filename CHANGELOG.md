@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.349] - 2026-10-12
+
+### Two share-class symbol rulings: HEI.A → HEI, FWONK → FWONA
+
+Both are seeded `same_issuer` rulings (operator, 2026-10-12). HEI.A clears QC-909, since Finnhub answers for HEI. FWONK clears QC-603, since Finnhub dates FWONA (11-03) and never FWONK. Rehearsed on 10-09 data: blocking 29 → 27.
+
+Details: `changelogs/v1.1.349_2026-10-12.md`.
+
 ## [1.1.348] - 2026-10-11
 
 ### Delisted universe members are detected (QC-211) and excluded (migration 092)
