@@ -450,7 +450,7 @@ export const QC409_STICKY_SET_HONOURED: CheckDefinition = {
     'Every currently pinned contract has a snapshot row this run. A pin exists so a held or ' +
     'recommended contract keeps being priced to expiry even when its underlying leaves the subset; a ' +
     'pin that stops producing rows silently is the pin failing to do the one thing it is for.',
-  readsTables: ['ref_sticky_contract', 'raw_option_contract_snapshot', 'qa_exception', 'meta_run'],
+  readsTables: ['ref_sticky_contract', 'raw_option_contract_snapshot', 'qa_exception', 'meta_run', 'meta_response'],
   testedQuantity: 'unhonoured_pin_count',
   testedUnit: 'count',
   thresholds: { maxUnhonoured: 0 },
@@ -496,9 +496,32 @@ export const QC409_STICKY_SET_HONOURED: CheckDefinition = {
       missed.set(r.key, { first: r.first, last: r.last });
     }
 
+    // A pin on an underlying E*Trade no longer lists is QC-415's finding, once per ticker (v1.1.347).
+    // Re-collecting cannot honour it, so firing here put one permanent blocking row per contract on the
+    // gate: 60 of 2026-10-09's 61, on MDT (204 since 10-06), PSKY and WBD (400 "symbol is invalid").
+    // Its open finding closes `rule_changed` only when the ticker was ALSO unlisted on the finding's
+    // last missed date, so a gap with another cause (a dead token, a skipped run) stays open.
+    const unlisted = unlistedCache(ctx.db);
+    const tonight = unlisted(ctx.tradingDate);
+
     return pins.map((p) => {
-      const ok = has(p.osi_symbol, ctx.tradingDate);
       const gap = missed.get(p.osi_symbol);
+      const gone = tonight.get(p.ticker);
+      if (gone) {
+        const explained = gap !== undefined && unlisted(gap.last).has(p.ticker);
+        return {
+          key: p.osi_symbol,
+          fired: false,
+          closesAs: explained
+            ? {
+                kind: 'rule_changed' as const,
+                note: `${p.osi_symbol}: E*Trade lists no options for ${p.ticker} (${gone.answer}` +
+                  `${gone.lastListed ? `, last listed ${gone.lastListed}` : ''}); reported per ticker by QC-415`
+              }
+            : undefined
+        } satisfies Evaluation;
+      }
+      const ok = has(p.osi_symbol, ctx.tradingDate);
       const refilled = ok && gap !== undefined && has(p.osi_symbol, gap.first) && has(p.osi_symbol, gap.last);
       return {
         key: p.osi_symbol,
@@ -513,6 +536,132 @@ export const QC409_STICKY_SET_HONOURED: CheckDefinition = {
                 `was re-collected and the pin is captured on ${ctx.tradingDate}`
             }
           : undefined
+      } satisfies Evaluation;
+    });
+  }
+};
+
+/** E*Trade's answer for a symbol with nothing to list: 204 (no expirations) or 400 (symbol invalid). */
+const UNLISTED_EXPIRATION_STATUSES = new Set([204, 400]);
+
+export interface UnlistedUnderlying {
+  /** What E*Trade answered, for the detail line: `HTTP 204, no expirations` or `HTTP 400`. */
+  readonly answer: string;
+  /** The latest trading date on which its expirations call returned 200, or null. */
+  readonly lastListed: string | null;
+}
+
+/**
+ * The tickers E*Trade listed no options for on one trading date (v1.1.347).
+ *
+ * Read from that date's LAST `optionexpiredate` response per symbol, across every run filed under the
+ * date, and only when no contract for the ticker was stored that date — a symbol that answered 204 once
+ * and was then collected is listed. A call never sent (a latched token, `http_status` null) or a 401 is
+ * a collection failure, never evidence of a delisting, so neither counts.
+ */
+export function unlistedUnderlyings(db: CheckContext['db'], tradingDate: string): Map<string, UnlistedUnderlying> {
+  const rows = db
+    .prepare(
+      `SELECT json_extract(r.params_json, '$.symbol') AS symbol, r.http_status
+         FROM meta_response r
+        WHERE r.provider = 'etrade' AND r.endpoint = '/v1/market/optionexpiredate'
+          AND r.run_id IN (SELECT run_id FROM meta_run WHERE trading_date = ?)
+        ORDER BY r.source_response_id`
+    )
+    .all(tradingDate) as { symbol: string | null; http_status: number | null }[];
+  const latest = new Map<string, number | null>();
+  for (const r of rows) if (r.symbol) latest.set(r.symbol, r.http_status);
+
+  const out = new Map<string, UnlistedUnderlying>();
+  const stored = db.prepare(
+    'SELECT 1 FROM raw_option_contract_snapshot WHERE ticker = ? AND as_of_date = ? LIMIT 1'
+  );
+  const lastListed = db.prepare(
+    `SELECT MAX(n.trading_date) AS d
+       FROM meta_response r JOIN meta_run n ON n.run_id = r.run_id
+      WHERE r.provider = 'etrade' AND r.endpoint = '/v1/market/optionexpiredate'
+        AND json_extract(r.params_json, '$.symbol') = ? AND r.http_status = 200 AND n.trading_date < ?`
+  );
+  for (const [symbol, status] of latest) {
+    if (status === null || !UNLISTED_EXPIRATION_STATUSES.has(status)) continue;
+    if (stored.get(symbol, tradingDate) !== undefined) continue;
+    const last = lastListed.get(symbol, tradingDate) as { d: string | null } | undefined;
+    out.set(symbol, {
+      answer: status === 204 ? 'HTTP 204, no expirations' : `HTTP ${String(status)}`,
+      lastListed: last?.d ?? null
+    });
+  }
+  return out;
+}
+
+/** Memoised per date for one check run: QC-409 asks once for tonight and once per open finding's date. */
+function unlistedCache(db: CheckContext['db']): (date: string) => Map<string, UnlistedUnderlying> {
+  const byDate = new Map<string, Map<string, UnlistedUnderlying>>();
+  return (date) => {
+    let m = byDate.get(date);
+    if (!m) byDate.set(date, (m = unlistedUnderlyings(db, date)));
+    return m;
+  };
+}
+
+export const QC415_PINNED_UNDERLYING_UNLISTED: CheckDefinition = {
+  id: 'QC-415',
+  domain: 'chains',
+  severity: 'warning',
+  description:
+    'A ticker with live pins whose options E*Trade no longer lists (expirations answered 204 or 400, ' +
+    'no contract stored). One finding per ticker, where QC-409 would raise one per pinned contract that ' +
+    're-collection can never honour. A warning for recommended pins; blocking when any pin is a ' +
+    'held position, since that contract still needs a price and the operator must get one elsewhere.',
+  readsTables: ['ref_sticky_contract', 'meta_response', 'meta_run', 'raw_option_contract_snapshot'],
+  testedQuantity: 'held_pin_count',
+  testedUnit: 'count',
+  thresholds: { maxHeldPins: 0 },
+  thresholdBasis: 'structural',
+  promoteToBlockingAtValue: 0,
+  // A provider property: "still unlisted tonight" is the expected state, not new evidence (§5.4).
+  escalatesOnRepeat: false,
+  run(ctx) {
+    const pins = ctx.db
+      .prepare(
+        `SELECT ticker, reason, COUNT(*) AS n, MIN(expiration_date) AS first_expiry, MAX(expiration_date) AS last_expiry
+           FROM ref_sticky_contract
+          WHERE valid_to IS NULL AND expiration_date >= ?
+          GROUP BY ticker, reason`
+      )
+      .all(ctx.tradingDate) as { ticker: string; reason: string; n: number; first_expiry: string; last_expiry: string }[];
+    if (pins.length === 0) return [];
+
+    const byTicker = new Map<string, { reasons: Record<string, number>; held: number; last: string }>();
+    for (const p of pins) {
+      const t = byTicker.get(p.ticker) ?? { reasons: {}, held: 0, last: p.last_expiry };
+      t.reasons[p.reason] = p.n;
+      if (p.reason === 'held_in_book') t.held += p.n;
+      if (p.last_expiry > t.last) t.last = p.last_expiry;
+      byTicker.set(p.ticker, t);
+    }
+
+    const unlisted = unlistedUnderlyings(ctx.db, ctx.tradingDate);
+    return [...byTicker].map(([ticker, t]) => {
+      const gone = unlisted.get(ticker);
+      const total = Object.values(t.reasons).reduce((a, b) => a + b, 0);
+      if (!gone) {
+        return {
+          key: ticker,
+          value: t.held,
+          fired: false,
+          closesAs: { kind: 'provider_fixed' as const, note: `${ticker}: E*Trade lists options again on ${ctx.tradingDate}` }
+        } satisfies Evaluation;
+      }
+      const reasons = Object.entries(t.reasons).map(([r, n]) => `${n} ${r}`).join(', ');
+      return {
+        key: ticker,
+        value: t.held,
+        fired: true,
+        detail:
+          `${ticker}: E*Trade lists no options (${gone.answer}${gone.lastListed ? `, last listed ${gone.lastListed}` : ''}); ` +
+          `${total} pinned contract(s) (${reasons}) cannot be priced, the last expiring ${t.last}`,
+        evidence: { ticker, answer: gone.answer, lastListed: gone.lastListed, pins: t.reasons, heldPins: t.held, lastExpiry: t.last }
       } satisfies Evaluation;
     });
   }
@@ -981,5 +1130,6 @@ export const CHAIN_CHECKS: readonly CheckDefinition[] = [
   QC411_WEEKEND_EXPIRATION,
   QC412_CHAIN_ERROR_RATE,
   QC413_RENEW_STORM,
-  QC414_GREEK_SCALE
+  QC414_GREEK_SCALE,
+  QC415_PINNED_UNDERLYING_UNLISTED
 ];

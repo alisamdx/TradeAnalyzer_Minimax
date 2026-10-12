@@ -1017,6 +1017,103 @@ describe('phase 7 — chains, and AC-5 on every response', () => {
     });
   });
 
+  describe('a pin on an underlying E*Trade no longer lists is one QC-415 finding, not N QC-409s (v1.1.347)', () => {
+    // 2026-10-09: 60 of 61 blocking QC-409 findings were pins on MDT (expirations 204 since 10-06),
+    // PSKY and WBD (400 "The symbol entered is invalid"). No re-collection could ever honour them, so
+    // each would have stayed blocking every night until its contract expired.
+    function pin(reason: 'recommended_by_legacy' | 'held_in_book', osi = 'SPY---260918P00770000'): void {
+      const run0 = newRun();
+      raw
+        .prepare(
+          "INSERT INTO meta_response (run_id, provider, endpoint, params_json, requested_at, http_status, byte_length, archive_file, archive_offset, sha256, dedup_hash, encrypted, at_provider_cap, parse_status, parsed_row_count) " +
+            "VALUES (?, 'etrade', '/x', '{}', '2026-09-07T17:00:00-04:00', 200, 1, 'f', 0, 'h', ?, 1, 0, 'ok', 0)"
+        )
+        .run(run0.runId, `pin-${osi}`);
+      const src = (raw.prepare('SELECT MAX(source_response_id) AS id FROM meta_response').get() as { id: number }).id;
+      raw
+        .prepare(
+          `INSERT INTO ref_sticky_contract (run_id, as_of_date, observed_at, source_response_id,
+             osi_symbol, ticker, expiration_date, reason, valid_from)
+           VALUES (?, ?, '2026-09-07T17:00:00-04:00', ?, ?, 'SPY', '2026-09-18', ?, ?)`
+        )
+        .run(run0.runId, DATE, src, osi, reason, DATE);
+    }
+    const unlistedHost = (status: 204 | 400) =>
+      makeHost({
+        etradeGet: async (path) =>
+          path === '/v1/market/optionexpiredate'
+            ? response(status === 204 ? '' : '<Error><code>10033</code><message>The symbol entered is invalid. Please enter another symbol.</message></Error>', status)
+            : response(chainBody({ nearPrice: 770.19, pairs: [{ strike: 770 }] }))
+      });
+    const findings = (check: string) =>
+      raw.prepare('SELECT key, severity, state, still_firing, resolution_kind, detail FROM qa_exception WHERE check_id = ? ORDER BY key').all(check) as
+        { key: string; severity: string; state: string; still_firing: number; resolution_kind: string | null; detail: string }[];
+    const gate = (runId: number, date: string) =>
+      runGate(db(), makeHost(), { runId, tradingDate: date, checks: [...CHAIN_CHECKS], domainsExpected: {} });
+    async function collect(host: CollectorHost, date: string): Promise<number> {
+      const run = beginRun(db(), host, { kind: 'daily', tradingDate: date });
+      await runChainsPhase(host, db(), run);
+      gate(run.runId, date);
+      raw.prepare("UPDATE meta_run SET status = 'complete' WHERE run_id = ?").run(run.runId);
+      return run.runId;
+    }
+
+    it.each([204, 400] as const)('HTTP %i: QC-409 stays quiet and QC-415 raises one warning for the ticker', async (status) => {
+      pin('recommended_by_legacy', 'SPY---260918P00770000');
+      pin('recommended_by_legacy', 'SPY---260918C00780000');
+      await collect(unlistedHost(status), DATE);
+      expect(findings('QC-409')).toEqual([]);
+      const [f, ...rest] = findings('QC-415');
+      expect(rest).toEqual([]);
+      expect(f).toMatchObject({ key: 'SPY', severity: 'warning', state: 'open', still_firing: 1 });
+      expect(f!.detail).toContain(`HTTP ${String(status)}`);
+      expect(f!.detail).toContain('2 pinned contract(s)');
+    });
+
+    it('is blocking when one of the pins is a held position', async () => {
+      pin('held_in_book');
+      await collect(unlistedHost(400), DATE);
+      expect(findings('QC-415')[0]).toMatchObject({ key: 'SPY', severity: 'blocking' });
+    });
+
+    it('a call never sent is a collection failure, not a delisting: QC-409 still fires', async () => {
+      pin('recommended_by_legacy');
+      await collect(makeHost({ etradeGet: async () => response('', null) }), DATE);
+      expect(findings('QC-409')).toHaveLength(1);
+      expect(findings('QC-415')).toEqual([]);
+    });
+
+    it('closes an open QC-409 rule_changed only when its last missed day was also unlisted', async () => {
+      pin('recommended_by_legacy', 'SPY---260918P00770000');
+      // Raised by the pre-v1.1.347 rule on a day E*Trade had already stopped listing SPY: the gate ran
+      // on an empty run, and the 204 that explains the day is filed under the same date.
+      const dead = beginRun(db(), makeHost(), { kind: 'daily', tradingDate: DATE });
+      gate(dead.runId, DATE);
+      expect(findings('QC-409')[0]?.state).toBe('open');
+      raw.prepare("UPDATE meta_run SET status = 'complete' WHERE run_id = ?").run(dead.runId);
+      await collect(unlistedHost(204), DATE);
+      // Same date re-run: the finding's last missed date is DATE, unlisted → closed.
+      expect(findings('QC-409')[0]).toMatchObject({ state: 'resolved', resolution_kind: 'rule_changed' });
+    });
+
+    it('keeps an open QC-409 whose missed day had another cause', async () => {
+      pin('recommended_by_legacy');
+      await collect(makeHost({ etradeGet: async () => response('', null) }), DATE); // dead token
+      await collect(unlistedHost(400), '2026-09-08');
+      // The pin missed DATE for a token, not a delisting: that hole stays for the operator.
+      expect(findings('QC-409')[0]).toMatchObject({ state: 'open', still_firing: 0 });
+      expect(findings('QC-415')[0]?.key).toBe('SPY');
+    });
+
+    it('closes QC-415 provider_fixed when E*Trade lists the ticker again', async () => {
+      pin('recommended_by_legacy');
+      await collect(unlistedHost(204), DATE);
+      expect(findings('QC-415')[0]?.state).toBe('open');
+      await collect(chainHost(), '2026-09-08');
+      expect(findings('QC-415')[0]).toMatchObject({ state: 'resolved', resolution_kind: 'provider_fixed' });
+    });
+  });
+
   it('an explicit ticker list means exactly that list — pins do not widen a one-shot', async () => {
     const run0 = newRun();
     raw

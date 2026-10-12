@@ -330,7 +330,7 @@ interface LegacyBriefHandoff {
 }
 ```
 
-Every `candidates[]` entry the brief scored is included — **the losers too** (P5). `volumeReported: false` is how the old app's `?? 0` is prevented from crossing over (the payload builder passes the raw field's presence). Units follow 02 §0.1 (IV as fraction; the builder converts from the old app's percentage representation **once**, and a hand-off test asserts it).
+Every `candidates[]` entry the brief scored is included — **the losers too** (P5). `volumeReported: false` is how the old app's `?? 0` is prevented from crossing over (the payload builder passes the raw field's presence). Units follow 02 §0.1 (IV as fraction; the builder converts from the old app's percentage representation **once**, and a hand-off test asserts it). **Neither was true until v1.1.347**: the builder passed the lab's percentage through under a comment claiming the lab held fractions, and no test existed. The builder is now `handoffLegsFor` (`src/main/services/legacy-handoff-legs.ts`, tested in `tests/legacy-handoff-legs.test.ts`). It also takes each leg's **own** `expiration`: a calendar/PMCC far leg comes from the lab's far chain, and stamping the setup's near expiry on it pinned contracts E\*Trade never listed (QC-409 on `CRWD--261030C00237500`).
 
 ---
 

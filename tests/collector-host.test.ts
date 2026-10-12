@@ -523,10 +523,15 @@ describe('registration in the existing app', () => {
     // contract tomorrow's chain phase never matches, so the sticky set looks
     // populated and captures nothing. The leg is skipped when the side or the
     // expiration is missing rather than guessed from a structure slug.
-    expect(brief).toContain('if (!l.side || !expiration) return [];');
-    expect(brief).toContain('right: l.side');
-    // And the volume crosses as a presence test, not `?? 0`.
-    expect(brief).toContain('volumeReported: l.volume !== null && l.volume !== undefined');
+    //
+    // Since v1.1.347 the builder is `handoffLegsFor` and its behaviour (side, per-leg expiry, IV as
+    // a fraction, volume presence) is tested directly in legacy-handoff-legs.test.ts. This scan only
+    // asserts the brief delegates to it rather than building legs inline again.
+    expect(brief).toContain('legs: handoffLegsFor(scored.ticker, setup,');
+    expect(brief).not.toMatch(/osiSymbol\(\{/);
+    const builder = stripComments(readFileSync(join(SRC, 'services', 'legacy-handoff-legs.ts'), 'utf8'));
+    expect(builder).toContain('if (!l.side || !expiration) return [];');
+    expect(builder).toContain('right: l.side');
   });
 
   it('has no automatic claim loop at all', () => {

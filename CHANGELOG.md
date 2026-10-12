@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.347] - 2026-10-11
+
+### Fix: pins on underlyings E*Trade no longer lists are one QC-415 finding per ticker; hand-off legs keep their own expiry
+
+On 2026-10-09, 60 of the gate's 84 blocking findings were QC-409 pins on MDT, PSKY and WBD. E\*Trade has answered their expirations calls with 204 or 400 "symbol is invalid" since 10-06, so no re-collection could ever honour those pins. New QC-415 reports each such ticker once: a warning, or blocking if a pin is a held position. QC-409 no longer fires on those pins. Rehearsed on 10-09: blocking 89 → 29. The old app's hand-off also stamped the setup's near expiry on calendar/PMCC far legs, which pinned a CRWD contract E\*Trade never listed. It also passed IV as a percentage into a fraction column. Both are fixed in `services/legacy-handoff-legs.ts`.
+
+Details: `changelogs/v1.1.347_2026-10-11.md`.
+
 ## [1.1.346] - 2026-10-09
 
 ### Four study scripts read through the API instead of opening the database

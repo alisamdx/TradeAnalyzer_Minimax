@@ -35,7 +35,8 @@ import { withTransaction } from '../../db/connection.js';
 import { STRATEGY_RELEVANT_SLUGS, pickRelevantStructure, relevantSlugsForPick, formatStructureLegs } from '@shared/strategy-structures.js';
 import { extractLoggableScores, logStructureLiquidity, pruneStructureLiquidityLog } from '../structure-liquidity-log.js';
 import { saveBriefCandidates, pruneBriefCandidates, resolveSlot, type BriefCandidateRow, type CandidateDisposition } from '../brief-candidates.js';
-import { osiSymbol, type LegacyBriefHandoff } from '@tradeanalyzer/core';
+import type { LegacyBriefHandoff } from '@tradeanalyzer/core';
+import { handoffLegsFor } from '../legacy-handoff-legs.js';
 
 // VIX sane range — reject anything outside this (a quote typo can return an unrelated
 // symbol). Historical VIX spans ~9 (2017) to ~82 (COVID); [5,150] is a safe guard.
@@ -108,6 +109,8 @@ function hasAdequateLiquidity(
 // crosses this boundary untyped.
 type CandLeg   = {
   action: string; side?: 'call' | 'put' | null; strike: number; mid: number;
+  // The leg's own expiry: a calendar/PMCC far leg differs from the setup's (SetupLeg.expiration).
+  expiration?: string | null;
   delta?: number | null; iv?: number | null; bid?: number | null; ask?: number | null;
   openInterest?: number | null; volume?: number | null;
 };
@@ -785,38 +788,8 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
             weight: (s?.weight as number) ?? 0,
             enabled: s?.missing !== true,
           })),
-          // A leg is emitted only when its side and the setup's expiration are
-          // both known. Both are needed to build the OSI symbol, and a
-          // constructed symbol that is wrong does not throw — it pins a
-          // contract tomorrow's chain phase never matches, so the sticky set
-          // looks populated and captures nothing. Skipping is the honest
-          // failure; guessing the right from a structure slug is not.
-          legs: (setup?.legs ?? []).flatMap(l => {
-            const expiration = setup?.expiration;
-            if (!l.side || !expiration) return [];
-            return [{
-              osiSymbol: osiSymbol({
-                ticker: scored.ticker, expiration, side: l.side, strike: l.strike,
-              }),
-              right: l.side,
-              strike: l.strike,
-              expiration,
-              bid: l.bid ?? null,
-              ask: l.ask ?? null,
-              mid: l.mid ?? null,
-              // **A fraction, and no conversion here.** The lab already holds
-              // fractions; a `* 100` anywhere on this path would inflate every
-              // stored leg a hundredfold (02 §0.1).
-              iv: l.iv ?? null,
-              delta: l.delta ?? null,
-              openInterest: l.openInterest ?? null,
-              volume: l.volume ?? null,
-              // The field's PRESENCE, not its truthiness. `?? 0` is what turned
-              // "not reported" into "did not trade" on 23 of 250 stored legs.
-              volumeReported: l.volume !== null && l.volume !== undefined,
-              liquidityScore: getBestLiquidityScore(lab, strategy, dir),
-            }];
-          }),
+          // Each leg with its OWN expiration, and IV as a fraction — see legacy-handoff-legs.ts.
+          legs: handoffLegsFor(scored.ticker, setup, getBestLiquidityScore(lab, strategy, dir)),
         });
       }
 
