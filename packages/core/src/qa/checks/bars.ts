@@ -912,6 +912,114 @@ function continuousListingRulings(
   return out;
 }
 
+/** Looked back over when a member's last bar is searched for; older than this counts as never. */
+const STOPPED_LOOKBACK_DAYS = 60;
+
+export const QC211_MEMBER_STOPPED_TRADING: CheckDefinition = {
+  id: 'QC-211',
+  domain: 'bars',
+  severity: 'warning',
+  description:
+    'A current universe member whose bars stopped: no bar on the last N sessions up to the trading ' +
+    'date, while the rest of the universe has one. That is the signature of a delisting, merger or ' +
+    'ticker change, and nothing else saw it. QC-201 tolerates 1 % missing, so a handful of dead ' +
+    'members fit under its line indefinitely, and QC-207 deliberately ignores the days after a ' +
+    "series' last bar. Membership only closes when the host's constituents drop the ticker and a " +
+    'universe_seed runs, so the finding names that action. It closes once the membership does, or ' +
+    'when bars resume.',
+  readsTables: ['ref_universe_membership', 'raw_daily_bar', 'ref_trading_day', 'qa_exception'],
+  testedQuantity: 'trailing_sessions_without_bar',
+  testedUnit: 'sessions',
+  thresholds: { maxTrailingSessions: 2 },
+  thresholdBasis: 'working',
+  thresholdEvidence:
+    'Drafted 2026-10-11 from three real cases in gen-002: QRVO (last bar 10-02, acquired by Skyworks, ' +
+    'delisted 10-05), PSKY and WBD (last bar 10-05; their merger closed 10-06 and trades as SKYD). On ' +
+    '10-09 they read 5, 4 and 4. Two sessions leaves room for a single-day halt or late print.',
+  run(ctx) {
+    // The start of each member's CURRENT range: a ticker admitted yesterday has not stopped trading
+    // just because it has no bars from before it was a member.
+    const memberFrom = new Map(
+      (
+        ctx.db
+          .prepare(
+            `SELECT ticker, MAX(valid_from) AS since FROM ref_universe_membership
+              WHERE valid_from <= ? AND (valid_to IS NULL OR valid_to >= ?)
+              GROUP BY ticker`
+          )
+          .all(ctx.tradingDate, ctx.tradingDate) as { ticker: string; since: string }[]
+      ).map((r) => [r.ticker, r.since])
+    );
+    const members = [...memberFrom.keys()];
+    if (members.length === 0) return [];
+
+    // A provider outage leaves EVERY member without a bar: that is QC-201's finding, not N of these.
+    const barredToday = (
+      ctx.db.prepare('SELECT COUNT(DISTINCT ticker) AS n FROM raw_daily_bar WHERE trade_date = ?').get(ctx.tradingDate) as { n: number }
+    ).n;
+    if (barredToday < members.length / 2) return [];
+
+    const since = addDaysIso(ctx.tradingDate, -STOPPED_LOOKBACK_DAYS);
+    const sessions = tradingDaysInRange(ctx.db, since, ctx.tradingDate);
+    const sessionIndex = new Map(sessions.map((d, i) => [d, i]));
+    const lastBar = new Map(
+      (
+        ctx.db
+          .prepare(
+            `SELECT ticker, MAX(trade_date) AS last FROM raw_daily_bar
+              WHERE trade_date BETWEEN ? AND ? GROUP BY ticker`
+          )
+          .all(since, ctx.tradingDate) as { ticker: string; last: string }[]
+      ).map((r) => [r.ticker, r.last])
+    );
+
+    const memberSet = new Set(members);
+    const out: Evaluation[] = members.map((ticker) => {
+      const last = lastBar.get(ticker) ?? null;
+      // Sessions after the last bar, up to and including the trading date. No bar in the lookback
+      // counts the whole window, which is still a finding and says so.
+      const lastIdx = last === null ? -1 : (sessionIndex.get(last) ?? -1);
+      // Sessions before membership began are not owed a bar.
+      const firstOwed = sessions.findIndex((d) => d >= (memberFrom.get(ticker) ?? since));
+      const idx = Math.max(lastIdx, (firstOwed < 0 ? sessions.length : firstOwed) - 1);
+      const missing = sessions.length - 1 - idx;
+      const fired = missing > this.thresholds['maxTrailingSessions']!;
+      return {
+        key: ticker,
+        value: missing,
+        fired,
+        detail: fired
+          ? `${ticker}: no bar for the last ${missing} session(s) (` +
+            (last ? `last bar ${last}` : `none since ${since}`) +
+            '). Likely delisted, merged or renamed: exclude it in TradeAnalyzer (constituents_excluded), then run universe_seed'
+          : undefined,
+        evidence: { ticker, lastBar: last, trailingSessions: missing },
+        closesAs: fired ? undefined : { kind: 'provider_fixed' as const, note: `${ticker}: bars resumed (last ${String(last)})` }
+      } satisfies Evaluation;
+    });
+
+    // A finding whose ticker has LEFT the universe is the outcome it asked for. Without this it would
+    // stop being evaluated and stay open forever.
+    for (const r of ctx.db
+      .prepare(`SELECT key FROM qa_exception WHERE check_id = 'QC-211' AND state IN ('open', 'acknowledged')`)
+      .all() as { key: string }[]) {
+      if (memberSet.has(r.key)) continue;
+      out.push({
+        key: r.key,
+        fired: false,
+        closesAs: { kind: 'data_corrected', note: `${r.key}: no longer a universe member on ${ctx.tradingDate}` }
+      });
+    }
+    return out;
+  }
+};
+
+function addDaysIso(date: string, days: number): string {
+  const d = new Date(`${date}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
 export const BAR_CHECKS: readonly CheckDefinition[] = [
   QC201_BAR_COMPLETENESS,
   QC202_OHLC_ORDER,
@@ -920,5 +1028,6 @@ export const BAR_CHECKS: readonly CheckDefinition[] = [
   QC205_VOLUME_REGIME,
   QC207_TRADING_DAY_GAP,
   QC209_DORMANT_SERIES_RESUMES,
-  QC210_BARS_PREDATE_LISTING
+  QC210_BARS_PREDATE_LISTING,
+  QC211_MEMBER_STOPPED_TRADING
 ];

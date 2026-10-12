@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.348] - 2026-10-11
+
+### Delisted universe members are detected (QC-211) and excluded (migration 092)
+
+QRVO (acquired by Skyworks), WBD (acquired by Paramount Skydance) and PSKY (now SKYD) stopped trading on 10-02 and 10-05. No check fired: QC-201 tolerates 1 % missing, and QC-207 ignores the days after a series' last bar. New QC-211 warns when a member has had no bar for more than 2 sessions. On 10-09 data it fires on exactly those three of 1,083. Migration 092 adds them to `constituents_excluded`. SKYD is left to join through the feeds as a new listing.
+
+Details: `changelogs/v1.1.348_2026-10-11.md`.
+
 ## [1.1.347] - 2026-10-11
 
 ### Fix: pins on underlyings E*Trade no longer lists are one QC-415 finding per ticker; hand-off legs keep their own expiry

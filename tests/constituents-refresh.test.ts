@@ -137,8 +137,10 @@ describe('ConstituentsService — Vanguard refresh', () => {
   });
 
   it('keeps excluded (delisted) tickers out even when the feed still lists them', async () => {
-    // Migration 085 seeds the six tickers delisted in August 2026.
-    expect([...svc.getExcludedTickers()].sort()).toEqual(['AVB', 'EA', 'EQR', 'LBRDA', 'LBRDK', 'WBS']);
+    // Migration 085 seeds the six tickers delisted in August 2026, 092 the three from October.
+    expect([...svc.getExcludedTickers()].sort()).toEqual(
+      ['AVB', 'EA', 'EQR', 'LBRDA', 'LBRDK', 'PSKY', 'QRVO', 'WBD', 'WBS']
+    );
 
     for (const h of makeHoldings(503)) {
       db.prepare(`INSERT INTO constituents (ticker, index_name) VALUES (?,'sp500')`).run(h.ticker);
@@ -155,7 +157,7 @@ describe('ConstituentsService — Vanguard refresh', () => {
 
   it('migration 085 removed excluded tickers already stored', () => {
     const rows = db
-      .prepare(`SELECT COUNT(*) AS n FROM constituents WHERE ticker IN ('AVB','EA','EQR','LBRDA','LBRDK','WBS')`)
+      .prepare(`SELECT COUNT(*) AS n FROM constituents WHERE ticker IN ('AVB','EA','EQR','LBRDA','LBRDK','WBS','PSKY','QRVO','WBD')`)
       .get() as { n: number };
     expect(rows.n).toBe(0);
   });
