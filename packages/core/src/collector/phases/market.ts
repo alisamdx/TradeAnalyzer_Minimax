@@ -6,6 +6,7 @@ import { recipes } from '../../ingest/recipes.js';
 import { captureRuleId, type RunHandle } from '../run.js';
 import { sweepPolygonPages, POLYGON_LIST_PAGE_SIZE } from '../paged.js';
 import { barSettled } from '../bar-settlement.js';
+import { BACKFILL_RULE } from '../backfill.js';
 export { barSettled, BAR_SETTLED_AT_ET } from '../bar-settlement.js';
 
 /**
@@ -25,6 +26,8 @@ export interface PhaseCounts {
   readonly expected: number;
   readonly stored: number;
   readonly failed: number;
+  /** Bars phase only: members fetched five years back because they had no history (v1.1.351). */
+  readonly backfilled?: number;
 }
 
 function activeMembers(db: SqliteLike): readonly string[] {
@@ -59,23 +62,45 @@ export async function runBarsPhase(
     .toISOString()
     .slice(0, 10);
 
+  // A member with no five-year history gets one now, in place of its tail call (v1.1.351). The
+  // backfill job ran once, at the start of the generation, so a ticker that joins the universe later
+  // never got history: VMRK (AVB + EQR, admitted by the 2026-10-12 seed) would have collected bars
+  // from its first nightly run onward and nothing before. Still one call per ticker. Stored as
+  // `fetch_kind = 'backfill'` under the backfill rule, exactly as the job would have stored it, so
+  // QC-204/205/209/210 read it the same way and the next night sees history and asks for the tail.
+  const historyFrom = fiveYearsBefore(run.tradingDate);
+  const hasHistory = db.prepare(
+    "SELECT 1 FROM raw_daily_bar WHERE ticker = ? AND fetch_kind = 'backfill' LIMIT 1"
+  );
+  let backfillRuleId: number | null = null;
+
   let stored = 0;
   let failed = 0;
+  let backfilled = 0;
 
   for (const [i, ticker] of tickers.entries()) {
     throwIfCancelled(host, 'phase-2-bars');
     host.progress('bars', i, tickers.length, ticker);
 
-    const path = `/v2/aggs/ticker/${ticker}/range/1/day/${from}/${run.tradingDate}`;
+    const needsHistory = hasHistory.get(ticker) === undefined;
+    if (needsHistory && backfillRuleId === null) {
+      backfillRuleId = captureRuleId(
+        db, host, 'bars_backfill', BACKFILL_RULE,
+        'One-time five-year bar history for every universe member, fetched in a single pass per ticker.'
+      );
+    }
+    const start = needsHistory ? historyFrom : from;
+    const path = `/v2/aggs/ticker/${ticker}/range/1/day/${start}/${run.tradingDate}`;
     const response = await host.polygonGet(path, { adjusted: 'true', sort: 'asc', limit: '50000' });
 
     const result = captureResponse({
       host, db, runId: run.runId, asOfDate: run.tradingDate, provider: 'polygon',
-      endpoint: path, slug: 'aggs-day', params: { ticker, from, to: run.tradingDate },
-      response, captureRuleId: ruleId,
+      endpoint: path, slug: needsHistory ? 'aggs-day-backfill' : 'aggs-day',
+      params: { ticker, from: start, to: run.tradingDate },
+      response, captureRuleId: needsHistory ? (backfillRuleId as number) : ruleId,
       recipe: recipes.bars({
         ticker,
-        fetchKind: 'daily',
+        fetchKind: needsHistory ? 'backfill' : 'daily',
         adjustedAsOf: run.tradingDate,
         // Anything dated today may still be settling before 17:00 ET — Polygon keeps adjusting
         // past 16:00, which is why the run is scheduled at 17:05 rather than 16:30. Decided per
@@ -84,11 +109,21 @@ export async function runBarsPhase(
       })
     });
 
-    if (result.parseStatus === 'ok') stored += result.rowsWritten;
-    else failed++;
+    if (result.parseStatus === 'ok') {
+      stored += result.rowsWritten;
+      if (needsHistory && result.rowsWritten > 0) backfilled++;
+    } else {
+      failed++;
+    }
   }
 
-  return { expected: tickers.length, stored, failed };
+  return { expected: tickers.length, stored, failed, backfilled };
+}
+
+function fiveYearsBefore(date: string): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCFullYear(d.getUTCFullYear() - 5);
+  return d.toISOString().slice(0, 10);
 }
 
 /**

@@ -182,6 +182,27 @@ describe('the bars phase stores what the clock says', () => {
     expect(await runR3FinalBarRefetch(late, db(), run)).toEqual({ provisional: 0, refetched: 0, stillProvisional: 0 });
   });
 
+  // v1.1.351: VMRK joined the universe at the 2026-10-12 seed with no bars at all, and the nightly
+  // phase only ever asked for five days, so its history before that would never have been fetched.
+  it('fetches five years for a member with no history, once, then goes back to the five-day tail', async () => {
+    const paths: string[] = [];
+    const base = host('2026-09-18T22:23:00.000Z');
+    const h: CollectorHost = { ...base, polygonGet: async (path, params) => { paths.push(path); return base.polygonGet(path, params); } };
+
+    const first = beginRun(db(), h, { kind: 'daily', tradingDate: DATE });
+    const counts = await runBarsPhase(h, db(), first);
+    expect(paths).toEqual(['/v2/aggs/ticker/SPY/range/1/day/2021-09-18/2026-09-18']);
+    expect(counts).toMatchObject({ expected: 1, failed: 0, backfilled: 1 });
+    expect(raw.prepare('SELECT DISTINCT fetch_kind FROM raw_daily_bar WHERE run_id = ?').all(first.runId)).toEqual([{ fetch_kind: 'backfill' }]);
+    raw.prepare("UPDATE meta_run SET status = 'complete' WHERE run_id = ?").run(first.runId);
+
+    paths.length = 0;
+    const next = beginRun(db(), h, { kind: 'daily', tradingDate: '2026-09-21' });
+    const again = await runBarsPhase(h, db(), next);
+    expect(paths).toEqual(['/v2/aggs/ticker/SPY/range/1/day/2026-09-16/2026-09-21']);
+    expect(again.backfilled).toBe(0);
+  });
+
   it('stores a bar fetched before 17:00 ET provisional, and QC-203 still fires on it', async () => {
     const { finals, qc203 } = await phaseAt('2026-09-18T14:33:00.000Z'); // 10:33 EDT, a morning run
     expect(finals).toEqual([{ trade_date: '2026-09-17', is_final: 1 }, { trade_date: '2026-09-18', is_final: 0 }]);

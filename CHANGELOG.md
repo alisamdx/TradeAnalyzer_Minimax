@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.351] - 2026-10-12
+
+### New universe members get five years of bars from the nightly run
+
+The bar backfill ran once, at the start of the generation, so a ticker added later only ever got the nightly five-day tail. VMRK, admitted by today's `universe_seed`, had no history at all. The nightly bars phase now asks for five years instead of five days for any member with no backfilled history, with no extra calls. It stores the result as backfill rows, so the series checks treat it like the original backfill.
+
+Details: `changelogs/v1.1.351_2026-10-12.md`.
+
 ## [1.1.350] - 2026-10-12
 
 ### Fix: weekend runs no longer pose as completed collections
