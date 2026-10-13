@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.352] - 2026-10-12
+
+### Fix: a late app start ran the collector twice
+
+The app started at 19:09 ET today, after every schedule time had passed. One scheduler tick ran the orchestrator's 17:00 chain, which includes the collector, and then ran the collector's own 17:05 schedule as well. That second decision used a job row read two hours earlier, before the chain had recorded today's success. The scheduler now re-reads each job's row before deciding.
+
+Details: `changelogs/v1.1.352_2026-10-12.md`.
+
 ## [1.1.351] - 2026-10-12
 
 ### New universe members get five years of bars from the nightly run

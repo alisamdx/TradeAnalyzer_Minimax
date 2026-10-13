@@ -266,11 +266,19 @@ export class BatchService {
     const now = this.currentTimeET();
     const today = this.todayET();
 
-    const jobs = this._getJobRows().filter(j =>
+    const listed = this._getJobRows().filter(j =>
       j.enabled && j.daily_schedule_enabled
     );
 
-    for (const job of jobs) {
+    for (const entry of listed) {
+      // Re-read the row at decision time (v1.1.352). Each `runJob` below is awaited, and the
+      // orchestrator's awaits its whole chain, so a row read at the top of the tick can be hours old
+      // by the time the loop reaches it. On 2026-10-12 the app started at 19:09 ET, one tick ran
+      // both orchestrator slots (the 17:00 chain ran data-collector, run 75, until 21:12), and the
+      // loop then reached data-collector's own 17:05 schedule holding the 19:09 copy of
+      // `last_success_date` (yesterday) and ran a second full collection (run 76).
+      const job = this._getJobRow(entry.id);
+      if (!job || !job.enabled || !job.daily_schedule_enabled) continue;
       // Multi-slot jobs (orchestrator) store their schedule in config_json.scheduleSlots.
       const config = job.config_json ? (JSON.parse(job.config_json) as Record<string, unknown>) : null;
       const slots = Array.isArray(config?.['scheduleSlots'])
