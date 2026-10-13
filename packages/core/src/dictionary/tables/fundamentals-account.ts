@@ -91,13 +91,17 @@ export const fundamentalsAccountTables: readonly TableEntry[] = [
       'One row per position per run. A position that vanishes is detected by **comparing snapshots**, ' +
       'never by deleting a row — which is what lets the history say when it went and what it was worth ' +
       'the last time it was seen.',
-    naturalKey: ['account_key_hash', 'symbol', 'as_of_date', 'observed_at'],
+    // `osi_symbol` is in the key (dictionary v23). `symbol` is the UNDERLYING for an option, so two
+    // legs on one name share it. A put spread (AMD 520P long / 540P short, 2026-09-24..29) read as one
+    // position stored twice, and QC-009 called it an idempotence bug. Null for a stock row, so a
+    // stock position keys exactly as before.
+    naturalKey: ['account_key_hash', 'symbol', 'osi_symbol', 'as_of_date', 'observed_at'],
     appendOnly: true,
     ruleDriven: true,
     standardColumns: true,
     columns: [
       { column: 'account_key_hash', type: 'TEXT', unit: 'sha256', nullable: false, description: 'SHA-256 of `accountIdKey`. The key itself is never stored (P15).', sourceProvider: 'derived_at_ingestion' },
-      col.ident('symbol', 'The position\'s symbol.', { sourceProvider: 'etrade', sourceField: 'Product.symbol' }),
+      col.ident('symbol', 'The position\'s symbol — for an option, the underlying, so it is shared by every leg on that name.', { sourceProvider: 'etrade', sourceField: 'Product.symbol' }),
       col.text('security_type', 'E*Trade\'s `securityType` verbatim — `EQ`, `OPTN`.', { sourceProvider: 'etrade', sourceField: 'Product.securityType' }),
       ...OPTION_LEG_COLUMNS('Position'),
       col.int('quantity', 'Position size, **signed** — short is negative, signed from `positionType`.', { sourceProvider: 'etrade', sourceField: 'quantity', converter: 'signQuantityByPositionType' }),

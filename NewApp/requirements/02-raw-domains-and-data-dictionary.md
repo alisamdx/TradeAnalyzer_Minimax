@@ -577,7 +577,7 @@ Expected count: not modelled; check = every CS ticker with a `cik` has facts wit
 All four tables are written from E*Trade account endpoints through the existing masked-key transport; their archive files are encrypted (P15). No derived P&L in stage 1.
 
 ### `raw_account_position_snapshot`
-Source: `/v1/accounts/{key}/portfolio`. One row per position per run; a position that vanishes is detected by snapshot comparison, never by deletion.
+Source: `/v1/accounts/{key}/portfolio`. One row per position per run; a position that vanishes is detected by snapshot comparison, never by deletion. **Natural key `(account_key_hash, symbol, osi_symbol, as_of_date, observed_at)` since dictionary v23 (v1.1.353).** `symbol` is the underlying for an option, so two legs on one name share it. Until v23 the key omitted `osi_symbol`, and the AMD 520P/540P put spread of 2026-09-24..29 read to QC-009 as one position stored twice. `osi_symbol` is null for a stock row, so stock positions key exactly as before.
 
 | column | type | null | source (`Position`) |
 |---|---|---|---|

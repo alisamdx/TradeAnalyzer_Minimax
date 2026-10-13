@@ -44,6 +44,7 @@ import { runGate } from '../src/qa/gate.js';
 import { CHAIN_CHECKS, ACCOUNT_CHECKS } from '../src/qa/registry.js';
 import { bsDelta } from '../src/qa/black-scholes.js';
 import { QC404_BID_ASK_SANITY } from '../src/qa/checks/chains.js';
+import { QC009_DUPLICATE_NATURAL_KEY } from '../src/qa/checks/cross-cutting.js';
 
 /**
  * B6 — the chain and account domains.
@@ -342,6 +343,29 @@ describe('the account — provider estimates stay labelled as estimates', () => 
         }
       ]
     }
+  });
+
+  // Regression, dictionary v23: a put spread is two positions on one underlying. Keyed on
+  // (account, symbol, date), the AMD 520P/540P spread of 2026-09-24..29 read as one position stored
+  // twice, and QC-009 escalated it to blocking.
+  it('keys a two-leg spread on one underlying as two positions, not one stored twice (QC-009)', () => {
+    const leg = (id: number, strike: number, type: 'LONG' | 'SHORT') => ({
+      positionId: id, quantity: 1, positionType: type, pricePaid: 5, totalCost: 500, marketValue: 400,
+      Product: { symbol: 'AMD', securityType: 'OPTN', callPut: 'PUT', expiryYear: 2026, expiryMonth: 10, expiryDay: 16, strikePrice: strike },
+      Quick: { lastTrade: 4 }
+    });
+    const spread = JSON.stringify({ PortfolioResponse: { AccountPortfolio: [{ Position: [leg(1, 520, 'LONG'), leg(2, 540, 'SHORT')] }] } });
+    const host = makeHost();
+    const run = newRun();
+    const captured = captureResponse({
+      host, db: db(), runId: run.runId, asOfDate: DATE, provider: 'etrade',
+      endpoint: '/v1/accounts/{accountKey}/portfolio', slug: 'account-portfolio', params: { count: '250' },
+      response: response(spread), captureRuleId: captureRuleId(db(), host, 'account', { v: 1 }, 'test'), recipe: recipes.positions(KEY)
+    });
+    expect(captured.parseStatus).toBe('ok');
+    expect(raw.prepare("SELECT COUNT(*) AS n FROM raw_account_position_snapshot WHERE symbol = 'AMD'").get()).toEqual({ n: 2 });
+    const evals = QC009_DUPLICATE_NATURAL_KEY.run({ db: db(), runId: run.runId, tradingDate: DATE, observedAt: 't' });
+    expect(evals.find((e) => e.key === 'raw_account_position_snapshot')).toMatchObject({ fired: false });
   });
 
   it('signs a short position negative so nothing downstream guesses the convention', () => {

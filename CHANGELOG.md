@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.353] - 2026-10-13
+
+### Fix: a spread's two legs are two positions, not one stored twice
+
+QC-009 flagged an AMD put spread (520P long, 540P short) as one position stored twice. The position table's natural key was account + underlying symbol + date, which two option legs on one name share. The key now includes the option symbol (dictionary v23), and the finding closes itself. The other two QC-009 findings are Finnhub data: XOM's July recommendations sent twice, and two reports listed for FDXF a day apart. Those are operator rulings.
+
+Details: `changelogs/v1.1.353_2026-10-13.md`.
+
 ## [1.1.352] - 2026-10-12
 
 ### Fix: a late app start ran the collector twice
