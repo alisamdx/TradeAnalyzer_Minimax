@@ -365,7 +365,8 @@ describe('the account — provider estimates stay labelled as estimates', () => 
     expect(captured.parseStatus).toBe('ok');
     expect(raw.prepare("SELECT COUNT(*) AS n FROM raw_account_position_snapshot WHERE symbol = 'AMD'").get()).toEqual({ n: 2 });
     const evals = QC009_DUPLICATE_NATURAL_KEY.run({ db: db(), runId: run.runId, tradingDate: DATE, observedAt: 't' });
-    expect(evals.find((e) => e.key === 'raw_account_position_snapshot')).toMatchObject({ fired: false });
+    expect(evals.filter((e) => e.key.startsWith('raw_account_position_snapshot')).map((e) => [e.key, e.fired]))
+      .toEqual([['raw_account_position_snapshot', false]]);
   });
 
   it('signs a short position negative so nothing downstream guesses the convention', () => {

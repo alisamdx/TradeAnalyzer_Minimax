@@ -735,8 +735,8 @@ describe('EDGAR company facts', () => {
     });
     expect(result.rowsWritten).toBe(2);
     const edgar = QC009_DUPLICATE_NATURAL_KEY.run({ db: db(), runId: run.runId, tradingDate: DATE, observedAt: OBSERVED })
-      .find((e) => e.key === 'raw_edgar_fact');
-    expect(edgar?.fired).toBe(false);
+      .filter((e) => e.key.startsWith('raw_edgar_fact'));
+    expect(edgar.map((e) => [e.key, e.fired])).toEqual([['raw_edgar_fact', false]]);
 
     // meta_dictionary keeps every version. On 2026-09-16 the check read them all, so a
     // superseded key without period_start would have kept firing after the key was fixed.
@@ -753,7 +753,7 @@ describe('EDGAR company facts', () => {
         WHERE table_name = 'raw_edgar_fact' AND dictionary_version < (SELECT MAX(dictionary_version) FROM meta_dictionary)`
     );
     const again = QC009_DUPLICATE_NATURAL_KEY.run({ db: db(), runId: run.runId, tradingDate: DATE, observedAt: OBSERVED })
-      .filter((e) => e.key === 'raw_edgar_fact');
+      .filter((e) => e.key.startsWith('raw_edgar_fact'));
     expect(again.map((e) => e.fired)).toEqual([false]);
   });
 
@@ -773,8 +773,8 @@ describe('EDGAR company facts', () => {
     const stored = raw.prepare("SELECT COUNT(*) AS n FROM raw_earnings_event WHERE ticker = 'NVDA'").get() as { n: number };
     expect(stored.n).toBe(2);
     const e = QC009_DUPLICATE_NATURAL_KEY.run({ db: db(), runId: run.runId, tradingDate: DATE, observedAt: OBSERVED })
-      .find((x) => x.key === 'raw_earnings_event');
-    expect(e?.fired).toBe(false);
+      .filter((x) => x.key.startsWith('raw_earnings_event'));
+    expect(e.map((x) => [x.key, x.fired])).toEqual([['raw_earnings_event', false]]);
   });
 
   it('re-judges its open findings: a per-run artefact and a redefined key close, a real duplicate stays (v1.1.284)', () => {
@@ -829,8 +829,35 @@ describe('EDGAR company facts', () => {
     expect(rows['raw_earnings_event']!.resolution_kind).toBe('rule_changed');
     expect(rows['raw_insider_transaction']!.resolution_kind).toBe('rule_changed');
     expect(rows['raw_insider_transaction']!.resolution_note).toContain('["accession_no","line_no"]');
-    // Stopped firing (the later run stored nothing), but its own run still holds the duplicate.
-    expect(rows['raw_analyst_recommendation']!.state).toBe('open');
+    // The table-level finding is replaced, not dropped (v1.1.354): its own run still holds XOM's
+    // duplicate, so that key becomes its own finding, dated to the run it was seen in.
+    expect(rows['raw_analyst_recommendation']!.resolution_kind).toBe('rule_changed');
+    expect(rows['raw_analyst_recommendation']!.resolution_note).toContain('raw_analyst_recommendation XOM 2026-07-01');
+    expect(rows['raw_analyst_recommendation XOM 2026-07-01']!.state).toBe('open');
+    const affects = raw.prepare("SELECT affects_trading_dates_json AS a FROM qa_exception WHERE key = 'raw_analyst_recommendation XOM 2026-07-01'").get() as { a: string };
+    expect(JSON.parse(affects.a)).toEqual([DATE]);
+  });
+
+  // v1.1.354: keyed by TABLE, one acceptance covered every future duplicate in it. Keyed per
+  // duplicated key, accepting XOM's repeated July row leaves another ticker's duplicate visible.
+  it('files one finding per duplicated key, so a ruling on one never covers another (QC-009)', () => {
+    const run = newRun();
+    const period = (symbol: string) => ({ symbol, period: '2026-07-01', strongBuy: 7, buy: 9, hold: 13, sell: 1, strongSell: 0 });
+    for (const t of ['XOM', 'CVX']) {
+      captureResponse({
+        host: makeHost(), db: db(), runId: run.runId, asOfDate: DATE, provider: 'finnhub',
+        endpoint: '/stock/recommendation', slug: 'recommendation', params: { symbol: t },
+        response: response(JSON.stringify([period(t), period(t)])), captureRuleId: ruleId(),
+        recipe: recipes.recommendations({ ticker: t })
+      });
+    }
+    const fired = QC009_DUPLICATE_NATURAL_KEY.run({ db: db(), runId: run.runId, tradingDate: DATE, observedAt: OBSERVED })
+      .filter((e) => e.fired);
+    expect(fired.map((e) => e.key)).toEqual([
+      'raw_analyst_recommendation CVX 2026-07-01',
+      'raw_analyst_recommendation XOM 2026-07-01'
+    ]);
+    expect(fired[1]!.detail).toBe('raw_analyst_recommendation: (ticker, period_month) = (XOM, 2026-07-01) stored 2 times within one response');
   });
 });
 

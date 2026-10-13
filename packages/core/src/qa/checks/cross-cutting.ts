@@ -312,8 +312,11 @@ export const QC009_DUPLICATE_NATURAL_KEY: CheckDefinition = {
     'returning the same key is not: a capped Finnhub window stores its rows and its uncapped halves ' +
     'store them again, which is the subdivision QC-008 requires (330 + 322 such keys on 2026-09-16). ' +
     'Keys come from the CURRENT dictionary version only: meta_dictionary keeps every version, and ' +
-    'reading them all kept a superseded key firing after the key was fixed. Open findings are ' +
-    're-judged on the runs they were seen in, and one raised against a since-redefined key closes.',
+    'reading them all kept a superseded key firing after the key was fixed. One finding per ' +
+    'duplicated KEY, `<table> <key values>`, since v1.1.354: keyed by table, one ruling covered every ' +
+    'future duplicate in that table, so accepting XOM\'s repeated July recommendation would have ' +
+    'silenced any other ticker\'s for as long as the acceptance ran. A finding raised against a ' +
+    'since-redefined key closes.',
   readsTables: ['meta_dictionary', 'meta_run', 'qa_exception'],
   testedQuantity: null,
   testedUnit: null,
@@ -332,30 +335,92 @@ export const QC009_DUPLICATE_NATURAL_KEY: CheckDefinition = {
     for (const t of tables) {
       const key = (JSON.parse(t.natural_key) as string[]).filter((c) => c !== 'observed_at');
       if (key.length === 0) continue;
-      const dupes = duplicatesPerResponse(ctx, t.table_name, key, ctx.runId, ctx.runId);
-      out.push({
-        key: t.table_name,
-        fired: dupes > 0,
-        detail: dupes > 0 ? `${dupes} duplicate natural key(s) in ${t.table_name} within one response` : undefined,
-        evidence: { table: t.table_name, duplicateKeys: dupes, naturalKey: key }
-      });
+      // One evaluation per table, clean or not, so the evaluated count still says how many tables
+      // were looked at; the per-key findings are added beside it.
+      out.push({ key: t.table_name, fired: false, evidence: { table: t.table_name, naturalKey: key } });
+      out.push(...duplicateFindings(ctx, t.table_name, key, ctx.runId, ctx.runId));
     }
     return withRejudgedDuplicateFindings(ctx, out, new Map(tables.map((t) => [t.table_name, t.natural_key])));
   }
 };
 
-/** Natural keys stored twice from one response, in runs `fromRun`..`toRun`. */
-function duplicatesPerResponse(ctx: CheckContext, table: string, key: readonly string[], fromRun: number, toRun: number): number {
-  const cols = [...key, 'source_response_id'].map((c) => `"${c}"`).join(', ');
-  return (
-    ctx.db
-      .prepare(
-        `SELECT COUNT(*) AS n FROM (
-           SELECT run_id, ${cols} FROM "${table}" WHERE run_id BETWEEN ? AND ?
-           GROUP BY run_id, ${cols} HAVING COUNT(*) > 1)`
-      )
-      .get(fromRun, toRun) as { n: number }
-  ).n;
+/** Keys listed one by one; past this a table's duplicates are one `<table> *` finding (a parser fault, not a provider quirk). */
+const MAX_DUPLICATE_KEYS_PER_TABLE = 50;
+
+/** The finding key for one duplicated natural key: `<table> <value> <value> …`, nulls spelt `null`. */
+export function duplicateFindingKey(table: string, values: readonly unknown[]): string {
+  return [table, ...values.map((v) => (v === null || v === undefined ? 'null' : String(v)))].join(' ');
+}
+
+interface DuplicateRow {
+  readonly values: readonly unknown[];
+  readonly copies: number;
+  readonly responses: number;
+  readonly firstRun: number;
+  readonly lastRun: number;
+  readonly runs: readonly number[];
+}
+
+/** Natural keys stored more than once from ONE response, in runs `fromRun`..`toRun`, one row per key. */
+function duplicateRows(ctx: CheckContext, table: string, key: readonly string[], fromRun: number, toRun: number): DuplicateRow[] {
+  const cols = key.map((c) => `"${c}"`).join(', ');
+  const rows = ctx.db
+    .prepare(
+      `SELECT ${cols}, MAX(n) AS copies, COUNT(*) AS responses, MIN(run_id) AS first_run, MAX(run_id) AS last_run,
+              GROUP_CONCAT(DISTINCT run_id) AS runs
+         FROM (SELECT run_id, source_response_id, ${cols}, COUNT(*) AS n FROM "${table}"
+                WHERE run_id BETWEEN ? AND ?
+                GROUP BY run_id, source_response_id, ${cols} HAVING COUNT(*) > 1)
+        GROUP BY ${cols}
+        ORDER BY ${cols}`
+    )
+    .all(fromRun, toRun) as Record<string, unknown>[];
+  return rows.map((r) => ({
+    values: key.map((c) => r[c] ?? null),
+    copies: Number(r['copies']),
+    responses: Number(r['responses']),
+    firstRun: Number(r['first_run']),
+    lastRun: Number(r['last_run']),
+    runs: String(r['runs']).split(',').map(Number)
+  }));
+}
+
+/** The trading dates of the runs a duplicate was seen in, the days it makes doubtful — not every run between. */
+function tradingDatesOf(ctx: CheckContext, runs: readonly number[]): string[] {
+  const get = ctx.db.prepare('SELECT trading_date FROM meta_run WHERE run_id = ?');
+  const dates = new Set<string>();
+  for (const r of runs) {
+    const d = (get.get(r) as { trading_date: string } | undefined)?.trading_date;
+    if (d) dates.add(d);
+  }
+  return [...dates].sort();
+}
+
+function duplicateFindings(ctx: CheckContext, table: string, key: readonly string[], fromRun: number, toRun: number): Evaluation[] {
+  const dupes = duplicateRows(ctx, table, key, fromRun, toRun);
+  if (dupes.length === 0) return [];
+  const historical = fromRun !== ctx.runId || toRun !== ctx.runId;
+  const affectsOf = (runs: readonly number[]) => (historical ? { affects: tradingDatesOf(ctx, runs) } : {});
+  if (dupes.length > MAX_DUPLICATE_KEYS_PER_TABLE) {
+    return [{
+      key: `${table} *`,
+      fired: true,
+      detail: `${dupes.length} natural keys in ${table} stored twice within one response — too many to be a provider quirk; look for a parser emitting rows twice`,
+      evidence: { table, naturalKey: key, duplicateKeys: dupes.length, sample: dupes.slice(0, 5).map((d) => d.values) },
+      ...affectsOf([...new Set(dupes.flatMap((d) => d.runs))])
+    }];
+  }
+  const cols = key.join(', ');
+  return dupes.map((d) => ({
+    key: duplicateFindingKey(table, d.values),
+    fired: true,
+    detail:
+      `${table}: (${cols}) = (${d.values.map((v) => String(v ?? 'null')).join(', ')}) stored ${d.copies} times ` +
+      `within one response` + (d.responses > 1 ? `, in ${d.responses} responses` : '') +
+      (historical ? ` (runs ${d.runs.join(', ')})` : ''),
+    evidence: { table, naturalKey: key, values: d.values, copies: d.copies, responses: d.responses, runs: d.runs },
+    ...affectsOf(d.runs)
+  }));
 }
 
 /**
@@ -375,7 +440,15 @@ function duplicatesPerResponse(ctx: CheckContext, table: string, key: readonly s
  *
  * A finding whose runs still show duplicates under today's rule stays open — raw_analyst_recommendation
  * on 2026-09-14, where Finnhub sent XOM's July period twice in one response, is exactly what the check
- * is for. Only a table evaluated clean TODAY is considered: one firing today is live.
+ * is for.
+ *
+ * **Per-key findings (v1.1.354).** A finding keyed by a bare table name is the old shape. It is re-counted
+ * over the runs it was seen in, and each key still duplicated there is raised as its own
+ * `<table> <values>` finding, dated to those runs. Then the table-level one closes `rule_changed`,
+ * naming what replaced it. Closing it without the carry-over would lose XOM, whose duplicate lives
+ * in the weekly sweep's run and not in tonight's. A per-key finding closes only when its table's key
+ * has since been redefined. A duplicate that simply was not fetched tonight stays open for the operator,
+ * as before.
  */
 function withRejudgedDuplicateFindings(
   ctx: CheckContext,
@@ -396,28 +469,44 @@ function withRejudgedDuplicateFindings(
     `SELECT natural_key FROM meta_dictionary
       WHERE table_name = ? AND column_name = 'run_id' AND dictionary_version = ? LIMIT 1`
   );
-  const byTable = new Map(today.map((e, i) => [e.key, i]));
   const out = [...today];
-  for (const f of open) {
-    const i = byTable.get(f.key);
-    const current = currentKeys.get(f.key);
-    if (i === undefined || out[i]!.fired || current === undefined) continue;
-    const then = f.dictionary_version === null
-      ? undefined
-      : (keyAt.get(f.key, f.dictionary_version) as { natural_key: string } | undefined)?.natural_key;
+  const indexOf = new Map(out.map((e, i) => [e.key, i]));
+  const keyThen = (table: string, version: number | null): string | undefined =>
+    version === null ? undefined : (keyAt.get(table, version) as { natural_key: string } | undefined)?.natural_key;
 
-    let note: string | undefined;
-    if (then !== undefined && then !== current) {
-      note = `raised against the natural key ${then} (dictionary v${f.dictionary_version}); the key is now ${current}`;
-    } else {
-      const key = (JSON.parse(current) as string[]).filter((c) => c !== 'observed_at');
-      if (duplicatesPerResponse(ctx, f.key, key, f.first_seen_run_id, f.last_seen_run_id) === 0) {
-        note =
-          `re-counted per response over runs ${f.first_seen_run_id}–${f.last_seen_run_id}: no key stored twice — ` +
-          'raised when duplicates were counted per run, which a subdivided sweep produces on correct data';
-      }
+  for (const f of open) {
+    const legacy = currentKeys.has(f.key);
+    const table = legacy ? f.key : f.key.split(' ')[0]!;
+    const current = currentKeys.get(table);
+    if (current === undefined) continue;
+    const then = keyThen(table, f.dictionary_version);
+    const redefined = then !== undefined && then !== current
+      ? `raised against the natural key ${then} (dictionary v${f.dictionary_version}); the key is now ${current}`
+      : undefined;
+
+    if (!legacy) {
+      const i = indexOf.get(f.key);
+      if (i !== undefined && out[i]!.fired) continue; // live tonight
+      if (redefined) out.push({ key: f.key, fired: false, closesAs: { kind: 'rule_changed', note: redefined } });
+      continue;
     }
-    if (note !== undefined) out[i] = { ...out[i]!, closesAs: { kind: 'rule_changed', note } };
+
+    const i = indexOf.get(f.key);
+    if (i === undefined) continue;
+    let note = redefined;
+    if (note === undefined) {
+      const key = (JSON.parse(current) as string[]).filter((c) => c !== 'observed_at');
+      const carried = duplicateFindings(ctx, table, key, f.first_seen_run_id, f.last_seen_run_id)
+        .filter((e) => !indexOf.has(e.key));
+      for (const e of carried) {
+        indexOf.set(e.key, out.length);
+        out.push(e);
+      }
+      note = carried.length === 0
+        ? `re-counted per response over runs ${f.first_seen_run_id}–${f.last_seen_run_id}: no key stored twice`
+        : `QC-009 files one finding per duplicated key since v1.1.354; replaced by ${carried.map((e) => e.key).join(', ')}`;
+    }
+    out[i] = { ...out[i]!, closesAs: { kind: 'rule_changed', note } };
   }
   return out;
 }

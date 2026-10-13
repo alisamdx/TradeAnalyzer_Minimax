@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.354] - 2026-10-13
+
+### QC-009 files one finding per duplicated key, not per table
+
+A QC-009 finding was keyed by table, so accepting one provider quirk (XOM's repeated July recommendation) would have hidden every future duplicate in that table. Findings are now keyed `<table> <key values>`. Open table-level findings are migrated to per-key ones, dated to the runs each duplicate appeared in, and then close `rule_changed`. More than 50 duplicated keys in one table are reported as a single parser-fault finding.
+
+Details: `changelogs/v1.1.354_2026-10-13.md`.
+
 ## [1.1.353] - 2026-10-13
 
 ### Fix: a spread's two legs are two positions, not one stored twice
