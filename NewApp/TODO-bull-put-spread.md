@@ -24,8 +24,8 @@ reaching the v2 engine. The 08 §4 enable gate is **time-blocked, not work-block
 
 | §4 condition | State |
 |---|---|
-| ≥ 15 intraday capture days, then re-run the study `--slip-model quoted --capital 25000 --risk 2500` | **16 / 15 — study run 10-09 (BPS-14): return passes, quoted coverage 44% < 50% fails.** Re-run ~mid-October |
-| ≥ 30 settled positions, mean return on max loss > 0 | **15 / 30**, mean +16.4% — most of the book settles 10-16…10-30 |
+| ≥ 15 intraday capture days, then re-run the study `--slip-model quoted --capital 25000 --risk 2500` | **18 / 15 — re-run 10-13: return passes (+88.8%), quoted coverage STILL 44% (660/1,495) — not growing; needs a decision, see BPS-14** |
+| ≥ 30 settled positions, mean return on max loss > 0 | **17 / 30**, mean +16.4% (10-13) — most of the book settles 10-16…10-30 |
 
 *(Status as of 2026-09-22, kept for history:)*
 
@@ -447,6 +447,21 @@ Provenance: **measured** (a #43 study result) · **inherited** (a wheel-screen r
     11.1%). Same 78-configuration multiple-comparison caveat; FR-SEY-5 applies.
   - **The shadow book (other half of §4) on 10-09:** 15 / 30 settled, mean +16.4%, 100% win, median hold
     7 days. Most of the book settles 10-16…10-30.
+  **RE-RUN 2026-10-13 (`bull-put-spread-gate-2026-10-13.md`; 18 intraday capture days; same command) —
+  coverage did NOT move: still 660 / 1,495 (44%)**, although quoted tickers rose 169 → 182. **Waiting will
+  not close this gap on its own.** Coverage only grows when capture quotes a ticker from the FIXED replay
+  set (179 tickers, 2025-06…2026-08), and capture quotes only what this day's pools hold. The 13 newly
+  quoted tickers are not replay tickers. Breakdown (ad-hoc, from `/diagnostics/spread-study-panel`):
+  44 of 179 replay tickers are quoted; 135 are not, and only 28 of those have even 1–2 intraday quotes.
+  **The bar needs 88 more entries and the entries are lumpy:** FAST alone is 59 (0 quotes) and MSFT 41
+  (2 quotes, one short of the ≥ 3 minimum), so **two tickers would pass the bar**, which says more about
+  the bar's definition (entries, not tickers) than about evidence. Return still passes: the shadow profile
+  behind the 25% gate is **+88.8%** against the CSP's +12.5% (10-09: +86.3%). Shadow book: 17 / 30
+  settled, mean +16.4%, 100% win.
+  **Open decision:** either (a) quote the largest unquoted replay tickers deliberately (FAST, MSFT, TEL,
+  TXN, ROL, DRI, SCHW…) in spread capture for a few days, or (b) restate the coverage bar as share of
+  replay TICKERS or a minimum per ticker, so two names cannot decide it. Until one is chosen, re-running
+  BPS-14 on a calendar reminder is not expected to change the verdict.
 - **BPS-15. Build the `on` surfaces** — Daily Brief panel and email — only once §4 passes. `on` is
   deliberately not a member of `SpreadModeSwitch`; adding it **fails the build** at `budgetGates()` in
   `spread-mode.ts`, which is where the BPS-11 decision must be made. (Was part of #44.)
