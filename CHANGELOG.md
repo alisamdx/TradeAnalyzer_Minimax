@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.357] - 2026-10-13
+
+### Bull put spread gate: quote the study's replay tickers directly, count coverage by ticker too
+
+The enable gate needs half the study's entries priced from real quotes. Coverage sat at 44% on 10-09 and again on 10-13, because the study's entries are a fixed set of past picks and spread capture only quoted the day's pools. Capture now also takes one chain a day for up to 15 replay tickers it has no quotes for yet. The bar now requires 50% of tickers as well as entries, since two heavily picked names (FAST, MSFT) could otherwise decide it. Today: 44% of entries, 25% of tickers.
+
+Details: `changelogs/v1.1.357_2026-10-13.md`.
+
 ## [1.1.356] - 2026-10-13
 
 ### Gate-rehearsal snapshots: keep 2, not 5

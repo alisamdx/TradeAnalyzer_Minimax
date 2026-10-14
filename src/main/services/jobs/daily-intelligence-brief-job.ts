@@ -1050,7 +1050,7 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
     if (!signal.aborted) {
       emit('Capturing spread chains…');
       const cap = await captureSpreadChains({ db: this.db, provider: this.optionsProvider, slot: candidateSlot });
-      const summary = `[brief] spread chains: ${cap.rowsWritten} rows (${cap.entryTickers} entry tickers, ${cap.trackedSeries} tracked series, ${cap.failures.length} failures)`;
+      const summary = `[brief] spread chains: ${cap.rowsWritten} rows (${cap.entryTickers} entry tickers, ${cap.trackedSeries} tracked series, ${cap.coverageTickers} coverage tickers, ${cap.failures.length} failures)`;
       logEmailOutcome({
         level: cap.failures.length > 0 && cap.rowsWritten === 0 ? 'ERROR' : 'INFO',
         operation: 'spread-capture:run',

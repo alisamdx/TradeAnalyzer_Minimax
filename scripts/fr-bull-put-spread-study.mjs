@@ -287,6 +287,7 @@ function stats(rows, side) {
   };
 }
 const f = (x, d = 1) => (x == null || !Number.isFinite(x) ? '—' : x.toFixed(d));
+const pct = x => `${f(x * 100, 0)}%`;
 const money = x => (x == null || !Number.isFinite(x) ? '—' : `$${Math.round(x).toLocaleString('en-US')}`);
 const EXIT_CODES = { target: 'T', stop: 'S', time: 'H', expiry: 'E' };
 const exitMix = s => Object.entries(EXIT_CODES).map(([k, code]) => `${code}${Math.round(((s.exits[k] ?? 0) / s.n) * 100)}`).join(' ');
@@ -387,6 +388,19 @@ function rankingTest(rows, { topN = 5, draws = 500, seed = 12345 } = {}) {
   return out;
 }
 
+/**
+ * 08 §4's quoted-cost coverage bar (BPS-14), restated 2026-10-13: ≥ 50% of ENTRIES and ≥ 50% of
+ * replay TICKERS priced from real quotes. Entries alone are lumpy — FAST carries 59 of 1,495 and MSFT
+ * 41, so quoting two names would have passed a bar that 135 unquoted tickers still fail. Requiring
+ * both means no handful of heavily picked names can decide it either way.
+ */
+const COVERAGE_BAR = 0.5;
+function coverageVerdict({ entriesQuoted, entries, tickersQuoted, tickers }) {
+  const entryShare = entries > 0 ? entriesQuoted / entries : 0;
+  const tickerShare = tickers > 0 ? tickersQuoted / tickers : 0;
+  return { entryShare, tickerShare, pass: entryShare >= COVERAGE_BAR && tickerShare >= COVERAGE_BAR };
+}
+
 // ── self-test (no database) ───────────────────────────────────────────────────────────────────
 function syntheticEntry(pathFn, iv = 0.35) {
   const start = '2025-01-01', bars = [];
@@ -406,6 +420,17 @@ function selftest() {
   const fails = [];
   const check = (name, ok) => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}`); if (!ok) fails.push(name); };
   const base = { dte: 30, delta: 0.25, wing: 0.05, skew: 0, pt: null, sl: null, ts: null };
+
+  // 2026-10-13's real numbers: entries short, tickers far short. Two heavy names would have fixed the
+  // entry share alone; the ticker share must stop that from passing.
+  const c1013 = coverageVerdict({ entriesQuoted: 660, entries: 1495, tickersQuoted: 44, tickers: 179 });
+  check('coverage 10-13 (44% of entries, 25% of tickers) fails', !c1013.pass);
+  check('two heavy tickers lift entries past 50% but not tickers, so it still fails',
+    !coverageVerdict({ entriesQuoted: 760, entries: 1495, tickersQuoted: 46, tickers: 179 }).pass);
+  check('both shares at 50% pass, at the boundary',
+    coverageVerdict({ entriesQuoted: 50, entries: 100, tickersQuoted: 10, tickers: 20 }).pass);
+  check('no entries is a fail, not a pass on 0/0',
+    !coverageVerdict({ entriesQuoted: 0, entries: 0, tickersQuoted: 0, tickers: 0 }).pass);
 
   check('skew adds vol out of the money, removes it in the money',
     Math.abs(ivAt(90, 100, 0.30, 6) - 0.36) < 1e-9 && Math.abs(ivAt(110, 100, 0.30, 6) - 0.24) < 1e-9);
@@ -707,6 +732,14 @@ async function main() {
       + `${quoted.perTicker.size} tickers with ≥3 quotes — ${quoted.fromSlot.intraday} from intraday, ${quoted.fromSlot.afterClose} from after-close. `
       + `Rows read: ${src}. Per leg: p10 $${at(0.1)} · median $${at(0.5)} · p90 $${at(0.9)}. `
       + `Entries priced from quotes: ${counts.quotedSlip} of ${pooled.length}; the rest use the $${SLIP} fallback.`);
+    const replayTickers = new Set(pooled.map(r => r.ticker));
+    const cov = coverageVerdict({
+      entriesQuoted: counts.quotedSlip, entries: pooled.length,
+      tickersQuoted: [...replayTickers].filter(t => quoted.perTicker.has(t)).length, tickers: replayTickers.size,
+    });
+    console.log(`**08 §4 quoted-cost coverage: ${cov.pass ? 'PASSES' : 'FAILS'}** — entries ${pct(cov.entryShare)} `
+      + `(${counts.quotedSlip}/${pooled.length}), replay tickers ${pct(cov.tickerShare)} `
+      + `(${[...replayTickers].filter(t => quoted.perTicker.has(t)).length}/${replayTickers.size}); both must be ≥ ${pct(COVERAGE_BAR)}.`);
     if (quoted.fromSlot.afterClose > 0) {
       console.log('WARNING: after-close option quotes are much wider than in-session ones — costs priced from them are an upper bound.');
     }

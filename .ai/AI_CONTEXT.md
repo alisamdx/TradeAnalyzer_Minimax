@@ -178,7 +178,7 @@ Authoritative DDL is in `migrations/`. Tables are created lazily (`CREATE TABLE 
 | News | `news_research_cache`, `macro_events` |
 | Earnings | `earnings_calendar` |
 | Filters | `filter_template_runs` (latest prefill run per template; shape-versioned) |
-| Spread capture | `spread_chain_capture` (migration 083, v1.1.243) — put-side chain JSON per (date, slot, ticker, expiry) for the bull put spread study; `entry` rows from wheel/income/bullish validated pools at 14–45 DTE, `track` rows re-quote entries from the last 21 days, and every spread-mode picked series, until expiry (v1.1.290). Data only, 730-day retention |
+| Spread capture | `spread_chain_capture` (migration 083, v1.1.243) — put-side chain JSON per (date, slot, ticker, expiry) for the bull put spread study; `entry` rows from wheel/income/bullish validated pools at 14–45 DTE, `track` rows re-quote entries from the last 21 days, and every spread-mode picked series, until expiry (v1.1.290); `coverage` rows (migration 093, v1.1.357) quote up to 15 wheel replay tickers per intraday run that the study cannot yet price (< 3 intraday quotes, not retried for 7 days). Data only, 730-day retention |
 | Constituent exclusions | `constituents_excluded` (migration 085, v1.1.245) — delisted tickers no constituents writer may store (AVB, EA, EQR, LBRDA, LBRDK, WBS; QRVO, WBD, PSKY via migration 092, v1.1.348); honoured by refresh, CSV import and bundled bootstrap |
 | Spread mode | `spread_mode_picks` (migration 084, v1.1.244) — bull put spread mode shadow output: one row per (date, slot, ticker), `outcome` `pick` (rank, both legs' quotes, fills, credit, max loss, cost share, contracts) or `rejected` (reason). 730-day retention |
 

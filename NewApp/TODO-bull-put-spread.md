@@ -24,7 +24,7 @@ reaching the v2 engine. The 08 §4 enable gate is **time-blocked, not work-block
 
 | §4 condition | State |
 |---|---|
-| ≥ 15 intraday capture days, then re-run the study `--slip-model quoted --capital 25000 --risk 2500` | **18 / 15 — re-run 10-13: return passes (+88.8%), quoted coverage STILL 44% (660/1,495) — not growing; needs a decision, see BPS-14** |
+| ≥ 15 intraday capture days, then re-run the study `--slip-model quoted --capital 25000 --risk 2500` | **18 / 15 — re-run 10-13: return passes (+88.8%), coverage 44% of entries / 25% of tickers (bar: 50% of both, S14); `coverage` capture from 10-14 should close it in ~1–2 weeks** |
 | ≥ 30 settled positions, mean return on max loss > 0 | **17 / 30**, mean +16.4% (10-13) — most of the book settles 10-16…10-30 |
 
 *(Status as of 2026-09-22, kept for history:)*
@@ -458,10 +458,12 @@ Provenance: **measured** (a #43 study result) · **inherited** (a wheel-screen r
   the bar's definition (entries, not tickers) than about evidence. Return still passes: the shadow profile
   behind the 25% gate is **+88.8%** against the CSP's +12.5% (10-09: +86.3%). Shadow book: 17 / 30
   settled, mean +16.4%, 100% win.
-  **Open decision:** either (a) quote the largest unquoted replay tickers deliberately (FAST, MSFT, TEL,
-  TXN, ROL, DRI, SCHW…) in spread capture for a few days, or (b) restate the coverage bar as share of
-  replay TICKERS or a minimum per ticker, so two names cannot decide it. Until one is chosen, re-running
-  BPS-14 on a calendar reminder is not expected to change the verdict.
+  **DECIDED 2026-10-13: both (08 S14, v1.1.357).** (a) Spread capture writes `coverage` rows: each
+  intraday run takes one chain nearest 30 DTE for up to 15 wheel replay tickers with < 3 intraday
+  quotes, most replay entries first (FAST, MSFT, TEL, TXN, ROL…), not retrying a ticker for 7 days.
+  ~135 tickers at 15 a day is ~9 trading days to reach all of them. (b) The bar is now ≥ 50% of entries
+  **and** ≥ 50% of replay tickers; the study prints the verdict on one line. On 10-13 that line reads
+  **FAILS — entries 44% (660/1,495), tickers 25% (44/179)**. Re-run BPS-14 after ~5 intraday runs.
 - **BPS-15. Build the `on` surfaces** — Daily Brief panel and email — only once §4 passes. `on` is
   deliberately not a member of `SpreadModeSwitch`; adding it **fails the build** at `budgetGates()` in
   `spread-mode.ts`, which is where the BPS-11 decision must be made. (Was part of #44.)

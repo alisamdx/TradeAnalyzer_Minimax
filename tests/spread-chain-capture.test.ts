@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { selectPuts, captureSpreadChains, type CapturedPut } from '../src/main/services/spread-chain-capture.js';
+import {
+  selectPuts, captureSpreadChains, coverageCandidates, intradayQuoteCounts, type CapturedPut,
+} from '../src/main/services/spread-chain-capture.js';
 import type { OptionContract } from '../src/main/services/data-provider.js';
 import { openDatabase } from '../src/main/db/connection.js';
 import { runMigrations } from '../src/main/db/migrations.js';
@@ -154,6 +156,122 @@ describe('captureSpreadChains', () => {
     const db = openDatabase(':memory:'); // no migrations
     const r = await captureSpreadChains({ db, provider, slot: 'intraday', now: NOW });
     expect(r.failures[0]).toEqual(expect.objectContaining({ step: 'capture' }));
+  });
+});
+
+// v1.1.357 (BPS-14): the study's replay set is fixed, so pool-driven capture stopped raising its quoted
+// coverage (660 / 1,495 on both 10-09 and 10-13). Coverage rows quote replay tickers it cannot price yet.
+describe('coverage capture for the study\'s replay tickers', () => {
+  const EXP_31 = '2026-10-15'; // 31 DTE — nearest 30 in the window
+
+  function seed() {
+    const db = openDatabase(':memory:');
+    runMigrations(db, MIGRATIONS_DIR);
+    const brief = db.prepare(`INSERT INTO replay_briefs (as_of_date, strategy) VALUES (?, ?)`);
+    const outcome = db.prepare(
+      `INSERT INTO replay_outcomes (replay_brief_id, ticker, rank, composite_score) VALUES (?, ?, 1, 60)`,
+    );
+    // Entries per ticker: T00 20, T01 19, … T16 4 (17 tickers, so the 15-ticker cap binds);
+    // QUO 30 (already quoted), REC 25 (covered 3 days ago), BEAR 30 (a bearish replay, not the study's).
+    const entries: Array<[string, number, string]> = [
+      ...Array.from({ length: 17 }, (_, i) => [`T${String(i).padStart(2, '0')}`, 20 - i, 'wheel'] as [string, number, string]),
+      ['QUO', 30, 'wheel'], ['REC', 25, 'wheel'], ['BEAR', 30, 'bearish'],
+    ];
+    const briefIds = new Map<string, number>();
+    for (const [ticker, n, strategy] of entries) {
+      for (let d = 0; d < n; d++) {
+        const date = `2025-07-${String(d + 1).padStart(2, '0')}`;
+        const key = `${strategy}|${date}`;
+        if (!briefIds.has(key)) briefIds.set(key, Number(brief.run(date, strategy).lastInsertRowid));
+        outcome.run(briefIds.get(key), ticker);
+      }
+    }
+    // QUO: three valid intraday brief quotes. One after-close and one zero-bid row must not count.
+    const cand = db.prepare(
+      `INSERT INTO brief_candidates (as_of_date, generated_at, strategy, ticker, composite_score, rank, disposition, slot, bid, ask)
+       VALUES (?, ?, 'wheel', ?, 60, 1, 'failed_liquidity', ?, ?, ?)`,
+    );
+    for (let i = 0; i < 3; i++) cand.run(`2026-09-0${i + 1}`, `g${i}`, 'QUO', 'intraday', 1, 1.2);
+    cand.run('2026-09-04', 'g3', 'T00', 'after_close', 1, 1.2);
+    cand.run('2026-09-05', 'g4', 'T00', 'intraday', 0, 1.2);
+    db.prepare(
+      `INSERT INTO spread_chain_capture (as_of_date, slot, captured_at, ticker, expiration, dte, reason, underlying_price, contract_count, puts_json)
+       VALUES ('2026-09-11', 'intraday', 'x', 'REC', ?, 25, 'coverage', 100, 0, '[]')`,
+    ).run(EXP_18);
+    return db;
+  }
+
+  const calls: string[] = [];
+  const provider = {
+    async getOptionsExpirations(t: string) { calls.push(`exp:${t}`); return [EXP_10, EXP_18, EXP_31, EXP_46]; },
+    async getOptionsChain(t: string, exp: string) {
+      calls.push(`chain:${t}:${exp}`);
+      return { ticker: t, expiration: exp, contracts: [c(95, 'put', -0.3), c(90, 'put', -0.15), c(85, 'put', -0.05)], underlyingPrice: 100 };
+    },
+  };
+
+  it('counts intraday quotes the way the study does', () => {
+    const n = intradayQuoteCounts(seed());
+    expect(n.get('QUO')).toBe(3);
+    expect(n.get('T00')).toBeUndefined(); // after-close and zero-bid rows do not count
+  });
+
+  it('lists uncovered wheel replay tickers, most entries first, skipping quoted and recently covered ones', () => {
+    const list = coverageCandidates(seed(), TODAY);
+    expect(list.slice(0, 3)).toEqual(['T00', 'T01', 'T02']);
+    expect(list).toHaveLength(17);
+    expect(list).not.toContain('QUO');
+    expect(list).not.toContain('REC');
+    expect(list).not.toContain('BEAR');
+  });
+
+  it('fetches one chain nearest 30 DTE for up to 15 tickers, intraday only, stored as coverage', async () => {
+    const db = seed();
+    calls.length = 0;
+    const r = await captureSpreadChains({ db, provider, slot: 'intraday', now: NOW });
+    expect(r.coverageTickers).toBe(15);
+    expect(calls.filter(x => x.startsWith('chain:'))).toHaveLength(15);
+    expect(calls).toContain(`chain:T00:${EXP_31}`);
+    expect(calls.some(x => x.includes('T15') || x.includes('T16'))).toBe(false);
+
+    const rows = db.prepare(`SELECT DISTINCT reason, dte FROM spread_chain_capture WHERE as_of_date = ?`).all(TODAY);
+    expect(rows).toEqual([{ reason: 'coverage', dte: 31 }]);
+    // Three puts captured (0.03–0.50Δ), two inside the study's 0.10–0.40 band: T00 is not yet quoted…
+    expect(intradayQuoteCounts(db).get('T00')).toBe(2);
+    // …but is not asked again within the retry window.
+    expect(coverageCandidates(db, TODAY)).not.toContain('T00');
+
+    calls.length = 0;
+    const late = await captureSpreadChains({ db, provider, slot: 'after_close', now: NOW });
+    expect(late.coverageTickers).toBe(0);
+    expect(calls).toEqual([]);
+  });
+
+  it('does not let tickers E*Trade cannot serve use up the run', async () => {
+    const db = seed();
+    const failing = {
+      ...provider,
+      async getOptionsExpirations(t: string) {
+        if (Number(t.slice(1)) < 5) throw new Error('E*Trade API error (400) at /v1/market/optionexpiredate: <code>10033</code>');
+        return provider.getOptionsExpirations(t);
+      },
+    };
+    const r = await captureSpreadChains({ db, provider: failing, slot: 'intraday', now: NOW });
+    expect(r.failures.filter(f => f.step === 'coverage expirations')).toHaveLength(5);
+    expect(r.coverageTickers).toBe(12); // T05…T16, all that remain; the 25-attempt cap was not reached
+  });
+});
+
+describe('migration 093', () => {
+  it('accepts reason = coverage and still rejects anything else', () => {
+    const db = openDatabase(':memory:');
+    runMigrations(db, MIGRATIONS_DIR);
+    const ins = db.prepare(
+      `INSERT INTO spread_chain_capture (as_of_date, slot, captured_at, ticker, expiration, dte, reason, contract_count, puts_json)
+       VALUES ('2026-10-14', 'intraday', 'x', ?, '2026-11-13', 30, ?, 0, '[]')`,
+    );
+    expect(() => ins.run('A', 'coverage')).not.toThrow();
+    expect(() => ins.run('B', 'other')).toThrow(/CHECK/);
   });
 });
 
