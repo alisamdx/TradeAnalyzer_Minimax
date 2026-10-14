@@ -14,6 +14,7 @@
 import { createHmac } from 'node:crypto';
 import { logApiCall, scrubObject } from './logger.js';
 import type { ApiLogEntry } from './logger.js';
+import { etradeApiErrorMessage } from './etrade-errors.js';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -467,7 +468,7 @@ export async function etradeGet(
       errorMessage: `HTTP ${res.status}`,
       responseBodyPreview: body.slice(0, 300),
     });
-    throw new Error(`E*Trade API error (${res.status}) at ${path}: ${body.slice(0, 300)}`);
+    throw new Error(etradeApiErrorMessage(res.status, path, body));
   }
 
   try {

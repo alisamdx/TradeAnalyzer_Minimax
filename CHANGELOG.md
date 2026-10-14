@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.355] - 2026-10-13
+
+### E*Trade "no options" answers cost one call instead of three
+
+`withRenew` renewed the token and retried after any E*Trade error, including a 400 that means "this symbol has no options" (10032) or "this symbol is invalid" (10033). Each such answer cost the call, a renew, and an identical retry: 136 failed chain calls and 89 renews on 2026-10-13, all for MDT, DDS, WTM, UI, LEN.B, NVR, SEB and PSKY. A 400 with an E*Trade error code is now rethrown without a retry, since E*Trade only sends one after accepting the token. 10032/10033 also skip that ticker for the rest of the ET day, across every job that uses the provider. Every other failure still renews and retries.
+
+Details: `changelogs/v1.1.355_2026-10-13.md`.
+
 ## [1.1.354] - 2026-10-13
 
 ### QC-009 files one finding per duplicated key, not per table

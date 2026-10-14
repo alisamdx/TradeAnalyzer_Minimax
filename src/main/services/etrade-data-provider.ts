@@ -14,6 +14,7 @@
  */
 
 import { renewAccessToken, type OAuthCredentials } from './etrade-auth.js';
+import { etradeApplicationErrorCode, TICKER_WIDE_NO_OPTIONS_CODES } from './etrade-errors.js';
 import {
   getETradeExpirations,
   getETradeOptionsChain,
@@ -29,6 +30,10 @@ import { assessChainGreeks, staleGreekGuardEnabled, withholdStaleGreeks, type Gr
 function parseExpiry(dateStr: string): { year: number; month: number; day: number } {
   const [y, m, d] = dateStr.split('-').map(Number);
   return { year: y!, month: m!, day: d! };
+}
+
+function etDate(): string {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
 }
 
 function legToContract(
@@ -95,11 +100,31 @@ export class ETradeDataProvider implements OptionsProvider {
    * on the retry, surfacing the real error. A fully expired token (past midnight ET)
    * makes the retry throw an auth error — the caller must prompt a manual re-auth.
    * see CLAUDE.md (E*Trade dormancy)
+   *
+   * The one exception (v1.1.355): an HTTP 400 carrying an E*Trade application code is
+   * rethrown as is. E*Trade only sends one after accepting the token, so it cannot be
+   * dormancy, and renewing and retrying turned every such answer into three calls —
+   * measured 2026-10-13: 136 failed chain calls and 89 renews, all from 10032/10033.
+   * This is an exemption for a positively identified answer, not a gate on an auth-shaped
+   * message: everything else (401s, killed streams, timeouts, 5xx) still renews.
+   *
+   * 10032/10033 also answer for the whole ticker, so the ticker is remembered for the ET day
+   * and later calls for it — any expiration, any job — fail at once with the same error.
    */
-  private async withRenew<T>(fn: (creds: OAuthCredentials) => Promise<T>): Promise<T> {
+  private async withRenew<T>(ticker: string, fn: (creds: OAuthCredentials) => Promise<T>): Promise<T> {
+    const key = ticker.toUpperCase();
+    const today = etDate();
+    const known = this.noOptions.get(key);
+    if (known && known.day === today) throw known.error;
+
     try {
       return await fn(this.getCreds());
-    } catch {
+    } catch (err) {
+      const code = etradeApplicationErrorCode(err);
+      if (code !== null) {
+        if (TICKER_WIDE_NO_OPTIONS_CODES.has(code)) this.noOptions.set(key, { day: today, error: err as Error });
+        throw err;
+      }
       try {
         await renewAccessToken(this.getCreds());
       } catch { /* active-token renew errors harmlessly; the retry below decides the outcome */ }
@@ -107,10 +132,13 @@ export class ETradeDataProvider implements OptionsProvider {
     }
   }
 
+  /** Tickers E*Trade answered 10032/10033 for, with the ET day of that answer. */
+  private readonly noOptions = new Map<string, { day: string; error: Error }>();
+
   // ── Expiration Discovery ───────────────────────────────────────────────────
 
   async getOptionsExpirations(ticker: string): Promise<string[]> {
-    const expirations = await this.withRenew(creds => getETradeExpirations(ticker, creds));
+    const expirations = await this.withRenew(ticker, creds => getETradeExpirations(ticker, creds));
     return expirations.map(e => e.dateStr);
   }
 
@@ -122,7 +150,7 @@ export class ETradeDataProvider implements OptionsProvider {
       expiryType: 'UNKNOWN',
       dateStr: expiration,
     };
-    const result = await this.withRenew(creds => getETradeOptionsChain(ticker, expObj, creds));
+    const result = await this.withRenew(ticker, creds => getETradeOptionsChain(ticker, expObj, creds));
 
     const contracts: OptionContract[] = [
       ...result.calls.map(leg => legToContract(leg, ticker, expiration)),
@@ -133,7 +161,7 @@ export class ETradeDataProvider implements OptionsProvider {
     // One choke point for every consumer that selects a strike by delta. Off until validated
     // (FR-SEY-5); see greek-consistency.ts for the measurement behind it.
     if (!staleGreekGuardEnabled()) return chain;
-    const todayEt = new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+    const todayEt = etDate();
     const assessment = assessChainGreeks(chain, todayEt);
     if (assessment.stale && this.onStaleChain) {
       try { this.onStaleChain(chain, assessment, todayEt); } catch { /* shadow log only — never fail the fetch */ }

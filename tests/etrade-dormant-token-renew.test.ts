@@ -26,6 +26,7 @@ vi.mock('../src/main/services/etrade-auth.js', () => ({
 }));
 
 const { ETradeDataProvider } = await import('../src/main/services/etrade-data-provider.js');
+const { etradeApiErrorMessage, etradeApplicationErrorCode } = await import('../src/main/services/etrade-errors.js');
 
 const creds = { consumerKey: 'k', consumerSecret: 's', accessToken: 't', accessSecret: 'a' };
 const emptyChain = { calls: [], puts: [], underlyingPrice: 100 };
@@ -88,6 +89,103 @@ describe('ETradeDataProvider dormant-token renew-and-retry', () => {
     renewAccessToken.mockRejectedValueOnce(new Error('E*Trade renew token failed (401)'));
 
     await expect(provider.getOptionsChain('AAPL', '2026-07-17')).rejects.toThrow(/401|expired/);
+    expect(renewAccessToken).toHaveBeenCalledTimes(1);
+    expect(getETradeOptionsChain).toHaveBeenCalledTimes(2);
+  });
+});
+
+// v1.1.355: an HTTP 400 with an E*Trade application code is an answer about the request,
+// sent only after the token was accepted — renewing and retrying it tripled every such call
+// (2026-10-13: 136 failed chain calls + 89 renews). 10032/10033 answer for the whole ticker,
+// so the provider remembers them for the ET day.
+describe('ETradeDataProvider definitive E*Trade errors', () => {
+  // Bodies copied from logs/api/api_2026-10-13.jsonl (responseBodyPreview), as etradeGet throws them.
+  const noOptions = () => new Error(etradeApiErrorMessage(400, '/v1/market/optionchains',
+    '<Error>\n  <code>10032</code>\n  <message>No options are available for this symbol.</message>\n</Error>'));
+  const invalidSymbol = () => new Error(etradeApiErrorMessage(400, '/v1/market/optionexpiredate',
+    '<Error>\n  <code>10033</code>\n  <message>The symbol entered is invalid. Please enter another symbol.</message>\n</Error>'));
+  const noChainForDate = () => new Error(etradeApiErrorMessage(400, '/v1/market/optionchains',
+    '<Error>\n  <code>10031</code>\n  <message>No chain for this expiration.</message>\n</Error>'));
+
+  beforeEach(() => {
+    getETradeOptionsChain.mockReset();
+    getETradeExpirations.mockReset();
+    renewAccessToken.mockReset();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-13T21:30:00Z')); // 17:30 ET
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it('parses the code out of the message etradeGet throws, and nothing else', () => {
+    expect(etradeApplicationErrorCode(noOptions())).toBe('10032');
+    expect(etradeApplicationErrorCode(invalidSymbol())).toBe('10033');
+    expect(etradeApplicationErrorCode(new Error(etradeApiErrorMessage(401, '/x', '<Error><code>10033</code></Error>')))).toBeNull();
+    expect(etradeApplicationErrorCode(new Error(etradeApiErrorMessage(400, '/x', '<!doctype html><html>…')))).toBeNull();
+    expect(etradeApplicationErrorCode(new TypeError('terminated'))).toBeNull();
+  });
+
+  it('does not renew or retry a 10032, and skips that ticker for the rest of the day', async () => {
+    const provider = new ETradeDataProvider(() => creds as never);
+    getETradeOptionsChain.mockRejectedValue(noOptions());
+
+    await expect(provider.getOptionsChain('MDT', '2026-10-16')).rejects.toThrow(/10032/);
+    expect(renewAccessToken).not.toHaveBeenCalled();
+    expect(getETradeOptionsChain).toHaveBeenCalledTimes(1);
+
+    // Another expiration, another method, another letter case: no call at all.
+    await expect(provider.getOptionsChain('mdt', '2026-10-23')).rejects.toThrow(/10032/);
+    await expect(provider.getOptionsExpirations('MDT')).rejects.toThrow(/10032/);
+    expect(getETradeOptionsChain).toHaveBeenCalledTimes(1);
+    expect(getETradeExpirations).not.toHaveBeenCalled();
+
+    // Other tickers are untouched.
+    getETradeOptionsChain.mockResolvedValueOnce(emptyChain);
+    await expect(provider.getOptionsChain('AAPL', '2026-10-16')).resolves.toMatchObject({ ticker: 'AAPL' });
+  });
+
+  it('asks again on the next ET day', async () => {
+    const provider = new ETradeDataProvider(() => creds as never);
+    getETradeExpirations.mockRejectedValueOnce(invalidSymbol());
+    await expect(provider.getOptionsExpirations('PSKY')).rejects.toThrow(/10033/);
+
+    vi.setSystemTime(new Date('2026-10-14T03:59:00Z')); // 23:59 ET, same day
+    await expect(provider.getOptionsExpirations('PSKY')).rejects.toThrow(/10033/);
+    expect(getETradeExpirations).toHaveBeenCalledTimes(1);
+
+    vi.setSystemTime(new Date('2026-10-14T04:01:00Z')); // 00:01 ET, next day
+    getETradeExpirations.mockResolvedValueOnce([{ dateStr: '2026-10-16' }]);
+    await expect(provider.getOptionsExpirations('PSKY')).resolves.toEqual(['2026-10-16']);
+    expect(getETradeExpirations).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not retry a per-expiration code (10031), but does not skip the ticker either', async () => {
+    const provider = new ETradeDataProvider(() => creds as never);
+    getETradeOptionsChain.mockRejectedValueOnce(noChainForDate()).mockResolvedValueOnce(emptyChain);
+
+    await expect(provider.getOptionsChain('AAPL', '2026-10-17')).rejects.toThrow(/10031/);
+    expect(renewAccessToken).not.toHaveBeenCalled();
+    await expect(provider.getOptionsChain('AAPL', '2026-10-16')).resolves.toMatchObject({ ticker: 'AAPL' });
+    expect(getETradeOptionsChain).toHaveBeenCalledTimes(2);
+  });
+
+  it('still renews and retries a 400 with no E*Trade code (an HTML body is not an answer)', async () => {
+    const provider = new ETradeDataProvider(() => creds as never);
+    getETradeOptionsChain
+      .mockRejectedValueOnce(new Error(etradeApiErrorMessage(400, '/v1/market/optionchains', '<!doctype html><html>')))
+      .mockResolvedValueOnce(emptyChain);
+
+    await expect(provider.getOptionsChain('AAPL', '2026-10-16')).resolves.toMatchObject({ ticker: 'AAPL' });
+    expect(renewAccessToken).toHaveBeenCalledTimes(1);
+    expect(getETradeOptionsChain).toHaveBeenCalledTimes(2);
+  });
+
+  it('still renews and retries a 401 that quotes an application code', async () => {
+    const provider = new ETradeDataProvider(() => creds as never);
+    getETradeOptionsChain
+      .mockRejectedValueOnce(new Error(etradeApiErrorMessage(401, '/v1/market/optionchains', '<Error><code>10033</code></Error>')))
+      .mockResolvedValueOnce(emptyChain);
+
+    await provider.getOptionsChain('AAPL', '2026-10-16');
     expect(renewAccessToken).toHaveBeenCalledTimes(1);
     expect(getETradeOptionsChain).toHaveBeenCalledTimes(2);
   });
