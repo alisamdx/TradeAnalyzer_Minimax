@@ -158,6 +158,16 @@ ADX = Wilder_smooth(DX, n)
 ```
 Trend confirmed when ADX > 20 with the matching price/SMA relationship.
 
+### stoch-rsi (14/14/3/3, display only — v1.1.358)
+```
+raw = 100 × (RSI14 − min14(RSI14)) / (max14(RSI14) − min14(RSI14))   null on a flat window
+%K  = SMA3(raw);  %D = SMA3(%K)
+state: falling   = %K < %D, or %K = %D ≤ 20
+       turned_up = strict cross up (%K ≤ %D → %K > %D) in the last 3 bars, with %K ≤ 20 in the last 5
+       rising    = otherwise;  null when undefined
+```
+Shown on brief picks; read by no score, gate, ranking or critic (enforced by a source-scan test).
+
 ### macd (12/26/9)
 ```
 MACD line   = EMA(12) − EMA(26)

@@ -10,6 +10,7 @@ import { computeSMA, computeRSI } from '../analysis-service.js';
 import { SCORING_REFERENCE_TICKERS } from './price-gap-fill-job.js';
 import { detectAllPatterns } from '../pattern-detector.js';
 import { findRecentDemandZone } from '../support-resistance.js';
+import { computeStochRsi, type StochRsiState } from '../stoch-rsi.js';
 import type { Bar } from '@shared/types.js';
 import { withTransaction, type DbHandle } from '../../db/connection.js';
 
@@ -114,6 +115,10 @@ interface TechnicalResult {
   breakoutDecisiveness: number | null; // |close − level| / ATR(14)
   volumeSurge: number | null;        // today vol / 20d avg vol
   atrPct: number | null;             // ATR(14) / close × 100
+  // Stochastic RSI 14/14/3/3 — display only (Bec's entry timing). see docs/formulas.md#stoch-rsi
+  stochRsiK: number | null;
+  stochRsiD: number | null;
+  stochRsiState: StochRsiState | null;
 }
 
 // ─── ATR(14) on the most recent bar (Wilder-simple average of true range) ──────
@@ -230,6 +235,8 @@ function computeSignals(ticker: string, bars: Bar[]): TechnicalResult | null {
   // Breakout/continuation signals (Inflection strategy)
   const breakout = computeBreakout(bars, sma50);
 
+  const stoch = computeStochRsi(bars);
+
   // Patterns + demand zone
   const patterns = detectAllPatterns(bars, 5);
   const demandZone = findRecentDemandZone(bars, 50);
@@ -314,6 +321,9 @@ function computeSignals(ticker: string, bars: Bar[]): TechnicalResult | null {
     adx,
     supportLevel,
     ...breakout,
+    stochRsiK: stoch.k,
+    stochRsiD: stoch.d,
+    stochRsiState: stoch.state,
   };
 }
 
@@ -375,14 +385,16 @@ export class DailyTechnicalSignalsJob implements BatchJobHandler {
          bollinger_position, trend_label,
          buy_signal_score, buy_signal_strength, pattern_names,
          adx, support_level,
-         breakout_state, breakout_level, breakout_decisiveness, volume_surge, atr_pct)
+         breakout_state, breakout_level, breakout_decisiveness, volume_surge, atr_pct,
+         stoch_rsi_k, stoch_rsi_d, stoch_rsi_state)
       VALUES
         (?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?, ?, ?, ?, ?,
          ?, ?, ?,
          ?, ?,
          ?, ?, ?,
          ?, ?,
-         ?, ?, ?, ?, ?)
+         ?, ?, ?, ?, ?,
+         ?, ?, ?)
       ON CONFLICT(ticker) DO UPDATE SET
         computed_at         = excluded.computed_at,
         price               = excluded.price,
@@ -404,7 +416,10 @@ export class DailyTechnicalSignalsJob implements BatchJobHandler {
         breakout_level         = excluded.breakout_level,
         breakout_decisiveness  = excluded.breakout_decisiveness,
         volume_surge           = excluded.volume_surge,
-        atr_pct                = excluded.atr_pct
+        atr_pct                = excluded.atr_pct,
+        stoch_rsi_k            = excluded.stoch_rsi_k,
+        stoch_rsi_d            = excluded.stoch_rsi_d,
+        stoch_rsi_state        = excluded.stoch_rsi_state
     `);
 
     const BATCH = 100;
@@ -460,6 +475,9 @@ export class DailyTechnicalSignalsJob implements BatchJobHandler {
             result.breakoutDecisiveness,
             result.volumeSurge,
             result.atrPct,
+            result.stochRsiK,
+            result.stochRsiD,
+            result.stochRsiState,
           );
           written++;
         }

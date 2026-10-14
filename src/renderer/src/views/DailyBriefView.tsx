@@ -2,7 +2,7 @@
 // see Requirements/DAILY_INTELLIGENCE_BRIEF.md §6
 
 import { useState, useEffect, useCallback } from 'react';
-import type { DailyBriefEntry, BriefPick, ScoringStrategy, StrategyLabValidateResult, StrategyLabGrade, StrategySetup, SetupLeg, PayoffLeg, BriefAccuracy, CriticVerdict, BriefPerformanceSummary, BriefHealthTrend } from '@shared/types.js';
+import type { DailyBriefEntry, BriefPick, ScoringStrategy, StrategyLabValidateResult, StrategyLabGrade, StrategySetup, SetupLeg, PayoffLeg, BriefAccuracy, CriticVerdict, BriefPerformanceSummary, BriefHealthTrend, StochRsiReading, StochRsiState } from '@shared/types.js';
 import { STRATEGY_RELEVANT_SLUGS, pickDisplayStructure } from '@shared/strategy-structures.js';
 import { convictionOf, rsiOf, passesFilter, definedRiskAlternative, level2DebitAlternative, type PassFilter } from '@shared/brief-ranking.js';
 // ONE definition, shared with the dice email. The panel kept a hand-copied duplicate of this
@@ -733,7 +733,7 @@ function buildGridRow(pick: BriefPick, strategy: ScoringStrategy): GridRow {
 }
 
 type SortKey = 'conviction' | 'ticker' | 'price' | 'composite' | 'strategy'
-             | 'structure' | 'expiry' | 'strike' | 'premium' | 'grade' | 'verdict' | 'rsi';
+             | 'structure' | 'expiry' | 'strike' | 'premium' | 'grade' | 'verdict' | 'rsi' | 'stoch';
 const TEXT_SORT_KEYS = new Set<SortKey>(['ticker', 'strategy', 'structure', 'expiry']);
 const VERDICT_RANK: Record<string, number> = { pass: 3, caution: 2, flag: 1 };
 
@@ -754,7 +754,36 @@ function sortValue(row: GridRow, key: SortKey): number | string | null {
       return !v || v.degraded ? 0 : (VERDICT_RANK[v.verdict] ?? 0);
     }
     case 'rsi':        return row.rsi;
+    case 'stoch': {
+      // Turn first (turned up > rising > falling), then the %K level within each.
+      const st = row.pick.stochRsi;
+      return st?.state ? STOCH_RANK[st.state] + (st.k ?? 0) / 1000 : null;
+    }
   }
+}
+
+// Stochastic RSI (Bec's entry timing) — DISPLAY ONLY, read by no score, gate or ranking.
+// see docs/formulas.md#stoch-rsi
+const STOCH_RANK: Record<StochRsiState, number> = { turned_up: 3, rising: 2, falling: 1 };
+const STOCH_TITLE =
+  'Stochastic RSI 14/14/3/3 — display only, not scored. Bec enters when it has reached the bottom ' +
+  'and turned back up (↑ turned up), never while it points down (↘ falling).';
+const STOCH_LABEL: Record<StochRsiState, { text: string; color: string; title: string }> = {
+  turned_up: { text: '↑ turned up', color: 'var(--success)', title: 'Crossed back above its signal line within 3 bars, after touching the bottom (≤ 20)' },
+  rising:    { text: '↗ rising',    color: 'inherit',               title: '%K above %D, but not a fresh turn off the bottom' },
+  falling:   { text: '↘ falling',   color: 'var(--danger)', title: '%K below %D — pointing down' },
+};
+
+function StochRsiCell({ reading }: { reading: StochRsiReading | undefined }) {
+  if (!reading || reading.state == null) return <span className="grid-muted">—</span>;
+  const l = STOCH_LABEL[reading.state];
+  const kd = `%K ${reading.k?.toFixed(0) ?? '—'} · %D ${reading.d?.toFixed(0) ?? '—'}`;
+  return (
+    <span style={{ color: l.color, whiteSpace: 'nowrap' }} title={`${l.title}
+${kd}`}>
+      {reading.k != null ? reading.k.toFixed(0) : '—'} {l.text}
+    </span>
+  );
 }
 
 function BriefGrid({ rows }: { rows: GridRow[] }) {
@@ -801,6 +830,7 @@ function BriefGrid({ rows }: { rows: GridRow[] }) {
     { key: 'grade',      label: 'Rating', title: 'Strategy-Lab grade of the recommended structure' },
     { key: 'verdict',    label: 'Flag', title: 'AI critic verdict' },
     { key: 'rsi',        label: 'RSI', title: 'Only scored for buy / bullish / bearish picks' },
+    { key: 'stoch',      label: 'Stoch RSI', title: STOCH_TITLE },
   ];
 
   return (
@@ -863,6 +893,7 @@ function BriefGrid({ rows }: { rows: GridRow[] }) {
                   : <span className="grid-muted">—</span>}
               </td>
               <td>{row.rsi != null ? row.rsi.toFixed(0) : <span className="grid-muted">—</span>}</td>
+              <td><StochRsiCell reading={row.pick.stochRsi} /></td>
               <td>
                 <div className="grid-actions">
                   <button className="grid-action-btn" onClick={nav.payoff}   title="Payoff">📐</button>

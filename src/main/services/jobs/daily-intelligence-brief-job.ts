@@ -7,7 +7,7 @@
 import type { Database } from 'better-sqlite3';
 import Anthropic from '@anthropic-ai/sdk';
 import type { BatchJobHandler, BatchJobResult, RunTrigger } from '../batch-service.js';
-import type { BatchProgressEvent, BriefPick, CriticFlag, ScoringStrategy } from '@shared/types.js';
+import type { BatchProgressEvent, BriefPick, CriticFlag, ScoringStrategy, StochRsiReading } from '@shared/types.js';
 import type { ScoredTicker } from '../scoring-service.js';
 import { ScoringService, STRATEGIES, minCompositeForStrategy } from '../scoring-service.js';
 import type { OptionsProvider } from '../options-provider.js';
@@ -127,6 +127,22 @@ type CandScore = { slug: string; grade: string; liquidityScore: number; setup: C
 function breakoutDirectionOf(sd: { breakoutState?: number | null } | undefined | null): 'up' | 'down' | undefined {
   const st = sd?.breakoutState;
   return st === 1 ? 'up' : st === -1 ? 'down' : undefined;
+}
+
+// Stochastic RSI for a pick, from technical_signals — a display-only annotation (Bec's entry
+// timing, v1.1.358). It reaches no score, gate, ranking or critic context. Never throws: a missing
+// column or row just leaves the pick without one. see docs/formulas.md#stoch-rsi
+function stochRsiReader(db: Database): (ticker: string) => StochRsiReading | undefined {
+  let stmt: { get(...a: unknown[]): unknown } | null = null;
+  try {
+    stmt = db.prepare('SELECT stoch_rsi_k AS k, stoch_rsi_d AS d, stoch_rsi_state AS state FROM technical_signals WHERE ticker = ?');
+  } catch { /* older schema */ }
+  return (ticker) => {
+    try {
+      const r = stmt?.get(ticker) as StochRsiReading | undefined;
+      return r && (r.k != null || r.state != null) ? { k: r.k, d: r.d, state: r.state } : undefined;
+    } catch { return undefined; }
+  };
 }
 
 // Compact summary of the structure a strategy would actually trade — fed to the
@@ -287,6 +303,7 @@ export class DailyIntelligenceBriefJob implements BatchJobHandler {
 
     // Gather signal data once for all tickers (batched DB queries)
     const signalData = this.scoringService.gatherSignalData(candidates);
+    const stochRsiOf = stochRsiReader(this.db); // display-only annotation on picks (v1.1.358)
 
     // Score per strategy
     const rankedByStrategy = new Map<string, ScoredTicker[]>();
@@ -806,6 +823,7 @@ Be specific: mention actual values (e.g. "IVR 72", "RSI 58", "EPS growth 42%"). 
         // Persist breakout side so the critic / report / renderer lock to the SAME
         // direction-matched structure as the advocate (inflection only; undefined → omitted).
         breakoutDirection: breakoutDirectionOf(signalData.get(scored.ticker)),
+        stochRsi: stochRsiOf(scored.ticker),
       }));
       assembledPicks.set(strategy as ScoringStrategy, picks);
     }

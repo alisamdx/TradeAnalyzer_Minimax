@@ -1946,6 +1946,19 @@ export interface BriefPick {
    *  up breakout never surfaces a bearish bear-call. Absent for non-inflection / legacy picks
    *  (selection then defaults to 'up', the launch/default config). */
   breakoutDirection?: 'up' | 'down';
+  /** Stochastic RSI at brief time — DISPLAY ONLY, read by no score, gate or ranking (Bec's entry
+   *  timing, v1.1.358). Absent on picks from earlier briefs or before technical signals had it. */
+  stochRsi?: StochRsiReading;
+}
+
+/** 'turned_up' = crossed back up off the bottom (Bec's entry) · 'falling' = pointing down (her
+ *  "don't enter") · 'rising' = otherwise. see docs/formulas.md#stoch-rsi */
+export type StochRsiState = 'turned_up' | 'rising' | 'falling';
+
+export interface StochRsiReading {
+  k: number | null;
+  d: number | null;
+  state: StochRsiState | null;
 }
 
 export interface DailyBriefEntry {

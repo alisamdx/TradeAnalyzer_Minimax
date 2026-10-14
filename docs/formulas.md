@@ -331,6 +331,35 @@ Implemented in `computeADX()` in `analysis-service.ts` and `daily-technical-sign
 
 **ADX is NOT used in the composite scoring (FR-SEY-5).** A full-year Brief-Replay A/B (corrected ADX vs ADX-absent) showed feeding ADX into scoring is net-negative — bullish −1.50pp, bearish −1.15pp, income −0.43pp on direction-aware forward returns (high-ADX names mean-revert over ~21d). So `ScoringService.USE_ADX_IN_SCORING = false`: `trendStrength`/`downtrendScore` use only their MA-stack component and income's `trendNeutral` goes missing. The corrected ADX is retained for **display** (Validate dashboard, Analysis view) only. Re-validate on `tests/adx-replay-validation.test.ts` (`REPLAY_WITH_ADX`) before re-enabling.
 
+### stoch-rsi
+
+Stochastic RSI, 14/14/3/3 (v1.1.358). Bec's only entry-timing input (`docs/Bec/STRATEGY-SUMMARY.md` §3):
+
+```
+RSI_t   = RSI(14) on closes (see rsi-14)
+raw_t   = 100 × (RSI_t − min(RSI over last 14)) / (max(RSI over last 14) − min(RSI over last 14))
+          null when max = min (a flat RSI window has no position in it — never an invented 0 or 50)
+%K_t    = SMA(raw, 3)
+%D_t    = SMA(%K, 3)
+
+state   = falling    if %K < %D, or %K = %D ≤ 20 (pinned at the bottom: not turned yet)
+          turned_up  if, within the last 3 bars, %K went from ≤ %D to > %D, AND some %K in the
+                     last 5 bars was ≤ 20 — reached the bottom and turned back up
+          rising     otherwise (incl. %K = %D > 20: pinned at the top is still up)
+          null       when %K or %D is undefined (needs ~33 bars)
+```
+
+The equality rules matter more than they look: after a hard sell-off %K and %D both pin at exactly
+0. A test written as "%K < %D → falling, else check for a cross" read a stock still pinned at 0/0 as
+having crossed up, and a cross written as "%K < %D, then %K ≥ %D" missed the real turn out of 0/0.
+The sell-off fixture in `tests/stoch-rsi.test.ts` caught both.
+
+**DISPLAY ONLY.** Stored on `technical_signals` (`stoch_rsi_k`, `stoch_rsi_d`, `stoch_rsi_state`,
+migration 094), copied onto brief picks as `BriefPick.stochRsi`, shown as the Daily Brief grid's
+"Stoch RSI" column. No score, gate, ranking or critic context reads it, and a source-scan test
+enforces that. Using it in any of those is an FR-SEY-5 question for Brief Replay, not for the eye.
+Implemented in `src/main/services/stoch-rsi.ts`.
+
 ### support-level
 
 20-day low — used as a support zone proxy for the `breakoutScore` `priceNearSupport` component when no `analysis_snapshots` entry exists for the ticker.

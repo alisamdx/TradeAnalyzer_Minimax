@@ -131,7 +131,7 @@ Views `v_open_positions`, `v_closed_positions`, `v_portfolio_summary` provide ca
 
 **`daily_briefs`** — `id PK`, `generated_at`, `valid_until` (next trading day 9:30 ET), `strategy`, `picks` (JSON `BriefPick[]`), `run_meta` (stage timing/counts/errors).
 
-**`technical_signals`** — `ticker PK`, `computed_at`, `price`, `sma20/50/200`, `rsi`, `macd_value`, `macd_signal_line`, `macd_bullish_cross`, `bollinger_position`, `trend_label`, `buy_signal_score` (0–100), `buy_signal_strength`, `pattern_names` (JSON). Upserted nightly; lets scoring read a precomputed buy score with no live calls.
+**`technical_signals`** — `ticker PK`, `computed_at`, `price`, `sma20/50/200`, `rsi`, `macd_value`, `macd_signal_line`, `macd_bullish_cross`, `bollinger_position`, `trend_label`, `buy_signal_score` (0–100), `buy_signal_strength`, `pattern_names` (JSON), and since migration 094 (v1.1.358) `stoch_rsi_k`, `stoch_rsi_d` (0–100) and `stoch_rsi_state` (`turned_up` / `rising` / `falling` / NULL; display only, see 23-formulas `stoch-rsi`). Upserted nightly; lets scoring read a precomputed buy score with no live calls.
 
 **`brief_learning_recommendations`** (032) — `id PK`, `strategy`, `gap_cause`, `occurrence_count`, `description`, `proposed_tweak`, `status` (`open|acknowledged`), `created_at`. Unique `(strategy, gap_cause)`. Generated when a gap cause recurs ≥3×.
 

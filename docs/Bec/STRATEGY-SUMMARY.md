@@ -236,9 +236,11 @@ takes has to show at worst neutral on Brief Replay / Backtest before it ships en
 
 **Tier 1 — build it, it is additive and cannot make anything worse:**
 
-- Rollability score (§9.1). It adds information to a decision we already make and gates nothing.
-- Stochastic RSI as a *displayed* indicator (§9.3), so we can see it on picks before deciding
-  whether it should influence anything.
+- ~~Rollability score (§9.1).~~ **Shipped v1.1.240 (2026-09-12)** — a panel on the Roll Analyzer.
+  It adds information to a decision we already make and gates nothing.
+- ~~Stochastic RSI as a *displayed* indicator (§9.3)~~ **Shipped v1.1.358 (2026-10-13)** — the Daily
+  Brief grid's Stoch RSI column (`turned_up` / `rising` / `falling`), display only, so we can see it
+  on picks before deciding whether it should influence anything.
 - Cumulative-premium-vs-basis on portfolio positions (§9.6). Reporting only.
 
 **Tier 2 — measurable A/Bs, run before believing:**
