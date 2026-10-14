@@ -44,13 +44,12 @@ describe('snapshotGeneration', () => {
     expect(snap.path).toContain('2026-09-16-23-59-59');
   });
 
-  it('keeps the five newest snapshots', () => {
+  it('keeps the two newest snapshots', () => {
     const target = join(dir, 'rehearsal');
     for (let s = 10; s < 17; s++) snapshotGeneration(source, target, 2, `2026-09-16T21:30:${s}-04:00`);
     const kept = readdirSync(target).sort();
-    expect(kept).toHaveLength(5);
-    expect(kept[0]).toContain('21-30-12');
-    expect(existsSync(join(target, 'gen-002-2026-09-16-21-30-10.sqlite'))).toBe(false);
+    expect(kept).toEqual(['gen-002-2026-09-16-21-30-15.sqlite', 'gen-002-2026-09-16-21-30-16.sqlite']);
+    expect(existsSync(join(target, 'gen-002-2026-09-16-21-30-14.sqlite'))).toBe(false);
   });
 
   it('replaces a same-second retake instead of failing (VACUUM INTO refuses an existing file)', () => {

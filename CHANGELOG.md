@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.356] - 2026-10-13
+
+### Gate-rehearsal snapshots: keep 2, not 5
+
+Each snapshot is a full copy of the TradeAnalyzer 2 generation (5.2 GB on 2026-10-13, growing about 240 MB a night), so keeping five let `~/.tradeanalyzer/rehearsal` reach 25+ GB. A rehearsal only reads the newest, so the app now keeps two.
+
+Details: `changelogs/v1.1.356_2026-10-13.md`.
+
 ## [1.1.355] - 2026-10-13
 
 ### E*Trade "no options" answers cost one call instead of three

@@ -16,8 +16,13 @@
 import { mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
-/** Snapshots kept; older ones are pruned so the directory cannot grow without bound. */
-const KEEP = 5;
+/**
+ * Snapshots kept; older ones are pruned so the directory cannot grow without bound. Two, not
+ * five (v1.1.356): each is a full copy of the generation (5.2 GB on 2026-10-13, growing about
+ * 240 MB a night), and a rehearsal only ever reads the newest — the second is there for a
+ * before/after comparison.
+ */
+const KEEP = 2;
 
 export interface SnapshotDb {
   prepare(sql: string): { run(...params: unknown[]): unknown };
