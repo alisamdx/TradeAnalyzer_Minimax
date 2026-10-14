@@ -10,6 +10,32 @@ Position types: **CSP**, **CC**, **Stock**. Fields per §2.9. The view has Open 
 
 IPC: `add`, `list(status?)`, `get(id)`, `update(id, …)`, `close(id, {exitPrice, exitDate, exitNotes?})`, `delete(id)`, `pnlSummary`, `getWithMetrics(id)`, `updatePrice(ticker, price)`, `listByTicker(ticker)`.
 
+### 18.1a Premium vs cost basis (v1.1.359)
+
+Bec's "risk line" (`docs/Bec/STRATEGY-SUMMARY.md` §6a, §9.6): a holding worth keeping is one whose
+basis only ever falls as calls are sold against it. Reporting only. It is a panel on the Open tab
+(`PremiumBasisPanel`, IPC `portfolio:premium-basis`, also `GET /api/v1/diagnostics/premium-basis`).
+It shows one row per ticker holding open stock:
+- **Columns:** shares, share-weighted cost, premium kept per share, net basis, % reduced, the line
+  verdict, and open short-option credit.
+- **Steps:** the row expands to the closed options in order, each with the basis after it.
+
+Rules (`src/shared/premium-basis.ts`, `docs/formulas.md#premium-basis`):
+- **Window:** short options on the ticker closed on or after the earliest open lot's acquisition
+  date, plus the **assigning put**. That put is found by expiry (≤ 7 days before acquisition) and a
+  strike matching a lot's cost (±1%, as strike or as strike − premium), never by an "Assigned" note,
+  because the orders import has no order for an assignment.
+- **Kept** = `realized_pnl` from real fills, so a buyback at a loss is negative and is a step UP.
+  Verdict: **✓ only fallen** if no step rose, otherwise **↑ rose N×**.
+- **Estimated rows** (closed, `exit_price` NULL, "estimated from last mark"):
+  - vanished on or after expiry → counted at the full credit and flagged;
+  - vanished before expiry → not counted, listed as unresolved ("run Sync Closed Positions").
+
+  The mark estimate is never used: measured wrong by thousands on assigned puts.
+- **No double count:** if a lot's cost sits nearer strike − premium than the strike, the broker
+  already netted the assigning put into the cost. It is shown, not subtracted again.
+- **Open short-option credit** is shown apart from kept premium; it is not yet earned.
+
 ## 18.2 E*Trade sync
 
 `etrade-portfolio-service.ts`:

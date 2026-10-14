@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSortable } from '../hooks/useSortable.js';
 import type { PositionEtrade, PositionAnalysis, AdvisorSession, AdvisorProgressEvent } from '@shared/types.js';
+import { PremiumBasisPanel } from '../components/PremiumBasisPanel.js';
 import { positionToPayoffLegs } from '@shared/position-payoff.js';
 
 type PositionType = 'CSP' | 'CC' | 'Stock' | 'Long Put' | 'Long Call';
@@ -768,6 +769,8 @@ export function PortfolioView() {
           )}
         </div>
       )}
+
+      {activeTab === 'open' && <PremiumBasisPanel reloadKey={`${positions.length}|${lastSyncedAt ?? ''}`} />}
 
       {/* ── Header ── */}
       <div className="portfolio-header">

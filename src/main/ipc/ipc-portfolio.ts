@@ -18,6 +18,7 @@ import {
 import { secureGet, secureSet } from '../services/secure-settings.js';
 import { toPositionSignedGreeks } from '@shared/position-greeks.js';
 import { getCapitalUtilisation } from '../services/capital-utilisation.js';
+import { getPremiumBasis } from '../services/premium-basis.js';
 import type { IpcResult, EtradeAccount, EtradeSyncResult, PositionAnalysis, PositionEtrade, AdvisorSession, AdvisorProgressEvent } from '@shared/types.js';
 
 export interface PositionDto {
@@ -93,6 +94,10 @@ export function registerPortfolioIpc(db: Database, analysisService?: AnalysisSer
   ipcMain.handle('portfolio:capital-utilisation', wrap(() =>
     getCapitalUtilisation(db, new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' }))
   ));
+
+  // Premium vs cost basis per stock holding — Bec's risk line (v1.1.359). Read-only.
+  // see services/premium-basis.ts
+  ipcMain.handle('portfolio:premium-basis', wrap(() => getPremiumBasis(db)));
 
   ipcMain.handle('portfolio:add', wrap((input: PositionInput) => {
     const position = service.addPosition(input);

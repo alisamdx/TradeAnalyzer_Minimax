@@ -241,7 +241,8 @@ takes has to show at worst neutral on Brief Replay / Backtest before it ships en
 - ~~Stochastic RSI as a *displayed* indicator (§9.3)~~ **Shipped v1.1.358 (2026-10-13)** — the Daily
   Brief grid's Stoch RSI column (`turned_up` / `rising` / `falling`), display only, so we can see it
   on picks before deciding whether it should influence anything.
-- Cumulative-premium-vs-basis on portfolio positions (§9.6). Reporting only.
+- ~~Cumulative-premium-vs-basis on portfolio positions (§9.6)~~ **Shipped v1.1.359 (2026-10-14)** — the
+  Portfolio Open tab's "Premium vs cost basis" panel, with an only-fallen verdict per holding. Reporting only.
 
 **Tier 2 — measurable A/Bs, run before believing:**
 

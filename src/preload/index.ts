@@ -130,6 +130,7 @@ import type {
   ExecStartResult,
 } from '@shared/types.js';
 import type { OwnAtStrikeRead } from '@shared/own-at-strike.js';
+import type { PremiumBasisHolding } from '@shared/premium-basis.js';
 import type { ShortlistResult } from '@shared/wheel-shortlist.js';
 import type { SpreadModeSettings, SpreadShadowReport } from '@shared/spread-mode.js';
 export type {
@@ -507,6 +508,8 @@ function buildApi() {
       balanceAgeDays: number | null;
       idleStreakDays: number | null;
     }>('portfolio:capital-utilisation'),
+    /** Premium kept vs cost basis per stock holding — Bec's risk line (v1.1.359). Read-only. */
+    premiumBasis: () => invoke<PremiumBasisHolding[]>('portfolio:premium-basis'),
     add: (input: {
       ticker: string;
       positionType: 'CSP' | 'CC' | 'Stock' | 'Long Put' | 'Long Call';

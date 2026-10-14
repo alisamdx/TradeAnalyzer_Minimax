@@ -8,6 +8,7 @@ import {
 } from '../services/settled-csp-panel.js';
 import { premiumRoc, ROC_STRATEGIES, type RocStrategy } from '../services/premium-roc.js';
 import { buildSpreadShadowReport } from '../services/spread-mode-settle.js';
+import { getPremiumBasis } from '../services/premium-basis.js';
 import { spreadStudyPanel } from '../services/spread-study-panel.js';
 import { spreadCapturePanel } from '../services/spread-capture-panel.js';
 import { poolSelectionPanel } from '../services/pool-selection-panel.js';
@@ -170,6 +171,17 @@ export function registerDiagnosticsRoutes(app: FastifyInstance, svc: ApiServerSe
   app.get('/diagnostics/spread-shadow', async (_req, reply) => {
     try {
       return apiOk(reply, buildSpreadShadowReport(svc.db, etDate(new Date().toISOString())));
+    } catch (err) {
+      return apiError(reply, err instanceof Error ? err.message : String(err), 'INTERNAL', 500);
+    }
+  });
+
+  // GET /diagnostics/premium-basis — premium kept vs cost basis per stock holding (Bec's risk line),
+  // the same read the Portfolio panel shows. Read-only; lets a session check the panel against the
+  // real book without opening the database. see services/premium-basis.ts
+  app.get('/diagnostics/premium-basis', async (_req, reply) => {
+    try {
+      return apiOk(reply, getPremiumBasis(svc.db));
     } catch (err) {
       return apiError(reply, err instanceof Error ? err.message : String(err), 'INTERNAL', 500);
     }

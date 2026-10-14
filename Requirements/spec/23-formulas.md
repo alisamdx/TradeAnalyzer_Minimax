@@ -158,6 +158,15 @@ ADX = Wilder_smooth(DX, n)
 ```
 Trend confirmed when ADX > 20 with the matching price/SMA relationship.
 
+### premium-basis (reporting only — v1.1.359)
+```
+net basis/sh = cost/sh − Σ kept / shares
+kept: real fill realized_pnl | full credit if no fill and vanished ≥ expiry | not counted if no fill before expiry
+window: closed CSP/CC with exit ≥ earliest open lot's acquisition, + the assigning put (expiry 0–7d before, strike ±1% of a lot cost, raw or less credit)
+the assigning put is not subtracted when a lot cost is nearer strike − credit than strike (broker-adjusted)
+only fallen = no kept < 0
+```
+
 ### stoch-rsi (14/14/3/3, display only — v1.1.358)
 ```
 raw = 100 × (RSI14 − min14(RSI14)) / (max14(RSI14) − min14(RSI14))   null on a flat window

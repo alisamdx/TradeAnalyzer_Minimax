@@ -331,6 +331,32 @@ Implemented in `computeADX()` in `analysis-service.ts` and `daily-technical-sign
 
 **ADX is NOT used in the composite scoring (FR-SEY-5).** A full-year Brief-Replay A/B (corrected ADX vs ADX-absent) showed feeding ADX into scoring is net-negative — bullish −1.50pp, bearish −1.15pp, income −0.43pp on direction-aware forward returns (high-ADX names mean-revert over ~21d). So `ScoringService.USE_ADX_IN_SCORING = false`: `trendStrength`/`downtrendScore` use only their MA-stack component and income's `trendNeutral` goes missing. The corrected ADX is retained for **display** (Validate dashboard, Analysis view) only. Re-validate on `tests/adx-replay-validation.test.ts` (`REPLAY_WITH_ADX`) before re-enabling.
 
+### premium-basis
+
+Premium vs cost basis on a stock holding, Bec's "risk line" (v1.1.359). Reporting only.
+
+```
+shares        = Σ open Stock lots' quantity
+cost/sh       = Σ(quantity × entry_price) / shares          (entry_price = E*Trade cost per share)
+acquired      = earliest open lot's entry_date
+window        = closed CSP/CC on the ticker with exit_date ≥ acquired
+                + the assigning put: CSP expiring 0–7 days before acquired, strike within 1% of a lot
+                  cost (as strike, or as strike − credit)
+kept_i        = realized_pnl (real fill: (credit − buyback) × 100 × contracts − commissions)
+                | credit × 100 × contracts     if no fill and it vanished on/after expiry (expired or
+                                               assigned; flagged estimated)
+                | not counted                  if no fill and it vanished before expiry (unresolved)
+in-basis      = the assigning put when a lot cost is nearer (strike − credit) than strike: shown,
+                not subtracted (the broker already did)
+net basis     = cost/sh − Σ kept (excluding in-basis) / shares
+step rose     = kept_i < 0      (bought back for more than it was sold: the line went UP)
+only fallen   = no step rose
+open credit   = Σ open CSP/CC entry_price × 100 × contracts   (shown apart; not yet kept)
+```
+
+The sync's "estimated from last mark" realized P&L is never used. It was measured wrong by thousands
+on assigned puts (TSLA 350: −$3,736 recorded, +$499 real). Implemented in `src/shared/premium-basis.ts`.
+
 ### stoch-rsi
 
 Stochastic RSI, 14/14/3/3 (v1.1.358). Bec's only entry-timing input (`docs/Bec/STRATEGY-SUMMARY.md` §3):
