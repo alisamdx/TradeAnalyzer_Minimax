@@ -27,6 +27,9 @@ interface CollectorHost {
   // not sent. Every call is logged to logs/api/ (error-body preview on failure only). Finnhub is
   // paced by the host app's ONE shared Finnhub limiter (55/min) — per KEY, so the existing app's
   // EarningsRefreshJob and this collector spend one allowance, as with Polygon (v1.1.224).
+  // EDGAR is paced by the host app's ONE sec.gov limiter (480/min, burst 2), shared with the
+  // existing app's fundamentals calls — SEC limits 10/s per IP (v1.1.364; 23/s and 26 429s
+  // on 2026-10-15 before it).
 
   // environment
   nowET(): string;                              // ISO with offset

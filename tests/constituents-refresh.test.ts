@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { openDatabase, type DbHandle } from '../src/main/db/connection.js';
 import { runMigrations } from '../src/main/db/migrations.js';
 import { MIGRATIONS_DIR } from './helpers.js';
-import { ConstituentsService } from '../src/main/services/constituents-service.js';
+import { ConstituentsService, normalizeVanguardTicker } from '../src/main/services/constituents-service.js';
 
 // The job imports fetchAndStorePrices for the new-member price bootstrap — mock the
 // module so no Polygon call is ever attempted; the mock records the tickers fetched.
@@ -134,6 +134,38 @@ describe('ConstituentsService — Vanguard refresh', () => {
     expect(new Date(fresh!.addedAt).getTime()).toBeGreaterThanOrEqual(before); // new member stamped now
     // Newest-added first ordering puts the fresh member ahead of the carried ones.
     expect(meta[0]?.ticker).toBe('NEW1');
+  });
+
+  it('keeps share classes dotted when Vanguard writes them with a space (v1.1.364)', async () => {
+    // Exact spellings from the live VOO/VONE files as of 2026-09-30. The old
+    // sanitiser deleted the space, and BRK.B became BRKB — a dead symbol.
+    expect(normalizeVanguardTicker('BRK B')).toBe('BRK.B');
+    expect(normalizeVanguardTicker('BF B')).toBe('BF.B');
+    expect(normalizeVanguardTicker('UHAL B')).toBe('UHAL.B');
+    expect(normalizeVanguardTicker(' brk.b ')).toBe('BRK.B'); // the old dotted form still works
+    expect(normalizeVanguardTicker('BRK/B')).toBe('BRK.B');
+    expect(normalizeVanguardTicker('GOOGL')).toBe('GOOGL');
+    expect(normalizeVanguardTicker('')).toBe('');
+    expect(normalizeVanguardTicker(null)).toBe('');
+
+    for (const h of makeHoldings(501)) {
+      db.prepare(`INSERT INTO constituents (ticker, index_name) VALUES (?,'sp500')`).run(h.ticker);
+    }
+    db.prepare(`INSERT INTO constituents (ticker, index_name) VALUES ('BRK.B','sp500'), ('BF.B','sp500')`).run();
+    const next = [
+      ...makeHoldings(501),
+      { ticker: 'BRK B', longName: 'Berkshire Hathaway Inc. Class B' },
+      { ticker: 'BF B', longName: 'Brown-Forman Corp. Class B' },
+    ];
+    stubVanguardFetch({ VOO: next });
+    const outcome = await svc.refreshIndexAuto('sp500');
+
+    // The 2026-10-15 refresh reported "+[BFB, BRKB] / −[BF.B, BRK.B]".
+    expect(outcome.added).toEqual([]);
+    expect(outcome.removed).toEqual([]);
+    const tickers = svc.getConstituents('sp500').map((r) => r.ticker);
+    expect(tickers).toContain('BRK.B');
+    expect(tickers).not.toContain('BRKB');
   });
 
   it('keeps excluded (delisted) tickers out even when the feed still lists them', async () => {
@@ -317,6 +349,20 @@ describe('ConstituentsRefreshJob', () => {
     expect(fetched).toEqual(['FRESH', 'NEWCO']); // AAPL skipped, NEWCO once
     expect(result.notes).toContain('NEWCO');
     expect(result.notes).toContain('OLDCO');
+  });
+
+  it('counts a bootstrap that stored zero bars as failed, not updated (v1.1.364)', async () => {
+    // 2026-10-15: six malformed tickers got Polygon 404s and the note still read
+    // "bootstrapped 1Y prices for 10/10 new members".
+    fetchAndStorePricesMock.mockImplementation(async (_s, _p, ticker: string) => (ticker === 'BRKB' ? 0 : 250));
+    const svc = stubService({
+      sp500:       { added: ['BRKB', 'NEWCO'], removed: [], total: 503 },
+      russell1000: { added: [], removed: [], total: 1002 },
+    });
+    const result = await new ConstituentsRefreshJob(db, svc, () => 'polygon-key').run(noop, signal);
+    expect(result.notes).toContain('bootstrapped 1Y prices for 1/2 new members (1 failed)');
+    expect(result.tickersFailed).toBe(1);
+    fetchAndStorePricesMock.mockImplementation(async () => 250);
   });
 
   it('returns warning (not failed, not success) when a source outage hits both indices — stale list is usable', async () => {

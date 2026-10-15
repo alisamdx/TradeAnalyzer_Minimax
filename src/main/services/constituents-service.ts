@@ -45,6 +45,25 @@ export interface ConstituentsRefreshOutcome {
   asOf?: string | null;
 }
 
+/**
+ * A Vanguard holdings ticker in the dotted share-class form every other source uses.
+ *
+ * From the 2026-09-30 holdings file Vanguard writes share classes with a SPACE —
+ * `BRK B`, `BF B`, `HEI A`, `UHAL B` — and the old sanitiser deleted every character
+ * outside `[A-Z0-9.-]`, so `BRK B` became `BRKB`: a symbol Polygon and E*Trade both
+ * answer 404/400. On 2026-10-15 that swapped BRK.B, BF.A, BF.B, HEI.A, LEN.B and
+ * UHAL.B out of the universe for six dead tickers, and the refresh reported it as
+ * ordinary index turnover. Internal whitespace and `/` are share-class separators
+ * and become `.`; only then are stray characters dropped.
+ */
+export function normalizeVanguardTicker(raw: string | null | undefined): string {
+  return (raw ?? '')
+    .trim()
+    .toUpperCase()
+    .replace(/[\s/]+/g, '.')
+    .replace(/[^A-Z0-9.-]/g, '');
+}
+
 interface VanguardHoldingEntity {
   ticker?: string | null;
   longName?: string | null;
@@ -413,7 +432,7 @@ export class ConstituentsService {
       const entities = json.fund?.entity ?? [];
       if (entities.length === 0) break;
       for (const e of entities) {
-        const ticker = (e.ticker ?? '').trim().toUpperCase().replace(/[^A-Z0-9.-]/g, '');
+        const ticker = normalizeVanguardTicker(e.ticker);
         if (!ticker) continue;
         // Vanguard holdings carry no sector — applyRefresh preserves the stored one.
         rows.push({ ticker, companyName: e.longName ? decodeHtmlEntities(e.longName).trim() || null : null, sector: null });

@@ -1,11 +1,12 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { openDatabase, type DbHandle } from '../src/main/db/connection.js';
 import { runMigrations } from '../src/main/db/migrations.js';
 import { MIGRATIONS_DIR } from './helpers.js';
 import {
-  setEdgarContactSource, edgarContact, edgarUserAgent, edgarHeaders, EDGAR_CONTACT_KEY
+  setEdgarContactSource, edgarContact, edgarUserAgent, edgarHeaders, EDGAR_CONTACT_KEY,
+  edgarFetch, edgarLimiter
 } from '../src/main/services/edgar-identity.js';
 
 /**
@@ -123,5 +124,37 @@ describe('no contact address is committed to this repository', () => {
     expect(provider).toContain('edgarFetch(');
     expect(provider).not.toContain('trader@local');
     expect(host).toContain('edgarUserAgent()');
+  });
+});
+
+describe('sec.gov pacing (v1.1.364)', () => {
+  // 2026-10-15: the collector's filings phase fired 23 calls/s, SEC allows 10/s
+  // per IP, and 26 responses came back HTTP 429 — the daily form index among them.
+
+  it("paces under SEC's 10/s with one bucket", () => {
+    expect(edgarLimiter.getRate()).toBe(480); // 8/s
+  });
+
+  it('edgarFetch takes a token from the shared bucket before every call', async () => {
+    const acquire = vi.spyOn(edgarLimiter, 'acquire').mockResolvedValue(undefined);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
+    try {
+      await edgarFetch('https://data.sec.gov/api/xbrl/companyfacts/CIK0000320193.json');
+      expect(acquire).toHaveBeenCalledWith(1);
+    } finally {
+      vi.unstubAllGlobals();
+      acquire.mockRestore();
+    }
+  });
+
+  it('the collector host paces its sec.gov calls through the SAME bucket', () => {
+    const src = readFileSync(join(process.cwd(), 'src', 'main', 'collector-host', 'electron-collector-host.ts'), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/(^|[^:])\/\/.*$/gm, '$1');
+    const httpBlock = src.slice(src.indexOf('async httpGet('), src.indexOf('nowET(): string'));
+    expect(httpBlock).toMatch(/provider === 'edgar'\)\s*\{\s*await edgarLimiter\.acquire\(1\)/);
+    // One bucket per IP: nobody else may build a second sec.gov limiter.
+    const index = readFileSync(join(process.cwd(), 'src', 'main', 'index.ts'), 'utf8');
+    expect(index).not.toMatch(/edgarLimiter\s*=\s*new TokenBucketRateLimiter/);
   });
 });

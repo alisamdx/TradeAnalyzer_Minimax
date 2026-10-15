@@ -8,7 +8,7 @@ import { etradeGetRaw, renewAccessToken, type OAuthCredentials } from '../servic
 import { ExpiredTokenLatch, EXPIRED_TOKEN_SKIP_MESSAGE, isExpiredTokenResponse } from '../services/etrade-token-latch.js';
 import type { TokenBucketRateLimiter } from '../services/rate-limiter.js';
 import { logApiCall, logError } from '../services/logger.js';
-import { edgarUserAgent } from '../services/edgar-identity.js';
+import { edgarUserAgent, edgarLimiter } from '../services/edgar-identity.js';
 
 /**
  * `ElectronCollectorHost` — NewApp 04 §1.1, 06 §5 change #3.
@@ -563,6 +563,13 @@ export class ElectronCollectorHost implements CollectorHost {
       signed.searchParams.set('apiKey', key);
       target = signed.toString();
       await this.opts.ivolatilityLimiter.acquire(1);
+    }
+
+    if (provider === 'edgar') {
+      // The one sec.gov bucket shared with this app's own EDGAR calls
+      // (`edgar-identity.ts`). Without it the filings phase reached 23 calls/s on
+      // 2026-10-15 against SEC's 10/s and lost 26 responses to HTTP 429.
+      await edgarLimiter.acquire(1);
     }
 
     const requestParams = loggableParams(parsed);

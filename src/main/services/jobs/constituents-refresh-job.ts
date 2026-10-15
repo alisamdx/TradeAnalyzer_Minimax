@@ -126,6 +126,10 @@ export class ConstituentsRefreshJob implements BatchJobHandler {
           attempted++;
           try {
             const count = await fetchAndStorePrices(this.historicalService, this.provider, ticker, '1Y');
+            // Zero bars is not a bootstrap. On 2026-10-15 six malformed tickers
+            // (BRKB, BFB, …) each got a Polygon 404 and the note still read
+            // "bootstrapped 1Y prices for 10/10 new members".
+            if (count === 0) throw new Error('no daily bars returned');
             updated++;
             onProgress({
               jobId: JOB_ID, runId: 0, ticker, status: 'updated',

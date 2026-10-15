@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.364] - 2026-10-15
+
+### Constituents keep share classes dotted; EDGAR calls are paced
+
+Vanguard's 2026-09-30 holdings file writes share classes with a space (`BRK B`, `BF B`, `HEI A`, `UHAL B`). The parser deleted the space, so this morning's refresh replaced BRK.B, BF.A, BF.B, HEI.A, LEN.B and UHAL.B with BRKB, BFA, BFB, HEIA, LENB and UHALB. Polygon and E*Trade don't recognise those symbols, so the six names dropped out of the brief, screener and IV capture. The note reported it as ordinary turnover. The space is now read as a share-class dot, and the next refresh puts the six real tickers back. A new member's price bootstrap that stores zero bars now counts as failed: the same refresh said "10/10 bootstrapped" while six of them got 404s.
+
+The collector's EDGAR calls had no rate limit. On 2026-10-15 its filings phase reached 23 calls a second against SEC's 10, and 26 responses came back HTTP 429, including the daily form index and the omitted-filing XBRL reads. Every sec.gov call, from the collector or from this app's fundamentals, now takes a token from one shared limiter (480/min, burst 2).
+
+Details: `changelogs/v1.1.364_2026-10-15.md`.
+
 ## [1.1.363] - 2026-10-14
 
 ### Collector: equity bid/ask from E*Trade, and QC-303 can finally run

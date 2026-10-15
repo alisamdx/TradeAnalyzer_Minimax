@@ -132,6 +132,8 @@ AI prompts must instruct Claude to **never invent financial figures** — only r
 
 Public, unauthenticated full-text search for Form 4 insider transactions, used by `news-data-fetcher.ts` for the News & Research dossier (§16). Fields: filer name/title, transaction type (buy/sell), shares, price, total value, filing date.
 
+**Pacing (v1.1.364):** every sec.gov call, from this app (`edgarFetch`) or the NewApp collector (`ElectronCollectorHost.httpGet`), takes a token from one `edgarLimiter` (480/min, burst 2) in `edgar-identity.ts`. SEC allows 10 requests/s per IP and answers the excess with HTTP 429.
+
 ## 3.9 Rate limiting & retry
 
 - **`TokenBucketRateLimiter`** (`rate-limiter.ts`): configurable 10–500 req/min (default 100). Token-bucket, not fixed sleep. On HTTP 429: halve the rate, exponential backoff ~5 min, then ramp back; surface in the UI status bar (NFR-6).

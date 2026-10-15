@@ -21,6 +21,20 @@
 
 import type { DbHandle } from '../db/connection.js';
 import { logApiCall } from './logger.js';
+import { TokenBucketRateLimiter } from './rate-limiter.js';
+
+/**
+ * **The application's single sec.gov pace — one instance for every caller.**
+ *
+ * SEC enforces 10 requests/second per client IP and answers the excess with
+ * HTTP 429. Until v1.1.364 neither caller paced itself: on 2026-10-15 the
+ * collector's filings phase fired 23 calls in one second and got 26 429s, among
+ * them the daily form index and the omitted-filing XBRL instances (v1.1.360).
+ * Both callers share one IP, so they share one bucket — two buckets would be two
+ * budgets spending one allowance (the Finnhub rule). 480/min = 8/s leaves margin
+ * under SEC's 10/s; burst 2 keeps a sweep from opening with a spike.
+ */
+export const edgarLimiter = new TokenBucketRateLimiter({ requestsPerMinute: 480, burstSize: 2 });
 
 /** The settings key holding the operator's EDGAR contact address. */
 export const EDGAR_CONTACT_KEY = 'edgarContact';
@@ -93,6 +107,8 @@ export function edgarHeaders(): Record<string, string> {
  * one place anybody looks.
  */
 export async function edgarFetch(url: string): Promise<Response> {
+  // Acquired before the clock starts: latency must measure SEC, not our queue.
+  await edgarLimiter.acquire(1);
   const requestedAt = new Date().toISOString();
   const started = Date.now();
   const endpoint = (() => {
