@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.362] - 2026-10-14
+
+### Collector: QC-413 counts real E*Trade renews
+
+QC-413 (renew storm) could never fire. It counted renew calls in the generation's response archive, but the collector renews the E*Trade token inside this app's own transport, so no renew was ever archived and the count was always zero. The collector host now counts every renew attempt it makes, and the daily run writes that count to a new `meta_run.etrade_renew_count` column just before the gate. QC-413 reads it, with the same threshold (more than 20 in one run). Rehearsals of new runs see it too. Older runs have no count and are reported as unmeasured, not as zero.
+
+Details: `changelogs/v1.1.362_2026-10-14.md`.
+
 ## [1.1.361] - 2026-10-14
 
 ### Collector: QC-006 run completeness and QC-105 calendar coverage

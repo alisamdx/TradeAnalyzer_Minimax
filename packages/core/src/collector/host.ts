@@ -67,6 +67,15 @@ export interface CollectorHost {
   polygonGet(path: string, params: Record<string, string>): Promise<ProviderResponse>;
   /** Renew-and-retry on ANY failure happens inside this, not here. */
   etradeGet(path: string, params: Record<string, string>): Promise<ProviderResponse>;
+  /**
+   * How many OAuth renews `etradeGet` has attempted since this host was built,
+   * successful or not. A count only, never a token. The renew goes through the
+   * host's own transport and never reaches `meta_response`, so without this
+   * QC-413 counted rows that could not exist (v1.1.362). Optional: a host that
+   * does not report it leaves `meta_run.etrade_renew_count` NULL, and QC-413
+   * then evaluates nothing rather than reading a zero nobody measured.
+   */
+  etradeRenewAttempts?(): number;
   /** EDGAR, Treasury, Finnhub, FOMC/BLS. */
   httpGet(url: string, headers?: Record<string, string>): Promise<ProviderResponse>;
 

@@ -1,6 +1,6 @@
 import type { CollectorHost } from './host.js';
 import { CollectorCancelled } from './host.js';
-import { beginRun, finishRun, type RunHandle } from './run.js';
+import { beginRun, finishRun, recordRenewCount, type RunHandle } from './run.js';
 import { runPreflight } from './phases/preflight.js';
 import { runBarsPhase, runQuotesPhase, runActionsPhase } from './phases/market.js';
 import { runAccountPhase } from './phases/account.js';
@@ -56,6 +56,8 @@ export async function runDaily(
   args: { readonly tradingDate: string; readonly barDepthDays?: number }
 ): Promise<DailyRunReport> {
   const db = host.openGenerationDb();
+  // Baseline before preflight, whose SPY probe can itself renew (QC-413, v1.1.362).
+  const renewsAtStart = host.etradeRenewAttempts?.() ?? null;
   const run: RunHandle = beginRun(db, host, {
     kind: 'daily', tradingDate: args.tradingDate, slot: 'after_close'
   });
@@ -184,6 +186,15 @@ export async function runDaily(
         phaseErrors.push(`remediation R3: ${r3Error}`);
       }
     }
+  }
+
+  // QC-413's input, written before the gate reads it. The host's renews never reach
+  // meta_response, so this count is the only record of them in the generation.
+  try {
+    const renewsNow = host.etradeRenewAttempts?.() ?? null;
+    recordRenewCount(db, run, renewsAtStart === null || renewsNow === null ? null : renewsNow - renewsAtStart);
+  } catch (err) {
+    phaseErrors.push(`renew-count: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   // The gate runs on whatever exists, including after a cancellation.

@@ -133,6 +133,17 @@ describe('ElectronCollectorHost', () => {
     expect(retryBlock).not.toMatch(/token_expired|token_rejected|oauth_problem|\/401\//);
   });
 
+  it('counts every renew attempt for QC-413, before the attempt so a throwing renew counts too', () => {
+    // The renew never reaches `meta_response`, so this counter is QC-413's only input
+    // (v1.1.362). It counts; it never stores anything about the token.
+    const retryBlock = host.slice(host.indexOf('async etradeGet('), host.indexOf('async httpGet('));
+    const increment = retryBlock.indexOf('this.renewAttempts += 1');
+    expect(increment).toBeGreaterThan(-1);
+    expect(increment).toBeLessThan(retryBlock.indexOf('renewAccessToken('));
+    expect((retryBlock.match(/renewAccessToken\(/g) ?? []).length).toBe(1);
+    expect(host).toMatch(/etradeRenewAttempts\(\): number \{\s*return this\.renewAttempts;\s*\}/);
+  });
+
   it('opens the generation write-capable, never readonly', () => {
     // On Windows a readonly connection cannot attach the live WAL index and
     // silently reads only up to the last checkpoint. The new exe holds this same

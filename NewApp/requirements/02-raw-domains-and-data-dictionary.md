@@ -180,6 +180,7 @@ One row per collector run (a run = one slot on one day, or a one-shot job).
 | `host_app`, `host_version` | TEXT | which exe hosted the collector (Q4) and its version |
 | `collector_version`, `dictionary_version` | TEXT | for replay equivalence (AC-4) |
 | `gate_verdict` | TEXT | `green` \| `amber` \| `red` — **the verdict at the moment the run finished**, never updated afterwards. It is a historical fact about the run, not a live usability flag. Usability is `qa_domain_day_status` and only that (03 §4); a stored `usable` column would go stale the first time an exception was resolved the next day |
+| `etrade_renew_count` | INTEGER, nullable | E\*Trade OAuth renews the host attempted during this daily run, written just before the gate (v1.1.362, dictionary v25). QC-413 reads it. A count only, no token data. NULL: not a daily run, a host that does not report it (runs before v1.1.362), or the run died before the gate |
 
 ### `meta_run_phase` — how each phase of a daily run ended (dictionary v24, v1.1.361)
 One row per phase of a daily run (`bars`, `quotes`, `corporate_actions`, `account`, `chain_subset`, `chains`, `events`, `derive`) and per phase-8 sub-phase (`events/<name>`, e.g. `events/edgar-facts`), written as each ends. QC-006 reads it.

@@ -179,7 +179,23 @@ export const metaTables: readonly TableEntry[] = [
         ),
         'the run has not finished, so the gate has not been evaluated'
       ),
-      nullable(col.date('reach_from', 'How far back an order/transaction pull reached on its first run.'), 'not an account-history run')
+      nullable(col.date('reach_from', 'How far back an order/transaction pull reached on its first run.'), 'not an account-history run'),
+      nullable(
+        {
+          column: 'etrade_renew_count',
+          type: 'INTEGER',
+          unit: 'count',
+          nullable: false,
+          description:
+            'E*Trade OAuth renews the host attempted during this daily run, written just before the gate ' +
+            '(v1.1.362, dictionary v25). QC-413 reads it. The renew happens inside the host\'s own ' +
+            'transport and is never captured into `meta_response`, so until this column existed QC-413 ' +
+            'counted `renew_access_token` rows that could not exist and could never fire. A count only; ' +
+            'no token value is ever stored.',
+          sourceProvider: 'collector'
+        },
+        'not a daily run, the host does not report renews (runs before v1.1.362), or the run died before the gate'
+      )
     ],
     indexes: [
       { columns: ['trading_date', 'slot'] },

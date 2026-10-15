@@ -1091,18 +1091,22 @@ export const QC413_RENEW_STORM: CheckDefinition = {
     'hardening, but a run that renews dozens of times is not recovering from dormancy — it is ' +
     'failing at something else and renewing at it, which the retry loop would otherwise hide ' +
     'completely.',
-  readsTables: ['meta_response'],
+  // Until v1.1.362 this counted `meta_response` rows matching `renew_access_token`. The host
+  // renews inside its own transport, so no such row was ever written and the check could
+  // not fire (gen-002, 2026-10-14: zero renew rows across every run). It now reads the
+  // count the daily run records from the host.
+  readsTables: ['meta_run'],
   testedQuantity: 'renew_call_count',
   testedUnit: 'count',
   thresholds: { maxRenewsPerRun: 20 },
   thresholdBasis: 'working',
   run(ctx) {
     const row = ctx.db
-      .prepare(
-        `SELECT COUNT(*) AS renews FROM meta_response
-          WHERE run_id = ? AND endpoint LIKE '%renew_access_token%'`
-      )
-      .get(ctx.runId) as { renews: number };
+      .prepare('SELECT etrade_renew_count AS renews FROM meta_run WHERE run_id = ?')
+      .get(ctx.runId) as { renews: number | null } | undefined;
+    // NULL means nobody counted (a host that does not report, or a run before v1.1.362).
+    // Evaluating nothing keeps that apart from a measured zero.
+    if (row?.renews === null || row?.renews === undefined) return [];
 
     return [
       {

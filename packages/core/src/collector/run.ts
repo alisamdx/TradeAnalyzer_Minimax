@@ -109,6 +109,22 @@ export function finishRun(
   );
 }
 
+/**
+ * Adds this process's E*Trade renew attempts to the run (v1.1.362), which QC-413 reads.
+ *
+ * `etradeRenewAttempts()` is cumulative for the host, so the caller passes the
+ * delta since the run began. Added rather than set, so a resumed run keeps what
+ * its earlier attempt recorded. A host that does not report renews writes
+ * nothing, and the column stays NULL rather than claiming a zero.
+ */
+export function recordRenewCount(db: SqliteLike, run: RunHandle, renews: number | null): void {
+  if (renews === null) return;
+  db.prepare('UPDATE meta_run SET etrade_renew_count = COALESCE(etrade_renew_count, 0) + ? WHERE run_id = ?').run(
+    renews,
+    run.runId
+  );
+}
+
 /** Ensures a capture rule version exists and returns its id (P6). */
 export function captureRuleId(
   db: SqliteLike,

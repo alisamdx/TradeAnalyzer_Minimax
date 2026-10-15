@@ -470,6 +470,8 @@ export class ElectronCollectorHost implements CollectorHost {
     const ok = first.status !== null && first.status >= 200 && first.status < 300;
     if (ok) return first;
 
+    // Counted before the attempt, so a renew that throws is counted too (QC-413).
+    this.renewAttempts += 1;
     try {
       await renewAccessToken(creds);
     } catch {
@@ -485,6 +487,18 @@ export class ElectronCollectorHost implements CollectorHost {
   }
 
   private readonly expiredToken = new ExpiredTokenLatch();
+
+  /**
+   * OAuth renews `etradeGet` has attempted on this host, successful or not
+   * (v1.1.362). The renew goes through this app's transport, never into
+   * `meta_response`, so `runDaily` writes this count to `meta_run` for QC-413.
+   * A number only — nothing about the token leaves here.
+   */
+  private renewAttempts = 0;
+
+  etradeRenewAttempts(): number {
+    return this.renewAttempts;
+  }
 
   private tripExpiredToken(accessToken: string, path: string): void {
     if (this.expiredToken.isTripped(accessToken)) return;
