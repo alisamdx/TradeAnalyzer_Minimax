@@ -37,6 +37,7 @@ const SAMPLES: readonly IngestRecipe[] = [
   recipes.bls({ slug: 'cpi', type: 'CPI', label: 'Consumer Price Index' }),
   recipes.submissions({ cik: '0000320193', ticker: 'AAPL', since: '2025-09-07', forms: new Set(['10-K', '10-Q']) }),
   recipes.companyFacts({ cik: '0000320193', since: '2025-09-07' }),
+  recipes.filingFacts({ cik: '0001722482', accessionNo: '0001628280-26-028141', form: '10-Q', filedDate: '2026-04-29' }),
   recipes.form4({ accessionNo: '0000320193-26-000001', tickerByCik: new Map([['0000320193', 'AAPL']]), derivatives: true }),
   recipes.formIndexFilings({
     filers: new Map([['0000320193', 'AAPL']]), forms: new Set(['10-K', '10-Q']), knownAccessions: new Set(['0000320193-26-000106'])

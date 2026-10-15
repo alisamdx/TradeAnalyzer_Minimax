@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.360] - 2026-10-14
+
+### EDGAR facts: read an omitted filing's own XBRL instance
+
+SEC's companyfacts aggregate has left out most 10-Qs filed 2026-07-28/29 for 70+ days. That made QC-701 blocking on filers like AEP, AVTR, BIIB, Citi and CDNS, and needed a manual acceptance each time. The collector now reads such a filing's own inline-XBRL instance from the EDGAR archive and writes the same rows companyfacts would have. That was verified row for row against companyfacts on three filings it does include (244/244, 348/348, 923/923). Rehearsed on today's data: 34 of 35 omitted filings recovered (the 35th has no XBRL), QC-701 15 → 0, QC-704 35 → 1, and today's gate goes from 8 open blocking to 0.
+
+Details: `changelogs/v1.1.360_2026-10-14.md`.
+
 ## [1.1.357] - 2026-10-13
 
 ### Bull put spread gate: quote the study's replay tickers directly, count coverage by ticker too

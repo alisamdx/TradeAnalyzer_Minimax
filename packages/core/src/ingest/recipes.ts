@@ -10,7 +10,9 @@ import {
   ingestShortInterest
 } from './events.js';
 import { ingestFomcCalendar, makeBlsScheduleIngest } from './macro-calendar.js';
-import { makeSubmissionsIngest, makeCompanyFactsIngest, makeForm4Ingest, makeFormIndexFilingsIngest } from './edgar.js';
+import {
+  makeSubmissionsIngest, makeCompanyFactsIngest, makeFilingFactsIngest, makeForm4Ingest, makeFormIndexFilingsIngest
+} from './edgar.js';
 import { makeIvBootstrapIngest, type IvBootstrapIngestArgs } from './iv-bootstrap.js';
 import { makeLegacyBriefIngest } from './legacy-brief.js';
 import { ingestTickerReference } from './raw-ticker-reference.js';
@@ -65,6 +67,7 @@ export const INGEST_MODULES = [
   'bls_schedule',
   'edgar_submissions',
   'edgar_companyfacts',
+  'edgar_filing_facts',
   'edgar_form4',
   'edgar_form_index_filings',
   'sec_ticker_map',
@@ -205,6 +208,13 @@ export const recipes = {
     })),
   companyFacts: (o: { readonly cik: string; readonly since?: string; readonly concepts?: ReadonlySet<string> }): IngestRecipe =>
     recipe('edgar_companyfacts', args({ cik: o.cik, since: o.since, concepts: sortedSet(o.concepts) })),
+  filingFacts: (o: {
+    readonly cik: string;
+    readonly accessionNo: string;
+    readonly form: string;
+    readonly filedDate: string;
+  }): IngestRecipe =>
+    recipe('edgar_filing_facts', { cik: o.cik, accessionNo: o.accessionNo, form: o.form, filedDate: o.filedDate }),
   // `derivatives` is omitted when false so a pre-v20 recipe keeps its exact
   // digest: adding the key unconditionally would give every already-captured
   // Form 4 a new recipe id and make its replay a different parse.
@@ -379,6 +389,13 @@ const DECODERS: { readonly [M in IngestModuleName]: (a: RecipeArgs) => IngestMod
       ...(concepts ? { concepts } : {})
     });
   },
+  edgar_filing_facts: (a) =>
+    makeFilingFactsIngest({
+      cik: str(a, 'cik'),
+      accessionNo: str(a, 'accessionNo'),
+      form: str(a, 'form'),
+      filedDate: str(a, 'filedDate')
+    }),
   edgar_form4: (a) =>
     makeForm4Ingest({
       accessionNo: str(a, 'accessionNo'),

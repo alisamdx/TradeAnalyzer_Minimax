@@ -237,6 +237,166 @@ export function makeCompanyFactsIngest(opts: {
   };
 }
 
+// ── a filing's own XBRL instance: the fallback when companyfacts omits it ──
+
+/**
+ * Which file in a filing directory (`…/{accession}/index.json`) is the XBRL instance.
+ *
+ * An inline-XBRL filing — every 10-K/10-Q since 2021 — carries an extracted instance SEC
+ * names `{primary}_htm.xml`. An older plain-XBRL filing has a single `.xml` instance beside
+ * its linkbases, so the fallback takes the one `.xml` that is not a linkbase, schema or
+ * filing summary. Null when there is none: a filing without XBRL has nothing to read, and
+ * that is an answer rather than a parse failure.
+ */
+export function filingInstanceName(indexBody: string): string | null {
+  const parsed = JSON.parse(indexBody) as { directory?: { item?: { name?: unknown }[] } };
+  const names = (parsed.directory?.item ?? [])
+    .map((i) => i.name)
+    .filter((n): n is string => typeof n === 'string');
+  const inline = names.filter((n) => n.endsWith('_htm.xml'));
+  if (inline.length > 0) return [...inline].sort()[0] as string;
+  const plain = names.filter(
+    (n) => n.endsWith('.xml') && !/_(cal|def|lab|pre)\.xml$/.test(n) && n !== 'FilingSummary.xml'
+  );
+  return plain.length === 1 ? (plain[0] as string) : null;
+}
+
+/** A taxonomy is identified by its namespace URI, never by the prefix a filer chose for it. */
+const TAXONOMY_NAMESPACES: readonly (readonly [RegExp, string])[] = [
+  [/^http:\/\/fasb\.org\/us-gaap\//, 'us-gaap'],
+  [/^http:\/\/xbrl\.sec\.gov\/dei\//, 'dei'],
+  [/^http:\/\/fasb\.org\/srt\//, 'srt'],
+  [/^https?:\/\/xbrl\.ifrs\.org\/taxonomy\/[^/]+\/ifrs-full/, 'ifrs-full'],
+  [/^http:\/\/xbrl\.sec\.gov\/invest\//, 'invest']
+];
+
+/** Any namespace prefix, or none: instances write `xbrli:context` and plain `context` alike. */
+const NS = '(?:[\\w.-]+:)?';
+
+/**
+ * The facts of ONE report filing, read from its own XBRL instance, into the rows
+ * companyfacts would have produced for that accession (v1.1.360).
+ *
+ * **Why.** SEC's companyfacts aggregate dropped most 10-Qs filed 2026-07-28/29 and was still
+ * missing them 70+ days later (AEP, AVTR, BIIB, C, CDNS, IQV, KO, …), while the filings
+ * themselves — with inline XBRL — sat in the archive. Every such filer went stale under QC-701
+ * and escalated to blocking, and no retry of companyfacts could fix it.
+ *
+ * **What it reproduces.** companyfacts carries exactly the facts with no dimension (a context
+ * with no `segment`/`scenario`) in a standard taxonomy, numeric and non-nil, with the filing's
+ * own `fy`/`fp` (`dei:DocumentFiscalYearFocus`/`…PeriodFocus`) on every point. Checked against
+ * companyfacts on three filings it DOES include, matched row for row and value for value:
+ * AVTR 10-Q 0001628280-26-028141 (244/244), AEP 10-Q 0000004904-26-000034 (348/348 — a
+ * multi-registrant filing, whose subsidiaries' facts all carry `dei:LegalEntityAxis` and are
+ * correctly left out) and Citi 10-K 0000831001-26-000011 (923/923).
+ *
+ * **What it cannot.** `frame` is SEC's deduplication across filings and exists only in the
+ * aggregate, so it is null here — its declared null meaning. `form` and `filed_date` come from
+ * the filing row, because `dei:DocumentType` says `10-Q` on a `10-Q/A`.
+ *
+ * A body with no `<xbrl>` root throws: a 200 that is an HTML page is not an empty filing.
+ */
+export function makeFilingFactsIngest(opts: {
+  readonly cik: string;
+  readonly accessionNo: string;
+  readonly form: string;
+  readonly filedDate: string;
+}) {
+  return (body: string, ctx: IngestContext): readonly IngestedRowSpec[] => {
+    const root = new RegExp(`<${NS}xbrl\\b([^>]*)>`).exec(body);
+    if (!root) throw new Error('no <xbrl> root element: not an XBRL instance');
+
+    const taxonomyOf = new Map<string, string>();
+    for (const m of (root[1] as string).matchAll(/xmlns:([\w.-]+)="([^"]+)"/g)) {
+      const hit = TAXONOMY_NAMESPACES.find(([re]) => re.test(m[2] as string));
+      if (hit) taxonomyOf.set(m[1] as string, hit[1]);
+    }
+
+    // Contexts with no dimension only — exactly the population companyfacts carries.
+    const periods = new Map<string, { start: string | null; end: string }>();
+    const contextRe = new RegExp(`<${NS}context\\b[^>]*\\bid="([^"]+)"[^>]*>([\\s\\S]*?)</${NS}context>`, 'g');
+    for (const m of body.matchAll(contextRe)) {
+      const inner = m[2] as string;
+      if (new RegExp(`<${NS}(segment|scenario)\\b`).test(inner)) continue;
+      const date = (tag: string) => new RegExp(`<${NS}${tag}>\\s*([^<\\s]+)\\s*<`).exec(inner)?.[1]?.slice(0, 10);
+      const instant = date('instant');
+      const start = date('startDate');
+      const end = date('endDate');
+      if (instant) periods.set(m[1] as string, { start: null, end: instant });
+      else if (start && end) periods.set(m[1] as string, { start, end });
+    }
+
+    // `iso4217:USD` → `USD`, a divide → `USD/shares`: companyfacts' own spelling.
+    const units = new Map<string, string>();
+    const measures = (s: string) =>
+      [...s.matchAll(new RegExp(`<${NS}measure>([^<]+)</${NS}measure>`, 'g'))]
+        .map((x) => (x[1] as string).trim().replace(/^[\w.-]+:/, ''))
+        .join('*');
+    const unitRe = new RegExp(`<${NS}unit\\b[^>]*\\bid="([^"]+)"[^>]*>([\\s\\S]*?)</${NS}unit>`, 'g');
+    for (const m of body.matchAll(unitRe)) {
+      const inner = m[2] as string;
+      const num = new RegExp(`<${NS}unitNumerator>([\\s\\S]*?)</${NS}unitNumerator>`).exec(inner);
+      const den = new RegExp(`<${NS}unitDenominator>([\\s\\S]*?)</${NS}unitDenominator>`).exec(inner);
+      units.set(m[1] as string, num && den ? `${measures(num[1] as string)}/${measures(den[1] as string)}` : measures(inner));
+    }
+
+    const dei = (name: string) => {
+      const prefix = [...taxonomyOf].find(([, t]) => t === 'dei')?.[0];
+      if (!prefix) return null;
+      const v = new RegExp(`<${prefix}:${name}\\b[^>]*>([^<]*)<`).exec(body)?.[1]?.trim();
+      return v ? v : null;
+    };
+    const fy = Number(dei('DocumentFiscalYearFocus'));
+    const fp = dei('DocumentFiscalPeriodFocus');
+
+    // An inline filing tags one number wherever it appears in the document, so the extracted
+    // instance repeats it. The natural key keeps one; the first occurrence wins.
+    const seen = new Set<string>();
+    const rows: IngestedRowSpec[] = [];
+    for (const m of body.matchAll(/<([\w.-]+):([\w.-]+)\b([^>]*?)(?:\/>|>([^<]*)<\/\1:\2>)/g)) {
+      const taxonomy = taxonomyOf.get(m[1] as string);
+      const raw = m[4];
+      if (!taxonomy || raw === undefined) continue;
+      const attrs = m[3] as string;
+      if (/\bxsi:nil="true"/.test(attrs)) continue;
+      const period = periods.get(/\bcontextRef="([^"]+)"/.exec(attrs)?.[1] ?? '');
+      const unit = units.get(/\bunitRef="([^"]+)"/.exec(attrs)?.[1] ?? '');
+      const text = raw.trim();
+      const value = Number(text);
+      if (!period || unit === undefined || text === '' || !Number.isFinite(value)) continue;
+
+      const concept = m[2] as string;
+      const key = `${taxonomy}|${concept}|${unit}|${period.start ?? ''}|${period.end}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      rows.push({
+        table: 'raw_edgar_fact',
+        values: {
+          run_id: ctx.runId,
+          as_of_date: ctx.asOfDate,
+          observed_at: ctx.observedAt,
+          capture_rule_id: ctx.captureRuleId,
+          cik: opts.cik,
+          taxonomy,
+          concept,
+          unit,
+          value,
+          period_start: period.start,
+          period_end: period.end,
+          fiscal_year: Number.isInteger(fy) ? fy : 0,
+          fiscal_period: fp ?? '',
+          form: opts.form,
+          filed_date: opts.filedDate,
+          accession_no: opts.accessionNo,
+          frame: null
+        }
+      });
+    }
+    return rows;
+  };
+}
+
 // ── the daily form index ───────────────────────────────────────────────────
 
 export interface IndexedFiling {

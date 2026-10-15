@@ -6,14 +6,19 @@ import { recipes } from '../../ingest/recipes.js';
 import { captureRuleId, type RunHandle } from '../run.js';
 import { earningsResponseAtCap } from '../../ingest/events.js';
 import { BLS_RELEASES, FOMC_CALENDAR_URL, blsScheduleUrl } from '../../ingest/macro-calendar.js';
-import { parseDailyFormIndex, dailyFormIndexUrl, submissionsAtCap, reportFilingsInIndex } from '../../ingest/edgar.js';
+import {
+  parseDailyFormIndex, dailyFormIndexUrl, submissionsAtCap, reportFilingsInIndex, filingInstanceName
+} from '../../ingest/edgar.js';
 import { SEC_TICKER_MAP_URL } from '../../ingest/sec-ticker-map.js';
 import { effectiveCikByTicker } from '../cik.js';
 import { previousTradingDay, tradingDaysInRange } from '../trading-calendar.js';
 import { sweepPolygonPages } from '../paged.js';
 import { refusedSymbolAnswers, withRefusals } from '../symbol-rulings.js';
 import { FUND_TYPES } from '../../qa/checks/earnings-fundamentals.js';
-import { factsBatch, FACTS_PER_RUN } from '../facts-queue.js';
+import {
+  factsBatch, FACTS_PER_RUN, filingFactsQueue, FILING_FACTS_PER_RUN, FILING_INDEX_ENDPOINT,
+  FILING_INSTANCE_ENDPOINT, COMPANYFACTS_OMITTED_AFTER_DAYS
+} from '../facts-queue.js';
 // The queue moved to collector/facts-queue.ts (v1.1.322); re-exported for existing callers.
 export { factsQueue, factsBatch } from '../facts-queue.js';
 
@@ -650,6 +655,87 @@ export async function runEdgarFacts(
 }
 
 /**
+ * XBRL facts read from a report filing's OWN instance, for filings SEC's companyfacts has omitted
+ * (v1.1.360) — `filingFactsQueue` decides which. Runs after `runEdgarFacts`, so a filing this run's
+ * companyfacts fetch did deliver is never read twice.
+ *
+ * Two requests per filing: the directory listing, to find the instance by name, then the instance.
+ * Both are captured, so an attempt that found no instance is on record and waits the weekly retry
+ * cadence instead of being asked every night. A non-2xx counts as a failure, and so does an
+ * instance that does not parse; a filing without XBRL does not, since that is an answer.
+ */
+export async function runEdgarFilingFacts(
+  host: CollectorHost,
+  db: SqliteLike,
+  run: RunHandle,
+  opts: { readonly maxFilings?: number } = {}
+): Promise<SubPhaseCount> {
+  const ruleId = captureRuleId(
+    db, host, 'edgar_filing_facts',
+    { trigger: 'companyfacts_omission', omittedAfterDays: COMPANYFACTS_OMITTED_AFTER_DAYS },
+    "XBRL facts from a report filing's own instance, when SEC companyfacts has omitted the filing."
+  );
+  const pending = filingFactsQueue(db, run.tradingDate).slice(0, opts.maxFilings ?? FILING_FACTS_PER_RUN);
+  if (pending.length === 0) return skipped('no report filing omitted by companyfacts is due');
+
+  let stored = 0;
+  let calls = 0;
+  let failed = 0;
+
+  for (const [i, f] of pending.entries()) {
+    throwIfCancelled(host, 'phase-8-edgar-filing-facts');
+    host.progress('edgar-filing-facts', i, pending.length, f.ticker);
+
+    // The archive path takes the CIK without its zero padding and the accession without dashes.
+    const base = `https://www.sec.gov/Archives/edgar/data/${String(Number(f.cik))}/${f.accessionNo.replace(/-/g, '')}/`;
+    const index = await host.httpGet(`${base}index.json`, EDGAR_HEADERS);
+    calls++;
+    const indexResult = captureResponse({
+      host, db, runId: run.runId, asOfDate: run.tradingDate, provider: 'edgar',
+      endpoint: FILING_INDEX_ENDPOINT, slug: 'edgar-filing-index',
+      params: { cik: f.cik, accession: f.accessionNo }, response: index, captureRuleId: ruleId
+    });
+    if (indexResult.parseStatus !== 'ok') {
+      failed++;
+      continue;
+    }
+
+    let instance: string | null;
+    try {
+      instance = filingInstanceName(index.body);
+    } catch {
+      failed++; // a 200 that is not the JSON listing
+      continue;
+    }
+    if (instance === null) continue;
+
+    const response = await host.httpGet(`${base}${instance}`, EDGAR_HEADERS);
+    calls++;
+    const result = captureResponse({
+      host, db, runId: run.runId, asOfDate: run.tradingDate, provider: 'edgar',
+      endpoint: FILING_INSTANCE_ENDPOINT, slug: 'edgar-filing-instance',
+      params: { cik: f.cik, accession: f.accessionNo, instance }, response, captureRuleId: ruleId,
+      recipe: recipes.filingFacts({ cik: f.cik, accessionNo: f.accessionNo, form: f.form, filedDate: f.filed })
+    });
+    if (result.parseStatus === 'ok') stored += result.rowsWritten;
+    else failed++;
+  }
+
+  return { stored, calls, failed };
+}
+
+/** Two sub-phases reported as one domain: calls, rows and failures add; skipped only if both were. */
+function combined(a: SubPhaseCount, b: SubPhaseCount): SubPhaseCount {
+  const skippedBoth = a.skipped !== undefined && b.skipped !== undefined;
+  return {
+    stored: a.stored + b.stored,
+    calls: a.calls + b.calls,
+    failed: a.failed + b.failed,
+    ...(skippedBoth ? { skipped: `${a.skipped as string}; ${b.skipped as string}` } : {})
+  };
+}
+
+/**
  * Short interest — weekly, one whole-market sweep from Polygon.
  *
  * Verified live on 2026-09-14: the first daily run after the endpoint fix stored
@@ -962,7 +1048,11 @@ export async function runEventsPhase(
     secTickerMap,
     // `events_filings` counts every report filing stored, from either source.
     filings: { ...rotation, stored: rotation.stored + fromIndex },
-    facts: await attempt('edgar-facts', () => runEdgarFacts(host, db, run)),
+    // `events_facts` counts both sources: companyfacts, then the filings it omitted (v1.1.360).
+    facts: combined(
+      await attempt('edgar-facts', () => runEdgarFacts(host, db, run)),
+      await attempt('edgar-filing-facts', () => runEdgarFilingFacts(host, db, run))
+    ),
     shortInterest: await attempt('short-interest', () => runShortInterest(host, db, run, opts)),
     recommendations: await attempt('recommendations', () => runRecommendations(host, db, run, opts)),
     insider

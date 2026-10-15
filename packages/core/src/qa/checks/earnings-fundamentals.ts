@@ -1,6 +1,7 @@
 import type { CheckContext, CheckDefinition, Evaluation } from '../check.js';
 import {
-  FACTS_RETRY_DAYS, FACTS_RETRY_RESERVE, factsQueueEntries, factsRetryDue, lastFactsFetchEt
+  COMPANYFACTS_OMITTED_AFTER_DAYS, FACTS_RETRY_DAYS, FACTS_RETRY_RESERVE, FILING_INSTANCE_ENDPOINT,
+  factsQueueEntries, factsRetryDue, lastFactsFetchEt
 } from '../../collector/facts-queue.js';
 import { effectiveCikSql } from '../../collector/cik.js';
 
@@ -133,12 +134,10 @@ const RECENT_REPORT_GRACE_DAYS = 21;
  */
 const REPORT_FILING_GRACE_DAYS = 60;
 
-/**
- * A report filing still absent from companyfacts this long after it was filed has been OMITTED from
- * SEC's aggregate, not merely delayed (v1.1.332). Working: filings either side of the hole landed
- * within days (all 15 filed 07-21..24 and 52 of 53 filed 08-03..11 were present when next read).
- */
-const COMPANYFACTS_OMITTED_AFTER_DAYS = 14;
+// COMPANYFACTS_OMITTED_AFTER_DAYS (v1.1.332) lives in collector/facts-queue.ts since v1.1.360, so
+// QC-701, QC-704 and the filing-facts fallback read one definition of "omitted". Working: filings
+// either side of the hole landed within days (all 15 filed 07-21..24 and 52 of 53 filed 08-03..11
+// were present when next read).
 
 /** The two independent readings QC-602 exists to compare. Both must be present or it is vacuous. */
 const EARNINGS_CROSS_SOURCES = ['finnhub', 'etrade'] as const;
@@ -1031,8 +1030,9 @@ export const QC704_COMPANYFACTS_OMISSION: CheckDefinition = {
     'QC-701 looks only at chain-subset stocks whose newest fact is over 120 days old, and on 2026-09-28 it ' +
     "named 7 of at least 15 filings the aggregate had dropped. SEC's companyfacts omitted most 10-Qs filed " +
     '2026-07-28 and 07-29 (5 of 6 and 8 of 12 read afterwards), while filings on either side landed. KO\'s ' +
-    'was still missing live two months later, though it carries inline XBRL. The pipeline is not the cause, so ' +
-    'this reports rather than gates, and the weekly companyfacts retry is what may close it.',
+    'was still missing live two months later, though it carries inline XBRL. Since v1.1.360 the collector reads ' +
+    "such a filing's facts from its own XBRL instance, so this fires only while that has not yet worked; a filing " +
+    'recovered that way closes `data_corrected`, and one SEC later adds closes `provider_fixed`.',
   readsTables: ['raw_edgar_filing', 'raw_edgar_fact', 'meta_response'],
   testedQuantity: 'days_since_filing_without_facts',
   testedUnit: 'days',
@@ -1044,32 +1044,48 @@ export const QC704_COMPANYFACTS_OMISSION: CheckDefinition = {
     const lastFetch = lastFactsFetchEt(ctx.db);
     const rows = ctx.db
       .prepare(
+        // Which SOURCE delivered the facts, not merely whether any exist: a filing recovered from its
+        // own instance is still absent from SEC's aggregate, and "now in SEC companyfacts" would be false.
         `SELECT f.ticker, f.cik, f.form, f.filed_date, f.accession_no,
-                EXISTS (SELECT 1 FROM raw_edgar_fact x WHERE x.accession_no = f.accession_no) AS has_facts
+                EXISTS (SELECT 1 FROM raw_edgar_fact x JOIN meta_response m ON m.source_response_id = x.source_response_id
+                         WHERE x.accession_no = f.accession_no AND m.endpoint <> ?) AS in_companyfacts,
+                EXISTS (SELECT 1 FROM raw_edgar_fact x JOIN meta_response m ON m.source_response_id = x.source_response_id
+                         WHERE x.accession_no = f.accession_no AND m.endpoint = ?) AS from_filing
            FROM raw_edgar_filing f
           WHERE f.form IN ('10-K', '10-Q', '20-F', '40-F') AND f.filed_date <= ?
           ORDER BY f.filed_date, f.ticker`
       )
-      .all(ctx.tradingDate) as {
-      ticker: string; cik: string; form: string; filed_date: string; accession_no: string; has_facts: number;
+      .all(FILING_INSTANCE_ENDPOINT, FILING_INSTANCE_ENDPOINT, ctx.tradingDate) as {
+      ticker: string; cik: string; form: string; filed_date: string; accession_no: string;
+      in_companyfacts: number; from_filing: number;
     }[];
     const out: Evaluation[] = [];
     for (const r of rows) {
       const fetched = lastFetch.get(r.cik) ?? null;
       // Judged only once companyfacts has been read long enough after the filing to have held it.
       if (fetched === null || daysBetween(r.filed_date, fetched) < COMPANYFACTS_OMITTED_AFTER_DAYS) continue;
-      const fired = r.has_facts === 0;
+      const fired = r.in_companyfacts === 0 && r.from_filing === 0;
       const days = daysBetween(r.filed_date, ctx.tradingDate);
+      const what = `${r.ticker} ${r.form} filed ${r.filed_date}`;
       out.push({
         key: r.accession_no,
         value: fired ? days : 0,
         fired,
         detail: fired
-          ? `${r.ticker} ${r.form} filed ${r.filed_date} (${r.accession_no}) is absent from SEC companyfacts read ${fetched}, ` +
-            `${daysBetween(r.filed_date, fetched)} days after filing — omitted by SEC's aggregate`
-          : `${r.ticker} ${r.form} filed ${r.filed_date} is in companyfacts`,
-        evidence: { ticker: r.ticker, cik: r.cik, form: r.form, filedDate: r.filed_date, accession: r.accession_no, companyfactsRead: fetched },
-        closesAs: fired ? undefined : { kind: 'provider_fixed', note: `${r.ticker} ${r.form} filed ${r.filed_date}: now in SEC companyfacts (read ${fetched})` }
+          ? `${what} (${r.accession_no}) is absent from SEC companyfacts read ${fetched}, ` +
+            `${daysBetween(r.filed_date, fetched)} days after filing — omitted by SEC's aggregate, and not yet read from the filing's own XBRL instance`
+          : r.in_companyfacts === 1
+            ? `${what} is in companyfacts`
+            : `${what} is omitted by SEC companyfacts; its facts were read from the filing's own XBRL instance`,
+        evidence: {
+          ticker: r.ticker, cik: r.cik, form: r.form, filedDate: r.filed_date, accession: r.accession_no,
+          companyfactsRead: fetched, inCompanyfacts: r.in_companyfacts === 1, fromFiling: r.from_filing === 1
+        },
+        closesAs: fired
+          ? undefined
+          : r.in_companyfacts === 1
+            ? { kind: 'provider_fixed', note: `${what}: now in SEC companyfacts (read ${fetched})` }
+            : { kind: 'data_corrected', note: `${what}: facts read from the filing's own XBRL instance; SEC companyfacts still omits it` }
       });
     }
     return out;
