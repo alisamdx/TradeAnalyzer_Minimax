@@ -200,6 +200,7 @@ Note the ordering limit this does *not* fix: a contract recommended by the eveni
 
 - **Checkpoints** per phase and, inside phases 2, 7 and 8, per ticker: `phase_progress_json = { phase, doneKeys: [...], total }`. A restarted run (same `trading_date`, same slot) reuses the open `meta_run` row and skips done keys.
 - **Cancellation** honours `host.signal`; the current response is archived and ingested before stopping; the run is `cancelled` and the gate still runs on what exists (partial days are `unusable` by QC-006, which is the correct verdict).
+- **Every phase outcome is recorded** in `meta_run_phase` (v1.1.361, 02 §1): `ok`, `failed`, `cancelled`, or `not_reached` for the phases a cancellation never reached. Phase-8 sub-phases are recorded individually through `runEventsPhase`'s `onOutcome`. A failed bookkeeping write is reported with the phase errors and never stops the run.
 - **Re-running a completed day** (operator) creates a **new** run with the same `trading_date`; rows append with a later `observed_at` (P1). Nothing is deleted.
 - **E*Trade token dormancy** mid-run: the host transport renews and retries on any failure (existing hardening). The collector additionally paces phase 7 so no gap between E*Trade calls exceeds 60 s, and issues a keep-alive quote if a Polygon-heavy phase would otherwise leave E*Trade idle for > 90 min (only relevant if phases reorder).
 

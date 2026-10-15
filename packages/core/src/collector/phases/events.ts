@@ -74,6 +74,14 @@ export interface SubPhaseCount {
   readonly skipped?: string;
 }
 
+/** How one phase-8 sub-phase ended, as `meta_run_phase` records it. */
+export interface SubPhaseOutcome {
+  readonly status: 'ok' | 'failed' | 'cancelled';
+  readonly startedAt: string;
+  readonly finishedAt: string;
+  readonly error?: string;
+}
+
 export interface EventsPhaseResult {
   readonly earnings: SubPhaseCount;
   readonly etradeEarnings: SubPhaseCount;
@@ -1012,18 +1020,32 @@ export async function runEventsPhase(
   opts: {
     readonly force?: boolean;
     readonly onError?: (name: string, err: unknown) => void;
+    /**
+     * Every sub-phase's outcome, success included (v1.1.361), so the run can record each one in
+     * `meta_run_phase`. `onError` alone said only what failed, which cannot tell "ran clean" from
+     * "never ran".
+     */
+    readonly onOutcome?: (name: string, outcome: SubPhaseOutcome) => void;
   } = {}
 ): Promise<EventsPhaseResult> {
   const attempt = async (
     name: string,
     fn: () => Promise<SubPhaseCount>
   ): Promise<SubPhaseCount> => {
+    const startedAt = host.nowET();
     try {
-      return await fn();
+      const result = await fn();
+      opts.onOutcome?.(name, { status: 'ok', startedAt, finishedAt: host.nowET() });
+      return result;
     } catch (err) {
-      if (host.signal.aborted) throw err;
+      const error = err instanceof Error ? err.message : String(err);
+      if (host.signal.aborted) {
+        opts.onOutcome?.(name, { status: 'cancelled', startedAt, finishedAt: host.nowET(), error });
+        throw err;
+      }
       opts.onError?.(name, err);
-      return { ...EMPTY, failed: 1, skipped: err instanceof Error ? err.message : String(err) };
+      opts.onOutcome?.(name, { status: 'failed', startedAt, finishedAt: host.nowET(), error });
+      return { ...EMPTY, failed: 1, skipped: error };
     }
   };
 

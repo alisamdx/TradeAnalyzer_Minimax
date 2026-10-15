@@ -565,10 +565,108 @@ export const QC010_LEGACY_HANDOFF_PARSED: CheckDefinition = {
   }
 };
 
+export const QC006_RUN_COMPLETENESS: CheckDefinition = {
+  id: 'QC-006',
+  domain: 'cross_cutting',
+  severity: 'blocking',
+  description:
+    'Every phase the daily run scheduled, and every phase-8 sub-phase it started, ended normally — read ' +
+    'from `meta_run_phase` (v1.1.361). A phase that threw, was cancelled mid-way or was never reached ' +
+    'leaves its domain thin in a way no per-domain check can tell from a quiet day: until this existed ' +
+    'a crashed phase was caught, logged to memory and forgotten. Keyed `<trading date> <phase>`, so a ' +
+    'failure affects only its own day; a later run that collects the same date and runs the phase ' +
+    'cleanly closes it `data_corrected`. A day nobody re-collects stays open, because its hole is real. ' +
+    'Evaluates nothing on a run that wrote no phase rows (a backfill, a one-shot, or a run before v1.1.361).',
+  readsTables: ['meta_run_phase'],
+  testedQuantity: null,
+  testedUnit: null,
+  thresholds: {},
+  thresholdBasis: 'not_applicable',
+  remediation: 'R1',
+  run(ctx) {
+    const rows = ctx.db
+      .prepare('SELECT phase, status, error FROM meta_run_phase WHERE run_id = ? ORDER BY phase_row_id')
+      .all(ctx.runId) as { phase: string; status: string; error: string | null }[];
+    return rows.map((r): Evaluation => {
+      const fired = r.status !== 'ok';
+      const what =
+        r.status === 'failed' ? `threw: ${r.error ?? 'no message'}`
+          : r.status === 'cancelled' ? 'was cancelled before it finished'
+            : r.status === 'not_reached' ? 'was never reached (the run stopped before it)'
+              : 'ended normally';
+      return {
+        key: `${ctx.tradingDate} ${r.phase}`,
+        fired,
+        detail: fired ? `phase ${r.phase} ${what}; its domain is incomplete for ${ctx.tradingDate}` : undefined,
+        evidence: { phase: r.phase, status: r.status, error: r.error, runId: ctx.runId },
+        closesAs: fired
+          ? undefined
+          : { kind: 'data_corrected', note: `phase ${r.phase} ran cleanly for ${ctx.tradingDate} on run ${String(ctx.runId)}` }
+      };
+    });
+  }
+};
+
+/** ISO date `days` after `iso` (negative for before). */
+function shiftDays(iso: string, days: number): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/** ISO date `years` years before `iso`; 29 February lands on 1 March. */
+function yearsBefore(iso: string, years: number): string {
+  const [y, m, d] = iso.split('-').map(Number) as [number, number, number];
+  return new Date(Date.UTC(y - years, m - 1, d)).toISOString().slice(0, 10);
+}
+
+export const QC105_CALENDAR_COVERAGE: CheckDefinition = {
+  id: 'QC-105',
+  domain: 'cross_cutting',
+  severity: 'blocking',
+  description:
+    '`ref_trading_day` holds every calendar day in [trading date − 5 y, trading date + 90 d] (v1.1.361). ' +
+    'Preflight, the watchdog and several checks treat an unknown date as a trading day on purpose, so a ' +
+    'missing stretch does not stop anything: it silently turns weekends into sessions (weekend-dated ' +
+    'snapshots, a NO RUN email every Saturday) and makes every "count the sessions since" read the wrong ' +
+    'number. Preflight seeds the calendar from five years back to two years ahead, so this can fire only ' +
+    'when that seeding has broken, which is exactly when nothing else would notice. One key, ' +
+    '`ref_trading_day`, so a reseeded calendar closes the finding the next night.',
+  readsTables: ['ref_trading_day'],
+  testedQuantity: 'missing_calendar_days',
+  testedUnit: 'days',
+  thresholds: { maxMissingDays: 0 },
+  thresholdBasis: 'structural',
+  run(ctx) {
+    const from = yearsBefore(ctx.tradingDate, 5);
+    const to = shiftDays(ctx.tradingDate, 90);
+    const present = new Set(
+      (ctx.db.prepare('SELECT date FROM ref_trading_day WHERE date BETWEEN ? AND ?').all(from, to) as { date: string }[])
+        .map((r) => r.date)
+    );
+    const missing: string[] = [];
+    for (let d = from; d <= to; d = shiftDays(d, 1)) if (!present.has(d)) missing.push(d);
+    const fired = missing.length > this.thresholds['maxMissingDays']!;
+    return [{
+      key: 'ref_trading_day',
+      value: missing.length,
+      fired,
+      detail: fired
+        ? `ref_trading_day lacks ${String(missing.length)} calendar day(s) in ${from}..${to}, ` +
+          `first ${missing[0] as string}, last ${missing[missing.length - 1] as string}; an unknown date reads as a trading day`
+        : undefined,
+      evidence: { from, to, missing: missing.length, firstMissing: missing[0] ?? null, lastMissing: missing[missing.length - 1] ?? null },
+      closesAs: fired ? undefined : { kind: 'data_corrected', note: `ref_trading_day covers ${from}..${to} again` }
+    }];
+  }
+};
+
 export const CROSS_CUTTING_CHECKS: readonly CheckDefinition[] = [
   QC001_PROVENANCE,
   QC004_NULL_DISCIPLINE,
+  QC006_RUN_COMPLETENESS,
   QC008_PROVIDER_CAP,
   QC009_DUPLICATE_NATURAL_KEY,
-  QC010_LEGACY_HANDOFF_PARSED
+  QC010_LEGACY_HANDOFF_PARSED,
+  QC105_CALENDAR_COVERAGE
 ];

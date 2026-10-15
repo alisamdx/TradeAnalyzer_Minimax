@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.361] - 2026-10-14
+
+### Collector: QC-006 run completeness and QC-105 calendar coverage
+
+Two of the unbuilt checks that decide whether a clean day can be trusted, built before the pilot's 20-day streak starts. A phase that crashed used to be caught and then forgotten, so its domain looked like a quiet day. Every phase outcome is now recorded in a new `meta_run_phase` table, and QC-006 blocks on any that did not finish, for that date only. QC-105 blocks if the trading calendar has a hole in the five years behind or 90 days ahead, since an unknown date is silently treated as a trading day.
+
+Details: `changelogs/v1.1.361_2026-10-14.md`.
+
 ## [1.1.360] - 2026-10-14
 
 ### EDGAR facts: read an omitted filing's own XBRL instance

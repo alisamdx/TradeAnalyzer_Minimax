@@ -181,6 +181,20 @@ One row per collector run (a run = one slot on one day, or a one-shot job).
 | `collector_version`, `dictionary_version` | TEXT | for replay equivalence (AC-4) |
 | `gate_verdict` | TEXT | `green` \| `amber` \| `red` — **the verdict at the moment the run finished**, never updated afterwards. It is a historical fact about the run, not a live usability flag. Usability is `qa_domain_day_status` and only that (03 §4); a stored `usable` column would go stale the first time an exception was resolved the next day |
 
+### `meta_run_phase` — how each phase of a daily run ended (dictionary v24, v1.1.361)
+One row per phase of a daily run (`bars`, `quotes`, `corporate_actions`, `account`, `chain_subset`, `chains`, `events`, `derive`) and per phase-8 sub-phase (`events/<name>`, e.g. `events/edgar-facts`), written as each ends. QC-006 reads it.
+
+| column | type | notes |
+|---|---|---|
+| `phase_row_id` | INTEGER PK | |
+| `run_id` | INTEGER | → `meta_run` |
+| `phase` | TEXT | unique with `run_id` |
+| `status` | TEXT | `ok` (returned normally, whatever it stored) \| `failed` (threw) \| `cancelled` (running when the run was cancelled) \| `not_reached` (scheduled, never started) |
+| `started_at`, `finished_at` | TEXT | null when `not_reached` |
+| `error` | TEXT | what the phase threw, verbatim; null when it did not throw |
+
+Before it existed, `runDaily` caught a phase that threw so the rest could run, and then only appended the message to an array it returned. Nothing stored it, so a crashed phase left its domain looking like a quiet day to every check, the email and every rehearsal. Phases a cancellation never reached are written `not_reached` once the run stops, so "did not run" is a row, never an absence. A backfill, a one-shot or a run before v1.1.361 writes no rows.
+
 ### `meta_capture_rule`
 Versioned definitions (P6). A change creates a new row; runs reference the row in force.
 

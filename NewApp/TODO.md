@@ -61,15 +61,16 @@ audit. State at creation: existing app **v1.1.239**, `core` **0.6.8**, TradeAnal
 16. **Never-fired checks — rule on each** (TA2 → Pilot exit).
 17. **Working thresholds — rule on each**, including QC-209's new `minGapSessions = 20`.
 18. **Every gate domain inspected by a person** (TA2 → Pilot exit → inspections).
-19. **18 checks specified in 03 but not built** — build or formally de-scope each in 03:
+19. **16 checks specified in 03 but not built** (QC-006 and QC-105 built v1.1.361) — build or
+    formally de-scope each in 03:
     QC-002 archive integrity, QC-003 dictionary conformance, QC-005 mutation guard,
-    QC-006 run completeness, QC-007 capture-rule reference, QC-101 universe drift,
+    QC-007 capture-rule reference, QC-101 universe drift,
     QC-102 reference staleness, QC-103 sector mapping gap, QC-104 optionability
-    contradiction, QC-105 calendar coverage, QC-106 unexpected market status,
+    contradiction, QC-106 unexpected market status,
     QC-206 series consistency after re-fetch, QC-208 zero-volume day, QC-304 stale snapshot,
     QC-952 fire-count review, QC-953 archive/DB drift, QC-954 exception aging,
-    QC-955 threshold distance. Highest value for trusting a "clean day": QC-006, QC-105,
-    QC-106, QC-002, QC-005. (Check first whether B10a's Pilot-exit reviews already cover
+    QC-955 threshold distance. Highest value for trusting a "clean day" now: QC-106, QC-002,
+    QC-005. (Check first whether B10a's Pilot-exit reviews already cover
     QC-952/955 in substance.)
 20. **Watch generation integrity** through the pilot — the corruption investigation is
     downgraded, not closed. Run `diagnose-generation.mjs` from an ordinary (non-Claude,

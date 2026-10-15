@@ -12,6 +12,7 @@ import { runGate, type Verdict } from '../qa/gate.js';
 import { runR6ActionRefetch, runR3FinalBarRefetch, R6_MAX_TICKERS_PER_RUN, type R6Report, type R3Report } from './remediation.js';
 import { buildStatusEmail } from '../qa/email.js';
 import { COLLECTOR_VERSION } from '../version.js';
+import { recordPhase, recordNotReached, type PhaseOutcome } from './run-phase.js';
 
 /**
  * The daily run — 04 §2.
@@ -82,12 +83,25 @@ export async function runDaily(
   // Each phase is attempted independently. A failure is recorded and the run
   // continues: the gate reports which domains suffered, which beats losing the
   // cheap domains because an expensive one failed.
+  // Every outcome is also written to `meta_run_phase` (v1.1.361), which QC-006 reads.
+  const record = (phase: string, outcome: PhaseOutcome): void => {
+    const failed = recordPhase(db, run.runId, phase, outcome);
+    if (failed !== null) phaseErrors.push(`phase-record ${phase}: ${failed}`);
+  };
   const attempt = async (name: string, fn: () => Promise<void>): Promise<void> => {
+    const startedAt = host.nowET();
     try {
       await fn();
+      record(name, { status: 'ok', startedAt, finishedAt: host.nowET() });
     } catch (err) {
-      if (err instanceof CollectorCancelled) { cancelled = true; throw err; }
-      phaseErrors.push(`${name}: ${err instanceof Error ? err.message : String(err)}`);
+      const error = err instanceof Error ? err.message : String(err);
+      if (err instanceof CollectorCancelled) {
+        cancelled = true;
+        record(name, { status: 'cancelled', startedAt, finishedAt: host.nowET(), error });
+        throw err;
+      }
+      phaseErrors.push(`${name}: ${error}`);
+      record(name, { status: 'failed', startedAt, finishedAt: host.nowET(), error });
     }
   };
 
@@ -129,7 +143,8 @@ export async function runDaily(
       const c = await runEventsPhase(host, db, run, {
         onError: (name, err) => {
           phaseErrors.push(`events/${name}: ${err instanceof Error ? err.message : String(err)}`);
-        }
+        },
+        onOutcome: (name, outcome) => record(`events/${name}`, outcome)
       });
       for (const [name, sub] of Object.entries(c)) {
         domains[`events_${name}`] = { expected: sub.calls, stored: sub.stored };
@@ -147,6 +162,12 @@ export async function runDaily(
   } catch {
     // Cancellation only. The current response was already archived and ingested
     // before the signal was honoured, so what exists is consistent.
+  }
+  // The phases a cancellation never reached, as rows rather than absences (QC-006).
+  try {
+    recordNotReached(db, run.runId);
+  } catch (err) {
+    phaseErrors.push(`phase-record not_reached: ${err instanceof Error ? err.message : String(err)}`);
   }
 
   // R3 — the last thing before the gate, so as much of the run as possible has passed 17:00 ET:

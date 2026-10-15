@@ -385,7 +385,7 @@ describe('the fallback in the collector', () => {
     // companyfacts read again a week later, now holding the 10-Q.
     const r = captureResponse({
       host: makeHost(), db: db(), runId: run.runId, asOfDate: DATE, provider: 'edgar',
-      endpoint: '/api/xbrl/companyfacts/CIK{cik}.json', slug: 'edgar-companyfacts', params: { cik: '0001722482', again: 1 },
+      endpoint: '/api/xbrl/companyfacts/CIK{cik}.json', slug: 'edgar-companyfacts', params: { cik: '0001722482', again: '1' },
       response: response(JSON.stringify({ facts: { 'us-gaap': { Assets: { units: { USD: [AVTR_CF[3].p] } } } } }), 200, '2026-10-14'),
       captureRuleId: rule(), recipe: recipes.companyFacts({ cik: '0001722482' })
     });

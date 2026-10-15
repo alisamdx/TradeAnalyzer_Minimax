@@ -188,6 +188,33 @@ export const metaTables: readonly TableEntry[] = [
   }),
 
   defineTable({
+    table: 'meta_run_phase',
+    layer: 'meta',
+    domain: 'generation',
+    description:
+      'How each phase of a daily run ended — one row per phase and per phase-8 sub-phase, written as the run ' +
+      'goes (v1.1.361, dictionary v24). QC-006 reads it. Until it existed a phase that threw was caught, ' +
+      'appended to an in-memory list, and lost when the run returned: nothing in the generation, the ' +
+      'gate, the email or a later rehearsal could tell a domain whose phase crashed from one that ran and ' +
+      'found little. Phases a cancellation never reached are written `not_reached`, so "did not run" is a ' +
+      'row and never an absence.',
+    naturalKey: ['run_id', 'phase'],
+    appendOnly: true,
+    ruleDriven: false,
+    standardColumns: false,
+    columns: [
+      col.int('phase_row_id', 'Row identifier.', { primaryKey: true, sourceProvider: 'collector' }),
+      col.int('run_id', 'The daily run this phase belongs to.', { references: { table: 'meta_run', column: 'run_id' }, sourceProvider: 'collector' }),
+      col.ident('phase', 'The phase — `bars`, `quotes`, `corporate_actions`, `account`, `chain_subset`, `chains`, `events`, `derive` — or a phase-8 sub-phase as `events/<name>`, e.g. `events/edgar-facts`.', { sourceProvider: 'collector' }),
+      col.enumOf('status', ['ok', 'failed', 'cancelled', 'not_reached'], '`ok`: returned normally, whatever it stored. `failed`: threw. `cancelled`: was running when the run was cancelled. `not_reached`: scheduled, never started.', { sourceProvider: 'collector' }),
+      nullable(col.ts('started_at', 'When the phase began.'), 'not reached'),
+      nullable(col.ts('finished_at', 'When the phase ended.'), 'not reached'),
+      nullable(col.text('error', 'What the phase threw, verbatim.'), 'the phase did not throw')
+    ],
+    indexes: [{ columns: ['run_id', 'phase'], unique: true }]
+  }),
+
+  defineTable({
     table: 'meta_capture_rule',
     layer: 'meta',
     domain: 'generation',
