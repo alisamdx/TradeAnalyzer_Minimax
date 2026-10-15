@@ -12,7 +12,7 @@ import type { SqliteLike } from '../db/sqlite-like.js';
 
 /** The phases a daily run schedules, in order (04 §2). A row for each is guaranteed by `recordNotReached`. */
 export const DAILY_PHASES = [
-  'bars', 'quotes', 'corporate_actions', 'account', 'chain_subset', 'chains', 'events', 'derive'
+  'bars', 'quotes', 'quotes_etrade', 'corporate_actions', 'account', 'chain_subset', 'chains', 'events', 'derive'
 ] as const;
 
 export interface PhaseOutcome {

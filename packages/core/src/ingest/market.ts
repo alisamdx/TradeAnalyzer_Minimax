@@ -167,6 +167,104 @@ export function ingestSnapshot(body: string, ctx: IngestContext): readonly Inges
   return rows;
 }
 
+// ── E*Trade equity quotes (QC-303's bid/ask) ───────────────────────────────
+
+interface EtradeEquityQuote {
+  dateTimeUTC?: unknown;
+  quoteStatus?: unknown;
+  ahFlag?: unknown;
+  All?: {
+    bid?: unknown; bidSize?: unknown; bidTime?: unknown;
+    ask?: unknown; askSize?: unknown; askTime?: unknown;
+  };
+  Product?: { symbol?: unknown };
+}
+
+/** E*Trade's `ahFlag` is the STRING `"true"`/`"false"` (live 2026-10-14). `Boolean("false")` is true. */
+export function etradeTrueFalseToFlag(v: unknown): number | null {
+  if (v === true || v === 'true') return 1;
+  if (v === false || v === 'false') return 0;
+  return null;
+}
+
+/**
+ * E*Trade's `bidTime`/`askTime`: an ET wall-clock string with a zone label,
+ * `19:59:57 EDT 10-14-2026` (live 2026-10-14). The label carries the offset, so
+ * no timezone arithmetic is needed — and none should be: re-deriving it would be
+ * a second opinion on a fact the provider already stated.
+ */
+export function etradeWallClockToEt(v: unknown): { value: string | null; status: 'ok' | 'omitted' | 'invalid' } {
+  if (v === null || v === undefined || v === '') return { value: null, status: 'omitted' };
+  const m = typeof v === 'string' ? /^(\d{2}):(\d{2}):(\d{2}) (EDT|EST) (\d{2})-(\d{2})-(\d{4})$/.exec(v.trim()) : null;
+  if (!m) return { value: null, status: 'invalid' };
+  const [, hh, mi, ss, zone, mo, dd, yyyy] = m;
+  return { value: `${yyyy}-${mo}-${dd}T${hh}:${mi}:${ss}${zone === 'EDT' ? '-04:00' : '-05:00'}`, status: 'ok' };
+}
+
+function finiteOrNull(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null;
+}
+
+/** ET timestamp from epoch SECONDS (E*Trade's `dateTimeUTC`). */
+function secondsToEt(v: unknown): string | null {
+  return typeof v === 'number' && Number.isFinite(v) && v > 0 ? nsEpochToEt(v * 1000) : null;
+}
+
+/**
+ * One batched E*Trade quote response (`/v1/market/quote/A,B,C`) to one row per
+ * symbol asked. A result for a symbol that was not asked is dropped rather than
+ * stored under its own name: the row is keyed on what was asked (v1.1.257), and
+ * the phase counts asked-but-unanswered tickers from the rows that do exist.
+ *
+ * Each side's price has its own status, and sizes stand alone, so an after-hours
+ * book showing only an ask keeps the ask.
+ */
+export function makeEtradeQuoteIngest(opts: { readonly symbols: readonly string[] }) {
+  const asked = new Set(opts.symbols.map((s) => s.toUpperCase()));
+  return (body: string, ctx: IngestContext): readonly IngestedRow[] => {
+    const parsed = JSON.parse(body) as { QuoteResponse?: { QuoteData?: EtradeEquityQuote[] } };
+    const rows: IngestedRow[] = [];
+    const seen = new Set<string>();
+
+    for (const q of parsed.QuoteResponse?.QuoteData ?? []) {
+      const symbol = typeof q.Product?.symbol === 'string' ? q.Product.symbol.toUpperCase() : null;
+      if (symbol === null || !asked.has(symbol) || seen.has(symbol)) continue;
+      seen.add(symbol);
+
+      const all = q.All ?? {};
+      const bid = finiteOrNull(all.bid);
+      const ask = finiteOrNull(all.ask);
+      const bidTime = etradeWallClockToEt(all.bidTime);
+      const askTime = etradeWallClockToEt(all.askTime);
+
+      rows.push({
+        table: 'raw_etrade_quote',
+        values: {
+          run_id: ctx.runId,
+          as_of_date: ctx.asOfDate,
+          observed_at: ctx.observedAt,
+          capture_rule_id: ctx.captureRuleId,
+          ticker: symbol,
+          bid,
+          bid_size: finiteOrNull(all.bidSize),
+          bid_status: bid === null ? statusFor(all.bid) === 'ok' ? 'invalid' : 'omitted' : 'ok',
+          ask,
+          ask_size: finiteOrNull(all.askSize),
+          ask_status: ask === null ? statusFor(all.ask) === 'ok' ? 'invalid' : 'omitted' : 'ok',
+          bid_time: bidTime.value,
+          bid_time_status: bidTime.status,
+          ask_time: askTime.value,
+          ask_time_status: askTime.status,
+          ah_flag: etradeTrueFalseToFlag(q.ahFlag),
+          provider_quote_state: typeof q.quoteStatus === 'string' && q.quoteStatus !== '' ? q.quoteStatus : null,
+          provider_timestamp: secondsToEt(q.dateTimeUTC)
+        }
+      });
+    }
+    return rows;
+  };
+}
+
 interface PolygonSplit {
   ticker?: string; execution_date?: string; split_from?: number; split_to?: number; id?: string;
 }

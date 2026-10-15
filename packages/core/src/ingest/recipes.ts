@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { IngestModule } from '../collector/capture.js';
-import { makeBarIngest, ingestSnapshot, ingestSplits, ingestDividends } from './market.js';
+import { makeBarIngest, ingestSnapshot, ingestSplits, ingestDividends, makeEtradeQuoteIngest } from './market.js';
 import {
   hashAccountKey, makePositionIngest, makeBalanceIngest, makeOrderIngest, makeTransactionIngest
 } from './account.js';
@@ -59,6 +59,7 @@ export const INGEST_MODULES = [
   'etrade_orders',
   'etrade_transactions',
   'etrade_index_quote',
+  'etrade_quote',
   'etrade_earnings',
   'finnhub_earnings',
   'finnhub_recommendations',
@@ -176,6 +177,8 @@ export const recipes = {
       knownIds: sortedSet(o.knownIds) ?? []
     }),
   indexQuote: (o: { readonly symbol: string }): IngestRecipe => recipe('etrade_index_quote', { symbol: o.symbol }),
+  etradeQuotes: (o: { readonly symbols: readonly string[] }): IngestRecipe =>
+    recipe('etrade_quote', { symbols: [...o.symbols].sort() }),
   etradeEarnings: (o: { readonly ticker: string }): IngestRecipe => recipe('etrade_earnings', { ticker: o.ticker }),
 
   earnings: (o: { readonly sweepFrom: string; readonly sweepTo: string; readonly universe?: ReadonlySet<string> }): IngestRecipe =>
@@ -341,6 +344,7 @@ const DECODERS: { readonly [M in IngestModuleName]: (a: RecipeArgs) => IngestMod
   etrade_transactions: (a) =>
     makeTransactionIngest({ accountKeyHash: str(a, 'accountKeyHash'), knownIds: new Set(strings(a, 'knownIds')) }),
   etrade_index_quote: (a) => makeIndexQuoteIngest({ symbol: str(a, 'symbol') }),
+  etrade_quote: (a) => makeEtradeQuoteIngest({ symbols: strings(a, 'symbols') }),
   etrade_earnings: (a) => makeEtradeEarningsIngest({ ticker: str(a, 'ticker') }),
 
   finnhub_earnings: (a) => {

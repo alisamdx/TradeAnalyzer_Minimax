@@ -79,7 +79,10 @@ export { ingestTickerReference, zeroPadCik, pickShares } from '../ingest/raw-tic
 
 export { runDaily } from './daily.js';
 export type { DailyRunReport } from './daily.js';
-export { runBarsPhase, runQuotesPhase, runActionsPhase, BARS_RULE, QUOTES_RULE, ACTIONS_RULE } from './phases/market.js';
+export {
+  runBarsPhase, runQuotesPhase, runEtradeQuotesPhase, runActionsPhase, BARS_RULE, QUOTES_RULE, ETRADE_QUOTES_RULE,
+  ETRADE_QUOTE_BATCH, ACTIONS_RULE
+} from './phases/market.js';
 export type { PhaseCounts } from './phases/market.js';
 export {
   makeBarIngest, ingestSnapshot, ingestSplits, ingestDividends, volumeOrNull, msEpochToEtDate, nsEpochToEt

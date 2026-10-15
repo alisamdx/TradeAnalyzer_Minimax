@@ -156,6 +156,79 @@ export async function runQuotesPhase(
   };
 }
 
+export const ETRADE_QUOTES_RULE = { scope: 'universe_active', source: 'etrade_quote', batchSize: 25 } as const;
+
+/** E*Trade documents 25 symbols per quote call (50 only with `overrideSymbolCount`, deliberately not used). */
+export const ETRADE_QUOTE_BATCH = 25;
+
+export interface EtradeQuoteCounts extends PhaseCounts {
+  readonly calls: number;
+  /** Asked, answered 2xx, and absent from every response — a ticker E*Trade does not quote under that symbol. */
+  readonly unanswered: readonly string[];
+}
+
+/**
+ * Phase 3b — equity bid/ask from E*Trade, the only bid/ask this plan set has for
+ * stocks (Polygon Starter sends no `lastQuote`), and what QC-303 reads.
+ *
+ * Batched 25 to a call — about 44 calls for the universe. **A batched path had
+ * never been sent by either app before this phase** (the single-symbol shape was
+ * read live 2026-10-14), so a batch that comes back non-2xx is retried one
+ * symbol at a time: if the comma path is ever refused, the night still gets its
+ * quotes and the per-symbol calls in the API log say why.
+ */
+export async function runEtradeQuotesPhase(
+  host: CollectorHost,
+  db: SqliteLike,
+  run: RunHandle
+): Promise<EtradeQuoteCounts> {
+  const ruleId = captureRuleId(db, host, 'quotes_etrade', ETRADE_QUOTES_RULE, 'Equity bid/ask from E*Trade, 25 symbols per call.');
+  const tickers = activeMembers(db);
+  const batches: string[][] = [];
+  for (let i = 0; i < tickers.length; i += ETRADE_QUOTE_BATCH) batches.push(tickers.slice(i, i + ETRADE_QUOTE_BATCH));
+
+  let stored = 0;
+  let failed = 0;
+  let calls = 0;
+
+  const fetchOne = async (symbols: readonly string[]): Promise<boolean> => {
+    const path = `/v1/market/quote/${symbols.join(',')}`;
+    const response = await host.etradeGet(path, {});
+    calls++;
+    const ok = response.status !== null && response.status >= 200 && response.status < 300;
+    const result = captureResponse({
+      host, db, runId: run.runId, asOfDate: run.tradingDate, provider: 'etrade',
+      endpoint: '/v1/market/quote/{symbols}', slug: 'quote-equity',
+      params: { symbols: symbols.join(',') }, response, captureRuleId: ruleId,
+      recipe: recipes.etradeQuotes({ symbols })
+    });
+    if (result.parseStatus === 'ok') stored += result.rowsWritten;
+    else failed++;
+    return ok;
+  };
+
+  for (const [i, batch] of batches.entries()) {
+    throwIfCancelled(host, 'phase-3b-quotes-etrade');
+    host.progress('quotes-etrade', i, batches.length, batch[0] ?? '');
+    if (await fetchOne(batch)) continue;
+    if (batch.length === 1) continue;
+    for (const symbol of batch) {
+      throwIfCancelled(host, 'phase-3b-quotes-etrade');
+      await fetchOne([symbol]);
+    }
+  }
+
+  const answered = new Set(
+    (
+      db
+        .prepare('SELECT DISTINCT ticker FROM raw_etrade_quote WHERE run_id = ?')
+        .all(run.runId) as { ticker: string }[]
+    ).map((r) => r.ticker)
+  );
+  const unanswered = tickers.filter((t) => !answered.has(t));
+  return { expected: tickers.length, stored, failed, calls, unanswered };
+}
+
 /**
  * Phase 4 — corporate actions, swept by execution-date window.
  *

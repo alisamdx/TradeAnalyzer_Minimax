@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.363] - 2026-10-14
+
+### Collector: equity bid/ask from E*Trade, and QC-303 can finally run
+
+QC-303 (crossed market: bid above ask) had never evaluated a row. Polygon Stocks Starter sends no bid/ask, so every end-of-day quote had them empty, and quotes are only in Polygon's $199/mo Advanced plan. The collector now asks E*Trade for the bid/ask of every universe member each night, 25 tickers per call (about 44 calls), into a new `raw_etrade_quote` table, and QC-303 reads that. At 17:05 ET E*Trade's bid/ask is the after-hours quote, so the table also keeps E*Trade's after-hours flag and the time each side was struck, and QC-303's evidence counts after-hours crossed quotes separately. The changed check is a new version, so it needs a fresh pilot-exit ruling once it has run.
+
+Details: `changelogs/v1.1.363_2026-10-14.md`.
+
 ## [1.1.362] - 2026-10-14
 
 ### Collector: QC-413 counts real E*Trade renews

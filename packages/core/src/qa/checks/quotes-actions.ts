@@ -94,10 +94,14 @@ export const QC303_CROSSED_MARKET: CheckDefinition = {
   domain: 'quotes',
   severity: 'warning',
   description:
-    'Bid does not exceed ask when both are present. A crossed quote is not a price — it is a ' +
+    'Bid does not exceed ask when both sides are quoted (both `ok` and above zero), on the latest ' +
+    'E*Trade equity quote per ticker for the trading date. A crossed quote is not a price — it is a ' +
     'stale side, a feed artefact, or a snapshot taken mid-update — and anything that computes a ' +
-    'spread from it gets a negative number that looks like free money.',
-  readsTables: ['raw_eod_quote'],
+    'spread from it gets a negative number that looks like free money. Reads `raw_etrade_quote` since ' +
+    'v1.1.363: Polygon Starter sends no bid/ask, so on `raw_eod_quote` this check had never evaluated ' +
+    'a row. Captured at ~17:05 ET, these are extended-hours quotes; the evidence splits crossed rows ' +
+    'by `ah_flag` so an after-hours artefact can be told from a regular-session one.',
+  readsTables: ['raw_etrade_quote'],
   testedQuantity: 'crossed_fraction',
   testedUnit: 'fraction',
   thresholds: { maxCrossedFraction: 0 },
@@ -106,23 +110,43 @@ export const QC303_CROSSED_MARKET: CheckDefinition = {
   // pilot's threshold-review queue forever.
   thresholdBasis: 'structural',
   run(ctx) {
-    const row = ctx.db
+    // The latest observation per ticker: a re-run of the same date appends, and
+    // counting both would double a crossed quote. `row_id` breaks an
+    // `observed_at` tie, which a fast re-run can produce.
+    const rows = ctx.db
       .prepare(
-        `SELECT COUNT(*) AS total,
-                SUM(CASE WHEN bid > ask THEN 1 ELSE 0 END) AS crossed
-           FROM raw_eod_quote
-          WHERE as_of_date = ? AND quote_status = 'ok'`
+        `SELECT q.ticker, q.bid, q.ask, q.bid_time, q.ask_time, q.ah_flag
+           FROM raw_etrade_quote q
+          WHERE q.as_of_date = ? AND q.bid_status = 'ok' AND q.ask_status = 'ok'
+            AND q.bid > 0 AND q.ask > 0
+            AND q.row_id = (SELECT x.row_id FROM raw_etrade_quote x
+                             WHERE x.ticker = q.ticker AND x.as_of_date = q.as_of_date
+                             ORDER BY x.observed_at DESC, x.row_id DESC LIMIT 1)
+          ORDER BY q.ticker`
       )
-      .get(ctx.tradingDate) as { total: number; crossed: number | null };
-    if (row.total === 0) return [];
-    const fraction = (row.crossed ?? 0) / row.total;
+      .all(ctx.tradingDate) as {
+        ticker: string; bid: number; ask: number; bid_time: string | null; ask_time: string | null; ah_flag: number | null;
+      }[];
+    if (rows.length === 0) return [];
+    const crossed = rows.filter((r) => r.bid > r.ask);
+    const fraction = crossed.length / rows.length;
+    const afterHours = crossed.filter((r) => r.ah_flag === 1).length;
     return [
       {
         key: ctx.tradingDate,
         value: fraction,
-        fired: (row.crossed ?? 0) > 0,
-        detail: `${row.crossed ?? 0} of ${row.total} quotes are crossed`,
-        evidence: { total: row.total, crossed: row.crossed ?? 0 }
+        fired: crossed.length > 0,
+        detail:
+          `${crossed.length} of ${rows.length} quotes are crossed` +
+          (crossed.length > 0 ? ` (${afterHours} marked after-hours)` : ''),
+        evidence: {
+          total: rows.length,
+          crossed: crossed.length,
+          crossedAfterHours: afterHours,
+          sample: crossed.slice(0, 20).map((r) => ({
+            ticker: r.ticker, bid: r.bid, ask: r.ask, bidTime: r.bid_time, askTime: r.ask_time, ahFlag: r.ah_flag
+          }))
+        }
       }
     ];
   }

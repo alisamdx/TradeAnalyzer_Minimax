@@ -2,7 +2,7 @@ import type { CollectorHost } from './host.js';
 import { CollectorCancelled } from './host.js';
 import { beginRun, finishRun, recordRenewCount, type RunHandle } from './run.js';
 import { runPreflight } from './phases/preflight.js';
-import { runBarsPhase, runQuotesPhase, runActionsPhase } from './phases/market.js';
+import { runBarsPhase, runQuotesPhase, runEtradeQuotesPhase, runActionsPhase } from './phases/market.js';
 import { runAccountPhase } from './phases/account.js';
 import { runChainSubsetPhase, runChainsPhase } from './phases/chains.js';
 import { runEventsPhase } from './phases/events.js';
@@ -115,6 +115,12 @@ export async function runDaily(
     await attempt('quotes', async () => {
       const c = await runQuotesPhase(host, db, run);
       domains['quotes'] = { expected: c.expected, stored: c.stored };
+    });
+    // Its own phase, not part of `quotes`: a failure here must be a row QC-006 can
+    // read, never hidden behind a Polygon snapshot that succeeded.
+    await attempt('quotes_etrade', async () => {
+      const c = await runEtradeQuotesPhase(host, db, run);
+      domains['quotes_etrade'] = { expected: c.expected, stored: c.stored };
     });
     await attempt('corporate_actions', async () => {
       const c = await runActionsPhase(host, db, run);

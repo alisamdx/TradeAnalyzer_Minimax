@@ -104,6 +104,7 @@ The inspector refuses any filter or sort that would scan unbounded (05 §8), so 
 | `raw_ticker_reference` | `(ticker, observed_at)` |
 | `raw_daily_bar` | `(ticker, trade_date)`, `(trade_date)`, `(ticker, observed_at)` |
 | `raw_eod_quote` | `(ticker, as_of_date)`, `(as_of_date)` |
+| `raw_etrade_quote` | `(ticker, as_of_date)`, `(as_of_date)` |
 | `raw_option_expiration` | `(ticker, as_of_date)`, `(ticker, expiration_date)` |
 | `raw_option_contract_snapshot` | `(as_of_date)`, `(ticker, as_of_date)`, `(osi_symbol, as_of_date)`, `(ticker, expiration_date, as_of_date)`, `(source_response_id)` — the last added v1.1.252: QC-403 counts contracts per chain response ~4,900 times a run, each a full table scan without it, and the 2026-09-16 gate held the main thread 27 minutes |
 | `raw_split`, `raw_dividend` | `(ticker, execution_date)` / `(ticker, ex_dividend_date)` |
@@ -183,7 +184,7 @@ One row per collector run (a run = one slot on one day, or a one-shot job).
 | `etrade_renew_count` | INTEGER, nullable | E\*Trade OAuth renews the host attempted during this daily run, written just before the gate (v1.1.362, dictionary v25). QC-413 reads it. A count only, no token data. NULL: not a daily run, a host that does not report it (runs before v1.1.362), or the run died before the gate |
 
 ### `meta_run_phase` — how each phase of a daily run ended (dictionary v24, v1.1.361)
-One row per phase of a daily run (`bars`, `quotes`, `corporate_actions`, `account`, `chain_subset`, `chains`, `events`, `derive`) and per phase-8 sub-phase (`events/<name>`, e.g. `events/edgar-facts`), written as each ends. QC-006 reads it.
+One row per phase of a daily run (`bars`, `quotes`, `quotes_etrade` (v1.1.363), `corporate_actions`, `account`, `chain_subset`, `chains`, `events`, `derive`) and per phase-8 sub-phase (`events/<name>`, e.g. `events/edgar-facts`), written as each ends. QC-006 reads it.
 
 | column | type | notes |
 |---|---|---|
@@ -407,7 +408,7 @@ Natural key `(ticker, trade_date, observed_at)`. Expected count per trading day:
 ## 4. Domain: end-of-day quotes (Q5)
 
 ### `raw_eod_quote`
-Source: Polygon full-market snapshot `/v2/snapshot/locale/us/markets/stocks/tickers` (one call for the whole universe) — it is the cross-source check on the bar close and carries bid/ask. E*Trade `/v1/market/quote` is used only for VIX (§8) and as a second source on a rotating 5 % sample for disagreement measurement.
+Source: Polygon full-market snapshot `/v2/snapshot/locale/us/markets/stocks/tickers` (one call for the whole universe) — it is the cross-source check on the bar close. Its bid/ask columns are declared but empty on this plan (below). E*Trade `/v1/market/quote` serves VIX (§8), earnings dates (§7) and, since v1.1.363, equity bid/ask (`raw_etrade_quote`).
 
 | column | type | null | source |
 |---|---|---|---|
@@ -420,6 +421,23 @@ Source: Polygon full-market snapshot `/v2/snapshot/locale/us/markets/stocks/tick
 | `snapshot_updated` | TEXT | no | `updated` |
 
 Expected count: |universe active|. Check: `day_close` vs `raw_daily_bar.close` same day (blocking if > 0.5 % on > 2 % of tickers).
+
+**Bid/ask is never present on this plan.** Polygon Stocks Starter sends no `lastQuote`, so every row has `quote_status = omitted` (13,211 of 13,211 on 2026-09-16). Quotes are in Stocks Advanced only. Equity bid/ask comes from E\*Trade instead, in `raw_etrade_quote` below.
+
+### `raw_etrade_quote` (dictionary v26, v1.1.363)
+Source: E\*Trade `/v1/market/quote/{A,B,…}`, **25 symbols per call** (E\*Trade's documented limit; `overrideSymbolCount` for 50 is deliberately not used), every active universe member, about 44 calls a run. A batch that comes back non-2xx is retried one symbol per call — a batched path had never been sent by either app before. Field names and types read live on AAPL, 2026-10-14 19:59:57 EDT. **At ~17:05 ET this is the extended-hours quote, not the closing one**: after the close `All.bid`/`All.ask` equal `All.ExtendedHourQuoteDetail.bid`/`ask`. What QC-303 reads.
+
+| column | type | null | source |
+|---|---|---|---|
+| `ticker` | TEXT | no | the symbol asked, matched to `Product.symbol`; an answer for a symbol not asked is dropped |
+| `bid`, `ask` | REAL | yes + own status each | `All.bid`, `All.ask`, stored as sent — a `0` stays `0` (QC-303 requires both sides above zero). `invalid` when present but not a number |
+| `bid_size`, `ask_size` | REAL (shares) | yes: omitted | `All.bidSize`, `All.askSize`. Not under the price's status: the coherence CHECK would make a missing size throw inside the capture and blank the price |
+| `bid_time`, `ask_time` | TEXT (ET) | yes + status | `All.bidTime`, `All.askTime` — an ET wall-clock string with a zone label (`19:59:57 EDT 10-14-2026`); the label gives the offset. `invalid` for any other shape |
+| `ah_flag` | INTEGER flag | yes | `ahFlag` — **the STRING `"true"`/`"false"`**; a cast would read `"false"` as true |
+| `provider_quote_state` | TEXT | yes | `quoteStatus` verbatim (`CLOSING` after hours) |
+| `provider_timestamp` | TEXT (ET) | yes | `dateTimeUTC`, epoch seconds |
+
+Expected count: |universe active|; the phase reports asked-but-unanswered tickers.
 
 ---
 
@@ -814,6 +832,7 @@ Populated by the hand-off contract in 04 (forward, from the day the collector st
 |---|---|---|
 | `raw_daily_bar` | \|universe active\| | `ref_universe_membership` current ∧ `ref_trading_day.is_trading_day` |
 | `raw_eod_quote` | \|universe active\| | same |
+| `raw_etrade_quote` | \|universe active\| | same |
 | `raw_option_expiration` | ≥ 1 per chain-subset ticker | `ref_chain_subset_membership` current |
 | `raw_option_contract_snapshot` | = Σ contracts parsed from responses | `meta_response.parse_status` (AC-5), not a model |
 | `raw_index_quote` | \|`ref_macro_series`\| | |

@@ -221,7 +221,7 @@ export const metaTables: readonly TableEntry[] = [
     columns: [
       col.int('phase_row_id', 'Row identifier.', { primaryKey: true, sourceProvider: 'collector' }),
       col.int('run_id', 'The daily run this phase belongs to.', { references: { table: 'meta_run', column: 'run_id' }, sourceProvider: 'collector' }),
-      col.ident('phase', 'The phase — `bars`, `quotes`, `corporate_actions`, `account`, `chain_subset`, `chains`, `events`, `derive` — or a phase-8 sub-phase as `events/<name>`, e.g. `events/edgar-facts`.', { sourceProvider: 'collector' }),
+      col.ident('phase', 'The phase — `bars`, `quotes`, `quotes_etrade`, `corporate_actions`, `account`, `chain_subset`, `chains`, `events`, `derive` — or a phase-8 sub-phase as `events/<name>`, e.g. `events/edgar-facts`.', { sourceProvider: 'collector' }),
       col.enumOf('status', ['ok', 'failed', 'cancelled', 'not_reached'], '`ok`: returned normally, whatever it stored. `failed`: threw. `cancelled`: was running when the run was cancelled. `not_reached`: scheduled, never started.', { sourceProvider: 'collector' }),
       nullable(col.ts('started_at', 'When the phase began.'), 'not reached'),
       nullable(col.ts('finished_at', 'When the phase ended.'), 'not reached'),

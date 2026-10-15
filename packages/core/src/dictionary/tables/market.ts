@@ -89,6 +89,44 @@ export const marketTables: readonly TableEntry[] = [
   }),
 
   defineTable({
+    table: 'raw_etrade_quote',
+    layer: 'raw',
+    domain: 'quotes',
+    description:
+      'Equity bid/ask from E*Trade\'s quote endpoint, 25 symbols per call, for every active universe ' +
+      'member. Added because Polygon\'s snapshot carries no `lastQuote` on Stocks Starter, so every ' +
+      '`raw_eod_quote` bid/ask was `omitted` and QC-303 had never evaluated a row. Field names and ' +
+      'types confirmed live on AAPL 2026-10-14 (after hours). **Captured at ~17:05 ET this is the ' +
+      'EXTENDED-HOURS quote, not the closing one**: after the close `All.bid`/`All.ask` equal ' +
+      '`ExtendedHourQuoteDetail.bid`/`ask`, which is why `ah_flag`, `provider_quote_state` and the ' +
+      'per-side times are kept beside them.',
+    naturalKey: ['ticker', 'as_of_date', 'observed_at'],
+    appendOnly: true,
+    ruleDriven: true,
+    standardColumns: true,
+    columns: [
+      col.ident('ticker', 'The ticker ASKED, matched to `Product.symbol` in the response (v1.1.257: key on what was asked).', { sourceProvider: 'etrade', sourceField: 'Product.symbol' }),
+      // Each side has its own status: an after-hours book can show one side and
+      // not the other, and a shared status would blank the side that was sent.
+      // Sizes do NOT share the price's status — the coherence CHECK would make a
+      // missing size throw inside the capture transaction and blank the price.
+      ...withStatus(col.perShare('bid', 'Best bid, stored as sent. A `0` is kept as `0` — whether it means "no bid" is a reading for the consumer, not the parser (QC-303 requires both sides above zero).', { sourceProvider: 'etrade', sourceField: 'All.bid' })),
+      nullable(col.shares('bid_size', 'Bid size in shares, as sent.', { sourceProvider: 'etrade', sourceField: 'All.bidSize' }), 'omitted by the provider'),
+      ...withStatus(col.perShare('ask', 'Best ask, stored as sent, `0` kept as `0`.', { sourceProvider: 'etrade', sourceField: 'All.ask' })),
+      nullable(col.shares('ask_size', 'Ask size in shares, as sent.', { sourceProvider: 'etrade', sourceField: 'All.askSize' }), 'omitted by the provider'),
+      ...withStatus(col.ts('bid_time', 'When the bid was struck. E*Trade sends an ET wall-clock string (`19:59:57 EDT 10-14-2026`); `invalid` when it is not in that shape.', { sourceProvider: 'etrade', sourceField: 'All.bidTime', converter: 'etradeWallClockToEt' })),
+      ...withStatus(col.ts('ask_time', 'When the ask was struck, same shape as `bid_time`.', { sourceProvider: 'etrade', sourceField: 'All.askTime', converter: 'etradeWallClockToEt' })),
+      nullable(col.flag('ah_flag', '`1` when E*Trade marks the quote as after-hours. Sent as the STRING `"true"`/`"false"` — a cast would read `"false"` as true.', { sourceProvider: 'etrade', sourceField: 'ahFlag' }), 'omitted by the provider, or not a recognised true/false'),
+      nullable(col.text('provider_quote_state', 'E*Trade\'s own `quoteStatus` (`CLOSING` after hours on 2026-10-14), stored verbatim.', { sourceProvider: 'etrade', sourceField: 'quoteStatus' }), 'omitted by the provider'),
+      nullable(col.ts('provider_timestamp', 'E*Trade\'s `dateTimeUTC`, epoch seconds, as an ET timestamp.', { sourceProvider: 'etrade', sourceField: 'dateTimeUTC', converter: 'secondsEpochToEt' }), 'omitted by the provider')
+    ],
+    indexes: [
+      { columns: ['ticker', 'as_of_date'] },
+      { columns: ['as_of_date'] }
+    ]
+  }),
+
+  defineTable({
     table: 'raw_option_expiration',
     layer: 'raw',
     domain: 'chains',

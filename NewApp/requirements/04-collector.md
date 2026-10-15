@@ -64,6 +64,7 @@ One run per trading day, slot `after_close`. Phases execute in order; each phase
 | 1 | **Universe & reference** | ~10 list fetches + reference for changed/heartbeat tickers (~60/day) | 0 | `ref_universe_membership`, `raw_ticker_reference`, `ref_sic_sector` |
 | 2 | **Daily bars** | 1 per active ticker (~1,089) | 1 | `raw_daily_bar` |
 | 3 | **EOD snapshot** | 1 | 1 | `raw_eod_quote` |
+| 3b | **E\*Trade quotes** (`quotes_etrade`, v1.1.363) | 1 per 25 active tickers (~44); a refused batch retries per symbol | 1 | `raw_etrade_quote` |
 | 4 | **Corporate actions** | 2 window sweeps + per-discontinuity | 2 | `raw_split`, `raw_dividend` |
 | 5 | **Account** | 4 (portfolio, balance, orders, transactions) | 0 | `raw_account_*`, `raw_executed_order*` |
 | 6 | **Chain subset & sticky sets** | 0 (computed) | 2, 5 | `ref_chain_subset_membership`, `ref_sticky_contract` |
@@ -143,6 +144,7 @@ Bars fetched at 17:05 are treated as final per the settlement quirk; `is_final` 
 | `universe` | `{ lists: ["sp500", "russell1000", "etf_list"], etfListSource: "config" }` |
 | `bars` | `{ scope: "universe_active", adjusted: true, depthDays: 1 }` (backfill job uses `depthYears: 5`) |
 | `quotes` | `{ scope: "universe_active", source: "polygon_full_snapshot" }` |
+| `quotes_etrade` | `{ scope: "universe_active", source: "etrade_quote", batchSize: 25 }` |
 | `chain_subset` | `{ minClose: 10, minAvgDollarVolume20d: 233_000_000, sticky: "ticker" }` ‡ |
 | `chain` | `{ maxDte: 90, extraMonthlies: 2, allStrikes: true, sticky: "contract" }` |
 | `account` | `{ ordersLookbackDays: 30, transactionsFallback: true }` |

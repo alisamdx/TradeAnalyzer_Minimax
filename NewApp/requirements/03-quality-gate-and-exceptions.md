@@ -113,7 +113,7 @@ A ‡ value still gets its distribution recorded like any other (§4) — measur
 |---|---|---|---|
 | QC-301 quote completeness | blocking if missing > 1 % † | tickers with no snapshot row < expected | R1 retry snapshot |
 | QC-302 close disagreement | warning per ticker; blocking if > 2 % of tickers † | \|`day_close` − `raw_daily_bar.close`\| / close > 0.5 % † same day | none |
-| QC-303 crossed market | warning | `bid > ask` with both `ok` | none (mark `invalid`) |
+| QC-303 crossed market | warning | `bid > ask` with both `ok` and above zero, on the latest `raw_etrade_quote` row per ticker for the date. **Reads `raw_etrade_quote` since v1.1.363**: on `raw_eod_quote` it never evaluated a row, because Polygon Starter sends no bid/ask. Captured ~17:05 ET these are extended-hours quotes, so the evidence counts crossed rows marked `ah_flag = 1` separately. A new registry version, so it needs a fresh never-fired ruling once it has run | none (mark `invalid`) |
 | QC-304 stale snapshot | warning | `snapshot_updated` earlier than the session close for > 5 % of tickers | R1 retry |
 
 ### 3.5 Option chains
