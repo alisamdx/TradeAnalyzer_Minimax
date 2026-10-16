@@ -1,7 +1,7 @@
 import type { CheckContext, CheckDefinition, Evaluation } from '../check.js';
 import {
-  COMPANYFACTS_OMITTED_AFTER_DAYS, FACTS_RETRY_DAYS, FACTS_RETRY_RESERVE, FILING_INSTANCE_ENDPOINT,
-  factsQueueEntries, factsRetryDue, lastFactsFetchEt
+  COMPANYFACTS_ENDPOINT, FACTS_RETRY_DAYS, FILING_FACTS_PER_RUN,
+  FILING_INSTANCE_ENDPOINT, filingAttempts, filingFactsQueue, factsRetryDue
 } from '../../collector/facts-queue.js';
 import { effectiveCikSql } from '../../collector/cik.js';
 
@@ -811,23 +811,18 @@ export const QC701_FILING_FRESHNESS: CheckDefinition = {
       )
       .all() as { ticker: string; cik: string; newest: string | null }[];
 
-    // Why the facts are old, stated rather than assumed (v1.1.271). The description used to
-    // say past 180 days "it is our pipeline, not the filer" — and on 2026-09-18 both findings
-    // were neither: IQV and JCI filed their July 10-Qs with inline XBRL, the collector fetched
-    // companyfacts AFTER those filings, and SEC's aggregate still did not contain them.
+    // Why the facts are old, stated rather than assumed (v1.1.271; causes rebuilt v1.1.365 when the
+    // filing's own instance became the primary source).
     const pendingFiling = ctx.db.prepare(
-      `SELECT form, filed_date FROM raw_edgar_filing f
+      `SELECT form, filed_date, accession_no FROM raw_edgar_filing f
         WHERE f.cik = ? AND f.form IN ('10-K', '10-Q', '20-F', '40-F')
           AND NOT EXISTS (SELECT 1 FROM raw_edgar_fact x WHERE x.accession_no = f.accession_no)
         ORDER BY f.filed_date DESC LIMIT 1`
     );
-    // ET dates, from the same function the fetch queue uses (v1.1.322): the old UTC substring read
-    // an evening fetch as the next day, in both places, against an ET trading date.
-    const lastFetch = lastFactsFetchEt(ctx.db);
-    // Where each due retry stands in the queue, so the finding says when it will really be asked —
-    // it used to promise "retried every 7 days" while 34 new filers sat ahead of every retry.
-    const retries = factsQueueEntries(ctx.db, ctx.tradingDate).filter((e) => e.kind === 'retry');
-    const retryRank = new Map(retries.map((e, i) => [e.cik, i + 1]));
+    const attempts = filingAttempts(ctx.db);
+    // Where each filing stands in the instance queue, so "queued" says when it will be read.
+    const queue = filingFactsQueue(ctx.db, ctx.tradingDate);
+    const queueRank = new Map(queue.map((e, i) => [e.accessionNo, i + 1]));
 
     // A filer whose facts have never been pulled is not a stale filer — the
     // fact pull is filing-triggered and works through a queue. Reporting it as
@@ -837,33 +832,36 @@ export const QC701_FILING_FRESHNESS: CheckDefinition = {
       .map((r) => {
         const days = daysBetween(r.newest as string, ctx.tradingDate);
         const fired = days > (this.thresholds['warnAfterDays'] as number);
-        let cause: 'sec_companyfacts_missing' | 'awaiting_fetch' | 'no_newer_filing_seen' | null = null;
+        let cause: 'no_newer_filing_seen' | 'awaiting_instance_read' | 'instance_read_failed' | 'instance_without_facts' | 'filing_has_no_xbrl' | null = null;
         let why = '';
         if (fired) {
-          const filing = pendingFiling.get(r.cik) as { form: string; filed_date: string } | undefined;
-          const fetched = lastFetch.get(r.cik) ?? null;
+          const filing = pendingFiling.get(r.cik) as { form: string; filed_date: string; accession_no: string } | undefined;
           if (!filing) {
             cause = 'no_newer_filing_seen';
             why = ' — no newer report filing has been seen (a late filer, or one filed before the daily form index began storing report filings and not yet re-read by the submissions sweep)';
-          } else if (fetched !== null && fetched >= filing.filed_date) {
-            cause = 'sec_companyfacts_missing';
-            const due = factsRetryDue(fetched);
-            const rank = retryRank.get(r.cik);
-            const next = due > ctx.tradingDate
-              ? `next retry due ${due}`
-              : rank !== undefined
-                ? `retry due since ${due}, ${rank} of ${retries.length} waiting retries (${FACTS_RETRY_RESERVE} reserved slots a run)`
-                : `retry due since ${due}`;
-            // Two weeks after filing it is not lag (v1.1.332): SEC's aggregate dropped most 10-Qs filed
-            // 2026-07-28/29 and still lacked KO's two months later, while filings either side landed.
-            const lag = daysBetween(filing.filed_date, fetched);
-            why = lag >= COMPANYFACTS_OMITTED_AFTER_DAYS
-              ? ` — SEC companyfacts, read ${fetched} (${lag} days after the ${filing.form} filed ${filing.filed_date}), omits that filing; SEC's aggregate has left it out, not the pipeline — QC-704 lists every such filing (${next})`
-              : ` — SEC companyfacts fetched ${fetched} still has no facts for the ${filing.form} filed ${filing.filed_date}; SEC's aggregate is behind, not the pipeline (${next})`;
           } else {
-            cause = 'awaiting_fetch';
-            const last = fetched ? `; companyfacts last read ${fetched}` : '';
-            why = ` — the ${filing.form} filed ${filing.filed_date} is queued for companyfacts${last}`;
+            const what = `the ${filing.form} filed ${filing.filed_date} (${filing.accession_no})`;
+            const a = attempts.get(filing.accession_no);
+            const rank = queueRank.get(filing.accession_no);
+            const when = rank === undefined
+              ? (a?.lastAnswered ? `next read due ${factsRetryDue(a.lastAnswered)}` : 'not yet queued')
+              : rank <= FILING_FACTS_PER_RUN
+                ? 'due on the next run'
+                : `position ${rank} of ${queue.length} in the instance queue, ${FILING_FACTS_PER_RUN} a run`;
+            if (a && a.lastFailureStatus !== undefined) {
+              cause = 'instance_read_failed';
+              const status = a.lastFailureStatus === null ? 'a network fault' : `HTTP ${a.lastFailureStatus}`;
+              why = ` — reading ${what} from its own XBRL instance last failed ${a.lastFailureAt} (${status}); ${when}`;
+            } else if (a?.lastAnswered && !a.instanceListed) {
+              cause = 'filing_has_no_xbrl';
+              why = ` — ${what} lists no XBRL instance (index read ${a.lastAnswered}); no source can hold its facts; ${when}`;
+            } else if (a?.lastAnswered) {
+              cause = 'instance_without_facts';
+              why = ` — ${what}'s XBRL instance was read ${a.lastAnswered} but stored no facts (a parse failure or an empty instance); ${when}`;
+            } else {
+              cause = 'awaiting_instance_read';
+              why = ` — ${what} is queued for its own XBRL instance; ${when}`;
+            }
           }
         }
         return {
@@ -1020,72 +1018,178 @@ export const QC703_CIK_SOURCE_DISAGREEMENT: CheckDefinition = {
   }
 };
 
-export const QC704_COMPANYFACTS_OMISSION: CheckDefinition = {
+/**
+ * How long after filing a report filing may go without facts from any source before QC-704 fires.
+ * The instance is read the evening the filing appears in the daily form index, so a healthy filing
+ * has facts the same day; three calendar days covers a weekend and one failed run's retry.
+ */
+const FILING_FACTS_DUE_DAYS = 3;
+
+export const QC704_FILING_WITHOUT_FACTS: CheckDefinition = {
   id: 'QC-704',
   domain: 'fundamentals',
   severity: 'warning',
   description:
-    "Every stored report filing (10-K/10-Q/20-F/40-F) appears in SEC's companyfacts once that has been read " +
-    `at least ${COMPANYFACTS_OMITTED_AFTER_DAYS} days after the filing. Per filing, so it catches what QC-701 cannot: ` +
-    'QC-701 looks only at chain-subset stocks whose newest fact is over 120 days old, and on 2026-09-28 it ' +
-    "named 7 of at least 15 filings the aggregate had dropped. SEC's companyfacts omitted most 10-Qs filed " +
-    '2026-07-28 and 07-29 (5 of 6 and 8 of 12 read afterwards), while filings on either side landed. KO\'s ' +
-    'was still missing live two months later, though it carries inline XBRL. Since v1.1.360 the collector reads ' +
-    "such a filing's facts from its own XBRL instance, so this fires only while that has not yet worked; a filing " +
-    'recovered that way closes `data_corrected`, and one SEC later adds closes `provider_fixed`.',
+    `Every stored report filing (10-K/10-Q/20-F/40-F) has XBRL facts from some source within ${FILING_FACTS_DUE_DAYS} ` +
+    "days of filing. Since v1.1.365 the collector reads each new report filing's own XBRL instance the evening it " +
+    'appears in the daily form index, so a filing still without facts after that is the pipeline (a read that ' +
+    'failed, an instance that yielded nothing) or a filing with no XBRL at all, and the finding says which. Until ' +
+    "v1.1.365 this check flagged filings SEC's companyfacts had omitted for two weeks (most 10-Qs filed 2026-07-28/29); " +
+    'that is no longer a data gap, since companyfacts is not the primary source, and QC-705 now measures it.',
   readsTables: ['raw_edgar_filing', 'raw_edgar_fact', 'meta_response'],
   testedQuantity: 'days_since_filing_without_facts',
   testedUnit: 'days',
-  thresholds: { omittedAfterDays: COMPANYFACTS_OMITTED_AFTER_DAYS },
+  thresholds: { dueAfterDays: FILING_FACTS_DUE_DAYS },
   thresholdBasis: 'working',
-  // SEC's aggregate, retried weekly by the fact pull; firing again is the expected state (03 §5.4).
+  // A filing with no XBRL fires on every run and that is its expected state; QC-701 escalates staleness.
   escalatesOnRepeat: false,
   run(ctx) {
-    const lastFetch = lastFactsFetchEt(ctx.db);
     const rows = ctx.db
       .prepare(
-        // Which SOURCE delivered the facts, not merely whether any exist: a filing recovered from its
-        // own instance is still absent from SEC's aggregate, and "now in SEC companyfacts" would be false.
         `SELECT f.ticker, f.cik, f.form, f.filed_date, f.accession_no,
                 EXISTS (SELECT 1 FROM raw_edgar_fact x JOIN meta_response m ON m.source_response_id = x.source_response_id
-                         WHERE x.accession_no = f.accession_no AND m.endpoint <> ?) AS in_companyfacts,
+                         WHERE x.accession_no = f.accession_no AND m.endpoint = ?) AS in_companyfacts,
                 EXISTS (SELECT 1 FROM raw_edgar_fact x JOIN meta_response m ON m.source_response_id = x.source_response_id
                          WHERE x.accession_no = f.accession_no AND m.endpoint = ?) AS from_filing
            FROM raw_edgar_filing f
           WHERE f.form IN ('10-K', '10-Q', '20-F', '40-F') AND f.filed_date <= ?
           ORDER BY f.filed_date, f.ticker`
       )
-      .all(FILING_INSTANCE_ENDPOINT, FILING_INSTANCE_ENDPOINT, ctx.tradingDate) as {
+      .all(COMPANYFACTS_ENDPOINT, FILING_INSTANCE_ENDPOINT, ctx.tradingDate) as {
       ticker: string; cik: string; form: string; filed_date: string; accession_no: string;
       in_companyfacts: number; from_filing: number;
     }[];
+    const attempts = filingAttempts(ctx.db);
     const out: Evaluation[] = [];
     for (const r of rows) {
-      const fetched = lastFetch.get(r.cik) ?? null;
-      // Judged only once companyfacts has been read long enough after the filing to have held it.
-      if (fetched === null || daysBetween(r.filed_date, fetched) < COMPANYFACTS_OMITTED_AFTER_DAYS) continue;
-      const fired = r.in_companyfacts === 0 && r.from_filing === 0;
       const days = daysBetween(r.filed_date, ctx.tradingDate);
+      const hasFacts = r.in_companyfacts === 1 || r.from_filing === 1;
+      if (!hasFacts && days < FILING_FACTS_DUE_DAYS) continue; // not yet due
       const what = `${r.ticker} ${r.form} filed ${r.filed_date}`;
+      let cause: string | null = null;
+      let why = '';
+      if (!hasFacts) {
+        const a = attempts.get(r.accession_no);
+        if (a && a.lastFailureStatus !== undefined) {
+          cause = 'instance_read_failed';
+          why = `its XBRL instance read last failed ${a.lastFailureAt} (${a.lastFailureStatus === null ? 'network fault' : `HTTP ${a.lastFailureStatus}`}); retried next run`;
+        } else if (a?.lastAnswered && !a.instanceListed) {
+          cause = 'filing_has_no_xbrl';
+          why = `its filing index (read ${a.lastAnswered}) lists no XBRL instance; re-read ${factsRetryDue(a.lastAnswered)}`;
+        } else if (a?.lastAnswered) {
+          cause = 'instance_without_facts';
+          why = `its XBRL instance was read ${a.lastAnswered} and stored no facts; re-read ${factsRetryDue(a.lastAnswered)}`;
+        } else {
+          cause = 'awaiting_instance_read';
+          why = 'its XBRL instance has not been read yet (queued)';
+        }
+      }
       out.push({
         key: r.accession_no,
-        value: fired ? days : 0,
-        fired,
-        detail: fired
-          ? `${what} (${r.accession_no}) is absent from SEC companyfacts read ${fetched}, ` +
-            `${daysBetween(r.filed_date, fetched)} days after filing — omitted by SEC's aggregate, and not yet read from the filing's own XBRL instance`
-          : r.in_companyfacts === 1
-            ? `${what} is in companyfacts`
-            : `${what} is omitted by SEC companyfacts; its facts were read from the filing's own XBRL instance`,
+        value: hasFacts ? 0 : days,
+        fired: !hasFacts,
+        detail: hasFacts
+          ? `${what} has facts`
+          : `${what} (${r.accession_no}) has no XBRL facts ${days} days after filing — ${why}`,
         evidence: {
           ticker: r.ticker, cik: r.cik, form: r.form, filedDate: r.filed_date, accession: r.accession_no,
-          companyfactsRead: fetched, inCompanyfacts: r.in_companyfacts === 1, fromFiling: r.from_filing === 1
+          inCompanyfacts: r.in_companyfacts === 1, fromFiling: r.from_filing === 1, ...(cause ? { cause } : {})
         },
-        closesAs: fired
-          ? undefined
-          : r.in_companyfacts === 1
-            ? { kind: 'provider_fixed', note: `${what}: now in SEC companyfacts (read ${fetched})` }
-            : { kind: 'data_corrected', note: `${what}: facts read from the filing's own XBRL instance; SEC companyfacts still omits it` }
+        closesAs: hasFacts
+          ? {
+              kind: 'data_corrected',
+              note: r.from_filing === 1
+                ? `${what}: facts read from the filing's own XBRL instance`
+                : `${what}: facts delivered by SEC companyfacts`
+            }
+          : undefined
+      });
+    }
+    return out;
+  }
+};
+
+/** Relative tolerance for two readings of one XBRL value: float noise only. 1e-9 would hide $11 on $11.7B. */
+const FACT_VALUE_TOLERANCE = 1e-12;
+
+export const QC705_FACT_SOURCE_AGREEMENT: CheckDefinition = {
+  id: 'QC-705',
+  domain: 'fundamentals',
+  severity: 'warning',
+  description:
+    "A report filing read from BOTH its own XBRL instance and SEC companyfacts carries the same facts in each: " +
+    'the same (taxonomy, concept, unit, period) keys, with equal values. Since v1.1.365 the instance is the primary ' +
+    'source and companyfacts the cross-check, so this is the standing evidence that the instance reader reproduces ' +
+    "SEC's own extraction — v1.1.360 measured it once, on three filings (244/244, 348/348, 923/923), and a measurement " +
+    'taken once is not a guarantee. One finding per accession; it fires on any value that differs, or any key one ' +
+    'side carries and the other does not. A filing companyfacts omits has nothing to compare and is not evaluated.',
+  readsTables: ['raw_edgar_fact', 'meta_response'],
+  testedQuantity: 'disagreeing_fact_fraction',
+  testedUnit: 'fraction',
+  thresholds: { maxFraction: 0 },
+  thresholdBasis: 'structural',
+  run(ctx) {
+    const accessions = ctx.db
+      .prepare(
+        `SELECT DISTINCT x.accession_no FROM raw_edgar_fact x
+           JOIN meta_response m ON m.source_response_id = x.source_response_id
+          WHERE m.endpoint = ?`
+      )
+      .all(FILING_INSTANCE_ENDPOINT) as { accession_no: string }[];
+    const factsOf = ctx.db.prepare(
+      `SELECT x.taxonomy, x.concept, x.unit, x.period_start, x.period_end, x.value, m.endpoint, x.cik, x.form, x.filed_date
+         FROM raw_edgar_fact x JOIN meta_response m ON m.source_response_id = x.source_response_id
+        WHERE x.accession_no = ? AND m.endpoint IN (?, ?)`
+    );
+
+    const out: Evaluation[] = [];
+    for (const { accession_no: accession } of accessions) {
+      const rows = factsOf.all(accession, COMPANYFACTS_ENDPOINT, FILING_INSTANCE_ENDPOINT) as {
+        taxonomy: string; concept: string; unit: string; period_start: string | null; period_end: string;
+        value: number; endpoint: string; cik: string; form: string; filed_date: string;
+      }[];
+      const filing = new Map<string, Set<number>>();
+      const aggregate = new Map<string, Set<number>>();
+      for (const r of rows) {
+        const key = `${r.taxonomy}|${r.concept}|${r.unit}|${r.period_start ?? ''}|${r.period_end}`;
+        const side = r.endpoint === FILING_INSTANCE_ENDPOINT ? filing : aggregate;
+        const set = side.get(key) ?? new Set<number>();
+        set.add(Number(r.value));
+        side.set(key, set);
+      }
+      if (aggregate.size === 0) continue; // companyfacts omits this filing: nothing to compare
+
+      const same = (a: Set<number>, b: Set<number>) =>
+        a.size === b.size &&
+        [...a].every((v) => [...b].some((w) => Math.abs(v - w) <= FACT_VALUE_TOLERANCE * Math.max(1, Math.abs(v), Math.abs(w))));
+      const differing: string[] = [];
+      const onlyFiling: string[] = [];
+      const onlyAggregate: string[] = [];
+      let matched = 0;
+      for (const [key, values] of filing) {
+        const other = aggregate.get(key);
+        if (!other) onlyFiling.push(key);
+        else if (same(values, other)) matched++;
+        else differing.push(`${key}: filing ${[...values].join('/')} vs companyfacts ${[...other].join('/')}`);
+      }
+      for (const key of aggregate.keys()) if (!filing.has(key)) onlyAggregate.push(key);
+
+      const total = matched + differing.length + onlyFiling.length + onlyAggregate.length;
+      const bad = differing.length + onlyFiling.length + onlyAggregate.length;
+      const first = rows[0] as (typeof rows)[number];
+      out.push({
+        key: accession,
+        value: total === 0 ? 0 : bad / total,
+        fired: bad > 0,
+        detail: bad > 0
+          ? `${first.form} filed ${first.filed_date} (${accession}, CIK ${first.cik}): ${matched} of ${total} fact keys agree — ` +
+            `${differing.length} differ in value, ${onlyFiling.length} only in the filing's instance, ${onlyAggregate.length} only in companyfacts`
+          : `${accession}: all ${matched} fact keys agree`,
+        evidence: {
+          accession, cik: first.cik, form: first.form, filedDate: first.filed_date,
+          matched, differing: differing.length, onlyInFiling: onlyFiling.length, onlyInCompanyfacts: onlyAggregate.length,
+          sample: [...differing.slice(0, 5), ...onlyFiling.slice(0, 5).map((k) => `filing only: ${k}`), ...onlyAggregate.slice(0, 5).map((k) => `companyfacts only: ${k}`)]
+        }
       });
     }
     return out;
@@ -1100,5 +1204,6 @@ export const EARNINGS_FUNDAMENTALS_CHECKS: readonly CheckDefinition[] = [
   QC701_FILING_FRESHNESS,
   QC702_FACT_SANITY,
   QC703_CIK_SOURCE_DISAGREEMENT,
-  QC704_COMPANYFACTS_OMISSION
+  QC704_FILING_WITHOUT_FACTS,
+  QC705_FACT_SOURCE_AGREEMENT
 ];

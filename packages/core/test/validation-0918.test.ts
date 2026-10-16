@@ -14,7 +14,7 @@ import { ensureTradingCalendar } from '../src/collector/trading-calendar.js';
 import { runInsiderSweep, insiderIndexDates, runEtradeEarnings, factsQueue, factsBatch, runEdgarFilings, runSecTickerMap } from '../src/collector/phases/events.js';
 import { lastFactsFetchEt } from '../src/collector/facts-queue.js';
 import { QC910_INSIDER_INDEX_COVERAGE } from '../src/qa/checks/macro.js';
-import { QC603_EARNINGS_FRESHNESS, QC701_FILING_FRESHNESS, QC702_FACT_SANITY, QC703_CIK_SOURCE_DISAGREEMENT, QC704_COMPANYFACTS_OMISSION } from '../src/qa/checks/earnings-fundamentals.js';
+import { QC603_EARNINGS_FRESHNESS, QC701_FILING_FRESHNESS, QC702_FACT_SANITY, QC703_CIK_SOURCE_DISAGREEMENT, QC704_FILING_WITHOUT_FACTS } from '../src/qa/checks/earnings-fundamentals.js';
 import { etradeEarningDate } from '../src/ingest/events.js';
 
 /**
@@ -336,7 +336,7 @@ describe('the EDGAR fact pull when SEC companyfacts lags a filing (v1.1.271)', (
     expect(factsQueue(db(), DATE)).toEqual([{ cik: '0000000001' }, { cik: '0001478242' }]);
   });
 
-  it('QC-701 names SEC\'s aggregate as the cause when companyfacts was fetched after the filing', () => {
+  it('QC-701 names the unread filing instance — not SEC\'s aggregate — as the cause (v1.1.365)', () => {
     captureResponse({
       host: makeHost(), db: db(), runId: run.runId, asOfDate: DATE, provider: 'polygon',
       endpoint: '/v3/reference/tickers/IQV', slug: 'ref', params: { ticker: 'IQV' },
@@ -353,13 +353,11 @@ describe('the EDGAR fact pull when SEC companyfacts lags a filing (v1.1.271)', (
 
     const [e] = QC701_FILING_FRESHNESS.run(ctx());
     expect(e?.fired).toBe(true);
-    expect(e?.evidence?.['cause']).toBe('sec_companyfacts_missing');
-    // Read 50 days after filing: omitted, not behind (v1.1.332), and QC-704 is named.
-    expect(e?.detail).toContain('SEC companyfacts, read 2026-09-16 (50 days after the 10-Q filed 2026-07-28), omits that filing');
-    expect(e?.detail).toContain('QC-704');
-    // Fetched two days ago: it says when it will be asked again, not "retried every 7 days" (v1.1.322).
-    expect(e?.detail).toContain('next retry due 2026-09-23');
-    expect(e?.detail).not.toContain('retried every');
+    // IQV on 2026-09-18: companyfacts read 50 days after the 10-Q and still without it. Under the
+    // filing-first design that is no longer a cause — the filing's own instance is, and it is due.
+    expect(e?.evidence?.['cause']).toBe('awaiting_instance_read');
+    expect(e?.detail).toContain('the 10-Q filed 2026-07-28 (A-IQV-JUL) is queued for its own XBRL instance; due on the next run');
+    expect(e?.detail).not.toContain('SEC companyfacts');
   });
 
   // v1.1.332: effectiveCikSql named its inner tables `s` and `r`, and QC-701 passes `r.ticker` from its
@@ -390,28 +388,27 @@ describe('the EDGAR fact pull when SEC companyfacts lags a filing (v1.1.271)', (
     expect(byKey.get('KO')!.evidence?.['newestPeriodEnd']).toBe('2026-07-03');
   });
 
-  // v1.1.332: SEC's companyfacts dropped most 10-Qs filed 2026-07-28/29 (KO still missing live two
-  // months later) while filings either side landed. QC-701 saw 7 of them; this sees every one.
-  describe('QC-704 — a report filing SEC companyfacts has left out', () => {
-    const byKey = () => new Map(QC704_COMPANYFACTS_OMISSION.run(ctx()).map((e) => [e.key, e]));
+  // v1.1.332 built QC-704 for filings SEC's companyfacts dropped (most 10-Qs filed 2026-07-28/29).
+  // v1.1.365 made the filing's own instance the primary source, so QC-704 now asks the question
+  // that matters: does the filing have facts from ANY source a few days after it was filed?
+  describe('QC-704 — a report filing without facts from any source', () => {
+    const byKey = () => new Map(QC704_FILING_WITHOUT_FACTS.run(ctx()).map((e) => [e.key, e]));
 
-    it('fires on a filing still absent two weeks after filing, and closes when it arrives', () => {
+    it('fires on a filing still without facts, naming why, and closes one that has them', () => {
       filing('0001478242', 'IQV', 'A-IQV-JUL', '2026-07-28');
       filing('0001478242', 'IQV', 'A-IQV-MAY', '2026-05-05');
       facts('0001478242', 'A-IQV-MAY', '2026-05-05', '2026-04-30', '2026-09-16');
       const e = byKey();
-      expect(e.get('A-IQV-JUL')).toMatchObject({ fired: true, value: 52 });
-      expect(e.get('A-IQV-JUL')!.detail).toContain('omitted by SEC\'s aggregate');
-      expect(e.get('A-IQV-MAY')).toMatchObject({ fired: false, closesAs: { kind: 'provider_fixed' } });
-      expect(QC704_COMPANYFACTS_OMISSION.escalatesOnRepeat).toBe(false);
+      expect(e.get('A-IQV-JUL')).toMatchObject({ fired: true, value: 52, evidence: { cause: 'awaiting_instance_read' } });
+      expect(e.get('A-IQV-MAY')).toMatchObject({ fired: false, closesAs: { kind: 'data_corrected', note: expect.stringContaining('SEC companyfacts') } });
+      expect(QC704_FILING_WITHOUT_FACTS.escalatesOnRepeat).toBe(false);
     });
 
-    it('does not judge a filing companyfacts was read too soon after to have held', () => {
-      filing('0001791942', 'JBS', 'A-JBS-AUG', '2026-09-10');
-      facts('0001791942', 'A-JBS-MAR', '2026-03-25', '2025-12-31', '2026-09-16');   // 6 days after filing
-      expect(byKey().has('A-JBS-AUG')).toBe(false);
+    it('judges a filing after three days whether or not companyfacts was ever read', () => {
+      filing('0001791942', 'JBS', 'A-JBS-SEP', '2026-09-17');                         // filed yesterday
+      expect(byKey().has('A-JBS-SEP')).toBe(false);
       filing('0000000009', 'NEW', 'A-NEW', '2026-08-01');                            // never read at all
-      expect(byKey().has('A-NEW')).toBe(false);
+      expect(byKey().get('A-NEW')?.fired).toBe(true);
     });
   });
 

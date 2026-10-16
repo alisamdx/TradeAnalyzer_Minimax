@@ -302,7 +302,53 @@ export function makeFilingFactsIngest(opts: {
   readonly form: string;
   readonly filedDate: string;
 }) {
-  return (body: string, ctx: IngestContext): readonly IngestedRowSpec[] => {
+  return (body: string, ctx: IngestContext): readonly IngestedRowSpec[] =>
+    parseFilingInstance(body).map((f) => ({
+      table: 'raw_edgar_fact',
+      values: {
+        run_id: ctx.runId,
+        as_of_date: ctx.asOfDate,
+        observed_at: ctx.observedAt,
+        capture_rule_id: ctx.captureRuleId,
+        cik: opts.cik,
+        taxonomy: f.taxonomy,
+        concept: f.concept,
+        unit: f.unit,
+        value: f.value,
+        period_start: f.periodStart,
+        period_end: f.periodEnd,
+        fiscal_year: f.fiscalYear,
+        fiscal_period: f.fiscalPeriod,
+        form: opts.form,
+        filed_date: opts.filedDate,
+        accession_no: opts.accessionNo,
+        frame: null
+      }
+    }));
+}
+
+/** One fact of a filing's own XBRL instance, in companyfacts' vocabulary. */
+export interface InstanceFact {
+  readonly taxonomy: string;
+  readonly concept: string;
+  readonly unit: string;
+  readonly value: number;
+  /** Null on an instant (balance-sheet) fact. */
+  readonly periodStart: string | null;
+  readonly periodEnd: string;
+  /** `dei:DocumentFiscalYearFocus`, or 0 when absent. */
+  readonly fiscalYear: number;
+  /** `dei:DocumentFiscalPeriodFocus`, or '' when absent. */
+  readonly fiscalPeriod: string;
+}
+
+/**
+ * The parse behind `makeFilingFactsIngest`, with no database in it, so the existing app's
+ * fundamentals path reads a filing exactly as the collector does (v1.1.365) — one parser, two
+ * callers, the rule this project keeps relearning.
+ */
+export function parseFilingInstance(body: string): InstanceFact[] {
+  {
     const root = new RegExp(`<${NS}xbrl\\b([^>]*)>`).exec(body);
     if (!root) throw new Error('no <xbrl> root element: not an XBRL instance');
 
@@ -352,7 +398,7 @@ export function makeFilingFactsIngest(opts: {
     // An inline filing tags one number wherever it appears in the document, so the extracted
     // instance repeats it. The natural key keeps one; the first occurrence wins.
     const seen = new Set<string>();
-    const rows: IngestedRowSpec[] = [];
+    const rows: InstanceFact[] = [];
     for (const m of body.matchAll(/<([\w.-]+):([\w.-]+)\b([^>]*?)(?:\/>|>([^<]*)<\/\1:\2>)/g)) {
       const taxonomy = taxonomyOf.get(m[1] as string);
       const raw = m[4];
@@ -371,30 +417,18 @@ export function makeFilingFactsIngest(opts: {
       seen.add(key);
 
       rows.push({
-        table: 'raw_edgar_fact',
-        values: {
-          run_id: ctx.runId,
-          as_of_date: ctx.asOfDate,
-          observed_at: ctx.observedAt,
-          capture_rule_id: ctx.captureRuleId,
-          cik: opts.cik,
-          taxonomy,
-          concept,
-          unit,
-          value,
-          period_start: period.start,
-          period_end: period.end,
-          fiscal_year: Number.isInteger(fy) ? fy : 0,
-          fiscal_period: fp ?? '',
-          form: opts.form,
-          filed_date: opts.filedDate,
-          accession_no: opts.accessionNo,
-          frame: null
-        }
+        taxonomy,
+        concept,
+        unit,
+        value,
+        periodStart: period.start,
+        periodEnd: period.end,
+        fiscalYear: Number.isInteger(fy) ? fy : 0,
+        fiscalPeriod: fp ?? ''
       });
     }
     return rows;
-  };
+  }
 }
 
 // ── the daily form index ───────────────────────────────────────────────────

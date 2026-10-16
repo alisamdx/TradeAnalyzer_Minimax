@@ -8,6 +8,7 @@
 
 import type { PolygonFinancials } from './fundamentals-computer.js';
 import { edgarFetch } from './edgar-identity.js';
+import { filingInstanceName, parseFilingInstance, type InstanceFact } from '@tradeanalyzer/core';
 
 const EDGAR_BASE = 'https://data.sec.gov';
 
@@ -333,6 +334,116 @@ function mkFiling(
 // Shared empty placeholder — financials is undefined so sumTtm() skips it.
 const EMPTY_FILING: FilingEntry = { date: '', start_date: '', end_date: '', financials: undefined };
 
+// ─── Filings SEC's companyfacts omitted (v1.1.365) ───────────────────────────
+//
+// companyfacts is SEC's aggregate, built FROM each filing's XBRL instance, and it drops filings:
+// most 10-Qs filed 2026-07-28/29 (AEP, CTSH, HCA, CLH, KO, Citi, …) were still absent 70+ days
+// later. This provider read only companyfacts, so for those filers every TTM figure, growth rate
+// and balance-sheet line silently stayed one quarter old — nothing failed, the numbers were just
+// stale. The NewApp collector reads each filing's own instance as its primary source; this path
+// reads the same instance, with the same parser (`parseFilingInstance` in core), whenever
+// companyfacts looks a filing behind.
+
+/**
+ * Newest 10-Q/10-K period end older than this → check the filer's submissions for a report filing
+ * companyfacts does not carry. A 10-Q is due 40–45 days after quarter end, so an up-to-date filer's
+ * newest period ends at most ~136 days ago, and ~181 at a 10-K; 100 checks every truly late case and
+ * costs one small submissions call on the rest.
+ */
+export const FILING_CHECK_AFTER_DAYS = 100;
+/** Report filings read from their own instance per call — the newest two cover a 10-Q and a 10-K. */
+const MAX_FILINGS_READ = 2;
+
+/** Newest period end and newest filing date across every 10-Q/10-K entry companyfacts carries. */
+export function newestReport(gaap: GaapFacts): { end: string | null; filed: string | null } {
+  let end: string | null = null;
+  let filed: string | null = null;
+  for (const concept of Object.values(gaap)) {
+    for (const entries of Object.values(concept.units ?? {})) {
+      for (const e of entries) {
+        if (e.form !== '10-Q' && e.form !== '10-K') continue;
+        if (end === null || e.end > end) end = e.end;
+        if (filed === null || e.filed > filed) filed = e.filed;
+      }
+    }
+  }
+  return { end, filed };
+}
+
+/**
+ * Add one filing's own facts to companyfacts-shaped us-gaap facts, as companyfacts would have
+ * carried them: every point keeps the filing's form and date, so `ttmPair`/`annualSeries` treat it
+ * exactly like an aggregate entry. A point already present for that filing is not added twice.
+ * Returns the number of points added.
+ */
+export function mergeFilingFacts(
+  gaap: GaapFacts,
+  facts: readonly InstanceFact[],
+  filing: { form: '10-Q' | '10-K'; filed: string }
+): number {
+  let added = 0;
+  for (const f of facts) {
+    if (f.taxonomy !== 'us-gaap') continue;
+    const concept = (gaap[f.concept] ??= { units: {} });
+    const entries = (concept.units[f.unit] ??= []);
+    const start = f.periodStart ?? undefined;
+    if (entries.some((e) => e.end === f.periodEnd && e.start === start && e.form === filing.form && e.filed === filing.filed)) continue;
+    entries.push({ ...(start !== undefined ? { start } : {}), end: f.periodEnd, val: f.value, fp: f.fiscalPeriod, form: filing.form, filed: filing.filed });
+    added++;
+  }
+  return added;
+}
+
+/** The newest 10-Q/10-K filings in a submissions document filed after `after`, newest first. */
+export function reportFilingsAfter(
+  submissions: unknown,
+  after: string
+): { accession: string; form: '10-Q' | '10-K'; filed: string }[] {
+  const recent = (submissions as { filings?: { recent?: Record<string, unknown> } })?.filings?.recent;
+  const acc = recent?.['accessionNumber'];
+  const form = recent?.['form'];
+  const date = recent?.['filingDate'];
+  if (!Array.isArray(acc) || !Array.isArray(form) || !Array.isArray(date)) return [];
+  const out: { accession: string; form: '10-Q' | '10-K'; filed: string }[] = [];
+  // Row count from the accession array, never zipped past a shorter companion (CLAUDE.md, EDGAR quirk).
+  for (let i = 0; i < acc.length; i++) {
+    const f = form[i];
+    const d = date[i];
+    if ((f === '10-Q' || f === '10-K') && typeof d === 'string' && d > after && typeof acc[i] === 'string') {
+      out.push({ accession: acc[i] as string, form: f, filed: d });
+    }
+  }
+  return out.sort((a, b) => b.filed.localeCompare(a.filed)).slice(0, MAX_FILINGS_READ);
+}
+
+/**
+ * When companyfacts looks a filing behind, read the missing report filings' own instances into
+ * `gaap`. Never throws: a failure leaves companyfacts' answer as it was, and every request is in
+ * `logs/api/` through `edgarFetch`.
+ */
+async function addOmittedFilings(cikPadded: string, gaap: GaapFacts): Promise<void> {
+  try {
+    const { end, filed } = newestReport(gaap);
+    if (end !== null && (Date.now() - Date.parse(`${end}T00:00:00Z`)) / 86_400_000 < FILING_CHECK_AFTER_DAYS) return;
+
+    const subs = await edgarFetch(`${EDGAR_BASE}/submissions/CIK${cikPadded}.json`);
+    if (!subs.ok) return;
+    const missing = reportFilingsAfter(await subs.json(), filed ?? '0000-00-00');
+    for (const m of missing) {
+      const base = `https://www.sec.gov/Archives/edgar/data/${String(Number(cikPadded))}/${m.accession.replace(/-/g, '')}/`;
+      const index = await edgarFetch(`${base}index.json`);
+      if (!index.ok) continue;
+      const instance = filingInstanceName(await index.text());
+      if (instance === null) continue;
+      const body = await edgarFetch(`${base}${instance}`);
+      if (!body.ok) continue;
+      mergeFilingFacts(gaap, parseFilingInstance(await body.text()), { form: m.form, filed: m.filed });
+    }
+  } catch {
+    // companyfacts' own answer stands; the calls that failed are in logs/api/.
+  }
+}
+
 // ─── Main export ──────────────────────────────────────────────────────────────
 
 /**
@@ -359,6 +470,8 @@ export async function getEdgarFundamentals(ticker: string): Promise<PolygonFinan
 
   const data = await r.json() as { facts?: { 'us-gaap'?: GaapFacts } };
   const gaap: GaapFacts = data.facts?.['us-gaap'] ?? {};
+  // companyfacts drops filings (v1.1.365): fill a missing one from its own XBRL instance.
+  await addOmittedFilings(cikPadded, gaap);
 
   // Resolve best concept + entries for every field role
   type ConceptResult = { entries: EdgarEntry[]; unit: string } | null;

@@ -36,12 +36,77 @@ export const FACTS_RETRY_RESERVE = 3;
  */
 export const COMPANYFACTS_OMITTED_AFTER_DAYS = 14;
 
-/** Filings whose own XBRL instance is read per run. Two requests each; instances run 1–12 MB. */
-export const FILING_FACTS_PER_RUN = 20;
+/**
+ * Filings whose own XBRL instance is read per run. Two requests each; instances run 1–12 MB.
+ *
+ * Was 20 while the instance was only a fallback for what companyfacts omitted. Since v1.1.365 it
+ * is the PRIMARY source for every new report filing, so a peak earnings day (~150 universe report
+ * filings) must fit, with what does not fit carried to the next run newest-first. 100 filings is
+ * 200 calls, ~25 s at the shared 8/s sec.gov pace plus the downloads.
+ */
+export const FILING_FACTS_PER_RUN = 100;
 
-/** The two requests of the filing-facts fallback, as `meta_response.endpoint` records them. */
+/** The companyfacts request, as `meta_response.endpoint` records it. */
+export const COMPANYFACTS_ENDPOINT = '/api/xbrl/companyfacts/CIK{cik}.json';
+
+/** The two requests of the filing-instance read, as `meta_response.endpoint` records them. */
 export const FILING_INDEX_ENDPOINT = '/Archives/edgar/data/{cik}/{accession}/index.json';
 export const FILING_INSTANCE_ENDPOINT = '/Archives/edgar/data/{cik}/{accession}/{instance}';
+
+/**
+ * Whether a response is an ANSWER from SEC — something that settles the question for a while —
+ * rather than a failure to be asked again next run (v1.1.365).
+ *
+ * A 2xx is an answer, and so is a 404 (no such document: asking again tomorrow will not create
+ * it). A 429, a 5xx and a network fault (null status) are not: they say nothing about the filing.
+ * Until v1.1.365 every captured response counted as an attempt, so on 2026-10-15, when all 20
+ * filing-instance reads came back HTTP 429, each of those filings was put off for a week.
+ */
+export function isSecAnswer(httpStatus: number | null): boolean {
+  return httpStatus !== null && ((httpStatus >= 200 && httpStatus < 300) || httpStatus === 404);
+}
+
+/** The last time each accession's own-instance read was ANSWERED, and the last failure since. */
+export interface FilingAttempt {
+  /** ET date of the latest answered request (index or instance), or null if none was answered. */
+  readonly lastAnswered: string | null;
+  /** Whether an answered index listed an XBRL instance (`false` = the filing has none). */
+  readonly instanceListed: boolean;
+  /** HTTP status of the latest request that was NOT an answer, when it is newer than the last answer. */
+  readonly lastFailureStatus: number | null | undefined;
+  readonly lastFailureAt: string | null;
+}
+
+export function filingAttempts(db: SqliteLike): Map<string, FilingAttempt> {
+  const rows = db
+    .prepare(
+      `SELECT json_extract(params_json, '$.accession') AS accession, endpoint, http_status, requested_at
+         FROM meta_response WHERE endpoint IN (?, ?)
+        ORDER BY requested_at`
+    )
+    .all(FILING_INDEX_ENDPOINT, FILING_INSTANCE_ENDPOINT) as {
+    accession: string; endpoint: string; http_status: number | null; requested_at: string;
+  }[];
+  const out = new Map<string, { lastAnswered: string | null; instanceListed: boolean; lastFailureStatus: number | null | undefined; lastFailureAt: string | null }>();
+  for (const r of rows) {
+    const t = Date.parse(r.requested_at);
+    if (Number.isNaN(t)) continue;
+    const d = etDate(new Date(t));
+    const cur = out.get(r.accession) ?? { lastAnswered: null, instanceListed: false, lastFailureStatus: undefined, lastFailureAt: null };
+    if (isSecAnswer(r.http_status)) {
+      cur.lastAnswered = d;
+      cur.lastFailureStatus = undefined;
+      cur.lastFailureAt = null;
+      // An instance was requested only because the index listed one.
+      if (r.endpoint === FILING_INSTANCE_ENDPOINT) cur.instanceListed = true;
+    } else {
+      cur.lastFailureStatus = r.http_status;
+      cur.lastFailureAt = d;
+    }
+    out.set(r.accession, cur);
+  }
+  return out;
+}
 
 export interface FactsQueueEntry {
   readonly cik: string;
@@ -72,9 +137,9 @@ export function lastFactsFetchEt(db: SqliteLike): Map<string, string> {
     .prepare(
       `SELECT json_extract(params_json, '$.cik') AS cik, requested_at
          FROM meta_response
-        WHERE endpoint = '/api/xbrl/companyfacts/CIK{cik}.json' AND parse_status = 'ok'`
+        WHERE endpoint = ? AND parse_status = 'ok'`
     )
-    .all() as { cik: string; requested_at: string }[];
+    .all(COMPANYFACTS_ENDPOINT) as { cik: string; requested_at: string }[];
   const out = new Map<string, string>();
   for (const r of rows) {
     const t = Date.parse(r.requested_at);
@@ -102,17 +167,23 @@ export interface FilingFactsEntry {
   readonly accessionNo: string;
   readonly form: string;
   readonly filed: string;
-  /** ET date of the last attempt at this filing's own instance, or null if never tried. */
+  /** ET date of the last ANSWERED attempt at this filing's own instance, or null if never answered. */
   readonly lastAttempt: string | null;
 }
 
 /**
- * Report filings SEC's companyfacts has OMITTED — read at least `COMPANYFACTS_OMITTED_AFTER_DAYS`
- * after the filing and still without a single fact from it — whose own XBRL instance is due to be
- * read (v1.1.360). Newest filing first, because it is the one that decides a filer's freshness.
+ * Report filings with no stored facts whose own XBRL instance is due to be read. Newest filing
+ * first, because it is the one that decides a filer's freshness.
  *
- * An attempt that found no instance, or one that failed, is retried every `FACTS_RETRY_DAYS`, the
- * companyfacts cadence; a successful one writes facts and so leaves the queue by construction.
+ * **The instance is the primary source since v1.1.365.** It used to be read only for filings SEC's
+ * companyfacts had OMITTED, judged at least `COMPANYFACTS_OMITTED_AFTER_DAYS` after filing — so a
+ * filing SEC's aggregate dropped (most 10-Qs filed 2026-07-28/29) went stale for two weeks before
+ * anything tried, and its freshness depended on a derived feed that drops filings at random.
+ * companyfacts is built FROM these instances; reading the instance the day the filing appears in the
+ * daily form index removes the dependency instead of waiting it out.
+ *
+ * Only ANSWERED attempts (`isSecAnswer`) start the `FACTS_RETRY_DAYS` wait: an index with no
+ * instance listed, or a 404. A throttled or failed attempt is due again on the next run.
  */
 export function filingFactsQueue(db: SqliteLike, tradingDate: string): FilingFactsEntry[] {
   const filings = db
@@ -125,26 +196,11 @@ export function filingFactsQueue(db: SqliteLike, tradingDate: string): FilingFac
     .all(tradingDate) as { cik: string; ticker: string; accession_no: string; form: string; filed_date: string }[];
   if (filings.length === 0) return [];
 
-  const lastFetch = lastFactsFetchEt(db);
-  const attempts = new Map<string, string>();
-  for (const r of db
-    .prepare(
-      `SELECT json_extract(params_json, '$.accession') AS accession, requested_at
-         FROM meta_response WHERE endpoint IN (?, ?)`
-    )
-    .all(FILING_INDEX_ENDPOINT, FILING_INSTANCE_ENDPOINT) as { accession: string; requested_at: string }[]) {
-    const t = Date.parse(r.requested_at);
-    if (Number.isNaN(t)) continue;
-    const d = etDate(new Date(t));
-    const prev = attempts.get(r.accession);
-    if (prev === undefined || d > prev) attempts.set(r.accession, d);
-  }
-
+  const attempts = filingAttempts(db);
   return filings
-    .filter((f) => companyfactsHadTime(f.filed_date, lastFetch.get(f.cik) ?? null))
     .map((f): FilingFactsEntry => ({
       cik: f.cik, ticker: f.ticker, accessionNo: f.accession_no, form: f.form, filed: f.filed_date,
-      lastAttempt: attempts.get(f.accession_no) ?? null
+      lastAttempt: attempts.get(f.accession_no)?.lastAnswered ?? null
     }))
     .filter((f) => f.lastAttempt === null || factsRetryDue(f.lastAttempt) <= tradingDate)
     .sort((a, b) => b.filed.localeCompare(a.filed) || a.accessionNo.localeCompare(b.accessionNo));
@@ -156,6 +212,11 @@ export function factsRetryDue(lastFetched: string): string {
 }
 
 /**
+ * companyfacts' role since v1.1.365 is HISTORY and CROSS-CHECK, not freshness: the filing's own
+ * instance (read first) supplies a new filing's facts, and companyfacts is still read after each
+ * report filing so a new filer gets its back history and QC-705 can compare the two sources on the
+ * filings both carry. "Pending" therefore means no facts FROM COMPANYFACTS for the filing.
+ *
  * Every filer that is due, in priority order: new filings first (newest first), then retries
  * (longest since fetched first). A filer fetched after its newest filing and less than
  * `FACTS_RETRY_DAYS` ago is not due and is not listed.
@@ -166,10 +227,11 @@ export function factsQueueEntries(db: SqliteLike, tradingDate: string): FactsQue
       `SELECT f.cik, MAX(f.filed_date) AS filed
          FROM raw_edgar_filing f
         WHERE f.form IN ('10-K', '10-Q', '20-F', '40-F')
-          AND NOT EXISTS (SELECT 1 FROM raw_edgar_fact x WHERE x.accession_no = f.accession_no)
+          AND NOT EXISTS (SELECT 1 FROM raw_edgar_fact x JOIN meta_response m ON m.source_response_id = x.source_response_id
+                           WHERE x.accession_no = f.accession_no AND m.endpoint = ?)
         GROUP BY f.cik`
     )
-    .all() as { cik: string; filed: string }[];
+    .all(COMPANYFACTS_ENDPOINT) as { cik: string; filed: string }[];
   const lastFetch = lastFactsFetchEt(db);
 
   const fresh: FactsQueueEntry[] = [];

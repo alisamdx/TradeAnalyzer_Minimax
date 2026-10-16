@@ -61,6 +61,8 @@ Financial statements come from the free **SEC EDGAR XBRL API** (`sec-edgar-provi
 
 `fundamentals-computer.ts` then derives all ratios (it does **not** trust any pre-computed provider ratio). Outputs `DerivedRatios`: P/E, EPS, profit margin, ROE, D/E (financial sector exempt → null), revenue growth YoY, EPS growth YoY, FCF (= op CF − |capex|, capex from EDGAR), current ratio, plus quality signals (ROIC, FCF-to-net-income, net-debt-to-EBITDA, 5Y revenue/EPS CAGR, value/growth/grade scores), **dividend yield** (TTM regular cash dividends / price, Polygon dividends endpoint, v0.32.84), **beta** (1Y daily vs SPY from local `historical_prices`, `beta-service.ts`, v0.32.84), sector, industry, market cap. Every formula is written out in §23. Results are cached 24h in `fundamentals_cache`.
 
+**Omitted filings (v1.1.365):** SEC's companyfacts drops filings (most 10-Qs filed 2026-07-28/29 were absent 70+ days later), which left TTM figures, growth and the latest balance sheet a quarter stale with no error. When the newest 10-Q/10-K period end in companyfacts is ≥ 100 days old (`FILING_CHECK_AFTER_DAYS`), `getEdgarFundamentals` reads `submissions/CIK.json` and, for up to 2 newer report filings, the filing's own XBRL instance (`index.json` → instance), merging its us-gaap facts as companyfacts-shaped entries. Same parser as the collector (`parseFilingInstance` in `@tradeanalyzer/core`); never throws.
+
 ## 3.4 `OptionsProvider` interface
 
 Defined in `options-provider.ts`. Implemented by both `PolygonDataProvider` and `ETradeDataProvider`.

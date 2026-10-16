@@ -54,6 +54,10 @@ export type { GeneratedDdl } from './dictionary/ddl.js';
 export { applyDictionary, materialiseDictionary } from './dictionary/apply.js';
 export type { ApplyResult } from './dictionary/apply.js';
 
+// The filing-instance reader, shared with the existing app's fundamentals path (v1.1.365).
+export { parseFilingInstance, filingInstanceName } from './ingest/edgar.js';
+export type { InstanceFact } from './ingest/edgar.js';
+
 export * from './collector/index.js';
 export * from './qa/index.js';
 

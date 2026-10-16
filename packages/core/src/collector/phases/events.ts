@@ -17,7 +17,7 @@ import { refusedSymbolAnswers, withRefusals } from '../symbol-rulings.js';
 import { FUND_TYPES } from '../../qa/checks/earnings-fundamentals.js';
 import {
   factsBatch, FACTS_PER_RUN, filingFactsQueue, FILING_FACTS_PER_RUN, FILING_INDEX_ENDPOINT,
-  FILING_INSTANCE_ENDPOINT, COMPANYFACTS_OMITTED_AFTER_DAYS
+  FILING_INSTANCE_ENDPOINT, COMPANYFACTS_ENDPOINT
 } from '../facts-queue.js';
 // The queue moved to collector/facts-queue.ts (v1.1.322); re-exported for existing callers.
 export { factsQueue, factsBatch } from '../facts-queue.js';
@@ -629,7 +629,7 @@ export async function runEdgarFacts(
   run: RunHandle,
   opts: { readonly maxFilers?: number } = {}
 ): Promise<SubPhaseCount> {
-  const ruleId = captureRuleId(db, host, 'edgar_facts', { trigger: 'new_report_filing' }, 'Company facts for filers with an unharvested report filing.');
+  const ruleId = captureRuleId(db, host, 'edgar_facts', { trigger: 'new_report_filing' }, 'Company facts (history, and the QC-705 cross-check) for filers with a report filing companyfacts has not yet delivered.');
 
   // Retries get reserved slots so a backlog of new filings cannot starve them (v1.1.322).
   const pending = factsBatch(db, run.tradingDate, opts.maxFilers ?? FACTS_PER_RUN);
@@ -650,7 +650,7 @@ export async function runEdgarFacts(
 
     const result = captureResponse({
       host, db, runId: run.runId, asOfDate: run.tradingDate, provider: 'edgar',
-      endpoint: '/api/xbrl/companyfacts/CIK{cik}.json', slug: 'edgar-companyfacts',
+      endpoint: COMPANYFACTS_ENDPOINT, slug: 'edgar-companyfacts',
       params: { cik }, response, captureRuleId: ruleId,
       recipe: recipes.companyFacts({ cik, since })
     });
@@ -663,9 +663,10 @@ export async function runEdgarFacts(
 }
 
 /**
- * XBRL facts read from a report filing's OWN instance, for filings SEC's companyfacts has omitted
- * (v1.1.360) — `filingFactsQueue` decides which. Runs after `runEdgarFacts`, so a filing this run's
- * companyfacts fetch did deliver is never read twice.
+ * XBRL facts read from a report filing's OWN instance — the PRIMARY source for every new report
+ * filing since v1.1.365 (v1.1.360 read it only for filings SEC's companyfacts had omitted for two
+ * weeks). `filingFactsQueue` decides which. Runs BEFORE `runEdgarFacts`, the day the filing appears
+ * in the daily form index.
  *
  * Two requests per filing: the directory listing, to find the instance by name, then the instance.
  * Both are captured, so an attempt that found no instance is on record and waits the weekly retry
@@ -680,8 +681,8 @@ export async function runEdgarFilingFacts(
 ): Promise<SubPhaseCount> {
   const ruleId = captureRuleId(
     db, host, 'edgar_filing_facts',
-    { trigger: 'companyfacts_omission', omittedAfterDays: COMPANYFACTS_OMITTED_AFTER_DAYS },
-    "XBRL facts from a report filing's own instance, when SEC companyfacts has omitted the filing."
+    { trigger: 'new_report_filing', primary: true },
+    "XBRL facts from a report filing's own instance — the primary source for a new report filing."
   );
   const pending = filingFactsQueue(db, run.tradingDate).slice(0, opts.maxFilings ?? FILING_FACTS_PER_RUN);
   if (pending.length === 0) return skipped('no report filing omitted by companyfacts is due');
@@ -1070,10 +1071,11 @@ export async function runEventsPhase(
     secTickerMap,
     // `events_filings` counts every report filing stored, from either source.
     filings: { ...rotation, stored: rotation.stored + fromIndex },
-    // `events_facts` counts both sources: companyfacts, then the filings it omitted (v1.1.360).
+    // `events_facts` counts both sources. The filing's own instance goes FIRST since v1.1.365: it is
+    // the primary source for a new filing; companyfacts follows for history and the QC-705 cross-check.
     facts: combined(
-      await attempt('edgar-facts', () => runEdgarFacts(host, db, run)),
-      await attempt('edgar-filing-facts', () => runEdgarFilingFacts(host, db, run))
+      await attempt('edgar-filing-facts', () => runEdgarFilingFacts(host, db, run)),
+      await attempt('edgar-facts', () => runEdgarFacts(host, db, run))
     ),
     shortInterest: await attempt('short-interest', () => runShortInterest(host, db, run, opts)),
     recommendations: await attempt('recommendations', () => runRecommendations(host, db, run, opts)),

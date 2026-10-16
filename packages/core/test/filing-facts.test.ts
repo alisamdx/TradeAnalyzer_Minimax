@@ -14,11 +14,11 @@ import { ensureTradingCalendar } from '../src/collector/trading-calendar.js';
 import { filingInstanceName, makeFilingFactsIngest } from '../src/ingest/edgar.js';
 import { runEdgarFilingFacts } from '../src/collector/phases/events.js';
 import { factsQueue, filingFactsQueue } from '../src/collector/facts-queue.js';
-import { QC701_FILING_FRESHNESS, QC704_COMPANYFACTS_OMISSION } from '../src/qa/checks/earnings-fundamentals.js';
+import { QC701_FILING_FRESHNESS, QC704_FILING_WITHOUT_FACTS, QC705_FACT_SOURCE_AGREEMENT } from '../src/qa/checks/earnings-fundamentals.js';
 
 /**
- * The filing-facts fallback (v1.1.360): when SEC's companyfacts aggregate omits a report filing,
- * read the filing's own XBRL instance instead.
+ * Reading a report filing's own XBRL instance: a fallback for what SEC's companyfacts omitted
+ * (v1.1.360), and the PRIMARY source for every new report filing since v1.1.365.
  *
  * `AVTR_INSTANCE` is an EXCERPT of real provider bytes — Avantor's Q1 10-Q,
  * https://www.sec.gov/Archives/edgar/data/1722482/000162828026028141/avtr-20260331_htm.xml, fetched
@@ -251,7 +251,7 @@ describe('reading a filing\'s own XBRL instance', () => {
   });
 });
 
-describe('the fallback in the collector', () => {
+describe('the filing-first read in the collector (v1.1.365)', () => {
   /** A submissions response listing one report filing for `cik`. */
   function filing(cik: string, ticker: string, accession: string, filed: string) {
     const r = captureResponse({
@@ -279,6 +279,22 @@ describe('the fallback in the collector', () => {
     expect(r.parseStatus).toBe('ok');
   }
 
+  /** companyfacts carrying AVTR's points for ACCESSION, optionally with one value changed. */
+  function companyfactsWithFiling(change?: { concept: string; val: number }) {
+    const facts: Record<string, Record<string, { units: Record<string, unknown[]> }>> = {};
+    for (const f of AVTR_CF) {
+      const p = change && f.concept === change.concept ? { ...f.p, val: change.val } : f.p;
+      ((facts[f.taxonomy] ??= {})[f.concept] ??= { units: {} }).units[f.unit] = [p];
+    }
+    const r = captureResponse({
+      host: makeHost(), db: db(), runId: run.runId, asOfDate: DATE, provider: 'edgar',
+      endpoint: '/api/xbrl/companyfacts/CIK{cik}.json', slug: 'edgar-companyfacts', params: { cik: '0001722482', withFiling: '1' },
+      response: response(JSON.stringify({ facts }), 200, DATE),
+      captureRuleId: rule(), recipe: recipes.companyFacts({ cik: '0001722482' })
+    });
+    expect(r.parseStatus).toBe('ok');
+  }
+
   /** In the chain subset with a ticker reference, which is what QC-701 reads. */
   function listed(ticker: string, cik: string) {
     captureResponse({
@@ -294,7 +310,7 @@ describe('the fallback in the collector', () => {
     ).run(run.runId, DATE, `${DATE}T17:00:00-04:00`, rule(), ticker, rule());
   }
 
-  /** SEC as the fallback sees it: a listing naming the instance, then the instance. */
+  /** SEC as the instance read sees it: a listing naming the instance, then the instance. */
   function sec(asked: string[], over: { index?: ProviderResponse; instance?: ProviderResponse } = {}) {
     return makeHost({
       httpGet: async (url: string) => {
@@ -307,17 +323,30 @@ describe('the fallback in the collector', () => {
     });
   }
 
-  /** AVTR's shape: companyfacts read 2026-10-08, long after the filing, and still without it. */
-  function omittedFiling() {
+  /** AVTR's shape: a 10-Q companyfacts never delivered, with only an older 10-K fact stored. */
+  function staleFiler() {
     listed('AVTR', '0001722482');
     filing('0001722482', 'AVTR', ACCESSION, '2026-04-29');
     companyfacts('0001722482', '0001722482-26-000010', '2025-12-31', '2026-10-08');
   }
 
-  it('reads an omitted filing\'s instance, which clears QC-701 and closes QC-704 as data_corrected', async () => {
-    omittedFiling();
-    expect(QC704_COMPANYFACTS_OMISSION.run(ctx()).find((e) => e.key === ACCESSION)?.fired).toBe(true);
-    expect(QC701_FILING_FRESHNESS.run(ctx()).find((e) => e.key === 'AVTR')?.evidence?.['cause']).toBe('sec_companyfacts_missing');
+  it('reads a NEW filing the day it is filed — no waiting for companyfacts — and still queues companyfacts for history', async () => {
+    filing('0001722482', 'AVTR', ACCESSION, '2026-10-13');
+    // Under v1.1.360 this filing waited 14 days for companyfacts to be judged as omitting it.
+    expect(filingFactsQueue(db(), DATE).map((f) => f.accessionNo)).toEqual([ACCESSION]);
+
+    const asked: string[] = [];
+    expect(await runEdgarFilingFacts(sec(asked), db(), run)).toEqual({ stored: 4, calls: 2, failed: 0 });
+    expect(filingFactsQueue(db(), DATE)).toEqual([]);
+    // companyfacts still has a job — history and the QC-705 cross-check — so the filer stays queued for it.
+    expect(factsQueue(db(), DATE)).toEqual([{ cik: '0001722482' }]);
+  });
+
+  it('reads a stale filer\'s instance, which clears QC-701\'s cause and closes QC-704 as data_corrected', async () => {
+    staleFiler();
+    const before = QC704_FILING_WITHOUT_FACTS.run(ctx()).find((e) => e.key === ACCESSION);
+    expect(before).toMatchObject({ fired: true, evidence: { cause: 'awaiting_instance_read' } });
+    expect(QC701_FILING_FRESHNESS.run(ctx()).find((e) => e.key === 'AVTR')?.evidence?.['cause']).toBe('awaiting_instance_read');
 
     const asked: string[] = [];
     const result = await runEdgarFilingFacts(sec(asked), db(), run);
@@ -327,48 +356,51 @@ describe('the fallback in the collector', () => {
     ]);
     expect(result).toEqual({ stored: 4, calls: 2, failed: 0 });
 
-    const qc704 = QC704_COMPANYFACTS_OMISSION.run(ctx()).find((e) => e.key === ACCESSION);
+    const qc704 = QC704_FILING_WITHOUT_FACTS.run(ctx()).find((e) => e.key === ACCESSION);
     expect(qc704).toMatchObject({ fired: false, closesAs: { kind: 'data_corrected' } });
-    expect(qc704?.detail).toContain("read from the filing's own XBRL instance");
-    // QC-701 now reads the 10-Q's own facts — its newest is the 2026-04-24 cover date, where the
-    // companyfacts fact alone said 2025-12-31 — and no longer has an omitted filing to blame SEC for.
-    // (The fixture is the Q1 report, so on this date it is old for its own reasons; a live Q2 recovery
-    // brings the newest period to 06-30 and the finding closes.)
+    expect(qc704?.closesAs?.note).toContain("read from the filing's own XBRL instance");
+    // QC-701 now reads the 10-Q's own facts — newest is the 2026-04-24 cover date. The fixture is the
+    // Q1 report, so on this date it is old for its own reasons and has no pending filing to blame.
     const qc701 = QC701_FILING_FRESHNESS.run(ctx()).find((e) => e.key === 'AVTR');
     expect(qc701?.evidence?.['newestPeriodEnd']).toBe('2026-04-24');
-    expect(qc701?.evidence?.['cause']).not.toBe('sec_companyfacts_missing');
-
-    // Harvested now, so neither queue asks for it again.
-    expect(filingFactsQueue(db(), DATE)).toEqual([]);
-    expect(factsQueue(db(), '2026-12-31')).toEqual([]);
+    expect(qc701?.evidence?.['cause']).toBe('no_newer_filing_seen');
   });
 
-  it('leaves alone a filing companyfacts has not had two weeks to hold', () => {
-    filing('0001722482', 'AVTR', ACCESSION, '2026-10-01');
-    companyfacts('0001722482', '0001722482-26-000010', '2025-12-31', '2026-10-08');   // 7 days after filing
-    expect(filingFactsQueue(db(), DATE)).toEqual([]);
+  it('retries a THROTTLED read on the next run, not next week (2026-10-15: 20 of 20 got HTTP 429)', async () => {
+    staleFiler();
+    const throttled = await runEdgarFilingFacts(sec([], { index: response('', 429) }), db(), run);
+    expect(throttled).toEqual({ stored: 0, calls: 1, failed: 1 });
+    // Still due today: a 429 says nothing about the filing.
+    expect(filingFactsQueue(db(), DATE).map((f) => f.accessionNo)).toEqual([ACCESSION]);
+    const qc701 = QC701_FILING_FRESHNESS.run(ctx()).find((e) => e.key === 'AVTR');
+    expect(qc701?.evidence?.['cause']).toBe('instance_read_failed');
+    expect(qc701?.detail).toContain('HTTP 429');
+    // A network fault (no status at all) is not an answer either.
+    await runEdgarFilingFacts(sec([], { index: response('', null) }), db(), run);
+    expect(filingFactsQueue(db(), DATE).map((f) => f.accessionNo)).toEqual([ACCESSION]);
   });
 
   it('records a filing with no XBRL and waits the weekly cadence before asking again', async () => {
-    omittedFiling();
-    const asked: string[] = [];
-    const host = sec(asked, { index: response(JSON.stringify({ directory: { item: [{ name: 'q.htm' }] } })) });
+    staleFiler();
+    const host = sec([], { index: response(JSON.stringify({ directory: { item: [{ name: 'q.htm' }] } })) });
     expect(await runEdgarFilingFacts(host, db(), run)).toEqual({ stored: 0, calls: 1, failed: 0 });
-    // The listing is on record, so the attempt is too.
+    // The listing is an answer, so the attempt waits the weekly cadence.
     expect(filingFactsQueue(db(), DATE)).toEqual([]);
     expect(filingFactsQueue(db(), '2026-10-20')).toEqual([]);
     expect(filingFactsQueue(db(), '2026-10-21').map((f) => f.accessionNo)).toEqual([ACCESSION]);
-    // And QC-704 still fires: the facts are still missing.
-    expect(QC704_COMPANYFACTS_OMISSION.run(ctx()).find((e) => e.key === ACCESSION)?.fired).toBe(true);
+    // And QC-704 still fires, naming the reason.
+    expect(QC704_FILING_WITHOUT_FACTS.run(ctx()).find((e) => e.key === ACCESSION)).toMatchObject({
+      fired: true, evidence: { cause: 'filing_has_no_xbrl' }
+    });
   });
 
-  it('counts a refused listing and an unparseable instance as failures, both retried next week', async () => {
-    omittedFiling();
+  it('retries a refused listing next run, and an unparseable instance (an answer) next week', async () => {
+    staleFiler();
     const refused = await runEdgarFilingFacts(sec([], { index: response('<html>Access Denied</html>', 403) }), db(), run);
     expect(refused).toEqual({ stored: 0, calls: 1, failed: 1 });
+    expect(filingFactsQueue(db(), DATE).map((f) => f.accessionNo)).toEqual([ACCESSION]);
 
-    const later = beginRun(db(), makeHost(), { kind: 'daily', tradingDate: '2026-10-21' });
-    const html = await runEdgarFilingFacts(sec([], { instance: response('<!DOCTYPE html><html></html>', 200, '2026-10-21') }), db(), later);
+    const html = await runEdgarFilingFacts(sec([], { instance: response('<!DOCTYPE html><html></html>', 200) }), db(), run);
     expect(html).toEqual({ stored: 0, calls: 2, failed: 1 });
     const failures = raw
       .prepare("SELECT endpoint, parse_error FROM meta_response WHERE endpoint LIKE '/Archives/edgar/data/%' AND parse_status = 'failed' ORDER BY source_response_id")
@@ -378,20 +410,47 @@ describe('the fallback in the collector', () => {
       '/Archives/edgar/data/{cik}/{accession}/{instance}'
     ]);
     expect(failures[1]?.parse_error).toMatch(/not an XBRL instance/);
+    // SEC answered with a document, so it waits the week; QC-701 says the instance yielded nothing.
+    expect(filingFactsQueue(db(), DATE)).toEqual([]);
+    expect(QC701_FILING_FRESHNESS.run(ctx()).find((e) => e.key === 'AVTR')?.evidence?.['cause']).toBe('instance_without_facts');
   });
 
-  it('closes QC-704 as provider_fixed, not data_corrected, when SEC itself adds the filing', () => {
-    omittedFiling();
-    // companyfacts read again a week later, now holding the 10-Q.
-    const r = captureResponse({
-      host: makeHost(), db: db(), runId: run.runId, asOfDate: DATE, provider: 'edgar',
-      endpoint: '/api/xbrl/companyfacts/CIK{cik}.json', slug: 'edgar-companyfacts', params: { cik: '0001722482', again: '1' },
-      response: response(JSON.stringify({ facts: { 'us-gaap': { Assets: { units: { USD: [AVTR_CF[3].p] } } } } }), 200, '2026-10-14'),
-      captureRuleId: rule(), recipe: recipes.companyFacts({ cik: '0001722482' })
+  it('closes QC-704 when companyfacts delivers the filing, naming that source', () => {
+    staleFiler();
+    companyfactsWithFiling();
+    expect(QC704_FILING_WITHOUT_FACTS.run(ctx()).find((e) => e.key === ACCESSION)).toMatchObject({
+      fired: false, closesAs: { kind: 'data_corrected', note: expect.stringContaining('SEC companyfacts') }
     });
-    expect(r.parseStatus).toBe('ok');
-    expect(QC704_COMPANYFACTS_OMISSION.run(ctx()).find((e) => e.key === ACCESSION)).toMatchObject({
-      fired: false, closesAs: { kind: 'provider_fixed' }
+  });
+
+  it('does not judge a filing inside its first three days', () => {
+    filing('0001722482', 'AVTR', ACCESSION, '2026-10-13');
+    expect(QC704_FILING_WITHOUT_FACTS.run(ctx()).find((e) => e.key === ACCESSION)).toBeUndefined();
+  });
+
+  describe('QC-705: the instance and companyfacts agree', () => {
+    it('passes when every key and value agrees', async () => {
+      staleFiler();
+      await runEdgarFilingFacts(sec([]), db(), run);
+      companyfactsWithFiling();
+      const e = QC705_FACT_SOURCE_AGREEMENT.run(ctx()).find((x) => x.key === ACCESSION);
+      expect(e).toMatchObject({ fired: false, value: 0, evidence: { matched: 4, differing: 0, onlyInFiling: 0, onlyInCompanyfacts: 0 } });
+    });
+
+    it('fires on a value that differs, and names it', async () => {
+      staleFiler();
+      await runEdgarFilingFacts(sec([]), db(), run);
+      companyfactsWithFiling({ concept: 'Assets', val: 11663000001 });
+      const e = QC705_FACT_SOURCE_AGREEMENT.run(ctx()).find((x) => x.key === ACCESSION);
+      expect(e).toMatchObject({ fired: true, evidence: { matched: 3, differing: 1 } });
+      expect(e?.value).toBeCloseTo(0.25);
+      expect(String((e?.evidence?.['sample'] as string[])[0])).toContain('us-gaap|Assets|USD||2026-03-31');
+    });
+
+    it('does not evaluate a filing companyfacts omits — there is nothing to compare', async () => {
+      staleFiler();
+      await runEdgarFilingFacts(sec([]), db(), run);
+      expect(QC705_FACT_SOURCE_AGREEMENT.run(ctx()).find((x) => x.key === ACCESSION)).toBeUndefined();
     });
   });
 });

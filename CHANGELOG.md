@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.1.365] - 2026-10-15
+
+### EDGAR facts: read each filing's own XBRL first; companyfacts becomes the cross-check
+
+SEC's companyfacts is a summary SEC builds from each filing's XBRL, and it drops filings. Most 10-Qs filed 2026-07-28/29 (AEP, CTSH, HCA, CLH, KO, Citi and others) were still missing 70+ days later. The collector only read a filing's own XBRL after companyfacts had left it out for 14 days, as a fallback. That fallback's first live run, on 10-15, lost all 20 calls to SEC rate limits. Because a rejected call still counted as an attempt, those 20 filings were then put off for a week, so CTSH stayed blocking.
+
+Now:
+- **Retries.** Only a real answer from SEC (a 2xx or 404) starts the weekly wait. A 429, 5xx or network fault is tried again on the next run.
+- **Filing first.** Each new 10-K/10-Q/20-F/40-F is read from its own XBRL the evening it appears in the daily form index, up to 100 a run, newest first. There is no more 14-day wait.
+- **companyfacts** is still read after each filing, for back history and for the new **QC-705**, which checks per filing that the filing's own XBRL and companyfacts hold the same facts. **QC-704** now flags any report filing with no facts from either source 3 days after filing, and says why. **QC-701** names the real cause.
+- **TA1 fundamentals** read companyfacts only, so for the filers SEC dropped, every TTM figure, growth rate and balance-sheet line stayed a quarter old without any error. When the newest 10-Q/10-K in companyfacts ends more than 100 days ago, TA1 now checks the filer's submissions and reads any missing filing from its own XBRL, with the same parser as the collector.
+
+QC-704, QC-705 and QC-701 are new check versions and need fresh rulings once they have run. core 0.6.77, next 0.4.62.
+
+Details: `changelogs/v1.1.365_2026-10-15.md`.
+
 ## [1.1.364] - 2026-10-15
 
 ### Constituents keep share classes dotted; EDGAR calls are paced
