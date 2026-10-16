@@ -68,7 +68,12 @@ export class ConstituentsRefreshJob implements BatchJobHandler {
           (outcome.added.length || outcome.removed.length
             ? ` (+${outcome.added.length}${outcome.added.length ? ` [${outcome.added.join(', ')}]` : ''}` +
               ` / −${outcome.removed.length}${outcome.removed.length ? ` [${outcome.removed.join(', ')}]` : ''})`
-            : ' (no changes)')
+            : ' (no changes)') +
+          // Holdings the source listed without a ticker cannot be members, but they are named (v1.1.366):
+          // DDS left the Russell 1000 on 2026-10-15 because Vanguard listed it with a blank ticker.
+          (outcome.untickered?.length
+            ? ` · ${outcome.untickered.length} holding(s) without a ticker skipped: ${outcome.untickered.join('; ')}`
+            : '')
         );
         onProgress({
           jobId: JOB_ID, runId: 0, ticker: index.toUpperCase(), status: 'updated',

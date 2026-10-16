@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { openDatabase, type DbHandle } from '../src/main/db/connection.js';
 import { runMigrations } from '../src/main/db/migrations.js';
 import { MIGRATIONS_DIR } from './helpers.js';
-import { ConstituentsService, normalizeVanguardTicker } from '../src/main/services/constituents-service.js';
+import { ConstituentsService, normalizeVanguardTicker, renamedByPunctuation } from '../src/main/services/constituents-service.js';
 
 // The job imports fetchAndStorePrices for the new-member price bootstrap — mock the
 // module so no Polygon call is ever attempted; the mock records the tickers fetched.
@@ -18,7 +18,7 @@ const { ConstituentsRefreshJob } = await import('../src/main/services/jobs/const
 
 // ─── Vanguard API mock ────────────────────────────────────────────────────────
 
-type Holding = { ticker: string; longName: string };
+type Holding = { ticker: string; longName: string; percentWeight?: string };
 
 function makeHoldings(count: number, prefix = 'T'): Holding[] {
   return Array.from({ length: count }, (_, i) => ({ ticker: `${prefix}${i}`, longName: `${prefix} Corp ${i}` }));
@@ -166,6 +166,34 @@ describe('ConstituentsService — Vanguard refresh', () => {
     const tickers = svc.getConstituents('sp500').map((r) => r.ticker);
     expect(tickers).toContain('BRK.B');
     expect(tickers).not.toContain('BRKB');
+  });
+
+  it('refuses a refresh that only respells tickers — format drift, not turnover (v1.1.366)', async () => {
+    expect(renamedByPunctuation(['BFB', 'BRKB', 'NEW1'], ['BF.B', 'BRK.B', 'OLD1'])).toEqual([['BFB', 'BF.B'], ['BRKB', 'BRK.B']]);
+    expect(renamedByPunctuation(['NEW1'], ['OLD1'])).toEqual([]);
+
+    for (const h of makeHoldings(501)) {
+      db.prepare(`INSERT INTO constituents (ticker, index_name) VALUES (?,'sp500')`).run(h.ticker);
+    }
+    db.prepare(`INSERT INTO constituents (ticker, index_name) VALUES ('BRK.B','sp500'), ('BF.B','sp500')`).run();
+    // What 2026-10-15 would have looked like with a sanitiser that drops the space.
+    const next = [...makeHoldings(501), { ticker: 'BRKB', longName: 'Berkshire' }, { ticker: 'BFB', longName: 'Brown-Forman' }];
+    stubVanguardFetch({ VOO: next });
+    await expect(svc.refreshFromVanguard('sp500')).rejects.toThrow(/respells BF.B as BFB, BRK.B as BRKB/);
+    const tickers = svc.getConstituents('sp500').map((r) => r.ticker);
+    expect(tickers).toContain('BRK.B');
+    expect(tickers).not.toContain('BRKB');
+  });
+
+  it('names holdings the source lists without a ticker instead of dropping them silently (v1.1.366)', async () => {
+    for (const h of makeHoldings(503)) {
+      db.prepare(`INSERT INTO constituents (ticker, index_name) VALUES (?,'sp500')`).run(h.ticker);
+    }
+    // Vanguard's VONE row for Dillard's on 2026-09-30: blank ticker, 552 shares, 0.00%.
+    stubVanguardFetch({ VOO: [...makeHoldings(503), { ticker: '', longName: 'Dillard&#39;s Inc. Class A', percentWeight: '0.00' }] });
+    const outcome = await svc.refreshFromVanguard('sp500');
+    expect(outcome.untickered).toEqual(["Dillard's Inc. Class A (0.00%)"]);
+    expect(outcome.total).toBe(503);
   });
 
   it('keeps excluded (delisted) tickers out even when the feed still lists them', async () => {

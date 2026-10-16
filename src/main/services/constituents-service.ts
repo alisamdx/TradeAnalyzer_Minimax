@@ -43,6 +43,12 @@ export interface ConstituentsRefreshOutcome {
   removed: string[];
   /** The source's own as-of date, when it states one (Vanguard publishes month-end holdings). */
   asOf?: string | null;
+  /**
+   * Holdings the source listed WITHOUT a ticker, as `name (weight%)` — skipped, since no ticker can
+   * be read from them, but never silently (v1.1.366). Vanguard's 2026-09-30 VONE file lists
+   * Dillard's Class A this way: 552 shares, 0.00% — a residual position, which is why DDS left.
+   */
+  untickered?: string[];
 }
 
 /**
@@ -64,9 +70,25 @@ export function normalizeVanguardTicker(raw: string | null | undefined): string 
     .replace(/[^A-Z0-9.-]/g, '');
 }
 
+/**
+ * Pairs `[added, removed]` that are the same ticker once `.`, `-`, `/` and spaces are dropped —
+ * `BRKB` arriving as `BRK.B` leaves. Exported for its test.
+ */
+export function renamedByPunctuation(added: readonly string[], removed: readonly string[]): [string, string][] {
+  const squash = (t: string) => t.replace(/[.\-/\s]/g, '');
+  const removedBySquash = new Map(removed.map((t) => [squash(t), t]));
+  const out: [string, string][] = [];
+  for (const a of added) {
+    const r = removedBySquash.get(squash(a));
+    if (r !== undefined && r !== a) out.push([a, r]);
+  }
+  return out;
+}
+
 interface VanguardHoldingEntity {
   ticker?: string | null;
   longName?: string | null;
+  percentWeight?: string | null;
 }
 interface VanguardHoldingsResponse {
   size?: number;
@@ -214,8 +236,8 @@ export class ConstituentsService {
 
   /** Refresh from Vanguard fund holdings (VOO/VONE) with sanity gates. */
   async refreshFromVanguard(index: 'sp500' | 'russell1000'): Promise<ConstituentsRefreshOutcome> {
-    const { rows, asOf } = await this.fetchVanguardHoldings(VANGUARD_FUND_BY_INDEX[index]);
-    return { ...this.applyRefresh(index, rows, 'vanguard', { enforceGates: true }), asOf };
+    const { rows, asOf, untickered } = await this.fetchVanguardHoldings(VANGUARD_FUND_BY_INDEX[index]);
+    return { ...this.applyRefresh(index, rows, 'vanguard', { enforceGates: true }), asOf, untickered };
   }
 
   /**
@@ -296,6 +318,20 @@ export class ConstituentsService {
 
     const added = fresh.map((r) => r.ticker).filter((t) => !oldByTicker.has(t)).sort();
     const removed = [...oldByTicker.keys()].filter((t) => !byTicker.has(t)).sort();
+
+    // Format drift (v1.1.366): a ticker that arrives and one that leaves, identical once the
+    // punctuation is gone, is the SOURCE changing how it spells tickers — never index turnover.
+    // On 2026-10-15 Vanguard began writing `BRK B`; six real members became dead symbols in a
+    // refresh well under the turnover gate. Refused, so the stored list stands and the job warns.
+    if (opts.enforceGates) {
+      const drift = renamedByPunctuation(added, removed);
+      if (drift.length > 0) {
+        throw new Error(
+          `${source} ${index} refresh respells ${drift.map(([a, r]) => `${r} as ${a}`).join(', ')} — ` +
+          'a change in how the source writes tickers, not index turnover; refusing to apply'
+        );
+      }
+    }
 
     if (opts.enforceGates && oldByTicker.size > 0) {
       const turnover = (added.length + removed.length) / oldByTicker.size;
@@ -403,7 +439,7 @@ export class ConstituentsService {
    * The holdings are MONTH-END (`asOfDate`, e.g. 2026-07-31 in mid-September), so a
    * delisting can take six weeks to leave this list — see `constituents_excluded`.
    */
-  private async fetchVanguardHoldings(fund: string): Promise<{ rows: ConstituentRow[]; asOf: string | null }> {
+  private async fetchVanguardHoldings(fund: string): Promise<{ rows: ConstituentRow[]; asOf: string | null; untickered: string[] }> {
     const base = `https://investor.vanguard.com/vmf/api/${fund}/portfolio-holding/stock`;
     const headers = {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) TradeAnalyzer-desktop',
@@ -411,6 +447,7 @@ export class ConstituentsService {
     };
 
     const rows: ConstituentRow[] = [];
+    const untickered: string[] = [];
     let asOf: string | null = null;
     let start = 1;
     let size = Number.POSITIVE_INFINITY;
@@ -433,13 +470,17 @@ export class ConstituentsService {
       if (entities.length === 0) break;
       for (const e of entities) {
         const ticker = normalizeVanguardTicker(e.ticker);
-        if (!ticker) continue;
+        if (!ticker) {
+          const name = e.longName ? decodeHtmlEntities(e.longName).trim() : '(no name)';
+          untickered.push(e.percentWeight ? `${name} (${e.percentWeight}%)` : name);
+          continue;
+        }
         // Vanguard holdings carry no sector — applyRefresh preserves the stored one.
         rows.push({ ticker, companyName: e.longName ? decodeHtmlEntities(e.longName).trim() || null : null, sector: null });
       }
       start += VANGUARD_PAGE_SIZE;
     }
-    return { rows, asOf };
+    return { rows, asOf, untickered };
   }
 
   /** Parse constituents from the bundled CSV (one-time setup). */

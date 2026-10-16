@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.366] - 2026-10-15
+
+### Constituents refresh refuses a respelled ticker, and names holdings with no ticker
+
+Two guards from the 2026-10-15 refresh. **Format drift:** when a ticker arriving and one leaving are the same apart from punctuation (BRKB in, BRK.B out), the source has changed how it writes tickers, so the refresh is refused. The stored list stands and the job reports `warning`. This would have stopped all six of 10-15's dead symbols even before v1.1.364 fixed the parser. **No ticker:** a holding the source lists without a ticker can't be a member, but it's now named in the job notes with its weight instead of disappearing. That is how DDS left the Russell 1000: Vanguard lists Dillard's Class A with a blank ticker, 552 shares, 0.00%, which looks like a leftover position, not a member.
+
+Details: `changelogs/v1.1.366_2026-10-15.md`.
+
 ## [1.1.365] - 2026-10-15
 
 ### EDGAR facts: read each filing's own XBRL first; companyfacts becomes the cross-check
