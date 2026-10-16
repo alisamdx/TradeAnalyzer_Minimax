@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.368] - 2026-10-15
+
+### Daily IV Update no longer skips dotted share-class tickers
+
+Since v0.23.9 (2026-06-05) the job skipped every ticker containing a dot, on the belief that E*Trade lists no options for class shares. E*Trade does: BRK.B, BF.A, BF.B, HEI.A and UHAL.B chains answer HTTP 200. So their `iv_history` stopped on 2026-06-05, and IV rank/percentile for them read a five-day series. They are now asked like any other ticker; LEN.B, which really has no options, is still skipped. The job's notes now name every skipped ticker with its reason, so the `batch-run` log line says what was skipped and why. The June–October gap is not backfilled.
+
+Details: `changelogs/v1.1.368_2026-10-15.md`.
+
 ## [1.1.367] - 2026-10-15
 
 ### The format-drift guard lets the repair through

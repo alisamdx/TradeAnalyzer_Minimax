@@ -34,6 +34,16 @@ function readCallDelay(db: import('../../db/connection.js').DbHandle): number {
   return DEFAULT_CALL_DELAY_MS;
 }
 
+const MAX_LISTED_SKIPS = 40;
+
+/** " Skipped: LEN.B (no listed options), …" — empty when nothing was skipped. */
+export function formatSkipReasons(reasons: Array<{ ticker: string; reason: string }>): string {
+  if (reasons.length === 0) return '';
+  const shown = reasons.slice(0, MAX_LISTED_SKIPS).map(r => `${r.ticker} (${r.reason})`);
+  const more = reasons.length > MAX_LISTED_SKIPS ? `, … and ${reasons.length - MAX_LISTED_SKIPS} more` : '';
+  return ` Skipped: ${shown.join(', ')}${more}.`;
+}
+
 export class DailyIvCaptureJob implements BatchJobHandler {
   readonly name = 'Daily IV Update';
   readonly description =
@@ -129,14 +139,21 @@ export class DailyIvCaptureJob implements BatchJobHandler {
     let updated = 0;
     let skipped = 0;
     let failed = 0;
+    // Why each skipped ticker was skipped. Carried into the result notes, which the
+    // batch-run log line writes to logs/errors, so a skip is never silent.
+    const skipReasons: Array<{ ticker: string; reason: string }> = [];
 
     // ── Helper: detect errors that mean "no listed options" or "unknown symbol" ──
-    // These are expected for some universe tickers (no listed options, class shares
-    // with dot notation E*Trade rejects, OTC-only names). Count as skipped, not failed.
+    // These are expected for some universe tickers (no listed options, OTC-only names).
+    // Count as skipped, not failed. Dotted class shares are NOT in this set: E*Trade
+    // lists options for BRK.B, BF.A, BF.B, HEI.A and UHAL.B. A v0.23.9 pre-filter
+    // skipped every dotted ticker on that wrong premise, and their iv_history stopped
+    // on 2026-06-05 (fixed v1.1.368). Each one is now asked like any other ticker.
     const isNoOptionsError = (e: unknown): boolean => {
       const msg = (e instanceof Error ? e.message : String(e));
       return (
         msg.includes('non-JSON') ||           // E*Trade returned XML (no options)
+        msg.includes('10032') ||              // "No options are available for this symbol."
         msg.includes('10033') ||              // "The symbol entered is invalid"
         msg.includes('Invalid symbol') ||
         msg.includes('invalid symbol')
@@ -147,19 +164,6 @@ export class DailyIvCaptureJob implements BatchJobHandler {
     for (const ticker of missing) {
       if (signal.aborted) break;
 
-      // Pre-filter: tickers with dots (e.g. LEN.B, CWE.A) are class shares that
-      // E*Trade does not support for options — skip immediately rather than burning
-      // an API call and getting a 400.
-      if (ticker.includes('.')) {
-        skipped++;
-        onProgress({
-          jobId: 'daily-iv-update', runId: 0, ticker, status: 'skipped',
-          attempted: ++attempted, updated, skipped, failed, total,
-          message: 'Class share — no listed options',
-        });
-        continue;
-      }
-
       attempted++;
 
       try {
@@ -168,6 +172,7 @@ export class DailyIvCaptureJob implements BatchJobHandler {
 
         if (expirations.length === 0) {
           skipped++;
+          skipReasons.push({ ticker, reason: 'no expirations' });
           onProgress({
             jobId: 'daily-iv-update',
             runId: 0, // will be overwritten by BatchService
@@ -241,6 +246,7 @@ export class DailyIvCaptureJob implements BatchJobHandler {
             message: 'Could not compute ATM IV from chain',
           });
           skipped++;
+          skipReasons.push({ ticker, reason: 'could not compute ATM IV from chain' });
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -248,6 +254,7 @@ export class DailyIvCaptureJob implements BatchJobHandler {
           // No listed options or symbol not supported — expected for some universe
           // tickers. Count as skipped, not failed, to keep job success metrics clean.
           skipped++;
+          skipReasons.push({ ticker, reason: 'no listed options' });
           onProgress({
             jobId: 'daily-iv-update', runId: 0, ticker, status: 'skipped',
             attempted, updated, skipped, failed, total,
@@ -271,7 +278,8 @@ export class DailyIvCaptureJob implements BatchJobHandler {
 
     return {
       status: finalStatus,
-      notes: `${updated} updated, ${skipped} skipped, ${failed} failed out of ${attempted} attempted.`,
+      notes: `${updated} updated, ${skipped} skipped, ${failed} failed out of ${attempted} attempted.` +
+        formatSkipReasons(skipReasons),
       errorMessage: signal.aborted ? 'Job was cancelled.' : undefined,
       tickersAttempted: attempted,
       tickersUpdated: updated,
