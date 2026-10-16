@@ -71,8 +71,14 @@ export function normalizeVanguardTicker(raw: string | null | undefined): string 
 }
 
 /**
- * Pairs `[added, removed]` that are the same ticker once `.`, `-`, `/` and spaces are dropped —
- * `BRKB` arriving as `BRK.B` leaves. Exported for its test.
+ * Pairs `[added, removed]` that are the same ticker once `.`, `-`, `/` and spaces are dropped AND
+ * where the arriving spelling has LOST separators — `BRKB` arriving as `BRK.B` leaves. Exported for
+ * its test.
+ *
+ * **One direction only.** The share-class separator is the canonical spelling every provider
+ * answers to, so losing it is drift and regaining it is the REPAIR. v1.1.366 refused both, and the
+ * first refresh after it (2026-10-15 evening) refused to put BRK.B back — and would have refused
+ * every day after, leaving the six dead symbols in place for good.
  */
 export function renamedByPunctuation(added: readonly string[], removed: readonly string[]): [string, string][] {
   const squash = (t: string) => t.replace(/[.\-/\s]/g, '');
@@ -80,7 +86,7 @@ export function renamedByPunctuation(added: readonly string[], removed: readonly
   const out: [string, string][] = [];
   for (const a of added) {
     const r = removedBySquash.get(squash(a));
-    if (r !== undefined && r !== a) out.push([a, r]);
+    if (r !== undefined && r !== a && a.length < r.length) out.push([a, r]);
   }
   return out;
 }

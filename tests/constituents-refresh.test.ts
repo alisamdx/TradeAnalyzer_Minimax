@@ -185,6 +185,24 @@ describe('ConstituentsService — Vanguard refresh', () => {
     expect(tickers).not.toContain('BRKB');
   });
 
+  it('lets the REPAIR through — regaining the separator is not drift (v1.1.367)', async () => {
+    // v1.1.366 refused both directions, so the evening of 2026-10-15 it refused to restore BRK.B.
+    expect(renamedByPunctuation(['BF.B', 'BRK.B'], ['BFB', 'BRKB'])).toEqual([]);
+
+    for (const h of makeHoldings(501)) {
+      db.prepare(`INSERT INTO constituents (ticker, index_name) VALUES (?,'sp500')`).run(h.ticker);
+    }
+    // The state 2026-10-15's refresh left behind: the dead, dot-less symbols.
+    db.prepare(`INSERT INTO constituents (ticker, index_name) VALUES ('BRKB','sp500'), ('BFB','sp500')`).run();
+    stubVanguardFetch({ VOO: [...makeHoldings(501), { ticker: 'BRK B', longName: 'Berkshire' }, { ticker: 'BF B', longName: 'Brown-Forman' }] });
+    const outcome = await svc.refreshFromVanguard('sp500');
+    expect(outcome.added).toEqual(['BF.B', 'BRK.B']);
+    expect(outcome.removed).toEqual(['BFB', 'BRKB']);
+    const tickers = svc.getConstituents('sp500').map((r) => r.ticker);
+    expect(tickers).toContain('BRK.B');
+    expect(tickers).not.toContain('BRKB');
+  });
+
   it('names holdings the source lists without a ticker instead of dropping them silently (v1.1.366)', async () => {
     for (const h of makeHoldings(503)) {
       db.prepare(`INSERT INTO constituents (ticker, index_name) VALUES (?,'sp500')`).run(h.ticker);

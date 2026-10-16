@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.367] - 2026-10-15
+
+### The format-drift guard lets the repair through
+
+v1.1.366's guard refused a respelling in both directions. The first refresh after it (2026-10-15 evening) therefore refused to put BRK.B, BF.A, BF.B, HEI.A, LEN.B and UHAL.B back in place of the dead dot-less symbols, and it would have refused every day after. Only losing the separator is drift; regaining it is the repair and now goes through. No data was harmed: both refusals kept the stored list.
+
+Details: `changelogs/v1.1.367_2026-10-15.md`.
+
 ## [1.1.366] - 2026-10-15
 
 ### Constituents refresh refuses a respelled ticker, and names holdings with no ticker
