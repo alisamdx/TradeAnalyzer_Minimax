@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.369] - 2026-10-15
+
+### Insider sweep: throttled Form 4s are retried, and no index is cut at 100
+
+The insider sweep walks every daily form index since the last one that parsed, so a missed index arrives a day late, not never. But a Form 4 that SEC throttled inside an index that DID parse was never asked for again. On 2026-10-15 six P&G Form 4s from the 10-14 index were lost to HTTP 429 that way. Separately, only the first 100 universe Form 4s per index were fetched, and 10-14's listed 102. Now a Form 4 SEC did not answer (429, 5xx, network fault) is retried on each later run for 30 days, and the per-index cap is 1,000. The 10-15 daily index itself, also throttled, is fetched on the next run as before.
+
+core 0.6.78, next 0.4.63. Details: `changelogs/v1.1.369_2026-10-15.md`.
+
 ## [1.1.368] - 2026-10-15
 
 ### Daily IV Update no longer skips dotted share-class tickers

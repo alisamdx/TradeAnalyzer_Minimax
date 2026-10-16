@@ -11,7 +11,7 @@ import { beginRun, captureRuleId, type RunHandle } from '../src/collector/run.js
 import { captureResponse } from '../src/collector/capture.js';
 import { recipes } from '../src/ingest/recipes.js';
 import { ensureTradingCalendar } from '../src/collector/trading-calendar.js';
-import { runInsiderSweep, insiderIndexDates, runEtradeEarnings, factsQueue, factsBatch, runEdgarFilings, runSecTickerMap } from '../src/collector/phases/events.js';
+import { runInsiderSweep, insiderIndexDates, runEtradeEarnings, factsQueue, factsBatch, runEdgarFilings, runSecTickerMap, form4Retries, INSIDER_FORM4_LIMIT } from '../src/collector/phases/events.js';
 import { lastFactsFetchEt } from '../src/collector/facts-queue.js';
 import { QC910_INSIDER_INDEX_COVERAGE } from '../src/qa/checks/macro.js';
 import { QC603_EARNINGS_FRESHNESS, QC701_FILING_FRESHNESS, QC702_FACT_SANITY, QC703_CIK_SOURCE_DISAGREEMENT, QC704_FILING_WITHOUT_FACTS } from '../src/qa/checks/earnings-fundamentals.js';
@@ -105,6 +105,45 @@ beforeEach(() => {
 afterEach(() => {
   raw.close();
   rmSync(dir, { recursive: true, force: true });
+});
+
+describe('Form 4s SEC did not answer are retried on later runs (v1.1.369)', () => {
+  /** A captured Form 4 request for `accession`, answered with `status`. */
+  function form4(accession: string, status: number | null) {
+    captureResponse({
+      host: makeHost(), db: db(), runId: run.runId, asOfDate: DATE, provider: 'edgar',
+      endpoint: '/Archives/edgar/data/{cik}/{accession}.txt', slug: 'edgar-form4',
+      params: { cik: '80424', accession }, response: response(status === 200 ? '' : 'Too Many Requests', status),
+      captureRuleId: captureRuleId(db(), makeHost(), 'insider', { v: 1 }, 'test'),
+      recipe: recipes.form4({ accessionNo: accession, tickerByCik: new Map(), derivatives: true })
+    });
+  }
+
+  it('re-asks a throttled Form 4 from an index the walk has already passed', async () => {
+    // 2026-10-15: six P&G Form 4s from the 10-14 index got HTTP 429; the index itself parsed.
+    parsedIndex(DATE);
+    form4('0000080424-26-000217', 429);
+    form4('0000080424-26-000218', null);   // network fault: not an answer either
+    form4('0000080424-26-000219', 404);    // an answer: no such document, never re-asked
+    expect(form4Retries(db(), DATE).map((r) => r.accession)).toEqual(['0000080424-26-000217', '0000080424-26-000218']);
+
+    const asked: string[] = [];
+    const host = makeHost({ httpGet: async (url: string) => { asked.push(url); return response('', 503); } });
+    await runInsiderSweep(host, db(), run);
+    expect(asked).toEqual([
+      'https://www.sec.gov/Archives/edgar/data/80424/0000080424-26-000217.txt',
+      'https://www.sec.gov/Archives/edgar/data/80424/0000080424-26-000218.txt'
+    ]);
+    // A 503 again: still due next run.
+    expect(form4Retries(db(), DATE)).toHaveLength(2);
+  });
+
+  it('stops retrying once it is fetched, or after thirty days', () => {
+    form4('0000080424-26-000217', 429);
+    expect(form4Retries(db(), DATE)).toHaveLength(1);
+    expect(form4Retries(db(), '2026-11-30')).toEqual([]);   // past FORM4_RETRY_DAYS
+    expect(INSIDER_FORM4_LIMIT).toBeGreaterThanOrEqual(1000);
+  });
 });
 
 describe('the insider sweep catches up from the last parsed index', () => {

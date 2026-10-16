@@ -17,7 +17,7 @@ import { refusedSymbolAnswers, withRefusals } from '../symbol-rulings.js';
 import { FUND_TYPES } from '../../qa/checks/earnings-fundamentals.js';
 import {
   factsBatch, FACTS_PER_RUN, filingFactsQueue, FILING_FACTS_PER_RUN, FILING_INDEX_ENDPOINT,
-  FILING_INSTANCE_ENDPOINT, COMPANYFACTS_ENDPOINT
+  FILING_INSTANCE_ENDPOINT, COMPANYFACTS_ENDPOINT, isSecAnswer
 } from '../facts-queue.js';
 // The queue moved to collector/facts-queue.ts (v1.1.322); re-exported for existing callers.
 export { factsQueue, factsBatch } from '../facts-queue.js';
@@ -905,7 +905,33 @@ export async function runInsiderSweep(
   let failed = 0;
   let indexed = 0;
   let reportFilings = 0;
-  const limit = opts.maxFilings ?? 100;
+  // Was 100 until v1.1.369: an index listing more universe Form 4s than that lost the rest with no
+  // record (2026-10-14's listed 102). At the shared 8/s sec.gov pace 1,000 is about two minutes.
+  const limit = opts.maxFilings ?? INSIDER_FORM4_LIMIT;
+
+  const fetchForm4 = async (cik: string, accessionNo: string, path: string): Promise<void> => {
+    const response = await host.httpGet(`https://www.sec.gov/Archives/${path}`, EDGAR_HEADERS);
+    calls++;
+    const result = captureResponse({
+      host, db, runId: run.runId, asOfDate: run.tradingDate, provider: 'edgar',
+      endpoint: FORM4_ENDPOINT, slug: 'edgar-form4',
+      params: { cik, accession: accessionNo },
+      response, captureRuleId: ruleId,
+      recipe: recipes.form4({ accessionNo, tickerByCik: byCik, derivatives: true })
+    });
+    if (result.parseStatus === 'ok') stored += result.rowsWritten;
+    else failed++;
+  };
+
+  // **Retry Form 4s SEC did not answer (v1.1.369).** The walk below never revisits an index that
+  // parsed, so a Form 4 throttled inside it was lost for good: on 2026-10-15 six P&G Form 4s from
+  // the 10-14 index got HTTP 429 and nothing would ever ask again. A failure that is not an answer
+  // (`isSecAnswer`) is retried on each later run for `FORM4_RETRY_DAYS`.
+  for (const r of form4Retries(db, run.tradingDate)) {
+    throwIfCancelled(host, 'phase-8-insider');
+    host.progress('insider', 0, 1, `retry ${r.accession}`);
+    await fetchForm4(r.cik, r.accession, `edgar/data/${String(Number(r.cik))}/${r.accession}.txt`);
+  }
 
   for (const indexDate of dates) {
     throwIfCancelled(host, 'phase-8-insider');
@@ -963,25 +989,44 @@ export async function runInsiderSweep(
     for (const [i, filing] of form4s.slice(0, limit).entries()) {
       throwIfCancelled(host, 'phase-8-insider');
       host.progress('insider', i, Math.min(form4s.length, limit), filing.companyName);
-
-      const url = `https://www.sec.gov/Archives/${filing.path}`;
-      const response = await host.httpGet(url, EDGAR_HEADERS);
-      calls++;
-
-      const result = captureResponse({
-        host, db, runId: run.runId, asOfDate: run.tradingDate, provider: 'edgar',
-        endpoint: '/Archives/edgar/data/{cik}/{accession}.txt', slug: 'edgar-form4',
-        params: { cik: filing.cik, accession: filing.accessionNo },
-        response, captureRuleId: ruleId,
-        recipe: recipes.form4({ accessionNo: filing.accessionNo, tickerByCik: byCik, derivatives: true })
-      });
-
-      if (result.parseStatus === 'ok') stored += result.rowsWritten;
-      else failed++;
+      await fetchForm4(filing.cik, filing.accessionNo, filing.path);
     }
   }
 
   return { stored, calls, failed, indexed, reportFilings };
+}
+
+/** Form 4s fetched per daily index (v1.1.369; was 100). */
+export const INSIDER_FORM4_LIMIT = 1000;
+
+/** How long a Form 4 SEC did not answer keeps being retried. */
+export const FORM4_RETRY_DAYS = 30;
+
+const FORM4_ENDPOINT = '/Archives/edgar/data/{cik}/{accession}.txt';
+
+/**
+ * Form 4s whose latest request got no ANSWER from SEC (a 429, 5xx or network fault) within the last
+ * `FORM4_RETRY_DAYS`, and which have never been fetched successfully — due again this run.
+ */
+export function form4Retries(db: SqliteLike, tradingDate: string): { cik: string; accession: string }[] {
+  const rows = db
+    .prepare(
+      `SELECT json_extract(params_json, '$.cik') AS cik, json_extract(params_json, '$.accession') AS accession,
+              http_status, parse_status, requested_at
+         FROM meta_response WHERE endpoint = ? ORDER BY requested_at`
+    )
+    .all(FORM4_ENDPOINT) as { cik: string; accession: string; http_status: number | null; parse_status: string; requested_at: string }[];
+  const latest = new Map<string, { cik: string; httpStatus: number | null; ok: boolean; on: string }>();
+  const everOk = new Set<string>();
+  for (const r of rows) {
+    if (r.parse_status === 'ok') everOk.add(r.accession);
+    latest.set(r.accession, { cik: r.cik, httpStatus: r.http_status, ok: r.parse_status === 'ok', on: r.requested_at.slice(0, 10) });
+  }
+  const cutoff = new Date(Date.parse(`${tradingDate}T00:00:00Z`) - FORM4_RETRY_DAYS * 86_400_000).toISOString().slice(0, 10);
+  return [...latest]
+    .filter(([acc, l]) => !everOk.has(acc) && !l.ok && !isSecAnswer(l.httpStatus) && l.on >= cutoff)
+    .map(([accession, l]) => ({ cik: l.cik, accession }))
+    .sort((a, b) => a.accession.localeCompare(b.accession));
 }
 
 /** How many sessions back the insider sweep will catch up in one run. */
