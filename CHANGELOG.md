@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.374] - 2026-10-21
+
+### TradeAnalyzer 2: accepted findings no longer make a run RED
+
+The gate counted every finding that fired, accepted ones included, so its verdict and its blocking count could disagree with the email subject, which counts only open and acknowledged findings. On 2026-10-20 the rehearsal said 21 blocking and the subject said 11; the other 10 were QC-603 ×7 and QC-204 ×3, all accepted. On a night when only accepted findings fired, the run would have been RED with a subject reading "RED (0 blocking)".
+
+The verdict and the counts now cover open and acknowledged findings only, the same set that decides a domain-day's usability and the clean-day streak. Accepted and expired-review findings that still fire are reported beside the verdict as `tolerated`, in the batch note ("N accepted still firing") and in the rehearsal output. Rehearsed on 2026-10-20: RED, 11 blocking, 10 accepted still firing, matching the email subject.
+
+core 0.6.82, next 0.4.67. Details: `changelogs/v1.1.374_2026-10-21.md`.
+
 ## [1.1.373] - 2026-10-20
 
 ### TradeAnalyzer 2: QC-701 back from 72 s to 0.4 s

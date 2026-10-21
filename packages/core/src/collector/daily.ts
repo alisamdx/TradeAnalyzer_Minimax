@@ -40,6 +40,8 @@ export interface DailyRunReport {
   readonly domains: Readonly<Record<string, { expected: number; stored: number }>>;
   readonly blocking: number;
   readonly warnings: number;
+  /** Fired this run but `accepted` or `expired_review`: outside the verdict, reported beside it. */
+  readonly tolerated: number;
   readonly checksRun: number;
   readonly checksVacuous: readonly string[];
   readonly emailSent: boolean;
@@ -77,7 +79,7 @@ export async function runDaily(
     finishRun(db, host, run, 'cancelled');
     return {
       runId: run.runId, tradingDate: args.tradingDate, verdict: 'skipped',
-      skippedReason: preflight.detail, domains: {}, blocking: 0, warnings: 0,
+      skippedReason: preflight.detail, domains: {}, blocking: 0, warnings: 0, tolerated: 0,
       checksRun: 0, checksVacuous: [], emailSent: false, phaseErrors: []
     };
   }
@@ -278,6 +280,7 @@ export async function runDaily(
     domains,
     blocking: gate.blocking,
     warnings: gate.warnings,
+    tolerated: gate.tolerated,
     checksRun: gate.checksRun,
     checksVacuous: gate.checksVacuous,
     emailSent,

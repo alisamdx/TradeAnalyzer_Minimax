@@ -106,7 +106,8 @@ export function createCollectorDailyJob(deps: {
           // the batch history unable to answer either question.
           status: report.phaseErrors.length > 0 ? 'failed' : 'success',
           notes:
-            `${report.verdict.toUpperCase()} — ${report.blocking} blocking, ${report.warnings} warning(s); ` +
+            `${report.verdict.toUpperCase()} — ${report.blocking} blocking, ${report.warnings} warning(s)` +
+            (report.tolerated > 0 ? `, ${report.tolerated} accepted still firing` : '') + '; ' +
             `email ${report.emailSent ? 'sent' : `NOT sent (${report.emailError ?? 'unknown'})`}` +
             (report.phaseErrors.length > 0 ? `; phase errors: ${report.phaseErrors.join(' | ')}` : ''),
           tickersAttempted: expected,

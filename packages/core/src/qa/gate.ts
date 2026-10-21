@@ -40,6 +40,11 @@ export interface GateResult {
   readonly blocking: number;
   readonly warnings: number;
   readonly info: number;
+  /**
+   * Findings that fired this run but are `accepted` or `expired_review`. They count toward
+   * neither the verdict nor `blocking`/`warnings`; this keeps them visible (v1.1.374).
+   */
+  readonly tolerated: number;
   readonly resolvedByGate: number;
   readonly checksRun: number;
   readonly checksFired: number;
@@ -278,10 +283,17 @@ export function runGate(
     }
   }
 
+  // The verdict counts what is open or acknowledged, the same set that makes a domain-day
+  // unusable and breaks the clean-day streak. An accepted finding (or one whose acceptance has
+  // expired into review) still fires, but it has been ruled tolerable for now. Until v1.1.374 it
+  // counted here, so 10 accepted findings made a run RED by themselves while the email subject,
+  // which counts open findings only, would have read "RED (0 blocking)".
   const counts = { blocking: 0, warning: 0, info: 0 };
+  let tolerated = 0;
   for (const finding of raised) {
-    const severity = upsertException(db, host, args.runId, args.tradingDate, finding);
-    counts[severity]++;
+    const { severity, state } = upsertException(db, host, args.runId, args.tradingDate, finding);
+    if (state === 'open' || state === 'acknowledged') counts[severity]++;
+    else tolerated++;
   }
 
   deescalateExempt(db, host, firedFingerprints, args.checks);
@@ -315,6 +327,7 @@ export function runGate(
     blocking: counts.blocking,
     warnings: counts.warning,
     info: counts.info,
+    tolerated,
     resolvedByGate,
     checksRun: args.checks.length,
     checksFired,
@@ -328,7 +341,7 @@ function upsertException(
   runId: number,
   tradingDate: string,
   finding: RaisedFinding
-): Severity {
+): { severity: Severity; state: string } {
   const { def, evaluation } = finding;
   const fp = fingerprint(def.id, def.domain, evaluation.key);
   const now = host.nowET();
@@ -359,7 +372,7 @@ function upsertException(
         runId, runId, affects
       );
     recordEvent(db, Number(info.lastInsertRowid), now, 'gate', null, 'open', null, finding.severity, 'first observed');
-    return finding.severity;
+    return { severity: finding.severity, state: 'open' };
   }
 
   // A recurrence after a resolution is not a new exception: same fingerprint,
@@ -408,7 +421,7 @@ function upsertException(
     recordEvent(db, existing.exception_id, now, 'gate', 'resolved', 'open', existing.severity, severity,
       'recurrence — the same fingerprint fired again');
   }
-  return severity;
+  return { severity, state: nextState };
 }
 
 /**

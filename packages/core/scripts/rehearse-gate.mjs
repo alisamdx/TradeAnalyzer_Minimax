@@ -147,7 +147,7 @@ try {
 
   console.log(`\n# Gate rehearsal — ${DATE}, run ${run.run_id}, core ${core.COLLECTOR_VERSION}\n`);
   console.log(`real run:   ${actualReport?.overall ?? '—'}`);
-  console.log(`rehearsal:  ${gate.verdict} — ${gate.blocking} blocking, ${gate.warnings} warnings, ${gate.checksRun} checks in ${gateSeconds}s`);
+  console.log(`rehearsal:  ${gate.verdict} — ${gate.blocking} blocking, ${gate.warnings} warnings, ${gate.tolerated ?? 0} accepted still firing, ${gate.checksRun} checks in ${gateSeconds}s`);
   if (gate.checksVacuous.length) console.log(`evaluated nothing: ${gate.checksVacuous.join(', ')}`);
   console.log(`\nemail subject: ${email.subject}`);
   console.log(`email size: ${Buffer.byteLength(email.html)} bytes html, ${Buffer.byteLength(email.text)} bytes text\n`);

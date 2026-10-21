@@ -517,6 +517,44 @@ describe('usability is derived, never stored on the run', () => {
     expect(status).toEqual({ status: 'usable' });
   });
 
+  it('leaves an accepted finding that still fires out of the verdict and the counts, and reports it beside them', () => {
+    // 2026-10-20: 10 accepted findings (QC-603 x7, QC-204 x3) fired. They counted as blocking, which
+    // alone would have made a run RED, with the email subject reading "RED (0 blocking)".
+    const host = makeHost();
+    const blocking = fakeCheck({ severity: 'blocking', evals: () => [{ key: 'AAPL', value: 2, fired: true, detail: 'x' }] });
+    const first = beginRun(db, host, { kind: 'daily', tradingDate: '2026-09-04' });
+    runGate(db, host, { runId: first.runId, tradingDate: '2026-09-04', checks: [blocking] });
+    raw.prepare("UPDATE qa_exception SET state='accepted', accepted_until='2026-10-06'").run();
+
+    const run = beginRun(db, host, { kind: 'daily', tradingDate: '2026-09-08' });
+    const result = runGate(db, host, { runId: run.runId, tradingDate: '2026-09-08', checks: [blocking] });
+    expect(result).toMatchObject({ verdict: 'green', blocking: 0, warnings: 0, tolerated: 1 });
+    expect(raw.prepare('SELECT state, still_firing FROM qa_exception').get()).toEqual({ state: 'accepted', still_firing: 1 });
+
+    const email = buildStatusEmail(db, {
+      runId: run.runId, tradingDate: '2026-09-08', slot: 'after_close', verdict: result.verdict,
+      generationNo: 1, generationStatus: 'pilot', collectorVersion: 't', startedAt: 't', finishedAt: 't', domains: {}
+    });
+    expect(email.subject).not.toMatch(/RED/);
+
+    // Expired into review: still outside the verdict (03 §5.2), still reported.
+    raw.prepare("UPDATE qa_exception SET state='expired_review'").run();
+    const later = beginRun(db, host, { kind: 'daily', tradingDate: '2026-09-09' });
+    expect(runGate(db, host, { runId: later.runId, tradingDate: '2026-09-09', checks: [blocking] }))
+      .toMatchObject({ verdict: 'green', blocking: 0, tolerated: 1 });
+  });
+
+  it('still counts an acknowledged finding that fires', () => {
+    const host = makeHost();
+    const blocking = fakeCheck({ severity: 'blocking', evals: () => [{ key: 'AAPL', value: 2, fired: true, detail: 'x' }] });
+    const first = beginRun(db, host, { kind: 'daily', tradingDate: '2026-09-04' });
+    runGate(db, host, { runId: first.runId, tradingDate: '2026-09-04', checks: [blocking] });
+    raw.prepare("UPDATE qa_exception SET state='acknowledged'").run();
+    const run = beginRun(db, host, { kind: 'daily', tradingDate: '2026-09-08' });
+    expect(runGate(db, host, { runId: run.runId, tradingDate: '2026-09-08', checks: [blocking] }))
+      .toMatchObject({ verdict: 'red', blocking: 1, tolerated: 0 });
+  });
+
   it('keeps meta_run.gate_verdict as history even after the exception is resolved', () => {
     const host = makeHost();
     const run = beginRun(db, host, { kind: 'daily', tradingDate: '2026-09-06' });

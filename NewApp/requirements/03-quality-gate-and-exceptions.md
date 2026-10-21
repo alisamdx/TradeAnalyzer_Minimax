@@ -227,7 +227,7 @@ One per run.
 |---|---|
 | `report_id`, `run_id` | |
 | `generated_at` | |
-| `overall` | `green` \| `amber` \| `red` (no findings / warnings only / any blocking) |
+| `overall` | `green` \| `amber` \| `red` (no findings / warnings only / any blocking), counted over findings that fired this run **and are `open` or `acknowledged`**. That is the same set that makes a domain-day unusable and breaks the clean-day streak. A finding that fires while `accepted` or `expired_review` is outside the verdict, and the gate reports it beside the verdict as `tolerated` ("N accepted still firing"). Until v1.1.374 it counted, so accepted findings alone could make a run RED while the email subject, which counts open findings only, read "RED (0 blocking)". On 2026-10-20 the gap was 21 against 11: QC-603 ×7 and QC-204 ×3, all accepted |
 | `domains_json` | per domain: expected, stored, status |
 | `checks_json` | per check: evaluated, fired, duration_ms |
 | `email_sent_at`, `email_status` | `sent` \| `failed` \| `suppressed` (never suppressed in stage 1) |
