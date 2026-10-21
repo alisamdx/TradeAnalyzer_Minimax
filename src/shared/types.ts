@@ -349,7 +349,32 @@ export interface WheelResult {
   optionLiquidityScore: number | null;
   suitabilityScore: number;
   explanation: string;
+  /** Why no CSP was resolved; null when one was, or when the chain search never ran
+   *  (insufficient history). Absent on snapshots written before v1.1.370. Diagnostic only —
+   *  nothing selects or scores on it. see analysis-service.ts `classifyNoCsp` */
+  noCspReason?: WheelNoCspReason | null;
 }
+
+/**
+ * Why the wheel chain search resolved no contract (v1.1.370). Before this, every cause wrote the
+ * same "No suitable CSP" text, and splitting them took a join against `stale_greek_shadow_picks`
+ * (Requirements/v2-execution/06, measured 2026-10-20: 70–78 % of after-close misses were
+ * `greeks_withheld`).
+ *   expirations_unavailable — the expiration list could not be fetched
+ *   no_expiry_in_window     — no listed expiry in the wheel DTE window (the monthly gap)
+ *   chain_unavailable       — in-window expiries exist but no chain came back with contracts
+ *   greeks_withheld         — every chain that came back had no delta on any contract
+ *                             (STALE_GREEK_GUARD withheld them)
+ *   none_in_band            — Greeks present, but no contract in the delta band with a bid
+ *   no_quote                — a contract was found but the underlying has no price
+ */
+export type WheelNoCspReason =
+  | 'expirations_unavailable'
+  | 'no_expiry_in_window'
+  | 'chain_unavailable'
+  | 'greeks_withheld'
+  | 'none_in_band'
+  | 'no_quote';
 
 export interface StrategyResult {
   mode: 'bullish' | 'bearish';

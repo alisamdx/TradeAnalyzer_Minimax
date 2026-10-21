@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.370] - 2026-10-20
+
+### The wheel snapshot says why a ticker got no CSP
+
+Every wheel miss used to read "No suitable CSP found (30–45 DTE, delta 0.20–0.30)." whatever the cause. Measured on 2026-10-20 by joining to the stale-Greek shadow log, 70–78 % of after-close misses were chains whose Greeks the stale-Greek guard withheld. They were not chains with nothing in the delta band. The explanation now carries a reason code after the old prefix, and each wheel result has a matching `noCspReason` field: `no_expiry_in_window`, `chain_unavailable`, `greeks_withheld`, `none_in_band`, `no_quote` or `expirations_unavailable`. Diagnostic only: which contract is chosen and how it is scored are unchanged.
+
+Details: `changelogs/v1.1.370_2026-10-20.md`.
+
 ## [1.1.369] - 2026-10-15
 
 ### Insider sweep: throttled Form 4s are retried, and no index is cut at 100

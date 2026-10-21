@@ -111,9 +111,9 @@ not shipped (it may ship **disabled**, as a configurable option, with the findin
   (liquid subset; monthly and weekly reported apart), is the right fix. Enabling it is a
   top-of-book reordering on liquid names, not a marginal addition, so it needs that score.
   Moving the wheel chain search to the intraday slot (about 4× fewer stale chains) would also
-  change selection, so it is a separate FR-SEY-5 candidate. Instrumentation worth adding (text
-  only, no selection change): a reason in `WheelResult.explanation`, one of `greeks withheld` /
-  `none in band` / `no expiry in window`, so the snapshot answers this without a join.
+  change selection, so it is a separate FR-SEY-5 candidate. Instrumentation, added in v1.1.370
+  with no selection change: `WheelResult.noCspReason` plus a `[reason]` in the explanation, so the
+  snapshot answers this without a join.
 
 **Rejected-on-data register** (changes that looked compelling and did *not* ship):
 SPY-regime gate · overbought guard · ADX in scoring · FR-SEY-3 per-name trend filter ·

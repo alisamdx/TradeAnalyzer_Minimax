@@ -29,7 +29,15 @@ Annualized return: `(premium / (strike × 100)) × (365 / DTE) × 100` (§23 `an
 
 ## 6.4 Mode 3 — Wheel Strategy
 
-Screens for wheel-suitable stocks: stable uptrend or sideways, IV rank ≥ 30, no earnings within the DTE window, option liquidity (OI ≥ 500, bid-ask ≤ 5% of mid), acceptable assignment risk (not at 52-week extremes). Recommends a CSP **30–45 DTE at delta 0.20–0.30**, taking the **first** expiration in that window that yields a delta-band match (ascending by date) — which is structurally a **weekly**, and means the liquidity it measures is a weekly's. `WHEEL_MONTHLY_FIRST_EXPIRY` (`analysis-service.ts`, **default off**, `WHEEL_MONTHLY_FIRST=1` to force on, v1.1.128) tries 3rd-Friday monthlies first and widens the window to 28–52 DTE; FR-SEY-5-gated because it changes the recommended contract and therefore `premiumYield`. See `23-formulas.md` / `docs/formulas.md#liquidity-score`.
+Screens for wheel-suitable stocks: stable uptrend or sideways, IV rank ≥ 30, no earnings within the DTE window, option liquidity (OI ≥ 500, bid-ask ≤ 5% of mid), acceptable assignment risk (not at 52-week extremes). Recommends a CSP **30–45 DTE at delta 0.20–0.30**, taking the **first** expiration in that window that yields a delta-band match (ascending by date) — which is structurally a **weekly**, and means the liquidity it measures is a weekly's. `WHEEL_MONTHLY_FIRST_EXPIRY` (`analysis-service.ts`, **default off**, `WHEEL_MONTHLY_FIRST=1` to force on, v1.1.128) tries 3rd-Friday monthlies first and widens the window to 28–52 DTE; FR-SEY-5-gated because it changes the recommended contract and therefore `premiumYield`. See `23-formulas.md` / `docs/formulas.md#liquidity-score`. **When no CSP is found (v1.1.370)** the explanation keeps the prefix `No suitable CSP found (<window> DTE, delta 0.20–0.30)` and adds `[reason]: detail`. `WheelResult.noCspReason` carries the same code (null on a hit), one of:
+- `expirations_unavailable`
+- `no_expiry_in_window`: no listed expiry in the window (the monthly gap)
+- `chain_unavailable`
+- `greeks_withheld`: every chain that came back had no deltas, so `STALE_GREEK_GUARD` withheld them
+- `none_in_band`: Greeks were present on at least one chain
+- `no_quote`
+
+It is filled by a tally of the chain walk and is diagnostic only. Selection is unchanged.
 
 **Candidate expirations (v1.1.289).** Options Income, Wheel and the lizard path all walk a guessed run of upcoming Fridays (holiday Fridays shifted to Thursday). Those guesses are intersected with the ticker's own listed expirations (`OptionsProvider.getOptionsExpirations`, cached per ticker per ET day), so a chain is requested only for a date the ticker lists. This only removes dates E*Trade would have answered with a 400 (code 10031), so the expirations tried, their order and the chosen contract are unchanged. A failed or empty listing falls back to the guesses. Before this, the existing app spent ~5,300 calls a day on unlisted weeklies.
 

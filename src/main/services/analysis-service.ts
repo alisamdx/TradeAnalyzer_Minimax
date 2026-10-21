@@ -18,6 +18,7 @@ import type {
   BuyResult,
   OptionsIncomeResult,
   WheelResult,
+  WheelNoCspReason,
   StrategyResult,
   LizardResult,
   AnalysisResult
@@ -47,6 +48,7 @@ export type {
   BuyResult,
   OptionsIncomeResult,
   WheelResult,
+  WheelNoCspReason,
   StrategyResult,
   LizardResult,
   AnalysisResult,
@@ -321,6 +323,57 @@ export function annualizedReturn(
 const WHEEL_GRADED_LIQUIDITY = false;
 export function wheelGradedLiquidityEnabled(): boolean {
   return WHEEL_GRADED_LIQUIDITY || process.env['WHEEL_GRADED_LIQUIDITY'] === '1';
+}
+
+/**
+ * What `findSuitableChain` saw on the way to returning null — filled in place when a caller passes
+ * one. Diagnostic only: it records the walk, it never changes which contract is chosen.
+ */
+export interface ChainSearchTally {
+  /** The expiration list itself could not be fetched. */
+  expirationsFailed: boolean;
+  /** Expirations inside the DTE window. */
+  inWindow: number;
+  /** In-window chains that came back with at least one contract. */
+  fetched: number;
+  /** Of `fetched`, chains with no delta on any contract (STALE_GREEK_GUARD withheld them). */
+  withheld: number;
+}
+
+export function emptyChainSearchTally(): ChainSearchTally {
+  return { expirationsFailed: false, inWindow: 0, fetched: 0, withheld: 0 };
+}
+
+/** A chain whose every contract has a null delta — no delta-band search can match it. */
+export function chainHasNoDeltas(chain: OptionsChain): boolean {
+  return chain.contracts.length > 0 && chain.contracts.every((c) => c.delta === null);
+}
+
+/**
+ * Why the wheel search resolved nothing, from its tally. `greeks_withheld` only when EVERY chain
+ * that came back was withheld: if one had Greeks and still had nothing in band, the band is the
+ * reason. see WheelNoCspReason in shared/types.ts
+ */
+export function classifyNoCsp(t: ChainSearchTally): WheelNoCspReason {
+  if (t.expirationsFailed) return 'expirations_unavailable';
+  if (t.inWindow === 0) return 'no_expiry_in_window';
+  if (t.fetched === 0) return 'chain_unavailable';
+  if (t.withheld === t.fetched) return 'greeks_withheld';
+  return 'none_in_band';
+}
+
+const NO_CSP_DETAIL: Record<WheelNoCspReason, string> = {
+  expirations_unavailable: 'expiration list unavailable',
+  no_expiry_in_window: 'no listed expiration in the window',
+  chain_unavailable: 'no chain returned for any expiration in the window',
+  greeks_withheld: 'Greeks withheld as stale on every chain in the window',
+  none_in_band: 'no contract in the delta band with a bid',
+  no_quote: 'no underlying price',
+};
+
+/** The wheel explanation for a miss. Keeps the historical "No suitable CSP found" prefix. */
+export function noCspExplanation(reason: WheelNoCspReason, minDTE: number, maxDTE: number): string {
+  return `No suitable CSP found (${minDTE}–${maxDTE} DTE, delta 0.20–0.30) [${reason}]: ${NO_CSP_DETAIL[reason]}. `;
 }
 
 /**
@@ -1157,7 +1210,8 @@ export class AnalysisService {
     // depend on WHEEL_MONTHLY_FIRST_EXPIRY (default off → 30–45 DTE, first-by-date).
     const monthlyFirst = wheelMonthlyFirstEnabled();
     const { minDTE, maxDTE } = wheelDteWindow(monthlyFirst);
-    const chain = await this.findSuitableChain(ticker, minDTE, maxDTE, 0.20, 0.30, monthlyFirst);
+    const tally = emptyChainSearchTally();
+    const chain = await this.findSuitableChain(ticker, minDTE, maxDTE, 0.20, 0.30, monthlyFirst, tally);
     // null (not 0) when there is no contract to measure — see wheelOptionLiquidityScore.
     const liquidity = wheelOptionLiquidityScore(chain?.contract ?? null);
     // Local 0-floor for the suitability/explanation gates below, which are pass/fail on a
@@ -1190,8 +1244,9 @@ export class AnalysisService {
     // No contract resolved → say exactly that. This must come BEFORE the "all checks passed"
     // default, or a ticker with no CSP but no other failed check reports success.
     if (!chain || !price) {
-      explanation += 'No suitable CSP found (30–45 DTE, delta 0.20–0.30). ';
-      return this.emptyWheel(ticker, price, currentIv, ivRank, explanation.trim());
+      const reason = chain ? 'no_quote' : classifyNoCsp(tally);
+      explanation += noCspExplanation(reason, minDTE, maxDTE);
+      return this.emptyWheel(ticker, price, currentIv, ivRank, explanation.trim(), reason);
     }
 
     if (isEtf && explanation === '') explanation = 'ETF — all checks passed (fundamentals N/A). ';
@@ -1215,11 +1270,15 @@ export class AnalysisService {
       openInterest: contract.openInterest ?? null, volume: contract.volume ?? null,
       optionLiquidityScore: liquidity,
       suitabilityScore: score,
-      explanation: explanation.trim()
+      explanation: explanation.trim(),
+      noCspReason: null
     };
   }
 
-  private emptyWheel(ticker: string, price: number | null, currentIv: number | null, ivRank: number | null, explanation: string): WheelResult {
+  private emptyWheel(
+    ticker: string, price: number | null, currentIv: number | null, ivRank: number | null, explanation: string,
+    noCspReason: WheelNoCspReason | null = null
+  ): WheelResult {
     return {
       mode: 'wheel', ticker, lastPrice: price,
       recommendedStrike: null, expiration: null, dte: null,
@@ -1229,7 +1288,7 @@ export class AnalysisService {
       // NOT 0 — nothing was measured here (no suitable chain / insufficient history). A 0
       // would be read downstream as "measured and illiquid" and cost the full weight-9
       // optionLiquidity penalty; null makes the signal *missing* instead (FR-SE-03).
-      optionLiquidityScore: null, suitabilityScore: 1, explanation
+      optionLiquidityScore: null, suitabilityScore: 1, explanation, noCspReason
     };
   }
 
@@ -1544,7 +1603,9 @@ export class AnalysisService {
     maxDelta: number,
     // Try 3rd-Friday monthlies before nearer weeklies — see WHEEL_MONTHLY_FIRST_EXPIRY.
     // Default false keeps every existing caller (incl. options-income) bit-identical.
-    preferMonthly = false
+    preferMonthly = false,
+    // Filled in place with what the walk saw, so a null result can say why. Never read here.
+    tally?: ChainSearchTally
   ): Promise<{ contract: NonNullable<OptionsChain['contracts']>[number]; dte: number; expiration: string } | null> {
     // Generate enough Fridays to cover maxDTE (the first is up to 6 days out, hence the +2).
     const weeksNeeded = Math.ceil(maxDTE / 7) + 2;
@@ -1552,6 +1613,7 @@ export class AnalysisService {
     try {
       expirations = await this.getNearTermExpirations(ticker, weeksNeeded);
     } catch {
+      if (tally) tally.expirationsFailed = true;
       return null;
     }
     for (const exp of wheelExpirationOrder(expirations, preferMonthly)) {
@@ -1559,6 +1621,7 @@ export class AnalysisService {
       // the target window (most generated Fridays are too near and would be wasted calls).
       const dte = dteDays(exp);
       if (!isDTEMatch(dte, minDTE, maxDTE)) continue;
+      if (tally) tally.inWindow++;
 
       let chain: OptionsChain;
       try {
@@ -1566,6 +1629,10 @@ export class AnalysisService {
       } catch {
         // E*Trade returns 10031 for expiry dates without listed options — skip and try next
         continue;
+      }
+      if (tally && chain.contracts.length > 0) {
+        tally.fetched++;
+        if (chainHasNoDeltas(chain)) tally.withheld++;
       }
       // For puts, delta is negative (e.g. -0.25). Use absolute value for filtering.
       // Note: bid is lastPrice (day.close) from the v3 snapshot; OI is often 0/null.
