@@ -870,6 +870,23 @@ export const QC701_FILING_FRESHNESS: CheckDefinition = {
     // Where each filing stands in the instance queue, so "queued" says when it will be read.
     const queue = filingFactsQueue(ctx.db, ctx.tradingDate);
     const queueRank = new Map(queue.map((e, i) => [e.accessionNo, i + 1]));
+    // The newest period each open finding was raised on. A clean reading closes it: as
+    // `data_corrected` when newer facts have been stored since, as `rule_changed` when the same
+    // facts no longer exceed the allowance (v1.1.371 replaced the flat 120 days). Without this,
+    // CTSH, D and LEN sat open and blocking for days after their facts arrived (2026-10-20).
+    const openPeriod = new Map(
+      (ctx.db
+        .prepare(`SELECT key, evidence_json FROM qa_exception WHERE check_id = 'QC-701' AND state IN ('open', 'acknowledged')`)
+        .all() as { key: string; evidence_json: string }[])
+        .map((f) => {
+          try {
+            const p = (JSON.parse(f.evidence_json) as { newestPeriodEnd?: unknown }).newestPeriodEnd;
+            return [f.key, typeof p === 'string' ? p : null] as const;
+          } catch {
+            return [f.key, null] as const;
+          }
+        })
+    );
 
     // A filer whose facts have never been pulled is not a stale filer — the
     // fact pull is filing-triggered and works through a queue. Reporting it as
@@ -919,7 +936,15 @@ export const QC701_FILING_FRESHNESS: CheckDefinition = {
           value: overdue,
           fired,
           detail: `${r.ticker} (CIK ${r.cik}): newest fact period ends ${r.newest}, ${days} days ago, ${overdue} past the ${allowance}-day allowance for ${NEXT_FILING_LABEL[next]}${why}`,
-          evidence: { ticker: r.ticker, cik: r.cik, newestPeriodEnd: r.newest, days, nextFiling: next, allowance, overdue, ...(cause ? { cause } : {}) }
+          evidence: { ticker: r.ticker, cik: r.cik, newestPeriodEnd: r.newest, days, nextFiling: next, allowance, overdue, ...(cause ? { cause } : {}) },
+          closesAs: fired || !openPeriod.has(r.ticker)
+            ? undefined
+            : (() => {
+                const then = openPeriod.get(r.ticker);
+                return then !== null && then !== undefined && (r.newest as string) > then
+                  ? { kind: 'data_corrected' as const, note: `${r.ticker}: newest fact period now ${r.newest} (raised on ${then}), within the ${allowance}-day allowance` }
+                  : { kind: 'rule_changed' as const, note: `${r.ticker}: newest fact period ${r.newest} is within the ${allowance}-day allowance for ${NEXT_FILING_LABEL[next]}` };
+              })()
         } satisfies Evaluation;
       });
   }

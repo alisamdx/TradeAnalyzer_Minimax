@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.1.372] - 2026-10-20
+
+### TradeAnalyzer 2: stale blocking findings that nothing could close
+
+The 2026-10-20 snapshot held about 3,200 blocking findings that were open but no longer firing. The gate only closes such a finding on evidence the check supplies, and four checks supplied none:
+
+- **QC-302 (687, 2026-10-16):** a check bug. It compared every stored version of a day's snapshot with every version of its bar, so the 12:09 ET intraday snapshot was paired with the final bar. It now compares the latest of each, and re-judges open findings on their own date.
+- **QC-701 (CTSH, D, LEN):** closes once the newer facts are stored (`data_corrected`) or the v1.1.371 allowance no longer fires (`rule_changed`).
+- **QC-956 (replay):** closes once a replay has passed.
+- **QC-804 (606:TSLA):** the option leg of an assignment has no execution price by nature. It is now exempt, and the open finding closes.
+- The 10-08 token-loss findings (QC-409 ×2,495 and six others) stay acknowledged by design: that day's data is lost for good. See 03 §5.1.
+
+Rehearsed on 2026-10-20: open, non-firing blocking findings 3,202 → 2,505 (all of them the acknowledged 10-08 group).
+
+core 0.6.80, next 0.4.65. Details: `changelogs/v1.1.372_2026-10-20.md`.
+
 ## [1.1.371] - 2026-10-20
 
 ### TradeAnalyzer 2: fixes behind the 2026-10-20 gate's blocking findings

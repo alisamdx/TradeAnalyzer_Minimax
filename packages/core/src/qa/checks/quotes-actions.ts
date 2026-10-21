@@ -1,4 +1,4 @@
-import type { CheckDefinition, Evaluation } from '../check.js';
+import type { CheckContext, CheckDefinition, Evaluation } from '../check.js';
 import { verifiedGenuineSteps } from './bars.js';
 
 /**
@@ -67,27 +67,86 @@ export const QC302_CLOSE_DISAGREEMENT: CheckDefinition = {
   // which is a different and blocking kind of problem (03 §2).
   promoteToBlockingAtFiredFraction: 0.02,
   run(ctx) {
-    const rows = ctx.db
-      .prepare(
-        `SELECT q.ticker, q.day_close, b.close
-           FROM raw_eod_quote q
-           JOIN raw_daily_bar b ON b.ticker = q.ticker AND b.trade_date = q.as_of_date
-          WHERE q.as_of_date = ? AND q.day_close IS NOT NULL AND b.close > 0`
-      )
-      .all(ctx.tradingDate) as { ticker: string; day_close: number; close: number }[];
-
-    return rows.map((r) => {
+    const max = this.thresholds['maxAbsDisagreement']!;
+    const today = qc302Pairs(ctx.db, ctx.tradingDate).map((r) => {
       const disagreement = Math.abs(r.day_close - r.close) / r.close;
       return {
         key: r.ticker,
         value: disagreement,
-        fired: disagreement > this.thresholds['maxAbsDisagreement']!,
+        fired: disagreement > max,
         detail: `snapshot close ${r.day_close} vs bar close ${r.close} (${(disagreement * 100).toFixed(2)}%)`,
         evidence: { ticker: r.ticker, snapshotClose: r.day_close, barClose: r.close, disagreement }
       } satisfies Evaluation;
     });
+    return rejudgeQc302(ctx.db, today, max);
   }
 };
+
+/**
+ * The latest snapshot beside the latest bar, per ticker, for one date — MAX(row_id) on each side,
+ * the supersession rule. Until v1.1.372 this joined EVERY stored version of each: on 2026-10-16
+ * the 12:09 ET intraday run had stored a snapshot and a partial bar, so the evening run paired the
+ * midday snapshot with the final bar (and the final snapshot with the midday bar) and fired on 687
+ * tickers whose latest readings agreed on all 1,081.
+ */
+function qc302Pairs(db: CheckContext['db'], date: string): { ticker: string; day_close: number; close: number }[] {
+  return db
+    .prepare(
+      `SELECT q.ticker, q.day_close, b.close
+         FROM raw_eod_quote q
+         JOIN raw_daily_bar b ON b.ticker = q.ticker AND b.trade_date = q.as_of_date
+        WHERE q.as_of_date = ? AND q.day_close IS NOT NULL AND b.close > 0
+          AND q.row_id = (SELECT MAX(x.row_id) FROM raw_eod_quote x
+                           WHERE x.ticker = q.ticker AND x.as_of_date = q.as_of_date)
+          AND b.row_id = (SELECT MAX(y.row_id) FROM raw_daily_bar y
+                           WHERE y.ticker = b.ticker AND y.trade_date = b.trade_date)`
+    )
+    .all(date) as { ticker: string; day_close: number; close: number }[];
+}
+
+/**
+ * Open QC-302 findings re-judged on the latest pair for each date they affect. The key is a ticker,
+ * so a clean reading tonight says nothing about the date the finding is about; only that date's own
+ * latest pair can close it. A finding whose dates all agree under that pairing was raised by the
+ * cross-version join, and closes as `rule_changed`.
+ */
+function rejudgeQc302(db: CheckContext['db'], today: Evaluation[], max: number): Evaluation[] {
+  const open = db
+    .prepare(`SELECT key, affects_trading_dates_json FROM qa_exception WHERE check_id = 'QC-302' AND state IN ('open', 'acknowledged')`)
+    .all() as { key: string; affects_trading_dates_json: string }[];
+  if (open.length === 0) return today;
+
+  const pairsByDate = new Map<string, Map<string, number>>();
+  const disagreementOn = (date: string, ticker: string): number | undefined => {
+    let m = pairsByDate.get(date);
+    if (!m) {
+      m = new Map(qc302Pairs(db, date).map((r) => [r.ticker, Math.abs(r.day_close - r.close) / r.close]));
+      pairsByDate.set(date, m);
+    }
+    return m.get(ticker);
+  };
+
+  const out = [...today];
+  const indexOf = new Map(out.map((e, i) => [e.key, i]));
+  for (const f of open) {
+    const i = indexOf.get(f.key);
+    if (i !== undefined && out[i]!.fired) continue; // live tonight
+    const dates = JSON.parse(f.affects_trading_dates_json) as string[];
+    if (dates.length === 0) continue;
+    const readings = dates.map((d) => ({ d, v: disagreementOn(d, f.key) }));
+    if (readings.some((r) => r.v === undefined || r.v > max)) continue; // unpaired, or still disagrees
+    const closesAs = {
+      kind: 'rule_changed' as const,
+      note:
+        `${f.key}: latest snapshot vs latest bar ` +
+        readings.map((r) => `${r.d} ${((r.v as number) * 100).toFixed(2)}%`).join(', ') +
+        ` — within ${max * 100}%; raised when QC-302 paired every stored version of the day`
+    };
+    if (i === undefined) out.push({ key: f.key, fired: false, closesAs });
+    else out[i] = { ...out[i]!, closesAs };
+  }
+  return out;
+}
 
 export const QC303_CROSSED_MARKET: CheckDefinition = {
   id: 'QC-303',

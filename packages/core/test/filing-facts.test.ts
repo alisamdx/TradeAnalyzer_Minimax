@@ -583,5 +583,25 @@ describe('the filing-first read in the collector (v1.1.365)', () => {
       expect(judge('OLDF')).toMatchObject({ fired: false });
       expect(judge('GONE')).toMatchObject({ fired: true, value: 16 });
     });
+
+    it('closes its open findings once they read clean — data_corrected on newer facts, else rule_changed', () => {
+      // CTSH and D on 2026-10-20: raised on 2026-04-24 facts, the 2026-07-24 10-Q's facts read 10-16.
+      const open = (ticker: string, newestPeriodEnd: string) => raw.prepare(
+        `INSERT INTO qa_exception (fingerprint, check_id, domain, key, severity, base_severity, state, detail,
+           evidence_json, first_seen_run_id, last_seen_run_id, consecutive_runs, remediations_json,
+           affects_trading_dates_json, still_firing)
+         VALUES (?, 'QC-701', 'fundamentals', ?, 'blocking', 'warning', 'open', 'd', ?, 1, 1, 3, '[]', '["2026-10-08"]', 0)`
+      ).run(`QC-701|${ticker}`, ticker, JSON.stringify({ newestPeriodEnd }));
+      listed('CTSH', '0001058290'); facts('0001058290', '2026-07-24', '10-Q', 'Q2'); open('CTSH', '2026-04-24');
+      listed('LAG', '0000000009'); facts('0000000009', '2026-06-07', '10-Q', 'Q2'); open('LAG', '2026-06-07');
+      listed('LATE', '0000000010'); facts('0000000010', '2026-05-01', '10-Q', 'Q2'); open('LATE', '2026-05-01');
+      listed('NONE', '0000000013'); facts('0000000013', '2026-07-24', '10-Q', 'Q2');
+
+      expect(judge('CTSH')?.closesAs).toMatchObject({ kind: 'data_corrected' });
+      expect(judge('CTSH')?.closesAs?.note).toContain('raised on 2026-04-24');
+      expect(judge('LAG')?.closesAs).toMatchObject({ kind: 'rule_changed' });
+      expect(judge('LATE')).toMatchObject({ fired: true, closesAs: undefined }); // still past its allowance
+      expect(judge('NONE')?.closesAs).toBeUndefined();                          // nothing open to close
+    });
   });
 });

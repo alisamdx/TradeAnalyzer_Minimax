@@ -141,6 +141,17 @@ describe('QC-956 — a replay must have passed recently', () => {
     replay('2026-09-10T20:00:00-04:00', 'nothing_replayable', ['2026-09-09']);
     expect(QC956_REPLAY_OVERDUE.run(ctx('2026-09-11'))[0]).toMatchObject({ value: 3, fired: false });
   });
+
+  it('says how to close its finding once a replay has passed, and not before', () => {
+    // 2026-10-20: escalated to blocking on 10-06, stayed open after the replay it asked for passed.
+    dailyRun('2026-08-31');
+    expect(QC956_REPLAY_OVERDUE.run(ctx('2026-09-11'))[0]?.closesAs).toBeUndefined(); // firing
+    expect(QC956_REPLAY_OVERDUE.run(ctx('2026-09-10'))[0]?.closesAs).toBeUndefined(); // quiet, but no replay ever passed
+    replay('2026-09-14T20:00:00-04:00', 'equal_on_replayed', ['2026-09-11']);
+    expect(QC956_REPLAY_OVERDUE.run(ctx('2026-09-15'))[0]).toMatchObject({
+      fired: false, closesAs: { kind: 'data_corrected', note: expect.stringContaining('passed 2026-09-14T20:00:00-04:00') }
+    });
+  });
 });
 
 describe('the pilot-exit reviews', () => {

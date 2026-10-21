@@ -1,4 +1,4 @@
-import type { CheckDefinition, Evaluation } from '../check.js';
+import type { CheckContext, CheckDefinition, Evaluation } from '../check.js';
 
 /**
  * Account checks — 03 §3.7.
@@ -189,21 +189,63 @@ export const QC804_FILLS_WITHOUT_PRICE: CheckDefinition = {
            FROM raw_executed_order_leg l
            JOIN raw_executed_order o ON o.row_id = l.order_row_id
           WHERE o.run_id = ? AND l.filled_quantity > 0
-            AND (l.average_execution_price IS NULL OR l.average_execution_price = 0)`
+            AND (l.average_execution_price IS NULL OR l.average_execution_price = 0)
+            AND NOT ${QC804_ASSIGNED_OPTION_LEG}`
       )
       .all(ctx.runId) as { row_id: number; symbol: string; filled_quantity: number; order_id: string }[];
 
-    if (rows.length === 0) return [{ key: ctx.tradingDate, value: 0, fired: false }];
-
-    return rows.map((r) => ({
-      key: `${r.order_id}:${r.symbol}`,
-      value: 1,
-      fired: true,
-      detail: `order ${r.order_id} filled ${r.filled_quantity} of ${r.symbol} with no execution price`,
-      evidence: { orderId: r.order_id, symbol: r.symbol, filledQuantity: r.filled_quantity }
-    })) satisfies Evaluation[];
+    const today: Evaluation[] = rows.length === 0
+      ? [{ key: ctx.tradingDate, value: 0, fired: false }]
+      : rows.map((r) => ({
+          key: `${r.order_id}:${r.symbol}`,
+          value: 1,
+          fired: true,
+          detail: `order ${r.order_id} filled ${r.filled_quantity} of ${r.symbol} with no execution price`,
+          evidence: { orderId: r.order_id, symbol: r.symbol, filledQuantity: r.filled_quantity }
+        }));
+    return [...today, ...rejudgeQc804(ctx, new Set(today.map((e) => e.key)))];
   }
 };
+
+/**
+ * The option leg of an assignment carries no execution price, by nature: nothing traded at a
+ * premium. The stock leg carries the strike (order 606, 2026-09-12: BUY_CLOSE TSLA 350C at 0,
+ * SELL 100 TSLA at 350). Exempted since v1.1.372; it had been blocking since 2026-09-14.
+ */
+const QC804_ASSIGNED_OPTION_LEG = `(o.order_type = 'OPTION_ASSIGNMENT' AND l.security_type = 'OPTN')`;
+
+/**
+ * Open QC-804 findings re-judged against every stored version of their order. The check reads only
+ * orders captured in this run, and an unchanged order is not captured again, so a finding about one
+ * would otherwise never be evaluated a second time. Closes as `rule_changed` when the order's only
+ * priceless filled legs for that symbol are an assignment's option legs.
+ */
+function rejudgeQc804(ctx: CheckContext, tonight: ReadonlySet<string>): Evaluation[] {
+  const open = ctx.db
+    .prepare(`SELECT key FROM qa_exception WHERE check_id = 'QC-804' AND state IN ('open', 'acknowledged')`)
+    .all() as { key: string }[];
+  const legs = ctx.db.prepare(
+    `SELECT COUNT(*) AS total, SUM(CASE WHEN ${QC804_ASSIGNED_OPTION_LEG} THEN 0 ELSE 1 END) AS other
+       FROM raw_executed_order_leg l
+       JOIN raw_executed_order o ON o.row_id = l.order_row_id
+      WHERE o.order_id = ? AND l.symbol = ? AND l.filled_quantity > 0
+        AND (l.average_execution_price IS NULL OR l.average_execution_price = 0)`
+  );
+  const out: Evaluation[] = [];
+  for (const f of open) {
+    if (tonight.has(f.key)) continue;
+    const sep = f.key.indexOf(':');
+    if (sep < 0) continue;
+    const r = legs.get(f.key.slice(0, sep), f.key.slice(sep + 1)) as { total: number; other: number | null };
+    if (r.total === 0 || (r.other ?? 0) > 0) continue; // order not stored, or a real priceless leg
+    out.push({
+      key: f.key,
+      fired: false,
+      closesAs: { kind: 'rule_changed', note: `${f.key}: the priceless leg is the option leg of an assignment, which has no execution price` }
+    });
+  }
+  return out;
+}
 
 export const QC805_TRANSACTIONS_UNAVAILABLE: CheckDefinition = {
   id: 'QC-805',

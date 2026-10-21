@@ -162,7 +162,16 @@ export const QC956_REPLAY_OVERDUE: CheckDefinition = {
           sessions: age.sessions,
           since: age.since,
           lastPassingRequest: age.lastPassing?.requestId ?? null
-        }
+        },
+        // The finding says "no replay has passed lately"; a passing replay inside the window is
+        // the answer to it, observed, not an absence. Without this it stayed open (and, escalated,
+        // blocking) after the replay it asked for came back equal (2026-10-20).
+        closesAs: fired || !age.lastPassing
+          ? undefined
+          : {
+              kind: 'data_corrected',
+              note: `replay request ${age.lastPassing.requestId} passed ${age.lastPassing.finishedAt}, ${age.sessions} sessions ago`
+            }
       }
     ];
   }
