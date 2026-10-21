@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.1.375] - 2026-10-21
+
+### TradeAnalyzer 2: QC-705 findings close once their filing reads clean
+
+The ten QC-705 blocking findings of 2026-10-20 all come from the parser revision v1.1.371 replaced. All ten filings were fetched from SEC and re-parsed by the current parser: every key and value now agrees with companyfacts. They are in the re-read queue and will be re-read over the next three runs. But QC-705 had nothing that closes a finding, so each one would have stayed open and blocking after its filing read clean. v1.1.371 said they would close; they would not have.
+
+A clean QC-705 reading of an accession with an open finding now closes it as `data_corrected`, and the note names the instance read and its parser revision. A filing that still differs keeps its finding.
+
+core 0.6.83, next 0.4.68. Details: `changelogs/v1.1.375_2026-10-21.md`.
+
 ## [1.1.374] - 2026-10-21
 
 ### TradeAnalyzer 2: accepted findings no longer make a run RED

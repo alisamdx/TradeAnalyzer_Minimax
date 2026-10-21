@@ -1228,6 +1228,21 @@ export const QC705_FACT_SOURCE_AGREEMENT: CheckDefinition = {
         WHERE x.accession_no = ? AND m.endpoint IN (?, ?)`
     );
 
+    // Open findings, so a clean reading can close them. The comparison is per accession and always
+    // re-made on the stored rows, so "clean" here is evidence, not absence. Without this, a filing
+    // re-read by a newer parser revision read clean and its finding stayed open and blocking for
+    // good (the ten of 2026-10-20, all fixed by revision 2).
+    const open = new Set(
+      (ctx.db
+        .prepare(`SELECT key FROM qa_exception WHERE check_id = 'QC-705' AND state IN ('open', 'acknowledged')`)
+        .all() as { key: string }[]).map((r) => r.key)
+    );
+    const revisionOf = ctx.db.prepare(
+      `SELECT COALESCE(json_extract(r.args_json, '$.rev'), 1) AS rev FROM meta_response m
+         LEFT JOIN meta_ingest_recipe r ON r.recipe_id = m.ingest_recipe_id
+        WHERE m.source_response_id = ?`
+    );
+
     const out: Evaluation[] = [];
     for (const { accession_no: accession } of accessions) {
       const rows = factsOf.all(accession, COMPANYFACTS_ENDPOINT, FILING_INSTANCE_ENDPOINT) as {
@@ -1283,7 +1298,16 @@ export const QC705_FACT_SOURCE_AGREEMENT: CheckDefinition = {
           accession, cik: first.cik, form: first.form, filedDate: first.filed_date,
           matched, differing: differing.length, onlyInFiling: onlyFiling.length, onlyInCompanyfacts: onlyAggregate.length,
           sample: [...differing.slice(0, 5), ...onlyFiling.slice(0, 5).map((k) => `filing only: ${k}`), ...onlyAggregate.slice(0, 5).map((k) => `companyfacts only: ${k}`)]
-        }
+        },
+        closesAs: bad > 0 || !open.has(accession)
+          ? undefined
+          : {
+              kind: 'data_corrected',
+              note:
+                `${accession}: all ${matched} fact keys agree with companyfacts on the instance read ` +
+                `(response ${newestInstance}, parser revision ` +
+                `${(revisionOf.get(newestInstance) as { rev: number } | undefined)?.rev ?? 1})`
+            }
       });
     }
     return out;

@@ -528,6 +528,32 @@ describe('the filing-first read in the collector (v1.1.365)', () => {
       expect(QC705_FACT_SOURCE_AGREEMENT.run(ctx()).find((x) => x.key === ACCESSION)).toMatchObject({ fired: false, evidence: { matched: 4 } });
     });
 
+    it('closes its open finding once the re-read agrees, and not while it still differs (v1.1.375)', async () => {
+      // 2026-10-20: ten blocking QC-705 findings, every one fixed by revision 2, and nothing to close them.
+      staleFiler();
+      revisionOneRead();
+      companyfactsWithFiling();
+      raw.prepare(
+        `INSERT INTO qa_exception (fingerprint, check_id, domain, key, severity, base_severity, state, detail,
+           evidence_json, first_seen_run_id, last_seen_run_id, consecutive_runs, remediations_json,
+           affects_trading_dates_json, still_firing)
+         VALUES (?, 'QC-705', 'fundamentals', ?, 'blocking', 'warning', 'open', 'd', '{}', 1, 1, 3, '[]', '["2026-10-09"]', 1)`
+      ).run(`QC-705|${ACCESSION}`, ACCESSION);
+      const judge = () => QC705_FACT_SOURCE_AGREEMENT.run(ctx()).find((x) => x.key === ACCESSION);
+
+      expect(judge()).toMatchObject({ fired: true, closesAs: undefined });
+      await runEdgarFilingFacts(sec([]), db(), run);
+      expect(judge()).toMatchObject({ fired: false, closesAs: { kind: 'data_corrected' } });
+      expect(judge()?.closesAs?.note).toMatch(/all 4 fact keys agree .* parser revision 2\)$/);
+    });
+
+    it('offers no closer for a clean filing that has no open finding', async () => {
+      staleFiler();
+      await runEdgarFilingFacts(sec([]), db(), run);
+      companyfactsWithFiling();
+      expect(QC705_FACT_SOURCE_AGREEMENT.run(ctx()).find((x) => x.key === ACCESSION)?.closesAs).toBeUndefined();
+    });
+
     it('keeps listing a re-read that failed, and never re-reads a filing the current revision has read', async () => {
       staleFiler();
       revisionOneRead();
