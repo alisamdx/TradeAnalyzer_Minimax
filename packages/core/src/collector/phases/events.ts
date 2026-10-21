@@ -16,7 +16,7 @@ import { sweepPolygonPages } from '../paged.js';
 import { refusedSymbolAnswers, withRefusals } from '../symbol-rulings.js';
 import { FUND_TYPES } from '../../qa/checks/earnings-fundamentals.js';
 import {
-  factsBatch, FACTS_PER_RUN, filingFactsQueue, FILING_FACTS_PER_RUN, FILING_INDEX_ENDPOINT,
+  factsBatch, FACTS_PER_RUN, filingFactsQueue, filingFactsRereadQueue, FILING_FACTS_PER_RUN, FILING_INDEX_ENDPOINT,
   FILING_INSTANCE_ENDPOINT, COMPANYFACTS_ENDPOINT, isSecAnswer
 } from '../facts-queue.js';
 // The queue moved to collector/facts-queue.ts (v1.1.322); re-exported for existing callers.
@@ -684,8 +684,13 @@ export async function runEdgarFilingFacts(
     { trigger: 'new_report_filing', primary: true },
     "XBRL facts from a report filing's own instance — the primary source for a new report filing."
   );
-  const pending = filingFactsQueue(db, run.tradingDate).slice(0, opts.maxFilings ?? FILING_FACTS_PER_RUN);
-  if (pending.length === 0) return skipped('no report filing omitted by companyfacts is due');
+  // New filings first, then filings last parsed by an older parser revision (v1.1.371), one budget.
+  // An instance that parsed to no rows sits in both lists; read it once.
+  const fresh = filingFactsQueue(db, run.tradingDate);
+  const freshSet = new Set(fresh.map((f) => f.accessionNo));
+  const pending = [...fresh, ...filingFactsRereadQueue(db, run.tradingDate).filter((f) => !freshSet.has(f.accessionNo))]
+    .slice(0, opts.maxFilings ?? FILING_FACTS_PER_RUN);
+  if (pending.length === 0) return skipped('no report filing is due for its own instance');
 
   let stored = 0;
   let calls = 0;

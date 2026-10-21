@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.371] - 2026-10-20
+
+### TradeAnalyzer 2: fixes behind the 2026-10-20 gate's blocking findings
+
+All 16 blocking findings of 2026-10-20 were warnings promoted by repetition, and 15 were our own faults:
+
+- **QC-705 (10):** the filing-instance parser kept the first copy of a repeated fact, often a rounded narrative figure. It now keeps the most precise copy. It also keyed one-day periods as ranges where SEC keys an instant; that is fixed too. Filings parsed by the old revision (398) are re-read over the next few runs, and QC-705 judges only each filing's newest read.
+- **QC-701 (4):** a flat 120 days fired on 20-F filers and on every company between its Q3 and its 10-K. From about 10-28 it would also have flagged most of the universe until the Q3 10-Qs landed. It now allows 140 / 185 / 485 days by cadence, measured on stored filing lags.
+- **QC-603 (1):** a superseded Finnhub estimate kept IBKR "stale" after it had reported.
+- The last one, FDXF's triple-dated Finnhub row, needs an operator ruling.
+
+core 0.6.79, next 0.4.64. Details: `changelogs/v1.1.371_2026-10-20.md`.
+
 ## [1.1.370] - 2026-10-20
 
 ### The wheel snapshot says why a ticker got no CSP

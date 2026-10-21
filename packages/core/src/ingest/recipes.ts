@@ -11,7 +11,8 @@ import {
 } from './events.js';
 import { ingestFomcCalendar, makeBlsScheduleIngest } from './macro-calendar.js';
 import {
-  makeSubmissionsIngest, makeCompanyFactsIngest, makeFilingFactsIngest, makeForm4Ingest, makeFormIndexFilingsIngest
+  makeSubmissionsIngest, makeCompanyFactsIngest, makeFilingFactsIngest, makeForm4Ingest, makeFormIndexFilingsIngest,
+  FILING_FACTS_PARSER_REVISION
 } from './edgar.js';
 import { makeIvBootstrapIngest, type IvBootstrapIngestArgs } from './iv-bootstrap.js';
 import { makeLegacyBriefIngest } from './legacy-brief.js';
@@ -217,7 +218,11 @@ export const recipes = {
     readonly form: string;
     readonly filedDate: string;
   }): IngestRecipe =>
-    recipe('edgar_filing_facts', { cik: o.cik, accessionNo: o.accessionNo, form: o.form, filedDate: o.filedDate }),
+    // `rev` names the parser revision (v1.1.371), so a filing parsed by an older one can be found and
+    // re-read: see FILING_FACTS_PARSER_REVISION and filingFactsRereadQueue. The builder ignores it.
+    recipe('edgar_filing_facts', {
+      cik: o.cik, accessionNo: o.accessionNo, form: o.form, filedDate: o.filedDate, rev: FILING_FACTS_PARSER_REVISION
+    }),
   // `derivatives` is omitted when false so a pre-v20 recipe keeps its exact
   // digest: adding the key unconditionally would give every already-captured
   // Form 4 a new recipe id and make its replay a different parse.

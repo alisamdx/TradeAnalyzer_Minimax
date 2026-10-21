@@ -594,6 +594,19 @@ function qc602Closers(
   return out;
 }
 
+/**
+ * A source's dated estimate that the SAME source later replaced with a different date (v1.1.371).
+ * QC-603 asks whether a future date is still believed, and a superseded one is not: Finnhub dated
+ * IBKR 2026-10-20 until 09-24, IBKR reported on 10-15, and on 10-20 that dead estimate still read as
+ * "a future date observed 09-24". It also blocked the just-reported grace (which applies only when no
+ * future date is live), so the finding said "26 days" about a company that had reported five days
+ * earlier. One response listing two dates (FDXF) supersedes neither: `>` on observed_at, not `>=`.
+ */
+const SUPERSEDED_DATE_SQL =
+  `SELECT 1 FROM raw_earnings_event o
+    WHERE o.ticker = e.ticker AND o.source = e.source
+      AND o.observed_at > e.observed_at AND o.report_date <> e.report_date`;
+
 export const QC603_EARNINGS_FRESHNESS: CheckDefinition = {
   id: 'QC-603',
   domain: 'earnings',
@@ -604,7 +617,8 @@ export const QC603_EARNINGS_FRESHNESS: CheckDefinition = {
     'fire, which is indistinguishable from a ticker with no earnings coming. Two cases are not ' +
     'staleness: a ticker that reported in the last 21 days (its next date can sit past the sweep), ' +
     'one listed within 135 days that has never been dated (its first report is not yet due), and ' +
-    'one whose last 10-Q/10-K was filed with the SEC within 60 days (its next date is not yet announced).',
+    'one whose last 10-Q/10-K was filed with the SEC within 60 days (its next date is not yet announced). ' +
+    'A future date the same source later replaced with a different one is not a future date observed.',
   readsTables: ['raw_earnings_event', 'ref_chain_subset_membership', 'raw_ticker_reference', 'qa_exception', 'ref_universe_membership', 'ref_provider_symbol_ruling', 'raw_edgar_filing', 'raw_sec_ticker_map'],
   testedQuantity: 'days_since_future_date_observed',
   testedUnit: 'days',
@@ -629,7 +643,8 @@ export const QC603_EARNINGS_FRESHNESS: CheckDefinition = {
         `SELECT m.ticker,
                 (SELECT MAX(substr(e.observed_at, 1, 10))
                    FROM raw_earnings_event e
-                  WHERE ${issuer('e.ticker')} AND e.report_date >= ?) AS last_seen,
+                  WHERE ${issuer('e.ticker')} AND e.report_date >= ?
+                    AND NOT EXISTS (${SUPERSEDED_DATE_SQL})) AS last_seen,
                 (SELECT e.ticker FROM raw_earnings_event e
                   WHERE ${issuer('e.ticker')} AND e.ticker <> m.ticker AND e.report_date >= ?
                     AND NOT EXISTS (SELECT 1 FROM raw_earnings_event o WHERE o.ticker = m.ticker AND o.report_date >= ?)
@@ -779,37 +794,69 @@ export const QC604_EARNINGS_WEEKEND_DATE: CheckDefinition = {
   }
 };
 
+/**
+ * QC-701's allowance: how old a filer's newest fact period may be before its next report is late
+ * (v1.1.371). A quarter-end is 91 days after the last (p99 95 over 1,482 stored 10-Q gaps), so the
+ * allowance is 91 days plus how long that NEXT filing may take. Measured on gen-002's stored report
+ * filings, period end to filing date, 2026-10-20:
+ *   10-Q  n 1,482  p50 34  p99 44  max 85   -> 91 + 44 + 5 slack = 140
+ *   10-K  n   494  p50 50  p99 75  max 93   -> 91 + 90 (the non-accelerated deadline) + 4 = 185
+ *   20-F  n     9  max 91 (4-month deadline) -> a year + 120 = 485, the filer reports annually
+ * The flat 120 days it replaces fired on any filer slower than 29 days with a 10-Q, over half of
+ * them, every October/January/April/July, and on every company between its Q3 and its 10-K.
+ */
+export const QC701_ALLOWANCE_DAYS = { tenQ: 140, tenK: 185, annual: 485 } as const;
+
+const NEXT_FILING_LABEL = { tenQ: 'a 10-Q', tenK: 'a 10-K after a fiscal Q3', annual: 'an annual 20-F/40-F filer' } as const;
+
+/** Which filing a filer's newest facts make due next, from those facts' own form and fiscal period. */
+export function qc701NextFiling(newestForms: string | null): keyof typeof QC701_ALLOWANCE_DAYS {
+  const tags = (newestForms ?? '').split(',');
+  if (tags.some((t) => t.startsWith('20-F:') || t.startsWith('40-F:'))) return 'annual';
+  if (tags.some((t) => t.startsWith('10-Q') && t.endsWith(':Q3'))) return 'tenK';
+  return 'tenQ';
+}
+
 export const QC701_FILING_FRESHNESS: CheckDefinition = {
   id: 'QC-701',
   domain: 'fundamentals',
   severity: 'warning',
   description:
-    'A common-stock ticker with a CIK has an XBRL fact whose period ends within 120 days, and is ' +
-    'blocking past 180. Each finding names its cause: no newer filing seen (a late filer), a filing ' +
+    'A common-stock ticker with a CIK has an XBRL fact recent enough for its filing cadence: the newest ' +
+    'period ends within 140 days when a 10-Q is next, 185 when a 10-K is next (the newest facts are a fiscal Q3), ' +
+    'and 485 for an annual 20-F/40-F filer. The value is the days PAST that allowance; blocking past 60. ' +
+    'Each finding names its cause: no newer filing seen (a late filer), a filing ' +
     'still queued for companyfacts, which is our backlog, or SEC companyfacts read after the filing and still ' +
     'missing it (SEC\'s aggregate — IQV and JCI on 2026-09-18, July 10-Qs filed with inline XBRL).',
   readsTables: ['raw_edgar_fact', 'raw_ticker_reference', 'raw_edgar_filing', 'meta_response', 'raw_sec_ticker_map'],
-  testedQuantity: 'days_since_newest_period_end',
+  testedQuantity: 'days_past_filing_allowance',
   testedUnit: 'days',
-  thresholds: { warnAfterDays: 120 },
-  thresholdBasis: 'working',
-  promoteToBlockingAtValue: 180,
+  thresholds: { warnAfterDays: 0, tenQAllowanceDays: 140, tenKAllowanceDays: 185, annualAllowanceDays: 485 },
+  thresholdBasis: 'measured',
+  thresholdEvidence:
+    'gen-002 stored report filings, period end to filed date, 2026-10-20: 10-Q n=1,482 p99 44 days, 10-K n=494 p99 75 ' +
+    '(max 93), 20-F n=9 max 91; quarter-ends 91 days apart (p99 95). Allowance = the gap to the next period end plus ' +
+    'that next filing\'s lag: 140 / 185 / 485. Blocking at 60 days past it, the margin the flat 120/180 pair had.',
+  promoteToBlockingAtValue: 60,
   remediation: 'R2',
   run(ctx) {
     const rows = ctx.db
       .prepare(
         // The effective CIK — SEC's map first (v1.1.331) — or FWONA/LLYVA/LLYVK read the old
         // Liberty Media Corporation's facts, of which there are none.
-        `SELECT x.ticker, x.cik,
+        `SELECT y.ticker, y.cik, y.newest,
+                (SELECT GROUP_CONCAT(DISTINCT f.form || ':' || f.fiscal_period) FROM raw_edgar_fact f
+                  WHERE f.cik = y.cik AND f.period_end = y.newest) AS newest_forms
+           FROM (SELECT x.ticker, x.cik,
                 (SELECT MAX(f.period_end) FROM raw_edgar_fact f WHERE f.cik = x.cik) AS newest
            FROM (SELECT r.ticker, ${effectiveCikSql('r.ticker')} AS cik
                    FROM raw_ticker_reference r
                   WHERE r.security_type = 'CS'
                     AND r.row_id IN (SELECT MAX(row_id) FROM raw_ticker_reference GROUP BY ticker)
                     AND r.ticker IN (SELECT ticker FROM ref_chain_subset_membership WHERE valid_to IS NULL)) x
-          WHERE x.cik IS NOT NULL`
+          WHERE x.cik IS NOT NULL) y`
       )
-      .all() as { ticker: string; cik: string; newest: string | null }[];
+      .all() as { ticker: string; cik: string; newest: string | null; newest_forms: string | null }[];
 
     // Why the facts are old, stated rather than assumed (v1.1.271; causes rebuilt v1.1.365 when the
     // filing's own instance became the primary source).
@@ -831,7 +878,10 @@ export const QC701_FILING_FRESHNESS: CheckDefinition = {
       .filter((r) => r.newest !== null)
       .map((r) => {
         const days = daysBetween(r.newest as string, ctx.tradingDate);
-        const fired = days > (this.thresholds['warnAfterDays'] as number);
+        const next = qc701NextFiling(r.newest_forms);
+        const allowance = (this.thresholds[`${next}AllowanceDays`] as number);
+        const overdue = days - allowance;
+        const fired = overdue > (this.thresholds['warnAfterDays'] as number);
         let cause: 'no_newer_filing_seen' | 'awaiting_instance_read' | 'instance_read_failed' | 'instance_without_facts' | 'filing_has_no_xbrl' | null = null;
         let why = '';
         if (fired) {
@@ -866,10 +916,10 @@ export const QC701_FILING_FRESHNESS: CheckDefinition = {
         }
         return {
           key: r.ticker,
-          value: days,
+          value: overdue,
           fired,
-          detail: `${r.ticker} (CIK ${r.cik}): newest fact period ends ${r.newest}, ${days} days ago${why}`,
-          evidence: { ticker: r.ticker, cik: r.cik, newestPeriodEnd: r.newest, days, ...(cause ? { cause } : {}) }
+          detail: `${r.ticker} (CIK ${r.cik}): newest fact period ends ${r.newest}, ${days} days ago, ${overdue} past the ${allowance}-day allowance for ${NEXT_FILING_LABEL[next]}${why}`,
+          evidence: { ticker: r.ticker, cik: r.cik, newestPeriodEnd: r.newest, days, nextFiling: next, allowance, overdue, ...(cause ? { cause } : {}) }
         } satisfies Evaluation;
       });
   }
@@ -1137,7 +1187,8 @@ export const QC705_FACT_SOURCE_AGREEMENT: CheckDefinition = {
       )
       .all(FILING_INSTANCE_ENDPOINT) as { accession_no: string }[];
     const factsOf = ctx.db.prepare(
-      `SELECT x.taxonomy, x.concept, x.unit, x.period_start, x.period_end, x.value, m.endpoint, x.cik, x.form, x.filed_date
+      `SELECT x.taxonomy, x.concept, x.unit, x.period_start, x.period_end, x.value, m.endpoint, x.cik, x.form, x.filed_date,
+              x.source_response_id
          FROM raw_edgar_fact x JOIN meta_response m ON m.source_response_id = x.source_response_id
         WHERE x.accession_no = ? AND m.endpoint IN (?, ?)`
     );
@@ -1146,12 +1197,20 @@ export const QC705_FACT_SOURCE_AGREEMENT: CheckDefinition = {
     for (const { accession_no: accession } of accessions) {
       const rows = factsOf.all(accession, COMPANYFACTS_ENDPOINT, FILING_INSTANCE_ENDPOINT) as {
         taxonomy: string; concept: string; unit: string; period_start: string | null; period_end: string;
-        value: number; endpoint: string; cik: string; form: string; filed_date: string;
+        value: number; endpoint: string; cik: string; form: string; filed_date: string; source_response_id: number;
       }[];
+      // Only the NEWEST instance read (v1.1.371): a filing re-read under a newer parser revision
+      // (filingFactsRereadQueue) keeps its older read's rows, and the union of both would report the
+      // old parse's mistakes for ever. companyfacts reads stay unioned — every one is SEC's own.
+      let newestInstance = -1;
+      for (const r of rows) {
+        if (r.endpoint === FILING_INSTANCE_ENDPOINT && r.source_response_id > newestInstance) newestInstance = r.source_response_id;
+      }
       const filing = new Map<string, Set<number>>();
       const aggregate = new Map<string, Set<number>>();
       for (const r of rows) {
         const key = `${r.taxonomy}|${r.concept}|${r.unit}|${r.period_start ?? ''}|${r.period_end}`;
+        if (r.endpoint === FILING_INSTANCE_ENDPOINT && r.source_response_id !== newestInstance) continue;
         const side = r.endpoint === FILING_INSTANCE_ENDPOINT ? filing : aggregate;
         const set = side.get(key) ?? new Set<number>();
         set.add(Number(r.value));

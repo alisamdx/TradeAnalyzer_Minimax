@@ -13,8 +13,12 @@ import { recipes } from '../src/ingest/recipes.js';
 import { ensureTradingCalendar } from '../src/collector/trading-calendar.js';
 import { filingInstanceName, makeFilingFactsIngest } from '../src/ingest/edgar.js';
 import { runEdgarFilingFacts } from '../src/collector/phases/events.js';
-import { factsQueue, filingFactsQueue } from '../src/collector/facts-queue.js';
-import { QC701_FILING_FRESHNESS, QC704_FILING_WITHOUT_FACTS, QC705_FACT_SOURCE_AGREEMENT } from '../src/qa/checks/earnings-fundamentals.js';
+import {
+  COMPANYFACTS_ENDPOINT, FILING_INSTANCE_ENDPOINT, factsQueue, filingFactsQueue, filingFactsRereadQueue
+} from '../src/collector/facts-queue.js';
+import {
+  QC701_FILING_FRESHNESS, QC704_FILING_WITHOUT_FACTS, QC705_FACT_SOURCE_AGREEMENT, qc701NextFiling
+} from '../src/qa/checks/earnings-fundamentals.js';
 
 /**
  * Reading a report filing's own XBRL instance: a fallback for what SEC's companyfacts omitted
@@ -238,6 +242,45 @@ describe('reading a filing\'s own XBRL instance', () => {
     ).toThrow(/not an XBRL instance/);
   });
 
+  // v1.1.371. Values from the 2026-10-20 gate's QC-705 evidence (CIK 920522's 10-Q
+  // 0000920522-26-000016: instance 600000 vs companyfacts 555000 on FinancingReceivableAllowance-
+  // ForCreditLosses; CIK 1101239's ProceedsFromMinorityShareholders on a 2023-04-03 one-day period).
+  const twoCopies = (first: string, second: string) => `<xbrl xmlns="http://www.xbrl.org/2003/instance"
+      xmlns:us-gaap="http://fasb.org/us-gaap/2025" xmlns:iso4217="http://www.xbrl.org/2003/iso4217">
+    <context id="i"><entity><identifier scheme="http://www.sec.gov/CIK">920522</identifier></entity>
+      <period><instant>2026-03-31</instant></period></context>
+    <context id="d"><entity><identifier scheme="http://www.sec.gov/CIK">920522</identifier></entity>
+      <period><startDate>2023-04-03</startDate><endDate>2023-04-03</endDate></period></context>
+    <unit id="usd"><measure>iso4217:USD</measure></unit>
+    ${first}
+    ${second}
+    <us-gaap:ProceedsFromMinorityShareholders contextRef="d" decimals="-5" unitRef="usd">1000000</us-gaap:ProceedsFromMinorityShareholders>
+  </xbrl>`;
+  const allowance = (decimals: string | null, value: number) =>
+    `<us-gaap:FinancingReceivableAllowanceForCreditLosses contextRef="i"${decimals === null ? '' : ` decimals="${decimals}"`} unitRef="usd">${value}</us-gaap:FinancingReceivableAllowanceForCreditLosses>`;
+  const parse = (body: string) =>
+    makeFilingFactsIngest({ cik: '0000920522', accessionNo: '0000920522-26-000016', form: '10-Q', filedDate: '2026-04-29' })(body, ingestCtx())
+      .map((r) => r.values);
+  const allowanceOf = (body: string) =>
+    parse(body).filter((v) => v['concept'] === 'FinancingReceivableAllowanceForCreditLosses').map((v) => v['value']);
+
+  it('keeps the MOST PRECISE copy of a repeated fact, as companyfacts does, whichever comes first', () => {
+    // The narrative's "$0.6 million" (decimals -5) tagged before the table's exact figure.
+    expect(allowanceOf(twoCopies(allowance('-5', 600000), allowance('-3', 555000)))).toEqual([555000]);
+    expect(allowanceOf(twoCopies(allowance('-3', 555000), allowance('-5', 600000)))).toEqual([555000]);
+    // INF is exact and beats any finite precision; a copy with no decimals never displaces one that has them.
+    expect(allowanceOf(twoCopies(allowance('-3', 555000), allowance('INF', 555123)))).toEqual([555123]);
+    expect(allowanceOf(twoCopies(allowance('-3', 555000), allowance(null, 999)))).toEqual([555000]);
+    // Equal precision keeps the first, as before.
+    expect(allowanceOf(twoCopies(allowance('-3', 555000), allowance('-3', 556000)))).toEqual([555000]);
+  });
+
+  it('keys a duration that starts and ends on one day as an instant, as companyfacts does', () => {
+    const one = parse(twoCopies(allowance('-3', 555000), '')).find((v) => v['concept'] === 'ProceedsFromMinorityShareholders');
+    expect(one?.['period_start']).toBeNull();
+    expect(one?.['period_end']).toBe('2023-04-03');
+  });
+
   it('finds the instance in a filing directory listing', () => {
     const listing = (...names: string[]) => JSON.stringify({ directory: { item: names.map((name) => ({ name })) } });
     // The real AEP Q2 directory carries R-files, linkbases, exhibits and the inline instance.
@@ -451,6 +494,94 @@ describe('the filing-first read in the collector (v1.1.365)', () => {
       staleFiler();
       await runEdgarFilingFacts(sec([]), db(), run);
       expect(QC705_FACT_SOURCE_AGREEMENT.run(ctx()).find((x) => x.key === ACCESSION)).toBeUndefined();
+    });
+  });
+
+  describe('re-reading filings an older parser revision read (v1.1.371)', () => {
+    /** An instance read stored under revision 1 — a recipe with no `rev` — whose parse got Assets wrong. */
+    function revisionOneRead() {
+      const wrong = AVTR_INSTANCE.replace('>11663000000<', '>11700000000<');
+      const r = captureResponse({
+        host: makeHost(), db: db(), runId: run.runId, asOfDate: DATE, provider: 'edgar',
+        endpoint: FILING_INSTANCE_ENDPOINT, slug: 'edgar-filing-instance',
+        params: { cik: '0001722482', accession: ACCESSION, instance: 'avtr-20260331_htm.xml' },
+        response: response(wrong, 200, '2026-10-09'), captureRuleId: rule(),
+        recipe: { module: 'edgar_filing_facts', args: { cik: '0001722482', accessionNo: ACCESSION, form: '10-Q', filedDate: '2026-04-29' } }
+      });
+      expect(r.parseStatus).toBe('ok');
+    }
+
+    it('lists a filing last read by an older revision, reads it again, and QC-705 judges only the newest read', async () => {
+      staleFiler();
+      revisionOneRead();
+      companyfactsWithFiling();
+      // The revision-1 read has facts, so the new-filing queue no longer lists it — only the re-read queue does.
+      expect(filingFactsQueue(db(), DATE)).toEqual([]);
+      expect(filingFactsRereadQueue(db(), DATE).map((f) => f.accessionNo)).toEqual([ACCESSION]);
+      expect(QC705_FACT_SOURCE_AGREEMENT.run(ctx()).find((x) => x.key === ACCESSION)).toMatchObject({ fired: true, evidence: { differing: 1 } });
+
+      expect(await runEdgarFilingFacts(sec([]), db(), run)).toEqual({ stored: 4, calls: 2, failed: 0 });
+      expect(filingFactsRereadQueue(db(), DATE)).toEqual([]);
+      // The old read's rows are still stored, and no longer judged.
+      const assets = raw.prepare("SELECT value FROM raw_edgar_fact WHERE concept = 'Assets' AND accession_no = ? ORDER BY row_id").all(ACCESSION);
+      expect(assets).toEqual([{ value: 11700000000 }, { value: 11663000000 }, { value: 11663000000 }]);
+      expect(QC705_FACT_SOURCE_AGREEMENT.run(ctx()).find((x) => x.key === ACCESSION)).toMatchObject({ fired: false, evidence: { matched: 4 } });
+    });
+
+    it('keeps listing a re-read that failed, and never re-reads a filing the current revision has read', async () => {
+      staleFiler();
+      revisionOneRead();
+      await runEdgarFilingFacts(sec([], { index: response('', 429) }), db(), run);
+      expect(filingFactsRereadQueue(db(), DATE).map((f) => f.accessionNo)).toEqual([ACCESSION]);
+      await runEdgarFilingFacts(sec([]), db(), run);
+      const asked: string[] = [];
+      await runEdgarFilingFacts(sec(asked), db(), run);
+      expect(asked).toEqual([]);
+    });
+  });
+
+  describe('QC-701 judges the facts by the filer\'s own cadence (v1.1.371)', () => {
+    /** One companyfacts fact for `cik` from a `form` filing for fiscal period `fp`, ending `end`. */
+    function facts(cik: string, end: string, form: string, fp: string) {
+      const r = captureResponse({
+        host: makeHost(), db: db(), runId: run.runId, asOfDate: DATE, provider: 'edgar',
+        endpoint: COMPANYFACTS_ENDPOINT, slug: 'edgar-companyfacts', params: { cik, end },
+        response: response(JSON.stringify({ facts: { 'us-gaap': { Revenues: { units: { USD: [
+          { start: '2025-01-01', end, val: 1, accn: `${cik}-x`, fy: 2026, fp, form, filed: end }
+        ] } } } } })),
+        captureRuleId: rule(), recipe: recipes.companyFacts({ cik })
+      });
+      expect(r.parseStatus).toBe('ok');
+    }
+    const judge = (ticker: string) => QC701_FILING_FRESHNESS.run(ctx()).find((e) => e.key === ticker);
+
+    it('names the next filing from the newest facts\' form and fiscal period', () => {
+      expect(qc701NextFiling('20-F:FY')).toBe('annual');
+      expect(qc701NextFiling('40-F:FY,10-Q:Q2')).toBe('annual');
+      expect(qc701NextFiling('10-Q:Q3')).toBe('tenK');
+      expect(qc701NextFiling('10-Q:Q2')).toBe('tenQ');
+      expect(qc701NextFiling('10-K:FY')).toBe('tenQ');
+      expect(qc701NextFiling(null)).toBe('tenQ');
+    });
+
+    it('does not fire on an annual 20-F filer, a filer between its Q3 and its 10-K, or a normal 10-Q lag', () => {
+      // DATE is 2026-10-14. AS/AU/BLSH (20-F, FY 2025-12-31) and AZO (fiscal Q3) fired on 2026-10-20.
+      listed('AS', '0001988894'); facts('0001988894', '2025-12-31', '20-F', 'FY');      // 287 days < 485
+      listed('AZO', '0000866787'); facts('0000866787', '2026-05-09', '10-Q', 'Q3');     // 158 days < 185
+      // 129 days: a 10-Q filer on day 38 of its window, inside every measured lag. Fired at the old flat 120.
+      listed('LAG', '0000000009'); facts('0000000009', '2026-06-07', '10-Q', 'Q2');
+      for (const t of ['AS', 'AZO', 'LAG']) expect(judge(t)).toMatchObject({ fired: false });
+      expect(judge('AZO')?.evidence).toMatchObject({ nextFiling: 'tenK', allowance: 185, overdue: -27 });
+    });
+
+    it('fires once a filer is past its allowance, with the value counting the days past it', () => {
+      listed('LATE', '0000000010'); facts('0000000010', '2026-05-01', '10-Q', 'Q2');   // 166 days, 26 past 140
+      listed('OLDF', '0000000011'); facts('0000000011', '2025-06-30', '20-F', 'FY');   // 471 days < 485: quiet
+      listed('GONE', '0000000012'); facts('0000000012', '2025-05-31', '20-F', 'FY');   // 501 days, 16 past 485
+      expect(judge('LATE')).toMatchObject({ fired: true, value: 26 });
+      expect(judge('LATE')?.detail).toContain('26 past the 140-day allowance for a 10-Q');
+      expect(judge('OLDF')).toMatchObject({ fired: false });
+      expect(judge('GONE')).toMatchObject({ fired: true, value: 16 });
     });
   });
 });

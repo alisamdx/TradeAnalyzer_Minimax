@@ -343,6 +343,28 @@ export interface InstanceFact {
 }
 
 /**
+ * Revision of `parseFilingInstance`, recorded in each instance read's recipe (`rev`). Bump it whenever
+ * the parse changes what a stored filing would yield: `filingFactsRereadQueue` then re-reads every
+ * filing last parsed by an older revision, and QC-705 compares only each filing's newest read.
+ *   1 — v1.1.360..370 (absent from the recipe)
+ *   2 — v1.1.371: the most precise duplicate wins; a same-day duration is an instant
+ */
+export const FILING_FACTS_PARSER_REVISION = 2;
+
+/**
+ * How precisely a numeric fact is stated, from its `decimals` attribute: `INF` (exact) ranks
+ * highest, a number ranks as itself (-3 = thousands beats -5 = hundred-thousands), and a fact with
+ * no `decimals` ranks lowest, so it never displaces one that states its precision.
+ */
+function factPrecision(attrs: string): number {
+  const d = /\bdecimals="([^"]+)"/.exec(attrs)?.[1]?.trim();
+  if (d === undefined) return Number.NEGATIVE_INFINITY;
+  if (d.toUpperCase() === 'INF') return Number.POSITIVE_INFINITY;
+  const n = Number(d);
+  return Number.isFinite(n) ? n : Number.NEGATIVE_INFINITY;
+}
+
+/**
  * The parse behind `makeFilingFactsIngest`, with no database in it, so the existing app's
  * fundamentals path reads a filing exactly as the collector does (v1.1.365) — one parser, two
  * callers, the rule this project keeps relearning.
@@ -369,7 +391,11 @@ export function parseFilingInstance(body: string): InstanceFact[] {
       const start = date('startDate');
       const end = date('endDate');
       if (instant) periods.set(m[1] as string, { start: null, end: instant });
-      else if (start && end) periods.set(m[1] as string, { start, end });
+      // A duration that starts and ends on the same day is keyed as an instant, which is how
+      // companyfacts carries it (v1.1.371). Kept as a range, the same fact read as "only in the
+      // filing" beside "only in companyfacts" and QC-705 fired on six accessions for nothing but
+      // the key, e.g. ProceedsFromMinorityShareholders 2023-04-03|2023-04-03 vs |2023-04-03.
+      else if (start && end) periods.set(m[1] as string, { start: start === end ? null : start, end });
     }
 
     // `iso4217:USD` → `USD`, a divide → `USD/shares`: companyfacts' own spelling.
@@ -396,8 +422,13 @@ export function parseFilingInstance(body: string): InstanceFact[] {
     const fp = dei('DocumentFiscalPeriodFocus');
 
     // An inline filing tags one number wherever it appears in the document, so the extracted
-    // instance repeats it. The natural key keeps one; the first occurrence wins.
-    const seen = new Set<string>();
+    // instance repeats it — and not always at one precision: the narrative's "$0.6 million" is
+    // tagged `decimals="-5"` beside the table's exact 555,000 (`decimals="-3"`). The natural key
+    // keeps one, the MOST PRECISE (v1.1.371), as companyfacts does; ties keep the first. Until
+    // then the first occurrence won, so a rounded copy that came first was stored and QC-705
+    // reported it against companyfacts (CIK 920522: 600,000 vs 555,000; CIK 1707753: 29.7M vs
+    // 29,669,000).
+    const byKey = new Map<string, { precision: number; index: number }>();
     const rows: InstanceFact[] = [];
     for (const m of body.matchAll(/<([\w.-]+):([\w.-]+)\b([^>]*?)(?:\/>|>([^<]*)<\/\1:\2>)/g)) {
       const taxonomy = taxonomyOf.get(m[1] as string);
@@ -413,10 +444,8 @@ export function parseFilingInstance(body: string): InstanceFact[] {
 
       const concept = m[2] as string;
       const key = `${taxonomy}|${concept}|${unit}|${period.start ?? ''}|${period.end}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-
-      rows.push({
+      const precision = factPrecision(attrs);
+      const fact: InstanceFact = {
         taxonomy,
         concept,
         unit,
@@ -425,7 +454,16 @@ export function parseFilingInstance(body: string): InstanceFact[] {
         periodEnd: period.end,
         fiscalYear: Number.isInteger(fy) ? fy : 0,
         fiscalPeriod: fp ?? ''
-      });
+      };
+      const prior = byKey.get(key);
+      if (prior === undefined) {
+        byKey.set(key, { precision, index: rows.length });
+        rows.push(fact);
+      } else if (precision > prior.precision) {
+        // Replace in place, so row order stays the order keys first appeared.
+        rows[prior.index] = fact;
+        prior.precision = precision;
+      }
     }
     return rows;
   }

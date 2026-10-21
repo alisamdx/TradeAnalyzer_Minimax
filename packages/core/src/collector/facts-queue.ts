@@ -1,5 +1,6 @@
 import type { SqliteLike } from '../db/sqlite-like.js';
 import { etDate } from '../time.js';
+import { FILING_FACTS_PARSER_REVISION } from '../ingest/edgar.js';
 
 /**
  * The companyfacts fetch queue — which filers the fact pull asks, and in what order (v1.1.271,
@@ -203,6 +204,46 @@ export function filingFactsQueue(db: SqliteLike, tradingDate: string): FilingFac
       lastAttempt: attempts.get(f.accession_no)?.lastAnswered ?? null
     }))
     .filter((f) => f.lastAttempt === null || factsRetryDue(f.lastAttempt) <= tradingDate)
+    .sort((a, b) => b.filed.localeCompare(a.filed) || a.accessionNo.localeCompare(b.accessionNo));
+}
+
+/**
+ * Report filings whose own instance WAS read, but only by a parser older than
+ * `FILING_FACTS_PARSER_REVISION` — read again so their stored facts are what today's parser yields
+ * (v1.1.371). Newest filing first. Served after `filingFactsQueue`, from the same per-run budget,
+ * so a new filing never waits behind a re-read.
+ *
+ * Re-reading rather than rewriting: stored rows are what a parse of a captured response produced,
+ * and no code here edits them in place. A re-read is a new response with new rows, and QC-705 reads
+ * only each filing's newest instance read. A re-read that fails (429, network) stores no
+ * current-revision read, so the filing stays listed and is tried again next run — no retry wait,
+ * because the filing has already been answered once and is not in question.
+ *
+ * Revision 1 recipes carry no `rev`, so a missing one reads as 1.
+ */
+export function filingFactsRereadQueue(db: SqliteLike, tradingDate: string): FilingFactsEntry[] {
+  const rows = db
+    .prepare(
+      `SELECT f.cik, MIN(f.ticker) AS ticker, f.accession_no, MIN(f.form) AS form, MIN(f.filed_date) AS filed_date
+         FROM raw_edgar_filing f
+        WHERE f.form IN ('10-K', '10-Q', '20-F', '40-F') AND f.filed_date <= ?
+          AND f.accession_no IN (
+                SELECT json_extract(m.params_json, '$.accession') FROM meta_response m
+                 WHERE m.endpoint = ? AND m.http_status BETWEEN 200 AND 299)
+          AND f.accession_no NOT IN (
+                SELECT json_extract(m.params_json, '$.accession') FROM meta_response m
+                  JOIN meta_ingest_recipe r ON r.recipe_id = m.ingest_recipe_id
+                 WHERE m.endpoint = ? AND m.http_status BETWEEN 200 AND 299
+                   AND COALESCE(json_extract(r.args_json, '$.rev'), 1) >= ?)
+        GROUP BY f.cik, f.accession_no`
+    )
+    .all(tradingDate, FILING_INSTANCE_ENDPOINT, FILING_INSTANCE_ENDPOINT, FILING_FACTS_PARSER_REVISION) as {
+    cik: string; ticker: string; accession_no: string; form: string; filed_date: string;
+  }[];
+  return rows
+    .map((f): FilingFactsEntry => ({
+      cik: f.cik, ticker: f.ticker, accessionNo: f.accession_no, form: f.form, filed: f.filed_date, lastAttempt: null
+    }))
     .sort((a, b) => b.filed.localeCompare(a.filed) || a.accessionNo.localeCompare(b.accessionNo));
 }
 
