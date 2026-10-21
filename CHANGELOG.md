@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.373] - 2026-10-20
+
+### TradeAnalyzer 2: QC-701 back from 72 s to 0.4 s
+
+v1.1.371 added a lookup of the newest facts' form as a correlated subquery. Because SQLite flattened the subqueries around it, the lookup re-evaluated the effective-CIK and newest-period expressions rather than using their values, and QC-701 took 72 s on every gate run. The lookup is now a separate statement per ticker. On the 2026-10-20 snapshot it takes 0.36 s, and all 344 evaluations are identical to the old query's.
+
+core 0.6.81, next 0.4.66. Details: `changelogs/v1.1.373_2026-10-20.md`.
+
 ## [1.1.372] - 2026-10-20
 
 ### TradeAnalyzer 2: stale blocking findings that nothing could close

@@ -840,23 +840,33 @@ export const QC701_FILING_FRESHNESS: CheckDefinition = {
   promoteToBlockingAtValue: 60,
   remediation: 'R2',
   run(ctx) {
-    const rows = ctx.db
+    // Two statements, not one. As a correlated subquery over the flattened `x`/`y`, the forms
+    // lookup re-evaluated the effective-CIK and MAX(period_end) expressions instead of using
+    // their values, and QC-701 went from 0.3 s to 72 s on gen-002 (v1.1.371 → v1.1.373).
+    const newestFormsOf = ctx.db.prepare(
+      `SELECT GROUP_CONCAT(DISTINCT f.form || ':' || f.fiscal_period) AS forms FROM raw_edgar_fact f
+        WHERE f.cik = ? AND f.period_end = ?`
+    );
+    const rows = (ctx.db
       .prepare(
         // The effective CIK — SEC's map first (v1.1.331) — or FWONA/LLYVA/LLYVK read the old
         // Liberty Media Corporation's facts, of which there are none.
-        `SELECT y.ticker, y.cik, y.newest,
-                (SELECT GROUP_CONCAT(DISTINCT f.form || ':' || f.fiscal_period) FROM raw_edgar_fact f
-                  WHERE f.cik = y.cik AND f.period_end = y.newest) AS newest_forms
-           FROM (SELECT x.ticker, x.cik,
+        `SELECT x.ticker, x.cik,
                 (SELECT MAX(f.period_end) FROM raw_edgar_fact f WHERE f.cik = x.cik) AS newest
            FROM (SELECT r.ticker, ${effectiveCikSql('r.ticker')} AS cik
                    FROM raw_ticker_reference r
                   WHERE r.security_type = 'CS'
                     AND r.row_id IN (SELECT MAX(row_id) FROM raw_ticker_reference GROUP BY ticker)
                     AND r.ticker IN (SELECT ticker FROM ref_chain_subset_membership WHERE valid_to IS NULL)) x
-          WHERE x.cik IS NOT NULL) y`
+          WHERE x.cik IS NOT NULL`
       )
-      .all() as { ticker: string; cik: string; newest: string | null; newest_forms: string | null }[];
+      .all() as { ticker: string; cik: string; newest: string | null }[])
+      .map((r) => ({
+        ...r,
+        newest_forms: r.newest === null
+          ? null
+          : ((newestFormsOf.get(r.cik, r.newest) as { forms: string | null } | undefined)?.forms ?? null)
+      }));
 
     // Why the facts are old, stated rather than assumed (v1.1.271; causes rebuilt v1.1.365 when the
     // filing's own instance became the primary source).
