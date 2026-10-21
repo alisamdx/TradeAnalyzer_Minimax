@@ -17,15 +17,15 @@ can never be confused with `#5` in the main list.
 
 ---
 
-## Status — 2026-10-09
+## Status — 2026-10-20
 
 Mode is `shadow`: picks are computed after every brief and stored, with no panel, no email, and nothing
 reaching the v2 engine. The 08 §4 enable gate is **time-blocked, not work-blocked**:
 
 | §4 condition | State |
 |---|---|
-| ≥ 15 intraday capture days, then re-run the study `--slip-model quoted --capital 25000 --risk 2500` | **18 / 15 — re-run 10-13: return passes (+88.8%), coverage 44% of entries / 25% of tickers (bar: 50% of both, S14); `coverage` capture from 10-14 should close it in ~1–2 weeks** |
-| ≥ 30 settled positions, mean return on max loss > 0 | **17 / 30**, mean +16.4% (10-13) — most of the book settles 10-16…10-30 |
+| ≥ 15 intraday capture days, then re-run the study `--slip-model quoted --capital 25000 --risk 2500` | **23 / 15 — re-run 10-20: coverage PASSES (88% of entries, 63% of tickers); return passes, but only narrowly: +34.4% (26.2% ann.) against the CSP's +9.7%, down from +88.8% when 56% of entries were on the $0.03 fallback** |
+| ≥ 30 settled positions, mean return on max loss > 0 | **20 / 30**, mean +14.2%, win 95% (10-20; the first loss) — most of the book settles by 10-30 |
 
 *(Status as of 2026-09-22, kept for history:)*
 
@@ -464,6 +464,34 @@ Provenance: **measured** (a #43 study result) · **inherited** (a wheel-screen r
   ~135 tickers at 15 a day is ~9 trading days to reach all of them. (b) The bar is now ≥ 50% of entries
   **and** ≥ 50% of replay tickers; the study prints the verdict on one line. On 10-13 that line reads
   **FAILS — entries 44% (660/1,495), tickers 25% (44/179)**. Re-run BPS-14 after ~5 intraday runs.
+  **RE-RUN 2026-10-20 (`bull-put-spread-gate-2026-10-20.md`, 23 intraday capture days, same command plus
+  `--slip 0.03`) — coverage PASSES: entries 88% (1,313/1,495), replay tickers 63% (113/179).** The
+  `coverage` capture did what it was built for: quoted tickers went from 182 to 276. **Real costs then took
+  most of the headline away.** The per-leg median rose from $0.138 to **$0.175** (p90 $0.787), because the
+  newly quoted tickers are the thinner ones the day's pools never chose. §7, $25,000 pot:
+
+  | profile | 10-13 (44% quoted) | **10-20 (88% quoted)** | CSP, same entries |
+  |---|--:|--:|--:|
+  | draft Δ0.25 w5% pt0.5 sl2 ts15 | −24.4% / 46.7% DD | **−95.4% / 95.5% DD** | +16.2% |
+  | Δ0.3 w5% pt0.5, no gate | +102.0% / 24.2% | **−62.1% / 68.5%** | +24.7% |
+  | **Δ0.3 w5% pt0.5 cost ≤ 25% (the shadow profile)** | +88.8% / 23.8% | **+34.4% (26.2% ann.) / 21.5%** | +9.7% |
+  | Δ0.3 **w10%** pt0.5 | +127.0% / 16.6% | **+65.4% / 22.6%** | +24.7% |
+  | Δ0.3 w5% hold to expiry | +103.1% / 11.2% | **+43.5% / 17.8%** | +19.1% |
+
+  - **The return bar still passes, with less room:** the shadow profile clears both ≥ 20% annualised and
+    beating the CSP on the same entries. Behind the cost gate it went from a 76-point lead to a
+    25-point one. **Without the gate the spread now loses 62%**, so the cost gate is no longer one of
+    the rules. It is the strategy. `on` must never ship without it.
+  - **The draft profile is ruled out** (−95%). The stops and time stops close often, and each close pays
+    four more fills.
+  - **§9 sweep on quoted costs:** ≤ 20% gives +44.9% against ≤ 25%'s +34.4%, and ≤ 35% gives +52.9%.
+    The curve is not monotonic, so this does not decide the level. It is 16 portfolios on one regime.
+  - **Caveat on the new quotes:** each coverage ticker's slip is a median from ≥ 3 quotes taken in
+    October 2026, applied to entries back to June 2025. That is a current-regime proxy for past spreads.
+    It is the best data available, but it is not the past entry's own quote.
+  - **§4 is still not passed overall:** the shadow book is 20 / 30 settled (mean +14.2%, win 95%, the
+    first loss). Read the study as settled once the book reaches 30. A re-run then would only add
+    capture days.
 - **BPS-15. Build the `on` surfaces** — Daily Brief panel and email — only once §4 passes. `on` is
   deliberately not a member of `SpreadModeSwitch`; adding it **fails the build** at `budgetGates()` in
   `spread-mode.ts`, which is where the BPS-11 decision must be made. (Was part of #44.)
@@ -499,6 +527,15 @@ Provenance: **measured** (a #43 study result) · **inherited** (a wheel-screen r
   - **ONE MONTHLY CYCLE.** Captures run 09-14…09-25, so every run's 21–35 window contained the same
     monthly (Oct 16). That is why "no monthly in the window" read 0. This is Oct 16 against its
     neighbouring weeklies, not yet evidence about monthlies.
+
+  **RE-RUN 2026-10-20 (`bps19-monthly-rule-2026-10-20.md`): disagreements 236 → 258, only +22, and the
+  10-20 date was set wrong.** Nov 20 did enter 21–35 DTE on 10-16. But on a weekly grid the two rules
+  disagree only when the monthly sits at **21–26 or 34–35 DTE**. From 27 to 33 DTE the monthly *is* the
+  nearest-30 pick. For Nov 20 that is one session so far (10-16, at 35 DTE); the 22 new disagreements
+  are about one day's runs. **The Nov cycle's main disagreement window is 10-26…10-30** (Nov 20 at
+  25…21 DTE). The figures are unchanged within a point: B 18.4% vs A 31.1%, paired −7.6% on 206/257,
+  both-tradable −2.8% on 74/94, net +65, B thinner on 41%, median OI 212 vs 102. **Re-run on or after
+  2026-10-30**, which is the first run that holds a second cycle.
   - **Next:** re-run after late October, once captures cover the November cycle. If it holds, add a
     shadow variant for B so returns can be measured (FR-SEY-5: cost is not return). No rule changed.
   **RE-RUN 2026-10-01 (`bps19-monthly-rule-2026-10-01.md`, through the app's API, v1.1.339) — no new
