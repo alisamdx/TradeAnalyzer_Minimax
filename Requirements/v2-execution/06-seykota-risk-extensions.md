@@ -77,6 +77,43 @@ not shipped (it may ship **disabled**, as a configurable option, with the findin
   realized outcomes of the flagged-ticker picks it would have made, against the picks actually taken.
   **Shadow log since v1.1.320:** `stale_greek_shadow_picks` (migration 088) records every such would-be
   pick with its quote; read it via `GET /diagnostics/stale-greek-shadow` once the first expire.
+  **Measured 2026-10-20 (what the guard costs wheel scoring; API only, nothing changed).** Wheel
+  picks whose Strategy Lab legs showed `delta: null` on every leg (ISRG and NFLX 10-20, STLD 10-19,
+  NTAP 10-14, MRVL and CRDO 10-12) are all in `stale_greek_shadow_picks`. So "a chain with prices but
+  no Greeks" is this guard withholding them. E\*Trade did not omit them. (1) *Split of the wheel
+  snapshot's "No suitable CSP"* (the explanation text is identical for every cause, so it was joined
+  to the shadow log by date and slot). From the 10-06 after-close run to 10-20 there are 274–366
+  misses per after-close run, of which **194–285 (70–78 %) are guard-withheld chains** and 76–87 are
+  genuine (nothing in band, or no listed expiry in window). The guard-withheld chains include
+  152–224 where the model delta would pick a put. Before 10-06 there were ~650 genuine misses a run,
+  from no monthly listed in 30–45 DTE, and only 12–26 from the guard. (2) *Time of day, not chance.*
+  Two back-to-back live requests at 21:01 ET gave the same answer: 11 of 12 flagged tickers were
+  withheld both times, and 6 of 6 controls (AAPL MSFT JPM KO XOM HD) were clean both times. A retry
+  cannot help. On 10-16, the one day the full wheel analysis also ran intraday, there were 71 stale
+  tickers intraday and 305 after close, with 36 stale in both slots. "No suitable CSP" read 141
+  against 355. After close the chain's `underlyingPrice` equals the day's close on every row
+  (n = 1,959). The delta-implied spot sits a median 2.15 % away, about halfway (0.52) back toward
+  the previous close. So E\*Trade's evening Greeks lag the close. The guard is right to withhold
+  them. Only 52 % of after-close flags recur the next evening. The wheel analysis runs after close
+  only, so **both daily briefs score wheel off the slot where the guard fires most.** (3) *Scoring.*
+  Under FR-SE-03 a withheld chain zeroes `premiumYield` and `optionLiquidity`, but their weight
+  (21 + 9 of 109) stays in the denominator. 5 of 53 wheel picks since 10-06 carried that deficit.
+  Re-scored with their shadow pick, each would gain 7.2–13.9 points and move to **#1 among its
+  brief's picks** (4 of the 5 were not #1; NTAP 4→1, EWZ 3→1, ISRG 5→1). On 10-20, 31 guarded
+  tickers had a liquid shadow pick (relative spread ≤ 15 %, OI ≥ 100). They include NVDA, TSLA,
+  AMD, MU, ORCL, SMH and TQQQ, with a median deficit of 19.2 points against picks scoring ~58–65.
+  The guard is therefore a large, silent selection input on liquid names, far more than the ~25 a
+  day this entry first assumed. How many guarded names would enter the top 5 cannot be counted:
+  `brief_candidates` keeps only the 15-name Stage-4 pool, the composites of everything below it are
+  not stored, and no API exposes them. **Recommendation: no live-path change now.** Retry is
+  refuted. Renormalising the composite without the missing signals would rank a ticker without
+  knowing its premium. This flag, decided on the 2026-10-31 first look and the 2026-11-21 score
+  (liquid subset; monthly and weekly reported apart), is the right fix. Enabling it is a
+  top-of-book reordering on liquid names, not a marginal addition, so it needs that score.
+  Moving the wheel chain search to the intraday slot (about 4× fewer stale chains) would also
+  change selection, so it is a separate FR-SEY-5 candidate. Instrumentation worth adding (text
+  only, no selection change): a reason in `WheelResult.explanation`, one of `greeks withheld` /
+  `none in band` / `no expiry in window`, so the snapshot answers this without a join.
 
 **Rejected-on-data register** (changes that looked compelling and did *not* ship):
 SPY-regime gate · overbought guard · ADX in scoring · FR-SEY-3 per-name trend filter ·
