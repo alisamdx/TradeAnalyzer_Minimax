@@ -361,16 +361,35 @@ interface DuplicateRow {
   readonly runs: readonly number[];
 }
 
+/**
+ * Columns that say whether copies of a key are one EVENT sent twice under different labels (v1.1.376).
+ * Copies agreeing on all of them are not counted as a duplicate.
+ *
+ * Finnhub's earnings calendar sends a January-fiscal-year retailer's quarter twice, as FY2026 Q3 and
+ * FY2027 Q3, on the same date with the same EPS estimate (BBWI, HD, LOW, TGT from 2026-10-20; the
+ * revenue estimate differs by ~0.03 %, so it is not compared). Every reader resolves the date as the
+ * nearest one, so the copies change nothing downstream. Copies on DIFFERENT dates still fire, because
+ * which date is real is a ruling: FDXF (10-28 is parent FedEx's date; the company confirmed 10-29),
+ * ROST and WSM (11-12 vs 11-18/11-17), DDS (11-05 vs 11-09).
+ */
+const SAME_EVENT_COLUMNS: Readonly<Record<string, readonly string[]>> = {
+  raw_earnings_event: ['report_date', 'eps_estimate']
+};
+
 /** Natural keys stored more than once from ONE response, in runs `fromRun`..`toRun`, one row per key. */
 function duplicateRows(ctx: CheckContext, table: string, key: readonly string[], fromRun: number, toRun: number): DuplicateRow[] {
   const cols = key.map((c) => `"${c}"`).join(', ');
+  const sameEvent = SAME_EVENT_COLUMNS[table];
+  const distinctEvents = sameEvent
+    ? ` AND COUNT(DISTINCT ${sameEvent.map((c) => `COALESCE(CAST("${c}" AS TEXT), 'null')`).join(` || '|' || `)}) > 1`
+    : '';
   const rows = ctx.db
     .prepare(
       `SELECT ${cols}, MAX(n) AS copies, COUNT(*) AS responses, MIN(run_id) AS first_run, MAX(run_id) AS last_run,
               GROUP_CONCAT(DISTINCT run_id) AS runs
          FROM (SELECT run_id, source_response_id, ${cols}, COUNT(*) AS n FROM "${table}"
                 WHERE run_id BETWEEN ? AND ?
-                GROUP BY run_id, source_response_id, ${cols} HAVING COUNT(*) > 1)
+                GROUP BY run_id, source_response_id, ${cols} HAVING COUNT(*) > 1${distinctEvents})
         GROUP BY ${cols}
         ORDER BY ${cols}`
     )
@@ -487,7 +506,25 @@ function withRejudgedDuplicateFindings(
     if (!legacy) {
       const i = indexOf.get(f.key);
       if (i !== undefined && out[i]!.fired) continue; // live tonight
-      if (redefined) out.push({ key: f.key, fired: false, closesAs: { kind: 'rule_changed', note: redefined } });
+      if (redefined) {
+        out.push({ key: f.key, fired: false, closesAs: { kind: 'rule_changed', note: redefined } });
+      } else if (SAME_EVENT_COLUMNS[table] && !f.key.endsWith(' *')) {
+        // Re-counted over its own runs under today's rule. Only for a table with a same-event rule:
+        // elsewhere the rule has not changed, so a recount could only agree with the finding.
+        const key = (JSON.parse(current) as string[]).filter((c) => c !== 'observed_at');
+        const still = duplicateRows(ctx, table, key, f.first_seen_run_id, f.last_seen_run_id)
+          .some((d) => duplicateFindingKey(table, d.values) === f.key);
+        if (!still) {
+          out.push({
+            key: f.key, fired: false,
+            closesAs: {
+              kind: 'rule_changed',
+              note: `re-counted over runs ${f.first_seen_run_id}–${f.last_seen_run_id}: every copy has the same ` +
+                `${SAME_EVENT_COLUMNS[table]!.join(' and ')}, one event under two labels (v1.1.376)`
+            }
+          });
+        }
+      }
       continue;
     }
 

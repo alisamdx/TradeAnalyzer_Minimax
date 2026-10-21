@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.376] - 2026-10-21
+
+### TradeAnalyzer 2: one earnings event under two fiscal labels is not a duplicate
+
+From 2026-10-20 Finnhub sends a January-fiscal-year retailer's Q3 twice, as FY2026 Q3 and FY2027 Q3, on the same date and with the same EPS estimate. QC-009 fired on each of BBWI, HD, LOW and TGT, and each would have turned blocking within three runs, every quarter. Copies that agree on the report date and the EPS estimate are now one event. Copies on different dates still fire, because which date is real needs a ruling: FDXF, ROST, WSM and DDS. The four open findings close as `rule_changed`.
+
+FDXF still needs that ruling. Finnhub adds parent FedEx's 10-28 to FedEx Freight, while the company confirmed it reports on 10-29. Readers take the nearest date, so FDXF reads one day early.
+
+Rehearsed on 2026-10-20: QC-009 8 → 4 firing.
+
+core 0.6.84, next 0.4.69. Details: `changelogs/v1.1.376_2026-10-21.md`.
+
 ## [1.1.375] - 2026-10-21
 
 ### TradeAnalyzer 2: QC-705 findings close once their filing reads clean

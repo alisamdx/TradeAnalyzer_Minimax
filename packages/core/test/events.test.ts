@@ -838,6 +838,60 @@ describe('EDGAR company facts', () => {
     expect(JSON.parse(affects.a)).toEqual([DATE]);
   });
 
+  // v1.1.376: Finnhub sends a January-FY retailer's quarter as FY2026 Q3 AND FY2027 Q3, same date, same
+  // EPS estimate (HD, 2026-10-20). One event under two labels; copies on different dates still fire.
+  describe('copies of one earnings event under two fiscal labels (v1.1.376)', () => {
+    /** The 2026-10-20 shape: HD twice on one date, ROST twice on two dates, FDXF three times on two. */
+    function relabelledSweep(runId: number) {
+      captureResponse({
+        host: makeHost(), db: db(), runId, asOfDate: DATE, provider: 'finnhub',
+        endpoint: '/calendar/earnings', slug: 'calendar-earnings', params: { from: '2026-10-20', to: '2026-11-30' },
+        response: response(earningsBody([
+          { symbol: 'HD', date: '2026-11-17', year: 2026, quarter: 3, epsEstimate: 3.9538, revenueEstimate: 44041604334 },
+          { symbol: 'HD', date: '2026-11-17', year: 2027, quarter: 3, epsEstimate: 3.9538, revenueEstimate: 44055282734 },
+          { symbol: 'ROST', date: '2026-11-12', year: 2026, quarter: 3, epsEstimate: 1.8714 },
+          { symbol: 'ROST', date: '2026-11-18', year: 2027, quarter: 3, epsEstimate: 1.8714 },
+          { symbol: 'FDXF', date: '2026-10-28', year: 2027, quarter: 1, epsEstimate: 0.7446 },
+          { symbol: 'FDXF', date: '2026-10-29', year: 2026, quarter: 4, epsEstimate: 0.5394 },
+          { symbol: 'FDXF', date: '2026-10-29', year: 2026, quarter: 3, epsEstimate: 1.3833 }
+        ])), captureRuleId: ruleId(),
+        recipe: recipes.earnings({ sweepFrom: '2026-10-20', sweepTo: '2026-11-30', universe: new Set(['HD', 'ROST', 'FDXF']) })
+      });
+    }
+
+    it('fires on copies with different dates, not on one event sent twice', () => {
+      const run = newRun();
+      relabelledSweep(run.runId);
+      const fired = QC009_DUPLICATE_NATURAL_KEY.run({ db: db(), runId: run.runId, tradingDate: DATE, observedAt: OBSERVED })
+        .filter((e) => e.fired).map((e) => e.key).sort();
+      expect(fired).toEqual(['raw_earnings_event FDXF finnhub', 'raw_earnings_event ROST finnhub']);
+    });
+
+    it('closes an open finding the new rule no longer sees, and leaves the rest open', () => {
+      const earlier = newRun();
+      relabelledSweep(earlier.runId);
+      runGate(db(), makeHost(), {
+        runId: earlier.runId, tradingDate: DATE, domainsExpected: {},
+        checks: [{
+          ...QC009_DUPLICATE_NATURAL_KEY,
+          run: () => ['raw_earnings_event HD finnhub', 'raw_earnings_event FDXF finnhub']
+            .map((key) => ({ key, fired: true, detail: 'duplicates' }))
+        }]
+      });
+      raw.prepare("UPDATE meta_run SET status = 'complete' WHERE run_id = ?").run(earlier.runId);
+
+      const later = beginRun(db(), makeHost(), { kind: 'daily', tradingDate: '2026-09-08' });
+      runGate(db(), makeHost(), { runId: later.runId, tradingDate: '2026-09-08', domainsExpected: {}, checks: [QC009_DUPLICATE_NATURAL_KEY] });
+      const state = Object.fromEntries(
+        (raw.prepare("SELECT key, state, resolution_kind, resolution_note FROM qa_exception WHERE check_id = 'QC-009'").all() as
+          { key: string; state: string; resolution_kind: string | null; resolution_note: string | null }[]).map((r) => [r.key, r])
+      );
+      expect(state['raw_earnings_event HD finnhub']).toMatchObject({ state: 'resolved', resolution_kind: 'rule_changed' });
+      expect(state['raw_earnings_event HD finnhub']!.resolution_note).toContain('same report_date and eps_estimate');
+      expect(state['raw_earnings_event FDXF finnhub']!.state).toBe('open');
+    });
+  });
+
   // v1.1.354: keyed by TABLE, one acceptance covered every future duplicate in it. Keyed per
   // duplicated key, accepting XOM's repeated July row leaves another ticker's duplicate visible.
   it('files one finding per duplicated key, so a ruling on one never covers another (QC-009)', () => {
