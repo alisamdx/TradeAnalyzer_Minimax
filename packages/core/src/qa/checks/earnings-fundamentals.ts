@@ -4,6 +4,7 @@ import {
   FILING_INSTANCE_ENDPOINT, filingAttempts, filingFactsQueue, factsRetryDue
 } from '../../collector/facts-queue.js';
 import { effectiveCikSql } from '../../collector/cik.js';
+import { FILING_FACTS_PARSER_REVISION } from '../../ingest/edgar.js';
 
 /**
  * Earnings and fundamentals checks — 03 §3.6.
@@ -1207,7 +1208,9 @@ export const QC705_FACT_SOURCE_AGREEMENT: CheckDefinition = {
     'source and companyfacts the cross-check, so this is the standing evidence that the instance reader reproduces ' +
     "SEC's own extraction — v1.1.360 measured it once, on three filings (244/244, 348/348, 923/923), and a measurement " +
     'taken once is not a guarantee. One finding per accession; it fires on any value that differs, or any key one ' +
-    'side carries and the other does not. A filing companyfacts omits has nothing to compare and is not evaluated.',
+    'side carries and the other does not. A filing companyfacts omits has nothing to compare and is not evaluated. ' +
+    'A filing whose newest instance read predates the current parser revision is not judged until it is re-read: it ' +
+    'returns an unvalued evaluation, and an open finding on it closes as rule_changed (v1.1.377).',
   readsTables: ['raw_edgar_fact', 'meta_response'],
   testedQuantity: 'disagreeing_fact_fraction',
   testedUnit: 'fraction',
@@ -1268,6 +1271,35 @@ export const QC705_FACT_SOURCE_AGREEMENT: CheckDefinition = {
       }
       if (aggregate.size === 0) continue; // companyfacts omits this filing: nothing to compare
 
+      // A newest read parsed by an older revision is not judged (v1.1.377). Its facts are what a
+      // parser since fixed produced, and filingFactsRereadQueue will read it again, so a disagreement
+      // there is a known parser fault, not evidence about the data. Judging it anyway escalated 58
+      // rev-1 findings 10 -> 29 -> 51 blocking on 2026-10-20..22 through the 3-run repeat rule
+      // alone. No value, so the distribution stays the current-revision comparisons and
+      // evaluated_count minus distribution n is the number awaiting re-read. An open finding closes
+      // as rule_changed: its comparison was of a parse the current parser does not make, and if the
+      // re-read still disagrees it reopens at warning with its counter back at 1.
+      const parsedBy = (revisionOf.get(newestInstance) as { rev: number } | undefined)?.rev ?? 1;
+      if (parsedBy < FILING_FACTS_PARSER_REVISION) {
+        out.push({
+          key: accession,
+          fired: false,
+          detail: `${accession}: awaiting re-read under parser revision ${FILING_FACTS_PARSER_REVISION} (newest read is revision ${parsedBy})`,
+          evidence: { accession, awaitingReread: true, parserRevision: parsedBy, currentRevision: FILING_FACTS_PARSER_REVISION },
+          closesAs: open.has(accession)
+            ? {
+                kind: 'rule_changed',
+                note:
+                  `${accession}: this finding compared a parser revision ${parsedBy} read of the filing's instance ` +
+                  `(response ${newestInstance}), and revision ${FILING_FACTS_PARSER_REVISION} changed how facts are ` +
+                  'deduplicated and keyed (v1.1.371). The filing is queued for re-read; a disagreement on that read ' +
+                  'opens this finding again at warning'
+              }
+            : undefined
+        });
+        continue;
+      }
+
       const same = (a: Set<number>, b: Set<number>) =>
         a.size === b.size &&
         [...a].every((v) => [...b].some((w) => Math.abs(v - w) <= FACT_VALUE_TOLERANCE * Math.max(1, Math.abs(v), Math.abs(w))));
@@ -1305,8 +1337,7 @@ export const QC705_FACT_SOURCE_AGREEMENT: CheckDefinition = {
               kind: 'data_corrected',
               note:
                 `${accession}: all ${matched} fact keys agree with companyfacts on the instance read ` +
-                `(response ${newestInstance}, parser revision ` +
-                `${(revisionOf.get(newestInstance) as { rev: number } | undefined)?.rev ?? 1})`
+                `(response ${newestInstance}, parser revision ${parsedBy})`
             }
       });
     }

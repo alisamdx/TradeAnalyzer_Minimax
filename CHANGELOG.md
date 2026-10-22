@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.377] - 2026-10-22
+
+### TradeAnalyzer 2: QC-705 no longer judges filings waiting to be re-parsed
+
+On 2026-10-22 (run 104) QC-705 had 58 open findings, 51 of them blocking. Every one compared a parse made by parser revision 1, the parser v1.1.371 fixed. They grew from 10 to 29 to 51 blocking over three runs only because the 3-run repeat rule counts runs, not evidence. 398 filings are queued to be re-read under revision 2, at about 96 a run.
+
+QC-705 now skips a filing whose newest read came from an older parser revision. It counts the filing as awaiting re-read and does not fire. An open finding on such a filing closes as `rule_changed`. If the re-read still disagrees, the finding reopens at warning with its count back at 1.
+
+Rehearsed on 2026-10-22: QC-705 went from 58/235 firing to 0/235. 186 filings are awaiting re-read, and all 49 current-revision comparisons agree. All 58 findings closed. The gate is still RED, with 6 blocking findings from other checks.
+
+core 0.6.85, next 0.4.70. Details: `changelogs/v1.1.377_2026-10-22.md`.
+
 ## [1.1.376] - 2026-10-21
 
 ### TradeAnalyzer 2: one earnings event under two fiscal labels is not a duplicate

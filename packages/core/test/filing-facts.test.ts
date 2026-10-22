@@ -19,6 +19,7 @@ import {
 import {
   QC701_FILING_FRESHNESS, QC704_FILING_WITHOUT_FACTS, QC705_FACT_SOURCE_AGREEMENT, qc701NextFiling
 } from '../src/qa/checks/earnings-fundamentals.js';
+import { fingerprint, runGate } from '../src/qa/gate.js';
 
 /**
  * Reading a report filing's own XBRL instance: a fallback for what SEC's companyfacts omitted
@@ -323,15 +324,15 @@ describe('the filing-first read in the collector (v1.1.365)', () => {
   }
 
   /** companyfacts carrying AVTR's points for ACCESSION, optionally with one value changed. */
-  function companyfactsWithFiling(change?: { concept: string; val: number }) {
+  function companyfactsWithFiling(change?: { concept: string; val: number }, accession: string = ACCESSION) {
     const facts: Record<string, Record<string, { units: Record<string, unknown[]> }>> = {};
     for (const f of AVTR_CF) {
-      const p = change && f.concept === change.concept ? { ...f.p, val: change.val } : f.p;
+      const p = { ...(change && f.concept === change.concept ? { ...f.p, val: change.val } : f.p), accn: accession };
       ((facts[f.taxonomy] ??= {})[f.concept] ??= { units: {} }).units[f.unit] = [p];
     }
     const r = captureResponse({
       host: makeHost(), db: db(), runId: run.runId, asOfDate: DATE, provider: 'edgar',
-      endpoint: '/api/xbrl/companyfacts/CIK{cik}.json', slug: 'edgar-companyfacts', params: { cik: '0001722482', withFiling: '1' },
+      endpoint: '/api/xbrl/companyfacts/CIK{cik}.json', slug: 'edgar-companyfacts', params: { cik: '0001722482', withFiling: accession },
       response: response(JSON.stringify({ facts }), 200, DATE),
       captureRuleId: rule(), recipe: recipes.companyFacts({ cik: '0001722482' })
     });
@@ -499,14 +500,14 @@ describe('the filing-first read in the collector (v1.1.365)', () => {
 
   describe('re-reading filings an older parser revision read (v1.1.371)', () => {
     /** An instance read stored under revision 1 — a recipe with no `rev` — whose parse got Assets wrong. */
-    function revisionOneRead() {
+    function revisionOneRead(accession: string = ACCESSION) {
       const wrong = AVTR_INSTANCE.replace('>11663000000<', '>11700000000<');
       const r = captureResponse({
         host: makeHost(), db: db(), runId: run.runId, asOfDate: DATE, provider: 'edgar',
         endpoint: FILING_INSTANCE_ENDPOINT, slug: 'edgar-filing-instance',
-        params: { cik: '0001722482', accession: ACCESSION, instance: 'avtr-20260331_htm.xml' },
+        params: { cik: '0001722482', accession, instance: 'avtr-20260331_htm.xml' },
         response: response(wrong, 200, '2026-10-09'), captureRuleId: rule(),
-        recipe: { module: 'edgar_filing_facts', args: { cik: '0001722482', accessionNo: ACCESSION, form: '10-Q', filedDate: '2026-04-29' } }
+        recipe: { module: 'edgar_filing_facts', args: { cik: '0001722482', accessionNo: accession, form: '10-Q', filedDate: '2026-04-29' } }
       });
       expect(r.parseStatus).toBe('ok');
     }
@@ -518,7 +519,10 @@ describe('the filing-first read in the collector (v1.1.365)', () => {
       // The revision-1 read has facts, so the new-filing queue no longer lists it — only the re-read queue does.
       expect(filingFactsQueue(db(), DATE)).toEqual([]);
       expect(filingFactsRereadQueue(db(), DATE).map((f) => f.accessionNo)).toEqual([ACCESSION]);
-      expect(QC705_FACT_SOURCE_AGREEMENT.run(ctx()).find((x) => x.key === ACCESSION)).toMatchObject({ fired: true, evidence: { differing: 1 } });
+      // The revision-1 parse disagrees, but it is not judged until it is re-read (v1.1.377).
+      expect(QC705_FACT_SOURCE_AGREEMENT.run(ctx()).find((x) => x.key === ACCESSION)).toMatchObject({
+        fired: false, evidence: { awaitingReread: true, parserRevision: 1, currentRevision: 2 }
+      });
 
       expect(await runEdgarFilingFacts(sec([]), db(), run)).toEqual({ stored: 4, calls: 2, failed: 0 });
       expect(filingFactsRereadQueue(db(), DATE)).toEqual([]);
@@ -541,10 +545,54 @@ describe('the filing-first read in the collector (v1.1.365)', () => {
       ).run(`QC-705|${ACCESSION}`, ACCESSION);
       const judge = () => QC705_FACT_SOURCE_AGREEMENT.run(ctx()).find((x) => x.key === ACCESSION);
 
-      expect(judge()).toMatchObject({ fired: true, closesAs: undefined });
+      // Before the re-read the revision-1 comparison is not judged, and the finding closes rule_changed (v1.1.377).
+      expect(judge()).toMatchObject({ fired: false, closesAs: { kind: 'rule_changed' } });
+      expect(judge()?.value).toBeUndefined();
       await runEdgarFilingFacts(sec([]), db(), run);
       expect(judge()).toMatchObject({ fired: false, closesAs: { kind: 'data_corrected' } });
       expect(judge()?.closesAs?.note).toMatch(/all 4 fact keys agree .* parser revision 2\)$/);
+    });
+
+    it('judges a current-revision read and not a revision-1 one, though both disagree with companyfacts alike (v1.1.377)', async () => {
+      // 2026-10-22, run 104: all 58 open QC-705 findings compared revision-1 parses, and the 3-run
+      // repeat rule took them 10 -> 29 -> 51 blocking while 398 accessions waited to be re-read.
+      const STALE = '0001628280-26-099999';
+      staleFiler();
+      revisionOneRead(STALE); // not in raw_edgar_filing, so this run does not re-read it
+      await runEdgarFilingFacts(sec([]), db(), run); // ACCESSION read by the current revision
+      companyfactsWithFiling({ concept: 'Assets', val: 11663000001 });
+      companyfactsWithFiling({ concept: 'Assets', val: 11663000001 }, STALE);
+      for (const key of [ACCESSION, STALE]) {
+        raw.prepare(
+          `INSERT INTO qa_exception (fingerprint, check_id, domain, key, severity, base_severity, state, detail,
+             evidence_json, first_seen_run_id, last_seen_run_id, consecutive_runs, remediations_json,
+             affects_trading_dates_json, still_firing)
+           VALUES (?, 'QC-705', 'fundamentals', ?, 'blocking', 'warning', 'open', 'd', '{}', 1, 1, 3, '[]', '["2026-10-09"]', 1)`
+        ).run(fingerprint('QC-705', 'fundamentals', key), key);
+      }
+
+      const evals = QC705_FACT_SOURCE_AGREEMENT.run(ctx());
+      expect(evals.find((x) => x.key === ACCESSION)).toMatchObject({ fired: true, evidence: { differing: 1 }, closesAs: undefined });
+      const stale = evals.find((x) => x.key === STALE);
+      expect(stale).toMatchObject({
+        fired: false, evidence: { awaitingReread: true, parserRevision: 1, currentRevision: 2 }, closesAs: { kind: 'rule_changed' }
+      });
+      expect(stale?.value).toBeUndefined();
+
+      // Through the gate: the stale finding closes, the current one stays open and blocking.
+      const result = runGate(db(), makeHost(), { runId: run.runId, tradingDate: DATE, checks: [QC705_FACT_SOURCE_AGREEMENT] });
+      expect(result.resolvedByGate).toBe(1);
+      const row = (key: string) => raw
+        .prepare("SELECT state, resolution_kind, severity FROM qa_exception WHERE check_id = 'QC-705' AND key = ?")
+        .get(key);
+      expect(row(STALE)).toMatchObject({ state: 'resolved', resolution_kind: 'rule_changed' });
+      expect(row(ACCESSION)).toMatchObject({ state: 'open', resolution_kind: null, severity: 'blocking' });
+      const check = raw
+        .prepare("SELECT evaluated_count, fired_count, distribution_json FROM qa_check_result WHERE check_id = 'QC-705'")
+        .get() as { evaluated_count: number; fired_count: number; distribution_json: string };
+      // evaluated_count minus the distribution's n is the number awaiting re-read.
+      expect(check).toMatchObject({ evaluated_count: 2, fired_count: 1 });
+      expect((JSON.parse(check.distribution_json) as { n: number }).n).toBe(1);
     });
 
     it('offers no closer for a clean filing that has no open finding', async () => {
