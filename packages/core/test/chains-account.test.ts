@@ -881,6 +881,75 @@ describe('phase 7 — chains, and AC-5 on every response', () => {
     ]);
   });
 
+  it('closes a delisted member whether or not it holds a live pin, and still asks about the pin (v1.1.378)', async () => {
+    // PSKY and WBD, 2026-10-22: out of the universe on 10-12, E*Trade 400 on runs 97/101/104, yet
+    // kept open in the subset by their legacy pins, so QC-603 judged them and escalated to blocking.
+    const pin = (osi: string, ticker: string, expiration: string): void => {
+      const run0 = newRun();
+      raw
+        .prepare(
+          "INSERT INTO meta_response (run_id, provider, endpoint, params_json, requested_at, http_status, byte_length, archive_file, archive_offset, sha256, dedup_hash, encrypted, at_provider_cap, parse_status, parsed_row_count) " +
+            "VALUES (?, 'etrade', '/x', '{}', '2026-09-07T17:00:00-04:00', 200, 1, 'f', 0, 'h', ?, 1, 0, 'ok', 0)"
+        )
+        .run(run0.runId, `pin-${osi}`);
+      const src = (raw.prepare('SELECT MAX(source_response_id) AS id FROM meta_response').get() as { id: number }).id;
+      raw
+        .prepare(
+          `INSERT INTO ref_sticky_contract (run_id, as_of_date, observed_at, source_response_id,
+             osi_symbol, ticker, expiration_date, reason, valid_from)
+           VALUES (?, ?, '2026-09-07T17:00:00-04:00', ?, ?, ?, ?, 'recommended_by_legacy', ?)`
+        )
+        .run(run0.runId, DATE, src, osi, ticker, expiration, DATE);
+    };
+    subsetMember('PSKY');
+    subsetMember('WBD');
+    subsetMember('SPY');
+    pin('PSKY--260918P00010000', 'PSKY', '2026-09-18');
+    pin('SPY---260918P00770000', 'SPY', '2026-09-18');
+
+    const inner = chainHost();
+    const delisted = new Set(['PSKY', 'WBD']);
+    const host = makeHost({
+      etradeGet: async (path, params) => {
+        if (delisted.has(params['symbol'] as string)) {
+          return response('{"Error":{"code":10033,"message":"The symbol entered is invalid. Please enter another symbol."}}', 400);
+        }
+        return inner.etradeGet(path, params);
+      }
+    });
+    const run = beginRun(db(), host, { kind: 'daily', tradingDate: DATE });
+    expect((await runChainsPhase(host, db(), run)).delistedClosed).toBe(2);
+    expect(
+      raw.prepare('SELECT ticker, valid_to, removal_reason FROM ref_chain_subset_membership ORDER BY ticker').all()
+    ).toEqual([
+      { ticker: 'PSKY', valid_to: DATE, removal_reason: 'delisted' },
+      { ticker: 'SPY', valid_to: null, removal_reason: null },
+      { ticker: 'WBD', valid_to: DATE, removal_reason: 'delisted' }
+    ]);
+
+    // Next run the closed PSKY is pin-only: still asked, and fetched at its pinned expiration
+    // alone once E*Trade answers again. WBD, with no pin, is not asked at all.
+    delisted.clear();
+    const asked: string[] = [];
+    const chains: string[] = [];
+    const host2 = makeHost({
+      etradeGet: async (path, params) => {
+        if (path === '/v1/market/optionexpiredate') asked.push(params['symbol'] as string);
+        if (path === '/v1/market/optionchains' && params['symbol'] === 'PSKY') {
+          chains.push(`${params['expiryMonth']}-${params['expiryDay']}`);
+        }
+        return inner.etradeGet(path, params);
+      }
+    });
+    const run2 = beginRun(db(), host2, { kind: 'daily', tradingDate: DATE });
+    await runChainsPhase(host2, db(), run2);
+    expect(asked).toEqual(['SPY', 'PSKY']);
+    expect(chains).toEqual(['9-18']);
+    expect(
+      raw.prepare("SELECT COUNT(*) AS n FROM ref_chain_subset_membership WHERE ticker = 'PSKY' AND valid_to IS NULL").get()
+    ).toEqual({ n: 0 });
+  });
+
   it('does not close a member on any other 400', async () => {
     subsetMember('SPY');
     const host = makeHost({

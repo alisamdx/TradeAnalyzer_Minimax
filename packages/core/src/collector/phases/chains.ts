@@ -506,16 +506,18 @@ export async function runChainsPhase(
 
     // A symbol E*Trade no longer recognises leaves the subset. Stickiness (Q15)
     // protects a series from a threshold, not from its ticker ceasing to exist,
-    // and a delisted member costs an error response every run forever. Only
-    // members close, and only with no live pin: a pin names a contract someone
-    // holds or was recommended, and that is worth an error line. A relisting
+    // and a delisted member costs an error response every run forever. A live
+    // pin does not hold the membership open (v1.1.378): `pinOnly` keeps asking
+    // about a pinned ticker outside the subset, and QC-415 reports pins on a
+    // ticker E*Trade no longer lists, so the open membership bought nothing but
+    // every subset-scoped check judging a dead ticker — PSKY and WBD, held open
+    // by legacy pins, escalated QC-603 to blocking on 2026-10-22. A relisting
     // is re-admitted by the rule on its next bar, since admission skips open
     // members only.
     if (
       expResponse.status === 400 &&
       expResponse.body.includes(ETRADE_INVALID_SYMBOL) &&
-      memberSet.has(ticker) &&
-      stickyExpirations.size === 0
+      memberSet.has(ticker)
     ) {
       delistedClosed += closeDelisted.run(run.tradingDate, ticker).changes;
     }

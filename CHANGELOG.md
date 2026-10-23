@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.1.378] - 2026-10-22
+
+### TradeAnalyzer 2: a live pin no longer keeps a delisted ticker in the chain subset
+
+On 2026-10-22 (run 104) two of the six blocking findings were QC-603 on PSKY and WBD, both delisted by mergers. E*Trade had answered their expirations with "invalid symbol" on three runs, but phase 7 closed a member `delisted` only when it had no live pin, and PSKY (9) and WBD (3) hold legacy pins. So they stayed in the chain subset and every subset-scoped check kept judging them.
+
+The pin condition is gone. Closing the membership does not stop the pins being asked for: phase 7 already fetches pinned tickers outside the subset, and QC-415 already reports pins on a ticker E*Trade no longer lists. QC-603 needs no change; its departed-ticker closer closes the findings `rule_changed`.
+
+Rehearsed on 2026-10-22 with the two memberships closed as the phase now would: QC-603 9 → 7 firing, both findings resolved, 6 → 4 blocking. The other four are operator rulings.
+
+core 0.6.86, next 0.4.71. Details: `changelogs/v1.1.378_2026-10-22.md`.
+
 ## [1.1.377] - 2026-10-22
 
 ### TradeAnalyzer 2: QC-705 no longer judges filings waiting to be re-parsed
